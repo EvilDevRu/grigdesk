@@ -658,6 +658,7 @@ source "$FACTORY_HOME/lib/attempt-state.sh"
 source "$FACTORY_HOME/lib/route-runtime.sh"
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/profile-preflight.sh"
+source "$FACTORY_HOME/lib/bootstrap-sandbox.sh"
 
 # Форму причины проверяем СРАЗУ после загрузки ledger-библиотеки: до локов, до
 # профиля и до единой строки в журнале. Иначе человек узнаёт о лишних символах
@@ -1703,8 +1704,11 @@ v2_env_get() {
 }
 
 v2_read_sandbox() {
+  local readiness=${1:-stand} V2_SANDBOX_ENV=${2:-$V2_SANDBOX_ENV}
   local task sb_k source_branch repo_count workspace_mode protocol ownership
   local index name source worktree branch container service_host actual_branch
+  [[ "$readiness" == stand ||
+     ( "$readiness" == workspace && "$V2_WORKSPACE_MODE" == isolated ) ]] || return 78
   [[ -f "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]] || return 78
   task=$(v2_env_get TASK)
   sb_k=$(v2_env_get SB_K)
@@ -1753,7 +1757,9 @@ v2_read_sandbox() {
     fi
   done
   # Только health: решение о start/create shared-стенда движок никогда не принимает.
-  profile_stand_alive "$TASK" || return 73
+  if [[ "$readiness" == stand ]]; then
+    profile_stand_alive "$TASK" || return 73
+  fi
   set_st "$TASK" FE_PORT "$V2_FE_PORT" API_PORT "$V2_API_PORT" SB_K "$sb_k" \
     WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
     STAND_OWNERSHIP "$([[ "$V2_WORKSPACE_MODE" == shared ]] && printf external || printf task)" \
@@ -1793,28 +1799,10 @@ v2_sandbox_up() {
 }
 
 v2_sandbox_up_lifecycle() {
-  local workspace_hash policy_hash evidence rc=0 status=succeeded reason=normal
-  workspace_hash=$(runtime_analytics_hash_string_v2 \
-    "$V2_WORKSPACE_MODE|$PROFILE|t$TASK|$V2_ATTEMPT|$V2_SANDBOX_ENV|${V2_REPO_WORKTREES[*]}") ||
-    return 78
-  policy_hash=$(runtime_analytics_hash_string_v2 \
-    "$V2_ATTEMPT_CATALOG_HASH|${ROUTE_V2_ROUTE_HASH:-}|$V2_WORKSPACE_MODE|sandbox-v2") ||
-    return 78
-  runtime_lifecycle_sandbox_begin_v2 \
-    "$V2_WORKSPACE_MODE" "$workspace_hash" "$policy_hash" >/dev/null || return
+  local rc=0
+  v2_sandbox_span_begin || return
   v2_sandbox_up || rc=$?
-  if (( rc != 0 )); then
-    status=failed
-    reason=unavailable
-  fi
-  evidence=$(runtime_analytics_hash_string_v2 \
-    "sandbox:$V2_ATTEMPT:$V2_WORKSPACE_MODE:rc=$rc") || evidence=""
-  runtime_lifecycle_sandbox_finish_v2 \
-    "$workspace_hash" "$status" "$reason" "$evidence" >/dev/null || {
-      (( rc != 0 )) && return "$rc"
-      return
-    }
-  return "$rc"
+  v2_sandbox_span_finish "$rc"
 }
 
 route_v2_workspace_roots() {
@@ -2544,6 +2532,10 @@ v2_on_signal() {
 v2_on_exit() {
   local rc=$? lifecycle_rc=0
   trap - EXIT TERM INT
+  v2_sandbox_bootstrap_cancel || {
+    set_st "$TASK" STALLED_HUMAN 1
+    (( rc != 0 )) || rc=73
+  }
   if [[ "$V2_LIFECYCLE_SESSION_OPEN" == 1 ]]; then
     if (( rc != 0 )) && [[ "$V2_LIFECYCLE_EXIT_STATUS" == succeeded ]]; then
       V2_LIFECYCLE_EXIT_STATUS=failed
@@ -2804,7 +2796,7 @@ v2_main() {
     return "$rc"
   }
 
-  v2_sandbox_up_lifecycle || {
+  v2_sandbox_bootstrap_prepare || {
     rc=$?
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "среда профиля не готова (код $rc)"
@@ -2819,6 +2811,12 @@ v2_main() {
     rc=$?
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "bootstrap не подтверждён (код $rc)"
+    return "$rc"
+  }
+  v2_sandbox_bootstrap_wait || {
+    rc=$?
+    set_st "$TASK" STALLED_HUMAN 1
+    v2_log "среда профиля не готова после разведки (код $rc)"
     return "$rc"
   }
   attempt_stage_state_init_v2 "$TASK" "$attempt" "$ROUTE" >/dev/null || {

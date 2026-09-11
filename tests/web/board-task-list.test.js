@@ -56,6 +56,18 @@ test('LIST-01: поиск работает по id, названию и груп
   assert.deepEqual(select({ query: 'backend' }).map((task) => task.id), [33]);
 });
 
+test('поиск соединяет слова из разных полей и одинаково читает # и е/ё', () => {
+  const result = selectBoardTasks({
+    tasks: [
+      { id: 11, title: 'Отчёт по заявкам', group: 'Кабинет', responsible: 'Семён' },
+      { id: 12, title: 'Отчёт по заявкам', group: 'Кабинет', responsible: 'Анна' },
+    ],
+    query: '  #11 СЕМЕН отчет кабинет  ',
+  });
+
+  assert.deepEqual(result.map((task) => task.id), [11]);
+});
+
 test('LIST-02/07: порядок B24 сохраняется и выключенное избранное его не меняет', () => {
   assert.deepEqual(select().map((task) => task.id), [11, 22, 33, 44]);
   assert.deepEqual(select({

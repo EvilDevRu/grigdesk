@@ -358,30 +358,32 @@
     grid-template-columns: 1fr;
   }
 }
+/* Карточка полки отличается от обычной строки выбора только раскладкой: содержимое
+   у неё многострочное, поэтому колонка действий не центрируется по высоте. Рамку, фон
+   и радиус карточка берёт у самого примитива — дублировать их здесь значит увести
+   карточку от токенов kit при первом же изменении темы. */
 [data-ui-task-shelf-row] {
   height: 100%;
   align-items: stretch;
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
 }
 
 [data-ui-task-shelf-row] .ui-selectable-row__primary {
   display: block;
   min-width: 0;
-  padding: 12px 10px 12px 14px;
+  padding: 14px 6px 14px 16px;
   color: inherit;
   text-align: left;
 }
 
 [data-ui-task-shelf-row] .ui-selectable-row__actions {
+  flex-direction: column;
   align-self: flex-start;
-  padding: 8px 7px 0 0;
+  padding: 10px 9px 0 0;
 }
 
-[data-ui-task-shelf-row]:hover {
-  background: var(--surface);
+[data-ui-task-shelf-row][data-shelf-attention='true'] {
+  border-left-color: var(--warn);
 }
 
 [data-ui-task-shelf-row][data-shelf-state='lit'] {

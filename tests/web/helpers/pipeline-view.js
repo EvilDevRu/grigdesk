@@ -49,9 +49,6 @@ export function compilePipelineView(prefix) {
       '../stores/ui.js': `export const useUiStore = globalThis.${prefix}UiStore;`,
       '../stores/tasks.js': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
       '../stores/board.js': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
-      '../stores/companion.js': (
-        `export const useCompanionStore = globalThis.${prefix}CompanionStore;`
-      ),
       '../shared/md.ts': 'export const mdToHtml = (value) => String(value || "");',
       '../shared/sandbox.js': (
         'export const sandboxUrl = (port) => `http://sandbox.test:${port}`;'

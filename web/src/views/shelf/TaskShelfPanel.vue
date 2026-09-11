@@ -1,9 +1,37 @@
 <template>
   <section ref="panel" class="task-shelf-panel" tabindex="-1" aria-label="Полка задач">
     <header class="shelf-head">
-      <div>
-        <h2>Полка</h2>
+      <div class="shelf-heading">
+        <h2>Полка задач</h2>
         <p>{{ summaryText }}</p>
+      </div>
+
+      <div v-if="shelf.rows.length || hasFilters" class="shelf-toolbar">
+        <div class="shelf-search">
+          <UiSearchInput
+            ref="searchInput"
+            v-model="query"
+            aria-label="Поиск задач на полке"
+            placeholder="Найти задачу…"
+            title="Поиск по номеру, названию, проекту и ответственному"
+          />
+        </div>
+        <UiControlGroup label="Фильтр задач на полке">
+          <UiButton
+            v-for="filter in filters"
+            :key="filter.id"
+            :data-shelf-filter="filter.id"
+            variant="ghost"
+            :pressed="activeFilter === filter.id"
+            @click="activeFilter = filter.id"
+          >
+            {{ filter.label }} · {{ filter.count }}
+          </UiButton>
+        </UiControlGroup>
+      </div>
+      <div v-if="hasFilters" class="shelf-filter-summary">
+        <span role="status">Показано {{ visibleCount }} из {{ shelf.rows.length }}</span>
+        <UiButton variant="ghost" @click="resetFilters">Сбросить фильтры</UiButton>
       </div>
     </header>
 
@@ -24,8 +52,15 @@
         <p>Откладывайте сюда задачи, по которым ждёте оценку, прогон или ответ.</p>
       </div>
     </div>
+    <div v-else-if="shelf.rows.length && !visibleCount" class="shelf-empty">
+      <span class="shelf-empty-icon" aria-hidden="true">⌕</span>
+      <div>
+        <h3>Ничего не найдено</h3>
+        <p>Измените поисковый запрос или выберите другую группу задач.</p>
+      </div>
+    </div>
 
-    <div v-if="shelf.rows.length" class="shelf-groups">
+    <div v-if="visibleCount" class="shelf-groups">
       <section
         v-for="group in groups"
         :key="group.id"
@@ -45,22 +80,20 @@
               data-ui-task-shelf-row
               :data-task-id="row.taskId"
               :data-shelf-state="row.state"
+              :data-shelf-attention="row.needsHuman && !row.completed ? 'true' : undefined"
               :data-shelf-completed="row.completed ? 'true' : undefined"
-              :aria-label="rowAriaLabel(row)"
               @select="ui.openTask(row.taskId)"
             >
               <span class="shelf-copy">
                 <span class="shelf-meta">
                   <span class="shelf-id mono">#{{ row.taskId }}</span>
-                  <span v-if="row.details?.project" class="shelf-project">
-                    {{ row.details.project }}
-                  </span>
-                  <time :datetime="row.addedAt" :title="fullDate(row.addedAt)">
-                    {{ ageLabel(row.addedAt) }}
-                  </time>
+                  <template v-if="row.details?.project">
+                    <span class="ui-visually-hidden">, </span>
+                    <span class="shelf-project">{{ row.details.project }}</span>
+                  </template>
                 </span>
 
-                <strong class="shelf-title">{{ row.title }}</strong>
+                <strong class="shelf-title" :title="row.title">{{ row.title }}</strong>
 
                 <span v-if="row.state === 'lit'" class="shelf-event">
                   <span class="shelf-event-label">
@@ -70,7 +103,7 @@
                   <span class="shelf-event-hint">Открытие задачи отметит событие просмотренным</span>
                 </span>
                 <span v-else class="shelf-waiting">
-                  <span>Ожидание</span>
+                  <span>{{ row.needsHuman && !row.completed ? 'Требует внимания' : 'Ожидание' }}</span>
                   {{ row.reasonText }}
                 </span>
 
@@ -79,24 +112,61 @@
                     v-for="activity in row.details.activities"
                     :key="activity.kind"
                     class="shelf-activity"
+                    :data-kind="activity.kind"
                     :data-tone="activity.tone"
                   >
                     <span class="shelf-activity-label">{{ activity.label }}</span>
+                    <span class="ui-visually-hidden">: </span>
                     <span class="shelf-activity-value">{{ activity.value }}</span>
                   </span>
                 </span>
 
-                <span v-if="hasFooter(row)" class="shelf-footer">
-                  <span v-if="row.details.responsible">{{ row.details.responsible }}</span>
-                  <span
-                    v-if="row.details.deadline"
-                    class="shelf-deadline"
-                    :class="{ overdue: row.details.overdue }"
-                  >
-                    до {{ row.details.deadline }}
+                <span class="shelf-bottom">
+                  <span class="shelf-footer">
+                    <span v-if="row.details?.responsible" class="shelf-responsible">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                           stroke-linecap="round" aria-hidden="true">
+                        <circle cx="12" cy="8" r="3" />
+                        <path d="M5 21v-2a7 7 0 0 1 14 0v2" />
+                      </svg>
+                      <span class="ui-visually-hidden">Ответственный: </span>{{ row.details.responsible }}
+                    </span>
+                    <span
+                      v-if="row.details?.deadline"
+                      class="shelf-deadline"
+                      :class="{ overdue: row.details.overdue }"
+                    >
+                      {{ row.details.overdue ? 'Просрочена · до' : 'до' }} {{ row.details.deadline }}
+                    </span>
+                    <span v-if="row.details?.unread" class="shelf-unread">
+                      <span class="ui-visually-hidden">, </span>{{ unreadLabel(row.details.unread) }}
+                    </span>
+                    <time :datetime="row.addedAt" :title="fullDate(row.addedAt)">
+                      {{ ageLabel(row.addedAt) }}
+                    </time>
                   </span>
-                  <span v-if="row.details.unread" class="shelf-unread">
-                    {{ unreadLabel(row.details.unread) }}
+                  <span
+                    v-for="bar in progressBars(row)"
+                    :key="`progress-${bar.kind}`"
+                    class="shelf-progress"
+                    :data-tone="bar.tone"
+                  >
+                    <span class="shelf-progress-count">
+                      <span class="shelf-progress-label">{{ bar.label }}<span
+                        class="ui-visually-hidden"
+                      >, пройдено:</span></span>
+                      {{ progressText(bar.progress!) }}
+                    </span>
+                    <UiProgress
+                      class="shelf-progress-bar"
+                      :label="bar.label"
+                      :tone="progressTone(bar.tone)"
+                      :value="bar.progress!.done"
+                      :max="bar.progress!.total"
+                      :indeterminate="!bar.progress!.total"
+                      :value-text="progressText(bar.progress!)"
+                      :title="progressText(bar.progress!)"
+                    />
                   </span>
                 </span>
               </span>
@@ -117,11 +187,16 @@
                     <path d="m5 12 4 4L19 6" />
                   </svg>
                 </UiIconButton>
+                <!--
+                  Тон намеренно нейтральный: снятие с полки обратимо — задачу кладут
+                  обратно тем же движением. Красный крестик был самым громким пятном
+                  карточки и обещал последствия, которых у действия нет.
+                -->
                 <UiIconButton
                   label="Убрать с полки"
                   title="Убрать с полки"
                   role="embedded"
-                  tone="danger"
+                  tone="neutral"
                   :loading="row.state !== 'lit' && shelf.isPending?.(row.taskId)"
                   :disabled="shelf.isPending?.(row.taskId)"
                   @click.stop="shelf.remove(row.taskId)"
@@ -141,13 +216,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
-import type { ShelfRow } from '../../stores/taskShelf.ts';
+import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';
 import { useUiStore } from '../../stores/ui.js';
-import { UiIconButton, UiSelectableRow } from '../../ui';
+import { UiButton, UiControlGroup, UiIconButton, UiProgress, UiSearchInput, UiSelectableRow } from '../../ui';
+import type { UiActionTone } from '../../ui';
 
 type PluralForms = [string, string, string];
+type ShelfGroupId = 'attention' | 'waiting' | 'completed';
+type ShelfFilter = 'all' | ShelfGroupId;
+
+interface ShelfGroup {
+  id: ShelfGroupId;
+  title: string;
+  rows: ShelfRow[];
+}
 
 const SOURCE_LABELS: Record<string, string> = {
   analysis: 'оценка',
@@ -156,31 +240,72 @@ const SOURCE_LABELS: Record<string, string> = {
   b24: 'Битрикс24',
 };
 
+// Полка и UI-kit говорят о цвете разными словарями: у карточки это состояние конвейера,
+// у примитива — роль действия. Перевод живёт здесь, чтобы полоса не заводила свой скин.
+const PROGRESS_TONES: Record<string, UiActionTone> = {
+  accent: 'accent',
+  good: 'success',
+  warn: 'warning',
+  bad: 'danger',
+};
+
 const shelf = useTaskShelfStore();
 const ui = useUiStore();
 const panel = ref<HTMLElement | null>(null);
+const searchInput = ref<InstanceType<typeof UiSearchInput> | null>(null);
+const query = ref('');
+const activeFilter = ref<ShelfFilter>('all');
 
-const groups = computed(() => [
+/**
+ * Верхняя группа отвечает на вопрос «что ждёт меня», а не «что изменилось». Огонёк —
+ * событие по фронту и снимается acknowledge, поэтому одной его проверки мало: задача,
+ * которую конвейер держит на воротах, после первого же просмотра уезжала в тихую
+ * «В ожидании» и там терялась, хотя решение по ней так и не принято.
+ */
+const allGroups = computed<ShelfGroup[]>(() => [
   {
     id: 'attention',
     title: 'Требуют внимания',
-    rows: shelf.rows.filter((row) => row.state === 'lit' && !row.completed),
+    rows: shelf.rows.filter((row) => (row.state === 'lit' || row.needsHuman) && !row.completed),
   },
   {
     id: 'waiting',
     title: 'В ожидании',
-    rows: shelf.rows.filter((row) => row.state !== 'lit' && !row.completed),
+    rows: shelf.rows.filter((row) => row.state !== 'lit' && !row.needsHuman && !row.completed),
   },
   {
     id: 'completed',
     title: 'Завершённые',
     rows: shelf.rows.filter((row) => row.completed),
   },
-].filter((group) => group.rows.length));
+]);
+
+const filters = computed(() => [
+  {
+    id: 'all' as const,
+    label: 'Все',
+    count: shelf.rows.length,
+  },
+  ...allGroups.value.map((group) => ({
+    id: group.id,
+    label: group.id === 'attention' ? 'Внимание' : group.title,
+    count: group.rows.length,
+  })),
+]);
+const searchTerms = computed(() => normalizeSearch(query.value).split(/\s+/).filter(Boolean));
+const hasFilters = computed(() => searchTerms.value.length > 0 || activeFilter.value !== 'all');
+const groups = computed(() => allGroups.value
+  .filter((group) => activeFilter.value === 'all' || group.id === activeFilter.value)
+  .map((group) => ({
+    ...group,
+    rows: group.rows.filter(matchesSearch),
+  }))
+  .filter((group) => group.rows.length));
+const visibleCount = computed(() => groups.value.reduce((total, group) => total + group.rows.length, 0));
 
 /**
- * Шапка называет сначала события, потом объём наблюдения: человек приходит на полку
- * за тем, что уже случилось, а не за списком.
+ * Счётчик внимания включает и просмотренные остановки на человеке. Он остаётся
+ * общим при поиске, чтобы фильтр не создавал впечатление, что остальные задачи исчезли.
  */
 const summaryText = computed(() => {
   if (!shelf.rows.length) {
@@ -189,14 +314,41 @@ const summaryText = computed(() => {
 
   const total = `${shelf.rows.length} ${wordForm(shelf.rows.length, ['задача', 'задачи', 'задач'])}`;
 
-  if (!shelf.litCount) {
-    return `${total} под наблюдением`;
-  }
+  const attention = allGroups.value.find((group) => group.id === 'attention')?.rows.length ?? 0;
 
-  const events = `${shelf.litCount} ${wordForm(shelf.litCount, ['событие', 'события', 'событий'])}`;
-
-  return `${events} · ${total}`;
+  return attention ? `${total} · требуют внимания: ${attention}` : `${total} под наблюдением`;
 });
+
+function normalizeSearch(value: string): string {
+  return value.toLocaleLowerCase('ru-RU').replaceAll('ё', 'е').replaceAll('#', '').trim();
+}
+
+/**
+ * Все слова запроса могут находиться в разных полях одной задачи. Поиск только
+ * сужает видимые строки: снимки наблюдения и признак нового события он не меняет.
+ */
+function matchesSearch(row: ShelfRow): boolean {
+  const text = normalizeSearch([
+    row.taskId,
+    row.title,
+    row.details?.project,
+    row.details?.responsible,
+  ].join(' '));
+
+  return searchTerms.value.every((term) => text.includes(term));
+}
+
+/**
+ * Кнопка сброса исчезает вместе с отбором; возвращаем фокус в поиск, чтобы человек
+ * мог сразу ввести новый запрос и не потерял место при работе с клавиатуры.
+ */
+async function resetFilters(): Promise<void> {
+  query.value = '';
+  activeFilter.value = 'all';
+
+  await nextTick();
+  searchInput.value?.focus();
+}
 
 /**
  * Русские числительные: 11–19 всегда просят форму множественного числа, поэтому
@@ -259,18 +411,26 @@ function eventSource(row: ShelfRow): string {
   return SOURCE_LABELS[String(row.source)] || '';
 }
 
-function hasFooter(row: ShelfRow): boolean {
-  return !!(row.details?.responsible || row.details?.deadline || row.details?.unread);
-}
-
 function unreadLabel(value: number): string {
   return `${value} ${wordForm(value, ['непрочитанный', 'непрочитанных', 'непрочитанных'])}`;
 }
 
-function rowAriaLabel(row: ShelfRow): string {
-  const event = row.state === 'lit' && row.message ? `, новое событие: ${row.message}` : '';
+function progressTone(tone: string): UiActionTone {
+  return PROGRESS_TONES[tone] || 'neutral';
+}
 
-  return `${row.title}, задача #${row.taskId}${event}`;
+function progressText(progress: ShelfActivityProgress): string {
+  return progress.total ? `${progress.done}/${progress.total}` : 'Идёт';
+}
+
+/**
+ * Полоса остаётся отдельной от колонок активности и помещается в нижней строке
+ * карточки: прогресс не растягивает соседние сведения и сохраняет видимые числа.
+ */
+function progressBars(row: ShelfRow): ShelfActivity[] {
+  const bar = row.details?.activities?.find((activity) => activity.progress);
+
+  return bar ? [bar] : [];
 }
 
 defineExpose({ focus: () => panel.value?.focus?.() });
@@ -292,29 +452,58 @@ defineExpose({ focus: () => panel.value?.focus?.() });
   position: sticky;
   z-index: 3;
   top: 0;
-  display: flex;
-  align-items: center;
-  min-height: 54px;
-  padding: 10px var(--tool-dock-actions-space, 12px) 10px 12px;
+  display: grid;
+  gap: 14px;
+  padding: calc(var(--tool-dock-action-top, 13px) + 3px) 16px 16px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ground) 94%, transparent);
+  background: color-mix(in srgb, var(--ground) 96%, transparent);
   backdrop-filter: blur(12px);
+}
+
+.shelf-heading {
+  min-height: 36px;
+  padding-right: var(--tool-dock-actions-space, 0px);
 }
 
 .shelf-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 17px;
+  line-height: 1.4;
 }
 
 .shelf-head p {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.shelf-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  min-width: 0;
+}
+
+.shelf-search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.shelf-filter-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--ink-mid);
+  font-size: 12px;
 }
 
 .shelf-state {
   margin: 0;
-  padding: 18px 14px;
+  padding: 18px 16px;
   color: var(--ink-mid);
   font-size: 13px;
 }
@@ -327,19 +516,20 @@ defineExpose({ focus: () => panel.value?.focus?.() });
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin: 10px 12px 0;
-  padding: 8px 10px;
+  margin: 12px 16px 0;
+  padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--warn) 7%, transparent);
   color: var(--warn);
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .source-issues svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   flex: none;
   margin-top: 1px;
 }
@@ -347,9 +537,9 @@ defineExpose({ focus: () => panel.value?.focus?.() });
 .shelf-empty {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 12px;
-  padding: 18px;
+  gap: 14px;
+  margin: 16px;
+  padding: 24px;
   border: 1px dashed var(--line-2);
   border-radius: 10px;
   color: var(--ink-mid);
@@ -357,25 +547,25 @@ defineExpose({ focus: () => panel.value?.focus?.() });
 
 .shelf-empty-icon {
   color: var(--accent);
-  font-size: 24px;
+  font-size: 28px;
 }
 
 .shelf-empty h3 {
   margin: 0;
   color: var(--ink);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .shelf-empty p {
-  margin: 3px 0 0;
-  font-size: 11px;
-  line-height: 1.45;
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .shelf-groups {
   display: grid;
-  gap: 18px;
-  padding: 12px;
+  gap: 24px;
+  padding: 18px 16px 24px;
 }
 
 .shelf-group {
@@ -385,28 +575,28 @@ defineExpose({ focus: () => panel.value?.focus?.() });
 .shelf-group-head {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin: 0 2px 7px;
+  gap: 8px;
+  margin: 0 0 10px;
 }
 
 .shelf-group-head h3 {
   margin: 0;
   color: var(--ink-mid);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .shelf-group-head span {
-  min-width: 18px;
-  height: 18px;
+  min-width: 20px;
+  height: 20px;
   display: inline-grid;
   place-items: center;
+  padding-inline: 5px;
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--ink-mid);
-  font-size: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 [data-shelf-group='attention'] .shelf-group-head h3,
@@ -418,14 +608,10 @@ defineExpose({ focus: () => panel.value?.focus?.() });
   background: color-mix(in srgb, var(--warn) 13%, transparent);
 }
 
-[data-shelf-group='completed'] .shelf-group-head {
-  opacity: .62;
-}
-
 .shelf-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 7px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -437,161 +623,162 @@ defineExpose({ focus: () => panel.value?.focus?.() });
 
 .shelf-copy {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
 }
 
 .shelf-meta {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 5px 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
   color: var(--ink-mid);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.shelf-id {
-  color: var(--accent);
-  font-weight: 700;
-}
-
-.shelf-project {
-  grid-column: 2;
-  overflow: hidden;
-  max-width: none;
-  padding-left: 8px;
-  border-left: 1px solid var(--line-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shelf-meta time {
-  grid-column: 3;
-  white-space: nowrap;
-}
-
-.shelf-title {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.shelf-event,
-.shelf-waiting {
-  padding: 7px 8px;
-  border-radius: 7px;
   font-size: 11px;
   line-height: 1.4;
 }
 
+.shelf-id {
+  flex: none;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.shelf-project {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-2);
+}
+
+.shelf-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.shelf-event,
+.shelf-waiting {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .shelf-event {
   display: grid;
-  align-items: start;
-  gap: 3px;
-  border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
-  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  gap: 4px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--warn);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+}
+
+.shelf-event-label {
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.shelf-event-message {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.shelf-event-hint {
+  color: var(--ink-mid);
+  font-size: 11px;
 }
 
 .shelf-waiting {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 3px 7px;
+  gap: 3px 8px;
+  color: var(--ink);
 }
 
-.shelf-event-label,
 .shelf-waiting > span {
-  color: var(--warn);
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: .05em;
-  text-transform: uppercase;
+  color: var(--ink-mid);
 }
 
-.shelf-event-message {
+[data-shelf-attention='true'] .shelf-waiting > span {
   color: var(--warn);
   font-weight: 650;
 }
 
-.shelf-event-hint {
-  color: var(--ink-mid);
-  font-size: 10px;
-}
-
-.shelf-waiting {
-  padding: 0;
-  color: var(--ink-mid);
-}
-
-.shelf-waiting > span {
-  color: var(--ink-low);
-}
-
 .shelf-activities {
   display: grid;
-  gap: 5px;
+  gap: 8px;
+  padding-block: 3px;
 }
 
 .shelf-activity {
   display: grid;
-  grid-template-columns: 70px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-content: start;
+  gap: 4px 10px;
   min-width: 0;
-  font-size: 10.5px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .shelf-activity-label {
   color: var(--ink-mid);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 550;
 }
 
 .shelf-activity-value {
   min-width: 0;
-  color: var(--ink-mid);
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
-.shelf-activity[data-tone='accent'] .shelf-activity-label {
-  color: var(--accent);
-}
-
-.shelf-activity[data-tone='good'] .shelf-activity-label {
-  color: var(--good);
-}
-
-.shelf-activity[data-tone='warn'] .shelf-activity-label {
+.shelf-activity[data-tone='warn'] .shelf-activity-value,
+.shelf-progress[data-tone='warn'] .shelf-progress-count {
   color: var(--warn);
 }
 
-.shelf-activity[data-tone='bad'] .shelf-activity-label {
+.shelf-activity[data-tone='bad'] .shelf-activity-value,
+.shelf-progress[data-tone='bad'] .shelf-progress-count {
   color: var(--bad);
+}
+
+.shelf-bottom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
 .shelf-footer {
   display: flex;
+  flex: 1 1 300px;
   align-items: center;
   flex-wrap: wrap;
-  gap: 5px 9px;
-  padding-top: 7px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  gap: 7px 16px;
+  min-width: 0;
   color: var(--ink-mid);
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
-.shelf-footer > span + span {
-  padding-left: 9px;
-  border-left: 1px solid var(--line-2);
+.shelf-responsible {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.shelf-responsible svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
 }
 
 .shelf-deadline.overdue,
@@ -599,97 +786,97 @@ defineExpose({ focus: () => panel.value?.focus?.() });
   color: var(--bad);
 }
 
-@container task-shelf (min-width: 820px) {
-  .shelf-groups {
-    gap: 14px;
-  }
+/* Короткая шкала в подвале показывает место в маршруте, оставляя причину остановки
+   главным цветовым акцентом. Число остаётся видимым и при неизвестной длине маршрута. */
+.shelf-progress {
+  display: flex;
+  flex: 0 1 260px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 
+.shelf-progress-count {
+  display: inline-flex;
+  flex: none;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 104px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.shelf-progress-label {
+  color: var(--ink-mid);
+}
+
+.shelf-progress-bar {
+  flex: 1;
+  min-width: 48px;
+}
+
+@container task-shelf (min-width: 820px) {
   .shelf-list {
     grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
   }
 
-  .shelf-copy {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-areas:
-      'meta meta signal'
-      'title title signal'
-      'activities activities activities'
-      'footer footer footer';
-    gap: 6px 18px;
-  }
-
-  .shelf-meta {
-    grid-area: meta;
-    align-self: end;
-  }
-
-  .shelf-title {
-    grid-area: title;
-    min-height: 2.7em;
-  }
-
-  .shelf-event,
-  .shelf-waiting {
-    grid-area: signal;
-    align-self: center;
-  }
-
-  .shelf-event {
-    align-self: stretch;
-    align-content: center;
-  }
-
-  .shelf-event-message {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .shelf-event-hint {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
+  /* Каждый источник сохраняет свою колонку даже при отсутствии соседнего:
+     оценка и конвейер не перескакивают влево между карточками. */
   .shelf-activities {
-    grid-area: activities;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 18px;
-    padding-top: 2px;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 20px;
   }
 
   .shelf-activity {
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .shelf-activity-value {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .shelf-activity[data-kind='b24'] {
+    grid-column: 1;
+    grid-row: 1;
   }
 
-  .shelf-footer {
-    grid-area: footer;
+  .shelf-activity[data-kind='analysis'] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .shelf-activity[data-kind='pipeline'] {
+    grid-column: 3;
+    grid-row: 1;
   }
 }
 
-@container task-shelf (max-width: 430px) {
-  .shelf-meta {
-    grid-template-columns: auto minmax(0, 1fr);
+@container task-shelf (max-width: 560px) {
+  .shelf-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
-  .shelf-meta time {
-    grid-column: 1 / -1;
-    width: 100%;
+  .shelf-search {
+    flex: auto;
+  }
+
+  .shelf-progress {
+    flex-basis: 100%;
+    max-width: 320px;
+  }
+}
+
+@container task-shelf (max-width: 380px) {
+  .shelf-head {
+    padding-inline: 12px;
+  }
+
+  .shelf-groups {
+    padding-inline: 12px;
   }
 
   .shelf-activity {
     grid-template-columns: minmax(0, 1fr);
-    gap: 1px;
+    gap: 2px;
   }
 }
 </style>

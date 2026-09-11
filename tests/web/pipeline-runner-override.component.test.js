@@ -128,10 +128,6 @@ async function mountPipeline(t, {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineRunnerCompanionStore = defineStore('pipeline-runner-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineRunner'), {
     attachTo: browser.document.querySelector('#mount'),
     global: {
@@ -150,7 +146,6 @@ async function mountPipeline(t, {
       '__pipelineRunnerUiStore',
       '__pipelineRunnerTasksStore',
       '__pipelineRunnerBoardStore',
-      '__pipelineRunnerCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

@@ -10,6 +10,9 @@ import { readInstruction, readActivity, readAgentLive } from '../../lib/factoryC
 import { taskDiff } from '../../lib/git.ts';
 import { refreshRepos } from '../../lib/gitRefresh.ts';
 import { loadTriageProfile } from '../../lib/analysis/profile.ts';
+import { CAP_CLARIFICATIONS } from '../../lib/analysis/prompt.ts';
+import { resolveRoute } from '../../lib/analysis/routePolicy.ts';
+import { questionKey } from '../../../../shared/analysisContracts.ts';
 import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.ts';
 import {
   hasSlotReservation, reserveSlot, releaseSlot, slotsOverview, SlotsFullError,
@@ -157,6 +160,9 @@ interface B24Port {
 interface AnalyzerPort {
   readClarifications: (id: string) => Promise<string | null>;
   readOpenQuestions: (id: string) => Promise<{ questions: string[]; unknowns: string[] } | null>;
+  // Что по задаче уже решено: идентификаторы вопросов и ключи их текстов. Второй ключ
+  // обязателен — заход триажа переписывает вопросы, и по одному id ответ теряется.
+  answeredQuestions?: (id: string) => Promise<{ ids: Set<string>; keys: Set<string> }>;
   get?: (id: string) => Promise<{
     analysis: (TriageAnalysis & {
       route_catalog_hash?: string;
@@ -397,11 +403,21 @@ async function factoryModule(
     const managed = await managedRegistry(id, reply);
     if (!managed) return null;
     const env = await factoryState.readEnv(id);
+
+    // Подъём, упавший до записи t<номер>.env, оставляет проекцию ПУСТОЙ — сверять с
+    // контрактом нечего. Отказ здесь запирал ровно тот случай, ради которого сделаны
+    // «перезапустить стенд» и «закрыть задачу»: половинчатую песочницу не убирал ни один
+    // путь интерфейса. Пути сноса и решение о нём берутся из trusted-контракта, а не из
+    // env, поэтому пустую проекцию пропускаем; непустая проверяется как раньше.
+    const envProjected = Object.keys(env || {}).length > 0;
+
     try {
       if (typeof factoryState.verifyTrustedEnvironment !== 'function') {
         throw new Error('trusted environment verifier недоступен');
       }
-      factoryState.verifyTrustedEnvironment(managed.trusted, env);
+      if (envProjected) {
+        factoryState.verifyTrustedEnvironment(managed.trusted, env);
+      }
     } catch (err) {
       reply.code(409).send({
         error: 'attempt_integrity_failed',
@@ -537,6 +553,8 @@ async function factoryModule(
   // Контекст, которого нет в описании задачи: локальные уточнения человека и арбитра
   // (в трекер их НЕ публикуем — заказчик видит комментарии) и несистемные комментарии
   // из B24. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
+  // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
+  // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
   async function ticketSections(id: string, { profile = null, title = '', description = '' }: {
     profile?: string | null;
     title?: string;
@@ -547,7 +565,7 @@ async function factoryModule(
     if (clarify) {
       sections.push({
         title: '[Внутренние уточнения триажа — учитывай автора каждой записи; пометки «[приложено фото: /путь]» открывай инструментом Read]',
-        text: clarify.slice(0, 6000),
+        text: clarify.slice(0, CAP_CLARIFICATIONS),
       });
     }
     const open = await analyzer.readOpenQuestions(id);
@@ -611,6 +629,48 @@ async function factoryModule(
       }
     }
     return sections;
+  }
+
+  /**
+   * Рекомендация маршрута с учётом ответов человека.
+   *
+   * Глубину политика считает в момент триажа, когда вопросы ещё открыты, и записывает
+   * в файл оценки. Человек отвечает уже после — и форма запуска продолжала показывать
+   * маршрут «с открытыми вопросами», хотя открытых не осталось. Пересчёт идёт ЗДЕСЬ и
+   * только для показа и старта: файл оценки — снимок своего захода, и переписывать его
+   * ответами нельзя. Отвечать нечем (ответов нет, профиль или каталог недоступны) —
+   * возвращаем null, и форма берёт то, что записал триаж.
+   */
+  async function liveRouteDecision(id: string, profile: string, analysis: any, catalog: any) {
+    if (!analysis || typeof analyzer?.answeredQuestions !== 'function') {
+      return null;
+    }
+
+    let answered;
+    try {
+      answered = await analyzer.answeredQuestions(id);
+    } catch {
+      return null;
+    }
+    const questions = (Array.isArray(analysis.questions) ? analysis.questions : [])
+      .filter((question: { id?: string; text?: string }) => (
+        question?.id
+        && !answered.ids.has(question.id)
+        && !answered.keys.has(questionKey(question.text))
+      ));
+    if (questions.length === (analysis.questions?.length || 0)) {
+      return null;
+    }
+
+    const triageProfile = await loadTriageProfile(config, profile).catch(() => null);
+    const decision = resolveRoute({
+      ...analysis,
+      questions,
+      // Признак «нужно уточнение» держится ровно до последнего открытого вопроса.
+      needs_clarification: analysis.needs_clarification === true && questions.length > 0,
+    }, { routeMap: triageProfile?.routeMap || '', routes: catalog?.routes || [] });
+
+    return decision.route ? decision : null;
   }
 
   /**
@@ -1364,9 +1424,12 @@ async function factoryModule(
     }));
     // Рекомендацию триажа принимаем только от ЭТОГО каталога: маршруты могли быть
     // переопубликованы после оценки, и подсказка на снятый маршрут ведёт в отказ движка.
-    const suggestionIsStale = typeof analysis?.route_catalog_hash === 'string'
+    // Пересчёт по ответам человека считается уже по текущему каталогу, поэтому
+    // протухание проверяем только у записанной оценки.
+    const live = await liveRouteDecision(id, profile, analysis, catalog);
+    const suggestionIsStale = !live && typeof analysis?.route_catalog_hash === 'string'
       && analysis.route_catalog_hash !== catalog.catalogHash;
-    const routeGuess = analysis?.route_guess;
+    const routeGuess = live?.route || analysis?.route_guess;
     const suggestedRoute = !suggestionIsStale && typeof routeGuess === 'string'
       && routes.includes(routeGuess)
       ? routeGuess
@@ -1379,8 +1442,10 @@ async function factoryModule(
       routeSuggestion: suggestedRoute
         ? {
           route: suggestedRoute,
-          depth: analysis?.route_depth || null,
-          reason: analysis?.route_reason || '',
+          depth: live?.depth || analysis?.route_depth || null,
+          reason: live
+            ? `${live.reason} — с учётом ответов человека`
+            : analysis?.route_reason || '',
         }
         : null,
       catalogHash: catalog.catalogHash,

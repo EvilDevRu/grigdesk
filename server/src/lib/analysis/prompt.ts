@@ -9,10 +9,24 @@ const CAP_DESC = 8000;    // описание тикета, символов
 const CAP_COMMENT = 1500; // один комментарий
 const MAX_COMMENTS = 15;  // последних комментариев
 
+// Уточнения человека — накопительный файл с base64-маркерами ответов (analyzer.ts):
+// один ответ вместе со своим вопросом весит 1–2 тыс. символов, и потолок в 6000 отрезал
+// хвост уже на пятом-шестом. Тот же предел держит вклейку уточнений в тикет конвейера
+// (modules/factory): триаж и конвейер обязаны видеть один и тот же объём.
+export const CAP_CLARIFICATIONS = 30_000;
+
 export interface TriageComment {
   author?: string;
   time?: string;
   text?: string;
+}
+
+// Закрытый вопрос прошлого захода: что спрашивали и что ответили. Ответ приходит
+// уже собранной строкой — промпту важен смысл, а не поля записи.
+export interface TriageAnsweredQuestion {
+  question: string;
+  answer: string;
+  actor: 'human' | 'cockpit-arbiter';
 }
 
 export interface TriageRouteChoice {
@@ -26,6 +40,7 @@ export interface TriagePromptInput {
   description: string;
   comments?: TriageComment[];
   clarifications?: string;
+  answered?: TriageAnsweredQuestion[];
   discussion?: string;
   profile: TriageProfile;
   routeChoice?: TriageRouteChoice | null;
@@ -39,7 +54,7 @@ export interface TriagePromptInput {
  * иначе триаж назовёт маршрут, которого движок не примет.
  */
 export function buildTriagePrompt({
-  task, title, description, comments, clarifications, discussion, profile,
+  task, title, description, comments, clarifications, answered, discussion, profile,
   routeChoice, jsonPath, notePath,
 }: TriagePromptInput): string {
   const comm = (comments || [])
@@ -58,6 +73,16 @@ export function buildTriagePrompt({
       routes.map((route) => `- ${route.id}${route.title ? ` — ${route.title}` : ''}`).join('\n')}\n`
     : '';
 
+  // Закрытые вопросы показываем ПАРАМИ. Прошлый заход видел только реплики ответов без
+  // самих вопросов — и штатно спрашивал то же самое снова, обнуляя работу человека.
+  const closed = (answered || []).filter((item) => item?.question && item?.answer);
+  const closedBlock = closed.length
+    ? `\n[Закрытые вопросы — на них уже ответили, повторно НЕ спрашивай]\n${
+      closed.map((item, index) => `${index + 1}. Вопрос: ${item.question}\n   Ответ (${
+        item.actor === 'human' ? 'человек' : 'арбитр, по коду'}): ${item.answer}`).join('\n')
+    }\nЭти ответы — часть постановки: считай их фактом, учитывай в оценке и НЕ выноси эти вопросы в questions[] ни в какой формулировке. Если они снимали неопределённость — подними confidence и не ставь needs_clarification только из-за них.`
+    : '';
+
   return `Ты — триаж-разведчик задач трекера. Цель: быстро и честно оценить сложность, риски и объём задачи ПО КОДУ. План реализации НЕ составлять — его позже сделает конвейер по свежему коду.
 
 РЕЖИМ: только чтение. Работаешь в ОСНОВНЫХ репозиториях проекта (стенда/песочницы нет), поэтому никаких docker/artisan/npm/тестов. Ищи и читай файлы доступными файловыми инструментами, историю смотри только через структурный repo_history (log/show). Код не менять.
@@ -73,7 +98,7 @@ ${routeCatalog}
 Описание:
 ${String(description || '(пусто)').slice(0, CAP_DESC)}
 ${comm ? `\nКомментарии (последние, старые → новые):\n${comm}` : ''}
-${clarifications ? `\n[Уточнения человека — внутренние, ответы на вопросы прошлого триажа; приоритетнее описания]\n${String(clarifications).slice(0, 6000)}` : ''}
+${clarifications ? `\n[Уточнения человека — внутренние, ответы на вопросы прошлого триажа; приоритетнее описания]\n${String(clarifications).slice(0, CAP_CLARIFICATIONS)}` : ''}${closedBlock}
 ${`${comm}${clarifications || ''}`.includes('[приложено фото:') ? '\nПометки «[приложено фото: /путь]» — скриншоты от человека, ОБЯЗАТЕЛЬНО открой каждый инструментом Read и учти содержимое в оценке.' : ''}
 ${discussion ? `\n${DISCUSSION_SECTION_TITLE}\n${discussion}\nЭто уже раскрытая переписка — доступ к ней просить не нужно. Строки «Ссылка не раскрыта» — то, что осталось недоступным: их и учитывай в confidence.\n` : ''}
 [Что сделать]
@@ -90,6 +115,7 @@ diff_size: S (<50 строк), M (50–300), L (300–1000), XL (>1000) — пр
 route_kind (род работы, НЕ глубина проверки): ${kindList}. feature — нужно новое или изменённое поведение; debug — есть наблюдаемый дефект, причину надо сначала доказать; perf — предмет задачи скорость; hunt — просят найти дефекты в области, а не чинить конкретный.
 ГЛУБИНУ маршрута (полный / средний / лёгкий) выбираешь НЕ ты: её считает политика по твоим complexity, risk, diff_size, confidence и по наличию открытых вопросов. Поэтому оценки должны быть честными в обе стороны: завышенная сложность отправит мелкую правку по полному кругу с планом и воротами, заниженный риск — наоборот. Про сам маршрут в summary писать не нужно.
 confidence: high | medium | low. Если тикет мутный, цель непонятна или есть недоступные ссылки (нераскрытые t.me/…, скрины без текста) — ставь low, заполняй questions[] и needs_clarification=true. НЕ фантазируй охват: честное «нужно уточнение» ценнее выдуманной оценки.
+questions[] — только то, что ОСТАЛОСЬ открытым. Вопрос из блока закрытых, переформулированный другими словами, — тот же вопрос: его задавать нельзя.
 
 [Схема ${jsonPath}]
 {

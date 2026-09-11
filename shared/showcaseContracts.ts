@@ -37,6 +37,7 @@ const {
   numeric,
   objectOf,
   oneOf,
+  optional,
   record,
   text,
   wholeNumber,
@@ -65,9 +66,9 @@ const screen = objectOf({
 });
 
 /**
- * Публичная проекция области показа. `viewUrl` — ссылка, которую человек открывает
- * на своём устройстве; адрес, по которому пишет сервер, сюда не попадает: он может
- * быть loopback-адресом самой машины и наружу не относится.
+ * Публичная проекция области показа. `viewUrl` — готовая ссылка постоянного стенда;
+ * у песочницы она null, потому что её внешний адрес зависит от места, где человек
+ * открыл кокпит. Адрес серверной записи сюда не попадает вовсе.
  */
 const scope = objectOf({
   targetKind,
@@ -92,6 +93,11 @@ const targetRef = objectOf({
   id: text,
 });
 
+const targetOptionRef = objectOf({
+  kind: oneOf('project', 'sandbox'),
+  id: text,
+});
+
 // Цель либо готова к работе, либо названа причина и следующий шаг. Промежуточного
 // «наверное сработает» нет: запись без проверенной цели не запускается.
 const readyTarget = objectOf({
@@ -103,6 +109,7 @@ const readyTarget = objectOf({
 const blockedTarget = objectOf({
   status: oneOf('blocked'),
   ref: targetRef,
+  profile: optional(text),
   reason: text,
   nextAction: nullable(objectOf({
     kind: oneOf('open-sandboxes', 'choose-project-url', 'configure-profile', 'retry'),
@@ -337,17 +344,38 @@ const doctor = objectOf({
   checkedAt: text,
 });
 
-// Профиль показа: годность объявляет сервер, прочитав контракт профиля. Список
-// нужен форме создания, и выводить её собственные догадки о годности нельзя —
-// иначе человек выберет цель, на которой запись невозможна, и узнает об этом
-// только после создания ролика.
+// Старый список профилей остаётся в overview на время совместимости прежних
+// клиентов. Новая форма использует только уже связанные сервером targetOption.
 const targetProfile = objectOf({
   id: text,
   ready: boolean,
   reason: text,
 });
 
+// Цель для новой формы ролика уже связана сервером с доверенным профилем и
+// адресом. Клиент выбирает эту запись целиком и не вводит профиль или порт сам.
+const targetOption = objectOf({
+  ref: targetOptionRef,
+  profile: text,
+  // Для ручной песочницы server-owned журнал может только предположить профиль.
+  // Старый ответ без признака читается как null и получает безопасную базовую policy.
+  profileBinding: optional(oneOf('verified', 'inferred')),
+  label: text,
+  // Постоянный стенд публикует готовую ссылку. Для локальной песочницы localhost
+  // был бы адресом сервера, а не браузера человека, поэтому наружу идёт лишь порт.
+  viewUrl: nullable(text),
+  viewPort: nullable(wholeNumber),
+  status: oneOf('ready', 'blocked'),
+  reason: text,
+  // Число экранов именно из объявления профиля. Ноль допустим: сервер даст
+  // безопасный корневой экран, но UI честно покажет, что карта не настроена.
+  screenCount: wholeNumber,
+});
+
 const overview = objectOf({
+  targets: listOf(targetOption),
+  // Старый список временно остаётся на проводе для совместимости клиентов,
+  // которые ещё не перешли на выбор уже разрешённой цели.
   profiles: listOf(targetProfile),
   projects: listOf(projectSummary),
   jobs: listOf(job),
@@ -388,11 +416,15 @@ const voiceEngineStatus = objectOf({
 // Размер показывается до нажатия: качается это по сети человека и в его каталог.
 const voicePackage = objectOf({
   id: text,
+  // Пакет ставит конкретный движок и может нести несколько голосов сразу: человек
+  // выбирает, кого услышит, а не файл модели.
+  engineId: text,
   name: text,
   language: text,
   timbre: text,
   byteSize: wholeNumber,
   license: text,
+  voices: listOf(text),
   installed: boolean,
 });
 
@@ -451,6 +483,12 @@ export type ShowcaseCapability = ReturnType<typeof capability>;
 export type ShowcaseScreen = ReturnType<typeof screen>;
 export type ShowcaseScope = ReturnType<typeof scope>;
 export type ShowcaseTargetRef = ReturnType<typeof targetRef>;
+// Новая форма выбирает только опубликованный постоянный стенд или песочницу.
+// `task` остаётся в общем ref лишь для чтения старых сохранённых роликов.
+export type ShowcaseSelectableTargetRef = {
+  kind: Exclude<ShowcaseTargetKind, 'task'>;
+  id: string;
+};
 export type ShowcaseTarget = ReturnType<typeof targetResolution>;
 export type ShowcaseArtifactRef = ReturnType<typeof artifactRef>;
 export type ShowcaseCheck = ReturnType<typeof check>;
@@ -461,6 +499,7 @@ export type ShowcaseScene = ReturnType<typeof scene>;
 export type ShowcaseDecision = ReturnType<typeof decision>;
 export type ShowcaseFinal = ReturnType<typeof finalArtifact>;
 export type ShowcaseTargetProfile = ReturnType<typeof targetProfile>;
+export type ShowcaseTargetOption = ReturnType<typeof targetOption>;
 export type ShowcaseProjectSummary = ReturnType<typeof projectSummary>;
 export type ShowcaseProject = ReturnType<typeof project>;
 export type ShowcaseJob = ReturnType<typeof job>;

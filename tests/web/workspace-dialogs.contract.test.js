@@ -27,17 +27,12 @@ test('DiffModal и DocumentModal используют единый dialog runtim
   assert.match(runtime, /data-ui-layer='diff-workspace'/);
 });
 
-test('TaskModal держит action триажа сверху и единый размер footer-кнопок', async () => {
+test('Действия TaskModal используют общее оформление из UI-kit', async () => {
   const [taskModal, actions] = await Promise.all([
     readFile(webFile('src/views/TaskModal.vue'), 'utf8'),
     readFile(webFile('src/styles/components/actions.css'), 'utf8'),
   ]);
 
-  assert.match(taskModal, /class="triage-summary"/u);
-  assert.match(
-    taskModal,
-    /\.triage-summary\s*\{[^}]*flex:\s*1 1 360px;[^}]*flex-wrap:\s*wrap;/u,
-  );
   assert.equal(
     [...taskModal.matchAll(/data-context="task-footer-action"/gu)].length,
     7,

@@ -9,12 +9,16 @@
 //  • выполненное условие готовности НЕ означает отрисованный кадр, поэтому после
 //    него снимается кадр — он заставляет браузер свести картинку;
 //  • браузер умеет умереть молча, оставив ожидание без конца, поэтому у сцены есть
-//    свой срок, а у снимка кадра — свой.
+//    свой срок, а у снимка кадра — свой;
+//  • выполненное условие готовности означает собравшийся каркас, а не пришедшие
+//    данные: вторая волна запросов стартует после него, и без ожидания её конца
+//    в клип попадает пустая таблица со спиннером — при здоровом стенде.
 import type { Browser, Page } from 'playwright-core';
 
 import type { ShowcaseAction, ShowcaseScene } from '../../../../../shared/showcaseContracts.ts';
 import { ShowcaseError } from '../errors.ts';
 import { browserLaunchArgs } from '../browserPolicy.ts';
+import { DEFAULT_QUIET, trackNetwork } from './networkQuiet.ts';
 import type { RenderStyle } from '../artifacts.ts';
 
 // Накладка курсора — доверенный код recorder-а. Она не приходит от модели, ничего
@@ -34,6 +38,12 @@ const CURSOR_OVERLAY = `
   })();
 `;
 
+// Пауза между готовностью и первым действием. Зритель должен увидеть исходное
+// состояние экрана, а речь — начаться раньше клика (пре-ролл сборки 400 мс);
+// заодно пауза перекрывает разброс между часами исполнителя и началом видео,
+// из-за которого срез клипа мог попасть на уже выполненное действие.
+const ACTION_LEAD_MS = 600;
+
 export interface ScreenMap {
   id: string;
   path: string;
@@ -47,19 +57,30 @@ export interface RecordSceneInput {
   screen: ScreenMap;
   baseUrl: string;
   allowedOrigins: string[];
+  // Методы к разрешённым адресам. Без объявления — только чтение: страница,
+  // которая читает данные POST-ом, объявляет это в цели, а не получает молча.
+  allowedMethods?: string[];
   outDir: string;
   style: RenderStyle;
   loginState: NonNullable<Parameters<Browser['newContext']>[0]>['storageState'] | null;
   deadlineMs?: number;
   actionTimeoutMs?: number;
   readyTimeoutMs?: number;
+  // Затишье сети после готовности и после действий: сколько подряд сеть должна
+  // молчать и сколько ждать самое большее. По умолчанию секунда и десять секунд.
+  settleQuietMs?: number;
+  settleCapMs?: number;
 }
 
 export interface RecordSceneResult {
   rawPath: string;
+  // Смещение готовности от начала записи: до него в клипе загрузка страницы, и
+  // исполнитель эту часть срезает.
   readyOffsetMs: number;
   recordedMs: number;
   blockedRequests: { url: string; method: string }[];
+  // Сколько ожиданий затишья упёрлось в предел: у спокойного стенда ноль.
+  unsettled: number;
 }
 
 /**
@@ -188,12 +209,16 @@ async function recordSceneOnce(input: RecordSceneInput): Promise<RecordSceneResu
     storageState: input.loginState ?? undefined,
   });
 
+  const allowedMethods = input.allowedMethods ?? ['GET', 'HEAD'];
+
   await context.route('**/*', async (route, request) => {
     const origin = new URL(request.url()).origin;
     const method = request.method();
-    const viewOnly = method === 'GET' || method === 'HEAD';
+    // OPTIONS — preflight, вопрос браузера перед cross-origin запросом, а не
+    // действие страницы: сам запрос всё равно проверяется своим методом.
+    const permitted = allowedMethods.includes(method) || method === 'OPTIONS';
 
-    if (!input.allowedOrigins.includes(origin) || !viewOnly) {
+    if (!input.allowedOrigins.includes(origin) || !permitted) {
       blockedRequests.push({ url: request.url(), method });
       await route.abort('blockedbyclient');
 
@@ -205,8 +230,17 @@ async function recordSceneOnce(input: RecordSceneInput): Promise<RecordSceneResu
 
   await context.addInitScript(CURSOR_OVERLAY);
 
-  const page = await context.newPage();
+  // Отсчёт идёт ДО создания страницы: видео контекста начинается вместе с ней, и
+  // смещение готовности, посчитанное от более поздней точки, срезало бы клип
+  // раньше самой готовности.
   const startedAt = Date.now();
+  const page = await context.newPage();
+  const network = trackNetwork(page);
+  const settle = {
+    quietMs: input.settleQuietMs ?? DEFAULT_QUIET.quietMs,
+    capMs: input.settleCapMs ?? DEFAULT_QUIET.capMs,
+  };
+  let unsettled = 0;
 
   try {
     const startUrl = new URL(input.screen.path, input.baseUrl).toString();
@@ -221,10 +255,18 @@ async function recordSceneOnce(input: RecordSceneInput): Promise<RecordSceneResu
     }
 
     // Готовность — явное условие сцены с ограниченным ожиданием. Общего ожидания
-    // тишины сети нет намеренно: стенд с SSE или polling до неё не доходит никогда.
+    // тишины Playwright нет намеренно: стенд с SSE или polling до неё не доходит
+    // никогда; вместо неё ниже ограниченное затишье по молодым запросам.
     const readySelector = input.scene.readyCondition || input.screen.readySelector;
 
     await page.locator(readySelector).first().waitFor({ state: 'visible', timeout: readyTimeoutMs });
+
+    // Готовность — это собравшийся каркас; данные приходят второй волной запросов.
+    // Её конец ждётся ограниченно: недождавшееся затишье сцену не срывает.
+    if (!(await network.quiet(settle))) {
+      unsettled += 1;
+    }
+
     // Снимок кадра заставляет браузер свести картинку: без него одна запись из
     // десяти выходила полностью однотонной при выполненном условии готовности.
     // Но это СРЕДСТВО, а не гарантия — сам снимок иногда отказывает протоколом,
@@ -236,8 +278,16 @@ async function recordSceneOnce(input: RecordSceneInput): Promise<RecordSceneResu
 
     const readyAt = Date.now();
 
+    await page.waitForTimeout(ACTION_LEAD_MS);
+
     for (const action of [...input.scene.actions].filter((item) => item.kind !== 'goto')) {
       await runAction(page, input.screen, action, actionTimeoutMs);
+    }
+
+    // Действия сами вызывают запросы — фильтр перестраивает таблицу, — и последний
+    // кадр обязан показывать их результат, а не спиннер.
+    if (!(await network.quiet(settle))) {
+      unsettled += 1;
     }
 
     const finishedAt = Date.now();
@@ -247,6 +297,7 @@ async function recordSceneOnce(input: RecordSceneInput): Promise<RecordSceneResu
       throw new ShowcaseError('record_failed', 'Браузер не завёл запись сцены.', 500);
     }
 
+    network.dispose();
     await context.close();
 
     return {
@@ -254,11 +305,82 @@ async function recordSceneOnce(input: RecordSceneInput): Promise<RecordSceneResu
       readyOffsetMs: readyAt - startedAt,
       recordedMs: finishedAt - startedAt,
       blockedRequests,
+      unsettled,
     };
   } catch (error) {
+    network.dispose();
     await context.close().catch(() => null);
 
     throw error;
+  }
+}
+
+export type StorageState = NonNullable<Parameters<Browser['newContext']>[0]>['storageState'];
+
+export interface LoginRecipe {
+  url: string;
+  userSelector: string;
+  passwordSelector: string;
+  submitSelector: string;
+  readySelector: string;
+  user: string;
+  password: string;
+}
+
+export interface LoginInput {
+  browser: Browser;
+  baseUrl: string;
+  allowedOrigins: string[];
+  style: RenderStyle;
+  login: LoginRecipe;
+  timeoutMs?: number;
+}
+
+/**
+ * Вход на стенд тестовой учёткой. Идёт в своём контексте и заканчивается снимком
+ * состояния (cookie и localStorage): сцены потом открываются уже вошедшими, а сам
+ * пароль в их контексты не попадает.
+ *
+ * Это единственное место, где странице разрешён не-GET запрос — форма входа
+ * отправляется POST. Назначение по-прежнему только объявленные origins.
+ */
+export async function loginToStand(input: LoginInput): Promise<StorageState> {
+  const timeoutMs = input.timeoutMs ?? 45_000;
+  const context = await input.browser.newContext({
+    viewport: { width: input.style.width, height: input.style.height },
+    serviceWorkers: 'block',
+    locale: input.style.locale,
+    colorScheme: input.style.theme === 'light' ? 'light' : 'dark',
+  });
+
+  await context.route('**/*', async (route, request) => {
+    if (!input.allowedOrigins.includes(new URL(request.url()).origin)) {
+      await route.abort('blockedbyclient');
+
+      return;
+    }
+
+    await route.continue();
+  });
+
+  const page = await context.newPage();
+  const recipe = input.login;
+
+  try {
+    await withDeadline((async () => {
+      const url = new URL(recipe.url, input.baseUrl).toString();
+
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      await page.locator(recipe.userSelector).first().fill(recipe.user, { timeout: timeoutMs });
+      await page.locator(recipe.passwordSelector).first().fill(recipe.password, { timeout: timeoutMs });
+      await page.locator(recipe.submitSelector).first().click({ timeout: timeoutMs });
+      await page.locator(recipe.readySelector).first()
+        .waitFor({ state: 'visible', timeout: timeoutMs });
+    })(), timeoutMs + 5_000, 'вход на стенд');
+
+    return await context.storageState();
+  } finally {
+    await context.close().catch(() => null);
   }
 }
 

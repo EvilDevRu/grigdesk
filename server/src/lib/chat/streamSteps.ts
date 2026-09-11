@@ -62,6 +62,42 @@ export function lineCount(value: unknown): number {
 }
 
 /**
+ * Кладёт шаг в ленту и удерживает её в пределах окна.
+ *
+ * Вытеснение НЕ молчит: место самого старого шага занимает строка-счётчик. Раньше начало
+ * длинного хода исчезало бесследно, и человек читал оставшуюся ленту как полный отчёт —
+ * агент отчитывался о работе, следов которой в ленте уже не было. Счётчик вытесненного
+ * живёт в самой метке, поэтому функция не хранит состояния: следующая метка продолжает
+ * счёт предыдущей, а сама меткой не считается.
+ *
+ * Копия этой арифметики есть у ленты в браузере (`web/src/stores/chat.js`): стор грузят
+ * офлайн-тесты подменой импортов, поэтому общий модуль ему не завезёшь.
+ */
+export function pushChatStep(
+  steps: ChatStep[],
+  step: ChatStep,
+  limit: number,
+  now: () => number = () => Date.now(),
+): ChatStep[] {
+  steps.push(step);
+  // В окно меньше двух мест метку не положить: там она вытеснила бы сам шаг.
+  if (limit < 2 || steps.length <= limit) return steps;
+
+  const removed = steps.splice(0, steps.length - (limit - 1));
+  const dropped = Number(removed.find((old) => old.truncated)?.dropped || 0)
+    + removed.filter((old) => !old.truncated).length;
+  steps.unshift({
+    k: 'note',
+    level: 'warn',
+    truncated: true,
+    dropped,
+    text: `… ранние шаги хода скрыты: ${dropped}`,
+    at: now(),
+  });
+  return steps;
+}
+
+/**
  * Принимает уже нормализованные шаги, ставит timestamp, ограничивает хранение и
  * безопасно передаёт поток в SSE. Локальная копия нужна executor-у для истории и
  * для корректного ответа после остановки хода.
@@ -84,9 +120,9 @@ export function createStepSink(onStep: ((step: ChatStep) => void) | null | undef
     // ещё час (у Codex это заметнее: его счётчик токенов тикает только в конце хода,
     // так что других признаков жизни у окна не остаётся вовсе).
     // Окно скользящее: у длинного хода ценен свежий хвост, а не архив начала —
-    // именно он восстанавливается в ленте после F5.
-    steps.push(next);
-    if (steps.length > limit) steps.splice(0, steps.length - limit);
+    // именно он восстанавливается в ленте после F5. Вытесненное называет счётчик,
+    // иначе сохранённая лента выдаёт себя за полный отчёт о ходе.
+    pushChatStep(steps, next, limit, now);
     try { onStep?.(next); } catch { /* лента не должна ронять ход агента */ }
     return next;
   }

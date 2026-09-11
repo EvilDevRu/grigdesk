@@ -90,23 +90,26 @@
           </span>
         </div>
         <div class="spacer"></div>
-        <!-- title у обёртки, а не только у select: на disabled-элементе браузер события
-             мыши подавляет, и объяснение «почему нельзя менять» человеку не показалось бы. -->
-        <div class="sel model" :title="isCompanion ? companionRunHint : undefined">
+        <div class="sel model">
           <span class="lbl">модель</span>
           <UiSelect
             compact
             data-context="chat-session-toolbar"
             :model-value="modelId"
-            :disabled="frozen || isCompanion"
+            :disabled="frozen"
             :title="currentModelTitle"
             @change="onModelChange"
           >
             <template v-if="provGroups.length">
-              <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
+              <!-- «недоступен» — итог последней проверки исполнителя, а не запрет: причина
+                   бывает временной (сеть, тайм-аут probe, минутный разлогин), и блокировка выбора
+                   отбирала у человека решение из-за одного неудачного опроса. Пометка остаётся,
+                   отказ приходит от самого запуска и называет настоящую причину. -->
+              <optgroup v-for="p in provGroups" :key="p.id"
+                        :label="p.name + (p.available ? '' : ' — недоступен')">
                 <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
-                <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
-                        :title="modelOptionTitle(m)">
+                <option v-for="m in p.models" :key="m.id" :value="m.id"
+                        :title="modelOptionTitle(m, p)">
                   {{ modelOptionLabel(m) }}
                 </option>
               </optgroup>
@@ -133,8 +136,7 @@
         <!-- Обёртки быть не должно: соседние правила (`.sel + .eff`, `.eff + .ctx-tip`)
              рисуют разделители по сиблингам, и лишний узел их погасил бы. -->
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
-                      :disabled="frozen || isCompanion" :hint="isCompanion ? companionRunHint : ''"
-                      @update:model-value="chat.setEffort(sid, $event)" />
+                      :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
              Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
              Подсказка штатная, а не browser title: так она не обрезается и вмещает
@@ -215,7 +217,8 @@
             «/» — команды, «$» — навыки Codex.
           </p>
         </div>
-        <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
+        <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role"
+             :style="runBrandStyle(m)">
           <div v-if="m.attachments?.length" class="m-atts">
             <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
                @click="onAttachmentClick($event, a)">
@@ -223,11 +226,11 @@
               <span v-else class="m-file">📄 {{ a.name }}</span>
             </a>
           </div>
-          <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей -->
+          <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей.
+               Знак и цвет — исполнителя ИМЕННО ЭТОГО хода, а не вшитый Claude: ИИ меняют
+               посреди разговора, и прошлые ответы обязаны остаться за прежним. -->
           <div v-if="m.role === 'assistant'" class="ahead">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
-              <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
-            </svg>
+            <ProviderIcon v-if="runProvider(m)" :provider="runProvider(m)" :size="12" />
             <span>Агент</span>
             <span v-if="m.actualModel || m.model" class="amodel">
               {{ m.actualModel || m.model }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
@@ -236,8 +239,12 @@
           <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
                а не наперегонки (два CLI на одну сессию убивают друг друга). -->
           <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
-          <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
-          <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
+          <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code).
+               У упавшего хода лента тем важнее: по ней видно, докуда он дошёл. -->
+          <StepList
+            v-if="(m.role === 'assistant' || m.role === 'error') && m.steps?.length"
+            :steps="m.steps"
+          />
           <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
             <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md"
@@ -266,8 +273,31 @@
               </svg>
             </UiIconButton>
           </div>
+          <!-- Ход прерван перезапуском сервера: память сессии цела, продолжение — обычное
+               сообщение в ту же сессию. Только у последнего сообщения свободного чата. -->
+          <div v-if="isResumeOffer(m, i)" class="m-resume">
+            <UiButton
+              variant="outline"
+              tone="accent"
+              data-role="chat-resume-interrupted"
+              @click="resumeInterrupted"
+            >
+              ▶ Продолжить ход
+            </UiButton>
+          </div>
         </div>
-        <div v-if="sess.sending" class="msg assistant">
+        <div v-if="sess.sending" class="msg assistant" :style="liveBrandStyle">
+          <!-- Шапка идущего хода — та же, что у готового ответа: знак исполнителя виден
+               с первой секунды, а не только когда ответ дописан. Модель здесь — выбор
+               чата, поэтому честно помечена «запрошено»; факт из потока CLI называют
+               строка «старт» в ленте и шапка готового ответа. -->
+          <div class="ahead">
+            <ProviderIcon v-if="liveProvider" :provider="liveProvider" :size="12" />
+            <span>Агент</span>
+            <span v-if="modelId" class="amodel">
+              {{ modelId }} · запрошено<template v-if="effortValue"> · {{ effortValue }}</template>
+            </span>
+          </div>
           <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
           <StepList v-if="sess.steps?.length" :steps="sess.steps" live />
           <div class="text muted">
@@ -577,6 +607,7 @@ import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
+import ProviderIcon from '../../shared/ProviderIcon.vue';
 import {
   confirmDialog,
   UiButton,
@@ -683,20 +714,9 @@ prov.load();
 // Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
-// У компаньона модель и усилие принадлежат server-owned настройке «Настройки →
-// Приложение → Голосовой компаньон»: она одна на его общий и задачные разговоры и на
-// все окна. Показываем здесь именно её, а не записанный прошлым ходом факт — иначе
-// заблокированный селект показывал бы одно, а ход уходил бы другим.
-const isCompanion = computed(() => sess.value?.purpose === 'companion');
-const companionRun = computed(() => chat.companion || { modelRef: null, effort: '' });
-const current = computed(() => (isCompanion.value
-  ? prov.modelOf(companionRun.value.modelRef || '')
-  : prov.modelOf(sess.value?.modelRef || sess.value?.model)));
+const current = computed(() => prov.modelOf(sess.value?.modelRef || sess.value?.model));
 const modelId = computed(() => current.value.id);
-// Значение слайдера: у обычного чата — своё, у компаньона — из настройки.
-const effortValue = computed(() => (isCompanion.value ? companionRun.value.effort : sess.value?.effort) || '');
-const companionRunHint = 'Модель и усилие компаньона задаются в «Настройки → Приложение →'
-  + ' Голосовой компаньон» — они общие для всех его разговоров и всех окон.';
+const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
 const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
 
@@ -729,8 +749,11 @@ function modelContextTitle(model, label) {
 const currentModelTitle = computed(() => (
   currentModel.value ? modelContextTitle(currentModel.value, currentModel.value.name) : 'Модель'
 ));
-const modelOptionTitle = (model) => modelContextTitle(model, model.id)
-  + (model.unknown ? ' · нет в каталоге установленного CLI' : '');
+// Подсказка пункта: окно модели и оговорки каталога. Недоступность исполнителя
+// названа здесь же и словами: она предупреждает о вероятном отказе, но выбор не отменяет.
+const modelOptionTitle = (model, provider) => modelContextTitle(model, model.id)
+  + (model.unknown ? ' · нет в каталоге установленного CLI' : '')
+  + (provider?.available === false ? ' · исполнитель недоступен по последней проверке' : '');
 const modelOptionLabel = (model) => model.name
   + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
   + (model.unknown ? ' ?' : '');
@@ -757,6 +780,58 @@ const ctxWindow = computed(() => sess.value?.contextWindow || currentModel.value
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
 const modelUnknown = computed(() => !!currentModel.value?.unknown);
+// Ключ хода — ЗАПРОШЕННАЯ модель: она из реестра и разворачивает алиасы. Факт из потока
+// CLI берём вторым: у Claude это полный версионный id, которого в каталоге может не быть.
+function runModelId(message) {
+  const id = message.model || message.actualModel || '';
+
+  return typeof id === 'string' ? id : '';
+}
+
+// Модель хода → исполнитель. Считаем разом по всей переписке: modelOf ходит по всему
+// реестру, а из шаблона он звался бы на каждый рендер каждого сообщения.
+const runProviders = computed(() => {
+  const map = new Map();
+
+  for (const message of sess.value?.messages || []) {
+    const id = message?.role === 'assistant' ? runModelId(message) : '';
+
+    if (!id || map.has(id)) continue;
+    map.set(id, prov.modelOf(id).provider || null);
+  }
+
+  return map;
+});
+
+/**
+ * Исполнитель конкретного ответа: знак и цвет шапки берутся из модели ЭТОГО хода, а не
+ * из селекта сессии — иначе смена ИИ задним числом переписывает всю прошлую переписку.
+ * Незнакомую реестру модель оставляем без знака: чужой фирменный знак хуже, чем никакого.
+ */
+function runProvider(message) {
+  if (message?.role !== 'assistant') return null;
+
+  return runProviders.value.get(runModelId(message)) || null;
+}
+
+// Фирменный цвет исполнителя одной переменной на всё сообщение: её берут и полоска
+// слева, и сам знак. Нет исполнителя — нет переменной, и оба остаются нейтральными.
+function runBrandStyle(message) {
+  const color = runProvider(message)?.color;
+
+  return color ? { '--prov': color } : null;
+}
+
+// Идущий ход ещё не сообщение, и своей модели у него нет: исполнителя берём из выбора
+// чата — работает сейчас именно он. Знак в шапке и полоска слева идут от одного
+// исполнителя: без этого живой ход получал цвет без знака, а знак — только вместе с ответом.
+const liveProvider = computed(() => current.value.provider || null);
+const liveBrandStyle = computed(() => {
+  const color = liveProvider.value?.color;
+
+  return color ? { '--prov': color } : null;
+});
+
 // Последний завершённый ход с моделью. Claude сообщает `actualModel` из потока,
 // Codex JSONL пока его не отдаёт — у него честно показываем «запрошено», иначе
 // поиск последнего непустого факта откатывался к старому Claude-ответу.
@@ -798,10 +873,7 @@ async function onModelChange(e) {
 
 // Реестр загружается асинхронно и может обновиться уже после открытия чата.
 // Когда он принёс достоверный список, старое неподдерживаемое значение не сохраняем.
-// Компаньона это не касается: его уровень принадлежит настройке, и снимать чужое
-// значение молча нельзя — устаревший выбор показывают сами «Настройки».
 watch(effortLevels, (levels) => {
-  if (isCompanion.value) return;
   if (sess.value?.effort && levels.length && !levels.includes(sess.value.effort)) {
     chat.setEffort(props.sid, '');
   }
@@ -852,8 +924,8 @@ const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext
 // он не меняет ни шкалу, ни цвет кольца.
 // Абсолютное число без потолка врало бы в другую сторону: у модели с окном 200k порог
 // 200k недостижим, кольцо осталось бы зелёным до самого конца разговора.
-// Сама арифметика — в `shared/chatContext.ts`: тот же порог показывает компактный
-// компаньон, и две копии этой шкалы разъехались бы на первой же правке.
+// Сама арифметика — в `shared/chatContext.ts`: тот же порог показывает карточка
+// Telegram-пульта, и две копии этой шкалы разъехались бы на первой же правке.
 const ctxFill = computed(() => contextFill({
   tokens: ctxTokens.value,
   window: ctxWindow.value,
@@ -1253,6 +1325,26 @@ async function submit() {
     chat.setDraft(props.sid, t);
   }
 }
+
+// Ход прерван перезапуском сервера: сессия исполнителя цела (транскрипт CLI живёт на
+// диске отдельно от кокпита), поэтому продолжение — обычное сообщение в ту же сессию.
+// Текст называет причину: агент должен сверить сделанное, а не переделывать с нуля.
+const RESUME_TEXT = 'Сервер кокпита перезапустился, и твой ход был прерван. '
+  + 'Продолжай с места остановки: сверь, что уже сделано, и доведи работу до конца.';
+
+/** Кнопку показываем только у последнего сообщения и только свободному чату. */
+function isResumeOffer(m, i) {
+  if (m?.interruptedBy !== 'server_shutdown') return false;
+  const messages = sess.value?.messages || [];
+  if (i !== messages.length - 1) return false;
+  return !sess.value?.sending && !sess.value?.compacting && !frozen.value;
+}
+
+async function resumeInterrupted() {
+  if (!sess.value || frozen.value) return;
+  atBottom.value = true;
+  await chat.send(props.sid, RESUME_TEXT, []);
+}
 function onKey(e) {
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
   // Навигация по выбираемым пунктам (cmdNav): заголовки и run:'none' пропускаются.
@@ -1422,8 +1514,8 @@ function onDrop(e) {
 
 // ── Диктовка: единый root-owned controller ──
 // Компонент владеет только политикой composer-а: устойчивые куски дописывает в
-// текущий draft, но terminal final сам не отправляет. Companion использует тот же
-// controller и отдельно решает, когда final превращается в быстрый chat-turn.
+// текущий draft, но terminal final сам не отправляет. TaskModal использует тот же
+// controller для карточки ответа на вопрос триажа.
 const inputErr = ref('');
 
 function appendDictationText(text) {
@@ -1702,6 +1794,7 @@ async function openDebug() {
    сообщений порядок обратный — иконка слева от пузыря. */
 .mrow { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
 .msg.user .mrow { flex-direction: row-reverse; }
+.m-resume { margin-top: 8px; }
 .msg .text { font-size: 14.5px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; min-width: 0; }
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
 .msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
@@ -1711,11 +1804,19 @@ async function openDebug() {
    не спорят с текстом, полная дата доступна по наведению. */
 .m-time { float: right; margin: .72em 0 0 9px; color: color-mix(in srgb, var(--ink-mid) 82%, transparent);
   font-size: 10px; font-weight: 400; line-height: 1; white-space: nowrap; user-select: none; }
-/* Агент — слева, с подписью и акцентной полоской, текст маркдауном */
-.msg.assistant { align-self: stretch; border-left: 2px solid color-mix(in srgb, #d97757 45%, transparent); padding-left: 13px; }
+/* Агент — слева, с подписью и акцентной полоской, текст маркдауном. Полоска и знак идут
+   в цвете исполнителя этого хода (`--prov` ставит runBrandStyle); пока исполнитель
+   неизвестен — переменной нет, и оба остаются нейтральными. */
+.msg.assistant { align-self: stretch; padding-left: 13px;
+  border-left: 2px solid color-mix(in srgb, var(--prov, var(--ink-mid)) 45%, transparent); }
 .ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
   letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
-.ahead svg { width: 12px; height: 12px; color: #d97757; }
+/* Знак берём чистым фирменным цветом, без подмешивания белого, как в списке чатов: там
+   он лежит на своей заливке, здесь — прямо на `--surface`. Замер контраста к #151b24
+   держит графический порог 3:1 у всех: claude 5.54, codex 5.41, kimi 3.24, ollama 9.43.
+   Селектор ловит и svg, и кружок-фоллбэк: оба — корень ProviderIcon, scope-атрибут на них есть. */
+.ahead svg, .ahead .fb { color: var(--prov, var(--ink-mid)); }
+.ahead svg { width: 12px; height: 12px; }
 /* Модель хода: факт из потока CLI либо честно помеченный запрос */
 .amodel { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .75;
   font-family: var(--mono, monospace); font-size: 10.5px; }

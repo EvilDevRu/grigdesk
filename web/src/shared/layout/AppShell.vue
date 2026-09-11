@@ -169,23 +169,24 @@
           class="sep"
           aria-hidden="true"
         >·</span>
-        <!-- Компаньон стоит в ряду исполнителей: на /chats плавающей фигурки нет,
-             а здесь он доступен всегда. Свой разделитель рисует сам. -->
-        <CompanionTopbarButton />
         <AttentionAlerts />
-        <!-- Наведения на ряд иконок для чтения лимитов больше нет: раскрытие всплывашки
-             перечитывает их само и тикает, пока она открыта (см. usageWatch). -->
+        <!-- Наведения на ряд иконок для чтения лимитов больше нет: свежий снимок сервер
+             присылает сам (SSE providers-usage), а раскрытие всплывашки перечитывает
+             его на случай оборванного потока и тикает, пока она открыта (см. usageWatch). -->
         <span v-if="runtimeProviders.length" class="provbox">
           <span
             v-for="p in runtimeProviders"
             :key="p.id"
             :class="['prov-tip', `prov-${p.id}`]"
           >
+            <!-- Ширина ЗАДАНА, а не ограничена сверху: содержимое всплывашки меняется
+                 на каждом тике («4ч 59м» → «4ч», проценты, новое ведро), и от maxWidth
+                 она дышала между min-width поверхности и потолком прямо под курсором. -->
             <UiPopover
               trigger-mode="both"
               focus-policy="none"
               placement="top"
-              :style="{ maxWidth: '320px' }"
+              :style="{ width: 'min(320px, calc(100vw - 20px))' }"
               @open="usageWatch.open(p.id)"
               @close="usageWatch.close(p.id)"
             >
@@ -242,6 +243,27 @@
                         <path d="M12 3v12 M7 10l5 5 5-5 M4 20h16" />
                       </svg>
                     </UiIconButton>
+                    <!-- Проверка «прямо сейчас»: фон ходит к вендору раз в пять минут, а
+                         человеку иногда нужна цифра этой минуты. Пока идёт пауза после
+                         отказа вендора, кнопка гаснет и называет время: клик всё равно
+                         вернул бы прошлый снимок, и молчащая кнопка честнее мёртвой. -->
+                    <UiIconButton
+                      data-context="topbar-popover-refresh"
+                      role="embedded"
+                      label="Проверить лимиты сейчас"
+                      :title="usagePauseOf(p)
+                        ? `Вендор попросил не проверять. Следующая проверка ${usagePauseOf(p)}.`
+                        : 'Проверить лимиты сейчас'"
+                      :disabled="!!usagePauseOf(p)"
+                      :loading="prov.usageRefreshing"
+                      loading-label="Проверяю"
+                      @click="prov.refreshUsage()"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1 M20.5 3.5v5.5H15" />
+                      </svg>
+                    </UiIconButton>
                     <UiIconButton
                       data-context="topbar-popover-settings"
                       role="embedded"
@@ -268,6 +290,9 @@
                      читали уже после того, как начинали гадать о причине сбоя. -->
                 <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
                   <span>{{ usageOf(p).message }}</span>
+                  <!-- Срок паузы — рядом с отказом: «временно ограничил» без «до когда»
+                       оставляло человека гадать, ждать минуту или час. -->
+                  <span v-if="usagePauseOf(p)">Следующая проверка {{ usagePauseOf(p) }}.</span>
                   <span v-if="statusHintOf(p)" class="pu-status">
                     {{ statusHintOf(p).text }}
                     <UiActionLink
@@ -304,7 +329,15 @@
                       <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
                     </span>
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
-                    <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
+                    <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
+                         одному «через 4д» нельзя. Полоса своей ширины не меняет, поэтому
+                         вторая половина уходит к правому краю, а не удлиняет строку. -->
+                    <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">
+                      <span>{{ b.note || resetIn(b.resetsAt) }}</span>
+                      <span v-if="!b.note && resetAt(b.resetsAt)" class="pu-reset-at">
+                        {{ resetAt(b.resetsAt) }}
+                      </span>
+                    </span>
                   </span>
                   <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
                        можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
@@ -477,10 +510,10 @@ import { useDockStore } from '../../stores/dock.js';
 import {
   providerStatusHint,
   providerUsageView,
+  resetAt,
   resetIn,
 } from '../../features/providers/providerUsage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
-import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
 import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
@@ -553,8 +586,18 @@ function toProviders() {
   router.push('/settings');
 }
 const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
-// Открытая всплывашка держит лимиты свежими: force обходит минутный троттл стора, а
-// серверный кэш остаётся — он и стережёт частоту походов в API вендора.
+// Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
+// принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
+// тот же, что у сброса полосы: «сегодня 03:45», и в прошлом он пуст — пауза снята.
+const usagePauseOf = (p) => {
+  const usage = prov.usage[p.id];
+
+  return usage?.state === 'rate_limited' ? resetAt(usage.retryAt) : '';
+};
+// Основной источник свежести — фоновый тик сервера (SSE providers-usage). Открытая
+// всплывашка перечитывает лимиты сама на случай оборванного потока: force обходит
+// минутный троттл стора, а серверный кэш остаётся — он и стережёт частоту походов
+// в API вендора, поэтому такое чтение к вендору не ходит.
 const usageWatch = createUsageWatch(() => prov.loadUsage(true));
 onUnmounted(() => usageWatch.stop());
 // Кнопка установки во всплывашке: только у отставшего CLI, который кокпит умеет ставить
@@ -838,10 +881,14 @@ onUnmounted(() => {
 
 async function loadHealth() { try { health.value = await api.get('/api/health'); } catch { health.value = null; } }
 loadHealth();
-const { connected } = useSse((name) => {
+const { connected } = useSse((name, data) => {
   if (name === 'state-change') { loadHealth(); notifyWatch.check(); }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
   if (name === 'providers-update') prov.load();
+  // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
+  if (name === 'providers-usage') {
+    prov.applyUsage(data?.usage);
+  }
   if (name === 'cockpit-update') cockpitUpdate.load({ quiet: true });
 });
 </script>
@@ -1014,7 +1061,16 @@ const { connected } = useSse((name) => {
 .pu-bar { height: 5px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .pu-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .pu-fill.hot { background: var(--bad); }
-.pu-reset { font-size: 10.5px; color: var(--ink-mid); }
+.pu-reset {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--ink-mid);
+}
+/* Календарная дата — тише отсчёта: читают её реже, а места в строке занимает больше. */
+.pu-reset-at { flex: none; color: var(--ink-low); font-variant-numeric: tabular-nums; }
 /* Граница ведра лимитов. Модификатор, а не правка .pu-row: тот же класс рисует
    полосы процессора и памяти в соседней всплывашке, где делить нечего. */
 .pu-row.pu-split { border-top: 1px solid var(--line); padding-top: 8px; }

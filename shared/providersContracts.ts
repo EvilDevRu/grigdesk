@@ -6,6 +6,25 @@
 
 import { contractDecoders } from './contractDecoders.ts';
 
+// Модель реестра в том объёме, в каком её читают соседние разделы при выборе.
+// `extra` — старая версия семейства: в кратком списке её не показывают.
+export interface ProviderModelEntry {
+  id: string;
+  name: string;
+  extra?: boolean;
+  efforts?: string[];
+}
+
+// Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —
+// подходит ли он настройке, которая требует, например, безопасного разбора текста.
+export interface ProviderEntry {
+  id: string;
+  name: string;
+  available?: boolean;
+  models?: ProviderModelEntry[];
+  capabilities?: Record<string, boolean>;
+}
+
 export class ProvidersContractError extends Error {
   constructor(path: string) {
     super(`Некорректный ответ реестра исполнителей: поле ${path}`);

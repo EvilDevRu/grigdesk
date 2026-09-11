@@ -12,6 +12,31 @@ async function compileStepList() {
   return compileVue(STEP_LIST_PATH);
 }
 
+// Общая подготовка DOM для смонтированных проверок ленты.
+async function mountStepList(steps) {
+  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
+  const browser = new Window({ url: 'http://cockpit.test/#/chats' });
+  for (const [key, value] of Object.entries({
+    window: browser,
+    document: browser.document,
+    navigator: browser.navigator,
+    Node: browser.Node,
+    Element: browser.Element,
+    HTMLElement: browser.HTMLElement,
+    SVGElement: browser.SVGElement,
+    Event: browser.Event,
+    CustomEvent: browser.CustomEvent,
+  })) {
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  }
+
+  const [{ mount }, StepList] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileStepList(),
+  ]);
+  return mount(StepList, { props: { live: true, steps } });
+}
+
 test('StepList раскрывает Bash-команду целиком, не ограничиваясь заголовком', async () => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://cockpit.test/#/chats' });
@@ -79,6 +104,36 @@ test('StepList не схлопывает пункты обновлённого �
 
   assert.match(component, /\.note\s*\{[^}]*white-space:\s*pre-line/s);
   assert.match(component, /\.note\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+});
+
+test('StepList обновляет строку вызова, а не заводит вторую', async () => {
+  // Исполнитель досылает подробности того же вызова (растущий патч) отдельным шагом
+  // с тем же id: две строки читались бы как два разных действия.
+  const wrapper = await mountStepList([
+    { k: 'tool', id: 'fc-1', name: 'Edit', title: 'a.py', files: ['a.py'] },
+    { k: 'tool', id: 'fc-1', name: 'Edit', title: '3 файлов', files: ['a.py', 'b.py', 'c.py'] },
+    { k: 'res', id: 'fc-1', ok: true, text: '' },
+  ]);
+
+  const rows = wrapper.findAll('.step.tool');
+  assert.equal(rows.length, 1);
+  assert.equal(wrapper.find('.ttl').text(), '3 файлов');
+  assert.equal(wrapper.find('.mark').text(), '✓');
+});
+
+test('StepList показывает итог, чей вызов вытеснен из ленты', async () => {
+  // Окно ленты выбрасывает начало длинного хода вместе со строкой инструмента.
+  // Осиротевший результат раньше рисовался пустой строкой без разметки.
+  const wrapper = await mountStepList([
+    { k: 'res', id: 'ушедший-вызов', ok: false, text: 'exit code 1', lines: 1 },
+  ]);
+
+  const row = wrapper.find('.step.res');
+  assert.equal(row.exists(), true);
+  assert.match(row.text(), /Итог/);
+  assert.equal(wrapper.find('.mark.bad').text(), '✕');
+  await wrapper.find('.head').trigger('click');
+  assert.equal(wrapper.find('.body.res').text(), 'exit code 1');
 });
 
 test('StepList не сдвигает служебную строку вдвое', async () => {

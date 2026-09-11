@@ -52,7 +52,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
       throw new ShowcaseError('target_unavailable', project.target.reason, 409);
     }
 
-    const scope = await targets.resolve(project.ref, project.target.scope.profile);
+    const scope = await targets.resolveSelected(project.ref, project.target.scope.profile);
 
     if (scope.status !== 'ready') {
       throw new ShowcaseError('target_unavailable', scope.reason, 409);
@@ -63,7 +63,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
     if (!screen) {
       throw new ShowcaseError(
         'unknown_screen',
-        `Профиль не объявлял экран «${screenId}».`,
+        `Экран «${screenId}» недоступен для этой цели.`,
         400,
       );
     }

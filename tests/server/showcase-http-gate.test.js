@@ -14,6 +14,16 @@ const Fastify = requireFromServer('fastify');
 const PROJECT_ID = '0123456789abcdef';
 
 const OVERVIEW = {
+  targets: [{
+    ref: { kind: 'project', id: 'demo-profile' },
+    profile: 'demo-profile',
+    label: 'demo-profile · постоянный стенд',
+    viewUrl: 'http://127.0.0.1:5173',
+    viewPort: null,
+    status: 'ready',
+    reason: '',
+    screenCount: 0,
+  }],
   profiles: [{ id: 'demo-profile', ready: true, reason: '' }],
   projects: [],
   jobs: [],
@@ -59,11 +69,24 @@ function serviceStub(overrides = {}) {
 
       return { id, state: 'cancelling' };
     },
-    targets: {
-      resolve: async (ref, profile) => {
-        calls.push(['resolve', ref, profile]);
+    setVoice: async (id, revision, choice) => {
+      calls.push(['set-voice', id, revision, choice]);
 
-        return { status: 'blocked', ref, reason: 'нет стенда', nextAction: null };
+      return { id, revision: revision + 1 };
+    },
+    previewVoice: async (voiceRef) => {
+      calls.push(['preview', voiceRef]);
+
+      throw Object.assign(new Error('движок не установлен'), {
+        code: 'voice_unavailable',
+        status: 503,
+      });
+    },
+    targets: {
+      resolveSelected: async (ref) => {
+        calls.push(['resolve', ref]);
+
+        return { status: 'blocked', ref, profile: null, reason: 'нет стенда', nextAction: null };
       },
     },
     jobs: {
@@ -111,7 +134,7 @@ const REQUESTS = [
   ['GET', '/api/showcase', undefined],
   ['GET', `/api/showcase/${PROJECT_ID}`, undefined],
   ['GET', '/api/showcase/doctor', undefined],
-  ['POST', '/api/showcase', { kind: 'project', id: 'demo-profile', profile: 'demo-profile' }],
+  ['POST', '/api/showcase', { kind: 'project', id: 'demo-profile' }],
   ['PUT', `/api/showcase/${PROJECT_ID}`, { expectedRevision: 1, title: 'Ролик' }],
   ['DELETE', `/api/showcase/${PROJECT_ID}`, undefined],
   ['POST', '/api/showcase/jobs/0123456789abcdef/cancel', {}],
@@ -155,13 +178,12 @@ test('обзор отдаёт профили, ролики, задания и п
   assert.deepEqual(response.json(), OVERVIEW);
 });
 
-test('цель без профиля и с чужой формой отклоняется до обращения к файлам', async (t) => {
+test('цель выбирается без профиля, а чужая форма отклоняется до файлов', async (t) => {
   const { app, service } = await fixture(t);
   const bad = [
-    ['/api/showcase/target?kind=project&id=demo-profile', 'bad_profile'],
-    ['/api/showcase/target?kind=неизвестно&id=1&profile=demo-profile', 'bad_target'],
-    ['/api/showcase/target?kind=sandbox&id=../../etc&profile=demo-profile', 'bad_target'],
-    ['/api/showcase/target?kind=sandbox&id=0&profile=demo-profile', 'bad_target'],
+    ['/api/showcase/target?kind=неизвестно&id=1', 'bad_target'],
+    ['/api/showcase/target?kind=sandbox&id=../../etc', 'bad_target'],
+    ['/api/showcase/target?kind=sandbox&id=0', 'bad_target'],
   ];
 
   for (const [url, error] of bad) {
@@ -174,12 +196,23 @@ test('цель без профиля и с чужой формой отклон�
   assert.deepEqual(service.calls, []);
 });
 
-test('создание ролика требует и цель, и профиль', async (t) => {
+test('резолвер сам определяет профиль выбранной цели', async (t) => {
+  const { app, service } = await fixture(t);
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/showcase/target?kind=project&id=demo-profile',
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(service.calls, [['resolve', { kind: 'project', id: 'demo-profile' }]]);
+});
+
+test('создание принимает выбранную цель без клиентского профиля', async (t) => {
   const { app, service } = await fixture(t);
   const bad = [
-    [{ kind: 'project', id: 'demo-profile' }, 'bad_profile'],
-    [{ kind: 'sandbox', id: 'не-число', profile: 'demo-profile' }, 'bad_target'],
-    [{ profile: 'demo-profile' }, 'bad_target'],
+    [{ kind: 'sandbox', id: 'не-число' }, 'bad_target'],
+    [{ kind: 'task', id: '990001' }, 'bad_target'],
+    [{ title: 'Без цели' }, 'bad_target'],
   ];
 
   for (const [payload, error] of bad) {
@@ -194,13 +227,17 @@ test('создание ролика требует и цель, и профил�
   const ok = await app.inject({
     method: 'POST',
     url: '/api/showcase',
-    payload: { kind: 'sandbox', id: '990001', profile: 'demo-profile', title: 'Ролик' },
+    payload: {
+      kind: 'sandbox',
+      id: '990001',
+      profile: 'подменённый-профиль',
+      title: 'Ролик',
+    },
   });
 
   assert.equal(ok.statusCode, 201);
   assert.deepEqual(service.calls[0], ['create', {
     ref: { kind: 'sandbox', id: '990001' },
-    profile: 'demo-profile',
     title: 'Ролик',
   }]);
 });
@@ -304,4 +341,57 @@ test('состояние задания отдаётся сводкой без �
   assert.ok(!body.includes('showcaseWorker'), 'командная строка исполнителя наружу не уходит');
   assert.ok(!body.includes('4242'), 'номер процесса наружу не уходит');
   assert.match(body, /пишем сцену/);
+});
+
+test('выбор голоса проверяет редакцию, темп и ссылку до обращения к службе', async (t) => {
+  const { app, service } = await fixture(t);
+  const url = `/api/showcase/${PROJECT_ID}/voice`;
+
+  const noRevision = await app.inject({ method: 'PUT', url, payload: { voiceRef: 'piper:irina' } });
+
+  assert.equal(noRevision.json().error, 'bad_revision');
+
+  const badPace = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 1, voiceRef: 'piper:irina', pace: 'быстро' },
+  });
+
+  assert.equal(badPace.json().error, 'bad_pace');
+
+  const badRef = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 1, voiceRef: 42 },
+  });
+
+  assert.equal(badRef.json().error, 'bad_voice_ref');
+  assert.deepEqual(service.calls, [], 'служба не трогается, пока форма запроса неверна');
+
+  const accepted = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 1, voiceRef: 'silero:xenia', pace: 'slow' },
+  });
+
+  assert.equal(accepted.statusCode, 200);
+  assert.deepEqual(service.calls, [
+    ['set-voice', PROJECT_ID, 1, { voiceRef: 'silero:xenia', pace: 'slow' }],
+  ]);
+});
+
+test('образец голоса требует ссылку и отдаёт отказ движка своим кодом', async (t) => {
+  const { app } = await fixture(t);
+  const empty = await app.inject({ method: 'GET', url: '/api/showcase/voices/preview' });
+
+  assert.equal(empty.statusCode, 400);
+  assert.equal(empty.json().error, 'bad_voice_ref');
+
+  const blocked = await app.inject({
+    method: 'GET',
+    url: '/api/showcase/voices/preview?voiceRef=silero:xenia',
+  });
+
+  assert.equal(blocked.statusCode, 503);
+  assert.equal(blocked.json().error, 'voice_unavailable');
 });

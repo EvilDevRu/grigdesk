@@ -2,6 +2,7 @@
 // Питает блок плагинов в сайдбаре (под разделителем) и вкладку «Настройки → Плагины».
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
+import { normalizePluginCategory } from '../../../shared/pluginsContracts.ts';
 
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
 
@@ -16,6 +17,32 @@ const LEGACY_SYSTEM_NAV = {
   telegram: { group: 'tools', order: 20 },
   github: { group: 'tools', order: 30 },
 };
+
+// Тот же случай, что и с nav: свежий бандл встречает ещё не перезапущенный сервер,
+// который отдаёт манифесты без category. Без запасной карты все встроенные модули
+// уехали бы в «Прочее», и раздел выглядел бы сломанным до рестарта.
+const LEGACY_SYSTEM_CATEGORY = {
+  video: 'work',
+  code: 'dev',
+  analysis: 'work',
+  shelf: 'work',
+  inbox: 'work',
+  telegram: 'work',
+  github: 'work',
+  knowledge: 'knowledge',
+  ssh: 'dev',
+  db: 'dev',
+  docker: 'dev',
+  showcase: 'knowledge',
+};
+
+/** Категория плагина для раздела настроек: заявленная манифестом или запасная. */
+export function pluginCategoryOf(plugin) {
+  const declared = plugin?.category
+    || (plugin?.system ? LEGACY_SYSTEM_CATEGORY[plugin.id] : '');
+
+  return normalizePluginCategory(declared);
+}
 
 export function normalizeNavItem(plugin) {
   if (!plugin?.nav?.path) return null;
@@ -87,6 +114,17 @@ export const usePluginsStore = defineStore('plugins', {
       if (!p) return;
       const r = await api.put(`/api/plugins/${id}/settings`, { values });
       p.values = r.values;
+    },
+    // Готовность плагина: ручку объявляет манифест, форму ответа — общий контракт.
+    // Установка запускается по пункту и только по нажатию человека.
+    async loadSetup(plugin) {
+      return api.get(plugin.setup.path);
+    },
+    async runSetup(plugin, itemId) {
+      return api.post(`${plugin.setup.path}/${encodeURIComponent(itemId)}`, {});
+    },
+    async cancelSetup(plugin, itemId) {
+      return api.post(`${plugin.setup.path}/${encodeURIComponent(itemId)}/cancel`, {});
     },
   },
 });

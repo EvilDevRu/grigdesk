@@ -48,7 +48,6 @@ interface CreateRoute {
   Body: {
     kind?: unknown;
     id?: unknown;
-    profile?: unknown;
     title?: unknown;
   };
 }
@@ -60,11 +59,31 @@ interface RenameRoute extends ProjectRoute {
   };
 }
 
+interface SetupRoute {
+  Params: { id: string };
+}
+
 interface VoiceInstallRoute {
   Body: {
     voiceId?: unknown;
   };
 }
+
+interface VoicePreviewRoute {
+  Querystring: {
+    voiceRef?: unknown;
+  };
+}
+
+interface VoiceChoiceRoute extends ProjectRoute {
+  Body: {
+    expectedRevision?: unknown;
+    voiceRef?: unknown;
+    pace?: unknown;
+  };
+}
+
+const PACES = new Set(['slow', 'normal', 'fast']);
 
 interface SceneRoute extends ProjectRoute {
   Params: {
@@ -85,7 +104,6 @@ interface TargetQuery {
   Querystring: {
     kind?: unknown;
     id?: unknown;
-    profile?: unknown;
   };
 }
 
@@ -128,6 +146,13 @@ function readTargetRef(kind: unknown, id: unknown): ShowcaseTargetRef | null {
   }
 
   return /^[1-9][0-9]{0,18}$/.test(targetId) ? { kind: targetKind, id: targetId } : null;
+}
+
+/** Новая форма создаёт ролик только из опубликованной цели, а не абстрактной задачи. */
+function readCreateTargetRef(kind: unknown, id: unknown): ShowcaseTargetRef | null {
+  const ref = readTargetRef(kind, id);
+
+  return ref?.kind === 'task' ? null : ref;
 }
 
 const ACTION_KINDS = new Set(['goto', 'click', 'hover', 'highlight', 'waitVisible', 'scroll', 'wait']);
@@ -228,18 +253,13 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
   fastify.get<TargetQuery>('/api/showcase/target', async (request, reply) => {
     const ref = readTargetRef(request.query.kind, request.query.id);
-    const profile = String(request.query.profile ?? '');
 
     if (!ref) {
       return reply.code(400).send({ error: 'bad_target' });
     }
 
-    if (!PROFILE_RE.test(profile)) {
-      return reply.code(400).send({ error: 'bad_profile' });
-    }
-
     try {
-      return await service.targets.resolve(ref, profile);
+      return await service.targets.resolveSelected(ref);
     } catch (error) {
       return sendError(reply, error);
     }
@@ -247,34 +267,24 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
   fastify.get<TargetQuery>('/api/showcase/doctor', async (request, reply) => {
     const ref = readTargetRef(request.query.kind, request.query.id);
-    const profile = String(request.query.profile ?? '');
 
     try {
-      return await service.doctor(
-        ref ?? undefined,
-        PROFILE_RE.test(profile) ? profile : undefined,
-      );
+      return await service.doctor(ref ?? undefined);
     } catch (error) {
       return sendError(reply, error);
     }
   });
 
   fastify.post<CreateRoute>('/api/showcase', async (request, reply) => {
-    const ref = readTargetRef(request.body?.kind, request.body?.id);
-    const profile = String(request.body?.profile ?? '');
+    const ref = readCreateTargetRef(request.body?.kind, request.body?.id);
 
     if (!ref) {
       return reply.code(400).send({ error: 'bad_target' });
     }
 
-    if (!PROFILE_RE.test(profile)) {
-      return reply.code(400).send({ error: 'bad_profile' });
-    }
-
     try {
       const project = await service.createProject({
         ref,
-        profile,
         title: typeof request.body?.title === 'string' ? request.body.title : undefined,
       });
 
@@ -490,6 +500,17 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     }
   });
 
+  // Разбор мастера: текст связанной задачи сервер берёт сам по номеру стенда, а
+  // человек на этом шаге ничего не заполняет. Ручные бриф и сценарий остаются
+  // рядом — они нужны, когда план правят точечно.
+  fastify.post<ProjectRoute>('/api/showcase/:id/analyze', async (request, reply) => {
+    try {
+      return await service.analyze(request.params.id);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
   fastify.post<SceneRoute>('/api/showcase/:id/script', async (request, reply) => {
 
     try {
@@ -627,10 +648,88 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     }
   });
 
+  // Готовность для настроек плагина: что нужно разделу и что он ставит сам.
+  // Установка идёт только по нажатию человека — раздел не начинает её сам.
+  fastify.get('/api/showcase/setup', async (request, reply) => {
+    try {
+      return await service.setupStatus();
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.post<SetupRoute>('/api/showcase/setup/:id', async (request, reply) => {
+    try {
+      return reply.code(202).send(await service.runSetup(String(request.params.id)));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.post<SetupRoute>('/api/showcase/setup/:id/cancel', async (request, reply) => {
+    try {
+      return await service.cancelSetup(String(request.params.id));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  // Образец голоса: короткая фраза, синтезированная один раз и отданная файлом.
+  // Человек выбирает голос ушами, и без образца список имён ни о чём не говорит.
+  fastify.get<VoicePreviewRoute>('/api/showcase/voices/preview', async (request, reply) => {
+    const voiceRef = typeof request.query.voiceRef === 'string' ? request.query.voiceRef : '';
+
+    if (!voiceRef) {
+      return reply.code(400).send({ error: 'bad_voice_ref' });
+    }
+
+    try {
+      const file = await service.previewVoice(voiceRef);
+      const info = await stat(file);
+
+      return reply
+        .header('content-type', 'audio/wav')
+        .header('content-length', String(info.size))
+        .header('cache-control', 'no-store')
+        .send(createReadStream(file));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
   fastify.post<ProjectRoute>('/api/showcase/:id/voice', async (request, reply) => {
 
     try {
       return reply.code(202).send(await service.synthesizeScenes(request.params.id));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  // Выбор голоса и темпа для ролика целиком. Уходит со своей редакцией, как и
+  // любая правка: чужая правка сцен в этот момент не должна затираться.
+  fastify.put<VoiceChoiceRoute>('/api/showcase/:id/voice', async (request, reply) => {
+    const expectedRevision = Number(request.body?.expectedRevision);
+    const voiceRef = request.body?.voiceRef ?? null;
+    const pace = request.body?.pace ?? null;
+
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      return reply.code(400).send({ error: 'bad_revision' });
+    }
+
+    if (voiceRef !== null && (typeof voiceRef !== 'string' || !voiceRef)) {
+      return reply.code(400).send({ error: 'bad_voice_ref' });
+    }
+
+    if (pace !== null && (typeof pace !== 'string' || !PACES.has(pace))) {
+      return reply.code(400).send({ error: 'bad_pace' });
+    }
+
+    try {
+      return await service.setVoice(request.params.id, expectedRevision, {
+        voiceRef: voiceRef as string | null,
+        pace: pace as 'slow' | 'normal' | 'fast' | null,
+      });
     } catch (error) {
       return sendError(reply, error);
     }

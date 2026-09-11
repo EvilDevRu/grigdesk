@@ -2,6 +2,21 @@
 // фиксирует поиск, сочетание фильтров и сохранение B24-порядка.
 const SIZE_ORDER = { S: 1, M: 2, L: 3, XL: 4 };
 
+function normalizeSearch(value) {
+  return String(value ?? '').toLocaleLowerCase('ru-RU').replaceAll('ё', 'е').replaceAll('#', '');
+}
+
+/**
+ * Слова запроса могут относиться к разным полям задачи. Номер со знаком # и «е/ё»
+ * находятся одинаково; тот же поиск используется в списках контроля и поручений.
+ */
+export function matchesBoardTask(task, query) {
+  const terms = normalizeSearch(query).trim().split(/\s+/).filter(Boolean);
+  const text = normalizeSearch([task.id, task.title, task.group, task.responsible].join(' '));
+
+  return terms.every((term) => text.includes(term));
+}
+
 function triageRow(analysisByTask, task) {
   return analysisByTask?.[task.id] || analysisByTask?.[String(task.id)] || null;
 }
@@ -29,11 +44,8 @@ export function selectBoardTasks({
   seenTaskIds = [],
 } = {}) {
   let list = Array.isArray(tasks) ? tasks : [];
-  const search = String(query).trim().toLowerCase();
-  if (search) {
-    list = list.filter((task) => String(task.id).includes(search)
-      || String(task.title || '').toLowerCase().includes(search)
-      || String(task.group || '').toLowerCase().includes(search));
+  if (String(query).trim()) {
+    list = list.filter((task) => matchesBoardTask(task, query));
   }
 
   if (favoriteOnly) {

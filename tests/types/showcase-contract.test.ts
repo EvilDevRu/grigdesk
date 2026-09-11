@@ -44,12 +44,15 @@ function checkContracts(
   store.applyJob(input);
   // @ts-expect-error Ролик заводится под конкретную цель: без неё показывать нечего.
   createShowcaseProject(store, { profile: 'demo-profile' });
+  // @ts-expect-error Новая форма не заводит ролик из абстрактной legacy-задачи.
+  createShowcaseProject(store, { ref: { kind: 'task', id: '123' } });
   // @ts-expect-error Удаление адресуется идентификатором ролика, а не самим роликом.
   deleteShowcaseProject(store, project);
   // @ts-expect-error Отмена работает по заданию, а не по ролику.
   cancelShowcaseJob(store, { id: 'job' });
-  // @ts-expect-error Цель resolve требует и ссылку, и профиль.
   showcaseApi.target({ kind: 'project', id: 'demo-profile' });
+  // @ts-expect-error Цель resolve требует ссылку на вариант из серверного списка.
+  showcaseApi.target();
   // @ts-expect-error Список роликов бывает пустым.
   overview.projects[0].title.toUpperCase();
 

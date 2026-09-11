@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import { installVoiceFiles, sha256Of } from '../../server/src/lib/showcase/voice/download.ts';
 import { createVoiceInstaller } from '../../server/src/lib/showcase/voice/install.ts';
 import { PIPER_VOICES } from '../../server/src/lib/showcase/voice/piperCatalog.ts';
+import { SILERO_VOICES } from '../../server/src/lib/showcase/voice/sileroCatalog.ts';
 
 const run = promisify(execFile);
 
@@ -300,4 +301,61 @@ test('неизвестный голос отвергается до запуск
     () => installer.start('чужой-голос'),
     (error) => error.code === 'unknown_voice' && error.status === 400,
   );
+});
+
+// Исполнитель, который только показывает, ЧТО ему передали: окружение, состав и
+// каталог голосов — по ним видно, что второй движок не ставится в venv первого.
+const REPORTING_WORKER = `
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const task = JSON.parse(await readFile(process.argv[2], 'utf8'));
+
+await writeFile(path.join(path.dirname(task.venvDir), 'seen-task.json'), JSON.stringify(task), 'utf8');
+await writeFile(
+  path.join(task.workDir, 'result.json'),
+  JSON.stringify({ attemptId: task.attemptId, state: 'succeeded' }),
+  'utf8',
+);
+`;
+
+test('каталог по умолчанию называет движок и голоса каждого пакета', async (t) => {
+  const root = await workspace(t);
+  const installer = createVoiceInstaller({
+    voiceDir: path.join(root, 'voice'),
+    broadcast: () => {},
+  });
+  const status = await installer.status();
+  const silero = status.available.find((item) => item.engineId === 'silero');
+  const piper = status.available.find((item) => item.engineId === 'piper');
+
+  assert.ok(silero, 'Silero ставится кнопкой наравне с Piper');
+  assert.ok(silero.voices.length >= 5, 'дикторы модели названы до нажатия');
+  assert.ok(silero.byteSize > SILERO_VOICES[0].fileBytes, 'в размер входит и движок, не только модель');
+  assert.deepEqual(piper.voices, ['Ирина']);
+  assert.equal(silero.installed, false);
+});
+
+test('установка Silero идёт в своё окружение со своим составом', async (t) => {
+  const root = await workspace(t);
+  const installer = installerAt(
+    root,
+    await fakeWorker(root, REPORTING_WORKER),
+    [],
+    [...SILERO_VOICES, ...PIPER_VOICES],
+  );
+
+  await installer.start(SILERO_VOICES[0].id);
+  await settle(installer);
+
+  const seen = JSON.parse(await readFile(path.join(root, 'voice', 'seen-task.json'), 'utf8'));
+
+  assert.equal(seen.voice.engineId, 'silero');
+  assert.match(seen.venvDir, /silero-venv$/);
+  assert.match(seen.voicesDir, /voice\/silero$/);
+  assert.match(seen.requirementsFile, /requirements-showcase-silero\.txt$/);
+
+  const status = await installer.status();
+
+  assert.equal(status.job.engineId, 'silero');
 });

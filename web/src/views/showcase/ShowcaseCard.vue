@@ -1,11 +1,21 @@
 <template>
   <article class="showcase-card" :data-state="project.state">
     <header class="showcase-card__head">
-      <div class="showcase-card__title">
-        <h3>{{ project.title }}</h3>
-        <span class="showcase-card__target">{{ targetText }}</span>
+      <div class="showcase-card__identity">
+        <span class="showcase-card__mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="m10 9 5 3-5 3z" />
+          </svg>
+        </span>
+        <div class="showcase-card__title">
+          <h3>{{ project.title }}</h3>
+          <span class="showcase-card__target">{{ targetText }}</span>
+        </div>
       </div>
-      <span class="showcase-card__state">{{ STATE_TEXT[project.state] }}</span>
+      <span class="showcase-card__state" :data-state="project.state">
+        <i aria-hidden="true"></i>{{ STATE_TEXT[project.state] }}
+      </span>
     </header>
 
     <dl class="showcase-card__facts">
@@ -43,7 +53,9 @@
     </ul>
 
     <footer class="showcase-card__actions">
-      <UiButton variant="ghost" @click="emit('open', project.id)">Открыть</UiButton>
+      <UiButton variant="outline" tone="accent" @click="emit('open', project.id)">
+        Открыть
+      </UiButton>
       <UiButton variant="ghost" tone="danger" :loading="busy" @click="emit('remove', project.id)">
         Удалить
       </UiButton>
@@ -117,16 +129,28 @@ function isRunning(state: ShowcaseJob['state']): boolean {
 <style scoped>
 .showcase-card {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--border, #2a2f3a);
-  border-radius: 10px;
-  background: var(--panel, #171a21);
+  gap: 14px;
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
+    var(--surface) 100%
+  );
+  box-shadow: inset 0 1px 0 #ffffff08;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.showcase-card:hover {
+  border-color: var(--line-2);
+  transform: translateY(-1px);
 }
 
 .showcase-card[data-state='blocked'] {
-  border-color: var(--warning, #b4823a);
+  border-color: color-mix(in srgb, var(--warn) 48%, var(--line));
 }
 
 .showcase-card__head {
@@ -136,42 +160,122 @@ function isRunning(state: ShowcaseJob['state']): boolean {
   gap: 12px;
 }
 
+.showcase-card__identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+}
+
+.showcase-card__mark {
+  display: grid;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--ground));
+  color: var(--accent);
+}
+
+.showcase-card__mark svg {
+  width: 18px;
+  height: 18px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .showcase-card__title {
   min-width: 0;
 }
 
 .showcase-card__title h3 {
-  margin: 0;
-  font-size: 16px;
+  margin: 1px 0 3px;
+  font-size: 15px;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
 .showcase-card__target {
-  color: var(--muted, #9aa4b2);
-  font-size: 13px;
+  display: block;
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .showcase-card__state {
+  display: inline-flex;
   flex: none;
-  font-size: 12px;
-  color: var(--muted, #9aa4b2);
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ground);
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.showcase-card__state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.showcase-card__state[data-state='ready'],
+.showcase-card__state[data-state='done'] {
+  border-color: color-mix(in srgb, var(--good) 34%, var(--line));
+  color: var(--good);
+}
+
+.showcase-card__state[data-state='building'] {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+  color: var(--accent);
+}
+
+.showcase-card__state[data-state='blocked'] {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
+  color: var(--warn);
 }
 
 .showcase-card__facts {
-  display: flex;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
   margin: 0;
-  flex-wrap: wrap;
+  padding: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ground) 54%, transparent);
+}
+
+.showcase-card__facts > div {
+  min-width: 0;
+  padding-inline: 11px;
+}
+
+.showcase-card__facts > div + div {
+  border-left: 1px solid var(--line);
 }
 
 .showcase-card__facts dt {
-  font-size: 12px;
-  color: var(--muted, #9aa4b2);
+  color: var(--ink-mid);
+  font-size: 10.5px;
 }
 
 .showcase-card__facts dd {
   margin: 2px 0 0;
-  font-size: 14px;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .showcase-card__jobs {
@@ -195,7 +299,7 @@ function isRunning(state: ShowcaseJob['state']): boolean {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--muted, #9aa4b2);
+  background: var(--ink-mid);
   flex: none;
 }
 
@@ -206,16 +310,16 @@ function isRunning(state: ShowcaseJob['state']): boolean {
 
 .showcase-card__job-dot[data-state='failed'],
 .showcase-card__job-dot[data-state='interrupted'] {
-  background: var(--danger, #d05353);
+  background: var(--bad);
 }
 
 .showcase-card__job-dot[data-state='succeeded'] {
-  background: var(--ok, #4c9a5a);
+  background: var(--good);
 }
 
 .showcase-card__job-state,
 .showcase-card__job-label {
-  color: var(--muted, #9aa4b2);
+  color: var(--ink-mid);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -223,6 +327,41 @@ function isRunning(state: ShowcaseJob['state']): boolean {
 
 .showcase-card__actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .showcase-card {
+    transition: none;
+  }
+
+  .showcase-card:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 440px) {
+  .showcase-card__head {
+    flex-direction: column;
+  }
+
+  .showcase-card__facts {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
+  }
+
+  .showcase-card__facts > div {
+    padding: 9px 11px;
+  }
+
+  .showcase-card__facts > div + div {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
 }
 </style>

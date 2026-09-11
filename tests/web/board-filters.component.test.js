@@ -155,3 +155,78 @@ test('выключенный триаж убирает массовый запу
     placeholder: true,
   });
 });
+
+test('контроль и поручения переключаются с независимым поиском и сохраняют общие счётчики', async (t) => {
+  const { wrapper, flushPromises, calls } = await mountBoardView(t, {
+    prefix: 'board-related-search',
+    tasks: [{ id: 11, title: 'Моя задача', group: 'Кабинет' }],
+    toReview: [
+      { id: 31, title: 'Проверить отчёт', group: 'Кабинет', responsible: 'Анна' },
+      { id: 32, title: 'Проверить форму', group: 'Кабинет', responsible: 'Семён' },
+    ],
+    created: [{ id: 41, title: 'Подготовить отчёт', group: 'Кабинет', responsible: 'Семён' }],
+  });
+
+  assert.equal(wrapper.get('#board-review-tab').attributes('aria-selected'), 'true');
+  assert.equal(wrapper.findAll('.related-row').length, 2);
+  await wrapper.get('[aria-label="Поиск по связанным задачам"]').setValue('отчет');
+  await flushPromises();
+  assert.equal(wrapper.findAll('.related-row').length, 1);
+  assert.equal(wrapper.findAll('li.trow').length, 1, 'поиск контроля не фильтрует мои задачи');
+  assert.equal(wrapper.get('#board-review-tab .cnt').text(), '2');
+
+  await wrapper.get('#board-created-tab').trigger('click');
+  await flushPromises();
+  assert.match(wrapper.get('.related-row').text(), /Подготовить отчёт/);
+  await wrapper.get('.related-row .ttext').trigger('click');
+  assert.deepEqual(calls.opened, ['41']);
+
+  await wrapper.get('[aria-label="Поиск по связанным задачам"]').setValue('#999');
+  await flushPromises();
+  assert.equal(wrapper.findAll('.related-row').length, 0);
+  assert.match(wrapper.get('.related-list .empty').text(), /Ничего не найдено/);
+});
+
+test('без задач контроля сразу открываются поручения', async (t) => {
+  const { wrapper } = await mountBoardView(t, {
+    prefix: 'board-related-default',
+    created: [{ id: 41, title: 'Подготовить отчёт' }],
+  });
+
+  assert.equal(wrapper.get('#board-created-tab').attributes('aria-selected'), 'true');
+  assert.match(wrapper.get('.related-row').text(), /Подготовить отчёт/);
+});
+
+test('первый появившийся список открывается, дальнейшее обновление сохраняет выбор вкладки', async (t) => {
+  const { wrapper, stores, flushPromises } = await mountBoardView(t, { prefix: 'board-related-live' });
+
+  assert.equal(wrapper.findAll('.secondary').length, 0);
+  stores.board().data.toReview.push({ id: 31, title: 'Проверить отчёт' });
+  await flushPromises();
+  assert.equal(wrapper.get('#board-review-tab').attributes('aria-selected'), 'true');
+  await wrapper.get('#board-created-tab').trigger('click');
+  stores.board().data.toReview.push({ id: 32, title: 'Проверить форму' });
+  await flushPromises();
+  assert.equal(wrapper.get('#board-created-tab').attributes('aria-selected'), 'true');
+  assert.match(wrapper.get('.related-list').text(), /пока нет задач/);
+});
+
+test('список можно продолжить кнопкой, а сброс одного поиска возвращает начало и фокус', async (t) => {
+  const { wrapper, flushPromises, browser } = await mountBoardView(t, {
+    prefix: 'board-list-navigation',
+    tasks: Array.from({ length: 85 }, (_, index) => ({ id: index + 1, title: `Задача ${index + 1}` })),
+  });
+
+  assert.equal(wrapper.findAll('li.trow').length, 40);
+  await wrapper.get('[data-role="board-load-more"]').trigger('click');
+  assert.equal(wrapper.findAll('li.trow').length, 80);
+  wrapper.get('.scroller').element.scrollTop = 300;
+  await wrapper.get('.search input').setValue('#85');
+  await flushPromises();
+  assert.equal(wrapper.findAll('li.trow').length, 1);
+  assert.equal(wrapper.get('.scroller').element.scrollTop, 0);
+  await wrapper.get('.filter-reset').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.findAll('li.trow').length, 40);
+  assert.ok(browser.document.activeElement === wrapper.get('.search input').element);
+});

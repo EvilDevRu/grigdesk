@@ -38,6 +38,48 @@ const JOB = {
   finishedAt: null,
 };
 
+test('обзор принимает готовую цель без карты экранов', () => {
+  const target = {
+    ref: { kind: 'project', id: 'parser' },
+    profile: 'parser',
+    profileBinding: null,
+    label: 'parser · постоянный стенд',
+    viewUrl: 'http://127.0.0.1:13000',
+    viewPort: null,
+    status: 'ready',
+    reason: '',
+    screenCount: 0,
+  };
+  const overview = {
+    targets: [target],
+    profiles: [],
+    projects: [],
+    jobs: [],
+    limits: {
+      maxScenes: 20,
+      maxSceneSeconds: 120,
+      maxTotalSeconds: 600,
+      retentionDays: 30,
+    },
+  };
+
+  assert.deepEqual(contract.parseShowcaseOverview(overview).targets, [target]);
+  assert.throws(
+    () => contract.parseShowcaseOverview({
+      ...overview,
+      targets: [{ ...target, status: 'почти готово' }],
+    }),
+    contract.ShowcaseContractError,
+  );
+  assert.throws(
+    () => contract.parseShowcaseOverview({
+      ...overview,
+      targets: [{ ...target, screenCount: -1 }],
+    }),
+    contract.ShowcaseContractError,
+  );
+});
+
 test('готовая цель и заблокированная разбираются как разные ветки', () => {
   const ready = {
     status: 'ready',
@@ -47,6 +89,7 @@ test('готовая цель и заблокированная разбираю
   const blocked = {
     status: 'blocked',
     ref: { kind: 'task', id: '990002' },
+    profile: null,
     reason: 'Стенд не найден в реестре.',
     nextAction: {
       kind: 'open-sandboxes',
@@ -172,11 +215,13 @@ test('каталог голосов приносит и состояние ус�
       available: [
         {
           id: 'irina',
+          engineId: 'piper',
           name: 'Ирина',
           language: 'ru',
           timbre: 'женский',
           byteSize: 58_340_190,
           license: 'GPLv2',
+          voices: ['Ирина'],
           installed: false,
         },
       ],

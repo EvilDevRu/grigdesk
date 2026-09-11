@@ -24,6 +24,23 @@ import { defaultWorkToolDescriptors } from './work-tools/index.ts';
 // Служебная модель внутренних вызовов CLI: её usage к контексту разговора не относится.
 export const SYNTHETIC_MODEL = '<synthetic>';
 
+/**
+ * Текст assistant-сообщения потока: блоки content склеиваются, всё нетекстовое
+ * (tool_use, thinking) отбрасывается.
+ */
+function claudeMessageText(message: { content?: unknown } | undefined): string {
+  const blocks = Array.isArray(message?.content) ? message.content : [];
+  return blocks
+    .map((block) => {
+      if (!block || typeof block !== 'object') return '';
+      const item = block as { type?: unknown; text?: unknown };
+      return item.type === 'text' && typeof item.text === 'string' ? item.text : '';
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
 // Событие stream-json CLI. Форма зависит от типа, поэтому объявлено ровно читаемое.
 interface ClaudeEvent {
   type?: string;
@@ -31,7 +48,7 @@ interface ClaudeEvent {
   session_id?: string;
   model?: string;
   compactMetadata?: unknown;
-  message?: { model?: string; usage?: Record<string, unknown> };
+  message?: { model?: string; usage?: Record<string, unknown>; content?: unknown };
   usage?: Record<string, unknown>;
   result?: string;
   num_turns?: number;
@@ -49,6 +66,10 @@ interface TurnState {
   lastContextCache: ContextCache | null;
   actualModel: string;
   streamSessionId: string;
+  // Текст последнего сообщения, которое CLI сочинил САМ (модель <synthetic>): сбой
+  // доставки, обрыв соединения, «No response requested.». Сбрасывается, как только
+  // заговорила настоящая модель, — тогда ход сбой пережил.
+  lastSyntheticText: string;
 }
 
 // Сборщик хода: лента шагов плюс его состояние.
@@ -84,6 +105,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
     lastContextCache: null,
     actualModel: '',
     streamSessionId: '',
+    lastSyntheticText: '',
   };
 
   function push(value: unknown): void {
@@ -110,7 +132,18 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
       return;
     }
 
+    // Сообщение, сочинённое самим CLI: до модели запрос не дошёл («API Error: …»,
+    // «Connection closed mid-response», «No response requested.»). Токенов оно не несёт,
+    // ответом агента не является — запоминаем только текст, чтобы отличить ход,
+    // который таким сообщением и ЗАКОНЧИЛСЯ, от нормального ответа.
+    if (ev.type === 'assistant' && ev.message?.model === SYNTHETIC_MODEL) {
+      state.lastSyntheticText = claudeMessageText(ev.message);
+      return;
+    }
+
     if (ev.type === 'assistant' && ev.message?.usage && ev.message.model !== SYNTHETIC_MODEL) {
+      // Модель заговорила после сбоя — ход его пережил, прежняя отметка недействительна.
+      state.lastSyntheticText = '';
       const usage = ev.message.usage as Record<string, number>;
       state.spentTokens += usage.output_tokens || 0;
       if (ev.message.model) state.actualModel = ev.message.model;
@@ -203,6 +236,14 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
     }
   }
 
+  // Ход ЗАКОНЧИЛСЯ сообщением, которое CLI сочинил сам: до модели запрос так и не
+  // дошёл (сеть, TLS, 529, обрыв соединения). Такой текст CLI кладёт и в result —
+  // раньше он уезжал в историю как ответ агента, и вся работа хода выглядела
+  // выброшенной. Сверяем именно с ПОСЛЕДНИМ синтетическим сообщением: если после него
+  // модель успела ответить, отметка уже сброшена и ход считается обычным.
+  const cliCut = String(state.lastSyntheticText || '').trim();
+  const deliveryFailure = !!cliCut && cliCut === String(reply || '').trim();
+
   return {
     reply,
     sessionId: ev.session_id || state.streamSessionId || fallbackSessionId || null,
@@ -212,6 +253,7 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
     actualModel: state.actualModel,
     steps,
     emptyRun,
+    deliveryFailure,
     subtype: ev.subtype || '',
   };
 }
@@ -304,6 +346,8 @@ export function openClaudeStreamSession({
       collector: ClaudeTurnCollector;
       resolve: (value: unknown) => void;
       reject: (error: unknown) => void;
+      onSessionCreated?: (sessionId: string) => unknown;
+      sessionAnnounced: boolean;
     } | null;
     background: ClaudeTurnCollector | null;
     interruptRequested: boolean;
@@ -376,6 +420,20 @@ export function openClaudeStreamSession({
 
     const collector = state.turn ? state.turn.collector : backgroundCollector();
     collector.push(ev);
+
+    // Id сессии известен с первого события хода: сообщаем его вызывающему сразу, а не
+    // в конце хода, — иначе перезапуск сервера посреди первого хода оставлял чат без
+    // сессии, и следующее сообщение начинало разговор с нуля.
+    if (state.turn && !state.turn.sessionAnnounced && ev.session_id) {
+      const turn = state.turn;
+      turn.sessionAnnounced = true;
+      if (!state.sessionId) state.sessionId = ev.session_id;
+      void Promise.resolve()
+        .then(() => turn.onSessionCreated?.(ev.session_id as string))
+        .catch((error) => {
+          log?.warn?.({ err: (error as Error)?.message }, 'чат: id сессии не принят вызывающим');
+        });
+    }
 
     if (ev?.type !== 'result') return;
 
@@ -482,10 +540,11 @@ export function openClaudeStreamSession({
     get busy() { return !!state.turn; },
 
     /** Заказанный ход: пишем сообщение в stdin и ждём его result. */
-    send({ message, onStep, onProgress }: {
+    send({ message, onStep, onProgress, onSessionCreated }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
+      onSessionCreated?: (sessionId: string) => unknown;
     }) {
       if (state.exited) return Promise.reject(new Error(state.exitReason || 'Сессия агента закрыта.'));
       if (state.turn) return Promise.reject(new Error('В этой сессии уже идёт ход.'));
@@ -497,7 +556,9 @@ export function openClaudeStreamSession({
 
       const collector = createClaudeTurnCollector({ onStep, onProgress, log });
       return new Promise<unknown>((resolve, reject) => {
-        state.turn = { collector, resolve, reject };
+        state.turn = {
+          collector, resolve, reject, onSessionCreated, sessionAnnounced: false,
+        };
         try {
           writeLine({
             type: 'user',

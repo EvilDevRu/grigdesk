@@ -701,7 +701,9 @@ export class SpeechRuntime {
         transcribePath: this.transcribePath,
         mediaHfDir: this.mediaHfDir,
         baseEnv: this.baseEnv,
-        signal,
+        // Runner процесса принимает отсутствие сигнала, но не null: вызов без
+        // отмены (самопроверка речи раздела презентаций) иначе падал на проверке типа.
+        signal: signal ?? undefined,
       });
     } catch (error) {
       if (requestedSpeech.device !== 'auto' || speech.device !== 'cuda' || !isCudaRuntimeFailure(error)) {
@@ -718,7 +720,9 @@ export class SpeechRuntime {
         transcribePath: this.transcribePath,
         mediaHfDir: this.mediaHfDir,
         baseEnv: this.baseEnv,
-        signal,
+        // Runner процесса принимает отсутствие сигнала, но не null: вызов без
+        // отмены (самопроверка речи раздела презентаций) иначе падал на проверке типа.
+        signal: signal ?? undefined,
       });
     }
     const value = {

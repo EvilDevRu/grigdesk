@@ -767,3 +767,47 @@ test('Codex usage retries transport failures but accepts a permanent answer at o
     assert.notEqual(classifyCodexUsageResponse(response).state, 'ok');
   }
 });
+
+// Фоновый тик читает по требованию, а не по TTL, и не теряет прошлый снимок: слияние
+// при сбое держит старые полосы, только если ему есть что держать.
+test('usage read cache: refresh перечитывает до истечения TTL и отдаёт load прошлый снимок', async () => {
+  let currentTime = 100;
+  const seen = [];
+  const cache = createUsageReadCache(async (previous) => {
+    seen.push(previous);
+    return { generation: seen.length };
+  }, { maxAgeMs: 60, now: () => currentTime });
+
+  assert.equal(cache.ageMs(), Number.POSITIVE_INFINITY, 'без снимка возраст бесконечен');
+  assert.deepEqual(await cache.read(), { generation: 1 });
+  assert.equal(cache.ageMs(), 0);
+
+  currentTime = 130;
+  assert.equal(cache.ageMs(), 30);
+  assert.deepEqual(await cache.read(), { generation: 1 }, 'TTL не вышел — read молчит');
+  assert.deepEqual(await cache.refresh(), { generation: 2 }, 'refresh ходит, не дожидаясь TTL');
+  assert.deepEqual(seen, [null, { generation: 1 }]);
+
+  currentTime = 150;
+  assert.deepEqual(await cache.read(), { generation: 2 }, 'снимок refresh обновил и TTL');
+});
+
+test('usage read cache: refresh не дублирует уже начатое чтение', async () => {
+  let finishFirst;
+  let calls = 0;
+  const cache = createUsageReadCache(async () => {
+    calls += 1;
+    return new Promise((resolve) => { finishFirst = resolve; });
+  }, { maxAgeMs: 60, now: () => 100 });
+
+  const reading = cache.read();
+  const refreshing = cache.refresh();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+
+  finishFirst({ generation: 1 });
+  assert.deepEqual(await Promise.all([reading, refreshing]), [
+    { generation: 1 },
+    { generation: 1 },
+  ]);
+});

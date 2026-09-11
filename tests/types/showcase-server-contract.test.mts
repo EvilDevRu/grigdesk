@@ -21,7 +21,7 @@ export type JobIsChecked = Checked<IsUnchecked<Overview['jobs'][number]>>;
 async function checkServerContracts(service: Service, store: Store, id: string): Promise<void> {
   // @ts-expect-error Цель обязательна: показывать без адреса и экранов нечего.
   await service.createProject({ profile: 'demo-profile' });
-  // @ts-expect-error Профиль обязателен: адреса и карту экранов объявляет он.
+  // Сервер сам связывает выбранную цель с профилем; отдельный profile не обязателен.
   await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
   // @ts-expect-error Вид цели закрыт перечислением.
   await service.createProject({ ref: { kind: 'anything', id: '1' }, profile: 'demo-profile' });

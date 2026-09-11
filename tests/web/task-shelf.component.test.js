@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { compileVue, webFile } from './helpers/compile-vue.js';
@@ -88,15 +87,21 @@ test('Нейтральная карточка показывает задачу,
     title: item.get('.shelf-title').text(),
     waiting: item.get('.shelf-waiting').text(),
     activities: item.findAll('.shelf-activity').map((activity) => activity.text()),
-    footer: item.get('.shelf-footer').text(),
+    responsible: item.get('.shelf-responsible').text(),
+    deadline: item.get('.shelf-deadline').text(),
+    unread: item.get('.shelf-unread').text(),
+    age: item.get('time').text(),
     state: item.attributes('data-shelf-state'),
   }, {
     id: '#42',
     project: 'Кокпит',
     title: 'Проверить поставку',
     waiting: 'Ожидание Жду оценку',
-    activities: ['Битрикс24В работе', 'ОценкаВ очереди'],
-    footer: 'Иван Петров до 29.08.20262 непрочитанных',
+    activities: ['Битрикс24: В работе', 'Оценка: В очереди'],
+    responsible: 'Ответственный: Иван Петров',
+    deadline: 'до 29.08.2026',
+    unread: ', 2 непрочитанных',
+    age: 'добавлена сегодня',
     state: 'neutral',
   });
 });
@@ -194,21 +199,87 @@ test('Завершённые задачи собраны внизу и пока�
   });
 });
 
-test('Широкая полка остаётся единым реестром без прыгающих карточных колонок', async () => {
-  const source = await readFile(webFile('src/views/shelf/TaskShelfPanel.vue'), 'utf8');
-  const wideListPattern = [
-    String.raw`@container task-shelf \(min-width: 820px\)`,
-    String.raw`[\s\S]*?\.shelf-list\s*\{\s*`,
-    String.raw`grid-template-columns:\s*minmax\(0, 1fr\);`,
-  ].join('');
+test('Поиск объединяет номер, название, проект и ответственного без мутаций полки', async (t) => {
+  const { wrapper, calls } = await mountPanel(t, [
+    row({ title: 'Проверить расчёт' }),
+    row({ taskId: '77', title: 'Другая задача' }),
+  ]);
 
-  assert.match(source, new RegExp(wideListPattern));
-  assert.doesNotMatch(
-    source,
-    /@container task-shelf \(min-width: 820px\)[\s\S]*?grid-template-columns:\s*repeat\(2,/,
+  await wrapper.get('input[type="search"]').setValue(' #42  РАСЧЕТ кокпит ПЕТРОВ ');
+
+  assert.deepEqual(
+    wrapper.findAll('[data-task-id]').map((item) => item.attributes('data-task-id')),
+    ['42'],
   );
-  assert.match(source, /grid-template-areas:[\s\S]*?'meta meta signal'/);
-  assert.match(source, /'activities activities activities'[\s\S]*?'footer footer footer';/);
+  assert.equal(wrapper.get('.shelf-filter-summary [role="status"]').text(), 'Показано 1 из 2');
+  assert.equal(wrapper.get('[data-shelf-filter="all"]').text(), 'Все · 2');
+  assert.deepEqual(calls, { opened: [], acknowledged: [], removed: [] });
+
+  await wrapper.get('button[aria-label="Очистить поиск"]').trigger('click');
+
+  assert.equal(wrapper.findAll('[data-task-id]').length, 2);
+  assert.equal(wrapper.find('.shelf-filter-summary').exists(), false);
+});
+
+test('Фильтр внимания учитывает просмотренные остановки и применяется вместе с поиском', async (t) => {
+  const { wrapper } = await mountPanel(t, [
+    row({ taskId: '11' }),
+    row({ taskId: '22', title: 'Проверить план', needsHuman: true }),
+    row({ taskId: '33', state: 'lit', message: 'Пришёл ответ' }),
+    row({ taskId: '44', completed: true, state: 'lit' }),
+  ]);
+
+  assert.equal(wrapper.get('.shelf-heading p').text(), '4 задачи · требуют внимания: 2');
+  await wrapper.get('[data-shelf-filter="attention"]').trigger('click');
+
+  assert.deepEqual(
+    wrapper.findAll('[data-task-id]').map((item) => item.attributes('data-task-id')),
+    ['22', '33'],
+  );
+  assert.equal(wrapper.get('[data-shelf-filter="attention"]').attributes('aria-pressed'), 'true');
+  assert.match(wrapper.get('[data-task-id="22"] .shelf-waiting').text(), /Требует внимания/);
+
+  await wrapper.get('input[type="search"]').setValue('план');
+
+  assert.equal(wrapper.findAll('[data-task-id]').length, 1);
+  assert.equal(wrapper.get('[data-task-id]').attributes('data-task-id'), '22');
+  assert.equal(wrapper.get('[data-shelf-filter="attention"]').text(), 'Внимание · 2');
+});
+
+test('Пустой результат отличается от пустой полки и позволяет сбросить оба фильтра', async (t) => {
+  const { wrapper } = await mountPanel(t, [row()]);
+
+  await wrapper.get('[data-shelf-filter="completed"]').trigger('click');
+  await wrapper.get('input[type="search"]').setValue('несуществующая задача');
+
+  assert.equal(wrapper.get('.shelf-empty h3').text(), 'Ничего не найдено');
+  assert.equal(wrapper.get('.shelf-filter-summary [role="status"]').text(), 'Показано 0 из 1');
+  await wrapper.get('.shelf-filter-summary button').trigger('click');
+
+  assert.equal(wrapper.get('input').element.value, '');
+  assert.equal(wrapper.element.ownerDocument.activeElement === wrapper.get('input').element, true);
+  assert.equal(wrapper.get('[data-shelf-filter="all"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.findAll('[data-task-id]').length, 1);
+});
+
+test('Новые данные обновляют выбранную группу и её счётчик без сброса поиска', async (t) => {
+  const { wrapper } = await mountPanel(t, [row({ needsHuman: true })]);
+
+  await wrapper.get('[data-shelf-filter="attention"]').trigger('click');
+  await wrapper.get('input[type="search"]').setValue('поставку');
+  globalThis.__taskShelfPanel.shelf.rows[0].needsHuman = false;
+  await wrapper.vm.$nextTick();
+
+  assert.equal(wrapper.findAll('[data-task-id]').length, 0);
+  assert.equal(wrapper.get('[data-shelf-filter="attention"]').text(), 'Внимание · 0');
+  assert.equal(wrapper.get('[data-shelf-filter="attention"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.get('input').element.value, 'поставку');
+
+  globalThis.__taskShelfPanel.shelf.rows.push(row({ taskId: '77', needsHuman: true }));
+  await wrapper.vm.$nextTick();
+
+  assert.equal(wrapper.get('[data-task-id]').attributes('data-task-id'), '77');
+  assert.equal(wrapper.get('[data-shelf-filter="attention"]').text(), 'Внимание · 1');
 });
 
 test('Ошибка обновления не скрывает уже загруженные задачи', async (t) => {
@@ -222,6 +293,118 @@ test('Ошибка обновления не скрывает уже загру�
   }, {
     alert: 'Не удалось обновить полку',
     task: 'Проверить поставку',
+  });
+});
+
+function pipelineRow(activity) {
+  const base = row();
+
+  return { ...base, details: { ...base.details, activities: [activity] } };
+}
+
+test('Задача на конвейере получает видимую полосу прогона в тоне состояния', async (t) => {
+  const { wrapper } = await mountPanel(t, [pipelineRow({
+    kind: 'pipeline',
+    label: 'Конвейер',
+    value: '3/7 · Проверка',
+    tone: 'accent',
+    progress: { done: 3, total: 7 },
+  })]);
+  const bar = wrapper.get('[data-task-id="42"] [role="progressbar"]');
+
+  assert.deepEqual({
+    tone: bar.classes().filter((name) => name.startsWith('ui-progress--')),
+    now: bar.attributes('aria-valuenow'),
+    max: bar.attributes('aria-valuemax'),
+    text: bar.attributes('aria-valuetext'),
+    width: Math.round(parseFloat(bar.get('.ui-progress__bar').element.style.width)),
+  }, {
+    tone: ['ui-progress--accent'],
+    now: '3',
+    max: '7',
+    text: '3/7',
+    width: 43,
+  });
+});
+
+test('Остановка на человеке красит полосу тревогой, а прогон без цифр только движется', async (t) => {
+  const { wrapper } = await mountPanel(t, [pipelineRow({
+    kind: 'pipeline',
+    label: 'Конвейер',
+    value: 'Нужно решение · Подтвердить план',
+    tone: 'warn',
+    progress: { done: 0, total: 0 },
+  })]);
+  const bar = wrapper.get('[data-task-id="42"] [role="progressbar"]');
+
+  assert.deepEqual({
+    tone: bar.classes().filter((name) => name.startsWith('ui-progress--')),
+    now: bar.attributes('aria-valuenow'),
+    text: bar.attributes('aria-valuetext'),
+    indeterminate: bar.get('.ui-progress__bar').classes().includes('is-indeterminate'),
+  }, {
+    tone: ['ui-progress--warning'],
+    now: undefined,
+    text: 'Идёт',
+    indeterminate: true,
+  });
+});
+
+test('Задача, которую держат ворота, остаётся сверху и без огонька', async (t) => {
+  // Огонёк снимается первым же acknowledge, а открытые ворота никуда не деваются:
+  // такая задача обязана остаться в верхней группе, а не уехать в «В ожидании».
+  const gated = row({ taskId: '77', title: 'Ждёт решения', needsHuman: true });
+  const plain = row({ taskId: '11', title: 'Просто ждёт' });
+  const { wrapper } = await mountPanel(t, [plain, gated]);
+
+  assert.deepEqual({
+    groups: wrapper.findAll('.shelf-group').map((group) => group.attributes('data-shelf-group')),
+    attention: wrapper.get('[data-shelf-group="attention"] [data-task-id]').attributes('data-task-id'),
+    waiting: wrapper.get('[data-shelf-group="waiting"] [data-task-id]').attributes('data-task-id'),
+  }, {
+    groups: ['attention', 'waiting'],
+    attention: '77',
+    waiting: '11',
+  });
+});
+
+test('Полоса прогона идёт с числом рядом, а не одной залитой долей', async (t) => {
+  // На воротах текст плашки занимает название решения, и цифры в нём нет: без
+  // отдельной подписи полоса оставалась залитой долей без единого числа.
+  const { wrapper } = await mountPanel(t, [pipelineRow({
+    kind: 'pipeline',
+    label: 'Конвейер',
+    value: 'Нужно решение · принять работу',
+    tone: 'warn',
+    progress: { done: 6, total: 7 },
+  })]);
+  const progress = wrapper.get('[data-task-id="42"] .shelf-progress');
+
+  assert.deepEqual({
+    count: progress.get('.shelf-progress-count').text(),
+    tone: progress.attributes('data-tone'),
+    insideActivity: wrapper.findAll('.shelf-activity .ui-progress').length,
+  }, {
+    count: 'Конвейер, пройдено: 6/7',
+    tone: 'warn',
+    insideActivity: 0,
+  });
+});
+
+test('Карточка без живого прогона полосу не показывает', async (t) => {
+  const { wrapper } = await mountPanel(t, [pipelineRow({
+    kind: 'pipeline',
+    label: 'Конвейер',
+    value: 'Последний прогон сейчас не виден',
+    tone: 'neutral',
+  })]);
+
+  assert.deepEqual({
+    bars: wrapper.findAll('[role="progressbar"]').length,
+    activity: wrapper.get('[data-task-id="42"] .shelf-activity').text(),
+  }, {
+    bars: 0,
+    activity: 'Конвейер: Последний прогон сейчас не виден',
   });
 });
 

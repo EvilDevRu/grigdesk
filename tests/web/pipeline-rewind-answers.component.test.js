@@ -83,10 +83,6 @@ async function mountPipeline(t, { factoryTask, graph }) {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineRewindCompanionStore = defineStore('pipeline-rewind-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineRewind'), {
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()], stubs: { teleport: true } },
@@ -97,7 +93,7 @@ async function mountPipeline(t, { factoryTask, graph }) {
     for (const key of [
       '__pipelineRewindApi', '__pipelineRewindConfirmDialog', '__pipelineRewindAlertDialog',
       '__pipelineRewindFactoryGraph', '__pipelineRewindUiStore', '__pipelineRewindTasksStore',
-      '__pipelineRewindBoardStore', '__pipelineRewindCompanionStore',
+      '__pipelineRewindBoardStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

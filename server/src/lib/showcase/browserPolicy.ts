@@ -98,7 +98,11 @@ export async function startEgressGuard(policy: BrowserPolicy) {
 
     const host = target?.hostname ?? '';
     const port = target?.port || (target?.protocol === 'https:' ? '443' : '80');
-    const allowedMethod = policy.allowedMethods.includes(request.method ?? '');
+    // OPTIONS — preflight: вопрос браузера «можно ли», а не действие страницы.
+    // Без него не состоится ни один cross-origin запрос с заголовком авторизации,
+    // а мутации всё равно останавливает проверка самого метода.
+    const method = request.method ?? '';
+    const allowedMethod = policy.allowedMethods.includes(method) || method === 'OPTIONS';
 
     if (!target || !isAllowed(host, port) || !allowedMethod) {
       blocked.push({ kind: 'request', target: String(request.url), at: new Date().toISOString() });

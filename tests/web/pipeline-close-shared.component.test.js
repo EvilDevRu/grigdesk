@@ -74,7 +74,6 @@ async function mountPipeline(t, { factoryTask, graph }) {
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const posts = [];
-  const companionCalls = [];
   globalThis.__pipelineCloseDialogs = [];
   // Подпись кнопки подтверждения — часть предупреждения, а не отделка: у прерывания
   // живого прогона она обязана отличаться от обычного закрытия. Держим её отдельным
@@ -111,9 +110,6 @@ async function mountPipeline(t, { factoryTask, graph }) {
   globalThis.__pipelineCloseBoardStore = defineStore('pipeline-close-board', {
     state: () => ({ data: null }), actions: { async load() {} },
   });
-  globalThis.__pipelineCloseCompanionStore = defineStore('pipeline-close-companion', {
-    actions: { openForTask(taskId) { companionCalls.push(String(taskId)); } },
-  });
 
   const wrapper = mount(await compilePipelineView('__pipelineClose'), {
     attachTo: browser.document.querySelector('#mount'),
@@ -130,7 +126,6 @@ async function mountPipeline(t, { factoryTask, graph }) {
       '__pipelineCloseConfirmOptions',
       '__pipelineCloseAlertDialog', '__pipelineCloseFactoryGraph', '__pipelineCloseUiStore',
       '__pipelineCloseTasksStore', '__pipelineCloseBoardStore',
-      '__pipelineCloseCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
@@ -138,27 +133,10 @@ async function mountPipeline(t, { factoryTask, graph }) {
     wrapper,
     flushPromises,
     posts,
-    companionCalls,
     dialogs: globalThis.__pipelineCloseDialogs,
     confirmOptions: globalThis.__pipelineCloseConfirmOptions,
   };
 }
-
-test('COMP-SHELL-Pipeline: обсуждение открывает companion с exact task и закрывает stage', async (t) => {
-  const { wrapper, flushPromises, companionCalls } = await mountPipeline(t, makeFixture());
-  wrapper.getComponent({ name: 'FactoryGraph' }).vm.$emit('node', {
-    id: 'retro', label: '🧾 Ретро', status: 'done', subtitle: '',
-  });
-  await flushPromises();
-
-  const discuss = wrapper.findAll('.sactions-buttons .btn').find((button) => /Обсудить с агентом/.test(button.text()));
-  assert.ok(discuss);
-  await discuss.trigger('click');
-  await flushPromises();
-
-  assert.deepEqual(companionCalls, ['90002']);
-  assert.equal(wrapper.find('.smodal').exists(), false);
-});
 
 test('shared-задача с внешним стендом: «закрыть задачу» есть, «снести стенд» — нет', async (t) => {
   const { wrapper, flushPromises, posts, dialogs } = await mountPipeline(t, makeFixture());

@@ -23,10 +23,6 @@
   "exclude": [
     "src/App.vue",
     "src/features/board/BoardTimerPopover.vue",
-    "src/features/companion/CompanionAvatar.vue",
-    "src/features/companion/CompanionHost.vue",
-    "src/features/companion/CompanionRobot.vue",
-    "src/features/companion/CompanionTopbarButton.vue",
     "src/features/documents/DocumentPanel.vue",
     "src/features/pipeline/PipelineTopbarPopover.vue",
     "src/features/projects/ProjectSwitcher.vue",

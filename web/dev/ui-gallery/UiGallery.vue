@@ -264,6 +264,13 @@
         Содержимое раскрытой строки.
       </p>
       <UiProgress :value="62" label="Пример прогресса" value-text="62 процента" />
+      <UiProgress
+        :value="3"
+        :max="7"
+        tone="warning"
+        label="Пример прогресса на остановке"
+        value-text="3 из 7"
+      />
       <UiInlineMessage tone="warning">
         Busy региона не блокирует вложенные controls автоматически.
       </UiInlineMessage>

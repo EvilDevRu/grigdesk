@@ -4,45 +4,21 @@
       <div class="scene__title">
         <span class="scene__order">{{ scene.order }}</span>
         <strong>{{ scene.title }}</strong>
-        <span class="scene__screen">экран «{{ scene.screenId }}»</span>
       </div>
       <span class="scene__state">{{ stateText }}</span>
     </header>
 
-    <div class="scene__grid">
-      <UiField label="Что говорит голос" hint="Короткая фраза с одной мыслью.">
-        <UiTextarea v-model="draft.narration" :disabled="busy" rows="3" />
-      </UiField>
+    <!-- На виду только то, что человек правит чаще всего: слова диктора и подпись.
+         Субтитр, загрузка своего звука и подробности записи — за раскрытием. -->
+    <UiField label="Текст озвучки">
+      <UiTextarea v-model="draft.narration" :disabled="busy" rows="3" />
+    </UiField>
 
-      <UiField label="Подпись на экране" hint="Это подпись, а не дословный субтитр.">
-        <UiInput v-model="draft.caption" :disabled="busy" />
-      </UiField>
+    <UiField label="Подпись на экране" hint="Короткая, не дословный субтитр.">
+      <UiInput v-model="draft.caption" :disabled="busy" />
+    </UiField>
 
-      <UiField label="Субтитр" hint="Тот же смысл, что в речи, обычной письменной формой.">
-        <UiTextarea v-model="draft.subtitleText" :disabled="busy" rows="2" />
-      </UiField>
-    </div>
-
-    <div class="scene__media">
-      <div class="scene__media-block">
-        <span class="scene__media-title">Звук сцены</span>
-        <UiAudio v-if="audioUrl" :src="audioUrl" :label="`Звук сцены «${scene.title}»`" />
-        <p v-else class="scene__hint">Звука ещё нет — загрузите запись сцены.</p>
-        <UiFilePicker
-          accept="audio/wav,audio/x-wav,.wav"
-          :disabled="busy"
-          :label="audioUrl ? 'Заменить звук' : 'Загрузить звук'"
-          @change="pickAudio"
-        />
-      </div>
-
-      <div class="scene__media-block">
-        <span class="scene__media-title">Запись экрана</span>
-        <p class="scene__hint">
-          {{ scene.clip ? clipText : 'Клипа ещё нет: запустите запись из карточки ролика.' }}
-        </p>
-      </div>
-    </div>
+    <UiAudio v-if="audioUrl" :src="audioUrl" :label="`Звук сцены «${scene.title}»`" />
 
     <ul v-if="speechChecks.length" class="scene__checks">
       <li v-for="check in speechChecks" :key="check.id" :data-status="check.status">
@@ -52,8 +28,44 @@
       </li>
     </ul>
 
+    <UiDisclosureButton
+      v-model:open="moreOpen"
+      :controls="`${scene.id}-more`"
+      density="compact"
+    >
+      {{ moreOpen ? 'Скрыть подробности' : 'Субтитр, свой звук и запись' }}
+    </UiDisclosureButton>
+
+    <div v-show="moreOpen" :id="`${scene.id}-more`" class="scene__more">
+      <UiField label="Субтитр" hint="Тот же смысл, что в речи, обычной письменной формой.">
+        <UiTextarea v-model="draft.subtitleText" :disabled="busy" rows="2" />
+      </UiField>
+
+      <div class="scene__media-block">
+        <span class="scene__media-title">Свой звук вместо синтеза</span>
+        <p class="scene__hint">
+          Загруженную запись озвучка не трогает: правка текста её не переозвучит.
+        </p>
+        <UiFilePicker
+          accept="audio/wav,audio/x-wav,.wav"
+          :disabled="busy"
+          :label="audioUrl ? 'Заменить звук' : 'Загрузить звук'"
+          @change="pickAudio"
+        />
+      </div>
+
+      <p class="scene__hint">{{ clipText }}</p>
+    </div>
+
     <footer class="scene__actions">
-      <UiButton variant="ghost" :disabled="!changed || busy" @click="save">Сохранить</UiButton>
+      <UiButton
+        variant="solid"
+        tone="accent"
+        :disabled="!changed || busy"
+        @click="save"
+      >
+        Сохранить
+      </UiButton>
       <UiButton variant="ghost" :disabled="busy || first" @click="emit('move', { id: scene.id, delta: -1 })">
         Выше
       </UiButton>
@@ -68,11 +80,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import {
   UiAudio,
   UiButton,
+  UiDisclosureButton,
   UiField,
   UiFilePicker,
   UiInput,
@@ -112,6 +125,8 @@ const CHECK_TEXT: Record<ShowcaseCheck['status'], string> = {
   skipped: 'проверка пропущена',
 };
 
+const moreOpen = ref(false);
+
 const draft = reactive({
   narration: props.scene.narration,
   caption: props.scene.caption,
@@ -146,17 +161,28 @@ const stateText = computed(() => {
 });
 
 const clipText = computed(() => {
-  const seconds = Math.round((props.scene.clip?.durationMs ?? 0) / 100) / 10;
+  if (!props.scene.clip) {
+    return 'Запись экрана появится после сборки ролика.';
+  }
 
-  return `Клип на ${seconds} с записан.`;
+  const seconds = Math.round((props.scene.clip.durationMs ?? 0) / 100) / 10;
+
+  return `Запись экрана: ${seconds} с.`;
 });
 
+/**
+ * Субтитр по умолчанию повторяет речь: пока человек его не правил, он следует за
+ * текстом озвучки, и заполнять два поля одним и тем же не нужно.
+ */
 function save() {
+  const subtitleFollows = props.scene.subtitleText === props.scene.narration
+    && draft.subtitleText === props.scene.subtitleText;
+
   emit('save', {
     id: props.scene.id,
     narration: draft.narration,
     caption: draft.caption,
-    subtitleText: draft.subtitleText,
+    subtitleText: subtitleFollows ? draft.narration : draft.subtitleText,
   });
 }
 
@@ -172,22 +198,23 @@ function pickAudio(files: File[]) {
 <style scoped>
 .scene {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border, #2a2f3a);
-  border-radius: 10px;
-  background: var(--panel, #171a21);
-  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--ground) 60%, var(--surface));
 }
 
 .scene[data-stale='yes'] {
-  border-color: var(--warning, #b4823a);
+  border-color: color-mix(in srgb, var(--warn) 48%, var(--line));
+  background: color-mix(in srgb, var(--warn) 3%, var(--ground));
 }
 
 .scene__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
@@ -195,33 +222,50 @@ function pickAudio(files: File[]) {
 
 .scene__title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .scene__order {
+  display: grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--muted, #9aa4b2);
 }
 
-.scene__screen,
 .scene__state,
 .scene__hint {
-  color: var(--muted, #9aa4b2);
-  font-size: 13px;
+  color: var(--ink-mid);
+  font-size: 12.5px;
 }
 
-.scene__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+.scene__state {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--good) 32%, var(--line));
+  border-radius: 999px;
+  color: var(--good);
+  font-size: 10.5px;
 }
 
-.scene__media {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.scene[data-stale='yes'] .scene__state {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
+  color: var(--warn);
+}
+
+.scene__more {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .scene__media-block {
@@ -229,14 +273,20 @@ function pickAudio(files: File[]) {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
 }
 
 .scene__media-title {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .scene__hint {
   margin: 0;
+  line-height: 1.45;
 }
 
 .scene__checks {
@@ -255,6 +305,10 @@ function pickAudio(files: File[]) {
   gap: 8px;
   min-width: 0;
   flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 54%, transparent);
 }
 
 .scene__check-dot {
@@ -263,19 +317,19 @@ function pickAudio(files: File[]) {
   border-radius: 50%;
   flex: none;
   align-self: center;
-  background: var(--muted, #9aa4b2);
+  background: var(--ink-mid);
 }
 
 .scene__checks li[data-status='passed'] .scene__check-dot {
-  background: var(--ok, #4c9a5a);
+  background: var(--good);
 }
 
 .scene__checks li[data-status='warning'] .scene__check-dot {
-  background: var(--warning, #b4823a);
+  background: var(--warn);
 }
 
 .scene__checks li[data-status='blocked'] .scene__check-dot {
-  background: var(--danger, #d05353);
+  background: var(--bad);
 }
 
 .scene__actions {
@@ -283,5 +337,13 @@ function pickAudio(files: File[]) {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 560px) {
+  .scene {
+    padding: 13px;
+  }
 }
 </style>

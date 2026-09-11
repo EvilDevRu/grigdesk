@@ -183,12 +183,12 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     for (const key of [
       '__uiContextPipelineApi', '__uiContextTaskApi', '__uiContextSourceHelper',
       '__uiContextPipelineUiStore', '__uiContextPipelineTasksStore',
-      '__uiContextPipelineBoardStore', '__uiContextPipelineCompanionStore',
+      '__uiContextPipelineBoardStore',
       '__uiContextPipelineContextSource', '__uiContextPipelineConfirmDialog',
       '__uiContextPipelineAlertDialog', '__uiContextPipelineFactoryGraph',
       '__uiContextApi', '__uiContextContextSource',
       '__uiContextUiStore', '__uiContextTasksStore', '__uiContextBoardStore',
-      '__uiContextCompanionStore', '__uiContextAnalysisStore', '__uiContextFavoritesStore',
+      '__uiContextAnalysisStore', '__uiContextFavoritesStore',
       '__uiContextSeenStore', '__uiContextPipelineWait', '__uiContextRunnerDisplay',
       '__uiContextFactoryGraph',
     ]) delete globalThis[key];
@@ -229,9 +229,6 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
       },
     }),
     actions: { async load() {} },
-  });
-  globalThis.__uiContextCompanionStore = defineStore('ui-context-runtime-companion', {
-    actions: { async openForTask() {} },
   });
   globalThis.__uiContextAnalysisStore = defineStore('ui-context-runtime-analysis', {
     actions: { async detail() { return {}; }, async analyze() {} },
@@ -305,7 +302,6 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
   globalThis.__uiContextPipelineUiStore = globalThis.__uiContextUiStore;
   globalThis.__uiContextPipelineTasksStore = globalThis.__uiContextTasksStore;
   globalThis.__uiContextPipelineBoardStore = globalThis.__uiContextBoardStore;
-  globalThis.__uiContextPipelineCompanionStore = globalThis.__uiContextCompanionStore;
   globalThis.__uiContextPipelineContextSource = useUiContextSource;
   globalThis.__uiContextPipelineConfirmDialog = async () => true;
   globalThis.__uiContextPipelineAlertDialog = async () => undefined;

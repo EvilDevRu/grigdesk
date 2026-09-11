@@ -186,10 +186,6 @@ async function mountScenario(t) {
       },
     },
   });
-  globalThis.__pipelineB24CompanionStore = defineStore('pipeline-b24-companion', {
-    actions: { openForTask() {} },
-  });
-
   const originalDateNow = Date.now;
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
@@ -238,7 +234,6 @@ async function mountScenario(t) {
       '__pipelineB24UiStore',
       '__pipelineB24TasksStore',
       '__pipelineB24BoardStore',
-      '__pipelineB24CompanionStore',
     ]) {
       delete globalThis[key];
     }

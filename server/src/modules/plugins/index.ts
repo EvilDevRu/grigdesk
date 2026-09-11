@@ -14,6 +14,7 @@ import {
   settingsValues,
 } from '../../lib/pluginsRegistry.ts';
 import type { PluginManifest, PluginSetting } from '../../lib/pluginsRegistry.ts';
+import { normalizePluginCategory } from '../../../../shared/pluginsContracts.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import type { CockpitConfig } from '../../config.ts';
 
@@ -84,10 +85,14 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         version: m.version,
         description: m.description,
         system: m.system,
+        // Категория режет экран настроек по роду работы; SYSTEM объявляет её сам,
+        // у чужого манифеста значение уже нормализовано сканом.
+        category: normalizePluginCategory(m.category),
         nav: m.nav || null,
         enabled: isEnabled(p, m),
         settings: m.settings || [],
         values: settingsValues(p, m),
+        setup: m.setup || null,
         // Пользовательский серверный код подключается на старте — тумблер подействует после рестарта.
         needsRestart: !m.system && m.hasServer,
       })),

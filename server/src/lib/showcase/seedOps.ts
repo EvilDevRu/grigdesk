@@ -11,6 +11,7 @@ import type { SeedDecision } from './seed.ts';
 import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
+import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
 
 export interface SeedOpsDeps {
   assertEnabled: () => void;
@@ -21,6 +22,7 @@ export interface SeedOpsDeps {
   // Удачный рецепт двигает ревизию данных сам: она входит в отпечаток цели, и
   // после подготовки записи по прежним данным считаются устаревшими.
   setDataRevision: (ref: ShowcaseProject['ref'], revision: string) => void;
+  acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
   readProject: (id: string) => Promise<ShowcaseProject>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
@@ -57,7 +59,11 @@ export function createSeedOps(deps: SeedOpsDeps) {
       };
     }
 
-    const scope = await targets.internalScope(project.ref, project.target.scope.profile);
+    const scope = await targets.selectedInternalScope(
+      project.ref,
+      project.target.scope.profile,
+      project.target.scope.targetFingerprint,
+    );
     const availability = await seedAvailability(scope, targets.contractDir(scope.profile));
 
     return {
@@ -97,22 +103,35 @@ export function createSeedOps(deps: SeedOpsDeps) {
       throw new ShowcaseError('target_unavailable', project.target.reason, 409);
     }
 
-    const scope = await targets.internalScope(project.ref, project.target.scope.profile);
-    const availability = await seedAvailability(scope, targets.contractDir(scope.profile));
-    const decision: SeedDecision = createSeedDecision(recipeFingerprint);
-    const outcome = await runSeed({
-      scope,
-      availability,
-      decision,
-      workDir: path.join(store.jobsDir, `seed-${id}`),
-    });
+    const lease = await deps.acquireTargetLease(project.ref);
 
-    if (outcome.state === 'succeeded' && outcome.dataRevision) {
-      setDataRevision(project.ref, outcome.dataRevision);
-      broadcast('showcase-changed', { projectId: id, revision: project.revision });
+    try {
+      const scope = await targets.selectedInternalScope(
+        project.ref,
+        project.target.scope.profile,
+        project.target.scope.targetFingerprint,
+      );
+      const availability = await seedAvailability(scope, targets.contractDir(scope.profile));
+      const decision: SeedDecision = createSeedDecision(recipeFingerprint);
+
+      await lease?.assertPathIdentity();
+
+      const outcome = await runSeed({
+        scope,
+        availability,
+        decision,
+        workDir: path.join(store.jobsDir, `seed-${id}`),
+      });
+
+      if (outcome.state === 'succeeded' && outcome.dataRevision) {
+        setDataRevision(project.ref, outcome.dataRevision);
+        broadcast('showcase-changed', { projectId: id, revision: project.revision });
+      }
+
+      return { state: outcome.state, reason: outcome.reason };
+    } finally {
+      await lease?.release();
     }
-
-    return { state: outcome.state, reason: outcome.reason };
   }
 
   return { prepareData, seedStatus };

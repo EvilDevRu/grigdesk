@@ -24,7 +24,7 @@ function engine(overrides = {}) {
 
 function reportWith(overrides = {}) {
   return createDoctorReport({
-    browserPath: null,
+    resolveBrowserPath: async () => null,
     showcaseDir: path.join(os.tmpdir(), 'showcase-doctor-нет-такого'),
     voiceStatuses: async () => [engine()],
     transcribeAvailable: false,

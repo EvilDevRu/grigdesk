@@ -4,6 +4,9 @@ web/dist/
 # как новый сервер подтвердил SHA, и не должны делать checkout dirty в это окно.
 web/dist.cockpit-backup-*/
 server/node_modules.cockpit-backup-*/
+# Кэш пребандла dev-сервера vite. Локальные стенды предпросмотра поднимают его с root в корне
+# репозитория, где нет package.json, — тогда vite кладёт кэш не в web/node_modules/.vite, а сюда.
+.vite/
 *.log
 .env
 .env.local

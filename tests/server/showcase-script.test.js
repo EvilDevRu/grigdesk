@@ -14,6 +14,7 @@ import {
   SCRIPT_PROMPT_VERSION,
 } from '../../server/src/lib/showcase/script/prompt.ts';
 import { parseBrief, parseScript } from '../../server/src/lib/showcase/script/writer.ts';
+import { createScriptOps } from '../../server/src/lib/showcase/scriptOps.ts';
 
 const SCREENS = [
   {
@@ -212,6 +213,88 @@ test('ожидание и прокрутка принимаются в объя�
   assert.equal(tooLong, null, 'сцена не должна уметь встать на минуту ожидания');
 });
 
+test('переход на экран без цели выбрасывается, а не ломает сценарий', () => {
+  const parsed = parseScript(
+    reply({
+      scenes: [scene({
+        actions: [
+          { kind: 'goto', targetId: null },
+          { kind: 'hover', targetId: 'run' },
+        ],
+      })],
+    }),
+    SCREENS,
+    5,
+  );
+
+  assert.ok(parsed, 'запись и так начинает сцену со своего экрана');
+  assert.deepEqual(parsed[0].actions, [{ kind: 'hover', targetId: 'run' }]);
+});
+
 test('версия промпта объявлена и попадает в решение', () => {
   assert.match(SCRIPT_PROMPT_VERSION, /^showcase-script-/);
+});
+
+test('вызов модели получает серверный config исполнителя, а не пустой', async () => {
+  const seen = { resolverConfig: null, run: null };
+  const project = {
+    id: 'demo',
+    revision: 1,
+    title: 'Ролик',
+    ref: { kind: 'sandbox', id: '990010' },
+    target: {
+      status: 'ready',
+      ref: { kind: 'sandbox', id: '990010' },
+      scope: { profile: 'demo-profile', targetFingerprint: 'fp' },
+    },
+    scenes: [],
+    decisions: [],
+  };
+  const scriptOps = createScriptOps({
+    assertEnabled: () => {},
+    broadcast: () => {},
+    limits: () => ({ maxScenes: 20 }),
+    readProject: async () => project,
+    // Резолвер и исполнитель здесь только записывают, что им передали: проверяется
+    // не работа модели, а то, что разделу есть чем запустить её процесс.
+    resolveScriptModel: async (options) => {
+      seen.resolverConfig = options.config;
+
+      return {
+        ok: true,
+        ref: { provider: 'claude', model: 'claude-opus-5' },
+        executor: {
+          runUntrusted: async (input) => {
+            seen.run = input;
+
+            return { reply: JSON.stringify({ points: ['первый', 'второй', 'третий'] }) };
+          },
+        },
+      };
+    },
+    scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+    executorConfig: () => ({ claudeBin: '/usr/bin/claude', modelsPath: '/tmp/models.json' }),
+    providerSettings: () => ({ claude: { baseUrl: 'https://example.test' } }),
+    acquireTargetLease: async () => null,
+    store: {
+      updateProject: async (id, revision, patch) => patch(project),
+    },
+    targets: {
+      selectedInternalScope: async () => ({
+        profile: 'demo-profile',
+        sandbox: { repos: [] },
+        screens: SCREENS,
+      }),
+    },
+    withFreshness: (value) => value,
+  });
+
+  const result = await scriptOps.generateBrief('demo', 'Текст задачи');
+
+  assert.equal(seen.resolverConfig.claudeBin, '/usr/bin/claude');
+  assert.equal(seen.run.config.claudeBin, '/usr/bin/claude');
+  assert.deepEqual(seen.run.providerSettings, { baseUrl: 'https://example.test' });
+  // Исполнители отвечают полем `reply`: читать другое поле значило бы получать
+  // пустую строку и винить модель за «ответ не по форме».
+  assert.deepEqual(result.brief, ['первый', 'второй', 'третий']);
 });

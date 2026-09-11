@@ -47,7 +47,31 @@ const BLOCKED_PROJECT = {
   updatedAt: '2026-09-09T09:00:00.000Z',
 };
 
+const TARGET = {
+  ref: { kind: 'project', id: 'parser' },
+  profile: 'parser',
+  label: 'parser · постоянный стенд',
+  viewUrl: 'http://127.0.0.1:13000',
+  viewPort: null,
+  status: 'ready',
+  reason: '',
+  screenCount: 0,
+};
+
 const OVERVIEW = {
+  targets: [
+    TARGET,
+    {
+      ref: { kind: 'sandbox', id: '990002' },
+      profile: 'arsenkin',
+      label: 'arsenkin · стенд t990002',
+      viewUrl: null,
+      viewPort: null,
+      status: 'blocked',
+      reason: 'Порты стенда не отвечают.',
+      screenCount: 3,
+    },
+  ],
   profiles: [
     { id: 'demo-profile', ready: true, reason: '' },
     { id: 'plain-profile', ready: false, reason: 'Профиль не объявил контракт презентаций.' },
@@ -107,7 +131,7 @@ test('стор состояния не знает ни про HTTP, ни про 
   assert.deepEqual(imports.sort(), ['../../../shared/showcaseContracts', 'pinia']);
 });
 
-test('обзор раскладывается на профили, ролики и задания', async (t) => {
+test('обзор раскладывается на цели, ролики и задания', async (t) => {
   const { store, loadShowcase } = await sectionFixture(t, {
     get: async () => OVERVIEW,
   });
@@ -115,11 +139,51 @@ test('обзор раскладывается на профили, ролики 
   await loadShowcase(store);
 
   assert.equal(store.loaded, true);
-  assert.deepEqual(store.readyProfiles.map((item) => item.id), ['demo-profile']);
+  assert.deepEqual(store.readyTargets.map((item) => item.ref), [TARGET.ref]);
   assert.deepEqual(store.projects.map((item) => item.id), ['project-1', 'project-2']);
   assert.deepEqual(store.blockedProjects.map((item) => item.id), ['project-2']);
   assert.deepEqual(store.jobsOf('project-1').map((item) => item.id), ['job-1']);
   assert.equal(store.limits.maxScenes, 20);
+});
+
+test('создание отправляет только выбранную цель и название', async (t) => {
+  let createdBody = null;
+  const created = {
+    schemaVersion: 1,
+    id: 'created-project',
+    title: 'Ролик парсера',
+    revision: 1,
+    ref: TARGET.ref,
+    target: {
+      status: 'blocked',
+      ref: TARGET.ref,
+      reason: 'Тестовая цель ещё не перечитана.',
+      nextAction: null,
+    },
+    brief: [],
+    scenes: [],
+    decisions: [],
+    latestFinal: null,
+    createdAt: '2026-09-10T10:00:00.000Z',
+    updatedAt: '2026-09-10T10:00:00.000Z',
+  };
+  const { store, createShowcaseProject } = await sectionFixture(t, {
+    get: async () => OVERVIEW,
+    post: async (path, body) => {
+      assert.equal(path, '/api/showcase');
+      createdBody = body;
+
+      return created;
+    },
+  });
+
+  await createShowcaseProject(store, { ref: TARGET.ref, title: 'Ролик парсера' });
+
+  assert.deepEqual(createdBody, {
+    kind: 'project',
+    id: 'parser',
+    title: 'Ролик парсера',
+  });
 });
 
 test('ответ не по контракту не становится состоянием раздела', async (t) => {
@@ -224,6 +288,26 @@ test('испорченная сводка не подменяет задание
   assert.ok(calls > 1, 'сомнительная сводка приводит к перечитыванию обзора');
 });
 
+test('изменение песочниц обновляет каталог целей без ручного нажатия', async (t) => {
+  let calls = 0;
+  const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
+    get: async (path) => {
+      if (path === '/api/showcase') {
+        calls += 1;
+      }
+
+      return OVERVIEW;
+    },
+  });
+
+  watchShowcase(store);
+  await loadShowcase(store);
+  emit('sandboxes-changed', { task: '990001' });
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  assert.equal(calls, 2);
+});
+
 test('удаление ролика закрывает его карточку и перечитывает список', async (t) => {
   let deleted = '';
   const { store, deleteShowcaseProject } = await sectionFixture(t, {
@@ -256,4 +340,47 @@ test('отказ ручки становится текстом раздела, 
 
   assert.equal(removed, false);
   assert.match(store.error, /выключен/i);
+});
+
+test('изменение ролика перечитывает открытую карточку, а не только список', async (t) => {
+  const reads = [];
+  const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
+    get: async (path) => {
+      reads.push(path);
+
+      if (path === '/api/showcase/project-1') {
+        return {
+          schemaVersion: 1,
+          id: 'project-1',
+          title: PROJECT.title,
+          revision: 7,
+          ref: PROJECT.ref,
+          target: { status: 'blocked', ref: PROJECT.ref, reason: 'нет стенда', nextAction: null },
+          brief: [],
+          scenes: [],
+          decisions: [],
+          latestFinal: null,
+          createdAt: '2026-09-09T10:00:00.000Z',
+          updatedAt: '2026-09-09T11:00:00.000Z',
+        };
+      }
+
+      return OVERVIEW;
+    },
+  });
+
+  watchShowcase(store);
+  await loadShowcase(store);
+  store.setOpened({ id: 'project-1', revision: 2 });
+  emit('showcase-changed', { projectId: 'project-1', revision: 7 });
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  // Редакция в карточке отстаёт от сервера после каждого завершённого задания;
+  // без перечитывания любая правка отвечала бы конфликтом редакций.
+  assert.ok(reads.includes('/api/showcase/project-1'));
+  assert.equal(store.opened.revision, 7);
+
+  emit('showcase-changed', { projectId: 'project-2', revision: 3 });
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.equal(reads.filter((path) => path === '/api/showcase/project-1').length, 1);
 });

@@ -37,7 +37,11 @@ pids=$(ss -tlnp 2>/dev/null | grep -E ":($PORT|$TLS_PORT) " | grep -oP 'pid=\K[0
 if [ -n "$pids" ]; then
   echo "гашу: $pids"
   kill $pids 2>/dev/null || true
-  for _ in $(seq 1 50); do busy || break; sleep 0.2; done
+  # SIGTERM запускает в сервере слив: идущим ходам агентов дают закончить, остальные
+  # прерывают с сохранением ленты и сессии, потом закрываются процессы исполнителей.
+  # Ждём дольше его бюджета (COCKPIT_SHUTDOWN_TIMEOUT_MS, по умолчанию 30 с): kill -9
+  # раньше срока обесценил бы весь слив.
+  for _ in $(seq 1 225); do busy || break; sleep 0.2; done
   if busy; then
     echo "порт не освободился — kill -9"
     kill -9 $pids 2>/dev/null || true

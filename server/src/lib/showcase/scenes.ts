@@ -44,9 +44,14 @@ const EMPTY_DIRECTION: ShowcaseScene['direction'] = {
  * Новая сцена встаёт в конец: вставка в середину — это перестановка, и делать её
  * побочным эффектом добавления нельзя. Звук по умолчанию синтезируется; загрузка
  * готовой записи меняет источник явным действием.
+ *
+ * Голос и темп наследуются у последней сцены: человек выбирает их для ролика
+ * целиком, и новая сцена, заговорившая другим голосом, читалась бы как ошибка.
  */
 export function createScene(project: ShowcaseProject, draft: SceneDraft): ShowcaseScene {
   const order = project.scenes.reduce((max, scene) => Math.max(max, scene.order), 0) + 1;
+  const previous = [...project.scenes].sort((left, right) => left.order - right.order).at(-1);
+  const inheritedVoice = previous?.audioSource.kind === 'tts' ? previous.audioSource.voiceRef : null;
 
   return {
     id: newSceneId(),
@@ -59,9 +64,9 @@ export function createScene(project: ShowcaseProject, draft: SceneDraft): Showca
     narration: draft.narration,
     caption: draft.caption,
     subtitleText: draft.subtitleText || draft.narration,
-    direction: EMPTY_DIRECTION,
+    direction: { ...EMPTY_DIRECTION, pace: previous?.direction.pace ?? null },
     timing: null,
-    audioSource: { kind: 'tts', voiceRef: null, artifactId: null },
+    audioSource: { kind: 'tts', voiceRef: inheritedVoice, artifactId: null },
     audio: null,
     clip: null,
     frame: null,

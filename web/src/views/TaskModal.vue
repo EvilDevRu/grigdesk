@@ -9,37 +9,41 @@
     @update:open="onTaskDialogOpenChange"
   >
       <header class="mhead">
-        <div class="midentity">
-          <span class="meyebrow">Задача Битрикс24</span>
-          <span class="mid mono">#{{ taskId }}</span>
+        <div class="mheading">
+          <div class="midentity">
+            <span class="meyebrow">Задача Битрикс24</span>
+            <span class="mid mono">#{{ taskId }}</span>
+          </div>
+          <h3 id="task-modal-title" class="mtitle">
+            <UiSpinner v-if="loading && !detail" decorative />
+            {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
+          </h3>
         </div>
-        <h3 id="task-modal-title" class="mtitle">
-          <UiSpinner v-if="loading && !detail" decorative />
-          {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
-        </h3>
-        <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
-                            :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
-                            :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
-                            @toggle="toggleFavorite" />
-        <UiIconButton
-          data-context="task-modal-header"
-          label="Обновить задачу"
-          title="Обновить"
-          :loading="loading"
-          :disabled="Boolean(editForm) || busy === 'edit'"
-          loading-label="Обновляю задачу"
-          @click="refresh"
-        >
-          ⟳
-        </UiIconButton>
-        <UiIconButton
-          data-context="task-modal-header"
-          label="Закрыть задачу"
-          title="Закрыть (Esc)"
-          @click="ui.close()"
-        >
-          ✕
-        </UiIconButton>
+        <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
+          <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
+                              :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
+                              :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
+                              @toggle="toggleFavorite" />
+          <UiIconButton
+            data-context="task-modal-header"
+            label="Обновить задачу"
+            title="Обновить"
+            :loading="loading"
+            :disabled="Boolean(editForm) || busy === 'edit'"
+            loading-label="Обновляю задачу"
+            @click="refresh"
+          >
+            ⟳
+          </UiIconButton>
+          <UiIconButton
+            data-context="task-modal-header"
+            label="Закрыть задачу"
+            title="Закрыть (Esc)"
+            @click="ui.close()"
+          >
+            ✕
+          </UiIconButton>
+        </div>
       </header>
 
       <div v-if="err || favorites.error || shelf.error" class="malerts" aria-live="polite">
@@ -50,11 +54,22 @@
 
       <div class="mcontext" aria-label="Состояние задачи">
         <div class="meta">
-          <span v-if="detail?.status_label" class="tag">{{ detail.status_label }}</span>
-          <span v-if="detail?.priority_label" class="tag">{{ detail.priority_label }}</span>
-          <span v-if="boardTask?.group" class="tag">{{ boardTask.group }}</span>
-          <span v-if="boardTask?.deadline" class="tag" :class="{ over: boardTask.overdue }">до {{ boardTask.deadline }}</span>
-          <span v-if="!detail?.status_label && !detail?.priority_label && !boardTask?.group && !boardTask?.deadline"
+          <span v-if="detail?.status_label" class="tag task-status">{{ detail.status_label }}</span>
+          <span v-if="taskProject" class="context-item">
+            <span class="context-label">Проект</span>{{ taskProject }}
+          </span>
+          <span v-if="taskResponsible" class="context-item">
+            <span class="context-label">Исполнитель</span>{{ taskResponsible }}
+          </span>
+          <span v-if="detail?.priority_label" class="context-item">
+            <span class="context-label">Приоритет</span>{{ detail.priority_label }}
+          </span>
+          <span v-if="boardTask?.deadline" class="context-item" :class="{ over: boardTask.overdue }">
+            <span class="context-label">{{ boardTask.overdue ? 'Просрочена' : 'Срок' }}</span>
+            {{ boardTask.deadline }}
+          </span>
+          <span v-if="!detail?.status_label && !detail?.priority_label
+            && !taskProject && !taskResponsible && !boardTask?.deadline"
                 class="context-empty">{{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}</span>
         </div>
       </div>
@@ -63,16 +78,16 @@
         <section class="task-pane brief-pane" aria-labelledby="task-brief-title">
           <div class="pane-head">
             <div>
-              <span class="pane-kicker">Постановка</span>
-              <h4 id="task-brief-title" class="pane-title">Что нужно сделать</h4>
+              <h4 id="task-brief-title" class="pane-title">Описание задачи</h4>
             </div>
             <UiButton
               v-if="detail && !editForm"
               data-role="task-edit-open"
+              title="Редактировать задачу"
               :disabled="loading || busy === 'edit'"
               @click="openTaskEdit"
             >
-              Править
+              Изменить
             </UiButton>
           </div>
           <div class="brief-scroll">
@@ -187,7 +202,6 @@
             <template v-else>
               <p v-if="editMessage" class="edit-message" role="status">{{ editMessage }}</p>
               <div v-if="cleanDesc" class="desc-box">
-                <div class="tlbl">Описание</div>
                 <p class="desc" v-html="descHtml"></p>
               </div>
 
@@ -240,8 +254,7 @@
         <section class="task-pane work-pane" aria-labelledby="task-work-title">
           <div class="work-head">
             <div>
-              <span class="pane-kicker">Рабочая зона</span>
-              <h4 id="task-work-title" class="pane-title">Разбор и связь</h4>
+              <h4 id="task-work-title" class="pane-title">Разбор задачи</h4>
             </div>
             <!-- Табы: Триаж | Комментарии -->
             <UiTabs v-model="mtab" class="mtabs" label="Раздел карточки задачи">
@@ -251,7 +264,7 @@
                 value="triage"
                 controls="task-panel-triage"
               >
-                Триаж
+                Оценка
               </UiTab>
               <UiTab
                 id="task-tab-comments"
@@ -264,7 +277,7 @@
             </UiTabs>
           </div>
 
-          <div class="tab-scroll">
+          <div class="tab-scroll" :class="{ 'show-comments': mtab === 'comments' }">
             <!-- Триаж: оценка сложности/рисков без стенда -->
             <div
               v-show="mtab === 'triage'"
@@ -277,54 +290,66 @@
             Триаж выключен в настройках плагинов. Сохранённые оценки и уточнения не удалены.
           </div>
           <template v-else>
-          <div class="thead2">
-            <span class="triage-summary">
-              <span class="tlbl">Триаж</span>
-              <template v-if="triage?.analysis">
-                <!-- Пока идёт переоценка, старые чипсы притушены + явный индикатор: иначе
-                     «нажал уточнить — и ничего не изменилось» (оценка-то на экране осталась). -->
-                <span class="tchips" :class="{ dim: triageBusy }">
-                  <span class="tchip" :class="triage.analysis.complexity >= 4 ? 'warn' : triage.analysis.complexity === 3 ? 'acc' : ''">сложность {{ triage.analysis.complexity }}/5</span>
-                  <span class="tchip" :class="triage.analysis.risk >= 4 ? 'bad' : triage.analysis.risk === 3 ? 'warn' : ''">риск {{ triage.analysis.risk }}/5</span>
-                  <span class="tchip">дифф {{ triage.analysis.diff_size }}</span>
-                  <span class="tchip" :title="triage.analysis.route_reason || ''">
-                    {{ triage.analysis.route_guess
-                    }}<template v-if="triageDepthLabel"> · {{ triageDepthLabel }}</template>
-                  </span>
-                  <span v-if="triage.analysis.confidence !== 'high'" class="tchip" :class="triage.analysis.confidence === 'low' ? 'warn' : ''">уверенность: {{ triage.analysis.confidence }}</span>
-                </span>
-                <span v-if="triageBusy" class="tmuted">
-                  <UiSpinner decorative />
-                  {{ triageState === 'running' ? 'переоценка идёт…' : 'переоценка в очереди…' }}
-                </span>
-              </template>
-              <span v-else-if="triageBusy" class="tmuted">
-                <UiSpinner decorative />
-                {{ triageState === 'running' ? 'разведка идёт…' : 'в очереди…' }}
+          <div v-if="!triagePending" class="thead2">
+            <div class="triage-summary">
+              <span class="triage-summary-title">Оценка по коду</span>
+              <span v-if="triage?.analysis" class="triage-ready">Готова</span>
+              <span v-else-if="triageState === 'failed'" class="terr">
+                Не удалось оценить: {{ triage?.status?.error || 'попробуйте ещё раз' }}
               </span>
-              <span v-else-if="triageState === 'failed'" class="terr" :title="triage?.status?.error">триаж упал: {{ (triage?.status?.error || '').slice(0, 80) }}</span>
-              <span v-else class="tmuted">задача не оценена</span>
-            </span>
+              <span v-else class="tmuted">Задача ещё не оценена</span>
+            </div>
             <UiButton
               data-role="task-compact-action"
               tone="accent"
-              :loading="triageBusy || busy === 'analyze'"
-              :disabled="triageBusy || busy === 'analyze'"
-              loading-label="Оцениваю задачу"
               @click="analyzeNow"
             >
-              {{ triage?.analysis ? '↻ Переоценить' : '🔍 Оценить' }}
+              {{ triage?.analysis ? 'Переоценить' : 'Оценить задачу' }}
             </UiButton>
+            <dl v-if="triage?.analysis" class="triage-metrics">
+              <div
+                v-for="metric in triageMetrics"
+                :key="metric.id"
+                class="triage-metric"
+                :data-metric="metric.id"
+                :data-tone="metric.tone"
+              >
+                <dt>{{ metric.label }}</dt>
+                <dd>{{ metric.value }}</dd>
+              </div>
+            </dl>
+            <p v-if="triage?.analysis" class="triage-route" :title="triage.analysis.route_reason || ''">
+              {{ triageWorkLabel }}
+              <span v-if="triageDepthLabel">· {{ triageDepthLabel }} маршрут</span>
+            </p>
           </div>
 
-          <template v-if="triage?.analysis">
-            <p v-if="triage.analysis.summary" class="tsum">{{ triage.analysis.summary }}</p>
+          <!-- Нажал «Уточнить» или «Переоценить» — и до конца захода на панели остаётся
+               только ход разбора со счётчиком. Прошлая оценка и уже отвеченные вопросы к
+               нему отношения не имеют, а сделать с ними человек всё равно ничего не может. -->
+          <div v-else class="thead2 triage-progress" role="status" aria-live="polite">
+            <span class="tlbl">Триаж</span>
+            <UiSpinner decorative />
+            <span class="triage-progress-state">{{ triageProgressLabel }}</span>
+            <span v-if="triageProgressElapsed" class="triage-progress-time mono">
+              {{ triageProgressElapsed }}
+            </span>
+          </div>
+
+          <template v-if="triage?.analysis && !triagePending">
+            <section v-if="triage.analysis.summary" class="triage-result" aria-label="Вывод оценки">
+              <h5>Вывод</h5>
+              <p class="tsum">{{ triage.analysis.summary }}</p>
+            </section>
             <p v-if="triage.stale?.length" class="tstale">
               ⚠ Код под оценкой менялся: {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? ` и ещё ${triage.stale.length - 5}` : '' }} — стоит переоценить.
             </p>
-            <ul v-if="triage.analysis.risk_markers?.length" class="tlist">
-              <li v-for="m in triage.analysis.risk_markers" :key="m">⚠ {{ m }}</li>
-            </ul>
+            <section v-if="triage.analysis.risk_markers?.length" class="triage-risks">
+              <h5>Риски и ограничения <span>{{ triage.analysis.risk_markers.length }}</span></h5>
+              <ul class="tlist">
+                <li v-for="m in triage.analysis.risk_markers" :key="m">{{ m }}</li>
+              </ul>
+            </section>
             <section
               v-if="triageQuestions.length"
               class="clarify"
@@ -342,22 +367,22 @@
                 v-for="(question, questionIndex) in triageQuestions"
                 :key="question.id"
                 class="clarify-card"
-                :class="{ 'is-answered': answerFor(question.id) }"
+                :class="{ 'is-answered': answerFor(question) }"
               >
                 <div class="clarify-question">
                   <span class="clarify-index" aria-hidden="true">{{ questionIndex + 1 }}</span>
                   <div class="clarify-question-copy">
                     <h6>{{ question.text }}</h6>
                     <span
-                      v-if="answerFor(question.id)"
+                      v-if="answerFor(question)"
                       class="clarify-status"
                       :class="{
-                        warn: answerFor(question.id).status === 'human_required',
+                        warn: answerFor(question).status === 'human_required',
                       }"
                     >
-                      {{ answerFor(question.id).status === 'human_required'
+                      {{ answerFor(question).status === 'human_required'
                         ? 'Арбитр оставил вопрос человеку'
-                        : answerFor(question.id).actor === 'cockpit-arbiter'
+                        : answerFor(question).actor === 'cockpit-arbiter'
                           ? 'Арбитр — машинный ответ'
                           : 'Ответил человек' }}
                     </span>
@@ -492,7 +517,7 @@
                     tone="accent"
                     variant="solid"
                     :loading="busy === 'clarify' || clarifyUploading"
-                    :disabled="busy === 'clarify' || triageBusy || clarifyUploading || !hasClarifyAnswers"
+                    :disabled="busy === 'clarify' || clarifyUploading || !hasClarifyAnswers"
                     loading-label="Сохраняю уточнения"
                     @click="sendClarify"
                   >
@@ -501,7 +526,7 @@
                   <UiButton
                     v-if="analysisManifest"
                     :loading="busy === 'arbitrate'"
-                    :disabled="busy === 'arbitrate' || triageBusy"
+                    :disabled="busy === 'arbitrate'"
                     @click="arbitrateQuestions"
                   >
                     Разобрать арбитром
@@ -509,10 +534,21 @@
                 </UiFormActions>
               </div>
             </section>
-            <details v-if="clarifySaved" class="clhist">
-              <summary>Внутренние уточнения (локально, для агентов — заказчик не видит)</summary>
-              <div class="clhist-body">{{ clarifySaved }}</div>
-            </details>
+            <div v-if="clarifySaved" class="clhist">
+              <UiDisclosureButton
+                controls="task-triage-history"
+                data-role="task-analysis-disclosure"
+                density="compact"
+                :open="showClarifyHistory"
+                @update:open="showClarifyHistory = $event"
+              >
+                Уточнения для агентов
+              </UiDisclosureButton>
+              <div v-if="showClarifyHistory" id="task-triage-history" class="clhist-body">
+                <p class="triage-private-hint">Хранятся локально. Заказчик их не видит.</p>
+                {{ clarifySaved }}
+              </div>
+            </div>
             <UiDisclosureButton
               v-if="triage.note"
               data-role="task-note-disclosure"
@@ -521,19 +557,42 @@
               :open="showNote"
               @update:open="showNote = $event"
             >
-              Разведнота (карта кода для планировщика)
+              Разведнота · карта кода
             </UiDisclosureButton>
             <div v-if="showNote" id="task-triage-note" class="tnote" v-html="noteHtml"></div>
-            <p class="tmeta mono">
-              {{ triage.analysis.generated_at ? new Date(triage.analysis.generated_at).toLocaleString('ru-RU') : '' }}
-              <template v-if="triage.analysis.meta">
-                · {{ triage.analysis.meta.provider || '' }}
-                · {{ triage.analysis.meta.model }}
-                <template v-if="triage.analysis.meta.effort"> · {{ triage.analysis.meta.effort }}</template>
-                · {{ Math.round((triage.analysis.meta.duration_ms || 0) / 60000) }} мин
-                <template v-if="triage.analysis.meta.cost_usd"> · ${{ triage.analysis.meta.cost_usd.toFixed(2) }}</template>
-              </template>
-            </p>
+            <div v-if="triage.analysis.generated_at || triage.analysis.meta" class="triage-details">
+              <UiDisclosureButton
+                controls="task-analysis-details"
+                data-role="task-analysis-disclosure"
+                density="compact"
+                :open="showAnalysisDetails"
+                @update:open="showAnalysisDetails = $event"
+              >
+                Подробности оценки
+              </UiDisclosureButton>
+              <dl v-if="showAnalysisDetails" id="task-analysis-details" class="tmeta">
+                <template v-if="triage.analysis.generated_at">
+                  <dt>Получена</dt>
+                  <dd>{{ new Date(triage.analysis.generated_at).toLocaleString('ru-RU') }}</dd>
+                </template>
+                <template v-if="triage.analysis.meta?.provider">
+                  <dt>Исполнитель</dt><dd>{{ triage.analysis.meta.provider }}</dd>
+                </template>
+                <template v-if="triage.analysis.meta?.model">
+                  <dt>Модель</dt><dd>{{ triage.analysis.meta.model }}</dd>
+                </template>
+                <template v-if="triage.analysis.meta?.effort">
+                  <dt>Усилие</dt><dd>{{ triage.analysis.meta.effort }}</dd>
+                </template>
+                <template v-if="triage.analysis.meta?.duration_ms != null">
+                  <dt>Длительность</dt>
+                  <dd>{{ mmss(triage.analysis.meta.duration_ms / 1000) }}</dd>
+                </template>
+                <template v-if="triage.analysis.meta?.cost_usd != null">
+                  <dt>Стоимость</dt><dd>${{ triage.analysis.meta.cost_usd.toFixed(2) }}</dd>
+                </template>
+              </dl>
+            </div>
           </template>
           </template>
         </div>
@@ -567,7 +626,9 @@
               v-model="commentText"
               class="comment-text"
               data-role="task-comment"
+              aria-label="Комментарий к задаче"
               rows="2"
+              :disabled="busy === 'comment'"
               placeholder="Добавить комментарий…"
             />
             <UiButton
@@ -586,14 +647,28 @@
 
       <!-- Управление -->
       <footer class="controls" aria-label="Действия с задачей">
-          <div class="timer mono" :class="{ run: running }">
-            <span class="tclock">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
-            <span class="tstate">{{ running ? 'идёт' : 'остановлен' }}</span>
+          <div class="timer-group" role="group" aria-label="Учёт времени">
+            <div class="timer" :class="{ run: running }">
+              <span class="tclock mono">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
+              <span class="tstate">{{ running ? 'Идёт учёт' : 'Учёт остановлен' }}</span>
+            </div>
+            <UiButton
+              data-context="task-footer-action"
+              :tone="running ? 'warning' : 'accent'"
+              variant="outline"
+              :loading="busy === 'timer'"
+              :disabled="busy === 'timer'"
+              loading-label="Обновляю учёт времени"
+              @click="toggleTimer"
+            >
+              {{ running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
+            </UiButton>
           </div>
           <div class="cbtns">
             <UiButton
               v-if="shelfEnabled"
               data-context="task-footer-action"
+              data-role="task-shelf-toggle"
               tone="neutral"
               variant="outline"
               :pressed="shelf.isOnShelf(taskId)"
@@ -602,29 +677,7 @@
               loading-label="Обновляю полку"
               @click="toggleShelf"
             >
-              {{ shelf.isOnShelf(taskId) ? 'Отложено' : 'Отложить' }}
-            </UiButton>
-            <UiButton
-              data-context="task-footer-action"
-              :tone="running ? 'warning' : 'accent'"
-              variant="solid"
-              :loading="busy === 'timer'"
-              :disabled="busy === 'timer'"
-              loading-label="Обновляю учёт времени"
-              @click="toggleTimer"
-            >
-              {{ running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
-            </UiButton>
-            <UiButton
-              data-context="task-footer-action"
-              tone="success"
-              variant="solid"
-              :loading="busy === 'complete'"
-              :disabled="busy === 'complete'"
-              loading-label="Завершаю задачу"
-              @click="complete"
-            >
-              ✓ Завершить
+              {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
             </UiButton>
             <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован.
                  Затык виден прямо на кнопке: карточку задачи открывают чаще, чем конвейер, а
@@ -676,6 +729,17 @@
               data-context="task-footer-action"
               :task-id="taskId"
             />
+            <UiButton
+              data-context="task-footer-action"
+              tone="success"
+              variant="solid"
+              :loading="busy === 'complete'"
+              :disabled="busy === 'complete'"
+              loading-label="Завершаю задачу"
+              @click="complete"
+            >
+              ✓ Завершить
+            </UiButton>
           </div>
           <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
@@ -880,12 +944,13 @@ import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { analyzeTask, readAnalysisDetail, useAnalysisStore } from '../actions/analysis';
 import { analysisApi } from '../shared/analysisApi.ts';
+import { questionKey } from '../../../shared/analysisContracts.ts';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
 import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import { useDictationController } from '../features/speech/provider.js';
-import { liveTimerSec, secToHMS } from '../shared/format.ts';
+import { liveTimerSec, mmss, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
@@ -929,6 +994,8 @@ function taskContextDetails(id) {
 const running = computed(() => !!boardTask.value?.timerRunning);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
+const taskProject = computed(() => detail.value?.group_name || boardTask.value?.group || '');
+const taskResponsible = computed(() => detail.value?.responsible?.name || boardTask.value?.responsible || '');
 
 // B24 отдаёт описание с HTML/entities — чистим до читаемого текста.
 function htmlToText(s) {
@@ -1145,6 +1212,8 @@ async function loadDetail(force = false) {
 const analysisStore = useAnalysisStore();
 const triage = ref(null);        // ответ /api/analysis/:id
 const showNote = ref(false);     // разведнота развёрнута
+const showClarifyHistory = ref(false);
+const showAnalysisDetails = ref(false);
 let triageTimer = null;
 const analysisManifest = computed(() => plugins.byId('analysis'));
 // Старый сервер ещё не отдаёт manifest триажа: до ручного рестарта считаем его включённым.
@@ -1152,6 +1221,100 @@ const analysisEnabled = computed(() => analysisManifest.value?.enabled !== false
 const triageState = computed(() => triage.value?.status?.state || null);
 const triageBusy = computed(() => triageState.value === 'queued' || triageState.value === 'running');
 const noteHtml = computed(() => (triage.value?.note ? mdToHtml(triage.value.note) : ''));
+
+const TRIAGE_WORK_LABELS = {
+  feature: 'Новая функциональность',
+  debug: 'Исправление ошибки',
+  perf: 'Оптимизация',
+  hunt: 'Поиск дефектов',
+};
+const CONFIDENCE_LABELS = {
+  high: 'Высокая',
+  medium: 'Средняя',
+  low: 'Низкая',
+};
+const triageWorkLabel = computed(() => {
+  const kind = triage.value?.analysis?.route_guess;
+
+  return TRIAGE_WORK_LABELS[kind] || kind || 'Тип работы не указан';
+});
+
+/**
+ * Показатели читаются отдельно от маршрута. Отсутствующие данные не превращаются
+ * в нулевую оценку, а машинные уровни уверенности показываются по-русски.
+ */
+const triageMetrics = computed(() => {
+  const value = triage.value?.analysis;
+
+  if (!value) {
+    return [];
+  }
+
+  return [
+    {
+      id: 'complexity',
+      label: 'Сложность',
+      value: triageScore(value.complexity),
+      tone: value.complexity >= 4 ? 'warning' : 'neutral',
+    },
+    {
+      id: 'risk',
+      label: 'Риск',
+      value: triageScore(value.risk),
+      tone: value.risk >= 4 ? 'danger' : value.risk === 3 ? 'warning' : 'neutral',
+    },
+    {
+      id: 'diff',
+      label: 'Объём правок',
+      value: value.diff_size || '—',
+      tone: 'neutral',
+    },
+    {
+      id: 'confidence',
+      label: 'Уверенность',
+      value: CONFIDENCE_LABELS[value.confidence] || 'Не указана',
+      tone: value.confidence === 'low' ? 'warning' : 'neutral',
+    },
+  ];
+});
+
+function triageScore(value) {
+  const score = Number(value);
+
+  return Number.isInteger(score) && score >= 1 && score <= 5 ? `${score}/5` : '—';
+}
+
+// Заход триажа идёт с момента нажатия и до готовой оценки: сначала уходят ответы
+// человека, потом оценка стоит в очереди и считается. Всё это время панель показывает
+// только прогресс, поэтому одного статуса сервера мало — нужна и своя отправка.
+const triagePending = computed(() => busy.value === 'clarify'
+  || busy.value === 'analyze'
+  || triageBusy.value);
+
+// Первый заход по задаче называется разведкой, повторный — переоценкой: человеку важно,
+// сгорит ли уже показанная оценка.
+const triageProgressLabel = computed(() => {
+  if (busy.value === 'clarify') {
+    return 'уточнения сохраняются…';
+  }
+  const again = Boolean(triage.value?.analysis);
+  if (triageState.value === 'running') {
+    return again ? 'переоценка идёт…' : 'разведка идёт…';
+  }
+
+  return again ? 'переоценка в очереди…' : 'в очереди…';
+});
+
+// Сколько заход уже длится. До старта считаем от постановки в очередь: ожидание очереди
+// человек ждёт так же, как саму работу, а пустая панель без счётчика выглядит зависшей.
+const triageProgressElapsed = computed(() => {
+  const startedAt = Number(triage.value?.status?.startedAt || triage.value?.status?.queuedAt || 0);
+  if (!triageBusy.value || !startedAt) {
+    return '';
+  }
+
+  return mmss(Math.max(0, (now.value - startedAt) / 1000));
+});
 
 function normalizeTriageQuestions(values) {
   return (Array.isArray(values) ? values : []).map((raw, index) => {
@@ -1201,10 +1364,15 @@ function draftFor(questionId) {
   return clarifyDrafts.value[questionId] || { text: '', optionIds: [], attachments: [] };
 }
 
-function answerFor(questionId) {
+// Ответ ищем и по идентификатору вопроса, и по смыслу его текста: следующий заход
+// триажа переписывает вопросы заново, и по одному id уже данный ответ пропадал из
+// карточки — человек отвечал второй раз на то же самое.
+function answerFor(question) {
+  const key = questionKey(question.text);
   for (let index = clarifyEntries.value.length - 1; index >= 0; index -= 1) {
-    if (clarifyEntries.value[index].questionId === questionId) {
-      return clarifyEntries.value[index];
+    const entry = clarifyEntries.value[index];
+    if (entry.questionId === question.id || (key && questionKey(entry.questionText) === key)) {
+      return entry;
     }
   }
   return null;
@@ -1683,6 +1851,8 @@ watch(taskId, (id) => {
     launchForm.value = null; launchOpts.value = null;
     launchOptionsRequest += 1; launchOptionsBusy.value = false;
     triage.value = null; showNote.value = false;
+    showClarifyHistory.value = false;
+    showAnalysisDetails.value = false;
     mtab.value = 'triage'; comments.value = null; clarifyDrafts.value = {}; clarifySaved.value = '';
     clarifyEntries.value = [];
     clarifyComposerOpen.value = {};
@@ -1742,37 +1912,131 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.mhead { flex: none; display: flex; align-items: center; gap: 12px; min-height: 66px;
-  padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-.midentity { flex: none; width: 112px; display: flex; flex-direction: column; gap: 2px; }
-.meyebrow, .pane-kicker { color: var(--ink-mid); font-size: 10px; font-weight: 650;
-  letter-spacing: .09em; line-height: 1.2; text-transform: uppercase; }
-.mid { color: var(--accent); font-size: 13px; font-weight: 650; }
-.mtitle { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ink);
-  font-size: 17px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.mhead {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.mheading {
+  flex: 1;
+  min-width: 0;
+}
+.midentity {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.meyebrow {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.mid {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mtitle {
+  max-height: 120px;
+  margin: 0;
+  overflow-y: auto;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.mhead-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
 .malerts { flex: none; display: grid; gap: 4px; max-height: 104px; overflow-y: auto;
   padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));
   background: color-mix(in srgb, var(--bad) 9%, var(--surface)); }
 .err { margin: 0; color: var(--bad); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
-.mcontext { flex: none; min-width: 0; min-height: 43px; display: flex; align-items: center;
-  padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--ground); }
-.meta { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.tag { max-width: 100%; padding: 3px 9px; overflow: hidden; border: 1px solid var(--line);
-  border-radius: 999px; background: var(--surface-2); color: var(--ink-mid); font-size: 11.5px;
-  line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
-.tag.over { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); color: var(--bad); }
-.context-empty { color: var(--ink-mid); font-size: 12px; }
+.mcontext {
+  flex: none;
+  min-width: 0;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+}
+.meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.tag {
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.context-item {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.context-label {
+  color: var(--ink-mid);
+}
+.context-item.over,
+.context-item.over .context-label {
+  color: var(--bad);
+}
+.context-empty {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
 .mbody { flex: 1; min-width: 0; min-height: 0; display: grid;
   grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: 14px;
   padding: 14px 16px; overflow: hidden; }
 .task-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
-.pane-head { flex: none; min-height: 56px; display: flex; align-items: center;
-  justify-content: space-between; gap: 12px; padding: 9px 13px;
-  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 72%, var(--ground)); }
-.pane-head > div { min-width: 0; }
-.pane-title { margin: 3px 0 0; color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.25; }
+.pane-head,
+.work-head {
+  flex: none;
+  min-width: 0;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.pane-head > div,
+.work-head > div {
+  min-width: 0;
+}
+.pane-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
 .brief-scroll, .tab-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
   overscroll-behavior: contain; scrollbar-gutter: stable; }
 .brief-scroll { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
@@ -1786,22 +2050,35 @@ onUnmounted(() => {
 .edit-message { margin: 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line));
   border-radius: 9px; background: color-mix(in srgb, var(--good) 8%, var(--surface));
   color: var(--good); font-size: 12px; line-height: 1.45; }
-.desc-box { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface); }
-.desc-box .tlbl { margin-bottom: 7px; }
-.desc { margin: 0; color: var(--ink); font-size: 13.5px; line-height: 1.58; white-space: pre-wrap;
-  overflow-wrap: anywhere; }
-.desc :deep(a) { color: var(--accent); text-decoration: none; word-break: break-all; }
-.desc :deep(a:hover) { text-decoration: underline; }
+.desc-box {
+  min-width: 0;
+  padding: 4px;
+}
+.desc {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.desc :deep(a) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
 .brief-empty { display: grid; min-height: 150px; place-items: center; padding: 18px;
   border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-mid); font-size: 13px;
   line-height: 1.45; text-align: center; }
-.work-head { flex: none; min-width: 0; min-height: 56px; display: flex; align-items: flex-end;
-  justify-content: space-between; gap: 12px; padding: 8px 13px 0;
-  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 72%, var(--ground)); }
-.work-head > div { flex: none; align-self: center; }
-.tab-scroll { padding: 12px; }
-
+.tab-scroll {
+  padding: 16px;
+}
+.tab-scroll.show-comments {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 /* Обсуждение в Telegram. min-width: 0 обязателен: блок стоит во флекс-колонке,
    а без него флекс-элемент не сжимается ниже своего содержимого — одна длинная
    ссылка из чужого чата раздвинула бы модалку (та же грабля, что была в чате).
@@ -1830,26 +2107,151 @@ onUnmounted(() => {
 .tgmedia { font-size: 11px; color: var(--ink-mid); overflow-wrap: anywhere; }
 .tgmore { font-size: 11px; color: var(--ink-mid); }
 
-.triage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.thead2 { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
-  padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface); }
-.triage-summary { display: flex; flex: 1 1 360px; align-items: center; gap: 6px;
-  min-width: 0; flex-wrap: wrap; }
-.tlbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); margin-right: 4px; }
-.tchips { display: contents; }
-.tchips.dim { display: inline-flex; gap: 6px; flex-wrap: wrap; opacity: .45; }
-.tchip { font-size: 12px; font-family: var(--mono, monospace); color: var(--ink-mid);
-  border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
-.tchip.acc { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.tchip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.tchip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
-.tmuted { color: var(--ink-mid); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
-.terr { color: var(--bad); font-size: 12px; }
-.thead2 [data-role='task-compact-action'] { flex: none; }
-.tsum { margin: 0 2px; font-size: 13px; color: var(--ink); line-height: 1.5; }
-.tstale { margin: 0 2px; font-size: 12px; color: var(--warn); }
-.tlist { margin: 0; padding: 0 0 0 4px; list-style: none; font-size: 12px; color: var(--ink-mid); display: flex; flex-direction: column; gap: 3px; }
+.triage {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.thead2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+.triage-summary {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.triage-summary-title {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.triage-ready {
+  color: var(--good);
+  font-size: 12px;
+}
+.triage-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  flex-basis: 100%;
+  gap: 8px;
+  margin: 0;
+}
+.triage-metric {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.triage-metric dt {
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.triage-metric dd {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.triage-metric[data-tone='warning'] dd {
+  color: var(--warn);
+}
+.triage-metric[data-tone='danger'] dd {
+  color: var(--bad);
+}
+.triage-route {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.tlbl {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.tmuted {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+.triage-progress {
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+.triage-progress-state,
+.triage-progress-time {
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+.terr {
+  color: var(--bad);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.thead2 [data-role='task-compact-action'] {
+  flex: none;
+}
+.triage-result h5,
+.triage-risks h5 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 9px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.triage-risks h5 span {
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 400;
+}
+.tsum {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.tstale {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.tlist {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-mid);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.tlist li::marker {
+  color: var(--warn);
+}
 .clarify { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line);
   border-radius: 11px; background: var(--surface); }
 .triage-disabled { color: var(--ink-mid); font-size: 13px; padding: 6px 2px; }
@@ -1898,10 +2300,28 @@ onUnmounted(() => {
 .clarify-submit { position: sticky; z-index: 1; bottom: -12px; padding: 10px 12px;
   border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; background: var(--surface);
   box-shadow: 0 -12px 24px color-mix(in srgb, var(--ground) 72%, transparent); }
-.clhist { border: 1px dashed var(--line); border-radius: 9px; padding: 7px 11px; }
-.clhist summary { cursor: pointer; font-size: 12.5px; color: var(--ink-mid); user-select: none; }
-.clhist-body { margin-top: 6px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
-  max-height: 220px; overflow-y: auto; }
+.clhist,
+.triage-details {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.clhist-body {
+  max-height: 260px;
+  margin-top: 8px;
+  padding: 0 10px;
+  overflow-y: auto;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.triage-private-hint {
+  margin: 0 0 10px;
+  color: var(--warn);
+  font-size: 12px;
+}
 .attrow { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
 .attchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
   border-radius: 8px; padding: 3px 8px 3px 3px; background: var(--surface-2); font-size: 12px; }
@@ -1910,8 +2330,24 @@ onUnmounted(() => {
 /* ── Табы модалки ── */
 .mtabs { align-self: stretch; }
 /* ── Таб комментариев ── */
-.comtab { min-height: 100%; display: flex; flex-direction: column; gap: 12px; }
-.comlist { display: flex; flex-direction: column; gap: 10px; }
+.comtab {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+.comlist {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .com { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
 .comhead { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
 .comtime { color: var(--ink-mid); font-size: 11.5px; }
@@ -1926,15 +2362,66 @@ onUnmounted(() => {
 .tnote :deep(code) { font-family: var(--mono, monospace); font-size: 12px; background: var(--surface-2);
   border-radius: 4px; padding: 1px 4px; }
 .tnote :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
-.tmeta { margin: 0; font-size: 11px; color: var(--ink-mid); }
-.controls { position: relative; flex: none; min-width: 0; display: flex; align-items: center;
-  gap: 12px; flex-wrap: wrap; padding: 10px 16px; background: var(--surface-2);
-  border-top: 1px solid var(--line); }
-.timer { flex: none; display: flex; flex-direction: column; min-width: 92px; margin-right: auto; }
-.tclock { font-size: 18px; font-weight: 650; line-height: 1.1; }
-.timer.run .tclock { color: var(--good); }
-.tstate { font-size: 11px; color: var(--ink-mid); }
-.cbtns { min-width: 0; display: flex; align-items: stretch; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.tmeta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 10px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tmeta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.controls {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  min-width: 0;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.timer-group {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.timer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 106px;
+}
+.tclock {
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.timer.run .tclock {
+  color: var(--good);
+}
+.tstate {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.cbtns {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
 .convstall { display: flex; flex-direction: column; gap: 2px; width: 100%;
   padding: 7px 10px; border-radius: 8px; color: var(--bad);
   background: color-mix(in srgb, var(--bad) 10%, transparent);
@@ -1972,11 +2459,21 @@ onUnmounted(() => {
 .ladvanced-body { display: flex; flex-direction: column; gap: 7px; }
 .lerror { margin: 0; color: var(--bad); font-size: 12px; }
 .lbtns { display: flex; gap: 8px; justify-content: flex-end; }
-.comment { display: flex; gap: 8px; align-items: flex-end; margin-top: auto; }
-.comment-text { flex: 1; }
+.comment {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.comment-text {
+  flex: 1;
+  min-width: 0;
+}
 
 @media (max-width: 980px) {
-  .midentity { width: 100px; }
   .mbody { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
     scrollbar-gutter: stable; }
   .task-pane { flex: none; min-height: auto; overflow: visible; }
@@ -1984,22 +2481,24 @@ onUnmounted(() => {
   .tg { max-height: 320px; }
   .clarify-submit { position: static; box-shadow: none; }
   .controls { gap: 10px; }
-  .timer { min-width: 82px; }
+  .timer-group { flex: 1 1 100%; justify-content: space-between; }
   .cbtns { flex: 1; }
+  .tab-scroll.show-comments { display: block; overflow: visible; }
+  .comtab { min-height: 240px; }
+  .comlist { flex: none; overflow: visible; }
 }
 
 @media (max-width: 600px) {
-  .mhead { gap: 7px; min-height: 56px; padding: 7px 10px; }
-  .midentity { width: auto; }
-  .meyebrow { display: none; }
-  .mid { font-size: 12px; }
-  .mtitle { font-size: 14px; line-height: 1.25; }
-  .mhead :deep(.favbtn) { width: 38px; height: 38px; }
-  .malerts { max-height: 88px; padding: 7px 10px; }
-  .mcontext { min-height: 38px; padding: 6px 10px; overflow: hidden; }
-  .meta { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
-  .meta::-webkit-scrollbar { display: none; }
-  .tag { flex: none; }
+  .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; }
+  .mheading { display: contents; }
+  .midentity { grid-row: 1; grid-column: 1; margin: 0; }
+  .meyebrow { font-size: 11px; }
+  .mtitle { grid-row: 2; grid-column: 1 / -1; max-height: 112px; font-size: 16px; }
+  .mhead-actions { grid-row: 1; grid-column: 2; gap: 0; }
+  .malerts { max-height: 88px; padding: 8px 12px; }
+  .mcontext { padding: 8px 12px; max-height: 90px; overflow-y: auto; }
+  .meta { gap: 8px 14px; }
+  .context-item { font-size: 11px; }
   .mbody { gap: 10px; padding: 10px; }
   .task-pane { border-radius: 10px; }
   .pane-head { min-height: 50px; padding: 8px 11px; }
@@ -2008,14 +2507,13 @@ onUnmounted(() => {
   .task-edit-grid { grid-template-columns: minmax(0, 1fr); }
   .task-edit-grid > :last-child { grid-column: auto; }
   .task-edit-actions > * { flex: 1; }
-  .desc-box { padding: 10px; }
-  .desc { font-size: 13px; line-height: 1.55; }
+  .desc-box { padding: 2px; }
+  .desc { font-size: 13.5px; line-height: 1.65; }
   .tg { max-height: 280px; padding: 9px 10px; }
-  .work-head { min-height: 44px; padding: 0 7px; }
+  .work-head { min-height: 50px; padding: 7px; }
   .work-head > div { display: none; }
   .mtabs { width: 100%; }
-  .triage-summary { flex-basis: 100%; }
-  .thead2 [data-role='task-compact-action'] { width: 100%; margin-left: 0; }
+  .triage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .clarify-head, .clarify-card { padding: 11px; }
   .clarify-recommendation, .clarify-options, .clarify-compose-row, .clarify-answer {
     margin-left: 0;
@@ -2023,15 +2521,12 @@ onUnmounted(() => {
   .clarify-answer-tools { align-items: flex-start; }
   .comment { flex-direction: column; align-items: stretch; }
   .comment > :last-child { align-self: flex-end; }
-  .controls { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 9px;
-    padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); }
-  .timer { min-width: 58px; margin: 0; }
-  .tclock { font-size: 15px; }
-  .tstate { font-size: 10px; }
-  .cbtns { width: 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto;
-    overscroll-behavior-x: contain; scrollbar-width: none; padding: 1px 0 3px; }
-  .cbtns::-webkit-scrollbar { display: none; }
-  .cbtns > * { flex: none; }
+  .controls { gap: 9px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .timer-group { gap: 10px; }
+  .timer { min-width: 90px; }
+  .tclock { font-size: 17px; }
+  .cbtns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .cbtns > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .convstall, .lmsg { grid-column: 1 / -1; }
   .lform { left: -10px; right: -10px; max-height: 60dvh;
     padding: 12px 12px 14px; border-radius: 12px 12px 0 0; }

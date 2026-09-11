@@ -37,6 +37,28 @@ export interface NarrationOpsDeps {
   transcribe: ((file: string) => Promise<string>) | null;
   voiceInstaller: VoiceInstaller;
   voices: VoiceRegistry;
+  // Образцы голосов лежат отдельно от роликов: они общие для всех и не стареют
+  // вместе со сценами.
+  previewDir: string;
+  withFreshness: (project: ShowcaseProject) => ShowcaseProject;
+}
+
+// Фраза образца. Она про сам раздел, а не про рабочую задачу: рабочий текст в
+// общий кэш образцов попадать не должен.
+const PREVIEW_PHRASE = 'Так будет звучать голос ролика: фильтр включается одним нажатием, '
+  + 'а результат виден сразу на экране.';
+
+const EMPTY_DIRECTION: ShowcaseProject['scenes'][number]['direction'] = {
+  tone: null,
+  pace: null,
+  emphasis: [],
+  pauses: [],
+  stresses: [],
+};
+
+export interface VoiceChoice {
+  voiceRef: string | null;
+  pace: 'slow' | 'normal' | 'fast' | null;
 }
 
 export function createNarrationOps(deps: NarrationOpsDeps) {
@@ -241,6 +263,85 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
   }
 
   /**
+   * Образец голоса: одна и та же фраза каждым голосом, синтезированная один раз.
+   * Кэш привязан к версии движка — обновлённый движок звучит иначе, и старый
+   * образец обманывал бы слух.
+   */
+  async function previewVoice(voiceRef: string): Promise<string> {
+    assertEnabled();
+
+    const { engineId, voiceId } = voices.parseVoiceRef(voiceRef);
+    const engine = voices.engineOf(engineId);
+    const version = engine.capabilities(voiceId).engineVersion;
+    const name = `${engineId}-${voiceId}-${version}.wav`.replace(/[^\w.-]/g, '_');
+    const file = path.join(deps.previewDir, name);
+
+    if (await fs.stat(file).then(() => true, () => false)) {
+      return file;
+    }
+
+    const candidate = await engine.synthesize(
+      {
+        canonicalText: PREVIEW_PHRASE,
+        direction: EMPTY_DIRECTION,
+        voiceRef: voiceId,
+        language: 'ru',
+      },
+      {
+        deadlineMs: 180_000,
+        outputDir: deps.previewDir,
+      },
+    );
+
+    await fs.rename(candidate.temporaryFile, file);
+
+    return file;
+  }
+
+  /**
+   * Голос и темп ролика целиком. Меняются все синтезируемые сцены разом: ролик,
+   * где сцены говорят разными голосами, читается как ошибка, а не как выбор.
+   * Загруженные записи не трогаются. Свежесть звука после смены считается
+   * заново хешами — переозвучка придёт со следующей сборкой.
+   */
+  async function setVoice(
+    id: string,
+    expectedRevision: number,
+    choice: VoiceChoice,
+  ): Promise<ShowcaseProject> {
+    assertEnabled();
+
+    if (choice.voiceRef) {
+      const { engineId, voiceId } = voices.parseVoiceRef(choice.voiceRef);
+      const known = await voices.engineOf(engineId).voices();
+      const voice = known.find((item) => item.id === voiceId);
+
+      if (!voice?.available) {
+        throw new ShowcaseError(
+          'voice_unavailable',
+          voice?.reason || `Голос «${choice.voiceRef}» сейчас недоступен.`,
+          409,
+        );
+      }
+    }
+
+    const saved = await store.updateProject(id, expectedRevision, (current) => ({
+      ...current,
+      scenes: current.scenes.map((scene) => ({
+        ...scene,
+        direction: { ...scene.direction, pace: choice.pace },
+        audioSource: scene.audioSource.kind === 'tts'
+          ? { ...scene.audioSource, voiceRef: choice.voiceRef }
+          : scene.audioSource,
+      })),
+    }));
+
+    broadcast('showcase-changed', { projectId: id, revision: saved.revision });
+
+    return deps.withFreshness(saved);
+  }
+
+  /**
    * Установка локального голоса. Раздел не выбирает голос за человека и не ставит
    * ничего сам при первом открытии: скачивание сотен мегабайт — его решение.
    */
@@ -264,6 +365,8 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
     cancelVoiceInstall,
     defaultVoiceRef,
     installVoice,
+    previewVoice,
+    setVoice,
     synthesizeScenes,
     voiceCatalog,
   };

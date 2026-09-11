@@ -146,6 +146,13 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
       '../shared/format.ts': [
         'export const liveTimerSec = (task) => task?.timerElapsed || 0;',
         'export const secToHMS = (value) => String(value ?? 0);',
+        // mmss повторён настоящим: тест прогресса триажа читает именно таймкод,
+        // а не факт наличия подписи.
+        'export const mmss = (value) => {',
+        '  const sec = Math.max(0, Math.floor(Number(value) || 0));',
+        '  const pad = (part) => String(part).padStart(2, "0");',
+        '  return pad(Math.floor(sec / 60)) + ":" + pad(sec % 60);',
+        '};',
       ].join('\n'),
       '../shared/md.ts': 'export const mdToHtml = (value) => String(value || "");',
       '../shared/runnerDisplay.ts': [

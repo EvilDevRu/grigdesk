@@ -1,13 +1,19 @@
+// Каталог плагинов («Настройки → Плагины»). Смысл проверки: модули разложены по РОДУ
+// РАБОТЫ (общий контракт категорий), плитка включает плагин на месте, а описание и
+// параметры открываются модалкой — второй колонки, которая пустует у большинства
+// модулей, здесь больше нет.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compileSettingsView } from './helpers/settings-view.js';
+import { compilePluginsCatalog } from './helpers/plugins-catalog.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
 const PLUGINS = [
   {
+    // Сервер этой установки ещё не перезапущен: категории в ответе нет, и встроенный
+    // модуль обязан встать в свою группу по запасной карте, а не уехать в «Прочее».
     id: 'video',
     name: 'Видео и встречи',
     version: '1.0.0',
@@ -30,6 +36,7 @@ const PLUGINS = [
     version: '1.0.0',
     system: true,
     enabled: true,
+    category: 'dev',
     description: 'Работа с изменениями в репозитории.',
     nav: { label: 'Код', icon: 'code' },
     needsRestart: false,
@@ -42,11 +49,14 @@ const PLUGINS = [
     version: '1.0.0',
     system: true,
     enabled: true,
+    category: 'knowledge',
     description: 'Проверенные факты и продуктовые договорённости команды.',
     nav: { label: 'Знания', icon: 'knowledge' },
     needsRestart: false,
     settings: [],
     values: {},
+    // Плагин с ручкой готовности: диалог рисует её по общему контракту.
+    setup: { path: '/api/knowledge/setup' },
   },
   {
     id: 'secure-shell',
@@ -54,6 +64,7 @@ const PLUGINS = [
     version: '1.0.0',
     system: true,
     enabled: false,
+    category: 'dev',
     description: 'Команды на удалённых машинах под надзором человека.',
     nav: { label: 'SSH', icon: 'terminal' },
     needsRestart: false,
@@ -77,6 +88,7 @@ const PLUGINS = [
     values: { echoToTerminal: true, outputLimitKiB: 64 },
   },
   {
+    // Системный модуль ещё не перезапущенного сервера: категории в ответе нет вовсе.
     id: 'legacy-reports',
     name: 'Старые отчёты',
     version: '1.0.0',
@@ -89,11 +101,13 @@ const PLUGINS = [
     values: {},
   },
   {
+    // Чужая категория не заводит на экране свою группу — модуль уходит в «Прочее».
     id: 'team-alerts',
     name: 'Командные сигналы',
     version: '0.4.0',
     system: false,
     enabled: true,
+    category: 'notifications',
     description: 'Пользовательские уведомления о важных событиях.',
     nav: null,
     needsRestart: true,
@@ -107,29 +121,41 @@ let mountNonce = 0;
 function makeProvidersStore() {
   return {
     providers: [],
-    usage: {},
-    mcp: {},
-    loaded: true,
-    showAllModels: false,
     visibleModels: () => [],
     modelOf: () => ({ id: '', provider: null, model: null }),
-    async load() {},
-    async loadUsage() {},
-    async loadMcp() { return { state: 'ok', servers: [] }; },
-    async runUsageAction() { return { ok: true }; },
   };
 }
 
 async function mountCatalog(t) {
   const prefix = `__pluginCatalog${mountNonce += 1}`;
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
-  browser.localStorage.setItem('cockpit-settings-tab', 'plugins');
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
 
   const toggles = [];
   const saves = [];
+  const setups = [];
   const list = structuredClone(PLUGINS);
+  // Готовность как её отдаёт сервер: одно требование с кнопкой, одно готовое.
+  const setupStatus = () => ({
+    checkedAt: '2026-09-11T00:00:00.000Z',
+    items: [
+      {
+        id: 'browser',
+        title: 'Браузер записи',
+        status: 'blocked',
+        reason: 'Браузер записи не установлен.',
+        action: { label: 'Установить Chromium', hint: 'Скачается около 170 МБ.' },
+        job: null,
+      },
+      {
+        id: 'storage',
+        title: 'Хранилище',
+        status: 'ready',
+        reason: 'Каталог доступен для записи.',
+        action: null,
+        job: null,
+      },
+    ],
+  });
   const plugins = {
     loaded: true,
     list,
@@ -137,48 +163,53 @@ async function mountCatalog(t) {
     byId: (id) => list.find((plugin) => plugin.id === id) || null,
     async load() {},
     async toggle(id, enabled) { toggles.push([id, enabled]); },
-    async saveSettings(id, values) {
-      saves.push([id, structuredClone(values)]);
+    async saveSettings(id, values) { saves.push([id, structuredClone(values)]); },
+    async loadSetup() { return setupStatus(); },
+    async runSetup(plugin, itemId) {
+      setups.push([plugin.id, itemId]);
+
+      const status = setupStatus();
+
+      status.items[0].job = { state: 'running', label: 'скачиваю Chromium', error: null };
+
+      return status;
     },
-  };
-  globalThis[`${prefix}Api`] = {
-    async get() { return {}; },
-    async post() { return {}; },
+    async cancelSetup() { return setupStatus(); },
   };
   globalThis[`${prefix}Stores`] = {
-    useProvidersStore: () => makeProvidersStore(),
-    useUiContextStore: () => ({ set() {}, clear() {} }),
-    useAuthStore: () => ({ login: 'tester', async logoutAll() {} }),
     usePluginsStore: () => plugins,
-    useChatStore: () => ({ compactWindow: 0 }),
-    useCompanionStore: () => ({ deviceEnabled: true, setDeviceEnabled() {} }),
-    usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, status: null, async load() {} }),
+    useProvidersStore: () => makeProvidersStore(),
   };
 
-  const [{ mount, flushPromises }, SettingsView] = await Promise.all([
+  const [vtu, PluginsCatalog] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileSettingsView({ prefix }),
+    compilePluginsCatalog({ prefix }),
   ]);
-  const wrapper = mount(SettingsView, {
+  const { mount, flushPromises } = vtu;
+  // Модалка уезжает в <body> через Teleport: на время теста оставляем её на месте,
+  // иначе до её полей пришлось бы ходить мимо wrapper, вручную по документу.
+  const wrapper = mount(PluginsCatalog, {
     attachTo: browser.document.querySelector('#mount'),
-    global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    global: { stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
-    delete globalThis[`${prefix}Api`];
     delete globalThis[`${prefix}Stores`];
-    delete globalThis.__COCKPIT_VERSION__;
-    delete globalThis.__COCKPIT_SHA__;
   });
-  for (let index = 0; index < 5; index += 1) await flushPromises();
+  for (let index = 0; index < 3; index += 1) await flushPromises();
 
-  return { wrapper, flushPromises, toggles, saves };
+  return { wrapper, flushPromises, toggles, saves, setups, browser, vtu };
 }
 
-function catalogIds(wrapper) {
-  return wrapper.findAll('.plugin-catalog-item')
-    .map((row) => row.attributes('data-plugin-id'));
+function tileIds(wrapper) {
+  return wrapper.findAll('.plugin-tile').map((tile) => tile.attributes('data-plugin-id'));
+}
+
+function groupIds(wrapper) {
+  return wrapper.findAll('.plugin-group').map((group) => [
+    group.attributes('data-category'),
+    group.findAll('.plugin-tile').map((tile) => tile.attributes('data-plugin-id')),
+  ]);
 }
 
 function configurableButton(wrapper) {
@@ -188,31 +219,100 @@ function configurableButton(wrapper) {
   return button;
 }
 
-test('каталог показывает много строк, один detail и переключает именно выбранный плагин', async (t) => {
-  const { wrapper, flushPromises, toggles } = await mountCatalog(t);
+async function openPlugin({ wrapper, flushPromises }, id) {
+  await wrapper.get(`[data-plugin-id="${id}"] .plugin-tile-open`).trigger('click');
+  await flushPromises();
 
-  assert.deepEqual(catalogIds(wrapper), PLUGINS.map((plugin) => plugin.id));
+  const dialog = wrapper.find('.ui-dialog');
+  assert.ok(dialog.exists(), `модалка плагина «${id}» не открылась`);
+
+  return dialog;
+}
+
+test('плитки разложены по категориям в порядке общего контракта', async (t) => {
+  const { wrapper } = await mountCatalog(t);
+
+  assert.deepEqual(groupIds(wrapper), [
+    ['work', ['video']],
+    ['dev', ['code', 'secure-shell']],
+    ['knowledge', ['knowledge']],
+    ['other', ['legacy-reports', 'team-alerts']],
+  ]);
   assert.equal(
     wrapper.get('button[aria-label="Только пользовательские плагины"]').text(),
     'Свои 1',
   );
-  assert.equal(wrapper.findAll('.plugin-detail').length, 1);
-  assert.equal(wrapper.get('.plugin-detail').attributes('aria-label'), 'Плагин Видео и встречи');
+  assert.equal(wrapper.get('[data-category="work"] h3').text(), 'Задачи и связь');
+  assert.equal(wrapper.get('[data-plugin-id="video"] .plugin-tile-meta').text(), '1 параметр');
+  assert.equal(
+    wrapper.get('[data-plugin-id="code"] .plugin-tile-meta').text(),
+    'без параметров',
+  );
+});
 
-  const sshRow = wrapper.get('[data-plugin-id="secure-shell"]');
-  await sshRow.get('.ui-selectable-row__primary').trigger('click');
-  await flushPromises();
+test('кнопка питания переключает именно свой плагин, не открывая модалку', async (t) => {
+  const { wrapper, flushPromises, toggles } = await mountCatalog(t);
+  const power = wrapper.get('[data-plugin-id="secure-shell"] .plugin-tile-power button');
 
-  assert.equal(wrapper.findAll('.plugin-detail').length, 1);
-  assert.equal(wrapper.get('.plugin-detail').attributes('aria-label'), 'Плагин SSH');
-  assert.equal(sshRow.get('.ui-selectable-row__primary').attributes('aria-selected'), 'true');
-
-  const pluginSwitch = wrapper.get('.plugin-detail input[role="switch"]');
-  assert.equal(pluginSwitch.attributes('aria-label'), 'Включить SSH');
-  await pluginSwitch.setValue(true);
+  assert.equal(power.attributes('aria-label'), 'Включить SSH');
+  await power.trigger('click');
   await flushPromises();
 
   assert.deepEqual(toggles, [['secure-shell', true]]);
+  assert.equal(wrapper.find('.ui-dialog').exists(), false);
+  assert.equal(
+    Boolean(power.element.closest('.plugin-tile-open')),
+    false,
+    'кнопка питания лежит вне кнопки плитки: интерактив внутри интерактива недоступен',
+  );
+});
+
+test('включённое состояние видно по самой кнопке питания, а не только по плитке', async (t) => {
+  // Кнопка заменила тумблер, поэтому «горит/не горит» обязано читаться с неё самой:
+  // залитая акцентом — модуль работает, тихая — выключен.
+  const { wrapper } = await mountCatalog(t);
+  const power = (id) => wrapper.get(`[data-plugin-id="${id}"] .plugin-tile-power button`);
+
+  assert.equal(power('code').attributes('data-variant'), 'solid');
+  assert.equal(power('code').attributes('data-tone'), 'accent');
+  assert.equal(power('code').attributes('title'), 'Плагин включён');
+
+  assert.equal(power('secure-shell').attributes('data-variant'), 'ghost');
+  assert.equal(power('secure-shell').attributes('data-tone'), 'neutral');
+  assert.equal(power('secure-shell').attributes('title'), 'Плагин выключен');
+});
+
+test('модалка открывается по плитке и сохраняет значения всех полей плагина', async (t) => {
+  const mounted = await mountCatalog(t);
+  const { wrapper, flushPromises, saves } = mounted;
+  const dialog = await openPlugin(mounted, 'secure-shell');
+
+  assert.match(dialog.text(), /SSH/);
+  assert.match(dialog.get('.pd-state').text(), /Плагин выключен/);
+  assert.match(dialog.get('.pd-state').text(), /параметры можно подготовить заранее/);
+  assert.equal(dialog.get('.pd-category').text(), 'Разработка');
+
+  const checkbox = dialog.get('.plugset input[type="checkbox"]');
+  const number = dialog.get('.plugset input[type="number"]');
+  assert.equal(checkbox.attributes('disabled'), undefined);
+  assert.equal(number.attributes('disabled'), undefined);
+
+  await checkbox.setValue(false);
+  await number.setValue('96');
+  await dialog.get('.plugin-save').trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(saves, [[
+    'secure-shell',
+    { echoToTerminal: false, outputLimitKiB: 96 },
+  ]]);
+});
+
+test('модалка называет ту же группу, в которой стоит плитка', async (t) => {
+  const mounted = await mountCatalog(t);
+  const dialog = await openPlugin(mounted, 'video');
+
+  assert.equal(dialog.get('.pd-category').text(), 'Задачи и связь');
 });
 
 test('поиск находит по name, id и description без учёта регистра и внешних пробелов', async (t) => {
@@ -226,7 +326,7 @@ test('поиск находит по name, id и description без учёта �
   ]) {
     await search.setValue(query);
     await flushPromises();
-    assert.deepEqual(catalogIds(wrapper), [expectedId], `не найден запрос «${query.trim()}»`);
+    assert.deepEqual(tileIds(wrapper), [expectedId], `не найден запрос «${query.trim()}»`);
   }
 });
 
@@ -235,36 +335,14 @@ test('фильтр состояния пересекается с фильтро
 
   await wrapper.get('.plugin-filter [data-option-value="disabled"]').trigger('click');
   await flushPromises();
-  assert.deepEqual(catalogIds(wrapper), ['secure-shell', 'legacy-reports']);
+  assert.deepEqual(groupIds(wrapper), [
+    ['dev', ['secure-shell']],
+    ['other', ['legacy-reports']],
+  ]);
 
   await configurableButton(wrapper).trigger('click');
   await flushPromises();
-  assert.deepEqual(catalogIds(wrapper), ['secure-shell']);
-  assert.equal(wrapper.get('.plugin-detail').attributes('aria-label'), 'Плагин SSH');
-});
-
-test('выключенный плагин настраивается, а save отправляет значения всех его полей', async (t) => {
-  const { wrapper, flushPromises, saves } = await mountCatalog(t);
-
-  await wrapper.get('[data-plugin-id="secure-shell"] .ui-selectable-row__primary').trigger('click');
-  await flushPromises();
-
-  assert.match(wrapper.get('.plugin-detail-state').text(), /Плагин выключен/);
-  assert.match(wrapper.get('.plugin-detail-state').text(), /параметры можно подготовить заранее/);
-  const checkbox = wrapper.get('.plugset input[type="checkbox"]');
-  const number = wrapper.get('.plugset input[type="number"]');
-  assert.equal(checkbox.attributes('disabled'), undefined);
-  assert.equal(number.attributes('disabled'), undefined);
-
-  await checkbox.setValue(false);
-  await number.setValue('96');
-  await wrapper.get('.plugin-save').trigger('click');
-  await flushPromises();
-
-  assert.deepEqual(saves, [[
-    'secure-shell',
-    { echoToTerminal: false, outputLimitKiB: 96 },
-  ]]);
+  assert.deepEqual(tileIds(wrapper), ['secure-shell']);
 });
 
 test('пустая выдача предлагает reset, который очищает запрос и все фильтры', async (t) => {
@@ -276,7 +354,7 @@ test('пустая выдача предлагает reset, который оч�
   await search.setValue('такого плагина нет');
   await flushPromises();
 
-  assert.equal(wrapper.findAll('.plugin-detail').length, 0);
+  assert.equal(wrapper.findAll('.plugin-group').length, 0);
   assert.match(wrapper.get('.plugin-empty').text(), /Плагины не найдены/);
   await wrapper.get('.plugin-empty button').trigger('click');
   await flushPromises();
@@ -287,6 +365,42 @@ test('пустая выдача предлагает reset, который оч�
     'true',
   );
   assert.equal(configurableButton(wrapper).attributes('aria-pressed'), 'false');
-  assert.deepEqual(catalogIds(wrapper), PLUGINS.map((plugin) => plugin.id));
-  assert.equal(wrapper.findAll('.plugin-detail').length, 1);
+  assert.deepEqual(groupIds(wrapper), [
+    ['work', ['video']],
+    ['dev', ['code', 'secure-shell']],
+    ['knowledge', ['knowledge']],
+    ['other', ['legacy-reports', 'team-alerts']],
+  ]);
+});
+
+test('готовность плагина показывает требования и ставит недостающее кнопкой', async (t) => {
+  const mounted = await mountCatalog(t);
+  const { flushPromises, setups } = mounted;
+  const dialog = await openPlugin(mounted, 'knowledge');
+
+  await flushPromises();
+
+  const items = dialog.findAll('.pd-setup-list li');
+
+  assert.equal(items.length, 2, 'каждое требование — своя строка');
+  assert.match(dialog.get('.pd-setup .plugset-head').text(), /1 из 2 готово/);
+  assert.equal(dialog.get('[data-setup-id="storage"] .pd-setup-dot').attributes('data-status'), 'ready');
+  assert.equal(dialog.find('[data-setup-id="storage"] button').exists(), false, 'готовому кнопка не нужна');
+
+  const install = dialog.get('[data-setup-id="browser"] button');
+
+  assert.equal(install.text(), 'Установить Chromium');
+  await install.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(setups, [['knowledge', 'browser']]);
+  assert.match(dialog.get('[data-setup-id="browser"]').text(), /скачиваю Chromium/);
+  assert.equal(dialog.get('[data-setup-id="browser"] button').text(), 'Отменить');
+});
+
+test('плагин без ручки готовности блока готовности не показывает', async (t) => {
+  const mounted = await mountCatalog(t);
+  const dialog = await openPlugin(mounted, 'code');
+
+  assert.equal(dialog.find('.pd-setup').exists(), false);
 });

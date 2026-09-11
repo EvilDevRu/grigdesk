@@ -125,7 +125,6 @@ async function mountSettings(t, { mcpByProvider, providerPatch } = {}) {
     useAuthStore: () => ({ login: 'me', async logoutAll() {} }),
     usePluginsStore: () => ({ loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {} }),
     useChatStore: () => ({ compactWindow: 0 }),
-    useCompanionStore: () => ({ deviceEnabled: true, setDeviceEnabled() {} }),
     usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };

@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 
 import { startEgressGuard } from '../../server/src/lib/showcase/browserPolicy.ts';
 import { checkSceneClip } from '../../server/src/lib/showcase/render/clipCheck.ts';
+import { READY_MARGIN_MS, trimSceneClip } from '../../server/src/lib/showcase/render/clipTrim.ts';
 import { launchBrowser, recordScene } from '../../server/src/lib/showcase/render/recorder.ts';
 
 const STYLE = {
@@ -87,7 +88,20 @@ async function startTargets() {
   await new Promise((resolve) => outside.listen(0, '127.0.0.1', resolve));
 
   const outsideOrigin = `http://127.0.0.1:${outside.address().port}`;
+  // Данные приходят второй волной: запрос уходит через полсекунды после
+  // готовности каркаса и отвечает не сразу — как таблица позиций на стенде.
+  const dataRequests = [];
   const target = http.createServer((request, response) => {
+    if (request.url === '/data') {
+      dataRequests.push(request.url);
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end('{"rows":3}');
+      }, 300);
+
+      return;
+    }
+
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Стенд</title>
 <style>body{margin:0;background:#0f1115;color:#e8ecf1;font:16px system-ui}main{padding:48px}</style>
@@ -95,7 +109,17 @@ async function startTargets() {
 <h1 data-testid="ready">Готовый экран</h1>
 <button data-testid="run">Запустить</button>
 <img src="${outsideOrigin}/pixel.png" alt="" width="1" height="1">
-<script>fetch('${outsideOrigin}/fetch').catch(() => {});</script>
+<script>
+fetch('${outsideOrigin}/fetch').catch(() => {});
+setTimeout(() => {
+  fetch('/data').then((r) => r.json()).then((data) => {
+    const p = document.createElement('p');
+    p.dataset.testid = 'loaded';
+    p.textContent = 'строк: ' + data.rows;
+    document.querySelector('main').append(p);
+  });
+}, 500);
+</script>
 </main></body></html>`);
   });
 
@@ -105,6 +129,7 @@ async function startTargets() {
     targetOrigin: `http://127.0.0.1:${target.address().port}`,
     outsideOrigin,
     outsideRequests,
+    dataRequests,
     close: async () => {
       await new Promise((resolve) => target.close(resolve));
       await new Promise((resolve) => outside.close(resolve));
@@ -184,6 +209,37 @@ test('запись сцены даёт непустой клип и не вып�
   assert.ok(
     check.flatFrames < check.sampledFrames,
     'в клипе обязана быть картинка, а не однотонный лист',
+  );
+
+  // Сцена дождалась второй волны данных и затишья после действий: спокойный
+  // стенд не упирается в предел, точка готовности сдвинута за конец волны
+  // (полсекунды до запроса, 300 мс ответа, секунда затишья), а после действий
+  // записано не меньше самих действий плюс затишье.
+  assert.equal(recorded.unsettled, 0, 'затишье сети обязано наступить на спокойном стенде');
+  assert.equal(targets.dataRequests.length, 1, 'вторая волна данных ушла на стенд во время сцены');
+  assert.ok(
+    recorded.readyOffsetMs >= 1800,
+    `готовность наступила раньше конца волны данных: ${recorded.readyOffsetMs} мс`,
+  );
+  assert.ok(
+    recorded.recordedMs - recorded.readyOffsetMs >= 1600,
+    `после готовности записано лишь ${recorded.recordedMs - recorded.readyOffsetMs} мс`,
+  );
+
+  // Обрезка до готовности: загрузка страницы в клип не входит, всё после неё —
+  // входит.
+  const trimmed = await trimSceneClip({
+    rawPath: recorded.rawPath,
+    startMs: Math.max(0, recorded.readyOffsetMs - READY_MARGIN_MS),
+    outFile: path.join(outDir, 'ready.webm'),
+  });
+  const trimmedCheck = await checkSceneClip(trimmed);
+
+  assert.equal(trimmedCheck.ok, true, trimmedCheck.reason);
+  assert.ok(trimmedCheck.durationMs < check.durationMs, 'обрезанный клип короче исходной записи');
+  assert.ok(
+    trimmedCheck.durationMs >= recorded.recordedMs - recorded.readyOffsetMs - 200,
+    `в обрезанном клипе должно остаться всё после готовности: ${trimmedCheck.durationMs} мс`,
   );
 
   assert.deepEqual(

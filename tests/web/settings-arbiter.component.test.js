@@ -56,6 +56,13 @@ function makeProvidersStore() {
         available: true,
         models: [{ id: 'hf.co/unsloth/qwen3.6:latest', name: 'qwen3.6' }],
       },
+      // Опрос этого CLI не удался: доступности нет, модели из каталога остались.
+      {
+        id: 'codex',
+        name: 'GPT (Codex)',
+        available: false,
+        models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }],
+      },
     ],
     usage: {},
     mcp: {},
@@ -109,12 +116,7 @@ async function mountSettings(t, { arbiter = null } = {}) {
       async toggle() {},
       async saveSettings() {},
     }),
-    useChatStore: () => ({ compactWindow: 0, companion: { modelRef: null, effort: '' } }),
-    useCompanionStore: () => ({
-      deviceEnabled: false,
-      setDeviceEnabled() {},
-      outputState: { prefs: {}, available: true, voices: [] },
-    }),
+    useChatStore: () => ({ compactWindow: 0 }),
     usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
@@ -184,4 +186,24 @@ test('пропавшая из реестра модель названа пря�
     arbiter: { modelRef: { provider: 'claude', model: 'снятая-модель' }, effort: '', auto: true },
   });
   assert.match(card(wrapper).text(), /нет в реестре/);
+});
+
+test('модель недоступного исполнителя названа оговоркой, но выбор не отнимает', async (t) => {
+  // «Недоступен» — итог последней проверки CLI, и причина у неё бывает временной
+  // (сеть, тайм-аут опроса, минутный разлогин). Заблокированный пункт решал бы за
+  // человека: арбитру модель назначают заранее, а отказ приходит от самого запуска.
+  const { wrapper, saved, flushPromises } = await mountSettings(t);
+  const select = modelSelect(wrapper);
+  const option = select.findAll('option').find((item) => item.attributes('value') === 'codex:gpt-5.6');
+
+  assert.ok(option, 'модель недоступного исполнителя пропала из селекта');
+  assert.equal(option.attributes('disabled'), undefined, 'модель заблокирована по недоступности');
+  assert.deepEqual(
+    select.findAll('optgroup').map((group) => group.attributes('label')),
+    ['Claude', 'Ollama', 'GPT (Codex) — недоступен'],
+  );
+
+  await select.setValue('codex:gpt-5.6');
+  await flushPromises();
+  assert.deepEqual(saved[0].arbiter.modelRef, { provider: 'codex', model: 'gpt-5.6' });
 });

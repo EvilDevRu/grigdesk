@@ -6,7 +6,6 @@ import type { CSSProperties } from 'vue';
 export type UiLayerName =
   | 'tools'
   | 'dock'
-  | 'companion'
   | 'dialog'
   | 'diff-workspace'
   | 'document'

@@ -37,6 +37,8 @@ export interface ProvidersModuleOptions {
   prefs?: PrefsStore;
   // Точка подмены для офлайн-тестов: реестр не знает про конкретных вендоров.
   getProviderAdapters?: () => Promise<Map<string, ExecutorAdapter>>;
+  // Период фонового чтения лимитов; офлайн-тесты укорачивают его до миллисекунд.
+  usageTickMs?: number;
 }
 
 // Маршруты исполнителя адресуются его id; действие и список добавляют свои части.
@@ -68,6 +70,25 @@ interface UsageBar {
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
+
+// Период чтения лимитов у вендора — СВОЙ, и он намеренно длиннее реестра. Реестр — это
+// probe локальных бинарей, они ничего не стоят; лимиты — запрос к API аккаунта, и минутный
+// шаг круглосуточно упирался в отказ по частоте («Anthropic временно ограничил запрос
+// проверки лимитов») у живого аккаунта. Окна лимитов измеряются часами и неделями, поэтому
+// пятиминутный шаг не теряет ничего: сессия в 5ч сдвигается за это время на 1,7%.
+const USAGE_CACHE_MS = 5 * 60_000;
+
+// Пауза после отказа по частоте — в СВОИХ тиках, а не в минутах: она означает «пропусти
+// столько своих походов», и при смене периода не надо пересчитывать её отдельно. С каждым
+// отказом подряд удваивается и упирается в потолок: вендор, который просит реже, не должен
+// получать один и тот же шаг вечно. При пятиминутном шаге это 15 → 30 → 60 минут.
+const USAGE_BACKOFF_TICKS = 3;
+const USAGE_BACKOFF_MAX_TICKS = 12;
+
+// Принудительная проверка по кнопке не перечитывает снимок моложе этого: дробь кликов
+// подряд не должна превращаться в очередь походов к вендору, а за 15 секунд лимиты
+// не меняются заметно.
+const USAGE_FORCE_MIN_AGE_MS = 15_000;
 const DIRECT_SSH_ENFORCEMENTS = new Set([
   'command-hook',
   'tool-filter',
@@ -278,6 +299,56 @@ async function providersModule(
   // вопрос «это у меня или у них».
   const statusProbe = createProviderStatusProbe();
 
+  // Период фонового тика И TTL кэша — одна величина: пока она общая, между тиками ни одно
+  // чтение окна к вендору не ходит, и частота походов равна ровно частоте тика.
+  const usageTickMs = opts.usageTickMs ?? USAGE_CACHE_MS;
+
+  // До какого момента исполнителя не трогаем. Пауза персональная: отказ по частоте у
+  // одного аккаунта ничего не говорит про соседний, и глушить весь ряд было бы неверно.
+  const usageBackoff = new Map<string, { until: number; ticks: number }>();
+
+  /**
+   * Отказ по частоте — единственная беда, на которую кокпит отвечает молчанием. Сеть,
+   * протухший вход и отсутствие API лечатся повтором или человеком, а вот на «стучитесь
+   * реже» повтор в прежнем темпе держит аккаунт в отказе сам.
+   *
+   * Срок называет вендор (`retryAt` из заголовка Retry-After), но своя шкала всё равно
+   * нужна: заголовка может не быть вовсе, а просьба «через 30 секунд» короче нашего
+   * собственного шага и вернула бы прежний темп. Берём более долгий из двух сроков.
+   * Удачное чтение снимает паузу целиком; прочие беды её не трогают.
+   */
+  function rememberUsageBackoff(id: string, current: ProviderUsage, checkedAt: number): void {
+    if (current.state === 'ok') {
+      usageBackoff.delete(id);
+
+      return;
+    }
+
+    if (current.state !== 'rate_limited') {
+      return;
+    }
+
+    // Храним саму паузу, а не число отказов: следующая — вдвое длиннее прошлой, и на
+    // потолке она просто перестаёт расти, без отдельного счётчика и его переполнения.
+    const heldTicks = usageBackoff.get(id)?.ticks ?? 0;
+    const ticks = Math.min(
+      heldTicks ? heldTicks * 2 : USAGE_BACKOFF_TICKS,
+      USAGE_BACKOFF_MAX_TICKS,
+    );
+    const ownPause = checkedAt + ticks * usageTickMs;
+    const askedPause = typeof current.retryAt === 'number' ? current.retryAt : 0;
+
+    usageBackoff.set(id, { until: Math.max(ownPause, askedPause), ticks });
+  }
+
+  // Срок паузы едет в снимок полем retryAt: по нему всплывашка гасит кнопку принудительной
+  // проверки и называет время, а не оставляет человека гадать, почему клик ничего не дал.
+  function withPauseUntil(id: string, usage: ProviderUsage): ProviderUsage {
+    const until = usageBackoff.get(id)?.until;
+
+    return until ? { ...usage, retryAt: until } : usage;
+  }
+
   const usageCache = createUsageReadCache<Record<string, ProviderUsage>>(async (previousUsage) => {
     // Тот же источник адаптеров, что и у реестра (`adaptersOf`): иначе стенд подменял
     // исполнителей, а лимиты всё равно собирались у настоящих.
@@ -286,6 +357,16 @@ async function providersModule(
     // Аккаунты независимы: медленная проверка одного исполнителя не должна
     // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
     const entries = await Promise.all([...executors.values()].map(async (ex) => {
+      const held = usageBackoff.get(ex.id);
+      const previous = previousUsage?.[ex.id];
+
+      // Идёт пауза после «стучитесь реже»: отдаём прошлый снимок как есть. Он уже несёт
+      // и слова вендора, и последние полосы — новых мы честно не знаем, а сходить за
+      // ними значит повторить ровно то, о чём нас попросили не делать.
+      if (held && held.until > checkedAt && previous) {
+        return [ex.id, previous] as const;
+      }
+
       let current: ProviderUsage;
       if (typeof ex.usage !== 'function') {
         current = unsupportedProviderUsage(String(ex.name), checkedAt);
@@ -303,11 +384,12 @@ async function providersModule(
           }, { providerName: String(ex.name), checkedAt });
         }
       }
+      rememberUsageBackoff(ex.id, current, checkedAt);
       // `current` здесь есть всегда, поэтому слияние возвращает запись, а не прошлый снимок.
-      const merged = mergeProviderUsage(
-        previousUsage?.[ex.id],
+      const merged = withPauseUntil(ex.id, mergeProviderUsage(
+        previous,
         markFreshBuckets(ex.id, current),
-      ) as ProviderUsage;
+      ) as ProviderUsage);
 
       if (!VENDOR_FAULT_USAGE_STATES.has(merged.state) || !ex.statusPage) {
         return [ex.id, merged] as const;
@@ -318,7 +400,7 @@ async function providersModule(
       return [ex.id, vendorStatus ? { ...merged, vendorStatus } : merged] as const;
     }));
     return Object.fromEntries(entries);
-  }, { maxAgeMs: CACHE_MS });
+  }, { maxAgeMs: usageTickMs });
 
   // ── Проверка новых версий CLI: периодически и по кнопке, НИКОГДА не обновляет сама ──
   // providerId → что показала последняя фоновая проверка новой версии CLI.
@@ -367,6 +449,55 @@ async function providersModule(
 
   // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
   fastify.get('/api/providers/usage', async () => ({ usage: await usageCache.read() }));
+
+  // Принудительная проверка по кнопке во всплывашке. Обходит TTL кэша, но не паузу после
+  // отказа вендора: её соблюдает само чтение и вернёт прошлый снимок. Свежий снимок
+  // отдаётся как есть — он уже в кэше, и read() к вендору не пойдёт. Итог рассылается
+  // всем окнам: проверку попросило одно, а полосы общие.
+  fastify.post('/api/providers/usage/refresh', async () => {
+    const usage = usageCache.ageMs() < USAGE_FORCE_MIN_AGE_MS
+      ? await usageCache.read()
+      : await usageCache.refresh();
+
+    fastify.sse?.broadcast?.('providers-usage', { usage });
+
+    return { usage };
+  });
+
+  // ── Фоновая свежесть лимитов ──
+  // Раньше лимиты читались только по запросу окна: первое наведение после минуты тишины
+  // запускало живой поход к вендору, и всплывашка секунды показывала прошлый снимок.
+  // Тик держит серверный кэш тёплым и рассылает снимок по SSE, поэтому окно читает
+  // готовое, а полосы идут за временем и без наведения.
+  //
+  // Цена фона — походы к вендору идут, пока открыт кокпит, а не пока водят мышью, поэтому
+  // шаг здесь свой (USAGE_CACHE_MS) и заметно длиннее реестра: минутный круглосуточно
+  // ловил отказ по частоте у живого аккаунта.
+
+  /**
+   * Один тик. Пустой зал вендора не тревожит: без окон на потоке снимок никому не нужен,
+   * а первое открывшееся окно перечитает его само. Снимок моложе половины периода тоже
+   * не перечитывается — его только что принёс запрос окна, второй поход подряд лишний.
+   */
+  async function tickUsage(): Promise<void> {
+    if (!(fastify.sse?.clientCount?.() ?? 0)) return;
+    if (usageCache.ageMs() < usageTickMs / 2) return;
+
+    const usage = await usageCache.refresh();
+
+    fastify.sse?.broadcast?.('providers-usage', { usage });
+  }
+
+  const usageTimer = setInterval(() => {
+    tickUsage().catch((err: unknown) => {
+      fastify.log.warn({ err }, 'фоновое чтение лимитов исполнителей не удалось');
+    });
+  }, usageTickMs);
+
+  usageTimer.unref?.();
+  fastify.addHook('onClose', async () => {
+    clearInterval(usageTimer);
+  });
 
   /**
    * Состояние MCP-серверов исполнителя — блок в его плашке «Настройки → Исполнители».

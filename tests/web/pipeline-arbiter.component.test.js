@@ -121,10 +121,6 @@ async function mountPipeline(t, { factoryTask, graph }, { response, compact = tr
   globalThis.__pipelineArbiterBoardStore = defineStore('pipeline-arbiter-board', {
     state: () => ({ data: null }), actions: { async load() {} },
   });
-  globalThis.__pipelineArbiterCompanionStore = defineStore('pipeline-arbiter-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineArbiter'), {
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()], stubs: { teleport: true } },
@@ -136,7 +132,6 @@ async function mountPipeline(t, { factoryTask, graph }, { response, compact = tr
       '__pipelineArbiterApi', '__pipelineArbiterApiCalls', '__pipelineArbiterDialogs', '__pipelineArbiterConfirmDialog',
       '__pipelineArbiterAlertDialog', '__pipelineArbiterFactoryGraph', '__pipelineArbiterUiStore',
       '__pipelineArbiterTasksStore', '__pipelineArbiterBoardStore',
-      '__pipelineArbiterCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

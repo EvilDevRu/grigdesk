@@ -10,7 +10,6 @@ import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeCompanionSettings } from '../../lib/companionSettings.ts';
 import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
@@ -31,7 +30,7 @@ import { resolveChatAttachment } from '../../lib/chat/attachments.ts';
 import { stoppedTurnBrief } from '../../lib/chat/stoppedBrief.ts';
 import { autoDecision } from '../../lib/chat/autoApprove.ts';
 import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
-import { MAX_CHAT_STEPS } from '../../lib/chat/streamSteps.ts';
+import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
   contextPrefix,
   normalizeUiContext,
@@ -103,7 +102,6 @@ interface ChatTurnInput {
   sentAt?: number;
   compact?: boolean;
   slashCommand?: unknown;
-  companionTurn?: boolean;
 }
 
 interface AnswerInput {
@@ -258,12 +256,10 @@ interface ChatModuleOptions {
   modelsRegistry?: (config: CockpitConfig) => Promise<ModelRegistry>;
   executorResolver?: (provider: string) => Promise<ExecutorAdapter | null>;
   taskExists?: (taskId: string) => Promise<boolean>;
-}
-
-interface TaskSandbox {
-  kind: 'generic';
-  workspaceMode: string;
-  repos: Array<{ name: string; path: string; branch: string }>;
+  // Бюджеты слива на остановке: сколько ждать естественного конца хода и сколько —
+  // после прерывания. Подменяются в тестах.
+  shutdownGraceMs?: number;
+  shutdownInterruptMs?: number;
 }
 
 interface ModelTarget {
@@ -284,16 +280,11 @@ interface TargetFailure {
 interface RunTarget extends ModelTarget {
   binding: BindingRecord | null;
   sessionId: string | null;
-  strictExecutor?: ChatExecutor | null;
-  strictPermissionMode?: string;
 }
 
 interface CompanionPreflight {
   ok: true;
   record: StoredChat | null;
-  modelTarget?: ModelTarget;
-  executor?: ChatExecutor | null;
-  taskSandbox?: TaskSandbox | null;
 }
 
 interface RunningTurn {
@@ -302,12 +293,17 @@ interface RunningTurn {
   steps: ChatStep[];
   ac: AbortController;
   compact: boolean;
-  speechSafe: boolean;
-  speechTraceSeen: boolean;
   workToolScopeKey: string;
   contextTokens?: number;
   contextCache?: ContextCache;
   onPermission?: ExecutorTurnOptions['onPermission'];
+  // Остановка сервера: id сессии, известный с первого события хода; обещание конца
+  // хода; причина прерывания и запись хода «на память», если он не закончился сам.
+  sessionId?: string | null;
+  finished: Promise<void>;
+  finish: () => void;
+  interruptedBy?: 'server_shutdown';
+  abandon?: () => Promise<void>;
 }
 
 interface ChatHead {
@@ -333,8 +329,13 @@ interface SpeechStreamStart {
 const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
 const SPEECH_STREAM_START_MAX_BYTES = 4 * 1024;
 const SPEECH_STREAM_START_TIMEOUT_MS = 10_000;
+// Слив на остановке: короткое окно закончить ход самому, потом прерывание как «стоп».
+// Сумма обязана укладываться в бюджет остановки (config.shutdownTimeoutMs) с запасом на
+// закрытие процессов исполнителей.
+const SHUTDOWN_GRACE_MS = 5_000;
+const SHUTDOWN_INTERRUPT_MS = 10_000;
+const SHUTDOWN_CUT_REPLY = '⏹ Ход прерван перезапуском сервера — память сессии сохранена.';
 const SPEECH_STREAM_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-const SPEECH_SAFE_STEP_KINDS = new Set(['start', 'text', 'think']);
 const SPEECH_STREAM_PUBLIC_ERRORS: Readonly<Record<string, string>> = Object.freeze({
   speech_model_missing: 'Локальная модель речи не установлена.',
   speech_unavailable: 'Локальное распознавание сейчас недоступно.',
@@ -518,67 +519,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return job;
   }
 
-  async function companionTaskSandbox(taskId: string | null | undefined): Promise<TaskSandbox | null> {
-    if (!taskId || typeof factoryState?.readRegistry !== 'function'
-      || typeof factoryState?.readTrustedAttempt !== 'function'
-      || typeof factoryState?.readEnv !== 'function'
-      || typeof factoryState?.verifyTrustedEnvironment !== 'function') return null;
-    try {
-      // Существующей задачи Б24 достаточно для владения долгой историей, но быстрый ход
-      // компаньона не должен переходить в корень Cockpit при отсутствии точного рабочего дерева.
-      // `.pipeline` и `.env` — доступные провайдеру для записи проекции; исполняемые пути берутся
-      // только из неизменяемого журнала попытки после точной проверки окружения.
-      const { registry } = await factoryState.readRegistry(taskId);
-      const trusted = await factoryState.readTrustedAttempt(taskId, registry);
-      const env = await factoryState.readEnv(taskId);
-      factoryState.verifyTrustedEnvironment(trusted, env);
-      const repositories = Array.isArray(trusted?.repositories) ? trusted.repositories : [];
-      if (!repositories.length || !['isolated', 'shared'].includes(trusted?.workspaceMode)) return null;
-      const repos = repositories.map((repo) => ({
-        name: repo?.name,
-        path: repo?.workspace,
-        branch: repo?.branch,
-      }));
-      if (repos.some((repo) => typeof repo.name !== 'string' || !repo.name
-        || typeof repo.path !== 'string' || !path.isAbsolute(repo.path)
-        || /[\u0000\r\n\t]/u.test(repo.path)
-        || typeof repo.branch !== 'string' || !repo.branch)) return null;
-      // Ledger задаёт доверенный путь, но не доказывает, что worktree всё ещё существует.
-      // Непосредственно перед ходом канонизируем каждый репозиторий: удалённый worktree
-      // и не-каталог дают fail-closed, а executor получает canonical path без symlink-алиаса.
-      const canonicalRepos = await Promise.all(repos.map(async (repo) => {
-        const declaredStat = await fs.lstat(repo.path);
-        if (declaredStat.isSymbolicLink() || !declaredStat.isDirectory()) {
-          throw new Error('доверенный worktree должен быть непосредственным каталогом');
-        }
-        const canonicalPath = await fs.realpath(repo.path);
-        const stat = await fs.stat(canonicalPath);
-        if (!stat.isDirectory() || canonicalPath !== path.resolve(repo.path)) {
-          throw new Error('доверенный worktree перенаправлен через symlink');
-        }
-        return { ...repo, path: canonicalPath };
-      }));
-      return {
-        kind: 'generic',
-        workspaceMode: trusted.workspaceMode,
-        repos: canonicalRepos as TaskSandbox['repos'],
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  function sameCompanionTaskSandbox(left: TaskSandbox | null | undefined, right: TaskSandbox | null) {
-    if (!left || !right || left.kind !== right.kind
-      || left.workspaceMode !== right.workspaceMode
-      || !Array.isArray(left.repos) || !Array.isArray(right.repos)
-      || left.repos.length !== right.repos.length) return false;
-    return left.repos.every((repo, index) => {
-      const other = right.repos[index];
-      return repo.name === other?.name && repo.path === other?.path && repo.branch === other?.branch;
-    });
-  }
-
   // История является server-owned источником surface/modelRef. Binding лежит отдельно:
   // никакой PUT чата не может назначить Kimi resume id или его generation.
   const history = new ChatHistoryStore({
@@ -712,6 +652,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // и уже показанную ленту шагов текущего хода. ──
   // Ключ чата → { startedAt, tokens, steps[], ac, compact }.
   const activeRuns = new Map<string | undefined, RunningTurn>();
+  // Сервер останавливается: новые ходы получают 503, идущие сливает drainTurns ниже.
+  let draining = false;
+  const shutdownGraceMs = Number.isInteger(opts.shutdownGraceMs) && opts.shutdownGraceMs! >= 0
+    ? opts.shutdownGraceMs!
+    : SHUTDOWN_GRACE_MS;
+  const shutdownInterruptMs = Number.isInteger(opts.shutdownInterruptMs) && opts.shutdownInterruptMs! >= 0
+    ? opts.shutdownInterruptMs!
+    : SHUTDOWN_INTERRUPT_MS;
+
+  /** Отказ новому ходу на остановке: окно покажет причину, человек повторит после подъёма. */
+  function restartingReply(reply: FastifyReply) {
+    return reply.code(503).send({
+      error: 'server_restarting',
+      message: 'Сервер перезапускается — повтори сообщение, когда он вернётся.',
+    });
+  }
 
   // ── Живые сессии исполнителей ────────────────────────────────────────────────
   // Процесс агента переживает свой ход, поэтому фоновые команды и субагенты не гибнут
@@ -745,9 +701,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           chatKey,
           role: 'assistant',
           ...normalizeExecutorContextCache(result as ExecutorRunResult),
-          // Ход агент начал сам, значит человек его не заказывал и озвучивать нечего:
-          // speechSafe остаётся выключенным, как у любого хода с действиями.
-          speechSafe: false,
           unsolicited: true,
           at: Date.now(),
         });
@@ -759,6 +712,53 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
     },
   });
+  /** Ждать конца всех идущих ходов, но не дольше бюджета. */
+  function settleRuns(ms: number): Promise<void> {
+    const pending = [...activeRuns.values()].map((run) => run.finished);
+    if (!pending.length) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      void Promise.all(pending).then(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Слив ходов на остановке сервера. Новые ходы с этого момента получают 503. Идущим
+   * даём короткое окно закончиться самим, потом прерываем тем же путём, что кнопка
+   * «стоп»: исполнитель закрывает ход штатным result, и обычный код хода отдаёт ленту
+   * и id сессии окну или в pending. Ход, не ответивший и на прерывание, записываем в
+   * pending сами — лента и сессия важнее чистого финала. Процессы исполнителей закрывает
+   * onClose-хук пула уже после этого, когда сервер перестаёт слушать.
+   */
+  async function drainTurns(): Promise<void> {
+    draining = true;
+    if (!activeRuns.size) return;
+    fastify.log.info({ count: activeRuns.size }, 'чат: остановка сервера — жду завершения ходов');
+    await settleRuns(shutdownGraceMs);
+    for (const [chatKey, run] of activeRuns) {
+      run.interruptedBy = 'server_shutdown';
+      dropPending(chatKey!, 'Сервер останавливается — ход прерван');
+      run.ac.abort();
+    }
+    if (activeRuns.size) {
+      fastify.log.info({ count: activeRuns.size }, 'чат: ходы прерваны остановкой сервера');
+    }
+    await settleRuns(shutdownInterruptMs);
+    for (const [chatKey, run] of [...activeRuns]) {
+      try {
+        await run.abandon?.();
+        fastify.log.warn({ chatKey }, 'чат: ход не ответил на прерывание — лента сохранена в pending');
+      } catch (error) {
+        fastify.log.error({ chatKey, err: (error as Error)?.message }, 'чат: ход не сохранён при остановке');
+      }
+    }
+  }
+
+  fastify.shutdown?.register('чат: ходы агентов', drainTurns);
+
   fastify.addHook('onClose', async () => {
     await liveSessions.closeAll('остановка сервера');
   });
@@ -1193,11 +1193,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // пока пользователь не нажмёт кнопку во всплывашке / не ответит на вопрос (или таймаут).
   fastify.post<ChatRoute>('/api/chat/permission-request', async (request, reply) => {
     const { tool_name, input, chatKey } = request.body || {};
-    // MCP разрешений Claude — отдельный локальный HTTP-канал, поэтому он обходит
-    // runArgs.onPermission. Небезопасный след закрепляем за ходом до ожидания человека:
-    // поздний скользящий хвост из 400 шагов не должен его стереть.
-    const permissionRun = activeRuns.get(chatKey);
-    if (permissionRun) permissionRun.speechSafe = false;
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     // Вопрос агента — не разрешение, а диалог: показываем варианты, а не «разрешить/отклонить».
     const isQuestion = tool_name === 'AskUserQuestion';
@@ -1309,6 +1304,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // (GET /api/chat/pending), раскладывает по чатам и подтверждает (DELETE).
   const pendingDir = path.join(config.chatsDir, 'pending');
 
+  /** Id записи pending: короткий и уникальный в пределах процесса. */
+  function orphanId() {
+    return `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+  }
+
   async function writeOrphan(entry: Record<string, unknown> & { id: string }) {
     await fs.mkdir(pendingDir, { recursive: true });
     const p = path.join(pendingDir, `${entry.id}.json`);
@@ -1339,7 +1339,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * Ответ на HTTP-запрос приходит по завершении СВОЕГО хода — клиенту ждать дольше,
    * зато сообщение не теряется и агент видит его в правильном порядке.
    */
-  /** Model/chat identity без side effects binding-а: strict companion gate использует
+  /** Model/chat identity без side effects binding-а: preflight companion-чата использует
    * этот срез до очереди и до любого session state. */
   async function resolveModelTarget(
     opts: ChatTurnInput, knownRecord: StoredChat | null | undefined = undefined,
@@ -1433,88 +1433,38 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   }
 
   /**
-   * Restrictive marker не является полномочием: он принимается только для durable
-   * server-created companion identity и exact route scope. Каталог plan читается
-   * свежим и fail-closed ДО Kimi binding, turnLocks и activeRuns.
+   * Durable identity companion-чата определяет маршрут хода: общий разговор идёт только
+   * через `/api/chat`, задачный — только через `/api/tasks/<id>/chat`. Проверка выполняется
+   * до очереди, binding и любого session state; повреждённая запись не становится
+   * execution identity.
    */
-  async function strictCompanionPreflight(opts: ChatTurnInput): Promise<CompanionPreflight | TargetFailure> {
+  async function companionScopePreflight(opts: ChatTurnInput): Promise<CompanionPreflight | TargetFailure> {
     const chatKey = String(opts.chatKey || '');
     const record = chatKey ? await history.readOne(chatKey) : null;
+    if (record?.purpose !== 'companion') return { ok: true, record };
+
     let recordTaskId;
     let expectedIdentity = '';
-    if (record?.purpose === 'companion') {
-      try {
-        recordTaskId = normalizeCompanionTaskId(record.taskId);
-        expectedIdentity = companionLogicalIdentity(recordTaskId);
-      } catch { /* повреждённая запись не становится execution identity */ }
-      if (!expectedIdentity || record.logicalIdentity !== expectedIdentity) {
-        return companionFailure(
-          'companion_chat_required',
-          'Chat key не принадлежит корректной server-owned companion identity.',
-        );
-      }
-      let routeTaskId;
-      try { routeTaskId = normalizeCompanionTaskId(opts.id); }
-      catch {
-        return companionFailure('companion_scope_mismatch', 'Маршрут хода не совпадает со scope companion-чата.');
-      }
-      if (routeTaskId !== recordTaskId) {
-        return companionFailure('companion_scope_mismatch', 'Маршрут хода не совпадает со scope companion-чата.');
-      }
-    }
-
-    // Durable companion identity определяет task route даже на полной странице /chats.
-    // Только дополнительные ограничения быстрого bubble-turn зависят от marker-а.
-    if (opts.companionTurn !== true) return { ok: true, record };
-    if (!chatKey || record?.purpose !== 'companion' || !expectedIdentity) {
-      return companionFailure('companion_chat_required', 'Companion turn требует сохранённый companion-чат.');
-    }
-    if (opts.mode !== 'plan') {
-      return companionFailure('companion_plan_required', 'Companion turn допускает только точный режим plan.');
-    }
-    if (opts.attachments != null || opts.slashCommand != null) {
-      return companionFailure(
-        'companion_turn_unsupported',
-        'Companion turn v1 принимает только typed/voice text без вложений и slash-команд.',
-      );
-    }
-    let taskSandbox = null;
-    if (recordTaskId) {
-      if (!await companionTaskExists(recordTaskId)) {
-        return companionFailure(
-          'companion_task_unavailable',
-          'Задача больше не подтверждается server-owned реестром.',
-        );
-      }
-      taskSandbox = await companionTaskSandbox(recordTaskId);
-      if (!taskSandbox) {
-        return companionFailure(
-          'companion_task_sandbox_unavailable',
-          'Для задачи ещё нет подтверждённого worktree; продолжите в полном чате или запустите конвейер.',
-        );
-      }
-    }
-
-    const modelTarget = await resolveModelTarget(opts, record);
-    if (!modelTarget.ok) return modelTarget;
-    let executor = null;
-    let planDeclared = false;
     try {
-      executor = await executorResolver(modelTarget.provider);
-      if (typeof executor?.modes === 'function') {
-        const catalog = await Promise.resolve(executor.modes(config));
-        planDeclared = Array.isArray(catalog) && catalog.some((mode) => mode?.id === 'plan');
-      }
-    } catch { /* любой сбой каталога означает fail-closed */ }
-    if (!planDeclared) {
+      recordTaskId = normalizeCompanionTaskId(record.taskId);
+      expectedIdentity = companionLogicalIdentity(recordTaskId);
+    } catch { /* повреждённая запись не становится execution identity */ }
+    if (!expectedIdentity || record.logicalIdentity !== expectedIdentity) {
       return companionFailure(
-        'companion_plan_unavailable',
-        `Исполнитель ${modelTarget.provider} не подтвердил безопасный режим plan.`,
+        'companion_chat_required',
+        'Chat key не принадлежит корректной server-owned companion identity.',
       );
     }
-    return {
-      ok: true, record, modelTarget, executor, taskSandbox,
-    };
+
+    let routeTaskId;
+    try { routeTaskId = normalizeCompanionTaskId(opts.id); }
+    catch {
+      return companionFailure('companion_scope_mismatch', 'Маршрут хода не совпадает со scope companion-чата.');
+    }
+    if (routeTaskId !== recordTaskId) {
+      return companionFailure('companion_scope_mismatch', 'Маршрут хода не совпадает со scope companion-чата.');
+    }
+    return { ok: true, record };
   }
 
   async function runChat(reply: FastifyReply, request: ChatRequest, opts: ChatTurnInput) {
@@ -1527,9 +1477,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         message: 'Чат сейчас удаляется; повторите действие после синхронизации истории.',
       });
     }
+    if (draining) return restartingReply(reply);
     const releaseAcceptedTurn = beginAcceptedTurn(chatKey);
     try {
-      const strict = await strictCompanionPreflight(opts);
+      const strict = await companionScopePreflight(opts);
       if (!strict.ok) {
         return reply.code(strict.statusCode || 400).send({
           error: strict.error,
@@ -1549,13 +1500,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (droppedContext.length) {
         fastify.log.warn({ dropped: droppedContext }, 'часть UI-контекста чата отброшена');
       }
-      const modelTarget = strict.modelTarget || await resolveModelTarget(opts, strict.record);
+      const modelTarget = await resolveModelTarget(opts, strict.record);
       const target = await resolveRunTarget(opts, modelTarget);
       if (!target.ok) return reply.code(400).send({ error: target.error, message: target.message });
-      if (strict.executor) {
-        target.strictExecutor = strict.executor;
-        target.strictPermissionMode = 'plan';
-      }
       const scope = { chatKey, provider: target.provider, sessionId: target.sessionId };
       const queued = turnLocks.isBusy(scope);
       if (queued) {
@@ -1564,44 +1511,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         fastify.sse.broadcast('chat-queued', { chatKey, at: Date.now() });
       }
       const result = await turnLocks.run(scope, async () => {
-        let lockedStrict: CompanionPreflight | TargetFailure = strict;
-        let lockedSandbox = strict.taskSandbox || null;
-        if (opts.companionTurn === true) {
-          // За время в очереди могли измениться каталог, durable identity или attempt.
-          // Повторяем проверку внутри chat lock до binding/activeRuns/executor spawn.
-          lockedStrict = await strictCompanionPreflight(opts);
-          if (!lockedStrict.ok) {
-            return reply.code(lockedStrict.statusCode || 400).send({
-              error: lockedStrict.error,
-              message: lockedStrict.message,
-            });
-          }
-          if (lockedStrict.modelTarget!.provider !== target.provider
-            || lockedStrict.modelTarget!.model !== target.model) {
-            return reply.code(409).send({
-              error: 'companion_target_changed',
-              message: 'Исполнитель companion-чата изменился во время ожидания; повторите ход.',
-            });
-          }
-          // После свежего modes() ещё раз читаем sandbox, чтобы между authoritative
-          // snapshot и передачей cwd в runChatTurn не было другого await.
-          lockedSandbox = opts.id ? await companionTaskSandbox(opts.id) : null;
-          if (opts.id && !lockedSandbox) {
-            return reply.code(409).send({
-              error: 'companion_task_sandbox_unavailable',
-              message: 'Worktree задачи изменился или исчез во время ожидания; ход не запущен.',
-            });
-          }
-          target.strictExecutor = lockedStrict.executor;
-          target.strictPermissionMode = 'plan';
-        }
+        // Сообщение дождалось очереди уже на остановке: запускать его некуда.
+        if (draining) return restartingReply(reply);
         return runChatTurn(reply, request, {
           ...opts,
           context: normalizedContext,
           model: target.model,
           sessionId: target.sessionId,
           target,
-          companionTaskSandbox: lockedSandbox,
           queued,
         });
       });
@@ -1614,13 +1531,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   async function runChatTurn(reply: FastifyReply, request: ChatRequest, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target,
-    companionTaskSandbox: trustedCompanionSandbox, companionTurn,
   }: ChatTurnInput & {
     model: string;
     target: RunTarget;
     queued: boolean;
     context: UiContext | null;
-    companionTaskSandbox: TaskSandbox | null;
   }) {
     // Клиент фиксирует момент нажатия «отправить» до durable save. Он нужен только
     // страховочной записи pending: если окно закрылось и вопрос пришлось восстановить,
@@ -1642,8 +1557,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // без рестарта сервера и без изменения глобальных конфигов конкретных CLI.
     const extraDirs = [...(prefs?.read().trustedDirectories || [])];
     if (id) {
-      const parsed = trustedCompanionSandbox
-        || parseSandboxRepositories(await factoryState.readEnv(id));
+      const parsed = parseSandboxRepositories(await factoryState.readEnv(id));
       if (parsed.kind === 'invalid') {
         return reply.code(409).send({
           error: 'invalid_sandbox_env',
@@ -1675,7 +1589,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Target уже разрешён строго по сохранённому modelRef до взятия locks. Никакого
     // fallback к Claude здесь больше нет.
     const info = { provider: target.provider, model: target.modelInfo };
-    const executor = target.strictExecutor || await executorResolver(target.provider);
+    const executor = await executorResolver(target.provider);
 
     // Служебный слэш-ход провайдерской команды (меню «/» в чате). Признак принимаем
     // строго: команда обязана быть в списке commands() исполнителя с run:'prompt', а
@@ -1728,7 +1642,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       );
     // Режим прав выбирает только пользователь в чате. UI-context не является
     // authorization surface и не даёт ни cwd, ни fallback permission mode.
-    const permissionMode = target.strictPermissionMode || await allowedMode(executor, wantMode);
+    const permissionMode = await allowedMode(executor, wantMode);
     if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
 
     const workProjectId = await trustedWorkProject(id);
@@ -1787,25 +1701,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
     const runEffort = resolvedEffort.effort;
 
-    // Подготовка prompt/ticket/provider выше могла ждать произвольный I/O. Перед первой
-    // мутацией binding/activeRuns/executor ещё раз подтверждаем физический exact worktree:
-    // ранний canonical-снимок не даёт права запускаться по уже удалённому пути.
-    if (companionTurn === true && id) {
-      const currentSandbox = await companionTaskSandbox(id);
-      if (!sameCompanionTaskSandbox(trustedCompanionSandbox, currentSandbox)) {
-        return reply.code(409).send({
-          error: 'companion_task_sandbox_unavailable',
-          message: 'Worktree задачи изменился во время подготовки хода; ход не запущен.',
-        });
-      }
-    }
-
     // Kimi session принадлежит не браузеру, а sidecar-у Cockpit. Все медленные части
     // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
     let kimiBinding: BindingRecord | null = null;
     let kimiIdentity: (BindingIdentity & { chatKey: string }) | null = null;
     if (target.provider === 'kimi') {
-      const cwdRealpath = trustedCompanionSandbox ? cwd : await fs.realpath(cwd);
+      const cwdRealpath = await fs.realpath(cwd);
       kimiIdentity = {
         chatKey: chatKey!,
         provider: 'kimi',
@@ -1828,17 +1729,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         await bindingStore.assertResumeOwner({ chatKey: chatKey!, provider: 'kimi', sessionId });
       }
       cwd = cwdRealpath;
-      // Binding I/O тоже могло занять время. Не запускаем executor со stale cwd даже
-      // после уже созданного recoverable sidecar-а.
-      if (companionTurn === true && id) {
-        const currentSandbox = await companionTaskSandbox(id);
-        if (!sameCompanionTaskSandbox(trustedCompanionSandbox, currentSandbox)) {
-          return reply.code(409).send({
-            error: 'companion_task_sandbox_unavailable',
-            message: 'Worktree задачи исчез до запуска исполнителя; ход не запущен.',
-          });
-        }
-      }
     }
 
     // Разрешения (claude): default-режим, на действия агент спрашивает через
@@ -1871,15 +1761,50 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // кольцом контекста. Флаг обязан быть здесь, а не только в затеявшем окне: у родного
     // компакта нет ни шагов, ни прогресса (см. ниже), так что второму устройству
     // догадаться о сжатии больше неоткуда.
+    // Конец хода как обещание: слив остановки ждёт его, а не опрашивает activeRuns.
+    let finishRun!: () => void;
+    const finished = new Promise<void>((resolve) => { finishRun = () => resolve(); });
     const runRec: RunningTurn = {
       startedAt: Date.now(),
       tokens: 0,
       steps: [],
       ac,
       compact: !!plan,
-      speechSafe: companionTurn === true,
-      speechTraceSeen: false,
       workToolScopeKey,
+      sessionId: sessionId || null,
+      finished,
+      finish: () => finishRun(),
+    };
+    // Слив остановки: ход не закончился даже после прерывания — его лента, id сессии и
+    // вопрос человека уходят в pending прямо сейчас, до закрытия процессов. Если ход всё
+    // же завершится позже, запись снимается, чтобы ответ не приехал дважды.
+    let abandonedId: string | null = null;
+    runRec.abandon = async () => {
+      if (abandonedId || !chatKey) return;
+      abandonedId = orphanId();
+      await writeOrphan({
+        id: abandonedId,
+        chatKey,
+        role: 'assistant',
+        reply: SHUTDOWN_CUT_REPLY,
+        stopped: true,
+        interruptedBy: 'server_shutdown',
+        steps: [...runRec.steps],
+        sessionId: runRec.sessionId || null,
+        contextTokens: runRec.contextTokens || 0,
+        ...(runRec.contextCache ? { contextCache: runRec.contextCache } : {}),
+        cost: null,
+        model: model || null,
+        effort: runEffort || null,
+        ...orphanUser,
+        at: Date.now(),
+      });
+      fastify.sse.broadcast('chat-orphan', { chatKey });
+    };
+    const discardAbandoned = async () => {
+      if (!abandonedId) return;
+      await fs.rm(path.join(pendingDir, `${abandonedId}.json`), { force: true }).catch(() => {});
+      abandonedId = null;
     };
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
@@ -1928,10 +1853,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         const visibleStep = visibleChatTitleStep(step, wantsTitle);
         if (!visibleStep) return;
         const a = activeRuns.get(chatKey);
-        if (a) {
-          a.steps.push(visibleStep);
-          if (a.steps.length > MAX_CHAT_STEPS) a.steps.splice(0, a.steps.length - MAX_CHAT_STEPS);
-        }
+        if (a) pushChatStep(a.steps, visibleStep, MAX_CHAT_STEPS);
         fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
       };
 
@@ -1969,20 +1891,32 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         log: fastify.log,
         // ACP возвращает id новой сессии до prompt. Фиксируем его CAS-записью ДО
         // передачи пользовательского текста, чтобы другой чат не мог присвоить id.
-        onSessionCreated: target.provider === 'kimi' ? async (newSessionId) => {
-          const saved = await bindingStore.compareAndSwap({
-            ...kimiIdentity,
-            sessionId: newSessionId,
-          }, kimiBinding!.generation);
-          kimiBinding = saved;
-          sessionId = saved.sessionId;
-          lastSession.set(chatKey, saved.sessionId);
-        } : undefined,
+        // У остальных исполнителей id известен с первого события потока: запоминаем его в
+        // записи хода и сообщаем окнам сразу (SSE `chat-session`), а не в конце хода —
+        // иначе перезапуск сервера посреди первого хода оставлял чат без сессии, и
+        // следующее сообщение начинало разговор с нуля.
+        onSessionCreated: async (newSessionId) => {
+          let known = String(newSessionId || '');
+          if (!known) return;
+          if (target.provider === 'kimi') {
+            const saved = await bindingStore.compareAndSwap({
+              ...kimiIdentity,
+              sessionId: known,
+            }, kimiBinding!.generation);
+            kimiBinding = saved;
+            sessionId = saved.sessionId;
+            lastSession.set(chatKey, saved.sessionId);
+            known = String(saved.sessionId || known);
+          }
+          runRec.sessionId = known;
+          if (chatKey) {
+            fastify.sse.broadcast('chat-session', { chatKey, sessionId: known, at: Date.now() });
+          }
+        },
         // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (kimi по
         // ACP, ollama из своего цикла инструментов). Выдаётся всем: не поддерживающий
         // его executor просто не вызовет колбэк, а вендорной ветки в ядре не остаётся.
         onPermission: (presentation) => {
-          runRec.speechSafe = false;
           // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
           // в default), а на безопасные запросы отвечает общий классификатор.
           // Деструктивные и неизвестные формы по-прежнему уходят человеку во всплывашку.
@@ -2014,14 +1948,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // Лента хода (размышления, инструменты, их результаты) — живьём в окно.
         // Копия в activeRuns: перезагрузка страницы посреди хода не теряет показанное.
         onStep: chatKey ? (step) => {
-          // Эта аттестация монотонна и намеренно выполняется до фильтрации заголовка и
-          // ограниченного хранения шагов. Озвучиваемый ход дают только допустимые нормализованные
-          // виды; свидетельство ошибки, неизвестного вида или действия нельзя забывать.
-          const speechKind = isPlainObject(step) && typeof step.k === 'string' && step.k
-            ? step.k
-            : null;
-          if (speechKind) runRec.speechTraceSeen = true;
-          if (!speechKind || !SPEECH_SAFE_STEP_KINDS.has(speechKind)) runRec.speechSafe = false;
           publishStep(step);
         } : undefined,
       };
@@ -2034,6 +1960,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           onStep: runArgs.onStep,
           onProgress: runArgs.onProgress,
           onPermission: runArgs.onPermission,
+          onSessionCreated: runArgs.onSessionCreated,
         }) as Promise<ExecutorRunResult>
         : executor.run(runArgs));
 
@@ -2119,30 +2046,39 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (slash && !String(out?.reply || '').trim()) {
         out = { ...out, reply: `✓ Команда ${slash.cmd} выполнена локально — вывода нет.`, note: true };
       }
+      // Ход закончился сообщением, которое CLI сочинил САМ, не спросив модель: сеть,
+      // TLS, 529 Overloaded, обрыв соединения. Ответом агента это не является — раньше
+      // текст «API Error: …» ложился в историю как слова модели, ход считался успешным,
+      // и работа (в инциденте 10.09.2026 — 112 шагов) выглядела выброшенной, а человеку
+      // приходилось самому догадываться написать «Продолжай». Session при этом цела:
+      // отдаём ошибку хода вместе с лентой и id разговора, продолжение возможно.
+      if (out?.deliveryFailure) {
+        const cliSaid = String(out.reply || '').trim();
+        out = {
+          ...out,
+          reply: `⚠ Ход оборвал сам CLI, ответа модели не было: «${cliSaid}».`
+            + ' Контекст сохранён — напиши «Продолжай», и агент продолжит с этого места.',
+        };
+      }
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
-      // Окончательный вердикт при последней записи принадлежит серверу: исполнитель не может
-      // сам подтвердить это поле, а ограниченный хвост `out.steps` не доказывает отсутствие раннего действия.
-      const speechSafe = companionTurn === true
-        && runRec.speechSafe === true
-        && runRec.speechTraceSeen === true
-        && !plan
-        && !slash
-        && !out?.note;
+      // Ход всё-таки закончился после слива остановки: настоящий ответ важнее записи «на память».
+      await discardAbandoned();
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
       if (request.socket.destroyed && chatKey) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: out?.note ? 'note' : 'assistant', ...out, model: model || null, effort: runEffort || null,
-          speechSafe,
+          chatKey,
+          role: out?.note ? 'note' : (out?.deliveryFailure ? 'error' : 'assistant'),
+          ...out, model: model || null, effort: runEffort || null,
           ...orphanUser, at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
       // model — что просили, actualModel — чем CLI отработал (алиас он резолвит сам),
       // effort — что реально ушло в запуск. По этой тройке в UI видно любой рассинхрон.
-      return { ...out, model: model || null, effort: runEffort || null, speechSafe };
+      return { ...out, model: model || null, effort: runEffort || null };
     } catch (errValue) {
       const err = errValue as ChatFailure;
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
@@ -2157,9 +2093,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // (stopped-brief.js) уже в новую session. Binding не трогаем и с точки зрения
         // гонок: его единственный владелец — эта цепочка ходов чата (turnLocks).
         const contextCache = normalizeContextCache(err.contextCache);
+        // Прерывание сливом остановки — не «стоп» человека: текст называет причину, а
+        // пометка даёт окну предложить продолжение уже после перезапуска.
+        const shutdownCut = runRec.interruptedBy === 'server_shutdown';
+        await discardAbandoned();
         const stoppedOut = finishChatTitleHook({
-          reply: '⏹ Ход остановлен.', steps: err.steps || [],
-          sessionId: err.sessionId || sessionId || null,
+          reply: shutdownCut ? SHUTDOWN_CUT_REPLY : '⏹ Ход остановлен.', steps: err.steps || [],
+          sessionId: err.sessionId || runRec.sessionId || sessionId || null,
+          ...(shutdownCut ? { interruptedBy: 'server_shutdown' } : {}),
           // Размер контекста берём тот, что исполнитель успел увидеть в потоке: раньше здесь
           // стоял жёсткий 0, клиент его игнорировал (нули не пишем), и после «стопа» кольцо
           // врало — у новой сессии оставалось пустым, хотя контекст в ней уже набрался.
@@ -2176,8 +2117,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           fastify.sse.broadcast('chat-orphan', { chatKey });
           return reply;
         }
-        return { ...stoppedOut, speechSafe: false };
+        return stoppedOut;
       }
+      // Ход уже записан сливом остановки: поздний отказ процесса (его закрыл пул) — не
+      // новая ошибка, а её следствие, и второй записи в истории ему не положено.
+      if (abandonedId) return reply;
       if (request.socket.destroyed && chatKey) {
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
           chatKey, role: 'error', reply: err.message, ...orphanUser,
@@ -2193,6 +2137,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...(err.sessionResetFailed ? { sessionResetFailed: true } : {}),
       });
     } finally {
+      runRec.finish();
       if (chatKey) {
         activeRuns.delete(chatKey);
         // Ход кончился (в т.ч. упал), а запрос всё ещё висит — снимаем: без хода
@@ -2643,12 +2588,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     const {
       message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand, companionTurn,
+      requestTitle, sentAt, slashCommand,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
       id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand, companionTurn,
+      requestTitle, sentAt, slashCommand,
     });
   });
 
@@ -2656,12 +2601,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   fastify.post<ChatRoute>('/api/chat', async (request, reply) => {
     const {
       message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand, companionTurn,
+      requestTitle, sentAt, slashCommand,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
       id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand, companionTurn,
+      requestTitle, sentAt, slashCommand,
     });
   });
 
@@ -2702,9 +2647,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return {
       ...(await history.read()),
       compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
-      // Чем уходит быстрый ход компаньона. Едет тем же путём, что порог сжатия: модель
-      // резолвит браузер перед отправкой, а настройка server-owned и общая для окон.
-      companion: normalizeCompanionSettings(prefs?.read()?.companion),
       speech: {
         ...publicSpeech,
         revision: speechSettingsRevision(settings, storedRevision),

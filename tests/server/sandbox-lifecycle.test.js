@@ -11,6 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createSandboxService } from '../../server/src/lib/sandboxes/service.ts';
+import { writeSandboxJournalRecord } from '../../server/src/lib/sandboxes/registry.ts';
+import { createSandboxActivityGuard } from '../../server/src/lib/sandboxes/activityGuard.ts';
 
 const UP_STUB = `#!/usr/bin/env bash
 set -euo pipefail
@@ -54,6 +56,16 @@ rm -f "$STATE_DIR/t\${TASK}.env"
 echo "ВНИМАНИЕ: в worktree есть незакоммиченные изменения — worktree ОСТАВЛЕН"
 `;
 
+const WAITING_DOWN_STUB = `#!/usr/bin/env bash
+set -euo pipefail
+TASK=$1
+echo ready > "$STATE_DIR/t\${TASK}.down-ready"
+while [[ ! -f "$STATE_DIR/t\${TASK}.down-continue" ]]; do
+  sleep 0.02
+done
+rm -f "$STATE_DIR/t\${TASK}.env"
+`;
+
 const FAILING_UP_STUB = `#!/usr/bin/env bash
 echo "ОШИБКА: схема уже существует (недоснесённая песочница?)" >&2
 exit 1
@@ -75,8 +87,10 @@ async function script(file, body) {
  */
 async function serviceFixture(t, {
   up = UP_STUB,
+  down = DOWN_STUB,
   withScripts = true,
   manualRange = { from: 990000, to: 990004 },
+  probe = async () => false,
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-life-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -89,13 +103,15 @@ async function serviceFixture(t, {
   await mkdir(stateDir, { recursive: true });
   await mkdir(path.join(profilesDir, 'demo-profile'), { recursive: true });
   await mkdir(path.join(profilesDir, 'plain-profile'), { recursive: true });
-  await writeFile(path.join(profilesDir, 'demo-profile', 'graph.json'), '{"capabilities":["route-v2"]}', 'utf8');
-  await writeFile(path.join(profilesDir, 'plain-profile', 'graph.json'), '{"capabilities":["route-v2"]}', 'utf8');
+  const graph = '{"capabilities":["route-v2"]}';
+
+  await writeFile(path.join(profilesDir, 'demo-profile', 'graph.json'), graph, 'utf8');
+  await writeFile(path.join(profilesDir, 'plain-profile', 'graph.json'), graph, 'utf8');
   await script(factoryBin, SLOTS_STUB);
 
   if (withScripts) {
     await script(path.join(profilesDir, 'demo-profile', 'up.sh'), up);
-    await script(path.join(profilesDir, 'demo-profile', 'down.sh'), DOWN_STUB);
+    await script(path.join(profilesDir, 'demo-profile', 'down.sh'), down);
   }
 
   const events = [];
@@ -108,7 +124,7 @@ async function serviceFixture(t, {
     sweepMs: 20,
     // Настоящих стендов в тесте нет, поэтому и портов быть не может: проба портов
     // подменена, иначе проверка ходила бы на живые сокеты машины.
-    probe: async () => false,
+    probe,
     broadcast: (event, data) => events.push([event, data]),
   });
   t.after(() => service.stop());
@@ -165,8 +181,69 @@ test('подъём без задачи берёт номер из служебн
   assert.equal(entry.profile, 'demo-profile');
   assert.equal(entry.fePort, 5192);
   assert.equal(entry.apiPort, 8092);
+  assert.equal(entry.feAlive, false);
+  assert.equal(entry.profileBinding, 'verified');
   assert.deepEqual(entry.repos.map((repo) => repo.branch), [`route-task-${started.task}`]);
   assert.ok(events.some(([name]) => name === 'sandboxes-changed'));
+});
+
+test('обзор отделяет живость FE от ответа API-порта', async (t) => {
+  const { service, stateDir } = await serviceFixture(t, {
+    probe: async (port) => port === 8092,
+  });
+
+  await writeFile(path.join(stateDir, 't990000.env'), [
+    'TASK=990000',
+    'SB_K=2',
+    'API_PORT=8092',
+    'FE_PORT=5192',
+    'WORKSPACE_MODE=isolated',
+    'STAND_OWNERSHIP=task',
+    '',
+  ].join('\n'), 'utf8');
+
+  const overview = await service.overview();
+  const entry = overview.sandboxes.find((item) => item.task === '990000');
+
+  assert.equal(entry.standAlive, true);
+  assert.equal(entry.feAlive, false);
+  assert.equal(entry.profile, 'demo-profile');
+  assert.equal(entry.profileBinding, 'inferred');
+});
+
+test('старый успешный up не доказывает профиль нового поколения стенда', async (t) => {
+  const { service, stateDir, journalDir } = await serviceFixture(t);
+
+  await writeSandboxJournalRecord(journalDir, {
+    task: '990001',
+    profile: 'demo-profile',
+    action: 'up',
+    state: 'done',
+    index: 11,
+    total: 11,
+    label: 'готово',
+    message: '',
+    pid: null,
+    starttime: null,
+    cmdline: null,
+    log: path.join(journalDir, 't990001.up.log'),
+    startedAt: '2026-01-01T10:00:00.000Z',
+    finishedAt: '2026-01-01T10:10:00.000Z',
+  });
+  await writeFile(path.join(stateDir, 't990001.env'), [
+    'TASK=990001',
+    'API_PORT=8092',
+    'FE_PORT=5192',
+    'WORKSPACE_MODE=isolated',
+    'STAND_OWNERSHIP=task',
+    '',
+  ].join('\n'), 'utf8');
+
+  const overview = await service.overview();
+  const entry = overview.sandboxes.find((item) => item.task === '990001');
+
+  assert.equal(entry.profile, 'demo-profile');
+  assert.equal(entry.profileBinding, 'inferred');
 });
 
 test('номер занятой задачи и повторный подъём того же стенда отклоняются', async (t) => {
@@ -224,6 +301,36 @@ test('снос зовёт down.sh профиля, бережёт незаком�
   const overview = await service.overview();
 
   assert.equal(overview.sandboxes.some((item) => item.task === '990001'), false);
+});
+
+test('Showcase и lifecycle атомарно делят аренду стенда между процессами', async (t) => {
+  const { service, stateDir } = await serviceFixture(t, { down: WAITING_DOWN_STUB });
+  const guard = createSandboxActivityGuard({ stateDir, timeoutMs: 10 });
+  const started = await service.raise({ profile: 'demo-profile', task: '990003' });
+
+  await settled(service, started.task);
+
+  const showcase = await guard.acquireShowcase(started.task);
+
+  await assert.rejects(
+    () => service.dismantle({ task: started.task }),
+    (error) => error.code === 'sandbox_busy' && error.status === 409,
+  );
+  await showcase.release();
+
+  await service.dismantle({ task: started.task });
+
+  await assert.rejects(
+    () => guard.acquireShowcase(started.task),
+    (error) => error.code === 'SANDBOX_ACTIVITY_BUSY',
+  );
+
+  await writeFile(path.join(stateDir, `t${started.task}.down-continue`), '', 'utf8');
+  await settled(service, started.task);
+
+  const after = await guard.acquireShowcase(started.task);
+
+  await after.release();
 });
 
 test('снос с явным «вместе с незакоммиченным» передаёт профилю force', async (t) => {

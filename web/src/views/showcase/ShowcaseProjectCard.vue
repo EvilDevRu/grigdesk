@@ -13,27 +13,24 @@
       <template v-if="nextAction"> — {{ nextAction }}</template>
     </UiInlineMessage>
 
+    <!-- Одна кнопка на весь конвейер: человек смотрит ролик, а не управляет
+         стадиями. Запись, озвучка и сборка сами считают, что им делать, и свежие
+         клипы второй раз не снимаются. -->
     <div class="project__toolbar">
       <UiButton
         variant="solid"
         tone="accent"
-        :disabled="!canRecord"
-        :loading="busy"
-        @click="emit('record')"
+        :disabled="!canBuild"
+        :loading="busy || Boolean(buildStage)"
+        @click="emit('build')"
       >
-        Записать сцены
+        {{ project.latestFinal ? 'Перегенерировать ролик' : 'Собрать ролик' }}
       </UiButton>
-      <UiButton variant="ghost" :disabled="!canSynthesize" :loading="busy" @click="emit('voice')">
-        Озвучить сцены
-      </UiButton>
-      <UiButton variant="ghost" :disabled="!canAssemble" :loading="busy" @click="emit('assemble')">
-        Собрать ролик
-      </UiButton>
-      <span class="project__note">{{ readinessText }}</span>
+      <span class="project__note">{{ buildStage || readinessText }}</span>
     </div>
 
-    <ul v-if="jobs.length" class="project__jobs">
-      <li v-for="job in jobs" :key="job.id">
+    <ul v-if="visibleJobs.length" class="project__jobs">
+      <li v-for="job in visibleJobs" :key="job.id">
         <span class="project__job-dot" :data-state="job.state" aria-hidden="true"></span>
         <strong>{{ JOB_KIND[job.kind] }}</strong>
         <span>{{ job.progress.label || JOB_STATE[job.state] }}</span>
@@ -51,120 +48,143 @@
       </li>
     </ul>
 
-    <section v-if="project.latestFinal" class="project__final" aria-labelledby="showcase-final-title">
-      <div class="project__block-head">
-        <h3 id="showcase-final-title">Готовый ролик</h3>
-        <span v-if="!project.latestFinal.current" class="project__stale">предыдущая сборка</span>
-      </div>
-      <UiVideo :src="finalUrl" label="Готовый ролик" />
-      <div class="project__downloads">
-        <UiActionLink :href="finalUrl" download="showcase.mp4">Скачать mp4</UiActionLink>
-        <UiActionLink v-if="subtitlesUrl" :href="subtitlesUrl" download="showcase.srt">
-          Скачать субтитры
-        </UiActionLink>
-      </div>
-    </section>
+    <!-- Готовый ролик и работа над ним стоят рядом: человек смотрит запись и тут же
+         правит текст, которым она озвучена, и голос, которым она говорит. -->
+    <div class="project__stage">
+      <div class="project__stage-main">
+        <section v-if="project.latestFinal" class="project__final" aria-labelledby="showcase-final-title">
+          <div class="project__block-head">
+            <h3 id="showcase-final-title">Готовый ролик</h3>
+            <span v-if="!project.latestFinal.current" class="project__stale">предыдущая сборка</span>
+          </div>
+          <UiVideo :src="finalUrl" label="Готовый ролик" />
+          <div class="project__downloads">
+            <UiActionLink :href="finalUrl" download="showcase.mp4">Скачать mp4</UiActionLink>
+            <UiActionLink v-if="subtitlesUrl" :href="subtitlesUrl" download="showcase.srt">
+              Скачать субтитры
+            </UiActionLink>
+          </div>
+        </section>
 
-    <section class="project__data" aria-labelledby="showcase-data-title">
-      <div class="project__block-head">
-        <h3 id="showcase-data-title">Данные стенда</h3>
-        <span class="project__note">{{ dataRevisionText }}</span>
-      </div>
+        <section v-else class="project__final project__final--empty" aria-labelledby="showcase-final-title">
+          <div class="project__block-head">
+            <h3 id="showcase-final-title">Готовый ролик</h3>
+          </div>
+          <div class="project__placeholder">
+            <span class="project__placeholder-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="m10 9 5 3-5 3z" />
+              </svg>
+            </span>
+            <div>
+              <strong>Ролика ещё нет</strong>
+              <p>
+                Проверьте сцены и голос справа и нажмите «Собрать ролик»: запись экранов,
+                озвучка и сборка займут несколько минут.
+              </p>
+            </div>
+          </div>
+        </section>
 
-      <p class="project__note">
-        {{ seed?.available
-          ? 'Профиль объявил рецепт подготовки. Он меняет данные стенда, поэтому запускается только по подтверждению.'
-          : (seed?.reason || 'Подготовка данных для этой цели недоступна: показываем то, что уже есть.') }}
-      </p>
+        <!-- Данные стенда нужны, только если профиль объявил рецепт подготовки. Без
+             него остаётся одна отметка «данные обновлены» — она старит записи всех
+             сцен, и прятать её нельзя, но и выпячивать незачем. -->
+        <section v-if="seed?.available" class="project__data" aria-labelledby="showcase-data-title">
+          <div class="project__block-head">
+            <h3 id="showcase-data-title">Данные стенда</h3>
+            <span class="project__note">{{ dataRevisionText }}</span>
+          </div>
+          <p class="project__note">
+            Профиль объявил рецепт подготовки. Он меняет данные стенда, поэтому
+            запускается только по подтверждению.
+          </p>
+          <div class="project__data-actions">
+            <UiButton variant="ghost" :loading="busy" @click="emit('seed', seed.recipeFingerprint)">
+              Подготовить данные
+            </UiButton>
+            <UiButton variant="ghost" :loading="busy" @click="emit('data-updated')">
+              Данные обновлены
+            </UiButton>
+          </div>
+        </section>
 
-      <div class="project__data-actions">
-        <UiButton
-          v-if="seed?.available"
-          variant="ghost"
-          :loading="busy"
-          @click="emit('seed', seed.recipeFingerprint)"
-        >
-          Подготовить данные
-        </UiButton>
-        <UiButton variant="ghost" :loading="busy" @click="emit('data-updated')">
-          Данные обновлены
-        </UiButton>
-      </div>
-    </section>
-
-    <section class="project__brief" aria-labelledby="showcase-brief-title">
-      <div class="project__block-head">
-        <h3 id="showcase-brief-title">Бриф</h3>
-        <span class="project__note">Что показать зрителю</span>
-      </div>
-
-      <ol v-if="project.brief.length" class="project__brief-list">
-        <li v-for="(point, index) in project.brief" :key="index">{{ point }}</li>
-      </ol>
-      <p v-else class="project__note">
-        Модель может предложить план по тексту задачи и изменениям в репозиториях стенда.
-        Текст задачи остаётся данными: адреса, экраны и действия он не задаёт.
-      </p>
-
-      <UiField label="Текст задачи для модели" hint="Вставьте постановку или её суть.">
-        <UiTextarea v-model="taskText" :disabled="busy" rows="3" />
-      </UiField>
-
-      <div class="project__brief-actions">
-        <UiButton variant="ghost" :loading="busy" @click="emit('brief', taskText)">
-          Предложить бриф
-        </UiButton>
-        <UiButton
-          variant="ghost"
-          :aria-disabled="!project.brief.length"
-          :loading="busy"
-          @click="emit('script', taskText)"
-        >
-          Предложить сцены
-        </UiButton>
-      </div>
-    </section>
-
-    <section class="project__scenes" aria-labelledby="showcase-scenes-title">
-      <div class="project__block-head">
-        <h3 id="showcase-scenes-title">Сцены</h3>
-        <span class="project__note">{{ project.scenes.length }} из {{ maxScenes }}</span>
+        <div v-else class="project__data-line">
+          <span class="project__note">
+            {{ seed?.reason || 'Подготовка данных для этой цели недоступна.' }}
+            Изменили данные стенда сами — отметьте это, и сцены снимутся заново.
+          </span>
+          <UiButton variant="ghost" :loading="busy" @click="emit('data-updated')">
+            Данные обновлены
+          </UiButton>
+        </div>
       </div>
 
-      <p v-if="!project.scenes.length" class="project__note">
-        Сцен ещё нет. Каждая сцена начинается со своего экрана и не зависит от соседних.
-      </p>
+      <div class="project__stage-side">
+        <slot name="voice" />
 
-      <ShowcaseSceneEditor
-        v-for="(scene, index) in orderedScenes"
-        :key="scene.id"
-        :scene="scene"
-        :audio-url="audioUrlOf(scene)"
-        :busy="busy"
-        :checks="scene.checks"
-        :first="index === 0"
-        :last="index === orderedScenes.length - 1"
-        @save="emit('save-scene', $event)"
-        @remove="emit('remove-scene', $event)"
-        @move="emit('move-scene', $event)"
-        @audio="emit('scene-audio', $event)"
-      />
+        <section class="project__scenes" aria-labelledby="showcase-scenes-title">
+          <div class="project__block-head">
+            <h3 id="showcase-scenes-title">Сцены</h3>
+            <span class="project__note">{{ project.scenes.length }} из {{ maxScenes }}</span>
+          </div>
 
-      <form class="project__add" @submit.prevent="addScene">
-        <UiField label="Экран новой сцены" hint="Список приходит из объявления профиля.">
-          <UiSelect v-model="newScreenId" :disabled="busy || !screens.length">
-            <option v-if="!screens.length" value="">профиль не объявил экранов</option>
-            <option v-for="screen in screens" :key="screen.id" :value="screen.id">
-              {{ screen.title }}
-            </option>
-          </UiSelect>
-        </UiField>
-        <UiField label="Что говорит голос">
-          <UiInput v-model="newNarration" :disabled="busy" placeholder="Открываем обзор задач." />
-        </UiField>
-        <UiButton type="submit" variant="ghost" :aria-disabled="!canAdd">Добавить сцену</UiButton>
-      </form>
-    </section>
+          <p v-if="!project.scenes.length" class="project__note">
+            Сцен ещё нет. Каждая сцена начинается со своего экрана и не зависит от соседних.
+          </p>
+
+          <ShowcaseSceneEditor
+            v-for="(scene, index) in orderedScenes"
+            :key="scene.id"
+            :scene="scene"
+            :audio-url="audioUrlOf(scene)"
+            :busy="busy"
+            :checks="scene.checks"
+            :first="index === 0"
+            :last="index === orderedScenes.length - 1"
+            @save="emit('save-scene', $event)"
+            @remove="emit('remove-scene', $event)"
+            @move="emit('move-scene', $event)"
+            @audio="emit('scene-audio', $event)"
+          />
+
+          <form class="project__add" @submit.prevent="addScene">
+            <UiField label="Экран новой сцены">
+              <UiSelect v-model="newScreenId" :disabled="busy || !screens.length">
+                <option v-if="!screens.length" value="">профиль не объявил экранов</option>
+                <option v-for="screen in screens" :key="screen.id" :value="screen.id">
+                  {{ screen.title }}
+                </option>
+              </UiSelect>
+            </UiField>
+            <UiField label="Текст озвучки">
+              <UiInput v-model="newNarration" :disabled="busy" placeholder="Открываем обзор задач." />
+            </UiField>
+            <UiButton type="submit" variant="ghost" :aria-disabled="!canAdd">Добавить сцену</UiButton>
+          </form>
+        </section>
+
+        <section class="project__brief" aria-labelledby="showcase-brief-title">
+          <div class="project__block-head">
+            <h3 id="showcase-brief-title">План ролика</h3>
+            <span class="project__note">что показать зрителю</span>
+          </div>
+
+          <ol v-if="project.brief.length" class="project__brief-list">
+            <li v-for="(point, index) in project.brief" :key="index">{{ point }}</li>
+          </ol>
+          <p v-else class="project__note">
+            План собирается по тексту связанной задачи и изменениям в репозиториях стенда.
+          </p>
+
+          <div class="project__brief-actions">
+            <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">
+              Разобрать заново
+            </UiButton>
+          </div>
+        </section>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -178,7 +198,6 @@ import {
   UiInlineMessage,
   UiInput,
   UiSelect,
-  UiTextarea,
   UiVideo,
 } from '../../ui';
 import type { ShowcaseJob, ShowcaseProject, ShowcaseScene } from '../../../../shared/showcaseContracts';
@@ -197,19 +216,19 @@ const props = defineProps<{
   seed: SeedStatus | null;
   jobs: ShowcaseJob[];
   busy: boolean;
+  // Стадия сквозной сборки: пока она идёт, кнопка занята, а человек читает, что
+  // именно сейчас происходит, — задания приходят позже и не покрывают паузы между.
+  buildStage: string;
   maxScenes: number;
   artifactUrl: (artifactId: string) => string;
 }>();
 
 const emit = defineEmits<{
   close: [];
-  record: [];
-  brief: [taskText: string];
+  build: [];
+  analyze: [];
   seed: [recipeFingerprint: string];
   'data-updated': [];
-  script: [taskText: string];
-  voice: [];
-  assemble: [];
   cancel: [jobId: string];
   'add-scene': [payload: { screenId: string; narration: string }];
   'save-scene': [payload: SceneTextPayload];
@@ -236,7 +255,10 @@ const JOB_STATE: Record<ShowcaseJob['state'], string> = {
   cancelled: 'отменено',
 };
 
-const taskText = ref('');
+const ACTIVE_STATES = new Set<ShowcaseJob['state']>([
+  'queued', 'running', 'awaiting_review', 'cancelling',
+]);
+
 const newScreenId = ref('');
 const newNarration = ref('');
 
@@ -247,6 +269,19 @@ const screens = computed(() => (
 const orderedScenes = computed(() => (
   [...props.project.scenes].sort((left, right) => left.order - right.order)
 ));
+
+// На экране только живые задания и последний отказ: история успешных стадий
+// человеку ни о чём не говорит, а отказ — говорит, почему ролика нет.
+const visibleJobs = computed(() => {
+  const active = props.jobs.filter((job) => ACTIVE_STATES.has(job.state));
+  const latest = [...props.jobs]
+    .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
+  const failed = latest && (latest.state === 'failed' || latest.state === 'interrupted')
+    ? [latest]
+    : [];
+
+  return [...active, ...failed.filter((job) => !active.includes(job))];
+});
 
 const targetText = computed(() => {
   if (props.project.target.status !== 'ready') {
@@ -267,28 +302,15 @@ const nextAction = computed(() => (
   props.project.target.status === 'blocked' ? props.project.target.nextAction?.hint ?? '' : ''
 ));
 
-const canRecord = computed(() => (
+// Собрать можно, когда есть что снимать: цель жива, запись разрешена и в ролике
+// хотя бы одна сцена. Свежесть отдельных клипов здесь не проверяется — стадии
+// сами пропускают то, что уже готово, и кнопка не гаснет посреди конвейера.
+const canBuild = computed(() => (
   !props.busy
+  && !props.buildStage
+  && props.project.scenes.length > 0
   && props.project.target.status === 'ready'
   && props.project.target.scope.capabilities.includes('record')
-  && props.project.scenes.some((scene) => scene.stale)
-));
-
-// Озвучивать есть что, только если у сцены источник — синтез и её звук устарел:
-// загруженную человеком запись движок не переозвучивает.
-const canSynthesize = computed(() => (
-  !props.busy
-  && props.project.scenes.some((scene) => (
-    scene.audioSource.kind === 'tts' && (!scene.audio || scene.stale)
-  ))
-));
-
-// Собирать можно, только когда у каждой сцены свежие клип и звук: смесь двух
-// редакций выглядела бы готовым роликом, но показывала бы не то, что написано.
-const canAssemble = computed(() => (
-  !props.busy
-  && props.project.scenes.length > 0
-  && props.project.scenes.every((scene) => !scene.stale && scene.audio && scene.clip)
 ));
 
 const readinessText = computed(() => {
@@ -300,7 +322,7 @@ const readinessText = computed(() => {
   const withoutAudio = props.project.scenes.filter((scene) => !scene.audio).length;
 
   if (withoutAudio) {
-    return `Без звука: ${withoutAudio} сцен(ы).`;
+    return `Без звука: ${withoutAudio} сцен(ы). Сборка озвучит их сама.`;
   }
 
   return stale ? `Нужна запись: ${stale} сцен(ы).` : 'Все сцены готовы к сборке.';
@@ -355,7 +377,7 @@ function addScene() {
 .project {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   min-width: 0;
 }
 
@@ -363,12 +385,25 @@ function addScene() {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
+  padding: 19px 20px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background:
+    radial-gradient(
+      circle at 88% 10%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 27%
+    ),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface));
+  box-shadow: inset 0 1px 0 #ffffff08;
 }
 
 .project__intro h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
+  margin: 0 0 6px;
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
   overflow-wrap: anywhere;
 }
 
@@ -376,8 +411,23 @@ function addScene() {
 .project__note,
 .project__stale {
   margin: 0;
-  color: var(--muted, #9aa4b2);
-  font-size: 13px;
+  color: var(--ink-mid);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.project__target {
+  display: block;
+  max-width: 720px;
+}
+
+.project__stale {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 6%, var(--ground));
+  color: var(--warn);
+  font-size: 10.5px;
 }
 
 .project__toolbar {
@@ -385,15 +435,22 @@ function addScene() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+
+.project__toolbar .project__note {
+  margin-left: auto;
 }
 
 .project__jobs {
-  list-style: none;
+  display: grid;
+  gap: 6px;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  list-style: none;
 }
 
 .project__jobs li {
@@ -403,6 +460,10 @@ function addScene() {
   font-size: 13px;
   min-width: 0;
   flex-wrap: wrap;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ground) 52%, transparent);
 }
 
 .project__job-dot {
@@ -415,37 +476,31 @@ function addScene() {
 
 .project__job-dot[data-state='failed'],
 .project__job-dot[data-state='interrupted'] {
-  background: var(--danger, #d05353);
+  background: var(--bad);
 }
 
 .project__job-dot[data-state='succeeded'] {
-  background: var(--ok, #4c9a5a);
+  background: var(--good);
 }
 
 .project__job-count,
 .project__job-error {
-  color: var(--muted, #9aa4b2);
+  color: var(--ink-mid);
 }
 
-.project__data-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.project__stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
 }
 
-.project__brief-list {
-  margin: 0;
-  padding-left: 20px;
+.project__stage-main,
+.project__stage-side {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-}
-
-.project__brief-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
 }
 
 .project__data,
@@ -454,38 +509,128 @@ function addScene() {
 .project__scenes {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 13px;
   min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
+    var(--surface) 100%
+  );
+  box-shadow: inset 0 1px 0 #ffffff08;
 }
 
 .project__block-head {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
 }
 
 .project__block-head h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 660;
+  letter-spacing: -0.01em;
 }
 
-.project__downloads {
+.project__placeholder {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: 13px;
+  min-height: 150px;
+  padding: 20px;
+  border: 1px dashed var(--line-2);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--surface-2) 28%, transparent);
+}
+
+.project__placeholder-mark {
+  display: grid;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+}
+
+.project__placeholder-mark svg {
+  width: 19px;
+  height: 19px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.project__placeholder strong {
+  font-size: 14px;
+}
+
+.project__placeholder p {
+  max-width: 460px;
+  margin: 5px 0 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.project__downloads,
+.project__data-actions,
+.project__brief-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project__data-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 6px;
+}
+
+.project__brief-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13.5px;
+}
+
+.project__brief-list li {
+  padding-left: 3px;
+  line-height: 1.5;
 }
 
 .project__add {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 14px;
-  border: 1px dashed var(--border, #2a2f3a);
-  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
-.project__add > *:not(:last-child) {
-  flex: 1 1 220px;
-  min-width: 0;
+@media (max-width: 980px) {
+  .project__stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .project__head {
+    flex-direction: column;
+  }
+
+  .project__toolbar .project__note {
+    margin-left: 0;
+  }
 }
 </style>

@@ -27,7 +27,12 @@ export const NAV_ICONS = {
     'h3 M14 7h3 M7 11h3 M14 11h3',
   ].join(''),
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
-  ssh: 'M13.5 10.5a4 4 0 1 0 5.7 5.7 4 4 0 1 0-5.7-5.7 M13.5 10.5 4 20 M7 17l2 2 M9.5 14.5l2 2',
+  // SSH — это вход на чужую машину, а не связка ключей: прежний ключ на 19 px рейки
+  // сливался в гаечный ключ и путался с локальным терминалом-соседом.
+  ssh: [
+    'M13 4h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M11 12h10 ',
+    'M17.5 8h.01 M17.5 16h.01 M3 12h5 M5.5 9.5 8 12l-2.5 2.5',
+  ].join(''),
   db: [
     'M4 6c0-2 3.6-3 8-3s8 1 8 3-3.6 3-8 3-8-1-8-3z M4 6v6c0 2 3.6 3 8 3s8-1 8-3V6 M4 12v6c0 ',
     '2 3.6 3 8 3s8-1 8-3v-6',
@@ -48,3 +53,20 @@ export const NAV_ICONS = {
   ].join(''),
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
+
+// Минимум манифеста, по которому выбирается знак: карта иконок и id плагина.
+interface PluginIconSource {
+  id?: string;
+  nav?: { icon?: string } | null;
+}
+
+const ICON_BY_NAME = NAV_ICONS as Record<string, string>;
+
+// Иконка относится к назначению плагина, а не к его происхождению. Встроенные
+// повторяют навигацию Cockpit; неизвестному пользовательскому модулю достаётся
+// нейтральный знак плагина — манифест не получает права передавать произвольный SVG.
+export function pluginIconPath(plugin: PluginIconSource | null | undefined): string {
+  const requested = plugin?.nav?.icon || '';
+
+  return ICON_BY_NAME[requested] || ICON_BY_NAME[plugin?.id || ''] || NAV_ICONS.plugin;
+}

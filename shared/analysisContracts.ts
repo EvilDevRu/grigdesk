@@ -123,9 +123,14 @@ const queueResponse = objectOf({
 const clarificationEntry = objectOf({
   id: text,
   questionId: text,
+  // Копия вопроса и подписей выбранных вариантов. Оценка триажа перезаписывается
+  // каждым заходом, поэтому вопрос хранится в самой записи ответа, а не только у неё
+  // в идентификаторе: иначе ответ переживает вопрос и теряет смысл.
+  questionText: text,
   actor: oneOf('human', 'cockpit-arbiter'),
   status: oneOf('answered', 'human_required'),
   selection: listOf(text),
+  selectionLabels: listOf(text),
   text,
   attachments: listOf(objectOf({
     file: text,
@@ -179,6 +184,23 @@ export interface AnalysisArbiterAnswerInput extends AnalysisAnswerInput {
   id?: string;
   status?: 'answered' | 'human_required';
   proof?: string[];
+}
+
+/**
+ * Ключ вопроса для сопоставления его с уже полученным ответом.
+ *
+ * Идентификатор вопроса считается по его тексту, а каждый заход триажа пишет
+ * questions[] заново: переформулированный на слово вопрос получает другой id, и ответ
+ * человека отвязывается — вопрос снова выглядит открытым и у сервера, и в карточке.
+ * Ключ огрубляет текст (регистр, ё, знаки), поэтому мелкая правка формулировки связь
+ * не рвёт. Живёт в общем контракте: сопоставляют одинаково сервер и карточка задачи.
+ */
+export function questionKey(value: unknown): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 export function parseAnalysisRows(value: unknown): AnalysisRow[] {

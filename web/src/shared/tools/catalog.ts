@@ -51,14 +51,6 @@ export const TOOL_CATALOG: ToolMeta[] = [
     plugin: 'shelf',
   },
   {
-    id: 'terminal',
-    route: '/terminal',
-    label: 'Терминал',
-    icon: 'terminal',
-    order: 30,
-    hotkey: 'Ctrl+Shift+Digit3',
-  },
-  {
     id: 'ssh',
     route: '/ssh',
     label: 'SSH',
@@ -84,6 +76,14 @@ export const TOOL_CATALOG: ToolMeta[] = [
     order: 60,
     hotkey: 'Ctrl+Shift+Digit6',
     plugin: 'docker',
+  },
+  {
+    id: 'terminal',
+    route: '/terminal',
+    label: 'Терминал',
+    icon: 'terminal',
+    order: 70,
+    hotkey: 'Ctrl+Shift+Digit3',
   },
 ];
 

@@ -1,6 +1,8 @@
 // Плагин SSE — push-обновления окну вместо polling'а.
 // `fs.watch` на единственном каталоге состояния → рассылка события
 // `state-change` всем клиентам. Эндпоинт: GET /api/events (text/event-stream).
+// Наружу: `sse.broadcast(name, payload)`, `sse.subscribe(listener)` и `sse.clientCount()` —
+// сколько окон держат поток прямо сейчас.
 import fp from 'fastify-plugin';
 import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
@@ -36,7 +38,13 @@ async function ssePlugin(fastify: FastifyInstance, opts: SsePluginOptions): Prom
       listeners.delete(listener);
     };
   }
-  fastify.decorate('sse', { broadcast, subscribe });
+  // Сколько окон держат поток. Слушатели процесса (пульт) не в счёте: они подписаны
+  // всегда, и фоновой работе по ним не отличить «никто не смотрит» от «смотрят все».
+  function clientCount(): number {
+    return clients.size;
+  }
+
+  fastify.decorate('sse', { broadcast, subscribe, clientCount });
 
   // Файловые изменения приходят пачками, шлём не чаще
   // раза в 300 мс. Событие безадресное («что-то изменилось»), поэтому склейка законна.

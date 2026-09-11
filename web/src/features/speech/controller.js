@@ -123,7 +123,7 @@ function defaultClock() {
  * Единая машина диктовки одного browser window.
  *
  * acquire() только регистрирует consumer. Эксклюзивный mic-owner выбирается атомарно
- * внутри start(), поэтому одновременно смонтированные ChatSession и companion не
+ * внутри start(), поэтому одновременно смонтированные ChatSession и TaskModal не
  * блокируют друг друга до явного пользовательского жеста.
  */
 export function createDictationController({

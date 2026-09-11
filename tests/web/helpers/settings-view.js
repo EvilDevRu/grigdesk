@@ -28,7 +28,6 @@ export function compileSettingsView({
     ['../stores/auth.js', 'useAuthStore'],
     ['../stores/plugins.js', 'usePluginsStore'],
     ['../stores/chat.js', 'useChatStore'],
-    ['../stores/companion.js', 'useCompanionStore'],
     ['../stores/pwa.js', 'usePwaStore'],
   ];
   const storeStubs = Object.fromEntries(
@@ -64,6 +63,11 @@ export function compileSettingsView({
       './settings/AccessOverview.vue': overview,
       './settings/ToolHotkeys.vue': `
         export default { template: '<div class="tool-hotkeys-stub"></div>' };
+      `,
+      // Каталог плагинов — самостоятельный подраздел со своими stores и модалкой;
+      // его поведение стережёт settings-plugins-catalog.component.test.js.
+      './settings/PluginsCatalog.vue': `
+        export default { template: '<div class="plugins-catalog-stub"></div>' };
       `,
       '../stores/cockpit-update.js': `
         export const blockReasonLabel = (value) => String(value || '');

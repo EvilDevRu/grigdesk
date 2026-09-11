@@ -231,3 +231,25 @@ test('auto=true запускает разбор один раз и не пере
     reevaluations: 1,
   });
 });
+
+// Следующий заход триажа пишет questions[] заново, и id вопроса меняется вместе с его
+// формулировкой. По одному id арбитр брался за тот же вопрос второй раз — поверх уже
+// полученного ответа человека, снова помечая его «нужно решение человека».
+test('арбитр не берётся за вопрос, переформулированный после ответа человека', async (t) => {
+  const { analyzer, arbiter, calls } = await fixture(t, {
+    questions: [{ id: 'q-mode', text: 'Какой режим оставить?', options: [{ id: 'o-manual', label: 'Ручной' }] }],
+    reply: JSON.stringify({ answers: [] }),
+  });
+  await analyzer.appendClarificationBatch('42', [{ questionId: 'q-mode', optionIds: ['o-manual'] }]);
+  await writeFile(path.join(analyzer.dir, 't42.analysis.json'), JSON.stringify({
+    task: 42,
+    questions: [{ id: 'q-mode-2', text: 'Какой режим оставить', options: [] }],
+  }));
+
+  const result = await arbiter.arbitrate('42', { automatic: false });
+
+  assert.deepEqual({ outcome: result?.outcome, calls: calls.length }, {
+    outcome: 'nothing_to_do',
+    calls: 0,
+  });
+});

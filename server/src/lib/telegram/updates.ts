@@ -121,6 +121,17 @@ const SINGLE_MEDIA: [string, string][] = [
   ['sticker', 'sticker'],
 ];
 
+/** Файловые поля блока rich-сообщения: как их зовёт Телеграм → как зовём мы. */
+const RICH_MEDIA: [string, string][] = [
+  ['photo', 'photo'], ['video', 'video'], ['animation', 'animation'],
+  ['audio', 'audio'], ['voice_note', 'voice'], ['video_note', 'video_note'],
+  ['document', 'document'], ['sticker', 'sticker'],
+];
+
+// Пределы разбора недоверенного дерева: и глубина, и ширина ограничены, иначе
+// одно сообщение способно занять поллер на весь свой размер.
+const RICH_LIMITS = { blocks: 500, depth: 8, parts: 500 };
+
 /** Человеческое имя автора: имя с фамилией, иначе ник, иначе просто id. */
 export function nameOf(user: TelegramUser | null | undefined): string {
   if (!user) return 'неизвестно';
@@ -128,35 +139,132 @@ export function nameOf(user: TelegramUser | null | undefined): string {
   return full || user.username || `id${user.id}`;
 }
 
+/** Телеграм присылает лесенку размеров одной картинки — берём самый крупный. */
+function largestPhoto(sizes: TelegramFile[]): TelegramFile | null {
+  if (!sizes.length) return null;
+
+  const px = (p: TelegramFile) => p.file_size ?? (p.width || 0) * (p.height || 0);
+
+  return sizes.reduce((a, b) => (px(b) > px(a) ? b : a));
+}
+
+const photoMedia = (best: TelegramFile): TelegramMedia => ({
+  kind: 'photo',
+  fileId: best.file_id,
+  uniqueId: best.file_unique_id || '',
+  size: best.file_size ?? null,
+  width: best.width ?? null,
+  height: best.height ?? null,
+});
+
+const fileMedia = (kind: string, f: TelegramFile): TelegramMedia => ({
+  kind,
+  fileId: f.file_id,
+  uniqueId: f.file_unique_id || '',
+  size: f.file_size ?? null,
+  name: f.file_name || '',
+  mime: f.mime_type || '',
+});
+
 function mediaOf(m: Payload): TelegramMedia[] {
   const out: TelegramMedia[] = [];
+  const best = Array.isArray(m.photo) ? largestPhoto(m.photo as TelegramFile[]) : null;
 
-  if (Array.isArray(m.photo) && m.photo.length) {
-    // Телеграм присылает лесенку размеров одной картинки — берём самый крупный.
-    const sizes = m.photo as TelegramFile[];
-    const px = (p: TelegramFile) => p.file_size ?? (p.width || 0) * (p.height || 0);
-    const best = sizes.reduce((a, b) => (px(b) > px(a) ? b : a));
-    out.push({
-      kind: 'photo',
-      fileId: best.file_id,
-      uniqueId: best.file_unique_id || '',
-      size: best.file_size ?? null,
-      width: best.width ?? null,
-      height: best.height ?? null,
-    });
-  }
+  if (best) out.push(photoMedia(best));
   for (const [field, kind] of SINGLE_MEDIA) {
     const f = m[field] as TelegramFile | undefined;
 
     if (!f?.file_id) continue;
-    out.push({
-      kind,
-      fileId: f.file_id,
-      uniqueId: f.file_unique_id || '',
-      size: f.file_size ?? null,
-      name: f.file_name || '',
-      mime: f.mime_type || '',
-    });
+    out.push(fileMedia(kind, f));
+  }
+  return out;
+}
+
+/**
+ * Содержимое rich-сообщения (Bot API 10.1).
+ *
+ * Такое сообщение приезжает не плоскими полями, а деревом блоков: абзацы несут
+ * текст, медиа-блок — файл и свою подпись. Старые `text`/`caption`/`video` при
+ * этом ПУСТЫ, поэтому без разбора блоков в кокпит приходит пустая карточка: ни
+ * текста, ни вложения, и разбирать её нечем.
+ *
+ * Разбор намеренно идёт по форме блока, а не по списку его имён: набор типов
+ * Телеграм расширяет, а поле файла и поле текста у них общие.
+ */
+function richContentOf(source: unknown): { text: string; media: TelegramMedia[] } {
+  const blocks = flattenRichBlocks(source, 0);
+  const parts: string[] = [];
+  const media: TelegramMedia[] = [];
+
+  for (const block of blocks) {
+    for (const field of ['text', 'caption']) {
+      const part = richTextOf(block[field], 0).trim();
+
+      if (part) parts.push(part);
+    }
+    media.push(...richMediaOf(block));
+  }
+  return { text: parts.join('\n'), media };
+}
+
+/** Дерево блоков в плоский список: контейнеры вкладывают свои блоки тем же полем. */
+function flattenRichBlocks(source: unknown, depth: number): Payload[] {
+  if (depth >= RICH_LIMITS.depth || !source || typeof source !== 'object') return [];
+
+  const raw = (source as Payload).blocks;
+
+  if (!Array.isArray(raw)) return [];
+
+  const out: Payload[] = [];
+
+  for (const item of raw.slice(0, RICH_LIMITS.blocks)) {
+    if (!item || typeof item !== 'object') continue;
+    const block = item as Payload;
+
+    out.push(block, ...flattenRichBlocks(block, depth + 1));
+  }
+  return out;
+}
+
+/**
+ * Текст блока: строкой, объектом `{text}` или списком оформленных кусков.
+ *
+ * Жирный, ссылка и курсив — это вложенные фрагменты со своим `text`, поэтому
+ * склейка идёт вглубь: иначе от абзаца остались бы только неформатированные
+ * куски, а ссылка из подписи потерялась бы вовсе.
+ */
+function richTextOf(value: unknown, depth: number): string {
+  if (typeof value === 'string') return value;
+  if (depth >= RICH_LIMITS.depth || !value || typeof value !== 'object') return '';
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, RICH_LIMITS.parts)
+      .map((part) => richTextOf(part, depth + 1))
+      .join('');
+  }
+  return richTextOf((value as Payload).text, depth + 1);
+}
+
+/** Вложения блока: фото приходит лесенкой размеров, остальное — одним файлом. */
+function richMediaOf(block: Payload): TelegramMedia[] {
+  const out: TelegramMedia[] = [];
+
+  for (const [field, kind] of RICH_MEDIA) {
+    const value = block[field];
+
+    if (!value || typeof value !== 'object') continue;
+    if (kind === 'photo') {
+      const best = Array.isArray(value)
+        ? largestPhoto(value as TelegramFile[])
+        : value as TelegramFile;
+
+      if (best?.file_id) out.push(photoMedia(best));
+      continue;
+    }
+
+    const file = value as TelegramFile;
+
+    if (file.file_id) out.push(fileMedia(kind, file));
   }
   return out;
 }
@@ -211,6 +319,7 @@ export function normalizeMessage(m: Payload): TelegramMessage {
   const replyTo = m.reply_to_message as Payload | undefined;
   const author = m.from as TelegramUser | undefined;
   const senderChat = m.sender_chat as Payload | undefined;
+  const rich = richContentOf(m.rich_message);
 
   return {
     chatId: chat.id as number,
@@ -237,8 +346,8 @@ export function normalizeMessage(m: Payload): TelegramMessage {
         name: (senderChat?.title as string) || 'канал',
         username: '',
       },
-    text: (m.text as string) || (m.caption as string) || '',
-    media: mediaOf(m),
+    text: (m.text as string) || (m.caption as string) || rich.text,
+    media: [...mediaOf(m), ...rich.media],
     ...(threadTitle ? {
       threadTitle: threadTitle.title,
       threadTitleSource: threadTitle.source,

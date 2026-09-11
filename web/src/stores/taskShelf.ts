@@ -94,11 +94,19 @@ interface ShelfController {
   stops: (() => void)[];
 }
 
+// Место прогона в маршруте: total === 0 значит «прогон идёт, а разбора графа ещё нет» —
+// такую полосу карточка показывает неопределённой, долю по ней не считают.
+export interface ShelfActivityProgress {
+  done: number;
+  total: number;
+}
+
 export interface ShelfActivity {
   kind: 'analysis' | 'pipeline' | 'b24';
   label: string;
   value: string;
   tone: string;
+  progress?: ShelfActivityProgress | null;
 }
 
 export interface ShelfRowDetails {
@@ -114,6 +122,7 @@ export interface ShelfRowDetails {
 export interface ShelfRow extends Omit<ShelfEntry, 'snapshot' | 'title'>, ShelfDecision {
   title: string;
   completed: boolean;
+  needsHuman: boolean;
   details: ShelfRowDetails;
 }
 
@@ -156,9 +165,9 @@ interface ShelfStoreAccess {
 
 const controllers = new WeakMap<object, ShelfController>();
 const BOARD_LISTS = ['tasks', 'toReview', 'created', 'accomplice', 'auditor'];
+// Подписи терминальных состояний: идущий заход называет сама строка активности,
+// потому что его имя зависит ещё и от наличия прошлой оценки.
 const ANALYSIS_LABELS: Record<string, string> = {
-  queued: 'В очереди',
-  running: 'Идёт',
   done: 'Готова',
   finished: 'Готова',
   failed: 'Завершилась с ошибкой',
@@ -459,6 +468,24 @@ function analysisActivity(
     return null;
   }
 
+  // Пока заход идёт, прошлых цифр в строке нет вовсе: карточка задачи и бейдж доски
+  // прячут их так же, а три экрана про одно состояние обязаны говорить одинаково.
+  // Первый заход по задаче называется разведкой, повторный — переоценкой: человеку
+  // важно, сгорит ли уже показанная оценка.
+  if (state === 'queued' || state === 'running') {
+    const again = Boolean(analysis);
+    const started = state === 'running';
+
+    return {
+      kind: 'analysis',
+      label: 'Оценка',
+      value: again
+        ? (started ? 'Переоценка идёт' : 'Переоценка в очереди')
+        : (started ? 'Разведка идёт' : 'В очереди'),
+      tone: ANALYSIS_TONES[state] || 'neutral',
+    };
+  }
+
   const parts = [ANALYSIS_LABELS[String(state)] || 'Состояние неизвестно'];
   const complexity = scale(analysis?.complexity);
   const risk = scale(analysis?.risk);
@@ -490,6 +517,27 @@ function analysisActivity(
     tone: terminalTone
       || (needsClarification ? 'warn' : ANALYSIS_TONES[String(state)] || 'neutral'),
   };
+}
+
+/**
+ * Цифры для полосы берутся только у живого прогона: durable снимок места в маршруте не
+ * хранит, и полоса «по памяти» показывала бы узел, которого прогон уже не занимает.
+ * Идущий прогон без разобранного графа отдаёт нулевой total — карточка покажет движение,
+ * а не выдуманную долю.
+ */
+function pipelineProgress(current: ShelfLivePipeline | null): ShelfActivityProgress | null {
+  if (!current) {
+    return null;
+  }
+
+  const done = Number(current.progress?.done);
+  const total = Number(current.progress?.total);
+
+  if (Number.isSafeInteger(done) && Number.isSafeInteger(total) && total > 0) {
+    return { done: Math.min(Math.max(done, 0), total), total };
+  }
+
+  return current.daemon === 'running' ? { done: 0, total: 0 } : null;
 }
 
 /**
@@ -556,7 +604,23 @@ function pipelineActivity(
     label: 'Конвейер',
     value,
     tone,
+    progress: pipelineProgress(current),
   };
+}
+
+/**
+ * Отвечает на вопрос «эта задача ждёт МЕНЯ?». Ворота и затык держат прогон до решения
+ * человека, и это состояние, а не событие: огонёк снимается первым же acknowledge,
+ * а открытые ворота остаются. Без отдельного признака такая задача уезжала в тихую
+ * группу «В ожидании» — туда же, где лежат те, за кем никаких действий не числится.
+ */
+function needsHumanNow(
+  observed: ShelfObservedSnapshot,
+  snapshot: ShelfObservedSnapshot,
+): boolean {
+  const pipeline = observed.pipeline || snapshot.pipeline;
+
+  return Boolean(pipeline?.attempt && (pipeline.gate || pipeline.stall));
 }
 
 /**
@@ -839,6 +903,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
           ...decision,
           title: details.title,
           completed,
+          needsHuman: needsHumanNow(observed, decision.snapshot),
           details,
         });
       }

@@ -1,11 +1,10 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
-import type { ShowcaseTargetRef } from '../../../../shared/showcaseContracts';
+import type { ShowcaseSelectableTargetRef } from '../../../../shared/showcaseContracts';
 import { loadShowcase } from './loadShowcase';
 import type { ShowcaseStore } from './showcaseRuntime';
 
 export interface CreateShowcaseInput {
-  ref: ShowcaseTargetRef;
-  profile: string;
+  ref: ShowcaseSelectableTargetRef;
   title?: string;
 }
 

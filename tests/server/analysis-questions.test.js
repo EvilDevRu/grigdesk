@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
-import { buildTriagePrompt } from '../../server/src/lib/analysis/prompt.ts';
+import { CAP_CLARIFICATIONS, buildTriagePrompt } from '../../server/src/lib/analysis/prompt.ts';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-questions-'));
@@ -117,4 +117,69 @@ test('ответ арбитра закрывает factual-вопрос, а huma
     questions: ['Какой сценарий выбрать?'],
     unknowns: [],
   });
+});
+
+// Разведчик видел в уточнениях только реплики ответов без самих вопросов — и штатно
+// задавал те же вопросы заново, обнуляя работу человека. Пары «вопрос → ответ» и
+// прямой запрет повтора собираются анализатором из его же записей уточнений.
+test('закрытые вопросы уезжают в промпт парами и с запретом спрашивать снова', async (t) => {
+  const { analyzer, dir } = await fixture(t);
+  await writeFile(path.join(dir, 't42.analysis.json'), JSON.stringify({
+    task: 42,
+    questions: [{
+      id: 'q-mode',
+      text: 'Какой режим оставить?',
+      options: [{ id: 'o-manual', label: 'Ручной' }],
+    }],
+  }));
+  await analyzer.appendClarificationBatch('42', [{
+    questionId: 'q-mode',
+    optionIds: ['o-manual'],
+    text: 'Автоматика ломает старые установки',
+  }]);
+
+  const prompt = buildTriagePrompt({
+    task: 42,
+    title: 'Задача',
+    description: '',
+    comments: [],
+    clarifications: await analyzer.readClarifications('42'),
+    answered: await analyzer.readAnsweredQuestions('42'),
+    discussion: '',
+    profile: { ctx: '', markers: '', repos: [] },
+    jsonPath: '/tmp/t42.analysis.json',
+    notePath: '/tmp/t42.md',
+  });
+
+  assert.deepEqual({
+    block: prompt.includes('[Закрытые вопросы — на них уже ответили, повторно НЕ спрашивай]'),
+    pair: prompt.includes('1. Вопрос: Какой режим оставить?')
+      && prompt.includes('Ответ (человек): Выбрано: Ручной. Автоматика ломает старые установки'),
+    ban: prompt.includes('НЕ выноси эти вопросы в questions[] ни в какой формулировке'),
+  }, { block: true, pair: true, ban: true });
+});
+
+test('уточнения доезжают до промпта целиком вплоть до общего предела', () => {
+  // Файл уточнений копит base64-маркеры ответов: пять-шесть ответов — уже больше прежних
+  // 6000 символов, и последний ответ человека (самый свежий) отрезался первым.
+  const tail = 'ПОСЛЕДНИЙ-ОТВЕТ-ЧЕЛОВЕКА';
+  const fitting = 'x'.repeat(CAP_CLARIFICATIONS - tail.length) + tail;
+  const overflowing = 'x'.repeat(CAP_CLARIFICATIONS) + tail;
+  const render = (clarifications) => buildTriagePrompt({
+    task: 42,
+    title: 'Задача',
+    description: '',
+    comments: [],
+    clarifications,
+    discussion: '',
+    profile: { ctx: '', markers: '', repos: [] },
+    jsonPath: '/tmp/t42.analysis.json',
+    notePath: '/tmp/t42.md',
+  });
+
+  assert.deepEqual({
+    aboveOldCap: CAP_CLARIFICATIONS > 6000,
+    fitting: render(fitting).includes(tail),
+    overflowing: render(overflowing).includes(tail),
+  }, { aboveOldCap: true, fitting: true, overflowing: false });
 });

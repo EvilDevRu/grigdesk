@@ -1022,7 +1022,11 @@ export function buildClaudeUntrustedArgs({ model, effort, providerSettings = {} 
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
     '--verbose',
-    '--permission-mode', 'plan',
+    // Режим `plan` здесь не подходит: CLI подмешивает в него инструкции о плане и
+    // файле плана, и модель на сложном вопросе отвечает «планом» вместо ответа.
+    // `dontAsk` не спрашивает разрешений и отклоняет всё, что их требует, а
+    // инструментов у хода и так нет.
+    '--permission-mode', 'dontAsk',
     '--tools', '',
     '--safe-mode',
     '--strict-mcp-config',
@@ -1669,7 +1673,7 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal,
-    workspaceAccess, workTools,
+    workspaceAccess, workTools, onSessionCreated,
   }: {
     config: ClaudeConfig;
     env?: NodeJS.ProcessEnv;
@@ -1689,6 +1693,7 @@ export default {
     signal?: AbortSignal;
     workspaceAccess?: WorkspaceAccess | null;
     workTools?: { descriptors?: unknown } | null;
+    onSessionCreated?: (sessionId: string) => unknown;
   }) {
     const args = [
       '-p', String(message ?? ''),
@@ -1774,6 +1779,9 @@ export default {
       const collector = createClaudeTurnCollector({ onStep, onProgress, log });
       const { state } = collector;
       let buf = '';
+      // Id сессии сообщаем с первого события, как и живая сессия: оборванный ход обязан
+      // оставить чату сессию, а не только финальный result.
+      let sessionAnnounced = false;
 
       // Своего таймаута у процесса НЕТ: лимит хода считает watchdog в modules/chat —
       // только он знает, что агент не работает, а ждёт ответа человека (это время не в счёт).
@@ -1823,6 +1831,13 @@ export default {
           let ev: unknown;
           try { ev = JSON.parse(line); } catch { continue; }
           collector.push(ev);
+          if (!sessionAnnounced && state.streamSessionId && onSessionCreated) {
+            sessionAnnounced = true;
+            const known = state.streamSessionId;
+            void Promise.resolve().then(() => onSessionCreated(known)).catch((error) => {
+              log?.warn?.({ err: (error as Error)?.message }, 'чат: id сессии не принят вызывающим');
+            });
+          }
         }
       });
     });

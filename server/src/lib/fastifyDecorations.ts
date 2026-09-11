@@ -10,6 +10,8 @@
 
 import 'fastify';
 
+import type { ShutdownCoordinator } from './shutdown.ts';
+
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
 export type AuthKind = 'session' | 'internal' | 'cli' | null;
@@ -19,6 +21,8 @@ export type AuthKind = 'session' | 'internal' | 'cli' | null;
 export interface SseBus {
   broadcast(name: string, payload?: unknown): void;
   subscribe(listener: (name: string, payload?: unknown) => void): () => void;
+  // Сколько окон держат поток: фоновая работа ради пустого зала не нужна.
+  clientCount(): number;
 }
 
 declare module 'fastify' {
@@ -40,6 +44,8 @@ declare module 'fastify' {
     providerRegistry?(): Promise<unknown>;
     factoryArbitrate?(...args: unknown[]): Promise<unknown>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
+    // Остановка сервера: модули регистрируют слив, точка входа и кнопка перезапуска её начинают.
+    shutdown?: ShutdownCoordinator;
   }
 
   interface FastifyRequest {

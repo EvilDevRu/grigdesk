@@ -452,6 +452,21 @@ test('STATE-07b: shared service ports are pinned by the immutable profile contra
   assert.equal(await missing(fx.gitLog), true);
 });
 
+// Подъём стенда падает раньше, чем профиль запишет t<номер>.env: для isolated-попытки
+// это штатный исход (упасть можно на втором шаге из одиннадцати). Пустая проекция не
+// должна запирать снос — иначе половинчатую песочницу не убрать ни одной кнопкой, а
+// движок откажется поднимать новую поверх её остатков.
+test('STATE-07c: упавший до записи env подъём не запирает снос стенда', async (t) => {
+  const fx = await fixture(t);
+  const app = await server(t, fx);
+  await rm(path.join(fx.stateDir, 't8.env'));
+
+  const response = await app.inject({ method: 'POST', url: '/api/tasks/8/sandbox/down', payload: {} });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(await missing(fx.downLog), false, 'down.sh профиля вызван');
+  assert.match(await readFile(fx.callsLog, 'utf8'), /abandon/, 'попытку закрыл движок');
+});
+
 test('STATE-08: forged valid-looking attempt identity cannot reach resume engine', async (t) => {
   const fx = await fixture(t);
   const app = await server(t, fx);

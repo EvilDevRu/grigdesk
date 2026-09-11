@@ -42,6 +42,10 @@ export const config = {
   // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось по локальной сети и через шлюз.
   port: Number(process.env.COCKPIT_PORT) || 8140,
   host: process.env.COCKPIT_HOST || '0.0.0.0',
+  // Бюджет остановки целиком: слив ходов чата, закрытие сессий исполнителей и сокетов.
+  // Должен быть меньше ожидания bin/restart и TimeoutStopSec юнита — иначе SIGKILL
+  // придёт раньше, чем сервер успеет сохранить прерванные ходы.
+  shutdownTimeoutMs: Number(process.env.COCKPIT_SHUTDOWN_TIMEOUT_MS) || 30 * 1000,
 
   // Пути «мозга».
   // Корень репозитория кокпита — от него считаются bin/restart, plugins/ и базы в корне.
@@ -183,6 +187,16 @@ export const config = {
   // зависимости раздела не считается: версия Playwright требует свою ревизию, и
   // случайная чужая даёт то падающую запись, то пустой клип.
   showcaseBrowser: process.env.COCKPIT_SHOWCASE_BROWSER || '',
+  // Браузер, который раздел ставит сам из настроек плагина: сборка Chromium под
+  // текущий playwright-core и манифест с версией. Явный COCKPIT_SHOWCASE_BROWSER
+  // сильнее него.
+  showcaseBrowserDir: process.env.COCKPIT_SHOWCASE_BROWSER_DIR
+    || path.join(__dirname, '..', '.state', 'showcase-browser'),
+  // Облачный голос раздела: ключ сервисного аккаунта Yandex SpeechKit. Пусто —
+  // говорят только локальные движки. Ключ остаётся серверной настройкой: интерфейс
+  // получает статус «задан/не задан», а не значение.
+  showcaseYandexApiKey: process.env.COCKPIT_SHOWCASE_YANDEX_API_KEY || '',
+  showcaseYandexFolderId: process.env.COCKPIT_SHOWCASE_YANDEX_FOLDER_ID || '',
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),

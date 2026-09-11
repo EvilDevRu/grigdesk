@@ -10,11 +10,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', import.meta.url));
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const PINIA_URL = pathToFileURL(PINIA_PATH).href;
-// Чистый модуль без Vue/pinia — подставляем настоящий, а не заглушку: правило
-// «полупустая ссылка = дефолт реестра» должно проверяться тем же кодом, что в бою.
-const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/src/shared/companion-run.js', import.meta.url),
-)).href;
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
 export const apiHarness = {};
@@ -65,10 +60,6 @@ function patch(source) {
     .replace(
       "import { useProvidersStore } from './providers.js';",
       'const useProvidersStore = () => globalThis.__chatProviders;',
-    )
-    .replace(
-      "import { normalizeCompanionRun } from '../shared/companion-run.js';",
-      `import { normalizeCompanionRun } from "${COMPANION_RUN_URL}";`,
     )
     .replace(
       "import { notify } from '../shared/notify.ts';",

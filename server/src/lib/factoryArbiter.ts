@@ -550,8 +550,6 @@ export function formatArbiterReason(decision: ArbiterDecision): string {
 }
 
 // --- настройка арбитра ---
-// Отдельная от companion: у той свой смысл (чем отвечает голосовой ход), и общий ключ
-// связал бы два независимых решения человека.
 
 const PROVIDER_RE = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 const MODEL_MAX = 200;

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   providerStatusHint,
   providerUsageView,
+  resetAt,
   resetIn,
 } from '../../web/src/features/providers/providerUsage.js';
 import {
@@ -172,11 +173,35 @@ test('weekly reset stays in hours and days', () => {
   assert.equal(resetIn('2026-09-06T00:00:00Z', now), 'сброс через 3д');
 });
 
+// «Сброс через 4д» не говорит, во сколько ждать окно: планировать по одному
+// отсчёту нельзя, и календарный момент считается по местной полуночи.
+test('reset copy also names the calendar moment', () => {
+  const now = new Date(2026, 8, 2, 12, 34).getTime();
+
+  assert.equal(resetAt(new Date(2026, 8, 2, 17, 33).toISOString(), now), 'сегодня 17:33');
+  assert.equal(resetAt(new Date(2026, 8, 3, 3, 0).toISOString(), now), 'завтра 03:00');
+  assert.equal(resetAt(new Date(2026, 8, 15, 3, 0).toISOString(), now), '15 сен 03:00');
+});
+
+// «Завтра» — следующая дата календаря, а не «через сутки»: сброс через 20 часов
+// приходится то на завтра, то на послезавтра, и человек сверяется с календарём.
+test('calendar day, not a 24-hour span, decides between today and tomorrow', () => {
+  const lateEvening = new Date(2026, 8, 2, 23, 30).getTime();
+  const earlyMorning = new Date(2026, 8, 2, 1, 0).getTime();
+  const inTwentyHours = (from) => new Date(from + 20 * 3_600_000).toISOString();
+
+  assert.match(resetAt(inTwentyHours(lateEvening), lateEvening), /^завтра /);
+  assert.match(resetAt(inTwentyHours(earlyMorning), earlyMorning), /^сегодня /);
+});
+
 test('missing or passed reset date has no copy at all', () => {
   const now = Date.parse('2026-09-02T12:34:00Z');
 
   assert.equal(resetIn(null, now), '');
   assert.equal(resetIn('2026-09-02T12:00:00Z', now), '');
+  assert.equal(resetAt(null, now), '');
+  assert.equal(resetAt('2026-09-02T12:00:00Z', now), '');
+  assert.equal(resetAt('не дата', now), '');
 });
 
 // Сбой у вендора выглядел как поломка кокпита: человек читал «не удалось получить

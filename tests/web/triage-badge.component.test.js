@@ -76,3 +76,66 @@ test('бейдж старой оценки показывает строковы
 
   assert.equal(wrapper.get('.trow.q').text(), '? Нужно ли сохранить старую подпись?');
 });
+
+test('идущий заход прячет цифры и называет себя переоценкой', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, TriageBadge] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileBadge(),
+  ]);
+  const wrapper = mount(TriageBadge, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: {
+      row: {
+        status: { state: 'running' },
+        analysis: {
+          complexity: 2,
+          risk: 2,
+          diff_size: 'S',
+          confidence: 'medium',
+        },
+      },
+    },
+  });
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.get('.tri.busy').attributes('title'), 'переоценка идёт');
+  assert.equal(wrapper.text().includes('сложн'), false);
+});
+
+test('первый заход по неоценённой задаче называется разведкой', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, TriageBadge] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileBadge(),
+  ]);
+  const wrapper = mount(TriageBadge, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: {
+      row: {
+        status: { state: 'running' },
+        analysis: null,
+      },
+    },
+  });
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.get('.tri.busy').attributes('title'), 'разведка идёт');
+});
+
+test('неизвестные показатели не превращаются в нулевой итог', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, TriageBadge] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileBadge(),
+  ]);
+  const wrapper = mount(TriageBadge, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { row: { analysis: { complexity: null, risk: null, diff_size: 'M' } } },
+  });
+  t.after(() => wrapper.unmount());
+
+  assert.match(wrapper.get('.metrics').text(), /Сложн\. —Риск —/);
+  assert.equal(wrapper.findAll('.total').length, 0);
+  assert.equal(wrapper.text().includes('Итог 0/5'), false);
+});

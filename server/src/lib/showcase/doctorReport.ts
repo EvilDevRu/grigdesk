@@ -10,13 +10,19 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
 
-import type { ShowcaseDoctor, ShowcaseTarget, ShowcaseTargetRef } from '../../../../shared/showcaseContracts.ts';
+import type {
+  ShowcaseDoctor,
+  ShowcaseTarget,
+  ShowcaseTargetRef,
+} from '../../../../shared/showcaseContracts.ts';
 import type { VoiceEngineStatus } from './voice/registry.ts';
 
 const run = promisify(execFile);
 
 export interface DoctorDeps {
-  browserPath: string | null;
+  // Путь к браузеру приходит функцией: он либо задан машинной настройкой, либо
+  // читается из манифеста установки, и проверке всё равно, откуда именно.
+  resolveBrowserPath: () => Promise<string | null>;
   showcaseDir: string;
   // Состояние голосовых движков берётся у реестра: у раздела не должно быть
   // второго мнения о том, чем он умеет говорить.
@@ -24,15 +30,14 @@ export interface DoctorDeps {
   // Расшифровка приходит из общего речевого runtime кокпита. Её отсутствие не
   // закрывает раздел, но и проверка речи тогда не выдаётся за пройденную.
   transcribeAvailable: boolean;
-  resolveTarget: (ref: ShowcaseTargetRef, profile: string) => Promise<ShowcaseTarget>;
+  resolveTarget: (ref: ShowcaseTargetRef, profile?: string) => Promise<ShowcaseTarget>;
 }
 
 type Operation = ShowcaseDoctor['operations'][number];
 
 /**
- * Пункт цели и вход на стенд. Оба зависят от того, объявил ли профиль контракт,
- * поэтому считаются вместе — иначе «цель готова» и «входа нет» разъехались бы по
- * разным причинам.
+ * Пункт цели и вход на стенд. Оба берутся из одной эффективной политики цели:
+ * безопасной основы и только тех расширений профиля, которым сервер доверяет.
  */
 function targetOperations(target: ShowcaseTarget | null): Operation[] {
   const loginReady = target?.status === 'ready' && target.scope.capabilities.includes('login');
@@ -44,7 +49,7 @@ function targetOperations(target: ShowcaseTarget | null): Operation[] {
       status: target === null ? 'unknown' : (target.status === 'ready' ? 'ready' : 'blocked'),
       reason: target === null
         ? 'Цель не выбрана.'
-        : (target.status === 'ready' ? 'Адрес и экраны объявлены профилем.' : target.reason),
+        : (target.status === 'ready' ? 'Адрес и экраны цели проверены сервером.' : target.reason),
       manual: false,
     },
     {
@@ -52,8 +57,8 @@ function targetOperations(target: ShowcaseTarget | null): Operation[] {
       title: 'Вход на стенд',
       status: loginReady ? 'ready' : 'unknown',
       reason: loginReady
-        ? 'Профиль объявил вход тестовой учётки.'
-        : 'Профиль не объявил вход: запись пойдёт без него.',
+        ? 'Для цели доступен вход тестовой учётки.'
+        : 'Вход для этой цели недоступен: запись пойдёт без него.',
       manual: false,
     },
   ];
@@ -93,7 +98,9 @@ function voiceOperation(statuses: VoiceEngineStatus[]): Operation {
       id: 'voice',
       title: 'Голос',
       status: 'ready',
-      reason: `Озвучка идёт движком «${ready.name}» на этой машине.`,
+      reason: ready.kind === 'cloud'
+        ? `Озвучка идёт движком «${ready.name}»: текст сцен уходит поставщику.`
+        : `Озвучка идёт движком «${ready.name}» на этой машине.`,
       manual: false,
     };
   }
@@ -113,9 +120,10 @@ function voiceOperation(statuses: VoiceEngineStatus[]): Operation {
 
 export function createDoctorReport(deps: DoctorDeps) {
   async function doctor(ref?: ShowcaseTargetRef, profile?: string): Promise<ShowcaseDoctor> {
-    const target = ref && profile ? await deps.resolveTarget(ref, profile) : null;
-    const browserReady = deps.browserPath
-      ? await fs.access(deps.browserPath).then(() => true).catch(() => false)
+    const target = ref ? await deps.resolveTarget(ref, profile) : null;
+    const browserPath = await deps.resolveBrowserPath();
+    const browserReady = browserPath
+      ? await fs.access(browserPath).then(() => true).catch(() => false)
       : false;
     const storage = await fs.stat(deps.showcaseDir).then(() => true).catch(() => false);
     const voices = await deps.voiceStatuses().catch(() => [] as VoiceEngineStatus[]);
@@ -136,7 +144,8 @@ export function createDoctorReport(deps: DoctorDeps) {
           status: browserReady ? 'ready' : 'blocked',
           reason: browserReady
             ? 'Исполняемый файл браузера на месте.'
-            : 'Браузер записи не установлен. Установка — отдельное действие настройки.',
+            : 'Браузер записи не установлен. Поставьте Chromium в настройках плагина '
+              + '«Презентации» или задайте COCKPIT_SHOWCASE_BROWSER.',
           manual: false,
         },
         await mediaOperation(),

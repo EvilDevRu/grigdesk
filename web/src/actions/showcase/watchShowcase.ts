@@ -1,6 +1,10 @@
 import { sseSubscribe } from '../../composables/useSse.ts';
-import { parseShowcaseProgressEvent } from '../../../../shared/showcaseContracts';
+import {
+  parseShowcaseChangedEvent,
+  parseShowcaseProgressEvent,
+} from '../../../../shared/showcaseContracts';
 import { loadShowcase } from './loadShowcase';
+import { openShowcaseProject } from './openShowcaseProject';
 import { loadShowcaseVoices } from './setupShowcaseVoice';
 import { runtimeOf } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
@@ -52,7 +56,26 @@ export function watchShowcase(store: ShowcaseStore): () => void {
       return;
     }
 
-    if (name === 'showcase-changed' || name === 'hello') {
+    // Открытый ролик перечитывается вместе с обзором: сервер меняет его и без
+    // человека — задание публикует клип или звук и поднимает редакцию. Карточка с
+    // прежней редакцией отвечала бы на каждую правку конфликтом.
+    if (name === 'showcase-changed') {
+      const openedId = store.opened?.id ?? null;
+
+      try {
+        const event = parseShowcaseChangedEvent(data);
+
+        if (openedId && event.projectId === openedId) {
+          void openShowcaseProject(store, openedId);
+        }
+      } catch {
+        // Событие не по форме — обзор ниже всё равно перечитается целиком.
+      }
+    }
+
+    // Каталог целей включает ручные песочницы. После их подъёма или сноса форма
+    // должна обновиться сама, даже если ни один ролик при этом не менялся.
+    if (name === 'showcase-changed' || name === 'sandboxes-changed' || name === 'hello') {
       void loadShowcase(store);
       void loadShowcaseVoices(store);
     }

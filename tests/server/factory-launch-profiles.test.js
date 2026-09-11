@@ -13,7 +13,12 @@ import factoryModule from '../../server/src/modules/factory/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function fixture(t, { analysisRepos = null, twinProfile = false, analysisExtra = null } = {}) {
+async function fixture(t, {
+  analysisRepos = null,
+  twinProfile = false,
+  analysisExtra = null,
+  answered = { ids: new Set(), keys: new Set() },
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-profiles-'));
   const profilesDir = path.join(root, 'profiles');
   const installed = ['project-alpha', 'project-beta', ...(twinProfile ? ['project-gamma'] : [])];
@@ -105,6 +110,7 @@ exit 99
     analyzer: {
       readClarifications: async () => null,
       readOpenQuestions: async () => null,
+      answeredQuestions: async () => answered,
       async get() {
         return {
           analysis: {
@@ -334,4 +340,41 @@ test('рекомендация маршрута принимается толь�
   });
   assert.equal(ignored.json().routeSuggestion, null);
   assert.equal(ignored.json().defaultRoute, 'feature');
+});
+
+// Глубину политика считает в момент триажа, когда вопросы ещё открыты, и кладёт в файл
+// оценки. Человек отвечает уже после — и форма продолжала предлагать маршрут «с
+// открытыми вопросами», хотя открытых не осталось: ответы на маршрут не влияли вовсе.
+test('ответы человека пересчитывают глубину маршрута прямо в форме запуска', async (t) => {
+  const analysisExtra = {
+    complexity: 2,
+    risk: 2,
+    diff_size: 'S',
+    confidence: 'high',
+    needs_clarification: true,
+    questions: [{ id: 'q-mode', text: 'Какой режим оставить?', options: [] }],
+    route_depth: 'mid',
+    route_reason: 'сложность 2, риск 2, размер S — план не нужен (есть открытые вопросы, поэтому не лёгкий)',
+  };
+  const url = '/api/tasks/9123/launch-options?profile=project-beta';
+
+  const open = await (await fixture(t, { analysisExtra })).inject({ method: 'GET', url });
+  const closed = await (await fixture(t, {
+    analysisExtra,
+    // Вопрос переформулирован следующим заходом, поэтому совпал ключ текста, а не id.
+    answered: { ids: new Set(), keys: new Set(['какой режим оставить']) },
+  })).inject({ method: 'GET', url });
+
+  assert.deepEqual({
+    open: open.json().routeSuggestion.depth,
+    closed: closed.json().routeSuggestion.depth,
+    reason: closed.json().routeSuggestion.reason,
+    route: closed.json().routeSuggestion.route,
+  }, {
+    open: 'mid',
+    closed: 'light',
+    reason: 'сложность 2, риск 2, размер S, уверенность высокая, вопросов нет'
+      + ' — с учётом ответов человека',
+    route: 'consilium-debug',
+  });
 });

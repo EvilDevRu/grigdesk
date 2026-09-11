@@ -53,10 +53,32 @@ function triageDetail() {
   };
 }
 
+// Сохранённый ответ приходит с копией вопроса: карточка ищет его и по идентификатору,
+// и по смыслу текста, потому что следующий заход триажа переписывает вопросы заново.
+function triageClarifications() {
+  return {
+    text: '## Разбор арбитра — машинный — Как подписать кнопку?\nПоле уже есть в форме.',
+    entries: [{
+      id: 'answer-1',
+      questionId: 'q-label',
+      questionText: 'Как подписать кнопку?',
+      actor: 'cockpit-arbiter',
+      status: 'answered',
+      selection: [],
+      selectionLabels: [],
+      text: 'Поле уже есть в форме.',
+      attachments: [],
+      proof: [],
+    }],
+  };
+}
+
 async function mountTriage(t, {
   enabled = true,
   detail = triageDetail(),
+  clarifications = triageClarifications(),
   speechMode = 'unavailable',
+  holdPost = false,
 } = {}) {
   nonce += 1;
   const prefix = `__taskModalAnalysis${nonce}`;
@@ -89,25 +111,20 @@ async function mountTriage(t, {
   let leases = 0;
   let releases = 0;
   let cancels = 0;
+  let resumePost = null;
   globalThis[`${prefix}Api`] = {
     async get(url) {
       if (url.endsWith('/clarifications')) {
-        return {
-          text: '',
-          entries: [{
-            id: 'answer-1',
-            questionId: 'q-label',
-            actor: 'cockpit-arbiter',
-            status: 'answered',
-            text: 'Поле уже есть в форме.',
-          }],
-        };
+        return clarifications;
       }
       if (url === '/api/tasks') return { tasks: [] };
       return {};
     },
     async post(url, body) {
       posts.push({ url, body: structuredClone(body) });
+      if (holdPost) {
+        await new Promise((resolve) => { resumePost = resolve; });
+      }
       return { text: 'сохранено', entries: [] };
     },
     async upload() { return {}; },
@@ -206,6 +223,7 @@ async function mountTriage(t, {
     flushPromises,
     posts,
     analyzed,
+    releasePost: () => resumePost?.(),
     speech: () => ({ leases, releases, cancels }),
   };
 }
@@ -345,6 +363,55 @@ test('ответы отправляются одним structured batch и за�
   });
 });
 
+test('идущий заход триажа оставляет на панели только прогресс', async (t) => {
+  const detail = triageDetail();
+  detail.status = { state: 'running', startedAt: Date.now() - 95_000 };
+  const { wrapper } = await mountTriage(t, { detail });
+
+  assert.deepEqual({
+    fields: wrapper.findAll('[data-role="task-clarification"]').length,
+    question: wrapper.text().includes('Какой режим оставить?'),
+    chips: wrapper.text().includes('сложность'),
+    reanalyze: wrapper.findAll('button').some((button) => /Переоценить/u.test(button.text())),
+    progress: wrapper.text().includes('переоценка идёт'),
+    elapsed: /01:3\d/u.test(wrapper.text()),
+  }, {
+    fields: 0,
+    question: false,
+    chips: false,
+    reanalyze: false,
+    progress: true,
+    elapsed: true,
+  });
+});
+
+// Кнопку жмёт человек, а статус захода приходит от сервера позже: панель обязана
+// очиститься уже на отправке ответов, иначе «нажал — и ничего не изменилось».
+test('нажатое уточнение убирает вопросы и оценку сразу, ещё до ответа сервера', async (t) => {
+  const { wrapper, flushPromises, releasePost } = await mountTriage(t, { holdPost: true });
+  const field = wrapper.get('[data-role="task-clarification"]');
+  await field.setValue('Оставить ручной');
+  const submit = wrapper.findAll('button')
+    .find((button) => button.text().includes('Уточнить и переоценить'));
+  await submit.trigger('click');
+  await flushPromises();
+  const onSend = {
+    fields: wrapper.findAll('[data-role="task-clarification"]').length,
+    chips: wrapper.text().includes('сложность'),
+    progress: wrapper.text().includes('уточнения сохраняются'),
+  };
+  releasePost();
+  await flushPromises();
+
+  assert.deepEqual({
+    onSend,
+    fieldsAfter: wrapper.findAll('[data-role="task-clarification"]').length,
+  }, {
+    onSend: { fields: 0, chips: false, progress: true },
+    fieldsAfter: 2,
+  });
+});
+
 test('карточка задачи берёт ровно один lease общего speech controller', async (t) => {
   const { speech } = await mountTriage(t);
 
@@ -353,6 +420,9 @@ test('карточка задачи берёт ровно один lease общ�
 
 test('машинный ответ и фактические provider/model/effort отличимы в карточке', async (t) => {
   const { wrapper } = await mountTriage(t);
+
+  assert.equal(wrapper.find('#task-analysis-details').exists(), false);
+  await wrapper.get('[aria-controls="task-analysis-details"]').trigger('click');
 
   assert.deepEqual({
     machine: /арбитр[^\n]*машин/iu.test(wrapper.text()),
@@ -365,6 +435,33 @@ test('машинный ответ и фактические provider/model/effor
     model: true,
     effort: true,
   });
+});
+
+test('неизвестная оценка не становится нулевой, а уверенность и тип работы читаются по-русски', async (t) => {
+  const detail = triageDetail();
+  detail.analysis.complexity = null;
+  detail.analysis.risk = undefined;
+  detail.analysis.confidence = 'medium';
+  detail.analysis.route_depth = 'full';
+  const { wrapper } = await mountTriage(t, { detail });
+
+  assert.equal(wrapper.get('[data-metric="complexity"] dd').text(), '—');
+  assert.equal(wrapper.get('[data-metric="risk"] dd').text(), '—');
+  assert.equal(wrapper.get('[data-metric="confidence"] dd').text(), 'Средняя');
+  assert.match(wrapper.get('.triage-route').text(), /Новая функциональность.*полный маршрут/);
+});
+
+test('сохранённые уточнения раскрываются отдельно и сохраняют предупреждение о локальной видимости', async (t) => {
+  const { wrapper } = await mountTriage(t);
+
+  assert.equal(wrapper.find('#task-triage-history').exists(), false);
+  await wrapper.get('[aria-controls="task-triage-history"]').trigger('click');
+
+  assert.match(wrapper.get('#task-triage-history').text(), /Заказчик их не видит/);
+  assert.match(wrapper.get('#task-triage-history').text(), /Поле уже есть в форме/);
+  await wrapper.get('[aria-controls="task-triage-history"]').trigger('click');
+
+  assert.equal(wrapper.find('#task-triage-history').exists(), false);
 });
 
 test('ручная кнопка арбитра видна при выключенном автоматическом режиме', async (t) => {
@@ -437,5 +534,28 @@ test('успешная диктовка дописывает активный о
     first: 'Начало Ответ голосом',
     second: 'Ответ голосом',
     speech: { leases: 1, releases: 1, cancels: 1 },
+  });
+});
+
+// Заход триажа переписывает questions[] целиком, и id вопроса меняется вместе с его
+// формулировкой. Пока карточка искала ответ строго по id, уже данный ответ пропадал
+// с экрана — и человек отвечал второй раз на то же самое.
+test('ответ остаётся виден, когда триаж переформулировал тот же вопрос', async (t) => {
+  const detail = triageDetail();
+  detail.analysis.questions = [{
+    id: 'q-label-2',
+    text: 'Как подписать кнопку',
+    options: [],
+    recommendation: null,
+  }];
+
+  const { wrapper } = await mountTriage(t, { detail });
+
+  assert.deepEqual({
+    status: wrapper.text().includes('Арбитр — машинный ответ'),
+    answered: wrapper.findAll('.clarify-card.is-answered').length,
+  }, {
+    status: true,
+    answered: 1,
   });
 });

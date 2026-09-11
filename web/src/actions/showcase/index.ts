@@ -17,6 +17,8 @@ export {
   recordShowcase,
   synthesizeShowcase,
 } from './buildShowcase';
+export { analyzeShowcase } from './analyzeShowcase';
+export { buildShowcaseFilm } from './buildShowcaseFilm';
 export { cancelShowcaseJob } from './cancelShowcaseJob';
 export { closeShowcaseProject, openShowcaseProject } from './openShowcaseProject';
 export {
@@ -32,5 +34,7 @@ export {
   cancelShowcaseVoiceInstall,
   installShowcaseVoice,
   loadShowcaseVoices,
+  setShowcaseVoice,
 } from './setupShowcaseVoice';
+export type { ShowcaseVoiceChoice } from './setupShowcaseVoice';
 export { watchShowcase } from './watchShowcase';

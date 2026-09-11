@@ -419,3 +419,25 @@ test('detached video сохраняет device:auto для worker retry', async 
     computeType: 'auto',
   });
 });
+
+test('расшифровка без сигнала отмены не передаёт runner-у null', async () => {
+  const seen = [];
+  const runtime = new SpeechRuntime({
+    mediaDir: '/state/media',
+    settings: { quality: 'balanced', device: 'cpu' },
+    deps: readyDeps({
+      async ingestRecording(value) {
+        seen.push(value.signal);
+        return { transcript: { segments: [] } };
+      },
+    }),
+  });
+
+  await runtime.capabilities();
+  await runtime.transcribe({ filePath: '/audio.wav', workDir: '/work' });
+
+  // execFile принимает отсутствие сигнала, но не null: именно так падала
+  // самопроверка речи раздела презентаций, которая отмены не передаёт.
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0], undefined);
+});

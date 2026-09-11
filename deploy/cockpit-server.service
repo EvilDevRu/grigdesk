@@ -46,6 +46,14 @@ ExecStartPre=-__NODE__ --disable-warning=ExperimentalWarning __COCKPIT_DIR__/ser
 Restart=always
 # 5с вместо 2с: пауза заметна только при ожидании VPN, а журнал не забивается.
 RestartSec=5
+# Остановка — сливом, а не расстрелом cgroup. С control-group SIGTERM прилетал бы и в
+# CLI агентов одновременно с сервером, и тот не успевал бы ни дать ходам закончить, ни
+# прервать их с сохранением ленты и id сессии. mixed: SIGTERM только главному процессу,
+# он сам закрывает исполнителей; остаток cgroup добивает SIGKILL после его выхода.
+KillMode=mixed
+# Больше бюджета остановки сервера (COCKPIT_SHUTDOWN_TIMEOUT_MS, по умолчанию 30 с):
+# SIGKILL раньше срока обесценил бы весь слив.
+TimeoutStopSec=45
 
 [Install]
 WantedBy=default.target

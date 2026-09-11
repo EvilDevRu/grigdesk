@@ -147,13 +147,16 @@ async function systemModule(
     uptimeSec: Math.round(process.uptime()),
   }));
 
-  // Перезапуск сервера. Ответ уходит ДО смерти процесса (задержка), иначе кнопка не
-  // узнает, что нажалась. Под systemd — просто выход: юнит с Restart=always поднимет
-  // чистую копию и подтянет новый код после деплоя. При ручном запуске поднимать некому,
-  // поэтому bin/restart отвязанным процессом (переживает смерть родителя: detached здесь
-  // + setsid внутри самого скрипта). РЕЖИМЫ НЕ СМЕШИВАЕМ: bin/restart под systemd поднял
-  // бы второй экземпляр против юнита и отправил service в бесконечный restart loop
-  // (см. комментарий в deploy/cockpit-server.service).
+  // Перезапуск сервера. Ответ уходит ДО остановки (задержка), иначе кнопка не узнает,
+  // что нажалась. Оба режима идут через координатор остановки (lib/shutdown.js): чат
+  // сначала даёт ходам закончиться и прерывает остальные с сохранением ленты и id сессии,
+  // и только потом процесс выходит. Под systemd этого достаточно: юнит с Restart=always
+  // поднимет чистую копию и подтянет новый код после деплоя. При ручном запуске поднимать
+  // некому, поэтому bin/restart отвязанным процессом (переживает смерть родителя:
+  // detached здесь + setsid внутри самого скрипта); он шлёт SIGTERM и ждёт освобождения
+  // порта, а слив запускает уже обработчик сигнала. РЕЖИМЫ НЕ СМЕШИВАЕМ: bin/restart под
+  // systemd поднял бы второй экземпляр против юнита и отправил service в бесконечный
+  // restart loop (см. комментарий в deploy/cockpit-server.service).
   fastify.post('/api/system/restart', async (_request, reply) => {
     // Рестарт гасит процесс → статус пересборки (в памяти) потеряется, а клиент
     // останется ждать. Проще запретить, чем восстанавливать неизвестное состояние.
@@ -162,7 +165,14 @@ async function systemModule(
     catch (error) { return sendReleaseError(reply, error); }
     const systemd = underSystemd();
     setTimeout(() => {
-      if (systemd) { process.exit(0); return; }
+      if (systemd) {
+        if (fastify.shutdown) {
+          void fastify.shutdown.begin('кнопка «Перезапустить»');
+        } else {
+          process.exit(0);
+        }
+        return;
+      }
       const child = spawn('bash', [path.join(config.rootDir, 'bin', 'restart')], {
         detached: true, stdio: 'ignore', cwd: config.rootDir,
       });

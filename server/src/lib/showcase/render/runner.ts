@@ -23,6 +23,9 @@ export interface WorkerLaunchInput {
   workDir: string;
   task: Record<string, unknown>;
   nodeBin?: string;
+  // Открытые дескрипторы kernel-lock дублируются начиная с fd 3. Worker их не
+  // трогает: само присутствие копии удерживает flock до завершения процесса.
+  inheritedFds?: number[];
   // Исполнитель по умолчанию — запись браузера. Установка локального голоса
   // использует ту же машинерию отсоединённого процесса, но свой скрипт, поэтому
   // метка для сверки identity приходит вместе с ним.
@@ -56,6 +59,9 @@ export interface WorkerResult {
     recordedMs: number;
     durationMs: number;
     blockedRequests: number;
+    // Ожидания затишья сети, упёршиеся в предел: подсказка, почему кадр сцены
+    // мог не дождаться данных.
+    unsettled?: number;
   }[];
 }
 
@@ -86,7 +92,7 @@ export async function launchWorker(input: WorkerLaunchInput): Promise<WorkerHand
     [script.file, taskFile],
     {
       detached: true,
-      stdio: ['ignore', log.fd, log.fd],
+      stdio: ['ignore', log.fd, log.fd, ...(input.inheritedFds ?? [])],
       env: {
         PATH: process.env.PATH ?? '',
         HOME: process.env.HOME ?? '',

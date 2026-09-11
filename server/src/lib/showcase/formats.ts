@@ -28,8 +28,10 @@ const ARTIFACT_EXTENSIONS: Record<ShowcaseArtifactRef['kind'], string> = {
   subtitles: '.srt',
 };
 
+// recorder-2: клип начинается с готовности экрана и дожидается затишья сети —
+// записи первой версии показывали загрузку страницы и пустые таблицы.
 export const PRODUCER_VERSIONS = {
-  recorder: 'recorder-1',
+  recorder: 'recorder-2',
   voice: 'imported-1',
   assembler: 'assembler-1',
 };

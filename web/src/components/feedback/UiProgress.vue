@@ -1,6 +1,7 @@
 <template>
   <div
     class="ui-progress"
+    :class="`ui-progress--${normalizedTone}`"
     role="progressbar"
     :aria-label="label"
     :aria-valuemin="min"
@@ -18,6 +19,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import type { UiActionTone } from '../../types/uiActions';
+import { normalizeActionTone } from '../../types/uiActions';
 
 const props = withDefaults(
   defineProps<{
@@ -27,6 +30,7 @@ const props = withDefaults(
     label: string;
     valueText?: string;
     indeterminate?: boolean;
+    tone?: UiActionTone;
   }>(),
   {
     value: 0,
@@ -34,8 +38,11 @@ const props = withDefaults(
     max: 100,
     valueText: undefined,
     indeterminate: false,
+    tone: 'accent',
   },
 );
+
+const normalizedTone = computed(() => normalizeActionTone(props.tone));
 const clamped = computed(() =>
   Math.min(props.max, Math.max(props.min, props.value)),
 );

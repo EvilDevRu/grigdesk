@@ -11,6 +11,7 @@ import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 
 import { assertSupportedNode } from './lib/nodeVersion.ts';
+import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { config } from './config.ts';
 import { cockpitCliPath } from './lib/cliPath.ts';
 import { AuthStore } from './lib/authStore.ts';
@@ -81,6 +82,7 @@ import type { SshModuleOptions } from './modules/ssh/index.ts';
 import type { SettingsModuleOptions } from './modules/settings/index.ts';
 import { normalizeDbResult } from './lib/db/result.ts';
 import { createDockerService } from './lib/docker/service.ts';
+import { createSandboxActivityGuard } from './lib/sandboxes/activityGuard.ts';
 import { createSandboxService } from './lib/sandboxes/service.ts';
 import { createShowcaseService } from './lib/showcase/service.ts';
 import { resolveInboxTriageTarget } from './lib/inbox/triage.ts';
@@ -208,7 +210,20 @@ async function build() {
     // (он ходит внутри процесса, мимо HTTP). Потолок берётся у кодека refs
     // (`INBOX_REF_LIMITS.encodedChars`), чтобы предела правды не было два.
     maxParamLength: INBOX_REF_LIMITS.encodedChars,
+    // На остановке рвём все соединения разом: поток SSE и вебсокеты — незавершённые
+    // ответы, и `server.close()` ждал бы их вечно. К этому моменту слив уже прошёл, и
+    // долгих запросов, которым есть что терять, на сервере нет.
+    forceCloseConnections: true,
   });
+  // Остановка: модули регистрируют слив (чат прерывает ходы и сохраняет их итог), а
+  // сигнал или кнопка «Перезапустить» запускают его ДО закрытия сервера. Обработчики
+  // сигналов вешаются после listen — до него закрывать нечего.
+  const shutdown = createShutdownCoordinator({
+    close: () => fastify.close(),
+    log: fastify.log,
+    timeoutMs: config.shutdownTimeoutMs,
+  });
+  fastify.decorate('shutdown', shutdown);
   const knowledge = createKnowledgeClient({
     dbPath: config.knowledgeDbPath,
     seedSamples: false,
@@ -441,12 +456,14 @@ async function build() {
 
   // Песочницы: подъём и снос идут отдельными процессами и переживают перезапуск
   // сервера, поэтому служба живёт весь его срок и сама доводит журнал до правды.
+  const sandboxActivityGuard = createSandboxActivityGuard({ stateDir: config.stateDir });
   const sandboxService = createSandboxService({
     stateDir: config.stateDir,
     journalDir: config.sandboxJournalDir,
     profilesDir: config.profilesDir,
     factoryBin: config.factoryBin,
     manualRange: config.sandboxManualRange,
+    sandboxActivityGuard,
     downCmd: config.sandboxDownCmd,
     broadcast: (event: string, data?: unknown) => fastify.sse?.broadcast?.(event, data),
     // Шаги подъёма ловит общий вотчер каталога состояния, а не второй наблюдатель.
@@ -680,9 +697,9 @@ async function build() {
   const githubAccountContextFor = createGitHubAccountContextFactory({ dir: config.githubDir });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
-  // Идентичность компаньона можно создать и для запущенной задачи фабрики, и для
-  // существующей задачи Б24 до запуска. Подтвердить её имеют право только эти серверные источники;
-  // для быстрого хода модуль чата отдельно требует точное рабочее дерево фабрики.
+  // Идентичность companion-чата можно создать и для запущенной задачи фабрики, и для
+  // существующей задачи Б24 до запуска. Подтвердить её имеют право только эти
+  // серверные источники.
   const companionTaskExists = async (taskId: string | number) => {
     try {
       await factoryState.readRegistry(taskId);
@@ -769,9 +786,16 @@ async function build() {
     profilesDir: config.profilesDir,
     stateDir: config.stateDir,
     browserPath: config.showcaseBrowser || null,
+    browserDir: config.showcaseBrowserDir,
     voiceDir: config.showcaseVoiceDir,
+    yandexVoice: {
+      apiKey: config.showcaseYandexApiKey,
+      folderId: config.showcaseYandexFolderId,
+    },
     bootstrapPython: process.env.COCKPIT_MEDIA_BOOTSTRAP_PYTHON || 'python3',
     listProjects: () => listProjects(config, prefs),
+    sandboxOverview: () => sandboxService.overview(),
+    sandboxActivityGuard,
     broadcast: (event: string, data?: unknown) => fastify.sse?.broadcast?.(event, data),
     // Расшифровка для самопроверки речи идёт через общий речевой runtime кокпита —
     // тот же, что у диктовки и «Видео». Своей копии распознавания у раздела нет,
@@ -792,6 +816,16 @@ async function build() {
     // текст.
     resolveScriptModel: (input) => resolveInboxTriageTarget(input),
     scriptModelRef: () => readPluginSettings(fastify, 'showcase').scriptModel ?? null,
+    // Тот же серверный config и те же настройки провайдера, что у остальных
+    // model-only мест: в них лежат путь к CLI исполнителя и каталог моделей.
+    executorConfig: () => config as unknown as Record<string, unknown>,
+    providerSettings: () => (prefs.read().providerSettings || {}) as Record<string, unknown>,
+    // Задача портала для стенда задачи: сессией владеет сервер, раздел получает
+    // только текст. Портал недоступен — разбор идёт без постановки, а не падает.
+    taskDetails: async (taskId: string) => await b24.taskDetail(taskId) as {
+      title?: unknown;
+      description?: unknown;
+    } | null,
     // Каналы доставки: сессией портала и аккаунтом Telegram владеет сервер, раздел
     // получает их готовыми и вторых не заводит.
     deliveryDeps: {
@@ -1251,6 +1285,8 @@ async function build() {
     const server = tlsRuntime.server;
 
     if (!server) return;
+    // Как и у http-сокета: SSE с планшета держал бы `close()` до SIGKILL.
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     tlsRuntime.server = null;
     tlsRuntime.up = false;
@@ -1302,3 +1338,4 @@ try {
   process.exit(1);
 }
 await startHttps(app);
+app.shutdown?.arm();

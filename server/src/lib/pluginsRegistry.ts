@@ -15,28 +15,10 @@
 //   pluginSettings: { <id>: {key: value} }
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { normalizePluginCategory } from '../../../shared/pluginsContracts.ts';
+import type { PluginNav, PluginSetting, PluginSetup } from '../../../shared/pluginsContracts.ts';
 
-// Одно поле настройки плагина: схему объявляет манифест, значение живёт в prefs.
-export interface PluginSetting {
-  key: string;
-  label?: string;
-  type?: string;
-  hint?: string;
-  default?: unknown;
-  min?: number;
-  max?: number;
-  step?: number;
-  requiresCapability?: string;
-}
-
-// Ссылка плагина в навигации — только декларация, кода фронта она не даёт.
-export interface PluginNav {
-  path: string;
-  label: string;
-  icon: string;
-  group: string;
-  order?: number;
-}
+export type { PluginNav, PluginSetting, PluginSetup };
 
 // Манифест плагина: системного из SYSTEM или пользовательского из plugin.json.
 export interface PluginManifest {
@@ -47,8 +29,13 @@ export interface PluginManifest {
   api?: number;
   version: string;
   description: string;
+  // Род работы для раздела настроек; значения — из общего контракта категорий.
+  category?: string;
   nav: PluginNav | null;
   settings: PluginSetting[];
+  // Ручка готовности: что плагину нужно на машине и что он ставит сам. Объявляют
+  // только системные плагины — у пользовательского серверной части такого рода нет.
+  setup?: PluginSetup | null;
   dir?: string;
   hasServer?: boolean;
 }
@@ -66,6 +53,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'Видео → задачи',
     version: '1.0.0',
     description: 'Разбор видеозаписи встречи: распознавание речи (whisper), выжимка по темам, черновики задач в Б24 со скриншотами.',
+    category: 'work',
     nav: { path: '/video', label: 'Видео', icon: 'video', group: 'tools', order: 10 },
     // Настройки распознавания диктовки и видео живут в едином speech-контракте.
     // Здесь — только то, что делают С УЖЕ ГОТОВОЙ расшифровкой.
@@ -91,6 +79,7 @@ export const SYSTEM: PluginManifest[] = [
     description: 'Код и Git проектов как в VS Code: дерево файлов, staged/unstaged '
       + 'изменения, коммиты и push для основного репозитория или worktree. Пути '
       + 'репозиториев — в разделе «Проекты».',
+    category: 'dev',
     nav: { path: '/code', label: 'Код', icon: 'code', group: 'dock', order: 10 },
     settings: [
       {
@@ -112,6 +101,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'Триаж',
     version: '1.0.0',
     description: 'Оценка сложности и рисков задачи с разведкой кода перед запуском конвейера.',
+    category: 'work',
     nav: null,
     settings: [
       {
@@ -139,6 +129,7 @@ export const SYSTEM: PluginManifest[] = [
     version: '1.0.0',
     description: 'Личный список задач Б24, по которым человек ждёт оценку, '
       + 'событие конвейера или новые комментарии.',
+    category: 'work',
     nav: { path: '/shelf', label: 'Полка', icon: 'shelf', group: 'dock', order: 20 },
     settings: [
       {
@@ -164,6 +155,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'Входящие',
     version: '1.0.0',
     description: 'Единая очередь новых обращений из подключённых каналов с ручным разбором и созданием задач в Б24.',
+    category: 'work',
     nav: { path: '/inbox', label: 'Входящие', icon: 'inbox', group: 'rail', order: 30 },
     settings: [
       {
@@ -201,6 +193,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'Телеграм',
     version: '0.1.0',
     description: 'Подключение Telegram Bot API, нативный архив и allowlist чатов для общего раздела «Входящие».',
+    category: 'work',
     nav: { path: '/telegram', label: 'Телеграм', icon: 'telegram', group: 'tools', order: 20 },
     settings: [],
   },
@@ -211,6 +204,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'GitHub Issues',
     version: '0.1.0',
     description: 'Подключение одного GitHub repository: новые Issues поступают в общий раздел «Входящие» через подписанный webhook и REST-сверку.',
+    category: 'work',
     nav: { path: '/github', label: 'GitHub', icon: 'github', group: 'tools', order: 30 },
     settings: [],
   },
@@ -221,6 +215,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'Знания',
     version: '1.0.0',
     description: 'Локальная база проверенных проектных фактов с морфологическим поиском.',
+    category: 'knowledge',
     nav: { path: '/knowledge', label: 'Знания', icon: 'knowledge', group: 'tools', order: 40 },
     settings: [],
   },
@@ -231,6 +226,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'SSH',
     version: '0.1.0',
     description: 'Терминал и SFTP для человека, надзорное выполнение команд для агента.',
+    category: 'dev',
     nav: { path: '/ssh', label: 'SSH', icon: 'ssh', group: 'dock', order: 40 },
     settings: [
       {
@@ -259,6 +255,7 @@ export const SYSTEM: PluginManifest[] = [
     name: 'Базы',
     version: '0.1.0',
     description: 'Надзорный доступ человека и агента к базам данных без хранения паролей.',
+    category: 'dev',
     nav: { path: '/db', label: 'Базы', icon: 'db', group: 'dock', order: 50 },
     settings: [
       {
@@ -346,6 +343,7 @@ export const SYSTEM: PluginManifest[] = [
     version: '0.1.0',
     description: 'Обзор локального Docker: контейнеры и compose-проекты, порты, образы, '
       + 'тома и сети, логи и терминал контейнера, очистка неиспользуемого места.',
+    category: 'dev',
     nav: { path: '/docker', label: 'Докер', icon: 'docker', group: 'dock', order: 60 },
     settings: [
       {
@@ -405,7 +403,11 @@ export const SYSTEM: PluginManifest[] = [
     version: '0.1.0',
     description: 'Ролик о готовой работе по сценам: сценарий, озвучка, запись браузера '
       + 'и сборка mp4 с субтитрами. Адреса, экраны и вход берутся из объявления профиля.',
+    category: 'knowledge',
     nav: { path: '/showcase', label: 'Презентации', icon: 'video', group: 'tools', order: 50 },
+    // Разделу нужны браузер записи, ffmpeg, голос и распознавание: что из этого
+    // есть и что можно поставить кнопкой, показывают настройки плагина.
+    setup: { path: '/api/showcase/setup' },
     settings: [
       {
         key: 'scriptModel',
@@ -473,6 +475,22 @@ export function normalizePluginNav(
 }
 
 /**
+ * Категория пользовательского манифеста приводится к известной. Подмена заявленного
+ * значения на «Прочее» не остаётся молчаливой: иначе автор плагина искал бы свою
+ * группу на экране настроек, которого нет.
+ */
+function userPluginCategory(raw: unknown, warn: (message: string) => void): string {
+  const category = normalizePluginCategory(raw);
+  const requested = raw == null ? '' : String(raw).trim();
+
+  if (requested && requested !== category) {
+    warn(`category «${requested}» не поддерживается — плагин помещён в «Прочее»`);
+  }
+
+  return category;
+}
+
+/**
  * Скан пользовательских плагинов: plugins/<id>/plugin.json.
  * Битый манифест пропускается с warn — один плагин не валит остальные.
  */
@@ -496,6 +514,9 @@ export async function scanUserPlugins(
         api: Number(m.api || 1),
         version: String(m.version || '0.0.0'),
         description: String(m.description || ''),
+        category: userPluginCategory(m.category, (message: string) => {
+          log?.warn?.({ plugin: e.name }, message);
+        }),
         nav: normalizePluginNav(m.nav, String(m.name || m.id), (message: string) => {
           log?.warn?.({ plugin: e.name }, message);
         }),

@@ -60,13 +60,17 @@ const detail = {
   task: 42, analysis, note: 'Разведнота.', stale: ['be:src/app.js'], status,
 };
 const clarifications = {
-  text: '## Ответ человека\nДа.',
+  text: '## Ответ человека — Оставить режим?\nВыбрано: Да\nДа.',
   entries: [{
     id: 'answer-1',
     questionId: 'q-1',
+    // Вопрос и подпись варианта хранит сама запись: оценку триажа перезапишет
+    // следующий заход, и по одному id ответ потерял бы свой вопрос.
+    questionText: 'Оставить режим?',
     actor: 'human',
     status: 'answered',
     selection: ['o-1'],
+    selectionLabels: ['Да'],
     text: 'Да.',
     attachments: [{ file: 'a1.png', name: 'скрин.png' }],
     proof: [],

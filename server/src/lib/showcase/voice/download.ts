@@ -17,6 +17,7 @@ import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 
 import type { PiperVoicePackage } from './piperCatalog.ts';
+import type { SileroVoicePackage } from './sileroCatalog.ts';
 
 const run = promisify(execFile);
 
@@ -141,4 +142,96 @@ export async function installVoiceFiles(
   }
 
   return voiceDir;
+}
+
+/**
+ * Загрузка одного файла с проверкой размера и суммы. Тот же контракт, что у
+ * архива: сверяется СКАЧАННОЕ, а не заголовки ответа.
+ */
+async function downloadChecked(
+  source: { url: string; sha256: string; bytes: number },
+  target: string,
+  label: string,
+  report: ProgressReport,
+): Promise<void> {
+  await report('voice', `скачиваю ${label}`);
+
+  const response = await fetch(source.url, { redirect: 'follow' });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`источник ответил ${response.status}`);
+  }
+
+  const hash = createHash('sha256');
+  const output = createWriteStream(target, { mode: 0o600 });
+  let received = 0;
+  let announced = 0;
+
+  await pipeline(
+    Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+    async function* (stream) {
+      for await (const chunk of stream) {
+        const buffer = chunk as Buffer;
+
+        hash.update(buffer);
+        received += buffer.byteLength;
+
+        const percent = Math.floor((received / source.bytes) * 100);
+
+        if (percent >= announced + 10) {
+          announced = percent;
+          await report('voice', `скачано ${Math.min(percent, 100)}%`);
+        }
+
+        yield buffer;
+      }
+    },
+    output,
+  );
+
+  if (received !== source.bytes) {
+    throw new Error(`размер файла не совпал: ${received} вместо ${source.bytes}`);
+  }
+
+  if (hash.digest('hex') !== source.sha256) {
+    throw new Error('sha256 скачанного файла не совпал с закреплённым');
+  }
+}
+
+/**
+ * Раскладка модели Silero. Модель — один файл torch-пакета; уже лежащий с верной
+ * суммой повторно не качается, прерванная установка повторяется тем же нажатием.
+ */
+export async function installSileroFiles(
+  pack: SileroVoicePackage,
+  modelsDir: string,
+  report: ProgressReport,
+): Promise<string> {
+  const modelDir = path.join(modelsDir, pack.id);
+  const modelFile = path.join(modelDir, pack.fileName);
+
+  if (await exists(modelFile) && await sha256Of(modelFile) === pack.fileSha256) {
+    await report('voice', 'файл модели уже на месте');
+
+    return modelDir;
+  }
+
+  const staging = await mkdtemp(path.join(os.tmpdir(), 'showcase-voice-'));
+
+  try {
+    const downloaded = path.join(staging, pack.fileName);
+
+    await downloadChecked(
+      { url: pack.url, sha256: pack.fileSha256, bytes: pack.fileBytes },
+      downloaded,
+      `модель «${pack.name}»`,
+      report,
+    );
+    await mkdir(modelDir, { recursive: true, mode: 0o700 });
+    await rename(downloaded, modelFile);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+
+  return modelDir;
 }

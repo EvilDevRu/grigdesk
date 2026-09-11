@@ -219,6 +219,11 @@ export function unsupportedProviderUsage(
  * Кэш долгого read-only сбора usage. Одновременные вкладки получают один и тот
  * же in-flight результат, а TTL отсчитывается от ЗАВЕРШЕНИЯ загрузки: медленный
  * исполнитель не должен сделать кэш устаревшим ещё до прихода ответа.
+ *
+ * Два входа с разной свежестью: `read` отдаёт снимок не старше TTL и ходит к вендору
+ * только по его истечении, `refresh` перечитывает по требованию — им живёт фоновый
+ * тик, который держит кэш тёплым для всех окон. Прошлый снимок при `refresh` тоже
+ * остаётся previous: слияние при сбое держит старые полосы, только если ему есть что.
  */
 export function createUsageReadCache<Value>(
   load: (previous: Value | null) => Promise<Value> | Value,
@@ -228,23 +233,42 @@ export function createUsageReadCache<Value>(
   let inFlight: Promise<Value> | null = null;
   let generation = 0;
 
+  // Одна живая загрузка на всех: начатую не дублируем, а результат, переживший
+  // `clear`, в кэш не кладём — он отвечает на вопрос, который уже сняли.
+  function start(): Promise<Value> {
+    const startedGeneration = generation;
+    const pending = Promise.resolve()
+      .then(() => load(cache?.value ?? null))
+      .then((value) => {
+        if (generation === startedGeneration) cache = { at: now(), value };
+        return value;
+      })
+      .finally(() => {
+        if (inFlight === pending) inFlight = null;
+      });
+
+    inFlight = pending;
+    return pending;
+  }
+
   return {
     async read() {
       if (cache && now() - cache.at < maxAgeMs) return cache.value;
       if (inFlight) return inFlight;
 
-      const startedGeneration = generation;
-      const pending = Promise.resolve()
-        .then(() => load(cache?.value ?? null))
-        .then((value) => {
-          if (generation === startedGeneration) cache = { at: now(), value };
-          return value;
-        })
-        .finally(() => {
-          if (inFlight === pending) inFlight = null;
-        });
-      inFlight = pending;
-      return pending;
+      return start();
+    },
+
+    async refresh() {
+      if (inFlight) return inFlight;
+
+      return start();
+    },
+
+    // Возраст снимка: по нему фоновый тик решает, не перечитывать ли то, что только
+    // что принёс запрос окна. Без снимка — бесконечность: читать надо.
+    ageMs() {
+      return cache ? now() - cache.at : Number.POSITIVE_INFINITY;
     },
 
     clear() {

@@ -253,13 +253,15 @@
 }
 
 @media (max-width: 600px) {
+  /* UiDialog выставляет пустой boolean-атрибут. Проверяем наличие: сравнение с
+     'true' оставляло внешний отступ вокруг панели высотой в целый экран. */
   .ui-dialog__overlay,
-  .ui-dialog-overlay[data-mobile-fullscreen='true'] {
+  .ui-dialog-overlay[data-mobile-fullscreen] {
     padding: 0;
   }
 
   .ui-dialog__overlay .ui-dialog,
-  .ui-dialog-overlay[data-mobile-fullscreen='true'] .ui-dialog {
+  .ui-dialog-overlay[data-mobile-fullscreen] .ui-dialog {
     width: 100%;
     height: 100dvh;
     max-height: 100dvh;

@@ -577,3 +577,56 @@ test('массовое гашение не обрывает работу мол�
   release();
   await running;
 });
+
+test('id сессии сообщается с первого события хода, а не по его итогу', async () => {
+  const { dir, file } = await fakeBin();
+  const session = openFake({ file });
+  const order = [];
+  try {
+    const result = await session.send({
+      message: 'привет',
+      onSessionCreated: (id) => { order.push(`session:${id}`); },
+    });
+    order.push('result');
+    // Перезапуск сервера посреди первого хода раньше оставлял чат без сессии:
+    // id доезжал только с result, которого у оборванного хода нет.
+    assert.equal(result.sessionId, 'sid-new');
+    assert.deepEqual(order, ['session:sid-new', 'result']);
+    assert.equal(session.sessionId, 'sid-new');
+  } finally {
+    await session.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('пул записывает ранний id сессии до внешнего колбэка', async () => {
+  const opened = [];
+  const executor = fakeExecutor({ opened });
+  // Ход, который сообщает id заранее, как настоящий поток CLI.
+  opened.announce = true;
+  executor.session.open = (spec) => {
+    const handle = {
+      spec,
+      alive: true,
+      pid: 1,
+      async send({ message, onSessionCreated }) {
+        await onSessionCreated?.('sid-early');
+        return { reply: `ответ:${message}`, sessionId: 'sid-early', steps: [] };
+      },
+      async interrupt() {},
+      async close() { handle.alive = false; },
+    };
+    opened.push(handle);
+    return handle;
+  };
+  const pool = new ChatLiveSessions({ maxSessions: 4 });
+  let seenInPool = null;
+
+  await pool.run({ chatKey: 'c1', executor, model: 'a' }, {
+    message: 'раз',
+    onSessionCreated: () => { seenInPool = pool.stats()[0]?.sessionId ?? null; },
+  });
+  assert.equal(seenInPool, 'sid-early', 'пул знает id ещё до конца хода');
+
+  await pool.closeAll();
+});

@@ -9,7 +9,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadTriageProfile } from './profile.ts';
 import type { TriageProfile } from './profile.ts';
-import { buildTriagePrompt } from './prompt.ts';
+import { buildTriagePrompt, type TriageAnsweredQuestion } from './prompt.ts';
 import { parseRouteMap, resolveRoute } from './routePolicy.ts';
 import { createRepoHistoryTools } from './repoHistory.ts';
 import { supportsScopedWorkspace } from '../executors/index.ts';
@@ -21,6 +21,7 @@ import {
 } from '../chat/attachments.ts';
 import { resolveLegacyModel, resolveModelRef } from '../chat/modelRef.ts';
 import { stripDiscussionSection } from '../telegram/discussion.ts';
+import { questionKey } from '../../../../shared/analysisContracts.ts';
 import type {
   Analysis,
   AnalysisArbiterAnswerInput,
@@ -157,10 +158,16 @@ function clarificationEntries(markdown: unknown): AnalysisClarificationEntry[] {
       entries.push({
         id: boundedText(parsed.id, 100),
         questionId: boundedText(parsed.questionId, 100),
+        // Текст вопроса и подписи вариантов записаны в самой записи: оценка триажа
+        // перезаписывается следующим заходом, и без копии ответ теряет свой вопрос.
+        questionText: boundedText(parsed.questionText, 1000),
         actor: parsed.actor === 'human' ? 'human' : 'cockpit-arbiter',
         status: parsed.status === 'human_required' ? 'human_required' : 'answered',
         selection: Array.isArray(parsed.selection)
           ? parsed.selection.map((value: unknown) => boundedText(value, 100)).filter(Boolean)
+          : [],
+        selectionLabels: Array.isArray(parsed.selectionLabels)
+          ? parsed.selectionLabels.map((value: unknown) => boundedText(value, 300)).filter(Boolean)
           : [],
         text: boundedText(parsed.text, 6000),
         attachments: Array.isArray(parsed.attachments)
@@ -178,6 +185,34 @@ function clarificationEntries(markdown: unknown): AnalysisClarificationEntry[] {
     }
   }
   return entries;
+}
+
+/**
+ * Видимая часть записи уточнения. Её читают не только глазами: этот markdown целиком
+ * уезжает в промпт следующего триажа и в описание тикета конвейера. Пока в блок попадал
+ * только свободный текст, ответ выбором варианта выглядел там заглушкой «нужно решение
+ * человека» — и триаж, и арбитр, и планировщик переспрашивали уже решённое.
+ */
+function clarificationBlock(entry: AnalysisClarificationEntry, heading: string): string {
+  const lines = [entry.questionText ? `## ${heading} — ${entry.questionText}` : `## ${heading}`];
+
+  if (entry.status === 'human_required') {
+    lines.push('Нужно решение человека.');
+  }
+  if (entry.selectionLabels.length) {
+    lines.push(`Выбрано: ${entry.selectionLabels.join('; ')}`);
+  }
+  if (entry.text) {
+    lines.push(entry.text);
+  }
+  if (entry.proof.length) {
+    lines.push(`Основание: ${entry.proof.join('; ')}`);
+  }
+  if (lines.length === 1) {
+    lines.push('Ответ без текста и выбранного варианта.');
+  }
+
+  return lines.join('\n');
 }
 
 export class Analyzer {
@@ -377,16 +412,52 @@ export class Analyzer {
     const analysis = await this._readJson(this._paths(id).json);
     if (!analysis) return null;
     const clean = (v: unknown) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : []);
-    const answered = new Set(
-      (await this.readClarificationEntries(id))
-        .filter((entry) => entry.status === 'answered')
-        .map((entry) => entry.questionId),
-    );
+    const answered = await this.answeredQuestions(id);
     const questions = normalizeAnalysisQuestions(analysis.questions)
-      .filter((question) => !answered.has(question.id))
+      .filter((question) => !answered.ids.has(question.id) && !answered.keys.has(questionKey(question.text)))
       .map((question) => question.text);
     const unknowns = clean(analysis.unknowns);
     return questions.length || unknowns.length ? { questions, unknowns } : null;
+  }
+
+  /**
+   * Что по задаче уже решено. Отвеченным вопрос считается и по идентификатору, и по
+   * смыслу текста: заход триажа переписывает questions[] целиком, и без второго ключа
+   * тот же вопрос в новой формулировке снова открыт, а ответ человека потерян.
+   */
+  async answeredQuestions(id: string | number): Promise<{ ids: Set<string>; keys: Set<string> }> {
+    const entries = (await this.readClarificationEntries(id))
+      .filter((entry) => entry.status === 'answered');
+
+    return {
+      ids: new Set(entries.map((entry) => entry.questionId)),
+      keys: new Set(entries.map((entry) => questionKey(entry.questionText)).filter(Boolean)),
+    };
+  }
+
+  /**
+   * Закрытые вопросы прошлых заходов парами «вопрос → ответ» для промпта триажа.
+   * Без них разведчик видит в уточнениях только реплики без вопросов и штатно задаёт
+   * те же вопросы снова. Записи без сохранённого текста вопроса (старые файлы) сюда
+   * не попадают: пара без вопроса промпту бесполезна.
+   */
+  async readAnsweredQuestions(id: string | number): Promise<TriageAnsweredQuestion[]> {
+    const answers: TriageAnsweredQuestion[] = [];
+    for (const entry of await this.readClarificationEntries(id)) {
+      if (entry.status !== 'answered' || !entry.questionText) {
+        continue;
+      }
+      const answer = [
+        entry.selectionLabels.length ? `Выбрано: ${entry.selectionLabels.join('; ')}` : '',
+        entry.text,
+        entry.proof.length ? `Основание: ${entry.proof.join('; ')}` : '',
+      ].filter(Boolean).join('. ');
+      if (!answer) {
+        continue;
+      }
+      answers.push({ question: entry.questionText, answer, actor: entry.actor });
+    }
+    return answers;
   }
 
   async appendClarification(id: string | number, text: string): Promise<string> {
@@ -450,12 +521,17 @@ export class Analyzer {
       const status = machine && answer?.status === 'human_required'
         ? 'human_required'
         : 'answered';
+      const selectionLabels = selection
+        .map((optionId) => question.options.find((option) => option.id === optionId)?.label || '')
+        .filter(Boolean);
       entries.push({
         id: boundedText(answer?.id, 100) || `answer-${randomUUID()}`,
         questionId: question.id,
+        questionText: question.text,
         actor: machine ? 'cockpit-arbiter' : 'human',
         status,
         selection,
+        selectionLabels,
         text: status === 'human_required' ? '' : boundedText(answer?.text, 6000),
         attachments,
         proof: machine && Array.isArray(answer?.proof)
@@ -469,9 +545,8 @@ export class Analyzer {
       const heading = entry.actor === 'cockpit-arbiter'
         ? 'Разбор арбитра — машинный'
         : 'Ответ человека';
-      const visible = entry.text || 'Нужно решение человека.';
       const marker = Buffer.from(JSON.stringify(entry)).toString('base64url');
-      return `## ${heading}\n${visible}\n<!-- cockpit-clarification:v1 ${marker} -->`;
+      return `${clarificationBlock(entry, heading)}\n<!-- cockpit-clarification:v1 ${marker} -->`;
     });
     const next = `${current}${current ? '\n' : ''}${blocks.join('\n\n')}\n`;
     await fs.mkdir(this.dir, { recursive: true });
@@ -718,6 +793,7 @@ export class Analyzer {
         description: ticket.description,
         comments: ticket.comments,
         clarifications,
+        answered: await this.readAnsweredQuestions(id),
         discussion: await this._discussion(id, ticket),
         profile,
         routeChoice: {

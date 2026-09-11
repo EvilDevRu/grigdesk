@@ -17,6 +17,9 @@ test('Claude untrusted argv отключает инструменты, customiza
   });
   const valueAfter = (flag) => args[args.indexOf(flag) + 1];
   assert.equal(valueAfter('--tools'), '');
+  // Режим plan подмешивает инструкции о файле плана, и модель на сложном вопросе
+  // отвечала «планом» вместо ответа: model-only ход идёт без подсказок о плане.
+  assert.equal(valueAfter('--permission-mode'), 'dontAsk');
   assert.equal(valueAfter('--setting-sources'), '');
   for (const flag of [
     '--safe-mode',

@@ -17,7 +17,6 @@
         </router-view>
       </AppShell>
       <TaskModal />
-      <CompanionHost />
       <DiffModal />
       <DocumentModal />
     </SpeechProvider>
@@ -33,7 +32,6 @@ import UpdateBanner from './features/pwa/UpdateBanner.vue';
 import TaskModal from './views/TaskModal.vue';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';
-import CompanionHost from './features/companion/CompanionHost.vue';
 import { SpeechProvider } from './features/speech/provider.js';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
@@ -57,9 +55,13 @@ function startPolling() {
 }
 
 onMounted(async () => {
-  // Одноразовая best-effort уборка настройки удалённой плавающей панели. Ключ
-  // полноразмерного composer-а не трогаем: его высота по-прежнему нужна /chats.
-  try { localStorage.removeItem('cockpit-chat-panel-composer-h'); } catch { /* storage может быть недоступен */ }
+  // Одноразовая best-effort уборка настроек удалённых поверхностей: плавающей панели
+  // чата и компактного компаньона. Ключ полноразмерного composer-а не трогаем: его
+  // высота по-прежнему нужна /chats.
+  try {
+    localStorage.removeItem('cockpit-chat-panel-composer-h');
+    localStorage.removeItem('cockpit-companion-device-v1');
+  } catch { /* storage может быть недоступен */ }
   auth.watchUnauthorized();
   await auth.load();
   if (auth.authenticated) startPolling();

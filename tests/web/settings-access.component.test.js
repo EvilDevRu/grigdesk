@@ -164,31 +164,6 @@ async function mountSettingsAccess(t, {
     async load() {}, async loadUsage() {}, async saveSetting() {},
     async loadMcp() {}, async runUsageAction() {},
   };
-  const companionChanges = [];
-  const companionAudioChanges = [];
-  const companionStore = {
-    deviceEnabled: true,
-    ttsConsentPrompt: false,
-    outputState: {
-      available: true,
-      prefs: {
-        enabled: true, ttsEnabled: true, ttsConsent: true,
-        voiceURI: 'ru-main', rate: 1, volume: 0.8,
-      },
-      voices: [
-        { voiceURI: 'ru-main', name: 'Русский', lang: 'ru-RU' },
-        { voiceURI: 'en-main', name: 'English', lang: 'en-US' },
-      ],
-    },
-    setDeviceEnabled(value) {
-      companionStore.deviceEnabled = value === true;
-      companionChanges.push(value === true);
-    },
-    setTtsEnabled(value) { companionAudioChanges.push({ ttsEnabled: value === true }); },
-    setOutputPrefs(value) { companionAudioChanges.push(copy(value)); },
-    confirmTtsConsent() { companionAudioChanges.push({ consent: true }); },
-    dismissTtsConsent() { companionAudioChanges.push({ consent: false }); },
-  };
   globalThis.__accessSettingsStores = {
     useProvidersStore: () => providersStore,
     useUiContextStore: () => ({ set() {}, clear() {} }),
@@ -199,7 +174,6 @@ async function mountSettingsAccess(t, {
       loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {},
     }),
     useChatStore: () => ({ compactWindow: 0 }),
-    useCompanionStore: () => companionStore,
     usePwaStore: () => ({
       canInstall: false, wakeLock: false, async install() {}, async checkForUpdate() {},
     }),
@@ -229,8 +203,6 @@ async function mountSettingsAccess(t, {
     gets,
     posts,
     confirmations,
-    companionChanges,
-    companionAudioChanges,
     tlsReadCount: () => tlsReads,
     flushPromises,
   };
@@ -561,48 +533,6 @@ test('ACCESS-WEB-12: SettingsView действительно монтирует 
   await flushPromises();
   assert.equal(wrapper.find('#local-https-settings').exists(), false);
   assert.equal(wrapper.find('#gateway-settings').exists(), false);
-});
-
-test('COMP-SHELL-10: device switch скрывает только companion и остаётся локальной настройкой', async (t) => {
-  const { wrapper, companionChanges, flushPromises } = await mountSettingsAccess(t, { tab: 'app' });
-  const setting = wrapper.get('[data-testid="companion-device-setting"]');
-  const toggle = setting.get('[role="switch"]');
-
-  assert.equal(toggle.attributes('aria-checked'), 'true');
-  assert.match(setting.text(), /Скрывает только аватар и компактное окно на этом устройстве/);
-  assert.match(setting.text(), /«Чаты», история и настройки речи продолжают работать/);
-
-  await toggle.trigger('click');
-  await flushPromises();
-  assert.deepEqual(companionChanges, [false]);
-});
-
-test('COMP-TTS-16: device settings управляют consent, voice, rate и volume без server API', async (t) => {
-  const {
-    wrapper, companionAudioChanges, posts, flushPromises,
-  } = await mountSettingsAccess(t, { tab: 'app' });
-  const setting = wrapper.get('[data-testid="companion-audio-setting"]');
-  assert.match(setting.text(), /Выключено по умолчанию/);
-  assert.match(setting.text(), /внешний облачный сервис/);
-  assert.match(setting.text(), /только сокращённый текст/);
-  assert.match(setting.text(), /только до закрытия этой вкладки/);
-
-  const toggle = setting.get('[role="switch"]');
-  assert.equal(toggle.attributes('aria-checked'), 'true');
-  await toggle.trigger('click');
-  await setting.get('[data-testid="companion-voice-select"]').setValue('en-main');
-  await setting.get('[data-testid="companion-rate"]').setValue('1.2');
-  await setting.get('[data-testid="companion-volume"]').setValue('0.45');
-  await flushPromises();
-
-  assert.deepEqual(companionAudioChanges, [
-    { ttsEnabled: false },
-    { voiceURI: 'en-main' },
-    { rate: 1.2 },
-    { volume: 0.45 },
-  ]);
-  assert.equal(posts.some((call) => call.path.includes('companion')), false,
-    'device output prefs не уходят в server settings');
 });
 
 test('ACCESS-WEB-13: ручная проверка шлюза привязана к фактически проверенному домену', async (t) => {

@@ -11,6 +11,7 @@ import {
   scanUserPlugins,
   settingsValues,
 } from '../../server/src/lib/pluginsRegistry.ts';
+import { normalizePluginCategory } from '../../shared/pluginsContracts.ts';
 
 test('системные инструменты имеют явные group/order, а неизвестная группа нормализуется в rail', () => {
   assert.deepEqual(NAV_GROUPS, ['rail', 'tools', 'dock']);
@@ -216,6 +217,67 @@ test('user plugin scanner протаскивает nav.group/order и остав
       path: '/legacy', label: 'Legacy', icon: 'plugin', group: 'rail',
     });
     assert.ok(warnings.some((entry) => entry.meta.plugin === 'legacy' && /не задан.*rail/.test(entry.message)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('каждый системный плагин объявляет род работы, а чужая категория уходит в «Прочее»', async () => {
+  // Категория режет экран настроек по роду работы. Системный модуль без неё попал бы
+  // в «Прочее» вместе со сторонними — это и проверяем, а не просто наличие поля.
+  assert.deepEqual(
+    Object.fromEntries(SYSTEM.map((plugin) => [plugin.id, plugin.category])),
+    {
+      video: 'work',
+      code: 'dev',
+      analysis: 'work',
+      shelf: 'work',
+      inbox: 'work',
+      telegram: 'work',
+      github: 'work',
+      knowledge: 'knowledge',
+      ssh: 'dev',
+      db: 'dev',
+      docker: 'dev',
+      showcase: 'knowledge',
+    },
+  );
+  assert.deepEqual(
+    SYSTEM.filter((plugin) => normalizePluginCategory(plugin.category) !== plugin.category),
+    [],
+    'категория системного манифеста обязана быть из общего контракта',
+  );
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-category-'));
+  try {
+    const manifests = {
+      helper: { id: 'helper', name: 'Помощник', category: 'dev' },
+      alerts: { id: 'alerts', name: 'Сигналы', category: 'notifications' },
+      plain: { id: 'plain', name: 'Без категории' },
+    };
+    for (const [id, manifest] of Object.entries(manifests)) {
+      const pluginDir = path.join(dir, id);
+      await mkdir(pluginDir);
+      await writeFile(path.join(pluginDir, 'plugin.json'), JSON.stringify(manifest));
+    }
+    const warnings = [];
+    const plugins = await scanUserPlugins(dir, { warn: (meta, message) => warnings.push({ meta, message }) });
+    const byId = Object.fromEntries(plugins.map((plugin) => [plugin.id, plugin]));
+
+    assert.deepEqual(
+      [byId.helper.category, byId.alerts.category, byId.plain.category],
+      ['dev', 'other', 'other'],
+    );
+    // Молчаливая подмена оставила бы автора плагина искать группу, которой нет.
+    assert.ok(
+      warnings.some((entry) => entry.meta.plugin === 'alerts' && /notifications.*Прочее/.test(entry.message)),
+      'подмену заявленной категории надо объяснить в журнале',
+    );
+    assert.equal(
+      warnings.some((entry) => entry.meta.plugin === 'plain' && /категор|category/i.test(entry.message)),
+      false,
+      'манифест без категории — обычное дело, ругаться не на что',
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -41,6 +41,8 @@ function checkContracts(
   sandboxApi.raise({ task: '990000' });
   // @ts-expect-error Порт может быть не выдан, пока стенд поднимается.
   entry.fePort.toFixed();
+  // @ts-expect-error Отдельная проверка FE отсутствует в ответах старого сервера.
+  entry.feAlive.valueOf();
   // @ts-expect-error Список стендов бывает пустым.
   overview.sandboxes[0].task.toUpperCase();
 

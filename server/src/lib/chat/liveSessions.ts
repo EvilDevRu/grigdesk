@@ -163,8 +163,22 @@ export class ChatLiveSessions {
     const entry = await this._acquire(spec);
     entry.busy = true;
     this._clearIdle(entry);
+    // Id сессии пул узнаёт с первого события хода, а не по его итогу: по нему сессия
+    // переоткроется после смерти процесса, даже если ход до result не дожил.
+    const turnSpec = turn && typeof turn === 'object'
+      ? turn as { onSessionCreated?: (sessionId: string) => unknown }
+      : null;
+    const send = turnSpec
+      ? {
+        ...turnSpec,
+        onSessionCreated: (sessionId: string) => {
+          if (sessionId) entry.sessionId = sessionId;
+          return turnSpec.onSessionCreated?.(sessionId);
+        },
+      }
+      : turn;
     try {
-      const result = await entry.handle.send(turn);
+      const result = await entry.handle.send(send);
       // sessionId нужен и живой сессии: по нему она переоткроется после простоя,
       // рестарта сервера или смены модели.
       if (result?.sessionId) entry.sessionId = result.sessionId;

@@ -107,6 +107,8 @@ test('обзор раскладывается на профили, стенды 
   assert.deepEqual(store.capableProfiles.map((item) => item.id), ['demo-profile']);
   assert.deepEqual(store.manualSandboxes.map((item) => item.task), ['990000']);
   assert.deepEqual(store.pipelineSandboxes, []);
+  assert.equal(store.sandboxes[0].feAlive, null);
+  assert.equal(store.sandboxes[0].profileBinding, null);
   assert.equal(store.jobOf('990000').label, 'клон db: данные');
   assert.equal(store.manualRange.from, 990000);
 });

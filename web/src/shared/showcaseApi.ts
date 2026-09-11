@@ -7,7 +7,11 @@ import {
   parseShowcaseTarget,
   parseShowcaseVoiceCatalog,
 } from '../../../shared/showcaseContracts';
-import type { ShowcaseAction, ShowcaseTargetRef } from '../../../shared/showcaseContracts';
+import type {
+  ShowcaseAction,
+  ShowcaseSelectableTargetRef,
+  ShowcaseTargetRef,
+} from '../../../shared/showcaseContracts';
 
 export interface ShowcaseSceneDraft {
   title: string;
@@ -19,8 +23,7 @@ export interface ShowcaseSceneDraft {
 }
 
 export interface ShowcaseCreateOptions {
-  ref: ShowcaseTargetRef;
-  profile: string;
+  ref: ShowcaseSelectableTargetRef;
   title?: string;
 }
 
@@ -43,22 +46,20 @@ export const showcaseApi = {
     return parseShowcaseProject(value);
   },
 
-  async target(ref: ShowcaseTargetRef, profile: string) {
+  async target(ref: ShowcaseTargetRef) {
     const query = new URLSearchParams({
       kind: ref.kind,
       id: ref.id,
-      profile,
     });
     const value: unknown = await api.get(`/api/showcase/target?${query.toString()}`);
 
     return parseShowcaseTarget(value);
   },
 
-  async doctor(ref: ShowcaseTargetRef | null, profile: string) {
+  async doctor(ref: ShowcaseTargetRef | null) {
     const query = new URLSearchParams(ref ? {
       kind: ref.kind,
       id: ref.id,
-      profile,
     } : {});
     const value: unknown = await api.get(`/api/showcase/doctor?${query.toString()}`);
 
@@ -69,7 +70,6 @@ export const showcaseApi = {
     const value: unknown = await api.post('/api/showcase', {
       kind: options.ref.kind,
       id: options.ref.id,
-      profile: options.profile,
       title: options.title ?? '',
     });
 
@@ -149,6 +149,16 @@ export const showcaseApi = {
     return parseShowcaseProject(value);
   },
 
+  /**
+   * Разбор мастера. Текста задачи здесь нет намеренно: связь стенда с задачей
+   * портала знает сервер, и подсказывать её из браузера нечем.
+   */
+  async analyze(id: string) {
+    const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/analyze`, {});
+
+    return parseShowcaseProject(value);
+  },
+
   async proposeBrief(id: string, taskText: string) {
     const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/brief`, {
       taskText,
@@ -224,6 +234,29 @@ export const showcaseApi = {
     return parseShowcaseVoiceCatalog(value);
   },
 
+  // Образец голоса — файл по адресу: плееру и прослушиванию нужен URL, а не байты
+  // в состоянии. Первый запрос синтезирует фразу, дальше отдаётся кэш сервера.
+  voicePreviewUrl(voiceRef: string) {
+    const query = new URLSearchParams({ voiceRef });
+
+    return api.url(`/api/showcase/voices/preview?${query.toString()}`);
+  },
+
+  // Голос и темп ролика целиком. Уходит со своей редакцией, как любая правка.
+  async setVoice(
+    id: string,
+    expectedRevision: number,
+    choice: { voiceRef: string | null; pace: 'slow' | 'normal' | 'fast' | null },
+  ) {
+    const value: unknown = await api.put(`/api/showcase/${encodeURIComponent(id)}/voice`, {
+      expectedRevision,
+      voiceRef: choice.voiceRef,
+      pace: choice.pace,
+    });
+
+    return parseShowcaseProject(value);
+  },
+
   async synthesize(id: string) {
     const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/voice`, {});
 
@@ -275,6 +308,9 @@ const MESSAGES: Record<string, string> = {
   scene_not_ready: 'Сцена ещё не готова к сборке.',
   no_scenes: 'В ролике нет ни одной сцены.',
   voice_unavailable: 'Голосовой движок недоступен: загрузите готовый звук.',
+  bad_voice_ref: 'Голос указан неверно.',
+  bad_pace: 'Темп указан неверно.',
+  login_credentials_missing: 'Учётка для входа на стенд не найдена по ссылке из профиля.',
   nothing_to_synthesize: 'Озвучивать нечего — звук сцен свежий.',
   empty_narration: 'У сцены нет текста для озвучки.',
   model_unavailable: 'Модель для брифа и сценария не выбрана в настройках плагина.',
@@ -296,6 +332,17 @@ function asRecord(value: unknown): Record<string, unknown> {
 /**
  * Текст отказа для человека. Общий клиент кладёт тело ответа в `data`: текст
  * сервера точнее всего, а карта кодов закрывает отказы, приходящие без пояснения.
+ */
+/** Код отказа сервера. Нужен там, где стадия отличает «нечего делать» от беды. */
+export function showcaseErrorCode(error: unknown): string {
+  const data = asRecord(asRecord(error).data);
+
+  return typeof data.error === 'string' ? data.error : '';
+}
+
+/**
+ * Текст отказа для человека. Своя формулировка берётся только тогда, когда сервер
+ * ответил голым кодом: свой текст поверх серверного разошёлся бы с ним по смыслу.
  */
 export function showcaseErrorMessage(error: unknown, fallback = 'Действие не удалось.'): string {
   const data = asRecord(asRecord(error).data);

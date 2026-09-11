@@ -101,10 +101,6 @@ async function mountPipeline(t, { factoryTask, graph }) {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineArbNodeCompanionStore = defineStore('pipeline-arb-node-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineArbNode'), {
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()], stubs: { teleport: true } },
@@ -115,7 +111,7 @@ async function mountPipeline(t, { factoryTask, graph }) {
     for (const key of [
       '__pipelineArbNodeApi', '__pipelineArbNodeConfirmDialog', '__pipelineArbNodeAlertDialog',
       '__pipelineArbNodeFactoryGraph', '__pipelineArbNodeUiStore', '__pipelineArbNodeTasksStore',
-      '__pipelineArbNodeBoardStore', '__pipelineArbNodeCompanionStore',
+      '__pipelineArbNodeBoardStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

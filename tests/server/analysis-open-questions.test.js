@@ -52,3 +52,33 @@ test('readOpenQuestions: пустые списки → null (секция в т�
   }));
   assert.equal(await analyzer.readOpenQuestions('4242'), null);
 });
+
+// Каждый заход триажа пишет questions[] заново, а id вопроса считается по его тексту:
+// переформулированный на слово вопрос получал другой id, ответ человека отвязывался,
+// и уже решённое уезжало в конвейер секцией «Открытые вопросы триажа».
+test('readOpenQuestions: ответ переживает переформулировку вопроса', async (t) => {
+  const analyzer = await fixture(t);
+  await writeFile(path.join(analyzer.dir, 't4242.analysis.json'), JSON.stringify({
+    task: 4242,
+    questions: [{
+      id: 'q-regions',
+      text: 'По каким регионам снимать частотность?',
+      options: [{ id: 'o-all', label: 'По всем' }],
+    }],
+    unknowns: [],
+  }));
+  await analyzer.appendClarificationBatch('4242', [{ questionId: 'q-regions', optionIds: ['o-all'] }]);
+
+  // Второй заход: тот же вопрос другими словами и, как следствие, с другим id.
+  await writeFile(path.join(analyzer.dir, 't4242.analysis.json'), JSON.stringify({
+    task: 4242,
+    questions: [{
+      id: 'q-regions-2',
+      text: 'По каким регионам снимать частотность',
+      options: [{ id: 'o-all', label: 'По всем' }],
+    }],
+    unknowns: [],
+  }));
+
+  assert.equal(await analyzer.readOpenQuestions('4242'), null);
+});

@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
 import { publishArtifact } from '../../server/src/lib/showcase/artifacts.ts';
+import { PRODUCER_VERSIONS } from '../../server/src/lib/showcase/formats.ts';
 
 const run = promisify(execFile);
 
@@ -173,9 +174,11 @@ async function projectWithScenes(service, root) {
           locale: 'ru-RU',
           burnSubtitles: false,
         },
-        versions: { recorder: 'recorder-1', voice: 'imported-1', assembler: 'assembler-1' },
+        // Версии те же, что у сервиса: подложенный клип должен считаться свежим
+        // ровно по тем правилам, по которым его проверит сборка.
+        versions: PRODUCER_VERSIONS,
       }),
-      producerVersion: 'recorder-1',
+      producerVersion: PRODUCER_VERSIONS.recorder,
       durationMs: Math.round((source.seconds + 0.5) * 1000),
       targetDir: path.join(names.scenesDir, scene.id, 'artifacts'),
     });

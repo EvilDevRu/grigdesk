@@ -12,7 +12,7 @@ test('PULT-DOC-01: канон описывает клавиатуру и без�
     ['четыре кнопки', /📋 Конвейер[\s\S]*💬 Агент[\s\S]*📥 Задачи[\s\S]*⚙️ Ещё/u],
     ['команды только владельцу', /setMyCommands[\s\S]*(scope|BotCommandScopeChat)[\s\S]*личк/iu],
     ['общий companion', /store\/ensure[\s\S]*purpose[^\n]*companion[\s\S]*taskId[^\n]*null/iu],
-    ['обычный auto-ход', /mode[^\n]*auto[\s\S]*без[^\n]*companionTurn/iu],
+    ['обычный auto-ход', /Обычный ход[^\n]*mode[^\n]*auto/u],
     ['запрет обхода спроса', /dontAsk[\s\S]*bypassPermissions[\s\S]*(не|never)/iu],
     ['тихий прогресс и Стоп', /sendChatAction[\s\S]*typing[\s\S]*30\s*секунд[\s\S]*Стоп/iu],
     ['управление памятью', /\/api\/chat\/compact[\s\S]*\/api\/chat\/session\/reset/u],

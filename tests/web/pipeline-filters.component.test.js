@@ -109,10 +109,6 @@ async function mountPipeline(t, { project = 'all', status = 'all' } = {}) {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineFiltersCompanionStore = defineStore('pipeline-filters-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineFilters'), {
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()], stubs: { teleport: true } },
@@ -123,7 +119,7 @@ async function mountPipeline(t, { project = 'all', status = 'all' } = {}) {
     for (const key of [
       '__pipelineFiltersApi', '__pipelineFiltersConfirmDialog', '__pipelineFiltersAlertDialog',
       '__pipelineFiltersFactoryGraph', '__pipelineFiltersUiStore', '__pipelineFiltersTasksStore',
-      '__pipelineFiltersBoardStore', '__pipelineFiltersCompanionStore',
+      '__pipelineFiltersBoardStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

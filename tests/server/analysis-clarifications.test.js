@@ -158,7 +158,9 @@ test('GET уточнений возвращает server-owned actor и status �
 
   const response = await app.inject({ method: 'GET', url: '/api/tasks/42/clarifications' });
 
-  assert.deepEqual(response.json().entries, [entry]);
+  // Запись, сделанная до появления копии вопроса, читается с пустыми новыми полями:
+  // старый файл остаётся валидным и не переписывается.
+  assert.deepEqual(response.json().entries, [{ ...entry, questionText: '', selectionLabels: [] }]);
 });
 
 test('выбор доезжает до записи, а чужой вопрос и чужой вариант отвергаются', async (t) => {
@@ -214,5 +216,88 @@ test('выбор доезжает до записи, а чужой вопрос 
     actor: 'human',
     question: [400, 'invalid_question'],
     option: [400, 'invalid_option'],
+  });
+});
+
+// Видимый текст записи читают не глазами: этот markdown целиком уезжает в промпт
+// следующего триажа и в описание тикета конвейера. Ответ одним выбором варианта
+// попадал туда заглушкой «Нужно решение человека» — оба агента спрашивали снова.
+test('ответ выбором варианта виден в markdown вопросом и подписью варианта', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-visible-answer-'));
+  const analyzer = new Analyzer({
+    config: { analysisDir: dir },
+    claudeAuth: null,
+    b24: null,
+    factoryState: {},
+    log: null,
+  });
+  await analyzer._ready;
+  await writeFile(path.join(dir, 't77.analysis.json'), JSON.stringify({
+    task: 77,
+    questions: [{
+      id: 'q-mode',
+      text: 'Какой режим оставить?',
+      options: [
+        { id: 'o-auto', label: 'Автоматический' },
+        { id: 'o-manual', label: 'Ручной' },
+      ],
+    }],
+  }));
+  t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  await analyzer.appendClarificationBatch('77', [{ questionId: 'q-mode', optionIds: ['o-manual'] }]);
+  const markdown = await analyzer.readClarifications('77');
+
+  assert.deepEqual({
+    question: markdown.includes('Какой режим оставить?'),
+    choice: markdown.includes('Выбрано: Ручной'),
+    stub: markdown.includes('Нужно решение человека.'),
+    answered: await analyzer.readAnsweredQuestions('77'),
+  }, {
+    question: true,
+    choice: true,
+    stub: false,
+    answered: [{
+      question: 'Какой режим оставить?',
+      answer: 'Выбрано: Ручной',
+      actor: 'human',
+    }],
+  });
+});
+
+// Вопрос, оставленный человеку, обязан остаться видимым именно как «решай ты»:
+// иначе арбитр молчит, а карточка показывает пустой ответ.
+test('human_required арбитра остаётся видимым требованием решения', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-human-required-'));
+  const analyzer = new Analyzer({
+    config: { analysisDir: dir },
+    claudeAuth: null,
+    b24: null,
+    factoryState: {},
+    log: null,
+  });
+  await analyzer._ready;
+  await writeFile(path.join(dir, 't77.analysis.json'), JSON.stringify({
+    task: 77,
+    questions: [{ id: 'q-price', text: 'Как показывать стоимость?', options: [] }],
+  }));
+  t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  await analyzer.appendClarificationBatch(
+    '77',
+    [{ questionId: 'q-price', status: 'human_required' }],
+    { actor: 'cockpit-arbiter' },
+  );
+  const markdown = await analyzer.readClarifications('77');
+
+  assert.deepEqual({
+    question: markdown.includes('Как показывать стоимость?'),
+    verdict: markdown.includes('Нужно решение человека.'),
+    // Вердикт «решай ты» ответом не считается: вопрос остаётся открытым для конвейера.
+    open: (await analyzer.readOpenQuestions('77'))?.questions,
+  }, {
+    question: true,
+    verdict: true,
+    open: ['Как показывать стоимость?'],
   });
 });

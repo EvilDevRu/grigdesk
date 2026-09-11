@@ -22,6 +22,32 @@ import { createScene } from './scenes.ts';
 import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
+import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
+
+// Длина текста задачи, которая доезжает до промпта. Постановки бывают на десятки
+// килобайт, а разбору нужна суть: остальное всё равно вытеснит diff и карту экранов.
+const TASK_TEXT_MAX = 4000;
+
+/**
+ * Описание задачи приходит размеченным. Модели нужен текст, а не теги, поэтому
+ * разметка снимается здесь же: своего HTML-разбора у раздела нет и заводить его
+ * ради одного поля незачем.
+ */
+function plainText(value: string): string {
+  return value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\[\/?[a-z][^\]]*\]/gi, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 export interface ScriptOpsDeps {
   assertEnabled: () => void;
@@ -37,6 +63,17 @@ export interface ScriptOpsDeps {
     log: { warn?: (data: unknown, message: string) => unknown };
   }) => Promise<unknown>) | null;
   scriptModelRef: (() => unknown) | null;
+  // Связь стенда с задачей портала принадлежит серверу. Раздел не знает ни адреса
+  // портала, ни его протокола — только просит текст по номеру стенда.
+  taskDetails: ((taskId: string) => Promise<{
+    title?: unknown;
+    description?: unknown;
+  } | null>) | null;
+  // Серверный config исполнителей и настройки провайдеров: путь к CLI и каталог
+  // моделей объявлены в config.ts, и без них вызов падает на запуске процесса.
+  executorConfig: (() => Record<string, unknown>) | null;
+  providerSettings: (() => Record<string, unknown>) | null;
+  acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
   withFreshness: (project: ShowcaseProject) => ShowcaseProject;
@@ -59,9 +96,10 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       throw new ShowcaseError('model_unavailable', 'Модель для сценария не подключена.', 503);
     }
 
+    const config = deps.executorConfig?.() ?? {};
     const target = await resolver({
       modelRef: deps.scriptModelRef?.() ?? null,
-      config: {},
+      config,
       requireImages: false,
       log: {},
     }) as Record<string, unknown> | null;
@@ -86,17 +124,21 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     }
 
     const ref = target.ref as { provider: string; model: string };
+    const settings = deps.providerSettings?.() ?? {};
     const reply: unknown = await runUntrusted.call(executor, {
-      config: {},
+      config,
       message: prompt,
       model: ref.model,
       effort: typeof target.effort === 'string' ? target.effort : undefined,
       images: [],
-      providerSettings: {},
+      providerSettings: (settings[ref.provider] ?? {}) as Record<string, unknown>,
       log: {},
     });
 
-    return typeof reply === 'string' ? reply : String((reply as { text?: string })?.text ?? '');
+    // Исполнители отдают ответ полем `reply` — тем же, что читают триаж Входящих и
+    // название коммита. Читать другое поле значит получать пустую строку и винить
+    // модель за «ответ не по форме».
+    return typeof reply === 'string' ? reply : String((reply as { reply?: unknown })?.reply ?? '');
   }
 
   /**
@@ -108,24 +150,37 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       throw new ShowcaseError('target_unavailable', project.target.reason, 409);
     }
 
-    const scope = await targets.internalScope(project.ref, project.target.scope.profile);
-    const diff = await collectDiffContext(scope.sandbox?.repos ?? []);
+    const lease = await deps.acquireTargetLease(project.ref);
 
-    return {
-      taskTitle: project.title,
-      taskText,
-      diff: diff.diff,
-      diffBase: diff.base,
-      diffHead: diff.head,
-      diffTruncated: diff.truncated,
-      screens: scope.screens.map((screen) => ({
-        id: screen.id,
-        title: screen.title,
-        path: screen.path,
-        elements: screen.elements.map((element) => ({ id: element.id })),
-      })),
-      maxScenes: limits().maxScenes,
-    };
+    try {
+      const scope = await targets.selectedInternalScope(
+        project.ref,
+        project.target.scope.profile,
+        project.target.scope.targetFingerprint,
+      );
+
+      await lease?.assertPathIdentity();
+
+      const diff = await collectDiffContext(scope.sandbox?.repos ?? []);
+
+      return {
+        taskTitle: project.title,
+        taskText,
+        diff: diff.diff,
+        diffBase: diff.base,
+        diffHead: diff.head,
+        diffTruncated: diff.truncated,
+        screens: scope.screens.map((screen) => ({
+          id: screen.id,
+          title: screen.title,
+          path: screen.path,
+          elements: screen.elements.map((element) => ({ id: element.id })),
+        })),
+        maxScenes: limits().maxScenes,
+      };
+    } finally {
+      await lease?.release();
+    }
   }
 
   /**
@@ -236,5 +291,48 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     return withFreshness(saved);
   }
 
-  return { generateBrief, generateScript };
+  /**
+   * Разбор целиком: текст связанной задачи, бриф и сцены одним шагом. Человек в
+   * мастере не собирает ролик по кнопкам — он говорит, ЧТО показать, и получает
+   * готовый план. Отсутствие задачи в портале разбор не останавливает: diff стенда
+   * и карта экранов остаются на месте, а текст был лишь подсказкой модели.
+   */
+  async function analyze(id: string): Promise<ShowcaseProject> {
+    assertEnabled();
+
+    const project = await readProject(id);
+    const taskText = await taskTextOf(project);
+
+    await generateBrief(id, taskText);
+
+    return generateScript(id, taskText);
+  }
+
+  /**
+   * Текст задачи из портала. Стенд задачи назван её номером, поэтому связь ищется
+   * по нему и только на сервере: браузер номер задачи не присылает и подменить его
+   * не может. Любая беда портала здесь — не отказ разбора, а пустой текст.
+   */
+  async function taskTextOf(project: ShowcaseProject): Promise<string> {
+    if (project.ref.kind === 'project' || !deps.taskDetails) {
+      return '';
+    }
+
+    try {
+      const details = await deps.taskDetails(project.ref.id);
+
+      if (!details) {
+        return '';
+      }
+
+      const title = String(details.title ?? '').trim();
+      const description = plainText(String(details.description ?? ''));
+
+      return [title, description].filter(Boolean).join('\n\n').slice(0, TASK_TEXT_MAX);
+    } catch {
+      return '';
+    }
+  }
+
+  return { analyze, generateBrief, generateScript };
 }

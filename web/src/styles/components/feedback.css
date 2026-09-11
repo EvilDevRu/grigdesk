@@ -95,12 +95,16 @@
   white-space: nowrap;
 }
 
+/* Дорожка задаётся примесью, а не готовым слоем: --surface-2 поверх карточки давал
+   контраст 1.08:1, и незалитый остаток полосы был не виден вовсе — долю «сколько
+   осталось» по форме прочитать было нельзя. Примесь считается от того, что под полосой,
+   поэтому одинаково работает и на карточке, и на фоне контента. */
 .ui-progress {
   min-width: 0;
   height: 7px;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--ink-mid) 38%, transparent);
 }
 
 .ui-progress__value,
@@ -110,6 +114,23 @@
   border-radius: inherit;
   background: var(--accent);
   transition: width var(--control-motion-duration) var(--control-motion-easing);
+}
+
+/* Тон полосы — то же состояние, что и у остальных сигналов: цвет назначает kit, а не consumer. */
+.ui-progress--neutral .ui-progress__bar {
+  background: var(--ink-mid);
+}
+
+.ui-progress--success .ui-progress__bar {
+  background: var(--good);
+}
+
+.ui-progress--warning .ui-progress__bar {
+  background: var(--warn);
+}
+
+.ui-progress--danger .ui-progress__bar {
+  background: var(--bad);
 }
 
 .ui-progress__label {

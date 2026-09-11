@@ -67,12 +67,14 @@ function dependencyPlugin(stubs) {
           path: specifier,
           namespace: 'cockpit-stub',
         }));
+        // resolveDir нужен стабам, которые реэкспортируют кусок настоящего модуля:
+        // без него esbuild некуда разрешать пути из подменённого кода.
         builder.onLoad(
           {
             filter,
             namespace: 'cockpit-stub',
           },
-          () => ({ contents, loader: 'js' }),
+          () => ({ contents, loader: 'js', resolveDir: WEB_ROOT }),
         );
       }
     },

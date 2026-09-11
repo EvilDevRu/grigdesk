@@ -58,4 +58,30 @@ profile_config_validate "$malicious" >/dev/null 2>&1
 assert_rc 2 "$?" "config is parsed, never sourced"
 assert_file_missing "$TEST_ROOT/pwned" "malicious value is not executed"
 
+# Изменение модели не должно стирать объяснения остальных настроек проекта.
+commented="$TEST_ROOT/commented.runners.env"
+cat >"$commented" <<'ENV'
+# Причина общего выбора.
+RUNNERS_SCHEMA=1
+CONFIG_REVISION=7
+PROJECT_RUNNER_PRIMARY=codex
+
+# Сильное ревью сохраняет независимую проверку.
+MODEL_REVIEW_CLAUDE_EFFORT=max
+# Разведка имеет собственную модель.
+MODEL_SCOUT_CODEX_EFFORT=xhigh
+ENV
+profile_config_write "$commented" 7 MODEL_SCOUT_CODEX_FAMILY codex-spark MODEL_SCOUT_CODEX_EFFORT high
+assert_rc 0 "$?" "model update preserves the annotated policy"
+assert_contains "$(cat "$commented")" $'# Сильное ревью сохраняет независимую проверку.\nMODEL_REVIEW_CLAUDE_EFFORT=max' \
+  "unrelated policy keeps its explanation next to its value"
+assert_contains "$(cat "$commented")" $'# Разведка имеет собственную модель.\nMODEL_SCOUT_CODEX_EFFORT=high' \
+  "changed model value keeps its explanation"
+assert_eq codex-spark "$(profile_config_get "$commented" MODEL_SCOUT_CODEX_FAMILY)" \
+  "new model key is included exactly once"
+assert_eq 8 "$(profile_config_get "$commented" CONFIG_REVISION)" \
+  "annotated policy still advances its CAS revision"
+profile_config_validate "$commented"
+assert_rc 0 "$?" "annotated model update remains valid canonical config"
+
 finish_tests

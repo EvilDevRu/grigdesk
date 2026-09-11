@@ -50,7 +50,43 @@ interface CodexItem {
   contentItems?: unknown;
   aggregatedOutput?: unknown;
   aggregated_output?: unknown;
+  path?: unknown;
+  review?: unknown;
+  kind?: unknown;
+  agentPath?: unknown;
+  durationMs?: unknown;
+  revisedPrompt?: unknown;
+  savedPath?: unknown;
 }
+
+// Элементы, у которых нет вызова инструмента. Одни показывают отдельные ветки
+// completeItem (ответ, размышление, план), другие — служебной строкой, третьи
+// принадлежат человеку. Всё, чего в этом списке нет, обязано попасть в ленту
+// хотя бы общей строкой: см. fallbackTool.
+const NON_TOOL_ITEMS = new Set([
+  'userMessage', 'user_message',
+  'agentMessage', 'agent_message',
+  'reasoning', 'agent_reasoning',
+  'plan',
+  'hookPrompt', 'hook_prompt',
+  'contextCompaction', 'context_compaction',
+  'enteredReviewMode', 'exitedReviewMode',
+  'subAgentActivity', 'sub_agent_activity',
+]);
+
+// Поля, из которых складывается подпись незнакомого элемента: сначала то, что агент
+// попросил, потом то, что получил. Длину режет cut() на выходе.
+const DESCRIBE_FIELDS = [
+  'arguments', 'prompt', 'input', 'params', 'query', 'path', 'savedPath',
+  'revisedPrompt', 'text', 'output', 'result',
+] as const;
+
+const SUB_AGENT_ACTIVITY: Record<string, string> = {
+  started: 'начал работу',
+  interacted: 'получил сообщение',
+  interrupted: 'прерван',
+  completed: 'закончил',
+};
 
 // Правка файла: путь и её unified diff.
 interface CodexChange {
@@ -147,6 +183,14 @@ function cutDiffMiddle(value: unknown, maxBytes: number): string {
   return `${utf8Prefix(source, headBytes)}${DIFF_CUT_MARKER}${suffix}`;
 }
 
+// Патч без единого пути показывать нечем: строка «несколько файлов» без файлов
+// ничего не сообщает, а Codex досылает такой набор отдельным уведомлением.
+function hasChangePaths(changes: unknown): boolean {
+  return (Array.isArray(changes) ? changes : []).some((change: CodexChange) => (
+    change?.path || change?.file_path || change?.move_path
+  ));
+}
+
 function changeList(item: CodexItem | null | undefined) {
   const raw = (Array.isArray(item?.changes) ? item.changes : []) as CodexChange[];
   const valid = raw.filter((change) => (
@@ -174,8 +218,72 @@ function changeList(item: CodexItem | null | undefined) {
   return { changes, omittedChanges };
 }
 
+function describeItem(item: CodexItem): string {
+  for (const field of DESCRIBE_FIELDS) {
+    const text = textOf((item as Record<string, unknown>)[field]);
+    if (text.trim()) return text;
+  }
+  return '';
+}
+
+/**
+ * Незнакомый тип элемента обязан деградировать в честную строку ленты, а не исчезать.
+ * Codex дописывает типы (`functionCallOutput`, `imageView`, `sleep`, …) быстрее, чем
+ * Кокпит разбирает их поимённо, а молча пропущенное действие заставляет человека
+ * читать ленту как полный отчёт и верить, что агент сделал меньше, чем сделал.
+ */
+function fallbackTool(item: CodexItem, id: string): Record<string, unknown> {
+  const type = String(item.type);
+  const description = describeItem(item);
+  return {
+    id,
+    name: String(item.tool || item.tool_name || item.name || type),
+    title: cut(description || type, 200),
+    preview: cut(description, 600),
+  };
+}
+
+/**
+ * Событие без вызова и результата: сжатие контекста, режим ревью, работа субагента.
+ * Показываем сам факт — именно он объясняет, почему ход выглядит рваным.
+ */
+function itemNote(item: CodexItem | null | undefined): string {
+  const type = String(item?.type || '');
+  if (type === 'contextCompaction' || type === 'context_compaction') {
+    return 'Codex сжал контекст хода.';
+  }
+  if (type === 'enteredReviewMode') return `Codex начал ревью: ${textOf(item?.review)}`;
+  if (type === 'exitedReviewMode') return `Codex закончил ревью: ${textOf(item?.review)}`;
+  if (type === 'subAgentActivity' || type === 'sub_agent_activity') {
+    const what = SUB_AGENT_ACTIVITY[String(item?.kind || '')] || String(item?.kind || 'работает');
+    return `Субагент ${textOf(item?.agentPath) || '(без имени)'}: ${what}.`;
+  }
+  return '';
+}
+
+function meaningful(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  return !(Array.isArray(value) && value.length === 0);
+}
+
+/**
+ * Строка вызова НАКАПЛИВАЕТ знание о нём, а не переписывается последним уведомлением:
+ * `item/completed` у Codex часто приходит без аргументов и без описания, и замена
+ * обеднила бы уже показанную строку. Пустое поле свежей версии оставляет прежнее.
+ */
+function mergeTool(known: ChatStep, fresh: Record<string, unknown>): ChatStep {
+  const merged: ChatStep = { ...known };
+  for (const [field, value] of Object.entries(fresh)) {
+    if (meaningful(value)) merged[field] = value;
+  }
+  return merged;
+}
+
 function toolOf(item: CodexItem | null | undefined): Record<string, unknown> | null {
   if (!item || typeof item !== 'object') return null;
+  // Элемент без типа приходит из пустого `params.item` — вызова за ним нет.
+  if (!item.type) return null;
+  if (NON_TOOL_ITEMS.has(String(item.type))) return null;
   const id = item.id ? String(item.id) : '';
 
   if (item.type === 'command_execution' || item.type === 'commandExecution') {
@@ -244,7 +352,7 @@ function toolOf(item: CodexItem | null | undefined): Record<string, unknown> | n
     };
   }
 
-  return null;
+  return fallbackTool(item, id);
 }
 
 function reasoningSummary(item: CodexItem | null | undefined): string {
@@ -303,6 +411,14 @@ export function createCodexStepNormalizer({
     });
   }
 
+  /**
+   * Показывает вызов инструмента и обновляет уже показанный, когда Codex дослал
+   * подробности: растущий патч, дополненные аргументы. Обновление уходит ОТДЕЛЬНЫМ
+   * шагом с тем же id — и SSE, и история хранят поверхностные копии, поэтому
+   * починить уже отправленную строку мутацией нельзя. Раньше первый показ был
+   * неизменяем, и правка, о которой Codex сообщил в два приёма, оставалась в ленте
+   * первым, самым бедным своим вариантом: три файла показывались одним.
+   */
   function ensureTool(item: CodexItem | null | undefined, out: ChatStep[]): ChatStep | null {
     let source = item;
     if ((item?.type === 'fileChange' || item?.type === 'file_change')
@@ -311,14 +427,13 @@ export function createCodexStepNormalizer({
     }
     const tool = toolOf(source);
     if (!tool) return null;
-    if (tool.id) {
-      const known = tools.get(String(tool.id));
-      // createStepSink хранит shallow-копию: мутация `known` после emit не
-      // обновила бы ни SSE, ни историю. Первый emitted tool поэтому неизменяем.
-      if (known) return known;
-    }
-    const step: ChatStep = { k: 'tool', ...tool };
-    if (tool.id) tools.set(String(tool.id), step);
+    const id = tool.id ? String(tool.id) : '';
+    const known = id ? tools.get(id) : null;
+    const step: ChatStep = known
+      ? mergeTool(known, tool)
+      : { k: 'tool', ...tool };
+    if (known && JSON.stringify(known) === JSON.stringify(step)) return known;
+    if (id) tools.set(id, step);
     out.push(step);
     return step;
   }
@@ -361,6 +476,12 @@ export function createCodexStepNormalizer({
       const text = reasoningSummary(item) || reasoningSummaries.get(id) || '';
       reasoningSummaries.delete(id);
       if (text.trim()) out.push({ k: 'think', text: cut(text, STEP_THINK_LIMIT) });
+      return;
+    }
+
+    const note = itemNote(item);
+    if (note) {
+      out.push({ k: 'note', text: cut(note) });
       return;
     }
 
@@ -411,10 +532,15 @@ export function createCodexStepNormalizer({
       if ((item.type === 'fileChange' || item.type === 'file_change') && id) {
         fileChanges.set(id, Array.isArray(item.changes) ? item.changes : []);
       }
-      // У app-server `started` часто содержит changes:[], а развёрнутый патч приходит
-      // отдельным `patchUpdated`. Не отправляем пустой вызов инструмента, который потом нельзя
-      // безопасно дополнить в уже сохранённой поверхностной копии.
-      if (item.type !== 'fileChange' && item.type !== 'file_change') ensureTool(item, out);
+      // 0.15x кладёт полный патч уже в `started`, ранние версии досылают его отдельным
+      // `patchUpdated`. Показываем правку, как только известен хоть один файл, и
+      // дополняем её потом (ensureTool умеет обновлять). Пустой вызов не показываем:
+      // «несколько файлов» без единого пути ничего не сообщает. Ждать `completed`
+      // нельзя — патч к этому моменту уже на диске, и оборванный ход прятал бы
+      // применённую правку целиком.
+      const emptyPatch = (item.type === 'fileChange' || item.type === 'file_change')
+        && !hasChangePaths(item.changes);
+      if (!emptyPatch) ensureTool(item, out);
       return out;
     }
 
@@ -443,9 +569,7 @@ export function createCodexStepNormalizer({
       const id = params.itemId ? String(params.itemId) : '';
       const changes = (Array.isArray(params.changes) ? params.changes : []) as CodexChange[];
       if (id) fileChanges.set(id, changes);
-      if (changes.some((change) => (
-        change?.path || change?.file_path || change?.move_path
-      ))) {
+      if (hasChangePaths(changes)) {
         ensureTool({ type: 'fileChange', id, changes, status: 'inProgress' }, out);
       }
       return out;
@@ -463,8 +587,45 @@ export function createCodexStepNormalizer({
     }
 
     if (method === 'error') {
-      const text = textOf(params.error ?? params.message ?? 'Ошибка Codex');
-      out.push({ k: 'note', level: 'warn', text: cut(text, 600) });
+      // `params.error` — объект TurnError. Раньше он уезжал в ленту целиком через
+      // JSON.stringify, и штатный ретрай сети читался как поломка: человек видел
+      // сырой `{"message":"Reconnecting… 2/5","codexErrorInfo":…}`.
+      const error = (params.error && typeof params.error === 'object'
+        ? params.error
+        : {}) as { message?: unknown; additionalDetails?: unknown };
+      const message = textOf(error.message ?? params.error ?? params.message ?? 'Ошибка Codex');
+      const details = typeof error.additionalDetails === 'string' ? error.additionalDetails : '';
+      const retry = params.willRetry === true ? 'Codex повторит запрос. ' : '';
+      out.push({
+        k: 'note',
+        level: 'warn',
+        text: cut(`${retry}${message}${details ? `\n${details}` : ''}`, 600),
+      });
+      return out;
+    }
+
+    // Служебные уведомления хода: молчать о них нельзя. Подменённая модель и сжатие
+    // контекста объясняют и рваную ленту, и внезапно другое поведение агента.
+    if (method === 'model/rerouted') {
+      const from = textOf(params.fromModel);
+      const to = textOf(params.toModel);
+      out.push({
+        k: 'note',
+        level: 'warn',
+        text: cut(`Codex переключил модель: ${from || '?'} → ${to || '?'}`
+          + `${params.reason ? ` (${textOf(params.reason)})` : ''}`, 600),
+      });
+      return out;
+    }
+
+    if (method === 'thread/compacted') {
+      out.push({ k: 'note', text: 'Codex сжал контекст хода.' });
+      return out;
+    }
+
+    if (method === 'warning' || method === 'guardianWarning') {
+      const text = textOf(params.message);
+      if (text.trim()) out.push({ k: 'note', level: 'warn', text: cut(text, 600) });
       return out;
     }
 

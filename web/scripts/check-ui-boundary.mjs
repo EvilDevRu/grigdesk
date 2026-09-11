@@ -23,13 +23,12 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/components/composites/UiChoiceList.vue',
   'web/src/components/composites/UiSelectableRow.vue',
   'web/src/components/composites/UiTab.vue',
-  'web/src/features/companion/CompanionAvatar.vue',
-  'web/src/features/companion/CompanionTopbarButton.vue',
   'web/src/shared/layout/AppShell.vue',
   'web/src/views/BoardView.vue',
   'web/src/views/chat/ChatList.vue',
   'web/src/views/code/CodePanel.vue',
   'web/src/views/diff/DiffPanel.vue',
+  'web/src/views/settings/PluginsCatalog.vue',
   'web/src/views/VideoView.vue',
 ]);
 const SVG_PRESSABLE_CONSUMERS = new Set([

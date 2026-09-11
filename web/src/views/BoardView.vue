@@ -8,7 +8,7 @@
 
     <template v-else-if="data">
       <!-- Показатели + месяц -->
-      <section class="stats">
+      <section class="stats" aria-label="Учёт времени и выполненные задачи">
         <div v-for="s in statTiles" :key="s.key" class="tile" :class="'t-' + s.tone">
           <div class="thead">
             <span class="tico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="TILE_ICONS[s.icon]" /></svg></span>
@@ -17,7 +17,7 @@
           <div class="tval">{{ s.value }}</div>
           <div class="tdelta mono" :class="s.dir">
             <span class="darrow">{{ s.dir === 'up' ? '↑' : s.dir === 'down' ? '↓' : '→' }}</span>{{ s.delta }}
-            <span class="dvs">vs вчера</span>
+            <span class="dvs">к вчерашнему дню</span>
           </div>
         </div>
         <div class="tile month t-month">
@@ -90,7 +90,7 @@
         <section class="col primary">
           <div class="colhead">
             <h3 class="h big">
-              Мои задачи
+              <span class="heading-name">Мои задачи</span>
               <span class="cnt">
                 {{ myTasks.length }}<template v-if="hasListFilters"> из {{ data.tasks.length }}</template>
               </span>
@@ -122,9 +122,10 @@
             </UiButton>
             <div class="search" role="search">
               <UiSearchInput
+                ref="taskSearch"
                 v-model="q"
                 aria-label="Поиск по задачам"
-                placeholder="Поиск по задачам…"
+                placeholder="Номер, название, проект…"
                 clear-label="Очистить поиск"
               />
             </div>
@@ -165,7 +166,7 @@
                     <path d="m12 2.7 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
                   </svg>
                 </template>
-                избранные {{ currentFavoriteCount }}
+                Избранные {{ currentFavoriteCount }}
               </UiToggleButton>
               <!-- «Новых» не бывает без загруженной базовой линии отметок, поэтому кнопка
                    ждёт сервер (seen.ready), а не гадает по пустому набору. -->
@@ -189,12 +190,12 @@
                     <path d="M12 3.4 14 9l5.6 2-5.6 2-2 5.6-2-5.6L4.4 11 10 9z" />
                   </svg>
                 </template>
-                новые {{ currentNewCount }}
+                Новые {{ currentNewCount }}
               </UiToggleButton>
             </div>
 
             <div v-if="analysisEnabled" class="filter-section triage-filter" role="group" aria-labelledby="board-triage-filter-label">
-              <span id="board-triage-filter-label" class="filter-caption">Триаж</span>
+              <span id="board-triage-filter-label" class="filter-caption">Оценка</span>
               <UiSegmentedControl
                 v-model="triageMode"
                 class="trisegment"
@@ -206,7 +207,7 @@
 
             <div class="filter-actions">
               <UiButton
-                v-if="activeFilterCount"
+                v-if="hasListFilters || activeFilterCount"
                 class="filter-reset"
                 variant="text"
                 title="Вернуть порядок B24 и показать все задачи"
@@ -268,32 +269,55 @@
               {{ seen.loading ? 'Повторяю…' : 'Повторить' }}
             </UiButton>
           </div>
-          <ul class="tasks scroller" @scroll="onTasksScroll">
-            <li v-for="t in visibleTasks" :key="t.id" class="trow">
-              <span class="tstat" :class="{
-                      conv: conveyor.has(String(t.id)),
-                      'on-shelf': shelfEnabled && shelf.isOnShelf(t.id),
-                    }"
-                    :style="{ background: dotColor(t) }" :title="dotTitle(t)"></span>
+          <div class="list-head" :class="{ 'without-analysis': !analysisEnabled }" aria-hidden="true">
+            <span class="list-task-label">Задача</span>
+            <span v-if="analysisEnabled">Оценка</span>
+            <span class="list-time-label">Учтено</span>
+          </div>
+          <ul ref="taskList" class="tasks scroller" @scroll="onTasksScroll">
+            <li v-for="t in visibleTasks" :key="t.id" class="trow"
+                :class="{ 'without-analysis': !analysisEnabled }">
               <TaskFavoriteButton :active="favorites.isFavorite(t.id)"
                                   :pending="!favorites.loaded || favorites.loading || favorites.isPending(t.id)"
                                   :task-title="t.title" @toggle="toggleFavorite(t)" />
-              <span v-if="projectName(t)" class="project-badge" role="img"
-                    :aria-label="`Проект: ${projectName(t)}`"
-                    :title="`Проект: ${projectName(t)}`">{{ projectInitial(t) }}</span>
               <UiPressable
                 class="ttext"
                 data-role="task-title"
+                data-context="board-task"
                 @click="ui.openTask(t.id)"
               >
-                {{ t.title }}
+                <span class="task-name">{{ t.title }}</span>
+                <span class="task-meta">
+                  <span class="mono task-id">#{{ t.id }}</span>
+                  <span v-if="projectName(t)" class="task-project">{{ projectName(t) }}</span>
+                  <span v-if="taskStateLabel(t)" class="task-state" :class="{ overdue: t.overdue }">
+                    <span
+                      class="tstat"
+                      :class="{
+                        conv: conveyor.has(String(t.id)),
+                        'on-shelf': shelfEnabled && shelf.isOnShelf(t.id),
+                      }"
+                      :style="{ background: dotColor(t) }"
+                      :title="dotTitle(t)"
+                    ></span>
+                    {{ taskStateLabel(t) }}
+                  </span>
+                  <span v-else class="tstat" :class="{ 'on-shelf': shelfEnabled && shelf.isOnShelf(t.id) }"
+                        :style="{ background: dotColor(t) }" :title="dotTitle(t)"></span>
+                  <span v-if="shelfEnabled && shelf.isOnShelf(t.id)" class="shelf-mark">На полке</span>
+                  <span v-if="isNewTask(t)" class="newbadge" role="img"
+                        aria-label="Новая задача — ещё не открывали"
+                        title="Новая задача — ещё не открывали">Новая</span>
+                  <span v-if="t.unread" class="badge" :aria-label="`Непрочитанных сообщений: ${t.unread}`">
+                    {{ t.unread }} сообщ.
+                  </span>
+                </span>
               </UiPressable>
-              <span v-if="isNewTask(t)" class="newbadge" role="img"
-                    aria-label="Новая задача — ещё не открывали"
-                    title="Новая задача — ещё не открывали">новая</span>
-              <TriageBadge :row="triageOf(t)" />
-              <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
-              <span class="ttime mono muted">{{ secToHMS(liveElapsed(t)) }}</span>
+              <div v-if="analysisEnabled" class="task-triage"><TriageBadge :row="triageOf(t)" /></div>
+              <span class="ttime" :class="{ running: t.timerRunning }">
+                <span class="mono">{{ secToHMS(liveElapsed(t)) }}</span>
+                <span v-if="t.timerRunning" class="time-state">Идёт учёт</span>
+              </span>
             </li>
             <li v-if="!myTasks.length" class="muted empty">
               <template v-if="favoriteOnly && !hasFavoriteMatchesBeforeSearch">В текущем списке избранных задач нет</template>
@@ -303,42 +327,68 @@
               <template v-else>Ничего не найдено</template>
             </li>
             <li v-else-if="visibleTasks.length < myTasks.length" class="more muted">
-              Показано {{ visibleTasks.length }} из {{ myTasks.length }} — прокрути ниже
+              <span>Показано {{ visibleTasks.length }} из {{ myTasks.length }}</span>
+              <UiButton data-role="board-load-more" variant="text" @click="showMoreTasks">
+                Показать ещё
+              </UiButton>
             </li>
           </ul>
         </section>
 
         <!-- Контроль / поставленные: блок скрыт, когда обе секции пусты -->
         <section v-if="data.toReview.length || data.created.length" class="col secondary">
-          <h3 class="h">Ждут моего контроля <span class="cnt">{{ data.toReview.length }}</span></h3>
-          <ul class="tasks" v-if="data.toReview.length">
-            <li v-for="t in data.toReview" :key="t.id" class="trow">
-              <span class="tstat" :style="{ background: statusColor(t.statusKind) }"></span>
-              <UiPressable
-                class="ttext"
-                data-role="task-title"
-                @click="ui.openTask(t.id)"
-              >
-                {{ t.title }}
-              </UiPressable>
-            </li>
-          </ul>
-          <p v-else class="muted empty">Нет задач на контроль</p>
-
-          <h3 class="h">Я поставил задачу <span class="cnt">{{ data.created.length }}</span></h3>
-          <ul class="tasks" v-if="data.created.length">
-            <li v-for="t in data.created" :key="t.id" class="trow">
-              <span class="tstat" :style="{ background: statusColor(t.statusKind) }"></span>
-              <UiPressable
-                class="ttext"
-                data-role="task-title"
-                @click="ui.openTask(t.id)"
-              >
-                {{ t.title }}
-              </UiPressable>
-            </li>
-          </ul>
-          <p v-else class="muted empty">Нет поставленных задач</p>
+          <h3 class="h big">Контроль и поручения</h3>
+          <UiTabs v-model="secondaryMode" class="secondary-tabs" label="Связанные задачи">
+            <UiTab id="board-review-tab" data-context="board-related-tab"
+                   value="review" controls="board-related-list">
+              Контроль <span class="cnt">{{ data.toReview.length }}</span>
+            </UiTab>
+            <UiTab id="board-created-tab" data-context="board-related-tab"
+                   value="created" controls="board-related-list">
+              Поручения <span class="cnt">{{ data.created.length }}</span>
+            </UiTab>
+          </UiTabs>
+          <UiSearchInput
+            v-model="secondaryQuery"
+            aria-label="Поиск по связанным задачам"
+            placeholder="Поиск в этом списке…"
+            clear-label="Очистить поиск связанных задач"
+          />
+          <div class="secondary-summary">
+            <span>{{ secondaryMode === 'review' ? 'Ждут моего контроля' : 'Я поставил задачу' }}</span>
+            <span v-if="secondaryQuery.trim()">{{ relatedTasks.length }} из {{ relatedSource.length }}</span>
+          </div>
+          <div
+            id="board-related-list"
+            class="related-panel"
+            role="tabpanel"
+            :aria-labelledby="secondaryMode === 'review' ? 'board-review-tab' : 'board-created-tab'"
+          >
+            <ul ref="relatedList" class="tasks related-list">
+              <li v-for="t in relatedTasks" :key="t.id" class="related-row">
+                <UiPressable
+                  class="ttext"
+                  data-role="task-title"
+                  data-context="board-task"
+                  @click="ui.openTask(t.id)"
+                >
+                  <span class="task-name">{{ t.title }}</span>
+                  <span class="task-meta">
+                    <span class="mono task-id">#{{ t.id }}</span>
+                    <span v-if="projectName(t)" class="task-project">{{ projectName(t) }}</span>
+                    <span v-if="t.responsible" class="task-responsible">{{ t.responsible }}</span>
+                    <span v-if="taskStateLabel(t)" class="task-state" :class="{ overdue: t.overdue }">
+                      <span class="tstat" :style="{ background: dotColor(t) }"></span>
+                      {{ taskStateLabel(t) }}
+                    </span>
+                  </span>
+                </UiPressable>
+              </li>
+              <li v-if="!relatedTasks.length" class="muted empty">
+                {{ secondaryQuery.trim() ? 'Ничего не найдено' : 'В этом списке пока нет задач' }}
+              </li>
+            </ul>
+          </div>
         </section>
       </div>
 
@@ -364,7 +414,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.ts';
 import { useBoardStore } from '../stores/board.js';
@@ -379,7 +429,7 @@ import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 import { api } from '../shared/apiClient.ts';
 import { useSse } from '../composables/useSse.ts';
-import { boardTaskListResetKey, selectBoardTasks } from '../shared/board-task-list.js';
+import { boardTaskListResetKey, matchesBoardTask, selectBoardTasks } from '../shared/board-task-list.js';
 import {
   confirmDialog,
   UiButton,
@@ -388,6 +438,8 @@ import {
   UiSegmentedControl,
   UiSelect,
   UiSpinner,
+  UiTab,
+  UiTabs,
   UiToggleButton,
 } from '../ui';
 
@@ -433,9 +485,14 @@ function dotTitle(t) {
 function projectName(t) {
   return String(t?.group || '').trim();
 }
-function projectInitial(t) {
-  const [initial = ''] = projectName(t).match(/[\p{L}\p{N}]/u) || [];
-  return initial.toLocaleUpperCase('ru-RU');
+function taskStateLabel(task) {
+  const id = String(task.id);
+
+  if (conveyor.value.has(id)) {
+    return conveyor.value.get(id) ? 'Конвейер идёт' : 'Конвейер остановлен';
+  }
+
+  return task.overdue ? 'Просрочена' : task.statusLabel || '';
 }
 
 // Живой тик таймера: считается от timer_started_at из B24 — см. liveTimerSec.
@@ -451,13 +508,43 @@ const TILE_ICONS = {
   calendar: 'M8 2.5v3 M16 2.5v3 M3.5 9.5h17 M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 19 20.5H5A1.5 1.5 0 0 1 3.5 19V6A1.5 1.5 0 0 1 5 4.5z',
 };
 const statTiles = computed(() => {
-  const d = data.value; if (!d?.today) return [];
+  const d = data.value;
+
+  if (!d?.today) {
+    return [];
+  }
+
   const dyn = d.dynamics || {};
   const dir = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'flat');
+
   return [
-    { key: 'hours', icon: 'clock', tone: 'accent', label: 'Отработано', value: hoursToHM(d.today.hours), delta: signed(dyn.hours, 'ч'), dir: dir(dyn.hours) },
-    { key: 'tasks', icon: 'check', tone: 'good', label: 'Выполнено', value: d.today.tasks_count ?? 0, delta: signed(dyn.tasks), dir: dir(dyn.tasks) },
-    { key: 'avg', icon: 'gauge', tone: 'warn', label: 'Ср. время', value: hoursToHM(d.today.avg_time), delta: signed(dyn.avg_time, 'ч'), dir: dir(dyn.avg_time) },
+    {
+      key: 'hours',
+      icon: 'clock',
+      tone: 'accent',
+      label: 'Отработано сегодня',
+      value: hoursToHM(d.today.hours),
+      delta: signed(dyn.hours, 'ч'),
+      dir: dir(dyn.hours),
+    },
+    {
+      key: 'tasks',
+      icon: 'check',
+      tone: 'good',
+      label: 'Выполнено сегодня',
+      value: d.today.tasks_count ?? 0,
+      delta: signed(dyn.tasks),
+      dir: dir(dyn.tasks),
+    },
+    {
+      key: 'avg',
+      icon: 'gauge',
+      tone: 'warn',
+      label: 'Среднее на задачу',
+      value: hoursToHM(d.today.avg_time),
+      delta: signed(dyn.avg_time, 'ч'),
+      dir: dir(dyn.avg_time),
+    },
   ];
 });
 const overwork = computed(() => {
@@ -470,8 +557,31 @@ const monthPct = computed(() => {
   return Math.round((m.hours / m.norm) * 100);
 });
 const activeTasks = computed(() => (data.value?.tasks || []).filter((task) => task.timerRunning));
-// Поиск по «Моим задачам» (88 штук — без фильтра неудобно).
+// Поиск основного списка независим от поиска контроля и поручений.
 const q = ref('');
+const taskSearch = ref(null);
+const taskList = ref(null);
+const secondaryQuery = ref('');
+const secondaryMode = ref(null);
+const relatedList = ref(null);
+const relatedSource = computed(() => secondaryMode.value === 'created'
+  ? data.value?.created || []
+  : data.value?.toReview || []);
+const relatedTasks = computed(() => relatedSource.value
+  .filter((task) => matchesBoardTask(task, secondaryQuery.value)));
+
+// При первом ответе открываем непустой список. Дальше выбор принадлежит человеку,
+// даже если после обновления в выбранном разделе больше нет задач.
+watch(() => [data.value?.toReview.length || 0, data.value?.created.length || 0], ([review, created]) => {
+  if (secondaryMode.value === null && (review || created)) {
+    secondaryMode.value = review ? 'review' : 'created';
+  }
+}, { immediate: true });
+watch([secondaryMode, secondaryQuery], () => {
+  if (relatedList.value) {
+    relatedList.value.scrollTop = 0;
+  }
+});
 
 // Триаж: бейджи оценок + сортировка/фильтры по ним. Выбор запоминается.
 const analysis = useAnalysisStore();
@@ -576,12 +686,19 @@ const activeFilterCount = computed(() => [
 const hasListFilters = computed(() => !!q.value.trim()
   || favoriteOnly.value || newOnly.value
   || (analysisEnabled.value && triageMode.value !== 'all'));
-function resetTaskFilters() {
+
+/**
+ * Возвращает исходный список и фокус в поиск после исчезновения кнопки сброса.
+ * Сортировка и личные фильтры сбрасываются вместе, серверные отметки не меняются.
+ */
+async function resetTaskFilters() {
   q.value = '';
   sortBy.value = 'b24';
   triageMode.value = 'all';
   favoriteOnly.value = false;
   newOnly.value = false;
+  await nextTick();
+  taskSearch.value?.focus();
 }
 const hasFavoriteMatchesBeforeSearch = computed(() => selectBoardTasks({
   tasks: data.value?.tasks || [],
@@ -603,11 +720,19 @@ const listResetKey = computed(() => boardTaskListResetKey({
   sortBy: sortBy.value,
   taskCount: data.value?.tasks?.length || 0,
 }));
-watch(listResetKey, () => { visibleCount.value = PAGE; });
+watch(listResetKey, () => {
+  visibleCount.value = PAGE;
+  if (taskList.value) {
+    taskList.value.scrollTop = 0;
+  }
+});
+function showMoreTasks() {
+  visibleCount.value = Math.min(myTasks.value.length, visibleCount.value + PAGE);
+}
 function onTasksScroll(e) {
   const el = e.target;
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && visibleCount.value < myTasks.value.length) {
-    visibleCount.value += PAGE;
+    showMoreTasks();
   }
 }
 const chart = computed(() => data.value?.charts?.[period.value] || null);
@@ -625,14 +750,20 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 </script>
 
 <style scoped>
-.board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  container: board-page / inline-size;
+}
 .err { color: var(--bad); }
 .link { color: var(--accent); margin-left: 8px; }
 
 .stats { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
-@media (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+@container board-page (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+  padding: 12px 16px; display: flex; flex-direction: column; gap: 7px; }
 .thead { display: flex; align-items: center; gap: 9px; }
 .tico { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center; flex: none; }
 .tico svg { width: 15px; height: 15px; }
@@ -642,11 +773,11 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .t-month .tico { color: var(--ink); background: var(--surface-2); }
 .tlabel { font-size: 12px; color: var(--ink-mid); font-weight: 500; }
 .tval { font-size: 24px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
-.tdelta { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
-  font-size: 11px; color: var(--ink-mid); background: var(--surface-2); border-radius: 999px; padding: 3px 9px; }
+.tdelta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; align-self: flex-start;
+  font-size: 11px; color: var(--ink-mid); line-height: 1.5; }
 .tdelta .darrow { font-weight: 700; }
-.tdelta .dvs { opacity: .6; }
-.tdelta.up { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); }
+.tdelta .dvs { color: var(--ink-mid); }
+.tdelta.up { color: var(--good); }
 .tdelta.down { color: var(--ink-mid); }
 
 .tpct { margin-left: auto; font-size: 12px; color: var(--ink-mid); font-weight: 600; }
@@ -816,22 +947,53 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
   .active-timers-pulse { animation: none; }
 }
 
-.cols { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; min-width: 0; }
+.cols { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; min-width: 0; }
 .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 /* Основной блок «Мои задачи» — в карточке, чтобы визуально доминировал */
 .col.primary {
   flex: 2 1 720px; container: board-primary / inline-size;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px;
 }
-.col.secondary { flex: 1 1 320px; }
+.col.secondary {
+  flex: 1 1 320px;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.secondary-tabs { width: 100%; }
+.secondary-tabs > :deep(.ui-tab) { flex: 1; }
+.secondary-summary {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.related-panel { display: flex; flex: 1; min-height: 0; }
+.related-list { flex: 1; max-height: min(58vh, 560px); overflow-y: auto; scrollbar-gutter: stable; }
+.related-row { padding: 11px 4px; }
+.related-row + .related-row { border-top: 1px solid var(--line); }
 /* Правой колонки нет — карточка задач занимает всю доступную строку. */
 .cols.solo .primary { flex-basis: 100%; }
 .colhead {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
   align-items: center; gap: 10px 14px; margin: 6px 0 2px; min-width: 0;
 }
-.h { font-size: 13px; font-weight: 640; margin: 6px 0 2px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); }
-.h.big { font-size: 14px; color: var(--ink); }
+.h {
+  font-size: 14px;
+  font-weight: 640;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-mid);
+}
+.h.big { font-size: 16px; color: var(--ink); }
+.colhead .h { flex-wrap: wrap; }
+.heading-name { white-space: nowrap; }
 .cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .filter-toggle {
   display: none;
@@ -850,8 +1012,8 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .sort-filter { flex: 0 1 205px; }
 .show-filter, .triage-filter { flex: 0 1 auto; }
 .filter-caption {
-  color: var(--ink-dim, var(--ink-mid)); font-size: 10px; font-weight: 650; letter-spacing: .06em;
-  line-height: 1; text-transform: uppercase; white-space: nowrap;
+  flex-basis: 100%; color: var(--ink-mid); font-size: 11px; font-weight: 500;
+  line-height: 1.4; white-space: nowrap;
 }
 .trisort {
   flex: 1 1 135px; min-width: 0; box-sizing: border-box;
@@ -877,33 +1039,85 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
   border-radius: 8px; color: var(--bad); font-size: 12px;
 }
 .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.scroller { max-height: min(58vh, 560px); overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
-.more { font-size: 12px; text-align: center; padding: 10px 0 4px; }
-.trow { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 8px; }
-.trow > :deep(.favbtn) { margin: -7px -7px -7px -5px; }
-.trow:hover { background: var(--surface); }
-.trow + .trow { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 55%, transparent); }
+.scroller {
+  flex: 1;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 10px 0 4px;
+}
+.list-head,
+.trow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 182px 86px;
+  align-items: center;
+  gap: 12px;
+}
+.list-head {
+  padding: 10px 10px 2px;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  border-top: 1px solid var(--line);
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.list-task-label { grid-column: 2; }
+.list-time-label { text-align: right; }
+.trow { min-width: 0; padding: 12px 10px; border-radius: 8px; }
+.trow.without-analysis,
+.list-head.without-analysis { grid-template-columns: 28px minmax(0, 1fr) 86px; }
+.trow > :deep(.favbtn) { align-self: start; margin-top: -4px; }
+.trow:hover,
+.trow:focus-within { background: var(--surface-2); }
+.trow + .trow { border-top: 1px solid var(--line); }
+.task-name { width: 100%; font-size: 14px; font-weight: 500; }
+.task-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.task-id { color: var(--ink-mid); }
+.task-project { overflow-wrap: anywhere; }
+.task-state { display: inline-flex; align-items: center; gap: 7px; }
+.task-state.overdue { color: var(--bad); }
+.shelf-mark { color: var(--warn); }
+.task-triage { min-width: 0; }
 .tstat { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
 .tstat.on-shelf { outline: 1px solid var(--warn); outline-offset: 3px; }
 /* Задача на конвейере: точка чуть крупнее и «дышит» — видно с первого взгляда */
 .tstat.conv { width: 9px; height: 9px; animation: convpulse 2s ease-in-out infinite; }
 @keyframes convpulse { 50% { opacity: .45; } }
-.project-badge {
-  width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
-  font-size: 11px; font-weight: 700; line-height: 1; text-transform: uppercase;
-}
-.badge { font-size: 11px; background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; flex: none; }
+.badge { font-size: 11px; color: var(--accent); }
 /* Метка «новая» — того же синего, что и точка новых задач на чипе «Доска» в навигации:
    человек приходит сюда именно с неё, и цвет должен совпасть. */
 .newbadge {
-  flex: none; font-size: 10.5px; font-weight: 700; line-height: 1.6; letter-spacing: .02em;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 0 7px;
+  flex: none; font-size: 11px; font-weight: 500; line-height: 1.5;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 1px 6px;
 }
-.ttime { font-size: 12px; flex: none; }
-.empty { font-size: 13px; padding: 4px 0 8px; }
+.ttime {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.ttime.running { color: var(--good); }
+.time-state { font-size: 11px; }
+.empty { font-size: 13px; padding: 24px 10px; }
 
 /* Решение принимается по ширине карточки, а не viewport: sidebar, dock и правая
    колонка могут оставить планшету узкий primary даже при широком окне. */
@@ -916,15 +1130,53 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
   .filter-section { flex: 1 1 100%; align-items: stretch; }
   .filter-caption { flex-basis: 100%; padding: 2px 1px 0; }
   .sort-filter .trisort { flex-basis: 100%; width: 100%; }
-  .show-filter :deep(.ui-toggle-button) { flex: 1 1 calc(50% - 3px); }
+  .show-filter > :deep(.ui-button) { flex: 1 1 140px; }
   .trisegment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .trisegment :deep(.ui-button) { width: 100%; }
   .filter-actions { width: 100%; margin-left: 0; }
   .filter-actions > :deep(.ui-button) { flex: 1 1 auto; }
   .batch-actions { margin-left: auto; }
+  .list-head { display: none; }
+  .trow,
+  .trow.without-analysis { grid-template-columns: 28px minmax(0, 1fr) 86px; gap: 9px; padding: 12px 2px; }
+  .trow .ttext { grid-column: 2 / -1; }
+  .task-triage { grid-column: 2; }
+  .ttime { grid-column: 3; grid-row: 2; }
+}
+
+@container board-primary (max-width: 560px) {
+  .trisegment { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trisegment > :deep(.ui-button:last-child) { grid-column: 1 / -1; }
+  .batch-actions {
+    flex: 1 1 100%;
+    margin-left: 0;
+    padding: 8px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .batch-actions > :deep(.ui-button) { width: 100%; }
+}
+
+@container board-primary (max-width: 390px) {
+  .colhead { column-gap: 8px; }
+  .colhead .h { font-size: 15px; gap: 6px; }
+  .trow,
+  .trow.without-analysis { grid-template-columns: 24px minmax(0, 1fr) 78px; gap: 6px; }
+  .task-triage :deep(.total) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tstat.conv { animation: none; }
 }
 
 .charts-head { display: flex; align-items: center; justify-content: space-between; }
 .charts-grid { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 10px; }
-@media (min-width: 720px) { .charts-grid { grid-template-columns: repeat(3, 1fr); } }
+@container board-page (min-width: 720px) { .charts-grid { grid-template-columns: repeat(3, 1fr); } }
+@container board-page (max-width: 420px) {
+  .stats { gap: 8px; }
+  .tile { padding: 10px; }
+  .thead { gap: 6px; }
+  .tico { width: 22px; height: 22px; }
+  .tval { font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+}
 </style>

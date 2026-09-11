@@ -11,11 +11,12 @@ import { api } from '../shared/apiClient.ts';
 // `as const` не украшение: из списка выводится тип имени, и опечатка в ветке подписчика
 // становится ошибкой сборки, а не молчащей веткой (та же грабля, что уже стоила отладки).
 const EVENT_NAMES = [
-  'hello', 'state-change', 'providers-update', 'cockpit-update',
+  'hello', 'state-change', 'providers-update', 'providers-usage', 'cockpit-update',
   'chat-permission', 'chat-question', 'chat-permission-done',
   'ssh-permission', 'ssh-sessions', 'ssh-audit',
   'db-permission', 'db-sessions', 'db-queries', 'db-audit',
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan', 'chat-turn-start', 'chat-sessions',
+  'chat-session',
   'chat-store', 'chat-store-meta',
   'speech-settings',
   'inbox-changed', 'telegram-status', 'task-shelf-changed', 'arbiter-live',

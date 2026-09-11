@@ -1006,12 +1006,6 @@
         <footer class="sactions">
           <span class="sactions-context"><b class="mono">#{{ stage.task }}</b> · действия с задачей</span>
           <div class="sactions-buttons">
-            <UiButton
-              class="btn"
-              @click="companion.openForTask(stage.task); closeStage()"
-            >
-              💬 Обсудить с агентом
-            </UiButton>
             <OpenDiffButton :task-id="stage.task" />
           </div>
         </footer>
@@ -1037,7 +1031,6 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
-import { useCompanionStore } from '../stores/companion.js';
 import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import {
@@ -1078,7 +1071,6 @@ import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
 const ui = useUiStore();
-const companion = useCompanionStore();
 const taskStore = useTasksStore();
 const board = useBoardStore();
 

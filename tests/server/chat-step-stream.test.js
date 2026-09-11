@@ -86,9 +86,26 @@ test('нейтральный sink ставит время, хранит хвос
   // Лимит режет только хранение: длинный ход упирался в него и переставал слать
   // шаги в SSE — лента в окне замирала, и живой агент выглядел повисшим.
   assert.deepEqual(sent.map((step) => step.k), ['start', 'think', 'note']);
+  // Вытеснение больше не молчит: место самого старого шага занимает счётчик, иначе
+  // сохранённая лента читается как полный отчёт о ходе.
   assert.equal(sink.steps.length, 2);
-  assert.deepEqual(sink.steps.map((step) => step.k), ['think', 'note']);
-  assert.deepEqual(sink.steps.map((step) => step.at), [102, 103]);
+  assert.deepEqual(sink.steps.map((step) => step.k), ['note', 'note']);
+  assert.equal(sink.steps[0].truncated, true);
+  assert.match(sink.steps[0].text, /скрыты: 2$/);
+  assert.equal(sink.steps[1].text, 'шаг сверх лимита хранения');
+});
+
+test('счётчик вытесненных шагов продолжается, а сама метка в него не попадает', () => {
+  const sink = createStepSink(null, { limit: 3 });
+  for (let index = 1; index <= 10; index += 1) {
+    sink.emit({ k: 'tool', id: String(index), title: `шаг ${index}` });
+  }
+
+  assert.equal(sink.steps.length, 3);
+  assert.equal(sink.steps[0].truncated, true);
+  // 10 шагов, в окне осталось два последних — скрыто ровно восемь.
+  assert.match(sink.steps[0].text, /скрыты: 8$/);
+  assert.deepEqual(sink.steps.slice(1).map((step) => step.title), ['шаг 9', 'шаг 10']);
 });
 
 test('Claude normalizer сохраняет прежние шаги в общем контракте', () => {
@@ -211,6 +228,124 @@ test('Codex normalizer показывает произвольные tool-call �
     preview: '{"queue":"reviews"}',
   });
   assert.doesNotMatch(JSON.stringify(steps), /UnknownTool/);
+});
+
+test('Codex normalizer не теряет незнакомый тип элемента', () => {
+  // Codex дописывает типы быстрее, чем Кокпит разбирает их поимённо. Раньше всё,
+  // чего не было в списке, исчезало бесследно — вместе с вызовом И его результатом,
+  // и человек читал ленту как полный отчёт о ходе.
+  const normalize = createCodexStepNormalizer();
+  const steps = [
+    ...normalize({
+      method: 'item/started',
+      params: { item: { type: 'functionCallOutput', id: 'fn-1', name: 'read_file' } },
+    }),
+    ...normalize({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'functionCallOutput', id: 'fn-1', name: 'read_file', output: 'первая строка',
+        },
+      },
+    }),
+    ...normalize({
+      method: 'item/completed',
+      params: { item: { type: 'ещёНеизвестныйТип', id: 'new-1', arguments: { a: 1 } } },
+    }),
+  ];
+
+  const tool = steps.find((step) => step.k === 'tool' && step.id === 'fn-1');
+  assert.equal(tool?.name, 'read_file');
+  assert.ok(steps.some((step) => step.k === 'res' && step.id === 'fn-1'));
+  const future = steps.find((step) => step.k === 'tool' && step.id === 'new-1');
+  assert.equal(future?.name, 'ещёНеизвестныйТип');
+  assert.equal(future?.title, '{"a":1}');
+});
+
+test('Codex события без вызова показываются служебной строкой', () => {
+  const normalize = createCodexStepNormalizer();
+  const steps = [
+    ...normalize({ method: 'item/completed', params: { item: { type: 'contextCompaction', id: 'c-1' } } }),
+    ...normalize({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'subAgentActivity', id: 's-1', kind: 'completed', agentPath: 'ревьювер',
+        },
+      },
+    }),
+    ...normalize({
+      method: 'model/rerouted',
+      params: { fromModel: 'gpt-a', toModel: 'gpt-b', reason: 'highRiskCyberActivity' },
+    }),
+  ];
+
+  const notes = steps.filter((step) => step.k === 'note').map((step) => step.text);
+  assert.equal(steps.filter((step) => step.k === 'tool').length, 0);
+  assert.match(notes[0], /сжал контекст/);
+  assert.match(notes[1], /Субагент ревьювер/);
+  assert.match(notes[2], /gpt-a → gpt-b/);
+});
+
+test('Codex дополняет уже показанную правку и не обедняет её при завершении', () => {
+  const normalize = createCodexStepNormalizer();
+  const grow = (paths) => paths.map((file) => ({
+    path: file,
+    kind: { type: 'update' },
+    diff: '@@\n-1\n+2\n',
+  }));
+  const full = grow(['a.py', 'b.py', 'c.py']);
+  const steps = [
+    ...normalize({
+      method: 'item/started',
+      params: {
+        item: {
+          type: 'fileChange', id: 'fc-1', changes: grow(['a.py']), status: 'inProgress',
+        },
+      },
+    }),
+    ...normalize({
+      method: 'item/fileChange/patchUpdated',
+      params: { itemId: 'fc-1', changes: full },
+    }),
+    ...normalize({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'fileChange', id: 'fc-1', changes: full, status: 'completed',
+        },
+      },
+    }),
+  ];
+
+  const tools = steps.filter((step) => step.k === 'tool');
+  // Правка видна сразу (патч уже на диске), а дошедший позже полный набор её дополняет.
+  assert.deepEqual(tools.map((step) => step.title), ['a.py', '3 файлов']);
+  assert.deepEqual(tools.at(-1).files, ['a.py', 'b.py', 'c.py']);
+  // Завершение без новых данных второй строки не плодит.
+  assert.equal(steps.filter((step) => step.k === 'res').length, 1);
+});
+
+test('Codex ретрай сети читается человеком, а не сырым JSON', () => {
+  const normalize = createCodexStepNormalizer();
+  const [note] = normalize({
+    method: 'error',
+    params: {
+      willRetry: true,
+      threadId: 'thread-1',
+      error: {
+        message: 'Reconnecting... 2/5',
+        codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+        additionalDetails: 'stream disconnected before completion: tls handshake eof',
+        misalignment: null,
+      },
+    },
+  });
+
+  assert.equal(note.k, 'note');
+  assert.equal(note.level, 'warn');
+  assert.match(note.text, /Codex повторит запрос\. Reconnecting\.\.\. 2\/5/);
+  assert.doesNotMatch(note.text, /codexErrorInfo/);
 });
 
 test('Codex executor передаёт JSONL-шаги живьём и сохраняет их в результате', async (t) => {

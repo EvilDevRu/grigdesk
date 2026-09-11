@@ -27,6 +27,12 @@ export interface SandboxRegistryEntry {
   updatedAt: string | null;
 }
 
+export interface PipelineHold {
+  profile: string;
+  stalledHuman: boolean;
+  gate: string | null;
+}
+
 export interface SandboxStage {
   state: 'running' | 'done' | 'failed';
   at: string;
@@ -172,6 +178,37 @@ export async function readSandboxStage(stateDir: string, task: string): Promise<
 /** Реестр конвейера у стенда есть — значит стендом владеет попытка движка. */
 export async function hasPipelineRegistry(stateDir: string, task: string): Promise<boolean> {
   return fileExists(path.join(stateDir, `t${task}.pipeline`));
+}
+
+/**
+ * Чем занята попытка, которая держит стенд. Признак остановки взят тот же, что у
+ * остального сервера: движок сам ставит STALLED_HUMAN=1 и выходит, обнуляя ORCH_PID.
+ * Пока попытка исполняется, стенд принадлежит ей целиком, и читатели вне раздела
+ * «Конвейер» не вправе на него опираться: движок в любой момент пересоберёт или
+ * снесёт его. Отдельно называется ворота: пауза у ворот — не затык, а ожидание
+ * решения человека, и стенд в этот момент стоит ровно таким, каким его показали.
+ */
+export async function readPipelineHold(
+  stateDir: string,
+  task: string,
+): Promise<PipelineHold | null> {
+  let text = '';
+
+  try {
+    text = await fs.readFile(path.join(stateDir, `t${task}.pipeline`), 'utf8');
+  } catch {
+    return null;
+  }
+
+  const registry = parsePipeline(text);
+  const gate = Object.keys(registry)
+    .find((key) => /^GATE_[A-Z_]+$/.test(key) && registry[key] === 'waiting') ?? null;
+
+  return {
+    profile: String(registry.PROFILE || ''),
+    stalledHuman: registry.STALLED_HUMAN === '1' && !registry.ORCH_PID,
+    gate: gate ? gate.slice('GATE_'.length).toLowerCase() : null,
+  };
 }
 
 /**

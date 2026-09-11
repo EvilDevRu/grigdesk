@@ -25,7 +25,9 @@ import type {
   ShowcaseProject,
 } from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
+import { toPublicScope } from './targets.ts';
 import type { ShowcaseTargets } from './targets.ts';
+import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
 
 export interface RecordingOpsDeps {
   assertEnabled: () => void;
@@ -33,10 +35,11 @@ export interface RecordingOpsDeps {
   // попытки и её итог.
   attempts: Map<string, WorkerHandle>;
   broadcast: (event: string, data: unknown) => void;
-  browserPath: string | null;
+  resolveBrowserPath: () => Promise<string | null>;
   inputsOf: (project: ShowcaseProject) => ArtifactInputs;
   jobs: ShowcaseJobs;
   limits: () => { maxSceneSeconds: number; maxTotalSeconds: number };
+  acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
   readProject: (id: string) => Promise<ShowcaseProject>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
@@ -61,94 +64,143 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
       throw new ShowcaseError('target_unavailable', project.target.reason, 409);
     }
 
-    if (!project.target.scope.capabilities.includes('record')) {
+    const lease = await deps.acquireTargetLease(project.ref);
+
+    try {
+      const internal = await targets.selectedInternalScope(
+        project.ref,
+        project.target.scope.profile,
+        project.target.scope.targetFingerprint,
+      );
+
+      if (!internal.capabilities.includes('record')) {
+        throw new ShowcaseError(
+          'record_not_allowed',
+          'Запись не разрешена для этой цели.',
+          409,
+        );
+      }
+
+      const browserPath = await deps.resolveBrowserPath();
+
+      if (!browserPath || !(await fs.access(browserPath).then(() => true).catch(() => false))) {
+        throw new ShowcaseError(
+          'browser_missing',
+          'Браузер записи не установлен: поставьте Chromium в настройках плагина «Презентации».',
+          503,
+        );
+      }
+
+      const inputs = inputsOf({
+        ...project,
+        target: { status: 'ready', ref: project.ref, scope: toPublicScope(internal) },
+      });
+      const pending = project.scenes
+        .filter((scene) => !sceneFreshness(scene, inputs).clip)
+        .sort((left, right) => left.order - right.order);
+
+      if (pending.length === 0) {
+        throw new ShowcaseError('nothing_to_record', 'Все клипы сцен уже свежие.', 409);
+      }
+
+      const scenes = pending.map((scene) => {
+        const screen = internal.screens.find((item) => item.id === scene.screenId);
+
+        if (!screen) {
+          throw new ShowcaseError(
+            'unknown_screen',
+            `Экран «${scene.screenId}» недоступен для этой цели.`,
+            400,
+          );
+        }
+
+        return { scene, screen };
+      });
+      const inputHashes = Object.fromEntries(
+        pending.map((scene) => [scene.id, clipInputHash(scene, inputs)]),
+      );
+      const { record, reused } = await jobs.enqueue({
+        projectId: id,
+        kind: 'record',
+        idempotencyKey: createHash('sha256')
+          .update(`record:${id}:${JSON.stringify(inputHashes)}`)
+          .digest('hex')
+          .slice(0, 32),
+        inputHashes,
+        inputRevision: project.revision,
+      });
+
+      if (reused) {
+        return toPublicJob(record);
+      }
+
+      const limits = deps.limits();
+      const login = await loginTaskOf(internal);
+
+      await lease?.assertPathIdentity();
+
+      const handle = await launchWorker({
+        workDir: path.join(store.jobsDir, record.id, 'work'),
+        task: {
+          jobId: record.id,
+          projectId: id,
+          baseUrl: internal.recordUrl,
+          allowedOrigins: internal.allowedOrigins,
+          allowedMethods: internal.allowedMethods,
+          browserPath,
+          style: RENDER_STYLE,
+          deadlineMs: Math.min(limits.maxSceneSeconds * 1000 + 60_000, 300_000),
+          login,
+          scenes,
+        },
+        inheritedFds: lease ? [lease.inheritedFd()] : undefined,
+      });
+
+      attempts.set(record.id, handle);
+
+      return toPublicJob(await jobs.progress(record.id, {
+        sequence: record.sequence + 1,
+        label: 'исполнитель записи запущен',
+        total: scenes.length,
+        identity: handle.identity,
+      }));
+    } finally {
+      // Успешный worker получил копию OFD; при ошибке spawn её не существует.
+      await lease?.release();
+    }
+  }
+
+  /**
+   * Вход для исполнителя: селекторы из объявления профиля и учётка по ссылке из
+   * него же. Объявленный, но не найденный секрет — отказ до записи: снимать стенд
+   * с формой входа вместо экранов бессмысленно, а причину лучше назвать сразу.
+   */
+  async function loginTaskOf(
+    internal: Awaited<ReturnType<ShowcaseTargets['selectedInternalScope']>>,
+  ) {
+    if (!internal.login || !internal.capabilities.includes('login')) {
+      return null;
+    }
+
+    const credentials = await targets.loginCredentialsOf(internal);
+
+    if (!credentials) {
       throw new ShowcaseError(
-        'record_not_allowed',
-        'Профиль не объявил запись для этой цели.',
+        'login_credentials_missing',
+        'Учётка для входа на стенд не найдена по ссылке из login.json профиля.',
         409,
       );
     }
 
-    const browserPath = deps.browserPath;
-
-    if (!browserPath || !(await fs.access(browserPath).then(() => true).catch(() => false))) {
-      throw new ShowcaseError(
-        'browser_missing',
-        'Браузер записи не установлен: установка — отдельное действие настройки.',
-        503,
-      );
-    }
-
-    const scope = await targets.resolve(project.ref, project.target.scope.profile);
-
-    if (scope.status !== 'ready') {
-      throw new ShowcaseError('target_unavailable', scope.reason, 409);
-    }
-
-    const inputs = inputsOf(project);
-    const pending = project.scenes
-      .filter((scene) => !sceneFreshness(scene, inputs).clip)
-      .sort((left, right) => left.order - right.order);
-
-    if (pending.length === 0) {
-      throw new ShowcaseError('nothing_to_record', 'Все клипы сцен уже свежие.', 409);
-    }
-
-    const internal = await targets.internalScope(project.ref, project.target.scope.profile);
-    const scenes = pending.map((scene) => {
-      const screen = internal.screens.find((item) => item.id === scene.screenId);
-
-      if (!screen) {
-        throw new ShowcaseError(
-          'unknown_screen',
-          `Профиль не объявлял экран «${scene.screenId}».`,
-          400,
-        );
-      }
-
-      return { scene, screen };
-    });
-    const inputHashes = Object.fromEntries(
-      pending.map((scene) => [scene.id, clipInputHash(scene, inputs)]),
-    );
-    const { record, reused } = await jobs.enqueue({
-      projectId: id,
-      kind: 'record',
-      idempotencyKey: createHash('sha256')
-        .update(`record:${id}:${JSON.stringify(inputHashes)}`)
-        .digest('hex')
-        .slice(0, 32),
-      inputHashes,
-      inputRevision: project.revision,
-    });
-
-    if (reused) {
-      return toPublicJob(record);
-    }
-
-    const limits = deps.limits();
-    const handle = await launchWorker({
-      workDir: path.join(store.jobsDir, record.id, 'work'),
-      task: {
-        jobId: record.id,
-        projectId: id,
-        baseUrl: internal.recordUrl,
-        allowedOrigins: internal.allowedOrigins,
-        browserPath,
-        style: RENDER_STYLE,
-        deadlineMs: Math.min(limits.maxSceneSeconds * 1000 + 60_000, 300_000),
-        scenes,
-      },
-    });
-
-    attempts.set(record.id, handle);
-
-    return toPublicJob(await jobs.progress(record.id, {
-      sequence: record.sequence + 1,
-      label: 'исполнитель записи запущен',
-      total: scenes.length,
-      identity: handle.identity,
-    }));
+    return {
+      url: internal.login.url,
+      userSelector: internal.login.userSelector,
+      passwordSelector: internal.login.passwordSelector,
+      submitSelector: internal.login.submitSelector,
+      readySelector: internal.login.readySelector,
+      user: credentials.user,
+      password: credentials.password,
+    };
   }
 
   /**

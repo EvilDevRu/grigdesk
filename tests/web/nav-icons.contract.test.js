@@ -78,13 +78,21 @@ test('маршрут знаний существует как page-only стра
 // Вторая копия карты иконок уже расходилась с первой: у SSH её просто не было, и
 // карточка плагина падала на запасную «деталь пазла».
 test('настройки берут иконки из общей карты, а не из своей копии', async () => {
-  const settings = await readFile(new URL('web/src/views/SettingsView.vue', root), 'utf8');
+  const catalog = await readFile(
+    new URL('web/src/views/settings/PluginsCatalog.vue', root), 'utf8',
+  );
+  const dialog = await readFile(
+    new URL('web/src/views/settings/PluginSettingsDialog.vue', root), 'utf8',
+  );
 
   assert.deepEqual({
-    ownMap: settings.includes('const PLUGIN_ICON_PATHS = {'),
-    sharedImport: settings.includes("from '../shared/navIcons.ts'"),
+    ownMap: catalog.includes('const PLUGIN_ICON_PATHS = {')
+      || dialog.includes('const PLUGIN_ICON_PATHS = {'),
+    catalogImport: catalog.includes("pluginIconPath } from '../../shared/navIcons.ts'"),
+    dialogImport: dialog.includes("pluginIconPath } from '../../shared/navIcons.ts'"),
   }, {
     ownMap: false,
-    sharedImport: true,
+    catalogImport: true,
+    dialogImport: true,
   });
 });

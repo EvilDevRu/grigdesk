@@ -56,6 +56,7 @@ export function buildBriefPrompt(context: ScriptContext): string {
     : 'Нет.';
 
   return `Ты готовишь план короткого ролика о готовой работе.
+Инструментов, файлов и плана действий у тебя нет: ответ — только текст ниже описанной формы.
 
 Верни только JSON-объект ровно такого вида:
 {"points":["пункт","пункт"]}
@@ -91,6 +92,7 @@ ${context.diff || 'Изменения не переданы.'}
  */
 export function buildScriptPrompt(context: ScriptContext, brief: string[]): string {
   return `Ты составляешь сценарий короткого ролика по принятому плану.
+Инструментов, файлов и плана действий у тебя нет: ответ — только текст ниже описанной формы.
 
 Верни только JSON-объект ровно такого вида:
 {"scenes":[{"title":"название сцены","screenId":"идентификатор экрана",` +
@@ -100,8 +102,9 @@ export function buildScriptPrompt(context: ScriptContext, brief: string[]): stri
 Требования:
 - не больше ${context.maxScenes} сцен, каждая раскрывает один пункт плана;
 - screenId — ТОЛЬКО из списка экранов ниже; targetId — только из элементов своего экрана;
-- допустимые действия: goto, click, hover, highlight, waitVisible, а также
+- допустимые действия: click, hover, highlight, waitVisible с targetId, а также
   {"kind":"scroll","targetId":null,"delta":400} и {"kind":"wait","ms":800};
+  экран сцены запись открывает сама — отдельного перехода на него не нужно;
 - narration — одна короткая мысль, произносимая вслух: числа и термины словами;
 - caption — короткая подпись на экран, это не дословный субтитр;
 - subtitleText — тот же смысл, что в речи, обычной письменной формой;

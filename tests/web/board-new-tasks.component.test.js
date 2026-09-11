@@ -24,15 +24,15 @@ test('BOARD-NEW-01: метка стоит только у непросмотре
   assert.equal(rows[0].findAll('.newbadge').length, 1);
   assert.equal(rows[1].findAll('.newbadge').length, 0);
   const badge = rows[0].get('.newbadge');
-  assert.equal(badge.text(), 'новая');
+  assert.equal(badge.text(), 'Новая');
   assert.equal(badge.attributes('aria-label'), 'Новая задача — ещё не открывали');
 
-  // Метка стоит ПОСЛЕ названия: она про задачу, а не про кнопку избранного.
-  const children = [...rows[0].element.children];
-  assert.ok(children.indexOf(rows[0].get('button.ttext').element) < children.indexOf(badge.element));
+  await rows[0].get('button.ttext').trigger('click');
+  assert.deepEqual(calls.opened, ['11']);
+  assert.deepEqual(calls.seenMarked, [], 'отметку просмотра сохраняет карточка задачи');
 
   const filter = wrapper.get('button.newfilter');
-  assert.match(filter.text(), /новые\s*1/);
+  assert.match(filter.text(), /Новые\s*1/);
   assert.equal(filter.attributes('aria-pressed'), 'false');
   assert.equal(filter.attributes('disabled'), undefined);
 
@@ -78,7 +78,7 @@ test('BOARD-NEW-03: всё просмотрено — фильтр честно 
   });
 
   const filter = wrapper.get('button.newfilter');
-  assert.match(filter.text(), /новые\s*0/);
+  assert.match(filter.text(), /Новые\s*0/);
   assert.equal(wrapper.findAll('.newbadge').length, 0);
 
   await filter.trigger('click');
@@ -97,7 +97,7 @@ test('BOARD-NEW-04: без базовой линии новых не бывае�
   assert.equal(wrapper.findAll('.newbadge').length, 0);
   const filter = wrapper.get('button.newfilter');
   assert.equal(filter.attributes('disabled'), '');
-  assert.match(filter.text(), /новые\s*0/);
+  assert.match(filter.text(), /Новые\s*0/);
   assert.match(filter.attributes('title'), /загружаются/);
   assert.equal(wrapper.findAll('li.trow').length, 2);
 });

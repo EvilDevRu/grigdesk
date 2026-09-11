@@ -43,15 +43,31 @@ profile_config_get() {
     "$file" 2>/dev/null
 }
 
+# Модельная политика хранит причины решений рядом с ключами. CAS-изменение одного
+# значения сохраняет эти комментарии и порядок существующих строк; новые ключи идут в хвост.
 _profile_config_render() {
-  local output=$1
+  local output=$1 source=${3:-} line key
   local -n values_ref=$2
+  declare -A written=()
   {
-    printf 'RUNNERS_SCHEMA=%s\n' "${values_ref[RUNNERS_SCHEMA]}"
-    printf 'CONFIG_REVISION=%s\n' "${values_ref[CONFIG_REVISION]}"
-    local key
+    if [[ -f "$source" ]]; then
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ -z "$line" || "$line" == \#* ]]; then
+          printf '%s\n' "$line"
+        else
+          key=${line%%=*}
+          printf '%s=%s\n' "$key" "${values_ref[$key]}"
+          written["$key"]=1
+        fi
+      done <"$source"
+    else
+      printf 'RUNNERS_SCHEMA=%s\n' "${values_ref[RUNNERS_SCHEMA]}"
+      printf 'CONFIG_REVISION=%s\n' "${values_ref[CONFIG_REVISION]}"
+      written[RUNNERS_SCHEMA]=1
+      written[CONFIG_REVISION]=1
+    fi
     while IFS= read -r key; do
-      [[ "$key" == RUNNERS_SCHEMA || "$key" == CONFIG_REVISION ]] && continue
+      [[ "${written[$key]:-}" == 1 ]] && continue
       printf '%s=%s\n' "$key" "${values_ref[$key]}"
     done < <(printf '%s\n' "${!values_ref[@]}" | sort)
   } >"$output"
@@ -103,7 +119,7 @@ profile_config_write() {
   done
   if (( rc == 0 )); then
     tmp=$(mktemp "$(dirname "$file")/.runners.XXXXXX")
-    _profile_config_render "$tmp" values
+    _profile_config_render "$tmp" values "$file"
     sync -f "$tmp" 2>/dev/null || true
     if [[ "${FACTORY_TEST_CRASH_BEFORE_RENAME:-0}" == 1 ]]; then
       rm -f -- "$tmp"

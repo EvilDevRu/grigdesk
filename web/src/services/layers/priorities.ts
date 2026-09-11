@@ -6,7 +6,6 @@ import type { UiLayerName, UiLayerRootProps } from '../../types/uiLayers';
 export const UI_LAYER_PRIORITIES = Object.freeze({
   tools: 70,
   dock: 80,
-  companion: 95,
   dialog: 100,
   'diff-workspace': 120,
   document: 180,

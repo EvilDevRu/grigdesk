@@ -28,13 +28,14 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.match(publicUiImport[1], /\bUiPressable\b/u);
   assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 4);
   assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 4);
-  assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 2);
+  assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 3);
   assert.doesNotMatch(source, /<button\b/u);
   assert.match(source, /toolsTrigger\.value\?\.el\?\.getBoundingClientRect/u);
   assert.match(source, /toolsTrigger\.value\?\.el\?\.contains/u);
   assert.doesNotMatch(source, /\.pu-state button|\.ptip-go button|\.instbar button/u);
   assert.match(source, /data-context="topbar-popover-action"/u);
   assert.match(source, /data-context="topbar-popover-settings"/u);
+  assert.match(source, /data-context="topbar-popover-refresh"/u);
   assert.match(source, /data-context="topbar-popover-update"/u);
   assert.match(source, /data-context="topbar-popover-footer"/u);
   assert.match(source, /<BoardTimerPopover/u);

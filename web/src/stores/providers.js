@@ -20,6 +20,8 @@ export const useProvidersStore = defineStore('providers', {
     showAllModels: false,
     updating: '',
     updateResults: {},
+    // Идёт принудительная проверка лимитов по кнопке: ход один на все всплывашки.
+    usageRefreshing: false,
   }),
   getters: {
     /**
@@ -124,6 +126,31 @@ export const useProvidersStore = defineStore('providers', {
         const { usage } = await api.get('/api/providers/usage');
         this.usage = usage || {};
       } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
+    },
+    /**
+     * Снимок лимитов, который сервер принёс сам (SSE `providers-usage` с фонового тика).
+     * Сдвигает и троттл: раз снимок только что пришёл, ближайший loadUsage без force
+     * ходить за ним не должен — иначе каждое событие оплачивалось бы лишним запросом.
+     */
+    applyUsage(usage) {
+      if (!usage || typeof usage !== 'object') return;
+      this.usage = usage;
+      usageAt = Date.now();
+    },
+    /**
+     * Принудительная проверка по кнопке во всплывашке. Обходит TTL серверного кэша, но не
+     * паузу после отказа вендора: её сервер держит сам и вернёт прошлый снимок. Ход один на
+     * все всплывашки — кнопки соседей на это время показывают тот же спиннер.
+     */
+    async refreshUsage() {
+      if (this.usageRefreshing) return;
+      this.usageRefreshing = true;
+      try {
+        const { usage } = await api.post('/api/providers/usage/refresh');
+        this.applyUsage(usage);
+      } catch { /* сервер молчит — остаётся прошлый снимок */ } finally {
+        this.usageRefreshing = false;
+      }
     },
     /**
      * Установка новой версии CLI исполнителя. Живёт в сторе, а не во вьюхе: жмут и в

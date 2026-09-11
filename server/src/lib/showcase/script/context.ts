@@ -4,9 +4,16 @@
 // Модель их не задаёт и не может расширить: она получает готовый текст, а не
 // возможность попросить другой.
 //
+// Сравнивается РАБОЧЕЕ ДЕРЕВО, а не только коммиты ветки: попытка конвейера до
+// отгрузки держит готовую работу незакоммиченной, и diff «база..ветка» у неё пуст.
+// Незакоммиченные новые файлы тоже входят в контекст — без них модель рассказала
+// бы о правках в старых файлах и промолчала о новом экране.
+//
 // Вход ограничен по размеру, и обрезка помечается явно. Без пометки модель выдала
 // бы разбор половины изменений за разбор всей работы, а человек об этом не узнал бы.
 import { execFile } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -15,9 +22,23 @@ const run = promisify(execFile);
 // длинный контекст не улучшает сценарий, зато делает вызов дорогим и медленным.
 const DIFF_LIMIT = 60_000;
 
-// База сравнения. Пробуются по очереди: у разных установок главная ветка называется
-// по-разному, и угадывать одну — верный способ получить пустой diff.
-const BASE_CANDIDATES = ['origin/main', 'origin/master', 'main', 'master'];
+// Новых файлов в контексте немного и они короткие: длинный новый файл — это
+// обычно сгенерированное или скопированное, а не то, о чём рассказывает ролик.
+const UNTRACKED_FILE_LIMIT = 6_000;
+const UNTRACKED_FILES_MAX = 12;
+
+// База сравнения. Первым идёт то, что сам remote называет главной веткой; остальные
+// имена — на случай, если `origin/HEAD` у клона не выставлен.
+const BASE_CANDIDATES = ['origin/HEAD', 'origin/main', 'origin/master', 'main', 'master'];
+
+// Что не попадает в контекст: замороженные зависимости бесполезны модели, а файлы
+// окружения стенд переписывает своими схемами и паролями — им в промпте не место.
+const EXCLUDED_PATHS = [
+  ':(exclude)*.lock',
+  ':(exclude)package-lock.json',
+  ':(exclude).env*',
+  ':(exclude)*/.env*',
+];
 
 export interface RepoRef {
   name: string;
@@ -60,9 +81,41 @@ async function mergeBase(cwd: string, head: string): Promise<string> {
 }
 
 /**
- * Diff одного репозитория. Бинарные файлы исключены самим форматом вывода, а
- * секретные пути не попадают в контекст: сравниваются отслеживаемые файлы, и
- * `.env` с ключами в репозитории не лежит по договорённости проекта.
+ * Новые файлы, которых git ещё не знает. Бинарные пропускаются по признаку нулевого
+ * байта: их содержимое модели не прочитать, а место в контексте они бы заняли.
+ */
+async function untrackedFiles(cwd: string): Promise<string> {
+  const listed = await git(cwd, ['ls-files', '--others', '--exclude-standard'])
+    .then((value) => value.split('\n').map((item) => item.trim()).filter(Boolean))
+    .catch(() => [] as string[]);
+  const parts: string[] = [];
+
+  for (const relative of listed.slice(0, UNTRACKED_FILES_MAX)) {
+    if (/(^|\/)\.env/.test(relative) || relative.endsWith('.lock')) {
+      continue;
+    }
+
+    const content = await fs.readFile(path.join(cwd, relative)).catch(() => null);
+
+    if (!content || content.includes(0)) {
+      continue;
+    }
+
+    const text = content.toString('utf8');
+    const shown = text.length > UNTRACKED_FILE_LIMIT
+      ? `${text.slice(0, UNTRACKED_FILE_LIMIT)}\n… (файл обрезан)`
+      : text;
+
+    parts.push(`## новый файл ${relative}\n${shown}`);
+  }
+
+  return parts.join('\n\n');
+}
+
+/**
+ * Diff одного репозитория относительно базы: коммиты ветки, незакоммиченные правки
+ * и новые файлы. Бинарные файлы исключены самим форматом вывода, а файлы окружения —
+ * явным списком: стенд переписывает их своими схемами и паролями.
  */
 async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
   const head = repo.branch || 'HEAD';
@@ -72,16 +125,18 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
     return null;
   }
 
-  const diff = await git(repo.path, [
+  const tracked = await git(repo.path, [
     'diff',
-    `${base}..${head}`,
+    base,
     '--no-color',
     '--stat',
     '--patch',
     '--',
-    ':(exclude)*.lock',
-    ':(exclude)package-lock.json',
+    '.',
+    ...EXCLUDED_PATHS,
   ]).catch(() => '');
+  const untracked = await untrackedFiles(repo.path);
+  const diff = [tracked.trim(), untracked].filter(Boolean).join('\n\n');
 
   if (!diff.trim()) {
     return null;

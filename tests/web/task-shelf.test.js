@@ -189,6 +189,29 @@ test('Текущая стадия выводит ожидание конвейе
   ]);
 });
 
+test('Открытые ворота называют ожидание решением человека, а не ответом в задаче', () => {
+  // Прогон доехал до узла человека и закрылся, но сами ворота остались открытыми:
+  // result и gate приезжают из разных источников и спокойно сосуществуют.
+  const gated = baseSnapshot({
+    pipeline: {
+      ...baseSnapshot().pipeline,
+      daemon: 'stopped',
+      result: 'completed',
+      gate: 'принять работу — проверить в браузере',
+    },
+  });
+
+  assert.equal(decision(gated, gated).reasonText, 'Жду моего решения');
+});
+
+test('Затык конвейера называется затыком и не притворяется штатным ожиданием', () => {
+  const stalled = baseSnapshot({
+    pipeline: { ...baseSnapshot().pipeline, daemon: 'stopped', stall: 'Узел оборвался' },
+  });
+
+  assert.equal(decision(stalled, stalled).reasonText, 'Конвейер встал');
+});
+
 test('Рост непрочитанных комментариев зажигает полку словами', () => {
   const result = decision(baseSnapshot(), baseSnapshot({
     b24: { ...baseSnapshot().b24, unread: 2 },
@@ -822,6 +845,114 @@ test('Строка полки получает живую карточку B24, 
       { kind: 'pipeline', value: '3/7 · Проверка' },
     ],
   });
+});
+
+function pipelineActivityOf(store) {
+  return store.rows[0]?.details?.activities
+    ?.find((activity) => activity.kind === 'pipeline') || null;
+}
+
+test('Полосу прогона рисуют только живые цифры вотчера', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  harness.pipeline.observedByTask[42] = {
+    ...baseSnapshot().pipeline,
+    progress: { done: 3, total: 7 },
+    stage: { id: 'review', label: 'Проверка', state: 'run' },
+  };
+  store.start();
+  await settleStore();
+
+  const counted = pipelineActivityOf(store);
+
+  harness.pipeline.observedByTask[42] = { ...baseSnapshot().pipeline, progress: null };
+  await settleStore();
+
+  const moving = pipelineActivityOf(store);
+
+  delete harness.pipeline.observedByTask[42];
+  await settleStore();
+
+  const forgotten = pipelineActivityOf(store);
+
+  assert.deepEqual({
+    counted: counted?.progress,
+    moving: moving?.progress,
+    forgotten: forgotten?.progress ?? null,
+    forgottenValue: forgotten?.value,
+  }, {
+    counted: { done: 3, total: 7 },
+    moving: { done: 0, total: 0 },
+    forgotten: null,
+    forgottenValue: 'Последний прогон сейчас не виден',
+  });
+});
+
+test('Остановленный прогон без цифр графа полосы не получает', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  harness.pipeline.observedByTask[42] = {
+    ...baseSnapshot().pipeline,
+    daemon: 'stopped',
+    result: 'human-rewind',
+    progress: null,
+  };
+  store.start();
+  await settleStore();
+
+  const activity = pipelineActivityOf(store);
+
+  assert.deepEqual({ value: activity?.value, progress: activity?.progress ?? null }, {
+    value: 'Завершён · human-rewind',
+    progress: null,
+  });
+});
+
+test('Идущий заход прячет прошлые цифры и называет себя по ним', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  harness.analysis.byTask[42].analysis = {
+    complexity: 4,
+    risk: 3,
+    diff_size: 'M',
+    needs_clarification: true,
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  store.start();
+  await settleStore();
+
+  const analysisActivity = () => store.rows[0]?.details?.activities
+    ?.find((activity) => activity.kind === 'analysis');
+
+  harness.analysis.byTask[42].status.state = 'running';
+  await settleStore();
+
+  assert.deepEqual({
+    value: analysisActivity()?.value,
+    tone: analysisActivity()?.tone,
+  }, {
+    value: 'Переоценка идёт',
+    tone: 'accent',
+  });
+
+  harness.analysis.byTask[42].analysis = null;
+  await settleStore();
+
+  assert.equal(analysisActivity()?.value, 'Разведка идёт');
+
+  harness.analysis.byTask[42].status.state = 'queued';
+  await settleStore();
+
+  assert.equal(analysisActivity()?.value, 'В очереди');
 });
 
 test('Строка полки помечается завершённой по живому состоянию B24', async (t) => {

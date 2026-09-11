@@ -6,6 +6,7 @@ import { supportsScopedWorkspace } from '../executors/index.ts';
 import { createWorkIpc } from '../executors/workIpc.ts';
 import { createRepoHistoryTools } from './repoHistory.ts';
 import type { Analyzer } from './analyzer.ts';
+import { questionKey } from '../../../../shared/analysisContracts.ts';
 import type {
   AnalysisArbiterAnswerInput,
   AnalysisQuestion,
@@ -99,11 +100,16 @@ export class AnalysisArbiter {
     }
 
     const detail = await this.analyzer.get(id);
-    const handled = new Set(
-      (await this.analyzer.readClarificationEntries(id)).map((entry) => entry.questionId),
+    // Разобранным вопрос считается и по идентификатору, и по смыслу текста: следующий
+    // заход триажа пишет questions[] заново, и по одному id арбитр брался за тот же
+    // вопрос повторно — поверх уже полученного ответа человека.
+    const entries = await this.analyzer.readClarificationEntries(id);
+    const handledIds = new Set(entries.map((entry) => entry.questionId));
+    const handledKeys = new Set(
+      entries.map((entry) => questionKey(entry.questionText)).filter(Boolean),
     );
     const questions = (detail.analysis?.questions || []).filter((question) => (
-      question?.id && !handled.has(question.id)
+      question?.id && !handledIds.has(question.id) && !handledKeys.has(questionKey(question.text))
     ));
     if (!questions.length) {
       return { ok: true, outcome: 'nothing_to_do', answered: 0 };

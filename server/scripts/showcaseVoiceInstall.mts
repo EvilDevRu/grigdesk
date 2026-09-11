@@ -7,18 +7,25 @@
 //
 // Всё, что приходит из сети, сверяется с sha256 из каталога раздела. Не сошлось —
 // установка останавливается, каталог голоса не создаётся.
+//
+// Движок выбирается по пакету: у Piper и Silero разные окружения, файлы модели и
+// скрипты синтеза, но порядок шагов и правила приёмки у них одни.
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createAttemptLog } from '../src/lib/showcase/attemptLog.ts';
-import { installVoiceFiles } from '../src/lib/showcase/voice/download.ts';
+import { installSileroFiles, installVoiceFiles } from '../src/lib/showcase/voice/download.ts';
 import { runWithStdin } from '../src/lib/showcase/voice/process.ts';
 import type { PiperVoicePackage } from '../src/lib/showcase/voice/piperCatalog.ts';
+import type { SileroVoicePackage } from '../src/lib/showcase/voice/sileroCatalog.ts';
 
-const SYNTH_SCRIPT = fileURLToPath(
+const PIPER_SYNTH = fileURLToPath(
   new URL('../src/lib/showcase/voice/piperSynth.py', import.meta.url),
+);
+const SILERO_SYNTH = fileURLToPath(
+  new URL('../src/lib/showcase/voice/sileroSynth.py', import.meta.url),
 );
 
 // Фраза приёмки: обычные слова, числа и латиница. Она же читается человеком в
@@ -30,7 +37,7 @@ const MIN_CHECK_PEAK = 0.01;
 interface InstallTask {
   attemptId: string;
   workDir: string;
-  voice: PiperVoicePackage;
+  voice: PiperVoicePackage | SileroVoicePackage;
   venvDir: string;
   voicesDir: string;
   requirementsFile: string;
@@ -103,22 +110,12 @@ async function runLong(
  * и громкости. Тишина нужной длины — самый частый способ «установить» неработающий
  * синтез, и пройти приёмку она не должна.
  */
-async function checkVoice(pack: PiperVoicePackage, voiceDir: string): Promise<void> {
+async function checkVoice(args: string[], timeoutMs: number): Promise<void> {
   await report('check', 'проверяю синтезом');
 
-  const sample = path.join(task.workDir, 'check.wav');
   // Фраза уходит на stdin тем же способом, что и в рабочем синтезе: приёмка
   // должна проверять тот путь, которым потом пойдёт озвучка.
-  const produced = await runWithStdin(
-    venvPython,
-    [
-      SYNTH_SCRIPT,
-      '--model', path.join(voiceDir, pack.modelName),
-      '--config', path.join(voiceDir, pack.configName),
-      '--out', sample,
-    ],
-    { input: CHECK_PHRASE, timeoutMs: 120_000 },
-  );
+  const produced = await runWithStdin(venvPython, args, { input: CHECK_PHRASE, timeoutMs });
   const facts = JSON.parse(produced.stdout.trim().split('\n').at(-1) ?? '{}') as {
     durationMs?: number;
     peak?: number | null;
@@ -133,6 +130,81 @@ async function checkVoice(pack: PiperVoicePackage, voiceDir: string): Promise<vo
   }
 
   await report('check', `контрольная фраза: ${facts.durationMs} мс`);
+}
+
+async function installPiper(pack: PiperVoicePackage): Promise<void> {
+  const voiceDir = await installVoiceFiles(pack, task.voicesDir, report);
+
+  await writeFile(
+    path.join(voiceDir, 'voice.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: pack.id,
+      name: pack.name,
+      language: pack.language,
+      timbre: pack.timbre,
+      model: pack.modelName,
+      config: pack.configName,
+      sampleRate: pack.sampleRate,
+      license: pack.license,
+      installedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+
+  try {
+    await checkVoice([
+      PIPER_SYNTH,
+      '--model', path.join(voiceDir, pack.modelName),
+      '--config', path.join(voiceDir, pack.configName),
+      '--out', path.join(task.workDir, 'check.wav'),
+    ], 120_000);
+  } catch (error) {
+    // Не прошедший приёмку голос снимается: «установлен» обязано значить
+    // «говорит», иначе отказ всплывёт посреди первой же озвучки.
+    await rm(path.join(voiceDir, 'voice.json'), { force: true });
+
+    throw error;
+  }
+}
+
+async function installSilero(pack: SileroVoicePackage): Promise<void> {
+  const modelDir = await installSileroFiles(pack, task.voicesDir, report);
+  const speaker = pack.speakers[0];
+
+  if (!speaker) {
+    throw new Error('в пакете не объявлено ни одного диктора');
+  }
+
+  await writeFile(
+    path.join(modelDir, 'voice.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: pack.id,
+      name: pack.name,
+      language: pack.language,
+      file: pack.fileName,
+      sampleRate: pack.sampleRate,
+      speakers: pack.speakers,
+      license: pack.license,
+      installedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+
+  try {
+    // Первый синтез Silero ещё и прогревает torch — срок выше, чем у Piper.
+    await checkVoice([
+      SILERO_SYNTH,
+      '--model', path.join(modelDir, pack.fileName),
+      '--speaker', speaker.id,
+      '--out', path.join(task.workDir, 'check.wav'),
+    ], 300_000);
+  } catch (error) {
+    await rm(path.join(modelDir, 'voice.json'), { force: true });
+
+    throw error;
+  }
 }
 
 const deadline = setTimeout(() => {
@@ -165,33 +237,10 @@ try {
     'ставлю движок синтеза',
   );
 
-  const voiceDir = await installVoiceFiles(task.voice, task.voicesDir, report);
-
-  await writeFile(
-    path.join(voiceDir, 'voice.json'),
-    `${JSON.stringify({
-      schemaVersion: 1,
-      id: task.voice.id,
-      name: task.voice.name,
-      language: task.voice.language,
-      timbre: task.voice.timbre,
-      model: task.voice.modelName,
-      config: task.voice.configName,
-      sampleRate: task.voice.sampleRate,
-      license: task.voice.license,
-      installedAt: new Date().toISOString(),
-    }, null, 2)}\n`,
-    { encoding: 'utf8', mode: 0o600 },
-  );
-
-  try {
-    await checkVoice(task.voice, voiceDir);
-  } catch (error) {
-    // Не прошедший приёмку голос снимается: «установлен» обязано значить
-    // «говорит», иначе отказ всплывёт посреди первой же озвучки.
-    await rm(path.join(voiceDir, 'voice.json'), { force: true });
-
-    throw error;
+  if (task.voice.engineId === 'silero') {
+    await installSilero(task.voice);
+  } else {
+    await installPiper(task.voice);
   }
 
   await report('done', 'голос готов');

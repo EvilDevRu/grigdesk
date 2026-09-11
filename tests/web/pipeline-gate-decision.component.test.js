@@ -92,10 +92,6 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineGateCompanionStore = defineStore('pipeline-gate-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineGate'), {
     attachTo: browser.document.querySelector('#mount'),
     global: {
@@ -109,7 +105,7 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
     for (const key of [
       '__pipelineGateApi', '__pipelineGateConfirmDialog', '__pipelineGateAlertDialog',
       '__pipelineGateFactoryGraph', '__pipelineGateUiStore', '__pipelineGateTasksStore',
-      '__pipelineGateBoardStore', '__pipelineGateCompanionStore',
+      '__pipelineGateBoardStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

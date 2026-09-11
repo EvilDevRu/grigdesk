@@ -37,6 +37,7 @@
 | `lib/attempt-stage-state.sh` | курсор, append-only hash-chain, findings projection и no-progress guard |
 | `lib/attempt-lifecycle-state.{sh,py}` | host-owned segmented lifecycle ledger, manifest generations и recovery хвоста |
 | `lib/runtime-analytics.{sh,py}` | typed lifecycle spans/reasons, stable identity и writable reconciliation |
+| `lib/bootstrap-sandbox.sh` | ранняя передача готовых рабочих деревьев разведке и барьер готовности стенда |
 | `lib/workspace-guard.sh` | точный snapshot source roots без автоматического отката |
 | `lib/instrumentation-transaction.sh` | scoped временные правки и CAS cleanup |
 | `lib/attempt-state.sh` | изолированные pin/CAS/terminal-файлы попытки route protocol v2 |
@@ -637,6 +638,30 @@ TOCTOU: `stat` подтверждал один inode, а `mapfile` читал д
 обязан отвечать успехом. Пока это считалось ошибкой, CLI отчитывался о провале
 состоявшегося переключения, а launcher ловил `group_rc` и подменял результат
 этапа на 76 (`core-multi-runner` краснел под нагрузкой 5 прогонов из 24).
+
+## Разведка во время подготовки стенда
+
+При новом isolated-запуске `lib/bootstrap-sandbox.sh` запускает профильный `up.sh` в отдельной
+сессии и передаёт `FACTORY_BOOTSTRAP_WORKSPACE_ENV` — уникальный путь внутри trusted control root.
+Профиль может атомарно записать туда полный будущий sandbox env после подготовки всех файлов
+рабочих деревьев. Движок проверяет task, ветки, пути и Git checkout по закреплённому контракту,
+затем разрешает bootstrap одновременно с оставшейся подготовкой данных и сервисов.
+
+До ранней передачи профиль обязан завершить изменения исходников, `.env.testing`, конфигурации
+и зависимостей. После передачи допустимы только данные, запуск сервисов и игнорируемые runtime
+файлы: сторож `state-only` продолжает проверять workspace без исключений для фоновой подготовки.
+Если профиль не может обеспечить эту границу, он не публикует ранний env. Отсутствие файла
+сохраняет прежнюю последовательность: весь `up.sh`, health, затем bootstrap.
+
+Основной маршрут начинается только после успешных bootstrap **и** `up.sh`, повторной проверки
+стенда и побайтового совпадения раннего env с окончательным реестром. Ошибка подъёма или дрейф
+метаданных останавливают попытку до первого main-узла. Shared, resume и существующая песочница
+используют прежнюю синхронную проверку; ранний env не является реестром готового стенда.
+
+Родитель владеет sandbox lifecycle span и отдельной process session подготовки. При выходе
+или сигнале незавершённая подготовка останавливается с доказанной quiescence, временный env
+убирается; частичные рабочие деревья и данные автоматически не удаляются. SandboxSpan и
+BootstrapSpan могут перекрываться: их длительности нельзя складывать как elapsed time попытки.
 
 ## Lifecycle, provider lineage и runtime usage
 
@@ -1316,6 +1341,9 @@ PROJECT_RUNNER_PRIMARY=<provider>
 3. строит новый документ;
 4. пишет temp в том же каталоге;
 5. делает atomic rename.
+
+Writer сохраняет комментарии, пустые строки и порядок существующих ключей: смена одной модели
+не стирает причины остальных настроек. Новые ключи добавляются в конец.
 
 Код 72 означает stale revision, 78 — неподдерживаемую schema/config.
 

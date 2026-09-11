@@ -1801,11 +1801,12 @@ export function openCodexSession({
     get alive() { return !exited; },
     get busy() { return !!turn; },
 
-    async send({ message, onStep, onProgress, onPermission }: {
+    async send({ message, onStep, onProgress, onPermission, onSessionCreated }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number) => void;
       onPermission?: (ask: Record<string, unknown>) => unknown;
+      onSessionCreated?: (sessionId: string) => unknown;
     }) {
       if (exited) throw new Error(exitReason || 'Сессия Codex закрыта.');
       if (turn) throw new Error('В этой сессии уже идёт ход.');
@@ -1825,6 +1826,15 @@ export function openCodexSession({
       try {
         await ready;
         if (current.settled) return result;
+        // Id thread известен сразу после handshake: сообщаем его до turn/start, чтобы
+        // перезапуск сервера посреди хода не оставил чат без сессии для resume.
+        if (threadId && onSessionCreated) {
+          try {
+            await onSessionCreated(threadId);
+          } catch (error) {
+            log?.warn?.({ err: (error as Error)?.message }, 'чат: id сессии не принят вызывающим');
+          }
+        }
         current.stepSink.emitAll(current.normalizeStep({
           type: 'thread.started', thread_id: threadId, model: actualModel,
         }));
@@ -1887,7 +1897,7 @@ export function openCodexSession({
 export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
-  workTools, workspaceAccess, onPermission, log,
+  workTools, workspaceAccess, onPermission, log, onSessionCreated,
 }: {
   config: CodexConfig;
   env?: NodeJS.ProcessEnv;
@@ -1907,6 +1917,7 @@ export async function runCodexAppServer({
   workspaceAccess?: CodexWorkspaceAccess | null;
   onPermission?: (ask: Record<string, unknown>) => unknown;
   log?: CodexLog;
+  onSessionCreated?: (sessionId: string) => unknown;
 }) {
   if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
@@ -1917,7 +1928,9 @@ export async function runCodexAppServer({
   const onAbort = () => { void session.interrupt(); };
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
-    return await session.send({ message, onStep, onProgress, onPermission });
+    return await session.send({
+      message, onStep, onProgress, onPermission, onSessionCreated,
+    });
   } finally {
     signal?.removeEventListener('abort', onAbort);
     await session.close();
@@ -2389,12 +2402,12 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
     providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
-    workTools, workspaceAccess, onPermission, log,
+    workTools, workspaceAccess, onPermission, log, onSessionCreated,
   }: Parameters<typeof runCodexAppServer>[0]) {
     return runCodexAppServer({
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
       providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools, workspaceAccess,
-      onPermission, log,
+      onPermission, log, onSessionCreated,
     });
   },
 

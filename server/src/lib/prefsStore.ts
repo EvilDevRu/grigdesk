@@ -2,7 +2,6 @@
 // Дефолты заданы здесь — отсутствующий файл означает «всё по умолчанию».
 import fs from 'node:fs';
 import path from 'node:path';
-import { COMPANION_DEFAULTS, normalizeCompanionSettings } from './companionSettings.ts';
 import { ARBITER_DEFAULTS, normalizeArbiterSettings } from './factoryArbiter.ts';
 import { SPEECH_DEFAULTS, normalizeSpeechSettings } from './speechSettings.ts';
 import { normalizeStoredTrustedDirectories } from './trustedDirectories.ts';
@@ -55,13 +54,7 @@ const DEFAULTS = {
   // Настройки распознавания имеют собственный валидированный endpoint. Объект здесь
   // обязателен: PrefsStore.write отбрасывает неизвестные ключи верхнего уровня.
   speech: SPEECH_DEFAULTS,
-  // Чем уходит быстрый ход голосового компаньона: { modelRef: {provider, model}, effort }.
-  // Настройка серверная, а не device-local: история компаньона server-owned и общая для
-  // всех окон, поэтому один разговор не должен идти разными моделями с разных устройств.
-  // Пустое значение = модель по умолчанию из реестра исполнителей.
-  companion: COMPANION_DEFAULTS,
-  // Арбитр типизированной остановки конвейера: { modelRef, effort, auto }. Модель
-  // отдельная от companion — это разные решения человека, и общий ключ связал бы их.
+  // Арбитр типизированной остановки конвейера: { modelRef, effort, auto }.
   // `auto: false` по умолчанию: арбитр действует САМ, двигая курсор чужой задачи, и
   // включённым по умолчанию делал бы это там, где его решений ещё никто не читал.
   arbiter: ARBITER_DEFAULTS,
@@ -104,7 +97,6 @@ export class PrefsStore {
       // Общий store мержит верхний уровень. Speech доклеиваем отдельно, иначе старый
       // частичный объект затрёт новые поля defaults целиком.
       speech: normalizeSpeechSettings(loaded.speech),
-      companion: normalizeCompanionSettings(loaded.companion),
       arbiter: normalizeArbiterSettings(loaded.arbiter),
     };
   }
@@ -117,9 +109,8 @@ export class PrefsStore {
     for (const k of Object.keys(DEFAULTS)) {
       if (patch && k in patch) {
         if (k === 'trustedDirectories') next[k] = normalizeStoredTrustedDirectories(patch[k]);
-        // Форму настройки компаньона нормализуем на записи: она уходит в аргументы CLI,
+        // Форму настройки арбитра нормализуем на записи: она уходит в аргументы CLI,
         // и произвольный объект из тела запроса храниться здесь не должен.
-        else if (k === 'companion') next[k] = normalizeCompanionSettings(patch[k]);
         else if (k === 'arbiter') next[k] = normalizeArbiterSettings(patch[k]);
         else next[k] = patch[k];
       }

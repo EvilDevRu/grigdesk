@@ -279,3 +279,244 @@ test('правка одной сцены отправляет на пересъ�
     'правленая сцена пересnята',
   );
 });
+
+/**
+ * Стенд за входом: без cookie сессии главная уводит на форму, форма принимает
+ * учётку POST-ом и ставит cookie. Так выглядит любой рабочий стенд, и запись
+ * без входа сняла бы форму вместо экрана.
+ */
+async function startGatedTarget() {
+  const server = http.createServer((request, response) => {
+    const authorized = /session=ok/.test(String(request.headers.cookie ?? ''));
+
+    if (request.method === 'POST' && request.url === '/login') {
+      let body = '';
+
+      request.on('data', (chunk) => {
+        body += chunk;
+      });
+      request.on('end', () => {
+        const params = new URLSearchParams(body);
+        const accepted = params.get('user') === 'demo' && params.get('pass') === 'secret';
+
+        response.writeHead(302, {
+          location: accepted ? '/' : '/login',
+          ...(accepted ? { 'set-cookie': 'session=ok; Path=/' } : {}),
+        });
+        response.end();
+      });
+
+      return;
+    }
+
+    if (request.url === '/login' || !authorized) {
+      response.writeHead(request.url === '/login' ? 200 : 302, {
+        'content-type': 'text/html; charset=utf-8',
+        ...(request.url === '/login' ? {} : { location: '/login' }),
+      });
+      response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"></head><body>
+<form method="post" action="/login"><input id="user" name="user"><input id="pass" name="pass" type="password">
+<button type="submit">Войти</button></form></body></html>`);
+
+      return;
+    }
+
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Стенд</title>
+<style>body{margin:0;background:#101318;color:#eef;font:16px system-ui}main{padding:40px}</style>
+</head><body><main><a href="/logout">Выйти</a>
+<h1 data-testid="ready">Экран за входом</h1><button data-testid="run">Запустить</button>
+</main></body></html>`);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  return {
+    origin: `http://127.0.0.1:${server.address().port}`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+test('запись входит на стенд тестовой учёткой и снимает экран за входом', async (t) => {
+  const browserPath = await findBrowser();
+
+  if (!browserPath) {
+    t.skip('браузер записи не установлен: это не успешная приёмка, а её отсутствие');
+
+    return;
+  }
+
+  const target = await startGatedTarget();
+
+  t.after(() => target.close());
+
+  const { service, root } = await fixture(t, { browserPath, targetOrigin: target.origin });
+  const profileDir = path.join(root, 'profiles', 'demo-profile');
+
+  await writeFile(path.join(profileDir, 'showcase', 'target.json'), JSON.stringify({
+    version: 1,
+    environment: 'read-only',
+    project: { record: target.origin, view: target.origin },
+    sandbox: null,
+    allowedOrigins: [],
+    capabilities: ['record', 'login'],
+  }), 'utf8');
+  await writeFile(path.join(profileDir, 'showcase', 'login.json'), JSON.stringify({
+    version: 1,
+    url: '/login',
+    userSelector: '#user',
+    passwordSelector: '#pass',
+    submitSelector: 'button[type="submit"]',
+    readySelector: 'a[href="/logout"]',
+    credentialsRef: 'lib.sh:STAND_USER:STAND_PASS',
+  }), 'utf8');
+  await writeFile(path.join(profileDir, 'lib.sh'), 'STAND_USER="demo"\nSTAND_PASS=\'secret\'\n', 'utf8');
+
+  let project = await service.createProject({
+    ref: { kind: 'project', id: 'demo-profile' },
+    profile: 'demo-profile',
+    title: 'Запись за входом',
+  });
+
+  assert.ok(project.target.scope.capabilities.includes('login'), 'вход объявлен и подтверждён файлом');
+
+  project = await service.addScene(project.id, project.revision, {
+    title: 'За входом',
+    screenId: 'overview',
+    narration: 'Экран за входом.',
+    caption: '',
+    subtitleText: '',
+    startState: null,
+    readyCondition: null,
+    actions: [{ kind: 'hover', targetId: 'run' }, { kind: 'wait', ms: 400 }],
+  });
+
+  const job = await service.startRecording(project.id);
+  const finished = await waitForJob(service, job.id);
+
+  assert.equal(finished.state, 'succeeded', finished.error ?? '');
+
+  const recorded = await service.readProject(project.id);
+
+  assert.ok(recorded.scenes[0].clip, 'экран за входом записался, а не форма входа');
+  assert.ok(recorded.scenes[0].clip.byteSize > 10_000);
+});
+
+/**
+ * Стенд, чей экран читает данные POST-ом с API на ДРУГОМ адресе: так устроены
+ * сводки и поиск многих SPA. Запрос идёт с заголовком авторизации, поэтому браузер
+ * сначала спрашивает preflight (OPTIONS), и только потом отправляет сам POST.
+ * Условие готовности экрана появляется лишь после ответа API — блокировка любого
+ * из двух запросов оставила бы сцену без готовности.
+ */
+async function startPostReadingTarget() {
+  const api = http.createServer((request, response) => {
+    const cors = {
+      'access-control-allow-origin': String(request.headers.origin ?? '*'),
+      'access-control-allow-headers': 'authorization, content-type',
+      'access-control-allow-methods': 'POST, OPTIONS',
+    };
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, cors);
+      response.end();
+
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/api/summary') {
+      response.writeHead(200, { ...cors, 'content-type': 'application/json' });
+      response.end(JSON.stringify({ rows: 3 }));
+
+      return;
+    }
+
+    response.writeHead(405, cors);
+    response.end();
+  });
+
+  await new Promise((resolve) => api.listen(0, '127.0.0.1', resolve));
+
+  const apiOrigin = `http://127.0.0.1:${api.address().port}`;
+  const server = http.createServer((request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Стенд</title>
+<style>body{margin:0;background:#101318;color:#eef;font:16px system-ui}main{padding:40px}</style>
+</head><body><main><h1 id="title">Сводка</h1><button data-testid="run">Запустить</button>
+<script>
+fetch('${apiOrigin}/api/summary', {
+  method: 'POST',
+  headers: { authorization: 'Bearer demo', 'content-type': 'application/json' },
+  body: '{}',
+}).then((r) => r.json()).then((data) => {
+  const p = document.createElement('p');
+  p.dataset.testid = 'ready';
+  p.textContent = 'строк: ' + data.rows;
+  document.querySelector('main').append(p);
+});
+</script></main></body></html>`);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  return {
+    origin: `http://127.0.0.1:${server.address().port}`,
+    apiOrigin,
+    close: async () => {
+      await new Promise((resolve) => server.close(resolve));
+      await new Promise((resolve) => api.close(resolve));
+    },
+  };
+}
+
+test('экран, читающий данные POST-ом с другого адреса, записывается по объявлению цели', async (t) => {
+  const browserPath = await findBrowser();
+
+  if (!browserPath) {
+    t.skip('браузер записи не установлен: это не успешная приёмка, а её отсутствие');
+
+    return;
+  }
+
+  const target = await startPostReadingTarget();
+
+  t.after(() => target.close());
+
+  const { service, root } = await fixture(t, { browserPath, targetOrigin: target.origin });
+
+  await writeFile(path.join(root, 'profiles', 'demo-profile', 'showcase', 'target.json'), JSON.stringify({
+    version: 1,
+    environment: 'read-only',
+    project: { record: target.origin, view: target.origin },
+    sandbox: null,
+    allowedOrigins: [target.apiOrigin],
+    allowedMethods: ['POST'],
+    capabilities: ['record'],
+  }), 'utf8');
+
+  let project = await service.createProject({
+    ref: { kind: 'project', id: 'demo-profile' },
+    profile: 'demo-profile',
+    title: 'Сводка POST-ом',
+  });
+
+  project = await service.addScene(project.id, project.revision, {
+    title: 'Сводка',
+    screenId: 'overview',
+    narration: 'Сводка загружена.',
+    caption: '',
+    subtitleText: '',
+    startState: null,
+    readyCondition: null,
+    actions: [{ kind: 'hover', targetId: 'run' }, { kind: 'wait', ms: 400 }],
+  });
+
+  const job = await service.startRecording(project.id);
+  const finished = await waitForJob(service, job.id);
+
+  assert.equal(finished.state, 'succeeded', finished.error ?? '');
+
+  const recorded = await service.readProject(project.id);
+
+  assert.ok(recorded.scenes[0].clip, 'готовность наступила только после ответа API — значит, POST прошёл');
+});

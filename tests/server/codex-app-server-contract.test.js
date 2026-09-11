@@ -520,3 +520,17 @@ test('Codex ограничивает один multi-file tool двадцатью
   );
   assert.deepEqual(sink.steps, sent, 'SSE и сохранённая история видят один и тот же bounded step');
 });
+
+test('Codex сообщает id thread до первого шага хода', async (t) => {
+  const f = await fixture(t);
+  const seen = [];
+  const live = [];
+  const result = await codex.run(runOptions(f, {
+    onStep: (step) => live.push(step),
+    onSessionCreated: (id) => { seen.push({ id, stepsBefore: live.length }); },
+  }));
+
+  // Перезапуск сервера посреди хода не должен оставить чат без id для thread/resume:
+  // id уходит вызывающему сразу после handshake, до первого шага ленты.
+  assert.deepEqual(seen, [{ id: result.sessionId, stepsBefore: 0 }]);
+});

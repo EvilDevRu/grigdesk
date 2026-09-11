@@ -180,20 +180,31 @@ function event(
 /**
  * Называет то, чего карточка ждёт прямо сейчас. Живое наблюдение важнее причины
  * постановки: она лишь запасной текст, когда ни один источник ничего не обещает.
+ *
+ * Ворота и затык проверяются раньше result, и это не вкусовщина. result и gate
+ * приезжают из разных источников — сводки прогона и разобранного графа, — поэтому
+ * спокойно сосуществуют: прогон доехал до узла человека и закрылся, а сами ворота
+ * остались открытыми. Со старым порядком карточка писала «жду ответ в задаче» ровно
+ * там, где конвейер ждал решения, и спорила сама с собой: строка активности конвейера
+ * называет ворота первыми. Порядок здесь обязан совпадать с pipelineActivity в сторе.
  */
 function waitingText(reason: string, current: ShelfObservedSnapshot): string {
   const analysisState = current.analysis?.state;
+  const pipeline = current.pipeline;
 
+  if (pipeline?.attempt && pipeline.gate) {
+    return 'Жду моего решения';
+  }
+  if (pipeline?.attempt && pipeline.stall) {
+    return 'Конвейер встал';
+  }
   if (analysisState === 'queued' || analysisState === 'running') {
     return 'Жду оценку';
   }
-  if (current.pipeline?.attempt && !current.pipeline.result
-    && (current.pipeline.daemon === 'running'
-      || current.pipeline.gate
-      || current.pipeline.stall)) {
+  if (pipeline?.attempt && !pipeline.result && pipeline.daemon === 'running') {
     return 'Жду конвейер';
   }
-  if (current.pipeline?.attempt && current.pipeline.result && current.b24?.present) {
+  if (pipeline?.attempt && pipeline.result && current.b24?.present) {
     return 'Жду ответ в задаче';
   }
 

@@ -88,6 +88,32 @@
           </div>
         </template>
 
+        <!-- Итог вызова, чья строка не дожила до этой ленты -->
+        <template v-else-if="r.k === 'res'">
+          <UiDisclosureButton
+            class="step-disclosure"
+            density="compact"
+            :open="Boolean(expanded[i])"
+            :controls="`${baseId}-step-${i}`"
+            :disabled="!r.text"
+            @update:open="toggle(i, r)"
+          >
+            <span class="head other">
+              <span class="ico">•</span>
+              <span class="nm">Итог</span>
+              <span class="ttl">действие вытеснено из ленты</span>
+              <span v-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+              <span class="mark" :class="{ bad: !r.ok }">{{ r.ok ? '✓' : '✕' }}</span>
+            </span>
+          </UiDisclosureButton>
+          <pre
+            v-if="expanded[i] && r.text"
+            :id="`${baseId}-step-${i}`"
+            class="body res"
+            :class="{ bad: !r.ok }"
+          >{{ r.text }}</pre>
+        </template>
+
         <!-- Служебное: старт хода, ретраи, сжатие контекста -->
         <div v-else-if="r.k === 'start'" class="note start">
           старт · модель <b>{{ r.model || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
@@ -127,6 +153,14 @@ const rows = computed(() => {
     if (s.k === 'res') {
       const tool = byId.get(s.id);
       if (tool) { tool.res = s; continue; }
+      // Вызов не дошёл (его вытеснило окно ленты) — результат всё равно показываем
+      // своей строкой: раньше он молча превращался в пустую строку без разметки.
+    }
+    // Исполнитель дослал подробности уже показанного вызова — обновляем ТУ ЖЕ строку.
+    // Иначе одно действие выглядело бы двумя, а свежий вариант — повтором.
+    if (s.k === 'tool' && s.id) {
+      const known = byId.get(s.id);
+      if (known) { Object.assign(known, s); continue; }
     }
     // Одинаковые служебные строки подряд (ретраи сети идут сериями) — одной строкой с «×N».
     const prev = out[out.length - 1];

@@ -26,6 +26,7 @@ const {
   numeric,
   objectOf,
   oneOf,
+  optional,
   text,
 } = contractDecoders((path) => {
   throw new SandboxContractError(path);
@@ -66,6 +67,10 @@ const sandboxEntry = objectOf({
   apiPort: nullable(numeric),
   repos: listOf(sandboxRepo),
   standAlive: nullable(boolean),
+  // Новые признаки необязательны на проводе: старый сервер и сохранённые fixtures
+  // продолжают читаться, а null означает, что отдельной проверки ещё не было.
+  feAlive: optional(boolean),
+  profileBinding: optional(oneOf('verified', 'inferred')),
   removable: boolean,
   removableReason: nullable(oneOf('pipeline_owned', 'job_running', 'unknown_owner')),
   updatedAt: nullable(text),

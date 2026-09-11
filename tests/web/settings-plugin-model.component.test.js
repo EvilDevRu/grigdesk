@@ -8,40 +8,12 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { SYSTEM } from '../../server/src/lib/pluginsRegistry.ts';
 import { webFile } from './helpers/compile-vue.js';
-import { compileSettingsView } from './helpers/settings-view.js';
+import { compilePluginsCatalog } from './helpers/plugins-catalog.js';
+import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = webFile('src/views/SettingsView.vue');
-
-async function installBrowser(t, storage = {}) {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
-  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
-  for (const [key, value] of Object.entries({
-    window: browser,
-    document: browser.document,
-    navigator: browser.navigator,
-    location: browser.location,
-    localStorage: browser.localStorage,
-    Node: browser.Node,
-    Element: browser.Element,
-    HTMLElement: browser.HTMLElement,
-    HTMLButtonElement: browser.HTMLButtonElement,
-    HTMLSelectElement: browser.HTMLSelectElement,
-    SVGElement: browser.SVGElement,
-    Event: browser.Event,
-    CustomEvent: browser.CustomEvent,
-    getComputedStyle: browser.getComputedStyle.bind(browser),
-  })) {
-    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  }
-  for (const [key, value] of Object.entries(storage)) browser.localStorage.setItem(key, value);
-  browser.document.body.innerHTML = '<div id="mount"></div>';
-  t.after(() => browser.close());
-  return browser;
-}
+const CATALOG_PATH = webFile('src/views/settings/PluginsCatalog.vue');
 
 // Реестр как в жизни: облачный исполнитель со «свежей» и «старой» моделями плюс локальный,
 // у которого id модели с точкой, двоеточием и слэшем.
@@ -156,40 +128,43 @@ function makePluginsStore(values, manifest = INBOX_PLUGIN) {
   };
 }
 
+let mountNonce = 0;
+
+/**
+ * Форма параметров живёт в модалке плитки, поэтому каждый тест открывает нужный плагин
+ * и дальше работает с её содержимым. Teleport на время теста оставляем на месте.
+ */
 async function mountSettings(t, { value = null, plugin = INBOX_PLUGIN } = {}) {
-  const browser = await installBrowser(t, { 'cockpit-settings-tab': 'plugins' });
+  const prefix = `__pluginModel${mountNonce += 1}`;
+  const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
   const prov = makeProvidersStore();
   const { store: plugins, saved } = makePluginsStore(value, plugin);
-  globalThis.__settingsApi = {
-    async get() { return {}; },
-    async post() { return {}; },
-  };
-  globalThis.__settingsStores = {
-    useProvidersStore: () => prov,
-    useUiContextStore: () => ({ set() {}, clear() {} }),
-    useAuthStore: () => ({ login: 'me', async logoutAll() {} }),
+  globalThis[`${prefix}Stores`] = {
     usePluginsStore: () => plugins,
-    useChatStore: () => ({ compactWindow: 0 }),
-    useCompanionStore: () => ({ deviceEnabled: true, setDeviceEnabled() {} }),
-    usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useProvidersStore: () => prov,
   };
-  const [{ mount, flushPromises }, SettingsView] = await Promise.all([
+
+  const [{ mount, flushPromises }, PluginsCatalog] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileSettingsView(),
+    compilePluginsCatalog({ prefix }),
   ]);
-  const wrapper = mount(SettingsView, {
+  const wrapper = mount(PluginsCatalog, {
     attachTo: browser.document.querySelector('#mount'),
-    global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    global: { stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
-    delete globalThis.__settingsApi;
-    delete globalThis.__settingsStores;
+    delete globalThis[`${prefix}Stores`];
   });
-  for (let i = 0; i < 5; i += 1) await flushPromises();
-  const select = wrapper.find('.plugrow select.inp');
-  return { wrapper, prov, plugins, saved, select, flushPromises };
+  for (let i = 0; i < 3; i += 1) await flushPromises();
+
+  await wrapper.get(`[data-plugin-id="${plugins.plugin.id}"] .plugin-tile-open`).trigger('click');
+  await flushPromises();
+
+  const dialog = wrapper.find('.ui-dialog');
+  assert.ok(dialog.exists(), 'модалка параметров не открылась');
+
+  return { wrapper: dialog, prov, plugins, saved, select: dialog.find('.plugrow select.inp'), flushPromises };
 }
 
 test('модели берутся из общего реестра исполнителей, группами', async (t) => {
@@ -206,10 +181,12 @@ test('модели берутся из общего реестра исполн�
     wrapper.findAll('.plugrow optgroup option').map((o) => o.text()),
     ['Opus 5', 'qwen3.6 (hf)', 'GPT-5.6'],
   );
-  // Недоступного исполнителя видно, но выбрать нельзя — иначе автомат уехал бы в никуда.
+  // Недоступность — итог последней проверки, а не приговор: CLI мог не ответить на опрос,
+  // моргнуть сетью или разлогиниться на минуту. Оговорка в названии группы остаётся,
+  // блокировки выбора нет — иначе один неудачный опрос решал бы за человека.
   assert.deepEqual(
     wrapper.findAll('.plugrow optgroup option').map((o) => o.attributes('disabled') !== undefined),
-    [false, false, true],
+    [false, false, false],
   );
   // Подсказка манифеста должна доехать до экрана: она объясняет, почему без модели
   // автоматических задач не будет вовсе.
@@ -226,7 +203,7 @@ test('карточка триажа предлагает только испол
 });
 
 test('выбор сохраняется парой «исполнитель + модель», а id со слэшем не рвётся', async (t) => {
-  const { plugins, saved, select, flushPromises } = await mountSettings(t);
+  const { wrapper, plugins, saved, select, flushPromises } = await mountSettings(t);
 
   await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
   assert.deepEqual(
@@ -235,12 +212,25 @@ test('выбор сохраняется парой «исполнитель + м
     'id модели содержит и слэши, и двоеточия — режем строку по ПЕРВОМУ двоеточию',
   );
 
-  await select.element.closest('.plugset').querySelector('button').click();
+  await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
   assert.deepEqual(saved, [{
     id: 'inbox',
     values: { triageModel: { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest' } },
   }], 'на сервер уезжает пара, а не склеенная строка');
+});
+
+test('модель недоступного исполнителя выбирается и сохраняется', async (t) => {
+  // Причина недоступности бывает временной, а настройка живёт дольше: человек вправе
+  // назначить модель заранее — сервер попробует запустить её и назовёт настоящий отказ.
+  const { wrapper, plugins, saved, select, flushPromises } = await mountSettings(t);
+
+  await select.setValue('codex:gpt-5.6');
+  assert.deepEqual(plugins.plugin.values.triageModel, { provider: 'codex', model: 'gpt-5.6' });
+
+  await wrapper.get('.plugin-save').trigger('click');
+  await flushPromises();
+  assert.deepEqual(saved, [{ id: 'inbox', values: { triageModel: { provider: 'codex', model: 'gpt-5.6' } } }]);
 });
 
 test('сохранённый выбор показан выбранным', async (t) => {
@@ -342,7 +332,7 @@ test('усилие уезжает в ту же пару и сохраняетс�
   assert.deepEqual(plugins.plugin.values.triageModel,
     { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' });
 
-  await wrapper.find('.plugset button').trigger('click');
+  await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
   assert.deepEqual(saved.at(-1).values.triageModel,
     { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' },
@@ -390,32 +380,20 @@ test('уровень, пропавший у модели, показан пом�
     'исчезнувший уровень обязан остаться в списке с оговоркой');
 });
 
-test('каталог и detail складываются в одну колонку без dense-переупорядочивания', async () => {
-  // happy-dom раскладку не считает вовсе, поэтому адаптивный контракт стережём
-  // чтением стиля, а поведение выбора — отдельным компонентным тестом.
-  const source = await readFile(VIEW_PATH, 'utf8');
+test('каталог — сетка плиток, и на узком экране она остаётся сеткой', async () => {
+  // happy-dom раскладку не считает вовсе, поэтому адаптивный контракт стережём чтением
+  // стиля, а поведение плиток и модалки — отдельными компонентными тестами.
+  const source = await readFile(CATALOG_PATH, 'utf8');
   const style = source.slice(source.indexOf('<style'));
 
-  assert.match(style, /\.plugin-browser \{[^}]*grid-template-columns:[^;}]*270px[^;}]*1\.55fr/s,
-    'на широком экране каталог и detail должны занимать самостоятельные колонки');
+  assert.match(style, /\.plugin-grid \{[^}]*grid-template-columns: repeat\(auto-fill, minmax\(150px/s,
+    'плитки должны заполнять ширину сами, а не выстраиваться в одну колонку');
   assert.doesNotMatch(style, /grid-auto-flow:\s*dense/,
     'dense меняет визуальный порядок относительно DOM и клавиатурного фокуса');
-  assert.match(style, /\.plugin-catalog-list \{[^}]*max-height:[^;}]*66vh[^}]*overflow-y:\s*auto/s,
-    'длинный desktop-каталог должен прокручиваться независимо от формы');
-
-  const tablet = style.slice(style.indexOf('@media (max-width: 959px)'));
-  assert.match(tablet, /\.plugin-browser \{ grid-template-columns: minmax\(0, 1fr\); \}/,
-    'на планшете detail не должен сжиматься рядом с каталогом');
-  assert.match(tablet, /\.plugin-catalog-list \{[^}]*max-height:\s*none[^}]*overflow-y:\s*visible/s,
-    'в одноколоночной раскладке не нужен вложенный вертикальный скролл');
-  assert.match(tablet, /\.plugin-mobile-back \{ display: inline-flex; \}/,
-    'после перехода к detail на планшете нужен короткий путь обратно к каталогу');
+  assert.match(style, /\.plugin-tile-power \{ position: absolute;/,
+    'кнопка питания лежит поверх плитки, а не внутри её кнопки — иначе интерактив вложен в интерактив');
 
   const mobile = style.slice(style.indexOf('@media (max-width: 639px)'));
-  assert.match(mobile, /\.plugin-browser\.mobile-detail-open \.plugin-catalog \{ display: none; \}/,
-    'на телефоне выбранный detail заменяет длинный каталог');
-  assert.match(mobile, /\.plugin-browser:not\(\.mobile-detail-open\) \.plugin-detail \{ display: none; \}/,
-    'до выбора телефон должен показывать каталог, а не случайный первый detail');
-  assert.match(style, /\.plugset > \.btn \{ align-self: flex-start; \}/,
-    'кнопка сохранения обязана оставаться по содержимому');
+  assert.match(mobile, /\.plugin-grid \{ grid-template-columns: repeat\(auto-fill, minmax\(128px/,
+    'на телефоне плитки сужаются, но список из них не делается');
 });

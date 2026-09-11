@@ -20,15 +20,11 @@ test('UI-04/07: BoardView переключает favoriteOnly и передаё�
   assert.match(filter.text(), /1/);
   assert.equal(filter.attributes('aria-pressed'), 'false');
 
-  const projectBadges = wrapper.findAll('.project-badge');
-  assert.deepEqual(projectBadges.map((badge) => badge.text()), ['A', 'B']);
-  assert.equal(projectBadges[0].attributes('title'), 'Проект: A');
-  assert.equal(projectBadges[0].attributes('aria-label'), 'Проект: A');
-  const firstRowChildren = [...wrapper.get('li.trow').element.children];
-  assert.ok(firstRowChildren.indexOf(wrapper.get('button.stub-fav').element)
-    < firstRowChildren.indexOf(projectBadges[0].element));
-  assert.ok(firstRowChildren.indexOf(projectBadges[0].element)
-    < firstRowChildren.indexOf(wrapper.get('button.ttext').element));
+  const projects = wrapper.findAll('.task-project');
+  assert.deepEqual(projects.map((project) => project.text()), ['A', 'B']);
+  assert.equal(wrapper.get('li.trow .task-id').text(), '#11');
+  await wrapper.get('button.ttext').trigger('click');
+  assert.deepEqual(calls.opened, ['11']);
 
   await filter.trigger('click');
   await flushPromises();
@@ -38,6 +34,7 @@ test('UI-04/07: BoardView переключает favoriteOnly и передаё�
 
   await wrapper.get('button.stub-fav').trigger('click');
   assert.deepEqual(calls.toggled, ['11']);
+  assert.deepEqual(calls.opened, ['11'], 'переключение звезды не открывает задачу');
 });
 
 test('Полка обводит существующую точку и не меняет состав доски или звезду', async (t) => {

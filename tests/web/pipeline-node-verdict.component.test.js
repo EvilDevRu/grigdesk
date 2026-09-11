@@ -84,10 +84,6 @@ async function mountPipeline(t, { factoryTask, graph }) {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineVerdictCompanionStore = defineStore('pipeline-verdict-companion', {
-    actions: { openForTask() {} },
-  });
-
   const wrapper = mount(await compilePipelineView('__pipelineVerdict'), {
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()], stubs: { teleport: true } },
@@ -98,7 +94,7 @@ async function mountPipeline(t, { factoryTask, graph }) {
     for (const key of [
       '__pipelineVerdictApi', '__pipelineVerdictConfirmDialog', '__pipelineVerdictAlertDialog',
       '__pipelineVerdictFactoryGraph', '__pipelineVerdictUiStore', '__pipelineVerdictTasksStore',
-      '__pipelineVerdictBoardStore', '__pipelineVerdictCompanionStore',
+      '__pipelineVerdictBoardStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

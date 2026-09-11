@@ -8,12 +8,11 @@ import type {
   ShowcaseOverview,
   ShowcaseProject,
   ShowcaseProjectSummary,
-  ShowcaseTargetProfile,
   ShowcaseVoiceCatalog,
 } from '../../../shared/showcaseContracts';
 
 interface ShowcaseState {
-  profiles: ShowcaseTargetProfile[];
+  targets: ShowcaseOverview['targets'];
   projects: ShowcaseProjectSummary[];
   jobs: ShowcaseJob[];
   limits: ShowcaseOverview['limits'];
@@ -30,7 +29,7 @@ interface ShowcaseState {
 
 export const useShowcaseStore = defineStore('showcase', {
   state: (): ShowcaseState => ({
-    profiles: [],
+    targets: [],
     projects: [],
     jobs: [],
     limits: {
@@ -49,10 +48,10 @@ export const useShowcaseStore = defineStore('showcase', {
   }),
 
   getters: {
-    // Цель показа выбирается только среди профилей, объявивших контракт: остальные
-    // видно в форме с причиной, но выбрать их нельзя.
-    readyProfiles(state): ShowcaseTargetProfile[] {
-      return state.profiles.filter((profile) => profile.ready);
+    // В форму попадают все известные цели, но выбрать можно только ту, которую
+    // сервер уже связал с живым адресом и профилем.
+    readyTargets(state): ShowcaseOverview['targets'] {
+      return state.targets.filter((target) => target.status === 'ready');
     },
 
     // Задания, которые ещё идут: по ним показывается прогресс и кнопка отмены.
@@ -85,7 +84,7 @@ export const useShowcaseStore = defineStore('showcase', {
      * и склейка со старым составом показывала бы призраков.
      */
     setOverview(overview: ShowcaseOverview) {
-      this.profiles = overview.profiles;
+      this.targets = overview.targets;
       this.projects = overview.projects;
       this.jobs = overview.jobs;
       this.limits = overview.limits;

@@ -16,6 +16,7 @@ export type LockErrorFactory = (code: string, message: string) => Error;
 
 export interface KernelFileLockOptions {
   lockPath: string;
+  mode?: 'exclusive' | 'shared';
   timeoutMs?: number;
   binary?: string;
   timeoutCode?: string;
@@ -30,6 +31,7 @@ export interface KernelFileLockOptions {
 export interface KernelFileLock {
   assertHeld: () => void;
   assertPathIdentity: () => Promise<void>;
+  inheritedFd: () => number;
   release: () => Promise<void>;
 }
 
@@ -53,6 +55,7 @@ function failureText(error: unknown): string {
  */
 export async function acquireKernelFileLock({
   lockPath,
+  mode = 'exclusive',
   timeoutMs = 5_000,
   binary = 'flock',
   timeoutCode = 'FILE_LOCK_TIMEOUT',
@@ -79,7 +82,7 @@ export async function acquireKernelFileLock({
   let stderr = '';
   try {
     const child = spawn(binary, [
-      '--exclusive',
+      mode === 'shared' ? '--shared' : '--exclusive',
       '--timeout',
       String(Math.max(0.001, Number(timeoutMs) / 1000)),
       '3',
@@ -160,6 +163,16 @@ export async function acquireKernelFileLock({
           `Kernel lock ${label} потерял path identity: ${failureText(error)}`,
         );
       }
+    },
+    inheritedFd() {
+      if (released || handle.fd < 0) {
+        throw errorFactory(lostCode, `Kernel lock ${label} уже освобождён`);
+      }
+
+      // spawn() дублирует этот fd в дочерний процесс. Дубликат ссылается на то
+      // же open-file-description и продолжает держать flock после закрытия
+      // родительской копии — это нужно отсоединённым заданиям.
+      return handle.fd;
     },
     async release() {
       if (released) return;

@@ -71,9 +71,17 @@ export function parseBrief(reply: unknown): string[] | null {
  * Действие сцены. Модель называет идентификатор элемента, а селектор к нему
  * подставляет recorder по карте профиля — сюда селектор не проходит ни в каком виде.
  */
-function parseAction(value: unknown, screen: ScriptScreen): ShowcaseAction | null {
+// Переход на экран сцены делает сама запись, поэтому `goto` без цели — не ошибка
+// формы, а лишнее слово: такое действие просто выбрасывается из сцены.
+const SKIP_ACTION = Symbol('skip');
+
+function parseAction(value: unknown, screen: ScriptScreen): ShowcaseAction | typeof SKIP_ACTION | null {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return null;
+  }
+
+  if (value.kind === 'goto' && (value.targetId === null || value.targetId === undefined)) {
+    return SKIP_ACTION;
   }
 
   if (value.kind === 'wait') {
@@ -147,7 +155,9 @@ function parseScene(value: unknown, screens: ScriptScreen[]): DraftScene | null 
       return null;
     }
 
-    actions.push(action);
+    if (action !== SKIP_ACTION) {
+      actions.push(action);
+    }
   }
 
   return {

@@ -40,6 +40,14 @@ import {
   writeSandboxJournalRecord,
 } from './registry.ts';
 import type { SandboxRegistryEntry } from './registry.ts';
+import {
+  createSandboxActivityGuard,
+  SandboxActivityError,
+} from './activityGuard.ts';
+import type {
+  SandboxActivityGuard,
+  SandboxActivityLease,
+} from './activityGuard.ts';
 
 export interface SandboxServiceOptions {
   stateDir: string;
@@ -55,6 +63,7 @@ export interface SandboxServiceOptions {
   subscribe?: (listener: (event: string, data: unknown) => void) => () => void;
   sweepMs?: number;
   probe?: (port: number) => Promise<boolean>;
+  sandboxActivityGuard?: SandboxActivityGuard;
 }
 
 export interface SandboxRaiseInput {
@@ -168,6 +177,8 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
   // Живые задания держатся в памяти: тик слежения обязан стоить одно чтение журнала
   // этапов на задание, а не обход всего журнала установки.
   const running = new Map<string, SandboxJournalRecord>();
+  const activityGuard = options.sandboxActivityGuard
+    ?? createSandboxActivityGuard({ stateDir });
   let sweep: NodeJS.Timeout | null = null;
   let unsubscribe: (() => void) | null = null;
 
@@ -246,12 +257,62 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     return capable.length === 1 ? capable[0] ?? null : null;
   }
 
+  /**
+   * Профиль считается привязанным к ТЕКУЩЕМУ поколению стенда, только если env
+   * появился во время успешного up, запущенного самим кокпитом. Старый journal с
+   * тем же номером задачи не получает полномочия над пересозданной песочницей.
+   */
+  function profileBinding(
+    entry: SandboxRegistryEntry,
+    record: SandboxJournalRecord | null,
+  ): 'verified' | 'inferred' | null {
+    if (!record?.profile) {
+      return null;
+    }
+
+    if (
+      record.action !== 'up'
+      || record.state !== 'done'
+      || !record.finishedAt
+      || !entry.updatedAt
+    ) {
+      return 'inferred';
+    }
+
+    const startedAt = Date.parse(record.startedAt);
+    const finishedAt = Date.parse(record.finishedAt);
+    const updatedAt = Date.parse(entry.updatedAt);
+    const correlated = [startedAt, finishedAt, updatedAt].every(Number.isFinite)
+      && startedAt <= updatedAt
+      && updatedAt <= finishedAt;
+
+    return correlated ? 'verified' : 'inferred';
+  }
+
   function requireTask(task: string): string {
     if (!SANDBOX_TASK_RE.test(task)) {
       throw new SandboxError('bad_task', 'номер стенда должен быть целым числом', 400);
     }
 
     return task;
+  }
+
+  /** Преобразует отказ общего kernel guard в язык lifecycle песочницы. */
+  async function acquireLifecycle(task: string): Promise<SandboxActivityLease> {
+    try {
+      return await activityGuard.acquireLifecycle(task);
+    } catch (error) {
+      if (error instanceof SandboxActivityError && error.code === 'SANDBOX_ACTIVITY_BUSY') {
+        throw new SandboxError(
+          'sandbox_busy',
+          `стенд ${task} сейчас используется презентацией или другим заданием`,
+        );
+      }
+
+      const reason = error instanceof Error ? error.message : 'kernel lock недоступен';
+
+      throw new SandboxError('sandbox_guard_unavailable', reason, 503);
+    }
   }
 
   /**
@@ -292,13 +353,15 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     record: SandboxJournalRecord,
     command: { file: string; args: string[] },
     env: Record<string, string>,
+    lease: SandboxActivityLease,
   ): Promise<SandboxJournalRecord> {
     await fs.mkdir(journalDir, { recursive: true });
 
     const log = await fs.open(record.log, 'a');
+    await lease.assertPathIdentity();
     const child = spawn(command.file, command.args, {
       detached: true,
-      stdio: ['ignore', log.fd, log.fd],
+      stdio: ['ignore', log.fd, log.fd, lease.inheritedFd()],
       env: { ...process.env, ...env },
     });
     const identity = child.pid ? readProcessIdentity(child.pid) : null;
@@ -418,12 +481,17 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     capable: string[],
   ): Promise<SandboxEntry> {
     const record = journal.get(entry.task) || null;
-    const ports = [entry.apiPort, entry.fePort].filter((port): port is number => Boolean(port));
-    const alive = ports.length
-      ? (await Promise.all(ports.map((port) => probe(port)))).some(Boolean)
-      : null;
+    const [apiAlive, feAlive] = await Promise.all([
+      entry.apiPort ? probe(entry.apiPort) : Promise.resolve(null),
+      entry.fePort ? probe(entry.fePort) : Promise.resolve(null),
+    ]);
+    const portsAlive = [apiAlive, feAlive].filter((alive) => alive !== null);
+    const alive = portsAlive.length ? portsAlive.some(Boolean) : null;
     const owned = ownedByTask(entry);
     const profile = owned ? ownerOf(record, capable) : record?.profile ?? null;
+    const binding = profile
+      ? profileBinding(entry, record) ?? 'inferred'
+      : null;
     const reason = !owned
       ? 'pipeline_owned' as const
       : record?.state === 'running'
@@ -439,6 +507,8 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       apiPort: entry.apiPort,
       repos: entry.repos,
       standAlive: alive,
+      feAlive,
+      profileBinding: binding,
       removable: reason === null,
       removableReason: reason,
       updatedAt: entry.updatedAt,
@@ -485,154 +555,176 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     async raise(input) {
       await requireProfile(input.profile);
 
-      const [registry, journal] = await Promise.all([
+      const [initialRegistry, initialJournal] = await Promise.all([
         readSandboxRegistry(stateDir),
         readSandboxJournal(journalDir),
       ]);
       const task = input.task === null
-        ? freeManualTask(registry, journal)
+        ? freeManualTask(initialRegistry, initialJournal)
         : requireTask(String(input.task));
-      const entry = registry.find((item) => item.task === task) || null;
-
-      // Реестр конвейера спрашиваем отдельно: попытка движка может существовать и
-      // до того, как стенд поднят, — тогда записи в реестре стендов ещё нет.
-      if (entry ? !ownedByTask(entry) : await hasPipelineRegistry(stateDir, task)) {
-        throw new SandboxError(
-          'pipeline_owned',
-          'этой задачей владеет конвейер — стенд поднимается и сносится в разделе «Конвейер»',
-        );
-      }
-
-      if (entry) {
-        throw new SandboxError('sandbox_exists', `стенд ${task} уже поднят`);
-      }
-
-      if (journal.some((record) => record.task === task && record.state === 'running')) {
-        throw new SandboxError('job_running', `по стенду ${task} уже идёт работа`);
-      }
-
-      let slot: number | null = null;
+      const lease = await acquireLifecycle(task);
 
       try {
-        const reservation = await reserveSlot({
-          factoryBin, stateDir, profilesDir, profile: input.profile, task,
-        });
-        slot = typeof reservation.k === 'number' ? reservation.k : null;
-      } catch (error) {
-        // Занятые слоты и сломанный распределитель — разные беды: первую человек чинит
-        // сносом лишнего стенда, вторую — профилем. Один код на двоих врал бы обоим.
-        const full = error instanceof Error && error.name === 'SlotsFullError';
-        const reason = error instanceof Error ? error.message : 'слот не выдан';
+        // Первый снимок нужен только для выбора свободного номера. После
+        // exclusive-lock всё перечитывается: параллельный процесс мог занять
+        // выбранную задачу между обходом диапазона и арендой.
+        const [registry, journal] = await Promise.all([
+          readSandboxRegistry(stateDir),
+          readSandboxJournal(journalDir),
+        ]);
+        const entry = registry.find((item) => item.task === task) || null;
 
-        throw new SandboxError(full ? 'slots_full' : 'slots_unavailable', reason);
+        // Реестр конвейера спрашиваем отдельно: попытка движка может существовать и
+        // до того, как стенд поднят, — тогда записи в реестре стендов ещё нет.
+        if (entry ? !ownedByTask(entry) : await hasPipelineRegistry(stateDir, task)) {
+          throw new SandboxError(
+            'pipeline_owned',
+            'этой задачей владеет конвейер — стенд поднимается и сносится в разделе «Конвейер»',
+          );
+        }
+
+        if (entry) {
+          throw new SandboxError('sandbox_exists', `стенд ${task} уже поднят`);
+        }
+
+        if (journal.some((record) => record.task === task && record.state === 'running')) {
+          throw new SandboxError('job_running', `по стенду ${task} уже идёт работа`);
+        }
+
+        let slot: number | null = null;
+
+        try {
+          const reservation = await reserveSlot({
+            factoryBin, stateDir, profilesDir, profile: input.profile, task,
+          });
+          slot = typeof reservation.k === 'number' ? reservation.k : null;
+        } catch (error) {
+          // Занятые слоты и сломанный распределитель — разные беды: первую человек чинит
+          // сносом лишнего стенда, вторую — профилем. Один код на двоих врал бы обоим.
+          const full = error instanceof Error && error.name === 'SlotsFullError';
+          const reason = error instanceof Error ? error.message : 'слот не выдан';
+
+          throw new SandboxError(full ? 'slots_full' : 'slots_unavailable', reason);
+        }
+
+        const record: SandboxJournalRecord = {
+          task,
+          profile: input.profile,
+          action: 'up',
+          state: 'running',
+          index: 0,
+          total: 0,
+          label: 'запуск подъёма',
+          message: '',
+          pid: null,
+          starttime: null,
+          cmdline: null,
+          log: path.join(journalDir, `t${task}.up.log`),
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        };
+        // Ровно тот же вызов, что делает движок: гард снимается явно и целиком, а
+        // слот приходит из общего распределителя, чтобы два подъёма не взяли один порт.
+        const started = await launch(
+          record,
+          { file: 'bash', args: [path.join(profilesDir, input.profile, 'up.sh'), task] },
+          {
+            STATE_DIR: stateDir,
+            FACTORY_STATE: stateDir,
+            FACTORY_WORKSPACE_MODE: 'isolated',
+            FACTORY_REQUIRE_NEW_SANDBOX: '1',
+            ...(slot === null ? {} : { FACTORY_SB_K: String(slot) }),
+          },
+          lease,
+        );
+
+        announce('sandboxes-changed', { task });
+
+        return { task, job: toSandboxJob(started) };
+      } finally {
+        // Успешный child получил копию того же OFD и продолжит держать lock сам.
+        await lease.release();
       }
-
-      const record: SandboxJournalRecord = {
-        task,
-        profile: input.profile,
-        action: 'up',
-        state: 'running',
-        index: 0,
-        total: 0,
-        label: 'запуск подъёма',
-        message: '',
-        pid: null,
-        starttime: null,
-        cmdline: null,
-        log: path.join(journalDir, `t${task}.up.log`),
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-      };
-      // Ровно тот же вызов, что делает движок: гард снимается явно и целиком, а
-      // слот приходит из общего распределителя, чтобы два подъёма не взяли один порт.
-      const started = await launch(
-        record,
-        { file: 'bash', args: [path.join(profilesDir, input.profile, 'up.sh'), task] },
-        {
-          STATE_DIR: stateDir,
-          FACTORY_STATE: stateDir,
-          FACTORY_WORKSPACE_MODE: 'isolated',
-          FACTORY_REQUIRE_NEW_SANDBOX: '1',
-          ...(slot === null ? {} : { FACTORY_SB_K: String(slot) }),
-        },
-      );
-
-      announce('sandboxes-changed', { task });
-
-      return { task, job: toSandboxJob(started) };
     },
 
     async dismantle(input) {
       const task = requireTask(String(input.task));
-      const [registry, record, known] = await Promise.all([
-        readSandboxRegistry(stateDir),
-        readSandboxJournalRecord(journalDir, task),
-        profiles(),
-      ]);
-      const entry = registry.find((item) => item.task === task) || null;
+      const lease = await acquireLifecycle(task);
 
-      if (!entry) {
-        throw new SandboxError('sandbox_missing', `стенда ${task} нет в реестре`, 404);
+      try {
+        const [registry, record, known] = await Promise.all([
+          readSandboxRegistry(stateDir),
+          readSandboxJournalRecord(journalDir, task),
+          profiles(),
+        ]);
+        const entry = registry.find((item) => item.task === task) || null;
+
+        if (!entry) {
+          throw new SandboxError('sandbox_missing', `стенда ${task} нет в реестре`, 404);
+        }
+
+        if (!ownedByTask(entry)) {
+          throw new SandboxError(
+            'pipeline_owned',
+            'стенд принадлежит конвейеру или общему checkout — сносить его нужно из карточки задачи',
+          );
+        }
+
+        if (record?.state === 'running') {
+          throw new SandboxError('job_running', `по стенду ${task} уже идёт работа`);
+        }
+
+        const capable = known.filter((item) => item.canRaise).map((item) => item.id);
+        const profile = ownerOf(record, capable);
+
+        if (!profile) {
+          throw new SandboxError(
+            'profile_unknown',
+            'кокпит не знает, чей это стенд: профилей с песочницей несколько, а журнала подъёма нет',
+          );
+        }
+
+        const script = path.join(profilesDir, profile, 'down.sh');
+
+        // Машинный override сноса (COCKPIT_SANDBOX_DOWN_CMD) уважает и карточка задачи:
+        // одна установка не может иметь двух разных способов снести стенд.
+        if (!downCmd && !await fileExists(script)) {
+          throw new SandboxError('sandbox_unsupported', `профиль ${profile} не объявил down.sh`);
+        }
+
+        const journalRecord: SandboxJournalRecord = {
+          task,
+          profile,
+          action: 'down',
+          state: 'running',
+          index: 0,
+          total: 0,
+          label: 'снос стенда',
+          message: '',
+          pid: null,
+          starttime: null,
+          cmdline: null,
+          log: path.join(journalDir, `t${task}.down.log`),
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        };
+        const command = downCmd
+          ? { file: 'sh', args: ['-c', downCmd.replaceAll('{task}', task)] }
+          : { file: 'bash', args: [script, task] };
+        // По умолчанию незакоммиченное в worktree сохраняется: ручную песочницу человек
+        // ведёт сам, и его работа не должна исчезать вместе со стендом.
+        const started = await launch(journalRecord, command, {
+          STATE_DIR: stateDir,
+          FACTORY_STATE: stateDir,
+          FACTORY_DOWN_WORKTREE: input.force ? 'force' : 'keep',
+        }, lease);
+
+        announce('sandboxes-changed', { task });
+
+        return { task, job: toSandboxJob(started) };
+      } finally {
+        await lease.release();
       }
-
-      if (!ownedByTask(entry)) {
-        throw new SandboxError(
-          'pipeline_owned',
-          'стенд принадлежит конвейеру или общему checkout — сносить его нужно из карточки задачи',
-        );
-      }
-
-      if (record?.state === 'running') {
-        throw new SandboxError('job_running', `по стенду ${task} уже идёт работа`);
-      }
-
-      const profile = ownerOf(record, known.filter((item) => item.canRaise).map((item) => item.id));
-
-      if (!profile) {
-        throw new SandboxError(
-          'profile_unknown',
-          'кокпит не знает, чей это стенд: профилей с песочницей несколько, а журнала подъёма нет',
-        );
-      }
-
-      const script = path.join(profilesDir, profile, 'down.sh');
-
-      // Машинный override сноса (COCKPIT_SANDBOX_DOWN_CMD) уважает и карточка задачи:
-      // одна установка не может иметь двух разных способов снести стенд.
-      if (!downCmd && !await fileExists(script)) {
-        throw new SandboxError('sandbox_unsupported', `профиль ${profile} не объявил down.sh`);
-      }
-
-      const journalRecord: SandboxJournalRecord = {
-        task,
-        profile,
-        action: 'down',
-        state: 'running',
-        index: 0,
-        total: 0,
-        label: 'снос стенда',
-        message: '',
-        pid: null,
-        starttime: null,
-        cmdline: null,
-        log: path.join(journalDir, `t${task}.down.log`),
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-      };
-      const command = downCmd
-        ? { file: 'sh', args: ['-c', downCmd.replaceAll('{task}', task)] }
-        : { file: 'bash', args: [script, task] };
-      // По умолчанию незакоммиченное в worktree сохраняется: ручную песочницу человек
-      // ведёт сам, и его работа не должна исчезать вместе со стендом.
-      const started = await launch(journalRecord, command, {
-        STATE_DIR: stateDir,
-        FACTORY_STATE: stateDir,
-        FACTORY_DOWN_WORKTREE: input.force ? 'force' : 'keep',
-      });
-
-      announce('sandboxes-changed', { task });
-
-      return { task, job: toSandboxJob(started) };
     },
 
     /**
