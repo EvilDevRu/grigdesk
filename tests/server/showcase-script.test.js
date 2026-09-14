@@ -9,11 +9,18 @@ import test from 'node:test';
 import {
   BRIEF_MAX,
   BRIEF_MIN,
+  buildBindingsPrompt,
   buildBriefPrompt,
   buildScriptPrompt,
   SCRIPT_PROMPT_VERSION,
 } from '../../server/src/lib/showcase/script/prompt.ts';
-import { parseBrief, parseScript } from '../../server/src/lib/showcase/script/writer.ts';
+import {
+  parseBindingsReply,
+  parseBrief,
+  parseScript,
+  parseScriptReply,
+  parseScriptReplyResult,
+} from '../../server/src/lib/showcase/script/writer.ts';
 import { createScriptOps } from '../../server/src/lib/showcase/scriptOps.ts';
 
 const SCREENS = [
@@ -61,6 +68,15 @@ test('промпт сценария перечисляет доступные э
   assert.match(prompt, /overview — «Обзор» \(\/\); элементы: run, filter/);
   assert.match(prompt, /list — «Список» \(\/list\); элементы: firstRow/);
   assert.match(prompt, /не больше 5 сцен/);
+});
+
+test('сценарий просит цитату и номер появления вместо сырых текстовых смещений', () => {
+  const prompt = buildScriptPrompt(CONTEXT, ['Показать обзор', 'Показать результат']);
+
+  assert.match(prompt, /"quote":"точная цитата из narration"/);
+  assert.match(prompt, /"occurrence":1/);
+  assert.match(prompt, /Индексы начинаются с нуля/);
+  assert.match(prompt, /waitVisible — ready-before/);
 });
 
 test('бриф принимается только в объявленных границах', () => {
@@ -181,6 +197,44 @@ test('лишние и недостающие поля сцены не прини
   assert.equal(parseScript(reply({ scenes: [missing] }), SCREENS, 5), null);
 });
 
+// Продолжение — единственное, что связывает сцены между собой: без него каждая
+// сцена открывала диалог заново, и опытный ролик пять раз показывал один путь.
+test('признак продолжения принимается булевым, а у первой сцены сбрасывается', () => {
+  const parsed = parseScript(
+    reply({
+      scenes: [
+        scene({ continuesPrevious: true }),
+        scene({ continuesPrevious: true, actions: [{ kind: 'highlight', targetId: 'filter' }] }),
+        scene(),
+      ],
+    }),
+    SCREENS,
+    5,
+  );
+
+  assert.deepEqual(
+    parsed.map((item) => item.continuesPrevious),
+    [false, true, false],
+    'первой сцене продолжать нечего; без поля сцена открывает экран сама',
+  );
+
+  for (const bad of ['true', 1, null]) {
+    assert.equal(
+      parseScript(reply({ scenes: [scene(), scene({ continuesPrevious: bad })] }), SCREENS, 5),
+      null,
+      `недоверенный ответ с continuesPrevious=${JSON.stringify(bad)} не проходит`,
+    );
+  }
+});
+
+test('промпт сценария объясняет цепочку и не требует независимости сцен', () => {
+  const prompt = buildScriptPrompt(CONTEXT, ['Открыть диалог', 'Показать итог в диалоге']);
+
+  assert.match(prompt, /"continuesPrevious":false/);
+  assert.match(prompt, /продолжает предыдущую с того места, где та закончилась/);
+  assert.doesNotMatch(prompt, /не зависит от предыдущей\./);
+});
+
 test('предел числа сцен соблюдается', () => {
   const many = Array.from({ length: 6 }, () => scene());
 
@@ -229,6 +283,172 @@ test('переход на экран без цели выбрасывается,
 
   assert.ok(parsed, 'запись и так начинает сцену со своего экрана');
   assert.deepEqual(parsed[0].actions, [{ kind: 'hover', targetId: 'run' }]);
+});
+
+test('три модельные связи переводятся из цитат после удаления лишнего goto', () => {
+  const parsed = parseScriptReply(reply({
+    scenes: [scene({
+      narration: 'Сначала запускаем, затем ждём результат и показываем результат.',
+      actions: [
+        { kind: 'goto', targetId: null },
+        { kind: 'click', targetId: 'run' },
+        { kind: 'waitVisible', targetId: 'filter' },
+        { kind: 'highlight', targetId: 'filter' },
+      ],
+      bindings: [
+        { quote: 'запускаем', occurrence: 1, actionIndex: 1, kind: 'align-start' },
+        { quote: 'результат', occurrence: 1, actionIndex: 2, kind: 'ready-before' },
+        { quote: 'результат', occurrence: 2, actionIndex: 3, kind: 'hold-through' },
+      ],
+    })],
+  }), SCREENS, 5);
+
+  assert.ok(parsed);
+  assert.deepEqual(parsed.scenes[0].syncCues.map((cue) => ({
+    actionIndex: cue.actionIndex,
+    text: parsed.scenes[0].narration.slice(cue.from, cue.to),
+    kind: cue.kind,
+  })), [
+    { actionIndex: 0, text: 'запускаем', kind: 'align-start' },
+    { actionIndex: 1, text: 'результат', kind: 'ready-before' },
+    { actionIndex: 2, text: 'результат', kind: 'hold-through' },
+  ]);
+});
+
+test('ссылка на удалённый goto даёт проблему своей сцены', () => {
+  const result = parseScriptReplyResult(reply({
+    scenes: [scene({
+      actions: [
+        { kind: 'goto', targetId: null },
+        { kind: 'click', targetId: 'run' },
+      ],
+      bindings: [
+        { quote: 'Открываем', occurrence: 1, actionIndex: 0, kind: 'align-start' },
+      ],
+    })],
+  }), SCREENS, 5);
+
+  assert.equal(result.draft, null);
+  assert.equal(result.problem.sceneIndex, 0);
+  assert.match(result.problem.message, /удалённое лишнее действие 0/);
+});
+
+test('binding не принимает сырой offset, selector и неверный номер повтора', () => {
+  const attempts = [
+    { quote: 'Открываем', occurrence: 1, actionIndex: 0, kind: 'align-start', from: 0 },
+    { quote: 'Открываем', occurrence: 1, actionIndex: 0, kind: 'align-start', selector: '#run' },
+    { quote: 'Открываем', occurrence: 2, actionIndex: 0, kind: 'align-start' },
+  ];
+
+  for (const binding of attempts) {
+    const result = parseScriptReplyResult(reply({
+      scenes: [scene({ bindings: [binding] })],
+    }), SCREENS, 5);
+
+    assert.equal(result.draft, null, JSON.stringify(binding));
+    assert.match(result.problem.message, /Сцена 1/);
+  }
+});
+
+test('старый ответ сценария без bindings остаётся годным', () => {
+  const parsed = parseScriptReply(reply({ scenes: [scene()] }), SCREENS, 5);
+
+  assert.ok(parsed);
+  assert.equal(parsed.scenes[0].syncCues, null);
+});
+
+test('отдельный ответ связей сохраняет ручное действие занятым', () => {
+  const scenes = [{
+    id: 'scene-existing',
+    title: 'Существующая сцена',
+    narration: 'Сначала запускаем, затем показываем результат.',
+    actions: [
+      { kind: 'click', targetId: 'run' },
+      { kind: 'highlight', targetId: 'filter' },
+    ],
+    manualActionIndices: [1],
+  }];
+  const prompt = buildBindingsPrompt(scenes);
+
+  assert.match(prompt, /manual_action_indices>\[1\]/);
+  assert.doesNotMatch(prompt, /data-testid/);
+
+  const ok = parseBindingsReply(reply({
+    scenes: [{
+      sceneId: 'scene-existing',
+      bindings: [
+        { quote: 'запускаем', occurrence: 1, actionIndex: 0, kind: 'align-start' },
+      ],
+    }],
+  }), scenes);
+
+  assert.equal(ok.bindings.get('scene-existing')[0].actionIndex, 0);
+
+  const occupied = parseBindingsReply(reply({
+    scenes: [{
+      sceneId: 'scene-existing',
+      bindings: [
+        { quote: 'результат', occurrence: 1, actionIndex: 1, kind: 'hold-through' },
+      ],
+    }],
+  }), scenes);
+
+  assert.equal(occupied.bindings, null);
+  assert.match(occupied.problem.message, /уже связано вручную/);
+});
+
+// Модель обязана сказать, чего ей не хватило в карте, а не изображать движение на
+// экране ради движения: ролик 8665 снял шесть сцен наведения на одну ссылку.
+test('пробелы карты экранов принимаются словами и ограничены по длине и числу', () => {
+  const withGaps = parseScriptReply(
+    reply({
+      scenes: [scene({ actions: [] })],
+      gaps: ['  нет кнопки «Снять частотность» над таблицей проектов ', '', 'x'.repeat(500)],
+    }),
+    SCREENS,
+    5,
+  );
+
+  assert.equal(withGaps.scenes.length, 1);
+  assert.deepEqual(withGaps.gaps, [
+    'нет кнопки «Снять частотность» над таблицей проектов',
+    'x'.repeat(240),
+  ]);
+
+  const without = parseScriptReply(reply({ scenes: [scene()] }), SCREENS, 5);
+
+  assert.deepEqual(without.gaps, [], 'без поля пробелов нет');
+  assert.equal(parseScriptReply(reply({ scenes: [scene()], gaps: 'строкой' }), SCREENS, 5), null);
+  assert.equal(
+    parseScriptReply(reply({ scenes: [scene()], gaps: [], extra: 1 }), SCREENS, 5),
+    null,
+    'лишний ключ верхнего уровня по-прежнему не проходит',
+  );
+
+  const tooMany = parseScriptReply(
+    reply({ scenes: [scene()], gaps: Array.from({ length: 20 }, (_, index) => `пробел ${index}`) }),
+    SCREENS,
+    5,
+  );
+
+  assert.equal(tooMany.gaps.length, 12);
+});
+
+test('промпт сценария показывает подписи элементов и просит назвать пробелы карты', () => {
+  const prompt = buildScriptPrompt({
+    ...CONTEXT,
+    screens: [{
+      id: 'overview',
+      title: 'Обзор',
+      path: '/',
+      elements: [{ id: 'run', title: 'кнопка запуска' }, { id: 'filter' }],
+    }],
+  }, ['Показать обзор']);
+
+  assert.match(prompt, /элементы: run \(кнопка запуска\), filter/);
+  assert.match(prompt, /"gaps":\[/);
+  assert.match(prompt, /покажи ближайший контекст/);
+  assert.match(prompt, /ради движения не нужны/);
 });
 
 test('версия промпта объявлена и попадает в решение', () => {

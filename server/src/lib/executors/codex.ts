@@ -184,7 +184,7 @@ interface CodexTurn {
   message: unknown;
   stepSink: StepSink;
   normalizeStep: (value: unknown) => ChatStep[];
-  onProgress?: (tokens: number) => void;
+  onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onPermission?: (ask: Record<string, unknown>) => unknown;
   messageDeltas: Map<string, string>;
   reply: string;
@@ -661,9 +661,12 @@ const CODEX_CONTEXT_METRIC = 'active-input-v1';
 const ROLLOUT_READ_CHUNK = 256 * 1024;
 
 function tokenNumber(value: unknown, { positive = false }: { positive?: boolean } = {}) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0 || (positive && number <= 0)) return null;
-  return number;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)
+    || value < 0 || (positive && value <= 0)) {
+    return null;
+  }
+
+  return value;
 }
 
 /**
@@ -1208,7 +1211,7 @@ export function openCodexSession({
   function createTurn({ message, onStep, onProgress, onPermission }: {
     message?: unknown;
     onStep?: (step: ChatStep) => void;
-    onProgress?: (tokens: number) => void;
+    onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
     onPermission?: (ask: Record<string, unknown>) => unknown;
   }): CodexTurn {
     const stepSink = createStepSink(onStep);
@@ -1257,7 +1260,9 @@ export function openCodexSession({
 
   function finishTurnStopped(current: CodexTurn | null) {
     if (!current || current.settled) return;
-    finishTurnError(current, codexStoppedError({ sessionId: threadId, steps: current.stepSink.steps }));
+    const error = codexStoppedError({ sessionId: threadId, steps: current.stepSink.steps });
+
+    finishTurnError(current, Object.assign(error, current.appContext || {}));
   }
 
   async function finishTurnSuccess(current: CodexTurn | null) {
@@ -1309,21 +1314,26 @@ export function openCodexSession({
     current.cachedInputTokens = tokenNumber(total.cachedInputTokens) || 0;
     current.progressTokens = (tokenNumber(last.outputTokens) || 0)
       + (tokenNumber(last.reasoningOutputTokens) || 0);
-    if (contextTokens === null || contextWindow === null) return;
+    const available = contextTokens !== null && contextWindow !== null;
+
     current.appContext = {
-      contextTokens,
-      contextWindow,
-      contextMetric: CODEX_CONTEXT_METRIC,
+      contextTokens: contextTokens ?? 0,
+      contextWindow: contextWindow ?? 0,
+      contextMetric: available ? CODEX_CONTEXT_METRIC : 'unavailable',
       contextIsEstimate: false,
-      contextCache: cachedRequestTokens === null
+      contextCache: !available || cachedRequestTokens === null
         ? contextCacheStatus('unavailable')
         : reportedContextCache({
           readTokens: cachedRequestTokens,
-          uncachedTokens: contextTokens - cachedRequestTokens,
+          uncachedTokens: (contextTokens ?? 0) - cachedRequestTokens,
         }),
       totalInputTokens: current.totalInputTokens,
       cachedInputTokens: current.cachedInputTokens,
     };
+
+    try {
+      current.onProgress?.(current.progressTokens, { ...current.appContext });
+    } catch { /* прогресс не должен ронять ход */ }
   }
 
   function appendMessage(current: CodexTurn, params: CodexNotificationParams) {
@@ -1407,6 +1417,9 @@ export function openCodexSession({
 
     if (method === 'thread/started') {
       threadId = params.thread?.id || threadId;
+      // Уведомление может опередить ответ handshake. Старт ленты публикует send()
+      // после onSessionCreated: иначе интерфейс уже видит ход без привязки сессии.
+      return;
     }
 
     if (!current) {
@@ -1804,7 +1817,7 @@ export function openCodexSession({
     async send({ message, onStep, onProgress, onPermission, onSessionCreated }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
-      onProgress?: (tokens: number) => void;
+      onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
       onPermission?: (ask: Record<string, unknown>) => unknown;
       onSessionCreated?: (sessionId: string) => unknown;
     }) {
@@ -1910,7 +1923,7 @@ export async function runCodexAppServer({
   compactWindow?: unknown;
   providerSettings?: CodexSettings | null;
   signal?: AbortSignal;
-  onProgress?: (tokens: number) => void;
+  onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onStep?: (step: ChatStep) => void;
   tokenInfoReader?: typeof readCodexThreadTokenInfo;
   workTools?: CodexWorkToolsPort | null;
@@ -2264,6 +2277,7 @@ export default {
   // Ручной компакт пока идёт универсальной выжимкой текстом. Автокомпакт родной:
   // thread config передаёт app-server-у официальный model_auto_compact_token_limit.
   compaction: { kind: 'summary' },
+  chatAutoCompact: true,
 
   bin(config: CodexConfig) { return config.codexBin; },
 

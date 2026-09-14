@@ -10,6 +10,7 @@ import test from 'node:test';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
 const contract = await compileModule(webFile('../shared/showcaseContracts.ts'));
+const sceneDraft = await compileModule(webFile('src/views/showcase/sceneDraft.ts'));
 
 const SCOPE = {
   targetKind: 'sandbox',
@@ -21,6 +22,8 @@ const SCOPE = {
   screens: [{ id: 'overview', title: 'Обзор', path: '/' }],
   targetFingerprint: 'fingerprint',
   policyRevision: 'policy',
+  // Ревизия словаря карты необязательна: старые ответы её не несут.
+  mapRevision: 'map',
   dataRevision: 'начальные',
   buildRevision: null,
 };
@@ -44,6 +47,8 @@ test('обзор принимает готовую цель без карты э
     profile: 'parser',
     profileBinding: null,
     label: 'parser · постоянный стенд',
+    // Старый ответ без названия задачи читается как «названия нет».
+    taskTitle: null,
     viewUrl: 'http://127.0.0.1:13000',
     viewPort: null,
     status: 'ready',
@@ -185,13 +190,23 @@ test('событие прогресса проверяется так же, ка
     label: 'сборка',
   };
 
-  assert.deepEqual(contract.parseShowcaseProgressEvent(event), event);
+  // Счётчик и причина отказа необязательны: у заявки в очереди нет ни того, ни другого.
+  assert.deepEqual(
+    contract.parseShowcaseProgressEvent(event),
+    { ...event, index: null, total: null, error: null },
+  );
+  assert.equal(
+    contract.parseShowcaseProgressEvent({ ...event, state: 'failed', error: 'вход не удался' }).error,
+    'вход не удался',
+  );
 
   for (const invalid of [
     null,
     { ...event, state: 'идёт' },
     { ...event, sequence: '4' },
     { ...event, label: null },
+    { ...event, error: 42 },
+    { ...event, index: -1 },
   ]) {
     assert.throws(
       () => contract.parseShowcaseProgressEvent(invalid),
@@ -207,8 +222,17 @@ test('каталог голосов приносит и состояние ус�
         id: 'piper',
         name: 'Piper (локально)',
         kind: 'local',
+        // Старый ответ без признака темпа читается как «признак не сообщён».
+        pace: null,
         doctor: { status: 'blocked', reason: 'не установлен', install: 'нажмите «Установить»' },
-        voices: [],
+        voices: [{
+          id: 'irina',
+          name: 'Ирина',
+          language: 'ru',
+          available: true,
+          reason: '',
+          capabilities: { pace: true, pause: true, stress: false },
+        }],
       },
     ],
     install: {
@@ -241,11 +265,27 @@ test('каталог голосов приносит и состояние ус�
 
   assert.deepEqual(contract.parseShowcaseVoiceCatalog(catalog), catalog);
 
+  const legacyCatalog = structuredClone(catalog);
+
+  delete legacyCatalog.engines[0].voices[0].capabilities;
+  assert.equal(
+    contract.parseShowcaseVoiceCatalog(legacyCatalog).engines[0].voices[0].capabilities,
+    null,
+    'старый ответ остаётся unknown',
+  );
+
   for (const invalid of [
     { ...catalog, install: undefined },
     {
       ...catalog,
       install: { ...catalog.install, job: { ...catalog.install.job, state: 'ставится' } },
+    },
+    {
+      ...catalog,
+      engines: [{
+        ...catalog.engines[0],
+        voices: [{ ...catalog.engines[0].voices[0], capabilities: { pace: 'да' } }],
+      }],
     },
     {
       ...catalog,
@@ -257,6 +297,27 @@ test('каталог голосов приносит и состояние ус�
   ]) {
     assert.throws(
       () => contract.parseShowcaseVoiceCatalog(invalid),
+      contract.ShowcaseContractError,
+    );
+  }
+});
+
+test('словарь ударений приходит текстом, записями и негодными строками с причиной', () => {
+  const dictionary = {
+    text: 'дин+амика\nплохо\n',
+    entries: ['дин+амика'],
+    errors: [{ line: 2, text: 'плохо', reason: 'нет знака ударения «+»' }],
+  };
+
+  assert.deepEqual(contract.parseShowcaseVoiceDictionary(dictionary), dictionary);
+
+  for (const invalid of [
+    { ...dictionary, text: null },
+    { ...dictionary, entries: 'дин+амика' },
+    { ...dictionary, errors: [{ line: '2', text: 'плохо', reason: 'нет знака' }] },
+  ]) {
+    assert.throws(
+      () => contract.parseShowcaseVoiceDictionary(invalid),
       contract.ShowcaseContractError,
     );
   }
@@ -321,4 +382,305 @@ test('краткая карточка не выдумывает цель у за
   assert.equal(summary.targetLabel, '');
   assert.equal(summary.state, 'blocked');
   assert.equal(summary.hasFinal, false);
+});
+
+test('проект принимает безопасные sync-ссылки и три вида cue без служебных полей', () => {
+  const artifact = (kind, id) => ({
+    id,
+    kind,
+    inputHash: `${id}-input`,
+    contentHash: `${id}-content`,
+    producerVersion: `${kind}-1`,
+    durationMs: kind === 'subtitles' ? null : 1200,
+    byteSize: 4096,
+  });
+  const timingRef = (id) => ({
+    id,
+    inputHash: `${id}-input`,
+    contentHash: `${id}-content`,
+    producerVersion: `${id}-producer`,
+    byteSize: 512,
+    path: '/не-должен-выйти.json',
+  });
+  const project = {
+    schemaVersion: 1,
+    id: 'project-sync',
+    title: 'Ролик с привязками',
+    revision: 3,
+    ref: { kind: 'project', id: 'demo-profile' },
+    target: {
+      status: 'blocked',
+      ref: { kind: 'project', id: 'demo-profile' },
+      reason: 'Тестовая цель не запущена.',
+      nextAction: null,
+    },
+    brief: [],
+    scenes: [{
+      id: 'scene-sync',
+      order: 1,
+      title: 'Три состояния',
+      screenId: 'overview',
+      startState: null,
+      readyCondition: null,
+      continuesPrevious: false,
+      actions: [
+        { kind: 'click', targetId: 'open' },
+        { kind: 'waitVisible', targetId: 'result' },
+        { kind: 'highlight', targetId: 'result' },
+      ],
+      narration: 'замок открыт, результат готов, рамка видна',
+      caption: 'Три состояния',
+      subtitleText: 'Замок открыт, результат готов, рамка видна.',
+      direction: { tone: null, pace: 'normal', emphasis: [], pauses: [], stresses: [] },
+      pronunciationOverrides: [{
+        from: 0,
+        to: 5,
+        pronunciation: 'з+амок',
+        textHash: 'text-hash',
+        voiceRef: 'edge:voice',
+      }],
+      timing: null,
+      syncBindings: {
+        version: 1,
+        textHash: 'text-hash',
+        actionsHash: 'actions-hash',
+        cues: [
+          {
+            id: 'cue-open',
+            actionIndex: 0,
+            from: 0,
+            to: 5,
+            kind: 'align-start',
+            origin: 'manual',
+            selector: '#unsafe',
+            url: 'https://unsafe.invalid',
+          },
+          {
+            id: 'cue-ready',
+            actionIndex: 1,
+            from: 14,
+            to: 29,
+            kind: 'ready-before',
+            origin: 'generated',
+          },
+          {
+            id: 'cue-hold',
+            actionIndex: 2,
+            from: 31,
+            to: 42,
+            kind: 'hold-through',
+            origin: 'manual',
+          },
+        ],
+      },
+      speechTiming: timingRef('speech-timing'),
+      recordingTiming: timingRef('recording-timing'),
+      audioSource: { kind: 'tts', voiceRef: 'edge:voice', artifactId: 'audio-1' },
+      audio: artifact('audio', 'audio-1'),
+      clip: artifact('clip', 'clip-1'),
+      frame: null,
+      checks: [],
+      stale: false,
+    }],
+    decisions: [],
+    latestFinal: {
+      video: artifact('final', 'final-1'),
+      subtitles: artifact('subtitles', 'subtitles-1'),
+      manifestId: 'manifest-1',
+      manifestVersion: 1,
+      builtAt: '2026-09-12T10:00:00.000Z',
+      current: true,
+    },
+    createdAt: '2026-09-12T09:00:00.000Z',
+    updatedAt: '2026-09-12T10:00:00.000Z',
+  };
+  const parsed = contract.parseShowcaseProject(project);
+  const [scene] = parsed.scenes;
+  const expectedBindings = structuredClone(project.scenes[0].syncBindings);
+  const expectedSpeechTiming = timingRef('speech-timing');
+  const expectedRecordingTiming = timingRef('recording-timing');
+
+  delete expectedBindings.cues[0].selector;
+  delete expectedBindings.cues[0].url;
+  delete expectedSpeechTiming.path;
+  delete expectedRecordingTiming.path;
+
+  assert.deepEqual(scene.syncBindings, expectedBindings);
+  assert.deepEqual(scene.pronunciationOverrides, project.scenes[0].pronunciationOverrides);
+  assert.deepEqual(scene.speechTiming, expectedSpeechTiming);
+  assert.deepEqual(scene.recordingTiming, expectedRecordingTiming);
+  assert.equal(parsed.latestFinal.manifestVersion, 1);
+
+  const oldFinal = structuredClone(project);
+
+  delete oldFinal.latestFinal.manifestVersion;
+  assert.equal(contract.parseShowcaseProject(oldFinal).latestFinal.manifestVersion, null);
+
+  const oldPronunciation = structuredClone(project);
+
+  delete oldPronunciation.scenes[0].pronunciationOverrides;
+  assert.equal(
+    contract.parseShowcaseProject(oldPronunciation).scenes[0].pronunciationOverrides,
+    null,
+  );
+});
+
+test('sync-codec называет точное структурно неверное поле', () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'project-sync',
+    title: 'Ролик',
+    revision: 1,
+    ref: { kind: 'project', id: 'demo' },
+    target: {
+      status: 'blocked',
+      ref: { kind: 'project', id: 'demo' },
+      reason: 'нет цели',
+      nextAction: null,
+    },
+    brief: [],
+    scenes: [{
+      id: 'scene-1',
+      order: 1,
+      title: 'Сцена',
+      screenId: 'root',
+      startState: null,
+      readyCondition: null,
+      actions: [{ kind: 'click', targetId: 'open' }],
+      narration: 'Открываем',
+      caption: '',
+      subtitleText: 'Открываем',
+      direction: { tone: null, pace: null, emphasis: [], pauses: [], stresses: [] },
+      timing: null,
+      syncBindings: {
+        version: 1,
+        textHash: 'text',
+        actionsHash: 'actions',
+        cues: [{
+          id: 'cue-1',
+          actionIndex: 0,
+          from: 0,
+          to: 9,
+          kind: 'align-start',
+          origin: 'manual',
+        }],
+      },
+      audioSource: { kind: 'tts', voiceRef: null, artifactId: null },
+      audio: null,
+      clip: null,
+      frame: null,
+      checks: [],
+      stale: true,
+    }],
+    decisions: [],
+    latestFinal: null,
+    createdAt: '2026-09-12T09:00:00.000Z',
+    updatedAt: '2026-09-12T09:00:00.000Z',
+  };
+  const cases = [
+    ['version', 2],
+    ['kind', 'wait-for-magic'],
+    ['origin', 'model'],
+    ['from', -1],
+  ];
+  const legacy = structuredClone(base);
+
+  delete legacy.scenes[0].syncBindings;
+
+  const [legacyScene] = contract.parseShowcaseProject(legacy).scenes;
+
+  assert.equal(legacyScene.syncBindings, null);
+  assert.equal(legacyScene.speechTiming, null);
+  assert.equal(legacyScene.recordingTiming, null);
+
+  for (const [field, value] of cases) {
+    const invalid = structuredClone(base);
+
+    if (field === 'version') {
+      invalid.scenes[0].syncBindings.version = value;
+    } else {
+      invalid.scenes[0].syncBindings.cues[0][field] = value;
+    }
+
+    assert.throws(
+      () => contract.parseShowcaseProject(invalid),
+      (error) => error instanceof contract.ShowcaseContractError
+        && error.message.includes(`syncBindings.${field === 'version' ? field : `cues[0].${field}`}`),
+    );
+  }
+});
+
+test('ручной sync-черновик отдаёт серверу только диапазон, действие и известный ID', () => {
+  const scene = {
+    id: 'scene-1',
+    title: 'Сцена',
+    narration: 'Показываем результат.',
+    caption: '',
+    subtitleText: 'Показываем результат.',
+    syncBindings: {
+      cues: [{
+        id: 'cue-server',
+        actionIndex: 0,
+        from: 11,
+        to: 20,
+        kind: 'hold-through',
+        origin: 'generated',
+      }],
+    },
+  };
+  const draft = sceneDraft.draftOf(scene);
+
+  draft.syncCues[0] = {
+    ...draft.syncCues[0],
+    from: 0,
+    to: 10,
+    origin: 'manual',
+  };
+
+  const payload = sceneDraft.payloadOf(scene, draft);
+
+  assert.deepEqual(payload.syncCues, [{
+    id: 'cue-server',
+    actionIndex: 0,
+    from: 0,
+    to: 10,
+    kind: 'hold-through',
+    manual: true,
+  }]);
+  assert.equal('origin' in payload.syncCues[0], false);
+  assert.equal('textHash' in payload, false);
+  assert.equal('actionsHash' in payload, false);
+});
+
+test('черновик произношения не отправляет hash и может явно обновить устаревший диапазон', () => {
+  const scene = {
+    id: 'scene-pronunciation',
+    title: 'Замок',
+    narration: 'Показываем замок.',
+    caption: 'Замок',
+    subtitleText: 'Показываем замок.',
+    syncBindings: null,
+    pronunciationOverrides: [{
+      from: 11,
+      to: 16,
+      pronunciation: 'зам+ок',
+      voiceRef: 'edge:voice',
+      textHash: 'старая-редакция',
+    }],
+  };
+  const draft = sceneDraft.draftOf(scene);
+
+  draft.pronunciationOverrides[0] = {
+    ...draft.pronunciationOverrides[0],
+    textHash: null,
+  };
+
+  assert.equal(sceneDraft.draftChanged(scene, draft), true);
+  assert.deepEqual(sceneDraft.payloadOf(scene, draft).pronunciationOverrides, [{
+    from: 11,
+    to: 16,
+    pronunciation: 'зам+ок',
+    voiceRef: 'edge:voice',
+    refresh: true,
+  }]);
 });

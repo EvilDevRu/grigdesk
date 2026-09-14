@@ -23,6 +23,7 @@ import { normalizeSpeechOptions } from '../speech/options.ts';
 import { speechModelMissing, speechUnavailable } from '../speech/errors.ts';
 import {
     buildTranscribeArgv,
+    decodeSpeechTranscript,
     decodeIngestJob,
     encodeIngestJob,
     pythonEnv,
@@ -59,6 +60,10 @@ export type SpeechOptions = ReturnType<typeof normalizeSpeechOptions>;
 // что это объект с репликами, а не строка.
 export interface Transcript {
     segments?: { start?: number; end?: number; text?: string }[];
+    words?: { start?: number; end?: number; text?: string }[];
+    wordTimestamps?: boolean;
+    wordTimingStatus?: string;
+    wordTimingReason?: string;
     language?: string;
     [field: string]: unknown;
 }
@@ -101,6 +106,7 @@ export interface IngestOptions {
     vadSilenceMs?: number;
     conditionOnPreviousText?: boolean;
     initialPrompt?: string;
+    wordTimestamps?: boolean;
 }
 
 export interface IngestJobOptions extends IngestOptions {
@@ -464,7 +470,9 @@ async function transcribe(wav: string, {
         }
         throw error;
     }
-    return JSON.parse(out) as Transcript;
+    return decodeSpeechTranscript(JSON.parse(out), {
+        wordTimestampsRequested: speech.wordTimestamps || Boolean(speech.initialPrompt),
+    });
 }
 
 /**
@@ -498,6 +506,7 @@ export async function ingestRecording(
         hotwords: opts.hotwords,
         vadSilenceMs: opts.vadSilenceMs,
         conditionOnPreviousText: opts.conditionOnPreviousText,
+        wordTimestamps: opts.wordTimestamps,
     }, 'dictation');
     if (!existsSync(filePath)) {
         throw new Error(`Файл не найден: ${filePath}`);
@@ -642,6 +651,7 @@ export function startIngestJob(
         vadSilenceMs: opts.vadSilenceMs,
         conditionOnPreviousText: opts.conditionOnPreviousText,
         initialPrompt: opts.initialPrompt,
+        wordTimestamps: opts.wordTimestamps,
     }, 'video');
     const job = encodeJob({
         jobId,

@@ -11,7 +11,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { probeDurationMs } from '../../server/src/lib/showcase/render/clipCheck.ts';
-import { trimSceneClip } from '../../server/src/lib/showcase/render/clipTrim.ts';
+import {
+  probeVideoFrames,
+  trimSceneClip,
+  trimSceneClipExact,
+} from '../../server/src/lib/showcase/render/clipTrim.ts';
 
 const run = promisify(execFile);
 
@@ -72,5 +76,88 @@ test('резать меньше кадра незачем: исходный фа
     await assert.rejects(access(outFile), 'файл результата не должен появляться без обрезки');
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// Цепочка пишется одним видео: клип сцены — от её готовности до её конца, а хвост
+// принадлежит следующим сценам. Конец задаётся длиной после перемотки: `-to` после
+// `-ss` на входе считался бы от нуля вывода и попадал бы мимо.
+test('срез с концом отдаёт ровно отрезок сцены из общей записи', async (t) => {
+  if (!(await ffmpegAvailable())) {
+    t.skip('ffmpeg не установлен: обрезку проверить нечем');
+
+    return;
+  }
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'showcase-trim-'));
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const raw = await makeRaw(dir);
+  const middle = await trimSceneClip({
+    rawPath: raw,
+    startMs: 1000,
+    endMs: 2200,
+    outFile: path.join(dir, 'middle.webm'),
+  });
+  const middleMs = await probeDurationMs(middle);
+
+  assert.ok(Math.abs(middleMs - 1200) <= 80, `ожидали около 1200 мс, получили ${middleMs}`);
+
+  // Голова цепочки с концом режется даже без отступа в начале: конец — тоже срез.
+  const head = await trimSceneClip({
+    rawPath: raw,
+    startMs: 0,
+    endMs: 900,
+    outFile: path.join(dir, 'head.webm'),
+  });
+
+  assert.equal(head, path.join(dir, 'head.webm'));
+
+  const headMs = await probeDurationMs(head);
+
+  assert.ok(Math.abs(headMs - 900) <= 80, `ожидали около 900 мс, получили ${headMs}`);
+
+  await assert.rejects(
+    () => trimSceneClip({ rawPath: raw, startMs: 1000, endMs: 1010, outFile: path.join(dir, 'x.webm') }),
+    (error) => error.code === 'record_failed',
+    'сцена короче кадра — отказ, а не пустой файл',
+  );
+});
+
+test('точный off-grid срез сообщает первый source PTS и приводит клип к CFR', async (t) => {
+  if (!(await ffmpegAvailable())) {
+    t.skip('ffmpeg не установлен: обрезку проверить нечем');
+    return;
+  }
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'showcase-trim-exact-'));
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const raw = await makeRaw(dir);
+  const rawFrames = await probeVideoFrames(raw);
+  const result = await trimSceneClipExact({
+    rawPath: raw,
+    startPtsMs: 1017,
+    endPtsMs: 2211,
+    fps: 30,
+    outFile: path.join(dir, 'exact.webm'),
+  });
+  const expectedFirst = rawFrames.find((frame) => frame.ptsMs >= 1017);
+  const expectedEnd = rawFrames.find((frame) => frame.ptsMs >= 2211);
+  const outputFrames = await probeVideoFrames(result.path);
+
+  assert.equal(result.firstRetainedSourcePtsMs, expectedFirst.ptsMs);
+  assert.equal(result.sourceEndExclusivePtsMs, expectedEnd.ptsMs);
+  assert.equal(result.outputFirstPtsMs, 0);
+  assert.equal(result.frameCount, outputFrames.length);
+  assert.ok(Math.abs(result.durationMs / (1000 / 30) - result.frameCount) < 1e-9);
+
+  for (const [index, frame] of outputFrames.entries()) {
+    assert.ok(
+      Math.abs(frame.ptsMs - index * 1000 / 30) <= 0.51,
+      `кадр ${index}: ${frame.ptsMs} мс`,
+    );
   }
 });

@@ -1850,6 +1850,36 @@ route_v2_sensitive_files() {
   return 0
 }
 
+# Runtime-пути проверочного инструментария (PROFILE-CONTRACT, `profile_route_volatile_paths`):
+# профиль печатает `имя-репозитория<TAB>относительный-путь`, движок разрешает имя в
+# закреплённый worktree задачи. Строка с неизвестным репозиторием, абсолютным путём или `..`
+# — ошибка профиля, и весь список отвергается (78): сторож state-only тогда работает без
+# послаблений, а не с частью объявлений. Без хука список пуст — прежнее поведение.
+route_v2_volatile_paths() {
+  local output line name rel index worktree
+  declare -F profile_route_volatile_paths >/dev/null || return 0
+  output=$(profile_route_volatile_paths "$TASK") || return 78
+  [[ -n "$output" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == *$'\t'* ]] || return 78
+    name=${line%%$'\t'*}
+    rel=${line#*$'\t'}
+    [[ -n "$rel" && "$rel" != *$'\t'* && "$rel" != /* && "$rel" != */ &&
+       "$rel" != .. && "$rel" != ../* && "$rel" != */.. && "$rel" != */../* &&
+       "$rel" != .git && "$rel" != .git/* ]] || return 78
+    worktree=""
+    for index in "${!V2_REPO_NAMES[@]}"; do
+      if [[ "${V2_REPO_NAMES[$index]}" == "$name" ]]; then
+        worktree=${V2_REPO_WORKTREES[$index]}
+        break
+      fi
+    done
+    [[ -n "$worktree" ]] || return 78
+    printf '%s/%s\n' "$worktree" "$rel"
+  done <<<"$output"
+}
+
 v2_scope_candidate() {
   local root=$1 rel=$2 absolute parent canonical_parent
   [[ -n "$rel" && "$rel" != /* && "$rel" != *$'\n'* && "$rel" != *$'\t'* ]] ||

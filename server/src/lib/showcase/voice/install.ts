@@ -9,9 +9,9 @@
 // sha256 закреплены в каталоге, а установка объявляется удачной ТОЛЬКО после
 // синтеза контрольной фразы: успешный `pip install` голосом ещё не является.
 //
-// Движков, которые ставятся кнопкой, два — Piper и Silero, — и у каждого своё
-// python-окружение: torch весит сотни мегабайт, и его обновление не должно
-// менять состав, на котором проверен другой голос.
+// Движков, которые ставятся кнопкой, три — Piper, Silero и Qwen3-TTS, — и у
+// каждого своё python-окружение: torch весит сотни мегабайт (с CUDA — гигабайты),
+// и его обновление не должно менять состав, на котором проверен другой голос.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,10 +20,13 @@ import { processAlive } from '../processIdentity.ts';
 import { launchWorker, readProgressSince, stopWorker } from '../render/runner.ts';
 import { PIPER_VOICES } from './piperCatalog.ts';
 import type { PiperVoicePackage } from './piperCatalog.ts';
+import { QWEN_VOICES } from './qwenCatalog.ts';
+import type { QwenVoicePackage } from './qwenCatalog.ts';
 import { SILERO_VOICES } from './sileroCatalog.ts';
 import type { SileroVoicePackage } from './sileroCatalog.ts';
 import { readInstalledVoices } from './piper.ts';
 import type { InstalledPiperVoice } from './piper.ts';
+import { readInstalledQwenModels } from './qwen.ts';
 import { readInstalledSileroModels } from './silero.ts';
 import type { JobIdentity } from '../jobs.ts';
 import { ShowcaseError } from '../errors.ts';
@@ -34,15 +37,16 @@ const WORKER_SCRIPT = fileURLToPath(
 const REQUIREMENTS: Record<VoiceEngineId, string> = {
   piper: fileURLToPath(new URL('../../../../requirements-showcase-voice.txt', import.meta.url)),
   silero: fileURLToPath(new URL('../../../../requirements-showcase-silero.txt', import.meta.url)),
+  qwen: fileURLToPath(new URL('../../../../requirements-showcase-qwen.txt', import.meta.url)),
 };
 
-// Сеть бывает медленной, а колёса и модель весят сотни мегабайт. Срок нужен
-// всё равно: без него оборванная загрузка держала бы кнопку занятой навсегда.
-const INSTALL_DEADLINE_MS = 45 * 60_000;
+// Сеть бывает медленной, а колёса и модель весят гигабайты. Срок нужен всё
+// равно: без него оборванная загрузка держала бы кнопку занятой навсегда.
+const INSTALL_DEADLINE_MS = 120 * 60_000;
 
-export type VoiceEngineId = 'piper' | 'silero';
+export type VoiceEngineId = 'piper' | 'silero' | 'qwen';
 
-export type VoicePackage = PiperVoicePackage | SileroVoicePackage;
+export type VoicePackage = PiperVoicePackage | SileroVoicePackage | QwenVoicePackage;
 
 export type VoiceInstallState = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 
@@ -107,6 +111,9 @@ export interface VoiceInstallerOptions {
   // занятости и отказа проверяются на нескольких голосах, а в закреплённом
   // каталоге их немного.
   voices?: readonly VoicePackage[];
+  // Вызывается по удачной установке: движки забывают кэш готовности, чтобы
+  // событие «голос установлен» показало живой статус, а не прежний отказ.
+  onInstalled?: (voiceId: string) => void;
 }
 
 export function voiceRuntimePaths(voiceDir: string): { python: string; voicesDir: string } {
@@ -123,21 +130,40 @@ export function sileroRuntimePaths(voiceDir: string): { python: string; modelsDi
   };
 }
 
+export function qwenRuntimePaths(voiceDir: string): { python: string; modelsDir: string } {
+  return {
+    python: path.join(voiceDir, 'qwen-venv', 'bin', 'python'),
+    modelsDir: path.join(voiceDir, 'qwen'),
+  };
+}
+
 /** Пакеты старого вида без поля движка — это Piper: другого раньше не было. */
 function engineOf(pack: VoicePackage): VoiceEngineId {
-  return pack.engineId === 'silero' ? 'silero' : 'piper';
+  if (pack.engineId === 'silero' || pack.engineId === 'qwen') {
+    return pack.engineId;
+  }
+
+  return 'piper';
 }
 
 function packageVoices(pack: VoicePackage): string[] {
-  return engineOf(pack) === 'silero'
-    ? (pack as SileroVoicePackage).speakers.map((speaker) => speaker.name)
-    : [pack.name];
+  if (pack.engineId === 'silero' || pack.engineId === 'qwen') {
+    return pack.speakers.map((speaker) => speaker.name);
+  }
+
+  return [pack.name];
 }
 
 function packageBytes(pack: VoicePackage): number {
-  return engineOf(pack) === 'silero'
-    ? (pack as SileroVoicePackage).fileBytes + (pack as SileroVoicePackage).engineBytes
-    : (pack as PiperVoicePackage).archiveBytes;
+  if (pack.engineId === 'silero') {
+    return pack.fileBytes + pack.engineBytes;
+  }
+
+  if (pack.engineId === 'qwen') {
+    return pack.modelBytes + pack.engineBytes;
+  }
+
+  return pack.archiveBytes;
 }
 
 function toPublic(record: VoiceInstallRecord): PublicVoiceInstall {
@@ -155,9 +181,12 @@ function toPublic(record: VoiceInstallRecord): PublicVoiceInstall {
 }
 
 export function createVoiceInstaller(options: VoiceInstallerOptions) {
-  const catalog: readonly VoicePackage[] = options.voices ?? [...SILERO_VOICES, ...PIPER_VOICES];
+  // Порядок — как у движков в службе: Qwen первым, потому что его ставят ради качества.
+  const catalog: readonly VoicePackage[] = options.voices
+    ?? [...QWEN_VOICES, ...SILERO_VOICES, ...PIPER_VOICES];
   const piperPaths = voiceRuntimePaths(options.voiceDir);
   const sileroPaths = sileroRuntimePaths(options.voiceDir);
+  const qwenPaths = qwenRuntimePaths(options.voiceDir);
   const stateFile = path.join(options.voiceDir, 'install.json');
 
   let current: VoiceInstallRecord | null = null;
@@ -240,6 +269,10 @@ export function createVoiceInstaller(options: VoiceInstallerOptions) {
 
     await persist(next);
     publish(next);
+
+    if (state === 'succeeded') {
+      options.onInstalled?.(record.voiceId);
+    }
   }
 
   /**
@@ -301,14 +334,18 @@ export function createVoiceInstaller(options: VoiceInstallerOptions) {
   async function status(): Promise<VoiceInstallStatus> {
     const installed = await readInstalledVoices(piperPaths.voicesDir);
     const sileroModels = await readInstalledSileroModels(sileroPaths.modelsDir);
+    const qwenModels = await readInstalledQwenModels(qwenPaths.modelsDir);
     const record = await load();
+    const presentIds: Record<VoiceEngineId, string[]> = {
+      piper: installed.map((voice) => voice.id),
+      silero: sileroModels.map((model) => model.id),
+      qwen: qwenModels.map((model) => model.id),
+    };
 
     return {
       available: catalog.map((item) => {
         const engineId = engineOf(item);
-        const present = engineId === 'silero'
-          ? sileroModels.some((model) => model.id === item.id)
-          : installed.some((voice) => voice.id === item.id);
+        const present = presentIds[engineId].includes(item.id);
 
         return {
           id: item.id,
@@ -355,16 +392,19 @@ export function createVoiceInstaller(options: VoiceInstallerOptions) {
     await fs.mkdir(options.voiceDir, { recursive: true, mode: 0o700 });
 
     const engineId = engineOf(pack);
+    const runtime: Record<VoiceEngineId, { venvDir: string; voicesDir: string }> = {
+      piper: { venvDir: path.join(options.voiceDir, 'venv'), voicesDir: piperPaths.voicesDir },
+      silero: { venvDir: path.join(options.voiceDir, 'silero-venv'), voicesDir: sileroPaths.modelsDir },
+      qwen: { venvDir: path.join(options.voiceDir, 'qwen-venv'), voicesDir: qwenPaths.modelsDir },
+    };
     const handle = await launchWorker({
       workDir: path.join(options.voiceDir, 'install'),
       nodeBin: options.nodeBin,
       script: options.workerScript ?? { file: WORKER_SCRIPT, marker: 'showcaseVoiceInstall' },
       task: {
         voice: pack,
-        venvDir: engineId === 'silero'
-          ? path.join(options.voiceDir, 'silero-venv')
-          : path.join(options.voiceDir, 'venv'),
-        voicesDir: engineId === 'silero' ? sileroPaths.modelsDir : piperPaths.voicesDir,
+        venvDir: runtime[engineId].venvDir,
+        voicesDir: runtime[engineId].voicesDir,
         requirementsFile: REQUIREMENTS[engineId],
         bootstrapPython: options.bootstrapPython || 'python3',
         deadlineMs: INSTALL_DEADLINE_MS,

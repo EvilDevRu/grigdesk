@@ -70,6 +70,7 @@ async function fixture(t, {
   speechRuntime = null,
   staleSaves = 0,
   providerModel = null,
+  chatAutoCompact = true,
   compactWindow = 0,
   compactResponse = null,
   initiallyBusy = false,
@@ -118,6 +119,7 @@ async function fixture(t, {
         body: {
           providers: [{
             id: 'claude', available: true, chatEnabled: true,
+            capabilities: { chatAutoCompact },
             modes: [{ id: 'auto' }],
             models: [providerModel || { id: 'claude-test', context: 1_000_000 }],
           }],
@@ -579,6 +581,41 @@ test('без автосжатия процент считается от 80% п�
     () => f.botCalls.some((call) => call.method === 'sendMessage' && /контекст 21%/u.test(call.body.text)),
     'итог с контекстом 21%',
   );
+});
+
+test('исполнитель без поддержки настройки считает процент от окна', async (t) => {
+  const f = await fixture(t, { compactWindow: 100_000, chatAutoCompact: false });
+  const { delivery } = await beginTurn(f, message('Проверь контекст'));
+  f.model.resolve({ statusCode: 200, body: { reply: 'Ответ', contextTokens: 165_172 } });
+  await delivery;
+  await waitFor(
+    () => f.botCalls.some((call) => call.method === 'sendMessage' && /контекст 21%/u.test(call.body.text)),
+    'запас до границы окна вместо неподдерживаемого автосжатия',
+  );
+});
+
+test('недоступный итоговый контекст не откатывается к старому живому замеру', async (t) => {
+  const f = await fixture(t, { compactWindow: 100_000 });
+  const { delivery } = await beginTurn(f, message('Проверь сжатый контекст'));
+  f.emit('chat-progress', {
+    chatKey: f.record().id, tokens: 50, contextTokens: 150_000,
+    contextWindow: 1_000_000, contextMetric: 'active-input-v1',
+  });
+  f.model.resolve({
+    statusCode: 200,
+    body: { reply: 'Контекст обновлён.', contextTokens: 0, contextMetric: 'unavailable' },
+  });
+  await delivery;
+  await waitFor(
+    () => f.botCalls.some((call) => (
+      call.method === 'sendMessage' && /Контекст обновлён/u.test(call.body.text)
+    )),
+    'итог без устаревшего предупреждения',
+  );
+  const answer = f.botCalls.find((call) => (
+    call.method === 'sendMessage' && /Контекст обновлён/u.test(call.body.text)
+  ));
+  assert.doesNotMatch(answer.body.text, /контекст \d+%|Контекст достиг/u);
 });
 
 test('окно фактического хода сильнее каталога модели', async (t) => {

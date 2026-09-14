@@ -33,9 +33,26 @@ withDefaults(
 
 const element = ref<HTMLVideoElement | null>(null);
 
+/**
+ * Переход к секунде ролика с запуском воспроизведения. Нужен разделам, где ролик
+ * состоит из частей и у каждой части есть свой адрес во времени: зритель нажимает
+ * на часть, а не ищет её ползунком.
+ */
+function seek(seconds: number): void {
+  const video = element.value;
+
+  if (!video || !Number.isFinite(seconds)) {
+    return;
+  }
+
+  video.currentTime = Math.max(0, seconds);
+  void video.play()?.catch(() => {});
+}
+
 defineExpose({
   play: () => element.value?.play(),
   pause: () => element.value?.pause(),
+  seek,
 });
 </script>
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { SpeechRuntimeError } from './errors.ts';
 import { normalizeSpeechOptions } from './options.ts';
 import { speechModel } from './catalog.ts';
+import { decodeSpeechTranscript } from './transport.ts';
 
 export const WARMUP_WORKER_PY = fileURLToPath(new URL('./warmup-worker.py', import.meta.url));
 
@@ -25,6 +26,7 @@ export interface WarmupController {
   transcribe: (input: {
     filePath: string;
     progressFile?: string | null;
+    wordTimestamps?: boolean;
     signal?: AbortSignal | null;
   }) => Promise<Record<string, unknown>>;
   cancel: () => Promise<boolean>;
@@ -44,7 +46,7 @@ interface WireMessage {
   type?: string;
   nonce?: string;
   requestId?: string;
-  result?: Record<string, unknown>;
+  result?: unknown;
   message?: string;
   code?: string;
 }
@@ -203,6 +205,7 @@ export function createWarmupProcess({
     reject: (error: unknown) => void;
     cleanup?: () => void;
     timer?: unknown;
+    wordTimestamps: boolean;
   } | null = null;
   let cancelPromise: Promise<boolean> | null = null;
   let readySettled = false;
@@ -242,7 +245,13 @@ export function createWarmupProcess({
       const pending = request;
       request = null;
       pending.cleanup?.();
-      pending.resolve(message.result ?? {});
+      try {
+        pending.resolve(decodeSpeechTranscript(message.result, {
+          wordTimestampsRequested: pending.wordTimestamps,
+        }));
+      } catch (error) {
+        pending.reject(error);
+      }
       return;
     }
     if (message.type === 'error') rejectPending(wireError(message));
@@ -298,9 +307,15 @@ export function createWarmupProcess({
     return cancelPromise;
   }
 
-  async function transcribe({ filePath, progressFile = null, signal = null }: {
+  async function transcribe({
+    filePath,
+    progressFile = null,
+    wordTimestamps = false,
+    signal = null,
+  }: {
     filePath: string;
     progressFile?: string | null;
+    wordTimestamps?: boolean;
     signal?: AbortSignal | null;
   }): Promise<Record<string, unknown>> {
     if (used) throw new Error('Warmup process уже использован');
@@ -337,9 +352,12 @@ export function createWarmupProcess({
       void cancel();
       throw aborted();
     }
+    if (typeof wordTimestamps !== 'boolean') {
+      throw new TypeError('wordTimestamps warmup-запроса должен быть boolean');
+    }
     const requestId = randomUUID();
     return new Promise<Record<string, unknown>>((resolve, reject) => {
-      request = { requestId, resolve, reject };
+      request = { requestId, resolve, reject, wordTimestamps };
       const abort = () => {
         if (!request || request.requestId !== requestId) return;
         const pending = request;
@@ -355,6 +373,7 @@ export function createWarmupProcess({
         requestId,
         filePath,
         progressFile,
+        wordTimestamps,
       })}\n`, (error: unknown) => {
         if (!error || !request || request.requestId !== requestId) return;
         const pending = request;

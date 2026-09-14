@@ -94,6 +94,21 @@ async function waitFor(check, limitMs = 3000) {
   return true;
 }
 
+test('каталог объявляет поддержку порога только по контракту адаптера', async (t) => {
+  for (const capability of [{}, { chatAutoCompact: true }, { autoCompactEnv: 'FIXTURE_COMPACT_WINDOW' }]) {
+    const fixture = await tickFixture(t, {
+      clients: 0,
+      usageTickMs: 20,
+      adapter: (onUsage) => ({ ...tickingAdapter(onUsage), ...capability }),
+    });
+    const response = await fixture.app.inject({ method: 'GET', url: '/api/providers' });
+    assert.equal(response.statusCode, 200);
+    const supported = response.json().providers[0].capabilities.chatAutoCompact;
+
+    assert.equal(supported, Object.keys(capability).length > 0);
+  }
+});
+
 test('без окон на потоке тик к вендору не ходит и ничего не рассылает', async (t) => {
   const fixture = await tickFixture(t, { clients: 0, usageTickMs: 20 });
 

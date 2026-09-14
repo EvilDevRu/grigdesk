@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', import.meta.url));
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const PINIA_URL = pathToFileURL(PINIA_PATH).href;
+const CONTEXT_USAGE_URL = new URL('../../../shared/chatContextUsage.ts', import.meta.url).href;
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
 export const apiHarness = {};
@@ -70,6 +71,10 @@ function patch(source) {
       'const sseSubscribe = (fn) => { globalThis.__chatSse = fn; return () => {}; };',
     )
     .replace("import { mdToText } from '../shared/md.ts';", 'const mdToText = (x) => x;')
+    .replace(
+      "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
+      `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,
+    )
     .replace(
       "import { chatVisibility } from '../shared/chat-visibility.js';",
       'const chatVisibility = globalThis.__chatVisibility;',

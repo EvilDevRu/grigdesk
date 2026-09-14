@@ -20,6 +20,7 @@ import {
 } from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
 import { notFound, revisionConflict, ShowcaseError } from './errors.ts';
+import { extensionOf } from './formats.ts';
 
 export interface ShowcaseStoreOptions {
   showcaseDir: string;
@@ -192,6 +193,94 @@ export function createShowcaseStore({ showcaseDir }: ShowcaseStoreOptions) {
   }
 
   /**
+   * Удаляет только узнаваемые неизменяемые артефакты, которые больше не достижимы
+   * из project.json и уже пережили общий retention. Свежий непринятый результат
+   * гонки остаётся до следующего прохода, поэтому публикация не спорит с уборкой.
+   */
+  async function sweepUnreferencedArtifacts(
+    project: ShowcaseProject,
+    beforeMs: number,
+  ): Promise<number> {
+    const names = namesOf(project.id);
+    const keep = new Set<string>();
+
+    for (const scene of project.scenes) {
+      for (const media of [scene.audio, scene.clip, scene.frame]) {
+        if (media) {
+          keep.add(path.join(names.scenesDir, scene.id, 'artifacts', `${media.id}${extensionOf(media.kind)}`));
+        }
+      }
+
+      for (const derived of [scene.speechTiming, scene.speechAlignment, scene.recordingTiming]) {
+        if (derived) {
+          keep.add(path.join(names.scenesDir, scene.id, 'artifacts', `${derived.id}.json`));
+        }
+      }
+    }
+
+    if (project.latestFinal) {
+      keep.add(path.join(
+        names.finalsDir,
+        `${project.latestFinal.video.id}${extensionOf(project.latestFinal.video.kind)}`,
+      ));
+
+      if (project.latestFinal.subtitles) {
+        keep.add(path.join(
+          names.finalsDir,
+          `${project.latestFinal.subtitles.id}${extensionOf(project.latestFinal.subtitles.kind)}`,
+        ));
+      }
+
+      if (project.latestFinal.manifestVersion === 1) {
+        keep.add(path.join(names.finalsDir, `${project.latestFinal.manifestId}.json`));
+      }
+    }
+
+    const candidates: string[] = [];
+    const sceneEntries = await fs.readdir(names.scenesDir, { withFileTypes: true }).catch(() => []);
+
+    for (const sceneEntry of sceneEntries) {
+      if (!sceneEntry.isDirectory()) {
+        continue;
+      }
+
+      const artifactsDir = path.join(names.scenesDir, sceneEntry.name, 'artifacts');
+      const entries = await fs.readdir(artifactsDir, { withFileTypes: true }).catch(() => []);
+
+      for (const entry of entries) {
+        if (entry.isFile() && /^(?:(?:audio|clip|frame)-[a-f0-9]{12}\.(?:wav|webm|png|jpg)|(?:speech-timing|speech-alignment|recording-timing)-[a-f0-9]{12}\.json)$/.test(entry.name)) {
+          candidates.push(path.join(artifactsDir, entry.name));
+        }
+      }
+    }
+
+    const finalEntries = await fs.readdir(names.finalsDir, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of finalEntries) {
+      if (entry.isFile() && /^(?:(?:final|subtitles)-[a-f0-9]{12}\.(?:mp4|srt)|manifest-[a-f0-9]{32}\.json)$/.test(entry.name)) {
+        candidates.push(path.join(names.finalsDir, entry.name));
+      }
+    }
+
+    let removed = 0;
+
+    for (const file of candidates) {
+      if (keep.has(file)) {
+        continue;
+      }
+
+      const info = await fs.stat(file).catch(() => null);
+
+      if (info?.isFile() && info.mtimeMs < beforeMs) {
+        await fs.rm(file, { force: true });
+        removed += 1;
+      }
+    }
+
+    return removed;
+  }
+
+  /**
    * Список роликов. Повреждённая или чужой версии запись не роняет весь список:
    * она возвращается отдельной строкой с причиной, потому что раздел обязан
    * показать, что такая запись есть, и не притворяться, что роликов меньше.
@@ -249,6 +338,7 @@ export function createShowcaseStore({ showcaseDir }: ShowcaseStoreOptions) {
     projectsDir,
     readProject,
     removeProject,
+    sweepUnreferencedArtifacts,
     updateProject,
     writeJson,
   };

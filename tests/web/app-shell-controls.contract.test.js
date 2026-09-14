@@ -11,13 +11,18 @@ const PIPELINE_POPOVER_PATH = new URL(
   '../../web/src/features/pipeline/PipelineTopbarPopover.vue',
   import.meta.url,
 );
+const VERSION_TILE_PATH = new URL(
+  '../../web/src/features/cockpit-update/CockpitVersionTile.vue',
+  import.meta.url,
+);
 const ACTIONS_PATH = new URL('../../web/src/styles/components/actions.css', import.meta.url);
 
 test('AppShell использует public UI controls и DOM handle триггера инструментов', async () => {
-  const [source, providerUsage, pipelinePopover, actions] = await Promise.all([
+  const [source, providerUsage, pipelinePopover, versionTile, actions] = await Promise.all([
     readFile(APP_SHELL_PATH, 'utf8'),
     readFile(PROVIDER_USAGE_PATH, 'utf8'),
     readFile(PIPELINE_POPOVER_PATH, 'utf8'),
+    readFile(VERSION_TILE_PATH, 'utf8'),
     readFile(ACTIONS_PATH, 'utf8'),
   ]);
   const publicUiImport = source.match(/import\s*\{([^}]*)\}\s*from '\.\.\/\.\.\/ui';/u);
@@ -26,8 +31,10 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.match(publicUiImport[1], /\bUiButton\b/u);
   assert.match(publicUiImport[1], /\bUiIconButton\b/u);
   assert.match(publicUiImport[1], /\bUiPressable\b/u);
-  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 4);
-  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 4);
+  // Версия кокпита живёт плиткой в конце рейки (CockpitVersionTile): в оболочке остались
+  // «Инструменты», «Свернуть» и всплывашка исполнителя.
+  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 3);
+  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 3);
   assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 3);
   assert.doesNotMatch(source, /<button\b/u);
   assert.match(source, /toolsTrigger\.value\?\.el\?\.getBoundingClientRect/u);
@@ -37,7 +44,10 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.match(source, /data-context="topbar-popover-settings"/u);
   assert.match(source, /data-context="topbar-popover-refresh"/u);
   assert.match(source, /data-context="topbar-popover-update"/u);
-  assert.match(source, /data-context="topbar-popover-footer"/u);
+  assert.doesNotMatch(source, /data-context="topbar-popover-footer"/u);
+  assert.match(versionTile, /<UiPressable[\s\S]*?data-context="cockpit-version"/u);
+  assert.match(versionTile, /data-context="topbar-popover-footer"/u);
+  assert.doesNotMatch(versionTile, /<button\b/u);
   assert.match(source, /<BoardTimerPopover/u);
   assert.match(source, /:tasks="topbarTimerTasks"/u);
   assert.match(source, /:worked-today-hours="workedTodayHours"/u);

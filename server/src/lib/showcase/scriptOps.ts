@@ -11,18 +11,35 @@
 import { ShowcaseError } from './errors.ts';
 import { collectDiffContext } from './script/context.ts';
 import {
+  buildBindingsPrompt,
   buildBriefPrompt,
   buildRepairPrompt,
   buildScriptPrompt,
   SCRIPT_PROMPT_VERSION,
 } from './script/prompt.ts';
 import type { ScriptContext } from './script/prompt.ts';
-import { parseBrief, parseScript } from './script/writer.ts';
-import { createScene } from './scenes.ts';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
+import {
+  parseBindingsReply,
+  parseBrief,
+  parseScriptReplyResult,
+} from './script/writer.ts';
+import type { BindingReplyScene, DraftSyncCue, ScriptReplyProblem } from './script/writer.ts';
+import { applyGeneratedSyncCues } from './sceneOps.ts';
+import {
+  createScene,
+  createSyncBindings,
+  sceneSyncBindingsState,
+} from './scenes.ts';
+import { mapRevisionOf } from './targets.ts';
+import type { ShowcaseProject, ShowcaseScene } from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
+
+// Пометка о неполном diff. Модель видела не все изменения — план и сцены построены
+// по видимой части, и человек должен знать об этом, не слушая оговорку в ролике.
+const DIFF_TRUNCATED_NOTE = 'Изменения репозиториев прочитаны не полностью (длинные файлы '
+  + 'обрезаны, тесты не читались): план и сцены построены по видимой части.';
 
 // Длина текста задачи, которая доезжает до промпта. Постановки бывают на десятки
 // килобайт, а разбору нужна суть: остальное всё равно вытеснит diff и карту экранов.
@@ -145,7 +162,12 @@ export function createScriptOps(deps: ScriptOpsDeps) {
    * Контекст генерации. Пути и Git-ссылки сервер берёт у зарегистрированных
    * репозиториев стенда: модель не выбирает, что ей показать.
    */
-  async function scriptContextOf(project: ShowcaseProject, taskText: string): Promise<ScriptContext> {
+  async function scriptContextOf(project: ShowcaseProject, taskText: string): Promise<{
+    context: ScriptContext;
+    // Ревизия словаря карты, по которому собран контекст: сценарий запоминает её,
+    // чтобы после правки карты экранов интерфейс мог сказать «сцены старше карты».
+    mapRevision: string;
+  }> {
     if (project.target.status !== 'ready') {
       throw new ShowcaseError('target_unavailable', project.target.reason, 409);
     }
@@ -164,19 +186,22 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       const diff = await collectDiffContext(scope.sandbox?.repos ?? []);
 
       return {
-        taskTitle: project.title,
-        taskText,
-        diff: diff.diff,
-        diffBase: diff.base,
-        diffHead: diff.head,
-        diffTruncated: diff.truncated,
-        screens: scope.screens.map((screen) => ({
-          id: screen.id,
-          title: screen.title,
-          path: screen.path,
-          elements: screen.elements.map((element) => ({ id: element.id })),
-        })),
-        maxScenes: limits().maxScenes,
+        context: {
+          taskTitle: project.title,
+          taskText,
+          diff: diff.diff,
+          diffBase: diff.base,
+          diffHead: diff.head,
+          diffTruncated: diff.truncated,
+          screens: scope.screens.map((screen) => ({
+            id: screen.id,
+            title: screen.title,
+            path: screen.path,
+            elements: screen.elements.map((element) => ({ id: element.id, title: element.title })),
+          })),
+          maxScenes: limits().maxScenes,
+        },
+        mapRevision: mapRevisionOf(scope.screens),
       };
     } finally {
       await lease?.release();
@@ -191,7 +216,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     assertEnabled();
 
     const project = await readProject(id);
-    const context = await scriptContextOf(project, taskText);
+    const { context } = await scriptContextOf(project, taskText);
     const prompt = buildBriefPrompt(context);
     const first = await runUntrustedModel(prompt);
     let points = parseBrief(first);
@@ -233,6 +258,10 @@ export function createScriptOps(deps: ScriptOpsDeps) {
   /**
    * Сценарий по ПРИНЯТОМУ брифу. Негодный ответ не меняет сохранённую редакцию:
    * человеку остаётся то, что он уже видел, а не половина новой версии.
+   *
+   * Годный ответ ЗАМЕНЯЕТ сцены ролика: «разобрать заново» — это новый сценарий, а
+   * не дописанный к прежнему. Голос и темп ролика при этом переживают замену: их
+   * выбирал человек для ролика целиком, а не для конкретных сцен.
    */
   async function generateScript(id: string, taskText: string): Promise<ShowcaseProject> {
     assertEnabled();
@@ -243,48 +272,205 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       throw new ShowcaseError('no_brief', 'Сначала нужен бриф: без него сценарий не о чем.', 409);
     }
 
-    const context = await scriptContextOf(project, taskText);
+    const { context, mapRevision } = await scriptContextOf(project, taskText);
     const prompt = buildScriptPrompt(context, project.brief);
     const first = await runUntrustedModel(prompt);
-    let drafts = parseScript(first, context.screens, context.maxScenes);
+    let parsed = parseScriptReplyResult(first, context.screens, context.maxScenes);
+    let problem = parsed.problem;
 
-    if (!drafts) {
-      drafts = parseScript(
+    if (!parsed.draft) {
+      parsed = parseScriptReplyResult(
         await runUntrustedModel(buildRepairPrompt(prompt, first)),
         context.screens,
         context.maxScenes,
       );
+      problem = parsed.problem ?? problem;
     }
 
-    if (!drafts) {
+    if (!parsed.draft) {
+      const detail = problem?.message;
+
       throw new ShowcaseError(
-        'model_reply_invalid',
-        'Модель не вернула сценарий нужной формы. Сцены можно собрать руками.',
+        detail ? 'model_bindings_invalid' : 'model_reply_invalid',
+        detail
+          ? `${detail} Исправьте привязки этой сцены или повторите построение.`
+          : 'Модель не вернула сценарий нужной формы. Сцены можно собрать руками.',
         502,
       );
     }
 
+    const draft = parsed.draft;
+    const { scenes: drafts } = draft;
+    // Обрезка изменений — знание для человека, а не тема ролика: она идёт в тот же
+    // список, что и пробелы карты, а не в озвучку заключительной сцены.
+    const gaps = context.diffTruncated
+      ? [...draft.gaps, DIFF_TRUNCATED_NOTE]
+      : draft.gaps;
     const saved = await store.updateProject(id, project.revision, (current) => {
-      let next = current;
+      const previous = [...current.scenes].sort((left, right) => left.order - right.order).at(-1);
+      let next: ShowcaseProject = {
+        ...current,
+        scenes: [],
+        scriptGaps: gaps,
+        scriptMapRevision: mapRevision,
+      };
 
-      for (const draft of drafts) {
+      for (const item of drafts) {
+        // Первая новая сцена наследует голос и темп у последней прежней, дальше
+        // наследование идёт по цепочке само — как при добавлении сцены руками.
+        const seed = next.scenes.length === 0 && previous ? { ...next, scenes: [previous] } : next;
+        const scene = createScene(seed, {
+          title: item.title,
+          screenId: item.screenId,
+          narration: item.narration,
+          caption: item.caption,
+          subtitleText: item.subtitleText,
+          startState: null,
+          readyCondition: null,
+          continuesPrevious: item.continuesPrevious,
+          actions: item.actions,
+          syncBindings: item.syncCues && item.syncCues.length > 0
+            ? createSyncBindings(item.narration, item.actions, item.syncCues)
+            : null,
+        });
+
         next = {
           ...next,
-          scenes: [...next.scenes, createScene(next, {
-            title: draft.title,
-            screenId: draft.screenId,
-            narration: draft.narration,
-            caption: draft.caption,
-            subtitleText: draft.subtitleText,
-            startState: null,
-            readyCondition: null,
-            actions: draft.actions,
-          })],
+          scenes: [...next.scenes, { ...scene, order: next.scenes.length + 1 }],
         };
       }
 
       return next;
     });
+
+    broadcast('showcase-changed', { projectId: id, revision: saved.revision });
+
+    return withFreshness(saved);
+  }
+
+  /**
+   * Готовит снимок уже принятого сценария для модели. Ручные связи входят только
+   * занятыми индексами: цитаты человека модели не нужны и заменять их она не может.
+   */
+  function bindingScenesOf(project: ShowcaseProject): BindingReplyScene[] {
+    return [...project.scenes]
+      .sort((left, right) => left.order - right.order)
+      .map((scene) => {
+        const manual = (scene.syncBindings?.cues ?? []).filter((cue) => cue.origin === 'manual');
+        const state = sceneSyncBindingsState(scene);
+
+        if (manual.length > 0 && state.status !== 'valid') {
+          throw new ShowcaseError(
+            'stale_manual_bindings',
+            `Ручные привязки сцены «${scene.title}» потеряли актуальность. Исправьте эту сцену.`,
+            409,
+          );
+        }
+
+        return {
+          id: scene.id,
+          title: scene.title,
+          narration: scene.narration,
+          actions: scene.actions,
+          manualActionIndices: manual.map((cue) => cue.actionIndex),
+        };
+      });
+  }
+
+  /** Проверяет совместимость модельных связей с сохранёнными ручными cue. */
+  function mergeGeneratedBindings(
+    scenes: readonly BindingReplyScene[],
+    project: ShowcaseProject,
+    bindings: ReadonlyMap<string, DraftSyncCue[]>,
+  ): { changed: Map<string, ShowcaseScene>; problem: ScriptReplyProblem | null } {
+    const changed = new Map<string, ShowcaseScene>();
+
+    for (const [sceneIndex, context] of scenes.entries()) {
+      const scene = project.scenes.find((item) => item.id === context.id) as ShowcaseScene;
+
+      try {
+        changed.set(scene.id, applyGeneratedSyncCues(scene, bindings.get(scene.id) ?? []));
+      } catch (error) {
+        if (!(error instanceof ShowcaseError)) {
+          throw error;
+        }
+
+        return {
+          changed,
+          problem: {
+            sceneId: scene.id,
+            sceneIndex,
+            message: `Сцена «${scene.title}»: ${error.message}`,
+          },
+        };
+      }
+    }
+
+    return { changed, problem: null };
+  }
+
+  /**
+   * Для существующего проекта модель строит только смысловые связи. Два ответа —
+   * исходный и один repair — предел операции. До атомарной записи narration,
+   * actions, порядок и ручные cue остаются неизменными.
+   */
+  async function generateBindings(id: string): Promise<ShowcaseProject> {
+    assertEnabled();
+
+    const project = await readProject(id);
+
+    if (project.scenes.length === 0) {
+      throw new ShowcaseError('no_scenes', 'В ролике нет сцен для привязки.', 409);
+    }
+
+    const scenes = bindingScenesOf(project);
+    const prompt = buildBindingsPrompt(scenes.map((scene) => ({
+      id: scene.id,
+      title: scene.title,
+      narration: scene.narration,
+      actions: scene.actions.map((action) => ({ ...action })),
+      manualActionIndices: scene.manualActionIndices,
+    })));
+    let previousReply = '';
+    let prepared: Map<string, ShowcaseScene> | null = null;
+    let problem: ScriptReplyProblem | null = null;
+
+    for (let attempt = 0; attempt < 2 && !prepared; attempt += 1) {
+      const reply = await runUntrustedModel(
+        attempt === 0 ? prompt : buildRepairPrompt(prompt, previousReply),
+      );
+      const parsed = parseBindingsReply(reply, scenes);
+
+      previousReply = reply;
+      problem = parsed.problem ?? problem;
+
+      if (!parsed.bindings) {
+        continue;
+      }
+
+      const merged = mergeGeneratedBindings(scenes, project, parsed.bindings);
+
+      prepared = merged.problem ? null : merged.changed;
+      problem = merged.problem ?? problem;
+    }
+
+    if (!prepared) {
+      throw new ShowcaseError(
+        problem ? 'model_bindings_invalid' : 'model_reply_invalid',
+        problem?.message
+          ?? 'Модель не вернула смысловые привязки нужной формы. Исправьте сцены вручную.',
+        502,
+      );
+    }
+
+    const saved = await store.updateProject(id, project.revision, (current) => ({
+      ...current,
+      scenes: current.scenes.map((scene) => {
+        const updated = prepared?.get(scene.id);
+
+        return updated ? { ...scene, syncBindings: updated.syncBindings } : scene;
+      }),
+    }));
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
@@ -334,5 +520,5 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     }
   }
 
-  return { analyze, generateBrief, generateScript };
+  return { analyze, generateBindings, generateBrief, generateScript };
 }

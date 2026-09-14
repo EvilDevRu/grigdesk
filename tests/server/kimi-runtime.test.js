@@ -149,6 +149,7 @@ test('contained runtime даже при false сохраняет сетевую 
   const f = await fixture(t);
   const process = new FakeAcpProcess();
   const order = [];
+  const progress = [];
   let launchConfig;
   let launchOptions;
   const out = await runContainedKimi({
@@ -161,6 +162,7 @@ test('contained runtime даже при false сохраняет сетевую 
     permissionMode: 'default',
     providerSettings: { blockDirectSsh: false },
     onSessionCreated: async (id) => { order.push(`bound:${id}`); },
+    onProgress: (_tokens, info) => progress.push(info),
     onPermission: async (presentation) => {
       order.push(`permission:${presentation.tool}`);
       return { allow: true };
@@ -182,6 +184,9 @@ test('contained runtime даже при false сохраняет сетевую 
   assert.equal(out.sessionId, 'session-1');
   assert.equal(out.contextTokens, 12_345);
   assert.equal(out.contextWindow, 1_048_576);
+  assert.equal(progress.at(-1).contextTokens, out.contextTokens);
+  assert.equal(progress.at(-1).contextWindow, out.contextWindow);
+  assert.equal(progress.at(-1).contextMetric, 'kimi-session-status');
   assert.equal(out.contextIsEstimate, false);
   assert.deepEqual(out.contextCache, { scope: 'request', status: 'unavailable' });
   assert.equal(out.retryState, 'post_prompt');
@@ -371,6 +376,8 @@ test('status parser не подменяет точное измерение оц
     actualModel: 'k3',
   });
   assert.equal(parseStatus('broken', 262144).contextIsEstimate, true);
+  assert.equal(parseStatus('Context: 123 / 0', 262144).contextMetric, 'unavailable');
+  assert.equal(parseStatus('Context: 99999999999999999 / 262144', 262144).contextMetric, 'unavailable');
 });
 
 test('status parser понимает формат 0.33+: /usage с размером, /status без маркеров', () => {

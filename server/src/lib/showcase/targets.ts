@@ -95,6 +95,9 @@ const screenContract = objectOf({
     elements: listOf(objectOf({
       id: text,
       selector: text,
+      // Подпись элемента для модели: по одному идентификатору не всегда ясно, что
+      // это за кнопка и когда она видна. Селектор при этом остаётся на сервере.
+      title: optional(text),
     })),
   })),
 });
@@ -371,6 +374,8 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
         profile,
         profileBinding: 'verified',
         label: `${profile} · постоянный стенд`,
+        // Постоянный стенд задаче не принадлежит.
+        taskTitle: null,
         viewUrl: url,
         viewPort: null,
         status: policy.reason ? 'blocked' : 'ready',
@@ -460,6 +465,8 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       profile,
       profileBinding,
       label,
+      // Название задачи дописывает служба: связь с порталом держит она, а не каталог.
+      taskTitle: null,
       // localhost здесь относится к машине сервера и не является ссылкой для
       // удалённого браузера. Клиент построит её из порта и своего cockpit host.
       viewUrl: null,
@@ -1001,6 +1008,20 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
  * входа и данные стенда остаются на сервере. Наружу уходит то, что показывает
  * карточка ролика, и отпечатки, которые интерфейс возвращает обратно как есть.
  */
+/**
+ * Ревизия СЛОВАРЯ карты — того, что видит модель: экраны, элементы и их подписи.
+ * Селекторы в неё не входят: их правка не меняет сценарий, и «сцены старше карты»
+ * после исправленного селектора было бы ложной тревогой.
+ */
+export function mapRevisionOf(screens: ShowcaseScreenContract['screens']): string {
+  return hashOf(screens.map((screen) => [
+    screen.id,
+    screen.title,
+    screen.path,
+    screen.elements.map((element) => [element.id, element.title ?? '']),
+  ]));
+}
+
 export function toPublicScope(scope: ShowcaseResolvedScope): ShowcaseScope {
   return {
     targetKind: scope.ref.kind,
@@ -1016,6 +1037,7 @@ export function toPublicScope(scope: ShowcaseResolvedScope): ShowcaseScope {
     })),
     targetFingerprint: scope.targetFingerprint,
     policyRevision: scope.policyRevision,
+    mapRevision: mapRevisionOf(scope.screens),
     dataRevision: scope.dataRevision,
     buildRevision: scope.buildRevision,
   };

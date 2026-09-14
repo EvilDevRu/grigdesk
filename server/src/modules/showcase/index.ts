@@ -17,12 +17,25 @@ import type { FastifyReply } from 'fastify';
 // расширяет сам запрос, а не приходит отдельным значением.
 import type {} from '@fastify/multipart';
 
-import { SHOWCASE_ID_RE } from '../../../../shared/showcaseContracts.ts';
-import type { ShowcaseAction, ShowcaseTargetRef } from '../../../../shared/showcaseContracts.ts';
+import {
+  SHOWCASE_BUILD_REQUEST_ID_RE,
+  SHOWCASE_ID_RE,
+  SHOWCASE_PACES,
+  parseShowcaseDirection,
+} from '../../../../shared/showcaseContracts.ts';
+import { SHOWCASE_SYNC_CUE_KINDS } from '../../../../shared/showcaseSync.ts';
+import { SHOWCASE_MANIFEST_ID_RE } from '../../../../shared/showcaseTimeline.ts';
+import type {
+  ShowcaseAction,
+  ShowcasePace,
+  ShowcaseTargetRef,
+} from '../../../../shared/showcaseContracts.ts';
 import { mediaTypeOf } from '../../lib/showcase/artifacts.ts';
 import { PROFILE_RE } from '../../lib/profiles.ts';
 import { toPublicJob } from '../../lib/showcase/jobs.ts';
 import type { ShowcaseService } from '../../lib/showcase/service.ts';
+import type { SceneSyncCueInput } from '../../lib/showcase/sceneOps.ts';
+import type { PronunciationOverrideInput } from '../../lib/showcase/voice/preparation.ts';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -75,6 +88,21 @@ interface VoicePreviewRoute {
   };
 }
 
+interface VoiceNarrationPreviewRoute {
+  Body: {
+    voiceRef?: unknown;
+    narration?: unknown;
+    direction?: unknown;
+    pronunciationOverrides?: unknown;
+  };
+}
+
+interface VoiceDictionaryRoute {
+  Body: {
+    text?: unknown;
+  };
+}
+
 interface VoiceChoiceRoute extends ProjectRoute {
   Body: {
     expectedRevision?: unknown;
@@ -83,7 +111,7 @@ interface VoiceChoiceRoute extends ProjectRoute {
   };
 }
 
-const PACES = new Set(['slow', 'normal', 'fast']);
+const PACES = new Set<string>(SHOWCASE_PACES);
 
 interface SceneRoute extends ProjectRoute {
   Params: {
@@ -97,6 +125,20 @@ interface ArtifactRoute {
   Params: {
     id: string;
     artifactId: string;
+  };
+}
+
+interface ManifestRoute {
+  Params: {
+    id: string;
+    manifestId: string;
+  };
+}
+
+interface BuildStartRoute extends ProjectRoute {
+  Body: {
+    revision?: unknown;
+    requestId?: unknown;
   };
 }
 
@@ -156,6 +198,7 @@ function readCreateTargetRef(kind: unknown, id: unknown): ShowcaseTargetRef | nu
 }
 
 const ACTION_KINDS = new Set(['goto', 'click', 'hover', 'highlight', 'waitVisible', 'scroll', 'wait']);
+const SYNC_CUE_KINDS = new Set<string>(SHOWCASE_SYNC_CUE_KINDS);
 
 /**
  * Действия сцены приходят от клиента и разбираются по видам: неизвестный вид не
@@ -213,6 +256,105 @@ function readActions(value: unknown): ShowcaseAction[] | null {
   }
 
   return actions;
+}
+
+/** Ручной cue не принимает origin, хеш, selector или придуманный новый ID. */
+function readSyncCues(value: unknown): SceneSyncCueInput[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const cues: SceneSyncCueInput[] = [];
+
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return null;
+    }
+
+    const keys = Object.keys(item);
+    const required = ['actionIndex', 'from', 'kind', 'to'];
+    const allowed = new Set([...required, 'id', 'manual']);
+
+    if (
+      !required.every((key) => Object.prototype.hasOwnProperty.call(item, key))
+      || keys.some((key) => !allowed.has(key))
+    ) {
+      return null;
+    }
+
+    if (
+      !Number.isSafeInteger(item.actionIndex)
+      || Number(item.actionIndex) < 0
+      || !Number.isSafeInteger(item.from)
+      || Number(item.from) < 0
+      || !Number.isSafeInteger(item.to)
+      || Number(item.to) < 0
+      || typeof item.kind !== 'string'
+      || !SYNC_CUE_KINDS.has(item.kind)
+    ) {
+      return null;
+    }
+
+    if (item.id !== undefined && item.id !== null && (typeof item.id !== 'string' || !item.id)) {
+      return null;
+    }
+
+    if (item.manual !== undefined && item.manual !== true) {
+      return null;
+    }
+
+    cues.push({
+      ...(typeof item.id === 'string' ? { id: item.id } : {}),
+      actionIndex: Number(item.actionIndex),
+      from: Number(item.from),
+      to: Number(item.to),
+      kind: item.kind as SceneSyncCueInput['kind'],
+      ...(item.manual === true ? { manual: true as const } : {}),
+    });
+  }
+
+  return cues;
+}
+
+/** Клиент не задаёт textHash: текущую редакцию реплики подписывает сервер. */
+function readPronunciationOverrides(value: unknown): PronunciationOverrideInput[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const replacements: PronunciationOverrideInput[] = [];
+
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return null;
+    }
+
+    const keys = Object.keys(item);
+    const required = ['from', 'to', 'pronunciation', 'voiceRef'];
+    const allowed = new Set([...required, 'refresh']);
+
+    if (
+      keys.some((key) => !allowed.has(key))
+      || !required.every((key) => Object.prototype.hasOwnProperty.call(item, key))
+      || !Number.isSafeInteger(item.from)
+      || !Number.isSafeInteger(item.to)
+      || typeof item.pronunciation !== 'string'
+      || typeof item.voiceRef !== 'string'
+      || item.refresh !== undefined && item.refresh !== true
+    ) {
+      return null;
+    }
+
+    replacements.push({
+      from: Number(item.from),
+      to: Number(item.to),
+      pronunciation: item.pronunciation,
+      voiceRef: item.voiceRef,
+      ...(item.refresh === true ? { refresh: true as const } : {}),
+    });
+  }
+
+  return replacements;
 }
 
 function readText(value: unknown, fallback = ''): string {
@@ -297,7 +439,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.get<ProjectRoute>('/api/showcase/:id', async (request, reply) => {
 
     try {
-      return await service.readProject(request.params.id);
+      return await service.openProject(request.params.id);
     } catch (error) {
       return sendError(reply, error);
     }
@@ -360,6 +502,9 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
         readyCondition: request.body?.readyCondition === undefined
           ? null
           : readText(request.body?.readyCondition) || null,
+        // Продолжение — только явное `true`: строка «true» или число из чужого
+        // клиента не должны молча превращать сцену в продолжение.
+        continuesPrevious: request.body?.continuesPrevious === true,
         actions,
       });
     } catch (error) {
@@ -370,13 +515,18 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.put<SceneRoute>('/api/showcase/:id/scenes/:sceneId', async (request, reply) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const actions = request.body?.actions === undefined ? undefined : readActions(request.body.actions);
-
+    const syncCues = request.body?.syncCues === undefined
+      ? undefined
+      : readSyncCues(request.body.syncCues);
+    const pronunciationOverrides = request.body?.pronunciationOverrides === undefined
+      ? undefined
+      : readPronunciationOverrides(request.body.pronunciationOverrides);
 
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       return reply.code(400).send({ error: 'bad_revision' });
     }
 
-    if (actions === null) {
+    if (actions === null || syncCues === null || pronunciationOverrides === null) {
       return reply.code(400).send({ error: 'bad_scene' });
     }
 
@@ -393,7 +543,12 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
           ...(request.body?.subtitleText === undefined
             ? {}
             : { subtitleText: readText(request.body.subtitleText) }),
+          ...(typeof request.body?.continuesPrevious === 'boolean'
+            ? { continuesPrevious: request.body.continuesPrevious }
+            : {}),
           ...(actions === undefined ? {} : { actions }),
+          ...(syncCues === undefined ? {} : { syncCues }),
+          ...(pronunciationOverrides === undefined ? {} : { pronunciationOverrides }),
         },
       );
     } catch (error) {
@@ -515,6 +670,16 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
     try {
       return await service.generateScript(request.params.id, readText(request.body?.taskText));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  // Принятый сценарий остаётся неизменным: модель предлагает только связи речи
+  // с уже разрешёнными действиями, а ручные cue сервер сохраняет отдельно.
+  fastify.post<ProjectRoute>('/api/showcase/:id/bindings', async (request, reply) => {
+    try {
+      return await service.generateBindings(request.params.id);
     } catch (error) {
       return sendError(reply, error);
     }
@@ -648,6 +813,28 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     }
   });
 
+  // Словарь ударений установки: одно слово со знаком «+» на строку. Текст
+  // сохраняется целиком, негодные строки возвращаются с причиной, а не теряются.
+  fastify.get('/api/showcase/voices/dictionary', async (request, reply) => {
+    try {
+      return await service.readDictionary();
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.put<VoiceDictionaryRoute>('/api/showcase/voices/dictionary', async (request, reply) => {
+    if (typeof request.body?.text !== 'string') {
+      return reply.code(400).send({ error: 'bad_dictionary' });
+    }
+
+    try {
+      return await service.saveDictionary(request.body.text);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
   // Готовность для настроек плагина: что нужно разделу и что он ставит сам.
   // Установка идёт только по нажатию человека — раздел не начинает её сам.
   fastify.get('/api/showcase/setup', async (request, reply) => {
@@ -697,6 +884,58 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     }
   });
 
+  // Своя реплика уходит POST-ом: текст не попадает в URL/журналы доступа. Обрыв
+  // вкладки отменяет синтез, а полный job использует тот же preparer службы.
+  fastify.post<VoiceNarrationPreviewRoute>(
+    '/api/showcase/voices/preview',
+    async (request, reply) => {
+      const voiceRef = typeof request.body?.voiceRef === 'string' ? request.body.voiceRef : '';
+      const narration = typeof request.body?.narration === 'string' ? request.body.narration : '';
+      const pronunciationOverrides = readPronunciationOverrides(
+        request.body?.pronunciationOverrides ?? [],
+      );
+      let direction;
+
+      try {
+        direction = parseShowcaseDirection(request.body?.direction);
+      } catch {
+        return reply.code(400).send({ error: 'bad_voice_preview' });
+      }
+
+      if (!voiceRef || !narration || pronunciationOverrides === null) {
+        return reply.code(400).send({ error: 'bad_voice_preview' });
+      }
+
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+
+      request.raw.once('aborted', abort);
+      reply.raw.once('close', abort);
+
+      try {
+        const file = await service.previewNarration({
+          voiceRef,
+          narration,
+          direction,
+          pronunciationOverrides,
+          signal: controller.signal,
+        });
+        const info = await stat(file);
+
+        return reply
+          .header('content-type', 'audio/wav')
+          .header('content-length', String(info.size))
+          .header('cache-control', 'no-store')
+          .send(createReadStream(file));
+      } catch (error) {
+        return sendError(reply, error);
+      } finally {
+        request.raw.removeListener('aborted', abort);
+        reply.raw.removeListener('close', abort);
+      }
+    },
+  );
+
   fastify.post<ProjectRoute>('/api/showcase/:id/voice', async (request, reply) => {
 
     try {
@@ -728,7 +967,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     try {
       return await service.setVoice(request.params.id, expectedRevision, {
         voiceRef: voiceRef as string | null,
-        pace: pace as 'slow' | 'normal' | 'fast' | null,
+        pace: pace as ShowcasePace | null,
       });
     } catch (error) {
       return sendError(reply, error);
@@ -752,6 +991,47 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
       return sendError(reply, error);
     }
   });
+
+  // Один запрос сохраняет серверный запуск до ответа. Дальнейшие этапы не
+  // зависят от вкладки и не вызываются браузером по одному.
+  fastify.post<BuildStartRoute>('/api/showcase/:id/build', async (request, reply) => {
+    const revision = Number(request.body?.revision);
+    const requestId = typeof request.body?.requestId === 'string' ? request.body.requestId : '';
+
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+      return reply.code(400).send({ error: 'bad_revision' });
+    }
+
+    if (!SHOWCASE_BUILD_REQUEST_ID_RE.test(requestId)) {
+      return reply.code(400).send({ error: 'bad_request_id' });
+    }
+
+    try {
+      const run = await service.startBuild(request.params.id, revision, requestId);
+
+      return reply.code(202).send({ run });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.get<ManifestRoute>(
+    '/api/showcase/:id/manifests/:manifestId',
+    async (request, reply) => {
+      try {
+        if (!SHOWCASE_MANIFEST_ID_RE.test(request.params.manifestId)) {
+          return reply.code(400).send({
+            error: 'bad_manifest_id',
+            message: 'Идентификатор manifest имеет недопустимую форму.',
+          });
+        }
+
+        return await service.finalManifest(request.params.id, request.params.manifestId);
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
 
   /**
    * Отдача артефакта. Range нужен плееру: без него браузер тянет весь ролик, чтобы
@@ -807,6 +1087,22 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.post<ProjectRoute>('/api/showcase/jobs/:id/cancel', async (request, reply) => {
     try {
       return await service.cancelJob(request.params.id);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.get<ProjectRoute>('/api/showcase/builds/:id', async (request, reply) => {
+    try {
+      return { run: service.readBuild(request.params.id) };
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.post<ProjectRoute>('/api/showcase/builds/:id/cancel', async (request, reply) => {
+    try {
+      return { run: await service.cancelBuild(request.params.id) };
     } catch (error) {
       return sendError(reply, error);
     }

@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node src/app.ts",
     "dev": "node --watch src/app.ts",
-    "test": "npm run typecheck && npm run typecheck:tests && node --test ../tests/server/*.test.js",
+    "test": "npm run typecheck && npm run typecheck:tests && NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=2048 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=1 ../tests/server/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "tsc -p tsconfig.code.json --noEmit",

@@ -11,8 +11,24 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { canonicalTextOf, unsupportedDirections } from '../../server/src/lib/showcase/voice/contract.ts';
+import {
+  canonicalTextOf,
+  openVoiceSession,
+  unreadableFragments,
+  unsupportedDirections,
+} from '../../server/src/lib/showcase/voice/contract.ts';
+import {
+  createStressDictionaryStore,
+  dictionaryStresses,
+  parseStressDictionary,
+} from '../../server/src/lib/showcase/voice/dictionary.ts';
+import { mergeStresses } from '../../server/src/lib/showcase/narrationOps.ts';
 import { createVoiceRegistry } from '../../server/src/lib/showcase/voice/registry.ts';
+import {
+  narrationWords,
+  parseNarration,
+  plainNarration,
+} from '../../shared/showcaseNarration.ts';
 import {
   audioStats,
   checkSpeech,
@@ -98,11 +114,172 @@ test('нейтральные указания переводятся адапт�
   assert.deepEqual(ignored, ['тон', 'акценты', 'паузы', 'ударения']);
 });
 
+test('нативные метки кандидата optional и проходят через обычную сессию без подмены текста', async () => {
+  const input = {
+    canonicalText: 'Замок открыт. Замок закрыт.',
+    direction: {
+      tone: null,
+      pace: null,
+      emphasis: [],
+      pauses: [],
+      stresses: [],
+    },
+    voiceRef: 'anna',
+    language: 'ru',
+  };
+  const options = { outputDir: '/tmp', deadlineMs: 1000, signal: undefined };
+  const legacySession = await openVoiceSession(engineStub());
+  const [legacy] = await legacySession.synthesize([input], options);
+
+  assert.equal('speechTiming' in legacy, false, 'старый адаптер не обязан выдумывать метки');
+  await legacySession.close();
+
+  const speechTiming = {
+    source: 'edge',
+    words: [
+      { text: 'Замок', startMs: 20, endMs: 140 },
+      { text: 'Замок', startMs: 300, endMs: 420 },
+    ],
+    segments: [{ text: 'Замок открыт. Замок закрыт.', startMs: 20, endMs: 600 }],
+  };
+  let received = null;
+  const timedSession = await openVoiceSession(engineStub({
+    synthesize: async (candidateInput) => {
+      received = candidateInput;
+
+      return {
+        temporaryFile: '/tmp/timed.wav',
+        format: 'wav',
+        sampleRate: 24_000,
+        channels: 1,
+        engineRequestId: 'edge-request',
+        ignoredDirections: [],
+        speechTiming,
+      };
+    },
+  }));
+  const [timed] = await timedSession.synthesize([input], options);
+
+  assert.deepEqual(received, input, 'метки результата не входят в текст или выбор голоса');
+  assert.deepEqual(timed.speechTiming, speechTiming);
+  await timedSession.close();
+});
+
 test('канонический текст не тащит в синтез разметку ввода', () => {
   assert.equal(
     canonicalTextOf('  Открываем   обзор\nкокпита.  '),
     'Открываем обзор кокпита.',
   );
+  assert.equal(canonicalTextOf('Я купил з+амок.'), 'Я купил замок.');
+});
+
+test('знак «+» перед гласной — ударение, любой другой «+» — текст', () => {
+  const parsed = parseNarration('  Арс+енал и\nз+амок: 2+2, C++ и +Ольга.');
+
+  assert.equal(parsed.text, 'Арсенал и замок: 2+2, C++ и Ольга.');
+  // Смещения считаются в каноническом тексте: `at` — начало слова, `vowel` — сдвиг
+  // ударной гласной, и вставка `+` в `at + vowel` возвращает знак на место.
+  assert.deepEqual(parsed.stresses, [
+    { at: 0, vowel: 3 },
+    { at: 10, vowel: 1 },
+    { at: 28, vowel: 0 },
+  ]);
+
+  for (const stress of parsed.stresses) {
+    assert.match(parsed.text[stress.at + stress.vowel], /[аеёиоуыэюя]/i);
+  }
+
+  assert.equal(plainNarration('Я купил\n  з+амок и 2+2.'), 'Я купил\n  замок и 2+2.');
+  // Дефис делит слово: словарная запись «р+азному» ложится и на «по-разному».
+  assert.deepEqual(narrationWords('по-разному, да'), [
+    { at: 0, word: 'по' },
+    { at: 3, word: 'разному' },
+    { at: 12, word: 'да' },
+  ]);
+});
+
+test('нечитаемые обрывки называются словами, а не флагом', () => {
+  assert.deepEqual(
+    unreadableFragments('Открываем API и Cockpit за 2026 год, v2.', ['latin', 'digits']),
+    ['API', 'Cockpit', '2026', 'v2'],
+  );
+  assert.deepEqual(unreadableFragments('Отчёт за 2026 год и API.', ['digits']), ['2026']);
+  assert.deepEqual(unreadableFragments('Отчёт за 2026 год.', undefined), []);
+  assert.deepEqual(unreadableFragments('Только кириллица.', ['latin', 'digits']), []);
+});
+
+test('словарь ударений: комментарии, регистр, «ё» и негодные строки с причиной', () => {
+  const parsed = parseStressDictionary([
+    '# слова, где ударение не угадать',
+    'дин+амика',
+    'ЗАМ+ОК   # замок на двери',
+    'ёлк+а',
+    '',
+    'безударное',
+    'дв+а+жды',
+    'зам+ок-2',
+    'дин+мика',
+  ].join('\n'));
+
+  assert.deepEqual(parsed.entries, [
+    { word: 'динамика', vowel: 3 },
+    { word: 'замок', vowel: 3 },
+    { word: 'ёлка', vowel: 3 },
+  ]);
+  assert.deepEqual(parsed.errors.map((error) => [error.line, error.reason]), [
+    [6, 'нет знака ударения «+»'],
+    [7, 'нужен ровно один знак «+»'],
+    [8, 'слово должно состоять только из русских букв'],
+    [9, 'знак «+» должен стоять перед гласной'],
+  ]);
+});
+
+test('словарь ложится на слова без явного знака, а явный «+» сильнее словаря', () => {
+  const { entries } = parseStressDictionary('зам+ок\nдин+амика');
+  const parsed = parseNarration('З+амок открыт, Динамика и замок.');
+  const fromDictionary = dictionaryStresses(
+    parsed.text,
+    entries,
+    parsed.stresses.map((stress) => stress.at),
+  );
+
+  // Первый «замок» помечен человеком и словарём не трогается; «Динамика» в другом
+  // регистре и последний «замок» получают ударение из словаря.
+  assert.deepEqual(fromDictionary, [{ at: 14, vowel: 3 }, { at: 25, vowel: 3 }]);
+  assert.deepEqual(
+    mergeStresses(parsed.stresses, fromDictionary, [{ at: 14, vowel: 0 }, { at: 0, vowel: 3 }]),
+    [{ at: 0, vowel: 1 }, { at: 14, vowel: 3 }, { at: 25, vowel: 3 }],
+    'на слово — одно ударение, старший источник побеждает',
+  );
+});
+
+test('хранилище словаря: текст сохраняется целиком, записи перечитываются, предел держится', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-dictionary-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const file = path.join(root, 'stress-dictionary.txt');
+  const store = createStressDictionaryStore({ file });
+
+  assert.deepEqual(await store.read(), { text: '', entries: [], errors: [] });
+  assert.deepEqual(store.entries(), []);
+
+  const saved = await store.save('дин+амика\nплохо\n');
+
+  assert.equal(saved.text, 'дин+амика\nплохо\n', 'негодная строка не выброшена из текста');
+  assert.deepEqual(saved.entries, ['дин+амика']);
+  assert.equal(saved.errors[0].line, 2);
+  assert.deepEqual(store.entries(), [{ word: 'динамика', vowel: 3 }]);
+
+  const reopened = createStressDictionaryStore({ file });
+
+  assert.deepEqual((await reopened.read()).entries, ['дин+амика']);
+
+  await assert.rejects(
+    () => store.save('а+а\n'.repeat(20_000)),
+    (error) => error.code === 'dictionary_too_long' && error.status === 413,
+  );
+  assert.deepEqual(store.entries(), [{ word: 'динамика', vowel: 3 }], 'отказ не трогает словарь');
 });
 
 test('реестр показывает недоступный движок с причиной, а не прячет его', async () => {
@@ -146,6 +323,35 @@ test('упавший doctor не выкидывает движок из спис
   assert.match(statuses[0].doctor.reason, /не отвечает/);
 });
 
+test('реестр отдаёт возможности каждого голоса, а неизвестные не додумывает', async () => {
+  const registry = createVoiceRegistry([
+    engineStub({
+      capabilities: (voiceId) => {
+        if (voiceId === 'unknown') {
+          throw new Error('каталог не дал возможностей');
+        }
+
+        return {
+          ...engineStub().capabilities(),
+          pace: voiceId === 'anna',
+          pause: true,
+          stress: voiceId === 'anna',
+        };
+      },
+      voices: async () => [
+        { id: 'anna', name: 'Анна', language: 'ru', available: true, reason: '' },
+        { id: 'boris', name: 'Борис', language: 'ru', available: true, reason: '' },
+        { id: 'unknown', name: 'Старый', language: 'ru', available: true, reason: '' },
+      ],
+    }),
+  ]);
+  const [status] = await registry.statuses();
+
+  assert.deepEqual(status.voices[0].capabilities, { pace: true, pause: true, stress: true });
+  assert.deepEqual(status.voices[1].capabilities, { pace: false, pause: true, stress: false });
+  assert.equal('capabilities' in status.voices[2], false, 'отказ остаётся unknown');
+});
+
 test('ссылка на голос разбирается строго', () => {
   const registry = createVoiceRegistry([engineStub()]);
 
@@ -183,6 +389,18 @@ test('несколько движков живут рядом и не смеши
   assert.deepEqual(statuses.map((item) => item.id), ['stub', 'cloud']);
   assert.deepEqual(statuses.map((item) => item.kind), ['local', 'cloud']);
   assert.deepEqual(statuses[1].voices.map((item) => item.id), ['nova']);
+  assert.deepEqual(
+    statuses.map((item) => item.pace),
+    [true, true],
+    'умеет ли движок менять темп — часть статуса: интерфейс не предлагает лишних ступеней',
+  );
+
+  const mute = createVoiceRegistry([engineStub({
+    id: 'mute',
+    capabilities: () => ({ ...engineStub().capabilities(), pace: false }),
+  })]);
+
+  assert.equal((await mute.statuses())[0].pace, false);
 
   // Голос адресуется вместе со своим движком, поэтому одинаковые имена в разных
   // движках не спорят друг с другом.

@@ -8,17 +8,22 @@
 // Всё, что приходит из сети, сверяется с sha256 из каталога раздела. Не сошлось —
 // установка останавливается, каталог голоса не создаётся.
 //
-// Движок выбирается по пакету: у Piper и Silero разные окружения, файлы модели и
-// скрипты синтеза, но порядок шагов и правила приёмки у них одни.
+// Движок выбирается по пакету: у Piper, Silero и Qwen3-TTS разные окружения,
+// файлы модели и скрипты синтеза, но порядок шагов и правила приёмки у них одни.
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createAttemptLog } from '../src/lib/showcase/attemptLog.ts';
-import { installSileroFiles, installVoiceFiles } from '../src/lib/showcase/voice/download.ts';
+import {
+  installQwenFiles,
+  installSileroFiles,
+  installVoiceFiles,
+} from '../src/lib/showcase/voice/download.ts';
 import { runWithStdin } from '../src/lib/showcase/voice/process.ts';
 import type { PiperVoicePackage } from '../src/lib/showcase/voice/piperCatalog.ts';
+import type { QwenVoicePackage } from '../src/lib/showcase/voice/qwenCatalog.ts';
 import type { SileroVoicePackage } from '../src/lib/showcase/voice/sileroCatalog.ts';
 
 const PIPER_SYNTH = fileURLToPath(
@@ -27,9 +32,13 @@ const PIPER_SYNTH = fileURLToPath(
 const SILERO_SYNTH = fileURLToPath(
   new URL('../src/lib/showcase/voice/sileroSynth.py', import.meta.url),
 );
+const QWEN_SYNTH = fileURLToPath(
+  new URL('../src/lib/showcase/voice/qwenSynth.py', import.meta.url),
+);
 
-// Фраза приёмки: обычные слова, числа и латиница. Она же читается человеком в
-// отчёте, поэтому смысл у неё осмысленный, а не «раз два три».
+// Фраза приёмки: обычные слова без чисел и латиницы — их читает не каждый движок.
+// Она же читается человеком в отчёте, поэтому смысл у неё осмысленный, а не
+// «раз два три».
 const CHECK_PHRASE = 'Проверка голоса: раздел собирает ролик из трёх сцен.';
 const MIN_CHECK_MS = 700;
 const MIN_CHECK_PEAK = 0.01;
@@ -37,7 +46,7 @@ const MIN_CHECK_PEAK = 0.01;
 interface InstallTask {
   attemptId: string;
   workDir: string;
-  voice: PiperVoicePackage | SileroVoicePackage;
+  voice: PiperVoicePackage | SileroVoicePackage | QwenVoicePackage;
   venvDir: string;
   voicesDir: string;
   requirementsFile: string;
@@ -207,6 +216,49 @@ async function installSilero(pack: SileroVoicePackage): Promise<void> {
   }
 }
 
+/**
+ * Qwen3-TTS: модель из нескольких файлов по закреплённой ревизии, приёмка на
+ * видеокарте. Первый подъём читает четыре гигабайта весов и инициализирует CUDA,
+ * поэтому срок приёмки заметно больше, чем у Silero.
+ */
+async function installQwen(pack: QwenVoicePackage): Promise<void> {
+  const modelDir = await installQwenFiles(pack, task.voicesDir, report);
+  const speaker = pack.speakers[0];
+
+  if (!speaker) {
+    throw new Error('в пакете не объявлено ни одного диктора');
+  }
+
+  await writeFile(
+    path.join(modelDir, 'voice.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: pack.id,
+      name: pack.name,
+      language: pack.language,
+      revision: pack.revision,
+      sampleRate: pack.sampleRate,
+      speakers: pack.speakers,
+      license: pack.license,
+      installedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+
+  try {
+    await checkVoice([
+      QWEN_SYNTH,
+      '--model-dir', modelDir,
+      '--speaker', speaker.id,
+      '--out', path.join(task.workDir, 'check.wav'),
+    ], 900_000);
+  } catch (error) {
+    await rm(path.join(modelDir, 'voice.json'), { force: true });
+
+    throw error;
+  }
+}
+
 const deadline = setTimeout(() => {
   void finish({ state: 'failed', error: 'установка не уложилась в срок' }).then(() => {
     process.exit(1);
@@ -229,8 +281,10 @@ try {
     [
       '-m', 'pip', 'install',
       '--disable-pip-version-check',
-      '--retries', '5',
-      '--timeout', '30',
+      // Сеть рвёт длинные загрузки: колёса на сотни мегабайт с пятью повторами
+      // по полминуты до конца не доезжали.
+      '--retries', '10',
+      '--timeout', '60',
       '-r', task.requirementsFile,
     ],
     'packages',
@@ -239,6 +293,8 @@ try {
 
   if (task.voice.engineId === 'silero') {
     await installSilero(task.voice);
+  } else if (task.voice.engineId === 'qwen') {
+    await installQwen(task.voice);
   } else {
     await installPiper(task.voice);
   }

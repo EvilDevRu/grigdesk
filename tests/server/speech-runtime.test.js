@@ -54,6 +54,7 @@ test('resolveSpeechOptions разделяет dictation и video overrides', () 
     vadSilenceMs: 875,
     conditionOnPreviousText: false,
     initialPrompt: '',
+    wordTimestamps: false,
   });
   assert.deepEqual(resolveSpeechOptions(settings, 'video'), {
     scenario: 'video',
@@ -66,6 +67,7 @@ test('resolveSpeechOptions разделяет dictation и video overrides', () 
     vadSilenceMs: 500,
     conditionOnPreviousText: true,
     initialPrompt: DEFAULT_VIDEO_INITIAL_PROMPT,
+    wordTimestamps: false,
   });
 });
 
@@ -102,7 +104,7 @@ test('стилевая подсказка принадлежит видео, а 
   );
 });
 
-test('transcribe.py не разрывает пару initial_prompt + word_timestamps', () => {
+test('transcribe.py сохраняет initial_prompt и добавляет явный запрос word timestamps', () => {
   const source = readFileSync(
     new URL('../../server/src/lib/media/transcribe.py', import.meta.url),
     'utf8',
@@ -112,8 +114,8 @@ test('transcribe.py не разрывает пару initial_prompt + word_times
   // снимает петлю, поэтому включаться оно обязано ровно вместе с промптом.
   assert.match(
     source,
-    /word_timestamps=bool\(initial_prompt\)/,
-    'word_timestamps должен следовать из наличия промпта, а не задаваться отдельно',
+    /word_timestamps = bool\(initial_prompt\) or args\.word_timestamps/,
+    'промпт обязан включать метки и после появления отдельного запроса',
   );
   assert.match(source, /initial_prompt=initial_prompt/);
 });
@@ -130,7 +132,13 @@ test('resolveSpeechOptions даёт совместимые дефолты и о�
     vadSilenceMs: 500,
     conditionOnPreviousText: true,
     initialPrompt: '',
+    wordTimestamps: false,
   });
+  assert.equal(resolveSpeechOptions({ wordTimestamps: true }).wordTimestamps, true);
+  assert.throws(
+    () => resolveSpeechOptions({ wordTimestamps: 'yes' }),
+    /wordTimestamps/,
+  );
   assert.throws(() => resolveSpeechOptions({ quality: 'maximum' }, 'dictation'), /quality/);
   assert.throws(() => resolveSpeechOptions({ videoModel: 'repo\/arbitrary' }, 'video'), /модель/i);
   assert.throws(() => resolveSpeechOptions({}, 'meeting'), /сценарий/i);
@@ -260,6 +268,56 @@ test('SpeechRuntime кэширует capabilities и маршрутизируе�
     jobId: 'job-x',
     jobsDir: path.join(root, 'media', 'jobs'),
   });
+});
+
+// Самопроверка речи презентаций зовёт transcribe без своего workDir, и runtime заводит
+// временный каталог сам. Разбор идёт минуты, и каталог обязан дожить до его конца:
+// прежде finally срабатывал на самом `return`, и ffmpeg писал wav в уже снесённый путь.
+test('собственный временный каталог живёт до конца разбора, а не до его запуска', async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-workdir-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'audio.wav');
+  writeFileSync(filePath, 'audio');
+  let seenDuringWork = null;
+  const runtime = new SpeechRuntime({
+    mediaDir: path.join(root, 'media'),
+    mediaHfDir: path.join(root, 'hf'),
+    pythonPath: '/runtime/python',
+    transcribePath: '/runtime/transcribe.py',
+    deps: {
+      preflight: (options) => ({ ok: true, checks: [], venvPython: options.pythonPath }),
+      inspectSpeechModelCache() {
+        return Object.keys(SPEECH_MODEL_CATALOG).map((modelId) => ({
+          modelId,
+          repo: SPEECH_MODEL_CATALOG[modelId].repo,
+          revision: SPEECH_MODEL_CATALOG[modelId].revision,
+          cached: true,
+          sizeMb: 1,
+        }));
+      },
+      runCudaCanary: () => ({ state: 'no_device', reason: 'тест без GPU' }),
+      async ingestRecording(value) {
+        // Настоящий разбор отдаёт управление на время ffmpeg и python: проверка
+        // существования каталога делается ПОСЛЕ такой паузы, а не в момент вызова.
+        await new Promise((resolve) => { setTimeout(resolve, 20); });
+        seenDuringWork = existsSync(value.workDir);
+        return { transcript: { segments: [{ text: 'слова' }] } };
+      },
+      startIngestJob: () => ({ jobId: 'job', statusPath: '/status.json' }),
+      readIngestJob: (jobId, jobsDir) => ({ jobId, jobsDir }),
+    },
+  });
+
+  const result = await runtime.transcribe({ filePath });
+
+  assert.equal(seenDuringWork, true, 'рабочий каталог снесён раньше, чем разбор его использовал');
+  assert.deepEqual(result.transcript, { transcript: { segments: [{ text: 'слова' }] } }.transcript);
+  assert.equal(
+    existsSync(path.join(root, 'media')) && (await import('node:fs')).readdirSync(path.join(root, 'media'))
+      .some((name) => name.startsWith('speech-')),
+    false,
+    'после разбора собственный временный каталог убирается',
+  );
 });
 
 test('MediaAdapter сохраняет legacy model/lang, но передаёт их как video settings', () => {

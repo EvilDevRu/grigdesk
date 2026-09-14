@@ -22,6 +22,7 @@ import type {
   VoiceDoctor,
   VoiceEngine,
   VoiceInfo,
+  VoicePace,
 } from './contract.ts';
 
 const SYNTH_SCRIPT = fileURLToPath(new URL('./piperSynth.py', import.meta.url));
@@ -82,6 +83,15 @@ export async function readInstalledVoices(voicesDir: string): Promise<InstalledP
 
   return voices.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
 }
+
+// Ступени темпа в множителе длины Piper: крайние — заметно, средние — чуть.
+const PIPER_LENGTH_SCALE: Record<VoicePace, string> = {
+  slowest: '1.35',
+  slow: '1.15',
+  normal: '1',
+  fast: '0.9',
+  fastest: '0.8',
+};
 
 export function createPiperEngine(options: PiperEngineOptions): VoiceEngine {
   let cached: { at: number; doctor: VoiceDoctor } | null = null;
@@ -165,6 +175,10 @@ export function createPiperEngine(options: PiperEngineOptions): VoiceEngine {
     return result;
   }
 
+  function forgetDoctor(): void {
+    cached = null;
+  }
+
   async function voices(): Promise<VoiceInfo[]> {
     const installed = await readInstalledVoices(options.voicesDir);
     const state = await doctor();
@@ -184,11 +198,7 @@ export function createPiperEngine(options: PiperEngineOptions): VoiceEngine {
    * множитель БОЛЬШЕ единицы. Общего числа для всех движков нет и быть не может.
    */
   function lengthScale(pace: SynthesisInput['direction']['pace']): string {
-    if (pace === 'slow') {
-      return '1.15';
-    }
-
-    return pace === 'fast' ? '0.9' : '1';
+    return PIPER_LENGTH_SCALE[pace ?? 'normal'];
   }
 
   async function synthesize(
@@ -267,6 +277,7 @@ export function createPiperEngine(options: PiperEngineOptions): VoiceEngine {
     kind: 'local',
     capabilities,
     doctor,
+    forgetDoctor,
     voices,
     synthesize,
   };

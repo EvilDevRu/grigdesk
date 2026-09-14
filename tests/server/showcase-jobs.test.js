@@ -119,6 +119,19 @@ test('терминальное состояние окончательно и о
   assert.equal(afterFinish.state, 'failed');
 });
 
+test('ожидание решения закрывает исполнитель и не занимает очередь', async (t) => {
+  const { jobs } = await fixture(t, { maxQueued: 1, jobTimeoutMs: 60_000 });
+  const { record } = await jobs.enqueue(enqueueInput());
+  const review = await jobs.finish(record.id, {
+    state: 'awaiting_review',
+    error: 'Привязка сцены устарела.',
+  });
+
+  assert.equal(review.state, 'awaiting_review');
+  assert.ok(isTerminal(review.state));
+  await assert.doesNotReject(() => jobs.enqueue(enqueueInput({ idempotencyKey: 'after-review' })));
+});
+
 test('отмена идущей работы ждёт исполнителя, а не объявляет её завершённой', async (t) => {
   const { jobs } = await fixture(t);
   const { record } = await jobs.enqueue(enqueueInput());
@@ -133,6 +146,26 @@ test('отмена идущей работы ждёт исполнителя, а
 
   assert.equal(cancelling.state, 'cancelling');
   assert.ok(!isTerminal(cancelling.state), 'дерево процессов ещё живо, задание не закрыто');
+
+  const late = await jobs.finish(record.id, { state: 'succeeded', label: 'поздний успех' });
+
+  assert.equal(late.state, 'cancelled', 'сохранённая отмена сильнее позднего успеха функции');
+  assert.ok(isTerminal(late.state));
+});
+
+test('устойчивый ключ этапа находит child после окна сбоя записи ссылки', async (t) => {
+  const { jobs } = await fixture(t);
+  const first = await jobs.withStageKey('build:run:voice:1', () => jobs.enqueue(enqueueInput()));
+  const joined = await jobs.withStageKey('build:run:voice:joined', () => jobs.enqueue(enqueueInput()));
+
+  assert.equal(joined.reused, true);
+  assert.equal(joined.record.id, first.record.id);
+  assert.equal(jobs.findByStageKey('build:run:voice:1')?.id, first.record.id);
+  assert.equal(jobs.findByStageKey('build:run:voice:joined')?.id, first.record.id);
+  assert.deepEqual(joined.record.stageKeys, [
+    'build:run:voice:1',
+    'build:run:voice:joined',
+  ]);
 });
 
 test('заявка в очереди отменяется сразу: останавливать ещё некого', async (t) => {
@@ -224,7 +257,7 @@ test('прогресс уходит в общий поток событий св
   const { jobs, events } = await fixture(t);
   const { record } = await jobs.enqueue(enqueueInput());
 
-  await jobs.progress(record.id, { sequence: 3, label: 'пишем сцену' });
+  await jobs.progress(record.id, { sequence: 3, label: 'пишем сцену', index: 2, total: 6 });
 
   const progress = events.filter(([name]) => name === 'showcase-progress');
   const last = progress[progress.length - 1][1];
@@ -232,5 +265,17 @@ test('прогресс уходит в общий поток событий св
   assert.equal(last.jobId, record.id);
   assert.equal(last.sequence, 3);
   assert.equal(last.label, 'пишем сцену');
+  assert.equal(last.index, 2);
+  assert.equal(last.total, 6);
+  assert.equal(last.error, null);
   assert.ok(!('inputHashes' in last), 'в событие не попадают входы задания');
+
+  // Причина отказа едет в той же сводке: интерфейсу не нужно перечитывать обзор,
+  // чтобы показать, почему задание встало.
+  await jobs.finish(record.id, { state: 'failed', error: 'вход на стенд не удался' });
+
+  const failed = events.filter(([name]) => name === 'showcase-progress').at(-1)[1];
+
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.error, 'вход на стенд не удался');
 });

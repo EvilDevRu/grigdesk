@@ -18,7 +18,12 @@ import type {
   ShowcaseProject,
   ShowcaseScene,
 } from '../../../../shared/showcaseContracts.ts';
+import { chainLineage } from '../../../../shared/showcaseChains.ts';
+import { parseNarration } from '../../../../shared/showcaseNarration.ts';
 import { ShowcaseError } from './errors.ts';
+import { dictionaryStresses } from './voice/dictionary.ts';
+import type { StressEntry } from './voice/dictionary.ts';
+import { prepareVoiceText, resolvePronunciation } from './voice/preparation.ts';
 
 /**
  * Версии инструментов входят в хеш наравне с данными сцены: другая версия браузера
@@ -46,6 +51,10 @@ export interface ArtifactInputs {
   dataRevision: string;
   style: RenderStyle;
   versions: ProducerVersions;
+  // Словарь ударений установки. В хеш звука входят только те его записи, которые
+  // ложатся на текст этой сцены: правка словаря старит сцены с этими словами, а
+  // не все ролики.
+  stressDictionary?: readonly StressEntry[];
 }
 
 function hashOf(value: unknown): string {
@@ -65,21 +74,73 @@ export function audioInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): st
     return scene.audio?.contentHash ?? '';
   }
 
+  const parsed = parseNarration(scene.narration);
+  const fromDictionary = dictionaryStresses(
+    parsed.text,
+    inputs.stressDictionary ?? [],
+    parsed.stresses.map((stress) => stress.at),
+  );
+  const voiceRef = scene.audioSource.voiceRef ?? '';
+  const pronunciation = resolvePronunciation(scene, voiceRef);
+  let preparedPronunciation: Record<string, unknown> = {};
+
+  if (pronunciation.overrides.length > 0) {
+    try {
+      const prepared = prepareVoiceText({
+        scene,
+        voiceRef,
+        stressDictionary: inputs.stressDictionary ?? [],
+      });
+
+      preparedPronunciation = {
+        pronunciationOverrides: prepared.overrides,
+        spokenText: prepared.spokenText,
+        spokenDirection: prepared.direction,
+        ...(prepared.dictionaryStresses.length > 0
+          ? { spokenDictionaryStresses: prepared.dictionaryStresses }
+          : {}),
+      };
+    } catch {
+      // Сохранённый активный диапазон неверен: synthesis назовёт причину, а хеш
+      // всё равно обязан отличаться от прежнего WAV и не объявлять его свежим.
+      preparedPronunciation = {
+        pronunciationOverrides: pronunciation.overrides,
+        pronunciationIssue: pronunciation.issue ?? 'invalid',
+      };
+    }
+  }
+
   return hashOf({
     kind: 'tts',
     narration: scene.narration,
     direction: scene.direction,
     voiceRef: scene.audioSource.voiceRef,
     version: inputs.versions.voice,
+    // Ключ появляется только у сцен, которым словарь что-то дал: у остальных хеш
+    // остаётся прежним, и появление словаря само по себе не старит их звук.
+    ...(fromDictionary.length > 0 ? { dictionaryStresses: fromDictionary } : {}),
+    ...preparedPronunciation,
   });
 }
+
+// Сцены цепочки до данной: их экран и действия задают её начальное состояние.
+// Считаются общей формулой `chainLineage` из shared/showcaseChains.ts.
+export type SceneLineage = readonly Pick<ShowcaseScene, 'screenId' | 'readyCondition' | 'actions'>[];
 
 /**
  * Клип зависит от экрана, начального состояния и действий, а также от всего, что
  * меняет саму картинку: размеров, темы, версии браузера и состояния цели. Текст
  * речи в него не входит — правка фразы не заставляет переписывать экран.
+ *
+ * Сцена-продолжение начинается там, где закончилась предыдущая, поэтому её клип
+ * зависит ещё и от экрана и действий всех сцен цепочки до неё. У головы цепочки
+ * ключа нет: хеши записей, снятых до появления цепочек, остаются прежними.
  */
-export function clipInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): string {
+export function clipInputHash(
+  scene: ShowcaseScene,
+  inputs: ArtifactInputs,
+  lineage: SceneLineage = [],
+): string {
   return hashOf({
     screenId: scene.screenId,
     startState: scene.startState,
@@ -90,6 +151,15 @@ export function clipInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): str
     policy: inputs.policyRevision,
     data: inputs.dataRevision,
     version: inputs.versions.recorder,
+    ...(lineage.length > 0
+      ? {
+        lineage: lineage.map((item) => ({
+          screenId: item.screenId,
+          readyCondition: item.readyCondition,
+          actions: item.actions,
+        })),
+      }
+      : {}),
   });
 }
 
@@ -97,8 +167,12 @@ export function clipInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): str
  * Кадр снимается из той же записи, что и клип, поэтому делит с ним входы. Отдельный
  * прогон ради кадров не нужен — и в режиме с мутациями он был бы прямо вреден.
  */
-export function frameInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): string {
-  return clipInputHash(scene, inputs);
+export function frameInputHash(
+  scene: ShowcaseScene,
+  inputs: ArtifactInputs,
+  lineage: SceneLineage = [],
+): string {
+  return clipInputHash(scene, inputs, lineage);
 }
 
 /**
@@ -114,6 +188,14 @@ export function finalInputHash(project: ShowcaseProject, inputs: ArtifactInputs)
       order: scene.order,
       audio: scene.audio?.contentHash ?? null,
       clip: scene.clip?.contentHash ?? null,
+      // Точный план зависит не только от готовых media bytes. Текст загруженной
+      // человеком реплики не старит сам WAV, но старит alignment и монтаж; cue и
+      // оба измерительных sidecar меняют карту времени без пересинтеза/перезаписи.
+      canonicalNarration: parseNarration(scene.narration).text,
+      syncBindings: scene.syncBindings ?? null,
+      speechTiming: scene.speechTiming ?? null,
+      speechAlignment: scene.speechAlignment ?? null,
+      recordingTiming: scene.recordingTiming ?? null,
       subtitleText: scene.subtitleText,
       caption: scene.caption,
       timing: scene.timing,
@@ -122,6 +204,7 @@ export function finalInputHash(project: ShowcaseProject, inputs: ArtifactInputs)
   return hashOf({
     scenes,
     style: inputs.style,
+    syncPlanVersion: 1,
     version: inputs.versions.assembler,
   });
 }
@@ -137,11 +220,20 @@ export interface SceneFreshness {
  * Свежесть сцены: артефакт свеж, если он есть и его хеш входов совпадает с текущим.
  * Отсутствие артефакта — это «ещё не сделано», а не «устарело», но для кнопки
  * сборки разница невелика: и то и другое требует работы.
+ *
+ * Для сцены-продолжения запись сверяется вместе с цепочкой до неё: правка головы
+ * старит все продолжения, правка последнего продолжения — только его.
  */
-export function sceneFreshness(scene: ShowcaseScene, inputs: ArtifactInputs): SceneFreshness {
+export function sceneFreshness(
+  scene: ShowcaseScene,
+  inputs: ArtifactInputs,
+  lineage: SceneLineage = [],
+): SceneFreshness {
   const audio = scene.audio !== null && scene.audio.inputHash === audioInputHash(scene, inputs);
-  const clip = scene.clip !== null && scene.clip.inputHash === clipInputHash(scene, inputs);
-  const frame = scene.frame !== null && scene.frame.inputHash === frameInputHash(scene, inputs);
+  const clip = scene.clip !== null
+    && scene.clip.inputHash === clipInputHash(scene, inputs, lineage);
+  const frame = scene.frame !== null
+    && scene.frame.inputHash === frameInputHash(scene, inputs, lineage);
 
   return {
     audio,
@@ -172,7 +264,9 @@ export function finalIsCurrent(project: ShowcaseProject, inputs: ArtifactInputs)
     return false;
   }
 
-  return project.scenes.every((scene) => !sceneFreshness(scene, inputs).stale);
+  return project.scenes.every((scene) => (
+    !sceneFreshness(scene, inputs, chainLineage(project.scenes, scene.id)).stale
+  ));
 }
 
 export interface PublishInput {

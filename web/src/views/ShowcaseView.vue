@@ -1,19 +1,13 @@
 <template>
-  <section
-    class="showcase"
-    :class="{ 'showcase--project': store.opened }"
-    aria-labelledby="showcase-title"
-  >
-    <header class="showcase__hero">
-      <div class="showcase__hero-copy">
-        <p class="showcase__eyebrow">Показ готовой работы</p>
+  <section class="showcase" :class="{ 'showcase--film': store.opened }" aria-labelledby="showcase-title">
+    <header v-if="!store.opened" class="showcase__head">
+      <div class="showcase__intro">
         <h1 id="showcase-title">Презентации</h1>
         <p>
-          Короткий ролик о готовой задаче: выберите стенд, проверьте сценарий и голос —
+          Короткий ролик о готовой задаче: выберите стенд, проверьте сцены и голос —
           и получите mp4 с озвучкой и субтитрами.
         </p>
       </div>
-
       <UiButton
         class="showcase__refresh"
         variant="ghost"
@@ -23,173 +17,118 @@
         Обновить
       </UiButton>
     </header>
+    <h1 v-else id="showcase-title" class="ui-visually-hidden">Презентации</h1>
 
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
 
-    <!-- Полоса шагов ведёт человека по одному пути: стенд → разбор → ролик. Шаг не
-         выбирается произвольно, он следует за состоянием ролика на сервере, поэтому
-         переживает и F5, и возврат к списку. -->
-    <div class="showcase__steps">
-      <UiTabs v-model="step" class="showcase__steps-tabs" label="Шаги подготовки ролика">
-        <UiTab
-          id="showcase-step-target"
-          class="showcase__step"
-          value="target"
-          controls="showcase-step-panel"
-        >
-          {{ store.opened ? '✓ Стенд' : '1 · Стенд' }}
-        </UiTab>
-        <UiTab
-          id="showcase-step-analyze"
-          class="showcase__step"
-          value="analyze"
-          controls="showcase-step-panel"
-          :disabled="!store.opened"
-        >
-          {{ hasScript ? '✓ Разбор' : '2 · Разбор' }}
-        </UiTab>
-        <UiTab
-          id="showcase-step-film"
-          class="showcase__step"
-          value="film"
-          controls="showcase-step-panel"
-          :disabled="!hasScript"
-        >
-          3 · Ролик
-        </UiTab>
-      </UiTabs>
-    </div>
-
-    <section
-      v-if="store.opened && step === 'analyze'"
-      id="showcase-step-panel"
-      class="showcase__panel"
-      role="tabpanel"
-      aria-labelledby="showcase-step-analyze"
-    >
-      <header class="showcase__section-head">
-        <div>
-          <p class="showcase__section-kicker">Разбор</p>
-          <h2>{{ store.opened.title }}</h2>
-          <p>Читаю связанную задачу и изменения в репозиториях стенда.</p>
-        </div>
-      </header>
-
-      <div v-if="analyzing" class="showcase__progress" role="status" aria-live="polite">
-        <UiSpinner decorative />
-        <div>
-          <strong>Собираю план ролика</strong>
-          <p>Модель предлагает бриф и сцены — это занимает до пары минут.</p>
-        </div>
-      </div>
-      <div v-else class="showcase__progress" role="status">
-        <div>
-          <strong>{{ hasScript ? 'План готов' : 'План пока пустой' }}</strong>
-          <p v-if="hasScript">Сцен: {{ store.opened.scenes.length }}. Дальше — сам ролик.</p>
-          <p v-else>Разбор не дал сцен. Можно повторить: постановка и diff читаются заново.</p>
-        </div>
-        <UiButton variant="ghost" :loading="analyzing" @click="analyze">Разобрать заново</UiButton>
-        <UiButton
-          v-if="hasScript"
-          variant="solid"
-          tone="accent"
-          @click="step = 'film'"
-        >
-          К ролику
-        </UiButton>
-      </div>
-    </section>
-
-    <ShowcaseProjectCard
-      v-else-if="store.opened"
-      id="showcase-step-panel"
+    <!-- Экран следует за состоянием ролика на сервере, а не за памятью вкладки:
+         открытый ролик живёт в адресе, и после F5 человек видит его же. -->
+    <ShowcaseFilm
+      v-if="store.opened"
       :project="store.opened"
       :seed="seed"
       :jobs="store.jobsOf(store.opened.id)"
-      :busy="store.isBusy(store.opened.id)"
-      :build-stage="buildStage"
+      :build-run="store.latestBuildOf(store.opened.id)"
+      :manifest="store.currentManifest"
+      :manifest-status="store.manifestStatus"
+      :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id"
+      :analyzing="store.analyzing === store.opened.id"
       :max-scenes="store.limits.maxScenes"
+      :target-url="openedTargetUrl"
       :artifact-url="artifactUrl"
+      :voice-ref="effectiveVoiceRef"
+      :voice-capabilities="effectiveVoiceCapabilities"
+      :load-scene-preview="loadShowcaseNarrationPreview"
       @close="close"
       @build="build"
+      @generate-bindings="generateBindings"
       @analyze="analyze"
+      @rename="rename"
+      @remove-project="remove(store.opened.id)"
       @seed="prepareData"
       @data-updated="markDataUpdated"
       @cancel="cancel"
+      @cancel-build="cancelBuild"
       @add-scene="addScene"
       @save-scene="saveScene"
       @remove-scene="removeScene"
       @move-scene="moveScene"
+      @scene-continues="setSceneContinues"
       @scene-audio="uploadAudio"
+      @select-scene="selectedSceneId = $event"
     >
       <template #voice>
         <ShowcaseVoicePanel
           mode="choice"
           :catalog="store.voices"
-          :busy="store.voiceBusy || store.isBusy(store.opened.id)"
+          :dictionary="store.dictionary"
+          :busy="store.voiceBusy || store.isBusy(store.opened.id) || store.analyzing === store.opened.id"
           :voice-ref="projectVoiceRef"
           :pace="projectPace"
-          :preview-url="previewUrl"
+          :load-preview="loadShowcaseVoicePreview"
           @install="installVoice"
           @cancel="cancelVoiceInstall"
           @change="changeVoice"
+          @save-dictionary="saveDictionary"
         />
       </template>
-    </ShowcaseProjectCard>
+    </ShowcaseFilm>
 
     <template v-else>
       <section class="showcase__panel" aria-labelledby="showcase-create-title">
-        <header class="showcase__section-head">
-          <span class="showcase__section-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <path d="M12 9v6 M9 12h6" />
-            </svg>
-          </span>
-          <div>
-            <p class="showcase__section-kicker">Новый выпуск</p>
-            <h2 id="showcase-create-title">Завести ролик</h2>
-            <p>Цель и доступность стенда проверятся до первой записи.</p>
-          </div>
-        </header>
-
-        <ShowcaseCreateForm
+        <div class="showcase__panel-head">
+          <h2 id="showcase-create-title">Новый ролик</h2>
+          <p>Выберите стенд, о котором рассказать: адрес и профиль подставятся сами.</p>
+        </div>
+        <ShowcaseTargetPicker
           :targets="store.targets"
+          :projects="store.projects"
           :busy="creating"
           :loaded="store.loaded"
           :loading="store.loading"
           :error="store.error"
           @create="create"
+          @open="open"
         />
       </section>
 
+      <!-- Готовность установки показывается только когда она мешает: зелёный список
+           «всё готово» ничего не решает, а красная строка называет, что чинить. -->
+      <UiInlineMessage v-if="doctorBlockers.length" tone="warning">
+        <span class="showcase__blockers">
+          <strong>Записи мешает:</strong>
+          <span v-for="operation in doctorBlockers" :key="operation.id">
+            {{ operation.title }} — {{ operation.reason }}
+          </span>
+          <UiActionLink href="#/settings" variant="ghost">Открыть настройки</UiActionLink>
+        </span>
+      </UiInlineMessage>
+
+      <ShowcaseVoicePanel
+        v-if="store.voices && !voiceReady"
+        mode="setup"
+        :catalog="store.voices"
+        :busy="store.voiceBusy"
+        @install="installVoice"
+        @cancel="cancelVoiceInstall"
+      />
+
       <section class="showcase__block" aria-labelledby="showcase-list-title">
         <div class="showcase__block-head">
-          <div>
-            <p class="showcase__section-kicker">Библиотека</p>
-            <h2 id="showcase-list-title">Ролики</h2>
-          </div>
+          <h2 id="showcase-list-title">Ролики</h2>
           <span v-if="store.projects.length" class="showcase__count">
             {{ store.projects.length }}
           </span>
         </div>
 
         <div v-if="!store.projects.length" class="showcase__empty">
-          <span class="showcase__empty-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <path d="m10 9 5 3-5 3z" />
-            </svg>
-          </span>
-          <div>
-            <strong>{{ store.loaded ? 'Роликов ещё нет' : 'Читаем состояние…' }}</strong>
-            <p v-if="store.loaded">
-              Первый ролик появится здесь вместе с целью, сценами и ходом сборки.
-            </p>
-          </div>
+          <strong>{{ store.loaded ? 'Роликов ещё нет' : 'Читаем состояние…' }}</strong>
+          <p v-if="store.loaded">
+            Нажмите «Снять ролик» у стенда: разбор задачи и сцены появятся здесь.
+          </p>
         </div>
         <div v-else class="showcase__list">
-          <ShowcaseCard
+          <ShowcaseProjectRow
             v-for="project in store.projects"
             :key="project.id"
             :project="project"
@@ -202,146 +141,82 @@
         </div>
       </section>
     </template>
-
-    <div
-      v-if="!store.opened"
-      class="showcase__services"
-      :class="{ 'showcase__services--single': voiceReady }"
-    >
-      <ShowcaseVoicePanel
-        v-if="!voiceReady"
-        mode="setup"
-        :catalog="store.voices"
-        :busy="store.voiceBusy"
-        @install="installVoice"
-        @cancel="cancelVoiceInstall"
-      />
-
-      <!-- Готовность проверяется сама при открытии: кнопка «Проверить» просила
-           человека делать то, что сервер знает и без него. Пункты про цель и сеть
-           здесь не показываются — цели на этом шаге ещё нет. -->
-      <section class="showcase__health" aria-labelledby="showcase-doctor-title">
-        <header class="showcase__health-head">
-          <div>
-            <p class="showcase__section-kicker">Окружение</p>
-            <h2 id="showcase-doctor-title">Готовность к записи</h2>
-          </div>
-          <span
-            class="showcase__health-state"
-            :data-state="doctorState.tone"
-            role="status"
-            aria-live="polite"
-          >
-            <i aria-hidden="true"></i>{{ doctorState.label }}
-          </span>
-        </header>
-
-        <p v-if="!doctorOperations.length" class="showcase__note">
-          {{ checking ? 'Проверяем браузер, ffmpeg и голос…' : 'Проверка ещё не выполнялась.' }}
-        </p>
-        <ul v-else class="showcase__doctor">
-          <li v-for="operation in doctorOperations" :key="operation.id">
-            <span
-              class="showcase__doctor-dot"
-              :data-status="operation.status"
-              aria-hidden="true"
-            />
-            <div class="showcase__doctor-copy">
-              <strong>{{ operation.title }}</strong>
-              <span class="showcase__doctor-reason">{{ operation.reason }}</span>
-            </div>
-          </li>
-        </ul>
-
-        <div class="showcase__health-action">
-          <UiButton variant="ghost" :loading="checking" @click="check">Проверить снова</UiButton>
-        </div>
-      </section>
-    </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
-import { UiButton, UiInlineMessage, UiSpinner, UiTab, UiTabs, confirmDialog } from '../ui';
+import {
+  UiActionLink,
+  UiButton,
+  UiInlineMessage,
+  confirmDialog,
+  promptDialog,
+} from '../ui';
 import {
   addShowcaseScene,
   analyzeShowcase,
   buildShowcaseFilm,
-  setShowcaseVoice,
+  cancelShowcaseBuild,
   cancelShowcaseJob,
   cancelShowcaseVoiceInstall,
   closeShowcaseProject,
   createShowcaseProject,
   deleteShowcaseProject,
+  generateShowcaseBindings,
   importShowcaseAudio,
   installShowcaseVoice,
   loadSeedStatus,
   loadShowcase,
+  loadShowcaseDictionary,
+  loadShowcaseManifest,
+  loadShowcaseNarrationPreview,
+  loadShowcaseVoicePreview,
   loadShowcaseVoices,
   markShowcaseDataUpdated,
   openShowcaseProject,
   prepareShowcaseData,
   removeShowcaseScene,
+  renameShowcaseProject,
   reorderShowcaseScenes,
+  saveShowcaseDictionary,
+  setShowcaseVoice,
   updateShowcaseScene,
   useShowcaseStore,
   watchShowcase,
 } from '../actions/showcase';
-import { showcaseApi, showcaseErrorMessage } from '../shared/showcaseApi';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { sandboxUrl } from '../shared/sandbox.js';
+import { showcaseApi } from '../shared/showcaseApi';
 import type { SeedStatus, ShowcaseVoiceChoice } from '../actions/showcase';
-import type {
-  ShowcaseDoctor,
-  ShowcaseSelectableTargetRef,
-  ShowcaseTargetRef,
-} from '../../../shared/showcaseContracts';
-import ShowcaseCard from './showcase/ShowcaseCard.vue';
-import ShowcaseCreateForm from './showcase/ShowcaseCreateForm.vue';
-import ShowcaseProjectCard from './showcase/ShowcaseProjectCard.vue';
+import type { ShowcaseDoctor, ShowcaseSelectableTargetRef } from '../../../shared/showcaseContracts';
+import ShowcaseFilm from './showcase/ShowcaseFilm.vue';
+import ShowcaseProjectRow from './showcase/ShowcaseProjectRow.vue';
+import ShowcaseTargetPicker from './showcase/ShowcaseTargetPicker.vue';
 import ShowcaseVoicePanel from './showcase/ShowcaseVoicePanel.vue';
+import type { SceneTextPayload } from './showcase/sceneDraft';
 
 const store = useShowcaseStore();
+const route = useRoute();
+const router = useRouter();
+const showcaseContext = useUiContextSource('showcase', { layer: 'page', active: false });
+
 const creating = ref(false);
-const analyzing = ref(false);
-const buildStage = ref('');
-const step = ref<'target' | 'analyze' | 'film'>('target');
-const checking = ref(false);
 const doctor = ref<ShowcaseDoctor | null>(null);
 const seed = ref<SeedStatus | null>(null);
+const selectedSceneId = ref('');
 
-// Пункты про цель и вход относятся к конкретному стенду, а сетевая проверка —
-// ручная и ни к чему не ведёт: на первом шаге показывается только то, что можно
-// исправить прямо сейчас.
-const GENERAL_OPERATIONS = new Set(['browser', 'media', 'voice', 'speech', 'storage']);
+// Без этого записи не будет вовсе. Голос и распознавание сюда не входят: без
+// голоса остаётся свой звук, а проверка речи рекомендательная.
+const BLOCKING_OPERATIONS = new Set(['browser', 'media', 'storage']);
 
-const doctorOperations = computed(() => (
-  (doctor.value?.operations ?? []).filter((operation) => GENERAL_OPERATIONS.has(operation.id))
-));
+const doctorBlockers = computed(() => (doctor.value?.operations ?? []).filter((operation) => (
+  BLOCKING_OPERATIONS.has(operation.id) && operation.status === 'blocked'
+)));
 
-const doctorState = computed(() => {
-  const operations = doctorOperations.value;
-
-  if (!operations.length) {
-    return { tone: 'idle', label: checking.value ? 'Проверяем' : 'Не проверено' };
-  }
-
-  if (operations.some((operation) => operation.status === 'blocked')) {
-    return { tone: 'bad', label: 'Есть блокеры' };
-  }
-
-  if (operations.some((operation) => operation.status === 'warning')) {
-    return { tone: 'warn', label: 'Нужна проверка' };
-  }
-
-  if (operations.some((operation) => operation.status === 'unknown')) {
-    return { tone: 'idle', label: 'Не всё проверено' };
-  }
-
-  return { tone: 'good', label: 'Всё готово' };
-});
-
-// Готовый движок есть — установка голосов с первого шага уходит: ставить другие
+// Готовый движок есть — установка голосов со списка уходит: ставить другие
 // голоса можно с экрана ролика, где их и выбирают.
 const voiceReady = computed(() => (
   Boolean(store.voices?.engines.some((engine) => engine.doctor.status === 'ready'))
@@ -356,37 +231,128 @@ const projectVoiceRef = computed(() => (
 
 const projectPace = computed(() => store.opened?.scenes[0]?.direction.pace ?? null);
 
-// Сцены есть — значит разбор уже дал план, и шаг «Ролик» открыт. Судить об этом
-// по своему флагу нельзя: ролик живёт на сервере и переживает перезагрузку вкладки.
-const hasScript = computed(() => Boolean(store.opened?.scenes.length));
+const firstAvailableVoiceRef = computed(() => {
+  for (const engine of store.voices?.engines ?? []) {
+    const voice = engine.voices.find((item) => item.available);
 
-// Шаг следует за состоянием: закрыли ролик — вернулись к выбору стенда, разобрали —
-// ушли к ролику. Человек по-прежнему может листать шаги руками, но сам мастер
-// никогда не оставляет его на пустом экране.
-watch([() => store.opened?.id, hasScript], ([id, ready]) => {
-  if (!id) {
-    step.value = 'target';
-
-    return;
+    if (voice) {
+      return `${engine.id}:${voice.id}`;
+    }
   }
 
-  step.value = ready ? 'film' : 'analyze';
-}, { immediate: true });
+  return null;
+});
+
+// Если сцены ещё не закрепили голос, это ровно тот первый доступный голос,
+// который выберет backend. Сохранённый, но недоступный голос не подменяется.
+const effectiveVoiceRef = computed(() => projectVoiceRef.value ?? firstAvailableVoiceRef.value);
+
+const effectiveVoiceCapabilities = computed(() => {
+  const [engineId, voiceId] = effectiveVoiceRef.value?.split(':') ?? [];
+  const engine = store.voices?.engines.find((item) => item.id === engineId);
+
+  return engine?.voices.find((voice) => voice.id === voiceId)?.capabilities;
+});
+
+// Ссылка на стенд открытого ролика. Постоянный стенд публикует её сам; у песочницы
+// наружу идёт только порт из каталога целей, и адрес строится по хосту кокпита.
+const openedTargetUrl = computed(() => {
+  const opened = store.opened;
+
+  if (!opened || opened.target.status !== 'ready') {
+    return null;
+  }
+
+  if (opened.target.scope.viewUrl) {
+    return opened.target.scope.viewUrl;
+  }
+
+  const option = store.targets.find((target) => (
+    target.ref.kind === opened.ref.kind && target.ref.id === opened.ref.id
+  ));
+
+  return option ? sandboxUrl(option.viewPort) : null;
+});
 
 let stopWatching: (() => void) | null = null;
+let mounted = false;
 
 onMounted(() => {
   stopWatching = watchShowcase(store);
   void loadShowcase(store);
   void loadShowcaseVoices(store);
+  void loadShowcaseDictionary(store);
   void check();
+  mounted = true;
 });
+
+/**
+ * Адрес — источник правды о том, какой ролик открыт: F5 и кнопка «назад» ведут
+ * туда же, куда и клик. На свежем монтировании без адреса открытый ролик
+ * возвращается в адрес: человек ушёл в другой раздел и вернулся к той же работе.
+ * Позже пустой адрес означает «к списку» — так работает «назад» в браузере.
+ */
+watch(() => String(route.params.id ?? ''), async (id) => {
+  if (!id) {
+    if (store.opened && !mounted) {
+      await router.replace(`/showcase/${store.opened.id}`);
+
+      return;
+    }
+
+    if (store.opened) {
+      closeShowcaseProject(store);
+      void loadShowcase(store);
+    }
+
+    return;
+  }
+
+  if (store.opened?.id === id) {
+    return;
+  }
+
+  if (!await openShowcaseProject(store, id)) {
+    await router.replace('/showcase');
+  }
+}, { immediate: true });
 
 // Доступность подготовки данных зависит от ЖИВОГО состояния стенда, поэтому она
 // спрашивается при появлении карточки, а не хранится в записи ролика: вчерашняя
 // доступность сегодня уже ничего не значит.
 watch(() => store.opened?.id, async (id) => {
   seed.value = id ? await loadSeedStatus(store) : null;
+}, { immediate: true });
+
+// Manifest относится к конкретному immutable final. Смена project/revision без
+// смены этой пары повторного чтения не запускает, а новый final загружается сам.
+watch(() => {
+  const opened = store.opened;
+  const final = opened?.latestFinal;
+
+  return final?.manifestVersion === 1 ? `${opened?.id}:${final.manifestId}` : '';
+}, (key) => {
+  if (key) {
+    void loadShowcaseManifest(store);
+  }
+}, { immediate: true });
+
+// Агент в чате знает, какой ролик и какая сцена перед человеком: «эта сцена»
+// в вопросе разрешается без пересказа названия.
+watch([() => store.opened?.id, () => store.opened?.title, selectedSceneId], ([id, title, sceneId]) => {
+  if (!id) {
+    showcaseContext.blur({ details: null });
+
+    return;
+  }
+
+  showcaseContext.focus({
+    details: {
+      projectId: id,
+      title: title ?? '',
+      sceneId: sceneId || null,
+    },
+  });
 }, { immediate: true });
 
 // Подписка снимается вместе с экраном: выключенный плагин и уход со страницы не
@@ -397,47 +363,106 @@ onUnmounted(() => {
 });
 
 /**
- * Шаг «Далее» мастера: ролик заводится и сразу уходит в разбор. Название ему даёт
- * сервер по стенду, а текст задачи он берёт сам — человеку на этом шаге заполнять
- * нечего, он уже сказал, ЧТО показывать.
+ * «Снять ролик»: ролик заводится и одним POST уходит в полный backend-run. Вкладка
+ * дальше только показывает сохранённый прогресс; закрытие страницы судьбу запуска
+ * не меняет.
  */
 async function create(payload: { ref: ShowcaseSelectableTargetRef }) {
   creating.value = true;
 
   try {
-    if (!await createShowcaseProject(store, { ref: payload.ref })) {
+    const id = await createShowcaseProject(store, { ref: payload.ref });
+
+    if (!id) {
       return;
     }
 
-    await analyze();
+    await router.replace(`/showcase/${id}`);
+    await buildShowcaseFilm(store);
   } finally {
     creating.value = false;
   }
 }
 
 /**
- * Разбор стенда. Долгий шаг: модель читает постановку и diff, поэтому мастер
- * держит на экране свой прогресс, а не молчит до ответа сервера.
+ * Разбор стенда заново. Новый сценарий ЗАМЕНЯЕТ сцены, а вместе с ними уходят и
+ * правки текста, поэтому при живых сценах спрашиваем; голос и темп остаются.
  */
 async function analyze() {
-  analyzing.value = true;
+  if (store.opened?.scenes.length) {
+    const accepted = await confirmDialog(
+      'Разобрать заново? Сцены заменятся новым сценарием, и правки текста в них пропадут. '
+        + 'Голос и темп ролика сохранятся.',
+      {
+        title: 'Повторный разбор',
+        okText: 'Разобрать',
+      },
+    );
 
-  try {
-    await analyzeShowcase(store);
-  } finally {
-    analyzing.value = false;
+    if (!accepted) {
+      return;
+    }
   }
+
+  await analyzeShowcase(store);
 }
 
 /**
- * Сборка ролика целиком: запись, озвучка и mp4 одной командой. Стадия показывается
- * человеку строкой — между заданиями есть паузы, и молчащий экран в это время
- * читается как «ничего не идёт».
+ * Сборка ролика целиком: несохранённые правки сцен уходят первыми, затем запись,
+ * озвучка и mp4 одной командой. Не сохранившаяся правка останавливает сборку —
+ * снимать экраны под старый текст значило бы выдать человеку не его ролик.
  */
-async function build() {
-  await buildShowcaseFilm(store, (stage) => {
-    buildStage.value = stage;
+async function build(pending: SceneTextPayload[]) {
+  for (const payload of pending) {
+    const { id, ...patch } = payload;
+
+    if (!await updateShowcaseScene(store, id, patch)) {
+      return;
+    }
+  }
+
+  await buildShowcaseFilm(store);
+}
+
+/**
+ * Модель видит только уже сохранённую редакцию. Конфликт любого черновика
+ * останавливает операцию, оставляет ввод в редакторе и не строит связи по старому
+ * тексту.
+ */
+async function generateBindings(pending: SceneTextPayload[]) {
+  for (const payload of pending) {
+    const { id, ...patch } = payload;
+
+    if (!await updateShowcaseScene(store, id, patch)) {
+      return;
+    }
+  }
+
+  await generateShowcaseBindings(store);
+}
+
+/**
+ * Переименование: имя ролика сервер даёт по стенду, но человек вправе назвать
+ * его по фиче. Пустой ответ и отмена ничего не меняют.
+ */
+async function rename() {
+  const opened = store.opened;
+
+  if (!opened) {
+    return;
+  }
+
+  const title = await promptDialog({
+    title: 'Название ролика',
+    value: opened.title,
+    okText: 'Сохранить',
   });
+
+  if (title === null) {
+    return;
+  }
+
+  await renameShowcaseProject(store, title);
 }
 
 /**
@@ -447,8 +472,9 @@ async function build() {
  */
 async function remove(id: string) {
   const project = store.projects.find((item) => item.id === id);
+  const title = project?.title ?? store.opened?.title ?? id;
   const accepted = await confirmDialog(
-    `Удалить ролик «${project?.title ?? id}»?\n\n`
+    `Удалить ролик «${title}»?\n\n`
       + 'Вместе с записью будут удалены её сцены, звук и собранный файл. '
       + 'Идущие задания сначала отменяются.',
     {
@@ -462,15 +488,25 @@ async function remove(id: string) {
     return;
   }
 
-  await deleteShowcaseProject(store, id);
+  const wasOpened = store.opened?.id === id;
+
+  if (await deleteShowcaseProject(store, id) && wasOpened) {
+    await router.replace('/showcase');
+  }
 }
 
 async function cancel(jobId: string) {
   await cancelShowcaseJob(store, jobId);
 }
 
+async function cancelBuild(runId: string) {
+  await cancelShowcaseBuild(store, runId);
+}
+
+// Открытие идёт через адрес: ролик читает наблюдатель маршрута, и клик по строке
+// ничем не отличается от ссылки или F5.
 async function open(id: string) {
-  await openShowcaseProject(store, id);
+  await router.replace(`/showcase/${id}`);
 }
 
 /**
@@ -501,10 +537,13 @@ async function markDataUpdated() {
   await markShowcaseDataUpdated(store);
 }
 
+// «К списку»: карточка закрывается, список перечитывается — пока она была открыта,
+// роликов могло стать больше или меньше, — а адрес возвращается к разделу.
 function close() {
   seed.value = null;
   closeShowcaseProject(store);
   void loadShowcase(store);
+  void router.replace('/showcase');
 }
 
 async function addScene(payload: { screenId: string; narration: string }) {
@@ -518,17 +557,16 @@ async function addScene(payload: { screenId: string; narration: string }) {
   });
 }
 
-async function saveScene(payload: {
-  id: string;
-  narration: string;
-  caption: string;
-  subtitleText: string;
-}) {
-  await updateShowcaseScene(store, payload.id, {
-    narration: payload.narration,
-    caption: payload.caption,
-    subtitleText: payload.subtitleText,
-  });
+async function saveScene(payload: SceneTextPayload) {
+  const { id, ...patch } = payload;
+
+  await updateShowcaseScene(store, id, patch);
+}
+
+// Начало сцены уходит отдельной правкой: это решение о записи, а не текст, и ждать
+// кнопки «Сохранить» вместе с черновиком озвучки ему незачем.
+async function setSceneContinues(payload: { id: string; value: boolean }) {
+  await updateShowcaseScene(store, payload.id, { continuesPrevious: payload.value });
 }
 
 /**
@@ -605,8 +643,8 @@ async function changeVoice(choice: ShowcaseVoiceChoice) {
   await setShowcaseVoice(store, choice);
 }
 
-function previewUrl(voiceRef: string): string {
-  return showcaseApi.voicePreviewUrl(voiceRef);
+async function saveDictionary(text: string) {
+  await saveShowcaseDictionary(store, text);
 }
 
 function artifactUrl(artifactId: string): string {
@@ -615,19 +653,14 @@ function artifactUrl(artifactId: string): string {
 
 /**
  * Готовность спрашивается без цели: так видно общее состояние установки — браузер,
- * ffmpeg, голос. Готовность конкретной цели показывает карточка ролика, у которой
- * эта цель уже выбрана. Отказ проверки не становится ошибкой раздела: она
- * справочная, и красная полоса из-за неё мешала бы завести ролик.
+ * ffmpeg, хранилище. Отказ проверки не становится ошибкой раздела: она справочная,
+ * и красная полоса из-за неё мешала бы завести ролик.
  */
 async function check() {
-  checking.value = true;
-
   try {
     doctor.value = await showcaseApi.doctor(null);
   } catch {
     doctor.value = null;
-  } finally {
-    checking.value = false;
   }
 }
 </script>
@@ -638,158 +671,52 @@ async function check() {
   margin-inline: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
   min-width: 0;
 }
 
-.showcase__hero {
-  position: relative;
-  min-height: 0;
-  overflow: hidden;
+.showcase__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 32px;
-  padding: 28px 30px;
-  border: 1px solid var(--line);
-  border-radius: 19px;
-  background:
-    radial-gradient(
-      circle at 86% 5%,
-      color-mix(in srgb, var(--accent) 18%, transparent),
-      transparent 30%
-    ),
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--surface) 94%, var(--accent)) 0%,
-      var(--surface) 72%
-    );
-  box-shadow: var(--shadow);
+  gap: 24px;
 }
 
-.showcase__hero::after {
-  position: absolute;
-  right: -64px;
-  bottom: -142px;
-  width: 350px;
-  height: 255px;
-  border: 1px solid color-mix(in srgb, var(--accent) 17%, transparent);
-  border-radius: 50%;
-  content: '';
-  pointer-events: none;
-}
-
-.showcase__hero-copy {
-  position: relative;
-  z-index: 1;
-  max-width: 625px;
+.showcase__intro {
   min-width: 0;
 }
 
-.showcase__eyebrow,
-.showcase__section-kicker {
-  margin: 0 0 6px;
-  color: var(--accent);
-  font-size: 10.5px;
-  font-weight: 750;
-  letter-spacing: 0.1em;
+.showcase__intro h1 {
+  margin: 0;
+  font-size: 24px;
   line-height: 1.2;
-  text-transform: uppercase;
+  letter-spacing: -0.03em;
 }
 
-.showcase__hero h1 {
-  margin: 0;
-  font-size: clamp(27px, 2.4vw, 34px);
-  line-height: 1.15;
-  letter-spacing: -0.035em;
-}
-
-.showcase__hero-copy > p:last-child {
-  margin: 0;
-  margin-top: 10px;
+.showcase__intro p {
+  max-width: 620px;
+  margin: 6px 0 0;
   color: var(--ink-mid);
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 .showcase__refresh {
-  position: relative;
-  z-index: 1;
   flex: none;
 }
 
-
-
-
-
-
-
-.showcase--project .showcase__hero {
-  min-height: 0;
-  padding-block: 18px;
-}
-
-.showcase--project .showcase__hero h1 {
-  font-size: 22px;
-}
-
-.showcase--project .showcase__hero-copy > p:last-child {
-  display: none;
-}
-
 .showcase__panel,
-.showcase__block,
-.showcase__health {
+.showcase__block {
   display: flex;
   flex-direction: column;
-  min-width: 0;
-}
-
-.showcase__steps {
-  display: flex;
-  align-items: center;
   gap: 12px;
-}
-
-/* Полоса шагов растягивается на всю ширину, а вкладки делят её поровну: общий
-   контрол сжимается до содержимого, и три шага слипались бы в одну строку. */
-.showcase__steps-tabs {
-  display: flex;
-  width: 100%;
-}
-
-.showcase__step {
-  flex: 1;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.showcase__progress {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 94%, #fff);
-}
-
-.showcase__progress div {
-  flex: 1;
   min-width: 0;
-}
-
-.showcase__progress p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .showcase__panel {
-  gap: 17px;
-  padding: 20px;
+  padding: 18px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 15px;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--surface) 96%, #fff) 0%,
@@ -798,61 +725,19 @@ async function check() {
   box-shadow: inset 0 1px 0 #ffffff08;
 }
 
-.showcase__section-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
-}
-
-.showcase__section-head > div {
-  min-width: 0;
-}
-
-.showcase__section-mark,
-.showcase__empty-mark {
-  display: grid;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--ground));
-  color: var(--accent);
-}
-
-.showcase__section-mark svg,
-.showcase__empty-mark svg {
-  width: 19px;
-  height: 19px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.showcase__section-head h2,
-.showcase__block-head h2,
-.showcase__health h2 {
+.showcase__panel-head h2,
+.showcase__block-head h2 {
   margin: 0;
   font-size: 15px;
   font-weight: 660;
   letter-spacing: -0.01em;
 }
 
-.showcase__section-head p:last-child {
+.showcase__panel-head p {
   margin: 4px 0 0;
   color: var(--ink-mid);
   font-size: 12.5px;
   line-height: 1.45;
-}
-
-.showcase__section-kicker {
-  margin-bottom: 3px;
-  font-size: 9.5px;
-}
-
-.showcase__block {
-  gap: 12px;
 }
 
 .showcase__block-head {
@@ -876,22 +761,22 @@ async function check() {
   font-variant-numeric: tabular-nums;
 }
 
-.showcase__empty {
+.showcase__blockers {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 13px;
-  min-height: 116px;
-  padding: 22px;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+}
+
+.showcase__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 18px 20px;
   border: 1px dashed var(--line-2);
   border-radius: 14px;
   background: color-mix(in srgb, var(--surface-2) 28%, transparent);
-}
-
-.showcase__empty-mark {
-  border-color: var(--line);
-  background: var(--surface-2);
-  color: var(--ink-mid);
 }
 
 .showcase__empty strong {
@@ -899,8 +784,8 @@ async function check() {
 }
 
 .showcase__empty p {
-  max-width: 470px;
-  margin: 5px 0 0;
+  max-width: 520px;
+  margin: 0;
   color: var(--ink-mid);
   font-size: 13px;
   line-height: 1.5;
@@ -908,192 +793,17 @@ async function check() {
 
 .showcase__list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
-  gap: 14px;
-}
-
-.showcase__services {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
-  align-items: start;
-  gap: 16px;
-  min-width: 0;
-}
-
-.showcase__services--single {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.showcase__health {
-  min-height: 100%;
-  gap: 14px;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 15px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 96%, #fff) 0%,
-    var(--surface) 100%
-  );
-  box-shadow: inset 0 1px 0 #ffffff08;
-}
-
-.showcase__health-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.showcase__health-state {
-  display: inline-flex;
-  flex: none;
-  min-height: 25px;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--ground);
-  color: var(--ink-mid);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-.showcase__health-state i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentcolor;
-}
-
-.showcase__health-state[data-state='good'] {
-  border-color: color-mix(in srgb, var(--good) 34%, var(--line));
-  color: var(--good);
-}
-
-.showcase__health-state[data-state='warn'] {
-  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
-  color: var(--warn);
-}
-
-.showcase__health-state[data-state='bad'] {
-  border-color: color-mix(in srgb, var(--bad) 38%, var(--line));
-  color: var(--bad);
-}
-
-.showcase__note {
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-.showcase__doctor {
-  display: grid;
   gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.showcase__doctor li {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 9px;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--ground) 58%, transparent);
-}
-
-.showcase__doctor-dot {
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: var(--ink-mid);
-}
-
-.showcase__doctor-dot[data-status='ready'] {
-  background: var(--good);
-}
-
-.showcase__doctor-dot[data-status='warning'] {
-  background: var(--warn);
-}
-
-.showcase__doctor-dot[data-status='blocked'] {
-  background: var(--bad);
-}
-
-.showcase__doctor-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  font-size: 12.5px;
-}
-
-.showcase__doctor-reason {
-  color: var(--ink-mid);
-  min-width: 0;
-  line-height: 1.4;
-}
-
-.showcase__doctor-manual {
-  padding: 1px 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--ink-mid);
-  font-size: 10px;
-}
-
-.showcase__health-action {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: auto;
-  padding-top: 2px;
-}
-
-.showcase__health-head > div {
-  min-width: 0;
-}
-
-@media (max-width: 920px) {
-  .showcase__hero {
-    gap: 20px;
-    padding-inline: 24px;
-  }
-
-  .showcase__services {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 720px) {
-  .showcase__hero {
-    min-height: 0;
-    align-items: flex-start;
+  .showcase__head {
     flex-direction: column;
-    padding: 22px;
+    gap: 12px;
   }
 
   .showcase__panel {
-    padding: 17px;
-  }
-
-  .showcase__empty {
-    align-items: flex-start;
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 440px) {
-  .showcase__health-head {
-    align-items: flex-start;
-    flex-direction: column;
+    padding: 15px;
   }
 }
 </style>

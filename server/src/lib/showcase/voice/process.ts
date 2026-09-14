@@ -22,7 +22,23 @@ export interface SpeakResult {
   stderr: string;
 }
 
+/**
+ * Отказ движка с кодом выхода. Код нужен адаптеру: у скрипта синтеза бывают
+ * причины со своим действием — нехватка видеопамяти, невидимая видеокарта, — и
+ * называть их по хвосту трассировки было бы гаданием.
+ */
+export class VoiceProcessError extends ShowcaseError {
+  exitCode: number | null;
+
+  constructor(message: string, exitCode: number | null) {
+    super('voice_failed', message, 500);
+    this.name = 'VoiceProcessError';
+    this.exitCode = exitCode;
+  }
+}
+
 const STDERR_TAIL = 400;
+const OUTPUT_KEEP = 1024 * 1024;
 
 export function runWithStdin(
   command: string,
@@ -34,43 +50,57 @@ export function runWithStdin(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let stopError: ShowcaseError | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    // Срок и отмена ведут к одному действию — снять процесс, — но причины у них
-    // разные, и человек должен видеть свою.
-    const stop = (reason: string): void => {
+    const cleanup = (): void => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+
+      options.signal?.removeEventListener('abort', onAbort);
+    };
+
+    const fail = (error: Error): void => {
       if (settled) {
         return;
       }
 
       settled = true;
-      child.kill('SIGKILL');
-      reject(new ShowcaseError('voice_failed', reason, 504));
+      cleanup();
+      reject(error);
     };
 
-    const timer = setTimeout(() => {
-      stop(`Движок не ответил за ${Math.round(options.timeoutMs / 1000)} с.`);
-    }, options.timeoutMs);
+    // Срок и отмена ведут к одному действию — снять процесс, — но причины у них
+    // разные, и человек должен видеть свою. Promise завершается только после
+    // `close`: вызывающий код не считает память освобождённой раньше процесса.
+    const stop = (reason: string): void => {
+      if (settled || stopError) {
+        return;
+      }
+
+      stopError = new ShowcaseError('voice_failed', reason, 504);
+      cleanup();
+      child.kill('SIGKILL');
+    };
+
     const onAbort = (): void => {
       stop('Синтез отменён.');
     };
 
-    options.signal?.addEventListener('abort', onAbort, { once: true });
-
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
+      stdout = `${stdout}${chunk.toString('utf8')}`.slice(-OUTPUT_KEEP);
     });
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
+      stderr = `${stderr}${chunk.toString('utf8')}`.slice(-OUTPUT_KEEP);
     });
     child.on('error', (error: Error) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      clearTimeout(timer);
-      options.signal?.removeEventListener('abort', onAbort);
-      reject(new ShowcaseError('voice_failed', `Движок не запустился: ${error.message}`, 500));
+      fail(stopError ?? new ShowcaseError(
+        'voice_failed',
+        `Движок не запустился: ${error.message}`,
+        500,
+      ));
     });
     child.on('close', (code: number | null) => {
       if (settled) {
@@ -78,8 +108,13 @@ export function runWithStdin(
       }
 
       settled = true;
-      clearTimeout(timer);
-      options.signal?.removeEventListener('abort', onAbort);
+      cleanup();
+
+      if (stopError) {
+        reject(stopError);
+
+        return;
+      }
 
       if (code === 0) {
         resolve({ stdout, stderr });
@@ -87,10 +122,9 @@ export function runWithStdin(
         return;
       }
 
-      reject(new ShowcaseError(
-        'voice_failed',
+      reject(new VoiceProcessError(
         `Движок завершился с кодом ${code}: ${stderr.trim().slice(-STDERR_TAIL)}`,
-        500,
+        code,
       ));
     });
 
@@ -98,6 +132,16 @@ export function runWithStdin(
       // Движок мог закрыть stdin раньше, чем дочитал реплику: это его отказ, и
       // он придёт кодом возврата — ронять из-за EPIPE нечего.
     });
-    child.stdin.end(options.input, 'utf8');
+
+    timer = setTimeout(() => {
+      stop(`Движок не ответил за ${Math.round(options.timeoutMs / 1000)} с.`);
+    }, options.timeoutMs);
+
+    if (options.signal?.aborted) {
+      onAbort();
+    } else {
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      child.stdin.end(options.input, 'utf8');
+    }
   });
 }

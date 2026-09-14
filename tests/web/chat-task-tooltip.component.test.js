@@ -186,7 +186,7 @@ test('кольцо контекста открывает форматирова�
       return {
         id: session.model,
         model: { name: 'Opus 5 (1M)', context: 1_000_000, efforts: [] },
-        provider: { id: 'claude' },
+        provider: { id: 'claude', capabilities: { chatAutoCompact: true } },
       };
     },
     visibleModels() { return []; },
@@ -234,6 +234,40 @@ test('кольцо контекста открывает форматирова�
   assert.match(compactValues.Кэш, /90% · чт\. 180 тыс\. · зап\. 10 тыс\. · мимо 10 тыс\./);
   assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '80%', 'процент кольца не смешан с DTO кэша');
   assert.doesNotMatch(content.textContent, /28,5 млн/, 'накопительный счётчик не подменяет снимок запроса');
+
+  session.sending = true;
+  await nextTick();
+  assert.match(ring.attributes('aria-label'), /замер прошлого хода/);
+  session.liveContextUsage = {
+    contextTokens: 40_000, contextWindow: 100_000,
+    contextMetric: 'active-input-v1', contextIsEstimate: false,
+  };
+  await nextTick();
+  assert.match(ring.attributes('aria-label'), /40[\s\u00a0]000 из 80[\s\u00a0]000.*50%/);
+  assert.match(ring.attributes('aria-label'), /замер этого хода/);
+
+  session.sessionId = null;
+  await nextTick();
+  assert.match(ring.attributes('aria-label'), /40[\s\u00a0]000 из 80[\s\u00a0]000.*50%/);
+  assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '50%');
+  assert.equal(ring.attributes('aria-disabled'), 'true');
+  session.sessionId = 'claude-session';
+
+  session.liveContextUsage.contextTokens = 0;
+  await nextTick();
+  assert.match(ring.attributes('aria-label'), /Контекст: 0 из/);
+  assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '0%');
+
+  session.liveContextUsage.contextTokens = 90_000;
+  session.liveContextUsage.contextMetric = 'unavailable';
+  await nextTick();
+  const arc = ring.get('.rfg');
+  assert.equal(arc.attributes('stroke-dashoffset'), arc.attributes('stroke-dasharray'));
+  assert.equal(Boolean(content.querySelector('.ctx-pop-pct')), false);
+  assert.match(content.textContent, /Точная заполненность пока недоступна/);
+  assert.equal(ring.classes().includes('hi'), false);
+  session.sending = false;
+  session.liveContextUsage = null;
 
   // Временно недоступное действие остаётся фокусируемым: иначе вместе с native disabled
   // клавиатура теряла и саму форматированную подсказку.
@@ -327,7 +361,7 @@ test('ChatSession передаёт в тултип полное загружен
       return {
         id: 'gpt-test',
         model: { name: 'GPT Test', context: 200000, efforts: [] },
-        provider: { id: 'codex' },
+        provider: { id: 'codex', capabilities: { chatAutoCompact: true } },
       };
     },
     visibleModels() { return []; },
@@ -576,7 +610,7 @@ test('ChatSession рисует дугу и процент кольца по то
       return {
         id: 'claude-opus-5[1m]',
         model: { name: 'Opus 5 (1M)', context: MODEL_WINDOW, efforts: [] },
-        provider: { id: 'claude' },
+        provider: { id: 'claude', capabilities: { chatAutoCompact: true } },
       };
     },
     visibleModels() { return []; },
@@ -750,7 +784,7 @@ test('ChatSession показывает provider-нейтральный стат�
   globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
   globalThis.__chatTaskTooltipChatStore = () => ({
     sessions: [session],
-    compactWindow: 0,
+    compactWindow: 200_000,
     loadConveyor() {},
     markRead() {},
     setDraft() {},

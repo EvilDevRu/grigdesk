@@ -218,6 +218,7 @@ async function providersModule(
         // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
         chatEnabled: typeof ex.run === 'function',
         capabilities: {
+          chatAutoCompact: ex.chatAutoCompact === true || !!ex.autoCompactEnv,
           scopedWorkspace: await supportsScopedWorkspace(ex, config),
           untrustedText: typeof ex.run === 'function'
             && typeof ex.runUntrusted === 'function'

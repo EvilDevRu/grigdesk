@@ -154,6 +154,22 @@ test('синтез зовёт движок выбранным голосом и 
 
   assert.match(argv, /--model .*irina\/voice\.onnx/, 'модель выбранного голоса');
   assert.match(argv, /--length-scale 1\.15/, 'медленный темп переведён в единицы движка');
+
+  await engine.synthesize(
+    {
+      canonicalText: 'Открываем раздел.',
+      direction: { ...DIRECTION, pace: 'fastest' },
+      voiceRef: 'irina',
+      language: 'ru',
+    },
+    { outputDir: path.join(root, 'out'), deadlineMs: 30_000, signal: undefined },
+  );
+
+  assert.match(
+    await readFile(calls, 'utf8'),
+    /--length-scale 0\.8\b/,
+    'крайняя ступень — своё число, а не повтор соседней',
+  );
 });
 
 test('тишина вместо речи — отказ, а не готовый звук', async (t) => {

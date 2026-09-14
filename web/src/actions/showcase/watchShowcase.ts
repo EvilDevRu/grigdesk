@@ -1,5 +1,6 @@
 import { sseSubscribe } from '../../composables/useSse.ts';
 import {
+  parseShowcaseBuildProgressEvent,
   parseShowcaseChangedEvent,
   parseShowcaseProgressEvent,
 } from '../../../../shared/showcaseContracts';
@@ -36,11 +37,52 @@ export function watchShowcase(store: ShowcaseStore): () => void {
           return;
         }
 
-        store.applyJob({
+        // Подпись, счётчик и причина отказа применяются вместе с состоянием: строку
+        // хода человек читает прямо сейчас, а отказ без причины — красная точка с
+        // прежней подписью, по которой нечего решать.
+        if (!store.applyJob({
           ...known,
           state: event.state,
           sequence: event.sequence,
-        });
+          progress: {
+            index: event.index ?? known.progress.index,
+            total: event.total ?? known.progress.total,
+            label: event.label,
+          },
+          error: event.error ?? known.error,
+        })) {
+          void loadShowcase(store);
+        }
+      } catch {
+        void loadShowcase(store);
+      }
+
+      return;
+    }
+
+    if (name === 'showcase-build-progress') {
+      try {
+        const event = parseShowcaseBuildProgressEvent(data);
+
+        if (!store.applyBuildProgress(event)) {
+          void loadShowcase(store);
+        }
+
+        if (
+          event.state === 'awaiting_review'
+          || event.state === 'succeeded'
+          || event.state === 'failed'
+          || event.state === 'interrupted'
+          || event.state === 'cancelled'
+        ) {
+          const openedId = store.opened?.id;
+
+          void loadShowcase(store);
+
+          if (openedId === event.projectId) {
+            void openShowcaseProject(store, openedId);
+          }
+        }
       } catch {
         void loadShowcase(store);
       }
@@ -76,7 +118,14 @@ export function watchShowcase(store: ShowcaseStore): () => void {
     // Каталог целей включает ручные песочницы. После их подъёма или сноса форма
     // должна обновиться сама, даже если ни один ролик при этом не менялся.
     if (name === 'showcase-changed' || name === 'sandboxes-changed' || name === 'hello') {
-      void loadShowcase(store);
+      const refreshed = loadShowcase(store);
+
+      if (name === 'hello' && store.opened?.id) {
+        const openedId = store.opened.id;
+
+        void refreshed.then(() => openShowcaseProject(store, openedId));
+      }
+
       void loadShowcaseVoices(store);
     }
   });

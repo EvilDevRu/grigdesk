@@ -122,14 +122,26 @@ export async function startEgressGuard(policy: BrowserPolicy) {
       path: target.pathname + target.search,
       headers: request.headers,
     }, (upstreamResponse) => {
+      // Стенд может оборвать ответ на середине — обрыв гасится вместе с ответом
+      // браузеру, а не выходит наружу необработанным исключением.
+      upstreamResponse.on('error', () => response.destroy());
       response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
       upstreamResponse.pipe(response);
     });
 
     upstream.on('error', () => {
-      response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      if (!response.headersSent) {
+        response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      }
+
       response.end('адрес показа недоступен');
     });
+
+    // Браузер обрывает соединения на ходу — при уходе со страницы, при закрытии
+    // контекста сцены. Обрыв без обработчика — необработанное исключение, и оно
+    // убило бы исполнителя вместе с записью, а не один запрос.
+    request.on('error', () => upstream.destroy());
+    response.on('error', () => upstream.destroy());
 
     request.pipe(upstream);
   });

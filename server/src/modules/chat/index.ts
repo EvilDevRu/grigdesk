@@ -30,6 +30,8 @@ import { resolveChatAttachment } from '../../lib/chat/attachments.ts';
 import { stoppedTurnBrief } from '../../lib/chat/stoppedBrief.ts';
 import { autoDecision } from '../../lib/chat/autoApprove.ts';
 import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
+import { normalizeContextUsage } from '../../../../shared/chatContextUsage.ts';
+import type { ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
   contextPrefix,
@@ -287,14 +289,13 @@ interface CompanionPreflight {
   record: StoredChat | null;
 }
 
-interface RunningTurn {
+interface RunningTurn extends ChatContextUsage {
   startedAt: number;
   tokens: number;
   steps: ChatStep[];
   ac: AbortController;
   compact: boolean;
   workToolScopeKey: string;
-  contextTokens?: number;
   contextCache?: ContextCache;
   onPermission?: ExecutorTurnOptions['onPermission'];
   // Остановка сервера: id сессии, известный с первого события хода; обещание конца
@@ -680,12 +681,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       fastify.sse.broadcast('chat-step', { chatKey, step });
     },
     onBackgroundProgress: ({ chatKey, tokens, extra }) => {
-      const progress = extra as { contextTokens?: number } | null;
+      const contextCache = normalizeContextCache((extra as Record<string, unknown> | null)?.contextCache);
+
       fastify.sse.broadcast('chat-progress', {
         chatKey,
         tokens,
-        ...(Number.isFinite(progress?.contextTokens)
-          ? { contextTokens: progress!.contextTokens } : {}),
+        ...normalizeContextUsage(extra),
+        ...(contextCache ? { contextCache } : {}),
       });
     },
     // Состав живых процессов виден человеку («Настройки → Запуски»), поэтому его
@@ -828,7 +830,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       compact: !!v.compact,
       // Живой размер контекста идущего хода — чтобы F5 посреди часового хода не
       // возвращал кольцо к цифре с прошлого хода (у claude она бывает ДО автокомпакта).
-      contextTokens: v.contextTokens || 0,
+      ...normalizeContextUsage(v),
       ...(v.contextCache ? { contextCache: v.contextCache } : {}),
     })),
   }));
@@ -1791,7 +1793,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         interruptedBy: 'server_shutdown',
         steps: [...runRec.steps],
         sessionId: runRec.sessionId || null,
-        contextTokens: runRec.contextTokens || 0,
+        ...normalizeContextUsage(runRec),
         ...(runRec.contextCache ? { contextCache: runRec.contextCache } : {}),
         cost: null,
         model: model || null,
@@ -1928,20 +1930,23 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           return requestDirectInteraction(presentation, chatKey);
         },
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
-        // Второе (необязательное) поле — ЗАПОЛНЕННОСТЬ контекста прямо сейчас: её знает
-        // тот исполнитель, чей поток сообщает вход каждого обращения к модели (claude).
-        // Не сообщил — кольцо живёт как раньше, цифрой с прошлого хода.
+        // Снимок контекста передаём целиком: без окна и статуса новая цифра могла
+        // рисоваться по старой шкале. Отсутствующий замер не подменяем нулём.
         onProgress: chatKey ? (tokens, info) => {
-          const contextTokens = Number(info?.contextTokens) || 0;
+          const contextUsage = normalizeContextUsage(info);
           const contextCache = normalizeContextCache(info?.contextCache);
           const a = activeRuns.get(chatKey);
+
           if (a) {
             a.tokens = tokens;
-            if (contextTokens) a.contextTokens = contextTokens;
+            Object.assign(a, contextUsage);
             if (contextCache) a.contextCache = contextCache;
           }
+
           fastify.sse.broadcast('chat-progress', {
-            chatKey, tokens, contextTokens,
+            chatKey,
+            tokens,
+            ...contextUsage,
             ...(contextCache ? { contextCache } : {}),
           });
         } : undefined,
@@ -2092,7 +2097,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // выше инвалидирует binding, а повторное сообщение получит досье сделанного
         // (stopped-brief.js) уже в новую session. Binding не трогаем и с точки зрения
         // гонок: его единственный владелец — эта цепочка ходов чата (turnLocks).
-        const contextCache = normalizeContextCache(err.contextCache);
+        const contextCache = normalizeContextCache(err.contextCache) || runRec.contextCache;
         // Прерывание сливом остановки — не «стоп» человека: текст называет причину, а
         // пометка даёт окну предложить продолжение уже после перезапуска.
         const shutdownCut = runRec.interruptedBy === 'server_shutdown';
@@ -2104,7 +2109,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           // Размер контекста берём тот, что исполнитель успел увидеть в потоке: раньше здесь
           // стоял жёсткий 0, клиент его игнорировал (нули не пишем), и после «стопа» кольцо
           // врало — у новой сессии оставалось пустым, хотя контекст в ней уже набрался.
-          contextTokens: err.contextTokens || 0, contextIsEstimate: !!err.contextIsEstimate,
+          ...normalizeContextUsage(runRec),
+          ...normalizeContextUsage(err),
           ...(contextCache ? { contextCache } : {}),
           cost: null, model: model || null, effort: runEffort || null, stopped: true, sessionReset: false,
         }, wantsTitle)!;

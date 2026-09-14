@@ -17,8 +17,15 @@ export {
   recordShowcase,
   synthesizeShowcase,
 } from './buildShowcase';
-export { analyzeShowcase } from './analyzeShowcase';
-export { buildShowcaseFilm } from './buildShowcaseFilm';
+export {
+  analyzeShowcase,
+  generateShowcaseBindings,
+  SCRIPT_GAPS_HINT,
+  SCRIPT_GAPS_INTRO,
+  SCRIPT_OUTDATED_TEXT,
+  showcaseScriptOutdated,
+} from './analyzeShowcase';
+export { buildShowcaseFilm, cancelShowcaseBuild } from './buildShowcaseFilm';
 export { cancelShowcaseJob } from './cancelShowcaseJob';
 export { closeShowcaseProject, openShowcaseProject } from './openShowcaseProject';
 export {
@@ -29,11 +36,17 @@ export {
 export type { SeedStatus } from './prepareShowcaseData';
 export { createShowcaseProject } from './createShowcaseProject';
 export { deleteShowcaseProject } from './deleteShowcaseProject';
+export { renameShowcaseProject } from './renameShowcaseProject';
 export { loadShowcase } from './loadShowcase';
+export { loadShowcaseManifest } from './loadShowcaseManifest';
 export {
   cancelShowcaseVoiceInstall,
   installShowcaseVoice,
+  loadShowcaseDictionary,
+  loadShowcaseNarrationPreview,
+  loadShowcaseVoicePreview,
   loadShowcaseVoices,
+  saveShowcaseDictionary,
   setShowcaseVoice,
 } from './setupShowcaseVoice';
 export type { ShowcaseVoiceChoice } from './setupShowcaseVoice';

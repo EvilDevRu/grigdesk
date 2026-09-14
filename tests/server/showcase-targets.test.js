@@ -399,6 +399,7 @@ test('каталог связывает постоянный стенд и ру�
     profile: 'demo-profile',
     profileBinding: 'verified',
     label: 'demo-profile · постоянный стенд',
+    taskTitle: null,
     viewUrl: 'http://127.0.0.1:5173',
     viewPort: null,
     status: 'ready',
@@ -914,6 +915,143 @@ test('цель без showcase-файлов получает безопасны�
     readySelector: 'body',
     elements: [],
   }]);
+});
+
+// По номеру стенда человек задачу не узнаёт: название из портала стоит и у цели,
+// и в имени ролика. Портал спрашивается один раз на номер, а его беда — не отказ
+// раздела: стенд остаётся подписан номером.
+test('стенд задачи подписан её названием из портала, и ролик берёт его в имя', async (t) => {
+  const sandbox = {
+    task: '990003',
+    profile: 'demo-profile',
+    owner: 'manual',
+    slot: 1,
+    fePort: 5199,
+    apiPort: 8099,
+    repos: [],
+    standAlive: true,
+    feAlive: true,
+    profileBinding: 'verified',
+    removable: true,
+    removableReason: null,
+    updatedAt: null,
+  };
+  const fx = await fixture(t, {
+    target: null,
+    screens: null,
+    sandboxOverview: async () => ({ sandboxes: [sandbox] }),
+  });
+  const asked = [];
+
+  await writeFile(
+    path.join(fx.profilesDir, 'demo-profile', 'dashboard.env'),
+    'FACTORY_STAND_URL=http://127.0.0.1:5173\n',
+    'utf8',
+  );
+  await writeFile(
+    path.join(fx.profilesDir, 'demo-profile', 'profile.sh'),
+    'PROFILE_SERVICE_HOST="localhost"\n',
+    'utf8',
+  );
+  sandbox.updatedAt = await writeSandbox(
+    fx.stateDir,
+    '990003',
+    { FE_PORT: '5199', API_PORT: '8099' },
+  );
+
+  const service = createShowcaseService({
+    showcaseDir: path.join(path.dirname(fx.profilesDir), 'showcase'),
+    authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
+    profilesDir: fx.profilesDir,
+    stateDir: fx.stateDir,
+    browserPath: null,
+    listProjects: async () => ['demo-profile'],
+    sandboxOverview: async () => ({ sandboxes: [sandbox] }),
+    taskDetails: async (taskId) => {
+      asked.push(taskId);
+
+      if (asked.length > 1) {
+        throw new Error('портал спрашивают повторно');
+      }
+
+      return { title: '  Массовый   съём частотности ', description: '<p>текст</p>' };
+    },
+    broadcast: () => {},
+    limits: () => ({
+      maxScenes: 20,
+      maxSceneSeconds: 120,
+      maxTotalSeconds: 600,
+      retentionDays: 30,
+      maxQueued: 4,
+      jobTimeoutMs: 60_000,
+    }),
+  });
+
+  const overview = await service.overview();
+  const permanent = overview.targets.find((item) => item.ref.kind === 'project');
+  const manual = overview.targets.find((item) => item.ref.kind === 'sandbox');
+
+  assert.equal(permanent.taskTitle, null, 'постоянный стенд задаче не принадлежит');
+  assert.equal(manual.taskTitle, 'Массовый съём частотности', 'название чистится от лишних пробелов');
+  assert.equal(manual.label, 'demo-profile · стенд 990003', 'подпись стенда остаётся отдельно');
+
+  const project = await service.createProject({ ref: manual.ref });
+
+  assert.equal(project.title, 'Задача 990003 · Массовый съём частотности');
+  assert.deepEqual(asked, ['990003'], 'портал спрошен один раз: название помнится');
+
+  // Ролик, заведённый до того, как название стало известно, носит имя по номеру:
+  // на экране оно догоняет название само, а имя, данное человеком, остаётся.
+  const stale = await service.createProject({ ref: manual.ref, title: 'Задача 990003 · demo-profile' });
+  const adopted = await service.openProject(stale.id);
+
+  assert.equal(adopted.title, 'Задача 990003 · Массовый съём частотности');
+  assert.equal(adopted.revision, stale.revision + 1, 'переименование — редакция, как любая правка');
+  assert.equal(
+    (await service.readProject(stale.id)).title,
+    adopted.title,
+    'имя сохранено, а не подставлено на лету',
+  );
+
+  const renamed = await service.renameProject(stale.id, adopted.revision, 'Съём частот за минуту');
+
+  assert.equal((await service.openProject(stale.id)).title, 'Съём частот за минуту');
+  assert.equal((await service.openProject(stale.id)).revision, renamed.revision);
+
+  const listed = await service.overview();
+
+  assert.deepEqual(
+    listed.projects.map((item) => item.title).sort(),
+    ['Задача 990003 · Массовый съём частотности', 'Съём частот за минуту'],
+    'список показывает те же имена, что и экран ролика',
+  );
+
+  const offline = createShowcaseService({
+    showcaseDir: path.join(path.dirname(fx.profilesDir), 'showcase-offline'),
+    authDir: path.join(path.dirname(fx.profilesDir), 'auth'),
+    profilesDir: fx.profilesDir,
+    stateDir: fx.stateDir,
+    browserPath: null,
+    listProjects: async () => ['demo-profile'],
+    sandboxOverview: async () => ({ sandboxes: [sandbox] }),
+    taskDetails: async () => {
+      throw new Error('портал недоступен');
+    },
+    broadcast: () => {},
+    limits: () => ({
+      maxScenes: 20,
+      maxSceneSeconds: 120,
+      maxTotalSeconds: 600,
+      retentionDays: 30,
+      maxQueued: 4,
+      jobTimeoutMs: 60_000,
+    }),
+  });
+  const quiet = await offline.overview();
+  const fallback = await offline.createProject({ ref: manual.ref });
+
+  assert.equal(quiet.targets.find((item) => item.ref.kind === 'sandbox').taskTitle, null);
+  assert.equal(fallback.title, 'Задача 990003 · demo-profile', 'без портала остаётся профиль');
 });
 
 test('overview использует один снимок песочниц для каталога и всех роликов', async (t) => {

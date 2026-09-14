@@ -16,6 +16,7 @@ import {
 import { runIngestWorker } from '../../server/src/lib/media/ingestWorker.ts';
 import {
   buildTranscribeArgv,
+  decodeSpeechTranscript,
   decodeIngestJob,
   encodeIngestJob,
 } from '../../server/src/lib/speech/transport.ts';
@@ -31,6 +32,7 @@ const SENTINEL_SPEECH = Object.freeze({
   vadSilenceMs: 875,
   conditionOnPreviousText: false,
   initialPrompt: '',
+  wordTimestamps: false,
 });
 
 /** Мок ffmpeg/ffprobe: сцены отдаёт по счётчику, seek-кадры и длительность — по запросу. */
@@ -182,6 +184,65 @@ test('непустая стилевая подсказка уезжает в arg
     argv.filter((item) => item === '--initial-prompt').length,
     1,
     'подсказка не должна дублироваться: whisper возьмёт последнюю и это будет молча',
+  );
+});
+
+test('явный wordTimestamps добавляет один флаг и не зависит от prompt', () => {
+  const argv = buildTranscribeArgv({
+    scriptPath: '/runtime/transcribe.py',
+    audioPath: '/work/audio.wav',
+    options: { ...SENTINEL_SPEECH, wordTimestamps: true },
+  });
+
+  assert.equal(argv.includes('--initial-prompt'), false);
+  assert.equal(argv.filter((item) => item === '--word-timestamps').length, 1);
+});
+
+test('единый decoder сохраняет повторы, clamp 1 мс и отбрасывает битые words целиком', () => {
+  const base = {
+    duration: 1,
+    model: 'medium',
+    language: 'ru',
+    language_probability: 0.9,
+    segments: [{ start: 0, end: 1, text: ' Да да ' }],
+    word_timestamps: true,
+  };
+  const valid = decodeSpeechTranscript({
+    ...base,
+    words: [
+      { start: 0.1, end: 0.4, text: ' да ' },
+      { start: 0.6, end: 1.0008, text: 'да' },
+    ],
+  });
+
+  assert.deepEqual(valid.words, [
+    { start: 0.1, end: 0.4, text: 'да' },
+    { start: 0.6, end: 1, text: 'да' },
+  ]);
+  assert.equal(valid.wordTimingStatus, 'valid');
+
+  const invalid = decodeSpeechTranscript({
+    ...base,
+    words: [
+      { start: 0.6, end: 0.8, text: 'да' },
+      { start: 0.3, end: 0.5, text: 'да' },
+    ],
+  });
+
+  assert.deepEqual(invalid.segments, [{ start: 0, end: 1, text: 'Да да' }]);
+  assert.deepEqual(invalid.words, []);
+  assert.equal(invalid.wordTimingStatus, 'invalid');
+  assert.equal(decodeSpeechTranscript({
+    ...base,
+    words: [],
+  }).wordTimingStatus, 'missing');
+  assert.equal(decodeSpeechTranscript({
+    ...base,
+    words: [{ start: 0.6, end: 1.0011, text: 'да' }],
+  }).wordTimingStatus, 'invalid');
+  assert.throws(
+    () => decodeSpeechTranscript({ ...base, segments: [{ start: -1, end: 1, text: 'Да' }] }),
+    /Сегменты/,
   );
 });
 
@@ -728,7 +789,12 @@ class WhisperModel:
     def transcribe(self, *args, **kwargs):
         calls.append({'kind': 'transcribe', 'kwargs': kwargs})
         info = types.SimpleNamespace(duration=1.0, language='en', language_probability=0.9)
-        return iter([]), info
+        words = [
+            types.SimpleNamespace(word=' да', start=0.1, end=0.4),
+            types.SimpleNamespace(word=' да', start=0.6, end=0.9),
+        ]
+        segment = types.SimpleNamespace(text=' Да да ', start=0.0, end=1.0, words=words)
+        return iter([segment]), info
 sys.modules['faster_whisper'] = types.SimpleNamespace(WhisperModel=WhisperModel)
 sys.modules['huggingface_hub'] = types.SimpleNamespace(snapshot_download=snapshot_download)
 sys.argv = ['transcribe.py', '/audio.wav', '--model', 'large-v3', '--lang', 'en',
@@ -763,6 +829,8 @@ print(json.dumps({'calls': calls, 'result': json.loads(stdout.getvalue())}))
   });
   assert.equal(payload.result.hotwordsTokens, 224);
   assert.equal(payload.result.hotwordsTruncated, true);
+  assert.equal(payload.result.word_timestamps, false);
+  assert.deepEqual(payload.result.words, []);
 
   // Тот же скрипт с подсказкой обязан САМ поднять выравнивание по словам. Замер на
   // large-v3-turbo: без него модель повторяет текст подсказки вместо речи, поэтому
@@ -773,9 +841,22 @@ print(json.dumps({'calls': calls, 'result': json.loads(stdout.getvalue())}))
     { encoding: 'utf8' },
   );
   assert.equal(withPrompt.status, 0, withPrompt.stderr);
-  const prompted = JSON.parse(withPrompt.stdout).calls[2].kwargs;
+  const promptedPayload = JSON.parse(withPrompt.stdout);
+  const prompted = promptedPayload.calls[2].kwargs;
   assert.equal(prompted.initial_prompt, 'Расшифровка встречи. С пунктуацией.');
   assert.equal(prompted.word_timestamps, true);
+  assert.deepEqual(promptedPayload.result.words.map((word) => word.text), ['да', 'да']);
+
+  const explicit = spawnSync(
+    'python3',
+    ['-c', source, scriptPath, '--word-timestamps'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(explicit.status, 0, explicit.stderr);
+  const explicitPayload = JSON.parse(explicit.stdout);
+  assert.equal(explicitPayload.calls[2].kwargs.initial_prompt, null);
+  assert.equal(explicitPayload.calls[2].kwargs.word_timestamps, true);
+  assert.deepEqual(explicitPayload.result.words.map((word) => word.text), ['да', 'да']);
 });
 
 test('one-shot и warmup считают словарь точным tokenizer и тем же лимитом среза', () => {

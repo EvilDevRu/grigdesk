@@ -20,6 +20,9 @@ export interface SpeechOptions {
   vadSilenceMs: number;
   conditionOnPreviousText: boolean;
   initialPrompt: string;
+  // Явный запрос словесных границ. Стилевая подсказка видео по-прежнему
+  // включает их независимо: это проверенная связка против зацикливания Whisper.
+  wordTimestamps: boolean;
 }
 
 // Настройки речи как их хранит prefs: любое поле может отсутствовать или быть чужим.
@@ -192,6 +195,7 @@ export function resolveSpeechOptions(
         'videoInitialPrompt',
       )
       : '',
+    wordTimestamps: booleanValue(source.wordTimestamps, false, 'wordTimestamps'),
   });
 }
 
@@ -231,5 +235,6 @@ export function normalizeSpeechOptions(
       'conditionOnPreviousText',
     ),
     initialPrompt: initialPromptValue(source.initialPrompt, 'initialPrompt'),
+    wordTimestamps: booleanValue(source.wordTimestamps, false, 'wordTimestamps'),
   });
 }

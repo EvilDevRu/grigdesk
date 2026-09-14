@@ -9,6 +9,8 @@ export type ShowcaseStore = ReturnType<typeof useShowcaseStore>;
 interface ShowcaseRuntime {
   off: (() => void) | null;
   loading: Promise<void> | null;
+  builds: Map<string, Promise<boolean>>;
+  manifests: Map<string, Promise<boolean>>;
 }
 
 const runtimes = new WeakMap<object, ShowcaseRuntime>();
@@ -22,7 +24,12 @@ export function runtimeOf(store: ShowcaseStore): ShowcaseRuntime {
   let runtime = runtimes.get(store);
 
   if (!runtime) {
-    runtime = { off: null, loading: null };
+    runtime = {
+      off: null,
+      loading: null,
+      builds: new Map(),
+      manifests: new Map(),
+    };
     runtimes.set(store, runtime);
   }
 

@@ -744,22 +744,71 @@ _route_v2_commit_and_project() {
   printf '%s\n' "$cursor"
 }
 
+# Runtime-пути проверочного инструментария, объявленные профилем (см. PROFILE-CONTRACT,
+# `profile_route_volatile_paths`): untracked-файлы под ними сторож state-only не считает.
+# Список пишется рядом со снимком — по нему видно, с каким объявлением снимок снимался.
+# Путь вне закреплённых рабочих деревьев — ошибка профиля, и она fail-closed (78):
+# послабление, которое дотягивается до чужого репозитория, хуже отсутствия послабления.
+_route_v2_guard_volatile_list() {
+  local output=$1 declared path root inside
+  : >"$output" || return 1
+  declare -F route_v2_volatile_paths >/dev/null || return 0
+  # Подстановка, а не пайп: отказ хука обязан остановить снимок, а у process
+  # substitution код возврата не забрать — частичный список прошёл бы за полный.
+  declared=$(route_v2_volatile_paths) || return 78
+  while IFS= read -r path || [[ -n "$path" ]]; do
+    [[ -n "$path" ]] || continue
+    [[ "$path" == /* && "$path" != */../* && "$path" != */.. && "$path" != */ ]] ||
+      return 78
+    inside=0
+    for root in "${ROUTE_V2_ROOTS[@]}"; do
+      [[ "$path" == "$root/"* ]] && { inside=1; break; }
+    done
+    (( inside )) || return 78
+    printf '%s\n' "$path" >>"$output" || return 1
+  done <<<"$declared"
+}
+
 _route_v2_guard_snapshot() {
   local task=$1 attempt=$2 node=$3 sequence=$4 side=$5
-  local dir output sensitive
+  local dir output sensitive volatile
   _route_v2_workspace_roots_array || return
   dir="$(factory_control_root)/guards-v2/t${task}/${attempt}/${node}"
   mkdir -p -- "$dir" || return 1
   [[ -d "$dir" && ! -L "$dir" ]] || return 78
   output="$dir/sequence-${sequence}.${side}.tsv"
   sensitive="$dir/sequence-${sequence}.sensitive.list"
+  volatile="$dir/sequence-${sequence}.volatile.list"
   : >"$sensitive" || return 1
   if declare -F route_v2_sensitive_files >/dev/null; then
     route_v2_sensitive_files | awk '/^\// && !seen[$0]++' >"$sensitive" || return 1
   fi
+  _route_v2_guard_volatile_list "$volatile" || return
   WORKSPACE_GUARD_SENSITIVE_LIST_FILE="$sensitive" \
+  WORKSPACE_GUARD_VOLATILE_LIST_FILE="$volatile" \
     workspace_guard_snapshot "$output" "${ROUTE_V2_ROOTS[@]}" || return
   printf '%s\n' "$output"
+}
+
+# Сверка снимков state-only узла. Расхождение — fail-closed 75, но с причиной в журнале:
+# раньше сюда писался только `.diff` из base64, а stages.log получал голое «код 75». Три
+# задачи подряд вставали на одном и том же переписанном прогоном e2e storage state, и
+# каждый раз человек заново раскапывал снимки руками. Сводка — только вид записи и каталог
+# с числом файлов, без хешей и содержимого (см. workspace_guard_diff_paths).
+_route_v2_guard_verify() {
+  local run_key=$1 node=$2 before=$3 after=$4 summary line headline
+  workspace_guard_compare "$before" "$after" && return 0
+  workspace_guard_diff_summary "$before" "$after" >"${after%.tsv}.diff" 2>/dev/null || true
+  declare -F v2_log >/dev/null || return 75
+  summary=$(workspace_guard_diff_paths "$before" "$after" 12 2>/dev/null) || summary=""
+  headline=$(printf '%s\n' "$summary" | head -n 3 | paste -sd ';' - | sed 's/;/; /g')
+  v2_log "$run_key: сторож state-only: узел $node изменил рабочее дерево — ${headline:-снимки разошлись}"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && v2_log "  изменено: $line"
+  done <<<"$summary"
+  v2_log "  runtime-артефакт проверки (storage state, скриншоты) объявляют в" \
+    "profile_route_volatile_paths или .gitignore проекта; правку агента возвращают узлу с указанием"
+  return 75
 }
 
 _route_v2_transaction_active_id() {
@@ -1056,12 +1105,11 @@ _route_v2_run_agent_node() {
       rm -f -- "$_r2_context_file" "$_r2_prompt_file"
       return 78
     }
-    if ! workspace_guard_compare "$guard_before" "$guard_after"; then
-      workspace_guard_diff_summary "$guard_before" "$guard_after" \
-        >"${guard_after%.tsv}.diff" 2>/dev/null || true
+    _route_v2_guard_verify "$run_key" "$node" "$guard_before" "$guard_after" || {
+      local rc=$?
       rm -f -- "$_r2_context_file" "$_r2_prompt_file"
-      return 75
-    fi
+      return "$rc"
+    }
   fi
   # Профиль может потребовать машинное доказательство результата конкретного runId
   # (hunt: declared coverage против tool-use events). Проверка исполняется хостом
@@ -1347,12 +1395,11 @@ _route_v2_run_command_node() {
         rm -f -- "$context_file" "$result_file"
         return 78
       }
-    if ! workspace_guard_compare "$guard_before" "$guard_after"; then
-      workspace_guard_diff_summary "$guard_before" "$guard_after" \
-        >"${guard_after%.tsv}.diff" 2>/dev/null || true
+    _route_v2_guard_verify "$run_key" "$node" "$guard_before" "$guard_after" || {
+      rc=$?
       rm -f -- "$context_file" "$result_file"
-      return 75
-    fi
+      return "$rc"
+    }
   fi
   run_state_control_update \
     "$task" "$run_key" "$outcome" "${run_key}_COMMENT" "$comment" || {
@@ -1633,13 +1680,12 @@ route_v2_dispatch_bootstrap() {
       "$lifecycle_active" 0 "$retry_after" unavailable
     return 78
   }
-  if ! workspace_guard_compare "$guard_before" "$guard_after"; then
-    workspace_guard_diff_summary "$guard_before" "$guard_after" \
-      >"${guard_after%.tsv}.diff" 2>/dev/null || true
+  _route_v2_guard_verify SCOUT scout "$guard_before" "$guard_after" || {
+    rc=$?
     _route_v2_bootstrap_abort_lifecycle_v2 \
       "$lifecycle_active" 0 "$retry_after" policy_rejected
-    return 75
-  fi
+    return "$rc"
+  }
 
   transition_tmp=$(mktemp "$(factory_control_root)/.route-v2-transition.XXXXXX") || {
     _route_v2_bootstrap_abort_lifecycle_v2 \

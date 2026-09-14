@@ -30,6 +30,9 @@ import type {
   VoiceDoctor,
   VoiceEngine,
   VoiceInfo,
+  VoicePace,
+  VoiceSpeechSpanTiming,
+  VoiceSpeechTiming,
 } from './contract.ts';
 
 const SAMPLE_RATE = 48_000;
@@ -40,6 +43,11 @@ const SILENCE_PEAK = 0.005;
 
 // Поставщик не держит паузу дольше семи секунд; ролику более длинная и не нужна.
 const MAX_PAUSE_MS = 7000;
+
+// SpeechKit сообщает целые миллисекунды, тогда как PCM может закончиться между
+// ними. Одна миллисекунда покрывает округление формата, но не скрывает неверную
+// длину порции или слова.
+const TIMING_TOLERANCE_MS = 1;
 
 const KEY_HINT = 'Задайте COCKPIT_SHOWCASE_YANDEX_API_KEY в корневом .env сервера '
   + '(ключ сервисного аккаунта с ролью ai.speechkit-tts.user) и перезапустите сервер.';
@@ -129,21 +137,23 @@ function peakOf(pcm: Buffer): number {
   return peak / 32_768;
 }
 
+// Ступени темпа в скорости поставщика (1 — как задумал автор голоса; обычный
+// темп не передаётся вовсе).
+const YANDEX_SPEED: Record<VoicePace, number | null> = {
+  slowest: 0.7,
+  slow: 0.85,
+  normal: null,
+  fast: 1.2,
+  fastest: 1.4,
+};
+
 /**
  * Темп в единицах поставщика. Три ступени интерфейса переводятся здесь, а не
  * хранятся числами в ядре: у другого движка шкала своя, и общее число значило бы
  * разное. Обычный темп не передаётся вовсе — голос звучит так, как задумал автор.
  */
 function speedOf(pace: VoiceDirection['pace']): number | null {
-  if (pace === 'slow') {
-    return 0.85;
-  }
-
-  if (pace === 'fast') {
-    return 1.2;
-  }
-
-  return null;
+  return pace ? YANDEX_SPEED[pace] : null;
 }
 
 function roleOf(tone: string | null, voice: YandexVoice): string | null {
@@ -179,33 +189,226 @@ function parseResponse(text: string): unknown[] {
   });
 }
 
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+// int64 в protobuf JSON приходит строкой. Не принимаем number даже для малого
+// значения: большой timestamp уже потерял бы точность до входа в адаптер.
+function int64Ms(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^(?:0|[1-9]\d*)$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+interface YandexTimingChunk {
+  words: VoiceSpeechSpanTiming[];
+  segment: VoiceSpeechSpanTiming | null;
+}
+
+function timingChunkOf(
+  item: Record<string, unknown>,
+  actualStartMs: number,
+  actualLengthMs: number,
+): YandexTimingChunk | null {
+  const startMs = int64Ms(item.startMs);
+  const lengthMs = int64Ms(item.lengthMs);
+
+  if (startMs === null || lengthMs === null || lengthMs <= 0) {
+    return null;
+  }
+
+  const endMs = startMs + lengthMs;
+  const actualEndMs = actualStartMs + actualLengthMs;
+
+  if (
+    !Number.isSafeInteger(endMs)
+    || Math.abs(startMs - actualStartMs) > TIMING_TOLERANCE_MS
+    || Math.abs(lengthMs - actualLengthMs) > TIMING_TOLERANCE_MS
+  ) {
+    return null;
+  }
+
+  const wordsRaw = item.wordTimings;
+
+  if (!Array.isArray(wordsRaw)) {
+    return null;
+  }
+
+  const words: VoiceSpeechSpanTiming[] = [];
+
+  for (const raw of wordsRaw) {
+    const word = recordOf(raw);
+    const wordStartMs = int64Ms(word?.startMs);
+    const wordLengthMs = int64Ms(word?.lengthMs);
+    const text = word?.word;
+
+    if (
+      !word
+      || wordStartMs === null
+      || wordLengthMs === null
+      || wordLengthMs <= 0
+      || typeof text !== 'string'
+      || text.trim().length === 0
+    ) {
+      return null;
+    }
+
+    const wordEndMs = wordStartMs + wordLengthMs;
+
+    if (
+      !Number.isSafeInteger(wordEndMs)
+      || wordStartMs < actualStartMs - TIMING_TOLERANCE_MS
+      || wordStartMs >= actualEndMs
+      || wordEndMs > actualEndMs + TIMING_TOLERANCE_MS
+    ) {
+      return null;
+    }
+
+    words.push({ text, startMs: wordStartMs, endMs: Math.min(wordEndMs, actualEndMs) });
+  }
+
+  let segment: VoiceSpeechSpanTiming | null = null;
+
+  if (item.textChunk !== undefined) {
+    const textChunk = recordOf(item.textChunk);
+    const text = textChunk?.text;
+
+    if (!textChunk || typeof text !== 'string') {
+      return null;
+    }
+
+    if (text.length > 0) {
+      segment = {
+        text,
+        startMs: Math.max(startMs, actualStartMs),
+        endMs: Math.min(endMs, actualEndMs),
+      };
+    }
+  }
+
+  return { words, segment };
+}
+
+function orderedSpans(
+  spans: VoiceSpeechSpanTiming[],
+  durationMs: number,
+): VoiceSpeechSpanTiming[] | null {
+  const result: VoiceSpeechSpanTiming[] = [];
+  let previousEndMs = 0;
+
+  for (const span of spans) {
+    if (
+      !Number.isFinite(span.startMs)
+      || !Number.isFinite(span.endMs)
+      || span.startMs < previousEndMs
+      || span.startMs >= durationMs
+      || span.endMs <= span.startMs
+      || span.endMs > durationMs + TIMING_TOLERANCE_MS
+    ) {
+      return null;
+    }
+
+    const endMs = Math.min(span.endMs, durationMs);
+
+    result.push({ ...span, endMs });
+    previousEndMs = endMs;
+  }
+
+  return result;
+}
+
 /**
- * Склейка звука из порций ответа. Порции приходят обёрнутыми в `result` или без
- * обёртки — читаются обе формы; отказ внутри потока становится отказом синтеза.
+ * Звук собирается независимо от metadata: негодная временная шкала выключает
+ * только `speechTiming`. Порции бывают как в `result`, так и прямо в сообщении.
  */
-function audioOf(objects: unknown[]): Buffer {
+function synthesisOf(objects: unknown[]): { pcm: Buffer; speechTiming?: VoiceSpeechTiming } {
   const parts: Buffer[] = [];
+  const words: VoiceSpeechSpanTiming[] = [];
+  const segments: VoiceSpeechSpanTiming[] = [];
+  let outputSamples = 0;
+  let timingValid = true;
 
   for (const object of objects) {
-    const outer = (object ?? {}) as { result?: unknown; error?: { message?: unknown } };
+    const outer = recordOf(object);
+    const error = outer?.error;
 
-    if (outer.error) {
+    if (error) {
+      const message = recordOf(error)?.message;
+
       throw new ShowcaseError(
         'voice_failed',
-        `Yandex SpeechKit: ${String(outer.error.message ?? 'отказ без пояснения')}`,
+        `Yandex SpeechKit: ${String(message ?? 'отказ без пояснения')}`,
         502,
       );
     }
 
-    const item = (outer.result ?? outer) as { audioChunk?: { data?: unknown } };
-    const data = item.audioChunk?.data;
+    const item = recordOf(outer?.result ?? outer);
 
-    if (typeof data === 'string' && data) {
-      parts.push(Buffer.from(data, 'base64'));
+    if (!item) {
+      continue;
     }
+
+    const audioChunk = recordOf(item.audioChunk);
+    const data = audioChunk?.data;
+
+    if (typeof data !== 'string' || data.length === 0) {
+      if (
+        item.startMs !== undefined
+        || item.lengthMs !== undefined
+        || item.wordTimings !== undefined
+        || item.textChunk !== undefined
+      ) {
+        timingValid = false;
+      }
+
+      continue;
+    }
+
+    const pcm = Buffer.from(data, 'base64');
+    const actualStartMs = outputSamples * 1000 / SAMPLE_RATE;
+    const actualLengthMs = pcm.length / 2 * 1000 / SAMPLE_RATE;
+    const timing = pcm.length % 2 === 0
+      ? timingChunkOf(item, actualStartMs, actualLengthMs)
+      : null;
+
+    if (!timing) {
+      timingValid = false;
+    } else {
+      words.push(...timing.words);
+
+      if (timing.segment) {
+        segments.push(timing.segment);
+      }
+    }
+
+    parts.push(pcm);
+    outputSamples += pcm.length / 2;
   }
 
-  return Buffer.concat(parts);
+  const pcm = Buffer.concat(parts);
+  const durationMs = pcm.length / 2 * 1000 / SAMPLE_RATE;
+  const orderedWords = timingValid && words.length > 0 ? orderedSpans(words, durationMs) : null;
+  const orderedSegments = timingValid ? orderedSpans(segments, durationMs) : null;
+
+  return {
+    pcm,
+    ...(orderedWords && orderedSegments
+      ? {
+        speechTiming: {
+          source: 'yandex' as const,
+          words: orderedWords,
+          segments: orderedSegments,
+        },
+      }
+      : {}),
+  };
 }
 
 function messageOf(text: string): string {
@@ -325,7 +528,7 @@ export function createYandexEngine(options: YandexEngineOptions): VoiceEngine {
   async function request(
     body: unknown,
     synthesisOptions: SynthesisOptions,
-  ): Promise<{ pcm: Buffer; requestId: string | null }> {
+  ): Promise<{ pcm: Buffer; requestId: string | null; speechTiming?: VoiceSpeechTiming }> {
     const timeout = AbortSignal.timeout(synthesisOptions.deadlineMs);
     const signal = synthesisOptions.signal
       ? AbortSignal.any([synthesisOptions.signal, timeout])
@@ -376,7 +579,7 @@ export function createYandexEngine(options: YandexEngineOptions): VoiceEngine {
     }
 
     return {
-      pcm: audioOf(parseResponse(text)),
+      ...synthesisOf(parseResponse(text)),
       requestId: response.headers.get('x-request-id'),
     };
   }
@@ -414,7 +617,7 @@ export function createYandexEngine(options: YandexEngineOptions): VoiceEngine {
       hints.push({ speed });
     }
 
-    const { pcm, requestId } = await request({
+    const { pcm, requestId, speechTiming } = await request({
       text: yandexMarkup(input.canonicalText, input.direction),
       hints,
       outputAudioSpec: {
@@ -454,6 +657,7 @@ export function createYandexEngine(options: YandexEngineOptions): VoiceEngine {
       channels: 1,
       engineRequestId: requestId,
       ignoredDirections: ignored,
+      ...(speechTiming ? { speechTiming } : {}),
     };
   }
 

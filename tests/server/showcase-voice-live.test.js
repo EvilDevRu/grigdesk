@@ -43,8 +43,12 @@ function voiceDirOf() {
 
 async function fixture(t, voiceDir) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-live-voice-'));
+  let service = null;
 
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(async () => {
+    await service?.disable().catch(() => null);
+    await rm(root, { recursive: true, force: true });
+  });
 
   const contractDir = path.join(root, 'profiles', 'demo-profile', 'showcase');
 
@@ -64,7 +68,7 @@ async function fixture(t, voiceDir) {
   );
   await writeFile(path.join(contractDir, 'screens.json'), JSON.stringify(SCREENS), 'utf8');
 
-  const service = createShowcaseService({
+  service = createShowcaseService({
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),
@@ -115,6 +119,10 @@ test('установленный кнопкой голос озвучивает 
     return;
   }
 
+  const piperVoice = (await engine.voices()).find((voice) => voice.available);
+
+  assert.ok(piperVoice, 'готовый Piper обязан объявить доступный голос');
+
   const service = await fixture(t, voiceDir);
   const catalog = await service.voiceCatalog();
   const ready = catalog.engines.find((item) => item.doctor.status === 'ready');
@@ -137,6 +145,14 @@ test('установленный кнопкой голос озвучивает 
     startState: null,
     readyCondition: null,
     actions: [],
+  });
+
+  // Тест проверяет именно Piper. Голос по умолчанию выбирать нельзя: если рядом
+  // установлен Qwen, registry ставит его раньше и «лёгкая» live-проверка грузит
+  // многогигабайтную модель во время общего suite.
+  project = await service.setVoice(project.id, project.revision, {
+    voiceRef: `piper:${piperVoice.id}`,
+    pace: null,
   });
 
   const job = await service.synthesizeScenes(project.id);

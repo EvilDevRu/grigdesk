@@ -27,7 +27,6 @@
     "src/features/pipeline/PipelineTopbarPopover.vue",
     "src/features/projects/ProjectSwitcher.vue",
     "src/features/providers/ProviderUsageResources.vue",
-    "src/features/pwa/UpdateBanner.vue",
     "src/shared/ProviderIcon.vue",
     "src/shared/layout/AppShell.vue",
     "src/shared/layout/ToolDock.vue",

@@ -26,6 +26,21 @@ const JOB = {
   finishedAt: null,
 };
 
+const BUILD_RUN = {
+  id: '0123456789abcdef',
+  projectId: 'project-1',
+  state: 'running',
+  sequence: 2,
+  stage: 'record-if-needed',
+  initialRevision: 2,
+  children: [],
+  cancelRequested: false,
+  error: null,
+  startedAt: '2026-09-09T10:00:00.000Z',
+  updatedAt: '2026-09-09T10:01:00.000Z',
+  finishedAt: null,
+};
+
 const PROJECT = {
   id: 'project-1',
   title: 'Ролик о готовой работе',
@@ -78,6 +93,7 @@ const OVERVIEW = {
   ],
   projects: [PROJECT, BLOCKED_PROJECT],
   jobs: [JOB],
+  buildRuns: [],
   limits: {
     maxScenes: 20,
     maxSceneSeconds: 120,
@@ -128,7 +144,11 @@ test('стор состояния не знает ни про HTTP, ни про 
   const source = await readFile(STORE_PATH, 'utf8');
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
-  assert.deepEqual(imports.sort(), ['../../../shared/showcaseContracts', 'pinia']);
+  assert.deepEqual(imports.sort(), [
+    '../../../shared/showcaseContracts',
+    '../../../shared/showcaseTimeline',
+    'pinia',
+  ]);
 });
 
 test('обзор раскладывается на цели, ролики и задания', async (t) => {
@@ -232,12 +252,12 @@ test('сводка прогресса обновляет своё задание
     jobId: 'job-1',
     projectId: 'project-1',
     state: 'succeeded',
-    sequence: 5,
+    sequence: 3,
     label: 'ролик собран',
   });
 
   assert.equal(store.jobsOf('project-1')[0].state, 'succeeded');
-  assert.equal(store.jobsOf('project-1')[0].sequence, 5);
+  assert.equal(store.jobsOf('project-1')[0].sequence, 3);
 });
 
 // Отчёт прошлой попытки доезжает позже нового статуса: применить его значило бы
@@ -254,19 +274,46 @@ test('поздняя сводка с меньшим номером не отка
     jobId: 'job-1',
     projectId: 'project-1',
     state: 'succeeded',
-    sequence: 5,
+    sequence: 3,
     label: 'ролик собран',
   });
   emit('showcase-progress', {
     jobId: 'job-1',
     projectId: 'project-1',
     state: 'running',
-    sequence: 3,
+    sequence: 2,
     label: 'пишем сцену',
   });
 
   assert.equal(store.jobsOf('project-1')[0].state, 'succeeded');
-  assert.equal(store.jobsOf('project-1')[0].sequence, 5);
+  assert.equal(store.jobsOf('project-1')[0].sequence, 3);
+});
+
+test('дыра sequence задания не склеивается и перечитывает полный snapshot', async (t) => {
+  let calls = 0;
+  const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
+    get: async () => {
+      calls += 1;
+
+      return OVERVIEW;
+    },
+  });
+
+  watchShowcase(store);
+  await loadShowcase(store);
+
+  emit('showcase-progress', {
+    jobId: 'job-1',
+    projectId: 'project-1',
+    state: 'succeeded',
+    sequence: 5,
+    label: 'пропущены два события',
+  });
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  assert.equal(store.jobsOf('project-1')[0].sequence, 2);
+  assert.equal(store.jobsOf('project-1')[0].state, 'running');
+  assert.equal(calls, 2);
 });
 
 test('испорченная сводка не подменяет задание и перечитывает обзор', async (t) => {
@@ -383,4 +430,282 @@ test('изменение ролика перечитывает открытую 
   emit('showcase-changed', { projectId: 'project-2', revision: 3 });
   await new Promise((resolve) => { setTimeout(resolve, 0); });
   assert.equal(reads.filter((path) => path === '/api/showcase/project-1').length, 1);
+});
+
+// Полный запуск принадлежит серверу. Двойной клик не должен заводить второй run,
+// а браузер после 202 не ждёт record/voice, чтобы решить, что запускать дальше.
+test('сквозная сборка создаёт один сохраняемый run одним POST', async (t) => {
+  const posts = [];
+  let acceptBuild;
+  const response = new Promise((resolve) => {
+    acceptBuild = resolve;
+  });
+  const { store, loadShowcase, buildShowcaseFilm } = await sectionFixture(t, {
+    get: async (path) => (path === '/api/showcase' ? { ...OVERVIEW, jobs: [] } : OVERVIEW),
+    post: async (path, body) => {
+      posts.push([path, body]);
+
+      return response;
+    },
+  });
+
+  await loadShowcase(store);
+  store.setOpened({ id: 'project-1', revision: 2 });
+
+  const first = buildShowcaseFilm(store);
+  const second = buildShowcaseFilm(store);
+
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.equal(posts.length, 1, 'два нажатия делят один запрос');
+  assert.equal(posts[0][0], '/api/showcase/project-1/build');
+  assert.equal(posts[0][1].revision, 2);
+  assert.match(posts[0][1].requestId, /^[A-Za-z0-9_-]{8,128}$/);
+
+  acceptBuild({ run: BUILD_RUN });
+
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.equal(store.latestBuildOf('project-1')?.id, BUILD_RUN.id);
+  assert.deepEqual(
+    posts.map(([path]) => path),
+    ['/api/showcase/project-1/build'],
+    'record, voice и assemble из браузера не запускаются',
+  );
+});
+
+test('snapshot запуска переживает F5, а старое SSE не откатывает sequence', async (t) => {
+  const overview = { ...OVERVIEW, jobs: [], buildRuns: [BUILD_RUN] };
+  const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
+    get: async () => overview,
+  });
+
+  watchShowcase(store);
+  await loadShowcase(store);
+
+  assert.equal(store.activeBuildOf('project-1')?.id, BUILD_RUN.id);
+  assert.equal(store.isBusy('project-1'), true);
+
+  emit('showcase-build-progress', {
+    runId: BUILD_RUN.id,
+    projectId: 'project-1',
+    state: 'running',
+    sequence: 3,
+    stage: 'validate',
+    error: null,
+  });
+  emit('showcase-build-progress', {
+    runId: BUILD_RUN.id,
+    projectId: 'project-1',
+    state: 'running',
+    sequence: 2,
+    stage: 'record-if-needed',
+    error: null,
+  });
+
+  assert.equal(store.latestBuildOf('project-1')?.sequence, 3);
+  assert.equal(store.latestBuildOf('project-1')?.stage, 'validate');
+
+  await loadShowcase(store);
+  assert.equal(store.latestBuildOf('project-1')?.sequence, 3, 'старый snapshot тоже не откатывает SSE');
+});
+
+test('дыра sequence полного запуска восстанавливается обзором', async (t) => {
+  let calls = 0;
+  const overview = { ...OVERVIEW, jobs: [], buildRuns: [BUILD_RUN] };
+  const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
+    get: async () => {
+      calls += 1;
+
+      return overview;
+    },
+  });
+
+  watchShowcase(store);
+  await loadShowcase(store);
+
+  emit('showcase-build-progress', {
+    runId: BUILD_RUN.id,
+    projectId: BUILD_RUN.projectId,
+    state: 'running',
+    sequence: 6,
+    stage: 'validate',
+    error: null,
+  });
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  assert.equal(store.latestBuildOf('project-1')?.sequence, 2);
+  assert.equal(store.latestBuildOf('project-1')?.stage, 'record-if-needed');
+  assert.equal(calls, 2);
+});
+
+test('отмена останавливает весь run и сохраняет новый snapshot', async (t) => {
+  const cancelling = {
+    ...BUILD_RUN,
+    state: 'cancelling',
+    sequence: 3,
+    cancelRequested: true,
+    updatedAt: '2026-09-09T10:02:00.000Z',
+  };
+  const posts = [];
+  const { store, cancelShowcaseBuild } = await sectionFixture(t, {
+    post: async (path, body) => {
+      posts.push([path, body]);
+
+      return { run: cancelling };
+    },
+  });
+
+  store.applyBuildRun(BUILD_RUN);
+
+  assert.equal(await cancelShowcaseBuild(store, BUILD_RUN.id), true);
+  assert.deepEqual(posts, [[`/api/showcase/builds/${BUILD_RUN.id}/cancel`, {}]]);
+  assert.equal(store.latestBuildOf('project-1')?.state, 'cancelling');
+  assert.equal(store.latestBuildOf('project-1')?.cancelRequested, true);
+});
+
+test('v1 manifest загружается один раз и становится единственной точной шкалой', async (t) => {
+  const manifestId = `manifest-${'a'.repeat(32)}`;
+  const videoId = 'final-abcdefabcdef';
+  const manifest = {
+    version: 1,
+    projectId: 'projectabcdef',
+    inputHash: 'b'.repeat(32),
+    mode: 'exact',
+    totalMs: 10_000,
+    video: {
+      id: videoId,
+      contentHash: 'c'.repeat(32),
+      byteSize: 2048,
+      durationMs: 10_000,
+    },
+    subtitles: null,
+    scenes: [{
+      id: 'scene-1',
+      order: 1,
+      caption: 'Обзор',
+      startMs: 0,
+      endMs: 10_000,
+      durationMs: 10_000,
+      planHash: 'd'.repeat(32),
+      mode: 'exact',
+      quality: 'word-exact',
+      phrases: [{ id: 'phrase-1', text: 'Открываем обзор.', startMs: 400, endMs: 2_000 }],
+      cues: [],
+    }],
+    subtitleCues: [],
+  };
+  const gets = [];
+  let acceptManifest;
+  const response = new Promise((resolve) => {
+    acceptManifest = resolve;
+  });
+  const { store, loadShowcaseManifest } = await sectionFixture(t, {
+    get: async (path) => {
+      gets.push(path);
+
+      return response;
+    },
+  });
+
+  store.setOpened({
+    id: manifest.projectId,
+    latestFinal: { manifestVersion: 1, manifestId, video: { id: videoId } },
+  });
+
+  const first = loadShowcaseManifest(store);
+  const second = loadShowcaseManifest(store);
+
+  acceptManifest(manifest);
+
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.deepEqual(gets, [
+    `/api/showcase/${manifest.projectId}/manifests/${manifestId}`,
+  ]);
+  assert.equal(store.manifestStatus, 'ready');
+  assert.equal(store.currentManifest?.scenes[0].phrases[0].startMs, 400);
+});
+
+test('битый v1 manifest отключает точные переходы, но не портит проект', async (t) => {
+  const manifestId = `manifest-${'a'.repeat(32)}`;
+  const { store, loadShowcaseManifest } = await sectionFixture(t, {
+    get: async () => ({ version: 1, projectId: 'projectabcdef' }),
+  });
+
+  store.setOpened({
+    id: 'projectabcdef',
+    latestFinal: {
+      manifestVersion: 1,
+      manifestId,
+      video: { id: 'final-abcdefabcdef' },
+    },
+  });
+  store.setError('прежняя ошибка');
+
+  assert.equal(await loadShowcaseManifest(store), false);
+  assert.equal(store.manifestStatus, 'failed');
+  assert.equal(store.currentManifest, null);
+  assert.equal(store.opened?.id, 'projectabcdef');
+  assert.equal(store.error, 'прежняя ошибка', 'производный JSON не отправляет проект в quarantine');
+});
+
+// Сводка хода несёт подпись и причину: без них человек видел бы красную точку с
+// прежней подписью, а за текстом отказа ходил бы отдельным чтением обзора.
+test('сводка прогресса приносит подпись хода и причину отказа', async (t) => {
+  const { store, emit, loadShowcase, watchShowcase } = await sectionFixture(t, {
+    get: async () => OVERVIEW,
+  });
+
+  watchShowcase(store);
+  await loadShowcase(store);
+
+  emit('showcase-progress', {
+    jobId: 'job-1',
+    projectId: 'project-1',
+    state: 'running',
+    sequence: 3,
+    label: 'пишем сцену «Обзор»',
+    index: 2,
+    total: 3,
+  });
+  assert.equal(store.jobsOf('project-1')[0].progress.label, 'пишем сцену «Обзор»');
+  assert.deepEqual(
+    store.jobsOf('project-1')[0].progress,
+    { index: 2, total: 3, label: 'пишем сцену «Обзор»' },
+  );
+  assert.equal(store.jobsOf('project-1')[0].error, null);
+
+  emit('showcase-progress', {
+    jobId: 'job-1',
+    projectId: 'project-1',
+    state: 'failed',
+    sequence: 4,
+    label: 'сцена не записалась',
+    error: 'сцена «Обзор» не записалась: браузер умер.',
+  });
+  assert.equal(store.jobsOf('project-1')[0].state, 'failed');
+  assert.equal(store.jobsOf('project-1')[0].error, 'сцена «Обзор» не записалась: браузер умер.');
+});
+
+test('словарь ударений уходит текстом целиком и возвращается с ошибками строк', async (t) => {
+  const saved = [];
+  const { store, loadShowcaseDictionary, saveShowcaseDictionary } = await sectionFixture(t, {
+    get: async () => ({ text: '', entries: [], errors: [] }),
+    put: async (path, body) => {
+      saved.push([path, body]);
+
+      return {
+        text: body.text,
+        entries: ['дин+амика'],
+        errors: [{ line: 2, text: 'плохо', reason: 'нет знака ударения «+»' }],
+      };
+    },
+  });
+
+  await loadShowcaseDictionary(store);
+
+  assert.deepEqual(store.dictionary, { text: '', entries: [], errors: [] });
+  assert.equal(await saveShowcaseDictionary(store, 'дин+амика\nплохо\n'), true);
+  assert.deepEqual(saved, [['/api/showcase/voices/dictionary', { text: 'дин+амика\nплохо\n' }]]);
+  assert.deepEqual(store.dictionary.entries, ['дин+амика']);
+  assert.equal(store.dictionary.errors[0].line, 2, 'негодная строка показана, а не потеряна');
+  assert.equal(store.error, '');
 });

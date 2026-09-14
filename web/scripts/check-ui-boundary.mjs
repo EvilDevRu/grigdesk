@@ -23,6 +23,8 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/components/composites/UiChoiceList.vue',
   'web/src/components/composites/UiSelectableRow.vue',
   'web/src/components/composites/UiTab.vue',
+  // Плитка версии — пункт рейки, вынесенный из AppShell: тот же skinless-контрол.
+  'web/src/features/cockpit-update/CockpitVersionTile.vue',
   'web/src/shared/layout/AppShell.vue',
   'web/src/views/BoardView.vue',
   'web/src/views/chat/ChatList.vue',

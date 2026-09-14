@@ -1,6 +1,7 @@
 // Единый TS-aware compiler для component tests. Он бандлит локальный граф .vue/.ts,
 // а Vue/Pinia оставляет внешними singleton-модулями из web/node_modules.
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from '../../../web/node_modules/esbuild/lib/main.js';
@@ -14,6 +15,21 @@ const SINGLETONS = new Map([
   ['vue-router', path.join(WEB_ROOT, 'node_modules/vue-router/dist/vue-router.mjs')],
 ]);
 let nonce = 0;
+
+// Data-URL навсегда оставляет в ESM cache и сам base64-код, и очень длинный
+// идентификатор модуля. Короткий file: URL удерживает только загруженный модуль;
+// исходник после import уже не нужен.
+async function importCompiled(code) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'cockpit-vue-test-'));
+  const filename = path.join(directory, `module-${process.pid}-${nonce += 1}.mjs`);
+
+  try {
+    await writeFile(filename, code, 'utf8');
+    return await import(pathToFileURL(filename).href);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
 function vuePlugin() {
   return {
@@ -100,8 +116,7 @@ export async function compileVue(filename, { stubs = {} } = {}) {
   });
   const code = result.outputFiles[0]?.text;
   if (!code) throw new Error(`esbuild не вернул модуль для ${filename}`);
-  const url = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce += 1}`;
-  return (await import(url)).default;
+  return (await importCompiled(code)).default;
 }
 
 /** Бандлит обычный JS/TS entry тем же resolver-ом, что и Vue component tests. */
@@ -120,8 +135,7 @@ export async function compileModule(filename, { stubs = {} } = {}) {
   });
   const code = result.outputFiles[0]?.text;
   if (!code) throw new Error(`esbuild не вернул модуль для ${filename}`);
-  const url = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce += 1}`;
-  return import(url);
+  return importCompiled(code);
 }
 
 export function webFile(relativePath) {

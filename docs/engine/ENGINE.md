@@ -1019,7 +1019,12 @@ sha256 всего бандла и кладёт его в `catalog/revisions/<х�
 
 `state-only` контролируется exact before/after guard: HEAD, worktree,
 index, tracked/untracked content, symlink targets и объявленные sensitive ignored-файлы.
-Расхождение приводит к human stall; общего autorevert нет.
+Расхождение приводит к human stall; общего autorevert нет. Причина уходит в `stages.log`
+строкой `<RUN_KEY>: сторож state-only: узел <node> изменил рабочее дерево — …` с видом записи
+и каталогом (без хешей и содержимого); Cockpit разбирает её в карточку остановки. Единственное
+послабление — `profile_route_volatile_paths`: untracked-файлы под объявленными профилем
+runtime-путями проверочного инструментария (storage state браузера, скриншоты прогона) в снимок
+не попадают. Tracked-файлы, index и sensitive под теми же путями сторожатся как прежде.
 
 `transactional-write` предназначен для временной инструментации: host заранее фиксирует file
 scope, проверяет отсутствие изменений вне него, сохраняет ожидаемый checkpoint и при cleanup

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
   SPEECH_MODEL_CATALOG,
   SpeechRuntime,
+  buildSpeechStreamArgv,
   buildWarmupArgv,
   createWarmupProcess,
   readProcessIdentity,
@@ -149,6 +152,136 @@ test('warmup argv закрепляет repo, SHA, aliases и весь resolved c
   assert.equal(speechOptionsRevision(options, 'prefs-rev-7'), 'prefs-rev-7');
 });
 
+test('word timestamps идут в warmup request и не ломают общий stream argv', async () => {
+  const child = fakeChild(704);
+  const writes = [];
+  let argv;
+
+  child.stdin.on('data', (chunk) => writes.push(chunk.toString('utf8')));
+
+  const controller = createWarmupProcess({
+    pythonPath: '/venv/python',
+    options: { model: 'medium', device: 'cpu', wordTimestamps: true },
+    nonce: 'nonce-words',
+  }, {
+    spawn(_command, args) {
+      argv = args;
+      return child;
+    },
+    readProcessIdentity() {
+      return {
+        pid: child.pid,
+        starttime: '444',
+        cmdline: ['/venv/python', ...argv],
+        nonce: 'nonce-words',
+      };
+    },
+  });
+
+  child.stdout.write(`${JSON.stringify({ type: 'ready', nonce: 'nonce-words' })}\n`);
+  await controller.ready;
+
+  const pending = controller.transcribe({
+    filePath: '/audio.wav',
+    wordTimestamps: true,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const request = JSON.parse(writes.join('').trim());
+
+  assert.equal(request.wordTimestamps, true);
+  assert.equal(argv.includes('--word-timestamps'), false);
+  assert.equal(buildSpeechStreamArgv({
+    workerPath: '/stream-worker.py',
+    nonce: 'stream-nonce',
+    options: { model: 'medium', device: 'cpu', wordTimestamps: true },
+  }).includes('--word-timestamps'), false);
+
+  child.stdout.write(`${JSON.stringify({
+    type: 'result',
+    requestId: request.requestId,
+    result: {
+      duration: 1,
+      segments: [{ start: 0, end: 1, text: 'Да да' }],
+      words: [
+        { start: 0.1, end: 0.4, text: 'да' },
+        { start: 0.6, end: 0.9, text: 'да' },
+      ],
+      word_timestamps: true,
+    },
+  })}\n`);
+
+  const result = await pending;
+
+  assert.equal(result.wordTimingStatus, 'valid');
+  assert.deepEqual(result.words.map((word) => word.text), ['да', 'да']);
+  child.emit('close', 0);
+});
+
+test('warmup-worker возвращает ту же плоскую структуру слов только по запросу', () => {
+  const workerPath = fileURLToPath(new URL(
+    '../../server/src/lib/speech/warmup-worker.py',
+    import.meta.url,
+  ));
+  const source = String.raw`
+import contextlib, importlib.util, io, json, sys, types
+worker_path = sys.argv[1]
+requested = sys.argv[2] == 'true'
+spec = importlib.util.spec_from_file_location('cockpit_warmup_worker', worker_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+calls = []
+def snapshot_download(**kwargs):
+    return '/pinned/snapshot'
+class WhisperModel:
+    def __init__(self, *args, **kwargs):
+        pass
+    def transcribe(self, *args, **kwargs):
+        calls.append(kwargs)
+        words = [
+            types.SimpleNamespace(word=' да', start=0.1, end=0.4),
+            types.SimpleNamespace(word=' да', start=0.6, end=0.9),
+        ]
+        segment = types.SimpleNamespace(text=' Да да ', start=0.0, end=1.0, words=words)
+        info = types.SimpleNamespace(duration=1.0, language='ru', language_probability=0.9)
+        return iter([segment]), info
+sys.modules['faster_whisper'] = types.SimpleNamespace(WhisperModel=WhisperModel)
+sys.modules['huggingface_hub'] = types.SimpleNamespace(snapshot_download=snapshot_download)
+sys.argv = ['warmup-worker.py', '--nonce', 'nonce', '--model', 'medium',
+            '--model-repo', 'repo', '--model-revision', 'revision']
+request = {'type': 'transcribe', 'requestId': 'request-1', 'filePath': '/audio.wav',
+           'wordTimestamps': requested}
+sys.stdin = io.StringIO(json.dumps(request) + '\n')
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    module.main()
+print(json.dumps({'lines': stdout.getvalue().splitlines(), 'calls': calls}))
+`;
+  const runWorker = (requested) => {
+    const run = spawnSync(
+      'python3',
+      ['-c', source, workerPath, String(requested)],
+      { encoding: 'utf8' },
+    );
+
+    assert.equal(run.status, 0, run.stderr);
+
+    const payload = JSON.parse(run.stdout);
+    const result = JSON.parse(payload.lines[1]).result;
+
+    return { payload, result };
+  };
+  const withoutWords = runWorker(false);
+  const withWords = runWorker(true);
+
+  assert.equal(withoutWords.payload.calls[0].word_timestamps, false);
+  assert.equal(withoutWords.result.word_timestamps, false);
+  assert.deepEqual(withoutWords.result.words, []);
+  assert.equal(withWords.payload.calls[0].word_timestamps, true);
+  assert.equal(withWords.result.word_timestamps, true);
+  assert.deepEqual(withWords.result.words.map((word) => word.text), ['да', 'да']);
+});
+
 test('/proc identity включает pid, starttime, полный argv и nonce', () => {
   const statFields = Array(20).fill('0');
   statFields[0] = 'S';
@@ -273,7 +406,12 @@ test('два окна получают независимые warmup и пред
   const { runtime, created, ingests } = runtimeHarness();
   t.after(() => runtime.shutdown());
   const first = await runtime.warmup({
-    settings: { quality: 'balanced', model: 'medium', dictionary: 'Первый' },
+    settings: {
+      quality: 'balanced',
+      model: 'medium',
+      dictionary: 'Первый',
+      wordTimestamps: true,
+    },
     optionsRevision: 'rev-first',
   });
   const second = await runtime.warmup({
@@ -302,7 +440,9 @@ test('два окна получают независимые warmup и пред
   assert.equal(secondResult.execution.optionsRevision, 'rev-second');
   assert.equal(firstResult.execution.optionsRevision, 'rev-first');
   assert.equal(created[1].calls[0].filePath, '/second.webm');
+  assert.equal(created[1].calls[0].wordTimestamps, false);
   assert.equal(created[0].calls[0].filePath, '/first.webm');
+  assert.equal(created[0].calls[0].wordTimestamps, true);
   assert.equal(created[0].args.options.hotwords, 'Первый');
   assert.equal(created[1].args.options.hotwords, 'Второй');
   assert.equal(ingests.length, 0);

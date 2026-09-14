@@ -103,9 +103,8 @@ function startOllamaStub(t, {
             : {
               message: { role: 'assistant', content: 'В файле написано: привет' },
               done: true,
-              // prompt_eval_count МЕНЬШЕ первого раунда (попадание в кэш промпта) —
-              // проверяем, что расход контекста берёт максимум, а не последнее.
-              prompt_eval_count: 40,
+              // Вход второго запроса уже включает вывод первого и результат инструмента.
+              prompt_eval_count: 140,
               eval_count: 9,
             })}\n`);
           return;
@@ -533,6 +532,7 @@ test('Ollama run: цикл инструментов — вызов, резуль
   await fs.writeFile(path.join(cwd, 'note.txt'), 'привет из файла\n', 'utf8');
 
   const steps = [];
+  const contexts = [];
   const out = await ollama.run({
     config: fakeConfig(port),
     chatKey: 'chat-tools',
@@ -544,6 +544,9 @@ test('Ollama run: цикл инструментов — вызов, резуль
     cwd,
     permissionMode: 'plan', // читающему инструменту план не мешает
     onStep: (step) => steps.push(step),
+    onProgress: (_tokens, info) => {
+      if (info) contexts.push(info);
+    },
   });
 
   assert.equal(chatRequests.length, 2, 'ход сделал два раунда: вызов и ответ');
@@ -558,9 +561,10 @@ test('Ollama run: цикл инструментов — вызов, резуль
   assert.match(second.at(-1).content, /привет из файла/);
 
   assert.equal(out.reply, 'В файле написано: привет');
-  // Расход контекста — МАКСИМУМ prompt_eval по раундам (кэш промпта его уменьшает)
-  // плюс сумма сгенерированного: 100 + (5 + 9).
-  assert.equal(out.contextTokens, 114);
+  assert.equal(out.contextTokens, 149, 'последний вход и вывод: 140 + 9, без повторных пяти токенов');
+  assert.deepEqual(contexts.map((info) => info.contextTokens), [105, 149]);
+  assert.ok(contexts.every((info) => info.contextWindow === out.contextWindow));
+  assert.ok(contexts.every((info) => info.contextMetric === 'request-total-v1'));
   assert.ok(steps.some((s) => s.k === 'tool' && s.name === 'Read'), 'вызов виден в ленте');
   assert.ok(steps.some((s) => s.k === 'res' && s.ok === true), 'результат виден в ленте');
 });

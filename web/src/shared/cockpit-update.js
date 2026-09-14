@@ -14,6 +14,18 @@ export const UPDATE_STAGE_LABELS = {
   failed: 'Обновление завершилось ошибкой',
 };
 
+// Те же стадии одним-двумя словами — для плитки версии в конце рейки, где полная фраза
+// не помещается. Полная остаётся во всплывашке и в настройках.
+export const UPDATE_STAGE_SHORT_LABELS = {
+  queued: 'В очереди',
+  preparing: 'Готовлю снимок',
+  installing: 'Зависимости',
+  building: 'Собираю web',
+  testing: 'Smoke-тест',
+  applying: 'Публикую сборку',
+  restarting: 'Перезапуск',
+};
+
 export const BLOCK_REASON_LABELS = {
   no_release_checked: 'Сначала выполните проверку опубликованных релизов.',
   branch_not_main: 'Релиз устанавливается только на ветку main.',

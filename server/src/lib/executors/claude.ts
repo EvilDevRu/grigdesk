@@ -1065,6 +1065,7 @@ function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
     result?: unknown;
     total_cost_usd?: unknown;
     model?: unknown;
+    is_error?: unknown;
   } | null = null;
   for (const line of String(stdout || '').split(/\r?\n/u)) {
     const candidate = line.trim();
@@ -1075,16 +1076,32 @@ function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
         result?: unknown;
         total_cost_usd?: unknown;
         model?: unknown;
+        is_error?: unknown;
       } | null;
       if (event?.type === 'result') result = event;
     } catch { /* посторонняя строка CLI */ }
   }
   if (!result) {
     const detail = String(stderr || '').trim().slice(-600);
-    throw new Error(detail || 'claude завершился без результата');
+    throw untrustedInputError(
+      'model_run_failed',
+      detail || 'Claude завершился без результата.',
+    );
   }
   const reply = typeof result.result === 'string' ? result.result.trim() : '';
-  if (!reply) throw new Error('claude вернул пустой результат');
+  if (result.is_error === true) {
+    const authFailed = /failed to authenticate|authentication[_\s-]+failed|oauth session expired/u
+      .test(reply.toLowerCase());
+    throw untrustedInputError(
+      authFailed ? 'model_auth_failed' : 'model_run_failed',
+      authFailed
+        ? 'Авторизация Claude истекла и не смогла обновиться. Выполните claude login.'
+        : reply || 'Claude завершил model-only ход с ошибкой.',
+    );
+  }
+  if (!reply) {
+    throw untrustedInputError('model_run_failed', 'Claude вернул пустой результат.');
+  }
   return {
     reply,
     sessionId: null,
@@ -1128,8 +1145,20 @@ export async function runClaudeUntrusted({
         signal,
       }, (error, stdout, stderr) => {
         if (error) {
+          // Claude пишет причину API/авторизации в result-событие stdout и при этом
+          // завершается с кодом 1. Разбираем поток до generic ошибки execFile,
+          // иначе BuildRun теряет исправимую причину остановки.
+          try {
+            claudeUntrustedResult(stdout, stderr);
+          } catch (resultError) {
+            reject(resultError);
+            return;
+          }
           const detail = String(stderr || '').trim().slice(-600);
-          reject(new Error(detail || error.message || 'claude не запустился'));
+          reject(untrustedInputError(
+            'model_run_failed',
+            detail || error.message || 'Claude не запустился.',
+          ));
           return;
         }
         try { resolve(claudeUntrustedResult(stdout, stderr)); } catch (parseError) { reject(parseError); }
@@ -1809,7 +1838,9 @@ export default {
               // Размер контекста у оборванного хода известен: его сообщил поток. Без него
               // кольцо после «стопа» показывало прежнюю (а у свежей сессии — нулевую) цифру,
               // и чат с реальными 80k выглядел пустым.
-              contextTokens: state.lastTurnInput,
+              contextTokens: state.lastTurnInput ?? 0,
+              contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
+              contextIsEstimate: false,
               contextCache: state.lastContextCache || contextCacheStatus('unavailable'),
             }));
           }

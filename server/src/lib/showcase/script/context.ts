@@ -20,12 +20,21 @@ const run = promisify(execFile);
 
 // Предел объёма diff. Он щедрый для обычной задачи и жёсткий для «переписали всё»:
 // длинный контекст не улучшает сценарий, зато делает вызов дорогим и медленным.
-const DIFF_LIMIT = 60_000;
+const DIFF_LIMIT = 90_000;
+
+// Предел на один файл. Обрезка по общему объёму срезала бы хвост diff целиком —
+// у задачи 8665 за бортом остался весь фронтенд с диалогом, ради которого ролик и
+// снимали. Каждый файл получает свою долю, и модель видит все изменения по верхам.
+const FILE_LIMIT = 4_000;
 
 // Новых файлов в контексте немного и они короткие: длинный новый файл — это
 // обычно сгенерированное или скопированное, а не то, о чём рассказывает ролик.
-const UNTRACKED_FILE_LIMIT = 6_000;
+const UNTRACKED_FILE_LIMIT = 4_000;
 const UNTRACKED_FILES_MAX = 12;
+
+// Тесты в контекст не идут: ролик рассказывает о видимом поведении, а тестовый
+// код занимает место, из-за которого обрезался сам продуктовый.
+const TEST_PATH = /(^|\/)(tests?|__tests__|e2e|spec|specs)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$/;
 
 // База сравнения. Первым идёт то, что сам remote называет главной веткой; остальные
 // имена — на случай, если `origin/HEAD` у клона не выставлен.
@@ -90,7 +99,9 @@ async function untrackedFiles(cwd: string): Promise<string> {
     .catch(() => [] as string[]);
   const parts: string[] = [];
 
-  for (const relative of listed.slice(0, UNTRACKED_FILES_MAX)) {
+  const product = listed.filter((relative) => !TEST_PATH.test(relative));
+
+  for (const relative of product.slice(0, UNTRACKED_FILES_MAX)) {
     if (/(^|\/)\.env/.test(relative) || relative.endsWith('.lock')) {
       continue;
     }
@@ -136,7 +147,8 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
     ...EXCLUDED_PATHS,
   ]).catch(() => '');
   const untracked = await untrackedFiles(repo.path);
-  const diff = [tracked.trim(), untracked].filter(Boolean).join('\n\n');
+  const patch = trimPatch(tracked.trim());
+  const diff = [patch.text, untracked].filter(Boolean).join('\n\n');
 
   if (!diff.trim()) {
     return null;
@@ -146,8 +158,36 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
     diff,
     base,
     head,
-    truncated: false,
+    truncated: patch.trimmed,
   };
+}
+
+/**
+ * Patch по файлам: сводка `--stat` остаётся целиком (она короткая и перечисляет всё),
+ * тестовые файлы выбрасываются, а каждый оставшийся получает не больше своей доли.
+ * Обрезанный файл помечается прямо в тексте — модель видит, что хвоста нет.
+ */
+function trimPatch(patch: string): { text: string; trimmed: boolean } {
+  const sections = patch.split(/^(?=diff --git )/m);
+  const kept: string[] = [];
+  let trimmed = false;
+
+  for (const section of sections) {
+    const changedPath = /^diff --git a\/(\S+) b\//.exec(section)?.[1] ?? '';
+
+    if (changedPath && TEST_PATH.test(changedPath)) {
+      continue;
+    }
+
+    if (section.length > FILE_LIMIT) {
+      trimmed = true;
+      kept.push(`${section.slice(0, FILE_LIMIT)}\n… (файл обрезан)\n`);
+    } else {
+      kept.push(section);
+    }
+  }
+
+  return { text: kept.join(''), trimmed };
 }
 
 /**
@@ -158,6 +198,7 @@ export async function collectDiffContext(repos: RepoRef[]): Promise<DiffContext>
   const parts: string[] = [];
   const bases: string[] = [];
   const heads: string[] = [];
+  let trimmed = false;
 
   for (const repo of repos) {
     const own = await repoDiff(repo).catch(() => null);
@@ -169,10 +210,11 @@ export async function collectDiffContext(repos: RepoRef[]): Promise<DiffContext>
     parts.push(`# репозиторий ${repo.name}\n${own.diff}`);
     bases.push(`${repo.name}:${own.base.slice(0, 12)}`);
     heads.push(`${repo.name}:${own.head}`);
+    trimmed = trimmed || own.truncated;
   }
 
   const joined = parts.join('\n\n');
-  const truncated = joined.length > DIFF_LIMIT;
+  const truncated = trimmed || joined.length > DIFF_LIMIT;
 
   return {
     diff: truncated ? joined.slice(0, DIFF_LIMIT) : joined,

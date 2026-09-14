@@ -8,14 +8,21 @@ import test from 'node:test';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { installVoiceFiles, sha256Of } from '../../server/src/lib/showcase/voice/download.ts';
+import {
+  downloadChecked,
+  gitBlobSha1Of,
+  installQwenFiles,
+  installVoiceFiles,
+  sha256Of,
+} from '../../server/src/lib/showcase/voice/download.ts';
 import { createVoiceInstaller } from '../../server/src/lib/showcase/voice/install.ts';
 import { PIPER_VOICES } from '../../server/src/lib/showcase/voice/piperCatalog.ts';
+import { QWEN_VOICES } from '../../server/src/lib/showcase/voice/qwenCatalog.ts';
 import { SILERO_VOICES } from '../../server/src/lib/showcase/voice/sileroCatalog.ts';
 
 const run = promisify(execFile);
@@ -229,7 +236,14 @@ async function settle(installer, attempts = 40) {
 test('удачная установка доходит до состояния «готово» и сообщает шаги', async (t) => {
   const root = await workspace(t);
   const events = [];
-  const installer = installerAt(root, await fakeWorker(root, SUCCESS_WORKER), events);
+  const installed = [];
+  const installer = createVoiceInstaller({
+    voiceDir: path.join(root, 'voice'),
+    broadcast: (name, data) => events.push([name, data]),
+    workerScript: await fakeWorker(root, SUCCESS_WORKER),
+    voices: TWO_VOICES,
+    onInstalled: (voiceId) => installed.push(voiceId),
+  });
 
   await installer.start('irina');
 
@@ -240,6 +254,7 @@ test('удачная установка доходит до состояния �
     events.some(([name, data]) => name === 'showcase-voice' && data.state === 'running'),
     'ход установки виден событием, а не только опросом',
   );
+  assert.deepEqual(installed, ['irina'], 'по удачной установке движки забывают кэш готовности');
 });
 
 test('повторное нажатие не заводит вторую установку', async (t) => {
@@ -328,12 +343,20 @@ test('каталог по умолчанию называет движок и г
   const status = await installer.status();
   const silero = status.available.find((item) => item.engineId === 'silero');
   const piper = status.available.find((item) => item.engineId === 'piper');
+  const qwen = status.available.find((item) => item.engineId === 'qwen');
 
   assert.ok(silero, 'Silero ставится кнопкой наравне с Piper');
   assert.ok(silero.voices.length >= 5, 'дикторы модели названы до нажатия');
   assert.ok(silero.byteSize > SILERO_VOICES[0].fileBytes, 'в размер входит и движок, не только модель');
   assert.deepEqual(piper.voices, ['Ирина']);
   assert.equal(silero.installed, false);
+
+  assert.ok(qwen, 'Qwen3-TTS ставится той же кнопкой');
+  assert.equal(status.available[0].engineId, 'qwen', 'Qwen первым: его ставят ради качества');
+  assert.ok(qwen.voices.length >= 9, 'дикторы модели названы до нажатия');
+  assert.ok(qwen.byteSize > QWEN_VOICES[0].modelBytes, 'в размер входит и движок с CUDA');
+  assert.match(qwen.license, /Apache/);
+  assert.equal(qwen.installed, false);
 });
 
 test('установка Silero идёт в своё окружение со своим составом', async (t) => {
@@ -358,4 +381,375 @@ test('установка Silero идёт в своё окружение со с�
   const status = await installer.status();
 
   assert.equal(status.job.engineId, 'silero');
+});
+
+test('установка Qwen идёт в своё окружение со своим составом и каталогом', async (t) => {
+  const root = await workspace(t);
+  const installer = installerAt(
+    root,
+    await fakeWorker(root, REPORTING_WORKER),
+    [],
+    [...QWEN_VOICES, ...SILERO_VOICES, ...PIPER_VOICES],
+  );
+
+  await installer.start(QWEN_VOICES[0].id);
+  await settle(installer);
+
+  const seen = JSON.parse(await readFile(path.join(root, 'voice', 'seen-task.json'), 'utf8'));
+
+  assert.equal(seen.voice.engineId, 'qwen');
+  assert.match(seen.venvDir, /qwen-venv$/);
+  assert.match(seen.voicesDir, /voice\/qwen$/);
+  assert.match(seen.requirementsFile, /requirements-showcase-qwen\.txt$/);
+  assert.equal((await installer.status()).job.engineId, 'qwen');
+});
+
+/**
+ * Стенд-источник модели Qwen: маленькие файлы по тем же относительным путям, что
+ * и в репозитории, с честно посчитанными sha256 и git blob sha1. Раскладка по
+ * подкаталогам и правила сверки не зависят от размера файлов.
+ */
+async function qwenSource(t, root) {
+  const source = path.join(root, 'source');
+  const bodies = {
+    'config.json': '{"model_type": "qwen3_tts"}',
+    'model.safetensors': 'веса модели',
+    'speech_tokenizer/config.json': '{"model_type": "tokenizer"}',
+    'speech_tokenizer/model.safetensors': 'веса токенизатора',
+  };
+  const files = [];
+
+  for (const [relative, body] of Object.entries(bodies)) {
+    const file = path.join(source, relative);
+
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, body, 'utf8');
+
+    // LFS-файлы сверяются по sha256, остальные — по git blob sha1, как в репозитории.
+    files.push(relative.endsWith('.safetensors')
+      ? { path: relative, bytes: Buffer.byteLength(body), sha256: await sha256Of(file) }
+      : { path: relative, bytes: Buffer.byteLength(body), gitBlobSha1: await gitBlobSha1Of(file) });
+  }
+
+  const requests = [];
+  const server = http.createServer(async (request, response) => {
+    requests.push(request.url);
+
+    const body = await readFile(path.join(source, decodeURIComponent(request.url.slice(1))))
+      .catch(() => null);
+
+    if (!body) {
+      response.writeHead(404);
+      response.end();
+
+      return;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': String(body.byteLength),
+    });
+    response.end(body);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  return {
+    requests,
+    pack: {
+      ...QWEN_VOICES[0],
+      baseUrl: `http://127.0.0.1:${server.address().port}/`,
+      files,
+      modelBytes: files.reduce((sum, file) => sum + file.bytes, 0),
+    },
+  };
+}
+
+test('git blob sha1 считается как в git: с префиксом «blob <байт>»', async (t) => {
+  const root = await workspace(t);
+  const file = path.join(root, 'blob.txt');
+
+  await writeFile(file, 'hello\n', 'utf8');
+
+  // Известная сумма: `printf 'hello\n' | git hash-object --stdin`.
+  assert.equal(await gitBlobSha1Of(file), 'ce013625030ba8dba906f756967f9e9ca394464a');
+});
+
+test('модель Qwen раскладывается по подкаталогам и второй раз не качается', async (t) => {
+  const root = await workspace(t);
+  const { pack, requests } = await qwenSource(t, root);
+  const modelsDir = path.join(root, 'qwen');
+  const steps = [];
+  const modelDir = await installQwenFiles(pack, modelsDir, (step, label) => {
+    steps.push(label);
+  });
+
+  assert.equal(modelDir, path.join(modelsDir, pack.id));
+  assert.equal(
+    await readFile(path.join(modelDir, 'speech_tokenizer', 'model.safetensors'), 'utf8'),
+    'веса токенизатора',
+    'подкаталог токенизатора создан и заполнен',
+  );
+  assert.equal(requests.length, 4, 'каждый файл скачан по одному разу');
+  assert.ok(steps.some((label) => /скачиваю model\.safetensors/.test(label)));
+
+  const again = [];
+
+  await installQwenFiles(pack, modelsDir, (step, label) => {
+    again.push(label);
+  });
+
+  assert.equal(requests.length, 4, 'файлы с верными суммами повторно не качаются');
+  assert.ok(again.every((label) => /уже на месте/.test(label)));
+  assert.deepEqual(
+    (await readdir(modelsDir)).filter((name) => name.startsWith('.staging')),
+    [],
+    'промежуточный каталог убран',
+  );
+});
+
+test('подменённый файл модели Qwen останавливает установку и называет обе суммы', async (t) => {
+  const root = await workspace(t);
+  const { pack } = await qwenSource(t, root);
+  const wrongSha = { ...pack, files: pack.files.map((file) => (file.sha256
+    ? { ...file, sha256: 'a'.repeat(64) }
+    : file)) };
+
+  await assert.rejects(
+    () => installQwenFiles(wrongSha, path.join(root, 'qwen-sha'), () => {}),
+    (error) => /sha256 файла model\.safetensors не совпал: ожидалось a{64}, получено [0-9a-f]{64}/.test(
+      error.message,
+    ),
+  );
+
+  const wrongBlob = { ...pack, files: pack.files.map((file) => (file.gitBlobSha1
+    ? { ...file, gitBlobSha1: 'b'.repeat(40) }
+    : file)) };
+
+  await assert.rejects(
+    () => installQwenFiles(wrongBlob, path.join(root, 'qwen-blob'), () => {}),
+    /git blob sha1 файла config\.json не совпал: ожидалось b{40}, получено [0-9a-f]{40}/,
+  );
+
+  await assert.rejects(
+    () => readFile(path.join(root, 'qwen-blob', pack.id, 'config.json')),
+    'файл с неверной суммой в каталог модели не попадает',
+  );
+});
+
+test('заявленный размер файла Qwen тоже проверяется', async (t) => {
+  const root = await workspace(t);
+  const { pack } = await qwenSource(t, root);
+  const wrong = { ...pack, files: pack.files.map((file, index) => (index === 0
+    ? { ...file, bytes: file.bytes + 1 }
+    : file)) };
+
+  await assert.rejects(
+    () => installQwenFiles(wrong, path.join(root, 'qwen'), () => {}),
+    /размер файла config\.json не совпал/,
+  );
+});
+
+/**
+ * Капризный источник: первые `cuts` ответов на большой файл обрываются на середине,
+ * дальше он честно отдаёт остаток по Range (или весь файл, если Range не понимает).
+ * Так проверяется докачка, а не удача сети.
+ */
+async function flakySource(t, { cuts = 1, ranges = true } = {}) {
+  const body = Buffer.from('веса модели '.repeat(4000), 'utf8');
+  const requests = [];
+  let failures = 0;
+  const server = http.createServer((request, response) => {
+    requests.push(request.headers.range ?? '');
+
+    if (failures < cuts) {
+      failures += 1;
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(body.byteLength),
+      });
+      // Обрыв — после того, как половина ушла в сокет: иначе клиент не получит
+      // ни байта, и докачивать будет нечего.
+      response.write(body.subarray(0, Math.floor(body.byteLength / 2)), () => {
+        setTimeout(() => response.destroy(), 20);
+      });
+
+      return;
+    }
+
+    const match = /^bytes=(\d+)-$/.exec(request.headers.range ?? '');
+
+    if (match && ranges) {
+      const from = Number(match[1]);
+
+      response.writeHead(206, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(body.byteLength - from),
+        'content-range': `bytes ${from}-${body.byteLength - 1}/${body.byteLength}`,
+      });
+      response.end(body.subarray(from));
+
+      return;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': String(body.byteLength),
+    });
+    response.end(body);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  return {
+    requests,
+    source: {
+      url: `http://127.0.0.1:${server.address().port}/model.safetensors`,
+      bytes: body.byteLength,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    },
+  };
+}
+
+test('обрыв загрузки докачивается по Range с места обрыва, а не с нуля', async (t) => {
+  const root = await workspace(t);
+  const { requests, source } = await flakySource(t);
+  const target = path.join(root, 'model.safetensors');
+  const steps = [];
+
+  await downloadChecked(source, target, 'model.safetensors', (step, label) => {
+    steps.push(label);
+  }, { attempts: 3, pauseMs: 50 });
+
+  assert.equal(await sha256Of(target), source.sha256, 'склеенный файл совпал с суммой');
+  assert.equal(requests.length, 2);
+  assert.match(requests[1], /^bytes=\d+-$/, 'второй запрос просит остаток');
+  assert.ok(steps.some((label) => /повтор 1 из/.test(label)), 'повтор назван в журнале');
+  assert.ok(steps.some((label) => /продолжаю с \d+%/.test(label)));
+  await assert.rejects(() => readFile(`${target}.part`), 'кусок переименован в целевой файл');
+});
+
+test('источник без Range после обрыва отдаёт файл заново — и это тоже принимается', async (t) => {
+  const root = await workspace(t);
+  const { requests, source } = await flakySource(t, { ranges: false });
+  const target = path.join(root, 'model.safetensors');
+
+  await downloadChecked(source, target, 'model.safetensors', () => {}, { attempts: 3, pauseMs: 50 });
+
+  assert.equal(await sha256Of(target), source.sha256);
+  assert.equal(requests.length, 2);
+});
+
+test('опечатка в сумме каталога чинится без повторной загрузки, а испорченный файл качается заново', async (t) => {
+  const root = await workspace(t);
+  const { requests, source } = await flakySource(t, { cuts: 0 });
+  const target = path.join(root, 'model.safetensors');
+  const wrong = { ...source, sha256: 'a'.repeat(64) };
+
+  await assert.rejects(
+    () => downloadChecked(wrong, target, 'model.safetensors', () => {}),
+    /ожидалось a{64}, получено [0-9a-f]{64}/,
+  );
+  assert.equal(requests.length, 1);
+  assert.equal((await readFile(`${target}.part`)).byteLength, source.bytes, 'скачанное сохранено');
+
+  // Сумма исправлена в каталоге: файл принимается без единого запроса к источнику.
+  await downloadChecked(source, target, 'model.safetensors', () => {});
+  assert.equal(requests.length, 1);
+  assert.equal(await sha256Of(target), source.sha256);
+
+  // Та же неверная сумма второй раз подряд означает испорченный файл: он качается заново.
+  const again = path.join(root, 'again.safetensors');
+
+  await assert.rejects(() => downloadChecked(wrong, again, 'again', () => {}), /ожидалось a{64}/);
+  await assert.rejects(() => downloadChecked(wrong, again, 'again', () => {}), /ожидалось a{64}/);
+  assert.equal(requests.length, 3, 'после повторного несовпадения файл скачан заново');
+});
+
+test('окончательный отказ источника не повторяется без конца', async (t) => {
+  const root = await workspace(t);
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.writeHead(404);
+    response.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  await assert.rejects(
+    () => downloadChecked(
+      { url: `http://127.0.0.1:${server.address().port}/x`, bytes: 10, sha256: 'a'.repeat(64) },
+      path.join(root, 'x'),
+      'x',
+      () => {},
+    ),
+    /источник ответил 404/,
+  );
+  assert.equal(requests.length, 1, '404 — не повод для повторов');
+});
+
+test('недоступный основной источник заменяется зеркалом, а суммы сверяются и у него', async (t) => {
+  const root = await workspace(t);
+  const { pack, requests } = await qwenSource(t, root);
+  const deadPort = await new Promise((resolve) => {
+    const probe = http.createServer();
+
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+
+      probe.close(() => resolve(port));
+    });
+  });
+  const mirrored = {
+    ...pack,
+    // Основной адрес — закрытый порт: соединение отказывает сразу, без ожидания.
+    baseUrl: `http://127.0.0.1:${deadPort}/`,
+    mirrorUrls: [pack.baseUrl],
+  };
+  const steps = [];
+  const fast = { attempts: 2, pauseMs: 50 };
+  const modelDir = await installQwenFiles(mirrored, path.join(root, 'qwen'), (step, label) => {
+    steps.push(label);
+  }, fast);
+
+  assert.equal(
+    await readFile(path.join(modelDir, 'speech_tokenizer', 'model.safetensors'), 'utf8'),
+    'веса токенизатора',
+  );
+  assert.equal(requests.length, 4, 'все файлы пришли с зеркала');
+  assert.equal(
+    steps.filter((label) => /пробую другой источник/.test(label)).length,
+    1,
+    'мёртвый источник запоминается и не опрашивается для каждого файла',
+  );
+
+  // Зеркало с подменённым содержимым останавливает установку так же, как основной.
+  const tampered = {
+    ...mirrored,
+    files: pack.files.map((file) => (file.sha256 ? { ...file, sha256: 'c'.repeat(64) } : file)),
+  };
+
+  await assert.rejects(
+    () => installQwenFiles(tampered, path.join(root, 'qwen-tampered'), () => {}, fast),
+    /sha256 файла model\.safetensors не совпал/,
+  );
+});
+
+test('нестабильная сеть выдерживается десятками попыток с растущей паузой', async (t) => {
+  const root = await workspace(t);
+  const { requests, source } = await flakySource(t, { cuts: 4 });
+  const target = path.join(root, 'model.safetensors');
+  const steps = [];
+
+  await downloadChecked(source, target, 'model.safetensors', (step, label) => {
+    steps.push(label);
+  }, { attempts: 6, pauseMs: 10 });
+
+  assert.equal(await sha256Of(target), source.sha256);
+  assert.equal(requests.length, 5, 'четыре обрыва и один удачный остаток');
+  assert.equal(steps.filter((label) => /повтор \d из 5/.test(label)).length, 4);
 });

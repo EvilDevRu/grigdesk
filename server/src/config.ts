@@ -197,6 +197,10 @@ export const config = {
   // получает статус «задан/не задан», а не значение.
   showcaseYandexApiKey: process.env.COCKPIT_SHOWCASE_YANDEX_API_KEY || '',
   showcaseYandexFolderId: process.env.COCKPIT_SHOWCASE_YANDEX_FOLDER_ID || '',
+  // Облачный голос Microsoft (Edge TTS): ключа нет, включён по умолчанию, а
+  // выключается явным нулём — текст сцен уходит поставщику, и установка, которой
+  // это не подходит, отключает его одной переменной.
+  showcaseEdgeTts: process.env.COCKPIT_SHOWCASE_EDGE_TTS !== '0',
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),

@@ -88,6 +88,10 @@
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="collapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'" /></svg>
         <span class="lbl">Свернуть</span>
       </UiPressable>
+      <!-- Конец рейки — версия кокпита и весь путь обновления: точка «есть релиз», стадия
+           установки, «Обновить кокпит». Отдельно от «Свернуть»: кнопка, которая иногда
+           перезагружает приложение вместо сворачивания, — ловушка для моторной памяти. -->
+      <CockpitVersionTile class="rail-version" />
     </aside>
 
     <header class="topbar">
@@ -97,7 +101,6 @@
       </div>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
-      <UpdateBanner />
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
@@ -380,71 +383,6 @@
           </template>
         </UiTooltip>
       </div>
-      <span v-if="cockpitVersion" class="cockpit-tip">
-        <UiPopover
-          trigger-mode="both"
-          focus-policy="none"
-          placement="top-end"
-          :style="{ maxWidth: 'min(340px, calc(100vw - 20px))' }"
-        >
-          <template #trigger>
-            <UiPressable
-              class="cockpit-version"
-              data-context="cockpit-version"
-              :class="cockpitUpdate.tone"
-              :aria-label="cockpitToneTitle"
-              :title="cockpitToneTitle"
-            >
-              <!-- «◧» рисуем SVG: текстовый глиф сидел ниже геометрического центра. -->
-              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 5h7v14H5z" fill="currentColor" />
-                <rect
-                  x="5"
-                  y="5"
-                  width="14"
-                  height="14"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                />
-              </svg>
-              <span v-if="cockpitUpdate.tone" class="cockpit-dot" aria-hidden="true"></span>
-            </UiPressable>
-          </template>
-          <template #default="{ close }">
-          <span class="ptip cockpit-version-tip">
-            <b>{{ cockpitToneTitle }}</b>
-            <span>
-              Запущено: {{ cockpitVersion.running.version }} ·
-              <span class="mono">{{ shortSha(cockpitVersion.running.sha) }}</span>
-            </span>
-            <span v-if="cockpitVersion.checkoutChanged || cockpitVersion.checkout.dirty">
-              Checkout: {{ cockpitVersion.checkout.version }} ·
-              <span class="mono">{{ shortSha(cockpitVersion.checkout.sha) }}</span> ·
-              {{ cockpitVersion.checkout.branch || 'detached HEAD' }}<template v-if="cockpitVersion.checkout.dirty"> · dirty</template>
-            </span>
-            <span v-if="cockpitVersion.latest">Доступно: {{ cockpitVersion.latest.tag }}</span>
-            <span class="pu-reset">Проверено: {{ checkedLabel(cockpitVersion.checkedAt) }}</span>
-            <span v-if="cockpitVersion.checkError" class="pu-state is-warn">
-              {{ cockpitVersion.checkError.message }}
-            </span>
-            <span v-if="cockpitVersion.installBlockReasons?.length" class="pu-reset">
-              {{ blockReasonLabel(cockpitVersion.installBlockReasons[0]) }}
-            </span>
-            <span class="ptip-go">
-              <UiButton
-                block
-                data-context="topbar-popover-footer"
-                variant="outline"
-                @click="close('action'); toCockpitSettings()"
-              >
-                Настройки обновления
-              </UiButton>
-            </span>
-          </span>
-          </template>
-        </UiPopover>
-      </span>
       <router-link to="/settings" class="settings-link" active-class="active"
                    title="Настройки" aria-label="Настройки">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
@@ -500,7 +438,7 @@ import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
-import { blockReasonLabel, useCockpitUpdateStore } from '../../stores/cockpit-update.js';
+import { useCockpitUpdateStore } from '../../stores/cockpit-update.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
 import { useTasksStore } from '../../stores/tasks.js';
@@ -516,7 +454,7 @@ import {
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
-import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
+import CockpitVersionTile from '../../features/cockpit-update/CockpitVersionTile.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.js';
@@ -533,25 +471,10 @@ const toolDock = useDockStore();
 const health = ref(null);
 const { data: sys } = storeToRefs(useSystemStore());
 const pwa = usePwaStore();
+// Снимок версии читает плитка в конце рейки; оболочка только запускает опрос и
+// перечитывает его по серверному событию — поток SSE один на вкладку.
 const cockpitUpdate = useCockpitUpdateStore();
-const { status: cockpitVersion } = storeToRefs(cockpitUpdate);
 cockpitUpdate.start();
-
-const shortSha = (sha) => sha?.slice(0, 7) || '—';
-const cockpitToneTitle = computed(() => ({
-  error: 'Последнее обновление Cockpit завершилось ошибкой',
-  checkout: 'Checkout Cockpit изменился после запуска сервера',
-  release: 'Доступен новый стабильный релиз Cockpit',
-}[cockpitUpdate.tone] || 'Версия Cockpit актуальна'));
-function checkedLabel(value) {
-  if (!value) return 'ещё не проверялось';
-  try { return new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)); }
-  catch { return value; }
-}
-function toCockpitSettings() {
-  localStorage.setItem('cockpit-settings-tab', 'server');
-  router.push('/settings');
-}
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
@@ -907,6 +830,9 @@ const { connected } = useSse((name, data) => {
   grid-row: 1 / -1; grid-column: 1;
   background: var(--sidebar); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; padding: 12px 10px;
+  /* Рейка — контейнер для своих плиток: узкая она или широкая, они узнают по её
+     ширине, а не по окну, и не дублируют пороги оболочки. */
+  container: rail / inline-size;
 }
 .brand { display: flex; align-items: center; gap: 11px; padding: 8px 10px 16px; }
 .brand .logo { color: var(--accent); font-size: 20px; line-height: 1; }
@@ -983,6 +909,7 @@ const { connected } = useSse((name, data) => {
 .nav-bottom { margin-top: auto; }
 .dock-route-nav { display: none; }
 .collapse-btn { margin-top: auto; }
+.rail-version { margin-top: 2px; }
 .tools-mobile { display: none; }
 
 /* Свёрнутый сайдбар: только иконки по центру, подписи скрыты */
@@ -1008,14 +935,8 @@ const { connected } = useSse((name, data) => {
   width: 32px; height: 32px; flex: none; display: grid; place-items: center;
   border-radius: 8px; color: var(--ink-mid); transition: background .12s, color .12s;
 }
-.cockpit-tip { display: inline-flex; align-items: center; height: 32px; }
 .settings-link { line-height: 0; }
 .settings-link .ic { display: block; }
-.cockpit-dot {
-  position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%;
-  background: currentColor; border: 2px solid var(--topbar);
-}
-.cockpit-version-tip { min-width: 260px; }
 .settings-link .ic { width: 16px; height: 16px; }
 .settings-link:hover { background: var(--surface); color: var(--ink); }
 .settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
@@ -1090,10 +1011,6 @@ const { connected } = useSse((name, data) => {
 }
 .pu-state.is-bad { color: var(--bad); }
 .pu-state.is-warn { color: var(--warn); }
-/* Подвал всплывашки «мозга»: у версии кокпита переход в настройки остаётся полосой —
-   там это единственное действие, и сжимать его в иконку нечего ради. */
-.ptip-go { display: flex; padding-top: 8px; border-top: 1px solid var(--line); }
-
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).
    Селекторы с тегом: иначе .pu-head b перебивает .lv-* по специфичности. */
 .pu-fill.lv-warn { background: var(--warn); }
@@ -1185,6 +1102,12 @@ const { connected } = useSse((name, data) => {
   .nav, .nav-bottom { display: contents; }
   .navitem { flex: 0 0 62px; min-width: 62px; flex-direction: column; gap: 3px; font-size: 10px; padding: 9px 2px; border-radius: 0; }
   .navitem.active { background: none; }
+  /* Плитка версии липнет к правому краю ряда: обновление видно и в прокрученной
+     навигации. Фон и линия слева отделяют её от проезжающих под ней пунктов. */
+  .rail-version {
+    position: sticky; right: 0; flex: none; margin: 0; z-index: 1;
+    background: var(--sidebar); box-shadow: -1px 0 0 var(--line);
+  }
   .topbar { grid-row: 1; grid-column: 1; padding: 0 16px; }
   .mlogo { display: inline; }
   .content { grid-row: 2; grid-column: 1; padding: 16px; }

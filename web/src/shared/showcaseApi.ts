@@ -1,17 +1,40 @@
 import { api } from './apiClient.ts';
 import {
+  parseShowcaseBuildRun,
   parseShowcaseDoctor,
   parseShowcaseJob,
   parseShowcaseOverview,
   parseShowcaseProject,
   parseShowcaseTarget,
   parseShowcaseVoiceCatalog,
+  parseShowcaseVoiceDictionary,
 } from '../../../shared/showcaseContracts';
+import { parseShowcaseFinalManifest } from '../../../shared/showcaseTimeline';
 import type {
   ShowcaseAction,
+  ShowcaseDirection,
+  ShowcasePace,
   ShowcaseSelectableTargetRef,
+  ShowcaseSyncCueKind,
   ShowcaseTargetRef,
 } from '../../../shared/showcaseContracts';
+
+export interface ShowcaseSyncCueDraft {
+  id?: string | null;
+  actionIndex: number;
+  from: number;
+  to: number;
+  kind: ShowcaseSyncCueKind;
+  manual?: true;
+}
+
+export interface ShowcasePronunciationOverrideDraft {
+  from: number;
+  to: number;
+  pronunciation: string;
+  voiceRef: string;
+  refresh?: true;
+}
 
 export interface ShowcaseSceneDraft {
   title: string;
@@ -19,7 +42,13 @@ export interface ShowcaseSceneDraft {
   narration: string;
   caption: string;
   subtitleText: string;
+  // Сцена начинает там, где закончилась предыдущая, а не со своего экрана.
+  continuesPrevious?: boolean;
   actions: ShowcaseAction[];
+  // Полный ручной список отправляется только после правки связей. ID можно вернуть
+  // из сцены; новой связи его выдаст сервер.
+  syncCues?: ShowcaseSyncCueDraft[];
+  pronunciationOverrides?: ShowcasePronunciationOverrideDraft[];
 }
 
 export interface ShowcaseCreateOptions {
@@ -175,6 +204,12 @@ export const showcaseApi = {
     return parseShowcaseProject(value);
   },
 
+  async proposeBindings(id: string) {
+    const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/bindings`, {});
+
+    return parseShowcaseProject(value);
+  },
+
   /**
    * Доступность подготовки данных. Ответ разбирается вручную, а не общим декодером:
    * это служебная справка о живом состоянии стенда, а не данные ролика, и своего
@@ -234,6 +269,20 @@ export const showcaseApi = {
     return parseShowcaseVoiceCatalog(value);
   },
 
+  // Словарь ударений установки: текст целиком, разобранные записи и негодные
+  // строки. Сохраняется тоже текстом — сервер разбирает его сам.
+  async voiceDictionary() {
+    const value: unknown = await api.get('/api/showcase/voices/dictionary');
+
+    return parseShowcaseVoiceDictionary(value);
+  },
+
+  async saveVoiceDictionary(text: string) {
+    const value: unknown = await api.put('/api/showcase/voices/dictionary', { text });
+
+    return parseShowcaseVoiceDictionary(value);
+  },
+
   // Образец голоса — файл по адресу: плееру и прослушиванию нужен URL, а не байты
   // в состоянии. Первый запрос синтезирует фразу, дальше отдаётся кэш сервера.
   voicePreviewUrl(voiceRef: string) {
@@ -242,11 +291,29 @@ export const showcaseApi = {
     return api.url(`/api/showcase/voices/preview?${query.toString()}`);
   },
 
+  // Тот же образец байтами: отказ движка приходит JSON-ом с причиной, а плеер по
+  // адресу умеет только молчать.
+  async voicePreview(voiceRef: string): Promise<Blob> {
+    const query = new URLSearchParams({ voiceRef });
+
+    return api.getBlob(`/api/showcase/voices/preview?${query.toString()}`);
+  },
+
+  /** Своя реплика передаётся телом POST и может быть отменена при новом preview. */
+  async narrationPreview(input: {
+    voiceRef: string;
+    narration: string;
+    direction: ShowcaseDirection;
+    pronunciationOverrides: ShowcasePronunciationOverrideDraft[];
+  }, signal?: AbortSignal): Promise<Blob> {
+    return api.postBlob('/api/showcase/voices/preview', input, { signal });
+  },
+
   // Голос и темп ролика целиком. Уходит со своей редакцией, как любая правка.
   async setVoice(
     id: string,
     expectedRevision: number,
-    choice: { voiceRef: string | null; pace: 'slow' | 'normal' | 'fast' | null },
+    choice: { voiceRef: string | null; pace: ShowcasePace | null },
   ) {
     const value: unknown = await api.put(`/api/showcase/${encodeURIComponent(id)}/voice`, {
       expectedRevision,
@@ -273,6 +340,36 @@ export const showcaseApi = {
     const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/assemble`, {});
 
     return parseShowcaseJob(value);
+  },
+
+  /** Один POST только ставит сохраняемый backend-run; стадии запускает сервер. */
+  async startBuild(id: string, revision: number, requestId: string) {
+    const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/build`, {
+      revision,
+      requestId,
+    });
+
+    return parseShowcaseBuildRun(asRecord(value).run);
+  },
+
+  async buildRun(id: string) {
+    const value: unknown = await api.get(`/api/showcase/builds/${encodeURIComponent(id)}`);
+
+    return parseShowcaseBuildRun(asRecord(value).run);
+  },
+
+  async cancelBuild(id: string) {
+    const value: unknown = await api.post(`/api/showcase/builds/${encodeURIComponent(id)}/cancel`, {});
+
+    return parseShowcaseBuildRun(asRecord(value).run);
+  },
+
+  async finalManifest(projectId: string, manifestId: string) {
+    const path = `/api/showcase/${encodeURIComponent(projectId)}`
+      + `/manifests/${encodeURIComponent(manifestId)}`;
+    const value: unknown = await api.get(path);
+
+    return parseShowcaseFinalManifest(value);
   },
 
   /**
@@ -310,6 +407,7 @@ const MESSAGES: Record<string, string> = {
   voice_unavailable: 'Голосовой движок недоступен: загрузите готовый звук.',
   bad_voice_ref: 'Голос указан неверно.',
   bad_pace: 'Темп указан неверно.',
+  bad_dictionary: 'Словарь ударений приходит текстом.',
   login_credentials_missing: 'Учётка для входа на стенд не найдена по ссылке из профиля.',
   nothing_to_synthesize: 'Озвучивать нечего — звук сцен свежий.',
   empty_narration: 'У сцены нет текста для озвучки.',

@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import argparse
+import math
 
 
 def resolve_snapshot(snapshot_download, args):
@@ -63,6 +64,15 @@ def load_model(WhisperModel, args):
     )
 
 
+def timestamp_value(value):
+    """Сохраняет недоверенную границу для строгой проверки на Node-стороне."""
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(result, 3) if math.isfinite(result) else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='faster-whisper транскрипция аудио в JSON')
     parser.add_argument('audio', help='путь к аудиофайлу (16 кГц mono wav и т.п.)')
@@ -88,6 +98,11 @@ def main() -> None:
         default=None,
         help='стилевая подсказка первому окну: задаёт пунктуацию, регистр и разбивку на предложения',
     )
+    parser.add_argument(
+        '--word-timestamps',
+        action='store_true',
+        help='вернуть временные границы отдельных слов',
+    )
     parser.add_argument('--progress-file', default=None, help='куда писать прогресс {done,total} по ходу распознавания')
     args = parser.parse_args()
 
@@ -100,11 +115,12 @@ def main() -> None:
 
     language = None if args.lang == 'auto' else args.lang
     initial_prompt = args.initial_prompt or None
+    word_timestamps = bool(initial_prompt) or args.word_timestamps
     # Связка обязательна и проверена замером на этой же модели: голый initial_prompt
     # при condition_on_previous_text уводит модель в петлю — она повторяет текст самой
     # подсказки вместо речи (три одинаковых сегмента на 79 секунд записи). Выравнивание
-    # по словам включает подавление повторов и снимает петлю. Поэтому word_timestamps
-    # не отдельная настройка, а следствие промпта: разорвать пару нечем.
+    # по словам включает подавление повторов и снимает петлю. Явный запрос может
+    # включить метки и без промпта, но промпт всегда сохраняет прежнее условие.
     segments, info = model.transcribe(
         args.audio,
         language=language,
@@ -112,7 +128,7 @@ def main() -> None:
         hotwords=args.hotwords,
         condition_on_previous_text=args.condition_on_previous_text,
         initial_prompt=initial_prompt,
-        word_timestamps=bool(initial_prompt),
+        word_timestamps=word_timestamps,
         vad_filter=True,                                   # отсекаем тишину/паузы
         vad_parameters={'min_silence_duration_ms': args.vad_silence_ms},
     )
@@ -137,8 +153,16 @@ def main() -> None:
     # segments — ленивый генератор: материализация здесь и запускает распознавание.
     # Тайм-код конца последнего сегмента / общая длительность = доля готовности.
     out_segments = []
+    out_words = []
     processed = 0
     for s in segments:
+        if word_timestamps:
+            for word in list(getattr(s, 'words', None) or []):
+                out_words.append({
+                    'start': timestamp_value(getattr(word, 'start', None)),
+                    'end': timestamp_value(getattr(word, 'end', None)),
+                    'text': str(getattr(word, 'word', '') or '').strip(),
+                })
         text = s.text.strip()
         if text:
             out_segments.append({
@@ -158,6 +182,8 @@ def main() -> None:
         'duration': round(info.duration, 2),
         'model': args.model,
         'segments': out_segments,
+        'words': out_words,
+        'word_timestamps': word_timestamps,
         **hotwords_measure,
     }
     json.dump(result, sys.stdout, ensure_ascii=False)

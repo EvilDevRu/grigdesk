@@ -27,7 +27,8 @@ const SCREENS_CONTRACT = {
       title: 'Обзор',
       path: '/',
       readySelector: '[data-testid="ready"]',
-      elements: [{ id: 'run', selector: '[data-testid="run"]' }],
+      // Подпись элемента доезжает до модели; селектор — нет.
+      elements: [{ id: 'run', selector: '[data-testid="run"]', title: 'кнопка запуска' }],
     },
   ],
 };
@@ -214,4 +215,269 @@ test('новая сцена наследует голос и темп преды
   const second = await service.addScene(paced.id, paced.revision, draft('Вторая'));
 
   assert.equal(second.scenes[1].direction.pace, 'fast');
+});
+
+/**
+ * Модель для разбора: бриф — первым вызовом, сцены — вторым. Ответ сценария
+ * задаётся снаружи, чтобы проверять, что раздел делает с тем, что вернула модель.
+ */
+function scriptedModel(scenesReply) {
+  const prompts = [];
+
+  return {
+    prompts,
+    deps: {
+      taskDetails: async () => null,
+      scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+      executorConfig: () => ({ claudeBin: '/usr/bin/claude' }),
+      resolveScriptModel: async () => ({
+        ok: true,
+        ref: { provider: 'claude', model: 'claude-opus-5' },
+        executor: {
+          runUntrusted: async ({ message }) => {
+            prompts.push(message);
+
+            return {
+              reply: prompts.length % 2 === 1
+                ? JSON.stringify({ points: ['первое', 'второе', 'третье'] })
+                : JSON.stringify(scenesReply),
+            };
+          },
+        },
+      }),
+    },
+  };
+}
+
+// «Разобрать заново» — новый сценарий, а не дописанный к прежнему: раньше каждый
+// повтор разбора удваивал список сцен. Голос и темп при этом остаются: их
+// выбирал человек для ролика целиком.
+test('повторный разбор заменяет сцены, сохраняя выбранный темп ролика', async (t) => {
+  const model = scriptedModel({
+    scenes: [
+      {
+        title: 'Обзор',
+        screenId: 'overview',
+        narration: 'Показываю обзор.',
+        caption: 'Обзор',
+        subtitleText: 'Показываю обзор.',
+        actions: [{ kind: 'hover', targetId: 'run' }],
+      },
+      {
+        title: 'Запуск',
+        screenId: 'overview',
+        narration: 'Запускаю.',
+        caption: 'Запуск',
+        subtitleText: 'Запускаю.',
+        actions: [],
+      },
+    ],
+    gaps: ['нет экрана результата запуска'],
+  });
+  const { service } = await fixture(t, { deps: model.deps });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const analyzed = await service.analyze(project.id);
+
+  assert.equal(analyzed.scenes.length, 2);
+  assert.deepEqual(analyzed.scriptGaps, ['нет экрана результата запуска']);
+  assert.equal(
+    analyzed.scriptMapRevision,
+    analyzed.target.scope.mapRevision,
+    'сценарий помнит ревизию словаря карты, по которому составлен',
+  );
+
+  const paced = await service.setVoice(analyzed.id, analyzed.revision, { voiceRef: null, pace: 'slow' });
+  const again = await service.analyze(paced.id);
+
+  assert.match(model.prompts[1], /run \(кнопка запуска\)/, 'подпись элемента видна модели');
+  assert.doesNotMatch(model.prompts[1], /data-testid/, 'селектор модели не показывается');
+  assert.equal(again.scenes.length, 2, 'повторный разбор не удваивает сцены');
+  assert.deepEqual(again.scenes.map((scene) => scene.order), [1, 2]);
+  assert.deepEqual(again.scenes.map((scene) => scene.direction.pace), ['slow', 'slow']);
+  assert.notEqual(again.scenes[0].id, analyzed.scenes[0].id, 'сцены новые, а не прежние');
+  assert.deepEqual(
+    again.scenes[0].actions,
+    [{ kind: 'hover', targetId: 'run' }],
+    'действия модели доезжают до сцены',
+  );
+});
+
+// После разбора профиль дописал карту экранов. Сцены об этом не знают, и раздел
+// обязан отдать разные ревизии: по ним интерфейс говорит «разберите заново».
+test('правка карты экранов после разбора видна как расхождение ревизий', async (t) => {
+  const model = scriptedModel({
+    scenes: [{
+      title: 'Обзор',
+      screenId: 'overview',
+      narration: 'Показываю обзор.',
+      caption: 'Обзор',
+      subtitleText: 'Показываю обзор.',
+      actions: [],
+    }],
+  });
+  const { service, root } = await fixture(t, { deps: model.deps });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const analyzed = await service.analyze(project.id);
+
+  await writeFile(
+    path.join(root, 'profiles', 'demo-profile', 'showcase', 'screens.json'),
+    JSON.stringify({
+      ...SCREENS_CONTRACT,
+      screens: [{
+        ...SCREENS_CONTRACT.screens[0],
+        elements: [...SCREENS_CONTRACT.screens[0].elements, { id: 'filter', selector: '#filter' }],
+      }],
+    }),
+    'utf8',
+  );
+
+  const reread = await service.readProject(project.id);
+
+  assert.equal(reread.scriptMapRevision, analyzed.scriptMapRevision);
+  assert.notEqual(reread.target.scope.mapRevision, reread.scriptMapRevision);
+
+  // Правка селектора словарь не меняет: сценарий от неё не стареет.
+  await writeFile(
+    path.join(root, 'profiles', 'demo-profile', 'showcase', 'screens.json'),
+    JSON.stringify({
+      ...SCREENS_CONTRACT,
+      screens: [{
+        ...SCREENS_CONTRACT.screens[0],
+        elements: [{ ...SCREENS_CONTRACT.screens[0].elements[0], selector: '#run-renamed' }],
+      }],
+    }),
+    'utf8',
+  );
+
+  const selectorOnly = await service.readProject(project.id);
+
+  assert.equal(selectorOnly.target.scope.mapRevision, selectorOnly.scriptMapRevision);
+});
+
+test('новый сценарий сохраняет три автоматические связи с серверными ID', async (t) => {
+  const model = scriptedModel({
+    scenes: [{
+      title: 'Синхронный обзор',
+      screenId: 'overview',
+      narration: 'Сначала запускаем, затем ждём результат и показываем результат.',
+      caption: 'Обзор',
+      subtitleText: 'Сначала запускаем, затем ждём результат и показываем результат.',
+      actions: [
+        { kind: 'click', targetId: 'run' },
+        { kind: 'waitVisible', targetId: 'run' },
+        { kind: 'highlight', targetId: 'run' },
+      ],
+      bindings: [
+        { quote: 'запускаем', occurrence: 1, actionIndex: 0, kind: 'align-start' },
+        { quote: 'результат', occurrence: 1, actionIndex: 1, kind: 'ready-before' },
+        { quote: 'результат', occurrence: 2, actionIndex: 2, kind: 'hold-through' },
+      ],
+    }],
+  });
+  const { service } = await fixture(t, { deps: model.deps });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const analyzed = await service.analyze(project.id);
+  const cues = analyzed.scenes[0].syncBindings.cues;
+
+  assert.equal(cues.length, 3);
+  assert.deepEqual(cues.map((cue) => cue.origin), ['generated', 'generated', 'generated']);
+  assert.ok(cues.every((cue) => /^cue-[a-f0-9]{12}$/.test(cue.id)));
+  assert.deepEqual(cues.map((cue) => cue.actionIndex), [0, 1, 2]);
+
+  const scene = analyzed.scenes[0];
+  const corrected = await service.updateScene(analyzed.id, analyzed.revision, scene.id, {
+    syncCues: cues.map((cue, index) => ({
+      id: cue.id,
+      actionIndex: cue.actionIndex,
+      from: index === 0 ? 0 : cue.from,
+      to: index === 0 ? 'Сначала'.length : cue.to,
+      kind: cue.kind,
+      ...(index === 0 ? { manual: true } : {}),
+    })),
+  });
+  const correctedScene = corrected.scenes[0];
+
+  assert.equal(correctedScene.syncBindings.cues[0].id, cues[0].id);
+  assert.equal(correctedScene.syncBindings.cues[0].origin, 'manual');
+  assert.deepEqual(
+    correctedScene.syncBindings.cues.slice(1),
+    cues.slice(1),
+    'неисправленные модельные cue сохраняют ID и origin',
+  );
+  assert.equal(correctedScene.narration, scene.narration);
+  assert.deepEqual(correctedScene.audioSource, scene.audioSource, 'выбор голоса не меняется');
+});
+
+test('построение только связей сохраняет ручную сцену и её cue', async (t) => {
+  let calls = 0;
+  const deps = {
+    scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+    executorConfig: () => ({ claudeBin: '/usr/bin/claude' }),
+    resolveScriptModel: async () => ({
+      ok: true,
+      ref: { provider: 'claude', model: 'claude-opus-5' },
+      executor: {
+        runUntrusted: async ({ message }) => {
+          calls += 1;
+          const sceneId = message.match(/<scene_id>([^<]+)<\/scene_id>/)?.[1];
+
+          return {
+            reply: JSON.stringify({
+              scenes: [{
+                sceneId,
+                bindings: [calls === 1
+                  ? { quote: 'результат', occurrence: 1, actionIndex: 1, kind: 'hold-through' }
+                  : { quote: 'запускаем', occurrence: 1, actionIndex: 0, kind: 'align-start' }],
+              }],
+            }),
+          };
+        },
+      },
+    }),
+  };
+  const { service } = await fixture(t, { deps });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const added = await service.addScene(project.id, project.revision, {
+    title: 'Ручная сцена',
+    screenId: 'overview',
+    narration: 'Сначала запускаем и показываем результат.',
+    caption: 'Ручная',
+    subtitleText: 'Сначала запускаем и показываем результат.',
+    startState: null,
+    readyCondition: null,
+    actions: [
+      { kind: 'click', targetId: 'run' },
+      { kind: 'highlight', targetId: 'run' },
+    ],
+  });
+  const scene = added.scenes[0];
+  const from = scene.narration.indexOf('результат');
+  const manual = await service.updateScene(added.id, added.revision, scene.id, {
+    syncCues: [{ actionIndex: 1, from, to: from + 'результат'.length, kind: 'hold-through' }],
+  });
+  const before = manual.scenes[0];
+  const manualCue = before.syncBindings.cues[0];
+  const generated = await service.generateBindings(manual.id);
+  const after = generated.scenes[0];
+
+  assert.equal(calls, 2, 'после негодного ответа выполняется ровно один repair');
+  assert.deepEqual({
+    id: after.id,
+    title: after.title,
+    narration: after.narration,
+    actions: after.actions,
+    order: after.order,
+  }, {
+    id: before.id,
+    title: before.title,
+    narration: before.narration,
+    actions: before.actions,
+    order: before.order,
+  });
+  assert.deepEqual(
+    after.syncBindings.cues.find((cue) => cue.origin === 'manual'),
+    manualCue,
+    'ручной cue сохраняется вместе с ID',
+  );
+  assert.equal(after.syncBindings.cues.find((cue) => cue.origin === 'generated').actionIndex, 0);
 });

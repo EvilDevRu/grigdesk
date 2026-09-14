@@ -2,8 +2,8 @@
   <!-- Пока не знаем состояние входа — не рисуем ничего: иначе на миг мелькает либо форма
        у вошедшего, либо интерфейс у невошедшего. -->
   <!-- На экране входа обновление остаётся доступно без AppShell: оно работает с SW,
-       а не с закрытым API. После входа уведомление переезжает в штатный топбар. -->
-  <UpdateBanner v-if="!auth.authenticated" standalone />
+       а не с закрытым API. После входа тот же компонент стоит плиткой в конце рейки. -->
+  <CockpitVersionTile v-if="!auth.authenticated" standalone />
   <UiDialogHost />
 
   <template v-if="auth.ready">
@@ -28,7 +28,7 @@ import { onMounted, watch } from 'vue';
 import { UiDialogHost } from './ui';
 import AppShell from './shared/layout/AppShell.vue';
 import LoginView from './views/LoginView.vue';
-import UpdateBanner from './features/pwa/UpdateBanner.vue';
+import CockpitVersionTile from './features/cockpit-update/CockpitVersionTile.vue';
 import TaskModal from './views/TaskModal.vue';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';

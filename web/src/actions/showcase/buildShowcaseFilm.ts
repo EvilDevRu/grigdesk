@@ -1,74 +1,86 @@
-import { showcaseApi, showcaseErrorCode, showcaseErrorMessage } from '../../shared/showcaseApi';
-import { openShowcaseProject } from './openShowcaseProject';
+import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
+import { runtimeOf } from './showcaseRuntime';
 import type { ShowcaseStore } from './showcaseRuntime';
 
-// Стадии, которым нечего делать, цепочку не останавливают: свежий клип и свежий
-// звук — это готовый результат прошлого прохода, а не отказ.
-const SKIPPED = ['nothing_to_record', 'nothing_to_synthesize'];
-
-const POLL_MS = 500;
-
-/**
- * Ролик целиком: запись сцен, озвучка и сборка mp4 одной командой. Человеку в
- * мастере не за чем знать про три отдельные стадии — он смотрит ролик, а не
- * управляет конвейером. Каждая стадия по-прежнему считает сама, что ей делать:
- * свежие клипы не переснимаются, а загруженный человеком звук не переозвучивается.
- */
-export async function buildShowcaseFilm(
-  store: ShowcaseStore,
-  onStage: (stage: string) => void = () => {},
-): Promise<boolean> {
-  const opened = store.opened;
-
-  if (!opened) {
-    return false;
+/** Ключ относится к одному нажатию и пригоден для безопасного повтора POST сервером. */
+function buildRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
   }
 
-  const stages: { label: string; run: () => Promise<unknown> }[] = [
-    { label: 'Записываю сцены', run: () => showcaseApi.startRecording(opened.id) },
-    { label: 'Озвучиваю сцены', run: () => showcaseApi.synthesize(opened.id) },
-    { label: 'Собираю ролик', run: () => showcaseApi.assemble(opened.id) },
-  ];
+  const random = Math.random().toString(36).slice(2, 14);
 
-  try {
-    for (const stage of stages) {
-      onStage(stage.label);
-
-      try {
-        store.applyJob(await stage.run() as Parameters<ShowcaseStore['applyJob']>[0]);
-      } catch (error) {
-        if (!SKIPPED.includes(showcaseErrorCode(error))) {
-          throw error;
-        }
-
-        continue;
-      }
-
-      await waitForIdle(store, opened.id);
-    }
-
-    store.setError('');
-    await openShowcaseProject(store, opened.id);
-
-    return true;
-  } catch (error) {
-    store.setError(showcaseErrorMessage(error, 'Не удалось собрать ролик.'));
-
-    return false;
-  } finally {
-    onStage('');
-  }
+  return `build_${Date.now().toString(36)}_${random}`;
 }
 
 /**
- * Ожидание конца стадии. Задания живут на сервере и приходят событиями, поэтому
- * здесь только пауза до момента, когда по ролику не осталось активных: своего
- * опроса сервера цепочка не заводит.
+ * Сохраняемый запуск создаётся одним POST. Браузер не ждёт дочерние задания и не
+ * решает, какую стадию запускать следующей: после 202 его можно закрыть, а run
+ * восстановится из overview/SSE с тем же sequence.
  */
-async function waitForIdle(store: ShowcaseStore, projectId: string): Promise<void> {
-  while (store.jobsOf(projectId).some((job) => job.state === 'running' || job.state === 'queued')) {
-    await new Promise((resolve) => {
-      setTimeout(resolve, POLL_MS);
+export function buildShowcaseFilm(store: ShowcaseStore): Promise<boolean> {
+  const opened = store.opened;
+
+  if (!opened) {
+    return Promise.resolve(false);
+  }
+
+  const active = store.activeBuildOf(opened.id);
+
+  if (active) {
+    return Promise.resolve(true);
+  }
+
+  const runtime = runtimeOf(store);
+  const pending = runtime.builds.get(opened.id);
+
+  if (pending) {
+    return pending;
+  }
+
+  const projectId = opened.id;
+  const requestId = buildRequestId();
+
+  store.setBusy(projectId, true);
+
+  const request = showcaseApi.startBuild(projectId, opened.revision, requestId)
+    .then((run) => {
+      store.applyBuildRun(run);
+      store.setError('');
+
+      return true;
+    })
+    .catch((error: unknown) => {
+      store.setError(showcaseErrorMessage(error, 'Не удалось запустить сборку ролика.'));
+
+      return false;
+    })
+    .finally(() => {
+      runtime.builds.delete(projectId);
+      store.setBusy(projectId, false);
     });
+
+  runtime.builds.set(projectId, request);
+
+  return request;
+}
+
+/**
+ * Отмена относится ко всему run, а не к одной стадии. Текущий дочерний job
+ * сервер остановит сам и сохранит итоговый снимок запуска.
+ */
+export async function cancelShowcaseBuild(
+  store: ShowcaseStore,
+  runId: string,
+): Promise<boolean> {
+  try {
+    store.applyBuildRun(await showcaseApi.cancelBuild(runId));
+    store.setError('');
+
+    return true;
+  } catch (error) {
+    store.setError(showcaseErrorMessage(error, 'Не удалось остановить сборку ролика.'));
+
+    return false;
   }
 }

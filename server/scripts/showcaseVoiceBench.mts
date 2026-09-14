@@ -15,8 +15,14 @@ import { canonicalTextOf } from '../src/lib/showcase/voice/contract.ts';
 import type { VoiceEngine } from '../src/lib/showcase/voice/contract.ts';
 import { createVoiceRegistry } from '../src/lib/showcase/voice/registry.ts';
 import { createPiperEngine } from '../src/lib/showcase/voice/piper.ts';
+import { createQwenEngine } from '../src/lib/showcase/voice/qwen.ts';
 import { createRhvoiceEngine } from '../src/lib/showcase/voice/rhvoice.ts';
-import { voiceRuntimePaths } from '../src/lib/showcase/voice/install.ts';
+import { createSileroEngine } from '../src/lib/showcase/voice/silero.ts';
+import {
+  qwenRuntimePaths,
+  sileroRuntimePaths,
+  voiceRuntimePaths,
+} from '../src/lib/showcase/voice/install.ts';
 import { checkSpeech } from '../src/lib/showcase/voice/speechCheck.ts';
 
 interface BenchPhrase {
@@ -165,7 +171,11 @@ const voiceDir = process.env.COCKPIT_SHOWCASE_VOICE_DIR
   || fileURLToPath(new URL('../.state/showcase-voice', import.meta.url));
 
 async function main(): Promise<void> {
+  // Тот же порядок, что у раздела. Фраза с латиницей у Silero честно даст отказ —
+  // это тоже результат сравнения, а не сбой скрипта.
   const registry = createVoiceRegistry([
+    createQwenEngine(qwenRuntimePaths(voiceDir)),
+    createSileroEngine(sileroRuntimePaths(voiceDir)),
     createPiperEngine(voiceRuntimePaths(voiceDir)),
     createRhvoiceEngine(),
   ]);

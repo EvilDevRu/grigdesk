@@ -1,9 +1,11 @@
 import { showcaseApi, showcaseErrorCode, showcaseErrorMessage } from '../../shared/showcaseApi';
+import type { ShowcasePronunciationOverrideDraft } from '../../shared/showcaseApi';
+import type { ShowcaseDirection, ShowcasePace } from '../../../../shared/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
 
 export interface ShowcaseVoiceChoice {
   voiceRef: string | null;
-  pace: 'slow' | 'normal' | 'fast' | null;
+  pace: ShowcasePace | null;
 }
 
 /**
@@ -16,6 +18,39 @@ export async function loadShowcaseVoices(store: ShowcaseStore): Promise<void> {
     store.setVoices(await showcaseApi.voices());
   } catch (error: unknown) {
     store.setError(showcaseErrorMessage(error, 'Не удалось прочитать список голосов.'));
+  }
+}
+
+/**
+ * Образец голоса. Первый запрос синтезирует фразу — у тяжёлого движка это десятки
+ * секунд, — дальше отдаётся кэш сервера. Отказ движка возвращается словами: тишина
+ * без причины читалась бы как поломка кнопки.
+ */
+export async function loadShowcaseVoicePreview(voiceRef: string): Promise<Blob> {
+  try {
+    return await showcaseApi.voicePreview(voiceRef);
+  } catch (error: unknown) {
+    throw new Error(showcaseErrorMessage(error, 'Образец не воспроизвёлся: движок не ответил.'));
+  }
+}
+
+/**
+ * Своя реплика использует те же указания и локальные замены, что полная сборка.
+ * AbortSignal нужен редактору, чтобы уход со сцены не запускал устаревший звук.
+ */
+export async function loadShowcaseNarrationPreview(input: {
+  voiceRef: string;
+  narration: string;
+  direction: ShowcaseDirection;
+  pronunciationOverrides: ShowcasePronunciationOverrideDraft[];
+}, signal?: AbortSignal): Promise<Blob> {
+  try {
+    return await showcaseApi.narrationPreview(input, signal);
+  } catch (error: unknown) {
+    throw new Error(showcaseErrorMessage(
+      error,
+      'Реплика не воспроизвелась: голосовой движок не ответил.',
+    ));
   }
 }
 
@@ -48,6 +83,41 @@ export async function cancelShowcaseVoiceInstall(store: ShowcaseStore): Promise<
     store.setVoices(await showcaseApi.cancelVoiceInstall());
   } catch (error: unknown) {
     store.setError(showcaseErrorMessage(error, 'Не удалось отменить установку.'));
+  } finally {
+    store.setVoiceBusy(false);
+  }
+}
+
+/**
+ * Словарь ударений установки. Читается снимком: текст, разобранные записи и
+ * негодные строки приходят вместе, чтобы редактор не показывал ошибки от
+ * прошлой редакции рядом со свежим текстом.
+ */
+export async function loadShowcaseDictionary(store: ShowcaseStore): Promise<void> {
+  try {
+    store.setDictionary(await showcaseApi.voiceDictionary());
+  } catch (error: unknown) {
+    store.setError(showcaseErrorMessage(error, 'Не удалось прочитать словарь ударений.'));
+  }
+}
+
+/**
+ * Сохранение словаря. Текст уходит целиком, вместе с негодными строками: сервер
+ * их не выбрасывает, а возвращает с причиной — человек чинит их на месте. Звук
+ * сцен со словами из словаря устареет сам, и следующая сборка переозвучит их.
+ */
+export async function saveShowcaseDictionary(store: ShowcaseStore, text: string): Promise<boolean> {
+  store.setVoiceBusy(true);
+
+  try {
+    store.setDictionary(await showcaseApi.saveVoiceDictionary(text));
+    store.setError('');
+
+    return true;
+  } catch (error: unknown) {
+    store.setError(showcaseErrorMessage(error, 'Не удалось сохранить словарь ударений.'));
+
+    return false;
   } finally {
     store.setVoiceBusy(false);
   }

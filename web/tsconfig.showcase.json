@@ -9,6 +9,8 @@
   "include": [
     "../shared/contractDecoders.ts",
     "../shared/showcaseContracts.ts",
+    "../shared/showcaseNarration.ts",
+    "../shared/showcaseTimeline.ts",
     "src/actions/showcase/**/*.ts",
     "src/stores/showcase.ts",
     "src/shared/showcaseApi.ts",

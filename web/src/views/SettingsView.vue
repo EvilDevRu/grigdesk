@@ -3869,12 +3869,13 @@ async function startCockpitAction(kind) {
   if (!job && cockpitUpdate.error) srvMsg.value = { type: 'err', text: cockpitUpdate.error };
 }
 
+// Проверку service worker после успешного задания делает плитка версии в рейке — она
+// есть на каждой странице. Здесь только перечитываем карточку сервера.
 watchEffect(() => {
   const job = cockpitJob.value;
   if (job?.status !== 'done' || job.id === confirmedUpdateJob) return;
   confirmedUpdateJob = job.id;
   loadServer();
-  pwa.checkForUpdate();
 });
 
 async function loadServer() { try { srv.value = await api.get('/api/system/server'); } catch { srv.value = null; } }

@@ -1,85 +1,115 @@
 <template>
   <section class="voice" :data-mode="mode" aria-labelledby="showcase-voice-title">
-    <header class="voice__head">
-      <div>
-        <p class="voice__kicker">Озвучка</p>
-        <h3 id="showcase-voice-title">{{ mode === 'choice' ? 'Голос ролика' : 'Голоса' }}</h3>
-      </div>
-      <span
-        class="voice__ready"
-        :data-state="voiceState.tone"
-        role="status"
-        aria-live="polite"
-      >
-        <i aria-hidden="true"></i>{{ voiceState.label }}
-      </span>
-    </header>
-
     <!-- Выбор голоса — один на весь ролик: сцены, говорящие разными голосами,
          читаются как ошибка. Образец слушается одним нажатием: по имени голос не
          выбрать, а тембр — единственное, что здесь важно. -->
-    <div v-if="mode === 'choice'" class="voice__choice">
-      <UiField
-        label="Голос"
-        hint="Один голос на все сцены. После смены звук устареет, и следующая сборка переозвучит их."
-      >
-        <UiSelect
-          data-testid="showcase-voice-select"
-          :model-value="currentVoice"
-          :disabled="busy || !groups.length"
-          @update:model-value="onVoice"
-        >
-          <option v-if="!groups.length" value="">голос ещё не установлен</option>
-          <optgroup v-for="group in groups" :key="group.engineId" :label="group.name">
-            <option v-for="voice in group.voices" :key="voice.ref" :value="voice.ref">
-              {{ voice.name }}
+    <template v-if="mode === 'choice'">
+      <div class="voice__choice">
+        <UiField label="Голос ролика" class="voice__field">
+          <UiSelect
+            data-testid="showcase-voice-select"
+            :model-value="currentVoice"
+            :disabled="busy || !availableVoiceRefs.length"
+            @update:model-value="onVoice"
+          >
+            <option v-if="!groups.length" value="">голос ещё не установлен</option>
+            <option v-if="missingCurrentVoice" :value="currentVoice" disabled>
+              {{ currentVoice }} — сохранённый голос недоступен
             </option>
-          </optgroup>
-        </UiSelect>
-      </UiField>
-
-      <div class="voice__row">
+            <optgroup v-for="group in groups" :key="group.engineId" :label="group.name">
+              <option
+                v-for="voice in group.voices"
+                :key="voice.ref"
+                :value="voice.ref"
+                :disabled="!voice.available"
+              >
+                {{ voice.name }}{{ voice.available ? '' : ' — недоступен' }}
+              </option>
+            </optgroup>
+          </UiSelect>
+        </UiField>
         <UiButton
+          class="voice__preview"
           variant="outline"
           data-testid="showcase-voice-preview"
-          :disabled="!currentVoice || busy"
+          :disabled="!currentVoiceAvailable || busy"
           :loading="previewing"
           @click="preview"
         >
-          Прослушать образец
+          Прослушать
         </UiButton>
-        <span v-if="previewError" class="voice__error" role="alert">{{ previewError }}</span>
+        <!-- Пять ступеней вокруг обычного темпа на ползунке; в свою шкалу их
+             переводит выбранный голос. Возможности берём у диктора, а старый
+             ответ без них показываем как unknown, не как обещание поддержки. -->
+        <UiField class="voice__pace" :label="paceSupported ? `Темп речи — ${paceLabel}` : 'Темп речи'">
+          <UiDiscreteSlider
+            v-if="paceSupported"
+            data-testid="showcase-voice-pace"
+            :model-value="paceIndex"
+            :min="0"
+            :max="PACES.length - 1"
+            :step="1"
+            :labels="PACE_POINTS"
+            :disabled="busy"
+            aria-label="Темп речи"
+            @update:model-value="onPaceIndex"
+          />
+          <span v-else class="voice__pace-note" data-testid="showcase-voice-pace-note">
+            {{ paceSupportText }}
+          </span>
+        </UiField>
       </div>
 
-      <UiField label="Темп речи">
-        <UiSegmentedControl
-          :model-value="currentPace"
-          :options="PACES"
-          label="Темп речи"
-          :disabled="busy"
-          @update:model-value="onPace"
-        />
-      </UiField>
-
-      <UiDisclosureButton
-        v-model:open="setupOpen"
-        controls="showcase-voice-setup"
-        density="compact"
+      <p
+        v-if="currentVoice"
+        class="voice__capabilities"
+        data-testid="showcase-voice-capabilities"
+        aria-label="Возможности выбранного голоса"
       >
-        {{ setupOpen ? 'Скрыть установку голосов' : 'Установить другие голоса' }}
-      </UiDisclosureButton>
-    </div>
-
-    <div v-show="mode === 'setup' || setupOpen" id="showcase-voice-setup" class="voice__setup">
-      <p class="voice__note">
-        Локальные движки говорят на этой машине без ключей и запросов наружу: движок и
-        модель скачиваются один раз, по нажатию — размер назван до него. Облачный голос
-        Яндекса включается ключом в корневом .env сервера; тогда текст сцен уходит
-        поставщику, а синтез платный.
+        <span :data-state="capabilityState(currentCapabilities?.pace)">
+          Темп: {{ capabilityLabel(currentCapabilities?.pace) }}
+        </span>
+        <span :data-state="capabilityState(currentCapabilities?.pause)">
+          Паузы: {{ capabilityLabel(currentCapabilities?.pause) }}
+        </span>
+        <span :data-state="capabilityState(currentCapabilities?.stress)">
+          Ударения: {{ capabilityLabel(currentCapabilities?.stress) }}
+        </span>
       </p>
 
-      <ul v-if="catalog" class="voice__engines">
-        <li v-for="engine in catalog.engines" :key="engine.id">
+      <p id="showcase-voice-title" class="voice__note">
+        Один голос на все сцены. После смены голоса или темпа звук устареет, и следующая
+        сборка переозвучит их.
+        <!-- Пока образец готовится, человек видит, чего ждёт: первый запрос синтезирует
+             фразу, и у тяжёлого движка это десятки секунд. -->
+        <span v-if="previewing" class="voice__preview-note" role="status">{{ previewNote }}</span>
+        <span v-if="previewError" class="voice__error" role="alert">{{ previewError }}</span>
+      </p>
+
+      <div class="voice__more">
+        <UiDisclosureButton v-model:open="setupOpen" controls="showcase-voice-setup" density="compact">
+          {{ setupOpen ? 'Скрыть установку голосов' : 'Установить другие голоса' }}
+        </UiDisclosureButton>
+        <UiDisclosureButton v-model:open="stressOpen" controls="showcase-voice-stress" density="compact">
+          {{ stressOpen ? 'Скрыть словарь ударений' : 'Ударения и словарь' }}
+        </UiDisclosureButton>
+      </div>
+    </template>
+
+    <header v-else class="voice__head">
+      <p class="voice__kicker">Озвучка</p>
+      <h3 id="showcase-voice-title">Голос для озвучки не установлен</h3>
+      <p class="voice__note">
+        Без голоса сборка не озвучит сцены; свой звук файлом загрузить можно. Установка —
+        одним нажатием, размер назван до него. Облако Microsoft говорит без ключа, как
+        только сервер видит сеть; облачный голос Яндекса включается ключом в корневом
+        .env сервера.
+      </p>
+    </header>
+
+    <div v-show="mode === 'setup' || setupOpen" id="showcase-voice-setup" class="voice__setup">
+      <ul v-if="catalog && pendingEngines.length" class="voice__engines">
+        <li v-for="engine in pendingEngines" :key="engine.id">
           <span class="voice__dot" :data-status="engine.doctor.status" aria-hidden="true" />
           <div class="voice__engine-copy">
             <div class="voice__engine-line">
@@ -138,68 +168,152 @@
         </li>
       </ul>
     </div>
+
+    <!-- Ударения: знак в тексте сцены и словарь установки. Словарь общий для всех
+         роликов, и править его логично там же, где выбирают голос. -->
+    <div v-show="mode === 'choice' && stressOpen" id="showcase-voice-stress" class="voice__stress">
+      <p class="voice__note">
+        Ударение в тексте сцены — знак «+» перед гласной: з+амок, зам+ок. Слова, в которых
+        движок ошибается всегда, лучше записать в словарь: одно слово со знаком на строку,
+        строки с «#» — комментарии. Словарь действует на все ролики; сцены с этими словами
+        переозвучатся при следующей сборке. Числа и латиницу пишите словами.
+        <strong class="voice__stress-support" :data-state="capabilityState(currentCapabilities?.stress)">
+          {{ stressSupportText }}
+        </strong>
+      </p>
+
+      <UiField label="Словарь ударений" :hint="dictionaryHint">
+        <UiTextarea
+          v-model="dictionaryDraft"
+          data-testid="showcase-voice-dictionary"
+          :disabled="busy || !dictionary"
+          rows="5"
+          placeholder="дин+амика"
+        />
+      </UiField>
+
+      <ul v-if="dictionary?.errors.length" class="voice__dictionary-errors" role="alert">
+        <li v-for="error in dictionary.errors" :key="error.line">
+          Строка {{ error.line }}: «{{ error.text }}» — {{ error.reason }}.
+        </li>
+      </ul>
+
+      <div class="voice__row">
+        <UiButton
+          variant="solid"
+          tone="accent"
+          data-testid="showcase-voice-dictionary-save"
+          :disabled="!dictionaryChanged || busy || !dictionary"
+          :loading="busy"
+          @click="emit('save-dictionary', dictionaryDraft)"
+        >
+          Сохранить словарь
+        </UiButton>
+      </div>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import {
   UiButton,
   UiDisclosureButton,
+  UiDiscreteSlider,
   UiField,
-  UiSegmentedControl,
   UiSelect,
+  UiTextarea,
 } from '../../ui';
 import type {
+  ShowcasePace,
   ShowcaseVoiceCatalog,
+  ShowcaseVoiceDictionary,
   ShowcaseVoicePackage,
 } from '../../../../shared/showcaseContracts';
 
-type Pace = 'slow' | 'normal' | 'fast';
+type Pace = ShowcasePace;
 
 const props = withDefaults(defineProps<{
   catalog: ShowcaseVoiceCatalog | null;
   busy: boolean;
-  // Режим «установка» живёт на первом шаге, пока говорить нечем; «выбор» — на
+  // Режим «установка» живёт на списке роликов, пока говорить нечем; «выбор» — на
   // экране ролика, где голос уже есть и его надо услышать и сменить.
   mode?: 'setup' | 'choice';
   voiceRef?: string | null;
   pace?: Pace | null;
-  // Адрес образца строит вид: у панели нет доступа к сети, и стаб в тестах ей не нужен.
-  previewUrl?: (voiceRef: string) => string;
+  // Образец приносит вид: у панели нет доступа к сети, и стаб в тестах ей не нужен.
+  // Отказ приходит ошибкой с причиной для человека.
+  loadPreview?: (voiceRef: string) => Promise<Blob>;
+  // Словарь ударений установки; null — ещё не прочитан, и править нечего.
+  dictionary?: ShowcaseVoiceDictionary | null;
 }>(), {
   mode: 'setup',
   voiceRef: null,
   pace: null,
-  previewUrl: () => '',
+  loadPreview: async () => new Blob(),
+  dictionary: null,
 });
 
 const emit = defineEmits<{
   install: [voiceId: string];
   cancel: [];
   change: [choice: { voiceRef: string | null; pace: Pace | null }];
+  'save-dictionary': [text: string];
 }>();
 
 const PACES: { value: Pace; label: string }[] = [
-  { value: 'slow', label: 'Медленнее' },
+  { value: 'slowest', label: 'Медленно' },
+  { value: 'slow', label: 'Помедленнее' },
   { value: 'normal', label: 'Обычный' },
-  { value: 'fast', label: 'Быстрее' },
+  { value: 'fast', label: 'Побыстрее' },
+  { value: 'fastest', label: 'Быстро' },
 ];
 
+// Подписи под ползунком: только края и середина, остальные ступени читаются по
+// подписи поля — пять слов под коротким ползунком слипались бы.
+const PACE_POINTS: Record<number, string> = {
+  0: 'Медленно',
+  2: 'Обычный',
+  4: 'Быстро',
+};
+
+const PREVIEW_NOTE = 'Готовлю образец: первый раз голос синтезирует фразу, '
+  + 'у тяжёлого движка это занимает до минуты.';
+
 const previewing = ref(false);
+const previewNote = ref('');
 const previewError = ref('');
+
+// Играющий образец держится ссылкой: элемент без ссылки браузер вправе собрать до
+// начала звука, и кнопка осталась бы занятой навсегда.
+let previewAudio: HTMLAudioElement | null = null;
+let previewAudioUrl: string | null = null;
+let previewGeneration = 0;
 const setupOpen = ref(false);
+const stressOpen = ref(false);
+
+const dictionaryDraft = ref(props.dictionary?.text ?? '');
+
+// Свежий словарь приходит после чтения и после сохранения: черновик подхватывает
+// его, пока человек в нём ничего не менял, иначе чужое обновление стёрло бы набранное.
+watch(() => props.dictionary, (next, previous) => {
+  if (dictionaryDraft.value === (previous?.text ?? '')) {
+    dictionaryDraft.value = next?.text ?? '';
+  }
+});
+
+const dictionaryChanged = computed(() => dictionaryDraft.value !== (props.dictionary?.text ?? ''));
 
 const job = computed(() => props.catalog?.install.job ?? null);
 
 const installing = computed(() => job.value?.state === 'running');
 
-// Готовый движок называется отдельно: у раздела их несколько, и человеку важно
-// знать, чей голос он услышит, а не только что «что-то готово».
-const readyEngine = computed(
-  () => props.catalog?.engines.find((engine) => engine.doctor.status === 'ready') ?? null,
-);
+// Движки, которым чего-то не хватает. Готовый движок здесь не перечисляется: его
+// голоса уже стоят в выборе, а строка «готов» ничего не решает.
+const pendingEngines = computed(() => (
+  (props.catalog?.engines ?? []).filter((engine) => engine.doctor.status !== 'ready')
+));
 
 // Голоса, которыми можно говорить прямо сейчас, сгруппированные по движку.
 // Недоступные в список выбора не попадают: выбрать голос, который молчит, нельзя.
@@ -208,42 +322,76 @@ const groups = computed(() => (props.catalog?.engines ?? [])
     engineId: engine.id,
     name: engine.name,
     voices: engine.voices
-      .filter((voice) => voice.available)
-      .map((voice) => ({ ref: `${engine.id}:${voice.id}`, name: voice.name })),
+      .filter((voice) => voice.available || `${engine.id}:${voice.id}` === props.voiceRef)
+      .map((voice) => ({
+        ref: `${engine.id}:${voice.id}`,
+        name: voice.name,
+        available: voice.available,
+        capabilities: voice.capabilities,
+      })),
   }))
   .filter((group) => group.voices.length > 0));
 
 // Пока человек ничего не выбирал, звучит первый доступный голос первого готового
 // движка — ровно тот, который возьмёт сервер. Показывать пустой выбор нельзя:
 // голос у ролика есть всегда.
-const currentVoice = computed(() => {
-  const known = groups.value.flatMap((group) => group.voices.map((voice) => voice.ref));
+const availableVoiceRefs = computed(() => groups.value
+  .flatMap((group) => group.voices)
+  .filter((voice) => voice.available)
+  .map((voice) => voice.ref));
 
-  if (props.voiceRef && known.includes(props.voiceRef)) {
-    return props.voiceRef;
-  }
+const currentVoice = computed(() => props.voiceRef ?? availableVoiceRefs.value[0] ?? '');
 
-  return known[0] ?? '';
-});
+const missingCurrentVoice = computed(() => Boolean(
+  currentVoice.value
+  && !groups.value.some((group) => group.voices.some((voice) => voice.ref === currentVoice.value)),
+));
 
 const currentPace = computed<Pace>(() => props.pace ?? 'normal');
 
-const voiceState = computed(() => {
-  if (!props.catalog) {
-    return { tone: 'idle', label: 'Проверяем' };
+const currentVoiceInfo = computed(() => groups.value
+  .flatMap((group) => group.voices)
+  .find((voice) => voice.ref === currentVoice.value) ?? null);
+
+const currentCapabilities = computed(() => currentVoiceInfo.value?.capabilities);
+
+const currentVoiceAvailable = computed(() => currentVoiceInfo.value?.available === true);
+
+// Только явное true открывает управление. Отсутствующее поле старого сервера —
+// «неизвестно»: отправлять выбор, который может быть молча проигнорирован, нельзя.
+const paceSupported = computed(() => currentCapabilities.value?.pace === true);
+
+const paceSupportText = computed(() => currentCapabilities.value?.pace === false
+  ? 'Этот голос темп не меняет — ускорить или замедлить речь можно другим голосом.'
+  : 'Поддержка изменения темпа для этого голоса неизвестна; темп не меняем.');
+
+const stressSupportText = computed(() => {
+  if (currentCapabilities.value?.stress === true) {
+    return 'Выбранный голос применяет знаки и словарь ударений.';
   }
 
-  return readyEngine.value
-    ? { tone: 'ready', label: readyEngine.value.name }
-    : { tone: 'blocked', label: 'Не настроен' };
+  if (currentCapabilities.value?.stress === false) {
+    return 'Выбранный голос не применяет знаки и словарь ударений; используйте явную замену в сцене.';
+  }
+
+  return 'Поддержка ударений у выбранного голоса неизвестна; проверьте реплику прослушиванием.';
 });
 
-// Установка раскрыта сама, пока говорить нечем: иначе человек искал бы кнопку.
-watch(readyEngine, (engine) => {
-  if (!engine) {
-    setupOpen.value = true;
-  }
-}, { immediate: true });
+// Возможность старого backend отсутствует, а не равна запрету. Отдельное unknown
+// не даёт интерфейсу обещать поддержку, которую сервер ещё не объявил.
+function capabilityState(value: boolean | undefined): 'yes' | 'no' | 'unknown' {
+  return value === true ? 'yes' : value === false ? 'no' : 'unknown';
+}
+
+// Текстовая подпись повторяет трёхзначное состояние значка без цветовой подсказки.
+// Это сохраняет различие «нет» и «неизвестно» для чтения вслух и без CSS.
+function capabilityLabel(value: boolean | undefined): string {
+  return value === true ? 'есть' : value === false ? 'нет' : 'неизвестно';
+}
+
+const paceIndex = computed(() => Math.max(0, PACES.findIndex((item) => item.value === currentPace.value)));
+
+const paceLabel = computed(() => PACES[paceIndex.value]?.label ?? 'Обычный');
 
 const JOB_TITLES: Record<string, string> = {
   running: 'Идёт установка',
@@ -266,8 +414,16 @@ function engineState(status: string): string {
   return ENGINE_STATES[status] ?? status;
 }
 
-function megabytes(bytes: number): string {
-  return `${Math.round(bytes / (1024 * 1024))} МБ`;
+const MEGABYTE = 1024 * 1024;
+const GIGABYTE = 1024 * MEGABYTE;
+
+// Пакет на гигабайты называется гигабайтами: «8100 МБ» читается хуже, чем «7,9 ГБ».
+function sizeLabel(bytes: number): string {
+  if (bytes >= GIGABYTE) {
+    return `${(bytes / GIGABYTE).toFixed(1).replace('.', ',')} ГБ`;
+  }
+
+  return `${Math.round(bytes / MEGABYTE)} МБ`;
 }
 
 /**
@@ -277,8 +433,37 @@ function megabytes(bytes: number): string {
 function packageAbout(item: ShowcaseVoicePackage): string {
   const voices = item.voices.length > 1 ? `голоса: ${item.voices.join(', ')}` : item.timbre;
 
-  return `${voices} · ${megabytes(item.byteSize)} · ${item.license}`;
+  return `${voices} · ${sizeLabel(item.byteSize)} · ${item.license}`;
 }
+
+/**
+ * Подпись словаря: сколько записей действует. Число склоняется, потому что
+ * «12 слово» под полем ввода читалось бы как ошибка самого раздела.
+ */
+function wordsCount(count: number): string {
+  const tail = count % 10;
+  const teen = count % 100 >= 11 && count % 100 <= 14;
+
+  if (tail === 1 && !teen) {
+    return `${count} слово`;
+  }
+
+  if (tail >= 2 && tail <= 4 && !teen) {
+    return `${count} слова`;
+  }
+
+  return `${count} слов`;
+}
+
+const dictionaryHint = computed(() => {
+  if (!props.dictionary) {
+    return 'Словарь ещё не прочитан.';
+  }
+
+  const count = props.dictionary.entries.length;
+
+  return count > 0 ? `Действует: ${wordsCount(count)}.` : 'Словарь пуст.';
+});
 
 // Смена голоса уходит наверх только когда выбор действительно изменился: сервер
 // перезаписывает все сцены, и повтор того же значения старил бы их звук зря.
@@ -286,14 +471,17 @@ function onVoice(value: unknown): void {
   const voiceRef = typeof value === 'string' && value ? value : null;
 
   if (voiceRef !== currentVoice.value) {
+    resetPreview();
     emit('change', { voiceRef, pace: currentPace.value });
   }
 }
 
 // Темп меняется вместе с текущим голосом: серверу нужен полный выбор, а не одно
-// из двух полей.
-function onPace(value: Pace): void {
-  if (value !== currentPace.value) {
+// из двух полей. Ползунок отдаёт номер ступени, наверх уходит её имя.
+function onPaceIndex(index: number): void {
+  const value = PACES[index]?.value;
+
+  if (value && value !== currentPace.value) {
     emit('change', { voiceRef: currentVoice.value || null, pace: value });
   }
 }
@@ -303,21 +491,104 @@ function onPace(value: Pace): void {
  * синтезирует фразу, поэтому кнопка занята до начала звука, а не до конца.
  */
 async function preview(): Promise<void> {
-  if (!currentVoice.value || typeof Audio === 'undefined') {
+  if (!currentVoice.value) {
     return;
   }
 
+  const generation = ++previewGeneration;
+
   previewing.value = true;
+  previewNote.value = PREVIEW_NOTE;
   previewError.value = '';
 
   try {
-    await new Audio(props.previewUrl(currentVoice.value)).play();
-  } catch {
-    previewError.value = 'Образец не воспроизвёлся: движок не ответил.';
+    const blob = await props.loadPreview(currentVoice.value);
+
+    if (generation !== previewGeneration) {
+      return;
+    }
+
+    await playPreview(blob);
+  } catch (error: unknown) {
+    if (generation === previewGeneration) {
+      previewError.value = error instanceof Error && error.message
+        ? error.message
+        : 'Образец не воспроизвёлся: движок не ответил.';
+    }
   } finally {
-    previewing.value = false;
+    if (generation === previewGeneration) {
+      previewing.value = false;
+      previewNote.value = '';
+    }
   }
 }
+
+/**
+ * Останавливает образец и сразу освобождает его Blob URL. Единая точка очистки
+ * используется при смене голоса, повторном preview и уходе со страницы.
+ */
+function stopPreviewAudio(): void {
+  previewAudio?.pause();
+  previewAudio = null;
+
+  if (previewAudioUrl && typeof URL.revokeObjectURL === 'function') {
+    URL.revokeObjectURL(previewAudioUrl);
+  }
+
+  previewAudioUrl = null;
+}
+
+/**
+ * Смена голоса или уход со страницы делает ответ и ошибку прошлого preview
+ * устаревшими. Номер поколения отсекает даже ответ уже завершившегося fetch.
+ */
+function resetPreview(): void {
+  previewGeneration += 1;
+  previewing.value = false;
+  previewNote.value = '';
+  previewError.value = '';
+  stopPreviewAudio();
+}
+
+/**
+ * Воспроизведение готового образца. Прежний образец останавливается — два голоса
+ * разом не сравнить. Без Audio (тесты, редкий браузер) образец считается
+ * полученным: причина отказа движка к этому моменту уже пришла бы ошибкой.
+ */
+async function playPreview(blob: Blob): Promise<void> {
+  if (typeof Audio === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return;
+  }
+
+  stopPreviewAudio();
+
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+
+  previewAudio = audio;
+  previewAudioUrl = url;
+  audio.addEventListener('ended', () => {
+    if (previewAudio === audio) {
+      previewAudio = null;
+    }
+
+    if (previewAudioUrl === url) {
+      previewAudioUrl = null;
+    }
+
+    URL.revokeObjectURL(url);
+  }, { once: true });
+
+  try {
+    await audio.play();
+  } catch (error) {
+    stopPreviewAudio();
+
+    throw error;
+  }
+}
+
+onBeforeUnmount(resetPreview);
 </script>
 
 <style scoped>
@@ -325,10 +596,10 @@ async function preview(): Promise<void> {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 15px;
+  border-radius: 14px;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--surface) 96%, #fff) 0%,
@@ -337,15 +608,80 @@ async function preview(): Promise<void> {
   box-shadow: inset 0 1px 0 #ffffff08;
 }
 
+.voice__pace {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.voice__pace-note,
+.voice__preview-note {
+  color: var(--ink-mid);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.voice__pace-note {
+  display: block;
+  padding-top: 6px;
+}
+
+.voice__capabilities {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.voice__capabilities span {
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+}
+
+.voice__capabilities span[data-state='yes'] {
+  border-color: color-mix(in srgb, var(--good) 34%, var(--line));
+  color: var(--good);
+}
+
+.voice__capabilities span[data-state='no'] {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
+  color: var(--warn);
+}
+
+.voice__preview-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.voice__choice {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px 14px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.voice__field {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.voice__preview {
+  flex: none;
+}
+
 .voice__head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .voice__kicker {
-  margin: 0 0 3px;
+  margin: 0;
   color: var(--accent);
   font-size: 9.5px;
   font-weight: 750;
@@ -361,45 +697,32 @@ async function preview(): Promise<void> {
   letter-spacing: -0.01em;
 }
 
-.voice__ready {
-  display: inline-flex;
-  flex: none;
-  min-height: 25px;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--ground);
-  color: var(--ink-mid);
-  font-size: 10.5px;
-  white-space: nowrap;
+.voice__more {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.voice__ready i,
-.voice__package-done i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentcolor;
-}
-
-.voice__ready[data-state='ready'] {
-  border-color: color-mix(in srgb, var(--good) 34%, var(--line));
-  color: var(--good);
-}
-
-.voice__ready[data-state='blocked'] {
-  border-color: color-mix(in srgb, var(--bad) 36%, var(--line));
-  color: var(--bad);
-}
-
-.voice__choice,
-.voice__setup {
+.voice__setup,
+.voice__stress {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+}
+
+.voice__dictionary-errors {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--bad) 42%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bad) 6%, var(--surface));
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.45;
+  list-style: none;
 }
 
 .voice__row {
@@ -410,16 +733,32 @@ async function preview(): Promise<void> {
 }
 
 .voice__error {
+  display: block;
+  margin-top: 2px;
   color: var(--bad);
-  font-size: 12.5px;
 }
 
 .voice__note {
+  max-width: 720px;
   margin: 0;
-  max-width: 680px;
   color: var(--ink-mid);
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+.voice__stress-support {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.voice__stress-support[data-state='no'] {
+  color: var(--warn);
+}
+
+.voice__stress-support[data-state='unknown'] {
+  color: var(--ink-mid);
 }
 
 .voice__engines,
@@ -484,10 +823,6 @@ async function preview(): Promise<void> {
   flex: none;
   color: var(--ink-mid);
   font-size: 10.5px;
-}
-
-.voice__engine-state[data-status='ready'] {
-  color: var(--good);
 }
 
 .voice__engine-state[data-status='warning'] {
@@ -566,8 +901,8 @@ async function preview(): Promise<void> {
 }
 
 .voice__package-about {
-  font-size: 12px;
   color: var(--ink-mid);
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -579,8 +914,14 @@ async function preview(): Promise<void> {
   font-size: 11px;
 }
 
+.voice__package-done i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
 @media (max-width: 520px) {
-  .voice__head,
   .voice__engine-line {
     align-items: flex-start;
     flex-direction: column;

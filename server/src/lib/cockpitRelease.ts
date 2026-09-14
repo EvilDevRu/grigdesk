@@ -3,6 +3,18 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type {
+  CheckoutState,
+  DisplayVersion,
+  ReleaseCheckError,
+  ReleaseStatus,
+  RunningRelease,
+  UpdateJob,
+} from '../../../shared/cockpitUpdateContracts.ts';
+
+// Форму снимка версии читает и веб (плитка версии, настройки сервера): она объявлена в
+// общем контракте, а здесь остаётся доступной прежним импортёрам.
+export type { ReleaseStatus, UpdateJob } from '../../../shared/cockpitUpdateContracts.ts';
 
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const TAG_RE = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -47,33 +59,6 @@ interface RemoteTag {
   sha: string | null;
   tagObjectSha: string | null;
   annotated: boolean;
-}
-
-// Как показать версию человеку: подпись, стабильная часть и точный тег, если он есть.
-interface DisplayVersion {
-  version: string;
-  stableVersion: string | null;
-  exactTag: string | null;
-}
-
-// Отказ проверки обновлений: наружу уходит код и текст, но не вывод git.
-interface ReleaseCheckError {
-  code: string;
-  message: string;
-}
-
-// Задание обновления. Его пишут и менеджер, и воркер, поэтому форма объявлена здесь —
-// в единственном модуле, который читают оба.
-export interface UpdateJob extends Record<string, unknown> {
-  id: string;
-  kind?: string;
-  status: string;
-  stage?: string;
-  targetSha?: string | null;
-  previousRunningInstanceId?: string | null;
-  backups?: Record<string, string | null> | null;
-  error?: { code?: string; message?: string } | null;
-  completedAt?: string | null;
 }
 
 // Файл состояния обновления целиком.
@@ -350,47 +335,6 @@ export interface CockpitReleaseServiceOptions {
   broadcast?: (name: string, payload?: unknown) => void;
   checkIntervalMs?: number;
   initialCheckDelayMs?: number;
-}
-
-// Снимок запущенного процесса: что именно сейчас исполняется и с какого момента.
-interface RunningRelease extends DisplayVersion {
-  productVersion: string;
-  versionTagMismatch: boolean;
-  sha: string;
-  instanceId: string;
-  startedAt: string;
-}
-
-// Состояние рабочего дерева: где стоит checkout и можно ли его трогать.
-interface CheckoutState extends DisplayVersion {
-  productVersion: string;
-  versionTagMismatch: boolean;
-  sha: string;
-  branch: string | null;
-  detached: boolean;
-  dirty: boolean;
-}
-
-/**
- * DTO раздела «Сервер»: одно и то же читают интерфейс и менеджер обновления.
- * Объявлен явно, а не выведен: без имени тип ссылался бы сам на себя через кеш.
- */
-export interface ReleaseStatus {
-  running: RunningRelease;
-  checkout: CheckoutState;
-  latest: { version: string; tag: string; sha: string; url: string | null } | null;
-  checkoutChanged: boolean;
-  checkoutRelation: string;
-  targetDescendsFromCheckout: boolean | null;
-  updateAvailable: boolean;
-  canApplyCheckout: boolean;
-  canInstallRelease: boolean;
-  applyBlockReasons: string[];
-  installBlockReasons: string[];
-  blockReasons: string[];
-  checkedAt: string | null;
-  checkError: ReleaseCheckError | null;
-  job: UpdateJob | null;
 }
 
 export class CockpitReleaseService {

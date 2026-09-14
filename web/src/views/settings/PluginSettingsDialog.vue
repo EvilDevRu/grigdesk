@@ -1,8 +1,12 @@
 <template>
+  <!-- У плагина с блоком готовности высота модалки задана по окну (см. overlays.css):
+       список готовности приходит с сервера после открытия, и модалка по содержимому
+       прыгала бы у человека на глазах. -->
   <UiDialog
     :open="open"
     class="plugin-dialog"
     data-role="plugin-settings"
+    :data-setup="setupAvailable ? 'true' : undefined"
     size="content"
     :label="`Плагин ${plugin?.name || ''}`"
     @update:open="(value) => emit('update:open', value)"
@@ -303,7 +307,10 @@
             </UiButton>
           </li>
         </ul>
-        <p v-else class="plughint">Проверяем, что есть на машине…</p>
+        <p v-else class="plughint pd-setup-loading" role="status">
+          <UiSpinner decorative role="standalone" />
+          <span>Проверяем, что есть на машине…</span>
+        </p>
       </div>
     </template>
 
@@ -353,6 +360,7 @@ import {
   UiInput,
   UiNumberInput,
   UiSelect,
+  UiSpinner,
   UiSwitch,
 } from '../../ui';
 import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.js';
@@ -841,6 +849,9 @@ async function save(): Promise<void> {
   margin-left: auto; }
 .plugin-save { display: inline-flex; align-items: center; gap: 6px; }
 
+.pd-setup-loading {
+  display: flex; align-items: center; gap: 8px; min-height: 40px; margin: 0;
+}
 .pd-setup-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .pd-setup-list li {
   display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 10px;

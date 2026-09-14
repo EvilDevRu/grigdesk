@@ -123,6 +123,21 @@ function runFixture() {
     durationMs: null,
   };
 
+  // Собственные замеры идут до завершения хода и могут уменьшаться после сжатия.
+  function emitContextUsage() {
+    for (const inputTokens of [180_000, 60_000]) {
+      send({ method: 'thread/tokenUsage/updated', params: {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        tokenUsage: {
+          last: { inputTokens, cachedInputTokens: inputTokens - 1_000, outputTokens: 50 },
+          total: { inputTokens: 900_000, cachedInputTokens: 850_000, outputTokens: 100 },
+          modelContextWindow: 256_000,
+        },
+      } });
+    }
+  }
+
   function emitRichTurn() {
     send({ method: 'turn/plan/updated', params: {
       threadId: THREAD_ID,
@@ -487,6 +502,9 @@ function runFixture() {
         fail('thread/resume получил неверный threadId');
         return;
       }
+      if (scenario === 'early-thread-notification') {
+        send({ method: 'thread/started', params: { thread } });
+      }
       send({ id: message.id, result: {
         thread,
         model: 'gpt-contract-0.149',
@@ -506,7 +524,9 @@ function runFixture() {
           initialTurnsPage: null, turnsBackwardsCursor: null, itemsBackwardsCursor: null,
         }),
       } });
-      send({ method: 'thread/started', params: { thread } });
+      if (scenario !== 'early-thread-notification') {
+        send({ method: 'thread/started', params: { thread } });
+      }
       phase = 'turn';
       return;
     }
@@ -540,12 +560,20 @@ function runFixture() {
       }
       send({ id: message.id, result: { turn: runningTurn } });
       send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
-      phase = scenario === 'interrupt'
+      phase = ['interrupt', 'context-interrupt'].includes(scenario)
         ? 'interrupt'
         : ['ssh-tool', 'knowledge-tool', 'mcp-elicitation', 'mcp-resolved'].includes(scenario)
           ? scenario
           : 'complete';
-      if (scenario === 'interrupt') emitInterruptibleTurn();
+      if (scenario === 'context-usage') {
+        emitContextUsage();
+        emitRichTurn();
+      }
+      else if (scenario === 'context-interrupt') {
+        emitContextUsage();
+        emitInterruptibleTurn();
+      }
+      else if (scenario === 'interrupt') emitInterruptibleTurn();
       else if (scenario === 'commentary-only') emitCommentaryOnlyTurn();
       else if (scenario === 'foreign-completed') emitForeignTurn('completed');
       else if (scenario === 'foreign-interrupted') emitForeignTurn('interrupted');

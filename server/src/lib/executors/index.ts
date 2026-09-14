@@ -77,6 +77,8 @@
 //                              автокомпакта в токенах. Есть → кокпит подставляет туда
 //                              значение из «Настроек → Запуски». Нет → у этого CLI
 //                              может быть свой transport через opts.compactWindow.
+//   chatAutoCompact?         — адаптер применяет opts.compactWindow своим transport.
+//                              Вместе с autoCompactEnv объявляет поддержку порога UI.
 //   session?                 — умеет ли исполнитель ЖИТЬ между ходами:
 //                              { mode: 'persistent'|'per-turn', unsolicited: boolean,
 //                                restartOn?: string[], open(spec) -> handle }.
@@ -215,6 +217,7 @@ export interface ExecutorAdapter {
   updateCmd?: readonly string[];
   catalogLive?: boolean;
   autoCompactEnv?: string;
+  chatAutoCompact?: boolean;
   retryContract?: string;
   scopedWorkspace?: boolean | ((config: unknown) => unknown);
   trustedDirectories?: boolean | ((config: unknown) => unknown);

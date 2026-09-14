@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 
 import { resolveModelRef, sameModelRef } from '../../chat/modelRef.ts';
 import { contextFill } from '../../../../../shared/chatContext.ts';
+import { normalizeContextUsage } from '../../../../../shared/chatContextUsage.ts';
 import {
   cbData,
   clipText,
@@ -147,14 +148,7 @@ function clearSessionContext(record: Payload, { discardSeed = false }: {
 }
 
 function applyContextUsage(record: Payload, result: Payload, run: RunState | null): void {
-  const metric = typeof result.contextMetric === 'string' ? result.contextMetric : '';
-  const contextTokens = nonNegative(result.contextTokens);
-  if (contextTokens !== null && (contextTokens > 0 || metric)) record.contextTokens = contextTokens;
-  else if (positive(run?.contextTokens)) record.contextTokens = positive(run?.contextTokens);
-  const contextWindow = positive(result.contextWindow);
-  if (contextWindow) record.contextWindow = contextWindow;
-  if (metric) record.contextMetric = metric;
-  if (Object.hasOwn(result, 'contextIsEstimate')) record.contextIsEstimate = result.contextIsEstimate === true;
+  Object.assign(record, normalizeContextUsage(run), normalizeContextUsage(result));
   const totalInputTokens = nonNegative(result.totalInputTokens);
   if (totalInputTokens !== null) record.totalInputTokens = totalInputTokens;
   const cachedInputTokens = nonNegative(result.cachedInputTokens);
@@ -351,7 +345,13 @@ export class TelegramPultAssistant {
     if (!resolved.ok || provider?.available !== true || provider?.chatEnabled !== true || !hasAuto) {
       throw new Error('Выбранный исполнитель недоступен в режиме auto. Открой /chats и выбери совместимую модель.');
     }
-    return { model: resolved.model as Payload, modelRef: resolved.modelRef as Payload };
+    return {
+      model: {
+        ...resolved.model,
+        chatAutoCompact: (provider.capabilities as Payload | undefined)?.chatAutoCompact === true,
+      },
+      modelRef: resolved.modelRef as Payload,
+    };
   }
 
   async _prepare(lease: AssistantLease, settings: Payload): Promise<Prepared> {
@@ -770,9 +770,12 @@ export class TelegramPultAssistant {
   }
 
   async _sendResult(prepared: Prepared, result: Payload, run: RunState) {
-    const contextTokens = positive(result.contextTokens) || positive(run.contextTokens);
-    const contextWindow = this._contextWindow(prepared, result);
-    const compactWindow = Math.max(0, Number(await this.readCompactWindow()) || 0);
+    const usage = { ...normalizeContextUsage(run), ...normalizeContextUsage(result) };
+    const unavailable = ['unavailable', 'legacy-unavailable'].includes(usage.contextMetric || '');
+    const contextTokens = unavailable ? 0 : (usage.contextTokens || 0);
+    const contextWindow = this._contextWindow(prepared, { ...result, ...usage });
+    const compactWindow = prepared.model.chatAutoCompact === true
+      ? Math.max(0, Number(await this.readCompactWindow()) || 0) : 0;
     const summary = turnSummary({
       files: [...run.files],
       tokens: run.tokens,
@@ -884,7 +887,7 @@ export class TelegramPultAssistant {
     if (!run || run.settled) return;
     if (event === 'chat-progress') {
       run.tokens = positive(payload.tokens) || run.tokens;
-      run.contextTokens = positive(payload.contextTokens) || run.contextTokens;
+      Object.assign(run, normalizeContextUsage(payload));
 
       return;
     }

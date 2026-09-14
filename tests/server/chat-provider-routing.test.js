@@ -165,6 +165,7 @@ test('chat API не принимает client-owned surface и не запуск
 test('contextCache идёт живьём в SSE, переживает F5 в active и возвращается с ответом', async (t) => {
   let release;
   let progressSeen;
+  let emitProgress;
   const gate = new Promise((resolve) => { release = resolve; });
   t.after(() => release?.());
   const progress = new Promise((resolve) => { progressSeen = resolve; });
@@ -174,7 +175,11 @@ test('contextCache идёт живьём в SSE, переживает F5 в acti
   const executor = {
     id: 'claude',
     async run(options) {
-      options.onProgress(5, { contextTokens: 100, contextCache });
+      emitProgress = options.onProgress;
+      options.onProgress(5, {
+        contextTokens: 100, contextWindow: 256_000,
+        contextMetric: 'active-input-v1', contextIsEstimate: false, contextCache,
+      });
       progressSeen();
       await gate;
       return {
@@ -213,14 +218,57 @@ test('contextCache идёт живьём в SSE, переживает F5 в acti
 
   const progressEvent = events.find((entry) => entry.event === 'chat-progress');
   assert.deepEqual(progressEvent?.data.contextCache, contextCache);
+  assert.equal(progressEvent?.data.contextWindow, 256_000);
+  assert.equal(progressEvent?.data.contextMetric, 'active-input-v1');
+  assert.equal(progressEvent?.data.contextIsEstimate, false);
   const active = await app.inject({ method: 'GET', url: '/api/chat/active' });
   assert.equal(active.statusCode, 200);
   assert.deepEqual(active.json().active[0]?.contextCache, contextCache);
+  assert.equal(active.json().active[0]?.contextWindow, 256_000);
+  assert.equal(active.json().active[0]?.contextMetric, 'active-input-v1');
+
+  emitProgress(6, { contextTokens: 0, contextWindow: 128_000, contextMetric: 'active-input-v1' });
+  emitProgress(7);
+  const zero = (await app.inject({ method: 'GET', url: '/api/chat/active' })).json().active[0];
+  assert.equal(zero.contextTokens, 0, 'ноль переживает событие только с расходом вывода');
+  assert.equal(zero.contextWindow, 128_000);
+  assert.equal(Object.hasOwn(events.at(-1).data, 'contextTokens'), false);
 
   release();
   const result = await running;
   assert.equal(result.statusCode, 200);
   assert.deepEqual(result.json().contextCache, contextCache);
+});
+
+test('остановленный ход возвращает весь последний снимок, даже если ошибка его не несёт', async (t) => {
+  const sample = {
+    contextTokens: 0, contextWindow: 256_000,
+    contextMetric: 'active-input-v1', contextIsEstimate: false,
+  };
+  const { app } = await apiFixture(t, { executor: {
+    id: 'claude',
+    async run(options) {
+      options.onProgress(8, sample);
+      throw Object.assign(new Error('Остановлен'), { stopped: true, sessionId: 'stopped-session' });
+    },
+  } });
+  const saved = await app.inject({
+    method: 'PUT', url: '/api/chat/store/chat', payload: { chat: {
+      id: 'context-stop', modelRef: { provider: 'claude', model: 'claude-test' },
+      messages: [], revision: 0,
+    } },
+  });
+  assert.equal(saved.statusCode, 200);
+  const response = await app.inject({
+    method: 'POST', url: '/api/chat', payload: {
+      chatKey: 'context-stop', modelRef: { provider: 'claude', model: 'claude-test' }, message: 'Проверь',
+    },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().stopped, true);
+  for (const [key, value] of Object.entries(sample)) {
+    assert.equal(response.json()[key], value, key);
+  }
 });
 
 test('Kimi forged sessionId отсекается до executor-а, resume берётся только из sidecar', async (t) => {

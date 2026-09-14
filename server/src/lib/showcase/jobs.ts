@@ -13,6 +13,7 @@
 // Терминальное состояние обратно в работу не возвращается: «Продолжить» создаёт
 // новую попытку с повторной проверкой входов.
 import { promises as fs } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
@@ -39,6 +40,9 @@ export interface JobRecord {
   // Ключ повтора: одни и те же входы дают одно задание. Двойной клик по «Собрать»
   // не запускает второй конфликтующий прогон.
   idempotencyKey: string;
+  // BuildRun помечает дочернее задание устойчивым ключом ДО запуска операции.
+  // Массив нужен, когда координатор присоединился к уже идущему ручному job.
+  stageKeys?: string[];
   inputHashes: Record<string, string>;
   inputRevision: number;
   deadlineAt: string;
@@ -54,7 +58,13 @@ export interface ShowcaseJobsOptions {
   limits: () => { maxQueued: number; jobTimeoutMs: number };
 }
 
-const TERMINAL: ShowcaseJobState[] = ['succeeded', 'failed', 'interrupted', 'cancelled'];
+const TERMINAL: ShowcaseJobState[] = [
+  'awaiting_review',
+  'succeeded',
+  'failed',
+  'interrupted',
+  'cancelled',
+];
 const JOB_FILE = /^[a-f0-9]{16}$/;
 // Пропавший heartbeat дольше этого срока означает, что worker не отчитывается,
 // даже если его процесс формально ещё существует.
@@ -100,6 +110,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
   // перечитывать каталог на каждое обращение дорого. Файл остаётся источником
   // правды для перезапуска, память — его отражением.
   const records = new Map<string, JobRecord>();
+  const stageContext = new AsyncLocalStorage<string>();
   let recovered = false;
 
   function fileOf(id: string): string {
@@ -143,6 +154,9 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
       state: record.state,
       sequence: record.sequence,
       label: record.progress.label,
+      index: record.progress.index,
+      total: record.progress.total,
+      error: record.error,
     });
   }
 
@@ -235,6 +249,18 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     return record;
   }
 
+  function findByStageKey(stageKey: string): JobRecord | null {
+    return list().find((record) => record.stageKeys?.includes(stageKey)) ?? null;
+  }
+
+  /**
+   * Контекст устойчивого ключа проходит через существующую операцию до enqueue,
+   * не заставляя voice/record/assemble знать о полном координаторе.
+   */
+  function withStageKey<Value>(stageKey: string, task: () => Promise<Value>): Promise<Value> {
+    return stageContext.run(stageKey, task);
+  }
+
   /**
    * Заявка на задание. Совпадение ключа повтора с незавершённым заданием
    * возвращает его же: «Собрать» с теми же входами не создаёт второй прогон,
@@ -250,8 +276,20 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     assertRecovered();
 
     const existing = active().find((record) => record.idempotencyKey === input.idempotencyKey);
+    const stageKey = stageContext.getStore();
 
     if (existing) {
+      if (stageKey && !existing.stageKeys?.includes(stageKey)) {
+        const joined = {
+          ...existing,
+          stageKeys: [...(existing.stageKeys ?? []), stageKey],
+        };
+
+        await persist(joined);
+
+        return { record: joined, reused: true };
+      }
+
       return { record: existing, reused: true };
     }
 
@@ -277,6 +315,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
       startedAt: new Date().toISOString(),
       finishedAt: null,
       idempotencyKey: input.idempotencyKey,
+      ...(stageKey ? { stageKeys: [stageKey] } : {}),
       inputHashes: input.inputHashes,
       inputRevision: input.inputRevision,
       deadlineAt: new Date(Date.now() + jobTimeoutMs).toISOString(),
@@ -332,7 +371,10 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
    * о том же задании его не меняет, а «Продолжить» заводит новую попытку.
    */
   async function finish(id: string, outcome: {
-    state: Extract<ShowcaseJobState, 'succeeded' | 'failed' | 'interrupted' | 'cancelled'>;
+    state: Extract<
+      ShowcaseJobState,
+      'awaiting_review' | 'succeeded' | 'failed' | 'interrupted' | 'cancelled'
+    >;
     error?: string | null;
     label?: string;
   }): Promise<JobRecord> {
@@ -340,6 +382,16 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
 
     if (isTerminal(record.state)) {
       return record;
+    }
+
+    // Поздний успех функции после сохранённой отмены не возвращает задание в
+    // succeeded: координатор увидит именно отмену и не запустит следующий этап.
+    if (record.state === 'cancelling' && outcome.state !== 'interrupted') {
+      outcome = {
+        state: 'cancelled',
+        error: null,
+        label: 'отменено',
+      };
     }
 
     const next: JobRecord = {
@@ -365,7 +417,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
   async function cancel(id: string): Promise<JobRecord> {
     const record = read(id);
 
-    if (isTerminal(record.state)) {
+    if (isTerminal(record.state) || record.state === 'cancelling') {
       return record;
     }
 
@@ -425,6 +477,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     active,
     cancel,
     enqueue,
+    findByStageKey,
     finish,
     list,
     progress,
@@ -432,6 +485,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     recover,
     removeForProject,
     sweepExpired,
+    withStageKey,
   };
 }
 

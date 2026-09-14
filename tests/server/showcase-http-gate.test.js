@@ -12,6 +12,24 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 const PROJECT_ID = '0123456789abcdef';
+const BUILD_ID = 'fedcba9876543210';
+const MANIFEST_ID = `manifest-${'a'.repeat(32)}`;
+const REQUEST_ID = 'build-request-http-0001';
+
+const BUILD_RUN = {
+  id: BUILD_ID,
+  projectId: PROJECT_ID,
+  state: 'running',
+  sequence: 3,
+  stage: 'voice-and-alignment',
+  initialRevision: 1,
+  children: [],
+  cancelRequested: false,
+  error: null,
+  startedAt: '2026-09-12T00:00:00.000Z',
+  updatedAt: '2026-09-12T00:00:01.000Z',
+  finishedAt: null,
+};
 
 const OVERVIEW = {
   targets: [{
@@ -27,6 +45,7 @@ const OVERVIEW = {
   profiles: [{ id: 'demo-profile', ready: true, reason: '' }],
   projects: [],
   jobs: [],
+  buildRuns: [],
   limits: {
     maxScenes: 20,
     maxSceneSeconds: 120,
@@ -69,6 +88,26 @@ function serviceStub(overrides = {}) {
 
       return { id, state: 'cancelling' };
     },
+    startBuild: async (id, revision, requestId) => {
+      calls.push(['start-build', id, revision, requestId]);
+
+      return BUILD_RUN;
+    },
+    readBuild: (id) => {
+      calls.push(['read-build', id]);
+
+      return BUILD_RUN;
+    },
+    cancelBuild: async (id) => {
+      calls.push(['cancel-build', id]);
+
+      return { ...BUILD_RUN, state: 'cancelling', cancelRequested: true };
+    },
+    finalManifest: async (id, manifestId) => {
+      calls.push(['manifest', id, manifestId]);
+
+      return { version: 1, projectId: id };
+    },
     setVoice: async (id, revision, choice) => {
       calls.push(['set-voice', id, revision, choice]);
 
@@ -81,6 +120,24 @@ function serviceStub(overrides = {}) {
         code: 'voice_unavailable',
         status: 503,
       });
+    },
+    previewNarration: async (input) => {
+      calls.push(['preview-narration', input]);
+
+      throw Object.assign(new Error('движок не установлен'), {
+        code: 'voice_unavailable',
+        status: 503,
+      });
+    },
+    readDictionary: async () => {
+      calls.push(['read-dictionary']);
+
+      return { text: 'зам+ок\n', entries: ['зам+ок'], errors: [] };
+    },
+    saveDictionary: async (text) => {
+      calls.push(['save-dictionary', text]);
+
+      return { text, entries: [], errors: [] };
     },
     targets: {
       resolveSelected: async (ref) => {
@@ -137,11 +194,24 @@ const REQUESTS = [
   ['POST', '/api/showcase', { kind: 'project', id: 'demo-profile' }],
   ['PUT', `/api/showcase/${PROJECT_ID}`, { expectedRevision: 1, title: 'Ролик' }],
   ['DELETE', `/api/showcase/${PROJECT_ID}`, undefined],
+  ['POST', `/api/showcase/${PROJECT_ID}/build`, { revision: 1, requestId: REQUEST_ID }],
+  ['GET', `/api/showcase/builds/${BUILD_ID}`, undefined],
+  ['POST', `/api/showcase/builds/${BUILD_ID}/cancel`, {}],
+  ['GET', `/api/showcase/${PROJECT_ID}/manifests/${MANIFEST_ID}`, undefined],
   ['POST', '/api/showcase/jobs/0123456789abcdef/cancel', {}],
   // Установка голоса скачивает и запускает код на машине человека: агенту и
   // выключенному плагину она закрыта тем же гардом, что и остальное.
   ['POST', '/api/showcase/voices/install', { voiceId: 'irina' }],
   ['POST', '/api/showcase/voices/install/cancel', {}],
+  ['POST', '/api/showcase/voices/preview', {
+    voiceRef: 'silero:xenia',
+    narration: 'Своя реплика.',
+    direction: { tone: null, pace: null, emphasis: [], pauses: [], stresses: [] },
+    pronunciationOverrides: [],
+  }],
+  // Словарь ударений — тоже настройка человека: агент его не читает и не правит.
+  ['GET', '/api/showcase/voices/dictionary', undefined],
+  ['PUT', '/api/showcase/voices/dictionary', { text: 'зам+ок' }],
 ];
 
 test('токен агента в раздел не пускается — это действия человека', async (t) => {
@@ -310,6 +380,7 @@ test('идентификатор ролика проверяется по фор
     ['POST', `/api/showcase/${'ролик-с-дефисом'}/record`],
     ['GET', `/api/showcase/${'ролик-с-дефисом'}/artifacts/abcdef0123456789`],
     ['GET', '/api/showcase/jobs/ЗАДАНИЕ'],
+    ['GET', '/api/showcase/builds/ЗАПУСК'],
   ];
 
   for (const [method, url] of routes) {
@@ -329,6 +400,72 @@ test('идентификатор ролика проверяется по фор
   }
 
   assert.deepEqual(service.calls, []);
+});
+
+test('полный запуск проверяет revision/requestId и отвечает сохранённым run', async (t) => {
+  const { app, service } = await fixture(t);
+  const url = `/api/showcase/${PROJECT_ID}/build`;
+
+  for (const payload of [
+    { requestId: REQUEST_ID },
+    { revision: 1, requestId: 'короткий ключ' },
+    { revision: 0, requestId: REQUEST_ID },
+  ]) {
+    const response = await app.inject({ method: 'POST', url, payload });
+
+    assert.equal(response.statusCode, 400);
+  }
+
+  assert.deepEqual(service.calls, []);
+
+  const accepted = await app.inject({
+    method: 'POST',
+    url,
+    payload: { revision: 1, requestId: REQUEST_ID },
+  });
+
+  assert.equal(accepted.statusCode, 202);
+  assert.deepEqual(accepted.json(), { run: BUILD_RUN });
+  assert.deepEqual(service.calls, [['start-build', PROJECT_ID, 1, REQUEST_ID]]);
+});
+
+test('снимок и отмена BuildRun идут отдельными серверными ручками', async (t) => {
+  const { app, service } = await fixture(t);
+  const read = await app.inject({ method: 'GET', url: `/api/showcase/builds/${BUILD_ID}` });
+  const cancel = await app.inject({
+    method: 'POST',
+    url: `/api/showcase/builds/${BUILD_ID}/cancel`,
+  });
+
+  assert.equal(read.statusCode, 200);
+  assert.deepEqual(read.json(), { run: BUILD_RUN });
+  assert.equal(cancel.statusCode, 200);
+  assert.equal(cancel.json().run.state, 'cancelling');
+  assert.deepEqual(service.calls, [
+    ['read-build', BUILD_ID],
+    ['cancel-build', BUILD_ID],
+  ]);
+});
+
+test('manifest имеет свой regex и выдаётся только через проверку службы', async (t) => {
+  const { app, service } = await fixture(t);
+  const invalid = await app.inject({
+    method: 'GET',
+    url: `/api/showcase/${PROJECT_ID}/manifests/not-a-manifest`,
+  });
+
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().error, 'bad_manifest_id');
+  assert.deepEqual(service.calls, []);
+
+  const valid = await app.inject({
+    method: 'GET',
+    url: `/api/showcase/${PROJECT_ID}/manifests/${MANIFEST_ID}`,
+  });
+
+  assert.equal(valid.statusCode, 200);
+  assert.deepEqual(valid.json(), { version: 1, projectId: PROJECT_ID });
+  assert.deepEqual(service.calls, [['manifest', PROJECT_ID, MANIFEST_ID]]);
 });
 
 test('состояние задания отдаётся сводкой без входов и identity процесса', async (t) => {
@@ -375,8 +512,17 @@ test('выбор голоса проверяет редакцию, темп и �
   });
 
   assert.equal(accepted.statusCode, 200);
+
+  const extreme = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 1, voiceRef: 'silero:xenia', pace: 'fastest' },
+  });
+
+  assert.equal(extreme.statusCode, 200, 'крайние ступени темпа — часть контракта');
   assert.deepEqual(service.calls, [
     ['set-voice', PROJECT_ID, 1, { voiceRef: 'silero:xenia', pace: 'slow' }],
+    ['set-voice', PROJECT_ID, 1, { voiceRef: 'silero:xenia', pace: 'fastest' }],
   ]);
 });
 
@@ -394,4 +540,84 @@ test('образец голоса требует ссылку и отдаёт о
 
   assert.equal(blocked.statusCode, 503);
   assert.equal(blocked.json().error, 'voice_unavailable');
+});
+
+test('своя реплика уходит POST-телом, а произношение не принимает клиентский hash', async (t) => {
+  const { app, service } = await fixture(t);
+  const direction = {
+    tone: null,
+    pace: 'fast',
+    emphasis: [],
+    pauses: [],
+    stresses: [],
+  };
+  const narration = 'Секретный текст замка.';
+  const replacement = {
+    from: narration.indexOf('замка'),
+    to: narration.indexOf('замка') + 'замка'.length,
+    pronunciation: 'за\u0301мка',
+    voiceRef: 'silero:xenia',
+  };
+  const accepted = await app.inject({
+    method: 'POST',
+    url: '/api/showcase/voices/preview',
+    payload: {
+      voiceRef: 'silero:xenia',
+      narration,
+      direction,
+      pronunciationOverrides: [replacement],
+    },
+  });
+
+  assert.equal(accepted.statusCode, 503, 'известный отказ движка проходит своим кодом');
+  assert.equal(accepted.json().error, 'voice_unavailable');
+
+  const [name, input] = service.calls[0];
+
+  assert.equal(name, 'preview-narration');
+  assert.equal(input.narration, narration);
+  assert.deepEqual(input.direction, direction);
+  assert.deepEqual(input.pronunciationOverrides, [replacement]);
+  assert.equal(input.signal instanceof AbortSignal, true);
+
+  const forged = await app.inject({
+    method: 'POST',
+    url: '/api/showcase/voices/preview',
+    payload: {
+      voiceRef: 'silero:xenia',
+      narration,
+      direction,
+      pronunciationOverrides: [{ ...replacement, textHash: 'чужой-хеш' }],
+    },
+  });
+
+  assert.equal(forged.statusCode, 400);
+  assert.equal(forged.json().error, 'bad_voice_preview');
+  assert.equal(service.calls.length, 1, 'поддельный hash не дошёл до службы');
+});
+
+test('словарь ударений читается и сохраняется текстом, а не чем попало', async (t) => {
+  const { app, service } = await fixture(t);
+  const read = await app.inject({ method: 'GET', url: '/api/showcase/voices/dictionary' });
+
+  assert.equal(read.statusCode, 200);
+  assert.deepEqual(read.json(), { text: 'зам+ок\n', entries: ['зам+ок'], errors: [] });
+
+  const bad = await app.inject({
+    method: 'PUT',
+    url: '/api/showcase/voices/dictionary',
+    payload: { text: ['зам+ок'] },
+  });
+
+  assert.equal(bad.statusCode, 400);
+  assert.equal(bad.json().error, 'bad_dictionary');
+
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/showcase/voices/dictionary',
+    payload: { text: 'дин+амика\n' },
+  });
+
+  assert.equal(saved.statusCode, 200);
+  assert.deepEqual(service.calls, [['read-dictionary'], ['save-dictionary', 'дин+амика\n']]);
 });

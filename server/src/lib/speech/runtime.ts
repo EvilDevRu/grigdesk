@@ -1233,6 +1233,7 @@ export class SpeechRuntime {
           const transcript = await warmup.controller.transcribe({
             filePath,
             progressFile: path.join(jobDir, 'progress.json'),
+            wordTimestamps: requestedSpeech.wordTimestamps,
             signal,
           });
           const result = {
@@ -1252,7 +1253,7 @@ export class SpeechRuntime {
           return result;
         } catch (error) {
           if (signal?.aborted || (error as Error)?.name === 'AbortError') throw error;
-          return this.#oneShot({
+          return await this.#oneShot({
             filePath,
             workDir: jobDir,
             signal,
@@ -1263,7 +1264,10 @@ export class SpeechRuntime {
           });
         }
       }
-      return this.#oneShot({
+      // Именно `return await`: без await блок finally срабатывает до конца разбора и
+      // сносит свой рабочий каталог, пока ffmpeg ещё пишет в него wav, — так пропадала
+      // самопроверка речи презентаций («audio.wav: No such file or directory»).
+      return await this.#oneShot({
         filePath, workDir: jobDir, signal, requestedSpeech,
       });
     } finally {

@@ -30,10 +30,18 @@ const ARTIFACT_EXTENSIONS: Record<ShowcaseArtifactRef['kind'], string> = {
 
 // recorder-2: клип начинается с готовности экрана и дожидается затишья сети —
 // записи первой версии показывали загрузку страницы и пустые таблицы.
+// recorder-3: указатель и рамка подсветки впервые попали в запись — прежние клипы
+// сняты без них и обязаны устареть.
+// recorder-4: цель действия встаёт в удобную полосу экрана — прежние клипы подсвечивали
+// заголовок у нижней кромки, а содержимое под ним оставалось за кадром.
+// recorder-5: события привязаны к PTS через визуальную калибровку, а клипы приведены
+// к общему CFR; прежняя запись не может получить эти измерения задним числом.
 export const PRODUCER_VERSIONS = {
-  recorder: 'recorder-2',
+  recorder: 'recorder-5',
   voice: 'imported-1',
-  assembler: 'assembler-1',
+  // assembler-2 публикует проверенный manifest и использует точный sync-план,
+  // когда у сцены есть доказанные речевая и видеошкала.
+  assembler: 'assembler-2',
 };
 
 export function extensionOf(kind: ShowcaseArtifactRef['kind']): string {

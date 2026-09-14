@@ -91,6 +91,32 @@ test('fixture закреплён на официальной схеме Codex ap
   });
 });
 
+test('Codex передаёт контекст до конца хода и сохраняет последний замер после остановки', async (t) => {
+  for (const stopped of [false, true]) {
+    const f = await fixture(t, stopped ? 'context-interrupt' : 'context-usage');
+    const controller = new AbortController();
+    const samples = [];
+    const run = codex.run(runOptions(f, {
+      signal: controller.signal,
+      onProgress(_tokens, info) {
+        if (!info) return;
+        samples.push(info);
+        if (stopped && info.contextTokens === 60_000) controller.abort();
+      },
+    }));
+    const result = stopped ? await run.catch((error) => error) : await run;
+
+    assert.deepEqual(samples.map((sample) => sample.contextTokens), [180_000, 60_000]);
+    assert.ok(samples.every((sample) => sample.contextWindow === 256_000));
+    assert.ok(samples.every((sample) => sample.contextMetric === 'active-input-v1'));
+    assert.equal(result.contextTokens, 60_000);
+    assert.equal(result.contextWindow, 256_000);
+    assert.equal(result.contextMetric, 'active-input-v1');
+    assert.equal(result.contextCache.readTokens, 59_000);
+    assert.equal(result.stopped === true, stopped);
+  }
+});
+
 test('Codex run использует app-server и не теряет rich events, steps и resume sessionId', async (t) => {
   const f = await fixture(t);
   const live = [];
@@ -522,7 +548,7 @@ test('Codex ограничивает один multi-file tool двадцатью
 });
 
 test('Codex сообщает id thread до первого шага хода', async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, 'early-thread-notification');
   const seen = [];
   const live = [];
   const result = await codex.run(runOptions(f, {

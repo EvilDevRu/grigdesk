@@ -8,13 +8,23 @@
 // Порядок хранится числом `order`, а каталоги артефактов — по `sceneId`.
 // Перестановка меняет номера, но не трогает файлы: клип третьей сцены остаётся
 // клипом той же сцены, куда бы её ни передвинули.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import type {
   ShowcaseAction,
   ShowcaseProject,
   ShowcaseScene,
 } from '../../../../shared/showcaseContracts.ts';
+import { parseNarration, plainNarration } from '../../../../shared/showcaseNarration.ts';
+import {
+  SHOWCASE_SYNC_BINDING_VERSION,
+  validateShowcaseSyncBindings,
+} from '../../../../shared/showcaseSync.ts';
+import type {
+  ShowcaseSyncBindings,
+  ShowcaseSyncCue,
+  ShowcaseSyncValidation,
+} from '../../../../shared/showcaseSync.ts';
 import { ShowcaseError, notFound } from './errors.ts';
 
 export interface SceneDraft {
@@ -25,11 +35,122 @@ export interface SceneDraft {
   subtitleText: string;
   startState: string | null;
   readyCondition: string | null;
+  // Продолжение начинается там, где закончилась предыдущая сцена, а не со своего
+  // экрана. Необязательно: сцена без указания открывает экран сама.
+  continuesPrevious?: boolean;
   actions: ShowcaseAction[];
+  // `undefined` при patch сохраняет прежние связи, `null` удаляет их явно.
+  // Хеши и cue создаёт сервер; HTTP первого этапа это поле ещё не принимает.
+  syncBindings?: ShowcaseSyncBindings | null;
 }
+
+export type SceneSyncCueDraft = Omit<ShowcaseSyncCue, 'id'>;
+
+export type SceneSyncBindingsState = ShowcaseSyncValidation | {
+  status: 'missing';
+  issues: [];
+};
 
 export function newSceneId(): string {
   return `scene-${randomBytes(5).toString('hex')}`;
+}
+
+/** Хеш смысловой связи разделён по домену, чтобы текст не совпал с JSON действий. */
+function syncHash(domain: 'text' | 'actions', value: unknown): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ version: SHOWCASE_SYNC_BINDING_VERSION, domain, value }))
+    .digest('hex')
+    .slice(0, 32);
+}
+
+/** Хеш всегда считается от канонической строки без `+` и лишних пробелов. */
+export function syncTextHash(narration: string): string {
+  return syncHash('text', parseNarration(narration).text);
+}
+
+/** Хеш охватывает принятые действия целиком и сохраняет их порядок. */
+export function syncActionsHash(actions: readonly ShowcaseAction[]): string {
+  const canonical = actions.map((action) => {
+    if (action.kind === 'scroll') {
+      return { kind: action.kind, targetId: action.targetId, delta: action.delta };
+    }
+
+    if (action.kind === 'wait') {
+      return { kind: action.kind, ms: action.ms };
+    }
+
+    return { kind: action.kind, targetId: action.targetId };
+  });
+
+  return syncHash('actions', canonical);
+}
+
+/**
+ * Единая проверка сохранённой привязки сцены. Любой будущий планировщик обязан
+ * брать связь отсюда: несовпавшие хеши означают `stale`, а не новые координаты
+ * поверх старой ручной работы.
+ */
+export function sceneSyncBindingsState(scene: ShowcaseScene): SceneSyncBindingsState {
+  if (!scene.syncBindings) {
+    return { status: 'missing', issues: [] };
+  }
+
+  return validateShowcaseSyncBindings({
+    bindings: scene.syncBindings,
+    canonicalText: parseNarration(scene.narration).text,
+    actions: scene.actions,
+    expectedTextHash: syncTextHash(scene.narration),
+    expectedActionsHash: syncActionsHash(scene.actions),
+  });
+}
+
+/** Новые cue получают ID и оба хеша на сервере, а не из ответа модели или UI. */
+export function createSyncBindings(
+  narration: string,
+  actions: readonly ShowcaseAction[],
+  cues: readonly SceneSyncCueDraft[],
+): ShowcaseSyncBindings {
+  const bindings: ShowcaseSyncBindings = {
+    version: SHOWCASE_SYNC_BINDING_VERSION,
+    textHash: syncTextHash(narration),
+    actionsHash: syncActionsHash(actions),
+    cues: cues.map((cue) => ({
+      ...cue,
+      id: `cue-${randomBytes(6).toString('hex')}`,
+    })),
+  };
+  const validation = validateShowcaseSyncBindings({
+    bindings,
+    canonicalText: parseNarration(narration).text,
+    actions,
+    expectedTextHash: bindings.textHash,
+    expectedActionsHash: bindings.actionsHash,
+  });
+
+  if (validation.status !== 'valid') {
+    throw new ShowcaseError(
+      'bad_sync_bindings',
+      validation.issues[0]?.message ?? 'Смысловые привязки сцены некорректны.',
+      400,
+    );
+  }
+
+  return bindings;
+}
+
+/** Явно присланная привязка обязана подходить итоговой редакции сцены. */
+function assertSceneSyncBindings(scene: ShowcaseScene): void {
+  const validation = sceneSyncBindingsState(scene);
+
+  if (validation.status === 'valid' || validation.status === 'missing') {
+    return;
+  }
+
+  throw new ShowcaseError(
+    'bad_sync_bindings',
+    validation.issues[0]?.message ?? 'Смысловые привязки сцены некорректны.',
+    400,
+  );
 }
 
 const EMPTY_DIRECTION: ShowcaseScene['direction'] = {
@@ -47,25 +168,33 @@ const EMPTY_DIRECTION: ShowcaseScene['direction'] = {
  *
  * Голос и темп наследуются у последней сцены: человек выбирает их для ролика
  * целиком, и новая сцена, заговорившая другим голосом, читалась бы как ошибка.
+ * Субтитр по умолчанию повторяет речь без знаков ударения: «з+амок» в субтитре
+ * был бы опечаткой.
  */
 export function createScene(project: ShowcaseProject, draft: SceneDraft): ShowcaseScene {
   const order = project.scenes.reduce((max, scene) => Math.max(max, scene.order), 0) + 1;
   const previous = [...project.scenes].sort((left, right) => left.order - right.order).at(-1);
   const inheritedVoice = previous?.audioSource.kind === 'tts' ? previous.audioSource.voiceRef : null;
 
-  return {
+  const created: ShowcaseScene = {
     id: newSceneId(),
     order,
     title: draft.title.trim() || `Сцена ${order}`,
     screenId: draft.screenId,
     startState: draft.startState,
     readyCondition: draft.readyCondition,
+    continuesPrevious: draft.continuesPrevious ?? false,
     actions: draft.actions,
     narration: draft.narration,
     caption: draft.caption,
-    subtitleText: draft.subtitleText || draft.narration,
+    subtitleText: draft.subtitleText || plainNarration(draft.narration),
     direction: { ...EMPTY_DIRECTION, pace: previous?.direction.pace ?? null },
+    pronunciationOverrides: [],
     timing: null,
+    syncBindings: draft.syncBindings ?? null,
+    speechTiming: null,
+    speechAlignment: null,
+    recordingTiming: null,
     audioSource: { kind: 'tts', voiceRef: inheritedVoice, artifactId: null },
     audio: null,
     clip: null,
@@ -73,6 +202,12 @@ export function createScene(project: ShowcaseProject, draft: SceneDraft): Showca
     checks: [],
     stale: true,
   };
+
+  if (draft.syncBindings !== undefined) {
+    assertSceneSyncBindings(created);
+  }
+
+  return created;
 }
 
 export function sceneOf(project: ShowcaseProject, sceneId: string): ShowcaseScene {
@@ -91,7 +226,7 @@ export function sceneOf(project: ShowcaseProject, sceneId: string): ShowcaseScen
  * работу, сделанную заданием параллельно.
  */
 export function patchScene(scene: ShowcaseScene, patch: Partial<SceneDraft>): ShowcaseScene {
-  return {
+  const changed: ShowcaseScene = {
     ...scene,
     title: patch.title?.trim() || scene.title,
     screenId: patch.screenId ?? scene.screenId,
@@ -99,11 +234,21 @@ export function patchScene(scene: ShowcaseScene, patch: Partial<SceneDraft>): Sh
     readyCondition: patch.readyCondition === undefined
       ? scene.readyCondition
       : patch.readyCondition,
+    continuesPrevious: patch.continuesPrevious ?? scene.continuesPrevious ?? false,
     actions: patch.actions ?? scene.actions,
     narration: patch.narration ?? scene.narration,
     caption: patch.caption ?? scene.caption,
     subtitleText: patch.subtitleText ?? scene.subtitleText,
+    syncBindings: patch.syncBindings === undefined
+      ? scene.syncBindings
+      : patch.syncBindings,
   };
+
+  if (patch.syncBindings !== undefined) {
+    assertSceneSyncBindings(changed);
+  }
+
+  return changed;
 }
 
 /**

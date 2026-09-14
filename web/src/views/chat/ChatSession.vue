@@ -776,7 +776,19 @@ const modeHint = computed(() => modes.value.find((m) => m.id === currentMode.val
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
 // 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
 // который не показываем человеку как свойство модели.
-const ctxWindow = computed(() => sess.value?.contextWindow || currentModel.value?.context || CONTEXT_WINDOW);
+const ctxUsage = computed(() => {
+  const s = sess.value;
+
+  return {
+    contextWindow: s?.contextWindow,
+    contextMetric: s?.contextMetric,
+    contextIsEstimate: s?.contextIsEstimate,
+    ...(s?.sending ? s.liveContextUsage : null),
+  };
+});
+const ctxWindow = computed(() => (
+  ctxUsage.value?.contextWindow || currentModel.value?.context || CONTEXT_WINDOW
+));
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
 const modelUnknown = computed(() => !!currentModel.value?.unknown);
@@ -917,7 +929,13 @@ function onTaskChange(e) {
 // к модели, если исполнитель его сообщает), а не цифру с прошлого хода. Разница не косметическая:
 // автокомпакт CLI срабатывает на границе хода, и без живого замера кольцо весь ход горело
 // бы красным по уже сжатому контексту.
-const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext) || sess.value?.contextTokens || 0);
+const ctxHasLiveUsage = computed(() => sess.value?.sending
+  && (sess.value?.liveContextUsage?.contextTokens !== undefined || sess.value?.liveContext > 0));
+const ctxTokens = computed(() => (
+  ctxHasLiveUsage.value
+    ? (sess.value?.liveContextUsage?.contextTokens ?? sess.value.liveContext)
+    : (sess.value?.contextTokens || 0)
+));
 // ── Ближайший практический порог контекста ────────────────────────────────────
 // Кольцо считает заполненность только по объёму активного контекста: до настроенного
 // автосжатия или безопасного потолка окна. Кэш — отдельный факт последнего запроса;
@@ -929,7 +947,8 @@ const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext
 const ctxFill = computed(() => contextFill({
   tokens: ctxTokens.value,
   window: ctxWindow.value,
-  compactWindow: chat.compactWindow || 0, // 0 — автосжатие в настройках выключено
+  compactWindow: current.value.provider?.capabilities?.chatAutoCompact === true
+    ? (chat.compactWindow || 0) : 0,
 }));
 const ctxLimit = computed(() => ctxFill.value.limit);
 // Заполненность — доля ТОГО ЖЕ порога, по которому кольцо красится. Раньше цвет считался
@@ -939,14 +958,21 @@ const ctxLimit = computed(() => ctxFill.value.limit);
 // пока CLI уже сжимал контекст по кругу.
 const ctxPct = computed(() => ctxFill.value.pct);
 const ctxRuntimeWindowPending = computed(() => (
-  !sess.value?.contextWindow && !!currentModel.value?.contextRuntimeOnly
+  !ctxUsage.value?.contextWindow
+    && (!!currentModel.value?.contextRuntimeOnly || !(currentModel.value?.context > 0))
 ));
-const ctxUnavailable = computed(() => !!sess.value?.sessionId
-  && (sess.value?.contextMetric === 'legacy-unavailable' || ctxRuntimeWindowPending.value));
+const ctxUnavailable = computed(() => (!!sess.value?.sessionId || ctxHasLiveUsage.value)
+  && (['legacy-unavailable', 'unavailable'].includes(ctxUsage.value?.contextMetric)
+    || ctxRuntimeWindowPending.value || ctxWindowUnverified.value));
 const ctxClass = computed(() => (ctxUnavailable.value ? '' : ctxFill.value.tone));
-const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate);
+const ctxIsEstimate = computed(() => !!ctxUsage.value?.contextIsEstimate);
+const ctxSampleHint = computed(() => {
+  if (!sess.value?.sending) return '';
+
+  return ctxHasLiveUsage.value ? ' · этот ход' : ' · прошлый ход, ждём замер';
+});
 const ctxWindowUnverified = computed(() => (
-  !sess.value?.contextWindow && !!currentModel.value?.contextUnverified
+  !ctxUsage.value?.contextWindow && !!currentModel.value?.contextUnverified
 ));
 const fmtSessionTokens = (value) => {
   const tokens = Math.max(0, Number(value) || 0);
@@ -1031,7 +1057,7 @@ const ctxTooltip = computed(() => {
       detail: 'Агент готовит рабочую выжимку разговора.', rows: [], actions: false,
     };
   }
-  if (!s?.sessionId) {
+  if (!s?.sessionId && !ctxHasLiveUsage.value) {
     return {
       title: 'Контекст', percent: '', tone: '',
       status: s?.pendingSeed ? 'Контекст сжат' : 'Контекст пуст',
@@ -1052,14 +1078,14 @@ const ctxTooltip = computed(() => {
     addSessionRows();
     return {
       title: 'Контекст', percent: '', tone: '', status: 'Точная заполненность пока недоступна',
-      detail: 'Она появится после следующего завершённого хода.', rows, actions: true,
+      detail: 'Исполнитель пока не сообщил свежий размер контекста.', rows, actions: true,
     };
   }
 
   rows.unshift(
     {
       label: 'Сейчас',
-      value: `${ctxIsEstimate.value ? '≈ ' : ''}${fmtTokens(ctxTokens.value)}${s?.sending && s?.liveContext ? ' · этот ход' : ''}`,
+      value: `${ctxIsEstimate.value ? '≈ ' : ''}${fmtTokens(ctxTokens.value)}${ctxSampleHint.value}`,
     },
     { label: 'Порог', value: `${fmtTokens(ctxLimit.value)} · ${ctxLimitShort.value}` },
   );
@@ -1080,7 +1106,7 @@ const ctxTitle = computed(() => {
   const s = sess.value;
   const tokens = fmtTokens(ctxTokens.value);
   if (s?.compacting) return 'Сжимаю контекст…';
-  if (!s?.sessionId) {
+  if (!s?.sessionId && !ctxHasLiveUsage.value) {
     const empty = s?.pendingSeed
       ? 'Контекст сжат — выжимка уедет со следующим сообщением'
       : 'Контекст: пусто';
@@ -1094,7 +1120,7 @@ const ctxTitle = computed(() => {
   if (s?.compactedAt && !ctxTokens.value) return 'Контекст сжат — размер покажется после следующего хода';
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
   if (ctxUnavailable.value) {
-    return `Точная заполненность появится после следующего завершённого хода${spentHint.value}${cacheHint.value} · ${hint}`;
+    return `Точная заполненность пока недоступна${spentHint.value}${cacheHint.value} · ${hint}`;
   }
   const warn = ctxLimitReached.value
     ? ' · порог достигнут — пора сжать'
@@ -1102,7 +1128,8 @@ const ctxTitle = computed(() => {
   const estimate = ctxIsEstimate.value ? 'примерно ' : '';
   // Пока ход идёт, цифра замерена ЭТИМ ходом — про это стоит сказать прямо: иначе
   // упавший на глазах контекст (автокомпакт CLI) выглядит сбоем кольца.
-  const live = s?.sending && s?.liveContext ? ' (замер этого хода)' : '';
+  const live = s?.sending
+    ? (ctxHasLiveUsage.value ? ' (замер этого хода)' : ' (замер прошлого хода)') : '';
   // Считаем от того же порога, что рисует дугу. Окно модели остаётся в подсказке
   // справочно: на 1M оно вводило в заблуждение как основная шкала — «из 1 000 000»
   // читается как огромный запас там, где до сжатия остались проценты.
@@ -1121,7 +1148,12 @@ const RING_C = 2 * Math.PI * 9;
 // На время сжатия дуга — короткий бегунок: кольцо в этот момент вращается, а полное
 // (или почти полное) кольцо при вращении выглядело бы неподвижным.
 const SPIN_DASH = RING_C * 0.75;
-const ringDash = computed(() => (sess.value?.compacting ? SPIN_DASH : RING_C * (1 - ctxPct.value / 100)));
+const ringDash = computed(() => {
+  if (sess.value?.compacting) return SPIN_DASH;
+  if (ctxUnavailable.value) return RING_C;
+
+  return RING_C * (1 - ctxPct.value / 100);
+});
 // Нативный disabled выкидывает кнопку из Tab-порядка вместе с её подсказкой. Кольцо
 // остаётся фокусируемым и честно объявляет недоступность через aria-disabled; обработчик
 // ниже всё равно не запускает действие, пока нет сессии или идёт ход/сжатие.

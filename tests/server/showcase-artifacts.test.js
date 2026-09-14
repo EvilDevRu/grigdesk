@@ -13,6 +13,7 @@ import {
   finalIsCurrent,
   sceneFreshness,
 } from '../../server/src/lib/showcase/artifacts.ts';
+import { chainLineage } from '../../shared/showcaseChains.ts';
 
 const INPUTS = {
   targetFingerprint: 'target-1',
@@ -216,6 +217,49 @@ test('одинаковая длина звука при другом содер�
   assert.notEqual(finalInputHash(project, INPUTS), finalInputHash(sameDuration, INPUTS));
 });
 
+test('привязки и измерения старят только монтаж, а не исходные WAV/WebM', () => {
+  const scene = sceneFixture();
+  const project = { scenes: [scene], latestFinal: null };
+  const derived = {
+    id: 'recording-timing-0123456789ab',
+    inputHash: 'timing-input',
+    contentHash: 'timing-content',
+    producerVersion: 'recording-timing-1',
+    byteSize: 256,
+  };
+  const edited = {
+    ...scene,
+    syncBindings: {
+      version: 1,
+      textHash: 'text',
+      actionsHash: 'actions',
+      cues: [],
+    },
+    recordingTiming: derived,
+  };
+
+  assert.equal(sceneFreshness(edited, INPUTS).audio, true);
+  assert.equal(sceneFreshness(edited, INPUTS).clip, true);
+  assert.notEqual(
+    finalInputHash(project, INPUTS),
+    finalInputHash({ scenes: [edited], latestFinal: null }, INPUTS),
+  );
+});
+
+test('новый текст собственного WAV сохраняет звук, но требует нового монтажа', () => {
+  const recorded = sceneFixture({
+    audioSource: { kind: 'recorded', voiceRef: null, artifactId: 'audio-0123456789ab' },
+    audio: artifact('audio', 'content-of-file', 'content-of-file'),
+  });
+  const changed = { ...recorded, narration: 'Другая каноническая строка.' };
+
+  assert.equal(sceneFreshness(changed, INPUTS).audio, true);
+  assert.notEqual(
+    finalInputHash({ scenes: [recorded], latestFinal: null }, INPUTS),
+    finalInputHash({ scenes: [changed], latestFinal: null }, INPUTS),
+  );
+});
+
 test('правка соседней сцены не старит артефакты этой', () => {
   const first = sceneFixture({ id: 'scene-1', order: 1 });
   const second = sceneFixture({ id: 'scene-2', order: 2, narration: 'Вторая сцена.' });
@@ -227,5 +271,97 @@ test('правка соседней сцены не старит артефак�
     sceneFreshness(first, INPUTS).audio,
     true,
     'соседи независимы: иначе правка одной фразы стоила бы переозвучки всего ролика',
+  );
+});
+
+// Продолжение начинает там, где закончилась предыдущая сцена: его картинка зависит
+// от действий всей цепочки до него. Голова же от продолжений не зависит, а сцена
+// без цепочки хешируется как раньше — записи, снятые до цепочек, не устаревают.
+test('в цепочке правка головы старит продолжения, а правка продолжения — только его хвост', () => {
+  const head = sceneFixture({ id: 'scene-1', order: 1 });
+  const middle = sceneFixture({
+    id: 'scene-2',
+    order: 2,
+    continuesPrevious: true,
+    actions: [{ kind: 'click', targetId: 'open' }],
+    clip: null,
+  });
+  const tail = sceneFixture({
+    id: 'scene-3',
+    order: 3,
+    continuesPrevious: true,
+    actions: [{ kind: 'highlight', targetId: 'total' }],
+    clip: null,
+  });
+  const chained = (scenes) => scenes.map((scene) => ({
+    ...scene,
+    clip: artifact('clip', clipInputHash(scene, INPUTS, chainLineage(scenes, scene.id))),
+  }));
+  const scenes = chained([head, middle, tail]);
+  const freshness = (list, id) => {
+    const scene = list.find((item) => item.id === id);
+
+    return sceneFreshness(scene, INPUTS, chainLineage(list, id));
+  };
+
+  for (const scene of scenes) {
+    assert.equal(freshness(scenes, scene.id).clip, true, `свежая цепочка: ${scene.id}`);
+  }
+
+  assert.equal(
+    scenes[0].clip.inputHash,
+    clipInputHash(head, INPUTS),
+    'голова хешируется как одиночная сцена: старые записи не устаревают от появления цепочек',
+  );
+
+  const editedHead = scenes.map((scene) => (
+    scene.id === 'scene-1'
+      ? { ...scene, actions: [{ kind: 'hover', targetId: 'filter' }] }
+      : scene
+  ));
+
+  assert.equal(freshness(editedHead, 'scene-1').clip, false);
+  assert.equal(freshness(editedHead, 'scene-2').clip, false, 'продолжение начинает с результата головы');
+  assert.equal(freshness(editedHead, 'scene-3').clip, false);
+
+  const editedTail = scenes.map((scene) => (
+    scene.id === 'scene-3'
+      ? { ...scene, actions: [{ kind: 'hover', targetId: 'total' }] }
+      : scene
+  ));
+
+  assert.equal(freshness(editedTail, 'scene-1').clip, true, 'голова от хвоста не зависит');
+  assert.equal(freshness(editedTail, 'scene-2').clip, true);
+  assert.equal(freshness(editedTail, 'scene-3').clip, false);
+
+  // Снятый флаг делает сцену головой: клип, снятый продолжением, ей не годится.
+  const detached = scenes.map((scene) => (
+    scene.id === 'scene-2' ? { ...scene, continuesPrevious: false } : scene
+  ));
+
+  assert.equal(freshness(detached, 'scene-2').clip, false);
+  assert.equal(freshness(detached, 'scene-3').clip, false, 'у хвоста сменилась цепочка');
+});
+
+test('перестановка продолжения в другую цепочку старит его запись', () => {
+  const scenes = [
+    sceneFixture({ id: 'scene-1', order: 1 }),
+    sceneFixture({ id: 'scene-2', order: 2, continuesPrevious: true, clip: null }),
+    sceneFixture({ id: 'scene-3', order: 3, actions: [{ kind: 'click', targetId: 'run' }] }),
+  ].map((scene, index, list) => ({
+    ...scene,
+    clip: scene.clip ?? artifact('clip', clipInputHash(scene, INPUTS, chainLineage(list, scene.id))),
+  }));
+  const moved = [
+    { ...scenes[0], order: 1 },
+    { ...scenes[2], order: 2 },
+    { ...scenes[1], order: 3 },
+  ];
+  const second = moved.find((scene) => scene.id === 'scene-2');
+
+  assert.equal(
+    sceneFreshness(second, INPUTS, chainLineage(moved, 'scene-2')).clip,
+    false,
+    'продолжение теперь начинает с другой сцены — записанный клип показывал бы не то',
   );
 });

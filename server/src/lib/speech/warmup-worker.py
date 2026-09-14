@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -64,6 +65,15 @@ def write_progress(progress_file, done, total):
         pass
 
 
+def timestamp_value(value):
+    """Сохраняет недоверенную границу для строгой проверки на Node-стороне."""
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(result, 3) if math.isfinite(result) else None
+
+
 def main():
     parser = argparse.ArgumentParser(description='Прогрев faster-whisper перед upload')
     parser.add_argument('--nonce', required=True)
@@ -99,6 +109,9 @@ def main():
         request = json.loads(line)
         if request.get('type') != 'transcribe':
             raise ValueError('ожидался transcribe request')
+        word_timestamps = request.get('wordTimestamps', False)
+        if not isinstance(word_timestamps, bool):
+            raise ValueError('wordTimestamps должен быть boolean')
         language = None if args.lang == 'auto' else args.lang
         segments, info = model.transcribe(
             request['filePath'],
@@ -108,11 +121,20 @@ def main():
             condition_on_previous_text=args.condition,
             vad_filter=True,
             vad_parameters={'min_silence_duration_ms': args.vad_silence_ms},
+            word_timestamps=word_timestamps,
         )
         total = round(info.duration or 0, 2)
         write_progress(request.get('progressFile'), 0, total)
         output = []
+        words = []
         for index, segment in enumerate(segments, start=1):
+            if word_timestamps:
+                for word in list(getattr(segment, 'words', None) or []):
+                    words.append({
+                        'start': timestamp_value(getattr(word, 'start', None)),
+                        'end': timestamp_value(getattr(word, 'end', None)),
+                        'text': str(getattr(word, 'word', '') or '').strip(),
+                    })
             text = segment.text.strip()
             if text:
                 output.append({
@@ -132,6 +154,8 @@ def main():
                 'duration': total,
                 'model': args.model,
                 'segments': output,
+                'words': words,
+                'word_timestamps': word_timestamps,
                 **hotwords_measure,
             },
         })

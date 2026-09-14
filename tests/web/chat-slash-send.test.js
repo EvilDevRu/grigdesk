@@ -13,6 +13,7 @@ const PINIA_URL = pathToFileURL(fileURLToPath(
 const CHAT_TITLE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/chat-title.js', import.meta.url),
 )).href;
+const CONTEXT_USAGE_URL = new URL('../../shared/chatContextUsage.ts', import.meta.url).href;
 
 const apiHarness = {};
 globalThis.__slashChatApi = apiHarness;
@@ -49,6 +50,10 @@ function patch(source) {
       'const sseSubscribe = () => () => {};',
     )
     .replace("import { mdToText } from '../shared/md.ts';", 'const mdToText = (x) => x;')
+    .replace(
+      "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
+      `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,
+    )
     .replace(
       "import { chatVisibility } from '../shared/chat-visibility.js';",
       'const chatVisibility = { isVisible: () => false, register: () => ({ update() {}, dispose() {} }) };',

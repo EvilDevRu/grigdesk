@@ -538,39 +538,92 @@
   padding: 0;
 }
 
+/* Плитка версии кокпита в конце рейки. Геометрия повторяет пункт навигации, чтобы
+   стоять с ним в одной колонке, но тише: это справка, а не раздел. Все состояния одной
+   высоты — конец рейки не прыгает, когда сборка готова. */
 .ui-pressable[data-context='cockpit-version'] {
   position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  color: var(--ink-mid);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 37px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: var(--ink-low);
+  font-size: 12px;
+  text-align: left;
   transition: background 0.12s, color 0.12s;
 }
 
-.ui-pressable[data-context='cockpit-version'] > .ic {
-  display: block;
-  width: 16px;
-  height: 16px;
-}
-
-.ui-pressable[data-context='cockpit-version']:hover {
+.ui-pressable[data-context='cockpit-version']:hover:not([aria-busy='true']) {
   background: var(--surface);
   color: var(--ink);
 }
 
-.ui-pressable[data-context='cockpit-version'].checkout {
+/* Громкое состояние: сборка уже здесь, один клик. Не заливка, а кольцо и подсветка
+   тоном акцента — рецепт outline-кнопки библиотеки: сплошной синий блок в монохромной
+   рейке смотрелся чужим. Без пульсации — цветного кольца на тёмной рейке достаточно. */
+.ui-pressable[data-context='cockpit-version'].refresh,
+.ui-pressable[data-context='cockpit-version'].refresh:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 44%, var(--line));
+  font-weight: 600;
 }
 
-.ui-pressable[data-context='cockpit-version'].release {
-  color: var(--warn, #e0a33a);
+.ui-pressable[data-context='cockpit-version'].refresh:hover:not([aria-busy='true']) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, var(--line));
 }
 
-.ui-pressable[data-context='cockpit-version'].error {
-  color: var(--bad);
+/* Узкая рейка: только знак по центру, как у соседних пунктов. Порог — ширина самой
+   рейки, а не окна, поэтому свёрнутая и планшетная рейки ведут себя одинаково. */
+@container rail (max-width: 100px) {
+  .ui-pressable[data-context='cockpit-version'] {
+    justify-content: center;
+    gap: 0;
+    padding: 10px 0;
+  }
+}
+
+/* Нижний ряд телефона: плитка в колонку, как пункт мобильной навигации. */
+@media (max-width: 759px) {
+  .ui-pressable[data-context='cockpit-version'] {
+    flex-direction: column;
+    gap: 3px;
+    width: 62px;
+    min-width: 62px;
+    min-height: 0;
+    padding: 9px 2px;
+    border-radius: 0;
+    font-size: 10px;
+    text-align: center;
+  }
+
+  /* В нижнем ряду плитку и так отделяет линия слева; кольцо внутри было бы второй рамкой. */
+  .ui-pressable[data-context='cockpit-version'].refresh,
+  .ui-pressable[data-context='cockpit-version'].refresh:hover {
+    box-shadow: none;
+  }
+}
+
+/* Полоса «сборка готова» на экране входа: тот же тон и подпись, что у плитки. */
+.ui-pressable[data-context='cockpit-version-strip'] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  height: 44px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ui-pressable[data-context='cockpit-version-strip']:hover:not([aria-busy='true']) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .ui-pressable[data-context='provider-status'] {

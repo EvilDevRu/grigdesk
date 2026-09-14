@@ -46,11 +46,37 @@ test('CTX-02: исполнитель без замера контекста ни
   const sse = sseOf(chat);
   const sess = chat.sessions[0];
 
-  // Codex/kimi/ollama шлют только счётчик потраченного — поля contextTokens в событии нет.
+  // Счётчик вывода может приходить отдельно от замера контекста у любого исполнителя.
   sse('chat-progress', { chatKey: 'c1', tokens: 42 });
 
   assert.ok(!sess.liveContext, 'живого замера нет — кольцо остаётся на сохранённой цифре');
   assert.equal(sess.contextTokens, 180000);
+});
+
+test('CTX-06: живой снимок сохраняет окно, достоверность и измеренный ноль', async () => {
+  const chat = await fixture();
+  const sse = sseOf(chat);
+  const sess = chat.sessions[0];
+  const sample = {
+    contextTokens: 0,
+    contextWindow: 128_000,
+    contextMetric: 'active-input-v1',
+    contextIsEstimate: false,
+  };
+
+  sse('chat-progress', { chatKey: 'c1', tokens: 40, ...sample });
+  sse('chat-progress', { chatKey: 'c1', tokens: 42 });
+  assert.equal(sess.liveContext, 0);
+  assert.deepEqual(sess.liveContextUsage, sample);
+  assert.equal(sess.contextTokens, 180_000);
+
+  apiHarness.get = async () => ({ active: [{ chatKey: 'c1', tokens: 42, steps: [], ...sample }] });
+  sess.liveContextUsage = null;
+  await chat._loadActive();
+  assert.deepEqual(sess.liveContextUsage, sample, 'F5 поднимает всю шкалу, включая точный ноль');
+
+  sse('chat-turn-start', { chatKey: 'c1', at: 2 });
+  assert.equal(sess.liveContextUsage, null, 'следующий ход не наследует свежесть предыдущего');
 });
 
 test('CTX-03: новый ход начинается без чужого замера', async () => {

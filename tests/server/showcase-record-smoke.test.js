@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 import { startEgressGuard } from '../../server/src/lib/showcase/browserPolicy.ts';
 import { checkSceneClip } from '../../server/src/lib/showcase/render/clipCheck.ts';
 import { READY_MARGIN_MS, trimSceneClip } from '../../server/src/lib/showcase/render/clipTrim.ts';
-import { launchBrowser, recordScene } from '../../server/src/lib/showcase/render/recorder.ts';
+import { launchBrowser, loginToStand, recordScene } from '../../server/src/lib/showcase/render/recorder.ts';
 
 const STYLE = {
   width: 1280,
@@ -251,4 +251,95 @@ test('запись сцены даёт непустой клип и не вып�
     guard.blocked.length > 0,
     'попытка выхода была настоящей: ограничитель обязан её увидеть',
   );
+});
+
+/**
+ * Стенд, который не принимает учётку: форма отправляется и рисуется заново без
+ * признака входа. Ровно так выглядит холодный или отвергший пароль стенд.
+ */
+async function startRejectingStand() {
+  const server = http.createServer((request, response) => {
+    let body = '';
+
+    request.on('data', (chunk) => {
+      body += chunk;
+    });
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Вход</title></head>
+<body><main>
+<form method="post" action="/login">
+<input id="email" name="email"><input id="password" name="password" type="password">
+<button type="submit">Войти</button>
+</form>
+${body ? '<p class="error">Неверный пароль</p>' : ''}
+</main></body></html>`);
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  return {
+    origin: `http://127.0.0.1:${server.address().port}`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+// Первая сорвавшаяся запись ролика осталась с причиной «locator.waitFor: Timeout» —
+// без адреса, без формы и без снимка. Отказ входа обязан говорить, что увидел браузер.
+test('несостоявшийся вход называет форму на экране и оставляет снимок', async (t) => {
+  const browserPath = await findBrowser();
+
+  if (!browserPath) {
+    t.skip('браузер записи не установлен: это не успешная приёмка, а её отсутствие');
+
+    return;
+  }
+
+  const outDir = await mkdtemp(path.join(os.tmpdir(), 'showcase-login-'));
+  const stand = await startRejectingStand();
+  const guard = await startEgressGuard({
+    allowedOrigins: [stand.origin],
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+
+  t.after(async () => {
+    await guard.close();
+    await stand.close();
+    await rm(outDir, { recursive: true, force: true });
+  });
+
+  const browser = await launchBrowser({ executablePath: browserPath, proxyPort: guard.port });
+
+  t.after(() => browser.close());
+
+  await assert.rejects(
+    () => loginToStand({
+      browser,
+      baseUrl: stand.origin,
+      allowedOrigins: [stand.origin],
+      style: STYLE,
+      login: {
+        url: '/login',
+        userSelector: '#email',
+        passwordSelector: '#password',
+        submitSelector: 'button[type="submit"]',
+        readySelector: 'a[href="/logout"]',
+        user: 'demo@example.test',
+        password: 'secret',
+      },
+      timeoutMs: 3_000,
+      diagnosticsDir: outDir,
+    }),
+    (error) => {
+      assert.equal(error.code, 'login_failed');
+      assert.match(error.message, /форма входа осталась на экране \(http:\/\/127\.0\.0\.1:\d+\/login\)/);
+      assert.match(error.message, /«a\[href="\/logout"\]» не появилось за 3 с/);
+      assert.doesNotMatch(error.message, /locator\.waitFor/, 'сырой текст Playwright наружу не уходит');
+      assert.match(error.message, /login-failed\.jpg/);
+
+      return true;
+    },
+  );
+  await access(path.join(outDir, 'login-failed.jpg'));
 });

@@ -89,3 +89,30 @@ test('Claude untrusted ход запускается в отдельном вр�
   assert.doesNotMatch(args.join('\n'), new RegExp(process.cwd().replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
   assert.equal(JSON.parse(await readFile(`${capture}.stdin`, 'utf8')).type, 'user');
 });
+
+test('Claude untrusted ход сохраняет причину ошибки из result при exit code 1', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-auth-'));
+  const bin = path.join(dir, 'fake-claude');
+  await writeFile(bin, [
+    '#!/bin/sh',
+    'IFS= read -r payload',
+    "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error_during_execution\","
+      + "\"is_error\":true,\"result\":\"Failed to authenticate: OAuth session expired "
+      + "and could not be refreshed\"}'",
+    'exit 1',
+  ].join('\n'));
+  await chmod(bin, 0o755);
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  await assert.rejects(claude.runUntrusted({
+    config: { claudeBin: bin },
+    message: 'недоверенный prompt',
+    images: [],
+    model: 'opus',
+    providerSettings: {},
+  }), (error) => {
+    assert.equal(error.code, 'model_auth_failed');
+    assert.match(error.message, /Авторизация Claude истекла/u);
+    return true;
+  });
+});

@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { captureProcessIdentity } from '../../speech/modelJobsProcess.ts';
 import { ShowcaseError } from '../errors.ts';
 import type { JobIdentity } from '../jobs.ts';
+import { processAlive } from '../processIdentity.ts';
+import type { RecordingTimingWorkerCandidate } from './recorder.ts';
 
 const WORKER_SCRIPT = fileURLToPath(new URL('../../../../scripts/showcaseWorker.mts', import.meta.url));
 
@@ -36,6 +38,10 @@ export interface WorkerHandle {
   attemptId: string;
   identity: JobIdentity;
   workDir: string;
+  // Номер последней прочитанной строки журнала попытки. Он живёт в своей шкале и
+  // с номером сообщения задания не смешивается: иначе каждый прочитанный отчёт
+  // отодвигал бы порог, и половина шагов исполнителя до человека не доезжала.
+  seenSequence: number;
 }
 
 export interface WorkerProgressLine {
@@ -62,6 +68,7 @@ export interface WorkerResult {
     // Ожидания затишья сети, упёршиеся в предел: подсказка, почему кадр сцены
     // мог не дождаться данных.
     unsettled?: number;
+    recordingTiming?: RecordingTimingWorkerCandidate;
   }[];
 }
 
@@ -125,6 +132,7 @@ export async function launchWorker(input: WorkerLaunchInput): Promise<WorkerHand
     attemptId,
     workDir,
     identity: identity ?? { pid: child.pid, starttime: null, cmdline: null },
+    seenSequence: 0,
   };
 }
 
@@ -190,17 +198,36 @@ export function stopWorker(identity: JobIdentity): boolean {
     return false;
   }
 
+  let group = false;
+
   try {
     process.kill(-identity.pid, 'SIGTERM');
-
-    return true;
+    group = true;
   } catch {
     try {
       process.kill(identity.pid, 'SIGTERM');
-
-      return true;
     } catch {
       return false;
     }
   }
+
+  // Chromium и python-библиотеки иногда не укладываются в мягкое завершение.
+  // Отсоединённая process group принадлежит ровно этому worker, поэтому после
+  // короткой форы добиваем оставшихся детей. Для одиночного процесса повторно
+  // сверяем identity, чтобы не попасть в переиспользованный pid.
+  const escalation = setTimeout(() => {
+    try {
+      if (group) {
+        process.kill(-(identity.pid as number), 'SIGKILL');
+      } else if (processAlive(identity)) {
+        process.kill(identity.pid as number, 'SIGKILL');
+      }
+    } catch {
+      // ESRCH означает, что мягкая остановка уже закончилась успешно.
+    }
+  }, 2000);
+
+  escalation.unref();
+
+  return true;
 }

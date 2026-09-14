@@ -1,44 +1,22 @@
 // Таймлайн сцены и общий таймлайн ролика.
 //
-// Режим один — `voiceLeads`: сначала известна длительность звука, и только потом
-// строится расписание. Обратный порядок заставлял бы резать речь под длину клипа,
-// а показывать надо ровно то, что произносится.
-//
-// Конец сцены — максимум конца речи и конца действий плюс короткий хвост.
-// Недостающая картинка добирается стоп-кадром, недостающий звук — тишиной.
+// Расписание одной сцены живёт в общем модуле (`shared/showcaseTimeline.ts`): по той
+// же формуле экран ролика считает, с какой секунды начинается сцена. Здесь остаётся
+// то, что нужно только сборке, — субтитры по измеренным длинам готовых клипов и SRT.
 import type { ShowcaseScene, ShowcaseTiming } from '../../../../../shared/showcaseContracts.ts';
+import {
+  planScene,
+  POST_ROLL_MS,
+  PRE_ROLL_MS,
+} from '../../../../../shared/showcaseTimeline.ts';
+import type { ScenePlanInput } from '../../../../../shared/showcaseTimeline.ts';
 
-export const PRE_ROLL_MS = 400;
-export const POST_ROLL_MS = 600;
+export { planScene, POST_ROLL_MS, PRE_ROLL_MS };
+export type { ScenePlanInput };
 
 // Хвост тишины длиннее этого порога — повод предупредить человека: скорее всего
 // действий в сцене больше, чем речи, и её стоит переписать. Звук при этом НЕ режется.
 export const SILENT_TAIL_WARNING_MS = 3_000;
-
-export interface ScenePlanInput {
-  audioMs: number;
-  clipMs: number;
-}
-
-/**
- * Расписание одной сцены. Общая длительность именно вычисляется, а не берётся у той
- * дорожки, которая длиннее случайно: план требует не обрезать звук ради клипа и не
- * обрывать показ ради звука.
- */
-export function planScene({ audioMs, clipMs }: ScenePlanInput): ShowcaseTiming {
-  const narrationStartMs = PRE_ROLL_MS;
-  const speechEndMs = narrationStartMs + audioMs;
-  const actionsEndMs = clipMs;
-
-  return {
-    preRollMs: PRE_ROLL_MS,
-    narrationStartMs,
-    speechEndMs,
-    actionsEndMs,
-    postRollMs: POST_ROLL_MS,
-    totalMs: Math.max(speechEndMs, actionsEndMs) + POST_ROLL_MS,
-  };
-}
 
 export function silentTailMs(timing: ShowcaseTiming): number {
   return timing.totalMs - timing.speechEndMs;

@@ -10,6 +10,17 @@
 # Этот модуль не восстанавливает файлы. Он только доказывает, совпадает ли текущее
 # состояние с baseline. Автоматический откат без владения изменением опасен: можно
 # перезаписать параллельную работу человека.
+#
+# Единственное послабление — WORKSPACE_GUARD_VOLATILE_LIST_FILE: список абсолютных путей
+# (файлов или каталогов), под которыми проверочный инструментарий проекта пишет свои
+# runtime-артефакты. Untracked-файлы под ними в снимок не попадают. Список объявляет
+# доверенный профиль, а не агент, и он НЕ распространяется на tracked-файлы, index и
+# чувствительные файлы: путь, который git отслеживает, runtime-артефактом быть не может.
+#
+# Почему это нужно: Playwright-сетап проекта писал storage state в `e2e/.auth/user.json`,
+# а `.gitignore` проекта закрывал только `tests/e2e/.auth/`. Каждый прогон e2e из
+# проверяющего узла (критик тестов, verify) переписывал этот untracked-файл, сторож честно
+# видел изменение — и три задачи подряд вставали кодом 75 без единого слова о причине.
 
 workspace_guard_sha256_stream() {
   sha256sum | awk '{print $1}'
@@ -67,6 +78,35 @@ KIND = sys.argv[1]
 ROOT = os.fsencode(sys.argv[2])
 STRICT = KIND == "UNTRACKED"
 CHUNK = 1 << 20
+
+
+def volatile_prefixes():
+    # Объявленные runtime-пути: строка — абсолютный путь без завершающего слэша.
+    # Пустые строки и комментарии пропускаются; относительный путь объявлением не считается.
+    listed = os.environ.get("WORKSPACE_GUARD_VOLATILE_LIST_FILE")
+    if not STRICT or not listed:
+        return []
+    prefixes = []
+    try:
+        with open(listed, "rb") as handle:
+            for raw in handle:
+                line = raw.rstrip(b"\r\n").rstrip(b"/")
+                if not line or line.startswith(b"#") or not line.startswith(b"/"):
+                    continue
+                prefixes.append(line)
+    except OSError:
+        return []
+    return prefixes
+
+
+VOLATILE = volatile_prefixes()
+
+
+def is_volatile(path):
+    for prefix in VOLATILE:
+        if path == prefix or path.startswith(prefix + b"/"):
+            return True
+    return False
 
 # GIT_DIR/GIT_WORK_TREE отменяют обычный поиск .git вверх по дереву: если они выставлены,
 # ответ знает только сам git, и ускорение по цепочке каталогов применять нельзя.
@@ -186,6 +226,8 @@ batch = []
 for item in items:
     if STRICT:
         root, rel, path = ROOT, item, ROOT + b"/" + item
+        if is_volatile(path):
+            continue
     else:
         if not item or not item.startswith(b"/") or not os.path.lexists(item):
             continue
@@ -335,7 +377,9 @@ workspace_guard_diff_paths() {
 import base64, collections, os, sys
 
 LIMIT = int(sys.argv[1])
-groups = collections.Counter()
+# Считаются ПУТИ, а не строки диффа: изменённый файл даёт пару строк `-`/`+`, и человек
+# читал бы «(2)» про один переписанный storage state.
+groups = collections.defaultdict(set)
 for line in os.fdopen(3, "rb"):
     line = line.rstrip(b"\n")
     if not line[:1] in (b"+", b"-"):
@@ -350,10 +394,11 @@ for line in os.fdopen(3, "rb"):
     except Exception:
         continue
     path = os.path.join(os.fsdecode(root), os.fsdecode(rel))
-    groups[(kind, os.path.dirname(path))] += 1
+    groups[(kind, os.path.dirname(path))].add(path)
 
-for (kind, directory), count in groups.most_common(LIMIT):
-    print(f"{kind} {directory} ({count})")
+ranked = sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))
+for (kind, directory), paths in ranked[:LIMIT]:
+    print(f"{kind} {directory} ({len(paths)})")
 hidden = len(groups) - LIMIT
 if hidden > 0:
     print(f"и ещё каталогов: {hidden}")

@@ -14,10 +14,17 @@ export {
 } from './options.ts';
 export {
   INGEST_JOB_SCHEMA_VERSION,
+  SPEECH_TIMESTAMP_END_TOLERANCE_SECONDS,
   buildTranscribeArgv,
+  decodeSpeechTranscript,
   decodeIngestJob,
   encodeIngestJob,
   pythonEnv,
+} from './transport.ts';
+export type {
+  SpeechTranscript,
+  SpeechTranscriptSpan,
+  SpeechWordTimingStatus,
 } from './transport.ts';
 export {
   SPEECH_ERROR_CODES,

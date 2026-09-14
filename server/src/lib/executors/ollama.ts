@@ -609,7 +609,7 @@ export default {
     attachmentPaths?: readonly string[];
     permissionMode?: string;
     onPermission?: PermissionBridge | null;
-    onProgress?: (tokens: number) => void;
+    onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
     onStep?: (step: ChatStep) => void;
     workTools?: WorkToolsPort | null;
   }) {
@@ -678,15 +678,17 @@ export default {
 
     let toolsAllowed = supportsTools;
     let reply = '';
-    let maxPromptTokens = 0;
+    let contextTokens: number | null = null;
     let doneTokens = 0;
     let roundChars = 0;
     let lastProgressAt = 0;
-    const pushProgress = (force = false) => {
+    const pushProgress = () => {
       const now = Date.now();
-      if (!force && now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+      if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
       lastProgressAt = now;
-      try { onProgress?.(doneTokens + Math.round(roundChars / CHARS_PER_TOKEN)); } catch { /* счётчик не роняет ход */ }
+      try {
+        onProgress?.(doneTokens + Math.round(roundChars / CHARS_PER_TOKEN));
+      } catch { /* счётчик не роняет ход */ }
     };
 
     try {
@@ -723,13 +725,24 @@ export default {
               pushProgress();
             }
             if (chunk?.done) {
-              // prompt_eval_count умеет УМЕНЬШАТЬСЯ при попадании в кэш промпта, хотя
-              // сам промпт только растёт — поэтому берём максимум по раундам, а
-              // сгенерированное складываем.
-              maxPromptTokens = Math.max(maxPromptTokens, Number(chunk.prompt_eval_count) || 0);
+              // Оба числа относятся к последнему запросу. Вывод прежних раундов
+              // уже входит в его prompt; повторное сложение завышало заполненность.
+              const prompt = chunk.prompt_eval_count;
+              const output = chunk.eval_count;
+              contextTokens = typeof prompt === 'number' && Number.isSafeInteger(prompt) && prompt >= 0
+                && typeof output === 'number' && Number.isSafeInteger(output) && output >= 0
+                ? prompt + output : null;
               doneTokens += Number(chunk.eval_count) || 0;
               roundChars = 0;
-              pushProgress(true);
+              try {
+                onProgress?.(doneTokens, {
+                  contextTokens: contextTokens ?? 0,
+                  contextWindow: numCtx,
+                  contextMetric: contextTokens === null ? 'unavailable' : 'request-total-v1',
+                  contextIsEstimate: false,
+                  contextCache: contextCacheStatus('not-applicable'),
+                });
+              } catch { /* счётчик не роняет ход */ }
             }
           },
         });
@@ -777,7 +790,10 @@ export default {
         throw Object.assign(new Error('Ход остановлен.'), {
           stopped: true,
           sessionId: nextSessionId,
-          contextTokens: maxPromptTokens + doneTokens,
+          contextTokens: contextTokens ?? 0,
+          contextWindow: numCtx,
+          contextMetric: contextTokens === null ? 'unavailable' : 'request-total-v1',
+          contextIsEstimate: false,
           contextCache: contextCacheStatus('not-applicable'),
           steps: sink.steps,
         });
@@ -790,8 +806,10 @@ export default {
     return {
       reply: cleaned || '(модель вернула пустой ответ)',
       sessionId: nextSessionId,
-      contextTokens: maxPromptTokens + doneTokens,
+      contextTokens: contextTokens ?? 0,
       contextWindow: numCtx,
+      contextMetric: contextTokens === null ? 'unavailable' : 'request-total-v1',
+      contextIsEstimate: false,
       contextCache: contextCacheStatus('not-applicable'),
       cost: null,
       steps: sink.steps,

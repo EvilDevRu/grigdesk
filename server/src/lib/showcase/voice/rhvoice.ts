@@ -29,6 +29,7 @@ import type {
   VoiceDoctor,
   VoiceEngine,
   VoiceInfo,
+  VoicePace,
 } from './contract.ts';
 
 const run = promisify(execFile);
@@ -50,17 +51,22 @@ async function hasClient(): Promise<boolean> {
   }
 }
 
+// Ступени темпа в скорости RHVoice: единица — темп голоса по умолчанию.
+const RHVOICE_RATE: Record<VoicePace, string> = {
+  slowest: '0.7',
+  slow: '0.85',
+  normal: '1',
+  fast: '1.15',
+  fastest: '1.3',
+};
+
 /**
  * Темп речи в единицах движка. RHVoice принимает множитель, поэтому три ступени
  * интерфейса переводятся здесь, а не хранятся числами в ядре: у другого движка
  * шкала своя, и общее число значило бы разное.
  */
 function rateOf(pace: SynthesisInput['direction']['pace']): string {
-  if (pace === 'slow') {
-    return '0.85';
-  }
-
-  return pace === 'fast' ? '1.15' : '1';
+  return RHVOICE_RATE[pace ?? 'normal'];
 }
 
 export function createRhvoiceEngine(): VoiceEngine {

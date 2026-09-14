@@ -10,6 +10,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import type { SpeechTranscript } from '../../speech/transport.ts';
+
 const run = promisify(execFile);
 
 export interface SpeechCheckInput {
@@ -18,7 +20,7 @@ export interface SpeechCheckInput {
   // Расшифровку делает общий речевой runtime кокпита. Она внедряется функцией:
   // раздел не должен знать, как именно устроен запуск распознавания, а тесты —
   // поднимать его целиком ради сверки токенов.
-  transcribe: ((file: string) => Promise<string>) | null;
+  transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
 }
 
 export interface SpeechCheckResult {
@@ -29,6 +31,10 @@ export interface SpeechCheckResult {
   // одно потерянное «не» меняет смысл целиком, а доля расхождения этого не видит.
   missingWords: string[];
   loudnessWarning: string;
+  // Тот же результат ASR затем используется для синхронизации. `null` означает,
+  // что проверка работала по старому строковому порту либо распознавание не
+  // состоялось; второй Whisper ради таймкодов запускать нельзя.
+  transcript: SpeechTranscript | null;
 }
 
 // Порог расхождения слов, после которого место считается спорным. Он рабочий,
@@ -123,6 +129,7 @@ export async function checkSpeech(input: SpeechCheckInput): Promise<SpeechCheckR
     durationMs: stats.durationMs,
     missingWords: [] as string[],
     loudnessWarning: '',
+    transcript: null as SpeechTranscript | null,
   };
 
   if (stats.durationMs < 200 || stats.meanDb <= -60) {
@@ -147,9 +154,17 @@ export async function checkSpeech(input: SpeechCheckInput): Promise<SpeechCheckR
   }
 
   let heardText = '';
+  let transcript: SpeechTranscript | null = null;
 
   try {
-    heardText = await input.transcribe(input.audioFile);
+    const recognized = await input.transcribe(input.audioFile);
+
+    if (typeof recognized === 'string') {
+      heardText = recognized;
+    } else {
+      transcript = recognized;
+      heardText = recognized.segments.map((segment) => segment.text).join(' ').trim();
+    }
   } catch (error) {
     return {
       ...base,
@@ -167,6 +182,7 @@ export async function checkSpeech(input: SpeechCheckInput): Promise<SpeechCheckR
   if (missing.length > 0 && ratio > MISMATCH_LIMIT) {
     return {
       ...base,
+      transcript,
       status: 'warning',
       loudnessWarning,
       missingWords: missing,
@@ -177,6 +193,7 @@ export async function checkSpeech(input: SpeechCheckInput): Promise<SpeechCheckR
   if (missing.length > 0) {
     return {
       ...base,
+      transcript,
       status: 'warning',
       loudnessWarning,
       missingWords: missing,
@@ -186,10 +203,13 @@ export async function checkSpeech(input: SpeechCheckInput): Promise<SpeechCheckR
     };
   }
 
+  // Причина — про слова; про громкость говорит своё поле, и склейка двух текстов
+  // не должна повторять одно предупреждение дважды.
   return {
     ...base,
+    transcript,
     status: loudnessWarning ? 'warning' : 'passed',
     loudnessWarning,
-    reason: loudnessWarning || 'Слова совпали с расшифровкой.',
+    reason: 'Слова совпали с расшифровкой.',
   };
 }

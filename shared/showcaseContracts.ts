@@ -8,6 +8,18 @@
 // они нужны исполнению, а не показу, и их утечка расширила бы область доверия.
 
 import { contractDecoders } from './contractDecoders.ts';
+import {
+  SHOWCASE_SYNC_BINDING_VERSION,
+  SHOWCASE_SYNC_CUE_KINDS,
+  SHOWCASE_SYNC_CUE_ORIGINS,
+} from './showcaseSync.ts';
+
+export type {
+  ShowcaseSyncBindings,
+  ShowcaseSyncCue,
+  ShowcaseSyncCueKind,
+  ShowcaseSyncCueOrigin,
+} from './showcaseSync.ts';
 
 /**
  * Идентификаторы генерирует сервер, поэтому форма у них узкая и общая для обеих
@@ -82,6 +94,9 @@ const scope = objectOf({
   // переиспользован под другую задачу». Клиент их только показывает и возвращает.
   targetFingerprint: text,
   policyRevision: text,
+  // Ревизия словаря карты экранов (экраны, элементы, подписи — без селекторов).
+  // Старые записи её не несут: тогда сравнивать не с чем.
+  mapRevision: optional(text),
   dataRevision: text,
   // Соответствие развёрнутой версии исходникам подтверждается, только если профиль
   // публикует ревизию сборки. Иначе интерфейс обязан сказать, что не подтверждено.
@@ -194,12 +209,48 @@ function action(value: unknown, path: string) {
   return viewAction(value, path);
 }
 
+// Производный JSON хранится рядом с медиа, но наружу сцена отдаёт только эту
+// ссылку. Путь и внутреннее содержимое хранилища в публичный контракт не входят.
+const derivedArtifactRef = objectOf({
+  id: text,
+  inputHash: text,
+  contentHash: text,
+  producerVersion: text,
+  byteSize: wholeNumber,
+});
+
+const syncCue = objectOf({
+  id: text,
+  actionIndex: wholeNumber,
+  from: wholeNumber,
+  to: wholeNumber,
+  kind: oneOf(...SHOWCASE_SYNC_CUE_KINDS),
+  origin: oneOf(...SHOWCASE_SYNC_CUE_ORIGINS),
+});
+
+// Хеши проверяет сервер по каноническому тексту и принятому массиву действий.
+// Декодер отвечает только за безопасную форму: устаревшая привязка остаётся
+// читаемой, чтобы человек мог исправить именно её, а не весь ролик из карантина.
+const syncBindings = objectOf({
+  version: oneOf(SHOWCASE_SYNC_BINDING_VERSION),
+  textHash: text,
+  actionsHash: text,
+  cues: listOf(syncCue),
+});
+
+// Темп речи — пять нейтральных ступеней вокруг обычного. Ядро не хранит число:
+// у каждого движка своя шкала (Silero — ступени SSML, Piper — множитель длины,
+// облако — скорость), и адаптер переводит ступень в неё сам.
+export const SHOWCASE_PACES = ['slowest', 'slow', 'normal', 'fast', 'fastest'] as const;
+
+export type ShowcasePace = (typeof SHOWCASE_PACES)[number];
+
 // Указания речи: тон, темп, акценты и паузы. Ударения и паузы приходят одной
 // канонической структурой — форма ввода со знаками разбирается на сервере, чтобы
 // у них не появилось двух независимых источников.
 const direction = objectOf({
   tone: nullable(text),
-  pace: nullable(oneOf('slow', 'normal', 'fast')),
+  pace: nullable(oneOf(...SHOWCASE_PACES)),
   emphasis: listOf(objectOf({
     from: wholeNumber,
     to: wholeNumber,
@@ -212,6 +263,17 @@ const direction = objectOf({
     at: wholeNumber,
     vowel: wholeNumber,
   })),
+});
+
+// Локальная поправка произношения относится к конкретной редакции канонического
+// текста и конкретному голосу. Диапазоны — UTF-16, как selectionStart в браузере
+// и slice в Node; экранный текст при этом не меняется.
+const pronunciationOverride = objectOf({
+  from: wholeNumber,
+  to: wholeNumber,
+  pronunciation: text,
+  textHash: text,
+  voiceRef: text,
 });
 
 const timing = objectOf({
@@ -238,6 +300,11 @@ const scene = objectOf({
   screenId: text,
   startState: nullable(text),
   readyCondition: nullable(text),
+  // Сцена-продолжение начинается там, где закончилась предыдущая: открытый диалог и
+  // выбранные строки остаются на экране, а путь к ним заново не снимается. Запись
+  // ведёт всю цепочку одним контекстом, поэтому и переснимается цепочка целиком.
+  // Старые записи поля не имеют — тогда сцена открывает свой экран сама.
+  continuesPrevious: optional(boolean),
   actions: listOf(action),
   // Произносимый текст, экранная подпись и субтитр — три разных строки. Подпись
   // не выдаётся за дословные субтитры, а субтитр повторяет смысл речи письменно.
@@ -245,7 +312,19 @@ const scene = objectOf({
   caption: text,
   subtitleText: text,
   direction,
+  // Старые проекты поля не имеют. `null` после декодирования означает, что явных
+  // локальных замен нет, а не что сервер должен угадать произношение сам.
+  pronunciationOverrides: optional(listOf(pronunciationOverride)),
   timing: nullable(timing),
+  // Старые проекты не несут измерений и смысловых привязок. `null` здесь означает
+  // честный старый путь, а не вымышленные времена для уже готового клипа или WAV.
+  syncBindings: optional(syncBindings),
+  speechTiming: optional(derivedArtifactRef),
+  // Сопоставление provider/ASR-меток с канонической строкой — отдельный
+  // производный документ. Raw speechTiming остаётся пригоден после правки текста,
+  // а это сопоставление обязано устареть по её хешу.
+  speechAlignment: optional(derivedArtifactRef),
+  recordingTiming: optional(derivedArtifactRef),
   audioSource,
   audio: nullable(artifactRef),
   clip: nullable(artifactRef),
@@ -269,6 +348,9 @@ const finalArtifact = objectOf({
   video: artifactRef,
   subtitles: nullable(artifactRef),
   manifestId: text,
+  // Старый `manifestId` был лишь хешем входов. Только явная версия означает, что
+  // идентификатор разрешается в проверенный итоговый JSON для плеера.
+  manifestVersion: optional(oneOf(1)),
   builtAt: text,
   // Итог помечается предыдущим, если входы ролика с тех пор изменились: старый
   // файл можно посмотреть, но нельзя выдать за актуальный.
@@ -296,6 +378,13 @@ const project = objectOf({
   target: targetResolution,
   brief: listOf(text),
   scenes: listOf(scene),
+  // Чего модели не хватило в карте экранов профиля, чтобы показать план: текст
+  // для человека, который дополняет карту, а не селекторы. Старые записи поля не
+  // имеют — тогда оно пустое.
+  scriptGaps: optional(listOf(text)),
+  // Ревизия словаря карты, по которому модель составляла сцены. Расходится с текущей
+  // — карта экранов менялась после разбора, и сцены не знают её новых элементов.
+  scriptMapRevision: optional(text),
   decisions: listOf(decision),
   latestFinal: nullable(finalArtifact),
   createdAt: text,
@@ -325,6 +414,64 @@ const job = objectOf({
   }),
   error: nullable(text),
   startedAt: text,
+  finishedAt: nullable(text),
+});
+
+export const SHOWCASE_BUILD_STAGES = [
+  'preflight',
+  'script-if-empty',
+  'bindings',
+  'voice-and-alignment',
+  'record-if-needed',
+  'timeline-and-assemble',
+  'validate',
+  'done',
+] as const;
+
+export const SHOWCASE_BUILD_STATES = [
+  'queued',
+  'running',
+  'cancelling',
+  'awaiting_review',
+  'succeeded',
+  'failed',
+  'interrupted',
+  'cancelled',
+] as const;
+
+// Ключ намерения создаёт браузер. Ограниченный URL-safe алфавит позволяет
+// хранить его в журнале и сравнивать буквально, не превращая в имя файла.
+export const SHOWCASE_BUILD_REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+
+const buildStage = oneOf(...SHOWCASE_BUILD_STAGES);
+const buildState = oneOf(...SHOWCASE_BUILD_STATES);
+
+const buildStopReason = objectOf({
+  code: text,
+  message: text,
+});
+
+const buildChild = objectOf({
+  stage: buildStage,
+  jobId: text,
+  attempt: wholeNumber,
+  state: jobState,
+});
+
+// Публичный запуск не раскрывает requestId, снимок содержательных входов и
+// устойчивые ключи этапов. Для восстановления страницы достаточно этой проекции.
+const buildRun = objectOf({
+  id: text,
+  projectId: text,
+  state: buildState,
+  sequence: wholeNumber,
+  stage: buildStage,
+  initialRevision: wholeNumber,
+  children: listOf(buildChild),
+  cancelRequested: boolean,
+  error: nullable(buildStopReason),
+  startedAt: text,
+  updatedAt: text,
   finishedAt: nullable(text),
 });
 
@@ -361,6 +508,9 @@ const targetOption = objectOf({
   // Старый ответ без признака читается как null и получает безопасную базовую policy.
   profileBinding: optional(oneOf('verified', 'inferred')),
   label: text,
+  // Название задачи портала у стенда задачи: по одному номеру человек стенд не
+  // узнаёт. Пусто у постоянного стенда и когда портал не ответил.
+  taskTitle: optional(text),
   // Постоянный стенд публикует готовую ссылку. Для локальной песочницы localhost
   // был бы адресом сервера, а не браузера человека, поэтому наружу идёт лишь порт.
   viewUrl: nullable(text),
@@ -379,6 +529,9 @@ const overview = objectOf({
   profiles: listOf(targetProfile),
   projects: listOf(projectSummary),
   jobs: listOf(job),
+  // Старый backend поля не отдаёт; новый snapshot включает последние запуски,
+  // чтобы пропущенный SSE или F5 не превращали идущую сборку в неизвестную.
+  buildRuns: optional(listOf(buildRun)),
   limits: objectOf({
     maxScenes: wholeNumber,
     maxSceneSeconds: wholeNumber,
@@ -396,12 +549,22 @@ const voiceInfo = objectOf({
   language: text,
   available: boolean,
   reason: text,
+  // Возможности относятся к выбранному диктору, а не ко всему движку. Старый
+  // ответ без объекта читается как unknown — поддержку по отсутствию не выдумываем.
+  capabilities: optional(objectOf({
+    pace: boolean,
+    pause: boolean,
+    stress: boolean,
+  })),
 });
 
 const voiceEngineStatus = objectOf({
   id: text,
   name: text,
   kind: oneOf('local', 'cloud'),
+  // Меняет ли движок темп речи. Без признака интерфейс предлагал бы ступени,
+  // которые движок молча пропускает. Старый ответ без поля читается как «меняет».
+  pace: optional(boolean),
   doctor: objectOf({
     status: oneOf('ready', 'blocked', 'unknown'),
     reason: text,
@@ -452,14 +615,42 @@ const voiceCatalog = objectOf({
   install: voiceInstall,
 });
 
+// Словарь ударений установки: текст как сохранён, разобранные записи и негодные
+// строки с причиной. Текст хранится целиком, ошибки не выбрасываются — человек
+// чинит их в редакторе, а не теряет.
+const voiceDictionary = objectOf({
+  text,
+  entries: listOf(text),
+  errors: listOf(objectOf({
+    line: wholeNumber,
+    text,
+    reason: text,
+  })),
+});
+
 // События SSE несут только безопасную сводку: полные данные интерфейс перечитывает
 // через ручку под сессией человека.
+// Сводка хода задания. Счётчик сцен и причина отказа едут вместе с состоянием:
+// без них интерфейс показывал бы свежую подпись при старом «2 из 6», а на отказе —
+// красную точку с прежней подписью, за текстом которой пришлось бы перечитывать обзор.
 const progressEvent = objectOf({
   jobId: text,
   projectId: text,
   state: jobState,
   sequence: wholeNumber,
   label: text,
+  index: optional(wholeNumber),
+  total: optional(wholeNumber),
+  error: optional(text),
+});
+
+const buildProgressEvent = objectOf({
+  runId: text,
+  projectId: text,
+  state: buildState,
+  sequence: wholeNumber,
+  stage: buildStage,
+  error: nullable(buildStopReason),
 });
 
 const changedEvent = objectOf({
@@ -491,9 +682,11 @@ export type ShowcaseSelectableTargetRef = {
 };
 export type ShowcaseTarget = ReturnType<typeof targetResolution>;
 export type ShowcaseArtifactRef = ReturnType<typeof artifactRef>;
+export type ShowcaseDerivedArtifactRef = ReturnType<typeof derivedArtifactRef>;
 export type ShowcaseCheck = ReturnType<typeof check>;
 export type ShowcaseAction = ReturnType<typeof action>;
 export type ShowcaseDirection = ReturnType<typeof direction>;
+export type ShowcasePronunciationOverride = ReturnType<typeof pronunciationOverride>;
 export type ShowcaseTiming = ReturnType<typeof timing>;
 export type ShowcaseScene = ReturnType<typeof scene>;
 export type ShowcaseDecision = ReturnType<typeof decision>;
@@ -504,6 +697,11 @@ export type ShowcaseProjectSummary = ReturnType<typeof projectSummary>;
 export type ShowcaseProject = ReturnType<typeof project>;
 export type ShowcaseJob = ReturnType<typeof job>;
 export type ShowcaseJobState = ReturnType<typeof jobState>;
+export type ShowcaseBuildStage = ReturnType<typeof buildStage>;
+export type ShowcaseBuildState = ReturnType<typeof buildState>;
+export type ShowcaseBuildStopReason = ReturnType<typeof buildStopReason>;
+export type ShowcaseBuildChild = ReturnType<typeof buildChild>;
+export type ShowcaseBuildRun = ReturnType<typeof buildRun>;
 export type ShowcaseDoctor = ReturnType<typeof doctor>;
 export type ShowcaseVoiceInfo = ReturnType<typeof voiceInfo>;
 export type ShowcaseVoiceEngineStatus = ReturnType<typeof voiceEngineStatus>;
@@ -511,8 +709,10 @@ export type ShowcaseVoicePackage = ReturnType<typeof voicePackage>;
 export type ShowcaseVoiceInstallJob = ReturnType<typeof voiceInstallJob>;
 export type ShowcaseVoiceInstall = ReturnType<typeof voiceInstall>;
 export type ShowcaseVoiceCatalog = ReturnType<typeof voiceCatalog>;
+export type ShowcaseVoiceDictionary = ReturnType<typeof voiceDictionary>;
 export type ShowcaseOverview = ReturnType<typeof overview>;
 export type ShowcaseProgressEvent = ReturnType<typeof progressEvent>;
+export type ShowcaseBuildProgressEvent = ReturnType<typeof buildProgressEvent>;
 export type ShowcaseChangedEvent = ReturnType<typeof changedEvent>;
 export type ShowcaseVoiceEvent = ReturnType<typeof voiceEvent>;
 
@@ -524,12 +724,26 @@ export function parseShowcaseProject(value: unknown): ShowcaseProject {
   return project(value, 'project');
 }
 
+export function parseShowcaseDirection(value: unknown): ShowcaseDirection {
+  return direction(value, 'direction');
+}
+
+export function parseShowcasePronunciationOverrides(
+  value: unknown,
+): ShowcasePronunciationOverride[] {
+  return listOf(pronunciationOverride)(value, 'pronunciationOverrides');
+}
+
 export function parseShowcaseTarget(value: unknown): ShowcaseTarget {
   return targetResolution(value, 'target');
 }
 
 export function parseShowcaseJob(value: unknown): ShowcaseJob {
   return job(value, 'job');
+}
+
+export function parseShowcaseBuildRun(value: unknown): ShowcaseBuildRun {
+  return buildRun(value, 'buildRun');
 }
 
 export function parseShowcaseDoctor(value: unknown): ShowcaseDoctor {
@@ -540,8 +754,16 @@ export function parseShowcaseVoiceCatalog(value: unknown): ShowcaseVoiceCatalog 
   return voiceCatalog(value, 'voices');
 }
 
+export function parseShowcaseVoiceDictionary(value: unknown): ShowcaseVoiceDictionary {
+  return voiceDictionary(value, 'dictionary');
+}
+
 export function parseShowcaseProgressEvent(value: unknown): ShowcaseProgressEvent {
   return progressEvent(value, 'progress');
+}
+
+export function parseShowcaseBuildProgressEvent(value: unknown): ShowcaseBuildProgressEvent {
+  return buildProgressEvent(value, 'buildProgress');
 }
 
 export function parseShowcaseChangedEvent(value: unknown): ShowcaseChangedEvent {

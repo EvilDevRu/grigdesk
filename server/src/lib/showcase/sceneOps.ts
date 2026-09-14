@@ -17,16 +17,157 @@ import { PRODUCER_VERSIONS } from './formats.ts';
 import { normalizeImportedAudio, probeResult } from './render/assembler.ts';
 import {
   createScene,
+  createSyncBindings,
   patchScene,
   removeScene,
   reorderScenes,
   replaceScene,
   sceneOf,
+  sceneSyncBindingsState,
+  syncTextHash,
 } from './scenes.ts';
 import type { SceneDraft } from './scenes.ts';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
+import type {
+  ShowcaseProject,
+  ShowcaseScene,
+} from '../../../../shared/showcaseContracts.ts';
+import type { ShowcaseSyncCueKind } from '../../../../shared/showcaseSync.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
+import { canonicalTextOf } from './voice/contract.ts';
+import { checkSpeech } from './voice/speechCheck.ts';
+import {
+  publishSpeechAlignment,
+  publishSpeechTiming,
+  recordedSpeechTextInputHash,
+  speechTimingFromTranscript,
+} from './syncStore.ts';
+import type { SpeechTranscript } from '../speech/transport.ts';
+import { alignSpeechTiming } from './voice/alignment.ts';
+import {
+  createPronunciationOverrides,
+} from './voice/preparation.ts';
+import type { PronunciationOverrideInput } from './voice/preparation.ts';
+
+export interface SceneSyncCueInput {
+  // ID можно только вернуть из текущей сцены. Для новой связи он отсутствует, а
+  // сервер создаёт его сам; произвольный ID клиента не становится сохранённым.
+  id?: string | null;
+  actionIndex: number;
+  from: number;
+  to: number;
+  kind: ShowcaseSyncCueKind;
+  // Клиент может только закрепить связь как ручную. Вернуть её в generated через
+  // HTTP нельзя: этот origin принадлежит исключительно проверенному ответу модели.
+  manual?: true;
+}
+
+export interface SceneUpdatePatch extends Partial<SceneDraft> {
+  syncCues?: SceneSyncCueInput[];
+  pronunciationOverrides?: PronunciationOverrideInput[];
+}
+
+function sameCue(
+  current: NonNullable<ShowcaseScene['syncBindings']>['cues'][number],
+  input: SceneSyncCueInput,
+): boolean {
+  return current.actionIndex === input.actionIndex
+    && current.from === input.from
+    && current.to === input.to
+    && current.kind === input.kind;
+}
+
+/**
+ * Применяет полный ручной список cue к текущей редакции сцены. Известный неизменённый
+ * cue сохраняет ID и origin; исправленный становится manual. Устаревший документ
+ * можно починить тем же действием, но нельзя подсунуть ID из другой сцены.
+ */
+export function applyManualSyncCues(
+  scene: ShowcaseScene,
+  inputs: readonly SceneSyncCueInput[],
+): ShowcaseScene {
+  if (inputs.length === 0) {
+    return patchScene(scene, { syncBindings: null });
+  }
+
+  const previous = new Map((scene.syncBindings?.cues ?? []).map((cue) => [cue.id, cue]));
+  const previousState = sceneSyncBindingsState(scene);
+  const generated = createSyncBindings(
+    scene.narration,
+    scene.actions,
+    inputs.map((input) => ({
+      actionIndex: input.actionIndex,
+      from: input.from,
+      to: input.to,
+      kind: input.kind,
+      origin: 'manual',
+    })),
+  );
+
+  const cues = generated.cues.map((cue, index) => {
+    const input = inputs[index] as SceneSyncCueInput;
+
+    if (!input.id) {
+      return cue;
+    }
+
+    const known = previous.get(input.id);
+
+    if (!known) {
+      throw new ShowcaseError(
+        'bad_sync_bindings',
+        `Привязка «${input.id}» не принадлежит текущей сцене.`,
+        400,
+      );
+    }
+
+    if (input.manual !== true && previousState.status === 'valid' && sameCue(known, input)) {
+      return known;
+    }
+
+    return { ...cue, id: known.id, origin: 'manual' as const };
+  });
+
+  return patchScene(scene, { syncBindings: { ...generated, cues } });
+}
+
+/**
+ * Заменяет только модельные cue, оставляя ручные объектами с теми же ID. Если
+ * ручная связь уже устарела, модель не угадывает её новый смысл: сцену должен
+ * исправить человек.
+ */
+export function applyGeneratedSyncCues(
+  scene: ShowcaseScene,
+  inputs: readonly Omit<SceneSyncCueInput, 'id'>[],
+): ShowcaseScene {
+  const previousState = sceneSyncBindingsState(scene);
+  const manual = (scene.syncBindings?.cues ?? []).filter((cue) => cue.origin === 'manual');
+
+  if (manual.length > 0 && previousState.status !== 'valid') {
+    throw new ShowcaseError(
+      'stale_manual_bindings',
+      `Ручные привязки сцены «${scene.title}» потеряли актуальность. Исправьте эту сцену.`,
+      409,
+    );
+  }
+
+  if (manual.length === 0 && inputs.length === 0) {
+    return patchScene(scene, { syncBindings: null });
+  }
+
+  const generated = createSyncBindings(
+    scene.narration,
+    scene.actions,
+    inputs.map((input) => ({ ...input, origin: 'generated' })),
+  );
+
+  return patchScene(scene, {
+    syncBindings: {
+      ...generated,
+      cues: [...manual, ...generated.cues],
+    },
+  });
+}
 
 export interface SceneOpsDeps {
   assertEnabled: () => void;
@@ -35,12 +176,13 @@ export interface SceneOpsDeps {
   readProject: (id: string) => Promise<ShowcaseProject>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
+  transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
   withFreshness: (project: ShowcaseProject) => ShowcaseProject;
 }
 
 export function createSceneOps(deps: SceneOpsDeps) {
   const {
-    assertEnabled, broadcast, limits, readProject, store, targets, withFreshness,
+    assertEnabled, broadcast, limits, readProject, store, targets, transcribe, withFreshness,
   } = deps;
 
   /**
@@ -110,7 +252,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
     id: string,
     expectedRevision: number,
     sceneId: string,
-    patch: Partial<SceneDraft>,
+    patch: SceneUpdatePatch,
   ): Promise<ShowcaseProject> {
     assertEnabled();
 
@@ -118,10 +260,30 @@ export function createSceneOps(deps: SceneOpsDeps) {
       await screenOf(await readProject(id), patch.screenId);
     }
 
-    const saved = await store.updateProject(id, expectedRevision, (project) => ({
-      ...project,
-      scenes: replaceScene(project, patchScene(sceneOf(project, sceneId), patch)),
-    }));
+    const { pronunciationOverrides, syncCues, ...scenePatch } = patch;
+
+    const saved = await store.updateProject(id, expectedRevision, (project) => {
+      const previous = sceneOf(project, sceneId);
+      const changed = patchScene(previous, scenePatch);
+      const withPronunciation = pronunciationOverrides === undefined
+        ? changed
+        : {
+          ...changed,
+          pronunciationOverrides: createPronunciationOverrides(
+            changed.narration,
+            pronunciationOverrides,
+            previous.pronunciationOverrides ?? [],
+          ),
+        };
+      const withBindings = syncCues === undefined
+        ? withPronunciation
+        : applyManualSyncCues(withPronunciation, syncCues);
+
+      return {
+        ...project,
+        scenes: replaceScene(project, withBindings),
+      };
+    });
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
@@ -211,6 +373,13 @@ export function createSceneOps(deps: SceneOpsDeps) {
       );
     }
 
+    const expectedText = canonicalTextOf(scene.narration);
+    const check = await checkSpeech({
+      audioFile: normalized,
+      expectedText,
+      transcribe,
+    });
+
     const published = await publishArtifact({
       file: normalized,
       kind: 'audio',
@@ -222,6 +391,32 @@ export function createSceneOps(deps: SceneOpsDeps) {
       targetDir: sceneDir,
     });
     const artifact = { ...published, inputHash: published.contentHash };
+    const measuredTiming = speechTimingFromTranscript(check.transcript);
+    const speechTiming = await publishSpeechTiming({
+      timing: measuredTiming,
+      // Raw ASR измеряет WAV, а не каноническую подпись. Правка текста должна
+      // пересчитать только отдельное alignment, не запускать Whisper повторно.
+      sceneInputHash: artifact.contentHash,
+      audioContentHash: artifact.contentHash,
+      producerVersion: `whisper:${String(check.transcript?.model ?? 'unknown')}`,
+      durationMs: check.durationMs,
+      targetDir: sceneDir,
+    });
+    const textHash = syncTextHash(expectedText);
+    const speechAlignment = speechTiming && measuredTiming
+      ? await publishSpeechAlignment({
+        alignment: alignSpeechTiming({
+          canonicalText: expectedText,
+          durationMs: check.durationMs,
+          timing: measuredTiming,
+        }),
+        canonicalText: expectedText,
+        textHash,
+        audioContentHash: artifact.contentHash,
+        speechTimingContentHash: speechTiming.contentHash,
+        targetDir: sceneDir,
+      })
+      : null;
     const audioSource = { kind: 'recorded' as const, voiceRef: null, artifactId: artifact.id };
     const saved = await store.updateProject(id, expectedRevision, (current) => ({
       ...current,
@@ -229,6 +424,23 @@ export function createSceneOps(deps: SceneOpsDeps) {
         ...sceneOf(current, sceneId),
         audioSource,
         audio: artifact,
+        speechTiming,
+        speechAlignment,
+        checks: [
+          ...sceneOf(current, sceneId).checks.filter((entry) => entry.kind !== 'speech'),
+          {
+            id: `speech-${artifact.id}`,
+            kind: 'speech' as const,
+            status: check.status,
+            inputHash: recordedSpeechTextInputHash(expectedText),
+            artifactId: artifact.id,
+            reason: [check.reason, check.loudnessWarning].filter(Boolean).join(' '),
+            textRange: null,
+            suggestions: check.missingWords.length > 0
+              ? [`Не слышно: ${check.missingWords.join(', ')}`]
+              : [],
+          },
+        ],
       }),
     }));
 

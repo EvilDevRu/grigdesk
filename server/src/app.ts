@@ -792,6 +792,7 @@ async function build() {
       apiKey: config.showcaseYandexApiKey,
       folderId: config.showcaseYandexFolderId,
     },
+    edgeVoice: { enabled: config.showcaseEdgeTts },
     bootstrapPython: process.env.COCKPIT_MEDIA_BOOTSTRAP_PYTHON || 'python3',
     listProjects: () => listProjects(config, prefs),
     sandboxOverview: () => sandboxService.overview(),
@@ -801,14 +802,18 @@ async function build() {
     // тот же, что у диктовки и «Видео». Своей копии распознавания у раздела нет,
     // а его недоступность делает проверку пропущенной, а не проваленной.
     transcribe: async (file: string) => {
-      // Расшифровка приходит сегментами со своими границами; для сверки слов нужен
-      // сплошной текст, а границы фраз — предмет отдельного захода.
-      const result = await speechRuntime.transcribe({ filePath: file }) as {
-        transcript?: { segments?: { text?: unknown }[] };
-      };
-      const segments = result?.transcript?.segments ?? [];
+      // Showcase просит структуру один раз: тот же результат проверяет слова и
+      // даёт границы для синхронизации. Обычная диктовка не включает эту опцию.
+      const result = await speechRuntime.transcribe({
+        filePath: file,
+        settings: { ...speechRuntime.settings, wordTimestamps: true },
+      }) as { transcript?: unknown };
 
-      return segments.map((segment) => String(segment?.text ?? '')).join(' ').trim();
+      if (!result.transcript || typeof result.transcript !== 'object') {
+        throw new Error('Распознавание не вернуло структурированную расшифровку.');
+      }
+
+      return result.transcript as import('./lib/speech/transport.ts').SpeechTranscript;
     },
     // Модель сценария — своя настройка плагина, читается перед самым вызовом:
     // смена модели действует со следующей генерации, без перезапуска. Резолвер тот

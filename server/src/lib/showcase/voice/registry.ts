@@ -14,6 +14,9 @@ export interface VoiceEngineStatus {
   id: string;
   name: string;
   kind: VoiceEngine['kind'];
+  // Меняет ли движок темп: интерфейс не должен предлагать ступени, которые
+  // адаптер молча пропустит (Qwen темп указанием не держит).
+  pace: boolean;
   doctor: VoiceDoctor;
   voices: VoiceInfo[];
 }
@@ -21,6 +24,32 @@ export interface VoiceEngineStatus {
 export function createVoiceRegistry(engines: VoiceEngine[] = [createRhvoiceEngine()]) {
   function list(): VoiceEngine[] {
     return engines;
+  }
+
+  // Возможности спрашиваются без голоса: темп — свойство движка, а не диктора.
+  // Отказ адаптера читается как «темп есть»: молча спрятать ступени хуже.
+  function paceOf(engine: VoiceEngine): boolean {
+    try {
+      return engine.capabilities(null).pace;
+    } catch {
+      return true;
+    }
+  }
+
+  function capabilitiesOf(engine: VoiceEngine, voiceId: string): VoiceInfo['capabilities'] {
+    try {
+      const capabilities = engine.capabilities(voiceId);
+
+      return {
+        pace: capabilities.pace,
+        pause: capabilities.pause,
+        stress: capabilities.stress,
+      };
+    } catch {
+      // Старый/частично доступный адаптер остаётся в каталоге с unknown, а не с
+      // выдуманной поддержкой возможностей движка вообще.
+      return undefined;
+    }
   }
 
   function engineOf(id: string): VoiceEngine {
@@ -55,8 +84,13 @@ export function createVoiceRegistry(engines: VoiceEngine[] = [createRhvoiceEngin
         id: engine.id,
         name: engine.name,
         kind: engine.kind,
+        pace: paceOf(engine),
         doctor,
-        voices,
+        voices: voices.map((voice) => {
+          const capabilities = capabilitiesOf(engine, voice.id);
+
+          return capabilities ? { ...voice, capabilities } : voice;
+        }),
       });
     }
 
@@ -78,7 +112,18 @@ export function createVoiceRegistry(engines: VoiceEngine[] = [createRhvoiceEngin
     return { engineId, voiceId };
   }
 
-  return { engineOf, list, parseVoiceRef, statuses };
+  /**
+   * Сброс кэшей готовности у всех движков. Зовётся по итогу установки: движок,
+   * который минуту назад честно сказал «модель не скачана», обязан перепроверить
+   * себя сразу, а не по истечении кэша.
+   */
+  function forgetDoctors(): void {
+    for (const engine of engines) {
+      engine.forgetDoctor?.();
+    }
+  }
+
+  return { engineOf, forgetDoctors, list, parseVoiceRef, statuses };
 }
 
 export type VoiceRegistry = ReturnType<typeof createVoiceRegistry>;

@@ -7,6 +7,27 @@ import { speechModel } from './catalog.ts';
 
 export const INGEST_JOB_SCHEMA_VERSION = 2;
 
+export const SPEECH_TIMESTAMP_END_TOLERANCE_SECONDS = 0.001;
+
+export type SpeechWordTimingStatus = 'not-requested' | 'valid' | 'missing' | 'invalid';
+
+export interface SpeechTranscriptSpan {
+  text: string;
+  start: number;
+  end: number;
+}
+
+// Нормализованный ответ обоих batch-путей Whisper. Секунды сохранены ради
+// существующего video API; showcase переводит их в миллисекунды на своей границе.
+export interface SpeechTranscript extends Record<string, unknown> {
+  duration: number;
+  segments: SpeechTranscriptSpan[];
+  words: SpeechTranscriptSpan[];
+  wordTimestamps: boolean;
+  wordTimingStatus: SpeechWordTimingStatus;
+  wordTimingReason: string;
+}
+
 // Задание распознавания видео в схеме v2: speech отдельным вложенным контрактом.
 export interface IngestJob {
   schemaVersion: number;
@@ -55,9 +76,125 @@ export function buildTranscribeArgv({ scriptPath, audioPath, options, progressFi
   if (speech.hotwords) argv.push('--hotwords', speech.hotwords);
   if (!speech.conditionOnPreviousText) argv.push('--no-condition-previous');
   if (speech.initialPrompt) argv.push('--initial-prompt', speech.initialPrompt);
+  if (speech.wordTimestamps) argv.push('--word-timestamps');
   argv.push('--vad-silence-ms', String(speech.vadSilenceMs));
   if (progressFile) argv.push('--progress-file', progressFile);
   return argv;
+}
+
+function transcriptRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Результат распознавания должен быть объектом');
+  }
+
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Проверяет временные границы без сортировки и равномерного растягивания. Только
+ * погрешность округления конца WAV до одной миллисекунды исправляется явно.
+ */
+function transcriptSpans(
+  value: unknown,
+  duration: number,
+  field: string,
+): { spans: SpeechTranscriptSpan[]; problem: string | null } {
+  if (!Array.isArray(value)) {
+    return { spans: [], problem: `${field} отсутствуют` };
+  }
+
+  const spans: SpeechTranscriptSpan[] = [];
+  let previousEnd = 0;
+
+  for (const raw of value) {
+    const span = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : null;
+    const textValue = span?.text;
+    const start = span?.start;
+    const sourceEnd = span?.end;
+
+    if (
+      typeof textValue !== 'string'
+      || textValue.trim() === ''
+      || typeof start !== 'number'
+      || !Number.isFinite(start)
+      || typeof sourceEnd !== 'number'
+      || !Number.isFinite(sourceEnd)
+      || start < 0
+      || start < previousEnd
+      || sourceEnd <= start
+      || sourceEnd > duration + SPEECH_TIMESTAMP_END_TOLERANCE_SECONDS
+    ) {
+      return { spans: [], problem: `${field} нарушают порядок или длительность аудио` };
+    }
+
+    const end = Math.min(sourceEnd, duration);
+
+    if (end <= start) {
+      return { spans: [], problem: `${field} схлопнулись на границе аудио` };
+    }
+
+    spans.push({ text: textValue.trim(), start, end });
+    previousEnd = end;
+  }
+
+  return { spans, problem: null };
+}
+
+/**
+ * Приводит one-shot и warmup к одной обратно совместимой форме. Повреждённые
+ * слова отбрасываются целиком, но годные сегменты остаются доступны для прежних
+ * потребителей и фразового fallback.
+ */
+export function decodeSpeechTranscript(
+  value: unknown,
+  { wordTimestampsRequested = false }: { wordTimestampsRequested?: boolean } = {},
+): SpeechTranscript {
+  const source = transcriptRecord(value);
+  const duration = source.duration;
+
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0) {
+    throw new TypeError('Длительность результата распознавания некорректна');
+  }
+
+  if (source.word_timestamps != null && typeof source.word_timestamps !== 'boolean') {
+    throw new TypeError('word_timestamps результата должен быть boolean');
+  }
+
+  const segments = transcriptSpans(source.segments, duration, 'Сегменты');
+
+  if (segments.problem) {
+    throw new TypeError(segments.problem);
+  }
+
+  const wordTimestamps = wordTimestampsRequested || source.word_timestamps === true;
+  const decodedWords = transcriptSpans(source.words, duration, 'Словесные метки');
+  let wordTimingStatus: SpeechWordTimingStatus = 'not-requested';
+  let wordTimingReason = 'Словесные метки не запрашивались.';
+  let words: SpeechTranscriptSpan[] = [];
+
+  if (wordTimestamps && decodedWords.problem) {
+    wordTimingStatus = Array.isArray(source.words) ? 'invalid' : 'missing';
+    wordTimingReason = decodedWords.problem;
+  } else if (wordTimestamps && decodedWords.spans.length === 0) {
+    wordTimingStatus = 'missing';
+    wordTimingReason = 'Распознаватель не вернул словесных меток.';
+  } else if (wordTimestamps) {
+    wordTimingStatus = 'valid';
+    wordTimingReason = 'Словесные метки распознавателя проверены.';
+    words = decodedWords.spans;
+  }
+
+  return {
+    ...source,
+    duration,
+    segments: segments.spans,
+    words,
+    wordTimestamps,
+    wordTimingStatus,
+    wordTimingReason,
+  };
 }
 
 /**
@@ -142,6 +279,7 @@ export function encodeIngestJob(value: unknown): IngestJob {
     vadSilenceMs: job.vadSilenceMs,
     conditionOnPreviousText: job.conditionOnPreviousText,
     initialPrompt: job.initialPrompt,
+    wordTimestamps: job.wordTimestamps,
   }, 'video');
   const frames = job.frames ?? 0;
   if (typeof frames !== 'number' || !Number.isInteger(frames) || frames < 0) {
@@ -183,6 +321,7 @@ export function decodeIngestJob(value: unknown): IngestJob {
     vadSilenceMs: job.vadSilenceMs,
     conditionOnPreviousText: job.conditionOnPreviousText,
     initialPrompt: job.initialPrompt,
+    wordTimestamps: job.wordTimestamps,
   }, 'video');
   // Поля состояния, которые дописывает воркер, сохраняются как есть: разбор
   // отвечает за схему, а не за инвентаризацию всего, что успел записать процесс.

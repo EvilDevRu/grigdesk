@@ -7,6 +7,14 @@
 // Длительность, хеш содержимого и идентификатор считает служба по готовому файлу.
 // Верить размеру и ревизии, которые вернул поставщик, нельзя: это его слова о
 // своём результате, а не проверенный факт.
+import { parseNarration } from '../../../../../shared/showcaseNarration.ts';
+import type { ShowcasePace } from '../../../../../shared/showcaseContracts.ts';
+
+export type VoicePace = ShowcasePace;
+
+// Чего движок не прочитает: латинские буквы и цифры молча выпадают из речи или
+// роняют синтез, поэтому такой текст отвергается до задания, а не после.
+export type UnreadableKind = 'latin' | 'digits';
 
 export interface VoiceCapabilities {
   languages: string[];
@@ -19,6 +27,7 @@ export interface VoiceCapabilities {
   supportedFormats: string[];
   engineVersion: string;
   modelRevision: string | null;
+  unreadable?: UnreadableKind[];
 }
 
 export interface VoiceInfo {
@@ -29,6 +38,9 @@ export interface VoiceInfo {
   // другим голосом посреди ролика хуже честного отказа.
   available: boolean;
   reason: string;
+  // У некоторых поставщиков возможности зависят от диктора. Адаптер может не
+  // знать их до каталога; registry дополняет поле перед публичным ответом.
+  capabilities?: Pick<VoiceCapabilities, 'pace' | 'pause' | 'stress'>;
 }
 
 export interface VoiceDoctor {
@@ -41,7 +53,7 @@ export interface VoiceDoctor {
 
 export interface VoiceDirection {
   tone: string | null;
-  pace: 'slow' | 'normal' | 'fast' | null;
+  pace: VoicePace | null;
   emphasis: { from: number; to: number }[];
   pauses: { at: number; ms: number }[];
   stresses: { at: number; vowel: number }[];
@@ -52,6 +64,21 @@ export interface SynthesisInput {
   direction: VoiceDirection;
   voiceRef: string | null;
   language: string;
+}
+
+// Нативная временная метка уже приведена адаптером к общей шкале WAV. Здесь нет
+// индексов канонического текста: последовательное сопоставление с повторами и
+// «ё/е» выполняется отдельно и не должно угадываться внутри поставщика голоса.
+export interface VoiceSpeechSpanTiming {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface VoiceSpeechTiming {
+  source: 'edge' | 'yandex';
+  readonly words: readonly VoiceSpeechSpanTiming[];
+  readonly segments: readonly VoiceSpeechSpanTiming[];
 }
 
 export interface VoiceCandidate {
@@ -65,6 +92,9 @@ export interface VoiceCandidate {
   // Указания, которые движок не поддержал. Молча терять их нельзя: человек
   // услышит не то, что просил, и не поймёт почему.
   ignoredDirections: string[];
+  // Старые и локальные движки вправе не вернуть метки. Их отсутствие не меняет
+  // голос и не запускает синтез повторно: следующий слой выберет ASR/fallback.
+  speechTiming?: VoiceSpeechTiming;
 }
 
 export interface SynthesisOptions {
@@ -73,23 +103,100 @@ export interface SynthesisOptions {
   outputDir: string;
 }
 
+// Сколько реплик движок принимает одним вызовом сеанса: по числу и по сумме
+// знаков. Предел по знакам держит видеопамять — батч растёт с длиной речи.
+export interface VoiceBatchLimit {
+  items: number;
+  chars: number;
+}
+
+/**
+ * Сеанс синтеза на одно задание. Движок с тяжёлой моделью поднимает её один раз
+ * на все реплики задания, а не на каждую: подъём процесса стоил дороже самого
+ * синтеза. Между заданиями сеанса нет — видеопамять и память свободны, как раньше.
+ * Реплики идут списком: движок, умеющий батч, отдаёт несколько за время одной.
+ */
+export interface VoiceSession {
+  // null — реплики только по одной.
+  batch: VoiceBatchLimit | null;
+  synthesize(inputs: SynthesisInput[], options: SynthesisOptions): Promise<VoiceCandidate[]>;
+  close(): Promise<void>;
+}
+
 export interface VoiceEngine {
   id: string;
   name: string;
   kind: 'local' | 'cloud';
   capabilities(voiceRef: string | null): VoiceCapabilities;
   doctor(): Promise<VoiceDoctor>;
+  // Локальные движки кэшируют проверку окружения. После установки кэш обязан
+  // забыться сразу: событие «голос установлен» иначе показало бы прежнее
+  // «модель не скачана» до истечения кэша.
+  forgetDoctor?(): void;
   voices(): Promise<VoiceInfo[]>;
   synthesize(input: SynthesisInput, options: SynthesisOptions): Promise<VoiceCandidate>;
+  // Сеанс на задание есть только у движков с резидентным процессом; остальные
+  // получают обёртку над одиночным синтезом через `openVoiceSession`.
+  openSession?(): Promise<VoiceSession>;
 }
 
 /**
- * Канонический текст для синтеза. Знаки ударения и паузы из формы ввода уже разобраны
- * в структуру `direction`, поэтому здесь остаётся обычный текст: два независимых
- * источника пауз (разметка в строке и структура рядом) неминуемо разошлись бы.
+ * Сеанс для любого движка: свой, если движок его даёт, иначе обёртка над
+ * одиночным синтезом по одной реплике. Озвучка работает с сеансом всегда и не
+ * ветвится по тому, есть ли у движка резидентный процесс.
+ */
+export async function openVoiceSession(engine: VoiceEngine): Promise<VoiceSession> {
+  if (engine.openSession) {
+    return engine.openSession();
+  }
+
+  return {
+    batch: null,
+    async synthesize(inputs, options) {
+      const candidates: VoiceCandidate[] = [];
+
+      for (const input of inputs) {
+        candidates.push(await engine.synthesize(input, options));
+      }
+
+      return candidates;
+    },
+    async close() {
+      // Резидентного процесса нет — закрывать нечего.
+    },
+  };
+}
+
+/**
+ * Канонический текст для синтеза: знаки ударения сняты, пробелы схлопнуты. Сами
+ * ударения разбираются в структуру `direction` отдельно — движок получает обычный
+ * текст и указания рядом, а не два независимых источника разметки в одной строке.
  */
 export function canonicalTextOf(narration: string): string {
-  return narration.replace(/\s+/g, ' ').trim();
+  return parseNarration(narration).text;
+}
+
+/**
+ * Обрывки текста, которые движок не прочитает: цепочки латинских букв и цифр.
+ * Возвращаются сами обрывки, а не флаг: человеку нужно видеть, ЧТО переписать
+ * словами, — «API» и «2026», а не «в тексте есть латиница».
+ */
+export function unreadableFragments(text: string, unreadable: UnreadableKind[] | undefined): string[] {
+  if (!unreadable || unreadable.length === 0) {
+    return [];
+  }
+
+  const found: string[] = [];
+
+  for (const match of text.matchAll(/[a-z0-9]+/gi)) {
+    const kind: UnreadableKind = /[a-z]/i.test(match[0]) ? 'latin' : 'digits';
+
+    if (unreadable.includes(kind) && !found.includes(match[0])) {
+      found.push(match[0]);
+    }
+  }
+
+  return found;
 }
 
 /**

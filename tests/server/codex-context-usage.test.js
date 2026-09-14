@@ -55,6 +55,14 @@ test('Codex не выдумывает cache write и помечает отсут
   assert.equal(Object.hasOwn(parsed.contextCache, 'writeTokens'), false);
 });
 
+test('Codex не превращает пустые и некорректные token usage в точный ноль', () => {
+  for (const input of [null, '', '123', -1, 1.5]) {
+    const event = structuredClone(TOKEN_EVENT);
+    event.payload.info.last_token_usage.input_tokens = input;
+    assert.equal(parseCodexTokenInfoLine(JSON.stringify(event)), null);
+  }
+});
+
 test('Codex rollout читается с конца и находит thread по безопасному UUIDv7', async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-home-'));
   t.after(() => rm(home, { recursive: true, force: true }));

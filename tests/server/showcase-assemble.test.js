@@ -17,6 +17,14 @@ import { promisify } from 'node:util';
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
 import { publishArtifact } from '../../server/src/lib/showcase/artifacts.ts';
 import { PRODUCER_VERSIONS } from '../../server/src/lib/showcase/formats.ts';
+import { publishRecordingTiming } from '../../server/src/lib/showcase/recordingOps.ts';
+import { createSyncBindings, syncTextHash } from '../../server/src/lib/showcase/scenes.ts';
+import {
+  publishSpeechAlignment,
+  publishSpeechTiming,
+  readFinalManifest,
+} from '../../server/src/lib/showcase/syncStore.ts';
+import { alignSpeechTiming } from '../../server/src/lib/showcase/voice/alignment.ts';
 
 const run = promisify(execFile);
 
@@ -66,6 +74,17 @@ async function makeWav(file, seconds) {
     '-y', '-hide_banner', '-loglevel', 'error',
     '-f', 'lavfi', '-i', `sine=frequency=330:duration=${seconds}:sample_rate=48000`,
     '-c:a', 'pcm_s16le', '-ac', '1',
+    file,
+  ]);
+
+  return file;
+}
+
+async function makeCfrClip(file, seconds, color = 'navy') {
+  await run('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-f', 'lavfi', '-i', `color=${color}:s=1920x1080:d=${seconds}:r=30`,
+    '-an', '-c:v', 'libvpx', '-b:v', '300k',
     file,
   ]);
 
@@ -192,6 +211,163 @@ async function projectWithScenes(service, root) {
   return service.readProject(project.id);
 }
 
+async function projectWithExactScene(service, root) {
+  let project = await service.createProject({
+    ref: { kind: 'project', id: 'demo-profile' },
+    profile: 'demo-profile',
+    title: 'Точная сборка',
+  });
+
+  project = await service.addScene(project.id, project.revision, {
+    title: 'Кнопка',
+    screenId: 'overview',
+    narration: 'Нажимаем кнопку.',
+    caption: 'Кнопка',
+    subtitleText: 'Нажимаем кнопку.',
+    startState: null,
+    readyCondition: null,
+    actions: [{ kind: 'click', targetId: 'run' }],
+  });
+
+  const workDir = path.join(root, 'exact-work');
+
+  await mkdir(workDir, { recursive: true });
+  project = await service.importSceneAudio(
+    project.id,
+    project.revision,
+    project.scenes[0].id,
+    await makeWav(path.join(workDir, 'speech.wav'), 1),
+  );
+
+  const scene = project.scenes[0];
+  const names = service.store.namesOf(project.id);
+  const targetDir = path.join(names.scenesDir, scene.id, 'artifacts');
+  const { clipInputHash } = await import('../../server/src/lib/showcase/artifacts.ts');
+  const clip = await publishArtifact({
+    file: await makeCfrClip(path.join(workDir, 'clip.webm'), 3),
+    kind: 'clip',
+    inputHash: clipInputHash(scene, {
+      targetFingerprint: project.target.scope.targetFingerprint,
+      policyRevision: project.target.scope.policyRevision,
+      dataRevision: project.target.scope.dataRevision,
+      style: {
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        theme: 'dark',
+        locale: 'ru-RU',
+        burnSubtitles: false,
+      },
+      versions: PRODUCER_VERSIONS,
+    }),
+    producerVersion: PRODUCER_VERSIONS.recorder,
+    durationMs: 3_000,
+    targetDir,
+  });
+  const raw = {
+    source: 'whisper',
+    words: [
+      { text: 'Нажимаем', startMs: 100, endMs: 450 },
+      { text: 'кнопку', startMs: 550, endMs: 900 },
+    ],
+    segments: [{ text: 'Нажимаем кнопку', startMs: 100, endMs: 900 }],
+  };
+  const speechTiming = await publishSpeechTiming({
+    timing: raw,
+    sceneInputHash: scene.audio.inputHash,
+    audioContentHash: scene.audio.contentHash,
+    producerVersion: 'fixture-whisper-1',
+    durationMs: 1_000,
+    targetDir,
+  });
+
+  assert.ok(speechTiming);
+
+  const canonicalText = 'Нажимаем кнопку.';
+  const speechAlignment = await publishSpeechAlignment({
+    alignment: alignSpeechTiming({ canonicalText, durationMs: 1_000, timing: raw }),
+    canonicalText,
+    textHash: syncTextHash(canonicalText),
+    audioContentHash: scene.audio.contentHash,
+    speechTimingContentHash: speechTiming.contentHash,
+    targetDir,
+  });
+  const recordingTiming = await publishRecordingTiming({
+    timing: {
+      status: 'calibrated',
+      durationMs: 3_000,
+      sceneReadyMs: 0,
+      calibration: {
+        method: 'visual-marker-affine-v1',
+        errorMs: 20,
+        startErrorMs: 15,
+        endErrorMs: 20,
+        rate: 1,
+      },
+      actions: [{
+        actionIndex: 0,
+        kind: 'click',
+        startMs: 1_000,
+        anchorMs: 1_100,
+        endMs: 1_200,
+        readyMs: null,
+        geometry: null,
+      }],
+      stableIntervals: [
+        {
+          id: 'before-click',
+          fromMs: 0,
+          toMs: 1_000,
+          frameMs: 900,
+          afterActionIndex: null,
+          beforeActionIndex: 0,
+        },
+        {
+          id: 'after-click',
+          fromMs: 1_200,
+          toMs: 3_000,
+          frameMs: 2_900,
+          afterActionIndex: 0,
+          beforeActionIndex: null,
+        },
+      ],
+      removableWaits: [],
+      highlights: [],
+    },
+    sceneInputHash: clip.inputHash,
+    clipContentHash: clip.contentHash,
+    actions: scene.actions,
+    targetDir,
+  });
+
+  assert.ok(speechAlignment);
+  assert.ok(recordingTiming);
+
+  const syncBindings = createSyncBindings(scene.narration, scene.actions, [{
+    actionIndex: 0,
+    from: 0,
+    to: 'Нажимаем'.length,
+    kind: 'align-start',
+    origin: 'manual',
+  }]);
+
+  await service.store.updateProject(project.id, null, (current) => ({
+    ...current,
+    scenes: current.scenes.map((item) => (item.id === scene.id
+      ? {
+        ...item,
+        clip,
+        speechTiming,
+        speechAlignment,
+        recordingTiming,
+        syncBindings,
+      }
+      : item)),
+  }));
+
+  return service.readProject(project.id);
+}
+
 async function waitForJob(service, jobId, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
 
@@ -297,6 +473,54 @@ test('субтитры идут по общему таймлайну и не в�
   );
 });
 
+test('production adapter публикует exact manifest из реальных sidecar', async (t) => {
+  const { service, root } = await fixture(t);
+  const project = await projectWithExactScene(service, root);
+  const started = await service.assemble(project.id);
+  const finished = await waitForJob(service, started.id);
+
+  assert.equal(finished.state, 'succeeded', finished.error ?? '');
+
+  const built = await service.readProject(project.id);
+
+  assert.equal(built.latestFinal.manifestVersion, 1);
+
+  const manifest = await readFinalManifest({
+    manifestId: built.latestFinal.manifestId,
+    targetDir: service.store.namesOf(project.id).finalsDir,
+    projectId: project.id,
+  });
+
+  assert.ok(manifest);
+  assert.deepEqual(
+    await service.finalManifest(project.id, built.latestFinal.manifestId),
+    manifest,
+  );
+  assert.equal(manifest.mode, 'exact');
+  assert.equal(manifest.scenes[0].mode, 'exact');
+  assert.equal(manifest.scenes[0].quality, 'word-exact');
+  assert.equal(manifest.scenes[0].cues.length, 1);
+  assert.ok(manifest.scenes[0].cues[0].errorMs <= 250);
+  assert.equal(manifest.subtitleCues.length, 1);
+  assert.equal(manifest.subtitleCues[0].text, 'Нажимаем кнопку.');
+});
+
+test('битый существующий журнал останавливает сборку для проверки', async (t) => {
+  const { service, root } = await fixture(t);
+  const project = await projectWithExactScene(service, root);
+  const scene = project.scenes[0];
+  const targetDir = path.join(service.store.namesOf(project.id).scenesDir, scene.id, 'artifacts');
+
+  await writeFile(path.join(targetDir, `${scene.recordingTiming.id}.json`), '{}\n', 'utf8');
+
+  const started = await service.assemble(project.id);
+  const finished = await waitForJob(service, started.id);
+
+  assert.equal(finished.state, 'awaiting_review');
+  assert.match(finished.error, /Журнал записи повреждён/);
+  assert.equal((await service.readProject(project.id)).latestFinal, null);
+});
+
 test('правка субтитра делает собранный ролик предыдущим, не удаляя его', async (t) => {
   const { service, root } = await fixture(t);
   const project = await projectWithScenes(service, root);
@@ -320,10 +544,10 @@ test('правка субтитра делает собранный ролик �
   );
 });
 
-// У сцены с ЗАГРУЖЕННЫМ звуком правка произносимого текста ничего не старит: этот
-// звук не переозвучивается, и делать вид, что ролик устарел, было бы неправдой —
-// человек и так слышит в нём ровно то, что записал.
-test('правка текста при загруженном звуке не старит ни сцену, ни ролик', async (t) => {
+// У сцены с ЗАГРУЖЕННЫМ звуком правка текста не старит WAV/клип, но обязана
+// пересчитать alignment, привязки и итог: прежний manifest относится к другой
+// канонической строке и не может оставаться текущим.
+test('правка текста при загруженном звуке сохраняет сцену, но старит ролик', async (t) => {
   const { service, root } = await fixture(t);
   const project = await projectWithScenes(service, root);
   const job = await service.assemble(project.id);
@@ -336,7 +560,7 @@ test('правка текста при загруженном звуке не с
   });
 
   assert.equal(edited.scenes[1].stale, false);
-  assert.equal(edited.latestFinal.current, true);
+  assert.equal(edited.latestFinal.current, false);
 });
 
 test('сборка отказывается работать с устаревшей сценой', async (t) => {

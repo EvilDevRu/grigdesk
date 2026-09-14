@@ -15,6 +15,9 @@ import path from 'node:path';
 import test from 'node:test';
 
 import claude from '../../server/src/lib/executors/claude.ts';
+import {
+  buildClaudeTurnResult, createClaudeTurnCollector,
+} from '../../server/src/lib/executors/_claudeStream.ts';
 
 /** Фальшивый CLI: печатает готовый stream-json и завершается. */
 async function fakeClaude(t, events) {
@@ -94,6 +97,11 @@ test('Claude отдаёт размер контекста живьём, а не 
       },
     },
     {
+      tokens: 100,
+      contextTokens: 0,
+      contextCache: { scope: 'request', status: 'unavailable' },
+    },
+    {
       tokens: 140,
       contextTokens: 60000,
       contextCache: {
@@ -134,8 +142,39 @@ test('Ход без компакта и без обращений к модел�
 
   assert.deepEqual(progress, [], 'нечего мерить — нечего и слать');
   assert.equal(out.contextTokens, 0);
+  assert.equal(out.contextMetric, 'unavailable');
   assert.deepEqual(out.contextCache, { scope: 'request', status: 'unavailable' });
   assert.equal(out.steps.filter((step) => step.k === 'note').length, 0);
+});
+
+test('Claude не принимает расход result и замеры субагента за контекст родителя', () => {
+  const progress = [];
+  const collector = createClaudeTurnCollector({ onProgress: (_tokens, info) => progress.push(info) });
+  collector.push({ type: 'result', result: 'готово', usage: { input_tokens: 900_000 } });
+  assert.equal(buildClaudeTurnResult(collector).contextMetric, 'unavailable');
+  assert.equal(buildClaudeTurnResult(collector).contextTokens, 0);
+
+  collector.push({
+    type: 'assistant', session_id: 'parent-session',
+    message: { model: 'parent', usage: { input_tokens: 80_000 } },
+  });
+  collector.push({
+    type: 'assistant', parent_tool_use_id: 'child-tool', session_id: 'child-session',
+    message: { model: 'child', usage: { input_tokens: 2_000 } },
+  });
+  assert.equal(buildClaudeTurnResult(collector).contextTokens, 80_000);
+  assert.equal(buildClaudeTurnResult(collector).actualModel, 'parent');
+  assert.equal(buildClaudeTurnResult(collector).sessionId, 'parent-session');
+  assert.equal(progress.length, 1);
+
+  collector.push({ type: 'system', subtype: 'compact_boundary' });
+  assert.equal(progress.at(-1).contextMetric, 'unavailable');
+  assert.equal(buildClaudeTurnResult(collector).contextMetric, 'unavailable');
+
+  collector.push({ type: 'assistant', message: { model: 'parent', usage: { input_tokens: 0 } } });
+  const result = buildClaudeTurnResult(collector);
+  assert.equal(result.contextTokens, 0, 'измеренный ноль не заменяется суммой из result');
+  assert.equal(result.contextMetric, 'active-input-v1');
 });
 
 test('Claude не превращает отсутствующие cache-поля в нули', async (t) => {

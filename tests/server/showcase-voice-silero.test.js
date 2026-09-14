@@ -10,7 +10,13 @@ import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/
 import os from 'node:os';
 import path from 'node:path';
 
-import { createSileroEngine, readInstalledSileroModels } from '../../server/src/lib/showcase/voice/silero.ts';
+import {
+  createSileroEngine,
+  PAUSE_TOKEN_END,
+  PAUSE_TOKEN_START,
+  readInstalledSileroModels,
+  sileroMarkup,
+} from '../../server/src/lib/showcase/voice/silero.ts';
 import { SILERO_VOICES } from '../../server/src/lib/showcase/voice/sileroCatalog.ts';
 
 const DIRECTION = {
@@ -26,8 +32,10 @@ async function workspace(t) {
 }
 
 /**
- * Подменённый python: отвечает на проверку модуля и на вызов синтеза. Аргументы
- * записываются в файл — так видно, ЧЕМ адаптер зовёт движок.
+ * Подменённый python: отвечает на проверку модуля, а в резидентном режиме — на
+ * каждый запрос заданными фактами по каждой реплике. Аргументы и запросы
+ * записываются в файлы — так видно, ЧЕМ адаптер зовёт движок и КАКОЙ текст с
+ * каким диктором и темпом ему отдаёт.
  */
 async function fakePython(root, {
   facts = '{"durationMs": 2100, "sampleRate": 48000, "channels": 1, "peak": 0.5}',
@@ -35,28 +43,37 @@ async function fakePython(root, {
 } = {}) {
   const file = path.join(root, 'python');
   const calls = path.join(root, 'calls.txt');
+  const stdin = path.join(root, 'stdin.txt');
 
   await writeFile(
     file,
-    `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> ${JSON.stringify(calls)}
-if [[ "$1" == '-c' ]]; then
-  ${hasModule ? 'exit 0' : 'echo "ModuleNotFoundError" >&2; exit 1'}
-fi
-out=''
-while [[ $# -gt 0 ]]; do
-  if [[ "$1" == '--out' ]]; then out=$2; fi
-  shift
-done
-cat > /dev/null
-printf 'RIFF' > "$out"
-echo '${facts}'
+    `#!/usr/bin/env python3
+import json, sys
+args = sys.argv[1:]
+open(${JSON.stringify(calls)}, 'a').write(' '.join(args) + '\\n')
+if args[:1] == ['-c']:
+    ${hasModule ? 'sys.exit(0)' : "sys.stderr.write('ModuleNotFoundError\\n'); sys.exit(1)"}
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    open(${JSON.stringify(stdin)}, 'a').write(line)
+    request = json.loads(line)
+    results = []
+    for item in request['items']:
+        open(item['out'], 'wb').write(b'RIFF')
+        results.append(json.loads('${facts}'))
+    print(json.dumps({'id': request['id'], 'results': results}), flush=True)
 `,
     'utf8',
   );
   await chmod(file, 0o755);
 
-  return { python: file, calls };
+  return { python: file, calls, stdin };
+}
+
+/** Запросы, ушедшие в движок, по порядку: JSON на строку. */
+async function requestsOf(stdin) {
+  return (await readFile(stdin, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
 }
 
 async function installModel(modelsDir, overrides = {}) {
@@ -132,7 +149,7 @@ test('голосами становятся дикторы установлен�
 
 test('синтез зовёт движок выбранным диктором и переводит темп', async (t) => {
   const root = await workspace(t);
-  const { python, calls } = await fakePython(root);
+  const { python, calls, stdin } = await fakePython(root);
   const modelsDir = path.join(root, 'silero');
 
   await installModel(modelsDir);
@@ -155,8 +172,63 @@ test('синтез зовёт движок выбранным диктором �
   const argv = await readFile(calls, 'utf8');
 
   assert.match(argv, /--model .*v5_5_ru\/v5_5_ru\.pt/);
-  assert.match(argv, /--speaker aidar/);
-  assert.match(argv, /--rate fast/);
+  assert.match(argv, /--serve/);
+  assert.doesNotMatch(argv, /Фильтр/, 'реплика не попадает в командную строку');
+
+  const [first] = await requestsOf(stdin);
+
+  assert.equal(first.items.length, 1);
+  assert.equal(first.items[0].speaker, 'aidar');
+  assert.equal(first.items[0].rate, 'fast');
+  assert.equal(first.items[0].out, candidate.temporaryFile);
+
+  await engine.synthesize(
+    {
+      canonicalText: 'Фильтр сбрасывается одним нажатием.',
+      direction: { ...DIRECTION, pace: 'slowest' },
+      voiceRef: 'aidar',
+      language: 'ru',
+    },
+    { outputDir: path.join(root, 'out'), deadlineMs: 30_000, signal: undefined },
+  );
+
+  const [, second] = await requestsOf(stdin);
+
+  assert.equal(second.items[0].rate, 'slowest', 'крайняя ступень доходит до скрипта');
+});
+
+test('сеанс на задание держит один процесс с моделью на все реплики', async (t) => {
+  const root = await workspace(t);
+  const { python, calls, stdin } = await fakePython(root);
+  const modelsDir = path.join(root, 'silero');
+
+  await installModel(modelsDir);
+
+  const session = await createSileroEngine({ python, modelsDir }).openSession();
+
+  assert.equal(session.batch, null, 'Silero читает реплики по одной');
+
+  const candidates = await session.synthesize(
+    ['Первая.', 'Вторая.', 'Третья.'].map((canonicalText) => ({
+      canonicalText, direction: DIRECTION, voiceRef: 'xenia', language: 'ru',
+    })),
+    { outputDir: path.join(root, 'out'), deadlineMs: 30_000, signal: undefined },
+  );
+
+  await session.close();
+
+  assert.equal(candidates.length, 3);
+  assert.equal(new Set(candidates.map((item) => item.temporaryFile)).size, 3, 'файлы не совпадают');
+  assert.deepEqual(
+    (await requestsOf(stdin)).map((request) => request.items.map((item) => item.text)),
+    [['Первая.'], ['Вторая.'], ['Третья.']],
+    'реплики ушли по одной, в порядке подачи',
+  );
+  assert.equal(
+    (await readFile(calls, 'utf8')).split('\n').filter((line) => line.includes('--serve')).length,
+    1,
+    'процесс поднят один раз',
+  );
 });
 
 test('тишина вместо речи — отказ, а не готовый звук', async (t) => {
@@ -207,4 +279,57 @@ test('две версии модели с теми же дикторами да�
   );
 
   assert.match(await readFile(calls, 'utf8'), /--model .*v5_5_ru\/v5_5_ru\.pt/);
+});
+
+test('ударения и паузы уходят движку разметкой, а не теряются', async (t) => {
+  const root = await workspace(t);
+  const { python, stdin } = await fakePython(root);
+  const modelsDir = path.join(root, 'silero');
+
+  await installModel(modelsDir);
+
+  const engine = createSileroEngine({ python, modelsDir });
+  const own = engine.capabilities(null);
+
+  assert.equal(own.stress, true);
+  assert.equal(own.pause, true);
+  assert.deepEqual(own.unreadable, ['latin', 'digits'], 'латиницу и цифры движок не читает');
+
+  const candidate = await engine.synthesize(
+    {
+      canonicalText: 'Я купил замок. И ещё один замок.',
+      direction: {
+        ...DIRECTION,
+        stresses: [{ at: 8, vowel: 1 }, { at: 26, vowel: 3 }],
+        pauses: [{ at: 14, ms: 600 }],
+      },
+      voiceRef: 'xenia',
+      language: 'ru',
+    },
+    { outputDir: path.join(root, 'out'), deadlineMs: 30_000, signal: undefined },
+  );
+
+  assert.deepEqual(candidate.ignoredDirections, [], 'ударения и паузы применены, а не отброшены');
+
+  const [request] = await requestsOf(stdin);
+
+  assert.equal(
+    request.items[0].text,
+    `Я купил з+амок.${PAUSE_TOKEN_START}600${PAUSE_TOKEN_END} И ещё один зам+ок.`,
+  );
+});
+
+test('разметка Silero: вставки с конца, предел паузы и защита от подделки токена', () => {
+  const text = `Первая.${PAUSE_TOKEN_START}9${PAUSE_TOKEN_END} Вторая.`;
+  const marked = sileroMarkup(text, {
+    ...DIRECTION,
+    stresses: [{ at: 0, vowel: 4 }],
+    pauses: [{ at: 7, ms: 9000 }, { at: 3, ms: 0 }],
+  });
+
+  // Чужие символы частного диапазона из текста заменены пробелами, поэтому
+  // токен в результате ровно один — тот, что поставил адаптер, и не длиннее 7 с.
+  assert.equal(marked.split(PAUSE_TOKEN_START).length - 1, 1);
+  assert.match(marked, /^Перв\+ая\.\uE0007000\uE001/u);
+  assert.doesNotMatch(marked, /\uE0009\uE001/u, 'подделанный токен не пережил разметку');
 });

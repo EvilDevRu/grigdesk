@@ -92,3 +92,28 @@ test('без изменений контекст пуст и честно об �
   assert.equal(context.diff, '');
   assert.equal(context.base, 'не определена');
 });
+
+// Обрезка по общему объёму срезала хвост diff целиком — у задачи 8665 за бортом
+// остался весь фронтенд, ради которого ролик снимали. Теперь доля есть у каждого
+// файла, а тесты в контекст не идут: они занимали место продуктового кода.
+test('каждый файл получает свою долю контекста, а тесты в него не попадают', async (t) => {
+  const root = await repository(t);
+
+  await mkdir(path.join(root, 'tests'), { recursive: true });
+  await writeFile(path.join(root, 'app.js'), `export const filter = true;\n${'// строка\n'.repeat(900)}`, 'utf8');
+  await writeFile(path.join(root, 'dialog.vue'), '<template>Массовый съём</template>\n', 'utf8');
+  await writeFile(path.join(root, 'tests', 'dialog.spec.js'), 'test("диалог", () => {});\n', 'utf8');
+  await writeFile(path.join(root, 'fresh.test.js'), 'test("новый", () => {});\n', 'utf8');
+  await git(root, ['add', 'app.js', 'dialog.vue', 'tests']);
+  await git(root, ['commit', '-q', '-m', 'правка']);
+
+  const context = await collectDiffContext([{ name: 'frontend', path: root, branch: 'route-task-1' }]);
+
+  assert.match(context.diff, /Массовый съём/, 'файл после длинного не должен быть срезан целиком');
+  assert.match(context.diff, /файл обрезан/, 'длинный файл обрезается по своей доле');
+  // Сводка `--stat` перечисляет всё, а сам код тестов в контекст не идёт.
+  assert.doesNotMatch(context.diff, /diff --git a\/tests\/dialog\.spec\.js/, 'patch теста не идёт');
+  assert.doesNotMatch(context.diff, /новый файл fresh\.test\.js/, 'новый тест не идёт');
+  assert.match(context.diff, /diff --git a\/dialog\.vue/);
+  assert.equal(context.truncated, true, 'обрезка файла — тоже неполный контекст');
+});

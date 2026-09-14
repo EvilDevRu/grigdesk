@@ -291,7 +291,12 @@ function parseStatus(text: unknown, fallbackWindow: number) {
   // 0.33+ убрал маркер «- » и добавляет суффикс «(thinking: on)».
   const model = String(text || '').match(/-?\s*Model:\s*(.+)/i)?.[1]?.trim()
     .replace(/\s*\(thinking:[^)]*\)\s*$/i, '') || '';
-  if (!match) return {
+  const contextTokens = match ? Number((match[1] || '').replaceAll(',', '')) : null;
+  const contextWindow = match ? Number((match[2] || '').replaceAll(',', '')) : null;
+
+  if (contextTokens === null || contextWindow === null
+    || !Number.isSafeInteger(contextTokens) || !Number.isSafeInteger(contextWindow)
+    || contextWindow <= 0) return {
     contextTokens: 0,
     contextWindow: fallbackWindow || 0,
     contextMetric: 'unavailable',
@@ -299,8 +304,8 @@ function parseStatus(text: unknown, fallbackWindow: number) {
     actualModel: model,
   };
   return {
-    contextTokens: Number((match[1] || '').replaceAll(',', '')) || 0,
-    contextWindow: Number((match[2] || '').replaceAll(',', '')) || fallbackWindow || 0,
+    contextTokens,
+    contextWindow,
     contextMetric: 'kimi-session-status',
     contextIsEstimate: false,
     actualModel: model,
@@ -373,7 +378,7 @@ export async function runContainedKimi({
   } | null;
   signal?: AbortSignal;
   onStep?: (step: ChatStep) => void;
-  onProgress?: (tokens: number) => void;
+  onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onPermission?: (ask: Record<string, unknown>) => Promise<PermissionAnswer | null | undefined>;
   onSessionCreated?: (sessionId: string) => unknown;
   chatKey?: string;
@@ -775,6 +780,8 @@ export async function runContainedKimi({
         steps: stepSink.steps,
         sessionId: currentSession,
         contextTokens: stoppedStatus.contextTokens,
+        contextWindow: stoppedStatus.contextWindow,
+        contextMetric: stoppedStatus.contextMetric,
         contextIsEstimate: stoppedStatus.contextIsEstimate,
         contextCache: contextCacheStatus('unavailable'),
       });
@@ -787,7 +794,15 @@ export async function runContainedKimi({
         { retryState: promptState },
       );
     }
-    try { onProgress?.(0); } catch { /* UI callback не влияет на ход */ }
+    try {
+      onProgress?.(0, {
+        contextTokens: status.contextTokens,
+        contextWindow: status.contextWindow,
+        contextMetric: status.contextMetric,
+        contextIsEstimate: status.contextIsEstimate,
+        contextCache: contextCacheStatus('unavailable'),
+      });
+    } catch { /* UI callback не влияет на ход */ }
     return {
       reply: `${reply.trim()}${replyTruncated ? '\n\n[Ответ Kimi сокращён: превышен лимит вывода Cockpit.]' : ''}`,
       sessionId: currentSession,

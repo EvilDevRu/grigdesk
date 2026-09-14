@@ -13,7 +13,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { sha256Of } from '../../server/src/lib/showcase/voice/download.ts';
+import { gitBlobSha1Of, sha256Of } from '../../server/src/lib/showcase/voice/download.ts';
+import { QWEN_VOICES } from '../../server/src/lib/showcase/voice/qwenCatalog.ts';
 
 const run = promisify(execFile);
 
@@ -218,4 +219,116 @@ test('подменённый источник останавливает уст�
     !outcome.progress.some((line) => line.state === 'check'),
     'до синтеза дело не дошло',
   );
+});
+
+/**
+ * Источник модели Qwen: маленькие файлы по тем же относительным путям, что и в
+ * репозитории, с честно посчитанными суммами обоих видов. Раскладка и приёмка не
+ * зависят от размера файлов — а четыре гигабайта тесту ни к чему.
+ */
+async function qwenFixture(root) {
+  const source = path.join(root, 'qwen-source');
+  const bodies = {
+    'config.json': '{"model_type": "qwen3_tts"}',
+    'model.safetensors': 'веса модели',
+    'speech_tokenizer/config.json': '{"model_type": "tokenizer"}',
+    'speech_tokenizer/model.safetensors': 'веса токенизатора',
+  };
+  const files = [];
+
+  for (const [relative, body] of Object.entries(bodies)) {
+    const file = path.join(source, relative);
+
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, body, 'utf8');
+    files.push(relative.endsWith('.safetensors')
+      ? { path: relative, bytes: Buffer.byteLength(body), sha256: await sha256Of(file) }
+      : { path: relative, bytes: Buffer.byteLength(body), gitBlobSha1: await gitBlobSha1Of(file) });
+  }
+
+  const server = http.createServer(async (request, response) => {
+    const body = await readFile(path.join(source, decodeURIComponent(request.url.slice(1))))
+      .catch(() => null);
+
+    if (!body) {
+      response.writeHead(404);
+      response.end();
+
+      return;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': String(body.byteLength),
+    });
+    response.end(body);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  return {
+    close: () => new Promise((resolve) => server.close(resolve)),
+    pack: {
+      ...QWEN_VOICES[0],
+      baseUrl: `http://127.0.0.1:${server.address().port}/`,
+      files,
+      modelBytes: files.reduce((sum, file) => sum + file.bytes, 0),
+    },
+  };
+}
+
+test('установка Qwen раскладывает модель по подкаталогам и принимает её синтезом', async (t) => {
+  const root = await workspace(t);
+  const source = await qwenFixture(root);
+
+  t.after(() => source.close());
+
+  const venvDir = await fakeVenv(root, '{"durationMs": 1800, "sampleRate": 24000, "peak": 0.4}');
+  const voicesDir = path.join(root, 'qwen');
+  const outcome = await runWorker(root, {
+    voice: source.pack,
+    venvDir,
+    voicesDir,
+    requirementsFile: path.join(root, 'requirements.txt'),
+    bootstrapPython: process.execPath,
+    deadlineMs: 90_000,
+  });
+
+  assert.equal(outcome.result.state, 'succeeded', outcome.result.error ?? '');
+
+  const steps = outcome.progress.map((line) => line.state);
+
+  assert.ok(steps.indexOf('check') > steps.indexOf('voice'), 'приёмка идёт после раскладки');
+
+  const modelDir = path.join(voicesDir, source.pack.id);
+  const manifest = JSON.parse(await readFile(path.join(modelDir, 'voice.json'), 'utf8'));
+
+  assert.equal(manifest.revision, QWEN_VOICES[0].revision, 'ревизия модели записана в манифест');
+  assert.equal(manifest.sampleRate, 24_000);
+  assert.equal(manifest.speakers.length, QWEN_VOICES[0].speakers.length);
+  await access(path.join(modelDir, 'speech_tokenizer', 'model.safetensors'));
+  await access(path.join(outcome.workDir, 'check.wav'));
+});
+
+test('молчащая на приёмке модель Qwen не считается установленной', async (t) => {
+  const root = await workspace(t);
+  const source = await qwenFixture(root);
+
+  t.after(() => source.close());
+
+  const venvDir = await fakeVenv(root, '{"durationMs": 1800, "sampleRate": 24000, "peak": 0.0}');
+  const voicesDir = path.join(root, 'qwen');
+  const outcome = await runWorker(root, {
+    voice: source.pack,
+    venvDir,
+    voicesDir,
+    requirementsFile: path.join(root, 'requirements.txt'),
+    bootstrapPython: process.execPath,
+    deadlineMs: 90_000,
+  });
+
+  assert.equal(outcome.result.state, 'failed');
+  assert.match(outcome.result.error, /тишин/);
+  await access(path.join(voicesDir, source.pack.id, 'model.safetensors'));
+  await assert.rejects(() => access(path.join(voicesDir, source.pack.id, 'voice.json')));
 });

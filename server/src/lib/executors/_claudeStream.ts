@@ -46,6 +46,7 @@ interface ClaudeEvent {
   type?: string;
   subtype?: string;
   session_id?: string;
+  parent_tool_use_id?: string | null;
   model?: string;
   compactMetadata?: unknown;
   message?: { model?: string; usage?: Record<string, unknown>; content?: unknown };
@@ -62,7 +63,7 @@ interface ClaudeEvent {
 interface TurnState {
   resultEv: ClaudeEvent | null;
   spentTokens: number;
-  lastTurnInput: number;
+  lastTurnInput: number | null;
   lastContextCache: ContextCache | null;
   actualModel: string;
   streamSessionId: string;
@@ -101,7 +102,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
   const state: TurnState = {
     resultEv: null,
     spentTokens: 0,
-    lastTurnInput: 0,
+    lastTurnInput: null,
     lastContextCache: null,
     actualModel: '',
     streamSessionId: '',
@@ -115,6 +116,10 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
 
     stepSink.emitAll(toClaudeSteps(ev));
 
+    // В том же потоке идут обращения субагентов. Их отдельные окна не заменяют
+    // контекст основного разговора, хотя сами шаги остаются в ленте.
+    if (ev.parent_tool_use_id) return;
+
     // session_id CLI проставляет во всех событиях, начиная с init. Забираем сразу:
     // у оборванного хода финального result нет, а продолжать разговор всё равно нужно.
     if (ev.session_id) state.streamSessionId = ev.session_id;
@@ -125,9 +130,18 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
     }
 
     if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
-      // CLI сжал контекст сам, по своему порогу. Новый размер сообщит ближайшее
-      // обращение к модели — lastTurnInput тут не трогаем, иначе между границей и
-      // этим обращением кольцо контекста показывало бы пустоту.
+      // Старый замер после сжатия уже недействителен. Это отсутствие нового
+      // измерения, а не пустой контекст; ближайший запрос вернёт точную цифру.
+      state.lastTurnInput = null;
+      state.lastContextCache = contextCacheStatus('unavailable');
+      try {
+        onProgress?.(state.spentTokens, {
+          contextTokens: 0,
+          contextMetric: 'unavailable',
+          contextIsEstimate: false,
+          contextCache: state.lastContextCache,
+        });
+      } catch { /* прогресс не критичен */ }
       log?.info?.({ meta: ev.compactMetadata || null }, 'чат: CLI сжал контекст сам');
       return;
     }
@@ -147,9 +161,13 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
       const usage = ev.message.usage as Record<string, number>;
       state.spentTokens += usage.output_tokens || 0;
       if (ev.message.model) state.actualModel = ev.message.model;
-      state.lastTurnInput = (usage.input_tokens || 0)
-        + (usage.cache_read_input_tokens || 0)
-        + (usage.cache_creation_input_tokens || 0);
+      const inputs = [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens];
+      const input = usage.input_tokens;
+      const validInput = typeof input === 'number' && Number.isSafeInteger(input) && input >= 0
+        && inputs.every((tokens) => tokens === undefined || (Number.isSafeInteger(tokens) && tokens >= 0));
+      state.lastTurnInput = validInput
+        ? inputs.reduce<number>((sum, tokens) => sum + (tokens ?? 0), 0)
+        : null;
 
       // Поля кэша относятся именно к ТЕКУЩЕМУ обращению к модели; накопительный
       // result.usage для этого не годится.
@@ -165,7 +183,9 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
 
       try {
         onProgress?.(state.spentTokens, {
-          contextTokens: state.lastTurnInput,
+          contextTokens: state.lastTurnInput ?? 0,
+          contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
+          contextIsEstimate: false,
           contextCache: state.lastContextCache,
         });
       } catch { /* прогресс не критичен */ }
@@ -193,12 +213,7 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
 } = {}) {
   const { state, steps } = collector;
   const ev = state.resultEv || {} as ClaudeEvent;
-  const usage = (ev.usage || {}) as Record<string, number>;
-
-  const contextTokens = state.lastTurnInput
-    || ((usage.input_tokens || 0)
-      + (usage.cache_read_input_tokens || 0)
-      + (usage.cache_creation_input_tokens || 0));
+  const contextTokens = state.lastTurnInput ?? 0;
 
   let reply = ev.result || '';
   // Ход, в котором не случилось ни одного обращения к модели: запуск ничего не сделал
@@ -249,6 +264,8 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
     sessionId: ev.session_id || state.streamSessionId || fallbackSessionId || null,
     cost: ev.total_cost_usd ?? null,
     contextTokens,
+    contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
+    contextIsEstimate: false,
     contextCache: state.lastContextCache || contextCacheStatus('unavailable'),
     actualModel: state.actualModel,
     steps,
@@ -454,6 +471,8 @@ export function openClaudeStreamSession({
           steps: result.steps,
           sessionId: state.sessionId,
           contextTokens: result.contextTokens,
+          contextMetric: result.contextMetric,
+          contextIsEstimate: result.contextIsEstimate,
           contextCache: result.contextCache,
         });
         turn.reject(stopped);

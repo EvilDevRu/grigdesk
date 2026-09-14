@@ -77,8 +77,12 @@ test('учётка приходит из файла профиля, а без н
  */
 async function fixture(t, { credentials = true } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-login-service-'));
+  let service = null;
 
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(async () => {
+    await service?.disable().catch(() => null);
+    await rm(root, { recursive: true, force: true });
+  });
 
   const profileDir = path.join(root, 'profiles', 'demo-profile');
   const contractDir = path.join(profileDir, 'showcase');
@@ -112,7 +116,7 @@ async function fixture(t, { credentials = true } = {}) {
     );
   }
 
-  const service = createShowcaseService({
+  service = createShowcaseService({
     showcaseDir: path.join(root, 'showcase'),
     authDir: path.join(root, 'auth'),
     profilesDir: path.join(root, 'profiles'),

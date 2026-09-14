@@ -230,6 +230,45 @@ async function download(path: string): Promise<DownloadedFile> {
   return { blob: await res.blob(), ...(filename ? { filename } : {}) };
 }
 
+/**
+ * Двоичный ответ на GET: звук или картинка, которые интерфейс воспроизводит сам.
+ * Отказ и здесь приходит JSON-ом и уходит в общий разбор — иначе человек услышал
+ * бы тишину вместо причины, по которой движок не ответил.
+ */
+async function getBlob(path: string): Promise<Blob> {
+  const res = await fetch(url(path), FETCH_OPTS);
+
+  if (!res.ok) {
+    await handle(res, path);
+  }
+
+  return res.blob();
+}
+
+/**
+ * JSON-запрос с двоичным ответом нужен для preview, где текст не должен быть в URL.
+ * Неуспешный ответ остаётся в общем JSON-разборе и сохраняет серверную причину.
+ */
+async function postBlob(
+  path: string,
+  body: unknown,
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<Blob> {
+  const res = await fetch(url(path), {
+    ...FETCH_OPTS,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
+  });
+
+  if (!res.ok) {
+    await handle(res, path);
+  }
+
+  return res.blob();
+}
+
 // Пароль SSH уходит только как непрозрачные байты: общий JSON-клиент здесь
 // использовать нельзя, иначе секрет окажется в сериализуемом объекте.
 async function postBytes(
@@ -259,7 +298,9 @@ export interface ApiClient {
   put: (path: string, body?: unknown) => Promise<unknown>;
   del: (path: string, body?: unknown) => Promise<unknown>;
   postBytes: typeof postBytes;
+  postBlob: typeof postBlob;
   download: typeof download;
+  getBlob: typeof getBlob;
   upload: typeof upload;
 }
 
@@ -274,6 +315,8 @@ export const api: ApiClient = {
   put: (path: string, body?: unknown) => request('PUT', path, body),
   del: (path: string, body?: unknown) => request('DELETE', path, body),
   postBytes,
+  postBlob,
   download,
+  getBlob,
   upload,
 };
