@@ -326,6 +326,7 @@ function ollamaUntrustedError(code: string, message: string) {
  */
 export async function runOllamaUntrusted({
   config, message, images = [], model, effort, providerSettings, signal,
+  timeoutMs = OLLAMA_UNTRUSTED_TIMEOUT_MS,
 }: {
   config?: OllamaConfig;
   message?: unknown;
@@ -334,6 +335,7 @@ export async function runOllamaUntrusted({
   effort?: string;
   providerSettings?: OllamaSettings | null;
   signal?: AbortSignal;
+  timeoutMs?: number;
 } = {}) {
   if (!model) throw new Error('Не выбрана модель Ollama.');
   if (!Array.isArray(images) || images.length > OLLAMA_UNTRUSTED_MAX_IMAGES) {
@@ -379,7 +381,9 @@ export async function runOllamaUntrusted({
 
   let reply = '';
   let contextTokens = 0;
-  const timeoutSignal = AbortSignal.timeout(OLLAMA_UNTRUSTED_TIMEOUT_MS);
+  const timeoutSignal = AbortSignal.timeout(
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : OLLAMA_UNTRUSTED_TIMEOUT_MS,
+  );
   const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   await postChatStream(baseUrl, body, {
     signal: requestSignal,

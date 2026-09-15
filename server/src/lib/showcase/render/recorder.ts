@@ -136,6 +136,15 @@ const CALIBRATION_COLORS = [
 // отданы под контекст. Цель за её пределами перед действием ставится в центр.
 const REVEAL_BAND = 0.15;
 
+// Предел ожидания плавной прокрутки к цели. Сама прокрутка Chromium укладывается в
+// полсекунды, но на тяжёлой странице начинается с задержкой; сверх предела цель
+// берётся там, где она есть, — срывать сцену из-за прокрутки нельзя.
+const REVEAL_SCROLL_CAP_MS = 1_500;
+
+// Сколько ждать появления цели, видимой только при наведении, после того как
+// указатель подведён к её ближайшему видимому предку.
+const HOVER_REVEAL_MS = 1_500;
+
 export interface ScreenMap {
   id: string;
   path: string;
@@ -511,21 +520,151 @@ function selectorOf(screen: ScreenMap, targetId: string): string {
  * и прокрутки нет — так заголовок таблицы позиций подсвечивался на 894-й строке
  * экрана из 1080, а сама таблица весь ролик оставалась за кадром. Цель вне средней
  * полосы плавно ставится по центру; уже удобная не трогается, чтобы соседние
- * действия не дёргали страницу вверх-вниз. Конца прокрутки дожидается замер
- * рамки: он берёт координаты, только когда цель перестала двигаться.
+ * действия не дёргали страницу вверх-вниз.
+ *
+ * Конца прокрутки дожидается сама функция, а не замер рамки после неё. Плавная
+ * прокрутка начинается не сразу: на странице с открытым диалогом (размытие фона,
+ * ~11 кадров в секунду) первое движение приходило через 230–300 мс, и два одинаковых
+ * замера ДО него выглядели остановкой — регион в шапке так и оставался за верхней
+ * кромкой, а цепочка срывалась «за границей кадра» на первой же сцене после диалога.
+ * Куда прокрутка приедет, известно заранее: мгновенный scrollIntoView с немедленным
+ * возвратом на место (в одном task, до отрисовки) даёт конечные смещения всех
+ * предков, и ожидание идёт до их достижения, а не до затишья. Цель, к которой
+ * прокрутить нельзя (шапка при нулевой прокрутке), не стоит ни одного кадра ожидания.
  */
 async function revealTarget(page: Page, target: ReturnType<Page['locator']>): Promise<void> {
   const height = page.viewportSize()?.height ?? 1080;
 
-  await target.evaluate((element, [viewportHeight, band]) => {
+  await target.evaluate((element, [viewportHeight, band, capMs]) => new Promise<void>((resolve) => {
     const box = element.getBoundingClientRect();
     const comfortable = box.top >= viewportHeight * band
       && box.bottom <= viewportHeight * (1 - band);
 
-    if (!comfortable) {
-      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    if (comfortable) {
+      resolve();
+
+      return;
     }
-  }, [height, REVEAL_BAND] as const).catch(() => null);
+
+    const scrollers: Element[] = [];
+
+    for (let node = element.parentElement; node; node = node.parentElement) {
+      scrollers.push(node);
+    }
+
+    const root = document.scrollingElement;
+
+    if (root && !scrollers.includes(root)) {
+      scrollers.push(root);
+    }
+
+    const before = scrollers.map((node) => ({ node, left: node.scrollLeft, top: node.scrollTop }));
+
+    element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+
+    const moving = before
+      .map((from) => ({ node: from.node, from, left: from.node.scrollLeft, top: from.node.scrollTop }))
+      .filter((item) => (
+        Math.abs(item.left - item.from.left) >= 0.5 || Math.abs(item.top - item.from.top) >= 0.5
+      ));
+
+    for (const item of moving) {
+      item.node.scrollTo({ left: item.from.left, top: item.from.top, behavior: 'instant' });
+    }
+
+    if (moving.length === 0) {
+      resolve();
+
+      return;
+    }
+
+    element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+
+    let settled = false;
+    const finish = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    const cap = setTimeout(finish, capMs);
+    const tick = () => {
+      if (settled) {
+        return;
+      }
+
+      const arrived = moving.every((item) => (
+        Math.abs(item.node.scrollLeft - item.left) <= 1 && Math.abs(item.node.scrollTop - item.top) <= 1
+      ));
+
+      if (arrived) {
+        clearTimeout(cap);
+        finish();
+
+        return;
+      }
+
+      requestAnimationFrame(tick);
+    };
+
+    requestAnimationFrame(tick);
+  }), [height, REVEAL_BAND, REVEAL_SCROLL_CAP_MS] as const).catch(() => null);
+}
+
+/**
+ * Рамка цели перед действием: цель дожидается появления в DOM, встаёт в удобную
+ * полосу экрана и перестаёт двигаться.
+ *
+ * Цель, видимая только при наведении (иконка настройки в заголовке колонки, кнопка
+ * в строке таблицы), без указателя рядом остаётся скрытой, и сцена срывалась
+ * «не видна на экране» — хотя человек просто подвёл бы мышь. Поэтому скрытая цель
+ * получает наведение на ближайший видимый предок и ждётся снова; накладка курсора
+ * едет туда же, иначе появление элемента в записи выглядело бы самопроизвольным.
+ * Цель, не появившаяся и после этого, отдаётся вызывающему как отсутствующая.
+ */
+async function settleTarget(
+  page: Page,
+  target: ReturnType<Page['locator']>,
+  timeoutMs: number,
+): Promise<TimedTargetBox | null> {
+  await target.waitFor({ state: 'attached', timeout: timeoutMs });
+  await revealTarget(page, target);
+
+  const box = await stableBox(target);
+
+  if (box) {
+    return box;
+  }
+
+  // Предки идут в порядке документа, ближайший — последний из видимых.
+  const anchor = target.locator('xpath=ancestor::*').filter({ visible: true }).last();
+
+  await revealTarget(page, anchor);
+
+  const anchorBox = await stableBox(anchor).catch(() => null);
+
+  if (!anchorBox) {
+    return null;
+  }
+
+  await moveCursor(page, anchorBox);
+  await page.mouse.move(
+    anchorBox.x + anchorBox.width / 2,
+    anchorBox.y + anchorBox.height / 2,
+    { steps: 8 },
+  );
+
+  const appeared = await target
+    .waitFor({ state: 'visible', timeout: HOVER_REVEAL_MS })
+    .then(() => true, () => false);
+
+  if (!appeared) {
+    return null;
+  }
+
+  await revealTarget(page, target);
+
+  return stableBox(target);
 }
 
 async function runAction(
@@ -595,10 +734,7 @@ async function runAction(
     // Цель у края экрана подсвечивать бессмысленно: зритель увидит рамку без
     // содержимого, о котором речь. Сначала цель дожидается появления, затем встаёт
     // в удобную полосу экрана.
-    await target.waitFor({ state: 'attached', timeout: timeoutMs });
-    await revealTarget(page, target);
-
-    const box = await stableBox(target);
+    const box = await settleTarget(page, target, timeoutMs);
 
     if (!box) {
       throw new ShowcaseError(
@@ -661,11 +797,10 @@ async function runAction(
     const target = page.locator(selectorOf(screen, action.targetId)).first();
 
     // Playwright прокрутил бы к цели сам, но лишь до края экрана: зритель должен
-    // видеть, ГДЕ нажимают, а не угадывать по рамке у нижней кромки.
-    await target.waitFor({ state: 'attached', timeout: timeoutMs }).catch(() => null);
-    await revealTarget(page, target);
-
-    const box = await stableBox(target).catch(() => null);
+    // видеть, ГДЕ нажимают, а не угадывать по рамке у нижней кромки. Цель, которой
+    // не нашлось, здесь не срывает сцену: сам клик ниже дождётся её или назовёт
+    // причину отказа.
+    const box = await settleTarget(page, target, timeoutMs).catch(() => null);
 
     // Накладка курсора едет к цели ДО клика: настоящий указатель в записи не виден,
     // и без этого зритель видел бы, как экран меняется сам по себе.
@@ -831,6 +966,14 @@ async function recordChainOnce(input: RecordChainInput): Promise<RecordChainResu
       // закрыть отметку своим DOM/CSS. После последнего полезного timestamp уходим
       // в чистый документ того же page/video и рисуем хвост уже там.
       await page.goto('about:blank', { waitUntil: 'commit', timeout: actionTimeoutMs });
+      // Первые кадры нового документа screencast отдаёт с задержкой: первая отметка
+      // хвоста, показанная сразу после перехода, попадала в запись одним кадром на
+      // 180 мс удержания. Калибровка такой guard переживает, но граница служебных
+      // кадров от него точнее, когда он цел: два кадра чистого документа до первой
+      // отметки дают compositor-у раскачаться на пустом кадре, а не на служебном.
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      })).catch(() => null);
       calibration.push(...await recordCalibrationMarkers(page, 'tail').catch(() => []));
     }
 

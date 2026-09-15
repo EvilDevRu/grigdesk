@@ -140,6 +140,8 @@
 //                              MCP, сессии и файловых путей. Изображения приходят как
 //                              [{ mediaType, data: base64 }]. Обычный run() НЕ является
 //                              fallback: permission mode не изолирует prompt injection.
+//                              opts.timeoutMs — срок хода; без него исполнитель берёт
+//                              свой (пять минут), и длинный сценарий в него не влезает.
 //   scopedWorkspace?         — boolean либо async (config) => boolean: adapter и текущая
 //                              версия CLI действительно разводят readable/writable roots;
 //                              одного permission mode для этой capability недостаточно.

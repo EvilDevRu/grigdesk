@@ -390,6 +390,8 @@ async function apiFixture(t, { liveEnabled = true } = {}) {
           alive: true,
           busy: false,
           sessionId: 'sid-live',
+          // С каким id процесс подняли: пустой — новый разговор, иначе resume прежнего.
+          openedWith: spec.sessionId || null,
           hold: null,
           interrupted: 0,
           closed: false,
@@ -629,4 +631,39 @@ test('пул записывает ранний id сессии до внешне
   assert.equal(seenInPool, 'sid-early', 'пул знает id ещё до конца хода');
 
   await pool.closeAll();
+});
+
+test('сжатие выжимкой гасит живую сессию, и следующий ход начинается с чистой', async (t) => {
+  const fixture = await apiFixture(t);
+  const chatKey = await fixture.chat();
+  const first = await fixture.turn(chatKey);
+  assert.equal(first.statusCode, 200, first.body);
+  assert.equal(first.json().sessionId, 'sid-live');
+
+  // Исполнитель без родного компакта: сервер просит выжимку у той же живой сессии.
+  const compacted = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/chat/compact',
+    payload: {
+      chatKey,
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      model: 'claude-test',
+      mode: 'plan',
+      sessionId: 'sid-live',
+    },
+  });
+  assert.equal(compacted.statusCode, 200, compacted.body);
+  assert.equal(compacted.json().compact.kind, 'summary');
+  assert.equal(compacted.json().compact.seed, 'ок', 'выжимка — это ответ исполнителя на запрос сжатия');
+  assert.equal(compacted.json().sessionId, null, 'id старого разговора наружу не уходит');
+  assert.equal(fixture.handles.length, 1, 'выжимку писал тот же процесс, что вёл разговор');
+  assert.equal(fixture.handles[0].closed, true, 'процесс со старым разговором погашен вместе с ним');
+
+  // Окно после выжимки шлёт пустой sessionId — это «начни заново», а не «окно ещё не
+  // знает id»: пул не должен поднять прежний разговор с полным контекстом под выжимку.
+  const next = await fixture.turn(chatKey, { sessionId: null, message: '[Выжимка…]\n\nпродолжай' });
+  assert.equal(next.statusCode, 200, next.body);
+  assert.equal(fixture.handles.length, 2, 'следующий ход поднял новый процесс');
+  assert.equal(fixture.handles[1].openedWith, null, 'новый процесс стартует без прежнего id сессии');
+  assert.equal(fixture.handles[1].closed, false);
 });

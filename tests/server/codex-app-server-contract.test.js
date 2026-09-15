@@ -24,7 +24,8 @@ const EXPECTED_CHANGES = [
   {
     path: 'src/ready.js',
     kind: 'add',
-    diff: '@@ -0,0 +1,2 @@\n+export function ready() {\n+  return true;\n+}\n',
+    // Содержимое созданного файла нормализатор разворачивает в patch.
+    diff: '@@ -0,0 +1,3 @@\n+export function ready() {\n+  return true;\n+}\n',
   },
 ];
 

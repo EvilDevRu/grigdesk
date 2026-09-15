@@ -11,7 +11,7 @@ const GAP = 72;         // зазор между блоками в ряду
 const MAX_X = 1980;     // правая граница ряда
 const X0 = 110;         // левый отступ первого блока
 
-/** Полуширина блока — та же формула, что в geometrии графа (graph-geom.nodeGeom). */
+/** Исходная полуширина схемы; FactoryGraph уплотняет её под геометрию клиентских карточек. */
 function halfWidth(kind, label) {
   if (kind === 'code') return 70;
   return Math.max(58, Math.floor(([...label].length + 2) * 3.8) + 14);

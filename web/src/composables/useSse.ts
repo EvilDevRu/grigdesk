@@ -23,6 +23,7 @@ const EVENT_NAMES = [
   'sandboxes-changed', 'sandbox-progress',
   'showcase-changed', 'showcase-progress', 'showcase-voice',
   'gateway-setup',
+  'usage-forecast',
 ] as const;
 
 // Имя события шины: ровно то, что сервер объявил выше.

@@ -20,7 +20,10 @@ const FOREIGN_THREAD_ID = '00000000-0000-7000-8000-00000000004b';
 const FOREIGN_TURN_ID = '00000000-0000-7000-8000-00000000004c';
 const STALE_TURN_ID = '00000000-0000-7000-8000-00000000004d';
 const UPDATE_DIFF = '@@ -1 +1 @@\n-export const answer = 41;\n+export const answer = 42;\n';
-const ADD_DIFF = '@@ -0,0 +1,2 @@\n+export function ready() {\n+  return true;\n+}\n';
+// Созданному файлу app-server кладёт в `diff` не patch, а само содержимое —
+// unified-форма у него есть только в общем `turn/diff/updated`.
+const ADD_CONTENT = 'export function ready() {\n  return true;\n}\n';
+const ADD_DIFF = '@@ -0,0 +1,3 @@\n+export function ready() {\n+  return true;\n+}\n';
 
 function runFixture() {
   const traceFile = process.env.COCKPIT_CODEX_FIXTURE_TRACE || '';
@@ -197,7 +200,7 @@ function runFixture() {
 
     const changes = [
       { path: 'src/answer.js', kind: { type: 'update', move_path: null }, diff: UPDATE_DIFF },
-      { path: 'src/ready.js', kind: { type: 'add' }, diff: ADD_DIFF },
+      { path: 'src/ready.js', kind: { type: 'add' }, diff: ADD_CONTENT },
     ];
     send({ method: 'item/started', params: {
       threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_500,

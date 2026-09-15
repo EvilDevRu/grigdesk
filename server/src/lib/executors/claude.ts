@@ -117,6 +117,8 @@ interface ClaudeUsageBar {
   label: string;
   pct: number;
   resetsAt: string | null;
+  // Длина окна в минутах: по ней прогноз отличает неделю от сессии.
+  windowMinutes: number | null;
 }
 
 // Запись MCP-сервера для панели исполнителя.
@@ -202,6 +204,9 @@ const MODE_LABELS: Record<string, { order: number; label: string; hint: string }
 // поменяют ручку — человек должен увидеть, что именно отвалилось.
 const API = 'https://api.anthropic.com';
 const OAUTH_REFRESH_SKEW_MS = 5 * 60 * 1000;
+
+// Срок model-only хода по умолчанию: триаж Входящих и название коммита короткие.
+const UNTRUSTED_TIMEOUT_MS = 5 * 60 * 1000;
 // Дефолтный месячный потолок при первом включении доплаты — как у CLI (2000 = 20.00).
 const DEFAULT_LIMIT_MINOR = 2000;
 
@@ -659,6 +664,11 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
   const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
   const bars: ClaudeUsageBar[] = [];
   const KIND: Record<string, string> = { session: 'Сессия (5ч)', weekly_all: 'Неделя (7д)' };
+  const KIND_MINUTES: Record<string, number> = {
+    session: 300,
+    weekly_all: 10_080,
+    weekly_scoped: 10_080,
+  };
 
   const limits = ((d as { limits?: unknown } | null)?.limits || []) as Array<{
     kind?: string;
@@ -685,6 +695,7 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
       label,
       pct: clamp(l.percent),
       resetsAt: l.resets_at || null,
+      windowMinutes: KIND_MINUTES[String(l.kind)] ?? null,
     });
   }
 
@@ -701,6 +712,7 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
         label: key.replace(/_/g, ' '),
         pct: clamp(value.utilization),
         resetsAt: value.resets_at || null,
+        windowMinutes: null,
       });
     }
   }
@@ -1112,6 +1124,7 @@ function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
 
 export async function runClaudeUntrusted({
   config, env, message, images = [], model, effort, providerSettings, signal,
+  timeoutMs = UNTRUSTED_TIMEOUT_MS,
 }: {
   config: ClaudeConfig;
   env?: NodeJS.ProcessEnv;
@@ -1121,8 +1134,10 @@ export async function runClaudeUntrusted({
   effort?: string;
   providerSettings?: ClaudeSettings;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }) {
   const input = buildClaudeUntrustedInput(message, images);
+  const limitMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : UNTRUSTED_TIMEOUT_MS;
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-inbox-model-'));
   await fs.chmod(cwd, 0o500);
   try {
@@ -1138,13 +1153,25 @@ export async function runClaudeUntrusted({
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         },
         // Inbox обрабатывает недоверенный ввод: ограничиваем не только capabilities,
-        // но и ресурсы зависшего/многословного model-only хода.
+        // но и ресурсы зависшего/многословного model-only хода. Срок задаёт вызывающий:
+        // триажу хватает пяти минут, сценарий ролика на opus с полным effort в них
+        // не укладывается.
         maxBuffer: 2 * 1024 * 1024,
-        timeout: 5 * 60 * 1000,
+        timeout: limitMs,
         killSignal: 'SIGTERM',
         signal,
       }, (error, stdout, stderr) => {
         if (error) {
+          // Убитый по сроку процесс не оставляет ни result-события, ни stderr, и
+          // прежде выглядел как «завершился без результата» — причина, по которой
+          // человек ничего не может сделать. Срок называется явно.
+          if (error.killed && !signal?.aborted) {
+            reject(untrustedInputError(
+              'model_run_failed',
+              `Claude не уложился в ${Math.round(limitMs / 60_000)} мин и остановлен.`,
+            ));
+            return;
+          }
           // Claude пишет причину API/авторизации в result-событие stdout и при этом
           // завершается с кодом 1. Разбираем поток до generic ошибки execFile,
           // иначе BuildRun теряет исправимую причину остановки.

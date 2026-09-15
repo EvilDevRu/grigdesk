@@ -177,12 +177,14 @@ export interface SceneOpsDeps {
   store: ShowcaseStore;
   targets: ShowcaseTargets;
   transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
-  withFreshness: (project: ShowcaseProject) => ShowcaseProject;
+  // Ответ мутации — с живой целью и свежестью сцен, как у чтения; сам снимок цели
+  // в project.json для интерфейса не годится (см. publish в service).
+  publish: (project: ShowcaseProject) => Promise<ShowcaseProject> | ShowcaseProject;
 }
 
 export function createSceneOps(deps: SceneOpsDeps) {
   const {
-    assertEnabled, broadcast, limits, readProject, store, targets, transcribe, withFreshness,
+    assertEnabled, broadcast, limits, readProject, store, targets, transcribe, publish,
   } = deps;
 
   /**
@@ -240,7 +242,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   /**
@@ -287,7 +289,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   /**
@@ -308,7 +310,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   async function deleteScene(
@@ -325,7 +327,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   /**
@@ -446,7 +448,7 @@ export function createSceneOps(deps: SceneOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   return {

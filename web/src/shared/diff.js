@@ -40,19 +40,45 @@ export function lineDiff(oldText, newText) {
   return { rows, added, removed };
 }
 
+// Сервер режет длинный patch посередине и оставляет между половинами эту строку
+// без знака стороны. В ленте она обязана остаться видимым разрывом: иначе конец
+// одного фрагмента склеивается с началом другого, и правка читается как бессмыслица.
+const CUT_MARKER = '… сокращено …';
+
+/**
+ * Содержимое файла целиком как дифф одной стороны: у созданного файла все строки
+ * добавлены, у удалённого — все убраны. Так хранятся ленты, записанные до того, как
+ * сервер стал разворачивать `add`/`delete` Codex в patch: в их `diff` лежит сам файл,
+ * и разбор его как patch давал «+0 −0» с одинаковыми колонками.
+ */
+function wholeFileDiff(content, kind) {
+  const t = kind === 'delete' ? 'del' : 'add';
+  const text = String(content ?? '');
+  if (!text) return { rows: [], added: 0, removed: 0 };
+  const lines = (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n');
+  const rows = lines.map((line) => (
+    line === CUT_MARKER ? { t: 'ctx', text: CUT_MARKER } : { t, text: line }
+  ));
+  const changed = rows.length - rows.filter((row) => row.t === 'ctx').length;
+  return { rows, added: t === 'add' ? changed : 0, removed: t === 'del' ? changed : 0 };
+}
+
 /**
  * Разбирает unified patch одного файла в тот же нейтральный набор строк, который
  * возвращает lineDiff. Заголовки файла и границы hunks не являются строками кода;
  * между несколькими hunks оставляем контекстный разделитель, чтобы splitRows не
  * склеил удаление из одного фрагмента с добавлением из следующего.
+ * Для `add`/`delete` текст без hunks — не patch, а сам файл (см. wholeFileDiff).
  *
  * @returns {{ rows: Array<{t:'ctx'|'del'|'add', text:string}>, added:number, removed:number }}
  */
-export function unifiedDiff(patch) {
+export function unifiedDiff(patch, kind = 'update') {
   const lines = String(patch ?? '').split('\n').map((line) => (
     line.endsWith('\r') ? line.slice(0, -1) : line
   ));
   const hasHunks = lines.some((line) => line.startsWith('@@'));
+  if (!hasHunks && (kind === 'add' || kind === 'delete')) return wholeFileDiff(patch, kind);
+
   const rows = [];
   let inHunk = !hasHunks;
   let added = 0;
@@ -64,6 +90,10 @@ export function unifiedDiff(patch) {
         rows.push({ t: 'ctx', text: '…' });
       }
       inHunk = true;
+      continue;
+    }
+    if (line === CUT_MARKER) {
+      rows.push({ t: 'ctx', text: CUT_MARKER });
       continue;
     }
     if (!inHunk || line === '\\ No newline at end of file') continue;

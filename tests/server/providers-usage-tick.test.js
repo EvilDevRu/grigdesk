@@ -117,6 +117,21 @@ test('без окон на потоке тик к вендору не ходит
   assert.deepEqual(fixture.events, []);
 });
 
+test('хук refreshProvidersUsage перечитывает и рассылает снимок без окон, но не чаще полупериода', async (t) => {
+  const fixture = await tickFixture(t, { clients: 0, usageTickMs: 60_000 });
+
+  await fixture.app.refreshProvidersUsage();
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events.length, 1);
+  assert.equal(fixture.events[0].event, 'providers-usage');
+  assert.equal(fixture.events[0].data.usage['ticking-provider'].bars[0].pct, 42);
+
+  // Снимок свежий — второй вызов подряд к вендору не идёт и события не даёт.
+  await fixture.app.refreshProvidersUsage();
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events.length, 1);
+});
+
 test('при открытом окне тик перечитывает лимиты и рассылает снимок событием providers-usage', async (t) => {
   const fixture = await tickFixture(t, { clients: 1, usageTickMs: 20 });
 

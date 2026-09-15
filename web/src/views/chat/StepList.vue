@@ -201,7 +201,7 @@ function changesOf(row) {
     : [];
 }
 function changeDiffOf(change) {
-  if (typeof change.diff === 'string') return unifiedDiff(change.diff);
+  if (typeof change.diff === 'string') return unifiedDiff(change.diff, change.kind);
   return lineDiff(change.diff?.old, change.diff?.new);
 }
 // Пары строк для показа в две колонки (слева убрано, справа добавлено).

@@ -42,6 +42,9 @@ declare module 'fastify' {
     // Реестр исполнителей и разбор арбитра — их подключает сборка приложения.
     executorFor?(id: string): Promise<unknown>;
     providerRegistry?(): Promise<unknown>;
+    // Перечитать лимиты исполнителей, если снимок устарел, и разослать их событием
+    // `providers-usage`. Для фоновых потребителей, которым снимок нужен и без окон.
+    refreshProvidersUsage?(): Promise<void>;
     factoryArbitrate?(...args: unknown[]): Promise<unknown>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Остановка сервера: модули регистрируют слив, точка входа и кнопка перезапуска её начинают.

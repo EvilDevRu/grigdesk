@@ -1411,6 +1411,57 @@ test('идущее задание показано ходом по сценам 
   assert.deepEqual(calls.filter(([name]) => name === 'cancel'), [['cancel', 'job-record']]);
 });
 
+// «Разобрать заново» заменяет сцены целиком. Остановка сборки и отказ задания,
+// случившиеся до этого, относятся к прежним сценам: их карточка читалась как новая
+// ошибка сразу после разбора, хотя новую сборку ещё не запускали.
+test('остановка сборки и отказ задания старше сценария не показываются как новые', async (t) => {
+  const stoppedRun = {
+    id: 'run-old',
+    projectId: 'project-1',
+    state: 'failed',
+    sequence: 3,
+    stage: 'record-if-needed',
+    initialRevision: 1,
+    children: [],
+    cancelRequested: false,
+    error: { code: 'child_failed', message: 'цепочка сцен «scene-old» не записалась.' },
+    startedAt: '2026-09-11T06:10:00.000Z',
+    updatedAt: '2026-09-11T06:12:00.000Z',
+    finishedAt: '2026-09-11T06:12:00.000Z',
+  };
+  const failedJob = {
+    id: 'job-old',
+    projectId: 'project-1',
+    kind: 'record',
+    state: 'failed',
+    attempt: 1,
+    sequence: 4,
+    progress: { index: 2, total: 7, label: 'сцена «scene-old» не записалась' },
+    error: 'сцена «scene-old» не записалась',
+    startedAt: '2026-09-11T06:10:32.000Z',
+    finishedAt: '2026-09-11T06:11:19.000Z',
+  };
+  const reparsed = project({
+    decisions: [{
+      id: 'brief-1',
+      kind: 'script',
+      inputHash: 'showcase-script-7',
+      decidedAt: '2026-09-12T03:07:20.000Z',
+      note: 'Бриф предложен моделью и ждёт правки человека.',
+    }],
+  });
+  const { wrapper } = await mountView(t, { opened: reparsed, buildRuns: [stoppedRun], jobs: [failedJob] });
+
+  assert.equal(wrapper.find('[data-role="build-failure"]').exists(), false, 'старый отказ не показан');
+  assert.ok(buttonByText(wrapper, 'Собрать ролик'), 'сборку можно запустить');
+
+  // Тот же отказ после разбора — уже про нынешние сцены, и его видно.
+  const laterRun = { ...stoppedRun, startedAt: '2026-09-12T04:00:00.000Z' };
+  const current = await mountView(t, { opened: reparsed, buildRuns: [laterRun], jobs: [] });
+
+  assert.match(current.wrapper.find('[data-role="build-failure"]').text(), /Сборка остановлена/);
+});
+
 // Карта экранов дописана после разбора: сборка переснимет прежние действия, и
 // человек обязан узнать об этом до записи — прямо у кнопки сборки.
 test('сцены старше карты экранов получают предупреждение у кнопки сборки', async (t) => {

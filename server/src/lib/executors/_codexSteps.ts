@@ -191,6 +191,26 @@ function hasChangePaths(changes: unknown): boolean {
   ));
 }
 
+/**
+ * У app-server поле `diff` — unified patch только у `update`. Для `add` и `delete`
+ * Codex кладёт туда СОДЕРЖИМОЕ файла целиком (созданное либо удалённое) без единого
+ * знака строки. Лента, читавшая его как patch, считала «+0 −0», теряла строки без
+ * отступа, а строки с отступом показывала контекстом в обеих колонках — созданный
+ * файл выглядел пустой правкой. Контракт ленты — patch, поэтому содержимое
+ * разворачивается в один hunk с нужным знаком; уже готовый patch не оборачиваем.
+ */
+function patchOf(change: CodexChange | null | undefined, kind: string): string {
+  const raw = String(change?.diff || change?.unified_diff || '');
+  if (kind === 'update' || !raw || /^(diff --git |@@ -\d)/.test(raw)) return raw;
+
+  const lines = (raw.endsWith('\n') ? raw.slice(0, -1) : raw).split('\n');
+  const sign = kind === 'add' ? '+' : '-';
+  const header = kind === 'add'
+    ? `@@ -0,0 +1,${lines.length} @@`
+    : `@@ -1,${lines.length} +0,0 @@`;
+  return `${header}\n${lines.map((line) => `${sign}${line}`).join('\n')}\n`;
+}
+
 function changeList(item: CodexItem | null | undefined) {
   const raw = (Array.isArray(item?.changes) ? item.changes : []) as CodexChange[];
   const valid = raw.filter((change) => (
@@ -202,16 +222,14 @@ function changeList(item: CodexItem | null | undefined) {
 
   const changes = selected.map((change, index) => {
     const file = change?.path || change?.file_path || change?.move_path || '';
+    const kind = changeKind(change);
     const remainingChanges = selected.length - index;
     const fairShare = Math.floor(remainingBytes / Math.max(1, remainingChanges));
-    const diff = cutDiffMiddle(
-      change?.diff || change?.unified_diff || '',
-      Math.min(STEP_DIFF_LIMIT, fairShare),
-    );
+    const diff = cutDiffMiddle(patchOf(change, kind), Math.min(STEP_DIFF_LIMIT, fairShare));
     remainingBytes -= Buffer.byteLength(diff, 'utf8');
     return {
       path: cut(String(file), MAX_CODEX_CHANGE_PATH_CHARS),
-      kind: changeKind(change),
+      kind,
       diff,
     };
   });

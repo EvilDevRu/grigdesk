@@ -506,7 +506,13 @@ test('вызов модели получает серверный config исп�
         screens: SCREENS,
       }),
     },
-    withFreshness: (value) => value,
+    // Ответ мутации идёт через publish сервиса — с живой целью. Снимок цели в
+    // project.json помнит ревизию карты на момент выбора стенда, и ответ с ним
+    // заставлял интерфейс просить «Разобрать заново» сразу после разбора.
+    publish: async (value) => ({
+      ...value,
+      target: { ...value.target, scope: { ...value.target.scope, mapRevision: 'живая-карта' } },
+    }),
   });
 
   const result = await scriptOps.generateBrief('demo', 'Текст задачи');
@@ -514,7 +520,11 @@ test('вызов модели получает серверный config исп�
   assert.equal(seen.resolverConfig.claudeBin, '/usr/bin/claude');
   assert.equal(seen.run.config.claudeBin, '/usr/bin/claude');
   assert.deepEqual(seen.run.providerSettings, { baseUrl: 'https://example.test' });
+  // Сценарий на opus думает дольше пяти минут по умолчанию у исполнителя: срок
+  // задаёт раздел, иначе разбор срывался «без результата» на пороге.
+  assert.ok(seen.run.timeoutMs >= 10 * 60 * 1000, `срок вызова ${seen.run.timeoutMs}`);
   // Исполнители отвечают полем `reply`: читать другое поле значило бы получать
   // пустую строку и винить модель за «ответ не по форме».
   assert.deepEqual(result.brief, ['первый', 'второй', 'третий']);
+  assert.equal(result.target.scope.mapRevision, 'живая-карта');
 });

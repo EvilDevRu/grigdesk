@@ -432,13 +432,22 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     return current;
   }
 
-  async function readProject(id: string): Promise<ShowcaseProject> {
-    const stored = await store.readProject(id);
-
+  /**
+   * Ролик наружу — с ЖИВОЙ целью и свежестью сцен. В project.json цель лежит снимком
+   * выбора (отпечаток, политика, ревизия карты на тот момент); ответ мутации с этим
+   * снимком заставлял интерфейс сравнивать свежий сценарий со старой картой, и сразу
+   * после «Разобрать заново» карточка просила разобрать заново ещё раз — пока
+   * следующее чтение не приносило живую цель.
+   */
+  async function publish(project: ShowcaseProject): Promise<ShowcaseProject> {
     return withFreshness({
-      ...stored,
-      target: await resolveStoredTarget(stored.ref, stored.target),
+      ...project,
+      target: await resolveStoredTarget(project.ref, project.target),
     });
+  }
+
+  async function readProject(id: string): Promise<ShowcaseProject> {
+    return publish(await store.readProject(id));
   }
 
   /** Старый список профилей остаётся на проводе до миграции прежних клиентов. */
@@ -1071,7 +1080,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     store,
     targets,
     transcribe: options.transcribe ?? null,
-    withFreshness,
+    publish,
   });
 
   const { publishRecording, startRecording } = createRecordingOps({
@@ -1118,7 +1127,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     voices,
     previewDir: path.join(voiceDir, 'previews'),
     stressDictionary,
-    withFreshness,
+    publish,
   });
 
   const { analyze, generateBindings, generateBrief, generateScript } = createScriptOps({
@@ -1134,7 +1143,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     taskDetails: options.taskDetails ?? null,
     store,
     targets,
-    withFreshness,
+    publish,
   });
 
   function voiceReady(project: ShowcaseProject): boolean {

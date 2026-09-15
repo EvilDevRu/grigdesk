@@ -34,7 +34,7 @@ JavaScript. Общие контракты объявлены ESM-пакетом 
 
 Установленный юнит перерисовывается из шаблона (`deploy/install.sh`) перед перезапуском.
 Сам перезапуск выполняет человек после завершения агентского хода. Для прямого запуска:
-`node server/src/app.js`.
+`node server/src/app.ts`.
 
 Типы проверяет общая команда среды: `npm --prefix server run typecheck` и
 `npm --prefix web run typecheck`; они входят в `npm test` своих пакетов и накрывают весь

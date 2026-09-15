@@ -112,6 +112,8 @@ import terminalModule from './modules/terminal/index.ts';
 import agentsModule from './modules/agents/index.ts';
 import routesModule from './modules/routes/index.ts';
 import providersModule from './modules/providers/index.ts';
+import usageForecastModule from './modules/usage-forecast/index.ts';
+import { createCodexResetSource } from './lib/usage-forecast/codexResetSource.ts';
 import analysisModule from './modules/analysis/index.ts';
 import authModule from './modules/auth/index.ts';
 import gatewayModule from './modules/gateway/index.ts';
@@ -1108,6 +1110,11 @@ async function build() {
   await fastify.register(agentsModule, { config });
   await fastify.register(routesModule, { config, prefs });
   await fastify.register(providersModule, { config, claudeAuth, prefs });
+  // Прогноз лимитов слушает тик providers по SSE, поэтому регистрируется следом за ним.
+  await fastify.register(usageForecastModule, {
+    filePath: config.usageForecastPath,
+    external: createCodexResetSource(),
+  });
   const analysisArbiter = new AnalysisArbiter({
     analyzer: asPort(analyzer),
     pluginEnabled: (id: string) => fastify.pluginEnabled(id),

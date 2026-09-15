@@ -2039,8 +2039,21 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (plan) {
         const seed = plan.kind === 'summary' ? String(out.reply || '').trim() : '';
         if (plan.kind === 'summary' && !seed) throw new Error('Исполнитель не вернул выжимку — контекст не сжат.');
+        // Выжимка — семя НОВОЙ сессии, а живой процесс помнит старый разговор внутри
+        // себя. Оставь его — и следующий ход придёт с пустым sessionId, который пул
+        // считает «окно ещё не знает id» (liveSessions.ts), поднимет прежнюю сессию и
+        // приклеит выжимку поверх полного контекста: сжатия не случится, а через
+        // четверть часа исполнитель сожмёт ход сам и ответит вместо работы своей
+        // выжимкой (инцидент 14.09.2026). Поэтому старую сессию гасим здесь же, как это
+        // делает явный сброс памяти, и id наружу не отдаём — иначе он вернулся бы в
+        // lastSession и через pending. Родному компакту всё это не нужно: сессия та же.
+        if (plan.kind === 'summary') {
+          lastSession.delete(chatKey);
+          if (liveTurn) await liveSessions.close(chatKey, 'контекст сжат выжимкой');
+        }
         out = {
           ...out,
+          ...(plan.kind === 'summary' ? { sessionId: null } : {}),
           reply: '🗜 Контекст сжат.',
           contextTokens: 0,
           compact: { kind: plan.kind, seed },

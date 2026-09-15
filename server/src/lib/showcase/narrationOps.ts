@@ -80,7 +80,9 @@ export interface NarrationOpsDeps {
   // Словарь ударений установки: его записи ложатся на слова без явного знака.
   // Без словаря озвучка обязана работать — тогда ударения только из текста.
   stressDictionary?: Pick<StressDictionaryStore, 'entries'>;
-  withFreshness: (project: ShowcaseProject) => ShowcaseProject;
+  // Ответ мутации — с живой целью и свежестью сцен, как у чтения; сам снимок цели
+  // в project.json для интерфейса не годится (см. publish в service).
+  publish: (project: ShowcaseProject) => Promise<ShowcaseProject> | ShowcaseProject;
 }
 
 // Фраза образца. Она про сам раздел, а не про рабочую задачу: рабочий текст в
@@ -796,7 +798,7 @@ export function createNarrationOps(deps: NarrationOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return deps.withFreshness(saved);
+    return deps.publish(saved);
   }
 
   /**

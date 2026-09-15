@@ -12,6 +12,8 @@ import { promisify } from 'node:util';
 
 import { probeDurationMs } from '../../server/src/lib/showcase/render/clipCheck.ts';
 import {
+  browserMonoToVideoPts,
+  calibrateVideoTiming,
   probeVideoFrames,
   trimSceneClip,
   trimSceneClipExact,
@@ -160,4 +162,148 @@ test('точный off-grid срез сообщает первый source PTS и
       `кадр ${index}: ${frame.ptsMs} мс`,
     );
   }
+});
+
+/**
+ * Запись с калибровочными отметками, склеенная из цветных отрезков: голова из
+ * четырёх цветов, «страница» между сериями и хвост. Длина guard-цвета каждой серии
+ * задаётся в кадрах — так воспроизводится guard, попавший в запись одним кадром или
+ * не попавший вовсе; `headCutMs` — сколько второго цвета головы прошло ДО первого
+ * кадра записи: так выглядит видео, начавшееся с опозданием.
+ */
+async function makeMarkedRaw(dir, { headGuardFrames = 5, headCutMs = 0, tailGuardFrames = 5 }) {
+  const file = path.join(dir, 'marked.webm');
+  const fps = 25;
+  const frame = 1 / fps;
+  const rgb = [[255, 0, 255], [0, 255, 255], [255, 255, 0], [255, 0, 0]];
+  const colors = ['0xFF00FF', '0x00FFFF', '0xFFFF00', '0xFF0000'];
+  const holdMs = 200;
+  const segments = [
+    { color: colors[0], seconds: headGuardFrames * frame },
+    { color: colors[1], seconds: (holdMs - headCutMs) / 1_000 },
+    { color: colors[2], seconds: holdMs / 1_000 },
+    { color: colors[3], seconds: holdMs / 1_000 },
+    { color: '0x304050', seconds: 1 },
+    { color: colors[0], seconds: tailGuardFrames * frame },
+    { color: colors[1], seconds: holdMs / 1_000 },
+    { color: colors[2], seconds: holdMs / 1_000 },
+    { color: colors[3], seconds: holdMs / 1_000 },
+  ].filter((segment) => segment.seconds > 0);
+  const inputs = segments.flatMap((segment) => [
+    '-f', 'lavfi', '-i', `color=c=${segment.color}:size=64x36:rate=${fps}:duration=${segment.seconds}`,
+  ]);
+  const chain = segments.map((_segment, index) => `[${index}:v]`).join('');
+
+  await run('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    ...inputs,
+    '-filter_complex', `${chain}concat=n=${segments.length}:v=1:a=0[v]`,
+    '-map', '[v]', '-c:v', 'libvpx', '-b:v', '200k',
+    file,
+  ]);
+
+  // Монотонные метки страницы в миллисекундах видео: guard головы начался за
+  // headGuardFrames кадров до второго цвета, второй цвет — за headCutMs до записи.
+  const base = 10_000;
+  const headSecondAt = base - headCutMs;
+  const headStart = headSecondAt - headGuardFrames * frame * 1_000;
+  const pageEndMs = headSecondAt + 3 * holdMs + 1_000;
+  const tailSecondAt = pageEndMs + tailGuardFrames * frame * 1_000;
+  const at = (phase, sequence) => {
+    if (phase === 'head') {
+      return sequence === 0 ? headStart : headSecondAt + (sequence - 1) * holdMs;
+    }
+
+    return sequence === 0 ? pageEndMs : tailSecondAt + (sequence - 1) * holdMs;
+  };
+  const samples = ['head', 'tail'].flatMap((phase) => rgb.map((color, sequence) => ({
+    phase, sequence, browserMonoMs: at(phase, sequence), rgb: color,
+  })));
+
+  // Старт видео — начало guard головы, а без guard — момент base внутри второго цвета.
+  const videoStart = headGuardFrames > 0 ? headStart : base;
+
+  return { file, samples, fps, pageEndVideoMs: pageEndMs - videoStart };
+}
+
+test('guard-отметка хвоста в один кадр или без кадров не лишает сцену калибровки', async (t) => {
+  if (!(await ffmpegAvailable())) {
+    t.skip('ffmpeg не установлен');
+    return;
+  }
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'showcase-marker-guard-'));
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  for (const tailGuardFrames of [5, 1, 0]) {
+    const { file, samples, pageEndVideoMs } = await makeMarkedRaw(dir, { tailGuardFrames });
+    const calibration = await calibrateVideoTiming(file, samples);
+
+    assert.equal(calibration.status, 'calibrated', `guard ${tailGuardFrames}: ${calibration.reason ?? ''}`);
+
+    // Граница служебных кадров — первый кадр хвоста, каким бы коротким ни был guard:
+    // одиночный кадр guard тоже не должен попасть в клип.
+    const frames = await probeVideoFrames(file);
+    const tailFirst = frames.find((point) => point.ptsMs >= pageEndVideoMs - 1);
+
+    assert.ok(tailFirst, 'в записи есть хвост');
+    assert.ok(
+      Math.abs(calibration.tailExcludedFromPtsMs - tailFirst.ptsMs) < 1,
+      `guard ${tailGuardFrames}: граница ${calibration.tailExcludedFromPtsMs}, ожидалась ${tailFirst.ptsMs}`,
+    );
+  }
+});
+
+test('запись, начавшаяся без guard головы и посреди второго цвета, калибруется по хвосту', async (t) => {
+  if (!(await ffmpegAvailable())) {
+    t.skip('ffmpeg не установлен');
+    return;
+  }
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'showcase-marker-late-start-'));
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  // Guard головы в запись не попал вовсе, а второй цвет начался за 80 мс до первого
+  // кадра: прежний поиск вперёд уходил к одноимённому цвету хвоста и оставлял хвост
+  // ни с чем, а «переключение» усечённого цвета на старте видео тянуло погрешность.
+  const { file, samples } = await makeMarkedRaw(dir, { headGuardFrames: 0, headCutMs: 80 });
+  const calibration = await calibrateVideoTiming(file, samples);
+
+  assert.equal(calibration.status, 'calibrated', calibration.reason ?? '');
+  assert.ok(calibration.errorMs <= 100, `погрешность ${calibration.errorMs}`);
+
+  // Шкала верна: третий цвет головы (жёлтый) объявлен через 120 мс после старта
+  // видео и ровно там же найден в кадрах.
+  const frames = await probeVideoFrames(file);
+  const yellowAt = browserMonoToVideoPts(calibration, samples[2].browserMonoMs);
+  const yellowFrame = frames.find((point) => point.ptsMs >= 120 - 1);
+
+  assert.ok(yellowFrame, 'в записи есть жёлтый');
+  assert.ok(Math.abs(yellowAt - yellowFrame.ptsMs) <= 60, `жёлтый: ${yellowAt} против ${yellowFrame.ptsMs}`);
+});
+
+test('пропавшая не-guard отметка по-прежнему оставляет сцену без калибровки', async (t) => {
+  if (!(await ffmpegAvailable())) {
+    t.skip('ffmpeg не установлен');
+    return;
+  }
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'showcase-marker-missing-'));
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const { file, samples } = await makeMarkedRaw(dir, {});
+  // Жёлтая отметка хвоста объявлена, но её цвет в записи подменён: такой хвост
+  // не сопоставить, и честный отказ важнее выдуманной шкалы.
+  const broken = samples.map((sample) => (
+    sample.phase === 'tail' && sample.sequence === 2
+      ? { ...sample, rgb: [0, 128, 0] }
+      : sample
+  ));
+  const calibration = await calibrateVideoTiming(file, broken);
+
+  assert.equal(calibration.status, 'unavailable');
+  assert.match(calibration.reason, /tail:2/);
 });

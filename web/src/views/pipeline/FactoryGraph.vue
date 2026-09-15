@@ -23,157 +23,202 @@
       }}</span>
     </div>
 
-    <svg
-      class="graph"
-      :viewBox="viewBox"
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <defs>
-        <marker
-          id="arr"
-          viewBox="0 0 8 8"
-          refX="6.5"
-          refY="4"
-          markerWidth="6.5"
-          markerHeight="6.5"
-          orient="auto-start-reverse"
-        >
-          <path d="M0,0 L8,4 L0,8 z" />
-        </marker>
-      </defs>
+    <div class="graph-viewport">
+      <svg
+        class="graph"
+        :viewBox="viewBox"
+        :style="canvasStyle"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <marker
+            :id="markerId"
+            viewBox="0 0 8 8"
+            refX="6.5"
+            refY="4"
+            markerWidth="5"
+            markerHeight="5"
+            orient="auto-start-reverse"
+          >
+            <path class="arrowhead" d="M0,0 L8,4 L0,8 z" />
+          </marker>
+        </defs>
 
-      <!-- старт -->
-      <circle
-        class="startdot"
-        :cx="START_DOT[0]"
-        :cy="START_DOT[1]"
-        r="4"
-      />
+        <!-- старт -->
+        <circle
+          class="startdot"
+          :cx="START_DOT[0]"
+          :cy="START_DOT[1]"
+          r="4"
+        />
 
-      <!-- рёбра -->
-      <g class="edges">
-        <template
-          v-for="edge in edgeElements"
-          :key="edge.key"
+        <!-- рёбра -->
+        <g class="edges">
+          <g
+            v-for="edge in edgeElements"
+            :key="edge.key"
+            :class="{ 'edge-muted': focusedNode && !edge.related, 'edge-related': edge.related }"
+            :data-source="edge.source"
+            :data-destination="edge.destination"
+          >
+            <title v-if="edge.visible">{{ edge.title }}</title>
+            <path
+              v-if="edge.visible"
+              :d="edge.d"
+              :class="edge.className"
+              :marker-end="`url(#${markerId})`"
+            />
+            <text
+              v-if="edge.visible && edge.label && edge.labelPosition && edge.showLabel"
+              :x="edge.labelPosition[0]"
+              :y="edge.labelPosition[1]"
+              :class="edge.labelClass"
+              text-anchor="middle"
+            >
+              {{ edge.label }}
+            </text>
+          </g>
+        </g>
+
+        <!-- узлы -->
+        <component
+          :is="nodeElement"
+          v-for="node in nodeElements"
+          :key="node.id"
+          class="ng"
+          :class="[
+            `ns-${node.status}`,
+            `nt-${node.kind}`,
+            { clickable: nodeInteractive },
+          ]"
+          :aria-label="nodeInteractive ? node.label : undefined"
+          :aria-description="nodeInteractive ? node.description : undefined"
+          :data-node="node.id"
+          @mouseenter="focusedNode = node.id"
+          @mouseleave="focusedNode = null"
+          @focusin="focusedNode = node.id"
+          @focusout="focusedNode = null"
+          @click="onNodeActivate(node, $event)"
         >
+          <title v-if="node.title">{{ node.title }}</title>
+          <rect
+            class="node-hit-area"
+            :x="node.cx - node.halfWidth"
+            :y="node.top - 4"
+            :width="node.halfWidth * 2"
+            :height="node.bottom - node.top + 4"
+            aria-hidden="true"
+          />
           <path
-            v-if="edge.visible"
-            :d="edge.d"
-            :class="edge.className"
-            marker-end="url(#arr)"
+            v-if="node.kind === 'code'"
+            class="node-shape"
+            :d="node.shapePath"
+          />
+          <circle
+            v-else
+            class="node-shape"
+            :cx="node.cx"
+            :cy="node.cy"
+            :r="node.radius"
+          />
+          <circle
+            v-if="node.kind === 'human'"
+            class="node-human-ring"
+            :cx="node.cx"
+            :cy="node.cy"
+            :r="node.radius - 5"
+            aria-hidden="true"
+          />
+          <g
+            class="node-kind"
+            :transform="`translate(${node.cx - 8}, ${node.cy - 8})`"
+            aria-hidden="true"
+          >
+            <path :d="node.icon" />
+          </g>
+          <circle
+            v-if="node.mark"
+            class="node-state-bg"
+            :cx="node.cx + 16"
+            :cy="node.cy + 16"
+            r="8"
+            aria-hidden="true"
           />
           <text
-            v-if="edge.visible && edge.label && edge.labelPosition"
-            :x="edge.labelPosition[0]"
-            :y="edge.labelPosition[1]"
-            :class="edge.labelClass"
+            v-if="node.mark"
+            :x="node.cx + 16"
+            :y="node.cy + 19.5"
+            text-anchor="middle"
+            class="node-state"
+            aria-hidden="true"
+          >
+            <tspan class="mk" :class="`mk-${node.status}`" aria-hidden="true">{{ node.mark }}</tspan>
+          </text>
+          <text
+            :x="node.contentX"
+            :y="node.labelY"
+            class="nlbl"
             text-anchor="middle"
           >
-            {{ edge.label }}
+            <tspan
+              v-for="(line, index) in node.labelLines"
+              :key="index"
+              :x="node.contentX"
+              :dy="index ? 16 : 0"
+            >{{ line }}</tspan>
           </text>
-        </template>
-      </g>
-
-      <!-- узлы -->
-      <component
-        :is="nodeElement"
-        v-for="node in nodeElements"
-        :key="node.id"
-        class="ng"
-        :class="[
-          `ns-${node.status}`,
-          `nt-${node.kind}`,
-          { clickable: nodeInteractive },
-        ]"
-        :aria-label="nodeInteractive ? node.label : undefined"
-        @click="onNodeActivate(node, $event)"
-      >
-        <title v-if="node.title">{{ node.title }}</title>
-        <polygon
-          v-if="node.points"
-          :points="node.points"
-        />
-        <rect
-          v-else
-          :x="node.cx - node.halfWidth"
-          :y="node.cy - node.halfHeight"
-          :width="node.halfWidth * 2"
-          :height="node.halfHeight * 2"
-          :rx="node.radius"
-        />
-        <text
-          :x="node.cx"
-          :y="node.cy + 4"
-          text-anchor="middle"
-          class="nlbl"
-        >
-          {{ node.label }}
-        </text>
-        <!-- След арбитра. Он не статус узла и живёт отдельной меткой: узел может быть
-             уже пройден, а знать, кто двигал курсор, человеку всё равно нужно. -->
-        <g
-          v-if="node.arbiterVerdict"
-          class="node-arb"
-          :class="`node-arb-${node.arbiterVerdict}`"
-          aria-hidden="true"
-        >
-          <rect
-            class="node-arb-bg"
-            :x="node.arbiterX - MARK_WIDTH / 2"
-            :y="node.arbiterY - MARK_HEIGHT / 2"
-            :width="MARK_WIDTH"
-            :height="MARK_HEIGHT"
-            :rx="MARK_HEIGHT / 2"
-          />
-          <text
-            :x="node.arbiterX"
-            :y="node.arbiterY + 3.5"
-            text-anchor="middle"
-            class="mk mk-arbiter"
-          >⚖</text>
-        </g>
-        <text
-          v-if="node.mark"
-          :x="node.markX"
-          :y="node.markY"
-          text-anchor="middle"
-          class="mk"
-          :class="`mk-${node.status}`"
-          aria-hidden="true"
-        >{{ node.mark }}</text>
-        <text
-          v-if="node.subtitle"
-          :x="node.cx"
-          :y="node.subtitleY"
-          text-anchor="middle"
-          class="sub"
-        >
-          {{ node.subtitle }}
-        </text>
-        <text
-          v-if="node.runner"
-          :x="node.cx"
-          :y="node.runnerY"
-          text-anchor="middle"
-          class="runner"
-          :class="{ switched: node.runnerSwitched }"
-        >
-          {{ node.runner }}<tspan v-if="node.runnerModel"> · {{ node.runnerModel }}</tspan>
-        </text>
-      </component>
-    </svg>
+          <!-- След арбитра. Он не статус узла и живёт отдельной меткой: узел может быть
+               уже пройден, а знать, кто двигал курсор, человеку всё равно нужно. -->
+          <g
+            v-if="node.arbiterVerdict"
+            class="node-arb"
+            :class="`node-arb-${node.arbiterVerdict}`"
+            aria-hidden="true"
+          >
+            <rect
+              class="node-arb-bg"
+              :x="node.arbiterX - MARK_WIDTH / 2"
+              :y="node.arbiterY - MARK_HEIGHT / 2"
+              :width="MARK_WIDTH"
+              :height="MARK_HEIGHT"
+              :rx="MARK_HEIGHT / 2"
+            />
+            <text
+              :x="node.arbiterX"
+              :y="node.arbiterY + 3.5"
+              text-anchor="middle"
+              class="mk mk-arbiter"
+            >⚖</text>
+          </g>
+          <foreignObject
+            :x="node.cx - node.halfWidth + 8"
+            :y="node.detailY"
+            :width="node.halfWidth * 2 - 16"
+            height="16"
+          >
+            <div
+              xmlns="http://www.w3.org/1999/xhtml"
+              class="node-detail"
+              :class="[node.runner ? 'runner' : 'sub', { switched: node.runnerSwitched }]"
+            >{{ node.detail }}</div>
+          </foreignObject>
+        </component>
+      </svg>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, useId } from 'vue';
 
 import { UiSvgPressable } from '../../ui';
 import {
   computeViewBox,
   edgePath,
+  layoutGraphPositions,
   MARKS,
   nodeGeom,
+  nodeLabelLines,
   START_DOT,
 } from '../../shared/graph-geom.js';
 import { arbiterRunLabel, nodeIsArbitrated } from '../../shared/arbiter-run.js';
@@ -186,7 +231,6 @@ import {
 import type {
   ArbiterRun,
   FactoryGraphData,
-  GraphNodeDefinition,
   GraphPosition,
   LabelPosition,
 } from '../../../../shared/factoryGraphContracts.ts';
@@ -201,38 +245,51 @@ interface GraphStall {
 
 interface EdgeElement {
   key: string;
+  source: string;
+  destination: string;
+  title: string;
   d: string;
   className: string;
   label: string;
   labelPosition: LabelPosition;
   labelClass: string;
   visible: boolean;
+  related: boolean;
+  showLabel: boolean;
+  bounds: GraphPosition[];
 }
 
 interface GraphNodeElement {
   id: string;
   kind: string;
   label: string;
+  labelLines: string[];
+  labelY: number;
+  contentX: number;
+  kindLabel: string;
+  description: string;
+  icon: string;
+  statusLabel: string;
+  detail: string;
   subtitle: string;
   cx: number;
   cy: number;
   halfWidth: number;
   halfHeight: number;
   radius: number;
-  points: string | null;
+  top: number;
+  bottom: number;
+  detailY: number;
+  shapePath: string;
   status: string;
   runner: string;
   runnerModel: string;
   runnerSwitched: boolean;
   title: string;
   mark: string;
-  markX: number;
-  markY: number;
   arbiterVerdict: string;
   arbiterX: number;
   arbiterY: number;
-  subtitleY: number;
-  runnerY: number;
 }
 
 const props = withDefaults(
@@ -262,6 +319,9 @@ const emit = defineEmits<{
   node: [node: GraphNodeElement, event: MouseEvent | KeyboardEvent];
 }>();
 
+const markerId = `graph-arrow-${useId()}`;
+const focusedNode = ref<string | null>(null);
+
 // Пройденный узел рисуется одинаково и когда он сделан, и когда законно пропущен.
 // Множество строк, а не статусов: неизвестного узла в карте статусов может не быть
 // вовсе, и такое отсутствие означает «ещё не дошли», а не ошибку.
@@ -277,14 +337,42 @@ const statusMarks = MARKS as Record<string, string>;
 // Пилюля следа арбитра над узлом.
 const MARK_WIDTH = 24;
 const MARK_HEIGHT = 14;
-// Ширину подписи SVG не сообщает, а знак статуса надо поставить сразу за ней. Оценка
-// снята замером 11px system-ui в Chrome: 6.6–7.5 px на символ кириллицы. Берём верхнюю
-// границу — ошибка вверх лишь отодвигает знак от подписи, ошибка вниз даёт наезд.
-const LABEL_CHAR_WIDTH = 7.4;
-const MARK_GAP = 8;
-const MARK_DIAMOND_BASELINE = 13;
+const KIND_LABEL: Record<string, string> = {
+  agent: 'Агент',
+  code: 'Автоматически',
+  human: 'Решение человека',
+};
+const KIND_HEADING: Record<string, string> = {
+  agent: 'Агент',
+  code: 'Проверка',
+  human: 'Человек',
+};
+// Значки дополняют силуэт типа, а цвет состояния остаётся самостоятельным сигналом.
+// Все контуры нарисованы в одной сетке 16 × 16.
+const KIND_ICON: Record<string, string> = {
+  agent: 'M8 1.5 9.8 6.2 14.5 8 9.8 9.8 8 14.5 6.2 9.8 1.5 8 6.2 6.2Z',
+  code: 'M4 3 1 8 4 13 M12 3 15 8 12 13 M6 8 7.5 9.5 10.5 6',
+  human: 'M10.5 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0 M3 14v-2a5 3 0 0 1 10 0v2',
+};
+const STATUS_LABEL: Record<string, string> = {
+  done: 'Готово',
+  run: 'В работе',
+  wait: 'Ждёт тебя',
+  stall: 'Остановка',
+  skipbad: 'Аномалия',
+  premature: 'Раньше срока',
+  fail: 'Ошибка',
+  arb: 'Разбор',
+  skip: 'Пропущен',
+  idle: 'Нет данных',
+  pending: 'Не начат',
+};
+
 const nodeInteractive = computed(() => props.interactive || !props.reference);
 const nodeElement = computed(() => (nodeInteractive.value ? UiSvgPressable : 'g'));
+const parallelNodes = computed(() => props.graph.edges
+  .filter(([, , , , routing]) => routing === 'to_sandbox')
+  .map(([, destination]) => destination));
 const stallView = computed<GraphStall | null>(() => {
   if (props.reference) {
     return null;
@@ -292,7 +380,14 @@ const stallView = computed<GraphStall | null>(() => {
 
   return graphStallView(props.graph) as GraphStall | null;
 });
-const viewBox = computed(() => computeViewBox(props.graph.pos, props.graph.nodes));
+const positions = computed<Record<string, GraphPosition>>(() => layoutGraphPositions(
+  props.graph.pos,
+  props.graph.nodes,
+  props.graph.edges.some(([source, , , kind]) => (
+    kind === 'fail' && (props.reference || props.loopsOn || (props.graph.loops?.[source] ?? 0) > 0)
+  )),
+  parallelNodes.value,
+));
 
 /**
  * Fail-рёбра зависят не только от статуса источника: потенциальные циклы скрыты,
@@ -303,14 +398,19 @@ const edgeElements = computed<EdgeElement[]>(() => {
   const statuses = graph.statuses ?? {};
   const elements: EdgeElement[] = [];
 
-  for (const [source, destination, originalLabel, edgeClass, routing] of graph.edges) {
+  for (const [index, [source, destination, originalLabel, edgeClass, routing]] of graph.edges.entries()) {
     const path = edgePath(
       source,
       destination,
       routing,
-      graph.pos,
+      positions.value,
       graph.nodes,
-    ) as { d: string; label: LabelPosition };
+      index,
+    ) as {
+      d: string;
+      label: LabelPosition;
+      bounds: GraphPosition[];
+    };
     let className = 'e-off';
     let label = originalLabel;
     let visible = true;
@@ -338,65 +438,71 @@ const edgeElements = computed<EdgeElement[]>(() => {
       labelClass = edgeClass === 'pass' ? 'elbl-pass' : 'elbl';
     } else {
       const sourceStatus = source === '_start' ? 'done' : statuses[source];
+      const destinationStatus = statuses[destination];
 
-      className = doneLike.has(sourceStatus)
-        ? 'e-on'
-        : sourceStatus === 'run'
-          ? 'e-flow'
-          : 'e-off';
+      if (doneLike.has(sourceStatus) && destinationStatus === 'run') {
+        className = 'e-flow';
+      } else if (doneLike.has(sourceStatus) && destinationStatus && destinationStatus !== 'pending') {
+        className = 'e-on';
+      }
+
       labelClass = edgeClass === 'pass' ? 'elbl-pass' : 'elbl';
     }
 
     elements.push({
-      key: `${source}-${destination}`,
+      key: `${source}-${destination}-${index}`,
+      source,
+      destination,
+      title: [
+        `${graph.nodes[source]?.[1] || 'Старт'} → ${graph.nodes[destination]?.[1] || destination}`,
+        label,
+      ].filter(Boolean).join(' · '),
       d: path.d,
       className,
       label,
       labelPosition: path.label,
       labelClass,
       visible,
+      related: focusedNode.value === source || focusedNode.value === destination,
+      showLabel: edgeClass !== 'fail' || focusedNode.value === source,
+      bounds: path.bounds,
     });
   }
 
   return elements;
 });
 
-interface NodeGeometry {
-  cx: number;
-  cy: number;
-  hw: number;
-}
-
-interface MarkPlacement {
-  x: number;
-  y: number;
-}
-
-/**
- * Место знака статуса. Он стоит отдельным элементом, а не хвостом подписи: внутри
- * общего `<text>` знак центрировался вместе с названием и двигал его при каждой смене
- * статуса. Позиция считается от оценённой ширины подписи, поэтому знак читается как
- * часть названия и не превращается в отдельную наклейку у рамки.
- *
- * У ромба справа сходятся грани: там, где у прямоугольника есть место, у него остаются
- * единицы пикселей высоты, и знак садился прямо на контур. Поэтому ромбу знак ставится
- * под названием — по центру, где высота максимальна.
- */
-function markPlacement(
-  kind: string,
-  label: string,
-  geometry: NodeGeometry,
-): MarkPlacement {
-  if (kind === 'code') {
-    return { x: geometry.cx, y: geometry.cy + MARK_DIAMOND_BASELINE };
-  }
-
-  const labelHalfWidth = ([...label].length * LABEL_CHAR_WIDTH) / 2;
+const viewBox = computed(() => computeViewBox(
+  positions.value,
+  props.graph.nodes,
+  edgeElements.value.filter((edge) => edge.visible).map((edge) => ({
+    bounds: edge.bounds,
+    label: edge.label ? edge.labelPosition : null,
+    labelText: edge.label,
+  })),
+));
+const canvasStyle = computed(() => {
+  const width = Number(viewBox.value.split(' ')[2]);
 
   return {
-    x: Math.min(geometry.cx + labelHalfWidth + MARK_GAP, geometry.cx + geometry.hw - 10),
-    y: geometry.cy + 3.5,
+    minWidth: `${width}px`,
+    maxWidth: `${width}px`,
   };
+});
+
+/**
+ * Ромб обозначает автоматический шаг; его вершины совпадают с точками подключения связей.
+ * Текст находится снаружи, поэтому длинное название не растягивает сам значок.
+ */
+function codeNodePath(geometry: ReturnType<typeof nodeGeom>): string {
+  const { cx, cy, radius } = geometry;
+
+  return [
+    `M ${cx} ${cy - radius}`,
+    `L ${cx + radius} ${cy}`,
+    `L ${cx} ${cy + radius}`,
+    `L ${cx - radius} ${cy} Z`,
+  ].join(' ');
 }
 
 /**
@@ -406,12 +512,15 @@ function markPlacement(
 const nodeElements = computed<GraphNodeElement[]>(() => {
   const graph = props.graph;
 
+  // Порядок фокуса следует серверной цепочке, даже когда второй ряд идёт справа налево.
   return Object.keys(graph.pos).map((nodeId) => {
     const definition = graph.nodes[nodeId] ?? ['agent', nodeId, ''];
     const kind = definition[0];
     const label = definition[1] || nodeId;
     const subtitle = definition[2] || '';
-    const geometry = nodeGeom(nodeId, graph.pos, graph.nodes);
+    const geometry = nodeGeom(nodeId, positions.value, graph.nodes);
+    const labelLines = nodeLabelLines(label);
+    const labelY = geometry.labelY;
     const committed = props.reference
       ? 'ref'
       : (graph.statuses?.[nodeId] ?? 'pending');
@@ -419,18 +528,16 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
     // человеке, её прямо сейчас делает арбитр. Красный узел в это время звал бы к
     // курьерской работе, которую он и снимает.
     const status = nodeIsArbitrated(committed, props.arbitrating) ? 'arb' : committed;
+    const kindLabel = parallelNodes.value.includes(nodeId) ? 'Стенд' : KIND_HEADING[kind] || kind;
+    const statusLabel = STATUS_LABEL[status] || '';
+    const description = [kindLabel, statusLabel].filter(Boolean).join(' · ');
     const runnerMetadata = graph.nodeMeta?.[nodeId]?.runner ?? null;
     const runner = runnerMetadata ? runnerNodeLabel(runnerMetadata) : '';
     const runnerModel = runnerMetadata ? runnerModelLabel(runnerMetadata) : '';
+    const detail = runner
+      ? [runner, runnerModel].filter(Boolean).join(' · ')
+      : subtitle || KIND_LABEL[kind] || '';
     const nodeStall = stallView.value?.node === nodeId ? stallView.value : null;
-    const radius = kind === 'human' ? geometry.hh : 6;
-    const markPosition = markPlacement(kind, label, geometry);
-    const points = kind === 'code'
-      ? `${geometry.cx},${geometry.cy - geometry.hh} `
-        + `${geometry.cx + geometry.hw},${geometry.cy} `
-        + `${geometry.cx},${geometry.cy + geometry.hh} `
-        + `${geometry.cx - geometry.hw},${geometry.cy}`
-      : null;
     const arbitratedReason = nodeStall?.title || 'узел остановил маршрут';
     const stallTitle = status === 'arb'
       ? `Арбитр разбирает остановку (${arbiterRunLabel(props.arbitrating)}) — ${arbitratedReason}`
@@ -447,32 +554,35 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
       id: nodeId,
       kind,
       label,
+      labelLines,
+      labelY,
+      contentX: geometry.cx,
+      kindLabel,
+      description,
+      icon: KIND_ICON[kind] || '',
+      statusLabel,
+      detail,
       subtitle,
       cx: geometry.cx,
       cy: geometry.cy,
       halfWidth: geometry.hw,
       halfHeight: geometry.hh,
-      radius,
-      points,
+      radius: geometry.radius,
+      top: geometry.top,
+      bottom: geometry.bottom,
+      detailY: geometry.detailY,
+      shapePath: kind === 'code' ? codeNodePath(geometry) : '',
       status,
       runner,
       runnerModel,
       runnerSwitched: Boolean(runnerMetadata?.switched),
-      title: [stallTitle, arbiterTitle, runnerTitle].filter(Boolean).join('\n'),
+      title: [label, description, stallTitle, arbiterTitle, runnerTitle, subtitle].filter(Boolean).join('\n'),
       mark: statusMarks[status] ?? '',
-      markX: markPosition.x,
-      markY: markPosition.y,
       arbiterVerdict,
-      // Метка арбитра висит НАД левым верхним углом, а не внутри узла: правый край занят
-      // статусом, а внутри она наезжала на подпись — ширина узла считается по длине
-      // текста и места под вторую пилюлю в ней нет (замер: «🔧 Исправление» — наезд).
-      // Сверху у холста 36 px запаса (`computeViewBox`), метке хватает её 14.
-      arbiterX: geometry.cx - geometry.hw + 12,
-      arbiterY: geometry.cy - geometry.hh - 7,
-      subtitleY: kind === 'code'
-        ? geometry.cy + geometry.hh + 12
-        : geometry.cy + geometry.hh + 13,
-      runnerY: geometry.cy + geometry.hh + (subtitle ? 24 : 13),
+      // След арбитра остаётся над значком, отдельно от текущего статуса.
+      // Размер холста учитывает метку, поэтому у верхнего ряда она не обрезается.
+      arbiterX: geometry.cx - geometry.radius,
+      arbiterY: geometry.top - 8,
     };
   });
 });
@@ -500,91 +610,165 @@ function onNodeActivate(
 .graph-stop strong { font-weight: 650; }
 .graph-stop-fails { white-space: nowrap; font-family: var(--mono); opacity: .85; }
 .graph-stop-hint { grid-column: 2 / -1; color: var(--ink-mid); }
-/* Разбор идёт — это не тревога. Пульс здесь несёт смысл: он единственный отличает
-   идущую работу от статичного зелёного «пройдено». */
+/* Плашка называет идущий разбор спокойным зелёным; движение остаётся у самого узла. */
 .graph-stop.arb { color: var(--good);
   background: color-mix(in srgb, var(--good) 12%, transparent);
-  border-color: color-mix(in srgb, var(--good) 38%, transparent);
-  animation: nodepulse 1.8s ease-in-out infinite; }
-.graph { width: 100%; height: auto; display: block; }
-/* Наконечник наследует цвет своей линии (context-stroke), а не всегда серый */
-#arr path { fill: context-stroke; }
-.edges path { marker-end: url(#arr); }
-.startdot { fill: var(--good); filter: drop-shadow(0 0 4px var(--good)); }
+  border-color: color-mix(in srgb, var(--good) 38%, transparent); }
+.graph-viewport {
+  overflow-x: auto;
+  padding: 4px 0;
+  scrollbar-color: var(--line-2) transparent;
+  scrollbar-width: thin;
+}
+.graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Auto-поля центрируют короткую схему и обнуляются, когда нужна прокрутка. */
+  margin: 0 auto;
+}
+/* Каждый граф владеет своим marker, а цвет стрелки наследуется от линии. */
+.arrowhead { fill: context-stroke; }
+.startdot { fill: var(--ink-mid); }
 
-/* базовый узел */
-.ng > rect, .ng > polygon { fill: #0e1611; stroke-width: 1.4; }
+.ng {
+  --node-tone: var(--node-agent);
+  --node-state: var(--ink-mid);
+}
+.nt-human { --node-tone: var(--node-human); }
+.nt-code { --node-tone: var(--node-code); }
+.node-shape {
+  fill: color-mix(in srgb, var(--node-tone) 10%, var(--surface));
+  stroke: color-mix(in srgb, var(--node-tone) 72%, var(--line-2));
+  stroke-width: 1;
+  stroke-linejoin: round;
+  transition: fill 160ms ease, stroke 160ms ease;
+}
 .clickable { cursor: pointer; }
-.clickable:hover > rect, .clickable:hover > polygon { stroke-width: 3; }
-.nt-agent > rect, .nt-agent > polygon { stroke: var(--node-agent); }
-.nt-human > rect, .nt-human > polygon { stroke: var(--node-human); }
-.nt-code > rect, .nt-code > polygon { stroke: var(--node-code); }
-.nlbl { fill: var(--ink); font-size: 11px; font-family: var(--sans); }
-.sub { fill: var(--ink-mid); font-size: 9.5px; font-family: var(--mono); }
-.runner { fill: var(--accent); font-size: 8.5px; font-family: var(--mono); }
-.runner.switched { fill: var(--warn); font-weight: 650; }
-/* След арбитра. Жёлтый — решение отдано человеку и всё ещё ждёт его; приглушённый —
-   арбитр проехал сам, и действия от человека это не требует. */
+.clickable.ns-pending:hover .node-shape, .clickable.ns-ref:hover .node-shape {
+  stroke: color-mix(in srgb, var(--node-tone) 90%, var(--ink));
+  fill: color-mix(in srgb, var(--node-tone) 12%, var(--surface));
+}
+.node-hit-area { fill: transparent; }
+.node-human-ring { fill: none; stroke: var(--node-tone); opacity: .4; }
+.node-kind { color: var(--node-tone); }
+.node-kind path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.node-state-bg { fill: var(--surface); stroke: var(--node-state); stroke-width: 1; }
+.node-state {
+  fill: var(--node-state);
+  font: 10px var(--sans);
+}
+.nlbl {
+  fill: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--sans);
+}
+.node-detail {
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  font-family: var(--sans);
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+.node-detail.runner.switched { color: var(--warn); }
 .node-arb-bg { fill: color-mix(in srgb, currentColor 18%, var(--surface)); }
 .node-arb-human { color: var(--warn); }
 .node-arb-resolve, .node-arb-deferred { color: var(--ink-mid); }
-/* Знак статуса — часть узла, а не наклейка поверх него: своей подложки у него нет и
-   гаснет он вместе с остальным узлом. */
-.mk { fill: var(--ink-mid); font-size: 10px; font-family: var(--sans); font-weight: 750;
-  pointer-events: none; }
+.mk {
+  fill: var(--node-state);
+  font-size: 10px;
+  font-family: var(--sans);
+  font-weight: 750;
+  pointer-events: none;
+}
 .mk-done, .mk-arb { fill: var(--good); }
 .mk-run { fill: var(--accent); }
 .mk-wait { fill: var(--warn); }
 .mk-stall, .mk-skipbad, .mk-premature, .mk-fail { fill: var(--bad); }
 .mk-arbiter { fill: currentColor; }
 
-/* статусы */
-.ns-ref { opacity: 1; }
-.ns-done > :not(.node-arb) { opacity: .55; }
-.ns-pending > :not(.node-arb) { opacity: .30; }
-.ns-idle > rect, .ns-idle > polygon { stroke: var(--accent); stroke-dasharray: 6 4; }
-.ns-idle > :not(.node-arb) { opacity: .7; }
-.ns-skip > rect, .ns-skip > polygon { stroke-dasharray: 4 4; }
-.ns-skip > :not(.node-arb) { opacity: .45; }
-.ns-run > rect, .ns-run > polygon { stroke: var(--accent); stroke-width: 2.2; fill: #0e1a2b;
-  filter: drop-shadow(0 0 9px var(--accent)); animation: nodepulse 1.6s ease-in-out infinite; }
-.ns-wait > rect, .ns-wait > polygon { stroke: var(--warn); stroke-width: 2.2; fill: #20160a;
-  filter: drop-shadow(0 0 9px var(--warn)); animation: nodepulse 2.2s ease-in-out infinite; }
-.ns-stall > rect, .ns-stall > polygon, .ns-premature > rect, .ns-premature > polygon {
-  stroke: var(--bad); stroke-width: 2.2; filter: drop-shadow(0 0 8px var(--bad)); }
-/* Провал узла: сплошной красный, без прозрачности — упавший стенд должен бросаться
-   в глаза, а не теряться среди непройденных этапов. */
-.ns-fail > rect, .ns-fail > polygon { stroke: var(--bad); stroke-width: 2.2; fill: #2a1113; }
-.ns-fail { opacity: 1; }
-.ns-skipbad > rect, .ns-skipbad > polygon { stroke: var(--bad); stroke-dasharray: 5 4;
-  filter: drop-shadow(0 0 6px var(--bad)); }
-/* Остановку разбирает арбитр. Зелёный — «не тревога, руками не трогай»; но статичный
-   зелёный на этой схеме уже занят пройденными узлами (`ns-done`, приглушённые), и
-   разбираемый узел слился бы с ними — то есть стал бы невидимым ровно там, где его и
-   ищут. Поэтому полная непрозрачность, заливка, свечение и пульс: цвет снимает тревогу,
-   движение говорит, что работа идёт. */
-.ns-arb > rect, .ns-arb > polygon { stroke: var(--good); stroke-width: 2.2; fill: #0d2015;
-  filter: drop-shadow(0 0 9px var(--good)); animation: nodepulse 1.6s ease-in-out infinite; }
-.ns-arb { opacity: 1; }
+/* Знак статуса примыкает к значку; контур выделяет этап, которому нужно внимание. */
+.ns-pending .nlbl { fill: color-mix(in srgb, var(--ink) 88%, var(--ink-mid)); }
+.ns-done { --node-state: var(--good); }
+.ns-done .node-shape {
+  stroke: color-mix(in srgb, var(--good) 72%, var(--line-2));
+}
+.ns-idle .node-shape { stroke-dasharray: 6 4; }
+.ns-skip .node-shape { stroke-dasharray: 4 4; }
+.ns-skip .nlbl { fill: var(--ink-mid); }
+.ns-run { --node-state: var(--accent); }
+.ns-run .node-shape {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  fill: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+.ns-run .node-detail { color: color-mix(in srgb, var(--accent) 75%, var(--ink)); }
+.ns-run .mk-run { animation: nodepulse 2.4s ease-in-out infinite; }
+.ns-wait { --node-state: var(--warn); }
+.ns-wait .node-shape {
+  stroke: var(--warn);
+  stroke-width: 1.5;
+  fill: color-mix(in srgb, var(--warn) 6%, var(--surface));
+}
+.ns-stall, .ns-premature, .ns-fail, .ns-skipbad { --node-state: var(--bad); }
+.ns-stall .node-shape, .ns-premature .node-shape, .ns-fail .node-shape, .ns-skipbad .node-shape {
+  stroke: var(--bad);
+  stroke-width: 1.5;
+  fill: color-mix(in srgb, var(--bad) 6%, var(--surface));
+}
+.ns-skipbad .node-shape { stroke-dasharray: 5 4; }
+/* Разбор отличается от завершённого шага насыщенной рамкой и движением. */
+.ns-arb { --node-state: var(--good); }
+.ns-arb .node-shape {
+  stroke: var(--good);
+  stroke-width: 1.5;
+  fill: color-mix(in srgb, var(--good) 9%, var(--surface));
+}
+.ns-arb .mk-arb { animation: nodepulse 2.4s ease-in-out infinite; }
 
-/* рёбра */
-.edges path { fill: none; }
-.e-off { stroke: var(--idle); opacity: .30; stroke-width: 1.4; }
-.e-on { stroke: var(--edge-on); opacity: .7; stroke-width: 1.6; }
-.e-flow { stroke: var(--edge-on); opacity: .9; stroke-width: 1.8; stroke-dasharray: 7 6;
-  animation: flow 1s linear infinite; filter: drop-shadow(0 0 4px #39d35388); }
-.e-fail { stroke: var(--edge-fail); opacity: .5; stroke-width: 1.4; }
-.e-loop { stroke: var(--edge-fail); opacity: 1; stroke-width: 2.2; }
-.e-loop.e-flow { stroke-dasharray: 7 5; animation: flow 1.1s linear infinite; }
-.elbl { fill: var(--ink-mid); font-size: 9px; font-family: var(--mono); }
-.elbl-pass { fill: var(--good); font-size: 9px; font-family: var(--mono); }
-.elbl-fail { fill: var(--bad); font-size: 9px; font-family: var(--mono); }
+.edges path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.edges > g { transition: opacity 160ms ease; }
+.e-off { stroke: var(--idle); stroke-width: 1.3; }
+.e-on { stroke: var(--edge-on); opacity: .55; stroke-width: 1.5; }
+.e-flow {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-dasharray: 6 6;
+  animation: flow 1s linear infinite;
+}
+.e-fail { stroke: var(--ink-low); opacity: .45; stroke-width: 1.2; stroke-dasharray: 4 5; }
+.e-loop { stroke: var(--bad); opacity: .85; stroke-width: 1.8; }
+.e-loop.e-flow { stroke-dasharray: 6 6; }
+.edge-muted { opacity: .18; }
+.edge-related .e-fail { stroke: var(--warn); opacity: .9; }
+.elbl, .elbl-pass, .elbl-fail {
+  fill: var(--ink-mid);
+  font-size: 10px;
+  font-family: var(--sans);
+  paint-order: stroke;
+  stroke: var(--ground);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.elbl-pass { fill: var(--good); }
+.elbl-fail { fill: var(--warn); }
 
-@keyframes nodepulse { 50% { opacity: .55; } }
-@keyframes flow { to { stroke-dashoffset: -13; } }
+@keyframes nodepulse { 50% { opacity: .4; } }
+@keyframes flow { to { stroke-dashoffset: -12; } }
 @media (prefers-reduced-motion: reduce) {
-  .e-flow, .ns-run > rect, .ns-wait > rect, .ns-arb > rect, .ns-arb > polygon,
-  .graph-stop.arb {
+  .edges > g, .node-shape { transition: none; }
+  .e-flow, .ns-run .mk-run, .ns-arb .mk-arb, .graph-stop.arb {
     animation: none;
   }
 }

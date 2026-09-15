@@ -19,6 +19,70 @@ const GRAPH = {
   },
 };
 
+test('движение линии ведёт к работающему этапу и не обещает запуск следующего', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const graph = {
+    ...GRAPH,
+    pos: { build: [140, 55], review: [480, 55] },
+    nodes: { build: ['agent', 'Сборка', ''], review: ['agent', 'Ревью', ''] },
+    edges: [...GRAPH.edges, ['build', 'review', '', 'pass', 'h']],
+    statuses: { build: 'run', review: 'pending' },
+  };
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph },
+  });
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.get('[data-source="_start"] path').classes().includes('e-flow'), true);
+  assert.equal(wrapper.get('[data-source="build"] path').classes().includes('e-off'), true);
+
+  await wrapper.setProps({ graph: { ...graph, statuses: { build: 'done', review: 'run' } } });
+
+  assert.equal(wrapper.get('[data-source="_start"] path').classes().includes('e-on'), true);
+  assert.equal(wrapper.get('[data-source="build"] path').classes().includes('e-flow'), true);
+});
+
+test('возможные возвраты скрыты, фактические видны и подпись открывается с узла', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const graph = {
+    ...GRAPH,
+    pos: { build: [140, 55], review: [480, 55] },
+    nodes: { build: ['agent', 'Сборка', ''], review: ['agent', 'Ревью', ''] },
+    edges: [...GRAPH.edges, ['review', 'build', 'Исправить замечания', 'fail', 'arc_up']],
+    statuses: { build: 'run', review: 'done' },
+  };
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph },
+  });
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.find('.e-fail').exists(), false);
+
+  await wrapper.setProps({ loopsOn: true });
+
+  assert.equal(wrapper.find('.e-fail').exists(), true);
+  assert.equal(wrapper.find('.elbl-fail').exists(), false);
+
+  await wrapper.get('[data-node="review"]').trigger('focusin');
+
+  assert.equal(wrapper.get('.elbl-fail').text(), 'Исправить замечания');
+
+  await wrapper.setProps({ loopsOn: false, graph: { ...graph, loops: { review: 2 } } });
+
+  assert.equal(wrapper.get('.e-loop').classes().includes('e-flow'), true);
+  assert.equal(wrapper.get('.elbl-fail').text(), 'Исправить замечания ×2');
+});
+
 test('FactoryGraph даёт интерактивным SVG-узлам button-контракт и клавиатуру', async (t) => {
   const browser = await installUiBrowser(t);
   const [{ mount }, FactoryGraph] = await Promise.all([
@@ -80,7 +144,7 @@ test('FactoryGraph даёт интерактивным SVG-узлам button-к�
   assert.equal(activations.length, 3);
 });
 
-test('знак статуса стоит за подписью и не имеет своей подложки', async (t) => {
+test('знак статуса не двигает название, а его смысл доступен текстом', async (t) => {
   const browser = await installUiBrowser(t);
   const [{ mount }, FactoryGraph] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -99,21 +163,22 @@ test('знак статуса стоит за подписью и не имее�
 
   const node = wrapper.get('.ng');
   const label = node.get('.nlbl');
-  const mark = node.get('.mk');
+  const state = node.get('.node-state');
+  const titlePosition = [label.attributes('x'), label.attributes('y')];
 
   assert.equal(label.text(), 'Сборка', 'знак больше не сдвигает подпись узла');
   assert.equal(label.find('.mk').exists(), false, 'знак отделён от текста');
-  assert.equal(mark.text(), '✓');
-  assert.equal(mark.element.localName, 'text', 'знак рисуется без своей подложки');
-  assert.equal(node.find('.node-mark-bg').exists(), false, 'пилюли под знаком нет');
+  assert.equal(state.get('.mk').text(), '✓');
+  assert.match(node.get('title').text(), /Готово/, 'подсказка называет состояние словами');
+  assert.match(node.attributes('aria-description'), /Готово/, 'состояние доступно скринридеру');
+  assert.equal(Number(state.attributes('x')) > Number(label.attributes('x')), true);
 
-  // Знак стоит сразу за подписью, а не у рамки: у края он читался наклейкой поверх узла.
-  const labelX = Number(label.attributes('x'));
-  const markX = Number(mark.attributes('x'));
-  const halfWidth = Number(node.get('rect').attributes('width')) / 2;
+  await wrapper.setProps({ graph: { ...GRAPH, statuses: { build: 'run' } } });
 
-  assert.equal(markX > labelX, true, 'знак справа от названия');
-  assert.equal(markX - labelX < halfWidth, true, 'знак остаётся внутри узла, а не у рамки');
+  assert.equal(node.get('.node-state .mk').text(), '●');
+  assert.match(node.get('title').text(), /В работе/);
+  assert.match(node.attributes('aria-description'), /В работе/);
+  assert.deepEqual([label.attributes('x'), label.attributes('y')], titlePosition);
 });
 
 // Пока идёт разбор, задача снаружи неотличима от вставшей: тот же красный узел, та же

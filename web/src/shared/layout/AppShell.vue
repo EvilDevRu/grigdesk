@@ -342,6 +342,9 @@
                       </span>
                     </span>
                   </span>
+                  <!-- Прогноз по полосам и последний сброс окна — свой раздел, снимается
+                       вместе с этой строкой (см. shared/usageForecastContracts.ts). -->
+                  <ProviderUsageForecast :provider-id="p.id" />
                   <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
                        можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
                   <ProviderUsageResources
@@ -457,6 +460,7 @@ import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover
 import CockpitVersionTile from '../../features/cockpit-update/CockpitVersionTile.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
+import ProviderUsageForecast from '../../features/providers/ProviderUsageForecast.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.js';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import ToolHost from './ToolHost.vue';

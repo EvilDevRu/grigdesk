@@ -42,6 +42,34 @@ test('Codex file_change сохраняет все пути одного вызо
   assert.deepEqual(steps.find((step) => step.k === 'tool')?.files, ['src/a.js', 'src/b.js']);
 });
 
+test('Codex add/delete: содержимое файла разворачивается в patch нужной стороны', () => {
+  const normalize = createCodexStepNormalizer();
+  const steps = normalize({
+    method: 'item/started',
+    params: {
+      item: {
+        id: 'fc-raw', type: 'fileChange', status: 'inProgress',
+        changes: [
+          // app-server кладёт в `diff` созданного файла его текст, а не unified diff.
+          { path: 'src/new.py', kind: { type: 'add' }, diff: 'import os\n\ndef main():\n    pass\n' },
+          { path: 'src/old.py', kind: { type: 'delete' }, diff: 'x = 1\n' },
+          { path: 'src/patch.js', kind: { type: 'add' }, diff: '@@ -0,0 +1,1 @@\n+ok\n' },
+          { path: 'src/upd.js', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-1\n+2\n' },
+        ],
+      },
+    },
+  });
+
+  const tool = steps.find((step) => step.k === 'tool');
+  assert.deepEqual(tool?.changes.map((change) => [change.kind, change.diff]), [
+    ['add', '@@ -0,0 +1,4 @@\n+import os\n+\n+def main():\n+    pass\n'],
+    ['delete', '@@ -1,1 +0,0 @@\n-x = 1\n'],
+    // Уже готовый patch и обычный update проходят как есть.
+    ['add', '@@ -0,0 +1,1 @@\n+ok\n'],
+    ['update', '@@ -1 +1 @@\n-1\n+2\n'],
+  ]);
+});
+
 test('Kimi edit объявляет путь независимо от текста превью', () => {
   const normalizer = createKimiStepNormalizer();
   const steps = normalizer({ update: {

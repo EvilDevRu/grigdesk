@@ -258,6 +258,22 @@ function pushStep(steps, step) {
   });
 }
 
+// Выжимка после сжатия едет агенту первым блоком следующего сообщения. Формат блока
+// знает только это окно, поэтому и снимать его — здесь же: сервер запоминает в pending
+// весь текст запроса как «вопрос пользователя», а в переписке блоку не место — там уже
+// есть и вся история, и плашка о сжатии.
+const SEED_OPEN = '[Выжимка предыдущего разговора — продолжаем с этого места]';
+const SEED_CLOSE = '[/Выжимка]';
+function withSeed(seed, text) {
+  return seed ? `${SEED_OPEN}\n${seed}\n${SEED_CLOSE}\n\n${text}` : text;
+}
+function stripSeed(userText) {
+  const text = String(userText || '');
+  if (!text.startsWith(SEED_OPEN)) return text;
+  const end = text.indexOf(`\n${SEED_CLOSE}\n\n`);
+  return end < 0 ? text : text.slice(end + SEED_CLOSE.length + 3);
+}
+
 // Рантайм-поля чата: живут только в окне и на сервер не едут (см. slimOf). При замене
 // чата серверной копией их надо сохранить — иначе принятое чужое изменение погасило бы
 // «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
@@ -412,6 +428,36 @@ function applyContextUsage(session, payload) {
   if (Object.hasOwn(payload, 'contextCache')) {
     session.contextCache = normalizeContextCache(payload.contextCache);
   }
+}
+
+// Итог удавшегося сжатия — один и тот же, откуда бы он ни приехал: ответом на свой
+// запрос или через pending, если окно перезагрузили посреди сжатия. Два пути (какой —
+// решает исполнитель на сервере):
+//   native  — CLI сжал разговор сам, сессия та же, ничего больше делать не надо;
+//   summary — сервер вернул выжимку; сессию обнуляем, выжимка ждёт в pendingSeed и
+//             уедет первой в новую сессию вместе со следующим сообщением.
+// Точный размер контекста после сжатия не знает никто: ход сжатия читал ещё СТАРУЮ
+// переписку. Поэтому обнуляем счётчик и ждём следующего обычного хода — он измерит.
+function applyCompactResult(session, result, before) {
+  if (result.compact?.kind === 'summary') {
+    if (!result.compact.seed) throw new Error('Сервер не вернул выжимку — контекст не сжат.');
+    session.pendingSeed = result.compact.seed;
+    session.sessionId = null;
+  }
+  session.contextTokens = 0;
+  session.contextWindow = 0;
+  session.contextMetric = '';
+  session.contextIsEstimate = false;
+  session.totalInputTokens = 0;
+  session.cachedInputTokens = 0;
+  session.contextCache = normalizeContextCache(null);
+  session.liveContextUsage = null;
+  session.liveContextCache = null;
+  session.compactedAt = Date.now();
+  session.messages.push({
+    role: 'note',
+    text: `🗜 Контекст сжат — было ${before.toLocaleString('ru')} токенов.`,
+  });
 }
 
 /** Обнулить provider session и её метрики. Выжимку выбрасываем только при явном reset:
@@ -657,16 +703,37 @@ export const useChatStore = defineStore('chat', {
         const s = this._find(p.chatKey);
         // Ответ мог прийти после F5: применяем семантическое имя, только если человек
         // не заменил временный заголовок вручную, пока агент работал.
+        // Сервер помнит весь текст запроса, а человек писал только то, что после
+        // блока выжимки: сравниваем и восстанавливаем видимую часть, иначе выжимка
+        // всплывала бы в переписке отдельным «сообщением пользователя».
+        const userText = stripSeed(p.userText);
         if (s && p.title) {
-          const provisional = provisionalChatTitle(p.userText, { hasAttachments: !!p.hadAttachments });
+          const provisional = provisionalChatTitle(userText, { hasAttachments: !!p.hadAttachments });
           applyGeneratedChatTitle(s, p.title, provisional);
         }
-        if (s && !(s.messages || []).some((m) => m.pid === p.id)) {
+        const seen = !s || (s.messages || []).some((m) => m.pid === p.id);
+        if (s && p.compact && !seen) {
+          // Окно перезагрузили посреди сжатия: его итог — не ответ агента, а семя новой
+          // сессии. Потерять его — значит потерять память после сжатия, а старый id
+          // сессии увёл бы следующий ход обратно в полный контекст.
+          try {
+            applyCompactResult(s, p, s.contextTokens || 0);
+          } catch (e) {
+            s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
+          }
+          s.messages.at(-1).pid = p.id;
+          s.compacting = false;
+          s.sending = false;
+          s.offline = false;
+          s.updatedAt = p.at || Date.now();
+        } else if (s && !seen) {
           // Гонка last-write-wins могла затереть сам вопрос — восстанавливаем его перед ответом.
-          if (p.userText && !(s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === p.userText)) {
+          const restored = (s.messages || []).slice(-12)
+            .some((m) => m.role === 'user' && m.text === userText);
+          if (userText && !restored) {
             const sentAt = messageSentAt(p.userSentAt);
             s.messages.push({
-              role: 'user', text: p.userText, pid: `${p.id}:u`,
+              role: 'user', text: userText, pid: `${p.id}:u`,
               ...(sentAt ? { sentAt } : {}),
             });
           }
@@ -1588,13 +1655,8 @@ export const useChatStore = defineStore('chat', {
 
     /**
      * Сжатие контекста: полноценный ход агента, поэтому идёт той же серверной очередью,
-     * что и сообщения, и так же занимает индикатор хода. Два пути (какой — решает
-     * исполнитель на сервере):
-     *   native  — CLI сжал разговор сам, сессия та же, ничего больше делать не надо;
-     *   summary — сервер вернул выжимку; сессию обнуляем, выжимка ждёт в pendingSeed и
-     *             уедет первой в новую сессию вместе со следующим сообщением.
-     * Точный размер контекста после сжатия не знает никто: ход сжатия читал ещё СТАРУЮ
-     * переписку. Поэтому обнуляем счётчик и ждём следующего обычного хода — он измерит.
+     * что и сообщения, и так же занимает индикатор хода. Итог применяет
+     * applyCompactResult — он же подбирает сжатие, доехавшее через pending.
      */
     async compact(id) {
       const s = this._find(id);
@@ -1631,22 +1693,7 @@ export const useChatStore = defineStore('chat', {
           }
           return;
         }
-        if (r.compact?.kind === 'summary') {
-          if (!r.compact.seed) throw new Error('Сервер не вернул выжимку — контекст не сжат.');
-          s.pendingSeed = r.compact.seed;
-          s.sessionId = null;
-        }
-        s.contextTokens = 0;
-        s.contextWindow = 0;
-        s.contextMetric = '';
-        s.contextIsEstimate = false;
-        s.totalInputTokens = 0;
-        s.cachedInputTokens = 0;
-        s.contextCache = normalizeContextCache(null);
-        s.liveContextUsage = null;
-        s.liveContextCache = null;
-        s.compactedAt = Date.now();
-        s.messages.push({ role: 'note', text: `🗜 Контекст сжат — было ${before.toLocaleString('ru')} токенов.` });
+        applyCompactResult(s, r, before);
       } catch (e) {
         if (e.data?.sessionReset) {
           clearSessionContext(s);
@@ -1760,7 +1807,7 @@ export const useChatStore = defineStore('chat', {
         await this._saveChatNow(s);
         modelRequestStarted = true;
         const r = await api.post(url, {
-          message: seed ? `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}\n[/Выжимка]\n\n${text}` : text,
+          message: withSeed(seed, text),
           model: resolvedModel.id, modelRef: s.modelRef,
           effort: requestEffort,
           mode: s.mode || '',

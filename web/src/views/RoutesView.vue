@@ -433,7 +433,6 @@ onMounted(load);
 
 .canvas { position: relative; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line);
   border-radius: 10px; background: var(--surface); padding: 14px; }
-.canvas :deep(svg.graph) { min-width: 1700px; }
 .mid { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; }
 
 .report { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 12px; }

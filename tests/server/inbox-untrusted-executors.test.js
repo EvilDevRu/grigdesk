@@ -116,3 +116,30 @@ test('Claude untrusted ход сохраняет причину ошибки и�
     return true;
   });
 });
+
+test('Claude untrusted ход, убитый по сроку, называет срок, а не «без результата»', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-slow-'));
+  const bin = path.join(dir, 'fake-claude');
+  // Медленная модель: читает prompt и молчит дольше срока; result-события не будет.
+  await writeFile(bin, [
+    '#!/bin/sh',
+    'IFS= read -r payload',
+    'sleep 5',
+  ].join('\n'));
+  await chmod(bin, 0o755);
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  await assert.rejects(claude.runUntrusted({
+    config: { claudeBin: bin },
+    message: 'длинный сценарий',
+    images: [],
+    model: 'opus',
+    providerSettings: {},
+    timeoutMs: 300,
+  }), (error) => {
+    assert.equal(error.code, 'model_run_failed');
+    assert.match(error.message, /не уложился/u);
+    assert.doesNotMatch(error.message, /без результата/u);
+    return true;
+  });
+});

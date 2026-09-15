@@ -45,6 +45,12 @@ const DIFF_TRUNCATED_NOTE = 'Изменения репозиториев про�
 // килобайт, а разбору нужна суть: остальное всё равно вытеснит diff и карту экранов.
 const TASK_TEXT_MAX = 4000;
 
+// Срок одного вызова модели. Срок исполнителя по умолчанию — пять минут под триаж
+// Входящих, а сценарий на opus с полным effort думает четыре-шесть минут: разбор
+// срывался на пороге «Claude завершился без результата», хотя модель просто
+// не успела. Запрос синхронный, человек ждёт на экране — поэтому срок конечен.
+const SCRIPT_MODEL_TIMEOUT_MS = 15 * 60 * 1000;
+
 /**
  * Описание задачи приходит размеченным. Модели нужен текст, а не теги, поэтому
  * разметка снимается здесь же: своего HTML-разбора у раздела нет и заводить его
@@ -93,12 +99,14 @@ export interface ScriptOpsDeps {
   acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
-  withFreshness: (project: ShowcaseProject) => ShowcaseProject;
+  // Ответ мутации — с живой целью и свежестью сцен, как у чтения; сам снимок цели
+  // в project.json для интерфейса не годится (см. publish в service).
+  publish: (project: ShowcaseProject) => Promise<ShowcaseProject> | ShowcaseProject;
 }
 
 export function createScriptOps(deps: ScriptOpsDeps) {
   const {
-    assertEnabled, broadcast, limits, readProject, store, targets, withFreshness,
+    assertEnabled, broadcast, limits, readProject, store, targets, publish,
   } = deps;
 
   /**
@@ -149,6 +157,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       effort: typeof target.effort === 'string' ? target.effort : undefined,
       images: [],
       providerSettings: (settings[ref.provider] ?? {}) as Record<string, unknown>,
+      timeoutMs: SCRIPT_MODEL_TIMEOUT_MS,
       log: {},
     });
 
@@ -252,7 +261,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   /**
@@ -345,7 +354,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   /**
@@ -474,7 +483,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     broadcast('showcase-changed', { projectId: id, revision: saved.revision });
 
-    return withFreshness(saved);
+    return publish(saved);
   }
 
   /**

@@ -95,6 +95,9 @@ export const config = {
   ollamaBaseUrl: process.env.COCKPIT_OLLAMA_HOST || '',
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
   modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
+  // Ряды прогноза лимитов (modules/usage-forecast): снимки полос и журнал сбросов.
+  usageForecastPath: process.env.COCKPIT_USAGE_FORECAST_PATH
+    || path.join(__dirname, '..', '.state', 'usage-forecast.json'),
   // Автообнаружение новых моделей Anthropic ХОСТОВЫМ OAuth-токеном CLI (~/.claude/.credentials.json).
   // Явный опт-ин пользователя: токен предназначен для claude CLI, использовать его для прямых
   // API-запросов без разрешения нельзя. ANTHROPIC_API_KEY в окружении работает и без флага.

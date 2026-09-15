@@ -66,13 +66,15 @@ interface CodexBucket {
   [slot: string]: unknown;
 }
 
-// Полоса лимита для всплывашки: ведро, подпись и процент.
+// Полоса лимита для всплывашки: ведро, подпись, процент и длина окна в минутах —
+// по ней прогноз отличает неделю от сессии и считает средний темп с начала окна.
 interface CodexUsageBar {
   key: string;
   group: string;
   label: string;
   pct: number;
   resetsAt: string | null;
+  windowMinutes: number | null;
 }
 
 // Ответ одноразового JSON-RPC клиента app-server.
@@ -348,6 +350,7 @@ export function parseCodexRateLimits(value: unknown): CodexUsageBar[] {
         label: scope ? `${base.replace(/ \([^)]+\)$/, '')} · ${scope}` : base,
         pct: clamp(Number(window.usedPercent)),
         resetsAt: resetIso(window.resetsAt),
+        windowMinutes: typeof window.windowDurationMins === 'number' ? window.windowDurationMins : null,
       });
     }
   }

@@ -415,21 +415,25 @@ test('синтез: подпись в адресе, заголовки брау�
 test('все WordBoundary и SentenceBoundary переводятся из 100 нс в общую шкалу', async (t) => {
   const root = await workspace(t);
   const provider = await fakeProvider(t, {
-    audio: await mp3Of(root),
+    audio: await mp3Of(root, { seconds: 1.5 }),
     metadataFrames: [
       metadataOf(
         boundary('WordBoundary', 'Замок', 12.3456, 87.6544),
-        boundary('WordBoundary', 'замок', 200.25, 99.75),
+        // Сумма миллисекунд 686.166 + 591.5 в плавающей точке чуть больше
+        // начала следующего слова: метки обязаны считаться из тиков.
+        boundary('WordBoundary', 'у', 100, 586.166),
+        boundary('WordBoundary', 'реки', 686.166, 591.5),
+        boundary('WordBoundary', 'замок', 1277.666, 99.75),
       ),
       metadataOf(
-        boundary('SentenceBoundary', 'Замок &amp; замок.', 0, 400),
+        boundary('SentenceBoundary', 'Замок &amp; у реки замок.', 0, 1400),
         { Type: 'SessionEnd', Data: {} },
       ),
     ],
   });
   const candidate = await engineOf(provider).synthesize(
     {
-      canonicalText: 'Замок & замок.',
+      canonicalText: 'Замок & у реки замок.',
       direction: DIRECTION,
       voiceRef: EDGE_DEFAULT_VOICE_ID,
       language: 'ru',
@@ -441,12 +445,14 @@ test('все WordBoundary и SentenceBoundary переводятся из 100 н
     source: 'edge',
     words: [
       { text: 'Замок', startMs: 12.3456, endMs: 100 },
-      { text: 'замок', startMs: 200.25, endMs: 300 },
+      { text: 'у', startMs: 100, endMs: 686.166 },
+      { text: 'реки', startMs: 686.166, endMs: 1277.666 },
+      { text: 'замок', startMs: 1277.666, endMs: 1377.416 },
     ],
-    segments: [{ text: 'Замок & замок.', startMs: 0, endMs: 400 }],
+    segments: [{ text: 'Замок & у реки замок.', startMs: 0, endMs: 1400 }],
   });
   assert.equal(provider.connections.length, 1);
-  assert.ok(wavSamples(await readFile(candidate.temporaryFile)) > 24_000 * 0.4);
+  assert.ok(wavSamples(await readFile(candidate.temporaryFile)) > 24_000 * 1.4);
 });
 
 test('ступень темпа умножает утверждённый темп, у голоса без настройки — от нуля', async (t) => {
@@ -477,8 +483,8 @@ test('ступень темпа умножает утверждённый тем
   assert.match(provider.connections[0].ssml, /rate='\+34%'/, '1,12 × 1,2');
   assert.match(provider.connections[1].ssml, /pitch='\+0Hz' rate='-30%'/);
   assert.match(provider.connections[1].ssml, /<voice name='ru-RU-SvetlanaNeural'>/);
-  assert.equal(engine.capabilities(EDGE_DEFAULT_VOICE_ID).engineVersion, 'edge-tts-1-rate112-pitch-1');
-  assert.equal(engine.capabilities('ru-RU-SvetlanaNeural').engineVersion, 'edge-tts-1');
+  assert.equal(engine.capabilities(EDGE_DEFAULT_VOICE_ID).engineVersion, 'edge-tts-6-rate112-pitch-1');
+  assert.equal(engine.capabilities('ru-RU-SvetlanaNeural').engineVersion, 'edge-tts-6');
   assert.equal(engine.capabilities(EDGE_DEFAULT_VOICE_ID).pace, true);
   assert.equal(engine.capabilities(EDGE_DEFAULT_VOICE_ID).pause, true);
   assert.equal(

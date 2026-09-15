@@ -159,3 +159,50 @@ test('StepList показывает точную ACP-пару Kimi внутри 
     ['const value = 2;'],
   );
 });
+
+test('StepList читает сохранённый до нормализации add/delete Codex как файл целиком', async (t) => {
+  const wrapper = await mountSteps(t, [{
+    k: 'tool',
+    id: 'codex-file-change-raw',
+    name: 'Edit',
+    title: '2 файлов',
+    changes: [
+      // Ленты до сентября 2026 хранят в `diff` созданного файла его текст без знаков строк.
+      { path: 'make-report.py', kind: 'add', diff: 'import json\n\ndef main():\n    pass\n' },
+      { path: 'legacy.py', kind: 'delete', diff: 'x = 1\n' },
+    ],
+  }]);
+
+  assert.equal(wrapper.get('.stat').text(), '+4 −1');
+  await wrapper.get('.head').trigger('click');
+  assert.deepEqual(
+    wrapper.findAll('.change .dcell.add').map((cell) => cell.text()),
+    ['import json', '', 'def main():', 'pass'],
+  );
+  assert.deepEqual(
+    wrapper.findAll('.change .dcell.del').map((cell) => cell.text()),
+    ['x = 1'],
+  );
+  assert.equal(wrapper.findAll('.change .dcell.ctx').length, 0, 'у файла целиком нет контекста');
+});
+
+test('StepList показывает серверный разрыв patch строкой, а не склеивает половины', async (t) => {
+  const wrapper = await mountSteps(t, [{
+    k: 'tool',
+    id: 'codex-file-change-cut',
+    name: 'Edit',
+    title: 'big.py',
+    changes: [{
+      path: 'big.py',
+      kind: 'add',
+      diff: '@@ -0,0 +1,300 @@\n+import json\n+head = 1\n… сокращено …\nail_tail = 2\n+tail = 3\n',
+    }],
+  }]);
+
+  assert.equal(wrapper.get('.stat').text(), '+3 −0');
+  await wrapper.get('.head').trigger('click');
+  assert.deepEqual(
+    wrapper.findAll('.change .drow').map((row) => row.get('.dcell:last-child').text()),
+    ['import json', 'head = 1', '… сокращено …', 'tail = 3'],
+  );
+});

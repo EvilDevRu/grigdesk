@@ -479,7 +479,7 @@ function timingNarrationOps(service, root, {
     voices,
     previewDir: path.join(root, 'previews'),
     stressDictionary: { entries: () => stressEntries },
-    withFreshness: (project) => project,
+    publish: (project) => project,
   });
 
   return { calls, inputs, ops };

@@ -72,7 +72,8 @@
 [остановки на человеке](docs/cockpit/guide/gates.md),
 [плагин докера](docs/cockpit/guide/docker.md),
 [раздел песочниц](docs/cockpit/guide/sandboxes.md),
-[раздел презентаций](docs/cockpit/guide/showcase.md). Выясненное про продукт кладут туда, а не
+[раздел презентаций](docs/cockpit/guide/showcase.md),
+[прогноз лимитов](docs/cockpit/guide/usage-forecast.md). Выясненное про продукт кладут туда, а не
 в базу; в базу — опыт этой установки.
 
 @CLAUDE.local.md

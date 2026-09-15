@@ -212,62 +212,141 @@ export async function calibrateVideoTiming(
     return unavailable('Не удалось сопоставить кадры и PTS исходной записи.');
   }
 
-  const orderedSamples = [...head, ...tail];
-  const observations: Array<{
+  type Observation = {
     sample: CalibrationMarkerSample;
     ptsMs: number;
     firstFrame: number;
     lastFrame: number;
-  }> = [];
-  let cursor = 0;
-
-  for (const sample of orderedSamples) {
-    let found = -1;
-
-    for (let index = cursor; index + 1 < colors.length; index += 1) {
-      if (
-        colorDistance(colors[index] as [number, number, number], sample.rgb) <= MARKER_COLOR_DISTANCE
-        && colorDistance(colors[index + 1] as [number, number, number], sample.rgb)
-          <= MARKER_COLOR_DISTANCE
-      ) {
-        found = index;
-        break;
-      }
-    }
-
-    if (found < 0) {
-      return unavailable(`В видео не найдена отметка ${sample.phase}:${sample.sequence}.`);
-    }
-
-    let lastFrame = found + 1;
-
-    while (
-      lastFrame + 1 < colors.length
-      && colorDistance(colors[lastFrame + 1] as [number, number, number], sample.rgb)
-        <= MARKER_COLOR_DISTANCE
-    ) {
-      lastFrame += 1;
-    }
-
-    const firstPtsMs = (frames[found] as VideoFramePoint).ptsMs;
-    const previousPtsMs = found > 0
-      ? (frames[found - 1] as VideoFramePoint).ptsMs
+  };
+  const matches = (index: number, sample: CalibrationMarkerSample) => (
+    index >= 0
+    && index < colors.length
+    && colorDistance(colors[index] as [number, number, number], sample.rgb) <= MARKER_COLOR_DISTANCE
+  );
+  const observationOf = (
+    sample: CalibrationMarkerSample,
+    firstFrame: number,
+    lastFrame: number,
+  ): Observation => {
+    const firstPtsMs = (frames[firstFrame] as VideoFramePoint).ptsMs;
+    const previousPtsMs = firstFrame > 0
+      ? (frames[firstFrame - 1] as VideoFramePoint).ptsMs
       : firstPtsMs;
 
-    observations.push({
+    return {
       sample,
       // Переключение лежит между последним старым и первым новым кадром. Середина
       // этого интервала не вносит систематический сдвиг на целый frame duration.
       ptsMs: (previousPtsMs + firstPtsMs) / 2,
-      firstFrame: found,
+      firstFrame,
       lastFrame,
-    });
+    };
+  };
+
+  // Хвост ищется С КОНЦА записи, голова — с начала и только до хвоста. Раньше обе
+  // серии искались одним проходом вперёд, и когда guard головы не попадал в запись
+  // (первые кадры контекста screencast отдаёт с задержкой), поиск уходил к
+  // одноимённому цвету ХВОСТА: отметки хвоста доставались голове, а самому хвосту
+  // не оставалось ничего — «В видео не найдена отметка tail:0» примерно у каждой
+  // десятой цепочки, при исправной записи. Guard (первый цвет серии) будит
+  // compositor и в регрессию не входит: он берётся только как кадры, вплотную
+  // предшествующие второму цвету, — сколько бы их ни было, хоть один, хоть ни одного.
+  const runEndingAt = (sample: CalibrationMarkerSample, lastFrame: number): Observation => {
+    let firstFrame = lastFrame;
+
+    while (matches(firstFrame - 1, sample)) {
+      firstFrame -= 1;
+    }
+
+    return observationOf(sample, firstFrame, lastFrame);
+  };
+  const guardBefore = (sample: CalibrationMarkerSample, index: number): Observation | null => (
+    matches(index - 1, sample) ? runEndingAt(sample, index - 1) : null
+  );
+  const tailFound: Observation[] = [];
+  let end = colors.length;
+
+  for (const sample of [...tail].reverse()) {
+    if (sample.sequence === 0) {
+      const guard = guardBefore(sample, end);
+
+      if (guard) {
+        tailFound.unshift(guard);
+        end = guard.firstFrame;
+      }
+
+      continue;
+    }
+
+    let lastFrame = -1;
+
+    for (let index = end - 1; index > 0; index -= 1) {
+      if (matches(index, sample) && matches(index - 1, sample)) {
+        lastFrame = index;
+        break;
+      }
+    }
+
+    if (lastFrame < 0) {
+      return unavailable(`В видео не найдена отметка ${sample.phase}:${sample.sequence}.`);
+    }
+
+    const run = runEndingAt(sample, lastFrame);
+
+    tailFound.unshift(run);
+    end = run.firstFrame;
+  }
+
+  const headFound: Observation[] = [];
+  let cursor = 0;
+
+  for (const sample of head) {
+    if (sample.sequence === 0) {
+      continue;
+    }
+
+    let firstFrame = -1;
+
+    for (let index = cursor; index + 1 < end; index += 1) {
+      if (matches(index, sample) && matches(index + 1, sample)) {
+        firstFrame = index;
+        break;
+      }
+    }
+
+    if (firstFrame < 0) {
+      return unavailable(`В видео не найдена отметка ${sample.phase}:${sample.sequence}.`);
+    }
+
+    let lastFrame = firstFrame;
+
+    while (lastFrame + 1 < end && matches(lastFrame + 1, sample)) {
+      lastFrame += 1;
+    }
+
+    if (headFound.length === 0) {
+      const guardSample = head.find((item) => item.sequence === 0);
+      const guard = guardSample ? guardBefore(guardSample, firstFrame) : null;
+
+      if (guard) {
+        headFound.push(guard);
+      }
+    }
+
+    headFound.push(observationOf(sample, firstFrame, lastFrame));
     cursor = lastFrame + 1;
   }
 
+  const observations: Observation[] = [...headFound, ...tailFound];
+
   // Первый цвет каждой серии будит/перекрывает compositor и не имеет наблюдаемого
   // предыдущего marker state. Он нужен как guard frame, но не как точка регрессии.
-  const fittedObservations = observations.filter((entry) => entry.sample.sequence > 0);
+  // Цвет, которым запись НАЧИНАЕТСЯ, тоже не точка: его переключение случилось до
+  // первого кадра, и «середина интервала» здесь — просто старт видео, на десятки
+  // миллисекунд позже правды; такая точка одна вытягивала погрешность за предел.
+  const fittedObservations = observations.filter((entry) => (
+    entry.sample.sequence > 0 && entry.firstFrame > 0
+  ));
   const origin = fittedObservations[0]?.sample.browserMonoMs;
 
   if (!finite(origin as number)) {

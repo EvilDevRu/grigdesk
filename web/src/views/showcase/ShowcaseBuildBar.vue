@@ -209,10 +209,30 @@ const progressValue = computed(() => (
   activeJob.value?.progress.total ? activeJob.value.progress.index : stageProgress.value
 ));
 
+// Момент рождения нынешнего сценария: «Разобрать заново» заменяет сцены целиком и
+// записывает решение о сценарии. Остановка или отказ, случившиеся раньше, относятся
+// к прежним сценам — их карточка читалась как новая ошибка сразу после разбора.
+const scenarioSince = computed(() => (
+  props.project.decisions
+    .filter((item) => item.kind === 'script')
+    .map((item) => item.decidedAt)
+    .sort()
+    .at(-1) ?? ''
+));
+
+const beforeScenario = (startedAt: string): boolean => (
+  Boolean(scenarioSince.value) && startedAt < scenarioSince.value
+);
+
 const runProblem = computed(() => {
   const run = props.buildRun;
 
-  if (!run || run.state === 'succeeded' || ACTIVE_RUN_STATES.has(run.state)) {
+  if (
+    !run
+    || run.state === 'succeeded'
+    || ACTIVE_RUN_STATES.has(run.state)
+    || beforeScenario(run.startedAt)
+  ) {
     return null;
   }
 
@@ -237,6 +257,7 @@ const runProblem = computed(() => {
 
 const latestJobFailure = computed(() => {
   const latest = [...props.jobs]
+    .filter((job) => !beforeScenario(job.startedAt))
     .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
 
   return latest && (latest.state === 'failed' || latest.state === 'interrupted') ? latest : null;

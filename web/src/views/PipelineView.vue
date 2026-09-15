@@ -2759,8 +2759,7 @@ function cardState(g) {
 .pnum { font-size: 12px; color: var(--ink-mid); flex: none; }
 .pw { font-size: 12px; color: var(--ink); flex: none; }
 
-.gwrap { overflow-x: auto; margin: 8px 0; }
-.gwrap :deep(svg.graph) { min-width: 1160px; }
+.gwrap { min-width: 0; margin: 8px 0; }
 
 .strip { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-mid);
   border-top: 1px solid var(--line); padding-top: 10px; }

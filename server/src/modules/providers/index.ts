@@ -476,17 +476,30 @@ async function providersModule(
   // ловил отказ по частоте у живого аккаунта.
 
   /**
-   * Один тик. Пустой зал вендора не тревожит: без окон на потоке снимок никому не нужен,
-   * а первое открывшееся окно перечитает его само. Снимок моложе половины периода тоже
-   * не перечитывается — его только что принёс запрос окна, второй поход подряд лишний.
+   * Перечитать лимиты, если снимок устарел, и разослать его. Снимок моложе половины
+   * периода не перечитывается — его только что принёс запрос окна, второй поход подряд
+   * лишний. Наружу отдаётся декоратором `refreshProvidersUsage`: фоновый потребитель
+   * (прогноз лимитов) зовёт его своим редким таймером, когда окон нет, — снимок уходит
+   * тем же событием, и второго пути к вендору не появляется.
    */
-  async function tickUsage(): Promise<void> {
-    if (!(fastify.sse?.clientCount?.() ?? 0)) return;
+  async function refreshUsageIfStale(): Promise<void> {
     if (usageCache.ageMs() < usageTickMs / 2) return;
 
     const usage = await usageCache.refresh();
 
     fastify.sse?.broadcast?.('providers-usage', { usage });
+  }
+
+  fastify.decorate('refreshProvidersUsage', refreshUsageIfStale);
+
+  /**
+   * Один тик. Пустой зал вендора не тревожит: без окон на потоке снимок никому не нужен,
+   * а первое открывшееся окно перечитает его само.
+   */
+  async function tickUsage(): Promise<void> {
+    if (!(fastify.sse?.clientCount?.() ?? 0)) return;
+
+    await refreshUsageIfStale();
   }
 
   const usageTimer = setInterval(() => {
