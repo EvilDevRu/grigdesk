@@ -392,18 +392,25 @@ assert_eq "" "$not_rewound" \
 
 # --- Host-side evidence hook может отклонить красивый done от runner'а ---
 EVIDENCE_HOOK_LOG="$TEST_ROOT/evidence-hook.log"
+EVIDENCE_RUNS_LOG="$TEST_ROOT/evidence-runs.log"
+EVIDENCE_REASON='fixture-guard: manifest нельзя полностью выполнить: frontend:tests/unit/x.test.mjs'
 profile_route_node_evidence_check() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >>"$EVIDENCE_HOOK_LOG"
-  [[ "$4" != BUILD ]] || return 78
+  [[ "$4" == BUILD ]] || return 0
+  # Диагноз сторожа — последней строкой stderr, как у профильных скриптов.
+  printf 'fixture-guard: подробности выше\n%s\n' "$EVIDENCE_REASON" >&2
+  return 78
 }
 run_agent() {
   local task=$1 prompt=$2 stage=$3 file
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
+  printf '%s\t%s\t%s\t%s\n' "$stage" "${FACTORY_STAGE_RETRY:-}" \
+    "${FACTORY_STAGE_RETRY_REASON:-}" "${FACTORY_STAGE_RETRY_NOTE:-}" >>"$EVIDENCE_RUNS_LOG"
   file=$(run_state_active_file "$task" "$stage") || return
   _run_state_write \
     "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-    committed done
+    committed done 'всё готово'
 }
 
 ATTEMPT_STATE_ID_OVERRIDE=a_90059005900590059005900590059005
@@ -429,6 +436,23 @@ assert_eq failed "$(json_field "$evidence_stopped" lastCommit outcome)" \
 evidence_prefix="${evidence_task}"$'\ttrivial\tbuild\tBUILD\tdone'
 assert_contains "$(cat "$EVIDENCE_HOOK_LOG")" "$evidence_prefix" \
   "hook receives task, route, node, runKey, runner result and exact runId"
+# Отказ сторожа — не слепой retry и не сразу человек: один повтор с цитатой причины
+# (t8702: агент устранил бы лишнюю строку manifest сам), и только второй отказ подряд
+# останавливает маршрут. Причина при этом переезжает в реестр поверх победного отчёта.
+assert_eq 2 "$(grep -c $'\tBUILD\tdone' "$EVIDENCE_HOOK_LOG")" \
+  "rejected evidence is re-checked exactly once more before stopping"
+assert_eq $'BUILD\t1\t\t' "$(grep '^BUILD' "$EVIDENCE_RUNS_LOG" | sed -n '1p')" \
+  "first BUILD run is a plain initial run"
+assert_eq $'BUILD\t2\tevidence-rejected\t'"$EVIDENCE_REASON" \
+  "$(grep '^BUILD' "$EVIDENCE_RUNS_LOG" | sed -n '2p')" \
+  "second BUILD run is an evidence retry quoting the guard's last line"
+assert_eq 2 "$(grep -c '^BUILD' "$EVIDENCE_RUNS_LOG")" \
+  "evidence retry budget is one: no third run without a human"
+assert_eq failed "$(pipeline_store_get "$evidence_task" BUILD)" \
+  "registry shows the trusted failed, not the runner's done"
+assert_eq "сторож отверг сдачу — $EVIDENCE_REASON" \
+  "$(pipeline_store_get "$evidence_task" BUILD_COMMENT)" \
+  "registry comment carries the guard reason for the stop card"
 
 # --- Полный no-ship lifecycle: mandatory verify/triage, reject и approve ворот ---
 unset -f profile_route_node_evidence_check

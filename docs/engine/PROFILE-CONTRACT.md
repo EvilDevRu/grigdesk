@@ -128,6 +128,7 @@ Topology и prompt-файлы не задаются shell-массивами и�
 | `profile_timeout_class <CLASS>` | переопределить секунды класса времени из бандла маршрута |
 | `profile_stage_agent_allow <RUN_KEY>` | добавить узкому route-узлу project command |
 | `profile_route_node_evidence_check ...` | trusted-проверка evidence exact run и снимок его артефактов |
+| `profile_stage_result_check <TASK> <RUN_KEY>` | путь исполняемой предпроверки сдачи, которую `stage-result.sh` зовёт до записи `done/skipped` |
 | `profile_route_volatile_paths <TASK>` | runtime-пути проверочного инструментария, которые сторож `state-only` терпит |
 | `profile_agent_control_start <TASK> <RUN_KEY>` / `profile_agent_control_stop <TASK> <RUN_KEY> <RC>` | краткоживущий project control channel для exact stage |
 
@@ -463,12 +464,30 @@ trusted runtime выводят ключ ворот/статуса из этой 
 Профиль может объявить `profile_route_node_evidence_check TASK ROUTE NODE RUN_KEY OUTCOME
 RUN_ID CONTEXT_FILE`. Диспетчер вызывает его после runner и `state-only` guard для точного
 `runId`; последний аргумент — owner-only typed context именно этого запуска. Ненулевой
-результат превращает заявленный runner-ом `done/skipped` в продуктовый `failed`, чтобы переход
-машины остановил недоказанный результат у человека, а не ретраил его как no-result.
+результат превращает заявленный runner-ом `done/skipped` в продуктовый `failed`: как no-result
+он не ретраится. Последняя непустая строка вывода hook считается причиной отказа: узел
+получает ОДИН повтор (вне бюджета `productFailure`), в промпте которого причина процитирована
+дословно — так агент сам чинит сдачу, которую хост не принял (лишняя строка manifest, не тот
+охват). Второй отказ подряд останавливает маршрут переходом `failed` у человека; причина при
+этом переезжает в `<RUN_KEY>_COMMENT` реестра поверх отчёта агента и в строку остановки
+журнала стадий (`маршрут остановлен: human — сторож отверг сдачу — …`), чтобы карточка
+кокпита называла её, а не отсылала к победному комментарию узла. Пиши диагноз последней
+строкой одной фразой: она едет в промпт и на карточку без обработки.
 Доверенные снимки такого hook должны лежать внутри `ROUTE_V2_ATTEMPT_DIR`/`FACTORY_CONTROL_ROOT`;
 копия в provider-writable `STATE_DIR` может использоваться для отчёта и UI, но не как источник
 истины следующей проверки. Проверка обязана связывать снимок с точным `runId` и не засчитывать
 команду декларации evidence как чтение проверяемого исходника.
+
+Той же проверке место и ДО сдачи: `profile_stage_result_check TASK RUN_KEY` печатает путь
+исполняемого файла профиля (или ничего), движок отдаёт его агенту переменной
+`FACTORY_STAGE_RESULT_CHECK`, а `stage-result.sh` зовёт файл с аргументами `TASK RUN_KEY RESULT`
+перед записью `done/skipped` (`failed` не проверяется). Ненулевой код — сдача отклонена: причина
+из вывода файла показывается агенту, результат не записывается, агент правит и сдаёт снова в
+том же заходе. Это не сторож, а его ранняя копия в руках агента: файл исполняется в оболочке
+runner-а без хуков профиля и typed context, поэтому worktree и артефакты он находит сам по
+`TASK`; недоступный файл сдачу не блокирует — доверенная проверка после runner-а остаётся
+источником истины. Так закрыт живой случай: manifest тестов с FE unit-тестом, который VERIFY
+не исполняет, отклонялся только post-mortem, и причину человек носил агенту сам.
 
 Для `executor=command` профиль объявляет доверенный hook:
 
@@ -481,6 +500,10 @@ profile_route_command TASK ROUTE NODE RUN_KEY COMMAND_ID CONTEXT_FILE
 исполняет содержимое bundle через shell. Command-узел объявляет `fanout: single/1/forbid`,
 нулевые `noResult`/`productFailure`/`providerFailure.attempts` и стратегию `none`. Допустимы
 `state-only` и `workspace-write`; для проверок предпочтителен `state-only` со сторожем.
+Проверка по diff обязана кормить инструменты только СУЩЕСТВУЮЩИМИ файлами: `git diff
+--name-only HEAD` отдаёт и удалённые, а линтер или `php -l` на отсутствующем пути не «чист»,
+а падает кодом инструмента — узел уходит к человеку с владельцем `environment` при живом
+стенде. Либо `--diff-filter=ACMRT`, либо проверка `is_file()` перед вызовом.
 
 Hook пишет в stdout ровно один JSON-объект:
 

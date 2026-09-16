@@ -2591,7 +2591,7 @@ v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
   local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node
-  local stop_reason deferred_file deferred_count terminal_file
+  local stop_reason stop_suffix deferred_file deferred_count terminal_file
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
   trap 'v2_on_signal TERM' TERM
@@ -2956,10 +2956,17 @@ v2_main() {
         # и ветка выше, но отсутствие имени здесь не отказ: терять остановку из-за
         # неназванного узла дороже, чем показать её без него.
         stop_node=$(json_value lastCommit.node <<<"$cursor" 2>/dev/null) || stop_node=""
+        # Отказ evidence-хука — единственный `human`, у которого причина есть и лежит
+        # не в вердикте агента (тот отчитался done), а у runtime узла. Кокпит читает
+        # причину остановки из ПОСЛЕДНЕЙ строки окна, поэтому она едет в самой строке
+        # остановки, а не строкой выше, где её перекрыла бы общая формулировка.
+        stop_suffix=""
+        [[ -z "${ROUTE_V2_EVIDENCE_STOP_REASON:-}" ]] ||
+          stop_suffix=" — $ROUTE_V2_EVIDENCE_STOP_REASON"
         if [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]]; then
-          v2_log "${stop_node^^}: маршрут остановлен: $stop"
+          v2_log "${stop_node^^}: маршрут остановлен: ${stop}${stop_suffix}"
         else
-          v2_log "маршрут остановлен: $stop"
+          v2_log "маршрут остановлен: ${stop}${stop_suffix}"
         fi
       fi
       return 0

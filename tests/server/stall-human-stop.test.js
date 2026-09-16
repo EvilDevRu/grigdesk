@@ -87,9 +87,14 @@ test('формат строки движка и правило кокпита с
   const factory = await fs.readFile(path.join(root, 'engine', 'bin', 'factory'), 'utf8');
 
   assert.equal(
-    factory.includes('v2_log "${stop_node^^}: маршрут остановлен: $stop"'),
+    factory.includes('v2_log "${stop_node^^}: маршрут остановлен: ${stop}${stop_suffix}"'),
     true,
     'движок больше не пишет узел в строке остановки — правило в stall.js осталось без источника',
+  );
+  assert.equal(
+    factory.includes('stop_suffix=" — $ROUTE_V2_EVIDENCE_STOP_REASON"'),
+    true,
+    'движок больше не дописывает причину сторожа в строку остановки — правило про сторожа осталось без источника',
   );
 
   const stall = detectStall({
@@ -99,4 +104,30 @@ test('формат строки движка и правило кокпита с
   });
 
   assert.equal(stall.stop, 'human');
+});
+
+// Агент сдал `done`, а хостовый сторож доказательств сдачу отверг: остановка та же `human`,
+// но совет «прочитай замечание узла» здесь вреден — замечание агента рапортует об успехе.
+// Причину движок кладёт в саму строку остановки (t8702: в manifest тестов попал файл,
+// который VERIFY не исполняет; человек собирал это по route-v2.log).
+test('отказ сторожа в строке остановки попадает в заголовок карточки', () => {
+  const reason = 'feature-verify snapshot: manifest нельзя полностью выполнить: '
+    + 'frontend:tests/unit/projects/volumeDeviceToggles.test.mjs';
+  const stall = detectStall({
+    registry: { ...stalledRegistry, TESTS_COMMENT: `сторож отверг сдачу — ${reason}` },
+    logText: logOf(
+      line('2026-09-16 15:08:11', 'узел tests: подготовка к исполнению'),
+      line('2026-09-16 15:26:38', `TESTS: сторож отверг сдачу — ${reason}; повтор с её цитатой`),
+      line('2026-09-16 15:44:02', `TESTS: сторож отверг сдачу — ${reason}; повтор не помог`),
+      line('2026-09-16 15:44:03', `TESTS: маршрут остановлен: human — сторож отверг сдачу — ${reason}`),
+    ),
+    daemonAlive: false,
+  });
+
+  assert.equal(stall.stop, 'human');
+  assert.equal(stall.stage, 'TESTS');
+  assert.equal(stall.title, `TESTS: сторож отверг сдачу — ${reason}`);
+  assert.equal(stall.hint.includes('перейти сюда'), true);
+  assert.equal(stall.hint.includes('замечание'), false);
+  assert.equal(stall.comment.startsWith('сторож отверг сдачу'), true);
 });

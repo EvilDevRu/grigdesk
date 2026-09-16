@@ -934,6 +934,29 @@ if isinstance(records, list) and records:
 ' "$context_file" "$section" 2>/dev/null || return 0
 }
 
+# Причина отказа evidence-хука — его последняя непустая строка: профильные сторожа печатают
+# диагноз одной строкой в самом конце (feature-verify, hunt-evidence). Текст поедет в промпт
+# повтора, в реестр и в журнал стадий, поэтому здесь он приводится к одной строке без
+# управляющих символов и с потолком длины: те же требования, что у comment вердикта.
+# Ошибка разбора даёт пустую строку — отсутствие формулировки не отменяет самого отказа.
+_route_v2_evidence_reason() {
+  printf '%s' "${1:-}" | python3 -c '
+import sys
+
+text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+lines = [line.strip() for line in text.splitlines() if line.strip()]
+if not lines:
+    raise SystemExit(0)
+reason = "".join(
+    char if ord(char) >= 32 and ord(char) != 127 else " " for char in lines[-1]
+)
+reason = " ".join(reason.split())
+if len(reason) > 500:
+    reason = reason[:499] + "…"
+sys.stdout.buffer.write(reason.encode("utf-8"))
+' 2>/dev/null || true
+}
+
 _route_v2_run_agent_node() {
   local task=$1 attempt=$2 node=$3 run_key=$4 policy=$5 sequence=$6
   local _r2_context_file _r2_prompt_file active before_signature after_signature
@@ -944,6 +967,10 @@ _route_v2_run_agent_node() {
   ROUTE_V2_NO_RESULT=0
   ROUTE_V2_NODE_VERDICT_B64=""
   ROUTE_V2_FINAL_RUN_ID=""
+  # Флаг отказа сторожа обнуляется на входе, а не только перед самой проверкой: заход,
+  # оборвавшийся раньше неё, не должен унаследовать отказ предыдущего.
+  ROUTE_V2_EVIDENCE_REJECTED=0
+  ROUTE_V2_EVIDENCE_REASON=""
   declare -F run_agent >/dev/null || _route_v2_fail "run_agent is unavailable" || return
   declare -F route_v2_context_for_node >/dev/null ||
     _route_v2_fail "route_v2_context_for_node hook is missing" || return
@@ -1030,6 +1057,7 @@ _route_v2_run_agent_node() {
   FACTORY_ROUTE_FANOUT_DEGRADE="${ROUTE_V2_NODE_FANOUT_DEGRADE:-forbid}" \
   FACTORY_STAGE_RETRY="${ROUTE_V2_NODE_RETRY:-1}" \
   FACTORY_STAGE_RETRY_REASON="${ROUTE_V2_NODE_RETRY_REASON:-}" \
+  FACTORY_STAGE_RETRY_NOTE="${ROUTE_V2_NODE_RETRY_NOTE:-}" \
   FACTORY_STAGE_HUMAN_NOTE="${ROUTE_V2_NODE_HUMAN_NOTE:-}" \
   FACTORY_STAGE_OPEN_FINDINGS="$_r2_open_findings" \
   FACTORY_STAGE_DEFERRED_FINDINGS="$_r2_deferred_findings" \
@@ -1115,19 +1143,28 @@ _route_v2_run_agent_node() {
   # (hunt: declared coverage против tool-use events). Проверка исполняется хостом
   # после readonly guard и не зависит от того, вызвал ли её агент в промпте.
   if declare -F profile_route_node_evidence_check >/dev/null; then
-    profile_route_node_evidence_check \
+    local evidence_output evidence_rc
+    # Вывод хука по-прежнему уезжает в route-v2.log, но через переменную: его последняя
+    # строка — единственная формулировка причины отказа, и она нужна не только журналу,
+    # а повторному заходу агента и карточке остановки у человека.
+    evidence_output=$(profile_route_node_evidence_check \
       "$task" "$ROUTE_V2_ROUTE" "$node" "$run_key" "$result" "$run_id" \
-      "$_r2_context_file" \
-      >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
-    local evidence_rc=$?
+      "$_r2_context_file" 2>&1)
+    evidence_rc=$?
+    [[ -z "$evidence_output" ]] ||
+      printf '%s\n' "$evidence_output" >>"$STATE_DIR/logs/t${task}.route-v2.log"
     if (( evidence_rc != 0 )); then
       printf 'route-v2 runtime: %s evidence rejected runner result (rc=%s)\n' \
         "$run_key" "$evidence_rc" \
         >>"$STATE_DIR/logs/t${task}.route-v2.log"
-      # Это продуктовый failed, а не no-result: retry не создаст отсутствующее
-      # доказательство задним числом, а переход маршрута обязан позвать человека.
+      # Это продуктовый failed, а не no-result: слепой retry не создаст отсутствующее
+      # доказательство задним числом. Но причина отказа — текст, который агент способен
+      # устранить сам (t8702: в manifest тестов попал файл, который VERIFY не исполняет),
+      # поэтому цикл узла даёт один повтор с её цитатой и лишь потом зовёт человека.
       result=failed
       verdict_b64=""
+      ROUTE_V2_EVIDENCE_REJECTED=1
+      ROUTE_V2_EVIDENCE_REASON=$(_route_v2_evidence_reason "$evidence_output")
     fi
   fi
   rm -f -- "$_r2_context_file" "$_r2_prompt_file"
@@ -1857,7 +1894,7 @@ route_v2_dispatch_next() {
   # только в пределах productFailure-бюджета.
   # Номер захода и причина повтора уезжают агенту: повтор, не знающий о следах
   # предыдущего захода, переделывает работу с нуля.
-  local outcome="" cleanup_rc attempt_no=1 retry_reason="" verdict_b64=""
+  local outcome="" cleanup_rc attempt_no=1 retry_reason="" retry_note="" verdict_b64=""
   local hard_rewind_limit=2 no_progress_limit=0
   # Суммарный предохранитель по target за попытку: per-arc лимиты не ловят
   # чередование дуг в один узел (на 8162 в build шесть раз возвращал review и
@@ -1865,6 +1902,13 @@ route_v2_dispatch_next() {
   local target_rewind_budget=10
   local tries_left=$(( 1 + retry_no_result + provider_attempts ))
   local product_left=$retry_product
+  # Отказ evidence-хука хоста — отдельный бюджет, не зависящий от productFailure бандла:
+  # агент отчитался done, а хост не принял доказательства. Один повтор с цитатой причины
+  # чинит ровно такие сдачи (t8702: лишний файл в manifest тестов); второй отказ подряд
+  # значит, что цитаты агенту не хватило, и решает уже человек. Причина последнего отказа
+  # уходит в реестр и в журнал стадий, чтобы человек не собирал её по route-v2.log.
+  local evidence_left=1
+  ROUTE_V2_EVIDENCE_STOP_REASON=""
   # Указание человека при возврате курсора сюда. Читаем ОДИН раз на вход в узел, а не
   # на каждый заход: журнал за время узла не меняется, а каждое чтение — обход всех
   # событий попытки под локом. Держится до коммита узла, поэтому повторы его тоже видят.
@@ -1911,10 +1955,12 @@ route_v2_dispatch_next() {
       case "$retry_reason" in
         '') execution_reason=initial ;;
         no-result) execution_reason=no_result ;;
-        failed) execution_reason=product_failure ;;
+        # Отказ сторожа для lifecycle — тот же продуктовый отказ: словарь причин
+        # исполнения закреплён аналитикой, а различие живёт в цитате промпта.
+        failed|evidence-rejected) execution_reason=product_failure ;;
         *) execution_reason=manual_resume ;;
       esac
-      retry_before=$((tries_left + product_left - 1))
+      retry_before=$((tries_left + product_left + evidence_left - 1))
       (( retry_before >= 0 )) || retry_before=0
       runtime_lifecycle_node_execution_begin_v2 agent "$((attempt_no - 1))" \
         "$retry_before" "$execution_reason" >/dev/null || {
@@ -1931,6 +1977,7 @@ route_v2_dispatch_next() {
       ROUTE_V2_NODE_FANOUT_DEGRADE="$fanout_degrade" \
       ROUTE_V2_NODE_RETRY="$attempt_no" \
       ROUTE_V2_NODE_HUMAN_NOTE="$human_note" \
+      ROUTE_V2_NODE_RETRY_NOTE="$retry_note" \
       ROUTE_V2_NODE_RETRY_REASON="$retry_reason" _route_v2_run_agent_node \
         "$task" "$attempt" "$node" "$run_key" "$policy" "$sequence"
       rc=$?
@@ -1987,6 +2034,33 @@ route_v2_dispatch_next() {
             interrupted unavailable attempt_interrupted '' '' >/dev/null || true
           return "$rc"
         }
+      if [[ "$ROUTE_V2_NODE_RESULT" == failed && "${ROUTE_V2_EVIDENCE_REJECTED:-0}" == 1 ]]; then
+        # Отказ сторожа не тратит productFailure-бюджет бандла: тот повтор идёт без
+        # цитаты причины и был бы слепым — ровно тем, чего сторож не лечит.
+        if (( evidence_left > 0 )); then
+          route_v2_cleanup_active_instrumentation "$task" "$attempt"
+          cleanup_rc=$?
+          (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+            runtime_lifecycle_node_visit_finish_v2 \
+              interrupted cleanup_failed attempt_interrupted '' '' >/dev/null || true
+            return "$cleanup_rc"
+          }
+          evidence_left=$(( evidence_left - 1 ))
+          attempt_no=$(( attempt_no + 1 ))
+          retry_reason=evidence-rejected
+          retry_note=${ROUTE_V2_EVIDENCE_REASON:-}
+          declare -F v2_log >/dev/null &&
+            v2_log "${run_key}: сторож отверг сдачу — ${retry_note:-причина не названа}; повтор с её цитатой"
+        else
+          ROUTE_V2_EVIDENCE_STOP_REASON="сторож отверг сдачу — ${ROUTE_V2_EVIDENCE_REASON:-причина не названа}"
+          declare -F v2_log >/dev/null &&
+            v2_log "${run_key}: ${ROUTE_V2_EVIDENCE_STOP_REASON}; повтор не помог"
+          outcome=$ROUTE_V2_NODE_RESULT
+          verdict_b64=${ROUTE_V2_NODE_VERDICT_B64:-}
+          break
+        fi
+        continue
+      fi
       if [[ "$ROUTE_V2_NODE_RESULT" == failed ]] && (( product_left > 0 )); then
         route_v2_cleanup_active_instrumentation "$task" "$attempt"
         cleanup_rc=$?
@@ -2004,6 +2078,24 @@ route_v2_dispatch_next() {
       verdict_b64=${ROUTE_V2_NODE_VERDICT_B64:-}
       break
     done
+  fi
+  # Агент сдал done, сторож отверг и повтор не помог: реестр до этой строки хранит
+  # `done` и победный отчёт агента (их записал stage-result), а маршрут встал. Узел
+  # переводится в failed, причина — в комментарий поверх отчёта: карточка остановки
+  # и модалка узла читают именно его, а не route-v2.log.
+  if [[ "$executor" == agent && "$outcome" == failed && -n "$ROUTE_V2_EVIDENCE_STOP_REASON" ]]; then
+    local agent_comment
+    agent_comment=$(pipeline_store_get "$task" "${run_key}_COMMENT" 2>/dev/null) || agent_comment=""
+    run_state_control_update \
+      "$task" "$run_key" failed \
+      "${run_key}_COMMENT" \
+      "${ROUTE_V2_EVIDENCE_STOP_REASON}${agent_comment:+ · отчёт агента: $agent_comment}" \
+      || {
+        rc=$?
+        runtime_lifecycle_node_visit_finish_v2 \
+          interrupted conflict attempt_interrupted '' '' >/dev/null || true
+        return "$rc"
+      }
   fi
   if [[ "$executor" == agent && ( "$outcome" == failed || "$outcome" == exhausted ) ]]; then
     route_v2_cleanup_active_instrumentation "$task" "$attempt"

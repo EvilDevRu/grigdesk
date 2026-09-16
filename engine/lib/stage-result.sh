@@ -49,6 +49,29 @@ fi
 
 verdict_b64=$(run_state_verdict_encode "$result" "$failure_owner" "${findings[@]}") || exit
 
+# Предпроверка сдачи профиля — до записи результата, пока агент жив. Хост после
+# раннера проверит то же самое доверенно (evidence-хук), но тогда исправлять уже
+# некому: узел встаёт, а причину носит человек. Здесь та же проверка отдаёт причину
+# прямо в вывод команды, и агент чинит сдачу в том же заходе. Путь назначает движок
+# (`FACTORY_STAGE_RESULT_CHECK`), сам скрипт — профиля; отсутствие или недоступность
+# файла не блокирует сдачу: доверенная проверка всё равно впереди.
+if [[ "$result" != failed && -n "${FACTORY_STAGE_RESULT_CHECK:-}" ]]; then
+  if [[ -f "$FACTORY_STAGE_RESULT_CHECK" && -x "$FACTORY_STAGE_RESULT_CHECK" ]]; then
+    check_output=$("$FACTORY_STAGE_RESULT_CHECK" "$task" "$stage" "$result" 2>&1)
+    check_rc=$?
+    if (( check_rc != 0 )); then
+      printf 'stage-result: сдача %s отклонена предпроверкой профиля (код %s) — результат НЕ записан.\n' \
+        "$result" "$check_rc" >&2
+      [[ -z "$check_output" ]] || printf '%s\n' "$check_output" >&2
+      printf 'Исправь названное и вызови stage-result снова.\n' >&2
+      exit 65
+    fi
+  else
+    printf 'stage-result: предпроверка профиля недоступна (%s) — сдача идёт без неё.\n' \
+      "$FACTORY_STAGE_RESULT_CHECK" >&2
+  fi
+fi
+
 status_fd=${FACTORY_STATUS_FD:-7}
 if [[ "$status_fd" =~ ^[0-9]+$ && -r "/proc/self/fd/$status_fd" ]]; then
   token=$(head -1 "/proc/self/fd/$status_fd") || exit 74
