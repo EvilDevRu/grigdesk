@@ -101,16 +101,21 @@ function project({ empty = false, bindings = true } = {}) {
   };
 }
 
+// Ожидание ограничено временем, а не числом проходов event loop: запись журнала
+// заданий идёт через диск, и под параллельным прогоном сорока файлов сто проходов
+// пролетали раньше, чем возвращалась запись.
 async function waitUntil(check) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + 3000;
+
+  while (Date.now() < deadline) {
     if (check()) {
       return;
     }
 
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 
-  assert.fail('Условие не наступило за 100 проходов event loop.');
+  assert.fail('Условие не наступило за 3 с.');
 }
 
 async function fixture(t, options = {}) {

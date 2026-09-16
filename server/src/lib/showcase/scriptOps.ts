@@ -61,6 +61,16 @@ const TASK_TEXT_MAX = 4000;
 // не успела. Запрос синхронный, человек ждёт на экране — поэтому срок конечен.
 const SCRIPT_MODEL_TIMEOUT_MS = 15 * 60 * 1000;
 
+// Попыток вызова модели на один запрос вместе с первой, когда исполнитель сообщил,
+// что до API не дошёл сам запрос (обрывы соединения, повторы CLI до истечения
+// срока). Сеть до API рвётся сериями по нескольку минут, а не по секунде: сборка
+// идёт без человека, и падать из-за серии — значит показать ему красную ошибку
+// через час. Третья попытка — это уже полчаса недоступной сети: дальше честнее
+// остановиться с названной причиной, чем держать задание до его крайнего срока.
+const MODEL_TRANSPORT_ATTEMPTS = 3;
+// Пауза перед повтором. Повтор без паузы попадает в ту же серию обрывов.
+const MODEL_TRANSPORT_PAUSE_MS = 60 * 1000;
+
 /**
  * Описание задачи приходит размеченным. Модели нужен текст, а не теги, поэтому
  * разметка снимается здесь же: своего HTML-разбора у раздела нет и заводить его
@@ -108,6 +118,8 @@ export interface ScriptOpsDeps {
   executorConfig: (() => Record<string, unknown>) | null;
   providerSettings: (() => Record<string, unknown>) | null;
   acquireTargetLease: (ref: ShowcaseProject['ref']) => Promise<SandboxActivityLease | null>;
+  // Ожидание перед повтором запроса к модели: тесты подменяют его, чтобы не ждать.
+  pause?: (ms: number) => Promise<void>;
   store: ShowcaseStore;
   targets: ShowcaseTargets;
   // Ответ мутации — с живой целью и свежестью сцен, как у чтения; сам снимок цели
@@ -128,6 +140,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
   async function runUntrustedModel(
     prompt: string,
     images: { mediaType: string; data: string }[] = [],
+    onProgress?: (label: string) => Promise<void>,
   ): Promise<string> {
     const resolver = deps.resolveScriptModel;
 
@@ -166,36 +179,63 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     const ref = target.ref as { provider: string; model: string };
     const settings = deps.providerSettings?.() ?? {};
+    const pause = deps.pause ?? ((ms: number) => new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    }));
     let reply: unknown;
 
-    try {
-      reply = await runUntrusted.call(executor, {
-        config,
-        message: prompt,
-        model: ref.model,
-        effort: typeof target.effort === 'string' ? target.effort : undefined,
-        images,
-        providerSettings: (settings[ref.provider] ?? {}) as Record<string, unknown>,
-        timeoutMs: SCRIPT_MODEL_TIMEOUT_MS,
-        log: {},
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        reply = await runUntrusted.call(executor, {
+          config,
+          message: prompt,
+          model: ref.model,
+          effort: typeof target.effort === 'string' ? target.effort : undefined,
+          images,
+          providerSettings: (settings[ref.provider] ?? {}) as Record<string, unknown>,
+          timeoutMs: SCRIPT_MODEL_TIMEOUT_MS,
+          log: {},
+        });
 
-      if ((error as { code?: string })?.code === 'model_rate_limited'
-          || /hit your (?:session|usage) limit/iu.test(message)) {
-        const reset = /resets\s+([^\n]+)/iu.exec(message)?.[1]?.slice(0, 120);
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const code = (error as { code?: string })?.code;
 
-        throw new ShowcaseError(
-          'model_rate_limited',
-          'Выбранная модель сценария исчерпала лимит. '
-            + (reset ? `Сброс по ответу провайдера: ${reset}. ` : '')
-            + 'Повторите сборку после сброса лимита или выберите другую модель в настройках плагина.',
-          429,
+        if (code === 'model_rate_limited' || /hit your (?:session|usage) limit/iu.test(message)) {
+          const reset = /resets\s+([^\n]+)/iu.exec(message)?.[1]?.slice(0, 120);
+
+          throw new ShowcaseError(
+            'model_rate_limited',
+            'Выбранная модель сценария исчерпала лимит. '
+              + (reset ? `Сброс по ответу провайдера: ${reset}. ` : '')
+              + 'Повторите сборку после сброса лимита или выберите другую модель в настройках плагина.',
+            429,
+          );
+        }
+
+        if (code !== 'model_unreachable') {
+          throw error;
+        }
+
+        if (attempt >= MODEL_TRANSPORT_ATTEMPTS) {
+          throw new ShowcaseError(
+            'model_unreachable',
+            `Модель сценария недоступна по сети: ${attempt} попытки подряд не дошли до API `
+              + `(${message}). Повторите сборку, когда сеть восстановится.`,
+            502,
+          );
+        }
+
+        // Отчёт о ходе заодно проверяет, что задание не отменили, пока шёл срок:
+        // отменённая подготовка не должна занимать модель ещё четверть часа.
+        await onProgress?.(`Модель недоступна по сети (${message}). `
+          + `Повтор ${attempt + 1} из ${MODEL_TRANSPORT_ATTEMPTS} через минуту.`);
+        await pause(MODEL_TRANSPORT_PAUSE_MS);
+        await onProgress?.(
+          `Повторяю запрос к модели: попытка ${attempt + 1} из ${MODEL_TRANSPORT_ATTEMPTS}.`,
         );
       }
-
-      throw error;
     }
 
     // Исполнители отдают ответ полем `reply` — тем же, что читают триаж Входящих и
@@ -270,11 +310,11 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     const prompt = buildBriefPrompt(context);
 
     await onProgress?.('Готовлю план по задаче и изменениям на стенде.');
-    const first = await runUntrustedModel(prompt);
+    const first = await runUntrustedModel(prompt, [], onProgress);
     let points = parseBrief(first);
 
     if (!points) {
-      points = parseBrief(await runUntrustedModel(buildRepairPrompt(prompt, first)));
+      points = parseBrief(await runUntrustedModel(buildRepairPrompt(prompt, first), [], onProgress));
     }
 
     if (!points) {
@@ -333,7 +373,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     const prompt = buildScriptPrompt(context, project.brief);
 
     await onProgress?.(keepScenes ? 'Проверяю сохранённый сценарий.' : 'Готовлю действия и текст сцен.');
-    const first = keepScenes ? '' : await runUntrustedModel(prompt);
+    const first = keepScenes ? '' : await runUntrustedModel(prompt, [], onProgress);
     let parsed = keepScenes ? {
       problem: null,
       draft: {
@@ -356,7 +396,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     if (!parsed.draft) {
       parsed = parseScriptReplyResult(
-        await runUntrustedModel(buildRepairPrompt(prompt, first)),
+        await runUntrustedModel(buildRepairPrompt(prompt, first), [], onProgress),
         context.screens,
         context.maxScenes,
       );
@@ -399,7 +439,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
           context,
           brief: project.brief,
           draft,
-          runModel: runUntrustedModel,
+          runModel: (candidate, images) => runUntrustedModel(candidate, images, onProgress),
           onProgress,
           allowRepair: !keepScenes || (!project.scriptProofHash && Boolean(project.scriptMapRevision)),
           rehearse: (candidate, previous) => launchRehearsal({

@@ -5,7 +5,6 @@
 import { defineStore } from 'pinia';
 
 import type {
-  ExternalResetSignal,
   ObservedReset,
   UsageBarForecast,
   UsageForecastSnapshot,
@@ -36,13 +35,6 @@ export const useUsageForecastStore = defineStore('usageForecast', {
       const own = (state.snapshot?.resets ?? []).filter((reset) => reset.providerId === providerId);
 
       return own.find((reset) => reset.origin !== 'scheduled') ?? own[0] ?? null;
-    },
-
-    // Внешний сигнал принадлежит тому исполнителю, которого назвал сам источник.
-    externalOf: (state) => (providerId: string): ExternalResetSignal | null => {
-      const external = state.snapshot?.external ?? null;
-
-      return external && external.providerId === providerId ? external : null;
     },
   },
 

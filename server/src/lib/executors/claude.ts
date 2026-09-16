@@ -1084,6 +1084,43 @@ export function buildClaudeUntrustedInput(message: unknown, images: readonly Unt
   return line;
 }
 
+/**
+ * Повторы запроса к API, которые CLI успел объявить в stream-json. Убитый по сроку
+ * процесс не оставляет result-события, и без этих событий четверть часа тишины
+ * неотличима от медленной модели. Сеть до API рвётся сериями по нескольку минут,
+ * CLI повторяет запрос до десяти раз с растущей паузой и в срок не укладывается —
+ * причина здесь транспорт, а не вход и не модель, и её имеет смысл повторить позже.
+ */
+function claudeApiRetries(stdout: unknown): { count: number; last: string } {
+  let count = 0;
+  let last = '';
+  for (const line of String(stdout || '').split(/\r?\n/u)) {
+    const candidate = line.trim();
+    if (!candidate.startsWith('{')) continue;
+    try {
+      const event = JSON.parse(candidate) as {
+        type?: string;
+        subtype?: string;
+        error?: unknown;
+        error_status?: unknown;
+      } | null;
+      if (event?.type !== 'system' || event.subtype !== 'api_retry') continue;
+      count += 1;
+      const status = Number(event.error_status);
+      const detail = String(event.error ?? '').trim();
+      last = Number.isFinite(status) && status > 0
+        ? `HTTP ${status}${detail && detail !== 'unknown' ? ` ${detail}` : ''}`
+        : detail && detail !== 'unknown' ? detail : 'обрыв соединения';
+    } catch { /* посторонняя строка CLI */ }
+  }
+  return { count, last };
+}
+
+// Текст result-события, которым CLI сообщает, что запрос к API так и не дошёл:
+// исчерпанные повторы после обрывов соединения, а не ответ модели по существу.
+const CLAUDE_TRANSPORT_LOST =
+  /connection to the api was lost|fetch failed|econnreset|etimedout|socket hang up/u;
+
 function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
   let result: {
     result?: unknown;
@@ -1106,6 +1143,14 @@ function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
     } catch { /* посторонняя строка CLI */ }
   }
   if (!result) {
+    const retries = claudeApiRetries(stdout);
+    if (retries.count > 0) {
+      throw untrustedInputError(
+        'model_unreachable',
+        `Claude завершился без результата после ${retries.count} повторов запроса к API `
+          + `(${retries.last}).`,
+      );
+    }
     const detail = String(stderr || '').trim().slice(-600);
     throw untrustedInputError(
       'model_run_failed',
@@ -1114,8 +1159,12 @@ function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
   }
   const reply = typeof result.result === 'string' ? result.result.trim() : '';
   if (result.is_error === true) {
+    const lower = reply.toLowerCase();
     const authFailed = /failed to authenticate|authentication[_\s-]+failed|oauth session expired/u
-      .test(reply.toLowerCase());
+      .test(lower);
+    if (!authFailed && CLAUDE_TRANSPORT_LOST.test(lower)) {
+      throw untrustedInputError('model_unreachable', `Claude не дозвонился до API: ${reply}`);
+    }
     throw untrustedInputError(
       authFailed ? 'model_auth_failed' : 'model_run_failed',
       authFailed
@@ -1176,12 +1225,22 @@ export async function runClaudeUntrusted({
         if (error) {
           // Убитый по сроку процесс не оставляет ни result-события, ни stderr, и
           // прежде выглядел как «завершился без результата» — причина, по которой
-          // человек ничего не может сделать. Срок называется явно.
+          // человек ничего не может сделать. Срок называется явно, а если CLI за
+          // это время повторял запрос к API, называется и транспорт: такой срыв
+          // не про модель, и вызывающий вправе повторить его после паузы.
           if (error.killed && !signal?.aborted) {
-            reject(untrustedInputError(
-              'model_run_failed',
-              `Claude не уложился в ${Math.round(limitMs / 60_000)} мин и остановлен.`,
-            ));
+            const minutes = Math.round(limitMs / 60_000);
+            const retries = claudeApiRetries(stdout);
+            reject(retries.count > 0
+              ? untrustedInputError(
+                'model_unreachable',
+                `Claude не уложился в ${minutes} мин: API не отвечал, CLI повторил запрос `
+                  + `${retries.count} раз (${retries.last}).`,
+              )
+              : untrustedInputError(
+                'model_run_failed',
+                `Claude не уложился в ${minutes} мин и остановлен.`,
+              ));
             return;
           }
           // Claude пишет причину API/авторизации в result-событие stdout и при этом

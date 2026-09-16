@@ -21,7 +21,7 @@ const FORECAST_PLUGIN = {
   nav: null,
   settings: [
     { key: 'providers', label: 'Исполнители', type: 'providers', default: [], hint: 'У остальных блока нет.' },
-    { key: 'externalSignal', label: 'Сигнал codexreset.org', type: 'checkbox', default: true },
+    { key: 'showIdle', label: 'Показывать стоящие полосы', type: 'checkbox', default: true },
   ],
 };
 
@@ -57,7 +57,7 @@ async function makePluginsStore({ settings = FORECAST_PLUGIN.settings, values } 
     ...FORECAST_PLUGIN,
     settings,
     enabled: true,
-    values: values ?? { providers: ['codex'], externalSignal: true },
+    values: values ?? { providers: ['codex'], showIdle: true },
     placements: [{
       slot: 'provider.popover.after-bars',
       label: 'Всплывашка исполнителя в топбаре, под полосами лимитов',
@@ -218,7 +218,7 @@ test('диалог показывает размещения и область, 
 
   assert.deepEqual(saved, [{
     id: 'usage-forecast',
-    values: { providers: ['claude'], externalSignal: true },
+    values: { providers: ['claude'], showIdle: true },
     placements: { 'provider.popover.after-bars': false },
   }]);
   assert.deepEqual(plugin.values.providers, ['claude']);

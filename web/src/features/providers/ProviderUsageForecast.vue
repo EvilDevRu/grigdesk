@@ -3,17 +3,7 @@
     <span class="usage-forecast-title">Прогноз</span>
     <span v-for="row in rows" :key="row.key" class="usage-forecast-row">
       <span class="usage-forecast-head">
-        <!-- Ссылка живёт строкой текста всплывашки: скин ресурса снимает высоту кнопки. -->
-        <UiActionLink
-          v-if="row.href"
-          data-context="topbar-popover-resource-link"
-          :href="row.href"
-          variant="text"
-          target="_blank"
-        >
-          {{ row.label }}
-        </UiActionLink>
-        <span v-else>{{ row.label }}</span>
+        <span>{{ row.label }}</span>
         <b class="usage-forecast-value" :class="`is-${row.tone}`">{{ row.value }}</b>
       </span>
       <span v-if="row.sub" class="usage-forecast-sub">
@@ -22,7 +12,6 @@
           {{ row.sub.text }}
         </span>
       </span>
-      <span v-if="row.note" class="usage-forecast-note">{{ row.note }}</span>
     </span>
   </span>
 </template>
@@ -30,12 +19,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiActionLink } from '../../ui';
 import { useUsageForecastStore } from '../../stores/usageForecast.ts';
 import { watchUsageForecast } from '../../actions/usageForecast/watchUsageForecast.ts';
 import {
   barRowOf,
-  externalRowOf,
   idleRow,
   resetRowOf,
   type ForecastRow,
@@ -48,9 +35,9 @@ const props = defineProps<{ providerId: string }>();
 const store = useUsageForecastStore();
 
 /**
- * Ряды блока: полосы с темпом (или один общий «расход стоит»), последний сброс,
- * внешний сигнал. Без единого ряда полос у исполнителя блока нет — так он не
- * появляется там, где лимиты вовсе не окна (Ollama).
+ * Ряды блока: полосы с темпом (или один общий «расход стоит») и последний сброс.
+ * Без единого ряда полос у исполнителя блока нет — так он не появляется там, где
+ * лимиты вовсе не окна (Ollama).
  */
 const rows = computed<ForecastRow[]>(() => {
   const now = Date.now();
@@ -65,12 +52,6 @@ const rows = computed<ForecastRow[]>(() => {
 
   if (reset) {
     result.push(resetRowOf(reset, now));
-  }
-
-  const external = store.externalOf(props.providerId);
-
-  if (external) {
-    result.push(externalRowOf(external, now));
   }
 
   return result;
@@ -100,7 +81,6 @@ watchUsageForecast();
 .usage-forecast-head b { color: var(--ink); }
 .usage-forecast-sub { font-size: 10.5px; color: var(--ink-mid); }
 .usage-forecast-value { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
-.usage-forecast-note { font-size: 10px; color: var(--ink-low); }
 .usage-forecast .is-bad { color: var(--bad); }
 .usage-forecast .is-warn { color: var(--warn); }
 .usage-forecast .is-muted { color: var(--ink-mid); }

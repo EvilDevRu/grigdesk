@@ -148,3 +148,64 @@ test('Claude untrusted ход, убитый по сроку, называет с
     return true;
   });
 });
+
+test('Claude untrusted ход, убитый по сроку после повторов запроса, называет транспорт', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-retry-'));
+  const bin = path.join(dir, 'fake-claude');
+  // Сеть рвётся: CLI успевает объявить два повтора запроса и молчит дольше срока.
+  await writeFile(bin, [
+    '#!/bin/sh',
+    'IFS= read -r payload',
+    "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-opus-5\"}'",
+    "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"api_retry\",\"attempt\":2,"
+      + "\"max_retries\":10,\"retry_delay_ms\":1212,\"error_status\":null,\"error\":\"unknown\"}'",
+    "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"api_retry\",\"attempt\":3,"
+      + "\"max_retries\":10,\"retry_delay_ms\":2298,\"error_status\":529,\"error\":\"overloaded_error\"}'",
+    'sleep 5',
+  ].join('\n'));
+  await chmod(bin, 0o755);
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  await assert.rejects(claude.runUntrusted({
+    config: { claudeBin: bin },
+    message: 'проверка сценария',
+    images: [],
+    model: 'opus',
+    providerSettings: {},
+    timeoutMs: 300,
+  }), (error) => {
+    assert.equal(error.code, 'model_unreachable');
+    assert.match(error.message, /не уложился/u);
+    assert.match(error.message, /повторил запрос 2 раз/u);
+    assert.match(error.message, /HTTP 529 overloaded_error/u);
+    return true;
+  });
+});
+
+test('Claude untrusted ход отличает потерянное соединение с API от ответа модели', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-lost-'));
+  const bin = path.join(dir, 'fake-claude');
+  await writeFile(bin, [
+    '#!/bin/sh',
+    'IFS= read -r payload',
+    "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error_during_execution\","
+      + "\"is_error\":true,\"result\":\"API Error: Connection to the API was lost (fetch failed). "
+      + "This is usually temporary.\"}'",
+    'exit 1',
+  ].join('\n'));
+  await chmod(bin, 0o755);
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  await assert.rejects(claude.runUntrusted({
+    config: { claudeBin: bin },
+    message: 'проверка сценария',
+    images: [],
+    model: 'opus',
+    providerSettings: {},
+  }), (error) => {
+    assert.equal(error.code, 'model_unreachable');
+    assert.match(error.message, /не дозвонился до API/u);
+    assert.match(error.message, /Connection to the API was lost/u);
+    return true;
+  });
+});

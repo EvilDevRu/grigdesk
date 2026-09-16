@@ -558,3 +558,132 @@ test('вызов модели получает серверный config исп�
   assert.deepEqual(result.brief, ['первый', 'второй', 'третий']);
   assert.equal(result.target.scope.mapRevision, 'живая-карта');
 });
+
+test('обрыв сети до модели повторяется после паузы, а не роняет сценарий', async () => {
+  const calls = [];
+  const labels = [];
+  const pauses = [];
+  const project = {
+    id: 'demo',
+    revision: 1,
+    title: 'Ролик',
+    ref: { kind: 'sandbox', id: '990010' },
+    target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
+    scenes: [],
+    decisions: [],
+  };
+  const ops = createScriptOps({
+    assertEnabled() {},
+    broadcast() {},
+    limits: () => ({ maxScenes: 20 }),
+    readProject: async () => project,
+    acquireTargetLease: async () => null,
+    pause: async (ms) => { pauses.push(ms); },
+    store: { updateProject: async (id, revision, patch) => patch(project) },
+    targets: { selectedInternalScope: async () => ({ sandbox: { repos: [] }, screens: SCREENS }) },
+    publish: async (value) => value,
+    scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+    resolveScriptModel: async () => ({
+      ok: true,
+      ref: { provider: 'claude', model: 'claude-opus-5' },
+      executor: {
+        // Первый вызов гибнет по сроку с повторами CLI, второй отвечает по существу.
+        async runUntrusted() {
+          calls.push(Date.now());
+
+          if (calls.length === 1) {
+            throw Object.assign(
+              new Error('Claude не уложился в 15 мин: API не отвечал, CLI повторил запрос 4 раз.'),
+              { code: 'model_unreachable' },
+            );
+          }
+
+          return { reply: JSON.stringify({ points: ['первый', 'второй', 'третий'] }) };
+        },
+      },
+    }),
+  });
+
+  const result = await ops.generateBrief('demo', 'Текст задачи', async (label) => { labels.push(label); });
+
+  assert.deepEqual(result.brief, ['первый', 'второй', 'третий']);
+  assert.equal(calls.length, 2);
+  // Повтор без паузы попадает в ту же серию обрывов: между попытками ждём минуту.
+  assert.deepEqual(pauses, [60_000]);
+  assert.ok(labels.some((label) => /Повтор 2 из 3 через минуту/u.test(label)), labels.join(' | '));
+  assert.ok(labels.some((label) => /попытка 2 из 3/u.test(label)), labels.join(' | '));
+});
+
+test('три обрыва подряд останавливают сценарий с названной причиной, а не «не уложился»', async () => {
+  let calls = 0;
+  const ops = createScriptOps({
+    assertEnabled() {},
+    broadcast() {},
+    limits: () => ({ maxScenes: 20 }),
+    readProject: async () => ({
+      title: 'Ролик', ref: { kind: 'sandbox', id: 'demo' },
+      target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
+    }),
+    acquireTargetLease: async () => null,
+    pause: async () => {},
+    targets: { selectedInternalScope: async () => ({ screens: SCREENS }) },
+    scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+    resolveScriptModel: async () => ({
+      ok: true,
+      ref: { provider: 'claude', model: 'claude-opus-5' },
+      executor: {
+        async runUntrusted() {
+          calls += 1;
+          throw Object.assign(new Error('Claude не дозвонился до API: fetch failed'), {
+            code: 'model_unreachable',
+          });
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(ops.generateBrief('demo', 'Текст задачи'), (error) => {
+    assert.equal(error.code, 'model_unreachable');
+    assert.equal(error.status, 502);
+    assert.match(error.message, /недоступна по сети/u);
+    assert.match(error.message, /3 попытки подряд/u);
+    assert.match(error.message, /fetch failed/u);
+    return true;
+  });
+  assert.equal(calls, 3);
+});
+
+test('ошибка модели не по сети не повторяется', async () => {
+  let calls = 0;
+  const ops = createScriptOps({
+    assertEnabled() {},
+    broadcast() {},
+    limits: () => ({ maxScenes: 20 }),
+    readProject: async () => ({
+      title: 'Ролик', ref: { kind: 'sandbox', id: 'demo' },
+      target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
+    }),
+    acquireTargetLease: async () => null,
+    pause: async () => { assert.fail('пауза без повтора'); },
+    targets: { selectedInternalScope: async () => ({ screens: SCREENS }) },
+    scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+    resolveScriptModel: async () => ({
+      ok: true,
+      ref: { provider: 'claude', model: 'claude-opus-5' },
+      executor: {
+        async runUntrusted() {
+          calls += 1;
+          throw Object.assign(new Error('Claude не уложился в 15 мин и остановлен.'), {
+            code: 'model_run_failed',
+          });
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(ops.generateBrief('demo', 'Текст задачи'), (error) => {
+    assert.equal(error.code, 'model_run_failed');
+    return true;
+  });
+  assert.equal(calls, 1);
+});

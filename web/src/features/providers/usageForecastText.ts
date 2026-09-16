@@ -1,7 +1,6 @@
 // Слова для блока прогноза во всплывашке исполнителя. Чистые функции от снимка и
 // «сейчас»: шаблон не должен считать даты, а тест — монтировать компонент ради строки.
 import type {
-  ExternalResetSignal,
   ObservedReset,
   UsageBarForecast,
 } from '../../../../shared/usageForecastContracts.ts';
@@ -71,29 +70,6 @@ export function momentOf(iso: string | null, now = Date.now()): string {
   return `${date.getDate()} ${MONTHS[date.getMonth()]} ${time}`;
 }
 
-/**
- * Давность одним словом: минуты до часа, часы до двух суток, дальше дни. Точность
- * убывает с давностью — «3 дня назад» читается, «4392 минуты назад» нет.
- */
-export function agoOf(iso: string | null, now = Date.now()): string {
-  const at = iso ? new Date(iso).getTime() : Number.NaN;
-
-  if (!Number.isFinite(at)) {
-    return '';
-  }
-
-  const minutes = Math.max(0, Math.round((now - at) / 60_000));
-
-  if (minutes < 60) {
-    return `${minutes} мин назад`;
-  }
-  if (minutes < 48 * 60) {
-    return `${Math.round(minutes / 60)} ч назад`;
-  }
-
-  return `${Math.round(minutes / 1_440)} дн назад`;
-}
-
 // Тот же порог «расход стоит», что и на сервере: текущий темп ниже него словом, не цифрой.
 const IDLE_RATE = 0.1;
 
@@ -102,15 +78,13 @@ function rateOf(value: number): string {
 }
 
 // Ряд блока: подпись слева, значение справа — как у полос всплывашки. Подстрока под
-// рядом раскрывает значение (момент 100 %, природа сброса, шанс), примечание — мелкое.
+// рядом раскрывает значение: момент 100 % и вердикт, природа сброса.
 export interface ForecastRow {
   key: string;
   label: string;
   value: string;
   tone: ForecastTone;
-  href?: string;
   sub?: ForecastLine & { label: string } | null;
-  note?: string;
 }
 
 const VERDICT_WORDS: Record<UsageBarForecast['verdict'], string> = {
@@ -202,47 +176,5 @@ export function resetRowOf(reset: ObservedReset, now = Date.now()): ForecastRow 
       text: `${Math.round(reset.fromPct)} % → ${Math.round(reset.toPct)} %`,
       tone: 'muted',
     },
-  };
-}
-
-/**
- * Ряд внешнего сигнала: подпись — ссылка на источник, справа последний подтверждённый
- * сброс, под ним чужая оценка шанса с именем горизонта. Без свежих данных остаётся
- * прошлый ответ с давностью в примечании, а без данных вовсе — причина, почему их нет.
- */
-export function externalRowOf(signal: ExternalResetSignal, now = Date.now()): ForecastRow {
-  const base = {
-    key: 'external',
-    label: signal.source,
-    href: signal.homepage,
-  };
-
-  if (!signal.lastReset && signal.chance24h === null) {
-    return {
-      ...base,
-      value: 'нет данных',
-      tone: 'muted',
-      sub: null,
-      ...(signal.error && { note: signal.error }),
-    };
-  }
-
-  const tone: ForecastTone = signal.stale ? 'muted' : 'ok';
-  const chances = signal.chance24h !== null && signal.chance48h !== null
-    ? `${Math.round(signal.chance24h)} % / ${Math.round(signal.chance48h)} %`
-    : '';
-
-  return {
-    ...base,
-    value: signal.lastReset ? `сброс ${momentOf(signal.lastReset.at, now)}` : '—',
-    tone,
-    sub: chances
-      ? {
-        label: 'шанс сброса за 24 ч / 48 ч',
-        text: chances,
-        tone,
-      }
-      : null,
-    ...(signal.stale && { note: `данные ${agoOf(signal.fetchedAt, now) || 'устарели'}` }),
   };
 }

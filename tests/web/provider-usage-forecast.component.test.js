@@ -1,14 +1,12 @@
-// Блок прогноза во всплывашке исполнителя: строки по полосам, последний сброс окна и
-// внешний сигнал только у своего исполнителя; у исполнителя без данных блока нет.
+// Блок прогноза во всплывашке исполнителя: ряды по полосам и последний сброс окна;
+// у исполнителя без данных блока нет.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 import {
-  agoOf,
   barRowOf,
-  externalRowOf,
   idleRow,
   momentOf,
   resetRowOf,
@@ -48,8 +46,6 @@ test('ряды прогноза: момент, давность, темп с в�
   assert.equal(momentOf(new Date(2026, 8, 14, 15, 9).toISOString(), NOW), 'вчера 15:09');
   assert.equal(momentOf(new Date(2026, 8, 12, 15, 9).toISOString(), NOW), '12 сен 15:09');
   assert.equal(momentOf(null, NOW), '');
-  assert.equal(agoOf(new Date(NOW - 40 * 60_000).toISOString(), NOW), '40 мин назад');
-  assert.equal(agoOf(new Date(NOW - 3 * 86_400_000).toISOString(), NOW), '3 дн назад');
 
   assert.deepEqual(barRowOf(bar(), NOW), {
     key: 'codex:primary',
@@ -112,58 +108,6 @@ test('ряды прогноза: момент, давность, темп с в�
   });
 });
 
-test('ряд внешнего сигнала: свежий, устаревший и пустой', () => {
-  const signal = {
-    providerId: 'codex',
-    source: 'codexreset.org',
-    homepage: 'https://codexreset.org/',
-    fetchedAt: new Date(NOW - 40 * 60_000).toISOString(),
-    stale: false,
-    error: null,
-    lastReset: {
-      at: new Date(2026, 8, 12, 15, 9).toISOString(),
-      title: 'Global Codex quota reset',
-      scope: 'All users',
-      sourceLabel: 'Tibo on X',
-      sourceUrl: null,
-    },
-    chance24h: 28,
-    chance48h: 49,
-  };
-
-  assert.deepEqual(externalRowOf(signal, NOW), {
-    key: 'external',
-    label: 'codexreset.org',
-    href: 'https://codexreset.org/',
-    value: 'сброс 12 сен 15:09',
-    tone: 'ok',
-    sub: { label: 'шанс сброса за 24 ч / 48 ч', text: '28 % / 49 %', tone: 'ok' },
-  });
-
-  const stale = externalRowOf({ ...signal, stale: true, error: 'socket closed' }, NOW);
-
-  assert.equal(stale.tone, 'muted');
-  assert.equal(stale.note, 'данные 40 мин назад');
-
-  assert.deepEqual(externalRowOf({
-    ...signal,
-    fetchedAt: null,
-    stale: true,
-    error: 'HTTP 503',
-    lastReset: null,
-    chance24h: null,
-    chance48h: null,
-  }, NOW), {
-    key: 'external',
-    label: 'codexreset.org',
-    href: 'https://codexreset.org/',
-    value: 'нет данных',
-    tone: 'muted',
-    sub: null,
-    note: 'HTTP 503',
-  });
-});
-
 test('компонент показывает блок своему исполнителю и молчит у чужого', async (t) => {
   const browser = await installUiBrowser(t);
 
@@ -178,17 +122,6 @@ test('компонент показывает блок своему исполн
       fromPct: 100,
       toPct: 0,
       origin: 'external',
-    } : null),
-    externalOf: (id) => (id === 'codex' ? {
-      providerId: 'codex',
-      source: 'codexreset.org',
-      homepage: 'https://codexreset.org/',
-      fetchedAt: new Date().toISOString(),
-      stale: false,
-      error: null,
-      lastReset: null,
-      chance24h: 28,
-      chance48h: 49,
     } : null),
   };
 
@@ -214,11 +147,8 @@ test('компонент показывает блок своему исполн
   assert.match(codex.text(), /до сброса не хватит/);
   assert.match(codex.text(), /Сброс окна\s*12 сен 18:30/);
   assert.match(codex.text(), /«Неделя \(7д\)» · сбросил вендор\s*100 % → 0 %/);
-  assert.match(codex.text(), /шанс сброса за 24 ч \/ 48 ч\s*28 % \/ 49 %/);
   assert.doesNotMatch(codex.text(), /расход стоит/);
-  assert.equal(codex.get('a').text(), 'codexreset.org');
-  assert.equal(codex.get('a').attributes('href'), 'https://codexreset.org/');
-  assert.equal(codex.get('a').attributes('target'), '_blank');
+  assert.equal(codex.findAll('a').length, 0);
   assert.equal(globalThis.__usageForecastWatched, 1);
 
   const ollama = mount(ProviderUsageForecast, { props: { providerId: 'ollama' } });

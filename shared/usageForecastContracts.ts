@@ -17,7 +17,6 @@ export class UsageForecastContractError extends Error {
 }
 
 const {
-  boolean,
   listOf,
   nullable,
   numeric,
@@ -78,38 +77,14 @@ const observedReset = objectOf({
   origin: oneOf(...RESET_ORIGINS),
 });
 
-const externalReset = objectOf({
-  at: text,
-  title: text,
-  scope: text,
-  sourceLabel: text,
-  sourceUrl: nullable(text),
-});
-
-// Источник сам называет исполнителя, о котором говорит: сервер и веб его не угадывают.
-const externalSignal = objectOf({
-  providerId: text,
-  source: text,
-  homepage: text,
-  fetchedAt: nullable(text),
-  stale: boolean,
-  error: nullable(text),
-  lastReset: nullable(externalReset),
-  chance24h: nullable(numeric),
-  chance48h: nullable(numeric),
-});
-
 const snapshot = objectOf({
   generatedAt: text,
   bars: listOf(barForecast),
   resets: listOf(observedReset),
-  external: nullable(externalSignal),
 });
 
 export type UsageBarForecast = ReturnType<typeof barForecast>;
 export type ObservedReset = ReturnType<typeof observedReset>;
-export type ExternalReset = ReturnType<typeof externalReset>;
-export type ExternalResetSignal = ReturnType<typeof externalSignal>;
 export type UsageForecastSnapshot = ReturnType<typeof snapshot>;
 
 export function parseUsageForecastSnapshot(value: unknown): UsageForecastSnapshot {

@@ -2,8 +2,8 @@
 //
 // Системный плагин `usage-forecast`: тумблер и настройки читаются на каждом шаге через
 // `pluginEnabled`/`pluginSettings`, поэтому действуют без рестарта. Выключенный плагин
-// инертен: не пишет ряды, не ходит ни к вендору, ни за внешним сигналом, а маршрут
-// отвечает `404 plugin_disabled`, как у прочих системных плагинов.
+// инертен: не пишет ряды, не ходит к вендору, а маршрут отвечает `404 plugin_disabled`,
+// как у прочих системных плагинов.
 //
 // Модуль ничего не спрашивает у вендоров сам: он слушает тот же SSE `providers-usage`,
 // который фоновый тик модуля providers шлёт окнам, копит из него ряды и отдаёт
@@ -20,7 +20,6 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 
 import type { UsageForecastSnapshot } from '../../../../shared/usageForecastContracts.ts';
-import type { CodexResetSource } from '../../lib/usage-forecast/codexResetSource.ts';
 import { forecastAll, ingestUsage, type ForecastState } from '../../lib/usage-forecast/forecast.ts';
 import { readForecastState, writeForecastState } from '../../lib/usage-forecast/store.ts';
 
@@ -28,9 +27,6 @@ export const USAGE_FORECAST_PLUGIN_ID = 'usage-forecast';
 
 export interface UsageForecastModuleOptions {
   filePath: string;
-  // Внешний сигнал о сбросах; null — раздел живёт только своими данными.
-  external?: CodexResetSource | null;
-  externalTickMs?: number;
   // Шаг фоновых замеров без окон, если настройка плагина его не назвала; 0 — не замерять.
   sampleTickMs?: number;
   now?: () => number;
@@ -39,12 +35,9 @@ export interface UsageForecastModuleOptions {
 // Настройки плагина в том виде, в каком их читает модуль; форму объявляет манифест.
 interface ForecastSettings {
   providers: Set<string> | null;
-  externalSignal: boolean;
   sampleTickMs: number;
 }
 
-// Опрос внешнего источника — по его же TTL; чаще он всё равно отдаст кэш.
-const EXTERNAL_TICK_MS = 60 * 60_000;
 // Таймер фона идёт раз в минуту, а шаг замера задаёт настройка: так её смена действует
 // без пересоздания таймера. Минута — грубее не надо, точнее незачем.
 const SAMPLE_CHECK_MS = 60_000;
@@ -61,7 +54,6 @@ async function usageForecastModule(
   opts: UsageForecastModuleOptions,
 ): Promise<void> {
   const now = opts.now ?? (() => Date.now());
-  const external = opts.external ?? null;
   const loaded = readForecastState(opts.filePath);
   const ownActions = new Map<string, number>();
 
@@ -81,8 +73,8 @@ async function usageForecastModule(
   }
 
   /**
-   * Настройки на момент вызова: область по исполнителям (пусто — все), внешний сигнал и
-   * шаг фона. Значения недоверенные — приводятся здесь, а не там, где используются.
+   * Настройки на момент вызова: область по исполнителям (пусто — все) и шаг фона.
+   * Значения недоверенные — приводятся здесь, а не там, где используются.
    */
   function settings(): ForecastSettings {
     const raw = (fastify.pluginSettings?.(USAGE_FORECAST_PLUGIN_ID) || {}) as Record<string, unknown>;
@@ -93,7 +85,6 @@ async function usageForecastModule(
 
     return {
       providers: providers.length ? new Set(providers) : null,
-      externalSignal: raw.externalSignal !== false,
       sampleTickMs: Number.isFinite(minutes) && minutes >= 0
         ? minutes * 60_000
         : opts.sampleTickMs ?? SAMPLE_TICK_MS,
@@ -102,18 +93,15 @@ async function usageForecastModule(
 
   function snapshot(): UsageForecastSnapshot {
     const at = now();
-    const current = settings();
-    const signal = external && current.externalSignal ? external.peek(at) : null;
+    const scope = settings().providers;
 
     return {
       generatedAt: new Date(at).toISOString(),
-      bars: forecastAll(state, { now: at })
-        .filter((bar) => !current.providers || current.providers.has(bar.providerId)),
+      bars: forecastAll(state, { now: at }).filter((bar) => !scope || scope.has(bar.providerId)),
       resets: state.resets
-        .filter((reset) => !current.providers || current.providers.has(reset.providerId))
+        .filter((reset) => !scope || scope.has(reset.providerId))
         .slice(-RESETS_IN_SNAPSHOT)
         .reverse(),
-      external: signal && (!current.providers || current.providers.has(signal.providerId)) ? signal : null,
     };
   }
 
@@ -167,45 +155,6 @@ async function usageForecastModule(
   });
 
   /**
-   * Внешний источник принадлежит исполнителю из его снимка: область проверяется
-   * до чтения, чтобы скрытый сигнал не продолжал расходовать сеть в фоне.
-   */
-  async function refreshExternal(): Promise<void> {
-    if (!external || !enabled()) {
-      return;
-    }
-
-    const current = settings();
-
-    if (!current.externalSignal) {
-      return;
-    }
-
-    const signal = external.peek(now());
-
-    if (current.providers && !current.providers.has(signal.providerId)) {
-      return;
-    }
-
-    const before = JSON.stringify(signal);
-    const after = JSON.stringify(await external.read(now()));
-
-    if (enabled() && before !== after) {
-      broadcast();
-    }
-  }
-
-  const externalTimer = external
-    ? setInterval(() => {
-      refreshExternal().catch((error: unknown) => {
-        fastify.log.warn({ err: error }, 'внешний сигнал о сбросах не обновился');
-      });
-    }, opts.externalTickMs ?? EXTERNAL_TICK_MS)
-    : null;
-
-  externalTimer?.unref?.();
-
-  /**
    * Замер без окон. При открытом окне снимок и так приносит тик providers, а хук
    * с устаревшим снимком не расходится: он сам пропускает свежий. Поэтому здесь
    * только проверка зала и шага — второго пути к вендору нет.
@@ -233,17 +182,8 @@ async function usageForecastModule(
 
   sampleTimer.unref?.();
 
-  fastify.addHook('onReady', async () => {
-    // Первый поход за внешним сигналом — фоном: старт сервера сеть не ждёт.
-    refreshExternal().catch(() => {});
-  });
-
   fastify.addHook('onClose', async () => {
     unsubscribe?.();
-
-    if (externalTimer) {
-      clearInterval(externalTimer);
-    }
     clearInterval(sampleTimer);
   });
 

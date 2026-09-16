@@ -54,7 +54,7 @@ test('прогноз лимитов объявлен системным плаг
   assert.deepEqual(forecast.placements, [{ slot: 'provider.popover.after-bars', default: true }]);
   assert.deepEqual(
     forecast.settings.map((setting) => [setting.key, setting.type]),
-    [['providers', 'providers'], ['externalSignal', 'checkbox'], ['sampleTickMinutes', 'number']],
+    [['providers', 'providers'], ['sampleTickMinutes', 'number']],
   );
 });
 
@@ -104,7 +104,6 @@ test('список отдаёт размещения с подписью, а с�
     payload: {
       values: {
         providers: ['codex', 7, 'codex', '', 'claude'],
-        externalSignal: false,
         sampleTickMinutes: 30,
       },
       placements: { 'provider.popover.after-bars': false, 'chat.nowhere': true },
@@ -113,7 +112,7 @@ test('список отдаёт размещения с подписью, а с�
 
   assert.equal(saved.statusCode, 200);
   assert.deepEqual(saved.json().values.providers, ['codex', 'claude']);
-  assert.equal(saved.json().values.externalSignal, false);
+  assert.equal(saved.json().values.sampleTickMinutes, 30);
   assert.deepEqual(saved.json().placements, [{
     slot: 'provider.popover.after-bars',
     label: PLUGIN_SLOT_LABELS['provider.popover.after-bars'],
@@ -135,7 +134,7 @@ test('список отдаёт размещения с подписью, а с�
 });
 
 test('размещения сохраняются независимо от параметров; явный пустой values возвращает умолчания', async (t) => {
-  const previous = { providers: ['claude'], externalSignal: false, sampleTickMinutes: 0 };
+  const previous = { providers: ['claude'], sampleTickMinutes: 0 };
   const { app, readPrefs } = await pluginFixture(t, {
     pluginSettings: { 'usage-forecast': previous, demo: { keep: true } },
   });
@@ -160,7 +159,6 @@ test('размещения сохраняются независимо от па
   assert.deepEqual(reset.json().values, {});
   assert.deepEqual(app.pluginSettings('usage-forecast'), {
     providers: [],
-    externalSignal: true,
     sampleTickMinutes: 15,
   });
   assert.deepEqual(readPrefs().pluginPlacements, {

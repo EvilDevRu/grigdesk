@@ -1,6 +1,5 @@
 // Прогноз лимитов: ряды из снимков тика, обнаружение сброса с его природой, вердикт
-// «хватит ли до сброса», разбор внешней страницы без исполнения её скриптов и связка
-// модуля через ту же SSE-шину, что кормит окна.
+// «хватит ли до сброса» и связка модуля через ту же SSE-шину, что кормит окна.
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -13,10 +12,6 @@ import {
   forecastSeries,
   ingestUsage,
 } from '../../server/src/lib/usage-forecast/forecast.ts';
-import {
-  createCodexResetSource,
-  parseCodexResetPage,
-} from '../../server/src/lib/usage-forecast/codexResetSource.ts';
 import { readForecastState, writeForecastState } from '../../server/src/lib/usage-forecast/store.ts';
 import usageForecastModule from '../../server/src/modules/usage-forecast/index.ts';
 import { parseUsageForecastSnapshot } from '../../shared/usageForecastContracts.ts';
@@ -253,88 +248,6 @@ test('хранилище: отсутствие файла — чистый ст�
   assert.match(broken.warning, /повреждён/);
 });
 
-// Кусок сериализованного состояния codexreset.org в том виде, в каком он лежит в HTML.
-const PAGE = [
-  '<html><script>self.$_TSR={};$_TSR.router=($R=>$R[0]={history:$R[1]=[',
-  '$R[2]={id:"reset:1",date:"SEP 8",dateTime:"2026-09-08T04:05:53.000Z",title:"Global reset",',
-  'description:"…",type:"forced-reset",scope:"All users",sourceLabel:"Tibo on X",',
-  'sourceUrl:"https://x.com/thsottiaux/status/1"},',
-  '$R[3]={id:"reset:2",date:"SEP 12",dateTime:"2026-09-12T08:09:17.000Z",',
-  'title:"Global Codex quota reset \\"propagated\\"",description:"…",type:"forced-reset",',
-  'scope:"All shared/global Codex quota users",sourceLabel:"Tibo on X",',
-  'sourceUrl:"https://evil.example/phish"},',
-  '$R[4]={id:"reset:3",date:"SEP 13",dateTime:"2026-09-13T00:00:00.000Z",title:"Rumor",',
-  'type:"speculation",scope:"?",sourceLabel:"Someone",sourceUrl:"https://x.com/a/1"}],',
-  'forecast:$R[5]={activeFeatures:[],baseScore24h:28,baseScore48h:49,',
-  'horizonCalibration:$R[6]={"24h":$R[7]={brierScore:0.18}},score24h:31,score48h:52}})',
-  '</script></html>',
-].join('');
-
-test('внешняя страница: последний подтверждённый сброс и оценка, чужие ссылки и слухи отброшены', () => {
-  const parsed = parseCodexResetPage(PAGE, { now: Date.parse('2026-09-15T00:00:00Z') });
-
-  assert.deepEqual(parsed, {
-    lastReset: {
-      at: '2026-09-12T08:09:17.000Z',
-      title: 'Global Codex quota reset "propagated"',
-      scope: 'All shared/global Codex quota users',
-      sourceLabel: 'Tibo on X',
-      sourceUrl: null,
-    },
-    chance24h: 31,
-    chance48h: 52,
-  });
-  assert.deepEqual(parseCodexResetPage('<html>нет данных</html>', { now: T0 }), {
-    lastReset: null,
-    chance24h: null,
-    chance48h: null,
-  });
-});
-
-test('читатель внешнего сигнала помнит последний удачный ответ и не долбит сеть после отказа', async () => {
-  const calls = [];
-  let mode = 'ok';
-  const fetchImpl = async (url) => {
-    calls.push(url);
-    if (mode === 'fail') {
-      throw new Error('socket closed');
-    }
-
-    return { ok: true, status: 200, text: async () => PAGE };
-  };
-  const source = createCodexResetSource({ fetchImpl, ttlMs: HOUR, homepage: 'https://example.test/' });
-
-  const first = await source.read(T0);
-
-  assert.equal(first.stale, false);
-  assert.equal(first.error, null);
-  assert.equal(first.lastReset.at, '2026-09-12T08:09:17.000Z');
-  assert.equal(first.chance24h, 31);
-  assert.equal(calls.length, 1);
-
-  // Внутри TTL — кэш, сеть не трогаем.
-  await source.read(T0 + HOUR / 2);
-  assert.equal(calls.length, 1);
-
-  // TTL вышел, сеть упала: прошлый ответ остаётся, ошибка названа, stale — по возрасту.
-  mode = 'fail';
-  const failed = await source.read(T0 + HOUR + 1);
-
-  assert.equal(failed.lastReset.at, '2026-09-12T08:09:17.000Z');
-  assert.equal(failed.error, 'socket closed');
-  assert.equal(failed.stale, false);
-  assert.equal(calls.length, 2);
-
-  // Сразу после отказа повтора нет, через десятую долю TTL — есть.
-  await source.read(T0 + HOUR + 2);
-  assert.equal(calls.length, 2);
-  await source.read(T0 + HOUR + HOUR / 10 + 1);
-  assert.equal(calls.length, 3);
-
-  // Сутки без удачного ответа — сигнал устарел.
-  assert.equal(source.peek(T0 + 25 * HOUR).stale, true);
-});
-
 // Шина SSE как в плагине: рассылка вкладкам подменена списком, подписка настоящая.
 function sseBus({ clients = 0 } = {}) {
   const listeners = new Set();
@@ -385,7 +298,6 @@ test('без окон модуль сам зовёт хук перечитыва
   });
   await app.register(usageForecastModule, {
     filePath: path.join(root, 'usage-forecast.json'),
-    external: null,
     sampleTickMs: 20,
   });
   await app.ready();
@@ -402,23 +314,13 @@ test('без окон модуль сам зовёт хук перечитыва
   assert.equal(refreshes, seen);
 });
 
-test('выключенный плагин инертен: маршрут 404, снимки не копятся, внешний сигнал и фон молчат', async (t) => {
+test('выключенный плагин инертен: маршрут 404, снимки не копятся, фон молчит', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-forecast-disabled-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   const bus = sseBus();
   let enabled = false;
   let refreshes = 0;
-  let fetches = 0;
-  const external = {
-    peek: () => ({ providerId: 'codex', source: 's', homepage: 'https://s/', fetchedAt: null, stale: true,
-      error: null, lastReset: null, chance24h: null, chance48h: null }),
-    async read() {
-      fetches += 1;
-
-      return this.peek();
-    },
-  };
 
   app.decorate('sse', bus);
   app.decorate('pluginEnabled', () => enabled);
@@ -428,8 +330,6 @@ test('выключенный плагин инертен: маршрут 404, с
   });
   await app.register(usageForecastModule, {
     filePath: path.join(root, 'usage-forecast.json'),
-    external,
-    externalTickMs: 20,
     sampleTickMs: 20,
   });
   await app.ready();
@@ -441,7 +341,6 @@ test('выключенный плагин инертен: маршрут 404, с
   assert.equal((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).statusCode, 404);
   assert.equal(bus.sent.filter((event) => event.name === 'usage-forecast').length, 0);
   assert.equal(refreshes, 0);
-  assert.equal(fetches, 0);
 
   // Тумблер включили — без рестарта всё оживает.
   enabled = true;
@@ -450,33 +349,21 @@ test('выключенный плагин инертен: маршрут 404, с
 
   assert.equal(response.statusCode, 200);
   assert.equal(parseUsageForecastSnapshot(response.json()).bars.length, 1);
-  assert.ok(await waitFor(() => refreshes >= 1 && fetches >= 1), 'фон и внешний сигнал не ожили');
+  assert.ok(await waitFor(() => refreshes >= 1), 'фоновый замер не ожил');
 });
 
-test('область по исполнителям: чужие снимки не копятся, а внешний сигнал уходит только своему', async (t) => {
+test('область по исполнителям: чужие снимки не копятся', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-forecast-scope-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   const bus = sseBus();
-  let settings = { providers: ['claude'], externalSignal: true };
-  let fetches = 0;
-  const external = {
-    peek: () => ({ providerId: 'codex', source: 's', homepage: 'https://s/', fetchedAt: null, stale: true,
-      error: null, lastReset: null, chance24h: 10, chance48h: 20 }),
-    async read() {
-      fetches += 1;
-
-      return this.peek();
-    },
-  };
+  let settings = { providers: ['claude'] };
 
   app.decorate('sse', bus);
   app.decorate('pluginEnabled', () => true);
   app.decorate('pluginSettings', () => settings);
   await app.register(usageForecastModule, {
     filePath: path.join(root, 'usage-forecast.json'),
-    external,
-    externalTickMs: 20,
     sampleTickMs: 0,
   });
   await app.ready();
@@ -492,32 +379,17 @@ test('область по исполнителям: чужие снимки не
   const scoped = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
 
   assert.deepEqual(scoped.bars.map((bar) => bar.providerId), ['claude']);
-  assert.equal(scoped.external, null);
 
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(fetches, 0, 'источник вне области не читается ни на старте, ни по таймеру');
-
-  // Область сняли — Codex в ответе, но его ряд начнётся только со следующего снимка.
-  settings = { providers: [], externalSignal: true };
+  // Область сняли — ряд Codex начнётся только со следующего снимка: прошлый не копился.
+  settings = { providers: [] };
   const all = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
 
   assert.deepEqual(all.bars.map((bar) => bar.providerId), ['claude']);
-  assert.equal(all.external?.providerId, 'codex');
-  assert.ok(await waitFor(() => fetches > 0), 'снятие области должно разрешить чтение источника');
 
-  // Область можно сузить на ходу: уже включённый таймер перестаёт ходить в сеть.
-  settings = { providers: ['claude'], externalSignal: true };
-  const scopedFetches = fetches;
+  bus.broadcast('providers-usage', { usage: usageOf(52, { at: T0 + 10 * 60_000 }) });
+  const later = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
 
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(fetches, scopedFetches);
-
-  settings = { providers: [], externalSignal: false };
-  const quiet = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
-
-  assert.equal(quiet.external, null);
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(fetches, scopedFetches, 'выключенный внешний сигнал тоже не должен читаться');
+  assert.deepEqual(later.bars.map((bar) => bar.providerId).sort(), ['claude', 'codex']);
 });
 
 test('без хука в приложении модуль без окон просто ждёт событий', async (t) => {
@@ -528,7 +400,6 @@ test('без хука в приложении модуль без окон пр�
   app.decorate('sse', sseBus());
   await app.register(usageForecastModule, {
     filePath: path.join(root, 'usage-forecast.json'),
-    external: null,
     sampleTickMs: 20,
   });
   await app.ready();
@@ -552,7 +423,7 @@ test('модуль слушает тик providers, отдаёт снимок, �
   app.decorate('sse', bus);
   // Маршрут сброса лимита принадлежит providers; здесь — его заглушка с тем же URL.
   app.post('/api/providers/:id/usage-actions/consume-rate-limit-reset', async () => ({ ok: true }));
-  await app.register(usageForecastModule, { filePath, external: null, now: () => clock });
+  await app.register(usageForecastModule, { filePath, now: () => clock });
   await app.ready();
   t.after(() => app.close());
 
@@ -569,7 +440,6 @@ test('модуль слушает тик providers, отдаёт снимок, �
   assert.equal(snapshot.bars.length, 1);
   assert.equal(snapshot.bars[0].verdict, 'short');
   assert.equal(snapshot.bars[0].ratePerHour, 12);
-  assert.equal(snapshot.external, null);
   assert.deepEqual(snapshot.resets, []);
   assert.equal(bus.sent.filter((event) => event.name === 'usage-forecast').length, 4);
 
