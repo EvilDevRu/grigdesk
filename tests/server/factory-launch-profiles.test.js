@@ -161,6 +161,9 @@ test('launch-options отдаёт профили и fail-closed каталог �
   assert.deepEqual(selected.json().diagnosisSuggestion, {
     kind: 'data', signal: 'Повторный запуск создаёт дубликаты',
   });
+  // Объём триажа едет в форму независимо от каталога: и у fail-closed профиля тоже
+  assert.deepEqual(selected.json().scopeSuggestion, { criteria: [], skip: [] });
+  assert.deepEqual(defaults.json().scopeSuggestion, { criteria: [], skip: [] });
   assert.deepEqual(selected.json().routeOptions['consilium-debug'], {
     deliveryMode: 'publish',
     instrumentationMode: 'explicit',
@@ -184,6 +187,27 @@ test('launch-options открывает профиль, чьи репозито�
   assert.equal(response.json().profile, 'project-beta');
   assert.equal(response.json().error, undefined);
   assert.deepEqual(response.json().instrumentationSuggestions, ['project-beta:src/diagnostics.py']);
+});
+
+test('launch-options отдаёт объём триажа: критерии из scope.do и «не делаем» из scope.skip', async (t) => {
+  const app = await fixture(t, {
+    analysisExtra: {
+      scope: {
+        do: ['Пустая ячейка подсказывает, как снять тип', 'Окно называет тип и число фраз'],
+        skip: ['Раздел «Частота» — по ответу человека'],
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().scopeSuggestion, {
+    criteria: ['Пустая ячейка подсказывает, как снять тип', 'Окно называет тип и число фраз'],
+    skip: ['Раздел «Частота» — по ответу человека'],
+  });
 });
 
 test('явно выбранный профиль сильнее подсказки триажа', async (t) => {

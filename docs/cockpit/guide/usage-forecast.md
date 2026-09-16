@@ -1,9 +1,23 @@
 # Прогноз лимитов
 
 Блок «Прогноз» во всплывашке исполнителя в топбаре. Отвечает на два вопроса, на которые
-сами полосы лимитов не отвечают: **хватит ли окна до сброса при текущем темпе** и
-**когда окно сбрасывали в последний раз**. Раздел вспомогательный и выпиливаемый — см.
-«Как снять» ниже.
+сами полосы лимитов не отвечают: **хватит ли окна до сброса при вашем темпе** и
+**когда окно сбрасывали в последний раз**. Это системный плагин `usage-forecast`
+(«Настройки → Плагины»), встроенный через слот `provider.popover.after-bars` — см.
+[контракт плагинов](plugins.md).
+
+## Плагин и его настройки
+
+- **Тумблер** действует без рестарта: выключенный плагин не пишет ряды, не ходит ни к
+  вендору, ни за внешним сигналом, `GET /api/usage-forecast` отвечает `404
+  plugin_disabled`, а размещение исчезает из всплывашки.
+- **Размещение** — одно, «Всплывашка исполнителя в топбаре, под полосами лимитов»; его
+  тумблер прячет блок, не выключая сбор данных.
+- **Исполнители** (тип `providers`) — у кого замерять; пусто — у всех. Исполнитель вне
+  области не замеряется и блока не получает; внешний сигнал Codex тоже подчиняется
+  области.
+- **Сигнал codexreset.org** — чекбокс; выключен — ни походов на сайт, ни ряда в блоке.
+- **Фоновый замер без окон, минут** — шаг замера при закрытых окнах, `0` выключает.
 
 ## Откуда данные
 
@@ -16,8 +30,8 @@
   зовёт хук `fastify.refreshProvidersUsage` (объявлен в `providers`: перечитать, если
   снимок устарел, и разослать тем же событием) — но только при пустом зале, так что
   второго пути к вендору не появляется, а без окон походов впятеро меньше, чем с ними.
-  Хук необязателен: без него ряды копятся лишь при открытой вкладке. Шаг задаёт опция
-  модуля `sampleTickMs`, `0` выключает фон. Ряды и журнал сбросов лежат в
+  Хук необязателен: без него ряды копятся лишь при открытой вкладке. Шаг задаёт
+  настройка плагина (умолчание — опция модуля `sampleTickMs`). Ряды и журнал сбросов лежат в
   `.state/usage-forecast.json`
   (путь — `config.usageForecastPath`, env `COCKPIT_USAGE_FORECAST_PATH`); замеры
   держатся двое суток, журнал — 200 последних сбросов.
@@ -78,15 +92,15 @@
 
 ## Как снять
 
-Единственная зацепка в `providers` — декоратор `refreshProvidersUsage`; он остаётся
-безвредным и без потребителя, но при желании снимается вместе с записью в
-`server/src/lib/fastifyDecorations.ts`. Удаляются
-`server/src/modules/usage-forecast/`, `server/src/lib/usage-forecast/`,
-`shared/usageForecastContracts.ts`, `web/src/stores/usageForecast.ts`,
+Выключить — тумблером плагина. Удалить из кода: запись `usage-forecast` в `SYSTEM`
+(`server/src/lib/pluginsRegistry.ts`), `server/src/modules/usage-forecast/`,
+`server/src/lib/usage-forecast/`, `shared/usageForecastContracts.ts`,
+`web/src/plugins/usage-forecast/`, `web/src/stores/usageForecast.ts`,
 `web/src/actions/usageForecast/`, `web/src/features/providers/ProviderUsageForecast.vue`,
 `web/src/features/providers/usageForecastText.ts`, тесты `tests/server/usage-forecast.test.js`
 и `tests/web/provider-usage-forecast.component.test.js`, этот документ; затем по строке в
-`server/src/app.ts` (регистрация), `server/src/config.ts` (`usageForecastPath`),
-`web/src/composables/useSse.ts` (`usage-forecast`) и `web/src/shared/layout/AppShell.vue`
-(импорт и `<ProviderUsageForecast>`). Чтобы убрать только внешний сигнал, достаточно
-удалить `codexResetSource.ts` и передать `external: null` при регистрации модуля.
+`server/src/app.ts` (регистрация), `server/src/config.ts` (`usageForecastPath`) и
+`web/src/composables/useSse.ts` (`usage-forecast`). Слот `provider.popover.after-bars` в
+`AppShell.vue` и декоратор `refreshProvidersUsage` в `providers` — общие, остаются.
+Чтобы убрать только внешний сигнал, достаточно снять чекбокс или удалить
+`codexResetSource.ts` и передать `external: null` при регистрации модуля.

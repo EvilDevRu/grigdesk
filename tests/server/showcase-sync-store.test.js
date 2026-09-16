@@ -232,7 +232,10 @@ test('alignment sidecar независимо связан с текстом, WAV
 
   assert.equal(document.quality, 'word-exact');
   assert.equal(document.spans.length, 4);
-  assert.deepEqual(document.safePauses, []);
+  // Тире с измеренной тишиной — пауза синтеза внутри фразы, и она доезжает до sidecar.
+  assert.deepEqual(document.safePauses, [{
+    id: 'clause-2', textAt: 8, atMs: 545, quietFromMs: 470, quietToMs: 620,
+  }]);
 
   for (const changed of [
     { ...input, textHash: '8'.repeat(32) },

@@ -55,6 +55,12 @@ interface TextRange {
 const END_TOLERANCE_MS = 1;
 const WORD = /[\p{L}\p{N}]+(?:[-’'][\p{L}\p{N}]+)*/gu;
 const PHRASE_END = /[.!?\n]+/gu;
+// Знаки, на которых синтез делает паузу внутри фразы. Дефис между словами сюда не
+// входит: «десктоп-версия» читается слитно, и тишины между половинами нет.
+const CLAUSE_PAUSE = /[,;:—–]/u;
+// Порог измеренной тишины между словами, чтобы считать её паузой синтеза, а не
+// шагом границ слов: Edge и локальные голоса на запятой держат 140–350 мс.
+const MIN_CLAUSE_PAUSE_MS = 100;
 
 function normalizeToken(value: string): string {
   return value.normalize('NFC').toLocaleLowerCase('ru-RU').replaceAll('ё', 'е');
@@ -239,6 +245,51 @@ function pausesOf(phrases: readonly SpeechPhraseTiming[]): SafeSpeechPause[] {
   }
 
   return result;
+}
+
+/**
+ * Паузы внутри фразы: синтез сам остановился на запятой, двоеточии или тире, и это
+ * видно по измеренной тишине между соседними словами. Только сентенциальных пауз
+ * планировщику не хватало — модель пишет реплику одним предложением, безопасных
+ * пауз выходило ноль, и позднее действие нельзя было совместить с речью иначе как
+ * остановкой на человеке. Тишина вставляется в середину измеренной паузы, слово
+ * не режется.
+ */
+function clausePausesOf(text: string, spans: readonly SpeechSpanTiming[]): SafeSpeechPause[] {
+  const result: SafeSpeechPause[] = [];
+
+  for (let index = 1; index < spans.length; index += 1) {
+    const previous = spans[index - 1];
+    const next = spans[index];
+
+    if (!previous || !next) {
+      continue;
+    }
+
+    if (
+      next.startMs - previous.endMs < MIN_CLAUSE_PAUSE_MS
+      || !CLAUSE_PAUSE.test(text.slice(previous.to, next.from))
+    ) {
+      continue;
+    }
+
+    result.push({
+      id: `clause-${index}`,
+      textAt: previous.to,
+      atMs: (previous.endMs + next.startMs) / 2,
+      quietFromMs: previous.endMs,
+      quietToMs: next.startMs,
+    });
+  }
+
+  return result;
+}
+
+/** Паузы фраз и паузы внутри фраз в порядке звучания; общих точек у них нет. */
+function mergePauses(
+  ...groups: readonly (readonly SafeSpeechPause[])[]
+): SafeSpeechPause[] {
+  return groups.flat().sort((left, right) => left.atMs - right.atMs || left.textAt - right.textAt);
 }
 
 function exactWordAlignment(
@@ -456,7 +507,7 @@ export function alignSpeechTiming({
       quality: 'word-exact',
       spans: wordSpans,
       phrases,
-      safePauses: pausesOf(phrases),
+      safePauses: mergePauses(pausesOf(phrases), clausePausesOf(canonicalText, wordSpans)),
       reason: 'Все слова однозначно сопоставлены с канонической репликой.',
     };
   }

@@ -82,6 +82,10 @@ export const usePluginsStore = defineStore('plugins', {
     dockNav() { return this.navItems.filter((item) => item.group === 'dock'); },
     byId: (s) => (id) => s.list.find((p) => p.id === id) || null,
     enabled: (s) => (id) => !!s.list.find((p) => p.id === id)?.enabled,
+    // Включено ли размещение плагина в слоте. Незаявленное в манифесте место — выключено:
+    // реестр веба может знать больше, чем манифест, но решает манифест.
+    placementEnabled: (s) => (id, slot) => !!(s.list.find((p) => p.id === id)?.placements || [])
+      .find((placement) => placement.slot === slot)?.enabled,
   },
   actions: {
     async load() {
@@ -109,11 +113,16 @@ export const usePluginsStore = defineStore('plugins', {
       }
       catch { p.enabled = !enabled; }
     },
-    async saveSettings(id, values) {
+    // Значения и размещения уходят одним запросом: у формы одна кнопка «Сохранить».
+    async saveSettings(id, values, placements = null) {
       const p = this.byId(id);
       if (!p) return;
-      const r = await api.put(`/api/plugins/${id}/settings`, { values });
+      const r = await api.put(`/api/plugins/${id}/settings`, {
+        values,
+        ...(placements && { placements }),
+      });
       p.values = r.values;
+      if (Array.isArray(r.placements)) p.placements = r.placements;
     },
     // Готовность плагина: ручку объявляет манифест, форму ответа — общий контракт.
     // Установка запускается по пункту и только по нажатию человека.

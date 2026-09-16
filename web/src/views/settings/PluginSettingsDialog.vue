@@ -86,14 +86,14 @@
         <span>
           <b>Плагин выключен</b>
           <small>
-            {{ plugin.settings.length
+            {{ hasSettings
               ? 'Функции неактивны, но параметры можно подготовить заранее.'
               : 'Включите его, чтобы использовать.' }}
           </small>
         </span>
       </div>
 
-      <div v-if="plugin.enabled && !plugin.settings.length" class="pd-state ready">
+      <div v-if="plugin.enabled && !hasSettings" class="pd-state ready">
         <span class="pd-state-icon" aria-hidden="true">
           <svg
             viewBox="0 0 24 24"
@@ -110,6 +110,29 @@
           <b>Готов к работе</b>
           <small>У этого плагина нет отдельных параметров.</small>
         </span>
+      </div>
+
+      <!-- Размещение: слоты, которые плагин объявил в манифесте. Тумблер гасит место,
+           не выключая плагин, — данные и серверная часть продолжают работать. -->
+      <div v-if="placements.length" class="plugset" data-role="plugin-placements">
+        <div class="plugset-head">
+          <div>
+            <span>Размещение</span>
+            <b>Где показывать</b>
+          </div>
+          <small>{{ placementCountLabel }}</small>
+        </div>
+        <div v-for="placement in placements" :key="placement.slot" class="plugrow plugcheck">
+          <UiCheckbox
+            :model-value="placement.enabled"
+            @update:model-value="(value) => setPlacement(placement.slot, value === true)"
+          >
+            <span class="plugcheck-copy">
+              <b>{{ placement.label }}</b>
+              <small>{{ placement.slot }}</small>
+            </span>
+          </UiCheckbox>
+        </div>
       </div>
 
       <div v-if="plugin.settings.length" class="plugset">
@@ -131,6 +154,22 @@
                 <small v-if="s.hint">{{ s.hint }}</small>
               </span>
             </UiCheckbox>
+          </div>
+          <!-- Область по исполнителям: галочка на каждого из живого реестра; ни одной —
+               значит все. Хранится массивом id, чтобы новый исполнитель попадал сам. -->
+          <div v-else-if="s.type === 'providers'" class="plugrow" data-role="plugin-providers">
+            <label>{{ s.label }}</label>
+            <div class="plugproviders">
+              <UiCheckbox
+                v-for="entry in providerEntries"
+                :key="entry.id"
+                :model-value="providersValue(s.key).includes(entry.id)"
+                @update:model-value="(value) => setProvider(s.key, entry.id, value === true)"
+              >
+                {{ entry.name }}
+              </UiCheckbox>
+            </div>
+            <p class="plughint">{{ providersHint(s) }}</p>
           </div>
           <template v-else>
             <div
@@ -324,7 +363,7 @@
           Закрыть
         </UiButton>
         <UiButton
-          v-if="plugin.settings.length"
+          v-if="hasSettings"
           class="plugin-save"
           :class="{ saved }"
           data-role="settings-action"
@@ -352,7 +391,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, toRaw, watch } from 'vue';
 import {
   UiButton,
   UiCheckbox,
@@ -371,6 +410,7 @@ import type { ProviderEntry } from '../../../../shared/providersContracts.ts';
 import type {
   PluginListItem,
   PluginModelValue,
+  PluginPlacementState,
   PluginSetting,
   PluginSetupItem,
   PluginSetupStatus,
@@ -403,21 +443,49 @@ const prov = useProvidersStore();
 const saving = ref(false);
 const saved = ref(false);
 const error = ref('');
+const draftValues = ref<Record<string, unknown>>({});
+const placements = ref<PluginPlacementState[]>([]);
 
-// Итог прошлого сохранения относится к прошлому плагину: и «Сохранено», и ошибка
-// обязаны исчезнуть, когда в модалке оказался другой модуль или её открыли заново.
+let formRevision = 0;
+let savedTimer: ReturnType<typeof setTimeout> | null = null;
+
+const hasSettings = computed(() => Boolean(props.plugin?.settings.length || placements.value.length));
+
+/**
+ * Форма получает собственную копию сохранённого состояния. Изменения полей не
+ * управляют живыми слотами и остаются черновиком до успешного ответа сервера.
+ */
+function resetDraft(): void {
+  draftValues.value = structuredClone(toRaw(props.plugin?.values ?? {}));
+  placements.value = (props.plugin?.placements ?? []).map((placement) => ({ ...placement }));
+}
+
+function clearSavedTimer(): void {
+  if (savedTimer) {
+    clearTimeout(savedTimer);
+    savedTimer = null;
+  }
+}
+
+// Закрытие отбрасывает черновик. Ревизия не даёт запоздавшему ответу старой формы
+// подменить новый черновик или показать в нём чужую ошибку сохранения.
 watch(
-  () => [props.open, props.plugin?.id],
+  () => [props.open, props.plugin?.id] as const,
   () => {
+    formRevision += 1;
+    clearSavedTimer();
+    resetDraft();
     saved.value = false;
     error.value = '';
   },
+  { immediate: true },
 );
 
-// Значения приходят из общего store как «что объявил манифест», поэтому каждый контрол
-// получает своё значение приведённым, а не через общий v-model по unknown.
+onUnmounted(clearSavedTimer);
+
+// Каждый контрол читает приведённое значение черновика, а не меняет общий store.
 function storedValue(key: string): unknown {
-  return props.plugin?.values?.[key];
+  return draftValues.value[key];
 }
 
 function flagValue(key: string): boolean {
@@ -445,8 +513,47 @@ function modelValue(key: string): PluginModelValue | null {
 
 function setValue(key: string, value: unknown): void {
   if (props.plugin) {
-    props.plugin.values[key] = value;
+    draftValues.value = { ...draftValues.value, [key]: value };
+    saved.value = false;
   }
+}
+
+// Область по исполнителям: сохранённый массив id; всё, что не массив, — «все».
+function providersValue(key: string): string[] {
+  const stored = storedValue(key);
+
+  return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [];
+}
+
+// Подсказка области: пустой выбор надо назвать словами, иначе он читается как «никто».
+function providersHint(setting: PluginSetting): string {
+  const hint = setting.hint || '';
+
+  return providersValue(setting.key).length ? hint : `Ни один не отмечен — значит все. ${hint}`.trim();
+}
+
+function setProvider(key: string, id: string, on: boolean): void {
+  const next = providersValue(key).filter((item) => item !== id);
+
+  setValue(key, on ? [...next, id] : next);
+}
+
+const providerEntries = computed(() => (prov.providers as ProviderEntry[]).map((entry) => ({
+  id: entry.id,
+  name: entry.name,
+})));
+
+const placementCountLabel = computed(() => {
+  const on = placements.value.filter((placement) => placement.enabled).length;
+
+  return `${on} из ${placements.value.length} включено`;
+});
+
+function setPlacement(slot: string, enabled: boolean): void {
+  placements.value = placements.value.map((placement) => (
+    placement.slot === slot ? { ...placement, enabled } : placement
+  ));
+  saved.value = false;
 }
 
 function selectValue(event: Event): string {
@@ -675,7 +782,7 @@ function setPluginModel(p: PluginListItem, key: string, value: string): void {
   const at = String(value || '').indexOf(':');
 
   if (at <= 0) {
-    p.values[key] = null;
+    setValue(key, null);
 
     return;
   }
@@ -689,7 +796,7 @@ function setPluginModel(p: PluginListItem, key: string, value: string): void {
     next.effort = effort;
   }
 
-  p.values[key] = next;
+  setValue(key, next);
 }
 
 // Уровни эффорта объявляет сама модель. Пустой список — не «выбери низкий», а
@@ -729,14 +836,14 @@ function setPluginEffort(p: PluginListItem, key: string, value: string): void {
   const effort = String(value || '');
 
   if (effort) {
-    p.values[key] = { ...stored, effort };
+    setValue(key, { ...stored, effort });
 
     return;
   }
 
   const { effort: _drop, ...rest } = stored;
 
-  p.values[key] = rest;
+  setValue(key, rest);
 }
 
 /**
@@ -752,18 +859,42 @@ async function save(): Promise<void> {
 
   saving.value = true;
   error.value = '';
+  clearSavedTimer();
+
+  const revision = formRevision;
+  const submittedValues = draftValues.value;
+  const submittedPlacements = placements.value;
 
   try {
-    await pluginsStore.saveSettings(plugin.id, plugin.values);
-    saved.value = true;
-    setTimeout(() => {
-      saved.value = false;
-    }, 2000);
+    const placementMap = Object.fromEntries(
+      submittedPlacements.map((placement) => [placement.slot, placement.enabled]),
+    );
+
+    // Стор ещё на JavaScript: третий аргумент выведен как `null`, форму знает диалог.
+    await (pluginsStore.saveSettings as (
+      id: string,
+      values: Record<string, unknown>,
+      placements: Record<string, boolean> | null,
+    ) => Promise<void>)(plugin.id, structuredClone(toRaw(submittedValues)), placementMap);
+
+    // Человек мог успеть открыть другую форму или поправить поле во время запроса.
+    // Приведённые сервером значения заменяют только отправленный, неизменённый черновик.
+    if (revision === formRevision
+      && draftValues.value === submittedValues
+      && placements.value === submittedPlacements) {
+      resetDraft();
+      saved.value = true;
+      savedTimer = setTimeout(() => {
+        saved.value = false;
+      }, 2000);
+    }
   } catch (err) {
     const failure = err as { data?: { message?: string }; message?: string } | null;
 
-    error.value = failure?.data?.message || failure?.message
-      || 'Не удалось сохранить настройки.';
+    if (revision === formRevision) {
+      error.value = failure?.data?.message || failure?.message
+        || 'Не удалось сохранить настройки.';
+    }
   } finally {
     saving.value = false;
   }
@@ -829,6 +960,7 @@ async function save(): Promise<void> {
 .plugset-head b { font-size: 12.5px; font-weight: 650; }
 .plugset-head small { color: var(--ink-mid); font-size: 9.5px; }
 .plugrow { min-width: 0; display: grid; gap: 6px; }
+.plugproviders { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .plugrow label { color: var(--ink-mid); font-size: 11.5px; }
 .plugrow .inp { width: min(100%, 320px); }
 .plug-model-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, .6fr);

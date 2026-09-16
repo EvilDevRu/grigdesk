@@ -385,6 +385,8 @@ const project = objectOf({
   // Ревизия словаря карты, по которому модель составляла сцены. Расходится с текущей
   // — карта экранов менялась после разбора, и сцены не знают её новых элементов.
   scriptMapRevision: optional(text),
+  // Ссылка на серверную приёмку живого сценария, без селекторов и наблюдений DOM.
+  scriptProofHash: optional(text),
   decisions: listOf(decision),
   latestFinal: nullable(finalArtifact),
   createdAt: text,

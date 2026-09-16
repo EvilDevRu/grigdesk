@@ -38,6 +38,50 @@ test('словесные метки последовательно сопост�
   assert.equal(result.phrases.length, 1);
 });
 
+// Модель пишет реплику одним предложением, и сентенциальных пауз в ней нет; паузу
+// синтеза на запятой видно по измеренной тишине между словами — она безопасна для
+// вставки. Знак без тишины и тишина без знака паузами не становятся.
+test('пауза синтеза на знаке препинания внутри фразы становится безопасной паузой', () => {
+  const canonicalText = 'Открываем окно, отмечаем десктоп и жмём: готово. Дальше.';
+  const result = alignSpeechTiming({
+    canonicalText,
+    durationMs: 3_500,
+    timing: {
+      words: [
+        { text: 'открываем', startMs: 0, endMs: 400 },
+        { text: 'окно', startMs: 400, endMs: 700 },
+        { text: 'отмечаем', startMs: 1_020, endMs: 1_400 },
+        // Тишина без знака препинания — не пауза синтеза.
+        { text: 'десктоп', startMs: 1_600, endMs: 1_900 },
+        { text: 'и', startMs: 1_900, endMs: 1_980 },
+        { text: 'жмём', startMs: 1_980, endMs: 2_200 },
+        // Двоеточие с тишиной короче порога — тоже нет.
+        { text: 'готово', startMs: 2_260, endMs: 2_600 },
+        { text: 'дальше', startMs: 3_000, endMs: 3_400 },
+      ],
+      segments: null,
+    },
+  });
+
+  assert.equal(result.quality, 'word-exact');
+  assert.deepEqual(result.safePauses, [
+    {
+      id: 'clause-2',
+      textAt: canonicalText.indexOf('окно') + 'окно'.length,
+      atMs: 860,
+      quietFromMs: 700,
+      quietToMs: 1_020,
+    },
+    {
+      id: 'pause-1',
+      textAt: canonicalText.indexOf('готово') + 'готово'.length,
+      atMs: 2_800,
+      quietFromMs: 2_600,
+      quietToMs: 3_000,
+    },
+  ]);
+});
+
 test('число словами не получает выдуманных словесных границ и понижает режим до фразы', () => {
   const canonicalText = 'В отчёте 2026 записей.';
   const result = alignSpeechTiming({

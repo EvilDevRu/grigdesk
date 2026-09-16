@@ -55,6 +55,13 @@ function isolatedEnv(root, port) {
     COCKPIT_SSH_AUDIT_DIR: path.join(root, 'ssh'),
     COCKPIT_DB_AUDIT_DIR: path.join(root, 'db'),
     COCKPIT_SANDBOX_JOURNAL_DIR: path.join(root, 'sandbox'),
+    // Раздел презентаций на старте сверяет журнал заданий с процессами и гасит
+    // «пропавшие». Без своих каталогов пробный сервер сверял ЖИВОЙ журнал кокпита
+    // и обрывал идущую сборку ролика: «Исполнитель задания не пережил перезапуск».
+    COCKPIT_SHOWCASE_DIR: path.join(root, 'showcase'),
+    COCKPIT_SHOWCASE_AUTH_DIR: path.join(root, 'showcase-auth'),
+    COCKPIT_SHOWCASE_VOICE_DIR: path.join(root, 'showcase-voice'),
+    COCKPIT_SHOWCASE_BROWSER_DIR: path.join(root, 'showcase-browser'),
     COCKPIT_MODELS_PATH: path.join(root, 'state/models.json'),
     COCKPIT_PREFS_PATH: path.join(root, 'state/prefs.json'),
     COCKPIT_AUTH_ACCOUNT: path.join(root, 'state/auth.json'),

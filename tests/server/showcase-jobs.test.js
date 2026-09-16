@@ -242,6 +242,16 @@ test('просроченное задание становится видимо�
   assert.match(stopped[0].error, /не уложилось в отведённый срок/);
 });
 
+test('составной этап получает конечный срок координатора вместо срока одного задания', async (t) => {
+  const { jobs } = await fixture(t, { maxQueued: 4, jobTimeoutMs: -1 });
+  const { record } = await jobs.enqueue({ ...enqueueInput(), timeoutMs: 60_000 });
+
+  assert.deepEqual(await jobs.sweepExpired(), []);
+  const duration = Date.parse(record.deadlineAt) - Date.parse(record.startedAt);
+
+  assert.ok(duration >= 60_000 && duration < 61_000);
+});
+
 test('наружу уходит только сводка задания', async (t) => {
   const { jobs } = await fixture(t);
   const { record } = await jobs.enqueue(enqueueInput());

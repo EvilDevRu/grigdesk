@@ -15,7 +15,24 @@ export interface PluginNav {
   order?: number;
 }
 
+// Размещение, которое плагин умеет занимать: слот из оглавления `shared/slots/` и
+// умолчание тумблера. Компонент к слоту привязывает сам плагин в своём коде веба;
+// манифест только называет места, чтобы настройки могли их включать и гасить.
+export interface PluginPlacementDecl {
+  slot: string;
+  default?: boolean;
+}
+
+// Размещение в ответе `/api/plugins`: с подписью места и текущим состоянием тумблера.
+export interface PluginPlacementState {
+  slot: string;
+  label: string;
+  enabled: boolean;
+}
+
 // Одно поле настройки плагина: схему объявляет манифест, значение живёт в prefs.
+// Тип `providers` — область по исполнителям: массив id из живого реестра, пустой —
+// «все». Его форму знает общий диалог настроек, а смысл — сам плагин.
 export interface PluginSetting {
   key: string;
   label?: string;
@@ -82,6 +99,7 @@ export interface PluginListItem {
   needsRestart?: boolean;
   settings: PluginSetting[];
   values: Record<string, unknown>;
+  placements?: PluginPlacementState[];
   setup?: PluginSetup | null;
 }
 

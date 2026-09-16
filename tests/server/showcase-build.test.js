@@ -168,6 +168,13 @@ async function fixture(t, options = {}) {
     jobs,
     limits: () => ({ maxScenes: 20 }),
     readProject: async () => current,
+    scriptReady: options.scriptReady,
+    prepareScript: options.prepareScript ? async (_id, onProgress) => {
+      calls.push('prepare');
+      current = await options.prepareScript(current, onProgress);
+
+      return current;
+    } : undefined,
     analyze: async () => {
       calls.push('analyze');
       current = {
@@ -241,6 +248,76 @@ async function fixture(t, options = {}) {
     },
   };
 }
+
+test('старый сценарий автоматически проверяется до первой озвучки', async (t) => {
+  const item = await fixture(t, {
+    scriptReady: async (project) => Boolean(project.scriptProofHash),
+    prepareScript: async (project) => ({
+      ...project,
+      scriptProofHash: 'proof',
+      revision: project.revision + 1,
+    }),
+  });
+
+  await item.ops.startBuild(PROJECT_ID, 1, REQUEST_ID);
+  await item.ops.poll();
+  await waitUntil(() => item.jobs.list().some((job) => job.kind === 'script' && job.state === 'succeeded'));
+  await item.ops.poll();
+  await waitUntil(() => item.calls.includes('voice'));
+
+  assert.deepEqual(item.calls.slice(0, 2), ['prepare', 'voice']);
+  assert.equal(item.project.scriptProofHash, 'proof');
+});
+
+test('непройденная проверка старого сценария не запускает озвучку и запись', async (t) => {
+  const item = await fixture(t, {
+    scriptReady: async () => false,
+    prepareScript: async () => {
+      throw new ShowcaseError('script_not_verified', 'Открылось другое окно.', 409);
+    },
+  });
+
+  const run = await item.ops.startBuild(PROJECT_ID, 1, REQUEST_ID);
+
+  await item.ops.poll();
+  await waitUntil(() => item.jobs.list().some((job) => job.kind === 'script' && job.state === 'failed'));
+  await item.ops.poll();
+
+  await waitUntil(() => item.ops.readBuild(run.id).state === 'failed');
+  assert.deepEqual(item.calls, ['prepare']);
+});
+
+test('проверка сценария публикует смену проходов через обычный прогресс задания', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const item = await fixture(t, {
+    scriptReady: async (project) => Boolean(project.scriptProofHash),
+    prepareScript: async (project, onProgress) => {
+      await onProgress('Проверяю действия на стенде: проход 1 из 6.');
+      await gate;
+      await onProgress('Сверяю рассказ с кадрами: проход 1 из 6.');
+
+      return {
+        ...project,
+        scriptProofHash: 'proof',
+        revision: project.revision + 1,
+      };
+    },
+  });
+
+  await item.ops.startBuild(PROJECT_ID, 1, REQUEST_ID);
+  await item.ops.poll();
+  await waitUntil(() => item.jobs.list().some((job) => /Проверяю действия/.test(job.progress.label)));
+  const progress = item.jobs.list().find((job) => job.kind === 'script');
+
+  assert.equal(progress.state, 'running');
+  assert.match(progress.progress.label, /проход 1 из 6/);
+  release();
+  await waitUntil(() => item.jobs.read(progress.id).state === 'succeeded');
+  assert.ok(item.jobs.read(progress.id).sequence > progress.sequence);
+});
 
 test('один BuildRun проходит все этапы и не занимает очередь maxQueued=1', async (t) => {
   const item = await fixture(t, { project: project({ empty: true }), maxQueued: 1 });

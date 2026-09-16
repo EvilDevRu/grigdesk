@@ -67,6 +67,7 @@ import { createNarrationOps } from './narrationOps.ts';
 import { createRecordingOps, readRecordingTiming } from './recordingOps.ts';
 import { createSceneOps } from './sceneOps.ts';
 import { createScriptOps } from './scriptOps.ts';
+import { readScriptProof } from './script/verification.ts';
 import { createSeedOps } from './seedOps.ts';
 import {
   createSandboxActivityGuard,
@@ -122,7 +123,7 @@ export interface ShowcaseServiceOptions {
   resolveScriptModel?: ((options: {
     modelRef: unknown;
     config: Record<string, unknown>;
-    requireImages: false;
+    requireImages: boolean;
     log: { warn?: (data: unknown, message: string) => unknown };
   }) => Promise<unknown>) | null;
   scriptModelRef?: () => unknown;
@@ -647,6 +648,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       scenes: [],
       scriptGaps: [],
       scriptMapRevision: null,
+      scriptProofHash: null,
       decisions: [],
       latestFinal: null,
       createdAt: now,
@@ -1021,6 +1023,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     return {
       targetFingerprint: scope?.targetFingerprint ?? '',
       policyRevision: scope?.policyRevision ?? '',
+      scriptProofHash: project.scriptProofHash ?? undefined,
       dataRevision: scope?.dataRevision ?? '',
       style: RENDER_STYLE,
       versions: PRODUCER_VERSIONS,
@@ -1130,11 +1133,12 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     publish,
   });
 
-  const { analyze, generateBindings, generateBrief, generateScript } = createScriptOps({
+  const { analyze, ensurePrepared, generateBindings, generateBrief, generateScript } = createScriptOps({
     acquireTargetLease,
     assertEnabled,
     broadcast: options.broadcast,
     limits: options.limits,
+    resolveBrowserPath,
     readProject,
     resolveScriptModel: options.resolveScriptModel ?? null,
     scriptModelRef: options.scriptModelRef ?? null,
@@ -1255,6 +1259,53 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     options.broadcast('showcase-changed', { projectId: run.projectId, revision: saved.revision });
   }
 
+  const manualScriptRequests = new Map<string, Promise<ShowcaseProject>>();
+
+  /**
+   * Вторая модель не должна менять бриф под уже идущей проверкой и срывать её
+   * сохранение конфликтом ревизий. Проверка действует и для другой вкладки.
+   */
+  async function requestScript(
+    id: string,
+    operation: () => Promise<ShowcaseProject>,
+  ): Promise<ShowcaseProject> {
+    assertEnabled();
+
+    if (buildRuns.active(id).length > 0 || manualScriptRequests.has(id)) {
+      throw new ShowcaseError(
+        'script_busy',
+        'Сценарий этого ролика уже готовится. Дождитесь результата текущей сборки или отмените её.',
+        409,
+      );
+    }
+
+    const request = Promise.resolve().then(operation).finally(() => {
+      manualScriptRequests.delete(id);
+    });
+
+    manualScriptRequests.set(id, request);
+
+    return request;
+  }
+
+  /**
+   * Если человек нажал сборку во время ручного разбора, она использует его
+   * результат. Ожидание предшествует чтению редакции для проверки сценария.
+   */
+  async function prepareScript(
+    id: string,
+    onProgress?: (label: string) => Promise<void>,
+  ): Promise<ShowcaseProject> {
+    const pending = manualScriptRequests.get(id);
+
+    if (pending) {
+      await onProgress?.('Дожидаюсь уже запущенного разбора сценария.');
+      await pending;
+    }
+
+    return ensurePrepared(id, onProgress);
+  }
+
   const buildOps = createBuildOps({
     assertEnabled,
     buildRuns,
@@ -1262,6 +1313,9 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     limits: options.limits,
     readProject,
     analyze,
+    prepareScript,
+    scriptReady: async (project) => !manualScriptRequests.has(project.id)
+      && Boolean(await readScriptProof(store.namesOf(project.id).dir, project)),
     generateBindings,
     synthesizeScenes,
     startRecording,
@@ -1509,10 +1563,10 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     disable,
     doctor,
     enable,
-    analyze,
-    generateBindings,
-    generateBrief,
-    generateScript,
+    analyze: (id: string) => requestScript(id, () => analyze(id)),
+    generateBindings: (id: string) => requestScript(id, () => generateBindings(id)),
+    generateBrief: (id: string, taskText: string) => requestScript(id, () => generateBrief(id, taskText)),
+    generateScript: (id: string, taskText: string) => requestScript(id, () => generateScript(id, taskText)),
     finalManifest,
     importSceneAudio,
     jobs,

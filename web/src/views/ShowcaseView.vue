@@ -277,6 +277,12 @@ const openedTargetUrl = computed(() => {
 let stopWatching: (() => void) | null = null;
 let mounted = false;
 
+// Ролик, перечитанный с сервера в ЭТОМ монтировании. Память стора переживает уход в
+// другой раздел, а подписка на события — нет: сцены, звук и запись, опубликованные
+// сборкой за это время, в снимке стора отсутствуют, и по возвращении человек видел
+// «Сцен пока нет» над идущей по восьми сценам сборкой.
+let refreshedId = '';
+
 onMounted(() => {
   stopWatching = watchShowcase(store);
   void loadShowcase(store);
@@ -308,11 +314,18 @@ watch(() => String(route.params.id ?? ''), async (id) => {
     return;
   }
 
-  if (store.opened?.id === id) {
+  const known = store.opened?.id === id;
+
+  if (known && refreshedId === id) {
     return;
   }
 
-  if (!await openShowcaseProject(store, id)) {
+  refreshedId = id;
+
+  // Известный ролик при неудаче остаётся на экране с ошибкой: уводить к списку
+  // есть смысл только когда показывать нечего.
+  if (!await openShowcaseProject(store, id) && !known) {
+    refreshedId = '';
     await router.replace('/showcase');
   }
 }, { immediate: true });

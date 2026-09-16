@@ -15,6 +15,7 @@ import { withRetry } from '../retry.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import { createCodexStepNormalizer } from './_codexSteps.ts';
+import { CODEX_UNTRUSTED_INPUT, runCodexUntrusted } from './_codexUntrusted.ts';
 import {
   codexElicitationPresentation,
   codexElicitationResponse,
@@ -2267,6 +2268,8 @@ export default {
   vendor: 'OpenAI',
   color: '#10a37f',
   order: 2,
+  untrustedInput: CODEX_UNTRUSTED_INPUT,
+  runUntrusted: runCodexUntrusted,
   scopedWorkspace(config: CodexConfig) {
     return codexSupportsRestrictedWorkspace(config?.codexBin);
   },

@@ -447,12 +447,42 @@ test('промпт сценария показывает подписи элем
 
   assert.match(prompt, /элементы: run \(кнопка запуска\), filter/);
   assert.match(prompt, /"gaps":\[/);
-  assert.match(prompt, /покажи ближайший контекст/);
+  assert.match(prompt, /Не подменяй нужный диалог похожим/);
   assert.match(prompt, /ради движения не нужны/);
 });
 
 test('версия промпта объявлена и попадает в решение', () => {
   assert.match(SCRIPT_PROMPT_VERSION, /^showcase-script-/);
+});
+
+test('лимит Codex останавливает сценарий с понятной причиной и HTTP 429', async () => {
+  const ops = createScriptOps({
+    assertEnabled() {},
+    limits: () => ({ maxScenes: 20 }),
+    readProject: async () => ({
+      title: 'Ролик', ref: { kind: 'sandbox', id: 'demo' },
+      target: { status: 'ready', scope: { profile: 'demo', targetFingerprint: 'fp' } },
+    }),
+    acquireTargetLease: async () => null,
+    targets: { selectedInternalScope: async () => ({ screens: SCREENS }) },
+    scriptModelRef: () => ({ provider: 'codex', model: 'gpt-6-astra' }),
+    resolveScriptModel: async () => ({
+      ok: true,
+      ref: { provider: 'codex', model: 'gpt-6-astra' },
+      executor: {
+        async runUntrusted() {
+          throw Object.assign(new Error('Codex исчерпал лимит запросов.'), { code: 'model_rate_limited' });
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(ops.generateBrief('demo', 'Показать новый интерфейс'), (error) => {
+    assert.equal(error.code, 'model_rate_limited');
+    assert.equal(error.status, 429);
+    assert.match(error.message, /выберите другую модель/iu);
+    return true;
+  });
 });
 
 test('вызов модели получает серверный config исполнителя, а не пустой', async () => {

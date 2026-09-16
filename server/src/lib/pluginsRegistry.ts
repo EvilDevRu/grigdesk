@@ -16,9 +16,16 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { normalizePluginCategory } from '../../../shared/pluginsContracts.ts';
-import type { PluginNav, PluginSetting, PluginSetup } from '../../../shared/pluginsContracts.ts';
+import type {
+  PluginNav,
+  PluginPlacementDecl,
+  PluginPlacementState,
+  PluginSetting,
+  PluginSetup,
+} from '../../../shared/pluginsContracts.ts';
+import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/slots/index.ts';
 
-export type { PluginNav, PluginSetting, PluginSetup };
+export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
 // Манифест плагина: системного из SYSTEM или пользовательского из plugin.json.
 export interface PluginManifest {
@@ -33,6 +40,8 @@ export interface PluginManifest {
   category?: string;
   nav: PluginNav | null;
   settings: PluginSetting[];
+  // Слоты, которые плагин умеет занимать; тумблер на каждое место — в его настройках.
+  placements?: PluginPlacementDecl[];
   // Ручка готовности: что плагину нужно на машине и что он ставит сам. Объявляют
   // только системные плагины — у пользовательского серверной части такого рода нет.
   setup?: PluginSetup | null;
@@ -66,7 +75,10 @@ export const SYSTEM: PluginManifest[] = [
         // одного человека, здесь — разговор нескольких, и выбор модели у этих
         // задач разный. Молчаливого fallback на чужой плагин нет: он связал бы
         // два раздела скрытой зависимостью.
-        hint: 'Кнопка «Разобрать на задачи» отдаёт расшифровку модели, и та предлагает черновики. Расшифровка — чужая речь, поэтому нужен безопасный режим недоверенного ввода: подходят Claude и модели Ollama. Не выбрана — задачи собираются вручную, как раньше.',
+        hint: 'Кнопка «Разобрать на задачи» отдаёт расшифровку модели, и та предлагает черновики. '
+          + 'Расшифровка — чужая речь, поэтому нужен безопасный режим недоверенного ввода: '
+          + 'подходят Claude, GPT через Codex и модели Ollama. '
+          + 'Не выбрана — задачи собираются вручную, как раньше.',
         default: null,
       },
     ],
@@ -88,7 +100,7 @@ export const SYSTEM: PluginManifest[] = [
         type: 'model',
         hint: 'Кнопка генерации читает только staged diff и предлагает одно название '
           + 'коммита. Diff считается недоверенным вводом, поэтому подходят исполнители '
-          + 'с безопасным model-only режимом, например Claude и Ollama.',
+          + 'с безопасным model-only режимом: Claude, GPT через Codex и Ollama.',
         default: null,
         requiresCapability: 'untrustedText',
       },
@@ -162,7 +174,10 @@ export const SYSTEM: PluginManifest[] = [
         key: 'triageModel',
         label: 'Модель для разбора',
         type: 'model',
-        hint: 'Одна модель разбирает обращения всех активных каналов. Нужен безопасный Inbox-режим и поддержка изображений; сейчас подходят Claude и vision-модели Ollama. Пока совместимая модель не выбрана, автоматические задачи не создаются.',
+        hint: 'Одна модель разбирает обращения всех активных каналов. '
+          + 'Нужен безопасный Inbox-режим и поддержка изображений: '
+          + 'подходят Claude, GPT через Codex и vision-модели Ollama. '
+          + 'Пока совместимая модель не выбрана, автоматические задачи не создаются.',
         default: null,
       },
       // Разбора вложений эти галки не касаются: речь и кадры видео модель читает
@@ -413,9 +428,9 @@ export const SYSTEM: PluginManifest[] = [
         key: 'scriptModel',
         label: 'Модель для брифа и сценария',
         type: 'model',
-        hint: 'Модель читает текст задачи и разрешённый diff — это недоверенный ввод, '
-          + 'поэтому нужен безопасный model-only режим: подходят Claude и модели Ollama. '
-          + 'Не выбрана — сцены пишутся руками.',
+        hint: 'Модель составляет сценарий и проверяет кадры пробного прохода. '
+          + 'Нужны поддержка изображений и безопасный режим недоверенного ввода: '
+          + 'подходят Claude, GPT через Codex и мультимодальные модели Ollama.',
         default: null,
         requiresCapability: 'untrustedText',
       },
@@ -440,6 +455,49 @@ export const SYSTEM: PluginManifest[] = [
         step: 1,
         hint: 'Проверяется до запуска: превышение видно человеку заранее, а не после '
           + 'получаса записи.',
+      },
+    ],
+  },
+  {
+    id: 'usage-forecast',
+    system: true,
+    // Включён по умолчанию: блок читает те же снимки лимитов, что и полосы, и ничего
+    // не запускает. Единственный поход наружу — публичная страница codexreset.org —
+    // отдельной настройкой, чтобы его можно было погасить, не теряя прогноз.
+    defaultEnabled: true,
+    name: 'Прогноз лимитов',
+    version: '0.1.0',
+    description: 'Хватит ли окна лимита до сброса при вашем темпе и когда окно сбрасывали: '
+      + 'по снимкам полос исполнителей, без запросов к вендорам сверх обычных.',
+    category: 'dev',
+    nav: null,
+    placements: [{ slot: 'provider.popover.after-bars', default: true }],
+    settings: [
+      {
+        key: 'providers',
+        label: 'Исполнители',
+        type: 'providers',
+        default: [],
+        hint: 'У остальных полосы не замеряются и блока во всплывашке нет.',
+      },
+      {
+        key: 'externalSignal',
+        label: 'Сигнал codexreset.org',
+        type: 'checkbox',
+        default: true,
+        hint: 'Раз в час читается публичная страница с историей сбросов Codex; наружу '
+          + 'ничего не уходит. Показывается только у исполнителя Codex.',
+      },
+      {
+        key: 'sampleTickMinutes',
+        label: 'Фоновый замер без окон, минут',
+        type: 'number',
+        default: 15,
+        min: 0,
+        max: 120,
+        step: 5,
+        hint: 'Пока открыто окно кокпита, замеры приносит обычный тик лимитов; без окон '
+          + 'плагин перечитывает их сам с этим шагом. 0 — не замерять без окон.',
       },
     ],
   },
@@ -521,6 +579,9 @@ export async function scanUserPlugins(
           log?.warn?.({ plugin: e.name }, message);
         }),
         settings: Array.isArray(m.settings) ? m.settings : [],
+        placements: normalizePlacements(m.placements, (message: string) => {
+          log?.warn?.({ plugin: m.id }, message);
+        }),
         dir,
         hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
       });
@@ -546,6 +607,65 @@ export function isEnabled(
   const map = (prefsData.plugins || {}) as Record<string, unknown>;
   if (manifest.id in map) return !!map[manifest.id];
   return manifest.defaultEnabled ?? !!manifest.system;
+}
+
+/**
+ * Размещения плагина с состоянием тумблеров: только слоты, известные оглавлению, —
+ * место, которого в ядре нет, в настройках показывать нечего. Умолчание объявляет
+ * манифест (`default`, иначе включено), сохранённое — prefs `pluginPlacements`.
+ */
+export function placementsState(
+  prefsData: Record<string, unknown>,
+  manifest: Pick<PluginManifest, 'id' | 'placements'>,
+): PluginPlacementState[] {
+  const stored = (prefsData.pluginPlacements || {}) as Record<string, unknown>;
+  const saved = (stored[manifest.id] || {}) as Record<string, unknown>;
+  const out: PluginPlacementState[] = [];
+
+  for (const decl of manifest.placements || []) {
+    if (!isPluginSlotName(decl.slot)) {
+      continue;
+    }
+
+    out.push({
+      slot: decl.slot,
+      label: PLUGIN_SLOT_LABELS[decl.slot],
+      enabled: decl.slot in saved ? !!saved[decl.slot] : decl.default ?? true,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Размещения чужого манифеста: массив записей со слотом из оглавления. Незнакомый
+ * слот отбрасывается с предупреждением, а не роняет плагин — место могло появиться в
+ * новой версии кокпита, которой на этой машине ещё нет.
+ */
+export function normalizePlacements(raw: unknown, warn: (message: string) => void): PluginPlacementDecl[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    warn('placements манифеста должен быть массивом — размещения пропущены');
+
+    return [];
+  }
+
+  const out: PluginPlacementDecl[] = [];
+
+  for (const item of raw as Array<{ slot?: unknown; default?: unknown } | null>) {
+    const slot = item && typeof item === 'object' ? item.slot : undefined;
+
+    if (!isPluginSlotName(slot)) {
+      warn(`неизвестный слот размещения: ${String(slot)}`);
+      continue;
+    }
+
+    out.push({ slot, ...(typeof item?.default === 'boolean' && { default: item.default }) });
+  }
+
+  return out;
 }
 
 /** Значения настроек плагина: дефолты схемы, перекрытые сохранёнными. */

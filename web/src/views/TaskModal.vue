@@ -823,16 +823,28 @@
               </p>
             </div>
 
-            <label class="llbl">Критерии приёмки <span class="lopt">— необязательно</span></label>
+            <label class="llbl">Критерии приёмки <span class="lopt">— это и есть объём задачи</span></label>
             <UiTextarea
               v-model="launchForm.criteria"
               data-role="task-launch-note"
-              rows="2"
+              rows="3"
               placeholder="Например: экспорт не падает на выборке 10 000 строк&#10;в отчёте появилась колонка «Менеджер»"
             />
             <p class="lnote">
-              Если оставить пустым, критерии сформулирует этап-переводчик по постановке.
+              По строке на каждый пункт постановки. Конвейер не имеет права сузить этот список сам:
+              пункт, которого здесь нет, он выполнит по постановке как есть или остановится с вопросом.
             </p>
+            <div
+              v-if="launchOpts?.scopeSuggestion?.skip?.length"
+              class="lnote lscope-skip"
+              data-role="task-launch-scope-skip"
+            >
+              <span class="lscope-skip-title">Триаж предлагает НЕ делать:</span>
+              <ul>
+                <li v-for="line in launchOpts.scopeSuggestion.skip" :key="line">{{ line }}</li>
+              </ul>
+              <span>Не согласен — допиши пункт в критерии выше.</span>
+            </div>
 
             <details v-if="launchNeedsDelivery || launchNeedsInstrumentation" class="ladvanced">
               <summary>Дополнительные параметры</summary>
@@ -1605,8 +1617,11 @@ const launchMsg = ref(null);
 // ── Запуск на конвейер ──
 // Маршрут и критерии задаёт человек. Технические immutable-входы route engine форма
 // тоже показывает явно: целевые ветки для ship и exact instrumentation scope для debug.
-// Критерии пустыми допустимы: тогда их формулирует этап-переводчик. Выдумывать их за человека нельзя —
-// отказ на приёмке откатывает маршрут на сборку со сбросом всего хвоста.
+// Критерии предзаполняются объёмом из триажа (`scope.do` — по пункту на каждый пункт
+// постановки): человек видит и правит объём ДО конвейера. Пустые критерии допустимы, но
+// тогда узлы маршрута читают пункты постановки как есть; переводчик формулирует критерии
+// только у маршрутов с планом. Выдумывать их за человека нельзя — отказ на приёмке
+// откатывает маршрут на сборку со сбросом всего хвоста.
 const launchForm = ref(null);   // форма открыта
 const launchOpts = ref(null);   // ответ /launch-options
 const launchOptionsBusy = ref(false);
@@ -1622,13 +1637,19 @@ let launchOptionsRequest = 0;
 function preferredLaunchRoute(opts) {
   return opts.routeSuggestion?.route || opts.defaultRoute;
 }
-function makeLaunchForm(opts, criteria = '') {
+// Объём из триажа — подсказка формы, а не решение: пустое поле заполняется им один раз
+// при открытии, а введённое человеком (в т.ч. стёртое до пустоты при смене профиля)
+// не перезаписывается.
+function suggestedCriteria(opts) {
+  return (opts.scopeSuggestion?.criteria || []).join('\n');
+}
+function makeLaunchForm(opts, criteria = null) {
   const route = preferredLaunchRoute(opts);
   const needsInstrumentation = opts.routeOptions?.[route]?.instrumentationRequired;
   return {
     profile: opts.profile,
     route,
-    criteria,
+    criteria: criteria === null ? suggestedCriteria(opts) : criteria,
     instrumentationFiles: needsInstrumentation
       ? (opts.instrumentationSuggestions || []).slice(0, 1).join('\n')
       : '',
@@ -2453,6 +2474,9 @@ onUnmounted(() => {
 .lshipwarn { margin: 2px 0 0; padding-top: 6px; border-top: 1px solid var(--line);
   color: var(--warn); font-size: 11.5px; line-height: 1.4; }
 .lnote { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.45; }
+.lscope-skip { border: 1px dashed var(--line); border-radius: 9px; padding: 6px 10px; }
+.lscope-skip-title { font-weight: 600; }
+.lscope-skip ul { margin: 4px 0; padding-left: 18px; }
 .ladvanced { margin-top: 2px; border: 1px dashed var(--line); border-radius: 9px; padding: 7px 10px; }
 .ladvanced summary { color: var(--ink-mid); font-size: 12px; cursor: pointer; user-select: none; }
 .ladvanced[open] summary { margin-bottom: 9px; }

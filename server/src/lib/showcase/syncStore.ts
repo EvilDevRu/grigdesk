@@ -28,7 +28,9 @@ import { syncTextHash } from './scenes.ts';
 export const SPEECH_TIMING_VERSION = 1;
 export const SPEECH_TIMING_PRODUCER_VERSION = 'speech-timing-2';
 export const SPEECH_ALIGNMENT_VERSION = 1;
-export const SPEECH_ALIGNMENT_PRODUCER_VERSION = 'speech-alignment-1';
+// speech-alignment-2: безопасные паузы включают паузы синтеза на знаках препинания
+// внутри фразы; прежние sidecar перестраиваются сборкой из raw timing без нового ASR.
+export const SPEECH_ALIGNMENT_PRODUCER_VERSION = 'speech-alignment-2';
 
 // ffprobe округляет длительность WAV до целой миллисекунды. Исправляется только
 // такой хвост; более заметное расхождение означает чужую временную шкалу.

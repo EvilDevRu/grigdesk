@@ -11,6 +11,7 @@ import {
   SYSTEM,
   scanUserPlugins,
   isEnabled,
+  placementsState,
   settingsValues,
 } from '../../lib/pluginsRegistry.ts';
 import type { PluginManifest, PluginSetting } from '../../lib/pluginsRegistry.ts';
@@ -27,7 +28,11 @@ export interface PluginsModuleOptions {
 // Запрос с id плагина в адресе и телом настройки.
 type PluginRequest = FastifyRequest<{
   Params: { id: string };
-  Body: { enabled?: unknown; values?: Record<string, unknown> } | null;
+  Body: {
+    enabled?: unknown;
+    values?: Record<string, unknown>;
+    placements?: Record<string, unknown>;
+  } | null;
 }>;
 
 async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOptions): Promise<void> {
@@ -92,6 +97,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         enabled: isEnabled(p, m),
         settings: m.settings || [],
         values: settingsValues(p, m),
+        placements: placementsState(p, m),
         setup: m.setup || null,
         // Пользовательский серверный код подключается на старте — тумблер подействует после рестарта.
         needsRestart: !m.system && m.hasServer,
@@ -118,6 +124,8 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   fastify.put('/api/plugins/:id/settings', async (request: PluginRequest, reply) => {
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
+    const hasValues = Object.hasOwn(request.body || {}, 'values');
+
     // Принимаем только ключи из схемы — мусор в prefs не попадает.
     const settings = new Map<string, PluginSetting>(
       (m.settings || []).map((setting) => [setting.key, setting]),
@@ -126,6 +134,14 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     for (const [k, v] of Object.entries((request.body || {}).values || {})) {
       const setting = settings.get(k);
       if (!setting) continue;
+      // Область по исполнителям — только массив строк-идентификаторов без повторов:
+      // всё остальное превратилось бы в «все» или в вечный отказ на стороне плагина.
+      if (setting.type === 'providers') {
+        values[k] = Array.isArray(v)
+          ? [...new Set(v.filter((id) => typeof id === 'string' && id).map(String))]
+          : [];
+        continue;
+      }
       if (setting.type !== 'number') {
         values[k] = v;
         continue;
@@ -139,10 +155,29 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       values[k] = Math.min(maximum, minimum + Math.round((clamped - minimum) / step) * step);
     }
     const p = prefs.read();
+    // Тумблеры размещений — только по слотам из манифеста: чужой слот не пишется.
+    const declared = new Set((m.placements || []).map((decl) => decl.slot));
+    const placements: Record<string, boolean> = {};
+    for (const [slot, on] of Object.entries((request.body || {}).placements || {})) {
+      if (declared.has(slot)) placements[slot] = !!on;
+    }
+    const storedPlacements = (p.pluginPlacements as Record<string, unknown> || {});
+    const ownPlacements = (storedPlacements[m.id] as Record<string, unknown> || {});
     prefs.write({
-      pluginSettings: { ...(p.pluginSettings as Record<string, unknown> || {}), [m.id]: values },
+      // Отсутствие values сохраняет параметры; явный values: {} возвращает их умолчания.
+      ...(hasValues && {
+        pluginSettings: { ...(p.pluginSettings as Record<string, unknown> || {}), [m.id]: values },
+      }),
+      ...(Object.keys(placements).length && {
+        pluginPlacements: { ...storedPlacements, [m.id]: { ...ownPlacements, ...placements } },
+      }),
     });
-    return { ok: true, values };
+    // Размещения в ответе — только у плагина, который их объявил: остальным поле ни к чему.
+    return {
+      ok: true,
+      values: hasValues ? values : settingsValues(p, m),
+      ...(m.placements?.length && { placements: placementsState(prefs.read(), m) }),
+    };
   });
 }
 

@@ -711,6 +711,91 @@ test('legacy и stale остаются различимыми, а невозмо
   assert.deepEqual(diagnosticCodes(invalidWait), ['invalid_recording_timing']);
 });
 
+// Модель часто привязывает две подсветки подряд к вложенным фрагментам одной
+// реплики: «держи A, пока не показали B». Буквально это невыполнимо — B пришлось бы
+// показать до конца A, — и сцена уходила человеку. Удержание A заканчивается на
+// начале фрагмента B.
+test('удержание подсветки заканчивается на начале фрагмента следующего действия', () => {
+  const words = [
+    { from: 0, to: 16, startMs: 3000, endMs: 3200 },
+    { from: 18, to: 23, startMs: 4000, endMs: 4200 },
+    { from: 24, to: 29, startMs: 4250, endMs: 4450 },
+    { from: 30, to: 39, startMs: 4500, endMs: 4600 },
+  ];
+  const speech = {
+    canonicalText: CANONICAL_TEXT,
+    durationMs: 4800,
+    sampleRate: SAMPLE_RATE,
+    sampleCount: 4800 * SAMPLE_RATE / 1000,
+    quality: 'word-exact',
+    spans: words.map((word) => ({ ...word, precision: 'word' })),
+    phrases: [
+      { id: 'phrase-click', from: 0, to: 16, startMs: 3000, endMs: 3200 },
+      { id: 'phrase-result', from: 18, to: 39, startMs: 4000, endMs: 4600 },
+    ],
+    safePauses: [{ id: 'between-phrases', textAt: 16, atMs: 3600, quietFromMs: 3200, quietToMs: 4000 }],
+  };
+  const highlight = (actionIndex, atMs, toMs, stableIntervalId) => ({
+    actionIndex, x: 40, y: 40, width: 100, height: 60, validFromMs: atMs, validToMs: toMs, stableIntervalId,
+  });
+  const recording = {
+    durationMs: 4000,
+    calibration: 'fixture-exact',
+    calibrationErrorMs: 0,
+    actions: [
+      { actionIndex: 0, kind: 'click', startMs: 900, anchorMs: 1000, endMs: 1100, readyMs: null },
+      { actionIndex: 1, kind: 'waitVisible', startMs: 1100, anchorMs: 1100, endMs: 3200, readyMs: 3200 },
+      { actionIndex: 2, kind: 'highlight', startMs: 3200, anchorMs: 3200, endMs: 3200, readyMs: null },
+      { actionIndex: 3, kind: 'highlight', startMs: 3700, anchorMs: 3700, endMs: 3700, readyMs: null },
+    ],
+    stableIntervals: [
+      { id: 'lead', fromMs: 0, toMs: 900, frameMs: 800, afterActionIndex: null, beforeActionIndex: 0 },
+      {
+        id: 'first',
+        fromMs: 3200,
+        toMs: 3700,
+        frameMs: 3233 + 1 / 3,
+        afterActionIndex: 2,
+        beforeActionIndex: 3,
+      },
+      {
+        id: 'second',
+        fromMs: 3700,
+        toMs: 4000,
+        frameMs: 3733 + 1 / 3,
+        afterActionIndex: 3,
+        beforeActionIndex: null,
+      },
+    ],
+    removableWaits: [],
+    highlights: [highlight(2, 3200, 3700, 'first'), highlight(3, 3700, 4000, 'second')],
+  };
+  const bindings = {
+    ...BINDINGS,
+    cues: [
+      BINDINGS.cues[0],
+      { id: 'cue-first', actionIndex: 2, from: 18, to: 39, kind: 'hold-through', origin: 'generated' },
+      { id: 'cue-second', actionIndex: 3, from: 24, to: 39, kind: 'hold-through', origin: 'generated' },
+    ],
+  };
+  const input = {
+    ...syncInput({ bindings, recording }),
+    bindingInput: { ...bindingInput(bindings), actions: [...ACTIONS, { kind: 'highlight' }] },
+    speech,
+  };
+  const result = exactPlan(input);
+  const [first, second] = result.plan.highlights;
+
+  assert.ok(diagnosticCodes(result).includes('hold_shortened'));
+  assert.equal(first.cueId, 'cue-first');
+  assert.equal(second.cueId, 'cue-second');
+  assert.ok(
+    Math.abs(first.endMs - second.startMs) < 1e-6,
+    'первая подсветка гаснет там, где загорается вторая',
+  );
+  assert.ok(second.startMs > first.startMs);
+});
+
 test('лимиты сцены и фильма проверяются до выдачи точного плана', () => {
   const sceneLimited = planShowcaseSync(syncInput({
     limits: { maxSceneMs: 6999, remainingFilmMs: 10_000 },

@@ -50,6 +50,11 @@ test('Claude untrusted input передаёт изображения байта�
   assert.throws(() => buildClaudeUntrustedInput('x', [{
     mediaType: 'application/octet-stream', data: 'AA==',
   }]), (error) => error.code === 'unsupported_media');
+  // Предел строки stream-json CLI называется до запуска, а не после его отказа.
+  assert.throws(
+    () => buildClaudeUntrustedInput('x', [{ mediaType: 'image/jpeg', data: 'A'.repeat(1_048_576) }]),
+    (error) => error.code === 'input_too_large' && /1024 КБ/u.test(error.message),
+  );
 });
 
 test('Claude untrusted ход запускается в отдельном временном cwd и не сохраняет session', async (t) => {

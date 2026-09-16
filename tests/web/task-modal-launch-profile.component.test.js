@@ -365,3 +365,47 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
   assert.equal(launchCalls[0][1].profile, 'project-beta');
   assert.equal(Object.hasOwn(launchCalls[0][1], 'runnerPrimary'), false);
 });
+
+// Объём из триажа — предзаполнение критериев приёмки: человек видит и правит объём до
+// конвейера, а «не делаем» показано рядом с причинами. Своё введённое (даже стёртое до
+// пустоты) смена профиля не перезаписывает подсказкой.
+test('TaskModal: критерии предзаполняются объёмом триажа, список «не делаем» показан рядом', async (t) => {
+  const catalog = (override) => ({
+    profiles: ['project-alpha', 'project-beta'],
+    routes: ['small'],
+    defaultRoute: 'small',
+    routeOptions: { small: { deliveryMode: 'publish', instrumentationRequired: false } },
+    repositories: [{ name: 'repo', targetBranch: 'main' }],
+    scopeSuggestion: {
+      criteria: ['Пустая ячейка подсказывает, как снять выбранный тип', 'Окно называет тип и число фраз'],
+      skip: ['Раздел «Частота» — по ответу человека'],
+    },
+    ...override,
+  });
+  const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
+    launchOptions: async (id, profile = '') => (profile === 'project-beta'
+      ? catalog({ profile: 'project-beta' })
+      : catalog({ profile: 'project-alpha' })),
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  await flushPromises();
+  const criteria = wrapper.get('[data-role="task-launch-note"]');
+  assert.equal(
+    criteria.element.value,
+    'Пустая ячейка подсказывает, как снять выбранный тип\nОкно называет тип и число фраз',
+  );
+  assert.match(wrapper.get('[data-role="task-launch-scope-skip"]').text(), /Раздел «Частота» — по ответу человека/);
+
+  // Человек стёр подсказку — смена профиля не возвращает её.
+  await criteria.setValue('');
+  await wrapper.get('#launch-profile').setValue('project-beta');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, '');
+
+  await wrapper.get('[data-role="task-launch-note"]').setValue('Своя формулировка');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
+  await flushPromises();
+  assert.equal(launchCalls.length, 1);
+  assert.deepEqual(launchCalls[0][1].acceptanceCriteria, ['Своя формулировка']);
+});

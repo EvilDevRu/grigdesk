@@ -1013,6 +1013,10 @@ const CLAUDE_UNTRUSTED_MEDIA_TYPES = Object.freeze([
   'image/webp',
 ]);
 const CLAUDE_UNTRUSTED_MAX_IMAGES = 20;
+// Предел одной строки stream-json на stdin CLI. Больше он не читает и отвечает
+// «Input exceeds the maximum length of 1048576 characters» — отказ без указания
+// на причину; здесь та же граница проверяется до запуска и называется словами.
+export const CLAUDE_UNTRUSTED_MAX_INPUT_CHARS = 1_048_576;
 
 function untrustedInputError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -1069,7 +1073,15 @@ export function buildClaudeUntrustedInput(message: unknown, images: readonly Unt
       source: { type: 'base64', media_type: image.mediaType, data: image.data },
     });
   }
-  return `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
+  const line = `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
+  if (line.length > CLAUDE_UNTRUSTED_MAX_INPUT_CHARS) {
+    throw untrustedInputError(
+      'input_too_large',
+      `Вход Claude (${Math.round(line.length / 1024)} КБ) превышает предел строки stream-json `
+        + `${Math.round(CLAUDE_UNTRUSTED_MAX_INPUT_CHARS / 1024)} КБ: сократите текст или число кадров.`,
+    );
+  }
+  return line;
 }
 
 function claudeUntrustedResult(stdout: unknown, stderr: unknown) {

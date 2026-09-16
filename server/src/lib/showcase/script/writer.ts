@@ -33,6 +33,9 @@ export interface DraftSyncCue {
 }
 
 export interface DraftScene {
+  // Только для проверки сохранённых ручных сцен; ответ модели этих полей не принимает.
+  startState?: string | null;
+  readyCondition?: string | null;
   title: string;
   screenId: string;
   // Сцена продолжает предыдущую с того места, где та закончилась, а не открывает

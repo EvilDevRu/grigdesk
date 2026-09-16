@@ -43,12 +43,16 @@ test('SSE: фронт подписан на все события, которы�
   }
 
   // Отсеиваем совпадения из других сравнений по имени: интересуют только те, что
-  // действительно рассылает сервер.
+  // действительно рассылает сервер. Сервер живёт на TypeScript, а часть служебных
+  // процессов осталась на .js: сторож, читавший одни .js, не видел ни одной рассылки
+  // и молча проходил — так `showcase-build-progress` прожил без подписки.
   const broadcast = new Set();
-  for (const file of await walk(SERVER_SRC, ['.js'])) {
+  for (const file of await walk(SERVER_SRC, ['.js', '.ts'])) {
     const source = await readFile(file, 'utf8');
     for (const match of source.matchAll(/broadcast\('([a-z-]+)'/g)) broadcast.add(match[1]);
   }
+
+  assert.ok(broadcast.size > 0, 'сервер не рассылает ни одного события — сторож ослеп');
 
   const missing = [...handled].filter((name) => broadcast.has(name) && !names.has(name));
   assert.deepEqual(

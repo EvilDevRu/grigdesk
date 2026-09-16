@@ -29,6 +29,11 @@ const analysis = {
   files: ['be:src/app.js'],
   unknowns: [],
   questions: [question],
+  // Объём: «делаем» предзаполняет критерии приёмки на запуске, «не делаем» показано рядом.
+  scope: {
+    do: ['В окне обновления частоты назван тип и число фраз'],
+    skip: ['Раздел «Частота» в настройках — по ответу человека'],
+  },
   route_guess: 'feature',
   route_kind: 'feature',
   route_depth: 'mid',

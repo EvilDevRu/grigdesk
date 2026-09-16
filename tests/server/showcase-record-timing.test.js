@@ -12,7 +12,8 @@ import { startEgressGuard } from '../../server/src/lib/showcase/browserPolicy.ts
 import {
   browserMonoToVideoPts,
   calibrateVideoTiming,
-  probeVideoFrameHashes,
+  probeVideoFrameSignatures,
+  stableFrameRunsOf,
   trimSceneClipExact,
   videoContainsCalibrationMarker,
 } from '../../server/src/lib/showcase/render/clipTrim.ts';
@@ -146,7 +147,7 @@ test('recordingTiming публикуется атомарно и битый JSON
     version: 1,
     clipContentHash: 'clip-content',
     actionsHash: decoded.actionsHash,
-    producerVersion: 'recorder-5',
+    producerVersion: 'recorder-6',
     ...timing,
   });
   assert.equal(await readRecordingTiming({ ...readInput, clipContentHash: 'other' }), null);
@@ -269,9 +270,9 @@ test('visual marker связывает browser monotonic с PTS и не попа
     await videoContainsCalibrationMarker(trimmed.path, recorded.calibration ?? []),
     false,
   );
-  const hashes = await probeVideoFrameHashes(trimmed.path);
+  const runs = stableFrameRunsOf(await probeVideoFrameSignatures(trimmed.path), { minFrames: 5 });
 
-  assert.ok(hashes.some((frame, index) => index > 0 && frame.hash === hashes[index - 1].hash));
+  assert.ok(runs.length > 0, 'у неподвижного стенда есть устойчивые серии кадров');
 
   for (const action of mark.actions ?? []) {
     const localAnchor = browserMonoToVideoPts(calibration, action.anchorMonoMs)
@@ -279,4 +280,66 @@ test('visual marker связывает browser monotonic с PTS и не попа
 
     assert.ok(localAnchor >= 0 && localAnchor <= trimmed.durationMs, `${action.kind}: ${localAnchor}`);
   }
+
+  // Перед действием, меняющим экран, запись отдыхает: монтажу нужен измеренный
+  // устойчивый интервал ПЕРЕД действием, а вплотную идущие действия его не
+  // оставляли. Перед ожиданием паузы нет — иначе готовность результата измерялась
+  // бы позже настоящей.
+  const [click, waitVisible, highlight] = mark.actions ?? [];
+
+  assert.ok(
+    waitVisible.startMonoMs - click.endMonoMs < 450,
+    `click → waitVisible: пауза ${Math.round(waitVisible.startMonoMs - click.endMonoMs)} мс`,
+  );
+  assert.ok(
+    highlight.startMonoMs - waitVisible.endMonoMs >= 450,
+    `waitVisible → highlight: пауза ${Math.round(highlight.startMonoMs - waitVisible.endMonoMs)} мс`,
+  );
+});
+
+// Серии считаются от опорного кадра с допуском: codec noise VP9 не рвёт неподвижный
+// экран, а плавное затухание и курсор серию заканчивают.
+test('stableFrameRunsOf: шум кодека не рвёт серию, дрейф и курсор — рвут', () => {
+  const size = 64 * 36;
+  const frame = (index, fill, patch = null) => {
+    const pixels = new Uint8Array(size).fill(fill);
+
+    if (patch) {
+      pixels[patch.at] = patch.value;
+    }
+
+    return { index, ptsMs: index * 1000 / 30, pixels };
+  };
+
+  const noisy = Array.from({ length: 12 }, (_, index) => frame(
+    index,
+    // Соседние кадры пляшут в пределах ±2 вокруг опорного значения.
+    128 + [0, 2, -2, 1, -1, 2, 0, -2, 1, 2, -1, 0][index],
+  ));
+
+  assert.deepEqual(stableFrameRunsOf(noisy, { minFrames: 5 }), [{ fromIndex: 0, toIndex: 11 }]);
+
+  // Затухание на уровень за кадр: относительно предыдущего кадра оно «в допуске»,
+  // относительно опорного — уходит за него на четвёртом кадре.
+  const fade = Array.from({ length: 12 }, (_, index) => frame(index, 128 + index));
+
+  assert.deepEqual(stableFrameRunsOf(fade, { minFrames: 3 }), [
+    { fromIndex: 0, toIndex: 3 },
+    { fromIndex: 4, toIndex: 7 },
+    { fromIndex: 8, toIndex: 11 },
+  ]);
+
+  // Один пиксель курсора на неподвижном фоне — уже другое состояние экрана.
+  const cursor = [
+    ...Array.from({ length: 6 }, (_, index) => frame(index, 128)),
+    ...Array.from({ length: 6 }, (_, index) => frame(6 + index, 128, { at: 700, value: 180 })),
+  ];
+
+  assert.deepEqual(stableFrameRunsOf(cursor, { minFrames: 5 }), [
+    { fromIndex: 0, toIndex: 5 },
+    { fromIndex: 6, toIndex: 11 },
+  ]);
+
+  // Серия короче минимума не публикуется.
+  assert.deepEqual(stableFrameRunsOf(cursor.slice(0, 4), { minFrames: 5 }), []);
 });

@@ -70,7 +70,7 @@ export const renameShowcaseProject = async (store, title) => {
 export const cancelShowcaseJob = async (store, id) => { harness().calls.push(['cancel', id]); };
 export const openShowcaseProject = async (store, id) => {
   harness().calls.push(['open', id]);
-  return true;
+  return harness().openResult;
 };
 export const closeShowcaseProject = () => { harness().calls.push(['close']); };
 export const analyzeShowcase = async () => { harness().calls.push(['analyze']); };
@@ -395,6 +395,7 @@ async function mountView(t, {
   preview = async () => new Blob(),
   narrationPreview = async () => new Blob(),
   updateResult = true,
+  openResult = true,
 } = {}) {
   const browser = await createUiBrowser(url);
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -405,6 +406,7 @@ async function mountView(t, {
     preview,
     narrationPreview,
     updateResult,
+    openResult,
     confirmations: [],
     promptValue,
     prompts: [],
@@ -850,6 +852,46 @@ test('адрес с идентификатором открывает ролик
   });
 
   assert.deepEqual(calls.filter(([name]) => name === 'open'), [['open', 'project-1']]);
+});
+
+// Память стора переживает уход в другой раздел, а подписка на события — нет. Пока
+// человек был в чатах, сборка опубликовала сцены; вернувшись, он видел снимок
+// стора с пустым сценарием над идущей по восьми сценам сборкой.
+test('ролик из памяти стора перечитывается при возврате в раздел', async (t) => {
+  const byAddress = await mountView(t, { opened: project(), routeId: 'project-1' });
+
+  assert.deepEqual(
+    byAddress.calls.filter(([name]) => name === 'open'),
+    [['open', 'project-1']],
+    'адрес совпал с памятью — ролик всё равно перечитан один раз',
+  );
+
+  const withoutAddress = await mountView(t, { opened: project(), routeId: '' });
+
+  assert.ok(
+    withoutAddress.calls.some(([name, to]) => name === 'route' && to === '/showcase/project-1'),
+    'открытый ролик возвращается в адрес',
+  );
+  assert.deepEqual(
+    withoutAddress.calls.filter(([name]) => name === 'open'),
+    [['open', 'project-1']],
+    'и перечитывается по этому адресу',
+  );
+});
+
+test('неудача перечитывания известного ролика не уводит к списку', async (t) => {
+  const { calls } = await mountView(t, {
+    opened: project(),
+    routeId: 'project-1',
+    openResult: false,
+  });
+
+  assert.deepEqual(calls.filter(([name]) => name === 'open'), [['open', 'project-1']]);
+  assert.equal(
+    calls.some(([name, to]) => name === 'route' && to === '/showcase'),
+    false,
+    'на экране есть что показать — ошибка видна на нём, а не на списке',
+  );
 });
 
 test('«Ролики» закрывает карточку и возвращает адрес к разделу', async (t) => {
@@ -1411,6 +1453,118 @@ test('идущее задание показано ходом по сценам 
   assert.deepEqual(calls.filter(([name]) => name === 'cancel'), [['cancel', 'job-record']]);
 });
 
+test('во время проверки сценария плеер явно показывает предыдущую сборку', async (t) => {
+  const run = {
+    id: 'run-rebuild',
+    projectId: 'project-1',
+    state: 'running',
+    sequence: 3,
+    stage: 'script-if-empty',
+    initialRevision: 1,
+    children: [{
+      stage: 'script-if-empty',
+      jobId: 'job-script',
+      attempt: 1,
+      state: 'running',
+    }],
+    cancelRequested: false,
+    error: null,
+    startedAt: '2026-09-15T15:11:00.000Z',
+    updatedAt: '2026-09-15T15:15:00.000Z',
+    finishedAt: null,
+  };
+  const { wrapper } = await mountView(t, {
+    opened: project({ latestFinal: final() }),
+    buildRuns: [run],
+    jobs: [{
+      id: 'job-script',
+      projectId: 'project-1',
+      kind: 'script',
+      state: 'running',
+      attempt: 1,
+      sequence: 4,
+      progress: {
+        index: 0,
+        total: 0,
+        label: 'Сверяю рассказ с кадрами: проход 2 из 6.',
+      },
+      error: null,
+      startedAt: run.startedAt,
+      finishedAt: null,
+    }],
+  });
+
+  assert.equal(wrapper.find('#showcase-final-title').text(), 'Предыдущая сборка');
+  assert.match(wrapper.find('[data-role="previous-build"]').text(), /Идёт пересборка/);
+  assert.match(wrapper.text(), /Проверяю сценарий/);
+  assert.match(wrapper.text(), /Сверяю рассказ с кадрами: проход 2 из 6/);
+  assert.equal(hasButton(wrapper, 'Пересобрать ролик'), false);
+});
+
+// Ожидание человека для сервера терминально: задание из него не выходит, продолжение
+// создаёт новую попытку. Панель крутила по нему спиннер «Собираю ролик» без конца,
+// прятала причину и кнопку сборки — на вопрос «собирается или повис?» экран отвечал
+// неправдой. Сценарий здесь родился внутри самого прогона, и по старту прогон
+// «старше» собственного сценария: сравнение по моменту остановки это учитывает.
+test('остановка на проверке синхронизации показана причиной, а не вечным ходом', async (t) => {
+  const reason = 'Сцена «Значок обновления у типа» требует проверки синхронизации. '
+    + 'Перед привязкой «cue-1» нет устойчивого кадра для удержания.';
+  const reviewRun = {
+    id: 'run-review',
+    projectId: 'project-1',
+    state: 'awaiting_review',
+    sequence: 9,
+    stage: 'timeline-and-assemble',
+    initialRevision: 1,
+    children: [{
+      stage: 'timeline-and-assemble', jobId: 'job-assemble', attempt: 1, state: 'awaiting_review',
+    }],
+    cancelRequested: false,
+    error: { code: 'child_awaiting_review', message: reason },
+    startedAt: '2026-09-15T11:47:37.000Z',
+    updatedAt: '2026-09-15T11:57:00.000Z',
+    finishedAt: '2026-09-15T11:57:00.000Z',
+  };
+  const reviewJob = {
+    id: 'job-assemble',
+    projectId: 'project-1',
+    kind: 'assemble',
+    state: 'awaiting_review',
+    attempt: 1,
+    sequence: 3,
+    progress: { index: 2, total: 8, label: 'нужна проверка синхронизации' },
+    error: reason,
+    startedAt: '2026-09-15T11:56:56.000Z',
+    finishedAt: '2026-09-15T11:56:58.000Z',
+  };
+  const bornInRun = project({
+    decisions: [{
+      id: 'brief-1',
+      kind: 'script',
+      inputHash: 'showcase-script-7',
+      decidedAt: '2026-09-15T11:48:52.000Z',
+      note: 'Бриф предложен моделью и ждёт правки человека.',
+    }],
+  });
+  const { wrapper } = await mountView(t, { opened: bornInRun, buildRuns: [reviewRun], jobs: [reviewJob] });
+  const problem = wrapper.find('[data-role="build-failure"]');
+
+  assert.equal(wrapper.find('[role="progressbar"]').exists(), false, 'ход сборки не показывается');
+  assert.doesNotMatch(wrapper.text(), /Собираю ролик/);
+  assert.match(problem.text(), /Сборка ждёт исправления/);
+  assert.match(problem.text(), /нет устойчивого кадра/, 'причина названа человеку');
+  assert.ok(buttonByText(wrapper, 'Собрать ролик'), 'после правки сцены сборку можно повторить');
+
+  // Задание без полного запуска (прежние ручки стадий) отчитывается само.
+  const alone = await mountView(t, { opened: bornInRun, buildRuns: [], jobs: [reviewJob] });
+  const aloneProblem = alone.wrapper.find('[data-role="build-failure"]');
+
+  assert.equal(alone.wrapper.find('[role="progressbar"]').exists(), false);
+  assert.match(aloneProblem.text(), /сборка — ждёт решения/);
+  assert.match(aloneProblem.text(), /нет устойчивого кадра/);
+  assert.ok(buttonByText(alone.wrapper, 'Собрать ролик'));
+});
+
 // «Разобрать заново» заменяет сцены целиком. Остановка сборки и отказ задания,
 // случившиеся до этого, относятся к прежним сценам: их карточка читалась как новая
 // ошибка сразу после разбора, хотя новую сборку ещё не запускали.
@@ -1456,7 +1610,12 @@ test('остановка сборки и отказ задания старше 
   assert.ok(buttonByText(wrapper, 'Собрать ролик'), 'сборку можно запустить');
 
   // Тот же отказ после разбора — уже про нынешние сцены, и его видно.
-  const laterRun = { ...stoppedRun, startedAt: '2026-09-12T04:00:00.000Z' };
+  const laterRun = {
+    ...stoppedRun,
+    startedAt: '2026-09-12T04:00:00.000Z',
+    updatedAt: '2026-09-12T04:02:00.000Z',
+    finishedAt: '2026-09-12T04:02:00.000Z',
+  };
   const current = await mountView(t, { opened: reparsed, buildRuns: [laterRun], jobs: [] });
 
   assert.match(current.wrapper.find('[data-role="build-failure"]').text(), /Сборка остановлена/);

@@ -47,6 +47,9 @@ const DEFAULTS = {
   // и значения их настроек. Схемы настроек — в lib/plugins-registry.js и манифестах.
   plugins: {},
   pluginSettings: {},
+  // Тумблеры размещений плагинов в слотах: { <id>: { <slot>: boolean } }. Отсутствие
+  // ключа = умолчание манифеста; сами слоты объявлены в shared/slots/.
+  pluginPlacements: {},
   // Свои настройки исполнителей (плашки «Настройки → Исполнители»):
   // { <providerId>: { <settingId>: value } }. Схему объявляет сам executor полем
   // `settings` (lib/executors/index.js) — здесь лежит только выбор человека.

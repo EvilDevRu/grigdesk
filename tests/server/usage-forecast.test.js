@@ -402,6 +402,124 @@ test('без окон модуль сам зовёт хук перечитыва
   assert.equal(refreshes, seen);
 });
 
+test('выключенный плагин инертен: маршрут 404, снимки не копятся, внешний сигнал и фон молчат', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-forecast-disabled-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const app = Fastify({ logger: false });
+  const bus = sseBus();
+  let enabled = false;
+  let refreshes = 0;
+  let fetches = 0;
+  const external = {
+    peek: () => ({ providerId: 'codex', source: 's', homepage: 'https://s/', fetchedAt: null, stale: true,
+      error: null, lastReset: null, chance24h: null, chance48h: null }),
+    async read() {
+      fetches += 1;
+
+      return this.peek();
+    },
+  };
+
+  app.decorate('sse', bus);
+  app.decorate('pluginEnabled', () => enabled);
+  app.decorate('pluginSettings', () => ({}));
+  app.decorate('refreshProvidersUsage', async () => {
+    refreshes += 1;
+  });
+  await app.register(usageForecastModule, {
+    filePath: path.join(root, 'usage-forecast.json'),
+    external,
+    externalTickMs: 20,
+    sampleTickMs: 20,
+  });
+  await app.ready();
+  t.after(() => app.close());
+
+  bus.broadcast('providers-usage', { usage: usageOf(50, { at: T0 }) });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.equal((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).statusCode, 404);
+  assert.equal(bus.sent.filter((event) => event.name === 'usage-forecast').length, 0);
+  assert.equal(refreshes, 0);
+  assert.equal(fetches, 0);
+
+  // Тумблер включили — без рестарта всё оживает.
+  enabled = true;
+  bus.broadcast('providers-usage', { usage: usageOf(52, { at: T0 + 10 * 60_000 }) });
+  const response = await app.inject({ method: 'GET', url: '/api/usage-forecast' });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(parseUsageForecastSnapshot(response.json()).bars.length, 1);
+  assert.ok(await waitFor(() => refreshes >= 1 && fetches >= 1), 'фон и внешний сигнал не ожили');
+});
+
+test('область по исполнителям: чужие снимки не копятся, а внешний сигнал уходит только своему', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-forecast-scope-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const app = Fastify({ logger: false });
+  const bus = sseBus();
+  let settings = { providers: ['claude'], externalSignal: true };
+  let fetches = 0;
+  const external = {
+    peek: () => ({ providerId: 'codex', source: 's', homepage: 'https://s/', fetchedAt: null, stale: true,
+      error: null, lastReset: null, chance24h: 10, chance48h: 20 }),
+    async read() {
+      fetches += 1;
+
+      return this.peek();
+    },
+  };
+
+  app.decorate('sse', bus);
+  app.decorate('pluginEnabled', () => true);
+  app.decorate('pluginSettings', () => settings);
+  await app.register(usageForecastModule, {
+    filePath: path.join(root, 'usage-forecast.json'),
+    external,
+    externalTickMs: 20,
+    sampleTickMs: 0,
+  });
+  await app.ready();
+  t.after(() => app.close());
+
+  bus.broadcast('providers-usage', {
+    usage: {
+      ...usageOf(50, { at: T0 }),
+      claude: { state: 'ok', bars: [{ key: 'weekly', label: 'Неделя (7д)', pct: 20 }], dataCheckedAt: T0 },
+    },
+  });
+
+  const scoped = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
+
+  assert.deepEqual(scoped.bars.map((bar) => bar.providerId), ['claude']);
+  assert.equal(scoped.external, null);
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(fetches, 0, 'источник вне области не читается ни на старте, ни по таймеру');
+
+  // Область сняли — Codex в ответе, но его ряд начнётся только со следующего снимка.
+  settings = { providers: [], externalSignal: true };
+  const all = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
+
+  assert.deepEqual(all.bars.map((bar) => bar.providerId), ['claude']);
+  assert.equal(all.external?.providerId, 'codex');
+  assert.ok(await waitFor(() => fetches > 0), 'снятие области должно разрешить чтение источника');
+
+  // Область можно сузить на ходу: уже включённый таймер перестаёт ходить в сеть.
+  settings = { providers: ['claude'], externalSignal: true };
+  const scopedFetches = fetches;
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(fetches, scopedFetches);
+
+  settings = { providers: [], externalSignal: false };
+  const quiet = parseUsageForecastSnapshot((await app.inject({ method: 'GET', url: '/api/usage-forecast' })).json());
+
+  assert.equal(quiet.external, null);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(fetches, scopedFetches, 'выключенный внешний сигнал тоже не должен читаться');
+});
+
 test('без хука в приложении модуль без окон просто ждёт событий', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-forecast-nohook-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

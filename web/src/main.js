@@ -5,6 +5,8 @@ import { router } from './router.js';
 import { usePwaStore } from './stores/pwa.js';
 import App from './App.vue';
 import './styles/index.css';
+// Системные плагины веба регистрируют свои размещения в слотах до первой отрисовки.
+import './plugins/index.ts';
 
 const pinia = createPinia();
 createApp(App).use(pinia).use(router).mount('#app');

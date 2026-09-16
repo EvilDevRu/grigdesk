@@ -73,7 +73,8 @@
 [плагин докера](docs/cockpit/guide/docker.md),
 [раздел песочниц](docs/cockpit/guide/sandboxes.md),
 [раздел презентаций](docs/cockpit/guide/showcase.md),
-[прогноз лимитов](docs/cockpit/guide/usage-forecast.md). Выясненное про продукт кладут туда, а не
+[прогноз лимитов](docs/cockpit/guide/usage-forecast.md),
+[слоты и размещения плагинов](docs/cockpit/guide/plugins.md). Выясненное про продукт кладут туда, а не
 в базу; в базу — опыт этой установки.
 
 @CLAUDE.local.md

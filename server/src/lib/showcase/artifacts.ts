@@ -48,6 +48,7 @@ export interface RenderStyle {
 export interface ArtifactInputs {
   targetFingerprint: string;
   policyRevision: string;
+  scriptProofHash?: string;
   dataRevision: string;
   style: RenderStyle;
   versions: ProducerVersions;
@@ -148,6 +149,7 @@ export function clipInputHash(
     actions: scene.actions,
     style: inputs.style,
     target: inputs.targetFingerprint,
+    ...(inputs.scriptProofHash ? { scriptProofHash: inputs.scriptProofHash } : {}),
     policy: inputs.policyRevision,
     data: inputs.dataRevision,
     version: inputs.versions.recorder,

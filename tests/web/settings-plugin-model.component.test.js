@@ -123,7 +123,10 @@ function makePluginsStore(values, manifest = INBOX_PLUGIN) {
       byId: (id) => (id === plugin.id ? plugin : null),
       async load() {},
       async toggle() {},
-      async saveSettings(id, next) { saved.push({ id, values: JSON.parse(JSON.stringify(next)) }); },
+      async saveSettings(id, next) {
+        plugin.values = JSON.parse(JSON.stringify(next));
+        saved.push({ id, values: plugin.values });
+      },
     },
   };
 }
@@ -134,10 +137,13 @@ let mountNonce = 0;
  * Форма параметров живёт в модалке плитки, поэтому каждый тест открывает нужный плагин
  * и дальше работает с её содержимым. Teleport на время теста оставляем на месте.
  */
-async function mountSettings(t, { value = null, plugin = INBOX_PLUGIN } = {}) {
+async function mountSettings(t, {
+  value = null, plugin = INBOX_PLUGIN, prepareProviders = () => {},
+} = {}) {
   const prefix = `__pluginModel${mountNonce += 1}`;
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
   const prov = makeProvidersStore();
+  prepareProviders(prov);
   const { store: plugins, saved } = makePluginsStore(value, plugin);
   globalThis[`${prefix}Stores`] = {
     usePluginsStore: () => plugins,
@@ -202,15 +208,33 @@ test('карточка триажа предлагает только испол
   );
 });
 
+test('«Презентации» предлагают Codex с безопасным вводом и сохраняют его модель и усилие', async (t) => {
+  const plugin = { ...SYSTEM.find((entry) => entry.id === 'showcase'), setup: undefined };
+  const { wrapper, select, saved, flushPromises } = await mountSettings(t, {
+    plugin,
+    prepareProviders(prov) {
+      const provider = prov.providers.find((entry) => entry.id === 'codex');
+      provider.available = true;
+      provider.capabilities.untrustedText = true;
+      provider.models = [{ id: 'gpt-6-astra', name: 'GPT-6 Astra', efforts: ['low', 'high'] }];
+    },
+  });
+
+  assert.ok(select.find('option[value="codex:gpt-6-astra"]').exists());
+  await select.setValue('codex:gpt-6-astra');
+  await effortSelect(wrapper).setValue('high');
+  await wrapper.get('.plugin-save').trigger('click');
+  await flushPromises();
+  assert.deepEqual(saved.at(-1).values.scriptModel, {
+    provider: 'codex', model: 'gpt-6-astra', effort: 'high',
+  });
+});
+
 test('выбор сохраняется парой «исполнитель + модель», а id со слэшем не рвётся', async (t) => {
   const { wrapper, plugins, saved, select, flushPromises } = await mountSettings(t);
 
   await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
-  assert.deepEqual(
-    plugins.plugin.values.triageModel,
-    { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest' },
-    'id модели содержит и слэши, и двоеточия — режем строку по ПЕРВОМУ двоеточию',
-  );
+  assert.equal(plugins.plugin.values.triageModel, null, 'несохранённый выбор остаётся в черновике');
 
   await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
@@ -226,7 +250,7 @@ test('модель недоступного исполнителя выбира�
   const { wrapper, plugins, saved, select, flushPromises } = await mountSettings(t);
 
   await select.setValue('codex:gpt-5.6');
-  assert.deepEqual(plugins.plugin.values.triageModel, { provider: 'codex', model: 'gpt-5.6' });
+  assert.equal(plugins.plugin.values.triageModel, null);
 
   await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
@@ -240,9 +264,13 @@ test('сохранённый выбор показан выбранным', asyn
 });
 
 test('«не выбрана» обнуляет настройку — автомат обязан замолчать', async (t) => {
-  const { plugins, select } = await mountSettings(t, { value: { provider: 'claude', model: 'claude-opus-5' } });
+  const { wrapper, plugins, select, flushPromises } = await mountSettings(t, {
+    value: { provider: 'claude', model: 'claude-opus-5' },
+  });
 
   await select.setValue('');
+  await wrapper.get('.plugin-save').trigger('click');
+  await flushPromises();
   assert.equal(plugins.plugin.values.triageModel, null, 'пустой выбор — это null, а не пустая пара');
 });
 
@@ -330,7 +358,7 @@ test('усилие уезжает в ту же пару и сохраняетс�
 
   await effort.setValue('xhigh');
   assert.deepEqual(plugins.plugin.values.triageModel,
-    { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' });
+    { provider: 'claude', model: 'claude-opus-5' }, 'усилие применяется только после сохранения');
 
   await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
@@ -340,11 +368,13 @@ test('усилие уезжает в ту же пару и сохраняетс�
 });
 
 test('пустое усилие СНИМАЕТ ключ, а не пишет пустую строку', async (t) => {
-  const { wrapper, plugins } = await mountSettings(
+  const { wrapper, plugins, flushPromises } = await mountSettings(
     t, { value: { provider: 'claude', model: 'claude-opus-5', effort: 'max' } },
   );
 
   await effortSelect(wrapper).setValue('');
+  await wrapper.get('.plugin-save').trigger('click');
+  await flushPromises();
   assert.deepEqual(plugins.plugin.values.triageModel, { provider: 'claude', model: 'claude-opus-5' },
     'пустая строка в effort означала бы «уровень выбран и он пустой»');
 });
@@ -352,11 +382,13 @@ test('пустое усилие СНИМАЕТ ключ, а не пишет пу
 test('смена модели не переносит уровень, которого у новой нет', async (t) => {
   // Ровно та грабля, из-за которой уровень вообще сверяется: `--effort xhigh` у модели
   // без такой возможности не игнорируется, а РОНЯЕТ запуск CLI.
-  const { wrapper, plugins, select } = await mountSettings(
+  const { wrapper, plugins, select, flushPromises } = await mountSettings(
     t, { value: { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' } },
   );
 
   await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
+  await wrapper.get('.plugin-save').trigger('click');
+  await flushPromises();
   assert.deepEqual(plugins.plugin.values.triageModel,
     { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest' },
     'у локальной модели эффорт бинарный — xhigh переносить некуда');
@@ -364,6 +396,8 @@ test('смена модели не переносит уровень, котор
   // А совпавший уровень переносится: терять осознанный выбор человека тоже нельзя.
   await effortSelect(wrapper).setValue('high');
   await select.setValue('claude:claude-opus-5');
+  await wrapper.get('.plugin-save').trigger('click');
+  await flushPromises();
   assert.equal(plugins.plugin.values.triageModel.effort, 'high');
 });
 

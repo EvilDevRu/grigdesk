@@ -32,6 +32,7 @@ import { toPublicScope } from './targets.ts';
 import type { ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
 import { syncActionsHash } from './scenes.ts';
+import { readScriptProof } from './script/verification.ts';
 import type {
   RecordingTimingCandidate,
   RecordingTimingUnavailableCandidate,
@@ -516,6 +517,11 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
       });
       const lineageOf = (sceneId: string) => chainLineage(project.scenes, sceneId);
       const names = store.namesOf(id);
+      const proof = await readScriptProof(names.dir, project);
+
+      if (project.scriptProofHash && !proof) {
+        throw new ShowcaseError('script_proof_stale', 'Сценарий изменился после проверки на стенде.', 409);
+      }
       const timingCurrent = new Map<string, boolean>();
 
       await Promise.all(project.scenes.map(async (scene) => {
@@ -549,7 +555,8 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
       }
 
       const screenOf = (scene: ShowcaseProject['scenes'][number]) => {
-        const screen = internal.screens.find((item) => item.id === scene.screenId);
+        const screen = (proof?.rehearsal.screens ?? internal.screens)
+          .find((item) => item.id === scene.screenId);
 
         if (!screen) {
           throw new ShowcaseError(
@@ -559,7 +566,14 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
           );
         }
 
-        return { scene, screen };
+        const index = [...project.scenes].sort((a, b) => a.order - b.order)
+          .findIndex((item) => item.id === scene.id);
+
+        return {
+          scene,
+          screen,
+          observations: proof?.rehearsal.observations.filter((step) => step.sceneIndex === index),
+        };
       };
       const taskChains = chains.map((chain) => chain.map(screenOf));
       const inputHashes = Object.fromEntries(

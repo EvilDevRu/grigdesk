@@ -44,6 +44,12 @@ export interface TriageAnalysis {
   areas?: unknown;
   title?: unknown;
   summary?: unknown;
+  scope?: unknown;
+}
+
+export interface ScopeSuggestion {
+  criteria: string[];
+  skip: string[];
 }
 
 const RECORD_SEPARATOR = '\x1e';
@@ -425,6 +431,32 @@ export function instrumentationSuggestions(
     } catch { /* триажная подсказка не должна ломать launch-options */ }
   }
   return suggestions.slice(0, 64);
+}
+
+/**
+ * Объём из оценки триажа для формы запуска: `criteria` предзаполняют «Критерии приёмки»
+ * (это `scope.do` — по пункту на каждый пункт постановки), `skip` показываются рядом как
+ * «не делаем — почему». Так человек подтверждает объём ДО конвейера: узлы маршрута
+ * не имеют права закрыть пункт постановки сами, а с пустыми критериями им было не за
+ * что держаться — живой прогон сузился до одной подсказки, и никто этого не увидел до приёмки.
+ * Пределы те же, что у тикета: строка до 2000 символов, не больше 100 строк.
+ */
+export function scopeSuggestion(
+  analysis: TriageAnalysis | null | undefined,
+): ScopeSuggestion {
+  const scope = analysis?.scope && typeof analysis.scope === 'object'
+    ? analysis.scope as Record<string, unknown>
+    : {};
+  const lines = (raw: unknown): string[] => {
+    const result: string[] = [];
+    for (const item of Array.isArray(raw) ? raw : []) {
+      if (typeof item !== 'string') continue;
+      const line = item.replace(/\s+/g, ' ').trim().slice(0, 2000);
+      if (line && !result.includes(line)) result.push(line);
+    }
+    return result.slice(0, 100);
+  };
+  return { criteria: lines(scope.do), skip: lines(scope.skip) };
 }
 
 export function diagnosisSuggestion(

@@ -25,6 +25,8 @@ import { ShowcaseError } from '../errors.ts';
 import { browserLaunchArgs } from '../browserPolicy.ts';
 import { DEFAULT_QUIET, trackNetwork } from './networkQuiet.ts';
 import type { RenderStyle } from '../artifacts.ts';
+import { actionTarget, assertObservedSurfaces } from '../script/observation.ts';
+import type { ObservedElement, ScreenObservation } from '../script/observation.ts';
 
 // Накладка курсора — доверенный код recorder-а. Она не приходит от модели, ничего
 // не кликает и события не перехватывает: указатель нарисован поверх страницы.
@@ -118,6 +120,16 @@ const ACTION_LEAD_MS = 600;
 // успеть увидеть, КУДА нажимают, иначе смена экрана читается как самопроизвольная.
 const CLICK_LEAD_MS = 400;
 
+// Пауза между действиями. Монтаж держит кадр ПЕРЕД действием, когда реплика о нём
+// начинается позже самого действия, а опорой такого удержания служит только
+// измеренный устойчивый интервал в промежутке между действиями. Без паузы hover
+// и следующий за ним клик смыкались вплотную (конец hover = начало клика), и
+// держать перед кликом было нечего — сцена уходила человеку на «проверку
+// синхронизации». Запас над минимальной длиной устойчивого интервала (150 мс)
+// оставляет место переходам интерфейса после действия (обычно до 300 мс: иконка
+// по наведению, раскрытие списка) и дублям кадров компоновщика.
+const ACTION_GAP_MS = 500;
+
 // Сколько сцена держит подсветку: два пульса по 900 мс должны попасть в запись.
 const HIGHLIGHT_HOLD_MS = 1_900;
 
@@ -149,12 +161,13 @@ export interface ScreenMap {
   id: string;
   path: string;
   readySelector: string;
-  elements: { id: string; selector: string }[];
+  elements: ObservedElement[];
 }
 
 export interface ChainSceneInput {
   scene: ShowcaseScene;
   screen: ScreenMap;
+  observations?: ScreenObservation[];
 }
 
 export interface RecordChainInput {
@@ -496,11 +509,10 @@ async function highlightBox(page: Page, box: TargetBox): Promise<void> {
 }
 
 /**
- * Селектор действия берётся из КАРТЫ ЭКРАНОВ профиля по идентификатору элемента.
- * Модель называет идентификатор, но не передаёт селектор: иначе она могла бы
- * указать на любой элемент страницы, включая тот, которого нет в объявлении.
+ * Селектор берётся из карты профиля или проверенного наблюдения браузера.
+ * Модель называет только идентификатор: собственного селектора у неё нет.
  */
-function selectorOf(screen: ScreenMap, targetId: string): string {
+async function checkedActionTarget(page: Page, screen: ScreenMap, targetId: string) {
   const element = screen.elements.find((item) => item.id === targetId);
 
   if (!element) {
@@ -511,7 +523,7 @@ function selectorOf(screen: ScreenMap, targetId: string): string {
     );
   }
 
-  return element.selector;
+  return actionTarget(page, element);
 }
 
 /**
@@ -667,7 +679,8 @@ async function settleTarget(
   return stableBox(target);
 }
 
-async function runAction(
+/** Выполняет одно проверенное действие; общий путь для репетиции и записи. */
+export async function runAction(
   page: Page,
   screen: ScreenMap,
   action: ShowcaseAction,
@@ -717,7 +730,7 @@ async function runAction(
   }
 
   if (action.kind === 'waitVisible') {
-    const target = page.locator(selectorOf(screen, action.targetId)).first();
+    const target = await checkedActionTarget(page, screen, action.targetId);
 
     await target.waitFor({ state: 'visible', timeout: timeoutMs });
 
@@ -729,7 +742,7 @@ async function runAction(
   }
 
   if (action.kind === 'hover' || action.kind === 'highlight') {
-    const target = page.locator(selectorOf(screen, action.targetId)).first();
+    const target = await checkedActionTarget(page, screen, action.targetId);
 
     // Цель у края экрана подсвечивать бессмысленно: зритель увидит рамку без
     // содержимого, о котором речь. Сначала цель дожидается появления, затем встаёт
@@ -794,7 +807,7 @@ async function runAction(
   }
 
   if (action.kind === 'click') {
-    const target = page.locator(selectorOf(screen, action.targetId)).first();
+    const target = await checkedActionTarget(page, screen, action.targetId);
 
     // Playwright прокрутил бы к цели сам, но лишь до края экрана: зритель должен
     // видеть, ГДЕ нажимают, а не угадывать по рамке у нижней кромки. Цель, которой
@@ -887,16 +900,23 @@ async function recordChainOnce(input: RecordChainInput): Promise<RecordChainResu
   });
 
   const allowedMethods = input.allowedMethods ?? ['GET', 'HEAD'];
+  let discoveredAction = false;
+  let blockedActionRequests = 0;
 
   await context.route('**/*', async (route, request) => {
     const origin = new URL(request.url()).origin;
     const method = request.method();
     // OPTIONS — preflight, вопрос браузера перед cross-origin запросом, а не
     // действие страницы: сам запрос всё равно проверяется своим методом.
-    const permitted = allowedMethods.includes(method) || method === 'OPTIONS';
+    const permitted = (discoveredAction ? ['GET', 'HEAD'] : allowedMethods).includes(method)
+      || method === 'OPTIONS';
 
     if (!input.allowedOrigins.includes(origin) || !permitted) {
       blockedRequests.push({ url: request.url(), method });
+
+      if (discoveredAction && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        blockedActionRequests += 1;
+      }
       await route.abort('blockedbyclient');
 
       return;
@@ -941,6 +961,18 @@ async function recordChainOnce(input: RecordChainInput): Promise<RecordChainResu
           actionTimeoutMs,
           readyTimeoutMs,
           measured,
+          restrictToRead: () => {
+            discoveredAction = true;
+          },
+          assertNetwork: () => {
+            if (blockedActionRequests > 0) {
+              throw new ShowcaseError(
+                'observed_action_network',
+                'Найденное действие требует запроса, не разрешённого для автоматического показа.',
+                409,
+              );
+            }
+          },
         }));
       } catch (error) {
         // Сорвалась цепочка, а человек чинит сцену: причина обязана назвать её —
@@ -1014,6 +1046,8 @@ interface SceneRunOptions {
   actionTimeoutMs: number;
   readyTimeoutMs: number;
   measured: boolean;
+  restrictToRead: () => void;
+  assertNetwork: () => void;
 }
 
 /**
@@ -1084,6 +1118,13 @@ async function runScene(
   await page.waitForTimeout(ACTION_LEAD_MS);
 
   for (const [actionIndex, action] of item.scene.actions.entries()) {
+    // Пауза нужна перед действием, которое меняет экран: перед ожиданиями она была
+    // бы пустым временем, а измеренная готовность результата уехала бы позже
+    // настоящей; goto же вовсе не действие на экране.
+    if (actionIndex > 0 && !['goto', 'wait', 'waitVisible'].includes(action.kind)) {
+      await page.waitForTimeout(ACTION_GAP_MS);
+    }
+
     if (action.kind === 'goto') {
       // Декларативный goto означает уже открытый и проверенный экран. Загрузочные
       // кадры намеренно вырезаются, поэтому его полезная опора — measured ready,
@@ -1101,6 +1142,12 @@ async function runScene(
       continue;
     }
 
+    if ('targetId' in action && item.screen.elements.some((element) => (
+      element.id === action.targetId && element.observed
+    ))) {
+      options.restrictToRead();
+    }
+
     const recorded = await runAction(
       page,
       item.screen,
@@ -1112,6 +1159,15 @@ async function runScene(
 
     actions.push(recorded.action);
 
+    const observation = item.observations?.find((step) => step.actionIndex === actionIndex);
+
+    if (observation) {
+      await page.waitForTimeout(600);
+      await network.quiet(settle);
+      await assertObservedSurfaces(page, observation.surfaces);
+      options.assertNetwork();
+    }
+
     if (recorded.highlight) {
       highlights.push(recorded.highlight);
     }
@@ -1122,6 +1178,8 @@ async function runScene(
   if (!(await network.quiet(settle))) {
     unsettled += 1;
   }
+
+  options.assertNetwork();
 
   const finishedMonoMs = await browserMonoNow(page);
   const timedHighlights = highlights.map((highlight) => {

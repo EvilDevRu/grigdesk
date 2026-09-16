@@ -9,6 +9,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
+import { createScene } from '../../server/src/lib/showcase/scenes.ts';
+import {
+  briefHashOf, scriptHashOf, SCRIPT_VERIFICATION_VERSION, writeScriptProof,
+} from '../../server/src/lib/showcase/script/verification.ts';
 
 const TARGET_CONTRACT = {
   version: 1,
@@ -79,6 +83,144 @@ test('ролик берёт имя у стенда, а не у человека'
   const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
 
   assert.equal(project.title, 'Проект demo-profile');
+});
+
+test('исчерпанный лимит модели оставляет явную причину и освобождает повторный разбор', async (t) => {
+  const { service } = await fixture(t, {
+    deps: {
+      resolveScriptModel: async () => ({
+        ok: true,
+        ref: { provider: 'claude', model: 'claude-opus-5' },
+        executor: {
+          runUntrusted: async () => {
+            throw new Error("You've hit your session limit · resets 12:50am (Asia/Novosibirsk)");
+          },
+        },
+      }),
+    },
+  });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assert.rejects(() => service.analyze(project.id), (error) => {
+      assert.equal(error.code, 'model_rate_limited');
+      assert.match(error.message, /исчерпала лимит/);
+      assert.match(error.message, /12:50am/);
+
+      return true;
+    });
+  }
+
+  assert.equal((await service.readProject(project.id)).scenes.length, 0);
+});
+
+test('сборка дожидается уже начатого разбора и не запускает конкурирующую модель', async (t) => {
+  let release;
+  let entered;
+  let calls = 0;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const { service } = await fixture(t, {
+    deps: {
+      resolveScriptModel: async () => ({
+        ok: true,
+        ref: { provider: 'claude', model: 'claude-opus-5' },
+        executor: {
+          runUntrusted: async () => {
+            calls += 1;
+
+            if (calls === 1) {
+              entered();
+              await gate;
+
+              return { reply: JSON.stringify({ points: ['Обзор', 'Действия', 'Результат'] }) };
+            }
+
+            return {
+              reply: JSON.stringify({ scenes: [{
+                title: 'Обзор',
+                screenId: 'overview',
+                narration: 'Показываем обзор.',
+                caption: 'Обзор',
+                subtitleText: 'Показываем обзор.',
+                actions: [],
+              }] }),
+            };
+          },
+        },
+      }),
+    },
+  });
+  let project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+
+  project = await service.store.updateProject(project.id, project.revision, (current) => ({
+    ...current,
+    brief: ['Прежний план'],
+    scenes: [createScene(current, {
+      title: 'Прежняя сцена',
+      screenId: 'overview',
+      narration: 'Прежний текст.',
+      caption: 'Обзор',
+      subtitleText: 'Прежний текст.',
+      actions: [],
+      startState: null,
+      readyCondition: null,
+    })],
+  }));
+  const proof = await writeScriptProof(service.store.namesOf(project.id).dir, {
+    version: SCRIPT_VERIFICATION_VERSION,
+    targetFingerprint: project.target.scope.targetFingerprint,
+    policyRevision: project.target.scope.policyRevision,
+    dataRevision: project.target.scope.dataRevision,
+    briefHash: briefHashOf(project.brief),
+    scriptHash: scriptHashOf(project.scenes),
+    rehearsal: {
+      screens: [],
+      observations: [],
+      completed: true,
+    },
+  });
+
+  project = await service.store.updateProject(project.id, project.revision, (current) => ({
+    ...current,
+    scriptProofHash: proof,
+  }));
+  const analysis = service.analyze(project.id);
+
+  await started;
+  await assert.rejects(() => service.analyze(project.id), (error) => error.code === 'script_busy');
+  await service.startBuild(project.id, project.revision, 'build-during-analysis');
+
+  for (let attempt = 0; attempt < 100 && !service.jobs.list().length; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  await service.pollWorkers();
+  const job = service.jobs.list().find((entry) => entry.kind === 'script');
+
+  assert.ok(job);
+  assert.equal(job.state, 'running');
+  assert.match(job.progress.label, /уже запущенного разбора/);
+  await assert.rejects(() => service.generateBrief(project.id, ''), (error) => error.code === 'script_busy');
+  assert.equal(calls, 1);
+  release();
+  const analyzed = await analysis;
+
+  assert.equal(calls, 2);
+  assert.equal(analyzed.scenes.length, 1);
+
+  for (let attempt = 0; attempt < 100 && service.jobs.read(job.id).state === 'running'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  // Браузер в этой проверке не настроен: отказ наступает только ПОСЛЕ разбора,
+  // вместо второй модели и конфликта ревизий сохранённых сцен.
+  assert.equal(service.jobs.read(job.id).state, 'failed');
+  assert.match(service.jobs.read(job.id).error, /браузер/);
 });
 
 test('разбор сам читает связанную задачу и не спрашивает её текст', async (t) => {

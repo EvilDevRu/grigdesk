@@ -79,8 +79,8 @@
                 </span>
                 <span class="plugin-tile-name">{{ plugin.name }}</span>
                 <span class="plugin-tile-meta">
-                  {{ plugin.settings.length
-                    ? settingCountLabel(plugin.settings.length)
+                  {{ settingCount(plugin)
+                    ? settingCountLabel(settingCount(plugin))
                     : 'без параметров' }}
                 </span>
               </span>
@@ -196,12 +196,16 @@ const pluginList = computed<PluginListItem[]>(() => (Array.isArray(pluginsStore.
   ? pluginsStore.list as PluginListItem[]
   : []));
 
+function settingCount(plugin: PluginListItem): number {
+  return (plugin.settings?.length || 0) + (plugin.placements?.length || 0);
+}
+
 const stats = computed(() => {
   const list = pluginList.value;
 
   return {
     enabled: list.filter((plugin) => plugin.enabled).length,
-    configurable: list.filter((plugin) => plugin.settings?.length).length,
+    configurable: list.filter((plugin) => settingCount(plugin) > 0).length,
     custom: list.filter((plugin) => !plugin.system).length,
   };
 });
@@ -244,7 +248,7 @@ function matchesFilter(plugin: PluginListItem): boolean {
       : true;
 
   return stateMatches
-    && (!configurableOnly.value || (plugin.settings?.length || 0) > 0)
+    && (!configurableOnly.value || settingCount(plugin) > 0)
     && (!customOnly.value || !plugin.system);
 }
 

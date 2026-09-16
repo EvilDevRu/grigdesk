@@ -48,11 +48,15 @@
         <strong>{{ runProblem.title }}</strong>
         {{ runProblem.message }}
       </UiInlineMessage>
-      <UiInlineMessage v-else-if="latestJobFailure" tone="danger" data-role="build-failure">
+      <UiInlineMessage
+        v-else-if="latestJobProblem"
+        :tone="latestJobProblem.state === 'awaiting_review' ? 'warning' : 'danger'"
+        data-role="build-failure"
+      >
         <strong>
-          {{ JOB_KIND[latestJobFailure.kind] }} — {{ JOB_STATE[latestJobFailure.state] }}.
+          {{ JOB_KIND[latestJobProblem.kind] }} — {{ JOB_STATE[latestJobProblem.state] }}.
         </strong>
-        {{ latestJobFailure.error || describeJob(latestJobFailure) }}
+        {{ latestJobProblem.error || describeJob(latestJobProblem) }}
       </UiInlineMessage>
     </template>
   </section>
@@ -113,7 +117,7 @@ const JOB_TITLE: Record<ShowcaseJob['kind'], string> = {
 
 const STAGE_TITLE: Record<ShowcaseBuildStage, string> = {
   preflight: 'Проверяю готовность',
-  'script-if-empty': 'Составляю сценарий',
+  'script-if-empty': 'Проверяю сценарий',
   bindings: 'Связываю речь и действия',
   'voice-and-alignment': 'Готовлю озвучку',
   'record-if-needed': 'Записываю сцены',
@@ -124,7 +128,7 @@ const STAGE_TITLE: Record<ShowcaseBuildStage, string> = {
 
 const STAGE_DETAIL: Record<ShowcaseBuildStage, string> = {
   preflight: 'проверяю цель и входные данные',
-  'script-if-empty': 'готовлю план и сцены',
+  'script-if-empty': 'проверяю действия на стенде и сверяю рассказ с кадрами',
   bindings: 'строю точные смысловые связи',
   'voice-and-alignment': 'синтезирую и выравниваю речь',
   'record-if-needed': 'снимаю только устаревшие сцены',
@@ -136,8 +140,15 @@ const STAGE_DETAIL: Record<ShowcaseBuildStage, string> = {
 const ACTIVE_RUN_STATES = new Set<ShowcaseBuildRun['state']>([
   'queued', 'running', 'cancelling',
 ]);
+// `awaiting_review` — остановка на человеке, для сервера она терминальна: задание из
+// неё не выходит, а продолжение создаёт новую попытку. Считать её ходом значило бы
+// крутить спиннер «Собираю ролик» без конца, прятать причину и кнопку сборки —
+// человек спрашивал «собирается или повис?», а ответ лежал в скрытом сообщении.
 const ACTIVE_JOB_STATES = new Set<ShowcaseJob['state']>([
-  'queued', 'running', 'awaiting_review', 'cancelling',
+  'queued', 'running', 'cancelling',
+]);
+const PROBLEM_JOB_STATES = new Set<ShowcaseJob['state']>([
+  'failed', 'interrupted', 'awaiting_review',
 ]);
 
 const activeRun = computed(() => (
@@ -220,8 +231,11 @@ const scenarioSince = computed(() => (
     .at(-1) ?? ''
 ));
 
-const beforeScenario = (startedAt: string): boolean => (
-  Boolean(scenarioSince.value) && startedAt < scenarioSince.value
+// Сравнивается момент ОСТАНОВКИ, а не старта: полная сборка пустого ролика сама
+// рождает сценарий своей первой стадией, и по старту она «старше» собственного
+// сценария — её остановка на монтаже пряталась как отчёт о прежних сценах.
+const beforeScenario = (stoppedAt: string | null, startedAt: string): boolean => (
+  Boolean(scenarioSince.value) && (stoppedAt ?? startedAt) < scenarioSince.value
 );
 
 const runProblem = computed(() => {
@@ -231,7 +245,7 @@ const runProblem = computed(() => {
     !run
     || run.state === 'succeeded'
     || ACTIVE_RUN_STATES.has(run.state)
-    || beforeScenario(run.startedAt)
+    || beforeScenario(run.finishedAt, run.startedAt)
   ) {
     return null;
   }
@@ -255,12 +269,14 @@ const runProblem = computed(() => {
   };
 });
 
-const latestJobFailure = computed(() => {
+// Задание без полного запуска (прежние ручки стадий) о своей остановке отчитывается
+// само: и отказ, и ожидание человека показываются у кнопки сборки.
+const latestJobProblem = computed(() => {
   const latest = [...props.jobs]
-    .filter((job) => !beforeScenario(job.startedAt))
+    .filter((job) => !beforeScenario(job.finishedAt, job.startedAt))
     .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
 
-  return latest && (latest.state === 'failed' || latest.state === 'interrupted') ? latest : null;
+  return latest && PROBLEM_JOB_STATES.has(latest.state) ? latest : null;
 });
 
 const canBuild = computed(() => (

@@ -28,6 +28,7 @@ import {
   loadFactoryLaunchProfile,
   normalizeFactoryLaunchInputs,
   profileMatchingTriage,
+  scopeSuggestion,
 } from '../../lib/factoryLaunchContract.ts';
 import {
   confirmRouteResume, logLength, readLogSince,
@@ -1392,6 +1393,8 @@ async function factoryModule(
       repositories: [],
       instrumentationSuggestions: [],
       diagnosisSuggestion: { kind: 'functional', signal: '' },
+      // Объём из триажа не зависит от каталога: человеку он нужен и при fail-closed профиле
+      scopeSuggestion: scopeSuggestion(analysis),
       profileContractError: null,
     };
     if (body.readOnly) {

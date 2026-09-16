@@ -272,6 +272,9 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     idempotencyKey: string;
     inputHashes: Record<string, string>;
     inputRevision: number;
+    // Составной модельный этап содержит несколько конечных проходов. Его общий
+    // срок задаёт координатор; обычные задания сохраняют предел настроек.
+    timeoutMs?: number;
   }): Promise<{ record: JobRecord; reused: boolean }> {
     assertRecovered();
 
@@ -294,6 +297,9 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     }
 
     const { maxQueued, jobTimeoutMs } = options.limits();
+    const timeoutMs = Number.isFinite(input.timeoutMs) && Number(input.timeoutMs) > 0
+      ? Number(input.timeoutMs)
+      : jobTimeoutMs;
 
     if (active().length >= maxQueued) {
       throw new ShowcaseError(
@@ -318,7 +324,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
       ...(stageKey ? { stageKeys: [stageKey] } : {}),
       inputHashes: input.inputHashes,
       inputRevision: input.inputRevision,
-      deadlineAt: new Date(Date.now() + jobTimeoutMs).toISOString(),
+      deadlineAt: new Date(Date.now() + timeoutMs).toISOString(),
       heartbeatAt: null,
       identity: { pid: null, starttime: null, cmdline: null },
     };

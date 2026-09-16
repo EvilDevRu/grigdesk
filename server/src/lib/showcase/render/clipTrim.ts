@@ -11,7 +11,6 @@
 // Цепочка сцен пишется одним видео, и тогда у среза есть и конец: клип сцены —
 // от её готовности до её конца, а хвост записи принадлежит следующим сценам.
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 
 import { ShowcaseError } from '../errors.ts';
@@ -90,11 +89,30 @@ export interface ExactTrimResult {
   fps: number;
 }
 
-export interface VideoFrameHash {
+export interface VideoFrameSignature {
   index: number;
   ptsMs: number;
-  hash: string;
+  // Серый кадр 64×36 после area-усреднения: прокрутку, диалог и курсор он
+  // различает, а на полный кадр память не тратит.
+  pixels: Uint8Array;
 }
+
+export interface StableFrameRun {
+  fromIndex: number;
+  // Включительно: последний кадр того же экранного состояния.
+  toIndex: number;
+}
+
+export const STABLE_FRAME_WIDTH = 64;
+export const STABLE_FRAME_HEIGHT = 36;
+
+// Допуск сравнения с опорным кадром серии, в уровнях серого 0..255. Измерено на
+// восьми клипах VP9 1080p: между соседними кадрами неподвижного экрана codec
+// noise даёт до ±2 (изредка 3) на десятках пикселей, мигающий каретой ввод —
+// около 7, движущийся курсор — от 40. Прежнее округление до 16 уровней шум не
+// снимало: пиксель на границе ступени перескакивал от ±1, и у таблиц с плотной
+// вёрсткой ни один кадр не совпадал с соседним — устойчивых интервалов не было.
+export const STABLE_FRAME_TOLERANCE = 3;
 
 function finite(value: number): boolean {
   return Number.isFinite(value);
@@ -452,11 +470,11 @@ export async function videoContainsCalibrationMarker(
   ));
 }
 
-/** Exact decoded-frame hashes for conservative stable-frame intervals. */
-export async function probeVideoFrameHashes(file: string): Promise<VideoFrameHash[]> {
+/** Уменьшенные decoded-кадры для поиска устойчивых интервалов клипа. */
+export async function probeVideoFrameSignatures(file: string): Promise<VideoFrameSignature[]> {
   const frames = await probeVideoFrames(file);
-  const width = 64;
-  const height = 36;
+  const width = STABLE_FRAME_WIDTH;
+  const height = STABLE_FRAME_HEIGHT;
   const frameBytes = width * height;
   const output = await run('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-i', file,
@@ -468,26 +486,67 @@ export async function probeVideoFrameHashes(file: string): Promise<VideoFrameHas
     ? output.stdout
     : Buffer.from(output.stdout as unknown as string, 'binary');
   const count = Math.min(frames.length, Math.floor(bytes.length / frameBytes));
-  const result: VideoFrameHash[] = [];
+  const result: VideoFrameSignature[] = [];
 
   for (let index = 0; index < count; index += 1) {
-    const source = bytes.subarray(index * frameBytes, (index + 1) * frameBytes);
-    const quantized = Buffer.allocUnsafe(frameBytes);
-
-    // Lossy VP9 может на соседних статичных кадрах менять младшие биты. Низкое
-    // разрешение и 16 уровней убирают codec noise, но сохраняют прокрутку/диалог.
-    for (let offset = 0; offset < source.length; offset += 1) {
-      quantized[offset] = Math.round((source[offset] as number) / 16);
-    }
-
     result.push({
       index,
       ptsMs: (frames[index] as VideoFramePoint).ptsMs,
-      hash: createHash('sha256').update(quantized).digest('hex').slice(0, 16),
+      pixels: Uint8Array.from(bytes.subarray(index * frameBytes, (index + 1) * frameBytes)),
     });
   }
 
   return result;
+}
+
+/** Кадр относится к тому же состоянию экрана, что и опорный, пока каждый пиксель в допуске. */
+function withinTolerance(reference: Uint8Array, candidate: Uint8Array, tolerance: number): boolean {
+  if (reference.length !== candidate.length) {
+    return false;
+  }
+
+  for (let offset = 0; offset < reference.length; offset += 1) {
+    if (Math.abs((reference[offset] as number) - (candidate[offset] as number)) > tolerance) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Серии кадров одного экранного состояния. Каждый кадр сравнивается с ОПОРНЫМ —
+ * первым кадром серии, а не с предыдущим: иначе медленное затухание или плавная
+ * анимация, меняющие картинку на уровень за кадр, прошли бы за неподвижный экран.
+ * Серия короче `minFrames` не публикуется: два одинаковых кадра после 25→30 CFR
+ * могут быть всего лишь дублем `fps`, а не доказательством неподвижности.
+ */
+export function stableFrameRunsOf(
+  frames: readonly VideoFrameSignature[],
+  options: { minFrames: number; tolerance?: number },
+): StableFrameRun[] {
+  const tolerance = options.tolerance ?? STABLE_FRAME_TOLERANCE;
+  const runs: StableFrameRun[] = [];
+
+  for (let start = 0; start < frames.length;) {
+    const reference = (frames[start] as VideoFrameSignature).pixels;
+    let end = start;
+
+    while (
+      end + 1 < frames.length
+      && withinTolerance(reference, (frames[end + 1] as VideoFrameSignature).pixels, tolerance)
+    ) {
+      end += 1;
+    }
+
+    if (end - start + 1 >= options.minFrames) {
+      runs.push({ fromIndex: start, toIndex: end });
+    }
+
+    start = end + 1;
+  }
+
+  return runs;
 }
 
 /**

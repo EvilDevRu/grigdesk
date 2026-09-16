@@ -69,6 +69,14 @@ const analysisMeta = objectOf({
   context_tokens: optional(numeric),
 });
 
+// Объём работы словами результата для пользователя: `do` — по пункту на каждый пункт
+// постановки, `skip` — что не делаем и почему. `do` предзаполняет критерии приёмки в форме
+// запуска: человек видит и правит объём ДО конвейера, а не узнаёт о сужении на приёмке.
+const analysisScope = objectOf({
+  do: listOf(text),
+  skip: listOf(text),
+});
+
 const analysis = objectOf({
   complexity: optional(numeric),
   risk: optional(numeric),
@@ -80,6 +88,7 @@ const analysis = objectOf({
   files: optional(listOf(text)),
   unknowns: optional(listOf(text)),
   questions: optional(listOf(analysisQuestion)),
+  scope: optional(analysisScope),
   route_guess: optional(text),
   route_kind: optional(text),
   route_depth: optional(text),
@@ -156,6 +165,7 @@ export type AnalysisState = ReturnType<typeof analysisState>;
 export type AnalysisStatus = ReturnType<typeof analysisStatus>;
 export type AnalysisQuestionOption = ReturnType<typeof questionOption>;
 export type AnalysisQuestion = ReturnType<typeof analysisQuestion>;
+export type AnalysisScope = ReturnType<typeof analysisScope>;
 export type AnalysisMeta = ReturnType<typeof analysisMeta>;
 export type Analysis = ReturnType<typeof analysis>;
 export type AnalysisRow = ReturnType<typeof analysisRow>;

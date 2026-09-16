@@ -30,6 +30,7 @@ import type {
   AnalysisQuestion,
   AnalysisQueueOutcome,
   AnalysisRow,
+  AnalysisScope,
   AnalysisState,
   AnalysisStatus,
 } from '../../../../shared/analysisContracts.ts';
@@ -99,6 +100,24 @@ function profileName(profile: TriageProfile): string {
 
 function stableId(prefix: string, value: unknown): string {
   return `${prefix}-${createHash('sha256').update(String(value)).digest('hex').slice(0, 12)}`;
+}
+
+/**
+ * Объём задачи из оценки: два списка строк без пустых и дублей. Модель может отдать
+ * объект не той формы или не отдать вовсе (старые оценки) — тогда оба списка пусты,
+ * и форма запуска просто ничего не предзаполняет.
+ */
+export function normalizeAnalysisScope(value: unknown): AnalysisScope {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const lines = (raw: unknown): string[] => {
+    const result: string[] = [];
+    for (const item of Array.isArray(raw) ? raw : []) {
+      const line = typeof item === 'string' ? boundedText(item, 2000) : '';
+      if (line && !result.includes(line)) result.push(line);
+    }
+    return result.slice(0, 100);
+  };
+  return { do: lines(source.do), skip: lines(source.skip) };
 }
 
 /**
@@ -603,7 +622,11 @@ export class Analyzer {
         // Вопросы нормализуются и здесь: у списка и у детали одна форма ответа,
         // иначе бейдж доски читал бы сырой ответ модели, а карточка — разобранный.
         if (m[2] === 'analysis') {
-          row.analysis = { ...data, questions: normalizeAnalysisQuestions(data.questions) };
+          row.analysis = {
+            ...data,
+            questions: normalizeAnalysisQuestions(data.questions),
+            scope: normalizeAnalysisScope(data.scope),
+          };
         } else {
           row.status = data;
         }
@@ -632,6 +655,7 @@ export class Analyzer {
     const normalizedAnalysis = analysis ? {
       ...analysis,
       questions: normalizeAnalysisQuestions(analysis.questions),
+      scope: normalizeAnalysisScope(analysis.scope),
     } : analysis;
     return {
       task: Number(id),
@@ -849,6 +873,7 @@ export class Analyzer {
         ...analysis,
         task: Number(id),
         questions: normalizeAnalysisQuestions(analysis.questions),
+        scope: normalizeAnalysisScope(analysis.scope),
       };
       await this._enrich(outputJson, normalized, {
         ticket,

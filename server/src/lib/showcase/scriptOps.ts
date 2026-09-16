@@ -4,11 +4,21 @@
 // безопасным режимом: без инструментов, рабочей области и продолжения сессии.
 // Обычный `run` не используется даже как запасной путь.
 //
-// Ответ модели проверяется как данные из сети: каждый идентификатор экрана и
-// элемента сверяется с картой профиля, а форма — разбором. Одна попытка исправить
-// форму и не больше: крутить модель по кругу дорого, а человеку полезнее честный
-// отказ с возможностью написать сцены самому.
+// Форма ответа и идентификаторы проходят строгий разбор. Пробное исполнение
+// дополняет карту наблюдениями браузера и проверяет рассказ по кадрам; исправление
+// обязательно исполняется заново до публикации сцен и начала озвучки.
+import path from 'node:path';
+
 import { ShowcaseError } from './errors.ts';
+import { launchRehearsal } from './script/rehearsalRunner.ts';
+import {
+  briefHashOf,
+  readScriptProof,
+  scriptHashOf,
+  SCRIPT_VERIFICATION_VERSION,
+  verifyAndRepairScript,
+  writeScriptProof,
+} from './script/verification.ts';
 import { collectDiffContext } from './script/context.ts';
 import {
   buildBindingsPrompt,
@@ -73,6 +83,7 @@ function plainText(value: string): string {
 }
 
 export interface ScriptOpsDeps {
+  resolveBrowserPath?: () => Promise<string | null>;
   assertEnabled: () => void;
   broadcast: (event: string, data: unknown) => void;
   limits: () => { maxScenes: number };
@@ -82,7 +93,7 @@ export interface ScriptOpsDeps {
   resolveScriptModel: ((options: {
     modelRef: unknown;
     config: Record<string, unknown>;
-    requireImages: false;
+    requireImages: boolean;
     log: { warn?: (data: unknown, message: string) => unknown };
   }) => Promise<unknown>) | null;
   scriptModelRef: (() => unknown) | null;
@@ -114,7 +125,10 @@ export function createScriptOps(deps: ScriptOpsDeps) {
    * даже как запасной путь: текст задачи и diff не должны получить инструменты,
    * рабочую область и продолжение сессии.
    */
-  async function runUntrustedModel(prompt: string): Promise<string> {
+  async function runUntrustedModel(
+    prompt: string,
+    images: { mediaType: string; data: string }[] = [],
+  ): Promise<string> {
     const resolver = deps.resolveScriptModel;
 
     if (!resolver) {
@@ -125,14 +139,16 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     const target = await resolver({
       modelRef: deps.scriptModelRef?.() ?? null,
       config,
-      requireImages: false,
+      requireImages: images.length > 0,
       log: {},
     }) as Record<string, unknown> | null;
 
     if (!target || target.ok !== true) {
       throw new ShowcaseError(
         'model_unavailable',
-        'Модель для брифа и сценария не выбрана или недоступна.',
+        target?.error === 'unsupported_media'
+          ? 'Выбранная модель не умеет проверять кадры ролика. Нужна модель с поддержкой изображений.'
+          : 'Модель для брифа и сценария не выбрана или недоступна.',
         503,
       );
     }
@@ -150,16 +166,37 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     const ref = target.ref as { provider: string; model: string };
     const settings = deps.providerSettings?.() ?? {};
-    const reply: unknown = await runUntrusted.call(executor, {
-      config,
-      message: prompt,
-      model: ref.model,
-      effort: typeof target.effort === 'string' ? target.effort : undefined,
-      images: [],
-      providerSettings: (settings[ref.provider] ?? {}) as Record<string, unknown>,
-      timeoutMs: SCRIPT_MODEL_TIMEOUT_MS,
-      log: {},
-    });
+    let reply: unknown;
+
+    try {
+      reply = await runUntrusted.call(executor, {
+        config,
+        message: prompt,
+        model: ref.model,
+        effort: typeof target.effort === 'string' ? target.effort : undefined,
+        images,
+        providerSettings: (settings[ref.provider] ?? {}) as Record<string, unknown>,
+        timeoutMs: SCRIPT_MODEL_TIMEOUT_MS,
+        log: {},
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if ((error as { code?: string })?.code === 'model_rate_limited'
+          || /hit your (?:session|usage) limit/iu.test(message)) {
+        const reset = /resets\s+([^\n]+)/iu.exec(message)?.[1]?.slice(0, 120);
+
+        throw new ShowcaseError(
+          'model_rate_limited',
+          'Выбранная модель сценария исчерпала лимит. '
+            + (reset ? `Сброс по ответу провайдера: ${reset}. ` : '')
+            + 'Повторите сборку после сброса лимита или выберите другую модель в настройках плагина.',
+          429,
+        );
+      }
+
+      throw error;
+    }
 
     // Исполнители отдают ответ полем `reply` — тем же, что читают триаж Входящих и
     // название коммита. Читать другое поле значит получать пустую строку и винить
@@ -221,12 +258,18 @@ export function createScriptOps(deps: ScriptOpsDeps) {
    * Бриф. Одна попытка исправить форму ответа и не больше: крутить модель по кругу
    * дорого, а человеку полезнее честный отказ с возможностью повторить самому.
    */
-  async function generateBrief(id: string, taskText: string): Promise<ShowcaseProject> {
+  async function generateBrief(
+    id: string,
+    taskText: string,
+    onProgress?: (label: string) => Promise<void>,
+  ): Promise<ShowcaseProject> {
     assertEnabled();
 
     const project = await readProject(id);
     const { context } = await scriptContextOf(project, taskText);
     const prompt = buildBriefPrompt(context);
+
+    await onProgress?.('Готовлю план по задаче и изменениям на стенде.');
     const first = await runUntrustedModel(prompt);
     let points = parseBrief(first);
 
@@ -272,7 +315,12 @@ export function createScriptOps(deps: ScriptOpsDeps) {
    * не дописанный к прежнему. Голос и темп ролика при этом переживают замену: их
    * выбирал человек для ролика целиком, а не для конкретных сцен.
    */
-  async function generateScript(id: string, taskText: string): Promise<ShowcaseProject> {
+  async function generateScript(
+    id: string,
+    taskText: string,
+    keepScenes = false,
+    onProgress?: (label: string) => Promise<void>,
+  ): Promise<ShowcaseProject> {
     assertEnabled();
 
     const project = await readProject(id);
@@ -283,8 +331,27 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     const { context, mapRevision } = await scriptContextOf(project, taskText);
     const prompt = buildScriptPrompt(context, project.brief);
-    const first = await runUntrustedModel(prompt);
-    let parsed = parseScriptReplyResult(first, context.screens, context.maxScenes);
+
+    await onProgress?.(keepScenes ? 'Проверяю сохранённый сценарий.' : 'Готовлю действия и текст сцен.');
+    const first = keepScenes ? '' : await runUntrustedModel(prompt);
+    let parsed = keepScenes ? {
+      problem: null,
+      draft: {
+        gaps: project.scriptGaps ?? [],
+        scenes: [...project.scenes].sort((a, b) => a.order - b.order).map((scene) => ({
+          title: scene.title,
+          screenId: scene.screenId,
+          startState: scene.startState,
+          readyCondition: scene.readyCondition,
+          continuesPrevious: scene.continuesPrevious ?? false,
+          narration: scene.narration,
+          caption: scene.caption,
+          subtitleText: scene.subtitleText,
+          actions: scene.actions,
+          syncCues: null,
+        })),
+      },
+    } : parseScriptReplyResult(first, context.screens, context.maxScenes);
     let problem = parsed.problem;
 
     if (!parsed.draft) {
@@ -302,19 +369,87 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       throw new ShowcaseError(
         detail ? 'model_bindings_invalid' : 'model_reply_invalid',
         detail
-          ? `${detail} Исправьте привязки этой сцены или повторите построение.`
-          : 'Модель не вернула сценарий нужной формы. Сцены можно собрать руками.',
+          ? `${detail} Не удалось однозначно связать речь с действиями.`
+          : 'Модель не вернула сценарий нужной формы после автоматического повтора.',
         502,
       );
     }
 
-    const draft = parsed.draft;
+    let draft = parsed.draft;
+    let scriptProofHash: string | null = null;
+    const browserPath = await deps.resolveBrowserPath?.();
+
+    if (browserPath) {
+      const lease = await deps.acquireTargetLease(project.ref);
+
+      try {
+        if (project.target.status !== 'ready') {
+          throw new ShowcaseError('target_unavailable', project.target.reason, 409);
+        }
+
+        const scope = await targets.selectedInternalScope(
+          project.ref, project.target.scope.profile, project.target.scope.targetFingerprint,
+        );
+
+        await lease?.assertPathIdentity();
+
+        const previousProof = await readScriptProof(store.namesOf(id).dir, project, false);
+
+        const verified = await verifyAndRepairScript({
+          context,
+          brief: project.brief,
+          draft,
+          runModel: runUntrustedModel,
+          onProgress,
+          allowRepair: !keepScenes || (!project.scriptProofHash && Boolean(project.scriptMapRevision)),
+          rehearse: (candidate, previous) => launchRehearsal({
+            scope,
+            targets,
+            browserPath,
+            workDir: path.join(store.namesOf(id).dir, 'rehearsals'),
+            inheritedFds: lease ? [lease.inheritedFd()] : undefined,
+            draft: candidate,
+            previous: previous ?? previousProof?.rehearsal ?? null,
+          }),
+        });
+
+        draft = verified.draft;
+        scriptProofHash = await writeScriptProof(store.namesOf(id).dir, {
+          version: SCRIPT_VERIFICATION_VERSION,
+          targetFingerprint: scope.targetFingerprint,
+          policyRevision: scope.policyRevision,
+          dataRevision: scope.dataRevision,
+          briefHash: briefHashOf(project.brief),
+          scriptHash: scriptHashOf(draft.scenes),
+          rehearsal: verified.rehearsal,
+        });
+      } finally {
+        await lease?.release();
+      }
+    }
+
     const { scenes: drafts } = draft;
     // Обрезка изменений — знание для человека, а не тема ролика: она идёт в тот же
     // список, что и пробелы карты, а не в озвучку заключительной сцены.
-    const gaps = context.diffTruncated
-      ? [...draft.gaps, DIFF_TRUNCATED_NOTE]
-      : draft.gaps;
+    const gaps = [
+      ...draft.gaps.filter((gap) => gap !== DIFF_TRUNCATED_NOTE),
+      ...(context.diffTruncated ? [DIFF_TRUNCATED_NOTE] : []),
+    ];
+
+    const savedScenes = [...project.scenes].sort((a, b) => a.order - b.order);
+
+    if (keepScenes && scriptHashOf(drafts) === scriptHashOf(savedScenes)) {
+      const saved = await store.updateProject(id, project.revision, (current) => ({
+        ...current,
+        scriptGaps: gaps,
+        scriptMapRevision: current.scriptMapRevision ? mapRevision : null,
+        scriptProofHash,
+      }));
+
+      broadcast('showcase-changed', { projectId: id, revision: saved.revision });
+
+      return publish(saved);
+    }
     const saved = await store.updateProject(id, project.revision, (current) => {
       const previous = [...current.scenes].sort((left, right) => left.order - right.order).at(-1);
       let next: ShowcaseProject = {
@@ -322,6 +457,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
         scenes: [],
         scriptGaps: gaps,
         scriptMapRevision: mapRevision,
+        scriptProofHash,
       };
 
       for (const item of drafts) {
@@ -492,15 +628,15 @@ export function createScriptOps(deps: ScriptOpsDeps) {
    * готовый план. Отсутствие задачи в портале разбор не останавливает: diff стенда
    * и карта экранов остаются на месте, а текст был лишь подсказкой модели.
    */
-  async function analyze(id: string): Promise<ShowcaseProject> {
+  async function analyze(id: string, onProgress?: (label: string) => Promise<void>): Promise<ShowcaseProject> {
     assertEnabled();
 
     const project = await readProject(id);
     const taskText = await taskTextOf(project);
 
-    await generateBrief(id, taskText);
+    await generateBrief(id, taskText, onProgress);
 
-    return generateScript(id, taskText);
+    return generateScript(id, taskText, false, onProgress);
   }
 
   /**
@@ -529,5 +665,25 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     }
   }
 
-  return { analyze, generateBindings, generateBrief, generateScript };
+  /** Полный запуск старого автоматического сценария сам обновляет его проверку. */
+  async function ensurePrepared(
+    id: string,
+    onProgress?: (label: string) => Promise<void>,
+  ): Promise<ShowcaseProject> {
+    const project = await readProject(id);
+
+    if (await readScriptProof(store.namesOf(id).dir, project)) {
+      return project;
+    }
+
+    if (!(await deps.resolveBrowserPath?.())) {
+      throw new ShowcaseError('browser_missing', 'Для проверки сценария нужен браузер записи.', 503);
+    }
+
+    return project.brief.length > 0
+      ? generateScript(id, await taskTextOf(project), project.scenes.length > 0, onProgress)
+      : analyze(id, onProgress);
+  }
+
+  return { analyze, ensurePrepared, generateBindings, generateBrief, generateScript };
 }

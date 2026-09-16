@@ -156,7 +156,9 @@ export type SyncDiagnosticCode =
   | 'cue_tolerance_exceeded'
   | 'video_hold_added'
   | 'empty_wait_removed'
-  | 'silence_inserted';
+  | 'silence_inserted'
+  | 'cue_error_accepted'
+  | 'hold_shortened';
 
 export interface SyncDiagnostic {
   severity: SyncDiagnosticSeverity;
@@ -347,9 +349,9 @@ interface PlanningState {
   diagnostics: SyncDiagnostic[];
   protectedVideoUntilMs: number;
   protectedVideoSourceUntilMs: number;
-  protectedTextTo: number;
   processedCues: ProcessedCue[];
   frameMs: number;
+  maxCueErrorMs: number;
 }
 
 const EPSILON_MS = 0.001;
@@ -581,20 +583,24 @@ function validateSpeechTiming(speech: SpeechFixtureTiming): string | null {
       return 'Безопасные паузы речи повторяются, выходят за WAV или нарушают порядок.';
     }
 
-    const previousPhrase = [...speech.phrases]
-      .filter((phrase) => phrase.to <= pause.textAt)
+    // Пауза подтверждается измеренными единицами речи по обе стороны: у фразовой
+    // шкалы это законченные фразы, у пословной — соседние слова, между которыми
+    // синтез сам сделал паузу на знаке препинания. Тишина ложится в измеренную
+    // тишину, и ни одно слово не режется.
+    const previousUnit = [...speech.spans]
+      .filter((span) => span.to <= pause.textAt)
       .sort((left, right) => right.to - left.to || right.endMs - left.endMs)[0];
-    const nextPhrase = [...speech.phrases]
-      .filter((phrase) => phrase.from >= pause.textAt)
+    const nextUnit = [...speech.spans]
+      .filter((span) => span.from >= pause.textAt)
       .sort((left, right) => left.from - right.from || left.startMs - right.startMs)[0];
 
     if (
-      !previousPhrase
-      || !nextPhrase
-      || previousPhrase.endMs > pause.quietFromMs + EPSILON_MS
-      || nextPhrase.startMs + EPSILON_MS < pause.quietToMs
+      !previousUnit
+      || !nextUnit
+      || previousUnit.endMs > pause.quietFromMs + EPSILON_MS
+      || nextUnit.startMs + EPSILON_MS < pause.quietToMs
     ) {
-      return 'Безопасная пауза не подтверждена границей двух законченных фраз.';
+      return 'Безопасная пауза не подтверждена границей двух измеренных единиц речи.';
     }
 
     const crossesWord = speech.spans.some((span) => (
@@ -1077,7 +1083,21 @@ function insertSafeSilence(
     return true;
   }
 
-  if (state.protectedTextTo === 0) {
+  // Граница текста, левее которой новая тишина сдвинула бы речь уже выровненного
+  // cue. Перекрывающий текущий фрагмент `ready-before` границу не поднимает — тем же
+  // исключением, что и у повторного использования паузы ниже: «готово не позже
+  // начала реплики» от более позднего начала реплики только крепнет. Без этого
+  // «открываем окно, отмечаем десктоп» с готовностью диалога на слове «отмечаем»
+  // запирало паузу на запятой для клика по «десктоп» — единственную в реплике.
+  const textFloor = state.processedCues
+    .filter((processed) => !(
+      processed.kind === 'ready-before'
+      && processed.from < cue.to
+      && cue.from < processed.to
+    ))
+    .reduce((floor, processed) => Math.max(floor, processed.to), 0);
+
+  if (textFloor === 0) {
     const preRoll = state.silences.find((silence) => silence.reason === 'pre-roll');
 
     if (!preRoll) {
@@ -1119,7 +1139,7 @@ function insertSafeSilence(
     } else {
       const pause = [...speech.safePauses]
       .filter((candidate) => (
-        candidate.textAt >= state.protectedTextTo
+        candidate.textAt >= textFloor
         && candidate.textAt <= cue.from
       ))
       .sort((left, right) => right.textAt - left.textAt || right.atMs - left.atMs)[0];
@@ -1154,6 +1174,39 @@ function insertSafeSilence(
   return true;
 }
 
+/**
+ * Отклонение, которое нечем выправить — нет устойчивого кадра для удержания или
+ * безопасной паузы для тишины, — принимается, если вместе с погрешностью калибровки
+ * укладывается в допуск cue: итоговую проверку такое cue проходит, а отдавать сцену
+ * человеку из-за полутора сотен миллисекунд значило бы останавливать каждый второй
+ * ролик. Тот же порог, что и у финальной сверки, чтобы принятое здесь не отвергалось
+ * там.
+ */
+function acceptWithinTolerance(
+  cue: ShowcaseSyncCue,
+  requiredMs: number,
+  recording: RecordingFixtureTiming,
+  state: PlanningState,
+): boolean {
+  if (requiredMs + recording.calibrationErrorMs > state.maxCueErrorMs + EPSILON_MS) {
+    return false;
+  }
+
+  state.diagnostics.push(diagnostic(
+    'info',
+    'cue_error_accepted',
+    `Отклонение привязки «${cue.id}» ${requiredMs.toFixed(1)} мс принято в пределах допуска.`,
+    {
+      cueId: cue.id,
+      actionIndex: cue.actionIndex,
+      requiredMs,
+      availableMs: state.maxCueErrorMs,
+    },
+  ));
+
+  return true;
+}
+
 /** Выравнивает точное событие, не меняя скорость исходного движения. */
 function alignEvent(
   cue: ShowcaseSyncCue,
@@ -1179,6 +1232,10 @@ function alignEvent(
     const hold = stableBeforeAction(action, recording, state);
 
     if (!hold) {
+      if (acceptWithinTolerance(cue, requiredMs, recording, state)) {
+        return null;
+      }
+
       return diagnostic(
         'conflict',
         'no_stable_frame',
@@ -1221,7 +1278,11 @@ function alignEvent(
     speechStartMs = audioOutputAt(speechRange.startMs, 'start', speech, state);
     leftMs = Math.max(leftMs, eventMs - speechStartMs);
 
-    if (leftMs > EPSILON_MS && !insertSafeSilence(leftMs, cue, speech, state)) {
+    if (
+      leftMs > EPSILON_MS
+      && !insertSafeSilence(leftMs, cue, speech, state)
+      && !acceptWithinTolerance(cue, leftMs, recording, state)
+    ) {
       return diagnostic(
         'conflict',
         'no_safe_pause',
@@ -1269,7 +1330,13 @@ function makeReadyBefore(
   speechStartMs = audioOutputAt(speechRange.startMs, 'start', speech, state);
   leftMs = Math.max(leftMs, eventMs - speechStartMs);
 
-  if (leftMs > EPSILON_MS && !insertSafeSilence(leftMs, cue, speech, state)) {
+  // Поздняя граница события уже включает погрешность калибровки, поэтому в допуск
+  // сравнивается сама задержка без её повторного учёта.
+  if (
+    leftMs > EPSILON_MS
+    && !insertSafeSilence(leftMs, cue, speech, state)
+    && !acceptWithinTolerance(cue, Math.max(0, leftMs - recording.calibrationErrorMs), recording, state)
+  ) {
     return diagnostic(
       'conflict',
       'no_safe_pause',
@@ -1777,10 +1844,47 @@ export function planShowcaseSync(input: SyncPlanInput): SyncPlanResult {
     diagnostics: [],
     protectedVideoUntilMs: 0,
     protectedVideoSourceUntilMs: 0,
-    protectedTextTo: 0,
     processedCues: [],
     frameMs: 1000 / input.style.fps,
+    maxCueErrorMs: options.maxCueErrorMs,
   };
+  // Два удержания не могут держать экран одновременно: состояние следующего действия
+  // сменяет предыдущее. Удержание, чей фрагмент реплики заходит за начало фрагмента
+  // более позднего действия, заканчивается на этом начале — модель так и имеет в
+  // виду («держи A, пока не показали B»), а буквальное прочтение требовало показать B
+  // раньше конца A, и сцена уходила человеку с «результат появляется после реплики».
+  const shortenedTo = new Map<string, number>();
+
+  for (const [index, cue] of orderedCues.entries()) {
+    const range = ranges.get(cue.id);
+
+    if (cue.kind !== 'hold-through' || !range) {
+      continue;
+    }
+
+    const next = orderedCues.slice(index + 1)
+      .map((later) => ({ later, range: ranges.get(later.id) }))
+      .filter((item): item is { later: ShowcaseSyncCue; range: ResolvedSpeechRange } => (
+        item.later.actionIndex > cue.actionIndex
+        && item.range !== undefined
+        && item.range.startMs > range.startMs
+        && item.range.startMs < range.endMs
+      ))
+      .sort((left, right) => left.range.startMs - right.range.startMs)[0];
+
+    if (!next) {
+      continue;
+    }
+
+    ranges.set(cue.id, { startMs: range.startMs, endMs: next.range.startMs });
+    shortenedTo.set(cue.id, next.later.from);
+    state.diagnostics.push(diagnostic(
+      'info',
+      'hold_shortened',
+      `Удержание «${cue.id}» заканчивается на начале «${next.later.id}»: следующее действие сменяет экран.`,
+      { cueId: cue.id, actionIndex: cue.actionIndex },
+    ));
+  }
 
   for (const cue of orderedCues) {
     const action = input.recording.actions[cue.actionIndex];
@@ -1864,12 +1968,11 @@ export function planShowcaseSync(input: SyncPlanInput): SyncPlanResult {
       state.protectedVideoSourceUntilMs,
       sourceEvent ?? action.anchorMs,
     );
-    state.protectedTextTo = Math.max(state.protectedTextTo, cue.to);
     state.processedCues.push({
       id: cue.id,
       kind: cue.kind,
       from: cue.from,
-      to: cue.to,
+      to: shortenedTo.get(cue.id) ?? cue.to,
     });
 
     const limitProblem = durationProblem(

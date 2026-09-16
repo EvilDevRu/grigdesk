@@ -240,6 +240,7 @@ test('каждый системный плагин объявляет род р�
       db: 'dev',
       docker: 'dev',
       showcase: 'knowledge',
+      'usage-forecast': 'dev',
     },
   );
   assert.deepEqual(

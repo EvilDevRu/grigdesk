@@ -150,6 +150,10 @@ export async function startEgressGuard(policy: BrowserPolicy) {
   // Отказ закрывает сокет: ответить «200 Connection Established» и надеяться на
   // проверку выше по стеку значило бы отдать туннель до проверки назначения.
   server.on('connect', async (request, socket, head) => {
+    // Браузер может сбросить отклонённый CONNECT или уйти во время DNS lookup.
+    // Обработчик нужен до обоих путей: иначе ECONNRESET убивает весь worker.
+    socket.on('error', () => socket.destroy());
+
     const [host, rawPort] = String(request.url ?? '').split(':');
     const port = rawPort || '443';
 
@@ -163,6 +167,11 @@ export async function startEgressGuard(policy: BrowserPolicy) {
     passed.push({ kind: 'connect', target: String(request.url), at: new Date().toISOString() });
 
     const address = await addressOf(host).catch(() => host);
+
+    if (socket.destroyed) {
+      return;
+    }
+
     const upstream = net.connect(Number(port), address, () => {
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       upstream.write(head);

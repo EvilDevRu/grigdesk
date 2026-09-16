@@ -97,13 +97,23 @@
         <div class="film__main">
           <section v-if="project.latestFinal" class="film__final" aria-labelledby="showcase-final-title">
             <div class="film__block-head">
-              <h3 id="showcase-final-title">Готовый ролик</h3>
+              <h3 id="showcase-final-title">
+                {{ rebuilding ? 'Предыдущая сборка' : 'Готовый ролик' }}
+              </h3>
               <span class="film__meta">
                 <span v-if="!project.latestFinal.current" class="film__stale">предыдущая сборка</span>
                 {{ finalText }}
               </span>
             </div>
-            <UiVideo ref="player" :src="finalUrl" label="Готовый ролик" />
+            <UiInlineMessage v-if="rebuilding" tone="neutral" data-role="previous-build">
+              Идёт пересборка. Здесь пока предыдущий ролик; новый появится после завершения сборки.
+            </UiInlineMessage>
+            <UiVideo
+              :key="project.latestFinal.video.id"
+              ref="player"
+              :src="finalUrl"
+              :label="rebuilding ? 'Предыдущая сборка' : 'Готовый ролик'"
+            />
             <UiInlineMessage
               v-if="manifestUnavailable"
               tone="warning"
@@ -313,6 +323,9 @@ const selectedId = ref('');
 const addOpen = ref(false);
 const briefOpen = ref(false);
 const player = ref<InstanceType<typeof UiVideo> | null>(null);
+const rebuilding = computed(() => Boolean(
+  props.buildRun && ['queued', 'running', 'cancelling'].includes(props.buildRun.state),
+));
 
 // Черновики текста по сценам. Живут здесь, а не в редакторе: переход к другой
 // сцене не должен терять набранное, а список сцен показывает, где правки не

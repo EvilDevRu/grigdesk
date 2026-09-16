@@ -26,6 +26,7 @@ import { revisionConflict, ShowcaseError } from './errors.ts';
 import { isTerminal, toPublicJob } from './jobs.ts';
 import type { JobRecord, ShowcaseJobs } from './jobs.ts';
 import { sceneSyncBindingsState } from './scenes.ts';
+import { MAX_REHEARSALS } from './script/verification.ts';
 
 const BINDABLE_ACTIONS = new Set(['goto', 'click', 'hover', 'highlight', 'waitVisible', 'scroll']);
 const REVIEW_ERRORS = new Set([
@@ -43,9 +44,11 @@ export interface BuildOpsDeps {
   assertEnabled: () => void;
   buildRuns: ShowcaseBuildRuns;
   jobs: ShowcaseJobs;
-  limits: () => { maxScenes: number };
+  limits: () => { maxScenes: number; jobTimeoutMs?: number };
   readProject: (id: string) => Promise<ShowcaseProject>;
   analyze: (id: string) => Promise<ShowcaseProject>;
+  prepareScript?: (id: string, onProgress?: (label: string) => Promise<void>) => Promise<ShowcaseProject>;
+  scriptReady?: (project: ShowcaseProject) => Promise<boolean>;
   generateBindings: (id: string) => Promise<ShowcaseProject>;
   synthesizeScenes: (id: string) => Promise<ShowcaseJob>;
   startRecording: (id: string) => Promise<ShowcaseJob>;
@@ -129,6 +132,7 @@ export function buildRunSnapshotOf(project: ShowcaseProject): BuildRunSnapshot {
     brief: project.brief,
     scriptGaps: project.scriptGaps,
     scriptMapRevision: project.scriptMapRevision,
+    scriptProofHash: project.scriptProofHash,
     scenes: sceneSnapshot(project, { bindings: true, voice: true }),
   };
 
@@ -209,8 +213,7 @@ function compatible(run: BuildRunRecord, next: BuildRunSnapshot): boolean {
   }
 
   if (run.stage === 'script-if-empty') {
-    return run.snapshot.sceneIds.length === 0
-      && run.snapshot.scriptBaseHash === next.scriptBaseHash;
+    return run.snapshot.scriptBaseHash === next.scriptBaseHash;
   }
 
   if (run.stage === 'bindings') {
@@ -235,7 +238,7 @@ export function createBuildOps(deps: BuildOpsDeps) {
   async function startTrackedModelJob(
     run: BuildRunRecord,
     attempt: number,
-    operation: (id: string) => Promise<ShowcaseProject>,
+    operation: (id: string, onProgress?: (label: string) => Promise<void>) => Promise<ShowcaseProject>,
   ): Promise<JobRecord> {
     const key = stageKey(run.id, run.stage, attempt);
     const project = await deps.readProject(run.projectId);
@@ -252,6 +255,9 @@ export function createBuildOps(deps: BuildOpsDeps) {
         }),
         inputHashes: { build: run.snapshot.inputHash },
         inputRevision: project.revision,
+        timeoutMs: run.stage === 'script-if-empty'
+          ? (deps.limits().jobTimeoutMs ?? 30 * 60_000) * MAX_REHEARSALS
+          : undefined,
       });
 
       if (reused) {
@@ -261,11 +267,24 @@ export function createBuildOps(deps: BuildOpsDeps) {
       const running = await jobs.progress(record.id, {
         sequence: record.sequence + 1,
         label: run.stage === 'script-if-empty'
-          ? 'модель готовит сценарий'
+          ? 'сценарий проходит проверку на стенде'
           : 'модель готовит смысловые привязки',
       });
 
-      void operation(run.projectId).then(async () => {
+      const onProgress = async (label: string) => {
+        const current = jobs.read(record.id);
+
+        if (isTerminal(current.state) || current.state === 'cancelling') {
+          throw new ShowcaseError('script_cancelled', 'Подготовка сценария отменена.', 409);
+        }
+
+        await jobs.progress(record.id, {
+          sequence: current.sequence + 1,
+          label,
+        });
+      };
+
+      void operation(run.projectId, onProgress).then(async () => {
         await jobs.finish(record.id, {
           state: 'succeeded',
           label: run.stage === 'script-if-empty' ? 'сценарий готов' : 'привязки готовы',
@@ -303,7 +322,7 @@ export function createBuildOps(deps: BuildOpsDeps) {
     let record: JobRecord;
 
     if (run.stage === 'script-if-empty') {
-      record = await startTrackedModelJob(run, attempt, deps.analyze);
+      record = await startTrackedModelJob(run, attempt, deps.prepareScript ?? deps.analyze);
     } else if (run.stage === 'bindings') {
       record = await startTrackedModelJob(run, attempt, deps.generateBindings);
     } else {
@@ -413,7 +432,7 @@ export function createBuildOps(deps: BuildOpsDeps) {
     }
 
     const ready = run.stage === 'script-if-empty'
-      ? project.scenes.length > 0
+      ? project.scenes.length > 0 && (!deps.scriptReady || await deps.scriptReady(project))
       : run.stage === 'bindings'
         ? !bindingsMissing(project) && bindingProblem(project) === null
         : run.stage === 'voice-and-alignment'
@@ -482,7 +501,7 @@ export function createBuildOps(deps: BuildOpsDeps) {
     }
 
     if (run.stage === 'script-if-empty') {
-      if (project.scenes.length > 0) {
+      if (project.scenes.length > 0 && (!deps.scriptReady || await deps.scriptReady(project))) {
         await nextStage(run, 'bindings', snapshot);
 
         return 'again';
@@ -490,8 +509,10 @@ export function createBuildOps(deps: BuildOpsDeps) {
 
       if (child?.state === 'succeeded' || child?.state === 'interrupted') {
         await stop(run, 'failed', {
-          code: 'script_empty',
-          message: 'Разбор завершился без сцен.',
+          code: project.scenes.length > 0 ? 'script_not_verified' : 'script_empty',
+          message: project.scenes.length > 0
+            ? 'Проверка сценария завершилась без подтверждения показа на стенде.'
+            : 'Разбор завершился без сцен.',
         });
 
         return 'done';

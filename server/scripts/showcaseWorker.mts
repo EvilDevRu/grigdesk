@@ -20,8 +20,9 @@ import { checkSceneClip } from '../src/lib/showcase/render/clipCheck.ts';
 import {
   browserMonoToVideoPts,
   calibrateVideoTiming,
-  probeVideoFrameHashes,
+  probeVideoFrameSignatures,
   READY_MARGIN_MS,
+  stableFrameRunsOf,
   trimSceneClipExact,
   videoContainsCalibrationMarker,
 } from '../src/lib/showcase/render/clipTrim.ts';
@@ -87,9 +88,8 @@ const MAX_LOGIN_ATTEMPTS = 2;
 const LOGIN_RETRY_PAUSE_MS = 3_000;
 
 const EPSILON_MS = 0.01;
-// Два одинаковых кадра после 25→30 CFR могут быть всего лишь дублем `fps`, а не
-// доказательством неподвижного экрана. Для hold публикуется только наблюдаемое
-// состояние длиной хотя бы 150 мс.
+// Для hold публикуется только наблюдаемое состояние длиной хотя бы 150 мс: короче
+// может оказаться дублем кадра после 25→30 CFR, а не неподвижным экраном.
 const MIN_STABLE_MS = 150;
 
 function finiteNonNegative(value: number): boolean {
@@ -102,31 +102,16 @@ interface StableRun {
   frameMs: number;
 }
 
-/** Ровные decoded кадры — консервативное доказательство, что frame можно держать. */
+/** Серии кадров одного состояния экрана — доказательство, что frame можно держать. */
 async function stableRunsOf(file: string, fps: number): Promise<StableRun[]> {
-  const frames = await probeVideoFrameHashes(file);
   const frameMs = 1000 / fps;
-  const runs: StableRun[] = [];
+  const minFrames = Math.ceil((MIN_STABLE_MS - EPSILON_MS) / frameMs);
 
-  for (let start = 0; start < frames.length;) {
-    let end = start;
-
-    while (end + 1 < frames.length && frames[end + 1]?.hash === frames[start]?.hash) {
-      end += 1;
-    }
-
-    if ((end - start + 1) * frameMs >= MIN_STABLE_MS - EPSILON_MS) {
-      runs.push({
-        fromMs: start * frameMs,
-        toMs: (end + 1) * frameMs,
-        frameMs: start * frameMs,
-      });
-    }
-
-    start = end + 1;
-  }
-
-  return runs;
+  return stableFrameRunsOf(await probeVideoFrameSignatures(file), { minFrames }).map((run) => ({
+    fromMs: run.fromIndex * frameMs,
+    toMs: (run.toIndex + 1) * frameMs,
+    frameMs: run.fromIndex * frameMs,
+  }));
 }
 
 function stableIntervalsOf(
@@ -315,6 +300,32 @@ async function timingCandidateOf(input: {
       });
     }
   }
+
+  // Пауза между действиями — тоже измеренное пустое ожидание: когда речь опережает
+  // экран, монтаж её вырезает, а когда отстаёт — держит кадр из неё же. Без этого
+  // пауза, добавленная ради устойчивого кадра, удлиняла видео там, где речь
+  // короткая, и следующему действию не хватало безопасной паузы в реплике.
+  for (const [index, action] of actions.entries()) {
+    const previous = actions[index - 1];
+
+    if (!previous || previous.endMs >= action.startMs) {
+      continue;
+    }
+
+    const stable = intersectingStableRun(runs, previous.endMs, action.startMs, fps);
+
+    if (stable) {
+      removableWaits.push({
+        id: `wait-gap-${action.actionIndex}`,
+        fromMs: stable.fromMs,
+        toMs: stable.toMs,
+        actionIndex: null,
+        beforeActionIndex: action.actionIndex,
+      });
+    }
+  }
+
+  removableWaits.sort((left, right) => left.fromMs - right.fromMs);
 
   return {
     status: 'calibrated',
