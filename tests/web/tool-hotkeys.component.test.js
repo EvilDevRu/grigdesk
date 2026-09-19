@@ -200,6 +200,8 @@ async function mountHost(t) {
         '  { id: "terminal", route: "/terminal", label: "Терминал", icon: "terminal", component },',
         '];',
         'export const TOOL_BY_ID = new Map(TOOL_REGISTRY.map((item) => [item.id, item]));',
+        'export const toolsOf = () => TOOL_REGISTRY;',
+        'export const toolById = (plugins, id) => TOOL_BY_ID.get(id) || null;',
         'export const toolAvailability = (item, plugins) =>',
         '  !item ? "disabled" : (!item.plugin || plugins.enabled(item.plugin) ? "enabled" : "disabled");',
       ].join('\n'),

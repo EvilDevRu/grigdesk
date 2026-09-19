@@ -5,5 +5,7 @@ export { useSandboxesStore } from '../../stores/sandboxes';
 
 export { dismantleSandbox } from './dismantleSandbox';
 export { loadSandboxes } from './loadSandboxes';
+export { loadSandboxJobLog } from './loadSandboxJobLog';
 export { raiseSandbox } from './raiseSandbox';
+export { runSandboxAction } from './runSandboxAction';
 export { watchSandboxes } from './watchSandboxes';

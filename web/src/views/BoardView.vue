@@ -26,7 +26,17 @@
             <span class="tlabel">За месяц</span>
             <span class="tpct mono" :class="{ over: overwork }">{{ monthPct }}%</span>
           </div>
-          <div class="tval">{{ hoursToHM(data.month.hours) }}</div>
+          <div class="month-summary">
+            <div class="tval">{{ hoursToHM(data.month.hours) }}</div>
+            <div
+              class="month-completed"
+              data-stat="month-completed"
+              :aria-label="`Выполнено задач за месяц: ${data.month.completedTasks ?? 0}`"
+            >
+              <strong class="mono">{{ data.month.completedTasks ?? 0 }}</strong>
+              <span>выполнено задач</span>
+            </div>
+          </div>
           <div class="bar"><span class="fill" :class="{ over: overwork }" :style="{ width: Math.min(100, monthPct) + '%' }"></span></div>
           <div class="mfoot">
             <span class="muted">норма {{ data.month.norm }}ч</span>
@@ -782,6 +792,14 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 
 .tpct { margin-left: auto; font-size: 12px; color: var(--ink-mid); font-weight: 600; }
 .tpct.over { color: var(--good); }
+.month-summary {
+  display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 7px;
+}
+.month-completed {
+  display: inline-flex; align-items: baseline; gap: 4px; color: var(--ink-mid);
+  font-size: 10.5px; line-height: 1.1;
+}
+.month-completed strong { color: var(--good); font-size: 16px; font-weight: 700; }
 .bar { height: 7px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .bar .fill { display: block; height: 100%; background: var(--good); border-radius: 999px; transition: width .3s; }
 .bar .fill.over { background: linear-gradient(90deg, var(--good), var(--accent)); }

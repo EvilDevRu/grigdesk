@@ -466,6 +466,7 @@ async function build() {
     manualRange: config.sandboxManualRange,
     sandboxActivityGuard,
     downCmd: config.sandboxDownCmd,
+    log: fastify.log,
     broadcast: (event: string, data?: unknown) => fastify.sse?.broadcast?.(event, data),
     // Шаги подъёма ловит общий вотчер каталога состояния, а не второй наблюдатель.
     subscribe: (listener: (name: string, payload?: unknown) => void) => (

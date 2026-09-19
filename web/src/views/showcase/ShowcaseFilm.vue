@@ -265,7 +265,7 @@ import {
   payloadOf,
   reconcilePronunciationHashes,
 } from './sceneDraft';
-import { timecode } from './sceneText';
+import { screenLabelOf, timecode } from './sceneText';
 import type {
   SceneDraft,
   SceneNarrationPreviewInput,
@@ -484,7 +484,7 @@ watch(() => props.project.scenes, (scenes) => {
 });
 
 function screenTitleOf(scene: ShowcaseScene): string {
-  return screens.value.find((screen) => screen.id === scene.screenId)?.title ?? scene.screenId;
+  return screenLabelOf(screens.value, scene);
 }
 
 function draftFor(scene: ShowcaseScene): SceneDraft {

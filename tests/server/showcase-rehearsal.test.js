@@ -15,6 +15,7 @@ import { rehearseScript } from '../../server/src/lib/showcase/script/rehearsal.t
 import {
   actionTarget, assertObservedSurfaces, observeScreen,
 } from '../../server/src/lib/showcase/script/observation.ts';
+import { parseScriptReplyResult } from '../../server/src/lib/showcase/script/writer.ts';
 import {
   briefHashOf,
   compactObservations,
@@ -35,6 +36,7 @@ const SCREEN = {
     { id: 'settings', selector: '#settings', title: 'Настройки колонки' },
     { id: 'cell', selector: '#cell', title: 'Ячейка частоты' },
     { id: 'settingsDialog', selector: '[role=dialog]:has-text("Колонка")', title: 'Колонка' },
+    { id: 'settingsLink', selector: '#settings-link', title: 'Настройки проекта' },
   ],
 };
 const CONTEXT = {
@@ -76,15 +78,30 @@ async function fixture(t) {
   }
 
   let launches = 0;
+  // Страница настроек, которой нет в карте: сюда уводит клик по ссылке в сайдбаре
+  // (SPA-переход без перезагрузки), и сюда же запись открывает найденный экран по адресу.
+  const settingsPage = '<h2>Частота</h2><p>Расписание съёма</p>'
+    + '<div data-testid="schedule-summary">По расписанию снимется: W</div>';
+  const settingsHtml = JSON.stringify(settingsPage).replace(/"/gu, '&quot;');
   const server = http.createServer((request, response) => {
     if (request.url === '/launch') {
       launches += 1;
     }
 
     response.setHeader('content-type', 'text/html; charset=utf-8');
+
+    if (request.url === '/settings/volume') {
+      response.end(`<!doctype html><html><body>${settingsPage}</body></html>`);
+
+      return;
+    }
+
     response.end(`<!doctype html><html><body><h1>Проверка позиций</h1>
       <div id="cell">12</div>
       <button id="settings" onclick="settingsDialog.hidden=false">Настройка колонки</button>
+      <a id="settings-link" href="#settings"
+        onclick="history.pushState({}, '', '/settings/volume');
+          document.body.innerHTML=${settingsHtml}">Настройки проекта</a>
       <button data-testid="types" onclick="menu.hidden=false">Типы частоты</button>
       <div id="menu" role="menu" hidden>
         <div role="menuitem">Выбранный тип
@@ -215,6 +232,95 @@ test('кадры репетиции сохраняются сжатым WebP н�
   assert.equal(bytes.subarray(0, 4).toString('latin1'), 'RIFF', 'кадр в контейнере WebP');
   assert.ok(bytes.length < 60_000, `кадр пустого стенда компактен: ${bytes.length} байт`);
   await assert.rejects(access(path.join(item.workDir, 'scene-0-action-0.full.jpg')), 'полный снимок убран');
+});
+
+// Ролик 8702: карта знала только позиции, клик сцены увёл в настройки проекта, а следующая
+// сцена продолжала «позиции» — ожидание каркаса позиций роняло всю сборку сырым таймаутом
+// Playwright вместо наблюдения, по которому модель могла бы перестроить сцену.
+test('уход с экрана: продолжение получает наблюдение, а головной экран — понятный отказ', async (t) => {
+  const item = await fixture(t);
+
+  if (!item) {
+    return;
+  }
+
+  const input = { ...item.input, readyTimeoutMs: 1500 };
+  const result = await rehearseScript({ ...input, scenes: [
+    scene([{ kind: 'click', targetId: 'settingsLink' }]),
+    { ...scene([{ kind: 'hover', targetId: 'cell' }]), continuesPrevious: true },
+  ] });
+  const last = result.observations.at(-1);
+  const found = result.screens.find((screen) => screen.id === 'page:/settings/volume');
+
+  assert.equal(result.completed, false);
+  assert.deepEqual([last.sceneIndex, last.actionIndex], [1, -1], 'сцена сорвалась до своих действий');
+  assert.match(last.error, /Экран «positions» не готов .* увели с этого экрана/u);
+  assert.match(last.error, /continuesPrevious: false/u, 'модели названы оба выхода');
+  assert.doesNotMatch(last.error, /locator|h1/u, 'селектор и текст Playwright в модель не идут');
+  assert.match(last.text, /Частота/u, 'наблюдение несёт то, что открылось на самом деле');
+  await access(path.join(item.workDir, 'scene-1-action--1.webp'));
+
+  // Страница, на которую увёл клик, стала найденным экраном: модели есть что назвать.
+  assert.ok(found, 'экран найден по адресу из браузера');
+  assert.equal(found.title, 'Частота');
+  assert.equal(found.readySelector, 'h2:has-text("Частота")');
+  assert.deepEqual(
+    [result.observations[1].screenId, result.observations[1].path],
+    ['page:/settings/volume', '/settings/volume'],
+    'наблюдение после клика лежит на найденном экране и несёт адрес',
+  );
+  assert.ok(found.elements.some((element) => element.observed?.text === 'По расписанию снимется: W'));
+
+  const stale = [{ ...SCREEN, readySelector: '#absent' }];
+
+  await assert.rejects(
+    () => rehearseScript({ ...input, screens: stale, scenes: [scene([])] }),
+    /Экран «positions» не открылся: условие готовности не выполнилось за 2 с/u,
+  );
+});
+
+// Автомат вместо ручной карты: страница фичи, которой в карте нет, находится браузером,
+// а модель называет её головой сцены — запись открывает адрес сама, без пути кликами.
+test('найденный экран становится головой сцены, а его элементы доступны любой сцене', async (t) => {
+  const item = await fixture(t);
+
+  if (!item) {
+    return;
+  }
+
+  const input = { ...item.input, readyTimeoutMs: 3000 };
+  const explore = scene([{ kind: 'click', targetId: 'settingsLink' }]);
+  const explored = await rehearseScript({ ...input, scenes: [explore] });
+  const found = explored.screens.find((screen) => screen.id === 'page:/settings/volume');
+  const summary = found.elements.find((element) => element.observed?.text === 'По расписанию снимется: W');
+
+  assert.equal(explored.completed, true);
+  assert.ok(summary, 'сводка найдена на новой странице');
+
+  // Модель называет найденный экран головой, а найденный элемент — из сцены другого экрана.
+  const { syncCues, ...publicScene } = scene([]);
+  const reply = JSON.stringify({ scenes: [
+    { ...publicScene, actions: [
+      { kind: 'click', targetId: 'settingsLink' }, { kind: 'waitVisible', targetId: summary.id },
+    ] },
+    { ...publicScene, screenId: 'page:/settings/volume', actions: [
+      { kind: 'highlight', targetId: summary.id },
+    ] },
+  ] });
+  const parsed = parseScriptReplyResult(reply, explored.screens, 8);
+
+  assert.ok(parsed.draft, 'сценарий с найденным экраном и чужим найденным элементом принят');
+  assert.equal(parsed.draft.scenes[1].screenId, 'page:/settings/volume');
+
+  const verified = await rehearseScript({ ...input, screens: explored.screens, scenes: parsed.draft.scenes });
+  const head = verified.observations.find((step) => step.sceneIndex === 1 && step.actionIndex === -1);
+  const shown = verified.observations.at(-1).elements.find((element) => element.id === summary.id);
+
+  assert.equal(verified.completed, true, JSON.stringify(verified.observations.map((step) => step.error)));
+  assert.equal(head.screenId, 'page:/settings/volume');
+  assert.equal(head.path, '/settings/volume', 'голова открыла найденный адрес сама');
+  assert.equal(shown.visible, true);
+  await access(path.join(item.workDir, 'scene-1-action-0.webp'));
 });
 
 test('настоящая запись отвергает другое окно и неоднозначный селектор', async (t) => {

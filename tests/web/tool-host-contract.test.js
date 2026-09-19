@@ -23,7 +23,9 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
 
   assert.equal(count(shell, /<ToolHost\s*\/>/g), 1);
   assert.equal(count(host, /<component\s+:is="item\.component"/g), 1);
-  assert.match(host, /v-for="item in TOOL_REGISTRY"/);
+  // Состав панелей — computed из встроенных и страниц плагинов, а не статический список.
+  assert.match(host, /v-for="item in tools"/);
+  assert.match(host, /const tools = computed\(\(\) => toolsOf\(plugins\)\)/);
   assert.doesNotMatch(codeRoute, /import\s+CodePanel/);
   assert.doesNotMatch(shelfRoute, /import\s+TaskShelfPanel/);
   assert.doesNotMatch(terminalRoute, /import\s+TerminalPanel/);
@@ -38,7 +40,9 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
     source('web/src/views/code/codePanelLoading.ts'),
   ]);
 
-  assert.equal(count(registry, /defineAsyncComponent\(/g), 6);
+  // Шесть встроенных панелей плюс одна общая панель-iframe для страниц плагинов.
+  assert.equal(count(registry, /defineAsyncComponent\(/g), 7);
+  assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginFramePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/terminal\/TerminalPanel\.vue'\)/);

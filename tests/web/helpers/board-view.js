@@ -128,6 +128,7 @@ export async function mountBoardView(t, {
   analysisEnabled = true,
   seen = {},
   triagePrefs,
+  month = { hours: 0, norm: 1, completedTasks: 0 },
 } = {}) {
   const browser = await installBrowser(t);
   if (triagePrefs !== undefined) browser.localStorage.setItem('board.triage', triagePrefs);
@@ -151,7 +152,7 @@ export async function mountBoardView(t, {
           userId: 7,
           today: { hours: 0, tasks_count: 0, avg_time: 0 },
           dynamics: {},
-          month: { hours: 0, norm: 1 },
+          month,
           charts: {},
           tasks,
           toReview,

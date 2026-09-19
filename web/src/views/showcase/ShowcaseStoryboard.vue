@@ -39,7 +39,7 @@ import { UiSelectableRow } from '../../ui';
 import { continuesPrevious } from '../../../../shared/showcaseChains';
 import type { ShowcaseScene, ShowcaseScreen } from '../../../../shared/showcaseContracts';
 import { plainNarration } from '../../../../shared/showcaseNarration';
-import { actionsText, CONTINUATION_LABEL, sceneStateOf, timecode } from './sceneText';
+import { actionsText, CONTINUATION_LABEL, sceneStateOf, screenLabelOf, timecode } from './sceneText';
 
 const props = defineProps<{
   // Сцены уже в порядке показа: порядок решает родитель, а не список.
@@ -60,7 +60,7 @@ const emit = defineEmits<{
 const EXCERPT_LENGTH = 140;
 
 function screenTitleOf(scene: ShowcaseScene): string {
-  return props.screens.find((screen) => screen.id === scene.screenId)?.title ?? scene.screenId;
+  return screenLabelOf(props.screens, scene);
 }
 
 function actionsOf(scene: ShowcaseScene): string {

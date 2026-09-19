@@ -465,7 +465,7 @@ import { createUsageWatch } from '../../features/providers/usageWatch.js';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
-import { TOOL_BY_ID } from '../tools/registry.ts';
+import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
 
 const route = useRoute();
@@ -740,16 +740,16 @@ const nav = [
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
   { to: '/projects', label: 'Проекты', icon: 'projects' },
 ];
-// Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У пользовательских
-// плагинов фронтовых страниц пока не бывает (только роуты /api/ext/…), а пункт с мёртвой
-// ссылкой хуже отсутствующего — такие скрываем, пока страница не появится в бандле.
+// Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У системных
+// страница собрана в бандл, у пользовательских — своя папка web, которую ведёт общий
+// роут /ext/:id; пункт с мёртвой ссылкой хуже отсутствующего — такие скрываем.
 const routeExists = (item) => router.resolve(item.to).matched.length > 0;
 const pluginNav = computed(() => plugins.railNav.filter(routeExists));
 const toolsNav = computed(() => plugins.toolsNav.filter(routeExists));
 // До 900 px правой рейки нет, поэтому dock-инструменты становятся обычными
 // route-ссылками. Незарегистрированную Vue-панель скрываем fail-closed.
 const dockRouteNav = computed(() => [
-  ...plugins.dockNav.filter((item) => routeExists(item) && TOOL_BY_ID.has(item.id)),
+  ...plugins.dockNav.filter((item) => routeExists(item) && toolById(plugins, item.id)),
   { id: 'terminal', to: '/terminal', label: 'Терминал', icon: 'terminal', order: 30 },
 ].sort((a, b) => (a.order || 0) - (b.order || 0) || a.label.localeCompare(b.label, 'ru')));
 

@@ -101,6 +101,9 @@ export interface PluginListItem {
   values: Record<string, unknown>;
   placements?: PluginPlacementState[];
   setup?: PluginSetup | null;
+  // Адрес своей страницы пользовательского плагина (кокпит показывает её панелью или
+  // страницей по nav.path); у плагинов без страницы поля нет.
+  web?: string | null;
 }
 
 export interface PluginCategory {

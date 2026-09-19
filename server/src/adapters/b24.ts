@@ -1,6 +1,6 @@
 // B24Adapter — изоляция интеграции Битрикс24 от остального сервера.
 // Строит локальный B24Client из кредов «Настроек» + СВОЙ cookie-файл (нет конфликта
-// между процессами). Собирает полный DTO «Рабочего стола» из getTodayData + chartDataByPeriod.
+// между процессами). Собирает полный DTO «Рабочего стола» из getData + chartDataByPeriod.
 import { B24Client } from '../lib/b24/client.ts';
 import type { NewTask } from '../lib/b24/client.ts';
 import type { CredsStore } from '../lib/b24/credsStore.ts';
@@ -109,9 +109,10 @@ export class B24Adapter {
     const uid = (await client.discoverUserId()) ?? 0;
     if (uid > 0) this._identity = { baseUrl: client.baseUrl, userId: uid };
     const resp = await client.apiGet(
-      `/local/ajax/dashboard.php?action=getTodayData&user_id=${uid}&project_id=0&show_all_tasks=1`,
+      `/local/ajax/dashboard.php?action=getData&user_id=${uid}&project_id=0&chart_period=day&show_all_tasks=1`,
     );
     const d = ((resp as { data?: unknown } | null)?.data ?? {}) as Record<string, unknown>;
+    const mainData = (d.mainData ?? {}) as Record<string, unknown>;
 
     // Задачи маппим тестированным mapTask, добавляем timerStartedAt (в mapTask его нет).
     const mapList = (arr: unknown) => ((arr ?? []) as Record<string, unknown>[]).map((t) => ({
@@ -121,7 +122,7 @@ export class B24Adapter {
 
     const salaryHtml = await (await client.raw('/salary/?project_id=0')).text();
     const charts = B24Adapter.parseCharts(salaryHtml);
-    const month = await client.getMonthStats();
+    const month = await client.getMonthStats(mainData);
 
     return {
       userId: uid,

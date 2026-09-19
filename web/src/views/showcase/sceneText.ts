@@ -24,6 +24,29 @@ export interface SceneStateText {
 // узнавал её с первого взгляда.
 export const CONTINUATION_LABEL = '↳ продолжает предыдущую';
 
+// Экран, найденный браузером на пробном проходе: его нет в карте профиля, а
+// идентификатор несёт адрес — человеку он говорит больше, чем название.
+const PAGE_SCREEN_PREFIX = 'page:';
+
+/**
+ * Подпись экрана сцены: название из карты, а для экрана, найденного браузером,
+ * — его адрес. Список сцен и редактор обязаны звать экран одинаково.
+ */
+export function screenLabelOf(
+  screens: readonly { id: string; title: string }[],
+  scene: Pick<ShowcaseScene, 'screenId'>,
+): string {
+  const declared = screens.find((screen) => screen.id === scene.screenId)?.title;
+
+  if (declared) {
+    return declared;
+  }
+
+  return scene.screenId.startsWith(PAGE_SCREEN_PREFIX)
+    ? `страница ${scene.screenId.slice(PAGE_SCREEN_PREFIX.length)}`
+    : scene.screenId;
+}
+
 /**
  * Действия сцены словами, в порядке исполнения. Пустая строка означает, что
  * запись покажет неподвижный экран — об этом вызывающая сторона говорит сама.

@@ -33,6 +33,18 @@ function serviceStub(overrides = {}) {
 
       return { task: input.task, job: { task: input.task, state: 'running' } };
     },
+    run: async (input) => {
+      calls.push(['run', input]);
+
+      return { task: input.task, job: { task: input.task, state: 'running' } };
+    },
+    jobLog: async (task) => {
+      calls.push(['jobLog', task]);
+
+      return {
+        task, action: 'run', state: 'done', text: 'ИТОГ: ок', truncated: false,
+      };
+    },
     ...overrides,
   };
 }
@@ -54,6 +66,8 @@ test('токен агента в раздел песочниц не пускае
     ['GET', '/api/sandboxes', undefined],
     ['POST', '/api/sandboxes', { profile: 'demo-profile' }],
     ['POST', '/api/sandboxes/990000/down', {}],
+    ['POST', '/api/sandboxes/990000/actions/scan-schedule', { args: { project: '1' } }],
+    ['GET', '/api/sandboxes/990000/log', undefined],
   ];
 
   for (const [method, url, payload] of requests) {
@@ -130,6 +144,37 @@ test('снос передаёт явный признак «вместе с не
     ['dismantle', { task: '990000', force: false }],
     ['dismantle', { task: '990000', force: true }],
   ]);
+});
+
+test('действие профиля уходит службе с аргументами, журнал — по номеру стенда', async (t) => {
+  const { app, service } = await fixture(t);
+
+  const started = await app.inject({
+    method: 'POST',
+    url: '/api/sandboxes/990000/actions/scan-schedule',
+    payload: { args: { project: '389' } },
+  });
+  const log = await app.inject({ method: 'GET', url: '/api/sandboxes/990000/log' });
+
+  assert.equal(started.statusCode, 200);
+  assert.equal(log.statusCode, 200);
+  assert.equal(log.json().text, 'ИТОГ: ок');
+  assert.deepEqual(service.calls, [
+    ['run', { task: '990000', action: 'scan-schedule', args: { project: '389' } }],
+    ['jobLog', '990000'],
+  ]);
+
+  const badAction = await app.inject({
+    method: 'POST',
+    url: '/api/sandboxes/990000/actions/Bad%20Id',
+    payload: {},
+  });
+  const badTask = await app.inject({ method: 'GET', url: '/api/sandboxes/0/log' });
+
+  assert.equal(badAction.statusCode, 400);
+  assert.equal(badAction.json().error, 'bad_action');
+  assert.equal(badTask.statusCode, 400);
+  assert.equal(service.calls.length, 2);
 });
 
 test('отказ службы доезжает до клиента своим кодом и статусом', async (t) => {

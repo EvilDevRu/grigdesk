@@ -1,6 +1,7 @@
 import { api } from './apiClient.ts';
 import {
   parseSandboxAction,
+  parseSandboxJobLog,
   parseSandboxOverview,
 } from '../../../shared/sandboxContracts';
 
@@ -37,6 +38,20 @@ export const sandboxApi = {
 
     return parseSandboxAction(value);
   },
+
+  // Действие профиля на стенде: аргументы — по ключам объявления, значения строками.
+  async run(task: string, action: string, args: Record<string, string>) {
+    const path = `/api/sandboxes/${encodeURIComponent(task)}/actions/${encodeURIComponent(action)}`;
+    const value: unknown = await api.post(path, { args });
+
+    return parseSandboxAction(value);
+  },
+
+  async jobLog(task: string) {
+    const value: unknown = await api.get(`/api/sandboxes/${encodeURIComponent(task)}/log`);
+
+    return parseSandboxJobLog(value);
+  },
 };
 
 // Тексты нужны только там, где сервер отвечает ОДНИМ кодом без пояснения: остальные
@@ -46,6 +61,7 @@ const MESSAGES: Record<string, string> = {
   session_required: 'Песочницами управляет человек: нужен вход в кокпит.',
   bad_profile: 'Профиль выбран неверно.',
   bad_task: 'Номер стенда должен быть целым числом.',
+  bad_action: 'Действие названо неверно.',
   sandbox_error: 'Сервер не смог выполнить действие — подробности в журнале кокпита.',
 };
 

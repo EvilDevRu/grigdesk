@@ -16,7 +16,7 @@
 
     <div v-if="job && job.state === 'running'" class="sandbox-card__progress">
       <UiProgress
-        :label="`${job.action === 'up' ? 'Подъём' : 'Снос'} стенда t${entry.task}`"
+        :label="`${jobTitle} стенда t${entry.task}`"
         :value="job.index"
         :max="job.total"
         :indeterminate="!job.total"
@@ -34,6 +34,33 @@
     >
       {{ job.message }}
     </UiInlineMessage>
+    <UiInlineMessage
+      v-else-if="job && job.action === 'run' && job.state === 'done'"
+      tone="success"
+    >
+      <span class="sandbox-card__result">{{ runSummary }}</span>
+    </UiInlineMessage>
+
+    <!-- Журнал задания — по запросу: итог в карточке короткий, а прогон профиля печатает
+         сверку по шагам, которую человек читает целиком. -->
+    <div v-if="job && (job.action === 'run' || job.state === 'failed')" class="sandbox-card__log">
+      <UiDisclosureButton
+        density="compact"
+        :open="logOpen"
+        :controls="`sandbox-log-${entry.task}`"
+        @update:open="toggleLog"
+      >
+        {{ logOpen ? 'Скрыть журнал' : 'Журнал задания' }}
+      </UiDisclosureButton>
+      <pre
+        v-if="logOpen"
+        :id="`sandbox-log-${entry.task}`"
+        class="sandbox-card__log-text"
+      >{{ logText || 'Вывода пока нет.' }}</pre>
+      <p v-if="logOpen && logTruncated" class="sandbox-card__hint">
+        Показан только хвост журнала.
+      </p>
+    </div>
 
     <div v-if="hasPorts || entry.standAlive !== null" class="sandbox-card__ports">
       <a
@@ -81,6 +108,22 @@
       </li>
     </ul>
 
+    <!-- Действия профиля: прогоны на поднятом стенде, объявленные рядом с его up/down.
+         Доступны и стенду конвейера — на воротах приёмки человек гоняет стенд руками. -->
+    <div v-if="actions.length" class="sandbox-card__runs">
+      <UiButton
+        v-for="action in actions"
+        :key="action.id"
+        variant="ghost"
+        tone="accent"
+        :title="action.description"
+        :aria-disabled="busy || (job !== null && job.state === 'running')"
+        @click="emit('run', { task: entry.task, action })"
+      >
+        {{ action.label }}
+      </UiButton>
+    </div>
+
     <footer
       v-if="entry.removable || blockedReason"
       class="sandbox-card__actions"
@@ -110,11 +153,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { UiButton, UiIconButton, UiInlineMessage, UiProgress } from '../../ui';
+import { computed, ref, watch } from 'vue';
+import {
+  UiButton, UiDisclosureButton, UiIconButton, UiInlineMessage, UiProgress,
+} from '../../ui';
+import { loadSandboxJobLog } from '../../actions/sandboxes';
 import { sandboxUrl } from '../../shared/sandbox.js';
 import { writeClipboardText } from '../../shared/clipboard.ts';
-import type { SandboxEntry, SandboxJob } from '../../../../shared/sandboxContracts';
+import type {
+  SandboxActionDecl, SandboxEntry, SandboxJob,
+} from '../../../../shared/sandboxContracts';
 
 const ICON = {
   viewBox: '0 0 24 24',
@@ -138,9 +186,18 @@ const emit = defineEmits<{
     task: string;
     force: boolean;
   }];
+  run: [payload: {
+    task: string;
+    action: SandboxActionDecl;
+  }];
 }>();
 
 const copied = ref('');
+const logOpen = ref(false);
+const logText = ref('');
+const logTruncated = ref(false);
+
+const actions = computed(() => props.entry.actions ?? []);
 
 const feHref = computed(() => sandboxUrl(props.entry.fePort));
 const apiHref = computed(() => sandboxUrl(props.entry.apiPort));
@@ -168,6 +225,28 @@ const aliveLabel = computed(() => {
   return aliveState.value === 'alive' ? 'порты отвечают' : 'порты молчат';
 });
 
+// Шаг по умолчанию, пока задание не назвало свой: у прогона журнал ещё пуст.
+const RUNNING_STEP: Record<SandboxJob['action'], string> = {
+  up: 'идёт подъём',
+  down: 'идёт снос',
+  run: 'идёт прогон',
+};
+
+// Заголовок задания словами: у прогона это подпись действия из манифеста профиля.
+const jobTitle = computed(() => {
+  const job = props.job;
+
+  if (!job) {
+    return '';
+  }
+
+  if (job.action === 'run') {
+    return job.actionLabel || 'Прогон';
+  }
+
+  return job.action === 'up' ? 'Подъём' : 'Снос';
+});
+
 // Полоса прогресса сама по себе молчит: человеку нужен шаг словами, иначе неясно,
 // клонируется ли база или уже поднимаются контейнеры.
 const progressLabel = computed(() => {
@@ -178,9 +257,20 @@ const progressLabel = computed(() => {
   }
 
   const step = job.total ? `${job.index}/${job.total}` : '';
-  const label = job.label || (job.action === 'up' ? 'идёт подъём' : 'идёт снос');
+  const label = job.label || RUNNING_STEP[job.action];
 
   return step ? `${step} · ${label}` : label;
+});
+
+// Итог прогона — хвост его вывода, где скрипт печатает сверку; без вывода — одно слово.
+const runSummary = computed(() => {
+  const job = props.job;
+
+  if (!job) {
+    return '';
+  }
+
+  return job.message || `${job.actionLabel || 'Прогон'}: выполнено.`;
 });
 
 // Секунды записи реестра ничего не решают и только удлиняют строку меты.
@@ -212,6 +302,34 @@ const blockedReason = computed(() => BLOCKED[props.entry.removableReason || ''] 
 function copyLabel(path: string) {
   return copied.value === path ? 'Скопировано' : 'Копировать путь';
 }
+
+/**
+ * Журнал читается при открытии и перечитывается на каждую смену задания, пока
+ * раскрыт: у идущего прогона хвост растёт, и держать в раскрытом блоке старый текст
+ * значило бы показывать не то, что печатает скрипт.
+ */
+async function refreshLog() {
+  const log = await loadSandboxJobLog(props.entry.task);
+
+  if (log) {
+    logText.value = log.text;
+    logTruncated.value = log.truncated;
+  }
+}
+
+async function toggleLog(open: boolean) {
+  logOpen.value = open;
+
+  if (open) {
+    await refreshLog();
+  }
+}
+
+watch(() => [props.job?.state, props.job?.label, props.job?.finishedAt], () => {
+  if (logOpen.value) {
+    void refreshLog();
+  }
+});
 
 /**
  * Путь worktree чаще всего нужен в терминале, поэтому он копируется целиком, а
@@ -388,6 +506,40 @@ async function copyPath(value: string) {
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sandbox-card__runs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sandbox-card__result {
+  white-space: pre-line;
+}
+
+.sandbox-card__log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.sandbox-card__log-text {
+  width: 100%;
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .sandbox-card__actions {

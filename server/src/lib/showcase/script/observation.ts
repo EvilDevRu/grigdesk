@@ -15,7 +15,8 @@ export interface ObservedIdentity {
 export interface ObservedElement {
   id: string;
   selector: string;
-  title?: string;
+  // Подпись из карты может быть null: контракт профиля допускает элемент без неё.
+  title?: string | null;
   observed?: ObservedIdentity;
 }
 
@@ -23,10 +24,162 @@ export interface ScreenObservation {
   screenId: string;
   sceneIndex: number;
   actionIndex: number;
+  // Адрес страницы в момент наблюдения: по одному тексту экрана модель не видит,
+  // что клик сменил маршрут. Прежние отчёты этого поля не имеют.
+  path?: string;
   text: string;
   surfaces: string[];
   elements: { id: string; text: string; visible: boolean; state?: string }[];
   error?: string;
+}
+
+// Идентификатор найденного экрана несёт его адрес: он читается в списке сцен и в
+// промпте без карты, а хеш нужен только адресам длиннее строки.
+const PAGE_ID_PREFIX = 'page:';
+const PAGE_ID_PATH_MAX = 120;
+
+/**
+ * Адрес страницы в форме пути экрана карты: путь и hash-маршрут SPA. Запрос не
+ * входит: страница, дописавшая себе `?period=…`, остаётся тем же экраном карты,
+ * а состояние по параметрам воспроизводят действия сцены.
+ */
+export function pagePathOf(url: string): string {
+  const parsed = new URL(url);
+  const route = parsed.hash.startsWith('#/') ? parsed.hash.split('?')[0] : '';
+
+  return `${parsed.pathname}${route}`;
+}
+
+export function pageScreenId(path: string): string {
+  if (path.length <= PAGE_ID_PATH_MAX) {
+    return `${PAGE_ID_PREFIX}${path}`;
+  }
+
+  const hash = createHash('sha256').update(path).digest('hex').slice(0, 8);
+
+  return `${PAGE_ID_PREFIX}${path.slice(0, PAGE_ID_PATH_MAX)}…${hash}`;
+}
+
+/**
+ * Найденный экран по одному идентификатору: он несёт адрес, поэтому сцена о нём
+ * переживает потерю прежнего отчёта (новый стенд, новая ревизия данных). Условие
+ * готовности здесь только body — каркас страницы; данные ждёт затишье сети, а
+ * элементы наблюдатель находит заново под теми же идентификаторами.
+ */
+export function screenFromPageId<Screen extends ScreenMap & { title: string }>(id: string): Screen | null {
+  if (!id.startsWith(PAGE_ID_PREFIX) || id.includes('…')) {
+    return null;
+  }
+
+  const path = id.slice(PAGE_ID_PREFIX.length);
+
+  return {
+    id,
+    title: `Страница ${path}`,
+    path,
+    readySelector: 'body',
+    elements: [],
+  } as unknown as Screen;
+}
+
+/**
+ * Экран, на котором браузер оказался на самом деле. Карта объявляет экраны заранее,
+ * а клик может увести на страницу, которой в ней нет. Тогда страница становится
+ * найденным экраном с адресом из самого браузера: модель получает его идентификатор
+ * наравне с объявленными и может назвать своим — и продолжению, и голове сцены,
+ * которую запись откроет по этому адресу сама. Условие готовности — каркас
+ * (видимый заголовок, иначе main или body); данные второй волны ждёт затишье сети,
+ * как у объявленных экранов. Прав найденный экран не добавляет: его элементы находит
+ * тот же наблюдатель, и они остаются read-only. Уход на чужой origin экраном не
+ * становится: адрес из карты подставляется только к origin цели.
+ */
+export async function currentScreen<Screen extends ScreenMap & { title: string }>(
+  page: Page,
+  screens: Screen[],
+  baseUrl: string,
+  declared: Screen,
+  // Адреса, за которыми объявленный экран уже признан: страница, открытая по адресу
+  // из карты, может переписать его сама (редирект, локаль, слэш) и остаётся собой.
+  aliases: ReadonlyMap<string, string> = new Map(),
+): Promise<Screen> {
+  const url = new URL(page.url());
+
+  if (url.origin !== new URL(baseUrl).origin) {
+    return declared;
+  }
+
+  const path = pagePathOf(url.toString());
+  const samePath = (screen: ScreenMap) => pagePathOf(new URL(screen.path, baseUrl).toString()) === path
+    || aliases.get(path) === screen.id;
+
+  if (samePath(declared)) {
+    return declared;
+  }
+
+  const known = screens.find(samePath);
+
+  if (known) {
+    return known;
+  }
+
+  const landmark = await page.evaluate(() => {
+    const visible = (node: Element) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden'
+        && style.display !== 'none' && style.opacity !== '0';
+    };
+    const heading = [...document.querySelectorAll('h1, h2, h3, [role=heading]')].find((node) => (
+      visible(node) && (node as HTMLElement).innerText.trim().length > 0
+    ));
+    // Кавычки в тексте заголовка сломали бы :has-text(); подстроки без них достаточно.
+    const text = heading
+      ? (heading as HTMLElement).innerText.replace(/\s+/gu, ' ').replace(/["'\\]/gu, '').trim().slice(0, 60)
+      : '';
+    const tag = heading?.getAttribute('role') === 'heading'
+      ? '[role=heading]'
+      : heading?.tagName.toLowerCase();
+    const main = document.querySelector('main, [role=main]');
+    const readySelector = heading && text
+      ? `${tag}:has-text("${text}")`
+      : main && visible(main) ? 'main, [role=main]' : 'body';
+
+    return {
+      readySelector,
+      title: text || document.title.replace(/\s+/gu, ' ').trim().slice(0, 80),
+    };
+  });
+  const screen = {
+    id: pageScreenId(path),
+    title: landmark.title || `Страница ${path}`,
+    path,
+    readySelector: landmark.readySelector,
+    elements: [],
+  } as unknown as Screen;
+
+  screens.push(screen);
+
+  return screen;
+}
+
+/**
+ * Элементы, которые сцена вправе назвать: свои по карте и найденные браузером на
+ * любом экране. У найденного элемента есть личность и проверка видимости при
+ * действии, поэтому привязка к экрану ему не нужна — а клик, уводящий на другую
+ * страницу, и ожидание элемента уже на ней естественно живут в одной сцене.
+ * Результат — только для разрешения целей: в промпт он не попадает.
+ */
+export function resolvableElements<Element extends { id: string; observed?: unknown }>(
+  screens: readonly { elements: Element[] }[],
+  screen: { elements: Element[] },
+): Element[] {
+  const own = new Set(screen.elements.map((element) => element.id));
+  const foreign = screens
+    .filter((item) => item !== screen)
+    .flatMap((item) => item.elements.filter((element) => element.observed && !own.has(element.id)));
+
+  return [...screen.elements, ...foreign];
 }
 
 /**
@@ -265,6 +418,7 @@ export async function observeScreen(
     screenId: screen.id,
     sceneIndex,
     actionIndex,
+    path: pagePathOf(page.url()),
     text: found.text,
     surfaces: found.surfaces,
     elements,

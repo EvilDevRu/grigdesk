@@ -6,7 +6,9 @@
 //    и вьюхи фронта, собранные в бандл; «плагинность» для них = вкл/выкл + настройки.
 //  • ПОЛЬЗОВАТЕЛЬСКИЕ — папки plugins/<id>/ в корне проекта: plugin.json (манифест
 //    той же формы, что SYSTEM-записи) + опционально server.js (default-экспорт
-//    fastify-плагина; регистрируется на старте, роуты обязаны жить под /api/ext/<id>/).
+//    fastify-плагина; регистрируется на старте, роуты обязаны жить под /api/ext/<id>/)
+//    + опционально своя страница (`web`: папка с index.html — кокпит раздаёт её под
+//    /api/ext/<id>/web/ и показывает панелью в рейке или страницей по nav.path).
 //    Выключенный пользовательский плагин не регистрируется вовсе (вкл/выкл — рестарт).
 //
 // Состояние (вкл/выкл, значения настроек) — в prefs (server/.state/prefs.json):
@@ -47,6 +49,14 @@ export interface PluginManifest {
   setup?: PluginSetup | null;
   dir?: string;
   hasServer?: boolean;
+  // Своя страница пользовательского плагина: каталог с index.html и адрес, под которым
+  // кокпит его раздаёт. Ядро не исполняет этот код — оно лишь показывает страницу.
+  web?: PluginWebPage | null;
+}
+
+export interface PluginWebPage {
+  dir: string;
+  url: string;
 }
 
 // Журнал сервера в том минимуме, который использует скан.
@@ -540,6 +550,35 @@ function userPluginCategory(raw: unknown, warn: (message: string) => void): stri
 }
 
 /**
+ * Страница пользовательского плагина: поле `web` — путь папки относительно каталога
+ * плагина, внутри обязан лежать index.html. Абсолютный путь и выход за каталог
+ * отвергаются: манифест называет свою папку, а не любое место на машине.
+ */
+async function resolvePluginWeb(
+  dir: string,
+  id: string,
+  raw: unknown,
+  warn: (message: string) => void,
+): Promise<PluginWebPage | null> {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || path.isAbsolute(raw)) {
+    warn('web должен быть относительным путём к папке страницы — страница пропущена');
+    return null;
+  }
+  const webDir = path.resolve(dir, raw);
+  if (!webDir.startsWith(`${path.resolve(dir)}${path.sep}`) && webDir !== path.resolve(dir)) {
+    warn('web выходит за каталог плагина — страница пропущена');
+    return null;
+  }
+  const index = await fs.stat(path.join(webDir, 'index.html')).then((s) => s.isFile()).catch(() => false);
+  if (!index) {
+    warn(`в папке страницы (${raw}) нет index.html — страница пропущена`);
+    return null;
+  }
+  return { dir: webDir, url: `/api/ext/${id}/web/` };
+}
+
+/**
  * Скан пользовательских плагинов: plugins/<id>/plugin.json.
  * Битый манифест пропускается с warn — один плагин не валит остальные.
  */
@@ -575,6 +614,9 @@ export async function scanUserPlugins(
         }),
         dir,
         hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
+        web: await resolvePluginWeb(dir, m.id, m.web, (message: string) => {
+          log?.warn?.({ plugin: e.name }, message);
+        }),
       });
     } catch (err) {
       log?.warn?.(

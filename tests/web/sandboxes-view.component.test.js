@@ -20,11 +20,16 @@ export { default as UiSelect } from '${webFile('src/components/primitives/UiSele
 export { default as UiSwitch } from '${webFile('src/components/primitives/UiSwitch.vue')}';
 export { default as UiField } from '${webFile('src/components/composites/UiField.vue')}';
 export { default as UiFormActions } from '${webFile('src/components/composites/UiFormActions.vue')}';
+export { default as UiDisclosureButton } from '${webFile('src/components/composites/UiDisclosureButton.vue')}';
 export { default as UiInlineMessage } from '${webFile('src/components/feedback/UiInlineMessage.vue')}';
 export { default as UiProgress } from '${webFile('src/components/feedback/UiProgress.vue')}';
 export const confirmDialog = async (text, options) => {
   globalThis.__sandboxViewHarness.confirmations.push({ text, options });
   return globalThis.__sandboxViewHarness.confirmed;
+};
+export const promptDialog = async (options) => {
+  globalThis.__sandboxViewHarness.prompts.push(options);
+  return globalThis.__sandboxViewHarness.answers.shift() ?? null;
 };
 `;
 
@@ -43,7 +48,23 @@ export const raiseSandbox = async (profile, task) => {
 export const dismantleSandbox = async (task, force) => {
   globalThis.__sandboxViewHarness.calls.push(['dismantle', task, force]);
 };
+export const runSandboxAction = async (task, action, args) => {
+  globalThis.__sandboxViewHarness.calls.push(['run', task, action, args]);
+  return true;
+};
+export const loadSandboxJobLog = async (task) => {
+  globalThis.__sandboxViewHarness.calls.push(['log', task]);
+  return { task, action: 'run', state: 'done', text: 'ИТОГ: все звенья СОВПАДАЮТ', truncated: false };
+};
 `;
+
+const ACTION = {
+  id: 'scan-schedule',
+  label: 'Плановый съём',
+  description: 'Гонит плановый съём проекта целиком.',
+  args: [{ key: 'project', label: 'Номер проекта', type: 'number', required: true, hint: 'из песочницы' }],
+  confirm: 'Спишет лимиты пользователя песочницы.',
+};
 
 function entry(overrides = {}) {
   return {
@@ -66,12 +87,16 @@ function entry(overrides = {}) {
  * Страница монтируется на двойнике стора: проверяется, что она спрашивает человека
  * и передаёт службе именно то, что он выбрал. Настоящих стендов здесь нет.
  */
-async function mountView(t, { sandboxes = [entry()], jobs = [], confirmed = true } = {}) {
+async function mountView(t, {
+  sandboxes = [entry()], jobs = [], confirmed = true, answers = [],
+} = {}) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/sandboxes');
   const calls = [];
   const harness = {
     confirmed,
     confirmations: [],
+    prompts: [],
+    answers,
     calls,
     store: {
       profiles: [{ id: 'demo-profile', canRaise: true, reason: null }],
@@ -96,6 +121,7 @@ async function mountView(t, { sandboxes = [entry()], jobs = [], confirmed = true
   const component = await compileVue(VIEW, {
     stubs: {
       '../actions/sandboxes': ACTIONS_STUB,
+      '../../actions/sandboxes': ACTIONS_STUB,
       '../ui': UI_STUB,
       '../../ui': UI_STUB,
     },
@@ -191,4 +217,69 @@ test('идущий подъём показан шагом, а не пустой 
 
   assert.match(wrapper.text(), /клон db: данные/);
   assert.equal(wrapper.find('[role="progressbar"]').attributes('aria-valuenow'), '4');
+});
+
+test('действие профиля спрашивает аргументы, подтверждение и уходит в службу', async (t) => {
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    sandboxes: [entry({ actions: [ACTION] })],
+    answers: ['389'],
+  });
+  const button = wrapper.findAll('.sandbox-card__runs button').find((item) => item.text() === 'Плановый съём');
+
+  assert.ok(button, 'кнопка действия из манифеста профиля');
+
+  await button.trigger('click');
+  await flushPromises();
+
+  assert.equal(harness.prompts.length, 1);
+  assert.match(harness.prompts[0].text, /Номер проекта\. из песочницы/);
+  assert.match(harness.confirmations[0].text, /Плановый съём на стенде t990000/);
+  assert.match(harness.confirmations[0].text, /Спишет лимиты/);
+  assert.deepEqual(calls.filter(([kind]) => kind === 'run'), [
+    ['run', '990000', 'scan-schedule', { project: '389' }],
+  ]);
+});
+
+test('отмена вопроса об аргументе не запускает действие и не спрашивает подтверждения', async (t) => {
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    sandboxes: [entry({ actions: [ACTION] })],
+    answers: [null],
+  });
+
+  await wrapper.find('.sandbox-card__runs button').trigger('click');
+  await flushPromises();
+
+  assert.equal(harness.confirmations.length, 0);
+  assert.deepEqual(calls.filter(([kind]) => kind === 'run'), []);
+});
+
+test('итог прогона показан на карточке, а журнал читается по кнопке', async (t) => {
+  const { wrapper, flushPromises, calls } = await mountView(t, {
+    sandboxes: [entry({ actions: [ACTION], removable: false, removableReason: 'job_running' })],
+    jobs: [{
+      task: '990000',
+      profile: 'demo-profile',
+      action: 'run',
+      actionId: 'scan-schedule',
+      actionLabel: 'Плановый съём',
+      state: 'done',
+      index: 0,
+      total: 0,
+      label: 'прогон выполнен',
+      message: 'набор проходов: СОВПАДАЕТ',
+      startedAt: '2026-09-18T10:00:00.000Z',
+      finishedAt: '2026-09-18T10:03:00.000Z',
+    }],
+  });
+
+  assert.match(wrapper.text(), /набор проходов: СОВПАДАЕТ/);
+
+  const toggle = wrapper.findAll('button').find((item) => /Журнал задания/.test(item.text()));
+
+  assert.ok(toggle, 'кнопка журнала у прогона');
+  await toggle.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(calls.filter(([kind]) => kind === 'log'), [['log', '990000']]);
+  assert.match(wrapper.find('.sandbox-card__log-text').text(), /все звенья СОВПАДАЮТ/);
 });

@@ -66,6 +66,8 @@ async function compileToolHostPublisher() {
       '../tools/registry.ts': `
         export const TOOL_REGISTRY = globalThis.__uiContextToolRegistry.TOOL_REGISTRY;
         export const TOOL_BY_ID = globalThis.__uiContextToolRegistry.TOOL_BY_ID;
+        export const toolsOf = () => globalThis.__uiContextToolRegistry.TOOL_REGISTRY;
+        export const toolById = (plugins, id) => globalThis.__uiContextToolRegistry.TOOL_BY_ID.get(id) || null;
         export const toolAvailability = (...args) =>
           globalThis.__uiContextToolRegistry.toolAvailability(...args);
       `,

@@ -616,34 +616,36 @@ export class B24Client {
     }
 
     /**
-     * Статистика отработанного времени за текущий месяц. Данные зашиты в HTML
-     * дашборда (chartDataByPeriod), отдельного JSON-эндпоинта нет:
-     * сумма day.hours = отработано за месяц; «Норма: Nч» — план.
+     * Итоги текущего месяца из `getData.mainData`. Ряд графика `day.tasks` для
+     * этого не подходит: одна задача может попасть в несколько дней учёта времени.
      */
-    async getMonthStats(): Promise<Payload> {
-        await this.ensureAuth();
-        const html = await (await this.raw('/salary/?project_id=0')).text();
-        let hours = 0;
-        // Первое вхождение "day":{...} — реальные данные (далее идут пустые перезаписи).
-        const dayMatch = html.match(/"day":\s*\{([^{}]*)\}/);
-        if (dayMatch) {
-            const hm = (dayMatch[1] ?? '').match(/"hours":\s*\[([-\d.,\s]*)\]/);
+    async getMonthStats(sourceMainData?: unknown): Promise<Payload> {
+        let mainData = sourceMainData && typeof sourceMainData === 'object' && !Array.isArray(sourceMainData)
+            ? sourceMainData as Payload
+            : {};
 
-            if (hm) {
-                hours = (hm[1] ?? '')
-                    .split(',')
-                    .map(Number)
-                    .filter((x) => !Number.isNaN(x))
-                    .reduce((a, b) => a + b, 0);
-            }
+        if (sourceMainData === undefined) {
+            const uid = (await this.discoverUserId()) ?? 0;
+            const response = await this.apiGet(
+                `/local/ajax/dashboard.php?action=getData&user_id=${uid}&project_id=0&chart_period=day&show_all_tasks=1`,
+            );
+            mainData = nested(nested(response, 'data'), 'mainData');
         }
-        const normM = html.match(/Норма:\s*(\d+)\s*ч/);
-        return { hours, norm: normM ? Number(normM[1]) : null };
+
+        const hours = Number(mainData.worked_hours);
+        const completedTasks = Number(mainData.completed_tasks);
+        const norm = Number(mainData.min_hours);
+
+        return {
+            hours: Number.isFinite(hours) && hours >= 0 ? hours : 0,
+            completedTasks: Number.isSafeInteger(completedTasks) && completedTasks >= 0 ? completedTasks : 0,
+            norm: Number.isFinite(norm) && norm >= 0 ? norm : null,
+        };
     }
 
     /**
-     * Список задач + сводка по отработанному времени (сегодня и за месяц) за один проход:
-     * getTodayData отдаёт и задачи, и todayData (сегодня), а страница — месяц.
+     * Список задач + сводка по отработанному времени (сегодня и за месяц) за один проход.
+     * Полный `getData` нужен ради авторитетного `mainData.completed_tasks`.
      * @param {object} opts
      * @param {boolean} opts.all все мои активные задачи (true) или приоритетный набор (false)
      */
@@ -651,7 +653,7 @@ export class B24Client {
         const uid = (await this.discoverUserId()) ?? 0;
         const flag = all ? 1 : 0;
         const data = await this.apiGet(
-            `/local/ajax/dashboard.php?action=getTodayData&user_id=${uid}&project_id=0&show_all_tasks=${flag}`,
+            `/local/ajax/dashboard.php?action=getData&user_id=${uid}&project_id=0&chart_period=day&show_all_tasks=${flag}`,
         );
         const payload = nested(data, 'data');
         const tasks = nestedList(payload, 'currentTasks').map((t) => this.mapTask(t, uid));
@@ -659,7 +661,7 @@ export class B24Client {
         tasks.sort(B24Client.comparePriority);
 
         const td = nested(payload, 'todayData');
-        const month = await this.getMonthStats();
+        const month = await this.getMonthStats(nested(payload, 'mainData'));
         return {
             tasks,
             today: { hours: td.hours ?? 0, tasks: td.tasks_count ?? 0 },

@@ -1,8 +1,9 @@
-// Межпроцессная аренда ручной песочницы для Showcase и её lifecycle.
+// Межпроцессная аренда ручной песочницы для Showcase, действий профиля и lifecycle.
 //
-// Операции показа берут shared flock, а up/down — exclusive. Замок относится к
-// номеру задачи и живёт на отдельном inode в stateDir: `orch.lock` принадлежит
-// другому протоколу и здесь намеренно не используется.
+// Операции показа и действия профиля берут shared flock, а up/down — exclusive: пока
+// на стенде идёт прогон, снести его нельзя, а два прогона друг другу не мешают.
+// Замок относится к номеру задачи и живёт на отдельном inode в stateDir:
+// `orch.lock` принадлежит другому протоколу и здесь намеренно не используется.
 import path from 'node:path';
 
 import { SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts.ts';
@@ -19,6 +20,7 @@ export interface SandboxActivityLease extends KernelFileLock {
 export interface SandboxActivityGuard {
   acquireLifecycle: (task: string) => Promise<SandboxActivityLease>;
   acquireShowcase: (task: string) => Promise<SandboxActivityLease>;
+  acquireAction: (task: string) => Promise<SandboxActivityLease>;
 }
 
 export interface SandboxActivityGuardOptions {
@@ -79,5 +81,6 @@ export function createSandboxActivityGuard({
   return Object.freeze({
     acquireLifecycle: (task: string) => acquire(task, 'exclusive'),
     acquireShowcase: (task: string) => acquire(task, 'shared'),
+    acquireAction: (task: string) => acquire(task, 'shared'),
   });
 }

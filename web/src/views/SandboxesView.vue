@@ -53,6 +53,7 @@
           :job="store.jobOf(entry.task)"
           :busy="store.isBusy(entry.task)"
           @dismantle="dismantle"
+          @run="run"
         />
       </div>
     </section>
@@ -72,7 +73,7 @@
           <span class="sandboxes__job-dot" :data-state="job.state" aria-hidden="true"></span>
           <strong>t{{ job.task }}</strong>
           <span class="sandboxes__job-state">
-            {{ job.action === 'up' ? 'подъём' : 'снос' }} · {{ jobState(job) }}
+            {{ jobKind(job) }} · {{ jobState(job) }}
           </span>
           <span v-if="job.message" class="sandboxes__job-message">{{ job.message }}</span>
         </li>
@@ -89,7 +90,7 @@
         <span class="sandboxes__count">{{ store.pipelineSandboxes.length }}</span>
       </div>
       <p class="sandboxes__note">
-        Показаны для сведения: их жизненным циклом владеет попытка движка.
+        Их жизненным циклом владеет попытка движка; действия профиля на них доступны.
       </p>
 
       <div class="sandboxes__list">
@@ -98,8 +99,9 @@
           :key="entry.task"
           :entry="entry"
           :job="store.jobOf(entry.task)"
-          :busy="false"
+          :busy="store.isBusy(entry.task)"
           @dismantle="dismantle"
+          @run="run"
         />
       </div>
     </section>
@@ -108,15 +110,18 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { UiButton, UiInlineMessage, confirmDialog } from '../ui';
+import {
+  UiButton, UiInlineMessage, confirmDialog, promptDialog,
+} from '../ui';
 import {
   dismantleSandbox,
   loadSandboxes,
   raiseSandbox,
+  runSandboxAction,
   useSandboxesStore,
   watchSandboxes,
 } from '../actions/sandboxes';
-import type { SandboxJob } from '../../../shared/sandboxContracts';
+import type { SandboxActionDecl, SandboxJob } from '../../../shared/sandboxContracts';
 import SandboxCard from './sandboxes/SandboxCard.vue';
 import SandboxRaiseForm from './sandboxes/SandboxRaiseForm.vue';
 
@@ -127,6 +132,18 @@ onMounted(() => {
   watchSandboxes();
   void loadSandboxes();
 });
+
+/**
+ * Род задания словами: подъём, снос или прогон — подписью действия из манифеста
+ * профиля, чтобы в списке недавних заданий было видно, ЧТО именно гоняли.
+ */
+function jobKind(job: SandboxJob) {
+  if (job.action === 'run') {
+    return job.actionLabel || 'прогон';
+  }
+
+  return job.action === 'up' ? 'подъём' : 'снос';
+}
 
 // Состояние задания словами: у стенда, которого уже нет в реестре, это единственное,
 // что остаётся человеку от подъёма или сноса.
@@ -191,6 +208,49 @@ async function dismantle(payload: { task: string; force: boolean }) {
   }
 
   await dismantleSandbox(payload.task, payload.force);
+}
+
+/**
+ * Прогон профиля: аргументы спрашиваются по одному в порядке объявления, а сам
+ * запуск подтверждается словами профиля — он гоняет стенд по-настоящему (очереди,
+ * лимиты, публикация), и что именно произойдёт, знает только его описание.
+ */
+async function run(payload: { task: string; action: SandboxActionDecl }) {
+  const { task, action } = payload;
+  const args: Record<string, string> = {};
+
+  for (const arg of action.args) {
+    const answer = await promptDialog({
+      title: `${action.label} — стенд t${task}`,
+      text: arg.hint ? `${arg.label}. ${arg.hint}` : arg.label,
+      placeholder: arg.type === 'number' ? 'целое число' : '',
+      okText: 'Дальше',
+    });
+
+    if (answer === null) {
+      return;
+    }
+
+    if (!answer.trim() && arg.required) {
+      return;
+    }
+
+    args[arg.key] = answer.trim();
+  }
+
+  const accepted = await confirmDialog(
+    `${action.label} на стенде t${task}?\n\n${action.confirm || action.description}`,
+    {
+      title: 'Прогон на стенде',
+      okText: 'Запустить',
+    },
+  );
+
+  if (!accepted) {
+    return;
+  }
+
+  await runSandboxAction(task, action.id, args);
 }
 </script>
 

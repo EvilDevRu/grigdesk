@@ -273,8 +273,9 @@
               </svg>
             </UiIconButton>
           </div>
-          <!-- Ход прерван перезапуском сервера: память сессии цела, продолжение — обычное
-               сообщение в ту же сессию. Только у последнего сообщения свободного чата. -->
+          <!-- Ход прерван перезапуском сервера или самим CLI (сеть, лимит): память сессии
+               цела, продолжение — обычное сообщение в ту же сессию. Только у последнего
+               сообщения свободного чата. -->
           <div v-if="isResumeOffer(m, i)" class="m-resume">
             <UiButton
               variant="outline"
@@ -1358,15 +1359,26 @@ async function submit() {
   }
 }
 
-// Ход прерван перезапуском сервера: сессия исполнителя цела (транскрипт CLI живёт на
-// диске отдельно от кокпита), поэтому продолжение — обычное сообщение в ту же сессию.
-// Текст называет причину: агент должен сверить сделанное, а не переделывать с нуля.
-const RESUME_TEXT = 'Сервер кокпита перезапустился, и твой ход был прерван. '
-  + 'Продолжай с места остановки: сверь, что уже сделано, и доведи работу до конца.';
+// Ход прерван перезапуском сервера или оборван самим CLI (сеть, лимит): сессия
+// исполнителя цела (транскрипт CLI живёт на диске отдельно от кокпита), поэтому
+// продолжение — обычное сообщение в ту же сессию. Текст называет причину по метке:
+// агент должен сверить сделанное, а не переделывать с нуля.
+const RESUME_TAIL = 'Продолжай с места остановки: сверь, что уже сделано, и доведи работу до конца.';
+const RESUME_TEXT = Object.freeze({
+  server_shutdown: `Сервер кокпита перезапустился, и твой ход был прерван. ${RESUME_TAIL}`,
+  delivery_failure: 'Твой прошлый ход оборвал сам CLI (сеть или лимит), ответ до меня не дошёл. '
+    + RESUME_TAIL,
+});
+
+/** Текст продолжения по метке прерывания; без известной метки продолжать нечего. */
+function resumeTextFor(m) {
+  const reason = m?.interruptedBy;
+  return typeof reason === 'string' && Object.hasOwn(RESUME_TEXT, reason) ? RESUME_TEXT[reason] : '';
+}
 
 /** Кнопку показываем только у последнего сообщения и только свободному чату. */
 function isResumeOffer(m, i) {
-  if (m?.interruptedBy !== 'server_shutdown') return false;
+  if (!resumeTextFor(m)) return false;
   const messages = sess.value?.messages || [];
   if (i !== messages.length - 1) return false;
   return !sess.value?.sending && !sess.value?.compacting && !frozen.value;
@@ -1374,8 +1386,10 @@ function isResumeOffer(m, i) {
 
 async function resumeInterrupted() {
   if (!sess.value || frozen.value) return;
+  const text = resumeTextFor(sess.value.messages?.at(-1));
+  if (!text) return;
   atBottom.value = true;
-  await chat.send(props.sid, RESUME_TEXT, []);
+  await chat.send(props.sid, text, []);
 }
 function onKey(e) {
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.

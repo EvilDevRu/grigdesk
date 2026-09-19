@@ -20,7 +20,7 @@
     </UiIconButton>
   </aside>
 
-  <template v-for="item in TOOL_REGISTRY" :key="item.id">
+  <template v-for="item in tools" :key="item.id">
     <ToolDock v-if="dock.mounted[item.id]"
               :ref="(value) => setDockRef(item.id, value)" :mode="modeOf(item.id)"
               :label="item.label" :width="dock.width" :min-width="minWidth" :max-width="maxWidth"
@@ -28,6 +28,7 @@
               @hide="hideDock(item.id)" @toggle-expanded="toggleDockExpanded"
               @resize="resize($event)" @resize-end="resize($event, true)">
       <component :is="item.component" :ref="(value) => setPanelRef(item.id, value)"
+                 v-bind="item.panelProps || {}"
                  :active="presentedTool === item.id" :compact="compactOf(item.id)"
                  :presentation="modeOf(item.id)" :intents="dock.intents[item.id] || []"
                  @consume-intent="consumeIntent(item.id, $event)"
@@ -52,7 +53,7 @@ import { usePluginsStore } from '../../stores/plugins.js';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { useUiContextSource } from '../../composables/useUiContextSource.ts';
 import { NAV_ICONS } from '../navIcons.ts';
-import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.ts';
+import { toolsOf, toolById, toolAvailability } from '../tools/registry.ts';
 import { useDockViewport } from '../tools/viewport.ts';
 import { comboFromEvent, formatCombo } from '../hotkeys/combo.ts';
 import { useHotkeysStore } from '../../stores/hotkeys.js';
@@ -68,14 +69,22 @@ const hotkeys = useHotkeysStore();
 const toolContext = useUiContextSource('tool', { layer: 'dock', active: false });
 const { dockCapable } = useDockViewport();
 
-const routeTool = computed(() => route.meta?.tool || null);
-const routeItem = computed(() => TOOL_BY_ID.get(routeTool.value) || null);
+// Встроенные панели плюс страницы включённых плагинов: состав меняется тумблером
+// плагина, поэтому реестр читается как computed, а не один раз при загрузке.
+const tools = computed(() => toolsOf(plugins));
+
+// Страница плагина ведётся общим роутом /ext/:id — инструмент называет адрес.
+const routeTool = computed(() => {
+  if (route.meta?.tool === 'ext') return String(route.params?.id || '') || null;
+  return route.meta?.tool || null;
+});
+const routeItem = computed(() => toolById(plugins, routeTool.value));
 const routeState = computed(() => (routeItem.value
   ? toolAvailability(routeItem.value, plugins)
   : null));
 const presentedTool = computed(() => {
   if (routeItem.value) return routeState.value === 'enabled' ? routeItem.value.id : null;
-  const item = TOOL_BY_ID.get(dock.activeTool);
+  const item = toolById(plugins, dock.activeTool);
   return dockCapable.value && dock.isOpen && toolAvailability(item, plugins) === 'enabled'
     ? item.id
     : null;
@@ -85,7 +94,7 @@ const presentation = computed(() => {
   return presentedTool.value ? 'dock' : 'hidden';
 });
 
-const railItems = computed(() => TOOL_REGISTRY.filter((item) => {
+const railItems = computed(() => tools.value.filter((item) => {
   if (toolAvailability(item, plugins) !== 'enabled') return false;
   if (!item.plugin) return true;
   return plugins.dockNav.some((nav) => nav.id === item.id);
@@ -210,7 +219,7 @@ function onHotkey(event) {
   if (hotkeys.recording || event.defaultPrevented || event.repeat || event.isComposing) return;
 
   const id = hotkeys.toolByCombo[comboFromEvent(event)];
-  const item = id && railItems.value.some((entry) => entry.id === id) ? TOOL_BY_ID.get(id) : null;
+  const item = id && railItems.value.some((entry) => entry.id === id) ? toolById(plugins, id) : null;
   if (!item) return;
 
   event.preventDefault();
@@ -260,7 +269,7 @@ watch([presentedTool, presentation, dockCapable], () => {
   // В route-only режиме живёт только текущая tool-страница. Уход с неё обязан
   // закрыть PTY/Monaco обычным unmount и сбросить runtime-индикатор.
   if (!dockCapable.value) {
-    for (const item of TOOL_REGISTRY) {
+    for (const item of tools.value) {
       if (item.id !== id && dock.mounted[item.id]) dock.resetRuntime(item.id);
     }
   }
@@ -271,7 +280,7 @@ watch(dockCapable, (can, was) => {
   measureContent();
   if (!can && was) {
     dock.close();
-    for (const item of TOOL_REGISTRY) {
+    for (const item of tools.value) {
       if (item.id !== routeTool.value) dock.resetRuntime(item.id);
     }
   }
@@ -286,7 +295,7 @@ watch(() => route.path, (path, previous) => {
 
 watch(() => [plugins.loaded, ...plugins.list.map((item) => `${item.id}:${item.enabled}:${item.nav?.group || ''}`)], () => {
   if (!plugins.loaded) return;
-  for (const item of TOOL_REGISTRY.filter((entry) => entry.plugin)) {
+  for (const item of tools.value.filter((entry) => entry.plugin)) {
     if (toolAvailability(item, plugins) === 'enabled') continue;
     if (dock.activeTool === item.id) dock.close();
     dock.resetRuntime(item.id);

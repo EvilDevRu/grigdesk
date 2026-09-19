@@ -35,6 +35,7 @@ interface CompactObservation {
   screenId: string;
   sceneIndex: number;
   actionIndex: number;
+  path?: string;
   error?: string;
   text: string;
   surfaces: string[];
@@ -74,6 +75,7 @@ export function compactObservations(observations: readonly ScreenObservation[]):
       screenId: observation.screenId,
       sceneIndex: observation.sceneIndex,
       actionIndex: observation.actionIndex,
+      ...(observation.path ? { path: observation.path } : {}),
       ...(observation.error ? { error: observation.error } : {}),
       text: observation.text,
       surfaces: observation.surfaces,
@@ -235,6 +237,9 @@ function reviewPrompt(
   PUT, PATCH, DELETE. Не пытайся запускать съём, оплату или менять данные стенда.
   Непоказуемую часть оставляй в gaps; основную функцию покажи доступными действиями.
 - Повтор проверяется с чистого экрана. Сохраняй необходимые предыдущие шаги цепочки.
+- Экран с id page:… браузер нашёл сам, когда клик сменил адрес (path в наблюдении).
+  Сцену о нём начинай прямо с него: назови его screenId головной сцене — запись
+  откроет адрес сама, и путь кликами через другие экраны не нужен.
 - Если выбор изменил текст элемента (например, пересчитал сводку), используй ID
   его нового видимого состояния из наблюдения ПОСЛЕ выбора. Старый ID неактивен.
 - При исправлении используй форму script из задания выше, включая bindings с цитатами.

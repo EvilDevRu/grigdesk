@@ -13,6 +13,11 @@
 // ЧУЖОЕ НЕ ТРОГАЕМ. Стенд с реестром конвейера (t<номер>.pipeline) принадлежит попытке
 // движка, стенд общего checkout (WORKSPACE_MODE=shared) — вообще не наш: у обоих свой
 // владелец и свой жизненный цикл. Здесь такие стенды только показываются.
+//
+// ДЕЙСТВИЯ ПРОФИЛЯ. Прогон на поднятом стенде (`profiles/<профиль>/actions.json`) —
+// не lifecycle: он не трогает контейнеры и схемы, поэтому доступен и стенду конвейера,
+// пока тот стоит на воротах. Идёт под shared-арендой стенда, как показ «Презентаций»:
+// снос дождётся конца прогона, а прогон не помешает второму прогону.
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
@@ -22,10 +27,15 @@ import { readLaunchLog } from '../factoryRouteCli.ts';
 import { listFactoryProfiles, PROFILE_RE } from '../profiles.ts';
 import { releaseSlot, reservedTasks, reserveSlot } from '../sandboxSlots.ts';
 import { readProcessIdentity } from '../speech/modelJobsProcess.ts';
-import { SANDBOX_TASK_RE, toSandboxJob } from '../../../../shared/sandboxContracts.ts';
+import {
+  SANDBOX_ACTION_ID_RE,
+  SANDBOX_TASK_RE,
+  toSandboxJob,
+} from '../../../../shared/sandboxContracts.ts';
 import type {
   SandboxActionResponse,
   SandboxEntry,
+  SandboxJobLog,
   SandboxJournalRecord,
   SandboxOverview,
   SandboxProfile,
@@ -33,6 +43,7 @@ import type {
 import {
   fileExists,
   hasPipelineRegistry,
+  readPipelineHold,
   readSandboxJournal,
   readSandboxJournalRecord,
   readSandboxRegistry,
@@ -40,6 +51,13 @@ import {
   writeSandboxJournalRecord,
 } from './registry.ts';
 import type { SandboxRegistryEntry } from './registry.ts';
+import {
+  readProfileActions,
+  SandboxActionsManifestError,
+  toActionDecl,
+  validateActionArgs,
+} from './actions.ts';
+import type { SandboxProfileAction } from './actions.ts';
 import {
   createSandboxActivityGuard,
   SandboxActivityError,
@@ -64,6 +82,8 @@ export interface SandboxServiceOptions {
   sweepMs?: number;
   probe?: (port: number) => Promise<boolean>;
   sandboxActivityGuard?: SandboxActivityGuard;
+  // Журнал сервера: кривой манифест действий профиля — предупреждение, а не отказ.
+  log?: { warn: (fields: Record<string, unknown>, message: string) => void };
 }
 
 export interface SandboxRaiseInput {
@@ -76,10 +96,18 @@ export interface SandboxDismantleInput {
   force?: boolean;
 }
 
+export interface SandboxRunInput {
+  task: string;
+  action: string;
+  args?: unknown;
+}
+
 export interface SandboxService {
   overview(): Promise<SandboxOverview>;
   raise(input: SandboxRaiseInput): Promise<SandboxActionResponse>;
   dismantle(input: SandboxDismantleInput): Promise<SandboxActionResponse>;
+  run(input: SandboxRunInput): Promise<SandboxActionResponse>;
+  jobLog(task: string): Promise<SandboxJobLog>;
   resume(): Promise<void>;
   stop(): void;
 }
@@ -87,6 +115,11 @@ export interface SandboxService {
 const DEFAULT_SWEEP_MS = 15000;
 const PROBE_TIMEOUT_MS = 250;
 const MESSAGE_LIMIT = 600;
+// Хвост вывода задания, который уезжает карточке по запросу: полный журнал прогона
+// бывает мегабайтами, а человеку нужны последние шаги и итог.
+const JOB_LOG_LIMIT = 64 * 1024;
+// Сколько хвоста читать ради последней строки прогона — шага, который идёт сейчас.
+const STEP_TAIL_BYTES = 400;
 // Завершённое задание живёт в обзоре ещё полчаса: стенда в реестре уже нет, а итог
 // сноса и причину упавшего подъёма человек обязан увидеть.
 const RECENT_JOB_MS = 30 * 60 * 1000;
@@ -150,6 +183,18 @@ function processAlive(record: SandboxJournalRecord): boolean {
 }
 
 /**
+ * Шаг прогона — последняя непустая строка его вывода. Своего журнала этапов у
+ * действия профиля нет: скрипт просто печатает, что делает, и карточка показывает
+ * последнюю строку как текущий шаг.
+ */
+async function readRunStep(log: string): Promise<string> {
+  const tail = await readLaunchLog(log, STEP_TAIL_BYTES);
+  const lines = tail.split('\n').map((line) => line.trim()).filter(Boolean);
+
+  return (lines[lines.length - 1] || '').slice(0, MESSAGE_LIMIT);
+}
+
+/**
  * Стенд принадлежит разделу только когда он изолированный и заведён самой задачей.
  * Общий checkout и внешний стенд профиля живут по чужим правилам: их не поднимают
  * и не сносят отсюда.
@@ -172,6 +217,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     subscribe = null,
     sweepMs = DEFAULT_SWEEP_MS,
     probe = probePort,
+    log = null,
   } = options;
 
   // Живые задания держатся в памяти: тик слежения обязан стоить одно чтение журнала
@@ -406,6 +452,21 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     ]);
     const failed = !ok || stage?.state === 'failed';
 
+    // Прогон профиля не снимает слот и не читает журнал этапов: его итог — код выхода
+    // скрипта и хвост вывода, где скрипт печатает сверку или причину отказа.
+    if (record.action === 'run') {
+      await save({
+        ...record,
+        state: failed ? 'failed' : 'done',
+        label: failed ? 'прогон завершился с ошибкой' : 'прогон выполнен',
+        message: output || (failed ? 'процесс завершился с ошибкой' : ''),
+        finishedAt: new Date().toISOString(),
+      });
+      announce('sandboxes-changed', { task });
+
+      return;
+    }
+
     if (!failed && record.action === 'down') {
       releaseSlot({ stateDir, task });
     }
@@ -430,6 +491,16 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     for (const record of [...running.values()]) {
       if (!processAlive(record)) {
         await finish(record.task, false);
+
+        continue;
+      }
+
+      if (record.action === 'run') {
+        const step = await readRunStep(record.log);
+
+        if (step && step !== record.label) {
+          await save({ ...record, label: step });
+        }
 
         continue;
       }
@@ -474,6 +545,45 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     }
   }
 
+  /**
+   * Действия профиля: манифест перечитывается на каждый обзор — он лежит рядом с
+   * кодом профиля и меняется вместе с ним. Кривой манифест не закрывает раздел:
+   * стенд получает пустой список, а причина уходит в журнал сервера.
+   */
+  async function actionsOf(profile: string | null): Promise<SandboxProfileAction[]> {
+    if (!profile) {
+      return [];
+    }
+
+    try {
+      return await readProfileActions(profilesDir, profile);
+    } catch (error) {
+      if (error instanceof SandboxActionsManifestError) {
+        log?.warn({ profile, reason: error.message }, 'манифест действий профиля отброшен');
+
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Чей это стенд, когда он принадлежит конвейеру: профиль называет реестр попытки.
+   * Своего журнала подъёма у такого стенда нет — его поднимал движок, — а действия
+   * профиля нужны и ему: на воротах приёмки человек гоняет стенд руками.
+   */
+  async function pipelineProfile(entry: SandboxRegistryEntry): Promise<string | null> {
+    if (!entry.pipeline) {
+      return null;
+    }
+
+    const hold = await readPipelineHold(stateDir, entry.task);
+    const profile = hold?.profile ?? '';
+
+    return PROFILE_RE.test(profile) ? profile : null;
+  }
+
   /** Стенд как его видит человек: реестр + владелец + живость портов. */
   async function describe(
     entry: SandboxRegistryEntry,
@@ -481,17 +591,19 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     capable: string[],
   ): Promise<SandboxEntry> {
     const record = journal.get(entry.task) || null;
-    const [apiAlive, feAlive] = await Promise.all([
+    const [apiAlive, feAlive, pipelineOwner] = await Promise.all([
       entry.apiPort ? probe(entry.apiPort) : Promise.resolve(null),
       entry.fePort ? probe(entry.fePort) : Promise.resolve(null),
+      pipelineProfile(entry),
     ]);
     const portsAlive = [apiAlive, feAlive].filter((alive) => alive !== null);
     const alive = portsAlive.length ? portsAlive.some(Boolean) : null;
     const owned = ownedByTask(entry);
-    const profile = owned ? ownerOf(record, capable) : record?.profile ?? null;
+    const profile = owned ? ownerOf(record, capable) : record?.profile ?? pipelineOwner;
     const binding = profile
       ? profileBinding(entry, record) ?? 'inferred'
       : null;
+    const actions = (await actionsOf(profile)).map(toActionDecl);
     const reason = !owned
       ? 'pipeline_owned' as const
       : record?.state === 'running'
@@ -512,7 +624,25 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       removable: reason === null,
       removableReason: reason,
       updatedAt: entry.updatedAt,
+      actions,
     };
+  }
+
+  /**
+   * Профиль стенда для запуска действия: у ручного — владелец по журналу, у стенда
+   * конвейера — реестр попытки. Без профиля действий нет: кокпит не гадает, чьи
+   * скрипты запускать.
+   */
+  async function profileForRun(
+    entry: SandboxRegistryEntry,
+    record: SandboxJournalRecord | null,
+    capable: string[],
+  ): Promise<string | null> {
+    if (ownedByTask(entry)) {
+      return ownerOf(record, capable);
+    }
+
+    return record?.profile ?? await pipelineProfile(entry);
   }
 
   /**
@@ -611,6 +741,8 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
           task,
           profile: input.profile,
           action: 'up',
+          actionId: null,
+          actionLabel: null,
           state: 'running',
           index: 0,
           total: 0,
@@ -696,6 +828,8 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
           task,
           profile,
           action: 'down',
+          actionId: null,
+          actionLabel: null,
           state: 'running',
           index: 0,
           total: 0,
@@ -725,6 +859,143 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       } finally {
         await lease.release();
       }
+    },
+
+    async run(input) {
+      const task = requireTask(String(input.task));
+      const actionId = String(input.action || '');
+
+      if (!SANDBOX_ACTION_ID_RE.test(actionId)) {
+        throw new SandboxError('bad_action', 'идентификатор действия имеет недопустимую форму', 400);
+      }
+
+      let lease: SandboxActivityLease;
+
+      try {
+        lease = await activityGuard.acquireAction(task);
+      } catch (error) {
+        if (error instanceof SandboxActivityError && error.code === 'SANDBOX_ACTIVITY_BUSY') {
+          throw new SandboxError('sandbox_busy', `стенд ${task} сейчас поднимается или сносится`);
+        }
+
+        const reason = error instanceof Error ? error.message : 'kernel lock недоступен';
+
+        throw new SandboxError('sandbox_guard_unavailable', reason, 503);
+      }
+
+      try {
+        const [registry, record, known] = await Promise.all([
+          readSandboxRegistry(stateDir),
+          readSandboxJournalRecord(journalDir, task),
+          profiles(),
+        ]);
+        const entry = registry.find((item) => item.task === task) || null;
+
+        if (!entry) {
+          throw new SandboxError('sandbox_missing', `стенда ${task} нет в реестре`, 404);
+        }
+
+        if (record?.state === 'running') {
+          throw new SandboxError('job_running', `по стенду ${task} уже идёт работа`);
+        }
+
+        const capable = known.filter((item) => item.canRaise).map((item) => item.id);
+        const profile = await profileForRun(entry, record, capable);
+
+        if (!profile) {
+          throw new SandboxError(
+            'profile_unknown',
+            'кокпит не знает, чей это стенд, и не запускает чужие скрипты наугад',
+          );
+        }
+
+        const action = (await actionsOf(profile)).find((item) => item.id === actionId) || null;
+
+        if (!action) {
+          throw new SandboxError('action_unknown', `профиль ${profile} не объявил действие ${actionId}`, 404);
+        }
+
+        if (!await fileExists(action.script)) {
+          throw new SandboxError('action_unavailable', `скрипт действия ${actionId} не найден`);
+        }
+
+        const checked = validateActionArgs(action.args, input.args);
+
+        if (checked.error) {
+          throw new SandboxError('bad_args', checked.error, 400);
+        }
+
+        const journalRecord: SandboxJournalRecord = {
+          task,
+          profile,
+          action: 'run',
+          actionId: action.id,
+          actionLabel: action.label,
+          state: 'running',
+          index: 0,
+          total: 0,
+          label: 'запуск прогона',
+          message: '',
+          pid: null,
+          starttime: null,
+          cmdline: null,
+          log: path.join(journalDir, `t${task}.run-${action.id}.log`),
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        };
+        // Прежний вывод того же действия не нужен: журнал открывается заново, иначе
+        // хвост старого прогона выдавался бы за шаг нового.
+        await fs.rm(journalRecord.log, { force: true });
+
+        // Аргументы уходят argv в порядке объявления — скрипту не нужен разбор JSON,
+        // а кокпиту — знание о том, что они значат.
+        const started = await launch(
+          journalRecord,
+          { file: 'bash', args: [action.script, task, ...checked.argv] },
+          {
+            STATE_DIR: stateDir,
+            FACTORY_STATE: stateDir,
+          },
+          lease,
+        );
+
+        announce('sandboxes-changed', { task });
+
+        return { task, job: toSandboxJob(started) };
+      } finally {
+        await lease.release();
+      }
+    },
+
+    /**
+     * Хвост вывода текущего задания стенда. Итог в карточке ограничен парой строк, а
+     * прогон печатает сверку по шагам — её человек читает целиком, но не мегабайтами.
+     */
+    async jobLog(input) {
+      const task = requireTask(String(input));
+      const record = running.get(task) || await readSandboxJournalRecord(journalDir, task);
+
+      if (!record) {
+        throw new SandboxError('job_missing', `по стенду ${task} заданий кокпита не было`, 404);
+      }
+
+      let text = '';
+
+      try {
+        text = await fs.readFile(record.log, 'utf8');
+      } catch {
+        text = '';
+      }
+
+      const truncated = text.length > JOB_LOG_LIMIT;
+
+      return {
+        task,
+        action: record.action,
+        state: record.state,
+        text: truncated ? text.slice(-JOB_LOG_LIMIT) : text,
+        truncated,
+      };
     },
 
     /**

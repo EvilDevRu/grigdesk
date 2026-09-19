@@ -38,13 +38,45 @@ const sandboxRepo = objectOf({
   branch: text,
 });
 
+/**
+ * Форма идентификатора действия профиля и ключа его аргумента: они подставляются в
+ * путь маршрута и в имя файла журнала, поэтому обе стороны сверяют одну и ту же
+ * форму до того, как что-то запустится.
+ */
+export const SANDBOX_ACTION_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+
+// Аргумент действия — то, что человек вводит перед запуском: номер проекта, имя.
+// Тип закрыт перечислением: по нему карточка выбирает поле, а сервер — проверку.
+const sandboxActionArg = objectOf({
+  key: text,
+  label: text,
+  type: oneOf('number', 'text'),
+  required: boolean,
+  hint: optional(text),
+});
+
+// Действие профиля над поднятым стендом: прогон, который профиль объявил рядом со
+// своими up.sh/down.sh. Карточка знает о нём ровно столько, чтобы спросить аргументы
+// и подтвердить запуск; что именно делает скрипт, объясняет описание профиля.
+const sandboxActionDecl = objectOf({
+  id: text,
+  label: text,
+  description: text,
+  args: listOf(sandboxActionArg),
+  confirm: nullable(text),
+});
+
 // Задание и запись журнала — одна форма: журнал добавляет к ней только то, что
 // наружу не отдаётся. Общие поля объявлены один раз, иначе новое поле задания
 // молча терялось бы на проводе или в журнале.
 const jobFields = {
   task: text,
   profile: nullable(text),
-  action: oneOf('up', 'down'),
+  // `run` — действие профиля: его id и подпись едут рядом, старые записи журнала и
+  // сохранённые fixtures их не знают, поэтому оба поля необязательны.
+  action: oneOf('up', 'down', 'run'),
+  actionId: optional(text),
+  actionLabel: optional(text),
   state: oneOf('running', 'done', 'failed'),
   index: numeric,
   total: numeric,
@@ -74,6 +106,8 @@ const sandboxEntry = objectOf({
   removable: boolean,
   removableReason: nullable(oneOf('pipeline_owned', 'job_running', 'unknown_owner')),
   updatedAt: nullable(text),
+  // Действия профиля этого стенда; старый сервер поля не знает — тогда их просто нет.
+  actions: optional(listOf(sandboxActionDecl)),
 });
 
 const sandboxProfile = objectOf({
@@ -97,6 +131,16 @@ const sandboxAction = objectOf({
   job: sandboxJob,
 });
 
+// Вывод задания стенда: хвост журнала процесса, обрезанный сервером до разумного
+// размера, и признак обрезки — чтобы карточка честно сказала «показано не всё».
+const sandboxJobLog = objectOf({
+  task: text,
+  action: oneOf('up', 'down', 'run'),
+  state: oneOf('running', 'done', 'failed'),
+  text,
+  truncated: boolean,
+});
+
 // Журнал кокпита — то же задание плюс то, что наружу не отдаётся: identity процесса
 // подъёма и путь его вывода. Runtime identifiers остаются на сервере.
 const sandboxJournalRecord = objectOf({
@@ -108,6 +152,9 @@ const sandboxJournalRecord = objectOf({
 });
 
 export type SandboxRepo = ReturnType<typeof sandboxRepo>;
+export type SandboxActionArg = ReturnType<typeof sandboxActionArg>;
+export type SandboxActionDecl = ReturnType<typeof sandboxActionDecl>;
+export type SandboxJobLog = ReturnType<typeof sandboxJobLog>;
 export type SandboxJob = ReturnType<typeof sandboxJob>;
 export type SandboxEntry = ReturnType<typeof sandboxEntry>;
 export type SandboxProfile = ReturnType<typeof sandboxProfile>;
@@ -125,6 +172,18 @@ export function parseSandboxAction(value: unknown): SandboxActionResponse {
 
 export function parseSandboxJob(value: unknown): SandboxJob {
   return sandboxJob(value, 'job');
+}
+
+export function parseSandboxJobLog(value: unknown): SandboxJobLog {
+  return sandboxJobLog(value, 'log');
+}
+
+/**
+ * Объявление действия профиля читается из его манифеста тем же декодером, что и
+ * ответ сервера: кривой манифест отбрасывается на сервере, а не доезжает до карточки.
+ */
+export function parseSandboxActionDecl(value: unknown, path = 'action'): SandboxActionDecl {
+  return sandboxActionDecl(value, path);
 }
 
 export function parseSandboxJournalRecord(value: unknown): SandboxJournalRecord {

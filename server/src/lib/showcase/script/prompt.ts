@@ -20,7 +20,8 @@ export interface ScriptScreen {
   title: string;
   path: string;
   // Подпись элемента необязательна: без неё модель видит только идентификатор.
-  elements: { id: string; title?: string | null }[];
+  // Найденный браузером элемент отмечен: его вправе назвать любая сцена.
+  elements: { id: string; title?: string | null; observed?: object | boolean | null }[];
 }
 
 export interface ScriptContext {
@@ -118,7 +119,10 @@ export function buildScriptPrompt(context: ScriptContext, brief: string[]): stri
 
 Требования:
 - не больше ${context.maxScenes} сцен, каждая раскрывает один пункт плана;
-- screenId — ТОЛЬКО из списка экранов ниже; targetId — только из элементов своего экрана;
+- screenId — ТОЛЬКО из списка экранов ниже; targetId — из элементов своего экрана; элементы
+  observed-… нашёл браузер, их вправе назвать любая сцена, на экране которой они видны;
+- экраны с id page:… нашёл браузер: клик увёл на них. Такой экран можно назвать своим и
+  продолжению, и головной сцене — запись откроет его по адресу сама, без пути кликами;
 - допустимые действия: click, hover, highlight, waitVisible с targetId, а также
   {"kind":"scroll","targetId":null,"delta":400} и {"kind":"wait","ms":800};
   экран сцены запись открывает сама — отдельного перехода на него не нужно;

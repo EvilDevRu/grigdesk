@@ -32,11 +32,13 @@ import { toPublicScope } from './targets.ts';
 import type { ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
 import { syncActionsHash } from './scenes.ts';
+import { resolvableElements, screenFromPageId } from './script/observation.ts';
 import { readScriptProof } from './script/verification.ts';
 import type {
   RecordingTimingCandidate,
   RecordingTimingUnavailableCandidate,
   RecordingTimingWorkerCandidate,
+  ScreenMap,
 } from './render/recorder.ts';
 import type { ShowcaseDerivedArtifactRef } from '../../../../shared/showcaseContracts.ts';
 
@@ -555,8 +557,10 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
       }
 
       const screenOf = (scene: ShowcaseProject['scenes'][number]) => {
-        const screen = (proof?.rehearsal.screens ?? internal.screens)
-          .find((item) => item.id === scene.screenId);
+        const screens: ScreenMap[] = proof?.rehearsal.screens ?? internal.screens;
+        // Найденный пробным проходом экран без его отчёта восстанавливается из адреса.
+        const screen = screens.find((item) => item.id === scene.screenId)
+          ?? screenFromPageId<ScreenMap & { title: string }>(scene.screenId);
 
         if (!screen) {
           throw new ShowcaseError(
@@ -569,9 +573,11 @@ export function createRecordingOps(deps: RecordingOpsDeps) {
         const index = [...project.scenes].sort((a, b) => a.order - b.order)
           .findIndex((item) => item.id === scene.id);
 
+        // Найденные браузером элементы других экранов разрешаются так же, как в
+        // пробном проходе: сцена, уводящая на другую страницу, ждёт элемент уже на ней.
         return {
           scene,
-          screen,
+          screen: { ...screen, elements: resolvableElements(screens, screen) },
           observations: proof?.rehearsal.observations.filter((step) => step.sceneIndex === index),
         };
       };

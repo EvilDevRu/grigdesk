@@ -742,7 +742,7 @@ export const useChatStore = defineStore('chat', {
             steps: p.steps || [], model: p.model || '', actualModel: p.actualModel || '', effort: p.effort || '',
             // Как и в send(): остановленный ход помечаем для серверного досье.
             ...(p.stopped ? { stopped: true } : {}),
-            // Прерван перезапуском сервера: по метке чат предложит продолжить ход.
+            // Прерван перезапуском сервера или обрывом CLI: по метке чат предложит продолжить ход.
             ...(p.interruptedBy ? { interruptedBy: p.interruptedBy } : {}),
           });
           if (p.sessionReset) {
@@ -1847,7 +1847,7 @@ export const useChatStore = defineStore('chat', {
             // Метка остановленного хода: по ней сервер соберёт досье для новой
             // Kimi-сессии, чтобы агент знал, что успел сделать оборванный ход.
             ...(r.stopped ? { stopped: true } : {}),
-            // Прерван перезапуском сервера: по метке чат предложит продолжить ход.
+            // Прерван перезапуском сервера или обрывом CLI: по метке чат предложит продолжить ход.
             ...(r.interruptedBy ? { interruptedBy: r.interruptedBy } : {}),
           });
         }

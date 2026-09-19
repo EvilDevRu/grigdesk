@@ -21,6 +21,8 @@ const routes = [
   { path: '/code', name: 'code', component: () => import('./views/CodeView.vue'), meta: { title: 'Код', tool: 'code' } },
   { path: '/shelf', name: 'shelf', component: () => import('./views/ShelfView.vue'), meta: { title: 'Полка', tool: 'shelf' } },
   { path: '/tools', name: 'tools', component: () => import('./views/ToolsView.vue'), meta: { title: 'Инструменты' } },
+  // Страница пользовательского плагина: панель-iframe ведёт ToolHost, id — из адреса.
+  { path: '/ext/:id', name: 'ext', component: () => import('./views/ExtPluginView.vue'), meta: { title: 'Плагин', tool: 'ext' } },
   { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { title: 'Видео' } },
   { path: '/inbox', name: 'inbox', component: () => import('./views/InboxView.vue'), meta: { title: 'Входящие' } },
   { path: '/github', name: 'github', component: () => import('./views/GitHubView.vue'), meta: { title: 'GitHub' } },

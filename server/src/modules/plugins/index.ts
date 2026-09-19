@@ -4,6 +4,7 @@
 // действует без рестарта. Пользовательские server.js подключаются здесь же
 // (только включённые; их вкл/выкл требует рестарта — честно отражено в API).
 import fp from 'fastify-plugin';
+import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -64,11 +65,27 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   // манифеста версионирован полем api — несовместимый плагин не поднимаем, а честно жалуемся.
   const PLUGIN_API = 1;
   for (const m of userPlugins) {
-    if (!m.hasServer || !isEnabled(prefs.read(), m)) continue;
+    if (!isEnabled(prefs.read(), m)) continue;
     if ((m.api || 1) !== PLUGIN_API) {
       fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, кокпит даёт api=${PLUGIN_API} — пропущен`);
       continue;
     }
+    // Своя страница плагина раздаётся под тем же префиксом /api/ext/<id>/, что и его
+    // роуты: общий auth guard закрывает её вместе со всем /api, а ядро не исполняет
+    // ни строчки её кода — только отдаёт файлы папки. Кеша нет: правку страницы
+    // человек видит по обновлению вкладки, без рестарта.
+    if (m.web) {
+      await fastify.register(fastifyStatic, {
+        root: m.web.dir,
+        prefix: m.web.url,
+        decorateReply: false,
+        index: ['index.html'],
+        cacheControl: true,
+        maxAge: 0,
+      });
+      fastify.log.info({ plugin: m.id }, `страница плагина раздаётся (${m.web.url})`);
+    }
+    if (!m.hasServer) continue;
     try {
       const mod = await import(pathToFileURL(path.join(String(m.dir), 'server.js')).href);
       await fastify.register(mod.default, { config, prefs, plugin: m, prefix: `/api/ext/${m.id}` });
@@ -99,8 +116,10 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         values: settingsValues(p, m),
         placements: placementsState(p, m),
         setup: m.setup || null,
-        // Пользовательский серверный код подключается на старте — тумблер подействует после рестарта.
-        needsRestart: !m.system && m.hasServer,
+        web: m.web?.url ?? null,
+        // Пользовательский серверный код и страница подключаются на старте — тумблер
+        // подействует после рестарта.
+        needsRestart: !m.system && (m.hasServer || !!m.web),
       })),
     };
   });

@@ -145,7 +145,21 @@ export function parseBrief(reply: unknown): string[] | null {
 // формы, а лишнее слово: такое действие просто выбрасывается из сцены.
 const SKIP_ACTION = Symbol('skip');
 
-function parseAction(value: unknown, screen: ScriptScreen): ShowcaseAction | typeof SKIP_ACTION | null {
+/**
+ * Цель действия — элемент своего экрана по карте или найденный браузером элемент
+ * любого экрана: у найденного есть личность и проверка видимости при действии, а
+ * клик, уводящий на другую страницу, и ожидание элемента уже на ней — одна сцена.
+ */
+function knowsTarget(screen: ScriptScreen, screens: readonly ScriptScreen[], targetId: string): boolean {
+  return screen.elements.some((element) => element.id === targetId)
+    || screens.some((item) => item.elements.some((element) => element.id === targetId && element.observed));
+}
+
+function parseAction(
+  value: unknown,
+  screen: ScriptScreen,
+  screens: readonly ScriptScreen[],
+): ShowcaseAction | typeof SKIP_ACTION | null {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return null;
   }
@@ -169,7 +183,7 @@ function parseAction(value: unknown, screen: ScriptScreen): ShowcaseAction | typ
 
     const targetId = typeof value.targetId === 'string' ? value.targetId : null;
 
-    if (targetId && !screen.elements.some((element) => element.id === targetId)) {
+    if (targetId && !knowsTarget(screen, screens, targetId)) {
       return null;
     }
 
@@ -180,7 +194,7 @@ function parseAction(value: unknown, screen: ScriptScreen): ShowcaseAction | typ
     return null;
   }
 
-  if (!screen.elements.some((element) => element.id === value.targetId)) {
+  if (!knowsTarget(screen, screens, value.targetId)) {
     return null;
   }
 
@@ -401,7 +415,7 @@ function parseScene(value: unknown, screens: ScriptScreen[], sceneIndex: number)
   const sourceToAccepted: (number | null)[] = [];
 
   for (const item of value.actions) {
-    const action = parseAction(item, screen);
+    const action = parseAction(item, screen, screens);
 
     if (!action) {
       return { scene: null, problem: null };

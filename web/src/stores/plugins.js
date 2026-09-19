@@ -2,6 +2,7 @@
 // Питает блок плагинов в сайдбаре (под разделителем) и вкладку «Настройки → Плагины».
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
+import { pluginPageRoute } from '../shared/tools/catalog.ts';
 import { normalizePluginCategory } from '../../../shared/pluginsContracts.ts';
 
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
@@ -55,7 +56,7 @@ export function normalizeNavItem(plugin) {
   const order = typeof rawOrder === 'number' ? rawOrder : Number.NaN;
   return {
     id: plugin.id,
-    to: plugin.nav.path,
+    to: !plugin.system && plugin.web ? pluginPageRoute(plugin.id) : plugin.nav.path,
     label: plugin.nav.label,
     icon: plugin.nav.icon || 'plugin',
     group,
@@ -80,6 +81,18 @@ export const usePluginsStore = defineStore('plugins', {
     railNav() { return this.navItems.filter((item) => item.group === 'rail'); },
     toolsNav() { return this.navItems.filter((item) => item.group === 'tools'); },
     dockNav() { return this.navItems.filter((item) => item.group === 'dock'); },
+    // Страницы пользовательских плагинов: включённые, со своей папкой web и пунктом
+    // навигации. Из них реестр панелей собирает инструменты рейки.
+    webPages: (s) => s.list
+      .filter((p) => p.enabled && !p.system && p.web && p.nav)
+      .map((p) => ({
+        id: p.id,
+        src: p.web,
+        label: p.nav.label || p.name,
+        icon: p.nav.icon || 'plugin',
+        order: typeof p.nav.order === 'number' ? p.nav.order : Number.MAX_SAFE_INTEGER,
+        group: NAV_GROUPS.includes(p.nav.group) ? p.nav.group : 'rail',
+      })),
     byId: (s) => (id) => s.list.find((p) => p.id === id) || null,
     enabled: (s) => (id) => !!s.list.find((p) => p.id === id)?.enabled,
     // Включено ли размещение плагина в слоте. Незаявленное в манифесте место — выключено:
