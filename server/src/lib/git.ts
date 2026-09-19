@@ -518,7 +518,8 @@ export async function worktreeChanges(cwd: string): Promise<CodeWorktreeChanges>
 }
 
 const ACTION_PATHS_MAX = 500;
-const COMMIT_MESSAGE_MAX = 5_000;
+// Потолок ручного сообщения коммита; предложение модели меряется им же.
+export const COMMIT_MESSAGE_MAX = 5_000;
 const COMMIT_PATCH_MAX_BYTES = 120_000;
 
 /**

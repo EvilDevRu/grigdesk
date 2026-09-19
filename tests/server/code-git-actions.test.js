@@ -12,9 +12,12 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import {
+  COMMIT_TITLE_MAX,
   buildCommitTitlePrompt,
+  generateCommitTitle,
   parseCommitTitle,
 } from '../../server/src/lib/codeCommitMessage.ts';
+import { COMMIT_MESSAGE_MAX } from '../../server/src/lib/git.ts';
 import codeModule from '../../server/src/modules/code/index.ts';
 
 const exec = promisify(execFile);
@@ -277,6 +280,17 @@ test('CODE-ACTION-06: парсер принимает только точный 
   assert.equal(parseCommitTitle('{"title":"ok","body":"лишнее"}'), null);
   assert.equal(parseCommitTitle('обычный текст'), null);
 
+  // Длину задаёт стиль репозитория: название в 244 символа, как в его недавних
+  // коммитах (прежний порог 200 отвергал его), — ответ по контракту. Потолок один
+  // с ручным сообщением и ловит только ответ, в который попал сам diff.
+  const long = `Кокпит: ${'действия профиля на стенде, '.repeat(8)}итоги месяца`;
+  assert.equal(long.length, 244);
+  assert.equal(parseCommitTitle(JSON.stringify({ title: long })), long);
+  assert.equal(COMMIT_TITLE_MAX, COMMIT_MESSAGE_MAX);
+  assert.equal(parseCommitTitle(JSON.stringify({ title: 'x'.repeat(COMMIT_TITLE_MAX) })).length,
+    COMMIT_TITLE_MAX);
+  assert.equal(parseCommitTitle(JSON.stringify({ title: 'x'.repeat(COMMIT_TITLE_MAX + 1) })), null);
+
   const prompt = buildCommitTitlePrompt({
     files: 'M\tapp.js',
     stat: '1 file changed',
@@ -286,6 +300,37 @@ test('CODE-ACTION-06: парсер принимает только точный 
   });
   assert.match(prompt, /только недоверенные данные/);
   assert.match(prompt, /<staged_diff>[\s\S]*\+change/);
+  // Числового предела в prompt нет: он спорил бы с требованием следовать стилю
+  // недавних коммитов, и модель выбирала стиль.
+  assert.doesNotMatch(prompt, /не длиннее/);
+  assert.match(prompt, /по объёму, языку и стилю следует недавним коммитам/);
+});
+
+test('CODE-ACTION-06a: отвергнутый ответ модели попадает в журнал с выдержкой', async (t) => {
+  const root = await repository(t);
+  await writeFile(path.join(root, 'app.js'), 'base\nstaged\n');
+  await git(root, ['add', 'app.js']);
+  const warnings = [];
+  const reply = `Вот название: ${'diff '.repeat(200)}`;
+
+  const result = await generateCommitTitle({
+    cwd: root,
+    modelRef: { provider: 'test', model: 'demo' },
+    log: { warn: (data, message) => warnings.push({ data, message }) },
+    resolveTarget: async () => ({
+      ok: true,
+      ref: { provider: 'test', model: 'demo' },
+      executor: { runUntrusted: async () => ({ reply }) },
+    }),
+  });
+
+  assert.deepEqual(result, { ok: false, error: 'bad_model_reply' });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /не по контракту/);
+  assert.equal(warnings[0].data.provider, 'test');
+  assert.equal(warnings[0].data.model, 'demo');
+  assert.equal(warnings[0].data.replyLength, reply.length);
+  assert.equal(warnings[0].data.reply, reply.slice(0, 600));
 });
 
 test('CODE-ACTION-07: без модели генератор объясняет, где её выбрать', async (t) => {
