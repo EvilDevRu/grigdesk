@@ -41,6 +41,12 @@ npm --prefix server test
 npm --prefix web test
 ```
 
+Файлы внутри набора идут параллельно (`--test-concurrency`: сервер 6, web 4), а суммарный
+RSS всей группы ограничивает `tests/run-node-tests-safe.sh`. Бюджет задаётся переменной
+`NODE_TEST_MAX_RSS_MB` и обязан быть не меньше гигабайта на одновременный файл — это
+проверяют контракты `tests/server/test-runner-memory.contract.test.js` и
+`tests/web/test-runner-memory.contract.test.js`.
+
 Серверные контракты отдельно фиксируют abort обоих chat executor-ов, отсутствие зависимости
 исходников от удалённого B24-проекта, чтение локальной canonical runner policy/attempt и
 безопасную команду runtime-switch. Web-тесты фиксируют provider-neutral подписи цепочки,

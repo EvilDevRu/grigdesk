@@ -30,6 +30,8 @@ export interface RouteConfig {
   profilesDir: string;
   factoryConfigRoot: string;
   knowledgeDbPath?: string;
+  deepseekBin?: string;
+  deepseekRuntimeHome?: string;
 }
 
 // Кого именно продолжаем: задача, профиль и закреплённая попытка.
@@ -271,6 +273,10 @@ export function routeLaunchEnv(
     ...extra,
     PATH: cockpitCliPath(config.rootDir),
     ...(config.knowledgeDbPath ? { COCKPIT_KNOWLEDGE_DB_PATH: config.knowledgeDbPath } : {}),
+    ...(config.deepseekBin ? { COCKPIT_DEEPSEEK_BIN: config.deepseekBin } : {}),
+    ...(config.deepseekRuntimeHome
+      ? { COCKPIT_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
+      : {}),
     HOME: process.env.HOME || '',
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
@@ -610,6 +616,10 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
     // systemd, а кокпит его не читает и читать не должен.
     `--property=StandardOutput=append:${logFile}`,
     ...Object.entries(env).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => `--setenv=${k}=${v}`),
+    // Без `=VALUE` systemd-run копирует значение из собственного окружения: имя
+    // секрета видно в argv, сам DEEPSEEK_API_KEY — нет. В non-systemd ветке child
+    // и так наследует process.env.
+    ...(process.env.DEEPSEEK_API_KEY ? ['--setenv=DEEPSEEK_API_KEY'] : []),
     config.factoryBin, ...args,
   ];
   const started = await new Promise<{ ok: boolean; message?: string }>((resolve) => {

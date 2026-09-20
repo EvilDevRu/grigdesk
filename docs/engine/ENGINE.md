@@ -81,9 +81,10 @@ factory
       task/policy/unknown-side-effect failure → stop
 ```
 
-`core.sh` provider-agnostic: в нём нет прямого запуска Claude/Codex и нет выбора модели.
-Project write roots и `STATE_DIR` передаются обоим adapter-ам явно; Codex получает их через
-повторяемый `--add-dir`, сохраняя `workspace-write`, а не переходя в `danger-full-access`.
+`core.sh` provider-agnostic: в нём нет прямого запуска provider CLI и нет выбора модели.
+Write roots и state transport принадлежат adapter-ам. Codex получает разрешённые roots через
+повторяемый `--add-dir`. DeepSeek V1 получает одну writable root — cwd; дополнительные
+каталоги остаются только prompt-контекстом, а status проходит отдельным host MCP.
 
 **Адрес стенда в контексте.** `services.frontendUrl`/`apiUrl` собирает `factory-context`
 из порта песочницы и хоста `PROFILE_SERVICE_HOST` (умолчание — `127.0.0.1`). Имя вынесено
@@ -1404,7 +1405,10 @@ EXACT
 EFFORT применяется адаптером провайдера: claude — флаг `--effort`, codex —
 `-c model_reasoning_effort=...`, kimi — через per-run `KIMI_CODE_HOME` с переписанной
 секцией `[thinking]` config.toml (argv-флага у CLI нет; допустимы только `low|high|max`,
-невалидное значение отвергается fail-closed до вызова модели — см. docs/engine/KIMI.md).
+невалидное значение отвергается fail-closed до вызова модели — см. docs/engine/KIMI.md),
+DeepSeek — через ACP `session/set_config_option` после проверки metadata и до prompt.
+Opaque DeepSeek model id берётся только из trusted catalog; pin и файловый контракт описаны
+в [DEEPSEEK.md](DEEPSEEK.md).
 
 Exact id допустим, если он подтверждён каталогом/coverage. Молчаливого downgrade нет.
 
@@ -1447,6 +1451,11 @@ fail-closed classify, TDD-порядок с критикой тестов, live-
 песочницы) — обязательный резерв. Оба заявляют и Codex, и Claude: начиная с
 CLI 2.1.220 Claude не наследует fd 7 в тул-шелл агента, из-за чего Scout не может
 отчитаться; `stage-result.sh` сам выбирает доступный путь.
+
+DeepSeek не получает ни fd 7, ни writable control root: отдельный server-owned stdio MCP
+принимает структурные `stage_progress`/`stage_result`, восстанавливает task/stage/run/epoch
+только из доверенного env и вызывает те же скрипты с `shell: false`. Неожиданный permission
+request в Factory отклоняется, а отсутствие terminal CAS остаётся ошибкой протокола.
 
 `run_state_begin` атомарно:
 

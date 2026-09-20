@@ -33,6 +33,12 @@ test('kimi label comes from PROVIDER_LABELS, not from the id fallback', () => {
   assert.equal(providerLabel('kimi'), 'Kimi');
 });
 
+test('deepseek label comes from PROVIDER_LABELS, not from the id fallback', () => {
+  assert.ok(Object.hasOwn(PROVIDER_LABELS, 'deepseek'));
+  assert.equal(PROVIDER_LABELS.deepseek, 'DeepSeek');
+  assert.equal(providerLabel('deepseek'), 'DeepSeek');
+});
+
 test('provider_unavailable attempt result has a human-readable label', () => {
   const label = attemptResultLabel('provider_unavailable');
   assert.equal(label, 'провайдер недоступен');

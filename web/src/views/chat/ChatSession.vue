@@ -79,7 +79,7 @@
         <div v-if="lastRunView.model || modelUnknown" class="factbar">
           <template v-if="lastRun">
             <span class="fb" :class="{ warn: lastRunView.mismatch }">
-              последний ход · {{ lastRunView.source }}: <b>{{ lastRunView.model }}</b>
+              последний ход · {{ lastRunView.source }}: <b>{{ modelLabelOf(lastRunView.model) }}</b>
               <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
             </span>
             <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
@@ -233,7 +233,7 @@
             <ProviderIcon v-if="runProvider(m)" :provider="runProvider(m)" :size="12" />
             <span>Агент</span>
             <span v-if="m.actualModel || m.model" class="amodel">
-              {{ m.actualModel || m.model }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
+              {{ runModelLabel(m) }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
             </span>
           </div>
           <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
@@ -244,6 +244,7 @@
           <StepList
             v-if="(m.role === 'assistant' || m.role === 'error') && m.steps?.length"
             :steps="m.steps"
+            :model-label="modelLabelOf"
           />
           <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
             <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
@@ -296,11 +297,11 @@
             <ProviderIcon v-if="liveProvider" :provider="liveProvider" :size="12" />
             <span>Агент</span>
             <span v-if="modelId" class="amodel">
-              {{ modelId }} · запрошено<template v-if="effortValue"> · {{ effortValue }}</template>
+              {{ modelLabelOf(modelId) }} · запрошено<template v-if="effortValue"> · {{ effortValue }}</template>
             </span>
           </div>
           <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
-          <StepList v-if="sess.steps?.length" :steps="sess.steps" live />
+          <StepList v-if="sess.steps?.length" :steps="sess.steps" :model-label="modelLabelOf" live />
           <div class="text muted">
             <UiSpinner decorative />
             думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
@@ -810,11 +811,30 @@ const runProviders = computed(() => {
     const id = message?.role === 'assistant' ? runModelId(message) : '';
 
     if (!id || map.has(id)) continue;
-    map.set(id, prov.modelOf(id).provider || null);
+    const found = prov.modelOf(id);
+    map.set(id, { provider: found.provider || null, label: found.model?.name || id });
   }
 
   return map;
 });
+
+// Подпись модели для человека: имя из каталога (`Opus 5`, `DeepSeek-V4-Flash`), а не
+// машинный id. У DeepSeek id — opaque JSON-массив, и без каталога шапка чата и шаг
+// «старт» показывали его как есть. Незнакомый реестру id остаётся сырым: он всё ещё
+// обязан называть, чем отвечали.
+function modelLabelOf(id) {
+  if (!id) return '';
+  const found = prov.modelOf(id);
+
+  return found.model?.name || found.id || id;
+}
+
+/** Подпись модели готового ответа: факт из потока или запрошенная, но именем из каталога. */
+function runModelLabel(message) {
+  const id = runModelId(message);
+
+  return runProviders.value.get(id)?.label || id;
+}
 
 /**
  * Исполнитель конкретного ответа: знак и цвет шапки берутся из модели ЭТОГО хода, а не
@@ -824,7 +844,7 @@ const runProviders = computed(() => {
 function runProvider(message) {
   if (message?.role !== 'assistant') return null;
 
-  return runProviders.value.get(runModelId(message)) || null;
+  return runProviders.value.get(runModelId(message))?.provider || null;
 }
 
 // Фирменный цвет исполнителя одной переменной на всё сообщение: её берут и полоска
@@ -860,15 +880,17 @@ async function onModelChange(e) {
   // снова окажется K3 и визуально успешный reset отменит саму смену модели.
   const select = e.target;
   const nextModelId = select.value;
-  const oldProv = current.value.provider?.id;
+  const oldProvider = current.value.provider;
+  const oldProv = oldProvider?.id;
   const newProv = prov.modelOf(nextModelId).provider?.id;
   // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
   // резюмить им нельзя: сбрасываем контекст, история чата остаётся.
   // У старого фронта Kimi reset был только локальным: в истории id уже мог быть null,
   // а server-owned binding — всё ещё жив. Поэтому для Kimi сбрасываем sidecar даже без
   // видимого sessionId; revision позволяет стору отличить сохранённый чат от нового.
-  if (oldProv && newProv && oldProv !== newProv && (sess.value?.sessionId || oldProv === 'kimi')) {
-    // Для Kimi reset меняет server-owned binding. Модель переключаем только после
+  if (oldProv && newProv && oldProv !== newProv
+      && (sess.value?.sessionId || oldProvider?.sessionBinding === true)) {
+    // Для capability reset меняет server-owned binding. Модель переключаем только после
     // подтверждения, иначе при сетевой ошибке старую сессию было бы уже не сбросить.
     if (!await chat.resetContext(props.sid)) {
       select.value = modelId.value;

@@ -151,7 +151,8 @@ _multi_resolve() {
       DISPATCH_RESOLVE_RESULT=unavailable_preflight
       return 4
     }
-    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+' <<<"$probe_output" | head -1)
+    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' \
+      <<<"$probe_output" | head -1)
     [[ -n "$runner_version" ]] || runner_version=1.0.0
     MULTI_PROBE_READY["$provider"]=1
     MULTI_PROBE_VERSION["$provider"]=$runner_version

@@ -43,6 +43,11 @@ fixture_resolve() {
       DISPATCH_RESOLVED_MODEL="kimi-${DISPATCH_RESOLVED_FAMILY}-actual"
       DISPATCH_FAMILY_FAILOVER=""
       DISPATCH_CREDENTIAL_FINGERPRINT=acct-kimi ;;
+    deepseek)
+      DISPATCH_RESOLVED_FAMILY=${requested_family:-default}
+      DISPATCH_RESOLVED_MODEL='["deepseek-official","deepseek-v4-flash"]'
+      DISPATCH_FAMILY_FAILOVER=""
+      DISPATCH_CREDENTIAL_FINGERPRINT=acct-deepseek ;;
     *)
       return 4 ;;
   esac
@@ -66,6 +71,7 @@ reset_fixture() {
   breaker_clear claude acct-claude family opus "" 2>/dev/null || true
   breaker_clear codex acct-codex provider "" "" 2>/dev/null || true
   breaker_clear kimi acct-kimi provider "" "" 2>/dev/null || true
+  breaker_clear deepseek acct-deepseek provider "" "" 2>/dev/null || true
 }
 
 reset_fixture
@@ -243,5 +249,28 @@ assert_rc 0 "$?" "chain survives a proven Kimi account refusal"
 assert_eq codex "$DISPATCH_RESULT_RUNNER" "proven Kimi refusal selects Codex"
 assert_eq fallback_provider_unavailable "$DISPATCH_REASON" \
   "provider refusal is visible as the failover reason from Kimi"
+
+reset_fixture
+FIXTURE_RESULT[deepseek]=provider_unavailable
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 51 PLAN deepseek codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "proven early DeepSeek auth refusal can fail over"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "DeepSeek refusal selects the configured fallback"
+
+reset_fixture
+FIXTURE_RESULT[codex]=limited
+FIXTURE_RESULT[deepseek]=ok
+dispatcher_run_chain 52 PLAN codex deepseek 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "DeepSeek works as a failover target"
+assert_eq deepseek "$DISPATCH_RESULT_RUNNER" "limited primary selects DeepSeek"
+
+for nonswitch in transient context_overflow unknown; do
+  reset_fixture
+  FIXTURE_RESULT[deepseek]=$nonswitch
+  FIXTURE_RESULT[codex]=ok
+  dispatcher_run_chain 53 PLAN deepseek codex 200 fixture_resolve fixture_invoke
+  assert_rc 1 "$?" "$nonswitch DeepSeek result does not replay the stage"
+  assert_eq deepseek "$DISPATCH_RESULT_RUNNER" "$nonswitch remains on DeepSeek"
+done
 
 finish_tests

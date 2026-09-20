@@ -65,7 +65,8 @@
 | bash | ≥ 4.0 | `mapfile` при разборе профилей |
 | python3 | ≥ 3.8 | проверки профиля и резервный диагностический dashboard |
 | git | — | worktree, diff и состояние веток |
-| `claude` / `codex` | совместимая с runner fixture версия | исполнители этапов; нужен CLI выбранной цепочки и его локальная авторизация |
+| `claude` / `codex` / `kimi` | совместимая с runner fixture версия | исполнители этапов; нужен CLI выбранной цепочки и его локальная авторизация |
+| DeepSeek Harness | exact `0.1.5-rc.2` | опциональный ACP-исполнитель; ставится pinned-скриптом, нужен `DEEPSEEK_API_KEY` |
 
 Три утилиты держат несущие инварианты, и заменять их нечем: `flock` — «один демон на задачу»,
 `timeout` — потолок этапа, `nohup` — уход конвейера в фон. Все из базовой поставки дистрибутива.
@@ -169,7 +170,7 @@ bin/
 lib/
   core.sh              ЯДРО: provider-neutral orchestration и вход в dispatcher
   multi-runner.sh      routing, model resolution, failover, telemetry и coverage gate
-  runners/             независимые модули CLI (Claude, Codex, Kimi, будущие providers —
+  runners/             независимые модули CLI (Claude, Codex, Kimi, DeepSeek, будущие providers —
                        добавление по ../docs/engine/ADDING-RUNNER.md)
   dispatcher.sh        белый список причин переключения + circuit breaker
   run-state.sh         run-id/epoch/capability CAS terminal status

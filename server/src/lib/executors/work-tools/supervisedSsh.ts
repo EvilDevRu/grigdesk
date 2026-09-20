@@ -77,4 +77,4 @@ async function invoke(
   return safeResult(value);
 }
 
-export default { descriptor, implicit: ['claude', 'kimi'], invoke };
+export default { descriptor, implicit: ['claude', 'kimi', 'deepseek'], invoke };

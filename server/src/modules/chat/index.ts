@@ -40,10 +40,6 @@ import {
 } from '../../lib/chat/uiContext.ts';
 import { DISCUSSION_SECTION_TITLE, stripDiscussionSection } from '../../lib/telegram/discussion.ts';
 import {
-  KIMI_AUTH_PROFILE_ID,
-  kimiSecurityProfile,
-} from '../../lib/kimi/profile.ts';
-import {
   normalizeModelRef,
   resolveLegacyModel,
   resolveModelRef,
@@ -216,6 +212,7 @@ interface ChatExecutor {
   modes?: (config: CockpitConfig) => Promise<Array<{ id: string }> | null>;
   commands?: (config: CockpitConfig) => Promise<Array<{ cmd: string; run?: string }>>;
   run: NonNullable<ExecutorAdapter['run']>;
+  sessionBinding?: ExecutorAdapter['sessionBinding'];
   session?: LiveExecutor['session'] & { mode?: string };
   compaction?: { kind: string; message?: string };
 }
@@ -782,21 +779,21 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * Пустой binding остаётся server-owned маркером: старое окно ещё может прислать прежний
    * sessionId, но сервер его проигнорирует и заведёт новую сессию вместо forged resume.
    */
-  async function invalidateKimiSession(chatKey: string, {
+  async function invalidateProviderSession(chatKey: string, provider: string, {
     expectedSessionId = '',
     reason = 'reset',
   } = {}) {
     const current = await bindingStore.read(chatKey!);
     if (!current) return null;
-    if (current.provider !== 'kimi') throw new Error('binding provider не совпал с Kimi');
+    if (current.provider !== provider) throw new Error('binding provider не совпал с исполнителем');
     if (expectedSessionId && current.sessionId && current.sessionId !== expectedSessionId) {
-      throw new Error('Kimi binding изменился до сброса session');
+      throw new Error('provider binding изменился до сброса session');
     }
     const next = current.sessionId
       ? await bindingStore.rotate(current, current.generation)
       : current;
     lastSession.delete(chatKey);
-    fastify.log.info({ chatKey, reason }, 'Kimi session binding сброшен');
+    fastify.log.info({ chatKey, provider, reason }, 'provider session binding сброшен');
     return next;
   }
 
@@ -931,7 +928,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Живая сессия помнит разговор ВНУТРИ процесса, а не по --resume: пока она открыта,
     // локального обнуления sessionId в окне мало — агент продолжил бы помнить всё.
     const hasLive = liveSessions.has(chatKey);
-    if ((hasLive || (record.modelRef as { provider?: unknown } | null)?.provider === 'kimi')
+    const modelRef = record.modelRef as { provider?: unknown } | null;
+    const provider = String(modelRef?.provider || '');
+    const providerExecutor = provider ? await executorResolver(provider) : null;
+    const hasBinding = Boolean(providerExecutor?.sessionBinding);
+    if ((hasLive || hasBinding)
       && (activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey }))) {
       return reply.code(409).send({
         error: 'chat_busy',
@@ -939,13 +940,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
     if (hasLive) await liveSessions.close(chatKey, 'сброс памяти агента');
-    const modelRef = record.modelRef as { provider?: unknown } | null;
 
-    if (modelRef?.provider !== 'kimi') return { ok: true, reset: hasLive };
+    if (!hasBinding) return { ok: true, reset: hasLive };
     // Проверка busy и постановка собственного chat lock идут без await между ними:
     // новый ход либо успевает первым (тогда 409 выше), либо ждёт уже пустой binding.
     const binding = await turnLocks.run({ chatKey }, () => (
-      invalidateKimiSession(chatKey!, { reason: 'user_reset' })
+      invalidateProviderSession(chatKey!, provider, { reason: 'user_reset' })
     ));
     return { ok: true, reset: !!binding, generation: binding?.generation ?? null };
   });
@@ -1405,12 +1405,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const chatKey = String(opts.chatKey || '');
     let binding = null;
     let sessionId = opts.sessionId || null;
-    if (provider === 'kimi') {
+    const providerExecutor = await executorResolver(provider);
+    if (providerExecutor?.sessionBinding) {
       if (record?.surface !== 'chats') {
-        return { ok: false, error: 'provider_surface_denied', message: 'Kimi доступен только пользовательским чатам' };
+        return {
+          ok: false,
+          error: 'provider_surface_denied',
+          message: 'Исполнитель с server-owned сессией доступен только пользовательским чатам',
+        };
       }
       binding = await bindingStore.read(chatKey!);
-      // Клиентский sessionId никогда не участвует в Kimi resume. При живом binding
+      // Клиентский sessionId никогда не участвует в provider resume. При живом binding
       // несовпадающее значение считаем forged/stale. Пустой binding — намеренная
       // инвалидация после reset/пустого хода: старый id из отставшего окна безопасно
       // игнорируем, потому что executor всё равно получит null и создаст новую session.
@@ -1630,9 +1635,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Досье прерванного хода — запасная память, когда resume невозможен: binding
     // мёртв (sessionId нет — после empty-run инвалидации), а последний ход был
     // остановлен. При живом binding следующий ход продолжит session резюмом, и
-    // полный контекст не нужно дублировать выжимкой. Только Kimi и только обычный
-    // ход: сжатию/слэш-команде ни досье, ни тикет не нужны.
-    const stoppedBrief = (!plan && !slash && target.provider === 'kimi' && !target.binding?.sessionId)
+    // полный контекст не нужно дублировать выжимкой. Нужно только исполнителю с
+    // server-owned binding (Kimi, DeepSeek) и только обычному ходу: сжатию и
+    // слэш-команде ни досье, ни тикет не нужны.
+    const stoppedBrief = (!plan && !slash && Boolean(executor?.sessionBinding) && !target.binding?.sessionId)
       ? stoppedTurnBrief(target.record?.messages)
       : '';
     const fullMessage = plan
@@ -1703,32 +1709,40 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
     const runEffort = resolvedEffort.effort;
 
-    // Kimi session принадлежит не браузеру, а sidecar-у Cockpit. Все медленные части
+    const currentPrefs = prefs?.read?.() || {};
+    const providerSettings = {
+      ...(currentPrefs.providerSettings?.[executor.id] || {}),
+      blockDirectDb: fastify.pluginEnabled?.('db') === true,
+      strictUnknownDbClient: (fastify.pluginSettings?.('db') as { strictClientPolicy?: unknown } | null)
+        ?.strictClientPolicy === true,
+    };
+
+    // Provider session принадлежит не браузеру, а sidecar-у Cockpit. Все медленные части
     // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
-    let kimiBinding: BindingRecord | null = null;
-    let kimiIdentity: (BindingIdentity & { chatKey: string }) | null = null;
-    if (target.provider === 'kimi') {
+    let providerBinding: BindingRecord | null = null;
+    let providerIdentity: (BindingIdentity & { chatKey: string }) | null = null;
+    if (executor.sessionBinding) {
       const cwdRealpath = await fs.realpath(cwd);
-      kimiIdentity = {
+      providerIdentity = {
         chatKey: chatKey!,
-        provider: 'kimi',
+        provider: target.provider,
         cwdRealpath,
         model,
-        authProfileId: KIMI_AUTH_PROFILE_ID,
-        securityProfile: kimiSecurityProfile(config),
+        authProfileId: String(await executor.sessionBinding.authProfileId(config, providerSettings)),
+        securityProfile: String(await executor.sessionBinding.securityProfile(config, providerSettings)),
       };
       const current = await bindingStore.read(chatKey!);
       const identityMatches = current
         && (['provider', 'cwdRealpath', 'model', 'authProfileId', 'securityProfile'] as const)
-          .every((field) => current[field] === kimiIdentity![field]);
+          .every((field) => current[field] === providerIdentity![field]);
       if (!current || !identityMatches) {
-        kimiBinding = await bindingStore.rotate(kimiIdentity, current?.generation ?? null);
+        providerBinding = await bindingStore.rotate(providerIdentity, current?.generation ?? null);
       } else {
-        kimiBinding = current;
+        providerBinding = current;
       }
-      sessionId = kimiBinding.sessionId || null;
+      sessionId = providerBinding.sessionId || null;
       if (sessionId) {
-        await bindingStore.assertResumeOwner({ chatKey: chatKey!, provider: 'kimi', sessionId });
+        await bindingStore.assertResumeOwner({ chatKey: chatKey!, provider: target.provider, sessionId });
       }
       cwd = cwdRealpath;
     }
@@ -1818,7 +1832,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Порог автокомпакта из «Настроек → Запуски» — только тем CLI, у кого такая ручка
     // вообще есть (executor.autoCompactEnv). Читаем перед каждым ходом: правка настройки
     // действует сразу, без рестарта сервера. 0 — не вмешиваемся, у CLI остаётся свой.
-    const currentPrefs = prefs?.read?.() || {};
     const compactWindow = Math.max(0, Number(currentPrefs.chatAutoCompactWindow) || 0);
     const compactEnv = compactWindow && executor.autoCompactEnv
       ? { [executor.autoCompactEnv]: String(compactWindow) }
@@ -1877,12 +1890,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         permissionPromptTool: 'mcp__cockpit-perm__approve',
         workTools: workToolsValue,
         workToolScopeKey,
-        providerSettings: {
-          ...(currentPrefs.providerSettings?.[executor.id] || {}),
-          blockDirectDb: fastify.pluginEnabled?.('db') === true,
-          strictUnknownDbClient: (fastify.pluginSettings?.('db') as { strictClientPolicy?: unknown } | null)
-            ?.strictClientPolicy === true,
-        },
+        providerSettings,
         // Server-owned снапшот истории чата: stateless HTTP-исполнители (Ollama)
         // реплеят из него разговор; CLI-исполнители поле игнорируют. Содержит и
         // текущее сообщение (клиент сохранил его до POST) — дубликат срезает executor.
@@ -1900,12 +1908,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         onSessionCreated: async (newSessionId) => {
           let known = String(newSessionId || '');
           if (!known) return;
-          if (target.provider === 'kimi') {
+          if (executor.sessionBinding) {
             const saved = await bindingStore.compareAndSwap({
-              ...kimiIdentity,
+              ...providerIdentity,
               sessionId: known,
-            }, kimiBinding!.generation);
-            kimiBinding = saved;
+            }, providerBinding!.generation);
+            providerBinding = saved;
             sessionId = saved.sessionId;
             lastSession.set(chatKey, saved.sessionId);
             known = String(saved.sessionId || known);
@@ -2005,27 +2013,30 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // binding, чтобы следующий ЯВНЫЙ запрос пользователя начал чистую session без
       // автоповтора, а досье (stopped-brief) передаст туда выжимку сделанного.
       // Служебный слэш-ход под эту ловушку не попадает: молчание команды — штатно.
-      if (!slash && !plan && target.provider === 'kimi' && out?.emptyRun) {
+      if (!slash && !plan && executor.sessionBinding && out?.emptyRun) {
         try {
-          await invalidateKimiSession(chatKey!, {
+          await invalidateProviderSession(chatKey!, target.provider, {
             expectedSessionId: out.sessionId || sessionId || '',
             reason: 'empty_post_prompt',
           });
         } catch (resetErrorValue) {
       const resetError = resetErrorValue as ChatFailure;
-          fastify.log.error({ chatKey, err: resetError.message }, 'Kimi binding после пустого хода не сброшен');
+          fastify.log.error(
+            { chatKey, provider: target.provider, err: resetError.message },
+            'provider binding после пустого хода не сброшен',
+          );
           const error: Error & { code?: string; sessionResetFailed?: boolean } = new Error(
-            'Kimi завершил ход без ответа, но сессию сбросить не удалось.'
+            'Исполнитель завершил ход без ответа, но сессию сбросить не удалось.'
             + ' Выполни явный сброс памяти перед повтором.',
           );
-          error.code = 'kimi_session_reset_failed';
+          error.code = 'provider_session_reset_failed';
           error.sessionResetFailed = true;
           throw error;
         }
         const error: Error & { code?: string; sessionReset?: boolean } = new Error(
-          'Kimi завершил ход без ответа. Сессия сброшена; повтори сообщение явно.',
+          'Исполнитель завершил ход без ответа. Сессия сброшена; повтори сообщение явно.',
         );
-        error.code = 'kimi_empty_response';
+        error.code = 'provider_empty_response';
         error.sessionReset = true;
         throw error;
       }
@@ -2050,6 +2061,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         if (plan.kind === 'summary') {
           lastSession.delete(chatKey);
           if (liveTurn) await liveSessions.close(chatKey, 'контекст сжат выжимкой');
+          // У исполнителей с server-owned binding (DeepSeek, Kimi) id сессии живёт не в
+          // чате, а в sidecar: без ротации следующий ход резюмировал бы прежнюю сессию и
+          // клеил выжимку поверх полного контекста — 580 К токенов после «сжатия»
+          // (инцидент 21.09.2026). Ротируем так же, как явный сброс памяти.
+          if (executor.sessionBinding && chatKey) {
+            await invalidateProviderSession(chatKey, target.provider, { reason: 'compact' });
+          }
         }
         out = {
           ...out,

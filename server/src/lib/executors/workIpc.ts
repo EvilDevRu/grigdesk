@@ -21,7 +21,7 @@ export interface WorkToolsPort {
 export interface WorkIpc {
   socketPath: string;
   nonce: string;
-  mcpServer: { command: string; args: string[] };
+  mcpServer: { command: string; args: string[]; env: Array<{ name: string; value: string }> };
   close: () => Promise<void>;
 }
 
@@ -68,6 +68,8 @@ export async function createWorkIpc({ workTools, root = os.tmpdir() }: {
     mcpServer: {
       command: process.execPath,
       args: [WORK_MCP, '--socket', socketPath, '--nonce', nonce],
+      // ACP V1 требует поле даже при пустом наследуемом окружении.
+      env: [],
     },
     async close() {
         await new Promise<void>((resolve) => { server.close(() => resolve()); });

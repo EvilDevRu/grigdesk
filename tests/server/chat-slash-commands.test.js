@@ -502,6 +502,10 @@ function slashExecutor(id, runImpl) {
   return {
     id,
     retryContract: id === 'kimi' ? KIMI_RETRY_CONTRACT : undefined,
+    sessionBinding: id === 'kimi' ? {
+      authProfileId: () => KIMI_AUTH_PROFILE_ID,
+      securityProfile: () => KIMI_SECURITY_PROFILE,
+    } : undefined,
     // Намеренно SYNC: контракт не обязывает async. Вызовы считаем — у codex чтение
     // каталога поднимает app-server, и на заведомо отвергаемой форме оно лишнее.
     commands: (config) => { commandCalls.push(config); return SLASH_COMMANDS; },
@@ -621,7 +625,7 @@ test('служебный ход kimi: пустой вывод не инвали�
     payload: { chatKey: 'slash-kimi', message: 'вопрос' },
   });
   assert.equal(plain.statusCode, 500);
-  assert.equal(plain.json().error, 'kimi_empty_response');
+  assert.equal(plain.json().error, 'provider_empty_response');
   const invalidated = await bindings.read('slash-kimi');
   assert.equal(invalidated.sessionId, null, 'обычный пустой ход по-прежнему сбрасывает сессию');
 });

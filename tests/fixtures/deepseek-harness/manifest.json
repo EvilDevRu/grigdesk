@@ -1,0 +1,221 @@
+{
+  "artifact": {
+    "version": "0.1.5-rc.2",
+    "integrity": "sha512-8Xc8hCQHcIWRmTCVU/xZdp6/qMsWMeAd2ObChKDEsfhUPJFXx6H0lgeb1DxUMD86HZrrVN+1bCvn1ppjZ/fOxw=="
+  },
+  "upstreamSha": "c291e7961a515f6d7af9304e7fd1d257929aef26",
+  "node": "v22.22.1",
+  "fetchedAt": "2026-09-20T10:35:01Z",
+  "files": [
+    {
+      "path": "dump-config.yml",
+      "source": "upstream-live",
+      "scenario": "Пустой DSH_HOME, штатный профиль acp, без overlay",
+      "expected": "Штатные строки base и acp-app до замен Cockpit",
+      "synthetic": false
+    },
+    {
+      "path": "dump-config-overlay.yml",
+      "source": "upstream-live",
+      "scenario": "Пустой DSH_HOME, профиль acp и ручной P0-overlay",
+      "expected": "Заменённые policy-конфиги, отключённые строки и вставленный hook bridge",
+      "synthetic": false
+    },
+    {
+      "path": "metadata/probe-no-key.json",
+      "source": "upstream-live",
+      "scenario": "initialize и session/new без DEEPSEEK_API_KEY",
+      "expected": "Metadata-handshake успешен; prompt не отправляется",
+      "synthetic": false
+    },
+    {
+      "path": "metadata/probe-synthetic-key.json",
+      "source": "upstream-live",
+      "scenario": "initialize и session/new с заведомо неверным синтетическим ключом",
+      "expected": "Результат неотличим от сценария без ключа",
+      "synthetic": true
+    },
+    {
+      "path": "metadata/probe-synthetic-proxy.json",
+      "source": "upstream-live",
+      "scenario": "Синтетический ключ и HTTPS_PROXY на недоступный локальный порт",
+      "expected": "Результат неотличим от сценария без ключа",
+      "synthetic": true
+    },
+    {
+      "path": "hooks/p0-hooks.json",
+      "source": "cockpit-fake",
+      "scenario": "Обезличенная ожидаемая форма hooks.json",
+      "expected": "PreToolUse и UserPromptSubmit используют только абсолютные пути",
+      "synthetic": true
+    },
+    {
+      "path": "fakeMcpEcho.mts",
+      "source": "cockpit-fake",
+      "scenario": "Безопасный MCP echo для будущего live-spike",
+      "expected": "Один инструмент echo и запись только canary-переменной",
+      "synthetic": true
+    },
+    {
+      "path": "raw/a-simple.ndjson",
+      "source": "upstream-live",
+      "scenario": "Короткий ответ без инструментов",
+      "expected": "stopReason end_turn и usage_update",
+      "synthetic": false
+    },
+    {
+      "path": "raw/b-read.ndjson",
+      "source": "upstream-live",
+      "scenario": "Чтение корневого AGENTS.md штатным файловым инструментом",
+      "expected": "tool_call read с file_path и успешный tool_call_update",
+      "synthetic": false
+    },
+    {
+      "path": "raw/c-write-allow.ndjson",
+      "source": "upstream-live",
+      "scenario": "Запись файла при approval ask",
+      "expected": "Файл создан без session/request_permission — расхождение с планом",
+      "synthetic": false
+    },
+    {
+      "path": "raw/c-write-reject.ndjson",
+      "source": "upstream-live",
+      "scenario": "Попытка отклонить запись файла при approval ask",
+      "expected": "Запрос разрешения не пришёл, поэтому отклонить действие было невозможно",
+      "synthetic": false
+    },
+    {
+      "path": "raw/c-escalation-allow.ndjson",
+      "source": "upstream-live",
+      "scenario": "Запись вне cwd с явной sandbox-эскалацией и allow-once",
+      "expected": "DSH присылает session/request_permission; ровно одна запись выполняется",
+      "synthetic": false
+    },
+    {
+      "path": "raw/c-escalation-reject.ndjson",
+      "source": "upstream-live",
+      "scenario": "Запись вне cwd с явной sandbox-эскалацией и reject-once",
+      "expected": "DSH сообщает модели об отказе; файл не появляется",
+      "synthetic": false
+    },
+    {
+      "path": "raw/d-workspace-boundaries.ndjson",
+      "source": "upstream-live",
+      "scenario": "Границы file tools и shell в workspace-write",
+      "expected": "cwd writable; ../, absolute outside и symlink escape запрещены; host /tmp не меняется",
+      "synthetic": false
+    },
+    {
+      "path": "raw/d-readonly-boundaries.ndjson",
+      "source": "upstream-live",
+      "scenario": "Границы file tools и shell в read-only",
+      "expected": "Все записи запрещены; запросы эскалации отклонены; чтение вне cwd доступно",
+      "synthetic": false
+    },
+    {
+      "path": "raw/e-env-service.ndjson",
+      "source": "upstream-live",
+      "scenario": "DSH запущен из служебного каталога рядом с проектом, где есть .env",
+      "expected": "CANARY_ENV отсутствует в shell",
+      "synthetic": false
+    },
+    {
+      "path": "raw/e-env-project.ndjson",
+      "source": "upstream-live",
+      "scenario": "DSH запущен непосредственно из проекта с .env",
+      "expected": "CANARY_ENV загружен и виден shell",
+      "synthetic": false
+    },
+    {
+      "path": "raw/f-mcp.ndjson",
+      "source": "upstream-live",
+      "scenario": "Fake stdio MCP в read-only-сессии",
+      "expected": "mcp__cockpit-echo__echo доступен, env передан, MCP пишет вне sandbox",
+      "synthetic": false
+    },
+    {
+      "path": "raw/g-hook-context.ndjson",
+      "source": "upstream-live",
+      "scenario": "UserPromptSubmit добавляет синтетический контекст",
+      "expected": "Модель отвечает CANARY-HOOK-7f3a без вызова инструментов",
+      "synthetic": false
+    },
+    {
+      "path": "raw/g-hooks-working.ndjson",
+      "source": "upstream-live",
+      "scenario": "PreToolUse получает payload file/shell и запрещает команду с маркером",
+      "expected": "Обычный write проходит; запрещённая bash-команда не создаёт файл",
+      "synthetic": false
+    },
+    {
+      "path": "raw/g-hooks-broken.ndjson",
+      "source": "upstream-live",
+      "scenario": "Несуществующая hook-команда",
+      "expected": "Bridge fail-open: write и ход завершаются",
+      "synthetic": false
+    },
+    {
+      "path": "raw/g-hooks-outside-log-fail-open.ndjson",
+      "source": "upstream-live",
+      "scenario": "Hook пытается записать служебный лог вне cwd",
+      "expected": "Sandbox запрещает служебную запись, bridge продолжает ход fail-open",
+      "synthetic": false
+    },
+    {
+      "path": "raw/h-cancel.ndjson",
+      "source": "upstream-live",
+      "scenario": "session/cancel во время длительной bash-команды",
+      "expected": "stopReason cancelled; DSH выходит; дочерний marker-процесс отсутствует",
+      "synthetic": false
+    },
+    {
+      "path": "raw/i-resume-first.ndjson",
+      "source": "upstream-live",
+      "scenario": "Первый процесс сохраняемой сессии",
+      "expected": "Фраза принята и session/close завершён",
+      "synthetic": false
+    },
+    {
+      "path": "raw/i-resume-second.ndjson",
+      "source": "upstream-live",
+      "scenario": "Новый процесс resume с тем же cwd",
+      "expected": "Модель помнит точную фразу первого процесса",
+      "synthetic": false
+    },
+    {
+      "path": "raw/i-resume-other-cwd.ndjson",
+      "source": "upstream-live",
+      "scenario": "Resume сохранённой сессии с другим cwd",
+      "expected": "Invalid params: session cwd does not match",
+      "synthetic": false
+    },
+    {
+      "path": "raw/j-instructions.ndjson",
+      "source": "upstream-live",
+      "scenario": "Корневые, вложенные и @-импортированные инструкции",
+      "expected": "ROOT-A/ROOT-C сразу; SUB после операции; IMPORT не раскрывается штатно",
+      "synthetic": false
+    },
+    {
+      "path": "raw/l-invalid-config.ndjson",
+      "source": "upstream-live",
+      "scenario": "Невалидные model и reasoning_effort",
+      "expected": "Оба set_config_option возвращают JSON-RPC -32602",
+      "synthetic": false
+    },
+    {
+      "path": "raw/m-invalid-key.ndjson",
+      "source": "upstream-live",
+      "scenario": "Prompt с заведомо неверным синтетическим API key",
+      "expected": "JSON-RPC -32603 с Authentication Fails и маскированным ключом",
+      "synthetic": true
+    },
+    {
+      "path": "raw/n-tools.ndjson",
+      "source": "upstream-live",
+      "scenario": "Список инструментов после отключения subagent/workflow/web/jobs",
+      "expected": "Отключённые классы отсутствуют; базовые file/bash/goal/skill остаются",
+      "synthetic": false
+    }
+  ]
+}

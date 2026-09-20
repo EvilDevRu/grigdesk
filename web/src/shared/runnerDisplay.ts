@@ -58,6 +58,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   claude: 'Claude',
   codex: 'Codex',
   kimi: 'Kimi',
+  deepseek: 'DeepSeek',
 };
 
 /**

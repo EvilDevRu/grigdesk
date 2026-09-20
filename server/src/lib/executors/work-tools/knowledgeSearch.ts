@@ -316,4 +316,4 @@ async function invoke(options: KnowledgeToolOptions, input: unknown = {}): Promi
   return safeResult(await options.knowledgeInvoke(scope, safeInput), safeInput.action);
 }
 
-export default { descriptor, implicit: ['kimi'], invoke };
+export default { descriptor, implicit: ['kimi', 'deepseek'], invoke };

@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "<BASH_TOOL_NAME>",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<NODE> <COCKPIT_ROOT>/server/src/lib/executors/_direct-ssh-policy-hook.js --tool-name <BASH_TOOL_NAME>",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<NODE> <COCKPIT_ROOT>/server/scripts/deepseekInstructionsHook.mts --root <PROJECT_ROOT> --cwd <CWD> --state <STATE_DIR>",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

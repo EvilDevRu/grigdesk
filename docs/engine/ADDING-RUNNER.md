@@ -157,7 +157,7 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
       `MODEL_<STAGE>_<ID>_*`); после правки — свежий host preflight.
 - [ ] Если заявлен `native_resume_v1`: adapter wiring exact provider scope и contract-cases
       fresh/resume/mismatch/missing checkpoint; lineage store пишет только host.
-- [ ] `web/src/shared/runner-display.js` — label в PROVIDER_LABELS; проверить
+- [ ] `web/src/shared/runnerDisplay.ts` — label в `PROVIDER_LABELS`; проверить
       `attemptResultLabel` на новых классах исходов; тесты web.
 
 ## Тесты (обязательный набор)

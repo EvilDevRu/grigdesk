@@ -23,17 +23,49 @@ async function main() {
     return;
   }
 
-  const command = payload?.tool_input?.command;
-  if (payload?.tool_name !== 'Bash' || typeof command !== 'string'
+  const args = process.argv.slice(2);
+  let toolName = 'Bash';
+  let commandField = 'command';
+  let blockDirectSsh = true;
+  let blockDirectDb = false;
+  let strictUnknownDbClient = false;
+  let invalidArgs = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--tool-name' || argument === '--command-field') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('--')) {
+        invalidArgs = true;
+        break;
+      }
+      if (argument === '--tool-name') toolName = value;
+      else commandField = value;
+      index += 1;
+    } else if (argument === '--ssh') blockDirectSsh = true;
+    else if (argument === '--no-ssh') blockDirectSsh = false;
+    else if (argument === '--db') blockDirectDb = true;
+    else if (argument === '--strict-db') strictUnknownDbClient = true;
+    else invalidArgs = true;
+  }
+  if (!/^[A-Za-z][A-Za-z0-9_.:-]*$/u.test(toolName)
+      || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(commandField)) {
+    invalidArgs = true;
+  }
+
+  const input = payload?.tool_input;
+  const command = input && typeof input === 'object'
+    && Object.prototype.hasOwnProperty.call(input, commandField)
+    ? input[commandField]
+    : undefined;
+  if (invalidArgs || payload?.tool_name !== toolName || typeof command !== 'string'
       || !command || command.includes('\0')) {
     deny('Проверка прямого SSH получила неподдерживаемый вызов; команда отклонена fail-closed.');
     return;
   }
-  const flags = new Set(process.argv.slice(2));
   const verdict = evaluateDirectCommand(command, {
-    blockDirectSsh: flags.size ? flags.has('--ssh') : true,
-    blockDirectDb: flags.has('--db'),
-    strictUnknownDbClient: flags.has('--strict-db'),
+    blockDirectSsh,
+    blockDirectDb,
+    strictUnknownDbClient,
   });
   if (verdict.verdict === 'deny') {
     deny(verdict.kind === 'db'

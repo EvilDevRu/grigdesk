@@ -159,7 +159,7 @@ test('Ollama probe/auth идут в HTTP API демона, адаптер вид
 
   assert.equal((await getProviderAdapters()).get('ollama'), ollama);
   assert.equal(await getExecutor('ollama'), ollama);
-  assert.equal(ollama.order, 4);
+  assert.equal(ollama.order, 5);
   assert.equal(ollama.install, 'curl -fsSL https://ollama.com/install.sh | sh');
   assert.deepEqual(ollama.seedModels(), []);
   assert.equal(ollama.catalogLive, true);

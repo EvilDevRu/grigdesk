@@ -411,7 +411,7 @@ export default {
   name: 'Ollama',
   vendor: 'Ollama',
   color: '#b8c0cc',
-  order: 4,
+  order: 5,
   // statusPage нет намеренно: демон работает на этой же машине, и внешняя страница
   // состояния про его сбой ничего не скажет.
   install: 'curl -fsSL https://ollama.com/install.sh | sh',

@@ -597,8 +597,10 @@ test('реальный work MCP получает descriptors и выполняе
   });
   const ipc = await createWorkIpc({ workTools: work });
   t.after(() => ipc.close());
+  assert.deepEqual(ipc.mcpServer.env, [], 'ACP V1 требует явный пустой env');
   const responses = await runMcpChild(ipc.mcpServer, [
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    { jsonrpc: '2.0', method: 'notifications/initialized', params: {} },
     { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
     {
       jsonrpc: '2.0',

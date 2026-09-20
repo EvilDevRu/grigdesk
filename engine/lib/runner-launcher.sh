@@ -438,6 +438,9 @@ _runner_runtime_usage_dialect() {
   local runner_id=$1 version=${2:-unknown}
   case "$runner_id" in
     codex) printf 'codex-jsonl-v1\n' ;;
+    # ACP usage_update — заполненность контекста, не billing counters. Диалект
+    # намеренно не зарегистрирован у runtime analytics и остаётся unavailable.
+    deepseek) printf 'deepseek-jsonl-unknown\n' ;;
     claude)
       if [[ "$version" == 2.1.220 || "$version" == *2.1.220* ]]; then
         printf 'claude-code-jsonl-2.1.220\n'

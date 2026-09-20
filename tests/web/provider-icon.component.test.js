@@ -21,6 +21,7 @@ const MARKED = [
   { id: 'codex', name: 'GPT' },
   { id: 'kimi', name: 'Kimi' },
   { id: 'ollama', name: 'Ollama' },
+  { id: 'deepseek', name: 'DeepSeek' },
 ];
 
 async function compileIcon() {

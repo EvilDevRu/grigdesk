@@ -1095,6 +1095,9 @@ run_agent() {
   export RUNNER_CLAUDE_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
   export RUNNER_CODEX_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
   export RUNNER_KIMI_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
+  # DeepSeek V1 не получает дополнительные writable roots: список остаётся только
+  # prompt-контекстом движка, а DSH sandbox пишет ровно в cwd сессии.
+  export RUNNER_DEEPSEEK_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
 
   # Shared-профиль может дать агенту узкий engine-owned control channel. Hook
   # стартует до provider CLI, stop выполняется при любом результате runner-а.

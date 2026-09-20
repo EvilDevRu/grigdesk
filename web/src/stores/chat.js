@@ -223,7 +223,8 @@ let speechSnapshotEpoch = 0;
 // нет счётчика inflight, а сервер попадает в список активных не мгновенно.
 const compactInflight = new Set();
 
-// Явный reset Kimi меняет server-owned binding и потому является асинхронным.
+// Явный reset исполнителя с server-owned binding меняет серверную сессию и потому
+// является асинхронным.
 // Карта не даёт отправить сообщение в коротком окне между нажатием «сбросить» и
 // подтверждением сервера, а повторный reset того же чата присоединяется к первому.
 const sessionResetJobs = new Map();
@@ -1610,10 +1611,13 @@ export const useChatStore = defineStore('chat', {
       const inflight = sessionResetJobs.get(id);
       if (inflight) return inflight;
 
-      // Важен ref ДО возможной смены provider в селекте. При переходе Kimi → другой
-      // исполнитель сначала инвалидируем старый Kimi binding, затем меняем модель.
+      // Важен ref ДО возможной смены provider в селекте. Для executor-а с server-owned
+      // binding сначала инвалидируем старую provider-session, затем меняем модель.
       const modelRef = s.modelRef ? { ...s.modelRef } : null;
-      const resetOnServer = modelRef?.provider === 'kimi' && (s.sessionId || s.revision > 0);
+      const bindingProvider = modelRef
+        ? useProvidersStore().modelOf(modelRef).provider?.sessionBinding === true
+        : false;
+      const resetOnServer = bindingProvider && (s.sessionId || s.revision > 0);
       s.sessionResetting = true;
       s.sessionResetFailed = false;
       s.error = null;

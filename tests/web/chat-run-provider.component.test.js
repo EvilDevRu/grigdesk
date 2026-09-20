@@ -34,6 +34,13 @@ const PROVIDERS = [
     available: true,
     models: [{ id: 'kimi-code/k3', name: 'K3', efforts: [] }],
   },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    color: '#4D6BFE',
+    available: true,
+    models: [{ id: '["deepseek-official","deepseek-v4-flash"]', name: 'DeepSeek V4', efforts: [] }],
+  },
 ];
 
 // Ответы одного чата: сперва Claude, потом сменили ИИ на Codex, потом на Kimi, а последний
@@ -43,6 +50,7 @@ const MESSAGES = [
   { role: 'assistant', text: 'ответ Claude', model: 'claude-opus-5' },
   { role: 'assistant', text: 'ответ Codex', model: 'gpt-5.6-sol', actualModel: 'gpt-5.6-sol' },
   { role: 'assistant', text: 'ответ Kimi', model: 'kimi-code/k3' },
+  { role: 'assistant', text: 'ответ DeepSeek', model: '["deepseek-official","deepseek-v4-flash"]' },
   { role: 'assistant', text: 'ответ ниоткуда', model: 'снятая-модель' },
 ];
 
@@ -183,7 +191,7 @@ async function expectedGlyph(t, provider) {
 test('шапка ответа показывает знак и цвет исполнителя ЭТОГО хода', async (t) => {
   const wrapper = await mountChat(t);
   const answers = wrapper.findAll('.msg.assistant');
-  assert.equal(answers.length, 4);
+  assert.equal(answers.length, 5);
 
   for (const [index, provider] of PROVIDERS.entries()) {
     const answer = answers[index];
@@ -202,9 +210,21 @@ test('шапка ответа показывает знак и цвет испо
   }
 });
 
+test('шапка ответа называет модель именем из каталога, а не opaque id', async (t) => {
+  const wrapper = await mountChat(t);
+  const answers = wrapper.findAll('.msg.assistant');
+
+  // DeepSeek хранит модель как JSON-массив: человеку показывается имя из каталога.
+  assert.equal(answers[3].find('.amodel').text().includes('DeepSeek V4 · запрошено'), true);
+  assert.equal(answers[3].find('.amodel').text().includes('deepseek-official'), false);
+  // Факт из потока — тоже через каталог: Codex назвал модель сам, подпись без «запрошено».
+  assert.equal(answers[1].find('.amodel').text().startsWith('GPT 5.6 Sol'), true);
+  assert.equal(answers[1].find('.amodel').text().includes('запрошено'), false);
+});
+
 test('ход на модели вне реестра остаётся без знака и без чужого цвета', async (t) => {
   const wrapper = await mountChat(t);
-  const orphan = wrapper.findAll('.msg.assistant')[3];
+  const orphan = wrapper.findAll('.msg.assistant')[4];
 
   assert.equal(orphan.find('.ahead svg').exists(), false, 'незнакомой модели пририсовали знак');
   assert.equal(orphan.find('.ahead .fb').exists(), false, 'незнакомой модели пририсовали кружок');
@@ -229,8 +249,10 @@ test('идущий ход с первой секунды несёт знак и 
   assert.deepEqual(glyph(icon.element), await expectedGlyph(t, kimi), 'у идущего хода знак чужого исполнителя');
   assert.equal(live.element.style.getPropertyValue('--prov').trim(), kimi.color);
   assert.equal(live.find('.ahead').text().includes('Агент'), true, 'у идущего хода нет подписи агента');
-  // Модель — выбор чата, и шапка честно называет её запрошенной, а не фактом из потока.
-  assert.equal(live.find('.amodel').text().includes('kimi-code/k3 · запрошено'), true);
+  // Модель — выбор чата, и шапка честно называет её запрошенной, а не фактом из потока;
+  // подпись — имя из каталога, а не машинный id.
+  assert.equal(live.find('.amodel').text().includes('K3 · запрошено'), true);
+  assert.equal(live.find('.amodel').text().includes('kimi-code/k3'), false);
 });
 
 test('пузырь человека фирменного цвета не получает', async (t) => {

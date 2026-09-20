@@ -122,7 +122,10 @@ profile_runner_host_preflight() {
       probe_output=""
       preflight_probe_ready["$provider"]=0
     fi
-    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+' <<<"$probe_output" | head -1)
+    # Не отбрасываем prerelease: pinned runner `0.1.5-rc.2` должен сравниваться
+    # с catalog min/max как exact версия, а не как более старая `0.1.5`.
+    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' \
+      <<<"$probe_output" | head -1)
     [[ -n "$runner_version" ]] || runner_version=1.0.0
     MULTI_CATALOG_ROOT=$(mktemp -d "${STATE_DIR:?}/.catalog-invoke.XXXXXX") || {
       rm -f -- "$providers" "$plans" "$results"

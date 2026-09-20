@@ -200,9 +200,7 @@
                   data-context="provider-status"
                   :class="[p.id, { off: !p.available, upd: p.updateAvailable }]"
                   :aria-label="provTitle(p)"
-                  :style="p.available && !['codex', 'kimi'].includes(p.id)
-                    ? { color: p.color }
-                    : null"
+                  :style="p.available ? { color: p.color } : null"
                 >
                   <ProviderIcon :provider="p" :size="15" />
                   <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
@@ -956,9 +954,9 @@ const { connected } = useSse((name, data) => {
   line-height: 0;
   vertical-align: middle;
 }
-/* У Kimi широкий SVG-кадр: правое плечо «K» заканчивается раньше его блока. Без
-   поправки визуальный зазор до следующего знака на 4px больше, чем у Codex → Kimi. */
-.prov-kimi + .prov-ollama { margin-left: -4px; }
+/* Оптические поля знаков выровнены viewBox-ами в ProviderIcon (все центрированы в кадре,
+   ширина 12,6–14,3 px), поэтому отдельных поправок зазоров между соседями здесь нет:
+   прежний «-4px» для Kimi → Ollama делал этот зазор на 3 px теснее остальных. */
 /* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
 .updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--warn, #e0a33a); box-shadow: 0 0 0 2px var(--surface); }

@@ -116,7 +116,7 @@
 
         <!-- Служебное: старт хода, ретраи, сжатие контекста -->
         <div v-else-if="r.k === 'start'" class="note start">
-          старт · модель <b>{{ r.model || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
+          старт · модель <b>{{ modelLabel(r.model) || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
         </div>
         <div v-else-if="r.k === 'note'" class="note" :class="r.level">
           {{ r.text }}<template v-if="r.times > 1"> ×{{ r.times }}</template>
@@ -137,6 +137,9 @@ import { UiDisclosureButton } from '../../ui';
 const props = defineProps({
   steps: { type: Array, default: () => [] },
   live: { type: Boolean, default: false }, // ход идёт прямо сейчас
+  // Подпись модели в шаге «старт»: id → имя из каталога. Реестр знает чат, а не лента,
+  // поэтому функция приходит снаружи; без неё показывается id как есть.
+  modelLabel: { type: Function, default: (id) => id },
 });
 
 // Свёрнутая по умолчанию сохранённая лента (в живой всё видно сразу).

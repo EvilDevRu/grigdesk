@@ -12,6 +12,8 @@ const chatsDir = process.env.COCKPIT_CHATS_DIR || path.join(rootDir, 'chats');
 const telegramDir = process.env.COCKPIT_TELEGRAM_DIR || path.join(rootDir, 'telegram');
 const githubDir = process.env.COCKPIT_GITHUB_DIR || path.join(rootDir, 'github');
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
+const deepseekRuntimeHome = process.env.COCKPIT_DEEPSEEK_RUNTIME_HOME
+  || path.join(factoryStateDir, 'cockpit-deepseek');
 const publicDomain = process.env.COCKPIT_PUBLIC_DOMAIN || '';
 const knowledgeDbPath = process.env.COCKPIT_KNOWLEDGE_DB_PATH
   || path.join(home, '.config', 'cockpit', 'knowledge', 'knowledge.db');
@@ -89,6 +91,11 @@ export const config = {
   kimiSystemdRunBin: process.env.COCKPIT_KIMI_SYSTEMD_RUN_BIN || '/usr/bin/systemd-run',
   kimiSystemctlBin: process.env.COCKPIT_KIMI_SYSTEMCTL_BIN || '/usr/bin/systemctl',
   kimiCaBundle: process.env.COCKPIT_KIMI_CA_BUNDLE || '/etc/ssl/certs/ca-certificates.crt',
+  // Pinned DeepSeek Harness живёт в server-owned runtime home. API key намеренно
+  // не попадает в config: дочернее окружение строится отдельным allowlist-ом.
+  deepseekRuntimeHome,
+  deepseekBin: process.env.COCKPIT_DEEPSEEK_BIN
+    || path.join(deepseekRuntimeHome, 'install', 'current', 'node_modules', '.bin', 'dsh'),
   // Машинный override адреса демона Ollama. Обычный путь — настройка «Адрес демона»
   // в UI («Настройки → Исполнители», prefs.providerSettings.ollama.host); env — для
   // стендов, где prefs не трогают.

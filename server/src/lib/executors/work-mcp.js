@@ -98,7 +98,13 @@ async function runCli() {
     }
     let response;
     try {
-      response = await handler.request(JSON.parse(line));
+      const message = JSON.parse(line);
+      // JSON-RPC notification подтверждать нельзя: лишний ответ с null/пустым id
+      // ломает строгие MCP-клиенты после initialize.
+      if (!Object.hasOwn(message, 'id')) {
+        continue;
+      }
+      response = await handler.request(message);
     } catch (error) {
       response = {
         jsonrpc: '2.0',

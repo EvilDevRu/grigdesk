@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { apiHarness, chatStoreFixture } from './helpers/chat-store.js';
+import { apiHarness, chatStoreFixture, setChatProviders } from './helpers/chat-store.js';
+
+function declareSessionBindingProvider(providerId) {
+  setChatProviders({
+    modelOf(value) {
+      const modelId = typeof value === 'object' && value ? value.model : value;
+      return {
+        id: modelId,
+        model: { id: modelId },
+        provider: { id: providerId, sessionBinding: true },
+      };
+    },
+  });
+}
 
 test('выбор модели сохраняет provider/model, legacy model и durable revision до запуска', async () => {
   const chat = await chatStoreFixture({
@@ -196,6 +209,7 @@ test('reset Kimi подтверждается сервером, очищает b
       updatedAt: 1,
     }],
   });
+  declareSessionBindingProvider('kimi');
   let finishReset;
   const resetGate = new Promise((resolve) => { finishReset = resolve; });
   const order = [];
@@ -261,6 +275,7 @@ test('ошибка server-owned reset не обнуляет локальную s
       updatedAt: 1,
     }],
   });
+  declareSessionBindingProvider('kimi');
   let posts = 0;
   apiHarness.post = async (url) => {
     posts += 1;

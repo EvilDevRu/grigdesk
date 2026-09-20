@@ -9,7 +9,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { KIMI_RETRY_CONTRACT } from '../chat/retryContract.ts';
-import { kimiSeedModels, KIMI_MODELS, KIMI_SECURITY_PROFILE } from '../kimi/profile.ts';
+import {
+  kimiSeedModels,
+  KIMI_AUTH_PROFILE_ID,
+  KIMI_MODELS,
+  KIMI_SECURITY_PROFILE,
+  kimiSecurityProfile,
+} from '../kimi/profile.ts';
 import { runContainedKimi } from '../kimi/runtime.ts';
 import {
   classifyKimiUsageResponse,
@@ -279,6 +285,10 @@ export default {
   color: '#6657d9',
   order: 3,
   workToolsTransport: 'mcp',
+  sessionBinding: {
+    authProfileId: () => KIMI_AUTH_PROFILE_ID,
+    securityProfile: (config: KimiConfig) => kimiSecurityProfile(config),
+  },
   // Основной официальный способ: отдельный бинарник с проверкой SHA-256, без
   // зависимости от системного Node.js.
   install: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',

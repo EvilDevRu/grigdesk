@@ -21,6 +21,10 @@ function guardedAdapter() {
     auth: async () => ({ mode: 'cli', label: 'ok', available: true }),
     seedModels: () => [],
     run: async () => ({ reply: 'ok' }),
+    sessionBinding: {
+      authProfileId: () => 'future-auth',
+      securityProfile: () => 'future-security',
+    },
     statusPage: 'https://status.example.test',
     settings: [{
       id: 'blockDirectSsh',
@@ -154,6 +158,17 @@ test('реестр отдаёт объявленную адаптером стр
   assert.deepEqual(byId, {
     'future-provider': 'https://status.example.test',
     'local-provider': null,
+  });
+});
+
+test('реестр отдаёт sessionBinding как capability, а не список известных id', async (t) => {
+  const fixture = await routeFixture(t, [localAdapter()]);
+  const response = await fixture.app.inject({ method: 'GET', url: '/api/providers' });
+  const byId = Object.fromEntries(response.json().providers
+    .map((provider) => [provider.id, provider.sessionBinding]));
+  assert.deepEqual(byId, {
+    'future-provider': true,
+    'local-provider': false,
   });
 });
 

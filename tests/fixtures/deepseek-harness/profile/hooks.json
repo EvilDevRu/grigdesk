@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{NODE}} {{POLICY_HOOK}} --tool-name {{BASH_TOOL}} --command-field command --ssh --db --strict-db",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{NODE}} {{INSTRUCTIONS_HOOK}} --root {{PROJECT_ROOT}} --cwd {{CWD}}",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

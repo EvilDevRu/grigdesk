@@ -20,9 +20,9 @@ function hookCommand() {
   return hook.command;
 }
 
-function runHook(input) {
+function runHook(input, command = hookCommand()) {
   return new Promise((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-c', hookCommand()], {
+    const child = spawn('/bin/sh', ['-c', command], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -94,4 +94,25 @@ test('hook отклоняет повреждённый ввод fail-closed', as
   ]);
 
   assert.deepEqual(decisions, ['deny', 'deny', 'deny']);
+});
+
+test('hook принимает имя DSH bash и настраиваемое поле команды', async () => {
+  const command = [
+    hookCommand(),
+    '--tool-name bash',
+    '--command-field script',
+    '--ssh',
+  ].join(' ');
+  assert.equal(await runHook({
+    tool_name: 'bash',
+    tool_input: { script: 'ssh prod.example' },
+  }, command), 'deny');
+  assert.equal(await runHook({
+    tool_name: 'bash',
+    tool_input: { script: 'printf local' },
+  }, command), null);
+  assert.equal(await runHook({
+    tool_name: 'Bash',
+    tool_input: { script: 'ssh prod.example' },
+  }, command), 'deny');
 });

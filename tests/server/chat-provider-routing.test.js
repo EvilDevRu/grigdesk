@@ -20,6 +20,11 @@ import chatModule from '../../server/src/modules/chat/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
+const kimiSessionBinding = {
+  authProfileId: () => KIMI_AUTH_PROFILE_ID,
+  securityProfile: () => KIMI_SECURITY_PROFILE,
+};
+
 async function apiFixture(t, { executor = null } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-routing-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -48,7 +53,13 @@ async function apiFixture(t, { executor = null } = {}) {
       claude: [{ id: 'claude-test', efforts: [] }],
       kimi: [{ id: 'kimi-test', efforts: [] }],
     }),
-    executorResolver: async () => { executorCalls += 1; return executor; },
+    executorResolver: async () => {
+      executorCalls += 1;
+      if (executor?.id === 'kimi' && !executor.sessionBinding) {
+        return { ...executor, sessionBinding: kimiSessionBinding };
+      }
+      return executor;
+    },
   });
   t.after(() => app.close());
   return { app, config, root, events, executorCalls: () => executorCalls };
@@ -272,7 +283,11 @@ test('остановленный ход возвращает весь после
 });
 
 test('Kimi forged sessionId отсекается до executor-а, resume берётся только из sidecar', async (t) => {
-  const { app, executorCalls } = await apiFixture(t);
+  const { app, executorCalls } = await apiFixture(t, { executor: {
+    id: 'kimi',
+    sessionBinding: kimiSessionBinding,
+    async run() { assert.fail('forged session не должна доходить до run'); },
+  } });
   const saved = await saveKimiChat(app);
   assert.deepEqual(saved.json().modelRef, { provider: 'kimi', model: 'kimi-test' });
 
@@ -289,11 +304,13 @@ test('Kimi forged sessionId отсекается до executor-а, resume бер
   });
   assert.equal(forged.statusCode, 400);
   assert.equal(forged.json().error, 'forged_session');
-  assert.equal(executorCalls(), 0);
+  assert.equal(executorCalls(), 1);
 });
 
 test('явный reset Kimi инвалидирует server-owned binding', async (t) => {
-  const { app, config, root } = await apiFixture(t);
+  const { app, config, root } = await apiFixture(t, { executor: {
+    id: 'kimi', sessionBinding: kimiSessionBinding, async run() { return {}; },
+  } });
   await saveKimiChat(app, 'reset-chat');
   const bindings = new ChatSessionBindingStore({ dir: config.chatBindingsDir });
   const live = await bindings.compareAndSwap({
@@ -319,7 +336,16 @@ test('явный reset Kimi инвалидирует server-owned binding', asyn
 });
 
 test('старый client sessionId после явной инвалидации игнорируется, а не оживляет resume', async (t) => {
-  const { app, config, root, executorCalls } = await apiFixture(t);
+  let resumedWith = 'not-called';
+  const { app, config, root, executorCalls } = await apiFixture(t, { executor: {
+    id: 'kimi',
+    sessionBinding: kimiSessionBinding,
+    async run(options) {
+      resumedWith = options.sessionId;
+      await options.onSessionCreated('fresh-session');
+      return { reply: 'ok', sessionId: 'fresh-session', steps: [] };
+    },
+  } });
   await saveKimiChat(app, 'stale-window-chat');
   const bindings = new ChatSessionBindingStore({ dir: config.chatBindingsDir });
   const live = await bindings.compareAndSwap({
@@ -340,10 +366,10 @@ test('старый client sessionId после явной инвалидации
     },
   });
 
-  assert.equal(run.statusCode, 400);
-  assert.equal(run.json().error, 'unknown_provider');
-  assert.equal(executorCalls(), 1, 'запрос прошёл проверку ownership и дошёл до resolver-а');
-  assert.equal((await bindings.read('stale-window-chat')).sessionId, null);
+  assert.equal(run.statusCode, 200);
+  assert.equal(resumedWith, null, 'инвалидированный id не участвует в resume');
+  assert.ok(executorCalls() >= 2, 'capability проверена и ход дошёл до resolver-а');
+  assert.equal((await bindings.read('stale-window-chat')).sessionId, 'fresh-session');
 });
 
 test('пустой Kimi-ход после принятого prompt не повторяется и сбрасывает binding', async (t) => {
@@ -378,7 +404,7 @@ test('пустой Kimi-ход после принятого prompt не пов�
   });
 
   assert.equal(run.statusCode, 500);
-  assert.equal(run.json().error, 'kimi_empty_response');
+  assert.equal(run.json().error, 'provider_empty_response');
   assert.equal(run.json().sessionReset, true);
   assert.equal(runs, 1, 'после принятого prompt автоматического повтора нет');
   const binding = await new ChatSessionBindingStore({ dir: config.chatBindingsDir }).read('empty-run-chat');
@@ -473,7 +499,7 @@ test('сбой инвалидации Kimi binding блокирует дальн
   });
 
   assert.equal(run.statusCode, 500);
-  assert.equal(run.json().error, 'kimi_session_reset_failed');
+  assert.equal(run.json().error, 'provider_session_reset_failed');
   assert.equal(run.json().sessionResetFailed, true);
   const binding = await new ChatSessionBindingStore({ dir: config.chatBindingsDir }).read('reset-failure-chat');
   assert.equal(binding.sessionId, 'binding-session', 'несогласованный id не записан и не сброшен вслепую');
@@ -599,7 +625,7 @@ test('resume после стопа; при проглатывании — инв
     },
   });
   assert.equal(swallowed.statusCode, 500);
-  assert.equal(swallowed.json().error, 'kimi_empty_response');
+  assert.equal(swallowed.json().error, 'provider_empty_response');
   assert.equal(swallowed.json().sessionReset, true);
   assert.equal(resumedWith[1], 'session-1', 'после стопа ход делает resume той же session');
   assert.ok(!received[1].includes('[Досье прерванного хода]'), 'при живом binding досье не нужно');

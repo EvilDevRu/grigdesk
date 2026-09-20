@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import { routeLaunchEnv } from '../../server/src/lib/factoryRouteCli.ts';
 import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -146,8 +147,8 @@ async function fixture(t) {
     mkdir(binDir, { recursive: true }),
     mkdir(runnersDir, { recursive: true }),
   ]);
-  // Установлены только claude и codex; kimi — валидное имя, но не установлен.
-  for (const name of ['claude.sh', 'codex.sh', 'index.sh']) {
+  // Kimi остаётся валидным, но не установленным именем; DeepSeek уже поставлен.
+  for (const name of ['claude.sh', 'codex.sh', 'deepseek.sh', 'index.sh']) {
     await writeFile(path.join(runnersDir, name), '# адаптер\n');
   }
 
@@ -335,6 +336,26 @@ test('валидный override пишется через runner set движк�
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().ok, true);
   assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD codex$/m);
+});
+
+test('DeepSeek доступен для override, а его точный binary pin доезжает в Factory env', async (t) => {
+  const { app, callsLog } = await fixture(t);
+  const response = await app.inject({
+    method: 'POST', url: '/api/tasks/8/runner/override',
+    payload: { stage: 'BUILD', primary: 'deepseek' },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD deepseek$/m);
+
+  const bin = '/opt/cockpit/deepseek/install/current/node_modules/.bin/dsh';
+  const env = routeLaunchEnv({
+    rootDir: '/opt/cockpit', factoryHome: '/opt/cockpit/engine',
+    profilesDir: '/opt/cockpit/profiles', factoryConfigRoot: '/tmp/factory-config',
+    routesDir: '/opt/cockpit/routes', stateDir: '/tmp/factory-state',
+    factoryControlDir: '/tmp/factory-control', factoryBin: '/opt/cockpit/engine/bin/factory',
+    deepseekBin: bin,
+  });
+  assert.equal(env.COCKPIT_DEEPSEEK_BIN, bin);
 });
 
 test('пустой primary снимает override через runner clear, идемпотентно', async (t) => {

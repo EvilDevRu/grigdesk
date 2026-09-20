@@ -204,6 +204,17 @@ export interface ExecutorRunResult {
   [field: string]: unknown;
 }
 
+export interface ExecutorSessionBinding {
+  authProfileId: (
+    config: unknown,
+    providerSettings?: Record<string, unknown>,
+  ) => string | Promise<string>;
+  securityProfile: (
+    config: unknown,
+    providerSettings?: Record<string, unknown>,
+  ) => string | Promise<string>;
+}
+
 // Контракт адаптера исполнителя — ровно то, что перечислено в шапке файла. Обязательны
 // только идентичность, бинарь и две проверки установки; всё остальное объявляет сам
 // адаптер, и ядро спрашивает наличие метода, а не вендора.
@@ -225,6 +236,7 @@ export interface ExecutorAdapter {
   trustedDirectories?: boolean | ((config: unknown) => unknown);
   directSshPolicy?: unknown;
   settings?: unknown;
+  sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;
   compaction?: Record<string, unknown>;
   usageActions?: Record<string, (input: Record<string, unknown>) => Promise<unknown>>;

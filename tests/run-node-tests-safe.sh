@@ -2,6 +2,10 @@
 # Ограничивает не только V8 heap coordinator-а, но и суммарный RSS всех test
 # workers и их дочерних процессов. Это ловит native/external allocations, которые
 # --max-old-space-size не видит (например, форматирование циклического DOM wrapper).
+#
+# Сторож считает группу целиком, поэтому при --test-concurrency>1 бюджет задаётся
+# на ВСЕ одновременные файлы: NODE_TEST_MAX_RSS_MB не меньше гигабайта на worker
+# (контракт tests/server|web/test-runner-memory.contract.test.js).
 set -uo pipefail
 
 HEAP_MB="${NODE_TEST_HEAP_MB:-1024}"

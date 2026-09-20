@@ -224,6 +224,8 @@ async function providersModule(
             && typeof ex.runUntrusted === 'function'
             && ex.untrustedInput?.text === true,
         },
+        // Resume id принадлежит server-owned sidecar, а не JSON чата/браузеру.
+        sessionBinding: typeof ex.run === 'function' && Boolean(ex.sessionBinding),
         // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
         trustedDirectories: await trustedDirectoriesOf(ex),
