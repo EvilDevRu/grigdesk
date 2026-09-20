@@ -160,6 +160,93 @@ test('CODE-ACTION-02: `−` переименования возвращает о
   assert.equal((await readFile(path.join(root, 'renamed.js'), 'utf8')), 'rename me\n');
 });
 
+test('CODE-DISCARD-01: откат рабочей правки сохраняет подготовленную часть', async (t) => {
+  const root = await repository(t);
+  const app = await codeApp(t, root);
+
+  await writeFile(path.join(root, 'app.js'), 'base\nstaged\n');
+  await git(root, ['add', 'app.js']);
+  await writeFile(path.join(root, 'app.js'), 'base\nstaged\nwork\n');
+
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('discard'),
+    payload: { paths: ['app.js'] },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { ok: true, changed: 1 });
+  assert.equal(await readFile(path.join(root, 'app.js'), 'utf8'), 'base\nstaged\n');
+  assert.match((await git(root, ['diff', '--cached', '--', 'app.js'])).stdout, /staged/);
+});
+
+test('CODE-DISCARD-02: откат восстанавливает удалённый tracked-файл', async (t) => {
+  const root = await repository(t);
+  const app = await codeApp(t, root);
+
+  await rm(path.join(root, 'app.js'));
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('discard'),
+    payload: { paths: ['app.js'] },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(await readFile(path.join(root, 'app.js'), 'utf8'), 'base\n');
+});
+
+test('CODE-DISCARD-03: откат передаёт pathspec-подобное имя буквально', async (t) => {
+  const root = await repository(t);
+  const special = ':(glob)*.txt';
+
+  await writeFile(path.join(root, special), 'special base\n');
+  await writeFile(path.join(root, 'keep.txt'), 'keep base\n');
+  await git(root, ['add', '--', special, 'keep.txt']);
+  await git(root, ['commit', '-qm', 'literal files']);
+  await writeFile(path.join(root, special), 'special changed\n');
+  await writeFile(path.join(root, 'keep.txt'), 'keep changed\n');
+
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('discard'),
+    payload: { paths: [special] },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(await readFile(path.join(root, special), 'utf8'), 'special base\n');
+  assert.equal(await readFile(path.join(root, 'keep.txt'), 'utf8'), 'keep changed\n');
+});
+
+test('CODE-CLEAN-01: удаляется только проверенный untracked-путь', async (t) => {
+  const root = await repository(t);
+
+  await writeFile(path.join(root, 'trash.js'), 'trash\n');
+  await writeFile(path.join(root, 'keep-new.js'), 'keep\n');
+
+  const app = await codeApp(t, root);
+  const rejected = await app.inject({
+    method: 'POST',
+    url: actionUrl('clean'),
+    payload: { paths: ['trash.js', 'app.js'] },
+  });
+
+  assert.equal(rejected.statusCode, 400);
+  assert.equal(rejected.json().error, 'bad_paths');
+  assert.equal(await readFile(path.join(root, 'trash.js'), 'utf8'), 'trash\n');
+
+  const cleaned = await app.inject({
+    method: 'POST',
+    url: actionUrl('clean'),
+    payload: { paths: ['trash.js'] },
+  });
+
+  assert.equal(cleaned.statusCode, 200);
+  await assert.rejects(readFile(path.join(root, 'trash.js'), 'utf8'), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(root, 'keep-new.js'), 'utf8'), 'keep\n');
+  assert.equal(await readFile(path.join(root, 'app.js'), 'utf8'), 'base\n');
+});
+
 test('CODE-ACTION-03: commit берёт staged snapshot и оставляет рабочую правку', async (t) => {
   const root = await repository(t);
   const app = await codeApp(t, root);
@@ -189,6 +276,131 @@ test('CODE-ACTION-03: commit берёт staged snapshot и оставляет р
   assert.ok(snapshot.files.some((file) => file.path === 'not-added.js'));
 });
 
+test('CODE-AMEND-01: amend меняет HEAD и включает индекс без нового коммита', async (t) => {
+  const root = await repository(t);
+  const app = await codeApp(t, root);
+
+  await writeFile(path.join(root, 'app.js'), 'base\namended\n');
+  await git(root, ['add', 'app.js']);
+  const beforeCount = Number((await git(root, ['rev-list', '--count', 'HEAD'])).stdout.trim());
+
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('commit'),
+    payload: { message: 'Исправленный заголовок', amend: true },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().subject, 'Исправленный заголовок');
+  assert.equal(Number((await git(root, ['rev-list', '--count', 'HEAD'])).stdout.trim()), beforeCount);
+  assert.equal((await git(root, ['show', 'HEAD:app.js'])).stdout, 'base\namended\n');
+});
+
+test('CODE-AMEND-02: опубликованный HEAD нельзя переписать', async (t) => {
+  const root = await repository(t);
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-amend-remote-'));
+
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  await git(remote, ['init', '--bare', '-q', '.']);
+  await git(root, ['remote', 'add', 'origin', remote]);
+  await git(root, ['push', '-qu', 'origin', 'main']);
+  await writeFile(path.join(root, 'app.js'), 'published changed\n');
+  await git(root, ['add', 'app.js']);
+  const before = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
+  const app = await codeApp(t, root);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('commit'),
+    payload: { message: 'Нельзя переписать', amend: true },
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'amend_published');
+  assert.equal((await git(root, ['rev-parse', 'HEAD'])).stdout.trim(), before);
+  assert.equal((await git(root, ['log', '-1', '--pretty=%s'])).stdout.trim(), 'init');
+});
+
+test('CODE-AMEND-03: amend до первого коммита возвращает no_head', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-amend-unborn-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await git(root, ['init', '-q', '-b', 'main', '.']);
+  await writeFile(path.join(root, 'first.js'), 'first\n');
+  await git(root, ['add', 'first.js']);
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('commit'),
+    payload: { message: 'Некого дополнять', amend: true },
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'no_head');
+});
+
+test('CODE-UNDO-01: отмена HEAD возвращает его файлы в индекс и сообщение', async (t) => {
+  const root = await repository(t);
+
+  await writeFile(path.join(root, 'app.js'), 'base\nsecond\n');
+  await git(root, ['add', 'app.js']);
+  await git(root, ['commit', '-qm', 'Второй коммит\n\nПодробности']);
+  const beforeCount = Number((await git(root, ['rev-list', '--count', 'HEAD'])).stdout.trim());
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('undo-commit'),
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {
+    ok: true,
+    message: 'Второй коммит\n\nПодробности',
+  });
+  assert.equal(Number((await git(root, ['rev-list', '--count', 'HEAD'])).stdout.trim()),
+    beforeCount - 1);
+  assert.match((await git(root, ['diff', '--cached', '--', 'app.js'])).stdout, /second/);
+});
+
+test('CODE-UNDO-02: опубликованный HEAD нельзя отменить', async (t) => {
+  const root = await repository(t);
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-undo-remote-'));
+
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'app.js'), 'base\npublished\n');
+  await git(root, ['add', 'app.js']);
+  await git(root, ['commit', '-qm', 'published']);
+  await git(remote, ['init', '--bare', '-q', '.']);
+  await git(root, ['remote', 'add', 'origin', remote]);
+  await git(root, ['push', '-qu', 'origin', 'main']);
+  const before = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('undo-commit'),
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'commit_published');
+  assert.equal((await git(root, ['rev-parse', 'HEAD'])).stdout.trim(), before);
+});
+
+test('CODE-UNDO-03: единственный коммит нельзя отменить через soft reset', async (t) => {
+  const root = await repository(t);
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('undo-commit'),
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'no_parent');
+  assert.equal((await git(root, ['log', '--oneline'])).stdout.trim().split('\n').length, 1);
+});
+
 test('CODE-ACTION-04: первый push публикует ветку и настраивает upstream', async (t) => {
   const root = await repository(t);
   const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-remote-'));
@@ -210,6 +422,71 @@ test('CODE-ACTION-04: первый push публикует ветку и нас�
   const remoteHead = await git(remote, ['rev-parse', 'refs/heads/main']);
   const localHead = await git(root, ['rev-parse', 'HEAD']);
   assert.equal(remoteHead.stdout.trim(), localHead.stdout.trim());
+});
+
+test('CODE-FETCH-01: fetch обновляет remote-ref и показывает отставание', async (t) => {
+  const root = await repository(t);
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-fetch-remote-'));
+  const other = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-fetch-other-'));
+
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  t.after(() => rm(other, { recursive: true, force: true }));
+  await git(remote, ['init', '--bare', '-q', '.']);
+  await git(root, ['remote', 'add', 'origin', remote]);
+  await git(root, ['push', '-qu', 'origin', 'main']);
+  await git(remote, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  await exec('git', ['clone', '-q', remote, other]);
+  await git(other, ['config', 'user.email', 'other@example.com']);
+  await git(other, ['config', 'user.name', 'other']);
+  await writeFile(path.join(other, 'remote.js'), 'remote\n');
+  await git(other, ['add', 'remote.js']);
+  await git(other, ['commit', '-qm', 'remote commit']);
+  await git(other, ['push', '-q', 'origin', 'main']);
+
+  const app = await codeApp(t, root);
+  assert.equal((await gitSnapshot(app)).tracking.behind, 0);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('fetch'),
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().remote, 'origin');
+  assert.equal(response.json().tracking.behind, 1);
+  assert.equal(response.json().tracking.ahead, 0);
+});
+
+test('CODE-FETCH-02: fetch без upstream и origin возвращает no_remote', async (t) => {
+  const root = await repository(t);
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('fetch'),
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'no_remote');
+});
+
+test('CODE-FETCH-03: ошибка fetch не раскрывает credentials remote', async (t) => {
+  const root = await repository(t);
+
+  await git(root, ['remote', 'add', 'origin', 'https://user:pass@127.0.0.1:1/missing.git']);
+
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('fetch'),
+    payload: {},
+  });
+  const body = response.json();
+
+  assert.equal(response.statusCode, 409);
+  assert.doesNotMatch(body.message, /user|pass/);
+  assert.match(body.message, /нужен доступ к remote/i);
 });
 
 test('CODE-ACTION-05: генератор видит staged diff, модель и выбранный effort', async (t) => {

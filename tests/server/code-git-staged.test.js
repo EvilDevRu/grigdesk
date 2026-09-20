@@ -18,7 +18,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import codeModule from '../../server/src/modules/code/index.ts';
-import { taskDiff, unquotePath, worktreeChanges } from '../../server/src/lib/git.ts';
+import { fileDiffSides, taskDiff, unquotePath, worktreeChanges } from '../../server/src/lib/git.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -68,6 +68,44 @@ async function repo(t) {
 
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, write };
+}
+
+/** Создаёт настоящий текстовый merge-конфликт с нашей и их версией одной строки. */
+async function conflictRepo(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-conflict-'));
+  const file = path.join(root, 'conflict.txt');
+
+  await git(root, ['init', '-q', '-b', 'main', '.']);
+  await git(root, ['config', 'user.email', 'test@example.com']);
+  await git(root, ['config', 'user.name', 'test']);
+  await writeFile(file, 'base\n');
+  await git(root, ['add', 'conflict.txt']);
+  await git(root, ['commit', '-qm', 'base']);
+  await git(root, ['checkout', '-qb', 'other']);
+  await writeFile(file, 'their version\n');
+  await git(root, ['commit', '-qam', 'their change']);
+  await git(root, ['checkout', '-q', 'main']);
+  await writeFile(file, 'our version\n');
+  await git(root, ['commit', '-qam', 'our change']);
+  await assert.rejects(git(root, ['merge', '--no-edit', 'other']), (error) => error?.code === 1);
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  return root;
+}
+
+/** Поднимает code-модуль на одном временном Git-дереве. */
+async function codeApp(t, root) {
+  const app = Fastify({ logger: false });
+
+  app.decorate('pluginEnabled', () => true);
+  app.register(codeModule, {
+    config: { profilesDir: path.join(root, 'no-profiles') },
+    prefs: { read: () => ({ projects: { demo: { repos: [{ key: 'main', dir: root }] } } }) },
+  });
+  await app.ready();
+  t.after(() => app.close());
+
+  return app;
 }
 
 const byPath = (files) => new Map(files.map((f) => [f.path, f]));
@@ -229,4 +267,71 @@ test('CODE-GIT-08: неотслеживаемый файл считает стр
   const acceptance = byPath((await taskDiff(root)).files);
   assert.equal(acceptance.get('fresh.txt').add, 3);
   assert.equal(acceptance.get('blob.bin').binary, true);
+});
+
+test('CODE-LAZY-01/02: список изменений не содержит сторон, но сохраняет метаданные', async (t) => {
+  const { root, write } = await repo(t);
+  await write('fresh-lines.txt', 'one\ntwo');
+  await write('fresh-binary.bin', Buffer.from([1, 0, 2]));
+
+  const changes = await worktreeChanges(root, { withContent: false });
+  const entries = [...changes.staged, ...changes.files];
+
+  assert.ok(entries.length > 0);
+  for (const entry of entries) {
+    assert.equal('oldContent' in entry, false);
+    assert.equal('newContent' in entry, false);
+    assert.equal('tooBig' in entry, false);
+  }
+  assert.equal(byPath(changes.files).get('fresh-lines.txt').add, 2);
+  assert.equal(byPath(changes.files).get('fresh-binary.bin').binary, true);
+  assert.equal(byPath(changes.staged).get('src/renamed-to.js').oldPath, 'src/renamed-from.js');
+});
+
+test('CODE-LAZY-03: стороны одного файла читаются отдельно, неизвестный путь отвергается', async (t) => {
+  const { root } = await repo(t);
+  const staged = await fileDiffSides(root, { group: 'staged', path: 'src/partial.js' });
+  const work = await fileDiffSides(root, { group: 'work', path: 'src/partial.js' });
+
+  assert.equal(staged.oldContent, 'base\n');
+  assert.equal(staged.newContent, 'base\nstaged\n');
+  assert.equal(work.oldContent, 'base\nstaged\n');
+  assert.equal(work.newContent, 'base\nstaged\nwork\n');
+  await assert.rejects(
+    fileDiffSides(root, { group: 'work', path: 'missing.js' }),
+    (error) => error?.code === 'no_file' && error?.status === 404,
+  );
+});
+
+test('CODE-CONFLICT-01: unmerged-файл виден только в рабочей группе со статусом U', async (t) => {
+  const root = await conflictRepo(t);
+  const changes = await worktreeChanges(root, { withContent: false });
+
+  assert.equal(byPath(changes.files).get('conflict.txt').status, 'U');
+  assert.equal(byPath(changes.staged).has('conflict.txt'), false);
+});
+
+test('CODE-CONFLICT-02: конфликт сравнивает нашу сторону с рабочими маркерами', async (t) => {
+  const root = await conflictRepo(t);
+  const diff = await fileDiffSides(root, { group: 'work', path: 'conflict.txt' });
+
+  assert.equal(diff.status, 'U');
+  assert.equal(diff.oldContent, 'our version\n');
+  assert.match(diff.newContent, /<<<<<<< HEAD[\s\S]*our version[\s\S]*their version/);
+});
+
+test('CODE-CONFLICT-03: stage помечает конфликт разрешённым и переносит его в индекс', async (t) => {
+  const root = await conflictRepo(t);
+  const app = await codeApp(t, root);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/code/demo/stage?repo=main',
+    payload: { paths: ['conflict.txt'] },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const changes = await worktreeChanges(root, { withContent: false });
+
+  assert.equal(byPath(changes.files).has('conflict.txt'), false);
+  assert.equal(byPath(changes.staged).get('conflict.txt').status, 'M');
 });

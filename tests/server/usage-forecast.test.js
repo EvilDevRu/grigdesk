@@ -331,6 +331,8 @@ test('выключенный плагин инертен: маршрут 404, с
   await app.register(usageForecastModule, {
     filePath: path.join(root, 'usage-forecast.json'),
     sampleTickMs: 20,
+    // Фиксированная дата снимков не должна протухать вместе с календарём запуска теста.
+    now: () => T0 + 10 * 60_000,
   });
   await app.ready();
   t.after(() => app.close());
@@ -365,6 +367,8 @@ test('область по исполнителям: чужие снимки не
   await app.register(usageForecastModule, {
     filePath: path.join(root, 'usage-forecast.json'),
     sampleTickMs: 0,
+    // Держим retention и прогноз в той же шкале, что и синтетические события выше.
+    now: () => T0 + 10 * 60_000,
   });
   await app.ready();
   t.after(() => app.close());

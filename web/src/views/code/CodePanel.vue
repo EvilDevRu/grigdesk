@@ -105,9 +105,19 @@
           Проверь пути в разделе <router-link to="/projects">«Проекты»</router-link>.
         </div>
 
+        <div v-if="!fileHistoryActive && tab === 'files'" class="code-search">
+          <UiSearchInput
+            v-model="searchQuery"
+            data-action="code-search"
+            placeholder="Поиск по коду"
+            aria-label="Поиск по коду"
+            @keydown.enter.prevent="openFirstSearchResult"
+          />
+        </div>
+
         <!-- Как Source Control в VS Code: сообщение относится только к индексу,
              генератор читает тот же staged diff, commit не делает скрытый git add. -->
-        <div v-if="tab === 'git' && git" class="git-compose">
+        <div v-if="!fileHistoryActive && tab === 'git' && git" class="git-compose">
           <!-- Сообщение коммита многострочное: заголовок, пустая строка и тело —
                обычная форма, и сервер её принимает. `rows="1"` обязателен: без него
                textarea открывается на две строки поверх компактного min-height. -->
@@ -122,6 +132,28 @@
             :disabled="gitActionBusy"
             @keydown.enter="commitOnShortcut"
           />
+          <div class="amend-controls">
+            <UiSwitch
+              v-model="amendCommit"
+              class="amend-toggle"
+              data-action="amend"
+              :disabled="gitActionBusy || !amendAvailable"
+              :title="amendTitle"
+              @change="changeAmend"
+            >Дополнить последний коммит</UiSwitch>
+            <span class="grow"></span>
+            <UiIconButton
+              class="undo-commit"
+              role="embedded"
+              data-context="code-commit"
+              data-action="undo-commit"
+              label="Отменить последний коммит"
+              :title="undoTitle"
+              :loading="gitBusy === 'undo'"
+              :disabled="gitActionBusy || !undoAvailable"
+              @click="undoGitCommit"
+            >↶</UiIconButton>
+          </div>
           <!-- Кнопки отдельной строкой: в доке поле ввода делило 218px с тремя
                контролами и схлопывалось до двух букв — набрать в нём было нечего. -->
           <div class="git-compose-actions">
@@ -141,9 +173,20 @@
               variant="solid"
               tone="accent"
               :loading="gitBusy === 'commit'"
-              :disabled="gitActionBusy || !git.staged.length || !commitMessage.trim()"
+              :disabled="gitActionBusy || (!amendCommit && !git.staged.length) || !commitMessage.trim()"
               @click="commitGitChanges"
-            >Коммит</UiButton>
+            >{{ amendCommit ? 'Дополнить' : 'Коммит' }}</UiButton>
+            <UiIconButton
+              class="fetch-action"
+              role="embedded"
+              data-context="code-commit"
+              data-action="fetch"
+              label="Проверить remote"
+              title="Проверить remote"
+              :loading="gitBusy === 'fetch'"
+              :disabled="gitActionBusy || !fetchRemoteLabel"
+              @click="fetchGitRemote"
+            >↓</UiIconButton>
             <UiIconButton
               class="push-action"
               role="embedded"
@@ -165,24 +208,106 @@
           </p>
         </div>
 
+        <div v-if="fileHistoryActive" class="scroll tree file-history">
+          <div class="subhead file-history-head">
+            <UiIconButton role="embedded" data-context="code-group-action"
+                          data-action="close-file-history" label="Вернуться"
+                          title="Вернуться к дереву" @click="closeFileHistory()">←</UiIconButton>
+            <span class="subtitle">История</span>
+            <span class="grow"></span>
+            <span class="cnt mono">{{ fileHistoryEntries.length }}</span>
+          </div>
+          <div class="history-path mono" :title="fileHistoryPath">{{ fileHistoryPath }}</div>
+          <div v-if="fileHistoryLoading" class="pnote">Читаю историю…</div>
+          <div v-else-if="fileHistoryError" class="perr">{{ fileHistoryError }}</div>
+          <div v-else-if="!fileHistoryEntries.length" class="pnote">История файла пуста.</div>
+          <UiPressable v-for="entry in fileHistoryEntries" :key="entry.hash"
+                       class="commit file-history-entry" data-context="code-commit-row"
+                       :data-hash="entry.hash" :class="{ sel: fileHistorySelected === entry.hash }"
+                       :pressed="fileHistorySelected === entry.hash" :title="entry.when"
+                       @click="openFileHistoryEntry(entry)">
+            <span class="hash mono">{{ entry.hash.slice(0, 7) }}</span>
+            <span class="subj">{{ entry.subject }}</span>
+            <span v-if="entry.path !== fileHistoryPath" class="history-old-path mono">
+              {{ entry.path }}
+            </span>
+          </UiPressable>
+        </div>
+
+        <div v-else-if="tab === 'files' && searchActive"
+             class="scroll tree code-search-results">
+          <div v-if="searchLoading" class="pnote">Ищу…</div>
+          <div v-else-if="searchError" class="perr">{{ searchError }}</div>
+          <template v-else>
+            <template v-if="searchResult?.files.length">
+              <div class="subhead search-result-head">
+                <span class="subtitle">Файлы</span>
+                <span class="cnt mono">{{ searchResult.files.length }}</span>
+              </div>
+              <UiPressable v-for="file in searchResult.files" :key="`file:${file.path}`"
+                           class="trow search-result" data-search-kind="file"
+                           :data-search-path="file.path" :title="file.path"
+                           @click="openSearchResult(file.path, 1)">
+                <span class="search-file mono">{{ file.path }}</span>
+              </UiPressable>
+            </template>
+            <template v-if="searchResult?.matches.length">
+              <div class="subhead search-result-head">
+                <span class="subtitle">Совпадения</span>
+                <span class="cnt mono">{{ searchResult.matches.length }}</span>
+              </div>
+              <UiPressable
+                v-for="(match, index) in searchResult.matches"
+                :key="`match:${match.path}:${match.line}:${index}`"
+                class="trow search-result search-match"
+                data-search-kind="match"
+                :data-search-path="match.path"
+                :data-search-line="match.line"
+                :title="`${match.path}:${match.line}`"
+                @click="openSearchResult(match.path, match.line)"
+              >
+                <span class="search-location mono">{{ match.path }}:{{ match.line }}</span>
+                <span class="search-text mono">{{ match.text }}</span>
+              </UiPressable>
+            </template>
+            <div v-if="searchResult && !searchResult.files.length && !searchResult.matches.length"
+                 class="pnote">Ничего не найдено.</div>
+            <div v-if="searchResult?.truncated" class="pnote search-truncated">
+              Показаны первые 500 совпадений.
+            </div>
+          </template>
+        </div>
+
         <!-- Дерево файлов. Место под шеврон занято и у файла (пустой .chev): без него
              имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
              уровнем выше — лесенка читалась рваной. -->
-        <div v-if="tab === 'files'" class="scroll tree">
+        <div v-else-if="tab === 'files'" class="scroll tree file-tree">
           <template v-for="row in rows" :key="row.rel">
             <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
                          :data-dir-path="row.rel" :data-depth="row.depth"
+                         :title="fileTreeDecorations.directories.has(row.rel)
+                           ? 'В каталоге есть изменения' : undefined"
                          :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
                          @click="toggleDir(row.rel)">
               <span class="chev">{{ openDirs.has(row.rel) ? '▾' : '▸' }}</span>
               <span class="dname">{{ row.name }}</span>
+              <span v-if="fileTreeDecorations.directories.has(row.rel)"
+                    class="git-dir-dot" aria-hidden="true">•</span>
             </UiPressable>
             <UiPressable v-else class="trow frow" data-context="code-tree-row"
                          :class="{ sel: fileSel === row.rel }"
                          :pressed="fileSel === row.rel" :data-file-path="row.rel" :data-depth="row.depth"
+                         :data-status="fileTreeDecorations.files.get(row.rel)"
+                         :title="fileTreeDecorations.files.get(row.rel) === 'U'
+                           ? CONFLICT_HINT : undefined"
                          :style="rowDepth(row.depth)" @click="openFile(row.rel)">
               <span class="chev" aria-hidden="true"></span>
-              <span class="nm">{{ row.name }}</span>
+              <span v-if="fileTreeDecorations.files.get(row.rel)" class="st"
+                    :class="fileTreeDecorations.files.get(row.rel)">
+                {{ STLABEL[fileTreeDecorations.files.get(row.rel) || '']
+                  || fileTreeDecorations.files.get(row.rel) }}
+              </span>
+              <span class="nm" :class="fileTreeDecorations.files.get(row.rel)">{{ row.name }}</span>
             </UiPressable>
           </template>
         </div>
@@ -195,8 +320,16 @@
           <template v-if="git">
             <template v-for="(group, groupIndex) in gitGroups" :key="group.id">
               <div class="subhead" :data-group="group.id">
-                <span class="subtitle" :title="group.hint">{{ group.title }}</span>
+                <!-- Заголовок сворачивает дерево группы: до списка коммитов не нужно прокручивать
+                     все правки. Счётчик и итог остаются — свёрнуто не значит пусто. -->
+                <UiPressable class="group-toggle" data-context="code-group-toggle"
+                             data-action="toggle-group"
+                             :aria-expanded="!collapsedGroups.has(group.id)"
+                             :title="group.hint" @click="toggleGroupCollapsed(group.id)">
+                  <span class="subtitle">{{ group.title }}</span>
+                </UiPressable>
                 <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
+                <span v-if="group.note" class="group-note">{{ group.note }}</span>
                 <!-- Итог группы, как сводка pull request на GitHub: сумма строк по всем файлам
                      и полоска из пяти квадратиков. Без строк (бинарные файлы, чистое дерево)
                      итога нет, чтобы не рисовать «+0». -->
@@ -209,7 +342,32 @@
                 </span>
                 <span class="grow"></span>
                 <UiIconButton
-                  v-if="group.files.length"
+                  class="git-group-action"
+                  role="embedded"
+                  data-context="code-group-action"
+                  data-action="patch-review"
+                  :data-group="group.id"
+                  :label="`Обзор группы «${group.title}»`"
+                  title="Показать все изменения одной страницей"
+                  :pressed="patchReviewActive && patchReviewGroupId === group.id"
+                  :loading="patchLoading && patchReviewGroupId === group.id"
+                  :disabled="!group.files.length"
+                  @click="openPatchReview(group)"
+                >☷</UiIconButton>
+                <UiIconButton
+                  v-if="group.id === 'work' && discardableGitCount(group)"
+                  class="git-group-action"
+                  role="embedded"
+                  data-context="code-group-action"
+                  data-action="discard-all"
+                  label="Откатить все tracked-правки"
+                  title="Откатить все tracked-правки"
+                  :loading="gitBusy === 'discard:all'"
+                  :disabled="gitActionBusy"
+                  @click="discardGitGroup(group)"
+                >↶</UiIconButton>
+                <UiIconButton
+                  v-if="group.mutable && group.files.length"
                   class="git-group-action"
                   role="embedded"
                   data-context="code-group-action"
@@ -236,22 +394,45 @@
                   </UiIconButton>
                 </div>
               </div>
-              <div v-if="!group.files.length" class="pnote">Несохранённых изменений нет.</div>
+              <div v-if="!group.files.length" class="pnote">
+                {{ group.id === 'commits' ? 'В выбранных коммитах нет изменений файлов.' : 'Несохранённых изменений нет.' }}
+              </div>
+              <template v-else-if="collapsedGroups.has(group.id)"></template>
               <template v-else-if="gitView === 'tree'">
                 <template v-for="row in group.rows" :key="row.key">
-                  <UiPressable v-if="row.kind === 'dir'" class="trow dir git-row git-dir"
-                               data-context="code-tree-row"
-                               :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
-                               :aria-expanded="gitOpenDirs.has(row.ref)"
-                               :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
-                    <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
-                    <span class="dname" :title="row.path">{{ row.name }}</span>
-                  </UiPressable>
+                  <!-- Каталог: та же обойма, что у файла — в индекс уходят все файлы группы
+                       под ним. Граница по «/», чтобы src не захватил src-other. -->
+                  <div v-if="row.kind === 'dir'" class="git-file-line git-dir-line"
+                       data-ui-row="code-change" :data-dir="row.path" :data-group="group.id">
+                    <UiPressable class="trow dir git-row git-dir"
+                                 data-context="code-tree-row"
+                                 :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
+                                 :aria-expanded="gitOpenDirs.has(row.ref)"
+                                 :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
+                      <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
+                      <span class="dname" :title="row.path">{{ row.name }}</span>
+                    </UiPressable>
+                    <span v-if="group.mutable" class="git-row-actions">
+                      <UiIconButton
+                        class="git-file-action"
+                        role="embedded"
+                        data-context="code-row-action"
+                        :data-action="group.id === 'staged' ? 'unstage-dir' : 'stage-dir'"
+                        :data-dir="row.path"
+                        :label="gitDirActionLabel(group, row.path)"
+                        :title="gitDirActionLabel(group, row.path)"
+                        :loading="gitBusy === gitDirActionKey(group.id, row.path)"
+                        :disabled="gitActionBusy"
+                        @click="changeGitDir(group, row.path)"
+                      >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                    </span>
+                  </div>
                   <div v-else class="git-file-line" data-ui-row="code-change">
                     <UiPressable class="trow frow git-row git-file"
                                  data-context="code-tree-row"
                                  :class="{ sel: gitSel === row.ref }" :pressed="gitSel === row.ref"
                                  :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
+                                 :title="gitFileHint(row.file)"
                                  :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
                       <span class="chev" aria-hidden="true"></span>
                       <span class="st" :class="row.file.status">
@@ -263,18 +444,37 @@
                         <i v-if="row.file.del" class="d">−{{ row.file.del }}</i>
                       </span>
                     </UiPressable>
-                    <UiIconButton
-                      class="git-file-action"
-                      role="embedded"
-                      data-context="code-row-action"
-                      :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
-                      :data-file="row.path"
-                      :label="gitFileActionLabel(group.id, row.path)"
-                      :title="group.id === 'staged' ? 'Вернуть из индекса' : 'Добавить в индекс'"
-                      :loading="gitBusy === gitFileActionKey(group.id, row.path)"
-                      :disabled="gitActionBusy"
-                      @click="changeGitFile(group, row.file)"
-                    >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                    <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
+                         иначе «Откатить» и «+» ложились в одну точку. -->
+                    <span class="git-row-actions">
+                      <UiIconButton
+                        v-if="group.id === 'work' && row.file.status !== 'U'"
+                        class="git-file-action"
+                        role="embedded"
+                        data-context="code-row-action"
+                        :data-group="group.id"
+                        :data-action="row.file.status === 'A' ? 'clean' : 'discard'"
+                        :data-file="row.path"
+                        :label="discardGitFileLabel(row.file)"
+                        :title="discardGitFileLabel(row.file)"
+                        :loading="gitBusy === discardGitFileKey(row.file)"
+                        :disabled="gitActionBusy"
+                        @click="discardGitFile(group, row.file)"
+                      >{{ row.file.status === 'A' ? '×' : '↶' }}</UiIconButton>
+                      <UiIconButton
+                        v-if="group.mutable"
+                        class="git-file-action"
+                        role="embedded"
+                        data-context="code-row-action"
+                        :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
+                        :data-file="row.path"
+                        :label="gitFileActionLabel(group.id, row.file)"
+                        :title="gitFileActionLabel(group.id, row.file)"
+                        :loading="gitBusy === gitFileActionKey(group.id, row.path)"
+                        :disabled="gitActionBusy"
+                        @click="changeGitFile(group, row.file)"
+                      >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                    </span>
                   </div>
                 </template>
               </template>
@@ -288,6 +488,7 @@
                                :class="{ sel: gitSel === gitRef(group.id, entry.file.path) }"
                                :pressed="gitSel === gitRef(group.id, entry.file.path)"
                                :data-path="entry.file.path" :data-group="group.id"
+                               :title="gitFileHint(entry.file)"
                                @click="selectGit(gitRef(group.id, entry.file.path))">
                     <span class="st" :class="entry.file.status">
                       {{ STLABEL[entry.file.status] || entry.file.status }}
@@ -301,26 +502,70 @@
                       <i v-if="entry.file.del" class="d">−{{ entry.file.del }}</i>
                     </span>
                   </UiPressable>
-                  <UiIconButton
-                    class="git-file-action"
-                    role="embedded"
-                    data-context="code-row-action"
-                    :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
-                    :data-file="entry.file.path"
-                    :label="gitFileActionLabel(group.id, entry.file.path)"
-                    :title="group.id === 'staged' ? 'Вернуть из индекса' : 'Добавить в индекс'"
-                    :loading="gitBusy === gitFileActionKey(group.id, entry.file.path)"
-                    :disabled="gitActionBusy"
-                    @click="changeGitFile(group, entry.file)"
-                  >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                  <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
+                       иначе «Откатить» и «+» ложились в одну точку. -->
+                  <span class="git-row-actions">
+                    <UiIconButton
+                      v-if="group.id === 'work' && entry.file.status !== 'U'"
+                      class="git-file-action"
+                      role="embedded"
+                      data-context="code-row-action"
+                      :data-group="group.id"
+                      :data-action="entry.file.status === 'A' ? 'clean' : 'discard'"
+                      :data-file="entry.file.path"
+                      :label="discardGitFileLabel(entry.file)"
+                      :title="discardGitFileLabel(entry.file)"
+                      :loading="gitBusy === discardGitFileKey(entry.file)"
+                      :disabled="gitActionBusy"
+                      @click="discardGitFile(group, entry.file)"
+                    >{{ entry.file.status === 'A' ? '×' : '↶' }}</UiIconButton>
+                    <UiIconButton
+                      v-if="group.mutable"
+                      class="git-file-action"
+                      role="embedded"
+                      data-context="code-row-action"
+                      :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
+                      :data-file="entry.file.path"
+                      :label="gitFileActionLabel(group.id, entry.file)"
+                      :title="gitFileActionLabel(group.id, entry.file)"
+                      :loading="gitBusy === gitFileActionKey(group.id, entry.file.path)"
+                      :disabled="gitActionBusy"
+                      @click="changeGitFile(group, entry.file)"
+                    >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                  </span>
                 </div>
               </template>
             </template>
-            <div class="subhead"><span class="subtitle">Коммиты</span></div>
-            <div v-for="c in git.log" :key="c.hash" class="commit" :title="c.when">
+            <div class="subhead commits-head">
+              <span class="subtitle">Коммиты</span>
+              <span v-if="commitSel.size" class="cnt mono">{{ commitSel.size }}</span>
+              <span class="grow"></span>
+              <!-- «С текущими»: правая сторона отрезка — рабочее дерево. Боль владельца — видеть
+                   коммиты и несохранённые правки одним дифом, как обычный diff задачи. -->
+              <UiButton variant="ghost" data-context="code-group-action"
+                        data-action="commits-with-work"
+                        :title="commitsWorkTitle" :pressed="commitsWithWork"
+                        :aria-disabled="!commitsWorkAvailable"
+                        @click="toggleCommitsWork">+ текущие</UiButton>
+              <UiIconButton role="embedded" data-context="code-group-action"
+                            data-action="branch-diff" label="Показать всю ветку"
+                            :title="branchDiffAvailability.title"
+                            :pressed="branchMode" :loading="commitsLoading && branchMode"
+                            :disabled="!branchDiffAvailability.enabled"
+                            @click="toggleBranchDiff">⑂</UiIconButton>
+              <UiIconButton v-if="commitSel.size" role="embedded" data-context="code-group-action"
+                            data-action="clear-commits" label="Снять выбор коммитов"
+                            title="Снять выбор" @click="clearCommitSelection">✕</UiIconButton>
+            </div>
+            <div v-if="commitsLoading" class="pnote commits-state">Читаю коммиты…</div>
+            <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
+            <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
+                         data-context="code-commit-row" :data-hash="c.hash"
+                         :class="{ sel: commitSel.has(c.hash) }" :pressed="commitSel.has(c.hash)"
+                         :title="c.when" @click="pickCommit(c, $event)">
               <span class="hash mono">{{ c.hash }}</span>
               <span class="subj">{{ c.subject }}</span>
-            </div>
+            </UiPressable>
           </template>
         </div>
       </aside>
@@ -338,46 +583,136 @@
       <!-- Просмотр: файл или диф -->
       <section class="editorwrap">
         <div class="ehead">
-          <template v-if="tab === 'files' && fileSel">
-            <span class="epath mono">{{ fileSel }}</span>
+          <template v-if="fileHistoryActive">
+            <span v-if="fileHistoryDiff" class="st" :class="fileHistoryDiff.status">
+              {{ STLABEL[fileHistoryDiff.status] || fileHistoryDiff.status }}
+            </span>
+            <span class="epath mono" :title="fileHistoryDiff?.path || fileHistoryPath">
+              <i v-if="headPath(fileHistoryDiff?.path || fileHistoryPath).dir" class="epath-dir">{{ headPath(fileHistoryDiff?.path || fileHistoryPath).dir }}/</i><b class="epath-name">{{ headPath(fileHistoryDiff?.path || fileHistoryPath).name }}</b>
+            </span>
+            <span class="scope">история</span>
+            <span v-if="fileHistoryDiffLoading" class="note">читаю diff…</span>
+            <span v-else-if="fileHistoryDiffError" class="note diff-error">
+              {{ fileHistoryDiffError }}
+            </span>
+          </template>
+          <template v-else-if="tab === 'files' && fileSel">
+            <span class="epath mono" :title="fileSel">
+              <i v-if="headPath(fileSel).dir" class="epath-dir">{{ headPath(fileSel).dir }}/</i><b class="epath-name">{{ headPath(fileSel).name }}</b>
+            </span>
             <span v-if="showsImage" class="note img-note">изображение</span>
             <span v-else-if="fileData?.binary" class="note">бинарный</span>
             <span v-else-if="fileData?.tooBig" class="note">слишком большой — превью отключено</span>
             <span v-if="fileLoading" class="note">читаю…</span>
+            <span v-else-if="blameLoading" class="note">считаю blame…</span>
+            <span v-else-if="blameError" class="note diff-error">{{ blameError }}</span>
+          </template>
+          <template v-else-if="tab === 'git' && patchReviewActive">
+            <span class="epath" :title="patchReviewGroup?.title">Обзор · {{ patchReviewGroup?.title }}</span>
+            <span v-if="patchReviewGroup" class="note mono range-summary">
+              {{ fileCountLabel(patchReviewGroup.files.length) }},
+              +{{ patchReviewGroup.stat.add }} −{{ patchReviewGroup.stat.del }}
+            </span>
+            <span v-if="patchLoading" class="note">читаю патч…</span>
+            <span v-else-if="patchError" class="note diff-error">{{ patchError }}</span>
           </template>
           <template v-else-if="tab === 'git' && gitFile">
             <span class="st" :class="gitFile.status">{{ STLABEL[gitFile.status] || gitFile.status }}</span>
-            <span class="epath mono">{{ gitFile.path }}</span>
+            <span class="epath mono" :title="gitFile.path">
+              <i v-if="headPath(gitFile.path).dir" class="epath-dir">{{ headPath(gitFile.path).dir }}/</i><b class="epath-name">{{ headPath(gitFile.path).name }}</b>
+            </span>
             <!-- Пока индекс пуст, называть группу нечего: диф в панели ровно один. -->
             <span v-if="gitScopeBadge" class="scope" :title="gitScopeBadge.hint">{{ gitScopeBadge.label }}</span>
+            <span v-if="rangeSummary" class="note mono range-summary">{{ rangeSummary }}</span>
             <span v-if="gitFile.binary" class="note">бинарный</span>
             <span v-else-if="gitFile.tooBig" class="note">слишком большой — превью отключено</span>
+            <span v-if="diffLoading" class="note">читаю…</span>
+            <span v-else-if="diffError" class="note diff-error">{{ diffError }}</span>
           </template>
           <span class="grow"></span>
-          <UiButton v-if="tab === 'git'" class="diff-layout" variant="ghost"
+          <!-- Действия шапки: значок + подпись. Подпись прячет контейнерный запрос по ширине
+               редактора, смысл остаётся в title. Сами кнопки не сжимаются: с бейджем и сводкой
+               отрезка семь кнопок ужимались до одной буквы, и «История» превращалась в «И». -->
+          <UiButton v-if="tab === 'git' && patchReviewActive" variant="ghost"
+                    data-action="close-patch-review" title="Вернуться к файлу"
+                    @click="closePatchReview">
+            <span class="glyph" aria-hidden="true">←</span><span class="label">К файлу</span>
+          </UiButton>
+          <UiButton v-if="(tab === 'git' || fileHistoryActive) && !patchReviewActive"
+                    class="diff-layout" variant="ghost"
                     :pressed="renderSideBySide" :aria-disabled="oneSidedDiff"
                     :title="oneSidedDiff ? 'Новый или удалённый файл показывается одной колонкой' : (renderSideBySide ? 'Показать в одну колонку' : 'Показать рядом')"
                     @click="toggleDiffLayout">
-            {{ oneSidedDiff ? '≡ одна колонка' : (renderSideBySide ? '⇆ рядом' : '≡ в строку') }}
+            <span class="glyph" aria-hidden="true">{{ oneSidedDiff || !renderSideBySide ? '≡' : '⇆' }}</span>
+            <span class="label">{{ oneSidedDiff ? 'одна колонка' : (renderSideBySide ? 'рядом' : 'в строку') }}</span>
+          </UiButton>
+          <UiButton v-if="(tab === 'git' || fileHistoryActive) && !patchReviewActive"
+                    variant="ghost" data-action="diff-wrap"
+                    :pressed="diffWrap" title="Переносить длинные строки"
+                    @click="toggleDiffWrap">
+            <span class="glyph" aria-hidden="true">↩</span><span class="label">перенос</span>
+          </UiButton>
+          <UiButton v-if="(tab === 'git' || fileHistoryActive) && !patchReviewActive" variant="ghost"
+                    data-action="diff-whitespace"
+                    :pressed="ignoreTrimWhitespace" title="Не учитывать пробелы по краям строк"
+                    @click="toggleDiffWhitespace">
+            <span class="glyph" aria-hidden="true">≋</span><span class="label">без пробелов</span>
+          </UiButton>
+          <UiButton v-if="canShowFileHistory" variant="ghost" data-action="file-history"
+                    title="Показать историю файла" @click="openFileHistory">
+            <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.3a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4zM7.4 4h1.2v4.2l2.9 1.7-.6 1-3.5-2.1z" /></svg>
+            <span class="label">История</span>
+          </UiButton>
+          <UiButton v-if="tab === 'files' && fileSel && !fileHistoryActive" variant="ghost"
+                    data-action="blame" :pressed="blameEnabled" :disabled="!canUseBlame"
+                    :title="blameTitle" @click="toggleBlame">
+            <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M8 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm0 7c3 0 5.5 1.5 5.5 3.5V14h-11v-1.5C2.5 10.5 5 9 8 9z" /></svg>
+            <span class="label">Blame</span>
+          </UiButton>
+          <UiButton v-if="canAskAgent" variant="ghost" data-action="ask-agent"
+                    :loading="askAgentBusy" :disabled="askAgentBusy"
+                    title="Создать чат с черновиком вопроса" @click="askAgentAboutCode">
+            <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h12v8.5H6.2L3 13.6V11H2z" /></svg>
+            <span class="label">Спросить агента</span>
+          </UiButton>
+          <UiButton v-if="canCopyCodeLink" variant="ghost" data-action="copy-code-link"
+                    :title="codeLinkCopied ? 'Ссылка скопирована' : 'Скопировать ссылку на файл'"
+                    @click="copyCodeLink">
+            <span v-if="codeLinkCopied" class="glyph ok" aria-hidden="true">✓</span>
+            <svg v-else class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0z" /></svg>
+            <span class="label">{{ codeLinkCopied ? 'скопировано' : 'Ссылка' }}</span>
           </UiButton>
           <UiIconButton role="embedded" label="Обновить" title="Обновить"
-                        :loading="gitLoading || fileLoading" @click="refresh()">↻</UiIconButton>
+                        :loading="gitLoading || fileLoading" @click="requestRefresh()">↻</UiIconButton>
         </div>
         <div class="ebody" data-escape-owner="monaco">
-          <div v-show="tab === 'files' && !imageSrc" ref="fileHost" class="editor"></div>
-          <div v-show="tab === 'git'" ref="diffHost" class="editor"></div>
+          <div v-show="tab === 'files' && !imageSrc && !fileHistoryActive"
+               ref="fileHost" class="editor"></div>
+          <div v-show="(tab === 'git' && !patchReviewActive) || fileHistoryActive"
+               ref="diffHost" class="editor"></div>
+          <PatchReview v-if="patchReviewActive && patchReviewData"
+                       :patch="patchReviewData.patch" :truncated="patchReviewData.truncated"
+                       :files="patchReviewGroup?.files || []" @open="openPatchReviewFile" />
+          <div v-else-if="patchReviewActive && patchLoading" class="overlay">Собираю обзор…</div>
+          <div v-else-if="patchReviewActive && patchError" class="overlay">{{ patchError }}</div>
           <!-- Картинка вместо пустого редактора: сырые байты отдаёт raw-роут «Кода». -->
-          <div v-if="tab === 'files' && imageSrc" class="imgwrap">
+          <div v-if="tab === 'files' && imageSrc && !fileHistoryActive" class="imgwrap">
             <img v-if="!imageError" :src="imageSrc" :alt="fileSel" @error="imageError = 'Не удалось загрузить изображение'">
             <div v-else class="imgerr">
               {{ imageError }}<br>
               <span class="muted">Возможно, файл больше 10 МБ или его формат не поддерживается предпросмотром.</span>
             </div>
           </div>
-          <div v-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
+          <div v-if="fileHistoryActive && !fileHistoryDiff && !fileHistoryDiffLoading"
+               class="overlay">Выбери коммит слева</div>
+          <div v-else-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
+          <div v-else-if="tab === 'git' && !patchReviewActive
+                         && commitSel.size && commitsDiff && !commitsDiff.files.length"
+               class="overlay">В выбранных коммитах нет изменений файлов</div>
           <!-- Пусто = нет изменений НИ В ОДНОЙ группе: при чистом рабочем дереве, но
                непустом индексе, диф выбранного файла существует и закрывать его нечем. -->
-          <div v-else-if="tab === 'git' && git && !gitEntries.size" class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
+          <div v-else-if="tab === 'git' && !patchReviewActive && git && !gitEntries.size"
+               class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
         </div>
       </section>
     </div>
@@ -390,41 +725,68 @@
 // справа Monaco. Смотреть можно ЛЮБОЕ дерево репозитория — основное или worktree
 // (их создаёт фабрика): репозиторий и worktree выбираются одним полем «Рабочая копия».
 // Пути репозиториев проекта задаются в разделе «Проекты».
-import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { codeApi, codeErrorMessage } from '../../shared/codeApi';
+import { useSse } from '../../composables/useSse';
+import { useChatStore } from '../../stores/chat.js';
+import { router } from '../../router.js';
 import type {
+  CodeBlameLine,
   CodeDirectoryEntry,
+  CodeCommitsDiffResponse,
+  CodeFileDiffResponse,
+  CodeFileLogEntry,
   CodeFileResponse,
+  CodeGitEntry,
   CodeGitFile,
   CodeGitResponse,
+  CodePatchResponse,
   CodeProject,
   CodeRepo,
   CodeRequestContext,
+  CodeSearchResponse,
+  CodeTarget,
 } from '../../../../shared/codeContracts';
+import PatchReview from './PatchReview.vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco';
+import { codeLinkHref } from '../../features/code/links';
 import {
+  askAgentDraft,
   buildCodeContexts,
   buildGitGroups,
+  chunkList,
+  groupDirectoryFiles,
+  splitGitPath,
+  commitRangeBounds,
   encodeStoredCodeContext,
+  extendCommitSelection,
+  fileDiffKey,
   gitGroupDirectoryPaths,
   gitRef,
   normalizeGitView,
   pickCodeContext,
+  pruneCommitSelection,
   reconcileGitOpenDirs,
+  treeDecorations,
+  toggleCommitSelection,
 } from '../../shared/codeTree';
 import type { CodeContext, GitGroup, GitGroupId, GitGroupStat } from '../../shared/codeTree';
 import {
   UiButton,
   UiIconButton,
   UiPressable,
+  UiSearchInput,
   UiSelect,
+  UiSwitch,
   UiTextarea,
+  confirmDialog,
+  promptDialog,
 } from '../../ui';
 
 type CodeTab = 'files' | 'git';
 type ContextSnapshot = CodeRequestContext & { generation: number };
 type ActivationOptions = { activation?: number | null };
-type RefreshOptions = ActivationOptions & { silent?: boolean };
+type RefreshOptions = ActivationOptions & { silent?: boolean; contentOnly?: boolean };
 type PreviousContext = {
   generation: number;
   project: string;
@@ -453,6 +815,16 @@ type CodeIntent = OpenFileIntent | { type: 'project'; project: string };
 type IntentEnvelope = { id: number; payload: CodeIntent | null };
 type FileTreeRow = CodeDirectoryEntry & { rel: string; depth: number };
 type GitNotice = { type: 'ok' | 'err'; text: string };
+interface FileHistoryOrigin {
+  tab: CodeTab;
+  file: string;
+  gitRef: string;
+}
+interface CommitSelectionSnapshot {
+  from: string;
+  to: string;
+  selected: number;
+}
 type TrackingNote = {
   type: 'err' | 'mid';
   text: string;
@@ -480,6 +852,7 @@ const emit = defineEmits<{
   'consume-intent': [id: number];
   context: [value: CodePanelContext | null];
 }>();
+const chatStore = useChatStore();
 
 const loading = ref(true);
 const contextLoading = ref(false);
@@ -550,14 +923,104 @@ const openDirs = ref(new Set<string>());
 const fileSel = ref('');
 const fileData = ref<CodeFileResponse | null>(null);      // { content, binary, tooBig, size }
 const fileLoading = ref(false);
+const searchQuery = ref('');
+const searchResult = ref<CodeSearchResponse | null>(null);
+const searchLoading = ref(false);
+const searchError = ref('');
+const searchActive = computed(() => searchQuery.value.length >= 2);
+const SEARCH_DELAY_MS = 300;
 
 // ── Гит ──
 const git = ref<CodeGitResponse | null>(null);           // { branch, files, staged, log }
+const fileTreeDecorations = computed(() => treeDecorations(git.value));
 const gitLoading = ref(false);
+const diffContent = ref(new Map<string, CodeFileDiffResponse>());
+const diffLoading = ref(false);
+const diffError = ref('');
+const patchContent = ref(new Map<string, CodePatchResponse>());
+const patchReviewKey = ref('');
+const patchReviewGroupId = ref<GitGroupId | null>(null);
+const patchLoading = ref(false);
+const patchError = ref('');
+const commitsDiff = ref<CodeCommitsDiffResponse | null>(null);
+const commitsLoading = ref(false);
+const commitsError = ref('');
+const branchMode = ref(false);
+const commitSel = ref(new Set<string>());
+const commitAnchor = ref('');
+const commitsLoadedSelection = ref<CommitSelectionSnapshot | null>(null);
+// «С текущими изменениями» — настройка устройства, по умолчанию включена: диф отрезка до
+// HEAD показывает и несохранённые правки. Для более старого конца режим молча не действует.
+const commitsWithWork = ref(localStorage.getItem('cockpit-code-commits-work') !== '0');
 const commitMessage = ref('');
+const amendCommit = ref(false);
+const amendHeadMessage = ref('');
 const gitBusy = ref('');
 const gitNotice = ref<GitNotice | null>(null);     // { type: 'ok' | 'err', text }
 const gitActionBusy = computed(() => !!gitBusy.value);
+const amendAvailable = computed(() => {
+  const current = git.value;
+
+  return Boolean(current?.log.length)
+    && !current?.tracking?.detached
+    && (!current?.tracking?.upstream || Number(current.tracking.ahead) > 0);
+});
+const amendTitle = computed(() => {
+  if (!git.value?.log.length) {
+    return 'В репозитории ещё нет последнего коммита';
+  }
+  if (git.value.tracking?.detached) {
+    return 'Detached HEAD нельзя переписывать';
+  }
+  if (git.value.tracking?.upstream && Number(git.value.tracking.ahead) === 0) {
+    return 'Коммит уже отправлен — push без force невозможен';
+  }
+
+  return 'Добавить индекс в последний локальный коммит или изменить его сообщение';
+});
+const undoAvailable = computed(() => amendAvailable.value && (git.value?.log.length || 0) > 1);
+const undoTitle = computed(() => {
+  if (git.value?.tracking?.detached) {
+    return 'Detached HEAD нельзя переписывать';
+  }
+  if (git.value?.tracking?.upstream && Number(git.value.tracking.ahead) === 0) {
+    return 'Коммит уже отправлен — push без force невозможен';
+  }
+  if (!git.value?.log.length) {
+    return 'В репозитории ещё нет последнего коммита';
+  }
+  if (git.value.log.length < 2) {
+    return 'У последнего коммита нет родителя';
+  }
+
+  return 'Отменить последний коммит и вернуть его изменения в индекс';
+});
+
+watch(() => git.value?.headMessage || '', (next, previous) => {
+  if (amendCommit.value
+    && (!commitMessage.value.trim()
+      || commitMessage.value === previous
+      || commitMessage.value === amendHeadMessage.value)) {
+    commitMessage.value = next;
+  }
+
+  amendHeadMessage.value = next;
+});
+watch(amendAvailable, (available) => {
+  if (!available) {
+    amendCommit.value = false;
+  }
+});
+
+const fetchRemoteLabel = computed(() => {
+  const tracking = git.value?.tracking;
+
+  if (tracking?.remote) {
+    return tracking.remote;
+  }
+
+  return tracking?.upstream?.split('/')[0] || '';
+});
 const pushLabel = computed(() => {
   if (!git.value?.tracking?.upstream) {
     return 'Опубликовать';
@@ -636,15 +1099,96 @@ const side = computed({
   },
 });
 const renderSideBySide = computed(() => side.value && !oneSidedDiff.value);
+const diffWrap = ref(localStorage.getItem('cockpit-diff-wrap') === '1');
+const ignoreTrimWhitespace = ref(localStorage.getItem('cockpit-diff-ws') === '1');
 const gitView = ref(normalizeGitView(localStorage.getItem('cockpit-code-git-view')));
+// Свёрнутые группы изменений — настройка устройства: свёрнутое дерево правок открывает
+// список коммитов без прокрутки, а счётчик и итог группы остаются в заголовке.
+const collapsedGroups = ref(readCollapsedGroups());
 const gitOpenDirs = ref(new Set<string>());
 const gitKnownDirs = ref(new Set<string>());
 const gitDirsReady = ref(false);
 // Группы изменений, как Source Control в VS Code: индекс и рабочее дерево. Пустая
 // группа не рисуется, поэтому при чистом индексе панель выглядит ровно как раньше.
-const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value));
+const selectedCommitBounds = computed(() => commitRangeBounds(
+  git.value?.log || [],
+  commitSel.value,
+));
+const commitsWorkAvailable = computed(() => {
+  if (branchMode.value) {
+    return true;
+  }
+
+  const bounds = selectedCommitBounds.value;
+  const head = git.value?.log[0]?.hash || '';
+
+  return !bounds || (!!head && bounds.to === head);
+});
+const commitsWorkActive = computed(() => commitsWithWork.value && commitsWorkAvailable.value);
+const commitsWorkTitle = computed(() => {
+  if (!commitsWorkAvailable.value) {
+    return 'Текущие изменения можно добавить только к отрезку до последнего коммита';
+  }
+
+  return commitsWithWork.value
+    ? 'Показывать отрезок вместе с несохранёнными правками — выключить'
+    : 'Показывать отрезок вместе с несохранёнными правками';
+});
+const branchDiffAvailability = computed(() => {
+  const selected = context.value;
+
+  if (!selected || !git.value) {
+    return { enabled: false, title: 'Сначала выбери рабочую копию.' };
+  }
+  if (selected.main) {
+    return git.value.tracking.upstream
+      ? { enabled: true, title: 'Показать всю ветку относительно upstream' }
+      : { enabled: false, title: 'У основной ветки нет upstream.' };
+  }
+
+  const main = contexts.value.find((item) => item.repoKey === selected.repoKey && item.main);
+
+  return main?.branch && main.branch !== '(detached)'
+    ? { enabled: true, title: `Показать всю ветку относительно ${main.branch}` }
+    : { enabled: false, title: 'У основного дерева не определена ветка.' };
+});
+const commitGroup = computed(() => {
+  const diff = commitsDiff.value;
+  const bounds = commitsLoadedSelection.value;
+
+  if (!diff || (!branchMode.value && !bounds)) {
+    return null;
+  }
+
+  if (branchMode.value) {
+    return {
+      files: diff.files,
+      from: diff.range.from,
+      to: diff.range.to,
+      commits: diff.range.commits,
+      selected: diff.range.commits,
+      mode: 'branch' as const,
+      work: diff.range.work,
+    };
+  }
+
+  return {
+    files: diff.files,
+    from: bounds?.from || '',
+    to: bounds?.to || '',
+    commits: diff.range.commits,
+    selected: commitSel.value.size,
+    work: diff.range.work,
+  };
+});
+const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value, commitGroup.value));
+const patchReviewGroup = computed(() => (
+  gitGroups.value.find((group) => group.id === patchReviewGroupId.value) || null
+));
+const patchReviewData = computed(() => patchContent.value.get(patchReviewKey.value) || null);
+const patchReviewActive = computed(() => Boolean(patchReviewKey.value && patchReviewGroup.value));
 const gitEntries = computed(() => {
-  const map = new Map<string, { file: CodeGitFile; group: GitGroup }>();
+  const map = new Map<string, { file: CodeGitEntry; group: GitGroup }>();
 
   for (const group of gitGroups.value) {
     for (const file of group.files) {
@@ -655,13 +1199,106 @@ const gitEntries = computed(() => {
   return map;
 });
 const gitEntry = computed(() => gitEntries.value.get(gitSel.value) || null);
-const gitFile = computed(() => gitEntry.value?.file || null);
+/**
+ * Запись, чей диф показывает редактор. В режиме «+ текущие» слитый диф отрезка открывается
+ * по клику на файл в ЛЮБОЙ группе: тот же путь есть в группе коммитов — показывается он,
+ * а строка рабочего дерева остаётся выбранной. Новый файл только с диска в отрезок тоже
+ * входит, и его слитый диф совпадает с собственным. Иначе человеку приходилось искать тот
+ * же файл именно в группе коммитов.
+ */
+const shownEntry = computed(() => {
+  const entry = gitEntry.value;
+
+  if (!entry || entry.group.id === 'commits' || !commitsDiff.value?.range.work) {
+    return entry;
+  }
+
+  return gitEntries.value.get(gitRef('commits', entry.file.path)) || entry;
+});
+const rangeSummary = computed(() => {
+  const group = shownEntry.value?.group;
+
+  if (group?.id !== 'commits') {
+    return '';
+  }
+
+  return `${fileCountLabel(group.files.length)}, +${group.stat.add} −${group.stat.del}`;
+});
+const gitFile = computed<CodeGitFile | null>(() => {
+  const entry = shownEntry.value;
+
+  if (!entry) {
+    return null;
+  }
+
+  const range = entry.group.id === 'commits' && commitsDiff.value
+    ? rangeCacheKey(commitsDiff.value.range)
+    : '';
+  const content = diffContent.value.get(fileDiffKey(entry.group.id, entry.file.path, range));
+
+  return {
+    ...entry.file,
+    tooBig: content?.tooBig || false,
+    oldContent: content?.oldContent || '',
+    newContent: content?.newContent || '',
+  };
+});
+const canCopyCodeLink = computed(() => (
+  !fileHistoryActive.value
+  && (tab.value === 'files' ? !!fileSel.value : !!gitFile.value && !patchReviewActive.value)
+));
+const canAskAgent = computed(() => !patchReviewActive.value && !fileHistoryActive.value && (
+  tab.value === 'files' ? !!fileSel.value : !!gitEntry.value
+));
+const canShowFileHistory = computed(() => !fileHistoryActive.value && !patchReviewActive.value && (
+  tab.value === 'files' ? !!fileSel.value : !!gitFile.value
+));
+const blameEnabled = ref(localStorage.getItem('cockpit-code-blame') === '1');
+const blameLines = ref<CodeBlameLine[]>([]);
+const blamePath = ref('');
+const blameLoading = ref(false);
+const blameError = ref('');
+const canUseBlame = computed(() => Boolean(
+  tab.value === 'files'
+  && fileSel.value
+  && fileData.value
+  && !fileData.value.binary
+  && !fileData.value.tooBig
+  && !isImagePath(fileSel.value),
+));
+const blameTitle = computed(() => {
+  if (fileData.value?.binary) {
+    return 'Blame недоступен для бинарного файла';
+  }
+  if (fileData.value?.tooBig) {
+    return 'Blame недоступен для слишком большого файла';
+  }
+  if (isImagePath(fileSel.value)) {
+    return 'Blame недоступен для изображения';
+  }
+
+  return blameEnabled.value ? 'Скрыть авторство строк' : 'Показать авторство строк';
+});
+const codeLinkCopied = ref(false);
+const askAgentBusy = ref(false);
+const fileHistoryOrigin = ref<FileHistoryOrigin | null>(null);
+const fileHistoryPath = ref('');
+const fileHistoryEntries = ref<CodeFileLogEntry[]>([]);
+const fileHistorySelected = ref('');
+const fileHistoryDiff = ref<CodeGitFile | null>(null);
+const fileHistoryLoading = ref(false);
+const fileHistoryError = ref('');
+const fileHistoryDiffLoading = ref(false);
+const fileHistoryDiffError = ref('');
+const fileHistoryActive = computed(() => fileHistoryOrigin.value !== null);
 const STLABEL: Record<string, string> = {
   A: 'A',
   M: 'M',
   D: 'D',
-  R: 'R'
+  R: 'R',
+  U: '!',
 };
+const CONFLICT_HINT = 'конфликт: разреши в файле, затем добавь в индекс';
 // Шаг лесенки дерева задаётся в CSS (`--tree-step`), сюда приезжает только глубина:
 // иначе два числа — px в скрипте и отступ шеврона в стилях — разъезжаются при правке.
 function rowDepth(depth: number) {
@@ -671,6 +1308,28 @@ function rowDepth(depth: number) {
 /** Подсказка итога группы: в заголовке только числа, слово «строк» живёт здесь. */
 function gitStatTitle(stat: GitGroupStat) {
   return `добавлено строк: ${stat.add}, удалено строк: ${stat.del}`;
+}
+
+/**
+ * Путь в шапке редактора: каталог отдельно от имени файла. Каталог сжимается с многоточием,
+ * имя — никогда: иначе при узкой шапке путь превращался в «docs…» и файл было не узнать.
+ */
+function headPath(path: string) {
+  return splitGitPath(path);
+}
+
+/**
+ * Склоняет счётчик файлов в короткой сводке выбранного диапазона.
+ * Отдельная ветка 11…14 защищает исключение русского множественного числа.
+ */
+function fileCountLabel(count: number) {
+  const tail = count % 100;
+  const digit = count % 10;
+  const word = tail >= 11 && tail <= 14
+    ? 'файлов'
+    : digit === 1 ? 'файл' : digit >= 2 && digit <= 4 ? 'файла' : 'файлов';
+
+  return `${count} ${word}`;
 }
 
 /**
@@ -692,11 +1351,28 @@ function firstGitRef() {
 // Чей это диф, показываем только когда групп больше одной: при пустом индексе
 // вариант ровно один, и подпись была бы шумом.
 const gitScopeBadge = computed(() => {
-  if (gitGroups.value.length < 2 || !gitEntry.value) {
+  const entry = shownEntry.value;
+
+  if (!entry) {
     return null;
   }
 
-  return gitEntry.value.group.id === 'staged'
+  if (entry.group.id === 'commits') {
+    return commitsDiff.value?.range.work
+      ? {
+        label: 'в коммитах + текущие',
+        hint: 'слева — до первого выбранного коммита, справа — файл на диске',
+      }
+      : {
+        label: 'в коммитах',
+        hint: 'слева — до первого выбранного коммита, справа — после последнего',
+      };
+  }
+  if (gitGroups.value.length < 2) {
+    return null;
+  }
+
+  return entry.group.id === 'staged'
     ? { label: 'в индексе', hint: 'слева HEAD, справа индекс — это уедет в коммит' }
     : { label: 'в рабочем дереве', hint: 'слева индекс, справа рабочее дерево — в коммит пока не попадёт' };
 });
@@ -710,6 +1386,9 @@ let fileEditor: monaco.editor.IStandaloneCodeEditor | null = null;
 let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
 let fileModel: monaco.editor.ITextModel | null = null;
 let diffModels: monaco.editor.ITextModel[] = [];
+let blameDecorations: monaco.editor.IEditorDecorationsCollection | null = null;
+let blameMouseDisposable: { dispose(): void } | null = null;
+let codeLinkCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 // Строка, на которую надо встать, когда модель уже создана: intent приходит раньше
 // ответа сервера, а Monaco умеет прокручивать только существующую модель.
 let pendingReveal: { path: string; line: number } | null = null;
@@ -719,6 +1398,26 @@ let contextGeneration = 0;
 let reposRequestId = 0;
 let fileRequestId = 0;
 let gitRequestId = 0;
+let diffRequestId = 0;
+let commitsRequestId = 0;
+let patchRequestId = 0;
+let fileHistoryRequestId = 0;
+let blameRequestId = 0;
+let searchRequestId = 0;
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let commitsLoadedKey = '';
+
+// Параметры file-diff/patch по принятому отрезку: с диском второй ревизии нет, есть флаг.
+function rangeQuery(range: CodeCommitsDiffResponse['range']) {
+  return range.work
+    ? { base: range.base, work: true }
+    : { base: range.base, to: range.to };
+}
+
+function rangeCacheKey(range: CodeCommitsDiffResponse['range']) {
+  return `${range.base}:${range.to}${range.work ? ':work' : ''}`;
+}
+
 let gitActionId = 0;
 let fileLoadingRequestId = 0;
 let gitLoadingRequestId = 0;
@@ -1019,9 +1718,8 @@ async function setContext(id: string, { activation = null }: ActivationOptions =
   const snapshot = captureContext();
   const rootLoaded = await loadDir('', snapshot, { activation });
 
-  if (rootLoaded && activationIsCurrent(activation)
-    && contextIsCurrent(snapshot) && tab.value === 'git') {
-    await loadGit(snapshot, { activation });
+  if (rootLoaded && activationIsCurrent(activation) && contextIsCurrent(snapshot)) {
+    await loadGit(snapshot, { activation, metadataOnly: tab.value !== 'git' });
   }
   if (activationIsCurrent(activation)
     && generation === contextGeneration && contextIsCurrent(snapshot)) {
@@ -1041,7 +1739,24 @@ function resetState() {
   imageError.value = '';
   git.value = null;
   gitSel.value = '';
+  diffContent.value = new Map();
+  diffLoading.value = false;
+  diffError.value = '';
+  patchContent.value = new Map();
+  patchReviewKey.value = '';
+  patchReviewGroupId.value = null;
+  patchLoading.value = false;
+  patchError.value = '';
+  commitsDiff.value = null;
+  commitsLoading.value = false;
+  commitsError.value = '';
+  branchMode.value = false;
+  commitSel.value = new Set();
+  commitAnchor.value = '';
+  commitsLoadedSelection.value = null;
   commitMessage.value = '';
+  amendCommit.value = false;
+  amendHeadMessage.value = '';
   gitBusy.value = '';
   gitNotice.value = null;
   gitOpenDirs.value = new Set();
@@ -1053,6 +1768,22 @@ function resetState() {
   gitLoadingRequestId = 0;
   fileRequestId += 1;
   gitRequestId += 1;
+  diffRequestId += 1;
+  commitsRequestId += 1;
+  patchRequestId += 1;
+  fileHistoryRequestId += 1;
+  resetBlameView();
+  resetSearch();
+  fileHistoryOrigin.value = null;
+  fileHistoryPath.value = '';
+  fileHistoryEntries.value = [];
+  fileHistorySelected.value = '';
+  fileHistoryDiff.value = null;
+  fileHistoryLoading.value = false;
+  fileHistoryError.value = '';
+  fileHistoryDiffLoading.value = false;
+  fileHistoryDiffError.value = '';
+  commitsLoadedKey = '';
   gitActionId += 1;
   dirRequestIds.clear();
   clearFileModel();
@@ -1060,12 +1791,76 @@ function resetState() {
   error.value = '';
 }
 
+/**
+ * Переключает вид без второго Git-снимка: вкладка файлов уже держит метаданные для
+ * меток, а при входе в Git остаётся только подгрузить содержимое выбранного diff.
+ */
 async function setTab(t: CodeTab) {
+  if (fileHistoryActive.value) {
+    await closeFileHistory(false);
+  }
+
   tab.value = t;
 
-  if (t === 'git' && !git.value && treePath.value) {
-    await loadGit(captureContext());
+  if (!treePath.value) {
+    return;
   }
+  if (t === 'files') {
+    if (!git.value) {
+      await loadGit(captureContext(), { metadataOnly: true });
+    }
+
+    return;
+  }
+  if (!git.value) {
+    await loadGit(captureContext());
+
+    return;
+  }
+
+  await nextTick();
+
+  if (branchMode.value) {
+    await loadBranchDiff(captureContext());
+  } else if (commitSel.value.size) {
+    await syncCommitsDiff(captureContext());
+  } else {
+    await ensureDiffContent();
+  }
+}
+
+/**
+ * Читает свёрнутые группы из localStorage; повреждённое значение — как пустое, чтобы
+ * панель не осталась без дерева из-за чужой записи.
+ */
+function readCollapsedGroups(): Set<GitGroupId> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem('cockpit-code-collapsed-groups') || '[]');
+    const ids = Array.isArray(parsed) ? parsed : [];
+
+    const known = new Set<string>(['staged', 'work', 'commits']);
+
+    return new Set(ids.filter((id): id is GitGroupId => typeof id === 'string' && known.has(id)));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Сворачивает или разворачивает группу и сразу запоминает состояние на устройстве.
+ * Новый Set нужен реактивности: мутация прежнего Vue не заметит.
+ */
+function toggleGroupCollapsed(id: GitGroupId) {
+  const next = new Set(collapsedGroups.value);
+
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+
+  collapsedGroups.value = next;
+  localStorage.setItem('cockpit-code-collapsed-groups', JSON.stringify([...next]));
 }
 
 function setGitView(view: 'list' | 'tree') {
@@ -1077,6 +1872,511 @@ function toggleDiffLayout() {
   if (!oneSidedDiff.value) {
     side.value = !side.value;
   }
+}
+
+function toggleDiffWrap() {
+  diffWrap.value = !diffWrap.value;
+  localStorage.setItem('cockpit-diff-wrap', diffWrap.value ? '1' : '0');
+}
+
+function toggleDiffWhitespace() {
+  ignoreTrimWhitespace.value = !ignoreTrimWhitespace.value;
+  localStorage.setItem('cockpit-diff-ws', ignoreTrimWhitespace.value ? '1' : '0');
+}
+
+/** Учитывает только текстовую модель, которую Monaco действительно показывает. */
+function fileSupportsBlame(relPath: string, data: CodeFileResponse | null): boolean {
+  return Boolean(relPath && data && !data.binary && !data.tooBig && !isImagePath(relPath));
+}
+
+/** Убирает подписи с модели, сохраняя принятый ответ для возврата из истории. */
+function removeBlameDecorations() {
+  blameDecorations?.clear();
+}
+
+/**
+ * Инвалидирует запрос и содержимое blame. Сам пользовательский режим сохраняется:
+ * в новой рабочей копии или файле он должен запуститься заново автоматически.
+ */
+function resetBlameView() {
+  blameRequestId += 1;
+  blameLines.value = [];
+  blamePath.value = '';
+  blameLoading.value = false;
+  blameError.value = '';
+  removeBlameDecorations();
+}
+
+/**
+ * Собирает короткую подпись строки. Нулевой hash никогда не маскируется коммитом.
+ * Пустые метаданные получают нейтральные подписи и не ломают ширину декорации.
+ */
+function blameLineLabel(line: CodeBlameLine): string {
+  if (!line.hash) {
+    return '  не в коммите';
+  }
+
+  const author = line.author || 'неизвестный автор';
+  const when = line.when || 'давно';
+
+  return `  ${line.hash.slice(0, 7)} · ${author} · ${when}`;
+}
+
+/**
+ * Применяет один принятый ответ к текущей текстовой модели Monaco.
+ * Коллекция переиспользуется, чтобы редактор не накапливал владельцев декораций.
+ */
+function applyBlameDecorations() {
+  if (!fileEditor || !blameEnabled.value || blamePath.value !== fileSel.value) {
+    removeBlameDecorations();
+
+    return;
+  }
+
+  const decorations: monaco.editor.IModelDeltaDecoration[] = blameLines.value.map((line) => ({
+    range: {
+      startLineNumber: line.line,
+      startColumn: 1,
+      endLineNumber: line.line,
+      endColumn: 1,
+    },
+    options: {
+      isWholeLine: true,
+      after: {
+        content: blameLineLabel(line),
+        inlineClassName: 'code-blame-after',
+        inlineClassNameAffectsLetterSpacing: true,
+      },
+      hoverMessage: { value: line.subject || 'Без темы' },
+    },
+  }));
+
+  if (blameDecorations) {
+    blameDecorations.set(decorations);
+  } else {
+    blameDecorations = fileEditor.createDecorationsCollection(decorations);
+  }
+}
+
+/**
+ * Загружает blame только для принятого снимка и пути. Request id не даёт позднему
+ * ответу прежнего файла нарисовать подписи поверх новой модели.
+ */
+async function loadBlame(snapshot: ContextSnapshot, relPath: string) {
+  if (!blameEnabled.value || !fileSupportsBlame(relPath, fileData.value)) {
+    resetBlameView();
+
+    return;
+  }
+
+  const own = ++blameRequestId;
+
+  blameLoading.value = true;
+  blameError.value = '';
+  removeBlameDecorations();
+
+  try {
+    const response = await codeApi.blame(snapshot, relPath);
+
+    if (!contextIsCurrent(snapshot) || own !== blameRequestId
+      || !blameEnabled.value || fileSel.value !== relPath) {
+      return;
+    }
+
+    blameLines.value = response.lines;
+    blamePath.value = relPath;
+    applyBlameDecorations();
+  } catch (blameLoadError) {
+    if (contextIsCurrent(snapshot) && own === blameRequestId && fileSel.value === relPath) {
+      blameLines.value = [];
+      blamePath.value = '';
+      blameError.value = codeErrorMessage(blameLoadError, 'Не удалось посчитать blame');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === blameRequestId) {
+      blameLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Сохраняет режим между открытиями и немедленно обновляет текущую модель.
+ * При выключении летящий запрос инвалидируется общим request id.
+ */
+function toggleBlame() {
+  if (!canUseBlame.value) {
+    return;
+  }
+
+  blameEnabled.value = !blameEnabled.value;
+  localStorage.setItem('cockpit-code-blame', blameEnabled.value ? '1' : '0');
+
+  if (blameEnabled.value) {
+    void loadBlame(captureContext(), fileSel.value);
+  } else {
+    resetBlameView();
+  }
+}
+
+/**
+ * Подпись ведёт сразу в diff породившего её коммита, без дополнительного file-log.
+ * Для незакоммиченной строки перехода нет.
+ */
+async function openBlameCommit(line: CodeBlameLine) {
+  const relPath = blamePath.value;
+
+  if (!line.hash || !relPath || fileHistoryActive.value) {
+    return;
+  }
+
+  const entry: CodeFileLogEntry = {
+    hash: line.hash,
+    base: line.base,
+    subject: line.subject,
+    when: line.when,
+    path: relPath,
+  };
+
+  fileHistoryOrigin.value = {
+    tab: 'files',
+    file: fileSel.value,
+    gitRef: '',
+  };
+  fileHistoryPath.value = relPath;
+  fileHistoryEntries.value = [entry];
+  fileHistorySelected.value = '';
+  fileHistoryDiff.value = null;
+  fileHistoryError.value = '';
+  fileHistoryDiffError.value = '';
+  removeBlameDecorations();
+  await openFileHistoryEntry(entry);
+}
+
+/** Подключает один делегированный обработчик клика к переиспользуемому редактору. */
+function installBlameClick() {
+  if (!fileEditor || blameMouseDisposable) {
+    return;
+  }
+
+  blameMouseDisposable = fileEditor.onMouseDown((event) => {
+    const element = event.target.element as (HTMLElement & {
+      closest(selector: string): Element | null;
+    }) | null;
+
+    if (!element?.closest?.('.code-blame-after')) {
+      return;
+    }
+
+    const lineNumber = event.target.position?.lineNumber || 0;
+    const line = blameLines.value.find((item) => item.line === lineNumber);
+
+    if (line) {
+      void openBlameCommit(line);
+    }
+  });
+}
+
+/**
+ * Возвращает короткую метку дерева для первой строки черновика.
+ * Ветка не дублируется внутри метки: она явно идёт следом отдельным полем.
+ */
+function draftWorktreeLabel(selected: CodeContext | null): string {
+  if (!selected || selected.main) {
+    return 'Основная';
+  }
+  if (selected.task) {
+    return `Задача ${selected.task}`;
+  }
+
+  return `Worktree ${selected.name || 'без имени'}`;
+}
+
+/**
+ * Снимает выбранные строки из уже проверенного ответа файла, а не читает DOM Monaco.
+ * Частичное выделение одной строки всё равно даёт агенту целую строку с контекстом.
+ */
+function selectedFileLines() {
+  const selection = fileEditor?.getSelection?.();
+
+  if (!selection || (selection.startLineNumber === selection.endLineNumber
+    && selection.startColumn === selection.endColumn)) {
+    return {};
+  }
+
+  const from = Math.min(selection.startLineNumber, selection.endLineNumber);
+  const to = Math.max(selection.startLineNumber, selection.endLineNumber);
+  const snippet = (fileData.value?.content || '').replace(/\r\n?/gu, '\n')
+    .split('\n')
+    .slice(from - 1, to)
+    .join('\n');
+
+  return {
+    lines: { from, to },
+    snippet,
+  };
+}
+
+/**
+ * Открывает историю текущего файла поверх левой панели, не меняя выбранный файл.
+ * Поздний ответ прежнего дерева отбрасывается общим generation и request id.
+ */
+async function openFileHistory() {
+  if (!canShowFileHistory.value) {
+    return;
+  }
+
+  const relPath = tab.value === 'files' ? fileSel.value : (gitFile.value?.path || '');
+
+  if (!relPath) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const own = ++fileHistoryRequestId;
+
+  fileHistoryOrigin.value = {
+    tab: tab.value,
+    file: fileSel.value,
+    gitRef: gitSel.value,
+  };
+  fileHistoryPath.value = relPath;
+  fileHistoryEntries.value = [];
+  fileHistorySelected.value = '';
+  fileHistoryDiff.value = null;
+  fileHistoryError.value = '';
+  fileHistoryDiffError.value = '';
+  fileHistoryLoading.value = true;
+  removeBlameDecorations();
+  // Прежний диф снимается сразу: под оверлеем «Выбери коммит слева» оставалась линейка
+  // обзора старого дифа, и экран выглядел как незагрузившийся, а не пустой.
+  clearDiffModels();
+
+  try {
+    const response = await codeApi.fileLog(snapshot, relPath);
+
+    if (!contextIsCurrent(snapshot) || own !== fileHistoryRequestId
+      || fileHistoryPath.value !== relPath) {
+      return;
+    }
+
+    fileHistoryEntries.value = response.entries;
+  } catch (historyError) {
+    if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
+      fileHistoryError.value = codeErrorMessage(historyError, 'Не удалось прочитать историю файла');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
+      fileHistoryLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Читает стороны пути именно в выбранном историческом коммите.
+ * `entry.path` может быть старым именем после `--follow`, его нельзя заменять текущим.
+ */
+async function openFileHistoryEntry(entry: CodeFileLogEntry) {
+  if (!fileHistoryActive.value) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const own = ++fileHistoryRequestId;
+
+  fileHistorySelected.value = entry.hash;
+  fileHistoryDiff.value = null;
+  fileHistoryDiffError.value = '';
+  fileHistoryDiffLoading.value = true;
+  clearDiffModels();
+
+  try {
+    const response = await codeApi.fileDiff(snapshot, {
+      group: 'commits',
+      path: entry.path,
+      base: entry.base,
+      to: entry.hash,
+    });
+
+    if (!contextIsCurrent(snapshot) || own !== fileHistoryRequestId
+      || fileHistorySelected.value !== entry.hash) {
+      return;
+    }
+
+    fileHistoryDiff.value = {
+      ...response,
+      add: 0,
+      del: 0,
+      group: 'commits',
+    };
+    await nextTick();
+
+    if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
+      showDiff(fileHistoryDiff.value);
+    }
+  } catch (historyError) {
+    if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
+      fileHistoryDiffError.value = codeErrorMessage(historyError, 'Не удалось прочитать версию файла');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === fileHistoryRequestId) {
+      fileHistoryDiffLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Закрывает историю и восстанавливает существующую модель исходного режима.
+ * При явной смене вкладки restore отключается: новый режим сам выберет свою модель.
+ */
+async function closeFileHistory(restore = true) {
+  const origin = fileHistoryOrigin.value;
+
+  fileHistoryRequestId += 1;
+  fileHistoryOrigin.value = null;
+  fileHistoryPath.value = '';
+  fileHistoryEntries.value = [];
+  fileHistorySelected.value = '';
+  fileHistoryDiff.value = null;
+  fileHistoryLoading.value = false;
+  fileHistoryError.value = '';
+  fileHistoryDiffLoading.value = false;
+  fileHistoryDiffError.value = '';
+  clearDiffModels();
+
+  if (!restore || !origin) {
+    return;
+  }
+
+  await nextTick();
+
+  if (origin.tab === 'files') {
+    if (fileData.value && fileSel.value === origin.file) {
+      showFile(origin.file, fileData.value);
+    }
+  } else {
+    gitSel.value = origin.gitRef;
+    await ensureDiffContent();
+  }
+}
+
+/**
+ * Создаёт новый чат только с черновиком и переводит человека к композеру.
+ * Для Git-группы патч одного файла повторно проверяет сервер через точный path.
+ */
+async function askAgentAboutCode() {
+  if (askAgentBusy.value || !canAskAgent.value || !context.value) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const selectedContext = context.value;
+  const entry = tab.value === 'git' ? shownEntry.value : null;
+  const relPath = tab.value === 'files' ? fileSel.value : (entry?.file.path || '');
+
+  if (!relPath) {
+    return;
+  }
+
+  askAgentBusy.value = true;
+
+  try {
+    const root = treePath.value.replace(/\/+$/u, '');
+    const position = fileEditor?.getPosition?.();
+    const line = tab.value === 'files' ? Number(position?.lineNumber) || 1 : 0;
+    let patch = '';
+
+    if (entry) {
+      const range = entry.group.id === 'commits' ? commitsDiff.value?.range : null;
+      const response = await codeApi.patch(snapshot, {
+        group: entry.group.id,
+        path: entry.file.path,
+        ...(range ? rangeQuery(range) : {}),
+      });
+
+      if (!contextIsCurrent(snapshot) || gitEntry.value?.file.path !== relPath) {
+        return;
+      }
+
+      patch = response.patch;
+    }
+
+    const draft = askAgentDraft({
+      label: draftWorktreeLabel(selectedContext),
+      branch: git.value?.branch || selectedContext.branch,
+      absPath: `${root}/${relPath}`,
+      line,
+      ...(tab.value === 'files' ? selectedFileLines() : {}),
+      ...(patch ? { patch } : {}),
+    });
+    const taskId = selectedContext.task.replace(/\D/gu, '');
+
+    chatStore.newSession({
+      ...(taskId ? { taskId } : {}),
+      title: `Код · ${relPath.split('/').at(-1) || relPath}`,
+      draft,
+    });
+    await router.push('/chats');
+  } catch (askError) {
+    error.value = codeErrorMessage(askError, 'Не удалось создать черновик для агента');
+  } finally {
+    askAgentBusy.value = false;
+  }
+}
+
+/**
+ * Копирует адрес обычного файла с текущей строкой Monaco. Git-diff адресуется файлом
+ * целиком: строка на двух сторонах неоднозначна, поэтому остаётся равной нулю.
+ */
+async function copyCodeLink() {
+  const path = tab.value === 'files' ? fileSel.value : (gitFile.value?.path || '');
+
+  if (!path || !project.value || !repoKey.value || !treePath.value) {
+    return;
+  }
+
+  const position = tab.value === 'files' ? fileEditor?.getPosition?.() : null;
+  const target: CodeTarget = {
+    project: project.value,
+    repo: repoKey.value,
+    root: treePath.value,
+    path,
+    line: Number(position?.lineNumber) || 0,
+  };
+  const href = codeLinkHref(target, globalThis.location?.origin || '');
+  let copied = false;
+
+  try {
+    const writeText = globalThis.navigator?.clipboard?.writeText;
+
+    if (typeof writeText === 'function') {
+      await writeText.call(globalThis.navigator.clipboard, href);
+      copied = true;
+    }
+  } catch {
+    // HTTP вне localhost и политика браузера штатно закрывают Clipboard API.
+  }
+
+  if (!copied) {
+    await promptDialog({
+      title: 'Ссылка на файл',
+      text: 'Буфер обмена недоступен. Скопируй адрес вручную.',
+      value: href,
+      okText: 'Готово',
+    });
+
+    return;
+  }
+
+  codeLinkCopied.value = true;
+
+  if (codeLinkCopiedTimer) {
+    clearTimeout(codeLinkCopiedTimer);
+  }
+
+  codeLinkCopiedTimer = setTimeout(() => {
+    codeLinkCopied.value = false;
+    codeLinkCopiedTimer = null;
+  }, 2_000);
 }
 
 function toggleGitDir(ref: string) {
@@ -1100,16 +2400,121 @@ function gitFileActionKey(group: GitGroupId, path: string) {
   return `${group === 'staged' ? 'unstage' : 'stage'}:${path}`;
 }
 
+function gitDirActionKey(group: GitGroupId, dir: string) {
+  return `${group === 'staged' ? 'unstage' : 'stage'}:dir:${dir}`;
+}
+
+/**
+ * Подпись действия каталога называет и каталог, и число его файлов в группе: человек
+ * должен понимать, сколько строк уедет одним нажатием.
+ */
+function gitDirActionLabel(group: GitGroup, dir: string) {
+  const count = groupDirectoryFiles(group.files, dir).length;
+
+  return group.id === 'staged'
+    ? `Вернуть каталог ${dir} из индекса (${fileCountLabel(count)})`
+    : `Добавить каталог ${dir} в индекс (${fileCountLabel(count)})`;
+}
+
 function gitGroupActionLabel(group: GitGroupId) {
   return group === 'staged'
     ? 'Вернуть все изменения из индекса'
     : 'Добавить все изменения в индекс';
 }
 
-function gitFileActionLabel(group: GitGroupId, path: string) {
+/**
+ * Называет обычное перемещение между группами и отдельно объясняет stage конфликта.
+ * У конфликтной строки плюс означает признание текущего содержимого разрешённым.
+ */
+function gitFileActionLabel(group: GitGroupId, file: CodeGitEntry) {
+  if (file.status === 'U') {
+    return `Пометить разрешённым: ${file.path}`;
+  }
+
   return group === 'staged'
-    ? `Вернуть ${path} из индекса`
-    : `Добавить ${path} в индекс`;
+    ? `Вернуть ${file.path} из индекса`
+    : `Добавить ${file.path} в индекс`;
+}
+
+function gitFileHint(file: CodeGitEntry) {
+  return file.status === 'U' ? CONFLICT_HINT : file.path;
+}
+
+function discardableGitCount(group: GitGroup) {
+  return group.files.filter((file) => file.status !== 'A' && file.status !== 'U').length;
+}
+
+function discardGitFileKey(file: CodeGitEntry) {
+  return `${file.status === 'A' ? 'clean' : 'discard'}:${file.path}`;
+}
+
+function discardGitFileLabel(file: CodeGitEntry) {
+  return file.status === 'A'
+    ? `Удалить ${file.path}`
+    : `Откатить изменения ${file.path}`;
+}
+
+/**
+ * Разрушительное действие фиксирует контекст до диалога и повторно сверяет его после.
+ * Новый файл удаляется через clean, tracked-правка возвращается к индексу через restore.
+ */
+async function discardGitFile(group: GitGroup, file: CodeGitEntry) {
+  if (group.id !== 'work' || file.status === 'U') {
+    return null;
+  }
+
+  const snapshot = captureContext();
+  const clean = file.status === 'A';
+  const accepted = await confirmDialog(
+    `${clean ? 'Удалить' : 'Откатить'} «${file.path}» без возможности отмены?`,
+    {
+      title: clean ? 'Удалить новый файл' : 'Откатить изменения',
+      okText: clean ? 'Удалить' : 'Откатить',
+      danger: true,
+    },
+  );
+
+  if (!accepted || !contextIsCurrent(snapshot)) {
+    return null;
+  }
+
+  const action = clean ? 'clean' : 'discard';
+
+  return performGitAction({
+    execute: (current) => codeApi[action](current, { paths: [file.path] }),
+    key: discardGitFileKey(file),
+  });
+}
+
+/**
+ * Групповой откат считает только tracked-пути: untracked-файлы требуют отдельного
+ * подтверждения удаления и никогда не исчезают вслед за общей кнопкой restore.
+ */
+async function discardGitGroup(group: GitGroup) {
+  const changed = discardableGitCount(group);
+
+  if (group.id !== 'work' || !changed) {
+    return null;
+  }
+
+  const snapshot = captureContext();
+  const accepted = await confirmDialog(
+    `Откатить tracked-файлы (${changed}) без возможности отмены?`,
+    {
+      title: 'Откатить изменения',
+      okText: 'Откатить',
+      danger: true,
+    },
+  );
+
+  if (!accepted || !contextIsCurrent(snapshot)) {
+    return null;
+  }
+
+  return performGitAction({
+    execute: (current) => codeApi.discard(current, { all: true }),
+    key: 'discard:all',
+  });
 }
 
 /**
@@ -1162,7 +2567,15 @@ async function performGitAction<Result>({
   }
 }
 
+/**
+ * Переносит целую изменяемую группу в индекс или обратно.
+ * Группа выбранных коммитов остаётся только для чтения.
+ */
 function changeGitGroup(group: GitGroup) {
+  if (!group.mutable) {
+    return null;
+  }
+
   const action = group.id === 'staged' ? 'unstage' : 'stage';
 
   return performGitAction({
@@ -1171,7 +2584,50 @@ function changeGitGroup(group: GitGroup) {
   });
 }
 
-function changeGitFile(group: GitGroup, file: CodeGitFile) {
+// Сервер принимает не больше стольких путей за одно действие (ACTION_PATHS_MAX).
+const GIT_ACTION_PATHS_MAX = 500;
+
+/**
+ * Переносит все файлы каталога в индекс или обратно. Пути берутся из свежей группы,
+ * поэтому сервер сверит каждый; каталог больше потолка уходит последовательными порциями.
+ */
+function changeGitDir(group: GitGroup, dir: string) {
+  if (!group.mutable) {
+    return null;
+  }
+
+  const action = group.id === 'staged' ? 'unstage' : 'stage';
+  const paths = groupDirectoryFiles(group.files, dir);
+
+  if (!paths.length) {
+    return null;
+  }
+
+  return performGitAction({
+    execute: async (snapshot) => {
+      let changed = 0;
+
+      for (const chunk of chunkList(paths, GIT_ACTION_PATHS_MAX)) {
+        const result = await codeApi[action](snapshot, { paths: chunk });
+
+        changed += result.changed;
+      }
+
+      return { ok: true as const, changed };
+    },
+    key: gitDirActionKey(group.id, dir),
+  });
+}
+
+/**
+ * Переносит одну проверенную строку изменяемой группы в индекс или обратно.
+ * Сервер повторно сверяет путь со свежим снимком перед мутацией.
+ */
+function changeGitFile(group: GitGroup, file: CodeGitEntry) {
+  if (!group.mutable) {
+    return null;
+  }
+
   const action = group.id === 'staged' ? 'unstage' : 'stage';
 
   return performGitAction({
@@ -1213,18 +2669,46 @@ function commitOnShortcut(event: KeyboardEvent) {
   commitGitChanges();
 }
 
+/**
+ * Подставляет полное сообщение HEAD только при включении amend.
+ * Уже введённый человеком и не совпадающий с прежним HEAD текст остаётся нетронутым.
+ */
+function changeAmend(event: Event) {
+  const enabled = (event.target as HTMLInputElement | null)?.checked === true;
+
+  if (!enabled) {
+    return;
+  }
+
+  const previous = amendHeadMessage.value;
+  const next = git.value?.headMessage || '';
+
+  if (!commitMessage.value.trim() || commitMessage.value === previous) {
+    commitMessage.value = next;
+  }
+
+  amendHeadMessage.value = next;
+}
+
+/**
+ * Фиксирует режим до сетевого вызова: даже если переключатель изменится во время
+ * запроса, сервер получит намерение именно того нажатия, которое запустило действие.
+ */
 function commitGitChanges() {
   const message = commitMessage.value.trim();
 
-  if (!git.value?.staged?.length || !message) {
+  if ((!amendCommit.value && !git.value?.staged?.length) || !message) {
     return null;
   }
 
+  const amend = amendCommit.value;
+
   return performGitAction({
-    execute: (snapshot) => codeApi.commit(snapshot, message),
+    execute: (snapshot) => codeApi.commit(snapshot, message, { amend }),
     key: 'commit',
     onSuccess: (result) => {
       commitMessage.value = '';
+      amendCommit.value = false;
       gitNotice.value = {
         type: 'ok',
         text: `Создан коммит ${result.hash}: ${result.subject}`,
@@ -1247,6 +2731,64 @@ function pushGitChanges() {
         text: result.published
           ? `Ветка ${result.branch} опубликована и связана с remote.`
           : `Ветка ${result.branch} отправлена.`,
+      };
+    },
+  });
+}
+
+/**
+ * Fetch не меняет рабочую ветку: сервер обновляет только refs выбранного remote,
+ * а клиент подменяет tracking из ответа без второго чтения тяжёлого списка diff.
+ */
+function fetchGitRemote() {
+  if (!fetchRemoteLabel.value) {
+    return null;
+  }
+
+  return performGitAction({
+    execute: (snapshot) => codeApi.fetch(snapshot),
+    key: 'fetch',
+    refreshGit: false,
+    onSuccess: (result) => {
+      if (git.value) {
+        git.value = { ...git.value, tracking: result.tracking };
+      }
+    },
+  });
+}
+
+/**
+ * Отмена HEAD всегда подтверждается после фиксации контекста рабочей копии.
+ * После диалога ещё раз проверяется, что человек не успел перейти в другое дерево.
+ */
+async function undoGitCommit() {
+  if (!undoAvailable.value) {
+    return null;
+  }
+
+  const snapshot = captureContext();
+  const accepted = await confirmDialog(
+    'Отменить последний коммит? Его изменения вернутся в индекс.',
+    {
+      title: 'Отменить последний коммит',
+      okText: 'Отменить коммит',
+      danger: true,
+    },
+  );
+
+  if (!accepted || !contextIsCurrent(snapshot)) {
+    return null;
+  }
+
+  return performGitAction({
+    execute: (current) => codeApi.undoCommit(current),
+    key: 'undo',
+    onSuccess: (result) => {
+      amendCommit.value = false;
+      commitMessage.value = result.message;
+      gitNotice.value = {
+        type: 'ok',
+        text: 'Последний коммит отменён; изменения возвращены в индекс.',
       };
     },
   });
@@ -1340,6 +2882,106 @@ const rows = computed(() => {
 });
 
 /**
+ * Сбрасывает поиск вместе с debounce и инвалидирует уже отправленный запрос.
+ * Смена рабочей копии поэтому не может вернуть результаты прежнего дерева.
+ */
+function resetSearch() {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+
+  searchRequestId += 1;
+  searchQuery.value = '';
+  searchResult.value = null;
+  searchLoading.value = false;
+  searchError.value = '';
+}
+
+/**
+ * Отправляет отложенный запрос для одного снимка и принимает только последнюю строку.
+ * Новый ввод сразу лишает поздний ответ прежнего запроса права менять список.
+ */
+async function executeSearch(query: string, snapshot: ContextSnapshot, own: number) {
+  try {
+    const response = await codeApi.search(snapshot, query);
+
+    if (!contextIsCurrent(snapshot) || own !== searchRequestId || searchQuery.value !== query) {
+      return;
+    }
+
+    searchResult.value = response;
+  } catch (searchLoadError) {
+    if (contextIsCurrent(snapshot) && own === searchRequestId && searchQuery.value === query) {
+      searchError.value = codeErrorMessage(searchLoadError, 'Не удалось выполнить поиск');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === searchRequestId) {
+      searchLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Debounce начинает поиск только со второго символа. До сетевого вызова request id
+ * уже закреплён, поэтому следующая клавиша безопасно отменяет ожидающий таймер.
+ */
+function scheduleSearch(query: string) {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+
+  const own = ++searchRequestId;
+
+  searchResult.value = null;
+  searchError.value = '';
+
+  if (query.length < 2 || !treePath.value) {
+    searchLoading.value = false;
+
+    return;
+  }
+
+  searchLoading.value = true;
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    void executeSearch(query, captureContext(), own);
+  }, SEARCH_DELAY_MS);
+}
+
+/** Открывает результат штатным файловым путём и откладывает reveal до модели Monaco. */
+async function openSearchResult(relPath: string, line: number) {
+  pendingReveal = {
+    path: relPath,
+    line: Math.max(1, line),
+  };
+
+  const opened = await openFile(relPath);
+
+  if (opened !== true && pendingReveal?.path === relPath) {
+    pendingReveal = null;
+  }
+}
+
+/**
+ * Enter повторяет визуальный порядок: первый файл, затем первое совпадение.
+ * Пустой принятый ответ оставляет редактор и выбор без изменений.
+ */
+function openFirstSearchResult() {
+  const file = searchResult.value?.files[0];
+  const match = searchResult.value?.matches[0];
+
+  if (file) {
+    void openSearchResult(file.path, 1);
+  } else if (match) {
+    void openSearchResult(match.path, match.line);
+  }
+}
+
+watch(searchQuery, scheduleSearch);
+
+/**
  * Другой файл сначала снимает прежнюю модель, чтобы заголовок совпадал с содержимым.
  * Обновление того же пути сохраняет валидный снимок до проверенного ответа.
  */
@@ -1353,6 +2995,7 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
 
   if (fileSel.value !== rel) {
     fileData.value = null;
+    resetBlameView();
     clearFileModel();
   }
 
@@ -1378,6 +3021,12 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
     if (activationIsCurrent(activation)
       && contextIsCurrent(snapshot) && fileRequestId === requestId && fileSel.value === rel) {
       showFile(rel, data);
+
+      if (blameEnabled.value && fileSupportsBlame(rel, data)) {
+        void loadBlame(snapshot, rel);
+      } else {
+        resetBlameView();
+      }
     }
 
     return true;
@@ -1404,12 +3053,434 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
 }
 
 /**
+ * Сбрасывает снимок сторон и лишает поздний file-diff права вернуть старую модель.
+ * Ручной refresh может сохранить модель до принятия нового списка.
+ */
+function resetDiffContent({ clearModels = true } = {}) {
+  diffContent.value = new Map();
+  diffError.value = '';
+  diffLoading.value = false;
+  diffRequestId += 1;
+  patchContent.value = new Map();
+  patchReviewKey.value = '';
+  patchReviewGroupId.value = null;
+  patchLoading.value = false;
+  patchError.value = '';
+  patchRequestId += 1;
+
+  if (clearModels) {
+    clearDiffModels();
+  }
+}
+
+/**
+ * Подгружает стороны выбранной строки один раз на снимок. Ключ включает commit-range,
+ * поэтому одинаковый путь из рабочего дерева и истории не делит чужое содержимое.
+ */
+async function ensureDiffContent(entry = shownEntry.value) {
+  if (!entry) {
+    clearDiffModels();
+
+    return;
+  }
+
+  // Ответ принимается для той строки, что выбрана сейчас: в режиме «+ текущие» это может
+  // быть строка рабочего дерева, а сам диф — из группы коммитов.
+  const selectedRef = gitSel.value;
+
+  const range = entry.group.id === 'commits' ? commitsDiff.value?.range : null;
+
+  if (entry.group.id === 'commits' && !range) {
+    return;
+  }
+
+  const rangeKey = range ? rangeCacheKey(range) : '';
+  const key = fileDiffKey(entry.group.id, entry.file.path, rangeKey);
+  const cached = diffContent.value.get(key);
+
+  if (cached) {
+    showDiff({ ...entry.file, ...cached });
+
+    return;
+  }
+
+  const snapshot = captureContext();
+  const own = ++diffRequestId;
+
+  diffLoading.value = true;
+  diffError.value = '';
+  clearDiffModels();
+
+  try {
+    const content = await codeApi.fileDiff(snapshot, {
+      group: entry.group.id,
+      path: entry.file.path,
+      ...(range ? rangeQuery(range) : {}),
+    });
+
+    if (!contextIsCurrent(snapshot) || own !== diffRequestId || gitSel.value !== selectedRef) {
+      return;
+    }
+
+    const next = new Map(diffContent.value);
+
+    next.set(key, content);
+    diffContent.value = next;
+    showDiff({ ...entry.file, ...content });
+  } catch (diffFailure) {
+    if (contextIsCurrent(snapshot) && own === diffRequestId) {
+      diffError.value = codeErrorMessage(diffFailure, 'Не удалось прочитать диф файла');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === diffRequestId) {
+      diffLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Ключ staged/work принадлежит текущему Git-снимку, а commits дополнительно включает
+ * диапазон: одинаковая группа разных выбранных коммитов не делит патч.
+ */
+function patchKey(group: GitGroup): string {
+  const range = group.id === 'commits' ? commitsDiff.value?.range : null;
+
+  return range
+    ? `${group.id}:${rangeCacheKey(range)}`
+    : group.id;
+}
+
+/**
+ * Закрывает обзор и лишает уже летящий ответ права вернуть его на экран.
+ * Сам кеш очищает только смена Git-снимка в resetDiffContent.
+ */
+function clearPatchReview() {
+  patchReviewKey.value = '';
+  patchReviewGroupId.value = null;
+  patchLoading.value = false;
+  patchError.value = '';
+  patchRequestId += 1;
+}
+
+/**
+ * Загружает полный patch группы один раз на текущий Git-снимок.
+ * Повторный клик по активной кнопке возвращает обычный Monaco-диф.
+ */
+async function openPatchReview(group: GitGroup) {
+  if (!group.files.length) {
+    return;
+  }
+
+  const key = patchKey(group);
+
+  if (patchReviewKey.value === key) {
+    await closePatchReview();
+
+    return;
+  }
+
+  const range = group.id === 'commits' ? commitsDiff.value?.range : null;
+
+  if (group.id === 'commits' && !range) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const own = ++patchRequestId;
+
+  patchReviewKey.value = key;
+  patchReviewGroupId.value = group.id;
+  patchError.value = '';
+  clearDiffModels();
+
+  if (patchContent.value.has(key)) {
+    patchLoading.value = false;
+
+    return;
+  }
+
+  patchLoading.value = true;
+
+  try {
+    const response = await codeApi.patch(snapshot, {
+      group: group.id,
+      ...(range ? rangeQuery(range) : {}),
+    });
+
+    if (!contextIsCurrent(snapshot) || own !== patchRequestId || patchReviewKey.value !== key) {
+      return;
+    }
+
+    const next = new Map(patchContent.value);
+
+    next.set(key, response);
+    patchContent.value = next;
+  } catch (reviewError) {
+    if (contextIsCurrent(snapshot) && own === patchRequestId && patchReviewKey.value === key) {
+      patchError.value = codeErrorMessage(reviewError, 'Не удалось собрать обзор изменений');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === patchRequestId && patchReviewKey.value === key) {
+      patchLoading.value = false;
+    }
+  }
+}
+
+async function closePatchReview() {
+  clearPatchReview();
+  await nextTick();
+  await ensureDiffContent();
+}
+
+/**
+ * Возвращает Monaco-диф выбранного файла из обзора.
+ * Клик по строке дополнительно прокручивает ту сторону, чей номер был показан.
+ */
+async function openPatchReviewFile(path: string, line: number, side: 'old' | 'new') {
+  const group = patchReviewGroup.value;
+
+  if (!group || !group.files.some((file) => file.path === path)) {
+    return;
+  }
+
+  clearPatchReview();
+  await nextTick();
+  await selectGit(gitRef(group.id, path));
+
+  if (line > 0) {
+    const editor = side === 'old'
+      ? diffEditor?.getOriginalEditor?.()
+      : diffEditor?.getModifiedEditor?.();
+
+    editor?.setPosition({ lineNumber: line, column: 1 });
+    editor?.revealLineInCenter(line);
+  }
+}
+
+/**
+ * Синхронизирует общий diff выбранного отрезка. Неудача оставляет последнюю принятую
+ * группу и Monaco-модель, а request id отбрасывает поздний ответ прежнего выбора.
+ */
+async function syncCommitsDiff(snapshot = captureContext()) {
+  const bounds = selectedCommitBounds.value;
+
+  if (!bounds) {
+    if (patchReviewGroupId.value === 'commits') {
+      clearPatchReview();
+    }
+
+    commitsRequestId += 1;
+    commitsDiff.value = null;
+    commitsLoadedSelection.value = null;
+    commitsLoadedKey = '';
+    commitsLoading.value = false;
+    commitsError.value = '';
+
+    if (gitEntry.value?.group.id === 'commits' || gitSel.value.startsWith('commits:')) {
+      gitSel.value = firstGitRef();
+      await nextTick();
+      await ensureDiffContent();
+    }
+
+    return;
+  }
+
+  const work = commitsWorkActive.value;
+  const key = `${bounds.from}:${bounds.to}${work ? ':work' : ''}`;
+
+  if (commitsLoadedKey === key && commitsDiff.value && !commitsError.value) {
+    commitsLoadedSelection.value = { ...bounds, selected: commitSel.value.size };
+
+    return;
+  }
+
+  if (patchReviewGroupId.value === 'commits') {
+    clearPatchReview();
+  }
+
+  const own = ++commitsRequestId;
+
+  commitsLoading.value = true;
+  commitsError.value = '';
+
+  try {
+    const nextDiff = await codeApi.commitsDiff(snapshot, bounds.from, bounds.to, { work });
+    const current = selectedCommitBounds.value;
+    const currentKey = current
+      ? `${current.from}:${current.to}${commitsWorkActive.value ? ':work' : ''}`
+      : '';
+
+    if (!contextIsCurrent(snapshot) || own !== commitsRequestId || currentKey !== key) {
+      return;
+    }
+
+    commitsDiff.value = nextDiff;
+    commitsLoadedKey = key;
+    commitsLoadedSelection.value = { ...bounds, selected: commitSel.value.size };
+
+    const nextDirs = gitGroupDirectoryPaths(git.value, commitGroup.value);
+
+    gitOpenDirs.value = reconcileGitOpenDirs(nextDirs, gitOpenDirs.value, gitKnownDirs.value);
+    gitKnownDirs.value = nextDirs;
+
+    await nextTick();
+
+    const first = commitGroup.value?.files[0];
+
+    gitSel.value = first ? gitRef('commits', first.path) : '';
+    await nextTick();
+    await ensureDiffContent();
+  } catch (rangeFailure) {
+    if (contextIsCurrent(snapshot) && own === commitsRequestId) {
+      commitsError.value = codeErrorMessage(rangeFailure, 'Не удалось прочитать выбранные коммиты');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === commitsRequestId) {
+      commitsLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Загружает все собственные коммиты ветки тем же представлением, что и ручной
+ * отрезок, и отбрасывает ответ уже покинутой рабочей копии.
+ */
+async function loadBranchDiff(snapshot = captureContext()) {
+  if (!branchDiffAvailability.value.enabled) {
+    return;
+  }
+
+  const own = ++commitsRequestId;
+
+  if (patchReviewGroupId.value === 'commits') {
+    clearPatchReview();
+  }
+
+  branchMode.value = true;
+  commitSel.value = new Set();
+  commitAnchor.value = '';
+  commitsDiff.value = null;
+  commitsLoadedSelection.value = null;
+  commitsLoadedKey = '';
+  commitsLoading.value = true;
+  commitsError.value = '';
+
+  try {
+    const nextDiff = await codeApi.branchDiff(snapshot, { work: commitsWithWork.value });
+
+    if (!contextIsCurrent(snapshot) || own !== commitsRequestId || !branchMode.value) {
+      return;
+    }
+
+    commitsDiff.value = nextDiff;
+
+    const nextDirs = gitGroupDirectoryPaths(git.value, commitGroup.value);
+
+    gitOpenDirs.value = reconcileGitOpenDirs(nextDirs, gitOpenDirs.value, gitKnownDirs.value);
+    gitKnownDirs.value = nextDirs;
+
+    await nextTick();
+
+    const first = commitGroup.value?.files[0];
+
+    gitSel.value = first ? gitRef('commits', first.path) : '';
+    await nextTick();
+    await ensureDiffContent();
+  } catch (branchFailure) {
+    if (contextIsCurrent(snapshot) && own === commitsRequestId) {
+      commitsError.value = codeErrorMessage(branchFailure, 'Не удалось прочитать всю ветку');
+    }
+  } finally {
+    if (contextIsCurrent(snapshot) && own === commitsRequestId) {
+      commitsLoading.value = false;
+    }
+  }
+}
+
+/**
+ * Переключает «с текущими изменениями» и перечитывает уже показанный отрезок или ветку.
+ * Настройка живёт на устройстве; при недоступном режиме клик ничего не меняет.
+ */
+async function toggleCommitsWork() {
+  if (!commitsWorkAvailable.value) {
+    return;
+  }
+
+  commitsWithWork.value = !commitsWithWork.value;
+  localStorage.setItem('cockpit-code-commits-work', commitsWithWork.value ? '1' : '0');
+
+  if (branchMode.value) {
+    return loadBranchDiff();
+  }
+  if (selectedCommitBounds.value) {
+    commitsLoadedKey = '';
+
+    return syncCommitsDiff();
+  }
+}
+
+/**
+ * Повторное нажатие закрывает режим ветки и возвращает первый рабочий diff,
+ * не сохраняя веточный диапазон в кеше выбранных коммитов.
+ */
+async function toggleBranchDiff() {
+  if (!branchMode.value) {
+    return loadBranchDiff();
+  }
+
+  branchMode.value = false;
+  commitsDiff.value = null;
+  commitsError.value = '';
+  commitsRequestId += 1;
+  gitSel.value = firstGitRef();
+  await nextTick();
+
+  return ensureDiffContent();
+}
+
+/**
+ * Клик без модификатора переключает строку, Shift добавляет видимый промежуток.
+ * Любой выбор строки завершает режим целой ветки до запроса нового отрезка.
+ */
+function pickCommit(entry: CodeGitResponse['log'][number], event: MouseEvent) {
+  if (branchMode.value) {
+    branchMode.value = false;
+    commitsDiff.value = null;
+    commitsLoadedSelection.value = null;
+    commitsLoadedKey = '';
+  }
+
+  commitSel.value = event.shiftKey
+    ? extendCommitSelection(git.value?.log || [], commitSel.value, commitAnchor.value, entry.hash)
+    : toggleCommitSelection(commitSel.value, entry.hash);
+  commitAnchor.value = entry.hash;
+
+  return syncCommitsDiff();
+}
+
+/**
+ * Снимает выбор и режим ветки, затем возвращает первый файл рабочего снимка.
+ * Один путь очистки не оставляет старый commit-range в Monaco.
+ */
+function clearCommitSelection() {
+  branchMode.value = false;
+  commitSel.value = new Set();
+  commitAnchor.value = '';
+
+  return syncCommitsDiff();
+}
+
+/**
  * Принимает проверенный снимок Git целиком, сохраняя раскрытие и выбор файла.
  * Поздние ответы другой рабочей копии не создают модели в текущем редакторе.
  */
 async function loadGit(
   snapshot = captureContext(),
-  { silent = false, activation = null }: RefreshOptions = {},
+  {
+    silent = false,
+    activation = null,
+    metadataOnly = false,
+  }: RefreshOptions & { metadataOnly?: boolean } = {},
 ) {
   if (!activationIsCurrent(activation)) {
     return;
@@ -1430,7 +3501,12 @@ async function loadGit(
       return;
     }
 
-    const nextDirs = gitGroupDirectoryPaths(nextGit);
+    const previousSelection = commitSel.value;
+    const nextSelection = pruneCommitSelection(nextGit.log, previousSelection);
+
+    commitSel.value = nextSelection;
+
+    const nextDirs = gitGroupDirectoryPaths(nextGit, commitGroup.value);
 
     gitOpenDirs.value = reconcileGitOpenDirs(
       nextDirs,
@@ -1440,6 +3516,7 @@ async function loadGit(
     gitKnownDirs.value = nextDirs;
     gitDirsReady.value = true;
     git.value = nextGit;
+    resetDiffContent();
 
     if (gitSel.value && !gitEntries.value.has(gitSel.value)) {
       gitSel.value = '';
@@ -1454,11 +3531,22 @@ async function loadGit(
       || !contextIsCurrent(snapshot) || gitRequestId !== requestId) {
       return;
     }
-    if (gitFile.value) {
-      showDiff(gitFile.value);
+
+    if (metadataOnly) {
+      return;
     }
-    else {
-      clearDiffModels();
+
+    const selectionChanged = previousSelection.size !== nextSelection.size
+      || [...previousSelection].some((hash) => !nextSelection.has(hash));
+
+    if (branchMode.value) {
+      await loadBranchDiff(snapshot);
+    } else if (selectionChanged || (!nextSelection.size && commitsDiff.value)) {
+      await syncCommitsDiff(snapshot);
+    } else if (nextSelection.size && !commitsDiff.value) {
+      await syncCommitsDiff(snapshot);
+    } else {
+      await ensureDiffContent();
     }
   } catch (e) {
     if (activationIsCurrent(activation)
@@ -1480,19 +3568,36 @@ async function loadGit(
 async function selectGit(ref: string) {
   const snapshot = captureContext();
 
+  if (patchReviewActive.value) {
+    clearPatchReview();
+  }
+
+  if (gitSel.value !== ref) {
+    clearDiffModels();
+    diffError.value = '';
+  }
+
   gitSel.value = ref;
   await nextTick();
 
   if (contextIsCurrent(snapshot) && gitSel.value === ref) {
-    showDiff(gitFile.value);
+    await ensureDiffContent();
   }
 }
+
+let refreshInFlight = false;
+let refreshAfterFlight = false;
+let refreshAfterSilent = true;
 
 /**
  * Перечитывает активный режим поверх последнего корректного снимка.
  * Удаление выбранного файла подтверждает только 404, а не временная ошибка сети.
  */
-async function refresh({ silent = false, activation = null }: RefreshOptions = {}) {
+async function refresh({
+  silent = false,
+  activation = null,
+  contentOnly = false,
+}: RefreshOptions = {}) {
   if (!treePath.value) {
     return;
   }
@@ -1500,6 +3605,9 @@ async function refresh({ silent = false, activation = null }: RefreshOptions = {
   const snapshot = captureContext();
 
   if (tab.value === 'git') {
+    if (!silent) {
+      resetDiffContent({ clearModels: false });
+    }
     if (!silent || !gitLoading.value) {
       await loadGit(snapshot, { silent, activation });
     }
@@ -1508,8 +3616,26 @@ async function refresh({ silent = false, activation = null }: RefreshOptions = {
   }
   // Файлы перечитываем поверх последнего валидного снимка. Очищение до ответа
   // давало заметный белый кадр при повторном открытии панели.
-  const open = [...openDirs.value];
   const selected = fileSel.value;
+
+  if (contentOnly) {
+    await loadGit(snapshot, {
+      silent,
+      activation,
+      metadataOnly: true,
+    });
+
+    if (!activationIsCurrent(activation) || !contextIsCurrent(snapshot)) {
+      return;
+    }
+    if (selected && (!silent || !fileLoading.value)) {
+      await openFile(selected, { silent, activation });
+    }
+
+    return;
+  }
+
+  const open = [...openDirs.value];
 
   if (!(await loadDir('', snapshot, { activation }))
     || !activationIsCurrent(activation) || !contextIsCurrent(snapshot)) {
@@ -1522,6 +3648,16 @@ async function refresh({ silent = false, activation = null }: RefreshOptions = {
     if (!activationIsCurrent(activation) || !contextIsCurrent(snapshot)) {
       return;
     }
+  }
+
+  await loadGit(snapshot, {
+    silent,
+    activation,
+    metadataOnly: true,
+  });
+
+  if (!activationIsCurrent(activation) || !contextIsCurrent(snapshot)) {
+    return;
   }
 
   if (silent && fileLoading.value) {
@@ -1540,7 +3676,58 @@ async function refresh({ silent = false, activation = null }: RefreshOptions = {
   }
 }
 
+/**
+ * Сериализует ручные и фоновые поводы обновления. Все сигналы поверх летящего
+ * запроса схлопываются в один повтор; ручной повод делает повтор видимым.
+ */
+async function requestRefresh({ silent = false }: Pick<RefreshOptions, 'silent'> = {}) {
+  if (!props.active || !treePath.value) {
+    return;
+  }
+  if (refreshInFlight) {
+    refreshAfterFlight = true;
+    refreshAfterSilent = refreshAfterSilent && silent;
+
+    return;
+  }
+
+  refreshInFlight = true;
+
+  let nextSilent = silent;
+
+  try {
+    do {
+      refreshAfterFlight = false;
+      refreshAfterSilent = true;
+      await refresh({ silent: nextSilent, contentOnly: true });
+      nextSilent = refreshAfterSilent;
+    } while (refreshAfterFlight && props.active);
+  } finally {
+    refreshInFlight = false;
+    refreshAfterFlight = false;
+    refreshAfterSilent = true;
+  }
+}
+
+/** Возврат браузерной вкладки перечитывает только активную панель. */
+function refreshWhenVisible() {
+  if (document.visibilityState === 'visible') {
+    requestRefresh({ silent: true });
+  }
+}
+
+useSse((name) => {
+  if (name === 'chat-done') {
+    requestRefresh({ silent: true });
+  }
+});
+
+/**
+ * Освобождает файловую модель вместе с относящимися к ней blame-декорациями.
+ * Сам принятый ответ сохраняется для возврата из исторического diff.
+ */
 function clearFileModel() {
+  removeBlameDecorations();
   fileEditor?.setModel(null);
   fileModel?.dispose();
   fileModel = null;
@@ -1568,7 +3755,11 @@ function showFile(rel: string, data: CodeFileResponse) {
     return;
   }
   if (!fileEditor) {
-    fileEditor = monaco.editor.create(fileHost.value, { ...READONLY_OPTS, renderLineHighlight: 'none' });
+    fileEditor = monaco.editor.create(fileHost.value, {
+      ...READONLY_OPTS,
+      renderLineHighlight: 'none',
+    });
+    installBlameClick();
   }
 
   const model = monaco.editor.createModel(data.binary || data.tooBig ? '' : data.content, langOf(rel));
@@ -1576,6 +3767,10 @@ function showFile(rel: string, data: CodeFileResponse) {
   fileEditor.setModel(model);
   fileModel?.dispose(); // старую модель снимаем ПОСЛЕ переустановки (иначе варнинг Monaco)
   fileModel = model;
+
+  if (blamePath.value === rel) {
+    applyBlameDecorations();
+  }
 
   if (pendingReveal && pendingReveal.path === rel) {
     revealLine(pendingReveal.line);
@@ -1605,8 +3800,9 @@ function showDiff(f: CodeGitFile | null) {
     diffEditor = monaco.editor.createDiffEditor(diffHost.value, {
       ...READONLY_OPTS,
       renderSideBySide: renderSideBySide.value,
+      diffWordWrap: diffWrap.value ? 'on' : 'off',
       renderOverviewRuler: true,
-      ignoreTrimWhitespace: false,
+      ignoreTrimWhitespace: ignoreTrimWhitespace.value,
       hideUnchangedRegions: {
         enabled: true,
         minimumLineCount: 3,
@@ -1629,6 +3825,14 @@ watch(renderSideBySide, async (value) => {
   diffEditor?.updateOptions?.({ renderSideBySide: value });
   await nextTick();
   layoutEditors();
+});
+watch(diffWrap, async (value) => {
+  diffEditor?.updateOptions?.({ diffWordWrap: value ? 'on' : 'off' });
+  await nextTick();
+  layoutEditors();
+});
+watch(ignoreTrimWhitespace, (value) => {
+  diffEditor?.updateOptions?.({ ignoreTrimWhitespace: value });
 });
 watch(() => props.compact, async () => {
   await nextTick();
@@ -2008,11 +4212,30 @@ watch(
   } : null),
   { immediate: true },
 );
+onMounted(() => {
+  document.addEventListener('visibilitychange', refreshWhenVisible);
+});
 onBeforeUnmount(() => {
   activationId += 1;
   gitActionId += 1;
+  document.removeEventListener('visibilitychange', refreshWhenVisible);
+
+  if (codeLinkCopiedTimer) {
+    clearTimeout(codeLinkCopiedTimer);
+  }
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+
   navigatorObserver?.disconnect?.();
   emit('context', null);
+  blameRequestId += 1;
+  searchRequestId += 1;
+  blameMouseDisposable?.dispose();
+  blameMouseDisposable = null;
+  blameDecorations?.clear();
+  blameDecorations = null;
   clearFileModel();
   clearDiffModels();
   fileEditor?.dispose();
@@ -2112,9 +4335,13 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--line); background: var(--surface);
 }
 .git-compose .commit-message { width: 100%; }
+.amend-controls { display: flex; align-items: center; min-width: 0; gap: 5px; }
+.git-compose .amend-toggle { min-width: 0; font-size: 11px; }
+.amend-controls .undo-commit { flex: none; }
 .git-compose-actions { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .git-compose-actions .commit-action { flex: 1; min-width: 0; }
-.git-compose-actions .generate-commit, .git-compose-actions .push-action { flex: none; }
+.git-compose-actions .generate-commit, .git-compose-actions .fetch-action,
+.git-compose-actions .push-action { flex: none; }
 .git-notice {
   min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 10.5px; line-height: 1.35; color: var(--ink-mid);
@@ -2135,10 +4362,22 @@ onBeforeUnmount(() => {
 .git-file-line { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
 .git-file-line .trow { flex: 1; width: auto; min-width: 0; }
 .git-file-action { flex: none; }
-/* Счётчик уступает место кнопке индексации, которая на указателе всплывает поверх
-   строки: иначе она легла бы прямо на цифры. На тач-устройстве кнопка в потоке. */
+/* Обойма действий строки: одна на строку, кнопки в ней в ряд. На тач-устройстве — в потоке. */
+.git-row-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+/* Заголовок группы — кнопка сворачивания (скин в actions.css, code-group-toggle); здесь
+   только текст заголовка, который при нехватке места обрезается многоточием. */
+.group-toggle .subtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* На указателе обойма всплывает справа поверх строки, а строка уступает ей место
+   отступом и прячет счётчик: кнопки не ложатся ни на цифры, ни на имя файла. */
 @media (hover: hover) and (pointer: fine) {
-  .git-file-line:hover .cnt, .git-file-line:focus-within .cnt { opacity: 0; }
+  .git-row-actions { position: absolute; top: 50%; right: 2px; transform: translateY(-50%);
+    opacity: 0; pointer-events: none; }
+  .git-file-line:hover .git-row-actions, .git-file-line:focus-within .git-row-actions {
+    opacity: 1; pointer-events: auto; }
+  .git-file-line:hover .cnt, .git-file-line:focus-within .cnt { visibility: hidden; }
+  /* Сам отступ строки под обойму — в общем скине строки (actions.css, code-change);
+     здесь только число кнопок, от которого он считается. */
+  .git-file-line:has(.git-row-actions > :nth-child(2)) { --row-actions: 2; }
 }
 /* Направляющие линии предков — по одной на уровень, ровно под шевроном родителя. */
 .tree .trow {
@@ -2152,6 +4391,12 @@ onBeforeUnmount(() => {
 .chev { flex: none; width: 12px; font-size: 10px; color: var(--ink-mid); }
 .dname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-dir-dot { flex: none; color: var(--warn); font-size: 15px; line-height: 1; }
+.file-tree .nm.A { color: var(--good); }
+.file-tree .nm.M { color: var(--warn); }
+.file-tree .nm.D { color: var(--bad); }
+.file-tree .nm.R { color: var(--accent); }
+.file-tree .nm.U { color: var(--bad); }
 /* Плоский список: имя целиком, каталог сжимается первым и обрезается СЛЕВА —
    у пути важен хвост рядом с файлом, а не общий для десятка строк корень.
    Своим классом, а не общим `.nm`: у строки дерева внутри голый текст, и flex-контейнер
@@ -2164,7 +4409,8 @@ onBeforeUnmount(() => {
 .nm-dir { flex: 0 999 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left; color: var(--ink-mid); font-size: 11px; font-style: normal; }
 .st { flex: none; width: 16px; text-align: center; font-family: var(--mono); font-size: 11px; font-weight: 700; border-radius: 4px; }
-.st.A { color: var(--good); } .st.M { color: var(--warn); } .st.D { color: var(--bad); } .st.R { color: var(--accent); }
+.st.A { color: var(--good); } .st.M { color: var(--warn); } .st.D { color: var(--bad); }
+.st.R { color: var(--accent); } .st.U { color: var(--bad); }
 .cnt { flex: none; font-size: 11px; display: flex; gap: 5px; transition: opacity .1s; }
 .cnt .a { color: var(--good); } .cnt .d { color: var(--bad); }
 /* Итог группы: числа в тех же цветах, что у строк файлов, полоска — пять квадратиков
@@ -2198,21 +4444,80 @@ onBeforeUnmount(() => {
 .git-view-toggle { display: inline-flex; gap: 1px; }
 .git-view-toggle svg { width: 15px; height: 15px; fill: currentColor; }
 .git-group-action { flex: none; }
-.commit { display: flex; align-items: baseline; gap: 8px; padding: 3px 8px; font-size: 12px; min-width: 0; }
+.commit { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .hash { flex: none; color: var(--accent); font-size: 11px; }
 .subj { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-path { padding: 5px 7px 8px; color: var(--ink-mid); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.file-history-entry { flex-wrap: wrap; }
+.file-history-entry .subj { flex: 1; min-width: 0; }
+.history-old-path { flex-basis: 100%; padding-left: 64px; color: var(--ink-mid);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
+.code-search { padding: 7px; border-bottom: 1px solid var(--line); }
+.code-search :deep(.ui-search-input) { width: 100%; }
+.code-search :deep(.ui-input) { min-width: 0; width: 100%; }
+.search-result-head { padding-top: 8px; }
+.search-result { min-height: 30px; height: auto; align-items: flex-start; flex-direction: column;
+  gap: 2px; padding-block: 5px; }
+.search-file, .search-location, .search-text { max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.search-location { color: var(--accent); font-size: 10.5px; }
+.search-text { color: var(--ink-mid); font-size: 11px; }
+.search-truncated { border-top: 1px solid var(--line); }
 
 /* Просмотр */
-.editorwrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editorwrap { display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  container: code-editor / inline-size; }
 .ehead { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--topbar); min-height: 37px; }
 .ehead .st { width: auto; padding: 0 5px; }
-.epath { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.epath { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: baseline;
+  font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epath-dir { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-style: normal; color: var(--ink-mid); }
+.epath-name { flex: none; font-weight: 500; }
+/* Действия шапки не сжимаются: ширину отдаёт путь файла, а не подписи кнопок. */
+.ehead > .ui-button,
+.ehead > .ui-icon-button { flex: none; }
+.ehead .glyph { display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; flex: none; }
+.ehead svg.glyph { fill: currentColor; }
+.ehead .glyph.ok { color: var(--good); }
+.ehead .glyph + .label { margin-left: 5px; }
+.ehead .range-summary { flex: none; }
+/* Узкий редактор: сначала уходит сводка отрезка и подписи тумблеров дифа, затем подписи
+   всех действий — остаются значки с подсказками, затем бейдж группы. */
+@container code-editor (max-width: 980px) {
+  .ehead .range-summary { display: none; }
+  .ehead .diff-layout .label,
+  .ehead [data-action="diff-wrap"] .label,
+  .ehead [data-action="diff-whitespace"] .label,
+  .ehead [data-action="ask-agent"] .label { display: none; }
+  .ehead .diff-layout .glyph + .label,
+  .ehead [data-action="diff-wrap"] .glyph + .label,
+  .ehead [data-action="diff-whitespace"] .glyph + .label,
+  .ehead [data-action="ask-agent"] .glyph + .label { margin-left: 0; }
+}
+@container code-editor (max-width: 720px) {
+  .ehead .label { display: none; }
+  .ehead .glyph + .label { margin-left: 0; }
+}
+/* Ширина телефона в доке: редкие тумблеры дифа уходят целиком, бейдж группы тоже. */
+@container code-editor (max-width: 480px) {
+  .ehead { gap: 6px; }
+  .ehead .scope,
+  .ehead [data-action="diff-wrap"],
+  .ehead [data-action="diff-whitespace"] { display: none; }
+}
 .scope { flex: none; font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
   border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
 .note { font-size: 11px; color: var(--warn); flex: none; }
 .grow { flex: 1; }
 .ebody { flex: 1; min-height: 0; position: relative; }
 .editor { position: absolute; inset: 0; }
+:global(.code-blame-after) {
+  color: var(--ink-mid); font-family: var(--mono); font-size: 11px; opacity: .72;
+  cursor: pointer;
+}
 .overlay { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-mid);
   font-size: 13px; background: #0a0c10; }
 

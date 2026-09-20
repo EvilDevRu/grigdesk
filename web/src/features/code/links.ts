@@ -201,6 +201,23 @@ export function codeRouteHref(href: string, { roots = codeRoots.value }: LinkOpt
 }
 
 /**
+ * Строит абсолютный адрес из уже проверенной цели панели.
+ * Нулевая строка остаётся явной: такой адрес полностью обратим через общий parser.
+ */
+export function codeLinkHref(target: CodeTarget, origin = globalThis.location?.origin || '') {
+  const query = new URLSearchParams({
+    project: target.project,
+    repo: target.repo,
+    root: target.root,
+    path: target.path,
+    line: String(Math.max(0, Number(target.line) || 0)),
+  });
+  const base = String(origin || '').replace(/\/+$/, '');
+
+  return `${base}/#/code?${query}`;
+}
+
+/**
  * Общий резолвер файловых ссылок чата: .md/.txt → просмотрщик документов, файл под
  * известным деревом → панель «Код», остальные локальные пути — false (текстом):
  * синяя ссылка не имеет права обещать открытие, которого не будет.

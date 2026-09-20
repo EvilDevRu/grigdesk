@@ -77,19 +77,21 @@ const file = objectOf({
   tooBig: boolean,
   content: text,
 });
-const gitFileFields = objectOf({
+const gitEntryFields = objectOf({
   path: text,
   status: text,
   add: numeric,
   del: numeric,
   binary: boolean,
+});
+const gitFileContentFields = objectOf({
   tooBig: boolean,
   oldContent: text,
   newContent: text,
 });
 
-function gitGroup(value: unknown, path: string): 'staged' | 'work' {
-  if (value !== 'staged' && value !== 'work') {
+function gitGroup(value: unknown, path: string): 'staged' | 'work' | 'commits' {
+  if (value !== 'staged' && value !== 'work' && value !== 'commits') {
     throw new CodeContractError(path);
   }
 
@@ -100,13 +102,20 @@ function gitGroup(value: unknown, path: string): 'staged' | 'work' {
  * Старый путь есть только при переименовании. Общий taskDiff не задаёт группу,
  * поэтому эти поля остаются необязательными и после проверки JSON.
  */
-function gitFile(value: unknown, path: string) {
+function gitEntry(value: unknown, path: string) {
   const source = record(value, path);
 
   return {
-    ...gitFileFields(value, path),
+    ...gitEntryFields(value, path),
     ...(source.group === undefined ? {} : { group: gitGroup(source.group, `${path}.group`) }),
     ...(source.oldPath === undefined ? {} : { oldPath: text(source.oldPath, `${path}.oldPath`) }),
+  };
+}
+
+function gitFile(value: unknown, path: string) {
+  return {
+    ...gitEntry(value, path),
+    ...gitFileContentFields(value, path),
   };
 }
 
@@ -117,25 +126,66 @@ const gitDiffFields = {
 };
 const gitDiff = objectOf(gitDiffFields);
 const changesFields = {
-  ...gitDiffFields,
-  staged: listOf(gitFile),
+  branch: text,
+  stat: text,
+  files: listOf(gitEntry),
+  staged: listOf(gitEntry),
 };
 const changes = objectOf(changesFields);
-const tracking = objectOf({
+const trackingRequired = objectOf({
   detached: boolean,
   upstream: text,
   ahead: numeric,
   behind: numeric,
 });
+function tracking(value: unknown, path: string) {
+  const source = record(value, path);
+
+  return {
+    ...trackingRequired(value, path),
+    ...(source.remote === undefined ? {} : { remote: text(source.remote, `${path}.remote`) }),
+  };
+}
 const logEntry = objectOf({
   hash: text,
   subject: text,
   when: text,
 });
-const git = objectOf({
-  ...changesFields,
-  tracking,
-  log: listOf(logEntry),
+const gitRequired = objectOf({ ...changesFields, tracking, log: listOf(logEntry) });
+
+/** Старый сервер мог не прислать headMessage: декодер сохраняет совместимость. */
+function git(value: unknown, path: string) {
+  const source = record(value, path);
+
+  return {
+    ...gitRequired(value, path),
+    ...(source.headMessage === undefined
+      ? {}
+      : { headMessage: text(source.headMessage, `${path}.headMessage`) }),
+  };
+}
+
+const fileDiff = objectOf({
+  path: text,
+  status: text,
+  binary: boolean,
+  tooBig: boolean,
+  oldContent: text,
+  newContent: text,
+});
+const commitRange = objectOf({
+  from: text,
+  to: text,
+  base: text,
+  commits: numeric,
+  // Правая сторона — рабочее дерево («с текущими изменениями»), а не коммит `to`.
+  work: boolean,
+});
+const commitsDiff = objectOf({
+  branch: text,
+  stat: text,
+  files: listOf(gitEntry),
+  range: commitRange,
 });
 const stage = objectOf({
   ok: success,
@@ -152,6 +202,47 @@ const push = objectOf({
   remote: text,
   published: boolean,
   tracking,
+});
+const fetchResult = objectOf({
+  ok: success,
+  remote: text,
+  tracking,
+});
+const undoCommit = objectOf({
+  ok: success,
+  message: text,
+});
+const patchResult = objectOf({
+  patch: text,
+  truncated: boolean,
+});
+const fileLogEntry = objectOf({
+  hash: text,
+  base: text,
+  subject: text,
+  when: text,
+  path: text,
+});
+const fileLog = objectOf({ entries: listOf(fileLogEntry) });
+const blameLine = objectOf({
+  line: numeric,
+  hash: text,
+  base: text,
+  author: text,
+  when: text,
+  subject: text,
+});
+const blame = objectOf({ lines: listOf(blameLine) });
+const searchFile = objectOf({ path: text });
+const searchMatch = objectOf({
+  path: text,
+  line: numeric,
+  text,
+});
+const search = objectOf({
+  files: listOf(searchFile),
+  matches: listOf(searchMatch),
+  truncated: boolean,
 });
 const commitTitle = objectOf({
   ok: success,
@@ -171,6 +262,7 @@ export type CodeDirectoryEntry = ReturnType<typeof directoryEntry>;
 export type CodeDirectoryResponse = ReturnType<typeof directory>;
 export type CodeFileResponse = ReturnType<typeof file>;
 export type CodeFile = CodeFileResponse;
+export type CodeGitEntry = ReturnType<typeof gitEntry>;
 export type CodeGitFile = ReturnType<typeof gitFile>;
 export type CodeGitDiff = ReturnType<typeof gitDiff>;
 export type CodeWorktreeChanges = ReturnType<typeof changes>;
@@ -178,9 +270,19 @@ export type CodeGitTracking = ReturnType<typeof tracking>;
 export type CodeGitLogEntry = ReturnType<typeof logEntry>;
 export type CodeGitResponse = ReturnType<typeof git>;
 export type CodeGitSnapshot = CodeGitResponse;
+export type CodeFileDiffResponse = ReturnType<typeof fileDiff>;
+export type CodeCommitsDiffResponse = ReturnType<typeof commitsDiff>;
 export type CodeStageResponse = ReturnType<typeof stage>;
 export type CodeCommitResponse = ReturnType<typeof commit>;
 export type CodePushResponse = ReturnType<typeof push>;
+export type CodeFetchResponse = ReturnType<typeof fetchResult>;
+export type CodeUndoCommitResponse = ReturnType<typeof undoCommit>;
+export type CodePatchResponse = ReturnType<typeof patchResult>;
+export type CodeFileLogEntry = ReturnType<typeof fileLogEntry>;
+export type CodeFileLogResponse = ReturnType<typeof fileLog>;
+export type CodeBlameLine = ReturnType<typeof blameLine>;
+export type CodeBlameResponse = ReturnType<typeof blame>;
+export type CodeSearchResponse = ReturnType<typeof search>;
 export type CodeCommitTitleResponse = ReturnType<typeof commitTitle>;
 
 export interface CodeStagedContext {
@@ -229,6 +331,14 @@ export function parseCodeGit(value: unknown): CodeGitResponse {
   return git(value, 'git');
 }
 
+export function parseCodeFileDiff(value: unknown): CodeFileDiffResponse {
+  return fileDiff(value, 'fileDiff');
+}
+
+export function parseCodeCommitsDiff(value: unknown): CodeCommitsDiffResponse {
+  return commitsDiff(value, 'commitsDiff');
+}
+
 export function parseCodeStageResponse(value: unknown): CodeStageResponse {
   return stage(value, 'stage');
 }
@@ -239,6 +349,30 @@ export function parseCodeCommitResponse(value: unknown): CodeCommitResponse {
 
 export function parseCodePushResponse(value: unknown): CodePushResponse {
   return push(value, 'push');
+}
+
+export function parseCodeFetchResponse(value: unknown): CodeFetchResponse {
+  return fetchResult(value, 'fetch');
+}
+
+export function parseCodeUndoCommitResponse(value: unknown): CodeUndoCommitResponse {
+  return undoCommit(value, 'undoCommit');
+}
+
+export function parseCodePatch(value: unknown): CodePatchResponse {
+  return patchResult(value, 'patch');
+}
+
+export function parseCodeFileLog(value: unknown): CodeFileLogResponse {
+  return fileLog(value, 'fileLog');
+}
+
+export function parseCodeBlame(value: unknown): CodeBlameResponse {
+  return blame(value, 'blame');
+}
+
+export function parseCodeSearch(value: unknown): CodeSearchResponse {
+  return search(value, 'search');
 }
 
 export function parseCodeCommitTitleResponse(value: unknown): CodeCommitTitleResponse {

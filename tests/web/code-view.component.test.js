@@ -48,6 +48,29 @@ async function compileCodeView() {
         export const langOf = (path) => path.split('.').pop() || 'plaintext';
         export const READONLY_OPTS = {};
       `,
+      '../../composables/useSse': `
+        export function useSse(listener) {
+          globalThis.__codeViewSse = listener;
+          return { connected: { value: true } };
+        }
+      `,
+      '../../stores/chat.js': `
+        export const useChatStore = () => globalThis.__codeViewChat;
+      `,
+      '../../router.js': `
+        export const router = globalThis.__codeViewRouter;
+      `,
+      '../../ui': `
+        export { default as UiButton } from './src/components/primitives/UiButton.vue';
+        export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
+        export { default as UiPressable } from './src/components/primitives/UiPressable.vue';
+        export { default as UiSearchInput } from './src/components/composites/UiSearchInput.vue';
+        export { default as UiSelect } from './src/components/primitives/UiSelect.vue';
+        export { default as UiSwitch } from './src/components/primitives/UiSwitch.vue';
+        export { default as UiTextarea } from './src/components/primitives/UiTextarea.vue';
+        export const confirmDialog = (text, options) => globalThis.__codeViewConfirm(text, options);
+        export const promptDialog = (options) => globalThis.__codeViewPrompt(options);
+      `,
     },
   });
 }
@@ -81,7 +104,13 @@ function installBrowser(t, storage = {}) {
 }
 
 function makeMonaco() {
-  const state = { models: [], fileEditors: [], diffEditors: [] };
+  const state = {
+    models: [],
+    fileEditors: [],
+    diffEditors: [],
+    colorizeCalls: [],
+    decorationCollections: [],
+  };
   const makeEditor = (kind, options = {}) => {
     const editor = {
       kind,
@@ -92,9 +121,39 @@ function makeMonaco() {
       disposed: false,
       revealed: [],
       position: null,
+      selection: null,
+      mouseDown: null,
       setModel(model) { this.model = model; this.setCalls.push(model); },
       revealLineInCenter(line) { this.revealed.push(line); },
       setPosition(value) { this.position = value; },
+      getPosition() { return this.position; },
+      getSelection() { return this.selection; },
+      setSelection(value) { this.selection = value; },
+      onMouseDown(listener) {
+        this.mouseDown = listener;
+        return {
+          dispose: () => {
+            if (this.mouseDown === listener) {
+              this.mouseDown = null;
+            }
+          },
+        };
+      },
+      createDecorationsCollection(decorations) {
+        const collection = {
+          decorations: [...decorations],
+          clear() {
+            this.decorations = [];
+          },
+          set(value) {
+            this.decorations = [...value];
+
+            return [];
+          },
+        };
+        state.decorationCollections.push(collection);
+        return collection;
+      },
       updateOptions(value) {
         this.options = { ...this.options, ...value };
         this.optionCalls.push(value);
@@ -106,6 +165,11 @@ function makeMonaco() {
   };
   const monaco = {
     editor: {
+      async colorize(content) {
+        state.colorizeCalls.push(content);
+        if (content.includes('COLORIZE_REJECT')) throw new Error('tokenizer failed');
+        return `<span class="mtk1">${content}</span>`;
+      },
       create: (_host, options) => makeEditor('file', options),
       createDiffEditor: (_host, options) => makeEditor('diff', options),
       createModel(content, language) {
@@ -144,11 +208,61 @@ async function waitFor(check, message) {
   assert.fail(message);
 }
 
-async function mountCodeView(t, { api, storage = {}, props = {} }) {
+async function mountCodeView(t, {
+  api,
+  storage = {},
+  props = {},
+  confirm = async () => false,
+  prompt = async () => null,
+  chat = { newSession: () => '' },
+  router = { push: async () => {} },
+}) {
   const browser = await installBrowser(t, storage);
   const { monaco, state: monacoState } = makeMonaco();
-  globalThis.__codeViewApi = api;
+  let lastGit = null;
+  // Старые сценарии хранят стороны прямо в фикстуре `/git`. Производственный
+  // декодер их теперь отбрасывает; адаптер теста отдаёт те же стороны через новый
+  // ленивый endpoint, пока конкретный сценарий не подменил его явно.
+  globalThis.__codeViewApi = {
+    ...api,
+    async get(url) {
+      try {
+        const value = await api.get(url);
+
+        if (url.includes('/git?')) {
+          lastGit = value;
+        }
+
+        return value;
+      } catch (error) {
+        if (!url.includes('/file-diff?') || !lastGit) {
+          throw error;
+        }
+
+        const params = query(url);
+        const files = params.get('group') === 'staged' ? lastGit.staged : lastGit.files;
+        const file = files?.find((entry) => entry.path === params.get('path'));
+
+        if (!file) {
+          throw error;
+        }
+
+        return {
+          path: file.path,
+          status: file.status,
+          binary: !!file.binary,
+          tooBig: !!file.tooBig,
+          oldContent: file.oldContent || '',
+          newContent: file.newContent || '',
+        };
+      }
+    },
+  };
   globalThis.__codeViewMonaco = monaco;
+  globalThis.__codeViewConfirm = confirm;
+  globalThis.__codeViewPrompt = prompt;
+  globalThis.__codeViewChat = chat;
+  globalThis.__codeViewRouter = router;
   const [{ mount, flushPromises }, CodeView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileCodeView(),
@@ -164,6 +278,11 @@ async function mountCodeView(t, { api, storage = {}, props = {} }) {
     wrapper.unmount();
     delete globalThis.__codeViewApi;
     delete globalThis.__codeViewMonaco;
+    delete globalThis.__codeViewConfirm;
+    delete globalThis.__codeViewPrompt;
+    delete globalThis.__codeViewChat;
+    delete globalThis.__codeViewRouter;
+    delete globalThis.__codeViewSse;
   });
   await settle(flushPromises);
   return { browser, wrapper, flushPromises, monacoState };
@@ -431,6 +550,290 @@ test('Git по умолчанию показан деревом, доступн�
   assert.equal(wrapper.find('button.git-file[data-path="root.md"]').exists(), true);
 });
 
+test('настройки diff восстанавливаются, меняют Monaco и сохраняются на устройстве', async (t) => {
+  const git = {
+    branch: 'main',
+    stat: '',
+    files: [{ path: 'app.js', status: 'M', add: 1, del: 1, binary: false }],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: [],
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      if (url.includes('/file-diff?')) {
+        return {
+          path: 'app.js', status: 'M', binary: false, tooBig: false,
+          oldContent: 'const value = 1;', newContent: 'const value = 2;',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { browser, wrapper, flushPromises, monacoState } = await mountCodeView(t, {
+    api,
+    storage: { 'cockpit-diff-wrap': '1', 'cockpit-diff-ws': '1' },
+  });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  const editor = monacoState.diffEditors[0];
+  const wrap = wrapper.get('button[data-action="diff-wrap"]');
+  const whitespace = wrapper.get('button[data-action="diff-whitespace"]');
+
+  assert.equal(editor.options.diffWordWrap, 'on');
+  assert.equal(editor.options.ignoreTrimWhitespace, true);
+  assert.equal(wrap.attributes('aria-pressed'), 'true');
+  assert.equal(whitespace.attributes('aria-pressed'), 'true');
+
+  await wrap.trigger('click');
+  await whitespace.trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(editor.options.diffWordWrap, 'off');
+  assert.equal(editor.options.ignoreTrimWhitespace, false);
+  assert.equal(browser.localStorage.getItem('cockpit-diff-wrap'), '0');
+  assert.equal(browser.localStorage.getItem('cockpit-diff-ws'), '0');
+  assert.ok(editor.optionCalls.some((options) => options.diffWordWrap === 'off'));
+  assert.ok(editor.optionCalls.some((options) => options.ignoreTrimWhitespace === false));
+});
+
+test('«Ссылка» копирует текущий файл и строку, а без Clipboard открывает общий prompt', async (t) => {
+  const copied = [];
+  const prompts = [];
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [{ name: 'новый файл.ts', dir: false }] };
+      if (url.includes('/file?')) {
+        return { content: 'one\ntwo\nthree', binary: false, tooBig: false, size: 13 };
+      }
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { browser, wrapper, flushPromises, monacoState } = await mountCodeView(t, {
+    api,
+    prompt: async (options) => { prompts.push(options); return null; },
+  });
+
+  Object.defineProperty(browser.navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (value) => { copied.push(value); } },
+  });
+  await wrapper.get('button[data-file-path="новый файл.ts"]').trigger('click');
+  await settle(flushPromises);
+  monacoState.fileEditors[0].setPosition({ lineNumber: 2, column: 1 });
+
+  await wrapper.get('button[data-action="copy-code-link"]').trigger('click');
+  await settle(flushPromises);
+
+  const { parseCodeRouteHref } = await import('../../web/src/features/code/links.ts');
+
+  assert.equal(copied.length, 1);
+  assert.deepEqual(parseCodeRouteHref(copied[0]), {
+    project: 'demo', repo: 'demo', root: '/demo', path: 'новый файл.ts', line: 2,
+  });
+  assert.match(copied[0], /^http:\/\/cockpit\.test\/#\/code\?/);
+  assert.match(wrapper.get('button[data-action="copy-code-link"]').text(), /скопировано/);
+
+  Object.defineProperty(browser.navigator, 'clipboard', {
+    configurable: true,
+    value: undefined,
+  });
+  await wrapper.get('button[data-action="copy-code-link"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].value, copied[0]);
+});
+
+test('откат и удаление требуют подтверждения, а staged-файл отката не имеет', async (t) => {
+  const posts = [];
+  const confirmations = [];
+  const decisions = [false, true];
+  const snapshot = {
+    branch: 'main', stat: '', log: [], headMessage: '',
+    staged: [{ path: 'staged.js', status: 'M', add: 1, del: 0, binary: false }],
+    files: [
+      { path: 'tracked.js', status: 'M', add: 1, del: 1, binary: false },
+      { path: 'new.js', status: 'A', add: 1, del: 0, binary: false },
+    ],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      if (url.includes('/file-diff?')) {
+        const path = query(url).get('path');
+        const file = [...snapshot.staged, ...snapshot.files].find((item) => item.path === path);
+        return {
+          ...file, tooBig: false,
+          oldContent: file.status === 'A' ? '' : 'old', newContent: 'new',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, payload) {
+      posts.push({ url, payload });
+      return { ok: true, changed: 1 };
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    confirm: async (text) => {
+      confirmations.push(text);
+      return decisions.shift() ?? true;
+    },
+  });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(wrapper.find('[data-group="staged"] [data-action="discard"]').exists(), false);
+  assert.equal(wrapper.find('button[data-action="discard-all"]').exists(), true);
+  assert.equal(wrapper.find('button[data-action="clean"][data-file="new.js"]').exists(), true);
+
+  const discard = wrapper.get('button[data-action="discard"][data-file="tracked.js"]');
+
+  await discard.trigger('click');
+  await settle(flushPromises);
+  assert.equal(posts.length, 0, 'отказ в диалоге не запускает мутацию');
+
+  await discard.trigger('click');
+  await settle(flushPromises);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/discard\?/);
+  assert.deepEqual(posts[0].payload, { paths: ['tracked.js'] });
+  assert.match(confirmations[0], /tracked\.js.*без возможности отмены/s);
+});
+
+test('конфликт помечен в Git, разрешается через stage и не предлагает откат', async (t) => {
+  const posts = [];
+  const conflict = {
+    path: 'conflict.txt', status: 'U', add: 0, del: 0, binary: false,
+  };
+  const snapshot = {
+    branch: 'main', stat: '', log: [], headMessage: '', staged: [], files: [conflict],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [] };
+      }
+      if (url.includes('/git?')) {
+        return snapshot;
+      }
+      if (url.includes('/file-diff?')) {
+        return {
+          ...conflict,
+          tooBig: false,
+          oldContent: 'ours\n',
+          newContent: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> other\n',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, payload) {
+      posts.push({ url, payload });
+
+      return { ok: true, changed: 1 };
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  const row = wrapper.get('button.git-file[data-path="conflict.txt"]');
+  const resolve = wrapper.get('button[data-action="stage"][data-file="conflict.txt"]');
+
+  assert.equal(row.get('.st').text(), '!');
+  assert.equal(row.attributes('title'), 'конфликт: разреши в файле, затем добавь в индекс');
+  assert.match(resolve.attributes('title'), /Пометить разрешённым/);
+  assert.equal(wrapper.find('button[data-action="discard"][data-file="conflict.txt"]').exists(), false);
+  assert.equal(wrapper.find('button[data-action="discard-all"]').exists(), false);
+
+  await resolve.trigger('click');
+  await settle(flushPromises);
+
+  assert.match(posts[0].url, /\/stage\?/);
+  assert.deepEqual(posts[0].payload, { paths: ['conflict.txt'] });
+});
+
+test('«Проверить remote» обновляет tracking, а без remote недоступна', async (t) => {
+  const posts = [];
+  const snapshot = {
+    branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+    tracking: {
+      detached: false, upstream: 'origin/main', remote: 'origin', ahead: 0, behind: 0,
+    },
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, payload) {
+      posts.push({ url, payload });
+      return {
+        ok: true,
+        remote: 'origin',
+        tracking: { ...snapshot.tracking, behind: 2 },
+      };
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-action="fetch"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/fetch\?/);
+  assert.deepEqual(posts[0].payload, {});
+  assert.match(wrapper.get('.git-notice').text(), /origin\/main · ↑0 ↓2/);
+
+  snapshot.tracking = { detached: false, upstream: '', ahead: 0, behind: 0 };
+  await wrapper.get('button[title="Обновить"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button[data-action="fetch"]').attributes('disabled'), '');
+});
+
 test('поздние ls/file не перезаписывают новый выбор, а смена контекста освобождает Monaco-модель', async (t) => {
   const lateBRoot = deferred();
   const currentARoot = deferred();
@@ -553,7 +956,7 @@ test('поздние repos и git не возвращают интерфейс �
           return lateTaskGit.promise;
         }
         mainGitCalls += 1;
-        if (mainGitCalls === 1) return gitPayload('main-initial.js');
+        if (mainGitCalls <= 2) return gitPayload('main-initial.js');
         return currentMainGit.promise;
       }
       throw new Error(`unexpected GET ${url}`);
@@ -580,7 +983,7 @@ test('поздние repos и git не возвращают интерфейс �
   await wrapper.get('#code-context').setValue(JSON.stringify(['a', '/a/task']));
   await waitFor(() => taskGitCalls === 1, 'не стартовал Git-запрос старого task-контекста');
   await wrapper.get('#code-context').setValue(JSON.stringify(['a', '/a/main']));
-  await waitFor(() => mainGitCalls === 2, 'не стартовал Git-запрос нового main-контекста');
+  await waitFor(() => mainGitCalls === 3, 'не стартовал Git-запрос нового main-контекста');
   currentMainGit.resolve(gitPayload('main-current.js'));
   await settle(flushPromises);
   lateTaskGit.resolve(gitPayload('task-late.js'));
@@ -1433,7 +1836,7 @@ test('лесенка дерева: у файла зарезервировано 
  * Строит панель на одном ответе `/git`, чтобы проверить строку под композером.
  * Каждый вызов — свой браузер и свой стор, поэтому состояния тестов не смешиваются.
  */
-async function mountGitPanel(t, gitPayload, { branch = 'main', post = null } = {}) {
+async function mountGitPanel(t, gitPayload, { branch = 'main', post = null, patch = null } = {}) {
   const api = {
     post,
     async get(url) {
@@ -1442,6 +1845,7 @@ async function mountGitPanel(t, gitPayload, { branch = 'main', post = null } = {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo', branch)] }] };
       }
       if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/patch?') && patch) return patch(url);
       if (url.includes('/git?')) return {
         stat: '',
         branch: 'main',
@@ -1489,17 +1893,551 @@ test('композер отдаёт поле ввода целой строке,
     tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
   });
 
-  // Поле — прямой потомок композера: деля строку с тремя кнопками, в доке оно
+  // Поле — прямой потомок композера: деля строку с кнопками, в доке оно
   // схлопывалось до двух букв, и набрать название коммита было негде.
   assert.equal(wrapper.get('.git-compose > textarea.commit-message').exists(), true);
   // Одна строка — только стартовый рост: `rows="1"` держит пустое поле в ритме кнопок.
   assert.equal(wrapper.get('textarea.commit-message').attributes('rows'), '1');
   assert.deepEqual(
     wrapper.findAll('.git-compose-actions > button').map((node) => node.classes()[0]),
-    ['generate-commit', 'commit-action', 'push-action'],
+    ['generate-commit', 'commit-action', 'fetch-action', 'push-action'],
   );
   assert.equal(wrapper.find('.git-compose-actions input').exists(), false);
   assert.equal(wrapper.find('.git-compose-actions textarea').exists(), false);
+});
+
+test('«Обзор» кеширует patch, рисует строки и возвращает Monaco по шапке файла', async (t) => {
+  const patchUrls = [];
+  const changed = {
+    path: 'src/a.ts', status: 'M', add: 2, del: 1, binary: false,
+    oldContent: 'old\n', newContent: 'new\nCOLORIZE_REJECT\n',
+  };
+  const { wrapper, flushPromises, monacoState } = await mountGitPanel(t, {
+    files: [changed],
+  }, {
+    patch: (url) => {
+      patchUrls.push(url);
+      return {
+        truncated: true,
+        patch: `diff --git a/src/a.ts b/src/a.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1,2 @@
+-old
++new
++COLORIZE_REJECT
+`,
+      };
+    },
+  });
+  const review = wrapper.get('button[data-action="patch-review"][data-group="work"]');
+
+  await review.trigger('click');
+  await settle(flushPromises, 8);
+  assert.equal(patchUrls.length, 1);
+  assert.match(patchUrls[0], /\/patch\?.*group=work/);
+  assert.equal(wrapper.findAll('.patch-file').length, 1);
+  assert.equal(wrapper.findAll('.patch-line.add').length, 2);
+  assert.equal(wrapper.findAll('.patch-line.del').length, 1);
+  assert.match(wrapper.get('.patch-limit').text(), /первые 2 МБ/);
+  assert.ok(monacoState.colorizeCalls.includes('COLORIZE_REJECT'));
+
+  await wrapper.get('button.patch-file-head[data-path="src/a.ts"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.find('[data-view="patch-review"]').exists(), false);
+
+  await review.trigger('click');
+  await settle(flushPromises);
+  assert.equal(patchUrls.length, 1, 'тот же снимок использует кеш патча');
+});
+
+test('«Спросить агента» создаёт обычный чат с абсолютным файлом и строкой', async (t) => {
+  const sessions = [];
+  const routes = [];
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [{ name: 'a.ts', dir: false }] };
+      if (url.includes('/file?')) {
+        return { size: 12, binary: false, tooBig: false, content: 'one\ntwo\nthree\nfour\n' };
+      }
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, {
+    api,
+    chat: { newSession: (options) => { sessions.push(options); return 'chat-1'; } },
+    router: { push: async (route) => { routes.push(route); } },
+  });
+
+  await wrapper.get('button[data-file-path="a.ts"]').trigger('click');
+  await settle(flushPromises);
+  monacoState.fileEditors[0].position = { lineNumber: 4, column: 1 };
+  await wrapper.get('button[data-action="ask-agent"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(sessions.length, 1);
+  assert.equal('taskId' in sessions[0], false);
+  assert.match(sessions[0].draft, /Рабочая копия Основная, ветка main/);
+  assert.match(sessions[0].draft, /Посмотри \/demo\/a\.ts:4/);
+  assert.deepEqual(routes, ['/chats']);
+});
+
+test('в diff «Спросить агента» берёт patch файла и привязывает чат к задаче', async (t) => {
+  const sessions = [];
+  const routes = [];
+  const calls = [];
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return {
+          repos: [{
+            key: 'demo', dir: '/demo',
+            trees: [mainTree('/demo'), worktree('/work/t46', 't46', 'task-46', 't46')],
+          }],
+        };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) {
+        return {
+          branch: 'task-46', stat: '', files: [], staged: [], headMessage: 'change',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+          log: [{ hash: 'ccccccc', subject: 'change', when: 'сейчас' }],
+        };
+      }
+      if (url.includes('/commits-diff?')) {
+        return {
+          branch: 'task-46', stat: 'one.js | 1 +',
+          files: [{ path: 'one.js', status: 'M', add: 1, del: 0, binary: false }],
+          range: {
+            from: 'c'.repeat(40), to: 'c'.repeat(40), base: 'b'.repeat(40), commits: 1,
+            work: query(url).get('work') === '1',
+            work: query(url).get('work') === '1',
+          },
+        };
+      }
+      if (url.includes('/file-diff?')) {
+        return {
+          path: 'one.js', status: 'M', binary: false, tooBig: false,
+          oldContent: 'old\n', newContent: 'new\n',
+        };
+      }
+      if (url.includes('/patch?')) {
+        return {
+          truncated: false,
+          patch: 'diff --git a/one.js b/one.js\n--- a/one.js\n+++ b/one.js\n@@ -1 +1 @@\n-old\n+new\n',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    storage: { 'cockpit-code-context:demo': JSON.stringify({
+      v: 1, repoKey: 'demo', treePath: '/work/t46',
+    }) },
+    chat: { newSession: (options) => { sessions.push(options); return 'chat-2'; } },
+    router: { push: async (route) => { routes.push(route); } },
+  });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.commit[data-hash="ccccccc"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-action="ask-agent"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(sessions[0].taskId, '46');
+  assert.match(sessions[0].draft, /Посмотри \/work\/t46\/one\.js/);
+  assert.match(sessions[0].draft, /```diff[\s\S]*-old[\s\S]*\+new/);
+  assert.ok(calls.some((url) => /\/patch\?.*group=commits.*path=one\.js/.test(url)));
+  assert.deepEqual(routes, ['/chats']);
+});
+
+test('история следует старому имени, открывает commit-diff и возвращает прежний файл', async (t) => {
+  const calls = [];
+  const latest = 'c'.repeat(40);
+  const oldest = 'a'.repeat(40);
+  const empty = 'e'.repeat(40);
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return {
+          repos: [{
+            key: 'demo', dir: '/demo',
+            trees: [mainTree('/demo'), worktree('/other', 'other', 'other')],
+          }],
+        };
+      }
+      if (url.includes('/ls?')) return { entries: [{ name: 'renamed.ts', dir: false }] };
+      if (url.includes('/file?')) {
+        return { size: 8, binary: false, tooBig: false, content: 'current\n' };
+      }
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      if (url.includes('/file-log?')) {
+        return { entries: [
+          { hash: latest, base: oldest, subject: 'rename', when: 'сейчас', path: 'renamed.ts' },
+          { hash: oldest, base: empty, subject: 'create', when: 'раньше', path: 'old.ts' },
+        ] };
+      }
+      if (url.includes('/file-diff?')) {
+        return {
+          path: query(url).get('path'), status: 'A', binary: false, tooBig: false,
+          oldContent: '', newContent: 'historic\n',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[data-file-path="renamed.ts"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-action="file-history"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.findAll('button.file-history-entry').length, 2);
+  assert.equal(wrapper.find('.file-tree').exists(), false);
+
+  await wrapper.get(`button.file-history-entry[data-hash="${oldest}"]`).trigger('click');
+  await settle(flushPromises);
+  const diffCall = calls.findLast((url) => url.includes('/file-diff?'));
+  assert.equal(query(diffCall).get('path'), 'old.ts');
+  assert.equal(query(diffCall).get('base'), empty);
+  assert.equal(query(diffCall).get('to'), oldest);
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'historic\n');
+
+  await wrapper.get('button[data-action="close-file-history"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button[data-file-path="renamed.ts"]').classes().includes('sel'), true);
+  assert.equal(monacoState.fileEditors[0].model.content, 'current\n');
+
+  await wrapper.get('button[data-action="file-history"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('#code-context').setValue(JSON.stringify(['demo', '/other']));
+  await settle(flushPromises);
+  assert.equal(wrapper.find('.file-history').exists(), false);
+});
+
+test('blame рисует строки, отбрасывает поздний файл и открывает commit-diff', async (t) => {
+  const calls = [];
+  const lateA = deferred();
+  const nextB = deferred();
+  const aHash = 'a'.repeat(40);
+  const bHash = 'b'.repeat(40);
+  const aBase = '0'.repeat(40);
+  const bBase = 'a'.repeat(40);
+  let aBlames = 0;
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [
+          { name: 'a.ts', dir: false },
+          { name: 'b.ts', dir: false },
+        ] };
+      }
+      if (url.includes('/file?')) {
+        return { size: 8, binary: false, tooBig: false, content: 'one\ntwo\n' };
+      }
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      if (url.includes('/blame?')) {
+        const relPath = query(url).get('path');
+
+        if (relPath === 'a.ts') {
+          aBlames += 1;
+
+          if (aBlames > 1) {
+            return lateA.promise;
+          }
+
+          return { lines: [
+            {
+              line: 1, hash: aHash, base: aBase, author: 'Анна',
+              when: 'сейчас', subject: 'первый',
+            },
+            {
+              line: 2, hash: '', base: '', author: 'Not Committed Yet',
+              when: '', subject: 'рабочая копия',
+            },
+          ] };
+        }
+
+        return nextB.promise;
+      }
+      if (url.includes('/file-diff?')) {
+        return {
+          path: query(url).get('path'), status: 'M', binary: false, tooBig: false,
+          oldContent: 'old\n', newContent: 'new\n',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState, browser } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[data-file-path="a.ts"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-action="blame"]').trigger('click');
+  await settle(flushPromises);
+
+  const decorations = monacoState.decorationCollections[0];
+
+  assert.equal(decorations.decorations.length, 2);
+  assert.match(decorations.decorations[0].options.after.content, /aaaaaaa · Анна · сейчас/);
+  assert.match(decorations.decorations[1].options.after.content, /не в коммите/);
+  assert.equal(browser.localStorage.getItem('cockpit-code-blame'), '1');
+
+  await wrapper.get('button[data-action="blame"]').trigger('click');
+  assert.equal(decorations.decorations.length, 0);
+  assert.equal(browser.localStorage.getItem('cockpit-code-blame'), '0');
+
+  await wrapper.get('button[data-action="blame"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-file-path="b.ts"]').trigger('click');
+  await settle(flushPromises);
+  nextB.resolve({ lines: [{
+    line: 1, hash: bHash, base: bBase, author: 'Борис',
+    when: 'вчера', subject: 'второй',
+  }] });
+  await settle(flushPromises);
+  lateA.resolve({ lines: [{
+    line: 1, hash: aHash, base: aBase, author: 'Поздний ответ',
+    when: 'давно', subject: 'старый',
+  }] });
+  await settle(flushPromises);
+
+  assert.equal(decorations.decorations.length, 1);
+  assert.match(decorations.decorations[0].options.after.content, /bbbbbbb · Борис · вчера/);
+
+  monacoState.fileEditors[0].mouseDown({
+    target: {
+      element: { closest: () => ({}) },
+      position: { lineNumber: 1, column: 1 },
+    },
+  });
+  await settle(flushPromises);
+
+  const diffCall = calls.findLast((url) => url.includes('/file-diff?'));
+
+  assert.equal(query(diffCall).get('path'), 'b.ts');
+  assert.equal(query(diffCall).get('base'), bBase);
+  assert.equal(query(diffCall).get('to'), bHash);
+});
+
+test('поиск ждёт debounce, открывает строку и отбрасывает поздний ответ', async (t) => {
+  const calls = [];
+  const slow = deferred();
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [{ name: 'src', dir: true }] };
+      }
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      if (url.includes('/search?')) {
+        const value = query(url).get('q');
+
+        if (value === 'needle') {
+          return {
+            files: [{ path: 'needle-file.ts' }],
+            matches: [{ path: 'src/app.ts', line: 7, text: 'const needle = true;' }],
+            truncated: false,
+          };
+        }
+        if (value === 'slow') {
+          return slow.promise;
+        }
+        if (value === 'fast') {
+          return {
+            files: [],
+            matches: [{ path: 'src/fast.ts', line: 3, text: 'fast result' }],
+            truncated: false,
+          };
+        }
+
+        return { files: [], matches: [], truncated: false };
+      }
+      if (url.includes('/file?')) {
+        return { size: 12, binary: false, tooBig: false, content: 'line\n'.repeat(10) };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+  const input = wrapper.get('input[data-action="code-search"]');
+  const searchCalls = () => calls.filter((url) => url.includes('/search?'));
+  const waitDebounce = async () => {
+    await new Promise((resolve) => { setTimeout(resolve, 340); });
+    await settle(flushPromises);
+  };
+
+  await input.setValue('n');
+  await waitDebounce();
+  assert.equal(searchCalls().length, 0);
+
+  await input.setValue('ne');
+  await input.setValue('needle');
+  await waitDebounce();
+
+  assert.equal(searchCalls().length, 1);
+  assert.equal(query(searchCalls()[0]).get('q'), 'needle');
+  assert.equal(wrapper.findAll('[data-search-kind="file"]').length, 1);
+  assert.equal(wrapper.findAll('[data-search-kind="match"]').length, 1);
+
+  await input.trigger('keydown', { key: 'Enter' });
+  await settle(flushPromises);
+  assert.equal(monacoState.fileEditors[0].revealed.at(-1), 1);
+
+  await wrapper.get('[data-search-kind="match"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(monacoState.fileEditors[0].revealed.at(-1), 7);
+
+  await input.setValue('slow');
+  await waitDebounce();
+  await input.setValue('fast');
+  await waitDebounce();
+  assert.match(wrapper.get('.code-search-results').text(), /fast result/);
+
+  slow.resolve({
+    files: [],
+    matches: [{ path: 'src/slow.ts', line: 1, text: 'slow result' }],
+    truncated: false,
+  });
+  await settle(flushPromises);
+  assert.doesNotMatch(wrapper.get('.code-search-results').text(), /slow result/);
+
+  await input.setValue('zz');
+  await waitDebounce();
+  assert.match(wrapper.get('.code-search-results').text(), /Ничего не найдено/);
+});
+
+test('amend подставляет сообщение HEAD и отправляется без staged-изменений', async (t) => {
+  const posts = [];
+  const { wrapper, flushPromises } = await mountGitPanel(t, {
+    headMessage: 'Старый заголовок\n\nСтарое тело',
+    log: [{ hash: 'abc1234', subject: 'Старый заголовок', when: 'сейчас' }],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+  }, {
+    post: async (url, body) => {
+      posts.push({ url, body });
+      return { ok: true, hash: 'def5678', subject: 'Старый заголовок' };
+    },
+  });
+  const amend = wrapper.get('input[data-action="amend"]');
+
+  assert.equal(amend.attributes('disabled'), undefined);
+  await amend.setValue(true);
+  assert.equal(wrapper.get('textarea.commit-message').element.value,
+    'Старый заголовок\n\nСтарое тело');
+  assert.equal(wrapper.get('button.commit-action').text(), 'Дополнить');
+  assert.equal(wrapper.get('button.commit-action').attributes('disabled'), undefined);
+
+  await wrapper.get('button.commit-action').trigger('click');
+  await settle(flushPromises);
+  assert.match(posts[0].url, /\/commit\?/);
+  assert.deepEqual(posts[0].body, {
+    message: 'Старый заголовок\n\nСтарое тело',
+    amend: true,
+  });
+});
+
+test('amend опубликованного HEAD недоступен и объясняет запрет force-push', async (t) => {
+  const { wrapper } = await mountGitPanel(t, {
+    headMessage: 'Опубликован',
+    log: [{ hash: 'abc1234', subject: 'Опубликован', when: 'сейчас' }],
+    tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
+  });
+  const amend = wrapper.get('input[data-action="amend"]');
+
+  assert.equal(amend.attributes('disabled'), '');
+  assert.match(amend.attributes('title'), /коммит уже отправлен.*push без force невозможен/i);
+});
+
+test('отмена локального HEAD требует подтверждения и возвращает сообщение в композер', async (t) => {
+  const posts = [];
+  const decisions = [false, true];
+  const { wrapper, flushPromises } = await mountGitPanel(t, {
+    headMessage: 'Второй коммит',
+    log: [
+      { hash: 'def5678', subject: 'Второй коммит', when: 'сейчас' },
+      { hash: 'abc1234', subject: 'Первый коммит', when: 'минуту назад' },
+    ],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+  }, {
+    post: async (url, body) => {
+      posts.push({ url, body });
+      return { ok: true, message: 'Второй коммит\n\nВозвращённое тело' };
+    },
+  });
+  globalThis.__codeViewConfirm = async () => decisions.shift() ?? false;
+  const undo = wrapper.get('button[data-action="undo-commit"]');
+
+  await undo.trigger('click');
+  await settle(flushPromises);
+  assert.equal(posts.length, 0);
+
+  await undo.trigger('click');
+  await settle(flushPromises);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/undo-commit\?/);
+  assert.deepEqual(posts[0].body, {});
+  assert.equal(wrapper.get('textarea.commit-message').element.value,
+    'Второй коммит\n\nВозвращённое тело');
+});
+
+test('отмена опубликованного HEAD недоступна с подсказкой', async (t) => {
+  const { wrapper } = await mountGitPanel(t, {
+    headMessage: 'Опубликован',
+    log: [
+      { hash: 'def5678', subject: 'Опубликован', when: 'сейчас' },
+      { hash: 'abc1234', subject: 'Первый', when: 'раньше' },
+    ],
+    tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
+  });
+  const undo = wrapper.get('button[data-action="undo-commit"]');
+
+  assert.equal(undo.attributes('disabled'), '');
+  assert.match(undo.attributes('title'), /коммит уже отправлен.*push без force невозможен/i);
 });
 
 test('Enter набирает тело сообщения, а коммит уходит по Ctrl+Enter', async (t) => {
@@ -1602,6 +2540,198 @@ test('шаг лесенки и направляющие живут в стиля
   assert.match(styles, /--tree-step:\s*\d+px/);
   assert.match(styles, /padding-left:\s*calc\(var\(--tree-lead\)\s*\+\s*var\(--depth,\s*0\)\s*\*\s*var\(--tree-step\)\)/);
   assert.match(styles, /background-image:\s*repeating-linear-gradient\(to right, var\(--tree-guide\)/);
+});
+
+test('действия шапки редактора несут подпись и подсказку, а стили не дают им сжиматься', async (t) => {
+  const git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    branch: 'main',
+    staged: [],
+    files: [{
+      binary: false,
+      tooBig: false,
+      path: 'src/a.js',
+      status: 'M',
+      add: 1,
+      del: 0,
+      group: 'work',
+      oldContent: 'old',
+      newContent: 'new',
+    }],
+    log: [],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  // Живой случай: с бейджем «в коммитах» и сводкой отрезка семь кнопок шапки ужимались до
+  // одной буквы — «История» превращалась в «И», и найти историю файла было невозможно.
+  // happy-dom раскладку не считает, поэтому контракт двойной: у каждой текстовой кнопки
+  // есть подсказка и отдельная подпись (её прячет контейнерный запрос, смысл остаётся в
+  // title), а стили запрещают сжатие кнопок и отдают ширину пути файла.
+  const actions = wrapper.findAll('.ehead button.ui-button:not(.ui-icon-button)');
+
+  assert.ok(actions.length >= 5, 'в шапке должны быть действия дифа, история, агент и ссылка');
+  for (const action of actions) {
+    assert.ok(action.attributes('title'), `у кнопки «${action.text()}» нет подсказки`);
+    assert.ok(action.find('.label').exists(), `у кнопки «${action.text()}» нет подписи .label`);
+    assert.ok(action.find('.glyph').exists(), `у кнопки «${action.text()}» нет значка .glyph`);
+  }
+
+  const source = await readFile(VIEW_PATH, 'utf8');
+  const styles = source.slice(source.indexOf('<style'));
+
+  assert.match(styles, /\.ehead > \.ui-button,\s*\.ehead > \.ui-icon-button \{[^}]*flex:\s*none/);
+  assert.match(styles, /\.epath \{[^}]*min-width:\s*0/);
+  assert.match(styles, /\.editorwrap \{[^}]*container:\s*code-editor \/ inline-size/);
+  assert.match(styles, /@container code-editor \(max-width: \d+px\) \{[^@]*\.ehead \.label \{ display: none; \}/);
+});
+
+test('обзор изменений занимает тело редактора и прокручивается внутри него', async () => {
+  const source = await readFile(webFile('src/views/code/PatchReview.vue'), 'utf8');
+  const styles = source.slice(source.indexOf('<style'));
+
+  // Живой случай: обзор на 24 файла обрезался снизу дока без прокрутки. Корень лежал в
+  // теле редактора обычным потоком с min-height: 100% — рос по содержимому, и overflow
+  // включать было нечему. Monaco там же живёт через position: absolute; inset: 0 —
+  // обзору положено то же, тогда overflow: auto прокручивает его внутри тела.
+  assert.match(styles, /\.patch-review \{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*overflow:\s*auto/);
+  assert.doesNotMatch(styles, /\.patch-review \{[^}]*min-height:\s*100%/);
+
+  // Второй живой случай: строка обзора — кнопка, а кнопка сжимается по содержимому даже как
+  // display: grid. Фон «+/−» обрывался на ширине самой длинной строки, правая половина
+  // экрана оставалась пустой. Строке нужна явная ширина хунка; хунк остаётся не уже
+  // самой длинной строки, чтобы длинный код прокручивался по горизонтали целиком.
+  assert.match(styles, /\.patch-line \{[^}]*width:\s*100%/);
+  assert.match(styles, /\.patch-hunk \{[^}]*min-width:\s*max-content/);
+  // Кнопка центрирует текст: на строке во всю ширину код уезжал в середину экрана.
+  assert.match(styles, /\.patch-line \{[^}]*text-align:\s*left/);
+});
+
+test('Monaco подключает шрифт значков, а фон изменённых строк различим на тёмной теме', async () => {
+  const source = await readFile(webFile('src/shared/monaco.ts'), 'utf8');
+
+  // Живой случай: знаки «+»/«−» и стрелки свёрнутых участков дифа рисовались квадратиками
+  // «▯» — это глифы шрифта codicon, а обвязка тянула Monaco без него (@font-face живёт в
+  // фиче codicon, не в editor.api). Фон строк на 8% прозрачности человек не различал.
+  assert.match(source, /import 'monaco-editor\/features\/codicon\/register';/);
+
+  const alpha = (key) => {
+    const match = source.match(new RegExp(`'${key}':\\s*'#[0-9a-f]{6}([0-9a-f]{2})'`, 'i'));
+
+    assert.ok(match, `в теме нет цвета ${key}`);
+
+    return parseInt(match[1], 16) / 255;
+  };
+
+  assert.ok(alpha('diffEditor.insertedLineBackground') >= 0.14, 'фон добавленных строк бледнее 14%');
+  assert.ok(alpha('diffEditor.removedLineBackground') >= 0.14, 'фон удалённых строк бледнее 14%');
+  assert.ok(alpha('diffEditorGutter.insertedLineBackground') >= 0.2, 'поле добавленных строк бледнее 20%');
+  assert.ok(alpha('diffEditorGutter.removedLineBackground') >= 0.2, 'поле удалённых строк бледнее 20%');
+});
+
+test('кнопки строки изменений лежат в одной обойме и не накладываются друг на друга', async (t) => {
+  const git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    branch: 'main',
+    staged: [],
+    files: [{
+      binary: false,
+      tooBig: false,
+      path: 'src/a.js',
+      status: 'M',
+      add: 16,
+      del: 9,
+      group: 'work',
+      oldContent: 'old',
+      newContent: 'new',
+    }],
+    log: [],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(async () => {});
+
+  // Живой случай: «Откатить» и «+» у одной строки рисовались в одной точке — общий скин
+  // прижимал КАЖДУЮ кнопку строки к правому краю абсолютно, в расчёте на одну кнопку.
+  // Теперь кнопки лежат в обойме .git-row-actions, а к краю прижата она одна.
+  const line = wrapper.get('.git-file-line[data-ui-row="code-change"]:not(.git-dir-line)');
+  const holders = line.findAll('.git-row-actions');
+
+  assert.equal(holders.length, 1);
+  assert.equal(holders[0].findAll('button.git-file-action').length, 2);
+
+  const skin = await readFile(webFile('src/styles/components/actions.css'), 'utf8');
+  const source = await readFile(VIEW_PATH, 'utf8');
+  const styles = source.slice(source.indexOf('<style'));
+
+  assert.doesNotMatch(skin, /code-row-action'\]\s*\{[^}]*position:\s*absolute/);
+  assert.match(styles, /\.git-row-actions \{[^}]*display:\s*flex/);
+  assert.match(styles, /\.git-row-actions \{[^}]*position:\s*absolute/);
+  // На указателе строка уступает обойме место справа, а не прячет цифры под кнопками;
+  // отступ самой строки — контрол, поэтому живёт в общем скине, а не в SFC.
+  assert.match(skin, /\[data-ui-row='code-change'\]:hover > \.ui-pressable,[^{]*\{[^}]*padding-right/);
+});
+
+test('режим «с текущими» включается подписанной кнопкой, а не значком', async (t) => {
+  const git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    branch: 'main',
+    staged: [],
+    files: [],
+    log: [{ hash: 'ccccccc', subject: 'c', when: 'сейчас' }],
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(async () => {});
+
+  // «±» никто не расшифровал; режим должен быть виден словами ещё до выбора коммитов.
+  const toggle = wrapper.get('[data-action="commits-with-work"]');
+
+  assert.equal(toggle.element.tagName, 'BUTTON');
+  assert.match(toggle.text(), /\+ текущие/);
+  assert.equal(toggle.attributes('aria-pressed'), 'true');
+  assert.ok(toggle.attributes('title'));
 });
 
 test('фон строки дерева задаёт общий скин и только background-color', async () => {
@@ -1825,3 +2955,699 @@ for (const failure of ['malformed', 'network']) {
     assert.equal(wrapper.findAll('.note').some((note) => note.text() === 'читаю…'), false);
   });
 }
+
+test('ленивый Git-диф рисует список сразу, кеширует файл и перечитывает после обновления', async (t) => {
+  const firstDiff = deferred();
+  const calls = [];
+  const snapshot = {
+    branch: 'main',
+    stat: '',
+    files: [{ path: 'app.js', status: 'M', add: 1, del: 1, binary: false, group: 'work' }],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: [],
+    headMessage: '',
+  };
+  let diffReads = 0;
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      if (url.includes('/file-diff?')) {
+        diffReads += 1;
+        if (diffReads === 1) return firstDiff.promise;
+        return {
+          path: 'app.js', status: 'M', binary: false, tooBig: false,
+          oldContent: 'before refresh', newContent: 'after refresh',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button.git-file[data-path="app.js"]').exists(), true);
+  assert.equal(wrapper.get('.ehead').text().includes('читаю…'), true);
+  assert.equal(monacoState.diffEditors.length, 0);
+
+  firstDiff.resolve({
+    path: 'app.js', status: 'M', binary: false, tooBig: false,
+    oldContent: 'before', newContent: 'after',
+  });
+  await settle(flushPromises);
+  assert.equal(monacoState.diffEditors[0].model.original.content, 'before');
+  assert.equal(diffReads, 1);
+
+  await wrapper.get('button.git-file[data-path="app.js"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(diffReads, 1, 'повторный выбор использует кеш снимка');
+
+  await wrapper.get('button[title="Обновить"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(diffReads, 2);
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'after refresh');
+  assert.ok(calls.some((url) => url.includes('group=work') && url.includes('path=app.js')));
+});
+
+test('«с текущими» включён по умолчанию: отрезок до HEAD и стороны файла читаются с диска', async (t) => {
+  const calls = [];
+  const snapshot = {
+    branch: 'main',
+    stat: '',
+    files: [{ path: 'work.js', status: 'M', add: 1, del: 0, binary: false }],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: ['ccccccc', 'bbbbbbb', 'aaaaaaa'].map((hash) => ({ hash, subject: hash, when: 'сейчас' })),
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      if (url.includes('/commits-diff?')) {
+        const params = query(url);
+        return {
+          branch: 'main',
+          stat: 'commit.js | 1 +',
+          files: [{ path: 'commit.js', status: 'M', add: 1, del: 0, binary: false }],
+          range: {
+            from: params.get('from').padEnd(40, '1'),
+            to: params.get('to').padEnd(40, '2'),
+            base: '0'.repeat(40),
+            commits: 1,
+            work: params.get('work') === '1',
+          },
+        };
+      }
+      if (url.includes('/file-diff?')) {
+        const params = query(url);
+        return {
+          path: params.get('path'),
+          status: 'M',
+          binary: false,
+          tooBig: false,
+          oldContent: 'old',
+          newContent: params.get('work') === '1' ? 'disk' : 'commit',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  // Боль владельца: диф нескольких коммитов «как обычный диф» — вместе с несохранёнными
+  // правками. Поэтому по умолчанию правая сторона отрезка до HEAD — рабочее дерево.
+  await wrapper.get('button.commit[data-hash="ccccccc"]').trigger('click');
+  await settle(flushPromises);
+  const rangeCall = calls.find((url) => url.includes('/commits-diff?'));
+  assert.equal(query(rangeCall).get('work'), '1');
+  assert.match(wrapper.get('.subhead[data-group="commits"] .subtitle').text(), /Коммит ccccccc \+ текущие/);
+  const fileCall = calls.find((url) => url.includes('/file-diff?') && url.includes('group=commits'));
+  assert.equal(query(fileCall).get('work'), '1');
+  assert.equal(query(fileCall).has('to'), false);
+  assert.equal(query(fileCall).get('base'), '0'.repeat(40));
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'disk');
+
+  const toggle = wrapper.get('[data-action="commits-with-work"]');
+  assert.equal(toggle.attributes('aria-pressed'), 'true');
+
+  // Выключение — обычный отрезок до коммита; настройка запоминается на устройстве.
+  await toggle.trigger('click');
+  await settle(flushPromises);
+  const committedCall = calls.filter((url) => url.includes('/commits-diff?')).at(-1);
+  assert.equal(query(committedCall).has('work'), false);
+  assert.equal(wrapper.get('.subhead[data-group="commits"] .subtitle').text().includes('текущие'), false);
+  assert.equal(localStorage.getItem('cockpit-code-commits-work'), '0');
+  const committedFile = calls.filter((url) => url.includes('/file-diff?') && url.includes('group=commits')).at(-1);
+  assert.equal(query(committedFile).has('work'), false);
+  assert.equal(query(committedFile).get('to'), 'ccccccc'.padEnd(40, '2'));
+
+  // Для отрезка, не доходящего до HEAD, режим недоступен и молча не применяется.
+  await toggle.trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-action="clear-commits"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.commit[data-hash="bbbbbbb"]').trigger('click');
+  await settle(flushPromises);
+  const olderCall = calls.filter((url) => url.includes('/commits-diff?')).at(-1);
+  assert.equal(query(olderCall).get('to'), 'bbbbbbb');
+  assert.equal(query(olderCall).has('work'), false);
+  const olderToggle = wrapper.get('[data-action="commits-with-work"]');
+  assert.equal(olderToggle.attributes('aria-disabled'), 'true');
+  assert.match(olderToggle.attributes('title'), /последнего коммита/);
+});
+
+test('при «+ текущие» слитый диф открывается по клику на файл в любой группе', async (t) => {
+  const calls = [];
+  const snapshot = {
+    branch: 'main',
+    stat: '',
+    files: [
+      { path: 'shared.js', status: 'M', add: 4, del: 0, binary: false },
+      { path: 'fresh.js', status: 'A', add: 2, del: 0, binary: false },
+    ],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: ['ccccccc', 'bbbbbbb'].map((hash) => ({ hash, subject: hash, when: 'сейчас' })),
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      if (url.includes('/commits-diff?')) {
+        const params = query(url);
+        const work = params.get('work') === '1';
+        return {
+          branch: 'main',
+          stat: '',
+          // С диском отрезок содержит и правку коммита в shared.js, и новый fresh.js.
+          files: work
+            ? [
+              { path: 'shared.js', status: 'M', add: 9, del: 1, binary: false },
+              { path: 'fresh.js', status: 'A', add: 2, del: 0, binary: false },
+            ]
+            : [{ path: 'shared.js', status: 'M', add: 5, del: 1, binary: false }],
+          range: {
+            from: params.get('from').padEnd(40, '1'),
+            to: params.get('to').padEnd(40, '2'),
+            base: '0'.repeat(40),
+            commits: 1,
+            work,
+          },
+        };
+      }
+      if (url.includes('/file-diff?')) {
+        const params = query(url);
+        return {
+          path: params.get('path'),
+          status: 'M',
+          binary: false,
+          tooBig: false,
+          oldContent: `old ${params.get('group')}`,
+          newContent: `new ${params.get('group')}${params.get('work') === '1' ? ' merged' : ''}`,
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.commit[data-hash="ccccccc"]').trigger('click');
+  await settle(flushPromises);
+
+  // Замечание владельца: чтобы увидеть слитые изменения, приходилось искать файл именно в
+  // группе коммитов. Теперь при включённом режиме клик по тому же файлу в «Не в коммите»
+  // показывает слитый диф отрезка, а строка рабочего дерева остаётся выбранной.
+  const fileCalls = () => calls.filter((url) => url.includes('/file-diff?'));
+  const workRow = wrapper.get('button.git-file[data-group="work"][data-path="shared.js"]');
+
+  await workRow.trigger('click');
+  await settle(flushPromises);
+  // Слитый диф shared.js уже был прочитан для группы коммитов — берётся из кеша, без
+  // второго запроса; строка рабочего дерева при этом остаётся выбранной.
+  assert.equal(workRow.classes().includes('sel'), true);
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'new commits merged');
+  assert.match(wrapper.get('.ehead').text(), /shared\.js.*в коммитах \+ текущие/s);
+  assert.equal(fileCalls().filter((url) => url.includes('path=shared.js') && url.includes('group=work')).length, 1);
+
+  // Новый файл только с диска в отрезке тоже есть — слитый диф равен его собственному.
+  await wrapper.get('button.git-file[data-group="work"][data-path="fresh.js"]').trigger('click');
+  await settle(flushPromises);
+  const freshCall = fileCalls().find((url) => url.includes('path=fresh.js'));
+  assert.equal(query(freshCall).get('group'), 'commits');
+
+  // Режим выключен — строка рабочего дерева показывает свой обычный диф.
+  await wrapper.get('[data-action="commits-with-work"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.git-file[data-group="work"][data-path="shared.js"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'new work');
+  assert.match(wrapper.get('.ehead').text(), /shared\.js.*в рабочем дереве/s);
+});
+
+test('каталог в группе индексируется и возвращается целиком, порциями по потолку сервера', async (t) => {
+  const entry = (path, group) => ({ path, status: 'M', add: 1, del: 0, binary: false, group });
+  const posts = [];
+  let git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    branch: 'main',
+    staged: [entry('lib/x.js', 'staged')],
+    files: [entry('src/a.js', 'work'), entry('src/deep/b.js', 'work'), entry('src-other/c.js', 'work'), entry('top.js', 'work')],
+    log: [],
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, body) {
+      posts.push({ url, body });
+      return { ok: true, changed: body.paths?.length || 0 };
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  // Замечание владельца: «+»/«−» были только у файлов, а каталог целиком — только терминалом.
+  // У строки каталога та же обойма: в индекс уходят все файлы группы под этим каталогом,
+  // граница — по «/», чтобы src не захватил src-other.
+  const dirLine = wrapper.get('.git-dir-line[data-ui-row="code-change"][data-dir="src"][data-group="work"]');
+  const stageDir = dirLine.get('[data-action="stage-dir"]');
+
+  assert.match(stageDir.attributes('title'), /src.*2 файла/);
+  await stageDir.trigger('click');
+  await settle(flushPromises);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/api\/code\/demo\/stage\?/);
+  assert.deepEqual(posts[0].body, { paths: ['src/a.js', 'src/deep/b.js'] });
+
+  const unstageDir = wrapper.get('.git-dir-line[data-dir="lib"][data-group="staged"] [data-action="unstage-dir"]');
+
+  await unstageDir.trigger('click');
+  await settle(flushPromises);
+  assert.match(posts[1].url, /\/api\/code\/demo\/unstage\?/);
+  assert.deepEqual(posts[1].body, { paths: ['lib/x.js'] });
+
+  // Каталог больше серверного потолка в 500 путей уходит порциями, а не отказом.
+  git = {
+    ...git,
+    files: Array.from({ length: 501 }, (_, index) => entry(`big/f${String(index).padStart(3, '0')}.js`, 'work')),
+  };
+  await wrapper.get('button[title="Обновить"]').trigger('click');
+  await settle(flushPromises);
+  posts.length = 0;
+  await wrapper.get('.git-dir-line[data-dir="big"][data-group="work"] [data-action="stage-dir"]').trigger('click');
+  await settle(flushPromises, 10);
+  assert.deepEqual(posts.map((post) => post.body.paths.length), [500, 1]);
+});
+
+test('дерево несохранённых изменений сворачивается по заголовку группы и помнит состояние', async (t) => {
+  const git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    branch: 'main',
+    staged: [],
+    files: [{ path: 'src/a.js', status: 'M', add: 1, del: 0, binary: false, group: 'work' }],
+    log: [{ hash: 'ccccccc', subject: 'c', when: 'сейчас' }],
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  // Замечание владельца: до списка коммитов приходилось прокручивать всё дерево правок.
+  const toggle = wrapper.get('.subhead[data-group="work"] [data-action="toggle-group"]');
+
+  assert.equal(toggle.attributes('aria-expanded'), 'true');
+  assert.equal(wrapper.findAll('button.git-file[data-group="work"]').length, 1);
+  await toggle.trigger('click');
+  await settle(flushPromises);
+  assert.equal(toggle.attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.findAll('button.git-file[data-group="work"]').length, 0);
+  // Счётчик и итог группы остаются в заголовке: свёрнуто — не значит пусто.
+  assert.equal(wrapper.get('.subhead[data-group="work"] .cnt').text(), '1');
+  assert.equal(wrapper.findAll('button.commit').length, 1);
+  assert.deepEqual(JSON.parse(localStorage.getItem('cockpit-code-collapsed-groups')), ['work']);
+
+  await toggle.trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.findAll('button.git-file[data-group="work"]').length, 1);
+  assert.deepEqual(JSON.parse(localStorage.getItem('cockpit-code-collapsed-groups')), []);
+});
+
+test('клики по коммитам строят общий отрезок, Shift заполняет промежуток и ✕ снимает выбор', async (t) => {
+  const calls = [];
+  const snapshot = {
+    branch: 'main',
+    stat: '',
+    files: [{ path: 'work.js', status: 'M', add: 1, del: 0, binary: false }],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: ['ccccccc', 'bbbbbbb', 'aaaaaaa'].map((hash) => ({ hash, subject: hash, when: 'сейчас' })),
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      if (url.includes('/commits-diff?')) {
+        const params = query(url);
+        const from = params.get('from');
+        const to = params.get('to');
+        return {
+          branch: 'main',
+          stat: 'commit.js | 1 +',
+          files: [{ path: 'commit.js', status: 'M', add: 1, del: 0, binary: false }],
+          range: {
+            from: from.padEnd(40, '1'),
+            to: to.padEnd(40, '2'),
+            base: '0'.repeat(40),
+            commits: from === to ? 1 : 3,
+            work: params.get('work') === '1',
+          },
+        };
+      }
+      if (url.includes('/file-diff?')) {
+        const params = query(url);
+        const filePath = params.get('path');
+        return {
+          path: filePath,
+          status: 'M',
+          binary: false,
+          tooBig: false,
+          oldContent: `old ${filePath}`,
+          newContent: `new ${filePath}`,
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.commit[data-hash="ccccccc"]').trigger('click');
+  await settle(flushPromises);
+  assert.match(wrapper.get('.subhead[data-group="commits"] .subtitle').text(), /Коммит ccccccc/);
+  assert.match(wrapper.get('.ehead').text(), /commit\.js.*в коммитах/s);
+  assert.equal(wrapper.get('.ehead .range-summary').text(), '1 файл, +1 −0');
+  assert.equal(wrapper.find(
+    '.subhead[data-group="commits"] [data-action="stage-all"], '
+    + '.subhead[data-group="commits"] [data-action="unstage-all"], '
+    + '.subhead[data-group="commits"] [data-action="discard-all"]',
+  ).exists(), false);
+
+  await wrapper.get('button.commit[data-hash="aaaaaaa"]').trigger('click');
+  await settle(flushPromises);
+  assert.match(wrapper.get('.subhead[data-group="commits"]').text(), /в отрезке ещё 1 коммит/);
+  assert.equal(wrapper.get('button.commit[data-hash="bbbbbbb"]').classes().includes('sel'), false);
+
+  await wrapper.get('button[data-action="clear-commits"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.commit[data-hash="ccccccc"]').trigger('click');
+  await wrapper.get('button.commit[data-hash="aaaaaaa"]').trigger('click', { shiftKey: true });
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button.commit[data-hash="bbbbbbb"]').classes().includes('sel'), true);
+  assert.equal(wrapper.find('.subhead[data-group="commits"] .group-note').exists(), false);
+
+  await wrapper.get('button[data-action="clear-commits"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.find('.subhead[data-group="commits"]').exists(), false);
+  assert.equal(wrapper.get('button.git-file[data-path="work.js"]').classes().includes('sel'), true);
+  assert.ok(calls.some((url) => query(url).get('from') === 'aaaaaaa'
+    && query(url).get('to') === 'ccccccc'));
+});
+
+test('«Вся ветка» показывает diff worktree, а клик по коммиту возвращает выбор отрезка', async (t) => {
+  const calls = [];
+  const log = ['ccccccc', 'bbbbbbb'].map((hash) => ({ hash, subject: hash, when: 'сейчас' }));
+  const snapshot = {
+    branch: 'task-46',
+    stat: '',
+    files: [],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log,
+    headMessage: '',
+  };
+  const api = {
+    async get(url) {
+      calls.push(url);
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return {
+          repos: [{
+            key: 'demo',
+            dir: '/demo',
+            trees: [mainTree('/demo'), worktree('/work/t46', 't46', 'task-46', 't46')],
+          }],
+        };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return snapshot;
+      if (url.includes('/branch-diff?')) {
+        return {
+          branch: 'task-46',
+          stat: 'branch.js | 1 +',
+          files: [{ path: 'branch.js', status: 'M', add: 1, del: 0, binary: false }],
+          range: {
+            from: 'b'.repeat(40), to: 'c'.repeat(40), base: 'a'.repeat(40), commits: 2,
+            work: query(url).get('work') === '1',
+          },
+        };
+      }
+      if (url.includes('/commits-diff?')) {
+        return {
+          branch: 'task-46',
+          stat: 'one.js | 1 +',
+          files: [{ path: 'one.js', status: 'M', add: 1, del: 0, binary: false }],
+          range: {
+            from: 'c'.repeat(40), to: 'c'.repeat(40), base: 'b'.repeat(40), commits: 1,
+            work: query(url).get('work') === '1',
+          },
+        };
+      }
+      if (url.includes('/file-diff?')) {
+        const filePath = query(url).get('path');
+        return {
+          path: filePath,
+          status: 'M',
+          binary: false,
+          tooBig: false,
+          oldContent: 'old',
+          newContent: 'new',
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    storage: { 'cockpit-code-context:demo': JSON.stringify({
+      v: 1,
+      repoKey: 'demo',
+      treePath: '/work/t46',
+    }) },
+  });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-action="branch-diff"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.match(wrapper.get('.subhead[data-group="commits"] .subtitle').text(), /Вся ветка · 2 коммита/);
+  assert.ok(calls.some((url) => url.includes('/branch-diff?')));
+
+  await wrapper.get('button.commit[data-hash="ccccccc"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.match(wrapper.get('.subhead[data-group="commits"] .subtitle').text(), /Коммит ccccccc/);
+  assert.ok(calls.some((url) => url.includes('/commits-diff?')));
+});
+
+test('«Вся ветка» недоступна у основного дерева без upstream и объясняет причину', async (t) => {
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main', stat: '', files: [], staged: [], log: [], headMessage: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  const branch = wrapper.get('button[data-action="branch-diff"]');
+
+  assert.equal(branch.attributes('disabled'), '');
+  assert.match(branch.attributes('title'), /нет upstream/);
+});
+
+test('chat-done и возврат вкладки тихо обновляют Git одним запросом в полёте', async (t) => {
+  const pending = deferred();
+  let gitReads = 0;
+  const snapshot = (add) => ({
+    branch: 'main',
+    stat: '',
+    files: [{ path: 'src/app.js', status: 'M', add, del: 0, binary: false }],
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: [],
+    headMessage: '',
+  });
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) {
+        gitReads += 1;
+        if (gitReads === 2) return pending.promise;
+        return snapshot(gitReads);
+      }
+      if (url.includes('/file-diff?')) {
+        return {
+          path: 'src/app.js', status: 'M', binary: false, tooBig: false,
+          oldContent: 'old', newContent: `new ${gitReads}`,
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { browser, wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button.git-dir[data-path="src"]').trigger('click');
+  assert.equal(wrapper.get('button.git-dir[data-path="src"]').attributes('aria-expanded'), 'false');
+
+  globalThis.__codeViewSse('chat-done', {});
+  await waitFor(() => gitReads === 2, 'chat-done не запустил тихое обновление');
+  globalThis.__codeViewSse('chat-done', {});
+  globalThis.__codeViewSse('chat-done', {});
+  await settle(flushPromises);
+  assert.equal(gitReads, 2, 'поверх летящего чтения появился второй запрос');
+
+  pending.resolve(snapshot(2));
+  await waitFor(() => gitReads === 3, 'отложенное обновление не стартовало после ответа');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button.git-dir[data-path="src"]').attributes('aria-expanded'), 'false');
+
+  Object.defineProperty(browser.document, 'visibilityState', {
+    value: 'hidden', configurable: true,
+  });
+  browser.document.dispatchEvent(new browser.Event('visibilitychange'));
+  await settle(flushPromises);
+  assert.equal(gitReads, 3);
+
+  Object.defineProperty(browser.document, 'visibilityState', {
+    value: 'visible', configurable: true,
+  });
+  browser.document.dispatchEvent(new browser.Event('visibilitychange'));
+  await waitFor(() => gitReads === 4, 'возврат видимой вкладки не обновил Git');
+
+  await wrapper.setProps({ active: false });
+  globalThis.__codeViewSse('chat-done', {});
+  browser.document.dispatchEvent(new browser.Event('visibilitychange'));
+  await settle(flushPromises);
+  assert.equal(gitReads, 4, 'неактивная панель не должна обновляться');
+});
+
+test('вкладка «Код» обновляет файл и Git-метки, но не перечитывает каталоги', async (t) => {
+  let listReads = 0;
+  let fileReads = 0;
+  let gitReads = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        listReads += 1;
+        return query(url).get('dir') === 'src'
+          ? { entries: [{ name: 'app.js', dir: false }] }
+          : { entries: [{ name: 'src', dir: true }] };
+      }
+      if (url.includes('/file?')) {
+        fileReads += 1;
+        return { content: `version ${fileReads}`, binary: false, tooBig: false, size: 9 };
+      }
+      if (url.includes('/git?')) {
+        gitReads += 1;
+        return {
+          branch: 'main', stat: '', staged: [], log: [], headMessage: '',
+          files: [{
+            path: 'src/app.js', status: gitReads === 1 ? 'M' : 'A',
+            add: 1, del: 0, binary: false,
+          }],
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+
+  assert.equal(gitReads, 1, 'вкладка файлов читает дешёвый Git-снимок при активации');
+  assert.equal(wrapper.get('button[data-dir-path="src"] .git-dir-dot').exists(), true);
+
+  await wrapper.get('button[data-dir-path="src"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button[data-file-path="src/app.js"]').attributes('data-status'), 'M');
+
+  await wrapper.get('button[data-file-path="src/app.js"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(listReads, 2);
+  assert.equal(fileReads, 1);
+
+  globalThis.__codeViewSse('chat-done', {});
+  await waitFor(() => fileReads === 2 && gitReads === 2,
+    'chat-done не перечитал открытый файл и Git-метки');
+  await settle(flushPromises);
+
+  assert.equal(listReads, 2);
+  assert.equal(wrapper.get('button[data-file-path="src/app.js"]').attributes('data-status'), 'A');
+  assert.equal(monacoState.fileEditors[0].model.content, 'version 2');
+});

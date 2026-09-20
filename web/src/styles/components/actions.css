@@ -433,6 +433,31 @@
   background-color: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+/* Коммит в журнале — такая же плотная строка навигации, но с отдельной парой
+   «короткий hash + тема». Скин живёт здесь, чтобы экран не переопределял размеры
+   и интерактивные состояния базового контрола. */
+.ui-pressable[data-context='code-commit-row'] {
+  width: 100%;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='code-commit-row']:hover {
+  background-color: var(--surface);
+}
+
+.ui-pressable[data-context='code-commit-row']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.ui-pressable[data-context='code-commit-row'][aria-pressed='true'] {
+  background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 /* Кадр записи в черновике задачи раздела «Видео». Это не кнопка формы, а само превью,
    которое открывают крупно: отступов и фона у него нет, рамка принадлежит картинке.
    Отказ человека от кадра ОБЕСЦВЕЧИВАЕТ превью, но оставляет его на экране — решение
@@ -508,20 +533,61 @@
   color: var(--accent);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .ui-icon-button[data-context='code-row-action'] {
-    position: absolute;
-    top: 50%;
-    right: 2px;
-    transform: translateY(-50%);
-    opacity: 0;
-    pointer-events: none;
-  }
+/* Заголовок группы изменений — кнопка сворачивания дерева: шеврон рисуется
+   псевдоэлементом, чтобы первым span оставался сам текст заголовка. */
+.ui-pressable[data-context='code-group-toggle'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
 
-  [data-ui-row='code-change']:hover .ui-icon-button[data-context='code-row-action'],
-  [data-ui-row='code-change']:focus-within .ui-icon-button[data-context='code-row-action'] {
-    opacity: 1;
-    pointer-events: auto;
+.ui-pressable[data-context='code-group-toggle']::before {
+  content: '▾';
+  flex: none;
+  font-size: 10px;
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='code-group-toggle'][aria-expanded='false']::before {
+  content: '▸';
+}
+
+/* Текстовая кнопка заголовка группы («+ текущие»): тот же рост и ритм, что у значков. */
+.ui-button[data-context='code-group-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--ink-mid);
+}
+
+.ui-button[data-context='code-group-action']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-button[data-context='code-group-action'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ui-button[data-context='code-group-action'][aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Кнопки строки изменений живут в обойме строки (.git-row-actions панели «Код»): к краю
+   прижата обойма, а не каждая кнопка — иначе две кнопки ложились в одну точку. На указателе
+   строка уступает обойме место справа: число кнопок приходит переменной --row-actions. */
+@media (hover: hover) and (pointer: fine) {
+  [data-ui-row='code-change']:hover > .ui-pressable,
+  [data-ui-row='code-change']:focus-within > .ui-pressable {
+    padding-right: calc(var(--row-actions, 1) * 28px + 4px);
   }
 }
 

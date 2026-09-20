@@ -4,6 +4,9 @@
 // для read-only просмотра языковые сервисы не нужны — только подсветка.
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/basic-languages/monaco.contribution';
+// Шрифт значков Monaco (@font-face codicon) живёт в отдельной фиче, а не в editor.api.
+// Без него знаки «+»/«−» дифа и стрелки свёрнутых участков — квадратики запасного шрифта.
+import 'monaco-editor/features/codicon/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 
 // Воркер один: editor.worker (в нём же считается сравнение для дифа).
@@ -24,10 +27,15 @@ monaco.editor.defineTheme('cockpit-dark', {
     'editor.foreground': '#e7eaf0',
     'editorLineNumber.foreground': '#3a4453',
     'editorLineNumber.activeForeground': '#8a93a3',
-    'diffEditor.insertedLineBackground': '#3fb95015',
-    'diffEditor.removedLineBackground': '#f0564c15',
-    'diffEditor.insertedTextBackground': '#3fb95028',
-    'diffEditor.removedTextBackground': '#f0564c28',
+    // Фон строк и полей дифа: на тёмной теме 8% не читались как «добавлено/удалено».
+    'diffEditor.insertedLineBackground': '#3fb95026',
+    'diffEditor.removedLineBackground': '#f0564c26',
+    'diffEditor.insertedTextBackground': '#3fb95045',
+    'diffEditor.removedTextBackground': '#f0564c45',
+    'diffEditorGutter.insertedLineBackground': '#3fb95040',
+    'diffEditorGutter.removedLineBackground': '#f0564c40',
+    'diffEditorOverview.insertedForeground': '#3fb950aa',
+    'diffEditorOverview.removedForeground': '#f0564caa',
     'editorWidget.background': '#151b24',
     'editorOverviewRuler.border': '#00000000',
     'scrollbarSlider.background': '#2e374288',

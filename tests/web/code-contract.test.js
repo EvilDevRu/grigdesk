@@ -2,15 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   CodeContractError,
+  parseCodeBlame,
   parseCodeRoots,
+  parseCodeSearch,
   parseCodeRepos,
   parseCodeProjects,
   parseCodeDirectory,
   parseCodeFile,
+  parseCodeFileDiff,
+  parseCodeFileLog,
   parseCodeGit,
+  parseCodePatch,
+  parseCodeCommitsDiff,
   parseCodeStageResponse,
   parseCodeCommitResponse,
+  parseCodeFetchResponse,
   parseCodePushResponse,
+  parseCodeUndoCommitResponse,
   parseCodeCommitTitleResponse,
 } from '../../shared/codeContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
@@ -20,11 +28,21 @@ import { codeRoots, loadCodeRoots } from '../../web/src/features/code/links.ts';
 const tracking = { detached: false, upstream: '', ahead: 0, behind: 0 };
 const file = {
   path: 'src/demo.ts', status: 'M', add: 1, del: 0,
-  binary: false, tooBig: false, oldContent: '', newContent: 'export {};',
+  binary: false,
+};
+const fileDiff = {
+  path: 'src/demo.ts', status: 'M', binary: false, tooBig: false,
+  oldContent: '', newContent: 'export {};',
 };
 const root = { project: 'demo', repo: 'main', root: '/repo', main: true, branch: 'main' };
 const tree = { path: '/repo', main: true, name: 'repo', task: '', branch: 'main' };
-const git = { branch: 'main', stat: '', files: [file], staged: [], tracking, log: [] };
+const git = { branch: 'main', stat: '', files: [file], staged: [], tracking, log: [], headMessage: '' };
+const commitsDiff = {
+  branch: 'main',
+  stat: ' src/demo.ts | 1 +',
+  files: [file],
+  range: { from: 'a'.repeat(40), to: 'b'.repeat(40), base: 'c'.repeat(40), commits: 1, work: false },
+};
 const contracts = [
   [parseCodeRoots, { roots: [root] }],
   [parseCodeRepos, { repos: [{ key: 'main', dir: '/repo', trees: [tree] }] }],
@@ -32,9 +50,27 @@ const contracts = [
   [parseCodeDirectory, { entries: [{ name: 'src', dir: true }] }],
   [parseCodeFile, { size: 10, binary: false, tooBig: false, content: 'export {};' }],
   [parseCodeGit, git],
+  [parseCodePatch, { patch: 'diff --git a/a b/a\n', truncated: false }],
+  [parseCodeFileDiff, fileDiff],
+  [parseCodeFileLog, { entries: [{
+    hash: 'a'.repeat(40), base: 'b'.repeat(40), subject: 'Изменение',
+    when: 'сейчас', path: 'src/demo.ts',
+  }] }],
+  [parseCodeBlame, { lines: [{
+    line: 1, hash: 'a'.repeat(40), base: 'b'.repeat(40), author: 'Анна',
+    when: 'сейчас', subject: 'Изменение',
+  }] }],
+  [parseCodeSearch, {
+    files: [{ path: 'src/demo.ts' }],
+    matches: [{ path: 'src/demo.ts', line: 2, text: 'demo' }],
+    truncated: false,
+  }],
+  [parseCodeCommitsDiff, commitsDiff],
   [parseCodeStageResponse, { ok: true, changed: 1 }],
   [parseCodeCommitResponse, { ok: true, hash: 'abc123', subject: 'Изменение' }],
   [parseCodePushResponse, { ok: true, branch: 'main', remote: 'origin', published: false, tracking }],
+  [parseCodeFetchResponse, { ok: true, remote: 'origin', tracking }],
+  [parseCodeUndoCommitResponse, { ok: true, message: 'Предыдущее сообщение' }],
   [parseCodeCommitTitleResponse, { ok: true, title: 'Изменение', model: 'test/demo', effort: null, truncated: false }],
 ];
 
@@ -48,10 +84,27 @@ test('контракты чтения и действий принимают JSO
   assert.deepEqual(parseCodeGit({ ...git, files: [{ ...file, group: 'staged', oldPath: 'old.ts' }] }).files,
     [{ ...file, group: 'staged', oldPath: 'old.ts' }]);
   assert.equal('oldPath' in parseCodeGit(git).files[0], false);
+  assert.equal(parseCodeGit({ ...git, tracking: { ...tracking, remote: 'origin' } }).tracking.remote,
+    'origin');
 });
 
 test('повреждённый элемент отклоняет весь ответ до обновления состояния', () => {
   assert.throws(() => parseCodeGit({ ...git, files: [file, { ...file, add: '1' }] }), /git\.files\[1\]\.add/);
+  assert.throws(() => parseCodeFileDiff({ ...fileDiff, tooBig: 'да' }), /fileDiff\.tooBig/);
+  assert.throws(() => parseCodeCommitsDiff({ ...commitsDiff, range: undefined }), /commitsDiff\.range/);
+  // «С текущими изменениями» — часть контракта: без флага клиент не знает, куда слать file-diff.
+  assert.throws(() => parseCodeCommitsDiff({
+    ...commitsDiff,
+    range: { ...commitsDiff.range, work: undefined },
+  }), /range\.work/);
+  assert.throws(() => parseCodeCommitsDiff({
+    ...commitsDiff,
+    range: { ...commitsDiff.range, work: '1' },
+  }), /range\.work/);
+  assert.throws(() => parseCodeCommitsDiff({
+    ...commitsDiff,
+    range: { ...commitsDiff.range, commits: '1' },
+  }), /commitsDiff\.range\.commits/);
   assert.throws(() => parseCodeGit({ ...git, tracking: { ...tracking, ahead: Infinity } }), /tracking\.ahead/);
   for (const invalid of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => parseCodeGit({ ...git, files: [{ ...file, add: invalid }] }), /files\[0\]\.add/);
@@ -110,6 +163,8 @@ test('адаптер не выдаёт повреждённый HTTP JSON за �
   await assert.rejects(codeApi.git(context), CodeContractError);
   await assert.rejects(codeApi.commit(context, 'Название'), CodeContractError);
   await assert.rejects(codeApi.push(context), CodeContractError);
+  await assert.rejects(codeApi.fetch(context), CodeContractError);
+  await assert.rejects(codeApi.undoCommit(context), CodeContractError);
   await assert.rejects(codeApi.commitMessage(context), CodeContractError);
 });
 

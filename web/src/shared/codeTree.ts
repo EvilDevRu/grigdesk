@@ -1,7 +1,12 @@
 // Чистая модель плагина «Код»: рабочие контексты и клиентское дерево Git-изменений.
 // Здесь намеренно нет Vue/localStorage/API, чтобы правила можно было проверить отдельно.
 
-import type { CodeRepo, CodeGitFile, CodeWorktree } from '../../../shared/codeContracts.ts';
+import type {
+  CodeGitEntry,
+  CodeGitLogEntry,
+  CodeRepo,
+  CodeWorktree,
+} from '../../../shared/codeContracts.ts';
 
 export interface CodeContext {
   id: string;
@@ -17,13 +22,13 @@ export interface CodeContext {
   label: string;
 }
 
-export type GitGroupId = 'staged' | 'work';
+export type GitGroupId = 'staged' | 'work' | 'commits';
 export type GitStatBlock = 'add' | 'del' | 'none';
 
 export interface GitNode {
   name: string;
   path: string;
-  file: CodeGitFile | null;
+  file: CodeGitEntry | null;
   children: Map<string, GitNode>;
 }
 
@@ -38,7 +43,7 @@ interface GitRowBase {
 
 export interface GitFileRow extends GitRowBase {
   kind: 'file';
-  file: CodeGitFile;
+  file: CodeGitEntry;
 }
 
 export interface GitDirectoryRow extends GitRowBase {
@@ -54,16 +59,18 @@ export interface GitGroupStat {
 
 interface GitGroupSource {
   id: GitGroupId;
-  files: readonly CodeGitFile[];
+  files: readonly CodeGitEntry[];
   title: string;
   hint: string;
+  mutable: boolean;
+  note?: string;
 }
 
 export interface GitGroup extends GitGroupSource {
   tree: GitNode;
   rows: (GitFileRow | GitDirectoryRow)[];
   list: {
-    file: CodeGitFile;
+    file: CodeGitEntry;
     name: string;
     dir: string;
   }[];
@@ -71,9 +78,32 @@ export interface GitGroup extends GitGroupSource {
 }
 
 type GitPayload = {
-  staged?: readonly CodeGitFile[];
-  files?: readonly CodeGitFile[];
+  staged?: readonly CodeGitEntry[];
+  files?: readonly CodeGitEntry[];
 } | null | undefined;
+export interface TreeDecorations {
+  files: Map<string, string>;
+  directories: Set<string>;
+}
+export interface CommitGitGroup {
+  files: readonly CodeGitEntry[];
+  from: string;
+  to: string;
+  commits: number;
+  selected: number;
+  mode?: 'selection' | 'branch';
+  // Правая сторона — рабочее дерево: коммиты плюс несохранённые правки одним дифом.
+  work?: boolean;
+}
+export interface AskAgentDraftOptions {
+  label: string;
+  branch: string;
+  absPath: string;
+  line: number;
+  lines?: { from: number; to: number };
+  snippet?: string;
+  patch?: string;
+}
 type StoredContext = Pick<CodeContext, 'repoKey' | 'treePath'>;
 
 const STORED_CONTEXT_VERSION = 1;
@@ -269,7 +299,7 @@ function gitNode(name = '', path = ''): GitNode {
  * Собирает дерево путей, сохраняя ссылки на исходные объекты изменений.
  * Один узел может одновременно содержать удалённый файл и новый каталог.
  */
-export function buildGitTree(files: readonly CodeGitFile[] | null | undefined) {
+export function buildGitTree(files: readonly CodeGitEntry[] | null | undefined) {
   const root = gitNode();
 
   for (const file of listOrEmpty(files)) {
@@ -358,7 +388,7 @@ export function gitRef(group: GitGroupId | '', path: string) {
   return group ? `${group}:${path}` : String(path);
 }
 
-function fileRow(node: GitNode, file: CodeGitFile, depth: number, group: GitGroupId | ''): GitFileRow {
+function fileRow(node: GitNode, file: CodeGitEntry, depth: number, group: GitGroupId | ''): GitFileRow {
   return {
     kind: 'file',
     key: group ? `${group}:file:${node.path}` : `file:${node.path}`,
@@ -436,7 +466,7 @@ export const GIT_STAT_BLOCKS = 5;
  * исчезать с полоски. Остаток — нейтральный.
  */
 export function gitGroupStat(
-  files: readonly Pick<CodeGitFile, 'add' | 'del'>[] | null | undefined,
+  files: readonly Pick<CodeGitEntry, 'add' | 'del'>[] | null | undefined,
 ): GitGroupStat {
   let add = 0;
   let del = 0;
@@ -470,6 +500,45 @@ export function gitGroupStat(
 }
 
 /**
+ * Сливает статусы индекса и рабочего дерева для обычного файлового дерева.
+ * Рабочая правка одного пути сильнее staged-снимка; каталог получает метку за
+ * любого потомка, а переименование относится только к новому имени.
+ */
+export function treeDecorations(payload: GitPayload): TreeDecorations {
+  const files = new Map<string, string>();
+  const directories = new Set<string>();
+
+  for (const entry of [...listOrEmpty(payload?.staged), ...listOrEmpty(payload?.files)]) {
+    files.set(entry.path, entry.status);
+
+    const parts = entry.path.split('/');
+
+    parts.pop();
+
+    for (let index = 1; index <= parts.length; index += 1) {
+      directories.add(parts.slice(0, index).join('/'));
+    }
+  }
+
+  return { files, directories };
+}
+
+/**
+ * Склоняет счётчик коммитов для заголовка и подписи группы: «1 коммит», «3 коммита»,
+ * «12 коммитов». Хвост 11…14 — исключение русского множественного числа: без него
+ * живой отрезок из четырнадцати коммитов подписывался как «12 коммита».
+ */
+function commitCountLabel(count: number) {
+  const tail = count % 100;
+  const digit = count % 10;
+  const word = tail >= 11 && tail <= 14
+    ? 'коммитов'
+    : digit === 1 ? 'коммит' : digit >= 2 && digit <= 4 ? 'коммита' : 'коммитов';
+
+  return `${count} ${word}`;
+}
+
+/**
  * Группы изменений панели «Код» — как Source Control в VS Code: сначала индекс,
  * затем рабочее дерево. Пустая группа не рисуется вовсе.
  *
@@ -478,7 +547,11 @@ export function gitGroupStat(
  * и привычное «Не в коммите» остаётся точным. Как только индекс не пуст, «не в
  * коммите» верно уже для обеих групп, и разделяющим становится сам индекс.
  */
-export function buildGitGroups(payload: GitPayload, openDirs: ReadonlySet<string>): GitGroup[] {
+export function buildGitGroups(
+  payload: GitPayload,
+  openDirs: ReadonlySet<string>,
+  commits?: CommitGitGroup | null,
+): GitGroup[] {
   const staged = listOrEmpty(payload?.staged);
   const work = listOrEmpty(payload?.files);
   const sources: [GitGroupSource, GitGroupSource] = [
@@ -487,6 +560,7 @@ export function buildGitGroups(payload: GitPayload, openDirs: ReadonlySet<string
       files: staged,
       title: 'В индексе',
       hint: 'git add уже забрал эти правки — они уедут в следующий коммит',
+      mutable: true,
     },
     {
       id: 'work',
@@ -495,6 +569,7 @@ export function buildGitGroups(payload: GitPayload, openDirs: ReadonlySet<string
       hint: staged.length
         ? 'правки поверх индекса: в коммит они пока не попадут'
         : 'несохранённые правки рабочего дерева',
+      mutable: true,
     },
   ];
   const groups = sources
@@ -514,34 +589,188 @@ export function buildGitGroups(payload: GitPayload, openDirs: ReadonlySet<string
       };
     });
 
-  if (groups.length) {
-    return groups;
+  if (!groups.length) {
+    // Чистое дерево: одна пустая группа остаётся, чтобы панели было куда поставить
+    // заголовок, переключатель вида и честное «изменений нет».
+    groups.push({
+      ...sources[1],
+      tree: buildGitTree([]),
+      rows: [],
+      list: [],
+      stat: gitGroupStat([]),
+    });
   }
-  // Чистое дерево: одна пустая группа остаётся, чтобы панели было куда поставить
-  // заголовок, переключатель вида и честное «изменений нет».
-  return [{
-    ...sources[1],
-    tree: buildGitTree([]),
-    rows: [],
-    list: [],
-    stat: gitGroupStat([]),
-  }];
+
+  if (commits) {
+    const tree = buildGitTree(commits.files);
+    const one = commits.from === commits.to;
+    const hidden = Math.max(0, commits.commits - commits.selected);
+    const range = commits.mode === 'branch'
+      ? `Вся ветка · ${commitCountLabel(commits.commits)}`
+      : (one ? `Коммит ${commits.from}` : `Коммиты ${commits.from}…${commits.to}`);
+    // «+ текущие» — в заголовке, а не только в подсказке: человек должен видеть, что в
+    // дифе есть и несохранённые правки, иначе он ищет их в отдельной группе.
+    const title = commits.work ? `${range} + текущие` : range;
+    const hint = commits.work
+      ? 'слева — до первого выбранного коммита, справа — файл на диске с несохранёнными правками'
+      : 'слева — до первого выбранного коммита, справа — после последнего';
+
+    groups.push({
+      id: 'commits',
+      files: commits.files,
+      title,
+      hint,
+      mutable: false,
+      ...(hidden ? { note: `в отрезке ещё ${commitCountLabel(hidden)}` } : {}),
+      tree,
+      rows: flattenGitTree(tree, openDirs, 'commits'),
+      list: commits.files.map((file) => ({
+        file,
+        ...splitGitPath(file.path),
+      })),
+      stat: gitGroupStat(commits.files),
+    });
+  }
+
+  return groups;
 }
 
 /**
  * Возвращает каталоги обеих групп ключами «группа:путь» для gitOpenDirs.
  * Одинаковые пути индекса и рабочего дерева остаются независимыми.
  */
-export function gitGroupDirectoryPaths(payload: GitPayload) {
+export function gitGroupDirectoryPaths(payload: GitPayload, commits?: CommitGitGroup | null) {
   const paths = new Set<string>();
 
-  for (const group of buildGitGroups(payload, new Set())) {
+  for (const group of buildGitGroups(payload, new Set(), commits)) {
     for (const dir of gitDirectoryPaths(group.tree)) {
       paths.add(gitRef(group.id, dir));
     }
   }
 
   return paths;
+}
+
+/**
+ * Возвращает старую и новую границы выбранного отрезка в порядке журнала.
+ * Неизвестные хеши не участвуют в результате.
+ */
+export function commitRangeBounds(
+  log: readonly CodeGitLogEntry[],
+  selected: ReadonlySet<string>,
+): { from: string; to: string } | null {
+  const indexes = log
+    .map((entry, index) => selected.has(entry.hash) ? index : -1)
+    .filter((index) => index >= 0);
+
+  if (!indexes.length) {
+    return null;
+  }
+
+  const newest = Math.min(...indexes);
+  const oldest = Math.max(...indexes);
+
+  return {
+    from: log[oldest]?.hash || '',
+    to: log[newest]?.hash || '',
+  };
+}
+
+/**
+ * Добавляет либо снимает один коммит, не меняя исходный Set.
+ * Пустой хеш никогда не добавляется в выбор.
+ */
+export function toggleCommitSelection(selected: ReadonlySet<string>, hash: string) {
+  const next = new Set(selected);
+
+  if (next.has(hash)) {
+    next.delete(hash);
+  } else if (hash) {
+    next.add(hash);
+  }
+
+  return next;
+}
+
+/**
+ * Shift-выбор добавляет весь видимый отрезок между якорем и текущей строкой.
+ * Потерянный якорь сводит действие к обычному переключению строки.
+ */
+export function extendCommitSelection(
+  log: readonly CodeGitLogEntry[],
+  selected: ReadonlySet<string>,
+  anchor: string,
+  hash: string,
+) {
+  const start = log.findIndex((entry) => entry.hash === anchor);
+  const end = log.findIndex((entry) => entry.hash === hash);
+
+  if (start < 0 || end < 0) {
+    return toggleCommitSelection(selected, hash);
+  }
+
+  const next = new Set(selected);
+
+  for (let index = Math.min(start, end); index <= Math.max(start, end); index += 1) {
+    const entry = log[index];
+
+    if (entry) {
+      next.add(entry.hash);
+    }
+  }
+
+  return next;
+}
+
+/**
+ * Удаляет выбор хешей, которых больше нет в свежем журнале.
+ * Исходный Set остаётся неизменным для реактивного присваивания.
+ */
+export function pruneCommitSelection(
+  log: readonly CodeGitLogEntry[],
+  selected: ReadonlySet<string>,
+) {
+  const available = new Set(log.map((entry) => entry.hash));
+
+  return new Set([...selected].filter((hash) => available.has(hash)));
+}
+
+/**
+ * Пути файлов группы под каталогом. Граница — только по «/»: «src» не должен захватить
+ * «src-other». Порядок — как в группе, чтобы запрос к серверу был воспроизводим.
+ */
+export function groupDirectoryFiles(files: readonly CodeGitEntry[], dir: string): string[] {
+  if (!dir) {
+    return [];
+  }
+
+  const prefix = `${dir}/`;
+
+  return files.filter((file) => file.path.startsWith(prefix)).map((file) => file.path);
+}
+
+/**
+ * Режет список на порции не длиннее потолка. Нужно действиям каталога: сервер принимает
+ * не больше 500 путей за раз, а каталог бывает больше — тогда действие идёт несколькими
+ * последовательными запросами вместо отказа.
+ */
+export function chunkList<Item>(items: readonly Item[], size: number): Item[][] {
+  const chunks: Item[][] = [];
+  const step = Math.max(1, Math.floor(size));
+
+  for (let index = 0; index < items.length; index += step) {
+    chunks.push(items.slice(index, index + step));
+  }
+
+  return chunks;
+}
+
+/**
+ * Стабильный ключ снимка сторон: путь может содержать любой печатный разделитель.
+ * JSON-кортеж не допускает коллизий между группой, путём и диапазоном.
+ */
+export function fileDiffKey(group: GitGroupId, path: string, range = '') {
+  return JSON.stringify([group, path, range]);
 }
 
 /**
@@ -560,4 +789,67 @@ export function reconcileGitOpenDirs(
   }
 
   return new Set([...next].filter((path) => !previousDirs.has(path) || previousOpen.has(path)));
+}
+
+const DRAFT_CONTROL_RE = /[\u0000-\u001f\u007f]/u;
+const DRAFT_CONTROL_GLOBAL_RE = /[\u0000-\u001f\u007f]/gu;
+
+/**
+ * Ограничивает многострочный фрагмент по строкам и сообщает об отсечённом хвосте.
+ * CRLF нормализуется до LF, чтобы итог одинаково выглядел на разных рабочих копиях.
+ */
+function draftLines(value: string, limit: number) {
+  const lines = value.replace(/\r\n?/gu, '\n').split('\n');
+  const truncated = lines.length > limit;
+  const visible = lines.slice(0, limit);
+
+  if (truncated) {
+    visible.push('…обрезано');
+  }
+
+  return visible.join('\n');
+}
+
+/**
+ * Выбирает ограждение, которое не закроется тройными обратными кавычками исходника.
+ * Для обычного текста остаётся привычный тройной Markdown-fence.
+ */
+function fenced(value: string, language = '') {
+  const fence = value.includes('```') ? '````' : '```';
+
+  return `${fence}${language}\n${value}\n${fence}`;
+}
+
+/**
+ * Формирует только черновик нового чата: отправка сообщения намеренно остаётся человеку.
+ * Управляющий символ в абсолютном пути отвергается, чтобы путь не менял структуру prompt.
+ */
+export function askAgentDraft(options: AskAgentDraftOptions): string {
+  const absPath = String(options.absPath || '');
+
+  if (!absPath.startsWith('/') || DRAFT_CONTROL_RE.test(absPath)) {
+    throw new Error('Некорректный абсолютный путь для черновика агенту.');
+  }
+
+  const label = String(options.label || '').replace(DRAFT_CONTROL_GLOBAL_RE, ' ').trim()
+    || 'без метки';
+  const branch = String(options.branch || '').replace(DRAFT_CONTROL_GLOBAL_RE, ' ').trim()
+    || 'не определена';
+  const range = options.lines;
+  const from = Math.max(1, Math.floor(Number(range?.from) || Number(options.line) || 1));
+  const to = Math.max(from, Math.floor(Number(range?.to) || from));
+  const suffix = range ? `:${from}-${to}` : options.line > 0 ? `:${from}` : '';
+  const result = [
+    `Рабочая копия ${label}, ветка ${branch}`,
+    '',
+    `Посмотри ${absPath}${suffix}`,
+  ];
+
+  if (options.patch) {
+    result.push('', fenced(draftLines(options.patch, 200), 'diff'));
+  } else if (options.snippet) {
+    result.push('', fenced(draftLines(options.snippet, 80)));
+  }
+
+  return result.join('\n');
 }

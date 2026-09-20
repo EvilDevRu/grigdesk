@@ -11,6 +11,7 @@ import test from 'node:test';
 import {
   chatFileLinkHref,
   codeLinkFromClick,
+  codeLinkHref,
   codeRouteHref,
   looksLikeLocalPath,
   parseCodeRouteHref,
@@ -107,4 +108,21 @@ test('CODE-LINK-07: без карты деревьев мост молчит, а
   // и это честнее кнопки, которая приведёт в пустоту.
   assert.equal(codeRouteHref('/srv/api/app/main.py', { roots: [] }), '');
   assert.equal(chatFileLinkHref('/srv/api/app/main.py', { roots: [] }), false);
+});
+
+test('CODE-LINK-09: абсолютная ссылка обратно разбирается вместе с Unicode и line=0', () => {
+  for (const line of [0, 27]) {
+    const target = {
+      project: 'мой проект',
+      repo: 'web ui',
+      root: '/srv/Рабочая копия',
+      path: 'src/новый файл.ts',
+      line,
+    };
+    const href = codeLinkHref(target, 'https://cockpit.example.test/');
+
+    assert.match(href, /^https:\/\/cockpit\.example\.test\/#\/code\?/);
+    assert.equal(new URL(href).hash.includes('line=0'), line === 0);
+    assert.deepEqual(parseCodeRouteHref(href), target);
+  }
 });

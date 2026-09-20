@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  askAgentDraft,
   buildCodeContexts,
   buildGitGroups,
+  chunkList,
+  groupDirectoryFiles,
+  commitRangeBounds,
+  extendCommitSelection,
+  fileDiffKey,
   buildGitTree,
   codeContextId,
   encodeStoredCodeContext,
@@ -15,8 +21,11 @@ import {
   gitRef,
   normalizeGitView,
   pickCodeContext,
+  pruneCommitSelection,
   reconcileGitOpenDirs,
   splitGitPath,
+  treeDecorations,
+  toggleCommitSelection,
 } from '../../web/src/shared/codeTree.ts';
 
 function tree(path, overrides = {}) {
@@ -332,4 +341,183 @@ test('итог группы: сумма строк по файлам и поло
     blocks: ['add', 'add', 'add', 'add', 'del'],
   });
   assert.equal(buildGitGroups({ staged: [], files: [] }, new Set())[0].stat.total, 0);
+});
+
+test('метки дерева сливают индекс и рабочие правки, сохраняя каталоги и новое имя', () => {
+  const decorations = treeDecorations({
+    staged: [
+      { path: 'src/app.js', status: 'M' },
+      { path: 'same', status: 'D' },
+    ],
+    files: [
+      { path: 'src/app.js', status: 'D' },
+      { path: 'same/child.js', status: 'A' },
+      { path: 'renamed/new.js', oldPath: 'old.js', status: 'R' },
+    ],
+  });
+
+  assert.deepEqual([...decorations.files], [
+    ['src/app.js', 'D'],
+    ['same', 'D'],
+    ['same/child.js', 'A'],
+    ['renamed/new.js', 'R'],
+  ]);
+  assert.deepEqual([...decorations.directories], ['src', 'same', 'renamed']);
+  assert.equal(decorations.files.has('old.js'), false);
+  assert.equal(decorations.files.get('src/app.js'), 'D',
+    'рабочее дерево имеет приоритет над индексом');
+});
+
+test('выбор коммитов задаёт непрерывные границы, shift-отрезок и очищается по журналу', () => {
+  const log = ['ccccccc', 'bbbbbbb', 'aaaaaaa'].map((hash) => ({ hash, subject: hash, when: '' }));
+
+  assert.deepEqual(commitRangeBounds(log, new Set(['ccccccc', 'aaaaaaa'])), {
+    from: 'aaaaaaa',
+    to: 'ccccccc',
+  });
+  assert.equal(commitRangeBounds(log, new Set()), null);
+  assert.equal(commitRangeBounds(log, new Set(['missing'])), null);
+  assert.deepEqual([...toggleCommitSelection(new Set(), 'ccccccc')], ['ccccccc']);
+  assert.deepEqual([...toggleCommitSelection(new Set(['ccccccc']), 'ccccccc')], []);
+  assert.deepEqual(
+    [...extendCommitSelection(log, new Set(['ccccccc']), 'ccccccc', 'aaaaaaa')],
+    ['ccccccc', 'bbbbbbb', 'aaaaaaa'],
+  );
+  assert.deepEqual([...pruneCommitSelection(log, new Set(['ccccccc', 'missing']))], ['ccccccc']);
+});
+
+test('группа выбранных коммитов неизменяема, последняя и имеет отдельный ключ кеша', () => {
+  const payload = { staged: [], files: [] };
+  const commits = {
+    files: [{ path: 'src/a.ts', status: 'M', add: 3, del: 1, binary: false }],
+    from: 'aaaaaaa',
+    to: 'ccccccc',
+    commits: 3,
+    selected: 2,
+  };
+  const groups = buildGitGroups(payload, new Set(['commits:src']), commits);
+
+  assert.deepEqual(groups.map((group) => group.id), ['work', 'commits']);
+  assert.equal(groups[1].title, 'Коммиты aaaaaaa…ccccccc');
+  assert.equal(groups[1].note, 'в отрезке ещё 1 коммит');
+  assert.equal(groups[1].mutable, false);
+  assert.deepEqual([...gitGroupDirectoryPaths(payload, commits)], ['commits:src']);
+  assert.notEqual(fileDiffKey('work', 'src/a.ts'), fileDiffKey('commits', 'src/a.ts', 'a:c'));
+});
+
+test('режим «с текущими изменениями» виден в заголовке группы, подсказке и ключе кеша', () => {
+  const payload = { staged: [], files: [] };
+  const source = {
+    files: [],
+    from: 'aaaaaaa',
+    to: 'ccccccc',
+    commits: 3,
+    selected: 2,
+    work: true,
+  };
+  const [, range] = buildGitGroups(payload, new Set(), source);
+  const [, one] = buildGitGroups(payload, new Set(), { ...source, from: 'ccccccc', selected: 1 });
+  const [, branch] = buildGitGroups(payload, new Set(), { ...source, mode: 'branch', selected: 3 });
+  const [, plain] = buildGitGroups(payload, new Set(), { ...source, work: false });
+
+  assert.equal(range.title, 'Коммиты aaaaaaa…ccccccc + текущие');
+  assert.equal(one.title, 'Коммит ccccccc + текущие');
+  assert.equal(branch.title, 'Вся ветка · 3 коммита + текущие');
+  assert.equal(plain.title, 'Коммиты aaaaaaa…ccccccc');
+  assert.match(range.hint, /на диске/);
+  assert.doesNotMatch(plain.hint, /на диске/);
+  assert.notEqual(fileDiffKey('commits', 'a.ts', 'b:c:work'), fileDiffKey('commits', 'a.ts', 'b:c'));
+});
+
+test('файлы каталога группы собираются по префиксу пути, порции ограничены потолком', () => {
+  const files = [
+    { path: 'src/a.js', status: 'M', add: 1, del: 0, binary: false },
+    { path: 'src/deep/b.js', status: 'A', add: 1, del: 0, binary: false },
+    { path: 'src-other/c.js', status: 'M', add: 1, del: 0, binary: false },
+    { path: 'top.js', status: 'D', add: 0, del: 1, binary: false },
+  ];
+
+  // «src-other/c.js» начинается с «src», но лежит в другом каталоге — граница только по «/».
+  assert.deepEqual(groupDirectoryFiles(files, 'src'), ['src/a.js', 'src/deep/b.js']);
+  assert.deepEqual(groupDirectoryFiles(files, 'src/deep'), ['src/deep/b.js']);
+  assert.deepEqual(groupDirectoryFiles(files, ''), []);
+  assert.deepEqual(chunkList(['a', 'b', 'c', 'd', 'e'], 2), [['a', 'b'], ['c', 'd'], ['e']]);
+  assert.deepEqual(chunkList([], 2), []);
+});
+
+test('счётчик коммитов в подписи и заголовке ветки склоняется по-русски', () => {
+  const payload = { staged: [], files: [] };
+  const note = (commits, selected) => buildGitGroups(payload, new Set(), {
+    files: [],
+    from: 'aaaaaaa',
+    to: 'ccccccc',
+    commits,
+    selected,
+  })[1].note;
+  const branch = (commits) => buildGitGroups(payload, new Set(), {
+    files: [],
+    from: 'aaaaaaa',
+    to: 'ccccccc',
+    commits,
+    selected: 0,
+    mode: 'branch',
+  })[1].title;
+
+  // Живой случай: 14 коммитов в отрезке при двух выбранных показывались как «12 коммита».
+  assert.equal(note(14, 2), 'в отрезке ещё 12 коммитов');
+  assert.equal(note(4, 1), 'в отрезке ещё 3 коммита');
+  assert.equal(note(7, 2), 'в отрезке ещё 5 коммитов');
+  assert.equal(note(23, 1), 'в отрезке ещё 22 коммита');
+  assert.equal(note(2, 1), 'в отрезке ещё 1 коммит');
+  assert.equal(branch(1), 'Вся ветка · 1 коммит');
+  assert.equal(branch(3), 'Вся ветка · 3 коммита');
+  assert.equal(branch(11), 'Вся ветка · 11 коммитов');
+  assert.equal(branch(21), 'Вся ветка · 21 коммит');
+});
+
+test('черновик агенту описывает worktree, строку, диапазон и безопасные лимиты', () => {
+  assert.equal(askAgentDraft({
+    label: 'Задача t42',
+    branch: 'task-42',
+    absPath: '/work/t42/src/a.ts',
+    line: 7,
+  }), [
+    'Рабочая копия Задача t42, ветка task-42',
+    '',
+    'Посмотри /work/t42/src/a.ts:7',
+  ].join('\n'));
+
+  const snippet = ['const fence = ```;', ...Array.from({ length: 85 }, (_, index) => `line ${index}`)]
+    .join('\n');
+  const ranged = askAgentDraft({
+    label: 'Основная',
+    branch: 'main',
+    absPath: '/repo/src/a.ts',
+    line: 3,
+    lines: { from: 3, to: 88 },
+    snippet,
+  });
+
+  assert.match(ranged, /Посмотри \/repo\/src\/a\.ts:3-88/);
+  assert.match(ranged, /````\nconst fence = ```;/);
+  assert.match(ranged, /…обрезано\n````$/);
+  assert.equal(ranged.split('\n').filter((line) => /^line \d+$/u.test(line)).length, 79);
+});
+
+test('черновик diff ограничен 200 строками и отвергает управляющий символ пути', () => {
+  const patch = Array.from({ length: 205 }, (_, index) => `+line ${index}`).join('\n');
+  const draft = askAgentDraft({
+    label: 'Worktree review',
+    branch: 'review',
+    absPath: '/repo/src/a.ts',
+    line: 0,
+    patch,
+  });
+
+  assert.match(draft, /```diff\n\+line 0/);
+  assert.match(draft, /…обрезано\n```$/);
+  assert.equal(draft.split('\n').filter((line) => /^\+line \d+$/u.test(line)).length, 200);
+  assert.throws(() => askAgentDraft({
+    label: 'Основная', branch: 'main', absPath: '/repo/bad\npath.ts', line: 1,
+  }), /путь/i);
 });

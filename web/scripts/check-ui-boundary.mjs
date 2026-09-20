@@ -29,6 +29,7 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/views/BoardView.vue',
   'web/src/views/chat/ChatList.vue',
   'web/src/views/code/CodePanel.vue',
+  'web/src/views/code/PatchReview.vue',
   'web/src/views/diff/DiffPanel.vue',
   'web/src/views/settings/PluginsCatalog.vue',
   'web/src/views/VideoView.vue',

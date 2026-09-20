@@ -105,6 +105,11 @@
       }
     },
     "web/src/views/code/CodePanel.vue": {
+      ".git-compose .amend-toggle": {
+        "font-size": {
+          "11px": 1
+        }
+      },
       ".ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible": {
         "outline": {
           "2px solid color-mix(in srgb, var(--accent) 55%, transparent)": 1
@@ -113,6 +118,53 @@
       ".tree .trow": {
         "padding-left": {
           "calc(var(--tree-lead) + var(--depth, 0) * var(--tree-step))": 1
+        }
+      },
+      ".search-result": {
+        "min-height": {
+          "30px": 1
+        },
+        "height": {
+          "auto": 1
+        },
+        "padding-block": {
+          "5px": 1
+        }
+      }
+    },
+    "web/src/views/code/PatchReview.vue": {
+      ".patch-file-head": {
+        "padding": {
+          "7px 12px": 1
+        },
+        "background": {
+          "var(--surface)": 1
+        }
+      },
+      ".patch-line": {
+        "min-height": {
+          "20px": 1
+        },
+        "line-height": {
+          "20px": 1
+        },
+        "cursor": {
+          "pointer": 1
+        }
+      },
+      ".patch-line.add": {
+        "background": {
+          "color-mix(in srgb, var(--good) 14%, transparent)": 1
+        }
+      },
+      ".patch-line.del": {
+        "background": {
+          "color-mix(in srgb, var(--bad) 14%, transparent)": 1
+        }
+      },
+      ".patch-line.meta": {
+        "color": {
+          "var(--ink-mid)": 1
         }
       }
     },

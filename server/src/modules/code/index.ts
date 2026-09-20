@@ -19,23 +19,40 @@ import { projectRepos } from '../../lib/projects.ts';
 import { generateCommitTitle } from '../../lib/codeCommitMessage.ts';
 import type { CommitTargetResolver } from '../../lib/codeCommitMessage.ts';
 import type {
+  CodeBlameResponse,
   CodeDirectoryResponse,
+  CodeCommitsDiffResponse,
+  CodeFileDiffResponse,
+  CodeFileLogResponse,
   CodeFileResponse,
   CodeGitLogEntry,
+  CodePatchResponse,
   CodeGitResponse,
   CodeRepo,
   CodeReposResponse,
   CodeRoot,
   CodeRootsResponse,
+  CodeSearchResponse,
   CodeWorktree,
 } from '../../../../shared/codeContracts.ts';
 import {
+  branchDiff,
+  blameFile,
+  cleanUntracked,
   CodeGitError,
+  commitRangeDiff,
   commitStagedChanges,
+  discardWorktreeChanges,
+  fileDiffSides,
+  fileLog,
+  fetchRemote,
   gitTrackingStatus,
+  patchText,
   pushCurrentBranch,
+  searchTree,
   stageWorktreeChanges,
   unstageWorktreeChanges,
+  undoLastCommit,
   worktreeChanges,
 } from '../../lib/git.ts';
 
@@ -54,6 +71,8 @@ export interface CodeModuleOptions {
   config: CodeModuleConfig;
   prefs: CodePreferences;
   resolveCommitTarget?: CommitTargetResolver;
+  patchMaxBytes?: number;
+  searchMaxBytes?: number;
 }
 
 interface CodeRoute {
@@ -65,6 +84,12 @@ interface CodeRoute {
     root?: unknown;
     dir?: unknown;
     path?: unknown;
+    work?: unknown;
+    group?: unknown;
+    from?: unknown;
+    to?: unknown;
+    base?: unknown;
+    q?: unknown;
   };
   Body: unknown;
 }
@@ -74,6 +99,12 @@ type ProjectRepo = Omit<CodeRepo, 'trees'>;
 interface RootContext {
   repo: ProjectRepo;
   tree: CodeWorktree;
+  mainBranch: string;
+}
+
+// Флаг «с текущими изменениями» в query: только буквальные 1/true, всё остальное — нет.
+function workFlag(value: unknown): boolean {
+  return value === '1' || value === 'true';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -202,6 +233,7 @@ export function isHiddenPath(abs: string, dirs: readonly string[] = []): boolean
 async function worktrees(dir: string): Promise<CodeWorktree[]> {
   const { stdout } = await exec('git', ['-C', dir, 'worktree', 'list', '--porcelain'], {
     maxBuffer: 4 * 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
   });
   const out: Pick<CodeWorktree, 'path' | 'branch'>[] = [];
   let cur: Pick<CodeWorktree, 'path' | 'branch'> | null = null;
@@ -313,6 +345,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     return {
       repo,
       tree,
+      mainBranch: trees[0]?.branch || '',
     };
   }
 
@@ -620,7 +653,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }
 
     const [diff, tracking] = await Promise.all([
-      worktreeChanges(ctx.tree.path),
+      worktreeChanges(ctx.tree.path, { withContent: false }),
       gitTrackingStatus(ctx.tree.path),
     ]);
     let log: CodeGitLogEntry[] = [];
@@ -628,8 +661,11 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     try {
       const { stdout } = await exec(
         'git',
-        ['-C', ctx.tree.path, 'log', '-15', '--pretty=%h\t%s\t%cr'],
-        { maxBuffer: 1024 * 1024 },
+        ['-C', ctx.tree.path, 'log', '-50', '--pretty=%h\t%s\t%cr'],
+        {
+          maxBuffer: 1024 * 1024,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        },
       );
 
       log = stdout.split('\n').filter(Boolean).map((l) => {
@@ -645,11 +681,224 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       // Репозиторий без коммитов отдаёт пустую историю.
     }
 
+    const headMessage = (await exec(
+      'git',
+      ['-C', ctx.tree.path, 'log', '-1', '--pretty=%B'],
+      {
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      },
+    ).then(({ stdout }) => stdout.trim()).catch(() => ''));
+
     return {
       ...diff,
       tracking,
       log,
+      headMessage,
     } satisfies CodeGitResponse;
+  });
+
+  // Стороны выбранного файла читаются отдельно от дешёвого списка `/git`.
+  fastify.get<CodeRoute>('/api/code/:project/file-diff', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    const group = String(req.query.group || '');
+
+    if (group !== 'staged' && group !== 'work' && group !== 'commits') {
+      return reply.code(400).send({
+        error: 'bad_group',
+        message: 'Неизвестная группа дифа.',
+      });
+    }
+
+    try {
+      return await fileDiffSides(ctx.tree.path, {
+        group,
+        path: String(req.query.path || ''),
+        ...(req.query.base === undefined ? {} : { base: String(req.query.base) }),
+        ...(req.query.to === undefined ? {} : { to: String(req.query.to) }),
+        work: workFlag(req.query.work),
+      }) satisfies CodeFileDiffResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  // Общий диф непрерывного отрезка выбранных коммитов.
+  fastify.get<CodeRoute>('/api/code/:project/commits-diff', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    try {
+      return await commitRangeDiff(
+        ctx.tree.path,
+        String(req.query.from || ''),
+        String(req.query.to || ''),
+        { work: workFlag(req.query.work) },
+      ) satisfies CodeCommitsDiffResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  // Все собственные коммиты ветки: worktree сравнивается с основной веткой,
+  // основное дерево — с upstream. Форма ответа совпадает с commits-diff.
+  fastify.get<CodeRoute>('/api/code/:project/branch-diff', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    try {
+      return await branchDiff(ctx.tree.path, {
+        main: ctx.tree.main,
+        mainBranch: ctx.mainBranch,
+      }, { work: workFlag(req.query.work) }) satisfies CodeCommitsDiffResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  // Ограниченный unified patch для обзора группы и черновика вопроса агенту.
+  fastify.get<CodeRoute>('/api/code/:project/patch', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    const group = String(req.query.group || '');
+
+    if (group !== 'staged' && group !== 'work' && group !== 'commits') {
+      return reply.code(400).send({
+        error: 'bad_group',
+        message: 'Неизвестная группа патча.',
+      });
+    }
+
+    try {
+      return await patchText(ctx.tree.path, {
+        group,
+        ...(req.query.path === undefined ? {} : { path: String(req.query.path) }),
+        ...(req.query.base === undefined ? {} : { base: String(req.query.base) }),
+        ...(req.query.to === undefined ? {} : { to: String(req.query.to) }),
+        work: workFlag(req.query.work),
+      }, opts.patchMaxBytes) satisfies CodePatchResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  // История точного файла продолжает путь через rename, но не обходит файловый guard.
+  fastify.get<CodeRoute>('/api/code/:project/file-log', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    const abs = inside(ctx.tree.path, req.query.path, reply);
+
+    if (!abs) {
+      return reply;
+    }
+    if (isHiddenPath(abs, hidden)) {
+      return reply.code(404).send({
+        error: 'no_file',
+        message: 'служебный каталог закрыт для просмотра',
+      });
+    }
+
+    try {
+      const result = await fileLog(ctx.tree.path, String(req.query.path || ''));
+
+      return result satisfies CodeFileLogResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  // Blame считается по рабочей копии и наследует тот же файловый guard, что чтение файла.
+  fastify.get<CodeRoute>('/api/code/:project/blame', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    const abs = inside(ctx.tree.path, req.query.path, reply);
+
+    if (!abs) {
+      return reply;
+    }
+    if (isHiddenPath(abs, hidden)) {
+      return reply.code(404).send({
+        error: 'no_file',
+        message: 'служебный каталог закрыт для просмотра',
+      });
+    }
+
+    try {
+      const result = await blameFile(ctx.tree.path, String(req.query.path || ''));
+
+      return result satisfies CodeBlameResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
+  });
+
+  // Поиск ограничен по stdout и после Git-фильтра повторно проходит файловый guard.
+  fastify.get<CodeRoute>('/api/code/:project/search', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    try {
+      return await searchTree(ctx.tree.path, String(req.query.q || ''), {
+        limit: opts.searchMaxBytes,
+        isHidden: (relPath) => isHiddenPath(path.join(ctx.tree.path, relPath), hidden),
+      }) satisfies CodeSearchResponse;
+    } catch (routeError) {
+      return sendGitError(reply, routeError);
+    }
   });
 
   // `+` у файла или группы: рабочее дерево → индекс.
@@ -690,6 +939,41 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }));
   });
 
+  // Откат tracked-правок рабочего дерева к индексу; untracked сюда не попадают.
+  fastify.post<CodeRoute>('/api/code/:project/discard', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    return mutateRoot(ctx, reply, (root) => discardWorktreeChanges(root, {
+      all: requestBody(req).all === true,
+      paths: requestBody(req).paths,
+    }));
+  });
+
+  // Удаление новых файлов отделено от restore и принимает только свежий untracked-срез.
+  fastify.post<CodeRoute>('/api/code/:project/clean', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    return mutateRoot(ctx, reply, (root) => cleanUntracked(root, {
+      paths: requestBody(req).paths,
+    }));
+  });
+
   // Коммит берёт только индекс: неявного `git add` здесь нет.
   fastify.post<CodeRoute>('/api/code/:project/commit', async (req, reply) => {
     if (gate(reply)) {
@@ -706,7 +990,23 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     return mutateRoot(ctx, reply, (root) => commitStagedChanges(
       root,
       requestBody(req).message,
+      { amend: requestBody(req).amend === true },
     ));
+  });
+
+  // Soft reset возвращает последний локальный коммит в индекс, не трогая файлы.
+  fastify.post<CodeRoute>('/api/code/:project/undo-commit', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    return mutateRoot(ctx, reply, (root) => undoLastCommit(root));
   });
 
   // Push текущей ветки; ветка без upstream публикуется и закрепляется за remote.
@@ -723,6 +1023,21 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
 
 
     return mutateRoot(ctx, reply, (root) => pushCurrentBranch(root));
+  });
+
+  // Fetch обновляет только remote refs и после этого возвращает свежие ahead/behind.
+  fastify.post<CodeRoute>('/api/code/:project/fetch', async (req, reply) => {
+    if (gate(reply)) {
+      return reply;
+    }
+
+    const ctx = await resolveRoot(req, reply);
+
+    if (!ctx) {
+      return reply;
+    }
+
+    return mutateRoot(ctx, reply, (root) => fetchRemote(root));
   });
 
   // Модель читает только staged diff через model-only transport без инструментов.
