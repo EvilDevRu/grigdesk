@@ -1,5 +1,6 @@
 <template>
-  <div class="code-panel" :class="{ compact }" :aria-busy="loading ? 'true' : undefined">
+  <div class="code-panel" :class="{ compact, narrow: codePanelNarrow }"
+       :aria-busy="loading ? 'true' : undefined">
     <header ref="panelHeader" class="code-head" tabindex="-1">
       <strong>Код</strong>
       <!-- Выбор рабочей копии живёт в шапке, а не отдельным блоком панели: там он
@@ -32,37 +33,44 @@
         </div>
         <span v-else-if="headContext" class="tlabel mono" :title="context?.treePath">{{ headContext }}</span>
       </div>
+      <UiTabs v-model="mainTab" class="code-tabs" label="Разделы кода">
+        <UiTab value="files" controls="code-navigator" data-context="code-main-tab"
+               data-tab="files" title="Код: дерево файлов">Файлы</UiTab>
+        <UiTab value="changes" controls="code-navigator" data-context="code-main-tab"
+               data-tab="changes" title="Гит: несохранённые изменения">
+          Изменения <span v-if="changePathCount" class="code-tab-count mono">{{ changePathCount }}</span>
+        </UiTab>
+        <UiTab value="commits" controls="code-navigator" data-context="code-main-tab"
+               data-tab="commits">Коммиты</UiTab>
+      </UiTabs>
       <span class="grow"></span>
-      <UiButton v-if="compact" class="navigator-toggle" variant="ghost"
-                data-context="tool-dock-navigator"
-                :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
-                :title="navigatorCollapsed ? 'Показать дерево' : 'Скрыть дерево'"
-                @click="navigatorCollapsed = !navigatorCollapsed">
+      <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
+           справа. Подпись с именем вкладки читалась второй вкладкой «Коммиты». -->
+      <UiIconButton v-if="!codePanelNarrow" class="navigator-toggle" role="embedded"
+                    data-context="tool-dock-navigator"
+                    :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
+                    :label="navigatorToggleLabel" :title="navigatorToggleLabel"
+                    @click="navigatorCollapsed = !navigatorCollapsed">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="2.5" y="3" width="15" height="14" rx="2" />
           <path d="M7 3v14" />
         </svg>
-        <span>Дерево</span>
-      </UiButton>
+      </UiIconButton>
     </header>
 
     <!-- Холодный запуск сразу занимает финальную сетку. Без этого сначала был
          короткий пустой экран «Загрузка…», а затем вся рабочая область прыгала. -->
     <div v-if="loading" ref="layHost" class="lay code-loading"
-         :class="{ compact, 'navigator-collapsed': navigatorCollapsed }"
+         :class="layoutClasses"
          :style="compactStyle">
-      <aside class="rail" aria-hidden="true">
-        <span class="loading-rail-item"></span>
-        <span class="loading-rail-item"></span>
-      </aside>
       <aside class="panel loading-panel" aria-hidden="true">
         <div class="loading-tree">
           <span v-for="index in 7" :key="index" class="loading-row"
                 :style="{ '--loading-row': `${48 + ((index * 17) % 38)}%` }"></span>
         </div>
       </aside>
-      <div v-if="compact && !navigatorCollapsed" class="code-split loading-split" aria-hidden="true">
+      <div v-if="!navigatorCollapsed" class="code-split loading-split" aria-hidden="true">
         <span></span>
       </div>
       <section class="editorwrap loading-editor" aria-hidden="true">
@@ -74,23 +82,11 @@
       Проектов пока нет — заведи в разделе <router-link to="/projects">«Проекты»</router-link>.
     </div>
 
-    <div v-else ref="layHost" class="lay" :class="{ compact, 'navigator-collapsed': navigatorCollapsed }"
+    <div v-else ref="layHost" class="lay" :class="layoutClasses"
          :style="compactStyle">
-      <!-- Рейка режимов, как activity bar в VS Code -->
-      <aside class="rail">
-        <UiIconButton class="ritem" role="rail" :pressed="tab === 'files'"
-                      title="Код: дерево файлов" label="Код" @click="setTab('files')">
-          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z M14 3v4h4" /></svg>
-        </UiIconButton>
-        <UiIconButton class="ritem" role="rail" :pressed="tab === 'git'"
-                      title="Гит: несохранённые изменения и коммиты" label="Git" @click="setTab('git')">
-          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9" /></svg>
-        </UiIconButton>
-      </aside>
-
       <!-- Панель — только содержимое: дерево файлов либо изменения. Проект и рабочая
            копия выбираются в шапке раздела. -->
-      <aside class="panel">
+      <aside id="code-navigator" class="panel">
         <div v-if="contextLoading" class="pnote">Загружаю рабочую копию…</div>
 
         <div v-if="error" class="perr">{{ error }}</div>
@@ -115,97 +111,154 @@
           />
         </div>
 
-        <!-- Как Source Control в VS Code: сообщение относится только к индексу,
-             генератор читает тот же staged diff, commit не делает скрытый git add. -->
-        <div v-if="!fileHistoryActive && tab === 'git' && git" class="git-compose">
-          <!-- Сообщение коммита многострочное: заголовок, пустая строка и тело —
-               обычная форма, и сервер её принимает. `rows="1"` обязателен: без него
-               textarea открывается на две строки поверх компактного min-height. -->
-          <UiTextarea
-            v-model="commitMessage"
-            class="commit-message"
-            data-context="code-commit"
-            rows="1"
-            maxlength="5000"
-            placeholder="Название коммита"
-            aria-label="Название коммита"
-            :disabled="gitActionBusy"
-            @keydown.enter="commitOnShortcut"
-          />
-          <div class="amend-controls">
-            <UiSwitch
-              v-model="amendCommit"
-              class="amend-toggle"
-              data-action="amend"
-              :disabled="gitActionBusy || !amendAvailable"
-              :title="amendTitle"
-              @change="changeAmend"
-            >Дополнить последний коммит</UiSwitch>
-            <span class="grow"></span>
-            <UiIconButton
-              class="undo-commit"
-              role="embedded"
-              data-context="code-commit"
-              data-action="undo-commit"
-              label="Отменить последний коммит"
-              :title="undoTitle"
-              :loading="gitBusy === 'undo'"
-              :disabled="gitActionBusy || !undoAvailable"
-              @click="undoGitCommit"
-            >↶</UiIconButton>
+        <!-- Композер относится к изменениям, но живёт внизу панели: дерево получает
+             высоту первым, а пустой индекс больше не отнимает четверть экрана. -->
+        <div v-if="!fileHistoryActive && tab === 'git' && gitPane === 'changes' && git"
+             class="git-footer">
+          <div class="git-compose" :class="{ open: commitComposerOpen, amend: amendCommit }">
+            <div class="git-compose-head">
+              <UiPressable class="commit-disclosure" data-context="code-commit-disclosure"
+                           data-action="commit-disclosure" :aria-expanded="commitComposerOpen"
+                           @click="toggleCommitComposer">
+                <span class="git-compose-title">{{ commitComposerTitle }}</span>
+                <span class="git-index-state" :class="{ empty: !git.staged.length }">
+                  {{ commitIndexLabel }}
+                </span>
+                <span class="commit-chevron" aria-hidden="true">
+                  {{ commitComposerOpen ? '▾' : '▸' }}
+                </span>
+              </UiPressable>
+              <UiPopover v-if="commitComposerOpen" has-popup="dialog" placement="top-end"
+                         :style="{ width: 'min(300px, calc(100vw - 20px))' }">
+                <template #trigger>
+                  <UiIconButton role="embedded" data-context="code-commit"
+                                data-action="commit-more" label="Дополнительные действия коммита"
+                                title="Дополнительные действия коммита">
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <circle cx="3" cy="8" r="1.15" />
+                      <circle cx="8" cy="8" r="1.15" />
+                      <circle cx="13" cy="8" r="1.15" />
+                    </svg>
+                  </UiIconButton>
+                </template>
+                <template #default="{ close }">
+                  <div class="code-popover-panel commit-more-panel">
+                    <strong class="code-popover-title">Действия коммита</strong>
+                    <UiSwitch v-model="amendCommit" class="amend-toggle"
+                              data-context="code-commit-amend" data-action="amend"
+                              :disabled="gitActionBusy || !amendAvailable" :title="amendTitle"
+                              @change="changeAmend">
+                      Дополнить последний коммит
+                    </UiSwitch>
+                    <UiButton block variant="ghost" data-context="code-popover-action"
+                              data-action="undo-commit" :loading="gitBusy === 'undo'"
+                              :disabled="gitActionBusy || !undoAvailable" :title="undoTitle"
+                              @click="undoGitCommit(); close('action')">
+                      Отменить последний коммит
+                    </UiButton>
+                  </div>
+                </template>
+              </UiPopover>
+            </div>
+            <p v-if="!commitComposerOpen" class="commit-empty-hint">
+              {{ commitComposerHint }}
+            </p>
+            <div v-else class="git-compose-body">
+              <div v-if="amendCommit" class="amend-active-row">
+                <span>Последний локальный коммит будет изменён.</span>
+                <UiButton variant="ghost" data-context="code-commit"
+                          data-action="leave-amend" @click="leaveAmend">
+                  Выйти из amend
+                </UiButton>
+              </div>
+              <!-- `rows="1"` оставляет поле компактным, но сохраняет многострочное сообщение. -->
+              <UiTextarea
+                v-model="commitMessage"
+                class="commit-message"
+                data-context="code-commit"
+                rows="1"
+                maxlength="5000"
+                placeholder="Сообщение коммита"
+                aria-label="Сообщение коммита"
+                :disabled="gitActionBusy"
+                @keydown.enter="commitOnShortcut"
+              />
+              <div class="git-compose-actions">
+                <UiIconButton
+                  class="generate-commit"
+                  role="embedded"
+                  data-context="code-commit"
+                  label="Составить сообщение по staged diff"
+                  title="Составить сообщение по staged diff"
+                  :loading="gitBusy === 'generate'"
+                  :disabled="gitActionBusy || !git.staged.length"
+                  @click="generateCommitMessage"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8 1.5 1.1 3.4L12.5 6 9.1 7.1 8 10.5 6.9 7.1 3.5 6l3.4-1.1z" />
+                    <path d="m13 10 .55 1.45L15 12l-1.45.55L13 14l-.55-1.45L11 12l1.45-.55z" />
+                  </svg>
+                </UiIconButton>
+                <UiButton
+                  class="commit-action"
+                  data-context="code-commit"
+                  variant="solid"
+                  tone="accent"
+                  :loading="gitBusy === 'commit'"
+                  :disabled="gitActionBusy || (!amendCommit && !git.staged.length)
+                    || !commitMessage.trim()"
+                  @click="commitGitChanges"
+                >{{ amendCommit ? 'Дополнить коммит' : 'Создать коммит' }}</UiButton>
+              </div>
+            </div>
           </div>
-          <!-- Кнопки отдельной строкой: в доке поле ввода делило 218px с тремя
-               контролами и схлопывалось до двух букв — набрать в нём было нечего. -->
-          <div class="git-compose-actions">
-            <UiIconButton
-              class="generate-commit"
-              role="embedded"
-              data-context="code-commit"
-              label="Составить сообщение по staged diff"
-              title="Составить сообщение по staged diff"
-              :loading="gitBusy === 'generate'"
-              :disabled="gitActionBusy || !git.staged.length"
-              @click="generateCommitMessage"
-            >✦</UiIconButton>
-            <UiButton
-              class="commit-action"
-              data-context="code-commit"
-              variant="solid"
-              tone="accent"
-              :loading="gitBusy === 'commit'"
-              :disabled="gitActionBusy || (!amendCommit && !git.staged.length) || !commitMessage.trim()"
-              @click="commitGitChanges"
-            >{{ amendCommit ? 'Дополнить' : 'Коммит' }}</UiButton>
-            <UiIconButton
-              class="fetch-action"
-              role="embedded"
-              data-context="code-commit"
-              data-action="fetch"
-              label="Проверить remote"
-              title="Проверить remote"
-              :loading="gitBusy === 'fetch'"
-              :disabled="gitActionBusy || !fetchRemoteLabel"
-              @click="fetchGitRemote"
-            >↓</UiIconButton>
-            <UiIconButton
-              class="push-action"
-              role="embedded"
-              data-context="code-commit"
-              :label="pushLabel"
-              :loading="gitBusy === 'push'"
-              :disabled="gitActionBusy || git.tracking?.detached"
-              :title="pushTitle"
-              @click="pushGitChanges"
-            >{{ git.tracking?.upstream ? '↑' : '⇧' }}</UiIconButton>
+          <div class="git-sync-row">
+            <UiInlineMessage v-if="gitNotice" class="git-notice"
+                             data-context="code-git-notice"
+                             :tone="gitNotice.type === 'err' ? 'danger' : 'success'">
+              {{ gitNotice.text }}
+            </UiInlineMessage>
+            <p v-else-if="trackingNote" class="git-notice git-tracking-note"
+               :class="trackingNote.type"
+               :title="trackingNote.hint">
+              {{ trackingNote.text }}
+            </p>
+            <span v-else class="grow"></span>
+            <div class="git-remote-actions" role="group" aria-label="Синхронизация с remote">
+              <UiIconButton
+                class="fetch-action"
+                role="embedded"
+                data-context="code-commit"
+                data-action="fetch"
+                label="Проверить удалённый репозиторий"
+                title="Проверить удалённый репозиторий"
+                :loading="gitBusy === 'fetch'"
+                :disabled="gitActionBusy || !fetchRemoteLabel"
+                @click="fetchGitRemote"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 2v8M4.8 7.4 8 10.6l3.2-3.2M3 13.5h10" />
+                </svg>
+              </UiIconButton>
+              <UiIconButton
+                class="push-action"
+                role="embedded"
+                data-context="code-commit"
+                :label="pushLabel"
+                :loading="gitBusy === 'push'"
+                :disabled="gitActionBusy || git.tracking?.detached"
+                :title="pushTitle"
+                @click="pushGitChanges"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 11V3M4.8 6.2 8 3l3.2 3.2M3 13.5h10" />
+                </svg>
+              </UiIconButton>
+            </div>
           </div>
-          <p v-if="gitNotice" class="git-notice" :class="gitNotice.type"
-             :title="gitNotice.text" role="status">
-            {{ gitNotice.text }}
-          </p>
-          <p v-else-if="trackingNote" class="git-notice" :class="trackingNote.type"
-             :title="trackingNote.hint">
-            {{ trackingNote.text }}
-          </p>
         </div>
 
         <div v-if="fileHistoryActive" class="scroll tree file-history">
@@ -293,6 +346,9 @@
               <span class="dname">{{ row.name }}</span>
               <span v-if="fileTreeDecorations.directories.has(row.rel)"
                     class="git-dir-dot" aria-hidden="true">•</span>
+              <span v-if="fileTreeDecorations.directories.has(row.rel)" class="ui-visually-hidden">
+                — внутри есть изменения
+              </span>
             </UiPressable>
             <UiPressable v-else class="trow frow" data-context="code-tree-row"
                          :class="{ sel: fileSel === row.rel }"
@@ -312,14 +368,136 @@
           </template>
         </div>
 
-        <!-- Гит: изменения группами (индекс, рабочее дерево) + свежие коммиты.
-             Группа с пустым индексом не рисуется вовсе, поэтому обычный прогон
-             фабрики выглядит как раньше — одним списком «Не в коммите». -->
-        <div v-else class="scroll tree">
-          <div v-if="gitLoading && !git" class="pnote">Читаю гит…</div>
-          <template v-if="git">
-            <template v-for="(group, groupIndex) in gitGroups" :key="group.id">
-              <div class="subhead" :data-group="group.id">
+        <!-- Git разделён на две вкладки: рабочие группы больше не выталкивают журнал
+             коммитов за нижнюю границу навигатора. -->
+        <div v-else-if="tab === 'git'" class="git-panel" :class="`${gitPane}-pane`">
+          <div v-if="git && gitPane === 'changes'" class="git-panel-toolbar">
+            <span class="git-panel-label">Файлы изменений</span>
+            <span class="grow"></span>
+            <div class="git-view-toggle" role="group" aria-label="Вид изменений">
+              <UiIconButton class="git-view-action" role="embedded"
+                            data-context="code-group-action" data-view="tree"
+                            title="Показать деревом" label="Показать деревом"
+                            :pressed="gitView === 'tree'" @click="setGitView('tree')">
+                <svg aria-hidden="true" viewBox="0 0 16 16">
+                  <path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" />
+                </svg>
+              </UiIconButton>
+              <UiIconButton class="git-view-action" role="embedded"
+                            data-context="code-group-action" data-view="list"
+                            title="Показать списком" label="Показать списком"
+                            :pressed="gitView === 'list'" @click="setGitView('list')">
+                <svg aria-hidden="true" viewBox="0 0 16 16">
+                  <path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" />
+                </svg>
+              </UiIconButton>
+            </div>
+          </div>
+          <div class="scroll tree git-tree" :class="{ 'commit-tree': gitPane === 'commits' }">
+            <div v-if="gitLoading && !git" class="pnote">Читаю гит…</div>
+            <template v-if="git">
+              <div v-if="gitPane === 'changes' && !changeGroups.length"
+                   class="git-clean" role="status">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m3.2 8.2 3 3L12.9 4.5" />
+                </svg>
+                <span>Рабочая копия чистая</span>
+              </div>
+              <section v-if="gitPane === 'commits'" class="commit-log-section">
+                <div class="subhead commits-head">
+                  <span class="subtitle">История ветки</span>
+                  <span v-if="commitSel.size" class="cnt mono">{{ commitSel.size }}</span>
+                  <span class="grow"></span>
+                  <!-- Подпись режима совпадает с хвостом заголовка отрезка «… + текущие»:
+                       одно слово в двух местах, а не два разных. Сброс отрезка живёт в его
+                       сводке ниже, в шапке журнала третьей кнопки нет. -->
+                  <UiButton variant="ghost" data-context="code-group-action"
+                            data-action="commits-with-work"
+                            :title="commitsWorkTitle" :pressed="commitsWorkActive"
+                            :aria-disabled="!commitsWorkAvailable"
+                            @click="toggleCommitsWork">+ текущие</UiButton>
+                  <UiIconButton role="embedded" data-context="code-group-action"
+                                data-action="branch-diff" label="Показать всю ветку"
+                                :title="branchDiffAvailability.title"
+                                :pressed="branchMode" :loading="commitsLoading && branchMode"
+                                :disabled="!branchDiffAvailability.enabled"
+                                @click="toggleBranchDiff">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="4" cy="3" r="1.5" />
+                      <circle cx="4" cy="13" r="1.5" />
+                      <circle cx="12" cy="5" r="1.5" />
+                      <path d="M4 4.5v7M5.5 10.5C9 10.2 10.5 8.4 10.5 6.4" />
+                    </svg>
+                  </UiIconButton>
+                </div>
+                <div v-if="commitsLoading" class="pnote commits-state">Читаю коммиты…</div>
+                <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
+                <div class="commit-log">
+                  <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
+                               data-context="code-commit-row" :data-hash="c.hash"
+                               :class="{ sel: commitSel.has(c.hash) }"
+                               :pressed="commitSel.has(c.hash)" :title="c.when"
+                               @click="pickCommit(c, $event)">
+                    <span class="hash mono">{{ c.hash }}</span>
+                    <span class="subj">{{ c.subject }}</span>
+                  </UiPressable>
+                </div>
+              </section>
+              <section v-for="group in visibleGitGroups" :key="group.id" class="git-group"
+                       :data-group-section="group.id">
+              <!-- Сводка отрезка — заголовок группы его файлов в две строки: сам отрезок с
+                   действиями и итог во всю ширину. Она липнет к верху списка, так что сброс не
+                   прячется за длинным деревом, а журнал над ней остаётся местом выбора. -->
+              <div v-if="group.id === 'commits'" class="subhead commit-range-summary"
+                   :data-group="group.id">
+                <span class="subtitle" :title="group.hint">{{ group.title }}</span>
+                <UiIconButton
+                  class="git-group-action"
+                  role="embedded"
+                  data-context="code-group-action"
+                  data-action="patch-review"
+                  :data-group="group.id"
+                  :label="`Обзор группы «${group.title}»`"
+                  title="Показать все изменения одной страницей"
+                  :pressed="patchReviewActive && patchReviewGroupId === group.id"
+                  :loading="patchLoading && patchReviewGroupId === group.id"
+                  :disabled="!group.files.length"
+                  @click="openPatchReview(group)"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 2.5h11v11h-11zM5 5h6M5 8h6M5 11h4" />
+                  </svg>
+                </UiIconButton>
+                <UiIconButton
+                  class="git-group-action"
+                  role="embedded"
+                  data-context="code-group-action"
+                  data-action="clear-commits"
+                  label="Снять выбор коммитов"
+                  title="Сбросить отрезок и вернуться к журналу"
+                  @click="clearCommitSelection"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                       stroke-linecap="round" aria-hidden="true">
+                    <path d="m4 4 8 8M12 4l-8 8" />
+                  </svg>
+                </UiIconButton>
+                <span class="commit-range-meta">
+                  <span class="cnt mono">{{ fileCountLabel(group.files.length) }}</span>
+                  <span v-if="group.stat.total" class="diffstat mono"
+                        :title="gitStatTitle(group.stat)">
+                    <i v-if="group.stat.add" class="a">+{{ group.stat.add }}</i>
+                    <i v-if="group.stat.del" class="d">−{{ group.stat.del }}</i>
+                  </span>
+                  <span v-if="group.note" class="group-note" :title="group.note">
+                    {{ group.note }}
+                  </span>
+                </span>
+              </div>
+              <div v-else class="subhead" :data-group="group.id">
                 <!-- Заголовок сворачивает дерево группы: до списка коммитов не нужно прокручивать
                      все правки. Счётчик и итог остаются — свёрнуто не значит пусто. -->
                 <UiPressable class="group-toggle" data-context="code-group-toggle"
@@ -329,7 +507,6 @@
                   <span class="subtitle">{{ group.title }}</span>
                 </UiPressable>
                 <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
-                <span v-if="group.note" class="group-note">{{ group.note }}</span>
                 <!-- Итог группы, как сводка pull request на GitHub: сумма строк по всем файлам
                      и полоска из пяти квадратиков. Без строк (бинарные файлы, чистое дерево)
                      итога нет, чтобы не рисовать «+0». -->
@@ -353,19 +530,35 @@
                   :loading="patchLoading && patchReviewGroupId === group.id"
                   :disabled="!group.files.length"
                   @click="openPatchReview(group)"
-                >☷</UiIconButton>
-                <UiIconButton
-                  v-if="group.id === 'work' && discardableGitCount(group)"
-                  class="git-group-action"
-                  role="embedded"
-                  data-context="code-group-action"
-                  data-action="discard-all"
-                  label="Откатить все tracked-правки"
-                  title="Откатить все tracked-правки"
-                  :loading="gitBusy === 'discard:all'"
-                  :disabled="gitActionBusy"
-                  @click="discardGitGroup(group)"
-                >↶</UiIconButton>
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 2.5h11v11h-11zM5 5h6M5 8h6M5 11h4" />
+                  </svg>
+                </UiIconButton>
+                <UiPopover v-if="group.id === 'work' && discardableGitCount(group)"
+                           has-popup="menu" placement="bottom-end"
+                           :style="{ width: 'min(250px, calc(100vw - 20px))' }">
+                  <template #trigger>
+                    <UiIconButton class="git-group-action" role="embedded"
+                                  data-context="code-group-action" data-action="group-more"
+                                  label="Действия группы" title="Действия группы">
+                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <circle cx="3" cy="8" r="1.15" />
+                        <circle cx="8" cy="8" r="1.15" />
+                        <circle cx="13" cy="8" r="1.15" />
+                      </svg>
+                    </UiIconButton>
+                  </template>
+                  <template #default="{ close }">
+                    <UiButton block variant="ghost" tone="danger"
+                              data-context="code-popover-action" data-action="discard-all"
+                              :loading="gitBusy === 'discard:all'" :disabled="gitActionBusy"
+                              @click="discardGitGroup(group); close('action')">
+                      Откатить все tracked-правки
+                    </UiButton>
+                  </template>
+                </UiPopover>
                 <UiIconButton
                   v-if="group.mutable && group.files.length"
                   class="git-group-action"
@@ -378,26 +571,11 @@
                   :disabled="gitActionBusy"
                   @click="changeGitGroup(group)"
                 >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
-                <!-- Переключатель вида один на панель: он про способ показа, а не про группу. -->
-                <div v-if="groupIndex === 0" class="git-view-toggle" role="group" aria-label="Вид изменений">
-                  <UiIconButton class="git-view-action" role="embedded"
-                                data-context="code-group-action" data-view="tree"
-                                title="Показать деревом" label="Показать деревом"
-                                :pressed="gitView === 'tree'" @click="setGitView('tree')">
-                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" /></svg>
-                  </UiIconButton>
-                  <UiIconButton class="git-view-action" role="embedded"
-                                data-context="code-group-action" data-view="list"
-                                title="Показать списком" label="Показать списком"
-                                :pressed="gitView === 'list'" @click="setGitView('list')">
-                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" /></svg>
-                  </UiIconButton>
-                </div>
               </div>
               <div v-if="!group.files.length" class="pnote">
                 {{ group.id === 'commits' ? 'В выбранных коммитах нет изменений файлов.' : 'Несохранённых изменений нет.' }}
               </div>
-              <template v-else-if="collapsedGroups.has(group.id)"></template>
+              <template v-else-if="gitPane === 'changes' && collapsedGroups.has(group.id)"></template>
               <template v-else-if="gitView === 'tree'">
                 <template v-for="row in group.rows" :key="row.key">
                   <!-- Каталог: та же обойма, что у файла — в индекс уходят все файлы группы
@@ -447,20 +625,33 @@
                     <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
                          иначе «Откатить» и «+» ложились в одну точку. -->
                     <span class="git-row-actions">
-                      <UiIconButton
-                        v-if="group.id === 'work' && row.file.status !== 'U'"
-                        class="git-file-action"
-                        role="embedded"
-                        data-context="code-row-action"
-                        :data-group="group.id"
-                        :data-action="row.file.status === 'A' ? 'clean' : 'discard'"
-                        :data-file="row.path"
-                        :label="discardGitFileLabel(row.file)"
-                        :title="discardGitFileLabel(row.file)"
-                        :loading="gitBusy === discardGitFileKey(row.file)"
-                        :disabled="gitActionBusy"
-                        @click="discardGitFile(group, row.file)"
-                      >{{ row.file.status === 'A' ? '×' : '↶' }}</UiIconButton>
+                      <UiPopover v-if="group.id === 'work' && row.file.status !== 'U'"
+                                 has-popup="menu" placement="bottom-end"
+                                 :style="{ width: 'min(240px, calc(100vw - 20px))' }">
+                        <template #trigger>
+                          <UiIconButton class="git-file-action" role="embedded"
+                                        data-context="code-row-action" data-action="row-more"
+                                        :data-file="row.path" label="Действия с файлом"
+                                        :title="`Действия с ${row.path}`">
+                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                              <circle cx="3" cy="8" r="1.15" />
+                              <circle cx="8" cy="8" r="1.15" />
+                              <circle cx="13" cy="8" r="1.15" />
+                            </svg>
+                          </UiIconButton>
+                        </template>
+                        <template #default="{ close }">
+                          <UiButton block variant="ghost" tone="danger"
+                                    data-context="code-popover-action"
+                                    :data-group="group.id"
+                                    :data-action="row.file.status === 'A' ? 'clean' : 'discard'"
+                                    :data-file="row.path" :loading="gitBusy === discardGitFileKey(row.file)"
+                                    :disabled="gitActionBusy"
+                                    @click="discardGitFile(group, row.file); close('action')">
+                            {{ discardGitFileLabel(row.file) }}
+                          </UiButton>
+                        </template>
+                      </UiPopover>
                       <UiIconButton
                         v-if="group.mutable"
                         class="git-file-action"
@@ -505,20 +696,33 @@
                   <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
                        иначе «Откатить» и «+» ложились в одну точку. -->
                   <span class="git-row-actions">
-                    <UiIconButton
-                      v-if="group.id === 'work' && entry.file.status !== 'U'"
-                      class="git-file-action"
-                      role="embedded"
-                      data-context="code-row-action"
-                      :data-group="group.id"
-                      :data-action="entry.file.status === 'A' ? 'clean' : 'discard'"
-                      :data-file="entry.file.path"
-                      :label="discardGitFileLabel(entry.file)"
-                      :title="discardGitFileLabel(entry.file)"
-                      :loading="gitBusy === discardGitFileKey(entry.file)"
-                      :disabled="gitActionBusy"
-                      @click="discardGitFile(group, entry.file)"
-                    >{{ entry.file.status === 'A' ? '×' : '↶' }}</UiIconButton>
+                    <UiPopover v-if="group.id === 'work' && entry.file.status !== 'U'"
+                               has-popup="menu" placement="bottom-end"
+                               :style="{ width: 'min(240px, calc(100vw - 20px))' }">
+                      <template #trigger>
+                        <UiIconButton class="git-file-action" role="embedded"
+                                      data-context="code-row-action" data-action="row-more"
+                                      :data-file="entry.file.path" label="Действия с файлом"
+                                      :title="`Действия с ${entry.file.path}`">
+                          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                            <circle cx="3" cy="8" r="1.15" />
+                            <circle cx="8" cy="8" r="1.15" />
+                            <circle cx="13" cy="8" r="1.15" />
+                          </svg>
+                        </UiIconButton>
+                      </template>
+                      <template #default="{ close }">
+                        <UiButton block variant="ghost" tone="danger"
+                                  data-context="code-popover-action" :data-group="group.id"
+                                  :data-action="entry.file.status === 'A' ? 'clean' : 'discard'"
+                                  :data-file="entry.file.path"
+                                  :loading="gitBusy === discardGitFileKey(entry.file)"
+                                  :disabled="gitActionBusy"
+                                  @click="discardGitFile(group, entry.file); close('action')">
+                          {{ discardGitFileLabel(entry.file) }}
+                        </UiButton>
+                      </template>
+                    </UiPopover>
                     <UiIconButton
                       v-if="group.mutable"
                       class="git-file-action"
@@ -535,42 +739,13 @@
                   </span>
                 </div>
               </template>
+            </section>
             </template>
-            <div class="subhead commits-head">
-              <span class="subtitle">Коммиты</span>
-              <span v-if="commitSel.size" class="cnt mono">{{ commitSel.size }}</span>
-              <span class="grow"></span>
-              <!-- «С текущими»: правая сторона отрезка — рабочее дерево. Боль владельца — видеть
-                   коммиты и несохранённые правки одним дифом, как обычный diff задачи. -->
-              <UiButton variant="ghost" data-context="code-group-action"
-                        data-action="commits-with-work"
-                        :title="commitsWorkTitle" :pressed="commitsWithWork"
-                        :aria-disabled="!commitsWorkAvailable"
-                        @click="toggleCommitsWork">+ текущие</UiButton>
-              <UiIconButton role="embedded" data-context="code-group-action"
-                            data-action="branch-diff" label="Показать всю ветку"
-                            :title="branchDiffAvailability.title"
-                            :pressed="branchMode" :loading="commitsLoading && branchMode"
-                            :disabled="!branchDiffAvailability.enabled"
-                            @click="toggleBranchDiff">⑂</UiIconButton>
-              <UiIconButton v-if="commitSel.size" role="embedded" data-context="code-group-action"
-                            data-action="clear-commits" label="Снять выбор коммитов"
-                            title="Снять выбор" @click="clearCommitSelection">✕</UiIconButton>
-            </div>
-            <div v-if="commitsLoading" class="pnote commits-state">Читаю коммиты…</div>
-            <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
-            <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
-                         data-context="code-commit-row" :data-hash="c.hash"
-                         :class="{ sel: commitSel.has(c.hash) }" :pressed="commitSel.has(c.hash)"
-                         :title="c.when" @click="pickCommit(c, $event)">
-              <span class="hash mono">{{ c.hash }}</span>
-              <span class="subj">{{ c.subject }}</span>
-            </UiPressable>
-          </template>
+          </div>
         </div>
       </aside>
 
-      <div v-if="compact && !navigatorCollapsed" class="code-split" role="separator"
+      <div v-if="!navigatorCollapsed" class="code-split" role="separator"
            aria-orientation="vertical" tabindex="0"
            :aria-valuemin="NAVIGATOR_MIN_WIDTH" :aria-valuemax="Math.round(navigatorMaxWidth)"
            :aria-valuenow="Math.round(navigatorWidth)"
@@ -581,110 +756,245 @@
       </div>
 
       <!-- Просмотр: файл или диф -->
-      <section class="editorwrap">
-        <div class="ehead">
-          <template v-if="fileHistoryActive">
-            <span v-if="fileHistoryDiff" class="st" :class="fileHistoryDiff.status">
-              {{ STLABEL[fileHistoryDiff.status] || fileHistoryDiff.status }}
+      <section ref="editorHost" class="editorwrap">
+        <header class="editor-header">
+        <div class="ehead file-head-row">
+          <UiIconButton v-if="codePanelNarrow && narrowPane === 'editor'" role="embedded"
+                        data-context="code-editor-action" data-action="back-to-navigator"
+                        :label="narrowBackLabel" :title="narrowBackLabel"
+                        @click="showNarrowNavigator">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m9.5 3-5 5 5 5" />
+            </svg>
+          </UiIconButton>
+          <div class="editor-identity">
+            <template v-if="fileHistoryActive">
+              <span v-if="fileHistoryDiff" class="st" :class="fileHistoryDiff.status">
+                {{ STLABEL[fileHistoryDiff.status] || fileHistoryDiff.status }}
+              </span>
+              <span class="epath mono" :title="fileHistoryDiff?.path || fileHistoryPath">
+                <i v-if="headPath(fileHistoryDiff?.path || fileHistoryPath).dir" class="epath-dir">
+                  {{ headPath(fileHistoryDiff?.path || fileHistoryPath).dir }}/
+                </i><!-- -->
+                <b class="epath-name">{{ headPath(fileHistoryDiff?.path || fileHistoryPath).name }}</b>
+              </span>
+              <span v-if="fileHistoryDiffLoading" class="note">читаю diff…</span>
+              <span v-else-if="fileHistoryDiffError" class="note diff-error">
+                {{ fileHistoryDiffError }}
+              </span>
+            </template>
+            <template v-else-if="tab === 'files' && fileSel">
+              <span class="epath mono" :title="fileSel">
+                <i v-if="headPath(fileSel).dir" class="epath-dir">{{ headPath(fileSel).dir }}/</i><!-- -->
+                <b class="epath-name">{{ headPath(fileSel).name }}</b>
+              </span>
+              <span v-if="showsImage" class="note img-note">изображение</span>
+              <span v-else-if="fileData?.binary" class="note">бинарный</span>
+              <span v-else-if="fileData?.tooBig" class="note">
+                слишком большой — превью отключено
+              </span>
+              <span v-if="fileLoading" class="note">читаю…</span>
+              <span v-else-if="blameLoading" class="note">считаю blame…</span>
+              <span v-else-if="blameError" class="note diff-error">{{ blameError }}</span>
+            </template>
+            <template v-else-if="tab === 'git' && patchReviewActive">
+              <span class="epath review-title" :title="patchReviewGroup?.title">
+                Обзор · {{ patchReviewGroup?.title }}
+              </span>
+              <span v-if="patchReviewGroup" class="note mono range-summary">
+                {{ fileCountLabel(patchReviewGroup.files.length) }},
+                +{{ patchReviewGroup.stat.add }} −{{ patchReviewGroup.stat.del }}
+              </span>
+              <span v-if="patchLoading" class="note">читаю патч…</span>
+              <span v-else-if="patchError" class="note diff-error">{{ patchError }}</span>
+            </template>
+            <template v-else-if="tab === 'git' && gitFile">
+              <span class="st" :class="gitFile.status">
+                {{ STLABEL[gitFile.status] || gitFile.status }}
+              </span>
+              <span class="epath mono" :title="gitFile.path">
+                <i v-if="headPath(gitFile.path).dir" class="epath-dir">
+                  {{ headPath(gitFile.path).dir }}/
+                </i><!-- -->
+                <b class="epath-name">{{ headPath(gitFile.path).name }}</b>
+              </span>
+              <span v-if="gitFile.binary" class="note">бинарный</span>
+              <span v-else-if="gitFile.tooBig" class="note">
+                слишком большой — превью отключено
+              </span>
+            </template>
+          </div>
+          <span v-if="tab === 'files' && fileSel && !fileHistoryActive"
+                class="file-view-state">Просмотр</span>
+          <span class="grow"></span>
+          <div class="file-head-actions" role="group" aria-label="Действия файла">
+              <UiButton v-if="tab === 'git' && patchReviewActive" variant="ghost"
+                        data-context="code-editor-action" data-action="close-patch-review"
+                        title="Вернуться к файлу" @click="closePatchReview">
+                <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16" fill="none"
+                     stroke="currentColor" stroke-width="1.45" stroke-linecap="round"
+                     stroke-linejoin="round">
+                  <path d="m7 3-5 5 5 5M2 8h12" />
+                </svg>
+                <span class="label">К файлу</span>
+              </UiButton>
+              <UiButton v-if="canShowFileHistory && !editorNarrowActions" variant="ghost"
+                        data-context="code-editor-action" data-action="file-history"
+                        title="Показать историю файла" @click="openFileHistory">
+                <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16">
+                  <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.3a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4zM7.4 4h1.2v4.2l2.9 1.7-.6 1-3.5-2.1z" />
+                </svg>
+                <span class="label">История</span>
+              </UiButton>
+              <UiButton v-if="canAskAgent && !editorNarrowActions" variant="ghost"
+                        data-context="code-editor-action"
+                        data-action="ask-agent" :loading="askAgentBusy" :disabled="askAgentBusy"
+                        title="Создать чат с черновиком вопроса" @click="askAgentAboutCode">
+                <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16">
+                  <path d="M2 2.5h12v8.5H6.2L3 13.6V11H2z" />
+                </svg>
+                <span class="label">Спросить агента</span>
+              </UiButton>
+              <UiPopover v-if="canShowFileMenu" has-popup="dialog" placement="bottom-end"
+                         :style="{ width: 'min(300px, calc(100vw - 20px))' }">
+                <template #trigger>
+                  <UiIconButton role="embedded" data-context="code-editor-action"
+                                data-action="file-actions" label="Действия файла"
+                                title="Действия файла">
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <circle cx="3" cy="8" r="1.15" />
+                      <circle cx="8" cy="8" r="1.15" />
+                      <circle cx="13" cy="8" r="1.15" />
+                    </svg>
+                  </UiIconButton>
+                </template>
+                <template #default="{ close }">
+                  <div class="code-popover-panel">
+                    <strong class="code-popover-title">Действия файла</strong>
+                    <UiButton v-if="editorNarrowActions && canShowFileHistory" block variant="ghost"
+                              data-context="code-popover-action" data-action="file-history"
+                              @click="openFileHistory(); close('action')">
+                      История файла
+                    </UiButton>
+                    <UiButton v-if="editorNarrowActions && canAskAgent" block variant="ghost"
+                              data-context="code-popover-action" data-action="ask-agent"
+                              :loading="askAgentBusy" :disabled="askAgentBusy"
+                              @click="askAgentAboutCode(); close('action')">
+                      Спросить агента
+                    </UiButton>
+                    <UiButton v-if="tab === 'files' && fileSel && !fileHistoryActive"
+                              block variant="ghost" data-context="code-popover-action"
+                              data-action="blame" :pressed="blameEnabled" :disabled="!canUseBlame"
+                              :title="blameTitle" @click="toggleBlame">
+                      Авторство строк
+                    </UiButton>
+                    <UiButton v-if="canCopyCodeLink" block variant="ghost"
+                              data-context="code-popover-action" data-action="copy-code-link"
+                              @click="copyCodeLink(); close('action')">
+                      {{ codeLinkCopied ? 'Ссылка скопирована' : 'Скопировать ссылку' }}
+                    </UiButton>
+                    <UiButton block variant="ghost" data-context="code-popover-action"
+                              data-action="refresh-file" :loading="gitLoading || fileLoading"
+                              @click="requestRefresh(); close('action')">
+                      Обновить
+                    </UiButton>
+                  </div>
+                </template>
+              </UiPopover>
+          </div>
+        </div>
+        <div v-if="showsComparisonRow" class="diffhead">
+          <div class="comparison-identity">
+            <span v-if="comparisonBadge" class="comparison-sides mono"
+                  :title="comparisonBadge.hint">
+              {{ comparisonBadge.label }}
             </span>
-            <span class="epath mono" :title="fileHistoryDiff?.path || fileHistoryPath">
-              <i v-if="headPath(fileHistoryDiff?.path || fileHistoryPath).dir" class="epath-dir">{{ headPath(fileHistoryDiff?.path || fileHistoryPath).dir }}/</i><b class="epath-name">{{ headPath(fileHistoryDiff?.path || fileHistoryPath).name }}</b>
-            </span>
-            <span class="scope">история</span>
-            <span v-if="fileHistoryDiffLoading" class="note">читаю diff…</span>
-            <span v-else-if="fileHistoryDiffError" class="note diff-error">
-              {{ fileHistoryDiffError }}
-            </span>
-          </template>
-          <template v-else-if="tab === 'files' && fileSel">
-            <span class="epath mono" :title="fileSel">
-              <i v-if="headPath(fileSel).dir" class="epath-dir">{{ headPath(fileSel).dir }}/</i><b class="epath-name">{{ headPath(fileSel).name }}</b>
-            </span>
-            <span v-if="showsImage" class="note img-note">изображение</span>
-            <span v-else-if="fileData?.binary" class="note">бинарный</span>
-            <span v-else-if="fileData?.tooBig" class="note">слишком большой — превью отключено</span>
-            <span v-if="fileLoading" class="note">читаю…</span>
-            <span v-else-if="blameLoading" class="note">считаю blame…</span>
-            <span v-else-if="blameError" class="note diff-error">{{ blameError }}</span>
-          </template>
-          <template v-else-if="tab === 'git' && patchReviewActive">
-            <span class="epath" :title="patchReviewGroup?.title">Обзор · {{ patchReviewGroup?.title }}</span>
-            <span v-if="patchReviewGroup" class="note mono range-summary">
-              {{ fileCountLabel(patchReviewGroup.files.length) }},
-              +{{ patchReviewGroup.stat.add }} −{{ patchReviewGroup.stat.del }}
-            </span>
-            <span v-if="patchLoading" class="note">читаю патч…</span>
-            <span v-else-if="patchError" class="note diff-error">{{ patchError }}</span>
-          </template>
-          <template v-else-if="tab === 'git' && gitFile">
-            <span class="st" :class="gitFile.status">{{ STLABEL[gitFile.status] || gitFile.status }}</span>
-            <span class="epath mono" :title="gitFile.path">
-              <i v-if="headPath(gitFile.path).dir" class="epath-dir">{{ headPath(gitFile.path).dir }}/</i><b class="epath-name">{{ headPath(gitFile.path).name }}</b>
-            </span>
-            <!-- Пока индекс пуст, называть группу нечего: диф в панели ровно один. -->
-            <span v-if="gitScopeBadge" class="scope" :title="gitScopeBadge.hint">{{ gitScopeBadge.label }}</span>
             <span v-if="rangeSummary" class="note mono range-summary">{{ rangeSummary }}</span>
-            <span v-if="gitFile.binary" class="note">бинарный</span>
-            <span v-else-if="gitFile.tooBig" class="note">слишком большой — превью отключено</span>
             <span v-if="diffLoading" class="note">читаю…</span>
             <span v-else-if="diffError" class="note diff-error">{{ diffError }}</span>
-          </template>
+          </div>
+          <UiButton v-if="tab === 'git' && gitPane === 'changes' && (commitSel.size || branchMode)"
+                    variant="ghost" data-context="code-editor-action"
+                    data-action="clear-commits" title="Сбросить выбранный диапазон"
+                    @click="clearCommitSelection">
+            Сбросить диапазон
+          </UiButton>
           <span class="grow"></span>
-          <!-- Действия шапки: значок + подпись. Подпись прячет контейнерный запрос по ширине
-               редактора, смысл остаётся в title. Сами кнопки не сжимаются: с бейджем и сводкой
-               отрезка семь кнопок ужимались до одной буквы, и «История» превращалась в «И». -->
-          <UiButton v-if="tab === 'git' && patchReviewActive" variant="ghost"
-                    data-action="close-patch-review" title="Вернуться к файлу"
-                    @click="closePatchReview">
-            <span class="glyph" aria-hidden="true">←</span><span class="label">К файлу</span>
-          </UiButton>
-          <UiButton v-if="(tab === 'git' || fileHistoryActive) && !patchReviewActive"
-                    class="diff-layout" variant="ghost"
-                    :pressed="renderSideBySide" :aria-disabled="oneSidedDiff"
-                    :title="oneSidedDiff ? 'Новый или удалённый файл показывается одной колонкой' : (renderSideBySide ? 'Показать в одну колонку' : 'Показать рядом')"
-                    @click="toggleDiffLayout">
-            <span class="glyph" aria-hidden="true">{{ oneSidedDiff || !renderSideBySide ? '≡' : '⇆' }}</span>
-            <span class="label">{{ oneSidedDiff ? 'одна колонка' : (renderSideBySide ? 'рядом' : 'в строку') }}</span>
-          </UiButton>
-          <UiButton v-if="(tab === 'git' || fileHistoryActive) && !patchReviewActive"
-                    variant="ghost" data-action="diff-wrap"
-                    :pressed="diffWrap" title="Переносить длинные строки"
-                    @click="toggleDiffWrap">
-            <span class="glyph" aria-hidden="true">↩</span><span class="label">перенос</span>
-          </UiButton>
-          <UiButton v-if="(tab === 'git' || fileHistoryActive) && !patchReviewActive" variant="ghost"
-                    data-action="diff-whitespace"
-                    :pressed="ignoreTrimWhitespace" title="Не учитывать пробелы по краям строк"
-                    @click="toggleDiffWhitespace">
-            <span class="glyph" aria-hidden="true">≋</span><span class="label">без пробелов</span>
-          </UiButton>
-          <UiButton v-if="canShowFileHistory" variant="ghost" data-action="file-history"
-                    title="Показать историю файла" @click="openFileHistory">
-            <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.3a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4zM7.4 4h1.2v4.2l2.9 1.7-.6 1-3.5-2.1z" /></svg>
-            <span class="label">История</span>
-          </UiButton>
-          <UiButton v-if="tab === 'files' && fileSel && !fileHistoryActive" variant="ghost"
-                    data-action="blame" :pressed="blameEnabled" :disabled="!canUseBlame"
-                    :title="blameTitle" @click="toggleBlame">
-            <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M8 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm0 7c3 0 5.5 1.5 5.5 3.5V14h-11v-1.5C2.5 10.5 5 9 8 9z" /></svg>
-            <span class="label">Blame</span>
-          </UiButton>
-          <UiButton v-if="canAskAgent" variant="ghost" data-action="ask-agent"
-                    :loading="askAgentBusy" :disabled="askAgentBusy"
-                    title="Создать чат с черновиком вопроса" @click="askAgentAboutCode">
-            <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h12v8.5H6.2L3 13.6V11H2z" /></svg>
-            <span class="label">Спросить агента</span>
-          </UiButton>
-          <UiButton v-if="canCopyCodeLink" variant="ghost" data-action="copy-code-link"
-                    :title="codeLinkCopied ? 'Ссылка скопирована' : 'Скопировать ссылку на файл'"
-                    @click="copyCodeLink">
-            <span v-if="codeLinkCopied" class="glyph ok" aria-hidden="true">✓</span>
-            <svg v-else class="glyph" aria-hidden="true" viewBox="0 0 16 16"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0z" /></svg>
-            <span class="label">{{ codeLinkCopied ? 'скопировано' : 'Ссылка' }}</span>
-          </UiButton>
-          <UiIconButton role="embedded" label="Обновить" title="Обновить"
-                        :loading="gitLoading || fileLoading" @click="requestRefresh()">↻</UiIconButton>
+          <div v-if="gitFileNavigation" class="file-navigation" role="group"
+               :aria-label="`Навигация по файлам изменений: файл ${gitFileNavigation.index + 1} из ${gitFileNavigation.total}`">
+            <UiIconButton role="embedded" data-context="code-editor-action"
+                          label="Предыдущий файл" title="Предыдущий файл"
+                          :disabled="!gitFileNavigation.previous"
+                          @click="navigateGitFile(-1)">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m10 3-5 5 5 5" />
+              </svg>
+            </UiIconButton>
+            <span class="file-position mono" aria-live="polite">
+              <span class="file-position-label">Файл </span>{{ gitFileNavigation.index + 1 }} /
+              {{ gitFileNavigation.total }}
+            </span>
+            <UiIconButton role="embedded" data-context="code-editor-action"
+                          label="Следующий файл" title="Следующий файл"
+                          :disabled="!gitFileNavigation.next"
+                          @click="navigateGitFile(1)">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m6 3 5 5-5 5" />
+              </svg>
+            </UiIconButton>
+          </div>
+          <UiPopover has-popup="dialog" placement="bottom-end"
+                     :style="{ width: 'min(320px, calc(100vw - 20px))' }">
+            <template #trigger>
+              <UiButton class="diff-view-trigger" variant="ghost"
+                        data-context="code-editor-action" data-action="diff-view"
+                        :title="`Вид сравнения: ${diffLayoutLabel}`">
+                <span>Вид сравнения</span>
+                <span class="diff-view-mode">· {{ diffLayoutLabel }}</span>
+                <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                     stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true">
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </UiButton>
+            </template>
+            <div class="code-popover-panel diff-view-panel">
+              <strong class="code-popover-title">Вид сравнения</strong>
+              <span class="code-popover-label">Расположение</span>
+              <div class="diff-layout-options" role="group" aria-label="Расположение сравнения">
+                <UiButton variant="ghost" data-context="code-popover-choice"
+                          :pressed="renderSideBySide"
+                          :disabled="oneSidedDiff || editorForcesInlineDiff"
+                          @click="setDiffLayout(true)">
+                  Рядом
+                </UiButton>
+                <UiButton variant="ghost" data-context="code-popover-choice"
+                          :pressed="!renderSideBySide" @click="setDiffLayout(false)">
+                  В одну колонку
+                </UiButton>
+              </div>
+              <p v-if="oneSidedDiff" class="code-popover-note">
+                Новый или удалённый файл показывается в одну колонку.
+              </p>
+              <p v-else-if="editorForcesInlineDiff" class="code-popover-note">
+                На этой ширине сравнение показано в одну колонку. При расширении вернётся
+                сохранённый режим «Рядом».
+              </p>
+              <UiSwitch :model-value="diffWrap" data-action="diff-wrap"
+                        @change="toggleDiffWrap">
+                Переносить длинные строки
+              </UiSwitch>
+              <UiSwitch :model-value="ignoreTrimWhitespace" data-action="diff-whitespace"
+                        @change="toggleDiffWhitespace">
+                Игнорировать пробелы по краям строк
+              </UiSwitch>
+            </div>
+          </UiPopover>
         </div>
+        </header>
         <div class="ebody" data-escape-owner="monaco">
           <div v-show="tab === 'files' && !imageSrc && !fileHistoryActive"
                ref="fileHost" class="editor"></div>
@@ -704,15 +1014,52 @@
             </div>
           </div>
           <div v-if="fileHistoryActive && !fileHistoryDiff && !fileHistoryDiffLoading"
-               class="overlay">Выбери коммит слева</div>
-          <div v-else-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
+               class="overlay">
+            <div class="editor-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5h16M4 12h16M4 19h10" />
+              </svg>
+              <strong>Выбери коммит</strong>
+              <span>История файла находится в панели слева.</span>
+            </div>
+          </div>
+          <div v-else-if="tab === 'files' && !fileSel" class="overlay">
+            <div class="editor-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 3h8l4 4v14H6zM14 3v4h4" />
+              </svg>
+              <strong>Выбери файл</strong>
+              <span>Открой его в дереве или найди по имени и содержимому.</span>
+            </div>
+          </div>
           <div v-else-if="tab === 'git' && !patchReviewActive
                          && commitSel.size && commitsDiff && !commitsDiff.files.length"
-               class="overlay">В выбранных коммитах нет изменений файлов</div>
+               class="overlay">
+            <div class="editor-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 7h14M7 12h10M9 17h6" />
+              </svg>
+              <strong>В диапазоне нет изменений</strong>
+              <span>Выбери другой коммит или вернись к текущим правкам.</span>
+            </div>
+          </div>
           <!-- Пусто = нет изменений НИ В ОДНОЙ группе: при чистом рабочем дереве, но
                непустом индексе, диф выбранного файла существует и закрывать его нечем. -->
           <div v-else-if="tab === 'git' && !patchReviewActive && git && !gitEntries.size"
-               class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
+               class="overlay">
+            <div class="editor-empty positive">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="m8 12 2.6 2.6L16.5 9" />
+              </svg>
+              <strong>Рабочая копия чистая</strong>
+              <span>Несохранённых изменений нет.</span>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -774,16 +1121,23 @@ import type { CodeContext, GitGroup, GitGroupId, GitGroupStat } from '../../shar
 import {
   UiButton,
   UiIconButton,
+  UiInlineMessage,
+  UiPopover,
   UiPressable,
   UiSearchInput,
   UiSelect,
   UiSwitch,
+  UiTab,
+  UiTabs,
   UiTextarea,
   confirmDialog,
   promptDialog,
 } from '../../ui';
 
 type CodeTab = 'files' | 'git';
+type CodeMainTab = 'files' | 'changes' | 'commits';
+type GitPane = 'changes' | 'commits';
+type NarrowPane = 'navigator' | 'editor';
 type ContextSnapshot = CodeRequestContext & { generation: number };
 type ActivationOptions = { activation?: number | null };
 type RefreshOptions = ActivationOptions & { silent?: boolean; contentOnly?: boolean };
@@ -792,6 +1146,7 @@ type PreviousContext = {
   project: string;
   contextId: string;
   tab: CodeTab;
+  gitPane: GitPane;
   file: string;
   gitFile: string;
 };
@@ -817,6 +1172,7 @@ type FileTreeRow = CodeDirectoryEntry & { rel: string; depth: number };
 type GitNotice = { type: 'ok' | 'err'; text: string };
 interface FileHistoryOrigin {
   tab: CodeTab;
+  gitPane: GitPane;
   file: string;
   gitRef: string;
 }
@@ -864,6 +1220,7 @@ const repoKey = ref('');
 const treePath = ref('');
 const contextId = ref('');
 const tab = ref<CodeTab>('files');   // 'files' | 'git'
+const gitPane = ref<GitPane>('changes');
 
 const contextModel = computed(() => buildCodeContexts(repos.value));
 const contexts = computed(() => contextModel.value.contexts);
@@ -932,6 +1289,16 @@ const SEARCH_DELAY_MS = 300;
 
 // ── Гит ──
 const git = ref<CodeGitResponse | null>(null);           // { branch, files, staged, log }
+const changePathCount = computed(() => new Set([
+  ...(git.value?.staged || []).map((file) => file.path),
+  ...(git.value?.files || []).map((file) => file.path),
+]).size);
+const mainTab = computed<CodeMainTab>({
+  get: () => (tab.value === 'files' ? 'files' : gitPane.value),
+  set: (value) => {
+    void setMainTab(value);
+  },
+});
 const fileTreeDecorations = computed(() => treeDecorations(git.value));
 const gitLoading = ref(false);
 const diffContent = ref(new Map<string, CodeFileDiffResponse>());
@@ -955,9 +1322,28 @@ const commitsWithWork = ref(localStorage.getItem('cockpit-code-commits-work') !=
 const commitMessage = ref('');
 const amendCommit = ref(false);
 const amendHeadMessage = ref('');
+const commitComposerOpen = ref(false);
+const commitComposerTouched = ref(false);
 const gitBusy = ref('');
 const gitNotice = ref<GitNotice | null>(null);     // { type: 'ok' | 'err', text }
 const gitActionBusy = computed(() => !!gitBusy.value);
+const commitComposerTitle = computed(() => {
+  if (!commitComposerOpen.value) {
+    return 'Коммит';
+  }
+
+  return amendCommit.value ? 'Изменение последнего коммита' : 'Новый коммит';
+});
+const commitIndexLabel = computed(() => (
+  git.value?.staged.length
+    ? `${fileCountLabel(git.value.staged.length)} в индексе`
+    : 'Индекс пуст'
+));
+const commitComposerHint = computed(() => (
+  git.value?.staged.length
+    ? 'Раскройте форму, чтобы написать сообщение.'
+    : 'Подготовьте файлы кнопкой +'
+));
 const amendAvailable = computed(() => {
   const current = git.value;
 
@@ -1009,6 +1395,20 @@ watch(() => git.value?.headMessage || '', (next, previous) => {
 watch(amendAvailable, (available) => {
   if (!available) {
     amendCommit.value = false;
+  }
+});
+watch(() => git.value?.staged.length || 0, (next, previous) => {
+  if (next > 0 && previous === 0 && !commitComposerTouched.value
+    && codePanelHeight.value >= 600) {
+    commitComposerOpen.value = true;
+  } else if (next === 0 && previous > 0 && !commitComposerTouched.value
+    && !commitMessage.value.trim() && !amendCommit.value) {
+    commitComposerOpen.value = false;
+  }
+});
+watch(amendCommit, (enabled) => {
+  if (enabled) {
+    commitComposerOpen.value = true;
   }
 });
 
@@ -1084,6 +1484,17 @@ const gitSel = ref('');
 // «рядом» она съедала половину редактора (особенно заметно в развёрнутом доке),
 // поэтому такие изменения всегда показываем одной колонкой.
 const oneSidedDiff = computed(() => ['A', 'D'].includes(gitFile.value?.status || ''));
+const editorWidth = ref(Number.POSITIVE_INFINITY);
+const editorForcesInlineDiff = computed(() => editorWidth.value < 760);
+const editorNarrowActions = computed(() => editorWidth.value < 760);
+const codePanelWidth = ref(Number.POSITIVE_INFINITY);
+const codePanelNarrow = computed(() => codePanelWidth.value < 760);
+const narrowPane = ref<NarrowPane>('navigator');
+const narrowBackLabel = computed(() => ({
+  files: 'К файлам',
+  changes: 'К изменениям',
+  commits: 'К коммитам',
+}[mainTab.value]));
 const fullSide = ref(localStorage.getItem('cockpit-diff-side') !== '0');
 const compactSide = ref(localStorage.getItem('cockpit-dock-diff-side') === '1');
 const side = computed({
@@ -1098,7 +1509,9 @@ const side = computed({
     }
   },
 });
-const renderSideBySide = computed(() => side.value && !oneSidedDiff.value);
+const renderSideBySide = computed(() => (
+  side.value && !oneSidedDiff.value && !editorForcesInlineDiff.value
+));
 const diffWrap = ref(localStorage.getItem('cockpit-diff-wrap') === '1');
 const ignoreTrimWhitespace = ref(localStorage.getItem('cockpit-diff-ws') === '1');
 const gitView = ref(normalizeGitView(localStorage.getItem('cockpit-code-git-view')));
@@ -1182,6 +1595,12 @@ const commitGroup = computed(() => {
   };
 });
 const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value, commitGroup.value));
+const changeGroups = computed(() => gitGroups.value.filter((group) => group.id !== 'commits'));
+const visibleGitGroups = computed(() => (
+  gitPane.value === 'changes'
+    ? changeGroups.value
+    : gitGroups.value.filter((group) => group.id === 'commits')
+));
 const patchReviewGroup = computed(() => (
   gitGroups.value.find((group) => group.id === patchReviewGroupId.value) || null
 ));
@@ -1199,6 +1618,33 @@ const gitEntries = computed(() => {
   return map;
 });
 const gitEntry = computed(() => gitEntries.value.get(gitSel.value) || null);
+const gitFileNavigation = computed(() => {
+  if (tab.value !== 'git' || fileHistoryActive.value) {
+    return null;
+  }
+
+  const entry = gitEntry.value;
+
+  if (!entry || entry.group.files.length < 2 || patchReviewActive.value) {
+    return null;
+  }
+
+  const index = entry.group.files.findIndex((file) => file.path === entry.file.path);
+
+  if (index < 0) {
+    return null;
+  }
+
+  const previous = entry.group.files[index - 1];
+  const next = entry.group.files[index + 1];
+
+  return {
+    index,
+    total: entry.group.files.length,
+    previous: previous ? gitRef(entry.group.id, previous.path) : '',
+    next: next ? gitRef(entry.group.id, next.path) : '',
+  };
+});
 /**
  * Запись, чей диф показывает редактор. В режиме «+ текущие» слитый диф отрезка открывается
  * по клику на файл в ЛЮБОЙ группе: тот же путь есть в группе коммитов — показывается он,
@@ -1253,6 +1699,9 @@ const canAskAgent = computed(() => !patchReviewActive.value && !fileHistoryActiv
 const canShowFileHistory = computed(() => !fileHistoryActive.value && !patchReviewActive.value && (
   tab.value === 'files' ? !!fileSel.value : !!gitFile.value
 ));
+// Обновление относится ко всему текущему контексту, поэтому меню остаётся доступным
+// и в чистом Git-состоянии, когда выбрать файл ещё невозможно.
+const canShowFileMenu = computed(() => !patchReviewActive.value);
 const blameEnabled = ref(localStorage.getItem('cockpit-code-blame') === '1');
 const blameLines = ref<CodeBlameLine[]>([]);
 const blamePath = ref('');
@@ -1333,6 +1782,19 @@ function fileCountLabel(count: number) {
 }
 
 /**
+ * Переключает diff на соседний файл, не меняя выбранную Git-группу.
+ * На границе списка кнопка недоступна, поэтому здесь пустая цель означает no-op.
+ */
+function navigateGitFile(direction: -1 | 1) {
+  const navigation = gitFileNavigation.value;
+  const target = direction < 0 ? navigation?.previous : navigation?.next;
+
+  if (target) {
+    void selectGit(target);
+  }
+}
+
+/**
  * Выбирает первый файл первой непустой группы.
  * Индекс имеет приоритет перед рабочим деревом, как и порядок групп в панели.
  */
@@ -1348,8 +1810,13 @@ function firstGitRef() {
   return '';
 }
 
-// Чей это диф, показываем только когда групп больше одной: при пустом индексе
-// вариант ровно один, и подпись была бы шумом.
+/** Короткая ревизия для явной подписи сторон сравнения. */
+function shortRevision(value: string) {
+  return value.slice(0, 7);
+}
+
+// Бейдж называет обе стороны, а не внутреннюю Git-группу: даже при одной группе
+// человеку важно отличать HEAD → индекс от индекс → рабочая копия.
 const gitScopeBadge = computed(() => {
   const entry = shownEntry.value;
 
@@ -1358,28 +1825,70 @@ const gitScopeBadge = computed(() => {
   }
 
   if (entry.group.id === 'commits') {
-    return commitsDiff.value?.range.work
+    const range = commitsDiff.value?.range;
+
+    if (!range) {
+      return null;
+    }
+
+    return range.work
       ? {
-        label: 'в коммитах + текущие',
+        label: `${shortRevision(range.base)} → рабочая копия`,
         hint: 'слева — до первого выбранного коммита, справа — файл на диске',
       }
       : {
-        label: 'в коммитах',
+        label: `${shortRevision(range.base)} → ${shortRevision(range.to)}`,
         hint: 'слева — до первого выбранного коммита, справа — после последнего',
       };
   }
-  if (gitGroups.value.length < 2) {
-    return null;
+
+  if (entry.file.status === 'U') {
+    return {
+      label: 'наша версия → рабочая копия',
+      hint: 'слева — наша версия до конфликта, справа — файл с маркерами конфликта',
+    };
   }
 
   return entry.group.id === 'staged'
-    ? { label: 'в индексе', hint: 'слева HEAD, справа индекс — это уедет в коммит' }
-    : { label: 'в рабочем дереве', hint: 'слева индекс, справа рабочее дерево — в коммит пока не попадёт' };
+    ? { label: 'HEAD → индекс', hint: 'справа то, что уедет в следующий коммит' }
+    : {
+      label: 'индекс → рабочая копия',
+      hint: 'справа правки на диске, которые в коммит пока не попадут',
+    };
 });
+const selectedFileHistoryEntry = computed(() => (
+  fileHistoryEntries.value.find((entry) => entry.hash === fileHistorySelected.value) || null
+));
+const comparisonBadge = computed(() => {
+  if (!fileHistoryActive.value) {
+    return gitScopeBadge.value;
+  }
+
+  const entry = selectedFileHistoryEntry.value;
+
+  return entry
+    ? {
+      label: `${shortRevision(entry.base)} → ${shortRevision(entry.hash)}`,
+      hint: 'версия файла до коммита и версия в выбранном коммите',
+    }
+    : {
+      label: 'История файла',
+      hint: 'выбери коммит в журнале слева',
+    };
+});
+const showsComparisonRow = computed(() => !patchReviewActive.value && (
+  fileHistoryActive.value
+    ? Boolean(fileHistoryDiff.value || fileHistoryDiffLoading.value || fileHistoryDiffError.value)
+    : tab.value === 'git' && Boolean(gitFile.value)
+));
+const diffLayoutLabel = computed(() => (
+  oneSidedDiff.value || !renderSideBySide.value ? 'Одна колонка' : 'Рядом'
+));
 
 // ── Monaco: оба редактора живут под v-show, но модели очищаются при смене контекста. ──
 const fileHost = ref<HTMLElement | null>(null);
 const diffHost = ref<HTMLElement | null>(null);
+const editorHost = ref<HTMLElement | null>(null);
 const panelHeader = ref<HTMLElement | null>(null);
 const layHost = ref<HTMLElement | null>(null);
 let fileEditor: monaco.editor.IStandaloneCodeEditor | null = null;
@@ -1454,61 +1963,108 @@ const projectIsCurrent = (generation: number, id: string, requestId: number) => 
 );
 const activationIsCurrent = (id: number | null) => id == null || id === activationId;
 
-const NAVIGATOR_MIN_WIDTH = 140;
+const NAVIGATOR_MIN_WIDTH = 220;
 const NAVIGATOR_MAX_WIDTH = 420;
+const NAVIGATOR_DEFAULT_WIDTH = 320;
 const navigatorMaxWidth = ref(NAVIGATOR_MAX_WIDTH);
+const codePanelHeight = ref(Number.POSITIVE_INFINITY);
 /**
  * Ограничивает сохранённую ширину текущим размером панели.
- * Повреждённое значение storage возвращает стандартные 260 пикселей.
+ * Повреждённое значение storage возвращает стандартные 320 пикселей.
  */
 const clampNavigatorWidth = (value: string | number | null, max = navigatorMaxWidth.value) => {
   const parsed = value === null || value === '' ? NaN : Number(value);
 
   return Math.min(
     Math.max(NAVIGATOR_MIN_WIDTH, max),
-    Math.max(NAVIGATOR_MIN_WIDTH, Number.isFinite(parsed) ? parsed : 260),
+    Math.max(NAVIGATOR_MIN_WIDTH, Number.isFinite(parsed) ? parsed : NAVIGATOR_DEFAULT_WIDTH),
   );
 };
+
+/**
+ * Читает пользовательскую ширину навигатора из локального состояния устройства.
+ * Недоступный storage не имеет права сломать открытие самой панели.
+ */
+function readNavigatorWidth() {
+  try {
+    return localStorage.getItem('cockpit-code-dock-nav-width');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Запоминает только уже ограниченную и округлённую ширину навигатора.
+ * Ошибка записи оставляет рабочей текущую раскладку до закрытия страницы.
+ */
+function storeNavigatorWidth() {
+  try {
+    localStorage.setItem('cockpit-code-dock-nav-width', String(Math.round(navigatorWidth.value)));
+  } catch {
+    // Недоступный storage не должен ломать сам разделитель.
+  }
+}
 // Храним желаемую ширину отдельно от текущего viewport-clamp. При временном
 // сужении дока дерево ужимается, а после разворачивания возвращается к выбору
 // человека, если он сам не двигал разделитель в узком состоянии.
 const navigatorPreferredWidth = ref(clampNavigatorWidth(
-  localStorage.getItem('cockpit-code-dock-nav-width'),
+  readNavigatorWidth(),
   NAVIGATOR_MAX_WIDTH,
 ));
 const navigatorWidth = computed(() => clampNavigatorWidth(navigatorPreferredWidth.value));
 const navigatorCollapsed = ref(false);
+const navigatorToggleLabel = computed(() => (
+  navigatorCollapsed.value ? 'Показать навигатор' : 'Скрыть навигатор'
+));
 const compactStyle = computed(() => ({ '--code-nav-width': `${navigatorWidth.value}px` }));
+const layoutClasses = computed(() => ({
+  compact: props.compact,
+  'navigator-collapsed': navigatorCollapsed.value && !codePanelNarrow.value,
+  'code-narrow': codePanelNarrow.value,
+  'narrow-navigator': codePanelNarrow.value && narrowPane.value === 'navigator',
+  'narrow-editor': codePanelNarrow.value && narrowPane.value === 'editor',
+}));
 let navigatorPointer: number | null = null;
 let navigatorObserver: ResizeObserver | null = null;
+let editorObserver: ResizeObserver | null = null;
 
 /**
  * Пересчитывает допустимую ширину дерева после изменения размера панели.
  * Редактор сохраняет большую часть пространства, а желаемая ширина не теряется.
  */
 function measureNavigatorWidth() {
-  const width = layHost.value?.getBoundingClientRect?.().width;
+  const rect = layHost.value?.getBoundingClientRect?.();
+  const width = rect?.width;
+
+  if (rect?.height && rect.height > 0) {
+    codePanelHeight.value = rect.height;
+  }
 
   if (width === undefined || width <= 0) {
     return;
   }
+
+  const widthChanged = codePanelWidth.value !== width;
+
+  codePanelWidth.value = width;
 
   const nextMax = Math.min(
     NAVIGATOR_MAX_WIDTH,
     Math.max(NAVIGATOR_MIN_WIDTH, Math.floor(width * 0.42)),
   );
 
-  if (nextMax === navigatorMaxWidth.value) {
-    return;
+  if (nextMax !== navigatorMaxWidth.value) {
+    navigatorMaxWidth.value = nextMax;
   }
 
-  navigatorMaxWidth.value = nextMax;
-  layoutEditors();
+  if (widthChanged) {
+    nextTick(layoutEditors);
+  }
 }
 
 /**
  * Переводит координату указателя в ширину дерева относительно панели.
- * Ширина рейки вычитается до ограничения размера и перераскладки редакторов.
+ * Внутренней рейки больше нет: координата считается от левого края панели.
  */
 function updateNavigatorWidth(clientX: number) {
   const rect = layHost.value?.getBoundingClientRect?.();
@@ -1517,7 +2073,7 @@ function updateNavigatorWidth(clientX: number) {
     return;
   }
 
-  navigatorPreferredWidth.value = clampNavigatorWidth(clientX - rect.left - 44);
+  navigatorPreferredWidth.value = clampNavigatorWidth(clientX - rect.left);
   layoutEditors();
 }
 
@@ -1562,7 +2118,7 @@ function finishNavigatorResize(event: PointerEvent) {
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   }
 
-  localStorage.setItem('cockpit-code-dock-nav-width', String(Math.round(navigatorWidth.value)));
+  storeNavigatorWidth();
 }
 
 /**
@@ -1589,13 +2145,23 @@ function navigatorResizeKey(event: KeyboardEvent) {
   }
 
   event.preventDefault();
-  localStorage.setItem('cockpit-code-dock-nav-width', String(navigatorWidth.value));
+  storeNavigatorWidth();
   nextTick(layoutEditors);
 }
 
 function layoutEditors() {
   fileEditor?.layout?.();
   diffEditor?.layout?.();
+}
+
+function showNarrowNavigator() {
+  narrowPane.value = 'navigator';
+  nextTick(layoutEditors);
+}
+
+function showNarrowEditor() {
+  narrowPane.value = 'editor';
+  nextTick(layoutEditors);
 }
 
 watch(layHost, (host) => {
@@ -1612,6 +2178,40 @@ watch(layHost, (host) => {
 
   nextTick(measureNavigatorWidth);
 }, { flush: 'post' });
+
+watch(editorHost, (host) => {
+  editorObserver?.disconnect?.();
+  editorObserver = null;
+
+  if (!host) {
+    return;
+  }
+
+  const measure = () => {
+    const width = host.getBoundingClientRect?.().width;
+
+    if (width && width > 0 && editorWidth.value !== width) {
+      editorWidth.value = width;
+      nextTick(layoutEditors);
+    }
+  };
+
+  if (typeof ResizeObserver !== 'undefined') {
+    editorObserver = new ResizeObserver(measure);
+    editorObserver.observe(host);
+  }
+
+  nextTick(measure);
+}, { flush: 'post' });
+
+watch(navigatorCollapsed, async () => {
+  await nextTick();
+  layoutEditors();
+});
+watch(narrowPane, async () => {
+  await nextTick();
+  layoutEditors();
+});
 
 function focusPanel() {
   panelHeader.value?.focus?.();
@@ -1757,6 +2357,8 @@ function resetState() {
   commitMessage.value = '';
   amendCommit.value = false;
   amendHeadMessage.value = '';
+  commitComposerOpen.value = false;
+  commitComposerTouched.value = false;
   gitBusy.value = '';
   gitNotice.value = null;
   gitOpenDirs.value = new Set();
@@ -1789,11 +2391,32 @@ function resetState() {
   clearFileModel();
   clearDiffModels();
   error.value = '';
+  narrowPane.value = 'navigator';
 }
 
 /**
  * Переключает вид без второго Git-снимка: вкладка файлов уже держит метаданные для
  * меток, а при входе в Git остаётся только подгрузить содержимое выбранного diff.
+ */
+async function setMainTab(next: CodeMainTab) {
+  showNarrowNavigator();
+
+  if (next === 'files') {
+    await setTab('files');
+  } else {
+    gitPane.value = next;
+    await setTab('git');
+  }
+
+  // Явный выбор вкладки всегда раскрывает её навигатор; состояние внутри не сбрасывается.
+  navigatorCollapsed.value = false;
+  await nextTick();
+  layoutEditors();
+}
+
+/**
+ * Переключает внутренний файловый/Git-режим и восстанавливает его текущую модель.
+ * Публичные три вкладки обязаны приходить сюда через setMainTab.
  */
 async function setTab(t: CodeTab) {
   if (fileHistoryActive.value) {
@@ -1868,9 +2491,10 @@ function setGitView(view: 'list' | 'tree') {
   localStorage.setItem('cockpit-code-git-view', gitView.value);
 }
 
-function toggleDiffLayout() {
+/** Выбирает расположение напрямую: popover не должен зависеть от прежнего toggle-состояния. */
+function setDiffLayout(value: boolean) {
   if (!oneSidedDiff.value) {
-    side.value = !side.value;
+    side.value = value;
   }
 }
 
@@ -2039,6 +2663,7 @@ async function openBlameCommit(line: CodeBlameLine) {
 
   fileHistoryOrigin.value = {
     tab: 'files',
+    gitPane: gitPane.value,
     file: fileSel.value,
     gitRef: '',
   };
@@ -2131,11 +2756,14 @@ async function openFileHistory() {
     return;
   }
 
+  showNarrowNavigator();
+
   const snapshot = captureContext();
   const own = ++fileHistoryRequestId;
 
   fileHistoryOrigin.value = {
     tab: tab.value,
+    gitPane: gitPane.value,
     file: fileSel.value,
     gitRef: gitSel.value,
   };
@@ -2179,6 +2807,8 @@ async function openFileHistoryEntry(entry: CodeFileLogEntry) {
   if (!fileHistoryActive.value) {
     return;
   }
+
+  showNarrowEditor();
 
   const snapshot = captureContext();
   const own = ++fileHistoryRequestId;
@@ -2247,6 +2877,7 @@ async function closeFileHistory(restore = true) {
     return;
   }
 
+  gitPane.value = origin.gitPane;
   await nextTick();
 
   if (origin.tab === 'files') {
@@ -2669,6 +3300,15 @@ function commitOnShortcut(event: KeyboardEvent) {
   commitGitChanges();
 }
 
+function toggleCommitComposer() {
+  commitComposerOpen.value = !commitComposerOpen.value;
+  commitComposerTouched.value = true;
+}
+
+function leaveAmend() {
+  amendCommit.value = false;
+}
+
 /**
  * Подставляет полное сообщение HEAD только при включении amend.
  * Уже введённый человеком и не совпадающий с прежним HEAD текст остаётся нетронутым.
@@ -2990,6 +3630,8 @@ async function openFile(rel: string, { silent = false, activation = null }: Refr
     return;
   }
 
+  showNarrowEditor();
+
   const snapshot = captureContext();
   const requestId = ++fileRequestId;
 
@@ -3170,6 +3812,8 @@ async function openPatchReview(group: GitGroup) {
   if (!group.files.length) {
     return;
   }
+
+  showNarrowEditor();
 
   const key = patchKey(group);
 
@@ -3568,6 +4212,8 @@ async function loadGit(
 async function selectGit(ref: string) {
   const snapshot = captureContext();
 
+  showNarrowEditor();
+
   if (patchReviewActive.value) {
     clearPatchReview();
   }
@@ -3757,6 +4403,9 @@ function showFile(rel: string, data: CodeFileResponse) {
   if (!fileEditor) {
     fileEditor = monaco.editor.create(fileHost.value, {
       ...READONLY_OPTS,
+      fontSize: 13,
+      lineHeight: 20,
+      padding: { top: 8, bottom: 8 },
       renderLineHighlight: 'none',
     });
     installBlameClick();
@@ -3799,6 +4448,9 @@ function showDiff(f: CodeGitFile | null) {
   if (!diffEditor) {
     diffEditor = monaco.editor.createDiffEditor(diffHost.value, {
       ...READONLY_OPTS,
+      fontSize: 13,
+      lineHeight: 20,
+      padding: { top: 8, bottom: 8 },
       renderSideBySide: renderSideBySide.value,
       diffWordWrap: diffWrap.value ? 'on' : 'off',
       renderOverviewRuler: true,
@@ -3993,6 +4645,7 @@ async function activate({ preserve = false } = {}) {
     project: project.value,
     contextId: contextId.value,
     tab: tab.value,
+    gitPane: gitPane.value,
     file: fileSel.value,
     gitFile: gitSel.value,
   } : null;
@@ -4044,6 +4697,7 @@ async function activate({ preserve = false } = {}) {
       && previous?.contextId === contextId.value;
 
     if (sameContext && previous.tab === 'git') {
+      gitPane.value = previous.gitPane;
       await setTab('git');
 
       if (previous.gitFile && gitEntries.value.has(previous.gitFile)) {
@@ -4229,6 +4883,7 @@ onBeforeUnmount(() => {
   }
 
   navigatorObserver?.disconnect?.();
+  editorObserver?.disconnect?.();
   emit('context', null);
   blameRequestId += 1;
   searchRequestId += 1;
@@ -4246,12 +4901,17 @@ onBeforeUnmount(() => {
 <style scoped>
 .code-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .code-head {
-  min-width: 0; min-height: 36px; display: flex; align-items: center; gap: 10px;
+  min-width: 0; min-height: 48px; display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
   padding: 0 4px 8px; color: var(--ink); outline: none;
   container: code-head / inline-size;
 }
 .code-head strong { flex: none; font-size: 13px; font-weight: 650; }
 .code-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.code-tabs { flex: none; }
+.code-tab-count { min-width: 17px; padding: 1px 5px; border-radius: 999px;
+  background: var(--surface-2); color: var(--ink-mid); font-size: 10.5px; text-align: center; }
+.navigator-toggle { flex: none; }
 /* Шапка — не форма: у контролов нет своих коробок, только подпись-метка, значение
    и шеврон. Тот же приём, что в строке состояния чата. */
 .head-ctx { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -4269,33 +4929,50 @@ onBeforeUnmount(() => {
 .head-pick + .head-pick { border-left: 1px solid var(--line); padding-left: 10px; }
 /* В узкой шапке дока подписи уходят: они стоили проекту его имени («rd…»), хотя
    значение и шеврон сами говорят, что это переключатель. Полные имена — в title. */
+@container code-head (max-width: 1099px) {
+  .code-tabs { order: 10; flex-basis: 100%; }
+}
 @container code-head (max-width: 620px) {
   .head-pick label { display: none; }
   .head-pick + .head-pick { padding-left: 8px; }
 }
+@container code-head (max-width: 479px) {
+  .head-ctx { flex: 1 1 0; gap: 5px; overflow: hidden; }
+  .head-pick.tree { flex: 1 1 0; overflow: hidden; }
+  .head-pick.project :deep(.ui-select) { max-width: 104px; }
+  .head-pick.tree :deep(.ui-select) { width: 100%; max-width: none; }
+  .head-pick + .head-pick { padding-left: 6px; }
+}
+.code-panel.narrow .code-head { column-gap: 6px; }
 .tlabel { font-size: 12px; color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.empty { color: var(--ink-mid); padding: 40px 0; text-align: center; }
-.empty a, .pnote a { color: var(--accent); }
+/* Только корневое «проектов нет»: у состояний внутри панели (`.git-index-state.empty`)
+   свои классы, и общий селектор `.empty` раздувал их отступами на 40px. */
+.code-panel > .empty { color: var(--ink-mid); padding: 40px 0; text-align: center; }
+.code-panel > .empty a, .pnote a { color: var(--accent); }
 
-.lay { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: 44px 300px minmax(0, 1fr);
+.lay { flex: 1; min-width: 0; min-height: 0; display: grid;
+  grid-template-columns: minmax(0, min(var(--code-nav-width, 320px), 42%)) 8px minmax(0, 1fr);
   border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
 
-/* В доке и на route-only планшете дерево остаётся слева, как на полной странице.
+/* В доке и на route дерево остаётся слева, как на полной странице.
    Верхняя граница clamp не отдаёт навигатору больше 42% узкой рабочей области. */
 .lay.compact {
-  grid-template-columns: 44px minmax(0, min(var(--code-nav-width, 260px), 42%)) 8px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   border: 0; border-radius: 0;
 }
-.lay.compact .rail { grid-column: 1; grid-row: 1; }
-.lay.compact .panel {
-  grid-column: 2; grid-row: 1; min-width: 0; border-right: 0;
-}
-.lay.compact .editorwrap { grid-column: 4; grid-row: 1; }
-.lay.compact.navigator-collapsed { grid-template-columns: 44px 0 0 minmax(0, 1fr); }
-.lay.compact.navigator-collapsed .panel { display: none; }
+.lay .panel { grid-column: 1; grid-row: 1; min-width: 0; border-right: 0; }
+.lay .editorwrap { grid-column: 3; grid-row: 1; }
+.lay.navigator-collapsed { grid-template-columns: 0 0 minmax(0, 1fr); }
+.lay.navigator-collapsed .panel { display: none; }
+/* Ни compact, ни ширина окна не определяют мобильную геометрию: класс приходит из
+   ResizeObserver самого CodePanel. Обе области остаются смонтированы, меняется только
+   видимость — Monaco не теряет модель, позицию и выделение. */
+.lay.code-narrow { grid-template-columns: minmax(0, 1fr); }
+.lay.code-narrow .panel, .lay.code-narrow .editorwrap { grid-column: 1; grid-row: 1; }
+.lay.code-narrow .code-split { display: none; }
+.lay.code-narrow.narrow-navigator .editorwrap { display: none; }
+.lay.code-narrow.narrow-editor .panel { display: none; }
 .code-loading { user-select: none; }
-.loading-rail-item { width: 34px; height: 34px; border-radius: 8px; background: var(--surface-2); }
 .loading-panel { gap: 0; }
 .loading-tree { display: flex; flex-direction: column; gap: 11px; padding: 15px 17px; }
 .loading-row { width: var(--loading-row); height: 8px; border-radius: 999px; background: var(--line); opacity: .78; }
@@ -4305,7 +4982,7 @@ onBeforeUnmount(() => {
 .loading-status { color: var(--ink-mid); font-size: 12px; }
 .loading-split { pointer-events: none; }
 .code-split {
-  grid-column: 3; grid-row: 1; position: relative; cursor: col-resize; touch-action: none;
+  grid-column: 2; grid-row: 1; position: relative; cursor: col-resize; touch-action: none;
   display: grid; place-items: center; background: var(--sidebar); border-right: 1px solid var(--line);
 }
 .code-split span { width: 2px; height: 34px; border-radius: 999px; background: var(--line-2); }
@@ -4318,11 +4995,6 @@ onBeforeUnmount(() => {
 }
 .code-panel.compact .code-head strong { font-size: 12.5px; letter-spacing: .01em; }
 
-/* Рейка режимов */
-.rail { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; align-items: center;
-  background: var(--sidebar); border-right: 1px solid var(--line); }
-.ic { width: 19px; height: 19px; }
-
 /* Панель */
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--sidebar);
   container: code-panel / inline-size; }
@@ -4330,54 +5002,79 @@ onBeforeUnmount(() => {
 .pnote { color: var(--ink-mid); font-size: 12px; padding: 8px 12px; }
 .context-warning { display: flex; flex-direction: column; gap: 3px; }
 .unavailable-repo { color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-compose {
-  display: flex; flex-direction: column; gap: 5px; padding: 7px 8px 8px;
-  border-bottom: 1px solid var(--line); background: var(--surface);
-}
+.git-footer { order: 20; flex: none; min-width: 0; border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 72%, var(--sidebar)); }
+.git-compose { display: flex; flex-direction: column; gap: 5px; padding: 6px 8px; }
+.git-compose-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.commit-disclosure { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0;
+  text-align: left; }
+.git-compose-title { color: var(--ink); font-size: 11.5px; font-weight: 650; }
+.git-index-state { min-width: 0; overflow: hidden; color: var(--accent); font-size: 10.5px;
+  text-overflow: ellipsis; white-space: nowrap; }
+.git-index-state::before { content: '·'; margin-right: 5px; color: var(--ink-low); }
+.git-index-state.empty { color: var(--ink-low); }
+.commit-chevron { margin-left: auto; color: var(--ink-mid); font-size: 10px; }
+.commit-empty-hint { margin: -1px 0 1px; color: var(--ink-mid); font-size: 10.5px; line-height: 16px; }
+.git-compose-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .git-compose .commit-message { width: 100%; }
-.amend-controls { display: flex; align-items: center; min-width: 0; gap: 5px; }
-.git-compose .amend-toggle { min-width: 0; font-size: 11px; }
-.amend-controls .undo-commit { flex: none; }
+.amend-active-row { display: flex; align-items: center; gap: 5px; min-width: 0;
+  color: var(--warn); font-size: 10.5px; }
+.amend-active-row span { flex: 1; min-width: 0; }
 .git-compose-actions { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .git-compose-actions .commit-action { flex: 1; min-width: 0; }
-.git-compose-actions .generate-commit, .git-compose-actions .fetch-action,
-.git-compose-actions .push-action { flex: none; }
+.git-compose-actions .generate-commit { flex: none; }
+.git-sync-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 34px;
+  padding: 3px 8px; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.git-remote-actions { display: inline-flex; flex: none; align-items: center; gap: 3px; }
 .git-notice {
-  min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 10.5px; line-height: 1.35; color: var(--ink-mid);
+  flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere;
 }
-.git-notice.ok { color: var(--good); }
-.git-notice.err { color: var(--bad); }
+.git-tracking-note { overflow: hidden; padding: 0; color: var(--ink-mid); text-overflow: ellipsis;
+  font-size: 10.5px; line-height: 1.35; white-space: nowrap; }
+.git-tracking-note.err { color: var(--bad); }
+.git-panel { order: 10; display: flex; flex: 1; flex-direction: column; min-width: 0;
+  min-height: 0; }
+.git-panel-toolbar {
+  display: flex; flex: none; align-items: center; gap: 6px; min-height: 31px; padding: 3px 10px;
+  border-bottom: 1px solid var(--line); background: var(--sidebar);
+}
+.git-panel-label {
+  color: var(--ink-low); font-size: 10.5px; font-weight: 650;
+  letter-spacing: .035em; text-transform: uppercase;
+}
+.git-clean {
+  display: flex; align-items: center; gap: 7px; padding: 8px 6px;
+  color: var(--good); font-size: 11.5px;
+}
+.git-clean svg { width: 15px; height: 15px; flex: none; }
 .scroll { flex: 1; min-width: 0; overflow: auto; padding: 6px 8px; }
 /* Лесенка дерева: шаг задан ОДИН раз здесь, скрипт присылает строке только --depth.
    Держать шаг числом в JS нельзя — он должен сходиться с положением направляющей. */
-.tree { --tree-step: 14px; --tree-lead: 8px; --tree-guide: color-mix(in srgb, var(--line) 80%, transparent); }
+.tree {
+  --tree-step: 14px;
+  --tree-lead: 8px;
+  --tree-guide: color-mix(in srgb, var(--line) 58%, transparent);
+}
 
 /* Вид строки (высота, радиус, фон, состояния) живёт в общем скине
    `.ui-pressable[data-context='code-tree-row']`: локальной копии этих свойств
    у плагина быть не должно. Здесь — только раскладка и направляющие дерева. */
 .trow { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; }
-.ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
 .git-file-line { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
 .git-file-line .trow { flex: 1; width: auto; min-width: 0; }
 .git-file-action { flex: none; }
 /* Обойма действий строки: одна на строку, кнопки в ней в ряд. На тач-устройстве — в потоке. */
 .git-row-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.git-file-line:has(.git-row-actions > :nth-child(2)) { --row-actions: 2; }
 /* Заголовок группы — кнопка сворачивания (скин в actions.css, code-group-toggle); здесь
    только текст заголовка, который при нехватке места обрезается многоточием. */
 .group-toggle .subtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* На указателе обойма всплывает справа поверх строки, а строка уступает ей место
-   отступом и прячет счётчик: кнопки не ложатся ни на цифры, ни на имя файла. */
+/* На указателе обойма всплывает справа поверх уже зарезервированной колонки. */
 @media (hover: hover) and (pointer: fine) {
   .git-row-actions { position: absolute; top: 50%; right: 2px; transform: translateY(-50%);
     opacity: 0; pointer-events: none; }
   .git-file-line:hover .git-row-actions, .git-file-line:focus-within .git-row-actions {
     opacity: 1; pointer-events: auto; }
-  .git-file-line:hover .cnt, .git-file-line:focus-within .cnt { visibility: hidden; }
-  /* Сам отступ строки под обойму — в общем скине строки (actions.css, code-change);
-     здесь только число кнопок, от которого он считается. */
-  .git-file-line:has(.git-row-actions > :nth-child(2)) { --row-actions: 2; }
 }
 /* Направляющие линии предков — по одной на уровень, ровно под шевроном родителя. */
 .tree .trow {
@@ -4408,9 +5105,14 @@ onBeforeUnmount(() => {
    не осталось — само имя. Иначе оба обрезались поровну и не читалось ни одно. */
 .nm-dir { flex: 0 999 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left; color: var(--ink-mid); font-size: 11px; font-style: normal; }
-.st { flex: none; width: 16px; text-align: center; font-family: var(--mono); font-size: 11px; font-weight: 700; border-radius: 4px; }
-.st.A { color: var(--good); } .st.M { color: var(--warn); } .st.D { color: var(--bad); }
-.st.R { color: var(--accent); } .st.U { color: var(--bad); }
+.st {
+  flex: none; width: 18px; height: 18px; text-align: center; font-family: var(--mono);
+  font-size: 10.5px; font-weight: 700; line-height: 18px; border-radius: 5px;
+}
+.st.A { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.st.M { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.st.D, .st.U { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.st.R { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .cnt { flex: none; font-size: 11px; display: flex; gap: 5px; transition: opacity .1s; }
 .cnt .a { color: var(--good); } .cnt .d { color: var(--bad); }
 /* Итог группы: числа в тех же цветах, что у строк файлов, полоска — пять квадратиков
@@ -4424,22 +5126,48 @@ onBeforeUnmount(() => {
    с кнопками: замер при 300 px показал заголовок, ужатый до «В…». Поэтому там итог
    целиком уходит на свою строку под заголовком — числа и полоска остаются читаемыми. */
 @container code-panel (max-width: 359px) {
-  .subhead { flex-wrap: wrap; }
-  .diffstat { order: 10; flex-basis: 100%; }
+  .subhead:not(.commit-range-summary) { flex-wrap: wrap; }
+  .subhead > .diffstat { order: 10; flex-basis: 100%; }
 }
 /* В узкой панели имени файла уступают и счётчик строк, и хвост каталога: имя — то,
    ради чего список открывают, числа видны в самом дифе, а целый путь остаётся в
    подсказке строки. Меряем панель, а не окно: ширину ей задаёт разделитель дерева,
    а не размер экрана. */
-@container code-panel (max-width: 250px) {
+@container code-panel (max-width: 299px) {
   .git-file .cnt, .git-file .nm-dir { display: none; }
 }
 
 /* Заголовок группы: капс с разрядкой был вдвое шире строчных букв и в узком доке
    переносил «В рабочем дереве» на вторую строку вместе с кнопками. */
 .subhead { font-size: 11px; font-weight: 650; letter-spacing: .01em;
-  color: var(--ink-mid); padding: 6px 4px 2px; display: flex; align-items: center; gap: 5px;
-  min-width: 0; }
+  color: var(--ink-mid); padding: 6px 4px 4px; display: flex; align-items: center; gap: 5px;
+  min-width: 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.git-tree .subhead {
+  position: sticky; top: -6px; z-index: 3;
+  background: color-mix(in srgb, var(--sidebar) 94%, var(--surface));
+}
+.commit-tree { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+/* Секция журнала — flex-колонка: список получает остаток высоты и прокручивается сам.
+   Блочная секция с overflow: hidden просто отрезала хвост истории без прокрутки. */
+.commit-log-section { display: flex; flex: none; flex-direction: column; max-height: 240px;
+  min-height: 0; overflow: hidden; border-bottom: 1px solid var(--line); }
+.commit-log-section:only-child { flex: 1; max-height: none; border-bottom: 0; }
+.commit-log-section .commits-head { flex: none; padding: 6px 8px 5px; }
+.commit-log-section .commits-state { flex: none; }
+.commit-log { flex: 1; min-height: 0; overflow: auto; padding: 5px 8px; }
+.commit-tree .git-group { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; }
+/* Сводка отрезка — сетка: первая строка — отрезок и две кнопки, вторая — итог во всю
+   ширину. Текстовое «Сбросить» рядом с заголовком не оставляло ему места уже при 320 px. */
+.commit-range-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; column-gap: 4px; row-gap: 3px; padding: 5px 4px 6px; }
+.commit-range-summary .subtitle { color: var(--ink); font-size: 11.5px; }
+.commit-range-meta { display: flex; grid-column: 1 / -1; align-items: center; gap: 0 6px;
+  min-width: 0; overflow: hidden; color: var(--ink-mid); font-size: 10.5px; font-weight: 400;
+  white-space: nowrap; }
+.commit-range-meta .cnt, .commit-range-meta .diffstat { flex: none; font-size: 10.5px; }
+.commit-range-meta .group-note { flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; color: var(--ink-low); }
+.commit-range-meta .group-note::before { content: '·'; margin-right: 6px; }
 .subtitle { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-view-toggle { display: inline-flex; gap: 1px; }
 .git-view-toggle svg { width: 15px; height: 15px; fill: currentColor; }
@@ -4468,49 +5196,78 @@ onBeforeUnmount(() => {
 /* Просмотр */
 .editorwrap { display: flex; flex-direction: column; min-width: 0; min-height: 0;
   container: code-editor / inline-size; }
-.ehead { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--topbar); min-height: 37px; }
-.ehead .st { width: auto; padding: 0 5px; }
+.editor-header { flex: none; min-width: 0; border-bottom: 1px solid var(--line);
+  background: var(--topbar); }
+.ehead {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px;
+}
+.ehead [data-action='back-to-navigator'] { flex: none; }
+.editor-identity { display: flex; flex: 0 1 auto; align-items: center; gap: 8px;
+  min-width: 0; overflow: hidden; }
+.ehead .st { width: auto; min-width: 18px; padding: 0 5px; }
 .epath { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: baseline;
-  font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  font-size: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .epath-dir { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  font-style: normal; color: var(--ink-mid); }
-.epath-name { flex: none; font-weight: 500; }
-/* Действия шапки не сжимаются: ширину отдаёт путь файла, а не подписи кнопок. */
-.ehead > .ui-button,
-.ehead > .ui-icon-button { flex: none; }
+  font-size: 12.5px; font-style: normal; color: var(--ink-mid); }
+.epath-name { flex: none; font-size: 12.5px; font-weight: 500; }
+.epath.review-title { font-size: 12.5px; }
+.file-view-state { flex: none; color: var(--ink-low); font-size: 12px; }
+.file-head-actions { display: flex; flex: none; align-items: center; gap: 2px; min-width: 0; }
+.diffhead {
+  display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px;
+  padding: 2px 10px; border-top: 1px solid var(--line);
+}
+.comparison-identity { display: flex; flex: 0 1 auto; align-items: center; gap: 8px;
+  min-width: 0; }
+.comparison-sides {
+  min-width: 0; color: var(--ink-mid); font-size: 12px; line-height: 16px;
+  white-space: normal;
+}
+.file-navigation { display: inline-flex; flex: none; align-items: center; gap: 1px; }
+.file-position { min-width: 66px; color: var(--ink-mid); font-size: 11px;
+  font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.file-head-actions > *, .diffhead > * { flex-shrink: 0; }
 .ehead .glyph { display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; flex: none; }
 .ehead svg.glyph { fill: currentColor; }
 .ehead .glyph.ok { color: var(--good); }
 .ehead .glyph + .label { margin-left: 5px; }
-.ehead .range-summary { flex: none; }
-/* Узкий редактор: сначала уходит сводка отрезка и подписи тумблеров дифа, затем подписи
-   всех действий — остаются значки с подсказками, затем бейдж группы. */
+.range-summary { flex: none; color: var(--ink-mid); }
+.diff-view-trigger { flex: none; white-space: nowrap; }
+.diff-view-trigger .chevron { margin-left: 5px; }
+.diff-view-mode { color: var(--ink-low); }
+.code-popover-panel { display: grid; gap: 7px; min-width: 0; }
+.code-popover-title { color: var(--ink); font-size: 12.5px; font-weight: 650; }
+.code-popover-label { color: var(--ink-mid); font-size: 11px; }
+.code-popover-note { margin: 0; color: var(--ink-mid); font-size: 11.5px; line-height: 1.4; }
+.diff-layout-options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px; }
+.diff-view-panel { gap: 9px; }
+
 @container code-editor (max-width: 980px) {
-  .ehead .range-summary { display: none; }
-  .ehead .diff-layout .label,
-  .ehead [data-action="diff-wrap"] .label,
-  .ehead [data-action="diff-whitespace"] .label,
-  .ehead [data-action="ask-agent"] .label { display: none; }
-  .ehead .diff-layout .glyph + .label,
-  .ehead [data-action="diff-wrap"] .glyph + .label,
-  .ehead [data-action="diff-whitespace"] .glyph + .label,
-  .ehead [data-action="ask-agent"] .glyph + .label { margin-left: 0; }
+  .range-summary { display: none; }
 }
-@container code-editor (max-width: 720px) {
-  .ehead .label { display: none; }
-  .ehead .glyph + .label { margin-left: 0; }
+@container code-editor (max-width: 760px) {
+  .ehead { min-height: 40px; padding-inline: 8px; }
+  .diffhead { padding-inline: 8px; }
+  .file-view-state { display: none; }
 }
-/* Ширина телефона в доке: редкие тумблеры дифа уходят целиком, бейдж группы тоже. */
-@container code-editor (max-width: 480px) {
-  .ehead { gap: 6px; }
-  .ehead .scope,
-  .ehead [data-action="diff-wrap"],
-  .ehead [data-action="diff-whitespace"] { display: none; }
+@container code-editor (max-width: 520px) {
+  .ehead, .diffhead { gap: 4px; }
+  .file-position { min-width: 38px; }
+  .file-position-label, .diff-view-mode { display: none; }
+  .epath-dir { max-width: 34%; }
 }
-.scope { flex: none; font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
-  border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+@container code-editor (max-width: 390px) {
+  .ehead { align-items: flex-start; min-height: 44px; }
+  .editor-identity { align-items: flex-start; padding-top: 6px; }
+  .epath { flex-wrap: wrap; line-height: 17px; white-space: normal; }
+  .epath-dir { max-width: 100%; }
+  .diffhead { flex-wrap: wrap; min-height: 36px; padding-block: 4px; }
+  .comparison-identity { flex: 1 1 100%; }
+}
 .note { font-size: 11px; color: var(--warn); flex: none; }
+.note.diff-error { color: var(--bad); }
 .grow { flex: 1; }
 .ebody { flex: 1; min-height: 0; position: relative; }
 .editor { position: absolute; inset: 0; }
@@ -4520,6 +5277,12 @@ onBeforeUnmount(() => {
 }
 .overlay { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-mid);
   font-size: 13px; background: #0a0c10; }
+.editor-empty { display: flex; align-items: center; flex-direction: column; gap: 7px;
+  max-width: 360px; padding: 24px; text-align: center; }
+.editor-empty svg { width: 28px; height: 28px; margin-bottom: 2px; color: var(--ink-low); }
+.editor-empty strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.editor-empty span { color: var(--ink-mid); font-size: 11.5px; }
+.editor-empty.positive svg { color: var(--good); }
 
 /* Предпросмотр картинки: вписываем целиком, «шахматка» показывает прозрачность. */
 .imgwrap {
@@ -4537,9 +5300,4 @@ onBeforeUnmount(() => {
 .note.img-note { color: var(--ink-mid); }
 
 .diff-layout { flex: none; }
-
-/* Full-page на небольшом десктопе: компактный режим задаёт ToolHost явно. */
-@media (min-width: 900px) and (max-width: 1099px) {
-  .lay:not(.compact) { grid-template-columns: 44px 250px minmax(0, 1fr); }
-}
 </style>

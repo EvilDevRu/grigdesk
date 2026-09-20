@@ -53,6 +53,7 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
   assert.match(registry, /delay: 0/);
   assert.match(codeLoading, /'aria-busy': 'true'/);
   assert.match(codeLoading, /class: \['code-loading-layout', \{ compact: props\.compact \}\]/);
+  assert.doesNotMatch(codeLoading, /code-loading-rail/);
   assert.doesNotMatch(codeLoading, /from ['"][^'"]*monaco|import\s+.*TerminalPanel|new WebSocket/i);
   assert.doesNotMatch(registry, /Promise\.all/);
 });
@@ -146,7 +147,7 @@ test('Escape у развёрнутого дока сначала возвращ�
   assert.match(shell, /:aria-hidden="toolDock\.isExpanded \? 'true' : undefined"/);
 });
 
-test('compact Code держит дерево слева от Monaco и меняет его ширину вертикальным разделителем', async () => {
+test('Code держит навигатор слева от Monaco и меняет его ширину разделителем', async () => {
   const [code, actions] = await Promise.all([
     source('web/src/views/code/CodePanel.vue'),
     source('web/src/styles/components/actions.css'),
@@ -154,9 +155,13 @@ test('compact Code держит дерево слева от Monaco и меня�
 
   assert.match(code, /cockpit-code-dock-nav-width/);
   assert.match(code, /aria-orientation="vertical"/);
-  assert.match(code, /\.lay\.compact \.panel \{[\s\S]*grid-column:\s*2/);
-  assert.match(code, /\.lay\.compact \.editorwrap \{ grid-column:\s*4/);
-  assert.match(code, /\.code-split \{[\s\S]*grid-column:\s*3[\s\S]*cursor:\s*col-resize/);
+  assert.match(code, /\.lay \.panel \{[\s\S]*grid-column:\s*1/);
+  assert.match(code, /\.lay \.editorwrap \{ grid-column:\s*3/);
+  assert.match(code, /\.code-split \{[\s\S]*grid-column:\s*2[\s\S]*cursor:\s*col-resize/);
+  assert.doesNotMatch(code, /<aside class="rail"/);
+  assert.doesNotMatch(code, /clientX - rect\.left - 44/);
+  assert.match(code, /const NAVIGATOR_MIN_WIDTH = 220/);
+  assert.match(code, /const NAVIGATOR_DEFAULT_WIDTH = 320/);
   assert.doesNotMatch(code, /cockpit-code-dock-split/);
   assert.match(code, /Math\.floor\(width \* 0\.42\)/);
   assert.match(code, /:aria-valuemax="Math\.round\(navigatorMaxWidth\)"/);

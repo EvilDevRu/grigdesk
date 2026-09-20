@@ -1645,9 +1645,15 @@ function deny(approval: ChatApproval): void {
   line-height: 1.45;
 }
 
+/*
+ * Раскрывашки лежат в прокручиваемых флекс-колонках, а overflow: hidden обнуляет их
+ * min-height: без flex: none колонка ужимает открытый блок под остаток высоты и режет
+ * его низ — кнопка «Сохранить» уходила под подпись. Прокручиваться должна колонка.
+ */
 .ssh-add-connection,
 .ssh-sftp,
 .ssh-audit {
+  flex: none;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);

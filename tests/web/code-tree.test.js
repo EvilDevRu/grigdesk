@@ -236,13 +236,11 @@ test('группы Git: индекс первым, пустая группа н�
   const onlyStaged = buildGitGroups({ staged, files: [] }, new Set());
   assert.deepEqual(onlyStaged.map((group) => group.id), ['staged']);
 
-  // Совсем чистое дерево оставляет один пустой заголовок: панели нужно место под
-  // переключатель вида и «изменений нет».
+  // Совсем чистое дерево не притворяется группой изменений: переключатель вида и
+  // честное пустое состояние живут на уровне панели.
   const empty = buildGitGroups({ staged: [], files: [] }, new Set());
-  assert.deepEqual(empty.map((group) => ({ id: group.id, files: group.files, rows: group.rows })), [
-    { id: 'work', files: [], rows: [] },
-  ]);
-  assert.deepEqual(buildGitGroups(null, new Set()).map((group) => group.id), ['work']);
+  assert.deepEqual(empty, []);
+  assert.deepEqual(buildGitGroups(null, new Set()), []);
 });
 
 test('каталоги Git-групп раскрываются независимо друг от друга', () => {
@@ -303,8 +301,7 @@ test('группа изменений несёт готовые строки п�
   ]);
   assert.equal(group.list[0].file, payload.files[0]);
 
-  // Чистое дерево тоже отдаёт список: шаблон не должен различать пустую группу.
-  assert.deepEqual(buildGitGroups({ staged: [], files: [] }, new Set())[0].list, []);
+  assert.deepEqual(buildGitGroups({ staged: [], files: [] }, new Set()), []);
 });
 
 test('итог группы: сумма строк по файлам и полоска из пяти квадратиков, как на GitHub', () => {
@@ -340,7 +337,7 @@ test('итог группы: сумма строк по файлам и поло
     total: 5,
     blocks: ['add', 'add', 'add', 'add', 'del'],
   });
-  assert.equal(buildGitGroups({ staged: [], files: [] }, new Set())[0].stat.total, 0);
+  assert.deepEqual(buildGitGroups({ staged: [], files: [] }, new Set()), []);
 });
 
 test('метки дерева сливают индекс и рабочие правки, сохраняя каталоги и новое имя', () => {
@@ -397,10 +394,10 @@ test('группа выбранных коммитов неизменяема, �
   };
   const groups = buildGitGroups(payload, new Set(['commits:src']), commits);
 
-  assert.deepEqual(groups.map((group) => group.id), ['work', 'commits']);
-  assert.equal(groups[1].title, 'Коммиты aaaaaaa…ccccccc');
-  assert.equal(groups[1].note, 'в отрезке ещё 1 коммит');
-  assert.equal(groups[1].mutable, false);
+  assert.deepEqual(groups.map((group) => group.id), ['commits']);
+  assert.equal(groups[0].title, 'Коммиты aaaaaaa…ccccccc');
+  assert.equal(groups[0].note, 'в отрезке ещё 1 коммит');
+  assert.equal(groups[0].mutable, false);
   assert.deepEqual([...gitGroupDirectoryPaths(payload, commits)], ['commits:src']);
   assert.notEqual(fileDiffKey('work', 'src/a.ts'), fileDiffKey('commits', 'src/a.ts', 'a:c'));
 });
@@ -415,10 +412,10 @@ test('режим «с текущими изменениями» виден в з
     selected: 2,
     work: true,
   };
-  const [, range] = buildGitGroups(payload, new Set(), source);
-  const [, one] = buildGitGroups(payload, new Set(), { ...source, from: 'ccccccc', selected: 1 });
-  const [, branch] = buildGitGroups(payload, new Set(), { ...source, mode: 'branch', selected: 3 });
-  const [, plain] = buildGitGroups(payload, new Set(), { ...source, work: false });
+  const [range] = buildGitGroups(payload, new Set(), source);
+  const [one] = buildGitGroups(payload, new Set(), { ...source, from: 'ccccccc', selected: 1 });
+  const [branch] = buildGitGroups(payload, new Set(), { ...source, mode: 'branch', selected: 3 });
+  const [plain] = buildGitGroups(payload, new Set(), { ...source, work: false });
 
   assert.equal(range.title, 'Коммиты aaaaaaa…ccccccc + текущие');
   assert.equal(one.title, 'Коммит ccccccc + текущие');
@@ -453,7 +450,7 @@ test('счётчик коммитов в подписи и заголовке в
     to: 'ccccccc',
     commits,
     selected,
-  })[1].note;
+  })[0].note;
   const branch = (commits) => buildGitGroups(payload, new Set(), {
     files: [],
     from: 'aaaaaaa',
@@ -461,7 +458,7 @@ test('счётчик коммитов в подписи и заголовке в
     commits,
     selected: 0,
     mode: 'branch',
-  })[1].title;
+  })[0].title;
 
   // Живой случай: 14 коммитов в отрезке при двух выбранных показывались как «12 коммита».
   assert.equal(note(14, 2), 'в отрезке ещё 12 коммитов');

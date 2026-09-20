@@ -191,6 +191,11 @@
   opacity: var(--control-disabled-opacity);
 }
 
+/* Переключатель amend живёт в компактном popover композера, а не в обычной форме. */
+.ui-switch:has(.ui-switch__native[data-context='code-commit-amend']) {
+  font-size: 11.5px;
+}
+
 .ui-range {
   width: 100%;
   min-width: 0;

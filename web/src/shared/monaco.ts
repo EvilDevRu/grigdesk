@@ -36,6 +36,8 @@ monaco.editor.defineTheme('cockpit-dark', {
     'diffEditorGutter.removedLineBackground': '#f0564c40',
     'diffEditorOverview.insertedForeground': '#3fb950aa',
     'diffEditorOverview.removedForeground': '#f0564caa',
+    // Свёрнутые неизменённые области остаются различимы, но не спорят с самим diff.
+    'diffEditor.diagonalFill': '#1c222c66',
     'editorWidget.background': '#151b24',
     'editorOverviewRuler.border': '#00000000',
     'scrollbarSlider.background': '#2e374288',

@@ -589,18 +589,6 @@ export function buildGitGroups(
       };
     });
 
-  if (!groups.length) {
-    // Чистое дерево: одна пустая группа остаётся, чтобы панели было куда поставить
-    // заголовок, переключатель вида и честное «изменений нет».
-    groups.push({
-      ...sources[1],
-      tree: buildGitTree([]),
-      rows: [],
-      list: [],
-      stat: gitGroupStat([]),
-    });
-  }
-
   if (commits) {
     const tree = buildGitTree(commits.files);
     const one = commits.from === commits.to;

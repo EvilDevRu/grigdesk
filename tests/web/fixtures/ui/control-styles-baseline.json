@@ -105,16 +105,6 @@
       }
     },
     "web/src/views/code/CodePanel.vue": {
-      ".git-compose .amend-toggle": {
-        "font-size": {
-          "11px": 1
-        }
-      },
-      ".ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible": {
-        "outline": {
-          "2px solid color-mix(in srgb, var(--accent) 55%, transparent)": 1
-        }
-      },
       ".tree .trow": {
         "padding-left": {
           "calc(var(--tree-lead) + var(--depth, 0) * var(--tree-step))": 1

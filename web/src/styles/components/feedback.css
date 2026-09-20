@@ -75,6 +75,13 @@
   overflow-wrap: anywhere;
 }
 
+/* Сообщение Git делит 34-пиксельный нижний ряд с fetch/push и может переноситься. */
+.ui-inline-message[data-context='code-git-notice'] {
+  padding: 5px 7px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
 /* Стадия зрелости продукта единообразно читается рядом с названием инструмента. */
 .ui-maturity-chip {
   display: inline-flex;

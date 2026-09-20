@@ -29,9 +29,9 @@ function storedNavigatorWidth() {
   try {
     const value = Number(localStorage.getItem('cockpit-code-dock-nav-width'));
 
-    return Number.isFinite(value) && value > 0 ? Math.min(420, Math.max(140, value)) : 260;
+    return Number.isFinite(value) && value > 0 ? Math.min(420, Math.max(220, value)) : 320;
   } catch {
-    return 260;
+    return 320;
   }
 }
 
@@ -52,25 +52,22 @@ export default defineComponent({
     }, [
       h('header', { class: 'code-loading-head' }, [
         h('strong', 'Код'),
+        h('span', { class: 'code-loading-tabs', 'aria-hidden': 'true' }, [
+          h('i'), h('i'), h('i'),
+        ]),
         h('span', { class: 'code-loading-grow' }),
-        props.compact ? h('span', { class: 'code-loading-navigator', 'aria-hidden': 'true' }, [
-          navigatorIcon(),
-          h('span', 'Дерево'),
-        ]) : null,
+        h('span', { class: 'code-loading-navigator', 'aria-hidden': 'true' }, [navigatorIcon()]),
       ]),
       h('div', {
         class: ['code-loading-layout', { compact: props.compact }],
         style: { '--code-loading-nav-width': `${navigatorWidth}px` },
       }, [
-        h('aside', { class: 'code-loading-rail', 'aria-hidden': 'true' }, [
-          h('span'), h('span'),
-        ]),
         h('aside', { class: 'code-loading-panel', 'aria-hidden': 'true' }, [
           h('div', { class: 'code-loading-tree' }, Array.from({ length: 7 }, (_, index) => (
             h('span', { style: { width: `${48 + (((index + 1) * 17) % 38)}%` } })
           ))),
         ]),
-        props.compact ? h('div', { class: 'code-loading-split', 'aria-hidden': 'true' }, [h('span')]) : null,
+        h('div', { class: 'code-loading-split', 'aria-hidden': 'true' }, [h('span')]),
         h('section', { class: 'code-loading-editor', 'aria-hidden': 'true' }, [
           h('div', { class: 'code-loading-editor-head' }, [h('span')]),
           h('div', { class: 'code-loading-editor-body' }, 'Загрузка кода…'),

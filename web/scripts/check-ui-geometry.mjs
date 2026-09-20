@@ -554,9 +554,10 @@ const BASE_GEOMETRY_AUDIT = `(() => {
     errors.push('task footer: контрольная тройка отсутствует');
   } else {
     const heights = taskFooterButtons.map((button) => button.getBoundingClientRect().height);
+    const expectedHeight = window.innerWidth <= 600 ? 40 : 36;
 
-    if (heights.some((height) => Math.abs(height - 36) > tolerance)) {
-      errors.push('task footer: разная высота ' + heights.join(', '));
+    if (heights.some((height) => Math.abs(height - expectedHeight) > tolerance)) {
+      errors.push('task footer: ожидалось ' + expectedHeight + 'px, получено ' + heights.join(', '));
     }
   }
 
