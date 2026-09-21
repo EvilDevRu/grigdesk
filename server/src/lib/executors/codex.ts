@@ -194,6 +194,11 @@ interface CodexTurn {
   lastCommentary: string;
   appContext: CodexContextInfo | null;
   progressTokens: number;
+  // Накопитель вывода ПОТОКА к началу этого хода: расход хода — прирост, а не последний
+  // запрос. `last` у каждого обращения к модели свой и обнуляется, поэтому счётчик
+  // «думает… · N ток.» прыгал вниз посреди хода. null — сессия ещё ничего не мерила
+  // (первый ход после запуска или thread/resume): базу посеет первый замер.
+  baseOutputTokens: number | null;
   totalInputTokens: number;
   cachedInputTokens: number;
   turnId: string | null;
@@ -671,6 +676,15 @@ function tokenNumber(value: unknown, { positive = false }: { positive?: boolean 
   }
 
   return value;
+}
+
+/**
+ * Вывод одного замера Codex в токенах. Рассуждения — ЧАСТЬ `output_tokens` (в аналитике
+ * они лежат атрибутом той же метрики `output_tokens`, а не отдельным слагаемым), поэтому
+ * отдельно их не прибавляем: прежняя сумма удваивала расход ровно на долю рассуждений.
+ */
+function codexOutputTokens(usage: unknown): number | null {
+  return tokenNumber((usage as { outputTokens?: unknown } | null)?.outputTokens);
 }
 
 /**
@@ -1154,6 +1168,11 @@ export function openCodexSession({
   }>();
   let nextRequestId = 0;
   let threadId: string | null = sessionId || null;
+  // Накопитель вывода потока, каким его видел последний замер. Его прирост за ход и есть
+  // расход этого хода; сам накопитель живёт дольше хода, поэтому хранится в сессии.
+  // null — замеров ещё не было: у возобновлённого thread `total` уже несёт всю его
+  // историю, и ноль вместо неё выдал бы историю за расход первого хода.
+  let threadOutputTokens: number | null = null;
   let actualModel = '';
   let stderrTail = '';
   let protocol = 'pending';
@@ -1230,6 +1249,7 @@ export function openCodexSession({
       lastCommentary: '',
       appContext: null,
       progressTokens: 0,
+      baseOutputTokens: threadOutputTokens,
       totalInputTokens: 0,
       cachedInputTokens: 0,
       turnId: null,
@@ -1316,8 +1336,24 @@ export function openCodexSession({
     const cachedRequestTokens = tokenNumber(last.cachedInputTokens);
     current.totalInputTokens = tokenNumber(total.inputTokens) || 0;
     current.cachedInputTokens = tokenNumber(total.cachedInputTokens) || 0;
-    current.progressTokens = (tokenNumber(last.outputTokens) || 0)
-      + (tokenNumber(last.reasoningOutputTokens) || 0);
+    // Расход хода — прирост накопителя потока. `total` копится по всему thread и не
+    // сбрасывается на новом обращении, поэтому цифра растёт до конца хода; `last` —
+    // замер одного запроса, и по нему счётчик хода «врал и прыгал».
+    const totalOutput = codexOutputTokens(total);
+    if (totalOutput !== null) {
+      // Первый замер сессии: всё, что накопитель несёт сверх текущего запроса, — история
+      // thread до этого хода (возобновление), а не его расход.
+      if (current.baseOutputTokens === null) {
+        current.baseOutputTokens = Math.max(0, totalOutput - (codexOutputTokens(last) ?? 0));
+      }
+
+      threadOutputTokens = totalOutput;
+      current.progressTokens = Math.max(0, totalOutput - current.baseOutputTokens);
+    } else {
+      // Старый app-server без накопителя: честного расхода хода взять негде, остаётся
+      // замер последнего запроса — он хотя бы не ноль.
+      current.progressTokens = codexOutputTokens(last) ?? 0;
+    }
     const available = contextTokens !== null && contextWindow !== null;
 
     current.appContext = {
@@ -1485,9 +1521,11 @@ export function openCodexSession({
     if (event.type === 'turn.completed' && event.usage) {
       current.totalInputTokens = codexTotalInputTokens(event.usage);
       current.cachedInputTokens = tokenNumber(event.usage.cached_input_tokens) || 0;
-      const spent = Number(event.usage.output_tokens || 0)
-        + Number(event.usage.reasoning_output_tokens || 0);
-      if (Number.isFinite(spent) && spent > 0) {
+      // У legacy-протокола usage относится к самому ходу: рассуждения уже входят в
+      // output_tokens, отдельным слагаемым они удваивали бы расход.
+      const spent = tokenNumber((event.usage as { output_tokens?: unknown }).output_tokens) ?? 0;
+      current.progressTokens = spent;
+      if (spent > 0) {
         try { current.onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
       }
     }

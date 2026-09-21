@@ -302,10 +302,18 @@
           </div>
           <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
           <StepList v-if="sess.steps?.length" :steps="sess.steps" :model-label="modelLabelOf" live />
-          <div class="text muted">
-            <UiSpinner decorative />
-            думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
-          </div>
+          <!-- Живая строка хода — последняя строка ЭТОГО блока, сразу под лентой шагов: она
+               про тот же ход и идёт под переписку, а не отдельной полосой у поля ввода.
+               Знак и слово стоят в тех же столбцах, что знак и заголовок строки шага. Ряд
+               всегда один, поэтому смена слова («Думаю» ↔ «Выполняю команду») высоту блока
+               не меняет. Число — расход вывода хода (0 = исполнитель его не публикует):
+               заполненность контекста живёт в кольце и означает другое. -->
+          <ChatThinking
+            :steps="sess.steps"
+            :tokens="sess.progressTokens"
+            :tokens-estimate="sess.progressTokensEstimate"
+            :started-at="sess.turnStartedAt"
+          />
         </div>
         <!-- Связь этого окна с сервером оборвалась посреди хода. Сам ход при этом идёт:
              он живёт в процессе сервера, а не во вкладке, и ответ вернётся через
@@ -607,6 +615,7 @@ import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
+import ChatThinking from './ChatThinking.vue';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -2046,7 +2055,7 @@ async function openDebug() {
   .sel.model { flex: 1 1 0; }
   .sel.task .lbl { display: none; }
   :deep(.eff .track) { width: 62px; }
-  .cs-body { padding: 0 6px 0 12px; margin: 16px 0; }
+  .cs-body { padding: 0 0px 0 12px; margin: 18px 0; }
   .cs-act, .cs-input { padding-left: 12px; padding-right: 12px; }
   .cs-input { padding-bottom: 12px; }
   /* Иначе длинный текст режется в узкий столбик */

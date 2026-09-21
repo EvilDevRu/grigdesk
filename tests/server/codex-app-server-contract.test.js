@@ -118,6 +118,22 @@ test('Codex передаёт контекст до конца хода и сох
   }
 });
 
+test('Codex считает расход ХОДА приростом накопителя потока, а не замером последнего запроса', async (t) => {
+  const f = await fixture(t, 'token-progress');
+  const spent = [];
+  const result = await codex.run(runOptions(f, {
+    onProgress(value) { spent.push(value); },
+  }));
+
+  // Накопитель потока 100 → 350: расход хода растёт и не прыгает на `last` (50, 40).
+  // Первый замер сессии сеет базу: 100 − 50 = 50 токенов накопитель нёс ДО этого хода
+  // (история возобновлённого thread), они не расход хода — поэтому 50 и 300, а не 100 и 350.
+  // 300, а не 420: рассуждения уже входят в outputTokens — отдельным слагаемым они
+  // удваивали расход.
+  assert.deepEqual([...new Set(spent)], [50, 300], 'счётчик хода взят не из накопителя');
+  assert.equal(result.reply, 'Расход хода посчитан.');
+});
+
 test('Codex run использует app-server и не теряет rich events, steps и resume sessionId', async (t) => {
   const f = await fixture(t);
   const live = [];

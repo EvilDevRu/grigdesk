@@ -82,27 +82,42 @@ test('Claude отдаёт размер контекста живьём, а не 
     onStep: (step) => live.push(step),
     onProgress: (tokens, info) => progress.push({
       tokens,
+      estimate: info?.tokensIsEstimate ?? null,
       contextTokens: info?.contextTokens ?? null,
       contextCache: info?.contextCache ?? null,
     }),
   });
 
   // Замер приезжает на КАЖДОМ обращении к модели, и падение после компакта видно сразу.
+  // Расход по ходу — оценка по символам ответа («Смотрю.» — 7 знаков ≈ 2 токена, с «Готово.»
+  // ≈ 5): `output_tokens` assistant-события — снимок начала ответа, а не расход. Точная
+  // цифра за ход — из result, и она уже не оценка.
   assert.deepEqual(progress, [
     {
-      tokens: 100,
+      tokens: 2,
+      estimate: true,
       contextTokens: 180000,
       contextCache: {
         scope: 'request', status: 'reported', readTokens: 179000, writeTokens: 990, uncachedTokens: 10,
       },
     },
     {
-      tokens: 100,
+      tokens: 2,
+      estimate: true,
       contextTokens: 0,
       contextCache: { scope: 'request', status: 'unavailable' },
     },
     {
+      tokens: 5,
+      estimate: true,
+      contextTokens: 60000,
+      contextCache: {
+        scope: 'request', status: 'reported', readTokens: 59990, writeTokens: 0, uncachedTokens: 10,
+      },
+    },
+    {
       tokens: 140,
+      estimate: false,
       contextTokens: 60000,
       contextCache: {
         scope: 'request', status: 'reported', readTokens: 59990, writeTokens: 0, uncachedTokens: 10,
@@ -206,4 +221,78 @@ test('Claude не превращает отсутствующие cache-поля
   });
   assert.equal(Object.hasOwn(out.contextCache, 'readTokens'), false);
   assert.equal(Object.hasOwn(out.contextCache, 'writeTokens'), false);
+});
+
+test('Расход хода Claude — оценка по потоку с «≈», точная цифра — из result', () => {
+  const progress = [];
+  const collector = createClaudeTurnCollector({
+    onProgress: (tokens, info) => progress.push({ tokens, estimate: info.tokensIsEstimate }),
+  });
+  const block = (id, content) => ({
+    type: 'assistant',
+    message: {
+      id,
+      model: 'claude-opus-5',
+      content: [content],
+      // Снимок НАЧАЛА ответа: живой CLI присылает здесь 2–4 токена при сотнях по итогу.
+      usage: { input_tokens: 5, output_tokens: 4 },
+    },
+  });
+
+  const thinking = (estimated_tokens, estimated_tokens_delta) => ({
+    type: 'system', subtype: 'thinking_tokens', estimated_tokens, estimated_tokens_delta,
+  });
+  const input = { command: 'echo probe-ok!!' };
+  const inputChars = JSON.stringify(input).length;
+
+  // Рассуждения оценивает CLI — накопительно по обращению, поэтому берутся дельты.
+  collector.push(thinking(50, 50));
+  collector.push(thinking(128, 78));
+  assert.equal(collector.state.spentTokens, 128);
+  assert.equal(collector.state.spentIsEstimate, true);
+
+  // Ответ идёт по блоку на событие: рассуждения второй раз не считаются, текст и аргументы
+  // инструмента — по символам (29 знаков JSON ≈ 10 токенов). Снимок output_tokens не суммируется.
+  collector.push(block('msg-1', { type: 'thinking', thinking: 'долгие размышления модели о задаче' }));
+  collector.push(block('msg-1', { type: 'tool_use', name: 'Bash', input }));
+  assert.equal(collector.state.spentTokens, 128 + Math.round(inputChars / 3));
+  assert.equal(progress.at(-1).estimate, true, 'по ходу цифра помечена оценкой');
+
+  // Второе обращение: CLI снова считает рассуждения с нуля — дельта складывается, а не заменяет.
+  collector.push(thinking(40, 40));
+  collector.push(block('msg-2', { type: 'text', text: 'Готово: probe-ok' }));
+  assert.equal(collector.state.spentTokens, 168 + Math.round((inputChars + 'Готово: probe-ok'.length) / 3));
+
+  // Итог хода — точный output_tokens за ЭТОТ ход: он заменяет оценку и уходит без «≈».
+  collector.push({
+    type: 'result', subtype: 'success', result: 'Готово: probe-ok', usage: { output_tokens: 188 },
+  });
+  assert.equal(collector.state.spentTokens, 188);
+  assert.equal(collector.state.spentIsEstimate, false);
+  assert.deepEqual(progress.at(-1), { tokens: 188, estimate: false });
+  assert.ok(progress.length >= 3, 'оценка уходила в окно по ходу, а не только итогом');
+});
+
+test('Claude без обращений к модели расход не выдумывает, а без рассуждений считает по тексту', () => {
+  const progress = [];
+  const collector = createClaudeTurnCollector({
+    onProgress: (tokens, info) => progress.push({ tokens, estimate: info.tokensIsEstimate }),
+  });
+
+  // Пустой usage у result (ход без единого обращения) — события прогресса нет вовсе.
+  collector.push({ type: 'result', subtype: 'success', result: '', usage: {} });
+  assert.deepEqual(progress, []);
+  assert.equal(collector.state.spentTokens, 0);
+
+  // Ответ без блока рассуждений: оценка — только по символам текста.
+  collector.push({
+    type: 'assistant',
+    message: {
+      id: 'msg-1',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'Париж' }],
+      usage: { output_tokens: 2 },
+    },
+  });
+  assert.deepEqual(progress.at(-1), { tokens: 2, estimate: true });
 });

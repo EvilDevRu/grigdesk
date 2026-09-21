@@ -12,7 +12,7 @@
       <span class="sum">Ход агента: {{ summary }}</span>
     </UiDisclosureButton>
     <div v-if="open || live" :id="`${baseId}-list`" class="list">
-      <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, r.sub ? 'nested' : '']">
+      <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, isNested(r) ? 'nested' : '']">
         <!-- Размышление -->
         <template v-if="r.k === 'think'">
           <UiDisclosureButton
@@ -59,7 +59,7 @@
             </span>
           </UiDisclosureButton>
           <div v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body-wrap">
-            <div v-if="r.sub" class="path">{{ r.sub }}</div>
+            <div v-if="pathOf(r)" class="path">{{ pathOf(r) }}</div>
             <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
             <pre v-if="r.command" class="body command">{{ r.command }}</pre>
             <!-- Один вызов инструмента может изменить несколько файлов. -->
@@ -242,9 +242,21 @@ function toggle(i, row) {
 }
 function hasBody(row) {
   return !!(
-    row.text || row.command || row.preview || row.diff || row.res?.text || row.sub
+    row.text || row.command || row.preview || row.diff || row.res?.text || pathOf(row)
     || changesOf(row).length
   );
+}
+
+// Подпись шага (путь файла, сервер MCP, пространство имён) — только строка: в сохранённых
+// лентах старых ходов `sub` бывает булевым признаком вложенности, показывать его нечего.
+function pathOf(row) {
+  return typeof row.sub === 'string' ? row.sub : '';
+}
+
+// Вложенный шаг — шаг субагента: у него `parent` (id вызова Task). Старые ленты несли
+// вместо него `sub: true` — их читаем так же, чтобы сохранённые ходы не поменяли вид.
+function isNested(row) {
+  return Boolean(row.parent) || row.sub === true;
 }
 
 // Иконка и подпись вида шага.

@@ -288,7 +288,10 @@ interface CompanionPreflight {
 
 interface RunningTurn extends ChatContextUsage {
   startedAt: number;
+  // Расход ВЫВОДА текущего хода в токенах (0 — исполнитель его не публикует) и признак
+  // того, что число получено оценкой, а не замером.
   tokens: number;
+  tokensIsEstimate?: boolean;
   steps: ChatStep[];
   ac: AbortController;
   compact: boolean;
@@ -679,10 +682,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     },
     onBackgroundProgress: ({ chatKey, tokens, extra }) => {
       const contextCache = normalizeContextCache((extra as Record<string, unknown> | null)?.contextCache);
+      const isEstimate = typeof (extra as Record<string, unknown> | null)?.tokensIsEstimate === 'boolean'
+        ? { tokensIsEstimate: (extra as Record<string, unknown>).tokensIsEstimate as boolean }
+        : {};
 
       fastify.sse.broadcast('chat-progress', {
         chatKey,
         tokens,
+        ...isEstimate,
         ...normalizeContextUsage(extra),
         ...(contextCache ? { contextCache } : {}),
       });
@@ -822,7 +829,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
       chatKey,
       startedAt: v.startedAt,
+      // Сколько ход уже идёт — по часам СЕРВЕРА, на момент ответа. Окно после F5 или
+      // с другого устройства считает время от этой длительности, а не от `startedAt`:
+      // разница часов машин превращала бы «сколько идёт» в выдуманное число.
+      elapsedMs: Math.max(0, Date.now() - v.startedAt),
       tokens: v.tokens,
+      ...(v.tokensIsEstimate === true ? { tokensIsEstimate: true } : {}),
       steps: v.steps,
       compact: !!v.compact,
       // Живой размер контекста идущего хода — чтобы F5 посреди часового хода не
@@ -1937,17 +1949,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           }
           return requestDirectInteraction(presentation, chatKey);
         },
-        // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
-        // Снимок контекста передаём целиком: без окна и статуса новая цифра могла
-        // рисоваться по старой шкале. Отсутствующий замер не подменяем нулём.
+        // Живой счётчик РАСХОДА хода → SSE → «Думаю… · N ток.» в чате. Снимок контекста
+        // передаём целиком: без окна и статуса новая цифра могла рисоваться по старой
+        // шкале. Отсутствующий замер не подменяем нулём.
         onProgress: chatKey ? (tokens, info) => {
           const contextUsage = normalizeContextUsage(info);
           const contextCache = normalizeContextCache(info?.contextCache);
+          // Оценку (Ollama считает незакрытый раунд по символам) помечаем отдельно:
+          // в окне она показывается как «≈», и путать её с замером нельзя.
+          const isEstimate = typeof info?.tokensIsEstimate === 'boolean'
+            ? { tokensIsEstimate: info.tokensIsEstimate }
+            : {};
           const a = activeRuns.get(chatKey);
 
           if (a) {
             a.tokens = tokens;
-            Object.assign(a, contextUsage);
+            Object.assign(a, contextUsage, isEstimate);
             if (contextCache) a.contextCache = contextCache;
           }
 
@@ -1955,6 +1972,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             chatKey,
             tokens,
             ...contextUsage,
+            ...isEstimate,
             ...(contextCache ? { contextCache } : {}),
           });
         } : undefined,

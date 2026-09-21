@@ -2,9 +2,15 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { ensurePrivateDir } from './env.ts';
+import {
+  type DeepSeekPricingStatus,
+  deepSeekPricingStatus,
+  watchDeepSeekPricing,
+} from './pricingWatch.ts';
+import { deepSeekTariffResource } from './tariff.ts';
 
 // DeepSeek продаёт API по предоплате: окон лимитов и «процента от подписки» у него нет,
-// поэтому всплывашка показывает состояние счёта и темп его расхода по своим снимкам.
+// поэтому всплывашка показывает состояние счёта, тарифную фазу и темп расхода по снимкам.
 export const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
 export const DEEPSEEK_TOP_UP_URL = 'https://platform.deepseek.com/top_up';
 
@@ -232,13 +238,20 @@ function forecastNote(forecast: DeepSeekSpendForecast, currency: string): string
 }
 
 /**
- * Ресурсы всплывашки: по строке на валюту счёта и одна строка прогноза по первой валюте с
- * деньгами. Проценты не выдумываются — у предоплаты нет «окна», от которого их считать.
+ * Ресурсы всплывашки: строки валют счёта, текущий тариф и прогноз по первой валюте с
+ * деньгами. Проценты баланса не выдумываются — у предоплаты нет «окна» для их расчёта.
  */
 export function deepSeekBalanceResources(
   balance: DeepSeekBalance,
   samples: DeepSeekBalanceSample[],
   now = Date.now(),
+  {
+    timeZone,
+    pricing = null,
+  }: {
+    timeZone?: string;
+    pricing?: DeepSeekPricingStatus | null;
+  } = {},
 ): Array<Record<string, unknown>> {
   const resources: Array<Record<string, unknown>> = [];
 
@@ -261,6 +274,8 @@ export function deepSeekBalanceResources(
     });
   }
 
+  resources.push(deepSeekTariffResource({ now, timeZone, pricing }));
+
   const primary = balance.balances.find((entry) => entry.total > 0) || balance.balances[0];
   if (primary) {
     const forecast = forecastDeepSeekSpend(samples, primary.currency, now);
@@ -277,19 +292,38 @@ export function deepSeekBalanceResources(
 }
 
 /**
+ * Сверка страницы цен — вспомогательная: её сбой (сеть, запись файла) не отнимает у
+ * всплывашки баланс и тариф, а лишь оставляет ресурс без приписки о сверке.
+ */
+async function pricingStatusSafely(
+  runtimeHome: string,
+  fetchImpl: typeof fetch,
+  now: number,
+): Promise<DeepSeekPricingStatus | null> {
+  try {
+    return deepSeekPricingStatus(await watchDeepSeekPricing({ runtimeHome, fetchImpl, now }));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Состояние счёта DeepSeek для общего контракта usage: без ключа — auth_required,
- * с ключом — запрос баланса, снимок в приватный журнал и ресурсы для всплывашки.
+ * с ключом — запрос баланса, снимок в приватный журнал, суточная сверка страницы цен
+ * и ресурсы для всплывашки.
  */
 export async function deepSeekUsage({
   config,
   env = process.env,
   fetchImpl = fetch,
   now = Date.now,
+  timeZone,
 }: {
   config: { deepseekRuntimeHome: string };
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  timeZone?: string;
 }): Promise<Record<string, unknown>> {
   const apiKey = env.DEEPSEEK_API_KEY;
   if (!apiKey) {
@@ -312,9 +346,10 @@ export async function deepSeekUsage({
     result.balance.balances.map((entry) => ({ at, currency: entry.currency, total: entry.total })),
     at,
   );
+  const pricing = await pricingStatusSafely(config.deepseekRuntimeHome, fetchImpl, at);
   return {
     state: 'ok',
     bars: [],
-    resources: deepSeekBalanceResources(result.balance, samples, at),
+    resources: deepSeekBalanceResources(result.balance, samples, at, { timeZone, pricing }),
   };
 }

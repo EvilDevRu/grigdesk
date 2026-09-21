@@ -141,6 +141,47 @@ function runFixture() {
     }
   }
 
+  // Расход хода: накопитель потока (`total`) растёт, а `last` у каждого обращения к модели
+  // свой. Счётчик хода обязан брать прирост накопителя — по `last` цифра прыгала бы вниз.
+  // Рассуждения в замере идут ВНУТРИ outputTokens (в аналитике они атрибут той же метрики),
+  // поэтому отдельным слагаемым их прибавлять нельзя.
+  function emitTokenProgressTurn() {
+    for (const [lastOutput, totalOutput] of [[50, 100], [40, 350]]) {
+      send({ method: 'thread/tokenUsage/updated', params: {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        tokenUsage: {
+          last: { inputTokens: 1_000, cachedInputTokens: 0, outputTokens: lastOutput },
+          total: {
+            inputTokens: 5_000,
+            cachedInputTokens: 0,
+            outputTokens: totalOutput,
+            reasoningOutputTokens: 120,
+          },
+          modelContextWindow: 256_000,
+        },
+      } });
+    }
+    const reply = 'Расход хода посчитан.';
+    send({ method: 'item/completed', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_800,
+      item: {
+        type: 'agentMessage', id: 'answer-progress-1', text: reply, phase: 'final_answer',
+        memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId: THREAD_ID,
+      turn: {
+        ...runningTurn,
+        status: 'completed',
+        completedAt: 1_700_000_002,
+        durationMs: 1_000,
+      },
+    } });
+    setTimeout(() => process.exit(0), 20);
+  }
+
   function emitRichTurn() {
     send({ method: 'turn/plan/updated', params: {
       threadId: THREAD_ID,
@@ -577,6 +618,7 @@ function runFixture() {
         emitInterruptibleTurn();
       }
       else if (scenario === 'interrupt') emitInterruptibleTurn();
+      else if (scenario === 'token-progress') emitTokenProgressTurn();
       else if (scenario === 'commentary-only') emitCommentaryOnlyTurn();
       else if (scenario === 'foreign-completed') emitForeignTurn('completed');
       else if (scenario === 'foreign-interrupted') emitForeignTurn('interrupted');

@@ -49,8 +49,16 @@ interface ClaudeEvent {
   parent_tool_use_id?: string | null;
   model?: string;
   compactMetadata?: unknown;
-  message?: { model?: string; usage?: Record<string, unknown>; content?: unknown };
+  message?: {
+    id?: unknown;
+    model?: string;
+    usage?: Record<string, unknown>;
+    content?: unknown;
+  };
   usage?: Record<string, unknown>;
+  // system/thinking_tokens: оценка рассуждений текущего обращения — накопительно и дельтой.
+  estimated_tokens?: unknown;
+  estimated_tokens_delta?: unknown;
   result?: string;
   num_turns?: number;
   permission_denials?: Array<{ tool_name?: unknown }>;
@@ -59,10 +67,52 @@ interface ClaudeEvent {
   request_id?: unknown;
 }
 
+/**
+ * Длина вывода модели в символах: текст и аргументы вызовов инструментов. Рассуждения
+ * не считаются — их оценку CLI присылает сам (system/thinking_tokens), а несериализуемые
+ * аргументы честно считаются нулём.
+ */
+function claudeOutputChars(message: { content?: unknown } | undefined): number {
+  const blocks = Array.isArray(message?.content) ? message.content : [];
+  let chars = 0;
+
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object') {
+      continue;
+    }
+
+    const item = block as { type?: unknown; text?: unknown; input?: unknown };
+
+    if (item.type === 'text' && typeof item.text === 'string') {
+      chars += item.text.length;
+    } else if (item.type === 'tool_use' && item.input !== undefined) {
+      try {
+        chars += JSON.stringify(item.input).length;
+      } catch { /* аргументы без представления — ноль */ }
+    }
+  }
+
+  return chars;
+}
+
+// Грубая оценка вывода по символам, пока ход идёт: та же цифра, что у Ollama и DeepSeek.
+const CHARS_PER_TOKEN = 3;
+// Дельты рассуждений идут часто; в окно уходит не каждая — как у остальных исполнителей.
+const PROGRESS_THROTTLE_MS = 400;
+
 // Состояние одного хода: что уже сказал CLI про токены, модель и сессию.
 interface TurnState {
   resultEv: ClaudeEvent | null;
+  // Расход ВЫВОДА хода. Пока ход идёт — оценка по потоку (spentIsEstimate = true):
+  // `usage.output_tokens` в assistant-событиях — снимок НАЧАЛА ответа (единицы токенов,
+  // проверено на CLI: 4 и 2 при 188 по итогу), расходом он не является. Точная цифра за ход
+  // приезжает только с `result.usage.output_tokens` — тогда оценка заменяется ею.
   spentTokens: number;
+  spentIsEstimate: boolean;
+  // Слагаемые оценки: рассуждения считает сам CLI (system/thinking_tokens, по запросу
+  // накопительно — берём дельты), текст и аргументы инструментов — по символам.
+  thinkingEstimated: number;
+  contentChars: number;
   lastTurnInput: number | null;
   lastContextCache: ContextCache | null;
   actualModel: string;
@@ -98,10 +148,14 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
   log?: StreamLog;
 } = {}): ClaudeTurnCollector {
   const stepSink = createStepSink(onStep);
+  let lastReportAt = 0;
 
   const state: TurnState = {
     resultEv: null,
     spentTokens: 0,
+    spentIsEstimate: true,
+    thinkingEstimated: 0,
+    contentChars: 0,
     lastTurnInput: null,
     lastContextCache: null,
     actualModel: '',
@@ -134,15 +188,26 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
       // измерения, а не пустой контекст; ближайший запрос вернёт точную цифру.
       state.lastTurnInput = null;
       state.lastContextCache = contextCacheStatus('unavailable');
-      try {
-        onProgress?.(state.spentTokens, {
-          contextTokens: 0,
-          contextMetric: 'unavailable',
-          contextIsEstimate: false,
-          contextCache: state.lastContextCache,
-        });
-      } catch { /* прогресс не критичен */ }
+      reportProgress();
       log?.info?.({ meta: ev.compactMetadata || null }, 'чат: CLI сжал контекст сам');
+      return;
+    }
+
+    // Рассуждения модели CLI оценивает сам и присылает накопительно ПО ТЕКУЩЕМУ обращению:
+    // складываем дельты, иначе следующий запрос обнулил бы счётчик хода. В окно уходит не
+    // каждая дельта — ближайшее событие всё равно унесёт накопленное.
+    if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
+      const delta = Number(ev.estimated_tokens_delta);
+
+      if (Number.isFinite(delta) && delta > 0) {
+        state.thinkingEstimated += delta;
+        refreshEstimate();
+
+        if (Date.now() - lastReportAt >= PROGRESS_THROTTLE_MS) {
+          reportProgress();
+        }
+      }
+
       return;
     }
 
@@ -159,7 +224,13 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
       // Модель заговорила после сбоя — ход его пережил, прежняя отметка недействительна.
       state.lastSyntheticText = '';
       const usage = ev.message.usage as Record<string, number>;
-      state.spentTokens += usage.output_tokens || 0;
+
+      // Событие несёт один блок содержимого. Текст и аргументы инструмента — вывод модели,
+      // считаем по символам; рассуждения уже сосчитал CLI, второй раз их не берём.
+      // `usage.output_tokens` здесь — снимок начала ответа, к расходу отношения не имеет.
+      state.contentChars += claudeOutputChars(ev.message);
+      refreshEstimate();
+
       if (ev.message.model) state.actualModel = ev.message.model;
       const inputs = [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens];
       const input = usage.input_tokens;
@@ -180,19 +251,53 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
       }
       if (Object.hasOwn(usage, 'input_tokens')) cacheFields.uncachedTokens = usage.input_tokens;
       state.lastContextCache = reportedContextCache(cacheFields);
+      reportProgress();
 
-      try {
-        onProgress?.(state.spentTokens, {
-          contextTokens: state.lastTurnInput ?? 0,
-          contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
-          contextIsEstimate: false,
-          contextCache: state.lastContextCache,
-        });
-      } catch { /* прогресс не критичен */ }
       return;
     }
 
-    if (ev.type === 'result') state.resultEv = ev;
+    if (ev.type === 'result') {
+      state.resultEv = ev;
+
+      // Точный расход вывода — только здесь, и он за ЭТОТ ход, а не за сессию (проверено
+      // двумя ходами одного процесса: 75 и 68, а не 75 и 143). Оценка заменяется им, и
+      // окно с пультом узнают итог уже без «≈». Пустой usage (ход без обращений к модели)
+      // цифры не выдумывает.
+      const output = Number(ev.usage?.output_tokens);
+      const known = Number.isSafeInteger(output) && output >= 0;
+
+      if (known && (output > 0 || state.spentTokens > 0)) {
+        state.spentTokens = output;
+        state.spentIsEstimate = false;
+        reportProgress();
+      }
+    }
+  }
+
+  // Оценка расхода по потоку: рассуждения — от CLI, текст и аргументы — по символам.
+  // После точной цифры из result оценка уже не нужна и её не перезатирает.
+  function refreshEstimate(): void {
+    if (!state.spentIsEstimate) {
+      return;
+    }
+
+    state.spentTokens = state.thinkingEstimated + Math.round(state.contentChars / CHARS_PER_TOKEN);
+  }
+
+  // Событие прогресса: расход хода и снимок контекста ПОСЛЕДНЕГО обращения к модели.
+  // После границы сжатия замера нет — и это честно уходит как «unavailable», а не ноль.
+  function reportProgress(): void {
+    lastReportAt = Date.now();
+
+    try {
+      onProgress?.(state.spentTokens, {
+        tokensIsEstimate: state.spentIsEstimate,
+        contextTokens: state.lastTurnInput ?? 0,
+        contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
+        contextIsEstimate: false,
+        contextCache: state.lastContextCache,
+      });
+    } catch { /* прогресс не критичен */ }
   }
 
   return { push, state, stepSink, get steps() { return stepSink.steps; } };

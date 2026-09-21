@@ -533,6 +533,7 @@ test('Ollama run: цикл инструментов — вызов, резуль
 
   const steps = [];
   const contexts = [];
+  const estimates = [];
   const out = await ollama.run({
     config: fakeConfig(port),
     chatKey: 'chat-tools',
@@ -545,7 +546,9 @@ test('Ollama run: цикл инструментов — вызов, резуль
     permissionMode: 'plan', // читающему инструменту план не мешает
     onStep: (step) => steps.push(step),
     onProgress: (_tokens, info) => {
-      if (info) contexts.push(info);
+      // Незакрытый раунд сообщает только оценку расхода — снимка контекста у него нет.
+      if (info?.contextTokens !== undefined) contexts.push(info);
+      if (typeof info?.tokensIsEstimate === 'boolean') estimates.push(info.tokensIsEstimate);
     },
   });
 
@@ -563,6 +566,10 @@ test('Ollama run: цикл инструментов — вызов, резуль
   assert.equal(out.reply, 'В файле написано: привет');
   assert.equal(out.contextTokens, 149, 'последний вход и вывод: 140 + 9, без повторных пяти токенов');
   assert.deepEqual(contexts.map((info) => info.contextTokens), [105, 149]);
+  // Незакрытый раунд считается по символам — это оценка, и окно обязано её помечать;
+  // закрытый раунд приносит точное число и «≈» снимает.
+  assert.ok(estimates.includes(true), 'оценка раунда не помечена');
+  assert.equal(estimates.at(-1), false, 'точный замер закрытого раунда помечен как оценка');
   assert.ok(contexts.every((info) => info.contextWindow === out.contextWindow));
   assert.ok(contexts.every((info) => info.contextMetric === 'request-total-v1'));
   assert.ok(steps.some((s) => s.k === 'tool' && s.name === 'Read'), 'вызов виден в ленте');

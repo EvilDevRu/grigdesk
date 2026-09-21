@@ -125,7 +125,12 @@ test('new → binding → config → один prompt; updates/usage/steps сох
   assert.equal(out.steps.filter((step) => step.k === 'text').length, 2);
   assert.equal(out.steps.filter((step) => step.k === 'tool').length, 1);
   assert.equal(out.steps.filter((step) => step.k === 'res').length, 1);
-  assert.equal(progress.at(-1)[0], 123);
+  // ACP `usage_update.used` — заполненность контекста, а не расход хода: в снимок она
+  // идёт своим полем. Расхода DSH не публикует вовсе, поэтому число в строке — оценка
+  // вывода по потоку (символы / средний токен), и она обязана быть помечена «≈».
+  assert.equal(progress.at(-1)[1].contextTokens, 123, 'контекст не доехал до окна');
+  assert.equal(progress.at(-1)[1].tokensIsEstimate, true, 'оценка выдана за точный замер');
+  assert.ok(progress.at(-1)[0] > 0, 'расход хода не показан вовсе');
   assert.deepEqual(await methods(f.logFile), [
     'initialize', 'session/new', 'session/set_config_option', 'session/set_config_option',
     'session/prompt', 'session/close',

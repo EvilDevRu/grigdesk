@@ -279,13 +279,26 @@ function stripSeed(userText) {
 // чата серверной копией их надо сохранить — иначе принятое чужое изменение погасило бы
 // «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
 const RUNTIME_KEYS = [
-  'sending', 'compacting', 'stopping', 'progressTokens', 'steps', 'error', 'inflight', 'offline',
+  'sending', 'compacting', 'stopping', 'progressTokens', 'progressTokensEstimate',
+  'turnStartedAt', 'steps', 'error', 'inflight', 'offline',
   'sessionResetting', 'sessionResetFailed', 'liveContext', 'liveContextUsage', 'liveContextCache',
 ];
 function runtimeOf(s) {
   const out = {};
   for (const k of RUNTIME_KEYS) if (s?.[k] !== undefined) out[k] = s[k];
   return out;
+}
+
+/**
+ * Начало идущего хода по часам ЭТОГО окна из длительности, которую назвал сервер.
+ * Ноль — длительности нет (старый сервер или мусор): таймер молчит, а не выдумывает.
+ */
+function turnStartFromElapsed(elapsedMs, now = Date.now()) {
+  if (typeof elapsedMs !== 'number' || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    return 0;
+  }
+
+  return now - Math.floor(elapsedMs);
 }
 
 // Порядок чатов в сторе — как у сервера (по времени создания): иначе вкладки прыгали бы
@@ -1065,12 +1078,15 @@ export const useChatStore = defineStore('chat', {
           // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
           this._collectPending();
         } else if (name === 'chat-progress') {
-          // Живой прогресс «думает… · N ток.». Прогресс = агент точно работает:
+          // Живой расход хода «Думаю… · N ток.». Прогресс = агент точно работает:
           // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
-          // Кроме сжатия: там работу показывает кольцо, а «думает…» только спорило бы с ним.
+          // Кроме сжатия: там работу показывает кольцо, а счётчик только спорил бы с ним.
           const s = this._find(d.chatKey);
           if (s && !s.compacting) {
             s.sending = true; s.progressTokens = d.tokens;
+            // «≈» — только для оценки (Ollama считает незакрытый раунд по символам);
+            // отсутствие флага значит замер.
+            s.progressTokensEstimate = d.tokensIsEstimate === true;
             // Заполненность контекста ПРЯМО СЕЙЧАС (её сообщает не каждый исполнитель).
             // В историю не пишем: это рантайм-поле, а иначе каждое обращение к модели
             // стоило бы записи всего чата на сервер (см. slimOf и дебаунс _persist).
@@ -1086,11 +1102,16 @@ export const useChatStore = defineStore('chat', {
           const m = (s.messages || []).find((x) => x.queued);
           if (m) delete m.queued;
           // Сжатие — служебный ход: во ВСЕХ окнах это вертящееся кольцо и заморозка ввода,
-          // а не «думает…». Раньше признак жил только в затеявшем окне, и на втором
+          // а не живая строка хода. Раньше признак жил только в затеявшем окне, и на втором
           // устройстве сжатие не отображалось ничем.
-          if (d.compact) { s.compacting = true; s.sending = false; s.progressTokens = 0; }
-          else {
-            s.sending = true; s.steps = []; s.progressTokens = 0;
+          if (d.compact) {
+            s.compacting = true; s.sending = false;
+            s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
+          } else {
+            s.sending = true; s.steps = []; s.progressTokens = 0; s.progressTokensEstimate = false;
+            // Начало хода — по ЧАСАМ ЭТОГО ОКНА: серверное `at` приходит с другой машины,
+            // и разница часов превратила бы «сколько идёт ход» в выдуманное число.
+            s.turnStartedAt = Date.now();
             s.liveContext = 0;
             s.liveContextUsage = null;
             s.liveContextCache = null;
@@ -1106,14 +1127,15 @@ export const useChatStore = defineStore('chat', {
             this._persist();
           }
         } else if (name === 'chat-done') {
-          // Ход завершён — снять «думает…»/кольцо во всех окнах (ответ доставляется
+          // Ход завершён — снять живую строку/кольцо во всех окнах (ответ доставляется
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
           // и они ждут очереди, агент продолжит работу: индикатор оставляем.
           const s = this._find(d.chatKey);
           // Событие дошло — связь с сервером есть, даже если рвался длинный POST хода.
           if (s?.offline) s.offline = false;
           if (s && !s.inflight) {
-            s.sending = false; s.stopping = false; s.progressTokens = 0; s.liveContextCache = null;
+            s.sending = false; s.stopping = false; s.liveContextCache = null;
+            s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
           }
           // Своё сжатие разморозит его собственный ответ (он ещё едет и правит счётчики);
           // чужому окну ждать нечего — снимаем кольцо здесь.
@@ -1173,17 +1195,24 @@ export const useChatStore = defineStore('chat', {
       for (const s of [...this.sessions, ...(this.archived || [])]) {
         const a = byKey.get(s.id);
         if (a?.compact) {
-          // Сжатие: «думает…» не показываем — его место занимает вертящееся кольцо.
-          s.compacting = true; s.sending = false; s.progressTokens = 0;
+          // Сжатие: живой строки хода нет — её место занимает вертящееся кольцо.
+          s.compacting = true; s.sending = false;
+          s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
         } else if (a) {
           s.compacting = false; s.sending = true; s.progressTokens = a.tokens || 0;
+          s.progressTokensEstimate = a.tokensIsEstimate === true;
+          // Начало хода это окно не видело (F5 или другое устройство), но сервер сказал,
+          // сколько ход уже идёт, — переносим отметку на часы ЭТОГО окна. Серверный
+          // `startedAt` напрямую не годится: часы машин расходятся. Старый сервер без
+          // длительности — таймер молчит: чужое время хуже, чем никакого.
+          s.turnStartedAt = turnStartFromElapsed(a.elapsedMs);
           // Ход идёт час, а сохранённая цифра контекста — с прошлого хода (у claude она
           // бывает ещё и ДО автокомпакта CLI). Поэтому живой размер тоже восстанавливаем.
           s.liveContext = 0;
           s.liveContextUsage = null;
           s.liveContextCache = null;
           applyLiveContextUsage(s, a);
-          // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
+          // Вместе с живой строкой возвращаем и уже показанную ленту шагов текущего хода.
           // Серверную копию берём, если она полнее ИЛИ свежее нашей: обе стороны держат
           // скользящее окно одного размера, поэтому у отставшего окна (связь рвалась,
           // шаги прошли мимо) длина такая же, а хвост — вчерашний.
@@ -1193,7 +1222,8 @@ export const useChatStore = defineStore('chat', {
           const theirLast = a.steps?.[theirs - 1]?.at || 0;
           if (theirs > mine || theirLast > myLast) s.steps = a.steps;
         } else if (!s.inflight && !compactInflight.has(s.id)) {
-          s.sending = false; s.stopping = false; s.compacting = false; s.progressTokens = 0;
+          s.sending = false; s.stopping = false; s.compacting = false;
+          s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
           s.liveContext = 0;
           s.liveContextUsage = null;
           s.liveContextCache = null;
@@ -1776,6 +1806,9 @@ export const useChatStore = defineStore('chat', {
       // сохранённую цифру.
       if (!queued) {
         s.progressTokens = 0;
+        s.progressTokensEstimate = false;
+        // Ход начинается прямо сейчас, в этом окне: от этой отметки считается «сколько идёт».
+        s.turnStartedAt = sentAt;
         s.steps = [];
         s.liveContext = 0;
         s.liveContextUsage = null;
@@ -1899,7 +1932,10 @@ export const useChatStore = defineStore('chat', {
         // Ещё есть незакрытые отправки этого чата — ход продолжается, «думает…» не снимаем.
         // Оборванная связь — тоже не повод его снимать: агент работает дальше, а правду о
         // нём вернут SSE (`chat-done`) и сверка активных ходов при восстановлении связи.
-        if (!s.inflight && !s.offline) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
+        if (!s.inflight && !s.offline) {
+          s.sending = false; s.stopping = false;
+          s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
+        }
         s.updatedAt = Date.now(); this._persist();
       }
       return true;

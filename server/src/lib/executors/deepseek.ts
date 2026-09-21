@@ -9,6 +9,7 @@ import {
   readDeepSeekCatalog,
 } from '../deepseek/catalog.ts';
 import { runDeepSeekTurn } from '../deepseek/runtime.ts';
+import { mergeMcpServers, readProjectMcpServers } from '../deepseek/projectMcp.ts';
 import { deepSeekUsage } from '../deepseek/balance.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
@@ -113,8 +114,15 @@ export default {
     return String(model?.family || 'default');
   },
 
+  // Проектные MCP из `.mcp.json` доезжают до DSH только через ACP-список сессии:
+  // добавляем их к служебным серверам Cockpit на каждом ходу (resume принимает тот же список).
   async run(options: Parameters<typeof runDeepSeekTurn>[0]) {
-    const result = await runDeepSeekTurn(options);
+    const project = options.cwd ? await readProjectMcpServers(options.cwd) : { file: null, servers: [], warnings: [] };
+    for (const warning of project.warnings) {
+      options.log?.warn?.({ file: project.file, warning }, 'DeepSeek: запись .mcp.json пропущена');
+    }
+    const mcpServers = mergeMcpServers(options.mcpServers || [], project.servers);
+    const result = await runDeepSeekTurn({ ...options, mcpServers });
     if (result.stopReason === 'cancelled') {
       const error = Object.assign(new Error('Ход DeepSeek остановлен.'), {
         stopped: true,

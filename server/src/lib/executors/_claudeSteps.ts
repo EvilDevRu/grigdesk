@@ -136,7 +136,11 @@ export function toClaudeSteps(value: unknown): ChatStep[] {
   }
 
   if (event.type === 'assistant') {
-    const sub = !!event.parent_tool_use_id;
+    // Шаги субагента несут id родительского вызова (`Task`): по нему лента рисует их
+    // вложенными. Раньше признак ехал булевым `sub`, а это же поле у инструментов — путь
+    // файла: `Edit` в корне хода выглядел вложенным, а у вложенного Bash в теле стояло «true».
+    const parentId = event.parent_tool_use_id ? String(event.parent_tool_use_id) : '';
+    const parent = parentId ? { parent: parentId } : {};
     for (const raw of event.message?.content || []) {
       const content = raw as {
         type?: string;
@@ -147,16 +151,16 @@ export function toClaudeSteps(value: unknown): ChatStep[] {
         input?: ToolInput;
       };
       if (content.type === 'thinking' && content.thinking) {
-        out.push({ k: 'think', text: cut(content.thinking, STEP_THINK_LIMIT), sub });
+        out.push({ k: 'think', text: cut(content.thinking, STEP_THINK_LIMIT), ...parent });
       } else if (content.type === 'text' && content.text?.trim()) {
-        out.push({ k: 'text', text: cut(content.text, 4000), sub });
+        out.push({ k: 'text', text: cut(content.text, 4000), ...parent });
       } else if (content.type === 'tool_use') {
         out.push({
           k: 'tool',
           id: content.id,
           name: content.name,
-          sub,
           ...describeTool(content.name, content.input),
+          ...parent,
         });
       }
     }

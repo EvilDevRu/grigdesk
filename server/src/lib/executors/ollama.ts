@@ -691,7 +691,11 @@ export default {
       if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
       lastProgressAt = now;
       try {
-        onProgress?.(doneTokens + Math.round(roundChars / CHARS_PER_TOKEN));
+        // Незакрытый раунд считается по символам — это оценка, и окно обязано её помечать:
+        // иначе «≈» и точный расход выглядели бы одной цифрой.
+        onProgress?.(doneTokens + Math.round(roundChars / CHARS_PER_TOKEN), {
+          tokensIsEstimate: true,
+        });
       } catch { /* счётчик не роняет ход */ }
     };
 
@@ -745,6 +749,8 @@ export default {
                   contextMetric: contextTokens === null ? 'unavailable' : 'request-total-v1',
                   contextIsEstimate: false,
                   contextCache: contextCacheStatus('not-applicable'),
+                  // Раунд закрыт — число точное, «≈» с него снимается.
+                  tokensIsEstimate: false,
                 });
               } catch { /* счётчик не роняет ход */ }
             }

@@ -136,6 +136,29 @@ test('StepList показывает итог, чей вызов вытеснен
   assert.equal(wrapper.find('.body.res').text(), 'exit code 1');
 });
 
+test('StepList рисует вложенным шаг субагента, а не правку с путём файла', async () => {
+  const wrapper = await mountStepList([
+    { k: 'tool', id: 'edit-1', name: 'Edit', title: 'a.ts', sub: '/repo/src/a.ts', diff: { old: 'a', new: 'b' } },
+    { k: 'tool', id: 'task-1', name: 'Task', title: 'подзадача', sub: 'general-purpose' },
+    { k: 'tool', id: 'inner-1', name: 'Bash', title: 'ls', command: 'ls', parent: 'task-1' },
+    // Сохранённая до разделения полей лента: вложенность ехала булевым sub.
+    { k: 'tool', id: 'old-1', name: 'Bash', title: 'pwd', command: 'pwd', sub: true },
+  ]);
+  const rows = wrapper.findAll('.step');
+
+  // `sub` с путём — подпись, а не вложенность: правка в корне хода стоит в общем ряду.
+  assert.equal(rows[0].classes().includes('nested'), false, 'правка с путём файла нарисована вложенной');
+  assert.equal(rows[1].classes().includes('nested'), false, 'вызов Task нарисован вложенным');
+  assert.equal(rows[2].classes().includes('nested'), true, 'шаг субагента не нарисован вложенным');
+  assert.equal(rows[3].classes().includes('nested'), true, 'старая лента потеряла вложенность');
+
+  // В раскрытии булев признак путём не показывается.
+  await rows[3].find('button').trigger('click');
+  assert.equal(rows[3].find('.path').exists(), false, 'булев sub показан как путь «true»');
+  await rows[0].find('button').trigger('click');
+  assert.equal(rows[0].find('.path').text(), '/repo/src/a.ts');
+});
+
 test('StepList не сдвигает служебную строку вдвое', async () => {
   const component = await readFile(STEP_LIST_PATH, 'utf8');
 

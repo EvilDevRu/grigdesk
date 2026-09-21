@@ -1,6 +1,7 @@
 // Состояние счёта DeepSeek во всплывашке: у предоплаты нет окон лимитов, поэтому вместо
-// «CLI не отдаёт лимиты» адаптер отдаёт остаток по валютам и темп его расхода по своим
-// снимкам. Ключ службы наружу не попадает, пополнение не считается расходом.
+// «CLI не отдаёт лимиты» адаптер отдаёт остаток, текущую фазу тарифа и темп расхода по
+// своим снимкам. Ключ службы наружу не попадает — ни в тексты, ни на публичную страницу
+// цен; пополнение не считается расходом.
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -14,17 +15,34 @@ import {
   forecastDeepSeekSpend,
   parseDeepSeekBalance,
 } from '../../server/src/lib/deepseek/balance.ts';
+import { pricingSnapshotPath } from '../../server/src/lib/deepseek/pricingWatch.ts';
+import { DEEPSEEK_PRICING_URL } from '../../server/src/lib/deepseek/tariff.ts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { normalizeProviderUsage } from '../../server/src/lib/providerUsage.ts';
 
 const KEY = 'synthetic-deepseek-balance-key';
 const HOUR = 3_600_000;
+const PRICING_FIXTURE = new URL('../fixtures/deepseek-pricing-2026-09-21.html', import.meta.url);
 
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+// Заглушка вендора целиком: баланс по API и публичная страница цен по её адресу.
+function vendorFetch(balanceResponse, { requests = [] } = {}) {
+  return async (url, init = {}) => {
+    requests.push({ url, auth: init.headers?.Authorization ?? null });
+    if (url === DEEPSEEK_PRICING_URL) {
+      return new Response(await fs.readFile(PRICING_FIXTURE, 'utf8'), {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    return balanceResponse();
+  };
 }
 
 function vendorBalance(total, { currency = 'USD', available = true } = {}) {
@@ -110,19 +128,24 @@ test('первый снимок даёт баланс со ссылкой на �
     config: { deepseekRuntimeHome: home },
     env: { DEEPSEEK_API_KEY: KEY },
     now: () => now,
-    fetchImpl: async (url, init) => {
-      requests.push({ url, auth: init.headers.Authorization });
-      return jsonResponse(200, vendorBalance('1.96'));
-    },
+    timeZone: 'Asia/Novosibirsk',
+    fetchImpl: vendorFetch(() => jsonResponse(200, vendorBalance('1.96')), { requests }),
   });
   const usage = normalizeProviderUsage(raw, { providerName: 'DeepSeek' });
 
-  assert.deepEqual(requests, [{ url: 'https://api.deepseek.com/user/balance', auth: `Bearer ${KEY}` }]);
+  // Страница цен публичная — ключ службы уходит только на API счёта.
+  assert.deepEqual(requests, [
+    { url: 'https://api.deepseek.com/user/balance', auth: `Bearer ${KEY}` },
+    { url: DEEPSEEK_PRICING_URL, auth: null },
+  ]);
   assert.equal(usage.state, 'ok');
   assert.deepEqual(usage.bars, []);
-  assert.deepEqual(usage.resources.map((resource) => resource.key), ['balance-usd', 'forecast']);
+  assert.deepEqual(
+    usage.resources.map((resource) => resource.key),
+    ['balance-usd', 'tariff', 'forecast'],
+  );
 
-  const [balance, forecast] = usage.resources;
+  const [balance, tariff, forecast] = usage.resources;
   assert.equal(balance.label, 'Баланс USD');
   assert.match(balance.summary, /1,96/u);
   assert.equal(balance.tone, 'ok');
@@ -130,6 +153,10 @@ test('первый снимок даёт баланс со ссылкой на �
   assert.deepEqual(balance.controls.map((control) => [control.kind, control.href]), [
     ['link', 'https://platform.deepseek.com/top_up'],
   ]);
+  assert.equal(tariff.label, 'Тариф');
+  assert.equal(tariff.tone, 'ok');
+  assert.equal(tariff.summary, 'скидка 50 % до завтра 08:00');
+  assert.match(tariff.note, / · сверено с сайтом сегодня 19:00$/u);
   assert.equal(forecast.tone, 'muted');
   assert.match(forecast.summary, /после двух часов/u);
   assert.equal(JSON.stringify(raw).includes(KEY), false);
@@ -138,6 +165,20 @@ test('первый снимок даёт баланс со ссылкой на �
   assert.deepEqual(log.samples, [{ at: now, currency: 'USD', total: 1.96 }]);
   assert.equal((await fs.stat(balanceLogPath(home))).mode & 0o777, 0o600);
   assert.equal((await fs.stat(home)).mode & 0o777, 0o700);
+
+  // Следующий тик через пять минут: баланс перечитан, страница цен взята из снимка.
+  await deepSeekUsage({
+    config: { deepseekRuntimeHome: home },
+    env: { DEEPSEEK_API_KEY: KEY },
+    now: () => now + 5 * 60_000,
+    timeZone: 'Asia/Novosibirsk',
+    fetchImpl: vendorFetch(() => jsonResponse(200, vendorBalance('1.95')), { requests }),
+  });
+  assert.deepEqual(
+    requests.slice(2).map((request) => request.url),
+    ['https://api.deepseek.com/user/balance'],
+  );
+  assert.equal(JSON.parse(await fs.readFile(pricingSnapshotPath(home), 'utf8')).checkedAt, now);
 });
 
 test('темп считается по убыли за сутки, пополнение и шум округления расходом не считаются', () => {
@@ -183,7 +224,8 @@ test('журнал снимков переживает тики, обрезае�
     config: { deepseekRuntimeHome: home },
     env: { DEEPSEEK_API_KEY: KEY },
     now: () => now,
-    fetchImpl: async () => jsonResponse(200, vendorBalance('3.00')),
+    timeZone: 'Asia/Novosibirsk',
+    fetchImpl: vendorFetch(() => jsonResponse(200, vendorBalance('3.00'))),
   }), { providerName: 'DeepSeek' });
 
   const forecast = usage.resources.find((resource) => resource.key === 'forecast');
@@ -198,10 +240,13 @@ test('журнал снимков переживает тики, обрезае�
 });
 
 test('пустой или заблокированный счёт подсвечивается как беда, а не как норма', async (t) => {
+  const now = Date.UTC(2026, 8, 20, 12, 0, 0);
   const usage = normalizeProviderUsage(await deepSeekUsage({
     config: { deepseekRuntimeHome: await runtimeHome(t) },
     env: { DEEPSEEK_API_KEY: KEY },
-    fetchImpl: async () => jsonResponse(200, vendorBalance('0.00', { available: false })),
+    now: () => now,
+    timeZone: 'Asia/Novosibirsk',
+    fetchImpl: vendorFetch(() => jsonResponse(200, vendorBalance('0.00', { available: false }))),
   }), { providerName: 'DeepSeek' });
   const balance = usage.resources.find((resource) => resource.key === 'balance-usd');
   assert.equal(balance.tone, 'bad');

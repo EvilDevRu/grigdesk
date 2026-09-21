@@ -205,6 +205,28 @@ function workToolNames(workTools: unknown): Set<string> {
 
 const TURN_FAILED_PREFIX = /^Internal error: turn failed: /u;
 
+// Живой счётчик вывода. DSH расхода не публикует (ACP отдаёт только заполненность
+// контекста), поэтому вывод считается по потоку: сколько символов написал агент — столько
+// и делим на средний размер токена. Та же оценка, что у Ollama, и так же помеченная «≈»:
+// точного числа у этого исполнителя нет вовсе, а пустое место человек читает как поломку.
+const CHARS_PER_TOKEN = 3;
+const PROGRESS_THROTTLE_MS = 400;
+
+/**
+ * Длина вывода модели в символах: текст сообщения или аргументы вызова инструмента.
+ * Точного счётчика токенов DSH не даёт, поэтому объём потока — единственная опора для
+ * оценки расхода; аргументы сериализуем, а несериализуемое честно считаем нулём.
+ */
+function producedCharsOf(value: unknown): number {
+  if (typeof value === 'string') return value.length;
+  if (!value || typeof value !== 'object') return 0;
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Ход оборвал сам harness после старта: сеть до API, 429/5xx, обрыв соединения. Ответа
  * модели не было, но сессия DSH цела — следующий prompt продолжит её. Такой исход
@@ -321,6 +343,30 @@ export async function runDeepSeekTurn({
   let aborted = false;
   let stderrTail = '';
   let abortTimer: ReturnType<typeof setTimeout> | null = null;
+  let producedChars = 0;
+  let lastProgressAt = 0;
+
+  /**
+   * Отдаёт расход хода оценкой по потоку: DSH точного числа не публикует, но пустое
+   * место человек читает как поломку. Прореживание обязательно — иначе каждый чанк
+   * текста становился бы отдельным SSE-событием; заполненность контекста едет тем же
+   * снимком, потому что второго канала для неё у этого исполнителя нет.
+   */
+  const pushProgress = () => {
+    const now = Date.now();
+    if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+    lastProgressAt = now;
+    try {
+      onProgress?.(Math.round(producedChars / CHARS_PER_TOKEN), {
+        tokensIsEstimate: true,
+        ...(contextTokens !== undefined ? {
+          contextTokens,
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
+          contextMetric: 'deepseek-acp-usage-update',
+        } : {}),
+      });
+    } catch { /* счётчик не роняет ход */ }
+  };
 
   child.stderr?.on('data', (chunk: Buffer | string) => {
     stderrTail = `${stderrTail}${String(chunk)}`.slice(-16 * 1024);
@@ -341,9 +387,17 @@ export async function runDeepSeekTurn({
           rawInput: update.rawInput ?? previous.rawInput,
           kind: update.sessionUpdate,
         });
+        // Аргументы вызова пишет модель — это её вывод. Считаем один раз на вызов:
+        // подробности приходят несколькими апдейтами с тем же rawInput.
+        if (previous.rawInput === undefined && update.rawInput !== undefined) {
+          producedChars += producedCharsOf(update.rawInput);
+          pushProgress();
+        }
       }
       if (update.sessionUpdate === 'agent_message_chunk') {
         reply += textContent(update.content);
+        producedChars += producedCharsOf(textContent(update.content));
+        pushProgress();
       }
       if (update.sessionUpdate === 'usage_update') {
         const used = Number(update.used);
@@ -351,7 +405,11 @@ export async function runDeepSeekTurn({
         if (Number.isFinite(used) && used >= 0) contextTokens = used;
         if (Number.isFinite(size) && size > 0) contextWindow = size;
         if (contextTokens !== undefined) {
-          onProgress?.(contextTokens, {
+          // Первым аргументом идёт РАСХОД хода (оценка вывода), вторым — заполненность
+          // контекста: она живёт в кольце и выдавать её за потраченное нельзя.
+          lastProgressAt = Date.now();
+          onProgress?.(Math.round(producedChars / CHARS_PER_TOKEN), {
+            tokensIsEstimate: true,
             contextTokens,
             ...(contextWindow !== undefined ? { contextWindow } : {}),
             contextMetric: 'deepseek-acp-usage-update',

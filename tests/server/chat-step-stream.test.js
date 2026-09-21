@@ -148,12 +148,43 @@ test('Claude normalizer сохраняет прежние шаги в общем
   });
 
   assert.deepEqual(steps, [
-    { k: 'think', text: 'Сначала проверю файл.', sub: false },
+    { k: 'think', text: 'Сначала проверю файл.' },
     {
-      k: 'tool', id: 'tool-1', name: 'Bash', sub: false, title: 'git status',
+      k: 'tool', id: 'tool-1', name: 'Bash', title: 'git status',
       command: 'git status', preview: '', lang: 'bash',
     },
   ]);
+});
+
+test('Claude normalizer: вложенность шага — parent субагента, а не подпись sub', () => {
+  // Правка в корне хода: `sub` — путь файла, признака вложенности у шага нет.
+  const [edit] = toClaudeSteps({
+    type: 'assistant',
+    message: {
+      content: [{
+        type: 'tool_use', id: 'edit-1', name: 'Edit',
+        input: { file_path: '/repo/src/a.ts', old_string: 'a', new_string: 'b' },
+      }],
+    },
+  });
+  assert.equal(edit.sub, '/repo/src/a.ts');
+  assert.equal(Object.hasOwn(edit, 'parent'), false, 'правка в корне хода помечена вложенной');
+
+  // Шаги субагента несут id родительского вызова, а подпись остаётся подписью.
+  const nested = toClaudeSteps({
+    type: 'assistant',
+    parent_tool_use_id: 'task-1',
+    message: {
+      content: [
+        { type: 'thinking', thinking: 'Смотрю файл.' },
+        { type: 'tool_use', id: 'inner-1', name: 'Bash', input: { command: 'ls' } },
+        { type: 'tool_use', id: 'inner-2', name: 'Read', input: { file_path: '/repo/README.md' } },
+      ],
+    },
+  });
+  assert.deepEqual(nested.map((step) => step.parent), ['task-1', 'task-1', 'task-1']);
+  assert.equal(nested[1].sub, undefined, 'у Bash подписи нет — и булевого «true» тоже');
+  assert.equal(nested[2].sub, '/repo/README.md');
 });
 
 test('нормализаторы сохраняют полную многострочную Bash-команду для раскрытия в UI', () => {
@@ -441,5 +472,7 @@ test('Codex executor передаёт JSONL-шаги живьём и сохра�
   assert.deepEqual(live, out.steps);
   assert.equal(out.steps[1].text, 'Сверяю состояние проекта.');
   assert.doesNotMatch(JSON.stringify(out.steps), /не показывать/);
-  assert.deepEqual(progress, [7]);
+  // Расход хода — это output_tokens целиком: рассуждения уже входят в него (в аналитике
+  // они атрибут той же метрики output_tokens). Вторым слагаемым они удваивали счётчик.
+  assert.deepEqual(progress, [3]);
 });
