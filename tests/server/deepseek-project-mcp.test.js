@@ -85,6 +85,20 @@ test('readProjectMcpServers: файл ищется у корня репозит�
   const { root: plain } = await tempProject(t);
   assert.deepEqual(await readProjectMcpServers(plain), { file: null, servers: [], warnings: [] });
 
+  // Проект без .git внутри чужого репозитория: свой .mcp.json в cwd перекрывает корневой.
+  await fs.writeFile(path.join(root, '.mcp.json'), JSON.stringify({
+    mcpServers: {
+      motion: { command: path.join(bin, 'motion-mcp'), args: ['root'] },
+      shared: { command: path.join(bin, 'on-path') },
+    },
+  }));
+  await fs.writeFile(path.join(nested, '.mcp.json'), JSON.stringify({
+    mcpServers: { motion: { command: path.join(bin, 'motion-mcp'), args: ['nested'] } },
+  }));
+  const layered = await readProjectMcpServers(nested, { searchPath: bin });
+  assert.equal(layered.file, path.join(nested, '.mcp.json'));
+  assert.deepEqual(layered.servers.map((server) => [server.name, server.args]), [['motion', ['nested']], ['shared', []]]);
+
   await fs.writeFile(path.join(plain, '.mcp.json'), '{ broken');
   const broken = await readProjectMcpServers(plain);
   assert.equal(broken.servers.length, 0);

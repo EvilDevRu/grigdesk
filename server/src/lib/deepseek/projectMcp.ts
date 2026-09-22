@@ -144,28 +144,52 @@ export async function parseProjectMcpServers(
   return { servers, warnings };
 }
 
-/** Читает `.mcp.json` проекта для cwd хода; отсутствие файла — не ошибка. */
-export async function readProjectMcpServers(
-  cwd: string,
-  options: { searchPath?: string } = {},
-): Promise<ProjectMcpRead> {
-  const root = await nearestProjectRoot(cwd);
-  const file = path.join(root, '.mcp.json');
+async function readMcpFile(
+  file: string,
+  options: { searchPath?: string },
+): Promise<{ found: boolean; servers: ProjectMcpServer[]; warnings: string[] }> {
   let raw: string;
   try {
     raw = await fs.readFile(file, 'utf8');
   } catch (error) {
-    if ((error as { code?: unknown } | null)?.code === 'ENOENT') return { file: null, servers: [], warnings: [] };
-    return { file, servers: [], warnings: [`.mcp.json не прочитан: ${(error as Error).message}`] };
+    if ((error as { code?: unknown } | null)?.code === 'ENOENT') return { found: false, servers: [], warnings: [] };
+    return { found: true, servers: [], warnings: [`${file} не прочитан: ${(error as Error).message}`] };
   }
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch (error) {
-    return { file, servers: [], warnings: [`.mcp.json: некорректный JSON (${(error as Error).message})`] };
+    return { found: true, servers: [], warnings: [`${file}: некорректный JSON (${(error as Error).message})`] };
   }
   const parsed = await parseProjectMcpServers(value, options);
-  return { file, ...parsed };
+  return { found: true, ...parsed };
+}
+
+/**
+ * Читает `.mcp.json` у корня репозитория и в самом cwd хода (cwd перекрывает одноимённые
+ * записи): проект без `.git` внутри чужого репозитория или рабочей папки всё равно получает
+ * свои серверы. Отсутствие файлов — не ошибка; `file` — последний найденный слой.
+ */
+export async function readProjectMcpServers(
+  cwd: string,
+  options: { searchPath?: string } = {},
+): Promise<ProjectMcpRead> {
+  const root = await nearestProjectRoot(cwd);
+  const layers = [path.join(root, '.mcp.json')];
+  const local = path.join(path.resolve(cwd), '.mcp.json');
+  if (local !== layers[0]) layers.push(local);
+
+  const merged = new Map<string, ProjectMcpServer>();
+  const warnings: string[] = [];
+  let file: string | null = null;
+  for (const layer of layers) {
+    const read = await readMcpFile(layer, options);
+    if (!read.found) continue;
+    file = layer;
+    warnings.push(...read.warnings);
+    for (const server of read.servers) merged.set(server.name, server);
+  }
+  return { file, servers: [...merged.values()], warnings };
 }
 
 /**

@@ -127,6 +127,7 @@
       "tests/server/deepseek-permissions.test.js",
       "tests/server/deepseek-pricing-watch.test.js",
       "tests/server/deepseek-profile.test.js",
+      "tests/server/deepseek-project-mcp.test.js",
       "tests/server/deepseek-provider.test.js",
       "tests/server/deepseek-runtime.test.js",
       "tests/server/deepseek-steps.test.js",
