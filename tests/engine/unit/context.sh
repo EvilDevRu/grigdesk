@@ -104,28 +104,16 @@ assert_eq valid-regex-route "$(jq -r '.evidence.findings.open[0].id' <<<"$output
 assert_eq build "$(jq -r '.evidence.findings.open[0].owner' <<<"$output")" \
   "finding ownership remains typed data for the receiving node"
 
-# Урок RETRO адресуется дважды: страховка в state и видимая человеку копия в рабочей
-# копии. Архив фабрики лежит вне репозитория, поэтому без второго адреса предложение
-# не попадает ни в `git status`, ни в PR (см. ENGINE.md).
-assert_eq "$state/archive/t42.lessons-proposed.md" \
-  "$(jq -r '.artifacts.lessons' <<<"$output")" \
-  "lessons keep the state archive address as a backup"
-assert_eq "$be_worktree/docs/lessons/t42.md" \
-  "$(jq -r '.artifacts.lessonsRepo' <<<"$output")" \
-  "lessons are also addressed inside the first repository"
-
-lessons_dir=("${common[@]}" --lessons-dir .claude/lessons)
-output_lessons=$("$tool" "${lessons_dir[@]}")
-assert_rc 0 "$?" "profile-owned lessons directory is accepted"
-assert_eq "$be_worktree/.claude/lessons/t42.md" \
-  "$(jq -r '.artifacts.lessonsRepo' <<<"$output_lessons")" \
-  "repository layout belongs to the profile, not to the engine"
-
-for bad_dir in /absolute ../escape 'docs/../..'; do
-  bad_lessons=("${common[@]}" --lessons-dir "$bad_dir")
-  "$tool" "${bad_lessons[@]}" >/dev/null 2>&1
-  assert_rc 78 "$?" "lessons-dir «$bad_dir» cannot escape the working copy"
-done
+# Узла ретро в маршрутах больше нет: адресов урока контекст не несёт, а прежний
+# флаг профиля отвергается как неизвестный — молчаливое принятие вернуло бы мёртвую
+# настройку LESSONS_DIR.
+assert_eq null "$(jq -r '.artifacts.lessons' <<<"$output")" \
+  "lessons artifact is gone together with the retro node"
+assert_eq null "$(jq -r '.artifacts.lessonsRepo' <<<"$output")" \
+  "lessonsRepo artifact is gone together with the retro node"
+stale_lessons=("${common[@]}" --lessons-dir docs/lessons)
+"$tool" "${stale_lessons[@]}" >/dev/null 2>&1
+assert_rc 2 "$?" "stale --lessons-dir flag is rejected"
 
 bad_findings=("${common[@]}")
 for index in "${!bad_findings[@]}"; do

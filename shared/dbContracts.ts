@@ -164,7 +164,11 @@ const auditPage = objectOf({
   nextCursor: optional(wholeNumber),
 });
 const acknowledgement = objectOf({ ok: boolean });
-const projectList = objectOf({ projects: listOf(objectOf({ id: text })) });
+// Архивный проект новому профилю не предлагается, но у заведённых он читается:
+// признак архива приходит с сервера, а не додумывается формой.
+const projectList = objectOf({
+  projects: listOf(objectOf({ id: text, archivedAt: optional(text) })),
+});
 
 export type DbProfile = ReturnType<typeof dbProfile>;
 export type DbEngine = ReturnType<typeof dbEngine>;

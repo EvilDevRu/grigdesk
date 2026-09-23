@@ -558,6 +558,32 @@ export async function confirmRouteResume({
  * пережить рестарт кокпита, а его собственный обработчик TERM должен успеть снять
  * инструментацию (KillMode=mixed в factoryUnitArgs).
  */
+/**
+ * Пишет секреты движка в файл `EnvironmentFile` юнита с правами 0600.
+ *
+ * Через `--setenv=NAME=VALUE` значение попало бы в argv systemd-run и в `ps`, а форму
+ * `--setenv=NAME` без значения systemd 249 не поддерживает. Файл один на все запуски:
+ * содержимое у него всегда одно и то же, юнит читает его на старте. Пустые значения
+ * пропускаются; без единого секрета файла нет и возвращается null.
+ */
+async function writeRouteSecretsFile(
+  stateDir: string,
+  secrets: Record<string, string | undefined>,
+): Promise<string | null> {
+  const lines = Object.entries(secrets)
+    .filter((entry): entry is [string, string] => Boolean(entry[1]))
+    .map(([name, value]) => `${name}="${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+  if (!lines.length) {
+    return null;
+  }
+
+  const file = path.join(stateDir, 'route-secrets.env');
+  await fs.mkdir(stateDir, { recursive: true });
+  await fs.writeFile(file, `${lines.join('\n')}\n`, { mode: 0o600 });
+  await fs.chmod(file, 0o600);
+  return file;
+}
+
 export async function spawnRouteEngine(config: RouteConfig, { task, args, extraEnv = {} }: {
   task: string | number;
   args: string[];
@@ -610,16 +636,20 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   }
 
   const unit = routeUnitName(task);
+  const secretsFile = await writeRouteSecretsFile(config.stateDir, {
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+  });
   const argv = [
     ...factoryUnitArgs(task),
     // Без этого отказ движка не оставит следа: у сервиса stdout уходит в журнал
     // systemd, а кокпит его не читает и читать не должен.
     `--property=StandardOutput=append:${logFile}`,
     ...Object.entries(env).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => `--setenv=${k}=${v}`),
-    // Без `=VALUE` systemd-run копирует значение из собственного окружения: имя
-    // секрета видно в argv, сам DEEPSEEK_API_KEY — нет. В non-systemd ветке child
-    // и так наследует process.env.
-    ...(process.env.DEEPSEEK_API_KEY ? ['--setenv=DEEPSEEK_API_KEY'] : []),
+    // Секрет едет файлом 0600, а не аргументом: в argv systemd-run его нет. Форма
+    // `--setenv=NAME` без значения здесь не годится — systemd 249 (Ubuntu 22.04) её не
+    // знает и отвергает весь юнит как «Invalid environment block». В non-systemd ветке
+    // child и так наследует process.env.
+    ...(secretsFile ? [`--property=EnvironmentFile=${secretsFile}`] : []),
     config.factoryBin, ...args,
   ];
   const started = await new Promise<{ ok: boolean; message?: string }>((resolve) => {

@@ -21,6 +21,7 @@
 
 - [guide/tasks.md](cockpit/guide/tasks.md) — как оформить задачу и что с ней делает триаж.
 - [guide/gates.md](cockpit/guide/gates.md) — где конвейер останавливается и чего ждёт от человека.
+- [guide/projects.md](cockpit/guide/projects.md) — паспорт проекта, его репозитории и API раздела.
 - [guide/knowledge.md](cockpit/guide/knowledge.md) — локальная база знаний, поиск, CLI и
   резервная копия.
 - [reference/runtime-contracts.md](cockpit/reference/runtime-contracts.md) — SSH-плагин, надзорный

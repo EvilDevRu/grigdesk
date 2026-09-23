@@ -270,11 +270,24 @@ export function normalizeUiContext(value: unknown, options: {
   return normalized;
 }
 
+// Паспорт проекта открывается по id: у него своя подсказка, а сам id в текст не
+// попадает — он уже уехал в details. Шаблон строгий: лишний сегмент, query или
+// заглавная буква в id означают «это не тот экран», и подсказки не будет вовсе.
+const PROJECT_PASSPORT_RE = /^\/projects\/[a-z0-9][a-z0-9_-]{0,40}$/;
+const PROJECT_PASSPORT_HINT = 'Открыт паспорт проекта.';
+
 /** Exact allowlist: похожий path/query не получает даже описательную подсказку. */
 export function pageHint(path: unknown): string {
   const hints = PAGE_HINTS as Record<string, string | undefined>;
 
-  return typeof path === 'string' && Object.hasOwn(PAGE_HINTS, path) ? hints[path] ?? '' : '';
+  if (typeof path !== 'string') {
+    return '';
+  }
+  if (Object.hasOwn(PAGE_HINTS, path)) {
+    return hints[path] ?? '';
+  }
+
+  return PROJECT_PASSPORT_RE.test(path) ? PROJECT_PASSPORT_HINT : '';
 }
 
 // JSON.stringify сам экранирует control chars, кавычки и backslash. Эти символы надо

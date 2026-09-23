@@ -717,6 +717,31 @@ _route_v2_mark_node_running() {
   return 0
 }
 
+# Число заходов узла словами — «3 захода», «5 заходов». Идёт в комментарий остановки,
+# который человек читает в карточке, поэтому падеж обязан быть правильным.
+_route_v2_runs_phrase() {
+  local n=$1 word=заходов
+
+  if (( n % 10 == 1 && n % 100 != 11 )); then
+    word=заход
+  elif (( n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) )); then
+    word=захода
+  fi
+  printf '%s %s' "$n" "$word"
+}
+
+# Класс исхода раннера — человеку. Словарь классов живёт в runners/policy.sh; незнакомое
+# имя показывается как есть, а не прячется за общим словом.
+_route_v2_no_result_label() {
+  case "${1:-}" in
+    timeout) printf 'убит по лимиту времени этапа' ;;
+    missing_status) printf 'не выставил статус' ;;
+    crashed) printf 'процесс упал' ;;
+    '') printf 'результат не зафиксирован' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 # Ledger остаётся единственным управляющим состоянием. После его успешного CAS
 # хост может синхронно обновить вторичную UI-проекцию из последнего проверенного
 # события. Ошибка проекции останавливает dispatch: следующий resume прочитает то
@@ -965,6 +990,10 @@ _route_v2_run_agent_node() {
   # rc 75 неоднозначен (нет результата ИЛИ guard поймал нарушение) — ретраить
   # можно только первое, поэтому источник помечается флагом.
   ROUTE_V2_NO_RESULT=0
+  # Класс исхода раннера у захода без результата (словарь — runners/policy.sh). Повтору
+  # после таймаута и после упавшего процесса нужны разные вводные, а комментарий
+  # остановки обязан назвать, чем именно кончился последний заход.
+  ROUTE_V2_NO_RESULT_CLASS=""
   ROUTE_V2_NODE_VERDICT_B64=""
   ROUTE_V2_FINAL_RUN_ID=""
   # Флаг отказа сторожа обнуляется на входе, а не только перед самой проверкой: заход,
@@ -1049,6 +1078,9 @@ _route_v2_run_agent_node() {
   local _r2_open_findings _r2_deferred_findings
   _r2_open_findings=$(_route_v2_findings_from_context "$_r2_context_file" open)
   _r2_deferred_findings=$(_route_v2_findings_from_context "$_r2_context_file" deferred)
+  # Класс запуска читается после run_agent из глобала диспетчера; след прошлого узла не
+  # должен сойти за класс этого захода, если до диспетчера дело не дошло.
+  DISPATCH_RESULT_KIND=""
   FACTORY_ROUTE_FILESYSTEM_POLICY="$policy" \
   FACTORY_ROUTE_BROWSER_POLICY="${ROUTE_V2_NODE_BROWSER:-forbid}" \
   FACTORY_ROUTE_TIMEOUT_CLASS="${ROUTE_V2_NODE_TIMEOUT_CLASS:-}" \
@@ -1064,6 +1096,9 @@ _route_v2_run_agent_node() {
     run_agent "$task" "$(cat "$_r2_prompt_file")" "$run_key" \
       >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
   local agent_rc=$?
+  # Диспетчер работает в этом же процессе и оставляет класс последнего запуска в
+  # DISPATCH_RESULT_KIND; фейковый run_agent тестов его не ставит — тогда класс пуст.
+  ROUTE_V2_NO_RESULT_CLASS=${DISPATCH_RESULT_KIND:-}
 
   # 79 — отказ ХОСТА/КОНФИГА (нет свежего coverage, провайдер недоступен, denied),
   # а не «агент не отчитался»: ретраить бессмысленно, а исчерпание бюджета
@@ -1901,6 +1936,10 @@ route_v2_dispatch_next() {
   # один раз lint, не исчерпав ни одной дуги). Решением человека не обнуляется.
   local target_rewind_budget=10
   local tries_left=$(( 1 + retry_no_result + provider_attempts ))
+  # Причина исчерпания бюджета — человеку: сколько заходов ушло впустую и чем кончился
+  # последний. Её читают карточка остановки (комментарий узла) и строка остановки в
+  # журнале стадий; без цифр остановка выглядела как «узел вернул решение человеку».
+  local exhausted_reason="исчерпан бюджет повторов: раннер не зафиксировал результат"
   local product_left=$retry_product
   # Отказ evidence-хука хоста — отдельный бюджет, не зависящий от productFailure бандла:
   # агент отчитался done, а хост не принял доказательства. Один повтор с цитатой причины
@@ -1996,10 +2035,23 @@ route_v2_dispatch_next() {
         if (( tries_left > 0 )); then
           attempt_no=$(( attempt_no + 1 ))
           retry_reason=no-result
+          # Класс исхода уезжает в блок повтора: «убит по лимиту времени» и «процесс упал»
+          # требуют от повтора разного. После таймаута бюджет времени съеден целиком, и
+          # повтор с прежним веером ролей съест его снова (t7989: три захода по 30 минут,
+          # каждый заново поднимал три роли и был убит перед stage-result). Узел, который
+          # допускает одиночный режим, на таком повторе идёт без веера: заметки ролей уже
+          # лежат в черновике и артефактах, заходу остаётся свести их и отчитаться.
+          retry_note=${ROUTE_V2_NO_RESULT_CLASS:-}
+          if [[ "$retry_note" == timeout && "$fanout_degrade" == allow-single ]]; then
+            fanout_mode=single
+          fi
           continue
         fi
         outcome=exhausted
         verdict_b64=""
+        exhausted_reason="исчерпан бюджет повторов: $(_route_v2_runs_phrase "$attempt_no")"
+        exhausted_reason+=" без результата, последний —"
+        exhausted_reason+=" $(_route_v2_no_result_label "${ROUTE_V2_NO_RESULT_CLASS:-}")"
         break
       fi
       if (( rc != 0 )); then
@@ -2122,7 +2174,7 @@ route_v2_dispatch_next() {
   if [[ "$outcome" == exhausted ]]; then
     run_state_control_update \
       "$task" "$run_key" failed \
-      "${run_key}_COMMENT" "исчерпан бюджет повторов: раннер не зафиксировал результат" \
+      "${run_key}_COMMENT" "$exhausted_reason" \
       || {
         rc=$?
         runtime_lifecycle_node_visit_finish_v2 \
@@ -2306,6 +2358,36 @@ route_v2_rewind_exhausted_stop() {
     "$task" "$attempt" "$last_node" "$reset" \
     "продолжение после исчерпанного бюджета повторов" engine >/dev/null || return
   printf '%s\n' "$last_node"
+}
+
+# Суффикс строки остановки для `human`, который объявил не вердикт агента, а сам runtime
+# узла: исчерпанный бюджет повторов. Причина уже лежит в комментарии узла (см.
+# `exhausted_reason` в исполнении узла), но кокпит читает причину остановки из ПОСЛЕДНЕЙ
+# строки окна журнала стадий — без суффикса исчерпание показывалось как «узел вернул
+# решение человеку» с советом прочитать замечание, которого агент не писал (t7989).
+# Печатает суффикс с ведущим « — » либо ничего: у остановки с другим исходом своя причина.
+route_v2_stop_line_suffix() {
+  local task attempt cursor_tmp state stop last_node last_outcome reason rc
+
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
+  attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" || {
+    rc=$?
+    rm -f -- "$cursor_tmp"
+    return "$rc"
+  }
+  IFS=$'\t' read -r state stop last_node last_outcome \
+    < <(_route_v2_json cursor-stop "$cursor_tmp") || {
+      rm -f -- "$cursor_tmp"
+      return 78
+    }
+  rm -f -- "$cursor_tmp"
+  [[ "$state" == stopped && "$stop" == human && "$last_outcome" == exhausted ]] ||
+    return 0
+  [[ "$last_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 0
+  reason=$(pipeline_store_get "$task" "${last_node^^}_COMMENT" 2>/dev/null) || reason=""
+  printf ' — %s' "${reason:-исчерпан бюджет повторов}"
 }
 
 route_v2_gate_decide() {

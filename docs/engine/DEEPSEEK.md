@@ -66,7 +66,9 @@ invalid-key до model/tool activity; timeout различим отдельно,
 
 Overlay из плана успешно прошёл `--dump-config` и ACP-start. Дамп подтверждает:
 
-- `sandbox-policy.mode` и абсолютный `workspaceRoot` заменяются;
+- `sandbox-policy.mode` и абсолютный `workspaceRoot` заменяются; в чате `workspaceRoot`
+  равен самому глубокому доверенному каталогу-предку realpath cwd (или cwd без такого
+  предка), в Factory — строго cwd;
 - `approval.policy` заменяется;
 - `permission.defaultPreset` задаётся явно. Помимо upstream-наборов объявлены
   `factory-state-only = read-only + never` и
@@ -341,7 +343,8 @@ drill. Боевые профили не включались.
 ## Принятые риски V1 и остаток проверки
 
 - hooks bridge fail-open; механическая защита — только sandbox DSH;
-- writable root одна — cwd сессии; Factory status идёт отдельным MCP;
+- writable root одна: в чате ближайший доверенный каталог-предок cwd (или сам cwd),
+  в Factory — строго cwd сессии; Factory status идёт отдельным MCP;
 - сеть и запуск процессов sandbox не ограничивает;
 - context `@`-импортов stateless добавляется каждый prompt;
 - per-turn процесс добавляет измеренную startup/RSS-цену;

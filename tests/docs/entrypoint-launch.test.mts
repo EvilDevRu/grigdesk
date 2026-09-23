@@ -29,9 +29,11 @@ const SQLITE_WARNING_ALLOWED = new Set([
 const LAUNCH_FILES = [
   'bin/cockpit',
   'bin/knowledge',
+  'bin/launch',
   'bin/restart',
   'bin/lib/runtime-env.sh',
   'deploy/install.sh',
+  'deploy/shortcut.sh',
   'deploy/cockpit-server.service',
   'server/package.json',
   'web/package.json',

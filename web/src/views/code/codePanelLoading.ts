@@ -52,9 +52,6 @@ export default defineComponent({
     }, [
       h('header', { class: 'code-loading-head' }, [
         h('strong', 'Код'),
-        h('span', { class: 'code-loading-tabs', 'aria-hidden': 'true' }, [
-          h('i'), h('i'), h('i'),
-        ]),
         h('span', { class: 'code-loading-grow' }),
         h('span', { class: 'code-loading-navigator', 'aria-hidden': 'true' }, [navigatorIcon()]),
       ]),
@@ -62,6 +59,9 @@ export default defineComponent({
         class: ['code-loading-layout', { compact: props.compact }],
         style: { '--code-loading-nav-width': `${navigatorWidth}px` },
       }, [
+        h('aside', { class: 'code-loading-rail', 'aria-hidden': 'true' }, [
+          h('span'), h('span'), h('span'),
+        ]),
         h('aside', { class: 'code-loading-panel', 'aria-hidden': 'true' }, [
           h('div', { class: 'code-loading-tree' }, Array.from({ length: 7 }, (_, index) => (
             h('span', { style: { width: `${48 + (((index + 1) * 17) % 38)}%` } })

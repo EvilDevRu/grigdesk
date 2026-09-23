@@ -21,6 +21,7 @@ import { TlsInputError, isPrivateAddress } from '../../lib/tls/local.ts';
 import type { ModelJobManager } from '../../lib/speech/modelJobs.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 import type { FactoryDebugSettings } from '../../lib/factoryDebug.ts';
+import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 
 // Кто владеет кредами B24 и умеет проверить вход. Оба соседа ещё JavaScript.
@@ -71,6 +72,10 @@ type SettingsRequest = FastifyRequest<{
 
 const PROTECTED_PREFS = new Map([
   ['speech', '/api/settings/speech'],
+  // Реестры проектов принадлежат разделу «Проекты»: здесь они пишутся только своим API,
+  // иначе одна общая запись настроек затирала бы паспорта проектов целиком.
+  ['projects', '/api/projects'],
+  ['projectsMeta', '/api/projects'],
   ['trustedDirectories', '/api/settings/trusted-directories'],
   ['plugins', '/api/plugins/:id/toggle'],
   ['pluginSettings', '/api/plugins/:id/settings'],
@@ -197,7 +202,16 @@ async function settingsModule(
         });
       }
     }
-    return prefs.write(body);
+    try {
+      return prefs.write(body);
+    } catch (err) {
+      // Файл настроек не читается — запись отклонена целиком, и человеку нужен не
+      // «внутренний сбой», а понятная причина: иначе порча выглядит как сбой кокпита.
+      if (err instanceof PrefsCorruptedError) {
+        return reply.code(500).send({ error: 'prefs_corrupted', message: err.message });
+      }
+      throw err;
+    }
   });
 
   fastify.get('/api/settings/speech', async (request: SettingsRequest) => {

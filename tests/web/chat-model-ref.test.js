@@ -372,3 +372,62 @@ test('sessionResetFailed от сервера сохраняет id и блоки
   assert.equal(session.contextTokens, 77);
   assert.equal(session.sessionResetFailed, true);
 });
+
+test('сброс памяти чата без binding подтверждает сервер: живая сессия гасится там', async () => {
+  // Claude и Codex живут между ходами процессом на сервере. Обнулить sessionId только
+  // в окне — значит оставить агенту всю память: следующий ход поднял бы тот же процесс.
+  const chat = await chatStoreFixture({
+    sessions: [{
+      id: 'claude-live-chat',
+      model: 'claude-test',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      revision: 3,
+      messages: [],
+      sessionId: 'claude-session-id',
+      contextTokens: 120,
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  });
+  const posts = [];
+  apiHarness.post = async (url, body) => {
+    posts.push({ url, body });
+    return { ok: true, reset: true };
+  };
+
+  assert.equal(await chat.resetContext('claude-live-chat', { note: false }), true);
+
+  const session = chat.sessions[0];
+  assert.deepEqual(posts, [{
+    url: '/api/chat/session/reset',
+    body: { chatKey: 'claude-live-chat', modelRef: { provider: 'claude', model: 'claude-test' } },
+  }]);
+  assert.equal(session.sessionId, null);
+  assert.equal(session.contextTokens, 0);
+  assert.equal(session.sessionResetFailed, false);
+});
+
+test('несохранённый чат без binding сбрасывается только локально', async () => {
+  // Пока чата нет на сервере (revision 0), там нет и живой сессии — гасить нечего,
+  // а запрос ответил бы 404 и превратил безобидный сброс в ошибку.
+  const chat = await chatStoreFixture({
+    sessions: [{
+      id: 'fresh-claude-chat',
+      model: 'claude-test',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      revision: 0,
+      messages: [],
+      sessionId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  });
+  let posts = 0;
+  apiHarness.post = async () => {
+    posts += 1;
+    return { ok: true };
+  };
+
+  assert.equal(await chat.resetContext('fresh-claude-chat', { note: false }), true);
+  assert.equal(posts, 0);
+});

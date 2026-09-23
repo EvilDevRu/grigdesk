@@ -13,8 +13,11 @@ import type {
   SshSession,
 } from '../../../shared/sshContracts.ts';
 
+// Признак архива приходит с сервера вместе со списком: форма по нему решает,
+// можно ли заводить на проект новую связь.
 export interface SshProjectOption {
   id: string;
+  archivedAt?: string | null;
 }
 
 export interface SshStoreState {

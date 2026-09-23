@@ -118,6 +118,14 @@ import authModule from './modules/auth/index.ts';
 import gatewayModule from './modules/gateway/index.ts';
 import pluginsModule from './modules/plugins/index.ts';
 import projectsModule from './modules/projects/index.ts';
+import { createProjectsService } from './modules/projects/service.ts';
+import {
+  countGitHubRules,
+  countKnowledgeRecords,
+  countTelegramRules,
+} from './lib/projects/dependencySources.ts';
+import { isProjectArchived } from './lib/projects/archive.ts';
+import { RoutesStore } from './modules/routes/store.ts';
 import codeModule from './modules/code/index.ts';
 import telegramModule from './modules/telegram/index.ts';
 import githubModule from './modules/github/index.ts';
@@ -465,6 +473,8 @@ async function build() {
     factoryBin: config.factoryBin,
     manualRange: config.sandboxManualRange,
     sandboxActivityGuard,
+    // Архивный проект новых стендов не поднимает: уже поднятый сносится как обычно.
+    isProjectArchived: (id: string) => isProjectArchived(prefs, id),
     downCmd: config.sandboxDownCmd,
     log: fastify.log,
     broadcast: (event: string, data?: unknown) => fastify.sse?.broadcast?.(event, data),
@@ -1078,9 +1088,112 @@ async function build() {
     poller: telegramPoller,
     botApi: telegramBotApi,
     listProjects: () => listProjects(config, prefs),
+    // Новое правило заводят только на активный проект; уже заведённые архив не трогает.
+    listActiveProjects: () => listProjects(config, prefs, { includeArchived: false }),
   });
   await fastify.register(documentsModule, { reader: documentReader });
-  await fastify.register(projectsModule, { config, prefs });
+  // Сервис проектов создаётся здесь, а не внутри модуля: провайдеры связей знают
+  // соседние разделы, и регистрировать их может только сборка приложения.
+  const projectsService = createProjectsService({
+    config,
+    prefs,
+    broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
+  });
+
+  // Связи проекта: каждый раздел сам отвечает, сколько записей держится за id.
+  // Правила Telegram и GitHub сюда добавятся из своих модулей: их хранилища живут
+  // в контекстах аккаунтов, и читать их напрямую сборке нечем.
+  projectsService.registerDependencyProvider({
+    kind: 'routes',
+    label: 'Опубликованный каталог маршрутов',
+    blocksArchive: false,
+    count: async (id) => {
+      const store = new RoutesStore({ baseDir: config.routesDir });
+      const current = await store.readCurrent(id).catch(() => null);
+
+      return current
+        ? { count: 1, items: Object.keys(current.catalog.routes).slice(0, 5) }
+        : { count: 0 };
+    },
+  });
+  projectsService.registerDependencyProvider({
+    kind: 'factory',
+    label: 'Попытки фабрики',
+    blocksArchive: false,
+    count: async (id) => {
+      const tasks = await factoryState.listTaskIds().catch(() => []);
+      const items: string[] = [];
+
+      for (const task of tasks) {
+        const attempt = await factoryState.readTrustedAttempt(task).catch(() => null);
+
+        if (attempt?.profile === id) {
+          items.push(`попытка ${task}`);
+        }
+      }
+
+      return { count: items.length, items: items.slice(0, 5) };
+    },
+  });
+  projectsService.registerDependencyProvider({
+    kind: 'ssh',
+    label: 'Профили SSH',
+    blocksArchive: false,
+    count: (id) => {
+      const items = sshConnections.list()
+        .filter((connection) => connection.projectId === id)
+        .map((connection) => connection.label || connection.id);
+
+      return { count: items.length, items };
+    },
+  });
+  projectsService.registerDependencyProvider({
+    kind: 'db',
+    label: 'Профили баз',
+    blocksArchive: false,
+    count: (id) => {
+      const items = dbProfiles.list()
+        .filter((profile) => profile.projectId === id)
+        .map((profile) => profile.label || profile.id);
+
+      return { count: items.length, items };
+    },
+  });
+  projectsService.registerDependencyProvider({
+    kind: 'showcase',
+    label: 'Цели презентаций',
+    blocksArchive: false,
+    count: async (id) => {
+      const overview = await showcaseService.overview();
+      const items = overview.projects
+        .filter((project) => project.ref.kind === 'project' && project.ref.id === id)
+        .map((project) => project.title || project.id);
+
+      return { count: items.length, items };
+    },
+  });
+  // Правила переживают архив и остались бы ссылками в никуда, поэтому только они
+  // архив запрещают. Их адреса (чат, репозиторий) в сводку не попадают — там число.
+  projectsService.registerDependencyProvider({
+    kind: 'telegram',
+    label: 'Правила Telegram',
+    blocksArchive: true,
+    count: (id) => countTelegramRules(telegramConnection, id),
+  });
+  projectsService.registerDependencyProvider({
+    kind: 'github',
+    label: 'Правила GitHub',
+    blocksArchive: true,
+    count: (id) => countGitHubRules(githubConnection, id),
+  });
+  projectsService.registerDependencyProvider({
+    kind: 'knowledge',
+    label: 'Записи базы знаний',
+    blocksArchive: false,
+    count: (id) => countKnowledgeRecords(knowledge, id),
+  });
+
+  await fastify.register(projectsModule, { config, prefs, service: projectsService });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
   await fastify.register(dbModule, { service: dbService });
   await fastify.register(dockerModule, { service: dockerService });

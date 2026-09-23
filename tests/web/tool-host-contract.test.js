@@ -53,7 +53,8 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
   assert.match(registry, /delay: 0/);
   assert.match(codeLoading, /'aria-busy': 'true'/);
   assert.match(codeLoading, /class: \['code-loading-layout', \{ compact: props\.compact \}\]/);
-  assert.doesNotMatch(codeLoading, /code-loading-rail/);
+  assert.match(codeLoading, /class: 'code-loading-rail'/);
+  assert.doesNotMatch(codeLoading, /code-loading-tabs/);
   assert.doesNotMatch(codeLoading, /from ['"][^'"]*monaco|import\s+.*TerminalPanel|new WebSocket/i);
   assert.doesNotMatch(registry, /Promise\.all/);
 });
@@ -147,19 +148,31 @@ test('Escape у развёрнутого дока сначала возвращ�
   assert.match(shell, /:aria-hidden="toolDock\.isExpanded \? 'true' : undefined"/);
 });
 
-test('Code держит навигатор слева от Monaco и меняет его ширину разделителем', async () => {
-  const [code, actions] = await Promise.all([
+test('Code держит рейку разделов и навигатор слева от Monaco и меняет ширину разделителем', async () => {
+  const [code, actions, dock] = await Promise.all([
     source('web/src/views/code/CodePanel.vue'),
     source('web/src/styles/components/actions.css'),
+    source('web/src/shared/layout/ToolDock.vue'),
   ]);
 
   assert.match(code, /cockpit-code-dock-nav-width/);
   assert.match(code, /aria-orientation="vertical"/);
-  assert.match(code, /\.lay \.panel \{[\s\S]*grid-column:\s*1/);
-  assert.match(code, /\.lay \.editorwrap \{ grid-column:\s*3/);
-  assert.match(code, /\.code-split \{[\s\S]*grid-column:\s*2[\s\S]*cursor:\s*col-resize/);
-  assert.doesNotMatch(code, /<aside class="rail"/);
-  assert.doesNotMatch(code, /clientX - rect\.left - 44/);
+  // Рейка — первая колонка сетки; её ширина одна и та же в CSS-переменной и в расчёте
+  // координаты разделителя. Шапка вкладок не держит.
+  assert.match(code, /<aside class="rail" aria-label="Разделы кода">/);
+  assert.match(code, /const RAIL_WIDTH = 44;/);
+  assert.match(code, /'--code-rail-width': `\$\{RAIL_WIDTH\}px`/);
+  assert.match(code, /clientX - rect\.left - RAIL_WIDTH/);
+  assert.match(code, /\.lay \{[\s\S]*grid-template-columns: var\(--code-rail-width, 44px\) minmax/);
+  assert.match(code, /\.lay \.rail \{ grid-column:\s*1/);
+  assert.match(code, /\.lay \.panel \{[\s\S]*grid-column:\s*2/);
+  assert.match(code, /\.lay \.editorwrap \{ grid-column:\s*4/);
+  assert.match(code, /\.code-split \{[\s\S]*grid-column:\s*3[\s\S]*cursor:\s*col-resize/);
+  assert.match(code, /\.lay\.code-narrow \{ grid-template-columns: var\(--code-rail-width, 44px\) minmax\(0, 1fr\); \}/);
+  assert.doesNotMatch(code, /<UiTabs/);
+  assert.match(actions, /\.ui-icon-button\[data-context='code-rail-item'\]\[aria-pressed='true'\]/);
+  assert.match(dock, /:deep\(\.code-loading-rail\) \{[\s\S]*grid-column: 1;/);
+  assert.match(dock, /:deep\(\.code-loading-layout\) \{[\s\S]*grid-template-columns: 44px minmax/);
   assert.match(code, /const NAVIGATOR_MIN_WIDTH = 220/);
   assert.match(code, /const NAVIGATOR_DEFAULT_WIDTH = 320/);
   assert.doesNotMatch(code, /cockpit-code-dock-split/);

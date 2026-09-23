@@ -519,6 +519,7 @@ test('COMP-PROV-01..08: реальные страницы используют o
   assert.match(files.agents, /details:\s*\{ agentId \}/);
   assert.match(files.chats, /details:\s*\{ chatId \}/);
   assert.doesNotMatch(files.chats, /details:\s*\{[^}]*messages|details:\s*\{[^}]*draft|details:\s*\{[^}]*sessionId/s);
-  assert.match(files.projects, /edit\.value\?\.id/);
+  assert.match(files.projects, /useUiContextSource\('projects'/);
+  assert.match(files.projects, /details:\s*\{\s*project/);
   assert.doesNotMatch(files.projects, /details:\s*\{[^}]*dir:/s);
 });

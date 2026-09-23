@@ -31,6 +31,8 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/views/code/CodePanel.vue',
   'web/src/views/code/PatchReview.vue',
   'web/src/views/diff/DiffPanel.vue',
+  // Строка списка проектов — такой же пункт-плитка, как карточка задачи на доске.
+  'web/src/views/projects/ProjectList.vue',
   'web/src/views/settings/PluginsCatalog.vue',
   'web/src/views/VideoView.vue',
 ]);

@@ -1,5 +1,5 @@
 import type { AgentCard, AgentDraft } from '../../shared/agentsContracts';
-import type { Project, ProjectRepoInput } from '../../shared/projectsContracts';
+import type { ProjectRepoInput } from '../../shared/projectsContracts';
 import type { RouteRevision } from '../../shared/routesContracts';
 import type { FactoryGraphData } from '../../shared/factoryGraphContracts';
 import { agentsApi } from '../../web/src/shared/agentsApi';
@@ -30,7 +30,6 @@ export type RevisionsAreChecked = Checked<
  */
 async function checkPipelineContracts(
   agent: AgentCard,
-  project: Project,
   revision: RouteRevision,
   graph: FactoryGraphData,
 ): Promise<void> {
@@ -54,8 +53,6 @@ async function checkPipelineContracts(
 
   // @ts-expect-error Режим публикации закрыт перечислением.
   await routesApi.publish('cockpit', 'deploy', null);
-
-  project.repos[0]?.from.toLowerCase();
 
   void rawAgents;
   void badTimeout;

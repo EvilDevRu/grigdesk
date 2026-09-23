@@ -256,6 +256,22 @@ export function stopIsArbitrable(
   return true;
 }
 
+/**
+ * Тот же признак для карточки задачи и вотчера — по вердикту узла остановки целиком.
+ *
+ * Остановка `human` без вердикта — не «класс не назван», а исчерпанный бюджет повторов:
+ * ни один заход результата не зафиксировал, и разбирать нечего. Гейт выше ответил бы на
+ * неё `arc_unknown` (в журнале нет дуги с вердиктами), а кнопка, за которой стоит отказ,
+ * хуже отсутствующей (t7989: «отдать арбитру» рядом с «раннер не получил результат»).
+ */
+export function stallIsArbitrable(
+  stop: string | null | undefined,
+  verdict: { owner: string | null } | null | undefined,
+): boolean {
+  if (stop === 'human' && !verdict) return false;
+  return stopIsArbitrable(stop, verdict?.owner || null);
+}
+
 /** Разбирает ли арбитр эту остановку. Ответ словами: он уезжает человеку. */
 export function arbitrationGate(
   context: ArbitrationRead | null | undefined,

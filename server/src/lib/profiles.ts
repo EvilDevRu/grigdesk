@@ -7,6 +7,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { archivedProjectIds } from './projects/archive.ts';
+
 export const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 
 /**
@@ -58,14 +60,27 @@ function listCockpitProjects(prefs: ProjectsPrefsPort | null): string[] {
   } catch { return []; }
 }
 
-/** Все проекты: фабрика + заведённые в кокпите (объединение, отсортировано). */
+/**
+ * Все проекты: фабрика + заведённые в кокпите (объединение, отсортировано).
+ * По умолчанию список полный — архив ничего не рвёт, и уже созданное продолжает
+ * открываться. `includeArchived: false` просят там, где начинают НОВОЕ: форма
+ * запуска, подъём песочницы, выбор проекта в новом правиле.
+ */
 export async function listProjects(
   { profilesDir }: { profilesDir: string },
   prefs: ProjectsPrefsPort | null = null,
+  { includeArchived = true }: { includeArchived?: boolean } = {},
 ): Promise<string[]> {
   const all = new Set([
     ...(await listFactoryProfiles(profilesDir)),
     ...listCockpitProjects(prefs),
   ]);
-  return [...all].sort();
+
+  if (includeArchived) {
+    return [...all].sort();
+  }
+
+  const archived = archivedProjectIds(prefs);
+
+  return [...all].filter((id) => !archived.has(id)).sort();
 }

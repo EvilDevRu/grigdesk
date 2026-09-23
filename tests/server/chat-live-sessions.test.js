@@ -226,6 +226,26 @@ test('смена blockDirectSsh переоткрывает процесс, ра�
   await pool.closeAll();
 });
 
+test('смена исполнителя не переносит id сессии в новый процесс', async () => {
+  // Id сессии принадлежит вендору: thread claude для codex — чужой id, и resume по нему
+  // падает «no rollout found». После смены ИИ новый процесс обязан стартовать без id.
+  const opened = [];
+  const claude = { ...fakeExecutor({ opened }), id: 'claude' };
+  const codex = { ...fakeExecutor({ opened }), id: 'codex' };
+  const pool = new ChatLiveSessions({ maxSessions: 4 });
+
+  await pool.run({ chatKey: 'c1', executor: claude, model: 'a' }, { message: 'раз' });
+  assert.equal(pool.stats()[0].sessionId, 'sid-1', 'первый исполнитель завёл сессию');
+
+  await pool.run({ chatKey: 'c1', executor: codex, model: 'a', sessionId: null }, { message: 'два' });
+  assert.equal(opened.length, 2, 'смена исполнителя переоткрывает процесс');
+  assert.equal(opened[0].closed, true);
+  assert.equal(opened[1].spec.sessionId, null, 'чужой id сессии новому исполнителю не достаётся');
+  assert.equal(pool.stats()[0].executor, 'codex');
+
+  await pool.closeAll();
+});
+
 test('умерший процесс заменяется новым с прежним id сессии', async () => {
   const opened = [];
   const executor = fakeExecutor({ opened });
@@ -666,4 +686,28 @@ test('сжатие выжимкой гасит живую сессию, и сл�
   assert.equal(fixture.handles.length, 2, 'следующий ход поднял новый процесс');
   assert.equal(fixture.handles[1].openedWith, null, 'новый процесс стартует без прежнего id сессии');
   assert.equal(fixture.handles[1].closed, false);
+});
+
+test('сброс памяти гасит живую сессию исполнителя без binding, следующий ход чистый', async (t) => {
+  const fixture = await apiFixture(t);
+  const chatKey = await fixture.chat();
+  const first = await fixture.turn(chatKey);
+  assert.equal(first.statusCode, 200, first.body);
+  assert.equal(fixture.handles[0].alive, true, 'после хода процесс живёт и помнит разговор');
+
+  // Окно обнулило sessionId у себя, но память лежит в процессе на сервере: без этого
+  // вызова следующий ход поднял бы тот же процесс, и «сброс» ничего бы не сбросил.
+  const reset = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/chat/session/reset',
+    payload: { chatKey, modelRef: { provider: 'claude', model: 'claude-test' } },
+  });
+  assert.equal(reset.statusCode, 200, reset.body);
+  assert.equal(reset.json().reset, true, 'сервер подтверждает, что гасить было что');
+  assert.equal(fixture.handles[0].closed, true, 'процесс со старым разговором погашен');
+
+  const next = await fixture.turn(chatKey, { sessionId: null, message: 'с чистого листа' });
+  assert.equal(next.statusCode, 200, next.body);
+  assert.equal(fixture.handles.length, 2, 'следующий ход поднял новый процесс');
+  assert.equal(fixture.handles[1].openedWith, null, 'новый процесс стартует без прежнего id');
 });

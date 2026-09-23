@@ -13,6 +13,7 @@ import {
 export interface DeepSeekLaunchFilesOptions {
   launchDir: string;
   cwd: string;
+  workspaceRoot: string;
   mode: 'read-only' | 'workspace-write';
   approval: 'ask' | 'never';
   hooks: {
@@ -54,7 +55,7 @@ const DISABLED_ROWS = Object.freeze([
 
 // Входит в persisted cache/session fingerprint. Менять при любом смысловом изменении
 // overlay, hooks или их enforcement, даже если версия DSH осталась прежней.
-export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v2';
+export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v3';
 
 const INSTRUCTIONS_HOOK_PATH = fileURLToPath(
   new URL('../../../scripts/deepseekInstructionsHook.mts', import.meta.url),
@@ -107,7 +108,7 @@ function shellQuote(value: string): string {
 }
 
 function assertAbsolute(label: string, value: string): void {
-  if (!path.isAbsolute(value) || value.includes('\0')) {
+  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) {
     throw new TypeError(`DeepSeek ${label} должен быть абсолютным путём`);
   }
 }
@@ -129,9 +130,10 @@ async function privateFile(file: string, content: string): Promise<void> {
 export async function buildLaunchFiles(
   options: DeepSeekLaunchFilesOptions,
 ): Promise<DeepSeekLaunchFiles> {
-  const { launchDir, cwd, mode, approval, hooks } = options;
+  const { launchDir, cwd, workspaceRoot, mode, approval, hooks } = options;
   assertAbsolute('launchDir', launchDir);
   assertAbsolute('cwd', cwd);
+  assertAbsolute('workspaceRoot', workspaceRoot);
   assertAbsolute('projectRoot', hooks.instructions.projectRoot);
   if (mode !== 'read-only' && mode !== 'workspace-write') {
     throw new TypeError(`DeepSeek mode не поддерживается: ${String(mode)}`);
@@ -145,6 +147,10 @@ export async function buildLaunchFiles(
   const relativeCwd = path.relative(hooks.instructions.projectRoot, cwd);
   if (relativeCwd.startsWith('..') || path.isAbsolute(relativeCwd)) {
     throw new TypeError('DeepSeek projectRoot должен содержать cwd');
+  }
+  const relativeWorkspaceCwd = path.relative(workspaceRoot, cwd);
+  if (relativeWorkspaceCwd.startsWith('..') || path.isAbsolute(relativeWorkspaceCwd)) {
+    throw new TypeError('DeepSeek workspaceRoot должен содержать cwd');
   }
 
   await fs.mkdir(launchDir, { recursive: true, mode: 0o700 });
@@ -188,7 +194,7 @@ export async function buildLaunchFiles(
   };
   const hooksJson = `${JSON.stringify(hooksDocument, null, 2)}\n`;
   const overlay = serializeOverlay([
-    { id: 'sandbox-policy', config: { mode, workspaceRoot: cwd } },
+    { id: 'sandbox-policy', config: { mode, workspaceRoot } },
     { id: 'approval', config: { policy: approval } },
     {
       // Upstream не объявляет preset для Factory-комбинаций `approval: never`.

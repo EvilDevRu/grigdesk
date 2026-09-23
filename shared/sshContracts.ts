@@ -17,6 +17,7 @@ const {
   boolean,
   listOf,
   numeric,
+  nullable,
   objectOf,
   oneOf,
   optional,
@@ -132,7 +133,11 @@ const auditPage = objectOf({
   nextCursor: optional(wholeNumber),
 });
 const acknowledgement = objectOf({ ok: boolean });
-const projectList = objectOf({ projects: listOf(objectOf({ id: text })) });
+// Архивный проект раздел SSH не предлагает новым связям, но уже заведённые читает:
+// поэтому признак архива входит в контракт, а не вычисляется формой по догадке.
+const projectList = objectOf({
+  projects: listOf(objectOf({ id: text, archivedAt: optional(text) })),
+});
 
 export type SshConnection = ReturnType<typeof sshConnection>;
 export type SshSession = ReturnType<typeof sshSession>;

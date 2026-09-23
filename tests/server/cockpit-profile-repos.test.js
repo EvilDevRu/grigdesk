@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { projectRepos } from '../../server/src/lib/projects.ts';
 
-test('проект с техническими BE/FE-алиасами одного монорепозитория получает один собственный ключ', async (t) => {
+test('проект с BE/FE-алиасами одного каталога отдаёт обе записи с исходными ключами', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-project-repos-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
@@ -27,11 +27,12 @@ test('проект с техническими BE/FE-алиасами одног
     isFactory: true,
   });
 
-  assert.deepEqual(repos, [{
-    key: 'cockpit',
-    dir: '/srv/cockpit',
-    from: 'factory',
-  }]);
+  // Схлопывание алиасов снято: ключ паспорта — это ключ плагина «Код», и он должен
+  // совпадать с тем, что объявил профиль, иначе пути фабрики и Кода разъедутся.
+  assert.deepEqual(repos, [
+    { key: 'be', dir: '/srv/cockpit', from: 'factory' },
+    { key: 'fe', dir: '/srv/cockpit', from: 'factory' },
+  ]);
 });
 
 test('разные физические репозитории проекта сохраняют исходные ключи и порядок', async (t) => {

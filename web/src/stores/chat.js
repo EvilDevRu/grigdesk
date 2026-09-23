@@ -1647,7 +1647,11 @@ export const useChatStore = defineStore('chat', {
       const bindingProvider = modelRef
         ? useProvidersStore().modelOf(modelRef).provider?.sessionBinding === true
         : false;
-      const resetOnServer = bindingProvider && (s.sessionId || s.revision > 0);
+      // Сброс подтверждает сервер, а не только окно — для любого исполнителя. Живая
+      // сессия помнит разговор внутри своего процесса, и одного `sessionId = null` в окне
+      // мало: следующий ход поднял бы тот же процесс, и агент помнил бы всё, что окно
+      // «забыло». Несохранённому чату (revision 0) гасить на сервере нечего.
+      const resetOnServer = s.revision > 0 || (bindingProvider && !!s.sessionId);
       s.sessionResetting = true;
       s.sessionResetFailed = false;
       s.error = null;

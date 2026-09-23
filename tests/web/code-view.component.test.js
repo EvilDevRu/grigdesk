@@ -404,8 +404,10 @@ test('холодный запуск Code сразу занимает финал�
   assert.equal(wrapper.get('.code-panel').attributes('aria-busy'), 'true');
   assert.equal(loading.attributes('role'), undefined);
   assert.equal(loading.classes().includes('compact'), true);
-  assert.equal(loading.find('.rail').exists(), false);
-  assert.equal(wrapper.findAll('button[data-context="code-main-tab"]').length, 3);
+  // Каркас сразу держит колонку рейки разделов, а живых кнопок в нём ещё нет.
+  assert.equal(loading.find('.rail').exists(), true);
+  assert.equal(loading.findAll('.loading-rail-item').length, 3);
+  assert.equal(wrapper.findAll('button[data-context="code-rail-item"]').length, 0);
   assert.equal(loading.find('.panel').exists(), true);
   assert.equal(loading.find('.code-split').exists(), true);
   assert.equal(loading.find('.editorwrap').exists(), true);
@@ -563,12 +565,20 @@ test('вкладки разделяют файлы, уникальные изм�
     },
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
-  const tabs = wrapper.findAll('button[data-context="code-main-tab"]');
+  const rail = wrapper.get('aside.rail');
+  const items = rail.findAll('button[data-context="code-rail-item"]');
 
-  assert.deepEqual(tabs.map((item) => item.attributes('data-tab')), [
+  // Разделы — небольшие кнопки в рейке слева от навигатора, а не вкладки в шапке.
+  assert.equal(rail.attributes('aria-label'), 'Разделы кода');
+  assert.equal(wrapper.find('.code-head [role="tablist"]').exists(), false);
+  assert.equal(rail.element.nextElementSibling === wrapper.get('.panel').element, true);
+  assert.deepEqual(items.map((item) => item.attributes('data-tab')), [
     'files', 'changes', 'commits',
   ]);
-  assert.match(wrapper.get('button[data-tab="changes"]').text(), /Изменения\s+2/);
+  assert.deepEqual(items.map((item) => item.attributes('aria-pressed')), ['true', 'false', 'false']);
+  assert.equal(wrapper.get('button[data-tab="changes"]').attributes('aria-label'), 'Изменения · 2');
+  assert.equal(wrapper.get('button[data-tab="changes"] .rail-badge').text(), '2');
+  assert.equal(wrapper.find('button[data-tab="files"] .rail-badge').exists(), false);
 
   await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
@@ -599,7 +609,8 @@ test('вкладки разделяют файлы, уникальные изм�
   assert.equal(wrapper.find('.file-history').exists(), true);
   await wrapper.get('button[data-action="close-file-history"]').trigger('click');
   await settle(flushPromises);
-  assert.equal(wrapper.get('button[data-tab="commits"]').attributes('aria-selected'), 'true');
+  assert.equal(wrapper.get('button[data-tab="commits"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.get('button[data-tab="changes"]').attributes('aria-pressed'), 'false');
 });
 
 test('Git по умолчанию показан деревом, доступно переключается в список и сохраняет выбранный diff', async (t) => {
@@ -678,7 +689,7 @@ test('Git по умолчанию показан деревом, доступн�
     storage: { 'cockpit-code-git-view': 'damaged' },
   });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   const toggle = wrapper.get('[role="group"][aria-label="Вид изменений"]');
@@ -771,7 +782,7 @@ test('настройки diff восстанавливаются, меняют M
     storage: { 'cockpit-diff-wrap': '1', 'cockpit-diff-ws': '1' },
   });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   const editor = monacoState.diffEditors[0];
@@ -1029,7 +1040,7 @@ test('откат и удаление требуют подтверждения, 
     },
   });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   assert.equal(wrapper.find('[data-group="staged"] [data-action="discard"]').exists(), false);
@@ -1100,7 +1111,7 @@ test('конфликт помечен в Git, разрешается через 
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   const row = wrapper.get('button.git-file[data-path="conflict.txt"]');
@@ -1151,7 +1162,7 @@ test('«Проверить remote» обновляет tracking, а без remot
   };
   const { wrapper, flushPromises, browser } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await wrapper.get('button[data-action="fetch"]').trigger('click');
   await settle(flushPromises);
@@ -1308,7 +1319,7 @@ test('поздние repos и git не возвращают интерфейс �
   assert.equal(wrapper.find('.perr').exists(), false);
   assert.ok(wrapper.findAll('#code-context option').every((option) => option.text().startsWith('a ·')));
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   assert.equal(wrapper.find('button.git-file[data-path="main-initial.js"]').exists(), true);
 
@@ -1784,7 +1795,7 @@ test('Git показывает индекс и рабочее дерево ра�
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   // Две группы с собственными заголовками; переключатель вида один на панель.
@@ -1939,7 +1950,7 @@ test('Git-кнопки индексируют, генерируют сообще
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   assert.equal(wrapper.find('input.commit-message').exists(), false);
   await wrapper.get('button[data-action="commit-disclosure"]').trigger('click');
@@ -2015,7 +2026,7 @@ test('пустой индекс оставляет прежний одиночн
     },
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   assert.deepEqual(groupHeads(wrapper), [{ group: 'work', title: 'Не в коммите', count: '1' }]);
@@ -2078,7 +2089,7 @@ test('заголовок группы несёт итог строк, как с�
     },
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   const heads = wrapper.findAll('.subhead[data-group]').map((node) => ({
@@ -2129,7 +2140,7 @@ test('чистое рабочее дерево при непустом инде�
     },
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   assert.deepEqual(groupHeads(wrapper), [{ group: 'staged', title: 'В индексе', count: '1' }]);
@@ -2208,7 +2219,7 @@ async function mountGitPanel(t, gitPayload, {
   };
   const mounted = await mountCodeView(t, { api });
 
-  await mounted.wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(mounted.wrapper, 'changes');
   await settle(mounted.flushPromises);
   const disclosure = mounted.wrapper.find('button[data-action="commit-disclosure"]');
 
@@ -2495,7 +2506,7 @@ test('в diff «Спросить агента» берёт patch файла и �
     router: { push: async (route) => { routes.push(route); } },
   });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -2559,12 +2570,12 @@ test('Git-навигация не протекает в обычный файл 
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   assert.equal(wrapper.get('.file-navigation .file-position').text(), 'Файл 1 / 2');
   assert.equal(wrapper.get('button.git-file[data-path="src/a.ts"]').classes().includes('sel'), true);
 
-  await wrapper.get('button[title^="Код:"]').trigger('click');
+  await selectCodeTab(wrapper, 'files');
   await settle(flushPromises);
   await wrapper.get('button[data-file-path="renamed.ts"]').trigger('click');
   await settle(flushPromises);
@@ -2590,12 +2601,12 @@ test('Git-навигация не протекает в обычный файл 
   assert.equal(monacoState.fileEditors[0].model.content, 'current\n');
   assert.equal(wrapper.find('.file-navigation').exists(), false);
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   assert.equal(wrapper.get('.file-navigation .file-position').text(), 'Файл 1 / 2');
   assert.equal(wrapper.get('button.git-file[data-path="src/a.ts"]').classes().includes('sel'), true);
 
-  await wrapper.get('button[title^="Код:"]').trigger('click');
+  await selectCodeTab(wrapper, 'files');
   await settle(flushPromises);
 
   await wrapper.get('button[data-action="file-history"]').trigger('click');
@@ -3054,7 +3065,7 @@ test('шапка разделяет файл и сравнение, а редк�
   };
   const { browser, wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   assert.match(wrapper.get('.file-head-row').text(), /a\.js.*История.*Спросить агента/s);
@@ -3168,7 +3179,7 @@ test('кнопки строки изменений лежат в одной об
   };
   const { wrapper } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(async () => {});
 
   // Живой случай: «Откатить» и «+» у одной строки рисовались в одной точке — общий скин
@@ -3220,7 +3231,7 @@ test('режим «с текущими» включается подписанн
   };
   const { wrapper } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(async () => {});
   await selectCodeTab(wrapper, 'commits');
   await settle(async () => {});
@@ -3332,7 +3343,7 @@ test('повреждённые Git и ответ генератора не за�
     },
   };
   const { wrapper, flushPromises, monacoState, browser } = await mountCodeView(t, { api });
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   const models = monacoState.diffEditors[0].model;
   await wrapper.get('textarea').setValue('Моё сообщение');
@@ -3490,7 +3501,7 @@ test('ленивый Git-диф рисует список сразу, кешир
   };
   const { wrapper, flushPromises, monacoState, browser } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   assert.equal(wrapper.get('button.git-file[data-path="app.js"]').exists(), true);
   assert.equal(wrapper.get('.diffhead').text().includes('читаю…'), true);
@@ -3565,7 +3576,7 @@ test('«с текущими» включён по умолчанию: отрез
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -3673,7 +3684,7 @@ test('при «+ текущие» слитый диф открывается п�
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -3747,7 +3758,7 @@ test('каталог в группе индексируется и возвра�
   };
   const { wrapper, flushPromises, browser } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   // Замечание владельца: «+»/«−» были только у файлов, а каталог целиком — только терминалом.
@@ -3805,7 +3816,7 @@ test('дерево несохранённых изменений сворачи�
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
   // Журнал больше не зависит от длины дерева: рабочие группы и коммиты разделены вкладками.
@@ -3889,7 +3900,7 @@ test('клики по коммитам строят общий отрезок, S
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -4005,7 +4016,7 @@ test('«Вся ветка» показывает diff worktree, а клик по
     }) },
   });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -4041,7 +4052,7 @@ test('«Вся ветка» недоступна у основного дере�
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -4087,7 +4098,7 @@ test('chat-done и возврат вкладки тихо обновляют Git
   };
   const { browser, wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   await wrapper.get('button.git-dir[data-path="src"]').trigger('click');
   assert.equal(wrapper.get('button.git-dir[data-path="src"]').attributes('aria-expanded'), 'false');

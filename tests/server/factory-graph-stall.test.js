@@ -132,6 +132,21 @@ test('точная причина остановки доезжает до за�
 // заново» поверх уже закрытой попытки.
 test('завершённый маршрут v2 не считается обрывом', () => {
   const stall = detectStall({
+    registry: { WF_STATUS: 'running', GATE_ACCEPT: 'done', RESULT: 'completed' },
+    daemonAlive: false,
+    logText: [
+      '2026-09-22 15:01:46 [t90002] route: gate gate_accept=approved зафиксирован',
+      '2026-09-22 15:01:47 [t90002] route: маршрут завершён; хвост маршрута подтверждён',
+      '',
+    ].join('\n'),
+  });
+  assert.equal(stall, null);
+});
+
+// Журналы прогонов до снятия узла ретро заканчиваются прежней фразой: архив читается
+// теми же правилами, что и живой журнал.
+test('архивный журнал v2 с хвостом ретро по-прежнему читается как завершённый', () => {
+  const stall = detectStall({
     registry: { WF_STATUS: 'running', RETRO: 'done', RESULT: 'completed' },
     daemonAlive: false,
     logText: [

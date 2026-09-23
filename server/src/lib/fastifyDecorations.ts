@@ -11,6 +11,7 @@
 import 'fastify';
 
 import type { ShutdownCoordinator } from './shutdown.ts';
+import type { ProjectsService } from '../modules/projects/service.ts';
 
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
@@ -47,6 +48,8 @@ declare module 'fastify' {
     refreshProvidersUsage?(): Promise<void>;
     factoryArbitrate?(...args: unknown[]): Promise<unknown>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
+    // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
+    projects?: ProjectsService;
     // Остановка сервера: модули регистрируют слив, точка входа и кнопка перезапуска её начинают.
     shutdown?: ShutdownCoordinator;
   }

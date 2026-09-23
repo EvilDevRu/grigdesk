@@ -18,6 +18,7 @@ import {
   hasSlotReservation, reserveSlot, releaseSlot, slotsOverview, SlotsFullError,
 } from '../../lib/sandboxSlots.ts';
 import { PROFILE_RE } from '../../lib/profiles.ts';
+import { archivedProjectIds } from '../../lib/projects/archive.ts';
 import {
   buildTicket, validateTicket, writeTicketFile, TicketError,
 } from '../../lib/factoryTicket.ts';
@@ -1157,6 +1158,18 @@ async function factoryModule(
     const profile = reqProfile || config.factoryProfile || (await factoryState.primaryProfile());
     if (!profile) return { status: 400, body: { error: 'no_profile', message: 'профиль конвейера не определён' } };
     const profiles = factoryState.discoverProfiles().filter((name) => PROFILE_RE.test(name));
+
+    // Архивный проект — не «сломанный», а убранный: уже бегущие попытки идут дальше,
+    // а новую запускать некуда. Отказ до любых побочных эффектов, как и bad_profile.
+    if (archivedProjectIds(prefs).has(profile)) {
+      return {
+        status: 409,
+        body: {
+          error: 'archived',
+          message: `Проект «${profile}» в архиве: верните его из архива, чтобы запускать конвейер.`,
+        },
+      };
+    }
     if (!PROFILE_RE.test(profile) || !profiles.includes(profile)) {
       return {
         status: 400,
@@ -1319,6 +1332,17 @@ async function factoryModule(
         profiles: installedProfiles,
       });
     }
+
+    // Архив — решение человека о том, что проектом больше не начинают работу.
+    // Форма о нём говорит тем же кодом, что и запуск: иначе выбор архивного
+    // профиля выглядел бы рабочим до самого нажатия «Запустить».
+    const archivedIds = archivedProjectIds(prefs);
+    if (typeof requested === 'string' && archivedIds.has(requested)) {
+      return reply.code(409).send({
+        error: 'archived',
+        message: `Проект «${requested}» в архиве: верните его из архива, чтобы запускать конвейер.`,
+      });
+    }
     // В обычной форме нет смысла предлагать выключенные профили без опубликованного
     // каталога. Если именно такой профиль выбран по умолчанию, оставляем его первым,
     // чтобы показать fail-closed причину и дать переключиться на реально доступный.
@@ -1329,7 +1353,8 @@ async function factoryModule(
       catch { return [name, null]; }
     }));
     const catalogs = new Map(catalogEntries);
-    const launchableProfiles = installedProfiles.filter((name) => catalogs.get(name));
+    const launchableProfiles = installedProfiles
+      .filter((name) => catalogs.get(name) && !archivedIds.has(name));
 
     // Триаж читается ДО выбора профиля: одним снимком он подсказывает форме и профиль,
     // и маршрут, и файлы инструментации. Разъехавшись, они дают пустое поле scope у
@@ -1339,10 +1364,16 @@ async function factoryModule(
       try { analysis = (await analyzer.get(id))?.analysis || null; }
       catch { /* триаж — только подсказка, запуск от него не зависит */ }
     }
-    const profile = requested
+    const suggested = requested
       || config.factoryProfile
       || (await profileMatchingTriage(config, id, analysis, launchableProfiles))
       || (await factoryState.primaryProfile());
+    // Профиль по умолчанию приходит и от последнего прогона: он мог уйти в архив
+    // уже после него. Форме нужен тот, которым можно работать, — иначе она
+    // открывается на выборе, который сама же и отклонит.
+    const profile = suggested && archivedIds.has(suggested)
+      ? (launchableProfiles[0] || '')
+      : suggested;
     if (!profile) return reply.code(400).send({ error: 'no_profile', message: 'профиль конвейера не определён' });
     if (!installedProfiles.includes(profile)) {
       return reply.code(400).send({

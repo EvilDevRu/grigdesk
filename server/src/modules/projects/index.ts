@@ -1,77 +1,156 @@
-// Модуль projects — раздел «Проекты»: реестр проектов и пути их репозиториев на диске.
-// Сам список проектов и их схемы уже живут в базе маршрутов (modules/routes); здесь —
-// только «паспорт»: где лежит код. Для проектов фабрики пути читаются из bash-профиля
-// (единственный источник правды), для кокпитных — редактируются здесь и живут в prefs.
+// Модуль projects — раздел «Проекты»: паспорта проектов и пути их репозиториев на диске.
+//
+// Вся логика живёт в сервисе (`service.ts`): здесь только HTTP-поверхность §1.3 —
+// разбор пути и тела, вызов сервиса и превращение его отказа в код ответа. Сервис
+// декорируется на экземпляр (`fastify.projects`): им же пользуется модуль routes,
+// заводя проект через POST /api/profiles.
 import fp from 'fastify-plugin';
-import type { FastifyInstance } from 'fastify';
-import path from 'node:path';
-import { PROFILE_RE, listFactoryProfiles, listProjects } from '../../lib/profiles.ts';
-import { projectsOverview } from '../../lib/projects.ts';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
+import { createProjectsService } from './service.ts';
+import { ProjectsError } from './errors.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
-
-// Серверный config в объёме, который читает раздел. Полная форма — в config.ts.
-type ProjectsModuleConfig = {
-  profilesDir: string;
-  routesDir: string;
-  factoryHome?: string;
-};
+import type { ProjectsService, ProjectsServiceConfig } from './service.ts';
 
 export interface ProjectsModuleOptions {
-  config: ProjectsModuleConfig;
+  config: ProjectsServiceConfig;
   prefs: PrefsStore;
+  // Готовый сервис передаёт сборка приложения (B1.3): ей нужен bootstrap до регистрации.
+  service?: ProjectsService;
 }
 
-// Паспорт проекта правится по его id; тело — список репозиториев проекта.
-interface ProjectRoute {
+interface ProjectParams {
   Params: { id: string };
-  Body: { repos?: unknown };
 }
 
-// Метка репозитория («be», «fe»…) — тот же формат, что префиксы PROFILE_TRIAGE_REPOS.
-const KEY_RE = /^[a-z0-9][a-z0-9_-]{0,15}$/;
+/** Отказ раздела в форме §1.2: код для машины, текст для человека и подробности формы. */
+function failure(reply: FastifyReply, err: unknown): unknown {
+  if (err instanceof ProjectsError) {
+    return reply.code(err.status).send({
+      error: err.code,
+      message: err.message,
+      ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}),
+      ...(err.currentRevision === undefined ? {} : { currentRevision: err.currentRevision }),
+    });
+  }
+  // Файл настроек не читается — запись отклонена целиком: клиенту нужен не «внутренний
+  // сбой», а понятная причина, по которой паспорт не сохранён.
+  if (err instanceof PrefsCorruptedError) {
+    return reply.code(500).send({ error: 'prefs_corrupted', message: err.message });
+  }
+
+  throw err;
+}
 
 async function projectsModule(
   fastify: FastifyInstance,
   opts: ProjectsModuleOptions,
 ): Promise<void> {
   const { config, prefs } = opts;
+  const service = opts.service ?? createProjectsService({
+    config,
+    prefs,
+    broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
+  });
 
-  fastify.get('/api/projects', async () => ({ projects: await projectsOverview({ config, prefs }) }));
+  fastify.decorate('projects', service);
 
-  // Пути репозиториев КОКПИТНОГО проекта. Фабричному с заданными в профиле путями
-  // отказываем: второй источник правды разъедется с профилем — правится профиль.
-  fastify.put<ProjectRoute>('/api/projects/:id', async (req, reply) => {
-    const id = String(req.params.id);
-    if (!PROFILE_RE.test(id)) return reply.code(400).send({ error: 'bad_id' });
-    if (!(await listProjects(config, prefs)).includes(id)) return reply.code(404).send({ error: 'not_found' });
-    if ((await listFactoryProfiles(config.profilesDir)).includes(id)) {
-      const { loadTriageProfile } = await import('../../lib/analysis/profile.ts');
-      const { repos } = await loadTriageProfile(config, id);
-      if (repos.length) {
-        return reply.code(409).send({
-          error: 'factory_project',
-          message: 'Пути этого проекта задаёт профиль фабрики (PROFILE_TRIAGE_REPOS) — правь их там.',
+  fastify.get('/api/projects', async (_request, reply) => {
+    try {
+      return { projects: await service.list() };
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  fastify.get<ProjectParams>('/api/projects/:id', async (request, reply) => {
+    try {
+      return await service.read(request.params.id);
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  fastify.post('/api/projects', async (request: FastifyRequest, reply) => {
+    try {
+      return await reply.code(201).send(await service.create(request.body));
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  fastify.put<ProjectParams>('/api/projects/:id', async (request, reply) => {
+    const body = (request.body ?? {}) as { expectedRevision?: unknown };
+
+    try {
+      return await service.update(request.params.id, request.body, body.expectedRevision);
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  // Связи проекта: форма показывает их перед архивом, чтобы человек видел, что мешает.
+  fastify.get<ProjectParams>('/api/projects/:id/dependencies', async (request, reply) => {
+    try {
+      return await service.dependencies(request.params.id);
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  fastify.post<ProjectParams>('/api/projects/:id/archive', async (request, reply) => {
+    const body = (request.body ?? {}) as { expectedRevision?: unknown };
+
+    try {
+      return await service.archive(request.params.id, body.expectedRevision);
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  fastify.post<ProjectParams>('/api/projects/:id/restore', async (request, reply) => {
+    const body = (request.body ?? {}) as { expectedRevision?: unknown };
+
+    try {
+      return await service.restore(request.params.id, body.expectedRevision);
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
+  // Проверка путей без сохранения: форма спрашивает по каждому репозиторию отдельно,
+  // а паспорт при этом не меняется. Ограничение параллельности — в библиотеке.
+  fastify.post('/api/project-tools/repositories/check', async (request: FastifyRequest, reply) => {
+    const body = (request.body ?? {}) as { repos?: unknown };
+    const rows = Array.isArray(body.repos) ? body.repos : null;
+
+    if (rows === null) {
+      return reply.code(400).send({
+        error: 'bad_request',
+        message: 'Ожидался список репозиториев: { repos: [{ dir }] }.',
+      });
+    }
+
+    const dirs: string[] = [];
+
+    for (const row of rows) {
+      const dir = typeof (row as { dir?: unknown })?.dir === 'string'
+        ? String((row as { dir: string }).dir).trim()
+        : '';
+
+      // Абсолютность проверяется здесь же, до диска: относительный путь означал бы
+      // проверку «относительно чего-то», а такого понятия у паспорта нет.
+      if (!dir.startsWith('/') || dir.includes('\u0000')) {
+        return reply.code(400).send({
+          error: 'bad_dir',
+          message: `Путь «${dir}» должен быть абсолютным.`,
         });
       }
+
+      dirs.push(dir);
     }
-    const repos: Array<{ key: string; dir: string }> = [];
-    const requested = (Array.isArray(req.body?.repos) ? req.body.repos : []) as Array<{
-      key?: unknown;
-      dir?: unknown;
-    }>;
-    for (const r of requested) {
-      const key = String(r?.key || '').trim();
-      const dir = String(r?.dir || '').trim();
-      if (!KEY_RE.test(key)) return reply.code(400).send({ error: 'bad_key', message: `метка «${key}»: строчные латиница/цифры/-/_` });
-      if (!path.isAbsolute(dir)) return reply.code(400).send({ error: 'bad_dir', message: `путь «${dir}» должен быть абсолютным` });
-      if (repos.some((x) => x.key === key)) return reply.code(400).send({ error: 'dup_key', message: `метка «${key}» повторяется` });
-      // Несуществующий путь не отклоняем: репозиторий мог ещё не клонироваться —
-      // раздел честно покажет красную точку «нет на диске».
-      repos.push({ key, dir: path.normalize(dir) });
-    }
-    const p = prefs.read();
-    prefs.write({ projects: { ...(p.projects || {}), [id]: { repos } } });
-    return { ok: true, repos };
+
+    return { results: await service.checkRepositories(dirs) };
   });
 }
 

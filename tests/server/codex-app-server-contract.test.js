@@ -577,3 +577,31 @@ test('Codex сообщает id thread до первого шага хода', a
   // id уходит вызывающему сразу после handshake, до первого шага ленты.
   assert.deepEqual(seen, [{ id: result.sessionId, stepsBefore: 0 }]);
 });
+
+test('неудачный thread/resume гасит живую сессию, а не оставляет её повторять отказ', async (t) => {
+  // App-server после «no rollout found» остаётся жив, но thread у него нет: живая сессия в
+  // пуле отвечала бы этим же отказом на каждый следующий ход, пока не выйдет по простою.
+  const f = await fixture(t, 'resume-missing');
+  const exits = [];
+  const session = codex.session.open({
+    ...runOptions(f, { sessionId: '00000000-0000-7000-8000-0000000000ff' }),
+    hooks: { onExit: (info) => exits.push(info) },
+  });
+  t.after(() => session.close());
+
+  await assert.rejects(
+    session.send({ message: 'продолжай' }),
+    /thread\/resume: no rollout found for thread id 00000000-0000-7000-8000-0000000000ff/,
+  );
+  assert.equal(session.alive, false, 'сессия без thread гасится сразу, пул увидит мёртвый процесс');
+
+  const deadline = Date.now() + 1_500;
+  while (!exits.length && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(exits.length, 1, 'пул узнаёт о закрытии через onExit');
+  assert.match(String(exits[0].reason), /не открыл thread: .*no rollout found/);
+  // Отказ пришёл от «app-server», а не от самой fixture: процесс жил, пока его не погасили.
+  const fixtureErrors = (await readTrace(f.trace)).filter((entry) => entry.direction === 'fixture-error');
+  assert.deepEqual(fixtureErrors, []);
+});

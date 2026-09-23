@@ -19,6 +19,7 @@ import {
   normalizeArbiterSettings,
   parseArbiterDecision,
   readArbitrationContext,
+  stallIsArbitrable,
   stopIsArbitrable,
 } from '../../server/src/lib/factoryArbiter.ts';
 import { routeGotoArgs } from '../../server/src/lib/factoryRouteCli.ts';
@@ -144,6 +145,21 @@ test('правило арбитрабельности одно и учитыва
   assert.equal(stopIsArbitrable('human', 'build'), false);
   assert.equal(stopIsArbitrable('human', 'tests'), false);
   assert.equal(stopIsArbitrable('done', 'human'), false);
+});
+
+// Остановка `human` без вердикта — исчерпанный бюджет повторов, а не «класс не назван»:
+// ни один заход результата не зафиксировал, разбирать нечего, гейт ответил бы `arc_unknown`.
+// Кнопка карточки и вотчер считают признак по вердикту целиком (t7989: «отдать арбитру»
+// рядом с «раннер не получил результат»).
+test('остановка human без вердикта арбитру не предлагается', () => {
+  assert.equal(stallIsArbitrable('human', null), false);
+  assert.equal(stallIsArbitrable('human', { owner: null }), true);
+  assert.equal(stallIsArbitrable('human', { owner: 'human' }), true);
+  assert.equal(stallIsArbitrable('human', { owner: 'environment' }), false);
+  // Остановки движка вердикта в событии остановки могут и не нести — правило прежнее.
+  assert.equal(stallIsArbitrable('no-progress', null), true);
+  assert.equal(stallIsArbitrable('rewind-limit', null), true);
+  assert.equal(stallIsArbitrable('done', null), false);
 });
 
 // Вводная промпта у двух остановок разная по существу: в одной спорят два узла, в другой

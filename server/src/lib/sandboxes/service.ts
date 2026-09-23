@@ -82,6 +82,9 @@ export interface SandboxServiceOptions {
   sweepMs?: number;
   probe?: (port: number) => Promise<boolean>;
   sandboxActivityGuard?: SandboxActivityGuard;
+  // Архивный проект новых стендов не поднимает: спрашиваем об этом раздел «Проекты»,
+  // а не читаем реестр сами — архивность там одна на всех потребителей.
+  isProjectArchived?: (id: string) => boolean;
   // Журнал сервера: кривой манифест действий профиля — предупреждение, а не отказ.
   log?: { warn: (fields: Record<string, unknown>, message: string) => void };
 }
@@ -218,6 +221,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     sweepMs = DEFAULT_SWEEP_MS,
     probe = probePort,
     log = null,
+    isProjectArchived = null,
   } = options;
 
   // Живые задания держатся в памяти: тик слежения обязан стоить одно чтение журнала
@@ -264,6 +268,13 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
         fileExists(path.join(profilesDir, id, 'down.sh')),
       ]);
       const missing = [up ? '' : 'up.sh', down ? '' : 'down.sh'].filter(Boolean);
+      // Архивный профиль из списка не исчезает: его уже поднятый стенд надо сносить,
+      // а снос ищет владельца именно здесь. Запрещён только подъём нового.
+      const archived = isProjectArchived?.(id) === true;
+
+      if (archived) {
+        return { id, canRaise: false, reason: 'проект в архиве: новый стенд не поднимается' };
+      }
 
       return {
         id,

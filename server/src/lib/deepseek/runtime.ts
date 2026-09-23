@@ -47,6 +47,7 @@ interface RuntimeDeps {
   prepareLaunch?: (options: {
     config: DeepSeekConfig;
     cwd: string;
+    workspaceRoot: string;
     chatKey: string;
     mode: 'read-only' | 'workspace-write';
     approval: 'ask' | 'never';
@@ -91,9 +92,19 @@ async function nearestProjectRoot(cwd: string): Promise<string> {
   }
 }
 
+/**
+ * Проверяет вложенность по каноническим путям, полученным через fs.realpath.
+ * Соседний каталог с похожим префиксом не должен расширять границу записи.
+ */
+function containsRealPath(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 async function prepareDeepSeekLaunch({
   config,
   cwd,
+  workspaceRoot,
   chatKey,
   mode,
   approval,
@@ -102,6 +113,7 @@ async function prepareDeepSeekLaunch({
 }: {
   config: DeepSeekConfig;
   cwd: string;
+  workspaceRoot: string;
   chatKey: string;
   mode: 'read-only' | 'workspace-write';
   approval: 'ask' | 'never';
@@ -115,6 +127,7 @@ async function prepareDeepSeekLaunch({
   const files = await buildLaunchFiles({
     launchDir,
     cwd,
+    workspaceRoot,
     mode,
     approval,
     hooks: {
@@ -306,6 +319,27 @@ export async function runDeepSeekTurn({
   if (!cwd || !path.isAbsolute(cwd)) throw new TypeError('DeepSeek cwd должен быть абсолютным');
   if (!chatKey) throw new Error('DeepSeek runtime требует server-owned chatKey');
   const realCwd = await fs.realpath(cwd);
+  // Недоступные каталоги не расширяют sandbox, но остаются внешними для note.
+  const realExtraDirs = await Promise.all(extraDirs.map(async (dir) => {
+    if (!path.isAbsolute(dir)) {
+      return null;
+    }
+    try {
+      return await fs.realpath(dir);
+    } catch {
+      return null;
+    }
+  }));
+  let trustedRoot: string | null = null;
+  if (!factory) {
+    for (const dir of realExtraDirs) {
+      if (dir && containsRealPath(dir, realCwd)
+          && (!trustedRoot || containsRealPath(trustedRoot, dir))) {
+        trustedRoot = dir;
+      }
+    }
+  }
+  const workspaceRoot = trustedRoot || realCwd;
   const mode = modeFor(permissionMode);
   const requestedProjectRoot = projectRoot
     ? await fs.realpath(projectRoot)
@@ -315,6 +349,7 @@ export async function runDeepSeekTurn({
   const launch = await (deps.prepareLaunch || prepareDeepSeekLaunch)({
     config,
     cwd: realCwd,
+    workspaceRoot,
     chatKey,
     mode,
     approval,
@@ -515,20 +550,20 @@ export async function runDeepSeekTurn({
       }, 15_000);
     }
 
-    // Writable root у DeepSeek V1 ровно одна — cwd, и note говорит именно про рабочую
-    // область: доверенные каталоги и вложения в неё не добавляются. «Не переданы» было
-    // бы неправдой: абсолютные пути вложений уезжают в само задание, и прочитать файл
-    // вне cwd агент может — писать нет.
-    // Доверенные каталоги — постоянная настройка, и одной строки на разговор о них
-    // достаточно: при resume она превращалась бы в жёлтый шум на каждом ходу.
-    // Вложения — разовые, о них ход предупреждает каждый раз.
+    // Граница записи — ближайший доверенный предок cwd, а в Factory ровно cwd.
+    // Вложения и каталоги вне границы доступны для чтения, но не для записи.
+    // Доверенные каталоги — постоянная настройка: note о внешних достаточно
+    // показать однажды. Вложения — разовые, о них предупреждаем каждый ход.
     const ignored: string[] = [];
     if (attachmentPaths.length) ignored.push('вложения');
-    if (extraDirs.length && !sessionId) ignored.push('дополнительные каталоги (доверенные и worktree)');
+    if (!sessionId && realExtraDirs.some((dir) => !dir || !containsRealPath(workspaceRoot, dir))) {
+      ignored.push('дополнительные каталоги (доверенные и worktree)');
+    }
     if (ignored.length) {
       stepSink.emit({
         k: 'note', level: 'warn',
-        text: `DeepSeek V1 пишет только в cwd: ${ignored.join(' и ')} не добавлены в рабочую область`,
+        text: `DeepSeek V1 пишет только в рабочей области ${workspaceRoot}: `
+          + `${ignored.join(' и ')} не добавлены в рабочую область`,
       });
     }
     const prompt = client.request('session/prompt', {

@@ -11,7 +11,6 @@ import {
   FactoryGraphContractError,
   parseFactoryGraph,
 } from '../../shared/factoryGraphContracts.ts';
-import { ProjectsContractError, parseProjectList } from '../../shared/projectsContracts.ts';
 import { ProvidersContractError, parseProviderEfforts } from '../../shared/providersContracts.ts';
 import {
   RoutesContractError,
@@ -72,22 +71,6 @@ test('ступени усилия собираются без повторов �
     ],
   }), ['low', 'high']);
   assert.throws(() => parseProviderEfforts({ providers: null }), ProvidersContractError);
-});
-
-test('источник пути проекта закрыт перечислением', () => {
-  const project = {
-    id: 'cockpit',
-    factory: true,
-    repos: [{ key: 'be', dir: '/srv/be', from: 'factory', exists: true }],
-    routes: ['hunt'],
-  };
-
-  assert.deepEqual(parseProjectList({ projects: [project] }), [project]);
-  // Чужой источник открыл бы правку путей, заданных профилем фабрики.
-  assert.throws(
-    () => parseProjectList({ projects: [{ ...project, repos: [{ ...project.repos[0], from: 'guess' }] }] }),
-    ProjectsContractError,
-  );
 });
 
 test('повреждённая ревизия каталога остаётся в списке, а не роняет раздел', () => {

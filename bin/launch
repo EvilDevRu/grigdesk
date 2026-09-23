@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Лаунчер кокпита — то, что запускает ярлык «Кокпит» на рабочем столе и в меню приложений
+# (deploy/shortcut.sh). Открывает кокпит в браузере; если сервер не отвечает, сначала
+# поднимает его тем способом, которым он установлен: через юнит systemd (deploy/install.sh)
+# или, когда юнита нет, через bin/restart. Режимы не смешиваются: второй экземпляр против
+# юнита отправил бы service в цикл перезапусков (см. deploy/cockpit-server.service).
+#
+# Окна терминала у ярлыка нет, поэтому о ходе дела сообщают уведомления рабочего стола.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UNIT="cockpit-server.service"
+UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
+# Сколько ждать подъёма: сам сервер стартует за секунды, но юнит перед ним ждёт VPN-маршрут.
+WAIT_SEC="${COCKPIT_LAUNCH_WAIT_SEC:-90}"
+
+# Сессия рабочего стола не знает nvm-каталог node: ярлык передаёт его переменной, которую
+# deploy/shortcut.sh зафиксировал при создании (как __NODE_DIR__ в юните).
+if [ -n "${COCKPIT_NODE_DIR:-}" ] && [ -x "$COCKPIT_NODE_DIR/node" ]; then
+  export PATH="$COCKPIT_NODE_DIR:$PATH"
+fi
+
+notify() {
+  # Уведомление — best-effort: без сессии рабочего стола notify-send нет.
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send --app-name=Кокпит "Кокпит" "$1" >/dev/null 2>&1 || true
+  fi
+  echo "$1"
+}
+
+source "$ROOT/bin/lib/runtime-env.sh"
+cockpit_add_cli_paths
+if ! cockpit_load_runtime_env "$ROOT"; then
+  notify "Не удалось прочитать настройки запуска: нужен node 22.18+ в PATH."
+  exit 1
+fi
+URL="http://localhost:$COCKPIT_EFFECTIVE_PORT/"
+
+# /api/auth/state публичный (нужен экрану входа); /api/health закрыт гардом авторизации.
+alive() {
+  curl -sf --max-time 2 "${URL}api/auth/state" >/dev/null 2>&1
+}
+
+open_browser() {
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 || true
+  fi
+  echo "$URL"
+}
+
+if alive; then
+  open_browser
+  exit 0
+fi
+
+if [ -f "$UNIT_FILE" ]; then
+  notify "Запускаю сервер кокпита…"
+  systemctl --user start "$UNIT" || true
+else
+  notify "Юнита нет — запускаю сервер через bin/restart…"
+  bash "$ROOT/bin/restart" >/dev/null 2>&1 || true
+fi
+
+for _ in $(seq 1 "$((WAIT_SEC * 2))"); do
+  if alive; then
+    open_browser
+    exit 0
+  fi
+  sleep 0.5
+done
+
+notify "Сервер не поднялся за $WAIT_SEC с: journalctl --user -u $UNIT или server/.state/cockpit-server.log."
+exit 1

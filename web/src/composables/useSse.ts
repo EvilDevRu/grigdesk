@@ -21,6 +21,7 @@ const EVENT_NAMES = [
   'speech-settings',
   'inbox-changed', 'telegram-status', 'task-shelf-changed', 'arbiter-live',
   'sandboxes-changed', 'sandbox-progress',
+  'projects-changed',
   'showcase-changed', 'showcase-progress', 'showcase-build-progress', 'showcase-voice',
   'gateway-setup',
   'usage-forecast',

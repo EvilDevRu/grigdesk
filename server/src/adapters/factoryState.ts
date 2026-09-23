@@ -15,7 +15,7 @@ import { RoutesStore } from '../modules/routes/store.ts';
 import { parseSandboxRepositories } from '../lib/sandboxEnv.ts';
 import { routeInstrumentationMode } from '../lib/factoryLaunchContract.ts';
 import { readNodeVerdicts, stopVerdictOf } from '../lib/factoryNodeVerdicts.ts';
-import { stopIsArbitrable } from '../lib/factoryArbiter.ts';
+import { stallIsArbitrable } from '../lib/factoryArbiter.ts';
 import {
   readFactoryAttemptLedger,
   verifyFactoryAttemptEnvironment,
@@ -534,7 +534,7 @@ export class FactoryStateAdapter {
       // месте». Полного `stallNodeId` здесь нет по цене — он требует определения схемы, —
       // но вердикт остановки уже прочитан строкой выше, и узел лежит прямо в нём.
       node: stopVerdict?.node || null,
-      arbitrable: stopIsArbitrable(trusted.cursor.stop, stopVerdict?.owner || null),
+      arbitrable: stallIsArbitrable(trusted.cursor.stop, stopVerdict),
       arbiter: this.arbiterCards?.read(task, trusted.attempt) || null,
     };
   }
@@ -637,9 +637,9 @@ export class FactoryStateAdapter {
       || (stopVerdict && def.pos[stopVerdict.node] !== undefined ? stopVerdict.node : null);
 
     // Берётся ли за неё арбитр — решает ОДНО правило, общее с его собственным гейтом.
-    // Кнопка, за которой стоит отказ, хуже отсутствующей кнопки.
-    const arbitrable = Boolean(cursorStop)
-      && stopIsArbitrable(cursorStop, stopVerdict?.owner || null);
+    // Кнопка, за которой стоит отказ, хуже отсутствующей кнопки: остановка `human` без
+    // вердикта (исчерпанный бюджет повторов) арбитру не предлагается.
+    const arbitrable = Boolean(cursorStop) && stallIsArbitrable(cursorStop, stopVerdict);
 
     const stall: (StallInfo & {
       node: string | null;

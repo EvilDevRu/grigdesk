@@ -15,6 +15,7 @@ const {
   nullable,
   objectOf,
   oneOf,
+  optional,
   record,
   text,
   wholeNumber: numeric,
@@ -60,10 +61,13 @@ const projectRepo = objectOf({
   key: text,
   dir: text,
 });
+// Архив читается и здесь: сам «Код» архивный проект не открывает, но показывает
+// его, если человек выбрал именно этот проект.
 const projects = objectOf({
   projects: listOf(objectOf({
     id: text,
     repos: listOf(projectRepo),
+    archivedAt: optional(text),
   })),
 });
 const directoryEntry = objectOf({

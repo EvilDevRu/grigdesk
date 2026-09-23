@@ -109,7 +109,7 @@ test('адаптер объявляет полный честный контра
   assert.equal(deepseek.session, undefined);
   assert.equal(deepseek.untrustedInput, undefined);
   assert.equal(deepseek.scopedWorkspace, undefined);
-  assert.equal(deepseek.trustedDirectories, undefined);
+  assert.equal(deepseek.trustedDirectories, true);
 
   const modes = await deepseek.modes();
   assert.deepEqual(modes.map((mode) => mode.id), ['default', 'auto', 'read-only']);
@@ -125,6 +125,6 @@ test('DeepSeek session identity пинит ключ и профиль без р�
   const changed = deepSeekSecurityProfile({ blockDirectSsh: false, blockDirectDb: false });
   assert.match(auth, /^deepseek-env-key:[a-f0-9]{16}$/u);
   assert.equal(auth.includes(secret), false);
-  assert.match(secure, /^deepseek-host-sandbox-v2:[a-f0-9]{64}$/u);
+  assert.match(secure, /^deepseek-host-sandbox-v3:[a-f0-9]{64}$/u);
   assert.notEqual(secure, changed);
 });

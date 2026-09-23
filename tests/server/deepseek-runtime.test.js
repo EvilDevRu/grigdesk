@@ -185,6 +185,51 @@ test('режимы выбирают честные sandbox/approval до spawn, 
   assert.equal(invalid.launchOptions.length, 0);
 });
 
+test('доверенный каталог-предок становится границей записи и не попадает в note', async (t) => {
+  const f = await fixture(t, {});
+  const out = await runDeepSeekTurn({ ...f.base, extraDirs: [f.root] });
+
+  assert.equal(f.launchOptions[0].workspaceRoot, await fs.realpath(f.root));
+  assert.deepEqual(out.steps.filter((step) => step.k === 'note'), []);
+});
+
+test('из вложенных доверенных каталогов выбирается самый глубокий realpath-предок', async (t) => {
+  const f = await fixture(t, {});
+  const nestedCwd = path.join(f.cwd, 'project', 'sub');
+  const trustedLink = path.join(f.root, 'trusted-link');
+  await fs.mkdir(nestedCwd, { recursive: true });
+  await fs.symlink(path.join(f.cwd, 'project'), trustedLink);
+
+  await runDeepSeekTurn({
+    ...f.base,
+    cwd: nestedCwd,
+    extraDirs: [f.root, trustedLink],
+  });
+
+  assert.equal(f.launchOptions[0].workspaceRoot, path.join(f.cwd, 'project'));
+});
+
+test('каталоги вне cwd не расширяют границу и перечисляются в note', async (t) => {
+  const f = await fixture(t, {});
+  const outside = path.join(f.root, 'outside');
+  await fs.mkdir(outside);
+
+  const out = await runDeepSeekTurn({ ...f.base, extraDirs: [outside] });
+
+  assert.equal(f.launchOptions[0].workspaceRoot, await fs.realpath(f.cwd));
+  assert.deepEqual(out.steps.filter((step) => step.k === 'note').map((step) => step.text), [
+    `DeepSeek V1 пишет только в рабочей области ${f.cwd}: `
+      + 'дополнительные каталоги (доверенные и worktree) не добавлены в рабочую область',
+  ]);
+});
+
+test('Factory сохраняет cwd границей записи при доверенном предке', async (t) => {
+  const f = await fixture(t, {});
+  await runDeepSeekTurn({ ...f.base, factory: true, extraDirs: [f.root] });
+
+  assert.equal(f.launchOptions[0].workspaceRoot, await fs.realpath(f.cwd));
+});
+
 test('read-only отвечает reject-once на реальный reverse request без UI', async (t) => {
   const f = await fixture(t, {
     updates: [{
@@ -362,7 +407,10 @@ test('без usage не придумывает нули; unsupported inputs да
   assert.equal('contextTokens' in out, false);
   assert.equal('contextWindow' in out, false);
   assert.equal(out.contextMetric, 'unavailable');
-  assert.equal(out.steps.filter((step) => step.k === 'note').length, 1);
+  assert.deepEqual(out.steps.filter((step) => step.k === 'note').map((step) => step.text), [
+    `DeepSeek V1 пишет только в рабочей области ${f.cwd}: `
+      + 'вложения и дополнительные каталоги (доверенные и worktree) не добавлены в рабочую область',
+  ]);
 
   // Доверенные каталоги — постоянная настройка: при resume той же сессии note о них
   // не повторяется, а разовые вложения по-прежнему получают предупреждение.
@@ -380,7 +428,8 @@ test('без usage не придумывает нули; unsupported inputs да
     ...resumedFiles.base, sessionId: 'saved-session', attachmentPaths: ['/ignored/file'],
   });
   assert.deepEqual(loud.steps.filter((step) => step.k === 'note').map((step) => step.text), [
-    'DeepSeek V1 пишет только в cwd: вложения не добавлены в рабочую область',
+    `DeepSeek V1 пишет только в рабочей области ${resumedFiles.cwd}: `
+      + 'вложения не добавлены в рабочую область',
   ]);
 });
 

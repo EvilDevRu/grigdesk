@@ -46,7 +46,9 @@ const commitsDiff = {
 const contracts = [
   [parseCodeRoots, { roots: [root] }],
   [parseCodeRepos, { repos: [{ key: 'main', dir: '/repo', trees: [tree] }] }],
-  [parseCodeProjects, { projects: [{ id: 'demo', repos: [{ key: 'main', dir: '/repo' }] }] }],
+  [parseCodeProjects, {
+    projects: [{ id: 'demo', repos: [{ key: 'main', dir: '/repo' }], archivedAt: null }],
+  }],
   [parseCodeDirectory, { entries: [{ name: 'src', dir: true }] }],
   [parseCodeFile, { size: 10, binary: false, tooBig: false, content: 'export {};' }],
   [parseCodeGit, git],

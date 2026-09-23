@@ -16,8 +16,11 @@ import type {
 } from '../../../shared/dbContracts.ts';
 import type { SshSession } from '../../../shared/sshContracts.ts';
 
+// Признак архива приходит с сервера вместе со списком: форма по нему решает,
+// можно ли заводить на проект новый профиль базы.
 export interface DbProjectOption {
   id: string;
+  archivedAt?: string | null;
 }
 
 export interface DbStoreState {

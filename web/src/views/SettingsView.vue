@@ -1377,7 +1377,8 @@
     <section v-else-if="tab === 'server'">
       <p class="section-note">
         Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
-        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки).
+        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, а с автозапуском переживает
+        и перезагрузки).
         Локальный checkout и опубликованный релиз применяются разными явными действиями:
         ни одно из них не выполняет неявный <code>git pull</code> и не затирает WIP.
       </p>
@@ -1531,6 +1532,12 @@
           <p class="muted small">Пересборка трогает только web: npm install + vite build из рабочего дерева, включая незакоммиченные правки. Без смены checkout и перезапуска сервера.</p>
           <p v-if="srvMsg" class="msg" :class="srvMsg.type">{{ srvMsg.text }}</p>
         </template>
+      </div>
+
+      <!-- Автозапуск и ярлык: продуктовая ручка над юнитом (enable + linger) и .desktop на bin/launch.
+           Механизм остаётся systemd — лаунчер процессом не владеет. -->
+      <div class="card">
+        <ServerLauncher :systemd="srv ? srv.systemd : null" />
       </div>
     </section>
 
@@ -2142,6 +2149,7 @@ import ProviderIcon from '../shared/ProviderIcon.vue';
 import ProviderUsageResources from '../features/providers/ProviderUsageResources.vue';
 import AccessOverview from './settings/AccessOverview.vue';
 import PluginsCatalog from './settings/PluginsCatalog.vue';
+import ServerLauncher from './settings/ServerLauncher.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
@@ -2204,7 +2212,7 @@ const TABS = [
     icon: 'M8 3v4 M16 3v4 M5 7h14v4a7 7 0 0 1-14 0z M12 18v3',
   },
   {
-    id: 'server', label: 'Сервер', group: 'Система', short: 'Процесс и рестарт',
+    id: 'server', label: 'Сервер', group: 'Система', short: 'Процесс, рестарт, автозапуск',
     description: 'Состояние процесса Cockpit и безопасное применение серверных обновлений.',
     icon: 'M5 4h14v6H5z M5 14h14v6H5z M8 7h.01 M8 17h.01',
   },

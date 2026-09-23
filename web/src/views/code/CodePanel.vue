@@ -33,16 +33,6 @@
         </div>
         <span v-else-if="headContext" class="tlabel mono" :title="context?.treePath">{{ headContext }}</span>
       </div>
-      <UiTabs v-model="mainTab" class="code-tabs" label="Разделы кода">
-        <UiTab value="files" controls="code-navigator" data-context="code-main-tab"
-               data-tab="files" title="Код: дерево файлов">Файлы</UiTab>
-        <UiTab value="changes" controls="code-navigator" data-context="code-main-tab"
-               data-tab="changes" title="Гит: несохранённые изменения">
-          Изменения <span v-if="changePathCount" class="code-tab-count mono">{{ changePathCount }}</span>
-        </UiTab>
-        <UiTab value="commits" controls="code-navigator" data-context="code-main-tab"
-               data-tab="commits">Коммиты</UiTab>
-      </UiTabs>
       <span class="grow"></span>
       <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
            справа. Подпись с именем вкладки читалась второй вкладкой «Коммиты». -->
@@ -64,6 +54,9 @@
     <div v-if="loading" ref="layHost" class="lay code-loading"
          :class="layoutClasses"
          :style="compactStyle">
+      <aside class="rail" aria-hidden="true">
+        <span v-for="index in 3" :key="index" class="loading-rail-item"></span>
+      </aside>
       <aside class="panel loading-panel" aria-hidden="true">
         <div class="loading-tree">
           <span v-for="index in 7" :key="index" class="loading-row"
@@ -84,6 +77,40 @@
 
     <div v-else ref="layHost" class="lay" :class="layoutClasses"
          :style="compactStyle">
+      <!-- Рейка разделов слева, как activity bar в VS Code: три небольшие кнопки вместо
+           вкладок в шапке. Шапка остаётся контексту, а переключатель стоит на одном месте
+           при любой ширине — в узкой раскладке он же возвращает навигатор поверх редактора. -->
+      <aside class="rail" aria-label="Разделы кода">
+        <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="files"
+                      aria-controls="code-navigator" :pressed="mainTab === 'files'"
+                      label="Файлы" title="Файлы: дерево и поиск по коду"
+                      @click="setMainTab('files')">
+          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 3h8l4 4v14H6z M14 3v4h4" />
+          </svg>
+        </UiIconButton>
+        <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="changes"
+                      aria-controls="code-navigator" :pressed="mainTab === 'changes'"
+                      :label="changesRailLabel" :title="changesRailLabel"
+                      @click="setMainTab('changes')">
+          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9" />
+          </svg>
+          <span v-if="changePathCount" class="rail-badge mono" aria-hidden="true">{{ changePathCount }}</span>
+        </UiIconButton>
+        <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="commits"
+                      aria-controls="code-navigator" :pressed="mainTab === 'commits'"
+                      label="Коммиты" title="Коммиты: журнал и отрезки ветки"
+                      @click="setMainTab('commits')">
+          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 1 0 0-7 M2.5 12h6 M15.5 12h6" />
+          </svg>
+        </UiIconButton>
+      </aside>
+
       <!-- Панель — только содержимое: дерево файлов либо изменения. Проект и рабочая
            копия выбираются в шапке раздела. -->
       <aside id="code-navigator" class="panel">
@@ -1097,6 +1124,7 @@ import type {
 import PatchReview from './PatchReview.vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco';
 import { codeLinkHref } from '../../features/code/links';
+import { pickCodeProject } from './projectChoice';
 import {
   askAgentDraft,
   buildCodeContexts,
@@ -1127,8 +1155,6 @@ import {
   UiSearchInput,
   UiSelect,
   UiSwitch,
-  UiTab,
-  UiTabs,
   UiTextarea,
   confirmDialog,
   promptDialog,
@@ -1293,12 +1319,11 @@ const changePathCount = computed(() => new Set([
   ...(git.value?.staged || []).map((file) => file.path),
   ...(git.value?.files || []).map((file) => file.path),
 ]).size);
-const mainTab = computed<CodeMainTab>({
-  get: () => (tab.value === 'files' ? 'files' : gitPane.value),
-  set: (value) => {
-    void setMainTab(value);
-  },
-});
+const mainTab = computed<CodeMainTab>(() => (tab.value === 'files' ? 'files' : gitPane.value));
+// Счётчик входит в доступное имя кнопки рейки: значок-бейдж читатель экрана не видит.
+const changesRailLabel = computed(() => (
+  changePathCount.value ? `Изменения · ${changePathCount.value}` : 'Изменения'
+));
 const fileTreeDecorations = computed(() => treeDecorations(git.value));
 const gitLoading = ref(false);
 const diffContent = ref(new Map<string, CodeFileDiffResponse>());
@@ -1963,6 +1988,9 @@ const projectIsCurrent = (generation: number, id: string, requestId: number) => 
 );
 const activationIsCurrent = (id: number | null) => id == null || id === activationId;
 
+// Ширина рейки разделов слева: одна цифра и для сетки (через CSS-переменную), и для
+// перевода координаты указателя в ширину навигатора.
+const RAIL_WIDTH = 44;
 const NAVIGATOR_MIN_WIDTH = 220;
 const NAVIGATOR_MAX_WIDTH = 420;
 const NAVIGATOR_DEFAULT_WIDTH = 320;
@@ -2016,7 +2044,10 @@ const navigatorCollapsed = ref(false);
 const navigatorToggleLabel = computed(() => (
   navigatorCollapsed.value ? 'Показать навигатор' : 'Скрыть навигатор'
 ));
-const compactStyle = computed(() => ({ '--code-nav-width': `${navigatorWidth.value}px` }));
+const compactStyle = computed(() => ({
+  '--code-rail-width': `${RAIL_WIDTH}px`,
+  '--code-nav-width': `${navigatorWidth.value}px`,
+}));
 const layoutClasses = computed(() => ({
   compact: props.compact,
   'navigator-collapsed': navigatorCollapsed.value && !codePanelNarrow.value,
@@ -2064,7 +2095,7 @@ function measureNavigatorWidth() {
 
 /**
  * Переводит координату указателя в ширину дерева относительно панели.
- * Внутренней рейки больше нет: координата считается от левого края панели.
+ * Ширина рейки вычитается до ограничения размера и перераскладки редакторов.
  */
 function updateNavigatorWidth(clientX: number) {
   const rect = layHost.value?.getBoundingClientRect?.();
@@ -2073,7 +2104,7 @@ function updateNavigatorWidth(clientX: number) {
     return;
   }
 
-  navigatorPreferredWidth.value = clampNavigatorWidth(clientX - rect.left);
+  navigatorPreferredWidth.value = clampNavigatorWidth(clientX - rect.left - RAIL_WIDTH);
   layoutEditors();
 }
 
@@ -4669,9 +4700,8 @@ async function activate({ preserve = false } = {}) {
 
     projects.value = loaded;
 
-    const withRepos = projects.value.filter((item) => (item.repos || []).length);
     const wanted = previous?.project || localStorage.getItem('cockpit-project') || '';
-    const pick = withRepos.find((item) => item.id === wanted) || withRepos[0] || projects.value[0];
+    const pick = pickCodeProject(projects.value, wanted);
     let revalidatedInPlace = false;
 
     if (pick && preserve && previous?.project === pick.id && project.value === pick.id) {
@@ -4901,16 +4931,12 @@ onBeforeUnmount(() => {
 <style scoped>
 .code-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .code-head {
-  min-width: 0; min-height: 48px; display: flex; align-items: center; gap: 10px;
-  flex-wrap: wrap;
+  min-width: 0; min-height: 36px; display: flex; align-items: center; gap: 10px;
   padding: 0 4px 8px; color: var(--ink); outline: none;
   container: code-head / inline-size;
 }
 .code-head strong { flex: none; font-size: 13px; font-weight: 650; }
 .code-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
-.code-tabs { flex: none; }
-.code-tab-count { min-width: 17px; padding: 1px 5px; border-radius: 999px;
-  background: var(--surface-2); color: var(--ink-mid); font-size: 10.5px; text-align: center; }
 .navigator-toggle { flex: none; }
 /* Шапка — не форма: у контролов нет своих коробок, только подпись-метка, значение
    и шеврон. Тот же приём, что в строке состояния чата. */
@@ -4929,9 +4955,6 @@ onBeforeUnmount(() => {
 .head-pick + .head-pick { border-left: 1px solid var(--line); padding-left: 10px; }
 /* В узкой шапке дока подписи уходят: они стоили проекту его имени («rd…»), хотя
    значение и шеврон сами говорят, что это переключатель. Полные имена — в title. */
-@container code-head (max-width: 1099px) {
-  .code-tabs { order: 10; flex-basis: 100%; }
-}
 @container code-head (max-width: 620px) {
   .head-pick label { display: none; }
   .head-pick + .head-pick { padding-left: 8px; }
@@ -4950,8 +4973,11 @@ onBeforeUnmount(() => {
 .code-panel > .empty { color: var(--ink-mid); padding: 40px 0; text-align: center; }
 .code-panel > .empty a, .pnote a { color: var(--accent); }
 
+/* Первая колонка — рейка разделов; её ширину задаёт скрипт той же цифрой, которой
+   вычитает рейку из координаты разделителя. */
 .lay { flex: 1; min-width: 0; min-height: 0; display: grid;
-  grid-template-columns: minmax(0, min(var(--code-nav-width, 320px), 42%)) 8px minmax(0, 1fr);
+  grid-template-columns: var(--code-rail-width, 44px) minmax(0, min(var(--code-nav-width, 320px), 42%))
+    8px minmax(0, 1fr);
   border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
 
 /* В доке и на route дерево остаётся слева, как на полной странице.
@@ -4960,19 +4986,22 @@ onBeforeUnmount(() => {
   grid-template-rows: minmax(0, 1fr);
   border: 0; border-radius: 0;
 }
-.lay .panel { grid-column: 1; grid-row: 1; min-width: 0; border-right: 0; }
-.lay .editorwrap { grid-column: 3; grid-row: 1; }
-.lay.navigator-collapsed { grid-template-columns: 0 0 minmax(0, 1fr); }
+.lay .rail { grid-column: 1; grid-row: 1; }
+.lay .panel { grid-column: 2; grid-row: 1; min-width: 0; border-right: 0; }
+.lay .editorwrap { grid-column: 4; grid-row: 1; }
+.lay.navigator-collapsed { grid-template-columns: var(--code-rail-width, 44px) 0 0 minmax(0, 1fr); }
 .lay.navigator-collapsed .panel { display: none; }
 /* Ни compact, ни ширина окна не определяют мобильную геометрию: класс приходит из
    ResizeObserver самого CodePanel. Обе области остаются смонтированы, меняется только
-   видимость — Monaco не теряет модель, позицию и выделение. */
-.lay.code-narrow { grid-template-columns: minmax(0, 1fr); }
-.lay.code-narrow .panel, .lay.code-narrow .editorwrap { grid-column: 1; grid-row: 1; }
+   видимость — Monaco не теряет модель, позицию и выделение. Рейка остаётся и здесь:
+   без неё в узкой раскладке не было бы, чем сменить раздел. */
+.lay.code-narrow { grid-template-columns: var(--code-rail-width, 44px) minmax(0, 1fr); }
+.lay.code-narrow .panel, .lay.code-narrow .editorwrap { grid-column: 2; grid-row: 1; }
 .lay.code-narrow .code-split { display: none; }
 .lay.code-narrow.narrow-navigator .editorwrap { display: none; }
 .lay.code-narrow.narrow-editor .panel { display: none; }
 .code-loading { user-select: none; }
+.loading-rail-item { width: 34px; height: 34px; border-radius: 8px; background: var(--surface-2); }
 .loading-panel { gap: 0; }
 .loading-tree { display: flex; flex-direction: column; gap: 11px; padding: 15px 17px; }
 .loading-row { width: var(--loading-row); height: 8px; border-radius: 999px; background: var(--line); opacity: .78; }
@@ -4982,7 +5011,7 @@ onBeforeUnmount(() => {
 .loading-status { color: var(--ink-mid); font-size: 12px; }
 .loading-split { pointer-events: none; }
 .code-split {
-  grid-column: 2; grid-row: 1; position: relative; cursor: col-resize; touch-action: none;
+  grid-column: 3; grid-row: 1; position: relative; cursor: col-resize; touch-action: none;
   display: grid; place-items: center; background: var(--sidebar); border-right: 1px solid var(--line);
 }
 .code-split span { width: 2px; height: 34px; border-radius: 999px; background: var(--line-2); }
@@ -4994,6 +5023,19 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--line); background: var(--topbar);
 }
 .code-panel.compact .code-head strong { font-size: 12.5px; letter-spacing: .01em; }
+
+/* Рейка разделов: skin кнопки — в общем actions.css по data-context, здесь только
+   раскладка колонки и бейдж счётчика поверх значка «Изменений». */
+.rail { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; align-items: center;
+  background: var(--sidebar); border-right: 1px solid var(--line); }
+.rail-item { position: relative; }
+.ic { width: 19px; height: 19px; }
+.rail-badge {
+  position: absolute; top: -2px; right: -3px; min-width: 16px; height: 16px;
+  display: inline-grid; place-items: center; box-sizing: border-box; padding: 0 4px;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-2);
+  color: var(--ink-mid); font-size: 9px; font-weight: 750; line-height: 1;
+}
 
 /* Панель */
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--sidebar);

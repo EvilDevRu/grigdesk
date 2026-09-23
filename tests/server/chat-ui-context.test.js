@@ -79,6 +79,18 @@ test('COMP-SCTX-12: префикс сохраняет инструкцию не 
   assert.match(prefix, /на отвлечённые вопросы/i);
 });
 
+test('COMP-SCTX-06: подсказка паспорта проекта выдаётся только по строгому адресу', () => {
+  // Точный путь списка остаётся прежним, а паспорт получает свою подсказку.
+  assert.match(pageHint('/projects'), /список проектов/i);
+  assert.equal(pageHint('/projects/demo'), 'Открыт паспорт проекта.');
+  assert.equal(pageHint('/projects/demo-1_x'), 'Открыт паспорт проекта.');
+  // Всё, что не совпало с шаблоном id, — чужой экран: query, лишний сегмент, регистр.
+  assert.equal(pageHint('/projects/../x'), '');
+  assert.equal(pageHint('/projects/demo?x=1'), '');
+  assert.equal(pageHint('/projects/Demo'), '');
+  assert.equal(pageHint('/projects/demo/extra'), '');
+});
+
 test('телеграм-пульт добавляет server-owned запрет перезапуска сервера', () => {
   const hint = pageHint('/telegram/pult');
   assert.match(hint, /не перезапускай сервер Cockpit|нельзя перезапускать сервер Cockpit/iu);

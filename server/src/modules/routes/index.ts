@@ -10,8 +10,10 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
-import { listProjects, PROFILE_RE } from '../../lib/profiles.ts';
+import { listProjects } from '../../lib/profiles.ts';
 import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
+import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
+import { ProjectsError } from '../projects/errors.ts';
 import { registerRoutesApi } from './api.ts';
 import type { CockpitConfig } from '../../config.ts';
 
@@ -34,37 +36,47 @@ async function routesModule(fastify: FastifyInstance, opts: RoutesModuleOptions)
     profilesDir: config.profilesDir,
   });
 
-  let mutationQueue: Promise<unknown> = Promise.resolve();
-  const mutate = <Value>(operation: () => Promise<Value>): Promise<Value> => {
-    const result = mutationQueue.then(operation, operation);
-    mutationQueue = result.catch(() => {});
-    return result;
-  };
-
   // ── Проекты ──
   fastify.get('/api/profiles', async () => ({ profiles: await listProjects(config, prefs) }));
 
-  // Новый проект кокпита — запись в реестре prefs; дальше ему задают пути репозиториев
-  // («Проекты»), и его видит плагин «Код». Профиль фабрики так НЕ заводится: его
-  // route-контракт создают вручную по PROFILE-CONTRACT/NEW-PROJECT, а кокпит не подделывает
-  // локальный каталог profiles/.
+  // Новый проект кокпита — запись реестра паспортов; дальше ему задают пути репозиториев
+  // («Проекты»), и его видит плагин «Код». Заводит её сервис раздела «Проекты»: у реестра
+  // одна очередь мутаций, одна ревизия и одно событие на оба входа, а своя очередь здесь
+  // означала бы две независимые записи в тот же файл настроек.
+  // Профиль фабрики так НЕ заводится: его route-контракт создают вручную по
+  // PROFILE-CONTRACT/NEW-PROJECT, а кокпит не подделывает локальный каталог profiles/.
   fastify.post('/api/profiles', async (
     req: FastifyRequest<{ Body: { id?: unknown } | null }>,
     reply,
   ) => {
-    return mutate(async () => {
-      const id = String(req.body?.id || '').trim();
-      if (!PROFILE_RE.test(id)) {
-        return reply.code(400).send({ error: 'bad_id', message: 'id: строчные латиница/цифры/-/_' });
+    const projects = fastify.projects;
+
+    if (!projects) {
+      throw new Error('module-projects не зарегистрирован: POST /api/profiles без него не работает');
+    }
+
+    const id = String(req.body?.id || '').trim();
+
+    try {
+      await projects.create({
+        id,
+        title: id,
+        description: '',
+        tags: [],
+        repos: [],
+        defaultRepoKey: null,
+      });
+    } catch (err) {
+      if (err instanceof ProjectsError) {
+        return reply.code(err.status).send({ error: err.code, message: err.message });
       }
-      const existing = await listProjects(config, prefs);
-      if (existing.includes(id)) {
-        return reply.code(409).send({ error: 'exists', message: `проект «${id}» уже есть` });
+      if (err instanceof PrefsCorruptedError) {
+        return reply.code(500).send({ error: 'prefs_corrupted', message: err.message });
       }
-      const saved = prefs.read().projects || {};
-      prefs.write({ projects: { ...saved, [id]: { repos: [] } } });
-      return { ok: true, profiles: await listProjects(config, prefs) };
-    });
+      throw err;
+    }
+
+    return { ok: true, profiles: await listProjects(config, prefs) };
   });
 }
 

@@ -277,19 +277,29 @@ export class ChatLiveSessions {
       const foreignSession = !!spec.sessionId
         && !!existing.sessionId
         && spec.sessionId !== existing.sessionId;
+      const sameExecutor = existing.executorId === String(executor?.id ?? '');
       const reusable = existing.handle.alive
         && existing.fingerprint === fingerprint
-        && existing.executorId === executor?.id
+        && sameExecutor
         && !foreignSession;
       if (reusable) return existing;
 
       // Сессия умерла сама либо изменилось то, что задаётся при запуске процесса.
       // Разговор при этом не теряется: новый процесс поднимается с прежним sessionId.
-      const reason = !existing.handle.alive
-        ? 'процесс завершился'
-        : (foreignSession ? 'сменился id сессии' : 'изменились параметры запуска');
+      // Но только у ТОГО ЖЕ исполнителя: id сессии принадлежит вендору, и thread claude
+      // для codex (как и наоборот) — чужой id, resume по нему падает «no rollout found».
+      // После смены ИИ новый процесс стартует с чистой памятью, как и обещает окно.
+      let reason = 'изменились параметры запуска';
+      if (!existing.handle.alive) {
+        reason = 'процесс завершился';
+      } else if (!sameExecutor) {
+        reason = 'сменился исполнитель';
+      } else if (foreignSession) {
+        reason = 'сменился id сессии';
+      }
       this._forget(existing, reason);
-      spec = { ...spec, sessionId: spec.sessionId || existing.sessionId };
+      const inherited = sameExecutor ? existing.sessionId : null;
+      spec = { ...spec, sessionId: spec.sessionId || inherited };
       await existing.handle.close().catch(() => {});
     }
 

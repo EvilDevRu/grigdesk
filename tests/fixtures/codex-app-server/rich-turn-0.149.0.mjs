@@ -542,6 +542,19 @@ function runFixture() {
         return;
       }
       resumed = message.method === 'thread/resume';
+      // Настоящий app-server на resume по неизвестному id отвечает JSON-RPC ошибкой и
+      // ПРОДОЛЖАЕТ жить: процесс не завершается, handshake остаётся незакрытым.
+      if (scenario === 'resume-missing') {
+        if (!resumed) {
+          fail('сценарий resume-missing ждёт thread/resume');
+          return;
+        }
+        send({ id: message.id, error: {
+          code: -32600,
+          message: `no rollout found for thread id ${message.params?.threadId}`,
+        } });
+        return;
+      }
       if (resumed && message.params?.threadId !== THREAD_ID) {
         fail('thread/resume получил неверный threadId');
         return;

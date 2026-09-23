@@ -43,6 +43,7 @@ test('profile builder пишет точные overlay/hooks, приватные 
   const options = {
     launchDir: f.launchDir,
     cwd: f.cwd,
+    workspaceRoot: f.cwd,
     mode: 'workspace-write',
     approval: 'ask',
     hooks: {
@@ -79,11 +80,33 @@ test('profile builder пишет точные overlay/hooks, приватные 
   assert.equal((await fs.stat(hooksPath)).mode & 0o777, 0o600);
 });
 
+test('profile builder записывает переданный workspaceRoot в sandbox-policy', async (t) => {
+  const f = await fixture(t);
+  const result = await buildLaunchFiles({
+    launchDir: f.launchDir,
+    cwd: f.cwd,
+    workspaceRoot: f.projectRoot,
+    mode: 'workspace-write',
+    approval: 'ask',
+    hooks: {
+      bashToolName: DEEPSEEK_BASH_TOOL,
+      ssh: false,
+      db: false,
+      strictDb: false,
+      instructions: { projectRoot: f.projectRoot },
+    },
+  });
+  const overlay = await fs.readFile(result.overlayPath, 'utf8');
+  const policyLine = overlay.split('\n').find((line) => line.trimStart().startsWith('workspaceRoot:'));
+  assert.equal(policyLine?.trim(), `workspaceRoot: ${JSON.stringify(f.projectRoot)}`);
+});
+
 test('profile builder убирает PreToolUse, если обе command-policy выключены', async (t) => {
   const f = await fixture(t);
   const result = await buildLaunchFiles({
     launchDir: f.launchDir,
     cwd: f.cwd,
+    workspaceRoot: f.cwd,
     mode: 'read-only',
     approval: 'never',
     hooks: {
@@ -110,6 +133,7 @@ test('profile builder отклоняет относительные пути и 
   const valid = {
     launchDir: f.launchDir,
     cwd: f.cwd,
+    workspaceRoot: f.cwd,
     mode: 'workspace-write',
     approval: 'ask',
     hooks: {
@@ -121,6 +145,10 @@ test('profile builder отклоняет относительные пути и 
     },
   };
   await assert.rejects(buildLaunchFiles({ ...valid, cwd: 'relative' }), /абсолют/u);
+  await assert.rejects(buildLaunchFiles({ ...valid, workspaceRoot: undefined }), TypeError);
+  await assert.rejects(buildLaunchFiles({ ...valid, workspaceRoot: 'relative' }), TypeError);
+  await assert.rejects(buildLaunchFiles({ ...valid, workspaceRoot: path.join(f.root, 'other') }), TypeError);
+  await assert.rejects(buildLaunchFiles({ ...valid, workspaceRoot: f.cwd + '-sibling' }), TypeError);
   await assert.rejects(buildLaunchFiles({ ...valid, mode: 'danger-full-access' }), /mode/u);
   await assert.rejects(buildLaunchFiles({ ...valid, approval: 'always' }), /approval/u);
   await assert.rejects(buildLaunchFiles({

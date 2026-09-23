@@ -1,11 +1,12 @@
 // Модуль system — нагрузка домашнего ПК (CPU/RAM) + жизненный цикл самого сервера
-// (режим запуска и перезапуск кнопкой из «Настройки → Сервер»).
+// (режим запуска, перезапуск, автозапуск и ярлык — из «Настройки → Сервер»).
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 import { CockpitReleaseService } from '../../lib/cockpitRelease.ts';
 import { CockpitUpdateManager } from '../../lib/cockpitUpdate.ts';
+import { LauncherError, LauncherService } from '../../lib/launcher.ts';
 import type { SystemAdapter } from '../../adapters/system.ts';
 
 // Отказ пересборки словами: машинный код для интерфейса и текст человеку.
@@ -38,6 +39,10 @@ interface UpdateRoute {
   Body: { targetTag: string; expectedCheckoutSha: string };
 }
 
+interface AutostartRoute {
+  Body: { enabled: boolean };
+}
+
 // Серверный config в объёме раздела. Полная форма — в config.ts.
 interface SystemModuleConfig {
   rootDir: string;
@@ -51,6 +56,8 @@ export interface SystemModuleOptions {
   updates?: CockpitUpdateManager;
   // Подмена для тестов: реальный билд в них не гоняем.
   webRebuilder?: () => Promise<RebuildFailure | null>;
+  // Подмена для тестов: systemctl и ярлык в них не трогаем.
+  launcher?: LauncherService;
 }
 
 async function systemModule(
@@ -179,6 +186,48 @@ async function systemModule(
       child.unref();
     }, 400);
     return { ok: true, mode: systemd ? 'systemd' : 'script' };
+  });
+
+  // ── Автозапуск и ярлык «Кокпит» ──
+  // Механизм остаётся systemd (надзор, ворота VPN, старт до входа через linger); здесь
+  // только продуктовая ручка над ним и ярлык на bin/launch через deploy/shortcut.sh.
+  const launcher = opts.launcher || new LauncherService({ rootDir: config.rootDir });
+
+  /**
+   * Отказ лаунчера наружу со своим статусом; чужая ошибка уходит общему обработчику как есть.
+   */
+  function sendLauncherError(reply: FastifyReply, thrown: unknown) {
+    if (!(thrown instanceof LauncherError)) throw thrown;
+
+    return reply.code(thrown.statusCode).send({ error: thrown.code, message: thrown.message });
+  }
+
+  fastify.get('/api/system/launcher', async () => launcher.readState());
+
+  fastify.put<AutostartRoute>('/api/system/launcher/autostart', {
+    schema: {
+      body: {
+        type: 'object', additionalProperties: false, required: ['enabled'],
+        propertyNames: { enum: ['enabled'] },
+        properties: { enabled: { type: 'boolean' } },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      return { autostart: await launcher.setAutostart(request.body.enabled) };
+    } catch (error) { return sendLauncherError(reply, error); }
+  });
+
+  fastify.post('/api/system/launcher/shortcut', async (_request, reply) => {
+    try {
+      return { shortcut: await launcher.installShortcut() };
+    } catch (error) { return sendLauncherError(reply, error); }
+  });
+
+  fastify.delete('/api/system/launcher/shortcut', async (_request, reply) => {
+    try {
+      return { shortcut: await launcher.removeShortcut() };
+    } catch (error) { return sendLauncherError(reply, error); }
   });
 
   // ── Пересборка web-бандла из текущего рабочего дерева ──

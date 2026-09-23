@@ -1,3 +1,35 @@
+/* Строка каталога проектов: выбранный паспорт заметен и мышью, и с клавиатуры.
+   Скин принадлежит UI-kit; сам экран задаёт только раскладку содержимого строки. */
+.ui-pressable[data-context='project-catalog-row'] {
+  padding: 13px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.ui-pressable[data-context='project-catalog-row']:hover {
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='project-catalog-row'][aria-current='page'] {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--sidebar));
+}
+
+.ui-pressable[data-context='project-catalog-row']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ui-button[data-context='project-repo-action'] {
+  flex: none;
+  width: var(--control-height);
+  padding: 0;
+}
+
 .ui-button,
 .ui-action-link,
 .ui-icon-button,
@@ -370,17 +402,6 @@
   height: 16px;
 }
 
-.ui-tab[data-context='code-main-tab'] {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-  padding-inline: 10px;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
 .ui-pressable[data-context='code-commit-disclosure'] {
   min-height: 28px;
   border-radius: 6px;
@@ -417,6 +438,38 @@
 }
 
 .ui-icon-button[data-context='tool-rail-item'] svg {
+  width: 19px;
+  height: 19px;
+}
+
+/* Рейка разделов плагина «Код» — та же плитка, что у рейки инструментов, но активный
+   раздел выражен pressed-состоянием самой кнопки, а не внешним классом. */
+.ui-icon-button[data-context='code-rail-item'] {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='code-rail-item']:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='code-rail-item'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='code-rail-item']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ui-icon-button[data-context='code-rail-item'] svg {
   width: 19px;
   height: 19px;
 }

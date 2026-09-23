@@ -131,3 +131,112 @@ test('отказ сторожа в строке остановки попада�
   assert.equal(stall.hint.includes('замечание'), false);
   assert.equal(stall.comment.startsWith('сторож отверг сдачу'), true);
 });
+
+// Исчерпанный бюджет повторов — та же остановка `human`, но без вердикта агента: ни один
+// заход результата не зафиксировал. Причину с цифрами (сколько заходов, чем кончился
+// последний) route-runtime пишет в комментарий узла, а движок повторяет её в строке
+// остановки. Голая строка попадала в правило «узел вернул решение человеку», и карточка
+// звала читать замечание, которого агент не писал (t7989: три захода по 30 минут, план
+// записан за 50 секунд до обрыва третьего).
+test('исчерпанный бюджет повторов не выдаётся за развилку агента', () => {
+  const reason = 'исчерпан бюджет повторов: 3 захода без результата, последний — '
+    + 'убит по лимиту времени этапа';
+  const stall = detectStall({
+    registry: { ...stalledRegistry, PLAN_COMMENT: reason },
+    logText: logOf(
+      line('2026-09-22 15:05:11', 'узел plan: подготовка к исполнению'),
+      line('2026-09-22 16:35:51', `PLAN: маршрут остановлен: human — ${reason}`),
+    ),
+    daemonAlive: false,
+  });
+
+  assert.equal(stall.stop, 'human');
+  assert.equal(stall.outcome, 'exhausted');
+  assert.equal(stall.stage, 'PLAN');
+  assert.equal(
+    stall.title,
+    'PLAN: раннер не получил результат — 3 захода без результата, последний — '
+      + 'убит по лимиту времени этапа',
+  );
+  assert.equal(stall.hint.includes('замечание'), false);
+  assert.equal(stall.hint.includes('checkpoint.md'), true);
+  assert.equal(stall.hint.includes('продолжить прогон'), true);
+  assert.equal(stall.comment, reason);
+});
+
+// Архивные журналы: движок дописывал суффикс без цифр либо не дописывал вовсе. Без цифр
+// правило всё равно отличает исчерпание от развилки; голая строка остаётся развилкой —
+// иначе нечем: тип остановки в ней один и тот же.
+test('исчерпание без цифр остаётся исчерпанием, а голая строка — развилкой', () => {
+  const bare = detectStall({
+    registry: stalledRegistry,
+    logText: logOf(line('2026-09-22 16:35:51', 'PLAN: маршрут остановлен: human — исчерпан бюджет повторов')),
+    daemonAlive: false,
+  });
+
+  assert.equal(bare.outcome, 'exhausted');
+  assert.equal(bare.title, 'PLAN: раннер не получил результат — исчерпан бюджет повторов');
+
+  const fork = detectStall({
+    registry: stalledRegistry,
+    logText: logOf(line('2026-09-22 16:35:51', 'PLAN: маршрут остановлен: human')),
+    daemonAlive: false,
+  });
+
+  assert.equal(fork.outcome, undefined);
+  assert.equal(fork.title, 'PLAN: узел вернул решение человеку');
+});
+
+// Формат суффикса принадлежит движку: комментарий узла собирает route-runtime, суффикс
+// строки остановки — `route_v2_stop_line_suffix`. Сверяем оба источника с правилом.
+test('формат исчерпания в движке и правило кокпита сходятся', async () => {
+  const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+  const runtime = await fs.readFile(path.join(root, 'engine', 'lib', 'route-runtime.sh'), 'utf8');
+  const factory = await fs.readFile(path.join(root, 'engine', 'bin', 'factory'), 'utf8');
+
+  assert.equal(
+    runtime.includes('exhausted_reason="исчерпан бюджет повторов: $(_route_v2_runs_phrase "$attempt_no")"'),
+    true,
+    'route-runtime больше не собирает комментарий исчерпания с цифрами — правило осталось без источника',
+  );
+  assert.equal(
+    factory.includes('stop_suffix=$(route_v2_stop_line_suffix "$TASK" "$attempt")'),
+    true,
+    'движок больше не дописывает причину исчерпания в строку остановки — правило осталось без источника',
+  );
+});
+
+// Задачи, остановленные ПРЕЖНИМ движком, несут голое `human`: суффикс с причиной он
+// дописывать ещё не умел. Комментарий узла писался всегда — по нему видно, что вердикта
+// агента не было вовсе, и карточка не имеет права звать читать замечание, которого нет.
+test('исчерпание узнаётся по комментарию узла, когда строка журнала голая', () => {
+  const reason = 'исчерпан бюджет повторов: раннер не зафиксировал результат';
+  const stall = detectStall({
+    registry: { ...stalledRegistry, PLAN: 'failed', PLAN_COMMENT: reason },
+    logText: logOf(
+      line('2026-09-22 15:05:11', 'узел plan: подготовка к исполнению'),
+      line('2026-09-22 16:35:51', 'PLAN: маршрут остановлен: human'),
+    ),
+    daemonAlive: false,
+  });
+
+  assert.equal(stall.stop, 'human');
+  assert.equal(stall.outcome, 'exhausted');
+  assert.equal(stall.stage, 'PLAN');
+  // Прежняя формулировка движка — пересказ заголовка: в заголовке она не повторяется.
+  assert.equal(stall.title, 'PLAN: раннер не получил результат — исчерпан бюджет повторов');
+  assert.equal(stall.hint.includes('замечание'), false);
+  assert.equal(stall.comment, reason);
+});
+
+// Обратное: у настоящей развилки агента комментарий свой, и подменять её нельзя.
+test('развилка агента с обычным замечанием остаётся развилкой', () => {
+  const stall = detectStall({
+    registry: { ...stalledRegistry, PLAN: 'failed', PLAN_COMMENT: 'шесть продуктовых решений ждут человека' },
+    logText: logOf(line('2026-09-22 16:35:51', 'PLAN: маршрут остановлен: human')),
+    daemonAlive: false,
+  });
+
+  assert.equal(stall.outcome, undefined);
+  assert.equal(stall.title, 'PLAN: узел вернул решение человеку');
+});

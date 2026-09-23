@@ -17,8 +17,7 @@
         label="Новый проект"
         title="Новый проект"
         tone="accent"
-        :loading="creating"
-        @click="addProject"
+        @click="emit('create')"
       >
         +
       </UiIconButton>
@@ -27,76 +26,23 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { api } from '../../shared/apiClient.ts';
-import {
-  alertDialog,
-  promptDialog,
-  UiButton,
-  UiControlGroup,
-  UiIconButton,
-} from '../../ui';
+// Переключатель проекта: выбор открытого профиля и просьба завести новый.
+//
+// Заведение проекта — не его дело: форма, проверка идентификатора и запись живут
+// в разделе «Проекты», и второй вход создавал бы вторую запись в том же реестре.
+import { UiButton, UiControlGroup, UiIconButton } from '../../ui';
 
-const props = defineProps({
+defineProps({
   profiles: {
     type: Array,
     required: true,
   },
 });
-const emit = defineEmits(['created']);
+const emit = defineEmits(['create']);
 const model = defineModel({
   type: String,
   required: true,
 });
-
-const creating = ref(false);
-const PROJECT_ID_PATTERN = /^[a-z0-9_-]+$/;
-
-function errorMessage(error) {
-  return error instanceof Error && error.message
-    ? error.message
-    : 'Неизвестная ошибка';
-}
-
-/**
- * Создание проекта начинается в управляемом UI-диалоге. До запроса на сервер
- * отсекаем идентификаторы, которые сам интерфейс объявляет недопустимыми.
- */
-async function addProject() {
-  const answer = await promptDialog({
-    title: 'Новый проект',
-    text: 'Идентификатор: строчные латинские буквы, цифры, дефис или подчёркивание.',
-    placeholder: 'my-project',
-    okText: 'Создать',
-  });
-  const id = answer?.trim() || '';
-
-  if (!id) {
-    return;
-  }
-  if (!PROJECT_ID_PATTERN.test(id)) {
-    await alertDialog('Используй только a–z, 0–9, дефис и подчёркивание.', {
-      title: 'Недопустимый идентификатор',
-    });
-
-    return;
-  }
-
-  creating.value = true;
-
-  try {
-    const response = await api.post('/api/profiles', { id });
-
-    emit('created', {
-      id,
-      profiles: response.profiles || [],
-    });
-  } catch (error) {
-    await alertDialog(`Не удалось создать проект: ${errorMessage(error)}`);
-  } finally {
-    creating.value = false;
-  }
-}
 </script>
 
 <style scoped>

@@ -1846,9 +1846,26 @@ export function openCodexSession({
     actualModel = String(opened?.model || model || '');
     return threadId;
   })();
+
+  /** Гасим процесс: stdin закрывается, ребёнок убивается, `alive` сразу false. */
+  async function closeSession() {
+    if (exited) return;
+    try { lines.close(); } catch { /* уже закрыт */ }
+    try { child.stdin?.end(); } catch { /* уже закрыт */ }
+    try { child.kill(); } catch { /* уже завершён */ }
+    exited = true;
+  }
+
   // Отказ handshake разбирает тот, кто делает первый ход: без этого он остался бы
-  // необработанным rejection и уронил бы процесс сервера.
-  ready.catch(() => {});
+  // необработанным rejection и уронил бы процесс сервера. Сам процесс после отказа
+  // бесполезен, но жив: app-server переживает неудачный thread/resume (нет rollout по
+  // такому id), и живая сессия в пуле повторяла бы тот же отказ каждым следующим ходом.
+  // Гасим его сами — пул увидит мёртвый процесс и откроет новый.
+  ready.catch((error: unknown) => {
+    const detail = String((error as Error)?.message || error || 'handshake не удался');
+    exitReason = exitReason || `Codex app-server не открыл thread: ${detail}`.slice(-600);
+    void closeSession();
+  });
 
   return {
     get pid() { return child.pid; },
@@ -1935,13 +1952,7 @@ export function openCodexSession({
       }
     },
 
-    async close() {
-      if (exited) return;
-      try { lines.close(); } catch { /* уже закрыт */ }
-      try { child.stdin?.end(); } catch { /* уже закрыт */ }
-      try { child.kill(); } catch { /* уже завершён */ }
-      exited = true;
-    },
+    close: closeSession,
   };
 }
 

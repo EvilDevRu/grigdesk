@@ -2045,9 +2045,6 @@ route_v2_context_for_node() {
     --ticket-json "$V2_TRUSTED_TICKET"
     --project-context-json "$V2_PROJECT_CONTEXT_JSON"
     --state-dir "$STATE_DIR"
-    # Куда RETRO кладёт урок внутри рабочей копии. Слово профиля: у одного проекта
-    # это docs/, у другого — .claude/ рядом со знаниями агентов.
-    --lessons-dir "${LESSONS_DIR:-docs/lessons}"
     --workspace-mode "$V2_WORKSPACE_MODE"
     --container-name "$V2_CONTAINER"
     --frontend-port "$V2_FE_PORT"
@@ -2922,7 +2919,7 @@ v2_main() {
           return "$rc"
         }
         set_st "$TASK" STALLED_HUMAN 0 RESULT completed
-        v2_log "маршрут завершён; SHIP и RETRO подтверждены"
+        v2_log "маршрут завершён; хвост маршрута подтверждён"
         deferred_file="$STATE_DIR/t${TASK}.deferred.md"
         deferred_count=$(v2_write_deferred_tail "$TASK" "$attempt" "$deferred_file") &&
           [[ "$deferred_count" =~ ^[1-9][0-9]*$ ]] &&
@@ -2956,13 +2953,19 @@ v2_main() {
         # и ветка выше, но отсутствие имени здесь не отказ: терять остановку из-за
         # неназванного узла дороже, чем показать её без него.
         stop_node=$(json_value lastCommit.node <<<"$cursor" 2>/dev/null) || stop_node=""
-        # Отказ evidence-хука — единственный `human`, у которого причина есть и лежит
-        # не в вердикте агента (тот отчитался done), а у runtime узла. Кокпит читает
-        # причину остановки из ПОСЛЕДНЕЙ строки окна, поэтому она едет в самой строке
-        # остановки, а не строкой выше, где её перекрыла бы общая формулировка.
+        # Два `human`, у которых причина есть и лежит не в вердикте агента, а у runtime
+        # узла: отказ evidence-хука (агент отчитался done) и исчерпанный бюджет повторов
+        # (результата не было ни у одного захода — комментарий узла пишет route-runtime).
+        # Кокпит читает причину остановки из ПОСЛЕДНЕЙ строки окна, поэтому она едет в
+        # самой строке остановки, а не строкой выше, где её перекрыла бы общая
+        # формулировка. Без суффикса исчерпание показывалось как «узел вернул решение
+        # человеку» с советом прочитать замечание, которого агент не писал (t7989).
         stop_suffix=""
         [[ -z "${ROUTE_V2_EVIDENCE_STOP_REASON:-}" ]] ||
           stop_suffix=" — $ROUTE_V2_EVIDENCE_STOP_REASON"
+        if [[ -z "$stop_suffix" ]]; then
+          stop_suffix=$(route_v2_stop_line_suffix "$TASK" "$attempt") || stop_suffix=""
+        fi
         if [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]]; then
           v2_log "${stop_node^^}: маршрут остановлен: ${stop}${stop_suffix}"
         else

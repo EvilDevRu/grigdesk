@@ -615,3 +615,34 @@ test('SSH-панель разрешает отказ без пояснения',
 
   assert.deepEqual(answers, [['ssh-pid-1', false, false, '', '']]);
 });
+
+test('архивный проект не предлагается новой связи, но заведённая остаётся видимой', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    store: {
+      projects: [
+        { id: 'cockpit', factory: false, archivedAt: null },
+        { id: 'kopeika', factory: false, archivedAt: '2026-09-22T10:00:00.000Z' },
+      ],
+      connections: [
+        {
+          id: 'conn-archived',
+          projectId: 'kopeika',
+          label: 'Старый сервер',
+          role: 'code',
+          host: 'example.test',
+          port: 22,
+          user: 'deploy',
+        },
+      ],
+    },
+  });
+
+  const options = wrapper.findAll('[data-ssh-project-select] option')
+    .map((option) => option.attributes('value'))
+    .filter(Boolean);
+
+  // Новый сервер заводят только на активный проект: архивным больше не работают.
+  assert.deepEqual(options, ['cockpit']);
+  // Архив ничего не рвёт: уже заведённая связь остаётся на месте вместе со своим проектом.
+  assert.equal(wrapper.text().includes('Старый сервер'), true);
+});

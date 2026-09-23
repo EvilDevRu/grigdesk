@@ -56,6 +56,9 @@ const SCENES = [
   { title: 'Третья', narration: 'Скачиваем готовый ролик.', seconds: 1.2, color: 'maroon' },
 ];
 
+// Фикстуре нужен валидный VP8-контейнер, а не качество картинки. Без этих ключей libvpx
+// разворачивается на все ядра и один тест занимает машину целиком, а параллельные прогоны
+// в соседних worktree складывают нагрузку и вешают её.
 async function makeClip(file, seconds, color) {
   await run('ffmpeg', [
     '-y', '-hide_banner', '-loglevel', 'error',
@@ -63,6 +66,7 @@ async function makeClip(file, seconds, color) {
     '-f', 'lavfi', '-i', `sine=frequency=200:duration=${seconds}`,
     '-map', '0:v', '-shortest',
     '-c:v', 'libvpx', '-b:v', '200k',
+    '-threads', '1', '-deadline', 'realtime', '-cpu-used', '8',
     file,
   ]);
 
@@ -85,6 +89,7 @@ async function makeCfrClip(file, seconds, color = 'navy') {
     '-y', '-hide_banner', '-loglevel', 'error',
     '-f', 'lavfi', '-i', `color=${color}:s=1920x1080:d=${seconds}:r=30`,
     '-an', '-c:v', 'libvpx', '-b:v', '300k',
+    '-threads', '1', '-deadline', 'realtime', '-cpu-used', '8',
     file,
   ]);
 

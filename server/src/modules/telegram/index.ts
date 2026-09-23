@@ -75,6 +75,9 @@ export interface TelegramModuleOptions {
   poller?: { status?: () => Payload } | null;
   botApi?: typeof realBotApi;
   listProjects?: () => Promise<unknown>;
+  // Список для ФОРМЫ: в новом правиле архивный проект не предлагается. Проверка уже
+  // сохранённых правил идёт по полному списку (`listProjects`) — архив их не рвёт.
+  listActiveProjects?: () => Promise<unknown>;
   now?: () => number;
 }
 
@@ -169,6 +172,7 @@ async function telegramModule(
     poller = null,
     botApi = realBotApi,
     listProjects = async () => [],
+    listActiveProjects = listProjects,
     now = Date.now,
   } = opts as TelegramModuleOptions & { connection: TelegramConnectionPort };
   if (!connection || typeof connection.status !== 'function'
@@ -482,7 +486,7 @@ async function telegramModule(
     const lease = await acquire();
     try {
       const snapshot = await checked(lease, (context) => context.rules.readPolicySnapshot());
-      const projects = await listProjects();
+      const projects = await listActiveProjects();
       if (!lease.isCurrent()) throw accountChanged();
       return { ...snapshot, projects };
     } finally { await lease.release(); }

@@ -110,12 +110,6 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 | `PROFILE_AGENT_DIRS` | дополнительные разрешённые каталоги |
 | `PROFILE_AGENT_ALLOW` / `PROFILE_AGENT_DENY` | project-specific command policy |
 | `PROFILE_SERVICE_HOST` | hostname без схемы и порта |
-| `LESSONS_DIR` | каталог уроков RETRO внутри первого repository; по умолчанию `docs/lessons` |
-
-`LESSONS_DIR` — относительный путь без `..` и ведущего слэша; движок отвергает остальное,
-иначе RETRO записал бы урок мимо рабочей копии. Структура репозитория — знание профиля:
-у одного проекта уроки логично лежат в `docs/`, у другого — в `.claude/` рядом со знаниями
-агентов. Само значение попадает в `artifacts.lessonsRepo` (см. ниже).
 
 Topology и prompt-файлы не задаются shell-массивами или функциями профиля. Они читаются только
 из опубликованного immutable route bundle. Обязательные workspace/stand hooks перечислены ниже

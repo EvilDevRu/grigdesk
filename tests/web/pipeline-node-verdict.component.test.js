@@ -10,7 +10,9 @@ process.env.NODE_ENV = 'test';
 // пустая карточка: человек шёл читать `stage-results/` руками либо пересказывать вопрос
 // агенту в чате, то есть работал курьером между двумя частями своей же системы.
 
-function makeFixture({ verdict = null, comment = null, status = 'stall', readOnly = false } = {}) {
+function makeFixture({
+  verdict = null, comment = null, stall = null, status = 'stall', readOnly = false,
+} = {}) {
   const factoryTask = {
     task: 42, profile: 'demo', route: 'consilium-debug', readOnly,
     daemonAlive: false, attempt: 'att-1', result: null, stall: null,
@@ -21,7 +23,7 @@ function makeFixture({ verdict = null, comment = null, status = 'stall', readOnl
     pos: { skeptic: 0 },
     keys: { skeptic: 'SKEPTIC' },
     statuses: { skeptic: status },
-    nodeMeta: { skeptic: { comment, verdict } },
+    nodeMeta: { skeptic: { comment, verdict, stall } },
     progress: { done: 0, total: 1, current: 'skeptic' },
   };
   return { factoryTask, graph };
@@ -169,6 +171,39 @@ test('остановка на человеке названа в заголов�
 
   assert.equal(wrapper.get('.sverdict .sclbl').text(), 'Узел вернул решение человеку');
   assert.equal(wrapper.get('.sverdict').classes().includes('human'), true);
+});
+
+// Исчерпанный бюджет повторов: агент не молчал — он работал и был убит по лимиту (или
+// лежал провайдер), а результата не получил раннер. Бейдж берёт признак из той же причины
+// остановки, что и карточка «что случилось»: на t7989 бейдж говорил «молчит», причина —
+// «вернул решение человеку», замечание — «исчерпан бюджет повторов».
+test('исчерпанный бюджет повторов в бейдже не выдаётся за молчание агента', async (t) => {
+  const reason = 'исчерпан бюджет повторов: 3 захода без результата, последний — '
+    + 'убит по лимиту времени этапа';
+  const { wrapper, openNode } = await mountPipeline(t, makeFixture({
+    comment: reason,
+    stall: {
+      kind: 'human',
+      stop: 'human',
+      outcome: 'exhausted',
+      stage: 'SKEPTIC',
+      node: 'skeptic',
+      title: `SKEPTIC: раннер не получил результат — ${reason}`,
+      hint: 'черновик хода уцелел — «продолжить прогон» переиграет узел с него',
+    },
+    readOnly: true,
+  }));
+  await openNode();
+
+  assert.equal(wrapper.get('.shead-state .sbadge').text(), 'раннер не получил результат');
+  assert.equal(wrapper.get('.scomment.failed b').text().includes('раннер не получил результат'), true);
+});
+
+test('остановка без вердикта и без причины остаётся молчанием агента', async (t) => {
+  const { wrapper, openNode } = await mountPipeline(t, makeFixture({ readOnly: true }));
+  await openNode();
+
+  assert.equal(wrapper.get('.shead-state .sbadge').text(), 'завис — агент молчит');
 });
 
 test('возврат маршрута назван вместе с узлом, куда он ведёт', async (t) => {

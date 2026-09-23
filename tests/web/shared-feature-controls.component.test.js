@@ -60,21 +60,23 @@ function button(wrapper, label) {
   return wrapper.findAll('button').find((entry) => entry.text() === label);
 }
 
-test('ProjectSwitcher переключает профиль и создаёт новый через UI-диалог', async (t) => {
+test('ProjectSwitcher переключает профиль, а «+» эмитит create без диалога и без запроса', async (t) => {
   const browser = await installUiBrowser(t);
   const requests = [];
-  let promptOptions;
+  const dialogs = [];
 
   globalThis.__projectPrompt = async (options) => {
-    promptOptions = options;
+    dialogs.push(['prompt', options]);
 
     return 'new_project';
   };
-  globalThis.__projectAlert = async () => {};
+  globalThis.__projectAlert = async (text) => {
+    dialogs.push(['alert', text]);
+  };
   globalThis.__projectPost = async (...args) => {
     requests.push(args);
 
-    return { profiles: ['alpha', 'beta', 'new_project'] };
+    return { profiles: ['alpha', 'beta'] };
   };
 
   const [{ mount, flushPromises }, ProjectSwitcher] = await Promise.all([
@@ -96,51 +98,11 @@ test('ProjectSwitcher переключает профиль и создаёт н
   await flushPromises();
 
   assert.deepEqual(wrapper.emitted('update:modelValue'), [['beta']]);
-  assert.equal(promptOptions.title, 'Новый проект');
-  assert.deepEqual(requests, [[
-    '/api/profiles',
-    { id: 'new_project' },
-  ]]);
-  assert.deepEqual(wrapper.emitted('created'), [[{
-    id: 'new_project',
-    profiles: ['alpha', 'beta', 'new_project'],
-  }]]);
-});
-
-test('ProjectSwitcher не отправляет недопустимый идентификатор', async (t) => {
-  const browser = await installUiBrowser(t);
-  const alerts = [];
-  let postCount = 0;
-
-  globalThis.__projectPrompt = async () => 'Bad project';
-  globalThis.__projectAlert = async (...args) => {
-    alerts.push(args);
-  };
-  globalThis.__projectPost = async () => {
-    postCount += 1;
-
-    return { profiles: [] };
-  };
-
-  const [{ mount, flushPromises }, ProjectSwitcher] = await Promise.all([
-    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileProjectSwitcher(),
-  ]);
-  const wrapper = mount(ProjectSwitcher, {
-    attachTo: browser.document.querySelector('#mount'),
-    props: {
-      profiles: ['alpha'],
-      modelValue: 'alpha',
-    },
-  });
-
-  t.after(() => wrapper.unmount());
-
-  await wrapper.get('[aria-label="Новый проект"]').trigger('click');
-  await flushPromises();
-
-  assert.equal(postCount, 0);
-  assert.match(alerts[0][0], /a–z/);
+  // Новый проект заводит общая форма раздела «Проекты»: переключатель только просит
+  // о переходе — ни диалога, ни запроса от него больше не исходит.
+  assert.deepEqual(wrapper.emitted('create'), [[]]);
+  assert.deepEqual(dialogs, []);
+  assert.deepEqual(requests, []);
   assert.equal(wrapper.emitted('created'), undefined);
 });
 

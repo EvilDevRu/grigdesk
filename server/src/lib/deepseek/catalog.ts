@@ -151,6 +151,7 @@ export async function readDeepSeekCatalog({
   const launch = await buildLaunchFiles({
     launchDir,
     cwd: projectRoot,
+    workspaceRoot: projectRoot,
     mode: 'read-only',
     approval: 'never',
     hooks: {

@@ -65,10 +65,29 @@ const DEFAULTS = {
   // Пути локальны для машины-мозга, поэтому живут в .state, а не в гитуемой базе.
   // У проектов фабрики источник путей — их bash-профиль; сюда они не пишутся.
   projects: {},
+  // Служебные данные реестра проектов: версия схемы, время миграции и надгробия
+  // удалённых записей. Внутри `projects` служебных записей нет — иначе паспорт
+  // проекта пришлось бы отличать от метаданных по форме ключа.
+  projectsMeta: { schemaVersion: 0, migratedAt: null, tombstones: {} },
 };
 
 // Настройки кокпита целиком: ключи DEFAULTS плюс всё, что уже лежало в файле.
 export type CockpitPrefs = Record<string, unknown>;
+
+/** Запись настроек из недоверенного файла: не объект читается как пустая. */
+function asRecord(value: unknown): CockpitPrefs {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as CockpitPrefs
+    : {};
+}
+
+/** Файл настроек есть, но прочитать его как объект нельзя: запись отклонена. */
+export class PrefsCorruptedError extends Error {
+  constructor(message = 'Файл настроек не читается как объект', options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PrefsCorruptedError';
+  }
+}
 
 export class PrefsStore {
   readonly prefsPath: string;
@@ -77,16 +96,40 @@ export class PrefsStore {
     this.prefsPath = prefsPath;
   }
 
-  /** Фактически записанный JSON без overlay DEFAULTS и скрытия внутренней revision. */
+  /**
+   * Фактически записанный JSON без overlay DEFAULTS и скрытия внутренней revision.
+   * Нечитаемый файл — ошибка, а не пустые настройки: иначе вызывающий не отличит
+   * «настроек нет» от «настройки испорчены» и запишет поверх чужой порчи умолчания.
+   * Отсутствие файла — не порча: его ещё не заводили, и это штатное состояние.
+   */
   readStored(): CockpitPrefs {
     try {
       const loaded = JSON.parse(fs.readFileSync(this.prefsPath, 'utf8'));
-      return loaded !== null && typeof loaded === 'object' && !Array.isArray(loaded)
-        ? loaded
-        : {};
+      if (loaded === null || typeof loaded !== 'object' || Array.isArray(loaded)) {
+        throw new PrefsCorruptedError();
+      }
+
+      return loaded as CockpitPrefs;
     } catch (err) {
       if ((err as { code?: unknown } | null)?.code === 'ENOENT') return {};
       throw err;
+    }
+  }
+
+  /**
+   * Снимок для последующей записи: нечитаемый файл — всегда PrefsCorruptedError, чем бы
+   * он ни был испорчен — формой или битым JSON. Для вызывающего это один отказ «писать
+   * некуда», и HTTP отвечает на него 500 prefs_corrupted. Различие причин остаётся в cause.
+   */
+  readForWrite(): CockpitPrefs {
+    try {
+      return this.readStored();
+    } catch (err) {
+      if (err instanceof PrefsCorruptedError) throw err;
+      throw new PrefsCorruptedError(
+        `Файл настроек не читается, запись отклонена: ${this.prefsPath}`,
+        { cause: err },
+      );
     }
   }
 
@@ -101,13 +144,25 @@ export class PrefsStore {
       // частичный объект затрёт новые поля defaults целиком.
       speech: normalizeSpeechSettings(loaded.speech),
       arbiter: normalizeArbiterSettings(loaded.arbiter),
+      // Реестру служебных данных нужна своя копия умолчаний: consumers правят
+      // надгробия на месте, а общий объект DEFAULTS живёт до перезапуска процесса.
+      projectsMeta: {
+        ...DEFAULTS.projectsMeta,
+        ...asRecord(loaded.projectsMeta),
+      },
     };
   }
 
-  /** Частичное обновление: неизвестные ключи отбрасываются. */
+  /**
+   * Частичное обновление: неизвестные ключи отбрасываются. Запись здесь fail-closed,
+   * а чтение — fail-soft, и это разные решения. Чтение обязано отдать хоть что-то,
+   * иначе один битый файл гасит весь интерфейс; запись же собирает новый файл из
+   * прочитанного, поэтому на нечитаемом файле она молча записала бы умолчания поверх
+   * чужих настроек и паспортов проектов. Отсутствие файла — не порча: его заводят
+   * этой же записью, и только для неё здесь допустима пустая основа.
+   */
   write(patch: CockpitPrefs | null | undefined): CockpitPrefs {
-    let stored: CockpitPrefs = {};
-    try { stored = this.readStored(); } catch { /* write сохраняет прежний fail-soft контракт */ }
+    const stored = this.readForWrite();
     const next: CockpitPrefs = { ...this.read() };
     for (const k of Object.keys(DEFAULTS)) {
       if (patch && k in patch) {

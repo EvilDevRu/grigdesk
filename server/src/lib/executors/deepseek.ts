@@ -46,6 +46,7 @@ export default {
   color: '#4D6BFE',
   order: 4,
   workToolsTransport: 'mcp',
+  trustedDirectories: true,
   sessionBinding: {
     authProfileId: () => deepSeekAuthProfileId(process.env),
     securityProfile: (_config: unknown, settings: Record<string, unknown> = {}) => (

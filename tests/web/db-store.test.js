@@ -104,7 +104,12 @@ test('DB store получает проекты отдельно от общег�
 
   await module.loadDbProjects();
 
-  assert.deepEqual(store.projects, [{ id: 'cockpit' }, { id: 'shop' }]);
+  // Признак архива входит в контракт списка: по нему форма решает, кому можно
+  // заводить новый профиль базы.
+  assert.deepEqual(store.projects, [
+    { id: 'cockpit', archivedAt: null },
+    { id: 'shop', archivedAt: null },
+  ]);
   assert.equal(store.projectsLoading, false);
   assert.equal(store.projectsError, '');
 });

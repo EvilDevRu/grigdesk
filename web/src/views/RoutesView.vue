@@ -7,7 +7,7 @@
         <UiTooltip :text="helpPanel" />
       </div>
       <ProjectSwitcher :profiles="profiles" :model-value="profile"
-                       @update:model-value="switchProfile" @created="onProjectCreated" />
+                       @update:model-value="switchProfile" @create="openProjectCreate" />
       <div v-if="loading && !revisions.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
       <div v-else-if="error" class="pad bad">{{ error }}</div>
       <div v-else-if="!published" class="pad muted">Каталог не опубликован</div>
@@ -86,6 +86,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 
 import type { FactoryGraphData } from '../../../shared/factoryGraphContracts.ts';
 import type { RouteRevision } from '../../../shared/routesContracts.ts';
@@ -146,6 +147,7 @@ const helpRevisions = 'Ревизия — слепок каталога, адр�
   + ' Откат переводит указатель current на выбранную ревизию: новые попытки пойдут'
   + ' по ней, уже бегущие останутся на своей.';
 
+const router = useRouter();
 const routesContext = useUiContextSource('routes', { layer: 'page', active: false });
 
 watch([profile, selectedRoute], ([project, route], previous) => {
@@ -308,12 +310,12 @@ function switchProfile(next: string): void {
   load();
 }
 
-function onProjectCreated({ id, profiles: fresh }: { id: string; profiles: string[] }): void {
-  if (fresh.length) {
-    profiles.value = fresh;
-  }
-
-  switchProfile(id);
+/**
+ * Новый проект заводится общей формой раздела «Проекты»: здесь только переход.
+ * Список проектов после возврата перечитает сама страница раздела.
+ */
+function openProjectCreate(): void {
+  void router.push({ path: '/projects', query: { create: '1' } });
 }
 
 /**

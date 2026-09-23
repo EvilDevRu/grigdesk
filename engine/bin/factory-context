@@ -123,22 +123,6 @@ def absolute_directory(value: str, label: str) -> str:
     return value
 
 
-def relative_directory(value: str, label: str) -> str:
-    """
-    Каталог уроков внутри рабочей копии. Значение приходит из профиля, поэтому
-    проверяется как чужой ввод: только относительный путь без `..`, без корня и
-    без управляющих символов — иначе RETRO записал бы урок мимо репозитория.
-    """
-    if not value or value != value.strip():
-        fail(f"{label}: пустое значение")
-    if any(char in value for char in "\n\t\\") or value.startswith("/"):
-        fail(f"{label}: нужен относительный путь без управляющих символов")
-    parts = [part for part in value.split("/") if part]
-    if not parts or any(part in {".", ".."} for part in parts):
-        fail(f"{label}: сегменты . и .. запрещены")
-    return "/".join(parts)
-
-
 def absolute_file_candidate(value: str, roots: list[str], label: str) -> str:
     path = Path(value)
     if not path.is_absolute() or "\n" in value or "\t" in value:
@@ -513,7 +497,6 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
         )
     source_branch = branch_name(args.source_branch, "source-branch")
 
-    lessons_dir = relative_directory(args.lessons_dir, "lessons-dir")
     artifact = lambda suffix: f"{state_dir}/t{task_id}.{suffix}"
     return {
         "task": read_ticket(Path(args.ticket_json), task_id),
@@ -574,16 +557,6 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             # ключ просто не используют.
             "audit": artifact("audit.md"),
             "ship": artifact("ship.md"),
-            "lessons": f"{state_dir}/archive/t{task_id}.lessons-proposed.md",
-            # Второй адрес того же урока — уже ВНУТРИ рабочей копии, а не в state.
-            # Архив фабрики лежит вне репозитория: он не попадает ни в `git status`,
-            # ни в PR, поэтому предложение RETRO там никто не видел (30 файлов
-            # накопилось за три недели). В рабочей копии оно попадает человеку на
-            # глаза тем же путём, что и код: диффом. Каталог задаёт профиль
-            # (LESSONS_DIR), потому что структура репозитория — его знание.
-            "lessonsRepo": (
-                f"{repos[repo_order[0]]['path']}/{lessons_dir}/t{task_id}.md"
-            ),
             # Консилиум (маршруты consilium-*): независимые мнения членов и trusted
             # сводка состава от command-узла COUNCIL_AGG. Route-нейтрально: остальные
             # маршруты ключи просто не используют.
@@ -653,7 +626,6 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--backend-worktree", default="")
     result.add_argument("--frontend-worktree", default="")
     result.add_argument("--state-dir", required=True)
-    result.add_argument("--lessons-dir", default="docs/lessons")
     result.add_argument("--workspace-mode", required=True)
     result.add_argument("--container-name", required=True)
     result.add_argument("--frontend-port", default="")

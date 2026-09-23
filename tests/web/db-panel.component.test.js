@@ -314,3 +314,27 @@ test('форма нового профиля сохраняет описание
   }]);
   assert.equal(Object.hasOwn(saved[0], 'password'), false);
 });
+
+test('архивный проект не предлагается новому профилю базы', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    profiles: [],
+    sessions: [],
+    sshSessions: [],
+    engines: [],
+    queries: [],
+    audit: [],
+    schemas: {},
+    projects: [
+      { id: 'cockpit', archivedAt: null },
+      { id: 'kopeika', archivedAt: '2026-09-22T10:00:00.000Z' },
+    ],
+    load: async () => {},
+  });
+
+  const options = wrapper.findAll('[data-db-project-select] option')
+    .map((option) => option.attributes('value'))
+    .filter(Boolean);
+
+  // Новый профиль базы заводят только на активный проект: архивным уже не работают.
+  assert.deepEqual(options, ['cockpit']);
+});
