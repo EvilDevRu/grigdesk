@@ -275,21 +275,17 @@ const ADAPTER_EXTENSIONS = ['.js', '.ts'];
  */
 export function createWorkTools({
   projectId = null,
-  knowledgeProjectId,
   chatKey = '',
   permissionMode = '',
   invoke,
-  knowledgeInvoke,
   pluginEnabled,
   dbInvoke,
 }: Record<string, unknown> = {}) {
   return createWorkToolRegistry({
     projectId,
-    knowledgeProjectId,
     chatKey,
     permissionMode,
     invoke,
-    knowledgeInvoke,
     pluginEnabled,
     dbInvoke,
   });

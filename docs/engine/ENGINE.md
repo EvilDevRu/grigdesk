@@ -1031,7 +1031,7 @@ Active pointer меняется под kernel `flock` и compare-and-swap. `fact
 | Слой | Где лежит | Когда перечитывается |
 |---|---|---|
 | Движок | `engine/bin`, `engine/lib` | при каждом запуске процесса |
-| Профиль | `profiles/<имя>/profile.sh` | перед каждым этапом (`_reload_profile`) |
+| Профиль | `profiles/<имя>/profile.sh` | один раз на процесс: при `start` и каждом `resume` (`bin/factory` делает `source`) |
 | Runner policy | `profiles/<имя>/runners.env` | при каждом routing decision; во время активного прогона не менять |
 | Server / web | `server/`, `web/` | после сборки и человеческого рестарта процесса |
 | Исходник схемы | `profiles/<имя>/routes/` | сам по себе ни на что не влияет; нужен publish CAS |

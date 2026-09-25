@@ -36,11 +36,6 @@ echo "→ node:   $NODE_BIN ($(node -v))"
 echo "→ Зависимости сервера…"
 ( cd "$COCKPIT_DIR/server" && npm install --no-audit --no-fund )
 
-# Installer фиксирует фактические Node/SQLite/FTS features. Провал не
-# блокирует остальной Cockpit: search останется degraded/disabled.
-"$NODE_BIN" "${COCKPIT_NODE_SQLITE_ARGS[@]}" \
-  "$COCKPIT_DIR/server/scripts/knowledge-search-preflight.mjs" || true
-
 echo "→ Зависимости web + сборка…"
 ( cd "$COCKPIT_DIR/web" && npm install --no-audit --no-fund && npm run build )
 
@@ -49,10 +44,9 @@ mkdir -p "$UNIT_DIR"
 sed -e "s|__NODE__|$NODE_BIN|g" -e "s|__NODE_DIR__|$NODE_DIR|g" -e "s|__COCKPIT_DIR__|$COCKPIT_DIR|g" \
   "$COCKPIT_DIR/deploy/$UNIT" > "$UNIT_DIR/$UNIT"
 
-echo "→ CLI b24 и knowledge в PATH…"
+echo "→ CLI b24 в PATH…"
 mkdir -p "$HOME/.local/bin"
 ln -sf "$COCKPIT_DIR/bin/b24" "$HOME/.local/bin/b24"
-ln -sf "$COCKPIT_DIR/bin/knowledge" "$HOME/.local/bin/knowledge"
 case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.local/bin в PATH" ;; esac
 
 systemctl --user daemon-reload

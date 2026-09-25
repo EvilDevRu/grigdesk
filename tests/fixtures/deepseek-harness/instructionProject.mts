@@ -28,7 +28,6 @@ export async function createInstructionProject(t: { after: (fn: () => unknown) =
     '@outside-link.md',
     '@docs/large.md',
     '@docs/binary.bin',
-    '@#/knowledge/00000000-0000-4000-8000-000000000000',
     '```text',
     '@docs/fenced.md',
     '```',

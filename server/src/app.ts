@@ -27,7 +27,6 @@ import { PrefsStore } from './lib/prefsStore.ts';
 import { SpeechRuntime } from './lib/speech/index.ts';
 import { ModelJobManager } from './lib/speech/modelJobs.ts';
 import { listProjects } from './lib/profiles.ts';
-import { projectMapsRoot } from './lib/projects.ts';
 import * as telegramBotApi from './lib/telegram/api.ts';
 import { TelegramAccountBindings } from './lib/telegram/accountBindings.ts';
 import { createTelegramAccountContextFactory } from './lib/telegram/accountContext.ts';
@@ -75,7 +74,6 @@ import { createDbAudit } from './lib/db/audit.ts';
 import { cancelDbQuery, createDbBroker } from './lib/db/broker.ts';
 import type { LimitedDbResult } from './lib/db/result.ts';
 import type { FactoryModuleOptions } from './modules/factory/index.ts';
-import type { KnowledgeModuleOptions } from './modules/knowledge/index.ts';
 import type { MediaModuleOptions } from './modules/media/index.ts';
 import type { GitHubModuleOptions } from './modules/github/index.ts';
 import type { TelegramModuleOptions } from './modules/telegram/index.ts';
@@ -87,9 +85,6 @@ import { createSandboxActivityGuard } from './lib/sandboxes/activityGuard.ts';
 import { createSandboxService } from './lib/sandboxes/service.ts';
 import { createShowcaseService } from './lib/showcase/service.ts';
 import { resolveInboxTriageTarget } from './lib/inbox/triage.ts';
-import { createKnowledgeClient } from './lib/search/client.ts';
-import { createKnowledgeBroker } from './lib/search/broker.ts';
-import { createKnowledgeTransfer } from './lib/search/transfer.ts';
 
 import authPlugin from './plugins/auth.ts';
 import httpScopePlugin from './plugins/httpScope.ts';
@@ -124,7 +119,6 @@ import projectsModule from './modules/projects/index.ts';
 import { createProjectsService } from './modules/projects/service.ts';
 import {
   countGitHubRules,
-  countKnowledgeRecords,
   countTelegramRules,
 } from './lib/projects/dependencySources.ts';
 import { isProjectArchived } from './lib/projects/archive.ts';
@@ -139,7 +133,6 @@ import dbModule from './modules/db/index.ts';
 import dockerModule from './modules/docker/index.ts';
 import sandboxesModule from './modules/sandboxes/index.ts';
 import showcaseModule from './modules/showcase/index.ts';
-import knowledgeModule from './modules/knowledge/index.ts';
 import { Analyzer } from './lib/analysis/analyzer.ts';
 import { AnalysisArbiter } from './lib/analysis/arbiter.ts';
 import { DocumentReader } from './lib/documents/reader.ts';
@@ -262,27 +255,6 @@ async function build() {
     timeoutMs: config.shutdownTimeoutMs,
   });
   fastify.decorate('shutdown', shutdown);
-  const knowledge = createKnowledgeClient({
-    dbPath: config.knowledgeDbPath,
-    seedSamples: false,
-  });
-  const knowledgeTransfer = createKnowledgeTransfer({
-    rootDir: config.rootDir,
-    dbPath: config.knowledgeDbPath,
-    knowledge,
-    mapsRootFor: (project) => projectMapsRoot({ config, prefs, id: project }),
-    listKnownProjects: () => listProjects(config, prefs),
-  });
-  const knowledgeBroker = createKnowledgeBroker({
-    pluginEnabled: (id: string) => fastify.pluginEnabled?.(id) === true,
-    // Клиент знаний отвечает недоверенным JSON воркера, поэтому его методы объявлены
-    // через `unknown`; брокер же перечисляет, что именно он спрашивает. Приведение одно.
-    knowledge: asPort(knowledge),
-    transfer: knowledgeTransfer,
-    log: fastify.log,
-  });
-  fastify.decorate('knowledgeBroker', knowledgeBroker);
-  fastify.addHook('onClose', async () => knowledge.close());
 
   // CORS нужен только в dev (vite на другом порту). В проде фронт — тот же origin.
   if (config.isDev) {
@@ -1085,10 +1057,6 @@ async function build() {
       }
     },
   });
-  await fastify.register<KnowledgeModuleOptions>(knowledgeModule, {
-    knowledge: asPort(knowledge),
-    transfer: asPort(knowledgeTransfer),
-  });
   await fastify.register(taskShelfModule, { shelf: taskShelf });
   // `speechRuntime` сюда не передаётся: раздел «Медиа» его не читает — распознавание идёт
   // через сам адаптер. Типизация показала, что аргумент был мёртвым.
@@ -1214,12 +1182,6 @@ async function build() {
     blocksArchive: true,
     count: (id) => countGitHubRules(githubConnection, id),
   });
-  projectsService.registerDependencyProvider({
-    kind: 'knowledge',
-    label: 'Записи базы знаний',
-    blocksArchive: false,
-    count: (id) => countKnowledgeRecords(knowledge, id),
-  });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
@@ -1233,7 +1195,6 @@ async function build() {
     permissionQueue,
     sshBroker,
     dbBroker,
-    knowledgeBroker,
   });
   // `config` и `claudeAuth` сюда не передаются: раздел «Настройки» их не читает —
   // авторизацию Claude показывает раздел исполнителей, а пути берутся из сервисов.

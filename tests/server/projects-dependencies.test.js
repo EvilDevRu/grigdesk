@@ -237,12 +237,12 @@ test('сторож: сборка приложения регистрирует �
 
   // Связи собираются в одном месте: разъехавшись по модулям, они перестали бы быть
   // сводкой и стали бы набором случайных проверок.
-  assert.ok(kinds.length >= 8, `провайдеров связей слишком мало: ${kinds.join(', ')}`);
+  assert.ok(kinds.length >= 7, `провайдеров связей слишком мало: ${kinds.join(', ')}`);
   assert.equal(new Set(kinds).size, kinds.length, 'вид связи повторяется');
 
   // Каждый раздел, который хранит ссылку на проект, обязан быть среди провайдеров:
   // пропущенный означает связь, о которой человек узнает уже после архива.
-  for (const kind of ['routes', 'factory', 'ssh', 'db', 'showcase', 'telegram', 'github', 'knowledge']) {
+  for (const kind of ['routes', 'factory', 'ssh', 'db', 'showcase', 'telegram', 'github']) {
     assert.ok(kinds.includes(kind), `нет провайдера связей «${kind}»: ${kinds.join(', ')}`);
   }
 

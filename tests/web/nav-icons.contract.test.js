@@ -56,25 +56,6 @@ test('каждый системный пункт навигации имеет �
   assert.deepEqual(missing, []);
 });
 
-test('страница знаний не зарегистрирована как dock-инструмент', () => {
-  assert.equal(TOOL_REGISTRY.some((tool) => tool.plugin === 'knowledge'), false);
-});
-
-test('маршрут знаний существует как page-only страница', async () => {
-  const router = await readFile(new URL('web/src/router.js', root), 'utf8');
-  const route = router.match(/\{ path: '\/knowledge\/:id\?'[^\n]+/u)?.[0] || '';
-
-  assert.deepEqual({
-    optionalId: route.includes("path: '/knowledge/:id?'"),
-    view: route.includes("import('./views/KnowledgeView.vue')"),
-    pageOnly: !/tool\s*:/.test(route),
-  }, {
-    optionalId: true,
-    view: true,
-    pageOnly: true,
-  });
-});
-
 // Вторая копия карты иконок уже расходилась с первой: у SSH её просто не было, и
 // карточка плагина падала на запасную «деталь пазла».
 test('настройки берут иконки из общей карты, а не из своей копии', async () => {

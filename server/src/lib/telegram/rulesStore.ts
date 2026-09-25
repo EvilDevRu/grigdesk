@@ -502,8 +502,7 @@ export function normalizeRules(list: unknown, { projects = null }: {
       // остаются молчащими, а настройка темы не расползается на соседние темы.
       notifyTaskCreated: src.notifyTaskCreated === true,
       // Human allowlist задаёт само наличие правила. Будущий внешний корпус
-      // переписки шире не выводим из него: локальная SQLite-база знаний этим
-      // флагом не управляется, а внешний текст требует отдельного opt-in.
+      // переписки шире не выводим из него: внешний текст требует отдельного opt-in.
       agentSearch: src.agentSearch === true,
       autoTask: normalizeAutoTask(src.autoTask),
       autoLaunch: normalizeAutoLaunch(src.autoLaunch, where),

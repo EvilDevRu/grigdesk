@@ -11,24 +11,16 @@ const REPO = new URL('../../', import.meta.url);
 // проект уже не проверяется, и лишний слой в каждом spawn и юните.
 const FORBIDDEN_FLAG = /--experimental-strip-types/;
 
-// Гашение предупреждения об экспериментальном `node:sqlite` — ДРУГОЕ обязательство и
-// снимается по своей причине: когда хранилище знаний перестанет быть экспериментальным.
-// Разрешено ровно там, где stdout читают машинно и посторонняя строка ломает разбор.
+// Гашение предупреждения об экспериментальном `node:sqlite` — ДРУГОЕ обязательство. Его
+// единственный потребитель, хранилище базы знаний, снят вместе с ней, поэтому флаг сейчас
+// не разрешён нигде: новый потребитель вносит себя сюда вместе с обоснованием.
 const SQLITE_WARNING_FLAG = /--disable-warning=ExperimentalWarning/;
-const SQLITE_WARNING_ALLOWED = new Set([
-  'bin/knowledge',
-  'bin/cockpit',
-  'bin/restart',
-  'bin/lib/runtime-env.sh',
-  'deploy/install.sh',
-  'deploy/cockpit-server.service',
-]);
+const SQLITE_WARNING_ALLOWED = new Set<string>();
 
 // Где действительно запускают собственные программы: лаунчеры, юнит, установщик,
 // команды пакетов и общий прогон. Приватные каталоги и сборку сюда не включаем.
 const LAUNCH_FILES = [
   'bin/cockpit',
-  'bin/knowledge',
   'bin/launch',
   'bin/restart',
   'bin/lib/runtime-env.sh',

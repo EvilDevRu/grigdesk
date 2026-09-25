@@ -31,7 +31,7 @@ TEST_REPEAT=50 bash tests/engine/run-offline.sh debug-settings-writer.sh
 Только документация:
 
 ```bash
-node --test tests/docs/*.test.mjs
+node --test tests/docs/*.test.mjs tests/docs/*.test.mts
 ```
 
 Сервер и web сохраняют привычные команды:

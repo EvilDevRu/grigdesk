@@ -106,8 +106,8 @@
                           :disabled="!providerWritable || !agentSearchKnown || !policyFingerprint || !!busy"
                           @change="changeAgentSearch">Разрешить поиск coding-агентам проекта</UiCheckbox>
               <p class="hint">
-                Это opt-in будущего внешнего корпуса. Локальную базу знаний он не открывает;
-                человеческий Inbox и его allowlist не расширяются.
+                Это opt-in будущего внешнего корпуса: человеческий Inbox и его allowlist
+                не расширяются.
               </p>
               <p v-if="!agentSearchKnown" class="warn" data-state="agent-search-unknown">
                 Состояние доступа не подтверждено (неизвестно). Обновите правила перед новым изменением.

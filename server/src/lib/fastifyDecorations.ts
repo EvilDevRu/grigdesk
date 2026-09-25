@@ -39,7 +39,6 @@ declare module 'fastify' {
     // Брокеры надзорных инструментов агента.
     dbBroker?: unknown;
     sshBroker?: unknown;
-    knowledgeBroker?: unknown;
     // Реестр исполнителей и разбор арбитра — их подключает сборка приложения.
     executorFor?(id: string): Promise<unknown>;
     providerRegistry?(): Promise<unknown>;

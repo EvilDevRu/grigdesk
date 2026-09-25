@@ -76,11 +76,11 @@ set -euo pipefail
 source "$1"
 PATH="$2/bin:/usr/bin:/bin:$2/bin"
 cockpit_add_cli_paths "$2"
-command -v knowledge
+command -v b24
 printf '%s\n' "$PATH"
 `, 'runtime-env-priority-test', helper, root], { encoding: 'utf8' }).trim().split('\n');
 
-  assert.equal(value[0], path.join(root, 'bin/knowledge'));
+  assert.equal(value[0], path.join(root, 'bin/b24'));
   assert.equal(value[1].split(':')[0], path.join(root, 'bin'));
   assert.equal(value[1].split(':').filter((entry) => entry === path.join(root, 'bin')).length, 1);
 });

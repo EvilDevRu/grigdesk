@@ -26,7 +26,6 @@ const routes = [
   { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { title: 'Видео' } },
   { path: '/inbox', name: 'inbox', component: () => import('./views/InboxView.vue'), meta: { title: 'Входящие' } },
   { path: '/github', name: 'github', component: () => import('./views/GitHubView.vue'), meta: { title: 'GitHub' } },
-  { path: '/knowledge/:id?', name: 'knowledge', component: () => import('./views/KnowledgeView.vue'), meta: { title: 'Знания' } },
   { path: '/telegram', name: 'telegram', component: () => import('./views/TelegramView.vue'), meta: { title: 'Телеграм' } },
   { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue'), meta: { title: 'Настройки' } },
 ];

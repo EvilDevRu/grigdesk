@@ -1,4 +1,3 @@
-import knowledgeSearch from './knowledgeSearch.ts';
 import supervisedDb from './supervisedDb.ts';
 import supervisedSsh from './supervisedSsh.ts';
 
@@ -12,7 +11,7 @@ export interface WorkToolRegistration {
 }
 
 const REGISTRATIONS = Object.freeze([
-  supervisedSsh, knowledgeSearch, supervisedDb,
+  supervisedSsh, supervisedDb,
 ]) as readonly WorkToolRegistration[];
 
 /** Один реестр владеет descriptor, dispatch и очисткой результата рабочих tools. */

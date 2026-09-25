@@ -30,7 +30,6 @@ const LEGACY_SYSTEM_CATEGORY = {
   inbox: 'work',
   telegram: 'work',
   github: 'work',
-  knowledge: 'knowledge',
   ssh: 'dev',
   db: 'dev',
   docker: 'dev',

@@ -180,419 +180,15 @@ test('агентский SSH descriptor содержит только list и ex
   });
 });
 
-test('реестр объявляет knowledge_search для поиска, чтения и правки без выбора проекта', async () => {
-  const tools = await workTools({ projectId: 'project-a', invoke: async () => ({ ok: true }) });
-  const descriptor = tools.descriptors.find((item) => item.name === 'knowledge_search');
-  const schema = JSON.stringify(descriptor || {});
-
-  assert.deepEqual({
-    found: Boolean(descriptor),
-    search: schema.includes('search'),
-    read: schema.includes('read'),
-    write: schema.includes('write'),
-    honestDescription: /прав(?:ить|ка)|измен(?:ять|ение)|записывать/iu
-      .test(descriptor?.description || ''),
-    projectInput: schema.includes('project'),
-  }, {
-    found: true,
-    search: true,
-    read: true,
-    write: true,
-    honestDescription: true,
-    projectInput: false,
-  });
-});
-
-test('Схема knowledge_search различает четыре формы и требует все поля записи', async () => {
-  const tools = await workTools({ projectId: 'project-a', invoke: async () => ({ ok: true }) });
-  const descriptor = tools.descriptors.find((item) => item.name === 'knowledge_search');
-  const branches = Array.isArray(descriptor?.inputSchema?.oneOf)
-    ? descriptor.inputSchema.oneOf
-    : [];
-  const writeBranches = branches.filter((branch) => /"(?:const|enum)":"?write|"write"/u
-    .test(JSON.stringify(branch)));
-  const required = new Set(writeBranches.flatMap((branch) => {
-    const recordRequired = branch?.properties?.record?.required || [];
-    return [...(branch?.required || []), ...recordRequired];
-  }));
-
-  assert.deepEqual({
-    branchCount: branches.length,
-    writeBranchCount: writeBranches.length,
-    rootType: descriptor?.inputSchema?.type,
-    missingRequired: [
-      'action', 'record', 'repository', 'kind', 'title', 'body', 'tags', 'id', 'revision',
-    ].filter((field) => !required.has(field)),
-  }, {
-    branchCount: 4,
-    writeBranchCount: 2,
-    rootType: 'object',
-    missingRequired: [],
-  });
-});
-
-test('агентский knowledge_search не получает export и import', async () => {
-  const tools = await workTools({ projectId: 'project-a', invoke: async () => ({ ok: true }) });
-  const descriptor = tools.descriptors.find((item) => item.name === 'knowledge_search');
-  const schema = JSON.stringify(descriptor || {});
-
-  assert.deepEqual({
-    found: Boolean(descriptor),
-    export: /export|экспорт/iu.test(schema),
-    import: /import|импорт/iu.test(schema),
-  }, {
-    found: true,
-    export: false,
-    import: false,
-  });
-});
-
-test('knowledge_search навязывает task scope и очищает краткую выдачу от путей', async () => {
-  const sentinel = '/tmp/private/knowledge.db';
-  const calls = [];
-  const tools = await workTools({
-    projectId: 'project-a',
-    invoke: async () => [],
-    async knowledgeInvoke(scope, input) {
-      calls.push({ scope, input });
-      return {
-        ok: true,
-        items: [{
-          id: '00000000-0000-4000-8000-000000000001',
-          title: 'Очередь деплоя',
-          tags: ['queue'],
-          fragment: '…после деплоя…',
-          project: 'project-a',
-          body: 'полный текст',
-          dbPath: sentinel,
-        }],
-        dbPath: sentinel,
-      };
-    },
-  });
-  const result = await tools.invoke('knowledge_search', {
-    action: 'search', query: 'деплой', project: 'forged', limit: 3,
-  });
-
-  assert.deepEqual({ calls, result, leaked: JSON.stringify(result).includes(sentinel) }, {
-    calls: [{
-      scope: { projectId: 'project-a' },
-      input: { action: 'search', query: 'деплой', limit: 3 },
-    }],
-    result: {
-      ok: true,
-      items: [{
-        id: '00000000-0000-4000-8000-000000000001',
-        title: 'Очередь деплоя',
-        tags: ['queue'],
-        fragment: '…после деплоя…',
-      }],
-    },
-    leaked: false,
-  });
-});
-
-test('knowledge_search в свободном чате читает общий корпус при null scope', async () => {
-  const scopes = [];
-  const tools = await workTools({
-    projectId: null,
-    invoke: async () => [],
-    async knowledgeInvoke(scope) {
-      scopes.push(scope);
-      return { ok: true, items: [] };
-    },
-  });
-  const result = await tools.invoke('knowledge_search', { action: 'search', query: 'очередь' });
-
-  assert.deepEqual({ scopes, result }, {
-    scopes: [{ projectId: null }],
-    result: { ok: true, items: [] },
-  });
-});
-
-test('knowledge_search проверяет live plugin gate на каждом вызове', async () => {
-  let enabled = false;
-  const tools = await workTools({
-    projectId: 'project-a',
-    invoke: async () => [],
-    async knowledgeInvoke() {
-      return enabled
-        ? { ok: true, items: [] }
-        : { ok: false, error: 'plugin_disabled' };
-    },
-  });
-  const disabled = await tools.invoke('knowledge_search', { action: 'search', query: 'очередь' });
-  enabled = true;
-  const enabledResult = await tools.invoke('knowledge_search', {
-    action: 'search', query: 'очередь',
-  });
-
-  assert.deepEqual({ disabled, enabled: enabledResult }, {
-    disabled: { ok: false, error: 'plugin_disabled' },
-    enabled: { ok: true, items: [] },
-  });
-});
-
-test('knowledge_search read возвращает полный allowlist DTO без абсолютных путей', async () => {
-  const sentinel = '/tmp/private/knowledge.db';
-  const tools = await workTools({
-    projectId: 'project-a',
-    invoke: async () => [],
-    async knowledgeInvoke() {
-      return {
-        ok: true,
-        record: {
-          id: '00000000-0000-4000-8000-000000000001',
-          project: 'project-a',
-          repository: 'main',
-          kind: 'fact',
-          title: 'Очередь деплоя',
-          body: 'Полный текст.',
-          tags: ['queue'],
-          updatedAt: '2026-08-29T00:00:00.000Z',
-          revision: 2,
-          dbPath: sentinel,
-        },
-      };
-    },
-  });
-  const result = await tools.invoke('knowledge_search', {
-    action: 'read', id: '00000000-0000-4000-8000-000000000001',
-  });
-
-  assert.deepEqual(result, {
-    ok: true,
-    record: {
-      id: '00000000-0000-4000-8000-000000000001',
-      project: 'project-a',
-      repository: 'main',
-      kind: 'fact',
-      title: 'Очередь деплоя',
-      body: 'Полный текст.',
-      tags: ['queue'],
-      updatedAt: '2026-08-29T00:00:00.000Z',
-      revision: 2,
-    },
-  });
-});
-
-test('knowledge_search очищает write-ввод и возвращает provenance в allowlist DTO', async () => {
-  const sentinel = '/tmp/private/knowledge.db';
-  const calls = [];
-  const tools = await workTools({
-    projectId: 'project-a',
-    chatKey: 'chat-42',
-    permissionMode: 'acceptEdits',
-    invoke: async () => [],
-    async knowledgeInvoke(scope, input) {
-      calls.push({ scope, input });
-      return {
-        ok: true,
-        record: {
-          id: '00000000-0000-4000-8000-000000000044',
-          project: 'project-a',
-          repository: input.record.repository,
-          kind: input.record.kind,
-          title: input.record.title,
-          body: input.record.body,
-          tags: input.record.tags,
-          updatedAt: '2026-08-30T00:00:00.000Z',
-          revision: 1,
-          provenance: { actor: 'executor', channel: 'chat', ref: 'chat-42' },
-          dbPath: sentinel,
-        },
-      };
-    },
-  });
-  const result = await tools.invoke('knowledge_search', {
-    action: 'write',
-    record: {
-      repository: 'main',
-      kind: 'fact',
-      title: 'Новая запись',
-      body: 'Точное тело.',
-      tags: ['knowledge'],
-      project: 'forged-project',
-      provenance: { actor: 'human', channel: 'cli', ref: 'forged' },
-      dbPath: sentinel,
-    },
-  });
-
-  assert.deepEqual({ calls, result, leaked: JSON.stringify(result).includes(sentinel) }, {
-    calls: [{
-      scope: {
-        projectId: 'project-a',
-        chatKey: 'chat-42',
-        permissionMode: 'acceptEdits',
-      },
-      input: {
-        action: 'write',
-        record: {
-          repository: 'main',
-          kind: 'fact',
-          title: 'Новая запись',
-          body: 'Точное тело.',
-          tags: ['knowledge'],
-        },
-      },
-    }],
-    result: {
-      ok: true,
-      record: {
-        id: '00000000-0000-4000-8000-000000000044',
-        project: 'project-a',
-        repository: 'main',
-        kind: 'fact',
-        title: 'Новая запись',
-        body: 'Точное тело.',
-        tags: ['knowledge'],
-        updatedAt: '2026-08-30T00:00:00.000Z',
-        revision: 1,
-        provenance: { actor: 'executor', channel: 'chat', ref: 'chat-42' },
-      },
-    },
-    leaked: false,
-  });
-});
-
-test('knowledge_search сохраняет текущую ревизию в безопасном ответе конфликта', async () => {
-  const tools = await workTools({
-    projectId: 'project-a',
-    chatKey: 'chat-42',
-    permissionMode: 'acceptEdits',
-    invoke: async () => [],
-    async knowledgeInvoke() {
-      return {
-        ok: false,
-        error: 'knowledge_conflict',
-        currentRevision: 7,
-        dbPath: '/tmp/private/knowledge.db',
-      };
-    },
-  });
-
-  const result = await tools.invoke('knowledge_search', {
-    action: 'write',
-    id: '00000000-0000-4000-8000-000000000044',
-    revision: 6,
-    record: {
-      repository: 'main',
-      kind: 'fact',
-      title: 'Правка',
-      body: 'Исправленный факт.',
-      tags: ['knowledge'],
-    },
-  });
-
-  assert.deepEqual(result, {
-    ok: false,
-    error: 'knowledge_conflict',
-    currentRevision: 7,
-  });
-});
-
-test('knowledge_search не превращает пустой id правки в создание записи', async () => {
-  let calls = 0;
-  const tools = await workTools({
-    projectId: 'project-a',
-    chatKey: 'chat-42',
-    permissionMode: 'acceptEdits',
-    invoke: async () => [],
-    async knowledgeInvoke() {
-      calls += 1;
-      return { ok: true };
-    },
-  });
-
-  const result = await tools.invoke('knowledge_search', {
-    action: 'write',
-    id: '',
-    record: {
-      repository: 'main',
-      kind: 'fact',
-      title: 'Правка',
-      body: 'Исправленный факт.',
-      tags: ['knowledge'],
-    },
-  });
-
-  assert.deepEqual({ result, calls }, {
-    result: { ok: false, error: 'invalid_arguments' },
-    calls: 0,
-  });
-});
-
-test('knowledge_search сохраняет безопасные metadata частичного отказа карты', async () => {
-  const tools = await workTools({
-    projectId: 'project-a',
-    chatKey: 'chat-42',
-    permissionMode: 'acceptEdits',
-    invoke: async () => [],
-    async knowledgeInvoke() {
-      return {
-        ok: false,
-        error: 'maps_refresh_failed',
-        committed: true,
-        id: '00000000-0000-4000-8000-000000000044',
-        revision: 8,
-        dbPath: '/tmp/private/knowledge.db',
-      };
-    },
-  });
-
-  const result = await tools.invoke('knowledge_search', {
-    action: 'write',
-    record: {
-      repository: 'main',
-      kind: 'fact',
-      title: 'Правка',
-      body: 'Исправленный факт.',
-      tags: ['knowledge'],
-    },
-  });
-
-  assert.deepEqual(result, {
-    ok: false,
-    error: 'maps_refresh_failed',
-    committed: true,
-    id: '00000000-0000-4000-8000-000000000044',
-    revision: 8,
-  });
-});
-
-test('knowledge_search не принимает delete даже при переданной ревизии', async () => {
-  let calls = 0;
-  const tools = await workTools({
-    projectId: 'project-a',
-    invoke: async () => [],
-    async knowledgeInvoke() {
-      calls += 1;
-      return { ok: true };
-    },
-  });
-
-  const result = await tools.invoke('knowledge_search', {
-    action: 'delete',
-    id: '00000000-0000-4000-8000-000000000044',
-    revision: 1,
-  });
-
-  assert.deepEqual({ result, calls }, {
-    result: { ok: false, error: 'invalid_arguments' },
-    calls: 0,
-  });
-});
-
 test('реальный work MCP получает descriptors и выполняет tools/call через IPC', async (t) => {
   const { createWorkIpc } = await import('../../server/src/lib/executors/workIpc.ts');
   const calls = [];
   const work = await workTools({
     projectId: 'project-a',
-    invoke: async () => [],
-    async knowledgeInvoke(scope, input) {
+    async invoke(scope, input) {
       await new Promise((resolve) => setImmediate(resolve));
       calls.push({ scope, input });
-      return { ok: true, items: [] };
+      return [{ label: 'Боевой код', role: 'code', host: 'private.example' }];
     },
   });
   const ipc = await createWorkIpc({ workTools: work });
@@ -607,26 +203,26 @@ test('реальный work MCP получает descriptors и выполняе
       id: 3,
       method: 'tools/call',
       params: {
-        name: 'knowledge_search',
-        arguments: { action: 'search', query: 'деплой' },
+        name: 'supervised_ssh',
+        arguments: { action: 'list' },
       },
     },
   ]);
 
   assert.deepEqual({
     tools: responses[1]?.result?.tools?.map((tool) => tool.name),
-    knowledgeRootType: responses[1]?.result?.tools
-      ?.find((tool) => tool.name === 'knowledge_search')?.inputSchema?.type,
+    sshRootType: responses[1]?.result?.tools
+      ?.find((tool) => tool.name === 'supervised_ssh')?.inputSchema?.type,
     calls,
     result: JSON.parse(responses[2]?.result?.content?.[0]?.text || 'null'),
   }, {
-    tools: ['supervised_ssh', 'knowledge_search'],
-    knowledgeRootType: 'object',
+    tools: ['supervised_ssh'],
+    sshRootType: 'object',
     calls: [{
       scope: { projectId: 'project-a' },
-      input: { action: 'search', query: 'деплой' },
+      input: { action: 'list' },
     }],
-    result: { ok: true, items: [] },
+    result: [{ label: 'Боевой код', role: 'code' }],
   });
 });
 
@@ -1029,8 +625,8 @@ test('Kimi передаёт work MCP в ACP и не создаёт вторую 
   });
 });
 
-test('Claude разрешает exact набор SSH и knowledge tools в one-shot и persistent ходах', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-knowledge-claude-argv-'));
+test('Claude разрешает exact набор рабочих tools в one-shot и persistent ходах', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-work-claude-argv-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'fake-claude');
   const trace = path.join(root, 'argv.json');
@@ -1039,7 +635,7 @@ node -e '
   require("node:fs").writeFileSync(process.env.ARGV_TRACE, JSON.stringify(process.argv.slice(1)))
 ' -- "$@"
 printf '%s\n' \
-  '{"type":"result","subtype":"success","result":"ok","session_id":"knowledge-session","usage":{}}'
+  '{"type":"result","subtype":"success","result":"ok","session_id":"work-session","usage":{}}'
 `);
   await chmod(bin, 0o755);
   const mcpConfig = {
@@ -1049,7 +645,7 @@ printf '%s\n' \
   };
   const descriptors = [
     { name: 'supervised_ssh', description: 'SSH', inputSchema: { type: 'object' } },
-    { name: 'knowledge_search', description: 'Знания', inputSchema: { type: 'object' } },
+    { name: 'supervised_db', description: 'БД', inputSchema: { type: 'object' } },
   ];
   const work = { descriptors, invoke: async () => ({ ok: true }) };
   await claude.run({
@@ -1067,18 +663,18 @@ printf '%s\n' \
 
   assert.deepEqual({ oneShot: allowed(oneShot), persistent: allowed(persistent) }, {
     oneShot: [
-      'mcp__cockpit-work__knowledge_search',
+      'mcp__cockpit-work__supervised_db',
       'mcp__cockpit-work__supervised_ssh',
     ],
     persistent: [
-      'mcp__cockpit-work__knowledge_search',
+      'mcp__cockpit-work__supervised_db',
       'mcp__cockpit-work__supervised_ssh',
     ],
   });
 });
 
-test('Codex объявляет и диспатчит knowledge_search как dynamic tool', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-knowledge-codex-tool-'));
+test('Codex объявляет и диспатчит рабочий tool как dynamic tool и отдаёт его результат', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-work-codex-tool-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'codex-fixture');
   const trace = path.join(root, 'trace.jsonl');
@@ -1086,8 +682,8 @@ test('Codex объявляет и диспатчит knowledge_search как dyn
   await chmod(bin, 0o755);
   const calls = [];
   const descriptor = {
-    name: 'knowledge_search',
-    description: 'Поиск и чтение знаний',
+    name: 'sample_lookup',
+    description: 'Поиск по образцу',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -1099,7 +695,7 @@ test('Codex объявляет и диспатчит knowledge_search как dyn
     env: {
       ...process.env,
       COCKPIT_CODEX_FIXTURE_TRACE: trace,
-      COCKPIT_CODEX_FIXTURE_SCENARIO: 'knowledge-tool',
+      COCKPIT_CODEX_FIXTURE_SCENARIO: 'lookup-tool',
       COCKPIT_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
       COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '0',
     },
@@ -1130,68 +726,29 @@ test('Codex объявляет и диспатчит knowledge_search как dyn
     entry.direction === 'client' && entry.message?.method === 'thread/start'
   ))?.message.params.dynamicTools;
 
-  const tool = run.steps.find((step) => step.k === 'tool' && step.id === 'knowledge-call-1');
-  const result = run.steps.find((step) => step.k === 'res' && step.id === 'knowledge-call-1');
+  const tool = run.steps.find((step) => step.k === 'tool' && step.id === 'lookup-call-1');
+  const result = run.steps.find((step) => step.k === 'res' && step.id === 'lookup-call-1');
 
   assert.deepEqual({ declared, calls }, {
     declared: [{ type: 'function', ...descriptor }],
     calls: [{
-      name: 'knowledge_search',
+      name: 'sample_lookup',
       input: { action: 'search', query: 'деплой', limit: 3 },
     }],
   });
-  assert.equal(tool?.name, 'knowledge_search');
+  assert.equal(tool?.name, 'sample_lookup');
   assert.equal(result?.ok, true);
   assert.equal(JSON.parse(result?.text || '{}').items?.[0]?.title, 'Очередь деплоя');
 });
 
-test('Kimi auto-allow применяет exact knowledge tool без provider-подтверждения', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-knowledge-kimi-mcp-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const cwd = path.join(root, 'workspace');
-  await import('node:fs/promises').then(({ mkdir }) => mkdir(cwd, { recursive: true }));
-  const fakeProcess = new KimiWorkMcpProcess('knowledge_search');
-  let prompts = 0;
-  await runContainedKimi({
-    config: {
-      kimiLaunchMode: 'host',
-      kimiRuntimeHome: path.join(root, 'runtime'),
-      kimiHome: path.join(root, 'home'),
-      chatsDir: path.join(root, 'chats'),
-      chatBindingsDir: path.join(root, 'chats', '.bindings'),
-    },
-    chatKey: 'chat-knowledge',
-    cwd,
-    message: 'search',
-    model: 'kimi-code/k3',
-    permissionMode: 'default',
-    providerSettings: { blockDirectSsh: false },
-    mcpServers: [{
-      name: 'cockpit-work', command: '/usr/bin/socat', args: ['STDIO', 'UNIX-CONNECT:/tmp/work.sock'],
-    }],
-    onPermission: async () => {
-      prompts += 1;
-      return { allow: true };
-    },
-    deps: {
-      assertVersion: async () => 'test',
-      buildHostLaunch: async () => ({ command: 'fake', args: [], env: {}, cwdReal: cwd, unit: null }),
-      spawn: () => fakeProcess,
-      stopUnit: async () => {},
-    },
-  });
-
-  assert.equal(prompts, 0);
-});
-
-test('Ollama объявляет и вызывает knowledge_search через общий dispatcher', async () => {
+test('Ollama объявляет и вызывает рабочий tool через общий dispatcher', async () => {
   const calls = [];
   const steps = [];
   const descriptor = {
     type: 'function',
     function: {
-      name: 'knowledge_search',
-      description: 'Поиск и чтение знаний',
+      name: 'sample_lookup',
+      description: 'Поиск по образцу',
       parameters: { type: 'object', properties: { action: { enum: ['search', 'read'] } } },
     },
   };
@@ -1207,7 +764,7 @@ test('Ollama объявляет и вызывает knowledge_search через 
     },
   });
   const result = await toolbox.call({
-    name: 'knowledge_search', args: { action: 'search', query: 'деплой' },
+    name: 'sample_lookup', args: { action: 'search', query: 'деплой' },
   });
 
   assert.deepEqual({
@@ -1215,8 +772,8 @@ test('Ollama объявляет и вызывает knowledge_search через 
     calls,
     result,
   }, {
-    title: 'Поиск и чтение знаний',
-    calls: [{ name: 'knowledge_search', input: { action: 'search', query: 'деплой' } }],
+    title: 'Поиск по образцу',
+    calls: [{ name: 'sample_lookup', input: { action: 'search', query: 'деплой' } }],
     result: { ok: true, items: [] },
   });
 });

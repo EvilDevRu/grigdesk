@@ -18,21 +18,17 @@ export const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // невидим компилятору во всех трёх случаях.
 export const ENTRYPOINTS: readonly string[] = [
     'server/src/app.js',
-    'server/scripts/knowledge-search-preflight.mjs',
     'server/src/lib/chat/permission-mcp.js',
     'server/src/lib/executors/work-mcp.js',
     'server/src/lib/executors/_direct-ssh-policy-hook.js',
     'server/src/workers/cockpit-update-worker.js',
     'server/src/lib/media/ingestWorker.ts',
-    'server/src/lib/search/worker.ts',
-    'server/src/lib/search/cli.ts',
     // Node-помощник движка: его зовут shell-скрипты runner-launcher.sh и
     // runtime-analytics.sh, и импортом это не видно вовсе.
     'engine/lib/runtime-usage.mjs',
     // Конфигурация сборки интерфейса — тоже программа: её исполняет Vite.
     'web/vite.config.js',
     // Фикстуры, которые тест запускает отдельным процессом.
-    'tests/fixtures/knowledge-maps-worker.mjs',
     'tests/fixtures/codex-app-server/rich-turn-0.149.0.mjs',
 ];
 

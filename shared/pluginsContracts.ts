@@ -129,8 +129,8 @@ export const PLUGIN_CATEGORIES: PluginCategory[] = [
   },
   {
     id: 'knowledge',
-    label: 'Знания и показ',
-    hint: 'Проектные факты и материалы о готовой работе.',
+    label: 'Показ работы',
+    hint: 'Материалы о готовой работе: ролики и презентации.',
   },
   {
     id: PLUGIN_CATEGORY_OTHER,

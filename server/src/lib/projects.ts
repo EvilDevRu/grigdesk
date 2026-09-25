@@ -7,7 +7,6 @@
 // Записи реестра бывают двух поколений: старая знает только `repos`, новая — весь
 // паспорт. Читатели получают одну форму через readProjectRecord: разбирать умолчания
 // каждому потребителю по-своему нельзя, иначе они разойдутся между собой.
-import path from 'node:path';
 import { PROFILE_RE, listFactoryProfiles } from './profiles.ts';
 import { loadTriageProfile } from './analysis/profile.ts';
 import type { TriageProfilePaths } from './analysis/profile.ts';
@@ -290,33 +289,4 @@ export async function projectRepos({ config, prefs, id, isFactory = null }: {
     if (repos.length) return normalizeProjectRepos(repos, 'factory');
   }
   return normalizeProjectRepos(readProjectRecord(prefs, id)?.repos ?? [], 'cockpit');
-}
-
-/**
- * Корень, в котором лежат карты знаний проекта. Источник — рабочий каталог агента из
- * профиля фабрики: агент проекта стартует именно там, поэтому до карт дотягивается его
- * собственный @-каскад, а не каскад кокпита. Кокпитный проект без bash-профиля отдаёт
- * единственный репозиторий паспорта. Несколько корней без явного выбора и полное
- * отсутствие путей дают null: карта, положенная наугад, хуже внятного отказа.
- * @returns абсолютный путь или null
- */
-export async function projectMapsRoot({ config, prefs, id, isFactory = null }: {
-  config: ProjectPathsConfig;
-  prefs: ProjectsPrefsReader;
-  id: string;
-  isFactory?: boolean | null;
-}): Promise<string | null> {
-  if (!PROFILE_RE.test(String(id || ''))) {
-    return null;
-  }
-  const factory = isFactory ?? (await listFactoryProfiles(config.profilesDir)).includes(id);
-  if (factory) {
-    const { cwd } = await cachedTriageProfile(config, id);
-    if (cwd && path.isAbsolute(cwd)) {
-      return path.resolve(cwd);
-    }
-  }
-  const repos = normalizeProjectRepos(readProjectRecord(prefs, id)?.repos ?? [], 'cockpit');
-  const only = repos[0];
-  return repos.length === 1 && only ? path.resolve(only.dir) : null;
 }

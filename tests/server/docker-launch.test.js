@@ -40,7 +40,6 @@ async function fixture(t, { stubNpm = false } = {}) {
   if (stubNpm) {
     await writeFile(path.join(directory, 'tools/npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   }
-  await writeFile(path.join(directory, 'server/scripts/knowledge-search-preflight.mjs'), 'export {};\n');
 
   const packageJson = JSON.parse(await readFile(path.join(root, 'server/package.json'), 'utf8'));
   await writeFile(path.join(directory, 'server/package.json'), JSON.stringify({

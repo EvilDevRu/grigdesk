@@ -28,7 +28,6 @@ test('раскрывает цепочку root→cwd, дедуплицирует
     && entry.status === 'skipped: binary'));
   assert.ok(result.sources.some((entry) => entry.target === '../docs/a.md'
     && entry.status === 'skipped: duplicate'));
-  assert.equal(result.sources.some((entry) => entry.target.startsWith('#/knowledge/')), false);
 });
 
 test('лимиты глубины, одного файла и общего объёма применяются до добавления контекста', async (t) => {

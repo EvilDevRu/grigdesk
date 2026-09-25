@@ -67,7 +67,6 @@ function isolatedEnv(root, port) {
     COCKPIT_AUTH_ACCOUNT: path.join(root, 'state/auth.json'),
     COCKPIT_AUTH_SESSIONS: path.join(root, 'state/sessions.json'),
     COCKPIT_CLI_TOKEN_PATH: path.join(root, 'state/cli-token'),
-    COCKPIT_KNOWLEDGE_DB_PATH: path.join(root, 'state/knowledge.db'),
     COCKPIT_TASK_SHELF_PATH: path.join(root, 'state/shelf.json'),
     COCKPIT_TASK_SEEN_PATH: path.join(root, 'state/seen.json'),
     COCKPIT_TASK_FAVORITES_PATH: path.join(root, 'state/favorites.json'),

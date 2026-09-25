@@ -29,7 +29,6 @@ export interface RouteConfig {
   factoryHome: string;
   profilesDir: string;
   factoryConfigRoot: string;
-  knowledgeDbPath?: string;
   deepseekBin?: string;
   deepseekRuntimeHome?: string;
 }
@@ -272,7 +271,6 @@ export function routeLaunchEnv(
   return {
     ...extra,
     PATH: cockpitCliPath(config.rootDir),
-    ...(config.knowledgeDbPath ? { COCKPIT_KNOWLEDGE_DB_PATH: config.knowledgeDbPath } : {}),
     ...(config.deepseekBin ? { COCKPIT_DEEPSEEK_BIN: config.deepseekBin } : {}),
     ...(config.deepseekRuntimeHome
       ? { COCKPIT_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }

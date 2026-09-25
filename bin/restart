@@ -24,11 +24,6 @@ PORT="$COCKPIT_EFFECTIVE_PORT"
 TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
 ENV_ARG=("${COCKPIT_NODE_ENV_ARGS[@]}")
 
-# Отказ probe не является поводом гасить Cockpit: в такой среде degraded
-# будет только knowledge search. DatabaseSync остаётся в этом коротком subprocess.
-node "${COCKPIT_NODE_SQLITE_ARGS[@]}" \
-  "$ROOT/server/scripts/knowledge-search-preflight.mjs" || true
-
 listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
 busy() { listening "$PORT" || listening "$TLS_PORT"; }
 

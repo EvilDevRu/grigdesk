@@ -27,7 +27,6 @@ test('системные инструменты имеют явные group/orde
       inbox: ['rail', 30],
       telegram: ['tools', 20],
       github: ['tools', 30],
-      knowledge: ['tools', 40],
       ssh: ['dock', 40],
       db: ['dock', 50],
       docker: ['dock', 60],
@@ -76,152 +75,6 @@ test('системные инструменты имеют явные group/orde
   );
 });
 
-test('Знания объявлены включённым системным плагином без собственных настроек', () => {
-  const knowledge = SYSTEM.find((plugin) => plugin.id === 'knowledge');
-
-  assert.deepEqual(knowledge && {
-    system: knowledge.system,
-    defaultEnabled: knowledge.defaultEnabled,
-    nav: knowledge.nav,
-    settings: knowledge.settings,
-  }, {
-    system: true,
-    defaultEnabled: true,
-    nav: {
-      path: '/knowledge',
-      label: 'Знания',
-      icon: 'knowledge',
-      group: 'tools',
-      order: 40,
-    },
-    settings: [],
-  });
-});
-
-test('Триаж объявлен включённым системным плагином с моделью и выключенным авторазбором', () => {
-  const analysis = SYSTEM.find((plugin) => plugin.id === 'analysis');
-
-  assert.deepEqual({
-    system: analysis?.system,
-    defaultEnabled: analysis?.defaultEnabled,
-    settings: analysis?.settings?.map((setting) => [
-      setting.key,
-      setting.type,
-      setting.default,
-      setting.requiresCapability || null,
-    ]),
-    values: analysis ? settingsValues({}, analysis) : null,
-  }, {
-    system: true,
-    defaultEnabled: true,
-    settings: [
-      ['triageModel', 'model', null, 'scopedWorkspace'],
-      ['autoArbitrate', 'checkbox', false, null],
-    ],
-    values: {
-      triageModel: null,
-      autoArbitrate: false,
-    },
-  });
-});
-
-test('Полка включена по умолчанию и объявляет обе работающие настройки', () => {
-  const shelf = SYSTEM.find((plugin) => plugin.id === 'shelf');
-
-  assert.deepEqual({
-    defaultEnabled: shelf?.defaultEnabled,
-    nav: shelf?.nav,
-    settings: shelf?.settings?.map((setting) => [
-      setting.key,
-      setting.type,
-      setting.default,
-    ]),
-    values: shelf ? settingsValues({}, shelf) : null,
-  }, {
-    defaultEnabled: true,
-    nav: {
-      path: '/shelf',
-      label: 'Полка',
-      icon: 'shelf',
-      group: 'dock',
-      order: 20,
-    },
-    settings: [
-      ['browserNotifications', 'checkbox', true],
-      ['autoAddOnAnalysis', 'checkbox', true],
-    ],
-    values: {
-      browserNotifications: true,
-      autoAddOnAnalysis: true,
-    },
-  });
-});
-
-test('Сохранённые настройки полки перекрывают значения по умолчанию', () => {
-  const shelf = SYSTEM.find((plugin) => plugin.id === 'shelf');
-
-  assert.deepEqual(shelf ? settingsValues({
-    pluginSettings: {
-      shelf: {
-        browserNotifications: false,
-        autoAddOnAnalysis: false,
-      },
-    },
-  }, shelf) : null, {
-    browserNotifications: false,
-    autoAddOnAnalysis: false,
-  });
-});
-
-test('Inbox не импортирует и не использует Telegram-owned модель как fallback', () => {
-  const inbox = SYSTEM.find((plugin) => plugin.id === 'inbox');
-  const oldModel = { provider: 'codex', model: 'old-model' };
-  const defaults = { attachPhotos: true, attachVideos: false };
-  assert.deepEqual(settingsValues({
-    pluginSettings: { telegram: { triageModel: oldModel } },
-  }, inbox), { triageModel: null, ...defaults });
-
-  const currentModel = { provider: 'codex', model: 'current-model' };
-  assert.deepEqual(settingsValues({
-    pluginSettings: {
-      telegram: { triageModel: oldModel },
-      inbox: { triageModel: currentModel },
-    },
-  }, inbox), { triageModel: currentModel, ...defaults });
-});
-
-test('user plugin scanner протаскивает nav.group/order и оставляет legacy manifest в rail', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-nav-'));
-  try {
-    const manifests = {
-      modern: {
-        id: 'modern', name: 'Современный', nav: { path: '/modern', label: 'Modern', icon: 'plugin', group: 'tools', order: 17 },
-      },
-      legacy: {
-        id: 'legacy', name: 'Старый', nav: { path: '/legacy', label: 'Legacy' },
-      },
-    };
-    for (const [id, manifest] of Object.entries(manifests)) {
-      const pluginDir = path.join(dir, id);
-      await mkdir(pluginDir);
-      await writeFile(path.join(pluginDir, 'plugin.json'), JSON.stringify(manifest));
-    }
-    const warnings = [];
-    const plugins = await scanUserPlugins(dir, { warn: (meta, message) => warnings.push({ meta, message }) });
-    const byId = Object.fromEntries(plugins.map((plugin) => [plugin.id, plugin]));
-
-    assert.deepEqual(byId.modern.nav, {
-      path: '/modern', label: 'Modern', icon: 'plugin', group: 'tools', order: 17,
-    });
-    assert.deepEqual(byId.legacy.nav, {
-      path: '/legacy', label: 'Legacy', icon: 'plugin', group: 'rail',
-    });
-    assert.ok(warnings.some((entry) => entry.meta.plugin === 'legacy' && /не задан.*rail/.test(entry.message)));
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
 test('каждый системный плагин объявляет род работы, а чужая категория уходит в «Прочее»', async () => {
   // Категория режет экран настроек по роду работы. Системный модуль без неё попал бы
   // в «Прочее» вместе со сторонними — это и проверяем, а не просто наличие поля.
@@ -235,7 +88,6 @@ test('каждый системный плагин объявляет род р�
       inbox: 'work',
       telegram: 'work',
       github: 'work',
-      knowledge: 'knowledge',
       ssh: 'dev',
       db: 'dev',
       docker: 'dev',

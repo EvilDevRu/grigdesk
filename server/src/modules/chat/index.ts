@@ -77,11 +77,6 @@ import type { WorkIpc, WorkToolsPort } from '../../lib/executors/workIpc.ts';
 import type { ExecutorAdapter, ExecutorRunInput, ExecutorRunResult } from '../../lib/executors/index.ts';
 import type { SshBroker, BrokerScope, BrokerInput } from '../../lib/ssh/broker.ts';
 import type { DbBroker, DbBrokerScope, DbBrokerInput } from '../../lib/db/broker.ts';
-import type {
-  KnowledgeToolScope,
-  KnowledgeToolInput,
-} from '../../lib/executors/work-tools/knowledgeSearch.ts';
-import type { createKnowledgeBroker } from '../../lib/search/broker.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 
 // HTTP-контракт чата: авторитетные model/session данные проверяются по durable истории.
@@ -235,10 +230,6 @@ interface ChatPrefs extends Record<string, unknown> {
   providerSettings?: Record<string, Record<string, unknown>>;
 }
 
-type KnowledgeWriteContext = NonNullable<
-  Parameters<ReturnType<typeof createKnowledgeBroker>['invoke']>[2]
->;
-
 interface ChatModuleOptions {
   config: CockpitConfig;
   factoryState: Pick<FactoryStateAdapter,
@@ -249,7 +240,6 @@ interface ChatModuleOptions {
   speechRuntime?: SpeechRuntime;
   sshBroker?: SshBroker;
   dbBroker?: DbBroker;
-  knowledgeBroker?: ReturnType<typeof createKnowledgeBroker>;
   permissionQueue?: PermissionQueue;
   speechStreamStartTimeoutMs?: number;
   modelsRegistry?: (config: CockpitConfig) => Promise<ModelRegistry>;
@@ -445,8 +435,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   } = opts;
   const sshBroker = opts.sshBroker || fastify.sshBroker as SshBroker | null || null;
   const dbBroker = opts.dbBroker || fastify.dbBroker as DbBroker | null || null;
-  const knowledgeBroker = opts.knowledgeBroker
-    || fastify.knowledgeBroker as ReturnType<typeof createKnowledgeBroker> | null || null;
   const permissionQueue = (opts.permissionQueue || createPermissionQueue()) as InteractionQueue;
   const workIpcs = new Map<string, WorkIpc>();
   const speechStreamStartTimeoutMs = Number.isInteger(opts.speechStreamStartTimeoutMs)
@@ -1673,31 +1661,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     ].join(':');
     const workToolsValue = createWorkTools({
       projectId: workProjectId,
-      knowledgeProjectId: workProjectId,
       chatKey,
       permissionMode,
       invoke: (scope: BrokerScope, input: BrokerInput) => (sshBroker
         ? sshBroker.invoke(scope, input)
         : Promise.resolve({ ok: false, error: 'not_available' })),
-      knowledgeInvoke: (scope: KnowledgeToolScope, input: KnowledgeToolInput) => {
-        if (!knowledgeBroker) {
-          return Promise.resolve({ ok: false, error: 'knowledge_unavailable' });
-        }
-        if (input.action !== 'write') {
-          return knowledgeBroker.invoke(scope, input as KnowledgeToolInput & Record<string, unknown>);
-        }
-        // MCP и dynamic tools живут дольше хода: подтверждение всегда принадлежит
-        // текущему запуску с тем же scope, а не замыканию первого сообщения.
-        const run = activeRuns.get(chatKey);
-        if (!run || run.workToolScopeKey !== workToolScopeKey) {
-          return Promise.resolve({ ok: false, error: 'permission_denied', reason: 'turn_inactive' });
-        }
-        return knowledgeBroker.invoke(scope, input as KnowledgeToolInput & Record<string, unknown>, {
-          onPermission: run.onPermission as KnowledgeWriteContext['onPermission'],
-          signal: run.ac.signal,
-          isCurrent: () => activeRuns.get(chatKey) === run,
-        });
-      },
       pluginEnabled: (pluginId: string) => fastify.pluginEnabled?.(pluginId) === true,
       dbInvoke: (scope: DbBrokerScope, input: DbBrokerInput) => (dbBroker
         ? dbBroker.invoke(scope, input)

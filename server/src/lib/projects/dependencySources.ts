@@ -32,15 +32,6 @@ export interface RulesConnectionPort {
   acquireInboxLease?: () => RulesLease | Promise<RulesLease>;
 }
 
-/** Порт знаний: нужен ровно один метод — список записей проекта. */
-export interface KnowledgeListPort {
-  list: (input: { project: string; limit?: number }) => Promise<unknown>;
-}
-
-// Сколько записей знаний считать: больше тысячи хранилище всё равно не отдаёт, а
-// сводке важно «есть и сколько примерно», а не точное число за пределами лимита.
-const KNOWLEDGE_LIMIT = 1000;
-
 function accountChanged(): Error {
   return new Error('Аккаунт сменился, пока читались правила: связи не проверены.');
 }
@@ -98,18 +89,4 @@ export function countGitHubRules(
   id: string,
 ): Promise<DependencyCount> {
   return countRules(() => connection.acquireInboxLease?.() as RulesLease, connection, id);
-}
-
-/**
- * Записи знаний проекта. Недоступное хранилище — отказ проверки, а не ноль: знания
- * переживают архив, и прятать проект, не зная про его записи, нельзя.
- */
-export async function countKnowledgeRecords(
-  knowledge: KnowledgeListPort,
-  id: string,
-): Promise<DependencyCount> {
-  const found = await knowledge.list({ project: id, limit: KNOWLEDGE_LIMIT });
-  const items = (found as { items?: unknown } | null)?.items;
-
-  return { count: Array.isArray(items) ? items.length : 0, items: [] };
 }

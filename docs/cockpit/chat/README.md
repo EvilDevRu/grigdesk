@@ -1,0 +1,85 @@
+# Чат и исполнители
+
+Чат, исполнители ИИ, каталог моделей, режимы прав, кольцо контекста и MCP.
+
+Читай перед правкой: `server/src/modules/chat`, `server/src/lib/chat`, `server/src/lib/executors`, `server/src/modules/providers`, `server/src/lib/kimi`, `server/src/lib/deepseek`, `server/src/lib/acp`, `web/src/views/chat`.
+
+## Контракты продукта
+
+- [Контекст разговора и его индикатор](../guide/chat-context.md)
+- [DeepSeek Harness](../guide/deepseek.md)
+- [Прогноз лимитов](../guide/usage-forecast.md)
+
+## Устройство
+
+- [Недоступность исполнителя не отнимает выбор его моделей](unavailable-executor-model-selection.md)
+
+### Kimi
+
+- [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)
+- [Kimi ACP: результаты contract spike](kimi-acp-spike.md)
+- [KimiRuntime: security gate](kimi-runtime-security.md)
+
+### Чат
+
+- [«Требуют вмешательства»: чипы, чтобы вопрос не проехал мимо](intervention-badges.md)
+- [Автопрокрутка](auto-scroll.md)
+- [Вложения (фото) и диктовка](attachments-and-dictation.md)
+- [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
+- [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
+- [Живая сессия исполнителя: агент переживает свой ход](persistent-executor-session.md)
+- [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
+- [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
+- [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
+- [Модульное подключение нового ИИ](executor-integration.md)
+- [Рабочие инструменты Cockpit](work-tools.md)
+- [Режимы прав (--permission-mode)](permission-modes.md)
+- [Спрос ВИСИТ, пока не ответишь (без короткого UI-таймаута)](pending-question-lifetime.md)
+- [Хранилище истории — chats/ в корне проекта](history-storage.md)
+- [Чат (modules/chat)](chat-module.md)
+- [Что реально ушло в запуск (проверка модели и эффорта)](launch-model-and-effort.md)
+- [UI-контекст: чат знает, где пользователь](ui-context.md)
+
+### Исполнители и модели
+
+- [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
+- [В кратком списке Claude — только свежая версия каждого семейства](claude-model-shortlist.md)
+- [Грабли исполнителей и моделей](executor-and-model-pitfalls.md)
+- [Запрет прямого SSH — настройка каждого исполнителя, а не общая политика UI](executor-ssh-policy.md)
+- [Инвалидация каталога учитывает ВСЕ входы](model-catalog-invalidation.md)
+- [Индикатор «вышла новая версия» — есть, автообновления НЕТ](cli-update-indicator.md)
+- [Новые модели Anthropic обнаруживаются сами](anthropic-model-discovery.md)
+- [Подключение нового ИИ — модульное](executor-adapter-boundary.md)
+- [Свои настройки исполнителя объявляет сам executor](executor-settings.md)
+- [Смена ИИ внутри чата](executor-switching.md)
+- [Список моделей Claude — ИЗ БИНАРЯ УСТАНОВЛЕННОГО CLI](claude-model-catalog.md)
+- [Список моделей Codex — ИЗ ОФИЦИАЛЬНОГО APP-SERVER](codex-model-catalog.md)
+- [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
+- [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
+- [Ollama — локальный HTTP-исполнитель](ollama-executor.md)
+
+### Авторизация Claude
+
+- [Авторизация Claude](claude-authentication.md)
+- [Стоп агента](agent-stop.md)
+- [Строка состояния полного чата — не отдельная форма](chat-status-bar.md)
+
+## Грабли
+
+- [«Агент повис» на длинном ходе = лимит ленты глушил не хранение, а трансляцию](turn-feed-broadcast-limit.md)
+- [«Кольцо контекста врёт» = цифра менялась раз в ход, а CLI сжимал контекст посреди хода](live-context-usage.md)
+- [«Переписка потёрлась» = PUT истории упёрся в лимит тела, и клиент ретраил молча](history-request-size-limit.md)
+- [«Я послежу и сообщу» = обещание, которое некому выполнить](agent-lifetime-and-promises.md)
+- [«Codex сжал контекст хода» через четверть часа после ручного сжатия и досье вместо ответа = выжимка не закрывала живую сессию](compaction-session-reset.md)
+- [Абсолютный путь в правах CLI пишется ДВУМЯ слэшами, иначе правило молчит](cli-absolute-path-permissions.md)
+- [Запрет прямого SSH — рубеж кооперативного агента, не same-uid sandbox](ssh-policy-sandbox-limits.md)
+- [Модель Codex пропала из селекта = урезанный каталог устаревшему CLI, а не снятая модель](codex-cli-catalog-compatibility.md)
+- [Переезд Codex на app-server молча сузил рабочую область агента до cwd](codex-workspace-scope.md)
+- [Полоса «Неделя · Fable» растёт без Fable = расход вне этой машины, а не ошибка кокпита](provider-account-usage.md)
+- [Фризы при наборе в чате = черновик сохранялся тем же тяжёлым путём, что и переписка](draft-save-performance.md)
+- [MCP «не удалось получить» и мёртвые кнопки карточки = опрос перезапускал сам себя](mcp-polling-restart-loop.md)
+- [MCP-серверы: «отвалился» = не поднялся на этой сессии, переподключать нечего](mcp-session-startup.md)
+- [Ollama: вся документация проекта в системном промпте = две минуты префилла на ход](ollama-documentation-prefill.md)
+- [Ollama: пустой ответ на второй ход = загруженную модель вычли из памяти дважды](ollama-memory-accounting.md)
+- [Ollama: уровни think принимаются, но не отрабатываются](ollama-thinking-level-support.md)
+- [UI-context — данные, а не полномочия; identity companion-чата принадлежит серверу](ui-context-trust-boundary.md)

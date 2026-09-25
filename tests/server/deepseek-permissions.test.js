@@ -43,12 +43,12 @@ test('read-only и Factory отклоняют запрос без вызова U
 });
 
 test('известный work MCP разрешается только в чате и только известным descriptor', async () => {
-  const context = { title: 'mcp__cockpit-work__knowledge_search', rawInput: {} };
+  const context = { title: 'mcp__cockpit-work__supervised_ssh', rawInput: {} };
   const known = await resolveDeepSeekPermission({
     params,
     context,
     mode: 'workspace-write',
-    workToolNames: new Set(['knowledge_search']),
+    workToolNames: new Set(['supervised_ssh']),
   });
   const unknown = await resolveDeepSeekPermission({
     params,
@@ -61,7 +61,7 @@ test('известный work MCP разрешается только в чат�
     context,
     mode: 'workspace-write',
     factory: true,
-    workToolNames: new Set(['knowledge_search']),
+    workToolNames: new Set(['supervised_ssh']),
   });
   assert.deepEqual(known, selected('allow-once'));
   assert.deepEqual(unknown, selected('reject-once'));

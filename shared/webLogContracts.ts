@@ -336,7 +336,7 @@ export const WEB_LOG_ROUTES = [
   '/', '/board', '/pipeline', '/sandboxes', '/showcase/:id?', '/chats', '/agents',
   '/diff', '/documents', '/terminal', '/ssh', '/db', '/docker', '/routes',
   '/projects/:id?', '/code', '/shelf', '/tools', '/ext/:id', '/video', '/inbox',
-  '/github', '/knowledge/:id?', '/telegram', '/settings',
+  '/github', '/telegram', '/settings',
 ] as const;
 
 const LAYERS = [

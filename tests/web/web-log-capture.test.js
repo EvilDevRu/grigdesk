@@ -109,15 +109,15 @@ test('результат перехода различает успех и по�
   const component = { render: () => null };
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/', component }, { path: '/knowledge/:id?', component }],
+    routes: [{ path: '/', component }, { path: '/projects/:id?', component }],
   });
   const off = installCapture({ app: { config: { errorHandler: null } }, router,
     pinia: { use: () => {} }, log, win: new EventTarget(), doc: new EventTarget() });
 
-  await router.push('/knowledge/private-uuid');
-  await router.push('/knowledge/private-uuid');
+  await router.push('/projects/private-id');
+  await router.push('/projects/private-id');
   const results = log.snapshot().entries.filter((entry) => entry.ev === 'router.nav')
     .map((entry) => [entry.data.to, entry.data.result]);
-  assert.deepEqual(results, [['/knowledge/:id?', 'success'], ['/knowledge/:id?', 'duplicated']]);
+  assert.deepEqual(results, [['/projects/:id?', 'success'], ['/projects/:id?', 'duplicated']]);
   off();
 });

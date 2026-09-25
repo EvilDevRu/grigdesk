@@ -467,8 +467,8 @@ test('Codex не роняет ход на дубле и чужом item/tool/cal
   const f = await fixture(t, 'work-routing');
   const calls = [];
   const descriptor = {
-    name: 'knowledge_search',
-    description: 'Поиск в базе знаний',
+    name: 'sample_lookup',
+    description: 'Поиск по образцу',
     inputSchema: { type: 'object' },
   };
   const result = await codex.run(runOptions(f, {
@@ -483,7 +483,7 @@ test('Codex не роняет ход на дубле и чужом item/tool/cal
 
   assert.equal(result.reply, 'Готово: изменения сохранены.');
   assert.deepEqual(calls, [{
-    name: 'knowledge_search',
+    name: 'sample_lookup',
     input: { action: 'search', query: 'figma', limit: 3 },
   }]);
   const trace = await readTrace(f.trace);

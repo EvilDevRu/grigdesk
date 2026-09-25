@@ -44,34 +44,9 @@ function lineAt(source, index) {
   return source.slice(0, index).split('\n').length;
 }
 
-function uuidRanges(source, pattern) {
-  return [...source.matchAll(pattern)].map((match) => ({
-    start: match.index,
-    end: match.index + match[0].length,
-  }));
-}
-
-function inRanges(index, ranges) {
-  return ranges.some((range) => index >= range.start && index < range.end);
-}
-
-function mapLinkUuidRanges(file, source) {
-  if (!/^docs\/cockpit\/[a-z0-9-]+\.md$/u.test(file)) {
-    return [];
-  }
-  const linePattern = /^- \[[^\n]+\]\(#\/knowledge\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\)(?: ·[^\n]+)?$/gimu;
-  return [...source.matchAll(linePattern)].map((match) => {
-    const offset = match.index + match[0].indexOf(match[1]);
-    return { start: offset, end: offset + match[1].length };
-  });
-}
-
 function scanText(file, source) {
   const hits = [];
   const lower = source.toLocaleLowerCase('ru-RU');
-  const allowedUuidRanges = [
-    ...mapLinkUuidRanges(file, source),
-  ];
 
   const upstreamIndex = lower.indexOf(PUBLIC_UPSTREAM.toLowerCase());
   if (upstreamIndex !== -1 && !PUBLIC_UPSTREAM_FILES.has(file)) {
@@ -91,7 +66,7 @@ function scanText(file, source) {
   }
 
   for (const match of source.matchAll(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/giu)) {
-    if (!isSyntheticUuid(match[0]) && !inRanges(match.index, allowedUuidRanges)) {
+    if (!isSyntheticUuid(match[0])) {
       hits.push(`${file}:${lineAt(source, match.index)}: UUID fixture is not visibly synthetic`);
     }
   }
@@ -139,24 +114,18 @@ test('detector distinguishes private values from documented synthetic fixtures',
   assert.equal(scanText('web/example.vue', PUBLIC_UPSTREAM).length, 1);
 });
 
-test('detector разрешает runtime UUID только в canonical live-ссылке карты', () => {
-  const uuid = ['abcdef12', '3456', '4789', 'abcd', 'ef1234567890'].join('-');
-  const source = `- [Проверенная запись](#/knowledge/${uuid}) · карта, ссылка`;
-
-  assert.deepEqual(scanText('docs/cockpit/knowledge.md', source), []);
-});
-
-test('detector не разрешает битый route, голый UUID и UUID в заголовке карты', () => {
+// Живые ссылки карт снятой базы знаний несли runtime UUID законно; карт больше нет, и
+// документация областей ссылается на файлы, поэтому исключения для UUID не осталось.
+test('detector ловит runtime UUID и в бывшей ссылке карты, и голым', () => {
   const uuid = ['abcdef12', '3456', '4789', 'abcd', 'ef1234567890'].join('-');
   const cases = [
-    `- [Битая ссылка](#/knowlege/${uuid})`,
+    `- [Проверенная запись](#/knowledge/${uuid}) · карта, ссылка`,
     `Голая identity ${uuid}`,
-    `- [Заголовок ${uuid}](#/knowledge/${uuid})`,
   ];
 
   assert.deepEqual(
-    cases.map((source) => scanText('docs/cockpit/example.md', source).length),
-    [1, 1, 1],
+    cases.map((source) => scanText('docs/cockpit/example/README.md', source).length),
+    [1, 1],
   );
 });
 

@@ -21,7 +21,6 @@ function deferred() {
 async function apiFixture(t, {
   ticket = null,
   telegramDiscussion = null,
-  knowledgeBroker = null,
   workProject = null,
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-mode-'));
@@ -118,7 +117,6 @@ async function apiFixture(t, {
       taskChecks.push(String(taskId));
       return knownTasks.has(String(taskId));
     },
-    knowledgeBroker,
   });
   await app.ready();
   t.after(() => app.close());
@@ -231,59 +229,6 @@ test('COMP-MODE-01: смена режима прав создаёт отдель
     statuses: [200, 200],
     distinct: 2,
     carriesModes: [true, true],
-  });
-});
-
-test('COMP-MODE-01: knowledge write получает server-owned plan и chat scope', async (t) => {
-  const calls = [];
-  const fixture = await apiFixture(t, {
-    workProject: 'cockpit',
-    knowledgeBroker: {
-      async invoke(scope, input) {
-        calls.push({ scope, input });
-        return { ok: false, error: 'permission_denied' };
-      },
-    },
-  });
-  fixture.setExecutor('claude', {
-    modesImpl: async () => [{ id: 'plan' }],
-    async runImpl(options) {
-      await options.workTools.invoke('knowledge_search', {
-        action: 'write',
-        record: {
-          repository: 'main',
-          kind: 'fact',
-          title: 'Проверка режима',
-          body: 'Не записывать в plan.',
-          tags: ['knowledge'],
-        },
-      });
-      return { reply: 'ok', steps: [], sessionId: 'plan-scope', cost: 0 };
-    },
-  });
-  const chat = await saveCompanion(fixture.app, { taskId: '44' });
-
-  const response = await fixture.app.inject({
-    method: 'POST',
-    url: '/api/tasks/44/chat',
-    payload: turnPayload(chat),
-  });
-
-  assert.deepEqual({ status: response.statusCode, calls }, {
-    status: 200,
-    calls: [{
-      scope: { projectId: 'cockpit', chatKey: chat.id, permissionMode: 'plan' },
-      input: {
-        action: 'write',
-        record: {
-          repository: 'main',
-          kind: 'fact',
-          title: 'Проверка режима',
-          body: 'Не записывать в plan.',
-          tags: ['knowledge'],
-        },
-      },
-    }],
   });
 });
 

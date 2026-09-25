@@ -49,7 +49,7 @@ test('таблица tool names даёт канонические шаги и о
     ['edit', { file_path: 'src/c.ts', old_string: 'a', new_string: 'b' }, 'Edit'],
     ['grep', { pattern: 'needle' }, 'Grep'],
     ['glob', { pattern: '**/*.ts' }, 'Glob'],
-    ['mcp__cockpit-work__knowledge_search', { query: 'x' }, 'mcp__cockpit-work__knowledge_search'],
+    ['mcp__cockpit-work__supervised_ssh', { action: 'list' }, 'mcp__cockpit-work__supervised_ssh'],
     ['future_tool', {}, 'future_tool'],
   ];
   const steps = calls.flatMap(([title, rawInput], index) => normalize({

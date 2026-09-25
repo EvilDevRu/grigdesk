@@ -234,17 +234,6 @@ export const SYSTEM: PluginManifest[] = [
     settings: [],
   },
   {
-    id: 'knowledge',
-    system: true,
-    defaultEnabled: true,
-    name: 'Знания',
-    version: '1.0.0',
-    description: 'Локальная база проверенных проектных фактов с морфологическим поиском.',
-    category: 'knowledge',
-    nav: { path: '/knowledge', label: 'Знания', icon: 'knowledge', group: 'tools', order: 40 },
-    settings: [],
-  },
-  {
     id: 'ssh',
     system: true,
     defaultEnabled: false,

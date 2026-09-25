@@ -161,8 +161,8 @@ test('supervised_db отсутствует при выключенном пла�
     disabled: disabled.descriptors.map((tool) => tool.name),
     enabled: enabled.descriptors.map((tool) => tool.name),
   }, {
-    disabled: ['supervised_ssh', 'knowledge_search'],
-    enabled: ['supervised_ssh', 'knowledge_search', 'supervised_db'],
+    disabled: ['supervised_ssh'],
+    enabled: ['supervised_ssh', 'supervised_db'],
   });
 });
 
@@ -200,7 +200,7 @@ test('состав work-tools задаёт реестр без fallback-спис
   const offenders = [];
   for (const file of files) {
     const source = await readFile(new URL(`../../${file}`, import.meta.url), 'utf8');
-    if (/supervised_ssh|knowledge_search|supervised_db/u.test(source)) {
+    if (/supervised_ssh|supervised_db/u.test(source)) {
       offenders.push(file);
     }
   }
@@ -229,11 +229,9 @@ test('Claude получает supervised_db в allowedTools только при 
 
   assert.deepEqual({ disabled: allowed(false), enabled: allowed(true) }, {
     disabled: [
-      'mcp__cockpit-work__knowledge_search',
       'mcp__cockpit-work__supervised_ssh',
     ],
     enabled: [
-      'mcp__cockpit-work__knowledge_search',
       'mcp__cockpit-work__supervised_db',
       'mcp__cockpit-work__supervised_ssh',
     ],
@@ -274,8 +272,8 @@ test('Codex получает supervised_db в dynamicTools только при �
   }
 
   assert.deepEqual(snapshots, {
-    disabled: ['knowledge_search', 'supervised_ssh'],
-    enabled: ['knowledge_search', 'supervised_db', 'supervised_ssh'],
+    disabled: ['supervised_ssh'],
+    enabled: ['supervised_db', 'supervised_ssh'],
   });
 });
 
@@ -330,12 +328,12 @@ test('Kimi считает supervised_db доверенным MCP-tool тольк
 
   assert.deepEqual(snapshots, {
     disabled: {
-      descriptors: ['knowledge_search', 'supervised_ssh'],
+      descriptors: ['supervised_ssh'],
       providerPrompts: 1,
       decision: { outcome: { outcome: 'selected', optionId: 'reject' } },
     },
     enabled: {
-      descriptors: ['knowledge_search', 'supervised_db', 'supervised_ssh'],
+      descriptors: ['supervised_db', 'supervised_ssh'],
       providerPrompts: 0,
       decision: { outcome: { outcome: 'selected', optionId: 'once' } },
     },

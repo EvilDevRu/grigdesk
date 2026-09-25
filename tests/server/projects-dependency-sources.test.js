@@ -1,14 +1,13 @@
-// Источники связей проекта: правила Telegram и GitHub и записи знаний.
+// Источники связей проекта: правила Telegram и GitHub.
 //
-// Эти три раздела хранят ссылку на проект не в файле настроек, а у себя: правила —
-// в контексте подключённого аккаунта, знания — в своей базе. Считать их приходится
+// Эти разделы хранят ссылку на проект не в файле настроек, а у себя — в контексте
+// подключённого аккаунта. Считать их приходится
 // через чужой порт, и важно ровно одно: «связей нет» и «проверить не удалось» не
 // должны выглядеть одинаково, иначе архив либо порвёт правило, либо не пройдёт никогда.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   countGitHubRules,
-  countKnowledgeRecords,
   countTelegramRules,
 } from '../../server/src/lib/projects/dependencySources.ts';
 
@@ -99,24 +98,4 @@ test('правила GitHub считаются своим lease', async () => {
   assert.equal(found.count, 2);
   assert.deepEqual(found.items ?? [], []);
   assert.equal(connection.state.released, 1);
-});
-
-test('записи знаний считаются по проекту, а недоступная база — отказ проверки', async () => {
-  const knowledge = {
-    list: async ({ project }) => {
-      assert.equal(project, 'demo');
-
-      return { items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] };
-    },
-  };
-
-  assert.equal((await countKnowledgeRecords(knowledge, 'demo')).count, 3);
-
-  const broken = {
-    list: async () => {
-      throw new Error('worker знаний недоступен');
-    },
-  };
-
-  await assert.rejects(() => countKnowledgeRecords(broken, 'demo'), /worker знаний недоступен/u);
 });

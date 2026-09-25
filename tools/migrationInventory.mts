@@ -85,11 +85,6 @@ export const COMPATIBILITY: readonly CompatibilityEntry[] = Object.freeze([
         removeWhen: 'Обновление прошло хотя бы один релиз с новым именем воркера.',
     },
     {
-        path: 'server/scripts/knowledge-search-preflight.mjs',
-        reason: 'Установленный юнит и лаунчеры зовут preflight по этому имени.',
-        removeWhen: 'Юнит перерисован, лаунчеры указывают на TypeScript-вход.',
-    },
-    {
         path: 'tests/server/cockpit-release.test.js',
         reason: 'Старый воркер обновления прогоняет этот файл в НОВОМ дереве без флагов.',
         removeWhen: 'Обновлятель на TypeScript установлен минимум один релиз.',

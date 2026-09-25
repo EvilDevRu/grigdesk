@@ -49,7 +49,7 @@ function directives(text: string): Directive[] {
     if (fence) return;
     const match = line.match(/^@(\S+)$/u);
     const target = match?.[1] || '';
-    if (target && !target.startsWith('#/knowledge/')) {
+    if (target) {
       result.push({ line: index + 1, target });
     }
   });
