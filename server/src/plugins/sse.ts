@@ -5,6 +5,7 @@
 // сколько окон держат поток прямо сейчас.
 import fp from 'fastify-plugin';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { ServerResponse } from 'node:http';
 
@@ -13,6 +14,9 @@ export interface SsePluginOptions {
 }
 
 type SseListener = (event: string, data?: unknown) => void;
+
+// Один bootId на процесс; переподключение той же вкладки его не меняет.
+const bootId = randomUUID();
 
 async function ssePlugin(fastify: FastifyInstance, opts: SsePluginOptions): Promise<void> {
   const stateDir = opts.stateDir;
@@ -75,7 +79,7 @@ async function ssePlugin(fastify: FastifyInstance, opts: SsePluginOptions): Prom
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
-    res.write(`event: hello\ndata: ${JSON.stringify({ at: Date.now() })}\n\n`);
+    res.write(`event: hello\ndata: ${JSON.stringify({ at: Date.now(), bootId })}\n\n`);
     clients.add(res);
 
     // keep-alive пинг раз в 25 с (чтобы прокси не рвали соединение)

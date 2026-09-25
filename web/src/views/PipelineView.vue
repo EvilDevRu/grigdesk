@@ -1615,7 +1615,9 @@ function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
  * Один canonical id нужен всему снимку модалки, иначе ошибка возникает ещё до её открытия.
  */
 function openStage(t, node) {
-  const nodeId = node.id;
+  const origin = t.graph.nodeOrigins?.[node.id];
+  if (origin && !origin.executable) return;
+  const nodeId = origin?.originId || node.id;
 
   stage.value = {
     task: t.task, id: nodeId, key: t.graph.keys?.[nodeId] || nodeId.toUpperCase(),

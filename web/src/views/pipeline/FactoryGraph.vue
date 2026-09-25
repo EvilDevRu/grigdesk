@@ -82,17 +82,21 @@
 
         <!-- узлы -->
         <component
-          :is="nodeElement"
+          :is="nodeInteractive && node.executable ? UiSvgPressable : 'g'"
           v-for="node in nodeElements"
           :key="node.id"
           class="ng"
           :class="[
             `ns-${node.status}`,
             `nt-${node.kind}`,
-            { clickable: nodeInteractive },
+            {
+              clickable: nodeInteractive && node.executable,
+              selected: node.id === selectedNode,
+            },
           ]"
-          :aria-label="nodeInteractive ? node.label : undefined"
-          :aria-description="nodeInteractive ? node.description : undefined"
+          :aria-current="node.id === selectedNode ? 'true' : undefined"
+          :aria-label="nodeInteractive && node.executable ? node.label : undefined"
+          :aria-description="nodeInteractive && node.executable ? node.description : undefined"
           :data-node="node.id"
           @mouseenter="focusedNode = node.id"
           @mouseleave="focusedNode = null"
@@ -261,6 +265,8 @@ interface EdgeElement {
 
 interface GraphNodeElement {
   id: string;
+  originId: string | null;
+  executable: boolean;
   kind: string;
   label: string;
   labelLines: string[];
@@ -305,6 +311,10 @@ const props = withDefaults(
     // Идущий разбор виден статусом `arb` и гаснет вместе с ним, а этот след остаётся:
     // без него человек не знает, что курсор на узле двигал не он.
     arbitrated?: Record<string, string> | null;
+    // Выбранный узел редактора маршрутов; живой конвейер выбора не держит.
+    selectedNode?: string | null;
+    // Масштаб холста относительно натурального размера, при котором текст читается.
+    scale?: number;
   }>(),
   {
     loopsOn: false,
@@ -312,6 +322,8 @@ const props = withDefaults(
     interactive: false,
     arbitrating: null,
     arbitrated: null,
+    selectedNode: null,
+    scale: 1,
   },
 );
 
@@ -369,7 +381,6 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const nodeInteractive = computed(() => props.interactive || !props.reference);
-const nodeElement = computed(() => (nodeInteractive.value ? UiSvgPressable : 'g'));
 const parallelNodes = computed(() => props.graph.edges
   .filter(([, , , , routing]) => routing === 'to_sandbox')
   .map(([, destination]) => destination));
@@ -482,7 +493,7 @@ const viewBox = computed(() => computeViewBox(
   })),
 ));
 const canvasStyle = computed(() => {
-  const width = Number(viewBox.value.split(' ')[2]);
+  const width = Number(viewBox.value.split(' ')[2]) * props.scale;
 
   return {
     minWidth: `${width}px`,
@@ -515,6 +526,7 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
   // Порядок фокуса следует серверной цепочке, даже когда второй ряд идёт справа налево.
   return Object.keys(graph.pos).map((nodeId) => {
     const definition = graph.nodes[nodeId] ?? ['agent', nodeId, ''];
+    const origin = graph.nodeOrigins?.[nodeId];
     const kind = definition[0];
     const label = definition[1] || nodeId;
     const subtitle = definition[2] || '';
@@ -552,6 +564,8 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
 
     return {
       id: nodeId,
+      originId: origin?.originId ?? nodeId,
+      executable: origin?.executable ?? nodeId !== 'sandbox',
       kind,
       label,
       labelLines,
@@ -591,7 +605,7 @@ function onNodeActivate(
   node: GraphNodeElement,
   event: MouseEvent | KeyboardEvent,
 ): void {
-  if (!nodeInteractive.value) {
+  if (!nodeInteractive.value || !node.executable) {
     return;
   }
 
@@ -650,6 +664,11 @@ function onNodeActivate(
   fill: color-mix(in srgb, var(--node-tone) 12%, var(--surface));
 }
 .node-hit-area { fill: transparent; }
+/* Выбор в редакторе — толщина и акцент контура, а не цвет статуса: статуса там нет. */
+.selected .node-shape {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
 .node-human-ring { fill: none; stroke: var(--node-tone); opacity: .4; }
 .node-kind { color: var(--node-tone); }
 .node-kind path {

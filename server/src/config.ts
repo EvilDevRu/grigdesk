@@ -11,6 +11,7 @@ const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
 const chatsDir = process.env.COCKPIT_CHATS_DIR || path.join(rootDir, 'chats');
 const telegramDir = process.env.COCKPIT_TELEGRAM_DIR || path.join(rootDir, 'telegram');
 const githubDir = process.env.COCKPIT_GITHUB_DIR || path.join(rootDir, 'github');
+const routesDir = process.env.COCKPIT_ROUTES_DIR || path.join(home, '.factory', 'routes');
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
 const deepseekRuntimeHome = process.env.COCKPIT_DEEPSEEK_RUNTIME_HOME
   || path.join(factoryStateDir, 'cockpit-deepseek');
@@ -154,10 +155,14 @@ export const config = {
   // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов — runtime-артефакт движка,
   // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Каталог
   // принадлежит единственному route-store; движок читает тот же путь.
-  routesDir: process.env.COCKPIT_ROUTES_DIR || path.join(home, '.factory', 'routes'),
+  routesDir,
+  // Черновики — отдельная область авторства рядом с опубликованным store.
+  routesAuthoringDir: process.env.COCKPIT_ROUTES_AUTHORING_DIR || `${routesDir}.authoring`,
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
+  // Файловый журнал окна: дневные NDJSON, доступны только владельцу сервера.
+  webLogDir: process.env.COCKPIT_WEB_LOG_DIR || path.join(__dirname, '..', '.state', 'web-log'),
 
 
   // Битрикс24. Куки и креды — В СВОЁМ каталоге (изоляция: свой cookie-файл = нет

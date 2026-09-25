@@ -570,10 +570,11 @@ test('ROUTES-API-11: провал публикатора — 422 с его же 
 test('ROUTES-API-12: схема маршрута строится из машины бандла', async (t) => {
   const { app } = await fixture(t);
   const { routeHash } = (await publishRoute(app)).json();
+  const { catalogHash } = (await publishCatalog(app, routeHash, null)).json();
 
   const response = await app.inject({
     method: 'GET',
-    url: `/api/routes/${PROFILE}/routes/${ROUTE}/${routeHash}/graph`,
+    url: `/api/routes/${PROFILE}/catalog/${catalogHash}/graph?route=${ROUTE}`,
   });
   assert.equal(response.statusCode, 200);
   // Схема — производная от бандла: после обновления рендера тот же hash обязан отдать
@@ -584,8 +585,14 @@ test('ROUTES-API-12: схема маршрута строится из маши�
   assert.equal(graph.route, ROUTE);
   assert.equal(graph.keys.build, 'BUILD');
   // Узлы схемы — из машины (плюс scout каталога и ромб стенда), чужих этапов нет.
+  // Остановка — исход, а не этап: она описана в данных проекции, но не нарисована.
   assert.deepEqual(Object.keys(graph.pos).sort(), ['build', 'sandbox', 'scout']);
+  assert.equal(graph.nodeOrigins['r:quick:stop:done']?.executable, false);
   assert.ok(graph.edges.some(([from, to]) => from === 'scout' && to === 'build'));
+  const routeOnly = await app.inject({ method: 'GET',
+    url: `/api/routes/${PROFILE}/routes/${ROUTE}/${routeHash}/graph` });
+  assert.equal(routeOnly.statusCode, 200);
+  assert.equal(routeOnly.json().graph.nodes.scout, undefined);
 });
 
 test('ROUTES-API-13: схема shared-профиля строится без ромба песочницы', async (t) => {
@@ -597,15 +604,18 @@ test('ROUTES-API-13: схема shared-профиля строится без р
     'profile_workspace_mode() { printf \'shared\\n\'; }\n',
   );
   const { routeHash } = (await publishRoute(app)).json();
+  const { catalogHash } = (await publishCatalog(app, routeHash, null)).json();
 
   const response = await app.inject({
     method: 'GET',
-    url: `/api/routes/${PROFILE}/routes/${ROUTE}/${routeHash}/graph`,
+    url: `/api/routes/${PROFILE}/catalog/${catalogHash}/graph?route=${ROUTE}`,
   });
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['cache-control'], 'private, no-store');
 
   const { graph } = response.json();
   assert.deepEqual(Object.keys(graph.pos).sort(), ['build', 'scout']);
+  assert.equal(graph.nodeOrigins['r:quick:stop:done']?.executable, false);
+  assert.equal(graph.nodes.sandbox, undefined);
   assert.ok(!graph.edges.some(([from, to]) => from === 'sandbox' || to === 'sandbox'));
 });

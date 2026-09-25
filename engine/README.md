@@ -149,14 +149,16 @@ bin/factory <TASK> debug clear
 bin/factory settings debug set off
 ```
 
-Уровни: `off`, `errors`, `decisions`, `verbose`; приоритет —
-`задача → проект → глобальная настройка → off`. Trace лежит рядом с run в
+Уровни: `off`, `errors`, `decisions`, `verbose`. Глобальный уровень — верхний предел:
+`off` выключает debug trace даже при настройке задачи или профиля. Внутри этого предела
+приоритет более строгих значений — `задача → проект → глобальная настройка`.
+Trace лежит рядом с run в
 `state/logs/runs/t<TASK>/<STAGE>/<run-id>/debug.trace.jsonl`. В него не попадают prompt,
 credentials, environment и status/control tokens. Настройки хранятся отдельно от
 `runners.env`, поэтому включение debug не сбрасывает coverage.
 
 Тот же глобальный переключатель доступен в Cockpit: «Настройки → Запуски →
-Диагностическое логирование фабрики». UI вызывает engine writer через API и не хранит
+Диагностическое логирование». UI вызывает engine writer через API и не хранит
 собственную копию настройки.
 
 ---

@@ -159,46 +159,13 @@
       }
     },
     "web/src/services/layers/stack.ts": {
-      "logical-spacing": {
-        "branch->exit: return Boolean((target as Element).closest('[data-escape-owner]'));": 1,
-        "declaration->branch: if (!layer) return;": 1,
-        "declaration->try: try { handled = layer.close(event); } catch (error) { // Ошибка обработчика не должна передать тот же Escape следующему слою. event.preventDefault(); event.stopImmediatePropagation": 1,
-        "branch->effect: event.preventDefault();": 1,
-        "effect->exit: return;": 1,
-        "branch->effect: listeningDocument?.removeEventListener('keydown', onKeydown, true);": 1,
-        "branch->effect: listeningDocument.removeEventListener('keydown', onKeydown, true);": 1,
-        "effect->exit: return () => listeners.delete(listener);": 1,
-        "declaration->branch: if (!element) return null;": 1,
-        "branch->try: try { return element(); } catch { return null; }": 1,
-        "effect->declaration: const token = Symbol(id);": 1,
-        "declaration->effect: layers.set(token, entry);": 1,
-        "declaration->exit: return handle;": 1,
-        "branch->effect: registered = false;": 1
-      },
-      "unbraced-control": {
-        "if (!target || typeof (target as Element).closest !== 'function') return false;": 1,
-        "if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) return;": 1,
-        "if (!layer) return;": 1,
-        "if (handled === false) return;": 1,
-        "if (typeof document === 'undefined' || listeningDocument === document) return;": 1,
-        "if (layers.size > 0 || !listeningDocument) return;": 1,
-        "for (const listener of [...listeners]) listener();": 1,
-        "if (!element) return null;": 1,
-        "if (!registered) return;": 1
-      },
       "function-explanation": {
-        "function onKeydown(event: KeyboardEvent): void { if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) return; const layer = topLayer(); if (!laye": 1,
-        "function ensureListener(): void { if (typeof document === 'undefined' || listeningDocument === document) return; listeningDocument?.removeEventListener('keydown', onKeydown, true);": 1,
         "export function refreshLayerStack(): void { notify(); }": 1,
         "export function subscribeLayerStack(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }": 1,
         "export function activeLayerId(): string | null { return topLayer()?.id ?? null; }": 1,
-        "export function activeLayerElement(): HTMLElement | null { const element = topLayer()?.element; if (!element) return null; try { return element(); } catch { return null; } }": 1,
         "export function isTopLayerToken(token: symbol): boolean { return topLayer()?.token === token; }": 1,
         "export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle { ensureListener(); const token = Symbol(id); const entry: LayerEntry = { token, id,": 1,
         "export function resetLayerStackForTests(): void { layers.clear(); listeners.clear(); sequence = 0; removeListenerWhenIdle(); }": 1
-      },
-      "one-line-function": {
-        "() => { throw error; }": 1
       }
     },
     "web/src/types/uiActions.ts": {

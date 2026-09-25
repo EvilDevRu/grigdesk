@@ -15,6 +15,10 @@ import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { ProjectsError } from '../projects/errors.ts';
 import { registerRoutesApi } from './api.ts';
+import { registerRoutesEditorApi } from './editorApi.ts';
+import { CatalogObserver } from './catalogObserver.ts';
+import type { CatalogObserverScheduler } from './catalogObserver.ts';
+import { RoutesStore } from './store.ts';
 import type { CockpitConfig } from '../../config.ts';
 
 // Реестр проектов кокпита живёт в ещё нетипизированном сторе настроек: объявлено
@@ -25,15 +29,32 @@ export interface RoutesPrefsPort extends ProjectsPrefsPort {
 }
 
 export interface RoutesModuleOptions {
-  config: Pick<CockpitConfig, 'routesDir' | 'profilesDir'>;
+  config: Pick<CockpitConfig, 'routesDir' | 'profilesDir'> & { routesAuthoringDir?: string };
   prefs: RoutesPrefsPort;
+  catalogScheduler?: CatalogObserverScheduler;
 }
 
 async function routesModule(fastify: FastifyInstance, opts: RoutesModuleOptions): Promise<void> {
   const { config, prefs } = opts;
+  const store = new RoutesStore({ baseDir: config.routesDir });
+  const observer = new CatalogObserver(store, (profile, snapshot) => {
+    fastify.sse?.broadcast?.('routes-catalog-changed', { profile, ...snapshot });
+  }, {
+    scheduler: opts.catalogScheduler,
+    onError: (error) => fastify.log.warn({ err: error }, 'routes observer: проверка current'),
+  });
+  fastify.addHook('onClose', async () => observer.close());
   await registerRoutesApi(fastify, {
-    baseDir: config.routesDir,
+    store,
+    observer,
     profilesDir: config.profilesDir,
+  });
+  await registerRoutesEditorApi(fastify, {
+    routesStore: store,
+    observer,
+    authoringDir: config.routesAuthoringDir ?? `${config.routesDir}.authoring`,
+    profilesDir: config.profilesDir,
+    prefs,
   });
 
   // ── Проекты ──

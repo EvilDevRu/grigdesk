@@ -285,6 +285,44 @@ assert_eq 3 "$(wc -l <"$CALLS_LOG")" \
 assert_eq review "$(json_field "$advanced" currentNode)" \
   "retried node commits done and the route advances"
 
+# Пробный шаг получает тот же immutable fixture как JSON: два отсутствующих
+# результата и зафиксированный done должны совпасть с тремя реальными вызовами
+# фейкового раннера dispatcher выше.
+simulation_step() {
+  local observed=$1 counters_json=$2
+  "$NODE_BIN" --input-type=module -e '
+import { pathToFileURL } from "node:url";
+const { ROUTE_DEFINITIONS, bootstrap, bootstrapPrompts, PROFILE_ID } =
+  await import(pathToFileURL(process.argv[1]));
+process.stdout.write(JSON.stringify({
+  catalogInput: { profile: PROFILE_ID, routes: ROUTE_DEFINITIONS,
+    bootstrap, bootstrapPrompts },
+  cursor: { scope: "route", routeId: "trivial", nodeId: "build", terminal: false },
+  counters: JSON.parse(process.argv[3]), outcome: process.argv[2],
+  failureOwner: null, selectedRouteId: null, pinned: false, stepIndex: 1,
+}));
+' "$FACTORY_TESTS_HOME/fixtures/routes-catalog-definitions.mjs" \
+    "$observed" "$counters_json" |
+    "$FACTORY_HOME/bin/factory-route" --profile "$profile_id" editor-step
+}
+
+simulation_counters() {
+  "$NODE_BIN" -e \
+    'process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).counters))' "$1"
+}
+
+simulation_first=$(simulation_step noResult \
+  '{"noResult":{},"productFailure":{},"rewinds":{}}')
+assert_rc 0 "$?" "editor-step принимает тот же fixture маршрута"
+assert_eq noResult "$(json_field "$simulation_first" action retry)" \
+  "первый noResult повторяется как у dispatcher"
+simulation_second=$(simulation_step noResult "$(simulation_counters "$simulation_first")")
+assert_eq noResult "$(json_field "$simulation_second" action retry)" \
+  "второй noResult тратит последний retry-бюджет"
+simulation_done=$(simulation_step done "$(simulation_counters "$simulation_second")")
+assert_eq review "$(json_field "$simulation_done" cursor nodeId)" \
+  "после двух молчаний и done симуляция попадает туда же, куда dispatcher"
+
 ATTEMPT_STATE_ID_OVERRIDE=a_90039003900390039003900390039003
 exhausted_attempt=$(attempt_state_begin_v2 "$exhausted_task" "$profile_id" "$routes_dir")
 begin_rc=$?
@@ -512,11 +550,23 @@ assert_eq done "$(json_field "$hunt_terminal" stop)" \
   "approved no-ship report has a normal done terminal"
 
 # --- Trusted command executor: без модели, со строгим JSON verdict и owner routing ---
+COMMAND_CAPABILITIES="$TEST_ROOT/profiles/$profile_id/routes/editor-capabilities.json"
+mkdir -p -- "$(dirname "$COMMAND_CAPABILITIES")"
+cat >"$COMMAND_CAPABILITIES" <<'JSON'
+{"schema":1,"commands":[{"id":"fixture-verify","label":"Проверка","filesystem":["state-only"]}],"contextSections":[]}
+JSON
+DECLARED_COMMAND_ID=$("$NODE_BIN" -e '
+  const fs = require("node:fs");
+  process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).commands[0].id);
+' "$COMMAND_CAPABILITIES")
 COMMAND_HOOK_LOG="$TEST_ROOT/command-hook.log"
 COMMAND_AGENT_LOG="$TEST_ROOT/command-agent.log"
 COMMAND_OUTCOME=failed
 profile_route_command() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >>"$COMMAND_HOOK_LOG"
+  if [[ "$5" != "$DECLARED_COMMAND_ID" ]]; then
+    return 78
+  fi
   if [[ "$COMMAND_OUTCOME" == failed ]]; then
     printf '%s\n' \
       '{"schema":1,"outcome":"failed","comment":"fixture check failed","failureOwner":"build","findings":[{"id":"fixture-check","summary":"детерминированная проверка не прошла"}]}'
@@ -580,5 +630,139 @@ assert_eq fixture-check "$(json_field "$command_findings" closed 0 id)" \
   "closed command finding remains auditable"
 route_v2_dispatch_until_pause "$command_task" "$command_attempt" 2 >/dev/null
 assert_rc 21 "$?" "command route terminates normally"
+unknown_command_output="$TEST_ROOT/unknown-command.out"
+profile_route_command "$command_task" command verify VERIFY unknown-command state-only \
+  >"$unknown_command_output"
+assert_rc 78 "$?" "trusted hook rejects an ID absent from editor-capabilities.json"
+assert_eq '' "$(cat "$unknown_command_output")" \
+  "unknown command produces no executable verdict"
+
+# Вход в проверяющего: задание → автор → приёмка. Отдельной разведки нет,
+# а новый current не меняет политику уже закреплённой попытки.
+direct_routes="$TEST_ROOT/direct-routes"
+direct_publisher="$TEST_ROOT/publish-direct.mjs"
+cat >"$direct_publisher" <<'JS'
+import { pathToFileURL } from 'node:url';
+
+const [root, baseDir, policy] = process.argv.slice(2);
+const { RoutesStore } = await import(pathToFileURL(`${root}/server/src/modules/routes/store.ts`));
+const fixtures = await import(pathToFileURL(`${root}/tests/engine/fixtures/routes-catalog-definitions.mjs`));
+const route = structuredClone(fixtures.ROUTE_DEFINITIONS.trivial.route);
+route.id = 'direct';
+route.bootstrap = policy;
+route.entry = 'review';
+route.sequence = { main: ['build', 'review'], tail: [] };
+route.nodes = route.nodes.filter((node) => ['build', 'review'].includes(node.id));
+route.nodes.find((node) => node.id === 'review').on.done = { stop: 'done' };
+const prompts = {
+  'prompts/build.base.md': 'Исполни задание из artifacts.plan и открытых findings. Запиши artifacts.report.',
+  'prompts/review.base.md': 'Подготовь задание, затем проверь отчёт. При замечаниях верни автору.',
+};
+for (const node of route.nodes) {
+  node.prompt.requiredContext = ['task', 'artifacts', 'evidence'];
+}
+const bootstrap = structuredClone(fixtures.bootstrap);
+bootstrap.nodes[0].on.done.escalate.routes = ['direct'];
+bootstrap.escalation[0].allowedRoutes = ['direct'];
+const store = new RoutesStore({ baseDir });
+const previous = await store.readCurrent(fixtures.PROFILE_ID);
+const published = await store.publishRoute(fixtures.PROFILE_ID, route.id, { route, prompts });
+const result = await store.publishCatalog(fixtures.PROFILE_ID, {
+  catalog: {
+    schema: 2, profile: fixtures.PROFILE_ID,
+    routes: { direct: published.routeHash }, bootstrap: { file: 'bootstrap/scout.json' },
+  },
+  bootstrap,
+  prompts: fixtures.bootstrapPrompts,
+}, { expectedCatalogHash: previous?.catalogHash ?? null });
+process.stdout.write(result.catalogHash);
+JS
+direct_catalog=$("$NODE_BIN" "$direct_publisher" "$FACTORY_HOME/.." "$direct_routes" skip)
+assert_rc 0 "$?" "двухузловой цикл без SCOUT публикуется в изолированный каталог"
+direct_task=9009
+direct_attempt=$(attempt_state_begin_v2 "$direct_task" "$profile_id" "$direct_routes")
+assert_rc 0 "$?" "попытка прямого входа создаётся"
+attempt_state_select_route_v2 "$direct_task" "$direct_attempt" direct >/dev/null
+assert_rc 0 "$?" "маршрут прямого входа закреплён"
+
+source <(sed -n '/^v2_registry_stage_keys() {/,/^}/p' "$FACTORY_HOME/bin/factory")
+PROFILE=$profile_id ROUTES_DIR=$direct_routes ROUTE=direct \
+  direct_keys=$(v2_registry_stage_keys "$direct_catalog")
+assert_eq 'BUILD REVIEW' "$direct_keys" "реестр не содержит неисполняемого SCOUT"
+
+DIRECT_CALLS="$TEST_ROOT/direct-calls.log"
+: >"$DIRECT_CALLS"
+route_v2_context_for_node() {
+  local findings
+  findings=$(attempt_stage_state_findings_v2 "$1" "$2") || return
+  "$NODE_BIN" - "$FIXTURE_CONTEXT" "$5" "$STATE_DIR" "$findings" <<'JS'
+const fs = require('node:fs');
+const [source, output, state, findings] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(source, 'utf8'));
+value.artifacts = { plan: `${state}/direct.plan`, report: `${state}/direct.report` };
+value.evidence.findings = JSON.parse(findings);
+value.delivery = { mode: 'disabled', actions: [], targetBranches: {}, sourceBranch: 'fixture' };
+fs.writeFileSync(output, JSON.stringify(value));
+JS
+}
+run_agent() {
+  local task=$1 prompt=$2 stage=$3 file result=done verdict='' epoch
+  printf '%s\n' "$stage" >>"$DIRECT_CALLS"
+  epoch=$(wc -l <"$DIRECT_CALLS")
+  case "$stage" in
+    REVIEW)
+      if [[ ! -f "$STATE_DIR/direct.report" ]]; then
+        printf '%s\n' 'Реализовать незакрытый сценарий' >"$STATE_DIR/direct.plan"
+        result=failed
+        verdict=$(run_state_verdict_encode failed build \
+          'remaining-scenario=Требуемый сценарий ещё не реализован') || return
+      else
+        [[ "$(cat "$STATE_DIR/direct.report")" == 'Сценарий проверен' ]] || return 92
+      fi
+      ;;
+    BUILD)
+      [[ "$(cat "$STATE_DIR/direct.plan")" == 'Реализовать незакрытый сценарий' ]] || return 93
+      [[ "$prompt" == *remaining-scenario* ]] || return 94
+      printf '%s\n' 'Сценарий проверен' >"$STATE_DIR/direct.report"
+      ;;
+    *) return 95 ;;
+  esac
+  file=$(run_state_active_file "$task" "$stage") || return
+  _run_state_write "$file" "direct-${stage}-${epoch}" "$epoch" \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    committed "$result" '' "$verdict"
+}
+
+direct_bootstrap=$(route_v2_dispatch_bootstrap "$direct_task" "$direct_attempt")
+assert_rc 0 "$?" "явная политика пропускает отдельную разведку"
+assert_eq skipped "$(json_field "$direct_bootstrap" bootstrap)" "пропуск не выдаётся за работу агента"
+assert_eq '' "$(cat "$DIRECT_CALLS")" "bootstrap не вызывает модель"
+direct_root=$(attempt_state_v2_task_root "$direct_task")
+[[ ! -e "$direct_root/attempts/$direct_attempt/artifacts/bootstrap.json" ]]
+assert_rc 0 "$?" "фиктивный результат SCOUT не создаётся"
+direct_cursor=$(attempt_stage_state_init_v2 "$direct_task" "$direct_attempt" direct)
+assert_rc 0 "$?" "курсор инициализируется без разведки"
+assert_eq review "$(json_field "$direct_cursor" currentNode)" "первым запускается проверяющий"
+route_v2_dispatch_next "$direct_task" "$direct_attempt" >/dev/null
+assert_rc 0 "$?" "постановка проверяющего передаёт незакрытый критерий автору"
+direct_findings=$(attempt_stage_state_findings_v2 "$direct_task" "$direct_attempt")
+assert_eq remaining-scenario "$(json_field "$direct_findings" open 0 id)" "задание сохранено в findings"
+
+"$NODE_BIN" "$direct_publisher" "$FACTORY_HOME/.." "$direct_routes" required >/dev/null
+assert_rc 0 "$?" "новый current снова требует разведку"
+route_v2_dispatch_bootstrap "$direct_task" "$direct_attempt" >/dev/null
+assert_rc 0 "$?" "resume сохраняет skip из прежнего route pin"
+assert_eq REVIEW "$(cat "$DIRECT_CALLS")" "после смены current лишний агент не запускается"
+route_v2_dispatch_next "$direct_task" "$direct_attempt" >/dev/null
+assert_rc 0 "$?" "автор получает план и findings и возвращает отчёт"
+direct_terminal=$(route_v2_dispatch_next "$direct_task" "$direct_attempt")
+assert_rc 0 "$?" "повторная проверка принимает отчёт без ручных ворот"
+assert_eq done "$(json_field "$direct_terminal" stop)" "цикл завершается принятием"
+assert_eq $'REVIEW\nBUILD\nREVIEW' "$(cat "$DIRECT_CALLS")" \
+  "фактический порядок ровно проверка → автор → проверка"
+direct_findings=$(attempt_stage_state_findings_v2 "$direct_task" "$direct_attempt")
+assert_eq 0 "$(json_field "$direct_findings" open length)" "принятие закрывает незавершённые критерии"
+assert_eq remaining-scenario "$(json_field "$direct_findings" closed 0 id)" \
+  "история передачи остаётся в журнале"
 
 finish_tests

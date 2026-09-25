@@ -151,12 +151,14 @@ test('factory debug parser fails closed on malformed CLI output', () => {
 
 test('settings API exposes global debug level and maps invalid input to 400', async () => {
   const calls = [];
+  const broadcasts = [];
   const factoryDebug = {
     show: async (input) => { calls.push(['show', input]); return parseFactoryDebugView(SHOW); },
     set: async (input) => { calls.push(['set', input]); return parseFactoryDebugView(SHOW); },
     clear: async (input) => { calls.push(['clear', input]); return parseFactoryDebugView(SHOW); },
   };
   const app = Fastify({ logger: false });
+  app.decorate('sse', { broadcast: (name) => broadcasts.push(name) });
   await app.register(settingsModule, {
     credsStore: { publicView: () => ({}), write: () => {} },
     b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
@@ -177,6 +179,7 @@ test('settings API exposes global debug level and maps invalid input to 400', as
   assert.deepEqual(calls.at(-1), ['set', {
     scope: 'global', profile: undefined, task: undefined, level: 'off', duration: undefined,
   }]);
+  assert.deepEqual(broadcasts, ['diagnostic-logging']);
 
   factoryDebug.set = async () => { throw new FactoryDebugInputError('bad level'); };
   const bad = await app.inject({
@@ -186,5 +189,6 @@ test('settings API exposes global debug level and maps invalid input to 400', as
   });
   assert.equal(bad.statusCode, 400);
   assert.equal(bad.json().error, 'bad_debug_setting');
+  assert.deepEqual(broadcasts, ['diagnostic-logging']);
   await app.close();
 });

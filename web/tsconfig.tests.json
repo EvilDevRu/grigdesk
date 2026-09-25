@@ -19,6 +19,7 @@
       "vue": ["node_modules/vue"],
       "vue/*": ["node_modules/vue/*"],
       "pinia": ["node_modules/pinia"],
+      "vue-router": ["node_modules/vue-router"],
       "@vue/*": ["node_modules/@vue/*"]
     }
   },

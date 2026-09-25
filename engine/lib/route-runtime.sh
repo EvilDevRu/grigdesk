@@ -99,6 +99,14 @@ if op == "resume":
     ):
         fail()
     print(value["profile"], value["catalogHash"], route["id"], route["hash"], sep="\t")
+elif op == "bootstrap-policy":
+    machine = value.get("machine") if isinstance(value, dict) else None
+    if not isinstance(machine, dict) or machine.get("kind") != "route":
+        fail()
+    policy = machine.get("bootstrap", "required")
+    if policy not in ("required", "skip"):
+        fail()
+    print(policy)
 elif op == "cursor":
     cursor = value
     required = {
@@ -1505,12 +1513,35 @@ route_v2_dispatch_bootstrap() {
   local fanout_mode fanout_max fanout_degrade retry_no_result retry_product
   local provider_attempts provider_strategy browser_policy timeout_class command_id
   local tries_left attempt_no agent_rc
-  local bootstrap_details lifecycle_active=0 execution_open=0 retry_after
+  local bootstrap_details lifecycle_active=0 execution_open=0 retry_after bootstrap_policy
   _route_v2_require_isolation || return
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   _route_v2_require_runner_invariant "$task" || return
   _route_v2_load_attempt "$task" "$attempt" || return
+
+  # Отказ от отдельной разведки принадлежит проверенному immutable-маршруту.
+  # На resume читаем тот же pin; mutable-профиль и новый current его не меняют.
+  # Пропуск не создаёт фиктивных run/result или записи об успешной работе SCOUT.
+  description_tmp=$(mktemp "$(factory_control_root)/.route-v2-bootstrap-policy.XXXXXX") || return 1
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" --profile "$ROUTE_V2_PROFILE" describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" >"$description_tmp" || {
+      rc=$?
+      rm -f -- "$description_tmp"
+      return "$rc"
+    }
+  bootstrap_policy=$(_route_v2_json bootstrap-policy "$description_tmp") || {
+    rc=$?
+    rm -f -- "$description_tmp"
+    return "$rc"
+  }
+  rm -f -- "$description_tmp"
+  if [[ "$bootstrap_policy" == skip ]]; then
+    printf '%s\n' '{"bootstrap":"skipped"}'
+    return 0
+  fi
+
   artifact="$ROUTE_V2_ATTEMPT_DIR/artifacts/bootstrap.json"
   if [[ -e "$artifact" || -L "$artifact" ]]; then
     _route_v2_bootstrap_record validate \

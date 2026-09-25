@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -109,30 +109,44 @@ test('сервер поднимается и закрывает /api гардо�
     await rm(root, { recursive: true, force: true });
   });
 
-  const address = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`сервер не поднялся:\n${log}`)), 90_000);
-    const watch = setInterval(() => {
-      const match = /Server listening at (http:\/\/[^"\s]+)/.exec(log);
+  // При глобальном off logger молчит, поэтому готовность доказывает ответ сокета,
+  // а не строка Fastify в stdout. Тот же запрос проверяет общий auth guard.
+  const address = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 90_000;
+  let response = null;
 
-      if (match) {
-        clearInterval(watch);
-        clearTimeout(timer);
-        resolve(match[1]);
-      }
-    }, 100);
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`сервер завершился с кодом ${child.exitCode}:\n${log}`);
+    }
 
-    child.once('exit', (code) => {
-      clearInterval(watch);
-      clearTimeout(timer);
-      reject(new Error(`сервер завершился с кодом ${code}:\n${log}`));
-    });
-  });
+    try {
+      response = await fetch(`${address}/api/health`, { signal: AbortSignal.timeout(1000) });
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 
-  const response = await fetch(`${address}/api/health`);
+  assert.ok(response, `сервер не поднялся:\n${log}`);
   const body = await response.json();
 
   assert.deepEqual({ status: response.status, error: body.error }, {
     status: 401,
     error: 'unauthorized',
   });
+
+  // Каталог шаблонов журнала окна собирает хук onRoute до регистрации модулей:
+  // в нём должны оказаться маршруты модулей, а не только самого журнала.
+  const token = (await readFile(path.join(root, 'state/cli-token'), 'utf8')).trim();
+  const routes = await fetch(`${address}/api/web-log/routes`, {
+    headers: { 'X-Cockpit-Token': token },
+  });
+  const catalog = (await routes.json()).routes;
+
+  assert.equal(routes.status, 200);
+  assert.ok(catalog.includes('/api/health'), 'маршрут модуля health есть в каталоге');
+  assert.ok(catalog.includes('/api/tasks'), 'маршрут модуля задач есть в каталоге');
+  assert.ok(catalog.includes('/api/web-log/routes'));
+  assert.ok(catalog.every((template) => template.startsWith('/api')));
 });

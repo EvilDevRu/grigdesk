@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import net from 'node:net';
 import qrcode from 'qrcode-generator';
 import { FactoryDebugInputError } from '../../lib/factoryDebug.ts';
+import { DiagnosticLoggingPolicy } from '../../lib/diagnosticLogging.ts';
 import { ModelJobError } from '../../lib/speech/modelJobs.ts';
 import {
   SpeechSettingsConflictError,
@@ -49,6 +50,7 @@ export interface SettingsModuleOptions {
   b24: B24Port;
   prefs: PrefsStore;
   factoryDebug: FactoryDebugSettings;
+  diagnosticLogging?: DiagnosticLoggingPolicy;
   localTls: LocalTlsPort;
   tlsRuntime: { httpPort: number };
   speechRuntime?: SpeechRuntime | null;
@@ -109,6 +111,7 @@ async function settingsModule(
   const {
     credsStore, b24, prefs, factoryDebug, localTls, tlsRuntime, speechRuntime,
   } = opts;
+  const diagnosticLogging = opts.diagnosticLogging ?? new DiagnosticLoggingPolicy(factoryDebug);
   const speechSettings = opts.speechSettings || new SpeechSettingsStore({ prefs });
   const modelJobs = Object.hasOwn(opts, 'modelJobs') ? opts.modelJobs : (speechRuntime?.modelJobs || null);
   let speechMutationTail: Promise<unknown> = Promise.resolve();
@@ -351,7 +354,11 @@ async function settingsModule(
   fastify.get('/api/settings/factory-debug', async (request: SettingsRequest, reply) => {
     const { scope = 'global', profile, task } = request.query || {};
     try {
-      return await factoryDebug.show(debugTarget(scope, profile, task));
+      const target = debugTarget(scope, profile, task);
+
+      return target.scope === 'global'
+        ? await diagnosticLogging.view()
+        : await factoryDebug.show(target);
     } catch (err) {
       if (err instanceof FactoryDebugInputError) {
         return reply.code(400).send({ error: 'bad_debug_setting', message: err.message });
@@ -369,8 +376,19 @@ async function settingsModule(
     } = request.body || {};
     const target = debugTarget(scope, profile, task);
     try {
-      if (clear) return await factoryDebug.clear(target);
-      return await factoryDebug.set({ ...target, level: String(level), duration });
+      const view = target.scope === 'global'
+        ? clear
+          ? await diagnosticLogging.clear()
+          : await diagnosticLogging.set(String(level), duration)
+        : clear
+          ? await factoryDebug.clear(target)
+          : await factoryDebug.set({ ...target, level: String(level), duration });
+
+      if (target.scope === 'global') {
+        fastify.sse?.broadcast?.('diagnostic-logging', { at: Date.now() });
+      }
+
+      return view;
     } catch (err) {
       if (err instanceof FactoryDebugInputError) {
         return reply.code(400).send({ error: 'bad_debug_setting', message: err.message });

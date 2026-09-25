@@ -5,7 +5,8 @@
 // Единственный изменяемый файл — catalog/current.json; его замена защищена CAS и lock-файлом.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 
@@ -85,7 +86,19 @@ export interface CatalogRevision {
 const MANIFEST_FILE = 'manifest.json';
 const CURRENT_FILE = 'current.json';
 const CURRENT_LOCK = '.current.lock';
+const EDITOR_SOURCE_FILE = 'editor-source.json';
 const LOCK_TIMEOUT_MS = 5_000;
+const profileMutationContext = new AsyncLocalStorage<Set<string>>();
+
+export interface RouteProfileMutation {
+  readonly profile: string;
+  readonly catalogDir: string;
+}
+
+export interface RouteEditorSource {
+  mode: 'profile-script' | 'editor';
+  revision: number;
+}
 
 const errorCode = (error: unknown) => (error as { code?: unknown } | null)?.code;
 
@@ -715,25 +728,12 @@ export class RoutesStore {
     }
   }
 
-  /**
-   * Публикует immutable catalog bundle и CAS-ом переставляет current.json.
-   * expectedCatalogHash обязателен: null означает «current ещё не существует».
-   */
-  async publishCatalog(
+  /** Создаёт проверенный immutable catalog bundle, не меняя current.json. */
+  async prepareCatalog(
     profile: string,
     { catalog, bootstrap, prompts }: { catalog: unknown; bootstrap: unknown; prompts: unknown },
-    options: { expectedCatalogHash?: string | null } = {},
-  ): Promise<{ catalogHash: string; created: boolean; currentChanged: boolean }> {
+  ): Promise<{ catalogHash: string; created: boolean }> {
     assertProfileId(profile);
-    if (!Object.hasOwn(options, 'expectedCatalogHash')) {
-      throw storeError(
-        'ROUTES_V2_INVALID_SCHEMA',
-        'publishCatalog требует expectedCatalogHash (null для первой публикации)',
-      );
-    }
-    const expectedCatalogHash = options.expectedCatalogHash ?? null;
-    if (expectedCatalogHash !== null) assertRevisionHash(expectedCatalogHash, 'expectedCatalogHash');
-
     const catalogDoc = validateCatalog(catalog, { profile });
     const { normalized, promptFiles } = this._normalizePrompts(
       prompts,
@@ -756,13 +756,36 @@ export class RoutesStore {
       files,
       manifestMeta: { kind: 'catalog', profile },
     });
+    return { catalogHash: published.hash, created: published.created };
+  }
+
+  /**
+   * Старый profile-script путь сохраняет формат и CAS-семантику ответа.
+   * Проверка source-mode и общий coordinator добавляются в D2.
+   */
+  async publishCatalog(
+    profile: string,
+    input: { catalog: unknown; bootstrap: unknown; prompts: unknown },
+    options: { expectedCatalogHash?: string | null } = {},
+  ): Promise<{ catalogHash: string; created: boolean; currentChanged: boolean }> {
+    assertProfileId(profile);
+    if (!Object.hasOwn(options, 'expectedCatalogHash')) {
+      throw storeError(
+        'ROUTES_V2_INVALID_SCHEMA',
+        'publishCatalog требует expectedCatalogHash (null для первой публикации)',
+      );
+    }
+    const expectedCatalogHash = options.expectedCatalogHash ?? null;
+    if (expectedCatalogHash !== null) assertRevisionHash(expectedCatalogHash, 'expectedCatalogHash');
+    const published = await this.prepareCatalog(profile, input);
     const current = await this._compareAndSwapCurrent(
       profile,
-      published.hash,
+      published.catalogHash,
       expectedCatalogHash,
+      'profile-script',
     );
     return {
-      catalogHash: published.hash,
+      catalogHash: published.catalogHash,
       created: published.created,
       currentChanged: current.changed,
     };
@@ -897,6 +920,12 @@ export class RoutesStore {
     profile: string,
     operation: (catalogDir: string) => Promise<Value>,
   ): Promise<Value> {
+    const lockKey = `${this.baseDir}\0${profile}`;
+    const active = profileMutationContext.getStore();
+    if (active?.has(lockKey)) {
+      throw storeError('ROUTES_V2_LOCKED', 'Повторный захват замка профиля запрещён');
+    }
+
     const catalogDir = await this._ensureDirectory([profile, 'catalog']);
     const lockPath = path.join(catalogDir, CURRENT_LOCK);
     try {
@@ -918,7 +947,13 @@ export class RoutesStore {
     });
     try {
       held.assertHeld();
-      const result = await operation(catalogDir);
+      const keys = new Set(active ?? []);
+      keys.add(lockKey);
+      const result = await profileMutationContext.run(keys, async () => {
+        const { PublicationJournal } = await import('./publicationJournal.ts');
+        await new PublicationJournal(this).recoverUnderMutation({ profile, catalogDir });
+        return operation(catalogDir);
+      });
       held.assertHeld();
       return result;
     } finally {
@@ -926,47 +961,195 @@ export class RoutesStore {
     }
   }
 
-  async _compareAndSwapCurrent(
-    profile: string,
-    desiredHash: string,
-    expectedHash: string | null,
-  ): Promise<{ changed: boolean; catalogHash: string }> {
-    return this._withCurrentLock(profile, async (catalogDir) => {
-      const current = await this._readCurrentPointer(profile);
-      const currentHash = current?.catalogHash ?? null;
-
-      // Повтор запроса после потерянного HTTP-ответа безопасен: желаемое состояние уже
-      // достигнуто, даже если expected у повторного запроса теперь выглядит устаревшим.
-      if (currentHash === desiredHash) return { changed: false, catalogHash: desiredHash };
-      if (currentHash !== expectedHash) {
-        throw storeError(
-          'ROUTES_V2_STALE_REVISION',
-          'current catalog изменился после начала редактирования',
-          { expectedCatalogHash: expectedHash, currentCatalogHash: currentHash, desiredHash },
-        );
+  /** Читает source как данные; отсутствие файла сохраняет legacy default без записи. */
+  async _readEditorSourceAt(catalogDir: string): Promise<RouteEditorSource> {
+    const file = path.join(catalogDir, EDITOR_SOURCE_FILE);
+    let handle: FileHandle;
+    try {
+      handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return { mode: 'profile-script', revision: 0 };
+      throw storeError('routes_authoring_corrupted', 'Источник управления недоступен');
+    }
+    let bytes: Buffer;
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size > 4096) {
+        throw storeError('routes_authoring_corrupted', 'Источник управления повреждён');
       }
+      bytes = await handle.readFile();
+    } finally {
+      await handle.close();
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      throw storeError('routes_authoring_corrupted', 'Источник управления не JSON');
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
+      || Object.keys(parsed).sort().join(',') !== 'mode,revision,schema') {
+      throw storeError('routes_authoring_corrupted', 'Источник управления имеет неверные поля');
+    }
+    const value = parsed as Record<string, unknown>;
+    if (value.schema !== 1 || (value.mode !== 'profile-script' && value.mode !== 'editor')
+      || !Number.isSafeInteger(value.revision) || Number(value.revision) < 1) {
+      throw storeError('routes_authoring_corrupted', 'Источник управления имеет неверную версию');
+    }
+    return { mode: value.mode, revision: Number(value.revision) };
+  }
 
-      const pointer = Buffer.from(serializeRoutesJson({
-        schema: 2,
-        catalogHash: desiredHash,
-      }));
-      const temporary = path.join(
-        catalogDir,
-        `${CURRENT_FILE}.${process.pid}.${randomUUID()}.tmp`,
-      );
+  async readEditorSource(profile: string): Promise<RouteEditorSource> {
+    assertProfileId(profile);
+    let catalogDir: string;
+    try {
+      catalogDir = await this._existingDirectory([profile, 'catalog']);
+    } catch (error) {
+      if (errorCode(error) === 'ROUTES_V2_NOT_FOUND') {
+        return { mode: 'profile-script', revision: 0 };
+      }
+      throw error;
+    }
+    return this._readEditorSourceAt(catalogDir);
+  }
+
+  /** Меняет source и current-ожидание под тем же kernel lock, что защищает CAS. */
+  async switchEditorSource(
+    profile: string,
+    { mode, expectedSourceRevision, expectedCatalogHash }: {
+      mode: RouteEditorSource['mode'];
+      expectedSourceRevision: number;
+      expectedCatalogHash: string | null;
+    },
+  ): Promise<RouteEditorSource> {
+    assertProfileId(profile);
+    if (mode !== 'profile-script' && mode !== 'editor') {
+      throw storeError('ROUTES_V2_INVALID_SCHEMA', 'Неверный источник управления');
+    }
+    if (!Number.isSafeInteger(expectedSourceRevision) || expectedSourceRevision < 0) {
+      throw storeError('ROUTES_V2_INVALID_SCHEMA', 'Неверная ревизия источника');
+    }
+    if (expectedCatalogHash !== null) {
+      assertRevisionHash(expectedCatalogHash, 'expectedCatalogHash');
+    }
+    return this.withProfileMutation(profile, async ({ catalogDir }) => {
+      const source = await this._readEditorSourceAt(catalogDir);
+      const current = await this._readCurrentPointer(profile);
+      if (source.revision !== expectedSourceRevision) {
+        throw storeError('routes_source_conflict', 'Источник управления изменился', {
+          sourceRevision: source.revision,
+        });
+      }
+      if ((current?.catalogHash ?? null) !== expectedCatalogHash) {
+        throw storeError('routes_catalog_conflict', 'Текущий каталог изменился', {
+          currentCatalogHash: current?.catalogHash ?? null,
+        });
+      }
+      if (source.mode === mode) return source;
+      const next = { mode, revision: source.revision + 1 } as const;
+      const temporary = path.join(catalogDir,
+        `${EDITOR_SOURCE_FILE}.${process.pid}.${randomUUID()}.tmp`);
       try {
-        await writeDurable(temporary, pointer);
-        await fs.rename(temporary, path.join(catalogDir, CURRENT_FILE));
+        await writeDurable(temporary, Buffer.from(serializeRoutesJson({ schema: 1, ...next })));
+        await fs.rename(temporary, path.join(catalogDir, EDITOR_SOURCE_FILE));
         await syncDirectory(catalogDir);
       } finally {
         await fs.rm(temporary, { force: true });
       }
-      const saved = await this._readCurrentPointer(profile);
-      if (saved?.catalogHash !== desiredHash) {
-        throw storeError('ROUTES_V2_TAMPERED', 'current.json не сохранил желаемую ревизию');
-      }
-      return { changed: true, catalogHash: desiredHash };
+      return next;
     });
+  }
+
+  /**
+   * Единый межпроцессный замок для изменения авторства и current профиля.
+   * Вложенный захват через этот или существующий CAS-путь отвергается.
+   */
+  async withProfileMutation<Value>(
+    profile: string,
+    operation: (mutation: RouteProfileMutation) => Promise<Value>,
+  ): Promise<Value> {
+    assertProfileId(profile);
+
+    return this._withCurrentLock(profile, async (catalogDir) => operation({
+      profile,
+      catalogDir,
+    }));
+  }
+
+  isProfileMutationActive(profile: string): boolean {
+    assertProfileId(profile);
+    return profileMutationContext.getStore()?.has(`${this.baseDir}\0${profile}`) ?? false;
+  }
+
+  async _compareAndSwapCurrent(
+    profile: string,
+    desiredHash: string,
+    expectedHash: string | null,
+    origin: 'profile-script' | 'editor' | 'rollback' = 'profile-script',
+  ): Promise<{ changed: boolean; catalogHash: string }> {
+    return this._withCurrentLock(profile, async () => this.activatePreparedUnderMutation(
+      profile, desiredHash, expectedHash, { origin },
+    ));
+  }
+
+  /** Единственный CAS для уже удерживаемого lock; вложенный захват запрещён. */
+  async activatePreparedUnderMutation(
+    profile: string,
+    desiredHash: string,
+    expectedHash: string | null,
+    { origin, expectedSourceRevision }: {
+      origin: 'profile-script' | 'editor' | 'rollback';
+      expectedSourceRevision?: number;
+    },
+  ): Promise<{ changed: boolean; catalogHash: string }> {
+    assertProfileId(profile);
+    assertRevisionHash(desiredHash, 'desiredHash');
+    const lockKey = `${this.baseDir}\0${profile}`;
+    if (!profileMutationContext.getStore()?.has(lockKey)) {
+      throw storeError('ROUTES_V2_LOCKED', 'Активация требует замка профиля');
+    }
+    const catalogDir = path.join(this.baseDir, profile, 'catalog');
+    const source = await this._readEditorSourceAt(catalogDir);
+    if (origin !== 'rollback' && source.mode !== origin) {
+      throw storeError('routes_source_conflict',
+        'Источник управления не разрешает активацию этим писателем', {
+          sourceRevision: source.revision,
+        });
+    }
+    if (expectedSourceRevision !== undefined && source.revision !== expectedSourceRevision) {
+      throw storeError('routes_source_conflict', 'Ревизия источника изменена', {
+        sourceRevision: source.revision,
+      });
+    }
+    const current = await this._readCurrentPointer(profile);
+    const currentHash = current?.catalogHash ?? null;
+    // Старый writer сохраняет no-op ответ; editor дополнительно проверяет ожидаемый hash.
+    if (origin !== 'editor' && currentHash === desiredHash) {
+      return { changed: false, catalogHash: desiredHash };
+    }
+    if (currentHash !== expectedHash) {
+      throw storeError(
+        origin === 'editor' ? 'routes_catalog_conflict' : 'ROUTES_V2_STALE_REVISION',
+        'current catalog изменился после начала редактирования',
+        { expectedCatalogHash: expectedHash, currentCatalogHash: currentHash, desiredHash },
+      );
+    }
+    if (currentHash === desiredHash) return { changed: false, catalogHash: desiredHash };
+    const pointer = Buffer.from(serializeRoutesJson({ schema: 2, catalogHash: desiredHash }));
+    const temporary = path.join(catalogDir,
+      `${CURRENT_FILE}.${process.pid}.${randomUUID()}.tmp`);
+    try {
+      await writeDurable(temporary, pointer);
+      await fs.rename(temporary, path.join(catalogDir, CURRENT_FILE));
+      await syncDirectory(catalogDir);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
+    const saved = await this._readCurrentPointer(profile);
+    if (saved?.catalogHash !== desiredHash) {
+      throw storeError('ROUTES_V2_TAMPERED', 'current.json не сохранил желаемую ревизию');
+    }
+    return { changed: true, catalogHash: desiredHash };
   }
 
   /**
@@ -983,7 +1166,8 @@ export class RoutesStore {
       assertRevisionHash(expectedCatalogHash, 'expectedCatalogHash');
     }
     await this.readCatalog(profile, desiredCatalogHash);
-    return this._compareAndSwapCurrent(profile, desiredCatalogHash, expectedCatalogHash);
+    return this._compareAndSwapCurrent(profile, desiredCatalogHash,
+      expectedCatalogHash, 'rollback');
   }
 
   async readCurrent(profile: string): Promise<StoredCatalog | null> {

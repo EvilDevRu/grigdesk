@@ -267,7 +267,8 @@ test('живая строка хода идёт под переписку — п
   assert.equal(lines.length, 1, 'живая строка хода должна быть ровно одна');
   assert.equal(live.element.contains(lines[0].element), true, 'строка стоит не в блоке идущего хода');
   // Последняя строка блока: под шапкой хода и лентой шагов, ничего ниже неё в блоке нет.
-  assert.equal(live.element.lastElementChild, lines[0].element, 'строка стоит не последней в блоке');
+  assert.equal(live.element.lastElementChild === lines[0].element, true,
+    'строка стоит не последней в блоке');
 });
 
 test('без хода живой строки нет — ни в ленте, ни у поля ввода', async (t) => {

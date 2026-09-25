@@ -8,6 +8,8 @@ runner_codex_probe() {
   factory_exec provider codex --version
 }
 
+# Нормализуем локальный каталог без запроса к модели. Числовая версия может быть
+# целой или дробной; требование точки скрывает новое поколение и искажает latest.
 runner_codex_catalog() {
   local cache
   if [[ -n "${FACTORY_CODEX_MODEL_CACHE:-}" ]]; then
@@ -35,7 +37,7 @@ for model in payload.get('models', []):
     priority = model.get('priority')
     if model.get('visibility') != 'list' or not isinstance(slug, str):
         continue
-    match = re.fullmatch(r'gpt-(\d+(?:\.\d+)+)-([a-z][a-z0-9-]*)', slug)
+    match = re.fullmatch(r'gpt-(\d+(?:\.\d+)*)-([a-z][a-z0-9-]*)', slug)
     if not match or not isinstance(priority, int) or priority < 0:
         continue
     fields = (

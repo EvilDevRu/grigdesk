@@ -4,7 +4,7 @@ import type {
   UiLayerName,
   UiLayerRegistrationOptions,
 } from '../../types/uiLayers';
-import { uiLayerPriority } from './priorities';
+import { uiLayerPriority } from './priorities.ts';
 
 interface LayerEntry {
   token: symbol;
@@ -33,54 +33,87 @@ function enabledLayers(): LayerEntry[] {
 }
 
 function topLayer(): LayerEntry | null {
-  return enabledLayers().sort((left, right) => (
-    right.priority - left.priority || right.sequence - left.sequence
-  ))[0] ?? null;
+  return (
+    enabledLayers().sort(
+      (left, right) => right.priority - left.priority || right.sequence - left.sequence,
+    )[0] ?? null
+  );
 }
 
 function targetOwnsEscape(target: EventTarget | null): boolean {
-  if (!target || typeof (target as Element).closest !== 'function') return false;
+  if (!target || typeof (target as Element).closest !== 'function') {
+    return false;
+  }
+
   return Boolean((target as Element).closest('[data-escape-owner]'));
 }
 
+/**
+ * Передаём Escape верхнему активному слою по его политике.
+ * Глобальный обработчик не забирает клавишу у вложенного элемента.
+ */
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) return;
+  if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) {
+    return;
+  }
 
   const layer = topLayer();
-  if (!layer) return;
+
+  if (!layer) {
+    return;
+  }
 
   let handled: boolean | void = false;
+
   try {
     handled = layer.close(event);
   } catch (error) {
     // Ошибка обработчика не должна передать тот же Escape следующему слою.
     event.preventDefault();
     event.stopImmediatePropagation();
-    queueMicrotask(() => { throw error; });
+    queueMicrotask(() => {
+      throw error;
+    });
+
     return;
   }
 
   // `false` означает: верхний слой осознанно оставил Escape себе, но не закрылся.
-  if (handled === false) return;
+  if (handled === false) {
+    return;
+  }
+
   event.preventDefault();
   event.stopImmediatePropagation();
 }
 
+/**
+ * Вешаем один обработчик клавиатуры на текущий document.
+ * При смене документа прежний обработчик снимается.
+ */
 function ensureListener(): void {
-  if (typeof document === 'undefined' || listeningDocument === document) return;
+  if (typeof document === 'undefined' || listeningDocument === document) {
+    return;
+  }
+
   listeningDocument?.removeEventListener('keydown', onKeydown, true);
   listeningDocument = document;
   listeningDocument.addEventListener('keydown', onKeydown, true);
 }
 
 function removeListenerWhenIdle(): void {
-  if (layers.size > 0 || !listeningDocument) return;
+  if (layers.size > 0 || !listeningDocument) {
+    return;
+  }
+
   listeningDocument.removeEventListener('keydown', onKeydown, true);
   listeningDocument = null;
 }
 
 function notify(): void {
-  for (const listener of [...listeners]) listener();
+  for (const listener of [...listeners]) {
+    listener();
+  }
 }
 
 export function refreshLayerStack(): void {
@@ -89,16 +122,35 @@ export function refreshLayerStack(): void {
 
 export function subscribeLayerStack(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => listeners.delete(listener);
 }
+
+/**
+ * Диагностика для журнала окна: вид слоя и номер, локальный для документа.
+ * Строковый id регистрации и DOM-элементы наружу не отдаются.
+ */
+export function getUiLayerDiagnostics(): { id: number; kind: UiLayerName }[] {
+  return enabledLayers().map((layer) => ({ id: layer.sequence, kind: layer.name }));
+}
+
+export const subscribeUiLayerDiagnostics = subscribeLayerStack;
 
 export function activeLayerId(): string | null {
   return topLayer()?.id ?? null;
 }
 
+/**
+ * Возвращаем узел верхнего слоя для безопасного замера.
+ * Ошибка пользовательского getter не ломает работу оболочки.
+ */
 export function activeLayerElement(): HTMLElement | null {
   const element = topLayer()?.element;
-  if (!element) return null;
+
+  if (!element) {
+    return null;
+  }
+
   try {
     return element();
   } catch {
@@ -112,6 +164,7 @@ export function isTopLayerToken(token: symbol): boolean {
 
 export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle {
   ensureListener();
+
   const token = Symbol(id);
   const entry: LayerEntry = {
     token,
@@ -123,6 +176,7 @@ export function registerUiLayer(id: string, options: UiLayerRegistrationOptions)
     enabled: options.enabled,
     element: options.element,
   };
+
   layers.set(token, entry);
   notify();
 
@@ -135,13 +189,17 @@ export function registerUiLayer(id: string, options: UiLayerRegistrationOptions)
     isTop: () => registered && isTopLayerToken(token),
     refresh: refreshLayerStack,
     unregister: () => {
-      if (!registered) return;
+      if (!registered) {
+        return;
+      }
+
       registered = false;
       layers.delete(token);
       notify();
       removeListenerWhenIdle();
     },
   };
+
   return handle;
 }
 

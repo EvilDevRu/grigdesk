@@ -3,6 +3,28 @@
 // нельзя незаметно протащить shell, provider/model policy или новый недетерминированный
 // оператор шаблонов.
 
+import type {
+  RouteCatalogDoc,
+  RouteEscalationRecord,
+  RouteMachineDoc,
+  RouteNodeDoc,
+  RoutePromptBlock,
+} from '../../../../shared/routeDefinition.ts';
+
+export type {
+  RouteCatalogDoc,
+  RouteEscalationRecord,
+  RouteFanout,
+  RouteMachineDoc,
+  RouteNodeDoc,
+  RoutePolicy,
+  RoutePrompt,
+  RoutePromptBlock,
+  RouteRetry,
+  RouteTransitionDoc,
+  RouteWhen,
+} from '../../../../shared/routeDefinition.ts';
+
 const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ENTITY_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 const RUN_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -40,96 +62,6 @@ const PROVIDER_RETRY_STRATEGIES = new Set([
   'runner-failover',
 ]);
 const FORBIDDEN_ROUTE_FIELDS = new Set(['model', 'effort', 'provider']);
-
-// Проверенные формы schema=2. До проверки документ приходит как unknown; каждая
-// функция читает его своей формой сразу после того, как набор ключей доказан.
-export interface RouteWhen {
-  context: string;
-  equals: string | number | boolean | null;
-}
-
-export interface RoutePromptBlock {
-  file: string;
-  when?: RouteWhen;
-}
-
-export interface RoutePrompt {
-  blocks: RoutePromptBlock[];
-  requiredContext: string[];
-}
-
-export interface RoutePolicy {
-  filesystem: string;
-  timeoutClass?: string;
-  budgetClass?: string;
-  browser?: string;
-}
-
-export interface RouteFanout {
-  mode: string;
-  maxExecutors: number;
-  degrade: string;
-}
-
-export interface RouteRetry {
-  noResult: number;
-  productFailure: number;
-  providerFailure: { attempts: number; strategy: string };
-}
-
-// Переход: ровно один из видов, остальные поля отсутствуют.
-export interface RouteTransitionDoc {
-  next?: string;
-  rewind?: string;
-  reset?: string[];
-  stop?: string;
-  escalate?: { routes: string[] };
-}
-
-// Узел машины. Форма зависит от executor: у status нет runKey/on, у gate — policy.
-export interface RouteNodeDoc {
-  id: string;
-  executor: string;
-  phase: string;
-  label?: string;
-  description?: string;
-  runKey?: string;
-  key?: string;
-  owner?: string;
-  emits?: string[];
-  commandId?: string;
-  prompt?: RoutePrompt;
-  policy?: RoutePolicy;
-  fanout?: RouteFanout;
-  retry?: RouteRetry;
-  on?: Record<string, RouteTransitionDoc>;
-  onFailure?: Record<string, RouteTransitionDoc>;
-}
-
-export interface RouteEscalationRecord {
-  from: string;
-  allowedRoutes: string[];
-  requiresHumanWhenPinned: boolean;
-}
-
-export interface RouteMachineDoc {
-  schema: number;
-  kind: string;
-  profile: string;
-  id: string;
-  title?: string;
-  entry: string;
-  sequence: { bootstrap?: string[]; main?: string[]; tail?: string[] };
-  nodes: RouteNodeDoc[];
-  escalation: RouteEscalationRecord[];
-}
-
-export interface RouteCatalogDoc {
-  schema: number;
-  profile: string;
-  routes: Record<string, string>;
-  bootstrap: { file: string };
-}
 
 export class RoutesError extends Error {
   readonly code: string;
@@ -698,7 +630,7 @@ function validateMachine(machine: unknown, {
 }): RouteMachineDoc {
   assertNoExecutionPolicy(machine);
   const required = ['schema', 'kind', 'profile', 'id', 'entry', 'sequence', 'nodes', 'escalation'];
-  assertExactKeys(machine, required, ['title'], 'machine');
+  assertExactKeys(machine, required, kind === 'route' ? ['title', 'bootstrap'] : ['title'], 'machine');
   // Набор ключей доказан, дальше документ читается своей формой.
   const doc = machine as unknown as RouteMachineDoc;
   if (doc.schema !== 2 || doc.kind !== kind) {
@@ -710,6 +642,9 @@ function validateMachine(machine: unknown, {
     fail('ROUTES_V2_INVALID_SCHEMA', 'machine: profile/id не совпадают с адресом bundle', 'machine');
   }
   if (Object.hasOwn(machine, 'title')) assertString(doc.title, 'machine.title', { max: 200 });
+  if (Object.hasOwn(machine, 'bootstrap') && doc.bootstrap !== 'required' && doc.bootstrap !== 'skip') {
+    fail('ROUTES_V2_INVALID_SCHEMA', 'machine.bootstrap: нужны required или skip', 'machine.bootstrap');
+  }
   assertIdentifier(doc.entry, ENTITY_ID_RE, 'machine.entry');
   const { order, phaseById } = collectSequence(doc.sequence, kind);
 
@@ -785,8 +720,15 @@ function validateMachine(machine: unknown, {
       );
     }
   }
-  if (order[0] !== doc.entry) {
-    fail('ROUTES_V2_INVALID_SCHEMA', 'machine.entry должен быть первым узлом sequence', 'machine.entry');
+  // Порядок задаёт направление next/rewind, а entry — первый реально запускаемый
+  // узел. Цикл проверки может начинаться с проверяющего и возвращаться к автору.
+  const entry = nodesById.get(doc.entry);
+  const entryPhase = kind === 'bootstrap' ? 'bootstrap' : 'main';
+  if (!entry || entry.executor === 'status' || entry.phase !== entryPhase) {
+    fail('ROUTES_V2_INVALID_SCHEMA', `machine.entry: нужен исполняемый узел ${entryPhase}`, 'machine.entry');
+  }
+  if (kind === 'bootstrap' && order[0] !== doc.entry) {
+    fail('ROUTES_V2_INVALID_SCHEMA', 'bootstrap.entry должен быть первым узлом sequence', 'machine.entry');
   }
 
   for (const node of nodesById.values()) {

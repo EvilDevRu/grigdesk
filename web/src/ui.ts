@@ -46,6 +46,7 @@ export { default as UiPopover } from './components/overlays/UiPopover.vue';
 export { default as UiTooltip } from './components/overlays/UiTooltip.vue';
 
 export { useUiLayer } from './composables/useUiLayer';
+export { getUiLayerDiagnostics, subscribeUiLayerDiagnostics } from './services/layers/stack';
 export { alertDialog, confirmDialog, promptDialog } from './services/dialogs';
 export type * from './types/uiActions';
 export type * from './types/uiFields';

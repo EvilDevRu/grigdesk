@@ -187,17 +187,27 @@ export class FactoryStateAdapter {
         String(registry.ROUTE),
         String(registry.ROUTE_HASH),
       );
+      let bootstrap: Parameters<typeof buildRouteDef>[0] | undefined;
+      if (/^[a-f0-9]{64}$/.test(registry.CATALOG_HASH || '')) {
+        const catalog = await store.readCatalog(String(registry.PROFILE),
+          String(registry.CATALOG_HASH));
+        if (catalog.catalog.routes[String(registry.ROUTE)] !== registry.ROUTE_HASH) {
+          throw new Error('routeHash не входит в закреплённый catalogHash');
+        }
+        bootstrap = catalog.bootstrap as Parameters<typeof buildRouteDef>[0];
+      }
       // Поля машины в route.json верхнеуровневые (sequence/nodes/entry). Хранилище
       // отдаёт проверенный документ бандла, а машина маршрута объявляет те же поля
       // строже — приведение одно и ровно на границе чтения.
       return buildRouteDef(
         {
           entry: route.entry,
+          bootstrap: route.bootstrap,
           sequence: route.sequence,
           nodes: route.nodes,
         } as Parameters<typeof buildRouteDef>[0],
         String(registry.ROUTE),
-        opts,
+        { ...opts, bootstrap },
       );
     } catch (err) {
       throw new Error(`закреплённый маршрут недоступен или повреждён: ${(err as Error).message}`);
@@ -577,8 +587,11 @@ export class FactoryStateAdapter {
       def = graphForRoute(g, route);
     }
     const runnerConfig = loadRunnerConfig(this.profilesDir, profile);
+    const executablePos = Object.fromEntries(Object.entries(def.pos).filter(([nid]) =>
+      !(def instanceof Object && 'nodeOrigins' in def
+        && def.nodeOrigins[nid]?.executable === false)));
     const statuses = computeNodeStatuses({
-      pf: registry, pos: def.pos, keys: def.keys, optional: def.optional, mtimeMs: mtime,
+      pf: registry, pos: executablePos, keys: def.keys, optional: def.optional, mtimeMs: mtime,
       // Узлы, чей провал ведёт маршрут вперёд, знает только закреплённый бандл;
       // у legacy-графа их нет, и поведение остаётся прежним.
       forwardOnFailure: def.forwardOnFailure || [],
@@ -586,6 +599,16 @@ export class FactoryStateAdapter {
       // захода `running` в реестре остаётся навсегда и в одиночку читается как «повис».
       cursorNode: trusted?.cursor?.node || null,
     });
+    // nodeOrigins описывает и не нарисованные узлы проекции (status, остановки):
+    // статус нужен только узлам змейки, а служебный узел на ней не бывает «пройден».
+    const nodeOrigins = 'nodeOrigins' in def
+      ? Object.fromEntries(Object.entries(def.nodeOrigins).filter(([nid]) => nid in def.pos))
+      : undefined;
+    for (const [nid, origin] of Object.entries(nodeOrigins ?? {})) {
+      if (!origin.executable && nid !== 'sandbox') {
+        statuses[nid] = 'pending';
+      }
+    }
     let loops: LoopFacts = { loops: {}, halted: null, haltMsg: '' };
     try {
       const log = await fsp.readFile(path.join(stateDir, 'logs', `t${task}.stages.log`), 'utf8');
@@ -676,8 +699,9 @@ export class FactoryStateAdapter {
     // счётчик не попадает. Старый event-to-event ledger оставлен для gate wait и
     // исторических read-only реестров: его рабочие интервалы включают простой после
     // падения оркестратора, поэтому для исполняемой попытки ими пользоваться нельзя.
-    const runnerStages = [...new Set(Object.keys(def.pos)
-      .filter((nid) => nid !== 'scout' && def.nodes[nid]?.[0] === 'agent')
+    const runnerStages = [...new Set(Object.keys(executablePos)
+      .filter((nid) => nid !== 'scout' && (!('nodeOrigins' in def)
+        || def.nodeOrigins[nid]?.scope !== 'bootstrap') && def.nodes[nid]?.[0] === 'agent')
       .map((nid) => def.runnerKeys[nid] || def.keys[nid] || nid.toUpperCase()))];
     const workTime = await this.readWorkTime(task, registry, trusted, mtime, {
       stateDir,
@@ -698,7 +722,7 @@ export class FactoryStateAdapter {
     };
 
     // Прогресс: done/skip/idle из узлов маршрута.
-    const chain = Object.keys(def.pos).filter((n) => n !== 'sandbox');
+    const chain = Object.keys(executablePos).filter((n) => n !== 'sandbox');
     const doneCount = chain.filter((n) => ['done', 'skip', 'idle'].includes(String(statuses[n]))).length;
     const cur = chain.find((n) => [
       'run', 'wait', 'premature', 'stall', 'fail', 'skipbad',
@@ -759,6 +783,9 @@ export class FactoryStateAdapter {
       nodes: def.nodes,
       pos: def.pos,
       edges: def.edges,
+      // Без происхождения узлов клиент считает исполняемым любой узел схемы и
+      // открывает на служебном модалку этапа с «Перейти сюда».
+      nodeOrigins,
       statuses,
       nodeMeta,
       // Глобальный override задачи важнее project policy и должен быть виден уже

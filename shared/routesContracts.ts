@@ -6,6 +6,23 @@
 
 import { contractDecoders } from './contractDecoders.ts';
 
+export {
+  parseRouteDraft,
+  parseRouteDraftList,
+  parseRouteEditorIssue,
+  parseRoutePublication,
+  ROUTES_EDITOR_LIMITS,
+} from './routesEditorContracts.ts';
+
+export type {
+  DraftOperation,
+  RouteDraft,
+  RouteDraftContent,
+  RouteDraftSummary,
+  RouteEditorIssue,
+  RoutePublication,
+} from './routesEditorContracts.ts';
+
 export class RoutesContractError extends Error {
   constructor(path: string) {
     super(`Некорректный ответ раздела маршрутов: поле ${path}`);

@@ -8,7 +8,10 @@
 // отдаёт сам сервер, и в dev через vite-proxy). Задел «сменный мозг»: адрес — одна настройка.
 const BASE = (import.meta.env?.VITE_BRAIN_URL || '').replace(/\/$/, '');
 // База для WebSocket (терминал): тот же хост, схема http→ws / https→wss.
-const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : '')).replace(/^http/, 'ws');
+const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : '')).replace(
+  /^http/,
+  'ws',
+);
 
 // Авторизация — сессионная httpOnly-cookie, её ставит сервер на входе. Никаких секретов
 // в клиентском коде: прежний VITE_COCKPIT_TOKEN попадал в бандл открытым текстом (Vite
@@ -122,7 +125,112 @@ async function handle(res: Response, path: string): Promise<unknown> {
   return data;
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+type ApiLogSink = (event: 'api.fail' | 'api.slow', data: Record<string, unknown>) => void;
+
+let logSink: ApiLogSink | null = null;
+const reportedErrors = new WeakSet<object>();
+
+/**
+ * Подключаем runtime журнала к общей точке наблюдения API.
+ * Сам транспорт журнала эту точку не использует.
+ */
+export function setApiLogSink(sink: ApiLogSink | null): void {
+  logSink = sink;
+}
+
+/**
+ * Ошибка уже записана журналом как api.fail. Ловушка store.error по этому
+ * признаку не дублирует ту же неудачу второй, более тяжёлой записью.
+ */
+export function isReportedApiError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && reportedErrors.has(error);
+}
+
+/**
+ * Передаём безопасную категорию сбоя или медленного ответа.
+ * Ошибка журнала не меняет исход прикладного запроса.
+ */
+function reportApi(event: 'api.fail' | 'api.slow', data: Record<string, unknown>): void {
+  try {
+    logSink?.(event, data);
+  } catch {
+    /* журнал не влияет на API */
+  }
+}
+
+function elapsed(start: number): number {
+  return Math.max(0, performance.now() - start);
+}
+
+/**
+ * Сообщаем журналу исход попытки. Путь уходит без query и hash, а шаблоном
+ * его делает runtime журнала; текст ответа и тело запроса не передаются.
+ */
+function reportAttempt(
+  method: Method,
+  path: string,
+  ms: number,
+  attempt: number,
+  error?: unknown,
+  willRetry = false,
+): void {
+  const route = path.split(/[?#]/u, 1)[0] ?? '';
+
+  if (ms > 10_000) {
+    reportApi('api.slow', {
+      method,
+      path: route,
+      ms,
+      attempt,
+    });
+  }
+  if (error === undefined) {
+    return;
+  }
+
+  const status = error instanceof ApiError ? error.status : undefined;
+
+  if (status === 401 && path.startsWith('/api/auth/')) {
+    return;
+  }
+
+  const name = error instanceof Error ? error.name : 'Error';
+
+  if (typeof error === 'object' && error !== null) {
+    reportedErrors.add(error);
+  }
+
+  reportApi('api.fail', {
+    method,
+    path: route,
+    ms,
+    attempt,
+    willRetry,
+    ...(status === undefined ? { name } : { status }),
+  });
+}
+
+/**
+ * Оборачиваем отдельный запрос без изменения его результата.
+ * Успех и ошибка получают длительность одной и той же попытки.
+ */
+async function observed<T>(method: Method, path: string, work: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+
+  try {
+    const result = await work();
+
+    reportAttempt(method, path, elapsed(start), 1);
+
+    return result;
+  } catch (error) {
+    reportAttempt(method, path, elapsed(start), 1, error);
+
+    throw error;
+  }
+}
 
 /**
  * Один запрос к серверу: тело сериализуется JSON-ом, ответ отдаётся как `unknown`.
@@ -146,33 +254,49 @@ async function request(method: Method, path: string, body?: unknown): Promise<un
   // оборваться, а ЗАВИСНУТЬ (соединение в подвешенном состоянии) — раздел тогда
   // вечно показывает «Загрузка…». 30с покрывает даже медленный B24-портал.
   const isGet = method === 'GET';
-  const attempt = () => fetch(url(path), {
-    ...opts,
-    ...(isGet && typeof AbortSignal?.timeout === 'function'
-      ? { signal: AbortSignal.timeout(30000) }
-      : {}),
-  });
+  const attempt = () =>
+    fetch(url(path), {
+      ...opts,
+      ...(isGet && typeof AbortSignal?.timeout === 'function'
+        ? { signal: AbortSignal.timeout(30000) }
+        : {}),
+    });
 
-  try {
-    return await handle(await attempt(), path);
-  } catch (error) {
-    // Сетевой обрыв (TypeError) или таймаут. В частности, docker может поднять/снести
-    // сеть стенда → Chrome видит «сеть изменилась» и рубит ВСЕ
-    // летящие запросы (ERR_NETWORK_CHANGED), даже на localhost. Сервер при этом
-    // жив — GET безопасно повторить один раз. Мутации не повторяем: неизвестно,
-    // дошла ли первая (риск дубля).
-    const name = (error as { name?: string } | null)?.name;
+  for (let number = 1; number <= (isGet ? 2 : 1); number += 1) {
+    const start = performance.now();
 
-    if (isGet && (error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError')) {
+    try {
+      const result = await handle(await attempt(), path);
+
+      reportAttempt(method, path, elapsed(start), number);
+
+      return result;
+    } catch (error) {
+      // Сетевой обрыв (TypeError) или таймаут. В частности, docker может поднять/снести
+      // сеть стенда → Chrome видит «сеть изменилась» и рубит ВСЕ
+      // летящие запросы (ERR_NETWORK_CHANGED), даже на localhost. Сервер при этом
+      // жив — GET безопасно повторить один раз. Мутации не повторяем: неизвестно,
+      // дошла ли первая (риск дубля).
+      const name = (error as { name?: string } | null)?.name;
+
+      const willRetry =
+        isGet &&
+        number === 1 &&
+        (error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError');
+
+      reportAttempt(method, path, elapsed(start), number, error, willRetry);
+
+      if (!willRetry) {
+        throw error;
+      }
+
       await new Promise((resolve) => {
         setTimeout(resolve, 700);
       });
-
-      return handle(await attempt(), path);
     }
-
-    throw error;
   }
+
+  throw new Error('api_retry_exhausted');
 }
 
 export interface UploadOptions {
@@ -191,9 +315,10 @@ async function upload(
 ): Promise<unknown> {
   // У загрузок общий таймаут опасен: видео на гигабайты и короткая диктовка имеют
   // разные бюджеты. Вызывающий включает его явно; переданный AbortSignal сильнее.
-  const timeoutSignal = !signal && timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
-    ? AbortSignal.timeout(timeoutMs)
-    : null;
+  const timeoutSignal =
+    !signal && timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs)
+      : null;
   const res = await fetch(url(path), {
     ...FETCH_OPTS,
     method: 'POST',
@@ -228,6 +353,24 @@ async function download(path: string): Promise<DownloadedFile> {
   const filename = disposition.match(/filename="([^"]+)"/iu)?.[1];
 
   return { blob: await res.blob(), ...(filename ? { filename } : {}) };
+}
+
+/**
+ * GET-скачивание с безопасным именем файла; прежний download остаётся POST.
+ * Обработка ошибок совпадает с прочими загрузками.
+ */
+async function downloadGet(path: string): Promise<DownloadedFile> {
+  const res = await fetch(url(path), { ...FETCH_OPTS, method: 'GET' });
+
+  if (!res.ok) {
+    await handle(res, path);
+  }
+
+  const header = res.headers.get('Content-Disposition') || '';
+  const candidate = header.match(/filename="([^"]+)"/iu)?.[1] || '';
+  const filename = /^[A-Za-z0-9._-]{1,100}$/u.test(candidate) ? candidate : 'web-log.ndjson';
+
+  return { blob: await res.blob(), filename };
 }
 
 /**
@@ -296,10 +439,12 @@ export interface ApiClient {
   get: (path: string) => Promise<unknown>;
   post: (path: string, body?: unknown) => Promise<unknown>;
   put: (path: string, body?: unknown) => Promise<unknown>;
+  patch: (path: string, body?: unknown) => Promise<unknown>;
   del: (path: string, body?: unknown) => Promise<unknown>;
   postBytes: typeof postBytes;
   postBlob: typeof postBlob;
   download: typeof download;
+  downloadGet: typeof downloadGet;
   getBlob: typeof getBlob;
   upload: typeof upload;
 }
@@ -313,10 +458,12 @@ export const api: ApiClient = {
   get: (path: string) => request('GET', path),
   post: (path: string, body?: unknown) => request('POST', path, body),
   put: (path: string, body?: unknown) => request('PUT', path, body),
+  patch: (path: string, body?: unknown) => request('PATCH', path, body),
   del: (path: string, body?: unknown) => request('DELETE', path, body),
-  postBytes,
-  postBlob,
-  download,
-  getBlob,
-  upload,
+  postBytes: (path, body, opts) => observed('POST', path, () => postBytes(path, body, opts)),
+  postBlob: (path, body, opts) => observed('POST', path, () => postBlob(path, body, opts)),
+  download: (path) => observed('POST', path, () => download(path)),
+  downloadGet: (path) => observed('GET', path, () => downloadGet(path)),
+  getBlob: (path) => observed('GET', path, () => getBlob(path)),
+  upload: (path, formData, opts) => observed('POST', path, () => upload(path, formData, opts)),
 };

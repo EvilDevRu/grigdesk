@@ -45,6 +45,10 @@ export function compileSettingsView({
       '../shared/apiClient.ts': `
         export const api = globalThis[${globalName(prefix, 'Api')}];
       `,
+      '../shared/webLogRuntime.ts': `
+        export const getWebLogRuntime = () =>
+          globalThis[${globalName(prefix, 'WebLogRuntime')}] || null;
+      `,
       ...storeStubs,
       '../composables/useUiContextSource.ts': `
         export const useUiContextSource = () => ({
@@ -63,6 +67,9 @@ export function compileSettingsView({
       './settings/AccessOverview.vue': overview,
       './settings/ToolHotkeys.vue': `
         export default { template: '<div class="tool-hotkeys-stub"></div>' };
+      `,
+      './settings/WebLogPanel.vue': `
+        export default { template: '<div class="web-log-panel-stub"></div>' };
       `,
       // Каталог плагинов — самостоятельный подраздел со своими stores и модалкой;
       // его поведение стережёт settings-plugins-catalog.component.test.js.

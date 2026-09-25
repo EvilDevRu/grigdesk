@@ -11,32 +11,121 @@ import { api } from '../shared/apiClient.ts';
 // `as const` не украшение: из списка выводится тип имени, и опечатка в ветке подписчика
 // становится ошибкой сборки, а не молчащей веткой (та же грабля, что уже стоила отладки).
 const EVENT_NAMES = [
-  'hello', 'state-change', 'providers-update', 'providers-usage', 'cockpit-update',
-  'chat-permission', 'chat-question', 'chat-permission-done',
-  'ssh-permission', 'ssh-sessions', 'ssh-audit',
-  'db-permission', 'db-sessions', 'db-queries', 'db-audit',
-  'chat-step', 'chat-progress', 'chat-done', 'chat-orphan', 'chat-turn-start', 'chat-sessions',
+  'hello',
+  'state-change',
+  'providers-update',
+  'providers-usage',
+  'cockpit-update',
+  'chat-permission',
+  'chat-question',
+  'chat-permission-done',
+  'ssh-permission',
+  'ssh-sessions',
+  'ssh-audit',
+  'db-permission',
+  'db-sessions',
+  'db-queries',
+  'db-audit',
+  'chat-step',
+  'chat-progress',
+  'chat-done',
+  'chat-orphan',
+  'chat-turn-start',
+  'chat-sessions',
   'chat-session',
-  'chat-store', 'chat-store-meta',
+  'chat-store',
+  'chat-store-meta',
   'speech-settings',
-  'inbox-changed', 'telegram-status', 'task-shelf-changed', 'arbiter-live',
-  'sandboxes-changed', 'sandbox-progress',
+  'diagnostic-logging',
+  'inbox-changed',
+  'telegram-status',
+  'task-shelf-changed',
+  'arbiter-live',
+  'sandboxes-changed',
+  'sandbox-progress',
   'projects-changed',
-  'showcase-changed', 'showcase-progress', 'showcase-build-progress', 'showcase-voice',
+  'routes-draft-changed',
+  'routes-catalog-changed',
+  'showcase-changed',
+  'showcase-progress',
+  'showcase-build-progress',
+  'showcase-voice',
   'gateway-setup',
   'usage-forecast',
 ] as const;
 
 // Имя события шины: ровно то, что сервер объявил выше.
-export type SseEventName = typeof EVENT_NAMES[number];
+export type SseEventName = (typeof EVENT_NAMES)[number];
 
 // Подписчик шины. Тело события недоверенное — его форму знает сам подписчик.
 export type SseListener = (name: SseEventName, data: unknown) => void;
 
 const connected = ref(false);
 const listeners = new Set<SseListener>();
+
+type SseLogSink = (
+  event: 'sse.open' | 'sse.hello' | 'sse.error',
+  data: Record<string, unknown>,
+) => void;
+
+let logSink: SseLogSink | null = null;
 let es: EventSource | null = null;
 let retry: ReturnType<typeof setTimeout> | null = null;
+let retries = 0;
+let openedAt = 0;
+let lastClosedAt = 0;
+let knownBoot: string | null = null;
+let stableTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Передаём диагностические события SSE внешнему runtime.
+ * Замена обработчика безопасна при повторном запуске приложения.
+ */
+export function setSseLogSink(sink: SseLogSink | null): void {
+  logSink = sink;
+}
+
+/**
+ * Тестовая уборка единственного потока без ожидания минутного таймера устойчивости:
+ * закрываем источник и очищаем все таймеры, фоновых переподключений не остаётся.
+ */
+export function resetSseForTests(): void {
+  es?.close();
+  es = null;
+
+  if (retry) {
+    clearTimeout(retry);
+  }
+
+  retry = null;
+
+  if (stableTimer) {
+    clearTimeout(stableTimer);
+  }
+
+  stableTimer = null;
+  connected.value = false;
+  listeners.clear();
+  retries = 0;
+  openedAt = 0;
+  lastClosedAt = 0;
+  knownBoot = null;
+}
+
+/**
+ * Публикуем только типизированные признаки состояния SSE.
+ * Ошибка подписчика не прерывает восстановление потока.
+ */
+function report(
+  event: 'sse.open' | 'sse.hello' | 'sse.error',
+  data: Record<string, unknown>,
+): void {
+  try {
+    logSink?.(event, data);
+  } catch {
+    /* журнал не влияет на поток */
+  }
+}
 
 /**
  * Поднимает единственное соединение вкладки, если его ещё нет. Повторный вызов
@@ -54,10 +143,33 @@ function ensure(): void {
 
   source.onopen = () => {
     connected.value = true;
+    openedAt = performance.now();
+    report('sse.open', { gapMs: lastClosedAt ? Math.max(0, openedAt - lastClosedAt) : 0, retries });
+
+    if (stableTimer) {
+      clearTimeout(stableTimer);
+    }
+
+    stableTimer = setTimeout(() => {
+      retries = 0;
+      stableTimer = null;
+    }, 60_000);
   };
 
   source.onerror = () => {
     connected.value = false;
+
+    if (stableTimer) {
+      clearTimeout(stableTimer);
+    }
+
+    stableTimer = null;
+    report('sse.error', {
+      uptimeMs: openedAt ? Math.max(0, performance.now() - openedAt) : 0,
+      retries,
+    });
+    lastClosedAt = performance.now();
+    retries += 1;
     source.close();
     es = null;
     retry = setTimeout(ensure, 3000); // авто-переподключение
@@ -69,12 +181,28 @@ function ensure(): void {
 
       try {
         data = JSON.parse(e.data);
-      } catch { /* событие без тела */ }
+      } catch {
+        /* событие без тела */
+      }
+
+      if (name === 'hello') {
+        const hello = data && typeof data === 'object' ? (data as { bootId?: unknown }) : {};
+        const value =
+          typeof hello.bootId === 'string' && /^[A-Za-z0-9_-]{8,64}$/u.test(hello.bootId)
+            ? hello.bootId
+            : null;
+        const changed = knownBoot !== null && value !== null && knownBoot !== value;
+
+        knownBoot = value;
+        report('sse.hello', { boot: value, changed });
+      }
 
       for (const fn of listeners) {
         try {
           fn(name, data);
-        } catch { /* один сломанный подписчик не мешает остальным */ }
+        } catch {
+          /* один сломанный подписчик не мешает остальным */
+        }
       }
     });
   }

@@ -1,9 +1,16 @@
-export const FACTORY_DEBUG_LEVELS = Object.freeze([
-  { value: 'off', label: 'Выключено' },
-  { value: 'errors', label: 'Только ошибки' },
-  { value: 'decisions', label: 'Решения маршрутизации' },
-  { value: 'verbose', label: 'Подробно' },
-]);
+import { DIAGNOSTIC_LEVELS } from '../../../shared/diagnosticLogging.ts';
+
+const LABELS = {
+  off: 'Выключено',
+  errors: 'Только ошибки',
+  decisions: 'Ошибки и контекст',
+  verbose: 'Подробно',
+};
+
+export const FACTORY_DEBUG_LEVELS = Object.freeze(DIAGNOSTIC_LEVELS.map((value) => ({
+  value,
+  label: LABELS[value],
+})));
 
 const VALUES = new Set(FACTORY_DEBUG_LEVELS.map((item) => item.value));
 

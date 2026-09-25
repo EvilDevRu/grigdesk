@@ -2100,7 +2100,7 @@ route_v2_context_for_node() {
 }
 
 # Скелет этапных ключей реестра — из runKeys закреплённого бандла (bootstrap
-# SCOUT + main + tail + status-узлы), а не из v1-списка: в реестре не должно
+# SCOUT, если требуется, + main + tail + status-узлы), а не из v1-списка: в реестре не должно
 # быть узлов, которых нет в маршруте.
 v2_registry_stage_keys() {
   # Каталог приходит параметром: на start он только что выбран (CURRENT_CATALOG),
@@ -2114,7 +2114,7 @@ import json
 import sys
 
 machine = json.load(sys.stdin)["machine"]
-keys = ["SCOUT"]
+keys = [] if machine.get("bootstrap", "required") == "skip" else ["SCOUT"]
 by_id = {n["id"]: n for n in machine["nodes"] if isinstance(n, dict)}
 for phase in ("main", "tail"):
     for node_id in machine["sequence"][phase]:

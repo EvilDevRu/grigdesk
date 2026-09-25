@@ -41,6 +41,22 @@ export interface GraphNodeMetadata {
   runner?: RunnerMetadata;
 }
 
+export interface GraphNodeOrigin {
+  scope: 'route' | 'bootstrap' | 'synthetic';
+  originId: string | null;
+  executable: boolean;
+}
+
+export interface GraphTransition {
+  source: string;
+  target: string;
+  channel: 'on' | 'onFailure' | 'emits';
+  outcome: string;
+  action: 'next' | 'rewind' | 'stop' | 'escalate' | 'emits';
+  reset: string[];
+  kind: 'execution' | 'emits';
+}
+
 // Остановка приходит из соседнего контракта и разбирается своим модулем: здесь она
 // остаётся непроверенной, чтобы форма остановки не была объявлена дважды.
 export interface FactoryGraphData {
@@ -50,6 +66,8 @@ export interface FactoryGraphData {
   statuses?: Record<string, string>;
   loops?: Record<string, number>;
   nodeMeta?: Record<string, GraphNodeMetadata>;
+  nodeOrigins?: Record<string, GraphNodeOrigin>;
+  transitions?: GraphTransition[];
   stall?: unknown;
 }
 

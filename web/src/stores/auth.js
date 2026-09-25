@@ -17,6 +17,10 @@ export const useAuthStore = defineStore('auth', {
     secure: false,
     error: null,
     busy: false,
+    // Отдельное подтверждение каждой удачной проверки сессии нужно транспорту журнала.
+    logConfirmation: 0,
+    logEpoch: 0,
+    logReason: 'load',
   }),
   getters: {
     // Открыто с самой машины: там http безопасен по определению, предупреждать не о чем.
@@ -24,18 +28,24 @@ export const useAuthStore = defineStore('auth', {
       && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname),
   },
   actions: {
-    async load() {
+    async load(reason = 'load') {
+      const epoch = this.logEpoch;
       try {
         const s = await api.get('/api/auth/state');
+        if (epoch !== this.logEpoch) return;
         this.configured = s.configured;
         this.authenticated = s.authenticated;
         this.login = s.login || '';
         this.secure = !!s.secure;
+        this.logReason = reason;
+        if (s.authenticated) this.logConfirmation += 1;
       } catch {
+        if (epoch !== this.logEpoch) return;
         // Сервер недоступен — считаем невошедшим, экран входа покажет ошибку при попытке.
         this.authenticated = false;
+        this.logReason = reason;
       } finally {
-        this.ready = true;
+        if (epoch === this.logEpoch) this.ready = true;
       }
     },
 
@@ -44,6 +54,7 @@ export const useAuthStore = defineStore('auth', {
     watchUnauthorized() {
       api.onUnauthorized((data) => {
         this.authenticated = false;
+        this.logReason = '401';
         if (data && typeof data.needsSetup === 'boolean') this.configured = !data.needsSetup;
       });
     },
@@ -53,8 +64,8 @@ export const useAuthStore = defineStore('auth', {
       this.error = null;
       try {
         await api.post('/api/auth/login', { login, password });
-        await this.load();
-        return true;
+        await this.load('login');
+        return this.authenticated;
       } catch (e) {
         this.error = e.data?.message || e.message;
         return false;
@@ -69,8 +80,8 @@ export const useAuthStore = defineStore('auth', {
       this.error = null;
       try {
         await api.post('/api/auth/setup', { login, password });
-        await this.load();
-        return true;
+        await this.load('setup');
+        return this.authenticated;
       } catch (e) {
         this.error = e.data?.message || e.message;
         return false;
@@ -80,8 +91,10 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async doLogout() {
-      try { await api.post('/api/auth/logout'); } catch { /* всё равно уходим на вход */ }
+      this.logEpoch += 1;
+      this.logReason = 'logout';
       this.authenticated = false;
+      try { await api.post('/api/auth/logout'); } catch { /* всё равно уходим на вход */ }
     },
   },
 });

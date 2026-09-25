@@ -1246,9 +1246,10 @@
 
           <div class="run-observe-item">
             <div class="run-threshold-copy">
-              <b>Логи фабрики</b>
+              <b>Диагностическое логирование</b>
               <p class="muted small">
-                Выбор модели, переключение ИИ и ошибки runner-а без prompt и credentials.
+                Один уровень для трассы фабрики, логов сервера и журнала окна: ошибки,
+                аномалии оболочки и контекст переходов без секретов и содержимого экрана.
               </p>
             </div>
             <div v-if="!factoryDebug && !factoryDebugMsg" class="muted">Загрузка…</div>
@@ -1256,7 +1257,7 @@
               <UiSelect
                 class="run-select"
                 data-context="settings-field"
-                aria-label="Уровень диагностического логирования фабрики"
+                aria-label="Общий уровень диагностического логирования"
                 :model-value="factoryDebug?.effective || 'off'"
                 :disabled="factoryDebugBusy"
                 @change="saveFactoryDebug($event.target.value)"
@@ -1274,7 +1275,8 @@
                 <span class="muted"> · источник: {{ factoryDebug.source }}</span>
               </span>
             </div>
-            <p class="run-subnote">Обязательный короткий audit сохраняется на любом уровне.</p>
+            <p class="run-subnote">При выключении новые диагностические записи не собираются.
+              Обязательный короткий audit фабрики сохраняется отдельно.</p>
           </div>
         </div>
 
@@ -1538,6 +1540,9 @@
            Механизм остаётся systemd — лаунчер процессом не владеет. -->
       <div class="card">
         <ServerLauncher :systemd="srv ? srv.systemd : null" />
+      </div>
+      <div class="card">
+        <WebLogPanel />
       </div>
     </section>
 
@@ -2150,6 +2155,7 @@ import ProviderUsageResources from '../features/providers/ProviderUsageResources
 import AccessOverview from './settings/AccessOverview.vue';
 import PluginsCatalog from './settings/PluginsCatalog.vue';
 import ServerLauncher from './settings/ServerLauncher.vue';
+import WebLogPanel from './settings/WebLogPanel.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
@@ -2178,6 +2184,7 @@ import {
 } from '../ui';
 import { useSse } from '../composables/useSse.ts';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
+import { getWebLogRuntime } from '../shared/webLogRuntime.ts';
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
 const TABS = [
@@ -3317,8 +3324,8 @@ async function saveSilenceWindow() {
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
 
-// Подробный trace фабрики. Сам файл настроек принадлежит engine writer-у; UI работает
-// только через /api/settings/factory-debug.
+// Общий уровень диагностики хранит engine writer; UI работает только через
+// /api/settings/factory-debug и сразу применяет подтверждённое значение в окне.
 const factoryDebug = ref(null);
 const factoryDebugBusy = ref(false);
 const factoryDebugMsg = ref(null);
@@ -3326,6 +3333,10 @@ const factoryDebugMsg = ref(null);
 async function loadFactoryDebug({ keepMessage = false } = {}) {
   try {
     factoryDebug.value = await api.get('/api/settings/factory-debug?scope=global');
+    if (factoryDebug.value?.effective) {
+      getWebLogRuntime()?.applyPolicy(factoryDebug.value.effective,
+        factoryDebug.value.expiresAt);
+    }
     if (!keepMessage) factoryDebugMsg.value = null;
   } catch (e) {
     factoryDebug.value = null;
@@ -3341,9 +3352,12 @@ async function saveFactoryDebug(level) {
       '/api/settings/factory-debug',
       factoryDebugPayload(level),
     );
+    getWebLogRuntime()?.applyPolicy(factoryDebug.value.effective,
+      factoryDebug.value.expiresAt);
     factoryDebugMsg.value = {
       type: 'ok',
-      text: level === 'off' ? 'Подробное логирование выключено.' : 'Уровень логирования сохранён.',
+      text: level === 'off' ? 'Диагностическое логирование выключено.'
+        : 'Общий уровень логирования сохранён.',
     };
   } catch (e) {
     factoryDebugMsg.value = { type: 'err', text: e.message };

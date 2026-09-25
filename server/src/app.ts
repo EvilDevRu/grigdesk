@@ -53,6 +53,7 @@ import { FactoryArbiterWatch } from './lib/factoryArbiterWatch.ts';
 import { FactoryArbiterLive } from './lib/factoryArbiterLive.ts';
 import { runInboxTriage } from './lib/inbox/triage.ts';
 import { FactoryDebugSettings } from './lib/factoryDebug.ts';
+import { DiagnosticLoggingPolicy, serverLogLevel } from './lib/diagnosticLogging.ts';
 import { readRouteWorkTime } from './lib/factoryRouteCli.ts';
 import { TaskFavoritesStore } from './lib/taskFavoritesStore.ts';
 import { TaskFavoritesService } from './lib/taskFavoritesService.ts';
@@ -93,6 +94,8 @@ import { createKnowledgeTransfer } from './lib/search/transfer.ts';
 import authPlugin from './plugins/auth.ts';
 import httpScopePlugin from './plugins/httpScope.ts';
 import ssePlugin from './plugins/sse.ts';
+import webLogModule from './modules/web-log/index.ts';
+import { createApiRouteRegistry } from './lib/webLog/apiRoutes.ts';
 import staticPlugin from './plugins/static.ts';
 import { LocalTls } from './lib/tls/local.ts';
 import { loadTlsSource } from './lib/tls/source.ts';
@@ -202,8 +205,16 @@ function readPluginSettings(
 }
 
 async function build() {
+  const factoryDebug = new FactoryDebugSettings({
+    factoryBin: config.factoryBin,
+    stateDir: config.stateDir,
+    configRoot: config.factoryConfigRoot,
+    profilesDir: config.profilesDir,
+  });
+  const diagnosticLogging = new DiagnosticLoggingPolicy(factoryDebug);
+  const initialLogLevel = await diagnosticLogging.level().catch(() => 'off' as const);
   const fastify = Fastify({
-    logger: { level: config.isDev ? 'debug' : 'info' },
+    logger: { level: serverLogLevel(initialLogLevel) },
     // trustProxy — только по явной настройке и только для адреса шлюза (см. config.trustProxy).
     // Без неё заголовки `X-Forwarded-*` игнорируются: иначе клиент сам назначал бы себе адрес.
     ...(config.trustProxy ? { trustProxy: config.trustProxy } : {}),
@@ -223,6 +234,24 @@ async function build() {
     // ответы, и `server.close()` ждал бы их вечно. К этому моменту слив уже прошёл, и
     // долгих запросов, которым есть что терять, на сервере нет.
     forceCloseConnections: true,
+  });
+  // Журнал окна хранит пути /api шаблонами; каталог шаблонов собирается здесь,
+  // до регистрации модулей, чтобы в него попал каждый маршрут сервера.
+  const apiRoutes = createApiRouteRegistry();
+
+  fastify.addHook('onRoute', (route) => apiRoutes.add(route.url));
+  const stopLoggingPolicy = diagnosticLogging.subscribe((level) => {
+    fastify.log.level = serverLogLevel(level);
+  });
+  const loggingPolicyTimer = setInterval(() => {
+    void diagnosticLogging.level().catch(() => undefined);
+  }, 60_000);
+
+  loggingPolicyTimer.unref();
+  fastify.addHook('onClose', async () => {
+    clearInterval(loggingPolicyTimer);
+    stopLoggingPolicy();
+    diagnosticLogging.close();
   });
   // Остановка: модули регистрируют слив (чат прерывает ходы и сохраняет их итог), а
   // сигнал или кнопка «Перезапустить» запускают его ДО закрытия сервера. Обработчики
@@ -951,12 +980,6 @@ async function build() {
   const taskShelf = new TaskShelfService({ store: taskShelfStore, b24 });
   const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
   const taskSeen = new TaskSeenService({ store: taskSeenStore, b24 });
-  const factoryDebug = new FactoryDebugSettings({
-    factoryBin: config.factoryBin,
-    stateDir: config.stateDir,
-    configRoot: config.factoryConfigRoot,
-    profilesDir: config.profilesDir,
-  });
   const analyzer = new Analyzer({
     config, claudeAuth, b24, factoryState, prefs, log: fastify.log,
     // Декоратор появится ниже, вместе с модулем telegram, — поэтому ищем его в
@@ -1013,6 +1036,11 @@ async function build() {
   // Единственный движок пишет одну runtime-проекцию; legacy-реестры в этом каталоге
   // доступны только для чтения и не требуют второго watcher-а.
   await fastify.register(ssePlugin, { stateDir: config.stateDir });
+  await fastify.register(webLogModule, {
+    dir: config.webLogDir,
+    policy: diagnosticLogging,
+    apiRoutes,
+  });
 
   // Модули.
   await fastify.register(authModule, { authStore, config });
@@ -1215,6 +1243,7 @@ async function build() {
     b24: asPort(b24),
     prefs,
     factoryDebug,
+    diagnosticLogging,
     localTls: asPort(localTls),
     tlsRuntime,
     speechRuntime,

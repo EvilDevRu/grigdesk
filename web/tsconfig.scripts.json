@@ -8,6 +8,7 @@
     "checkJs": false
   },
   "include": [
+    "../server/src/lib/fastifyDecorations.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mjs"
   ]

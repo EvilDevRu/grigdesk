@@ -169,4 +169,4 @@ systemctl --user status cockpit-server
 
 ---
 
-Лицензия — [MIT](LICENSE).
+Лицензия — MIT.
