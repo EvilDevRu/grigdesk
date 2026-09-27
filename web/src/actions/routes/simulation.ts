@@ -1,4 +1,6 @@
-import { ROUTES_EDITOR_LIMITS } from '../../../../shared/routesEditorContracts.ts';
+import {
+  ROUTES_EDITOR_LIMITS, ROUTES_LOOP_DEFAULT_MAX_ROUNDS, routeSimulationStepLimit,
+} from '../../../../shared/routesEditorContracts.ts';
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import type { RouteSimulationObservation } from '../../stores/routes.ts';
@@ -11,6 +13,7 @@ import { runtimeOf } from './routesRuntime.ts';
  */
 export function startRouteSimulation(
   scope: 'route' | 'bootstrap', routeId: string | null, pinned: boolean,
+  loopMaxRounds: number | null = null,
 ): void {
   const store = useRoutesStore();
   const draft = store.serverSnapshot;
@@ -33,6 +36,16 @@ export function startRouteSimulation(
     return;
   }
 
+  // Потолок кругов живёт в профиле, а не в маршруте: сценарий цикла несёт свой.
+  const rounds = machine.loop ? loopMaxRounds ?? ROUTES_LOOP_DEFAULT_MAX_ROUNDS : null;
+
+  if (rounds !== null && (!Number.isSafeInteger(rounds) || rounds < 1
+    || rounds > ROUTES_EDITOR_LIMITS.loopMaxRounds)) {
+    store.simulationError = `Потолок кругов — целое от 1 до ${ROUTES_EDITOR_LIMITS.loopMaxRounds}.`;
+
+    return;
+  }
+
   store.simulation = {
     cursor: {
       scope,
@@ -49,6 +62,7 @@ export function startRouteSimulation(
     generation: store.editGeneration,
     stepIndex: 1,
     pinned,
+    loopMaxRounds: rounds,
     busy: false,
     error: '',
     stale: false,
@@ -75,8 +89,11 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
 
     return;
   }
-  if (state.stepIndex > ROUTES_EDITOR_LIMITS.simulationSteps) {
-    state.error = 'Достигнут предел 200 шагов. Начните новый сценарий.';
+
+  const limit = routeSimulationStepLimit(state.loopMaxRounds);
+
+  if (state.stepIndex > limit) {
+    state.error = `Достигнут предел ${limit} шагов. Начните новый сценарий.`;
 
     return;
   }
@@ -103,6 +120,7 @@ export async function stepRouteSimulation(observation: RouteSimulationObservatio
       ...observation,
       pinned: state.pinned,
       stepIndex: state.stepIndex,
+      ...(state.loopMaxRounds === null ? {} : { loopMaxRounds: state.loopMaxRounds }),
     });
 
     if (identity !== runtime.openRequest || store.simulation !== state) {

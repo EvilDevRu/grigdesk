@@ -428,7 +428,10 @@ interface StageRuntimeEnvelope {
 }
 
 const NODE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
-const CURSOR_STOP_TARGETS = new Set(['human', 'failed', 'done', 'rewind-limit', 'no-progress']);
+// loop-ceiling — доверенная остановка режима «цикл»: исчерпан потолок кругов профиля.
+const CURSOR_STOP_TARGETS = new Set([
+  'human', 'failed', 'done', 'rewind-limit', 'no-progress', 'loop-ceiling',
+]);
 
 function validCursorReason(value: unknown): boolean {
   return typeof value === 'string' && value.length >= 1 && value.length <= 500

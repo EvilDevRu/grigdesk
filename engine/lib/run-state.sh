@@ -90,6 +90,13 @@ REVIEWED_LIMIT = 64
 ANCHOR_PREFIX = "anchor:"
 REVIEWED_PREFIX = "reviewed:"
 DEFERRED_PREFIX = "deferred:"
+# Граница этапа цикла: ведущий принимает прежний этап и передаёт следующий. Три части
+# едут вместе — вид границы, закрываемые id прежнего этапа и основание приёмки. Что
+# граница честная, проверяет доверенный коммит по журналу попытки; здесь только форма.
+STAGE_PREFIX = "stage:"
+STAGE_CLOSED_PREFIX = "stage-closed:"
+STAGE_SUMMARY_PREFIX = "stage-summary:"
+STAGE_KINDS = {"next"}
 # Вес замечания. `blocking` — дефолт и единственное, что возвращает работу автору;
 # `deferred` — та самая находка «outside scope / follow-up», которую общий шаблон
 # этапа давно разрешает словами, но выразить машинно было нечем: любой список
@@ -122,11 +129,38 @@ def artifact_path(value):
     )
 
 
+def validate_stage(stage, findings):
+    # Граница этапа имеет смысл только вместе с работой следующего этапа: без
+    # блокирующей находки передавать исполнителю нечего.
+    if not isinstance(stage, dict) or set(stage) != {"kind", "closes", "summary"}:
+        fail("stage: ровно kind, closes и summary")
+    if stage["kind"] not in STAGE_KINDS:
+        fail(f"stage.kind: допустимо {', '.join(sorted(STAGE_KINDS))}")
+    closes = stage["closes"]
+    if not isinstance(closes, list) or not 1 <= len(closes) <= FINDINGS_LIMIT:
+        count = len(closes) if isinstance(closes, list) else "нет списка"
+        fail(f"stage.closes: id {count}, допустимо 1..{FINDINGS_LIMIT}")
+    if len(set(closes)) != len(closes):
+        fail("stage.closes: id не должны повторяться")
+    for closed_id in closes:
+        if not isinstance(closed_id, str) or not finding_re.fullmatch(closed_id):
+            fail("stage.closes: каждый id — kebab-case до 64 символов")
+    summary = stage["summary"]
+    if not isinstance(summary, str) or not 1 <= len(summary) <= SUMMARY_LIMIT:
+        fail(f"stage.summary: одна строка 1..{SUMMARY_LIMIT} символов")
+    if any(ord(char) < 32 or ord(char) == 127 for char in summary):
+        fail("stage.summary: переводы строки и управляющие символы запрещены")
+    if not any(
+        finding.get("severity", DEFAULT_SEVERITY) == "blocking" for finding in findings
+    ):
+        fail("stage: граница этапа требует блокирующих находок следующего этапа")
+
+
 def validate(value):
     if not isinstance(value, dict) or not {"owner", "findings"} <= set(value) or not set(
         value
-    ) <= {"owner", "findings", "reviewed"}:
-        fail("вердикт состоит из owner, findings и необязательного reviewed")
+    ) <= {"owner", "findings", "reviewed", "stage"}:
+        fail("вердикт состоит из owner, findings и необязательных reviewed и stage")
     owner = value.get("owner")
     findings = value.get("findings")
     if owner not in owners:
@@ -187,6 +221,8 @@ def validate(value):
                     "reviewed: каждый путь — относительный, до "
                     f"{PATH_LIMIT} символов, без ведущего / и без .."
                 )
+    if "stage" in value:
+        validate_stage(value["stage"], findings)
     return value
 
 
@@ -212,9 +248,21 @@ if operation == "encode":
     parsed = []
     anchors = {}
     reviewed = []
+    stage_kinds = []
+    stage_closes = []
+    stage_summaries = []
     for index, raw in enumerate(findings_raw, start=1):
         if raw.startswith(REVIEWED_PREFIX):
             reviewed.append(raw[len(REVIEWED_PREFIX):])
+            continue
+        if raw.startswith(STAGE_CLOSED_PREFIX):
+            stage_closes.append(raw[len(STAGE_CLOSED_PREFIX):])
+            continue
+        if raw.startswith(STAGE_SUMMARY_PREFIX):
+            stage_summaries.append(raw[len(STAGE_SUMMARY_PREFIX):])
+            continue
+        if raw.startswith(STAGE_PREFIX):
+            stage_kinds.append(raw[len(STAGE_PREFIX):])
             continue
         if raw.startswith(ANCHOR_PREFIX):
             body = raw[len(ANCHOR_PREFIX):]
@@ -263,6 +311,19 @@ if operation == "encode":
     value = {"owner": owner, "findings": parsed}
     if reviewed:
         value["reviewed"] = reviewed
+    if stage_kinds or stage_closes or stage_summaries:
+        if result != "failed":
+            fail("граница этапа (--next-stage) допустима только у failed")
+        if len(stage_kinds) != 1 or len(stage_summaries) != 1 or not stage_closes:
+            fail(
+                "граница этапа: нужны вместе --next-stage, хотя бы один "
+                "--stage-closed и ровно один --stage-summary"
+            )
+        value["stage"] = {
+            "kind": stage_kinds[0],
+            "closes": stage_closes,
+            "summary": stage_summaries[0],
+        }
     value = validate(value)
     payload = json.dumps(
         value,
@@ -304,6 +365,8 @@ elif operation in {"validate", "owner"}:
         for finding in value["findings"]
     ):
         fail("результат done: вердикт содержит блокирующие замечания")
+    if result != "failed" and "stage" in value:
+        fail(f"результат {result}: граница этапа допустима только у failed")
     if operation == "owner":
         print(value["owner"])
 else:

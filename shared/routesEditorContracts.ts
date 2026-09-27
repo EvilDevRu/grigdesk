@@ -11,8 +11,22 @@ export const ROUTES_EDITOR_LIMITS = {
   promptBlocks: 128,
   operations: 128,
   simulationSteps: 200,
+  // Маршрут с циклом: потолок до 100 кругов — это 201 шаг до остановки `loop-ceiling`
+  // (передача и ответ исполнителя на каждый круг), с запасом на ворота и решения человека.
+  loopSimulationSteps: 400,
+  loopMaxRounds: 100,
   undoCommands: 100,
 } as const;
+
+// Потолок кругов по умолчанию — тот же, что у движка без строки в профиле.
+export const ROUTES_LOOP_DEFAULT_MAX_ROUNDS = 20;
+
+/** Предел шагов пробного сценария: у маршрута с циклом он вмещает весь потолок кругов. */
+export function routeSimulationStepLimit(loopMaxRounds: number | null | undefined): number {
+  return loopMaxRounds === null || loopMaxRounds === undefined
+    ? ROUTES_EDITOR_LIMITS.simulationSteps
+    : ROUTES_EDITOR_LIMITS.loopSimulationSteps;
+}
 
 export interface RoutePublication {
   operationId: string;
@@ -178,6 +192,9 @@ export interface RouteSimulationStepRequest {
   pinned: boolean;
   humanApproved: boolean;
   stepIndex: number;
+  // Потолок кругов цикла (1..100): живёт в профиле, поэтому сценарий передаёт его явно.
+  // Только для маршрута с `loop`; без поля движок считает по умолчанию 20.
+  loopMaxRounds?: number;
 }
 
 export interface RouteSimulationStepResponse {
@@ -517,7 +534,7 @@ function nodeAt(value: unknown, path: string): void {
 function machineAt(value: unknown, path: string): void {
   const machine = recordAt(value, [
     'schema', 'kind', 'profile', 'id', 'entry', 'sequence', 'nodes', 'escalation',
-  ], ['title', 'bootstrap'], path);
+  ], ['title', 'bootstrap', 'loop'], path);
   if (machine.schema !== 2) {
     throw new RoutesEditorContractError(`${path}.schema`);
   }
@@ -527,6 +544,15 @@ function machineAt(value: unknown, path: string): void {
       throw new RoutesEditorContractError(`${path}.bootstrap`);
     }
     enumAt(machine.bootstrap, ['required', 'skip'], `${path}.bootstrap`);
+  }
+  // Пара цикла переживает черновик как есть; смысл пары проверяет схема публикации.
+  if (Object.hasOwn(machine, 'loop')) {
+    if (machine.kind !== 'route') {
+      throw new RoutesEditorContractError(`${path}.loop`);
+    }
+    const loop = recordAt(machine.loop, ['lead', 'worker'], [], `${path}.loop`);
+    stringAt(loop.lead, `${path}.loop.lead`);
+    stringAt(loop.worker, `${path}.loop.worker`);
   }
   stringAt(machine.profile, `${path}.profile`);
   stringAt(machine.id, `${path}.id`);

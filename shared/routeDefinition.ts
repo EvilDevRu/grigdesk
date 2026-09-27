@@ -67,6 +67,12 @@ export interface RouteEscalationRecord {
   requiresHumanWhenPinned: boolean;
 }
 
+// Пара режима «цикл»: ведущий ставит задание и проверяет, исполнитель делает.
+export interface RouteLoopDoc {
+  lead: string;
+  worker: string;
+}
+
 export interface RouteMachineDoc {
   schema: number;
   kind: string;
@@ -74,6 +80,7 @@ export interface RouteMachineDoc {
   id: string;
   title?: string;
   bootstrap?: 'required' | 'skip';
+  loop?: RouteLoopDoc;
   entry: string;
   sequence: { bootstrap?: string[]; main?: string[]; tail?: string[] };
   nodes: RouteNodeDoc[];

@@ -46,6 +46,8 @@ import {
 import { listInstalledRunners } from '../../lib/runnersCatalog.ts';
 import { loadRunnerConfig, resolveProjectRunnerState } from '../../lib/runnerState.ts';
 import { parseSandboxRepositories } from '../../lib/sandboxEnv.ts';
+import { parsePipeline } from '../../lib/pipelineParse.ts';
+import { archiveTaskFiles } from '../../lib/taskArtifacts.ts';
 import {
   ARBITER_ACTOR,
   arbitrationGate,
@@ -479,13 +481,41 @@ async function factoryModule(
     audit: 'audit.md',
     review: 'review.md',
   };
+  /**
+   * Файл отчёта исполнителя. У обычного маршрута — прежний `t<id>.report.md`. В режиме
+   * «цикл» отчёт свой на каждый визит исполнителя, и движок называет в реестре последний
+   * сданный (`LOOP_REPORT`): его и читают ворота приёмки. Общий `report.md` в цикле —
+   * чужой, от прошлой попытки или маршрута, поэтому показать его вместо отчёта цикла
+   * нельзя: нет сданного отчёта — пустой текст. Реестр без `LOOP_REPORT` писал движок
+   * до пофайловых визитов — тогда отчёт круга `LOOP_ROUND`.
+   */
+  async function reportDocFile(dir: string, id: string): Promise<string | null> {
+    let registry: Record<string, string> = {};
+    try {
+      registry = parsePipeline(await fs.readFile(path.join(dir, `t${id}.pipeline`), 'utf8'));
+    } catch {
+      return `t${id}.report.md`;
+    }
+    if (registry.LOOP_MODE !== '1') return `t${id}.report.md`;
+    if (Object.hasOwn(registry, 'LOOP_REPORT')) {
+      const named = registry.LOOP_REPORT || '';
+      const valid = new RegExp(`^t${id}\\.report\\.r\\d{1,3}(?:\\.v\\d{1,4})?\\.md$`);
+      return valid.test(named) ? named : null;
+    }
+    const round = registry.LOOP_ROUND || '';
+    return /^\d{1,3}$/.test(round) ? `t${id}.report.r${round}.md` : null;
+  }
+
   fastify.get<FactoryRoute>('/api/tasks/:id/doc/:name', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
-    const file = STAGE_DOCS[String(request.params.name)];
+    const name = String(request.params.name);
+    const file = STAGE_DOCS[name];
     if (!id || !file) return reply.code(400).send({ error: 'bad_doc' });
     try {
       const dir = await factoryState.taskStateDir(id);
-      return { text: await fs.readFile(path.join(dir, `t${id}.${file}`), 'utf8') };
+      const target = name === 'report' ? await reportDocFile(dir, id) : `t${id}.${file}`;
+      if (!target) return { text: '' };
+      return { text: await fs.readFile(path.join(dir, target), 'utf8') };
     } catch { return { text: '' }; }
   });
 
@@ -1673,7 +1703,9 @@ async function factoryModule(
     const context = await readArbitrationContext({
       controlDir: config.factoryControlDir, task: id, attempt: trusted.attempt,
     });
-    const gate = arbitrationGate(context, trusted.cursor);
+    const gate = arbitrationGate(context, trusted.cursor, {
+      loop: managed.registry.LOOP_MODE === '1',
+    });
     if (!gate.ok || !context.ok || !context.target) {
       reply.code(409).send({ error: gate.error, message: gate.message });
       return null;
@@ -2036,27 +2068,6 @@ async function factoryModule(
         }
       });
     });
-  }
-
-  // Артефакты прогона — в архив своего же каталога состояния: чего нет, то и не
-  // переносится. Доверенный журнал попытки здесь не участвует и не принадлежит
-  // Cockpit: t<id>.pipeline — лишь его проекция для интерфейса.
-  const TASK_ARTIFACTS = ['pipeline', 'env', 'stage', 'plan.md', 'recon.md', 'diag.md',
-    'ship.md', 'report.md', 'tests.sha256', 'instrumentation-scope.list'];
-  async function archiveTaskFiles(id: string, stateDir: string) {
-    const moved = [];
-    await fs.mkdir(path.join(stateDir, 'archive'), { recursive: true });
-    for (const suffix of TASK_ARTIFACTS) {
-      const from = path.join(stateDir, `t${id}.${suffix}`);
-      try {
-        await fs.rename(from, path.join(stateDir, 'archive', `t${id}.${suffix}`));
-        moved.push(suffix);
-      } catch (err) {
-        if (!registryIsMissing(err)) throw err;
-        // Файла нет — нечего архивировать (down.sh мог уже перенести его сам).
-      }
-    }
-    return moved;
   }
 
   // Снос стенда — терминальное действие для ТЕКУЩЕГО прогона: инфраструктуру удаляем,

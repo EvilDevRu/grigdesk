@@ -419,6 +419,7 @@ const RUN_RESULT = Object.freeze({
   abandoned: { icon: '⏹', text: 'попытка закрыта' },
   recovered: { icon: '♻', text: 'попытка восстановлена в новую' },
   'human-rewind': { icon: '↩', text: 'возврат человеком' },
+  'loop-continue': { icon: '🔁', text: 'цикл продолжен после поднятого потолка кругов' },
 });
 
 export function runResult(value: unknown): { icon: string; text: string } | null {

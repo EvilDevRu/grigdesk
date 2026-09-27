@@ -1991,7 +1991,7 @@ route_v2_context_for_node() {
   local context_run_key=$4 context_output=$5 cursor event_count=0
   local transaction_id="" instrumentation_phase=not-started scope_arg=""
   local cause review acceptance allowed action target index
-  local ledger_results ledger_line findings_ledger
+  local ledger_results ledger_line findings_file rc
   local -a args=()
 
   cursor=$(attempt_stage_state_read_v2 "$context_task" "$context_attempt" 2>/dev/null || true)
@@ -2000,15 +2000,6 @@ route_v2_context_for_node() {
   fi
   [[ "$event_count" =~ ^[0-9]+$ ]] || return 78
   ledger_results=$(v2_ledger_stage_results "$context_task" "$context_attempt") || return 78
-  # Bootstrap исполняется до рождения stage-ledger и по определению не может иметь
-  # findings. Все узлы закреплённого маршрута получают проекцию только после полной
-  # проверки уже инициализированного hash-chain.
-  if [[ "$context_node" == scout ]]; then
-    findings_ledger='{"schema":1,"open":[],"closed":[],"deferred":[]}'
-  else
-    findings_ledger=$(attempt_stage_state_findings_v2 \
-      "$context_task" "$context_attempt") || return 78
-  fi
 
   if [[ "$context_node" == instrument || "$context_node" == trace ]]; then
     v2_prepare_scope || return
@@ -2056,7 +2047,6 @@ route_v2_context_for_node() {
     --transaction-id "$transaction_id"
     --instrumentation-phase "$instrumentation_phase"
     --event-count "$event_count"
-    --findings-ledger-json "$findings_ledger"
     --cause-decision "$cause"
     --cause-comment "$(get "$TASK" CAUSE_DECISION_COMMENT)"
     --review-decision "$review"
@@ -2081,6 +2071,17 @@ route_v2_context_for_node() {
   while IFS= read -r ledger_line; do
     [[ -n "$ledger_line" ]] && args+=(--stage-result "$ledger_line")
   done <<<"$ledger_results"
+  # Режим «цикл»: круг, этап, потолок профиля и свой отчёт на каждый круг. У обычного
+  # маршрута аргумента нет, и контекст побайтно прежний.
+  if [[ "$context_node" != scout ]]; then
+    local loop_state loop_max
+    loop_state=$(attempt_stage_state_loop_state_v2 "$context_task" "$context_attempt") ||
+      return 78
+    if [[ "$(json_value loop <<<"$loop_state")" != None ]]; then
+      loop_max=$(route_v2_loop_max_rounds) || return 78
+      args+=(--loop-state-json "$loop_state" --loop-max-rounds "$loop_max")
+    fi
+  fi
   if [[ -f "$V2_SCOPE_FILE" && ! -L "$V2_SCOPE_FILE" ]]; then
     args+=(--scope-file "$V2_SCOPE_FILE")
     while IFS= read -r allowed || [[ -n "$allowed" ]]; do
@@ -2096,7 +2097,24 @@ route_v2_context_for_node() {
       args+=(--delivery-target "$target")
     done
   fi
+  # Проекция находок — файлом в control root: история цикла растёт с каждым этапом, а
+  # одна строка argv в Linux не длиннее 128 КиБ (MAX_ARG_STRLEN). Bootstrap исполняется
+  # до рождения stage-ledger и находок иметь не может; остальные узлы получают проекцию
+  # только после полной проверки уже инициализированного hash-chain.
+  findings_file=$(mktemp "$(factory_control_root)/.route-findings.XXXXXX") || return 1
+  if [[ "$context_node" == scout ]]; then
+    printf '%s\n' '{"schema":1,"open":[],"closed":[],"deferred":[]}' >"$findings_file"
+  else
+    attempt_stage_state_findings_v2 "$context_task" "$context_attempt" >"$findings_file"
+  fi || {
+    rm -f -- "$findings_file"
+    return 78
+  }
+  args+=(--findings-ledger-file "$findings_file")
   "${args[@]}" >"$context_output"
+  rc=$?
+  rm -f -- "$findings_file"
+  return "$rc"
 }
 
 # Скелет этапных ключей реестра — из runKeys закреплённого бандла (bootstrap
@@ -2187,6 +2205,95 @@ print(len(items))
 PY
 }
 
+# Подготовка диспетчера к режиму «цикл». Пара закреплённого маршрута читается один раз.
+# У цикла — признак режима, потолок и состояние цикла ЭТОЙ попытки в реестре (кокпит не
+# предлагает арбитра: этапы ведёт ведущая модель) и предел шагов, вмещающий весь потолок
+# кругов: 3 * потолок + число исполняемых узлов + 2. У обычного маршрута — прежние 64,
+# а признаки цикла, оставшиеся в реестре от прошлой попытки задачи (recover сохраняет
+# посторонние поля), гасятся: иначе обычный маршрут терял бы арбитра.
+# Неверный потолок здесь не отказ: первый же шаг диспетчера остановится fail-closed.
+v2_prepare_dispatch() {
+  local attempt=$1 description info lead nodes max_rounds rc key had_loop=""
+  V2_DISPATCH_STEP_LIMIT=64
+  _route_v2_load_attempt "$TASK" "$attempt" || return 0
+  description=$(mktemp "$(factory_control_root)/.route-loop-info.XXXXXX") || return 0
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" --profile "$ROUTE_V2_PROFILE" describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" >"$description" 2>/dev/null
+  rc=$?
+  info=""
+  if (( rc == 0 )); then
+    # Пустой первый столбец bash съел бы (TAB — пробельный IFS): у обычного маршрута
+    # число узлов попадало в `lead`. Поэтому узлы идут первыми, а отсутствие ведущего
+    # выражено явным «-».
+    info=$(python3 - "$description" <<'PY'
+import json
+import sys
+
+machine = json.load(open(sys.argv[1], encoding="utf-8"))["machine"]
+pair = machine.get("loop") or {}
+nodes = len(machine["sequence"]["main"]) + len(machine["sequence"]["tail"])
+print(nodes, pair.get("lead") or "-")
+PY
+    ) || info=""
+  fi
+  rm -f -- "$description"
+  # Описание не прочитано — реестр не трогаем: снять признак цикла по сбою чтения значило
+  # бы отдать попытку цикла арбитру. Первый шаг диспетчера сам остановится fail-closed.
+  [[ -n "$info" ]] || return 0
+  read -r nodes lead <<<"$info"
+  if [[ -z "$lead" || "$lead" == - ]]; then
+    [[ -f "$STATE_DIR/t${TASK}.pipeline" ]] || return 0
+    for key in LOOP_MODE LOOP_MAX_ROUNDS LOOP_ROUND LOOP_STAGE LOOP_REPORT; do
+      [[ -z "$(get "$TASK" "$key")" ]] || had_loop=1
+    done
+    [[ -z "$had_loop" ]] || set_st "$TASK" LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" \
+      LOOP_STAGE "" LOOP_REPORT "" || v2_log "признаки прошлого цикла в реестре не сняты"
+    return 0
+  fi
+  max_rounds=$(route_v2_loop_max_rounds 2>/dev/null) || max_rounds=""
+  if [[ -f "$STATE_DIR/t${TASK}.pipeline" ]]; then
+    set_st "$TASK" LOOP_MODE 1 LOOP_MAX_ROUNDS "$max_rounds" ||
+      v2_log "признак режима «цикл» в реестр не записан"
+    route_v2_project_loop "$TASK" "$attempt" "" "" ||
+      v2_log "состояние цикла в реестр не записано"
+  fi
+  [[ "$max_rounds" =~ ^[1-9][0-9]*$ && "$nodes" =~ ^[0-9]+$ ]] || return 0
+  V2_DISPATCH_STEP_LIMIT=$(( 3 * max_rounds + nodes + 2 ))
+}
+
+# Витрина цикла в реестре задачи: круг, этап, действующий потолок и последний сданный
+# отчёт исполнителя (его показывают ворота приёмки). После terminal-результата
+# исполнителя отчёт этого визита закрывается на запись: следующий визит пишет в свой
+# файл, а прежний остаётся доказательством ровно в том виде, в каком его читал ведущий.
+# `exhausted` результатом не считается: повтор продолжает тот же незаконченный отчёт.
+route_v2_project_loop() {
+  local task=$1 attempt=$2 node=${3:-} outcome=${4:-} state round stage worker last report
+  local max_rounds
+  state=$(attempt_stage_state_loop_state_v2 "$task" "$attempt") || return
+  worker=$(json_value loop.worker <<<"$state" 2>/dev/null) || return 0
+  round=$(json_value loop.rounds <<<"$state") || return
+  stage=$(json_value loop.stage <<<"$state") || return
+  last=$(json_value loop.lastReport <<<"$state") || return
+  [[ "$last" != None ]] || last=""
+  max_rounds=$(route_v2_loop_max_rounds 2>/dev/null) || max_rounds=""
+  [[ "$round" =~ ^[0-9]+$ && "$stage" =~ ^[0-9]+$ ]] || return 78
+  [[ -z "$last" || "$last" =~ ^report\.r[0-9]{1,3}(\.v[0-9]{1,4})?\.md$ ]] || return 78
+  set_st "$task" LOOP_ROUND "$round" LOOP_STAGE "$stage" LOOP_MAX_ROUNDS "$max_rounds" \
+    LOOP_REPORT "${last:+t${task}.$last}" || return
+  [[ "$node" == "$worker" && -n "$last" ]] || return 0
+  case "$outcome" in
+    done|failed|skipped) ;;
+    *) return 0 ;;
+  esac
+  report="$STATE_DIR/t${task}.$last"
+  if [[ -f "$report" && ! -L "$report" ]]; then
+    chmod a-w -- "$report" || return
+  else
+    v2_log "${worker^^}: отчёт визита не записан (${report##*/}) — ведущий увидит отсутствие"
+  fi
+}
+
 # Переводит exact reset из закреплённого route ledger в вторичный реестр Cockpit.
 # Ни фиксированного списка стадий, ни семантики --replan/--reject-accept здесь нет:
 # набор узлов берётся из immutable event, а runKey — из pinned machine.
@@ -2229,7 +2336,7 @@ with open(sys.argv[1], encoding="utf-8") as source:
 with open(sys.argv[2], encoding="utf-8") as source:
     description = json.load(source)
 
-if event.get("kind") not in {"commit", "human-rewind"}:
+if event.get("kind") not in {"commit", "human-rewind", "loop-continue"}:
     raise SystemExit(3)
 action = event.get("action")
 if not isinstance(action, dict) or set(action) != {"rewind", "reset"}:
@@ -2520,7 +2627,9 @@ v2_lifecycle_begin_human_for_stop() {
   local attempt=$1 stop=$2 reason evidence
   runtime_lifecycle_enabled_v2 || return 0
   case "$stop" in
-    rewind-limit) reason=rewind_limit ;;
+    # Потолок кругов цикла — тот же исчерпанный бюджет автоматических возвратов:
+    # закрытый словарь аналитики не расширяется ради синонима.
+    rewind-limit|loop-ceiling) reason=rewind_limit ;;
     no-progress) reason=no_progress ;;
     human) reason=manual_resume_required ;;
     *) reason=operator_requested ;;
@@ -2587,7 +2696,7 @@ v2_on_exit() {
 v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
-  local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node
+  local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node continue_node
   local stop_reason stop_suffix deferred_file deferred_count terminal_file
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
@@ -2730,6 +2839,18 @@ v2_main() {
       die "--route расходится с immutable pin"
     ROUTE=$pinned_route
     route_hash=$ROUTE_V2_ROUTE_HASH
+    if [[ "$MODE" == resume ]]; then
+      # Остановка по потолку кругов без поднятого потолка: отказ до сессии lifecycle,
+      # закрытия вмешательства человека и снятия STALLED_HUMAN — журнал, реестр и
+      # lifecycle продолжают согласованно говорить «ждёт человека». Подсказка — в журнале.
+      route_v2_loop_ceiling_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then
+        return 0
+      elif (( rc != 0 )); then
+        return "$rc"
+      fi
+    fi
     v2_lifecycle_begin_session \
       "$attempt" resume "$ROUTE" "$route_hash" || {
         rc=$?
@@ -2868,6 +2989,27 @@ v2_main() {
         set_st "$TASK" RESULT human-rewind || return
       v2_log "$rewind_node: продолжение после исчерпанного бюджета повторов — узел переигрывается"
     fi
+    # Остановка по потолку кругов цикла: человек поднял PROFILE_LOOP_MAX_ROUNDS и
+    # нажал «продолжить» — исполняется тот же кандидат ведущего, круг списывается.
+    # Потолок не поднят — остановка остаётся, модель не запускается.
+    continue_node=$(route_v2_continue_loop_ceiling "$TASK" "$attempt")
+    rc=$?
+    if (( rc == 11 )); then
+      # Страховка: ранняя проверка resume уже отказывает без побочных эффектов, но если
+      # потолок не поднят и здесь, остановка возвращается в реестр и lifecycle так же,
+      # как её ставит диспетчер, — модель не запускается.
+      set_st "$TASK" STALLED_HUMAN 1 RESULT stopped-loop-ceiling || return
+      v2_lifecycle_begin_human_for_stop "$attempt" loop-ceiling || return
+      return 0
+    elif (( rc != 0 )); then
+      v2_log "resume: продолжение цикла после потолка кругов не принято (код $rc)"
+      return "$rc"
+    fi
+    if [[ -n "$continue_node" ]]; then
+      [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
+        set_st "$TASK" RESULT loop-continue || return
+      v2_log "${continue_node^^}: цикл продолжен после поднятого потолка кругов"
+    fi
   fi
   if [[ "$MODE" != start ]]; then
     # Если предыдущий процесс умер после ledger CAS, но до UI reset, immutable
@@ -2887,7 +3029,8 @@ v2_main() {
     v2_gate_commit "$attempt" || return
   fi
 
-  route_v2_dispatch_until_pause "$TASK" "$attempt" 64
+  v2_prepare_dispatch "$attempt"
+  route_v2_dispatch_until_pause "$TASK" "$attempt" "$V2_DISPATCH_STEP_LIMIT"
   rc=$?
   case "$rc" in
     20)
@@ -2928,7 +3071,7 @@ v2_main() {
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
       v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || return
-      if [[ "$stop" == no-progress || "$stop" == rewind-limit ]]; then
+      if [[ "$stop" == no-progress || "$stop" == rewind-limit || "$stop" == loop-ceiling ]]; then
         stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
         [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78
         # Движок уже вычислил, ЧЕМ именно кончился автоматический цикл (повтор
@@ -3218,6 +3361,16 @@ v2_admin_main() {
     else
       recovery_failover=""
     fi
+    # Витрина цикла принадлежит попытке: новая начинает без кругов, а признак режима
+    # проставит её собственный диспетчер — иначе recover в обычный маршрут оставил бы
+    # LOOP_MODE прежней попытки, и кокпит не пускал бы к ней арбитра. Реестр без
+    # признаков цикла остаётся побайтно прежним.
+    local key
+    local -a loop_reset=()
+    for key in LOOP_MODE LOOP_MAX_ROUNDS LOOP_ROUND LOOP_STAGE LOOP_REPORT; do
+      [[ -z "$(get "$TASK" "$key")" ]] ||
+        loop_reset=(LOOP_MODE "" LOOP_MAX_ROUNDS "" LOOP_ROUND "" LOOP_STAGE "" LOOP_REPORT "")
+    done
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
       STALLED_HUMAN 0 RESULT recovered ATTEMPT_ID "$out" \
       CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
@@ -3225,7 +3378,8 @@ v2_admin_main() {
       QUEUE_DISPATCH_ID "" \
       RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
       RUNNER_OVERRIDE_FAILOVER "$recovery_failover" \
-      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
+      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending \
+      "${loop_reset[@]}"
   fi
   v2_log "recovery attempt $out создан из $EXPECTED_ATTEMPT: $REASON"
   printf '%s\n' "$out"

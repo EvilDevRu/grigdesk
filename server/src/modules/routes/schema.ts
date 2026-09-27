@@ -6,15 +6,18 @@
 import type {
   RouteCatalogDoc,
   RouteEscalationRecord,
+  RouteLoopDoc,
   RouteMachineDoc,
   RouteNodeDoc,
   RoutePromptBlock,
+  RouteTransitionDoc,
 } from '../../../../shared/routeDefinition.ts';
 
 export type {
   RouteCatalogDoc,
   RouteEscalationRecord,
   RouteFanout,
+  RouteLoopDoc,
   RouteMachineDoc,
   RouteNodeDoc,
   RoutePolicy,
@@ -56,6 +59,8 @@ const TIMEOUT_CLASSES = new Set([
 ]);
 const STOP_TARGETS = new Set(['human', 'failed', 'done']);
 const FAILURE_OWNERS = new Set(['build', 'tests', 'environment', 'plan', 'human']);
+// Продуктовые owner отказа исполнителя цикла; `environment` — единственное исключение.
+const LOOP_WORKER_PRODUCT_OWNERS = ['build', 'tests', 'plan', 'human'];
 const PROVIDER_RETRY_STRATEGIES = new Set([
   'none',
   'same-runner',
@@ -630,7 +635,8 @@ function validateMachine(machine: unknown, {
 }): RouteMachineDoc {
   assertNoExecutionPolicy(machine);
   const required = ['schema', 'kind', 'profile', 'id', 'entry', 'sequence', 'nodes', 'escalation'];
-  assertExactKeys(machine, required, kind === 'route' ? ['title', 'bootstrap'] : ['title'], 'machine');
+  const optional = kind === 'route' ? ['title', 'bootstrap', 'loop'] : ['title'];
+  assertExactKeys(machine, required, optional, 'machine');
   // Набор ключей доказан, дальше документ читается своей формой.
   const doc = machine as unknown as RouteMachineDoc;
   if (doc.schema !== 2 || doc.kind !== kind) {
@@ -883,7 +889,139 @@ function validateMachine(machine: unknown, {
       fail('ROUTES_V2_INVALID_SCHEMA', `prompt «${file}» не используется`, file);
     }
   }
+  if (Object.hasOwn(machine, 'loop')) validateLoop(doc, nodesById);
   return doc;
+}
+
+// Канонический вид для сравнения переходов: опубликованный bundle хранит ключи
+// отсортированными, а исходник — в порядке автора; сравнивать надо смысл.
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sameTransition(value: unknown, expected: RouteTransitionDoc): boolean {
+  return value !== undefined && canonicalJson(value) === canonicalJson(expected);
+}
+
+/**
+ * Пара режима «цикл» — та же узкая топология, что проверяет движок (route_model.py).
+ * Единственная автономная обратная дуга — ведущий → исполнитель; в исполнителя не
+ * ведёт ни один автоматический переход в обход ведущего, эскалаций нет. Ворота
+ * человека вправе возвращать в пару: это решение человека, а не автоматика.
+ */
+function validateLoop(doc: RouteMachineDoc, nodesById: Map<string, RouteNodeDoc>): void {
+  const path = 'machine.loop';
+  assertExactKeys(doc.loop, ['lead', 'worker'], [], path);
+  const loop = doc.loop as RouteLoopDoc;
+  assertIdentifier(loop.lead, ENTITY_ID_RE, `${path}.lead`);
+  assertIdentifier(loop.worker, ENTITY_ID_RE, `${path}.worker`);
+  if (loop.lead === loop.worker) {
+    fail('ROUTES_V2_INVALID_SCHEMA', `${path}: ведущий и исполнитель должны различаться`, path);
+  }
+  for (const [role, nodeId] of [['lead', loop.lead], ['worker', loop.worker]] as const) {
+    const node = nodesById.get(nodeId);
+    if (!node || node.executor !== 'agent' || node.phase !== 'main') {
+      fail('ROUTES_V2_INVALID_SCHEMA', `${path}.${role}: нужен agent-узел фазы main`, `${path}.${role}`);
+    }
+    if ((node.retry?.productFailure || 0) !== 0) {
+      fail(
+        'ROUTES_V2_INVALID_SCHEMA',
+        `${path}.${role}: productFailure должен быть 0 — повтор принадлежит циклу`,
+        `machine.nodes.${nodeId}.retry.productFailure`,
+      );
+    }
+  }
+  const main = doc.sequence.main ?? [];
+  if (main.indexOf(loop.worker) + 1 !== main.indexOf(loop.lead)) {
+    fail(
+      'ROUTES_V2_INVALID_SCHEMA',
+      `${path}: исполнитель стоит в sequence.main непосредственно перед ведущим`,
+      path,
+    );
+  }
+  if (doc.entry !== loop.lead) {
+    fail('ROUTES_V2_INVALID_SCHEMA', `${path}: вход маршрута — ведущий`, 'machine.entry');
+  }
+  const lead = nodesById.get(loop.lead) as RouteNodeDoc;
+  const worker = nodesById.get(loop.worker) as RouteNodeDoc;
+  // Любой продуктовый исход исполнителя уходит ведущему: в обход него — ни к человеку,
+  // ни дальше по маршруту. Исключение — только owner `environment`.
+  const toLead: RouteTransitionDoc = { next: loop.lead };
+  for (const outcome of ['done', 'skipped', 'failed']) {
+    if (!sameTransition(worker.on?.[outcome], toLead)) {
+      fail(
+        'ROUTES_V2_INVALID_SCHEMA',
+        `${path}: исполнитель после ${outcome} передаёт работу ведущему`,
+        `machine.nodes.${loop.worker}.on.${outcome}`,
+      );
+    }
+  }
+  for (const owner of LOOP_WORKER_PRODUCT_OWNERS) {
+    const effective = worker.onFailure?.[owner] ?? worker.on?.failed;
+    if (!sameTransition(effective, toLead)) {
+      fail(
+        'ROUTES_V2_INVALID_SCHEMA',
+        `${path}: отказ исполнителя с owner ${owner} передаёт работу ведущему`,
+        `machine.nodes.${loop.worker}.onFailure.${owner}`,
+      );
+    }
+  }
+  const transfer: RouteTransitionDoc = { rewind: loop.worker, reset: [loop.worker, loop.lead] };
+  for (const owner of ['build', 'tests']) {
+    const effective = lead.onFailure?.[owner] ?? lead.on?.failed;
+    if (!sameTransition(effective, transfer)) {
+      fail(
+        'ROUTES_V2_INVALID_SCHEMA',
+        `${path}: отказ ведущего с owner ${owner} возвращает работу исполнителю`,
+        path,
+      );
+    }
+  }
+  if (!sameTransition(lead.on?.failed, transfer)) {
+    fail('ROUTES_V2_INVALID_SCHEMA', `${path}: обычный отказ ведущего возвращает работу исполнителю`, path);
+  }
+  if (doc.escalation.length > 0) {
+    fail('ROUTES_V2_INVALID_SCHEMA', `${path}: эскалация маршрута в цикле запрещена`, 'machine.escalation');
+  }
+  for (const node of nodesById.values()) {
+    if (node.executor === 'status') continue;
+    const transitions = [
+      ...Object.entries(node.on ?? {}),
+      ...Object.entries(node.onFailure ?? {}).map(([owner, value]) => [`onFailure.${owner}`, value] as const),
+    ];
+    for (const [name, transition] of transitions) {
+      const transitionPath = `machine.nodes.${node.id}.${name}`;
+      if (Object.hasOwn(transition, 'escalate')) {
+        fail(
+          'ROUTES_V2_INVALID_SCHEMA',
+          `${transitionPath}: эскалация маршрута в цикле запрещена`,
+          transitionPath,
+        );
+      }
+      if (node.executor === 'gate') continue;
+      const leadTransfer = node.id === loop.lead && sameTransition(transition, transfer);
+      if (Object.hasOwn(transition, 'rewind') && !leadTransfer) {
+        fail(
+          'ROUTES_V2_INVALID_SCHEMA',
+          `${transitionPath}: в цикле автоматический возврат — только ведущий → исполнитель`,
+          transitionPath,
+        );
+      }
+      if (transition.next === loop.worker) {
+        fail(
+          'ROUTES_V2_INVALID_SCHEMA',
+          `${transitionPath}: вход в исполнителя в обход ведущего запрещён`,
+          transitionPath,
+        );
+      }
+    }
+  }
 }
 
 export function validateRoute(route: unknown, {

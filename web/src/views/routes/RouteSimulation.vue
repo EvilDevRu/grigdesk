@@ -13,6 +13,10 @@
         </UiSelect>
       </label>
       <UiCheckbox v-model="pinned">Закреплённый маршрут</UiCheckbox>
+      <label v-if="startIsLoop">Потолок кругов
+        <UiNumberInput v-model="loopMaxRounds" data-test="simulation-loop-max-rounds"
+                       :min="1" :max="ROUTES_EDITOR_LIMITS.loopMaxRounds" />
+      </label>
       <UiButton data-test="simulation-start" @click="start">Начать заново</UiButton>
     </div>
     <p v-if="simulation?.stale" class="bad" role="alert">
@@ -20,9 +24,11 @@
     </p>
     <p v-if="simulation?.error" class="bad" role="alert">{{ simulation.error }}</p>
     <template v-if="simulation">
-      <p>Шаг {{ Math.min(simulation.stepIndex, 200) }} из 200 · узел
+      <p>Шаг {{ Math.min(simulation.stepIndex, stepLimit) }} из {{ stepLimit }} · узел
         <strong>{{ simulation.cursor.nodeId }}</strong>
         <span v-if="simulation.cursor.routeId"> · {{ simulation.cursor.routeId }}</span>
+        <span v-if="simulation.loopMaxRounds !== null">
+          · потолок кругов {{ simulation.loopMaxRounds }}</span>
       </p>
       <p v-if="simulation.cursor.terminal">Сценарий остановлен. Продолжение возможно только
         после нового запуска.</p>
@@ -83,21 +89,29 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 
+import {
+  ROUTES_EDITOR_LIMITS, ROUTES_LOOP_DEFAULT_MAX_ROUNDS, routeSimulationStepLimit,
+} from '../../../../shared/routesEditorContracts.ts';
 import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
 import type { RouteSimulationObservation, RouteSimulationState } from '../../stores/routes.ts';
-import { UiButton, UiCheckbox, UiSelect } from '../../ui';
+import { UiButton, UiCheckbox, UiNumberInput, UiSelect } from '../../ui';
+import type { UiNumberValue } from '../../ui';
 
 const props = defineProps<{
   document: RouteDraft;
   simulation: RouteSimulationState | null;
 }>();
 const emit = defineEmits<{
-  start: [scope: 'route' | 'bootstrap', routeId: string | null, pinned: boolean];
+  start: [
+    scope: 'route' | 'bootstrap', routeId: string | null, pinned: boolean,
+    loopMaxRounds: number | null,
+  ];
   step: [observation: RouteSimulationObservation];
   approve: [];
 }>();
 const startTarget = ref('bootstrap');
 const pinned = ref(false);
+const loopMaxRounds = ref<UiNumberValue>(ROUTES_LOOP_DEFAULT_MAX_ROUNDS);
 const outcome = ref('done');
 const failureOwner = ref('');
 const selectedRouteId = ref('');
@@ -122,8 +136,12 @@ const stopNames: Record<string, string> = {
   failed: 'ошибка',
   done: 'завершено',
   'rewind-limit': 'исчерпан лимит возвратов',
+  'loop-ceiling': 'исчерпан потолок кругов цикла',
 };
 const routeIds = computed(() => Object.keys(props.document.routes).sort());
+const startIsLoop = computed(() => startTarget.value !== 'bootstrap'
+  && Boolean(props.document.routes[startTarget.value]?.route.loop));
+const stepLimit = computed(() => routeSimulationStepLimit(props.simulation?.loopMaxRounds));
 const machine = computed(() => {
   const cursor = props.simulation?.cursor;
 
@@ -153,7 +171,7 @@ const escalationRoutes = computed(() => {
 });
 const canStep = computed(() => Boolean(props.simulation && !props.simulation.busy
   && !props.simulation.stale && !props.simulation.pendingHuman
-  && !props.simulation.cursor.terminal && props.simulation.stepIndex <= 200
+  && !props.simulation.cursor.terminal && props.simulation.stepIndex <= stepLimit.value
   && effectiveOutcome.value && (!escalationRoutes.value.length
     || escalationRoutes.value.includes(selectedRouteId.value))));
 
@@ -168,8 +186,11 @@ watch(() => props.simulation?.cursor.nodeId, () => {
  * Панель задаёт наблюдения, а исполнение остаётся чистой моделью движка.
  */
 function start(): void {
+  const rounds = typeof loopMaxRounds.value === 'number' ? loopMaxRounds.value : Number.NaN;
+
   emit('start', startTarget.value === 'bootstrap' ? 'bootstrap' : 'route',
-    startTarget.value === 'bootstrap' ? null : startTarget.value, pinned.value);
+    startTarget.value === 'bootstrap' ? null : startTarget.value, pinned.value,
+    startIsLoop.value ? rounds : null);
 }
 
 function outcomeLabel(value: string): string {

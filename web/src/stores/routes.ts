@@ -28,6 +28,8 @@ export interface RouteSimulationState {
   generation: number;
   stepIndex: number;
   pinned: boolean;
+  // Потолок кругов цикла для сценария маршрута с `loop`; у прочих — null.
+  loopMaxRounds: number | null;
   busy: boolean;
   error: string;
   stale: boolean;

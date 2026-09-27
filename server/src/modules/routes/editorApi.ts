@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import { ROUTES_EDITOR_LIMITS, RoutesEditorContractError } from '../../../../shared/routesEditorContracts.ts';
+import {
+  ROUTES_EDITOR_LIMITS, RoutesEditorContractError, routeSimulationStepLimit,
+} from '../../../../shared/routesEditorContracts.ts';
 import type {
   RouteRebaseResolution, RouteSimulationStepRequest,
 } from '../../../../shared/routesEditorContracts.ts';
@@ -483,10 +485,13 @@ export async function registerRoutesEditorApi(
     const body = bodyAt(request.body, [
       'expectedRevision', 'cursor', 'counters', 'outcome', 'failureOwner',
       'selectedRouteId', 'pinned', 'humanApproved', 'stepIndex',
-    ]);
+    ], ['loopMaxRounds']);
+    const loopMaxRounds = body.loopMaxRounds as number | undefined;
     if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 1
+      || (loopMaxRounds !== undefined && (!Number.isSafeInteger(loopMaxRounds)
+        || loopMaxRounds < 1 || loopMaxRounds > ROUTES_EDITOR_LIMITS.loopMaxRounds))
       || !Number.isSafeInteger(body.stepIndex) || Number(body.stepIndex) < 1
-      || Number(body.stepIndex) > ROUTES_EDITOR_LIMITS.simulationSteps
+      || Number(body.stepIndex) > routeSimulationStepLimit(loopMaxRounds)
       || typeof body.outcome !== 'string'
       || (body.failureOwner !== null && typeof body.failureOwner !== 'string')
       || (body.selectedRouteId !== null && typeof body.selectedRouteId !== 'string')

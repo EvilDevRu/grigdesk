@@ -544,7 +544,9 @@ export class FactoryStateAdapter {
       // месте». Полного `stallNodeId` здесь нет по цене — он требует определения схемы, —
       // но вердикт остановки уже прочитан строкой выше, и узел лежит прямо в нём.
       node: stopVerdict?.node || null,
-      arbitrable: stallIsArbitrable(trusted.cursor.stop, stopVerdict),
+      arbitrable: stallIsArbitrable(trusted.cursor.stop, stopVerdict, {
+        loop: registry.LOOP_MODE === '1',
+      }),
       arbiter: this.arbiterCards?.read(task, trusted.attempt) || null,
     };
   }
@@ -662,7 +664,9 @@ export class FactoryStateAdapter {
     // Берётся ли за неё арбитр — решает ОДНО правило, общее с его собственным гейтом.
     // Кнопка, за которой стоит отказ, хуже отсутствующей кнопки: остановка `human` без
     // вердикта (исчерпанный бюджет повторов) арбитру не предлагается.
-    const arbitrable = Boolean(cursorStop) && stallIsArbitrable(cursorStop, stopVerdict);
+    const arbitrable = Boolean(cursorStop) && stallIsArbitrable(cursorStop, stopVerdict, {
+      loop: registry.LOOP_MODE === '1',
+    });
 
     const stall: (StallInfo & {
       node: string | null;

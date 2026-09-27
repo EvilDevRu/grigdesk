@@ -107,6 +107,24 @@ elif op == "bootstrap-policy":
     if policy not in ("required", "skip"):
         fail()
     print(policy)
+elif op == "loop":
+    # Пара режима «цикл» закреплённого маршрута: «ведущий<TAB>исполнитель» либо пустая
+    # строка у обычного маршрута. Бандл уже проверен factory-route.
+    machine = value.get("machine") if isinstance(value, dict) else None
+    if not isinstance(machine, dict):
+        fail()
+    pair = machine.get("loop")
+    if pair is None:
+        print("", "", sep="\t")
+    else:
+        if not isinstance(pair, dict) or set(pair) != {"lead", "worker"}:
+            fail()
+        for node_id in (pair["lead"], pair["worker"]):
+            if not isinstance(node_id, str) or not re.fullmatch(
+                r"[a-z0-9][a-z0-9_-]{0,40}", node_id
+            ):
+                fail()
+        print(pair["lead"], pair["worker"], sep="\t")
 elif op == "cursor":
     cursor = value
     required = {
@@ -137,7 +155,7 @@ elif op == "cursor-stop":
         fail()
     stop = cursor["stop"]
     if stop is not None and stop not in {
-        "human", "failed", "done", "rewind-limit", "no-progress"
+        "human", "failed", "done", "rewind-limit", "no-progress", "loop-ceiling"
     }:
         fail()
     last = cursor["lastCommit"]
@@ -757,11 +775,11 @@ _route_v2_no_result_label() {
 _route_v2_commit_and_project() {
   local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
   local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0}
-  local target_budget=${9:-0} reject_feedback=${10:-} cursor rc
+  local target_budget=${9:-0} reject_feedback=${10:-} loop_max_rounds=${11:-0} cursor rc
   cursor=$(attempt_stage_state_commit_v2 \
     "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
     "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget" \
-    "$reject_feedback") || return
+    "$reject_feedback" "$loop_max_rounds") || return
   _route_v2_lifecycle_finish_visit_after_commit "$task" "$attempt" "$outcome" || return
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
@@ -774,7 +792,124 @@ _route_v2_commit_and_project() {
     # Витрина таймера: ошибка пересчёта не останавливает маршрут.
     route_v2_project_work_time "$task" "$attempt" || true
   fi
+  if (( loop_max_rounds > 0 )) && declare -F route_v2_project_loop >/dev/null; then
+    # Витрина цикла (круг, этап, потолок, последний отчёт) и снятие записи с отчёта
+    # исполнителя: следующий визит пишет свой отчёт, прошлый остаётся доказательством.
+    route_v2_project_loop "$task" "$attempt" "$node" "$outcome" || true
+  fi
   printf '%s\n' "$cursor"
+}
+
+# Потолок кругов режима «цикл» из профиля — снимок на процесс оркестратора: профиль
+# читается при start/resume. Нет строки — 20; каноническое целое 1..100 — заданный
+# потолок; пустое значение, 0, 101, дробь и мусор — отказ до запуска модели, чтобы
+# опечатка в профиле не превратилась в молчаливое значение по умолчанию.
+route_v2_loop_max_rounds() {
+  if [[ -z "${PROFILE_LOOP_MAX_ROUNDS+set}" ]]; then
+    printf '20\n'
+    return 0
+  fi
+  if [[ "$PROFILE_LOOP_MAX_ROUNDS" =~ ^([1-9][0-9]?|100)$ ]]; then
+    printf '%s\n' "$PROFILE_LOOP_MAX_ROUNDS"
+    return 0
+  fi
+  _route_v2_fail \
+    "PROFILE_LOOP_MAX_ROUNDS: нужно целое 1..100, в профиле «${PROFILE_LOOP_MAX_ROUNDS}»"
+}
+
+# Проверка resume ДО любых побочных эффектов: остановка `loop-ceiling`, а потолок
+# профиля не поднят (или испорчен). Такой resume обязан отказать раньше, чем откроется
+# сессия lifecycle, закроется вмешательство человека, снимется STALLED_HUMAN и поедет
+# разведка стенда: иначе журнал попытки стоит на остановке, а реестр и lifecycle уже
+# говорят «продолжено», и кокпит после выхода демона принимает ожидание человека за
+# падение. Только чтение. Код 11 — потолок не поднят, 78 — потолок профиля испорчен
+# (причина — в журнал этапов); 0 — это не такая остановка или потолок поднят. Курсор,
+# который ещё не читается, — не повод отказывать: строгую проверку сделает общий путь.
+route_v2_loop_ceiling_held() {
+  local task attempt cursor_tmp event_tmp state stop last_node last_outcome kind rounds
+  local max_rounds
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _route_v2_load_attempt "$task" "$attempt" || return
+  cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
+  if ! attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" 2>/dev/null ||
+     ! IFS=$'\t' read -r state stop last_node last_outcome \
+       < <(_route_v2_json cursor-stop "$cursor_tmp" 2>/dev/null); then
+    rm -f -- "$cursor_tmp"
+    return 0
+  fi
+  rm -f -- "$cursor_tmp"
+  [[ "$state" == stopped && "$stop" == loop-ceiling ]] || return 0
+  max_rounds=$(route_v2_loop_max_rounds 2>&1) || {
+    declare -F v2_log >/dev/null && v2_log "${last_node^^}: ${max_rounds#route-v2 runtime: }" \
+      "— задача остаётся на остановке по потолку кругов"
+    return 78
+  }
+  event_tmp=$(mktemp "$(factory_control_root)/.route-v2-loop-ceiling.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$task" "$attempt" >"$event_tmp" 2>/dev/null || {
+    rm -f -- "$event_tmp"
+    return 0
+  }
+  kind=$(runtime_analytics_json_get_v2 "$event_tmp" kind 2>/dev/null) || kind=""
+  rounds=$(runtime_analytics_json_get_v2 "$event_tmp" loop.roundsBefore 2>/dev/null) || rounds=""
+  rm -f -- "$event_tmp"
+  [[ "$kind" == loop-ceiling && "$rounds" =~ ^[0-9]+$ ]] || return 0
+  (( max_rounds > rounds )) && return 0
+  declare -F v2_log >/dev/null && v2_log \
+    "${last_node^^}: потолок кругов цикла не поднят (PROFILE_LOOP_MAX_ROUNDS=${max_rounds})" \
+    "— задача остаётся на остановке"
+  return 11
+}
+
+# Продолжение цикла после поднятого потолка кругов — только из resume человека.
+# Остановка `loop-ceiling` исполняет ТОТ ЖЕ кандидат ведущего, если потолок профиля
+# теперь больше числа исполненных кругов: это не human-rewind, серия сторожей, находки
+# и счёт кругов не обнуляются. Печатает узел, куда ушёл курсор; пустой вывод и код 0 —
+# это не остановка по потолку. Код 11 — потолок не поднят: в журнал уходит подсказка,
+# событие не пишется, и продолжать диспетчер вызывающему нечем.
+route_v2_continue_loop_ceiling() {
+  local task attempt cursor_tmp event_tmp state stop last_node last_outcome
+  local sequence hash max_rounds target rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _route_v2_load_attempt "$task" "$attempt" || return
+  cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
+  attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" || {
+    rc=$?
+    rm -f -- "$cursor_tmp"
+    return "$rc"
+  }
+  IFS=$'\t' read -r state stop last_node last_outcome \
+    < <(_route_v2_json cursor-stop "$cursor_tmp") || {
+      rm -f -- "$cursor_tmp"
+      return 78
+    }
+  rm -f -- "$cursor_tmp"
+  [[ "$state" == stopped && "$stop" == loop-ceiling ]] || return 0
+  max_rounds=$(route_v2_loop_max_rounds) || return 78
+  event_tmp=$(mktemp "$(factory_control_root)/.route-v2-loop-ceiling.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$task" "$attempt" >"$event_tmp" || {
+    rc=$?
+    rm -f -- "$event_tmp"
+    return "$rc"
+  }
+  sequence=$(runtime_analytics_json_get_v2 "$event_tmp" sequence) || sequence=""
+  target=$(runtime_analytics_json_get_v2 "$event_tmp" action.rewind) || target=""
+  hash=$(sha256sum -- "$event_tmp" | awk '{print $1}') || hash=""
+  rm -f -- "$event_tmp"
+  [[ "$sequence" =~ ^[1-9][0-9]*$ && "$hash" =~ ^[a-f0-9]{64}$ && -n "$target" ]] ||
+    return 78
+  attempt_stage_state_loop_continue_v2 \
+    "$task" "$attempt" "$max_rounds" "$sequence" "$hash" >/dev/null
+  rc=$?
+  if (( rc == 11 )); then
+    declare -F v2_log >/dev/null && v2_log \
+      "${last_node^^}: потолок кругов цикла не поднят (PROFILE_LOOP_MAX_ROUNDS=${max_rounds})" \
+      "— задача остаётся на остановке"
+    return 11
+  fi
+  (( rc == 0 )) || return "$rc"
+  printf '%s\n' "$target"
 }
 
 # Runtime-пути проверочного инструментария, объявленные профилем (см. PROFILE-CONTRACT,
@@ -963,7 +1098,10 @@ evidence = context.get("evidence")
 findings = evidence.get("findings") if isinstance(evidence, dict) else None
 records = findings.get(sys.argv[2]) if isinstance(findings, dict) else None
 if isinstance(records, list) and records:
-    json.dump(records, sys.stdout, ensure_ascii=False)
+    # Блоки промпта показывают 50 открытых и 30 отложенных: больше в переменную
+    # окружения не кладём — одна строка env в Linux не длиннее 128 КиБ.
+    limit = 50 if sys.argv[2] == "open" else 30
+    json.dump(records[:limit], sys.stdout, ensure_ascii=False)
 ' "$context_file" "$section" 2>/dev/null || return 0
 }
 
@@ -1101,6 +1239,7 @@ _route_v2_run_agent_node() {
   FACTORY_STAGE_HUMAN_NOTE="${ROUTE_V2_NODE_HUMAN_NOTE:-}" \
   FACTORY_STAGE_OPEN_FINDINGS="$_r2_open_findings" \
   FACTORY_STAGE_DEFERRED_FINDINGS="$_r2_deferred_findings" \
+  FACTORY_LOOP_ROLE="${ROUTE_V2_NODE_LOOP_ROLE:-}" \
     run_agent "$task" "$(cat "$_r2_prompt_file")" "$run_key" \
       >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
   local agent_rc=$?
@@ -1909,7 +2048,22 @@ route_v2_dispatch_next() {
       rm -f -- "$description_tmp"
       return 78
     }
+  local loop_lead="" loop_worker="" loop_role="" loop_max_rounds=0
+  IFS=$'\t' read -r loop_lead loop_worker < <(_route_v2_json loop "$description_tmp") || {
+    rm -f -- "$description_tmp"
+    return 78
+  }
   rm -f -- "$description_tmp"
+  # Режим «цикл»: потолок кругов проверяется до запуска любой модели, чтобы опечатка
+  # в профиле не превратилась в молчаливое значение по умолчанию посреди работы.
+  if [[ -n "$loop_lead" ]]; then
+    loop_max_rounds=$(route_v2_loop_max_rounds) || return 78
+    if [[ "$node" == "$loop_lead" ]]; then
+      loop_role=lead
+    elif [[ "$node" == "$loop_worker" ]]; then
+      loop_role=worker
+    fi
+  fi
 
   if [[ "$executor" == gate ]]; then
     IFS=$'\t' read -r visit_reason visit_transition visit_stage_hash \
@@ -2048,6 +2202,7 @@ route_v2_dispatch_next() {
       ROUTE_V2_NODE_RETRY="$attempt_no" \
       ROUTE_V2_NODE_HUMAN_NOTE="$human_note" \
       ROUTE_V2_NODE_RETRY_NOTE="$retry_note" \
+      ROUTE_V2_NODE_LOOP_ROLE="$loop_role" \
       ROUTE_V2_NODE_RETRY_REASON="$retry_reason" _route_v2_run_agent_node \
         "$task" "$attempt" "$node" "$run_key" "$policy" "$sequence"
       rc=$?
@@ -2215,7 +2370,8 @@ route_v2_dispatch_next() {
   fi
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" || {
+    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" "" \
+    "$loop_max_rounds" || {
       rc=$?
       runtime_lifecycle_node_visit_finish_v2 \
         interrupted conflict attempt_interrupted '' '' >/dev/null || true

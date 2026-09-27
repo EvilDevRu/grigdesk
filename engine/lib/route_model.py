@@ -42,6 +42,14 @@ TIMEOUT_CLASSES = {
 }
 STOP_TARGETS = {"human", "failed", "done"}
 FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
+# Потолок кругов режима «цикл» задаёт профиль (PROFILE_LOOP_MAX_ROUNDS); здесь только
+# значение по умолчанию для симуляции и верхняя граница, общие с движком.
+LOOP_DEFAULT_MAX_ROUNDS = 20
+LOOP_MAX_ROUNDS_LIMIT = 100
+# Предел шагов пробного сценария редактора (ROUTES_EDITOR_LIMITS в shared): у маршрута с
+# циклом он вмещает весь потолок кругов — 100 кругов это 201 шаг до `loop-ceiling`.
+SIMULATION_STEPS = 200
+LOOP_SIMULATION_STEPS = 400
 RETRY_STRATEGIES = {"none", "same-runner", "runner-failover"}
 OUTCOMES = {
     "agent": {"done", "skipped", "failed", "exhausted"},
@@ -396,7 +404,7 @@ def validate_machine(
 ) -> None:
     assert_no_execution_policy(machine)
     required = {"schema", "kind", "profile", "id", "entry", "sequence", "nodes", "escalation"}
-    optional = {"title", "bootstrap"} if kind == "route" else {"title"}
+    optional = {"title", "bootstrap", "loop"} if kind == "route" else {"title"}
     assert_exact_keys(machine, required, optional, "machine")
     if (
         machine["schema"] != 2
@@ -697,6 +705,80 @@ def validate_machine(
     unused_prompts = prompt_files - referenced_prompts
     if unused_prompts:
         fail("bundle: неиспользуемые prompts " + ", ".join(sorted(unused_prompts)))
+    if "loop" in machine:
+        validate_loop(machine, nodes, order)
+
+
+# Продуктовые owner отказа исполнителя цикла; `environment` — единственное исключение.
+LOOP_WORKER_PRODUCT_OWNERS = ("build", "tests", "plan", "human")
+
+
+def effective_failure_transition(node: dict[str, Any], owner: str) -> Any:
+    return node.get("onFailure", {}).get(owner, node["on"]["failed"])
+
+
+def validate_loop(machine: dict[str, Any], nodes: dict[str, Any], order: list[str]) -> None:
+    """Проверяет пару режима «цикл»: ведущий ставит задание и проверяет, исполнитель делает.
+
+    Топология узкая намеренно: только на ней движок может доказать бюджет кругов.
+    Единственная автономная обратная дуга — ведущий → исполнитель; в исполнителя не
+    ведёт ни один автоматический переход в обход ведущего, эскалаций нет. Ворота
+    человека вправе возвращать в пару — это решение человека, а не автоматика.
+    """
+    loop = assert_exact_keys(machine["loop"], {"lead", "worker"}, set(), "machine.loop")
+    lead = assert_identifier(loop["lead"], ENTITY_RE, "machine.loop.lead")
+    worker = assert_identifier(loop["worker"], ENTITY_RE, "machine.loop.worker")
+    if lead == worker:
+        fail("machine.loop: ведущий и исполнитель должны различаться")
+    for role, node_id in (("lead", lead), ("worker", worker)):
+        node = nodes.get(node_id)
+        if not node or node["executor"] != "agent" or node["phase"] != "main":
+            fail(f"machine.loop.{role}: нужен agent-узел фазы main")
+        if node["retry"]["productFailure"] != 0:
+            fail(f"machine.loop.{role}: productFailure должен быть 0 — повтор принадлежит циклу")
+    main = machine["sequence"]["main"]
+    if main.index(worker) + 1 != main.index(lead):
+        fail("machine.loop: исполнитель стоит в sequence.main непосредственно перед ведущим")
+    if machine["entry"] != lead:
+        fail("machine.loop: вход маршрута — ведущий")
+    # Любой продуктовый исход исполнителя — результат, частичный отказ, пропуск — уходит
+    # ведущему: разбор и следующее задание — его работа. В обход ведущего нельзя ни к
+    # человеку (цикл встал бы после первого же частичного результата), ни дальше по
+    # маршруту (работа ушла бы на приёмку без проверки). Исключение — только owner
+    # `environment`: окружение ведущий не починит.
+    to_lead = {"next": lead}
+    for outcome in ("done", "skipped", "failed"):
+        if nodes[worker]["on"][outcome] != to_lead:
+            fail(f"machine.loop: исполнитель после {outcome} передаёт работу ведущему")
+    for owner in LOOP_WORKER_PRODUCT_OWNERS:
+        if effective_failure_transition(nodes[worker], owner) != to_lead:
+            fail(f"machine.loop: отказ исполнителя с owner {owner} передаёт работу ведущему")
+    transfer = {"rewind": worker, "reset": [worker, lead]}
+    for owner in ("build", "tests"):
+        if effective_failure_transition(nodes[lead], owner) != transfer:
+            fail(f"machine.loop: отказ ведущего с owner {owner} возвращает работу исполнителю")
+    if nodes[lead]["on"]["failed"] != transfer:
+        fail("machine.loop: обычный отказ ведущего возвращает работу исполнителю")
+    if machine["escalation"]:
+        fail("machine.loop: эскалация маршрута в цикле запрещена")
+    for node in nodes.values():
+        if node["executor"] == "status":
+            continue
+        transitions = list(node["on"].items()) + [
+            (f"onFailure.{owner}", value) for owner, value in node.get("onFailure", {}).items()
+        ]
+        for name, transition in transitions:
+            label = f"machine.nodes.{node['id']}.{name}"
+            if "escalate" in transition:
+                fail(f"{label}: эскалация маршрута в цикле запрещена")
+            if node["executor"] == "gate":
+                continue
+            if "rewind" in transition and not (
+                node["id"] == lead and transition == transfer
+            ):
+                fail(f"{label}: в цикле автоматический возврат — только ведущий → исполнитель")
+            if transition.get("next") == worker:
+                fail(f"{label}: вход в исполнителя в обход ведущего запрещён")
 
 
 def context_value(context: dict[str, Any], path_value: str) -> Any:
@@ -882,8 +964,12 @@ def step_editor_catalog(value: Any, profile: str) -> dict[str, Any]:
         request = assert_exact_keys(value, {
             "catalogInput", "cursor", "counters", "outcome", "failureOwner",
             "selectedRouteId", "pinned", "stepIndex",
-        }, {"humanApproved"}, "input")
-        assert_integer(request["stepIndex"], 1, 200, "stepIndex")
+        }, {"humanApproved", "loopMaxRounds"}, "input")
+        assert_integer(request["stepIndex"], 1, LOOP_SIMULATION_STEPS, "stepIndex")
+        # Потолок кругов цикла живёт в профиле, а не в маршруте: симуляции его передают
+        # явно, без него — значение движка по умолчанию.
+        loop_max_rounds = request.get("loopMaxRounds", LOOP_DEFAULT_MAX_ROUNDS)
+        assert_integer(loop_max_rounds, 1, LOOP_MAX_ROUNDS_LIMIT, "loopMaxRounds")
         cursor = assert_exact_keys(request["cursor"],
             {"scope", "routeId", "nodeId", "terminal"}, set(), "cursor")
         if cursor["terminal"] is not False:
@@ -916,6 +1002,8 @@ def step_editor_catalog(value: Any, profile: str) -> dict[str, Any]:
             fail("cursor.routeId: маршрут отсутствует")
         machine = (catalog["bootstrap"] if cursor["scope"] == "bootstrap"
                    else catalog["routes"][route_id]["route"])
+        if not isinstance(machine.get("loop"), dict):
+            assert_integer(request["stepIndex"], 1, SIMULATION_STEPS, "stepIndex")
         node = next((item for item in machine["nodes"] if item["id"] == node_id), None)
         if node is None or node["executor"] == "status":
             fail("cursor.nodeId: узел не исполняется")
@@ -967,7 +1055,24 @@ def step_editor_catalog(value: Any, profile: str) -> dict[str, Any]:
             count = next_counters["rewinds"].get(arc, 0)
             target_count = next_counters["rewinds"].get(target_key, 0)
             hard_limit = 6 if request["failureOwner"] else 2
-            if node["executor"] != "gate" and (count >= hard_limit
+            loop = machine.get("loop")
+            loop_transfer = (
+                isinstance(loop, dict)
+                and node_id == loop.get("lead")
+                and target == loop.get("worker")
+            )
+            if loop_transfer:
+                # Симуляция цикла структурная: принятие этапа и сторожа топтания
+                # требуют настоящих вердиктов, здесь считается только потолок кругов.
+                if target_count >= loop_max_rounds:
+                    stop = "loop-ceiling"
+                    next_cursor["terminal"] = True
+                    next_cursor["nodeId"] = node_id
+                    reset = []
+                else:
+                    next_counters["rewinds"][arc] = count + 1
+                    next_counters["rewinds"][target_key] = target_count + 1
+            elif node["executor"] != "gate" and (count >= hard_limit
                     or target_count >= 10):
                 stop = "rewind-limit"
                 next_cursor["terminal"] = True

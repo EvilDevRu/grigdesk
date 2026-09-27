@@ -648,7 +648,7 @@ export function removeEmitReference(draft: RouteDraft, scope: RouteCommandScope,
 
 type NodeReference = {
   target: string;
-  relation: 'entry' | 'sequence' | 'transition' | 'reset' | 'owner' | 'emits' | 'escalation';
+  relation: 'entry' | 'sequence' | 'transition' | 'reset' | 'owner' | 'emits' | 'escalation' | 'loop';
   path: string;
   sourceId?: string;
   set: (value: string) => void;
@@ -668,6 +668,23 @@ function eachNodeReference(machine: DraftMachine, visit: (reference: NodeReferen
          machine.entry = value;
       }
     });
+  }
+
+  // Роли цикла — такие же ссылки на этапы: переименование обязано их перенести,
+  // а удаление ведущего или исполнителя без новой цели — назвать висячую связь.
+  const loop = machine.loop;
+
+  if (loop) {
+    for (const role of ['lead', 'worker'] as const) {
+      visit({
+        target: loop[role],
+        relation: 'loop',
+        path: `loop.${role}`,
+        set: (value) => {
+          loop[role] = value;
+        }
+      });
+    }
   }
 
   for (const phase of ['bootstrap', 'main', 'tail'] as const) {

@@ -110,6 +110,7 @@ interface LedgerEvent {
   reason?: string;
   action?: { stop?: string; rewind?: string };
   verdict?: { owner?: string; findings?: unknown; reviewed?: unknown };
+  loop?: unknown;
 }
 
 // Журнал попытки прочитан: дуга возвратов, её вердикты и потраченные арбитражи.
@@ -121,6 +122,9 @@ export interface ArbitrationContext {
   reason: string | null;
   series: ArbiterRound[];
   arbitrations: number;
+  // Попытка режима «цикл»: этапы ведёт ведущая модель, второй управляющий поверх неё
+  // запрещён. Признак берётся из журнала (снимки и события цикла).
+  loop: boolean;
 }
 
 // Журнал попытки не прочитан — разбирать нечего.
@@ -172,6 +176,7 @@ export async function readArbitrationContext({ controlDir, task, attempt }: {
     .map((entry) => entry.name);
 
   let arbitrations = 0;
+  let loop = false;
   let series: ArbiterRound[] = [];
   let stop: string | null = null;
   let node: string | null = null;
@@ -184,6 +189,9 @@ export async function readArbitrationContext({ controlDir, task, attempt }: {
       event = JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'));
     } catch {
       return { ok: false, error: 'ledger_unreadable' };
+    }
+    if (event.loop || event.kind === 'loop-ceiling' || event.kind === 'loop-continue') {
+      loop = true;
     }
     if (event.kind === 'human-rewind') {
       if (event.actor === ARBITER_ACTOR) arbitrations += 1;
@@ -236,7 +244,7 @@ export async function readArbitrationContext({ controlDir, task, attempt }: {
   }
 
   return {
-    ok: true, stop, node, target, reason, series, arbitrations,
+    ok: true, stop, node, target, reason, series, arbitrations, loop,
   };
 }
 
@@ -267,7 +275,11 @@ export function stopIsArbitrable(
 export function stallIsArbitrable(
   stop: string | null | undefined,
   verdict: { owner: string | null } | null | undefined,
+  { loop = false }: { loop?: boolean } = {},
 ): boolean {
+  // Режим «цикл»: этапы ведёт ведущая модель, её остановку решает человек. Арбитр
+  // стал бы вторым управляющим циклом поверх ведущего — ни кнопки, ни вотчера.
+  if (loop) return false;
   if (stop === 'human' && !verdict) return false;
   return stopIsArbitrable(stop, verdict?.owner || null);
 }
@@ -276,9 +288,17 @@ export function stallIsArbitrable(
 export function arbitrationGate(
   context: ArbitrationRead | null | undefined,
   cursor: ArbitrationCursor | null | undefined,
+  { loop = false }: { loop?: boolean } = {},
 ): ArbitrationGateResult {
   if (!context?.ok) {
     return { ok: false, error: 'ledger_unreadable', message: 'журнал попытки не прочитан' };
+  }
+  if (loop || context.loop) {
+    return {
+      ok: false,
+      error: 'not_arbitrable',
+      message: 'цикл ведёт этапы сам: его остановку решает человек, арбитр не вмешивается',
+    };
   }
   if (cursor?.state !== 'stopped' || !ARBITRABLE_STOPS.has(cursor?.stop)) {
     return {

@@ -121,7 +121,7 @@ export const CARD_UI_VERSION = 5;
  * означает лишь, что маршрут поехал новой попыткой — её карточка придёт своим ходом.
  * Доехавший маршрут и закрытая попытка, наоборот, звонят: их и ждут с телефона.
  */
-const QUIET_RESULTS = new Set(['recovered', 'human-rewind']);
+const QUIET_RESULTS = new Set(['recovered', 'human-rewind', 'loop-continue']);
 
 /** Отпечаток текста карточки: хранить в state весь текст дорого, сравнить надо точно. */
 const textHash = (text: unknown) => (

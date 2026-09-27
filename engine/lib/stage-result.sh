@@ -5,7 +5,7 @@ FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 source "$FACTORY_HOME/lib/run-state.sh"
 source "$FACTORY_HOME/lib/status-request.sh"
 
-task="" stage="" run_id="" epoch="" result="" comment="" failure_owner=""
+task="" stage="" run_id="" epoch="" result="" comment="" failure_owner="" stage_flags=0
 declare -a findings=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,12 +22,23 @@ while [[ $# -gt 0 ]]; do
     # списком под префиксом: разбирает их run_state_verdict_encode.
     --finding-anchor) findings+=("anchor:${2:-}"); shift 2 ;;
     --reviewed) findings+=("reviewed:${2:-}"); shift 2 ;;
+    # Граница этапа цикла: ведущий принимает этап и передаёт следующий. Доступна только
+    # ведущему (подсказку роли ставит диспетчер); честность границы проверяет коммит.
+    --next-stage) findings+=("stage:next"); stage_flags=1; shift ;;
+    --stage-closed) findings+=("stage-closed:${2:-}"); stage_flags=1; shift 2 ;;
+    --stage-summary) findings+=("stage-summary:${2:-}"); stage_flags=1; shift 2 ;;
     *)
       if [[ -z "$result" ]]; then result=$1; else comment="${comment:+$comment }$1"; fi
       shift ;;
   esac
 done
 [[ -n "$task" && -n "$stage" && -n "$run_id" && -n "$epoch" && -n "$result" ]] || exit 2
+
+if (( stage_flags )) && [[ "${FACTORY_LOOP_ROLE:-}" != lead ]]; then
+  printf '%s\n' \
+    'stage-result: граница этапа (--next-stage) доступна только ведущему узлу цикла' >&2
+  exit 2
+fi
 
 # Отказ, в котором не осталось ни одного блокирующего замечания, — это не отказ.
 # Проверяющий сам решил, что всё найденное можно отложить, и держать из-за этого
@@ -38,7 +49,7 @@ if [[ "$result" == failed && ${#findings[@]} -gt 0 ]]; then
   has_blocking=0
   for raw in "${findings[@]}"; do
     case "$raw" in
-      deferred:*|anchor:*|reviewed:*) ;;
+      deferred:*|anchor:*|reviewed:*|stage:*|stage-closed:*|stage-summary:*) ;;
       *) has_blocking=1; break ;;
     esac
   done

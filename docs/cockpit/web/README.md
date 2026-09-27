@@ -26,6 +26,7 @@
 
 ## Грабли
 
+- [Долгие POST чатов, накопление опросов и исчезновение метрик при сбое транспорта](../chat/concurrent-send-transport.md)
 - [«Кокпит завис, все запросы (ожидает)» = съеден лимит соединений браузера](browser-connection-limit.md)
 - [Колонка чата без min-width: 0 — длинная команда выталкивает кнопки за экран](chat-column-overflow.md)
 - [Подразделы настроек не наследуют стили SettingsView (scoped CSS)](settings-scoped-styles.md)
