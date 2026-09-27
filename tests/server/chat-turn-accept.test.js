@@ -1,0 +1,344 @@
+// Приём хода чата отдельно от его исполнения. Раньше POST /api/chat держал HTTP-запрос
+// до конца работы агента (и всё время ожидания в очереди чата): несколько параллельных
+// ходов съедали лимит соединений браузера, а оборванный запрос оставлял неясным, был ли
+// запуск. Теперь окно шлёт устойчивый turnId, сервер коротко подтверждает приём,
+// повтор с тем же turnId ничего не запускает второй раз, а итог приходит через pending.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  chatAppFixture,
+  controlledExecutor,
+  saveChat,
+  turnBody,
+  waitFor,
+} from './helpers/chat-turns.js';
+
+/**
+ * Ответ на приём должен прийти, не дожидаясь исполнителя. Старый синхронный POST здесь
+ * повис бы до конца хода — поэтому проверка падает по таймауту, а не зависает.
+ */
+async function quick(promise, what, ms = 1500) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: ответа нет за ${ms} мс`)), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function post(app, body) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: body,
+  });
+}
+
+async function pendingOf(app) {
+  return (await app.inject({ method: 'GET', url: '/api/chat/pending' })).json().pending;
+}
+
+async function turnsOf(app, ids) {
+  const response = await app.inject({ method: 'GET', url: `/api/chat/turns?ids=${ids.join(',')}` });
+
+  assert.equal(response.statusCode, 200);
+
+  return response.json().turns;
+}
+
+test('приём: короткое подтверждение до конца хода, итог в pending под тем же turnId', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app, events } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'accept-chat');
+
+  const accepted = await quick(post(app, turnBody('accept-chat', 'turn-accept-0001')), 'приём хода');
+
+  assert.equal(accepted.statusCode, 202);
+  assert.deepEqual(accepted.json(), {
+    accepted: true,
+    turnId: 'turn-accept-0001',
+    state: 'started',
+  });
+
+  await waitForRuns(1);
+
+  const active = (await app.inject({ method: 'GET', url: '/api/chat/active' })).json();
+
+  assert.equal(active.active[0].chatKey, 'accept-chat');
+  assert.equal(active.active[0].turnId, 'turn-accept-0001', 'после F5 окно узнаёт свой ход');
+  assert.equal((await turnsOf(app, ['turn-accept-0001']))['turn-accept-0001'].state, 'running');
+
+  runs[0].release('Готово');
+
+  const [result] = await waitFor(async () => {
+    const pending = await pendingOf(app);
+
+    return pending.length ? pending : null;
+  }, { what: 'итог хода в pending' });
+
+  assert.equal(result.id, 'turn-accept-0001', 'id записи — turnId: окно сверяет ответ со своим сообщением');
+  assert.equal(result.turnId, 'turn-accept-0001');
+  assert.equal(result.chatKey, 'accept-chat');
+  assert.equal(result.role, 'assistant');
+  assert.equal(result.reply, 'Готово');
+  assert.equal(result.userText, 'привет');
+
+  const done = events.find((entry) => entry.event === 'chat-done');
+
+  assert.equal(done.data.turnId, 'turn-accept-0001');
+  assert.equal(done.data.queued, 0);
+
+  const orphan = events.find((entry) => entry.event === 'chat-orphan');
+
+  assert.equal(orphan.data.turnId, 'turn-accept-0001');
+  assert.ok(
+    events.indexOf(orphan) < events.indexOf(done),
+    'итог записан до сигнала о конце хода: окно, услышавшее chat-done, находит ответ',
+  );
+  assert.equal((await turnsOf(app, ['turn-accept-0001']))['turn-accept-0001'].state, 'done');
+});
+
+test('потерянный ACK: повтор той же отправки не запускает исполнителя второй раз', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'dup-chat');
+
+  const body = turnBody('dup-chat', 'turn-dup-000001');
+
+  const first = await quick(post(app, body), 'первый приём');
+  const repeat = await quick(post(app, body), 'повтор приёма');
+
+  assert.equal(first.statusCode, 202);
+  assert.equal(repeat.statusCode, 202);
+  assert.deepEqual(repeat.json(), {
+    accepted: true,
+    duplicate: true,
+    turnId: 'turn-dup-000001',
+    state: 'running',
+  });
+
+  await waitForRuns(1);
+  await new Promise((resolve) => {
+    setTimeout(resolve, 30);
+  });
+  assert.equal(runs.length, 1, 'повтор с тем же turnId исполнителя не будит');
+
+  runs[0].release('Один раз');
+  await waitFor(async () => (await pendingOf(app)).length === 1, { what: 'итог' });
+
+  const late = await quick(post(app, body), 'поздний повтор после конца хода');
+
+  assert.equal(late.json().duplicate, true);
+  assert.equal(late.json().state, 'done');
+  assert.equal(runs.length, 1, 'и после конца хода повтор ничего не запускает');
+  assert.equal((await pendingOf(app)).length, 1, 'ответ один');
+});
+
+test('два одинаковых запроса, пришедших одновременно, дают один запуск', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'race-chat');
+
+  const body = turnBody('race-chat', 'turn-race-00001');
+
+  const [left, right] = await quick(Promise.all([post(app, body), post(app, body)]), 'гонка приёма');
+
+  assert.deepEqual([left.statusCode, right.statusCode], [202, 202]);
+  assert.equal([left.json(), right.json()].filter((item) => item.duplicate).length, 1);
+  await waitForRuns(1);
+  await new Promise((resolve) => {
+    setTimeout(resolve, 30);
+  });
+  assert.equal(runs.length, 1);
+  runs[0].release();
+});
+
+test('turnId принадлежит одному чату: чужой чат с тем же id получает отказ', async (t) => {
+  const { executor, runs } = controlledExecutor();
+  const { app } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'owner-chat');
+  await saveChat(app, 'other-chat');
+
+  await quick(post(app, turnBody('owner-chat', 'turn-owner-0001')), 'приём');
+
+  const conflict = await quick(post(app, turnBody('other-chat', 'turn-owner-0001')), 'чужой приём');
+
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.json().error, 'turn_conflict');
+
+  const bad = await quick(post(app, turnBody('owner-chat', 'плохой id')), 'кривой id');
+
+  assert.equal(bad.statusCode, 400);
+  assert.equal(bad.json().error, 'bad_turn_id');
+  await waitFor(() => runs.length === 1, { what: 'единственный запуск' });
+  runs[0].release();
+});
+
+test('отказ до приёма ничего не записывает и не запускает', async (t) => {
+  const { executor, runs } = controlledExecutor();
+  const { app } = await chatAppFixture(t, { executor });
+
+  const refused = await quick(post(app, turnBody('never-saved', 'turn-refused-01')), 'отказ');
+
+  assert.equal(refused.statusCode, 400);
+  assert.equal(refused.json().error, 'unknown_chat');
+  assert.deepEqual(await turnsOf(app, ['turn-refused-01']), { 'turn-refused-01': null });
+  assert.equal(runs.length, 0);
+});
+
+test('несколько сообщений одного чата принимаются сразу и исполняются строго по очереди', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app, events } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'queue-chat');
+
+  const ids = ['turn-queue-0001', 'turn-queue-0002', 'turn-queue-0003'];
+  const texts = ['первое', 'второе', 'третье'];
+  const acks = [];
+
+  for (const [index, turnId] of ids.entries()) {
+    const accepted = await quick(post(app, turnBody('queue-chat', turnId, texts[index])), `приём ${index}`);
+
+    acks.push(accepted.json());
+  }
+
+  assert.deepEqual(acks.map((ack) => ack.state), ['started', 'queued', 'queued']);
+  await waitForRuns(1);
+
+  const active = (await app.inject({ method: 'GET', url: '/api/chat/active' })).json();
+
+  assert.deepEqual(active.queued.map((item) => item.turnId), ids.slice(1));
+  assert.ok(active.queued.every((item) => item.chatKey === 'queue-chat'));
+
+  for (let index = 0; index < ids.length; index += 1) {
+    await waitForRuns(index + 1);
+    assert.equal(runs.length, index + 1, 'следующий ход не стартует раньше конца предыдущего');
+    assert.match(runs[index].message, new RegExp(texts[index]));
+    runs[index].release(`Ответ ${index + 1}`);
+  }
+
+  const pending = await waitFor(async () => {
+    const list = await pendingOf(app);
+
+    return list.length === 3 ? list : null;
+  }, { what: 'три итога' });
+
+  assert.deepEqual(
+    pending.sort((left, right) => left.at - right.at).map((item) => [item.id, item.reply]),
+    [[ids[0], 'Ответ 1'], [ids[1], 'Ответ 2'], [ids[2], 'Ответ 3']],
+  );
+
+  const starts = events
+    .filter((entry) => entry.event === 'chat-turn-start')
+    .map((entry) => entry.data.turnId);
+
+  assert.deepEqual(starts, ids, 'окна знают, какое именно сообщение пошло в работу');
+
+  const dones = events.filter((entry) => entry.event === 'chat-done').map((entry) => entry.data.queued);
+
+  assert.deepEqual(dones, [2, 1, 0], 'пока в очереди есть ходы, окно не гасит «думает…»');
+});
+
+test('слив остановки: ход из очереди получает честный итог, а не тишину', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app, drain } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'drain-queue');
+
+  await quick(post(app, turnBody('drain-queue', 'turn-drain-0001', 'идёт')), 'первый');
+  await quick(post(app, turnBody('drain-queue', 'turn-drain-0002', 'ждёт')), 'второй');
+  await waitForRuns(1);
+
+  await drain();
+
+  const pending = await waitFor(async () => {
+    const list = await pendingOf(app);
+
+    return list.length === 2 ? list : null;
+  }, { what: 'итоги обоих ходов' });
+  const byId = Object.fromEntries(pending.map((item) => [item.id, item]));
+
+  assert.equal(byId['turn-drain-0001'].stopped, true);
+  assert.equal(byId['turn-drain-0001'].interruptedBy, 'server_shutdown');
+  assert.equal(byId['turn-drain-0002'].role, 'error');
+  assert.match(byId['turn-drain-0002'].reply, /перезапуск/);
+  assert.equal(byId['turn-drain-0002'].userText, 'ждёт', 'вопрос человека сохранён рядом с итогом');
+  assert.equal(runs.length, 1, 'ход из очереди на остановке не запускается');
+
+  const turns = await turnsOf(app, ['turn-drain-0001', 'turn-drain-0002']);
+
+  assert.equal(turns['turn-drain-0001'].state, 'done');
+  assert.equal(turns['turn-drain-0002'].state, 'done');
+
+  const refused = await quick(post(app, turnBody('drain-queue', 'turn-drain-0003')), 'после слива');
+
+  assert.equal(refused.statusCode, 503);
+  assert.equal(refused.json().error, 'server_restarting');
+});
+
+test('после падения сервера незавершённые ходы журнала получают итог-ошибку', async (t) => {
+  const first = controlledExecutor();
+  const crashed = await chatAppFixture(t, { executor: first.executor });
+
+  await saveChat(crashed.app, 'crash-chat');
+
+  await quick(post(crashed.app, turnBody('crash-chat', 'turn-crash-0001', 'шёл')), 'первый');
+  await quick(post(crashed.app, turnBody('crash-chat', 'turn-crash-0002', 'ждал')), 'второй');
+  await first.waitForRuns(1);
+
+  // Падение: процесс исчез без слива — ни ответа, ни записи в pending.
+  const second = controlledExecutor();
+  const restarted = await chatAppFixture(t, { executor: second.executor, root: crashed.root });
+  const pending = await waitFor(async () => {
+    const list = await pendingOf(restarted.app);
+
+    return list.length === 2 ? list : null;
+  }, { what: 'итоги прерванных ходов' });
+  const byId = Object.fromEntries(pending.map((item) => [item.id, item]));
+
+  assert.equal(byId['turn-crash-0001'].role, 'error');
+  assert.equal(byId['turn-crash-0001'].interruptedBy, 'server_shutdown', 'окно предложит продолжить ход');
+  assert.equal(byId['turn-crash-0002'].role, 'error');
+  assert.equal(byId['turn-crash-0002'].userText, 'ждал');
+  assert.equal(second.runs.length, 0, 'после рестарта старые ходы сами не перезапускаются');
+
+  const retry = await quick(post(restarted.app, turnBody('crash-chat', 'turn-crash-0002', 'ждал')), 'повтор');
+
+  assert.equal(retry.json().duplicate, true, 'повтор с прежним turnId не превращается в новый запуск');
+  assert.equal(second.runs.length, 0);
+});
+
+test('история объявляет протокол приёма, старый синхронный запуск без turnId сохранён', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'legacy-chat');
+
+  const store = (await app.inject({ method: 'GET', url: '/api/chat/store' })).json();
+
+  assert.equal(store.turnProtocol, 1);
+
+  const legacy = post(app, {
+    chatKey: 'legacy-chat',
+    modelRef: { provider: 'test-provider', model: 'test-model' },
+    message: 'без turnId',
+  });
+
+  await waitForRuns(1);
+  runs[0].release('Синхронно');
+
+  const response = await legacy;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().reply, 'Синхронно', 'Telegram-пульт и старые окна получают ответ как прежде');
+  assert.deepEqual(await pendingOf(app), []);
+});

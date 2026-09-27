@@ -22,6 +22,7 @@ import {
 } from '../../lib/chat/historyStore.ts';
 import { ChatSessionBindingStore } from '../../lib/chat/sessionBindingStore.ts';
 import { ChatTurnLocks } from '../../lib/chat/turnLocks.ts';
+import { ChatTurnLedger, TURN_ID_RE } from '../../lib/chat/turnLedger.ts';
 import { ChatLiveSessions } from '../../lib/chat/liveSessions.ts';
 import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
@@ -67,6 +68,7 @@ import type { ClaudeAuthStore } from '../../lib/claudeAuthStore.ts';
 import type { StoredChat, ChatMeta } from '../../lib/chat/historyStore.ts';
 import type { ModelRegistry, RegistryModel } from '../../lib/chat/modelRef.ts';
 import type { BindingIdentity, BindingRecord } from '../../lib/chat/sessionBindingStore.ts';
+import type { TurnEntry } from '../../lib/chat/turnLedger.ts';
 import type { ContextCache } from '../../lib/chat/contextCache.ts';
 import type { ChatStep } from '../../lib/chat/streamSteps.ts';
 import type { UiContext } from '../../lib/chat/uiContext.ts';
@@ -95,6 +97,9 @@ interface ChatTurnInput {
   sentAt?: number;
   compact?: boolean;
   slashCommand?: unknown;
+  // Устойчивый id отправки из окна: с ним ход принимается коротко и исполняется без
+  // HTTP-соединения, а повтор с тем же id не запускает исполнителя второй раз.
+  turnId?: unknown;
 }
 
 interface AnswerInput {
@@ -295,6 +300,42 @@ interface RunningTurn extends ChatContextUsage {
   finish: () => void;
   interruptedBy?: 'server_shutdown';
   abandon?: () => Promise<void>;
+  // Id принятого хода: окно после F5 узнаёт по нему своё сообщение в работе.
+  turnId?: string;
+}
+
+// Куда уходит итог хода. Синхронный запуск отвечает на свой HTTP-запрос и паркует итог
+// в pending только при оборванном сокете; принятый ход паркует ВСЕГДА — его запрос
+// давно получил подтверждение приёма.
+interface TurnChannel {
+  turnId: string;
+  // Некому вернуть итог по HTTP: он уходит в pending.
+  detached: () => boolean;
+  // Записать итог в pending и сообщить окнам.
+  park: (result: Record<string, unknown>) => Promise<void>;
+  // Итог уже записан сливом остановки: принятому ходу закрыть журнал без второй записи.
+  closeAbandoned: () => Promise<void>;
+  // Отказ или ошибка: ответом на запрос либо, у принятого хода, итогом в pending.
+  refuse: (status: number, body: Record<string, unknown>) => unknown;
+  // Что вернуть обработчику после парковки итога: синхронному запуску — reply.
+  settled: () => unknown;
+}
+
+// Проверки хода до очереди прошли: цель исполнения, UI-контекст и ключи очереди.
+interface PreparedTurn {
+  ok: true;
+  target: RunTarget;
+  context: UiContext | null;
+  scope: {
+    chatKey: string;
+    provider: string;
+    sessionId: string | null;
+  };
+}
+
+interface TurnReply {
+  status: number;
+  body: Record<string, unknown>;
 }
 
 interface ChatHead {
@@ -326,6 +367,14 @@ const SPEECH_STREAM_START_TIMEOUT_MS = 10_000;
 const SHUTDOWN_GRACE_MS = 5_000;
 const SHUTDOWN_INTERRUPT_MS = 10_000;
 const SHUTDOWN_CUT_REPLY = '⏹ Ход прерван перезапуском сервера — память сессии сохранена.';
+// Итог принятого хода, который остановка сервера застала ещё в очереди чата.
+const QUEUED_CUT_REPLY = 'Сервер перезапускается — сообщение не выполнено.'
+  + ' Отправь его ещё раз, когда он вернётся.';
+// Итоги ходов, которые прошлый процесс принял, но не довёл до конца (падение без слива).
+const CRASH_RUNNING_REPLY = 'Ход прерван: сервер кокпита остановился посреди работы,'
+  + ' ответ и лента хода не сохранились.';
+const CRASH_QUEUED_REPLY = 'Сообщение не выполнено: сервер кокпита перезапустился до начала хода.'
+  + ' Отправь его ещё раз.';
 const SPEECH_STREAM_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SPEECH_STREAM_PUBLIC_ERRORS: Readonly<Record<string, string>> = Object.freeze({
   speech_model_missing: 'Локальная модель речи не установлена.',
@@ -527,6 +576,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   const acceptedTurns = new Map<string, number>(); // chatKey -> число preflight/queued/locked/running ходов
   const savingChats = new Map<string, number>(); // chatKey -> число принятых point/full PUT
   const deletingChats = new Set<string>();
+  // Журнал ходов, принятых по turnId: идемпотентность приёма, статус после F5 и итог
+  // ходам, которые прошлый процесс не довёл до конца.
+  const turnLedger = new ChatTurnLedger({ dir: path.join(config.chatsDir, 'turns') });
+  // turnId → приём, который идёт прямо сейчас: одновременный повтор ждёт его исхода.
+  const acceptingTurns = new Map<string, Promise<TurnReply>>();
+  // chatKey → хвост приёма. Приём одного чата идёт строго по очереди прихода, иначе
+  // preflight разной длины переставил бы сообщения местами ещё до очереди ходов.
+  const admissions = new Map<string, Promise<void>>();
 
   function beginAcceptedTurn(chatKey: string) {
     if (!chatKey) return () => {};
@@ -729,6 +786,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    */
   async function drainTurns(): Promise<void> {
     draining = true;
+
+    try {
+      await drainActiveRuns();
+    } finally {
+      // Принятые ходы, не дождавшиеся очереди, на этом процессе уже не стартуют. Окно
+      // подтверждение приёма получило, поэтому молчать нельзя: итог — явная ошибка.
+      await refuseQueuedTurns(QUEUED_CUT_REPLY);
+    }
+  }
+
+  /**
+   * Идущие ходы: сначала короткое окно закончиться самим, затем прерывание как «стоп»,
+   * затем запись в pending тех, кто не ответил и на прерывание. Бюджеты — shutdownGraceMs
+   * и shutdownInterruptMs, их сумма укладывается в общий срок остановки сервера.
+   */
+  async function drainActiveRuns(): Promise<void> {
     if (!activeRuns.size) return;
     fastify.log.info({ count: activeRuns.size }, 'чат: остановка сервера — жду завершения ходов');
     await settleRuns(shutdownGraceMs);
@@ -816,6 +889,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
       chatKey,
+      ...(v.turnId ? { turnId: v.turnId } : {}),
       startedAt: v.startedAt,
       // Сколько ход уже идёт — по часам СЕРВЕРА, на момент ответа. Окно после F5 или
       // с другого устройства считает время от этой длительности, а не от `startedAt`:
@@ -829,6 +903,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // возвращал кольцо к цифре с прошлого хода (у claude она бывает ДО автокомпакта).
       ...normalizeContextUsage(v),
       ...(v.contextCache ? { contextCache: v.contextCache } : {}),
+    })),
+    // Принятые ходы, которые ждут своей очереди: после F5 окно показывает их «в очереди»,
+    // а не голыми репликами без исполнителя.
+    queued: turnLedger.queued().map((entry) => ({
+      chatKey: entry.chatKey,
+      turnId: entry.turnId,
+      acceptedAt: entry.acceptedAt,
     })),
   }));
 
@@ -1318,6 +1399,91 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     await fs.rename(p + '.tmp', p);
   }
 
+  /**
+   * Вопрос человека рядом с итогом: окно восстановит реплику, если её затёрла гонка окон.
+   * Время отправки едет, только если оно известно: иначе реплика получила бы чужое.
+   */
+  function turnUserOf(entry: Pick<TurnEntry, 'userText' | 'userSentAt' | 'hadAttachments'>) {
+    return {
+      userText: entry.userText || '',
+      hadAttachments: !!entry.hadAttachments,
+      ...(entry.userSentAt ? { userSentAt: entry.userSentAt } : {}),
+    };
+  }
+
+  /**
+   * Чем кончился ход — для журнала: стоп, ошибка или ответ. По этой отметке после F5
+   * видно, что ход закончен и как, даже если его итог окно уже забрало из pending.
+   */
+  function outcomeOf(result: Record<string, unknown>): string {
+    if (result.stopped) {
+      return 'stopped';
+    }
+
+    return result.role === 'error' ? 'error' : 'reply';
+  }
+
+  /**
+   * Итог принятого хода: запись в pending под его turnId, отметка в журнале, событие
+   * окнам. Порядок важен: окно, услышавшее chat-orphan (или chat-done следом), обязано
+   * найти запись, а повтор приёма — увидеть ход законченным.
+   */
+  async function parkTurnResult(turnId: string, result: Record<string, unknown>, outcome: string) {
+    const chatKey = String(result.chatKey || turnLedger.get(turnId)?.chatKey || '');
+
+    await writeOrphan({
+      ...result,
+      id: turnId,
+      turnId,
+      chatKey,
+      at: Date.now(),
+    });
+    await turnLedger.update(turnId, {
+      state: 'done',
+      finishedAt: Date.now(),
+      outcome,
+    }).catch((error) => {
+      fastify.log.error({ turnId, err: (error as Error)?.message }, 'чат: журнал хода не обновлён');
+    });
+    fastify.sse.broadcast('chat-orphan', { chatKey, turnId });
+  }
+
+  /**
+   * Ошибка-итог ходу, который так и не дошёл до исполнителя в этом процессе (остановка,
+   * падение прошлого процесса). С interruptedBy окно предложит «Продолжить ход».
+   */
+  async function failTurn(entry: TurnEntry, message: string, extra: Record<string, unknown> = {}) {
+    await parkTurnResult(entry.turnId, {
+      chatKey: entry.chatKey,
+      role: 'error',
+      reply: message,
+      ...turnUserOf(entry),
+      ...extra,
+    }, extra.interruptedBy ? 'interrupted' : 'refused');
+  }
+
+  /**
+   * Все принятые, но не начатые ходы получают явную ошибку (остановка сервера). Сбой
+   * записи одного итога не останавливает остальные: каждое окно ждёт своего ответа.
+   */
+  async function refuseQueuedTurns(message: string) {
+    for (const entry of turnLedger.queued()) {
+      // Пока писались предыдущие итоги, ход мог дождаться очереди и получить свой.
+      if (turnLedger.get(entry.turnId)?.state !== 'queued') {
+        continue;
+      }
+
+      try {
+        await failTurn(entry, message);
+      } catch (error) {
+        fastify.log.error(
+          { turnId: entry.turnId, err: (error as Error)?.message },
+          'чат: итог хода из очереди не записан',
+        );
+      }
+    }
+  }
+
   fastify.get<ChatRoute>('/api/chat/pending', async () => {
     const pending: unknown[] = [];
     let files = [];
@@ -1336,11 +1502,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return { ok: true };
   });
 
-  /**
-   * Точка входа роутов: ход либо стартует сразу, либо встаёт в очередь чата.
-   * Ответ на HTTP-запрос приходит по завершении СВОЕГО хода — клиенту ждать дольше,
-   * зато сообщение не теряется и агент видит его в правильном порядке.
-   */
   /** Model/chat identity без side effects binding-а: preflight companion-чата использует
    * этот срез до очереди и до любого session state. */
   async function resolveModelTarget(
@@ -1474,8 +1635,377 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return { ok: true, record };
   }
 
+  /**
+   * Проверки хода до очереди, общие для синхронного запуска и приёма по turnId:
+   * companion scope, UI-контекст и модель строго по durable записи. Отказ здесь
+   * означает «исполнитель точно не запускался».
+   */
+  async function prepareTurn(opts: ChatTurnInput): Promise<PreparedTurn | (TurnReply & { ok: false })> {
+    const chatKey = String(opts.chatKey || '');
+    const strict = await companionScopePreflight(opts);
+
+    if (!strict.ok) {
+      return {
+        ok: false,
+        status: strict.statusCode || 400,
+        body: { error: strict.error, message: strict.message },
+      };
+    }
+    // Client context — только bounded prompt data. Нормализуем ровно один раз до
+    // очереди хода; contextPrefix узнаёт созданный здесь объект и повторно его не читает.
+    const droppedContext: string[] = [];
+    const normalizedContext = normalizeUiContext(opts.context, {
+      // Отброшенные поля копятся для одного предупреждения в журнал: не больше 16
+      // разных, чтобы мусорный контекст не раздувал саму запись.
+      onDrop({ code, key = '' }) {
+        if (droppedContext.length >= 16) {
+          return;
+        }
+
+        const item = `${code}:${key}`;
+
+        if (!droppedContext.includes(item)) {
+          droppedContext.push(item);
+        }
+      },
+    });
+
+    if (droppedContext.length) {
+      fastify.log.warn({ dropped: droppedContext }, 'часть UI-контекста чата отброшена');
+    }
+
+    const modelTarget = await resolveModelTarget(opts, strict.record);
+    const target = await resolveRunTarget(opts, modelTarget);
+
+    if (!target.ok) {
+      return {
+        ok: false,
+        status: 400,
+        body: { error: target.error, message: target.message },
+      };
+    }
+
+    return {
+      ok: true,
+      target,
+      context: normalizedContext,
+      scope: { chatKey, provider: target.provider, sessionId: target.sessionId },
+    };
+  }
+
+  /**
+   * Канал синхронного запуска (Telegram-пульт, сжатие, старое окно): итог — ответом на
+   * запрос, а в pending со случайным id — только если сокет окна уже оборвался.
+   */
+  function attachedChannel(reply: FastifyReply, request: ChatRequest): TurnChannel {
+    return {
+      turnId: '',
+      detached: () => request.socket.destroyed,
+      async park(result) {
+        await writeOrphan({
+          ...result,
+          id: orphanId(),
+          at: Date.now(),
+        });
+        fastify.sse.broadcast('chat-orphan', { chatKey: result.chatKey });
+      },
+      async closeAbandoned() {},
+      refuse: (status, body) => reply.code(status).send(body),
+      settled: () => reply,
+    };
+  }
+
+  /**
+   * Канал принятого хода: окно давно получило подтверждение приёма, поэтому любой итог,
+   * включая отказ после приёма, уходит в pending под turnId и закрывает запись журнала.
+   */
+  function detachedChannel(entry: TurnEntry): TurnChannel {
+    return {
+      turnId: entry.turnId,
+      detached: () => true,
+      park: (result) => parkTurnResult(
+        entry.turnId,
+        { ...result, chatKey: entry.chatKey },
+        outcomeOf(result),
+      ),
+      async closeAbandoned() {
+        await turnLedger.update(entry.turnId, {
+          state: 'done',
+          finishedAt: Date.now(),
+          outcome: 'interrupted',
+        });
+      },
+      refuse: (status, body) => parkTurnResult(entry.turnId, {
+        chatKey: entry.chatKey,
+        role: 'error',
+        reply: String(body.message || body.error || 'Ход отклонён сервером'),
+        error: body.error,
+        ...turnUserOf(entry),
+        ...(body.sessionReset ? { sessionReset: true } : {}),
+        ...(body.sessionResetFailed ? { sessionResetFailed: true } : {}),
+      }, status >= 500 ? 'error' : 'refused'),
+      settled: () => undefined,
+    };
+  }
+
+  /**
+   * Известный журналу turnId: повтор отвечает прежним состоянием и ничего не запускает.
+   * Тот же id от другого чата — конфликт: id отправки принадлежит одной реплике.
+   */
+  function knownTurn(turnId: string, chatKey: string): TurnReply | null {
+    const known = turnLedger.get(turnId);
+
+    if (!known) {
+      return null;
+    }
+    if (known.chatKey !== chatKey) {
+      return {
+        status: 409,
+        body: { error: 'turn_conflict', message: 'Этот id хода уже принадлежит другому чату.' },
+      };
+    }
+
+    return {
+      status: 202,
+      body: {
+        accepted: true,
+        duplicate: true,
+        turnId,
+        state: known.state,
+      },
+    };
+  }
+
+  function restartingTurn(): TurnReply {
+    return {
+      status: 503,
+      body: {
+        error: 'server_restarting',
+        message: 'Сервер перезапускается — повтори сообщение, когда он вернётся.',
+      },
+    };
+  }
+
+  /**
+   * Приём одного чата строго по очереди прихода: порядок сообщений задаёт человек, а
+   * preflight разной длины иначе переставил бы их ещё до очереди ходов. Хвост снимается,
+   * когда за время приёма его никто не продлил.
+   */
+  function inAdmissionOrder<Value>(chatKey: string, job: () => Promise<Value>): Promise<Value> {
+    const previous = admissions.get(chatKey) || Promise.resolve();
+    const next = previous.then(job, job);
+    const tail = next.then(() => {}, () => {});
+
+    admissions.set(chatKey, tail);
+    void tail.then(() => {
+      if (admissions.get(chatKey) === tail) {
+        admissions.delete(chatKey);
+      }
+    });
+
+    return next;
+  }
+
+  /**
+   * Приём хода по turnId. Отвечает сразу после проверок и записи в журнал; сам ход идёт
+   * в фоне той же очередью чата, итог уходит в pending под тем же id. Повтор с известным
+   * turnId — в том числе пришедший, пока первый ещё принимается, — ничего не запускает.
+   */
+  async function acceptTurn(reply: FastifyReply, opts: ChatTurnInput) {
+    const turnId = typeof opts.turnId === 'string' && TURN_ID_RE.test(opts.turnId) ? opts.turnId : '';
+    const chatKey = String(opts.chatKey || '');
+
+    if (!turnId) {
+      return reply.code(400).send({
+        error: 'bad_turn_id',
+        message: 'Id хода — строка 8–80 символов из латиницы, цифр, «_» и «-».',
+      });
+    }
+    if (!chatKey) {
+      return reply.code(400).send({
+        error: 'bad_chat_key',
+        message: 'Принять можно только ход сохранённого чата.',
+      });
+    }
+
+    await turnLedger.load();
+
+    let answer = knownTurn(turnId, chatKey);
+    const inflight = acceptingTurns.get(turnId);
+
+    if (!answer && inflight) {
+      const first = await inflight;
+
+      answer = knownTurn(turnId, chatKey) || first;
+    }
+    if (!answer) {
+      const job = inAdmissionOrder(chatKey, () => admitTurn(turnId, opts));
+
+      acceptingTurns.set(turnId, job);
+
+      try {
+        answer = await job;
+      } finally {
+        if (acceptingTurns.get(turnId) === job) {
+          acceptingTurns.delete(turnId);
+        }
+      }
+    }
+
+    return reply.code(answer.status).send(answer.body);
+  }
+
+  /**
+   * Проверки, запись в журнал и постановка в очередь; ответ — подтверждение или отказ.
+   * Отказ возможен только до записи в журнал: после неё ход уже принадлежит серверу и
+   * получит итог в pending при любом исходе.
+   */
+  async function admitTurn(turnId: string, opts: ChatTurnInput): Promise<TurnReply> {
+    const chatKey = String(opts.chatKey || '');
+    const known = knownTurn(turnId, chatKey);
+
+    if (known) {
+      return known;
+    }
+    if (deletingChats.has(chatKey)) {
+      return {
+        status: 409,
+        body: {
+          error: 'chat_busy',
+          message: 'Чат сейчас удаляется; повторите действие после синхронизации истории.',
+        },
+      };
+    }
+    if (draining) {
+      return restartingTurn();
+    }
+
+    const releaseAcceptedTurn = beginAcceptedTurn(chatKey);
+    let launched = false;
+
+    try {
+      const prepared = await prepareTurn(opts);
+
+      if (!prepared.ok) {
+        return { status: prepared.status, body: prepared.body };
+      }
+      if (draining) {
+        return restartingTurn();
+      }
+
+      const userSentAt = Number.isSafeInteger(opts.sentAt) && opts.sentAt! > 0 ? opts.sentAt! : 0;
+      const entry = await turnLedger.put({
+        turnId,
+        chatKey,
+        state: 'queued',
+        acceptedAt: Date.now(),
+        userText: opts.message || '',
+        hadAttachments: !!opts.attachments?.length,
+        ...(userSentAt ? { userSentAt } : {}),
+      });
+      // Между проверкой очереди и постановкой в неё нет await: ход либо ждёт, либо стартует.
+      const queued = turnLocks.isBusy(prepared.scope);
+
+      launchAcceptedTurn(entry, opts, prepared, queued, releaseAcceptedTurn);
+      launched = true;
+
+      if (queued) {
+        fastify.log.info({ chatKey, turnId }, 'чат: ход принят в очередь');
+        fastify.sse.broadcast('chat-queued', {
+          chatKey,
+          turnId,
+          at: Date.now(),
+        });
+      }
+
+      return {
+        status: 202,
+        body: {
+          accepted: true,
+          turnId,
+          state: queued ? 'queued' : 'started',
+        },
+      };
+    } finally {
+      if (!launched) {
+        releaseAcceptedTurn();
+      }
+    }
+  }
+
+  /**
+   * Фоновая часть принятого хода — та же очередь чата, что у синхронного запуска.
+   * Любой исход, включая ошибку вне обработчика хода, заканчивается итогом в pending:
+   * окно получило подтверждение приёма и не должно остаться без ответа.
+   */
+  function launchAcceptedTurn(
+    entry: TurnEntry,
+    opts: ChatTurnInput,
+    prepared: PreparedTurn,
+    queued: boolean,
+    release: () => void,
+  ) {
+    const { target, context, scope } = prepared;
+    const job = turnLocks.run(scope, async () => {
+      // Итог уже выдан сливом остановки — запускать нечего.
+      if (turnLedger.get(entry.turnId)?.state === 'done') {
+        return;
+      }
+      if (draining) {
+        await failTurn(entry, QUEUED_CUT_REPLY);
+
+        return;
+      }
+
+      await turnLedger.update(entry.turnId, { state: 'running', startedAt: Date.now() });
+      await runChatTurn(detachedChannel(entry), {
+        ...opts,
+        context,
+        model: target.model,
+        sessionId: target.sessionId,
+        target,
+        queued,
+      });
+
+      if (turnLedger.get(entry.turnId)?.state !== 'done') {
+        fastify.log.warn({ turnId: entry.turnId }, 'чат: ход завершился без отметки итога');
+        await turnLedger.update(entry.turnId, { state: 'done', finishedAt: Date.now() });
+      }
+    });
+
+    void job
+      .catch(async (error) => {
+        const reason = (error as Error)?.message || 'внутренняя ошибка сервера';
+
+        fastify.log.error(
+          {
+            chatKey: entry.chatKey,
+            turnId: entry.turnId,
+            err: reason,
+          },
+          'чат: принятый ход упал вне обработчика',
+        );
+
+        if (turnLedger.get(entry.turnId)?.state !== 'done') {
+          await failTurn(entry, `Ход не выполнен: ${reason}.`);
+        }
+      })
+      .catch(() => {})
+      .finally(release);
+  }
+
+  /**
+   * Точка входа роутов хода. С turnId ход принимается коротко (acceptTurn) и живёт без
+   * HTTP-соединения. Без него — прежний синхронный контракт: ход либо стартует сразу,
+   * либо встаёт в очередь чата, а ответ на запрос приходит по завершении СВОЕГО хода.
+   */
   async function runChat(reply: FastifyReply, request: ChatRequest, opts: ChatTurnInput) {
     const chatKey = String(opts.chatKey || '');
+
+    // Окно прислало id отправки — ход принимается коротко и живёт без HTTP-соединения.
+    if (opts.turnId !== undefined && opts.turnId !== null && opts.turnId !== '') {
+      return acceptTurn(reply, opts);
+    }
     // DELETE ставит marker до первого filesystem await; новый ход не имеет права
     // вклиниться между busy-check и удалением durable identity.
     if (chatKey && deletingChats.has(chatKey)) {
@@ -1484,58 +2014,54 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         message: 'Чат сейчас удаляется; повторите действие после синхронизации истории.',
       });
     }
-    if (draining) return restartingReply(reply);
+    if (draining) {
+      return restartingReply(reply);
+    }
+
     const releaseAcceptedTurn = beginAcceptedTurn(chatKey);
+
     try {
-      const strict = await companionScopePreflight(opts);
-      if (!strict.ok) {
-        return reply.code(strict.statusCode || 400).send({
-          error: strict.error,
-          message: strict.message,
-        });
+      const prepared = await prepareTurn(opts);
+
+      if (!prepared.ok) {
+        return reply.code(prepared.status).send(prepared.body);
       }
-      // Client context — только bounded prompt data. Нормализуем ровно один раз до
-      // очереди хода; contextPrefix узнаёт созданный здесь объект и повторно его не читает.
-      const droppedContext: string[] = [];
-      const normalizedContext = normalizeUiContext(opts.context, {
-        onDrop({ code, key = '' }) {
-          if (droppedContext.length >= 16) return;
-          const item = `${code}:${key}`;
-          if (!droppedContext.includes(item)) droppedContext.push(item);
-        },
-      });
-      if (droppedContext.length) {
-        fastify.log.warn({ dropped: droppedContext }, 'часть UI-контекста чата отброшена');
-      }
-      const modelTarget = await resolveModelTarget(opts, strict.record);
-      const target = await resolveRunTarget(opts, modelTarget);
-      if (!target.ok) return reply.code(400).send({ error: target.error, message: target.message });
-      const scope = { chatKey, provider: target.provider, sessionId: target.sessionId };
+
+      const { target, context, scope } = prepared;
       const queued = turnLocks.isBusy(scope);
+
       if (queued) {
         fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
         // Второму окну (и своему же, если оно захочет показать «в очереди») — сигнал.
         fastify.sse.broadcast('chat-queued', { chatKey, at: Date.now() });
       }
-      const result = await turnLocks.run(scope, async () => {
+
+      return await turnLocks.run(scope, async () => {
         // Сообщение дождалось очереди уже на остановке: запускать его некуда.
-        if (draining) return restartingReply(reply);
-        return runChatTurn(reply, request, {
+        if (draining) {
+          return restartingReply(reply);
+        }
+
+        return runChatTurn(attachedChannel(reply, request), {
           ...opts,
-          context: normalizedContext,
+          context,
           model: target.model,
           sessionId: target.sessionId,
           target,
           queued,
         });
       });
-      return result;
     } finally {
       releaseAcceptedTurn();
     }
   }
 
-  async function runChatTurn(reply: FastifyReply, request: ChatRequest, {
+  /**
+   * Один ход выбранного исполнителя: cwd и доп-каталоги по задаче и UI-контексту, промпт,
+   * права, живая сессия или разовый запуск, лента и прогресс в SSE. Куда уходит итог,
+   * решает канал: ответом на запрос или записью в pending (принятый ход, оборванный сокет).
+   */
+  async function runChatTurn(channel: TurnChannel, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target,
   }: ChatTurnInput & {
@@ -1563,10 +2089,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Настройка читается перед каждым ходом: кнопка в настройках действует сразу,
     // без рестарта сервера и без изменения глобальных конфигов конкретных CLI.
     const extraDirs = [...(prefs?.read().trustedDirectories || [])];
+
     if (id) {
       const parsed = parseSandboxRepositories(await factoryState.readEnv(id));
+
       if (parsed.kind === 'invalid') {
-        return reply.code(409).send({
+        return channel.refuse(409, {
           error: 'invalid_sandbox_env',
           message: 'Реестр worktree задачи повреждён — task-chat не запущен.',
         });
@@ -1614,8 +2142,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         : [];
       slash = list.find((c) => c.cmd === want && c.run === 'prompt'
         && (text === c.cmd || text.startsWith(`${c.cmd} `))) || null;
+
       if (!slash) {
-        return reply.code(400).send({
+        return channel.refuse(400, {
           error: 'unknown_slash_command',
           message: `Команда ${want} не поддерживается исполнителем ${target.provider}.`,
         });
@@ -1651,7 +2180,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Режим прав выбирает только пользователь в чате. UI-context не является
     // authorization surface и не даёт ни cwd, ни fallback permission mode.
     const permissionMode = await allowedMode(executor, wantMode);
-    if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
+
+    if (!executor) {
+      return channel.refuse(400, {
+        error: 'unknown_provider',
+        message: `нет исполнителя для модели ${model}`,
+      });
+    }
 
     const workProjectId = await trustedWorkProject(id);
     const workToolScopeKey = [
@@ -1679,8 +2214,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // валидации. Не придумываем замену — принимаем только точное значение каталога.
     const levels = info?.model?.efforts || [];
     const resolvedEffort = resolveRequestedEffort(effort, levels);
+
     if (!resolvedEffort.ok) {
-      return reply.code(400).send({
+      return channel.refuse(400, {
         error: 'unsupported_effort',
         message: levels.length
           ? `Уровень effort «${effort}» не поддерживается моделью ${model}. Доступно: ${levels.join(', ')}`
@@ -1770,6 +2306,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       sessionId: sessionId || null,
       finished,
       finish: () => finishRun(),
+      ...(channel.turnId ? { turnId: channel.turnId } : {}),
     };
     // Слив остановки: ход не закончился даже после прерывания — его лента, id сессии и
     // вопрос человека уходят в pending прямо сейчас, до закрытия процессов. Если ход всё
@@ -1793,9 +2330,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         model: model || null,
         effort: runEffort || null,
         ...orphanUser,
+        // Принятый ход окно узнаёт по turnId и снимает с его реплики ожидание.
+        ...(channel.turnId ? { turnId: channel.turnId } : {}),
         at: Date.now(),
       });
-      fastify.sse.broadcast('chat-orphan', { chatKey });
+      await channel.closeAbandoned();
+      fastify.sse.broadcast('chat-orphan', {
+        chatKey,
+        ...(channel.turnId ? { turnId: channel.turnId } : {}),
+      });
     };
     const discardAbandoned = async () => {
       if (!abandonedId) return;
@@ -1805,7 +2348,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
       // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
-      fastify.sse.broadcast('chat-turn-start', { chatKey, at: runRec.startedAt, compact: !!plan });
+      fastify.sse.broadcast('chat-turn-start', {
+        chatKey,
+        at: runRec.startedAt,
+        compact: !!plan,
+        ...(channel.turnId ? { turnId: channel.turnId } : {}),
+      });
     }
     // Ожидание ответа человека не должно упираться в таймаут вызова MCP-инструмента.
     const baseEnv = claudeAuth ? claudeAuth.env() : process.env;
@@ -2091,17 +2639,21 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Ход всё-таки закончился после слива остановки: настоящий ответ важнее записи «на память».
       await discardAbandoned();
-      // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
-      if (request.socket.destroyed && chatKey) {
+      // Клиент не дождался (перезагрузка/закрытие вкладки) или ход принят без
+      // HTTP-соединения — ответ в pending, окно подберёт его по событию или при загрузке.
+      if (channel.detached() && chatKey) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
-        await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+        await channel.park({
           chatKey,
           role: out?.note ? 'note' : (out?.deliveryFailure ? 'error' : 'assistant'),
-          ...out, model: model || null, effort: runEffort || null,
-          ...orphanUser, at: Date.now() });
-        fastify.sse.broadcast('chat-orphan', { chatKey });
-        return reply;
+          ...out,
+          model: model || null,
+          effort: runEffort || null,
+          ...orphanUser,
+        });
+
+        return channel.settled();
       }
       // model — что просили, actualModel — чем CLI отработал (алиас он резолвит сам),
       // effort — что реально ушло в запуск. По этой тройке в UI видно любой рассинхрон.
@@ -2139,26 +2691,42 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // Следующему ходу из очереди нужен фактический id оборванного разговора:
         // именно с ним он сделает resume, а не заведёт пустую session.
         if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
-        if (request.socket.destroyed && chatKey) {
-          await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-            chatKey, role: 'assistant', ...stoppedOut, ...orphanUser, at: Date.now() });
-          fastify.sse.broadcast('chat-orphan', { chatKey });
-          return reply;
+        if (channel.detached() && chatKey) {
+          await channel.park({
+            chatKey,
+            role: 'assistant',
+            ...stoppedOut,
+            ...orphanUser,
+          });
+
+          return channel.settled();
         }
         return stoppedOut;
       }
       // Ход уже записан сливом остановки: поздний отказ процесса (его закрыл пул) — не
       // новая ошибка, а её следствие, и второй записи в истории ему не положено.
-      if (abandonedId) return reply;
-      if (request.socket.destroyed && chatKey) {
-        await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'error', reply: err.message, ...orphanUser,
-          sessionReset: !!err.sessionReset, sessionResetFailed: !!err.sessionResetFailed,
-          at: Date.now() });
-        fastify.sse.broadcast('chat-orphan', { chatKey });
-        return reply;
+      if (abandonedId) {
+        await channel.closeAbandoned();
+
+        return channel.settled();
       }
-      return reply.code(500).send({
+      if (channel.detached() && chatKey) {
+        // Лента упавшего хода едет вместе с ошибкой: по ней видно, докуда агент дошёл,
+        // а окно, не видевшее хода живьём (F5, второе устройство), иначе её не получит.
+        await channel.park({
+          chatKey,
+          role: 'error',
+          reply: err.message,
+          ...orphanUser,
+          steps: [...runRec.steps],
+          sessionReset: !!err.sessionReset,
+          sessionResetFailed: !!err.sessionResetFailed,
+        });
+
+        return channel.settled();
+      }
+
+      return channel.refuse(500, {
         error: err.code || 'chat_failed',
         message: err.message,
         ...(err.sessionReset ? { sessionReset: true } : {}),
@@ -2172,7 +2740,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // отвечать на него некому, а чип «ждёт ответа» висел бы вечно.
         dropPending(chatKey, 'Ход завершён — ответ уже не нужен');
         // Сигнал всем окнам: ход завершён (снимают «думает…», даже если ответ пришёл не к ним).
-        fastify.sse.broadcast('chat-done', { chatKey });
+        // queued — сколько принятых ходов этого чата ещё ждут: пока они есть, работа идёт.
+        fastify.sse.broadcast('chat-done', {
+          chatKey,
+          ...(channel.turnId ? { turnId: channel.turnId } : {}),
+          queued: turnLedger.queued(chatKey).length,
+        });
       }
     }
   }
@@ -2610,32 +3183,85 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
   });
 
+  /**
+   * Общий вход обоих маршрутов хода. Пустое сообщение без вложений — отказ; остальное
+   * уходит в runChat ровно теми полями, которые знает контракт хода, — лишние поля тела
+   * дальше не едут. id — задача чата (worktree) или null для свободного чата.
+   */
+  function startTurnRoute(reply: FastifyReply, request: ChatRequest, id: string | null) {
+    const body = request.body || {};
+
+    if (!(body.message || '').trim() && !body.attachments?.length) {
+      return reply.code(400).send({ error: 'empty_message' });
+    }
+
+    return runChat(reply, request, {
+      id,
+      message: body.message,
+      model: body.model,
+      modelRef: body.modelRef,
+      effort: body.effort,
+      mode: body.mode,
+      sessionId: body.sessionId,
+      context: body.context,
+      attachments: body.attachments,
+      chatKey: body.chatKey,
+      requestTitle: body.requestTitle,
+      sentAt: body.sentAt,
+      slashCommand: body.slashCommand,
+      turnId: body.turnId,
+    });
+  }
+
   // Чат по задаче (worktree задачи).
   fastify.post<ChatRoute>('/api/tasks/:id/chat', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
-    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand,
-    } = request.body || {};
-    if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, request, {
-      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand,
-    });
+
+    if (!id) {
+      return reply.code(400).send({ error: 'bad_task_id' });
+    }
+
+    return startTurnRoute(reply, request, id);
   });
 
   // Свободный чат без задачи (корень фабрики).
-  fastify.post<ChatRoute>('/api/chat', async (request, reply) => {
-    const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand,
-    } = request.body || {};
-    if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, request, {
-      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
-      requestTitle, sentAt, slashCommand,
-    });
+  fastify.post<ChatRoute>('/api/chat', async (request, reply) => startTurnRoute(reply, request, null));
+
+  /**
+   * Состояние принятых ходов по их id: окно после F5 или долгого обрыва отличает
+   * «сервер не получил» (null — можно отправить тем же id ещё раз) от «принят и идёт»
+   * и «уже закончен» (итог лежит в pending или уже в истории).
+   */
+  fastify.get<ChatRoute>('/api/chat/turns', async (request, reply) => {
+    const ids = String(request.query?.ids || '').split(',').map((id) => id.trim()).filter(Boolean);
+
+    if (ids.length > 50 || ids.some((id) => !TURN_ID_RE.test(id))) {
+      return reply.code(400).send({ error: 'bad_turn_ids', message: 'Нужно до 50 корректных id ходов.' });
+    }
+
+    await turnLedger.load();
+
+    const turns: Record<string, unknown> = {};
+
+    for (const id of ids) {
+      const entry = turnLedger.get(id);
+
+      if (entry) {
+        turns[id] = {
+          turnId: entry.turnId,
+          chatKey: entry.chatKey,
+          state: entry.state,
+          acceptedAt: entry.acceptedAt,
+          ...(entry.startedAt ? { startedAt: entry.startedAt } : {}),
+          ...(entry.finishedAt ? { finishedAt: entry.finishedAt } : {}),
+          ...(entry.outcome ? { outcome: entry.outcome } : {}),
+        };
+      } else {
+        turns[id] = acceptingTurns.has(id) ? { turnId: id, state: 'accepting' } : null;
+      }
+    }
+
+    return { turns };
   });
 
   // ── Сжатие контекста чата (кнопка на кольце) ────────────────────────────────────
@@ -2672,8 +3298,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const publicSpeech = speechRuntime?.publicSnapshot
       ? speechRuntime.publicSnapshot(settings)
       : await speechRuntime?.publicSnapshotAsync?.(settings);
+
     return {
       ...(await history.read()),
+      // Сервер принимает ходы по turnId: окно шлёт короткий приём с повтором вместо
+      // POST, висящего весь ход. Старый сервер поля не знает, и окно остаётся на
+      // синхронном запуске — повтор без идемпотентности там означал бы второй запуск.
+      turnProtocol: 1,
       compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
       speech: {
         ...publicSpeech,
@@ -2880,6 +3511,31 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     fastify.sse.broadcast('chat-store-meta', { meta, origin: origin || '', at: Date.now() });
     return { ok: true, meta };
   });
+
+  // Наследство прошлого процесса: ходы, принятые им, но оставшиеся без итога (падение,
+  // SIGKILL, нехватка памяти — слив остановки тогда не выполнялся). Окно получило
+  // подтверждение приёма, поэтому тишина хуже ошибки: каждый такой ход получает итог.
+  // Сами ходы не перезапускаются — неизвестно, что исполнитель успел сделать.
+  for (const entry of await turnLedger.load()) {
+    const wasRunning = entry.state === 'running';
+
+    try {
+      await failTurn(
+        entry,
+        wasRunning ? CRASH_RUNNING_REPLY : CRASH_QUEUED_REPLY,
+        wasRunning ? { interruptedBy: 'server_shutdown' } : {},
+      );
+      fastify.log.warn(
+        { turnId: entry.turnId, state: entry.state },
+        'чат: ход прошлого процесса остался без итога',
+      );
+    } catch (error) {
+      fastify.log.error(
+        { turnId: entry.turnId, err: (error as Error)?.message },
+        'чат: итог хода прошлого процесса не записан',
+      );
+    }
+  }
 }
 
 export default fp(chatModule, { name: 'module-chat' });

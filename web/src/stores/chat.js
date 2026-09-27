@@ -173,6 +173,61 @@ let saveWarned = false;
 // не начинался. Бесконечно спорить с постоянно пишущим окном нельзя.
 const CHAT_SAVE_ATTEMPTS = 3;
 
+// ── Доставка хода по протоколу приёма ─────────────────────────────────────────
+// Сервер, объявивший turnProtocol, принимает ход коротким POST с устойчивым turnId и
+// исполняет его без HTTP-соединения; итог приходит через chats/pending. Раньше POST
+// висел весь ход: несколько чатов съедали лимит соединений браузера, а оборванный
+// запрос оставлял реплику без исполнителя и без объяснения.
+const TURN_PROTOCOL = 1;
+// Сколько ждать подтверждения приёма. Дольше — исход неизвестен, и безопасен только
+// повтор ТЕМ ЖЕ turnId: сервер узнает его и исполнителя второй раз не запустит.
+const ACCEPT_TIMEOUT_MS = 20000;
+// Паузы автоматических повторов доставки; когда они кончились — кнопка у реплики.
+const REDELIVERY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 15000, 15000, 15000];
+// Сервер принимает не больше стольких id за один запрос статуса.
+const TURN_STATUS_BATCH = 50;
+// turnId → таймер следующей попытки доставки.
+const redeliveryTimers = new Map();
+// turnId, по которым прямо сейчас летит POST приёма: второй параллельный не нужен.
+const postingTurns = new Set();
+// turnId → контекст страницы на момент отправки: автоматический повтор несёт тот же.
+// Отсутствие записи значит, что реплику отправляло другое окно или окно до F5.
+const outgoing = new Map();
+// Подбор pending и сверка после переподключения — по одному за раз; просьба, пришедшая
+// во время прохода, даёт ещё один проход после него (повторные hello, chat-orphan).
+let collectJob = null;
+let collectAgain = false;
+let reconnectJob = null;
+let reconnectAgain = false;
+// Чужая реплика без подтверждения приёма (её отправляет другое окно): даём владельцу
+// время получить ответ и только потом сверяемся с сервером сами — вдруг он умер.
+const FOREIGN_DELIVERY_GRACE_MS = 15000;
+let reconcileTimer = null;
+
+// Запись истории по чатам: id → { tail, next, force }. Следующий PUT чата ждёт ответа
+// на предыдущий, а все просьбы, пришедшие за время полёта, склеиваются в одну.
+const chatSaves = new Map();
+
+/**
+ * Id отправки: 8–80 символов [A-Za-z0-9_-], как требует сервер. Время в начале
+ * упорядочивает id по созданию, случайный хвост делает их уникальными между окнами.
+ */
+function newTurnId() {
+  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, '')
+    || `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+
+  return `t${Date.now().toString(36)}${random.slice(0, 16)}`;
+}
+
+// Запись о доставке реплики для рендера этого окна: чей чат, стадия и номер попытки.
+function deliveryOf(chatId, state, attempt) {
+  return {
+    chatId,
+    state,
+    attempt,
+  };
+}
+
 function chatRevisionConflict() {
   const error = new Error('Чат одновременно меняется в другом окне. Закрой лишние окна или повтори отправку.');
   error.code = 'chat_revision_conflict';
@@ -273,6 +328,19 @@ function stripSeed(userText) {
   if (!text.startsWith(SEED_OPEN)) return text;
   const end = text.indexOf(`\n${SEED_CLOSE}\n\n`);
   return end < 0 ? text : text.slice(end + SEED_CLOSE.length + 3);
+}
+// Сама выжимка из текста запроса: итог принятого хода, сбросившего сессию, обязан
+// вернуть её в ожидание — окно, отправлявшее ход, могло уже перезагрузиться.
+function seedOf(userText) {
+  const text = String(userText || '');
+
+  if (!text.startsWith(SEED_OPEN)) {
+    return '';
+  }
+
+  const end = text.indexOf(`\n${SEED_CLOSE}\n\n`);
+
+  return end < 0 ? '' : text.slice(SEED_OPEN.length + 1, end);
 }
 
 // Рантайм-поля чата: живут только в окне и на сервер не едут (см. slimOf). При замене
@@ -570,9 +638,21 @@ export const useChatStore = defineStore('chat', {
   // оповещением, текст ошибки хранится здесь.
   // compactWindow — порог сжатия контекста из настроек сервера (0 = «не вмешиваться»).
   // Держим в сторе, а не в компоненте: по нему кольцо контекста красится в каждом чате.
+  // turnProtocol — сервер принимает ходы по turnId (0 — старый синхронный запуск).
+  // deliveries — turnId → { chatId, state, attempt }: доставка реплик, приём которых сервер
+  // ещё не подтвердил. posting — POST летит, retrying — связи нет, повторяем тем же id,
+  // lost — сервер этот ход не знает (F5 до приёма, повторы кончились): нужна кнопка.
+  // Только для рендера этого окна: в историю едет лишь `delivery` у самой реплики.
   state: () => ({
-    ...pickStore(null), loaded: false, conveyorIds: [], pending: {}, saveError: null,
-    compactWindow: 0, speech: normalizeSpeechSnapshot(null),
+    ...pickStore(null),
+    loaded: false,
+    conveyorIds: [],
+    pending: {},
+    saveError: null,
+    compactWindow: 0,
+    speech: normalizeSpeechSnapshot(null),
+    turnProtocol: 0,
+    deliveries: {},
   }),
   getters: {
     // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
@@ -668,6 +748,8 @@ export const useChatStore = defineStore('chat', {
           // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
           // снимок в браузере хранит только историю, настроек в нём нет.
           this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
+          // Возможность сервера — тоже только из его ответа: снимок в браузере её не знает.
+          this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
           // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
           // содержит только историю и не вправе подменять приватностный выбор движка.
           const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
@@ -703,82 +785,235 @@ export const useChatStore = defineStore('chat', {
           await this._loadWaiting();
           // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
           await this._loadActive();
+          // Реплики, приём которых окно до F5 не успело подтвердить: сверка с сервером.
+          await this._reconcileDeliveries();
         })();
       }
       await loadPromise;
     },
-    // Недоставленные ответы (chats/pending на сервере): раскладываем по чатам,
-    // dedup по pid в сообщении, подтверждаем удалением.
-    async _collectPending() {
+    /**
+     * Недоставленные ответы (chats/pending на сервере): раскладываем по чатам, dedup по
+     * pid в сообщении, подтверждаем удалением. Проход один за раз: повторные hello и
+     * chat-orphan во время прохода дают ещё один проход после него, а не гонку двух.
+     */
+    _collectPending() {
+      if (collectJob) {
+        collectAgain = true;
+
+        return collectJob;
+      }
+
+      collectJob = (async () => {
+        do {
+          collectAgain = false;
+          await this._collectPendingOnce();
+        } while (collectAgain);
+      })().finally(() => {
+        collectJob = null;
+      });
+
+      return collectJob;
+    },
+    /**
+     * Один проход по pending. Запись подтверждается (DELETE) только после того, как
+     * ответ устойчиво лёг в историю на сервере: раньше подтверждение уходило сразу, а
+     * запись — дебаунсом, и закрытие вкладки между ними теряло ответ насовсем. Запись
+     * чата, которого в окне нет, не удаляется: её подберёт окно, где этот чат есть.
+     */
+    async _collectPendingOnce() {
       let j = null;
       try { j = await api.get('/api/chat/pending'); } catch { return; }
-      if (!j?.pending?.length) return;
-      for (const p of j.pending) {
-        const s = this._find(p.chatKey);
-        // Ответ мог прийти после F5: применяем семантическое имя, только если человек
-        // не заменил временный заголовок вручную, пока агент работал.
-        // Сервер помнит весь текст запроса, а человек писал только то, что после
-        // блока выжимки: сравниваем и восстанавливаем видимую часть, иначе выжимка
-        // всплывала бы в переписке отдельным «сообщением пользователя».
-        const userText = stripSeed(p.userText);
-        if (s && p.title) {
-          const provisional = provisionalChatTitle(userText, { hasAttachments: !!p.hadAttachments });
-          applyGeneratedChatTitle(s, p.title, provisional);
-        }
-        const seen = !s || (s.messages || []).some((m) => m.pid === p.id);
-        if (s && p.compact && !seen) {
-          // Окно перезагрузили посреди сжатия: его итог — не ответ агента, а семя новой
-          // сессии. Потерять его — значит потерять память после сжатия, а старый id
-          // сессии увёл бы следующий ход обратно в полный контекст.
-          try {
-            applyCompactResult(s, p, s.contextTokens || 0);
-          } catch (e) {
-            s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
-          }
-          s.messages.at(-1).pid = p.id;
-          s.compacting = false;
-          s.sending = false;
-          s.offline = false;
-          s.updatedAt = p.at || Date.now();
-        } else if (s && !seen) {
-          // Гонка last-write-wins могла затереть сам вопрос — восстанавливаем его перед ответом.
-          const restored = (s.messages || []).slice(-12)
-            .some((m) => m.role === 'user' && m.text === userText);
-          if (userText && !restored) {
-            const sentAt = messageSentAt(p.userSentAt);
-            s.messages.push({
-              role: 'user', text: userText, pid: `${p.id}:u`,
-              ...(sentAt ? { sentAt } : {}),
-            });
-          }
-          s.messages.push({
-            role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id,
-            steps: p.steps || [], model: p.model || '', actualModel: p.actualModel || '', effort: p.effort || '',
-            // Как и в send(): остановленный ход помечаем для серверного досье.
-            ...(p.stopped ? { stopped: true } : {}),
-            // Прерван перезапуском сервера или обрывом CLI: по метке чат предложит продолжить ход.
-            ...(p.interruptedBy ? { interruptedBy: p.interruptedBy } : {}),
-          });
-          if (p.sessionReset) {
-            clearSessionContext(s);
-            s.sessionResetFailed = false;
-          } else {
-            if (p.sessionId) s.sessionId = p.sessionId;
-            applyContextUsage(s, p);
-            if (p.sessionResetFailed) s.sessionResetFailed = true;
-          }
-          // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
-          if (p.effort && p.effort !== s.effort) s.effort = p.effort;
-          // Ответ доехал, пока мы смотрели в другое место — чат становится непрочитанным.
-          s.sending = false;
-          // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
-          s.offline = false;
-          s.updatedAt = p.at || Date.now();
-          this._notifyReply(s, p.reply || '(пусто)', `${p.chatKey}:pid:${p.id}`);
-        }
-        api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
+
+      const entries = Array.isArray(j?.pending) ? j.pending : [];
+
+      if (!entries.length) {
+        return;
       }
-      this._persist();
+
+      const settled = new Map();
+
+      for (const p of entries) {
+        if (!p?.id) {
+          continue;
+        }
+
+        const place = await this._chatForPending(p.chatKey);
+
+        if (place === 'gone') {
+          // Чата нет и на сервере — ответ класть некуда, запись только копилась бы.
+          api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
+          continue;
+        }
+        if (!place) {
+          continue;
+        }
+
+        this._applyPending(place, p);
+
+        if (!settled.has(place.id)) {
+          settled.set(place.id, []);
+        }
+
+        settled.get(place.id).push(p.id);
+      }
+      for (const [chatId, ids] of settled) {
+        try {
+          await this._writeChat(chatId);
+        } catch {
+          // Запись истории не прошла — подтверждать нечем, pending подождёт.
+          this._persist();
+          continue;
+        }
+
+        for (const id of ids) {
+          api.del(`/api/chat/pending/${id}`).catch(() => { /* подберём в следующий раз */ });
+        }
+      }
+    },
+    /**
+     * Чат для записи pending. Если в окне его нет, он мог появиться на другом устройстве
+     * за время разрыва — тянем с сервера. 'gone' — сервер такого чата не знает.
+     */
+    async _chatForPending(chatKey) {
+      const local = this._find(chatKey);
+
+      if (local) {
+        return local;
+      }
+      if (!chatKey) {
+        return 'gone';
+      }
+
+      try {
+        const { chat } = await api.get(`/api/chat/store/chat/${chatKey}`);
+
+        if (!chat?.id) {
+          return 'gone';
+        }
+
+        this._applyRemoteChat(chat, !!chat.archived, { notifyReply: false });
+
+        return this._find(chatKey);
+      } catch (error) {
+        return error?.status === 404 ? 'gone' : null;
+      }
+    },
+    /**
+     * Разложить одну запись pending в чат. Повторный вызов с той же записью ничего не
+     * меняет (dedup по pid), поэтому проход можно безопасно повторять.
+     */
+    _applyPending(s, p) {
+      // Ответ мог прийти после F5: применяем семантическое имя, только если человек
+      // не заменил временный заголовок вручную, пока агент работал.
+      // Сервер помнит весь текст запроса, а человек писал только то, что после
+      // блока выжимки: сравниваем и восстанавливаем видимую часть, иначе выжимка
+      // всплывала бы в переписке отдельным «сообщением пользователя».
+      const userText = stripSeed(p.userText);
+
+      if (p.title) {
+        const provisional = provisionalChatTitle(userText, { hasAttachments: !!p.hadAttachments });
+
+        applyGeneratedChatTitle(s, p.title, provisional);
+      }
+      // Итог принятого хода: его реплика больше не ждёт ни приёма, ни очереди.
+      if (p.turnId) {
+        this._settleTurnMessage(s, p.turnId, { finished: true });
+      }
+
+      const seen = (s.messages || []).some((m) => m.pid === p.id);
+
+      if (seen) {
+        return;
+      }
+      if (p.compact) {
+        // Окно перезагрузили посреди сжатия: его итог — не ответ агента, а семя новой
+        // сессии. Потерять его — значит потерять память после сжатия, а старый id
+        // сессии увёл бы следующий ход обратно в полный контекст.
+        try {
+          applyCompactResult(s, p, s.contextTokens || 0);
+        } catch (e) {
+          s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
+        }
+
+        s.messages.at(-1).pid = p.id;
+        s.compacting = false;
+        s.sending = false;
+        s.offline = false;
+        s.updatedAt = p.at || Date.now();
+
+        return;
+      }
+      // Гонка last-write-wins могла затереть сам вопрос — восстанавливаем его перед ответом.
+      const restored = p.turnId
+        ? (s.messages || []).some((m) => m.role === 'user' && m.turnId === p.turnId)
+        : (s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === userText);
+
+      if (userText && !restored) {
+        const sentAt = messageSentAt(p.userSentAt);
+
+        s.messages.push({
+          role: 'user',
+          text: userText,
+          pid: `${p.id}:u`,
+          ...(p.turnId ? { turnId: p.turnId } : {}),
+          ...(sentAt ? { sentAt } : {}),
+        });
+      }
+
+      const role = p.role || 'assistant';
+
+      s.messages.push({
+        role,
+        text: p.reply || '(пусто)',
+        cost: p.cost ?? null,
+        pid: p.id,
+        steps: p.steps || [],
+        model: p.model || '',
+        actualModel: p.actualModel || '',
+        effort: p.effort || '',
+        // Как и в send(): остановленный ход помечаем для серверного досье.
+        ...(p.stopped ? { stopped: true } : {}),
+        // Прерван перезапуском сервера или обрывом CLI: по метке чат предложит продолжить ход.
+        ...(p.interruptedBy ? { interruptedBy: p.interruptedBy } : {}),
+      });
+      // Выжимка ушла вместе с этим ходом. Если он её не донёс (сессия сброшена, ход
+      // упал), она снова ждёт следующего сообщения — как это делал send() в своём окне.
+      const seed = p.turnId && (p.sessionReset || role === 'error') ? seedOf(p.userText) : '';
+
+      if (seed && !s.pendingSeed) {
+        s.pendingSeed = seed;
+      }
+      if (p.sessionReset) {
+        clearSessionContext(s);
+        s.sessionResetFailed = false;
+      } else {
+        if (p.sessionId) {
+          s.sessionId = p.sessionId;
+        }
+
+        applyContextUsage(s, p);
+
+        if (p.sessionResetFailed) {
+          s.sessionResetFailed = true;
+        }
+      }
+      if (role === 'error' && p.turnId) {
+        s.error = p.reply || '';
+      }
+      // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
+      if (p.effort && p.effort !== s.effort) {
+        s.effort = p.effort;
+      }
+      // Строку хода старого синхронного запуска снимаем здесь. У принятого хода её
+      // снимает chat-done или сверка активных ходов: в очереди чата мог стартовать
+      // следующий ход, и ответ предыдущего не должен гасить его «думает…».
+      if (!p.turnId) {
+        s.sending = false;
+      }
+      // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
+      s.offline = false;
+      s.updatedAt = p.at || Date.now();
+      this._notifyReply(s, p.reply || '(пусто)', `${p.chatKey}:pid:${p.id}`);
     },
     // Сохранение на сервер с дебаунсом — вызовы дискретные, но склеиваем всплески.
     // flush=true — писать немедленно (критичные моменты: только что добавленное
@@ -808,22 +1043,25 @@ export const useChatStore = defineStore('chat', {
         // Каждый чат — свой запрос, и только если он реально изменился.
         const jobs = [];
         const alive = new Set();
-        const push = (c, archived) => {
-          if (!c?.id) return;
+        // Чат, которого нет на сервере в этом виде, ставится в очередь записи; чаты,
+        // попавшие в alive, переживут сверку удалённых ниже.
+        const push = (c) => {
+          if (!c?.id) {
+            return;
+          }
+
           alive.add(c.id);
-          const mark = fingerprintOf(c);
-          if (sentChats.get(c.id) === mark) return;
-          jobs.push(api.put('/api/chat/store/chat', { chat: c, archived, origin: WINDOW_ID })
-            .then((response) => {
-              const live = this._find(c.id);
-              applySaveAck(live, response);
-              const acknowledged = { ...c };
-              applySaveAck(acknowledged, response);
-              sentChats.set(c.id, fingerprintOf(acknowledged));
-            }));
+
+          if (sentChats.get(c.id) === fingerprintOf(c)) {
+            return;
+          }
+          // Очередь чата сама возьмёт свежий снимок в момент отправки и не пошлёт
+          // тот же снимок второй раз, пока предыдущий PUT ждёт ответа.
+          jobs.push(this._writeChat(c.id));
         };
-        slim.forEach((c) => push(c, false));
-        archivedSlim.forEach((c) => push(c, true));
+
+        slim.forEach((c) => push(c));
+        archivedSlim.forEach((c) => push(c));
         // Чат исчез из стора (удалили, вытеснили из архива) — убираем и на сервере.
         for (const id of [...sentChats.keys()]) {
           if (alive.has(id)) continue;
@@ -860,38 +1098,129 @@ export const useChatStore = defineStore('chat', {
     /**
      * Барьер перед запуском executor-а: server-owned record с modelRef должен быть
      * durable раньше POST /api/chat. Иначе быстрый запрос мог обогнать debounce истории.
+     * Пишет через общую очередь чата: летящий PUT того же чата сначала получает ответ,
+     * и CAS-база барьера — уже его ревизия, а не устаревшая копия.
      */
     async _saveChatNow(session) {
-      if (!session?.id) throw new Error('чат не выбран');
+      if (!session?.id) {
+        throw new Error('чат не выбран');
+      }
+
       clearTimeout(persistTimer);
-      const archived = (this.archived || []).some((item) => item.id === session.id);
       // Именно эту модель человек видел в отправляющем окне. stale-ack сообщает
       // server-owned модель чужой ревизии; принять её и продолжить означало бы
       // незаметно запустить не того исполнителя. На повторном CAS сохраняем свой выбор.
       const intendedModel = session.model;
       const intendedModelRef = session.modelRef ? { ...session.modelRef } : session.modelRef;
+
       for (let attempt = 0; attempt < CHAT_SAVE_ATTEMPTS; attempt += 1) {
-        const snapshot = archived ? archivedSlimOf(session) : slimOf(session);
-        const response = await api.put('/api/chat/store/chat', {
-          chat: snapshot,
-          archived,
-          origin: WINDOW_ID,
-        });
-        applySaveAck(session, response);
+        const response = await this._writeChat(session.id, { force: true });
+
         if (response?.stale) {
           // revision из ack — новая CAS-база. Сервер уже слил сообщения, поэтому
           // повтор того же снимка их не удалит (mergeChat восстановит серверный хвост).
           session.model = intendedModel;
           session.modelRef = intendedModelRef ? { ...intendedModelRef } : intendedModelRef;
-          if (attempt + 1 < CHAT_SAVE_ATTEMPTS) continue;
+
+          if (attempt + 1 < CHAT_SAVE_ATTEMPTS) {
+            continue;
+          }
           throw chatRevisionConflict();
         }
-        const acknowledged = { ...snapshot };
-        applySaveAck(acknowledged, response);
-        sentChats.set(session.id, fingerprintOf(acknowledged));
+
         return response;
       }
       throw chatRevisionConflict();
+    },
+    /**
+     * Запись одного чата по очереди. Пока летит PUT, новые просьбы о записи этого чата
+     * склеиваются в одну следующую, и снимок для неё берётся в момент отправки: правка,
+     * сделанная во время полёта, не теряется, а одинаковый снимок второй раз не уходит.
+     * force — барьер перед запуском хода: писать, даже если сервер уже видел этот
+     * снимок, потому что нужен сам ответ (stale и ревизия для CAS).
+     */
+    _writeChat(id, { force = false } = {}) {
+      let slot = chatSaves.get(id);
+      const release = (run) => {
+        run.catch(() => {}).then(() => {
+          if (chatSaves.get(id) === slot && slot.tail === run && !slot.next) {
+            chatSaves.delete(id);
+          }
+        });
+      };
+
+      if (!slot) {
+        // Записи этого чата нет в полёте — PUT уходит сразу, без круга по очереди.
+        slot = {
+          tail: null,
+          next: null,
+          force: false,
+        };
+        chatSaves.set(id, slot);
+
+        const run = this._putChat(id, force);
+
+        slot.tail = run;
+        release(run);
+
+        return run;
+      }
+      if (force) {
+        slot.force = true;
+      }
+      if (slot.next) {
+        return slot.next;
+      }
+
+      const run = slot.tail.catch(() => {}).then(() => {
+        slot.next = null;
+
+        const forced = slot.force;
+
+        slot.force = false;
+
+        return this._putChat(id, forced);
+      });
+
+      slot.next = run;
+      slot.tail = run;
+      release(run);
+
+      return run;
+    },
+    /**
+     * Один PUT чата: снимок берётся в момент отправки, уже записанный без force не
+     * уходит. Ответ сервера (ревизия, модель) применяется и к живому чату, и к отпечатку:
+     * иначе следующий снимок считался бы отличным от сервера и уехал бы повторно.
+     */
+    async _putChat(id, force) {
+      const live = this._find(id);
+
+      if (!live) {
+        return null;
+      }
+
+      const archived = (this.archived || []).some((item) => item.id === id);
+      const snapshot = archived ? archivedSlimOf(live) : slimOf(live);
+
+      if (!force && sentChats.get(id) === fingerprintOf(snapshot)) {
+        return null;
+      }
+
+      const response = await api.put('/api/chat/store/chat', {
+        chat: snapshot,
+        archived,
+        origin: WINDOW_ID,
+      });
+
+      applySaveAck(this._find(id), response);
+
+      const acknowledged = { ...snapshot };
+
+      applySaveAck(acknowledged, response);
+      sentChats.set(id, fingerprintOf(acknowledged));
+
+      return response;
     },
     /**
      * Стор совпал с серверным — запоминаем слепки, чтобы первое же сохранение
@@ -1045,11 +1374,12 @@ export const useChatStore = defineStore('chat', {
           // Заодно снимаем плашки «связь прервалась»: раз событие дошло — связь есть,
           // а что стало с самими ходами, сейчас расскажет _loadActive().
           for (const c of [...this.sessions, ...(this.archived || [])]) if (c.offline) c.offline = false;
+
           if (this.loaded) {
             this._loadWaiting();
-            this._loadActive();
             this._resyncSpeech();
-            if (Date.now() - storeSyncedAt > 2000) this._resyncStore();
+            // История, pending, живые ходы и доставки — строго по порядку (см. _afterReconnect).
+            this._afterReconnect();
           }
         } else if (name === 'chat-store') {
           // Историю изменило другое окно/устройство. Своё эхо пропускаем: изменение
@@ -1099,8 +1429,16 @@ export const useChatStore = defineStore('chat', {
           // Чат завели в другом окне и сразу отправили — его копия к нам ещё едет.
           // Тянем сейчас, чтобы разговор появился с работающим агентом, а не после F5.
           if (!s) { this._pullChat(d.chatKey, false); return; }
-          const m = (s.messages || []).find((x) => x.queued);
+          // Принятый ход называет себя turnId: метку снимаем ровно с его реплики. Старый
+          // синхронный — с самой ранней ожидающей, как раньше.
+          const m = d.turnId
+            ? (s.messages || []).find((x) => x.role === 'user' && x.turnId === d.turnId)
+            : (s.messages || []).find((x) => x.queued);
           if (m) delete m.queued;
+          // Ход стартовал — значит сервер его принял, даже если ответ на приём ещё в пути.
+          if (d.turnId) {
+            this._settleTurnMessage(s, d.turnId);
+          }
           // Сжатие — служебный ход: во ВСЕХ окнах это вертящееся кольцо и заморозка ввода,
           // а не живая строка хода. Раньше признак жил только в затеявшем окне, и на втором
           // устройстве сжатие не отображалось ничем.
@@ -1133,13 +1471,32 @@ export const useChatStore = defineStore('chat', {
           const s = this._find(d.chatKey);
           // Событие дошло — связь с сервером есть, даже если рвался длинный POST хода.
           if (s?.offline) s.offline = false;
-          if (s && !s.inflight) {
-            s.sending = false; s.stopping = false; s.liveContextCache = null;
-            s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
+
+          // Снять строку хода и кольцо. queued — принятые ходы этого чата, ещё ждущие
+          // очереди: пока они есть, работа продолжается и «думает…» остаётся.
+          const finish = () => {
+            if (s && !s.inflight && !(Number(d.queued) > 0)) {
+              s.sending = false;
+              s.stopping = false;
+              s.liveContextCache = null;
+              s.progressTokens = 0;
+              s.progressTokensEstimate = false;
+              s.turnStartedAt = 0;
+            }
+            // Своё сжатие разморозит его собственный ответ (он ещё едет и правит счётчики);
+            // чужому окну ждать нечего — снимаем кольцо здесь.
+            if (s && !compactInflight.has(s.id)) {
+              s.compacting = false;
+            }
+          };
+          // Итог принятого хода уже лежит в pending: строку хода снимаем, когда ответ
+          // встал в переписку, иначе между ними мелькала бы пустота.
+          if (d.turnId) {
+            this._collectPending().finally(finish);
           }
-          // Своё сжатие разморозит его собственный ответ (он ещё едет и правит счётчики);
-          // чужому окну ждать нечего — снимаем кольцо здесь.
-          if (s && !compactInflight.has(s.id)) s.compacting = false;
+          else {
+            finish();
+          }
         }
       });
     },
@@ -1189,11 +1546,47 @@ export const useChatStore = defineStore('chat', {
      */
     async _loadActive() {
       let active;
-      try { ({ active } = await api.get('/api/chat/active')); }
+      let queued;
+
+      try { ({ active, queued } = await api.get('/api/chat/active')); }
       catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
       const byKey = new Map((active || []).map((a) => [a.chatKey, a]));
+      // Принятые ходы, ждущие очереди: их чат занят, а реплики честно «ждут очереди».
+      const waitingTurns = new Map();
+
+      for (const item of Array.isArray(queued) ? queued : []) {
+        if (!item?.chatKey || !item.turnId) {
+          continue;
+        }
+        if (!waitingTurns.has(item.chatKey)) {
+          waitingTurns.set(item.chatKey, []);
+        }
+
+        waitingTurns.get(item.chatKey).push(item.turnId);
+      }
       for (const s of [...this.sessions, ...(this.archived || [])]) {
         const a = byKey.get(s.id);
+        const waiting = waitingTurns.get(s.id) || [];
+
+        for (const turnId of waiting) {
+          const m = (s.messages || []).find((x) => x.role === 'user' && x.turnId === turnId);
+
+          this._settleTurnMessage(s, turnId);
+
+          if (m) {
+            m.queued = true;
+          }
+        }
+
+        if (a?.turnId) {
+          const m = (s.messages || []).find((x) => x.role === 'user' && x.turnId === a.turnId);
+
+          this._settleTurnMessage(s, a.turnId);
+
+          if (m) {
+            delete m.queued;
+          }
+        }
         if (a?.compact) {
           // Сжатие: живой строки хода нет — её место занимает вертящееся кольцо.
           s.compacting = true; s.sending = false;
@@ -1221,6 +1614,9 @@ export const useChatStore = defineStore('chat', {
           const myLast = s.steps?.[mine - 1]?.at || 0;
           const theirLast = a.steps?.[theirs - 1]?.at || 0;
           if (theirs > mine || theirLast > myLast) s.steps = a.steps;
+        } else if (waiting.length) {
+          // Предыдущий ход только что кончился, следующий вот-вот стартует: чат занят.
+          s.sending = true;
         } else if (!s.inflight && !compactInflight.has(s.id)) {
           s.sending = false; s.stopping = false; s.compacting = false;
           s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
@@ -1296,6 +1692,18 @@ export const useChatStore = defineStore('chat', {
         .at(-1);
       if (freshReply && notifyReply) this._notifyReply(applied, freshReply.message.text, freshReply.key);
       sentChats.set(applied.id, fingerprintOf(archived ? archivedSlimOf(applied) : slimOf(applied)));
+      // Реплику с неподтверждённым приёмом отправляет другое окно. Если оно умерло до
+      // подтверждения, это окно само покажет «не доставлено» — после паузы на ответ.
+      const foreign = (applied.messages || [])
+        .some((m) => m?.role === 'user' && m.turnId && m.delivery === 'sending' && !outgoing.has(m.turnId));
+
+      if (foreign && this.turnProtocol === TURN_PROTOCOL && !reconcileTimer) {
+        reconcileTimer = setTimeout(() => {
+          reconcileTimer = null;
+          this._reconcileDeliveries();
+        }, FOREIGN_DELIVERY_GRACE_MS);
+        reconcileTimer?.unref?.();
+      }
     },
     /** Чат удалили в другом окне — убираем и здесь (удаление всегда осознанное действие). */
     _dropRemoteChat(id) {
@@ -1335,6 +1743,8 @@ export const useChatStore = defineStore('chat', {
       catch { return; }
       if (!j?.sessions && !j?.archived) return;
       storeSyncedAt = Date.now();
+      // Сервер мог смениться за время разрыва (перезапуск с новой версией).
+      this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
       const onServer = new Set();
       for (const [list, archived] of [[j.sessions || [], false], [j.archived || [], true]]) {
         for (const chat of list) {
@@ -1699,6 +2109,10 @@ export const useChatStore = defineStore('chat', {
     async compact(id) {
       const s = this._find(id);
       if (!s || s.compacting || s.sending || !s.sessionId) return;
+      // Сообщение этого чата ещё доставляется: сжатие обогнало бы его в очереди сервера.
+      if (Object.values(this.deliveries).some((d) => d.chatId === id && d.state !== 'lost')) {
+        return;
+      }
       const before = s.contextTokens || 0;
       s.compacting = true;
       s.error = null;
@@ -1796,6 +2210,18 @@ export const useChatStore = defineStore('chat', {
       // Фиксируем именно момент отправки запроса. updatedAt всего чата для этого не
       // годится: он ещё несколько раз изменится, пока агент ответит и история сохранится.
       const sentAt = Date.now();
+      // Сервер принимает ходы по turnId — короткий приём вместо POST на весь ход.
+      if (this.turnProtocol === TURN_PROTOCOL) {
+        return this._sendTurn(s, {
+          text,
+          atts,
+          sentAt,
+          queued,
+          slashCommand,
+          requestTitle,
+        });
+      }
+
       s.messages.push({
         role: 'user', text, sentAt,
         ...(atts.length ? { attachments: atts } : {}),
@@ -1943,6 +2369,418 @@ export const useChatStore = defineStore('chat', {
         s.updatedAt = Date.now(); this._persist();
       }
       return true;
+    },
+
+    /**
+     * Отправка по протоколу приёма. Реплика уходит в историю вместе с turnId и отметкой
+     * «приём не подтверждён» ДО запроса: F5 в любой момент оставляет честный след, по
+     * которому окно сверится с сервером. Сам POST короткий — сервер подтверждает приём,
+     * итог хода приходит через pending, а повтор тем же turnId исполнителя не будит.
+     */
+    async _sendTurn(s, {
+      text, atts, sentAt, queued, slashCommand, requestTitle,
+    }) {
+      const turnId = newTurnId();
+      const seed = s.pendingSeed || '';
+      // Всё, без чего повтор после F5 не совпал бы с исходной отправкой, лежит у самой
+      // реплики до подтверждения приёма и снимается вместе с отметкой доставки.
+      const outbox = {
+        ...(seed ? { seed } : {}),
+        ...(slashCommand ? { slashCommand } : {}),
+        ...(requestTitle ? { requestTitle: true } : {}),
+      };
+      const message = {
+        role: 'user',
+        text,
+        sentAt,
+        turnId,
+        delivery: 'sending',
+        ...(Object.keys(outbox).length ? { outbox } : {}),
+        ...(atts.length ? { attachments: atts } : {}),
+        ...(queued ? { queued: true } : {}),
+      };
+      // Выжимка уезжает вместе с репликой: второе окно её уже не возьмёт, а F5 до приёма
+      // её не потеряет — повтор отправки возьмёт её из outbox.
+      if (seed) {
+        s.pendingSeed = '';
+      }
+
+      s.messages.push(message);
+      s.error = null;
+      s.offline = false;
+      s.updatedAt = sentAt;
+      this.deliveries[turnId] = deliveryOf(s.id, 'posting', 0);
+      // Контекст страницы фиксируется один раз: автоматический повтор несёт тот же.
+      outgoing.set(turnId, {
+        context: useUiContextStore().capture(router.currentRoute.value).promptContext,
+      });
+
+      try {
+        // Модель: что показано в селекте, то и считает; пустое значение — модель по
+        // умолчанию из реестра. Сохраняется в чат ДО durable save.
+        const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
+
+        if (!resolvedModel.provider || !resolvedModel.model) {
+          throw new Error('Выбранная модель недоступна в реестре.');
+        }
+
+        s.model = resolvedModel.id;
+        s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+        await this._saveChatNow(s);
+      } catch (e) {
+        // Реплика не записана или модель не разрешилась — агент точно не стартовал.
+        this._refuseTurn(s, message, e);
+
+        return true;
+      }
+
+      await this._deliverTurn(s.id, turnId);
+
+      return true;
+    },
+    /**
+     * Тело POST приёма по реплике — и для первой попытки, и для повтора после F5. Текст,
+     * выжимка, слэш-команда и вложения берутся у самой реплики, модель и режим — у чата.
+     */
+    _turnRequest(s, m) {
+      const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
+
+      if (!resolvedModel.provider || !resolvedModel.model) {
+        throw new Error('Выбранная модель недоступна в реестре.');
+      }
+      // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
+      // явный effort не отправляем: CLI применит собственный актуальный дефолт.
+      const effortLevels = resolvedModel.model?.efforts || [];
+      const context = outgoing.get(m.turnId)?.context
+        || useUiContextStore().capture(router.currentRoute.value).promptContext;
+
+      return {
+        url: s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat',
+        body: {
+          message: withSeed(m.outbox?.seed || '', m.text),
+          model: resolvedModel.id,
+          modelRef: { provider: resolvedModel.provider.id, model: resolvedModel.model.id },
+          effort: effortLevels.includes(s.effort) ? s.effort : '',
+          mode: s.mode || '',
+          sessionId: s.sessionId,
+          context,
+          chatKey: s.id,
+          requestTitle: !!m.outbox?.requestTitle,
+          sentAt: m.sentAt,
+          turnId: m.turnId,
+          ...(m.outbox?.slashCommand ? { slashCommand: m.outbox.slashCommand } : {}),
+          ...(m.attachments?.length
+            ? { attachments: m.attachments.map((a) => ({ file: a.file, name: a.name })) }
+            : {}),
+        },
+      };
+    },
+    /**
+     * Одна попытка доставить приём хода. Однозначных исходов два: сервер подтвердил приём
+     * (в том числе повтор — duplicate) или явно отказал. Обрыв и таймаут неоднозначны:
+     * запрос мог дойти, поэтому повторяем ТЕМ ЖЕ turnId — старый POST вслепую не шлём.
+     */
+    async _deliverTurn(chatId, turnId) {
+      clearTimeout(redeliveryTimers.get(turnId));
+      redeliveryTimers.delete(turnId);
+
+      const s = this._find(chatId);
+      const m = (s?.messages || []).find((x) => x.role === 'user' && x.turnId === turnId);
+
+      if (!s || !m || m.delivery !== 'sending') {
+        this._forgetDelivery(turnId);
+
+        return 'settled';
+      }
+      if (postingTurns.has(turnId)) {
+        return 'posting';
+      }
+
+      const attempt = (this.deliveries[turnId]?.attempt || 0) + 1;
+
+      this.deliveries[turnId] = deliveryOf(chatId, 'posting', attempt);
+
+      let request;
+
+      try {
+        request = this._turnRequest(s, m);
+      } catch (e) {
+        this._refuseTurn(s, m, e);
+
+        return 'refused';
+      }
+
+      postingTurns.add(turnId);
+
+      try {
+        const r = await api.post(request.url, request.body, { timeoutMs: ACCEPT_TIMEOUT_MS });
+
+        postingTurns.delete(turnId);
+        this._markAccepted(s, m, r);
+
+        return 'accepted';
+      } catch (e) {
+        postingTurns.delete(turnId);
+
+        if (isConnectionError(e)) {
+          this._scheduleRedelivery(chatId, turnId, attempt);
+
+          return 'retrying';
+        }
+
+        this._refuseTurn(s, m, e);
+
+        return 'refused';
+      }
+    },
+    /**
+     * Сервер подтвердил приём. started — ход пошёл сразу, queued — ждёт очереди чата,
+     * running/done — это повтор уже принятого хода (итог придёт или уже лежит в pending).
+     */
+    _markAccepted(s, m, r) {
+      const state = String(r?.state || '');
+      // Ответ на приём и события SSE идут разными соединениями. Если сервер уже сообщил о
+      // ходе (старт, конец, итог), отметку доставки сняли они, и живым состоянием дальше
+      // управляют события: запоздавший ответ не вернёт «думает…» законченному ходу.
+      const observed = m.delivery !== 'sending';
+
+      this._settleTurnMessage(s, m.turnId);
+
+      if (observed) {
+        return;
+      }
+      if (state === 'queued') {
+        m.queued = true;
+      } else {
+        delete m.queued;
+      }
+      if (state === 'done') {
+        // Ход закончился, пока окно не знало о приёме: ответ ждёт в pending.
+        this._collectPending();
+      } else {
+        s.sending = true;
+        // Строку хода начинаем здесь: chat-turn-start сюда ещё не дошёл.
+        if (state === 'started') {
+          s.progressTokens = 0;
+          s.progressTokensEstimate = false;
+          s.turnStartedAt = Date.now();
+          s.steps = [];
+          s.liveContext = 0;
+          s.liveContextUsage = null;
+          s.liveContextCache = null;
+        }
+      }
+
+      s.updatedAt = Date.now();
+      this._persist();
+    },
+    /**
+     * Сервер явно отказал (или отправка не дошла до записи истории): агент точно не
+     * стартовал. Реплика остаётся с ошибкой рядом, выжимка возвращается в ожидание.
+     */
+    _refuseTurn(s, m, e) {
+      const seed = m.outbox?.seed || '';
+
+      this._forgetDelivery(m.turnId);
+      delete m.delivery;
+      delete m.outbox;
+      delete m.queued;
+
+      if (seed && !s.pendingSeed) {
+        s.pendingSeed = seed;
+      }
+      if (e?.data?.sessionReset) {
+        clearSessionContext(s);
+        s.sessionResetFailed = false;
+      }
+      if (e?.data?.sessionResetFailed) {
+        s.sessionResetFailed = true;
+      }
+
+      s.error = e?.message || 'Сервер не принял сообщение';
+      s.messages.push({ role: 'error', text: s.error });
+      s.updatedAt = Date.now();
+      this._persist();
+    },
+    /**
+     * Следующая автоматическая попытка того же turnId. Паузы растут до 15 с; когда они
+     * кончились, реплика становится «не доставлено» и ждёт кнопки или связи (hello).
+     */
+    _scheduleRedelivery(chatId, turnId, attempt) {
+      const delay = REDELIVERY_DELAYS_MS[attempt - 1];
+
+      if (delay === undefined) {
+        this.deliveries[turnId] = deliveryOf(chatId, 'lost', attempt);
+
+        return;
+      }
+
+      this.deliveries[turnId] = deliveryOf(chatId, 'retrying', attempt);
+
+      const timer = setTimeout(() => {
+        this._deliverTurn(chatId, turnId);
+      }, delay);
+
+      timer?.unref?.();
+      redeliveryTimers.set(turnId, timer);
+    },
+    /**
+     * Приём хода подтверждён любым путём (ответ на POST, chat-turn-start, журнал сервера,
+     * итог в pending): снимаем с реплики отметку доставки и то, что ждало повтора.
+     */
+    _settleTurnMessage(s, turnId, { finished = false } = {}) {
+      this._forgetDelivery(turnId);
+
+      const m = (s?.messages || []).find((x) => x.role === 'user' && x.turnId === turnId);
+      // Итог хода (даже отказ из очереди при остановке сервера) снимает и «ждёт очереди».
+      const queued = finished && !!m?.queued;
+
+      if (!m?.delivery && !m?.outbox && !queued) {
+        return;
+      }
+
+      delete m.delivery;
+      delete m.outbox;
+
+      if (queued) {
+        delete m.queued;
+      }
+
+      this._persist();
+    },
+    /**
+     * Забыть доставку в этом окне: таймер повтора, контекст отправки и строку состояния.
+     * Отметку `delivery` у самой реплики не трогает — её снимает только подтверждение.
+     */
+    _forgetDelivery(turnId) {
+      clearTimeout(redeliveryTimers.get(turnId));
+      redeliveryTimers.delete(turnId);
+      outgoing.delete(turnId);
+
+      if (this.deliveries[turnId]) {
+        delete this.deliveries[turnId];
+      }
+    },
+    /**
+     * «Отправить ещё раз» у реплики, приём которой сервер не подтвердил. Тот же turnId:
+     * если прежний запрос всё-таки дошёл, сервер узнает его и второго запуска не будет.
+     */
+    async retryDelivery(chatId, turnId) {
+      const s = this._find(chatId);
+      const m = (s?.messages || []).find((x) => x.role === 'user' && x.turnId === turnId);
+
+      if (!m || m.delivery !== 'sending' || postingTurns.has(turnId)) {
+        return false;
+      }
+      if (this.deliveries[turnId]) {
+        delete this.deliveries[turnId];
+      }
+
+      return (await this._deliverTurn(chatId, turnId)) === 'accepted';
+    },
+    /**
+     * Реплики с неподтверждённым приёмом, которые не отправляет это окно (F5, другое
+     * устройство, долгий обрыв): сверяем с журналом сервера. Известный ход — снимаем
+     * отметку; неизвестный — «не доставлено» с кнопкой повтора того же turnId.
+     */
+    async _reconcileDeliveries() {
+      if (this.turnProtocol !== TURN_PROTOCOL) {
+        return;
+      }
+
+      const open = [];
+
+      for (const s of [...this.sessions, ...(this.archived || [])]) {
+        for (const m of s.messages || []) {
+          if (m?.role !== 'user' || !m.turnId || m.delivery !== 'sending') {
+            continue;
+          }
+          if (postingTurns.has(m.turnId) || redeliveryTimers.has(m.turnId)) {
+            continue;
+          }
+          // Ответ уже в переписке — ход точно был принят.
+          if ((s.messages || []).some((x) => x.pid === m.turnId)) {
+            this._settleTurnMessage(s, m.turnId);
+            continue;
+          }
+
+          open.push({ s, m });
+        }
+      }
+      for (let index = 0; index < open.length; index += TURN_STATUS_BATCH) {
+        const batch = open.slice(index, index + TURN_STATUS_BATCH);
+        let turns;
+
+        try {
+          ({ turns } = await api.get(`/api/chat/turns?ids=${batch.map(({ m }) => m.turnId).join(',')}`));
+        } catch {
+          return;
+        }
+
+        for (const { s, m } of batch) {
+          // За время запроса реплику могли подтвердить или начать повтор.
+          if (m.delivery !== 'sending' || postingTurns.has(m.turnId)) {
+            continue;
+          }
+
+          const known = turns?.[m.turnId];
+
+          if (known?.state === 'accepting') {
+            continue;
+          }
+          if (known) {
+            this._settleTurnMessage(s, m.turnId);
+            continue;
+          }
+
+          this.deliveries[m.turnId] = deliveryOf(s.id, 'lost', this.deliveries[m.turnId]?.attempt || 0);
+        }
+      }
+    },
+    /**
+     * Связь вернулась: свои повторы доставки уходят сразу, не дожидаясь таймера. Свои —
+     * это отправленные из этого окна; чужие «не доставлено» ждут кнопки человека.
+     */
+    _redeliverNow() {
+      for (const [turnId, delivery] of Object.entries(this.deliveries)) {
+        const own = outgoing.has(turnId);
+
+        if (delivery.state === 'retrying' || (delivery.state === 'lost' && own)) {
+          this._deliverTurn(delivery.chatId, turnId);
+        }
+      }
+    },
+    /**
+     * Восстановление связи. Порядок существенен: сначала история (за время разрыва мог
+     * появиться сам чат), затем pending (ответ кладётся в известный чат и пишется в
+     * историю до подтверждения), затем живые ходы и сверка неподтверждённых отправок;
+     * свои повторы доставки уходят сразу. Повторный hello во время прохода — ещё проход.
+     */
+    _afterReconnect() {
+      if (reconnectJob) {
+        reconnectAgain = true;
+
+        return reconnectJob;
+      }
+
+      reconnectJob = (async () => {
+        do {
+          reconnectAgain = false;
+
+          if (Date.now() - storeSyncedAt > 2000) {
+            await this._resyncStore();
+          }
+
+          await this._collectPending();
+          await this._loadActive();
+          await this._reconcileDeliveries();
+          this._redeliverNow();
+        } while (reconnectAgain);
+      })().finally(() => {
+        reconnectJob = null;
+      });
+
+      return reconnectJob;
     },
 
     // Список номеров задач, уже находящихся на конвейере (для защиты «На конвейер»).

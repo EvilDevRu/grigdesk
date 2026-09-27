@@ -91,10 +91,15 @@ function patch(source) {
  * у стора есть состояние вне pinia — подписка на SSE, карта отправленного, id окна, —
  * и общий модуль протаскивал бы его из теста в тест.
  *
+ * `api` — свой транспорт окна (например, настоящий модуль чата через inject): так два
+ * экземпляра стора в одном тесте ведут себя как два окна со своими сетями.
+ * `fromServer` — окно грузит историю само, как после F5, а не из готового состояния.
+ *
  * @param {{ sessions?: object[], archived?: object[], activeId?: string }} state
+ * @param {{ api?: object, fromServer?: boolean }} options
  * @returns {Promise<object>} стор, уже помеченный как загруженный и синхронный с сервером
  */
-export async function chatStoreFixture(state = {}) {
+export async function chatStoreFixture(state = {}, { api = null, fromServer = false } = {}) {
   globalThis.__chatNotifications = [];
   globalThis.__chatProviders = defaultProviders();
   globalThis.__chatVisibility.ids.clear();
@@ -103,22 +108,37 @@ export async function chatStoreFixture(state = {}) {
     promptContext: { page: '', path: '/chats' },
   });
   if (!patchedSource) patchedSource = patch(await readFile(STORE_PATH, 'utf8'));
+  // Модуль стора читает транспорт один раз при загрузке: подменяем его до импорта
+  // и сразу возвращаем общий, чтобы соседние тесты работали с apiHarness.
+  globalThis.__chatApi = api || apiHarness;
+
   const [{ createPinia, setActivePinia }, { useChatStore }] = await Promise.all([
     import(pathToFileURL(PINIA_PATH).href),
     import(`data:text/javascript;base64,${Buffer.from(
       `${patchedSource}\n// экземпляр ${++instance}`,
     ).toString('base64')}`),
   ]);
+
+  globalThis.__chatApi = apiHarness;
   setActivePinia(createPinia());
   const chat = useChatStore();
+
+  if (!api) {
+    apiHarness.get = async () => ({ active: [] });
+    apiHarness.post = async () => ({});
+    apiHarness.put = async () => ({});
+    apiHarness.del = async () => ({});
+  }
+  if (fromServer) {
+    await chat._load();
+
+    return chat;
+  }
+
   chat.sessions = state.sessions || [];
   chat.archived = state.archived || [];
   chat.activeId = state.activeId ?? (chat.sessions[0]?.id || null);
   chat.loaded = true;
-  apiHarness.get = async () => ({ active: [] });
-  apiHarness.post = async () => ({});
-  apiHarness.put = async () => ({});
-  apiHarness.del = async () => ({});
   // Стор считает себя совпавшим с сервером — иначе любое чужое изменение он отвергнет
   // как «у нас есть несохранённое» (см. `_dirty`).
   chat._markSent();

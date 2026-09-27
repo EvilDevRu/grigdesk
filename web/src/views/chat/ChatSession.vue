@@ -239,6 +239,26 @@
           <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
                а не наперегонки (два CLI на одну сессию убивают друг друга). -->
           <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
+          <!-- Сервер ещё не подтвердил приём сообщения. Пока подтверждения нет, агент не
+               работает, поэтому здесь честное состояние доставки, а не «думает…». -->
+          <div
+            v-if="m.role === 'user' && m.delivery === 'sending'"
+            class="m-delivery"
+            :class="deliveryView(m).tone"
+            data-role="chat-delivery"
+          >
+            <span>{{ deliveryView(m).text }}</span>
+            <UiButton
+              v-if="deliveryView(m).retry"
+              variant="outline"
+              tone="accent"
+              data-role="chat-delivery-retry"
+              :disabled="frozen"
+              @click="retryDelivery(m)"
+            >
+              Отправить ещё раз
+            </UiButton>
+          </div>
           <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code).
                У упавшего хода лента тем важнее: по ней видно, докуда он дошёл. -->
           <StepList
@@ -1407,6 +1427,45 @@ function resumeTextFor(m) {
   return typeof reason === 'string' && Object.hasOwn(RESUME_TEXT, reason) ? RESUME_TEXT[reason] : '';
 }
 
+// Строка доставки реплики, приём которой сервер ещё не подтвердил, — по состоянию из
+// стора. Без записи о доставке окно ещё сверяет реплику с сервером (после F5 или hello).
+const DELIVERY_VIEWS = Object.freeze({
+  posting: {
+    text: '⏳ Отправляется…',
+    tone: '',
+    retry: false,
+  },
+  retrying: {
+    text: '📡 Нет связи с сервером — повторяю отправку…',
+    tone: 'warn',
+    retry: false,
+  },
+  lost: {
+    text: '⚠ Не доставлено: сервер не подтвердил приём.',
+    tone: 'warn',
+    retry: true,
+  },
+  checking: {
+    text: '⏳ Проверяю доставку…',
+    tone: '',
+    retry: false,
+  },
+});
+
+function deliveryView(m) {
+  return DELIVERY_VIEWS[chat.deliveries[m.turnId]?.state] || DELIVERY_VIEWS.checking;
+}
+
+// Повтор идёт тем же turnId: если прежний запрос всё-таки дошёл, второго запуска не будет.
+async function retryDelivery(m) {
+  if (!sess.value || frozen.value) {
+    return;
+  }
+
+  atBottom.value = true;
+  await chat.retryDelivery(props.sid, m.turnId);
+}
+
 /** Кнопку показываем только у последнего сообщения и только свободному чату. */
 function isResumeOffer(m, i) {
   if (!resumeTextFor(m)) return false;
@@ -1958,6 +2017,9 @@ async function openDebug() {
 /* Вложения в сообщениях: картинка открывается в общем viewer-е, файл — как оригинал. */
 .m-queued { font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
 .msg.user .m-queued { text-align: right; }
+.m-delivery { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px;
+  font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
+.m-delivery.warn { color: var(--warn); }
 .m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg.user .m-atts { justify-content: flex-end; }
 .m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block;

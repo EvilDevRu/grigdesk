@@ -130,7 +130,39 @@ export function mergeMessages(base: unknown = [], incoming: unknown = []): {
     extra.push(m);
   }
 
-  return { messages: [...left, ...extra], restored: tailBase.length, dropped };
+  return {
+    messages: [...confirmedDeliveries(left, right, p), ...extra],
+    restored: tailBase.length,
+    dropped,
+  };
+}
+
+/**
+ * В совпавшем начале лент остаются серверные копии сообщений. Отметка «приём хода не
+ * подтверждён» (`delivery`) при этом монотонна: если окно уже сняло её со своей копии
+ * той же реплики (тот же turnId), отставшая серверная не имеет права её вернуть —
+ * иначе у отвеченного сообщения снова висело бы «отправляется».
+ */
+function confirmedDeliveries(left: ChatMessage[], right: ChatMessage[], prefix: number): ChatMessage[] {
+  let changed = false;
+  const out = left.map((message, index) => {
+    const incoming = right[index];
+
+    if (index >= prefix || !message?.delivery || incoming?.delivery) {
+      return message;
+    }
+    if (!message.turnId || incoming?.turnId !== message.turnId) {
+      return message;
+    }
+
+    const { delivery: _delivery, outbox: _outbox, ...confirmed } = message;
+
+    changed = true;
+
+    return confirmed;
+  });
+
+  return changed ? out : left;
 }
 
 // Поля, которые описывают состояние агента, а не окно: отставшая копия ломает ими живой

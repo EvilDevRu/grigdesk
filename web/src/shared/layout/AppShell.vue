@@ -110,7 +110,9 @@
           :surface-style="{ maxWidth: '320px' }"
         >
           <template #trigger>
-            <span class="metric mono" tabindex="0">
+            <!-- Опрос не удался — цифры остаются, но честно блекнут: пустое место в шапке
+                 выглядело как «метрики пропали», хотя пропала только связь. -->
+            <span class="metric mono" :class="{ stale: sysStale }" tabindex="0">
               CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
               · RAM
               <b :class="loadClass(sys.mem.percent)">
@@ -141,6 +143,9 @@
                 <span v-else class="pu-reset">подкачка выключена</span>
               </span>
               <span class="sysnote">В шапке ОЗУ и подкачка сложены: занято {{ sys.mem.usedGb }} из {{ sys.mem.totalGb }} ГБ</span>
+              <span v-if="sysStale" class="sysnote stale-note">
+                Нет свежих данных: сервер не ответил на опрос. Показан снимок от {{ sysSnapshotTime }}.
+              </span>
             </span>
           </template>
         </UiTooltip>
@@ -471,7 +476,11 @@ const router = useRouter();
 const ui = useUiStore();
 const toolDock = useDockStore();
 const health = ref(null);
-const { data: sys } = storeToRefs(useSystemStore());
+const { data: sys, stale: sysStale, updatedAt: sysUpdatedAt } = storeToRefs(useSystemStore());
+// Время последнего удачного снимка метрик — для подсказки «устарело».
+const sysSnapshotTime = computed(() => (sysUpdatedAt.value
+  ? new Date(sysUpdatedAt.value).toLocaleTimeString('ru-RU')
+  : '—'));
 const pwa = usePwaStore();
 // Снимок версии читает плитка в конце рейки; оболочка только запускает опрос и
 // перечитывает его по серверному событию — поток SSE один на вкладку.
@@ -944,6 +953,8 @@ const { connected } = useSse((name, data) => {
 .settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
 .metric { color: var(--ink-mid); font-variant-numeric: tabular-nums; }
 .metric b { font-weight: 600; }
+.metric.stale { opacity: .5; }
+.stale-note { color: var(--warn); border-top: 0; padding-top: 4px; }
 .sep { color: var(--ink-mid); margin: 0 -4px; }
 .provbox { display: inline-flex; align-items: center; gap: 9px; }
 /* В топбаре это обычные знаки, без кнопочных контейнеров. Нулевая высота строки

@@ -27,6 +27,7 @@
 - [Вложения (фото) и диктовка](attachments-and-dictation.md)
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
+- [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)
 - [Живая сессия исполнителя: агент переживает свой ход](persistent-executor-session.md)
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
@@ -66,7 +67,7 @@
 
 ## Грабли
 
-- [Параллельные отправки занимают HTTP-соединения; сохранённое сообщение ещё не подтверждает запуск](concurrent-send-transport.md)
+- [«Связь теряется при отправках в несколько чатов» = POST держал соединение весь ход](concurrent-send-transport.md)
 - [«Агент повис» на длинном ходе = лимит ленты глушил не хранение, а трансляцию](turn-feed-broadcast-limit.md)
 - [«Кольцо контекста врёт» = цифра менялась раз в ход, а CLI сжимал контекст посреди хода](live-context-usage.md)
 - [«Переписка потёрлась» = PUT истории упёрся в лимит тела, и клиент ретраил молча](history-request-size-limit.md)

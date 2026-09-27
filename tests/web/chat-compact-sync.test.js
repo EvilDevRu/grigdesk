@@ -86,6 +86,13 @@ test('WEB-05: своё незакрытое сжатие сверка не ра�
   sseOf(chat)('chat-done', { chatKey: 'c1' });
   assert.equal(sess.compacting, true);
 
+  // Запрос сжатия уходит после записи чата через его очередь — ждём сам запрос,
+  // а не угадываем число микрозадач до него.
+  while (!release) {
+    await new Promise(setImmediate);
+  }
+
+  assert.equal(sess.compacting, true, 'и пока летит сам запрос сжатия');
   release({ compact: { kind: 'native' } });
   await running;
   assert.equal(sess.compacting, false, 'разморозил собственный ответ');

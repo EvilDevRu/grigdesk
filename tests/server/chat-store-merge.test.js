@@ -250,3 +250,38 @@ test('повторы одного текста не схлопываются', (
   assert.deepEqual(messages.map((m) => `${m.role}:${m.text}`),
     ['user:Делай', 'assistant:Готово', 'user:Делай']);
 });
+
+test('подтверждение приёма хода не откатывается отставшей серверной копией', () => {
+  // На диске ответ уже есть (его записало другое окно), а реплика ещё с отметкой
+  // «приём не подтверждён». Окно, получившее подтверждение, присылает её без отметки,
+  // но без ответа — сервер оставляет свою копию начала ленты и раньше возвращал отметку.
+  const question = {
+    role: 'user',
+    text: 'Собери отчёт',
+    turnId: 'turn-merge-0001',
+  };
+  const disk = [
+    {
+      ...question,
+      delivery: 'sending',
+      outbox: { seed: 'x' },
+    },
+    {
+      role: 'assistant',
+      text: 'Готово',
+      pid: 'turn-merge-0001',
+    },
+  ];
+  const confirmed = [{ ...question }];
+
+  const { messages } = mergeMessages(disk, confirmed);
+
+  assert.deepEqual(messages.map((m) => `${m.role}:${m.text}`), ['user:Собери отчёт', 'assistant:Готово']);
+  assert.equal(messages[0].delivery, undefined, 'снятая отметка доставки не возвращается');
+  assert.equal(messages[0].outbox, undefined);
+  assert.equal(disk[0].delivery, 'sending', 'серверная копия не мутируется на месте');
+
+  const stillSending = mergeMessages(disk, [{ ...disk[0] }]);
+
+  assert.equal(stillSending.messages[0].delivery, 'sending', 'без подтверждения отметка остаётся');
+});

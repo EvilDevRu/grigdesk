@@ -232,12 +232,29 @@ async function observed<T>(method: Method, path: string, work: () => Promise<T>)
   }
 }
 
+// Настройка одной попытки. По умолчанию GET ждёт 30 с и повторяется один раз, а
+// мутации ждут без таймаута и не повторяются.
+export interface RequestOptions {
+  // Таймаут попытки в миллисекундах; 0 — без таймаута.
+  timeoutMs?: number;
+  // Встроенный повтор чтения после обрыва. Опрос, который сам себе повтор, его выключает.
+  retry?: boolean;
+}
+
+// Таймаут чтения по умолчанию: покрывает даже медленный B24-портал.
+const DEFAULT_GET_TIMEOUT_MS = 30000;
+
 /**
  * Один запрос к серверу: тело сериализуется JSON-ом, ответ отдаётся как `unknown`.
  * Здесь же живут таймаут и единственный повтор чтения — оба нужны из-за docker,
  * который рвёт летящие запросы при смене сети стенда.
  */
-async function request(method: Method, path: string, body?: unknown): Promise<unknown> {
+async function request(
+  method: Method,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<unknown> {
   const headers: Record<string, string> = {};
   const opts: RequestInit = {
     ...FETCH_OPTS,
@@ -252,17 +269,20 @@ async function request(method: Method, path: string, body?: unknown): Promise<un
 
   // GET — с таймаутом: во время docker-манипуляций со стендами fetch может не
   // оборваться, а ЗАВИСНУТЬ (соединение в подвешенном состоянии) — раздел тогда
-  // вечно показывает «Загрузка…». 30с покрывает даже медленный B24-портал.
+  // вечно показывает «Загрузка…». Мутации ждут без таймаута, если вызывающий
+  // сам не знает, что повтор безопасен (например, приём хода по turnId).
   const isGet = method === 'GET';
+  const timeoutMs = options.timeoutMs ?? (isGet ? DEFAULT_GET_TIMEOUT_MS : 0);
+  const attempts = isGet && options.retry !== false ? 2 : 1;
   const attempt = () =>
     fetch(url(path), {
       ...opts,
-      ...(isGet && typeof AbortSignal?.timeout === 'function'
-        ? { signal: AbortSignal.timeout(30000) }
+      ...(timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+        ? { signal: AbortSignal.timeout(timeoutMs) }
         : {}),
     });
 
-  for (let number = 1; number <= (isGet ? 2 : 1); number += 1) {
+  for (let number = 1; number <= attempts; number += 1) {
     const start = performance.now();
 
     try {
@@ -280,8 +300,7 @@ async function request(method: Method, path: string, body?: unknown): Promise<un
       const name = (error as { name?: string } | null)?.name;
 
       const willRetry =
-        isGet &&
-        number === 1 &&
+        number < attempts &&
         (error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError');
 
       reportAttempt(method, path, elapsed(start), number, error, willRetry);
@@ -436,8 +455,8 @@ export interface ApiClient {
   onUnauthorized: (handler: UnauthorizedHandler) => () => void;
   wsUrl: (path: string) => string;
   eventsUrl: () => string;
-  get: (path: string) => Promise<unknown>;
-  post: (path: string, body?: unknown) => Promise<unknown>;
+  get: (path: string, options?: RequestOptions) => Promise<unknown>;
+  post: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   put: (path: string, body?: unknown) => Promise<unknown>;
   patch: (path: string, body?: unknown) => Promise<unknown>;
   del: (path: string, body?: unknown) => Promise<unknown>;
@@ -455,8 +474,8 @@ export const api: ApiClient = {
   onUnauthorized,
   wsUrl: (path: string) => WS_BASE + path,
   eventsUrl: () => url('/api/events'),
-  get: (path: string) => request('GET', path),
-  post: (path: string, body?: unknown) => request('POST', path, body),
+  get: (path: string, options?: RequestOptions) => request('GET', path, undefined, options),
+  post: (path: string, body?: unknown, options?: RequestOptions) => request('POST', path, body, options),
   put: (path: string, body?: unknown) => request('PUT', path, body),
   patch: (path: string, body?: unknown) => request('PATCH', path, body),
   del: (path: string, body?: unknown) => request('DELETE', path, body),

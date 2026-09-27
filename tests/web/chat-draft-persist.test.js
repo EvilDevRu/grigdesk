@@ -122,10 +122,13 @@ test('CHAT-DRAFT-04: сравнение с отправленным не зав�
   chat.sessions[0].updatedAt = 3000;
   chat._persist(true);
   assert.deepEqual(puts, ['c1'], 'изменение переписки уезжает на сервер');
+  // Запись одного чата идёт по очереди: следующая ждёт ответа на эту.
+  await new Promise(setImmediate);
 
   // Отпечаток считается по числу шагов, а не по их содержимому: дописанный шаг виден.
   puts.length = 0;
   chat.sessions[0].messages.at(-1).steps.push({ kind: 'res', at: 2 });
   chat._persist(true);
+  await new Promise(setImmediate);
   assert.deepEqual(puts, ['c1'], 'дописанный шаг тоже уезжает');
 });
