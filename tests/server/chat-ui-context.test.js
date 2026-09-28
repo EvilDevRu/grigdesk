@@ -152,7 +152,9 @@ test('COMP-SCTX-06/07/08/10: живые chat routes используют context
       },
     },
     prefs: {
-      read() { return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; },
+      read() {
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
+      },
     },
     modelsRegistry: async () => ({ claude: [{ id: 'claude-test', efforts: [] }] }),
     executorResolver: async () => ({

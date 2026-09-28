@@ -2,8 +2,8 @@
 
 ## Проблема
 
-У codex- и claude-чатов доверенные каталоги (`prefs.trustedDirectories` и
-дополнительные worktree задачи) передаются в CLI флагами `--add-dir`, и модель
+У codex- и claude-чатов дополнительные каталоги (репозитории выбранного проекта и
+рабочие копии задачи) передаются в CLI флагами `--add-dir`, и модель
 может читать/писать в них как в части workspace. У kimi-чатов проводка
 `extraDirs` существовала (`modules/chat/index.js` → `lib/kimi/runtime.ts` →
 `lib/kimi/sandbox.ts`), но ограничивалась writable bind-mount в sandbox namespace:
@@ -79,13 +79,11 @@
 
 1. Перезапустить cockpit-server (код рантайма загружается при старте):
    `bin/restart` или `systemctl --user restart cockpit-server`.
-2. «Настройки → Исполнители → Доверенные каталоги» — добавить нужные пути.
-   Можно доверять и общий родительский каталог нескольких checkout-ов, где
-   лежит сам cockpit: служебные пути cockpit внутри него будут автоматически
-   замаскированы, о чём сервер пишет в лог. Действует со следующего хода любого
-   kimi-чата, дальнейших рестартов не требует.
+2. В чате выбрать проект кнопкой 📁 или привязать задачу с несколькими рабочими копиями.
+   Сервер передаёт дополнительные корни в contained runtime, маскируя control state.
+   Общая настройка доверенных каталогов удалена; host-профиль остаётся single-root.
 
-Связанные документы: [chat-agents.md](README.md) («Доверенные каталоги»),
+Связанные документы: [папка чата](../guide/chat-workdir.md),
 [kimi-runtime-security.md](kimi-runtime-security.md) («Границы contained runtime»).
 
 Источник до переноса: docs/cockpit/kimi-workspace-extra-dirs.md § Раскатка

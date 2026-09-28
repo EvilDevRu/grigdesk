@@ -89,10 +89,14 @@ async function mountRuns(t, { confirmAnswer = true } = {}) {
   const confirms = [];
 
   globalThis.__settingsApi = {
+    /**
+     * Список сессий и prefs приходят из одного управляемого транспорта.
+     * Тест видит только заданный снимок и не читает работающий сервер.
+     */
     async get(path) {
       if (path === '/api/chat/sessions') return sessionsPayload();
       if (path === '/api/settings/prefs') {
-        return { chatLiveSessions: true, trustedDirectories: [], providerSettings: {} };
+        return { chatLiveSessions: true, providerSettings: {} };
       }
       return {};
     },

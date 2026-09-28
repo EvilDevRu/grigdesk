@@ -10,6 +10,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import type { ResolvedWorkdir } from './workdir.ts';
+
 export type TurnState = 'queued' | 'running' | 'done';
 
 export interface TurnEntry {
@@ -25,6 +27,7 @@ export interface TurnEntry {
   userText?: string;
   userSentAt?: number;
   hadAttachments?: boolean;
+  workspace?: ResolvedWorkdir;
 }
 
 export const TURN_ID_RE = /^[A-Za-z0-9_-]{8,80}$/;

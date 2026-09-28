@@ -29,7 +29,7 @@ Kimi. Выключение не расширяет contained-сеть; оно в
   пользователь). ACP `protocolVersion === 1` остаётся обязательным;
 - staging вложений: файлы читаются по исходным путям (корень `chats/attachments`
   по-прежнему проверяется);
-- `extraDirs` (prefs.trustedDirectories): у `kimi acp` нет `--add-dir`, у ACP нет
+- `extraDirs` (репозитории проекта и копии задачи): у `kimi acp` нет `--add-dir`, у ACP нет
   additionalDirs — pre-authorization невозможен. Доступ за пределами cwd закрывает
   permission-система Kimi (промпты; в cockpit-режиме «Авто» — auto-approve.js).
   Проектный `.kimi-code/local.toml` читается нативно.

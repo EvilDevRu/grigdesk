@@ -446,7 +446,6 @@ async function apiFixture(t, { liveEnabled = true } = {}) {
       read() {
         return {
           speech: {},
-          trustedDirectories: [],
           providerSettings: {},
           chatAutoCompactWindow: 0,
           chatLiveSessions: liveEnabled,

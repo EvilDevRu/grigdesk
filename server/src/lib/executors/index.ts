@@ -67,10 +67,11 @@
 //                              command-hook|tool-filter|network-sandbox|fail-closed|
 //                              unsupported, note? — честная режимная граница для UI.
 //                              Не объявлен или сломан → unsupported.
-//   trustedDirectories?      — применяет ли исполнитель `opts.extraDirs` как доступные
-//                              рабочие каталоги новых ходов. `true` либо
-//                              `(config) => boolean`, если поддержка зависит от режима
-//                              запуска (например, contained/host). Не объявлен → false.
+//   workdir?                 — { switch: 'resume'|'reseed', roots: 'multi'|'single' }
+//                              либо `(config) => capability`, если возможности зависят
+//                              от режима запуска. Нет/сломана → перенос не обещается.
+//   validateWorkdir?         — чистая проверка cwd/extraDirs до переноса и запуска:
+//                              { error?, extraDirs, rejected?: [{ path, reason }] }.
 //                              Признак уезжает в `/api/providers`, чтобы UI называл
 //                              поддерживающих исполнителей без списка вендоров в Vue.
 //   autoCompactEnv?          — имя переменной окружения, которой CLI задаётся ПОРОГ
@@ -93,7 +94,7 @@
 //                              в историю чата, а не в ответ HTTP.
 //                              `restartOn` — поля spec, которые задаются при запуске
 //                              процесса и потому требуют переоткрытия сессии (модель,
-//                              усилие, режим прав, cwd, доверенные каталоги).
+//                              усилие, режим прав, cwd, дополнительные рабочие корни).
 //                              Владелец времени жизни — lib/chat/live-sessions.js.
 //   compaction?              — как сжимать контекст по кнопке на кольце:
 //                              { kind: 'native', message } — CLI понимает слэш-команду
@@ -119,7 +120,7 @@
 //                              'not-applicable', readTokens?, writeTokens?, uncachedTokens? }.
 //                              Числа — только известные неотрицательные целые; отсутствие
 //                              поля не приравнивается к нулю.
-//                              opts.extraDirs — единый список доверенных/служебных каталогов
+//                              opts.extraDirs — дополнительные корни проекта/задачи и вложений
 //                              opts.workspaceAccess — строгие readable/writable roots для
 //                              adapter-ов с capability scopedWorkspace; сеть и temp roots
 //                              задаются там же и не выводятся из cwd
@@ -150,6 +151,8 @@
 // для поэтапного подключения нового CLI: сначала обычная установка/авторизация, затем
 // отдельным изменением transport и модели.
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
+import type { WorkdirCapability } from '../../../../shared/chatWorkdir.ts';
+import type { WorkdirValidator } from '../chat/workdir.ts';
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -233,7 +236,8 @@ export interface ExecutorAdapter {
   chatAutoCompact?: boolean;
   retryContract?: string;
   scopedWorkspace?: boolean | ((config: unknown) => unknown);
-  trustedDirectories?: boolean | ((config: unknown) => unknown);
+  workdir?: WorkdirCapability | ((config: unknown) => unknown);
+  validateWorkdir?: WorkdirValidator;
   directSshPolicy?: unknown;
   settings?: unknown;
   sessionBinding?: ExecutorSessionBinding;

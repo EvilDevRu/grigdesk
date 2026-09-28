@@ -4,6 +4,8 @@
 // окон/устройств и переживает чистку браузера. Это единый источник истории для
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
+import { normalizeChatWorkdir, normalizeRecentWorkdirs, sameChatWorkdir }
+  from '../../../shared/chatWorkdir.ts';
 import { api } from '../shared/apiClient.ts';
 import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
@@ -148,6 +150,8 @@ function pickStore(j) {
     defEffort: j?.defEffort || '',
     // Режим прав по умолчанию для новых чатов (пусто = как решит сервер по странице).
     defMode: j?.defMode || '',
+    defWorkdir: normalizeChatWorkdir(j?.defWorkdir) || { kind: 'cockpit' },
+    recentWorkdirs: normalizeRecentWorkdirs(j?.recentWorkdirs),
   };
 }
 
@@ -347,7 +351,8 @@ function seedOf(userText) {
 // чата серверной копией их надо сохранить — иначе принятое чужое изменение погасило бы
 // «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
 const RUNTIME_KEYS = [
-  'sending', 'compacting', 'stopping', 'progressTokens', 'progressTokensEstimate',
+  'workdirChanging', 'workdirProposal', 'workdirPreview', 'workdirInitializing',
+  'workdirImplicit', 'sending', 'compacting', 'stopping', 'progressTokens', 'progressTokensEstimate',
   'turnStartedAt', 'steps', 'error', 'inflight', 'offline',
   'sessionResetting', 'sessionResetFailed', 'liveContext', 'liveContextUsage', 'liveContextCache',
 ];
@@ -401,25 +406,57 @@ export function normalizeContextCache(value) {
 // Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
 function slimOf(s) {
   return {
-    id: s.id, taskId: s.taskId, title: s.title, model: s.model, modelRef: s.modelRef || null,
+
+    workdir: s.workdir,
+    workdirState: s.workdirState,
+
+    id: s.id,
+    taskId: s.taskId,
+    title: s.title,
+    model: s.model,
+    modelRef: s.modelRef || null,
     // Служебные рабочие чаты (например Debug) остаются обычными пользовательскими
     // чатами, но эта устойчивая метка позволяет повторной кнопке открыть тот же
     // разговор вместо размножения сессий. По заголовку связывать нельзя — он редактируемый.
-    purpose: s.purpose || '', sourceChatId: s.sourceChatId || null,
+
+    purpose: s.purpose || '',
+    sourceChatId: s.sourceChatId || null,
+
     ...(s.logicalIdentity ? { logicalIdentity: s.logicalIdentity } : {}),
-    schema: s.schema, surface: s.surface, revision: s.revision,
-    effort: s.effort, mode: s.mode || '',
-    messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
-    contextWindow: s.contextWindow || 0, contextMetric: s.contextMetric || '',
+
+    schema: s.schema,
+    surface: s.surface,
+    revision: s.revision,
+
+    effort: s.effort,
+    mode: s.mode || '',
+
+    messages: s.messages,
+    sessionId: s.sessionId,
+    contextTokens: s.contextTokens,
+
+    contextWindow: s.contextWindow || 0,
+    contextMetric: s.contextMetric || '',
+
     contextIsEstimate: !!s.contextIsEstimate,
-    totalInputTokens: s.totalInputTokens || 0, cachedInputTokens: s.cachedInputTokens || 0,
+
+    totalInputTokens: s.totalInputTokens || 0,
+    cachedInputTokens: s.cachedInputTokens || 0,
+
     contextCache: normalizeContextCache(s.contextCache),
     // Выжимка после сжатия у исполнителя без родного компакта: ждёт следующего
     // сообщения, чтобы уехать первой в новую сессию. Обязана переживать F5 — иначе
     // сжатие превратилось бы в потерю памяти агента.
+
     pendingSeed: s.pendingSeed || '',
+
     compactedAt: s.compactedAt || 0,
-    draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
+
+    draft: s.draft || '',
+    unread: !!s.unread,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+
   };
 }
 
@@ -459,6 +496,12 @@ function applySaveAck(session, response) {
   if (response.surface) session.surface = response.surface;
   if (response.modelRef) session.modelRef = response.modelRef;
   if (response.modelRefState) session.modelRefState = response.modelRefState;
+
+  for (const key of ['workdir', 'taskId', 'workdirState', 'sessionId', 'pendingSeed']) {
+    if (Object.hasOwn(response, key)) {
+      session[key] = response[key];
+    }
+  }
 }
 
 function selectedModel(session) {
@@ -652,6 +695,7 @@ export const useChatStore = defineStore('chat', {
     compactWindow: 0,
     speech: normalizeSpeechSnapshot(null),
     turnProtocol: 0,
+    workdirProtocol: 0,
     deliveries: {},
   }),
   getters: {
@@ -750,6 +794,7 @@ export const useChatStore = defineStore('chat', {
           this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
           // Возможность сервера — тоже только из его ответа: снимок в браузере её не знает.
           this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
+          this.workdirProtocol = Number(j?.workdirProtocol) === 1 ? 1 : 0;
           // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
           // содержит только историю и не вправе подменять приватностный выбор движка.
           const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
@@ -1029,9 +1074,20 @@ export const useChatStore = defineStore('chat', {
         const slim = this.sessions.map(slimOf);
         const archivedSlim = (this.archived || []).map(archivedSlimOf);
         const payload = {
-          sessions: slim, archived: archivedSlim, activeId: this.activeId,
-          defModel: this.defModel, defModelRef: this.defModelRef,
-          defEffort: this.defEffort, defMode: this.defMode,
+
+          sessions: slim,
+          archived: archivedSlim,
+          activeId: this.activeId,
+
+          defModel: this.defModel,
+          defModelRef: this.defModelRef,
+
+          defEffort: this.defEffort,
+          defMode: this.defMode,
+
+          defWorkdir: this.defWorkdir,
+          recentWorkdirs: this.recentWorkdirs,
+
         };
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
@@ -1068,12 +1124,22 @@ export const useChatStore = defineStore('chat', {
           jobs.push(api.del(`/api/chat/store/chat/${id}?origin=${WINDOW_ID}`)
             .then(() => { sentChats.delete(id); }));
         }
+
         const meta = {
+
           activeId: this.activeId,
+
           defModel: this.defModel,
+
           defModelRef: this.defModelRef,
+
           defEffort: this.defEffort,
+
           defMode: this.defMode,
+
+          defWorkdir: this.defWorkdir,
+          recentWorkdirs: this.recentWorkdirs,
+
         };
         const metaJson = JSON.stringify(meta);
         if (metaJson !== sentMeta) {
@@ -1110,6 +1176,9 @@ export const useChatStore = defineStore('chat', {
       // Именно эту модель человек видел в отправляющем окне. stale-ack сообщает
       // server-owned модель чужой ревизии; принять её и продолжить означало бы
       // незаметно запустить не того исполнителя. На повторном CAS сохраняем свой выбор.
+      const intendedWorkdir = session.workdir;
+      const intendedTask = session.taskId || null;
+      const intendedEpoch = session.workdirState?.epoch || 0;
       const intendedModel = session.model;
       const intendedModelRef = session.modelRef ? { ...session.modelRef } : session.modelRef;
 
@@ -1117,6 +1186,11 @@ export const useChatStore = defineStore('chat', {
         const response = await this._writeChat(session.id, { force: true });
 
         if (response?.stale) {
+          if (!sameChatWorkdir(intendedWorkdir, session.workdir)
+            || intendedTask !== (session.taskId || null)
+            || intendedEpoch !== (session.workdirState?.epoch || 0)) {
+            throw new Error('Рабочая папка изменена в другом окне. Проверьте её перед отправкой.');
+          }
           // revision из ack — новая CAS-база. Сервер уже слил сообщения, поэтому
           // повтор того же снимка их не удалит (mergeChat восстановит серверный хвост).
           session.model = intendedModel;
@@ -1200,8 +1274,16 @@ export const useChatStore = defineStore('chat', {
         return null;
       }
 
+      if (this.workdirProtocol && live.workdirInitializing) {
+        await this._initializeWorkdir(live);
+      }
+
       const archived = (this.archived || []).some((item) => item.id === id);
       const snapshot = archived ? archivedSlimOf(live) : slimOf(live);
+
+      if (live.revision && !normalizeChatWorkdir(snapshot.workdir)) {
+        delete snapshot.workdir;
+      }
 
       if (!force && sentChats.get(id) === fingerprintOf(snapshot)) {
         return null;
@@ -1231,8 +1313,17 @@ export const useChatStore = defineStore('chat', {
       this.sessions.forEach((s) => sentChats.set(s.id, fingerprintOf(slimOf(s))));
       (this.archived || []).forEach((c) => sentChats.set(c.id, fingerprintOf(archivedSlimOf(c))));
       sentMeta = JSON.stringify({
-        activeId: this.activeId, defModel: this.defModel, defModelRef: this.defModelRef,
-        defEffort: this.defEffort, defMode: this.defMode,
+
+        activeId: this.activeId,
+        defModel: this.defModel,
+        defModelRef: this.defModelRef,
+
+        defEffort: this.defEffort,
+        defMode: this.defMode,
+
+        defWorkdir: this.defWorkdir,
+        recentWorkdirs: this.recentWorkdirs,
+
       });
     },
     /**
@@ -1281,6 +1372,11 @@ export const useChatStore = defineStore('chat', {
         s.steps ||= [];
         s.draft ??= '';
         s.pendingSeed ??= '';
+
+        if (s.workdir === undefined) {
+          s.workdir = { kind: 'cockpit' };
+        }
+
         s.compactedAt ??= 0;
         s.compacting = false;
         s.sessionResetting = false;
@@ -1322,18 +1418,53 @@ export const useChatStore = defineStore('chat', {
       if (opts.purpose === 'companion') {
         throw new Error('Companion-чат создаётся только атомарно на сервере.');
       }
+
       const s = {
-        id: uid(), taskId: opts.taskId ? String(opts.taskId) : null, title: opts.title || '',
-        purpose: opts.purpose || '', sourceChatId: opts.sourceChatId || null,
+
+        id: uid(),
+        taskId: opts.taskId ? String(opts.taskId) : null,
+        title: opts.title || '',
+
+        workdir: opts.workdir === undefined ? this.defWorkdir || { kind: 'cockpit' } : opts.workdir,
+
+        workdirInitializing: true,
+
+        workdirImplicit: opts.workdir === undefined,
+
+        purpose: opts.purpose || '',
+        sourceChatId: opts.sourceChatId || null,
         // Пустая модель = «по умолчанию»: конкретный id подставится из реестра при показе
         // и отправке. Фиксировать здесь нельзя — реестр к этому моменту может не загрузиться.
-        model: this.defModel, modelRef: this.defModelRef, effort: this.defEffort, mode: this.defMode,
-        schema: 2, revision: 0,
-        createdAt: Date.now(), updatedAt: Date.now(),
-        messages: [], sessionId: null, contextTokens: 0, contextWindow: 0,
-        contextMetric: '', contextIsEstimate: false, totalInputTokens: 0, cachedInputTokens: 0,
+
+        model: this.defModel,
+        modelRef: this.defModelRef,
+        effort: this.defEffort,
+        mode: this.defMode,
+
+        schema: 2,
+        revision: 0,
+
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+
+        messages: [],
+        sessionId: null,
+        contextTokens: 0,
+        contextWindow: 0,
+
+        contextMetric: '',
+        contextIsEstimate: false,
+        totalInputTokens: 0,
+        cachedInputTokens: 0,
+
         contextCache: normalizeContextCache(null),
-        sending: false, error: null, draft: opts.draft || '', pendingSeed: '', compactedAt: 0,
+
+        sending: false,
+        error: null,
+        draft: opts.draft || '',
+        pendingSeed: '',
+        compactedAt: 0,
+
       };
       this.sessions.push(s);
       this.activeId = s.id;
@@ -1396,6 +1527,12 @@ export const useChatStore = defineStore('chat', {
           if (m.defModelRef !== undefined) this.defModelRef = m.defModelRef || null;
           if (m.defEffort !== undefined) this.defEffort = m.defEffort || '';
           if (m.defMode !== undefined) this.defMode = m.defMode || '';
+          if (m.defWorkdir !== undefined) {
+            this.defWorkdir = normalizeChatWorkdir(m.defWorkdir);
+          }
+          if (m.recentWorkdirs !== undefined) {
+            this.recentWorkdirs = normalizeRecentWorkdirs(m.recentWorkdirs);
+          }
         } else if (name === 'speech-settings') {
           // Настройка общая для всех окон/устройств. Revision позволяет компоненту
           // отличить реальную смену от собственного SSE-эха, но snapshot применяем весь.
@@ -1642,11 +1779,21 @@ export const useChatStore = defineStore('chat', {
     async _pullChat(id, archived) {
       if (!id) return;
       const local = this._find(id);
-      if (local && this._dirty(local)) return;
       let chat = null;
       try { ({ chat } = await api.get(`/api/chat/store/chat/${id}`)); }
       catch { return; /* чат уже успели удалить — придёт отдельным событием */ }
       if (!chat?.id) return;
+      if (local && this._dirty(local)) {
+        // Набранный текст остаётся локальным, но server-owned execution-состояние
+        // нельзя откладывать: другая вкладка могла уже перенести разговор.
+        for (const key of ['workdir', 'taskId', 'workdirState']) {
+          if (Object.hasOwn(chat, key)) {
+            local[key] = chat[key];
+          }
+        }
+
+        return;
+      }
       this._applyRemoteChat(chat, archived);
       // Чат появился в окне впервые — в нём может уже идти ход (его завели и сразу
       // отправили сообщение на другом устройстве). Своих SSE-событий мы не видели,
@@ -1745,6 +1892,7 @@ export const useChatStore = defineStore('chat', {
       storeSyncedAt = Date.now();
       // Сервер мог смениться за время разрыва (перезапуск с новой версией).
       this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
+      this.workdirProtocol = Number(j?.workdirProtocol) === 1 ? 1 : 0;
       const onServer = new Set();
       for (const [list, archived] of [[j.sessions || [], false], [j.archived || [], true]]) {
         for (const chat of list) {
@@ -1993,13 +2141,283 @@ export const useChatStore = defineStore('chat', {
       return { id: target.id, created };
     },
 
+    /**
+     * Задача меняет эффективную папку и проходит тот же переход памяти; её название чат
+     * получает после подтверждения. Отказ без окна выбора пишется в разговор: иначе селект
+     * молча вернулся бы к прежней задаче. Старый сервер — прежний путь без перехода.
+     */
     setTask(id, taskId, title) {
-      const s = this._find(id); if (!s) return;
-      if (s.purpose === 'companion') return false;
-      s.taskId = taskId ? String(taskId) : null;
-      s.title = title || '';
-      this._persist();
-      return true;
+      const session = this._find(id);
+
+      if (!session || session.purpose === 'companion') {
+        return false;
+      }
+      if (!this.workdirProtocol) {
+        session.taskId = taskId ? String(taskId) : null;
+        session.title = title || '';
+        this._persist();
+
+        return true;
+      }
+
+      const candidate = {
+        taskId: taskId ? String(taskId) : null,
+        workdir: session.workdir,
+      };
+
+      session.error = null;
+
+      return this.proposeWorkdir(id, candidate, false, { title: title || '' }).then((done) => {
+        const live = this._find(id);
+
+        if (!done && live?.error && !live.workdirProposal) {
+          live.messages.push({ role: 'error', text: `Сменить задачу не удалось: ${live.error}` });
+          this._persist();
+        }
+
+        return done;
+      });
+    },
+    /**
+     * Пропавшая папка по умолчанию заменяется до первого сохранения нового чата.
+     * Явный выбор и уже сохранённые разговоры не получают молчаливого fallback.
+     */
+    async _initializeWorkdir(session) {
+      if (!this.workdirProtocol || !session.workdirInitializing) {
+        return;
+      }
+
+      try {
+        await api.post('/api/chat/workdir/preview', {
+          modelRef: session.modelRef,
+          candidate: { taskId: session.taskId || null, workdir: session.workdir },
+        });
+      } catch (error) {
+        const unavailableDefault = [
+          'workdir_missing', 'workdir_unavailable', 'workdir_archived_project',
+          'workdir_unknown_project', 'workdir_unknown_repo', 'workdir_no_repositories', 'bad_workdir',
+        ].includes(error.data?.error);
+
+        if (!session.workdirImplicit || !unavailableDefault || session.taskId) {
+          throw error;
+        }
+
+        session.workdir = { kind: 'cockpit' };
+        session.error = 'Папка по умолчанию недоступна. Для нового чата выбран Кокпит.';
+      }
+
+      session.workdirInitializing = false;
+    },
+    /**
+     * Предпросмотр читает запись сервера, поэтому до него уходят только несохранённые
+     * правки этого чата: чистый чат повторно целиком не отправляется. Данные пути и
+     * способ переноса приходят только от сервера.
+     */
+    async previewWorkdir(id, candidate) {
+      const session = this._find(id);
+
+      if (!session || !this.workdirProtocol) {
+        return null;
+      }
+
+      await this._writeChat(id);
+
+      const preview = await api.post('/api/chat/workdir/preview', {
+        chatKey: id,
+        ...(candidate ? { candidate } : {}),
+      });
+
+      if (!candidate) {
+        session.workdirPreview = preview;
+      }
+
+      return preview;
+    },
+    /**
+     * Выбор задачи и папки проходят один поток переноса памяти. Окно выбора открывается,
+     * только когда исполнитель требует решения человека (выжимка или сброс памяти):
+     * resume и чат без памяти переходят сразу. Та же папка без переноса — не переход.
+     */
+    async proposeWorkdir(id, candidate, remember = false, { title } = {}) {
+      const session = this._find(id);
+
+      const companionRebind = session?.purpose === 'companion'
+        && ((candidate.taskId || null) !== (session.taskId || null)
+          || !sameChatWorkdir(candidate.workdir, session.workdir));
+
+      if (!session || companionRebind || session.sending || session.compacting
+        || session.sessionResetting || session.workdirChanging || session.workdirProposal
+        || Object.values(this.deliveries).some((item) => item.chatId === id && item.state !== 'lost')) {
+        return false;
+      }
+
+      session.workdirChanging = true;
+      session.error = null;
+
+      try {
+        const preview = await this.previewWorkdir(id, candidate);
+
+        if (!preview) {
+          throw new Error('Сервер ещё не поддерживает выбор папки.');
+        }
+
+        const proposal = {
+          candidate,
+          remember,
+          preview,
+          operationId: newTurnId(),
+          ...(title === undefined ? {} : { title }),
+        };
+
+        if (preview.transfer === 'reseed' || preview.transfer === 'unavailable') {
+          session.workdirProposal = proposal;
+
+          return false;
+        }
+        if (preview.transfer === 'none' && (candidate.taskId || null) === (session.taskId || null)
+          && sameChatWorkdir(candidate.workdir, session.workdir)) {
+          this._rememberWorkdir(session, proposal);
+          this._persist();
+
+          return true;
+        }
+
+        return await this.commitWorkdir(id, 'resume', proposal);
+      } catch (error) {
+        session.error = error.message;
+
+        return false;
+      } finally {
+        session.workdirChanging = false;
+      }
+    },
+    /**
+     * Явный выбор папки свободного чата становится умолчанием новых чатов и первой
+     * строкой недавних. Папка задачи и снятие задачи предпочтений не меняют.
+     */
+    _rememberWorkdir(session, proposal) {
+      if (!proposal.remember || session.taskId) {
+        return;
+      }
+
+      this.defWorkdir = session.workdir;
+      this.recentWorkdirs = normalizeRecentWorkdirs([session.workdir, ...this.recentWorkdirs]);
+    },
+    /**
+     * Новый выбор применяется после серверного commit, вместе с плашкой и памятью.
+     * Черновик, набранный пока сервер делал выжимку, остаётся в этом окне. Прямой переход
+     * без окна выбора (`direct`) открывает окно только после сбоя — для повтора.
+     */
+    async commitWorkdir(id, transfer, direct = null) {
+      const session = this._find(id);
+      const proposal = direct || session?.workdirProposal;
+
+      if (!session || !proposal) {
+        return false;
+      }
+
+      session.workdirChanging = true;
+      session.error = null;
+
+      try {
+        proposal.transfer ||= transfer;
+
+        const result = await api.post('/api/chat/workdir/change', {
+          chatKey: id,
+          operationId: proposal.operationId,
+          expectedRevision: proposal.preview.revision,
+          expectedWorkspaceKey: proposal.preview.workspaceKey,
+          ...proposal.candidate,
+          transfer: proposal.transfer,
+        });
+        const transition = result.chat?.workdirState?.transition;
+        const draft = session.draft;
+
+        this._applyRemoteChat(result.chat, false, { notifyReply: false });
+        session.draft = draft;
+        session.workdirPreview = null;
+        session.workdirProposal = null;
+
+        if (transition?.phase !== 'done') {
+          session.error = transition?.error || 'Перенос не завершён.';
+
+          return false;
+        }
+        if (proposal.title !== undefined) {
+          session.title = proposal.title;
+        }
+
+        this._rememberWorkdir(session, proposal);
+        this._persist(true);
+
+        return true;
+      } catch (error) {
+        session.error = error.message;
+        session.workdirProposal = await this._workdirRetry(id, proposal, error);
+
+        return false;
+      } finally {
+        session.workdirChanging = false;
+      }
+    },
+    /**
+     * Что остаётся после сбоя commit. Определённый отказ сервера закрывает переход.
+     * Потерянный ответ сохраняет прежний operationId: повтор идемпотентен. Если сервер
+     * записал failed, reseed получает новый выбор стратегии, а прямой переход закрывается.
+     */
+    async _workdirRetry(id, proposal, error) {
+      if (error.status === 409 || error.data?.error === 'stale_chat_workdir') {
+        return null;
+      }
+      if (!error.status) {
+        return proposal;
+      }
+
+      try {
+        const remote = await api.get(`/api/chat/store/chat/${id}`);
+        const transition = remote.chat?.workdirState?.transition;
+
+        if (transition?.id !== proposal.operationId || transition.phase !== 'failed') {
+          return proposal;
+        }
+        if (!['reseed', 'unavailable'].includes(proposal.preview.transfer)) {
+          return null;
+        }
+
+        return {
+          ...proposal,
+          operationId: newTurnId(),
+          transfer: null,
+          preview: await this.previewWorkdir(id, proposal.candidate),
+        };
+      } catch {
+        // Исход пока неизвестен: повтор тем же operationId остаётся идемпотентным.
+        return proposal;
+      }
+    },
+    /**
+     * Отправка закрепляет workspace в outbox, чтобы F5 не поменял цель повтора.
+     * Внешняя смена корней требует отдельного явного переноса, а не запуска по новому preview.
+     */
+    async prepareWorkdirSend(session, message) {
+      if (!this.workdirProtocol) {
+        return;
+      }
+
+      const preview = await api.post('/api/chat/workdir/preview', { chatKey: session.id });
+
+      session.workdirPreview = preview;
+
+      if (preview.transfer === 'reseed' || preview.transfer === 'unavailable') {
+        throw new Error('Рабочие папки изменились. Откройте выбор папки и подтвердите перенос разговора.');
+      }
+      if (message) {
+        message.outbox ||= {};
+        message.outbox.workspaceKey = preview.workspaceKey;
+        message.outbox.workdir = session.workdir;
+        message.outbox.taskId = session.taskId || null;
+        await this._saveChatNow(session);
+      }
     },
     /**
      * Режим прав чата (вручную / авто / план …). Запоминаем и как дефолт новых чатов —
@@ -2128,10 +2546,24 @@ export const useChatStore = defineStore('chat', {
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
         await this._saveChatNow(s);
+        await this.prepareWorkdirSend(s);
+
         const r = await api.post(url, {
-          model: resolvedModel.id, modelRef: s.modelRef,
+
+          model: resolvedModel.id,
+          modelRef: s.modelRef,
+
           effort: effortLevels.includes(s.effort) ? s.effort : '',
-          mode: s.mode || '', sessionId: s.sessionId, chatKey: id,
+
+          mode: s.mode || '',
+          sessionId: s.sessionId,
+          chatKey: id,
+
+          ...(this.workdirProtocol ? {
+            workdir: s.workdir,
+            workspaceKey: s.workdirPreview.workspaceKey,
+          } : {}),
+
         });
         // Сжатие оборвали кнопкой «стоп»: ход вернулся обычным ответом, но контекст
         // остался прежним. Обнулить счётчик здесь значило бы соврать кольцу и человеку.
@@ -2249,7 +2681,7 @@ export const useChatStore = defineStore('chat', {
       // блоком этого сообщения. В переписку на экране блок не попадает — там уже есть и
       // вся история, и плашка о сжатии. Снимаем семя ДО запроса (иначе гонка со вторым
       // окном засеяла бы сессию дважды), при провале возвращаем на место.
-      const seed = s.pendingSeed || '';
+      const seed = this.workdirProtocol ? '' : s.pendingSeed || '';
       if (seed) s.pendingSeed = '';
       // До этой границы любой сбой означает «агент точно НЕ стартовал». После начала
       // POST сетевой исход неоднозначен: сервер мог принять запрос и продолжить ход уже
@@ -2272,15 +2704,34 @@ export const useChatStore = defineStore('chat', {
         // явный effort не отправляем: CLI применит собственный актуальный дефолт.
         const requestEffort = effortLevels.includes(s.effort) ? s.effort : '';
         await this._saveChatNow(s);
+        await this.prepareWorkdirSend(s);
         modelRequestStarted = true;
+
         const r = await api.post(url, {
+
+          ...(this.workdirProtocol ? {
+            workdir: s.workdir, workspaceKey: s.workdirPreview?.workspaceKey,
+          } : {}),
+
           message: withSeed(seed, text),
-          model: resolvedModel.id, modelRef: s.modelRef,
+
+          model: resolvedModel.id,
+          modelRef: s.modelRef,
+
           effort: requestEffort,
+
           mode: s.mode || '',
-          sessionId: s.sessionId, context, chatKey: id, requestTitle, sentAt,
+
+          sessionId: s.sessionId,
+          context,
+          chatKey: id,
+          requestTitle,
+          sentAt,
+
           ...(slashCommand ? { slashCommand } : {}),
+
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
+
         });
         // Сервер вырезал служебный маркер из ответа и вернул готовое трёхсловное имя.
         // Ручное переименование, сделанное во время хода, не перетираем.
@@ -2381,7 +2832,7 @@ export const useChatStore = defineStore('chat', {
       text, atts, sentAt, queued, slashCommand, requestTitle,
     }) {
       const turnId = newTurnId();
-      const seed = s.pendingSeed || '';
+      const seed = this.workdirProtocol ? '' : s.pendingSeed || '';
       // Всё, без чего повтор после F5 не совпал бы с исходной отправкой, лежит у самой
       // реплики до подтверждения приёма и снимается вместе с отметкой доставки.
       const outbox = {
@@ -2427,6 +2878,7 @@ export const useChatStore = defineStore('chat', {
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
         await this._saveChatNow(s);
+        await this.prepareWorkdirSend(s, message);
       } catch (e) {
         // Реплика не записана или модель не разрешилась — агент точно не стартовал.
         this._refuseTurn(s, message, e);
@@ -2455,8 +2907,13 @@ export const useChatStore = defineStore('chat', {
         || useUiContextStore().capture(router.currentRoute.value).promptContext;
 
       return {
-        url: s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat',
+        url: (Object.hasOwn(m.outbox || {}, 'taskId') ? m.outbox.taskId : s.taskId)
+          ? `/api/tasks/${Object.hasOwn(m.outbox || {}, 'taskId') ? m.outbox.taskId : s.taskId}/chat`
+          : '/api/chat',
         body: {
+          ...(m.outbox?.workspaceKey ? {
+            workspaceKey: m.outbox.workspaceKey, workdir: m.outbox.workdir,
+          } : {}),
           message: withSeed(m.outbox?.seed || '', m.text),
           model: resolvedModel.id,
           modelRef: { provider: resolvedModel.provider.id, model: resolvedModel.model.id },

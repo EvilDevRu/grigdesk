@@ -4,6 +4,7 @@
 // ПОДКЛЮЧЕНИЕ НОВОГО ИИ — МОДУЛЬНОЕ: один файл в server/src/lib/executors/ (контракт там),
 // этот модуль ничего не знает про конкретных вендоров.
 // Не путать с /api/agents — там база агентов-стадий конвейера (промпты).
+import { resolveWorkdirCapability } from '../../lib/chat/workdir.ts';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { execFile } from 'node:child_process';
@@ -145,27 +146,6 @@ async function providersModule(
   }
 
   /**
-   * Поддержка доверенных каталогов — свойство адаптера, а не список известных
-   * вендоров в реестре/UI. Setup-only карточка физически не может получить ход,
-   * поэтому даже ошибочно объявленный ею признак наружу не выпускаем.
-   */
-  async function trustedDirectoriesOf(ex: ExecutorAdapter) {
-    if (typeof ex.run !== 'function') return false;
-    try {
-      const declared = typeof ex.trustedDirectories === 'function'
-        ? await ex.trustedDirectories(config)
-        : ex.trustedDirectories;
-      return declared === true;
-    } catch (err) {
-      fastify.log.warn(
-        { provider: ex.id, err: (err as Error)?.message },
-        'признак доверенных каталогов исполнителя не получен',
-      );
-      return false;
-    }
-  }
-
-  /**
    * Способ запрета объявляет сам runtime-адаптер. Ошибка декларации не раскрывает
    * возможность молча: реестр честно показывает unsupported без списка вендоров.
    */
@@ -226,9 +206,9 @@ async function providersModule(
         },
         // Resume id принадлежит server-owned sidecar, а не JSON чата/браузеру.
         sessionBinding: typeof ex.run === 'function' && Boolean(ex.sessionBinding),
-        // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
+        // Как переносить память и применять рабочие корни, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
-        trustedDirectories: await trustedDirectoriesOf(ex),
+        workdir: await resolveWorkdirCapability(ex, config),
         directSshPolicy: await directSshPolicyOf(ex),
         installed: ok,
         install: ex.install || null,

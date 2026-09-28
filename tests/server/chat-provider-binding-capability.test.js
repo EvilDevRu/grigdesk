@@ -18,14 +18,22 @@ async function fixture(t) {
   let auth = 'auth-a';
   let security = 'security-a';
   let serial = 0;
+  let env = {};
   const executor = {
     id: 'sidecar-test',
+    workdir: { switch: 'reseed', roots: 'single' },
     sessionBinding: {
       authProfileId: () => auth,
       securityProfile: () => security,
     },
+    // Новая сессия получает собственный id, а resume сохраняет прежний.
+    // Тест видит каждый запуск и cwd, поэтому пустая выжимка не маскируется успехом.
     async run(options) {
-      calls.push({ sessionId: options.sessionId, model: options.model });
+      calls.push({
+        sessionId: options.sessionId,
+        model: options.model,
+        cwd: options.cwd
+      });
       const sessionId = options.sessionId || `provider-session-${++serial}`;
       await options.onSessionCreated(sessionId);
       return { reply: `ok-${calls.length}`, sessionId, steps: [] };
@@ -42,10 +50,17 @@ async function fixture(t) {
     agentsDir: path.join(root, 'agents'),
     port: 18141,
   };
+
   await app.register(chatModule, {
     config,
-    factoryState: { async readEnv() { return {}; } },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {} }; } },
+    factoryState: { async readEnv() {
+      return env;
+    } },
+    prefs: {
+      read() {
+        return { providerSettings: {} };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({
@@ -57,16 +72,77 @@ async function fixture(t) {
     executorResolver: async (provider) => (provider === executor.id ? executor : null),
   });
   t.after(() => app.close());
+
   return {
     app,
     config,
     calls,
     setAuth(value) { auth = value; },
     setSecurity(value) { security = value; },
+    setEnv(value) {
+      env = value;
+    },
   };
 }
 
-async function save(app, model = 'model-a', revision = 0) {
+test('смена identity до summary не ротирует исходную сессию и не запускает пустую выжимку', async (t) => {
+  const f = await fixture(t);
+
+  await save(f.app);
+  await run(f.app);
+
+  const bindings = new ChatSessionBindingStore({ dir: f.config.chatBindingsDir });
+  const before = await bindings.read('capability-chat');
+  const directory = path.join(f.config.rootDir, 'next');
+
+  await fs.mkdir(directory);
+  f.setSecurity('security-b');
+
+  const candidate = { taskId: null, workdir: { kind: 'path', path: directory } };
+  const preview = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat/workdir/preview',
+    payload: { chatKey: 'capability-chat', candidate },
+  });
+
+  assert.equal(preview.statusCode, 200, preview.body);
+
+  const response = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat/workdir/change',
+    payload: {
+      chatKey: 'capability-chat',
+      ...candidate,
+      operationId: 'changed-identity',
+      transfer: 'summary',
+      expectedRevision: preview.json().revision,
+      expectedWorkspaceKey: preview.json().workspaceKey,
+    },
+  });
+
+  assert.equal(response.statusCode, 409, response.body);
+  assert.equal(response.json().error, 'workdir_origin_changed');
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(await bindings.read('capability-chat'), before);
+
+  const stored = (await f.app.inject('/api/chat/store/chat/capability-chat')).json().chat;
+
+  assert.deepEqual(stored.workdir, { kind: 'cockpit' });
+  assert.equal(stored.sessionId, before.sessionId);
+
+  const compact = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat/compact',
+    payload: { chatKey: 'capability-chat', sessionId: before.sessionId },
+  });
+
+  assert.equal(compact.statusCode, 409, compact.body);
+  assert.equal(compact.json().error, 'workdir_origin_changed');
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(await bindings.read('capability-chat'), before);
+});
+
+async function save(app, model = 'model-a', revision = 0, fields = {}) {
   const response = await app.inject({
     method: 'PUT',
     url: '/api/chat/store/chat',
@@ -75,6 +151,7 @@ async function save(app, model = 'model-a', revision = 0) {
       modelRef: { provider: 'sidecar-test', model },
       messages: [],
       revision,
+        ...fields,
     } },
   });
   assert.equal(response.statusCode, 200);
@@ -147,4 +224,64 @@ test('generic reset инвалидирует binding capability, не прове
     .read('capability-chat');
   assert.equal(after.sessionId, null);
   assert.ok(after.generation > before.generation);
+});
+
+test('compact после смены cwd задачи ждёт подтверждения и сохраняет старую память', async (t) => {
+  const f = await fixture(t);
+  const first = path.join(f.config.rootDir, 'first');
+  const second = path.join(f.config.rootDir, 'second');
+  const env = {
+    WORKSPACE_MODE: 'isolated',
+    REPO_COUNT: '1',
+    REPO_0_NAME: 'app',
+    REPO_0_SOURCE: f.config.rootDir,
+    REPO_0_WT: first,
+    REPO_0_BRANCH: 'task-12',
+  };
+
+  await Promise.all([first, second].map((dir) => fs.mkdir(dir)));
+  f.setEnv(env);
+  await save(f.app, 'model-a', 0, { taskId: '12' });
+
+  const initial = await f.app.inject({
+    method: 'POST',
+    url: '/api/tasks/12/chat',
+    payload: { chatKey: 'capability-chat', message: 'Запомни разговор' },
+  });
+
+  assert.equal(initial.statusCode, 200, initial.body);
+
+  const bindings = new ChatSessionBindingStore({ dir: f.config.chatBindingsDir });
+  const before = await bindings.read('capability-chat');
+
+  f.setEnv({ ...env, REPO_0_WT: second });
+
+  const preview = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat/workdir/preview',
+    payload: { chatKey: 'capability-chat' },
+  });
+
+  assert.equal(preview.json().transfer, 'reseed');
+
+  // Оба поколения клиента получают отказ: отсутствие ключа у старого compact
+  // тоже не разрешает ротировать binding и сжимать пустой разговор в новой папке.
+  for (const workspaceKey of [undefined, preview.json().workspaceKey]) {
+    const response = await f.app.inject({
+      method: 'POST',
+      url: '/api/tasks/12/compact',
+      payload: {
+        chatKey: 'capability-chat',
+        sessionId: before.sessionId,
+        workspaceKey,
+      },
+    });
+
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().error, 'workdir_transfer_required');
+  }
+
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].cwd, first);
+  assert.deepEqual(await bindings.read('capability-chat'), before);
 });

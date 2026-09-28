@@ -33,10 +33,15 @@ async function apiFixture(t, executor = null) {
     agentsDir: path.join(root, 'agents'),
     port: 18140,
   };
+
   await app.register(chatModule, {
     config,
     factoryState: { async readEnv() { return {}; } },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; } },
+    prefs: {
+      read() {
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({
@@ -144,8 +149,9 @@ async function askDirectly(t, { presentation, answer }) {
   });
   const want = presentation.isQuestion ? 'chat-question' : 'chat-permission';
   let ev;
-  for (let i = 0; i < 50 && !ev; i += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
+
+  for (let i = 0; i < 500 && !ev; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
     ev = events.find((e) => e.name === want);
   }
   assert.ok(ev, `спрос дошёл до окон событием ${want}`);

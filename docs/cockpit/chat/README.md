@@ -6,6 +6,7 @@
 
 ## Контракты продукта
 
+- [Рабочая папка разговора: выбор проекта, пути и перенос памяти](../guide/chat-workdir.md)
 - [Контекст разговора и его индикатор](../guide/chat-context.md)
 - [DeepSeek Harness](../guide/deepseek.md)
 - [Прогноз лимитов](../guide/usage-forecast.md)
@@ -37,7 +38,9 @@
 - [Режимы прав (--permission-mode)](permission-modes.md)
 - [Спрос ВИСИТ, пока не ответишь (без короткого UI-таймаута)](pending-question-lifetime.md)
 - [Хранилище истории — chats/ в корне проекта](history-storage.md)
+- [Смена папки требует согласования истории, очереди и памяти](workdir-transition-preconditions.md)
 - [Чат (modules/chat)](chat-module.md)
+- [Рабочая папка чата: приоритет задачи, выбор проекта и границы записи](chat-workspace.md)
 - [Что реально ушло в запуск (проверка модели и эффорта)](launch-model-and-effort.md)
 - [UI-контекст: чат знает, где пользователь](ui-context.md)
 
@@ -53,6 +56,7 @@
 - [Подключение нового ИИ — модульное](executor-adapter-boundary.md)
 - [Свои настройки исполнителя объявляет сам executor](executor-settings.md)
 - [Смена ИИ внутри чата](executor-switching.md)
+- [Смена рабочей папки посреди разговора: Claude и Codex помнят разговор, DeepSeek начинает заново](workdir-switch.md)
 - [Список моделей Claude — ИЗ БИНАРЯ УСТАНОВЛЕННОГО CLI](claude-model-catalog.md)
 - [Список моделей Codex — ИЗ ОФИЦИАЛЬНОГО APP-SERVER](codex-model-catalog.md)
 - [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
@@ -67,12 +71,15 @@
 
 ## Грабли
 
+- [Локальная картинка в ответе не видна: нужен URL вложения](assistant-image-links.md)
 - [«Связь теряется при отправках в несколько чатов» = POST держал соединение весь ход](concurrent-send-transport.md)
 - [«Агент повис» на длинном ходе = лимит ленты глушил не хранение, а трансляцию](turn-feed-broadcast-limit.md)
 - [«Кольцо контекста врёт» = цифра менялась раз в ход, а CLI сжимал контекст посреди хода](live-context-usage.md)
 - [«Переписка потёрлась» = PUT истории упёрся в лимит тела, и клиент ретраил молча](history-request-size-limit.md)
 - [«Я послежу и сообщу» = обещание, которое некому выполнить](agent-lifetime-and-promises.md)
 - [«Codex сжал контекст хода» через четверть часа после ручного сжатия и досье вместо ответа = выжимка не закрывала живую сессию](compaction-session-reset.md)
+- [«DeepSeek не пишет в соседний каталог» = граница записи — папка разговора, доверенный каталог её не расширяет](deepseek-write-boundary.md)
+- [DeepSeek: импорты инструкций работают в папке без Git](deepseek-instructions-without-git.md)
 - [Абсолютный путь в правах CLI пишется ДВУМЯ слэшами, иначе правило молчит](cli-absolute-path-permissions.md)
 - [Запрет прямого SSH — рубеж кооперативного агента, не same-uid sandbox](ssh-policy-sandbox-limits.md)
 - [Модель Codex пропала из селекта = урезанный каталог устаревшему CLI, а не снятая модель](codex-cli-catalog-compatibility.md)

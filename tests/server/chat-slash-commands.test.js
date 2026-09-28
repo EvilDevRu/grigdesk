@@ -316,22 +316,22 @@ test('/api/providers отдаёт commands каждого исполнителя
   assert.ok(calls >= 2, '?refresh=1 пересобирает списки команд');
 });
 
-test('/api/providers берёт поддержку доверенных каталогов из контракта адаптера', async (t) => {
+test('/api/providers берёт смену папки из контракта адаптера', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'providers-trusted-dirs-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
-  const runtimeAdapter = (id, trustedDirectories) => ({
+  const runtimeAdapter = (id, workdir) => ({
     ...stubAdapter(id, null),
     run: async () => ({ reply: 'ok' }),
-    trustedDirectories,
+    workdir,
   });
   const adapters = new Map([
-    ['static', runtimeAdapter('static', true)],
-    ['dynamic', runtimeAdapter('dynamic', (config) => config.enableExtraDirs === true)],
+    ['static', runtimeAdapter('static', { switch: 'resume', roots: 'multi' })],
+    ['dynamic', runtimeAdapter('dynamic', () => ({ switch: 'reseed', roots: 'single' }))],
     ['broken', runtimeAdapter('broken', () => { throw new Error('capability failed'); })],
     // Setup-only карточка не получает ходы и не должна обещать доступ, даже если
     // ошибочно скопировала capability из полноценного адаптера.
-    ['setup', { ...stubAdapter('setup', null), trustedDirectories: true }],
+    ['setup', { ...stubAdapter('setup', null), workdir: { switch: 'resume', roots: 'multi' } }],
   ]);
   const app = Fastify({ logger: false });
   app.decorate('sse', { broadcast() {} });
@@ -346,10 +346,11 @@ test('/api/providers берёт поддержку доверенных ката
   const response = await app.inject({ method: 'GET', url: '/api/providers' });
   assert.equal(response.statusCode, 200);
   const byId = new Map(response.json().providers.map((provider) => [provider.id, provider]));
-  assert.equal(byId.get('static')?.trustedDirectories, true);
-  assert.equal(byId.get('dynamic')?.trustedDirectories, true);
-  assert.equal(byId.get('broken')?.trustedDirectories, false, 'сбой capability не валит реестр');
-  assert.equal(byId.get('setup')?.trustedDirectories, false, 'setup-only не получает ход');
+
+  assert.deepEqual(byId.get('static')?.workdir, { switch: 'resume', roots: 'multi' });
+  assert.deepEqual(byId.get('dynamic')?.workdir, { switch: 'reseed', roots: 'single' });
+  assert.equal(byId.get('broken')?.workdir, null, 'сбой capability не валит реестр');
+  assert.equal(byId.get('setup')?.workdir, null, 'setup-only не получает ход');
 });
 
 test('/api/providers объявляет безопасный недоверенный текст только по полному контракту', async (t) => {
@@ -456,10 +457,15 @@ async function chatFixture(t, { executor }) {
     agentsDir: path.join(root, 'agents'),
     port: 18141,
   };
+
   await app.register(chatModule, {
     config,
     factoryState: { async readEnv() { return {}; } },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; } },
+    prefs: {
+      read() {
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({

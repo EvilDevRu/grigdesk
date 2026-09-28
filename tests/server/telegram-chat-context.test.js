@@ -137,7 +137,11 @@ async function fixture(t, {
         return { registry: { PROFILE: profile }, mtime: 0 };
       },
     },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; } },
+    prefs: {
+      read() {
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({ claude: [{ id: 'claude-test', efforts: [] }] }),
@@ -166,12 +170,14 @@ async function fixture(t, {
   t.after(() => app.close());
 
   const chatKey = 'task-chat';
+
   await app.inject({
     method: 'PUT',
     url: '/api/chat/store/chat',
     payload: {
       chat: {
         id: chatKey,
+        taskId: '44',
         modelRef: { provider: 'claude', model: 'claude-test' },
         messages: [],
         createdAt: Date.UTC(2026, 7, 1),

@@ -2974,6 +2974,11 @@ async function askAgentAboutCode() {
 
     chatStore.newSession({
       ...(taskId ? { taskId } : {}),
+      workdir: {
+        kind: 'project',
+        projectId: project.value,
+        repoKey: selectedContext.repoKey
+      },
       title: `Код · ${relPath.split('/').at(-1) || relPath}`,
       draft,
     });

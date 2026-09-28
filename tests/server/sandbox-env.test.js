@@ -187,7 +187,7 @@ async function chatServer(t, root, env, calls) {
     factoryState: { async readEnv() { return env; } },
     prefs: {
       read() {
-        return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 };
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
       },
     },
     claudeAuth: null,

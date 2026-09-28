@@ -14,10 +14,6 @@ import {
   SpeechSettingsInputError,
   SpeechSettingsStore,
 } from '../../lib/speechSettings.ts';
-import {
-  TrustedDirectoryInputError,
-  validateTrustedDirectories,
-} from '../../lib/trustedDirectories.ts';
 import { TlsInputError, isPrivateAddress } from '../../lib/tls/local.ts';
 import type { ModelJobManager } from '../../lib/speech/modelJobs.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
@@ -78,7 +74,6 @@ const PROTECTED_PREFS = new Map([
   // иначе одна общая запись настроек затирала бы паспорта проектов целиком.
   ['projects', '/api/projects'],
   ['projectsMeta', '/api/projects'],
-  ['trustedDirectories', '/api/settings/trusted-directories'],
   ['plugins', '/api/plugins/:id/toggle'],
   ['pluginSettings', '/api/plugins/:id/settings'],
   ['providerSettings', '/api/providers/:id/settings'],
@@ -322,21 +317,6 @@ async function settingsModule(
       return job;
     } catch (err) {
       return speechModelJobError(err, reply);
-    }
-  });
-
-  // Единый список дополнительных деревьев для всех локальных ИИ. Мы не переписываем
-  // ~/.claude и ~/.codex: проверенный список добавляется флагами к каждому новому ходу.
-  fastify.post('/api/settings/trusted-directories', async (request: SettingsRequest, reply) => {
-    try {
-      const directories = await validateTrustedDirectories(request.body?.directories);
-      prefs.write({ trustedDirectories: directories });
-      return { directories };
-    } catch (err) {
-      if (err instanceof TrustedDirectoryInputError) {
-        return reply.code(400).send({ error: 'bad_trusted_directory', message: err.message });
-      }
-      throw err;
     }
   });
 

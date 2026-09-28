@@ -60,7 +60,7 @@ export interface KimiSandboxConfig {
 
 function buildWorkspaceLocalToml(extraDirs: readonly unknown[]): string {
   return `${[
-    '# Сгенерировано Cockpit из доверенных каталогов чата (prefs.trustedDirectories',
+    '# Сгенерировано Cockpit из дополнительных рабочих копий чата',
     '# и дополнительные worktree задачи). Не редактировать: пересоздаётся на каждый ход.',
     '[workspace]',
     `additional_dir = [${extraDirs.map((dir) => JSON.stringify(String(dir))).join(', ')}]`,
@@ -260,6 +260,41 @@ function workspaceControlStateMasks(
   const { dirs, files } = workspaceControlStatePaths(config);
   const within = (target: string) => canonicalExtras.some((extra) => isWithin(extra, target));
   return { dirs: dirs.filter(within), files: files.filter(within) };
+}
+
+/**
+ * Предпросмотр применяет те же запреты, что построение mount namespace.
+ * Проверка ничего не монтирует и не создаёт runtime-каталоги исполнителя.
+ */
+export function validateKimiWorkdir({ config, cwd, extraDirs }: {
+  config: KimiSandboxConfig;
+  cwd: string;
+  extraDirs: string[];
+}) {
+  const error = workspaceMountBoundaryError(cwd, config);
+  const reasons: Record<string, string> = {
+    kimi_workspace_mount_too_broad: 'Слишком широкий системный каталог для рабочей папки Kimi.',
+    kimi_workspace_mount_is_control_state: 'Каталог содержит служебное состояние Кокпита.',
+    kimi_workspace_mount_contains_control_state: 'Рабочая папка включает служебное состояние Кокпита.',
+  };
+  const rejected: Array<{ path: string; reason: string; }> = [];
+  const accepted: string[] = [];
+
+  for (const dir of extraDirs) {
+    const reason = workspaceMountBoundaryError(dir, config, { maskControlState: true });
+
+    if (reason) {
+      rejected.push({ path: dir, reason: reasons[reason] || reason });
+    } else if (dir !== cwd && !isWithin(cwd, dir)) {
+      accepted.push(dir);
+    }
+  }
+
+  return {
+    ...(error ? { error: reasons[error] || error } : {}),
+    extraDirs: accepted,
+    rejected,
+  };
 }
 
 function assertWorkspaceMountBoundary(candidate: string, config: KimiSandboxConfig): void {

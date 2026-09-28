@@ -74,13 +74,13 @@ test('hook stateless перечитывает импорт на каждый pro
   ]);
 });
 
-test('hook при отсутствии git root или повреждённом stdin остаётся fail-open', async (t) => {
+test('hook читает инструкции без .git; повреждённый stdin остаётся fail-open', async (t) => {
   const f = await createInstructionProject(t);
   await fs.rm(path.join(f.root, '.git'), { recursive: true });
   const missing = await runHook({ root: f.root, cwd: f.sub });
   assert.equal(missing.code, 0);
-  assert.deepEqual(missing.value, {});
-  assert.match(missing.stderr, /корень|\.git/iu);
+  assert.match(missing.value.hookSpecificOutput.additionalContext, /A-V1/u);
+  assert.doesNotMatch(missing.value.hookSpecificOutput.additionalContext, /OUTSIDE-MUST-NOT-APPEAR/u);
 
   const malformed = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [HOOK, '--root', f.root, '--cwd', f.sub], {

@@ -36,10 +36,15 @@ async function apiFixture(t, { executor }) {
     agentsDir: path.join(root, 'agents'),
     port: 18141,
   };
+
   await app.register(chatModule, {
     config,
     factoryState: { async readEnv() { return {}; } },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; } },
+    prefs: {
+      read() {
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({ claude: [{ id: 'claude-test', efforts: [] }] }),

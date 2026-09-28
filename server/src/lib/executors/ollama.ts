@@ -416,7 +416,7 @@ export default {
   // состояния про его сбой ничего не скажет.
   install: 'curl -fsSL https://ollama.com/install.sh | sh',
   // Файловые инструменты Cockpit принимают opts.extraDirs как разрешённые realpath-корни.
-  trustedDirectories: true,
+  workdir: { switch: 'resume', roots: 'multi' },
   directSshPolicy: { enforcement: 'tool-filter' },
   untrustedInput: Object.freeze({
     text: true,

@@ -97,7 +97,6 @@ async function apiFixture(t, {
       read() {
         return {
           speech: {},
-          trustedDirectories: [],
           providerSettings: {},
           chatAutoCompactWindow: 0,
           projects: workProject ? { [workProject]: {} } : {},

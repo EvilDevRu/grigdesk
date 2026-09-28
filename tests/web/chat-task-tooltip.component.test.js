@@ -562,6 +562,94 @@ test('ChatSession сохраняет выбранную модель после 
   assert.equal(select.element.value, 'gpt-5.6-sol');
 });
 
+test('ChatSession возвращает селект задачи к привязке чата, если переход не подтверждён', async (t) => {
+  const browser = await browserHarness(t);
+  const [{ reactive }, { mount, flushPromises }] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+  ]);
+  const session = reactive({
+    id: 'task-select-cancel',
+    taskId: null,
+    title: 'Свободный чат',
+    model: '',
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sending: false,
+    compacting: false,
+    sessionResetting: false,
+  });
+  const requested = [];
+
+  globalThis.__chatTaskTooltipApi = {
+    async get() {
+      return { tasks: [{ task: '42', route: 'demo-profile' }] };
+    },
+  };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor: () => null,
+    questionFor: () => null,
+    isOnConveyor: () => false,
+    tabLabel: () => session.title,
+    // Переход ждёт решения в окне выбора или получил отказ: привязка чата не изменилась.
+    async setTask(_id, taskId) {
+      requested.push(taskId);
+
+      return false;
+    },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ load: async () => null });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [],
+    load() {},
+    modelOf: () => ({
+      id: '',
+      model: null,
+      provider: null
+    }),
+    visibleModels: () => [],
+    modesOf: () => [],
+  });
+
+  const ChatSession = await compileChatSession();
+
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id },
+  });
+
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const select = wrapper.find('.sel.task select');
+
+  assert.equal(select.element.value, '');
+  await select.setValue('42');
+  await flushPromises();
+  assert.deepEqual(requested, ['42']);
+  assert.equal(session.taskId, null);
+  assert.equal(select.element.value, '', 'селект показывает фактическую привязку чата');
+});
+
 // Сторож согласованности шкал кольца. Цвет считался от порога сжатия, а дуга и подсказка —
 // от окна модели: на 1M это расходилось впятеро (жёлтое кольцо, залитое на 17%), и человек
 // читал форму, а не оттенок — «места ещё дофига», пока CLI уже сжимал контекст по кругу.

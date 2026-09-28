@@ -330,16 +330,7 @@ export async function runDeepSeekTurn({
       return null;
     }
   }));
-  let trustedRoot: string | null = null;
-  if (!factory) {
-    for (const dir of realExtraDirs) {
-      if (dir && containsRealPath(dir, realCwd)
-          && (!trustedRoot || containsRealPath(trustedRoot, dir))) {
-        trustedRoot = dir;
-      }
-    }
-  }
-  const workspaceRoot = trustedRoot || realCwd;
+  const workspaceRoot = realCwd;
   const mode = modeFor(permissionMode);
   const requestedProjectRoot = projectRoot
     ? await fs.realpath(projectRoot)

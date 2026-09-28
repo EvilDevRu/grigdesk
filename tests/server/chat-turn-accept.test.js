@@ -89,7 +89,9 @@ test('приём: короткое подтверждение до конца х
   assert.equal(result.reply, 'Готово');
   assert.equal(result.userText, 'привет');
 
-  const done = events.find((entry) => entry.event === 'chat-done');
+  const done = await waitFor(() => events.find((entry) => entry.event === 'chat-done'), {
+    what: 'сигнал о завершении после записи pending',
+  });
 
   assert.equal(done.data.turnId, 'turn-accept-0001');
   assert.equal(done.data.queued, 0);
@@ -159,6 +161,41 @@ test('два одинаковых запроса, пришедших однов�
   });
   assert.equal(runs.length, 1);
   runs[0].release();
+});
+
+test('старый полный PUT без нового чата не удаляет запись принятого первого хода', async (t) => {
+  const { executor, runs, waitForRuns } = controlledExecutor();
+  const { app } = await chatAppFixture(t, { executor });
+
+  await saveChat(app, 'new-chat');
+
+  const accepted = await post(app, turnBody('new-chat', 'turn-preserve-chat'));
+
+  assert.equal(accepted.statusCode, 202, accepted.body);
+  await waitForRuns(1);
+
+  const before = (await app.inject('/api/chat/store/chat/new-chat')).json().chat;
+
+  assert.equal(before.workdirState, undefined, 'первый ход ещё не создал session state');
+
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store',
+    payload: { sessions: [], archived: [] },
+  });
+
+  assert.equal(saved.statusCode, 200, saved.body);
+  assert.equal((await app.inject('/api/chat/store/chat/new-chat')).json().chat.id, 'new-chat');
+  runs[0].release('Разговор сохранён');
+
+  const pending = await waitFor(async () => {
+    const entries = await pendingOf(app);
+
+    return entries.length ? entries : null;
+  });
+
+  assert.equal(pending[0].reply, 'Разговор сохранён');
+  assert.equal(pending[0].role, 'assistant');
 });
 
 test('turnId принадлежит одному чату: чужой чат с тем же id получает отказ', async (t) => {

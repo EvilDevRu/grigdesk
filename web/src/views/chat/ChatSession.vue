@@ -58,10 +58,10 @@
             <span class="task-tip sel task">
               <span class="lbl">задача</span>
               <UiSelect
+                v-model="taskChoice"
                 compact
                 data-context="chat-session-toolbar"
-                :model-value="sess.taskId || ''"
-                :disabled="frozen || sess.purpose === 'companion'"
+                :disabled="frozen || sess.sending || sess.purpose === 'companion'"
                 @change="onTaskChange"
               >
                 <option value="">без задачи</option>
@@ -72,6 +72,7 @@
             </span>
           </template>
         </UiTooltip>
+        <ChatWorkdir :sid="sid" />
       </div>
       <div class="col bar">
         <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
@@ -211,11 +212,26 @@
       <div class="col flow">
         <div v-if="!sess.messages?.length" class="empty">
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
-          <p class="e-sub muted">
-            {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
-            Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
-            «/» — команды, «$» — навыки Codex.
-          </p>
+          <div class="e-sub muted">
+            <p class="e-workdir">
+              Работаем в: {{ sess.workdirPreview?.target?.cwd
+                || sess.workdirState?.committed?.cwd || chatWorkdirLabel(sess.workdir) }}
+            </p>
+            <template v-if="!sess.taskId && chat.workdirProtocol">
+              <div v-if="chat.recentWorkdirs.length" class="e-workdir-shortcuts">
+                <UiButton v-for="(workdir, index) in chat.recentWorkdirs.slice(0, 4)" :key="index"
+                          variant="text" :disabled="frozen"
+                          @click="chat.proposeWorkdir(sid, { taskId: null, workdir }, true)">
+                  {{ chatWorkdirLabel(workdir) }}
+                </UiButton>
+              </div>
+              <p>Сменить рабочую папку — «Папка» в шапке чата.</p>
+            </template>
+            <p>
+              Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
+              «/» — команды, «$» — навыки Codex.
+            </p>
+          </div>
         </div>
         <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role"
              :style="runBrandStyle(m)">
@@ -623,6 +639,8 @@
 </template>
 
 <script setup>
+import ChatWorkdir from './ChatWorkdir.vue';
+import { chatWorkdirLabel } from '../../../../shared/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../../shared/apiClient.ts';
@@ -970,10 +988,27 @@ const activeTaskLabel = computed(() => {
   const option = taskOpts.value.find((o) => o.task === id);
   return option ? optLabel(option) : `#${id}`;
 });
-function onTaskChange(e) {
+// Селект задачи показывает фактическую привязку чата. Смена задачи идёт через переход
+// рабочей папки: пока он ждёт решения в окне выбора или получил отказ, селект
+// возвращается к записи чата, а не к выбору, которого у чата нет.
+const taskChoice = ref('');
+
+watch(() => sess.value?.taskId || '', (taskId) => {
+  taskChoice.value = taskId;
+}, { immediate: true });
+
+/**
+ * Выбор задачи в селекте — просьба о переходе, а не готовая привязка: название задачи
+ * передаётся стору для чата, а при отказе или ожидании решения селект откатывается.
+ */
+async function onTaskChange(e) {
   const val = e.target.value;
   const o = taskOpts.value.find((x) => x.task === val);
-  chat.setTask(props.sid, val || null, o ? (o.title || `#${o.task}`) : '');
+  const done = await chat.setTask(props.sid, val || null, o ? (o.title || `#${o.task}`) : '');
+
+  if (!done) {
+    taskChoice.value = sess.value?.taskId || '';
+  }
 }
 
 // ── Контекст (окно — у каждой модели своё, из реестра) ──
@@ -1242,10 +1277,14 @@ async function onCtxClick(e) {
 // Сжатие или server-owned reset замораживают управление: менять модель/задачу/права
 // посреди перехода нельзя. Поле ввода, вложения и диктовка остаются живыми; сама кнопка
 // отправки ждёт завершения перехода.
-const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting);
+const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting
+  || !!sess.value?.workdirChanging || !!sess.value?.workdirProposal
+  || ['preparing', 'ready', 'resetting'].includes(sess.value?.workdirState?.transition?.phase));
 const frozenHint = computed(() => (sess.value?.sessionResetting
   ? 'Сбрасывается память агента — отправка будет доступна после подтверждения сервера'
-  : 'Идёт сжатие контекста — отправка будет доступна сразу после него'));
+  : sess.value?.compacting
+    ? 'Идёт сжатие контекста — отправка будет доступна сразу после него'
+    : 'Подтвердите перенос и дождитесь смены рабочей папки'));
 
 // ── «Прочитано» ──
 // Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
@@ -1921,9 +1960,12 @@ async function openDebug() {
 .flow { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
 
 /* Пустое состояние — по центру, а не подсказка в углу */
-.empty { margin: auto; text-align: center; padding: 24px; }
+.empty { margin: auto; min-width: 0; max-width: 100%; text-align: center; padding: 24px; }
 .e-title { font-size: 17px; font-weight: 600; }
-.e-sub { font-size: 13px; line-height: 1.6; margin-top: 8px; }
+.e-sub { display: grid; gap: 8px; font-size: 13px; line-height: 1.6; margin-top: 8px; }
+.e-sub p { margin: 0; }
+.e-workdir { overflow-wrap: anywhere; }
+.e-workdir-shortcuts { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 
 .msg { display: flex; flex-direction: column; gap: 4px; }
 /* Текст + иконка копирования рядом (в потоке, не поверх текста). У пользовательских
@@ -2106,10 +2148,10 @@ async function openDebug() {
    название с задачей и настройки расходятся по своим рядам, поля — к минимуму. */
 @media (max-width: 759px) {
   .cs-top { min-height: 0; justify-content: flex-start; padding: 8px 10px; }
-  /* Переносится только задача: «назад» и название остаются одной строкой — иначе
-     кнопка занимает целый ряд в одиночку и шапка съедает пятую часть экрана. */
+  /* Задача идёт после названия и папки: иначе выбор папки занимает отдельный ряд.
+     Кнопка «назад», название и папка остаются вместе на узком экране. */
   .hrow { flex-wrap: wrap; }
-  .task-tip { flex: 1 1 100%; max-width: none; min-width: 0; }
+  .task-tip { order: 1; flex: 1 1 100%; max-width: none; min-width: 0; }
   .bar { flex-wrap: wrap; }
   /* Факт-строка своим рядом — в одном ряду с контролами от неё осталось бы три буквы */
   .factbar { order: 9; flex: 1 1 100%; }

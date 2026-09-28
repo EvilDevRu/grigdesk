@@ -290,7 +290,15 @@ test('COMP-ENSURE-01/02/06: HTTP ensure атомарен, scope берёт то�
       async readRegistry() { factoryCalls += 1; throw new Error('ensure не читает factory-only state'); },
     },
     prefs: {
-      read() { return { speech: {}, trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; },
+      read() {
+        return {
+          speech: {
+          },
+          providerSettings: {
+          },
+          chatAutoCompactWindow: 0
+        };
+      },
     },
     modelsRegistry: async () => ({}),
     executorResolver: async () => { executorCalls += 1; return null; },
@@ -428,7 +436,11 @@ test('COMP-ENSURE-05: HTTP conflict возвращает 409 и оба канд�
       port: 18140,
     },
     factoryState: { async readEnv() { return {}; } },
-    prefs: { read() { return { speech: {}, trustedDirectories: [] }; } },
+    prefs: {
+      read() {
+        return { speech: {} };
+      }
+    },
     modelsRegistry: async () => ({}),
   });
   await app.ready();

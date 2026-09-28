@@ -103,6 +103,7 @@ export function compileChatSession(prefix) {
       './StepList.vue': inertComponentStub('step-list-stub'),
       './ChatQuestion.vue': inertComponentStub('chat-question-stub'),
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
+      './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub'),
       '../../ui': uiFacadeStub(prefix),
       '../../shared/md.ts': 'export const mdToHtml = (text) => String(text || "");',
       '../../features/documents/links.js': 'export const documentLinkFromClick = () => "";',

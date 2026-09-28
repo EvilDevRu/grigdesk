@@ -47,6 +47,8 @@ let instance = 0;
 
 function patch(source) {
   return source
+    .replace("'../../../shared/chatWorkdir.ts'",
+      JSON.stringify(new URL('../../../shared/chatWorkdir.ts', import.meta.url).href))
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
     .replace("import { api } from '../shared/apiClient.ts';", 'const api = globalThis.__chatApi;')
     .replace(

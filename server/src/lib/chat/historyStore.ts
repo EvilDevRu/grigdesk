@@ -6,6 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { normalizeChatWorkdir, normalizeRecentWorkdirs, sameChatWorkdir }
+  from '../../../../shared/chatWorkdir.ts';
+import type { WorkdirState } from './workdirTransition.ts';
+
 import { mergeChat } from './mergeChat.ts';
 import type { ChatRecord } from './mergeChat.ts';
 import type { ModelRegistry } from './modelRef.ts';
@@ -18,10 +22,15 @@ import {
 
 const SERVER_CHAT_KEYS = new Set([
   'schema', 'surface', 'revision', 'modelRefState', 'sessionBindingState',
-  'logicalIdentity',
+  'logicalIdentity', 'workdirState',
   // Binding не должен оказаться в chat JSON даже под выдуманным клиентом именем.
   'binding', 'bindingGeneration', 'sessionBinding',
 ]);
+
+export const WORKDIR_MEMORY_KEYS = [
+  'sessionId', 'pendingSeed', 'contextTokens', 'contextWindow', 'contextMetric',
+  'contextIsEstimate', 'totalInputTokens', 'cachedInputTokens', 'contextCache', 'compactedAt',
+];
 
 const COMPANION_PURPOSE = 'companion';
 const COMPANION_TASK_RE = /^[1-9][0-9]{0,18}$/;
@@ -36,7 +45,8 @@ export interface StoredChat extends ChatRecord {
   revision?: number;
   archived?: boolean;
   surface?: string;
-  sessionId?: string;
+  sessionId?: string | null;
+  workdirState?: WorkdirState;
   sessionBindingState?: { state?: string; reason?: string };
   model?: unknown;
   modelRef?: unknown;
@@ -78,6 +88,8 @@ export interface ChatMeta {
   defModelRefState?: unknown;
   defEffort?: unknown;
   defMode?: unknown;
+  defWorkdir?: unknown;
+  recentWorkdirs?: unknown;
   schema?: number;
 }
 
@@ -460,6 +472,7 @@ export class ChatHistoryStore {
   /**
    * Раскладывает стор по файлам: пишет только изменившиеся чаты, удаляет файлы
    * исчезнувших, переносит файл при смене месяца (не должно случаться).
+   * HTTP-восстановление задаёт preserveMissing: старый снимок не удаляет чужие новые чаты.
    */
   async save(body: {
     sessions?: StoredChat[];
@@ -469,7 +482,9 @@ export class ChatHistoryStore {
     defModelRef?: unknown;
     defEffort?: unknown;
     defMode?: unknown;
-  }): Promise<void> {
+    defWorkdir?: unknown;
+    recentWorkdirs?: unknown;
+  }, { preserveMissing = false } = {}): Promise<void> {
     await this.ensureMigrated();
     await this.ensureDir();
     const incoming = [
@@ -487,16 +502,20 @@ export class ChatHistoryStore {
       // Полный PUT остался миграционным compatibility endpoint-ом. Server-created
       // companion нельзя удалить устаревшим снимком всего стора; для явного удаления
       // есть точечный DELETE.
-      if (!seen.has(id) && v.chat?.purpose !== COMPANION_PURPOSE) {
+      if (!preserveMissing && !seen.has(id)
+        && v.chat?.purpose !== COMPANION_PURPOSE && !v.chat?.workdirState) {
         await this.remove(id);
       }
     }
+
     await this.saveMeta({
       activeId: body.activeId ?? null,
       defModel: body.defModel,
       defModelRef: body.defModelRef,
       defEffort: body.defEffort,
       defMode: body.defMode,
+      defWorkdir: body.defWorkdir,
+      recentWorkdirs: body.recentWorkdirs,
     });
   }
 
@@ -535,6 +554,35 @@ export class ChatHistoryStore {
       // но server-owned выбор модели уже не откатываем.
       const stale = !!prev && incomingRevision !== currentRevision;
       const clean = clientChat(chat);
+      const choice = normalizeChatWorkdir(chat.workdir);
+
+      if (Object.hasOwn(chat, 'workdir') && !choice) {
+        throw new ChatHistoryError('bad_workdir', 'Выбор папки повреждён.', { statusCode: 400 });
+      }
+      if (prev && !stale && (
+        (Object.hasOwn(chat, 'workdir') && !sameChatWorkdir(chat.workdir, prev.chat.workdir))
+        || (Object.hasOwn(chat, 'taskId') && (chat.taskId || null) !== (prev.chat.taskId || null))
+      ) && prev.chat.purpose !== COMPANION_PURPOSE) {
+        throw new ChatHistoryError('workdir_change_required', 'Папка и задача меняются отдельным переходом.');
+      }
+
+      clean.workdir = prev
+        ? (Object.hasOwn(prev.chat, 'workdir') ? prev.chat.workdir : { kind: 'cockpit' })
+        : choice;
+
+      if (prev) {
+        clean.taskId = prev.chat.taskId ?? null;
+      }
+
+      const phase = prev?.chat.workdirState?.transition?.phase;
+
+      if (phase && !['done', 'failed'].includes(phase)
+        && ['modelRef', 'mode', 'effort'].some((key) => (
+          Object.hasOwn(chat, key) && JSON.stringify(chat[key]) !== JSON.stringify(prev?.chat[key])
+        ))) {
+        throw new ChatHistoryError('chat_busy', 'Сначала дождитесь переноса разговора.');
+      }
+
       const previousIdentity = companionIdentity(prev?.chat);
       let identity: CompanionIdentity | null = null;
       if (serverIdentity) {
@@ -557,6 +605,9 @@ export class ChatHistoryStore {
       } else if (chat.purpose === COMPANION_PURPOSE
         || Object.hasOwn(chat, 'logicalIdentity')) {
         throw rebindError();
+      }
+      if (identity && choice?.kind !== 'cockpit') {
+        throw new ChatHistoryError('workdir_change_required', 'Папка компаньона определяется его задачей.');
       }
       if (identity) {
         clean.purpose = COMPANION_PURPOSE;
@@ -594,6 +645,13 @@ export class ChatHistoryStore {
         c.modelRef = prev.chat.modelRef;
         c.modelRefState = prev.chat.modelRefState;
       }
+      if (prev?.chat.workdirState) {
+        c.workdirState = prev.chat.workdirState;
+
+        for (const key of WORKDIR_MEMORY_KEYS) {
+          c[key] = prev.chat[key] ?? null;
+        }
+      }
       c.createdAt = c.createdAt || c.updatedAt || Date.now();
       const target = this.fileOf(c);
       // Нет семантического изменения — revision не накручиваем из-за повторного PUT.
@@ -606,6 +664,35 @@ export class ChatHistoryStore {
       await this.writeAtomic(target, json);
       if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
       return { written: true, restored, dropped, stale, chat: c };
+    });
+  }
+
+  /**
+   * Серверная мутация исполняемого состояния поверх свежей записи.
+   * Короткий lock не держится во время запроса модели и сохраняет новые черновики/сообщения.
+   */
+  async patchExecution(
+    id: string,
+    patch: (chat: StoredChat) => Partial<StoredChat>,
+  ): Promise<StoredChat> {
+    await this.ensureMigrated();
+
+    return this.withChatLock(id, async () => {
+      const entry = await this.readEntry(id);
+
+      if (!entry) {
+        throw new ChatHistoryError('unknown_chat', 'Чат не найден.', { statusCode: 404 });
+      }
+
+      const next = {
+        ...entry.chat,
+        ...patch(entry.chat),
+        revision: Number(entry.chat.revision || 0) + 1,
+      };
+
+      await this.writeAtomic(entry.path, stableJson(next));
+
+      return next;
     });
   }
 
@@ -747,9 +834,27 @@ export class ChatHistoryStore {
     const prev = await this.readMetaRaw();
     const next: Record<string, unknown> = { ...prev };
     const source = (meta ?? {}) as Record<string, unknown>;
-    for (const k of ['activeId', 'defModel', 'defModelRef', 'defEffort', 'defMode']) {
+
+    const metaKeys = [
+      'activeId', 'defModel', 'defModelRef', 'defEffort', 'defMode', 'defWorkdir', 'recentWorkdirs',
+    ];
+
+    for (const k of metaKeys) {
       if (source[k] !== undefined) next[k] = source[k];
     }
+
+    if (source.defWorkdir !== undefined) {
+      const workdir = normalizeChatWorkdir(source.defWorkdir);
+
+      if (!workdir) {
+        throw new ChatHistoryError('bad_workdir', 'Папка по умолчанию повреждена.', { statusCode: 400 });
+      }
+
+      next.defWorkdir = workdir;
+    }
+
+    next.recentWorkdirs = normalizeRecentWorkdirs(next.recentWorkdirs);
+
     const migrated = migrateDefaultModel(next, await this.registry()).meta;
     migrated.schema = CHAT_SCHEMA;
     await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(migrated));
@@ -783,6 +888,8 @@ export class ChatHistoryStore {
       // defMode клиент присылал, а мета его не хранила — выбранный режим прав не переживал
       // перезагрузку страницы и молча откатывался к режиму по умолчанию.
       defMode: meta.defMode,
+      defWorkdir: normalizeChatWorkdir(meta.defWorkdir) || { kind: 'cockpit' },
+      recentWorkdirs: normalizeRecentWorkdirs(meta.recentWorkdirs),
     };
   }
 }

@@ -75,7 +75,11 @@ async function fixture(t) {
   await app.register(chatModule, {
     config,
     factoryState: { async readEnv() { return {}; } },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {} }; } },
+    prefs: {
+      read() {
+        return { providerSettings: {} };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({

@@ -185,15 +185,15 @@ test('режимы выбирают честные sandbox/approval до spawn, 
   assert.equal(invalid.launchOptions.length, 0);
 });
 
-test('доверенный каталог-предок становится границей записи и не попадает в note', async (t) => {
+test('дополнительный каталог-предок не расширяет границу записи', async (t) => {
   const f = await fixture(t, {});
   const out = await runDeepSeekTurn({ ...f.base, extraDirs: [f.root] });
 
-  assert.equal(f.launchOptions[0].workspaceRoot, await fs.realpath(f.root));
-  assert.deepEqual(out.steps.filter((step) => step.k === 'note'), []);
+  assert.equal(f.launchOptions[0].workspaceRoot, await fs.realpath(f.cwd));
+  assert.ok(out.steps.some((step) => step.k === 'note'));
 });
 
-test('из вложенных доверенных каталогов выбирается самый глубокий realpath-предок', async (t) => {
+test('симлинк на предка не меняет выбранный cwd', async (t) => {
   const f = await fixture(t, {});
   const nestedCwd = path.join(f.cwd, 'project', 'sub');
   const trustedLink = path.join(f.root, 'trusted-link');
@@ -206,7 +206,7 @@ test('из вложенных доверенных каталогов выбир
     extraDirs: [f.root, trustedLink],
   });
 
-  assert.equal(f.launchOptions[0].workspaceRoot, path.join(f.cwd, 'project'));
+  assert.equal(f.launchOptions[0].workspaceRoot, nestedCwd);
 });
 
 test('каталоги вне cwd не расширяют границу и перечисляются в note', async (t) => {

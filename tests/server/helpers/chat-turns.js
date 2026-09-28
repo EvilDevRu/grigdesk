@@ -180,7 +180,6 @@ export async function chatAppFixture(t, {
     prefs: {
       read() {
         return {
-          trustedDirectories: [],
           providerSettings: {},
           chatAutoCompactWindow: 0,
           speech: {},

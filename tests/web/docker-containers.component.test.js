@@ -244,7 +244,7 @@ test('сворачивание проекта обновляет aria и скр�
 
   assert.equal(toggle.attributes('aria-expanded'), 'true');
   assert.notEqual(target.style.display, 'none');
-  assert.equal(browser.document.getElementById(targetId), target);
+  assert.equal(browser.document.getElementById(targetId) === target, true);
 });
 
 test('выключенный настройкой терминал не открывается даже у работающего контейнера', async (t) => {

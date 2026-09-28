@@ -126,7 +126,6 @@ async function chatFixture(t, {
     read() {
       return {
         speech: settings,
-        trustedDirectories: [],
         providerSettings: {},
         chatAutoCompactWindow: 0,
       };

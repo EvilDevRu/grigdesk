@@ -109,7 +109,7 @@ test('адаптер объявляет полный честный контра
   assert.equal(deepseek.session, undefined);
   assert.equal(deepseek.untrustedInput, undefined);
   assert.equal(deepseek.scopedWorkspace, undefined);
-  assert.equal(deepseek.trustedDirectories, true);
+  assert.deepEqual(deepseek.workdir, { switch: 'reseed', roots: 'single' });
 
   const modes = await deepseek.modes();
   assert.deepEqual(modes.map((mode) => mode.id), ['default', 'auto', 'read-only']);

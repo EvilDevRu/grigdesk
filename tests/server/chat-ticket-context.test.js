@@ -37,10 +37,15 @@ async function apiFixture(t, { executor, ticket = null } = {}) {
     ticketsDir,
     port: 18140,
   };
+
   await app.register(chatModule, {
     config,
     factoryState: { async readEnv() { return { WORKSPACE_MODE: 'isolated' }; } },
-    prefs: { read() { return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 }; } },
+    prefs: {
+      read() {
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
+      }
+    },
     claudeAuth: null,
     internalToken: 'test',
     modelsRegistry: async () => ({ claude: [{ id: 'claude-test', efforts: [] }] }),
@@ -50,13 +55,14 @@ async function apiFixture(t, { executor, ticket = null } = {}) {
   return { app };
 }
 
-async function saveClaudeChat(app, id) {
+async function saveClaudeChat(app, id, taskId = null) {
   const response = await app.inject({
     method: 'PUT',
     url: '/api/chat/store/chat',
     payload: {
       chat: {
         id,
+        taskId,
         modelRef: { provider: 'claude', model: 'claude-test' },
         messages: [],
         createdAt: Date.UTC(2026, 7, 1),
@@ -90,7 +96,8 @@ const TICKET = {
 test('чат по задаче получает тикет в конверте сообщения', async (t) => {
   const captured = {};
   const { app } = await apiFixture(t, { executor: capturingExecutor(captured), ticket: TICKET });
-  await saveClaudeChat(app, 'task-chat');
+
+  await saveClaudeChat(app, 'task-chat', '44');
 
   const run = await app.inject({
     method: 'POST',
@@ -119,7 +126,8 @@ test('чат по задаче получает тикет в конверте �
 test('задача без тикета не роняет ход и не добавляет конверт', async (t) => {
   const captured = {};
   const { app } = await apiFixture(t, { executor: capturingExecutor(captured) });
-  await saveClaudeChat(app, 'no-ticket-chat');
+
+  await saveClaudeChat(app, 'no-ticket-chat', '44');
 
   const run = await app.inject({
     method: 'POST',
@@ -160,7 +168,8 @@ test('длинное описание обрезается с указанием
   const captured = {};
   const longTicket = { ...TICKET, description: `начало ${'x'.repeat(7000)} конец` };
   const { app } = await apiFixture(t, { executor: capturingExecutor(captured), ticket: longTicket });
-  await saveClaudeChat(app, 'long-ticket-chat');
+
+  await saveClaudeChat(app, 'long-ticket-chat', '44');
 
   const run = await app.inject({
     method: 'POST',

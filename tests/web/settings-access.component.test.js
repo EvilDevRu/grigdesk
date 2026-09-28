@@ -95,11 +95,14 @@ function copy(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+/**
+ * Открываем настройки с управляемыми ответами доступа и TLS.
+ * Состояние формы и вызовы проверяются без обращения к настройкам этой машины.
+ */
 async function mountSettingsAccess(t, {
   prefs: initialPrefs = {
     accessLocalHttps: true,
     accessGateway: false,
-    trustedDirectories: [],
   },
   tlsStates = [tls({
     enabled: true,
@@ -581,7 +584,7 @@ test('ACCESS-WEB-14: ошибка TLS — отдельное состояние 
 
 test('ACCESS-WEB-15: сохранённые сертификаты доступны при выключенном LAN HTTPS', async (t) => {
   const { wrapper, flushPromises } = await mountSettingsAccess(t, {
-    prefs: { accessLocalHttps: false, accessGateway: false, trustedDirectories: [] },
+    prefs: { accessLocalHttps: false, accessGateway: false },
     tlsStates: [tls({
       enabled: true,
       source: 'none',
@@ -612,7 +615,7 @@ test('ACCESS-WEB-15: сохранённые сертификаты доступ�
 
 test('ACCESS-WEB-16: старый accessGateway не раскрывает мастер после перезагрузки', async (t) => {
   const { wrapper } = await mountSettingsAccess(t, {
-    prefs: { accessLocalHttps: false, accessGateway: true, trustedDirectories: [] },
+    prefs: { accessLocalHttps: false, accessGateway: true },
     gateway: { setup: null, job: null, publicDomain: '' },
   });
 

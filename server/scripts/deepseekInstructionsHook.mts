@@ -1,4 +1,3 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { expandInstructionImports } from '../src/lib/deepseek/instructions.ts';
@@ -29,7 +28,7 @@ async function main(): Promise<Record<string, unknown>> {
   if (payload?.hook_event_name !== 'UserPromptSubmit') {
     throw new Error('неожиданное событие hook');
   }
-  await fs.access(path.join(projectRoot, '.git'));
+
   const result = await expandInstructionImports({ projectRoot, cwd });
   return {
     hookSpecificOutput: {

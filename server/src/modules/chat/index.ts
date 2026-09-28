@@ -51,7 +51,12 @@ import {
   visibleChatTitleStep,
   withChatTitleHook,
 } from '../../lib/chat/titleHook.ts';
-import { parseSandboxRepositories } from '../../lib/sandboxEnv.ts';
+import { normalizeChatWorkdir, sameChatWorkdir } from '../../../../shared/chatWorkdir.ts';
+import { resolveChatWorkdir, resolveWorkdirCapability, ChatWorkdirError } from '../../lib/chat/workdir.ts';
+import type { ResolvedWorkdir } from '../../lib/chat/workdir.ts';
+import {
+  ChatWorkdirTransitions, EMPTY_WORKDIR_MEMORY, workdirTaskId,
+} from '../../lib/chat/workdirTransition.ts';
 import { PROFILE_RE, listProjects } from '../../lib/profiles.ts';
 import { normalizeSpeechSettings, speechSettingsRevision } from '../../lib/speechSettings.ts';
 import {
@@ -96,6 +101,8 @@ interface ChatTurnInput {
   requestTitle?: boolean;
   sentAt?: number;
   compact?: boolean;
+  workdir?: unknown;
+  workspaceKey?: string;
   slashCommand?: unknown;
   // Устойчивый id отправки из окна: с ним ход принимается коротко и исполняется без
   // HTTP-соединения, а повтор с тем же id не запускает исполнителя второй раз.
@@ -134,6 +141,11 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
   purpose?: unknown;
   taskId?: unknown;
   origin?: unknown;
+  candidate?: { taskId?: unknown; workdir?: unknown; };
+  operationId?: string;
+  expectedRevision?: number;
+  expectedWorkspaceKey?: string;
+  transfer?: string;
   sessions?: StoredChat[];
   archived?: StoredChat[] | boolean;
   chat?: StoredChat;
@@ -215,6 +227,8 @@ interface ChatExecutor {
   sessionBinding?: ExecutorAdapter['sessionBinding'];
   session?: LiveExecutor['session'] & { mode?: string };
   compaction?: { kind: string; message?: string };
+  workdir?: ExecutorAdapter['workdir'];
+  validateWorkdir?: ExecutorAdapter['validateWorkdir'];
 }
 
 interface ExecutorTurnOptions extends ExecutorRunInput {
@@ -230,7 +244,6 @@ interface ExecutorTurnOptions extends ExecutorRunInput {
 
 interface ChatPrefs extends Record<string, unknown> {
   projects?: Record<string, unknown>;
-  trustedDirectories?: string[];
   speech?: Record<string, unknown>;
   providerSettings?: Record<string, Record<string, unknown>>;
 }
@@ -272,6 +285,7 @@ interface TargetFailure {
 }
 
 interface RunTarget extends ModelTarget {
+  workspace?: ResolvedWorkdir;
   binding: BindingRecord | null;
   sessionId: string | null;
 }
@@ -865,6 +879,227 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return next;
   }
 
+  /**
+   * Папка разрешается по durable выбору и текущей capability адаптера.
+   * Кандидат предпросмотра не меняет сохранённую модель или scope рабочих инструментов.
+   */
+  async function workspaceOf(record: StoredChat, selection?: {
+    taskId: string | null;
+    workdir: NonNullable<ReturnType<typeof normalizeChatWorkdir>>;
+  }): Promise<ResolvedWorkdir> {
+    const ref = normalizeModelRef(record.modelRef);
+    const executor = ref ? await executorResolver(ref.provider) : null;
+    const caps = await resolveWorkdirCapability(executor, config);
+
+    return resolveChatWorkdir({
+      taskId: selection?.taskId === undefined ? record.taskId || null : selection.taskId,
+      workdir: selection?.workdir ?? record.workdir,
+      provider: ref?.provider || '',
+      caps,
+      validateWorkdir: executor?.validateWorkdir,
+      config,
+      prefs,
+      factoryState,
+      trustedProject: trustedWorkProject,
+      allowArchived: !selection || sameChatWorkdir(selection.workdir, record.workdir),
+    });
+  }
+
+  /**
+   * Прежний cwd берётся из серверного снимка, живого процесса или ACP binding.
+   * При неизвестном происхождении сессии summary не должен выполняться в случайной папке.
+   */
+  async function workspaceMemory(record: StoredChat) {
+    const live = liveSessions.stats().find((entry) => entry.chatKey === record.id);
+    const binding = record.id ? await bindingStore.read(record.id) : null;
+    const sessionId = binding?.sessionId || live?.sessionId || lastSession.get(record.id)
+      || record.sessionId || null;
+    let workspace = record.workdirState?.sessionWorkspace;
+
+    if (!workspace && (binding?.cwdRealpath || live?.cwd)) {
+      const cwd = binding?.cwdRealpath || live!.cwd;
+
+      workspace = {
+        taskId: record.taskId || null,
+        workdir: normalizeChatWorkdir(record.workdir) || { kind: 'cockpit' },
+        provider: normalizeModelRef(record.modelRef)?.provider || '',
+        cwd,
+        extraDirs: live?.extraDirs || [],
+        copies: [],
+        source: 'session',
+        label: cwd,
+        workspaceKey: '',
+        warnings: [],
+      };
+    }
+
+    return { sessionId, workspace };
+  }
+
+  /**
+   * Внутренний сброс вызывается уже под блокировкой хода.
+   * Он одинаков для явного reset, перехода и восстановления выжимки после сбоя.
+   */
+  async function resetWorkspaceMemory(record: StoredChat): Promise<void> {
+    const id = record.id!;
+    const ref = normalizeModelRef(record.modelRef);
+    const executor = ref ? await executorResolver(ref.provider) : null;
+
+    await liveSessions.close(id, 'перенос или сброс памяти');
+
+    if (executor?.sessionBinding) {
+      await invalidateProviderSession(id, ref!.provider, { reason: 'workdir' });
+    }
+
+    lastSession.delete(id);
+  }
+
+  /**
+   * Служебная выжимка использует прежнюю сессию внутри уже взятого turn lock.
+   * Обычный путь compact здесь не сбрасывает память: сначала journal сохранит seed.
+   */
+  async function workspaceSummary(record: StoredChat, workspace: ResolvedWorkdir, sessionId: string) {
+    const target = await resolveRunTarget({ chatKey: record.id, sessionId });
+
+    if (!target.ok) {
+      throw new ChatWorkdirError(target.error, target.message);
+    }
+
+    const channel: TurnChannel = {
+      turnId: '',
+      detached: () => false,
+      park: async () => { },
+      closeAbandoned: async () => { },
+      refuse: (status, body) => {
+        throw new ChatWorkdirError(String(body.error), String(body.message), status);
+      },
+      settled: () => undefined,
+    };
+    const result = await runChatTurn(channel, {
+      id: workspace.taskId,
+      chatKey: record.id,
+      model: target.model,
+      effort: String(record.effort || ''),
+      mode: String(record.mode || ''),
+      sessionId,
+      target,
+      queued: false,
+      context: null,
+      compact: true,
+      summaryWorkspace: workspace,
+    }) as {
+      stopped?: boolean;
+      compact?: {
+        seed?: string;
+      };
+      deliveryFailure?: unknown;
+    };
+
+    if (result?.stopped || result?.deliveryFailure) {
+      throw new ChatWorkdirError('workdir_summary_stopped', 'Выжимка прервана; папка не изменена.');
+    }
+
+    return result?.compact?.seed || '';
+  }
+
+  const workdirTransitions = new ChatWorkdirTransitions({
+    history,
+    busy: (id) => draining || deletingChats.has(id) || !!savingChats.get(id)
+      || !!acceptedTurns.get(id) || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id }),
+    lock: (id, job) => turnLocks.run({ chatKey: id }, job),
+    resolve: workspaceOf,
+    capability: async (record) => {
+      const ref = normalizeModelRef(record.modelRef);
+
+      return resolveWorkdirCapability(ref ? await executorResolver(ref.provider) : null, config);
+    },
+    memory: workspaceMemory,
+    summary: workspaceSummary,
+    reset: resetWorkspaceMemory,
+    notify: (id) => fastify.sse.broadcast('chat-store', {
+      id,
+      origin: '',
+      at: Date.now()
+    }),
+  });
+
+  // До появления новых ходов завершаем durable фазы прошлого процесса. Выжимку
+  // повторно не заказываем; один повреждённый путь не мешает загрузить остальные чаты.
+  const startupChats = await history.scan();
+
+  for (const { chat: record } of startupChats.values()) {
+    const state = record.workdirState;
+    const phase = state?.transition?.phase;
+
+    if (!state?.seedClaim && (!phase || ['done', 'failed'].includes(phase))) {
+      continue;
+    }
+
+    try {
+      await workdirTransitions.recover(record.id!);
+    } catch (error) {
+      fastify.log.warn({ err: (error as Error).message }, 'восстановление рабочей папки не завершено');
+    }
+  }
+
+  /**
+   * Ошибка workspace всегда является отказом до запуска исполнителя.
+   * Обе HTTP-ручки возвращают один контракт кодов и русское объяснение.
+   */
+  function workdirFailure(reply: FastifyReply, error: unknown) {
+    const failure = error as {
+      statusCode?: number;
+      code?: string;
+      message?: string;
+    };
+
+    return reply.code(failure.statusCode || 500).send({
+      error: failure.code || 'workdir_failed',
+      message: failure.message || 'Рабочая папка недоступна.',
+    });
+  }
+
+  fastify.post<ChatRoute>('/api/chat/workdir/preview', async (request, reply) => {
+    try {
+      const body = request.body || {};
+      const record = body.chatKey ? await history.readOne(body.chatKey) : {
+        modelRef: body.modelRef,
+        taskId: null,
+        workdir: { kind: 'cockpit' },
+      };
+
+      if (!record) {
+        throw new ChatWorkdirError('unknown_chat', 'Чат не найден.', 404);
+      }
+
+      const choice = body.candidate && Object.hasOwn(body.candidate, 'workdir')
+        ? body.candidate.workdir : record.workdir;
+      const workdir = normalizeChatWorkdir(choice);
+
+      if (!workdir) {
+        throw new ChatWorkdirError('bad_workdir', 'Выбор папки повреждён.', 400);
+      }
+
+      const candidate = body.candidate ? {
+        taskId: workdirTaskId(body.candidate.taskId), workdir,
+      } : undefined;
+
+      return await workdirTransitions.preview(record, candidate);
+    } catch (error) {
+      return workdirFailure(reply, error);
+    }
+  });
+
+  fastify.post<ChatRoute>('/api/chat/workdir/change', async (request, reply) => {
+    try {
+      const chat = await workdirTransitions.change(String(request.body?.chatKey || ''), request.body);
+
+      return { chat };
+    } catch (error) {
+      return workdirFailure(reply, error);
+    }
+  });
+
   // Допустимые режимы прав исполнителя: спрашиваем у CLI (executor.modes), кэшируем —
   // это запуск подпроцесса, гонять его на каждое сообщение незачем.
   const modesCache = new Map<string, { at: number; ids: Set<string> }>(); // providerId → { at, ids: Set }
@@ -996,39 +1231,46 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    */
   fastify.post<ChatRoute>('/api/chat/session/reset', async (request, reply) => {
     const chatKey = String(request.body?.chatKey || '');
-    if (!chatKey) return reply.code(400).send({ error: 'bad_chat_key' });
-    const record = await history.readOne(chatKey);
-    if (!record) return reply.code(404).send({ error: 'unknown_chat' });
-    const requestedRef = normalizeModelRef(request.body?.modelRef);
-    if (requestedRef && !sameModelRef(record.modelRef, requestedRef)) {
-      return reply.code(409).send({
-        error: 'stale_chat_model',
-        message: 'модель чата уже изменена в другом окне; перечитай чат перед сбросом памяти',
-      });
-    }
-    // Живая сессия помнит разговор ВНУТРИ процесса, а не по --resume: пока она открыта,
-    // локального обнуления sessionId в окне мало — агент продолжил бы помнить всё.
-    const hasLive = liveSessions.has(chatKey);
-    const modelRef = record.modelRef as { provider?: unknown } | null;
-    const provider = String(modelRef?.provider || '');
-    const providerExecutor = provider ? await executorResolver(provider) : null;
-    const hasBinding = Boolean(providerExecutor?.sessionBinding);
-    if ((hasLive || hasBinding)
-      && (activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey }))) {
-      return reply.code(409).send({
-        error: 'chat_busy',
-        message: 'сначала останови текущий ход, затем сбрось память агента',
-      });
-    }
-    if (hasLive) await liveSessions.close(chatKey, 'сброс памяти агента');
 
-    if (!hasBinding) return { ok: true, reset: hasLive };
-    // Проверка busy и постановка собственного chat lock идут без await между ними:
-    // новый ход либо успевает первым (тогда 409 выше), либо ждёт уже пустой binding.
-    const binding = await turnLocks.run({ chatKey }, () => (
-      invalidateProviderSession(chatKey!, provider, { reason: 'user_reset' })
-    ));
-    return { ok: true, reset: !!binding, generation: binding?.generation ?? null };
+    if (!chatKey) {
+      return reply.code(400).send({ error: 'bad_chat_key' });
+    }
+    if (workdirTransitions.isBusy(chatKey) || acceptedTurns.get(chatKey)
+      || deletingChats.has(chatKey) || turnLocks.isBusy({ chatKey })) {
+      return reply.code(409).send({ error: 'chat_busy', message: 'Сначала дождитесь окончания хода.' });
+    }
+
+    return turnLocks.run({ chatKey }, async () => {
+      const record = await history.readOne(chatKey);
+
+      if (!record) {
+        return reply.code(404).send({ error: 'unknown_chat' });
+      }
+      const requestedRef = normalizeModelRef(request.body?.modelRef);
+
+      if (requestedRef && !sameModelRef(record.modelRef, requestedRef)) {
+        return reply.code(409).send({ error: 'stale_chat_model', message: 'Модель изменена в другом окне.' });
+      }
+
+      await resetWorkspaceMemory(record);
+
+      const binding = await bindingStore.read(chatKey);
+
+      await history.patchExecution(chatKey, (current) => ({
+        ...EMPTY_WORKDIR_MEMORY,
+        workdirState: {
+          ...current.workdirState,
+          seed: '',
+          seedClaim: null
+        },
+      }));
+
+      return {
+        ok: true,
+        reset: true,
+        generation: binding?.generation ?? null
+      };
+    });
   });
 
   /**
@@ -1565,7 +1807,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     } = resolved;
     const chatKey = String(opts.chatKey || '');
     let binding = null;
-    let sessionId = opts.sessionId || null;
+    let sessionId = record?.workdirState ? record.sessionId || null : opts.sessionId || null;
     const providerExecutor = await executorResolver(provider);
     if (providerExecutor?.sessionBinding) {
       if (record?.surface !== 'chats') {
@@ -1682,6 +1924,42 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ok: false,
         status: 400,
         body: { error: target.error, message: target.message },
+      };
+    }
+
+    try {
+      if (target.record && (target.record.taskId || null) !== (opts.id || null)) {
+        throw new ChatWorkdirError('stale_chat_workdir', 'Маршрут задачи не совпадает с записью чата.');
+      }
+      if (target.record && opts.workdir !== undefined
+        && !sameChatWorkdir(opts.workdir, target.record.workdir)) {
+        throw new ChatWorkdirError('stale_chat_workdir', 'Папка изменена в другом окне.');
+      }
+
+      target.workspace = await workspaceOf(target.record || {
+        taskId: opts.id,
+        modelRef: { provider: target.provider, model: target.model },
+      });
+
+      if (opts.workspaceKey && opts.workspaceKey !== target.workspace.workspaceKey) {
+        throw new ChatWorkdirError('stale_chat_workdir', 'Рабочие пути изменились после предпросмотра.');
+      }
+      if ((opts.workspaceKey || opts.compact) && target.record) {
+        const preview = await workdirTransitions.preview(target.record);
+
+        if (['reseed', 'unavailable'].includes(preview.transfer)) {
+          throw new ChatWorkdirError(
+            'workdir_transfer_required', 'Подтвердите перенос памяти в новую папку.',
+          );
+        }
+      }
+    } catch (error) {
+      const failure = error as ChatWorkdirError;
+
+      return {
+        ok: false,
+        status: failure.statusCode || 409,
+        body: { error: failure.code || 'workdir_failed', message: failure.message },
       };
     }
 
@@ -1867,7 +2145,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     if (known) {
       return known;
     }
-    if (deletingChats.has(chatKey)) {
+    if (deletingChats.has(chatKey) || workdirTransitions.isBusy(chatKey)) {
       return {
         status: 409,
         body: {
@@ -1901,6 +2179,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         acceptedAt: Date.now(),
         userText: opts.message || '',
         hadAttachments: !!opts.attachments?.length,
+        workspace: prepared.target.workspace,
         ...(userSentAt ? { userSentAt } : {}),
       });
       // Между проверкой очереди и постановкой в неё нет await: ход либо ждёт, либо стартует.
@@ -2008,7 +2287,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
     // DELETE ставит marker до первого filesystem await; новый ход не имеет права
     // вклиниться между busy-check и удалением durable identity.
-    if (chatKey && deletingChats.has(chatKey)) {
+    if (chatKey && (deletingChats.has(chatKey) || workdirTransitions.isBusy(chatKey))) {
       return reply.code(409).send({
         error: 'chat_busy',
         message: 'Чат сейчас удаляется; повторите действие после синхронизации истории.',
@@ -2057,16 +2336,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   }
 
   /**
-   * Один ход выбранного исполнителя: cwd и доп-каталоги по задаче и UI-контексту, промпт,
+   * Один ход выбранного исполнителя: cwd и доп-каталоги из резолвера workspace, промпт,
    * права, живая сессия или разовый запуск, лента и прогресс в SSE. Куда уходит итог,
    * решает канал: ответом на запрос или записью в pending (принятый ход, оборванный сокет).
    */
   async function runChatTurn(channel: TurnChannel, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
-    chatKey, queued, requestTitle, sentAt, compact, slashCommand, target,
+    chatKey, queued, requestTitle, sentAt, compact, slashCommand, target, summaryWorkspace, workspaceKey,
   }: ChatTurnInput & {
     model: string;
     target: RunTarget;
+    summaryWorkspace?: ResolvedWorkdir;
     queued: boolean;
     context: UiContext | null;
   }) {
@@ -2083,28 +2363,42 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // мог завести новый id, и запуск со старым потерял бы контекст разговора. Пустой
     // sessionId не трогаем: это осознанный старт нового разговора, а не устаревшая копия.
     if (queued && sessionId && lastSession.get(chatKey)) sessionId = lastSession.get(chatKey);
-    // Чат без задачи стартует из корня репозитория кокпита: исполнитель сразу видит
-    // корневые AGENTS.md/CLAUDE.md, а engine/ остаётся внутри рабочего дерева.
-    let cwd = config.rootDir;
-    // Настройка читается перед каждым ходом: кнопка в настройках действует сразу,
-    // без рестарта сервера и без изменения глобальных конфигов конкретных CLI.
-    const extraDirs = [...(prefs?.read().trustedDirectories || [])];
 
-    if (id) {
-      const parsed = parseSandboxRepositories(await factoryState.readEnv(id));
+    let workspace = summaryWorkspace || target.workspace!;
 
-      if (parsed.kind === 'invalid') {
-        return channel.refuse(409, {
-          error: 'invalid_sandbox_env',
-          message: 'Реестр worktree задачи повреждён — task-chat не запущен.',
+    if (!summaryWorkspace) {
+      try {
+        if (chatKey) {
+          target.record = await workdirTransitions.recover(chatKey);
+        }
+
+        const fresh = await workspaceOf(target.record || {
+          taskId: id,
+          modelRef: { provider: target.provider, model: target.model },
+        });
+
+        if (fresh.workspaceKey !== workspace.workspaceKey) {
+          throw new ChatWorkdirError('stale_chat_workdir', 'Рабочие пути изменились, пока ход ждал очереди.');
+        }
+
+        workspace = fresh;
+
+        if (target.record?.workdirState) {
+          sessionId = target.record.sessionId || null;
+        }
+      } catch (error) {
+        const failure = error as ChatWorkdirError;
+
+        return channel.refuse(failure.statusCode || 409, {
+          error: failure.code || 'workdir_failed', message: failure.message,
         });
       }
-      const { repos } = parsed;
-      if (repos.length) {
-        cwd = repos[0]!.path;
-        extraDirs.push(...repos.slice(1).map((repo) => repo.path));
-      }
     }
+
+    let cwd = workspace.cwd;
+    const extraDirs = [...workspace.extraDirs];
+    let rotationNote = '';
+
     // Вложения: клиент присылает имена файлов, ранее загруженных через /api/chat/upload.
     // Пути строим сами (только внутри attachDir) и открываем агенту доступ через --add-dir.
     let attachBlock = '';
@@ -2117,7 +2411,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (target.provider !== 'kimi') extraDirs.push(attachDir);
       attachBlock = `[Вложения]\nПользователь приложил файлы (открой их инструментом Read):\n${attachPaths.map((p) => `- ${p}`).join('\n')}\n[/Вложения]\n\n`;
     }
-    // Один и тот же каталог может прийти из доверенного списка, worktree и вложений.
+    // Один и тот же каталог может прийти из репозиториев проекта, worktree и вложений.
     // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
     const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
 
@@ -2158,7 +2452,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // контекст страницы, ни вложения, ни хук заголовка ему не нужны. План берём у
     // исполнителя: родная слэш-команда CLI (сессия сохраняется) либо выжимка текстом,
     // если слэш-команд в неинтерактивном режиме он не понимает (lib/executors/index.js).
-    const plan = compact ? (executor?.compaction || { kind: 'summary' }) : null;
+    const plan = compact ? (summaryWorkspace ? { kind: 'summary' }
+      : executor?.compaction || { kind: 'summary' }) : null;
     // Тикет выбранной задачи — только обычному ходу: служебному сжатию он не нужен.
     const ticket = plan ? '' : await taskTicketBlock(id);
     // Досье прерванного хода — запасная память, когда resume невозможен: binding
@@ -2170,10 +2465,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const stoppedBrief = (!plan && !slash && Boolean(executor?.sessionBinding) && !target.binding?.sessionId)
       ? stoppedTurnBrief(target.record?.messages)
       : '';
-    const fullMessage = plan
+    let fullMessage = slash ? String(message || '').trim() : plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
         contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock
+        + (workspace.copies.length > 1
+          ? `Рабочие копии:\n${workspace.copies.map((copy) => `${copy.key} → ${copy.path}`).join('\n')}\n\n`
+          : '')
         + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
         wantsTitle,
       );
@@ -2251,7 +2549,28 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       const identityMatches = current
         && (['provider', 'cwdRealpath', 'model', 'authProfileId', 'securityProfile'] as const)
           .every((field) => current[field] === providerIdentity![field]);
+
+      // Выжимка имеет смысл только в той сессии, чью память переносит операция.
+      // Ротация здесь скрыла бы потерю исходной памяти успешным ответом новой сессии.
+      if (compact && (!identityMatches || !current?.sessionId || current.sessionId !== sessionId)) {
+        return channel.refuse(409, {
+          error: 'workdir_origin_changed',
+          message: 'Профиль или сессия исполнителя изменились. Для смены папки выберите явный сброс памяти.',
+        });
+      }
+
       if (!current || !identityMatches) {
+        if (current?.sessionId && current.cwdRealpath !== cwdRealpath && !summaryWorkspace) {
+          rotationNote = `Новая сессия в ${cwdRealpath}: папка сменилась, прежний разговор агент не помнит.`;
+
+          if (chatKey) {
+            await history.patchExecution(chatKey, (record) => ({
+              messages: [...(record.messages || []), { role: 'note', text: rotationNote }],
+            }));
+            fastify.sse.broadcast('chat-store', { id: chatKey, origin: '' });
+          }
+        }
+
         providerBinding = await bindingStore.rotate(providerIdentity, current?.generation ?? null);
       } else {
         providerBinding = current;
@@ -2400,6 +2719,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
       };
 
+      if (!plan && !slash && chatKey) {
+        const seed = await workdirTransitions.claimSeed(chatKey, channel.turnId, Boolean(workspaceKey));
+
+        if (seed) {
+          fullMessage = `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}`
+            + `\n[/Выжимка]\n\n${fullMessage}`;
+        }
+      }
+      if (rotationNote) {
+        publishStep({
+          k: 'note',
+          text: rotationNote,
+          at: Date.now()
+        });
+      }
+
       const runArgs: ExecutorTurnOptions = {
         config,
         chatKey,
@@ -2447,6 +2782,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             known = String(saved.sessionId || known);
           }
           runRec.sessionId = known;
+
+          if (chatKey && !summaryWorkspace) {
+            await history.patchExecution(chatKey, (record) => ({
+              sessionId: known,
+              workdirState: {
+                ...record.workdirState,
+                committed: workspace,
+                sessionWorkspace: workspace,
+              },
+            }));
+          }
           if (chatKey) {
             fastify.sse.broadcast('chat-session', { chatKey, sessionId: known, at: Date.now() });
           }
@@ -2592,7 +2938,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // выжимкой (инцидент 14.09.2026). Поэтому старую сессию гасим здесь же, как это
         // делает явный сброс памяти, и id наружу не отдаём — иначе он вернулся бы в
         // lastSession и через pending. Родному компакту всё это не нужно: сессия та же.
-        if (plan.kind === 'summary') {
+        if (plan.kind === 'summary' && !summaryWorkspace) {
           lastSession.delete(chatKey);
           if (liveTurn) await liveSessions.close(chatKey, 'контекст сжат выжимкой');
           // У исполнителей с server-owned binding (DeepSeek, Kimi) id сессии живёт не в
@@ -2603,9 +2949,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             await invalidateProviderSession(chatKey, target.provider, { reason: 'compact' });
           }
         }
+
         out = {
           ...out,
-          ...(plan.kind === 'summary' ? { sessionId: null } : {}),
+          ...(plan.kind === 'summary' && !summaryWorkspace ? { sessionId: null } : {}),
           reply: '🗜 Контекст сжат.',
           contextTokens: 0,
           compact: { kind: plan.kind, seed },
@@ -2635,6 +2982,40 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             + ' и агент продолжит с этого места.',
         };
       }
+      if (chatKey && !summaryWorkspace) {
+        // Выжимку прежнего сжатия старое окно и пульт вклеивают в сообщение сами: успешный
+        // обычный ход её потребил. Чистим той же записью, а не второй на каждый ход.
+        const seedConsumed = !plan && !slash && !out.deliveryFailure;
+
+        await history.patchExecution(chatKey, (record) => ({
+          sessionId: out.sessionId || runRec.sessionId || null,
+          ...(plan?.kind === 'summary' ? {
+            ...EMPTY_WORKDIR_MEMORY,
+            pendingSeed: (out.compact as { seed?: string; })?.seed || '',
+          } : normalizeContextUsage(out)),
+          ...(seedConsumed ? { pendingSeed: '' } : {}),
+          workdirState: {
+            ...record.workdirState,
+            committed: workspace,
+            sessionWorkspace: workspace,
+          },
+        }));
+
+        if (!plan && !slash) {
+          const reset = await workdirTransitions.settleSeed(chatKey, !out.deliveryFailure);
+
+          if (reset) {
+            out = {
+              ...out,
+              ...EMPTY_WORKDIR_MEMORY,
+              sessionReset: true
+            };
+          }
+        }
+      }
+      if (rotationNote) {
+        out = { ...out, reply: `${rotationNote}\n\n${out.reply || ''}` };
+      }
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Ход всё-таки закончился после слива остановки: настоящий ответ важнее записи «на память».
@@ -2660,6 +3041,16 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return { ...out, model: model || null, effort: runEffort || null };
     } catch (errValue) {
       const err = errValue as ChatFailure;
+      let seedReset = false;
+
+      if (chatKey && !summaryWorkspace && !plan && !slash) {
+        seedReset = await workdirTransitions.settleSeed(chatKey, false);
+        err.sessionReset ||= seedReset;
+
+        if (err.sessionReset && !seedReset) {
+          await history.patchExecution(chatKey, () => ({ ...EMPTY_WORKDIR_MEMORY }));
+        }
+      }
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
       if (err.stopped) {
@@ -2686,8 +3077,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           ...normalizeContextUsage(runRec),
           ...normalizeContextUsage(err),
           ...(contextCache ? { contextCache } : {}),
-          cost: null, model: model || null, effort: runEffort || null, stopped: true, sessionReset: false,
+          cost: null, model: model || null, effort: runEffort || null, stopped: true,
+          ...(seedReset ? EMPTY_WORKDIR_MEMORY : {}),
+          sessionReset: seedReset,
         }, wantsTitle)!;
+
+        if (chatKey && !summaryWorkspace && !seedReset) {
+          await history.patchExecution(chatKey, (record) => ({
+            sessionId: stoppedOut.sessionId,
+            ...normalizeContextUsage(stoppedOut),
+            workdirState: {
+              ...record.workdirState,
+              committed: workspace,
+              sessionWorkspace: workspace
+            },
+          }));
+        }
         // Следующему ходу из очереди нужен фактический id оборванного разговора:
         // именно с ним он сделает resume, а не заведёт пустую session.
         if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
@@ -3210,6 +3615,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       sentAt: body.sentAt,
       slashCommand: body.slashCommand,
       turnId: body.turnId,
+      workdir: body.workdir,
+      workspaceKey: body.workspaceKey,
     });
   }
 
@@ -3268,8 +3675,19 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Идёт ТОЙ ЖЕ очередью, что обычные сообщения: два CLI на одну сессию не живут, а
   // сжатие — полноценный ход агента. Без sessionId сжимать нечего: разговора ещё нет.
   function compactBody(request: ChatRequest) {
-    const { model, modelRef, effort, mode, sessionId, chatKey } = request.body || {};
-    return { model, modelRef, effort, mode, sessionId, chatKey, compact: true };
+    const { model, modelRef, effort, mode, sessionId, chatKey, workdir, workspaceKey } = request.body || {};
+
+    return {
+      model,
+      modelRef,
+      effort,
+      mode,
+      sessionId,
+      chatKey,
+      workdir,
+      workspaceKey,
+      compact: true
+    };
   }
 
   fastify.post<ChatRoute>('/api/chat/compact', async (request, reply) => {
@@ -3305,6 +3723,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // POST, висящего весь ход. Старый сервер поля не знает, и окно остаётся на
       // синхронном запуске — повтор без идемпотентности там означал бы второй запуск.
       turnProtocol: 1,
+      workdirProtocol: 1,
       compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
       speech: {
         ...publicSpeech,
@@ -3383,9 +3802,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // PUT и DELETE объявляют намерение синхронно до первого await. Если PUT принят
     // первым, DELETE вернёт chat_busy; если DELETE — поздний PUT не воскресит файл.
     const releaseChatSaves = beginChatSaves(chatIds);
+
     try {
       try {
-        await history.save(body);
+        await history.save(body, { preserveMissing: true });
         return { ok: true };
       } catch (error) {
         if (!(error instanceof ChatHistoryError)) throw error;
@@ -3454,6 +3874,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         surface: saved?.surface ?? null,
         modelRef: saved?.modelRef ?? null,
         modelRefState: saved?.modelRefState ?? null,
+        workdir: saved?.workdir,
+        taskId: saved?.taskId ?? null,
+        workdirState: saved?.workdirState,
+        ...(saved?.workdirState ? {
+          sessionId: saved.sessionId ?? null,
+          pendingSeed: saved.pendingSeed || '',
+        } : {}),
       };
     } finally {
       releaseChatSave();
@@ -3470,7 +3897,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const id = String(request.params.id);
     // Проверка и marker выполняются без await: ход либо уже принят и блокирует DELETE,
     // либо увидит deletingChats и не сможет стартовать по удаляемой durable identity.
-    if ((acceptedTurns.get(id) || 0) > 0 || (savingChats.get(id) || 0) > 0 || deletingChats.has(id)
+    if (workdirTransitions.isBusy(id) || (acceptedTurns.get(id) || 0) > 0
+      || (savingChats.get(id) || 0) > 0 || deletingChats.has(id)
       || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id })) {
       return reply.code(409).send({
         error: 'chat_busy',

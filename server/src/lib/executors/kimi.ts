@@ -8,6 +8,9 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { validateKimiWorkdir } from '../kimi/sandbox.ts';
+import type { KimiSandboxConfig } from '../kimi/sandbox.ts';
+
 import { KIMI_RETRY_CONTRACT } from '../chat/retryContract.ts';
 import {
   kimiSeedModels,
@@ -300,7 +303,22 @@ export default {
   compaction: { kind: 'native', message: '/compact' },
   // В host-режиме ACP не умеет принять extraDirs; contained объявляет их через
   // server-owned local.toml и монтирует в sandbox. UI получает фактический режим.
-  trustedDirectories(config: KimiConfig) { return config.kimiLaunchMode === 'contained'; },
+  workdir(config: KimiConfig) {
+    return { switch: 'reseed', roots: config.kimiLaunchMode === 'host' ? 'single' : 'multi' };
+  },
+  validateWorkdir({ config, cwd, extraDirs }: {
+    config: unknown;
+    cwd: string;
+    extraDirs: string[];
+  }) {
+    return (config as KimiConfig).kimiLaunchMode === 'host'
+      ? { extraDirs }
+      : validateKimiWorkdir({
+        config: config as KimiSandboxConfig,
+        cwd,
+        extraDirs
+      });
+  },
   directSshPolicy(config: KimiConfig) {
     if (config?.kimiLaunchMode === 'contained') {
       return {

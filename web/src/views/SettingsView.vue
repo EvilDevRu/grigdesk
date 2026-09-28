@@ -912,73 +912,6 @@
           исполнителя в шапке). Обновление ставится только по кнопке.
         </p>
       </div>
-      <div class="card narrow">
-        <div>
-          <b>Доверенные каталоги</b>
-          <p class="muted small trusted-copy">
-            Дополнительные деревья, которые Cockpit открывает новым ходам исполнителей,
-            поддерживающих эту настройку. Текущий каталог проекта доступен и без этого
-            списка; корень <code>/</code> добавить нельзя.
-          </p>
-          <p v-if="!prov.loaded" class="muted small" data-testid="trusted-directory-providers">
-            Определяю исполнителей по реестру…
-          </p>
-          <p v-else-if="trustedDirectoryProviderNames" class="muted small" data-testid="trusted-directory-providers">
-            <b>Настройку применяют:</b> {{ trustedDirectoryProviderNames }}.
-          </p>
-          <p v-else class="muted small" data-testid="trusted-directory-providers">
-            Сейчас ни один чат-исполнитель не применяет эту настройку.
-          </p>
-        </div>
-        <div v-if="trustedDirectories.length" class="trusted-list">
-          <div v-for="(directory, index) in trustedDirectories" :key="directory" class="trusted-item">
-            <code :title="directory">{{ directory }}</code>
-            <UiButton
-              data-role="settings-compact-action"
-              :disabled="trustedDirectoriesBusy"
-              @click="removeTrustedDirectory(index)"
-            >
-              Убрать
-            </UiButton>
-          </div>
-        </div>
-        <p v-else class="muted small">Дополнительных каталогов пока нет.</p>
-        <div class="trusted-add">
-          <UiInput
-            v-model="trustedDirectoryInput"
-            data-context="settings-field"
-            :disabled="trustedDirectoriesBusy"
-            placeholder="/home/user/Workspace"
-            aria-label="Абсолютный путь к доверенному каталогу"
-            @keyup.enter="addTrustedDirectory"
-          />
-          <UiButton
-            data-role="settings-action"
-            :disabled="trustedDirectoriesBusy || !trustedDirectoryInput.trim()"
-            @click="addTrustedDirectory"
-          >
-            Добавить
-          </UiButton>
-        </div>
-        <div class="row">
-          <UiButton
-            variant="solid"
-            tone="accent"
-            data-role="settings-action"
-            :disabled="trustedDirectoriesBusy"
-            @click="applyTrustedDirectories"
-          >
-            {{ trustedDirectoriesBusy ? 'Сохраняю…' : 'Сохранить каталоги' }}
-          </UiButton>
-        </div>
-        <p class="muted small">
-          Настройка действует внутри Cockpit и не переписывает глобальные конфиги CLI.
-          Режим подтверждений выбранного исполнителя продолжает действовать отдельно.
-        </p>
-        <p v-if="trustedDirectoriesMsg" class="msg" :class="trustedDirectoriesMsg.type">
-          {{ trustedDirectoriesMsg.text }}
-        </p>
-      </div>
     </section>
 
     <!-- Запуски собраны как пульт: сначала правила, затем живое состояние и наблюдение.
@@ -2871,13 +2804,6 @@ async function testAuth() {
 
 // ── Исполнители (реестр LLM-агентов) ──
 const prov = useProvidersStore();
-// Кто применяет доверенные каталоги, объявляют сами адаптеры в /api/providers.
-// Здесь нет ни id, ни названий конкретных ИИ: новый исполнитель появится в строке
-// автоматически, как только включит capability в своём контракте.
-const trustedDirectoryProviders = computed(() =>
-  prov.providers.filter((provider) => provider.trustedDirectories === true));
-const trustedDirectoryProviderNames = computed(() =>
-  trustedDirectoryProviders.value.map((provider) => provider.name).join(', '));
 const refreshing = ref(false);
 async function refreshProv() {
   refreshing.value = true;
@@ -3045,57 +2971,17 @@ function loadAllMcp(refresh = false) {
 // ── Запуски (правила перед стартом триажа/конвейера) ──
 const prefs = ref(null);
 const prefsMsg = ref(null);
-const trustedDirectories = ref([]);
-const trustedDirectoryInput = ref('');
-const trustedDirectoriesBusy = ref(false);
-const trustedDirectoriesMsg = ref(null);
+
+/**
+ * Загружаем общие настройки и согласуем раскрытие блока доступа.
+ * При недоступном сервере не показываем устаревший снимок как действующий.
+ */
 async function loadPrefs() {
   try {
     prefs.value = await api.get('/api/settings/prefs');
-    trustedDirectories.value = [...(prefs.value.trustedDirectories || [])];
     syncInitialAccessDetails();
   } catch {
     prefs.value = null;
-    trustedDirectories.value = [];
-  }
-}
-
-function addTrustedDirectory() {
-  const value = trustedDirectoryInput.value.trim();
-  trustedDirectoriesMsg.value = null;
-  if (!value) return true;
-  if (!value.startsWith('/')) {
-    trustedDirectoriesMsg.value = { type: 'err', text: 'Укажите абсолютный путь, начиная с /.' };
-    return false;
-  }
-  if (!trustedDirectories.value.includes(value)) trustedDirectories.value.push(value);
-  trustedDirectoryInput.value = '';
-  return true;
-}
-
-function removeTrustedDirectory(index) {
-  trustedDirectories.value.splice(index, 1);
-  trustedDirectoriesMsg.value = null;
-}
-
-async function applyTrustedDirectories() {
-  if (!addTrustedDirectory()) return;
-  trustedDirectoriesBusy.value = true;
-  trustedDirectoriesMsg.value = null;
-  try {
-    const result = await api.post('/api/settings/trusted-directories', {
-      directories: trustedDirectories.value,
-    });
-    trustedDirectories.value = [...result.directories];
-    if (prefs.value) prefs.value.trustedDirectories = [...result.directories];
-    trustedDirectoriesMsg.value = {
-      type: 'ok',
-      text: 'Сохранено. Изменение действует со следующего хода.',
-    };
-  } catch (e) {
-    trustedDirectoriesMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally {
-    trustedDirectoriesBusy.value = false;
   }
 }
 
@@ -4255,18 +4141,6 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   font-size: 13px;
 }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
-.trusted-copy { margin: 5px 0 0; }
-.trusted-list { display: grid; gap: 7px; }
-.trusted-item { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
-.trusted-item code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; background: var(--ground); border: 1px solid var(--line);
-  border-radius: 7px; padding: 0 9px; height: 36px; box-sizing: border-box;
-  display: flex; align-items: center; font-size: 12px; }
-.trusted-item .ui-button { flex: none; box-sizing: border-box; }
-.trusted-add { display: flex; align-items: stretch; gap: 8px; }
-.trusted-add .ui-input { flex: 1; min-width: 0; box-sizing: border-box; }
-.trusted-add .ui-button { box-sizing: border-box; }
-
 /* «Запуски» — не линейная форма, а небольшой пульт из независимых смысловых зон.
    Автоподбор колонок использует всю ширину вкладки и сам схлопывается до одной. */
 .runs-section { container-type: inline-size; gap: 14px; }
@@ -4716,8 +4590,6 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .live-row-actions .ui-button { flex: 1; }
   .live-meta { align-items: stretch; flex-direction: column; }
   .live-path { max-width: 100%; }
-  .trusted-add { flex-direction: column; }
-  .trusted-add .ui-button { width: 100%; }
   .mode > p { margin-left: 0; padding-left: 39px; }
   .notification-line { align-items: stretch; flex-direction: column; }
   .notification-line .ui-button { width: 100%; }

@@ -278,7 +278,8 @@ test('гейт читает признак сервера, а не заголо�
       title: 'SKEPTIC: исчерпан лимит возвратов',
     },
   }));
-  assert.equal(arbiterButton(wrapper), undefined);
+
+  assert.equal(Boolean(arbiterButton(wrapper)), false);
 });
 
 // Узел, сам позвавший человека, — самая частая объявленная остановка маршрутов, и часть
@@ -302,7 +303,8 @@ test('вызов человека по отказу среды кнопки не
       ...NO_PROGRESS_STALL, stop: 'human', arbitrable: false, title: 'BUILD: стенд не поднялся',
     },
   }));
-  assert.equal(arbiterButton(wrapper), undefined);
+
+  assert.equal(Boolean(arbiterButton(wrapper)), false);
 });
 
 test('затык без машинного вида арбитру не отдаётся', async (t) => {
@@ -313,7 +315,8 @@ test('затык без машинного вида арбитру не отда
       kind: 'human', stage: 'SANDBOX', title: 'стенд не поднялся', hint: 'смотри журнал', since: null,
     },
   }));
-  assert.equal(arbiterButton(wrapper), undefined);
+
+  assert.equal(Boolean(arbiterButton(wrapper)), false);
 });
 
 test('нажатие спрашивает подтверждение и зовёт арбитра', async (t) => {
@@ -455,7 +458,8 @@ test('идущий разбор виден плашкой и убирает кн
   assert.equal(run.text().includes('1 мин'), true);
   const arbiterButton = wrapper.findAll('.sbretry')
     .find((button) => button.text().includes('разобрать и продолжить'));
-  assert.equal(arbiterButton, undefined, 'второй арбитраж спорил бы за исполнителя');
+
+  assert.equal(Boolean(arbiterButton), false, 'второй арбитраж спорил бы за исполнителя');
 });
 
 test('разбор по кнопке называет себя иначе, чем обход вотчера', async (t) => {

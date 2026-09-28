@@ -43,22 +43,61 @@ async function installBrowser(t, storage = {}) {
 function providers() {
   return [
     {
-      id: 'claude', name: 'Claude', vendor: 'Anthropic', available: true, installed: true,
-      chatEnabled: true, trustedDirectories: true, mcp: true, models: [], settings: [],
+
+      id: 'claude',
+      name: 'Claude',
+      vendor: 'Anthropic',
+      available: true,
+      installed: true,
+
+      chatEnabled: true,
+      mcp: true,
+      models: [],
+      settings: [],
+
     },
     {
-      id: 'codex', name: 'GPT (Codex)', vendor: 'OpenAI', available: true, installed: true,
-      chatEnabled: true, trustedDirectories: true, mcp: true, models: [], settings: [],
+
+      id: 'codex',
+      name: 'GPT (Codex)',
+      vendor: 'OpenAI',
+      available: true,
+      installed: true,
+
+      chatEnabled: true,
+      mcp: true,
+      models: [],
+      settings: [],
+
     },
     {
-      id: 'kimi', name: 'Kimi', vendor: 'Moonshot', available: false, installed: true,
-      chatEnabled: true, trustedDirectories: false, mcp: true, models: [], settings: [],
+
+      id: 'kimi',
+      name: 'Kimi',
+      vendor: 'Moonshot',
+      available: false,
+      installed: true,
+
+      chatEnabled: true,
+      mcp: true,
+      models: [],
+      settings: [],
+
     },
     // Произвольный будущий адаптер доказывает, что строка собирается из реестра,
     // а не из списка известных названий в SettingsView.
     {
-      id: 'local-next', name: 'Локальный Next', vendor: 'Test', available: true, installed: true,
-      chatEnabled: true, trustedDirectories: true, models: [], settings: [],
+
+      id: 'local-next',
+      name: 'Локальный Next',
+      vendor: 'Test',
+      available: true,
+      installed: true,
+
+      chatEnabled: true,
+      models: [],
+      settings: [],
+
     },
   ];
 }
@@ -355,12 +394,9 @@ test('итог обновления стоит у своей кнопки и н�
   );
 });
 
-test('доверенные каталоги перечисляют исполнителей по capability из реестра', async (t) => {
+test('общего списка доверенных каталогов больше нет в настройках', async (t) => {
   const { wrapper } = await mountSettings(t);
 
-  const text = wrapper.get('[data-testid="trusted-directory-providers"]').text();
-  assert.match(text, /Claude/);
-  assert.match(text, /GPT \(Codex\)/);
-  assert.match(text, /Локальный Next/, 'новый адаптер появился без правки списка во Vue');
-  assert.doesNotMatch(text, /Kimi/, 'исполнитель без capability не обещает доступ');
+  assert.equal(wrapper.find('[data-testid="trusted-directory-providers"]').exists(), false);
+  assert.doesNotMatch(wrapper.text(), /Доверенные каталоги/u);
 });

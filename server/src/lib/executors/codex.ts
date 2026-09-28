@@ -2,7 +2,7 @@
 // Установка: npm i -g @openai/codex && codex login — после этого провайдер оживает сам.
 // Ходы идут через `codex app-server`: новый разговор делает `thread/start`, следующий
 // `thread/resume`, затем `turn/start`. Песочница workspace-write: текущий cwd и явно
-// доверенные каталоги доступны для правок, сеть включена для gh/git/package CLI,
+// дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -2325,7 +2325,7 @@ export default {
   install: 'npm i -g @openai/codex && codex login',
   statusPage: 'https://status.openai.com',
   // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
-  trustedDirectories: true,
+  workdir: { switch: 'resume', roots: 'multi' },
   directSshPolicy: { enforcement: 'command-hook' },
   settings: [directSshSetting()],
 

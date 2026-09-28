@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ARBITER_DEFAULTS, normalizeArbiterSettings } from './factoryArbiter.ts';
 import { SPEECH_DEFAULTS, normalizeSpeechSettings } from './speechSettings.ts';
-import { normalizeStoredTrustedDirectories } from './trustedDirectories.ts';
 
 const DEFAULTS = {
   // Перед любым запуском (триаж, конвейер) подтягивать свежий код в репозитории
@@ -13,9 +12,6 @@ const DEFAULTS = {
   // Показывать в выборе модели ВСЕ, что помнит CLI (включая Sonnet 3.7, Opus 4.0…),
   // а не только две свежие версии каждого семейства.
   showAllModels: false,
-  // Дополнительные каталоги хоста, доступные всем ИИ-исполнителям в чатах Cockpit.
-  // Текущий cwd запуска доступен отдельно; здесь — соседние репозитории и общие деревья.
-  trustedDirectories: [],
   // Держать процесс исполнителя живым между ходами чата. Разовый запуск умирал вместе
   // с ответом, унося фоновые команды и субагентов, поэтому дефолт — включено. Тумблер
   // оставлен для отката: живая сессия держит память и свои MCP-серверы, а исполнители
@@ -133,13 +129,20 @@ export class PrefsStore {
     }
   }
 
+  /**
+   * Публичный снимок объединяет умолчания и сохранённые настройки.
+   * Удалённые настройки доступа не выдаются наружу и не переносятся следующей записью.
+   */
   read(): CockpitPrefs {
     let loaded: CockpitPrefs = {};
     try { loaded = this.readStored(); } catch { /* прежний fail-soft контракт read() */ }
+    // Старый общий доступ больше не участвует в запуске. Следующая запись prefs
+    // удалит устаревший ключ с диска, не перенося его в настройки отдельных чатов.
+    delete loaded.trustedDirectories;
+
     return {
       ...DEFAULTS,
       ...loaded,
-      trustedDirectories: normalizeStoredTrustedDirectories(loaded.trustedDirectories),
       // Общий store мержит верхний уровень. Speech доклеиваем отдельно, иначе старый
       // частичный объект затрёт новые поля defaults целиком.
       speech: normalizeSpeechSettings(loaded.speech),
@@ -164,12 +167,12 @@ export class PrefsStore {
   write(patch: CockpitPrefs | null | undefined): CockpitPrefs {
     const stored = this.readForWrite();
     const next: CockpitPrefs = { ...this.read() };
+
     for (const k of Object.keys(DEFAULTS)) {
       if (patch && k in patch) {
-        if (k === 'trustedDirectories') next[k] = normalizeStoredTrustedDirectories(patch[k]);
         // Форму настройки арбитра нормализуем на записи: она уходит в аргументы CLI,
         // и произвольный объект из тела запроса храниться здесь не должен.
-        else if (k === 'arbiter') next[k] = normalizeArbiterSettings(patch[k]);
+        if (k === 'arbiter') next[k] = normalizeArbiterSettings(patch[k]);
         else next[k] = patch[k];
       }
     }

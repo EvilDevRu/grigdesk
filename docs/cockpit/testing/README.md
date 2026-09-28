@@ -12,5 +12,5 @@
 - [Сторож, читающий текст задачи, ловит фикстуру, а не страницу](fixture-text-false-positives.md)
 - [Тест прошёл по другой причине — правило не проверено вовсе](behavioral-test-coverage.md)
 - [Однострочные пояснения функций прошли незамеченными = сторож читаемости видел только TS в web/](readability-guard-scope.md)
-- [Упавший assert с happy-dom может съесть всю память до показа ошибки](happy-dom-assert-memory.md)
+- [Упавший assert с узлом happy-dom съедает всю память — веб-тест запускай через сторож памяти](happy-dom-assert-memory.md)
 - [Playwright падает до первой спеки: в общем кэше нет ревизии chromium под версию проекта](playwright-browser-revision.md)

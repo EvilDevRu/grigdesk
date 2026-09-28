@@ -52,6 +52,9 @@
             <span :class="['status-dot', { archived: store.opened.archivedAt }]" />
             {{ store.opened.archivedAt ? 'В архиве' : 'Активный' }}
           </span>
+          <UiButton v-if="!creating && store.opened && !store.opened.archivedAt" @click="openChat">
+            Чат с проектом
+          </UiButton>
         </header>
 
         <div class="form-content">
@@ -122,6 +125,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import { UiButton, UiInlineMessage, confirmDialog } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
+import { useChatStore } from '../stores/chat.js';
 import {
   archiveProject,
   checkRepositories,
@@ -142,6 +146,7 @@ import ProjectAvatar from './projects/ProjectAvatar.vue';
 const route = useRoute();
 const router = useRouter();
 const store = useProjectsStore();
+const chat = useChatStore();
 const { dockCapable } = useDockViewport();
 const projectsContext = useUiContextSource('projects', { layer: 'page', active: false });
 
@@ -169,6 +174,23 @@ const listVisible = computed(() => splitView.value || !formVisible.value);
 const formTitle = computed(() => (
   creating.value ? 'Новый проект' : store.opened?.title || openedId.value
 ));
+
+/**
+ * Чат запоминает явный проект и выбранный репозиторий паспорта.
+ * Рабочую папку перед первым сохранением проверяет общий серверный resolver.
+ */
+async function openChat() {
+  await chat._load();
+  chat.newSession({
+    workdir: {
+      kind: 'project',
+      projectId: openedId.value,
+      repoKey: selectedRepo.value || null
+    },
+    title: `Проект · ${formTitle.value}`,
+  });
+  await router.push('/chats');
+}
 
 const snapshot = computed(() => (
   store.opened ? createDraft(store.opened) : null

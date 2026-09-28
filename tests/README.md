@@ -41,6 +41,15 @@ npm --prefix server test
 npm --prefix web test
 ```
 
+Отдельные файлы — тоже через сторож памяти: голый `node --test` его не получает, и упавший
+веб-тест однажды занял всю ОЗУ и подкачку
+([ловушка](../docs/cockpit/testing/happy-dom-assert-memory.md)).
+
+```bash
+bash tests/run-node-tests-safe.sh --test tests/web/<файл>.test.js
+NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test --test-concurrency=2 <файлы>
+```
+
 Файлы внутри набора идут параллельно (`--test-concurrency`: сервер 6, web 4), а суммарный
 RSS всей группы ограничивает `tests/run-node-tests-safe.sh`. Бюджет задаётся переменной
 `NODE_TEST_MAX_RSS_MB` и обязан быть не меньше гигабайта на одновременный файл — это

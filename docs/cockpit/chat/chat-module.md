@@ -8,46 +8,16 @@
   По задаче cwd = первый worktree из exact-списка `REPO_COUNT`/`REPO_<i>_*`, остальные
   передаются executor-у как `extraDirs`.
   Для старых песочниц без `REPO_*` совместимо читаются `BE_WT` и `FE_WT`.
-  Без задачи cwd = `config.rootDir` (корень репозитория кокпита — исполнитель сразу видит
-  корневые AGENTS.md/CLAUDE.md); страница «Агенты» переопределяет его на `agents/`.
-  Отдельный trusted-run триажа использует тот же adapter-контракт, но только у исполнителей
-  с `scopedWorkspace`: readable roots профиля отделены от единственного writable output,
-  сеть и общий Bash закрыты. Claude получает private MCP только с `repo_history`, Codex —
-  тот же server-owned descriptor как dynamic tool; остальные внешние MCP в этот ход не едут.
-  У Codex capability публикуется только когда живая схема CLI содержит
-  `workspaceWrite.readOnlyAccess`; старые версии с чтением всего хоста fail-closed не
-  предлагаются для триажа.
-  Codex работает с `approvalPolicy: "never"` и sandbox `workspaceWrite`: cwd и `extraDirs`
-  перечисляются в `turn/start.sandboxPolicy.writableRoots`, полный доступ к хосту не выдаётся,
-  сеть включена для `gh`, `git` и пакетных менеджеров. **Те же пути идут вторым, независимым
-  полем `runtimeWorkspaceRoots` в `thread/start`/`thread/resume`**: writableRoots — это только
-  право писать, а рабочей ОБЛАСТЬЮ агента без этого поля остаётся один cwd («Omitted defaults
-  to cwd» в схеме app-server). Поле экспериментальное, поэтому `initialize` объявляет
-  `capabilities: {experimentalApi: true, requestAttestation: false}`; почему второй флаг
-  обязан быть выключен и как это отличалось у `codex exec` — [грабли](codex-workspace-scope.md).
-- **Доверенные каталоги** задаются один раз в «Настройки → Исполнители» и хранятся в
-  `prefs.trustedDirectories`. Сервер проверяет realpath каждого существующего абсолютного
-  каталога, не разрешает `/`, убирает дубли и перед каждым новым ходом добавляет список в
-  `extraDirs`. Claude превращает его в `--add-dir`, Codex — в
-  `turn/start.sandboxPolicy.writableRoots` **и** `thread/*.runtimeWorkspaceRoots` (право
-  писать и рабочая область — два разных поля, см. выше). У `kimi acp` такого флага нет.
-  Запуск Kimi имеет два режима (`config.kimiLaunchMode`, умолчание `host`): в host-режиме
-  Kimi — прямой хост-процесс (parity с claude: host fs/config/credentials, permission-система
-  самого CLI), и `extraDirs` ему недоступны — доступ за пределами cwd идёт через
-  permission-промпты. В contained-режиме sandbox монтирует каталоги writable bind-ом и
-  объявляет их сессии через server-owned
-  `local.toml` (`[workspace] additional_dir`) в per-run каталоге-маске, заменяющем
-  `<projectRoot>/.kimi-code` целиком (kimi-runtime-security.md). Доверенный каталог может
-  содержать сам репозиторий cockpit: в contained-режиме server-owned control state внутри
-  него (`chats/`, `server/.state`, `.env`, runtime/factory state) прячется пустым read-only
-  mount-ом; в host-режиме этой маски нет — как у claude.
-  Глобальные `~/.claude` и
-  `~/.codex` Cockpit не переписывает, активный ход не меняется — следующий подхватывает
-  настройку без рестарта. Поддержку списка объявляет сам адаптер полем
-  `trustedDirectories: true | (config) => boolean`; реестр отдаёт вычисленный boolean в
-  `/api/providers`, а UI перечисляет имена поддерживающих исполнителей из этого ответа.
-  Поэтому новый исполнитель появляется в подписи без ветки по его id во Vue, а Kimi
-  автоматически появляется/исчезает при смене contained/host-профиля.
+  Без задачи cwd задаёт сохранённый выбор `workdir`: Кокпит, проект или абсолютный путь.
+  У задачи без копий читается доверенно связанный проект, затем сохранённый выбор чата.
+  Контекст страницы cwd не меняет. [Резолвер и границы](chat-workspace.md),
+  [переход памяти](workdir-transition-preconditions.md).
+
+- **Рабочие корни** приходят из выбранной папки, репозиториев проекта и копий задачи.
+  Вложения добавляются отдельно. Адаптер публикует `workdir.switch` (resume/reseed) и
+  `workdir.roots` (multi/single); UI использует серверный предпросмотр. Общая настройка
+  доверенных каталогов и её API удалены. DeepSeek не расширяет cwd до общего предка,
+  Kimi contained проверяет запреты монтирования тем же валидатором в preview и runtime.
 - **Метрики кольца описаны в продуктовом контракте**
   `docs/cockpit/guide/chat-context.md`. Claude и Codex измеряют вход последнего
   основного model request; Ollama — вход и вывод последнего раунда; Kimi — статус

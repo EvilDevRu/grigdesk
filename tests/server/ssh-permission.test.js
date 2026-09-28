@@ -165,7 +165,7 @@ test('chat/index в auto-режиме не применяет autoDecision и re
     },
     prefs: {
       read() {
-        return { trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 };
+        return { providerSettings: {}, chatAutoCompactWindow: 0 };
       },
     },
     modelsRegistry: async () => ({ fake: [{ id: 'fake-1', efforts: [] }] }),

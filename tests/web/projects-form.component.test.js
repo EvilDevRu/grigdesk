@@ -161,6 +161,7 @@ async function mountForm(t, {
 
   const component = await compileVue(VIEW, {
     stubs: {
+      '../stores/chat.js': 'export const useChatStore = () => ({ _load: async () => {} });',
       '../actions/projects': ACTIONS_STUB,
       '../../actions/projects': ACTIONS_STUB,
       '../ui': UI_STUB,

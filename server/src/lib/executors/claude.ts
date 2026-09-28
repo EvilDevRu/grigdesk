@@ -1500,7 +1500,7 @@ export default {
   // пришли не по нашей вине: иначе сбой Anthropic человек разбирает как поломку кокпита.
   statusPage: 'https://status.claude.com',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
-  trustedDirectories: true,
+  workdir: { switch: 'resume', roots: 'multi' },
   directSshPolicy: { enforcement: 'command-hook' },
   untrustedInput: Object.freeze({
     text: true,
