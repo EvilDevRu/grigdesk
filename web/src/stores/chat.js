@@ -1300,6 +1300,16 @@ export const useChatStore = defineStore('chat', {
       const acknowledged = { ...snapshot };
 
       applySaveAck(acknowledged, response);
+
+      // Отпечаток — только полей снимка. Поле ответа, которого снимок не несёт (например,
+      // modelRefState), навсегда делало чат «несохранённым», и каждая следующая запись
+      // отправляла его целиком заново.
+      for (const key of Object.keys(acknowledged)) {
+        if (!Object.hasOwn(snapshot, key)) {
+          delete acknowledged[key];
+        }
+      }
+
       sentChats.set(id, fingerprintOf(acknowledged));
 
       return response;
