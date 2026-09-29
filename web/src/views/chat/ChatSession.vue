@@ -217,16 +217,6 @@
               Работаем в: {{ sess.workdirPreview?.target?.cwd
                 || sess.workdirState?.committed?.cwd || chatWorkdirLabel(sess.workdir) }}
             </p>
-            <template v-if="!sess.taskId && chat.workdirProtocol">
-              <div v-if="chat.recentWorkdirs.length" class="e-workdir-shortcuts">
-                <UiButton v-for="(workdir, index) in chat.recentWorkdirs.slice(0, 4)" :key="index"
-                          variant="text" :disabled="frozen"
-                          @click="chat.proposeWorkdir(sid, { taskId: null, workdir }, true)">
-                  {{ chatWorkdirLabel(workdir) }}
-                </UiButton>
-              </div>
-              <p>Сменить рабочую папку — «Папка» в шапке чата.</p>
-            </template>
             <p>
               Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
               «/» — команды, «$» — навыки Codex.
@@ -1965,7 +1955,6 @@ async function openDebug() {
 .e-sub { display: grid; gap: 8px; font-size: 13px; line-height: 1.6; margin-top: 8px; }
 .e-sub p { margin: 0; }
 .e-workdir { overflow-wrap: anywhere; }
-.e-workdir-shortcuts { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 
 .msg { display: flex; flex-direction: column; gap: 4px; }
 /* Текст + иконка копирования рядом (в потоке, не поверх текста). У пользовательских

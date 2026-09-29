@@ -5,7 +5,6 @@
 import { defineStore } from 'pinia';
 
 import type {
-  ObservedReset,
   UsageBarForecast,
   UsageForecastSnapshot,
 } from '../../../shared/usageForecastContracts.ts';
@@ -26,16 +25,6 @@ export const useUsageForecastStore = defineStore('usageForecast', {
     barsOf: (state) => (providerId: string): UsageBarForecast[] => (
       (state.snapshot?.bars ?? []).filter((bar) => bar.providerId === providerId)
     ),
-
-    // Последний сброс окна у исполнителя. Истечение окна по расписанию — штатное дело
-    // (5-часовое окно истекает пять раз в сутки), поэтому вперёд идёт сброс чужими или
-    // своими руками, и только без таких — последнее истечение. Журнал сервер уже
-    // отсортировал от свежего к старому.
-    lastResetOf: (state) => (providerId: string): ObservedReset | null => {
-      const own = (state.snapshot?.resets ?? []).filter((reset) => reset.providerId === providerId);
-
-      return own.find((reset) => reset.origin !== 'scheduled') ?? own[0] ?? null;
-    },
   },
 
   actions: {

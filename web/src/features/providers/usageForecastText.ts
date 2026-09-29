@@ -1,9 +1,6 @@
 // Слова для блока прогноза во всплывашке исполнителя. Чистые функции от снимка и
 // «сейчас»: шаблон не должен считать даты, а тест — монтировать компонент ради строки.
-import type {
-  ObservedReset,
-  UsageBarForecast,
-} from '../../../../shared/usageForecastContracts.ts';
+import type { UsageBarForecast } from '../../../../shared/usageForecastContracts.ts';
 
 // Тон строки: тем же словарём пользуются классы `is-*` состояний всплывашки.
 export type ForecastTone = 'ok' | 'warn' | 'bad' | 'muted';
@@ -19,12 +16,6 @@ const MONTHS = [
   'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
   'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
 ];
-
-const ORIGIN_WORDS: Record<ObservedReset['origin'], string> = {
-  scheduled: 'окно истекло само',
-  own: 'ваш сброс',
-  external: 'сбросил вендор',
-};
 
 function clockOf(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
@@ -44,7 +35,7 @@ function calendarDaysBetween(from: number, to: number): number {
 
 /**
  * Календарный момент в обе стороны: «сегодня 14:20», «вчера 18:30», «завтра 03:00»,
- * «12 сен 15:09». Помощник полос знает только будущее, а сброс — всегда в прошлом.
+ * «12 сен 15:09». Прогноз из последнего снимка может устареть до нового замера.
  */
 export function momentOf(iso: string | null, now = Date.now()): string {
   const at = iso ? new Date(iso).getTime() : Number.NaN;
@@ -159,22 +150,5 @@ export function idleRow(): ForecastRow {
     value: 'расход стоит',
     tone: 'muted',
     sub: null,
-  };
-}
-
-// Последний замеченный сброс окна: когда, чьими руками и с какого процента на какой.
-// Природа сброса названа словами, потому что «12 сен 18:30» без неё не отвечает,
-// ждать ли следующего.
-export function resetRowOf(reset: ObservedReset, now = Date.now()): ForecastRow {
-  return {
-    key: 'reset',
-    label: 'Сброс окна',
-    value: momentOf(reset.at, now),
-    tone: 'muted',
-    sub: {
-      label: `«${reset.label}» · ${ORIGIN_WORDS[reset.origin]}`,
-      text: `${Math.round(reset.fromPct)} % → ${Math.round(reset.toPct)} %`,
-      tone: 'muted',
-    },
   };
 }

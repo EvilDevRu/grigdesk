@@ -1,4 +1,4 @@
-// Блок прогноза во всплывашке исполнителя: ряды по полосам и последний сброс окна;
+// Блок прогноза во всплывашке исполнителя: темп и вердикт по полосам;
 // у исполнителя без данных блока нет.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -9,7 +9,6 @@ import {
   barRowOf,
   idleRow,
   momentOf,
-  resetRowOf,
 } from '../../web/src/features/providers/usageForecastText.ts';
 
 const NOW = new Date(2026, 8, 15, 12, 0).getTime();
@@ -41,7 +40,7 @@ function bar(overrides = {}) {
   };
 }
 
-test('ряды прогноза: момент, давность, темп с вердиктом, стоящий расход и сброс', () => {
+test('ряды прогноза: момент, давность, темп с вердиктом и стоящий расход', () => {
   assert.equal(momentOf(new Date(2026, 8, 15, 18, 0).toISOString(), NOW), 'сегодня 18:00');
   assert.equal(momentOf(new Date(2026, 8, 14, 15, 9).toISOString(), NOW), 'вчера 15:09');
   assert.equal(momentOf(new Date(2026, 8, 12, 15, 9).toISOString(), NOW), '12 сен 15:09');
@@ -90,22 +89,6 @@ test('ряды прогноза: момент, давность, темп с в�
   });
   assert.equal(barRowOf(bar({ verdict: 'unknown', ratePerHour: null, exhaustAt: null }), NOW), null);
   assert.deepEqual(idleRow(), { key: 'idle', label: 'Темп', value: 'расход стоит', tone: 'muted', sub: null });
-
-  assert.deepEqual(resetRowOf({
-    providerId: 'codex',
-    barKey: 'codex:primary',
-    label: 'Неделя (7д)',
-    at: new Date(2026, 8, 12, 18, 30).toISOString(),
-    fromPct: 100,
-    toPct: 0,
-    origin: 'external',
-  }, NOW), {
-    key: 'reset',
-    label: 'Сброс окна',
-    value: '12 сен 18:30',
-    tone: 'muted',
-    sub: { label: '«Неделя (7д)» · сбросил вендор', text: '100 % → 0 %', tone: 'muted' },
-  });
 });
 
 test('компонент показывает блок своему исполнителю и молчит у чужого', async (t) => {
@@ -114,15 +97,6 @@ test('компонент показывает блок своему исполн
   globalThis.__usageForecastWatched = 0;
   globalThis.__usageForecastStore = {
     barsOf: (id) => (id === 'codex' ? [bar()] : []),
-    lastResetOf: (id) => (id === 'codex' ? {
-      providerId: 'codex',
-      barKey: 'codex:primary',
-      label: 'Неделя (7д)',
-      at: new Date(2026, 8, 12, 18, 30).toISOString(),
-      fromPct: 100,
-      toPct: 0,
-      origin: 'external',
-    } : null),
   };
 
   const [{ mount }, ProviderUsageForecast] = await Promise.all([
@@ -145,8 +119,7 @@ test('компонент показывает блок своему исполн
   assert.match(codex.text(), /Прогноз/);
   assert.match(codex.text(), /Неделя \(7д\)\s*6.2 %\/ч/);
   assert.match(codex.text(), /до сброса не хватит/);
-  assert.match(codex.text(), /Сброс окна\s*12 сен 18:30/);
-  assert.match(codex.text(), /«Неделя \(7д\)» · сбросил вендор\s*100 % → 0 %/);
+  assert.doesNotMatch(codex.text(), /Сброс окна|сбросил вендор/);
   assert.doesNotMatch(codex.text(), /расход стоит/);
   assert.equal(codex.findAll('a').length, 0);
   assert.equal(globalThis.__usageForecastWatched, 1);

@@ -24,7 +24,6 @@ import { watchUsageForecast } from '../../actions/usageForecast/watchUsageForeca
 import {
   barRowOf,
   idleRow,
-  resetRowOf,
   type ForecastRow,
 } from './usageForecastText.ts';
 
@@ -35,7 +34,7 @@ const props = defineProps<{ providerId: string }>();
 const store = useUsageForecastStore();
 
 /**
- * Ряды блока: полосы с темпом (или один общий «расход стоит») и последний сброс.
+ * Ряды блока: полосы с темпом или один общий «расход стоит».
  * Без единого ряда полос у исполнителя блока нет — так он не появляется там, где
  * лимиты вовсе не окна (Ollama).
  */
@@ -46,12 +45,6 @@ const rows = computed<ForecastRow[]>(() => {
 
   if (bars.length && !result.length) {
     result.push(idleRow());
-  }
-
-  const reset = store.lastResetOf(props.providerId);
-
-  if (reset) {
-    result.push(resetRowOf(reset, now));
   }
 
   return result;

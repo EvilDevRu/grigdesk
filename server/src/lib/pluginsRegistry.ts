@@ -465,7 +465,7 @@ export const SYSTEM: PluginManifest[] = [
     defaultEnabled: true,
     name: 'Прогноз лимитов',
     version: '0.1.0',
-    description: 'Хватит ли окна лимита до сброса при вашем темпе и когда окно сбрасывали: '
+    description: 'Хватит ли окна лимита до сброса при вашем темпе: '
       + 'по снимкам полос исполнителей, без запросов к вендорам сверх обычных.',
     category: 'dev',
     nav: null,
