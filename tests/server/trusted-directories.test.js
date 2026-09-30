@@ -8,11 +8,10 @@ import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 import claudeExecutor from '../../server/src/lib/executors/claude.ts';
 import codexExecutor from '../../server/src/lib/executors/codex.ts';
 import kimiExecutor from '../../server/src/lib/executors/kimi.ts';
-import ollamaExecutor from '../../server/src/lib/executors/ollama.ts';
 import { resolveWorkdirCapability } from '../../server/src/lib/chat/workdir.ts';
 
 test('адаптеры объявляют смену папки вместо общего доверенного доступа', async () => {
-  for (const executor of [claudeExecutor, codexExecutor, ollamaExecutor]) {
+  for (const executor of [claudeExecutor, codexExecutor]) {
     assert.deepEqual(await resolveWorkdirCapability(executor, {}), { switch: 'resume', roots: 'multi' });
     assert.equal(Object.hasOwn(executor, 'trustedDirectories'), false);
   }

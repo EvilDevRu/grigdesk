@@ -1,7 +1,7 @@
 # Рабочие инструменты Cockpit
 
 `supervised_ssh` — первый рабочий tool самого Cockpit. Он доставляется Claude через MCP,
-Codex как app-server dynamic tool, Kimi через ACP/MCP, Ollama через общий toolbox, но
+Codex как app-server dynamic tool, Kimi и DeepSeek через ACP/MCP, но
 descriptor и dispatcher едины. Scope строится только из trusted attempt ledger и
 authoritative project membership; UI-context, body и история его выбрать не могут.
 Свободный чат получает null scope.

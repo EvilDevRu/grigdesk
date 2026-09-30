@@ -255,7 +255,6 @@
       "tests/server/meeting-plan.test.js",
       "tests/server/model-effort.test.js",
       "tests/server/models-registry.test.js",
-      "tests/server/ollama-provider.test.js",
       "tests/server/plugins-nav.test.js",
       "tests/server/plugins-placements.test.js",
       "tests/server/plugins-web-page.test.js",
@@ -777,7 +776,6 @@
       "tools/claude-contract-smoke.mjs",
       "tools/kimi-resume-smoke.mjs",
       "tools/kimi-status-probe.mjs",
-      "tools/ollama-agent-smoke.mjs",
       "tools/telegram-reactions-probe.mjs"
     ],
     "webPublic": [

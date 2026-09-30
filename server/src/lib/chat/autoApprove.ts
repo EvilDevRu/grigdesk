@@ -1,7 +1,6 @@
 // Кокпит-политика «авто» для исполнителей, чьи разрешения проходят через кокпит:
 // Kimi (ACP-сессия остаётся в режиме `default` и продолжает спрашивать через
-// session/request_permission) и Ollama (инструменты исполняет сам кокпит). Отвечает
-// на запросы этот классификатор: безопасные действия разрешаются молча,
+// session/request_permission). На запросы отвечает этот классификатор: безопасные действия разрешаются молча,
 // деструктивные и неизвестные уходят человеку во всплывашку.
 //
 // Словарь действий один — ACP `toolCall.kind`; исполнитель обязан лишь назвать свой
@@ -9,8 +8,7 @@
 //
 // ВАЖНО: это UX-политика, а не security boundary. У Kimi настоящая граница —
 // contained runtime (bwrap + cgroup + egress allowlist): запись ограничена workspace,
-// сети нет, credentials недоступны. У Ollama — realpath-песочница путей (см.
-// executors/_ollama-tools.js), которая, однако, НЕ распространяется на `bash`.
+// сети нет, credentials недоступны.
 // Обфусцированную команду классификатор может не узнать — поэтому неизвестные формы
 // fail-closed уходят на подтверждение.
 
@@ -80,7 +78,7 @@ function kindOf(presentation: PermissionPresentation): string {
 
 /**
  * Решение авто-режима по presentation исполнителя (у Kimi её строит
- * permissionPresentation() в runtime.js, у Ollama — каталог инструментов).
+ * permissionPresentation() в runtime.ts).
  * Возвращает { verdict: 'allow' } либо { verdict: 'ask', reason }.
  * Fail-closed: неизвестный kind/пустой запрос → 'ask'.
  */

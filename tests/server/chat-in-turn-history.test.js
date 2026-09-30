@@ -32,18 +32,40 @@ function deferred() {
  * Исполнитель под управлением теста: отдаёт порт уточнений и держит ход, пока тест не
  * отпустит его. Так проверяется очередь «A работает → B ждёт».
  */
-function holdingExecutor() {
+function holdingExecutor(t) {
   const runs = [];
   const delivered = [];
+  let closing = false;
+
+  t.after(() => {
+    closing = true;
+
+    for (const run of runs) {
+      run.hold.resolve();
+    }
+  });
 
   const executor = {
     id: 'test-provider',
     inTurnInput: { protocol: 1, text: true, confirmation: 'forwarded' },
+    // Снимок берётся до ожидания и до чтений через API: reader не должен сам
+    // достраивать историю и тем самым скрывать отсутствие барьера записи.
     async run(options) {
+      const chatPath = path.join(options.config.chatsDir, '2026-09', options.chatKey + '.json');
+      const history = JSON.parse(await fs.readFile(chatPath, 'utf8')).messages;
       const hold = deferred();
-      const run = { options, hold };
+      const run = {
+        options,
+        hold,
+        history,
+      };
 
       runs.push(run);
+
+      if (closing) {
+        hold.resolve();
+      }
+
       options.onInTurnReady?.({
         async deliver(input) {
           delivered.push(input);
@@ -78,7 +100,7 @@ async function tmpHistory() {
 }
 
 test('FLOW-15: следующий ход видит уточнение и ответы прошлого запуска при закрытых окнах', async (t) => {
-  const { executor, runs, delivered } = holdingExecutor();
+  const { executor, runs, delivered } = holdingExecutor(t);
   const { app } = await chatAppFixture(t, { executor });
 
   await saveChat(app, 'chat-fixture');
@@ -136,7 +158,9 @@ test('FLOW-15: следующий ход видит уточнение и отв
 
   await waitFor(() => runs.length === 2, { what: 'старт хода B' });
 
-  const history = runs[1].options.chatHistory || [];
+  assert.equal(Object.hasOwn(runs[1].options, 'chatHistory'), false);
+
+  const history = runs[1].history;
   const texts = history.map((message) => String(message.text || ''));
 
   assert.equal(texts.filter((text) => text === 'Почему выбран первый файл?').length, 1, 'уточнение C ровно один раз');
@@ -163,7 +187,7 @@ test('FLOW-15: следующий ход видит уточнение и отв
 });
 
 test('FLOW-17: ошибка записи группы не запускает следующий executor; повтор сохраняет её', async (t) => {
-  const { executor, runs, delivered } = holdingExecutor();
+  const { executor, runs, delivered } = holdingExecutor(t);
   const { app, config } = await chatAppFixture(t, { executor });
 
   await saveChat(app, 'chat-fixture');
@@ -214,12 +238,12 @@ test('FLOW-17: ошибка записи группы не запускает с
     payload: turnBody('chat-fixture', 'turn-fixture-c017', 'Третья работа'),
   });
   await waitFor(() => runs.length === 2, { what: 'восстановленный ход C' });
-  assert.equal(runs[1].options.chatHistory.filter((message) => message.text === 'Почему так?').length, 1);
+  assert.equal(runs[1].history.filter((message) => message.text === 'Почему так?').length, 1);
   runs[1].hold.resolve();
 });
 
 test('FLOW-18: большой PUT не переписывает canonical receipt, текст и sequence', async (t) => {
-  const { executor, runs, delivered } = holdingExecutor();
+  const { executor, runs, delivered } = holdingExecutor(t);
   const { app } = await chatAppFixture(t, { executor });
 
   await saveChat(app, 'chat-fixture');

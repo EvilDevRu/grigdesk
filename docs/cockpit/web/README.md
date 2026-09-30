@@ -11,6 +11,7 @@
 ## Устройство
 
 - [Веб (web/src/)](frontend-architecture.md)
+- [Настройки исполнителей раскрываются по одному](executor-settings-accordion.md)
 - [Вид — третичный уровень без заголовка](view-navigation-level.md)
 - [Горячие клавиши инструментов — настройка устройства](device-tool-shortcuts.md)
 - [Звонят все три беды вотчера, а не две](watcher-alert-sounds.md)

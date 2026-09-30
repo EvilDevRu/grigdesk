@@ -16,7 +16,7 @@ export const TEST_MODEL_REF = Object.freeze({ provider: 'test-provider', model: 
 /**
  * Исполнитель под управлением теста. Каждый запуск висит, пока тест не вызовет
  * `release`/`fail`, а «стоп» обрывает его так же, как настоящий CLI: ошибкой stopped.
- * Спросы (разрешение и вопрос) идут тем же мостом onPermission, что у Kimi/Ollama.
+ * Спросы (разрешение и вопрос) идут тем же мостом onPermission, что у Kimi.
  */
 export function controlledExecutor({ id = 'test-provider' } = {}) {
   const runs = [];

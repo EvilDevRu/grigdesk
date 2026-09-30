@@ -193,7 +193,6 @@ test('состав work-tools задаёт реестр без fallback-спис
     'server/src/lib/executors/_claudeStream.ts',
     'server/src/lib/executors/codex.ts',
     'server/src/lib/kimi/runtime.ts',
-    'server/src/lib/executors/_ollamaTools.ts',
     'server/src/lib/executors/workIpc.ts',
     'server/src/lib/executors/work-mcp.js',
   ];

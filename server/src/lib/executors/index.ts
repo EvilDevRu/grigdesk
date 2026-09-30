@@ -52,8 +52,7 @@
 //                              value, disabled?, note?, min?, max?, step?, confirm? }]
 //                              ЛИБО
 //                              async-функция (config) → такой же массив — для деклараций,
-//                              зависящих от живого железа/демона (потолок ползунка num_ctx
-//                              у Ollama считается от памяти машины). kind: 'toggle' |
+//                              зависящих от окружения исполнителя. kind: 'toggle' |
 //                              'text' | 'number' | 'range' (ползунок, обязаны min/max/step;
 //                              значение приводится к числу, как у 'number'). Ручки у разных
 //                              ИИ разные, поэтому список объявляет сам executor, а UI только
@@ -64,7 +63,7 @@
 //                              только с точным `confirmed: true`.
 //   directSshPolicy?         — как адаптер обеспечивает запрет прямого SSH: объект
 //                              либо `(config) => object`, где enforcement — один из
-//                              command-hook|tool-filter|network-sandbox|fail-closed|
+//                              command-hook|network-sandbox|fail-closed|
 //                              unsupported, note? — честная режимная граница для UI.
 //                              Не объявлен или сломан → unsupported.
 //   workdir?                 — { switch: 'resume'|'reseed', roots: 'multi'|'single' }
@@ -127,9 +126,6 @@
 //                              opts.workTools — server-owned структурные инструменты; adapter
 //                              передаёт только их descriptors/invoke, без внешних MCP
 //                              opts.providerSettings — выбор из настроек этого исполнителя
-//                              opts.chatHistory — server-owned история чата (массив сохранённых
-//                              сообщений; для stateless HTTP-исполнителей, реплеящих разговор
-//                              из неё; содержит текущее сообщение последним user-блоком)
 //                              opts.compactWindow — порог автокомпакта из общих настроек
 //                              opts.onStep — колбэк нейтральных шагов хода:
 //                              start/think/text/tool/res/note. Каждый executor сам

@@ -3,7 +3,6 @@
 // видимости, состояние и текст ошибки обязаны доезжать до экрана. Плюс блок ленивый: его
 // нельзя дёргать для исполнителя, который про MCP вообще не сообщает.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { compileSettingsView } from './helpers/settings-view.js';
 
@@ -269,6 +268,7 @@ test('ответ опроса не перезапускает опрос', async
 test('«Обновить» перечитывает список мимо кэша', async (t) => {
   const { wrapper, calls } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
 
+  await wrapper.get('#provider-toggle-claude').trigger('click');
   await wrapper.find('.mcpbtn').trigger('click');
   assert.deepEqual(calls.at(-1), { id: 'claude', refresh: true });
 });
@@ -328,25 +328,55 @@ test('Codex и Kimi показывают configured/disabled без ложног
   assert.equal(kimi.get('.mcpst').text(), 'Настроен');
 });
 
-// Число ручек и длина списка MCP у исполнителей разные, а приезжают они в разное время.
-// Потолок высоты этого не держит: одноимённые разделы соседних карточек вставали на
-// разной высоте, а пришедший ответ сдвигал вниз всё, что под ним, — вплоть до кнопки
-// «Обновить». Поэтому у обоих блоков высота ЗАДАНА, а лишнее прокручивается внутри.
-test('блоки настроек и MCP держат заданную высоту и прокручивают содержимое', async () => {
-  const source = await readFile(
-    new URL('../../web/src/views/SettingsView.vue', import.meta.url),
-    'utf8',
-  );
+test('закрытые строки показывают сводки и связывают кнопки с панелями', async (t) => {
+  const { wrapper } = await mountSettings(t, {
+    providerPatch: { claude: { version: '2.1.9', models: [{ id: 'test-model' }] } },
+  });
 
-  const pvsettings = source.match(/\.pvsettings\s*\{[^}]*\}/s)?.[0] || '';
-  const pvmcp = source.match(/\.pvmcp\s*\{[^}]*\}/s)?.[0] || '';
-  assert.match(pvsettings, /(?<!max-|min-)block-size:\s*220px/, 'высота настроек не задана');
-  assert.match(pvmcp, /(?<!max-|min-)block-size:\s*220px/, 'высота MCP не задана');
-  for (const body of ['pvsetbody', 'mcpbody']) {
-    const rule = new RegExp(`\\.[\\w.,\\s]*\\b${body}\\b[^{]*\\{[^}]*overflow-y:\\s*auto[^}]*\\}`, 's');
-    assert.match(source, rule, `${body} не прокручивается внутри`);
+  const toggles = wrapper.findAll('[data-testid="provider-toggle"]');
+  const panels = wrapper.findAll('[data-testid="provider-panel"]');
+
+  assert.equal(toggles.length, 4);
+  assert.ok(toggles.every((toggle) => toggle.attributes('aria-expanded') === 'false'));
+  assert.ok(panels.every((panel) => !panel.isVisible()));
+  assert.match(toggles[0].text(), /Claude.*2\.1\.9.*Модели: 1.*доступен/s);
+  assert.match(toggles[2].text(), /Kimi.*недоступен/s);
+
+  for (const [index, toggle] of toggles.entries()) {
+    assert.equal(toggle.element.tagName, 'BUTTON');
+    assert.equal(toggle.attributes('aria-controls'), panels[index].attributes('id'));
+    assert.equal(panels[index].attributes('aria-labelledby'), toggle.attributes('id'));
   }
-  assert.match(source, /\.pvsetbody,\s*\.mcpbody\s*\{[^}]*scrollbar-gutter:\s*stable/s);
+});
+
+test('гармошка открывает одну панель и сохраняет настройки при повторном раскрытии', async (t) => {
+  const { wrapper, calls } = await mountSettings(t, {
+    providerPatch: { claude: { settings: [{
+      id: 'endpoint',
+      kind: 'text',
+      label: 'Адрес сервера',
+      value: 'http://localhost:11434',
+    }] } },
+  });
+  const toggles = wrapper.findAll('[data-testid="provider-toggle"]');
+  const panels = wrapper.findAll('[data-testid="provider-panel"]');
+
+  await toggles[0].trigger('click');
+  await panels[0].get('input').setValue('http://localhost:11435');
+  assert.deepEqual(panels.map((panel) => panel.isVisible()), [true, false, false, false]);
+
+  await toggles[1].trigger('click');
+  assert.deepEqual(panels.map((panel) => panel.isVisible()), [false, true, false, false]);
+  assert.deepEqual(toggles.map((toggle) => toggle.attributes('aria-expanded')),
+    ['false', 'true', 'false', 'false']);
+
+  await toggles[1].trigger('click');
+  assert.ok(panels.every((panel) => !panel.isVisible()));
+
+  await toggles[0].trigger('click');
+  assert.equal(panels[0].isVisible(), true);
+  assert.equal(panels[0].get('input').element.value, 'http://localhost:11435');
+  assert.deepEqual(calls.map((call) => call.id), ['claude', 'codex', 'kimi']);
 });
 
 // Строка «доступно обновление» была только у отставшего исполнителя и сдвигала вниз
@@ -375,22 +405,22 @@ test('версия CLI показана точкой у имени, а не ст
   assert.match(tips[1].props('text'), /Последняя версия \(0\.152\.1\)/);
 });
 
-// Итог нажатия появляется в одной карточке ряда. Стоя над блоками заданной высоты, он
-// сдвигал бы вниз и настройки, и MCP — и одноимённые секции соседей снова разъезжались бы.
-test('итог обновления стоит у своей кнопки и не двигает секции', async (t) => {
+test('итог обновления стоит у своей кнопки после настроек и диагностики', async (t) => {
   const { wrapper, flushPromises } = await mountSettings(t, {
     providerPatch: { claude: { canUpdate: true } },
   });
 
   const card = wrapper.findAll('.pvcard')[0];
+
+  await card.get('[data-testid="provider-toggle"]').trigger('click');
   await card.get('.upd').trigger('click');
   await flushPromises();
 
   const result = card.get('[data-testid="provider-update-result"]');
   assert.ok(card.get('.pvfoot').element.contains(result.element), 'итог не в строке кнопки');
   assert.ok(
-    card.get('.pvfacts').element.nextElementSibling.matches('[data-testid="provider-settings-slot"]'),
-    'между фактами и настройками вклинился блок, который сдвигает секции вниз',
+    card.get('.pvsections').element.nextElementSibling.matches('.pvfoot'),
+    'футер должен следовать за настройками и диагностикой',
   );
 });
 

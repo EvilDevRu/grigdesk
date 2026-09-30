@@ -967,7 +967,7 @@ const { connected } = useSse((name, data) => {
 }
 /* Оптические поля знаков выровнены viewBox-ами в ProviderIcon (все центрированы в кадре,
    ширина 12,6–14,3 px), поэтому отдельных поправок зазоров между соседями здесь нет:
-   прежний «-4px» для Kimi → Ollama делал этот зазор на 3 px теснее остальных. */
+   прежний сдвиг «-4px» делал этот зазор на 3 px теснее остальных. */
 /* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
 .updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--warn, #e0a33a); box-shadow: 0 0 0 2px var(--surface); }

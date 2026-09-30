@@ -1456,7 +1456,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
   // ── Всплывашка разрешений и диалог с агентом: ожидающие ответа пользователя запросы ──
   // pid → { resolve, direct, isQuestion, tool, input, chatKey, at }
-  // `direct` — исполнитель ждёт ответа сам (kimi по ACP, ollama внутри цикла инструментов),
+  // `direct` — исполнитель ждёт ответа сам (например, Kimi по ACP),
   // без локального HTTP MCP-процесса Claude. От него зависит только ФОРМА ответа, поэтому
   // вендорных веток здесь нет: новый исполнитель ничего не добавляет в ядро.
   const pendingPerms = permissionQueue.entries;
@@ -1559,9 +1559,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
   }
 
-  /** Та же всплывашка, но ответ возвращается исполнителю напрямую: ACP reverse-RPC
-   * у Kimi, вызов внутри цикла инструментов у Ollama — локального HTTP MCP-процесса,
-   * как у Claude, в этом пути нет. */
+  /**
+   * Та же всплывашка возвращает ответ непосредственно исполнителю, например через ACP reverse-RPC Kimi.
+   * Этот путь обходится без локального HTTP MCP-процесса, который нужен Claude.
+   */
   function requestDirectInteraction(
     presentation: InteractionPresentation, chatKey: string | undefined,
   ): Promise<InteractionDecision> {
@@ -1844,7 +1845,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         choice: typeof body.choice === 'string' ? body.choice.slice(0, 100) : '',
       });
       // Дойдёт ли пояснение до агента — свойство КАНАЛА, а не вендора: ACP-outcome Kimi
-      // текста не несёт, а результат инструмента Ollama несёт. Канал сам об этом и
+      // текста не несёт, а другой канал может передавать его. Канал сам об этом и
       // сообщает при создании запроса (presentation.acceptsComment).
       return comment && !p.acceptsComment ? { ok: true, commentDelivered: false } : { ok: true };
     } else if (p.isQuestion) {
@@ -3014,13 +3015,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // Барьер перед executor: группа прошлых запусков и pending попадает в chat-файл
       // под его lock. Ошибка записи не позволяет следующему ходу читать неполный prompt.
       const pendingHistory = await readPendingRecords();
-      const durableHistory = chatKey && target.record
-        ? await history.syncMessages(chatKey, (messages) => inTurnHistory.project({
+
+      if (chatKey && target.record) {
+        await history.syncMessages(chatKey, (messages) => inTurnHistory.project({
           chatKey,
           base: messages,
           pending: pendingHistory,
-        }))
-        : null;
+        }));
+      }
 
       const runArgs: ExecutorTurnOptions = {
         config,
@@ -3041,16 +3043,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         workTools: workToolsValue,
         workToolScopeKey,
         providerSettings,
-        // Server-owned снапшот истории чата: stateless HTTP-исполнители реплеят из него
-        // разговор, CLI-исполнители поле игнорируют. Кроме сохранённой ленты сюда входит
-        // проекция прошлых запусков и ответы из pending: окно могло быть закрыто и не
-        // перенести их, а следующая инструкция обязана их видеть. Текущее сообщение клиент
-        // сохранил до POST — дубликат срезает executor.
-        chatHistory: durableHistory?.messages || inTurnHistory.project({
-          chatKey: String(chatKey || ''),
-          base: target.record?.messages,
-          pending: pendingHistory,
-        }),
         // Claude получает порог через env выше, Codex — как официальный config override
         // в своих exec-args. Одно значение настроек, transport выбирает сам executor.
         compactWindow,
@@ -3090,8 +3082,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             fastify.sse.broadcast('chat-session', { chatKey, sessionId: known, at: Date.now() });
           }
         },
-        // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (kimi по
-        // ACP, ollama из своего цикла инструментов). Выдаётся всем: не поддерживающий
+        // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (например, Kimi по
+        // ACP). Выдаётся всем: не поддерживающий
         // его executor просто не вызовет колбэк, а вендорной ветки в ядре не остаётся.
         // Канал ввода в активный ход. Порт принадлежит конкретному запуску: чужой runId
         // отсекается сверкой с activeRuns, поэтому поздние события старого хода не
@@ -3146,7 +3138,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         onProgress: chatKey ? (tokens, info) => {
           const contextUsage = normalizeContextUsage(info);
           const contextCache = normalizeContextCache(info?.contextCache);
-          // Оценку (Ollama считает незакрытый раунд по символам) помечаем отдельно:
+          // Оценку (Claude и DeepSeek считают вывод по символам) помечаем отдельно:
           // в окне она показывается как «≈», и путать её с замером нельзя.
           const isEstimate = typeof info?.tokensIsEstimate === 'boolean'
             ? { tokensIsEstimate: info.tokensIsEstimate }

@@ -1745,7 +1745,7 @@ test('образец голоса показывает ожидание, а от
   const failed = await mountView(t, {
     voices: readyVoiceCatalog(),
     preview: async () => {
-      throw new Error('Не хватило видеопамяти: выгрузите модель Ollama и повторите.');
+      throw new Error('Не хватило видеопамяти: закройте программы, которые её занимают, и повторите.');
     },
   });
 
@@ -1754,7 +1754,7 @@ test('образец голоса показывает ожидание, а от
 
   assert.equal(
     failed.wrapper.find('.voice__error').text(),
-    'Не хватило видеопамяти: выгрузите модель Ollama и повторите.',
+    'Не хватило видеопамяти: закройте программы, которые её занимают, и повторите.',
   );
   assert.equal(failed.wrapper.find('.voice__preview-note').exists(), false);
 

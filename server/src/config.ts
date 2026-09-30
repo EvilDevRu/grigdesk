@@ -93,10 +93,6 @@ export const config = {
   deepseekRuntimeHome,
   deepseekBin: process.env.COCKPIT_DEEPSEEK_BIN
     || path.join(deepseekRuntimeHome, 'install', 'current', 'node_modules', '.bin', 'dsh'),
-  // Машинный override адреса демона Ollama. Обычный путь — настройка «Адрес демона»
-  // в UI («Настройки → Исполнители», prefs.providerSettings.ollama.host); env — для
-  // стендов, где prefs не трогают.
-  ollamaBaseUrl: process.env.COCKPIT_OLLAMA_HOST || '',
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
   modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
   // Ряды прогноза лимитов (modules/usage-forecast): снимки полос и журнал сбросов.

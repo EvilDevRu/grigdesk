@@ -51,8 +51,8 @@ function makeProvidersStore() {
       },
       // id локальной модели со слэшем и двоеточием: склеенную строку не разобрать наивно.
       {
-        id: 'ollama',
-        name: 'Ollama',
+        id: 'fake',
+        name: 'Фейк',
         available: true,
         models: [{ id: 'hf.co/unsloth/qwen3.6:latest', name: 'qwen3.6' }],
       },
@@ -163,10 +163,11 @@ test('тумблер автоматического разбора доходи�
 test('пара «исполнитель:модель» разбирается у модели с двоеточиями в id', async (t) => {
   const { wrapper, saved, flushPromises } = await mountSettings(t);
   const select = modelSelect(wrapper);
-  await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
+
+  await select.setValue('fake:hf.co/unsloth/qwen3.6:latest');
   await flushPromises();
   assert.deepEqual(saved[0].arbiter.modelRef, {
-    provider: 'ollama',
+    provider: 'fake',
     model: 'hf.co/unsloth/qwen3.6:latest',
   });
 });
@@ -176,7 +177,8 @@ test('уровень усилия не переносится на модель,
   const { wrapper, saved, flushPromises } = await mountSettings(t, {
     arbiter: { modelRef: { provider: 'claude', model: 'claude-opus-5' }, effort: 'high', auto: false },
   });
-  await modelSelect(wrapper).setValue('ollama:hf.co/unsloth/qwen3.6:latest');
+
+  await modelSelect(wrapper).setValue('fake:hf.co/unsloth/qwen3.6:latest');
   await flushPromises();
   assert.equal(saved[0].arbiter.effort, '');
 });
@@ -200,7 +202,7 @@ test('модель недоступного исполнителя назван�
   assert.equal(option.attributes('disabled'), undefined, 'модель заблокирована по недоступности');
   assert.deepEqual(
     select.findAll('optgroup').map((group) => group.attributes('label')),
-    ['Claude', 'Ollama', 'GPT (Codex) — недоступен'],
+    ['Claude', 'Фейк', 'GPT (Codex) — недоступен'],
   );
 
   await select.setValue('codex:gpt-5.6');

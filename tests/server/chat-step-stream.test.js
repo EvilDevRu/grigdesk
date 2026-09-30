@@ -10,7 +10,6 @@ import {
 import { toClaudeSteps } from '../../server/src/lib/executors/_claudeSteps.ts';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
 import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimiSteps.ts';
-import { createToolbox } from '../../server/src/lib/executors/_ollamaTools.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
 
 test('Claude Write объявляет изменяемый файл в нейтральном шаге', () => {
@@ -81,22 +80,6 @@ test('Kimi edit объявляет путь независимо от текст
     rawInput: { path: 'src/kimi.js', old_string: 'a', new_string: 'b' },
   } });
   assert.deepEqual(steps.find((step) => step.k === 'tool')?.files, ['src/kimi.js']);
-});
-
-test('Ollama Write сообщает путь в tool-step и успешный результат отдельно', async (t) => {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ollama-step-files-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const steps = [];
-  const toolbox = await createToolbox({
-    cwd,
-    permissionMode: 'acceptEdits',
-    sink: { emit: (step) => steps.push(step) },
-  });
-  await toolbox.call({ name: 'write_file', args: { path: 'src/ollama.js', content: 'ok\n' } });
-  assert.deepEqual(steps.map((step) => ({ k: step.k, files: step.files, ok: step.ok })), [
-    { k: 'tool', files: ['src/ollama.js'], ok: undefined },
-    { k: 'res', files: undefined, ok: true },
-  ]);
 });
 
 test('нейтральный sink ставит время, хранит хвост и транслирует ВСЕ шаги', () => {

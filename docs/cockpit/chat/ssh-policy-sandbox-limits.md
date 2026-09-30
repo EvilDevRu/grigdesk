@@ -1,8 +1,8 @@
 # Запрет прямого SSH — рубеж кооперативного агента, не same-uid sandbox
 
 `blockDirectSsh` закрывает штатные попытки `ssh`/`slogin`, `scp`, `sftp`, `autossh`,
-`ssh-copy-id`, `sshpass` с SSH-клиентом и удалённый `rsync`. У Claude и Codex это
-server-owned command-hook, у Ollama — фильтр собственного `bash`; режим прав Bash
+`ssh-copy-id`, `sshpass` с SSH-клиентом и удалённый `rsync`. У Claude, Codex и DeepSeek это
+server-owned command-hook; режим прав Bash
 независим и не отменяет запрет, включая `dontAsk` и `bypassPermissions`. Kimi contained
 держит сетевую границу, а Kimi host при включённой настройке вообще не начинает ход.
 

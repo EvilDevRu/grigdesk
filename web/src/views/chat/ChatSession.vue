@@ -101,6 +101,9 @@
             :title="currentModelTitle"
             @change="onModelChange"
           >
+            <option v-if="modelId && !currentModel" :value="modelId" disabled>
+              {{ modelId }} — нет в реестре
+            </option>
             <template v-if="provGroups.length">
               <!-- «недоступен» — итог последней проверки исполнителя, а не запрет: причина
                    бывает временной (сеть, тайм-аут probe, минутный разлогин), и блокировка выбора
@@ -288,14 +291,20 @@
             />
             <div v-if="m.kind === 'assistant-block' && compact" class="agent-reply">
               <span class="reply-mark" role="img" aria-label="Ответ агента">
-                <ProviderIcon :provider="group.provider || fallbackAgent" :size="13" />
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
               </span>
               <ChatInTurnReply :block="m" @click="onMarkdownClick" />
             </div>
             <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow"
                  :class="{ 'agent-reply': m.role === 'assistant' }">
               <span v-if="m.role === 'assistant'" class="reply-mark" role="img" aria-label="Ответ агента">
-                <ProviderIcon :provider="group.provider || fallbackAgent" :size="13" />
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
               </span>
               <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
               <div v-if="m.role === 'assistant'" class="text md"
@@ -632,10 +641,6 @@
             ↑
           </UiIconButton>
         </div>
-        <div v-if="sess.sending && !inTurnComposer.ready && !frozen" class="in-turn-hint"
-             data-role="chat-in-turn-unavailable">
-          {{ inTurnComposer.reason }} Сообщение будет отправлено после текущего хода.
-        </div>
         <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -747,28 +752,19 @@ const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
   || (chat.archived || []).find((s) => s.id === props.sid)
   || null);
 const inTurnRun = computed(() => chat.inTurnFor?.(props.sid) || null);
-const inTurnComposer = computed(() => {
-  if (sess.value?.sending && !inTurnRun.value?.active) {
-    return { active: true, ready: false, reason: 'Сервер пока не подтвердил активный запуск.' };
-  }
-  return inTurnComposerState({
-    run: inTurnRun.value,
-    protocol: chat.inTurnProtocol,
-    capability: current.value.provider?.inTurn,
-    pendingCount: pending.value.length,
-    text: input.value,
-  });
-});
+const inTurnComposer = computed(() => inTurnComposerState({
+  run: inTurnRun.value,
+  protocol: chat.inTurnProtocol,
+  capability: current.value.provider?.inTurn,
+  pendingCount: pending.value.length,
+  text: input.value,
+}));
 const timeline = computed(() => chatTimeline(
   sess.value?.messages || [],
   sess.value?.steps || [],
   !!sess.value?.sending,
   inTurnRun.value,
 ));
-const fallbackAgent = {
-  id: 'unknown',
-  name: 'Агент',
-};
 const timelineGroups = computed(() => groupChatTimeline(timeline.value).map((group) => {
   const provider = group.current ? liveProvider.value : runProvider(group.agent);
 
@@ -948,30 +944,45 @@ const lastRequestedName = computed(() => {
   const id = lastRun.value?.model;
   return id ? (prov.modelOf(id).model?.name || id) : '';
 });
+
+/**
+ * Смена исполнителя требует сбросить несовместимую сессию или server-owned binding.
+ * У сохранённого чата без адаптера могла остаться память и seed даже без sessionId.
+ */
+function requiresContextReset(nextModelId) {
+  const session = sess.value;
+  const oldProvider = current.value.provider;
+  const oldProviderId = oldProvider?.id || session?.modelRef?.provider;
+  const nextProviderId = prov.modelOf(nextModelId).provider?.id;
+
+  if (!oldProviderId || !nextProviderId || oldProviderId === nextProviderId) {
+    return false;
+  }
+
+  return Boolean(session?.sessionId)
+    || oldProvider?.sessionBinding === true
+    || (!oldProvider && session?.revision > 0);
+}
+
+/**
+ * Смена исполнителя подтверждает сброс прежней памяти до записи новой модели.
+ * Отказ сервера возвращает селект к прежней паре и сохраняет историю и память.
+ */
 async function onModelChange(e) {
   // Reset Kimi асинхронный и на время запроса перерисовывает select со старой моделью.
   // Поэтому выбранный id надо снять с DOM до await, иначе после подтверждения здесь
   // снова окажется K3 и визуально успешный reset отменит саму смену модели.
   const select = e.target;
   const nextModelId = select.value;
-  const oldProvider = current.value.provider;
-  const oldProv = oldProvider?.id;
-  const newProv = prov.modelOf(nextModelId).provider?.id;
-  // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
-  // резюмить им нельзя: сбрасываем контекст, история чата остаётся.
-  // У старого фронта Kimi reset был только локальным: в истории id уже мог быть null,
-  // а server-owned binding — всё ещё жив. Поэтому для Kimi сбрасываем sidecar даже без
-  // видимого sessionId; revision позволяет стору отличить сохранённый чат от нового.
-  if (oldProv && newProv && oldProv !== newProv
-      && (sess.value?.sessionId || oldProvider?.sessionBinding === true)) {
-    // Для capability reset меняет server-owned binding. Модель переключаем только после
-    // подтверждения, иначе при сетевой ошибке старую сессию было бы уже не сбросить.
-    if (!await chat.resetContext(props.sid)) {
-      select.value = modelId.value;
-      return;
-    }
+
+  if (requiresContextReset(nextModelId) && !await chat.resetContext(props.sid)) {
+    select.value = modelId.value;
+
+    return;
   }
+
   chat.setModel(props.sid, nextModelId);
+
   // У новой модели может не быть текущего уровня эффорта — снимаем явный выбор.
   // Выбирать другую ступень за пользователя нельзя.
   const lv = effortLevels.value;
@@ -2068,7 +2079,7 @@ async function openDebug() {
    не спорят с текстом, полная дата доступна по наведению. */
 .m-time { float: right; margin: .72em 0 0 9px; color: color-mix(in srgb, var(--ink-mid) 82%, transparent);
   font-size: 10px; font-weight: 400; line-height: 1; white-space: nowrap; user-select: none; }
-/* Знак ответа занимает тот же столбец, что и знак действия в StepList.
+/* Нейтральный знак ответа занимает тот же столбец, что и знак действия в StepList.
    5px слева учитывают поле и рамку кнопки; текст всех строк начинается после 27px. */
 .msg.assistant { align-self: stretch; }
 .agent-reply { display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding-left: 5px; }
@@ -2078,7 +2089,7 @@ async function openDebug() {
   flex: none;
   width: 15px;
   height: 20px;
-  color: var(--prov, var(--ink-mid));
+  color: var(--ink-mid);
 }
 .agent-reply > .chat-in-turn-reply, .agent-reply > .text { flex: 1; min-width: 0; }
 .agent-reply > .copy { align-self: flex-end; }
@@ -2088,7 +2099,7 @@ async function openDebug() {
   letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
 /* Знак берём чистым фирменным цветом, без подмешивания белого, как в списке чатов: там
    он лежит на своей заливке, здесь — прямо на `--surface`. Замер контраста к #151b24
-   держит графический порог 3:1 у всех: claude 5.54, codex 5.41, kimi 3.24, ollama 9.43.
+   держит графический порог 3:1 у всех: claude 5.54, codex 5.41, kimi 3.24.
    Селектор ловит и svg, и кружок-фоллбэк: оба — корень ProviderIcon, scope-атрибут на них есть. */
 .ahead svg, .ahead .fb { color: var(--prov, var(--ink-mid)); }
 .ahead svg { width: 12px; height: 12px; }
@@ -2174,7 +2185,6 @@ async function openDebug() {
 .chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
 .chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
-.in-turn-hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }
 .speech-note { margin-top: 6px; }

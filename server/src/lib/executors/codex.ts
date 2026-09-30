@@ -1104,7 +1104,7 @@ function codexRpcError(method: string, value: unknown) {
 /**
  * Provider-neutral descriptor не должен знать wire-форму конкретного исполнителя.
  * App-server v2 требует явный discriminant `type: function`, поэтому добавляем его
- * только на границе Codex, не ломая MCP/Ollama-представления тех же инструментов.
+ * только на границе Codex, не ломая MCP-представления тех же инструментов.
  */
 function codexDynamicTools(descriptors: readonly unknown[] = []) {
   return descriptors.map((value) => {

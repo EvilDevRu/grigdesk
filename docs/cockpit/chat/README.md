@@ -51,6 +51,7 @@
 
 ### Исполнители и модели
 
+- [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке Claude — только свежая версия каждого семейства](claude-model-shortlist.md)
 - [Грабли исполнителей и моделей](executor-and-model-pitfalls.md)
@@ -66,7 +67,6 @@
 - [Список моделей Codex — ИЗ ОФИЦИАЛЬНОГО APP-SERVER](codex-model-catalog.md)
 - [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
-- [Ollama — локальный HTTP-исполнитель](ollama-executor.md)
 
 ### Авторизация Claude
 
@@ -98,7 +98,4 @@
 - [Фризы при наборе в чате = черновик сохранялся тем же тяжёлым путём, что и переписка](draft-save-performance.md)
 - [MCP «не удалось получить» и мёртвые кнопки карточки = опрос перезапускал сам себя](mcp-polling-restart-loop.md)
 - [MCP-серверы: «отвалился» = не поднялся на этой сессии, переподключать нечего](mcp-session-startup.md)
-- [Ollama: вся документация проекта в системном промпте = две минуты префилла на ход](ollama-documentation-prefill.md)
-- [Ollama: пустой ответ на второй ход = загруженную модель вычли из памяти дважды](ollama-memory-accounting.md)
-- [Ollama: уровни think принимаются, но не отрабатываются](ollama-thinking-level-support.md)
 - [UI-context — данные, а не полномочия; identity companion-чата принадлежит серверу](ui-context-trust-boundary.md)

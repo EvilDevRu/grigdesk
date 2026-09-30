@@ -20,28 +20,27 @@
   Kimi contained проверяет запреты монтирования тем же валидатором в preview и runtime.
 - **Метрики кольца описаны в продуктовом контракте**
   `docs/cockpit/guide/chat-context.md`. Claude и Codex измеряют вход последнего
-  основного model request; Ollama — вход и вывод последнего раунда; Kimi — статус
-  открытой ACP-сессии после хода. Накопительный расход не становится контекстом.
+  основного model request; Kimi — статус открытой ACP-сессии после хода;
+  DeepSeek — ACP `usage_update.used` во время хода. Накопительный расход не становится контекстом.
   Полный снимок (`contextTokens`, `contextWindow`, `contextMetric`,
   `contextIsEstimate`) проходит через `onProgress`, SSE, `/api/chat/active`,
   остановку и runtime `liveContextUsage` в браузере без записи истории на каждый запрос.
   Codex отправляет собственные `thread/tokenUsage/updated` сразу, а fallback берёт
   из последнего `token_count` точного rollout-файла. Claude не принимает
   `result.usage` и события субагента за основной контекст, после `compact_boundary`
-  ждёт новый замер. Ollama не прибавляет старый вывод повторно к следующему входу.
+  ждёт новый замер.
   Kimi добирает `/usage`, когда `/status` не содержит размера (`kimi/runtime.ts`).
   Ноль — измерение; `unavailable` и `legacy-unavailable` — отсутствие точной цифры.
   Неизвестное окно не заменяется видимыми 200k. Пока свежего замера нет, подсказка
   называет показанную цифру замером прошлого хода.
   Настройка автосжатия учитывается лишь при `capabilities.chatAutoCompact`:
-  её применяют Claude и Codex, а Kimi/Ollama используют шкалу 80% окна.
+  её применяют Claude и Codex, а Kimi/DeepSeek используют шкалу 80% окна.
 - **Prompt cache — отдельная provider-neutral метрика ПОСЛЕДНЕГО model request**, а не часть
   шкалы кольца и не накопительный расход сессии. Executor отдаёт
   `contextCache: { scope: 'request', status, readTokens?, writeTokens?, uncachedTokens? }`,
   где `status` — `reported`, `unavailable` или `not-applicable`. Claude сообщает чтение,
   запись и некэшированный вход; Codex — чтение и некэшированный вход, но не выдумывает
-  отсутствующую у CLI запись; Kimi явно отдаёт `unavailable`; у локального Ollama статус
-  `not-applicable`, потому что его KV-кэш нельзя приравнивать к тарифицируемому prompt cache.
+  отсутствующую у CLI запись; Kimi явно отдаёт `unavailable`.
   Отсутствующее числовое поле означает «provider не сообщил», а не ноль. По одному размеру
   контекста кокпит не делает вывод ни о cache hit, ни о цене: подсказка показывает только
   фактические read/write/uncached, которые пришли в `contextCache`.

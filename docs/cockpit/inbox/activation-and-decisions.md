@@ -49,9 +49,9 @@ PDF, Office, animation, бинарный текст и прочие неподд
 обычный coding `executor.run`: режим `plan` не является sandbox от prompt injection.
 Допускается только явно объявленный `runUntrusted` — одноразовый model-only transport без
 coding tools, project/user rules, MCP, hooks, session и workspace. Claude запускается в
-отдельном временном cwd с пустым набором tools и strict/safe config; Ollama получает прямой
-HTTP model call без toolbox. Codex/Kimi до отдельного безопасного transport остаются
-fail-closed (`unsafe_model_provider`).
+отдельном временном cwd с пустым набором tools и strict/safe config. Codex использует
+свой безопасный model-only transport. Kimi/DeepSeek без объявленного безопасного
+transport остаются fail-closed (`unsafe_model_provider`).
 
 Visual path не попадает ни в prompt, ни в executor. Сервер разрешает realpath только внутри
 `mediaDir/inbox-attachment-analysis`, открывает обычный файл без symlink, проверяет размер,

@@ -8,7 +8,7 @@ import claude, {
 } from '../../server/src/lib/executors/claude.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
 import kimi from '../../server/src/lib/executors/kimi.ts';
-import ollama from '../../server/src/lib/executors/ollama.ts';
+import deepseek from '../../server/src/lib/executors/deepseek.ts';
 
 const EXECUTOR = {
   id: 'demo',
@@ -123,13 +123,21 @@ test('точное confirmed сохраняет только значение, �
   });
 });
 
-test('декларация async-функцией (ollama-стиль): await-им её, config доезжает, range — число', async () => {
+test('декларация async-функцией: await-им её, config доезжает, range — число', async () => {
   // settings может быть функцией от config: потолок ползунка зависит от живого железа.
   const FN_EXECUTOR = {
     id: 'fn',
     name: 'Fn',
     settings: async (config) => [
-      { id: 'window', kind: 'range', label: 'Окно', min: 2048, step: 1024, max: config?.max || 131072, value: 32768 },
+      {
+        id: 'window',
+        kind: 'range',
+        label: 'Окно',
+        min: 2048,
+        step: 1024,
+        max: config?.max || 131072,
+        value: 32768,
+      },
     ],
   };
   const resolved = await resolveProviderSettings(FN_EXECUTOR, undefined, { max: 65536 });
@@ -201,7 +209,7 @@ test('четыре адаптера объявляют default-on настрой
     resolveProviderSettings(claude),
     resolveProviderSettings(codex),
     resolveProviderSettings(kimi, undefined, { kimiLaunchMode: 'host' }),
-    resolveProviderSettings(ollama),
+    resolveProviderSettings(deepseek),
   ]);
 
   assert.deepEqual(declarations.map((settings) => {
@@ -219,7 +227,7 @@ for (const [name, executor, config] of [
   ['Claude', claude],
   ['Codex', codex],
   ['Kimi', kimi, { kimiLaunchMode: 'host' }],
-  ['Ollama', ollama],
+  ['DeepSeek', deepseek],
 ]) {
   test(`${name} называет в подтверждении последствия снятия запрета`, async () => {
     const settings = await resolveProviderSettings(executor, undefined, config);
@@ -237,7 +245,7 @@ test('способ запрета объявляет сам адаптер с у
   const policies = await Promise.all([
     directSshPolicyOf(claude),
     directSshPolicyOf(codex),
-    directSshPolicyOf(ollama),
+    directSshPolicyOf(deepseek),
     directSshPolicyOf(kimi, { kimiLaunchMode: 'contained' }),
     directSshPolicyOf(kimi, { kimiLaunchMode: 'host' }),
   ]);
@@ -245,51 +253,58 @@ test('способ запрета объявляет сам адаптер с у
   assert.deepEqual(policies.map((policy) => policy?.enforcement), [
     'command-hook',
     'command-hook',
-    'tool-filter',
+    'command-hook',
     'network-sandbox',
     'fail-closed',
   ]);
 });
 
-test('настройки Ollama: numCtx приводится к числу, чужой ключ отклоняется', async () => {
-  // Демона в offline-тесте нет: справочные строки объявляются всё равно, просто с
-  // честным «демон не отвечает» внутри — иначе таб настроек пустел бы при выключенном демоне.
-  const declared = (await ollama.settings()).map((s) => [s.id, s.kind]);
-  assert.deepEqual(declared, [
-    ['blockDirectSsh', 'toggle'], ['host', 'text'], ['numCtx', 'range'],
-    ['keepAliveMin', 'range'],
-    ['memInfo', 'info'], ['loadedInfo', 'info'], ['ctxCostInfo', 'info'],
-  ]);
-
-  // UI шлёт значение ползунка строкой — в prefs оно обязано лечь числом.
-  const applied = await applyProviderSetting(ollama, {}, { settingId: 'numCtx', value: '16384' });
-  assert.equal(applied.ok, true);
-  assert.equal(applied.providerSettings.ollama.numCtx, 16384);
-  assert.equal(applied.settings.find((s) => s.id === 'numCtx').value, 16384);
-  assert.equal(applied.settings.find((s) => s.id === 'host').value, 'http://127.0.0.1:11434');
-
-  // Текстовый host проходит как есть, соседние исполнители не задеваются.
-  const withHost = await applyProviderSetting(
-    ollama,
-    { claude: { fastMode: true } },
-    { settingId: 'host', value: 'http://192.168.1.10:11434' },
+test('текст и справка сохраняют общий контракт настроек без снятого адаптера', async () => {
+  const fake = {
+    ...EXECUTOR,
+    id: 'fake',
+    settings: [
+      {
+        id: 'note',
+        kind: 'text',
+        label: 'Текст',
+        value: 'Начальный текст',
+      },
+      {
+        id: 'status',
+        kind: 'info',
+        label: 'Справка',
+        value: 'Текущее состояние',
+      },
+    ],
+  };
+  const saved = {
+    other: { keep: 'Сохранить' },
+    'retired-provider': { note: 'Прежняя настройка', unknownKey: 17 },
+    fake: { extra: 'Сохранить чужой ключ' },
+  };
+  const applied = await applyProviderSetting(
+    fake,
+    saved,
+    { settingId: 'note', value: 'Новый текст' },
   );
-  assert.equal(withHost.providerSettings.ollama.host, 'http://192.168.1.10:11434');
-  assert.deepEqual(withHost.providerSettings.claude, { fastMode: true });
 
-  // Минуты keep_alive — тот же ползунок, значение обязано лечь числом.
-  const keepAlive = await applyProviderSetting(ollama, {}, { settingId: 'keepAliveMin', value: '30' });
-  assert.equal(keepAlive.providerSettings.ollama.keepAliveMin, 30);
+  assert.equal(applied.ok, true);
+  assert.equal(applied.providerSettings.fake.note, 'Новый текст');
+  assert.equal(typeof applied.providerSettings.fake.note, 'string');
+  assert.equal(applied.providerSettings.fake.extra, saved.fake.extra);
+  assert.deepEqual(applied.providerSettings.other, saved.other);
+  assert.deepEqual(applied.providerSettings['retired-provider'], saved['retired-provider']);
+  assert.equal(Object.hasOwn(saved.fake, 'note'), false);
 
-  const rejected = await applyProviderSetting(ollama, {}, { settingId: 'temperature', value: 0.7 });
-  assert.equal(rejected.ok, false);
-  assert.equal(rejected.error, 'unknown_setting');
+  const readonly = await applyProviderSetting(
+    fake,
+    applied.providerSettings,
+    { settingId: 'status', value: 'Запись запрещена' },
+  );
+  const resolved = await resolveProviderSettings(fake, { status: 'Устаревшее значение' });
 
-  // Справка объявлена исполнителем, но записывать в неё нечего: ядро не даёт
-  // засорить prefs строкой, значение которой всё равно вычисляется каждый раз заново.
-  const readonly = await applyProviderSetting(ollama, {}, { settingId: 'memInfo', value: 'что угодно' });
   assert.equal(readonly.ok, false);
   assert.equal(readonly.error, 'readonly_setting');
-  const stale = await resolveProviderSettings(ollama, { memInfo: 'старьё из prefs' });
-  assert.notEqual(stale.find((s) => s.id === 'memInfo').value, 'старьё из prefs');
+  assert.equal(resolved.find((setting) => setting.id === 'status').value, 'Текущее состояние');
 });

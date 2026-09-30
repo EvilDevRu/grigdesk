@@ -855,16 +855,16 @@ test('ChatSession показывает provider-нейтральный стат�
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
   const session = {
-    id: 'ctx-ring-ollama',
+    id: 'ctx-ring-fake',
     taskId: null,
     title: 'Локальная модель',
-    model: 'ollama/qwen',
+    model: 'fake/qwen',
     effort: '',
     mode: '',
     messages: [],
     steps: [],
     draft: '',
-    sessionId: 'ollama-session',
+    sessionId: 'fake-session',
     contextTokens: 200_000,
     contextCache: { scope: 'request', status: 'not-applicable' },
     sending: false,
@@ -889,9 +889,9 @@ test('ChatSession показывает provider-нейтральный стат�
     load() {},
     modelOf() {
       return {
-        id: 'ollama/qwen',
+        id: 'fake/qwen',
         model: { name: 'Qwen', context: 1_000_000, efforts: [] },
-        provider: { id: 'ollama' },
+        provider: { id: 'fake' },
       };
     },
     visibleModels() { return []; },

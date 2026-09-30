@@ -87,7 +87,7 @@ export const SYSTEM: PluginManifest[] = [
         // два раздела скрытой зависимостью.
         hint: 'Кнопка «Разобрать на задачи» отдаёт расшифровку модели, и та предлагает черновики. '
           + 'Расшифровка — чужая речь, поэтому нужен безопасный режим недоверенного ввода: '
-          + 'подходят Claude, GPT через Codex и модели Ollama. '
+          + 'подходят Claude и GPT через Codex. '
           + 'Не выбрана — задачи собираются вручную, как раньше.',
         default: null,
       },
@@ -110,7 +110,7 @@ export const SYSTEM: PluginManifest[] = [
         type: 'model',
         hint: 'Кнопка генерации читает только staged diff и предлагает одно название '
           + 'коммита. Diff считается недоверенным вводом, поэтому подходят исполнители '
-          + 'с безопасным model-only режимом: Claude, GPT через Codex и Ollama.',
+          + 'с безопасным model-only режимом: Claude и GPT через Codex.',
         default: null,
         requiresCapability: 'untrustedText',
       },
@@ -186,7 +186,7 @@ export const SYSTEM: PluginManifest[] = [
         type: 'model',
         hint: 'Одна модель разбирает обращения всех активных каналов. '
           + 'Нужен безопасный Inbox-режим и поддержка изображений: '
-          + 'подходят Claude, GPT через Codex и vision-модели Ollama. '
+          + 'подходят Claude и GPT через Codex. '
           + 'Пока совместимая модель не выбрана, автоматические задачи не создаются.',
         default: null,
       },
@@ -429,7 +429,7 @@ export const SYSTEM: PluginManifest[] = [
         type: 'model',
         hint: 'Модель составляет сценарий и проверяет кадры пробного прохода. '
           + 'Нужны поддержка изображений и безопасный режим недоверенного ввода: '
-          + 'подходят Claude, GPT через Codex и мультимодальные модели Ollama.',
+          + 'подходят Claude и GPT через Codex.',
         default: null,
         requiresCapability: 'untrustedText',
       },

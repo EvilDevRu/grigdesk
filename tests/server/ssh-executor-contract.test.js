@@ -10,7 +10,6 @@ import test from 'node:test';
 import claude from '../../server/src/lib/executors/claude.ts';
 import { claudeSessionArgs } from '../../server/src/lib/executors/_claudeStream.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
-import { createToolbox } from '../../server/src/lib/executors/_ollamaTools.ts';
 import { runContainedKimi } from '../../server/src/lib/kimi/runtime.ts';
 
 class KimiWorkMcpProcess extends EventEmitter {
@@ -409,47 +408,6 @@ test('persistent Claude и Codex ротируют процесс при смен
   });
 });
 
-test('Ollama создаёт ровно одно SSH-подтверждение во всех режимах прав', async () => {
-  const calls = [];
-  const results = [];
-  const modes = ['default', 'auto', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
-  for (const permissionMode of modes) {
-    const toolbox = await createToolbox({
-      permissionMode,
-      workTools: {
-        descriptors: [{
-          type: 'function',
-          function: {
-            name: 'supervised_ssh',
-            description: 'Надзорная команда',
-            parameters: { type: 'object', properties: {} },
-          },
-        }],
-        async invoke(name, input) {
-          calls.push({ permissionMode, name, input });
-          return { ok: false, error: 'denied', comment: 'не во время выкладки' };
-        },
-      },
-    });
-    results.push(await toolbox.call({
-      name: 'supervised_ssh',
-      args: { action: 'exec', label: 'Боевой код', role: 'code', command: 'id' },
-    }));
-  }
-
-  assert.deepEqual({
-    calls: calls.map(({ permissionMode }) => permissionMode),
-    results,
-  }, {
-    calls: modes,
-    results: modes.map(() => ({
-      ok: false,
-      error: 'denied',
-      comment: 'не во время выкладки',
-    })),
-  });
-});
-
 test('Claude строит one-shot и persistent argv с точечным SSH preallow', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-claude-argv-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -739,41 +697,4 @@ test('Codex объявляет и диспатчит рабочий tool как 
   assert.equal(tool?.name, 'sample_lookup');
   assert.equal(result?.ok, true);
   assert.equal(JSON.parse(result?.text || '{}').items?.[0]?.title, 'Очередь деплоя');
-});
-
-test('Ollama объявляет и вызывает рабочий tool через общий dispatcher', async () => {
-  const calls = [];
-  const steps = [];
-  const descriptor = {
-    type: 'function',
-    function: {
-      name: 'sample_lookup',
-      description: 'Поиск по образцу',
-      parameters: { type: 'object', properties: { action: { enum: ['search', 'read'] } } },
-    },
-  };
-  const toolbox = await createToolbox({
-    permissionMode: 'default',
-    sink: { emit(step) { steps.push(step); } },
-    workTools: {
-      descriptors: [descriptor],
-      async invoke(name, input) {
-        calls.push({ name, input });
-        return { ok: true, items: [] };
-      },
-    },
-  });
-  const result = await toolbox.call({
-    name: 'sample_lookup', args: { action: 'search', query: 'деплой' },
-  });
-
-  assert.deepEqual({
-    title: steps.find((step) => step.k === 'tool')?.title,
-    calls,
-    result,
-  }, {
-    title: 'Поиск по образцу',
-    calls: [{ name: 'sample_lookup', input: { action: 'search', query: 'деплой' } }],
-    result: { ok: true, items: [] },
-  });
 });

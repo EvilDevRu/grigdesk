@@ -21,7 +21,7 @@
 разные режимы, SFTP доступен только человеку. Для подтверждений действует одна общая
 очередь; origin-aware ответ идёт через `/api/ssh/approvals/:pid`.
 
-Bridge-провайдеры — Claude, Codex, Kimi и Ollama. Доступ агента привязан к доверенному
+Bridge-провайдеры — Claude, Codex, Kimi и DeepSeek. Доступ агента привязан к доверенному
 attempt (trusted attempt), а у свободного чата task scope равен null. Вывод сервера
 недоверенный: prompt injection не получает инструментов. Один ToolHost обслуживает все
 сессии; Telegram fail-closed не видит SSH-подтверждения, старый PWA bundle также
@@ -38,7 +38,7 @@ fail-closed и не разрешает новое действие.
 Настройка `blockDirectSsh` хранится как `providerSettings.<id>.blockDirectSsh` и меняется
 существующим `POST /api/providers/:id/settings` с `confirmed: true`. При отсутствии ключа
 запрет по умолчанию включён (`true`). Claude использует command-hook, Codex — command-hook,
-Ollama — tool-filter, Kimi — network-sandbox и host fail-closed. После изменения
+DeepSeek — command-hook, Kimi — network-sandbox и host fail-closed. После изменения
 `providerSettings` сессию надо переоткрыть или restart.
 
 Это граница для кооперативного агента, не защита от намеренного обхода через base64/sh или
@@ -97,8 +97,7 @@ localhost, loopback и unix socket; неизвестная форма блоки
 бинарь `clickhouse` с подкомандой `client`; `clickhouse local` сети не открывает и
 разрешён. Обёртки запуска снимаются до разбора: кроме `command`, `exec`, `nohup`, `env` и
 `sudo` — это `setsid`, `time`, `nice`, `ionice`, `stdbuf` и `timeout` вместе с его
-длительностью. Claude/Codex применяют server-owned hook, Ollama фильтрует до permission
-mode. Kimi host не может удержать этот рубеж и при активной DB-политике fail-closed
+длительностью. Claude/Codex/DeepSeek применяют server-owned command-hook. Kimi host не может удержать этот рубеж и при активной DB-политике fail-closed
 возвращает `direct_db_policy_unavailable` до build/spawn во всех режимах прав;
 contained по-прежнему закрыт network/egress-песочницей.
 

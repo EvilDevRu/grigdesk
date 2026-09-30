@@ -1775,9 +1775,10 @@ export const useChatStore = defineStore('chat', {
           // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
           // Кроме сжатия: там работу показывает кольцо, а счётчик только спорил бы с ним.
           const s = this._find(d.chatKey);
+
           if (s && !s.compacting) {
             s.sending = true; s.progressTokens = d.tokens;
-            // «≈» — только для оценки (Ollama считает незакрытый раунд по символам);
+            // «≈» — только для оценки (Claude и DeepSeek считают вывод по символам);
             // отсутствие флага значит замер.
             s.progressTokensEstimate = d.tokensIsEstimate === true;
             // Заполненность контекста ПРЯМО СЕЙЧАС (её сообщает не каждый исполнитель).

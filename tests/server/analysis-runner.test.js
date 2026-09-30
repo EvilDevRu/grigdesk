@@ -395,7 +395,7 @@ test('адаптер без scopedWorkspace отклоняется до запу
     config: runnerConfig(root),
     ...runnerDeps({
       executorFor: async () => ({
-        id: 'ollama',
+        id: 'fake',
         async scopedWorkspace() { return false; },
         async run(options) { calls.push(options); },
       }),

@@ -20,7 +20,6 @@
   вовсе. Родной `auto` (решает сам Kimi) кокпит НЕ выставляет: в нём permission reverse RPC
   до кокпита не доходит, всплывашка перестаёт появляться и классификатору нечего решать.
   Полное соответствие режимов и цена каждого — в
-  [kimi-runtime-security.md](kimi-runtime-security.md). У Ollama свой список
-  (спрашивать некого — см. ниже), у Claude — прочитанный из CLI.
+  [kimi-runtime-security.md](kimi-runtime-security.md). У Claude список прочитан из CLI.
 
 Источник до переноса: docs/cockpit/chat-agents.md § Режимы прав (--permission-mode)

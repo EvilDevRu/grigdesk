@@ -158,6 +158,9 @@ test('отмена точного предупреждения оставляе�
   const { wrapper, confirmations, saves, flushPromises } = await mountSettings(t, {
     confirmImpl: async () => false,
   });
+
+  await wrapper.get('#provider-toggle-alpha-next').trigger('click');
+
   const toggle = wrapper.findAll('.pvcard')[0].get('[role="switch"]');
   await toggle.trigger('click');
   await flushPromises();
@@ -175,6 +178,8 @@ test('отмена точного предупреждения оставляе�
 
 test('принятое предупреждение сохраняет false как подтверждённое изменение', async (t) => {
   const { wrapper, confirmations, saves, flushPromises } = await mountSettings(t);
+
+  await wrapper.get('#provider-toggle-beta-next').trigger('click');
   await wrapper.findAll('.pvcard')[1].get('[role="switch"]').trigger('click');
   await flushPromises();
 
@@ -188,6 +193,8 @@ test('включение запрета не требует подтвержде
   const { wrapper, confirmations, saves, flushPromises } = await mountSettings(t, {
     initialValue: false,
   });
+
+  await wrapper.get('#provider-toggle-alpha-next').trigger('click');
   await wrapper.findAll('.pvcard')[0].get('[role="switch"]').trigger('click');
   await flushPromises();
 
@@ -199,6 +206,9 @@ test('включение запрета не требует подтвержде
 
 test('mode-dependent пояснение неспособного исполнителя видно в его карточке', async (t) => {
   const { wrapper } = await mountSettings(t);
+
+  await wrapper.get('#provider-toggle-gamma-next').trigger('click');
+
   const gamma = wrapper.findAll('.pvcard')[2];
 
   assert.match(gamma.text(), /Host-режим не умеет обеспечить запрет и остановит ход/);
@@ -210,6 +220,9 @@ test('пока подтверждение открыто, повторный к�
   const { wrapper, confirmations, saves, flushPromises } = await mountSettings(t, {
     confirmImpl: () => waiting,
   });
+
+  await wrapper.get('#provider-toggle-alpha-next').trigger('click');
+
   const toggle = wrapper.findAll('.pvcard')[0].get('[role="switch"]');
   await toggle.trigger('click');
   await toggle.trigger('click');

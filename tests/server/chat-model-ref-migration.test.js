@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.ts';
 import {
   resolveLegacyModel,
   resolveModelRef,
@@ -21,6 +22,13 @@ const registry = {
   other: [{ id: 'shared', tier: 1 }],
   duplicate: [{ id: 'shared', tier: 1 }],
 };
+
+test('снятый адаптер отсутствует в карточках и не разрешается для запуска', async () => {
+  const adapters = await getProviderAdapters();
+
+  assert.equal(adapters.has('ollama'), false);
+  assert.equal(await getExecutor('ollama'), null);
+});
 
 async function tempStore(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-schema-'));

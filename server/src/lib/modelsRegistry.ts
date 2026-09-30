@@ -251,7 +251,64 @@ export function resolveModelEfforts(
 }
 
 /**
+ * Готовит копии моделей зарегистрированного исполнителя для runtime-каталога.
+ * Семейства и уровни усилия уточняются адаптером, сохранённые записи не меняются.
+ */
+async function resolveRuntimeModels(
+  models: CatalogModel[],
+  executor: ExecutorAdapter,
+  config: unknown,
+): Promise<CatalogModel[]> {
+  let discovered: unknown = null;
+
+  if (executor.efforts) {
+    try {
+      discovered = await executor.efforts(config);
+    } catch {
+      discovered = null;
+    }
+  }
+
+  return models
+    .map((model) => {
+      let family = String(model.family || '').trim();
+
+      if (!family && typeof executor.modelFamily === 'function') {
+        try {
+          family = String(executor.modelFamily(model) || '').trim();
+        } catch {
+          family = '';
+        }
+      }
+
+      // Ладдер задаёт общий порядок ступеней, гейт — доступные конкретной модели.
+      // Живой CLI обновляет сохранённый ладдер, но ручной custom-выбор остаётся.
+      let efforts = resolveModelEfforts(model.efforts, discovered, model.custom);
+
+      if (!model.custom && typeof executor.modelEfforts === 'function') {
+        try {
+          const allowed = executor.modelEfforts(model, efforts);
+
+          if (Array.isArray(allowed)) {
+            efforts = allowed;
+          }
+        } catch {
+          // При ошибке гейта остаётся общий ладдер исполнителя.
+        }
+      }
+
+      return {
+        ...model,
+        ...(family && { family }),
+        efforts,
+      };
+    })
+    .sort((a, b) => (b.tier || 0) - (a.tier || 0));
+}
+
+/**
  * Итоговый реестр: { providerId: [модели с efforts, сортированные по tier desc] }.
+ * Снятые исполнители остаются в файле, но не участвуют в runtime-каталоге.
  */
 export async function getModelsRegistry(
   config: { modelsPath: string },
@@ -275,37 +332,19 @@ export async function getModelsRegistry(
   if (dirty) await fs.writeFile(config.modelsPath, JSON.stringify(file, null, 2));
 
   const registry: ModelsRegistry = {};
+
   for (const [prov, models] of Object.entries(file)) {
-    if (prov === '_meta') continue;
-    const ex = executors.get(prov);
-    let discovered: unknown = null;
-    if (ex?.efforts) {
-      try { discovered = await ex.efforts(config); } catch { discovered = null; }
+    if (prov === '_meta') {
+      continue;
     }
-    registry[prov] = ((models || []) as CatalogModel[])
-      .map((m) => {
-        let family = String(m.family || '').trim();
-        if (!family && typeof ex?.modelFamily === 'function') {
-          try { family = String(ex.modelFamily(m) || '').trim(); } catch { family = ''; }
-        }
-        // Ладдер и гейт — РАЗНЫЕ оси. Ладдер (имена и порядок ступеней) даёт живой CLI и
-        // он же перебивает устаревший сохранённый список. Кому из моделей какая ступень
-        // доступна — знает только исполнитель: `--effort xhigh` на модели без поддержки
-        // не игнорируется, а роняет запуск. Правленную руками запись не трогаем.
-        let efforts = resolveModelEfforts(m.efforts, discovered, m.custom);
-        if (!m.custom && typeof ex?.modelEfforts === 'function') {
-          try {
-            const allowed = ex.modelEfforts(m, efforts);
-            if (Array.isArray(allowed)) efforts = allowed;
-          } catch { /* гейт не обязан работать — остаётся общий ладдер */ }
-        }
-        return {
-          ...m,
-          ...(family && { family }),
-          efforts,
-        };
-      })
-      .sort((a, b) => (b.tier || 0) - (a.tier || 0));
+
+    const executor = executors.get(prov);
+
+    if (!executor) {
+      continue;
+    }
+
+    registry[prov] = await resolveRuntimeModels((models || []) as CatalogModel[], executor, config);
   }
   cache = { at: Date.now(), registry };
   return registry;

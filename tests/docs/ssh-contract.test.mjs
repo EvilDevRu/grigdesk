@@ -51,11 +51,11 @@ test('документация называет четыре bridge и trusted t
   const docs = await sshDocs();
 
   assert.deepEqual({
-    providers: ['Claude', 'Codex', 'Kimi', 'Ollama'].filter((name) => docs.includes(name)),
+    providers: ['Claude', 'Codex', 'Kimi', 'DeepSeek'].filter((name) => docs.includes(name)),
     trustedAttempt: /trusted attempt|доверенн[а-я -]*attempt/i.test(docs),
     nullScope: /free|свободн[а-я ]+чат/i.test(docs),
   }, {
-    providers: ['Claude', 'Codex', 'Kimi', 'Ollama'],
+    providers: ['Claude', 'Codex', 'Kimi', 'DeepSeek'],
     trustedAttempt: true,
     nullScope: true,
   });

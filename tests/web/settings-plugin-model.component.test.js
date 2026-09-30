@@ -31,8 +31,8 @@ function providers() {
       ],
     },
     {
-      id: 'ollama',
-      name: 'Ollama',
+      id: 'fake',
+      name: 'Фейк',
       available: true,
       capabilities: { scopedWorkspace: false, untrustedText: true },
       // У локального эффорт бинарный: `xhigh` ему передать нельзя.
@@ -179,7 +179,7 @@ test('модели берутся из общего реестра исполн�
   assert.ok(select.exists(), 'селекта модели нет — настройка нарисована полем ввода');
   assert.deepEqual(
     wrapper.findAll('.plugrow optgroup').map((g) => g.attributes('label')),
-    ['Claude', 'Ollama', 'GPT (Codex) — недоступен'],
+    ['Claude', 'Фейк', 'GPT (Codex) — недоступен'],
     'исполнители обязаны стоять группами, а недоступный — с оговоркой',
   );
   // Старая версия («extra») в кратком списке не показывается — то же правило, что в чате.
@@ -233,14 +233,14 @@ test('«Презентации» предлагают Codex с безопасн�
 test('выбор сохраняется парой «исполнитель + модель», а id со слэшем не рвётся', async (t) => {
   const { wrapper, plugins, saved, select, flushPromises } = await mountSettings(t);
 
-  await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
+  await select.setValue('fake:hf.co/unsloth/qwen3.6:latest');
   assert.equal(plugins.plugin.values.triageModel, null, 'несохранённый выбор остаётся в черновике');
 
   await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
   assert.deepEqual(saved, [{
     id: 'inbox',
-    values: { triageModel: { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest' } },
+    values: { triageModel: { provider: 'fake', model: 'hf.co/unsloth/qwen3.6:latest' } },
   }], 'на сервер уезжает пара, а не склеенная строка');
 });
 
@@ -277,11 +277,14 @@ test('«не выбрана» обнуляет настройку — автом
 test('пропавшая из реестра модель не выдаётся за «не выбрана»', async (t) => {
   // Сменили CLI, выключили демон — модели в каталоге больше нет. Выбор при этом остался
   // в настройках, и сервер ходит именно им: показать «не выбрана» значило бы соврать.
-  const { wrapper, select } = await mountSettings(t, { value: { provider: 'ollama', model: 'сгинувшая:latest' } });
+  const { wrapper, select } = await mountSettings(t, {
+    value: { provider: 'fake', model: 'сгинувшая:latest' },
+  });
 
-  assert.equal(select.element.value, 'ollama:сгинувшая:latest');
+  assert.equal(select.element.value, 'fake:сгинувшая:latest');
   const lost = wrapper.findAll('.plugrow select.inp > option').map((o) => o.text());
-  assert.ok(lost.some((text) => text.includes('ollama:сгинувшая:latest') && text.includes('нет в реестре')),
+
+  assert.ok(lost.some((text) => text.includes('fake:сгинувшая:latest') && text.includes('нет в реестре')),
     'выбор должен остаться в списке с пометкой');
 });
 
@@ -296,7 +299,7 @@ test('сохранённая несовместимая модель остаё�
   );
   assert.deepEqual(
     wrapper.findAll('.plugrow optgroup').map((group) => group.attributes('label')),
-    ['Claude', 'Ollama'],
+    ['Claude', 'Фейк'],
   );
 });
 
@@ -318,7 +321,7 @@ test('карточка «Код» показывает модель сообще
   assert.equal(select.element.value, 'claude:claude-opus-5');
   assert.deepEqual(
     wrapper.findAll('.plugrow optgroup').map((group) => group.attributes('label')),
-    ['Claude', 'Ollama'],
+    ['Claude', 'Фейк'],
     'небезопасный model transport нельзя предложить для чтения staged diff',
   );
   assert.deepEqual(
@@ -386,11 +389,11 @@ test('смена модели не переносит уровень, котор
     t, { value: { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' } },
   );
 
-  await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
+  await select.setValue('fake:hf.co/unsloth/qwen3.6:latest');
   await wrapper.get('.plugin-save').trigger('click');
   await flushPromises();
   assert.deepEqual(plugins.plugin.values.triageModel,
-    { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest' },
+    { provider: 'fake', model: 'hf.co/unsloth/qwen3.6:latest' },
     'у локальной модели эффорт бинарный — xhigh переносить некуда');
 
   // А совпавший уровень переносится: терять осознанный выбор человека тоже нельзя.
@@ -405,7 +408,13 @@ test('уровень, пропавший у модели, показан пом�
   // Обновили CLI, лестница модели изменилась. Сервер такой уровень снимет и пойдёт на
   // умолчании — человек обязан видеть, что его выбор больше не действует.
   const { wrapper } = await mountSettings(
-    t, { value: { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest', effort: 'xhigh' } },
+    t, {
+      value: {
+        provider: 'fake',
+        model: 'hf.co/unsloth/qwen3.6:latest',
+        effort: 'xhigh',
+      },
+    },
   );
   const effort = effortSelect(wrapper);
 

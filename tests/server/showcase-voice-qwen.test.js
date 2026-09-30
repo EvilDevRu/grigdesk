@@ -316,7 +316,7 @@ test('отказ реплики внутри сеанса называется �
       ],
       { outputDir: path.join(root, 'out'), deadlineMs: 30_000, signal: undefined },
     ),
-    (error) => error.code === 'voice_failed' && /видеопамят.*Ollama/.test(error.message),
+    (error) => error.code === 'voice_failed' && /видеопамят.*закройте программы/.test(error.message),
   );
 
   const requests = (await readFile(stdin, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
@@ -350,7 +350,7 @@ test('нехватка видеопамяти называется словам�
       },
       { outputDir: path.join(root, 'out'), deadlineMs: 30_000, signal: undefined },
     ),
-    (error) => error.code === 'voice_failed' && /видеопамят.*Ollama/.test(error.message),
+    (error) => error.code === 'voice_failed' && /видеопамят.*закройте программы/.test(error.message),
   );
 });
 

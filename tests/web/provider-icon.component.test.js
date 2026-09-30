@@ -1,7 +1,7 @@
 // Иконки исполнителей (ProviderIcon.vue). Смысл проверки: у известного исполнителя
 // должен рисоваться ЗНАК, а не кружок с буквой. Фоллбэк молчаливый — новый исполнитель
 // без своей ветки выглядит «почти нормально» (буква в кружке), и пропажу знака замечают
-// не сразу: Ollama так и жила с буквой «O», пока о ней не спросили отдельно.
+// не сразу: такая проверка сохраняет знак при добавлении и переносе адаптеров.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
@@ -20,7 +20,6 @@ const MARKED = [
   { id: 'claude', name: 'Claude' },
   { id: 'codex', name: 'GPT' },
   { id: 'kimi', name: 'Kimi' },
-  { id: 'ollama', name: 'Ollama' },
   { id: 'deepseek', name: 'DeepSeek' },
 ];
 
@@ -105,14 +104,4 @@ test('незнакомому исполнителю остаётся кружо�
   assert.ok(fb.exists());
   assert.equal(fb.text(), 'М');
   assert.match(fb.attributes('style'), /width:\s*20px/);
-});
-
-test('знак Ollama обведён линией — на тёмной теме заливка выглядела бы кляксой', async (t) => {
-  const wrapper = await mountIcon(t, { id: 'ollama', name: 'Ollama' });
-  const svg = wrapper.find('svg');
-  assert.equal(svg.attributes('stroke'), 'currentColor');
-  assert.equal(svg.attributes('fill'), 'none');
-  // Глаза — единственное, что залито: точками они читаются и на 15px.
-  const dots = svg.element.querySelectorAll('circle[fill="currentColor"]');
-  assert.equal(dots.length, 2);
 });

@@ -101,7 +101,7 @@ function claudeOutputChars(message: { content?: unknown } | undefined): number {
   return chars;
 }
 
-// Грубая оценка вывода по символам, пока ход идёт: та же цифра, что у Ollama и DeepSeek.
+// Грубая оценка вывода по символам, пока ход идёт: тот же способ оценки, что у DeepSeek.
 const CHARS_PER_TOKEN = 3;
 // Дельты рассуждений идут часто; в окно уходит не каждая — как у остальных исполнителей.
 const PROGRESS_THROTTLE_MS = 400;

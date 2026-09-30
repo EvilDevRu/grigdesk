@@ -14,7 +14,7 @@
   |---|---|---|
   | Claude | `command-hook` | нативный deny для прямой формы и server-owned PreToolUse |
   | Codex | `command-hook` | process hook, подтверждённый через `hooks/list` до thread |
-  | Ollama | `tool-filter` | фильтр Cockpit до permission mode и запуска `bash` |
+  | DeepSeek | `command-hook` | server-owned PreToolUse hook в штатном DSH (DeepSeek CLI) |
   | Kimi contained | `network-sandbox` | egress разрешён только API Kimi |
   | Kimi host | `fail-closed` | при включённом запрете весь ход отклоняется до spawn |
 

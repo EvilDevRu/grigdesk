@@ -72,7 +72,7 @@ test('bucket boundary is drawn where the group changes, not per bar', () => {
 });
 
 test('an executor that never names a bucket keeps the flat list it had before', () => {
-  // У Ollama полосы — это память машины, а не вёдра лимитов. Линия там утверждала бы
+  // Справочные полосы описывают ресурсы, а не вёдра лимитов. Линия там утверждала бы
   // структуру, о которой исполнитель ничего не сообщал.
   const view = providerUsageView({
     state: 'ok',
@@ -274,7 +274,7 @@ test('local trouble keeps the vendor status page out of the popover', () => {
 // страницу состояния для демона на этой же машине фронт не вправе.
 test('executor without a declared status page gets no invented address', () => {
   assert.equal(
-    providerStatusHint({ name: 'Ollama', vendor: 'Ollama' }, { state: 'unavailable' }),
+    providerStatusHint({ name: 'Фейк', vendor: 'Фейк' }, { state: 'unavailable' }),
     null,
   );
 });

@@ -69,7 +69,11 @@ function modelOf(value) {
   return { id, model: provider?.models.find((model) => model.id === id) || null, provider };
 }
 
-async function mountChat(t) {
+/**
+ * Монтирует настоящий селект с управляемым ответом на сброс памяти.
+ * Сохранённое состояние задаётся до загрузки реестра и не исправляется фикстурой.
+ */
+async function mountChat(t, { initial = {}, reset = async () => true } = {}) {
   const browser = await installBrowser(t);
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
@@ -88,8 +92,10 @@ async function mountChat(t) {
     sending: false,
     compacting: false,
     sessionResetting: false,
+    ...initial,
   });
   const setModelCalls = [];
+  const resetCalls = [];
 
   globalThis.__modelAvailApi = {
     url: (path) => path,
@@ -111,7 +117,11 @@ async function mountChat(t) {
       session.model = modelId;
       session.modelRef = { provider: modelOf(modelId).provider?.id || '', model: modelId };
     },
-    async resetContext() { return true; },
+    async resetContext(sid) {
+      resetCalls.push({ sid, modelRef: { ...session.modelRef } });
+
+      return reset(sid);
+    },
     permFor() { return null; },
     questionFor() { return null; },
     isOnConveyor() { return false; },
@@ -148,7 +158,13 @@ async function mountChat(t) {
   });
   await flushPromises();
 
-  return { wrapper, setModelCalls };
+  return {
+    wrapper,
+    session,
+    setModelCalls,
+    resetCalls,
+    flushPromises,
+  };
 }
 
 const modelOption = (wrapper, id) => wrapper.findAll('.sel.model option')
@@ -183,4 +199,82 @@ test('переключение на модель недоступного исп
   await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
 
   assert.deepEqual(setModelCalls, [{ sid: 'model-availability-chat', modelId: 'gpt-5.6-sol' }]);
+});
+
+const RETIRED_SESSION = {
+  revision: 3,
+  model: 'retired-model',
+  modelRef: { provider: 'retired-provider', model: 'retired-model' },
+  sessionId: 'retired-fixture-session',
+  pendingSeed: 'Сохранённая память',
+};
+
+test('снятая модель остаётся выбранной, а история видна после загрузки реестра', async (t) => {
+  const { wrapper, session, setModelCalls, resetCalls } = await mountChat(t, {
+    initial: RETIRED_SESSION,
+  });
+
+  assert.equal(wrapper.find('.sel.model select').element.value, RETIRED_SESSION.model);
+  assert.equal(wrapper.text().includes('привет'), true);
+  assert.equal(setModelCalls.length, 0);
+  assert.equal(resetCalls.length, 0);
+  assert.deepEqual(session.modelRef, RETIRED_SESSION.modelRef);
+});
+
+test('перевыбор снятого исполнителя ждёт сброса с прежним modelRef', async (t) => {
+  let finishReset;
+  const gate = new Promise((resolve) => {
+    finishReset = resolve;
+  });
+
+  t.after(() => finishReset(true));
+
+  const { wrapper, session, resetCalls, setModelCalls, flushPromises } = await mountChat(t, {
+    initial: RETIRED_SESSION,
+    reset: () => gate,
+  });
+
+  await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
+
+  assert.deepEqual(resetCalls, [{
+    sid: session.id,
+    modelRef: RETIRED_SESSION.modelRef,
+  }]);
+  assert.equal(setModelCalls.length, 0);
+  assert.deepEqual(session.modelRef, RETIRED_SESSION.modelRef);
+
+  finishReset(true);
+  await flushPromises();
+
+  assert.deepEqual(setModelCalls, [{ sid: session.id, modelId: 'gpt-5.6-sol' }]);
+  assert.deepEqual(session.modelRef, { provider: 'codex', model: 'gpt-5.6-sol' });
+  assert.equal(session.messages[0].text, 'привет');
+});
+
+test('отказ сброса снятого исполнителя возвращает селект и сохраняет пару', async (t) => {
+  const { wrapper, session, resetCalls, setModelCalls, flushPromises } = await mountChat(t, {
+    initial: RETIRED_SESSION,
+    reset: async () => false,
+  });
+
+  await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
+  await flushPromises();
+
+  assert.equal(resetCalls.length, 1);
+  assert.equal(setModelCalls.length, 0);
+  assert.equal(wrapper.find('.sel.model select').element.value, RETIRED_SESSION.model);
+  assert.deepEqual(session.modelRef, RETIRED_SESSION.modelRef);
+  assert.equal(session.messages[0].text, 'привет');
+});
+
+test('сохранённый seed снятого исполнителя требует сброса даже без sessionId', async (t) => {
+  const { wrapper, session, resetCalls, setModelCalls, flushPromises } = await mountChat(t, {
+    initial: { ...RETIRED_SESSION, sessionId: null },
+  });
+
+  await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
+  await flushPromises();
+
+  assert.deepEqual(resetCalls, [{ sid: session.id, modelRef: RETIRED_SESSION.modelRef }]);
+  assert.deepEqual(setModelCalls, [{ sid: session.id, modelId: 'gpt-5.6-sol' }]);
 });

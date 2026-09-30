@@ -28,8 +28,7 @@
   в раскрытии стояло «true». Старые сохранённые ленты с `sub: true` `StepList` читает как
   вложенные, но путём не показывает.
 - У tool-шага есть необязательное поле `files: string[]` — нормализованные пути файлов,
-  которые инструмент изменил (Claude Write/Edit, Codex `fileChange`, Kimi Edit,
-  Ollama Write/Edit), и rich-форма `changes: [{path, kind, diff}]`. `diff` бывает unified
+  которые инструмент изменил (Claude Write/Edit, Codex `fileChange`, Kimi Edit), и rich-форма `changes: [{path, kind, diff}]`. `diff` бывает unified
   patch от Codex либо точной парой `{old,new}` из ACP Kimi. **У app-server patch лежит в
   `diff` только у `update`: для `add`/`delete` там содержимое файла целиком**, без единого
   знака строки — нормализатор Codex (`patchOf`) разворачивает его в один hunk с нужным
@@ -45,8 +44,7 @@
   успешным `res`, дубли путей схлопываются.
 - **У общего sink размышления свой лимит — `STEP_THINK_LIMIT` 6000 символов** против
   `STEP_TEXT_LIMIT` 1200 у остального текста (`STEP_DIFF_LIMIT` 2000 на кусок диффа).
-  Executor вправе передать уже bounded preview: текущий Ollama adapter вызывает обычный
-  `cut()` заранее и поэтому фактически показывает до 1200 символов think на round.
+  Executor вправе передать уже bounded preview; общий sink не увеличивает его обратно.
   Общие 1200 резали рассуждение на первом же абзаце, и в ленте оставался огрызок фразы:
   со стороны это выглядело как «размышлений не видно вовсе» — ровно та жалоба, с которой
   лимит и развели.

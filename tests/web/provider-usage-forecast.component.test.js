@@ -124,11 +124,11 @@ test('компонент показывает блок своему исполн
   assert.equal(codex.findAll('a').length, 0);
   assert.equal(globalThis.__usageForecastWatched, 1);
 
-  const ollama = mount(ProviderUsageForecast, { props: { providerId: 'ollama' } });
+  const fake = mount(ProviderUsageForecast, { props: { providerId: 'fake' } });
 
-  t.after(() => ollama.unmount());
+  t.after(() => fake.unmount());
 
-  assert.equal(ollama.text(), '');
+  assert.equal(fake.text(), '');
 
   // Полосы есть, но все стоят: один общий ряд вместо трёх одинаковых.
   globalThis.__usageForecastStore.barsOf = (id) => (id === 'claude'

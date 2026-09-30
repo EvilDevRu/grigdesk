@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createToolbox } from '../../server/src/lib/executors/_ollamaTools.ts';
 import * as policy from '../../server/src/lib/executors/_directSshPolicy.ts';
 import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
@@ -183,42 +182,6 @@ test('Codex process hook применяет host-aware DB-политику к в
   assert.deepEqual({ hookInstalled: Boolean(hookCommand), decisions }, {
     hookInstalled: true,
     decisions: ['deny', null],
-  });
-});
-
-test('Ollama блокирует внешний DB-клиент до обходящего режима прав и запуска Bash', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-ollama-policy-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const marker = path.join(root, 'bash-reached');
-  let permissionCalls = 0;
-  const toolbox = await createToolbox({
-    cwd: root,
-    roots: [root],
-    permissionMode: 'bypassPermissions',
-    blockDirectSsh: false,
-    blockDirectDb: true,
-    strictUnknownDbClient: true,
-    onPermission: async () => {
-      permissionCalls += 1;
-      return { allow: true };
-    },
-  });
-  const result = await toolbox.call({
-    name: 'bash',
-    args: {
-      command: `mysql -h db.prod.internal >/dev/null 2>&1 || printf reached > ${marker}`,
-    },
-  });
-  const markerText = await readFile(marker, 'utf8').catch(() => null);
-
-  assert.deepEqual({
-    blocked: result?.ok === false && /БД|DB|баз/iu.test(result?.text || ''),
-    permissionCalls,
-    markerText,
-  }, {
-    blocked: true,
-    permissionCalls: 0,
-    markerText: null,
   });
 });
 

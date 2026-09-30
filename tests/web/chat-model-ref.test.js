@@ -3,6 +3,30 @@ import test from 'node:test';
 
 import { apiHarness, chatStoreFixture, setChatProviders } from './helpers/chat-store.js';
 
+const RETIRED_MODEL_REF = Object.freeze({ provider: 'retired-provider', model: 'retired-model' });
+
+/**
+ * Создаёт сохранённый чат снятого исполнителя с независимой копией пары и истории.
+ * Реестр подменяется после создания стора, чтобы его обычная инициализация не скрыла отказ.
+ */
+async function retiredChatFixture(id, memory = {}) {
+  const chat = await chatStoreFixture({
+    sessions: [{
+      id,
+      modelRef: { ...RETIRED_MODEL_REF },
+      revision: 3,
+      messages: [{ role: 'user', text: 'Прежняя история' }],
+      createdAt: 1,
+      updatedAt: 1,
+      ...memory,
+    }],
+  });
+
+  setChatProviders({ modelOf: () => ({ provider: null, model: null }) });
+
+  return chat;
+}
+
 function declareSessionBindingProvider(providerId) {
   setChatProviders({
     modelOf(value) {
@@ -430,4 +454,90 @@ test('несохранённый чат без binding сбрасывается 
 
   assert.equal(await chat.resetContext('fresh-claude-chat', { note: false }), true);
   assert.equal(posts, 0);
+});
+
+for (const succeeds of [true, false]) {
+  test(`снятый исполнитель: сброс ${succeeds ? 'очищает память после ACK' : 'блокирует ход при отказе'}`,
+    async (t) => {
+      const chat = await retiredChatFixture('retired-reset-chat', {
+        sessionId: 'retired-fixture-session',
+        pendingSeed: 'Сохранённая память',
+        contextTokens: 123,
+        contextWindow: 456,
+        totalInputTokens: 789,
+        cachedInputTokens: 12,
+      });
+
+      let finishReset;
+      const gate = new Promise((resolve) => {
+        finishReset = resolve;
+      });
+      const requests = [];
+
+      t.after(() => finishReset());
+
+      apiHarness.post = async (url, body) => {
+        requests.push({ url, body });
+        await gate;
+
+        if (!succeeds) {
+          throw new Error('Синтетический отказ сброса');
+        }
+
+        return { ok: true, reset: true };
+      };
+
+      const reset = chat.resetContext('retired-reset-chat', { note: false });
+
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const session = chat.sessions[0];
+
+      assert.deepEqual(requests, [{
+        url: '/api/chat/session/reset',
+        body: { chatKey: session.id, modelRef: RETIRED_MODEL_REF },
+      }]);
+      assert.equal(session.sessionId, 'retired-fixture-session');
+      assert.equal(session.pendingSeed, 'Сохранённая память');
+      assert.equal(session.contextTokens, 123);
+
+      finishReset();
+
+      assert.equal(await reset, succeeds);
+      assert.deepEqual(session.modelRef, RETIRED_MODEL_REF);
+      assert.equal(session.messages[0].text, 'Прежняя история');
+      assert.equal(session.sessionResetFailed, !succeeds);
+
+      if (succeeds) {
+        assert.equal(session.sessionId, null);
+        assert.equal(session.pendingSeed, '');
+        assert.equal(session.contextTokens, 0);
+        assert.equal(session.contextWindow, 0);
+        assert.equal(session.totalInputTokens, 0);
+        assert.equal(session.cachedInputTokens, 0);
+      } else {
+        assert.equal(session.sessionId, 'retired-fixture-session');
+        assert.equal(session.pendingSeed, 'Сохранённая память');
+        assert.equal(await chat.send(session.id, 'Не продолжать с прежней памятью'), false);
+        assert.equal(requests.length, 1);
+      }
+    });
+}
+
+test('снятая модель не запускает отправку и сохраняет историю без fallback', async () => {
+  const chat = await retiredChatFixture('retired-send-chat');
+  let posts = 0;
+
+  apiHarness.post = async () => {
+    posts += 1;
+
+    return {};
+  };
+
+  await chat.send('retired-send-chat', 'Продолжение');
+  assert.equal(posts, 0);
+  assert.deepEqual(chat.sessions[0].modelRef, RETIRED_MODEL_REF);
+  assert.equal(chat.sessions[0].messages[0].text, 'Прежняя история');
+  assert.equal(chat.sessions[0].sending, false);
+  assert.match(chat.sessions[0].error, /недоступна в реестре/);
 });

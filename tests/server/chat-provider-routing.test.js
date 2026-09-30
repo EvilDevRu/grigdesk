@@ -144,7 +144,30 @@ test('Kimi retry разрешён только до подтверждённог
 });
 
 test('chat API не принимает client-owned surface и не запускает unknown model/provider', async (t) => {
-  const { app, executorCalls } = await apiFixture(t);
+  const runs = [];
+  const { app, executorCalls } = await apiFixture(t, {
+    executor: {
+      id: 'claude',
+      async run(options) {
+        runs.push(options);
+
+        return {
+          reply: 'Новый ответ',
+          sessionId: 'fresh-fixture-session',
+          steps: [],
+        };
+      },
+    },
+  });
+  const oldRef = { provider: 'missing', model: 'invented' };
+  const messages = [
+    {
+      role: 'user',
+      text: 'Сохранённая история',
+      attachments: [{ id: 'fixture-image' }],
+    },
+    { role: 'assistant', text: 'Прежний ответ' },
+  ];
   const saved = await app.inject({
     method: 'PUT',
     url: '/api/chat/store/chat',
@@ -152,8 +175,11 @@ test('chat API не принимает client-owned surface и не запуск
       chat: {
         id: 'route-chat',
         surface: 'embedded',
-        modelRef: { provider: 'missing', model: 'invented' },
-        messages: [],
+        modelRef: oldRef,
+        sessionId: 'retired-fixture-session',
+        pendingSeed: 'Старая память',
+        contextTokens: 123,
+        messages,
         createdAt: Date.UTC(2026, 7, 1),
         updatedAt: Date.UTC(2026, 7, 1),
         revision: 0,
@@ -176,6 +202,67 @@ test('chat API не принимает client-owned surface и не запуск
   assert.equal(run.statusCode, 400);
   assert.equal(run.json().error, 'unknown_provider');
   assert.equal(executorCalls(), 0);
+  assert.equal(runs.length, 0);
+
+  const staleReset = await app.inject({
+    method: 'POST',
+    url: '/api/chat/session/reset',
+    payload: { chatKey: 'route-chat', modelRef: { provider: 'claude', model: 'claude-test' } },
+  });
+
+  assert.equal(staleReset.statusCode, 409);
+  assert.equal(staleReset.json().error, 'stale_chat_model');
+  assert.equal(runs.length, 0);
+
+  const reset = await app.inject({
+    method: 'POST',
+    url: '/api/chat/session/reset',
+    payload: { chatKey: 'route-chat', modelRef: oldRef },
+  });
+
+  assert.equal(reset.statusCode, 200);
+  assert.equal(reset.json().reset, true);
+
+  const state = await app.inject({ method: 'GET', url: '/api/chat/store' });
+  const current = state.json().sessions.find((chat) => chat.id === 'route-chat');
+
+  assert.deepEqual(current.modelRef, oldRef);
+  assert.deepEqual(current.messages, messages);
+  assert.equal(current.sessionId, null);
+  assert.equal(current.pendingSeed, '');
+  assert.equal(current.contextTokens, 0);
+
+  const chosen = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        ...current,
+        modelRef: { provider: 'claude', model: 'claude-test' },
+      },
+    },
+  });
+
+  assert.equal(chosen.statusCode, 200);
+
+  const next = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'route-chat',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'Продолжить с новой моделью',
+    },
+  });
+
+  assert.equal(next.statusCode, 200);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].sessionId, null);
+
+  const after = await app.inject({ method: 'GET', url: '/api/chat/store' });
+  const history = after.json().sessions.find((chat) => chat.id === 'route-chat').messages;
+
+  assert.deepEqual(history.slice(0, messages.length), messages);
 });
 
 test('contextCache идёт живьём в SSE, переживает F5 в active и возвращается с ответом', async (t) => {

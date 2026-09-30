@@ -61,8 +61,8 @@ attempt ledger: task id → доверенный attempt.profile → сущес�
 и недоверенная/legacy-задача получают null scope и не видят сессий.
 
 Доставка общая, но транспорт соответствует исполнителю: Claude получает локальный MCP,
-Codex — dynamic tool app-server, Kimi — MCP через ACP (включая contained mount), Ollama —
-тот же descriptor/dispatcher в toolbox. В ядре чата нет выбора по вендору.
+Codex — dynamic tool app-server, Kimi и DeepSeek — MCP через ACP
+(у Kimi contained с mount). Descriptor и dispatcher едины. В ядре чата нет выбора по вендору.
 
 Для всех команд действует одна общая очередь чата; broker кладёт в неё запись
 `origin: 'ssh'`.

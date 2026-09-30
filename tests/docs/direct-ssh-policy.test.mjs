@@ -11,7 +11,7 @@ function missingClauses(text, clauses) {
   return clauses.filter(([, pattern]) => !pattern.test(text)).map(([name]) => name);
 }
 
-test('канон chat-agents описывает настройку, POST и четыре способа запрета SSH', async () => {
+test('канон описывает настройку и способы запрета SSH у исполнителей', async () => {
   const text = await physicalDocs('chat-agents');
   const missing = missingClauses(text, [
     ['ключ настройки', /blockDirectSsh/u],
@@ -21,7 +21,7 @@ test('канон chat-agents описывает настройку, POST и че
     ['default-on', /(по умолчанию|отсутстви[^\n]*ключ)[^\n]*(включ|true)/iu],
     ['Claude command-hook', /Claude[^\n]*command-hook/iu],
     ['Codex command-hook', /Codex[^\n]*command-hook/iu],
-    ['Ollama tool-filter', /Ollama[^\n]*tool-filter/iu],
+    ['DeepSeek command-hook', /DeepSeek[^\n]*command-hook/iu],
     ['Kimi network/fail-closed', /Kimi[\s\S]{0,500}(network-sandbox|fail-closed)/iu],
     ['переоткрытие сессии', /providerSettings[\s\S]{0,300}(restart|переоткр)/iu],
   ]);
