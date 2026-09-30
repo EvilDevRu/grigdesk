@@ -164,6 +164,37 @@ export function routeResumeArgs(
 }
 
 /**
+ * Полная проекция находок читается движком под task lock, включая sealed attempt.
+ * Операция не запускает модель и не зависит от общего task-level Markdown-файла.
+ */
+export function routeFindingsArgs(config: RouteConfig, {
+  task, profile, attempt,
+}: RouteIdentityArgs): string[] {
+  return [String(task), 'findings-export', '--profile', profile, '--attempt', attempt,
+    '--format', 'json', ...routePathArgs(config)];
+}
+
+/**
+ * Ответ адресует immutable stop отдельного bootstrap, а текст передаётся файлом.
+ * Команда завершается после CAS и не смешивается с отдельным resume.
+ */
+export function routeBootstrapAnswerArgs(config: RouteConfig, {
+  task, profile, attempt, visitId, stopHash, answerFile,
+}: RouteIdentityArgs & {
+  visitId: string;
+  stopHash: string;
+  answerFile: string;
+}): string[] {
+  if (!/^b_[a-f0-9]{32}$/.test(visitId) || !CATALOG_HASH_RE.test(stopHash)) {
+    throw new TypeError('ответ требует exact bootstrap visit и stop hash');
+  }
+
+  return [String(task), 'bootstrap-answer', '--profile', profile, '--attempt', attempt,
+    '--node', 'scout', '--visit', visitId, '--stop-hash', stopHash, '--answer-file', answerFile,
+    ...routePathArgs(config)];
+}
+
+/**
  * `gate` — фиксация решения человека. `--commit-only` обязателен: без него gate сам
  * ведёт маршрут дальше и держит команду столько, сколько работает следующий узел,
  * а вызывающий по HTTP упирается в свой таймаут. Продолжение — отдельным resume.

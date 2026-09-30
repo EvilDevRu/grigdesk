@@ -98,7 +98,11 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 ```
 
 Он не отправляет prompt. Пока coverage отсутствует, просрочено или несовместимо, запуск
-блокируется до model call.
+блокируется до model call. Внутри длинного маршрута корректный положительный снимок,
+отказавший только по сроку, автоматически обновляется одним metadata-only preflight.
+Перед продолжением проверяются исходная revision и новое текущее время. Отсутствие,
+несовместимость, записанная недоступность и отказ перепроверки сохраняют остановку;
+семейства моделей, цепочка исполнителей и TTL не меняются.
 
 ## Переменные `profile.sh`
 
@@ -329,6 +333,20 @@ production-сборкой, получил 401 и ушёл на отсутств�
 а завершается fail-closed до lifecycle-действий.
 
 ### Вход в маршрут и отдельная разведка
+
+Отдельный SCOUT принимает done с неблокирующими deferred и сохраняет весь вердикт
+в immutable checkpoint schema 2. Находки передаются основным узлам и приёмке с явным
+bootstrap-источником, без выдуманного sequence основного журнала. Failed, skipped
+и host-generated exhausted исполняют закреплённый stop:human до основного cursor;
+продолжение требует ответа на exact visit/hash. Поддерживается один scout/state-only,
+другие bootstrap topology/actions отвергаются до модели.
+
+Внутренний `route_v2_context_for_node TASK ATTEMPT NODE RUN_KEY OUTPUT [PHASE]`
+получает phase=bootstrap от отдельной разведки; умолчание route сохраняет старые callers.
+Ответ передаётся в evidence.bootstrapDecision и в служебном блоке полного вопроса/ответа
+через FACTORY_STAGE_BOOTSTRAP_DECISION_FILE. Pin и опубликованные prompts не меняются.
+Хранение, экспорт и человеческое решение —
+[контракт результатов bootstrap](../cockpit/pipeline/bootstrap-results.md).
 
 У route-машины необязательное поле `bootstrap` принимает `required` (умолчание)
 или `skip`. При `skip` движок не вызывает отдельного SCOUT и не создаёт фиктивный

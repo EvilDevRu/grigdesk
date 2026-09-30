@@ -92,6 +92,7 @@
             {
               clickable: nodeInteractive && node.executable,
               selected: node.id === selectedNode,
+              'node-running': node.running,
               'loop-member': Boolean(node.loopRole),
               'loop-active': node.id === loop?.activeNode,
             },
@@ -114,14 +115,6 @@
             class="node-loop-role"
             text-anchor="middle"
           >{{ node.loopRole }}</text>
-          <circle
-            v-if="node.id === loop?.activeNode"
-            class="node-loop-orbit"
-            :cx="node.cx"
-            :cy="node.cy"
-            :r="node.radius + 7"
-            aria-hidden="true"
-          />
           <rect
             class="node-hit-area"
             :x="node.cx - node.halfWidth"
@@ -148,6 +141,22 @@
             :cx="node.cx"
             :cy="node.cy"
             :r="node.radius - 5"
+            aria-hidden="true"
+          />
+          <path
+            v-if="node.running && node.kind === 'code'"
+            class="node-run-outline"
+            :d="node.shapePath"
+            pathLength="100"
+            aria-hidden="true"
+          />
+          <circle
+            v-else-if="node.running"
+            class="node-run-outline"
+            :cx="node.cx"
+            :cy="node.cy"
+            :r="node.radius"
+            pathLength="100"
             aria-hidden="true"
           />
           <g
@@ -306,6 +315,7 @@ interface GraphNodeElement {
   detailY: number;
   shapePath: string;
   status: string;
+  running: boolean;
   runner: string;
   runnerModel: string;
   runnerSwitched: boolean;
@@ -401,6 +411,27 @@ const STATUS_LABEL: Record<string, string> = {
 
 const nodeInteractive = computed(() => props.interactive || !props.reference);
 const loop = computed(() => factoryLoopView(props.graph, props.reference));
+
+/**
+ * Статус run переживает остановку демона, поэтому сам по себе не включает движение.
+ * Обводка и входящие стрелки используют один признак живой работы на любом маршруте.
+ */
+const runningNodes = computed(() => {
+  if (props.reference || props.graph.daemonAlive !== true || props.graph.stall) {
+    return new Set<string>();
+  }
+
+  return new Set(Object.entries(props.graph.statuses ?? {})
+    .filter(([, status]) => status === 'run')
+    .map(([id]) => id));
+});
+
+const activeReturnNodes = computed(() => new Set(props.graph.edges
+  .filter(([source, destination, , kind]) => (
+    kind === 'fail' && (props.graph.loops?.[source] ?? 0) > 0 && runningNodes.value.has(destination)
+  ))
+  .map(([, destination]) => destination)));
+
 const parallelNodes = computed(() => props.graph.edges
   .filter(([, , , , routing]) => routing === 'to_sandbox')
   .map(([, destination]) => destination));
@@ -471,7 +502,7 @@ const edgeElements = computed<EdgeElement[]>(() => {
 
         className = loopCount > 0 ? 'e-loop' : 'e-fail';
 
-        if (loopCount > 0 && statuses[destination] === 'run') {
+        if (loopCount > 0 && runningNodes.value.has(destination)) {
           className += ' e-flow';
         }
 
@@ -486,7 +517,8 @@ const edgeElements = computed<EdgeElement[]>(() => {
       const sourceStatus = source === '_start' ? 'done' : statuses[source];
       const destinationStatus = statuses[destination];
 
-      if (doneLike.has(sourceStatus) && destinationStatus === 'run') {
+      if (doneLike.has(sourceStatus) && runningNodes.value.has(destination)
+        && !activeReturnNodes.value.has(destination)) {
         className = 'e-flow';
       } else if (doneLike.has(sourceStatus) && destinationStatus && destinationStatus !== 'pending') {
         className = 'e-on';
@@ -634,11 +666,12 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
       detailY: geometry.detailY,
       shapePath: kind === 'code' ? codeNodePath(geometry) : '',
       status,
+      running: runningNodes.value.has(nodeId),
       runner,
       runnerModel,
       runnerSwitched: Boolean(runnerMetadata?.switched),
       title: [label, description, stallTitle, arbiterTitle, runnerTitle, subtitle].filter(Boolean).join('\n'),
-      mark: statusMarks[status] ?? '',
+      mark: status === 'run' ? '' : statusMarks[status] ?? '',
       arbiterVerdict,
       // След арбитра остаётся над значком, отдельно от текущего статуса.
       // Размер холста учитывает метку, поэтому у верхнего ряда она не обрезается.
@@ -738,18 +771,16 @@ function onNodeActivate(
   stroke-width: 4px;
 }
 .loop-active .node-loop-role { fill: var(--accent); }
-.node-loop-orbit {
+.node-run-outline {
   fill: none;
   stroke: var(--accent);
   stroke-width: 2;
   stroke-linecap: round;
-  stroke-dasharray: 34 148;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: orbit 2.4s linear infinite;
+  stroke-linejoin: round;
+  stroke-dasharray: 25 75;
+  animation: node-run-spin .85s linear infinite;
   pointer-events: none;
 }
-.loop-member:not(.loop-active) .mk-run { animation: none; }
 .nlbl {
   fill: var(--ink);
   font-size: 12.5px;
@@ -778,7 +809,6 @@ function onNodeActivate(
   pointer-events: none;
 }
 .mk-done, .mk-arb { fill: var(--good); }
-.mk-run { fill: var(--accent); }
 .mk-wait { fill: var(--warn); }
 .mk-stall, .mk-skipbad, .mk-premature, .mk-fail { fill: var(--bad); }
 .mk-arbiter { fill: currentColor; }
@@ -799,7 +829,7 @@ function onNodeActivate(
   fill: color-mix(in srgb, var(--accent) 9%, var(--surface));
 }
 .ns-run .node-detail { color: color-mix(in srgb, var(--accent) 75%, var(--ink)); }
-.ns-run .mk-run { animation: nodepulse 2.4s ease-in-out infinite; }
+.node-running .node-shape { stroke: color-mix(in srgb, var(--accent) 30%, var(--line-2)); }
 .ns-wait { --node-state: var(--warn); }
 .ns-wait .node-shape {
   stroke: var(--warn);
@@ -834,7 +864,7 @@ function onNodeActivate(
 }
 .e-fail { stroke: var(--ink-low); opacity: .45; stroke-width: 1.2; stroke-dasharray: 4 5; }
 .e-loop { stroke: var(--bad); opacity: .85; stroke-width: 1.8; }
-.e-loop.e-flow { stroke-dasharray: 6 6; }
+.e-loop.e-flow { stroke: var(--accent); opacity: 1; stroke-width: 2.4; stroke-dasharray: 6 6; }
 .e-cycle { stroke: var(--accent); opacity: .6; stroke-width: 2; }
 .e-cycle.e-flow { opacity: 1; stroke-width: 2.4; }
 .edge-muted { opacity: .18; }
@@ -855,10 +885,10 @@ function onNodeActivate(
 
 @keyframes nodepulse { 50% { opacity: .4; } }
 @keyframes flow { to { stroke-dashoffset: -12; } }
-@keyframes orbit { to { transform: rotate(360deg); } }
+@keyframes node-run-spin { to { stroke-dashoffset: -100; } }
 @media (prefers-reduced-motion: reduce) {
   .edges > g, .node-shape { transition: none; }
-  .e-flow, .node-loop-orbit, .ns-run .mk-run, .ns-arb .mk-arb, .graph-stop.arb {
+  .e-flow, .node-run-outline, .ns-arb .mk-arb, .graph-stop.arb {
     animation: none;
   }
 }

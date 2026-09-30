@@ -200,3 +200,29 @@ export function stopVerdictOf(
     .sort((a, b) => (b[1].sequence ?? -1) - (a[1].sequence ?? -1))[0];
   return entry ? { node: entry[0], ...entry[1] } : null;
 }
+
+/**
+ * Bootstrap остаётся отдельным источником, даже если основной узел тоже зовётся scout.
+ * Sequence основного журнала не назначается вопросу отдельной разведки.
+ */
+export function bootstrapNodeVerdict(stop: {
+  verdict: unknown;
+  outcome: string;
+  at: string;
+} | null | undefined): (NodeVerdictEntry & { phase: 'bootstrap' }) | null {
+  if (!stop) {
+    return null;
+  }
+
+  const verdict = normalizeVerdict(stop.verdict);
+
+  return verdict ? {
+    ...verdict,
+    phase: 'bootstrap',
+    outcome: stop.outcome,
+    stop: 'human',
+    rewind: null,
+    at: stop.at,
+    sequence: null,
+  } : null;
+}

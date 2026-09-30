@@ -5,6 +5,7 @@ import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { STAGES, StageKind } from '../../lib/stages.ts';
 import { readInstruction, readActivity, readAgentLive } from '../../lib/factoryCli.ts';
 import { taskDiff } from '../../lib/git.ts';
@@ -36,6 +37,8 @@ import {
   runRouteEngine, spawnRouteEngine, routeUnitActive,
   routeFailure, startRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
+  routeFindingsArgs,
+  routeBootstrapAnswerArgs,
   stageAutoCompactEnv,
 } from '../../lib/factoryRouteCli.ts';
 import {
@@ -517,6 +520,54 @@ async function factoryModule(
       if (!target) return { text: '' };
       return { text: await fs.readFile(path.join(dir, target), 'utf8') };
     } catch { return { text: '' }; }
+  });
+
+  // Список на приёмке читает exact immutable источники, а не устаревающий tN.deferred.md.
+  // Ошибка чтения видима клиенту и не становится законным пустым списком.
+  fastify.get<FactoryRoute>('/api/tasks/:id/findings', async (request, reply) => {
+    const id = request.params.id || '';
+
+    if (!/^[1-9][0-9]{0,18}$/.test(id)) {
+      return reply.code(400).send({ error: 'bad_task' });
+    }
+
+    const managed = await managedRegistry(id, reply);
+
+    if (!managed) {
+      return reply;
+    }
+
+    const { trusted } = managed;
+
+    if (request.query.profile !== trusted.profile || request.query.attempt !== trusted.attempt) {
+      return reply.code(409).send({
+        error: 'attempt_changed',
+        message: 'Попытка изменилась — обнови карточку.',
+      });
+    }
+
+    const exported = await runRouteEngine(config, routeFindingsArgs(config, {
+      task: id,
+      profile: trusted.profile,
+      attempt: trusted.attempt,
+    }));
+
+    if (!exported.ok) {
+      return reply.code(409).send({ error: 'findings_unavailable', message: exported.message });
+    }
+
+    try {
+      const value = JSON.parse(exported.stdout);
+
+      if (value.taskId !== id || value.profile !== trusted.profile || value.attemptId !== trusted.attempt
+          || !Array.isArray(value.findings?.deferred)) {
+        throw new Error('Движок вернул список другой попытки или неверную форму.');
+      }
+
+      return value;
+    } catch (error) {
+      return reply.code(409).send({ error: 'findings_unavailable', message: errorMessage(error) });
+    }
   });
 
   // Воркдиры задачи — для кнопки «Открыть в VS Code». Исторический BE/FE env здесь
@@ -1550,6 +1601,89 @@ async function factoryModule(
     });
   });
 
+  // Ответ отдельной разведке — короткий CAS exact stop; запуск остаётся отдельным resume.
+  // Ошибка запуска продолжения не может потерять уже принятое решение человека.
+  fastify.post<FactoryRoute>('/api/tasks/:id/bootstrap-answer', async (request, reply) => {
+    const id = request.params.id || '';
+    const body = request.body || {};
+
+    if (!/^[1-9][0-9]{0,18}$/.test(id) || body.phase !== 'bootstrap' || body.node !== 'scout'
+        || typeof body.visitId !== 'string' || !/^b_[a-f0-9]{32}$/.test(body.visitId)
+        || typeof body.stopHash !== 'string' || !/^[a-f0-9]{64}$/.test(body.stopHash)
+        || typeof body.answer !== 'string') {
+      return reply.code(400).send({ error: 'bad_bootstrap_answer' });
+    }
+
+    const answer = body.answer;
+
+    // Ответ адресует конкретный stop и сохраняет весь введённый текст.
+    // Предел считаем по Unicode-символам, как CLI; неподдержанные controls отвергаем.
+    if (!answer.trim() || [...answer].length > HUMAN_COMMENT_LIMIT
+        || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(answer)) {
+      return reply.code(400).send({
+        error: 'bad_bootstrap_answer',
+        message: `Нужен непустой ответ до ${HUMAN_COMMENT_LIMIT} символов без управляющих знаков.`,
+      });
+    }
+
+    const managed = await managedRegistry(id, reply);
+
+    if (!managed) {
+      return reply;
+    }
+
+    const { trusted } = managed;
+    const stop = trusted.bootstrapStop;
+
+    if (trusted.terminal || body.profile !== trusted.profile || body.attempt !== trusted.attempt
+        || !stop || stop.visitId !== body.visitId || stop.recordHash !== body.stopHash) {
+      return reply.code(409).send({
+        error: 'bootstrap_visit_changed',
+        message: 'Визит изменился — обнови карточку.',
+      });
+    }
+
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'factory-bootstrap-answer-'));
+
+    try {
+      const answerFile = path.join(temporary, 'answer.txt');
+
+      await fs.writeFile(answerFile, answer, { mode: 0o600 });
+
+      const recorded = await runRouteEngine(config, routeBootstrapAnswerArgs(config, {
+        task: id,
+        profile: trusted.profile || '',
+        attempt: trusted.attempt,
+        visitId: body.visitId,
+        stopHash: body.stopHash,
+        answerFile,
+      }));
+
+      if (!recorded.ok) {
+        return reply.code(409).send({ error: 'bootstrap_answer_conflict', message: recorded.message });
+      }
+
+      const decision = JSON.parse(recorded.stdout);
+
+      if (decision.kind !== 'decision' || decision.visitId !== body.visitId
+          || decision.stopHash !== body.stopHash || decision.taskId !== id
+          || decision.attemptId !== trusted.attempt || decision.profile !== trusted.profile
+          || decision.answer !== answer || !/^[a-f0-9]{64}$/.test(decision.recordHash)) {
+        throw new Error('Движок не подтвердил exact решение.');
+      }
+
+      return {
+        ok: true,
+        outcome: 'recorded',
+        decision,
+      };
+    } catch (error) {
+      return reply.code(409).send({ error: 'bootstrap_answer_unconfirmed', message: errorMessage(error) });
+    } finally {
+      await fs.rm(temporary, { recursive: true, force: true });
+    }
+  });
+
   // Ворота: принять/отклонить (+ комментарий агенту при отклонении).
   fastify.post<FactoryRoute>('/api/tasks/:id/gate/:key/:decision', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
@@ -1587,6 +1721,13 @@ async function factoryModule(
         message: cursor
           ? `маршрут не стоит на этих воротах: журнал на узле ${cursor.node} (${cursor.state}) — сначала продолжи или верни прогон`
           : 'маршрут ещё не дошёл до ворот: курсор журнала не инициализирован — решение принять нельзя',
+      });
+    }
+    if ((request.body?.attempt && request.body.attempt !== trusted.attempt)
+        || (request.body?.profile && request.body.profile !== trusted.profile)) {
+      return reply.code(409).send({
+        error: 'attempt_changed',
+        message: 'Попытка изменилась — обнови карточку.',
       });
     }
     const attempt = trusted.attempt;
@@ -2295,6 +2436,20 @@ async function factoryModule(
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     const { registry, trusted } = managed;
+
+    if ((request.body?.attempt && request.body.attempt !== trusted.attempt)
+        || (request.body?.profile && request.body.profile !== trusted.profile)) {
+      return reply.code(409).send({
+        error: 'attempt_changed',
+        message: 'Попытка изменилась — обнови карточку.',
+      });
+    }
+    if (trusted.bootstrapStop?.state === 'waiting') {
+      return reply.code(409).send({
+        error: 'bootstrap_answer_required',
+        message: 'Сначала ответь на вопрос разведки SCOUT.',
+      });
+    }
     if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
       return { ok: true, outcome: 'already_running' };
     }

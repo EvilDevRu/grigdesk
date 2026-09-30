@@ -5,6 +5,7 @@
 // дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
 import { execFile, spawn } from 'node:child_process';
+import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -194,6 +195,7 @@ interface CodexTurn {
   stepSink: StepSink;
   normalizeStep: (value: unknown) => ChatStep[];
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onPermission?: (ask: Record<string, unknown>) => unknown;
   messageDeltas: Map<string, string>;
   reply: string;
@@ -1187,6 +1189,7 @@ export function openCodexSession({
   // историю, и ноль вместо неё выдал бы историю за расход первого хода.
   let threadOutputTokens: number | null = null;
   let actualModel = '';
+  let confirmedSessionModel = '';
   let stderrTail = '';
   let protocol = 'pending';
   let exited = false;
@@ -1250,11 +1253,12 @@ export function openCodexSession({
    */
   function createTurn({
     message, onStep, onProgress, onPermission,
-    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
   }: {
     message?: unknown;
     onStep?: (step: ChatStep) => void;
     onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
     onPermission?: (ask: Record<string, unknown>) => unknown;
     onInTurnReady?: (port: InTurnPort) => void;
     onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
@@ -1262,11 +1266,13 @@ export function openCodexSession({
     onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
   }): CodexTurn {
     const stepSink = createStepSink(onStep);
+
     return {
       message,
       stepSink,
       normalizeStep: createCodexStepNormalizer({ model, cwd }),
       onProgress,
+      onRunMetadata,
       onPermission,
       messageDeltas: new Map(),
       reply: '',
@@ -1990,6 +1996,7 @@ export function openCodexSession({
       })) as { thread?: { id?: string; sessionId?: string }; model?: unknown } | null;
     threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
     actualModel = String(opened?.model || model || '');
+    confirmedSessionModel = typeof opened?.model === 'string' ? opened.model : '';
     return threadId;
   })();
 
@@ -2025,11 +2032,12 @@ export function openCodexSession({
      */
     async send({
       message, onStep, onProgress, onPermission, onSessionCreated,
-      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
     }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
       onPermission?: (ask: Record<string, unknown>) => unknown;
       onSessionCreated?: (sessionId: string) => unknown;
       onInTurnReady?: (port: InTurnPort) => void;
@@ -2046,6 +2054,7 @@ export function openCodexSession({
         message,
         onStep,
         onProgress,
+      onRunMetadata,
         onPermission,
         ...(onInTurnReady ? { onInTurnReady } : {}),
         ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
@@ -2064,6 +2073,9 @@ export function openCodexSession({
       try {
         await ready;
         if (current.settled) return result;
+        if (confirmedSessionModel) {
+          onRunMetadata?.({ actualModelId: confirmedSessionModel, modelSource: 'session' });
+        }
         // Id thread известен сразу после handshake: сообщаем его до turn/start, чтобы
         // перезапуск сервера посреди хода не оставил чат без сессии для resume.
         if (threadId && onSessionCreated) {
@@ -2131,7 +2143,7 @@ export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   workTools, workspaceAccess, onPermission, log, onSessionCreated,
-  onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+  onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
 }: {
   config: CodexConfig;
   env?: NodeJS.ProcessEnv;
@@ -2145,6 +2157,7 @@ export async function runCodexAppServer({
   providerSettings?: CodexSettings | null;
   signal?: AbortSignal;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onStep?: (step: ChatStep) => void;
   tokenInfoReader?: typeof readCodexThreadTokenInfo;
   workTools?: CodexWorkToolsPort | null;
@@ -2172,6 +2185,7 @@ export async function runCodexAppServer({
       message,
       onStep,
       onProgress,
+      onRunMetadata,
       onPermission,
       onSessionCreated,
       ...(onInTurnReady ? { onInTurnReady } : {}),
@@ -2654,13 +2668,13 @@ export default {
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
     providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
     workTools, workspaceAccess, onPermission, log, onSessionCreated,
-    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
   }: Parameters<typeof runCodexAppServer>[0]) {
     return runCodexAppServer({
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
       providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools, workspaceAccess,
       onPermission, log, onSessionCreated,
-      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
     });
   },
 

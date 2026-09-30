@@ -67,7 +67,7 @@ if [[ "$FIXTURE_CASE" != sequential ]]; then
   while [[ ! -f "$FIXTURE_CASE_DIR/scout.seen" ]]; do sleep 0.05; done
 fi
 case "$FIXTURE_CASE" in
-  up_failed) exit 42 ;;
+  up_failed|human_up_failed) exit 42 ;;
   cancel) while true; do sleep 0.05; done ;;
   changed_metadata) sed -i 's/API_PORT=8801/API_PORT=8811/' "$metadata" ;;
 esac
@@ -93,6 +93,14 @@ runner_alpha_run() {
   elif [[ "$stage" == BUILD ]]; then
     [[ -f "$FIXTURE_CASE_DIR/up.done" ]] || return 41
     : >"$FIXTURE_CASE_DIR/build.seen"
+  fi
+  if [[ "$stage" == SCOUT && "$FIXTURE_CASE" == human* ]]; then
+    FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" \
+      --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
+      --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" \
+      --failure-owner human --finding 'owner-choice=Какой вариант выбрать?' \
+      failed 'Нужен выбор владельца'
+    return $?
   fi
   FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" \
     --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
@@ -147,6 +155,34 @@ assert_file_missing "$FIXTURE_CASE_DIR/scout.seen" "invalid workspace metadata b
 up_pid=$(cat "$FIXTURE_CASE_DIR/up.pid")
 kill -0 "$up_pid" 2>/dev/null
 assert_rc 1 "$?" "rejected early metadata stops and reaps sandbox provisioning"
+
+# Вопрос появляется раньше main cursor и не бросает принадлежащую подготовку среды.
+# Resume без решения удерживает ту же границу human lifecycle и не запускает up.sh.
+run_case human 6107 0
+assert_file_exists "$FIXTURE_CASE_DIR/up.done" "human pause ждёт успешного owned provisioning"
+assert_file_missing "$FIXTURE_CASE_DIR/build.seen" "human pause не запускает основной маршрут"
+human_attempt=$(awk -F= '$1 == "ATTEMPT_ID" {print $2}' "$FIXTURE_CASE_DIR/state/t6107.pipeline")
+human_root="$FIXTURE_CASE_DIR/control/protocol-v2/tasks/t6107/attempts/$human_attempt"
+assert_file_missing "$human_root/stage-results/runtime.json" "вопрос не создаёт основной cursor"
+assert_contains "$(cat "$FIXTURE_CASE_DIR/state/t6107.pipeline")" 'RESULT=stopped-bootstrap-human' \
+  "bootstrap pause имеет отдельную проекцию"
+before_human=$(find "$human_root" -type f -name 'event.*.json' -print | sort | xargs sha256sum)
+before_up=$(cat "$FIXTURE_CASE_DIR/up.pid")
+FACTORY_FORBID_LIVE=0 "$FACTORY_HOME/bin/factory" 6107 resume \
+  --profile demo-profile --attempt "$human_attempt" --routes-dir "$routes" \
+  --state-dir "$FIXTURE_CASE_DIR/state" --control-dir "$FIXTURE_CASE_DIR/control" \
+  >"$FIXTURE_CASE_DIR/resume.log" 2>&1
+assert_rc 0 "$?" "resume без ответа штатно удержан"
+assert_eq "$before_human" "$(find "$human_root" -type f -name 'event.*.json' -print | sort | xargs sha256sum)" \
+  "удержанный resume не открывает lifecycle и не закрывает human span"
+assert_eq "$before_up" "$(cat "$FIXTURE_CASE_DIR/up.pid")" "удержанный resume не запускает provisioning"
+
+run_case human_up_failed 6108 42
+assert_file_missing "$FIXTURE_CASE_DIR/build.seen" "ошибка среды при вопросе не запускает BUILD"
+assert_contains "$(cat "$FIXTURE_CASE_DIR/state/t6108.pipeline")" 'RESULT=stopped-bootstrap-human' \
+  "ошибка среды не теряет сохранённый вопрос"
+assert_contains "$(cat "$FIXTURE_CASE_DIR/state/t6108.pipeline")" 'BOOTSTRAP_ENV_ERROR=' \
+  "ошибка среды сохраняется отдельно от вопроса"
 
 # Ручная остановка во время разведки должна завершить обе принадлежащие запуску
 # сессии: модель и ещё не готовый стенд. Отдельный setsid up.sh не делает его сиротой.

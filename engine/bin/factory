@@ -47,6 +47,13 @@ usage() {
   factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT [--actor ID]
                    [те же общие пути]
 
+  factory TASK findings-export --attempt a_<32hex> --format json|markdown
+                   [те же общие пути]
+
+  factory TASK bootstrap-answer --attempt a_<32hex> --node scout
+                   --visit b_<32hex> --stop-hash SHA256 --answer-file ABS
+                   [те же общие пути]
+
   factory TASK work-time --attempt a_<32hex>
                    [те же общие пути]
 
@@ -227,6 +234,10 @@ runner_failover_without() {
 
 TASK=""
 MODE=""
+EXPORT_FORMAT=""
+BOOTSTRAP_VISIT=""
+BOOTSTRAP_STOP_HASH=""
+BOOTSTRAP_ANSWER_FILE=""
 PROFILE=""
 ROUTE=""
 FACTORY_USER_HOME="${HOME:-/nonexistent}"
@@ -324,7 +335,7 @@ fi
 
 while (( $# > 0 )); do
   case "$1" in
-    check|start|resume|gate|abandon|recover|goto|work-time)
+    check|start|resume|gate|abandon|recover|goto|work-time|findings-export|bootstrap-answer)
       [[ -z "$MODE" ]] || die "режим указан повторно"
       MODE=$1
       shift
@@ -450,6 +461,20 @@ while (( $# > 0 )); do
       TASK_COMMENT=1
       shift
       ;;
+    --format)
+      (( $# >= 2 )) || die "после --format нужно значение"
+      EXPORT_FORMAT=$2
+      shift 2
+      ;;
+    --visit|--stop-hash|--answer-file)
+      (( $# >= 2 )) || die "после $1 нужно значение"
+      case "$1" in
+        --visit) BOOTSTRAP_VISIT=$2 ;;
+        --stop-hash) BOOTSTRAP_STOP_HASH=$2 ;;
+        --answer-file) BOOTSTRAP_ANSWER_FILE=$2 ;;
+      esac
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -467,8 +492,9 @@ done
 
 [[ "$MODE" == check || "$MODE" == start || "$MODE" == resume ||
    "$MODE" == gate || "$MODE" == abandon || "$MODE" == recover ||
-   "$MODE" == goto || "$MODE" == work-time ]] ||
-  die "укажи check, start, resume, gate, abandon, recover, goto или work-time"
+   "$MODE" == goto || "$MODE" == work-time || "$MODE" == findings-export ||
+   "$MODE" == bootstrap-answer ]] ||
+  die "укажи check, start, resume, gate, abandon, recover, goto или work-time/findings-export"
 # Task-level override исполнителя рождается только вместе с новой попыткой;
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
@@ -492,6 +518,52 @@ done
   die "route: недопустимое имя (маршрут валидируется по current-каталогу)"
 
 ROUTES_DIR=$(canonical_existing_dir "$ROUTES_DIR" routes-dir) || exit 78
+if [[ "$MODE" == bootstrap-answer ]]; then
+  [[ "$TASK" =~ ^[1-9][0-9]{0,18}$ && "$EXPECTED_ATTEMPT" =~ ^a_[a-f0-9]{32}$ &&
+     "$GATE_NODE" == scout && "$BOOTSTRAP_VISIT" =~ ^b_[a-f0-9]{32}$ &&
+     "$BOOTSTRAP_STOP_HASH" =~ ^[a-f0-9]{64}$ ]] ||
+    die "bootstrap-answer требует exact attempt, node scout, visit и stop hash"
+  [[ -z "$ROUTE" && -z "$TICKET_JSON" && -z "$GATE_DECISION" && -z "$GATE_COMMENT" &&
+     -z "$REASON" && -z "$ACTOR" && -z "$EXPORT_FORMAT" && "$GATE_COMMIT_ONLY" == 0 &&
+     ${#INSTRUMENTATION_SPECS[@]} -eq 0 && ${#DELIVERY_TARGETS[@]} -eq 0 && "$TASK_COMMENT" == 0 ]] ||
+    die "bootstrap-answer не принимает параметры запуска или смены маршрута"
+  BOOTSTRAP_ANSWER_FILE=$(canonical_file "$BOOTSTRAP_ANSWER_FILE" answer-file) || exit 78
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+  paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || die "state/control пересекаются"
+  export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE" FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
+  unset BASH_ENV ENV
+  source "$FACTORY_HOME/lib/bootstrap-state.sh"
+  attempt_bootstrap_answer_v2 "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE" \
+    "$BOOTSTRAP_VISIT" "$BOOTSTRAP_STOP_HASH" "$BOOTSTRAP_ANSWER_FILE"
+  exit $?
+fi
+[[ -z "$BOOTSTRAP_VISIT" && -z "$BOOTSTRAP_STOP_HASH" && -z "$BOOTSTRAP_ANSWER_FILE" ]] ||
+  die "visit, stop-hash и answer-file допустимы только для bootstrap-answer"
+# Чтение sealed attempt не зависит от текущего runners.env или готовности стенда.
+# Exact pins проверяются под task lock; операция не открывает оркестратор/lifecycle.
+if [[ "$MODE" == findings-export ]]; then
+  [[ "$TASK" =~ ^[1-9][0-9]{0,18}$ && "$EXPECTED_ATTEMPT" =~ ^a_[a-f0-9]{32}$ ]] ||
+    die "findings-export требует task и exact --attempt"
+  [[ -z "$ROUTE" && -z "$TICKET_JSON" && -z "$REASON" && -z "$ACTOR" &&
+     -z "$GATE_NODE" && -z "$GATE_DECISION" && -z "$GATE_COMMENT" &&
+     "$GATE_COMMIT_ONLY" == 0 && ${#INSTRUMENTATION_SPECS[@]} -eq 0 &&
+     ${#DELIVERY_TARGETS[@]} -eq 0 && "$TASK_COMMENT" == 0 ]] ||
+    die "findings-export не принимает параметры изменения попытки"
+  [[ "${EXPORT_FORMAT:-json}" == json || "$EXPORT_FORMAT" == markdown ]] ||
+    die "findings-export: format должен быть json или markdown"
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+  paths_disjoint "$V2_STATE" "$CONTROL_ROOT" || die "state/control пересекаются"
+  export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE" FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
+  unset BASH_ENV ENV
+  source "$FACTORY_HOME/lib/findings-export.sh"
+  attempt_findings_export_v2 "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE" "${EXPORT_FORMAT:-json}"
+  exit $?
+fi
+[[ -z "$EXPORT_FORMAT" ]] || die "--format допустим только для findings-export"
+
+
 PF_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/profile.sh" profile) || exit 78
 RUNNER_CONFIG_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/runners.env" runners-config) || exit 78
 GRAPH_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/graph.json" graph) || exit 78
@@ -659,6 +731,7 @@ source "$FACTORY_HOME/lib/route-runtime.sh"
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/profile-preflight.sh"
 source "$FACTORY_HOME/lib/bootstrap-sandbox.sh"
+source "$FACTORY_HOME/lib/findings-export.sh"
 
 # Форму причины проверяем СРАЗУ после загрузки ledger-библиотеки: до локов, до
 # профиля и до единой строки в журнале. Иначе человек узнаёт о лишних символах
@@ -1988,7 +2061,7 @@ v2_review_decision() {
 
 route_v2_context_for_node() {
   local context_task=$1 context_attempt=$2 context_node=$3
-  local context_run_key=$4 context_output=$5 cursor event_count=0
+  local context_run_key=$4 context_output=$5 context_phase=${6:-route} cursor event_count=0
   local transaction_id="" instrumentation_phase=not-started scope_arg=""
   local cause review acceptance allowed action target index
   local ledger_results ledger_line findings_file rc
@@ -2073,7 +2146,7 @@ route_v2_context_for_node() {
   done <<<"$ledger_results"
   # Режим «цикл»: круг, этап, потолок профиля и свой отчёт на каждый круг. У обычного
   # маршрута аргумента нет, и контекст побайтно прежний.
-  if [[ "$context_node" != scout ]]; then
+  if [[ "$context_phase" != bootstrap ]]; then
     local loop_state loop_max
     loop_state=$(attempt_stage_state_loop_state_v2 "$context_task" "$context_attempt") ||
       return 78
@@ -2098,15 +2171,11 @@ route_v2_context_for_node() {
     done
   fi
   # Проекция находок — файлом в control root: история цикла растёт с каждым этапом, а
-  # одна строка argv в Linux не длиннее 128 КиБ (MAX_ARG_STRLEN). Bootstrap исполняется
-  # до рождения stage-ledger и находок иметь не может; остальные узлы получают проекцию
-  # только после полной проверки уже инициализированного hash-chain.
+  # одна строка argv в Linux не длиннее 128 КиБ (MAX_ARG_STRLEN). Фаза задаётся явно:
+  # основной узел scout не подменяет bootstrap. Reader проверяет оба immutable источника,
+  # включая законное отсутствие основного ledger до первого узла.
   findings_file=$(mktemp "$(factory_control_root)/.route-findings.XXXXXX") || return 1
-  if [[ "$context_node" == scout ]]; then
-    printf '%s\n' '{"schema":1,"open":[],"closed":[],"deferred":[]}' >"$findings_file"
-  else
-    attempt_stage_state_findings_v2 "$context_task" "$context_attempt" >"$findings_file"
-  fi || {
+  attempt_stage_state_findings_v2 "$context_task" "$context_attempt" >"$findings_file" || {
     rm -f -- "$findings_file"
     return 78
   }
@@ -2169,40 +2238,32 @@ v2_gate_pipeline_key() {
 # Пишем человекочитаемый файл рядом с прочими артефактами задачи и возвращаем
 # число находок, чтобы вызывающий назвал его в журнале.
 v2_write_deferred_tail() {
-  local task=$1 attempt=$2 target=$3 ledger
-  ledger=$(attempt_stage_state_findings_v2 "$task" "$attempt") || return 1
-  printf '%s' "$ledger" | python3 - "$target" "$task" <<'PY'
-import json
-import sys
+  attempt_findings_export_v2 "$1" "$2" "$PROFILE" write "$3"
+}
 
-target, task = sys.argv[1], sys.argv[2]
-try:
-    ledger = json.load(sys.stdin)
-except (ValueError, json.JSONDecodeError):
-    raise SystemExit(1)
-items = ledger.get("deferred") or []
-if not items:
-    raise SystemExit(9)
-lines = [
-    f"# Отложенные находки задачи {task}",
-    "",
-    "Проверяющие узлы нашли это по пути, но признали вне цели задачи: маршрут их",
-    "не чинил и не проверял. Решение — за человеком: принять как есть, завести",
-    "отдельными задачами или вернуть маршрут с явным требованием починить.",
-    "",
-    "Строка находки — ярлык, а не разбор: развёрнутое доказательство лежит в отчёте",
-    "узла-источника (он назван в скобках) среди артефактов задачи. Возвращая маршрут",
-    "на доработку, назовите нужный id дословно — по нему узел-автор поймёт, какая",
-    "именно находка стала работой этого захода.",
-    "",
-]
-for item in items:
-    lines.append(f"- **{item['id']}** ({item['sourceNode']} → {item['owner']}): {item['summary']}")
-lines.append("")
-with open(target, "w", encoding="utf-8") as handle:
-    handle.write("\n".join(lines))
-print(len(items))
-PY
+# Побочная Markdown-проекция не отменяет durable gate/terminal при ошибке диска.
+# Все исходы, включая пустой хвост и ошибку, явно отражаются в журнале и витрине.
+v2_publish_deferred_tail() {
+  local task=$1 attempt=$2 count rc
+  count=$(v2_write_deferred_tail "$task" "$attempt" "$STATE_DIR/t${task}.deferred.md")
+  rc=$?
+  case "$rc" in
+    0)
+      [[ "$count" =~ ^[1-9][0-9]*$ ]] || rc=1
+      if (( rc == 0 )); then
+        set_st "$task" DEFERRED_EXPORT_ERROR '' DEFERRED_COUNT "$count" || return
+        v2_log "отложено находок: $count — список в t${task}.deferred.md"
+      fi
+      ;;
+    9)
+      set_st "$task" DEFERRED_EXPORT_ERROR '' DEFERRED_COUNT 0 || return
+      ;;
+  esac
+  if (( rc != 0 && rc != 9 )); then
+    set_st "$task" DEFERRED_EXPORT_ERROR "выгрузка замечаний не создана (код $rc)" || return
+    v2_log "выгрузка замечаний не создана (код $rc); повтори findings-export для exact attempt"
+  fi
+  return 0
 }
 
 # Подготовка диспетчера к режиму «цикл». Пара закреплённого маршрута читается один раз.
@@ -2616,11 +2677,37 @@ v2_lifecycle_latest_stage_hash() {
 }
 
 v2_lifecycle_resolve_human() {
-  local resolution=$1 evidence
+  local resolution=$1 evidence=${2:-}
   runtime_lifecycle_enabled_v2 || return 0
-  evidence=$(runtime_analytics_hash_string_v2 \
-    "$resolution:$FACTORY_LIFECYCLE_ATTEMPT_ID:$FACTORY_LIFECYCLE_SESSION_ID") || return
+  if [[ -z "$evidence" ]]; then
+    evidence=$(runtime_analytics_hash_string_v2 \
+      "$resolution:$FACTORY_LIFECYCLE_ATTEMPT_ID:$FACTORY_LIFECYCLE_SESSION_ID") || return
+  fi
   runtime_lifecycle_resolve_open_human_v2 "$resolution" "$evidence" >/dev/null
+}
+
+# Долговечный вопрос не зависит от успешности побочной проекции или подъёма среды.
+# Owned provisioning завершается и проверяется до штатного выхода без основного cursor.
+v2_bootstrap_pause() {
+  local attempt=$1 journal evidence environment_rc=0 reason
+  journal=$(attempt_bootstrap_journal_v2 read "$TASK" "$attempt" "$PROFILE") || return
+  evidence=$(jq -r .stop.recordHash <<<"$journal") || return 78
+  reason=$(jq -r .stop.reason <<<"$journal") || return 78
+  set_st "$TASK" STALLED_HUMAN 1 RESULT stopped-bootstrap-human || return
+  if runtime_lifecycle_enabled_v2; then
+    export FACTORY_LIFECYCLE_NODE_VISIT_ID=$ROUTE_V2_BOOTSTRAP_LIFECYCLE_VISIT_ID
+    export FACTORY_LIFECYCLE_NODE_ID=scout FACTORY_LIFECYCLE_RUN_KEY=SCOUT
+    runtime_lifecycle_human_begin_v2 manual_resume_required "$evidence" >/dev/null || return
+  fi
+  v2_sandbox_bootstrap_wait || environment_rc=$?
+  if (( environment_rc != 0 )); then
+    set_st "$TASK" BOOTSTRAP_ENV_ERROR "среда не готова (код $environment_rc)" || return
+    v2_log "SCOUT: вопрос сохранён; среда не готова (код $environment_rc)"
+  else
+    set_st "$TASK" BOOTSTRAP_ENV_ERROR '' || return
+  fi
+  v2_log "SCOUT: разведка ждёт ответа человека — $reason"
+  return "$environment_rc"
 }
 
 v2_lifecycle_begin_human_for_stop() {
@@ -2698,6 +2785,7 @@ v2_main() {
   local unavailable_runners preflight_message
   local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node continue_node
   local stop_reason stop_suffix deferred_file deferred_count terminal_file
+  local bootstrap_journal bootstrap_decision_hash=""
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
   trap 'v2_on_signal TERM' TERM
@@ -2714,6 +2802,19 @@ v2_main() {
     [[ ! -e "$route_task_root/active-attempt.json" &&
        ! -L "$route_task_root/active-attempt.json" ]] ||
       die "t${TASK} уже имеет active immutable attempt"
+  fi
+
+  # Resume без ответа удерживает тот же визит до runner preflight и любых lifecycle
+  # или provisioning эффектов; нажатие кнопки не заменяет решение человека.
+  if [[ "$MODE" == resume ]]; then
+    _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+    bootstrap_journal=$(attempt_bootstrap_journal_v2 read "$TASK" "$EXPECTED_ATTEMPT" "$PROFILE") || return
+    if [[ "$(jq -r .state <<<"$bootstrap_journal")" == waiting ]]; then
+      set_st "$TASK" STALLED_HUMAN 1 RESULT stopped-bootstrap-human || return
+      v2_log "SCOUT: разведка ждёт ответа человека; resume без решения удержан"
+      return 0
+    fi
+    bootstrap_decision_hash=$(jq -r '.decision.recordHash // empty' <<<"$bootstrap_journal") || return 78
   fi
 
   # Решение человека на воротах в режиме --commit-only не запускает ни одного
@@ -2857,7 +2958,9 @@ v2_main() {
         v2_log "lifecycle resume не открыт (код $rc)"
         return "$rc"
       }
-    v2_lifecycle_resolve_human "$([[ "$MODE" == gate ]] && printf operator_override || printf resume)" || {
+    v2_lifecycle_resolve_human \
+      "$([[ "$MODE" == gate ]] && printf operator_override || printf resume)" \
+      "$bootstrap_decision_hash" || {
       rc=$?
       v2_log "human intervention lifecycle не закрыт (код $rc)"
       return "$rc"
@@ -2957,6 +3060,10 @@ v2_main() {
   _route_v2_load_attempt "$TASK" "$attempt" || return
   route_v2_dispatch_bootstrap "$TASK" "$attempt" >/dev/null || {
     rc=$?
+    if (( rc == 22 )); then
+      v2_bootstrap_pause "$attempt"
+      return $?
+    fi
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "bootstrap не подтверждён (код $rc)"
     return "$rc"
@@ -3043,10 +3150,7 @@ v2_main() {
       }
       set_st "$TASK" "$pipeline_gate_key" waiting STALLED_HUMAN 1
       v2_log "пауза на human gate $gate_node"
-      deferred_file="$STATE_DIR/t${TASK}.deferred.md"
-      deferred_count=$(v2_write_deferred_tail "$TASK" "$attempt" "$deferred_file") &&
-        [[ "$deferred_count" =~ ^[1-9][0-9]*$ ]] &&
-        v2_log "$gate_node: отложено находок: $deferred_count — список в t${TASK}.deferred.md"
+      v2_publish_deferred_tail "$TASK" "$attempt" || return
       return 0
       ;;
     21)
@@ -3063,10 +3167,7 @@ v2_main() {
         }
         set_st "$TASK" STALLED_HUMAN 0 RESULT completed
         v2_log "маршрут завершён; хвост маршрута подтверждён"
-        deferred_file="$STATE_DIR/t${TASK}.deferred.md"
-        deferred_count=$(v2_write_deferred_tail "$TASK" "$attempt" "$deferred_file") &&
-          [[ "$deferred_count" =~ ^[1-9][0-9]*$ ]] &&
-          v2_log "отложено находок: $deferred_count — список в t${TASK}.deferred.md"
+        v2_publish_deferred_tail "$TASK" "$attempt" || return
         return 0
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"

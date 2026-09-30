@@ -7,7 +7,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { parsePipeline } from '../lib/pipelineParse.ts';
 import { parseStagesLog } from '../lib/stagesParse.ts';
-import { detectStall } from '../lib/stall.ts';
+import { bootstrapStall, detectStall } from '../lib/stall.ts';
 import { readRunSilence } from '../lib/factoryCli.ts';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factoryGraph.ts';
 import { buildRouteDef, routeStageKeys } from '../lib/routeGraph.ts';
@@ -15,7 +15,7 @@ import { readLoopProgress } from '../lib/factoryLoopProgress.ts';
 import { RoutesStore } from '../modules/routes/store.ts';
 import { parseSandboxRepositories } from '../lib/sandboxEnv.ts';
 import { routeInstrumentationMode } from '../lib/factoryLaunchContract.ts';
-import { readNodeVerdicts, stopVerdictOf } from '../lib/factoryNodeVerdicts.ts';
+import { bootstrapNodeVerdict, readNodeVerdicts, stopVerdictOf } from '../lib/factoryNodeVerdicts.ts';
 import { stallIsArbitrable } from '../lib/factoryArbiter.ts';
 import {
   readFactoryAttemptLedger,
@@ -503,7 +503,8 @@ export class FactoryStateAdapter {
       orchPid: registry.ORCH_PID || null,
       daemonAlive,
       needsRun: registry.NEEDS_RUN === '1',
-      stalledHuman: registry.STALLED_HUMAN === '1',
+      stalledHuman: trusted?.bootstrapStop?.state === 'waiting' || registry.STALLED_HUMAN === '1',
+      bootstrapStop: trusted?.terminal ? null : trusted?.bootstrapStop || null,
       stall: await this.summaryStall({ registry, timeline, daemonAlive, trusted, task }),
       // Молчание идущего хода. detectStall сюда не дотягивается по устройству: он
       // отвечает на «почему конвейер СТОИТ», а зависший агент формально работает —
@@ -530,6 +531,14 @@ export class FactoryStateAdapter {
     trusted: TrustedAttempt | null;
     task: string | number;
   }) {
+    const bootstrap = trusted?.terminal ? null : bootstrapStall(
+      trusted?.bootstrapStop, registry.BOOTSTRAP_ENV_ERROR,
+    );
+
+    if (bootstrap) {
+      return bootstrap;
+    }
+
     const stall = detectStall({ registry, timeline, daemonAlive });
     if (!stall || trusted?.cursor?.state !== 'stopped') return stall;
 
@@ -646,7 +655,13 @@ export class FactoryStateAdapter {
       })
       : {};
 
-    const detectedStall = detectStall({
+    const bootstrapNode = Object.entries(nodeOrigins || {}).find(([, origin]) => (
+      origin.scope === 'bootstrap' && origin.originId === 'scout'
+    ))?.[0] || null;
+    const bootstrap = trusted?.terminal ? null : bootstrapStall(
+      trusted?.bootstrapStop, registry.BOOTSTRAP_ENV_ERROR,
+    );
+    const detectedStall = bootstrap || detectStall({
       registry,
       timeline: await this.readTimeline(task),
       daemonAlive: alive,
@@ -660,7 +675,7 @@ export class FactoryStateAdapter {
 
     // Имя узла остановки берём у журнала, когда строка журнала его не назвала: старые
     // записи движка писали остановку без узла, и подсвечивать на схеме было нечего.
-    const stallNode = stallNodeId(def, statuses, detectedStall?.stage)
+    const stallNode = (bootstrap ? bootstrapNode : null) || stallNodeId(def, statuses, detectedStall?.stage)
       || (stopVerdict && def.pos[stopVerdict.node] !== undefined ? stopVerdict.node : null);
 
     // Берётся ли за неё арбитр — решает ОДНО правило, общее с его собственным гейтом.
@@ -678,7 +693,7 @@ export class FactoryStateAdapter {
       ? {
         ...detectedStall,
         node: stallNode,
-        arbitrable,
+        arbitrable: bootstrap ? false : arbitrable,
         // Человеческая формулировка того же затыка, если арбитр его уже разбирал.
         arbiter: this.arbiterCards?.read(task, trusted?.attempt) || null,
       }
@@ -759,7 +774,10 @@ export class FactoryStateAdapter {
         stall: stall?.node === nid ? stall : null,
         // Вердикт последнего захода: `owner`, находки, просмотренные файлы. Текст пишет
         // агент — недоверенные данные, рисуются только интерполяцией.
-        verdict: verdicts[nid] || null,
+        verdict: nid === bootstrapNode && trusted?.bootstrapStop
+          ? bootstrapNodeVerdict(trusted.bootstrapStop)
+          : verdicts[nid] || null,
+        bootstrapStop: nid === bootstrapNode && !trusted?.terminal ? trusted?.bootstrapStop || null : null,
       };
       // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.

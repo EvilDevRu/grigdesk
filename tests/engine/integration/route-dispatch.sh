@@ -130,6 +130,8 @@ run_agent() {
       ;;
   esac
   file=$(run_state_active_file "$task" "$stage") || return
+  MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   _run_state_write \
     "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -256,6 +258,8 @@ run_agent() {
   printf '%s\n' "$stage" >>"$CALLS_LOG"
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   run_id="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_ID=$run_id
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   run_state_begin "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" || return
   if [[ "$stage" == BUILD ]] && (( SILENT_LEFT > 0 )); then
     SILENT_LEFT=$((SILENT_LEFT - 1))
@@ -391,6 +395,8 @@ run_agent() {
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   [[ "$stage" != REVIEW ]] || result=failed
   file=$(run_state_active_file "$task" "$stage") || return
+  MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   _run_state_write \
     "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -445,6 +451,8 @@ run_agent() {
   printf '%s\t%s\t%s\t%s\n' "$stage" "${FACTORY_STAGE_RETRY:-}" \
     "${FACTORY_STAGE_RETRY_REASON:-}" "${FACTORY_STAGE_RETRY_NOTE:-}" >>"$EVIDENCE_RUNS_LOG"
   file=$(run_state_active_file "$task" "$stage") || return
+  MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   _run_state_write \
     "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -502,6 +510,8 @@ run_agent() {
   case "$stage" in HUNT_*) result=skipped ;; esac
   printf '%s\t%s\n' "$stage" "$result" >>"$HUNT_CALLS"
   file=$(run_state_active_file "$task" "$stage") || return
+  MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   _run_state_write \
     "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -580,6 +590,8 @@ run_agent() {
   printf '%s\n' "$stage" >>"$COMMAND_AGENT_LOG"
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   file=$(run_state_active_file "$task" "$stage") || return
+  MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   _run_state_write \
     "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \

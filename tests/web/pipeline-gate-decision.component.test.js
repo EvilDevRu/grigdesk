@@ -22,7 +22,15 @@ function makeFixture({ gateStatus = 'wait', gateComment = null, readOnly = false
   return { factoryTask, graph };
 }
 
-async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
+// Стенд монтирует публичную модалку с настоящими дочерними компонентами.
+// Ответы API управляют доступностью решения, а записи запросов проверяют его identity.
+async function mountPipeline(t, {
+  factoryTask,
+  graph,
+  postFails = null,
+  findings = null,
+  findingsFails = false,
+}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
   for (const [key, value] of Object.entries({
@@ -57,6 +65,17 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
       if (url === '/api/tasks') return { tasks: [factoryTask] };
       if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
       if (url === '/api/factory/runners') return { runners: ['claude'] };
+      if (url.startsWith(`/api/tasks/${factoryTask.task}/findings?`)) {
+        if (findingsFails) {
+          throw new Error('Источник находок недоступен');
+        }
+
+        return {
+          profile: factoryTask.profile,
+          attemptId: factoryTask.attempt,
+          findings: findings || { deferred: [] },
+        };
+      }
       return {};
     },
     async post(url, body) {
@@ -119,7 +138,53 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
   const openPlan = (status = 'done') => openStage({
     id: 'plan', label: '📋 План', subtitle: '', status,
   });
-  return { wrapper, flushPromises, getCalls, posts, alerts, openGate, openPlan };
+
+  return {
+    wrapper,
+    flushPromises,
+    getCalls,
+    posts,
+    alerts,
+    openGate,
+    openPlan,
+    openStage,
+  };
+}
+
+// Приёмка читает реальную findings-компоненту; ошибка должна удержать именно кнопку,
+// успешно прочитанный пустой список разрешает тот же gate CAS с exact identity.
+for (const findingsFails of [true, false]) {
+  test(`приёмка: чтение находок ${findingsFails ? 'удерживает' : 'разрешает'} принятие`, async (t) => {
+    const fx = makeFixture();
+
+    fx.graph.nodes.gate_accept = ['human', 'Приёмка'];
+    fx.graph.pos.gate_accept = 2;
+    fx.graph.keys.gate_accept = 'GATE_ACCEPT';
+    fx.graph.statuses.gate_accept = 'wait';
+    fx.graph.nodeMeta.gate_accept = {};
+
+    const { wrapper, openStage, posts, flushPromises } = await mountPipeline(t, { ...fx, findingsFails });
+
+    await openStage({
+      id: 'gate_accept',
+      label: 'Приёмка',
+      status: 'wait',
+    });
+
+    const button = wrapper.get('.gate-sect .btn.good');
+
+    assert.equal(button.element.disabled, findingsFails);
+
+    if (findingsFails) {
+      assert.match(wrapper.text(), /Источник находок недоступен/);
+      assert.equal(posts.length, 0);
+    } else {
+      await button.trigger('click');
+      await flushPromises();
+      assert.equal(posts[0][0], '/api/tasks/42/gate/GATE_ACCEPT/approve');
+      assert.equal(posts[0][1].attempt, fx.factoryTask.attempt);
+    }
+  });
 }
 
 test('ворота ждут решения: поля комментария нет, пока не нажали «Отклонить»', async (t) => {
@@ -141,7 +206,14 @@ test('«Принять» уходит без комментария и не сп
 
   await wrapper.get('.gate-sect .btn.good').trigger('click');
   await flushPromises();
-  assert.deepEqual(posts, [['/api/tasks/42/gate/GATE_PLAN/approve', { comment: '' }]]);
+  assert.deepEqual(posts, [[
+    '/api/tasks/42/gate/GATE_PLAN/approve',
+    {
+      comment: '',
+      profile: 'demo',
+      attempt: 'att-1',
+    },
+  ]]);
   // Решение принято — модалка закрывается.
   assert.equal(wrapper.find('.smodal').exists(), false);
 });
@@ -161,7 +233,11 @@ test('«Отклонить» раскрывает поле, и текст уез
   await flushPromises();
   assert.deepEqual(posts, [[
     '/api/tasks/42/gate/GATE_PLAN/reject',
-    { comment: 'Не учтён кейс с пустым списком' },
+    {
+      comment: 'Не учтён кейс с пустым списком',
+      profile: 'demo',
+      attempt: 'att-1',
+    },
   ]]);
 });
 

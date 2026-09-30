@@ -38,6 +38,13 @@ test('RE-H1-04: графический scope ворот не попадает в
       if (url === '/api/tasks') return { tasks: [task] };
       if (url === '/api/tasks/42/graph') return graph;
       if (url === '/api/factory/runners') return { runners: ['claude'] };
+      if (url.startsWith('/api/tasks/42/findings?')) {
+        return {
+          profile: task.profile,
+          attemptId: task.attempt,
+          findings: { deferred: [] },
+        };
+      }
       return {};
     },
     async post(url, body) { posts.push([url, body]); return { ok: true, resumed: true }; },
@@ -80,7 +87,11 @@ test('RE-H1-04: графический scope ворот не попадает в
   assert.equal(wrapper.find('.gate-sect').exists(), true);
   await wrapper.get('.gate-sect .btn.good').trigger('click');
   await flushPromises();
-  assert.deepEqual(posts, [['/api/tasks/42/gate/GATE_ACCEPT/approve', { comment: '' }]]);
+  assert.deepEqual(posts, [['/api/tasks/42/gate/GATE_ACCEPT/approve', {
+    comment: '',
+    profile: task.profile,
+    attempt: task.attempt,
+  }]]);
 });
 
 test('RE-H1-04: synthetic stop и status не получают кнопку запуска на SVG', async (t) => {

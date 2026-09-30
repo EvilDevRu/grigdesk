@@ -247,8 +247,8 @@
                 <ProviderIcon v-if="group.provider" :provider="group.provider" :size="12" />
               </span>
               <span>Агент</span>
-              <span v-if="current && modelId" class="amodel">
-                {{ modelLabelOf(modelId) }} · запрошено<template v-if="effortValue"> · {{ effortValue }}</template>
+              <span v-if="current && status.modelId" class="amodel">
+                {{ status.modelLabel }} · {{ status.modelKind }}<template v-if="effortValue"> · {{ effortValue }}</template>
               </span>
               <span v-else-if="m.actualModel || m.model" class="amodel">
                 {{ runModelLabel(m) }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
@@ -346,18 +346,15 @@
                 ▶ Продолжить ход
               </UiButton>
             </div>
-            <!-- Индикатор закрывает проекцию текущего запуска после последней реплики
-                 или действия. В историю он не попадает; число показывает расход вывода
-                 хода, а заполненность контекста остаётся в кольце. -->
-            <ChatThinking
-              v-if="thinking"
-              :steps="sess.steps"
-              :tokens="sess.progressTokens"
-              :tokens-estimate="sess.progressTokensEstimate"
-              :started-at="sess.turnStartedAt"
-            />
+            <!-- Индикатор остаётся последней строкой запуска внутри ленты.
+                 Модель, папка и лимиты дополняют ту же линию только справа. -->
+            <ChatStatusBar v-if="thinking" :chat-key="sid" :status="status" :usage="statusUsage"
+                           :steps="sess.steps" :tokens="sess.progressTokens"
+                           :tokens-estimate="sess.progressTokensEstimate" :started-at="sess.turnStartedAt" />
           </div>
         </div>
+        <ChatStatusBar v-if="status.phase === 'compact'"
+                       :chat-key="sid" :status="status" :usage="statusUsage" />
         <!-- Связь этого окна с сервером оборвалась посреди хода. Сам ход при этом идёт:
              он живёт в процессе сервера, а не во вкладке, и ответ вернётся через
              chats/pending. Плашка ЛОКАЛЬНАЯ (поле offline в историю не едет) — порвалось
@@ -666,7 +663,9 @@ import StepList from './StepList.vue';
 import ChatInTurnReply from './ChatInTurnReply.vue';
 import { inTurnComposerState, inTurnDeliveryText } from './chatInTurn.ts';
 import { chatTimeline, groupChatTimeline } from './chatTimeline.ts';
-import ChatThinking from './ChatThinking.vue';
+import ChatStatusBar from './ChatStatusBar.vue';
+import { chatStatus } from './chatStatus.ts';
+import { providerUsageSummary } from '../../features/providers/providerUsageSummary.ts';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -762,7 +761,7 @@ const inTurnComposer = computed(() => inTurnComposerState({
 const timeline = computed(() => chatTimeline(
   sess.value?.messages || [],
   sess.value?.steps || [],
-  !!sess.value?.sending,
+  ['running', 'legacy', 'background'].includes(status.value.phase),
   inTurnRun.value,
 ));
 const timelineGroups = computed(() => groupChatTimeline(timeline.value).map((group) => {
@@ -800,6 +799,26 @@ prov.load();
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
 const current = computed(() => prov.modelOf(sess.value?.modelRef || sess.value?.model));
+const status = computed(() => {
+  const view = chatStatus(sess.value || { id: props.sid }, chat.runtimeFor?.(props.sid) || null, {
+    providerId: current.value.provider?.id || sess.value?.modelRef?.provider || '',
+    modelId: current.value.id,
+    modelLabel: current.value.model?.name || current.value.id,
+  });
+
+  if (view.providerId && view.modelId) {
+    view.modelLabel = prov.modelOf({ provider: view.providerId, model: view.modelId }).model?.name
+      || view.modelLabel;
+  }
+
+  return view;
+});
+const statusUsage = computed(() => providerUsageSummary(
+  status.value.providerId,
+  prov.usage?.[status.value.providerId],
+  prov.usageTransport,
+  !!prov.providers.find((provider) => provider.id === status.value.providerId),
+));
 const modelId = computed(() => current.value.id);
 const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
@@ -930,10 +949,11 @@ function runProvider(message) {
   return runProviders.value.get(runModelId(message))?.provider || null;
 }
 
-// Идущий ход ещё не сообщение, и своей модели у него нет: исполнителя берём из выбора
-// чата — работает сейчас именно он. Знак в шапке и полоска слева идут от одного
-// исполнителя: без этого живой ход получал цвет без знака, а знак — только вместе с ответом.
-const liveProvider = computed(() => current.value.provider || null);
+// Исполнитель работающего запуска берётся из его серверного снимка.
+// Смена выбора следующего хода не перекрашивает уже идущую линию и её шапку.
+const liveProvider = computed(() => (
+  prov.providers.find((provider) => provider.id === status.value.providerId) || null
+));
 
 // Последний завершённый ход с моделью. Claude сообщает `actualModel` из потока,
 // Codex JSONL пока его не отдаёт — у него честно показываем «запрошено», иначе
@@ -1970,6 +1990,12 @@ async function openDebug() {
    содержимого — одна длинная команда в ленте или во всплывашке раздувала всю колонку
    чата, и кнопки «Разрешить/Отклонить» уезжали за правый край экрана. */
 .cs { display: flex; flex-direction: column; min-height: 0; min-width: 0; height: 100%; }
+.cs {
+  --chat-reply-size: .78125rem;
+  --chat-reply-leading: 1.5;
+  --chat-reply-heading-size: .875rem;
+  --chat-reply-preview-lines: 4;
+}
 
 .col { width: 100%; min-width: 0; }
 
@@ -2071,6 +2097,7 @@ async function openDebug() {
 .msg.user .mrow { flex-direction: row-reverse; }
 .m-resume { margin-top: 8px; }
 .msg .text { font-size: 14.5px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; min-width: 0; }
+.msg.assistant .text { font-size: var(--chat-reply-size); line-height: var(--chat-reply-leading); }
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
 .msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
 .msg.user .text { display: flow-root; background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -2118,11 +2145,11 @@ async function openDebug() {
 .fb.warn { color: var(--warn, #e0a33a); }
 .fb.warn b { color: var(--warn, #e0a33a); }
 /* Маркдаун ответа */
-.text.md :deep(p) { margin: 0 0 8px; }
+.text.md :deep(p) { margin: 0 0 4px; }
 .text.md :deep(p:last-child) { margin-bottom: 0; }
 .text.md :deep(h1), .text.md :deep(h2), .text.md :deep(h3),
 .text.md :deep(h4), .text.md :deep(h5), .text.md :deep(h6) {
-  margin: 14px 0 6px; font-size: 14px; line-height: 1.35; }
+  margin: 8px 0 4px; font-size: var(--chat-reply-heading-size); line-height: 1.35; }
 .text.md :deep(ul), .text.md :deep(ol) { margin: 4px 0 8px; padding-left: 20px; }
 .text.md :deep(li) { margin: 2px 0; }
 .text.md :deep(a) { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }

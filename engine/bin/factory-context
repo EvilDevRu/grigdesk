@@ -320,15 +320,16 @@ def findings_ledger(
     # Секция отложенных находок появилась позже открытых и закрытых: проекция без
     # неё — законная старая форма, а не ошибка. Дополняем пустой, чтобы дальше
     # схема оставалась ровно одна.
-    if isinstance(value, dict) and "deferred" not in value:
+    if isinstance(value, dict) and value.get("schema") == 1 and "deferred" not in value:
         value = {**value, "deferred": []}
     value = exact_object(
         value, {"schema", "open", "closed", "deferred"}, "findings-ledger-json"
     )
-    if value["schema"] != 1:
-        fail("findings-ledger-json.schema: поддерживается только 1")
+    version = value["schema"]
+    if isinstance(version, bool) or version not in {1, 2}:
+        fail("findings-ledger-json.schema: поддерживаются 1 и 2")
 
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     # `deferred` — находки вне цели задачи: возврата не вызывают, живут до ворот
     # приёмки. Автору они видны как справка, а не как список к ремонту.
     projected: dict[str, list[dict[str, Any]]] = {
@@ -353,9 +354,25 @@ def findings_ledger(
                     "lastSeenSequence",
                     "status",
                     "closedSequence",
-                },
+                } | ({"source"} if version == 2 else set()),
                 label,
             )
+            source = {"phase": "route"}
+            if version == 2:
+                source = record["source"]
+                if not isinstance(source, dict):
+                    fail(f"{label}.source: ожидался объект")
+                if source.get("phase") == "route":
+                    exact_object(source, {"phase"}, f"{label}.source")
+                elif source.get("phase") == "bootstrap":
+                    exact_object(source, {"phase", "recordHash", "runId", "epoch"}, f"{label}.source")
+                    identifier(source["recordHash"], HASH_RE, f"{label}.source.recordHash")
+                    identifier(source["runId"], re.compile(r"^[A-Za-z0-9._-]+$"), f"{label}.source.runId")
+                    epoch = source["epoch"]
+                    if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+                        fail(f"{label}.source.epoch: нужно целое от 1")
+                else:
+                    fail(f"{label}.source.phase: неизвестная фаза")
             finding_id = identifier(record["id"], FINDING_RE, f"{label}.id")
             source_node = identifier(record["sourceNode"], NODE_RE, f"{label}.sourceNode")
             owner = identifier(record["owner"], ID_RE, f"{label}.owner")
@@ -366,7 +383,13 @@ def findings_ledger(
                 fail(f"{label}.summary: управляющие символы запрещены")
             opened = record["openedSequence"]
             last_seen = record["lastSeenSequence"]
-            if (
+            bootstrap = source["phase"] == "bootstrap"
+            if bootstrap and (
+                status != "deferred" or source_node != "scout"
+                or opened is not None or last_seen is not None
+            ):
+                fail(f"{label}: bootstrap допускает только deferred с null sequence")
+            if not bootstrap and (
                 isinstance(opened, bool)
                 or not isinstance(opened, int)
                 or not 1 <= opened <= 999_999
@@ -387,7 +410,7 @@ def findings_ledger(
                 or not last_seen <= closed <= 999_999
             ):
                 fail(f"{label}.closedSequence: недопустимый sequence")
-            key = (source_node, finding_id)
+            key = (source["phase"], source_node, finding_id)
             if key in seen:
                 fail(f"{label}: повтор finding {source_node}/{finding_id}")
             seen.add(key)
@@ -401,9 +424,10 @@ def findings_ledger(
                     "lastSeenSequence": last_seen,
                     "status": status,
                     "closedSequence": closed,
+                    **({"source": source} if version == 2 else {}),
                 }
             )
-    return {"schema": 1, **projected}
+    return {"schema": version, **projected}
 
 
 def bound_loop_findings(findings: dict[str, Any]) -> dict[str, Any]:
@@ -414,7 +438,7 @@ def bound_loop_findings(findings: dict[str, Any]) -> dict[str, Any]:
     в контекст попадают самые свежие в пределах бюджета секции, в прежнем порядке;
     сколько опущено — в `omitted`. Без усечения форма проекции прежняя.
     """
-    bounded: dict[str, Any] = {"schema": 1, "open": findings["open"]}
+    bounded: dict[str, Any] = {"schema": findings["schema"], "open": findings["open"]}
     omitted: dict[str, int] = {}
     for status, budget in LOOP_FINDINGS_BUDGET.items():
         records = findings[status]
@@ -441,12 +465,14 @@ def bound_loop_findings(findings: dict[str, Any]) -> dict[str, Any]:
     return bounded
 
 
-def finding_freshness(status: str, record: dict[str, Any]) -> tuple[int, int]:
-    # Свежесть записи истории: закрытую — по ходу закрытия, отложенную — по последнему
-    # появлению в вердикте.
+def finding_freshness(status: str, record: dict[str, Any]) -> tuple[int, int, int]:
+    # Bootstrap предшествует main и не имеет sequence его журнала.
+    # Фазовый ключ сохраняет прежнюю свежесть route без сравнения null с числом.
+    if record.get("source", {}).get("phase") == "bootstrap":
+        return (0, 0, 0)
     if status == "closed":
-        return (record["closedSequence"], record["lastSeenSequence"])
-    return (record["lastSeenSequence"], record["openedSequence"])
+        return (1, record["closedSequence"], record["lastSeenSequence"])
+    return (1, record["lastSeenSequence"], record["openedSequence"])
 
 
 def loop_context(raw: str, max_rounds_raw: str, node: str) -> dict[str, Any] | None:

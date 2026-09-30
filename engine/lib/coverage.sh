@@ -85,8 +85,11 @@ coverage_host_preflight() {
   (( unavailable == 0 ))
 }
 
+# Код отказа остаётся общим для существующих callers и продвижения каталога.
+# Причина отдельно разрешает runtime перепроверить только корректный истёкший снимок.
 coverage_gate() {
   local structural=$1 host=$2 expected_revision=$3 now=$4
+  COVERAGE_GATE_REASON=invalid
   [[ "$now" =~ ^[0-9]+$ ]] || return 77
   [[ "$(coverage_artifact_get "$structural" SCHEMA)" == 1 &&
      "$(coverage_artifact_get "$structural" KIND)" == structural &&
@@ -103,7 +106,15 @@ coverage_gate() {
      "$host_structural" == "$structural_hash" ]] || return 77
   [[ "$(coverage_artifact_get "$structural" UNAVAILABLE)" == 0 &&
      "$(coverage_artifact_get "$host" UNAVAILABLE)" == 0 ]] || return 77
-  [[ "$expires" =~ ^[0-9]+$ && "$now" -le "$expires" ]] || return 77
+  [[ "$expires" =~ ^[0-9]+$ ]] || return 77
+  if [[ "$now" -le "$expires" ]]; then
+    COVERAGE_GATE_REASON=ready
+    return 0
+  fi
+  if [[ "$now" -gt "$expires" ]]; then
+    COVERAGE_GATE_REASON=expired
+  fi
+  return 77
 }
 
 coverage_catalog_promote() {

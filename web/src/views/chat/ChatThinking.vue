@@ -42,7 +42,7 @@
       <svg class="fico" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="8.6" />
         <circle cx="12" cy="12" r="3.4" />
-      </svg>{{ tokensText }}
+      </svg>{{ tokensText }}<span class="tok-unit"> ток.</span>
     </span>
   </div>
 </template>
@@ -86,7 +86,7 @@ const order = shuffledOrder(THINKING_WORDS.length);
 const tick = computed(() => Math.floor((now.value - mountedAt.value) / WORD_MS));
 const word = computed(() => thinkingWord(props.steps, tick.value, order));
 const elapsed = computed(() => formatElapsed(props.startedAt, now.value));
-const tokensText = computed(() => formatTurnTokens(props.tokens, props.tokensEstimate));
+const tokensText = computed(() => formatTurnTokens(props.tokens, props.tokensEstimate, false));
 
 onMounted(() => {
   timer = setInterval(() => {
@@ -109,8 +109,8 @@ onUnmounted(() => {
    знака 15px и зазор 7px, чтобы знак стоял под знаками шагов, а слово — под их заголовками
    (замер: знак 582 = 582, слово 604 = 604). Ряд всегда один: перенос менял бы высоту блока
    на смене слова, и переписка «скакала» бы.
-   Слово, точки и числа стоят на ОДНОЙ базовой линии: кегли у них разные, и выравнивание
-   по центру боксов разводило текст по уровням. */
+   Слово, точки и числа стоят на ОДНОЙ базовой линии. Она сохраняет выравнивание и с общим
+   кеглем строки сведений, и с исходными размерами при отдельном использовании индикатора. */
 .think {
   display: flex;
   flex-wrap: nowrap;
@@ -119,7 +119,7 @@ onUnmounted(() => {
   min-width: 0;
   max-width: 100%;
   padding: 2px 5px;
-  font-size: 12.5px;
+  font-size: var(--chat-status-font-size, 12.5px);
   line-height: 1.4;
   color: var(--ink-mid);
 }
@@ -176,7 +176,7 @@ onUnmounted(() => {
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--chat-status-font-size, 13px);
   animation: word-in .3s ease both;
 }
 /* Вход слова — сдвигом ВВЕРХ на 2px, внутри собственного поля строки. Сдвиг вниз на 3px

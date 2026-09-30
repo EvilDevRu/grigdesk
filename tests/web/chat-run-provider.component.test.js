@@ -127,6 +127,20 @@ async function mountChat(t, { sending = false } = {}) {
   };
   globalThis.__runProviderChatStore = () => ({
     sessions: [session],
+    runtimeFor() {
+      return sending ? {
+        runId: 'run-current',
+        active: true,
+        snapshot: {
+          chatKey: session.id,
+          runId: 'run-current',
+          providerId: 'kimi',
+          requestedModelId: 'kimi-code/k3',
+          cwd: '/synthetic/project',
+          extraDirs: [],
+        },
+      } : null;
+    },
     compactWindow: 0,
     loadConveyor() {},
     markRead() {},
@@ -239,9 +253,7 @@ test('идущий ход с первой секунды несёт знак и 
   const live = blocks[blocks.length - 1];
   const kimi = PROVIDERS.find((provider) => provider.id === 'kimi');
 
-  // Живой ход отличаем по живой строке хода: своей модели у него ещё нет, а строка стоит
-  // в его же блоке.
-  assert.equal(live.find('[data-role="chat-thinking"]').exists(), true, 'взят не блок идущего хода');
+  assert.equal(live.find('.ahead').exists(), true, 'до первого шага потеряна шапка запуска');
 
   // Чат стоит на Kimi — работает сейчас он, и знак с цветом обязаны быть его: раньше
   // живой ход шёл без шапки вовсе, и знак появлялся только вместе с готовым ответом.
@@ -252,23 +264,20 @@ test('идущий ход с первой секунды несёт знак и 
   assert.equal(live.find('.ahead').text().includes('Агент'), true, 'у идущего хода нет подписи агента');
   // Модель — выбор чата, и шапка честно называет её запрошенной, а не фактом из потока;
   // подпись — имя из каталога, а не машинный id.
-  assert.equal(live.find('.amodel').text().includes('K3 · запрошено'), true);
+  assert.equal(live.find('.amodel').text().includes('K3 · запрошена'), true);
   assert.equal(live.find('.amodel').text().includes('kimi-code/k3'), false);
 });
 
-test('живая строка хода идёт под переписку — последней строкой блока идущего хода', async (t) => {
+test('единственная живая строка остаётся в конце своего запуска внутри ленты', async (t) => {
   const wrapper = await mountChat(t, { sending: true });
   const blocks = wrapper.findAll('.msg.assistant');
   const live = blocks[blocks.length - 1];
   const lines = wrapper.findAll('[data-role="chat-thinking"]');
 
-  // Строка одна и стоит в самом блоке хода, а не отдельной полосой у поля ввода: пока
-  // переписка короткая, она держится под последним сообщением, а не у нижнего края окна.
   assert.equal(lines.length, 1, 'живая строка хода должна быть ровно одна');
-  assert.equal(live.element.contains(lines[0].element), true, 'строка стоит не в блоке идущего хода');
-  // Последняя строка блока: под шапкой хода и лентой шагов, ничего ниже неё в блоке нет.
-  assert.equal(live.element.lastElementChild === lines[0].element, true,
-    'строка стоит не последней в блоке');
+  assert.equal(live.element.contains(lines[0].element), true, 'индикатор покинул свой запуск');
+  assert.equal(wrapper.find('[data-role="chat-status"]').element.contains(lines[0].element), true);
+  assert.equal(wrapper.find('.cs-body').element.contains(lines[0].element), true);
 });
 
 test('без хода живой строки нет — ни в ленте, ни у поля ввода', async (t) => {

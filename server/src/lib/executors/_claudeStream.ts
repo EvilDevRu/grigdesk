@@ -13,6 +13,7 @@
 // Разбор потока здесь общий с разовым `run()`: событие CLI одно и то же, и вторая
 // копия правил про usage, компакт и пустой ответ разошлась бы с первой.
 import { spawn } from 'node:child_process';
+import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
 
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import type { ContextCache } from '../chat/contextCache.ts';
@@ -148,9 +149,10 @@ interface StreamLog {
  * Живёт ровно один ход, потому что лента шагов и счётчик токенов — свойства хода,
  * а не сессии: в долгоживущем процессе их иначе пришлось бы обнулять руками.
  */
-export function createClaudeTurnCollector({ onStep, onProgress, log }: {
+export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, log }: {
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   log?: StreamLog;
 } = {}): ClaudeTurnCollector {
   const stepSink = createStepSink(onStep);
@@ -186,6 +188,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.model) {
       state.actualModel = ev.model;
+      onRunMetadata?.({ actualModelId: ev.model, modelSource: 'session' });
       return;
     }
 
@@ -224,6 +227,11 @@ export function createClaudeTurnCollector({ onStep, onProgress, log }: {
     if (ev.type === 'assistant' && ev.message?.model === SYNTHETIC_MODEL) {
       state.lastSyntheticText = claudeMessageText(ev.message);
       return;
+    }
+
+    if (ev.type === 'assistant' && ev.message?.model && ev.message.model !== SYNTHETIC_MODEL) {
+      state.actualModel = ev.message.model;
+      onRunMetadata?.({ actualModelId: ev.message.model, modelSource: 'response' });
     }
 
     if (ev.type === 'assistant' && ev.message?.usage && ev.message.model !== SYNTHETIC_MODEL) {
@@ -786,12 +794,13 @@ export function openClaudeStreamSession({
      * не завершая процесс.
      */
     send({
-      message, onStep, onProgress, onSessionCreated,
+      message, onStep, onProgress, onSessionCreated, onRunMetadata,
       onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
     }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
       onSessionCreated?: (sessionId: string) => unknown;
       onInTurnReady?: (port: InTurnPort) => void;
       onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
@@ -806,7 +815,12 @@ export function openClaudeStreamSession({
       // его шаги прилипли бы к новому ходу.
       if (state.background) finishBackground();
 
-      const collector = createClaudeTurnCollector({ onStep, onProgress, log });
+      const collector = createClaudeTurnCollector({
+        onStep,
+        onProgress,
+        onRunMetadata,
+        log,
+      });
 
       return new Promise<unknown>((resolve, reject) => {
         state.turn = {

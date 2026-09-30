@@ -39,6 +39,7 @@ import { autoDecision } from '../../lib/chat/autoApprove.ts';
 import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
 import { normalizeContextUsage } from '../../../../shared/chatContextUsage.ts';
 import type { ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
+import type { ChatRunSnapshot } from '../../../../shared/chatRun.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
   IN_TURN_ID_RE,
@@ -317,6 +318,7 @@ interface CompanionPreflight {
 }
 
 interface RunningTurn extends ChatContextUsage {
+  snapshot: ChatRunSnapshot;
   startedAt: number;
   // Расход ВЫВОДА текущего хода в токенах (0 — исполнитель его не публикует) и признак
   // того, что число получено оценкой, а не замером.
@@ -1191,6 +1193,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
       chatKey,
       runId: v.runId,
+      snapshot: v.snapshot,
       inTurn: publicInTurnState(v.runId),
       ...(v.turnId ? { turnId: v.turnId } : {}),
       startedAt: v.startedAt,
@@ -2874,6 +2877,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const runId = `run-${randomUUID()}`;
     const runRec: RunningTurn = {
       runId,
+      snapshot: {
+        chatKey: String(chatKey || ''),
+        runId,
+        ...(channel.turnId ? { turnId: channel.turnId } : {}),
+        providerId: executor.id,
+        requestedModelId: model,
+        cwd,
+        extraDirs: [...uniqueExtraDirs],
+      },
       startedAt: Date.now(),
       tokens: 0,
       steps: [],
@@ -2909,6 +2921,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...orphanUser,
         // Принятый ход окно узнаёт по turnId и снимает с его реплики ожидание.
         ...(channel.turnId ? { turnId: channel.turnId } : {}),
+        runId,
         at: Date.now(),
       });
       await channel.closeAbandoned();
@@ -2946,6 +2959,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         chatKey,
         at: runRec.startedAt,
         runId,
+        snapshot: runRec.snapshot,
         compact: !!plan,
         inTurn: publicInTurnState(runId),
         ...(channel.turnId ? { turnId: channel.turnId } : {}),
@@ -2989,11 +3003,20 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // приходит не от исполнителя, и аттестацию озвучки трогать не должна.
       const publishStep = (step: ChatStep) => {
         if (!chatKey) return;
+        if (activeRuns.get(chatKey)?.runId !== runId) {
+          return;
+        }
+
         const visibleStep = visibleChatTitleStep(step, wantsTitle);
         if (!visibleStep) return;
         const a = activeRuns.get(chatKey);
         if (a) pushChatStep(a.steps, visibleStep, MAX_CHAT_STEPS);
-        fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
+
+        fastify.sse.broadcast('chat-step', {
+          chatKey,
+          runId,
+          step: visibleStep,
+        });
       };
 
       if (!plan && !slash && chatKey) {
@@ -3047,6 +3070,29 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // в своих exec-args. Одно значение настроек, transport выбирает сам executor.
         compactWindow,
         log: fastify.log,
+        onRunMetadata: (metadata) => {
+          if (activeRuns.get(chatKey)?.runId !== runId) {
+            return;
+          }
+          if (!metadata.actualModelId
+            || (metadata.modelSource !== 'session' && metadata.modelSource !== 'response')) {
+            return;
+          }
+          if (runRec.snapshot.modelSource === 'response' && metadata.modelSource === 'session') {
+            return;
+          }
+          if (runRec.snapshot.actualModelId === metadata.actualModelId
+            && runRec.snapshot.modelSource === metadata.modelSource) {
+            return;
+          }
+
+          runRec.snapshot = { ...runRec.snapshot, ...metadata };
+          fastify.sse.broadcast('chat-run-metadata', {
+            chatKey,
+            runId,
+            snapshot: runRec.snapshot,
+          });
+        },
         // ACP возвращает id новой сессии до prompt. Фиксируем его CAS-записью ДО
         // передачи пользовательского текста, чтобы другой чат не мог присвоить id.
         // У остальных исполнителей id известен с первого события потока: запоминаем его в
@@ -3079,7 +3125,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             }));
           }
           if (chatKey) {
-            fastify.sse.broadcast('chat-session', { chatKey, sessionId: known, at: Date.now() });
+            fastify.sse.broadcast('chat-session', {
+              chatKey,
+              runId,
+              sessionId: known,
+              at: Date.now(),
+            });
           }
         },
         // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (например, Kimi по
@@ -3136,6 +3187,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // передаём целиком: без окна и статуса новая цифра могла рисоваться по старой
         // шкале. Отсутствующий замер не подменяем нулём.
         onProgress: chatKey ? (tokens, info) => {
+          if (activeRuns.get(chatKey)?.runId !== runId) {
+            return;
+          }
+
           const contextUsage = normalizeContextUsage(info);
           const contextCache = normalizeContextCache(info?.contextCache);
           // Оценку (Claude и DeepSeek считают вывод по символам) помечаем отдельно:
@@ -3153,6 +3208,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
           fastify.sse.broadcast('chat-progress', {
             chatKey,
+            runId,
             tokens,
             ...contextUsage,
             ...isEstimate,
@@ -3175,6 +3231,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           onProgress: runArgs.onProgress,
           onPermission: runArgs.onPermission,
           onSessionCreated: runArgs.onSessionCreated,
+          onRunMetadata: runArgs.onRunMetadata,
           // Канал уточнений живого режима идёт тем же путём, что разовый: иначе
           // у живой сессии он молча закрывался бы, а окно показывало «недоступно».
           onInTurnReady: runArgs.onInTurnReady,
@@ -3423,6 +3480,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           ...normalizeContextUsage(err),
           ...(contextCache ? { contextCache } : {}),
           cost: null, model: model || null, effort: runEffort || null, stopped: true,
+          runId,
           ...(seedReset ? EMPTY_WORKDIR_MEMORY : {}),
           sessionReset: seedReset,
         }, wantsTitle)!;
@@ -3469,6 +3527,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           reply: err.message,
           ...orphanUser,
           steps: [...runRec.steps],
+          runId,
           sessionReset: !!err.sessionReset,
           sessionResetFailed: !!err.sessionResetFailed,
         });
@@ -3477,6 +3536,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       return channel.refuse(500, {
+        runId,
         error: err.code || 'chat_failed',
         message: err.message,
         ...(err.sessionReset ? { sessionReset: true } : {}),
@@ -3488,17 +3548,19 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (chatKey) {
         await inTurnMessages.closeRun(runId, 'Ход завершён.').catch(() => {});
 
-        activeRuns.delete(chatKey);
-        // Ход кончился (в т.ч. упал), а запрос всё ещё висит — снимаем: без хода
-        // отвечать на него некому, а чип «ждёт ответа» висел бы вечно.
-        dropPending(chatKey, 'Ход завершён — ответ уже не нужен');
-        // Сигнал всем окнам: ход завершён (снимают «думает…», даже если ответ пришёл не к ним).
-        // queued — сколько принятых ходов этого чата ещё ждут: пока они есть, работа идёт.
-        fastify.sse.broadcast('chat-done', {
-          chatKey,
-          ...(channel.turnId ? { turnId: channel.turnId } : {}),
-          queued: turnLedger.queued(chatKey).length,
-        });
+        const current = activeRuns.get(chatKey)?.runId === runId;
+
+        if (current) {
+          activeRuns.delete(chatKey);
+          // Снимаем спросы только этого исполнения: поздний finally не закрывает новый ход.
+          dropPending(chatKey, 'Ход завершён — ответ уже не нужен');
+          fastify.sse.broadcast('chat-done', {
+            chatKey,
+            runId,
+            ...(channel.turnId ? { turnId: channel.turnId } : {}),
+            queued: turnLedger.queued(chatKey).length,
+          });
+        }
       }
     }
   }

@@ -108,8 +108,10 @@ run_agent() {
     rewrite_artifact
   fi
   file=$(run_state_active_file "$task" "$stage") || return
+  MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   _run_state_write \
-    "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
+    "$file" "$MULTI_LAST_RUN_ID" "$MULTI_LAST_RUN_EPOCH" \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     committed done
 }

@@ -362,7 +362,9 @@
           </UiButton>
           <span class="sfixhint">{{ arbiterAsksHuman(t)
             ? 'разбор арбитра целиком и поле для твоего решения'
-            : 'откроет узел: там указание агенту и возврат конвейера на него' }}</span>
+            : t.stall.phase === 'bootstrap'
+              ? 'откроет вопрос разведки и поле ответа следующему SCOUT'
+              : 'откроет узел: там указание агенту и возврат конвейера на него' }}</span>
         </div>
         <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
              Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
@@ -646,7 +648,7 @@
                    вопрос дважды на одном экране. Текст пишет агент, поэтому только
                    интерполяция: `v-html` здесь запрещён. -->
               <div
-                v-if="verdictFindings.length"
+                v-if="verdictFindings.length && !stage.meta.bootstrapStop"
                 class="sverdict"
                 :class="{ human: stage.meta.verdict.stop === 'human' && !verdictDeferredOnly }"
               >
@@ -677,6 +679,23 @@
                 </div>
               </div>
             </div>
+
+            <BootstrapDecision
+              v-if="stage.meta.bootstrapStop && !stageTask?.readOnly"
+              :task="stageTask.task"
+              :profile="stageTask.profile"
+              :attempt="stageTask.attempt"
+              :stop="stage.meta.bootstrapStop"
+              :running="stageTask.daemonAlive"
+              @changed="load"
+            />
+            <DeferredFindings
+              v-if="stage.id === 'gate_accept' && !stage.readOnly"
+              :task="stage.task"
+              :profile="stageTask?.profile"
+              :attempt="stageTask?.attempt"
+              @ready="stageFindingsReady = $event"
+            />
 
             <!-- Ворота: принять/отклонить. Поле пояснения принадлежит ОТКЛОНЕНИЮ и
                  раскрывается по кнопке: при принятии текст никуда не уходит. -->
@@ -736,7 +755,7 @@
                     tone="success"
                     variant="solid"
                     :loading="stageBusy === 'gate'"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="stageBusy === 'gate' || (stage.id === 'gate_accept' && !stageFindingsReady)"
                     loading-label="Принимаю решение"
                     @click="gateDecide('approve')"
                   >
@@ -1026,6 +1045,8 @@
 </template>
 
 <script setup>
+import DeferredFindings from './pipeline/DeferredFindings.vue';
+import BootstrapDecision from './pipeline/BootstrapDecision.vue';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
 import { useSse } from '../composables/useSse.ts';
@@ -1526,6 +1547,7 @@ const stageBusy = ref(null);
 // при отклонении, у возврата — всегда. Общий ref переносил бы набранное из одного смысла
 // в другой и подсказывал, что при «Принять» текст тоже куда-то уйдёт (он не уходит).
 const gateComment = ref('');
+const stageFindingsReady = ref(false);
 const gateRejecting = ref(false);
 const gateNoteEl = ref(null);
 const rewindComment = ref('');
@@ -1726,7 +1748,8 @@ const gateArbiterLog = computed(() => {
 });
 
 const stageHasRewind = computed(() => Boolean(
-  stage.value && !stage.value.readOnly && !stage.value.isGate,
+  stage.value && !stage.value.readOnly && !stage.value.isGate
+  && stageTask.value?.graph?.nodeOrigins?.[stage.value.id]?.scope !== 'bootstrap',
 ));
 // Вопросом к человеку является только БЛОКИРУЮЩАЯ находка: правило общее с отдельной
 // модалкой разбора, поэтому живёт в `shared/rewind-note.js`.
@@ -1778,7 +1801,10 @@ const stageHasMain = computed(() => Boolean(
 ));
 // Колонка решения показывается и без кнопок: у read-only узла причина остановки — всё,
 // что человеку нужно, и прятать её в телеметрию слева значило бы прятать сам ответ.
-const stageHasRail = computed(() => gateDecidable.value || stageHasRewind.value || stageHasSituation.value);
+const stageHasRail = computed(() => (
+  gateDecidable.value || stageHasRewind.value || stageHasSituation.value || stage.value?.id === 'gate_accept'
+  || Boolean(stage.value?.meta?.bootstrapStop)
+));
 // Контекст открытого этапа остаётся живым: название задачи может догрузиться из B24 уже
 // после открытия модалки, а стенд — появиться после очередного SSE-обновления графа.
 // Снимок в openStage здесь дал бы устаревшие название и порты до повторного открытия.
@@ -1814,8 +1840,13 @@ async function gateDecide(decision) {
   // При принятии комментарий не отправляем вовсе: пустое поле честнее, чем текст,
   // который движок молча выбросит, а проекция реестра потом покажет как «Замечание».
   const comment = decision === 'reject' ? gateComment.value : '';
+
   try {
-    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment });
+    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, {
+      comment,
+      profile: stageTask.value?.profile,
+      attempt: stageTask.value?.attempt,
+    });
     await load(); closeStage();
     await warnIfNotResumed(res);
   }
@@ -2076,7 +2107,18 @@ function canAnswerStall(t) {
   if (t.readOnly || t.daemonAlive || t.arbitrating || !t.stall) return false;
   return Boolean(stallNodeId(t)) && t.stall.stage !== 'SANDBOX' && t.stall.kind !== 'crashed';
 }
+
+/**
+ * Вопрос bootstrap открывает узел своей фазы при совпадении имён scout.
+ * Карта registry keys сама по себе не различает отдельную разведку и основной маршрут.
+ */
 function stallNodeId(t) {
+  if (t.stall?.phase === 'bootstrap') {
+    return Object.entries(t.graph?.nodeOrigins || {}).find(([, origin]) => (
+      origin.scope === 'bootstrap' && origin.originId === 'scout'
+    ))?.[0] || '';
+  }
+
   const keys = t.graph?.keys || {};
   return Object.keys(keys).find((id) => keys[id] === t.stall?.stage) || '';
 }

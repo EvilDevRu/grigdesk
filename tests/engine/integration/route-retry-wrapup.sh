@@ -100,6 +100,8 @@ run_agent() {
     "${FACTORY_STAGE_RETRY_NOTE:-}" >>"$RUNS_LOG"
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   run_id="fake-${stage}-${FAKE_EPOCH}"
+  MULTI_LAST_RUN_ID=$run_id
+  MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
   run_state_begin "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" || return
   if [[ "$stage" == PREPARE ]] && (( SILENT_LEFT > 0 )); then
     SILENT_LEFT=$((SILENT_LEFT - 1))

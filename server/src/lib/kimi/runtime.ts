@@ -1,3 +1,4 @@
+import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -368,6 +369,7 @@ export async function runContainedKimi({
   onProgress,
   onPermission,
   onSessionCreated,
+  onRunMetadata,
   onInTurnReady,
   onInTurnAvailability,
   onAssistantMessage,
@@ -397,6 +399,7 @@ export async function runContainedKimi({
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onPermission?: (ask: Record<string, unknown>) => Promise<PermissionAnswer | null | undefined>;
   onSessionCreated?: (sessionId: string) => unknown;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onInTurnReady?: (port: InTurnPort) => void;
   onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
@@ -966,6 +969,11 @@ export async function runContainedKimi({
       });
     }
     const status = parseStatus(statusText, modelInfo.context);
+
+    if (status.actualModel) {
+      onRunMetadata?.({ actualModelId: status.actualModel, modelSource: 'session' });
+    }
+
     const emptyRun = !reply.trim() && stepSink.steps.length === 0;
     if (emptyRun && ended.code && ended.code !== 0) {
       throw Object.assign(

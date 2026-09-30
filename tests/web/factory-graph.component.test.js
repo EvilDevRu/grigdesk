@@ -17,6 +17,7 @@ const GRAPH = {
   statuses: {
     build: 'pending',
   },
+  daemonAlive: true,
 };
 
 test('движение линии ведёт к работающему этапу и не обещает запуск следующего', async (t) => {
@@ -80,6 +81,7 @@ test('возможные возвраты скрыты, фактические �
   await wrapper.setProps({ loopsOn: false, graph: { ...graph, loops: { review: 2 } } });
 
   assert.equal(wrapper.get('.e-loop').classes().includes('e-flow'), true);
+  assert.equal(wrapper.findAll('.e-flow').length, 1, 'старт не движется вместе с возвратом');
   assert.equal(wrapper.get('.elbl-fail').text(), 'Исправить замечания ×2');
 });
 
@@ -175,10 +177,59 @@ test('знак статуса не двигает название, а его с
 
   await wrapper.setProps({ graph: { ...GRAPH, statuses: { build: 'run' } } });
 
-  assert.equal(node.get('.node-state .mk').text(), '●');
+  assert.equal(node.find('.node-state').exists(), false);
+  assert.equal(node.find('.node-state-bg').exists(), false);
+  assert.equal(node.find('.node-run-outline').exists(), true);
   assert.match(node.get('title').text(), /В работе/);
   assert.match(node.attributes('aria-description'), /В работе/);
   assert.deepEqual([label.attributes('x'), label.attributes('y')], titlePosition);
+});
+
+test('обводка автоматического шага и возврат замирают при паузе и остановке', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const graph = {
+    ...GRAPH,
+    pos: { build: [140, 55], review: [480, 55] },
+    nodes: { build: ['code', 'Проверка', ''], review: ['agent', 'Ревью', ''] },
+    edges: [...GRAPH.edges, ['review', 'build', 'Повторить', 'fail', 'arc_up']],
+    statuses: { build: 'run', review: 'pending' },
+    loops: { review: 2 },
+  };
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph },
+  });
+
+  t.after(() => wrapper.unmount());
+
+  const node = wrapper.get('[data-node="build"]');
+  const outline = node.get('.node-run-outline');
+
+  assert.equal(outline.element.localName, 'path', 'движение следует контуру ромба');
+  assert.equal(outline.attributes('d'), node.get('.node-shape').attributes('d'));
+  assert.equal(node.find('.node-state-bg').exists(), false);
+  assert.equal(wrapper.findAll('.e-flow').length, 1);
+  assert.equal(wrapper.get('[data-source="review"] path').classes().includes('e-flow'), true);
+
+  for (const stopped of [
+    { daemonAlive: false },
+    { stall: { node: 'build', title: 'Остановка' } },
+  ]) {
+    await wrapper.setProps({ graph: { ...graph, ...stopped } });
+
+    assert.equal(wrapper.find('.node-run-outline').exists(), false);
+    assert.equal(wrapper.find('.e-flow').exists(), false);
+    assert.equal(wrapper.find('.e-loop').exists(), true, 'история возврата остаётся видимой');
+  }
+
+  await wrapper.setProps({ graph, reference: true });
+
+  assert.equal(wrapper.find('.node-run-outline').exists(), false);
+  assert.equal(wrapper.find('.e-flow').exists(), false);
 });
 
 // Пока идёт разбор, задача снаружи неотличима от вставшей: тот же красный узел, та же
@@ -363,6 +414,10 @@ test('петля всегда показывает две передачи и д
   assert.equal(wrapper.get(`${back} path`).classes().includes('e-flow'), true);
   assert.equal(wrapper.findAll('.e-flow').length, 1);
   assert.equal(wrapper.get('.loop-active').attributes('data-node'), 'build');
+  assert.equal(wrapper.get('.node-running').attributes('data-node'), 'build');
+  assert.equal(wrapper.get('.node-run-outline').attributes('r'), wrapper.get('.node-running .node-shape')
+    .attributes('r'), 'движется существующая обводка, без второго кольца');
+  assert.equal(wrapper.find('.mk-run').exists(), false);
   assert.equal(wrapper.get('[data-node="review"] .node-loop-role').text(), 'Ведущий');
   assert.equal(wrapper.find('[data-source="accept"] path').exists(), false);
 
@@ -379,6 +434,7 @@ test('петля всегда показывает две передачи и д
   assert.equal(wrapper.get(`${back} path`).classes().includes('e-flow'), false);
   assert.equal(wrapper.findAll('.e-flow').length, 1, 'старт не движется повторно вместе с петлёй');
   assert.equal(wrapper.get('.loop-active').attributes('data-node'), 'review');
+  assert.equal(wrapper.get('.node-running').attributes('data-node'), 'review');
 });
 
 test('первая постановка, пауза, приёмка и эталон не изображают выполненный круг', async (t) => {
@@ -399,7 +455,7 @@ test('первая постановка, пауза, приёмка и этал�
 
   await wrapper.setProps({ graph: { ...LOOP_GRAPH, daemonAlive: false } });
 
-  assert.equal(wrapper.find('.node-loop-orbit').exists(), false);
+  assert.equal(wrapper.find('.node-run-outline').exists(), false);
   assert.equal(wrapper.find('.e-flow').exists(), false);
   assert.equal(wrapper.findAll('.elbl-cycle').length, 2, 'обе передачи видны и на паузе');
 
@@ -412,7 +468,7 @@ test('первая постановка, пауза, приёмка и этал�
     },
   } });
 
-  assert.equal(wrapper.find('.node-loop-orbit').exists(), false);
+  assert.equal(wrapper.find('.node-run-outline').exists(), false);
   assert.equal(wrapper.find('.e-flow').exists(), false);
 
   await wrapper.setProps({ graph: LOOP_GRAPH, reference: true });

@@ -345,6 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
     transition_bootstrap.add_argument("--catalog-hash", required=True)
     transition_bootstrap.add_argument("--node", required=True)
     transition_bootstrap.add_argument("--outcome", required=True)
+    transition_bootstrap.add_argument("--failure-owner", default="")
 
     transition = sub.add_parser("transition")
     transition.add_argument("--catalog-hash", required=True)
@@ -473,8 +474,11 @@ def main() -> int:
         ))
     elif args.command == "transition-bootstrap":
         catalog = reader.read_catalog(args.catalog_hash)
+        failure_owner = args.failure_owner
+        if failure_owner and (args.outcome != "failed" or failure_owner not in FAILURE_OWNERS):
+            fail("failure-owner допустим только для outcome failed")
         action, policy, node = select_node_transition(
-            catalog["bootstrap"], args.node, args.outcome,
+            catalog["bootstrap"], args.node, args.outcome, failure_owner or None,
         )
         output_json({
             "schema": 2,

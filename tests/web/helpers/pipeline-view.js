@@ -33,6 +33,7 @@ export function compilePipelineView(prefix) {
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
       '../composables/useSse.ts': [
         'export function useSse(onEvent) {',
         `  globalThis.${prefix}SseHandler = onEvent;`,

@@ -219,6 +219,21 @@ test('пустой живой ход встаёт после своего зап
   assert.equal(rows[0].index, 0);
 });
 
+test('индикатор остаётся в конце текущего запуска до первого шага и после реплики', () => {
+  const empty = chatTimeline([parent], [], true, run);
+
+  assert.equal(empty.length, 2);
+  assert.equal(empty[1].heading, true);
+  assert.equal(empty[1].current, true);
+  assert.equal(empty[1].thinking, true);
+
+  const started = chatTimeline([parent, reply], [], true, run);
+
+  assert.equal(started.at(-2).message.text, reply.text);
+  assert.equal(started.at(-1).thinking, true);
+  assert.equal(started.filter((row) => row.thinking).length, 1);
+});
+
 test('линия объединяет ход с уточнениями, но не захватывает очередь и соседний запуск', () => {
   const older = {
     role: 'assistant',

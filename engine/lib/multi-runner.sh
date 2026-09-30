@@ -418,17 +418,48 @@ tests — дефект/неполнота теста; environment —
   return 0
 }
 
+# Истёкший положительный снимок требует новой metadata-проверки, а не остановки
+# длинного маршрута. Повреждение/недоступность не обновляем; TTL вручную не продлеваем.
+_multi_require_coverage() {
+  local task=$1 stage=$2 config=$3 coverage_dir expected_revision refresh_rc=0
+  coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
+  expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
+  if coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$expected_revision" "$(date +%s)"; then
+    return 0
+  fi
+  [[ "${COVERAGE_GATE_REASON:-}" == expired ]] || return 79
+
+  flog "$task" "$stage: истёк срок проверки исполнителей; повторяю host preflight" || true
+  # Preflight использует резолверы этого модуля и меняет глобальный registry/catalog.
+  # Отдельная оболочка допускает ленивую загрузку без изменения состояния dispatch.
+  (
+    source "$FACTORY_HOME/lib/profile-preflight.sh" || exit 78
+    profile_runner_host_preflight "$PROFILE_NAME"
+  ) || refresh_rc=$?
+  if (( refresh_rc != 0 )); then
+    flog "$task" "$stage: повторная проверка исполнителей не пройдена (код $refresh_rc)" || true
+    return 79
+  fi
+
+  # Сверяем исходную revision и новое время: во время пробы могли измениться
+  # конфигурация или снимок, а короткий TTL мог уже истечь. Второго обновления нет.
+  if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$expected_revision" "$(date +%s)"; then
+    flog "$task" "$stage: обновлённый preflight несовместим или уже просрочен" || true
+    return 79
+  fi
+  flog "$task" "$stage: проверка исполнителей обновлена; продолжаю запуск узла" || true
+  return 0
+}
+
 multi_runner_run() {
   local task=$1 prompt=$2 stage=$3 timeout_s=$4
   local config route primary failover rc manual_count=0 switched=0
   config=$(multi_runner_config_file)
   profile_config_validate "$config" || return 78
   if [[ "$(profile_config_get "$config" RUNNERS_COVERAGE)" == required ]]; then
-    local coverage_dir expected_revision
-    coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
-    expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
-    if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
-      "$expected_revision" "$(date +%s)"; then
+    if ! _multi_require_coverage "$task" "$stage" "$config"; then
       set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" coverage_unavailable
       return 79
     fi

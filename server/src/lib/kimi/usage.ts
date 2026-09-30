@@ -274,19 +274,33 @@ function money(cents: unknown, currency: unknown): string {
   return `${amount} ${currency || ''}`.trim();
 }
 
+/**
+ * Дополнительный денежный счёт сохраняет валюту и отдельно проверенный баланс.
+ * Отсутствующая или сломанная сумма не превращается в видимый ноль.
+ */
 export function parseKimiUsageResources(result: KimiUsageResult | null | undefined) {
   const raw = result?.kind === 'ok' ? result.extra_usage : null;
   if (!raw || typeof raw !== 'object') return [];
   const extra = raw as Record<string, unknown>;
   const currency = String(extra.currency || 'CNY');
+  const rawBalance = extra.balance_cents;
+  const validBalance = (typeof rawBalance === 'number'
+    || (typeof rawBalance === 'string' && !!rawBalance.trim()))
+    && Number.isFinite(Number(rawBalance));
+  const balanceCents = validBalance ? Number(rawBalance) : null;
   const used = Number(extra.monthly_used_cents) || 0;
   const limit = Number(extra.monthly_charge_limit_cents) || 0;
   const limited = extra.monthly_charge_limit_enabled === true && limit > 0;
+
   return [{
     key: 'kimi-extra-usage',
     label: 'Extra Usage',
-    summary: `Баланс: ${money(Number(extra.balance_cents) || 0, currency)}`,
-    tone: Number(extra.balance_cents) > 0 ? 'ok' : 'muted',
+    summary: balanceCents === null ? 'Баланс не получен' : `Баланс: ${money(balanceCents, currency)}`,
+    tone: balanceCents !== null && balanceCents > 0 ? 'ok' : 'muted',
+    ...(balanceCents !== null ? {
+      kind: 'balance',
+      balance: { amount: balanceCents / 100, currency: currency.toUpperCase() },
+    } : {}),
     ...(limited && { percent: Math.max(0, Math.min(100, Math.round((used / limit) * 100))) }),
     note: limited
       ? `В этом месяце: ${money(used, currency)} из ${money(limit, currency)}.`

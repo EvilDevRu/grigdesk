@@ -162,6 +162,7 @@ import type {
   InTurnUnavailableReason,
 } from '../../../../shared/chatInTurnContracts.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
+import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
 
@@ -194,6 +195,8 @@ export interface ExecutorRunInput {
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onStep?: (step: ChatStep) => void;
   onSessionCreated?: (sessionId: string) => void | Promise<void>;
+  // Только модель, названная основным исполнителем; fallback сюда не передаётся.
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   // Канал ввода в активный ход: адаптер отдаёт порт, когда транспорт действительно готов,
   // сообщает о смене готовности и о позднем подтверждении потребления.
   onInTurnReady?: (port: InTurnPort) => void;

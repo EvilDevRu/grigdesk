@@ -15,6 +15,7 @@ import { sseSubscribe } from '../composables/useSse.ts';
 import { mdToText } from '../shared/md.ts';
 import { chatVisibility } from '../shared/chat-visibility.js';
 import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';
+import { normalizeChatRunSnapshot } from '../../../shared/chatRun.ts';
 import { IN_TURN_PROTOCOL, IN_TURN_TEXT_LIMIT_BYTES, utf8Bytes }
   from '../../../shared/chatInTurnContracts.ts';
 import {
@@ -709,6 +710,9 @@ export const useChatStore = defineStore('chat', {
     deliveries: {},
     inTurnProtocol: 0,
     inTurnRuns: {},
+    runtimeRuns: {},
+    runRevisions: {},
+    activeRequest: 0,
     inTurnAttempts: {},
     inTurnError: '',
   }),
@@ -723,6 +727,7 @@ export const useChatStore = defineStore('chat', {
       || (s.archived || []).find((x) => x.id === id)
       || null,
     inTurnFor: (s) => (id) => s.inTurnRuns[id] || null,
+    runtimeFor: (s) => (id) => s.runtimeRuns[id] || null,
     isArchived: (s) => (id) => (s.archived || []).some((x) => x.id === id),
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
@@ -797,6 +802,45 @@ export const useChatStore = defineStore('chat', {
   },
   actions: {
     /**
+     * Любое принятое изменение запуска инвалидирует летящий снимок active.
+     * Счётчик живёт вне истории и не запускает её сохранение.
+     */
+    _touchRun(chatKey) {
+      this.runRevisions[chatKey] = (this.runRevisions[chatKey] || 0) + 1;
+
+      return this.runRevisions[chatKey];
+    },
+    /**
+     * Старт и восстановление хранят параметры конкретного исполнения целиком.
+     * Старый API остаётся активностью с неизвестными параметрами, без догадок по селекту.
+     */
+    _setRuntimeRun(chatKey, data) {
+      const snapshot = normalizeChatRunSnapshot(data.snapshot);
+
+      this.runtimeRuns[chatKey] = {
+        runId: data.runId || '',
+        turnId: data.turnId || '',
+        active: true,
+        compact: !!data.compact,
+        source: 'managed',
+        snapshot: snapshot?.chatKey === chatKey && snapshot.runId === data.runId ? snapshot : null,
+      };
+      this._touchRun(chatKey);
+    },
+    /**
+     * События управляемого запуска относятся только к текущему активному run.
+     * Без runId сохраняется совместимость фонового потока и старого сервера.
+     */
+    _ownsRunEvent(data) {
+      const current = this.runtimeRuns[data.chatKey];
+
+      if (data.runId) {
+        return current?.active && current.runId === data.runId;
+      }
+
+      return !current?.active || !current.runId;
+    },
+    /**
      * Канал привязан к запуску, поэтому новый run заменяет прежний целиком.
      * Поздние события сверяются с runId и не переоткрывают старый канал.
      */
@@ -870,7 +914,14 @@ export const useChatStore = defineStore('chat', {
         return false;
       }
 
-      const run = this._ensureInTurn(chatKey, runId);
+      const current = this.inTurnRuns[chatKey];
+      const historical = current && current.runId !== runId;
+      const run = historical ? newChatInTurnRun(chatKey, runId) : this._ensureInTurn(chatKey, runId);
+
+      if (historical) {
+        run.active = false;
+      }
+
       let afterSequence = 0;
       let throughSequence = 0;
 
@@ -1151,6 +1202,8 @@ export const useChatStore = defineStore('chat', {
       // блока выжимки: сравниваем и восстанавливаем видимую часть, иначе выжимка
       // всплывала бы в переписке отдельным «сообщением пользователя».
       const userText = stripSeed(p.userText);
+      const current = this.runtimeRuns[s.id];
+      const ownsRuntime = !current?.active || (!!p.runId && p.runId === current.runId);
 
       if (p.title) {
         const provisional = provisionalChatTitle(userText, { hasAttachments: !!p.hadAttachments });
@@ -1165,6 +1218,9 @@ export const useChatStore = defineStore('chat', {
       const seen = (s.messages || []).some((m) => m.pid === p.id);
 
       if (seen) {
+        return;
+      }
+      if (p.compact && !ownsRuntime) {
         return;
       }
       if (p.compact) {
@@ -1225,10 +1281,10 @@ export const useChatStore = defineStore('chat', {
       if (seed && !s.pendingSeed) {
         s.pendingSeed = seed;
       }
-      if (p.sessionReset) {
+      if (ownsRuntime && p.sessionReset) {
         clearSessionContext(s);
         s.sessionResetFailed = false;
-      } else {
+      } else if (ownsRuntime) {
         if (p.sessionId) {
           s.sessionId = p.sessionId;
         }
@@ -1243,13 +1299,13 @@ export const useChatStore = defineStore('chat', {
         s.error = p.reply || '';
       }
       // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
-      if (p.effort && p.effort !== s.effort) {
+      if (ownsRuntime && p.effort && p.effort !== s.effort) {
         s.effort = p.effort;
       }
       // Строку хода старого синхронного запуска снимаем здесь. У принятого хода её
       // снимает chat-done или сверка активных ходов: в очереди чата мог стартовать
       // следующий ход, и ответ предыдущего не должен гасить его «думает…».
-      if (!p.turnId) {
+      if (!p.turnId && ownsRuntime) {
         s.sending = false;
       }
       // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
@@ -1747,7 +1803,11 @@ export const useChatStore = defineStore('chat', {
         } else if (name === 'chat-step') {
           // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
           const s = this._find(d.chatKey);
-          if (s && d.step) pushStep((s.steps ||= []), d.step);
+
+          if (s && d.step && this._ownsRunEvent(d)) {
+            this._touchRun(d.chatKey);
+            pushStep((s.steps ||= []), d.step);
+          }
         } else if (name === 'chat-in-turn') {
           if (d.kind === 'ready') {
             const run = this.inTurnRuns[d.chatKey];
@@ -1776,7 +1836,17 @@ export const useChatStore = defineStore('chat', {
           // Кроме сжатия: там работу показывает кольцо, а счётчик только спорил бы с ним.
           const s = this._find(d.chatKey);
 
-          if (s && !s.compacting) {
+          if (s && !s.compacting && this._ownsRunEvent(d)) {
+            if (!d.runId) {
+              this.runtimeRuns[d.chatKey] = {
+                runId: '',
+                active: true,
+                source: 'background',
+                snapshot: null,
+              };
+            }
+
+            this._touchRun(d.chatKey);
             s.sending = true; s.progressTokens = d.tokens;
             // «≈» — только для оценки (Claude и DeepSeek считают вывод по символам);
             // отсутствие флага значит замер.
@@ -1786,10 +1856,21 @@ export const useChatStore = defineStore('chat', {
             // стоило бы записи всего чата на сервер (см. slimOf и дебаунс _persist).
             applyLiveContextUsage(s, d);
           }
+        } else if (name === 'chat-run-metadata') {
+          const current = this.runtimeRuns[d.chatKey];
+          const snapshot = normalizeChatRunSnapshot(d.snapshot);
+
+          if (current?.active && current.runId === d.runId
+            && snapshot?.chatKey === d.chatKey && snapshot.runId === d.runId) {
+            current.snapshot = snapshot;
+            this._touchRun(d.chatKey);
+          }
         } else if (name === 'chat-turn-start') {
           // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
           // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
           const s = this._find(d.chatKey);
+
+          this._setRuntimeRun(d.chatKey, d);
 
           if (d.runId) {
             this._mergeInTurnSnapshot(d.chatKey, d.runId, d.inTurn, d.turnId);
@@ -1829,7 +1910,9 @@ export const useChatStore = defineStore('chat', {
           // следующее сообщение начинало разговор с нуля. Только идущему ходу: поздний
           // id завершённого хода не должен перебить сброс сессии после сжатия.
           const s = this._find(d.chatKey);
-          if (s && d.sessionId && (s.sending || s.compacting) && s.sessionId !== d.sessionId) {
+
+          if (s && d.sessionId && this._ownsRunEvent(d)
+            && (s.sending || s.compacting) && s.sessionId !== d.sessionId) {
             s.sessionId = d.sessionId;
             this._persist();
           }
@@ -1838,9 +1921,27 @@ export const useChatStore = defineStore('chat', {
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
           // и они ждут очереди, агент продолжит работу: индикатор оставляем.
           const s = this._find(d.chatKey);
+          const current = this.runtimeRuns[d.chatKey];
           const inTurn = this.inTurnRuns[d.chatKey];
 
-          if (inTurn?.active) {
+          if (current?.active && (d.runId ? current.runId !== d.runId : !!current.runId)) {
+            if (d.turnId) {
+              this._collectPending();
+            }
+
+            return;
+          }
+          if (d.runId && current?.runId !== d.runId) {
+            return;
+          }
+
+          const revision = this._touchRun(d.chatKey);
+
+          if (current) {
+            current.active = false;
+            current.queuedCount = Number(d.queued) || 0;
+          }
+          if (inTurn?.active && (!d.runId || inTurn.runId === d.runId)) {
             inTurn.active = false;
             this._reconcileInTurn(d.chatKey, inTurn.runId);
           }
@@ -1850,6 +1951,10 @@ export const useChatStore = defineStore('chat', {
           // Снять строку хода и кольцо. queued — принятые ходы этого чата, ещё ждущие
           // очереди: пока они есть, работа продолжается и «думает…» остаётся.
           const finish = () => {
+            if (this.runRevisions[d.chatKey] !== revision) {
+              return;
+            }
+
             if (s && !s.inflight && !(Number(d.queued) > 0)) {
               s.sending = false;
               s.stopping = false;
@@ -1920,6 +2025,8 @@ export const useChatStore = defineStore('chat', {
      * из этого окна висит свой незакрытый запрос: его судьбу решит его же ответ.
      */
     async _loadActive() {
+      const request = ++this.activeRequest;
+      const revisions = { ...this.runRevisions };
       let active;
       let queued;
       let protocol;
@@ -1932,6 +2039,10 @@ export const useChatStore = defineStore('chat', {
         protocol = response.protocol;
       } catch {
         return; // Сервер старый или недоступен — обойдёмся SSE.
+      }
+
+      if (request !== this.activeRequest) {
+        return;
       }
 
       this.inTurnProtocol = protocol || 0;
@@ -1950,9 +2061,24 @@ export const useChatStore = defineStore('chat', {
 
         waitingTurns.get(item.chatKey).push(item.turnId);
       }
+
+      const accepted = [];
+
       for (const s of [...this.sessions, ...(this.archived || [])]) {
+        if ((this.runRevisions[s.id] || 0) !== (revisions[s.id] || 0)) {
+          continue;
+        }
+
         const a = byKey.get(s.id);
         const waiting = waitingTurns.get(s.id) || [];
+
+        if (a) {
+          this._setRuntimeRun(s.id, a);
+          accepted.push(a);
+        } else if (this.runtimeRuns[s.id]) {
+          this.runtimeRuns[s.id].active = false;
+          this._touchRun(s.id);
+        }
 
         if (a?.runId) {
           this._mergeInTurnSnapshot(s.id, a.runId, a.inTurn, a.turnId);
@@ -2018,7 +2144,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
-      await Promise.all((active || []).filter((a) => a?.runId)
+      await Promise.all(accepted.filter((a) => a?.runId)
         .map((a) => this._reconcileInTurn(a.chatKey, a.runId)));
     },
     /**
@@ -3072,7 +3198,7 @@ export const useChatStore = defineStore('chat', {
         // Ещё есть незакрытые отправки этого чата — ход продолжается, «думает…» не снимаем.
         // Оборванная связь — тоже не повод его снимать: агент работает дальше, а правду о
         // нём вернут SSE (`chat-done`) и сверка активных ходов при восстановлении связи.
-        if (!s.inflight && !s.offline) {
+        if (!s.inflight && !s.offline && !this.runtimeRuns[s.id]?.active) {
           s.sending = false; s.stopping = false;
           s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
         }

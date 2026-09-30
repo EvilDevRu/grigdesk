@@ -885,6 +885,12 @@ Server публикует route и catalog как content-addressed катало
 `factory-route` повторно проверяет типы файлов, отсутствие symlink/лишних каталогов,
 manifest/hash/size, строгую schema, достижимость, переходы, owner↔status и все prompt-ссылки.
 
+Отдельная разведка сохраняет done/deferred в immutable checkpoint schema 2 и общей
+проекции находок. Неуспешный stop:human живёт в отдельной цепочке bootstrap visit/decision
+до основного cursor; ответ записывается коротким bootstrap-answer, запуск — отдельным
+resume. Старые checkpoint schema 1 и stage events не переписываются. Контракты source,
+экспорта, questions и rollout — [результаты bootstrap](../cockpit/pipeline/bootstrap-results.md).
+
 Catalog содержит точные route hashes и bootstrap Scout. Рендерер принимает только JSON
 context, проверяет обязательные корневые секции, отклоняет secret-shaped поля и добавляет
 их как ограниченные hash-секции данных. Условия prompt-блоков поддерживают только
@@ -1728,11 +1734,22 @@ Artifacts привязаны к config revision и по умолчанию де�
 `RUNNERS_COVERAGE=required` означает fail-closed:
 
 - нет artifact;
-- artifact истёк;
+- artifact истёк и повторный host preflight не дал свежего совместимого снимка;
 - revision не совпадает;
 - provider/model/capability unavailable.
 
 Ни одно из этих состояний не лечится скрытым выбором другого provider-а.
+
+**Истечение внутри маршрута запускает одну повторную проверку.** Если снимок проходит
+проверки схемы, revision, связи structural/host и доступности, но истёк, `multi_runner_run`
+выполняет metadata-only `profile_runner_host_preflight` перед запуском очередного узла.
+После него повторно проверяются исходная revision и новое время. Ошибка preflight,
+сменившаяся revision или снова истёкший срок оставляют прежний отказ до model call.
+Свежий снимок не обновляется лишний раз; отсутствие, несовместимость и записанная
+недоступность не запускают автоматическую перепроверку. Сам `coverage_gate` сохраняет
+код 77 для всех отказов, поэтому продвижение каталога по просроченному снимку запрещено.
+Подробности и регрессия —
+[обновление проверки внутри маршрута](../cockpit/pipeline/coverage-expiry-during-route.md).
 
 **Host preflight не применяется к `gate --commit-only`.** Решение человека на воротах
 агентов не запускает — это CAS в журнале попытки и проекция в реестр, поэтому готовность
@@ -1751,9 +1768,9 @@ CLI могло проявить недоступность провайдера,
 может вернуть его и по другой причине; Cockpit типизирует отказ только по маркеру.
 
 **Проба CLI повторяется с паузой, потому что снимок покрытия общий на профиль.**
-`<state>/coverage/<профиль>/host.env` не принадлежит задаче: пишет его любой `start`
-или `resume`, а читает `multi_runner_run` на КАЖДОМ заходе в узел любого идущего
-прогона этого профиля (`RUNNERS_COVERAGE=required`). Поэтому одна моргнувшая проба
+`<state>/coverage/<профиль>/host.env` не принадлежит задаче: пишет его любой `start`,
+`resume` или перепроверка после истечения, а читает `multi_runner_run` на КАЖДОМ заходе
+в узел любого идущего прогона этого профиля (`RUNNERS_COVERAGE=required`). Поэтому одна моргнувшая проба
 записывает `UNAVAILABLE>0` сразу для всех, и соседний прогон встаёт fail-closed
 кодом 79 с `RUNNER_REASON_<STAGE>=coverage_unavailable`. Так 27.08.2026 resume одной
 задачи уронил идущий рядом прогон на узле `review`; через минуту повторный preflight

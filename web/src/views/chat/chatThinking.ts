@@ -182,13 +182,14 @@ export function formatElapsed(startedAt: unknown, now: number): string {
  * Расход вывода за ход. Пустая строка — исполнитель его не публикует (DeepSeek, Kimi):
  * ноль здесь значит «неизвестно», и подставлять вместо него заполненность контекста
  * нельзя — та же цифра уже показана кольцом и означает совсем другое.
+ * Отдельная подпись единицы позволяет узкой строке скрыть её без обрезания числа.
  */
-export function formatTurnTokens(tokens: unknown, estimate: boolean): string {
+export function formatTurnTokens(tokens: unknown, estimate: boolean, includeUnit = true): string {
   const value = Number(tokens);
 
   if (!Number.isSafeInteger(value) || value <= 0) {
     return '';
   }
 
-  return `${estimate ? '≈ ' : ''}${value.toLocaleString('ru')} ток.`;
+  return `${estimate ? '≈ ' : ''}${value.toLocaleString('ru')}${includeUnit ? ' ток.' : ''}`;
 }

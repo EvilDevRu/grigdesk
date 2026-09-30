@@ -1,4 +1,5 @@
 // Исполнитель Claude (Anthropic, Claude Code CLI).
+import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -1806,7 +1807,7 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal,
-    workspaceAccess, workTools, onSessionCreated,
+    workspaceAccess, workTools, onSessionCreated, onRunMetadata,
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
   }: {
     config: ClaudeConfig;
@@ -1823,6 +1824,7 @@ export default {
     providerSettings?: ClaudeSettings;
     log?: StreamLog;
     onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
+    onRunMetadata?: (metadata: ChatRunMetadata) => void;
     onStep?: (step: ChatStep) => void;
     signal?: AbortSignal;
     workspaceAccess?: WorkspaceAccess | null;
@@ -1937,6 +1939,7 @@ export default {
             message,
             onStep,
             onProgress,
+            onRunMetadata,
             onSessionCreated,
             ...(onInTurnReady ? { onInTurnReady } : {}),
             ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
@@ -1953,7 +1956,12 @@ export default {
     return new Promise<unknown>((resolve, reject) => {
       // Разбор потока общий с живой сессией (_claude-stream.js): событие CLI одно и то
       // же, и вторая копия правил про usage, компакт и пустой ответ разошлась бы с первой.
-      const collector = createClaudeTurnCollector({ onStep, onProgress, log });
+      const collector = createClaudeTurnCollector({
+        onStep,
+        onProgress,
+        onRunMetadata,
+        log,
+      });
       const { state } = collector;
       let buf = '';
       // Id сессии сообщаем с первого события, как и живая сессия: оборванный ход обязан

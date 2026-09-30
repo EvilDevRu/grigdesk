@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Dirent, Stats } from 'node:fs';
+import { readBootstrapStop } from './factoryBootstrapLedger.ts';
 
 // Записи журнала читаются по объявленным схемой полям: набор ключей сверяет exactKeys,
 // а типы ниже описывают ровно то, что после этого разбирается.
@@ -634,6 +635,19 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     fail('pipeline projection disagrees with trusted launch provenance');
   }
 
+  const bootstrapStop = await readBootstrapStop(attemptDir, {
+    taskId: task,
+    attemptId: attempt,
+    profile: attemptState.profile || '',
+    catalogHash: attemptState.catalogHash || '',
+    routeId: routePin.routeId || '',
+    routeHash: routePin.routeHash || '',
+  }, attemptState.routesDir || '').catch((error: Error) => fail(error.message));
+
+  if (bootstrapStop && cursor) {
+    fail('bootstrap stop conflicts with main cursor');
+  }
+
   return {
     task,
     attempt,
@@ -649,6 +663,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     terminal,
     terminalRecord,
     cursor,
+    bootstrapStop,
     ...contract,
   };
 }

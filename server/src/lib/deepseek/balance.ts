@@ -24,9 +24,9 @@ const SPEND_EPSILON = 0.005;
 
 export interface DeepSeekBalanceInfo {
   currency: string;
-  total: number;
-  granted: number;
-  toppedUp: number;
+  total: number | null;
+  granted: number | null;
+  toppedUp: number | null;
 }
 
 export interface DeepSeekBalance {
@@ -49,9 +49,18 @@ export type DeepSeekSpendForecast =
   | { kind: 'stalled'; hoursObserved: number }
   | { kind: 'rate'; hoursObserved: number; spentPerDay: number; daysLeft: number };
 
-function money(value: unknown): number {
-  const parsed = Number.parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
+/**
+ * API допускает десятичные строки, но пустота и мусор не являются деньгами.
+ * Проверяем исходный тип до преобразования, сохраняя отсутствие замера.
+ */
+function money(value: unknown): number | null {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /**
@@ -202,7 +211,15 @@ export function forecastDeepSeekSpend(
   };
 }
 
-export function formatDeepSeekMoney(value: number, currency: string): string {
+/**
+ * Сумма форматируется только после проверки ответа API, в исходной валюте.
+ * При отсутствии числа показывается отсутствие данных, а не нулевой баланс.
+ */
+export function formatDeepSeekMoney(value: number | null, currency: string): string {
+  if (value === null) {
+    return 'нет данных';
+  }
+
   try {
     return new Intl.NumberFormat('ru-RU', {
       style: 'currency',
@@ -256,11 +273,16 @@ export function deepSeekBalanceResources(
   const resources: Array<Record<string, unknown>> = [];
 
   for (const entry of balance.balances) {
-    const empty = entry.total <= 0;
+    const empty = entry.total !== null && entry.total <= 0;
+
     resources.push({
       key: `balance-${entry.currency.toLowerCase()}`,
       label: `Баланс ${entry.currency}`,
       summary: formatDeepSeekMoney(entry.total, entry.currency),
+      ...(entry.total !== null ? {
+        kind: 'balance',
+        balance: { amount: entry.total, currency: entry.currency },
+      } : {}),
       note: `пополнение ${formatDeepSeekMoney(entry.toppedUp, entry.currency)}`
         + ` · бонус ${formatDeepSeekMoney(entry.granted, entry.currency)}`
         + (balance.available ? '' : ' · вендор считает счёт недостаточным для запросов'),
@@ -276,7 +298,8 @@ export function deepSeekBalanceResources(
 
   resources.push(deepSeekTariffResource({ now, timeZone, pricing }));
 
-  const primary = balance.balances.find((entry) => entry.total > 0) || balance.balances[0];
+  const measured = balance.balances.filter((entry) => entry.total !== null);
+  const primary = measured.find((entry) => entry.total! > 0) || measured[0];
   if (primary) {
     const forecast = forecastDeepSeekSpend(samples, primary.currency, now);
     resources.push({
@@ -343,7 +366,8 @@ export async function deepSeekUsage({
   const at = now();
   const samples = await appendBalanceLog(
     config.deepseekRuntimeHome,
-    result.balance.balances.map((entry) => ({ at, currency: entry.currency, total: entry.total })),
+    result.balance.balances.flatMap((entry) => entry.total === null
+      ? [] : [{ at, currency: entry.currency, total: entry.total }]),
     at,
   );
   const pricing = await pricingStatusSafely(config.deepseekRuntimeHome, fetchImpl, at);

@@ -46,9 +46,11 @@ function measurePreview(): void {
     return;
   }
 
-  const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
+  const style = getComputedStyle(element);
+  const lineHeight = Number.parseFloat(style.lineHeight);
+  const lines = Number.parseFloat(style.getPropertyValue('--chat-reply-preview-lines')) || 4;
 
-  overflows.value = element.scrollHeight > lineHeight * 4 + 1;
+  overflows.value = element.scrollHeight > lineHeight * lines + 1;
 }
 
 watch(() => props.block.text, async () => {
@@ -70,11 +72,15 @@ onUnmounted(() => observer?.disconnect());
 <style scoped>
 .chat-in-turn-reply {
   min-width: 0;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--chat-reply-size, .78125rem);
+  line-height: var(--chat-reply-leading, 1.5);
   color: var(--ink);
 }
-.chat-in-turn-reply__body.collapsed { max-height: 6em; overflow: hidden; }
+.chat-in-turn-reply__body.collapsed {
+  max-height: calc(var(--chat-reply-size, .78125rem) * var(--chat-reply-leading, 1.5)
+    * var(--chat-reply-preview-lines, 4));
+  overflow: hidden;
+}
 .chat-in-turn-reply__body.faded { mask-image: linear-gradient(#000 75%, transparent); }
 .chat-in-turn-reply__draft { display: block; font-size: 11px; color: var(--ink-mid); }
 .text { overflow-wrap: anywhere; }
@@ -82,7 +88,10 @@ onUnmounted(() => observer?.disconnect());
 .text :deep(:first-child) { margin-top: 0; }
 .text :deep(:last-child) { margin-bottom: 0; }
 .text :deep(h1), .text :deep(h2), .text :deep(h3),
-.text :deep(h4), .text :deep(h5), .text :deep(h6) { margin: 8px 0 4px; font-size: inherit; }
+.text :deep(h4), .text :deep(h5), .text :deep(h6) {
+  margin: 8px 0 4px;
+  font-size: var(--chat-reply-heading-size, .875rem);
+}
 .text :deep(ul), .text :deep(ol) { margin: 4px 0; padding-left: 20px; }
 .text :deep(a) { color: var(--accent); text-decoration: underline; }
 .text :deep(code) { font-size: 12px; background: var(--surface-2); }

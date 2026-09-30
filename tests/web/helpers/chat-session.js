@@ -17,6 +17,7 @@ function uiFacadeStub(prefix) {
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
     ['UiTooltip', 'src/components/overlays/UiTooltip.vue'],
+    ['UiPopover', 'src/components/overlays/UiPopover.vue'],
   ];
   const imports = components.map(([name, file]) => (
     `import ${name} from ${JSON.stringify(webFile(file))};`

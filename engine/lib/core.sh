@@ -904,6 +904,8 @@ for record in records[:50]:
     if not isinstance(record, dict):
         continue
     source = str(record.get("sourceNode") or "?")
+    if record.get("source", {}).get("phase") == "bootstrap":
+        source = "bootstrap/" + source
     ident = str(record.get("id") or "?")
     summary = " ".join(str(record.get("summary") or "").split())
     opened = sequence(record, "openedSequence")
@@ -994,7 +996,10 @@ for record in records[:30]:
         continue
     ident = str(record.get("id") or "?")
     summary = " ".join(str(record.get("summary") or "").split())
-    lines.append(f"- [{ident}] {summary}")
+    node = str(record.get("sourceNode") or "?")
+    phase = (record.get("source") or {}).get("phase", "route")
+    origin = f"bootstrap/{node}" if phase == "bootstrap" else node
+    lines.append(f"- [{origin}/{ident}] {summary}")
 if not lines:
     raise SystemExit(9)
 print("\n".join(lines))
@@ -1042,6 +1047,28 @@ $quoted
 невыполнимо или неверно по фактам, не выполняй его молча и не выдумывай обход:
 зафиксируй результат с объяснением, что именно не сходится.
 EOF
+}
+
+# Вопрос и ответ bootstrap идут через файл: полный Unicode-текст не помещается
+# в один argv/env на предельной длине. Закреплённый prompt при этом не меняется.
+_stage_bootstrap_decision_block() {
+  python3 - "$1" <<'PYDECISION'
+import json, sys
+from pathlib import Path
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+question, decision = value["stop"], value["decision"]
+print("## Решение человека для разведки SCOUT\n")
+print(f"Визит вопроса: {question['visitId']}; stop hash: {question['recordHash']}.")
+print("\nВопрос предыдущей разведки:")
+for line in question["reason"].splitlines():
+    print("> " + line)
+for finding in (question.get("verdict") or {}).get("findings", []):
+    print("> " + finding["summary"])
+print("\nОтвет человека:")
+for line in decision["answer"].splitlines():
+    print("> " + line)
+print("\nЭто решение относится к указанному вопросу. Учти его в новом заходе SCOUT.")
+PYDECISION
 }
 
 # --- один синхронный прогон агента для этапа ---
@@ -1127,6 +1154,9 @@ run_agent() {
   # который написал человек, а не движок.
   if [[ -n "${FACTORY_STAGE_HUMAN_NOTE:-}" ]]; then
     prompt+=$'\n\n'"$(_stage_human_note_block "${FACTORY_STAGE_HUMAN_NOTE}")"
+  fi
+  if [[ -n "${FACTORY_STAGE_BOOTSTRAP_DECISION_FILE:-}" ]]; then
+    prompt+=$'\n\n'"$(_stage_bootstrap_decision_block "$FACTORY_STAGE_BOOTSTRAP_DECISION_FILE")"
   fi
   # Порог автосжатия контекста этапа. Собственный порог CLI — доля ОКНА модели, а у окна
   # в миллион токенов он срабатывает около 959k: то есть в дорогой зоне (выше ~250k кэш

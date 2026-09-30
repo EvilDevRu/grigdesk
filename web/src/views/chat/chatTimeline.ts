@@ -197,6 +197,8 @@ function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
     cursor += 1;
   }
 
+  // Индикатор остаётся в конце своего запуска, рядом с правой сводкой.
+  // До первого шага эта строка также сохраняет шапку нового хода.
   if (turn.live) {
     const tail = activity('thinking');
 

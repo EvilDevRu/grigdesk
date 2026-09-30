@@ -825,6 +825,8 @@ const { connected } = useSse((name, data) => {
   }
   if (name === 'cockpit-update') cockpitUpdate.load({ quiet: true });
 });
+
+watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, flush: 'sync' });
 </script>
 
 <style scoped>

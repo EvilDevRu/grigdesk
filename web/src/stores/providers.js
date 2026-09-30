@@ -4,8 +4,6 @@ import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { familyModels } from '../shared/modelFamily.ts';
 
-let usageAt = 0;
-
 export const useProvidersStore = defineStore('providers', {
   // showAllModels — настройка «показывать все модели, включая старые версии» (server prefs).
   // Держим её здесь же: список моделей приходит полным, тумблер только фильтрует показ.
@@ -15,6 +13,17 @@ export const useProvidersStore = defineStore('providers', {
   state: () => ({
     providers: [],
     usage: {},
+    usageAt: 0,
+    usageVersion: 0,
+    usageRequest: 0,
+    usageTransport: {
+      status: 'idle',
+      receivedAt: 0,
+      error: '',
+      connected: false,
+      everConnected: false,
+      deliveryStale: false,
+    },
     mcp: {},
     loaded: false,
     showAllModels: false,
@@ -117,38 +126,97 @@ export const useProvidersStore = defineStore('providers', {
       } catch { /* сервер молчит — иконок просто нет */ }
       this.loaded = true;
     },
-    // Потребление лимитов (прогрессбары в тултипе иконки исполнителя). Кэш минута;
-    // force — после своих же изменений (доплата), когда ждать минуту нельзя.
+    /**
+     * Использует существующий минутный GET; компоненты читают единый снимок.
+     * Транспортный отказ завершается явно и не означает разлогин у исполнителя.
+     */
     async loadUsage(force = false) {
-      if (!force && Date.now() - usageAt < 60_000) return;
-      usageAt = Date.now();
-      try {
-        const { usage } = await api.get('/api/providers/usage');
-        this.usage = usage || {};
-      } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
+      if (!force && Date.now() - this.usageAt < 60_000) {
+        return;
+      }
+
+      this.usageAt = Date.now();
+      await this._requestUsage(false);
     },
     /**
-     * Снимок лимитов, который сервер принёс сам (SSE `providers-usage` с фонового тика).
-     * Сдвигает и троттл: раз снимок только что пришёл, ближайший loadUsage без force
-     * ходить за ним не должен — иначе каждое событие оплачивалось бы лишним запросом.
+     * SSE и HTTP конкурируют за один снимок. Событие либо более новый запрос
+     * инвалидируют результат уже летящего GET/refresh вместе с его ошибкой.
+     */
+    async _requestUsage(refresh) {
+      const request = ++this.usageRequest;
+      const version = this.usageVersion;
+
+      this.usageTransport.status = 'loading';
+
+      try {
+        const response = refresh
+          ? await api.post('/api/providers/usage/refresh')
+          : await api.get('/api/providers/usage');
+
+        if (request !== this.usageRequest || version !== this.usageVersion) {
+          return;
+        }
+        if (!this.applyUsage(response?.usage)) {
+          throw new Error('Сервер не вернул снимок лимитов.');
+        }
+      } catch (error) {
+        if (request !== this.usageRequest || version !== this.usageVersion) {
+          return;
+        }
+
+        this.usageTransport.status = 'error';
+        this.usageTransport.error = error?.message || 'Не удалось получить лимиты от Cockpit.';
+        this.usageTransport.deliveryStale = this.usageTransport.receivedAt > 0;
+      }
+    },
+    /**
+     * Принятый снимок снимает ошибку доставки и сдвигает троттл обычного GET.
+     * При разорванном SSE HTTP обновляет числа, сохраняя недоступность живого обновления.
      */
     applyUsage(usage) {
-      if (!usage || typeof usage !== 'object') return;
+      if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
+        return false;
+      }
+
       this.usage = usage;
-      usageAt = Date.now();
+      this.usageAt = Date.now();
+      this.usageVersion += 1;
+      this.usageTransport.status = 'success';
+      this.usageTransport.receivedAt = this.usageAt;
+      this.usageTransport.error = '';
+      this.usageTransport.deliveryStale = this.usageTransport.everConnected
+        && !this.usageTransport.connected;
+
+      return true;
     },
     /**
-     * Принудительная проверка по кнопке во всплывашке. Обходит TTL серверного кэша, но не
-     * паузу после отказа вендора: её сервер держит сам и вернёт прошлый снимок. Ход один на
-     * все всплывашки — кнопки соседей на это время показывают тот же спиннер.
+     * Потеря общего SSE помечает доставку устаревшей для всех читателей.
+     * Сам reconnect метку не снимает: нужен новый принятый снимок usage.
+     */
+    noteUsageConnection(connected) {
+      const transport = this.usageTransport;
+
+      if (transport.everConnected && transport.connected && !connected) {
+        transport.deliveryStale = true;
+      }
+
+      transport.connected = connected;
+      transport.everConnected ||= connected;
+    },
+    /**
+     * Проверка по кнопке остаётся общей для всех всплывашек.
+     * Защита от позднего ответа совпадает с обычным GET, новый опрос не появляется.
      */
     async refreshUsage() {
-      if (this.usageRefreshing) return;
+      if (this.usageRefreshing) {
+        return;
+      }
+
       this.usageRefreshing = true;
+
       try {
-        const { usage } = await api.post('/api/providers/usage/refresh');
-        this.applyUsage(usage);
-      } catch { /* сервер молчит — остаётся прошлый снимок */ } finally {
+        await this._requestUsage(true);
+      } finally {
         this.usageRefreshing = false;
       }
     },

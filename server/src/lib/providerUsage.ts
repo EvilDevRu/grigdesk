@@ -35,6 +35,8 @@ export interface UsageResource {
   summary: string;
   note: string;
   tone: string;
+  kind?: 'balance';
+  balance?: { amount: number; currency: string };
   percent?: number;
   controls: UsageControl[];
 }
@@ -97,6 +99,10 @@ function normalizeControl(raw: unknown): UsageControl | null {
   };
 }
 
+/**
+ * Сохраняет совместимые текстовые ресурсы и принимает только конечный числовой баланс.
+ * Название ресурса и локализованная строка не доказывают его денежную природу.
+ */
 export function normalizeUsageResources(resources: unknown): UsageResource[] {
   if (!Array.isArray(resources)) return [];
   return resources.flatMap((raw): UsageResource[] => {
@@ -106,12 +112,21 @@ export function normalizeUsageResources(resources: unknown): UsageResource[] {
     const label = String(value.label || '');
     if (!ACTION_ID.test(key) || !label) return [];
     const percent = typeof value.percent === 'number' ? value.percent : Number.NaN;
+    const balance = value.balance as { amount?: unknown; currency?: unknown } | null;
+    const validBalance = value.kind === 'balance' && typeof balance?.amount === 'number'
+      && Number.isFinite(balance.amount) && typeof balance.currency === 'string'
+      && /^[A-Z]{3}$/.test(balance.currency);
+
     return [{
       key,
       label,
       summary: typeof value.summary === 'string' ? value.summary : '',
       note: typeof value.note === 'string' ? value.note : '',
       tone: RESOURCE_TONES.has(String(value.tone)) ? String(value.tone) : 'muted',
+      ...(validBalance ? {
+        kind: 'balance' as const,
+        balance: { amount: balance!.amount as number, currency: balance!.currency as string },
+      } : {}),
       ...(Number.isFinite(percent) && { percent: Math.max(0, Math.min(100, Math.round(percent))) }),
       controls: Array.isArray(value.controls)
         ? value.controls.map(normalizeControl).filter((c): c is UsageControl => Boolean(c))

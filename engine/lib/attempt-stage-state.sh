@@ -2281,13 +2281,12 @@ PY
 # Заполняет глобальные ASTAGE_* после проверки активной попытки, неизменяемых пинов,
 # терминального состояния, выбранного маршрута и самого закреплённого бандла.
 _attempt_stage_state_load_locked() {
-  local task=$1 attempt=$2 expected_route=${3:-}
+  local task=$1 attempt=$2 expected_route=${3:-} read_terminal=${4:-0}
   local root dir profile routes catalog route_pin route route_hash
   local terminal_rc description entry rc
 
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_protocol_locked "$root" || return
-  _attempt_state_require_active_locked "$root" "$task" "$attempt" >/dev/null || return
   dir=$(_attempt_state_validate_attempt_locked "$root" "$task" "$attempt") || return
   profile=$(_attempt_state_json get "$dir/attempt.json" profile) || return
   routes=$(_attempt_state_json get "$dir/attempt.json" routesDir) || return
@@ -2299,9 +2298,11 @@ _attempt_stage_state_load_locked() {
   _attempt_state_terminal_locked "$dir" "$task" "$attempt" >/dev/null
   terminal_rc=$?
   if (( terminal_rc == 0 )); then
-    return 75
+    [[ "$read_terminal" == 1 ]] || return 75
   elif (( terminal_rc != 3 )); then
     return "$terminal_rc"
+  else
+    _attempt_state_require_active_locked "$root" "$task" "$attempt" >/dev/null || return
   fi
 
   route_pin=$(_attempt_state_route_pin_locked \
@@ -2645,27 +2646,46 @@ attempt_stage_state_human_note_v2() {
 # Производная проекция immutable events: какие typed findings ещё открыты и какие
 # уже закрыты повторной проверкой того же узла. Ничего отдельно не мутируется — при
 # повреждении hash-chain чтение падает до построения проекции.
+# Locked helper не берёт task lock повторно и допускает только пустой ledger до init.
+# Терминальная попытка доступна для экспорта, но не для мутаций cursor.
+_attempt_stage_state_findings_locked() {
+  local task=$1 attempt=$2 ledger rc=0
+  ledger=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-findings.XXXXXX") || return 1
+  if [[ ! -e "$ASTAGE_RESULTS_DIR/runtime.json" && ! -L "$ASTAGE_RESULTS_DIR/runtime.json" &&
+        -z "$(find "$ASTAGE_RESULTS_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    printf '%s\n' '{"schema":1,"open":[],"closed":[],"deferred":[]}' >"$ledger"
+  else
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >/dev/null
+    rc=$?
+    if (( rc == 0 )); then
+      local -a loop_args=()
+      [[ -z "$ASTAGE_LOOP_LEAD" ]] || loop_args=("$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER")
+      _attempt_stage_state_json findings-ledger "$ASTAGE_RESULTS_DIR" "${loop_args[@]}" >"$ledger"
+      rc=$?
+    fi
+  fi
+  if (( rc == 0 )); then
+    python3 "$FACTORY_HOME/lib/bootstrap_state.py" findings \
+      "$ASTAGE_ATTEMPT_DIR/artifacts/bootstrap.json" "$task" "$attempt" \
+      "$ASTAGE_PROFILE" "$ASTAGE_CATALOG_HASH" "$ASTAGE_ROUTE" "$ASTAGE_ROUTE_HASH" \
+      "$ASTAGE_ROUTES_DIR" <"$ledger"
+    rc=$?
+  fi
+  rm -f -- "$ledger"
+  return "$rc"
+}
+
 attempt_stage_state_findings_v2() {
-  local task attempt lock_fd runtime_tmp rc
+  local task attempt lock_fd rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   _attempt_state_lock "$task" lock_fd || return
-  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  _attempt_stage_state_load_locked "$task" "$attempt" "" 1
   rc=$?
   if (( rc == 0 )); then
-    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-findings.XXXXXX") || rc=1
-  fi
-  if (( rc == 0 )); then
-    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    _attempt_stage_state_findings_locked "$task" "$attempt"
     rc=$?
   fi
-  if (( rc == 0 )); then
-    local -a loop_args=()
-    [[ -z "$ASTAGE_LOOP_LEAD" ]] || loop_args=("$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER")
-    _attempt_stage_state_json findings-ledger "$ASTAGE_RESULTS_DIR" "${loop_args[@]}"
-    rc=$?
-  fi
-  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
   _attempt_state_unlock "$lock_fd"
   return "$rc"
 }

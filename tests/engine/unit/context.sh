@@ -265,4 +265,33 @@ done
 "$tool" "${bad_branch[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "repository branch name is validated like any other branch"
 
+# Bootstrap не входит в sequence основного ledger и может совпасть по id с main scout.
+# Проверяем реальный context CLI и freshness loop, а не только форму фикстуры.
+bootstrap_ledger=$(jq -c '
+  .schema = 2 |
+  .open |= map(. + {source:{phase:"route"},sourceNode:"scout"}) |
+  .deferred = [{id:"valid-regex-route",sourceNode:"scout",owner:"build",summary:"Проверка целевой среды",
+    openedSequence:null,lastSeenSequence:null,closedSequence:null,status:"deferred",
+    source:{phase:"bootstrap",recordHash:("a" * 64),runId:"fixture-scout",epoch:1}}]
+' <<<"$findings_ledger")
+bootstrap_output=$("$tool" "${common[@]}" --findings-ledger-json "$bootstrap_ledger")
+assert_rc 0 "$?" "context CLI принимает внешнюю findings schema 2"
+assert_eq bootstrap "$(jq -r .evidence.findings.deferred[0].source.phase <<<"$bootstrap_output")" \
+  "context сохраняет источник bootstrap"
+assert_eq null "$(jq -r .evidence.findings.deferred[0].openedSequence <<<"$bootstrap_output")" \
+  "context не подменяет bootstrap sequence"
+invalid_bootstrap=$(jq -c '.deferred[0].openedSequence = 1' <<<"$bootstrap_ledger")
+"$tool" "${common[@]}" --findings-ledger-json "$invalid_bootstrap" >/dev/null 2>&1
+assert_rc 78 "$?" "bootstrap sequence основного ledger отвергнут"
+python3 - "$tool" "$bootstrap_ledger" <<'PYTEST'
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+findings = module["findings_ledger"](sys.argv[2])
+bounded = module["bound_loop_findings"](findings)
+assert bounded["schema"] == 2
+assert bounded["deferred"][0]["source"]["phase"] == "bootstrap"
+assert module["finding_freshness"]("deferred", bounded["deferred"][0]) == (0, 0, 0)
+PYTEST
+assert_rc 0 "$?" "loop-bounding сохраняет schema/source и сортирует null sequence"
+
 finish_tests

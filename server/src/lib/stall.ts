@@ -11,6 +11,7 @@
 // но без отдельного признака человек об этом не узнает. Этот модуль достаёт причину из журнала и
 // формулирует её так, чтобы по ней было понятно, что делать.
 import { parseStagesLog } from './stagesParse.ts';
+import type { BootstrapStop } from './factoryBootstrapLedger.ts';
 
 // Событие журнала в том минимуме, который нужен разбору: когда и что напечатал движок.
 export interface StallEvent {
@@ -24,7 +25,7 @@ export interface StallEvent {
 interface HaltMatch {
   stage: string | null;
   stop?: string;
-  outcome?: 'exhausted';
+  outcome?: 'exhausted' | 'failed' | 'skipped';
   title: string;
   hint: string;
 }
@@ -94,6 +95,37 @@ export interface StallInfo extends StallCause {
   kind: 'human' | 'crashed';
   fails: number | null;
   comment: string | null;
+}
+
+/**
+ * Вопрос разведки берётся из trusted stop, даже если stdout или pipeline не обновились.
+ * Арбитр main cursor не получает эту остановку; ответ привязан к bootstrap visit.
+ */
+export function bootstrapStall(stop: BootstrapStop | null | undefined, environmentError = '') {
+  if (!stop || stop.state === 'running') {
+    return null;
+  }
+
+  return {
+    kind: 'human' as const,
+    phase: 'bootstrap' as const,
+    stage: 'SCOUT',
+    node: 'scout',
+    stop: 'human',
+    outcome: stop.outcome,
+    title: stop.state === 'answered'
+      ? 'SCOUT: ответ сохранён, можно продолжить'
+      : 'SCOUT: нужен ответ человека',
+    hint: environmentError || 'Ответь на вопрос разведки; основной маршрут начнётся после успешного SCOUT.',
+    detail: stop.reason,
+    since: stop.at,
+    fails: null,
+    comment: stop.reason,
+    arbitrable: false,
+    arbiter: null,
+    bootstrap: stop,
+    environmentError: environmentError || null,
+  };
 }
 
 // Формулировки движка (lib/core.sh) → человеческая причина и что с ней делать.

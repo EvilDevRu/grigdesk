@@ -23,6 +23,8 @@
 
 ### Данные фабрики
 
+- [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md)
+
 - [вердикт human — вопрос человеку, и у ответа на него СВОЯ модалка](human-verdict-dialog.md)
 - [вердикт human закрывает автоматический повтор по этой остановке](human-verdict-retry-boundary.md)
 - [границу задачи арбитр менять не вправе](arbiter-task-scope.md)
@@ -34,9 +36,11 @@
 ### Клиент графа
 
 - [Петля агентов: круг, этап и видимая передача между ведущим и исполнителем](loop-visualization.md)
+- [Работа узла: вращающаяся обводка и синяя стрелка текущего возврата](running-node-outline.md)
 - [Выбор исполнителя — карточки, и он не закрывает модалку](node-executor-selection.md)
 - [Документ этапа: карта NODE_DOC и список сервера обязаны сходиться](stage-document-mapping.md)
 - [Клиент (web/src/shared/graph-geom.js)](graph-client.md)
+- [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md)
 - [Раскладка модалки: шапка называет этап, колонки отвечают на вопрос](stage-dialog-layout.md)
 - [Решение человека принимается в СВОЕЙ модалке, остальные места только ведут туда](human-decision-dialog.md)
@@ -87,6 +91,8 @@
 - [Самая частая остановка маршрута была невидимой и неразбираемой](stall-visibility-and-analysis.md)
 - [Скрипты публикации маршрутов в profiles/ импортируют .js, которых после миграции на TS нет](route-publisher-typescript-imports.md)
 - [Старт route engine из кокпита: сервис возвращает 0 всегда, а отказ приходит позже](start-route-engine.md)
+- [Проверка исполнителей обновляется внутри длинного маршрута](coverage-expiry-during-route.md)
+- [Resume читает закреплённый hash каталога из загрузчика попытки](bootstrap-resume-catalog-hash.md)
 - [Стенд старой задачи не сносился: попытка родилась раньше lifecycle-журнала](legacy-sandbox-cleanup.md)
 - [Транзакционный узел БЕЗ пары instrument делает маршрут заложником формы запуска](transactional-node-instrument-pair.md)
 - [Узлы маршрута обязаны ходить в общий runtime под ОДНИМ uid](shared-runtime-uid.md)
