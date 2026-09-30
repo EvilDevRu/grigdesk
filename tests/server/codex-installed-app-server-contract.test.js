@@ -115,6 +115,7 @@ test('установленный Codex сохраняет необходимый
     'thread/start',
     'thread/resume',
     'turn/start',
+    'turn/steer',
     'turn/interrupt',
   ]) {
     assertMethod(clientRequest, method, version, 'ClientRequest');
@@ -154,6 +155,7 @@ test('установленный Codex сохраняет необходимый
     dynamicToolOutput,
     dynamicToolSpec,
     turnStartParams,
+    turnSteerParams,
     userInput,
     sandboxMode,
     sandboxPolicy,
@@ -175,6 +177,7 @@ test('установленный Codex сохраняет необходимый
     schema('v2/DynamicToolCallOutputContentItem.ts'),
     schema('v2/DynamicToolSpec.ts'),
     schema('v2/TurnStartParams.ts'),
+    schema('v2/TurnSteerParams.ts'),
     schema('v2/UserInput.ts'),
     schema('v2/SandboxMode.ts'),
     schema('v2/SandboxPolicy.ts'),
@@ -218,6 +221,18 @@ test('установленный Codex сохраняет необходимый
   assertSchemaPattern(dynamicToolSpec, /"type"\s*:\s*"function"/,
     'function discriminant', version, 'DynamicToolSpec');
 
+  // Канал уточнений Cockpit опирается на turn/steer с обязательным expectedTurnId:
+  // без него сообщение могло бы уехать в следующий ход того же thread.
+  assertField(turnSteerParams, 'threadId', 'string', version, 'TurnSteerParams');
+  assertField(turnSteerParams, 'expectedTurnId', 'string', version, 'TurnSteerParams');
+  assertField(turnSteerParams, 'input', 'Array<UserInput>', version, 'TurnSteerParams');
+  assertSchemaPattern(
+    turnSteerParams,
+    /\bclientUserMessageId\?\s*:\s*string\s*\|\s*null/,
+    'clientUserMessageId?: string | null',
+    version,
+    'TurnSteerParams',
+  );
   assertField(turnStartParams, 'threadId', 'string', version, 'TurnStartParams');
   assertField(turnStartParams, 'input', 'Array<UserInput>', version, 'TurnStartParams');
   for (const field of ['cwd', 'approvalPolicy', 'sandboxPolicy', 'model', 'effort', 'summary']) {

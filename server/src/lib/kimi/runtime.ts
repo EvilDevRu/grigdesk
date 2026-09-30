@@ -19,6 +19,14 @@ import {
   KIMI_EGRESS_ALLOWLIST_VERSION,
 } from './egressProxy.ts';
 import { buildKimiHostLaunch } from './hostLaunch.ts';
+import { buildKimiHostWebHome } from './hostWebHome.ts';
+import { runKimiServerTurn } from './serverTurn.ts';
+import { startKimiServer } from './serverRuntime.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnPort,
+  InTurnUnavailableReason,
+} from '../../../../shared/chatInTurnContracts.ts';
 import { KIMI_MODELS } from './profile.ts';
 import { inspectKimiRuntimeHost } from './runtimePreflight.ts';
 import {
@@ -87,6 +95,9 @@ interface PermissionAnswer {
   selected?: unknown[];
   allow?: unknown;
   remember?: unknown;
+  comment?: string;
+  text?: string;
+  rawAnswers?: Array<{ selected?: string[]; text?: string }>;
 }
 
 // Запись MCP-сервера сессии в том виде, в котором её передаёт чат.
@@ -114,6 +125,7 @@ interface KimiRuntimeDeps {
   preflight?: typeof inspectKimiRuntimeHost;
   stopUnit?: typeof stopKimiUnit;
   assertVersion?: typeof assertPinnedVersion;
+  startServer?: typeof startKimiServer;
 }
 const MAX_REPLY_BYTES = 8 * 1024 * 1024;
 const MAX_STATUS_BYTES = 64 * 1024;
@@ -356,6 +368,10 @@ export async function runContainedKimi({
   onProgress,
   onPermission,
   onSessionCreated,
+  onInTurnReady,
+  onInTurnAvailability,
+  onAssistantMessage,
+  transport = 'acp',
   chatKey,
   mcpServers = [],
   workTools,
@@ -381,6 +397,10 @@ export async function runContainedKimi({
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onPermission?: (ask: Record<string, unknown>) => Promise<PermissionAnswer | null | undefined>;
   onSessionCreated?: (sessionId: string) => unknown;
+  onInTurnReady?: (port: InTurnPort) => void;
+  onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+  onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
+  transport?: 'acp' | 'server';
   chatKey?: string;
   mcpServers?: readonly KimiMcpServerSpec[];
   workTools?: { descriptors?: unknown } | null;
@@ -437,6 +457,7 @@ export async function runContainedKimi({
   let runDir = '';
   let stagingParent = '';
   let egressSocketPath = '';
+  let controlDir = '';
   let proxy: ReturnType<typeof createKimiEgressProxy> | null = null;
   if (launchMode === 'contained') {
     const runtimeBase = path.resolve(config.kimiRuntimeHome);
@@ -453,12 +474,14 @@ export async function runContainedKimi({
     runDir = path.join(brokerHome, 'r', runId);
     const egressDir = runDir;
     stagingParent = path.join(runDir, 'a');
-    await Promise.all([runtimeHome, brokerHome, egressDir, stagingParent]
+    controlDir = path.join(runDir, 'c');
+    await Promise.all([runtimeHome, brokerHome, egressDir, stagingParent, controlDir]
       .map((dir) => fs.mkdir(dir, { recursive: true, mode: 0o700 })));
     egressSocketPath = path.join(egressDir, KIMI_EGRESS_SOCKET_FILE);
     proxy = makeProxy({ socketPath: egressSocketPath });
   }
   let staged: Awaited<ReturnType<typeof stageKimiAttachments>> | null = null;
+  let hostWebHome: Awaited<ReturnType<typeof buildKimiHostWebHome>> | null = null;
   let child: ChildProcess | null = null;
   let launch: KimiLaunch | null = null;
   let stderrTail = '';
@@ -542,8 +565,31 @@ export async function runContainedKimi({
       // extraDirs намеренно не передаются: у `kimi acp` нет --add-dir, а у ACP нет
       // additionalDirs. Доступ за пределами cwd закрывает permission-система Kimi.
       launch = await buildHost({ config, cwd, env });
+
+      if (transport === 'server') {
+        hostWebHome = await buildKimiHostWebHome({
+          kimiHome: config.kimiHome,
+          runtimeHome: config.kimiRuntimeHome,
+          mcpServers: sessionMcpServers,
+        });
+      }
     } else {
       const safeExtraDirs = extraDirs.filter((dir) => path.resolve(dir) !== path.resolve(config.chatsDir, 'attachments'));
+      let serverMcpFile = '';
+
+      if (transport === 'server' && sessionMcpServers.length) {
+        serverMcpFile = path.join(runDir, 'mcp.json');
+
+        const mcpConfig = Object.fromEntries(sessionMcpServers
+          .filter((entry) => typeof entry.name === 'string' && typeof entry.command === 'string')
+          .map((entry) => [entry.name, {
+            command: entry.command,
+            args: Array.isArray(entry.args) ? entry.args : [],
+          }]));
+
+        await fs.writeFile(serverMcpFile, JSON.stringify({ mcpServers: mcpConfig }), { mode: 0o600 });
+      }
+
       launch = await buildLaunch({
         config: { ...config, kimiRuntimeHome: runtimeHome, kimiRuntimeBroker: brokerHome },
         cwd,
@@ -551,6 +597,8 @@ export async function runContainedKimi({
         attachmentDir: staged?.stagingDir,
         egressSocketPath,
         workMcp: containedWorkMcp,
+        ...(transport === 'server' ? { serverControlDir: controlDir } : {}),
+        ...(serverMcpFile ? { serverMcpFile } : {}),
         unit: `cockpit-kimi-${runId}.service`,
       });
     }
@@ -564,6 +612,137 @@ export async function runContainedKimi({
       log?.info?.({
         paths: launch.maskedWorkspacePaths,
       }, 'Kimi runtime: control state внутри доверенных каталогов замаскирован');
+    }
+    if (transport === 'server') {
+      const result = await runKimiServerTurn({
+        bin: config.kimiBin,
+        home: launchMode === 'host' ? hostWebHome?.home || config.kimiHome : runtimeHome,
+        cwd: launch.cwdReal,
+        env: launchMode === 'host' ? launch.env : kimiSystemdClientEnv(),
+        model,
+        effort,
+        permissionMode: permissionMode === 'yolo' ? 'yolo' : 'manual',
+        planMode: permissionMode === 'plan',
+        message: staged ? replaceAttachmentPaths(message, staged, attachmentPaths) : String(message || ''),
+        sessionId,
+        signal,
+        onStep,
+        onProgress,
+        onSessionCreated: async (id) => {
+          await onSessionCreated?.(id);
+        },
+        onInTurnReady,
+        onInTurnAvailability,
+        onAssistantMessage,
+        onApproval: async (approval, respond) => {
+          const tool = String(approval.tool_name || approval.tool || 'Действие агента');
+          const answer = await onPermission?.({
+            tool,
+            input: {
+              command: String(approval.tool_input_display || approval.command || ''),
+              description: String(approval.description || approval.tool_input_display || ''),
+              kind: String(approval.kind || approval.action || ''),
+            },
+            acceptsComment: true,
+            canRemember: true,
+            raw: approval,
+            signal,
+          });
+
+          await respond({
+            decision: answer?.allow === true ? 'approved' : 'rejected',
+            ...(answer?.remember === true ? { scope: 'session' } : {}),
+            ...(typeof answer?.comment === 'string' ? { feedback: answer.comment } : {}),
+            ...(typeof answer?.choice === 'string' && answer.choice
+              ? { selectedLabel: answer.choice } : {}),
+          });
+        },
+        onQuestion: async (question, respond) => {
+          const rawQuestions = Array.isArray(question.questions) ? question.questions : [];
+          const questions = rawQuestions.map((entry, index) => {
+            const item = entry as Record<string, unknown>;
+            const options = Array.isArray(item.options) ? item.options : [];
+
+            return {
+              key: String(item.id || `q_${index}`),
+              header: String(item.header || item.title || `Вопрос ${index + 1}`),
+              question: String(item.question || item.text || ''),
+              options,
+              multiSelect: item.multi_select === true || item.multiSelect === true,
+              allowFreeText: true,
+            };
+          });
+          const answer = await onPermission?.({
+            tool: 'Вопрос агента',
+            isQuestion: true,
+            questions,
+            prompt: String(question.prompt || question.text || ''),
+            source: 'Kimi',
+            acceptsText: true,
+            raw: question,
+            signal,
+          });
+          const answers: Record<string, unknown> = {};
+
+          for (let index = 0; index < questions.length; index += 1) {
+            const current = questions[index];
+
+            if (!current) {
+              continue;
+            }
+
+            const questionAnswer = answer?.rawAnswers?.[index];
+            const selected = Array.isArray(questionAnswer?.selected) ? questionAnswer.selected : [];
+            const ownText = String(questionAnswer?.text || '').trim();
+            const options = current.options as Array<{ id?: unknown; label?: unknown }>;
+            const selectedIds = selected.map((label) => String(
+              options.find((option) => option.label === label)?.id || label,
+            ));
+            const key = current.key;
+
+            if (selectedIds.length && ownText) {
+              answers[key] = {
+                kind: 'multi_with_other',
+                option_ids: selectedIds,
+                other_text: ownText,
+              };
+            } else if (ownText) {
+              answers[key] = { kind: 'other', text: ownText };
+            } else if (selectedIds.length > 1 || current.multiSelect) {
+              answers[key] = selectedIds.length
+                ? { kind: 'multi', option_ids: selectedIds }
+                : { kind: 'skipped' };
+            } else {
+              answers[key] = selectedIds.length
+                ? { kind: 'single', option_id: selectedIds[0] }
+                : { kind: 'skipped' };
+            }
+          }
+
+          await respond({ answers, method: 'click' });
+        },
+        startServer: launchMode === 'contained'
+          ? (input) => (deps.startServer || startKimiServer)({
+            ...input,
+            launch: {
+              command: launch!.command,
+              args: launch!.args,
+              cwd: launch!.cwdReal,
+              env: kimiSystemdClientEnv(),
+            },
+            socketPath: path.join(controlDir, 's'),
+          })
+          : deps.startServer,
+        log,
+      });
+
+      return {
+        ...result,
+        cost: null,
+        contextCache: contextCacheStatus('unavailable'),
+        emptyRun: !result.reply && result.steps.length === 0,
+        retryState: 'post_prompt',
+      };
     }
     child = spawnProcess(launch.command, launch.args, {
       cwd: launch.cwdReal,
@@ -839,12 +1018,16 @@ export async function runContainedKimi({
     if (error.stopped) error.steps = stepSink.steps;
     throw error;
   } finally {
+    if (transport === 'server' && launch?.unit) {
+      await stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin });
+    }
     if (child && !child.killed && child.exitCode === null) {
       if (launch?.unit) await stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin });
       child.kill('SIGTERM');
     }
     await proxy?.close().catch(() => {});
     await staged?.cleanup?.().catch(() => {});
+    await hostWebHome?.cleanup().catch(() => {});
     if (runDir) await fs.rm(runDir, { recursive: true, force: true }).catch(() => {});
   }
 }

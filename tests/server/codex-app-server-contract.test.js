@@ -237,7 +237,6 @@ test('Codex run использует app-server и не теряет rich events
     assert.deepEqual(turn.params.sandboxPolicy, {
       type: 'workspaceWrite',
       writableRoots: [f.dir, path.join(f.dir, 'shared')],
-      readOnlyAccess: { type: 'fullAccess' },
       networkAccess: true,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,

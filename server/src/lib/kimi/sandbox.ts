@@ -101,13 +101,27 @@ umask 077
 /usr/bin/setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
   /usr/bin/socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/cockpit-egress/${KIMI_EGRESS_SOCKET_FILE} &
 bridge=$!
+api_bridge=
+if [ "$#" -gt 0 ] && [ "$1" = web ]; then
+  /usr/bin/setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
+    /usr/bin/socat UNIX-LISTEN:/run/cockpit-control/s,unlink-early,fork \
+    TCP-CONNECT:127.0.0.1:58627 &
+  api_bridge=$!
+fi
 cleanup() {
   kill "$bridge" 2>/dev/null || true
   wait "$bridge" 2>/dev/null || true
+  if [ -n "$api_bridge" ]; then
+    kill "$api_bridge" 2>/dev/null || true
+    wait "$api_bridge" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT HUP INT TERM
+if [ "$#" -eq 0 ]; then
+  set -- acp
+fi
 /usr/bin/setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
-  /opt/kimi/bin/kimi acp
+  /opt/kimi/bin/kimi "$@"
 `;
 
 function isWithin(root: string, candidate: string): boolean {
@@ -313,6 +327,8 @@ export async function buildKimiSandboxLaunch({
   attachmentDir,
   egressSocketPath,
   workMcp = null,
+  serverControlDir,
+  serverMcpFile,
   unit = `cockpit-kimi-${randomUUID()}.service`,
 }: {
   config: KimiSandboxConfig;
@@ -321,6 +337,8 @@ export async function buildKimiSandboxLaunch({
   attachmentDir?: string;
   egressSocketPath: string;
   workMcp?: { socketPath: string; scriptPath: string } | null;
+  serverControlDir?: string;
+  serverMcpFile?: string;
   unit?: string;
 }) {
   await fs.mkdir(config.kimiRuntimeHome, { recursive: true, mode: 0o700 });
@@ -399,8 +417,19 @@ export async function buildKimiSandboxLaunch({
     addMount(bwrap, '--ro-bind', path.join(brokerHome, 'empty', hidden), `/kimi-home/${hidden}`, madeDirs);
   }
   addMount(bwrap, '--ro-bind', home.emptyFile, '/kimi-home/SYSTEM.md', madeDirs);
-  addMount(bwrap, '--ro-bind', home.emptyMcp, '/kimi-home/mcp.json', madeDirs);
+
+  const mcpSource = serverMcpFile
+    ? await fs.realpath(serverMcpFile)
+    : home.emptyMcp;
+
+  addMount(bwrap, '--ro-bind', mcpSource, '/kimi-home/mcp.json', madeDirs);
   addMount(bwrap, '--ro-bind', egressDir, '/run/cockpit-egress', madeDirs);
+
+  if (serverControlDir) {
+    const controlReal = await canonicalDirectory(serverControlDir, 'kimi_server_control');
+
+    addMount(bwrap, '--bind', controlReal, '/run/cockpit-control', madeDirs);
+  }
   if (workMcp) {
     // Только каталог одного per-scope UDS и неизменяемый bridge; сетевой egress
     // contained Kimi этим не расширяется.
@@ -488,6 +517,10 @@ export async function buildKimiSandboxLaunch({
     bwrap.push('--dir', '/attachments');
   }
   bwrap.push('--chdir', cwdReal, '/opt/cockpit/run-kimi');
+
+  if (serverControlDir) {
+    bwrap.push('web', '--port', '58627', '--host', '127.0.0.1', '--no-open');
+  }
 
   const systemd = [
     '--user', '--pipe', '--wait', '--collect', '--service-type=exec', `--unit=${unit}`,

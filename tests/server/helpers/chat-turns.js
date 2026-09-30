@@ -116,6 +116,7 @@ export function controlledExecutor({ id = 'test-provider' } = {}) {
  */
 export async function chatAppFixture(t, {
   executor,
+  prefs: givenPrefs = null,
   root: givenRoot = '',
   onEvent = null,
   withSsePlugin = false,
@@ -183,6 +184,7 @@ export async function chatAppFixture(t, {
           providerSettings: {},
           chatAutoCompactWindow: 0,
           speech: {},
+          ...(givenPrefs || {}),
         };
       },
     },

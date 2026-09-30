@@ -268,6 +268,28 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
   const plainPairs = plainLaunch.args.slice(0, -1).map((value, index) => [value, plainLaunch.args[index + 1]]);
   assert.ok(plainPairs.some(([a, b]) => a === path.join(broker, 'empty', 'agents') && b === path.join(workspace, '.kimi-code')));
   assert.equal(plainPairs.some(([a]) => a === maskDir), false);
+  const webControl = path.join(egressDir, 'c');
+  const webMcp = path.join(egressDir, 'mcp.json');
+  await fs.mkdir(webControl, { recursive: true });
+  await fs.writeFile(webMcp, '{"mcpServers":{}}', { mode: 0o600 });
+  const webLaunch = await buildKimiSandboxLaunch({
+    config,
+    cwd: workspace,
+    egressSocketPath: proxy.socketPath,
+    serverControlDir: webControl,
+    serverMcpFile: webMcp,
+    unit: 'cockpit-kimi-web.service',
+  });
+  assert.ok(webLaunch.args.some((value, index) => value === '--bind'
+    && webLaunch.args[index + 1] === webControl
+    && webLaunch.args[index + 2] === '/run/cockpit-control'));
+  assert.ok(webLaunch.args.some((value, index) => value === '--ro-bind'
+    && webLaunch.args[index + 1] === webMcp
+    && webLaunch.args[index + 2] === '/kimi-home/mcp.json'));
+  assert.deepEqual(webLaunch.args.slice(-6), [
+    'web', '--port', '58627', '--host', '127.0.0.1', '--no-open',
+  ]);
+  assert.match(wrapper, /UNIX-LISTEN:\/run\/cockpit-control\/s/);
   // Доверенный предок cwd с .git становится projectRoot kimi: маска с local.toml
   // подменяет .kimi-code предка (проектный local.toml предка в sandbox не виден),
   // а собственный .kimi-code cwd прячется за общей пустой маской.

@@ -80,7 +80,7 @@ DEFAULT_SEVERITY = "blocking"
 # rewind-limit — не исход опубликованного маршрута, а доверенная остановка движка:
 # схема просила ещё один автоматический rewind, но этот же переход уже дважды не помог.
 # loop-ceiling — такая же доверенная остановка, но только у маршрута с `loop`:
-# кандидат прошёл все сторожа, а потолок кругов профиля исчерпан.
+# ведущий передаёт работу исполнителю, а потолок кругов профиля исчерпан.
 CURSOR_STOP_TARGETS = DECLARED_STOP_TARGETS | {"rewind-limit", "no-progress", "loop-ceiling"}
 HUMAN_RESUMABLE_STOP_TARGETS = {"human", "rewind-limit", "no-progress", "loop-ceiling"}
 # Режим «цикл» (поле маршрута `loop`): ведущий ставит задание и проверяет, исполнитель
@@ -789,7 +789,7 @@ def loop_report_name(round_no, visit):
 def loop_stage_decision(state, verdict):
     # Граница этапа признаётся только по журналу: ведущий видел свежий результат
     # worker, закрыл ровно то, что сам передавал последним, и не выдаёт старые id за
-    # новый этап. Иначе вердикт остаётся обычным возвратом под прежними сторожами.
+    # новый этап. Иначе вердикт остаётся ремонтом того же этапа и расходует круг.
     stage = verdict.get("stage") if isinstance(verdict, dict) else None
     if stage is None:
         return False, None
@@ -812,47 +812,6 @@ def loop_next_stage(previous_stage, accepted):
     if accepted:
         return previous_stage + 1
     return max(previous_stage, 1)
-
-
-def loop_series_verdicts(events, loop):
-    # Серия сторожей дуги lead → worker. Начинается после настоящего решения человека
-    # (goto без actor, rejected ворот) или с признанной границы этапа. Машинный возврат
-    # (`actor`) серию НЕ обнуляет: продолжение после exhausted — не решение человека,
-    # и сброс выдал бы сторожам чистый лист без нового факта.
-    verdicts = []
-    for event in events:
-        kind = event.get("kind")
-        action = event.get("action")
-        if kind == "human-rewind" and "actor" not in event:
-            verdicts = []
-            continue
-        if (
-            kind == "commit"
-            and event.get("outcome") == "rejected"
-            and isinstance(action, dict)
-            and "rewind" in action
-        ):
-            verdicts = []
-            continue
-        if is_loop_transfer(event, loop):
-            verdict = event.get("verdict")
-            validate_verdict(verdict, event.get("outcome"))
-            if event["loop"]["stageAccepted"]:
-                verdicts = [verdict]
-            else:
-                verdicts.append(verdict)
-    return verdicts
-
-
-def loop_guard_verdict(verdict):
-    # На дуге цикла build и tests возвращают работу одному исполнителю: для сравнения
-    # наборов это один класс, иначе смена слова остановила бы цикл «сменой владельца».
-    # Сохранённый вердикт не меняется — нормализуется только копия для сторожей.
-    if not isinstance(verdict, dict) or verdict.get("owner") != "tests":
-        return verdict
-    normalized = dict(verdict)
-    normalized["owner"] = "build"
-    return normalized
 
 
 def validate_loop_snapshot(value, verdict):
@@ -1548,46 +1507,40 @@ elif OP == "prepare-commit":
     loop_state = None
     stage_accepted = False
     stage_rejection = None
-    guard_verdict = verdict
     if loop_transfer:
         if loop_max_rounds < 1:
             fail(2)
         loop_events = ledger_events(results_dir)
         loop_state = loop_ledger_state(loop_events, loop)
         stage_accepted, stage_rejection = loop_stage_decision(loop_state, verdict)
-        guard_verdict = loop_guard_verdict(verdict)
     if action_mode == "rewind":
-        if loop_transfer:
-            # Признанная граница открывает новую серию: кандидат становится её первым
-            # вердиктом, прежний этап сторожам больше не предъявляется.
-            rewind_verdicts = []
-            if not stage_accepted:
-                rewind_verdicts = [
-                    loop_guard_verdict(item)
-                    for item in loop_series_verdicts(loop_events, loop)
-                ]
-        else:
+        # В цикле ведущий оценивает прогресс по результату ремонта: прежний id может
+        # означать уже суженный остаток требования. Сравнение id, расширение набора
+        # и лимит серии не подменяют это решение. Все передачи расходуют общий потолок,
+        # который не сбрасывают ни новые id, ни граница этапа, ни решение человека.
+        rewind_verdicts = []
+        if not loop_transfer:
             rewind_verdicts = automatic_rewind_verdicts(
                 results_dir,
                 node,
                 action["rewind"],
             )
         rewind_history = [verdict_snapshot(item) for item in rewind_verdicts]
-        candidate_snapshot = verdict_snapshot(guard_verdict)
+        candidate_snapshot = verdict_snapshot(verdict)
         progress_reason = None
-        if no_progress_limit:
+        if not loop_transfer and no_progress_limit:
             progress_reason = scope_expansion_reason(
                 rewind_verdicts,
-                guard_verdict,
+                verdict,
                 runtime.get("taskId"),
                 action["rewind"],
             )
-        if progress_reason is None:
-            progress_reason = no_progress_reason(
-                rewind_history,
-                candidate_snapshot,
-                no_progress_limit,
-            )
+            if progress_reason is None:
+                progress_reason = no_progress_reason(
+                    rewind_history,
+                    candidate_snapshot,
+                    no_progress_limit,
+                )
         if progress_reason is not None:
             event_kind = "no-progress"
             event_reason = (
@@ -1605,7 +1558,7 @@ elif OP == "prepare-commit":
                     "sequence": sequence,
                 },
             }
-        elif rewind_limit and len(rewind_history) >= rewind_limit:
+        elif not loop_transfer and rewind_limit and len(rewind_history) >= rewind_limit:
             event_kind = "rewind-limit"
             event_reason = (
                 f"автоматический лимит возвратов исчерпан: {node} → "
@@ -1623,8 +1576,8 @@ elif OP == "prepare-commit":
                 },
             }
         elif loop_transfer and loop_state["rounds"] >= loop_max_rounds:
-            # Потолок кругов профиля — последний предохранитель цикла вместо общего
-            # бюджета 10: кандидат прошёл все сторожа, исполнить его не на что.
+            # Потолок кругов профиля ограничивает все передачи цикла вместо сторожей
+            # по наборам id и общих пределов 6/10: ещё один ремонт требует бюджета.
             event_kind = "loop-ceiling"
             event_reason = (
                 f"потолок кругов цикла исчерпан: {loop_state['rounds']} из "

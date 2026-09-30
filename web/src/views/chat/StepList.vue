@@ -137,6 +137,7 @@ import { UiDisclosureButton } from '../../ui';
 const props = defineProps({
   steps: { type: Array, default: () => [] },
   live: { type: Boolean, default: false }, // ход идёт прямо сейчас
+  displayedAssistantIds: { type: Array, default: () => [] },
   // Подпись модели в шаге «старт»: id → имя из каталога. Реестр знает чат, а не лента,
   // поэтому функция приходит снаружи; без неё показывается id как есть.
   modelLabel: { type: Function, default: (id) => id },
@@ -152,7 +153,9 @@ const baseId = `chat-steps-${useId().replaceAll(':', '')}`;
 const rows = computed(() => {
   const out = [];
   const byId = new Map();
+  const displayed = new Set(props.displayedAssistantIds);
   for (const s of props.steps || []) {
+    if (s.k === 'text' && s.id && displayed.has(s.id)) continue;
     if (s.k === 'res') {
       const tool = byId.get(s.id);
       if (tool) { tool.res = s; continue; }

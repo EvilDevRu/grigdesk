@@ -300,9 +300,14 @@ export default {
   statusPage: 'https://status.moonshot.cn',
   securityProfile: KIMI_SECURITY_PROFILE,
   retryContract: KIMI_RETRY_CONTRACT,
+  inTurnInput: {
+    protocol: 1,
+    text: true,
+    confirmation: 'forwarded',
+  },
   compaction: { kind: 'native', message: '/compact' },
-  // В host-режиме ACP не умеет принять extraDirs; contained объявляет их через
-  // server-owned local.toml и монтирует в sandbox. UI получает фактический режим.
+  // Host-режим не принимает extraDirs; contained объявляет их через server-owned
+  // local.toml и монтирует в sandbox. UI получает фактический режим.
   workdir(config: KimiConfig) {
     return { switch: 'reseed', roots: config.kimiLaunchMode === 'host' ? 'single' : 'multi' };
   },
@@ -450,7 +455,9 @@ export default {
     return classifyKimiUsageResponse(outcome);
   },
 
-  run(options: Parameters<typeof runContainedKimi>[0]) { return runContainedKimi(options); },
+  run(options: Parameters<typeof runContainedKimi>[0]) {
+    return runContainedKimi({ ...options, transport: 'server' });
+  },
 
   // updateCmd и latestVersion намеренно отсутствуют: версия запинена в contract gate
   // (runtime.js REQUIRED_KIMI_VERSION), самовольное обновление сломает запуск. Новая

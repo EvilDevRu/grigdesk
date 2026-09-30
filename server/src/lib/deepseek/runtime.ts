@@ -79,7 +79,7 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal
   });
 }
 
-async function nearestProjectRoot(cwd: string): Promise<string> {
+export async function nearestProjectRoot(cwd: string): Promise<string> {
   let current = cwd;
   while (true) {
     try {
@@ -101,7 +101,7 @@ function containsRealPath(parent: string, candidate: string): boolean {
   return !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-async function prepareDeepSeekLaunch({
+export async function prepareDeepSeekLaunch({
   config,
   cwd,
   workspaceRoot,
@@ -110,6 +110,8 @@ async function prepareDeepSeekLaunch({
   approval,
   projectRoot,
   providerSettings,
+  transport,
+  mcpServers,
 }: {
   config: DeepSeekConfig;
   cwd: string;
@@ -119,6 +121,8 @@ async function prepareDeepSeekLaunch({
   approval: 'ask' | 'never';
   projectRoot: string;
   providerSettings?: DeepSeekProviderSettings | null;
+  transport?: 'acp' | 'web';
+  mcpServers?: readonly DeepSeekMcpServer[];
 }) {
   const dshHome = chatHomeFor(config.deepseekRuntimeHome, chatKey);
   const chatDir = path.dirname(dshHome);
@@ -130,6 +134,8 @@ async function prepareDeepSeekLaunch({
     workspaceRoot,
     mode,
     approval,
+    transport,
+    mcpServers,
     hooks: {
       bashToolName: DEEPSEEK_BASH_TOOL,
       ssh: providerSettings?.blockDirectSsh !== false,
@@ -150,7 +156,7 @@ function modeFor(value: unknown): 'read-only' | 'workspace-write' {
   throw new Error(`DeepSeek: неизвестный режим ${String(value)}`);
 }
 
-function validateMcpServers(value: readonly DeepSeekMcpServer[]): DeepSeekMcpServer[] {
+export function validateMcpServers(value: readonly DeepSeekMcpServer[]): DeepSeekMcpServer[] {
   if (!Array.isArray(value)) throw new TypeError('DeepSeek mcpServers должен быть массивом');
   const entries = value as readonly DeepSeekMcpServer[];
   return entries.map((entry, index) => {

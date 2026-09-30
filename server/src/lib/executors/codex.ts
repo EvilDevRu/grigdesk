@@ -29,6 +29,12 @@ import {
 
 import type { ChildProcess } from 'node:child_process';
 import type { ChatStep, StepSink } from '../chat/streamSteps.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnPort,
+  InTurnReceiptEvent,
+  InTurnUnavailableReason,
+} from '../../../../shared/chatInTurnContracts.ts';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 const SCOPED_WORKSPACE_CACHE_MS = 60_000;
@@ -203,6 +209,13 @@ interface CodexTurn {
   cachedInputTokens: number;
   turnId: string | null;
   workCalls: Map<string, { signature: string; outcome: Promise<Record<string, unknown>> }>;
+  // Канал уточнений: порт отдаётся, когда провайдер назвал id активного хода.
+  onInTurnReady?: (port: InTurnPort) => void;
+  onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+  onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+  onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
+  inTurnAnnounced: boolean;
+  assistantRevision: number;
   settled: boolean;
   abortRequested: boolean;
   interruptSent: boolean;
@@ -1231,11 +1244,22 @@ export function openCodexSession({
   }
 
   /** Состояние ОДНОГО хода: лента, счётчики и итог принадлежат ходу, не сессии. */
-  function createTurn({ message, onStep, onProgress, onPermission }: {
+  /**
+   * Состояние одного хода вместе с каналом уточнений: лента, счётчики, ожидание порта и
+   * видимые блоки ответа принадлежат ходу, а не сессии.
+   */
+  function createTurn({
+    message, onStep, onProgress, onPermission,
+    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+  }: {
     message?: unknown;
     onStep?: (step: ChatStep) => void;
     onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
     onPermission?: (ask: Record<string, unknown>) => unknown;
+    onInTurnReady?: (port: InTurnPort) => void;
+    onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+    onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+    onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
   }): CodexTurn {
     const stepSink = createStepSink(onStep);
     return {
@@ -1254,6 +1278,12 @@ export function openCodexSession({
       cachedInputTokens: 0,
       turnId: null,
       workCalls: new Map(),
+      ...(onInTurnReady ? { onInTurnReady } : {}),
+      ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
+      ...(onInTurnReceipt ? { onInTurnReceipt } : {}),
+      ...(onAssistantMessage ? { onAssistantMessage } : {}),
+      inTurnAnnounced: false,
+      assistantRevision: 0,
       settled: false,
       abortRequested: false,
       interruptSent: false,
@@ -1265,8 +1295,15 @@ export function openCodexSession({
     };
   }
 
+  /**
+   * Ход перестал быть активным: снимаем таймер прерывания, закрываем ожидающие спросы и
+   * объявляем канал уточнений закрытым, чтобы поздний текст не прилип к следующему ходу.
+   */
   function closeTurn(current: CodexTurn) {
     clearTimeout(current.interruptTimer ?? undefined);
+    // Ход закрыт — канал уточнений больше не принимает: позднее сообщение не должно
+    // выглядеть как часть следующего хода.
+    current.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
     for (const [requestId, pendingElicitation] of elicitationControllers) {
       if (pendingElicitation.current !== current) continue;
       elicitationControllers.delete(requestId);
@@ -1376,13 +1413,108 @@ export function openCodexSession({
     } catch { /* прогресс не должен ронять ход */ }
   }
 
+  /**
+   * Дельта видимого сообщения: копим текст по id и отдаём его наружу как незавершённый
+   * блок. Полный текст идёт в событие, а не дельта, — окно не собирает строку само.
+   */
   function appendMessage(current: CodexTurn, params: CodexNotificationParams) {
     const id = String(params?.itemId || '');
+
     if (!id || typeof params?.delta !== 'string') return;
-    current.messageDeltas.set(
-      id,
-      `${current.messageDeltas.get(id) || ''}${params.delta}`.slice(0, 100_000),
-    );
+
+    const text = `${current.messageDeltas.get(id) || ''}${params.delta}`.slice(0, 100_000);
+
+    current.messageDeltas.set(id, text);
+    current.assistantRevision += 1;
+    void current.onAssistantMessage?.({
+      assistantMessageId: id,
+      text,
+      sourceRevision: current.assistantRevision,
+      complete: false,
+    });
+  }
+
+  /**
+   * Порт уточнений конкретного хода. `turn/steer` адресуется активному provider-ходу:
+   * `expectedTurnId` защищает от доставки в следующий turn, а RPC-ответ даёт только
+   * `forwarded` — «прочитано моделью» транспорт не подтверждает.
+   */
+  function inTurnPortFor(current: CodexTurn): InTurnPort {
+    return {
+      /**
+       * Передача уточнения в активный ход. Проверка ожидаемого turn id — часть протокола:
+       * без неё app-server принял бы текст в другой ход того же thread.
+       */
+      async deliver({ messageId, text }: { messageId: string; text: string }) {
+        if (!threadId || !current.turnId || current.settled) {
+          return {
+            ok: false,
+            code: 'turn_changed',
+            message: 'Активный ход уже завершился.',
+          };
+        }
+
+        try {
+          await request('turn/steer', {
+            threadId,
+            expectedTurnId: current.turnId,
+            clientUserMessageId: messageId,
+            input: [
+              {
+                type: 'text',
+                text,
+                text_elements: [],
+              },
+              // Живой turn/steer трактует голый вопрос как новую цель и может
+              // завершить ход, бросив исходную работу. Подсказка принадлежит
+              // адаптеру; человек отправляет только свой вопрос.
+              {
+                type: 'text',
+                text: 'Ответь на уточнение отдельным сообщением до итогового ответа. '
+                  + 'После ответа самостоятельно вернись к ранее поставленной задаче и закончи её.',
+                text_elements: [],
+              },
+            ],
+          }, current);
+
+          return { ok: true, state: 'forwarded' };
+        } catch (error) {
+          const code = (error as { code?: unknown })?.code;
+
+          // Отказ JSON-RPC детерминирован; обрыв транспорта — неопределённый исход,
+          // повторять его автоматически нельзя.
+          if (code !== undefined) {
+            return {
+              ok: false,
+              code: String(code),
+              message: (error as Error).message,
+            };
+          }
+
+          return {
+            ok: false,
+            code: 'transport_lost',
+            message: (error as Error).message,
+            uncertain: true,
+          };
+        }
+      },
+      close() {},
+    };
+  }
+
+  /**
+   * Готовность канала объявляется ровно один раз — когда провайдер назвал id активного
+   * хода. До этого сообщение некуда адресовать, и окно честно видит `not_ready`.
+   */
+  function announceInTurn(current: CodexTurn) {
+    if (!current.turnId || current.inTurnAnnounced) {
+      return;
+    }
+
+    current.inTurnAnnounced = true;
+    current.onInTurnAvailability?.({ available: true });
+    current.onInTurnReady?.(inTurnPortFor(current));
   }
 
   function maybeInterrupt(current: CodexTurn | null) {
@@ -1471,6 +1603,7 @@ export function openCodexSession({
 
     if (method === 'turn/started') {
       current.turnId = params.turn?.id || current.turnId;
+      announceInTurn(current);
       maybeInterrupt(current);
     } else if (method === 'item/agentMessage/delta') {
       appendMessage(current, params);
@@ -1485,6 +1618,13 @@ export function openCodexSession({
         if (text.trim()) current.reply = text;
       } else if (text.trim()) {
         current.lastCommentary = text;
+        current.assistantRevision += 1;
+        void current.onAssistantMessage?.({
+          assistantMessageId: id,
+          text,
+          sourceRevision: current.assistantRevision,
+          complete: true,
+        });
       }
     } else if (method === 'thread/tokenUsage/updated') {
       rememberUsage(current, params);
@@ -1805,6 +1945,12 @@ export function openCodexSession({
   });
 
   const ready = (async () => {
+    // У новых app-server поле readOnlyAccess снято. Для строгих readable roots
+    // нельзя молча расширить чтение до всего хоста: такой запуск закрываем заранее.
+    if (workspaceAccess && !await codexSupportsRestrictedWorkspace(config.codexBin)) {
+      throw new Error('Установленный Codex не поддерживает ограниченные readable roots.');
+    }
+
     await request('initialize', {
       clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
       // `experimentalApi` открывает `runtimeWorkspaceRoots`: без него app-server
@@ -1873,19 +2019,39 @@ export function openCodexSession({
     get alive() { return !exited; },
     get busy() { return !!turn; },
 
-    async send({ message, onStep, onProgress, onPermission, onSessionCreated }: {
+    /**
+     * Заказанный ход: пишем turn/start и ждём его завершения, а параллельно отдаём наружу
+     * порт уточнений — с этого момента в активный ход можно передать текст.
+     */
+    async send({
+      message, onStep, onProgress, onPermission, onSessionCreated,
+      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+    }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
       onPermission?: (ask: Record<string, unknown>) => unknown;
       onSessionCreated?: (sessionId: string) => unknown;
+      onInTurnReady?: (port: InTurnPort) => void;
+      onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+      onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+      onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
     }) {
       if (exited) throw new Error(exitReason || 'Сессия Codex закрыта.');
       if (turn) throw new Error('В этой сессии уже идёт ход.');
 
       // Ход объявляется ДО ожидания handshake: «стоп» может прийти, пока app-server
       // ещё поднимается, и прерывать тогда будет нечего — запрос повис бы до таймаута.
-      const current = createTurn({ message, onStep, onProgress, onPermission });
+      const current = createTurn({
+        message,
+        onStep,
+        onProgress,
+        onPermission,
+        ...(onInTurnReady ? { onInTurnReady } : {}),
+        ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
+        ...(onInTurnReceipt ? { onInTurnReceipt } : {}),
+        ...(onAssistantMessage ? { onAssistantMessage } : {}),
+      });
       turn = current;
       const result = new Promise<unknown>((resolve, reject) => {
         current.resolve = resolve;
@@ -1919,11 +2085,11 @@ export function openCodexSession({
           sandboxPolicy: {
             type: 'workspaceWrite',
             writableRoots,
-            readOnlyAccess: workspaceAccess ? {
+            ...(workspaceAccess ? { readOnlyAccess: {
               type: 'restricted',
               includePlatformDefaults: true,
               readableRoots: roots,
-            } : { type: 'fullAccess' },
+            } } : {}),
             networkAccess: workspaceAccess?.networkAccess ?? true,
             excludeTmpdirEnvVar: workspaceAccess?.excludeTmpdirEnvVar ?? false,
             excludeSlashTmp: workspaceAccess?.excludeSlashTmp ?? false,
@@ -1933,6 +2099,7 @@ export function openCodexSession({
           summary: 'detailed',
         }, current) as { turn?: { id?: string } } | null;
         current.turnId = started?.turn?.id || current.turnId;
+        announceInTurn(current);
         maybeInterrupt(current);
       } catch (error) {
         finishTurnError(current, error);
@@ -1964,6 +2131,7 @@ export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   workTools, workspaceAccess, onPermission, log, onSessionCreated,
+  onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
 }: {
   config: CodexConfig;
   env?: NodeJS.ProcessEnv;
@@ -1984,6 +2152,10 @@ export async function runCodexAppServer({
   onPermission?: (ask: Record<string, unknown>) => unknown;
   log?: CodexLog;
   onSessionCreated?: (sessionId: string) => unknown;
+  onInTurnReady?: (port: InTurnPort) => void;
+  onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+  onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+  onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
 }) {
   if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
@@ -1992,10 +2164,20 @@ export async function runCodexAppServer({
     tokenInfoReader, workTools, workspaceAccess, log,
   });
   const onAbort = () => { void session.interrupt(); };
+
   signal?.addEventListener('abort', onAbort, { once: true });
+
   try {
     return await session.send({
-      message, onStep, onProgress, onPermission, onSessionCreated,
+      message,
+      onStep,
+      onProgress,
+      onPermission,
+      onSessionCreated,
+      ...(onInTurnReady ? { onInTurnReady } : {}),
+      ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
+      ...(onInTurnReceipt ? { onInTurnReceipt } : {}),
+      ...(onAssistantMessage ? { onAssistantMessage } : {}),
     });
   } finally {
     signal?.removeEventListener('abort', onAbort);
@@ -2472,11 +2654,13 @@ export default {
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
     providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
     workTools, workspaceAccess, onPermission, log, onSessionCreated,
+    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
   }: Parameters<typeof runCodexAppServer>[0]) {
     return runCodexAppServer({
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
       providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools, workspaceAccess,
       onPermission, log, onSessionCreated,
+      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
     });
   },
 
@@ -2488,6 +2672,14 @@ export default {
    * отчитались бы без запроса, у него нет. Живая сессия всё равно нужна: она сохраняет
    * рабочее состояние процесса и позволяет разбудить агента сообщением от кокпита.
    */
+  // Канал ввода в активный ход: `turn/steer` установленного app-server. Живой сессии
+  // для него не требуется — разовый запуск держит тот же turn до своего финала.
+  inTurnInput: {
+    protocol: 1,
+    text: true,
+    confirmation: 'forwarded',
+  },
+
   session: {
     mode: 'persistent',
     unsolicited: false,

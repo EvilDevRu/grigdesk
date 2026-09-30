@@ -14,6 +14,8 @@ const CHAT_TITLE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/chat-title.js', import.meta.url),
 )).href;
 const CONTEXT_USAGE_URL = new URL('../../shared/chatContextUsage.ts', import.meta.url).href;
+const IN_TURN_CONTRACT_URL = new URL('../../shared/chatInTurnContracts.ts', import.meta.url).href;
+const IN_TURN_STORE_URL = new URL('../../web/src/stores/chatInTurn.ts', import.meta.url).href;
 
 const apiHarness = {};
 globalThis.__slashChatApi = apiHarness;
@@ -56,6 +58,9 @@ function patch(source) {
       "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
       `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,
     )
+    .replace("from '../../../shared/chatInTurnContracts.ts';",
+      `from '${IN_TURN_CONTRACT_URL}';`)
+    .replace("from './chatInTurn.ts';", `from '${IN_TURN_STORE_URL}';`)
     .replace(
       "import { chatVisibility } from '../shared/chat-visibility.js';",
       'const chatVisibility = { isVisible: () => false, register: () => ({ update() {}, dispose() {} }) };',

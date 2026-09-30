@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Режим «цикл»: ведущий ставит задание и проверяет, исполнитель делает. Проверяется
 # то, ради чего режим введён: этапы идут без человека, отказ исполнителя уходит
-# ведущему, застревание и потолок кругов останавливают честно, продолжение после
-# поднятого потолка списывает круг, а пара без loop-режима ведёт себя по-старому.
+# ведущему, повторные замечания доходят до исполнителя в пределах потолка кругов,
+# продолжение после поднятого потолка списывает круг; обычные маршруты не меняются.
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
@@ -252,23 +252,34 @@ assert_eq '' "$(find "$STATE_DIR" -maxdepth 1 -name "t${task}.report.md")" \
 [[ -f "$STATE_DIR/t${task}.report.r5.md" && -n "$report_mode" ]]
 assert_rc 0 "$?" "отчёт последнего круга записан по пути своего круга"
 
-# --- 2. Застревание внутри этапа — честная остановка no-progress ----------------------
+# --- 2. Прежнее замечание ремонтируется до потолка, включая пределы 6 и 10 -----------
 task=9102
 : >"$CALLS"
+PROFILE_LOOP_MAX_ROUNDS=11
 LOOP_ATTEMPT=$(begin_loop "$task")
-assert_rc 0 "$?" "попытка для застревания создана"
-cat >"$SCRIPT" <<'TXT'
-REVIEW|failed|build|x=Критерий не закрыт|
-BUILD|done|||
-REVIEW|failed|build|x=Критерий не закрыт|
-TXT
+assert_rc 0 "$?" "попытка для повторных замечаний создана"
+{
+  for round in {1..11}; do
+    printf 'REVIEW|failed|build|x=Остаток того же требования, проверка %s|\n' "$round"
+    printf 'BUILD|done|||\n'
+  done
+  printf 'REVIEW|failed|build|x=Требование всё ещё не принято|\n'
+} >"$SCRIPT"
 route_v2_dispatch_until_pause "$task" "$LOOP_ATTEMPT" 64 >/dev/null
-assert_rc 21 "$?" "повтор того же набора после ремонта останавливает цикл"
+assert_rc 21 "$?" "повторные замечания доходят до потолка цикла"
 cursor=$(attempt_stage_state_read_v2 "$task" "$LOOP_ATTEMPT")
-assert_eq no-progress "$(json_field "$cursor" stop)" "остановка названа no-progress"
+assert_eq loop-ceiling "$(json_field "$cursor" stop)" "останавливает потолок, а не совпадение id"
 event=$(latest_event "$task" "$LOOP_ATTEMPT")
-assert_eq 1 "$(json_field "$event" loop roundsBefore)" "снимок хранит число исполненных кругов"
-assert_eq 1 "$(json_field "$event" loop roundsAfter)" "остановленный кандидат круг не списывает"
+assert_eq 11 "$(json_field "$event" loop roundsBefore)" "исполнены все одиннадцать кругов"
+assert_eq 11 "$(json_field "$event" loop roundsAfter)" "остановленный кандидат круг не списывает"
+assert_eq 1 "$(json_field "$event" loop stage)" "незакрытое требование остаётся в прежнем этапе"
+assert_eq '' "$(cat "$SCRIPT")" "ведущий проверил результат каждого круга"
+assert_eq 23 "$(wc -l <"$CALLS")" "нет лишних запусков после исчерпания потолка"
+findings=$(attempt_stage_state_findings_v2 "$task" "$LOOP_ATTEMPT")
+assert_eq x "$(json_field "$findings" open 0 id)" "потолок не закрывает нерешённое замечание"
+assert_eq 'Требование всё ещё не принято' "$(json_field "$findings" open 0 summary)" \
+  "находка хранит последний результат проверки"
+unset PROFILE_LOOP_MAX_ROUNDS
 
 # --- 3. Потолок кругов и продолжение после его подъёма -------------------------------
 task=9103
@@ -390,5 +401,37 @@ FACTORY_LOOP_ROLE='' "$FACTORY_HOME/lib/stage-result.sh" --task 1 --stage REVIEW
   --stage-closed x --stage-summary y >/dev/null 2>"$TEST_ROOT/stage-flag.err"
 assert_rc 2 "$?" "stage-result не принимает границу этапа не у ведущего"
 assert_contains "$(cat "$TEST_ROOT/stage-flag.err")" 'ведущему' "отказ объясняет, кому доступна граница"
+
+# --- 9. Уточнение набора и возврат прежнего дефекта не подменяют решение ведущего ----
+task=9108
+: >"$CALLS"
+LOOP_ATTEMPT=$(begin_loop "$task")
+cat >"$SCRIPT" <<'TXT'
+REVIEW|failed|build|a=Первое требование|
+BUILD|done|||
+REVIEW|failed|build|a=Остаток;b=Первое уточнение|
+BUILD|failed|build|a=Частичный ремонт|
+REVIEW|failed|tests|a=Остаток;b=Первое уточнение;c=Второе уточнение|
+BUILD|done|||
+REVIEW|failed|build|a=Повторная проверка A|
+BUILD|done|||
+REVIEW|failed|build|b=Повторная проверка B|
+BUILD|done|||
+REVIEW|failed|build|a=Повторная проверка A|
+BUILD|done|||
+REVIEW|failed|build|b=Повторная проверка B|
+BUILD|done|||
+REVIEW|failed|build|a=Повторная проверка A|
+BUILD|done|||
+REVIEW|done|||
+TXT
+route_v2_dispatch_until_pause "$task" "$LOOP_ATTEMPT" 64 >/dev/null
+assert_rc 20 "$?" "ведущий довёл уточняемый ремонт до ворот приёмки"
+assert_eq '' "$(cat "$SCRIPT")" "все решения ведущего переданы исполнителю"
+state=$(attempt_stage_state_loop_state_v2 "$task" "$LOOP_ATTEMPT")
+assert_eq 8 "$(json_field "$state" loop rounds)" "каждая передача расходует круг"
+assert_eq 1 "$(json_field "$state" loop stage)" "уточнение id само по себе не принимает этап"
+findings=$(attempt_stage_state_findings_v2 "$task" "$LOOP_ATTEMPT")
+assert_eq 0 "$(json_field "$findings" open length)" "замечания закрыты только решением ведущего"
 
 finish_tests

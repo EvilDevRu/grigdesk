@@ -14,12 +14,10 @@
 // быть свежее (человек продолжает печатать в него), а ленты при этом расходятся хвостами.
 // Сравниваем сами сообщения, а не отметки времени.
 
-/**
- * Опознание сообщения. Ни у одного сообщения нет собственного id (`pid` есть только у тех,
- * что приехали через chats/pending), поэтому сличаем по роли и тексту — этого достаточно:
- * ленту мы сравниваем позиционно, а не как множество.
- */
-// Сообщение ленты: у него нет собственного id, поэтому сравниваем роль и текст.
+import { legacyMessageKey, messageKey, stableMessageKey } from './messageIdentity.ts';
+
+// Сообщение ленты: постоянные id появились у уточнений и блоков ответов, у старых
+// записей их нет — для них остаётся сличение по роли и тексту.
 export interface ChatMessage {
   role?: string;
   text?: unknown;
@@ -33,10 +31,6 @@ export interface ChatRecord {
   createdAt?: number;
   title?: string;
   [field: string]: unknown;
-}
-
-function keyOf(m: ChatMessage | undefined): string {
-  return `${m?.role || ''}\0${m?.text || ''}`;
 }
 
 /**
@@ -76,11 +70,18 @@ function dropStaleErrors(list: unknown): { messages: ChatMessage[]; dropped: num
   return dropped ? { messages: out, dropped } : { messages: msgs, dropped: 0 };
 }
 
-/** Длина совпадающего начала двух лент. */
+/**
+ * Длина общего начала определяется тем же ключом, что и проекция истории.
+ * Остатки обеих лент затем сравниваются с учётом кратности сообщений.
+ */
 function commonPrefix(a: ChatMessage[], b: ChatMessage[]): number {
   const max = Math.min(a.length, b.length);
   let i = 0;
-  while (i < max && keyOf(a[i]) === keyOf(b[i])) i += 1;
+
+  while (i < max && messageKey(a[i]) === messageKey(b[i])) {
+    i += 1;
+  }
+
   return i;
 }
 
@@ -114,19 +115,63 @@ export function mergeMessages(base: unknown = [], incoming: unknown = []): {
   // выглядит проваленным при живом ответе.
   const answered = tailBase.some((m) => m?.role && m.role !== 'error' && m.role !== 'user');
 
-  const counts = new Map<string, number>();
+  // Три счётчика: устойчивые ключи, записи без ключа и «текстовые двойники» записей с
+  // ключом. Последние нужны, когда одна и та же реплика приехала двумя путями — например,
+  // окно восстановило её из pending (с pid), а другое окно прислало свою копию без ключа.
+  const stableCounts = new Map<string, number>();
+  const legacyCounts = new Map<string, number>();
+  const textTwins = new Map<string, number>();
+
   for (const m of tailBase) {
-    const k = keyOf(m);
-    counts.set(k, (counts.get(k) || 0) + 1);
+    const stable = stableMessageKey(m);
+
+    if (stable) {
+      stableCounts.set(stable, (stableCounts.get(stable) || 0) + 1);
+
+      const twin = legacyMessageKey(m);
+
+      textTwins.set(twin, (textTwins.get(twin) || 0) + 1);
+    } else {
+      const legacy = legacyMessageKey(m);
+
+      legacyCounts.set(legacy, (legacyCounts.get(legacy) || 0) + 1);
+    }
   }
 
   const extra: ChatMessage[] = [];
   let dropped = 0;
+
   for (const m of tailIncoming) {
     if (answered && m?.role === 'error') { dropped += 1; continue; }
-    const k = keyOf(m);
-    const n = counts.get(k) || 0;
-    if (n > 0) { counts.set(k, n - 1); continue; } // это же сообщение уже есть в серверном хвосте
+
+    const stable = stableMessageKey(m);
+
+    if (stable) {
+      const n = stableCounts.get(stable) || 0;
+
+      if (n > 0) {
+        stableCounts.set(stable, n - 1); // это же сообщение уже в серверном хвосте
+        continue;
+      }
+    }
+
+    // Текстовое совпадение допустимо только когда хотя бы одна сторона без устойчивого
+    // ключа: две записи с разными ключами — разные сообщения, даже если текст совпал.
+    const legacy = legacyMessageKey(m);
+    const legacyLeft = legacyCounts.get(legacy) || 0;
+
+    if (legacyLeft > 0) {
+      legacyCounts.set(legacy, legacyLeft - 1);
+      continue;
+    }
+
+    const twinLeft = textTwins.get(legacy) || 0;
+
+    if (twinLeft > 0 && !stable) {
+      textTwins.set(legacy, twinLeft - 1);
+      continue;
+    }
+
     extra.push(m);
   }
 

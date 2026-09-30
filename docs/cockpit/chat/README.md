@@ -29,6 +29,8 @@
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
 - [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)
+- [Уточнение работающему агенту: тот же ход, ответ до финала и восстановление](in-turn-messages.md)
+- [Границы модулей уточнений: ключи истории, публикация блоков и проекция окна](in-turn-module-boundaries.md)
 - [Живая сессия исполнителя: агент переживает свой ход](persistent-executor-session.md)
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
@@ -71,6 +73,8 @@
 
 ## Грабли
 
+- [Сообщение во время работы: прежняя очередь и границы уточнения](in-turn-message-gap.md)
+- [Ответ в pending ещё не входит в историю следующего хода](queued-turn-history-gap.md)
 - [Локальная картинка в ответе не видна: нужен URL вложения](assistant-image-links.md)
 - [«Связь теряется при отправках в несколько чатов» = POST держал соединение весь ход](concurrent-send-transport.md)
 - [«Агент повис» на длинном ходе = лимит ленты глушил не хранение, а трансляцию](turn-feed-broadcast-limit.md)
@@ -85,6 +89,7 @@
 - [Запрет прямого SSH — рубеж кооперативного агента, не same-uid sandbox](ssh-policy-sandbox-limits.md)
 - [Модель Codex пропала из селекта = урезанный каталог устаревшему CLI, а не снятая модель](codex-cli-catalog-compatibility.md)
 - [Переезд Codex на app-server молча сузил рабочую область агента до cwd](codex-workspace-scope.md)
+- [Codex: живое уточнение требует подсказки вернуться к исходной задаче](codex-in-turn-live.md)
 - [Полоса «Неделя · Fable» растёт без Fable = расход вне этой машины, а не ошибка кокпита](provider-account-usage.md)
 - [Фризы при наборе в чате = черновик сохранялся тем же тяжёлым путём, что и переписка](draft-save-performance.md)
 - [MCP «не удалось получить» и мёртвые кнопки карточки = опрос перезапускал сам себя](mcp-polling-restart-loop.md)

@@ -116,7 +116,7 @@ export function toClaudeSteps(value: unknown): ChatStep[] {
     cwd?: unknown;
     compactMetadata?: { preTokens?: unknown; trigger?: unknown };
     parent_tool_use_id?: unknown;
-    message?: { content?: Array<Record<string, unknown>> };
+    message?: { id?: unknown; content?: Array<Record<string, unknown>> };
   };
 
   if (event.type === 'system') {
@@ -153,7 +153,14 @@ export function toClaudeSteps(value: unknown): ChatStep[] {
       if (content.type === 'thinking' && content.thinking) {
         out.push({ k: 'think', text: cut(content.thinking, STEP_THINK_LIMIT), ...parent });
       } else if (content.type === 'text' && content.text?.trim()) {
-        out.push({ k: 'text', text: cut(content.text, 4000), ...parent });
+        // Id сообщения связывает текстовый шаг с видимым блоком ответа: новый клиент
+        // показывает блок, старый продолжает видеть шаг — дубля нет у обоих.
+        out.push({
+          k: 'text',
+          id: String(event.message?.id || ''),
+          text: cut(content.text, 4000),
+          ...parent,
+        });
       } else if (content.type === 'tool_use') {
         out.push({
           k: 'tool',

@@ -11,6 +11,8 @@ const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', impo
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const PINIA_URL = pathToFileURL(PINIA_PATH).href;
 const CONTEXT_USAGE_URL = new URL('../../../shared/chatContextUsage.ts', import.meta.url).href;
+const IN_TURN_CONTRACT_URL = new URL('../../../shared/chatInTurnContracts.ts', import.meta.url).href;
+const IN_TURN_STORE_URL = new URL('../../../web/src/stores/chatInTurn.ts', import.meta.url).href;
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
 export const apiHarness = {};
@@ -77,6 +79,9 @@ function patch(source) {
       "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
       `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,
     )
+    .replace("from '../../../shared/chatInTurnContracts.ts';",
+      `from '${IN_TURN_CONTRACT_URL}';`)
+    .replace("from './chatInTurn.ts';", `from '${IN_TURN_STORE_URL}';`)
     .replace(
       "import { chatVisibility } from '../shared/chat-visibility.js';",
       'const chatVisibility = globalThis.__chatVisibility;',

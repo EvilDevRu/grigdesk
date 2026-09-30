@@ -11,20 +11,8 @@ import chatModule from '../../server/src/modules/chat/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
-const FAKE_ACP = path.join(REPO_ROOT, 'tests/fixtures/deepseek-harness/fakeAcp.mts');
+const FAKE_WEB = path.join(REPO_ROOT, 'tests/fixtures/deepseek-harness/fakeWeb.mjs');
 const MODEL = '["deepseek-official","deepseek-v4-flash"]';
-const CONFIG_OPTIONS = [
-  {
-    id: 'model',
-    category: 'model',
-    options: [{ options: [{ value: MODEL, name: 'DeepSeek V4 Flash' }] }],
-  },
-  {
-    id: 'reasoning_effort',
-    category: 'thought_level',
-    options: [{ value: 'high', name: 'High' }],
-  },
-];
 
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
@@ -49,7 +37,7 @@ async function fixture(t) {
   await fs.writeFile(bin, [
     '#!/bin/sh',
     'if [ "$1" = "-V" ]; then printf "0.1.5-rc.2\\n"; exit 0; fi',
-    `exec ${shellQuote(process.execPath)} ${shellQuote(FAKE_ACP)} --scenario ${shellQuote(scenarioFile)} --log ${shellQuote(logFile)}`,
+    `exec ${shellQuote(process.execPath)} ${shellQuote(FAKE_WEB)} --scenario ${shellQuote(scenarioFile)} --log ${shellQuote(logFile)} "$@"`,
     '',
   ].join('\n'), { mode: 0o755 });
   const events = [];
@@ -99,6 +87,7 @@ async function fixture(t) {
     } },
   });
   assert.equal(saved.statusCode, 200);
+  await fs.writeFile(scenarioFile, JSON.stringify({ updates: [] }));
   return {
     app,
     root,
@@ -106,7 +95,7 @@ async function fixture(t) {
     scenarioFile,
     logFile,
     async scenario(value) {
-      await fs.writeFile(scenarioFile, JSON.stringify({ configOptions: CONFIG_OPTIONS, ...value }));
+      await fs.writeFile(scenarioFile, JSON.stringify(value));
     },
   };
 }
@@ -173,15 +162,16 @@ test('полный fake-чат: permission → binding → resume, шаги ви
   const second = await turn(f.app, 'second prompt');
   assert.equal(second.statusCode, 200);
   assert.equal(second.json().reply, 'resume ok');
-  const methods = (await entries(f.logFile))
-    .filter((entry) => entry.kind === 'request')
-    .map((entry) => entry.message?.method);
-  assert.equal(methods.filter((method) => method === 'session/new').length, 1);
-  assert.equal(methods.filter((method) => method === 'session/resume').length, 1);
+  const requests = (await entries(f.logFile)).filter((entry) => entry.kind === 'request');
+  const methods = requests.map((entry) => entry.message?.method);
+  assert.equal(requests.filter((entry) => entry.message?.method === 'session/create'
+    && !entry.message?.params?.request?.sessionId).length, 1);
+  assert.equal(requests.filter((entry) => entry.message?.method === 'session/create'
+    && entry.message?.params?.request?.sessionId).length, 1);
   assert.equal(methods.filter((method) => method === 'session/prompt').length, 2);
   const permissionResponse = (await entries(f.logFile))
     .find((entry) => entry.kind === 'permission_response');
-  assert.equal(permissionResponse.message.result.outcome.optionId, 'allow-once');
+  assert.equal(permissionResponse.message.result.value, 'allowed-once');
   // Каталоги ходов (overlay + hooks) живут только вместе с процессом DSH: после двух ходов
   // в runtime home чата не должно остаться ни одного `turns/<uuid>`.
   const chatDirs = await fs.readdir(path.join(f.root, 'deepseek-runtime', 'chat'));
@@ -219,10 +209,9 @@ test('обрыв хода harness-ом доходит до окна как пр�
   const next = await turn(f.app, 'Продолжай');
   assert.equal(next.statusCode, 200);
   assert.equal(next.json().reply, 'resumed');
-  const methods = (await entries(f.logFile))
-    .filter((entry) => entry.kind === 'request')
-    .map((entry) => entry.message?.method);
-  assert.equal(methods.filter((method) => method === 'session/resume').length, 1);
+  const requests = (await entries(f.logFile)).filter((entry) => entry.kind === 'request');
+  assert.equal(requests.filter((entry) => entry.message?.method === 'session/create'
+    && entry.message?.params?.request?.sessionId).length, 1);
 });
 
 test('сжатие выжимкой ротирует server-owned binding: следующий ход — новая сессия', async (t) => {
@@ -258,12 +247,11 @@ test('сжатие выжимкой ротирует server-owned binding: сл�
   const next = await turn(f.app, '[Выжимка…]\n\nпродолжай');
   assert.equal(next.statusCode, 200, next.body);
   assert.equal(next.json().reply, 'с чистого листа');
-  const methods = (await entries(f.logFile))
-    .filter((entry) => entry.kind === 'request')
-    .map((entry) => entry.message?.method);
+  const requests = (await entries(f.logFile)).filter((entry) => entry.kind === 'request');
   assert.deepEqual(
-    methods.filter((method) => method === 'session/new' || method === 'session/resume'),
-    ['session/new', 'session/resume', 'session/new'],
+    requests.filter((entry) => entry.message?.method === 'session/create')
+      .map((entry) => entry.message?.params?.request?.sessionId ? 'resume' : 'new'),
+    ['new', 'resume', 'new'],
   );
 });
 
@@ -325,7 +313,7 @@ test('досье прерванного хода доезжает до DeepSeek,
   const prompt = (await entries(f.logFile))
     .filter((entry) => entry.kind === 'request' && entry.message?.method === 'session/prompt')
     .at(-1);
-  const text = String(prompt?.message?.params?.prompt?.[0]?.text || '');
+  const text = String(prompt?.message?.params?.request?.content?.[0]?.text || '');
   assert.ok(text.includes('[Досье прерванного хода]'), 'досье подмешано в задание');
   assert.ok(text.includes('- Edit: chat.js'), 'досье называет сделанное');
   assert.ok(text.endsWith('продолжай'), 'сообщение человека остаётся последним');

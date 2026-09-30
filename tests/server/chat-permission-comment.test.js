@@ -221,7 +221,10 @@ test('вопрос по прямому каналу: свой текст без 
   // и чекбоксы, и поле своего ответа, которых этот канал не поддерживает.
   assert.equal(event.questions[0].allowFreeText, false);
   assert.match(event.questions[0].hint, /один вариант/);
-  assert.deepEqual(outcome, { selected: ['Первый'], text: 'а лучше третий' });
+  assert.deepEqual(outcome, {
+    selected: ['Первый'], text: 'а лучше третий',
+    rawAnswers: [{ header: 'Путь', selected: ['Первый'], text: 'а лучше третий' }],
+  });
   assert.deepEqual(ack, { ok: true, textDelivered: false });
 });
 
@@ -233,7 +236,10 @@ test('вопрос по прямому каналу с текстовым ход
     },
     answer: { answers: [{ header: 'Шаг', selected: [], text: 'сначала прогони тесты' }] },
   });
-  assert.deepEqual(outcome, { selected: [], text: 'сначала прогони тесты' });
+  assert.deepEqual(outcome, {
+    selected: [], text: 'сначала прогони тесты',
+    rawAnswers: [{ header: 'Шаг', selected: [], text: 'сначала прогони тесты' }],
+  });
   assert.deepEqual(ack, { ok: true });
 });
 
@@ -292,18 +298,30 @@ test('невалидный typed-ответ не снимает pending, пос�
       return { reply: 'готово', sessionId: 'sess-typed' };
     },
   };
-  const { app, events } = await apiFixture(t, executor);
+  const { app } = await apiFixture(t, executor);
+
+  await app.ready();
+
+  const broadcast = app.sse.broadcast;
+  const questionPublished = new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error('вопрос не опубликован')), 15_000);
+
+    app.sse.broadcast = (name, payload) => {
+      broadcast(name, payload);
+
+      if (name === 'chat-question') {
+        clearTimeout(deadline);
+        resolve({ name, payload });
+      }
+    };
+  });
+
   const turn = app.inject({
     method: 'POST',
     url: '/api/chat',
     payload: { message: 'спроси', modelRef: { provider: 'fake', model: 'fake-1' } },
   });
-  let event;
-  for (let i = 0; i < 50 && !event; i += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-    event = events.find((entry) => entry.name === 'chat-question');
-  }
-  assert.ok(event);
+  const event = await questionPublished;
 
   const invalid = await app.inject({
     method: 'POST',

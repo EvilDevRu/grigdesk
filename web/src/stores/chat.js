@@ -15,6 +15,16 @@ import { sseSubscribe } from '../composables/useSse.ts';
 import { mdToText } from '../shared/md.ts';
 import { chatVisibility } from '../shared/chat-visibility.js';
 import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';
+import { IN_TURN_PROTOCOL, IN_TURN_TEXT_LIMIT_BYTES, utf8Bytes }
+  from '../../../shared/chatInTurnContracts.ts';
+import {
+  applyAssistantFinal,
+  materializeInTurnMessages,
+  mergeInTurnAvailability,
+  mergeInTurnEntry,
+  mergeInTurnPage,
+  newChatInTurnRun,
+} from './chatInTurn.ts';
 import {
   applyGeneratedChatTitle,
   firstMessageTitle,
@@ -697,6 +707,10 @@ export const useChatStore = defineStore('chat', {
     turnProtocol: 0,
     workdirProtocol: 0,
     deliveries: {},
+    inTurnProtocol: 0,
+    inTurnRuns: {},
+    inTurnAttempts: {},
+    inTurnError: '',
   }),
   getters: {
     // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
@@ -708,6 +722,7 @@ export const useChatStore = defineStore('chat', {
     session: (s) => (id) => s.sessions.find((x) => x.id === id)
       || (s.archived || []).find((x) => x.id === id)
       || null,
+    inTurnFor: (s) => (id) => s.inTurnRuns[id] || null,
     isArchived: (s) => (id) => (s.archived || []).some((x) => x.id === id),
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
@@ -781,6 +796,182 @@ export const useChatStore = defineStore('chat', {
     }; },
   },
   actions: {
+    /**
+     * Канал привязан к запуску, поэтому новый run заменяет прежний целиком.
+     * Поздние события сверяются с runId и не переоткрывают старый канал.
+     */
+    _ensureInTurn(chatKey, runId, parentTurnId = '') {
+      if (!chatKey || !runId) {
+        return null;
+      }
+
+      const old = this.inTurnRuns[chatKey];
+
+      if (old?.runId === runId) {
+        return old;
+      }
+      if (old) {
+        old.active = false;
+      }
+
+      const run = newChatInTurnRun(chatKey, runId);
+
+      run.parentTurnId = parentTurnId;
+      this.inTurnRuns[chatKey] = run;
+
+      return run;
+    },
+    /**
+     * Снимок активного хода объединяет готовность канала и первую страницу сообщений.
+     * Ревизии защищают оба вида данных от отката поздним ответом другого запроса.
+     */
+    _mergeInTurnSnapshot(chatKey, runId, snapshot, parentTurnId = '') {
+      const run = this._ensureInTurn(chatKey, runId, parentTurnId);
+
+      if (!run || !snapshot) {
+        return;
+      }
+      if (parentTurnId) {
+        run.parentTurnId = parentTurnId;
+      }
+
+      mergeInTurnAvailability(run, snapshot);
+      mergeInTurnPage(run, snapshot);
+      this._materializeInTurn(run);
+    },
+    /**
+     * Проекция канонических записей отделена от побочных эффектов Pinia.
+     * Сохраняем историю только после изменения видимой группы запуска.
+     */
+    _materializeInTurn(run) {
+      const session = this._find(run.chatKey);
+
+      if (!session) {
+        return;
+      }
+
+      const previous = session.messages || [];
+      const messages = materializeInTurnMessages(previous, run);
+
+      if (messages === previous || JSON.stringify(previous) === JSON.stringify(messages)) {
+        return;
+      }
+
+      session.messages = messages;
+      session.updatedAt = Date.now();
+      this._persist();
+    },
+    /**
+     * Страницы читаются до зафиксированной границы sequence, даже если ход ещё идёт.
+     * Только полный проход разрешает удалить pending после сохранения истории.
+     */
+    async _reconcileInTurn(chatKey, runId) {
+      if (!chatKey || !runId) {
+        return false;
+      }
+
+      const run = this._ensureInTurn(chatKey, runId);
+      let afterSequence = 0;
+      let throughSequence = 0;
+
+      for (let pages = 0; pages < 100; pages += 1) {
+        let page;
+
+        try {
+          page = await api.get(`/api/chat/in-turn?chatKey=${encodeURIComponent(chatKey)}`
+            + `&runId=${encodeURIComponent(runId)}&afterSequence=${afterSequence}`
+            + (throughSequence ? `&throughSequence=${throughSequence}` : ''));
+        } catch (error) {
+          return error?.status === 404 && !run.entries.length;
+        }
+
+        if (!throughSequence) {
+          throughSequence = page.throughSequence || 0;
+        }
+
+        mergeInTurnAvailability(run, page.availability);
+        mergeInTurnPage(run, page);
+        this._materializeInTurn(run);
+
+        if (page.nextAfterSequence === null) {
+          return true;
+        }
+        if (!Number.isSafeInteger(page.nextAfterSequence)
+          || page.nextAfterSequence <= afterSequence) {
+          return false;
+        }
+
+        afterSequence = page.nextAfterSequence;
+      }
+
+      return false;
+    },
+    /**
+     * Обычный POST и восстановление его потерянного ответа завершают одну попытку.
+     * Полученный receipt материализуется до удаления сохранённого id отправки.
+     */
+    _confirmInTurnReceipt(run, receipt) {
+      mergeInTurnEntry(run, receipt);
+      this._materializeInTurn(run);
+      delete this.inTurnAttempts[run.chatKey];
+
+      return true;
+    },
+    /**
+     * Повтор текста в том же запуске использует прежний id, пока исход не подтверждён.
+     * При потере ответа POST сначала ищем receipt, чтобы не отправить второй экземпляр.
+     */
+    async sendInTurn(chatKey, text) {
+      const run = this.inTurnRuns[chatKey];
+      const value = String(text || '').trim();
+
+      if (this.inTurnProtocol !== IN_TURN_PROTOCOL || !run?.active
+        || !run.availability?.available || !value
+        || utf8Bytes(value) > IN_TURN_TEXT_LIMIT_BYTES) {
+        return false;
+      }
+
+      const prior = this.inTurnAttempts[chatKey];
+      const attempt = prior?.runId === run.runId && prior?.text === value
+        ? prior
+        : {
+          runId: run.runId,
+          text: value,
+          messageId: newTurnId(),
+          sentAt: Date.now(),
+        };
+
+      this.inTurnAttempts[chatKey] = attempt;
+
+      try {
+        const receipt = await api.post('/api/chat/in-turn', {
+          chatKey,
+          targetRunId: run.runId,
+          messageId: attempt.messageId,
+          text: value,
+          sentAt: attempt.sentAt,
+        });
+
+        return this._confirmInTurnReceipt(run, receipt);
+      } catch (error) {
+        // POST мог дойти, а ответ потеряться. Сверяем тот же id; новую реплику не создаём.
+        try {
+          const found = await api.get(`/api/chat/in-turn?chatKey=${encodeURIComponent(chatKey)}`
+            + `&ids=${encodeURIComponent(attempt.messageId)}`);
+          const receipt = found?.messages?.[attempt.messageId];
+
+          if (receipt) {
+            return this._confirmInTurnReceipt(run, receipt);
+          }
+        } catch {
+          // Исход передачи всё ещё неизвестен; тот же id сохранён для ручного повтора.
+        }
+
+        this.inTurnError = error?.data?.message || error?.message || 'Не удалось отправить уточнение.';
+
+        return false;
+      }
+    },
     // Загрузка истории с сервера (однократно). Если серверный файл пуст, а в localStorage
     // осталась история со старой схемы хранения — мигрируем её и чистим браузер.
     async _load() {
@@ -890,6 +1081,12 @@ export const useChatStore = defineStore('chat', {
           continue;
         }
         if (!place) {
+          continue;
+        }
+
+        // Даже уже видимый pid не доказывает, что страницы уточнений этого run записаны.
+        // Пока сверка не закончилась, pending остаётся на сервере как страховка.
+        if (p.runId && !await this._reconcileInTurn(place.id, p.runId)) {
           continue;
         }
 
@@ -1007,7 +1204,7 @@ export const useChatStore = defineStore('chat', {
 
       const role = p.role || 'assistant';
 
-      s.messages.push({
+      applyAssistantFinal(s.messages, p, {
         role,
         text: p.reply || '(пусто)',
         cost: p.cost ?? null,
@@ -1551,6 +1748,25 @@ export const useChatStore = defineStore('chat', {
           // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
           const s = this._find(d.chatKey);
           if (s && d.step) pushStep((s.steps ||= []), d.step);
+        } else if (name === 'chat-in-turn') {
+          if (d.kind === 'ready') {
+            const run = this.inTurnRuns[d.chatKey];
+
+            if (run?.runId === d.runId) {
+              this._reconcileInTurn(d.chatKey, d.runId);
+            }
+          } else if (d.chatKey && d.runId) {
+            this._reconcileInTurn(d.chatKey, d.runId);
+          }
+        } else if (name === 'chat-assistant-message') {
+          const run = this.inTurnRuns[d.chatKey];
+
+          if (run?.runId === d.runId && d.block) {
+            mergeInTurnEntry(run, d.block);
+            this._materializeInTurn(run);
+          } else if (d.chatKey && d.runId) {
+            this._reconcileInTurn(d.chatKey, d.runId);
+          }
         } else if (name === 'chat-orphan') {
           // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
           this._collectPending();
@@ -1573,6 +1789,11 @@ export const useChatStore = defineStore('chat', {
           // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
           // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
           const s = this._find(d.chatKey);
+
+          if (d.runId) {
+            this._mergeInTurnSnapshot(d.chatKey, d.runId, d.inTurn, d.turnId);
+            this._reconcileInTurn(d.chatKey, d.runId);
+          }
           // Чат завели в другом окне и сразу отправили — его копия к нам ещё едет.
           // Тянем сейчас, чтобы разговор появился с работающим агентом, а не после F5.
           if (!s) { this._pullChat(d.chatKey, false); return; }
@@ -1616,6 +1837,12 @@ export const useChatStore = defineStore('chat', {
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
           // и они ждут очереди, агент продолжит работу: индикатор оставляем.
           const s = this._find(d.chatKey);
+          const inTurn = this.inTurnRuns[d.chatKey];
+
+          if (inTurn?.active) {
+            inTurn.active = false;
+            this._reconcileInTurn(d.chatKey, inTurn.runId);
+          }
           // Событие дошло — связь с сервером есть, даже если рвался длинный POST хода.
           if (s?.offline) s.offline = false;
 
@@ -1694,9 +1921,20 @@ export const useChatStore = defineStore('chat', {
     async _loadActive() {
       let active;
       let queued;
+      let protocol;
 
-      try { ({ active, queued } = await api.get('/api/chat/active')); }
-      catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
+      try {
+        const response = await api.get('/api/chat/active');
+
+        active = response.active;
+        queued = response.queued;
+        protocol = response.protocol;
+      } catch {
+        return; // Сервер старый или недоступен — обойдёмся SSE.
+      }
+
+      this.inTurnProtocol = protocol || 0;
+
       const byKey = new Map((active || []).map((a) => [a.chatKey, a]));
       // Принятые ходы, ждущие очереди: их чат занят, а реплики честно «ждут очереди».
       const waitingTurns = new Map();
@@ -1714,6 +1952,12 @@ export const useChatStore = defineStore('chat', {
       for (const s of [...this.sessions, ...(this.archived || [])]) {
         const a = byKey.get(s.id);
         const waiting = waitingTurns.get(s.id) || [];
+
+        if (a?.runId) {
+          this._mergeInTurnSnapshot(s.id, a.runId, a.inTurn, a.turnId);
+        } else if (this.inTurnRuns[s.id]) {
+          this.inTurnRuns[s.id].active = false;
+        }
 
         for (const turnId of waiting) {
           const m = (s.messages || []).find((x) => x.role === 'user' && x.turnId === turnId);
@@ -1772,6 +2016,9 @@ export const useChatStore = defineStore('chat', {
           s.liveContextCache = null;
         }
       }
+
+      await Promise.all((active || []).filter((a) => a?.runId)
+        .map((a) => this._reconcileInTurn(a.chatKey, a.runId)));
     },
     /**
      * В окне есть изменения, которых сервер ещё не видел (дебаунс `_persist`, неудачная
@@ -2765,7 +3012,8 @@ export const useChatStore = defineStore('chat', {
           s.messages.push({ role: 'note', text: r.reply });
         } else {
           const responseSteps = (r.steps?.length ? r.steps : s.steps) || [];
-          s.messages.push({
+
+          applyAssistantFinal(s.messages, r, {
             // Сбой доставки (CLI не достучался до API) — не ответ агента: показываем
             // плашкой ошибки, но с лентой и сессией, чтобы ход можно было продолжить.
             role: r.deliveryFailure ? 'error' : 'assistant', text: r.reply || '(пусто)', cost: r.cost,

@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { getProviderAdapters, supportsScopedWorkspace } from '../../lib/executors/index.ts';
 import type { ExecutorAdapter } from '../../lib/executors/index.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
+import { parseInTurnCapability } from '../../../../shared/chatInTurnContracts.ts';
 import { isOutdated } from '../../lib/executors/_npmLatest.ts';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/providerSettings.ts';
 import {
@@ -204,6 +205,8 @@ async function providersModule(
             && typeof ex.runUntrusted === 'function'
             && ex.untrustedInput?.text === true,
         },
+        // Канал ввода в активный ход: адаптер объявляет его сам, наружу идёт разобранная форма.
+        inTurn: parseInTurnCapability(ex.inTurnInput),
         // Resume id принадлежит server-owned sidecar, а не JSON чата/браузеру.
         sessionBinding: typeof ex.run === 'function' && Boolean(ex.sessionBinding),
         // Как переносить память и применять рабочие корни, UI узнаёт

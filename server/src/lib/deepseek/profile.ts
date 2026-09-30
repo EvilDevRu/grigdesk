@@ -16,6 +16,13 @@ export interface DeepSeekLaunchFilesOptions {
   workspaceRoot: string;
   mode: 'read-only' | 'workspace-write';
   approval: 'ask' | 'never';
+  transport?: 'acp' | 'web';
+  mcpServers?: readonly {
+    name: string;
+    command: string;
+    args: readonly string[];
+    env: readonly { name: string; value: string }[];
+  }[];
   hooks: {
     bashToolName: string;
     ssh: boolean;
@@ -55,7 +62,7 @@ const DISABLED_ROWS = Object.freeze([
 
 // Входит в persisted cache/session fingerprint. Менять при любом смысловом изменении
 // overlay, hooks или их enforcement, даже если версия DSH осталась прежней.
-export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v3';
+export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v4';
 
 const INSTRUCTIONS_HOOK_PATH = fileURLToPath(
   new URL('../../../scripts/deepseekInstructionsHook.mts', import.meta.url),
@@ -95,9 +102,9 @@ function yamlLines(value: YamlValue, indent = 0): string[] {
   return [`${prefix}${yamlScalar(value)}`];
 }
 
-function serializeOverlay(value: YamlValue): string {
+function serializeOverlay(value: YamlValue, transport: 'acp' | 'web'): string {
   return [
-    '# Cockpit overlay для штатного профиля acp. Генерируется на каждый запуск.',
+    `# Cockpit overlay для штатного профиля ${transport}. Генерируется на каждый запуск.`,
     ...yamlLines(value),
     '',
   ].join('\n');
@@ -143,6 +150,15 @@ export async function buildLaunchFiles(
   }
   if (hooks.bashToolName !== DEEPSEEK_BASH_TOOL) {
     throw new TypeError(`DeepSeek bashToolName не прошёл pinned-контракт: ${hooks.bashToolName}`);
+  }
+  const webMcp = options.transport === 'web' ? options.mcpServers || [] : [];
+  const mcpNames = new Set<string>();
+  for (const server of webMcp) {
+    if (!/^[A-Za-z0-9_-]{1,32}$/u.test(server.name) || mcpNames.has(server.name)
+      || !server.command || server.command.includes('\0')) {
+      throw new TypeError('DeepSeek web MCP-сервер имеет недопустимое имя или команду');
+    }
+    mcpNames.add(server.name);
   }
   const relativeCwd = path.relative(hooks.instructions.projectRoot, cwd);
   if (relativeCwd.startsWith('..') || path.isAbsolute(relativeCwd)) {
@@ -213,15 +229,27 @@ export async function buildLaunchFiles(
       },
     },
     { id: 'agent-instructions', config: { maxBytes: 262_144 } },
-    ...DISABLED_ROWS.map((id) => ({ id, disabled: true })),
+    // Web-профиль монтирует стандартный Agent preset: его инструменты зависят
+    // от host-сервисов. ACP-список нельзя переносить сюда по id строк.
+    ...(options.transport === 'web' ? [] : DISABLED_ROWS.map((id) => ({ id, disabled: true }))),
     {
       insert: [{
         id: 'hooks-claude-code',
         name: '@deepseek-ai/dsh-hooks-claude-code',
         config: { configPath: hooksPath, projectDir: cwd },
-      }],
+      }, ...webMcp.map((server) => ({
+        id: `cockpit-mcp-${server.name}`,
+        name: '@deepseek-ai/dsh-mcp-client',
+        config: {
+          serverName: server.name,
+          transport: 'stdio',
+          command: server.command,
+          args: [...server.args],
+          env: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
+        },
+      }))],
     },
-  ]);
+  ], options.transport === 'web' ? 'web' : 'acp');
 
   await Promise.all([
     privateFile(hooksPath, hooksJson),

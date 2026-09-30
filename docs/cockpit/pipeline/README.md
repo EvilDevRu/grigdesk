@@ -79,6 +79,7 @@
 - [Причина остановки ищется в ОКНЕ текущего захода, а не по всему журналу](current-attempt-stall-diagnosis.md)
 - [Проверяющий узел (state-only) не может сравнить файл с HEAD внутри worktree](state-only-worktree-head.md)
 - [Проверяющий, который ведёт этапы, встаёт на третьем проходе: сторож топтания считает этап неснятым замечанием](reviewer-multi-stage-progress.md)
+- [Повторное замечание в цикле должно доходить до исполнителя](loop-review-continuation.md)
 - [Цикл ведущего и исполнителя: счётчики, findings, отчёты визитов, пределы argv и readers остановок](route-loop-runtime-constraints.md)
 - [Ретро оставлял файлы и ничего не менял: генератор предложений без канала решения](retrospective-decision-flow.md)
 - [Ромб «Песочница» на графе — статус из реальности, не из цепочки](sandbox-observed-status.md)

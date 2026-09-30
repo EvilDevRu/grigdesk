@@ -125,6 +125,6 @@ test('DeepSeek session identity пинит ключ и профиль без р�
   const changed = deepSeekSecurityProfile({ blockDirectSsh: false, blockDirectDb: false });
   assert.match(auth, /^deepseek-env-key:[a-f0-9]{16}$/u);
   assert.equal(auth.includes(secret), false);
-  assert.match(secure, /^deepseek-host-sandbox-v3:[a-f0-9]{64}$/u);
+  assert.match(secure, /^deepseek-host-sandbox-v4:[a-f0-9]{64}$/u);
   assert.notEqual(secure, changed);
 });

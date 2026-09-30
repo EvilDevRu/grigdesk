@@ -158,6 +158,13 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { CockpitConfig } from '../../config.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnCapability,
+  InTurnPort,
+  InTurnReceiptEvent,
+  InTurnUnavailableReason,
+} from '../../../../shared/chatInTurnContracts.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
@@ -191,6 +198,13 @@ export interface ExecutorRunInput {
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onStep?: (step: ChatStep) => void;
   onSessionCreated?: (sessionId: string) => void | Promise<void>;
+  // Канал ввода в активный ход: адаптер отдаёт порт, когда транспорт действительно готов,
+  // сообщает о смене готовности и о позднем подтверждении потребления.
+  onInTurnReady?: (port: InTurnPort) => void;
+  onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+  onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+  // Видимый ответ агента: адаптер даёт id и текст, сервер назначает sequence и revision.
+  onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
   [field: string]: unknown;
 }
 
@@ -245,6 +259,8 @@ export interface ExecutorAdapter {
   compaction?: Record<string, unknown>;
   usageActions?: Record<string, (input: Record<string, unknown>) => Promise<unknown>>;
   untrustedInput?: { text?: boolean };
+  // Подробный контракт канала ввода в активный ход; отсутствие поля — честное «не умею».
+  inTurnInput?: InTurnCapability;
   bin: (config: unknown) => unknown;
   probe: (config: unknown) => Promise<ExecutorProbe> | ExecutorProbe;
   auth: (config: unknown, deps?: unknown) => Promise<ExecutorAuth> | ExecutorAuth;

@@ -12,6 +12,7 @@ import type { WorkdirState } from './workdirTransition.ts';
 
 import { mergeChat } from './mergeChat.ts';
 import type { ChatRecord } from './mergeChat.ts';
+import { messageKey } from './messageIdentity.ts';
 import type { ModelRegistry } from './modelRef.ts';
 import {
   CHAT_SCHEMA,
@@ -188,6 +189,41 @@ function clientChat(value: StoredChat | null | undefined): StoredChat {
   return next;
 }
 
+/**
+ * Серверные receipt и блоки перекрывают копию окна с тем же устойчивым id.
+ * Остальные поля сообщения сохраняются: они могут содержать метаданные финала.
+ */
+function protectCanonicalMessages(
+  messages: unknown,
+  canonical: unknown,
+): ChatRecord['messages'] {
+  const result = Array.isArray(messages) ? [...messages] : [];
+  const trusted = Array.isArray(canonical) ? canonical : [];
+  const positions = new Map<string, number>();
+
+  for (const [index, message] of result.entries()) {
+    positions.set(messageKey(message), index);
+  }
+
+  for (const message of trusted) {
+    if (!message?.serverCanonical) {
+      continue;
+    }
+
+    const key = messageKey(message);
+    const index = positions.get(key);
+
+    if (index === undefined) {
+      positions.set(key, result.length);
+      result.push(message);
+    } else {
+      result[index] = { ...result[index], ...message };
+    }
+  }
+
+  return result;
+}
+
 function legacySessionState(chat: StoredChat | null | undefined) {
   if (chat?.sessionBindingState?.state) return chat.sessionBindingState;
   return chat?.sessionId
@@ -213,6 +249,8 @@ export class ChatHistoryStore {
   private locks: Map<string, Promise<void>>;
 
   private logicalLocks: Map<string, Promise<void>>;
+
+  private canonicalMessages: ((chatId: string) => ChatRecord['messages']) | null = null;
 
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
   constructor({
@@ -242,6 +280,11 @@ export class ChatHistoryStore {
     // Логическая идентичность → хвост атомарного создания или восстановления. Блокировки по id недостаточно:
     // до появления первого файла у двух окон ещё нет общего id чата.
     this.logicalLocks = new Map();
+  }
+
+  /** Привязка durable-журналов уточнений после создания их владельцев в chat module. */
+  setCanonicalMessages(source: (chatId: string) => ChatRecord['messages']): void {
+    this.canonicalMessages = source;
   }
 
   /**
@@ -640,6 +683,15 @@ export class ChatHistoryStore {
         sessionBindingState: legacySessionState(prev?.chat || merged),
         archived: !!archived,
       };
+
+      c.messages = protectCanonicalMessages(
+        c.messages,
+        [
+          ...(prev?.chat.messages || []).filter((message) => message.serverCanonical),
+          ...(this.canonicalMessages?.(String(chat.id)) || []),
+        ],
+      );
+
       if (stale && prev?.chat) {
         c.model = prev.chat.model;
         c.modelRef = prev.chat.modelRef;
@@ -687,6 +739,45 @@ export class ChatHistoryStore {
       const next = {
         ...entry.chat,
         ...patch(entry.chat),
+        revision: Number(entry.chat.revision || 0) + 1,
+      };
+
+      await this.writeAtomic(entry.path, stableJson(next));
+
+      return next;
+    });
+  }
+
+  /**
+   * Барьер истории перед следующим ходом: короткий lock, свежая копия и одна
+   * атомарная запись. При ошибке вызывающий не запускает executor.
+   */
+  async syncMessages(
+    id: string,
+    project: (messages: ChatRecord['messages']) => ChatRecord['messages'],
+  ): Promise<StoredChat> {
+    await this.ensureMigrated();
+
+    return this.withChatLock(id, async () => {
+      const entry = await this.readEntry(id);
+
+      if (!entry) {
+        throw new ChatHistoryError('unknown_chat', 'Чат не найден.', { statusCode: 404 });
+      }
+
+      const messages = project(entry.chat.messages);
+      const protectedMessages = protectCanonicalMessages(
+        messages,
+        this.canonicalMessages?.(id),
+      );
+
+      if (stableJson(protectedMessages) === stableJson(entry.chat.messages)) {
+        return entry.chat;
+      }
+
+      const next = {
+        ...entry.chat,
+        messages: protectedMessages,
         revision: Number(entry.chat.revision || 0) + 1,
       };
 

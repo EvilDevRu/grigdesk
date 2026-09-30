@@ -478,8 +478,15 @@ export function createCodexStepNormalizer({
     if (item.type === 'agentMessage') {
       const text = textOf(item.text || agentMessages.get(id) || '');
       agentMessages.delete(id);
+
       if (item.phase === 'commentary' && text.trim()) {
-        out.push({ k: 'text', text: cut(text, 4000) });
+        // Id связывает текстовый шаг с видимым блоком ответа: окно показывает блок,
+        // а старый клиент продолжает видеть шаг — без дубля у обоих.
+        out.push({
+          k: 'text',
+          id,
+          text: cut(text, 4000),
+        });
       }
       return;
     }

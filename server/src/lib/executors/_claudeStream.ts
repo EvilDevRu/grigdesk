@@ -18,6 +18,12 @@ import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.t
 import type { ContextCache } from '../chat/contextCache.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep, StepSink } from '../chat/streamSteps.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnPort,
+  InTurnReceiptEvent,
+  InTurnUnavailableReason,
+} from '../../../../shared/chatInTurnContracts.ts';
 import { toClaudeSteps } from './_claudeSteps.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
 
@@ -470,6 +476,16 @@ export function openClaudeStreamSession({
       reject: (error: unknown) => void;
       onSessionCreated?: (sessionId: string) => unknown;
       sessionAnnounced: boolean;
+      // Канал уточнений: CLI принимает дополнительные user-сообщения в тот же процесс.
+      onInTurnReady?: (port: InTurnPort) => void;
+      onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+      onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+      onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
+      assistantRevision: number;
+      injectedPending: number;
+      injectedMessageIds: string[];
+      injectedAssistantId: string;
+      injectedAssistantText: string;
     } | null;
     background: ClaudeTurnCollector | null;
     interruptRequested: boolean;
@@ -499,6 +515,51 @@ export function openClaudeStreamSession({
       throw new Error('Сессия агента уже закрыта.');
     }
     child.stdin?.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  /**
+   * Порт уточнений активного хода. Пишем дополнительное user-сообщение в тот же stdin:
+   * CLI в режиме stream-json принимает его, не завершая процесс. Подтверждение записи —
+   * только `forwarded`; ответ придёт отдельным result и закроет обмен, а не исходный ход.
+   */
+  function inTurnPortForTurn(): InTurnPort {
+    return {
+      /**
+       * Запись дополнительного вопроса в stdin активного хода. Подтверждается только факт
+       * записи: ответ придёт отдельным result и закроет обмен, а не исходный ход.
+       */
+      async deliver({ messageId, text }: { messageId: string; text: string }) {
+        const turn = state.turn;
+
+        if (!turn || state.exited) {
+          return {
+            ok: false,
+            code: 'turn_changed',
+            message: 'Активный ход уже завершился.',
+          };
+        }
+
+        try {
+          writeLine({
+            type: 'user',
+            message: { role: 'user', content: [{ type: 'text', text }] },
+          });
+        } catch (error) {
+          return {
+            ok: false,
+            code: 'transport_lost',
+            message: (error as Error).message,
+            uncertain: true,
+          };
+        }
+
+        turn.injectedPending += 1;
+        turn.injectedMessageIds.push(messageId);
+
+        return { ok: true, state: 'forwarded' };
+      },
+      close() {},
+    };
   }
 
   // Непрошеный ход начинается с любого события, пришедшего вне заказанного хода.
@@ -543,6 +604,30 @@ export function openClaudeStreamSession({
     const collector = state.turn ? state.turn.collector : backgroundCollector();
     collector.push(ev);
 
+    // Видимый текст хода: id сообщения связывает блок с шагом ленты. Пока ждём ответ на
+    // побочный ввод, копим именно его — этот текст закроется первым result.
+    if (ev?.type === 'assistant' && state.turn) {
+      const turn = state.turn;
+      const text = claudeMessageText((ev as { message?: { content?: unknown } }).message);
+      const id = String((ev as { message?: { id?: unknown } }).message?.id || '');
+
+      if (id && text) {
+        turn.assistantRevision += 1;
+
+        if (turn.injectedPending > 0) {
+          turn.injectedAssistantId = id;
+          turn.injectedAssistantText = text;
+        }
+
+        void turn.onAssistantMessage?.({
+          assistantMessageId: id,
+          text,
+          sourceRevision: turn.assistantRevision,
+          complete: false,
+        });
+      }
+    }
+
     // Id сессии известен с первого события хода: сообщаем его вызывающему сразу, а не
     // в конце хода, — иначе перезапуск сервера посреди первого хода оставлял чат без
     // сессии, и следующее сообщение начинало разговор с нуля.
@@ -559,6 +644,34 @@ export function openClaudeStreamSession({
 
     if (ev?.type !== 'result') return;
 
+    if (state.turn && state.turn.injectedPending > 0) {
+      // Первый result после побочного ввода закрывает ОБМЕН с уточнением, а не исходный
+      // ход: публикуем ответ, подтверждаем потребление и продолжаем ждать свой result.
+      const turn = state.turn;
+
+      turn.injectedPending -= 1;
+
+      const messageId = turn.injectedMessageIds.shift() || '';
+      const id = turn.injectedAssistantId || `claude-injected-${turn.assistantRevision + 1}`;
+
+      turn.assistantRevision += 1;
+      void turn.onAssistantMessage?.({
+        assistantMessageId: id,
+        text: turn.injectedAssistantText,
+        sourceRevision: turn.assistantRevision,
+        complete: true,
+      });
+
+      if (messageId) {
+        void turn.onInTurnReceipt?.({ messageId, state: 'consumed' });
+      }
+
+      turn.injectedAssistantId = '';
+      turn.injectedAssistantText = '';
+
+      return;
+    }
+
     if (state.turn) {
       const turn = state.turn;
       state.turn = null;
@@ -568,6 +681,8 @@ export function openClaudeStreamSession({
         log,
       });
       state.sessionId = result.sessionId || state.sessionId;
+
+      turn.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
 
       if (state.interruptRequested) {
         state.interruptRequested = false;
@@ -628,6 +743,7 @@ export function openClaudeStreamSession({
     if (state.turn) {
       const turn = state.turn;
       state.turn = null;
+      turn.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
       const error = Object.assign(
         new Error(`${state.exitReason}${stderrTail.trim() ? `: ${stderrTail.trim().slice(-300)}` : ''}`),
         { sessionId: state.sessionId },
@@ -664,11 +780,23 @@ export function openClaudeStreamSession({
     get busy() { return !!state.turn; },
 
     /** Заказанный ход: пишем сообщение в stdin и ждём его result. */
-    send({ message, onStep, onProgress, onSessionCreated }: {
+    /**
+     * Заказанный ход: пишем сообщение в stdin и ждём его result. Порт уточнений отдаётся
+     * сразу после записи: CLI в режиме stream-json принимает дополнительные сообщения,
+     * не завершая процесс.
+     */
+    send({
+      message, onStep, onProgress, onSessionCreated,
+      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+    }: {
       message?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
       onSessionCreated?: (sessionId: string) => unknown;
+      onInTurnReady?: (port: InTurnPort) => void;
+      onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+      onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+      onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
     }) {
       if (state.exited) return Promise.reject(new Error(state.exitReason || 'Сессия агента закрыта.'));
       if (state.turn) return Promise.reject(new Error('В этой сессии уже идёт ход.'));
@@ -679,15 +807,33 @@ export function openClaudeStreamSession({
       if (state.background) finishBackground();
 
       const collector = createClaudeTurnCollector({ onStep, onProgress, log });
+
       return new Promise<unknown>((resolve, reject) => {
         state.turn = {
-          collector, resolve, reject, onSessionCreated, sessionAnnounced: false,
+          collector,
+          resolve,
+          reject,
+          onSessionCreated,
+          sessionAnnounced: false,
+          ...(onInTurnReady ? { onInTurnReady } : {}),
+          ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
+          ...(onInTurnReceipt ? { onInTurnReceipt } : {}),
+          ...(onAssistantMessage ? { onAssistantMessage } : {}),
+          assistantRevision: 0,
+          injectedPending: 0,
+          injectedMessageIds: [],
+          injectedAssistantId: '',
+          injectedAssistantText: '',
         };
+
         try {
           writeLine({
             type: 'user',
             message: { role: 'user', content: [{ type: 'text', text: String(message || '') }] },
           });
+
+          onInTurnAvailability?.({ available: true });
+          onInTurnReady?.(inTurnPortForTurn());
         } catch (error) {
           state.turn = null;
           reject(error);

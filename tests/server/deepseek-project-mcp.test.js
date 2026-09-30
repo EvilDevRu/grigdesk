@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { spawn } from 'node:child_process';
 
 import {
   mergeMcpServers,
@@ -12,8 +11,6 @@ import {
 } from '../../server/src/lib/deepseek/projectMcp.ts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 
-const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
-const FAKE_ACP = path.join(REPO_ROOT, 'tests/fixtures/deepseek-harness/fakeAcp.mts');
 
 async function tempProject(t, { git = false } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-mcp-'));
@@ -118,16 +115,10 @@ test('mergeMcpServers: cockpit-work первый, одноимённые про�
   ]);
 });
 
-test('адаптер DeepSeek добавляет проектные MCP к служебным в session/new', async (t) => {
+test('адаптер DeepSeek добавляет проектные MCP к служебным в web overlay', async (t) => {
   const { root, bin } = await tempProject(t, { git: true });
   const cwd = path.join(root, 'workspace');
-  const launchDir = path.join(root, 'launch');
-  const dshHome = path.join(root, 'home');
-  const scenarioFile = path.join(root, 'scenario.json');
-  const logFile = path.join(root, 'fake.ndjson');
-  await Promise.all([cwd, launchDir, dshHome].map((dir) => fs.mkdir(dir, { recursive: true })));
-  await fs.writeFile(path.join(launchDir, 'overlay.yml'), '[]\n');
-  await fs.writeFile(scenarioFile, JSON.stringify({ configOptions: [], updates: [] }));
+  await fs.mkdir(cwd, { recursive: true });
   await fs.writeFile(path.join(root, '.mcp.json'), JSON.stringify({
     mcpServers: {
       motion: { command: path.join(bin, 'motion-mcp'), args: ['--stdio'], env: { KIMODO_URL: 'http://127.0.0.1:1' } },
@@ -136,7 +127,8 @@ test('адаптер DeepSeek добавляет проектные MCP к сл�
   }));
   const warnings = [];
   const work = { name: 'cockpit-work', command: process.execPath, args: ['work.js'], env: [] };
-  const result = await deepseek.run({
+  let overlay = '';
+  await assert.rejects(deepseek.run({
     config: { deepseekRuntimeHome: path.join(root, 'runtime'), deepseekBin: path.join(root, 'fake-dsh') },
     env: { ...process.env, DEEPSEEK_API_KEY: 'synthetic-runtime-key' },
     cwd,
@@ -147,28 +139,16 @@ test('адаптер DeepSeek добавляет проектные MCP к сл�
     permissionMode: 'default',
     mcpServers: [work],
     log: { warn: (fields, message) => warnings.push({ fields, message }) },
-    deps: {
-      prepareLaunch: async () => ({ launchDir, dshHome, overlayPath: path.join(launchDir, 'overlay.yml') }),
-      spawn: () => spawn(process.execPath, [FAKE_ACP, '--scenario', scenarioFile, '--log', logFile], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }),
-      closeTimeoutMs: 80,
-      termTimeoutMs: 80,
+    startServer: async ({ overlayPath }) => {
+      overlay = await fs.readFile(overlayPath, 'utf8');
+      throw new Error('overlay captured');
     },
-  });
-  assert.equal(result.stopReason, 'end_turn');
+  }), /overlay captured/u);
 
-  const entries = (await fs.readFile(logFile, 'utf8')).trim().split('\n').map(JSON.parse);
-  const created = entries.find((entry) => entry.kind === 'request' && entry.message?.method === 'session/new');
-  assert.deepEqual(created.message.params.mcpServers, [
-    work,
-    {
-      name: 'motion',
-      command: path.join(bin, 'motion-mcp'),
-      args: ['--stdio'],
-      env: [{ name: 'KIMODO_URL', value: 'http://127.0.0.1:1' }],
-    },
-  ]);
+  assert.match(overlay, /serverName: "cockpit-work"/u);
+  assert.match(overlay, /serverName: "motion"/u);
+  assert.match(overlay, /args:\s*\n\s*- "--stdio"/u);
+  assert.match(overlay, /KIMODO_URL: "http:\/\/127\.0\.0\.1:1"/u);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0].fields.warning, /broken: исполняемый файл/);
   assert.equal(warnings[0].message, 'DeepSeek: запись .mcp.json пропущена');

@@ -8,7 +8,7 @@ import {
   deepSeekSeedModels,
   readDeepSeekCatalog,
 } from '../deepseek/catalog.ts';
-import { runDeepSeekTurn } from '../deepseek/runtime.ts';
+import { runDeepSeekWebTurn } from '../deepseek/webRuntime.ts';
 import { mergeMcpServers, readProjectMcpServers } from '../deepseek/projectMcp.ts';
 import { deepSeekUsage } from '../deepseek/balance.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
@@ -59,6 +59,7 @@ export default {
   statusPage: 'https://status.deepseek.com',
   catalogLive: true,
   retryContract: RETRY_CONTRACT.PRE_PROMPT_ONLY,
+  inTurnInput: { protocol: 1, text: true, confirmation: 'forwarded' },
   compaction: { kind: 'summary' },
   directSshPolicy: {
     enforcement: 'command-hook',
@@ -115,15 +116,14 @@ export default {
     return String(model?.family || 'default');
   },
 
-  // Проектные MCP из `.mcp.json` доезжают до DSH только через ACP-список сессии:
-  // добавляем их к служебным серверам Cockpit на каждом ходу (resume принимает тот же список).
-  async run(options: Parameters<typeof runDeepSeekTurn>[0]) {
+  // Проектные и служебные MCP входят в одноразовый overlay web-профиля до старта хода.
+  async run(options: Parameters<typeof runDeepSeekWebTurn>[0]) {
     const project = options.cwd ? await readProjectMcpServers(options.cwd) : { file: null, servers: [], warnings: [] };
     for (const warning of project.warnings) {
       options.log?.warn?.({ file: project.file, warning }, 'DeepSeek: запись .mcp.json пропущена');
     }
     const mcpServers = mergeMcpServers(options.mcpServers || [], project.servers);
-    const result = await runDeepSeekTurn({ ...options, mcpServers });
+    const result = await runDeepSeekWebTurn({ ...options, mcpServers });
     if (result.stopReason === 'cancelled') {
       const error = Object.assign(new Error('Ход DeepSeek остановлен.'), {
         stopped: true,

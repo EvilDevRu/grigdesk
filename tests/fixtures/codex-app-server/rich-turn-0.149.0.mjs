@@ -2,7 +2,7 @@
 
 // Версионированный fake app-server по TypeScript-схеме `codex-cli 0.149.0`.
 // Он закрепляет wire-форму JSON-RPC v2 без настоящего model call и аккаунта OpenAI.
-import { appendFileSync, createReadStream, writeSync } from 'node:fs';
+import { appendFileSync, createReadStream, mkdirSync, writeFileSync, writeSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
@@ -31,9 +31,24 @@ function runFixture() {
   // Базовая fixture остаётся снимком 0.149, а dynamic tool сценарии могут
   // проверить актуальный wire-контракт без дублирования всего app-server.
   const cliVersion = process.env.COCKPIT_CODEX_FIXTURE_CLI_VERSION || '0.149.0';
+  // Сколько уточнений принимает сценарий steer: на последнем ход закрывается сам.
+  const steersExpected = Math.max(1, Number(process.env.COCKPIT_CODEX_FIXTURE_STEERS) || 1);
   const expectHook = process.env.COCKPIT_CODEX_FIXTURE_EXPECT_HOOK !== '0';
   const hookState = process.env.COCKPIT_CODEX_FIXTURE_HOOK_STATE || 'enabled';
   const argv = process.argv.slice(2);
+
+  // Строгий triage-вызов спрашивает схему до thread/start. Версионированная
+  // fixture 0.149 объявляет старый restricted-read канал, который она проверяет ниже.
+  if (argv.includes('generate-ts')) {
+    const out = argv[argv.indexOf('--out') + 1];
+    const v2 = path.join(out, 'v2');
+
+    mkdirSync(v2, { recursive: true });
+    writeFileSync(path.join(v2, 'SandboxPolicy.ts'),
+      'export type SandboxPolicy = { readOnlyAccess?: unknown };\n');
+    return;
+  }
+
   const hookConfigIndex = argv.findIndex((value, index) => (
     argv[index - 1] === '-c' && String(value).startsWith('hooks.PreToolUse=')
   ));
@@ -42,6 +57,7 @@ function runFixture() {
   const hookMatcher = hookConfig.match(/matcher\s*=\s*"([^"]+)"/)?.[1] || '';
   let phase = 'initialize';
   let resumed = false;
+  let steerCount = 0;
   let fixtureInput = null;
 
   function trace(entry) {
@@ -167,6 +183,51 @@ function runFixture() {
       threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_800,
       item: {
         type: 'agentMessage', id: 'answer-progress-1', text: reply, phase: 'final_answer',
+        memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId: THREAD_ID,
+      turn: {
+        ...runningTurn,
+        status: 'completed',
+        completedAt: 1_700_000_002,
+        durationMs: 1_000,
+      },
+    } });
+    setTimeout(() => process.exit(0), 20);
+  }
+
+  /**
+   * Активный ход, который ждёт уточнения: комментарий уже показан, инструмент ещё «идёт»,
+   * а ответ на turn/steer приходит до финала — так проверяется доставка в ТОТ ЖЕ ход.
+   */
+  function emitSteerableTurn() {
+    send({ method: 'item/completed', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_100,
+      item: {
+        type: 'agentMessage', id: 'commentary-before-steer', phase: 'commentary',
+        text: 'Сначала проверяю первый файл.', memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'item/started', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_150,
+      item: {
+        type: 'dynamicToolCall', id: 'long-call-1', namespace: null, tool: 'sample_lookup',
+        arguments: { action: 'search', query: 'второй файл', limit: 3 },
+        status: 'inProgress', contentItems: null, success: null, durationMs: null,
+      },
+    } });
+  }
+
+  function finishSteeredTurn(resumed = true) {
+    const reply = resumed
+      ? 'Второй файл проверен, задача продолжена.'
+      : 'Ответ на вопрос дан, второй файл не проверен.';
+    send({ method: 'item/completed', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_950,
+      item: {
+        type: 'agentMessage', id: 'answer-after-steer', text: reply, phase: 'final_answer',
         memoryCitation: null, delivery: null,
       },
     } });
@@ -619,7 +680,7 @@ function runFixture() {
       send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
       phase = ['interrupt', 'context-interrupt'].includes(scenario)
         ? 'interrupt'
-        : ['ssh-tool', 'lookup-tool', 'mcp-elicitation', 'mcp-resolved'].includes(scenario)
+        : ['ssh-tool', 'lookup-tool', 'mcp-elicitation', 'mcp-resolved', 'steer'].includes(scenario)
           ? scenario
           : 'complete';
       if (scenario === 'context-usage') {
@@ -633,6 +694,7 @@ function runFixture() {
       else if (scenario === 'interrupt') emitInterruptibleTurn();
       else if (scenario === 'token-progress') emitTokenProgressTurn();
       else if (scenario === 'commentary-only') emitCommentaryOnlyTurn();
+      else if (scenario === 'steer') emitSteerableTurn();
       else if (scenario === 'foreign-completed') emitForeignTurn('completed');
       else if (scenario === 'foreign-interrupted') emitForeignTurn('interrupted');
       else if (scenario === 'ssh-tool') {
@@ -734,6 +796,41 @@ function runFixture() {
         setTimeout(() => emitRichTurn(), 10);
       }
       else emitRichTurn();
+      return;
+    }
+
+    if (phase === 'steer') {
+      if (message.method !== 'turn/steer' || message.id === undefined) {
+        fail('сценарий steer ждёт turn/steer в активный ход');
+        return;
+      }
+      if (message.params?.threadId !== THREAD_ID) {
+        fail('turn/steer получил неверный threadId');
+        return;
+      }
+      if (message.params?.expectedTurnId !== TURN_ID) {
+        fail('turn/steer получил неверный expectedTurnId');
+        return;
+      }
+
+      steerCount += 1;
+      const text = String(message.params?.input?.[0]?.text || '');
+      send({ id: message.id, result: { turnId: TURN_ID } });
+      send({ method: 'item/completed', params: {
+        threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_900,
+        item: {
+          type: 'agentMessage', id: `steer-answer-${steerCount}`, phase: 'commentary',
+          text: `Отвечаю на уточнение: ${text}`, memoryCitation: null, delivery: null,
+        },
+      } });
+
+      if (steerCount >= steersExpected) {
+        const guided = message.params?.input?.slice(1).some((part) =>
+          String(part?.text || '').includes('вернись к ранее поставленной задаче'));
+        const resumed = !process.env.COCKPIT_CODEX_FIXTURE_REQUIRE_RESUME || guided;
+        finishSteeredTurn(resumed);
+        phase = 'complete';
+      }
       return;
     }
 

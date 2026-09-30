@@ -27,6 +27,12 @@ import {
 } from './_claudeStream.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnPort,
+  InTurnReceiptEvent,
+  InTurnUnavailableReason,
+} from '../../../../shared/chatInTurnContracts.ts';
 
 // Журнал сервера в том минимуме, который использует ход. Та же форма, что у потока.
 interface StreamLog {
@@ -1801,6 +1807,7 @@ export default {
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal,
     workspaceAccess, workTools, onSessionCreated,
+    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
   }: {
     config: ClaudeConfig;
     env?: NodeJS.ProcessEnv;
@@ -1821,6 +1828,10 @@ export default {
     workspaceAccess?: WorkspaceAccess | null;
     workTools?: { descriptors?: unknown } | null;
     onSessionCreated?: (sessionId: string) => unknown;
+    onInTurnReady?: (port: InTurnPort) => void;
+    onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
+    onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+    onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
   }) {
     const args = [
       '-p', String(message ?? ''),
@@ -1898,6 +1909,45 @@ export default {
     if (sessionId) args.push('--resume', sessionId);
     for (const d of readableRoots) {
       if (d !== cwd) args.push('--add-dir', d);
+    }
+
+    // Разовый запуск с каналом уточнений идёт тем же stream-json процессом, что живая
+    // сессия, и закрывается после общего завершения: иначе дополнительный ввод некуда
+    // писать — `claude -p <текст>` читает stdin только как признак конца.
+    if (onInTurnReady || onInTurnAvailability || onInTurnReceipt || onAssistantMessage) {
+      const streamArgs = ['-p', '--input-format', 'stream-json', ...args.slice(2)];
+
+      return (async () => {
+        const session = openClaudeStreamSession({
+          bin: config.claudeBin,
+          args: streamArgs,
+          cwd,
+          env,
+          sessionId: sessionId || null,
+          log,
+        });
+        const onAbort = () => {
+          void session.interrupt();
+        };
+
+        signal?.addEventListener('abort', onAbort, { once: true });
+
+        try {
+          return await session.send({
+            message,
+            onStep,
+            onProgress,
+            onSessionCreated,
+            ...(onInTurnReady ? { onInTurnReady } : {}),
+            ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
+            ...(onInTurnReceipt ? { onInTurnReceipt } : {}),
+            ...(onAssistantMessage ? { onAssistantMessage } : {}),
+          });
+        } finally {
+          signal?.removeEventListener('abort', onAbort);
+          await session.close();
+        }
+      })();
     }
 
     return new Promise<unknown>((resolve, reject) => {
@@ -1981,6 +2031,15 @@ export default {
    * Всё из restartOn — флаги командной строки, зафиксированные при запуске: сменить их
    * на лету нечем, поэтому пул переоткрывает сессию с прежним sessionId.
    */
+  // Канал ввода в активный ход: дополнительное user-сообщение в тот же stream-json
+  // процесс. Ответ приходит отдельным result — по нему подтверждается потребление,
+  // а разовый режим поднимает stream-json на время хода и закрывает после финала.
+  inTurnInput: {
+    protocol: 1,
+    text: true,
+    confirmation: 'consumed',
+  },
+
   session: {
     mode: 'persistent',
     unsolicited: true,

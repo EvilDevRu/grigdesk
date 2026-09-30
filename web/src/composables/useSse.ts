@@ -31,6 +31,8 @@ const EVENT_NAMES = [
   'chat-done',
   'chat-orphan',
   'chat-turn-start',
+  'chat-in-turn',
+  'chat-assistant-message',
   'chat-sessions',
   'chat-session',
   'chat-store',

@@ -5,6 +5,7 @@
 // в проекте быть не должно.
 
 import { contractDecoders } from './contractDecoders.ts';
+import type { InTurnCapability } from './chatInTurnContracts.ts';
 
 // Модель реестра в том объёме, в каком её читают соседние разделы при выборе.
 // `extra` — старая версия семейства: в кратком списке её не показывают.
@@ -23,6 +24,8 @@ export interface ProviderEntry {
   available?: boolean;
   models?: ProviderModelEntry[];
   capabilities?: Record<string, boolean>;
+  // Канал ввода в активный ход: подробный контракт отдельным полем, а не boolean-флагом.
+  inTurn?: InTurnCapability;
 }
 
 export class ProvidersContractError extends Error {

@@ -10,6 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
@@ -23,6 +24,11 @@ import {
 import { ChatSessionBindingStore } from '../../lib/chat/sessionBindingStore.ts';
 import { ChatTurnLocks } from '../../lib/chat/turnLocks.ts';
 import { ChatTurnLedger, TURN_ID_RE } from '../../lib/chat/turnLedger.ts';
+import { ChatInTurnLedger } from '../../lib/chat/inTurnLedger.ts';
+import { ChatAssistantMessages } from '../../lib/chat/assistantMessages.ts';
+import { ChatAssistantPublisher } from '../../lib/chat/assistantPublisher.ts';
+import { InTurnHistory } from '../../lib/chat/inTurnHistory.ts';
+import { InTurnMessages } from '../../lib/chat/inTurnMessages.ts';
 import { ChatLiveSessions } from '../../lib/chat/liveSessions.ts';
 import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
@@ -34,6 +40,18 @@ import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
 import { normalizeContextUsage } from '../../../../shared/chatContextUsage.ts';
 import type { ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
+import {
+  IN_TURN_ID_RE,
+  IN_TURN_PROTOCOL,
+  IN_TURN_PAGE_LIMIT,
+  utf8Bytes,
+} from '../../../../shared/chatInTurnContracts.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnPort,
+  InTurnReceiptEvent,
+  InTurnUnavailableReason,
+} from '../../../../shared/chatInTurnContracts.ts';
 import {
   contextPrefix,
   normalizeUiContext,
@@ -184,6 +202,7 @@ interface InteractionDecision {
   behavior?: string;
   message?: string;
   answers?: StructuredAnswer[];
+  rawAnswers?: AnswerInput[];
   selected?: string[];
   text?: string;
   comment?: string;
@@ -218,6 +237,8 @@ type InteractionQueue = Omit<PermissionQueue, 'entries'> & {
 // до проверки массива, а модели и ответы несут только поля, которые читает модуль.
 interface ChatExecutor {
   id: string;
+  // Канал ввода в активный ход объявляет сам адаптер; отсутствие — честное «не умею».
+  inTurnInput?: ExecutorAdapter['inTurnInput'];
   workToolsTransport?: string;
   autoCompactEnv?: string;
   retryContract?: string;
@@ -316,6 +337,8 @@ interface RunningTurn extends ChatContextUsage {
   abandon?: () => Promise<void>;
   // Id принятого хода: окно после F5 узнаёт по нему своё сообщение в работе.
   turnId?: string;
+  // Идентификатор конкретного исполнения: уточнения адресуются ему, а не «чату вообще».
+  runId: string;
 }
 
 // Куда уходит итог хода. Синхронный запуск отвечает на свой HTTP-запрос и паркует итог
@@ -593,6 +616,34 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Журнал ходов, принятых по turnId: идемпотентность приёма, статус после F5 и итог
   // ходам, которые прошлый процесс не довёл до конца.
   const turnLedger = new ChatTurnLedger({ dir: path.join(config.chatsDir, 'turns') });
+  const inTurnLedger = new ChatInTurnLedger({ dir: path.join(config.chatsDir, 'in-turn') });
+  const assistantMessages = new ChatAssistantMessages({
+    dir: path.join(config.chatsDir, 'in-turn-assistant'),
+  });
+  // Проекция разговора для следующего хода: уточнения и ответы прошлых запусков.
+  const inTurnHistory = new InTurnHistory({ ledger: inTurnLedger, assistant: assistantMessages });
+
+  history.setCanonicalMessages((chatId) => inTurnHistory.project({ chatKey: chatId }));
+  // Координатор уточнений: приём и доставка живут отдельно от очереди обычных ходов.
+  const inTurnMessages = new InTurnMessages({
+    ledger: inTurnLedger,
+    assistant: assistantMessages,
+    onChange: (event) => {
+      fastify.sse.broadcast('chat-in-turn', { ...event, at: Date.now() });
+    },
+  });
+  const assistantPublisher = new ChatAssistantPublisher({
+    messages: assistantMessages,
+    nextSequence: (runId) => inTurnMessages.hasRun(runId) ? inTurnMessages.nextSequence(runId) : 0,
+    onMessage: (block) => {
+      fastify.sse.broadcast('chat-assistant-message', {
+        chatKey: block.chatKey,
+        runId: block.runId,
+        block,
+        at: Date.now(),
+      });
+    },
+  });
   // turnId → приём, который идёт прямо сейчас: одновременный повтор ждёт его исхода.
   const acceptingTurns = new Map<string, Promise<TurnReply>>();
   // chatKey → хвост приёма. Приём одного чата идёт строго по очереди прихода, иначе
@@ -1120,10 +1171,27 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return '';
   }
 
+  /**
+   * Публичное состояние канала уточнений у запуска: готовность с ревизией и ограниченная
+   * проекция записей. Полный список окно добирает страницами GET по runId, не зная id заранее.
+   */
+  function publicInTurnState(runId: string) {
+    const availability = inTurnMessages.availability(runId);
+
+    if (!availability) {
+      return null;
+    }
+
+    return { ...availability, ...inTurnMessages.activeProjection(runId) };
+  }
+
   fastify.get<ChatRoute>('/api/chat/active', async () => ({
+    protocol: IN_TURN_PROTOCOL,
     // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
       chatKey,
+      runId: v.runId,
+      inTurn: publicInTurnState(v.runId),
       ...(v.turnId ? { turnId: v.turnId } : {}),
       startedAt: v.startedAt,
       // Сколько ход уже идёт — по часам СЕРВЕРА, на момент ответа. Окно после F5 или
@@ -1147,6 +1215,103 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       acceptedAt: entry.acceptedAt,
     })),
   }));
+
+
+  // Приём уточнения в активный ход. Отвечает коротко после устойчивой записи, а доставку
+  // выполняет координатор: HTTP-соединение не держится ни до ответа модели, ни до ACK.
+  fastify.post<ChatRoute>('/api/chat/in-turn', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>;
+    const allowed = new Set(['chatKey', 'targetRunId', 'messageId', 'text', 'sentAt', 'context']);
+    const unknown = Object.keys(body).filter((key) => !allowed.has(key));
+
+    if (unknown.length) {
+      return reply.code(400).send({
+        error: 'invalid_in_turn_message',
+        message: `Неизвестные поля: ${unknown.join(', ')}`,
+      });
+    }
+
+    const chatKey = String(body.chatKey || '');
+    const targetRunId = String(body.targetRunId || '');
+    const messageId = String(body.messageId || '');
+    const text = typeof body.text === 'string' ? body.text : '';
+    const sentAt = Number.isSafeInteger(body.sentAt) ? Number(body.sentAt) : 0;
+
+    if (!chatKey || !IN_TURN_ID_RE.test(messageId) || !IN_TURN_ID_RE.test(targetRunId)) {
+      return reply.code(400).send({
+        error: 'invalid_in_turn_message',
+        message: 'Некорректный чат, id сообщения или запуска.',
+      });
+    }
+
+    const result = await inTurnMessages.accept({
+      chatKey,
+      runId: targetRunId,
+      messageId,
+      text,
+      ...(sentAt > 0 ? { sentAt } : {}),
+      ...(body.context !== undefined ? { context: body.context } : {}),
+    });
+
+    if (!result.ok) {
+      return reply.code(result.status).send({
+        error: result.code,
+        message: result.message,
+        ...(result.reason ? { reason: result.reason } : {}),
+      });
+    }
+
+    return reply.code(202).send({ accepted: true, ...result.receipt });
+  });
+
+  // Восстановление уточнений и ответов: список известных id или страницы по runId.
+  // Второй режим работает и после финала запуска — окно подбирает пропуски, не зная id.
+  fastify.get<ChatRoute>('/api/chat/in-turn', async (request, reply) => {
+    const query = request.query || {};
+    const chatKey = String(query.chatKey || '');
+    const runId = String(query.runId || '');
+    const ids = String(query.ids || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (!chatKey) {
+      return reply.code(400).send({ error: 'invalid_in_turn_message', message: 'Не указан чат.' });
+    }
+    if (!ids.length && !runId) {
+      return reply.code(400).send({
+        error: 'invalid_in_turn_message',
+        message: 'Нужен runId или список ids.',
+      });
+    }
+    if (ids.length > IN_TURN_PAGE_LIMIT) {
+      return reply.code(400).send({
+        error: 'invalid_in_turn_message',
+        message: `За один запрос не больше ${IN_TURN_PAGE_LIMIT} id.`,
+      });
+    }
+
+    if (ids.length) {
+      const messages: Record<string, unknown> = {};
+
+      for (const id of ids) {
+        messages[id] = IN_TURN_ID_RE.test(id) ? inTurnMessages.receipt(chatKey, id) : null;
+      }
+
+      return { messages };
+    }
+    if (inTurnMessages.chatKeyOf(runId) !== chatKey) {
+      return reply.code(404).send({ error: 'not_found', message: 'Запуск не найден в этом чате.' });
+    }
+
+    const page = inTurnMessages.page(runId, {
+      afterSequence: Number(query.afterSequence) || 0,
+      throughSequence: Number(query.throughSequence) || 0,
+      limit: Math.min(Number(query.limit) || IN_TURN_PAGE_LIMIT, IN_TURN_PAGE_LIMIT),
+    });
+
+    return { ...page, availability: inTurnMessages.availability(runId) };
+  });
 
   /**
    * Живые процессы исполнителей: кто сейчас держит память, MCP-серверы и незакрытые
@@ -1295,6 +1460,70 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // без локального HTTP MCP-процесса Claude. От него зависит только ФОРМА ответа, поэтому
   // вендорных веток здесь нет: новый исполнитель ничего не добавляет в ядро.
   const pendingPerms = permissionQueue.entries;
+  const questionHolds = new Map<string, {
+    count: number;
+    desired: { available: boolean; reason?: InTurnUnavailableReason };
+  }>();
+
+  /**
+   * Пока открыт вопрос агента, обычное уточнение не должно стать ответом на него.
+   * Последний закрытый вопрос возвращает готовность, которую запросил транспорт.
+   */
+  function holdInTurnForQuestion(chatKey: string | undefined): () => void {
+    const runId = activeRuns.get(chatKey)?.runId;
+
+    if (!runId || !inTurnMessages.hasRun(runId)) {
+      return () => {};
+    }
+
+    const current = questionHolds.get(runId);
+
+    if (current) {
+      current.count += 1;
+    } else {
+      const availability = inTurnMessages.availability(runId);
+
+      questionHolds.set(runId, {
+        count: 1,
+        desired: {
+          available: availability?.available === true,
+          ...(availability?.reason ? { reason: availability.reason } : {}),
+        },
+      });
+    }
+
+    inTurnMessages.setAvailability(runId, false, 'awaiting_answer');
+
+    return () => {
+      const hold = questionHolds.get(runId);
+
+      if (!hold || --hold.count > 0) {
+        return;
+      }
+
+      questionHolds.delete(runId);
+
+      if (activeRuns.get(chatKey)?.runId === runId) {
+        inTurnMessages.setAvailability(runId, hold.desired.available, hold.desired.reason);
+      }
+    };
+  }
+
+  function publishInTurnAvailability(runId: string, status: {
+    available: boolean;
+    reason?: InTurnUnavailableReason;
+  }): void {
+    const hold = questionHolds.get(runId);
+
+    if (hold) {
+      hold.desired = status;
+      inTurnMessages.setAvailability(runId, false, 'awaiting_answer');
+
+      return;
+    }
+
+    inTurnMessages.setAvailability(runId, status.available, status.reason);
+  }
   // Ждём ответ СКОЛЬКО НУЖНО: «не успел за 4 минуты» — не повод продолжать без человека.
   // Сутки — верхняя граница здравого смысла, столько же держит вызов сам CLI
   // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
@@ -1339,6 +1568,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     const at = Date.now();
     const isQuestion = !!presentation?.isQuestion;
+    const releaseQuestion = isQuestion ? holdInTurnForQuestion(chatKey) : () => {};
     const presentationActions = Array.isArray(presentation?.actions)
       && presentation.actions.length
       ? presentation.actions
@@ -1404,7 +1634,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           pid, tool, input, canRemember: entry.canRemember, chatKey: chatKey || '', at,
         });
       }
-    });
+    }).finally(releaseQuestion);
   }
 
   /**
@@ -1521,6 +1751,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     // Вопрос агента — не разрешение, а диалог: показываем варианты, а не «разрешить/отклонить».
     const isQuestion = tool_name === 'AskUserQuestion';
+    const releaseQuestion = isQuestion ? holdInTurnForQuestion(chatKey) : () => {};
     const at = Date.now();
     return new Promise((resolve) => {
       // chatKey запоминаем, чтобы «стоп» и конец хода сняли именно запросы этого чата.
@@ -1547,7 +1778,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       } else {
         fastify.sse.broadcast('chat-permission', { pid, tool: tool_name || '?', input: input || {}, chatKey: chatKey || '', at });
       }
-    });
+    }).finally(releaseQuestion);
   });
 
   // Ответ пользователя из браузера: разрешение (allow) либо ответы на вопросы (answers).
@@ -1591,9 +1822,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
       const answers = Array.isArray(body.answers) ? body.answers : [];
       const text = answers.map((answer) => answer?.text || '').find(Boolean) || '';
+
       p.resolve({
         selected: answers.flatMap((answer) => answer?.selected || []).filter(Boolean),
         text,
+        rawAnswers: answers,
       });
       // Свой текст в ответе доезжает не всегда (см. acceptsText): молчаливая потеря
       // выглядела бы как «агент проигнорировал ответ», поэтому говорим прямо — фронт
@@ -1672,9 +1905,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    */
   async function parkTurnResult(turnId: string, result: Record<string, unknown>, outcome: string) {
     const chatKey = String(result.chatKey || turnLedger.get(turnId)?.chatKey || '');
+    const runId = activeRuns.get(chatKey)?.runId;
 
     await writeOrphan({
       ...result,
+      ...(runId ? { runId } : {}),
       id: turnId,
       turnId,
       chatKey,
@@ -1726,17 +1961,37 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
   }
 
-  fastify.get<ChatRoute>('/api/chat/pending', async () => {
-    const pending: unknown[] = [];
-    let files = [];
-    try { files = await fs.readdir(pendingDir); } catch { return { pending }; }
-    for (const f of files) {
-      if (!f.endsWith('.json')) continue;
-      try { pending.push(JSON.parse(await fs.readFile(path.join(pendingDir, f), 'utf8'))); }
-      catch { /* битый файл — подберём/удалят руками */ }
+  /**
+   * Записи pending: итоги ходов, которые окно ещё не перенесло в историю. Читаются и
+   * маршрутом, и проекцией следующего хода — окно может быть закрыто, а ответ обязан
+   * доехать до модели вместе с репликой.
+   */
+  async function readPendingRecords(): Promise<Array<Record<string, unknown>>> {
+    const pending: Array<Record<string, unknown>> = [];
+    let files: string[] = [];
+
+    try {
+      files = await fs.readdir(pendingDir);
+    } catch {
+      return pending;
     }
-    return { pending };
-  });
+
+    for (const file of files) {
+      if (!file.endsWith('.json')) {
+        continue;
+      }
+
+      try {
+        pending.push(JSON.parse(await fs.readFile(path.join(pendingDir, file), 'utf8')));
+      } catch {
+        // Битый файл подберут или удалят руками — проекцию он не ломает.
+      }
+    }
+
+    return pending;
+  }
+
+  fastify.get<ChatRoute>('/api/chat/pending', async () => ({ pending: await readPendingRecords() }));
 
   fastify.delete<ChatRoute>('/api/chat/pending/:id', async (request) => {
     const id = String(request.params.id).replace(/[^\w.-]/g, '');
@@ -2615,7 +2870,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Конец хода как обещание: слив остановки ждёт его, а не опрашивает activeRuns.
     let finishRun!: () => void;
     const finished = new Promise<void>((resolve) => { finishRun = () => resolve(); });
+    const runId = `run-${randomUUID()}`;
     const runRec: RunningTurn = {
+      runId,
       startedAt: Date.now(),
       tokens: 0,
       steps: [],
@@ -2664,13 +2921,32 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       await fs.rm(path.join(pendingDir, `${abandonedId}.json`), { force: true }).catch(() => {});
       abandonedId = null;
     };
+
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
+      // Канал уточнений открывается на этот запуск; транспорт зарегистрирует порт сам.
+
+      inTurnMessages.beginRun({
+        chatKey,
+        runId,
+        ...(channel.turnId ? { parentTurnId: channel.turnId } : {}),
+      });
+
+      if (plan) {
+        inTurnMessages.setAvailability(runId, false, 'compacting');
+      } else if (!executor.inTurnInput) {
+        // Исполнитель честно не умеет ввод в активный ход: причина называется сразу,
+        // а не выглядит как «транспорт ещё не поднялся».
+        inTurnMessages.setAvailability(runId, false, 'unsupported');
+      }
+
       // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
       fastify.sse.broadcast('chat-turn-start', {
         chatKey,
         at: runRec.startedAt,
+        runId,
         compact: !!plan,
+        inTurn: publicInTurnState(runId),
         ...(channel.turnId ? { turnId: channel.turnId } : {}),
       });
     }
@@ -2735,6 +3011,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         });
       }
 
+      // Барьер перед executor: группа прошлых запусков и pending попадает в chat-файл
+      // под его lock. Ошибка записи не позволяет следующему ходу читать неполный prompt.
+      const pendingHistory = await readPendingRecords();
+      const durableHistory = chatKey && target.record
+        ? await history.syncMessages(chatKey, (messages) => inTurnHistory.project({
+          chatKey,
+          base: messages,
+          pending: pendingHistory,
+        }))
+        : null;
+
       const runArgs: ExecutorTurnOptions = {
         config,
         chatKey,
@@ -2754,10 +3041,16 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         workTools: workToolsValue,
         workToolScopeKey,
         providerSettings,
-        // Server-owned снапшот истории чата: stateless HTTP-исполнители (Ollama)
-        // реплеят из него разговор; CLI-исполнители поле игнорируют. Содержит и
-        // текущее сообщение (клиент сохранил его до POST) — дубликат срезает executor.
-        chatHistory: target.record?.messages,
+        // Server-owned снапшот истории чата: stateless HTTP-исполнители реплеят из него
+        // разговор, CLI-исполнители поле игнорируют. Кроме сохранённой ленты сюда входит
+        // проекция прошлых запусков и ответы из pending: окно могло быть закрыто и не
+        // перенести их, а следующая инструкция обязана их видеть. Текущее сообщение клиент
+        // сохранил до POST — дубликат срезает executor.
+        chatHistory: durableHistory?.messages || inTurnHistory.project({
+          chatKey: String(chatKey || ''),
+          base: target.record?.messages,
+          pending: pendingHistory,
+        }),
         // Claude получает порог через env выше, Codex — как официальный config override
         // в своих exec-args. Одно значение настроек, transport выбирает сам executor.
         compactWindow,
@@ -2800,6 +3093,42 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (kimi по
         // ACP, ollama из своего цикла инструментов). Выдаётся всем: не поддерживающий
         // его executor просто не вызовет колбэк, а вендорной ветки в ядре не остаётся.
+        // Канал ввода в активный ход. Порт принадлежит конкретному запуску: чужой runId
+        // отсекается сверкой с activeRuns, поэтому поздние события старого хода не
+        // открывают канал следующему.
+        onInTurnReady: (port: InTurnPort) => {
+          if (activeRuns.get(chatKey)?.runId !== runId) {
+            port.close?.('stale_run');
+
+            return;
+          }
+
+          inTurnMessages.registerPort(runId, port);
+
+          if (questionHolds.has(runId)) {
+            const hold = questionHolds.get(runId)!;
+
+            hold.desired = { available: true };
+            inTurnMessages.setAvailability(runId, false, 'awaiting_answer');
+          }
+        },
+        onInTurnAvailability: (status: { available: boolean; reason?: InTurnUnavailableReason }) => {
+          if (activeRuns.get(chatKey)?.runId !== runId) {
+            return;
+          }
+
+          publishInTurnAvailability(runId, status);
+        },
+        onInTurnReceipt: async (event: InTurnReceiptEvent) => {
+          await inTurnMessages.noteReceipt({
+            ...event,
+            runId,
+            chatKey: String(chatKey || ''),
+          });
+        },
+        onAssistantMessage: async (event: InTurnAssistantEvent) => {
+          await assistantPublisher.publish(runId, String(chatKey || ''), event);
+        },
         onPermission: (presentation) => {
           // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
           // в default), а на безопасные запросы отвечает общий классификатор.
@@ -2854,6 +3183,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           onProgress: runArgs.onProgress,
           onPermission: runArgs.onPermission,
           onSessionCreated: runArgs.onSessionCreated,
+          // Канал уточнений живого режима идёт тем же путём, что разовый: иначе
+          // у живой сессии он молча закрывался бы, а окно показывало «недоступно».
+          onInTurnReady: runArgs.onInTurnReady,
+          onInTurnAvailability: runArgs.onInTurnAvailability,
+          onInTurnReceipt: runArgs.onInTurnReceipt,
+          onAssistantMessage: runArgs.onAssistantMessage,
         }) as Promise<ExecutorRunResult>
         : executor.run(runArgs));
 
@@ -2884,6 +3219,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         const retrySteps = Array.isArray(out.steps) ? out.steps : [];
         out = { ...out, steps: [...emptySteps, retryNote, ...retrySteps] };
       }
+
+      await assistantPublisher.flush(runId);
       out = normalizeExecutorContextCache(out);
       // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt
       // повторять нельзя: модель могла выполнить действие, а ответ потеряться. Но и
@@ -3016,6 +3353,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (rotationNote) {
         out = { ...out, reply: `${rotationNote}\n\n${out.reply || ''}` };
       }
+      // Итоговый текст уже может быть видимым блоком этого же хода. Сохраняем его id
+      // в pending и HTTP-ответе: добавление pid при переносе в историю не создаст дубль.
+      const explicitFinalId = String((out as Record<string, unknown>).assistantMessageId || '');
+      const finalBlock = assistantMessages.byRun(runId)
+        .filter((block) => block.complete && block.text === out.reply)
+        .at(-1);
+      const finalAssistantMessageId = explicitFinalId || finalBlock?.assistantMessageId || '';
+
+      if (finalAssistantMessageId) {
+        out = {
+          ...out,
+          runId,
+          assistantMessageId: finalAssistantMessageId,
+          finalAssistantMessageId,
+        };
+      }
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Ход всё-таки закончился после слива остановки: настоящий ответ важнее записи «на память».
@@ -3139,7 +3492,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     } finally {
       runRec.finish();
+
       if (chatKey) {
+        await inTurnMessages.closeRun(runId, 'Ход завершён.').catch(() => {});
+
         activeRuns.delete(chatKey);
         // Ход кончился (в т.ч. упал), а запрос всё ещё висит — снимаем: без хода
         // отвечать на него некому, а чип «ждёт ответа» висел бы вечно.
@@ -3723,6 +4079,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // POST, висящего весь ход. Старый сервер поля не знает, и окно остаётся на
       // синхронном запуске — повтор без идемпотентности там означал бы второй запуск.
       turnProtocol: 1,
+      // Канал уточнений внутри хода: старый сервер поля не знает, и окно остаётся
+      // на прежней отправке следом — молчаливой поломки не будет.
+      inTurnProtocol: IN_TURN_PROTOCOL,
       workdirProtocol: 1,
       compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
       speech: {
@@ -3944,6 +4303,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // SIGKILL, нехватка памяти — слив остановки тогда не выполнялся). Окно получило
   // подтверждение приёма, поэтому тишина хуже ошибки: каждый такой ход получает итог.
   // Сами ходы не перезапускаются — неизвестно, что исполнитель успел сделать.
+  // Наследство канала уточнений: мёртвые запуски получают честный исход до выдачи итогов
+  // ходов. Восстановление только читает журналы и агента не запускает.
+  await inTurnLedger.load();
+  await assistantMessages.load();
+  await inTurnLedger.sweepDeadRuns(new Set([...activeRuns.keys()].filter((key): key is string => !!key)));
+
   for (const entry of await turnLedger.load()) {
     const wasRunning = entry.state === 'running';
 

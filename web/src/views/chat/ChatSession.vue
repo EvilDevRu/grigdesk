@@ -235,7 +235,7 @@
           <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей.
                Знак и цвет — исполнителя ИМЕННО ЭТОГО хода, а не вшитый Claude: ИИ меняют
                посреди разговора, и прошлые ответы обязаны остаться за прежним. -->
-          <div v-if="m.role === 'assistant'" class="ahead">
+          <div v-if="m.role === 'assistant' && m.kind !== 'assistant-block'" class="ahead">
             <ProviderIcon v-if="runProvider(m)" :provider="runProvider(m)" :size="12" />
             <span>Агент</span>
             <span v-if="m.actualModel || m.model" class="amodel">
@@ -245,6 +245,9 @@
           <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
                а не наперегонки (два CLI на одну сессию убивают друг друга). -->
           <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
+          <div v-if="m.kind === 'in-turn'" class="m-delivery" data-role="chat-in-turn-delivery">
+            {{ inTurnDeliveryText(m.receipt?.state, m.receipt?.error) }}
+          </div>
           <!-- Сервер ещё не подтвердил приём сообщения. Пока подтверждения нет, агент не
                работает, поэтому здесь честное состояние доставки, а не «думает…». -->
           <div
@@ -271,8 +274,10 @@
             v-if="(m.role === 'assistant' || m.role === 'error') && m.steps?.length"
             :steps="m.steps"
             :model-label="modelLabelOf"
+            :displayed-assistant-ids="displayedIdsFor(m.runId)"
           />
-          <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
+          <ChatInTurnReply v-if="m.kind === 'assistant-block'" :block="m" />
+          <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
             <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md"
                  v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
@@ -327,7 +332,10 @@
             </span>
           </div>
           <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
-          <StepList v-if="sess.steps?.length" :steps="sess.steps" :model-label="modelLabelOf" live />
+          <StepList v-if="sess.steps?.length" :steps="sess.steps" :model-label="modelLabelOf"
+                    :displayed-assistant-ids="displayedIdsFor(inTurnRun?.runId)" live />
+          <ChatInTurnReply v-for="block in liveInTurnDrafts" :key="block.assistantMessageId"
+                           :block="block" />
           <!-- Живая строка хода — последняя строка ЭТОГО блока, сразу под лентой шагов: она
                про тот же ход и идёт под переписку, а не отдельной полосой у поля ввода.
                Знак и слово стоят в тех же столбцах, что знак и заголовок строки шага. Ряд
@@ -603,24 +611,40 @@
           >
             <span class="sq"></span>
           </UiIconButton>
+          <UiButton
+            v-if="sess.sending && !sess.compacting"
+            class="send-follow"
+            variant="outline"
+            tone="neutral"
+            data-context="chat-send-following"
+            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
+            @click="submit('following')"
+          >
+            Отправить следом
+          </UiButton>
           <UiIconButton
             class="send"
             role="peer"
             variant="solid"
             tone="accent"
-            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
+            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)
+              || (sess.sending && !inTurnComposer.ready)"
             :label="speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
-              : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
+              : sess.sending ? (inTurnComposer.ready ? 'Уточнить сейчас (Enter)' : inTurnComposer.reason)
+              : 'Отправить (Enter)'"
             :title="speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
-              : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
+              : sess.sending ? (inTurnComposer.ready ? 'Уточнить сейчас (Enter)' : inTurnComposer.reason)
+              : 'Отправить (Enter)'"
             data-context="chat-send"
             @click="submit"
           >
             ↑
           </UiIconButton>
         </div>
+        <div v-if="sess.sending && !inTurnComposer.ready" class="in-turn-hint"
+             data-role="chat-in-turn-unavailable">{{ inTurnComposer.reason }}</div>
         <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -643,6 +667,9 @@ import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
+import ChatInTurnReply from './ChatInTurnReply.vue';
+import { inTurnComposerState, inTurnDeliveryText } from './chatInTurn.ts';
+import { displayedAssistantIds, isInTurnReceipt } from '../../stores/chatInTurn.ts';
 import ChatThinking from './ChatThinking.vue';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
@@ -728,6 +755,29 @@ function onAttachmentClick(event, attachment) {
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
   || (chat.archived || []).find((s) => s.id === props.sid)
   || null);
+const inTurnRun = computed(() => chat.inTurnFor?.(props.sid) || null);
+const inTurnComposer = computed(() => {
+  if (sess.value?.sending && !inTurnRun.value?.active) {
+    return { active: true, ready: false, reason: 'Сервер пока не подтвердил активный запуск.' };
+  }
+  return inTurnComposerState({
+    run: inTurnRun.value,
+    protocol: chat.inTurnProtocol,
+    capability: current.value.provider?.inTurn,
+    pendingCount: pending.value.length,
+    text: input.value,
+  });
+});
+const liveInTurnDrafts = computed(() => (inTurnRun.value?.entries || [])
+  .filter((entry) => !isInTurnReceipt(entry) && !entry.complete && !!entry.text?.trim()));
+function displayedIdsFor(runId) {
+  if (!runId) return [];
+  const restored = (sess.value?.messages || [])
+    .filter((message) => message.runId === runId && message.kind === 'assistant-block')
+    .map((message) => message.assistantMessageId);
+  if (inTurnRun.value?.runId === runId) restored.push(...displayedAssistantIds(inTurnRun.value));
+  return [...new Set(restored)];
+}
 
 // ── Название чата в шапке страницы «Чаты» ──
 const editingTitle = ref(false);
@@ -1414,7 +1464,7 @@ watch(input, (v) => {
 function flushDraft() { clearTimeout(draftTimer); chat.setDraft(props.sid, input.value); }
 window.addEventListener('beforeunload', flushDraft);
 onUnmounted(() => { flushDraft(); window.removeEventListener('beforeunload', flushDraft); });
-async function submit() {
+async function submit(mode = 'primary') {
   if (speechBusy.value) return;
   const t = input.value.trim();
   const atts = pending.value.slice();
@@ -1423,7 +1473,24 @@ async function submit() {
   // служебным ходом, `$skill` — обычным prompt; run:'none' остаётся обычным сообщением.
   // Сверка регистронезависимая — как в меню: имя навыка приходит от исполнителя.
   const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === t.toLowerCase() && c.run !== 'none');
-  if (exact) { runCommand(exact); return; }
+  if (exact && exact.cmd.startsWith('/')) { runCommand(exact); return; }
+  if (sess.value.sending && mode !== 'following') {
+    if (!inTurnComposer.value.ready) {
+      inputErr.value = inTurnComposer.value.reason;
+      return;
+    }
+    const accepted = await chat.sendInTurn(props.sid, t);
+    if (!accepted) {
+      inputErr.value = chat.inTurnError || 'Не удалось отправить уточнение.';
+      return;
+    }
+    inputErr.value = '';
+    input.value = '';
+    clearTimeout(draftTimer);
+    chat.setDraft(props.sid, '');
+    atBottom.value = true;
+    return;
+  }
   input.value = '';
   atBottom.value = true; // своё сообщение всегда показываем — как в мессенджерах
   // Черновик отправленного сообщения гасим сразу: дебаунс успел бы записать его
@@ -1511,6 +1578,7 @@ async function resumeInterrupted() {
   await chat.send(props.sid, text, []);
 }
 function onKey(e) {
+  if (e.isComposing || e.keyCode === 229) return;
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
   // Навигация по выбираемым пунктам (cmdNav): заголовки и run:'none' пропускаются.
   const m = cmdNav.value;
@@ -1520,7 +1588,10 @@ function onKey(e) {
     if ((e.key === 'Enter' || e.key === 'Tab') && m.length) { e.preventDefault(); runCommand(m[Math.min(cmdIndex.value, m.length - 1)]); return; }
     if (e.key === 'Escape') { input.value = ''; return; }
   }
-  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); submit(); }
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    submit();
+  }
 }
 
 // ── Команды и навыки: «/» открывает CLI-команды, «$» — skills Codex ──
@@ -1602,6 +1673,12 @@ async function runCommand(command) {
     // Вложения тоже уезжают только с навыком: у служебного хода их не бывает,
     // а «переделай вот эту картинку» — обычный сценарий $-навыка.
     const skill = c.cmd.startsWith('$');
+    if (skill && sess.value.sending) {
+      input.value = c.cmd;
+      cmdIndex.value = 0;
+      await submit();
+      return;
+    }
     const atts = skill ? pending.value.slice() : [];
     input.value = '';
     cmdIndex.value = 0;
@@ -2066,6 +2143,8 @@ async function openDebug() {
 .chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
 .chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
+.in-turn-hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.send-follow { align-self: flex-end; white-space: nowrap; }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }
 .speech-note { margin-top: 6px; }
