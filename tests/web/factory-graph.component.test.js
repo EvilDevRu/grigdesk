@@ -299,3 +299,202 @@ test('эталонный режим след арбитра не рисует', 
 
   assert.equal(wrapper.find('.node-arb').exists(), false);
 });
+
+const LOOP_GRAPH = {
+  pos: {
+    build: [140, 50],
+    review: [480, 50],
+    accept: [820, 50],
+  },
+  nodes: {
+    build: ['agent', 'Реализация', ''],
+    review: ['agent', 'Проверка', ''],
+    accept: ['human', 'Приёмка', ''],
+  },
+  edges: [
+    ['_start', 'review', '', 'plain', 'arc_up'],
+    ['build', 'review', '', 'plain', 'h'],
+    ['review', 'build', 'failed', 'fail', 'arc_up'],
+    ['review', 'accept', '', 'plain', 'h'],
+    ['accept', 'review', 'rejected', 'fail', 'arc_up'],
+  ],
+  loop: { lead: 'review', worker: 'build' },
+  loopProgress: {
+    round: 3,
+    maxRounds: 20,
+    stage: 2,
+  },
+  daemonAlive: true,
+  statuses: {
+    build: 'run',
+    review: 'pending',
+    accept: 'pending',
+  },
+};
+
+/**
+ * Оба представления получают одинаковый граф, как в живой карточке конвейера.
+ * Настоящие SFC проверяют смену состояний без запуска маршрута и настоящих агентов.
+ */
+async function mountLoop(t, component = 'FactoryGraph') {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, Component] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile(`src/views/pipeline/${component}.vue`)),
+  ]);
+  const wrapper = mount(Component, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph: structuredClone(LOOP_GRAPH) },
+  });
+
+  t.after(() => wrapper.unmount());
+
+  return wrapper;
+}
+
+test('петля всегда показывает две передачи и движется к работающему агенту', async (t) => {
+  const wrapper = await mountLoop(t);
+  const forward = '[data-source="build"][data-destination="review"]';
+  const back = '[data-source="review"][data-destination="build"]';
+
+  assert.equal(wrapper.get(`${back} text`).text(), 'Задание на круг');
+  assert.match(wrapper.get(`${back} title`).text(), /failed/, 'исход перехода остаётся в подсказке');
+  assert.equal(wrapper.get(`${forward} text`).text(), 'На проверку');
+  assert.equal(wrapper.get(`${back} path`).classes().includes('e-flow'), true);
+  assert.equal(wrapper.findAll('.e-flow').length, 1);
+  assert.equal(wrapper.get('.loop-active').attributes('data-node'), 'build');
+  assert.equal(wrapper.get('[data-node="review"] .node-loop-role').text(), 'Ведущий');
+  assert.equal(wrapper.find('[data-source="accept"] path').exists(), false);
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    statuses: {
+      build: 'done',
+      review: 'run',
+      accept: 'pending',
+    },
+  } });
+
+  assert.equal(wrapper.get(`${forward} path`).classes().includes('e-flow'), true);
+  assert.equal(wrapper.get(`${back} path`).classes().includes('e-flow'), false);
+  assert.equal(wrapper.findAll('.e-flow').length, 1, 'старт не движется повторно вместе с петлёй');
+  assert.equal(wrapper.get('.loop-active').attributes('data-node'), 'review');
+});
+
+test('первая постановка, пауза, приёмка и эталон не изображают выполненный круг', async (t) => {
+  const wrapper = await mountLoop(t);
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    loopProgress: { ...LOOP_GRAPH.loopProgress, round: 0 },
+    statuses: {
+      build: 'pending',
+      review: 'run',
+      accept: 'pending',
+    },
+  } });
+
+  assert.equal(wrapper.findAll('.e-cycle.e-flow').length, 0);
+  assert.equal(wrapper.get('[data-source="_start"] path').classes().includes('e-flow'), true);
+
+  await wrapper.setProps({ graph: { ...LOOP_GRAPH, daemonAlive: false } });
+
+  assert.equal(wrapper.find('.node-loop-orbit').exists(), false);
+  assert.equal(wrapper.find('.e-flow').exists(), false);
+  assert.equal(wrapper.findAll('.elbl-cycle').length, 2, 'обе передачи видны и на паузе');
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    statuses: {
+      build: 'done',
+      review: 'done',
+      accept: 'wait',
+    },
+  } });
+
+  assert.equal(wrapper.find('.node-loop-orbit').exists(), false);
+  assert.equal(wrapper.find('.e-flow').exists(), false);
+
+  await wrapper.setProps({ graph: LOOP_GRAPH, reference: true });
+
+  assert.equal(wrapper.find('.e-flow').exists(), false);
+  assert.equal(wrapper.findAll('.elbl-cycle').length, 2);
+});
+
+test('сводка называет круг, этап и агента и обновляется при передаче', async (t) => {
+  const wrapper = await mountLoop(t, 'LoopStatus');
+
+  assert.match(wrapper.text(), /Круг 3 из 20/);
+  assert.match(wrapper.text(), /Этап 2/);
+  assert.match(wrapper.text(), /Выполняет: Реализация/);
+  assert.equal(wrapper.attributes('role'), 'status');
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    statuses: {
+      build: 'done',
+      review: 'run',
+      accept: 'pending',
+    },
+  } });
+
+  assert.match(wrapper.text(), /Проверяет: Проверка/);
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    loopProgress: {
+      round: 4,
+      maxRounds: 20,
+      stage: 3,
+    },
+  } });
+
+  assert.match(wrapper.text(), /Круг 4 из 20/);
+  assert.match(wrapper.text(), /Этап 3/);
+
+  await wrapper.setProps({ graph: { ...LOOP_GRAPH, daemonAlive: false } });
+
+  assert.match(wrapper.text(), /Петля на паузе/);
+  assert.equal(wrapper.find('.loop-dot').exists(), false);
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    stall: { node: 'build', title: 'Остановка' },
+  } });
+
+  assert.match(wrapper.text(), /Петля остановлена/);
+  assert.equal(wrapper.find('.loop-dot').exists(), false);
+});
+
+test('сводка не выдумывает первый круг и не включает режим по обычным возвратам', async (t) => {
+  const wrapper = await mountLoop(t, 'LoopStatus');
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    loopProgress: {
+      round: 0,
+      maxRounds: 20,
+      stage: 1,
+    },
+    statuses: {
+      build: 'pending',
+      review: 'run',
+      accept: 'pending',
+    },
+  } });
+
+  assert.match(wrapper.text(), /До первого круга/);
+  assert.match(wrapper.text(), /Ставит задачу/);
+
+  await wrapper.setProps({ graph: { ...LOOP_GRAPH, loopProgress: null } });
+
+  assert.match(wrapper.text(), /Круг неизвестен/);
+
+  await wrapper.setProps({ graph: {
+    ...LOOP_GRAPH,
+    loop: null,
+    loops: { review: 3 },
+  } });
+
+  assert.equal(wrapper.find('.loop-status').exists(), false);
+});

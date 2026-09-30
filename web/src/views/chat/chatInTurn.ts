@@ -52,7 +52,7 @@ export function inTurnComposerState({ run, protocol, capability, pendingCount, t
     return composerState(true, false, REASONS.unsupported);
   }
   if (pendingCount) {
-    return composerState(true, false, 'Уточнение принимает только текст. Вложения можно отправить следом.');
+    return composerState(true, false, 'Вложения нельзя передать в текущий ход.');
   }
   if (utf8Bytes(text || '') > IN_TURN_TEXT_LIMIT_BYTES) {
     return composerState(true, false, 'Уточнение длиннее 32 КиБ.');

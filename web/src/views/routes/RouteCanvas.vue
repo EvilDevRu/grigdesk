@@ -126,6 +126,7 @@ const connectOutcomes = computed(() => Object.keys(connectSource.value?.on ?? {}
 function graphMachine(source: DraftMachine, bootstrap: boolean): RouteMachine {
   return {
     entry: source.entry ?? undefined,
+    loop: bootstrap ? undefined : source.loop,
     sequence: {
       main: (bootstrap ? source.sequence.bootstrap : source.sequence.main) ?? [],
       tail: bootstrap ? [] : source.sequence.tail ?? [],

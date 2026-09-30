@@ -9,7 +9,7 @@
 // и склеивает исходы одной пары в одну линию: служебные узлы и отдельная линия на каждый
 // исход делали схему нечитаемой.
 import { projectRouteMachine } from './routeProjection.ts';
-import type { DraftMachine } from './routeDefinition.ts';
+import type { DraftMachine, RouteLoopDoc } from './routeDefinition.ts';
 import type { ProjectedRouteEdge } from './routeProjection.ts';
 
 // [вид, подпись, подзаголовок] узла схемы.
@@ -44,6 +44,7 @@ export interface RouteMachine {
   sequence: { bootstrap?: string[]; main: string[]; tail: string[] };
   entry?: string;
   bootstrap?: 'required' | 'skip';
+  loop?: RouteLoopDoc;
 }
 
 // Ребро схемы: откуда, куда, подпись, класс линии и способ прокладки.
@@ -80,6 +81,7 @@ export interface RouteGraphDef {
   transitions: RouteGraphTransition[];
   nodeOrigins: Record<string, RouteGraphNodeOrigin>;
   route: string;
+  loop: RouteLoopDoc | null;
 }
 
 export interface RouteGraphOptions {
@@ -534,5 +536,8 @@ export function buildRouteGraph(
     transitions,
     nodeOrigins,
     route,
+    loop: machine.loop && order.has(machine.loop.lead) && order.has(machine.loop.worker)
+      ? { ...machine.loop }
+      : null,
   };
 }

@@ -92,6 +92,8 @@
             {
               clickable: nodeInteractive && node.executable,
               selected: node.id === selectedNode,
+              'loop-member': Boolean(node.loopRole),
+              'loop-active': node.id === loop?.activeNode,
             },
           ]"
           :aria-current="node.id === selectedNode ? 'true' : undefined"
@@ -105,6 +107,21 @@
           @click="onNodeActivate(node, $event)"
         >
           <title v-if="node.title">{{ node.title }}</title>
+          <text
+            v-if="node.loopRole"
+            :x="node.cx"
+            :y="node.top - 14"
+            class="node-loop-role"
+            text-anchor="middle"
+          >{{ node.loopRole }}</text>
+          <circle
+            v-if="node.id === loop?.activeNode"
+            class="node-loop-orbit"
+            :cx="node.cx"
+            :cy="node.cy"
+            :r="node.radius + 7"
+            aria-hidden="true"
+          />
           <rect
             class="node-hit-area"
             :x="node.cx - node.halfWidth"
@@ -227,6 +244,7 @@ import {
 } from '../../shared/graph-geom.js';
 import { arbiterRunLabel, nodeIsArbitrated } from '../../shared/arbiter-run.js';
 import { graphStallView } from '../../shared/graph-stall.js';
+import { factoryLoopView } from '../../shared/factoryLoopView.ts';
 import {
   runnerChainLabel,
   runnerModelLabel,
@@ -296,6 +314,7 @@ interface GraphNodeElement {
   arbiterVerdict: string;
   arbiterX: number;
   arbiterY: number;
+  loopRole: string;
 }
 
 const props = withDefaults(
@@ -381,6 +400,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const nodeInteractive = computed(() => props.interactive || !props.reference);
+const loop = computed(() => factoryLoopView(props.graph, props.reference));
 const parallelNodes = computed(() => props.graph.edges
   .filter(([, , , , routing]) => routing === 'to_sandbox')
   .map(([, destination]) => destination));
@@ -395,14 +415,15 @@ const positions = computed<Record<string, GraphPosition>>(() => layoutGraphPosit
   props.graph.pos,
   props.graph.nodes,
   props.graph.edges.some(([source, , , kind]) => (
-    kind === 'fail' && (props.reference || props.loopsOn || (props.graph.loops?.[source] ?? 0) > 0)
+    kind === 'fail'
+      && (loop.value || props.reference || props.loopsOn || (props.graph.loops?.[source] ?? 0) > 0)
   )),
   parallelNodes.value,
 ));
 
 /**
- * Fail-рёбра зависят не только от статуса источника: потенциальные циклы скрыты,
- * пока пользователь не включит их или сервер не зафиксирует фактический проход.
+ * Возвраты обычного маршрута скрыты до первого прохода или включения переключателя.
+ * Пара режима петли всегда показывает обе передачи, но движется только вход в работающий узел.
  */
 const edgeElements = computed<EdgeElement[]>(() => {
   const graph = props.graph;
@@ -410,13 +431,17 @@ const edgeElements = computed<EdgeElement[]>(() => {
   const elements: EdgeElement[] = [];
 
   for (const [index, [source, destination, originalLabel, edgeClass, routing]] of graph.edges.entries()) {
+    const cycle = loop.value;
+    const transfer = cycle && source === cycle.lead && destination === cycle.worker;
+    const review = cycle && source === cycle.worker && destination === cycle.lead;
+    const cycleEdge = Boolean(transfer || review);
     const path = edgePath(
       source,
       destination,
       routing,
       positions.value,
       graph.nodes,
-      index,
+      transfer ? 2 : index,
     ) as {
       d: string;
       label: LabelPosition;
@@ -427,7 +452,17 @@ const edgeElements = computed<EdgeElement[]>(() => {
     let visible = true;
     let labelClass = 'elbl';
 
-    if (edgeClass === 'fail') {
+    if (cycleEdge) {
+      className = 'e-cycle';
+      label = transfer ? 'Задание на круг' : 'На проверку';
+      labelClass = 'elbl-cycle';
+
+      // На первом входе ведущий ещё не получил результат исполнителя.
+      // После передачи круг уже положительный, даже если статусы пары сброшены в pending.
+      if (cycle?.activeNode === destination && (transfer || (cycle.round ?? 0) > 0)) {
+        className += ' e-flow';
+      }
+    } else if (edgeClass === 'fail') {
       if (props.reference) {
         className = 'e-fail';
         labelClass = 'elbl-fail';
@@ -460,6 +495,14 @@ const edgeElements = computed<EdgeElement[]>(() => {
       labelClass = edgeClass === 'pass' ? 'elbl-pass' : 'elbl';
     }
 
+    // Вход в маршрут и возврат с ворот не должны двигаться одновременно с передачей пары.
+    // На паузе старый run в реестре также не является свидетельством живой работы.
+    if (cycle && !props.reference && !cycleEdge
+      && (!cycle.activeNode || (cycle.round ?? 0) > 0)
+      && [cycle.lead, cycle.worker].includes(destination)) {
+      className = className.replace('e-flow', 'e-on');
+    }
+
     elements.push({
       key: `${source}-${destination}-${index}`,
       source,
@@ -467,6 +510,7 @@ const edgeElements = computed<EdgeElement[]>(() => {
       title: [
         `${graph.nodes[source]?.[1] || 'Старт'} → ${graph.nodes[destination]?.[1] || destination}`,
         label,
+        cycleEdge ? originalLabel : '',
       ].filter(Boolean).join(' · '),
       d: path.d,
       className,
@@ -475,7 +519,7 @@ const edgeElements = computed<EdgeElement[]>(() => {
       labelClass,
       visible,
       related: focusedNode.value === source || focusedNode.value === destination,
-      showLabel: edgeClass !== 'fail' || focusedNode.value === source,
+      showLabel: cycleEdge || edgeClass !== 'fail' || focusedNode.value === source,
       bounds: path.bounds,
     });
   }
@@ -542,7 +586,9 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
     const status = nodeIsArbitrated(committed, props.arbitrating) ? 'arb' : committed;
     const kindLabel = parallelNodes.value.includes(nodeId) ? 'Стенд' : KIND_HEADING[kind] || kind;
     const statusLabel = STATUS_LABEL[status] || '';
-    const description = [kindLabel, statusLabel].filter(Boolean).join(' · ');
+    const loopRole = loop.value?.lead === nodeId
+      ? 'Ведущий' : loop.value?.worker === nodeId ? 'Исполнитель' : '';
+    const description = [kindLabel, loopRole, statusLabel].filter(Boolean).join(' · ');
     const runnerMetadata = graph.nodeMeta?.[nodeId]?.runner ?? null;
     const runner = runnerMetadata ? runnerNodeLabel(runnerMetadata) : '';
     const runnerModel = runnerMetadata ? runnerModelLabel(runnerMetadata) : '';
@@ -572,6 +618,7 @@ const nodeElements = computed<GraphNodeElement[]>(() => {
       labelY,
       contentX: geometry.cx,
       kindLabel,
+      loopRole,
       description,
       icon: KIND_ICON[kind] || '',
       statusLabel,
@@ -683,6 +730,26 @@ function onNodeActivate(
   fill: var(--node-state);
   font: 10px var(--sans);
 }
+.node-loop-role {
+  fill: var(--ink-mid);
+  font: 10px var(--sans);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+}
+.loop-active .node-loop-role { fill: var(--accent); }
+.node-loop-orbit {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 34 148;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: orbit 2.4s linear infinite;
+  pointer-events: none;
+}
+.loop-member:not(.loop-active) .mk-run { animation: none; }
 .nlbl {
   fill: var(--ink);
   font-size: 12.5px;
@@ -768,9 +835,11 @@ function onNodeActivate(
 .e-fail { stroke: var(--ink-low); opacity: .45; stroke-width: 1.2; stroke-dasharray: 4 5; }
 .e-loop { stroke: var(--bad); opacity: .85; stroke-width: 1.8; }
 .e-loop.e-flow { stroke-dasharray: 6 6; }
+.e-cycle { stroke: var(--accent); opacity: .6; stroke-width: 2; }
+.e-cycle.e-flow { opacity: 1; stroke-width: 2.4; }
 .edge-muted { opacity: .18; }
 .edge-related .e-fail { stroke: var(--warn); opacity: .9; }
-.elbl, .elbl-pass, .elbl-fail {
+.elbl, .elbl-pass, .elbl-fail, .elbl-cycle {
   fill: var(--ink-mid);
   font-size: 10px;
   font-family: var(--sans);
@@ -782,12 +851,14 @@ function onNodeActivate(
 }
 .elbl-pass { fill: var(--good); }
 .elbl-fail { fill: var(--warn); }
+.elbl-cycle { fill: var(--accent); font-weight: 600; }
 
 @keyframes nodepulse { 50% { opacity: .4; } }
 @keyframes flow { to { stroke-dashoffset: -12; } }
+@keyframes orbit { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .edges > g, .node-shape { transition: none; }
-  .e-flow, .ns-run .mk-run, .ns-arb .mk-arb, .graph-stop.arb {
+  .e-flow, .node-loop-orbit, .ns-run .mk-run, .ns-arb .mk-arb, .graph-stop.arb {
     animation: none;
   }
 }

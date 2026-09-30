@@ -223,131 +223,131 @@
             </p>
           </div>
         </div>
-        <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role"
-             :style="runBrandStyle(m)">
-          <div v-if="m.attachments?.length" class="m-atts">
-            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
-               @click="onAttachmentClick($event, a)">
-              <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
-              <span v-else class="m-file">📄 {{ a.name }}</span>
-            </a>
-          </div>
-          <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей.
-               Знак и цвет — исполнителя ИМЕННО ЭТОГО хода, а не вшитый Claude: ИИ меняют
-               посреди разговора, и прошлые ответы обязаны остаться за прежним. -->
-          <div v-if="m.role === 'assistant' && m.kind !== 'assistant-block'" class="ahead">
-            <ProviderIcon v-if="runProvider(m)" :provider="runProvider(m)" :size="12" />
-            <span>Агент</span>
-            <span v-if="m.actualModel || m.model" class="amodel">
-              {{ runModelLabel(m) }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
-            </span>
-          </div>
-          <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
-               а не наперегонки (два CLI на одну сессию убивают друг друга). -->
-          <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
-          <div v-if="m.kind === 'in-turn'" class="m-delivery" data-role="chat-in-turn-delivery">
-            {{ inTurnDeliveryText(m.receipt?.state, m.receipt?.error) }}
-          </div>
-          <!-- Сервер ещё не подтвердил приём сообщения. Пока подтверждения нет, агент не
-               работает, поэтому здесь честное состояние доставки, а не «думает…». -->
-          <div
-            v-if="m.role === 'user' && m.delivery === 'sending'"
-            class="m-delivery"
-            :class="deliveryView(m).tone"
-            data-role="chat-delivery"
-          >
-            <span>{{ deliveryView(m).text }}</span>
-            <UiButton
-              v-if="deliveryView(m).retry"
-              variant="outline"
-              tone="accent"
-              data-role="chat-delivery-retry"
-              :disabled="frozen"
-              @click="retryDelivery(m)"
+        <div v-for="group in timelineGroups" :key="group.key" class="conversation-group"
+             :class="{ turn: group.turn }" :style="group.brandStyle"
+             :data-role="group.turn ? 'chat-turn' : undefined">
+          <div v-for="{ key, message: m, index: i, steps, heading, compact, live, current, thinking } in group.rows"
+               :key="key" class="msg" :class="[m.role, { compact }]"
+               :style="m.role === 'assistant' ? group.brandStyle : null">
+            <div v-if="m.attachments?.length" class="m-atts">
+              <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
+                 @click="onAttachmentClick($event, a)">
+                <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
+                <span v-else class="m-file">📄 {{ a.name }}</span>
+              </a>
+            </div>
+            <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей.
+                 Знак и цвет — исполнителя ИМЕННО ЭТОГО хода, а не вшитый Claude: ИИ меняют
+                 посреди разговора, и прошлые ответы обязаны остаться за прежним. -->
+            <div v-if="heading" class="ahead">
+              <span class="ahead-mark">
+                <ProviderIcon v-if="group.provider" :provider="group.provider" :size="12" />
+              </span>
+              <span>Агент</span>
+              <span v-if="current && modelId" class="amodel">
+                {{ modelLabelOf(modelId) }} · запрошено<template v-if="effortValue"> · {{ effortValue }}</template>
+              </span>
+              <span v-else-if="m.actualModel || m.model" class="amodel">
+                {{ runModelLabel(m) }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
+              </span>
+            </div>
+            <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
+                 а не наперегонки (два CLI на одну сессию убивают друг друга). -->
+            <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
+            <div v-if="m.kind === 'in-turn'" class="m-delivery" data-role="chat-in-turn-delivery">
+              {{ inTurnDeliveryText(m.receipt?.state, m.receipt?.error) }}
+            </div>
+            <!-- Сервер ещё не подтвердил приём сообщения. Пока подтверждения нет, агент не
+                 работает, поэтому здесь честное состояние доставки, а не «думает…». -->
+            <div
+              v-if="m.role === 'user' && m.delivery === 'sending'"
+              class="m-delivery"
+              :class="deliveryView(m).tone"
+              data-role="chat-delivery"
             >
-              Отправить ещё раз
-            </UiButton>
+              <span>{{ deliveryView(m).text }}</span>
+              <UiButton
+                v-if="deliveryView(m).retry"
+                variant="outline"
+                tone="accent"
+                data-role="chat-delivery-retry"
+                :disabled="frozen"
+                @click="retryDelivery(m)"
+              >
+                Отправить ещё раз
+              </UiButton>
+            </div>
+            <!-- Действия стоят между репликами в порядке хода. После завершения
+                 участки свёрнуты отдельно, а старт остаётся перед первым ответом. -->
+            <StepList
+              v-if="steps.length"
+              :steps="steps"
+              :model-label="modelLabelOf"
+              :live="live"
+              :section="group.turn"
+            />
+            <div v-if="m.kind === 'assistant-block' && compact" class="agent-reply">
+              <span class="reply-mark" role="img" aria-label="Ответ агента">
+                <ProviderIcon :provider="group.provider || fallbackAgent" :size="13" />
+              </span>
+              <ChatInTurnReply :block="m" @click="onMarkdownClick" />
+            </div>
+            <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow"
+                 :class="{ 'agent-reply': m.role === 'assistant' }">
+              <span v-if="m.role === 'assistant'" class="reply-mark" role="img" aria-label="Ответ агента">
+                <ProviderIcon :provider="group.provider || fallbackAgent" :size="13" />
+              </span>
+              <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
+              <div v-if="m.role === 'assistant'" class="text md"
+                   v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
+                   @click="onMarkdownClick"></div>
+              <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
+                v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
+                :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
+                :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
+              <UiIconButton
+                v-if="m.text"
+                class="copy"
+                :class="{ done: copiedIdx === i }"
+                role="stepper"
+                :label="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
+                :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
+                data-context="chat-message-copy"
+                @click="copyMsg(m, i)"
+              >
+                <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </UiIconButton>
+            </div>
+            <!-- Ход прерван перезапуском сервера или самим CLI (сеть, лимит): память сессии
+                 цела, продолжение — обычное сообщение в ту же сессию. Только у последнего
+                 сообщения свободного чата. -->
+            <div v-if="isResumeOffer(m, i)" class="m-resume">
+              <UiButton
+                variant="outline"
+                tone="accent"
+                data-role="chat-resume-interrupted"
+                @click="resumeInterrupted"
+              >
+                ▶ Продолжить ход
+              </UiButton>
+            </div>
+            <!-- Индикатор закрывает проекцию текущего запуска после последней реплики
+                 или действия. В историю он не попадает; число показывает расход вывода
+                 хода, а заполненность контекста остаётся в кольце. -->
+            <ChatThinking
+              v-if="thinking"
+              :steps="sess.steps"
+              :tokens="sess.progressTokens"
+              :tokens-estimate="sess.progressTokensEstimate"
+              :started-at="sess.turnStartedAt"
+            />
           </div>
-          <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code).
-               У упавшего хода лента тем важнее: по ней видно, докуда он дошёл. -->
-          <StepList
-            v-if="(m.role === 'assistant' || m.role === 'error') && m.steps?.length"
-            :steps="m.steps"
-            :model-label="modelLabelOf"
-            :displayed-assistant-ids="displayedIdsFor(m.runId)"
-          />
-          <ChatInTurnReply v-if="m.kind === 'assistant-block'" :block="m" />
-          <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
-            <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
-            <div v-if="m.role === 'assistant'" class="text md"
-                 v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
-                 @click="onMarkdownClick"></div>
-            <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
-              v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
-              :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
-              :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
-            <UiIconButton
-              v-if="m.text"
-              class="copy"
-              :class="{ done: copiedIdx === i }"
-              role="stepper"
-              :label="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
-              :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
-              data-context="chat-message-copy"
-              @click="copyMsg(m, i)"
-            >
-              <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            </UiIconButton>
-          </div>
-          <!-- Ход прерван перезапуском сервера или самим CLI (сеть, лимит): память сессии
-               цела, продолжение — обычное сообщение в ту же сессию. Только у последнего
-               сообщения свободного чата. -->
-          <div v-if="isResumeOffer(m, i)" class="m-resume">
-            <UiButton
-              variant="outline"
-              tone="accent"
-              data-role="chat-resume-interrupted"
-              @click="resumeInterrupted"
-            >
-              ▶ Продолжить ход
-            </UiButton>
-          </div>
-        </div>
-        <div v-if="sess.sending" class="msg assistant" :style="liveBrandStyle">
-          <!-- Шапка идущего хода — та же, что у готового ответа: знак исполнителя виден
-               с первой секунды, а не только когда ответ дописан. Модель здесь — выбор
-               чата, поэтому честно помечена «запрошено»; факт из потока CLI называют
-               строка «старт» в ленте и шапка готового ответа. -->
-          <div class="ahead">
-            <ProviderIcon v-if="liveProvider" :provider="liveProvider" :size="12" />
-            <span>Агент</span>
-            <span v-if="modelId" class="amodel">
-              {{ modelLabelOf(modelId) }} · запрошено<template v-if="effortValue"> · {{ effortValue }}</template>
-            </span>
-          </div>
-          <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
-          <StepList v-if="sess.steps?.length" :steps="sess.steps" :model-label="modelLabelOf"
-                    :displayed-assistant-ids="displayedIdsFor(inTurnRun?.runId)" live />
-          <ChatInTurnReply v-for="block in liveInTurnDrafts" :key="block.assistantMessageId"
-                           :block="block" />
-          <!-- Живая строка хода — последняя строка ЭТОГО блока, сразу под лентой шагов: она
-               про тот же ход и идёт под переписку, а не отдельной полосой у поля ввода.
-               Знак и слово стоят в тех же столбцах, что знак и заголовок строки шага. Ряд
-               всегда один, поэтому смена слова («Думаю» ↔ «Выполняю команду») высоту блока
-               не меняет. Число — расход вывода хода (0 = исполнитель его не публикует):
-               заполненность контекста живёт в кольце и означает другое. -->
-          <ChatThinking
-            :steps="sess.steps"
-            :tokens="sess.progressTokens"
-            :tokens-estimate="sess.progressTokensEstimate"
-            :started-at="sess.turnStartedAt"
-          />
         </div>
         <!-- Связь этого окна с сервером оборвалась посреди хода. Сам ход при этом идёт:
              он живёт в процессе сервера, а не во вкладке, и ответ вернётся через
@@ -592,9 +592,8 @@
               </UiIconButton>
             </template>
           </UiTooltip>
-          <!-- Пока агент работает, рядом появляется «стоп». Отправку при этом НЕ прячем:
-               следующее сообщение можно готовить и слать сразу — сервер поставит его
-               в очередь и пустит следом (раньше оно молча пропадало). -->
+          <!-- Одна кнопка отправляет текст в активный ход, если его канал готов,
+               иначе ставит сообщение в очередь. Остановка остаётся отдельным действием. -->
           <UiIconButton
             v-if="sess.sending || sess.compacting"
             class="send stop"
@@ -611,31 +610,21 @@
           >
             <span class="sq"></span>
           </UiIconButton>
-          <UiButton
-            v-if="sess.sending && !sess.compacting"
-            class="send-follow"
-            variant="outline"
-            tone="neutral"
-            data-context="chat-send-following"
-            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
-            @click="submit('following')"
-          >
-            Отправить следом
-          </UiButton>
           <UiIconButton
             class="send"
             role="peer"
             variant="solid"
             tone="accent"
-            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)
-              || (sess.sending && !inTurnComposer.ready)"
+            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
             :label="speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
-              : sess.sending ? (inTurnComposer.ready ? 'Уточнить сейчас (Enter)' : inTurnComposer.reason)
+              : sess.sending ? (inTurnComposer.ready
+                ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
               : 'Отправить (Enter)'"
             :title="speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
-              : sess.sending ? (inTurnComposer.ready ? 'Уточнить сейчас (Enter)' : inTurnComposer.reason)
+              : sess.sending ? (inTurnComposer.ready
+                ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
               : 'Отправить (Enter)'"
             data-context="chat-send"
             @click="submit"
@@ -643,8 +632,10 @@
             ↑
           </UiIconButton>
         </div>
-        <div v-if="sess.sending && !inTurnComposer.ready" class="in-turn-hint"
-             data-role="chat-in-turn-unavailable">{{ inTurnComposer.reason }}</div>
+        <div v-if="sess.sending && !inTurnComposer.ready && !frozen" class="in-turn-hint"
+             data-role="chat-in-turn-unavailable">
+          {{ inTurnComposer.reason }} Сообщение будет отправлено после текущего хода.
+        </div>
         <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -669,7 +660,7 @@ import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
 import ChatInTurnReply from './ChatInTurnReply.vue';
 import { inTurnComposerState, inTurnDeliveryText } from './chatInTurn.ts';
-import { displayedAssistantIds, isInTurnReceipt } from '../../stores/chatInTurn.ts';
+import { chatTimeline, groupChatTimeline } from './chatTimeline.ts';
 import ChatThinking from './ChatThinking.vue';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
@@ -768,16 +759,25 @@ const inTurnComposer = computed(() => {
     text: input.value,
   });
 });
-const liveInTurnDrafts = computed(() => (inTurnRun.value?.entries || [])
-  .filter((entry) => !isInTurnReceipt(entry) && !entry.complete && !!entry.text?.trim()));
-function displayedIdsFor(runId) {
-  if (!runId) return [];
-  const restored = (sess.value?.messages || [])
-    .filter((message) => message.runId === runId && message.kind === 'assistant-block')
-    .map((message) => message.assistantMessageId);
-  if (inTurnRun.value?.runId === runId) restored.push(...displayedAssistantIds(inTurnRun.value));
-  return [...new Set(restored)];
-}
+const timeline = computed(() => chatTimeline(
+  sess.value?.messages || [],
+  sess.value?.steps || [],
+  !!sess.value?.sending,
+  inTurnRun.value,
+));
+const fallbackAgent = {
+  id: 'unknown',
+  name: 'Агент',
+};
+const timelineGroups = computed(() => groupChatTimeline(timeline.value).map((group) => {
+  const provider = group.current ? liveProvider.value : runProvider(group.agent);
+
+  return {
+    ...group,
+    provider,
+    brandStyle: provider?.color ? { '--prov': provider.color } : null,
+  };
+}));
 
 // ── Название чата в шапке страницы «Чаты» ──
 const editingTitle = ref(false);
@@ -934,23 +934,10 @@ function runProvider(message) {
   return runProviders.value.get(runModelId(message))?.provider || null;
 }
 
-// Фирменный цвет исполнителя одной переменной на всё сообщение: её берут и полоска
-// слева, и сам знак. Нет исполнителя — нет переменной, и оба остаются нейтральными.
-function runBrandStyle(message) {
-  const color = runProvider(message)?.color;
-
-  return color ? { '--prov': color } : null;
-}
-
 // Идущий ход ещё не сообщение, и своей модели у него нет: исполнителя берём из выбора
 // чата — работает сейчас именно он. Знак в шапке и полоска слева идут от одного
 // исполнителя: без этого живой ход получал цвет без знака, а знак — только вместе с ответом.
 const liveProvider = computed(() => current.value.provider || null);
-const liveBrandStyle = computed(() => {
-  const color = liveProvider.value?.color;
-
-  return color ? { '--prov': color } : null;
-});
 
 // Последний завершённый ход с моделью. Claude сообщает `actualModel` из потока,
 // Codex JSONL пока его не отдаёт — у него честно показываем «запрошено», иначе
@@ -1438,9 +1425,11 @@ async function autoScroll() {
   await nextTick();
   scrollDown();
 }
+
 watch(() => [
   sess.value?.messages?.length,
   sess.value?.steps?.length,
+  inTurnRun.value?.entries.map((entry) => `${entry.sequence}:${entry.revision}`).join(','),
   sess.value?.sending,
   chat.permFor(props.sid)?.pid,
   chat.questionFor(props.sid)?.pid,
@@ -1464,33 +1453,51 @@ watch(input, (v) => {
 function flushDraft() { clearTimeout(draftTimer); chat.setDraft(props.sid, input.value); }
 window.addEventListener('beforeunload', flushDraft);
 onUnmounted(() => { flushDraft(); window.removeEventListener('beforeunload', flushDraft); });
-async function submit(mode = 'primary') {
-  if (speechBusy.value) return;
+/**
+ * Кнопка и Enter используют один маршрут: готовый канал текущего хода или обычную очередь.
+ * Отказ уже начатой передачи сохраняет черновик и не создаёт второй запрос другим путём.
+ */
+async function submit() {
+  if (speechBusy.value) {
+    return;
+  }
+
   const t = input.value.trim();
   const atts = pending.value.slice();
-  if ((!t && !atts.length) || !sess.value || frozen.value) return;
+
+  if ((!t && !atts.length) || !sess.value || frozen.value) {
+    return;
+  }
+
   // Точное имя пункта выполняем через его dispatch. `/`-команды провайдера идут
   // служебным ходом, `$skill` — обычным prompt; run:'none' остаётся обычным сообщением.
   // Сверка регистронезависимая — как в меню: имя навыка приходит от исполнителя.
   const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === t.toLowerCase() && c.run !== 'none');
-  if (exact && exact.cmd.startsWith('/')) { runCommand(exact); return; }
-  if (sess.value.sending && mode !== 'following') {
-    if (!inTurnComposer.value.ready) {
-      inputErr.value = inTurnComposer.value.reason;
-      return;
-    }
+
+  if (exact && exact.cmd.startsWith('/')) {
+    runCommand(exact);
+
+    return;
+  }
+  if (sess.value.sending && inTurnComposer.value.ready) {
     const accepted = await chat.sendInTurn(props.sid, t);
+
     if (!accepted) {
       inputErr.value = chat.inTurnError || 'Не удалось отправить уточнение.';
+
       return;
     }
+
     inputErr.value = '';
     input.value = '';
     clearTimeout(draftTimer);
     chat.setDraft(props.sid, '');
     atBottom.value = true;
+
     return;
   }
+
+  inputErr.value = '';
   input.value = '';
   atBottom.value = true; // своё сообщение всегда показываем — как в мессенджерах
   // Черновик отправленного сообщения гасим сразу: дебаунс успел бы записать его
@@ -1498,7 +1505,9 @@ async function submit(mode = 'primary') {
   clearTimeout(draftTimer);
   chat.setDraft(props.sid, '');
   pending.value = [];
+
   const accepted = await chat.send(props.sid, t, atts);
+
   if (accepted === false) {
     input.value = t;
     pending.value = atts;
@@ -2025,6 +2034,17 @@ async function openDebug() {
 .cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 0 11px 0 22px; margin: 26px 0; }
 /* min-height 100% — пустое состояние центрируется */
 .flow { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.conversation-group { display: contents; }
+/* Линия принадлежит всему запуску: раскрытие действий и реплики человека
+   меняют высоту группы, но не разрывают её и не добавляют вложенных полос. */
+.conversation-group.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 0 3px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--prov, var(--ink-mid)) 55%, transparent);
+}
 
 /* Пустое состояние — по центру, а не подсказка в углу */
 .empty { margin: auto; min-width: 0; max-width: 100%; text-align: center; padding: 24px; }
@@ -2048,12 +2068,23 @@ async function openDebug() {
    не спорят с текстом, полная дата доступна по наведению. */
 .m-time { float: right; margin: .72em 0 0 9px; color: color-mix(in srgb, var(--ink-mid) 82%, transparent);
   font-size: 10px; font-weight: 400; line-height: 1; white-space: nowrap; user-select: none; }
-/* Агент — слева, с подписью и акцентной полоской, текст маркдауном. Полоска и знак идут
-   в цвете исполнителя этого хода (`--prov` ставит runBrandStyle); пока исполнитель
-   неизвестен — переменной нет, и оба остаются нейтральными. */
-.msg.assistant { align-self: stretch; padding-left: 13px;
-  border-left: 2px solid color-mix(in srgb, var(--prov, var(--ink-mid)) 45%, transparent); }
-.ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
+/* Знак ответа занимает тот же столбец, что и знак действия в StepList.
+   5px слева учитывают поле и рамку кнопки; текст всех строк начинается после 27px. */
+.msg.assistant { align-self: stretch; }
+.agent-reply { display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding-left: 5px; }
+.reply-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 15px;
+  height: 20px;
+  color: var(--prov, var(--ink-mid));
+}
+.agent-reply > .chat-in-turn-reply, .agent-reply > .text { flex: 1; min-width: 0; }
+.agent-reply > .copy { align-self: flex-end; }
+.turn .msg.assistant .m-atts, .turn .m-resume { padding-left: 27px; }
+.ahead-mark { display: grid; place-items: center; flex: none; width: 15px; }
+.ahead { display: flex; align-items: center; gap: 7px; padding-left: 5px; font-size: 11px; font-weight: 600;
   letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
 /* Знак берём чистым фирменным цветом, без подмешивания белого, как в списке чатов: там
    он лежит на своей заливке, здесь — прямо на `--surface`. Замер контраста к #151b24
@@ -2144,7 +2175,6 @@ async function openDebug() {
 .chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
 .in-turn-hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
-.send-follow { align-self: flex-end; white-space: nowrap; }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }
 .speech-note { margin-top: 6px; }

@@ -30,11 +30,14 @@
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
 - [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)
 - [Уточнение работающему агенту: тот же ход, ответ до финала и восстановление](in-turn-messages.md)
+- [Одна кнопка отправки: автоматический выбор текущего хода или очереди](single-send-control.md)
 - [Границы модулей уточнений: ключи истории, публикация блоков и проекция окна](in-turn-module-boundaries.md)
 - [Живая сессия исполнителя: агент переживает свой ход](persistent-executor-session.md)
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
+- [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
+- [Общая линия хода, иконки ответов и выравнивание](turn-rail.md)
 - [Модульное подключение нового ИИ](executor-integration.md)
 - [Рабочие инструменты Cockpit](work-tools.md)
 - [Режимы прав (--permission-mode)](permission-modes.md)
@@ -73,6 +76,7 @@
 
 ## Грабли
 
+- [Снятие адаптера: сохранённый каталог, сброс памяти и барьер записи истории](executor-removal-boundaries.md)
 - [Сообщение во время работы: прежняя очередь и границы уточнения](in-turn-message-gap.md)
 - [Ответ в pending ещё не входит в историю следующего хода](queued-turn-history-gap.md)
 - [Локальная картинка в ответе не видна: нужен URL вложения](assistant-image-links.md)

@@ -2,9 +2,14 @@ import { compileVue, webFile } from './compile-vue.js';
 
 export const CHAT_SESSION_PATH = webFile('src/views/chat/ChatSession.vue');
 
+/**
+ * Сценарии композера используют настоящие кнопки и раскрытия общего UI-kit.
+ * Подменяется только подтверждение, требующее ответа человека.
+ */
 function uiFacadeStub(prefix) {
   const components = [
     ['UiButton', 'src/components/primitives/UiButton.vue'],
+    ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiFilePicker', 'src/components/composites/UiFilePicker.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
     ['UiInput', 'src/components/primitives/UiInput.vue'],
@@ -71,7 +76,7 @@ function inertComponentStub(className) {
  * ChatSession бандлится единым TS-aware compiler-ом с настоящими UI primitives.
  * Stores, сеть, speech-controller и product children остаются границами сценария.
  */
-export function compileChatSession(prefix) {
+export function compileChatSession(prefix, { realSteps = false } = {}) {
   return compileVue(CHAT_SESSION_PATH, {
     stubs: {
       'vue-router': [
@@ -100,7 +105,7 @@ export function compileChatSession(prefix) {
         `export const useProvidersStore = globalThis.${prefix}ProvidersStore;`
       ),
       './EffortSlider.vue': effortSliderStub(),
-      './StepList.vue': inertComponentStub('step-list-stub'),
+      ...(realSteps ? {} : { './StepList.vue': inertComponentStub('step-list-stub') }),
       './ChatQuestion.vue': inertComponentStub('chat-question-stub'),
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
       './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub'),

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="rows.length" class="steps" :class="{ live }">
+  <div v-if="rows.length" class="steps" :class="{ live, section }">
     <!-- Сохранённая лента свёрнута: сначала ответ, детали — по клику -->
     <UiDisclosureButton
       v-if="!live"
@@ -7,9 +7,17 @@
       density="compact"
       :open="open"
       :controls="`${baseId}-list`"
+      :aria-label="section ? `Действия агента: ${summary}` : undefined"
       @update:open="open = $event"
     >
-      <span class="sum">Ход агента: {{ summary }}</span>
+      <span v-if="section" class="head activity-summary">
+        <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h10" />
+        </svg>
+        <span class="sum">{{ summary }}</span>
+      </span>
+      <span v-else class="sum">Ход агента: {{ summary }}</span>
     </UiDisclosureButton>
     <div v-if="open || live" :id="`${baseId}-list`" class="list">
       <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, isNested(r) ? 'nested' : '']">
@@ -127,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, computed, useId } from 'vue';
+import { ref, computed, useId, watch } from 'vue';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
 import { UiDisclosureButton } from '../../ui';
 
@@ -137,6 +145,7 @@ import { UiDisclosureButton } from '../../ui';
 const props = defineProps({
   steps: { type: Array, default: () => [] },
   live: { type: Boolean, default: false }, // ход идёт прямо сейчас
+  section: { type: Boolean, default: false }, // участок общей ленты между репликами
   displayedAssistantIds: { type: Array, default: () => [] },
   // Подпись модели в шаге «старт»: id → имя из каталога. Реестр знает чат, а не лента,
   // поэтому функция приходит снаружи; без неё показывается id как есть.
@@ -147,6 +156,12 @@ const props = defineProps({
 const open = ref(props.live);
 const expanded = ref({}); // индекс шага → раскрыт ли
 const baseId = `chat-steps-${useId().replaceAll(':', '')}`;
+
+// После финала тот же участок становится свёрнутой историей.
+// Его стабильный ключ сохраняет место, но не прежнюю высоту живой ленты.
+watch(() => props.live, (live) => {
+  open.value = live;
+});
 
 // Результаты приклеиваем к своим вызовам (res приходит отдельным шагом с тем же id) —
 // строка ленты должна быть одна: «инструмент + чем закончился».
@@ -298,6 +313,7 @@ function toolLabel(name) {
 .summary-disclosure {
   align-self: flex-start;
 }
+.activity-summary { color: var(--ink-mid); }
 
 .sum {
   font-size: 12px;
@@ -372,6 +388,7 @@ function toolLabel(name) {
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
+.section .step > .note { padding-left: 27px; }
 .note.warn { color: var(--warn, #e0a33a); }
 .note.start b { color: var(--ink); font-weight: 600; }
 </style>

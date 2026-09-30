@@ -307,6 +307,8 @@
         <span class="pw">{{ currentLabel(t.graph) }}</span>
       </div>
 
+      <LoopStatus :graph="t.graph" />
+
       <!-- Ждёт тебя (видно и в свёрнутом виде) -->
       <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph).premature }">
         ⏳ ждёт тебя: {{ waitingReason(t.graph).text }}
@@ -1068,6 +1070,7 @@ import {
 } from '../shared/runnerDisplay.ts';
 import ArbiterDecision from './pipeline/ArbiterDecision.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
+import LoopStatus from './pipeline/LoopStatus.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
 const ui = useUiStore();

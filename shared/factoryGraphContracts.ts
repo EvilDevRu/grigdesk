@@ -10,6 +10,7 @@
 // корня — это сломанный ответ, а лишний элемент кортежа компонент просто не читает.
 
 import { contractDecoders } from './contractDecoders.ts';
+import type { RouteLoopDoc } from './routeDefinition.ts';
 
 export class FactoryGraphContractError extends Error {
   constructor(path: string) {
@@ -57,6 +58,12 @@ export interface GraphTransition {
   kind: 'execution' | 'emits';
 }
 
+export interface GraphLoopProgress {
+  round: number | null;
+  stage: number | null;
+  maxRounds: number | null;
+}
+
 // Остановка приходит из соседнего контракта и разбирается своим модулем: здесь она
 // остаётся непроверенной, чтобы форма остановки не была объявлена дважды.
 export interface FactoryGraphData {
@@ -65,6 +72,9 @@ export interface FactoryGraphData {
   edges: GraphEdge[];
   statuses?: Record<string, string>;
   loops?: Record<string, number>;
+  loop?: RouteLoopDoc | null;
+  loopProgress?: GraphLoopProgress | null;
+  daemonAlive?: boolean;
   nodeMeta?: Record<string, GraphNodeMetadata>;
   nodeOrigins?: Record<string, GraphNodeOrigin>;
   transitions?: GraphTransition[];

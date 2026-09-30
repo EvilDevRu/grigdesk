@@ -33,6 +33,7 @@
 
 ### Клиент графа
 
+- [Петля агентов: круг, этап и видимая передача между ведущим и исполнителем](loop-visualization.md)
 - [Выбор исполнителя — карточки, и он не закрывает модалку](node-executor-selection.md)
 - [Документ этапа: карта NODE_DOC и список сервера обязаны сходиться](stage-document-mapping.md)
 - [Клиент (web/src/shared/graph-geom.js)](graph-client.md)

@@ -11,6 +11,7 @@ import { detectStall } from '../lib/stall.ts';
 import { readRunSilence } from '../lib/factoryCli.ts';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factoryGraph.ts';
 import { buildRouteDef, routeStageKeys } from '../lib/routeGraph.ts';
+import { readLoopProgress } from '../lib/factoryLoopProgress.ts';
 import { RoutesStore } from '../modules/routes/store.ts';
 import { parseSandboxRepositories } from '../lib/sandboxEnv.ts';
 import { routeInstrumentationMode } from '../lib/factoryLaunchContract.ts';
@@ -203,6 +204,7 @@ export class FactoryStateAdapter {
         {
           entry: route.entry,
           bootstrap: route.bootstrap,
+          loop: route.loop,
           sequence: route.sequence,
           nodes: route.nodes,
         } as Parameters<typeof buildRouteDef>[0],
@@ -798,6 +800,8 @@ export class FactoryStateAdapter {
       keys: def.keys,
       runnerKeys: def.runnerKeys,
       loops: loops.loops,
+      loop: 'loop' in def ? def.loop : null,
+      loopProgress: 'loop' in def && def.loop ? readLoopProgress(registry) : null,
       halted: loops.halted,
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,

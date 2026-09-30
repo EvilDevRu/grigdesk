@@ -12,6 +12,9 @@ import routesModule from '../../server/src/modules/routes/index.ts';
 import { validateRoute } from '../../server/src/modules/routes/schema.ts';
 import { detectStall } from '../../server/src/lib/stall.ts';
 import { archiveTaskFiles } from '../../server/src/lib/taskArtifacts.ts';
+import { buildRouteDef } from '../../server/src/lib/routeGraph.ts';
+import { readLoopProgress } from '../../server/src/lib/factoryLoopProgress.ts';
+import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import {
   arbitrationGate,
   readArbitrationContext,
@@ -83,6 +86,89 @@ const check = (route) => validateRoute(route, { profile: 'sample', routeId: 'loo
 
 test('корректная пара цикла публикуется', () => {
   assert.doesNotThrow(() => check(loopRoute()));
+});
+
+test('граф сохраняет пару режима петли, обычный rewind её не включает', () => {
+  const route = loopRoute();
+
+  assert.deepEqual(buildRouteDef(route, 'loop').loop, { lead: 'review', worker: 'build' });
+
+  delete route.loop;
+
+  assert.equal(buildRouteDef(route, 'loop').loop, null);
+});
+
+test('граф задачи передаёт пару из бандла и счётчики из текущей проекции', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loop-graph-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const stateDir = path.join(root, 'state');
+  const routesDir = path.join(root, 'routes');
+  const store = new RoutesStore({ baseDir: routesDir });
+  const { routeHash } = await store.publishRoute('sample', 'loop', {
+    route: loopRoute(),
+    prompts: Object.fromEntries(promptFiles.map((file) => [file, 'Задание узлу.'])),
+  });
+
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(path.join(stateDir, 't9.pipeline'), [
+    'PROFILE=sample',
+    'ROUTE=loop',
+    'CATALOG_PROTOCOL=route-v2',
+    `ATTEMPT_ID=a_${'1'.repeat(32)}`,
+    `ROUTE_HASH=${routeHash}`,
+    'BUILD=running',
+    'REVIEW=pending',
+    'LOOP_MODE=1',
+    'LOOP_ROUND=4',
+    'LOOP_STAGE=2',
+    'LOOP_MAX_ROUNDS=20',
+    '',
+  ].join('\n'));
+
+  const adapter = new FactoryStateAdapter({
+    stateDir,
+    routesDir,
+    profilesDir: path.join(root, 'profiles'),
+  });
+  const graph = await adapter.getTaskGraph('9');
+
+  assert.deepEqual(graph.loop, { lead: 'review', worker: 'build' });
+  assert.deepEqual(graph.loopProgress, {
+    round: 4,
+    stage: 2,
+    maxRounds: 20,
+  });
+  assert.equal(graph.daemonAlive, false);
+});
+
+test('отсутствующие счётчики петли неизвестны, снятый режим не показывает старые значения', () => {
+  const registry = {
+    LOOP_MODE: '1',
+    LOOP_ROUND: '0',
+    LOOP_STAGE: '1',
+    LOOP_MAX_ROUNDS: '20',
+  };
+  const unknown = {
+    round: null,
+    stage: null,
+    maxRounds: null,
+  };
+
+  assert.deepEqual(readLoopProgress(registry), {
+    round: 0,
+    stage: 1,
+    maxRounds: 20,
+  });
+  assert.equal(readLoopProgress({ ...registry, LOOP_MODE: '' }), null);
+  assert.deepEqual(readLoopProgress({ LOOP_MODE: '1' }), unknown);
+  assert.deepEqual(readLoopProgress({
+    LOOP_MODE: '1',
+    LOOP_ROUND: '-1',
+    LOOP_STAGE: '0',
+    LOOP_MAX_ROUNDS: '20x',
+  }), unknown);
 });
 
 const violations = [
