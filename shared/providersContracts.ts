@@ -22,6 +22,7 @@ export interface ProviderEntry {
   id: string;
   name: string;
   available?: boolean;
+  settingsCatalog?: boolean;
   models?: ProviderModelEntry[];
   capabilities?: Record<string, boolean>;
   // Канал ввода в активный ход: подробный контракт отдельным полем, а не boolean-флагом.

@@ -598,6 +598,12 @@ function runFixture() {
     }
 
     if (phase === 'thread') {
+      if (scenario === 'native-settings' && message.method === 'config/read') {
+        send({ id: message.id, result: { config: { features: { future_flag: false } } } });
+
+        return;
+      }
+
       if (!['thread/start', 'thread/resume'].includes(message.method) || message.id === undefined) {
         fail('после handshake нужен thread/start или thread/resume');
         return;

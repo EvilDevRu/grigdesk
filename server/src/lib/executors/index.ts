@@ -163,6 +163,7 @@ import type {
 } from '../../../../shared/chatInTurnContracts.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import type { NativeSettingsCapability, PreparedNativeSettings } from '../executorSettings/types.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
 
@@ -191,6 +192,8 @@ export interface ExecutorRunInput {
   sessionId?: string | null;
   permissionMode?: string;
   signal?: AbortSignal;
+  nativeSettings?: PreparedNativeSettings;
+  nativeSettingsFingerprint?: string;
   env?: NodeJS.ProcessEnv;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onStep?: (step: ChatStep) => void;
@@ -253,6 +256,7 @@ export interface ExecutorAdapter {
   validateWorkdir?: WorkdirValidator;
   directSshPolicy?: unknown;
   settings?: unknown;
+  nativeSettings?: NativeSettingsCapability;
   sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;
   compaction?: Record<string, unknown>;

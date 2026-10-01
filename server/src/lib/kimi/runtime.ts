@@ -23,6 +23,7 @@ import { buildKimiHostLaunch } from './hostLaunch.ts';
 import { buildKimiHostWebHome } from './hostWebHome.ts';
 import { runKimiServerTurn } from './serverTurn.ts';
 import { startKimiServer } from './serverRuntime.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import type {
   InTurnAssistantEvent,
   InTurnPort,
@@ -364,6 +365,7 @@ export async function runContainedKimi({
   sessionId,
   permissionMode,
   providerSettings,
+  nativeSettings,
   signal,
   onStep,
   onProgress,
@@ -390,6 +392,7 @@ export async function runContainedKimi({
   effort?: string;
   sessionId?: string | null;
   permissionMode?: string;
+  nativeSettings?: PreparedNativeSettings;
   providerSettings?: {
     blockDirectSsh?: unknown;
     blockDirectDb?: unknown;
@@ -574,6 +577,7 @@ export async function runContainedKimi({
           kimiHome: config.kimiHome,
           runtimeHome: config.kimiRuntimeHome,
           mcpServers: sessionMcpServers,
+          isolateConfig: Boolean(nativeSettings?.accepted.length),
         });
       }
     } else {
@@ -618,6 +622,7 @@ export async function runContainedKimi({
     }
     if (transport === 'server') {
       const result = await runKimiServerTurn({
+        nativeSettings,
         bin: config.kimiBin,
         home: launchMode === 'host' ? hostWebHome?.home || config.kimiHome : runtimeHome,
         cwd: launch.cwdReal,

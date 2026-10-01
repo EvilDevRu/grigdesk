@@ -70,6 +70,21 @@ const DEFAULTS = {
 // Настройки кокпита целиком: ключи DEFAULTS плюс всё, что уже лежало в файле.
 export type CockpitPrefs = Record<string, unknown>;
 
+/**
+ * Общий prefs API сохраняет прежние локальные ручки исполнителей.
+ * Нативный контейнер выдаётся только через проверенную проекцию своего каталога.
+ */
+export function publicPrefsView(prefs: CockpitPrefs): CockpitPrefs {
+  const providers = asRecord(prefs.providerSettings);
+  const providerSettings = Object.fromEntries(Object.entries(providers).map(([id, value]) => {
+    const { nativeSettings: _private, ...local } = asRecord(value);
+
+    return [id, local];
+  }));
+
+  return { ...prefs, providerSettings };
+}
+
 /** Запись настроек из недоверенного файла: не объект читается как пустая. */
 function asRecord(value: unknown): CockpitPrefs {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -154,6 +169,30 @@ export class PrefsStore {
         ...asRecord(loaded.projectsMeta),
       },
     };
+  }
+
+  /**
+   * Оба writer настроек исполнителей меняют строгий актуальный снимок без await.
+   * Чистый mutator работает с копией, а no-op не переписывает файл.
+   */
+  updateProviderSettings(
+    mutator: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): Record<string, unknown> {
+    const stored = this.readForWrite();
+    const saved = stored.providerSettings === undefined ? {} : stored.providerSettings;
+
+    if (saved === null || typeof saved !== 'object' || Array.isArray(saved)) {
+      throw new PrefsCorruptedError('Настройки исполнителей не читаются как объект');
+    }
+
+    const current = saved as Record<string, unknown>;
+    const next = mutator(structuredClone(current));
+
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      this.write({ providerSettings: next });
+    }
+
+    return next;
   }
 
   /**

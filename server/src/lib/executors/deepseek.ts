@@ -14,6 +14,7 @@ import { deepSeekUsage } from '../deepseek/balance.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
+import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
 type DeepSeekConfig = {
   deepseekBin: string;
@@ -41,6 +42,7 @@ export function deepSeekSecurityProfile(settings: Record<string, unknown> = {}):
 
 export default {
   id: 'deepseek',
+  nativeSettings: deepSeekNativeSettings,
   name: 'DeepSeek',
   vendor: 'DeepSeek',
   color: '#4D6BFE',

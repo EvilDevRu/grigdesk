@@ -25,6 +25,7 @@ import { createProviderStatusProbe, VENDOR_FAULT_USAGE_STATES } from '../../lib/
 import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/providerUsageSeen.ts';
 import type { ProviderUsage } from '../../lib/providerUsage.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
+import { registerProviderNativeSettings } from './settings.ts';
 
 // Серверный config в объёме, который читает реестр. Полная его форма объявлена
 // в config.ts; адаптеры получают его целиком и разбирают сами.
@@ -131,6 +132,12 @@ async function providersModule(
   const deps = { claudeAuth };
   const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
 
+  registerProviderNativeSettings(fastify, {
+    config,
+    prefs,
+    adaptersOf,
+  });
+
   /**
    * Реестр: для каждого исполнителя — probe бинаря, авторизация, модели
    * (из models-registry: редактируемый файл + динамическое обнаружение эффортов).
@@ -224,6 +231,7 @@ async function providersModule(
         // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
         // адаптер может делать health-check или читать конфиг, UI ходит отдельным маршрутом.
         mcp: typeof ex.mcpStatus === 'function',
+        settingsCatalog: typeof ex.nativeSettings?.discover === 'function',
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
         latest: updates.get(ex.id)?.latest || null,
@@ -584,7 +592,15 @@ async function providersModule(
     const saved = prefs?.read().providerSettings as Record<string, unknown> | undefined;
     const applied = await applyProviderSetting(ex, saved, request.body || {}, config);
     if (!applied.ok) return reply.code(400).send({ error: applied.error, message: applied.message });
-    prefs?.write({ providerSettings: applied.providerSettings });
+
+    const settingId = String(request.body?.settingId || '');
+    const approved = applied.providerSettings[ex.id] as Record<string, unknown>;
+
+    prefs?.updateProviderSettings((current) => ({
+      ...current,
+      [ex.id]: { ...current[ex.id] as object, [settingId]: approved[settingId] },
+    }));
+
     cache = null; // следующий /api/providers отдаст новое значение
     return { ok: true, settings: applied.settings };
   });

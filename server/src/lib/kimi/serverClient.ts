@@ -6,6 +6,7 @@
 // активному ходу. Модуль знает только про этот HTTP-контракт: ни процессов, ни sandbox —
 // ими владеет runtime, который поднимает сервер и выдаёт токен.
 import type { InTurnDeliverResult } from '../../../../shared/chatInTurnContracts.ts';
+import { readSettingsJson } from '../executorSettings/probe.ts';
 
 export interface KimiServerOptions {
   baseUrl: string;
@@ -86,6 +87,44 @@ export class KimiServerClient {
   /** Мета сервера: версия и объявленные возможности; заодно проверка токена и живости. */
   async meta(): Promise<Record<string, unknown>> {
     return this.request('GET', '/api/v1/meta');
+  }
+
+  /**
+   * Нативные схемы и конфигурация читаются с пределом размера и abort probe.
+   * Обёртка протокола не становится частью нормализованного каталога.
+   */
+  async settingsRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const answer = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
+        : AbortSignal.timeout(this.timeoutMs),
+    });
+    const response = asRecord(await readSettingsJson(answer));
+
+    if (response.code !== undefined && response.code !== 0) {
+      throw new Error('Kimi отклонил запрос конфигурации');
+    }
+
+    return response.data ?? response;
+  }
+
+  settingsSchema(signal?: AbortSignal): Promise<unknown> {
+    return this.settingsRequest('GET', '/openapi.json', undefined, signal);
+  }
+
+  readSettings(signal?: AbortSignal): Promise<unknown> {
+    return this.settingsRequest('GET', '/api/v1/config', undefined, signal);
+  }
+
+  updateSettings(patch: unknown, signal?: AbortSignal): Promise<unknown> {
+    return this.settingsRequest('POST', '/api/v1/config', patch, signal);
   }
 
   /**

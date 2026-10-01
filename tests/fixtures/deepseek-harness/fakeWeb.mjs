@@ -2,6 +2,7 @@
 // Запускается из repo-файла через shell-обёртку, чтобы зависимости искались в server/.
 import { createRequire } from 'node:module';
 import { readFile, appendFile } from 'node:fs/promises';
+import nativeSettingsDescription from '../executor-settings/deepseek.json' with { type: 'json' };
 
 const requireServer = createRequire(new URL('../../../server/package.json', import.meta.url));
 const Fastify = requireServer('fastify');
@@ -19,6 +20,7 @@ let turn = 0;
 let seq = 0;
 let pendingApproval = null;
 let pendingCancel = false;
+const nativeSettings = structuredClone(nativeSettingsDescription);
 const log = async (value) => appendFile(logFile, `${JSON.stringify(value)}\n`);
 const send = (socket, streamId, value) => {
   socket.send(JSON.stringify({ type: 'item', streamId, value }));
@@ -58,7 +60,19 @@ app.post('/api/*', async (request) => {
   const params = body.payload.args;
   await log({ kind: 'request', message: { method, params } });
   let value = {};
-  if (method === 'session/create') {
+
+  if (method === 'settings/describe') {
+    value = nativeSettings;
+  } else if (method === 'settings/mutate') {
+    const namespace = nativeSettings.namespaces.find((entry) => entry.ns === params.ns);
+
+    for (const operation of params.ops) {
+      namespace.value[operation.path[0]] = operation.value;
+    }
+
+    namespace.revision += 1;
+    value = namespace;
+  } else if (method === 'session/create') {
     value = { sessionId: params.request.sessionId || `fake-session-${Date.now()}-${Math.random()}` };
   } else if (method === 'session/selectModel') {
     value = { selected: params.request };

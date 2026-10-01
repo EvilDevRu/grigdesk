@@ -14,6 +14,9 @@
 // копия правил про usage, компакт и пустой ответ разошлась бы с первой.
 import { spawn } from 'node:child_process';
 import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import { verifyNativeSettings } from '../executorSettings/capability.ts';
+import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
 
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import type { ContextCache } from '../chat/contextCache.ts';
@@ -462,13 +465,14 @@ const STDERR_TAIL = 4_000;
  * чата и SSE — тем же путём, которым доезжают ответы после закрытого окна.
  */
 export function openClaudeStreamSession({
-  bin, args, cwd, env, sessionId = null, log, hooks = {},
+  bin, args, cwd, env, sessionId = null, nativeSettings, log, hooks = {},
 }: {
   bin: string;
   args: string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   sessionId?: string | null;
+  nativeSettings?: PreparedNativeSettings;
   log?: StreamLog;
   hooks?: Record<string, ((...values: never[]) => unknown) | undefined>;
 }) {
@@ -781,6 +785,41 @@ export function openClaudeStreamSession({
     return waiting;
   }
 
+  const nativeReady = nativeSettings ? (async () => {
+    await control('initialize');
+
+    const envelope = await control('get_settings') as { subtype?: string; response?: {
+      effective?: unknown; applied?: unknown;
+    } };
+
+    if (envelope.subtype !== 'success') {
+      throw new Error('Claude не подтвердил чтение нативного слоя');
+    }
+
+    const read = envelope.response ?? {};
+    const at = (root: unknown, path: string[]) => path.reduce<unknown>((value, key) => (
+      value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined
+    ), root);
+    const evidence = verifyNativeSettings(nativeSettings, nativeSettings.accepted.map((entry) => {
+      const applied = at(read.applied, entry.path);
+      const effective = at(read.effective, entry.path);
+      const value = applied !== undefined ? applied : effective;
+
+      return {
+        fieldId: entry.fieldId,
+        basis: applied !== undefined ? 'applied' as const
+          : effective !== undefined ? 'effective' as const : 'unavailable' as const,
+        ...(value !== undefined ? { value: decodeSettingsJson(value) } : {}),
+      };
+    }));
+
+    if (evidence.some((item) => item.result === 'overridden' || item.result === 'rejected')) {
+      throw new Error('Claude не принял нативный слой конфигурации');
+    }
+  })() : undefined;
+
+  void nativeReady?.catch(() => {});
+
   return {
     get pid() { return child.pid; },
     get sessionId() { return state.sessionId; },
@@ -793,7 +832,7 @@ export function openClaudeStreamSession({
      * сразу после записи: CLI в режиме stream-json принимает дополнительные сообщения,
      * не завершая процесс.
      */
-    send({
+    async send({
       message, onStep, onProgress, onSessionCreated, onRunMetadata,
       onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
     }: {
@@ -807,6 +846,10 @@ export function openClaudeStreamSession({
       onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
       onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
     }) {
+      if (nativeReady) {
+        await nativeReady;
+      }
+
       if (state.exited) return Promise.reject(new Error(state.exitReason || 'Сессия агента закрыта.'));
       if (state.turn) return Promise.reject(new Error('В этой сессии уже идёт ход.'));
 

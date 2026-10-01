@@ -87,3 +87,32 @@ test('POST /api/settings/prefs на битом файле отвечает prefs
   assert.equal(reply.json().error, 'prefs_corrupted');
   assert.equal(await readFile(prefsPath, 'utf8'), broken);
 });
+
+test('общий prefs API скрывает nativeSettings в GET и успешном POST', async (t) => {
+  const { prefs } = await withPrefs(t);
+  prefs.write({
+    providerSettings: {
+      future: { blockDirectSsh: true, nativeSettings: { sentinel: 'private-native-value' } },
+      neighbor: { fastMode: false },
+    },
+  });
+  const app = await settingsApp({ prefs });
+  t.after(() => app.close());
+  const read = await app.inject('/api/settings/prefs');
+  const saved = await app.inject({
+    method: 'POST',
+    url: '/api/settings/prefs',
+    payload: { showAllModels: true },
+  });
+
+  for (const response of [read, saved]) {
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.includes('private-native-value'), false);
+    assert.deepEqual(response.json().providerSettings, {
+      future: { blockDirectSsh: true },
+      neighbor: { fastMode: false },
+    });
+  }
+
+  assert.equal(prefs.read().providerSettings.future.nativeSettings.sentinel, 'private-native-value');
+});

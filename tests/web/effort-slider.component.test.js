@@ -35,8 +35,17 @@ const LEVELS = ['low', 'medium', 'high'];
 
 test('EFFORT-01: обычный слайдер меняет уровень кликом по точке и по треку', async (t) => {
   const wrapper = await mountSlider(t, { modelValue: 'low', levels: LEVELS });
+
+  assert.equal(wrapper.findAll('.ui-discrete-slider__points > span').length, LEVELS.length);
+  assert.equal(wrapper.get('input[type="range"]').attributes('aria-valuetext'), 'low');
+  assert.equal(wrapper.get('input[type="range"]').attributes('aria-label'), 'Усилие рассуждения');
   await wrapper.get('input[type="range"]').setValue(2);
   assert.deepEqual(wrapper.emitted('update:modelValue'), [['high']]);
+
+  await wrapper.setProps({ modelValue: 'high', levels: ['minimal', 'low', 'medium', 'high', 'max'] });
+  assert.equal(wrapper.findAll('.ui-discrete-slider__points > span').length, 5);
+  assert.equal(wrapper.get('input[type="range"]').attributes('max'), '4');
+  assert.equal(wrapper.get('input[type="range"]').attributes('aria-valuetext'), 'high');
 });
 
 test('EFFORT-02: неактивный слайдер молчит, но значение остаётся читаемым', async (t) => {

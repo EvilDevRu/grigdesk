@@ -8,6 +8,7 @@ import path from 'node:path';
 import { parsePipeline } from '../lib/pipelineParse.ts';
 import { parseStagesLog } from '../lib/stagesParse.ts';
 import { bootstrapStall, detectStall } from '../lib/stall.ts';
+import { enrichRunnerStall } from '../lib/runnerStall.ts';
 import { readRunSilence } from '../lib/factoryCli.ts';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factoryGraph.ts';
 import { buildRouteDef, routeStageKeys } from '../lib/routeGraph.ts';
@@ -539,7 +540,14 @@ export class FactoryStateAdapter {
       return bootstrap;
     }
 
-    const stall = detectStall({ registry, timeline, daemonAlive });
+    const stall = await enrichRunnerStall({
+      stateDir: this.stateDir,
+      task,
+      registry,
+      timeline,
+      attempt: trusted?.attempt,
+      stall: detectStall({ registry, timeline, daemonAlive }),
+    });
     if (!stall || trusted?.cursor?.state !== 'stopped') return stall;
 
     const verdicts = await readNodeVerdicts({
@@ -661,10 +669,18 @@ export class FactoryStateAdapter {
     const bootstrap = trusted?.terminal ? null : bootstrapStall(
       trusted?.bootstrapStop, registry.BOOTSTRAP_ENV_ERROR,
     );
-    const detectedStall = bootstrap || detectStall({
+    const timeline = await this.readTimeline(task);
+    const detectedStall = bootstrap || await enrichRunnerStall({
+      stateDir: this.stateDir,
+      task,
       registry,
-      timeline: await this.readTimeline(task),
-      daemonAlive: alive,
+      timeline,
+      attempt: trusted?.attempt,
+      stall: detectStall({
+        registry,
+        timeline,
+        daemonAlive: alive,
+      }),
     });
 
     // Узел, чей вердикт объявил текущую остановку. Их в журнале может остаться

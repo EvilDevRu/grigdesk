@@ -816,6 +816,11 @@
                 <!-- Ресурсы исполнителя (доплата, кредиты, загруженные модели): ЕДИНСТВЕННОЕ
                      место, где их МЕНЯЮТ. Всплывашка топбара те же ресурсы только показывает —
                      там человек смотрит на состояние, а не правит деньги аккаунта между делом. -->
+                <ProviderNativeSettings
+                  v-if="p.settingsCatalog"
+                  :provider-id="p.id"
+                  :active="tab === 'providers' && activeProvider === p.id"
+                />
                 <div
                   v-if="usageResourcesOf(p).length"
                   class="pvset pvusage"
@@ -2123,6 +2128,7 @@ import PluginsCatalog from './settings/PluginsCatalog.vue';
 import ServerLauncher from './settings/ServerLauncher.vue';
 import WebLogPanel from './settings/WebLogPanel.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
+import ProviderNativeSettings from './settings/ProviderNativeSettings.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';

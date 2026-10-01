@@ -404,6 +404,7 @@ tests — дефект/неполнота теста; environment —
   result=$(_run_state_get "$run_dir/meta.env" RESULT_CLASS)
   [[ -n "$result" ]] || result=unknown
   DISPATCH_INVOKE_RESULT=$result
+  DISPATCH_INVOKE_DETAIL=$(_run_state_get "$run_dir/meta.env" FAILURE_DETAIL)
   DISPATCH_INVOKE_STARTED=1
   DISPATCH_LIMIT_SCOPE=provider
   DISPATCH_LIMIT_UNTIL=""

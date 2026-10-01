@@ -15,6 +15,8 @@ import type { KimiRawEvent } from './serverEvents.ts';
 import type { KimiServerProcess } from './serverRuntime.ts';
 import { startKimiServer } from './serverRuntime.ts';
 import type { StartKimiServerOptions } from './serverRuntime.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import { applyKimiNativeSettings } from '../executorSettings/kimi.ts';
 
 export interface KimiServerTurnOptions {
   bin: string;
@@ -28,6 +30,7 @@ export interface KimiServerTurnOptions {
   planMode?: boolean;
   effort?: string;
   signal?: AbortSignal;
+  nativeSettings?: PreparedNativeSettings;
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
@@ -96,6 +99,10 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
   });
 
   try {
+    if (options.nativeSettings?.accepted.length) {
+      await applyKimiNativeSettings(server.client, options.nativeSettings, options.signal);
+    }
+
     const session = options.sessionId
       ? { id: options.sessionId }
       : await server.client.createSession({

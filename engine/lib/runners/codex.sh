@@ -163,97 +163,16 @@ runner_codex_run() {
   fi
 }
 
-_runner_codex_meta() {
-  local run_dir=$1 key=$2
-  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' \
-    "$run_dir/meta.env" 2>/dev/null
-}
-
-_runner_codex_no_model_activity() {
-  command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$1/events.jsonl" <<'PYTHON'
-import json
-import sys
-
-try:
-    source = open(sys.argv[1], encoding="utf-8", errors="replace")
-except OSError:
-    raise SystemExit(1)
-
-for line in source:
-    if not line.strip():
-        continue
-    try:
-        event = json.loads(line)
-    except (TypeError, ValueError):
-        raise SystemExit(1)
-    kind = event.get("type", "")
-    item = event.get("item") or {}
-    if kind in {"item.started", "item.completed"} and item.get("type") in {
-        "agent_message", "command_execution", "file_change", "mcp_tool_call",
-    }:
-        raise SystemExit(1)
-    usage = event.get("usage") or {}
-    if kind == "turn.completed" and any(
-        isinstance(value, (int, float)) and value > 0 for value in usage.values()
-    ):
-        raise SystemExit(1)
-raise SystemExit(0)
-PYTHON
-}
-
+# Версия CLI не определяет смысл терминальной ошибки. Общий разбор JSONL
+# отделяет отказ провайдера от вывода инструментов и сохраняет запреты failover.
 runner_codex_classify() {
-  local run_dir=$1 rc=$2 version verified source_kind
+  local run_dir=$1 rc=$2 node_bin=${NODE_BIN:-}
   [[ "$rc" == 0 ]] && { printf 'ok\n'; return; }
   [[ "$rc" == 124 ]] && { printf 'timeout\n'; return; }
-  version=$(_runner_codex_meta "$run_dir" CLI_VERSION)
-  verified=$(_runner_codex_meta "$run_dir" FIXTURE_VERIFIED)
-  source_kind=$(_runner_codex_meta "$run_dir" SOURCE)
-  [[ "$version" =~ ^0\.145\. ]] || { printf 'unknown\n'; return; }
-  if grep -qiE 'sandbox[_ ]denied|permission denied' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'denied\n'
-    return
-  fi
-  if [[ "$verified" != 1 && "$source_kind" != runtime ]]; then
-    printf 'unknown\n'
-    return
-  fi
-  if grep -qiE -e '(^|[^0-9])413([^0-9]|$)' -e 'request too large' \
-      -e 'context[_ -]length[_ -]exceeded' -e 'context window.*exceed' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'context_overflow\n'
-    return
-  fi
-  # Формулировка лимита у CLI 0.145 — обычная фраза в `{"type":"error"}` и
-  # `turn.failed`, без кода 429 и без структурного `usage_limit_reached`: провайдер
-  # сообщает об исчерпанном лимите и времени следующей попытки обычным текстом. Прежние
-  # шаблоны её не ловили: класс выходил `unknown`, предохранитель не ставился, и
-  # диспетчер делал холостой заход в лимит на каждой эпохе.
-  if grep -q '"type":"usage_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null || \
-     grep -qiE -e '429.*(weekly|subscription|usage).*(limit|reached)' \
-       -e '(weekly|subscription|usage).*limit.*(reached|reset)' \
-       -e "hit your (usage|weekly|monthly|rate) limit" \
-       -e 'purchase more credits' \
-       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'limited\n'
-    return
-  fi
-  if grep -qiE '(^|[^0-9])429([^0-9]|$)|"type":"rate_limit_error"|too many requests' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    printf 'transient\n'
-    return
-  fi
-  if grep -qiE -e '(^|[^0-9])(401|403)([^0-9]|$)' -e 'unauthorized' \
-      -e 'authentication.*(expired|required)' -e 'request not allowed' \
-      -e 'run codex login' \
-      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
-    if _runner_codex_no_model_activity "$run_dir"; then
-      printf 'provider_unavailable\n'
-      return
-    fi
-  fi
-  printf 'unknown\n'
+
+  [[ -n "$node_bin" && -x "$node_bin" ]] || node_bin=$(command -v node 2>/dev/null)
+  [[ -n "$node_bin" ]] || { printf 'unknown\n'; return; }
+  "$node_bin" "$FACTORY_HOME/lib/codex-failure.mjs" "$run_dir" "$rc" 2>/dev/null || printf 'unknown\n'
 }
 
 runner_codex_limit_until() {

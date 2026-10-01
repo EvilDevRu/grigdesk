@@ -1045,7 +1045,24 @@ runtime_lifecycle_human_begin_v2() {
       "$FACTORY_LIFECYCLE_NODE_VISIT_ID:human:start" "$RUNTIME_LIFECYCLE_HUMAN_SPAN_ID"
 }
 
+# Закрытие вопроса использует историческую связь с визитом только для нового события.
+# Контекст вызывающего процесса сохраняется: связанный визит уже мог завершиться.
 runtime_lifecycle_resolve_open_human_v2() {
+  local event_hash rc
+  event_hash=$(_runtime_lifecycle_resolve_open_human_event_v2 "$@")
+  rc=$?
+  (( rc == 0 )) || return "$rc"
+  if [[ -n "$event_hash" ]]; then
+    RUNTIME_LIFECYCLE_LAST_EVENT_HASH=$event_hash
+    export RUNTIME_LIFECYCLE_LAST_EVENT_HASH
+    printf '%s\n' "$event_hash"
+  fi
+  return 0
+}
+
+# Изолированный вызов восстанавливает identity вопроса, сохраняя текущую сессию писателя.
+# Полный reader и append продолжают проверять журнал; отсутствие вопроса идемпотентно.
+_runtime_lifecycle_resolve_open_human_event_v2() {
   local resolution=$1 resolution_hash=$2 root event rc started_at span at mono boot duration details
   runtime_lifecycle_enabled_v2 || return 0
   root=$(factory_control_root) || return

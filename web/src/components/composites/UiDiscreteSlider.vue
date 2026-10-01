@@ -1,5 +1,5 @@
 <template>
-  <div class="ui-discrete-slider">
+  <div class="ui-discrete-slider" :class="{ 'ui-discrete-slider--ticks': ticks }">
     <UiRange
       v-model="model"
       :min="min"
@@ -8,6 +8,7 @@
       :disabled="disabled"
       :aria-disabled="readonly"
       :aria-value-text="valueLabel"
+      :aria-label="label"
     />
     <div
       v-if="points.length"
@@ -35,6 +36,8 @@ const props = withDefaults(
     step?: number;
     disabled?: boolean;
     readonly?: boolean;
+    ticks?: boolean;
+    label?: string;
     labels?: Record<number, string>;
   }>(),
   {
@@ -43,6 +46,8 @@ const props = withDefaults(
     step: 1,
     disabled: false,
     readonly: false,
+    ticks: false,
+    label: undefined,
     labels: () => ({}),
   },
 );

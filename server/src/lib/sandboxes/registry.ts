@@ -7,6 +7,7 @@
 // Чтение обязано быть устойчивым к наполовину поднятому состоянию: движок кладёт
 // ссылку на реестр ДО подъёма, и всё время провижининга она висит битой. На такой
 // ссылке уже обрывался статус профиля, поэтому здесь она просто пропускается.
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -214,6 +215,8 @@ export async function readPipelineHold(
 /**
  * Запись журнала переживает перезапуск сервера, поэтому пишется атомарно и только
  * целиком: недописанный JSON после падения был бы неотличим от повреждённого.
+ * Каждый writer держит собственный временный файл: refresh и итог процесса
+ * могут сохранять одно задание одновременно и не должны забирать файл соседа.
  */
 export async function writeSandboxJournalRecord(
   journalDir: string,
@@ -222,10 +225,18 @@ export async function writeSandboxJournalRecord(
   await fs.mkdir(journalDir, { recursive: true });
 
   const file = journalFile(journalDir, record.task);
-  const temporary = `${file}.tmp`;
+  const temporary = `${file}.${randomUUID()}.tmp`;
 
-  await fs.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  await fs.rename(temporary, file);
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    await fs.rename(temporary, file);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 /** Одна запись журнала; повреждённая читается как отсутствующая. */

@@ -1459,7 +1459,8 @@
 /* Подписанный выбор папки остаётся рядом с задачей и сохраняет геометрию шапки.
    Состояние открытого окна использует общий pressed-скин кнопки. */
 .ui-button[data-context='chat-workdir'] {
-  flex: none;
+  flex: 0 1 auto;
+  max-width: min(240px, 45%);
   height: 30px;
   min-height: 30px;
   padding: 0 9px;

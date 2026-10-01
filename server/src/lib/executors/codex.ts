@@ -17,6 +17,11 @@ import { createStepSink } from '../chat/streamSteps.ts';
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import { createCodexStepNormalizer } from './_codexSteps.ts';
 import { CODEX_UNTRUSTED_INPUT, runCodexUntrusted } from './_codexUntrusted.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import { codexNativeSettings } from '../executorSettings/codex.ts';
+import { nativeSettingsTomlArgs } from '../executorSettings/toml.ts';
+import { verifyNativeSettings } from '../executorSettings/capability.ts';
+import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
 import {
   codexElicitationPresentation,
   codexElicitationResponse,
@@ -1031,19 +1036,33 @@ function codexAppServerConfig(compactWindow: unknown) {
   };
 }
 
-function codexProcessArgs(providerSettings: CodexSettings | null | undefined) {
+/**
+ * Нативный слой передаётся отдельными argv вместе с обязательным командным hook.
+ * Пустой план сохраняет прежний запуск и не добавляет сохранённых CLI-значений.
+ */
+function codexProcessArgs(
+  providerSettings: CodexSettings | null | undefined,
+  nativeSettings?: PreparedNativeSettings,
+) {
   const hookCommand = directCommandHook({
     blockDirectSsh: providerSettings?.blockDirectSsh !== false,
     blockDirectDb: providerSettings?.blockDirectDb === true,
     strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
   });
-  if (!hookCommand) return ['app-server'];
+  const nativeArgs = nativeSettingsTomlArgs(nativeSettings);
+
+  if (!hookCommand) {
+    return [...nativeArgs, 'app-server'];
+  }
+
   const hook = '[{ matcher = "^Bash$", hooks = [{ type = "command", '
     + `command = "${hookCommand}", timeout = 5 }] }]`;
+
   return [
     '--dangerously-bypass-hook-trust',
     '-c',
     `hooks.PreToolUse=${hook}`,
+    ...nativeArgs,
     'app-server',
   ];
 }
@@ -1151,7 +1170,7 @@ function codexDynamicToolResponse(value: unknown) {
  */
 export function openCodexSession({
   config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-  providerSettings, log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo, workTools,
+  providerSettings, nativeSettings, log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo, workTools,
   workspaceAccess,
 }: {
   config: CodexConfig;
@@ -1163,6 +1182,7 @@ export function openCodexSession({
   sessionId?: string | null;
   compactWindow?: unknown;
   providerSettings?: CodexSettings | null;
+  nativeSettings?: PreparedNativeSettings;
   log?: CodexLog;
   hooks?: { onExit?: (info: { code?: number | null; reason: string }) => void };
   tokenInfoReader?: typeof readCodexThreadTokenInfo;
@@ -1210,7 +1230,7 @@ export function openCodexSession({
     blockDirectDb: providerSettings?.blockDirectDb === true,
     strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
   });
-  const child = spawn(config.codexBin, codexProcessArgs(providerSettings), {
+  const child = spawn(config.codexBin, codexProcessArgs(providerSettings, nativeSettings), {
     cwd,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -1975,6 +1995,29 @@ export function openCodexSession({
       assertDirectSshHook(await request('hooks/list', {}), commandHook);
     }
 
+    if (nativeSettings?.accepted.length) {
+      const read = await request('config/read', { cwd, includeLayers: false }) as { config?: unknown };
+      const evidence = verifyNativeSettings(nativeSettings, nativeSettings.accepted.map((entry) => {
+        let value: unknown = read.config;
+
+        for (const segment of entry.path) {
+          value = value && typeof value === 'object'
+            ? (value as Record<string, unknown>)[segment]
+            : undefined;
+        }
+
+        return {
+          fieldId: entry.fieldId,
+          basis: entry.value === null ? 'unavailable' as const : 'effective' as const,
+          ...(value !== undefined ? { value: decodeSettingsJson(value) } : {}),
+        };
+      }));
+
+      if (evidence.some((item) => item.result === 'overridden' || item.result === 'rejected')) {
+        throw new Error('Codex не принял нативный слой конфигурации');
+      }
+    }
+
     const dynamicTools = codexDynamicTools(workTools?.descriptors || []);
     const common = {
       ...(model && { model }),
@@ -1985,7 +2028,8 @@ export function openCodexSession({
       // а не только writable-песочницей: `codex exec --add-dir` давал агенту именно
       // рабочую область, и после переезда на app-server она сузилась до cwd.
       runtimeWorkspaceRoots: roots,
-      config: codexAppServerConfig(compactWindow),
+      config: { ...(nativeSettings?.payload as Record<string, unknown> ?? {}),
+        ...codexAppServerConfig(compactWindow) },
     };
     const opened = (threadId
       ? await request('thread/resume', { threadId, ...common })
@@ -2141,7 +2185,7 @@ export function openCodexSession({
  */
 export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-  providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+  providerSettings, nativeSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   workTools, workspaceAccess, onPermission, log, onSessionCreated,
   onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
 }: {
@@ -2155,6 +2199,7 @@ export async function runCodexAppServer({
   sessionId?: string | null;
   compactWindow?: unknown;
   providerSettings?: CodexSettings | null;
+  nativeSettings?: PreparedNativeSettings;
   signal?: AbortSignal;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onRunMetadata?: (metadata: ChatRunMetadata) => void;
@@ -2173,8 +2218,20 @@ export async function runCodexAppServer({
   if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
   const session = openCodexSession({
-    config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, providerSettings,
-    tokenInfoReader, workTools, workspaceAccess, log,
+    config,
+    env,
+    cwd,
+    extraDirs,
+    model,
+    effort,
+    sessionId,
+    compactWindow,
+    providerSettings,
+    nativeSettings,
+    tokenInfoReader,
+    workTools,
+    workspaceAccess,
+    log,
   });
   const onAbort = () => { void session.interrupt(); };
 
@@ -2509,6 +2566,7 @@ function readCodexMcpInventory(bin: string, cwd: string | undefined, {
 
 export default {
   id: 'codex',
+  nativeSettings: codexNativeSettings,
   name: 'GPT (Codex)',
   vendor: 'OpenAI',
   color: '#10a37f',
@@ -2666,15 +2724,36 @@ export default {
 
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-    providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+    providerSettings, nativeSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
     workTools, workspaceAccess, onPermission, log, onSessionCreated,
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
   }: Parameters<typeof runCodexAppServer>[0]) {
     return runCodexAppServer({
-      config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
-      providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools, workspaceAccess,
-      onPermission, log, onSessionCreated,
-      onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
+      config,
+      env,
+      message,
+      cwd,
+      extraDirs,
+      model,
+      effort,
+      sessionId,
+      compactWindow,
+      providerSettings,
+      nativeSettings,
+      signal,
+      onProgress,
+      onStep,
+      tokenInfoReader,
+      workTools,
+      workspaceAccess,
+      onPermission,
+      log,
+      onSessionCreated,
+      onInTurnReady,
+      onInTurnAvailability,
+      onInTurnReceipt,
+      onAssistantMessage,
+      onRunMetadata,
     });
   },
 
@@ -2704,17 +2783,30 @@ export default {
       'extraDirs',
       'compactWindow',
       'providerSettings',
+      'nativeSettingsFingerprint',
       'workToolScopeKey',
       'workspaceAccess',
     ],
 
     open({
       config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-      providerSettings, log, hooks, workTools, workspaceAccess,
+      providerSettings, nativeSettings, log, hooks, workTools, workspaceAccess,
     }: Parameters<typeof openCodexSession>[0]) {
       return openCodexSession({
-        config, env, cwd, extraDirs, model, effort, sessionId, compactWindow,
-        providerSettings, log, hooks, workTools, workspaceAccess,
+        config,
+        env,
+        cwd,
+        extraDirs,
+        model,
+        effort,
+        sessionId,
+        compactWindow,
+        providerSettings,
+        nativeSettings,
+        log,
+        hooks,
+        workTools,
+        workspaceAccess,
       });
     },
   },

@@ -12,6 +12,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
+import { prepareChatNativeSettings } from '../../lib/executorSettings/launch.ts';
+import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
 import { resolveRequestedEffort } from '../../lib/modelEffort.ts';
@@ -238,6 +240,8 @@ type InteractionQueue = Omit<PermissionQueue, 'entries'> & {
 // до проверки массива, а модели и ответы несут только поля, которые читает модуль.
 interface ChatExecutor {
   id: string;
+  bin?: ExecutorAdapter['bin'];
+  nativeSettings?: ExecutorAdapter['nativeSettings'];
   // Канал ввода в активный ход объявляет сам адаптер; отсутствие — честное «не умею».
   inTurnInput?: ExecutorAdapter['inTurnInput'];
   workToolsTransport?: string;
@@ -2783,12 +2787,32 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const runEffort = resolvedEffort.effort;
 
     const currentPrefs = prefs?.read?.() || {};
+    const savedSettings = currentPrefs.providerSettings?.[executor.id] || {};
+    const { nativeSettings: _container, ...localSettings } = savedSettings;
     const providerSettings = {
-      ...(currentPrefs.providerSettings?.[executor.id] || {}),
+      ...localSettings,
       blockDirectDb: fastify.pluginEnabled?.('db') === true,
       strictUnknownDbClient: (fastify.pluginSettings?.('db') as { strictClientPolicy?: unknown } | null)
         ?.strictClientPolicy === true,
     };
+    let nativeSettings: ExecutorRunInput['nativeSettings'];
+
+    try {
+      nativeSettings = await prepareChatNativeSettings(executor, config, cwd, currentPrefs.providerSettings);
+    } catch (error) {
+      if (error instanceof NativeSettingsError) {
+        return channel.refuse(error.statusCode, {
+          error: error.code,
+          message: error.message,
+          ...(error.fieldIds.length ? { fieldIds: error.fieldIds, reasons: error.reasons } : {}),
+        });
+      }
+
+      return channel.refuse(503, {
+        error: 'settings_unavailable',
+        message: 'Не удалось подготовить нативные настройки исполнителя',
+      });
+    }
 
     // Provider session принадлежит не браузеру, а sidecar-у Cockpit. Все медленные части
     // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
@@ -3066,6 +3090,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         workTools: workToolsValue,
         workToolScopeKey,
         providerSettings,
+        nativeSettings,
+        nativeSettingsFingerprint: nativeSettings?.fingerprint ?? '',
         // Claude получает порог через env выше, Codex — как официальный config override
         // в своих exec-args. Одно значение настроек, transport выбирает сам executor.
         compactWindow,

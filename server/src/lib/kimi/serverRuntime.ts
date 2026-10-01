@@ -43,6 +43,7 @@ export interface StartKimiServerOptions {
     env: NodeJS.ProcessEnv;
   };
   socketPath?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -114,7 +115,10 @@ export async function startKimiServer({
   log = null,
   launch,
   socketPath,
+  signal,
 }: StartKimiServerOptions): Promise<KimiServerProcess> {
+  signal?.throwIfAborted();
+
   const listenPort = port || await freeLoopbackPort();
   const tokenFile = path.join(home, 'server.token');
   let tail = '';
@@ -136,6 +140,13 @@ export async function startKimiServer({
     env: launch?.env || { ...(env || process.env), KIMI_CODE_HOME: home },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const abort = () => child.kill('SIGKILL');
+
+  signal?.addEventListener('abort', abort, { once: true });
+  child.once('error', () => {
+    exited = true;
+    exitReason = 'ошибка запуска';
+  });
 
   const remember = (chunk: unknown) => {
     tail = `${tail}${String(chunk)}`.slice(-LOG_TAIL_LIMIT);
@@ -154,6 +165,7 @@ export async function startKimiServer({
 
   while (Date.now() < deadline) {
     if (exited) {
+      signal?.removeEventListener('abort', abort);
       await relay?.close();
 
       throw new Error(`Kimi server завершился, не поднявшись (${exitReason}): ${tail.trim().slice(-600)}`);
@@ -183,6 +195,8 @@ export async function startKimiServer({
            * SIGKILL. Уже завершённый процесс — не ошибка: остановка идемпотентна.
            */
           async stop() {
+            signal?.removeEventListener('abort', abort);
+
             if (exited) {
               await relay?.close();
 
@@ -217,6 +231,7 @@ export async function startKimiServer({
   }
 
   child.kill('SIGKILL');
+  signal?.removeEventListener('abort', abort);
   await relay?.close();
 
   throw new Error(`Kimi server не поднялся за ${startupTimeoutMs} мс: ${tail.trim().slice(-600)}`);

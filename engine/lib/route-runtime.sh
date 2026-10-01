@@ -1062,6 +1062,8 @@ _route_v2_run_agent_node() {
   # после таймаута и после упавшего процесса нужны разные вводные, а комментарий
   # остановки обязан назвать, чем именно кончился последний заход.
   ROUTE_V2_NO_RESULT_CLASS=""
+  ROUTE_V2_NO_RESULT_DETAIL=""
+  DISPATCH_RESULT_DETAIL=""
   ROUTE_V2_NODE_VERDICT_B64=""
   ROUTE_V2_FINAL_RUN_ID=""
   # Флаг отказа сторожа обнуляется на входе, а не только перед самой проверкой: заход,
@@ -1168,6 +1170,7 @@ _route_v2_run_agent_node() {
   # Диспетчер работает в этом же процессе и оставляет класс последнего запуска в
   # DISPATCH_RESULT_KIND; фейковый run_agent тестов его не ставит — тогда класс пуст.
   ROUTE_V2_NO_RESULT_CLASS=${DISPATCH_RESULT_KIND:-}
+  ROUTE_V2_NO_RESULT_DETAIL=${DISPATCH_RESULT_DETAIL:-}
 
   # 79 — отказ ХОСТА/КОНФИГА (нет свежего coverage, провайдер недоступен, denied),
   # а не «агент не отчитался»: ретраить бессмысленно, а исчерпание бюджета
@@ -2167,7 +2170,11 @@ route_v2_dispatch_next() {
         verdict_b64=""
         exhausted_reason="исчерпан бюджет повторов: $(_route_v2_runs_phrase "$attempt_no")"
         exhausted_reason+=" без результата, последний —"
-        exhausted_reason+=" $(_route_v2_no_result_label "${ROUTE_V2_NO_RESULT_CLASS:-}")"
+        if [[ -n "${ROUTE_V2_NO_RESULT_DETAIL:-}" ]]; then
+          exhausted_reason+=" ${ROUTE_V2_NO_RESULT_DETAIL}"
+        else
+          exhausted_reason+=" $(_route_v2_no_result_label "${ROUTE_V2_NO_RESULT_CLASS:-}")"
+        fi
         break
       fi
       if (( rc != 0 )); then

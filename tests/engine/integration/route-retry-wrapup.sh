@@ -93,6 +93,7 @@ route_v2_context_for_node() {
 FAKE_EPOCH=0
 SILENT_LEFT=0
 SILENT_CLASS=timeout
+SILENT_DETAIL=""
 run_agent() {
   local task=$1 prompt=$2 stage=$3 run_id token=fake-token
   printf '%s\t%s\t%s\t%s\t%s\n' "$stage" "${FACTORY_ROUTE_FANOUT_MODE:-}" \
@@ -106,6 +107,7 @@ run_agent() {
   if [[ "$stage" == PREPARE ]] && (( SILENT_LEFT > 0 )); then
     SILENT_LEFT=$((SILENT_LEFT - 1))
     DISPATCH_RESULT_KIND=$SILENT_CLASS
+    DISPATCH_RESULT_DETAIL=$SILENT_DETAIL
     return 0
   fi
   run_state_apply_result "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" done
@@ -187,5 +189,21 @@ assert_eq "$exhausted_reason" "$(pipeline_store_get "$exhausted_task" PREPARE_CO
   "комментарий узла называет число заходов и последний исход"
 assert_eq " — $exhausted_reason" "$(route_v2_stop_line_suffix "$exhausted_task" "$exhausted_attempt")" \
   "строка остановки несёт ту же причину суффиксом"
+
+# Конкретное пояснение сохраняется и при unknown; оно не меняет бюджет повторов.
+detail_task=9204
+detail_attempt=$(begin_attempt "$detail_task" a_92049204920492049204920492049204)
+assert_rc 0 "$?" "попытка с пояснением ошибки начинается"
+SILENT_LEFT=99
+SILENT_CLASS=unknown
+SILENT_DETAIL='ошибка провайдера: Provider E_NEW'
+: >"$RUNS_LOG"
+stopped=$(route_v2_dispatch_next "$detail_task" "$detail_attempt")
+assert_rc 0 "$?" "unknown с текстом коммитит обычный exhausted"
+assert_eq 3 "$(wc -l <"$RUNS_LOG")" "пояснение не меняет число повторов"
+assert_contains "$(pipeline_store_get "$detail_task" PREPARE_COMMENT)" "$SILENT_DETAIL" \
+  "конкретная ошибка передана в комментарий остановки"
+assert_contains "$(route_v2_stop_line_suffix "$detail_task" "$detail_attempt")" "$SILENT_DETAIL" \
+  "та же ошибка передана в журнал остановки"
 
 finish_tests

@@ -96,6 +96,7 @@
           <UiSelect
             compact
             data-context="chat-session-toolbar"
+            data-role="chat-model"
             :model-value="modelId"
             :disabled="frozen"
             :title="currentModelTitle"
@@ -2025,9 +2026,9 @@ async function openDebug() {
    в общем UiTooltip — внешний overflow страницы его не обрежет. */
 .task-tip { flex: 0 1 420px; max-width: 520px; min-width: 150px; }
 .sel.task { width: 100%; min-width: 0; }
-/* Селект модели сжимаемый: ряд «модель + эффорт + кольцо» должен оставаться
-   одним рядом, а не разъезжаться на три. */
-.sel.model { flex: 0 1 140px; min-width: 84px; }
+/* Модель получает ширину выбранного названия, а не фиксированные 140px.
+   При нехватке места первой сокращается информационная строка последнего хода. */
+.sel.model { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 /* Строка состояния — не отдельная форма: у контролов нет своих коробок, только
    подпись-метка, значение и шеврон. Разделители — тонкие вертикальные линии. */
 .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
@@ -2265,7 +2266,6 @@ async function openDebug() {
   .cs-act, .cs-input { padding-left: 14px; padding-right: 14px; }
   .task-tip { flex: 0 1 300px; }
   .sel.model .lbl, .sel.mode .lbl, .bar :deep(.eff .cap) { display: none; }
-  .sel.model { flex: 0 1 118px; }
 }
 
 /* ── Планшет-портрет и телефон: список и чат делят одну колонку ──────────────────
@@ -2286,12 +2286,12 @@ async function openDebug() {
   /* Задача идёт после названия и папки: иначе выбор папки занимает отдельный ряд.
      Кнопка «назад», название и папка остаются вместе на узком экране. */
   .hrow { flex-wrap: wrap; }
+  .ttl { flex-basis: 0; }
   .task-tip { order: 1; flex: 1 1 100%; max-width: none; min-width: 0; }
   .bar { flex-wrap: wrap; }
   /* Факт-строка своим рядом — в одном ряду с контролами от неё осталось бы три буквы */
   .factbar { order: 9; flex: 1 1 100%; }
   .spacer { display: none; }
-  .sel.model { flex: 1 1 0; }
   .sel.task .lbl { display: none; }
   :deep(.eff .track) { width: 62px; }
   .cs-body { padding: 0 0px 0 12px; margin: 18px 0; }

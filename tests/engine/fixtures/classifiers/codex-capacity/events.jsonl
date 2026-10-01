@@ -1,0 +1,3 @@
+{"type":"item.completed","item":{"type":"agent_message","text":"Проверка продолжается."}}
+{"type":"error","message":"Selected model is at capacity. Please try a different model."}
+{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}

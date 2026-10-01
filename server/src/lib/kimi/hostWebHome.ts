@@ -19,6 +19,7 @@ export async function buildKimiHostWebHome(input: {
   kimiHome: string;
   runtimeHome: string;
   mcpServers: readonly McpSpec[];
+  isolateConfig?: boolean;
 }): Promise<{ home: string; cleanup(): Promise<void> }> {
   const home = path.join(input.runtimeHome, 'host-web', randomUUID());
 
@@ -29,6 +30,16 @@ export async function buildKimiHostWebHome(input: {
 
     for (const entry of entries) {
       if (entry.name === 'mcp.json' || entry.name === 'server.token') {
+        continue;
+      }
+
+      if (entry.name === 'config.toml' && input.isolateConfig) {
+        if ((await fs.stat(path.join(input.kimiHome, entry.name))).size > 2_097_152) {
+          throw new Error('Конфигурация Kimi превышает предел объёма');
+        }
+
+        await fs.copyFile(path.join(input.kimiHome, entry.name), path.join(home, entry.name));
+        await fs.chmod(path.join(home, entry.name), 0o600);
         continue;
       }
 

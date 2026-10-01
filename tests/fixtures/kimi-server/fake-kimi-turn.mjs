@@ -34,6 +34,13 @@ mkdirSync(home, { recursive: true });
 writeFileSync(path.join(home, 'server.token'), `${token}\n`, 'utf8');
 
 const app = Fastify({ logger: false });
+
+app.post('/api/v1/config', async (request) => {
+  remember({ kind: 'config', body: request.body });
+
+  return { code: 0, data: request.body };
+});
+
 let socket = null;
 let seq = 0;
 let promptCount = 0;

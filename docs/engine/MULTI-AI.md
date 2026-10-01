@@ -251,6 +251,12 @@ metadata, каталоги моделей и capabilities, после чего �
 
 Dispatcher принимает нормализованный результат adapter-а.
 
+У Codex распознавание ошибок не зависит от номера CLI: классифицируются только
+подтверждённые терминальные JSON-события. Отказ `Selected model is at capacity`
+имеет класс `transient`, без переключения модели или breaker квоты. Пояснение
+передаётся человеку отдельно от класса, поэтому даже `unknown` сохраняет текст
+ошибки. Формат — [диагностика отказов](../cockpit/pipeline/runner-failure-diagnostics.md).
+
 Переключение разрешено:
 
 - до model call: `unavailable_preflight` и `route_unavailable`;

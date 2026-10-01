@@ -33,6 +33,7 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
     config: options.config, cwd, workspaceRoot: cwd, chatKey: options.chatKey,
     mode, approval: options.factory ? 'never' : 'ask', projectRoot,
     providerSettings: options.providerSettings,
+    nativeSettings: options.nativeSettings,
     transport: 'web', mcpServers,
   });
   try {
@@ -45,6 +46,7 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       overlayPath: launch.overlayPath,
       cwd,
       env,
+      nativeSettings: options.nativeSettings,
       message: String(options.message || ''),
       sessionId: options.sessionId,
       model: options.model,

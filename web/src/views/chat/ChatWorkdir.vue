@@ -9,8 +9,8 @@
     <template #trigger="{ open }">
       <UiButton
         variant="ghost"
-        aria-label="Рабочая папка"
-        :title="`Работаем в: ${directory}`"
+        :aria-label="`Рабочая папка: ${directoryName}`"
+        :title="`Работаем в: ${currentDirectory || directory}`"
         :pressed="open"
         :disabled="busy"
         data-context="chat-workdir"
@@ -21,7 +21,7 @@
             <path :d="NAV_ICONS.projects" />
           </svg>
         </template>
-        Папка
+        {{ directoryName }}
         <template #trailing>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -210,6 +210,13 @@ const proposal = computed(() => session.value?.workdirProposal || null);
 const retrying = computed(() => Boolean(proposal.value?.transfer) && !session.value?.workdirChanging);
 const directory = computed(() => preview.value?.target?.cwd
   || session.value?.workdirState?.committed?.cwd || chatWorkdirLabel(session.value?.workdir));
+// Подпись шапки показывает подтверждённую папку, даже если предпросмотр предлагает другую.
+// До первого подтверждения серверный preview разрешает фактический путь сохранённого выбора.
+const currentDirectory = computed(() => session.value?.workdirState?.committed?.cwd
+  || preview.value?.target?.cwd || '');
+const directoryName = computed(() => (
+  currentDirectory.value ? currentDirectory.value.split('/').filter(Boolean).at(-1) || '/' : 'Папка'
+));
 const busy = computed(() => Boolean(session.value?.sending || session.value?.compacting
   || session.value?.sessionResetting || session.value?.workdirChanging));
 const editable = computed(() => !session.value?.taskId && session.value?.purpose !== 'companion');

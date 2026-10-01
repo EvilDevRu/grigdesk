@@ -4,7 +4,7 @@
     <span class="cap">эффорт</span>
     <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
                       :max="Math.max(0, levels.length - 1)" :step="1"
-                      :disabled="disabled" aria-label="Усилие рассуждения" />
+                      :labels="sliderLabels" ticks :disabled="disabled" label="Усилие рассуждения" />
     <span class="val">{{ model || '—' }}</span>
   </div>
 </template>
@@ -27,13 +27,18 @@ const props = defineProps({
 });
 const model = defineModel({ type: String, default: '' });
 
+const sliderLabels = computed(() => Object.fromEntries(
+  props.levels.map((level, index) => [index, level]),
+));
 const idx = computed(() => {
   return props.levels.indexOf(model.value);
 });
 const sliderIndex = computed({
   get: () => Math.max(0, idx.value),
   set: (value) => {
-    if (!props.disabled && props.levels[value] !== undefined) model.value = props.levels[value];
+    if (!props.disabled && props.levels[value] !== undefined) {
+      model.value = props.levels[value];
+    }
   },
 });
 </script>

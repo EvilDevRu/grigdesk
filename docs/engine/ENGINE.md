@@ -723,6 +723,12 @@ boot считается monotonic clock, допустимое восстанов
 содержит bounded code и SHA-256 исходного evidence. Provider result не подменяет trusted
 `NodeExecution.productOutcome`.
 
+`HumanIntervention.nodeVisitId` сохраняет историческую связь и после завершения визита.
+Закрытие вопроса восстанавливает эту identity только внутри изолированного вызова:
+контекст административной команды и её текущий живой визит не меняются. Иначе abandon
+повторно закрывает старый визит и требует второго нажатия —
+[разбор и регрессия](../cockpit/pipeline/human-stop-cleanup.md).
+
 Stage ledger остаётся authority перехода cursor. Lifecycle ссылается на exact
 `stageEventHash` и stable `transitionId`; writable start/resume вызывает
 `runtime_lifecycle_reconcile_routing_v2`, который после полной проверки stage chain
@@ -1577,6 +1583,14 @@ Exact id допустим, если он подтверждён каталого
 ## Ошибки и failover
 
 Adapter возвращает нормализованную категорию, а не текст, который core пытается угадать.
+
+Codex распознаёт терминальные JSON-события без semver-пина классификатора;
+версия CLI остаётся в metadata. Capacity даёт `transient`, без переключения и
+breaker квоты. Retained-FD finalizer отдельно сохраняет диагностические
+`FAILURE_CODE`, `FAILURE_MESSAGE`, `FAILURE_DETAIL`, включая неизвестную сигнатуру.
+Dispatcher передаёт пояснение в комментарий и журнал остановки. Сервер дополняет
+также старые exhausted по exact run текущего визита, без записи в состояние;
+подробнее — [диагностика отказов](../cockpit/pipeline/runner-failure-diagnostics.md).
 
 Switchable:
 

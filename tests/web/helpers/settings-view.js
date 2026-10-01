@@ -22,6 +22,7 @@ export function compileSettingsView({
   prefix = '__settings',
   accessOverview = false,
   confirm = false,
+  nativeSettings = false,
 } = {}) {
   const stores = [
     ['../stores/providers.js', 'useProvidersStore'],
@@ -42,6 +43,15 @@ export function compileSettingsView({
 
   return compileVue(SETTINGS_VIEW, {
     stubs: {
+      ...(nativeSettings ? {
+        '../../stores/providerSettings.ts': `
+          export const useProviderSettingsStore = () => globalThis[${globalName(prefix, 'NativeStore')}];
+        `,
+      } : {
+        './settings/ProviderNativeSettings.vue': `
+          export default { template: '<div class="native-settings-stub"></div>' };
+        `,
+      }),
       '../shared/apiClient.ts': `
         export const api = globalThis[${globalName(prefix, 'Api')}];
       `,

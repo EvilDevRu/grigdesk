@@ -261,5 +261,77 @@ assert_rc 0 "$?" "startup usage reconciliation sweeps every remaining crash gap"
 assert_eq 2 "$(lifecycle_count runner_usage_reconciled)" \
   "full sweep repairs the second exact document without accepting the orphan"
 
+# HumanIntervention ссылается на уже завершённый NodeVisit. Новый административный
+# процесс закрывает вопрос, но не получает этот исторический визит как открытый.
+runtime_lifecycle_clear_entity_v2
+runtime_lifecycle_node_visit_begin_v2 check CHECK 1 initial >/dev/null
+assert_rc 0 "$?" "визит перед человеческой остановкой открыт"
+closed_visit=$FACTORY_LIFECYCLE_NODE_VISIT_ID
+runtime_lifecycle_node_visit_finish_v2 failed product_failure attempt_terminal >/dev/null
+assert_rc 0 "$?" "визит завершён до ожидания человека"
+runtime_lifecycle_human_begin_v2 manual_resume_required "$stage_hash" >/dev/null
+assert_rc 0 "$?" "вопрос сохраняет ссылку на завершённый визит"
+runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
+
+runtime_lifecycle_set_context_v2 \
+  "$task" "$attempt" demo-profile debug "$route_hash" \
+  os_55555555555555555555555555555555 >/dev/null
+runtime_lifecycle_session_begin_v2 resume os_44444444444444444444444444444444 >/dev/null
+resolution_hash=$(runtime_analytics_hash_string_v2 'operator abandon')
+resolution_output="$TEST_ROOT/human-resolution.hash"
+runtime_lifecycle_resolve_open_human_v2 abandon "$resolution_hash" >"$resolution_output"
+assert_rc 0 "$?" "первое закрытие вопроса выполнено без повторного действия человека"
+assert_eq '' "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" \
+  "закрытый визит не становится текущим визитом административной команды"
+assert_eq '' "${FACTORY_LIFECYCLE_NODE_ID:-}" \
+  "исторический узел вопроса не меняет контекст команды"
+assert_eq "$(<"$resolution_output")" "$RUNTIME_LIFECYCLE_LAST_EVENT_HASH" \
+  "hash подтверждённого события доступен вызывающему процессу"
+human_event="$TEST_ROOT/human-resolved.json"
+lifecycle_last human_intervention_resolved "$human_event"
+assert_eq "$closed_visit" "$(json_file_value "$human_event" nodeVisitId)" \
+  "событие решения связано с исходным визитом"
+assert_eq os_55555555555555555555555555555555 \
+  "$(json_file_value "$human_event" orchestratorSessionId)" \
+  "событие решения записано текущей административной сессией"
+assert_eq abandon "$(json_file_value "$human_event" details.resolutionCode)" \
+  "в журнале сохранено действие abandon"
+runtime_lifecycle_resolve_open_human_v2 abandon "$resolution_hash" >/dev/null 2>&1
+assert_rc 0 "$?" "повтор закрытия вопроса идемпотентен"
+assert_eq 1 "$(lifecycle_count human_intervention_resolved)" \
+  "повтор не добавляет второго решения"
+
+# Продолжение может уже иметь собственный живой визит. Его identity и таймеры
+# должны пережить закрытие старого вопроса, а событие решения хранит прежнюю связь.
+runtime_lifecycle_node_visit_begin_v2 check CHECK 2 initial >/dev/null
+second_closed_visit=$FACTORY_LIFECYCLE_NODE_VISIT_ID
+runtime_lifecycle_node_visit_finish_v2 failed product_failure attempt_terminal >/dev/null
+runtime_lifecycle_human_begin_v2 manual_resume_required "$stage_hash" >/dev/null
+runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
+runtime_lifecycle_set_context_v2 \
+  "$task" "$attempt" demo-profile debug "$route_hash" \
+  os_66666666666666666666666666666666 >/dev/null
+runtime_lifecycle_session_begin_v2 resume os_55555555555555555555555555555555 >/dev/null
+runtime_lifecycle_node_visit_begin_v2 check CHECK 3 initial >/dev/null
+current_visit=$FACTORY_LIFECYCLE_NODE_VISIT_ID
+current_visit_clock=$RUNTIME_LIFECYCLE_VISIT_STARTED_NS
+current_visit_span=$RUNTIME_LIFECYCLE_VISIT_SPAN_ID
+resolution_hash=$(runtime_analytics_hash_string_v2 'operator resume')
+runtime_lifecycle_resolve_open_human_v2 resume "$resolution_hash" >/dev/null
+assert_rc 0 "$?" "старый вопрос закрывается при наличии нового живого визита"
+assert_eq "$current_visit" "$FACTORY_LIFECYCLE_NODE_VISIT_ID" \
+  "закрытие вопроса сохраняет текущий визит"
+assert_eq "$current_visit_clock" "$RUNTIME_LIFECYCLE_VISIT_STARTED_NS" \
+  "таймер текущего визита не меняется"
+assert_eq "$current_visit_span" "$RUNTIME_LIFECYCLE_VISIT_SPAN_ID" \
+  "span текущего визита не меняется"
+lifecycle_last human_intervention_resolved "$human_event"
+assert_eq "$second_closed_visit" "$(json_file_value "$human_event" nodeVisitId)" \
+  "решение второго вопроса не подменяет его исходный визит текущим"
+runtime_lifecycle_node_visit_finish_v2 abandoned attempt_terminal attempt_terminal >/dev/null
+assert_rc 0 "$?" "текущий визит корректно закрывается после решения старого вопроса"
+assert_eq 3 "$(lifecycle_count node_visit_finished)" \
+  "каждый визит закрыт ровно один раз"
+
 runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
 finish_tests

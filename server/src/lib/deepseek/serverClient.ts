@@ -1,6 +1,7 @@
 // Серверный клиент штатного профиля DSH web. Cookie получается только от URL
 // запущенного нами процесса и никогда не выходит за loopback этого запуска.
 import { randomUUID } from 'node:crypto';
+import { readSettingsJson } from '../executorSettings/probe.ts';
 
 export class DeepSeekWebError extends Error {
   readonly code: string;
@@ -28,12 +29,22 @@ export class DeepSeekWebClient {
     this.cookie = cookie;
   }
 
-  static async authenticate(authenticatedUrl: string): Promise<DeepSeekWebClient> {
+  /**
+   * Cookie извлекается только из loopback-адреса принадлежащего нам процесса.
+   * Abort ограничивает probe, не меняя авторизацию или runtime работающего чата.
+   */
+  static async authenticate(authenticatedUrl: string, signal?: AbortSignal): Promise<DeepSeekWebClient> {
     const url = new URL(authenticatedUrl);
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1') {
       throw new Error('DeepSeek web должен слушать только локальный адрес');
     }
-    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(10_000) });
+
+    const response = await fetch(url, {
+      redirect: 'manual',
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+        : AbortSignal.timeout(10_000),
+    });
     const cookie = response.headers.get('set-cookie')?.split(';', 1)[0];
     if (response.status !== 303 || !cookie) {
       throw new Error(`DeepSeek web не выдал cookie: HTTP ${response.status}`);
@@ -41,7 +52,13 @@ export class DeepSeekWebClient {
     return new DeepSeekWebClient(url.origin, cookie);
   }
 
-  async rpc(method: string, args: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<unknown> {
+  /**
+   * Ответ сверяется по rpcId и штатному envelope до извлечения результата.
+   * Чтение настроек с AbortSignal также ограничивает размер тела ответа.
+   */
+  async rpc(
+    method: string, args: Record<string, unknown> = {}, timeoutMs = 30_000, signal?: AbortSignal,
+  ): Promise<unknown> {
     const rpcId = randomUUID();
     let response: Response;
     try {
@@ -49,7 +66,9 @@ export class DeepSeekWebClient {
         method: 'POST',
         headers: { cookie: this.cookie, 'content-type': 'application/json' },
         body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args } }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       throw new DeepSeekWebError(String((error as Error)?.message || error), 'deepseek_transport_unknown', true);
@@ -58,8 +77,9 @@ export class DeepSeekWebClient {
       throw new DeepSeekWebError(`DeepSeek web HTTP ${response.status}`, 'deepseek_http_error', true);
     }
     let frame: RpcResult;
+
     try {
-      frame = await response.json() as RpcResult;
+      frame = await (signal ? readSettingsJson(response) : response.json()) as RpcResult;
     } catch {
       throw new DeepSeekWebError('DeepSeek web вернул повреждённый RPC-ответ',
         'deepseek_bad_response', true);

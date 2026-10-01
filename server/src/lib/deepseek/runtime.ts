@@ -22,6 +22,7 @@ import { createDeepSeekStepNormalizer } from './steps.ts';
 import type { DeepSeekUpdate } from './steps.ts';
 import { DEEPSEEK_BASH_TOOL } from './contract.ts';
 import { buildLaunchFiles } from './profile.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 
 interface DeepSeekConfig {
   deepseekRuntimeHome: string;
@@ -101,6 +102,10 @@ function containsRealPath(parent: string, candidate: string): boolean {
   return !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+/**
+ * Каждый ход получает свой профиль прав и отдельный документ нативных overrides.
+ * Общий home хранит разговор, а снятые настройки не остаются в следующем запуске.
+ */
 export async function prepareDeepSeekLaunch({
   config,
   cwd,
@@ -112,6 +117,7 @@ export async function prepareDeepSeekLaunch({
   providerSettings,
   transport,
   mcpServers,
+  nativeSettings,
 }: {
   config: DeepSeekConfig;
   cwd: string;
@@ -123,11 +129,37 @@ export async function prepareDeepSeekLaunch({
   providerSettings?: DeepSeekProviderSettings | null;
   transport?: 'acp' | 'web';
   mcpServers?: readonly DeepSeekMcpServer[];
+  nativeSettings?: PreparedNativeSettings;
 }) {
   const dshHome = chatHomeFor(config.deepseekRuntimeHome, chatKey);
   const chatDir = path.dirname(dshHome);
   const launchDir = path.join(chatDir, 'turns', randomUUID());
   await ensurePrivateDir(dshHome);
+
+  let nativeSettingsDocument: string | undefined;
+
+  if (nativeSettings?.accepted.length) {
+    await ensurePrivateDir(launchDir);
+    nativeSettingsDocument = path.join(launchDir, 'native-settings.yaml');
+
+    const source = path.join(dshHome, 'settings.yaml');
+
+    try {
+      if ((await fs.stat(source)).size > 2_097_152) {
+        throw new Error('Нативный документ DeepSeek превышает предел объёма');
+      }
+
+      await fs.copyFile(source, nativeSettingsDocument);
+      await fs.chmod(nativeSettingsDocument, 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error('Нативный документ DeepSeek не удалось изолировать');
+      }
+
+      await fs.writeFile(nativeSettingsDocument, '{}\n', { mode: 0o600 });
+    }
+  }
+
   const files = await buildLaunchFiles({
     launchDir,
     cwd,
@@ -136,6 +168,7 @@ export async function prepareDeepSeekLaunch({
     approval,
     transport,
     mcpServers,
+    nativeSettingsDocument,
     hooks: {
       bashToolName: DEEPSEEK_BASH_TOOL,
       ssh: providerSettings?.blockDirectSsh !== false,
@@ -316,6 +349,7 @@ export async function runDeepSeekTurn({
   chatKey?: string;
   projectRoot?: string;
   providerSettings?: DeepSeekProviderSettings | null;
+  nativeSettings?: PreparedNativeSettings;
   extraDirs?: readonly string[];
   attachmentPaths?: readonly string[];
   factory?: boolean;

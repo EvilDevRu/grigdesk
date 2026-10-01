@@ -4,6 +4,7 @@
 // (есть t<номер>.pipeline) от поднятого руками.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { promises as fs } from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -141,4 +142,63 @@ test('журнал кокпита переживает перезапись и �
   assert.equal(journal[0].task, '990009');
   assert.equal(journal[0].state, 'done');
   assert.equal(journal[0].finishedAt, '2026-09-07T10:15:00.000Z');
+});
+
+test('параллельные записи одного задания сохраняют целый снимок без отказов', async (t) => {
+  const { journalDir } = await stateFixture(t);
+  const record = {
+    task: '990009',
+    profile: 'demo-profile',
+    action: 'up',
+    actionId: null,
+    actionLabel: null,
+    state: 'running',
+    index: 1,
+    total: 11,
+    label: 'первый шаг',
+    message: 'первый снимок'.repeat(200),
+    pid: 4242,
+    starttime: '123456',
+    cmdline: 'bash /profiles/demo/up.sh 990009',
+    log: path.join(journalDir, 't990009.log'),
+    startedAt: '2026-09-07T10:00:00.000Z',
+    finishedAt: null,
+  };
+  const snapshots = [record, {
+    ...record,
+    index: 2,
+    label: 'второй шаг',
+    message: 'второй снимок',
+  }];
+  const write = fs.writeFile.bind(fs);
+  let releaseWrites;
+  let writes = 0;
+  const written = new Promise((resolve) => {
+    releaseWrites = resolve;
+  });
+
+  // Обе записи доходят до диска до первого rename. Это воспроизводит пересечение
+  // refresh и завершения процесса без зависимости от нагрузки и случайных таймеров.
+  t.mock.method(fs, 'writeFile', async (...args) => {
+    await write(...args);
+    writes += 1;
+
+    if (writes === snapshots.length) {
+      releaseWrites();
+    }
+
+    await written;
+  });
+
+  const results = await Promise.allSettled(snapshots.map((snapshot) => (
+    writeSandboxJournalRecord(journalDir, snapshot)
+  )));
+
+  assert.deepEqual(results.map((result) => result.status), ['fulfilled', 'fulfilled']);
+
+  const journal = await readSandboxJournal(journalDir);
+
+  assert.equal(journal.length, 1);
+  assert.deepEqual(journal[0], snapshots.find((snapshot) => snapshot.label === journal[0].label));
+  assert.deepEqual(await fs.readdir(journalDir), ['t990009.json']);
 });

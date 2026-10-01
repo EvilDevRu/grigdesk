@@ -242,6 +242,36 @@
   color: var(--accent);
 }
 
+/* Компактные риски располагаются под нативным треком и не добавляют второй ряд.
+   Отступ равен половине ширины бегунка: крайние риски совпадают с его центром. */
+.ui-discrete-slider--ticks {
+  position: relative;
+  gap: 0;
+}
+
+.ui-discrete-slider--ticks .ui-discrete-slider__points {
+  position: absolute;
+  top: calc(50% + 6px);
+  right: 7px;
+  left: 7px;
+  gap: 0;
+  height: 4px;
+  opacity: .65;
+  pointer-events: none;
+}
+
+.ui-discrete-slider--ticks .ui-discrete-slider__points > span {
+  flex: none;
+  width: 1px;
+  height: 4px;
+  background: currentColor;
+  font-size: 0;
+}
+
+.ui-discrete-slider--ticks .ui-discrete-slider__points > span:only-child {
+  margin-inline: auto;
+}
+
 .ui-checkbox.is-invalid .ui-checkbox__mark,
 .ui-radio.is-invalid .ui-radio__mark {
   border-color: var(--bad);

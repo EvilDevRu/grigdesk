@@ -27,6 +27,7 @@ import {
 } from '../kimi/usage.ts';
 import { withRetry } from '../retry.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
+import { kimiNativeSettings } from '../executorSettings/kimi.ts';
 
 // Серверный config в объёме, который читает адаптер. Полная его форма объявлена
 // в config.ts; здесь перечислено ровно то, что нужно запуску и опросам Kimi.
@@ -283,6 +284,7 @@ async function nearestKimiProjectRoot(cwd?: string): Promise<string | null> {
 
 export default {
   id: 'kimi',
+  nativeSettings: kimiNativeSettings,
   name: 'Kimi Code',
   vendor: 'Moonshot AI',
   color: '#6657d9',

@@ -20,6 +20,7 @@
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)
 - [Стадии — глобальный enum (server/src/lib/stages.ts)](stage-catalog.md)
 - [Триаж называет род работы, глубину маршрута считает политика](triage-routing-policy.md)
+- [Ручной выбор маршрута принадлежит человеку](manual-route-choice.md)
 
 ### Данные фабрики
 
@@ -54,6 +55,7 @@
 - [«Арбитр помер» = он отработал, а показать результат было негде](arbiter-result-visibility.md)
 - [«Блокирующее замечание» проверяющего узла бывает просто отказом прав](reviewer-permission-denials.md)
 - [«Завис — агент молчит», «узел вернул решение человеку» и «исчерпан бюджет повторов» в одной модалке = три захода убиты по лимиту, а туннель терял половину рукопожатий](retry-timeouts-and-tunnel-failures.md)
+- [Перегрузка модели и неизвестная ошибка сохраняют конкретную причину в карточке](runner-failure-diagnostics.md)
 - [«Конвейер встал» при живом этапе: правило линейности гасило сам фронт](active-stage-linearity.md)
 - [«Маршрут требует файл инструментации» = форма открылась на чужом профиле](launch-profile-consistency.md)
 - [«Нет событий N мин» на штатной паузе = свежесть считали по чужому ACTIVE_RUN](active-run-freshness.md)
@@ -94,6 +96,7 @@
 - [Проверка исполнителей обновляется внутри длинного маршрута](coverage-expiry-during-route.md)
 - [Resume читает закреплённый hash каталога из загрузчика попытки](bootstrap-resume-catalog-hash.md)
 - [Стенд старой задачи не сносился: попытка родилась раньше lifecycle-журнала](legacy-sandbox-cleanup.md)
+- [Первый снос после вопроса человеку: историческая ссылка не открывает визит](human-stop-cleanup.md)
 - [Транзакционный узел БЕЗ пары instrument делает маршрут заложником формы запуска](transactional-node-instrument-pair.md)
 - [Узлы маршрута обязаны ходить в общий runtime под ОДНИМ uid](shared-runtime-uid.md)
 - [Command-узел тянет за собой артефакт своего узла-источника](command-node-source-artifacts.md)

@@ -64,6 +64,7 @@
 - [Новые модели Anthropic обнаруживаются сами](anthropic-model-discovery.md)
 - [Подключение нового ИИ — модульное](executor-adapter-boundary.md)
 - [Свои настройки исполнителя объявляет сам executor](executor-settings.md)
+- [Нативные настройки чатов: динамическая форма, API и проверенные транспорты](executor-native-settings.md)
 - [Обнаружение нативных настроек: источники CLI, пробелы схем и общий контракт](executor-settings-discovery.md)
 - [Границы настроек: конкурирующие записи, публичные prefs и fingerprint запуска](executor-settings-storage-boundaries.md)
 - [План TDD динамических настроек: этапы, контракты, тесты и проверка применения](executor-settings-tdd-plan.md)
@@ -79,6 +80,7 @@
 - [Авторизация Claude](claude-authentication.md)
 - [Стоп агента](agent-stop.md)
 - [Строка состояния полного чата — не отдельная форма](chat-status-bar.md)
+- [Шапка чата: полная модель, риски усилия и имя текущей папки](header-controls.md)
 
 ## Грабли
 

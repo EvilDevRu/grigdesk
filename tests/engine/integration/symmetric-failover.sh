@@ -20,6 +20,7 @@ declare -A FIXTURE_RESULT=()
 declare -A FIXTURE_STARTED=()
 declare -A FIXTURE_SCOPE=()
 declare -A FIXTURE_RESOLVE_ERROR=()
+declare -A FIXTURE_DETAIL=()
 
 fixture_resolve() {
   local provider=$1 requested_family=${2:-}
@@ -57,6 +58,7 @@ fixture_invoke() {
   local provider=$1 family=$2 model=$3
   local key="$provider:$family"
   DISPATCH_INVOKE_RESULT=${FIXTURE_RESULT[$key]:-${FIXTURE_RESULT[$provider]:-ok}}
+  DISPATCH_INVOKE_DETAIL=${FIXTURE_DETAIL[$provider]:-}
   DISPATCH_INVOKE_STARTED=${FIXTURE_STARTED[$key]:-${FIXTURE_STARTED[$provider]:-1}}
   DISPATCH_LIMIT_SCOPE=${FIXTURE_SCOPE[$key]:-${FIXTURE_SCOPE[$provider]:-provider}}
   DISPATCH_LIMIT_UNTIL=500
@@ -67,6 +69,7 @@ reset_fixture() {
   FIXTURE_STARTED=()
   FIXTURE_SCOPE=()
   FIXTURE_RESOLVE_ERROR=()
+  FIXTURE_DETAIL=()
   breaker_clear claude acct-claude provider "" "" 2>/dev/null || true
   breaker_clear claude acct-claude family opus "" 2>/dev/null || true
   breaker_clear codex acct-codex provider "" "" 2>/dev/null || true
@@ -272,5 +275,19 @@ for nonswitch in transient context_overflow unknown; do
   assert_rc 1 "$?" "$nonswitch DeepSeek result does not replay the stage"
   assert_eq deepseek "$DISPATCH_RESULT_RUNNER" "$nonswitch remains on DeepSeek"
 done
+
+reset_fixture
+FIXTURE_RESULT[codex]=transient
+FIXTURE_RESULT[claude]=ok
+FIXTURE_DETAIL[codex]='модель перегружена'
+dispatcher_run_chain 54 PLAN codex claude 200 fixture_resolve fixture_invoke
+assert_rc 1 "$?" "пояснение перегрузки не разрешает переключение"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "при перегрузке остаётся назначенный исполнитель"
+assert_eq 'модель перегружена' "$DISPATCH_RESULT_DETAIL" "конкретная причина проходит dispatcher"
+
+reset_fixture
+dispatcher_run_chain 55 PLAN codex claude 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "следующий исправный запуск проходит"
+assert_eq '' "$DISPATCH_RESULT_DETAIL" "исправный запуск не наследует прошлую ошибку"
 
 finish_tests

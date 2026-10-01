@@ -77,7 +77,7 @@ async function workdirSession(extra = {}) {
 test('папка открывается одним кликом, выбор и диалог переноса работают через общий UI', async (t) => {
   const browser = await browserHarness();
   const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
-  const session = await workdirSession();
+  const session = await workdirSession({ workdirState: { committed: { cwd: '/workspace/current' } } });
   const calls = [];
   const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
     workdirProtocol: 1,
@@ -98,6 +98,9 @@ test('папка открывается одним кликом, выбор и �
     commitWorkdir: async (id, transfer) => calls.push({ id, transfer }),
   });
 
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').text(), 'current');
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').attributes('title'),
+    'Работаем в: /workspace/current');
   await wrapper.get('[data-context="chat-workdir"]').trigger('click');
   await flushPromises();
   assert.match(browser.document.querySelector('.workdir-path').textContent, /\/workspace\/current/u);
@@ -116,6 +119,11 @@ test('папка открывается одним кликом, выбор и �
     remember: true,
   });
 
+  session.workdirPreview.target.cwd = '/workspace/next';
+  await flushPromises();
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').text(), 'current',
+    'предпросмотр перехода не заменяет текущий каталог');
+
   const reset = buttonByText(browser, 'Перейти без выжимки');
 
   assert.ok(reset);
@@ -124,6 +132,10 @@ test('папка открывается одним кликом, выбор и �
   reset.click();
   await flushPromises();
   assert.deepEqual(calls[1], { id: 'chat', transfer: 'reset' });
+
+  session.workdirState.committed.cwd = '/workspace/next/';
+  await flushPromises();
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').text(), 'next');
 });
 
 test('относительный путь объясняется на месте и не уходит на сервер', async (t) => {

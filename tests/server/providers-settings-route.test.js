@@ -83,6 +83,9 @@ async function routeFixture(t, extraAdapters = []) {
       writes.push(patch);
       snapshot = { ...snapshot, ...patch };
     },
+    updateProviderSettings(mutator) {
+      this.write({ providerSettings: mutator(structuredClone(snapshot.providerSettings)) });
+    },
   };
   const adapters = [guardedAdapter(), ...extraAdapters];
   const app = Fastify({ logger: false });

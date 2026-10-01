@@ -18,7 +18,7 @@ import { TlsInputError, isPrivateAddress } from '../../lib/tls/local.ts';
 import type { ModelJobManager } from '../../lib/speech/modelJobs.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 import type { FactoryDebugSettings } from '../../lib/factoryDebug.ts';
-import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
+import { PrefsCorruptedError, publicPrefsView } from '../../lib/prefsStore.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 
 // Кто владеет кредами B24 и умеет проверить вход. Оба соседа ещё JavaScript.
@@ -183,7 +183,7 @@ async function settingsModule(
   }
 
   // Общие настройки кокпита (правила запусков и пр.).
-  fastify.get('/api/settings/prefs', async () => prefs.read());
+  fastify.get('/api/settings/prefs', async () => publicPrefsView(prefs.read()));
   fastify.post('/api/settings/prefs', async (request: SettingsRequest, reply) => {
     const body = request.body || {};
     if (typeof body !== 'object' || Array.isArray(body)) {
@@ -200,8 +200,9 @@ async function settingsModule(
         });
       }
     }
+
     try {
-      return prefs.write(body);
+      return publicPrefsView(prefs.write(body));
     } catch (err) {
       // Файл настроек не читается — запись отклонена целиком, и человеку нужен не
       // «внутренний сбой», а понятная причина: иначе порча выглядит как сбой кокпита.

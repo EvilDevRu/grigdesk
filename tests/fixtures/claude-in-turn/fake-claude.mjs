@@ -111,7 +111,30 @@ process.stdin.on('data', (chunk) => {
     } catch {
       continue;
     }
+
     if (message?.type !== 'user') {
+      if (process.env.COCKPIT_CLAUDE_FIXTURE_SETTINGS === '1' && message?.type === 'control_request') {
+        trace({ direction: 'client', message });
+
+        const settingsAt = argv.indexOf('--settings');
+        const effective = settingsAt < 0 ? {} : JSON.parse(argv[settingsAt + 1]);
+
+        send({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: message.request_id,
+            response: message.request.subtype === 'get_settings'
+              ? {
+                effective,
+                sources: {},
+                applied: {},
+              }
+              : {},
+          },
+        });
+      }
+
       continue;
     }
 

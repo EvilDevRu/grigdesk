@@ -23,6 +23,7 @@ export interface DeepSeekLaunchFilesOptions {
     args: readonly string[];
     env: readonly { name: string; value: string }[];
   }[];
+  nativeSettingsDocument?: string;
   hooks: {
     bashToolName: string;
     ssh: boolean;
@@ -210,6 +211,9 @@ export async function buildLaunchFiles(
   };
   const hooksJson = `${JSON.stringify(hooksDocument, null, 2)}\n`;
   const overlay = serializeOverlay([
+    ...(options.nativeSettingsDocument
+      ? [{ id: 'settings', config: { path: options.nativeSettingsDocument } }]
+      : []),
     { id: 'sandbox-policy', config: { mode, workspaceRoot } },
     { id: 'approval', config: { policy: approval } },
     {

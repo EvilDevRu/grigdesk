@@ -28,6 +28,7 @@ dispatcher_run_chain() {
   local pending_from_run="" pending_from_epoch="" pending_from_provider=""
   local pending_reason="" pending_scope=none
   DISPATCH_RESULT_KIND=""
+  DISPATCH_RESULT_DETAIL=""
   DISPATCH_RESULT_RUNNER=""
   DISPATCH_RESULT_FAMILY=""
   DISPATCH_RESULT_MODEL=""
@@ -106,6 +107,7 @@ dispatcher_run_chain() {
       fi
 
       DISPATCH_INVOKE_RESULT=unknown
+      DISPATCH_INVOKE_DETAIL=""
       DISPATCH_INVOKE_STARTED=1
       DISPATCH_LIMIT_SCOPE=provider
       DISPATCH_LIMIT_UNTIL=""
@@ -139,6 +141,7 @@ dispatcher_run_chain() {
       DISPATCH_RESULT_FAMILY=$family
       DISPATCH_RESULT_MODEL=$model
       DISPATCH_RESULT_KIND=$result
+      DISPATCH_RESULT_DETAIL=${DISPATCH_INVOKE_DETAIL:-}
 
       if [[ "$result" == manual_switch && -n "${MULTI_MANUAL_TARGET:-}" ]]; then
         runtime_lifecycle_dispatch_finish_v2 interrupted manual_switch interrupted \

@@ -27,6 +27,8 @@ import {
   openClaudeStreamSession,
 } from './_claudeStream.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import { claudeNativeSettings } from '../executorSettings/claude.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type {
   InTurnAssistantEvent,
@@ -988,7 +990,8 @@ async function configureClaudeExtraUsage(patch: {
  */
 export function claudeProviderSettingsArgs(settings: ClaudeSettings = {}, {
   directSshPolicy = true,
-}: { directSshPolicy?: boolean } = {}) {
+  nativeSettings,
+}: { directSshPolicy?: boolean; nativeSettings?: PreparedNativeSettings } = {}) {
   const blockDirectSsh = directSshPolicy && settings.blockDirectSsh !== false;
   const hookCommand = directCommandHook({
     blockDirectSsh,
@@ -996,6 +999,7 @@ export function claudeProviderSettingsArgs(settings: ClaudeSettings = {}, {
     strictUnknownDbClient: settings.strictUnknownDbClient === true,
   });
   const payload = {
+    ...(nativeSettings?.payload as Record<string, unknown> ?? {}),
     fastMode: settings.fastMode === true,
     ...(hookCommand && {
       hooks: {
@@ -1496,6 +1500,7 @@ function claudeConfigDir() {
 
 export default {
   id: 'claude',
+  nativeSettings: claudeNativeSettings,
   name: 'Claude',
   vendor: 'Anthropic',
   color: '#d97757',
@@ -1806,7 +1811,7 @@ export default {
    */
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
-    mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal,
+    mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, onProgress, onStep, signal,
     workspaceAccess, workTools, onSessionCreated, onRunMetadata,
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
   }: {
@@ -1822,6 +1827,7 @@ export default {
     mcpConfig?: { mcpServers?: Record<string, unknown> } | null;
     permissionPromptTool?: string;
     providerSettings?: ClaudeSettings;
+    nativeSettings?: PreparedNativeSettings;
     log?: StreamLog;
     onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
     onRunMetadata?: (metadata: ChatRunMetadata) => void;
@@ -1873,7 +1879,7 @@ export default {
         ]),
       },
     } : null;
-    const providerArgs = claudeProviderSettingsArgs(providerSettings);
+    const providerArgs = claudeProviderSettingsArgs(providerSettings, { nativeSettings });
     if (scopedPermissions) {
       const settingsAt = providerArgs.lastIndexOf('--settings');
       const current = JSON.parse(providerArgs[settingsAt + 1] || '{}') as Record<string, unknown>;
@@ -1916,7 +1922,7 @@ export default {
     // Разовый запуск с каналом уточнений идёт тем же stream-json процессом, что живая
     // сессия, и закрывается после общего завершения: иначе дополнительный ввод некуда
     // писать — `claude -p <текст>` читает stdin только как признак конца.
-    if (onInTurnReady || onInTurnAvailability || onInTurnReceipt || onAssistantMessage) {
+    if (nativeSettings || onInTurnReady || onInTurnAvailability || onInTurnReceipt || onAssistantMessage) {
       const streamArgs = ['-p', '--input-format', 'stream-json', ...args.slice(2)];
 
       return (async () => {
@@ -1926,6 +1932,7 @@ export default {
           cwd,
           env,
           sessionId: sessionId || null,
+          nativeSettings,
           log,
         });
         const onAbort = () => {
@@ -2058,12 +2065,13 @@ export default {
       'cwd',
       'extraDirs',
       'providerSettings',
+      'nativeSettingsFingerprint',
       'workToolScopeKey',
     ],
 
     open({
       config, env, cwd, extraDirs = [], model, effort, permissionMode, sessionId,
-      mcpConfig, permissionPromptTool, providerSettings, log, hooks, workTools,
+      mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, hooks, workTools,
     }: {
       config: ClaudeConfig;
       env?: NodeJS.ProcessEnv;
@@ -2076,6 +2084,7 @@ export default {
       mcpConfig?: { mcpServers?: Record<string, unknown> } | null;
       permissionPromptTool?: string;
       providerSettings?: ClaudeSettings;
+      nativeSettings?: PreparedNativeSettings;
       log?: StreamLog;
       hooks?: Parameters<typeof openClaudeStreamSession>[0]['hooks'];
       workTools?: { descriptors?: unknown } | null;
@@ -2090,12 +2099,13 @@ export default {
           extraDirs,
           mcpConfig,
           permissionPromptTool,
-          providerSettingsArgs: claudeProviderSettingsArgs(providerSettings),
+          providerSettingsArgs: claudeProviderSettingsArgs(providerSettings, { nativeSettings }),
           workTools,
         }),
         cwd,
         env,
         sessionId,
+        nativeSettings,
         log,
         hooks,
       });

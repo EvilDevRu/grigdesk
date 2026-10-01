@@ -38,7 +38,8 @@ async function declaredSettings(
 ): Promise<ProviderSetting[]> {
   const decl = executor?.settings;
   const list = typeof decl === 'function' ? await decl(config) : decl;
-  return Array.isArray(list) ? list : [];
+
+  return Array.isArray(list) ? list.filter((setting) => setting.id !== 'nativeSettings') : [];
 }
 
 /**

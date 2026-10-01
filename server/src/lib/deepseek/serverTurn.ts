@@ -10,6 +10,8 @@ import { openDeepSeekStream } from './serverEvents.ts';
 import type { DeepSeekWireFrame } from './serverEvents.ts';
 import { startDeepSeekServer } from './serverRuntime.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './serverRuntime.ts';
+import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import { applyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
 type PermissionAnswer = {
   allow?: boolean;
@@ -21,6 +23,7 @@ export interface DeepSeekServerTurnOptions {
   overlayPath: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
+  nativeSettings?: PreparedNativeSettings;
   message: string;
   sessionId?: string | null;
   model?: string;
@@ -94,7 +97,12 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
   const server = await (options.startServer || startDeepSeekServer)({
     bin: options.bin, overlayPath: options.overlayPath, cwd: options.cwd, env: options.env,
   });
+
   try {
+    if (options.nativeSettings?.accepted.length) {
+      await applyDeepSeekNativeSettings(server.client, options.nativeSettings);
+    }
+
     const sessionId = await server.client.createSession(options.cwd, options.sessionId);
     await options.onSessionCreated?.(sessionId);
     if (options.model) {

@@ -31,6 +31,7 @@ import {
   publishUsageDocument,
 } from '../../server/src/lib/analytics/usageDocument.ts';
 import { ensurePrivateDirectory } from '../../server/src/lib/analytics/durableFs.ts';
+import { inspectCodexFailure, runnerFailureDetail } from '../../server/src/lib/runnerFailure.ts';
 
 const EVENTS_READ_FD = 7;
 const EVENTS_WRITE_FD = 8;
@@ -495,6 +496,10 @@ function prepare(contextPath) {
     sourceFingerprint: source.sourceFingerprint,
     observedProviderScope: observedScope(context.provider, source.raw, normalization),
     normalization,
+    failure: context.provider === 'codex' && context.rc !== 0
+      && ![124, 130, 143].includes(context.rc)
+      ? inspectCodexFailure(source.raw.toString('utf8')).failure
+      : null,
   };
   process.stdout.write(`${canonicalJson(prepared, { bytes: MAX_PREPARED_BYTES })}\n`);
 }
@@ -613,6 +618,16 @@ function meta(contextPath, phase, preparedPath = null, resultClass = null) {
       ['FINISHED_AT', context.quiescedAt],
       ['USAGE_SCHEMA', '2'],
     );
+
+    const showFailure = !['ok', 'timeout', 'manual_switch'].includes(resultClass ?? context.resultClass);
+
+    if (prepared?.failure && showFailure) {
+      fields.push(
+        ['FAILURE_CODE', prepared.failure.code],
+        ['FAILURE_MESSAGE', prepared.failure.message],
+        ['FAILURE_DETAIL', runnerFailureDetail(prepared.failure, context.resolvedModel).slice(0, 220)],
+      );
+    }
     if (prepared && ['complete', 'partial'].includes(prepared.normalization?.completeness)) {
       fields.push(
         ['TOKENS_IN', summary.uncachedInput],

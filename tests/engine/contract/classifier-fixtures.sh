@@ -63,7 +63,7 @@ materialize_fixture() {
     claude-synthetic-limit)
       printf 'You have reached your 5-hour usage limit.\n' >"$target/stderr.log"
       : >"$target/stdout.log" ;;
-    claude-runtime-session-limit|codex-runtime-usage-limit|kimi-ok|kimi-interrupted)
+    claude-runtime-session-limit|codex-runtime-usage-limit|codex-capacity|kimi-ok|kimi-interrupted)
       : >"$target/stderr.log"
       : >"$target/stdout.log" ;;
     codex-synthetic-limit)
@@ -128,6 +128,7 @@ check_fixture codex codex-denied
 check_fixture codex codex-auth-expired
 check_fixture codex codex-auth-corrupt-stream
 check_fixture codex codex-context-overflow
+check_fixture codex codex-capacity
 check_fixture kimi kimi-ok
 check_fixture kimi kimi-no-login
 check_fixture kimi kimi-bad-model
@@ -161,7 +162,25 @@ unknown="$TEST_ROOT/unknown-version"
 cp -a "$fixture_root/codex-denied" "$unknown"
 sed -i 's/CLI_VERSION=.*/CLI_VERSION=999.0.0/' "$unknown/meta.env"
 actual=$(runner_call codex classify "$unknown" 1)
-assert_eq unknown "$actual" "unknown CLI version fails closed"
+assert_eq denied "$actual" "new Codex semver preserves a proven permission failure"
+
+# Обновление CLI не меняет смысл того же терминального события. Ошибка внутри
+# вывода инструмента, наоборот, не является отказом провайдера ни при какой версии.
+codex_tool_text="$TEST_ROOT/codex-tool-text"
+cp -a "$fixture_root/codex-runtime-usage-limit" "$codex_tool_text"
+printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution",'\
+'"aggregated_output":"You have hit your usage limit. purchase more credits"}}' \
+  >"$codex_tool_text/events.jsonl"
+actual=$(runner_call codex classify "$codex_tool_text" 1)
+assert_eq unknown "$actual" "tool output cannot open a Codex quota breaker"
+
+for version in 0.145.0 0.159.2 999.0.0; do
+  codex_capacity="$TEST_ROOT/codex-capacity-$version"
+  cp -a "$fixture_root/codex-capacity" "$codex_capacity"
+  sed -i "s/CLI_VERSION=.*/CLI_VERSION=$version/" "$codex_capacity/meta.env"
+  actual=$(runner_call codex classify "$codex_capacity" 1)
+  assert_eq transient "$actual" "Codex capacity after work is transient on $version"
+done
 
 kimi_unknown="$TEST_ROOT/kimi-unknown-version"
 cp -a "$fixture_root/kimi-no-login" "$kimi_unknown"
