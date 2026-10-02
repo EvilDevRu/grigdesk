@@ -86,6 +86,7 @@ profile_runner_host_preflight() {
   local probe_output runner_version
   declare -A preflight_probe_ready=()
   declare -A preflight_structural_ready=()
+  declare -A preflight_runtime_versions=()
   providers=$(mktemp "$coverage_dir/.providers.XXXXXX") || return 78
   plans=$(mktemp "$coverage_dir/.plans.XXXXXX") || {
     rm -f -- "$providers"
@@ -124,9 +125,12 @@ profile_runner_host_preflight() {
     fi
     # Не отбрасываем prerelease: pinned runner `0.1.5-rc.2` должен сравниваться
     # с catalog min/max как exact версия, а не как более старая `0.1.5`.
-    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' \
-      <<<"$probe_output" | head -1)
-    [[ -n "$runner_version" ]] || runner_version=1.0.0
+    runner_version=$(_multi_probe_version "$probe_output")
+    if declare -F "runner_${provider}_refresh_probe" >/dev/null &&
+       runner_call "$provider" refresh_probe; then
+      preflight_runtime_versions["$provider"]=$runner_version
+      printf 'runtime\t%s\t%s\n' "$provider" "$runner_version" >>"$results"
+    fi
     MULTI_CATALOG_ROOT=$(mktemp -d "${STATE_DIR:?}/.catalog-invoke.XXXXXX") || {
       rm -f -- "$providers" "$plans" "$results"
       return 78
@@ -193,6 +197,10 @@ profile_runner_host_preflight() {
     printf 'CATALOG_REVISION=%s\nTOTAL=%s\nUNAVAILABLE=%s\nUNAVAILABLE_RUNNERS=%s\n' \
       "$revision" "$total" "$unavailable" "$unavailable_runners"
     printf 'FETCHED_AT=%s\nEXPIRES_AT=%s\n' "$now" "$((now + ttl))"
+    while IFS= read -r provider; do
+      [[ -z "${preflight_runtime_versions[$provider]:-}" ]] ||
+        printf 'RUNTIME_VERSION_%s=%s\n' "$provider" "${preflight_runtime_versions[$provider]}"
+    done <"$providers"
   } >"$tmp" || {
     rm -f -- "$tmp" "$providers" "$plans" "$results"
     return 78

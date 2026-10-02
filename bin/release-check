@@ -32,6 +32,6 @@ if [ -n "$(git -C "$ROOT" ls-remote --tags origin "refs/tags/$TAG")" ]; then
   exit 1
 fi
 
-( cd "$ROOT/server" && npm test )
+( cd "$ROOT/server" && npm run deepseek:prepare && npm run deepseek:verify && npm test )
 ( cd "$ROOT/web" && npm test && npm run build )
 echo "Готово к публикации $TAG: создай аннотированный тег и GitHub Release явными командами."

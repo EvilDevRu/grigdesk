@@ -17,6 +17,7 @@ async function fixture(t) {
   const calls = [];
   let auth = 'auth-a';
   let security = 'security-a';
+  let securityError = null;
   let serial = 0;
   let env = {};
   const executor = {
@@ -24,7 +25,13 @@ async function fixture(t) {
     workdir: { switch: 'reseed', roots: 'single' },
     sessionBinding: {
       authProfileId: () => auth,
-      securityProfile: () => security,
+      securityProfile: () => {
+        if (securityError) {
+          throw securityError;
+        }
+
+        return security;
+      },
     },
     // Новая сессия получает собственный id, а resume сохраняет прежний.
     // Тест видит каждый запуск и cwd, поэтому пустая выжимка не маскируется успехом.
@@ -79,6 +86,9 @@ async function fixture(t) {
     calls,
     setAuth(value) { auth = value; },
     setSecurity(value) { security = value; },
+    setSecurityError(value) {
+      securityError = value;
+    },
     setEnv(value) {
       env = value;
     },
@@ -191,6 +201,50 @@ test('произвольный executor с sessionBinding получает CAS, 
   assert.equal(binding.provider, 'sidecar-test');
   assert.equal(binding.authProfileId, 'auth-b');
   assert.equal(binding.securityProfile, 'security-b');
+});
+
+test('недоступный профиль исполнителя отклоняет ход без новой сессии и потери памяти', async (t) => {
+  const f = await fixture(t);
+
+  await save(f.app);
+  assert.equal((await run(f.app)).statusCode, 200);
+
+  // Код адаптера с его id в префиксе — безопасная причина; прочие ошибки текст не раскрывают.
+  f.setSecurityError(Object.assign(new Error('Публикация runtime Cockpit не завершена'), {
+    code: 'sidecar-test_runtime_publish_pending',
+  }));
+
+  const refused = await run(f.app);
+
+  assert.equal(refused.statusCode, 503);
+  assert.equal(refused.json().error, 'executor_unavailable');
+  assert.match(refused.json().message, /Публикация runtime/u);
+
+  f.setSecurityError(Object.assign(new Error('ENOENT /private/fixture/path'), { code: 'ENOENT' }));
+
+  const hidden = await run(f.app);
+
+  assert.equal(hidden.statusCode, 503);
+  assert.doesNotMatch(hidden.json().message, /private/u);
+  assert.equal(f.calls.length, 1, 'исполнитель не запускался');
+
+  f.setSecurityError(null);
+  assert.equal((await run(f.app)).statusCode, 200);
+  assert.equal(f.calls[1].sessionId, 'provider-session-1', 'прежняя сессия продолжается');
+});
+
+test('смена профиля исполнителя оставляет заметку о новой сессии', async (t) => {
+  const f = await fixture(t);
+
+  await save(f.app);
+  assert.equal((await run(f.app)).statusCode, 200);
+  f.setSecurity('security-b');
+
+  const rotated = await run(f.app);
+
+  assert.equal(rotated.statusCode, 200);
+  assert.match(rotated.json().reply, /профиль исполнителя изменился/u);
+  assert.equal(f.calls[1].sessionId, null);
 });
 
 test('client-owned sessionId отклоняется для capability без запуска executor-а', async (t) => {

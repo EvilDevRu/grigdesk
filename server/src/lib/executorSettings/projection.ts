@@ -33,6 +33,8 @@ function publicNode(
     writable: node.writable && !stale,
     ...(node.reason ? { reason: node.reason } : {}),
     ...(node.owner ? { owner: node.owner } : {}),
+    ...(node.appliesTo ? { appliesTo: node.appliesTo } : {}),
+    ...(node.consumerSupport ? { consumerSupport: node.consumerSupport } : {}),
     ...(node.children
       ? { children: node.children.map((child) => publicNode(child, storage, stale, fields)) }
       : {}),
@@ -84,7 +86,7 @@ export function projectNativeSettingsCatalog(
     protocolVersion: 1,
     providerId: read.context.providerId,
     state: read.state,
-    scope: { id: 'cockpit-chats', label: 'Для чатов Cockpit' },
+    scope: read.snapshot?.scope ?? { id: 'cockpit-chats', label: 'Для чатов Cockpit' },
     source: read.snapshot?.source ?? {
       kind: 'cli',
       version: null,

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-# Минимальная версия Node: с 22.18 снятие типов встроено, и собственный TypeScript
-# кокпита исполняется без единого флага. Ниже этой версии импорт `.ts` падает на
-# разрешении модуля — читаемый отказ можно дать только здесь, до самого запуска.
-COCKPIT_MIN_NODE=22.18.0
+# Общий host и DeepSeek используют один Node со снятием TypeScript-типов.
+# Закреплённый Harness допускает ветку 22 с 22.19 или Node 24 и новее.
+COCKPIT_MIN_NODE=22.19.0
 
-# Сравнение по частям: `sort -V` вернул бы 22.9 новее 22.18.
+# Проверка выполняется до чтения TS-модулей и подготовки встроенного runtime.
+# Node 23 не входит в compatibility закреплённого Harness.
 cockpit_require_node() {
   local actual
   actual=$(node -p 'process.versions.node' 2>/dev/null) || {
@@ -13,22 +13,16 @@ cockpit_require_node() {
     return 1
   }
 
-  local -a have want
+  local -a have
   IFS=. read -r -a have <<<"${actual%%-*}"
-  IFS=. read -r -a want <<<"$COCKPIT_MIN_NODE"
 
-  local i
-  for i in 0 1 2; do
-    (( ${have[i]:-0} > ${want[i]:-0} )) && return 0
-    (( ${have[i]:-0} < ${want[i]:-0} )) && {
-      echo "Cockpit требует Node $COCKPIT_MIN_NODE или новее, найден $actual." >&2
-      echo "С 22.18 Node исполняет TypeScript сам; на более старой версии сервер не стартует." >&2
-      echo "Обнови Node (nvm install $COCKPIT_MIN_NODE) и повтори запуск." >&2
-      return 1
-    }
-  done
+  if (( ${have[0]:-0} >= 24 || (${have[0]:-0} == 22 && ${have[1]:-0} >= 19) )); then
+    return 0
+  fi
 
-  return 0
+  echo "Cockpit требует Node ^22.19.0 || >=24.0.0, найден $actual." >&2
+  echo "Обнови Node (nvm install $COCKPIT_MIN_NODE) и повтори запуск." >&2
+  return 1
 }
 
 # CLI текущей установки доступны без повторного запуска installer. Абсолютный bin

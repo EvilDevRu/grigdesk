@@ -1,15 +1,17 @@
 # DeepSeek Harness в Cockpit: контракт и статус внедрения
 
-Проверяемый артефакт — `@deepseek-ai/dsh@0.1.5-rc.2`, upstream-снимок —
-`c291e7961a515f6d7af9304e7fd1d257929aef26` от 20.09.2026. Обезличенные дампы и
-live-трассы лежат в `tests/fixtures/deepseek-harness/`; происхождение каждого файла
-описано в `manifest.json`. Generic-контракт раннера: [ADDING-RUNNER.md](ADDING-RUNNER.md).
+Cockpit содержит выбранные исходники Harness `0.1.5-rc.2`, upstream commit
+`c291e7961a515f6d7af9304e7fd1d257929aef26`. Общая подготовка собирает самодостаточное
+поколение; отдельная установка DSH больше не требуется. Generic-контракт раннера:
+[ADDING-RUNNER.md](ADDING-RUNNER.md).
 
-Статус: **P0–P9 закрыты; автоматизированные chat/Factory smoke P10 зелёные**. Проверены
-metadata и разрешённые короткие model/tool-вызовы, включая границы записи, настоящий
-`session/request_permission`, MCP, hooks, cancel и resume. Обычные изменения внутри cwd
-в `workspace-write` приняты как заранее разрешённый контракт; всплывашка перед каждой
-записью не обещается. Ручные UI/restart и chain/switch пункты P10 перечислены ниже.
+Настоящий compiled runtime проверен с loopback API: web RPC/events для чата,
+ACP для Factory, native settings обоих consumers, sandbox, MCP/status, hooks,
+cancel/resume, обновление и совместимый откат. Эти проверки не расходуют платный API.
+Состав и ограничения: [композиция](../cockpit/chat/deepseek-vendored-composition.md),
+[чатовый паритет](../cockpit/chat/deepseek-compiled-chat-parity.md),
+[настройки Factory](../cockpit/pipeline/deepseek-native-settings-runtime.md),
+[переход updater](../cockpit/server/deepseek-release-transition.md).
 
 Инструкция оператора по установке, режимам и откату:
 [guide/deepseek.md](../cockpit/guide/deepseek.md).
@@ -17,7 +19,7 @@ metadata и разрешённые короткие model/tool-вызовы, в�
 ## Реализация Cockpit и Factory
 
 Chat adapter живёт в `server/src/lib/executors/deepseek.ts`. Он запускает pinned DSH через
-общий ACP-клиент, строит private overlay/hooks на каждый ход, хранит session binding только
+web RPC/events, строит private overlay/hooks на каждый ход, хранит session binding только
 на сервере и возобновляет сессию лишь для того же realpath cwd, auth profile и security
 profile. Metadata-каталог делает `initialize → session/new → session/close` без prompt;
 opaque model id не разбираются и не переименовываются.
@@ -29,14 +31,20 @@ run identity нельзя передать или подменить tool argume
 в MCP env, retained event stream или launcher argv. Text-only успех без terminal status
 повышается launcher-ом до protocol failure.
 
-Runner требует exact `0.1.5-rc.2`, публикует четыре opaque model id, capabilities
+Embedded runner различает сборки версией `0.1.5-rc.2.cockpit.b<hash16>`, проверяет её
+перед каждым узлом и публикует четыре opaque model id, capabilities
 `status status_request tools structured_output` и не заявляет sandbox/fanout только по
 факту наличия upstream-механизма. Billing dialect намеренно не зарегистрирован: usage
 Factory остаётся `unavailable`. Автоматический failover разрешён только для доказанного
 invalid-key до model/tool activity; timeout различим отдельно, все неоднозначные исходы
 остаются `unknown`.
 
-## Артефакт и установка
+## Исторический аудит внешнего npm-артефакта
+
+Следующие сведения и live fixtures описывают первоначальную интеграцию внешнего
+`@deepseek-ai/dsh@0.1.5-rc.2`. Они сохраняют происхождение исходных протокольных
+наблюдений; текущий embedded runtime доказывается отдельными compiled тестами выше.
+Обезличенные трассы лежат в `tests/fixtures/deepseek-harness/`, с manifest происхождения.
 
 Проверено на Node `v22.22.1`:
 
@@ -64,7 +72,7 @@ invalid-key до model/tool activity; timeout различим отдельно,
 а секрет живёт только в env процесса, не в файлах профиля. Каталог хода
 (`turns/<uuid>`) и launch-каталог metadata-probe удаляются после завершения процесса.
 
-Overlay из плана успешно прошёл `--dump-config` и ACP-start. Дамп подтверждает:
+Исходный overlay успешно прошёл `--dump-config` и ACP-start. Дамп подтверждает:
 
 - `sandbox-policy.mode` и абсолютный `workspaceRoot` заменяются; и в чате, и в Factory
   `workspaceRoot` равен realpath cwd. Для вызовов агента DSH берёт ту же границу из cwd

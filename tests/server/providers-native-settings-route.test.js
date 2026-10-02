@@ -10,6 +10,9 @@ import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 import { syntheticProvider } from '../fixtures/executor-settings/syntheticProvider.js';
 import { decodeProviderSettingsCatalog } from '../../shared/providerSettingsContracts.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
+import deepseek from '../../server/src/lib/executors/deepseek.ts';
+import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { flattenNativeSettings } from '../../server/src/lib/executorSettings/validation.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -18,7 +21,10 @@ const Fastify = requireFromServer('fastify');
  * Маршруты используют временный prefs и настоящий синхронный writer.
  * Только внешний CLI заменён синтетическим исполнителем.
  */
-export async function nativeRouteFixture(t, provider = syntheticProvider(), { auth = false } = {}) {
+export async function nativeRouteFixture(t, provider = syntheticProvider(), {
+  auth = false,
+  config = {},
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-routes-'));
 
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -36,7 +42,11 @@ export async function nativeRouteFixture(t, provider = syntheticProvider(), { au
   }
 
   await app.register(providersModule, {
-    config: { rootDir: root, modelsPath: path.join(root, 'models.json') },
+    config: {
+      rootDir: root,
+      modelsPath: path.join(root, 'models.json'),
+      ...config,
+    },
     prefs,
     getProviderAdapters: async () => new Map([[provider.id, provider]]),
   });
@@ -49,6 +59,123 @@ export async function nativeRouteFixture(t, provider = syntheticProvider(), { au
     root,
   };
 }
+
+test('настоящий candidate публикует embedded readiness и общую форму без ключа', async (t) => {
+  const artifact = await ensureTestDeepSeekArtifact();
+  const provider = {
+    ...deepseek,
+    auth: () => ({
+      mode: 'api-key',
+      label: 'Нет API key',
+      available: false,
+    }),
+    catalog: async () => null,
+    usage: undefined,
+    latestVersion: () => {
+      throw new Error('Embedded не проверяет npm latest');
+    },
+  };
+  const { app, root, prefs } = await nativeRouteFixture(t, provider, {
+    config: { deepseekArtifactDir: artifact },
+  });
+  const registry = (await app.inject('/api/providers')).json().providers;
+  const card = registry.find((entry) => entry.id === 'deepseek');
+
+  assert.equal(card.distribution.kind, 'embedded');
+  assert.equal(card.distribution.ready, true);
+  assert.equal(card.distribution.label, 'Входит в Cockpit');
+  assert.equal(card.available, false);
+  assert.equal(card.installed, true);
+  assert.equal(card.install, null);
+  assert.equal(card.setupCommand, null);
+  assert.equal(card.canUpdate, false);
+  assert.equal(card.latest, null);
+  assert.match(card.distribution.authHint, /DEEPSEEK_API_KEY/);
+  assert.equal((await app.inject('/api/providers/deepseek/mcp')).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/providers/check-updates' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/providers/deepseek/update' })).statusCode, 400);
+
+  const first = decodeProviderSettingsCatalog(
+    (await app.inject('/api/providers/deepseek/settings/catalog')).json(),
+  );
+  const fieldId = '["llm-deepseek","maxTokens"]';
+
+  assert.equal(first.scope.id, 'cockpit-chats-and-pipelines');
+  assert.equal(flattenNativeSettings(first.fields)
+    .find((field) => field.id === fieldId).consumerSupport.pipeline.state, 'verified');
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/providers/deepseek/settings/overrides',
+    payload: {
+      fieldId,
+      operation: 'set',
+      value: 64,
+      schemaRevision: first.schemaRevision,
+      revision: first.revision,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(prefs.readStored().providerSettings.deepseek.nativeSettings.overrides[fieldId].value, 64);
+
+  const reloaded = (await app.inject('/api/providers/deepseek/settings/catalog?refresh=1')).json();
+  const serialized = JSON.stringify(reloaded);
+
+  assert.equal(flattenNativeSettings(reloaded.fields)
+    .find((field) => field.id === '["llm-deepseek","apiKeyEnv"]').writable, false);
+  assert.equal(serialized.includes(artifact), false);
+  assert.equal(serialized.includes(root), false);
+  assert.equal(serialized.includes('normalizedFields'), false);
+  assert.equal(serialized.includes('consumerFields'), false);
+});
+
+test('отсутствующая встроенная сборка объясняет причину и команду подготовки в карточке', async (t) => {
+  const provider = {
+    ...deepseek,
+    auth: () => ({
+      mode: 'api-key',
+      label: 'Нет API key',
+      available: false,
+    }),
+    catalog: async () => null,
+  };
+  const generationRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'deepseek-missing-generation-'));
+
+  t.after(() => fs.rmSync(generationRoot, { recursive: true, force: true }));
+
+  const { app, root } = await nativeRouteFixture(t, provider, {
+    config: { deepseekRuntimeMode: 'embedded', deepseekGenerationRoot: generationRoot },
+  });
+  const card = (await app.inject('/api/providers')).json().providers.find((entry) => entry.id === 'deepseek');
+
+  assert.equal(card.distribution.ready, false);
+  assert.equal(card.distribution.error, 'deepseek_runtime_missing');
+  assert.match(card.distribution.problem.message, /не подготовлена/u);
+  assert.equal(card.distribution.problem.command, `${path.join(root, 'bin/cockpit')} deps`);
+  assert.equal(card.install, null);
+});
+
+test('installed default не объявляет embedded delivery до cutover', async (t) => {
+  const provider = {
+    ...deepseek,
+    probe: async () => ({ ok: false, version: null }),
+    auth: () => ({
+      mode: 'api-key',
+      label: 'Нет API key',
+      available: false,
+    }),
+    catalog: async () => null,
+  };
+  const { app } = await nativeRouteFixture(t, provider, {
+    config: { deepseekRuntimeMode: 'installed', deepseekBin: '/missing-fixture/dsh' },
+  });
+  const card = (await app.inject('/api/providers')).json().providers.find((entry) => entry.id === 'deepseek');
+
+  assert.equal(card.distribution, null);
+  assert.match(card.install, /deepseekHarnessInstall/);
+  assert.equal(card.available, false);
+});
 
 test('публичный каталог и POST сохраняют boolean для будущего запуска', async (t) => {
   const { app, prefs, provider } = await nativeRouteFixture(t);

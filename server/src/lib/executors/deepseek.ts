@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
-import { probeDeepSeekBin } from '../deepseek/env.ts';
+import {
+  describeDeepSeekRuntime,
+  probeDeepSeekRuntime,
+  requireDeepSeekRuntimeIdentity,
+} from '../deepseek/runtimeProcess.ts';
+import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
 import {
   deepSeekAuth,
   deepSeekCatalogCacheKey,
@@ -17,7 +24,7 @@ import { RETRY_CONTRACT } from '../chat/retryContract.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
-type DeepSeekConfig = {
+type DeepSeekConfig = DeepSeekRuntimeConfig & {
   rootDir?: string;
   deepseekBin: string;
   deepseekRuntimeHome: string;
@@ -25,15 +32,77 @@ type DeepSeekConfig = {
 
 const DEEPSEEK_EFFORTS = Object.freeze(['off', 'low', 'high', 'max']);
 
+// Что видит человек в карточке при недоступной встроенной сборке и чем это лечится.
+// Подготовка пересобирает отсутствующую, повреждённую или чужую по ABI сборку.
+const DISTRIBUTION_PROBLEMS: Readonly<Record<string, string>> = Object.freeze({
+  deepseek_runtime_missing: 'Сборка DeepSeek ещё не подготовлена.',
+  deepseek_runtime_corrupt: 'Файлы сборки DeepSeek повреждены; подготовка соберёт её заново.',
+  deepseek_runtime_incompatible: 'Сборка DeepSeek собрана под другую версию Node, чем у службы Cockpit; '
+    + 'подготовь её тем же Node, которым запущена служба.',
+  deepseek_runtime_changed: 'Сборка DeepSeek сменилась во время проверки; перепроверь карточку.',
+});
+
+function shellArgument(value: string): string {
+  return /^[\w./-]+$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * Причина недоступности встроенной сборки и команда исправления для терминала.
+ * Незавершённую публикацию лечит только recovery своего job, поэтому команда берёт
+ * его id из маркера; нечитаемый маркер требует ручной сверки, а не подготовки.
+ */
+function deepSeekDistributionProblem(
+  config: DeepSeekConfig,
+  code: string | undefined,
+): { message: string; command?: string } {
+  const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
+  const prepare = `${shellArgument(root ? path.join(root, 'bin/cockpit') : 'bin/cockpit')} deps`;
+
+  if (code === 'deepseek_runtime_publish_pending') {
+    const runtimeRoot = config.deepseekGenerationRoot
+      || (root ? path.join(root, 'server/runtime/deepseek') : '');
+    let jobId = '';
+
+    try {
+      const pending = JSON.parse(fs.readFileSync(path.join(runtimeRoot, 'publish-pending.json'), 'utf8'));
+
+      jobId = /^[0-9a-f-]{36}$/u.test(pending?.jobId || '') ? pending.jobId : '';
+    } catch { /* Нечитаемый маркер: команды recovery нет. */ }
+
+    const script = path.join(root, 'server/scripts/prepareDeepSeekRuntime.mts');
+
+    return jobId ? {
+      message: 'Обновление Cockpit не завершило публикацию DeepSeek. Восстанови его и перезапусти Cockpit.',
+      command: `node ${shellArgument(script)} --recover-job ${jobId}`,
+    } : {
+      message: 'Маркер незавершённой публикации DeepSeek не читается: сверь checkout и сборку по журналу '
+        + 'обновлений вручную.',
+    };
+  }
+
+  return {
+    message: DISTRIBUTION_PROBLEMS[code || ''] || 'Сборка DeepSeek не прошла проверку версии.',
+    command: prepare,
+  };
+}
+
 export function deepSeekAuthProfileId(env: NodeJS.ProcessEnv = process.env): string {
   const key = String(env.DEEPSEEK_API_KEY || '');
   const fingerprint = key ? createHash('sha256').update(key).digest('hex').slice(0, 16) : 'missing';
   return `deepseek-env-key:${fingerprint}`;
 }
 
-export function deepSeekSecurityProfile(settings: Record<string, unknown> = {}): string {
+/**
+ * Привязка сессии включает и host-права, и identity конкретного runtime.
+ * Обновление композиции не продолжает разговор под прежним security binding.
+ */
+export function deepSeekSecurityProfile(
+  settings: Record<string, unknown> = {},
+  runtimeIdentity?: string,
+): string {
   const fingerprint = createHash('sha256').update(JSON.stringify({
     version: DEEPSEEK_PIN.version,
+    runtimeIdentity,
     profile: DEEPSEEK_PROFILE_REVISION,
     ssh: settings.blockDirectSsh !== false,
     db: settings.blockDirectDb === true,
@@ -53,11 +122,49 @@ export default {
   workdir: { switch: 'reseed', roots: 'single' },
   sessionBinding: {
     authProfileId: () => deepSeekAuthProfileId(process.env),
-    securityProfile: (_config: unknown, settings: Record<string, unknown> = {}) => (
-      deepSeekSecurityProfile(settings)
+    securityProfile: (config: DeepSeekConfig, settings: Record<string, unknown> = {}) => (
+      deepSeekSecurityProfile(settings, requireDeepSeekRuntimeIdentity(config))
     ),
   },
   install: 'node server/scripts/deepseekHarnessInstall.mts',
+  /**
+   * Доставка объявляется адаптером; общий UI не перечисляет провайдеров.
+   * Отсутствующий embedded artifact остаётся встроенным с причиной отказа.
+   */
+  distribution(config: DeepSeekConfig, probe?: { ok: boolean; code?: string }) {
+    if (config.deepseekBinOverride
+      || (!config.deepseekArtifactDir && config.deepseekRuntimeMode !== 'embedded')) {
+      return null;
+    }
+
+    const base = {
+      kind: 'embedded' as const,
+      label: 'Входит в Cockpit',
+      authHint: 'Добавьте DEEPSEEK_API_KEY в окружение службы Cockpit.',
+    };
+
+    try {
+      const runtime = describeDeepSeekRuntime(config);
+      const described = {
+        ...base,
+        buildId: runtime.buildId!,
+        runtimeVersion: runtime.runtimeVersion,
+      };
+
+      // Выбор поколения прошёл, но полную проверку и запуск `-V` выполняет только probe.
+      return !probe || probe.ok
+        ? described
+        : { ...described, problem: deepSeekDistributionProblem(config, probe.code) };
+    } catch (error) {
+      const code = String((error as { code?: string }).code || 'deepseek_runtime_missing');
+
+      return {
+        ...base,
+        error: code,
+        problem: deepSeekDistributionProblem(config, code),
+      };
+    }
+  },
   // Страница не в формате Statuspage: при сбое счёта остаётся ссылкой, а не разобранным
   // состоянием, — контракт допускает и это.
   statusPage: 'https://status.deepseek.com',
@@ -74,7 +181,9 @@ export default {
   })],
 
   bin(config: DeepSeekConfig) { return config.deepseekBin; },
-  probe(config: DeepSeekConfig) { return probeDeepSeekBin(config.deepseekBin); },
+  probe(config: DeepSeekConfig) {
+    return probeDeepSeekRuntime(config);
+  },
   auth() { return deepSeekAuth(process.env); },
   // Лимитов подписки у DeepSeek нет — есть предоплаченный счёт. Вместо «CLI не отдаёт
   // лимиты» всплывашка получает остаток по валютам и темп его расхода.

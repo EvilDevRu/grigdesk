@@ -63,7 +63,7 @@ const DISABLED_ROWS = Object.freeze([
 
 // Входит в persisted cache/session fingerprint. Менять при любом смысловом изменении
 // overlay, hooks или их enforcement, даже если версия DSH осталась прежней.
-export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v4';
+export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v5';
 
 const INSTRUCTIONS_HOOK_PATH = fileURLToPath(
   new URL('../../../scripts/deepseekInstructionsHook.mts', import.meta.url),

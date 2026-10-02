@@ -386,7 +386,9 @@ function normalizeNode(
   const schema = normalizeDialect(resolveSchema(raw, root), options.dialect);
   const shape = scalarShape(schema, options);
   const owner = options.ownership.find((policy) => policy.path.every((part, index) => path[index] === part));
-  const secret = parentSecret || owner?.secret === true || schema.writeOnly === true;
+  const declaredSecret = options.ownership.some((policy) =>
+    policy.secret === true && policy.path.every((part, index) => path[index] === part));
+  const secret = parentSecret || declaredSecret || schema.writeOnly === true;
   const keys = shape.kind === 'object' ? OBJECT_KEYS : shape.kind === 'array' ? ARRAY_KEYS : SCALAR_KEYS;
   const unsupported = Object.keys(schema).some(
     (keyword) => !keys.has(keyword) && !(options.dialect === 'schemastery' && keyword === 'x-cockpit-step'),

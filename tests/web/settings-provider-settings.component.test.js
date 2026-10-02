@@ -66,16 +66,21 @@ function provider(id, name, note = '', value = true) {
   };
 }
 
+/**
+ * Настройки монтируются с переданным реестром capability и временным браузером.
+ * Сохранения и подтверждения фиксируются без обращения к настоящему серверу.
+ */
 async function mountSettings(t, {
   confirmImpl = async () => true,
   saveImpl,
   initialValue = true,
+  providers,
 } = {}) {
   const browser = await installBrowser(t);
   const confirmations = [];
   const saves = [];
   const prov = {
-    providers: [
+    providers: providers || [
       provider('alpha-next', 'Alpha', '', initialValue),
       provider('beta-next', 'Beta', '', initialValue),
       provider(
@@ -152,6 +157,65 @@ test('каждая карточка исполнителя содержит св
     perCard: [1, 1, 1, 1],
     outsideCards: 0,
   });
+});
+
+test('embedded карточка без ключа объясняет авторизацию и не предлагает отдельную установку', async (t) => {
+  const embedded = {
+    ...provider('future-provider', 'Future provider'),
+    available: false,
+    authLabel: 'Нет API key',
+    distribution: {
+      kind: 'embedded',
+      label: 'Входит в Cockpit',
+      ready: true,
+      authHint: 'Добавьте TEST_API_KEY в окружение службы.',
+    },
+    install: null,
+    setupCommand: null,
+    canUpdate: false,
+    settingsCatalog: true,
+    mcp: true,
+  };
+  const { wrapper } = await mountSettings(t, { providers: [embedded] });
+
+  await wrapper.get('#provider-toggle-future-provider').trigger('click');
+
+  assert.match(wrapper.get('[data-testid="provider-distribution"]').text(),
+    /Входит в Cockpit.*Сборка готова/);
+  assert.match(wrapper.text(), /Авторизация: Добавьте TEST_API_KEY/);
+  assert.equal(wrapper.find('[data-role="settings-command"]').exists(), false);
+  assert.equal(wrapper.find('[data-testid="provider-update-result"]').exists(), false);
+});
+
+test('недоступная встроенная сборка показывает причину и команду исправления', async (t) => {
+  const broken = {
+    ...provider('future-provider', 'Future provider'),
+    available: false,
+    installed: false,
+    distribution: {
+      kind: 'embedded',
+      label: 'Входит в Cockpit',
+      ready: false,
+      error: 'future_runtime_missing',
+      problem: {
+        message: 'Сборка ещё не подготовлена.',
+        command: '/opt/cockpit/bin/cockpit deps',
+      },
+    },
+    install: null,
+    setupCommand: null,
+    canUpdate: false,
+  };
+  const { wrapper } = await mountSettings(t, { providers: [broken] });
+
+  await wrapper.get('#provider-toggle-future-provider').trigger('click');
+
+  const problem = wrapper.get('[data-testid="provider-distribution-problem"]');
+
+  assert.match(wrapper.get('[data-testid="provider-distribution"]').text(), /Сборка недоступна/);
+  assert.match(problem.text(), /Сборка ещё не подготовлена\./);
+  assert.equal(problem.get('[data-role="settings-command"]').text(), '/opt/cockpit/bin/cockpit deps');
+  assert.match(problem.text(), /Перепроверить/);
 });
 
 test('отмена точного предупреждения оставляет запрет включённым и ничего не сохраняет', async (t) => {

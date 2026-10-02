@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ExecutorAdapter } from '../executors/index.ts';
 import type { NativeSettingsContext } from './types.ts';
+import type { SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
 
 /**
  * Базовая карточка и запуск строят одинаковую идентичность источника.
@@ -14,9 +15,14 @@ export async function nativeSettingsContext(
   adapter: Pick<ExecutorAdapter, 'id' | 'nativeSettings'> & Partial<Pick<ExecutorAdapter, 'bin'>>,
   config: unknown,
   cwd = String((config as { rootDir?: unknown } | null)?.rootDir ?? process.cwd()),
+  consumer: SettingsConsumer = 'chat',
 ): Promise<NativeSettingsContext> {
   if (adapter.nativeSettings?.context) {
-    return adapter.nativeSettings.context(config, cwd);
+    const context = await adapter.nativeSettings.context(config, cwd, consumer);
+
+    context.consumer = consumer;
+
+    return context;
   }
 
   const configured = String(adapter.bin?.(config) ?? adapter.id);
@@ -51,5 +57,6 @@ export async function nativeSettingsContext(
     transport: 'default',
     mode: 'default',
     cwdRealpath: fs.realpathSync(cwd),
+    consumer,
   };
 }

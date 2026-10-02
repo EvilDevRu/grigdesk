@@ -92,7 +92,11 @@ test('metadata probe делает initialize/new/close без prompt и возв
     ], { stdio: ['pipe', 'pipe', 'pipe'] }),
   });
   assert.equal(again.models.length, 4);
-  assert.deepEqual(await fs.readdir(path.join(root, 'catalog', 'launch')), []);
+
+  const generations = await fs.readdir(path.join(root, 'catalog'));
+
+  assert.equal(generations.length, 1);
+  assert.deepEqual(await fs.readdir(path.join(root, 'catalog', generations[0], 'launch')), []);
 });
 
 test('адаптер объявляет полный честный контракт и виден обоим реестрам', async () => {
@@ -125,6 +129,6 @@ test('DeepSeek session identity пинит ключ и профиль без р�
   const changed = deepSeekSecurityProfile({ blockDirectSsh: false, blockDirectDb: false });
   assert.match(auth, /^deepseek-env-key:[a-f0-9]{16}$/u);
   assert.equal(auth.includes(secret), false);
-  assert.match(secure, /^deepseek-host-sandbox-v4:[a-f0-9]{64}$/u);
+  assert.match(secure, /^deepseek-host-sandbox-v5:[a-f0-9]{64}$/u);
   assert.notEqual(secure, changed);
 });

@@ -3,8 +3,8 @@
 #
 #   bin/cockpit            собрать web и запустить сервер (прод-режим, один origin)
 #   bin/cockpit dev        dev-режим: vite (:5180) + сервер с автоперезапуском
-#   bin/cockpit build      только собрать web
-#   bin/cockpit deps       установить зависимости server + web
+#   bin/cockpit build      собрать web и встроенный DeepSeek
+#   bin/cockpit deps       подготовить зависимости и встроенный DeepSeek
 #
 # Переменные окружения (опционально): COCKPIT_PORT, COCKPIT_MEDIA_PYTHON и т.д. (см. server/src/config.js).
 set -euo pipefail
@@ -30,9 +30,18 @@ ENV_ARG=("${COCKPIT_NODE_ENV_ARGS[@]}")
 # Занят ли порт (сервер уже запущен другим процессом/вкладкой).
 port_busy() { command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q "[:.]${PORT}[[:space:]]"; }
 
+# Встроенный DeepSeek — один из исполнителей: сбой его подготовки (нет сети, компилятора,
+# прерванная сборка) не мешает запуску Cockpit; карточка DeepSeek покажет недоступность.
+prepare_deepseek() {
+  ( cd "$DIR/server" && npm run --silent deepseek:prepare ) || {
+    echo "⚠ DeepSeek не подготовлен; Cockpit работает без него. Повтор: bin/cockpit deps" >&2
+  }
+}
+
 ensure_deps() {
   [ -d "$DIR/server/node_modules" ] || ( echo "→ npm i (server)"; cd "$DIR/server" && npm install --no-audit --no-fund )
   [ -d "$DIR/web/node_modules" ]    || ( echo "→ npm i (web)";    cd "$DIR/web"    && npm install --no-audit --no-fund )
+  prepare_deepseek
 }
 
 build_web() { echo "→ Сборка web…"; ( cd "$DIR/web" && npm run build ); }
@@ -41,6 +50,7 @@ case "$CMD" in
   deps)
     cd "$DIR/server" && npm install --no-audit --no-fund
     cd "$DIR/web"    && npm install --no-audit --no-fund
+    prepare_deepseek
     ;;
   build)
     ensure_deps; build_web

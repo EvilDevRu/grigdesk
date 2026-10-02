@@ -10,9 +10,14 @@ import { openDeepSeekStream } from './serverEvents.ts';
 import type { DeepSeekWireFrame } from './serverEvents.ts';
 import { startDeepSeekServer } from './serverRuntime.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './serverRuntime.ts';
+import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { createDeepSeekServerThoughtNormalizer } from './serverThoughts.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
-import { applyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
+import {
+  applyDeepSeekNativeSettings,
+  deepSeekSettingsNeedRestart,
+  verifyDeepSeekNativeSettings,
+} from '../executorSettings/deepseek.ts';
 
 type PermissionAnswer = {
   allow?: boolean;
@@ -21,6 +26,7 @@ type PermissionAnswer = {
 
 export interface DeepSeekServerTurnOptions {
   bin: string;
+  runtime?: DeepSeekRuntimeDescriptor;
   overlayPath: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -94,14 +100,33 @@ function compactText(stream: unknown): string {
   return text;
 }
 
+/**
+ * Запускает web-процесс выбранного поколения и завершает его вместе с ходом.
+ * Настройки принимаются до session/prompt; private URL остаётся внутри клиента.
+ */
 export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) {
-  const server = await (options.startServer || startDeepSeekServer)({
-    bin: options.bin, overlayPath: options.overlayPath, cwd: options.cwd, env: options.env,
+  const start = () => (options.startServer || startDeepSeekServer)({
+    runtime: options.runtime,
+    bin: options.bin,
+    overlayPath: options.overlayPath,
+    cwd: options.cwd,
+    env: options.env,
+    signal: options.signal,
   });
+  let server = await start();
 
   try {
     if (options.nativeSettings?.accepted.length) {
-      await applyDeepSeekNativeSettings(server.client, options.nativeSettings);
+      const restart = await deepSeekSettingsNeedRestart(server.client, options.nativeSettings);
+
+      await applyDeepSeekNativeSettings(server.client, options.nativeSettings, options.signal);
+
+      if (restart) {
+        await server.stop();
+        server = await start();
+      }
+
+      await verifyDeepSeekNativeSettings(server.client, options.nativeSettings, options.signal);
     }
 
     const sessionId = await server.client.createSession(options.cwd, options.sessionId);
@@ -116,10 +141,16 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         },
       });
     }
+
+    if (options.nativeSettings?.accepted.length) {
+      await verifyDeepSeekNativeSettings(server.client, options.nativeSettings, options.signal);
+    }
+
     const sink = createStepSink(options.onStep);
     const thoughts = createDeepSeekServerThoughtNormalizer();
     const drafts = new Map<string, string>();
     const completed = new Set<string>();
+    const textSteps = new Map<string, Record<string, unknown>>();
     const toolContexts = new Map<string, { title: string; rawInput: unknown }>();
     const writes = new Set<Promise<void>>();
     let currentAttempt = '';
@@ -147,7 +178,20 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         reply = text;
         replyMessageId = id;
       }
-      sink.emit({ k: 'text', id, text });
+      // Живой ответ обновляется отдельным каналом; лента удерживает один шаг блока.
+      // Его объект дополняется без сотен повторных шагов в истории и SSE.
+      const step = textSteps.get(id);
+
+      if (step) {
+        step.text = text;
+      } else {
+        const created = sink.emit({ k: 'text', id, text });
+
+        if (created) {
+          textSteps.set(id, created);
+        }
+      }
+
       save({ assistantMessageId: id, text, sourceRevision: text.length, complete });
     };
     /**

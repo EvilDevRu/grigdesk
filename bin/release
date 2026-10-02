@@ -195,7 +195,7 @@ run_checks() {
     ( cd "$ROOT" && bash -c "$COCKPIT_RELEASE_CHECK_COMMAND" ) || return 1
     return 0
   fi
-  ( cd "$ROOT/server" && npm test ) || return 1
+  ( cd "$ROOT/server" && npm run deepseek:prepare && npm run deepseek:verify && npm test ) || return 1
   ( cd "$ROOT/web" && npm test && npm run build ) || return 1
 }
 

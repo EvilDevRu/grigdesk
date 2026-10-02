@@ -30,6 +30,15 @@
             {{ field.label }}
           </label>
           <span v-else class="native-setting__title">{{ field.label }}</span>
+          <p
+            v-if="field.consumerSupport?.chat?.state === 'verified'
+              && field.consumerSupport?.pipeline?.state === 'unsupported'"
+            class="native-setting__description"
+          >Только чаты</p>
+          <p v-else-if="field.consumerSupport?.pipeline?.state === 'unverified'"
+            class="native-setting__description">
+            {{ field.consumerSupport.pipeline.reason || 'Совместимость с конвейерами не проверена' }}
+          </p>
           <p v-if="descriptionSummary" class="native-setting__description">{{ descriptionSummary }}</p>
         </div>
         <ProviderSettingValue

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, mkdtemp, readFile, rename, rm, statfs } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -10,6 +10,138 @@ import {
 } from '../lib/cockpitRelease.ts';
 
 const MAX_BUFFER = 4 * 1024 * 1024;
+const PUBLISH_CONTRACT = '1';
+const PUBLISH_PENDING = 'server/runtime/deepseek/publish-pending.json';
+const UNUSABLE_PREVIOUS_RUNTIME = ['deepseek_runtime_corrupt', 'deepseek_runtime_incompatible'];
+
+/**
+ * Installed worker узнаёт наличие runtime по явному target contract, сохраняя старые релизы.
+ * Неизвестный контракт отказывает до checkout и не превращается в пропуск подготовки.
+ */
+async function runtimeContract(source) {
+  let value;
+
+  try {
+    value = JSON.parse(await readFile(path.join(source, 'server/deepseek-runtime-contract.json'), 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (value.format !== 1 || value.publishContract !== Number(PUBLISH_CONTRACT)
+      || !['installed', 'embedded'].includes(value.mode)) {
+    throw new Error('unsupported_runtime_publish_contract');
+  }
+
+  return value;
+}
+
+/**
+ * Worker переносит generation собственным проверенным publisher, без imports из staging.
+ * Загружается один раз до fast-forward: после него этот путь указывает уже на код
+ * целевого релиза, который смешался бы с загруженным installed runtimeArtifact.
+ */
+async function runtimePublisher() {
+  return import('../../../tools/deepseekRuntimePublication.ts');
+}
+
+/**
+ * Целевой prepare сообщает о повторном использовании последней строкой JSON.
+ * Старый или незнакомый вывод означает обычную сборку в checkout релиза.
+ */
+function reusedRuntimeBuildId(stdout) {
+  const line = String(stdout || '').trim().split('\n').at(-1) || '';
+
+  try {
+    const value = JSON.parse(line);
+
+    return value?.reused === true && /^[a-f0-9]{64}$/u.test(value.buildId || '') ? value.buildId : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Маркер незавершённой публикации читается без исключений: null — маркера нет,
+ * jobId null — файл нечитаем или не нашего формата, и вызывающий обязан отказать.
+ */
+async function readPublishPending(rootDir) {
+  let text;
+
+  try {
+    text = await readFile(path.join(rootDir, PUBLISH_PENDING), 'utf8');
+  } catch (error) {
+    return error.code === 'ENOENT' ? null : { jobId: null };
+  }
+
+  try {
+    const value = JSON.parse(text);
+    const valid = typeof value?.jobId === 'string' && /^[0-9a-f-]{36}$/i.test(value.jobId);
+
+    return { jobId: valid ? value.jobId : null };
+  } catch {
+    return { jobId: null };
+  }
+}
+
+/**
+ * Чужой pending — незавершённая публикация другого job: сборка поверх неё перезаписала бы
+ * маркер и спрятала нужное восстановление. Отказ называет точную команду восстановления.
+ */
+async function assertNoForeignPending(rootDir, jobId) {
+  const pending = await readPublishPending(rootDir);
+
+  if (!pending || pending.jobId === jobId) {
+    return;
+  }
+
+  const error = new Error(pending.jobId
+    ? `Публикация runtime DeepSeek предыдущего обновления (job ${pending.jobId}) не завершена. `
+      + 'Из корня Cockpit выполните: node server/scripts/prepareDeepSeekRuntime.mts '
+      + `--recover-job ${pending.jobId} — и затем перезапустите Cockpit.`
+    : `Маркер незавершённой публикации runtime DeepSeek (${PUBLISH_PENDING}) не читается, `
+      + 'поэтому --recover-job неприменим. Сверьте checkout и runtime вручную по журналу '
+      + 'обновлений и только после этого уберите маркер.');
+
+  error.safeCode = 'runtime_publication_pending';
+
+  throw error;
+}
+
+/**
+ * Pending появляется целиком через rename приватного временного файла: оборванная запись
+ * не оставляет нечитаемый маркер, который заблокировал бы все следующие обновления.
+ */
+async function writePublishPending(rootDir, marker) {
+  const file = path.join(rootDir, PUBLISH_PENDING);
+  const temporary = path.join(path.dirname(file), `.publish-pending-${marker.jobId}.tmp`);
+
+  await mkdir(path.dirname(file), { recursive: true });
+
+  try {
+    await writeFile(temporary, JSON.stringify(marker), { mode: 0o600, flag: 'wx' });
+    await rename(temporary, file);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+
+    throw error;
+  }
+}
+
+/**
+ * При сбое снимается только собственный маркер. Чужой или нечитаемый pending принадлежит
+ * другой незавершённой публикации и нужен её восстановлению.
+ */
+async function removeOwnPending(rootDir, jobId) {
+  const pending = await readPublishPending(rootDir);
+
+  if (pending?.jobId === jobId) {
+    await rm(path.join(rootDir, PUBLISH_PENDING), { force: true });
+  }
+}
 
 function argsFromCli(argv) {
   const out = {};
@@ -191,27 +323,78 @@ async function replaceDir(source, destination, backup) {
   return movedOld;
 }
 
-async function publishBuild(root, source, job) {
+/**
+ * Web, dependencies и runtime публикуются при установленном launch blocker.
+ * При сбое восстанавливаются каталоги и указатель до восстановления checkout.
+ * Publisher передаётся уже загруженным из установленного дерева, до fast-forward.
+ */
+async function publishBuild(root, source, job, runtime, publisher, progress) {
   const webDestination = path.join(root, 'web', 'dist');
   const serverDestination = path.join(root, 'server', 'node_modules');
   const webBackup = `${webDestination}.cockpit-backup-${job.id}`;
   const serverBackup = `${serverDestination}.cockpit-backup-${job.id}`;
   let webMoved = false;
   let serverMoved = false;
+  let webPublished = false;
+  let serverPublished = false;
+
   try {
+    await progress('publishing-web');
     webMoved = await replaceDir(path.join(source, 'web', 'dist'), webDestination, webBackup);
+    webPublished = true;
+    await progress('publishing-server');
     serverMoved = await replaceDir(path.join(source, 'server', 'node_modules'), serverDestination, serverBackup);
+    serverPublished = true;
+
+    if (runtime) {
+      await progress('publishing-runtime');
+
+      const published = await publisher.publishDeepSeekGeneration(
+        path.join(source, 'server/runtime/deepseek/current'), path.join(root, 'server/runtime/deepseek'));
+
+      if (published.buildId !== runtime.buildId) {
+        throw new Error('runtime_changed_during_publication');
+      }
+    }
   } catch (error) {
-    if (serverMoved) {
-      await rm(serverDestination, { recursive: true, force: true }).catch(() => {});
-      await rename(serverBackup, serverDestination).catch(() => {});
+    try {
+      if (serverPublished) {
+        await rm(serverDestination, { recursive: true, force: true });
+
+        if (serverMoved) {
+          await rename(serverBackup, serverDestination);
+        }
+      }
+      if (webPublished) {
+        await rm(webDestination, { recursive: true, force: true });
+
+        if (webMoved) {
+          await rename(webBackup, webDestination);
+        }
+      }
+      if (runtime) {
+        const runtimeRoot = path.join(root, 'server/runtime/deepseek');
+
+        if (job.previousRuntimeBuildId) {
+          await publisher.activateDeepSeekGeneration(runtimeRoot, job.previousRuntimeBuildId);
+        } else {
+          await rm(path.join(runtimeRoot, 'current'), { force: true });
+        }
+      }
+    } catch (rollbackError) {
+      rollbackError.safeCode = 'publish_recovery_failed';
+      rollbackError.message = 'Частичная публикация требует восстановления; запуск DeepSeek заблокирован.';
+
+      throw rollbackError;
     }
-    if (webMoved) {
-      await rm(webDestination, { recursive: true, force: true }).catch(() => {});
-      await rename(webBackup, webDestination).catch(() => {});
-    }
+
+    // Занятый lock публикации — единственная причина, которую оператор устраняет сам,
+    // поэтому её безопасный текст с pid владельца сохраняется в сообщении job.
+    const lockReason = error.code === 'deepseek_runtime_publish_locked' ? ` ${error.message}.` : '';
+
     error.safeCode = 'publish_failed';
-    error.message = 'Не удалось атомарно опубликовать подготовленную сборку.';
+    error.message = `Не удалось атомарно опубликовать подготовленную сборку.${lockReason}`;
+
     throw error;
   }
   return {
@@ -242,6 +425,10 @@ async function main() {
   let workDir = null;
   let job = null;
   let releasePreparation = null;
+  let runtime = null;
+  let publisher = null;
+  let checkoutApplied = false;
+  let publicationComplete = false;
   try {
     const owner = JSON.parse(await readFile(path.join(jobLockPath, 'owner.json'), 'utf8'));
     if (owner.id !== jobId) throw new Error('job_lock_owner_mismatch');
@@ -249,6 +436,9 @@ async function main() {
     if (!job || job.id !== jobId || job.status !== 'queued') throw new Error('job_not_queued');
     await setJob(statePath, jobId, { workerPid: process.pid, status: 'preparing', stage: 'preparing' });
     await appendFile(logPath, `${new Date().toISOString()} ${job.id} ${job.kind} started\n`, { mode: 0o600 });
+
+    // Незавершённая публикация прежнего job проверяется до долгой установки и сборки.
+    await assertNoForeignPending(rootDir, jobId);
 
     await ensureFreeSpace(rootDir);
     await ensureCheckout(rootDir, job, { requireMain: job.kind === 'update' });
@@ -258,6 +448,8 @@ async function main() {
     const source = await archiveSource(rootDir, job.targetSha, workDir);
 
     await assertReleaseNodeRuntime(source);
+
+    const contract = await runtimeContract(source);
 
     await stage(statePath, jobId, 'installing');
     await command('npm', ['ci', '--no-audit', '--no-fund'], { cwd: path.join(source, 'server') },
@@ -273,6 +465,65 @@ async function main() {
       'web_dependencies_failed', 'Не удалось установить зависимости web.');
 
     await stage(statePath, jobId, 'building');
+
+    if (contract) {
+      // Целевой prepare сам решает, подходит ли установленная сборка: при тех же входах
+      // он не собирает заново, а исходники берёт из проверенного кэша установки.
+      const prepared = await command(process.execPath, ['scripts/prepareDeepSeekRuntime.mts'], {
+        cwd: path.join(source, 'server'),
+        env: {
+          ...process.env,
+          COCKPIT_DEEPSEEK_REUSE_RUNTIME: path.join(rootDir, 'server/runtime/deepseek'),
+          COCKPIT_DEEPSEEK_UPSTREAM_SEED: path.join(rootDir, 'third_party/deepseek-harness/upstream'),
+        },
+      }, 'deepseek_build_failed', 'Не удалось подготовить встроенный runtime DeepSeek.');
+
+      const { readDeepSeekArtifact } = await import('../lib/deepseek/runtimeArtifact.ts');
+      const current = path.join(rootDir, 'server/runtime/deepseek/current');
+      const reusedBuildId = reusedRuntimeBuildId(prepared.stdout);
+      const target = readDeepSeekArtifact(reusedBuildId
+        ? current
+        : path.join(source, 'server/runtime/deepseek/current')).artifact;
+
+      if (reusedBuildId && target.buildId !== reusedBuildId) {
+        const error = new Error('Установленный runtime DeepSeek изменился во время подготовки.');
+
+        error.safeCode = 'deepseek_build_failed';
+        throw error;
+      }
+
+      // Повторно используемая сборка уже опубликована: публиковать и откатывать нечего,
+      // поэтому publisher нужен только новой сборке.
+      runtime = reusedBuildId ? null : target;
+      publisher = runtime ? await runtimePublisher() : null;
+
+      let previousRuntimeBuildId = null;
+
+      // Повреждённый или несовместимый current не является поколением для отката:
+      // обновление продолжается и чинит runtime, а откат снимет такой current.
+      try {
+        previousRuntimeBuildId = readDeepSeekArtifact(current).artifact.buildId;
+      } catch (error) {
+        if (UNUSABLE_PREVIOUS_RUNTIME.includes(error.code)) {
+          await appendFile(logPath, `${new Date().toISOString()} ${jobId} previous-runtime-unusable `
+            + `${error.code}\n`, { mode: 0o600 });
+        } else if (error.code !== 'deepseek_runtime_missing') {
+          throw error;
+        }
+      }
+
+      job = {
+        ...job,
+        previousRuntimeBuildId,
+        expectedRuntimeBuildId: target.buildId,
+      };
+      await setJob(statePath, jobId, {
+        previousRuntimeBuildId,
+        expectedRuntimeBuildId: target.buildId,
+        previousCheckoutSha: job.expectedCheckoutSha,
+      });
+    }
+
     await command('npm', ['run', 'build'], {
       cwd: path.join(source, 'web'),
       env: {
@@ -283,11 +534,16 @@ async function main() {
     }, 'web_build_failed', 'Production-сборка web завершилась ошибкой.');
 
     await stage(statePath, jobId, 'testing');
-    await command(process.execPath, ['--test', 'tests/server/cockpit-release.test.js'], { cwd: source, timeout: 5 * 60_000 },
+    await command(process.execPath, ['--test', 'tests/server/cockpit-release.test.js'], {
+      cwd: source,
+      timeout: 5 * 60_000,
+      env: { ...process.env, COCKPIT_RELEASE_PUBLISH_CONTRACT: PUBLISH_CONTRACT },
+    },
       'smoke_test_failed', 'Smoke-тест обновления завершился ошибкой.');
 
     // Повторяем весь меняемый preflight после долгой установки зависимостей и сборки.
     await ensureCheckout(rootDir, job, { requireMain: job.kind === 'update' });
+
     if (job.kind === 'update') {
       const remote = await resolveRemoteTag(rootDir, job.targetTag);
       if (!remote || remote.sha !== job.targetSha) {
@@ -300,21 +556,73 @@ async function main() {
 
     await stage(statePath, jobId, 'applying');
     await ensureCheckout(rootDir, job, { requireMain: job.kind === 'update' });
+    // Чужой маркер мог появиться за время сборки; свой его не перезаписывает.
+    await assertNoForeignPending(rootDir, jobId);
+
+    if (runtime) {
+      await writePublishPending(rootDir, {
+        jobId,
+        workerPid: process.pid,
+        previousSha: job.expectedCheckoutSha,
+        targetSha: job.targetSha,
+        previousBuildId: job.previousRuntimeBuildId,
+        expectedBuildId: runtime.buildId,
+      });
+    }
+
+    await setJob(statePath, jobId, { publicationStage: 'applying-checkout' });
+
     if (job.kind === 'update') {
       await git(rootDir, ['merge', '--ff-only', job.targetSha], 'fast_forward_failed', 'Git отказался применить релиз fast-forward-ом.');
+      checkoutApplied = true;
     }
-    const backups = await publishBuild(rootDir, source, job);
+
+    const backups = await publishBuild(rootDir, source, job, runtime, publisher,
+      (publicationStage) => setJob(statePath, jobId, { publicationStage }));
+
+    publicationComplete = true;
+
+    if (runtime) {
+      await rm(path.join(rootDir, PUBLISH_PENDING));
+    }
+
     await setJob(statePath, jobId, { status: 'restarting', stage: 'restarting', backups });
     await restart(rootDir, mode);
     await appendFile(logPath, `${new Date().toISOString()} ${jobId} restart-command-completed\n`, { mode: 0o600 });
     // Успех подтверждает только новый server process, увидев свой running SHA.
   } catch (error) {
     if (job) {
+      let recovery = null;
+
+      if (checkoutApplied && !publicationComplete) {
+        const current = await git(rootDir, ['rev-parse', 'HEAD']).catch(() => null);
+
+        if (current?.stdout.trim() === job.targetSha) {
+          const rollback = await run('git', ['-C', rootDir, 'reset', '--keep', job.expectedCheckoutSha],
+            { cwd: rootDir, timeout: 30_000 });
+
+          recovery = rollback.code === 0 ? 'previous-checkout-restored' : 'manual-recovery-required';
+        } else {
+          recovery = 'manual-recovery-required';
+        }
+      }
+      if (runtime && !publicationComplete && recovery !== 'manual-recovery-required') {
+        if (error.safeCode === 'publish_recovery_failed') {
+          recovery = 'manual-recovery-required';
+        } else {
+          await removeOwnPending(rootDir, jobId);
+        }
+      }
+
       const code = error.safeCode || 'worker_failed';
       const message = error.safeCode ? error.message : 'Worker обновления неожиданно завершился.';
+
       await setJob(statePath, jobId, {
-        status: 'failed', stage: 'failed', completedAt: new Date().toISOString(),
+        status: 'failed',
+        stage: 'failed',
+        completedAt: new Date().toISOString(),
         error: { code, message },
+        recovery,
       }).catch(() => {});
       await appendFile(logPath, `${new Date().toISOString()} ${jobId} failed ${code}\n`, { mode: 0o600 }).catch(() => {});
     }

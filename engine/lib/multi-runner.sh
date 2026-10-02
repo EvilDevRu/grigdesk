@@ -137,23 +137,46 @@ _multi_execution_plan() {
   [[ "${MULTI_PLAN_LEVEL[$provider]}" != unavailable ]]
 }
 
+# Версия исполнителя — первое semver-подобное слово ответа пробы; prerelease и build
+# suffix сохраняются. Preflight пишет её в снимок, а dispatch и сверка сборки читают
+# той же функцией: префикс CLI в ответе пробы не должен выглядеть сменой сборки.
+_multi_probe_version() {
+  local version
+  version=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' <<<"$1" | head -1)
+  printf '%s\n' "${version:-1.0.0}"
+}
+
 _multi_resolve() {
   local provider=$1 requested_family=${2:-}
   local config family version variant effort exact fallback provider_key auth_profile
-  local probe_output runner_version
+  local probe_output runner_version previous_version refresh_probe=0
   config=$(multi_runner_config_file)
   runner_registry_has "$provider" || {
     DISPATCH_RESOLVE_RESULT=route_unavailable
     return 4
   }
-  if [[ "${MULTI_PROBE_READY[$provider]:-0}" != 1 ]]; then
+  if declare -F "runner_${provider}_refresh_probe" >/dev/null &&
+     runner_call "$provider" refresh_probe; then
+    refresh_probe=1
+  fi
+  previous_version=${MULTI_PROBE_VERSION[$provider]:-}
+  if [[ "${MULTI_PROBE_READY[$provider]:-0}" != 1 || "$refresh_probe" == 1 ]]; then
     probe_output=$(runner_call "$provider" probe 2>/dev/null) || {
-      DISPATCH_RESOLVE_RESULT=unavailable_preflight
+      if [[ "$refresh_probe" == 1 && -n "$previous_version" ]]; then
+        DISPATCH_RESOLVE_RESULT=runtime_changed
+        printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$provider" >&2
+      else
+        DISPATCH_RESOLVE_RESULT=unavailable_preflight
+      fi
       return 4
     }
-    runner_version=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' \
-      <<<"$probe_output" | head -1)
-    [[ -n "$runner_version" ]] || runner_version=1.0.0
+    runner_version=$(_multi_probe_version "$probe_output")
+    if [[ "$refresh_probe" == 1 && -n "$previous_version" &&
+          "$previous_version" != "$runner_version" ]]; then
+      DISPATCH_RESOLVE_RESULT=runtime_changed
+      printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$provider" >&2
+      return 4
+    fi
     MULTI_PROBE_READY["$provider"]=1
     MULTI_PROBE_VERSION["$provider"]=$runner_version
   fi
@@ -185,6 +208,8 @@ _multi_resolve() {
     effort=$(awk -F= '$1=="EFFORT"{print $2}' <<<"$defaults")
   fi
   if ! _multi_catalog_model "$provider" "$family" "$version" "$variant" "$exact" "$runner_version"; then
+    # Смену сборки runtime-sensitive runner-а уже отсекла проба выше. Здесь каталог
+    # отказал той же сборке: это выбор модели, а не runtime_changed без failover.
     if [[ -n "$exact" ]]; then
       DISPATCH_RESOLVE_RESULT=invalid_config
     else
@@ -419,19 +444,50 @@ tests — дефект/неполнота теста; environment —
   return 0
 }
 
-# Истёкший положительный снимок требует новой metadata-проверки, а не остановки
-# длинного маршрута. Повреждение/недоступность не обновляем; TTL вручную не продлеваем.
-_multi_require_coverage() {
-  local task=$1 stage=$2 config=$3 coverage_dir expected_revision refresh_rc=0
-  coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
-  expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
-  if coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
-    "$expected_revision" "$(date +%s)"; then
-    return 0
-  fi
-  [[ "${COVERAGE_GATE_REASON:-}" == expired ]] || return 79
+# Runtime-sensitive runners сверяются даже в пределах TTL перед каждым новым узлом.
+# Отдельная оболочка сохраняет registry и cache уже работающего dispatch. Несовпавшие
+# providers печатаются через запятую: решение об обновлении снимка принимает вызывающий.
+# Версия разбирается той же функцией, что и при записи снимка в preflight.
+_multi_coverage_runtime_match() (
+  local config=$1 host=$2 provider observed expected changed=''
+  source "$FACTORY_HOME/lib/profile-preflight.sh" || return 79
+  runner_registry_reset
+  runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 79
 
-  flog "$task" "$stage: истёк срок проверки исполнителей; повторяю host preflight" || true
+  # Один provider может стоять в нескольких цепочках профиля, но проба ему нужна одна.
+  while IFS= read -r provider; do
+    [[ -n "$provider" ]] || continue
+    if ! declare -F "runner_${provider}_refresh_probe" >/dev/null ||
+       ! runner_call "$provider" refresh_probe; then
+      continue
+    fi
+
+    expected=$(coverage_artifact_get "$host" "RUNTIME_VERSION_$provider")
+    if observed=$(runner_call "$provider" probe 2>/dev/null); then
+      observed=$(_multi_probe_version "$observed")
+    else
+      observed=''
+    fi
+    if [[ -z "$expected" || "$expected" != "$observed" ]]; then
+      changed+="${changed:+,}$provider"
+    fi
+  done < <(_profile_preflight_providers "$config" | LC_ALL=C sort -u)
+
+  [[ -n "$changed" ]] || return 0
+  printf '%s\n' "$changed"
+  return 79
+)
+
+# Обновляет снимок ровно одним host preflight и принимает только новый снимок исходной
+# revision, который ещё не истёк и совпадает с наблюдаемыми сборками runtime-sensitive
+# исполнителей. Второго обновления нет: нестабильная сборка останавливает узел, а не
+# зацикливает его. FACTORY_ERROR печатается лишь при окончательном отказе: строка из
+# удачного обновления в журнале маршрута выглядела бы причиной чужого падения.
+_multi_refresh_coverage() {
+  local task=$1 stage=$2 config=$3 expected_revision=$4 reason=$5
+  local coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}" refresh_rc=0 changed
+
+  flog "$task" "$stage: $reason; повторяю host preflight" || true
   # Preflight использует резолверы этого модуля и меняет глобальный registry/catalog.
   # Отдельная оболочка допускает ленивую загрузку без изменения состояния dispatch.
   (
@@ -450,8 +506,34 @@ _multi_require_coverage() {
     flog "$task" "$stage: обновлённый preflight несовместим или уже просрочен" || true
     return 79
   fi
+  if ! changed=$(_multi_coverage_runtime_match "$config" "$coverage_dir/host.env"); then
+    flog "$task" "$stage: сборка ${changed:-исполнителя} не совпала и после обновления" || true
+    [[ -z "$changed" ]] || printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$changed" >&2
+    return 79
+  fi
   flog "$task" "$stage: проверка исполнителей обновлена; продолжаю запуск узла" || true
-  return 0
+}
+
+# Истёкший положительный снимок требует новой metadata-проверки, а не остановки
+# длинного маршрута. Повреждение/недоступность не обновляем; TTL вручную не продлеваем.
+# Смена сборки runtime-sensitive исполнителя (в том числе легитимное обновление) лечится
+# так же, как истёкший срок: иначе новая сборка резерва останавливала бы узлы любого
+# основного исполнителя до ручного preflight.
+_multi_require_coverage() {
+  local task=$1 stage=$2 config=$3 coverage_dir expected_revision changed
+  coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
+  expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
+  if coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$expected_revision" "$(date +%s)"; then
+    changed=$(_multi_coverage_runtime_match "$config" "$coverage_dir/host.env") && return 0
+    _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" \
+      "сменилась сборка ${changed:-исполнителя}"
+    return
+  fi
+  [[ "${COVERAGE_GATE_REASON:-}" == expired ]] || return 79
+
+  _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" \
+    "истёк срок проверки исполнителей"
 }
 
 multi_runner_run() {

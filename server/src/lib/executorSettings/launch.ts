@@ -1,4 +1,4 @@
-// Только чат превращает сохранённый контейнер в подготовленный план запуска.
+// Общий prepare использует один контейнер и явно выбранный consumer запуска.
 // Служебный run и runUntrusted не наследуют этот путь через общее чтение prefs.
 
 import type { ExecutorAdapter } from '../executors/index.ts';
@@ -9,6 +9,7 @@ import { readNativeSettingsStorage } from './overrides.ts';
 import { flattenNativeSettings, validateNativeSetting } from './validation.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import { NativeSettingsError } from './errors.ts';
+import type { SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
 
 const chatCatalogCache = new ProviderSettingsCatalogCache();
 
@@ -32,12 +33,20 @@ function immutable<T>(value: T): T {
  * Выбранный снимок prefs не перечитывается во время подготовки. Источник сверяется
  * с фактической папкой чата, а изменение prefs затронет только следующий ход.
  */
-export async function prepareChatNativeSettings(
+export async function prepareNativeSettings(
   adapter: Pick<ExecutorAdapter, 'id' | 'nativeSettings'> & Partial<Pick<ExecutorAdapter, 'bin'>>,
   config: unknown,
   cwd: string,
   allSaved: unknown,
-  cache = chatCatalogCache,
+  {
+    consumer = 'chat',
+    cache = chatCatalogCache,
+    mode,
+  }: {
+    consumer?: SettingsConsumer;
+    cache?: ProviderSettingsCatalogCache;
+    mode?: string;
+  } = {},
 ): Promise<PreparedNativeSettings | undefined> {
   const storage = readNativeSettingsStorage(allSaved, adapter.id);
 
@@ -47,11 +56,20 @@ export async function prepareChatNativeSettings(
 
   const capability = adapter.nativeSettings;
 
+  if (consumer === 'pipeline' && !capability?.consumers?.includes('pipeline')) {
+    return undefined;
+  }
+
   if (!capability) {
     throw new NativeSettingsError('settings_unavailable', 503, 'Источник нативных настроек недоступен');
   }
 
-  const baseContext = await nativeSettingsContext(adapter, config);
+  const baseContext = await nativeSettingsContext(adapter, config, undefined, consumer);
+
+  if (mode) {
+    baseContext.mode = mode;
+  }
+
   const baseline = await cache.read(capability, baseContext, { refresh: true });
   const available = (read: typeof baseline) =>
     read.snapshot && read.schemaRevision && read.state !== 'stale' && read.state !== 'unavailable';
@@ -60,16 +78,38 @@ export async function prepareChatNativeSettings(
     throw new NativeSettingsError('settings_unavailable', 503, 'Нативные настройки не удалось перепроверить');
   }
 
-  const active = Object.entries(storage.overrides).filter(
+  const selected = Object.entries(storage.overrides).filter(([fieldId]) => {
+    const field = flattenNativeSettings(baseline.fields).find((field) => field.id === fieldId);
+
+    if (consumer !== 'pipeline') {
+      return field?.consumerSupport?.chat?.state !== 'unsupported';
+    }
+
+    const support = field?.consumerSupport?.pipeline;
+
+    if (!support || support.state === 'unverified') {
+      throw new NativeSettingsError(
+        'native_settings_unverified', 503, 'Совместимость overrides с ACP не подтверждена', [fieldId],
+      );
+    }
+
+    return support.state === 'verified';
+  });
+  const active = selected.filter(
     ([fieldId, entry]) =>
-      !validateNativeSetting(baseline.fields, fieldId, entry.value, Object.values(storage.overrides)),
+      !validateNativeSetting(baseline.fields, fieldId, entry.value, selected.map(([, value]) => value)),
   );
 
   if (active.length === 0) {
     return undefined;
   }
 
-  const context = await nativeSettingsContext(adapter, config, cwd);
+  const context = await nativeSettingsContext(adapter, config, cwd, consumer);
+
+  if (mode) {
+    context.mode = mode;
+  }
+
   const read =
     settingsFingerprint(context) === settingsFingerprint(baseContext)
       ? baseline
@@ -84,6 +124,13 @@ export async function prepareChatNativeSettings(
   }
 
   const incompatible = active.flatMap(([fieldId, entry]) => {
+    const support = flattenNativeSettings(read.fields)
+      .find((field) => field.id === fieldId)?.consumerSupport?.[consumer];
+
+    if (consumer === 'pipeline' && support?.state !== 'verified') {
+      return [{ fieldId, message: 'Совместимость поля с ACP не подтверждена в рабочей папке' }];
+    }
+
     const invalid = validateNativeSetting(
       read.fields,
       fieldId,
@@ -91,7 +138,16 @@ export async function prepareChatNativeSettings(
       active.map(([, entry]) => entry),
     );
 
-    return invalid ? [{ fieldId, message: invalid.message }] : [];
+    const field = flattenNativeSettings(read.fields).find((field) => field.id === fieldId);
+    const profileInvalid = Object.entries(read.snapshot?.consumerFields ?? {}).some(([profile, fields]) =>
+      field?.consumerSupport?.[profile as SettingsConsumer]?.state === 'verified' && fields &&
+      validateNativeSetting(fields, fieldId, entry.value, active.map(([, value]) => value)) !== null);
+
+    return invalid || profileInvalid
+      ? [{
+        fieldId,
+        message: invalid?.message || 'Значение несовместимо со схемой одного из consumers',
+      }] : [];
   });
 
   if (incompatible.length) {
@@ -136,4 +192,18 @@ export async function prepareChatNativeSettings(
       fingerprint: settingsFingerprint({ context, accepted }),
     }),
   );
+}
+
+/**
+ * Совместимая обёртка сохраняет старые callers и их отдельный chat consumer.
+ * Другие providers не получают pipeline settings без явной capability.
+ */
+export function prepareChatNativeSettings(
+  adapter: Pick<ExecutorAdapter, 'id' | 'nativeSettings'> & Partial<Pick<ExecutorAdapter, 'bin'>>,
+  config: unknown,
+  cwd: string,
+  allSaved: unknown,
+  cache = chatCatalogCache,
+): Promise<PreparedNativeSettings | undefined> {
+  return prepareNativeSettings(adapter, config, cwd, allSaved, { consumer: 'chat', cache });
 }

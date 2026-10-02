@@ -30,7 +30,12 @@ export interface RouteConfig {
   profilesDir: string;
   factoryConfigRoot: string;
   deepseekBin?: string;
+  deepseekBinOverride?: string;
+  deepseekRuntimeMode?: 'installed' | 'embedded';
+  deepseekArtifactDir?: string;
+  deepseekGenerationRoot?: string;
   deepseekRuntimeHome?: string;
+  prefsPath?: string;
 }
 
 // Кого именно продолжаем: задача, профиль и закреплённая попытка.
@@ -293,16 +298,28 @@ export function startRegistryIdentity(registry: Record<string, string | undefine
 
 /**
  * Окружение прогона. Runtime roots передаются аргументами, здесь остаются только
- * process-level настройки профилей и runner control.
+ * process-level настройки профилей и runner control. Пути от корня Cockpit выводятся,
+ * только если корень известен и абсолютен — как и для PATH; иначе wrapper берёт свои.
  */
 export function routeLaunchEnv(
   config: RouteConfig,
   extra: Record<string, string> = {},
 ): Record<string, string> {
+  const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
+  const prefsPath = config.prefsPath || (root ? path.join(root, 'server/.state/prefs.json') : '');
+  const generationRoot = config.deepseekGenerationRoot
+    || (root ? path.join(root, 'server/runtime/deepseek') : '');
+
   return {
     ...extra,
     PATH: cockpitCliPath(config.rootDir),
-    ...(config.deepseekBin ? { COCKPIT_DEEPSEEK_BIN: config.deepseekBin } : {}),
+    ...(prefsPath ? { COCKPIT_PROVIDER_PREFS_PATH: path.resolve(prefsPath) } : {}),
+    COCKPIT_DEEPSEEK_NODE_BIN: process.execPath,
+    COCKPIT_DEEPSEEK_RUNTIME_MODE: config.deepseekRuntimeMode || 'embedded',
+    ...(generationRoot ? { COCKPIT_DEEPSEEK_GENERATION_ROOT: generationRoot } : {}),
+    COCKPIT_DEEPSEEK_ARTIFACT_DIR: config.deepseekArtifactDir || '',
+    COCKPIT_DEEPSEEK_BIN: config.deepseekBinOverride
+      || (config.deepseekRuntimeMode === 'installed' ? config.deepseekBin || '' : ''),
     ...(config.deepseekRuntimeHome
       ? { COCKPIT_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),
@@ -389,6 +406,16 @@ export async function readRouteWorkTime(
  */
 export function routeFailure(output: string | null | undefined): RouteFailure | null {
   const text = String(output || '');
+  const runtime = /FACTORY_ERROR=runtime_changed(?:\s+RUNNERS=([a-z][a-z0-9_,.-]*))?/.exec(text);
+
+  if (runtime) {
+    return {
+      error: 'runtime_changed',
+      runners: runtime[1]?.split(',') || [],
+      message: 'сборка runtime изменилась после проверки; обнови каталог и повтори preflight',
+    };
+  }
+
   const catalog = /FACTORY_ERROR=catalog_changed\s+EXPECTED=([a-f0-9]{64})\s+ACTUAL=([a-f0-9]{64}|none)\b/.exec(text);
   if (catalog) {
     return {

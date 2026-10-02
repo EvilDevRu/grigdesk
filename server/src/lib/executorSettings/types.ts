@@ -5,20 +5,25 @@ import type {
   JsonValue,
   ProviderSettingNode,
   SettingsSource,
+  SettingsConsumer,
+  ProviderSettingsCatalog,
 } from '../../../../shared/providerSettingsContracts.ts';
 
 export interface NativeSettingsContext {
   providerId: string;
   binaryIdentity: string;
+  runtimeIdentity?: string;
+  buildId?: string;
   profileFingerprint: string;
   transport: string;
   mode: string;
   cwdRealpath: string;
+  consumer?: SettingsConsumer;
 }
 
 export interface NativeSettingsWriteChannel {
   id: string;
-  scope: 'cockpit-chats';
+  scope: 'cockpit-chats' | 'cockpit-chats-and-pipelines';
   state: 'verified' | 'unsupported' | 'unverified';
   reason?: string;
 }
@@ -46,6 +51,9 @@ export interface NativeSettingsSnapshot {
   source: SettingsSource;
   areas: NativeSettingsArea[];
   ownership: NativeSettingsOwnership[];
+  scope?: ProviderSettingsCatalog['scope'];
+  normalizedFields?: NormalizedSettingNode[];
+  consumerFields?: Partial<Record<SettingsConsumer, NormalizedSettingNode[]>>;
 }
 
 export interface NativeSettingsOverride {
@@ -67,6 +75,7 @@ export interface AcceptedNativeSetting extends NativeSettingsOverride {
 export interface PreparedNativeSettings {
   providerId: string;
   contextFingerprint: string;
+  runtimeIdentity?: string;
   schemaRevision: string;
   storageRevision: string;
   fingerprint: string;
@@ -89,7 +98,12 @@ export interface NativeSettingsEvidence {
 }
 
 export interface NativeSettingsCapability {
-  context?: (config: unknown, cwd: string) => NativeSettingsContext | Promise<NativeSettingsContext>;
+  consumers?: readonly SettingsConsumer[];
+  context?: (
+    config: unknown,
+    cwd: string,
+    consumer?: SettingsConsumer,
+  ) => NativeSettingsContext | Promise<NativeSettingsContext>;
   discover: (
     context: NativeSettingsContext,
     options: { signal: AbortSignal; refresh: boolean },

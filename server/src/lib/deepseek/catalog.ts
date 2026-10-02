@@ -10,6 +10,12 @@ import { DEEPSEEK_PIN } from './contract.ts';
 import { buildDeepSeekChildEnv, ensurePrivateDir } from './env.ts';
 import { buildLaunchFiles, DEEPSEEK_PROFILE_REVISION } from './profile.ts';
 import { DEEPSEEK_BASH_TOOL } from './contract.ts';
+import {
+  deepSeekRuntimeIdentity,
+  resolveDeepSeekRuntimeAsync,
+  verifyDeepSeekRuntimeDescriptorAsync,
+} from './runtimeProcess.ts';
+import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
 
 interface SelectOption {
   value?: unknown;
@@ -41,7 +47,7 @@ export interface DeepSeekCatalogResult {
   currentEffort: string;
 }
 
-interface CatalogConfig {
+interface CatalogConfig extends DeepSeekRuntimeConfig {
   deepseekRuntimeHome: string;
   deepseekBin: string;
 }
@@ -108,15 +114,21 @@ export function deepSeekAuth(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
+/**
+ * Каталог зависит от payload runtime, host-профиля и текущего источника credentials.
+ * Одинаковая upstream version двух поколений не позволяет переиспользовать старый каталог.
+ */
 export function deepSeekCatalogCacheKey(
-  _config: { deepseekRuntimeHome?: string },
+  config: DeepSeekRuntimeConfig & { deepseekRuntimeHome?: string },
   env: NodeJS.ProcessEnv = process.env,
 ) {
   const key = String(env.DEEPSEEK_API_KEY || '');
   const keyFingerprint = key
     ? createHash('sha256').update(key).digest().subarray(0, 8).toString('hex')
     : 'missing';
-  return [DEEPSEEK_PIN.version, DEEPSEEK_PROFILE_REVISION, keyFingerprint].join(':');
+
+  return [DEEPSEEK_PIN.version, deepSeekRuntimeIdentity(config),
+    DEEPSEEK_PROFILE_REVISION, keyFingerprint].join(':');
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
@@ -136,7 +148,9 @@ export async function readDeepSeekCatalog({
 }: {
   spawnProcess?: typeof spawn;
 } = {}): Promise<DeepSeekCatalogResult> {
-  const catalogRoot = path.join(config.deepseekRuntimeHome, 'catalog');
+  const runtime = await resolveDeepSeekRuntimeAsync(config);
+  const catalogRoot = path.join(config.deepseekRuntimeHome, 'catalog',
+    createHash('sha256').update(runtime.identity).digest('hex'));
   const dshHome = path.join(catalogRoot, 'home');
   const projectRoot = path.join(catalogRoot, 'project');
   const launchDir = path.join(catalogRoot, 'launch', randomUUID());
@@ -162,7 +176,12 @@ export async function readDeepSeekCatalog({
       instructions: { projectRoot },
     },
   });
-  const child = spawnProcess(config.deepseekBin, ['--profile', 'acp', '--patch', launch.overlayPath], {
+
+  await verifyDeepSeekRuntimeDescriptorAsync(runtime);
+
+  const child = spawnProcess(runtime.command, [
+    ...runtime.prefixArgs, '--profile', 'acp', '--patch', launch.overlayPath,
+  ], {
     cwd: launchDir,
     env: buildDeepSeekChildEnv({ source: env, dshHome }),
     stdio: ['pipe', 'pipe', 'pipe'],

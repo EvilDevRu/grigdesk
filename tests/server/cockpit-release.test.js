@@ -4,10 +4,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeDeepSeekArtifactFixture } from '../helpers/deepSeekArtifactFixture.mts';
+import { publishDeepSeekGeneration } from '../../tools/deepseekRuntimePublication.ts';
 
 import {
   CockpitReleaseService,
   assertReleaseNodeRuntime,
+  assertReleasePublishContract,
   compareSemVer,
   parseRemoteTags,
   parseSemVer,
@@ -17,6 +20,11 @@ import {
 
 const SHA_A = '1'.repeat(40);
 const SHA_B = '2'.repeat(40);
+
+test('embedded релиз требует publish contract установленного worker до merge', async () => {
+  await assertReleasePublishContract(fileURLToPath(new URL('../../', import.meta.url)),
+    process.env.COCKPIT_RELEASE_PUBLISH_CONTRACT);
+});
 
 // Старый worker запускает этот JS-файл в новом дереве обычным node --test.
 // До merge и замены web/dist он обязан узнать, сможет ли новый сервер стартовать.
@@ -211,4 +219,42 @@ test('the old process cannot confirm apply of the same SHA before it actually re
   assert.equal((await newProcess.getStatus({ fresh: true })).job.status, 'done');
   oldProcess.stop();
   newProcess.stop();
+});
+
+test('новый running SHA без ожидаемого целого runtime не подтверждает обновление', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runtime-readiness-'));
+  const statePath = path.join(root, 'state.json');
+  const runtimeRoot = path.join(root, 'server/runtime/deepseek');
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'VERSION'), '0.1.0\n');
+
+  const a = await writeDeepSeekArtifactFixture(path.join(root, 'A'), 'A');
+
+  await publishDeepSeekGeneration(path.join(root, 'A'), runtimeRoot);
+
+  for (const [scenario, expected] of [['mismatch', 'f'.repeat(64)], ['corrupt', a.buildId]]) {
+    await writePersistentState(statePath, { job: {
+      id: `readiness-${scenario}`,
+      status: 'restarting',
+      targetSha: SHA_A,
+      expectedRuntimeBuildId: expected,
+    } });
+
+    if (scenario === 'corrupt') {
+      await writeFile(path.join(runtimeRoot, 'builds', a.buildId, 'entry.mjs'), 'corrupt');
+    }
+
+    const service = new CockpitReleaseService({
+      rootDir: root,
+      statePath,
+      runner: fakeRunner({ remoteResult: null, calls: [] }),
+    });
+    const status = await service.getStatus({ fresh: true });
+
+    assert.equal(status.job.status, 'failed');
+    assert.equal(status.job.error.code, scenario === 'mismatch'
+      ? 'runtime_build_mismatch' : 'runtime_readiness_failed');
+    service.stop();
+  }
 });

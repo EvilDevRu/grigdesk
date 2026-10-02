@@ -2821,15 +2821,36 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
     let providerBinding: BindingRecord | null = null;
     let providerIdentity: (BindingIdentity & { chatKey: string }) | null = null;
+
     if (executor.sessionBinding) {
       const cwdRealpath = await fs.realpath(cwd);
+      let authProfileId: string;
+      let securityProfile: string;
+
+      // Привязку сравниваем только с доступным исполнителем: недоступная сборка или профиль
+      // дают отказ хода, а не новую сессию без памяти под отпечатком «недоступно».
+      // Текст показываем лишь у ошибок адаптера с кодом `<id исполнителя>_…`.
+      try {
+        authProfileId = String(await executor.sessionBinding.authProfileId(config, providerSettings));
+        securityProfile = String(await executor.sessionBinding.securityProfile(config, providerSettings));
+      } catch (error) {
+        const code = (error as { code?: unknown })?.code;
+
+        return channel.refuse(503, {
+          error: 'executor_unavailable',
+          message: typeof code === 'string' && code.startsWith(`${executor.id}_`)
+            ? (error as Error).message
+            : 'Исполнитель недоступен: не удалось определить профиль сессии',
+        });
+      }
+
       providerIdentity = {
         chatKey: chatKey!,
         provider: target.provider,
         cwdRealpath,
         model,
-        authProfileId: String(await executor.sessionBinding.authProfileId(config, providerSettings)),
-        securityProfile: String(await executor.sessionBinding.securityProfile(config, providerSettings)),
+        authProfileId,
+        securityProfile,
       };
       const current = await bindingStore.read(chatKey!);
       const identityMatches = current
@@ -2848,13 +2869,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (!current || !identityMatches) {
         if (current?.sessionId && current.cwdRealpath !== cwdRealpath && !summaryWorkspace) {
           rotationNote = `Новая сессия в ${cwdRealpath}: папка сменилась, прежний разговор агент не помнит.`;
+        } else if (current?.sessionId && !summaryWorkspace
+          && (current.securityProfile !== securityProfile || current.authProfileId !== authProfileId)) {
+          rotationNote = 'Новая сессия: профиль исполнителя изменился (сборка, права или ключ доступа), '
+            + 'прежний разговор агент не помнит.';
+        }
 
-          if (chatKey) {
-            await history.patchExecution(chatKey, (record) => ({
-              messages: [...(record.messages || []), { role: 'note', text: rotationNote }],
-            }));
-            fastify.sse.broadcast('chat-store', { id: chatKey, origin: '' });
-          }
+        if (rotationNote && chatKey) {
+          await history.patchExecution(chatKey, (record) => ({
+            messages: [...(record.messages || []), { role: 'note', text: rotationNote }],
+          }));
+          fastify.sse.broadcast('chat-store', { id: chatKey, origin: '' });
         }
 
         providerBinding = await bindingStore.rotate(providerIdentity, current?.generation ?? null);

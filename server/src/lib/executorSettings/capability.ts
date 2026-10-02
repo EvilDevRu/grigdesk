@@ -1,7 +1,7 @@
 // Адаптер привязывает серверную конфигурацию к контексту через WeakMap.
 // Конфигурация, ключи доступа и временные пути не входят в публичный каталог и fingerprint.
 
-import type { JsonValue } from '../../../../shared/providerSettingsContracts.ts';
+import type { JsonValue, SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
 import type {
   NativeSettingsCapability,
   NativeSettingsContext,
@@ -15,8 +15,10 @@ import { canonicalSettingsJson, settingsFingerprint } from './fingerprint.ts';
 
 export interface SettingsSourceOptions<Config> {
   id: string;
+  consumers?: readonly SettingsConsumer[];
   bin(config: Config): string;
-  profile(config: Config): {
+  context?: (config: Config, cwd: string, consumer: SettingsConsumer) => Promise<NativeSettingsContext>;
+  profile(config: Config, consumer: SettingsConsumer): {
     transport: string;
     mode: string;
     identity: JsonValue;
@@ -37,24 +39,25 @@ export function createNativeSettingsCapability<Config>(
   const configurations = new WeakMap<NativeSettingsContext, Config>();
 
   return {
+    ...(options.consumers ? { consumers: options.consumers } : {}),
     /**
      * Профиль строится сервером для того же транспорта, который откроет чат.
      * Приватный config привязан к объекту контекста и не попадает в каталог.
      */
-    async context(input, cwd) {
+    async context(input, cwd, consumer = 'chat') {
       const config = input as Config;
-      const profile = options.profile(config);
-      const common = await nativeSettingsContext(
-        { id: options.id, bin: () => options.bin(config) },
-        config,
-        cwd,
-      );
-      const context = {
-        ...common,
+      const profile = options.profile(config, consumer);
+      const common = options.context
+        ? await options.context(config, cwd, consumer)
+        : await nativeSettingsContext(
+          { id: options.id, bin: () => options.bin(config) }, config, cwd, consumer,
+        );
+      const context = Object.assign(common, {
         transport: profile.transport,
         mode: profile.mode,
-        profileFingerprint: settingsFingerprint(profile.identity),
-      };
+        consumer,
+        profileFingerprint: settingsFingerprint([profile.identity, common.runtimeIdentity ?? null]),
+      });
 
       configurations.set(context, config);
 
@@ -73,6 +76,7 @@ export function createNativeSettingsCapability<Config>(
       return {
         providerId: options.id,
         contextFingerprint: settingsFingerprint(context),
+        ...(context.runtimeIdentity ? { runtimeIdentity: context.runtimeIdentity } : {}),
         schemaRevision: snapshot.generation,
         storageRevision: '',
         fingerprint: '',

@@ -6,6 +6,8 @@ import net from 'node:net';
 import type { ChildProcess } from 'node:child_process';
 
 import { DeepSeekWebClient } from './serverClient.ts';
+import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
+import { verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
 
 export interface DeepSeekServerProcess {
   client: DeepSeekWebClient;
@@ -14,6 +16,7 @@ export interface DeepSeekServerProcess {
 
 export interface StartDeepSeekServerOptions {
   bin: string;
+  runtime?: DeepSeekRuntimeDescriptor;
   overlayPath: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -55,7 +58,14 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
   options.signal?.throwIfAborted();
 
   const port = await unusedPort();
-  const child = (options.spawnProcess || spawn)(options.bin, [
+
+  if (options.runtime) {
+    await verifyDeepSeekRuntimeDescriptorAsync(options.runtime);
+    options.signal?.throwIfAborted();
+  }
+
+  const child = (options.spawnProcess || spawn)(options.runtime?.command || options.bin, [
+    ...(options.runtime?.prefixArgs || []),
     '--profile', 'web', '--patch', options.overlayPath,
     '--host', '127.0.0.1', '--port', String(port), '--no-open',
   ], {
@@ -120,6 +130,14 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
     clearTimeout(startupTimer!);
 
     const client = await DeepSeekWebClient.authenticate(authenticatedUrl, options.signal);
+
+    // После startup отменой хода владеет session/cancel; процесс освобождается в finally.
+    // Metadata-запросы передают свой signal в RPC и также закрываются единственным owner.
+    options.signal?.removeEventListener('abort', abort);
+    child.stdout?.off('data', accept);
+    child.stderr?.off('data', accept);
+    child.stdout?.resume();
+    child.stderr?.resume();
 
     return { client, stop: async () => {
       options.signal?.removeEventListener('abort', abort);

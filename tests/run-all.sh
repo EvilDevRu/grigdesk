@@ -34,6 +34,14 @@ else
   echo "Внимание: flock недоступен, защита от параллельного прогона выключена." >&2
 fi
 
+# Все дочерние проверки получают одну проверенную generation под общим build lock.
+# Helper не загружает зависимости и не переключает production current.
+if ! COCKPIT_TEST_DEEPSEEK_ARTIFACT=$(node "$PROJECT_ROOT/tests/helpers/deepseekRuntimeArtifact.mts"); then
+  exit 1
+fi
+export COCKPIT_TEST_DEEPSEEK_ARTIFACT
+export COCKPIT_RELEASE_PUBLISH_CONTRACT=1
+
 bash "$PROJECT_ROOT/tests/layout.sh" || RC=1
 # Часть проверок уже на TypeScript: с минимумом Node 22.18 они исполняются как есть.
 node --test "$PROJECT_ROOT"/tests/docs/*.test.mjs "$PROJECT_ROOT"/tests/docs/*.test.mts || RC=1

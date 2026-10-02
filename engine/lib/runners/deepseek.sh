@@ -6,6 +6,45 @@
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
+_runner_deepseek_node() {
+  local node=${COCKPIT_DEEPSEEK_NODE_BIN:-${NODE_BIN:-}}
+  if [[ -n "${COCKPIT_DEEPSEEK_NODE_BIN:-}" ]]; then
+    [[ -x "$node" && ! -d "$node" ]] || return 4
+  else
+    [[ -n "$node" && -x "$node" ]] || node=$(command -v node 2>/dev/null) || return 4
+  fi
+  printf '%s\n' "$node"
+}
+
+_runner_deepseek_embedded() {
+  [[ -z "${COCKPIT_DEEPSEEK_BIN:-}" ]] || return 1
+  local mode=${COCKPIT_DEEPSEEK_RUNTIME_MODE:-}
+  if [[ -z "$mode" ]]; then
+    local node
+    node=$(_runner_deepseek_node) || return 4
+    mode=$("$node" --input-type=module -e '
+      const { deepSeekDistributionMode } = await import(process.argv[1]);
+      console.log(deepSeekDistributionMode(process.argv[2]));
+    ' "$FACTORY_HOME/../server/src/lib/deepseek/distribution.ts" \
+      "$FACTORY_HOME/../server/deepseek-runtime-contract.json" 2>/dev/null) || mode=embedded
+  fi
+  [[ -z "${COCKPIT_DEEPSEEK_BIN:-}" ]] &&
+    [[ "$mode" == embedded ||
+       -n "${COCKPIT_DEEPSEEK_ARTIFACT_DIR:-}" ]]
+}
+
+# Metadata helper использует тот же Node и descriptor, что рабочий процесс.
+# Здесь нет API key, settings home, model call или автоматической сборки.
+_runner_deepseek_runtime_info() {
+  local node
+  node=$(_runner_deepseek_node) || return 4
+  factory_exec local "$node" "$FACTORY_HOME/../server/scripts/deepseekRuntimeInfo.mts" "$@"
+}
+
+runner_deepseek_refresh_probe() {
+  _runner_deepseek_embedded
+}
+
 _runner_deepseek_bin() {
   local candidate runtime_home state_root
   if [[ -n "${COCKPIT_DEEPSEEK_BIN:-}" ]]; then
@@ -26,6 +65,10 @@ _runner_deepseek_bin() {
 
 runner_deepseek_probe() {
   local bin version
+  if _runner_deepseek_embedded; then
+    _runner_deepseek_runtime_info --probe
+    return
+  fi
   bin=$(_runner_deepseek_bin) || return 4
   version=$(factory_exec provider "$bin" -V) || return
   version=${version%%[[:space:]]*}
@@ -34,6 +77,10 @@ runner_deepseek_probe() {
 }
 
 runner_deepseek_catalog() {
+  if _runner_deepseek_embedded; then
+    _runner_deepseek_runtime_info --catalog
+    return
+  fi
   # Opaque ACP ids и их доступность сняты pinned metadata-probe P0. У id нет
   # стабильного family metadata, поэтому family честно `default`; release задаёт
   # только default (V4 Flash), а не сравнительную «силу» моделей.
@@ -71,7 +118,8 @@ _runner_deepseek_model_valid() {
 
 runner_deepseek_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
-  local mode bin node wrapper prompt_dir prompt_file runtime_home cwd
+  local mode bin node wrapper prompt_dir prompt_file runtime_home cwd descriptor
+  local generation='' runtime_identity='' runtime_version=''
 
   case "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" in
     state-only) mode=read-only ;;
@@ -95,9 +143,33 @@ runner_deepseek_run() {
   esac
   [[ "$timeout_s" =~ ^[1-9][0-9]*$ && "$run_dir" == /* ]] || return 4
 
-  bin=$(_runner_deepseek_bin) || return 4
-  node=${NODE_BIN:-}
-  [[ -n "$node" && -x "$node" ]] || node=$(command -v node 2>/dev/null) || return 4
+  node=$(_runner_deepseek_node) || return 4
+  if _runner_deepseek_embedded; then
+    descriptor=$(_runner_deepseek_runtime_info) || return 4
+    local -a fields=()
+    mapfile -t fields < <(printf '%s' "$descriptor" | "$node" --input-type=module -e '
+      let data = "";
+      for await (const chunk of process.stdin) data += chunk;
+      const runtime = JSON.parse(data);
+      const fields = [runtime.command, runtime.generationDir, runtime.identity, runtime.runtimeVersion];
+      if (runtime.kind !== "embedded" || fields.some(v => typeof v !== "string" || /[\r\n\0]/u.test(v))) {
+        process.exit(4);
+      }
+      console.log(fields.join("\n"));
+    ')
+    [[ "${#fields[@]}" == 4 ]] || return 4
+    bin=${fields[0]}
+    generation=${fields[1]}
+    runtime_identity=${fields[2]}
+    runtime_version=${fields[3]}
+    if [[ -n "${FACTORY_RUNNER_VERSION:-}" &&
+          "$FACTORY_RUNNER_VERSION" != "$runtime_version" ]]; then
+      printf 'FACTORY_ERROR=runtime_changed RUNNERS=deepseek\n' >&2
+      return 4
+    fi
+  else
+    bin=$(_runner_deepseek_bin) || return 4
+  fi
   wrapper="$FACTORY_HOME/../server/scripts/deepseekRunner.mts"
   [[ -f "$wrapper" ]] || return 4
   cwd=$(realpath -e -- "$PWD" 2>/dev/null) || return 4
@@ -121,6 +193,10 @@ runner_deepseek_run() {
     --mode "$mode"
   )
   [[ -z "$effort" ]] || args+=(--effort "$effort")
+  if [[ -n "$generation" ]]; then
+    args+=(--artifact-dir "$generation" --runtime-identity "$runtime_identity"
+      --runtime-version "$runtime_version")
+  fi
 
   # Prompt остаётся private-файлом, status identity — только server-owned env.
   # RUNNER_DEEPSEEK_ADD_DIRS намеренно не становится дополнительной writable root.

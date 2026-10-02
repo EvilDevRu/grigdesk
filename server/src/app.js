@@ -10,20 +10,19 @@
 // получил бы «unknown file extension» вместо ответа «нужен Node новее». Тот же минимум
 // объявлен в `lib/nodeVersion.ts` и `bin/lib/runtime-env.sh`; все три пинует
 // `tests/docs/entrypoint-launch.test.mts`, чтобы предела правды не стало два.
-const MIN_NODE_VERSION = '22.18.0';
+const MIN_NODE_VERSION = '22.19.0';
 
 const parts = (value) => value.replace(/^v/, '').split('-')[0].split('.').map(Number);
 
 const [major, minor, patch] = parts(process.versions.node);
 const [needMajor, needMinor, needPatch] = parts(MIN_NODE_VERSION);
 
-if (major < needMajor
+if (major === 23 || major < needMajor
   || (major === needMajor && minor < needMinor)
   || (major === needMajor && minor === needMinor && patch < needPatch)) {
   process.stderr.write(
-    `Cockpit требует Node ${MIN_NODE_VERSION} или новее, запущен ${process.versions.node}. `
-    + 'С 22.18 Node исполняет TypeScript сам, без флагов; на более старой версии сервер '
-    + 'не стартует. Обнови Node (nvm install 22.18.0) и повтори запуск.\n',
+    `Cockpit требует Node ^${MIN_NODE_VERSION} || >=24.0.0, запущен ${process.versions.node}. `
+    + `Обнови Node (nvm install ${MIN_NODE_VERSION}) и повтори запуск.\n`,
   );
   process.exit(1);
 }

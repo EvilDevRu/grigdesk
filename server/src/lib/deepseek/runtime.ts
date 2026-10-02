@@ -23,8 +23,16 @@ import type { DeepSeekUpdate } from './steps.ts';
 import { DEEPSEEK_BASH_TOOL } from './contract.ts';
 import { buildLaunchFiles } from './profile.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import {
+  assertDeepSeekPreparedRuntime,
+  resolveDeepSeekRuntimeAsync,
+  verifyDeepSeekRuntimeDescriptorAsync,
+} from './runtimeProcess.ts';
+import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
+import { acpDeepSeekSettingsRpc, startDeepSeekAcpSettings } from './nativeSettingsRpc.ts';
+import { applyDeepSeekNativeSettings, verifyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
-interface DeepSeekConfig {
+interface DeepSeekConfig extends DeepSeekRuntimeConfig {
   deepseekRuntimeHome: string;
   deepseekBin: string;
   rootDir?: string;
@@ -54,6 +62,8 @@ interface RuntimeDeps {
     approval: 'ask' | 'never';
     projectRoot: string;
     providerSettings?: DeepSeekProviderSettings | null;
+    nativeSettings?: PreparedNativeSettings;
+    transport?: 'acp' | 'web';
   }) => Promise<{ launchDir: string; dshHome: string; overlayPath: string }>;
   closeTimeoutMs?: number;
   termTimeoutMs?: number;
@@ -118,6 +128,7 @@ export async function prepareDeepSeekLaunch({
   transport,
   mcpServers,
   nativeSettings,
+  runtime: preparedRuntime,
 }: {
   config: DeepSeekConfig;
   cwd: string;
@@ -130,11 +141,27 @@ export async function prepareDeepSeekLaunch({
   transport?: 'acp' | 'web';
   mcpServers?: readonly DeepSeekMcpServer[];
   nativeSettings?: PreparedNativeSettings;
+  runtime?: import('./runtimeProcess.ts').DeepSeekRuntimeDescriptor;
 }) {
-  const dshHome = chatHomeFor(config.deepseekRuntimeHome, chatKey);
+  const runtime = preparedRuntime || await resolveDeepSeekRuntimeAsync(config);
+  const runtimeHome = runtime.buildId
+    ? path.join(config.deepseekRuntimeHome, 'generations', runtime.buildId) : config.deepseekRuntimeHome;
+  const dshHome = chatHomeFor(runtimeHome, chatKey);
   const chatDir = path.dirname(dshHome);
   const launchDir = path.join(chatDir, 'turns', randomUUID());
   await ensurePrivateDir(dshHome);
+
+  try {
+    const binding = JSON.parse(await fs.readFile(path.join(dshHome, '.cockpit-runtime.json'), 'utf8'));
+
+    if (binding.buildId !== runtime.buildId || binding.journalFormat !== 1) {
+      throw new Error('Копия home закреплена за другим или несовместимым runtime');
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
 
   let nativeSettingsDocument: string | undefined;
 
@@ -319,6 +346,7 @@ export async function runDeepSeekTurn({
   chatKey,
   projectRoot,
   providerSettings,
+  nativeSettings,
   extraDirs = [],
   attachmentPaths = [],
   factory = false,
@@ -377,6 +405,11 @@ export async function runDeepSeekTurn({
     : await nearestProjectRoot(realCwd);
   const approval = factory ? 'never' : 'ask';
   const sessionMcpServers = validateMcpServers(mcpServers);
+  const runtime = await resolveDeepSeekRuntimeAsync(config);
+
+  assertDeepSeekPreparedRuntime(runtime, nativeSettings);
+  signal?.throwIfAborted();
+
   const launch = await (deps.prepareLaunch || prepareDeepSeekLaunch)({
     config,
     cwd: realCwd,
@@ -386,14 +419,56 @@ export async function runDeepSeekTurn({
     approval,
     projectRoot: requestedProjectRoot,
     providerSettings,
+    nativeSettings,
+    transport: 'acp',
+    runtime,
   });
-  const childEnv = buildDeepSeekChildEnv({ source: env, dshHome: launch.dshHome });
-  const spawnProcess = deps.spawn || spawn;
-  const child = spawnProcess(config.deepseekBin, ['--profile', 'acp', '--patch', launch.overlayPath], {
-    cwd: launch.launchDir,
-    env: childEnv,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  /**
+   * Подготовка и spawn владеют одним временным документом, даже при раннем отказе.
+   * Отмена между фазами не создаёт рабочий процесс или неполную сессию.
+   */
+  const startPreparedProcess = async () => {
+    let preparation: Awaited<ReturnType<typeof startDeepSeekAcpSettings>> | undefined;
+
+    try {
+      const childEnv = buildDeepSeekChildEnv({ source: env, dshHome: launch.dshHome });
+
+      if (nativeSettings?.accepted.length) {
+        preparation = await startDeepSeekAcpSettings({
+          runtime,
+          overlayPath: launch.overlayPath,
+          cwd: launch.launchDir,
+          env: childEnv,
+          signal,
+        });
+        await applyDeepSeekNativeSettings(preparation.client, nativeSettings, signal);
+        await verifyDeepSeekNativeSettings(preparation.client, nativeSettings, signal);
+        await preparation.stop();
+        preparation = undefined;
+      }
+
+      signal?.throwIfAborted();
+      await verifyDeepSeekRuntimeDescriptorAsync(runtime);
+      signal?.throwIfAborted();
+
+      return (deps.spawn || spawn)(runtime.command, [
+        ...runtime.prefixArgs, '--profile', 'acp', '--patch', launch.overlayPath,
+      ], {
+        cwd: launch.launchDir,
+        env: childEnv,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      await preparation?.stop();
+      preparation = undefined;
+      await fs.rm(launch.launchDir, { recursive: true, force: true });
+
+      throw error;
+    } finally {
+      await preparation?.stop();
+    }
+  };
+  const child = await startPreparedProcess();
   const exit = waitForExit(child);
   const closeTimeoutMs = deps.closeTimeoutMs ?? 8_000;
   const termTimeoutMs = deps.termTimeoutMs ?? 2_000;
@@ -542,7 +617,14 @@ export async function runDeepSeekTurn({
   };
 
   try {
-    await initializeAcp(client, 10_000);
+    const initialized = await initializeAcp(client, 10_000);
+    const settingsRpc = nativeSettings?.accepted.length
+      ? acpDeepSeekSettingsRpc(client, initialized) : undefined;
+
+    if (settingsRpc && nativeSettings) {
+      await verifyDeepSeekNativeSettings(settingsRpc, nativeSettings, signal);
+    }
+
     let configOptions: unknown = [];
     if (currentSession) {
       try {
@@ -579,6 +661,10 @@ export async function runDeepSeekTurn({
       await client.request('session/set_config_option', {
         sessionId: currentSession, configId: 'reasoning_effort', value: effort,
       }, 15_000);
+    }
+
+    if (settingsRpc && nativeSettings) {
+      await verifyDeepSeekNativeSettings(settingsRpc, nativeSettings, signal);
     }
 
     // Граница записи — ближайший доверенный предок cwd, а в Factory ровно cwd.

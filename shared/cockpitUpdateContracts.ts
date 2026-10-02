@@ -24,6 +24,9 @@ export interface UpdateJob extends Record<string, unknown> {
   stage?: string;
   targetSha?: string | null;
   previousRunningInstanceId?: string | null;
+  expectedRuntimeBuildId?: string | null;
+  previousRuntimeBuildId?: string | null;
+  publicationStage?: string | null;
   backups?: Record<string, string | null> | null;
   error?: { code?: string; message?: string } | null;
   completedAt?: string | null;

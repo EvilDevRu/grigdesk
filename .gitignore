@@ -4,6 +4,12 @@ web/dist/
 # как новый сервер подтвердил SHA, и не должны делать checkout dirty в это окно.
 web/dist.cockpit-backup-*/
 server/node_modules.cockpit-backup-*/
+server/runtime/deepseek/
+# Исходники DeepSeek Harness — кэш по commit из upstream.lock.json: в Git лежат только manifest,
+# патчи и лицензии, а `npm --prefix server run deepseek:prepare` подкачивает и сверяет остальное.
+third_party/deepseek-harness/upstream/
+third_party/.deepseek-*/
+third_party/deepseek-harness.sync-lock/
 # Кэш пребандла dev-сервера vite. Локальные стенды предпросмотра поднимают его с root в корне
 # репозитория, где нет package.json, — тогда vite кладёт кэш не в web/node_modules/.vite, а сюда.
 .vite/

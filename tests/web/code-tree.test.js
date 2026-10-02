@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { installUiBrowser } from './helpers/ui-components.js';
 
 import {
   askAgentDraft,
@@ -27,6 +29,12 @@ import {
   treeDecorations,
   toggleCommitSelection,
 } from '../../web/src/shared/codeTree.ts';
+import {
+  VIRTUAL_ROWS_OVERSCAN,
+  VIRTUAL_ROWS_THRESHOLD,
+  measuredRowStep,
+  virtualRowsWindow,
+} from '../../web/src/shared/virtualRows.ts';
 
 function tree(path, overrides = {}) {
   return {
@@ -517,4 +525,174 @@ test('черновик diff ограничен 200 строками и отве�
   assert.throws(() => askAgentDraft({
     label: 'Основная', branch: 'main', absPath: '/repo/bad\npath.ts', line: 1,
   }), /путь/i);
+});
+
+// Виртуальное окно длинных списков навигатора.
+//
+// Новый репозиторий целиком в индексе дал панели 9 тысяч строк изменений и замораживал
+// окно на секунды. Окно обязано рисовать только строки у видимой области, но держать
+// полную высоту списка распорками; короткий список остаётся обычным v-for.
+
+const ROW = 28;
+
+// Окно тысячи строк по 28 px в области на 10 строк с запасом 12 — как дерево «Кода».
+function windowAt(viewTop) {
+  return virtualRowsWindow({
+    count: 1000,
+    rowHeight: ROW,
+    viewTop,
+    viewHeight: 10 * ROW,
+    overscan: 12,
+  });
+}
+
+test('окно вверху списка рисует видимые строки и запас снизу', () => {
+  assert.deepEqual(windowAt(0), {
+    start: 0,
+    end: 22,
+    before: 0,
+    after: (1000 - 22) * ROW,
+  });
+});
+
+test('в середине списка запас идёт в обе стороны, а сумма высот равна всему списку', () => {
+  const frame = windowAt(500 * ROW);
+
+  assert.equal(frame.start, 488);
+  assert.equal(frame.end, 522);
+  assert.equal(frame.before + (frame.end - frame.start) * ROW + frame.after, 1000 * ROW);
+});
+
+test('список ниже видимой области рисует только запас, уехавший вверх — ничего', () => {
+  const below = windowAt(-2000);
+  const above = windowAt(2000 * ROW);
+
+  assert.deepEqual([below.start, below.end], [0, 0]);
+  assert.deepEqual([above.start, above.end, above.after], [1000, 1000, 0]);
+  assert.equal(above.before, 1000 * ROW);
+});
+
+test('шаг строки без раскладки остаётся прежним', () => {
+  assert.equal(measuredRowStep(0, 0, 20, ROW), ROW);
+  assert.equal(measuredRowStep(100, 100, 0, ROW), ROW);
+  assert.equal(measuredRowStep(100, 100 + 20 * 36, 20, ROW), 36);
+});
+
+/**
+ * Монтирует окно в прокручиваемый контейнер с подставленной геометрией: happy-dom не
+ * раскладывает страницу, поэтому прямоугольники распорок считаются из их высоты и scrollTop.
+ */
+async function mountRows(t, count) {
+  const browser = await installUiBrowser(t);
+  const [vue, { mount }, VirtualRows] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/shared/VirtualRows.vue')),
+  ]);
+  const items = vue.ref(Array.from({ length: count }, (_, index) => `row-${index}`));
+  const Host = vue.defineComponent({
+    setup() {
+      return () => vue.h('div', { class: 'scroller', style: 'overflow: auto' }, [
+        vue.h(VirtualRows, { items: items.value, itemKey: (item) => item }, {
+          default: ({ item, index }) => vue.h('div', { class: 'row', 'data-index': index }, item),
+        }),
+      ]);
+    },
+  });
+  const wrapper = mount(Host, { attachTo: browser.document.querySelector('#mount') });
+
+  t.after(() => wrapper.unmount());
+
+  return {
+    wrapper,
+    items,
+    nextTick: vue.nextTick,
+  };
+}
+
+/**
+ * Раскладывает список как браузер: контейнер на 10 строк с верхом в 100 px, строки по
+ * 28 px подряд от верха содержимого. Возвращает функцию прокрутки до заданного scrollTop.
+ */
+function layOut(wrapper) {
+  const scroller = wrapper.get('.scroller').element;
+  let scrollTop = 0;
+  const box = (top, height) => ({
+    top,
+    bottom: top + height,
+    height,
+    left: 0,
+    right: 0,
+    width: 0,
+    x: 0,
+    y: top,
+  });
+  const gap = (side) => scroller.querySelector(`[data-virtual-gap="${side}"]`);
+  const height = (element) => parseFloat(element?.style.height || '0');
+
+  Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 10 * ROW });
+  Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => scrollTop });
+  scroller.getBoundingClientRect = () => box(100, 10 * ROW);
+
+  for (const side of ['before', 'after']) {
+    gap(side).getBoundingClientRect = function rect() {
+      const rendered = scroller.querySelectorAll('.row').length;
+      const top = side === 'before'
+        ? 100 - scrollTop
+        : 100 - scrollTop + height(gap('before')) + rendered * ROW;
+
+      return box(top, height(this));
+    };
+  }
+
+  return (value) => {
+    scrollTop = value;
+    scroller.dispatchEvent(new Event('scroll'));
+  };
+}
+
+function renderedIndexes(wrapper) {
+  return wrapper.findAll('.row').map((row) => Number(row.attributes('data-index')));
+}
+
+test('короткий список рисуется целиком и без распорок', async (t) => {
+  const { wrapper } = await mountRows(t, VIRTUAL_ROWS_THRESHOLD);
+
+  assert.equal(wrapper.findAll('.row').length, VIRTUAL_ROWS_THRESHOLD);
+  assert.equal(wrapper.findAll('[data-virtual-gap]').length, 0);
+});
+
+test('длинный список рисует окно у видимой области и держит полную высоту распорками', async (t) => {
+  const { wrapper, nextTick } = await mountRows(t, 1000);
+  const scrollTo = layOut(wrapper);
+
+  scrollTo(0);
+  await nextTick();
+
+  const top = renderedIndexes(wrapper);
+
+  assert.deepEqual([top[0], top.at(-1)], [0, 10 + VIRTUAL_ROWS_OVERSCAN - 1]);
+
+  scrollTo(500 * ROW);
+  await nextTick();
+
+  const middle = renderedIndexes(wrapper);
+  const before = parseFloat(wrapper.get('[data-virtual-gap="before"]').element.style.height);
+  const after = parseFloat(wrapper.get('[data-virtual-gap="after"]').element.style.height);
+
+  assert.equal(middle[0], 500 - VIRTUAL_ROWS_OVERSCAN);
+  assert.equal(middle.at(-1), 510 + VIRTUAL_ROWS_OVERSCAN - 1);
+  assert.equal(before + middle.length * ROW + after, 1000 * ROW);
+  assert.ok(wrapper.findAll('.row').length < 60, 'в DOM только окно, а не вся тысяча строк');
+});
+
+test('список, ужатый ниже порога, снова рисуется целиком', async (t) => {
+  const { wrapper, items, nextTick } = await mountRows(t, 1000);
+
+  items.value = items.value.slice(0, 5);
+  await nextTick();
+  await nextTick();
+
+  assert.deepEqual(renderedIndexes(wrapper), [0, 1, 2, 3, 4]);
+  assert.equal(wrapper.findAll('[data-virtual-gap]').length, 0);
 });

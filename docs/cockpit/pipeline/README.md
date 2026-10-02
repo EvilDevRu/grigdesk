@@ -13,6 +13,8 @@
 
 ## Устройство
 
+- [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)
+
 - [Авто-шип фабрики](automatic-shipping.md)
 - [База агентов (modules/agents) — стадии конвейера](agent-stage-catalog.md)
 - [Маршруты (modules/routes)](route-management.md)

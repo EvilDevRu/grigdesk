@@ -190,4 +190,115 @@ for defect in missing revision structural-hash structural-unavailable host-unava
   task=$((task + 1))
 done
 
+# Runtime-sensitive резерв, как встроенный DeepSeek, сверяет сборку перед каждым узлом
+# даже в пределах TTL. Легитимная смена сборки резерва не должна останавливать узел
+# основного исполнителя: снимок обновляется один раз, как истёкший.
+cat >>"$FACTORY_RUNNERS_DIR/beta.sh" <<'RUNNER'
+
+# Сборка читается из файла при каждой пробе; без файла резерв прежний, не runtime.
+runner_beta_refresh_probe() {
+  [[ -f "$TEST_ROOT/beta-build" ]]
+}
+
+# Проба печатает версию с префиксом CLI, как настоящие раннеры. FAKE_BETA_FLIP
+# переключает сборку после каждой пробы: публикация не устоялась за обновление.
+runner_beta_probe() {
+  local build
+  printf 'beta\n' >>"$TEST_ROOT/probes"
+  [[ "${FAKE_BETA_PROBE:-ready}" == ready ]] || return 4
+  if [[ ! -f "$TEST_ROOT/beta-build" ]]; then
+    printf 'ready\n'
+    return 0
+  fi
+
+  build=$(cat "$TEST_ROOT/beta-build")
+  printf 'beta-cli %s\n' "$build"
+  if [[ "${FAKE_BETA_FLIP:-0}" == 1 ]]; then
+    if [[ "$build" == 1.1.0 ]]; then
+      printf '1.2.0\n' >"$TEST_ROOT/beta-build"
+    else
+      printf '1.1.0\n' >"$TEST_ROOT/beta-build"
+    fi
+  fi
+}
+RUNNER
+
+# Резерв назван дважды: сверка сборки обязана пробовать его один раз.
+cat >"$config" <<'CONFIG'
+RUNNERS_SCHEMA=1
+CONFIG_REVISION=3
+RUNNERS_COVERAGE=required
+PROJECT_RUNNER_PRIMARY=alpha
+PROJECT_RUNNER_FAILOVER=beta
+STAGE_REVIEW_FAILOVER=beta
+MODEL_DEFAULT_ALPHA_FAMILY=fixture
+MODEL_DEFAULT_ALPHA_VERSION=latest
+MODEL_DEFAULT_BETA_FAMILY=fixture
+MODEL_DEFAULT_BETA_VERSION=latest
+CONFIG
+restore_coverage
+printf '1.0.0\n' >"$TEST_ROOT/beta-build"
+profile_runner_host_preflight fixture
+assert_rc 0 "$?" "свежий preflight фиксирует сборку runtime-sensitive резерва"
+assert_eq 1.0.0 "$(coverage_artifact_get "$coverage/host.env" RUNTIME_VERSION_beta)" \
+  "снимок хранит версию сборки без префикса CLI"
+cp "$coverage/host.env" "$TEST_ROOT/host-runtime.env"
+cp "$coverage/structural.env" "$TEST_ROOT/structural-runtime.env"
+cp "$config" "$TEST_ROOT/config-runtime.env"
+
+# Каждый runtime-случай начинает со свежего снимка сборки 1.0.0.
+# Срок не истёк, поэтому обновление может вызвать только сверка сборки.
+restore_runtime_coverage() {
+  cp "$TEST_ROOT/host-runtime.env" "$coverage/host.env"
+  cp "$TEST_ROOT/structural-runtime.env" "$coverage/structural.env"
+  cp "$TEST_ROOT/config-runtime.env" "$config"
+  : >"$TEST_ROOT/invocations"
+  : >"$TEST_ROOT/probes"
+  unset FAKE_ALPHA_PROBE FAKE_BETA_PROBE FAKE_BETA_FLIP
+  printf '%s\n' "$1" >"$TEST_ROOT/beta-build"
+}
+
+restore_runtime_coverage 1.0.0
+run_fixture 90
+assert_rc 0 "$fixture_rc" "неизменная сборка резерва не мешает узлу"
+assert_eq $'beta\nalpha\nalpha' "$(cat "$TEST_ROOT/probes")" \
+  "дважды названный резерв сверяется одной пробой без нового preflight"
+
+restore_runtime_coverage 1.1.0
+run_fixture 91
+assert_rc 0 "$fixture_rc" "смена сборки резерва обновляет снимок и продолжает узел"
+assert_eq alpha "$(cat "$TEST_ROOT/invocations")" "основной исполнитель запущен ровно один раз"
+assert_eq 0 "$(get 91 STALLED_HUMAN)" "смена сборки резерва не требует человека"
+assert_eq primary "$(get 91 RUNNER_REASON_BUILD)" "цепочка исполнителей не подменяется"
+assert_eq 1.1.0 "$(coverage_artifact_get "$coverage/host.env" RUNTIME_VERSION_beta)" \
+  "обновлённый снимок хранит новую сборку"
+assert_eq $'beta\nalpha\nbeta\nbeta\nalpha\nalpha' "$(cat "$TEST_ROOT/probes")" \
+  "сверка, один полный preflight и повторная сверка перед dispatch"
+assert_contains "$(cat "$LOGDIR/t91.stages.log" 2>/dev/null)" 'сменилась сборка' \
+  "причина обновления видна в журнале задачи"
+assert_contains "$(cat "$LOGDIR/t91.stages.log" 2>/dev/null)" 'обновлена' \
+  "успешное обновление видно в журнале задачи"
+[[ "$(cat "$TEST_ROOT/task-91.log")" != *FACTORY_ERROR* ]]
+assert_rc 0 "$?" "успешное обновление не оставляет маршруту ложную ошибку runtime"
+
+restore_runtime_coverage 1.1.0
+export FAKE_BETA_FLIP=1
+run_fixture 92
+assert_rc 79 "$fixture_rc" "сборка, не совпавшая и после обновления, останавливает узел"
+assert_eq '' "$(cat "$TEST_ROOT/invocations")" "нестабильная сборка не начинает model call"
+assert_eq 1 "$(get 92 STALLED_HUMAN)" "остановка требует человека"
+assert_eq coverage_unavailable "$(get 92 RUNNER_REASON_BUILD)" "причина остановки сохранена"
+assert_eq $'beta\nalpha\nbeta\nbeta' "$(cat "$TEST_ROOT/probes")" \
+  "после неудачной сверки второго обновления нет"
+assert_contains "$(cat "$TEST_ROOT/task-92.log")" 'FACTORY_ERROR=runtime_changed RUNNERS=beta' \
+  "маршрут получает понятную причину остановки"
+
+restore_runtime_coverage 1.1.0
+export FAKE_BETA_PROBE=missing
+run_fixture 93
+assert_rc 79 "$fixture_rc" "непройденный preflight после смены сборки останавливает узел"
+assert_eq '' "$(cat "$TEST_ROOT/invocations")" "непройденный preflight не начинает model call"
+assert_eq coverage_unavailable "$(get 93 RUNNER_REASON_BUILD)" "причина отказа preflight сохранена"
+rm -f -- "$TEST_ROOT/beta-build"
+
 finish_tests

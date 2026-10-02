@@ -3,6 +3,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
@@ -91,6 +92,9 @@ export const config = {
   // Pinned DeepSeek Harness живёт в server-owned runtime home. API key намеренно
   // не попадает в config: дочернее окружение строится отдельным allowlist-ом.
   deepseekRuntimeHome,
+  deepseekRuntimeMode: deepSeekDistributionMode(path.join(rootDir, 'server/deepseek-runtime-contract.json')),
+  deepseekBinOverride: process.env.COCKPIT_DEEPSEEK_BIN,
+  deepseekGenerationRoot: path.join(rootDir, 'server', 'runtime', 'deepseek'),
   deepseekBin: process.env.COCKPIT_DEEPSEEK_BIN
     || path.join(deepseekRuntimeHome, 'install', 'current', 'node_modules', '.bin', 'dsh'),
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).

@@ -39,6 +39,8 @@ if [[ "${1:-}" == "--one" ]]; then
     XDG_CACHE_HOME="$test_root/xdg-cache" \
     TEST_ROOT="$test_root" \
     NODE_BIN="$HOST_NODE_BIN" \
+    COCKPIT_PROVIDER_PREFS_PATH="$test_root/provider-prefs.json" \
+    COCKPIT_DEEPSEEK_RUNTIME_MODE=installed \
     bash --noprofile --norc "$test_file" >"$out_buf" 2>&1
   test_rc=$?
   # Вывод файла печатается одним куском под общим flock: иначе строки соседних

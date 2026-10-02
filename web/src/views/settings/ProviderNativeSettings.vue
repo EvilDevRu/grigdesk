@@ -3,7 +3,9 @@
     <header class="native-settings__heading">
       <div class="native-settings__intro">
         <h4>Дополнительные настройки</h4>
-        <p class="native-settings__scope">Для чатов Cockpit · со следующего запуска</p>
+        <p class="native-settings__scope">
+          {{ state.catalog?.scope.label || 'Для чатов Cockpit' }} · со следующего запуска
+        </p>
       </div>
       <UiButton
         variant="ghost"

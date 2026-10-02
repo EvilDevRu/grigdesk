@@ -13,6 +13,8 @@
 
 ## Устройство
 
+- [Области дополнительных настроек: чаты, конвейеры и непроверенная ACP-схема](native-settings-consumers.md)
+
 - [Недоступность исполнителя не отнимает выбор его моделей](unavailable-executor-model-selection.md)
 
 ### Kimi
@@ -57,6 +59,13 @@
 
 ### Исполнители и модели
 
+- [Снимок исходников DeepSeek: manifest в Git, кэш исходников по commit, integrity и публикация](deepseek-source-snapshot.md)
+- [Состав host runtime DeepSeek: воспроизводимая сборка, ресурсы и compiled проверки](deepseek-vendored-composition.md)
+- [Граница LLM-провайдеров DSH: исключённый pi-ai, зависимости и пределы проверки](deepseek-llm-provider-boundary.md)
+- [Descriptor DeepSeek: integrity без блокировки сервера, generation и привязка запуска](deepseek-runtime-descriptor.md)
+- [Приватный settings-мост DeepSeek: ACP, readback и restart](deepseek-private-settings-bridge.md)
+- [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)
+- [Обновление upstream DeepSeek и совместимый откат журналов](deepseek-upstream-update-rollback.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке Claude — только свежая версия каждого семейства](claude-model-shortlist.md)
@@ -67,7 +76,7 @@
 - [Новые модели Anthropic обнаруживаются сами](anthropic-model-discovery.md)
 - [Подключение нового ИИ — модульное](executor-adapter-boundary.md)
 - [Свои настройки исполнителя объявляет сам executor](executor-settings.md)
-- [Нативные настройки чатов: динамическая форма, API и проверенные транспорты](executor-native-settings.md)
+- [Нативные настройки исполнителей: форма, API и области применения](executor-native-settings.md)
 - [Обнаружение нативных настроек: источники CLI, пробелы схем и общий контракт](executor-settings-discovery.md)
 - [Границы настроек: конкурирующие записи, публичные prefs и fingerprint запуска](executor-settings-storage-boundaries.md)
 - [Смена ИИ внутри чата](executor-switching.md)
@@ -89,6 +98,7 @@
 ## Грабли
 
 - [Неудачный запуск Claude: необработанная ошибка stdin может завершить сервер](claude-startup-pipe-error.md)
+- [Claude: завершённые реплики остаются «Пишет…» и не закрываются в журнале блоков](claude-assistant-block-completion.md)
 - [DeepSeek: сотни строк «Размышление» = web-транспорт публиковал каждый фрагмент отдельно](deepseek-reasoning-chunks.md)
 - [Снятие адаптера: сохранённый каталог, сброс памяти и барьер записи истории](executor-removal-boundaries.md)
 - [Сообщение во время работы: прежняя очередь и границы уточнения](in-turn-message-gap.md)

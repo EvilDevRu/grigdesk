@@ -31,7 +31,7 @@ notify() {
 source "$ROOT/bin/lib/runtime-env.sh"
 cockpit_add_cli_paths
 if ! cockpit_load_runtime_env "$ROOT"; then
-  notify "Не удалось прочитать настройки запуска: нужен node 22.18+ в PATH."
+  notify "Не удалось прочитать настройки запуска: нужен Node 22.19+ из ветки 22 либо Node 24+ в PATH."
   exit 1
 fi
 URL="http://localhost:$COCKPIT_EFFECTIVE_PORT/"

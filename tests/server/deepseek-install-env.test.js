@@ -86,7 +86,7 @@ test('probe допускает только pinned dsh', async (t) => {
   assert.deepEqual(await probeDeepSeekBin(old), {
     ok: false,
     version: '0.1.4',
-    error: 'Ожидалась версия 0.1.5-rc.2',
+    error: 'Версия DeepSeek не соответствует descriptor',
   });
   const missing = await probeDeepSeekBin(path.join(root, 'missing'));
   assert.equal(missing.ok, false);

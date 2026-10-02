@@ -353,7 +353,7 @@ test('DeepSeek доступен для override, а его точный binary p
     profilesDir: '/opt/cockpit/profiles', factoryConfigRoot: '/tmp/factory-config',
     routesDir: '/opt/cockpit/routes', stateDir: '/tmp/factory-state',
     factoryControlDir: '/tmp/factory-control', factoryBin: '/opt/cockpit/engine/bin/factory',
-    deepseekBin: bin,
+    deepseekBinOverride: bin,
   });
   assert.equal(env.COCKPIT_DEEPSEEK_BIN, bin);
 });

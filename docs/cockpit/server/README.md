@@ -7,6 +7,7 @@
 ## Устройство
 
 - [Авторизация и CLI-токен](authentication-and-cli-token.md)
+- [Встроенный DeepSeek: переход updater, публикация и восстановление](deepseek-release-transition.md)
 
 ## Грабли
 

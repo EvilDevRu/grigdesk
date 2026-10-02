@@ -360,9 +360,10 @@
 
         <!-- Дерево файлов. Место под шеврон занято и у файла (пустой .chev): без него
              имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
-             уровнем выше — лесенка читалась рваной. -->
+             уровнем выше — лесенка читалась рваной. Каталог на тысячи файлов рисуется
+             окном VirtualRows: целиком он замораживал панель. -->
         <div v-else-if="tab === 'files'" class="scroll tree file-tree">
-          <template v-for="row in rows" :key="row.rel">
+          <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey">
             <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
                          :data-dir-path="row.rel" :data-depth="row.depth"
                          :title="fileTreeDecorations.directories.has(row.rel)
@@ -392,7 +393,7 @@
               </span>
               <span class="nm" :class="fileTreeDecorations.files.get(row.rel)">{{ row.name }}</span>
             </UiPressable>
-          </template>
+          </VirtualRows>
         </div>
 
         <!-- Git разделён на две вкладки: рабочие группы больше не выталкивают журнал
@@ -603,8 +604,10 @@
                 {{ group.id === 'commits' ? 'В выбранных коммитах нет изменений файлов.' : 'Несохранённых изменений нет.' }}
               </div>
               <template v-else-if="gitPane === 'changes' && collapsedGroups.has(group.id)"></template>
+              <!-- Группа бывает на тысячи файлов (новый репозиторий целиком в индексе):
+                   и дерево, и список рисуются окном VirtualRows, а не всеми строками. -->
               <template v-else-if="gitView === 'tree'">
-                <template v-for="row in group.rows" :key="row.key">
+                <VirtualRows v-slot="{ item: row }" :items="group.rows" :item-key="gitRowKey">
                   <!-- Каталог: та же обойма, что у файла — в индекс уходят все файлы группы
                        под ним. Граница по «/», чтобы src не захватил src-other. -->
                   <div v-if="row.kind === 'dir'" class="git-file-line git-dir-line"
@@ -694,77 +697,78 @@
                       >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
                     </span>
                   </div>
-                </template>
+                </VirtualRows>
               </template>
               <!-- Плоский список: сначала имя файла, каталог — приглушённым хвостом.
                    Целый путь обрезался с конца, то есть съедал именно имя. -->
               <template v-else>
-                <div v-for="entry in group.list" :key="`${group.id}:file:${entry.file.path}`"
-                     class="git-file-line" data-ui-row="code-change">
-                  <UiPressable class="trow frow git-row git-file"
-                               data-context="code-tree-row"
-                               :class="{ sel: gitSel === gitRef(group.id, entry.file.path) }"
-                               :pressed="gitSel === gitRef(group.id, entry.file.path)"
-                               :data-path="entry.file.path" :data-group="group.id"
-                               :title="gitFileHint(entry.file)"
-                               @click="selectGit(gitRef(group.id, entry.file.path))">
-                    <span class="st" :class="entry.file.status">
-                      {{ STLABEL[entry.file.status] || entry.file.status }}
+                <VirtualRows v-slot="{ item: entry }" :items="group.list" :item-key="gitListKey">
+                  <div class="git-file-line" data-ui-row="code-change">
+                    <UiPressable class="trow frow git-row git-file"
+                                 data-context="code-tree-row"
+                                 :class="{ sel: gitSel === gitRef(group.id, entry.file.path) }"
+                                 :pressed="gitSel === gitRef(group.id, entry.file.path)"
+                                 :data-path="entry.file.path" :data-group="group.id"
+                                 :title="gitFileHint(entry.file)"
+                                 @click="selectGit(gitRef(group.id, entry.file.path))">
+                      <span class="st" :class="entry.file.status">
+                        {{ STLABEL[entry.file.status] || entry.file.status }}
+                      </span>
+                      <span class="nm split mono" :title="entry.file.path">
+                        <b class="nm-base">{{ entry.name }}</b>
+                        <i v-if="entry.dir" class="nm-dir">{{ entry.dir }}</i>
+                      </span>
+                      <span class="cnt mono">
+                        <i v-if="entry.file.add" class="a">+{{ entry.file.add }}</i>
+                        <i v-if="entry.file.del" class="d">−{{ entry.file.del }}</i>
+                      </span>
+                    </UiPressable>
+                    <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
+                         иначе «Откатить» и «+» ложились в одну точку. -->
+                    <span class="git-row-actions">
+                      <UiPopover v-if="group.id === 'work' && entry.file.status !== 'U'"
+                                 has-popup="menu" placement="bottom-end"
+                                 :style="{ width: 'min(240px, calc(100vw - 20px))' }">
+                        <template #trigger>
+                          <UiIconButton class="git-file-action" role="embedded"
+                                        data-context="code-row-action" data-action="row-more"
+                                        :data-file="entry.file.path" label="Действия с файлом"
+                                        :title="`Действия с ${entry.file.path}`">
+                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                              <circle cx="3" cy="8" r="1.15" />
+                              <circle cx="8" cy="8" r="1.15" />
+                              <circle cx="13" cy="8" r="1.15" />
+                            </svg>
+                          </UiIconButton>
+                        </template>
+                        <template #default="{ close }">
+                          <UiButton block variant="ghost" tone="danger"
+                                    data-context="code-popover-action" :data-group="group.id"
+                                    :data-action="entry.file.status === 'A' ? 'clean' : 'discard'"
+                                    :data-file="entry.file.path"
+                                    :loading="gitBusy === discardGitFileKey(entry.file)"
+                                    :disabled="gitActionBusy"
+                                    @click="discardGitFile(group, entry.file); close('action')">
+                            {{ discardGitFileLabel(entry.file) }}
+                          </UiButton>
+                        </template>
+                      </UiPopover>
+                      <UiIconButton
+                        v-if="group.mutable"
+                        class="git-file-action"
+                        role="embedded"
+                        data-context="code-row-action"
+                        :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
+                        :data-file="entry.file.path"
+                        :label="gitFileActionLabel(group.id, entry.file)"
+                        :title="gitFileActionLabel(group.id, entry.file)"
+                        :loading="gitBusy === gitFileActionKey(group.id, entry.file.path)"
+                        :disabled="gitActionBusy"
+                        @click="changeGitFile(group, entry.file)"
+                      >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
                     </span>
-                    <span class="nm split mono" :title="entry.file.path">
-                      <b class="nm-base">{{ entry.name }}</b>
-                      <i v-if="entry.dir" class="nm-dir">{{ entry.dir }}</i>
-                    </span>
-                    <span class="cnt mono">
-                      <i v-if="entry.file.add" class="a">+{{ entry.file.add }}</i>
-                      <i v-if="entry.file.del" class="d">−{{ entry.file.del }}</i>
-                    </span>
-                  </UiPressable>
-                  <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
-                       иначе «Откатить» и «+» ложились в одну точку. -->
-                  <span class="git-row-actions">
-                    <UiPopover v-if="group.id === 'work' && entry.file.status !== 'U'"
-                               has-popup="menu" placement="bottom-end"
-                               :style="{ width: 'min(240px, calc(100vw - 20px))' }">
-                      <template #trigger>
-                        <UiIconButton class="git-file-action" role="embedded"
-                                      data-context="code-row-action" data-action="row-more"
-                                      :data-file="entry.file.path" label="Действия с файлом"
-                                      :title="`Действия с ${entry.file.path}`">
-                          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                            <circle cx="3" cy="8" r="1.15" />
-                            <circle cx="8" cy="8" r="1.15" />
-                            <circle cx="13" cy="8" r="1.15" />
-                          </svg>
-                        </UiIconButton>
-                      </template>
-                      <template #default="{ close }">
-                        <UiButton block variant="ghost" tone="danger"
-                                  data-context="code-popover-action" :data-group="group.id"
-                                  :data-action="entry.file.status === 'A' ? 'clean' : 'discard'"
-                                  :data-file="entry.file.path"
-                                  :loading="gitBusy === discardGitFileKey(entry.file)"
-                                  :disabled="gitActionBusy"
-                                  @click="discardGitFile(group, entry.file); close('action')">
-                          {{ discardGitFileLabel(entry.file) }}
-                        </UiButton>
-                      </template>
-                    </UiPopover>
-                    <UiIconButton
-                      v-if="group.mutable"
-                      class="git-file-action"
-                      role="embedded"
-                      data-context="code-row-action"
-                      :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
-                      :data-file="entry.file.path"
-                      :label="gitFileActionLabel(group.id, entry.file)"
-                      :title="gitFileActionLabel(group.id, entry.file)"
-                      :loading="gitBusy === gitFileActionKey(group.id, entry.file.path)"
-                      :disabled="gitActionBusy"
-                      @click="changeGitFile(group, entry.file)"
-                    >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
-                  </span>
-                </div>
+                  </div>
+                </VirtualRows>
               </template>
             </section>
             </template>
@@ -1122,6 +1126,7 @@ import type {
   CodeTarget,
 } from '../../../../shared/codeContracts';
 import PatchReview from './PatchReview.vue';
+import VirtualRows from '../../shared/VirtualRows.vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco';
 import { codeLinkHref } from '../../features/code/links';
 import { pickCodeProject } from './projectChoice';
@@ -1626,6 +1631,12 @@ const visibleGitGroups = computed(() => (
     ? changeGroups.value
     : gitGroups.value.filter((group) => group.id === 'commits')
 ));
+
+// Ключи строк для VirtualRows — постоянные функции, а не стрелки в шаблоне: новая стрелка
+// на каждом рендере панели была бы новым prop и будила бы окно впустую.
+const fileRowKey = (row: FileTreeRow) => row.rel;
+const gitRowKey = (row: GitGroup['rows'][number]) => row.key;
+const gitListKey = (entry: GitGroup['list'][number]) => entry.file.path;
 const patchReviewGroup = computed(() => (
   gitGroups.value.find((group) => group.id === patchReviewGroupId.value) || null
 ));

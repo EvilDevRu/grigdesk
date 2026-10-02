@@ -520,6 +520,45 @@ test('общая форма нативных настроек', async (t) => {
     assert.deepEqual(resets[0], ['future-provider', '["enabled"]']);
   });
 
+  await t.test('scope и поддержка consumers приходят из общего каталога', async (scenario) => {
+    const value = structuredClone(catalog);
+
+    value.scope = { id: 'cockpit-chats-and-pipelines', label: 'Чаты и конвейеры' };
+    value.fields[0].appliesTo = ['chat'];
+    value.fields[0].consumerSupport = {
+      chat: { state: 'verified' },
+      pipeline: { state: 'unsupported', reason: 'Поле доступно только в web' },
+    };
+
+    const state = reactive({
+      catalog: value,
+      drafts: {},
+      errors: {},
+      loading: false,
+      saving: false,
+    });
+
+    globalThis.__nativeStore = { panel: () => state, async load() {} };
+
+    const wrapper = mount(Component, { props: { providerId: 'future-provider', active: true } });
+
+    scenario.after(() => wrapper.unmount());
+    await flushPromises();
+
+    assert.match(wrapper.text(), /Чаты и конвейеры/);
+    assert.match(wrapper.text(), /Только чаты/);
+
+    state.catalog.fields[0].consumerSupport.pipeline = {
+      state: 'unverified',
+      reason: 'ACP-схема временно недоступна',
+    };
+    await flushPromises();
+
+    assert.equal(wrapper.text().includes('Только чаты'), false);
+    assert.match(wrapper.text(), /ACP-схема временно недоступна/);
+    assert.equal(wrapper.find('[role="switch"]').exists(), true);
+  });
+
   await t.test('каталог без доступных действий показывает короткое пустое состояние', async (scenario) => {
     const value = structuredClone(catalog);
 

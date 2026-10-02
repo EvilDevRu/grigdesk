@@ -67,20 +67,20 @@ test('минимум Node объявлен и проверяется на зап
     source('server/src/lib/nodeVersion.ts'),
   ]);
 
-  assert.equal(JSON.parse(serverPkg).engines.node, '>=22.18.0');
-  assert.equal(JSON.parse(webPkg).engines.node, '>=22.18.0');
+  assert.equal(JSON.parse(serverPkg).engines.node, '^22.19.0 || >=24.0.0');
+  assert.equal(JSON.parse(webPkg).engines.node, '^22.19.0 || >=24.0.0');
   // Отказ должен наступать до запуска: иначе человек получит ошибку разрешения
   // модуля `.ts` вместо ответа «нужен Node новее».
-  assert.match(runtimeEnv, /COCKPIT_MIN_NODE=22\.18\.0/);
+  assert.match(runtimeEnv, /COCKPIT_MIN_NODE=22\.19\.0/);
   assert.match(runtimeEnv, /cockpit_require_node\s*\(\)/);
-  assert.match(gate, /MIN_NODE_VERSION = '22\.18\.0'/);
+  assert.match(gate, /MIN_NODE_VERSION = '22\.19\.0'/);
   assert.match(await source('server/src/app.ts'), /assertSupportedNode\(\)/);
 
   // Лаунчер юнита проверяет версию САМ и на голом JavaScript: до `import('./app.ts')`
   // общий гейт недостижим — он тоже `.ts`, и на старом Node упал бы на разрешении модуля.
   const launcher = await source('server/src/app.js');
 
-  assert.match(launcher, /MIN_NODE_VERSION = '22\.18\.0'/);
+  assert.match(launcher, /MIN_NODE_VERSION = '22\.19\.0'/);
   assert.match(launcher, /process\.versions\.node/);
   assert.doesNotMatch(
     launcher.split("await import('./app.ts')")[0] ?? '',

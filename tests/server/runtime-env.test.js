@@ -6,6 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { isNodeVersionSupported } from '../../server/src/lib/nodeVersion.ts';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const helper = path.join(root, 'bin', 'lib', 'runtime-env.sh');
 const probe = String.raw`
@@ -24,6 +26,32 @@ cockpit_add_cli_paths
 cockpit_add_cli_paths
 printf '%s\n' "$PATH"
 `;
+
+test('общий preflight соблюдает Node compatibility встроенного DeepSeek', () => {
+  const versionProbe = String.raw`
+source "$1"
+node() {
+  printf '%s\n' "$DSH_TEST_NODE_VERSION"
+}
+cockpit_require_node
+`;
+
+  for (const version of ['20.19.0', '22.18.0', '23.0.0']) {
+    assert.equal(isNodeVersionSupported(version), false, version);
+    assert.throws(() => execFileSync('bash', ['-c', versionProbe, 'node-version-test', helper], {
+      env: { ...process.env, DSH_TEST_NODE_VERSION: version },
+      stdio: 'pipe',
+    }));
+  }
+
+  for (const version of ['22.19.0', '22.22.1', '24.0.0', '26.1.0']) {
+    assert.equal(isNodeVersionSupported(version), true, version);
+    execFileSync('bash', ['-c', versionProbe, 'node-version-test', helper], {
+      env: { ...process.env, DSH_TEST_NODE_VERSION: version },
+      stdio: 'pipe',
+    });
+  }
+});
 
 function ports(dir, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };

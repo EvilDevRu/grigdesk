@@ -107,6 +107,7 @@ printf '%s\\n' "$result"
   ].join('\n'));
 
   const config = {
+    rootDir: root,
     factoryHome: path.join(root, 'engine'),
     factoryBin: path.join(root, 'engine/bin/factory'),
     factoryConfigRoot: path.join(directory, 'config'),

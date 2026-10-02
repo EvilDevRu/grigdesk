@@ -1,10 +1,15 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { DEEPSEEK_DIALECT } from '../src/lib/deepseek/contract.ts';
 import { runDeepSeekTurn } from '../src/lib/deepseek/runtime.ts';
 import type { DeepSeekUpdate } from '../src/lib/deepseek/steps.ts';
+import deepseek from '../src/lib/executors/deepseek.ts';
+import type { ExecutorAdapter } from '../src/lib/executors/index.ts';
+import { prepareFactoryNativeSettings } from '../src/lib/executorSettings/factorySettings.ts';
+import { resolveDeepSeekRuntime } from '../src/lib/deepseek/runtimeProcess.ts';
+import { deepSeekDistributionMode } from '../src/lib/deepseek/distribution.ts';
 
 interface Arguments {
   bin: string;
@@ -15,6 +20,9 @@ interface Arguments {
   model: string;
   effort: string;
   mode: 'read-only' | 'workspace-write';
+  artifactDir?: string;
+  runtimeIdentity?: string;
+  runtimeVersion?: string;
 }
 
 const STATUS_ENV_NAMES = Object.freeze([
@@ -57,7 +65,7 @@ function parseArguments(argv: readonly string[]): Arguments {
   };
   const known = new Set([
     '--bin', '--cwd', '--run-dir', '--runtime-home', '--prompt-file',
-    '--model', '--effort', '--mode',
+    '--model', '--effort', '--mode', '--artifact-dir', '--runtime-identity', '--runtime-version',
   ]);
   for (const name of values.keys()) {
     if (!known.has(name)) throw new Error(`DeepSeek Factory: неизвестный аргумент ${name}`);
@@ -79,6 +87,9 @@ function parseArguments(argv: readonly string[]): Arguments {
     model,
     effort,
     mode,
+    artifactDir: values.get('--artifact-dir'),
+    runtimeIdentity: values.get('--runtime-identity'),
+    runtimeVersion: values.get('--runtime-version'),
   };
 }
 
@@ -154,22 +165,27 @@ function emit(value: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-function emitUpdate(update: DeepSeekUpdate): void {
+/**
+ * Публикует только retained diagnostic события без private ACP payload.
+ * Host status остаётся отдельным MCP-контрактом и не выводится из текста ответа.
+ */
+function emitUpdate(update: DeepSeekUpdate, publish = emit): void {
   const event = String(update.sessionUpdate || '');
+
   if (event === 'agent_message_chunk') {
-    emit({ event, text: textContent(update.content) });
+    publish({ event, text: textContent(update.content) });
   } else if (event === 'agent_thought_chunk') {
-    emit({ event });
+    publish({ event });
   } else if (event === 'tool_call') {
-    emit({ event, name: String(update.title || ''), toolCallId: String(update.toolCallId || '') });
+    publish({ event, name: String(update.title || ''), toolCallId: String(update.toolCallId || '') });
   } else if (event === 'tool_call_update') {
-    emit({
+    publish({
       event,
       toolCallId: String(update.toolCallId || ''),
       status: String(update.status || ''),
     });
   } else if (event === 'usage_update') {
-    emit({ event, used: update.used, size: update.size });
+    publish({ event, used: update.used, size: update.size });
   }
 }
 
@@ -194,9 +210,56 @@ async function writeLast(runDir: string, text: string): Promise<void> {
   await fs.chmod(target, 0o600);
 }
 
-async function main(): Promise<void> {
-  const args = await validatePaths(parseArguments(process.argv.slice(2)));
-  const identity = runIdentity(process.env);
+/**
+ * Wrapper закрепляет runtime и перечитывает host prefs для этого узла до model call.
+ * Тестовая зависимость использует тот же runtime с loopback endpoint и private overlay.
+ */
+export async function runDeepSeekFactory(
+  argv = process.argv.slice(2),
+  env = process.env,
+  deps: { runTurn?: typeof runDeepSeekTurn; emit?: typeof emit } = {},
+): Promise<void> {
+  const args = await validatePaths(parseArguments(argv));
+  const identity = runIdentity(env);
+  const runtimeMode = env.COCKPIT_DEEPSEEK_RUNTIME_MODE
+    || deepSeekDistributionMode(path.join(ROOT, 'server/deepseek-runtime-contract.json'));
+
+  if (runtimeMode !== 'installed' && runtimeMode !== 'embedded') {
+    throw new Error('DeepSeek Factory: неизвестный режим runtime');
+  }
+
+  const config = {
+    deepseekRuntimeHome: args.runtimeHome,
+    deepseekBin: args.bin,
+    deepseekBinOverride: env.COCKPIT_DEEPSEEK_BIN || undefined,
+    deepseekRuntimeMode: runtimeMode as 'installed' | 'embedded',
+    deepseekGenerationRoot: env.COCKPIT_DEEPSEEK_GENERATION_ROOT
+      || path.join(ROOT, 'server/runtime/deepseek'),
+    deepseekArtifactDir: args.artifactDir || env.COCKPIT_DEEPSEEK_ARTIFACT_DIR || undefined,
+    rootDir: ROOT,
+  };
+  const runtime = resolveDeepSeekRuntime(config);
+
+  if ((args.runtimeIdentity && args.runtimeIdentity !== runtime.identity)
+      || (args.runtimeVersion && args.runtimeVersion !== runtime.runtimeVersion)) {
+    throw Object.assign(new Error('DeepSeek Factory: runtime изменился после preflight'), {
+      code: 'deepseek_runtime_changed',
+    });
+  }
+
+  if (runtime.generationDir) {
+    config.deepseekArtifactDir = runtime.generationDir;
+  }
+
+  const { nativeSettings } = await prepareFactoryNativeSettings({
+    adapter: deepseek as ExecutorAdapter,
+    config,
+    cwd: args.cwd,
+    mode: args.mode,
+    prefsPath: env.COCKPIT_PROVIDER_PREFS_PATH || env.COCKPIT_PREFS_PATH
+      || path.join(ROOT, 'server/.state/prefs.json'),
+  });
+  const publish = deps.emit || emit;
   const prompt = await fs.readFile(args.promptFile, 'utf8');
   if (Buffer.byteLength(prompt, 'utf8') > 2 * 1024 * 1024) {
     throw new Error('DeepSeek Factory: prompt превышает 2 MiB');
@@ -210,15 +273,14 @@ async function main(): Promise<void> {
   process.once('SIGTERM', cancel);
   process.once('SIGINT', cancel);
 
-  emit({ event: 'deepseek_start', dialect: DEEPSEEK_DIALECT, mode: args.mode, model: args.model });
+  publish({ event: 'deepseek_start', dialect: DEEPSEEK_DIALECT, mode: args.mode, model: args.model });
+
   try {
-    const result = await runDeepSeekTurn({
-      config: {
-        deepseekRuntimeHome: args.runtimeHome,
-        deepseekBin: args.bin,
-        rootDir: ROOT,
-      },
-      env: process.env,
+    const result = await (deps.runTurn || runDeepSeekTurn)({
+      config,
+      env,
+      nativeSettings,
+      // Чатовые тумблеры прямого SSH/БД сюда не идут: дефолт адаптера блокирует SSH.
       message: prompt,
       model: args.model,
       effort: args.effort,
@@ -231,11 +293,11 @@ async function main(): Promise<void> {
         name: 'factory-status',
         command: process.execPath,
         args: [STATUS_MCP],
-        env: statusEnvironment(process.env),
+        env: statusEnvironment(env),
       }],
-      onRawUpdate: emitUpdate,
-      onSessionCreated: () => emit({ event: 'session_created' }),
-      onPermissionResolved: ({ context, outcome }) => emit({
+      onRawUpdate: (update) => emitUpdate(update, publish),
+      onSessionCreated: () => publish({ event: 'session_created' }),
+      onPermissionResolved: ({ context, outcome }) => publish({
         event: 'permission',
         tool: String(context.title || ''),
         outcome: outcome.outcome.outcome,
@@ -253,7 +315,8 @@ async function main(): Promise<void> {
     if (interruptedBySignal) {
       return;
     }
-    emit({
+
+    publish({
       event: 'result',
       stopReason: result.stopReason || 'unknown',
       contextMetric: result.contextMetric,
@@ -266,11 +329,14 @@ async function main(): Promise<void> {
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = safeError(error);
-  emit({ event: 'wrapper_error', code: errorCode(error, message), message });
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try {
+    await runDeepSeekFactory();
+  } catch (error) {
+    const message = safeError(error);
+
+    emit({ event: 'wrapper_error', code: errorCode(error, message), message });
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
 }

@@ -5,6 +5,13 @@ import { contractDecoders } from './contractDecoders.ts';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
+export type SettingsConsumer = 'chat' | 'pipeline';
+
+export interface SettingsConsumerSupport {
+  state: 'verified' | 'unsupported' | 'unverified';
+  reason?: string;
+}
+
 export type SettingsValueSlot =
   | { state: 'known'; value: JsonValue }
   | { state: 'unset' | 'unknown' }
@@ -47,6 +54,8 @@ export interface ProviderSettingNode {
   writable: boolean;
   reason?: string;
   owner?: string;
+  appliesTo?: SettingsConsumer[];
+  consumerSupport?: Partial<Record<SettingsConsumer, SettingsConsumerSupport>>;
   children?: ProviderSettingNode[];
   items?: ProviderSettingNode;
   default: SettingsValueSlot;
@@ -65,7 +74,10 @@ export interface ProviderSettingsCatalog {
   protocolVersion: 1;
   providerId: string;
   state: 'ready' | 'partial' | 'stale' | 'unavailable';
-  scope: { id: 'cockpit-chats'; label: string };
+  scope: {
+    id: 'cockpit-chats' | 'cockpit-chats-and-pipelines';
+    label: string;
+  };
   source: SettingsSource;
   schemaRevision: string | null;
   revision: string;
@@ -122,6 +134,30 @@ const inactiveOf = objectOf({
   label: text,
   reason: text,
 });
+
+/**
+ * Необязательные capabilities расширяют protocol 1 без изменения старых каталогов.
+ * Декодер принимает только известных consumers и проверенные состояния поддержки.
+ */
+function consumerSupportOf(value: unknown): Partial<Record<SettingsConsumer, SettingsConsumerSupport>> {
+  const input = record(value, 'consumerSupport');
+  const result: Partial<Record<SettingsConsumer, SettingsConsumerSupport>> = {};
+
+  for (const [consumer, entry] of Object.entries(input)) {
+    if (!['chat', 'pipeline'].includes(consumer)) {
+      fail('consumerSupport.consumer');
+    }
+
+    const item = record(entry, `consumerSupport.${consumer}`);
+
+    result[consumer as SettingsConsumer] = {
+      state: oneOf('verified', 'unsupported', 'unverified')(item.state, 'consumerSupport.state'),
+      ...(item.reason !== undefined ? { reason: text(item.reason, 'consumerSupport.reason') } : {}),
+    };
+  }
+
+  return result;
+}
 
 /**
  * JSON-значение проверяется без coercion и копируется в безопасный новый объект.
@@ -285,6 +321,10 @@ function nodeOf(value: unknown, path: string, depth = 0, budget = { left: 5_000 
     ...(node.description !== undefined ? { description: text(node.description, `${path}.description`) } : {}),
     ...(node.reason !== undefined ? { reason: text(node.reason, `${path}.reason`) } : {}),
     ...(node.owner !== undefined ? { owner: text(node.owner, `${path}.owner`) } : {}),
+    ...(node.appliesTo !== undefined
+      ? { appliesTo: listOf(oneOf('chat', 'pipeline'))(node.appliesTo, `${path}.appliesTo`) } : {}),
+    ...(node.consumerSupport !== undefined
+      ? { consumerSupport: consumerSupportOf(node.consumerSupport) } : {}),
     ...(kind === 'unknown' ? { reason: 'Тип поля не поддерживается' } : {}),
     ...(unknownConstraint ? { reason: 'Ограничение поля не поддерживается' } : {}),
     ...(node.children !== undefined ? { children: listOf(child)(node.children, `${path}.children`) } : {}),
@@ -307,7 +347,10 @@ export function decodeProviderSettingsCatalog(value: unknown): ProviderSettingsC
     protocolVersion: oneOf(1)(catalog.protocolVersion, 'protocolVersion'),
     providerId: text(catalog.providerId, 'providerId'),
     state: oneOf('ready', 'partial', 'stale', 'unavailable')(catalog.state, 'state'),
-    scope: objectOf({ id: oneOf('cockpit-chats'), label: text })(catalog.scope, 'scope'),
+    scope: objectOf({
+      id: oneOf('cockpit-chats', 'cockpit-chats-and-pipelines'),
+      label: text,
+    })(catalog.scope, 'scope'),
     source: sourceOf(catalog.source, 'source'),
     schemaRevision: nullable(text)(catalog.schemaRevision, 'schemaRevision'),
     revision: text(catalog.revision, 'revision'),

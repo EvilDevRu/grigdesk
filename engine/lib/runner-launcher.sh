@@ -459,7 +459,7 @@ _runner_runtime_result_class_valid() {
   case "${1:-}" in
     ok|limited|unavailable_preflight|route_unavailable|manual_switch|agent_failed|\
     provider_unavailable|missing_status|denied|timeout|transient|invalid_config|\
-    context_overflow|crashed|unknown) return 0 ;;
+    context_overflow|crashed|runtime_changed|unknown) return 0 ;;
     *) return 1 ;;
   esac
 }

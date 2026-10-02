@@ -38,9 +38,23 @@ function fieldRevision(node: NormalizedSettingNode): unknown {
     owner: node.owner,
     channelId: node.channelId,
     secret: node.secret,
+    appliesTo: node.appliesTo,
+    consumerSupport: node.consumerSupport,
     children: node.children?.map(fieldRevision),
     items: node.items ? fieldRevision(node.items) : undefined,
   };
+}
+
+/**
+ * Нормализация применяется после объединения ownership/secret запретов профилей.
+ * Consumer metadata не заменяет схему и не выводит её на публичную границу.
+ */
+export function normalizeNativeSettingsSnapshot(snapshot: NativeSettingsSnapshot): NormalizedSettingNode[] {
+  return snapshot.normalizedFields ?? snapshot.areas.flatMap((area) =>
+    (area.format === 'schemastery' ? normalizeSchemastery : normalizeJsonSchema)(area.schema, {
+      ...area,
+      ownership: snapshot.ownership,
+    }));
 }
 
 export class ProviderSettingsCatalogCache {
@@ -156,12 +170,7 @@ export class ProviderSettingsCatalogCache {
       discovery = capability.discover(context, { signal: controller.signal, refresh });
 
       const snapshot = await Promise.race([discovery, aborted]);
-      const fields = snapshot.areas.flatMap((area) =>
-        (area.format === 'schemastery' ? normalizeSchemastery : normalizeJsonSchema)(area.schema, {
-          ...area,
-          ownership: snapshot.ownership,
-        }),
-      );
+      const fields = normalizeNativeSettingsSnapshot(snapshot);
 
       result = {
         context,

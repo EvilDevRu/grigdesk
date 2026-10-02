@@ -1,45 +1,46 @@
 # DeepSeek Harness
 
-Cockpit запускает DeepSeek через закреплённый `@deepseek-ai/dsh@0.1.5-rc.2`.
+DeepSeek входит в Cockpit: выбранные исходники Harness `0.1.5-rc.2` закреплены
+commit `c291e7961a515f6d7af9304e7fd1d257929aef26` и собираются при общей подготовке.
 Чат использует штатный профиль `web` и его серверный RPC/events на loopback;
 каталог моделей и Factory используют ACP.
-Пакет ставится в отдельный server-owned runtime, не в checkout проекта и не через
-плавающий `latest`. API-ключ остаётся только в окружении сервиса.
+Каждая сборка содержит собственные зависимости, ресурсы и лицензии. API-ключ
+остаётся только в окружении сервиса.
 
 ## Установка
 
-Нужны Node не старше требований сервера, npm и Linux-механизм песочницы DSH. Из корня
-Cockpit:
+Отдельная установка DSH не требуется. Штатные установка, обновление и подготовка
+Cockpit собирают runtime; из корня можно выполнить:
 
 ```bash
-node server/scripts/deepseekHarnessInstall.mts
+bin/cockpit deps
+bin/cockpit build
 ```
 
-По умолчанию runtime находится в
-`${FACTORY_STATE_DIR:-~/.factory/state}/cockpit-deepseek`. Другой приватный каталог можно
-задать заранее или передать установщику явно:
+Артефакт находится в `server/runtime/deepseek/builds/<buildId>/`, указатель `current`
+выбирает поколение. Исходники Harness в Git не хранятся: первая подготовка скачивает
+закреплённый commit в игнорируемый кэш `third_party/deepseek-harness/upstream/` и сверяет
+каждый файл с manifest. Повторная подготовка проверяет входы и переиспользует исправную
+сборку без сети. Сбой подготовки DeepSeek не мешает запуску остального Cockpit.
+Первый prompt ничего не устанавливает. Адресная подготовка и проверка:
 
 ```bash
-COCKPIT_DEEPSEEK_RUNTIME_HOME=/private/runtime/deepseek \
-  node server/scripts/deepseekHarnessInstall.mts --runtime-home /private/runtime/deepseek
+npm --prefix server run deepseek:prepare
+node server/scripts/prepareDeepSeekRuntime.mts --check
+node server/scripts/deepseekRuntimeInfo.mts --probe
 ```
 
-Установщик скачивает exact-версию, проверяет версию и integrity из lock-файла и только
-после этого атомарно переключает `install/current`. Проверка результата:
-
-```bash
-"${COCKPIT_DEEPSEEK_RUNTIME_HOME:-$HOME/.factory/state/cockpit-deepseek}/install/current/node_modules/.bin/dsh" -V
-```
-
-Ответ должен быть ровно `0.1.5-rc.2`. Непинованную версию Cockpit и Factory не допускают
-к ходу.
+Probe сообщает версию вида `0.1.5-rc.2.cockpit.b<hash16>`; buildId различает сборки
+одного upstream. Нужны Node `^22.19.0 || >=24.0.0`, npm, C compiler, Node headers и
+native prerequisites зависимостей; для Linux sandbox — bubblewrap. Проверены Linux
+x64/glibc и Node 22.22.1. Другие платформы и Node 24 этой проверкой не подтверждены.
+Состав и лицензии описаны в [композиции runtime](../chat/deepseek-vendored-composition.md).
 
 Задайте `DEEPSEEK_API_KEY` в окружении user-service Cockpit, а не в браузерных настройках,
-проектном `.env` или настройках Factory. При нестандартной установке тому же сервису задаются:
+проектном `.env` или настройках Factory. Приватное состояние можно разместить отдельно:
 
 ```text
 COCKPIT_DEEPSEEK_RUNTIME_HOME=/private/runtime/deepseek
-COCKPIT_DEEPSEEK_BIN=/private/runtime/deepseek/install/current/node_modules/.bin/dsh
 ```
 
 После изменения окружения нужен ручной рестарт сервера. Затем в «Настройки →
@@ -164,16 +165,17 @@ preflight и disposable-smoke обоих файловых режимов. Док
 
 ## Обновление и откат
 
-Pin меняют только вместе с `DEEPSEEK_PIN` в коде и новым полным P0-аудитом: install scripts
-и native artifacts, dump overlay, config options, реальные file/shell boundaries,
-allow-once/reject-once, MCP, hooks, cancel/resume, classifier signatures и controlled
-Factory smoke. Простого `npm update` или замены `current` на `latest` недостаточно.
+Runtime обновляется вместе с Cockpit. Старый updater сначала требует совместимый
+промежуточный релиз: [переход и восстановление обновления](../server/deepseek-release-transition.md).
+Обновление исходников использует явный полный SHA, отдельный review candidate и
+обязательные compiled gates. Публикация snapshot не переключает работающий runtime.
+Порядок сборки, активации, совместимого отката и копирования журналов:
+[обновление upstream и откат](../chat/deepseek-upstream-update-rollback.md).
 
-Для отката верните предыдущую проверенную редакцию кода и соответствующий exact runtime,
-перепроверьте карточку и disposable-smoke, затем вручную перезапустите сервер. Быстро
-выключить provider можно, убрав ключ из окружения сервиса или указав недоступный бинарь:
-preflight остановит DeepSeek fail-closed. Боевые профили при установке, обновлении и откате
-автоматически не меняются.
+`COCKPIT_DEEPSEEK_BIN` остаётся явным диагностическим override для внешнего pinned
+`0.1.5-rc.2`. Автоматического fallback на установленный DSH или PATH нет. Внешний
+ACP без приватного settings-моста не допускает pipeline с активными общими overrides.
+Неисправный embedded artifact запрещает prompt; боевые маршруты автоматически не меняются.
 
 Технические доказательства pinned-версии и точные ограничения собраны в
 [DEEPSEEK.md](../../engine/DEEPSEEK.md).

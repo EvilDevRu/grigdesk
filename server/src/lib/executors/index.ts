@@ -245,6 +245,17 @@ export interface ExecutorAdapter {
   order?: number;
   install?: string;
   login?: string;
+  // Сборку, входящую в Cockpit, описывает адаптер; probe передаётся, чтобы причина отказа
+  // проверки версии тоже дошла до карточки. problem — текст и команда исправления.
+  distribution?: (config: unknown, probe?: { ok: boolean; code?: string }) => {
+    kind: 'embedded';
+    label: string;
+    authHint?: string;
+    buildId?: string;
+    runtimeVersion?: string;
+    error?: string;
+    problem?: { message: string; command?: string };
+  } | null;
   statusPage?: string;
   updateCmd?: readonly string[];
   catalogLive?: boolean;

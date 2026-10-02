@@ -73,7 +73,7 @@ execution_plan_runtime_classify() {
   local rc=${1:-1} hint=${2:-unknown}
   case "$hint" in
     unavailable_preflight|route_unavailable) EXECUTION_RUNTIME_CLASS=unknown ;;
-    denied|timeout|transient|invalid_config|context_overflow|crashed|unknown)
+    denied|timeout|transient|invalid_config|context_overflow|crashed|runtime_changed|unknown)
       EXECUTION_RUNTIME_CLASS=$hint ;;
     *) [[ "$rc" == 0 ]] && EXECUTION_RUNTIME_CLASS=ok || EXECUTION_RUNTIME_CLASS=unknown ;;
   esac

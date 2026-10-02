@@ -14,6 +14,8 @@ import { flattenNativeSettings } from '../../server/src/lib/executorSettings/val
 import { projectNativeSettingsCatalog } from '../../server/src/lib/executorSettings/projection.ts';
 import { prepareDeepSeekLaunch } from '../../server/src/lib/deepseek/runtime.ts';
 import { runDeepSeekWebTurn } from '../../server/src/lib/deepseek/webRuntime.ts';
+import { runDeepSeekServerTurn } from '../../server/src/lib/deepseek/serverTurn.ts';
+import { acpDeepSeekSettingsRpc } from '../../server/src/lib/deepseek/nativeSettingsRpc.ts';
 
 const context = {
   providerId: 'deepseek',
@@ -23,6 +25,84 @@ const context = {
   mode: 'default',
   cwdRealpath: '/fixture',
 };
+
+test('ACP bridge без capability и чужой метод отвергаются без request', async () => {
+  let requests = 0;
+  const client = { request: async () => {
+    requests += 1;
+  } };
+
+  assert.throws(() => acpDeepSeekSettingsRpc(client, {}));
+
+  const rpc = acpDeepSeekSettingsRpc(client, {
+    agentCapabilities: { _meta: { 'cockpit.settings': { contract: 1 } } },
+  });
+
+  await assert.rejects(rpc.rpc('session/prompt'));
+  assert.equal(requests, 0);
+});
+
+test('unknown mutation readback запрещает prompt вместо sent', async () => {
+  await assert.rejects(applyDeepSeekNativeSettings({
+    rpc: async (method) => method === 'settings/describe' ? description : { value: {} },
+  }, {
+    accepted: [{
+      fieldId: '["future-namespace","enabled"]',
+      path: ['future-namespace', 'enabled'],
+      value: false,
+    }],
+  }));
+});
+
+for (const absent of [false, true]) {
+  test(`readback после model selection ${absent ? 'unknown' : 'mismatch'} запрещает prompt`, async () => {
+    const current = structuredClone(description);
+    let prompts = 0;
+    let stopped = 0;
+
+    await assert.rejects(runDeepSeekServerTurn({
+      bin: '/fixture',
+      cwd: '/fixture',
+      overlayPath: '/fixture/overlay',
+      env: {},
+      message: 'fixture',
+      model: '["deepseek-official","deepseek-v4-flash"]',
+      nativeSettings: {
+        accepted: [{
+          fieldId: '["future-namespace","enabled"]',
+          path: ['future-namespace', 'enabled'],
+          value: false,
+        }],
+      },
+      startServer: async () => ({
+        stop: async () => {
+          stopped += 1;
+        },
+        client: {
+          createSession: async () => 'fixture-session',
+          prompt: async () => {
+            prompts += 1;
+          },
+          rpc: async (method) => {
+            if (method === 'settings/describe') {
+              return current;
+            }
+
+            if (method === 'session/selectModel') {
+              current.namespaces[0].value = absent ? {} : { enabled: true };
+
+              return {};
+            }
+
+            return current.namespaces[0];
+          },
+        },
+      }),
+    }));
+    assert.equal(prompts, 0);
+    assert.equal(stopped, 1);
+  });
+}
 
 test('DSH объявляет новый namespace и boolean, скрывая описанные secrets', async () => {
   const cache = new ProviderSettingsCatalogCache();

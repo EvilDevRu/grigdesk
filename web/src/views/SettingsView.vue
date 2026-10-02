@@ -715,6 +715,9 @@
             data-testid="provider-panel"
           >
             <div class="pvfacts">
+              <div v-if="p.distribution" class="pvsub muted" data-testid="provider-distribution">
+                {{ p.distribution.label }} · {{ p.distribution.ready ? 'Сборка готова' : 'Сборка недоступна' }}
+              </div>
               <div class="pvsub muted">
                 {{ p.authLabel }}<template v-if="p.version"> · {{ p.version }}</template>
               </div>
@@ -730,6 +733,28 @@
                   · есть неизвестные CLI (помечены «?»)
                 </template>
               </div>
+            </div>
+            <p v-if="p.distribution?.authHint && p.installed && !p.available" class="pvinstall">
+              Авторизация: {{ p.distribution.authHint }}
+            </p>
+            <!-- Причину и команду исправления формирует адаптер; UI их только показывает. -->
+            <div
+              v-if="p.distribution?.problem && !p.distribution.ready"
+              class="pvinstall"
+              data-testid="provider-distribution-problem"
+            >
+              {{ p.distribution.problem.message }}
+              <template v-if="p.distribution.problem.command">
+                Исправить:
+                <UiCommandButton
+                  data-role="settings-command"
+                  title="Кликни — откроется терминал с введённой командой"
+                  @click="fixDistributionInTerminal(p)"
+                >
+                  {{ p.distribution.problem.command }}
+                </UiCommandButton>
+                затем «Перепроверить».
+              </template>
             </div>
             <div v-if="!p.available && (p.setupCommand || p.install)" class="pvinstall">
               {{ p.installed ? 'Авторизация' : 'Установка' }}:
@@ -2824,6 +2849,10 @@ async function refreshProv() {
 const { openTerminal } = useToolLauncher();
 function installInTerminal(p) {
   openTerminal({ insert: p.setupCommand || p.install });
+}
+
+function fixDistributionInTerminal(p) {
+  openTerminal({ insert: p.distribution.problem.command });
 }
 
 // Свои настройки исполнителя: что за ключ и какое направление опасно — знает адаптер.

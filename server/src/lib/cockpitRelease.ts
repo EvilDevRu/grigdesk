@@ -176,6 +176,24 @@ export const defaultCommandRunner: CommandRunner = (file, args, options = {}) =>
 );
 
 /**
+ * Target smoke требует возможности installed worker публиковать embedded generation.
+ * Промежуточный installed-релиз допускает legacy worker для перехода в два релиза.
+ */
+export async function assertReleasePublishContract(rootDir: string, supplied: string | undefined) {
+  const file = path.join(rootDir, 'server/deepseek-runtime-contract.json');
+  const contract = JSON.parse(await readFile(file, 'utf8'));
+
+  if (contract.format !== 1 || contract.publishContract !== 1
+      || !['installed', 'embedded'].includes(contract.mode)) {
+    throw new Error('Неподдерживаемый контракт публикации DeepSeek');
+  }
+
+  if (contract.mode === 'embedded' && supplied !== String(contract.publishContract)) {
+    throw new Error('Updater требует промежуточного релиза с publish contract 1');
+  }
+}
+
+/**
  * Проверяет runtime целевого дерева до установки релиза. Проверку исполняет отдельный
  * Node без флагов родителя и NODE_OPTIONS: старый сервер мог включать снятие типов
  * флагом, которого в новом запуске уже нет. Минимум объявляет сам целевой gate.
@@ -473,20 +491,49 @@ export class CockpitReleaseService {
     // в `restarting`, чтобы смерть старого процесса не могла объявить успех заранее.
     const newProcessInstance = !job?.previousRunningInstanceId
       || job.previousRunningInstanceId !== running.instanceId;
+
     if (job?.status === 'restarting' && job.targetSha === running.sha && newProcessInstance) {
       const completedAt = this.now().toISOString();
       const finished = job;
+      let runtimeError: string | null = null;
+
+      if (job.expectedRuntimeBuildId) {
+        try {
+          const { resolveDeepSeekRuntime } = await import('./deepseek/runtimeProcess.ts');
+          const runtime = resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
+            deepseekGenerationRoot: path.join(this.rootDir, 'server/runtime/deepseek') });
+
+          if (runtime.buildId !== job.expectedRuntimeBuildId) {
+            runtimeError = 'runtime_build_mismatch';
+          }
+        } catch {
+          runtimeError = 'runtime_readiness_failed';
+        }
+      }
+
       const next = await mutatePersistentState(this.statePath, (state) => ({
         ...state,
         job: state.job?.id === finished.id
-          ? { ...state.job, status: 'done', stage: 'done', completedAt, error: null }
+          ? {
+            ...state.job,
+            status: runtimeError ? 'failed' : 'done',
+            stage: runtimeError ? 'failed' : 'done',
+            completedAt,
+            error: runtimeError ? {
+              code: runtimeError,
+              message: 'Runtime не подтверждён; восстанови согласованный checkout и current.',
+            } : null,
+          }
           : state.job,
       }));
       job = next.job || job;
-      this.broadcast('cockpit-update', { at: Date.now(), reason: 'job-done' });
+      this.broadcast('cockpit-update', { at: Date.now(), reason: runtimeError ? 'job-failed' : 'job-done' });
+
       try {
-        await this.#cleanupBackups(job);
-        job = { ...job, backups: null };
+        if (!runtimeError) {
+          await this.#cleanupBackups(job);
+          job = { ...job, backups: null };
+        }
       } catch { /* backup останется для ручной диагностики; статус обновления уже честный */ }
     }
     const latest = persisted.releaseCheck?.latest || null;

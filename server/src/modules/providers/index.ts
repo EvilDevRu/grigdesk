@@ -185,8 +185,12 @@ async function providersModule(
     const executors = await adaptersOf();
     const models = await modelsOf(config);
     const providers = [];
+
     for (const ex of executors.values()) {
-      const [{ ok, version }, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
+      const [probe, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
+      const { ok, version } = probe;
+      const distribution = ex.distribution?.(config, probe) || null;
+      const embedded = distribution?.kind === 'embedded';
       // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
       let modes = null;
       if (ok && typeof ex.modes === 'function') {
@@ -226,22 +230,23 @@ async function providersModule(
         workdir: await resolveWorkdirCapability(ex, config),
         directSshPolicy: await directSshPolicyOf(ex),
         installed: ok,
-        install: ex.install || null,
+        install: embedded ? null : ex.install || null,
+        distribution: distribution ? { ...distribution, ready: ok } : null,
         // Куда смотреть при сбое вендора. Какой домен «свой» — знает только адаптер,
         // поэтому Vue домены не перечисляет и по вендорам не ветвится.
         statusPage: ex.statusPage || null,
         // Установка и login могут быть разными сценариями. Старые адаптеры пока
         // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
-        setupCommand: ok ? (ex.login || ex.install || null) : (ex.install || null),
-        canUpdate: !!ex.updateCmd,
+        setupCommand: embedded ? null : ok ? (ex.login || ex.install || null) : (ex.install || null),
+        canUpdate: !embedded && !!ex.updateCmd,
         // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
         // адаптер может делать health-check или читать конфиг, UI ходит отдельным маршрутом.
         mcp: typeof ex.mcpStatus === 'function',
         settingsCatalog: typeof ex.nativeSettings?.discover === 'function',
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
-        latest: updates.get(ex.id)?.latest || null,
-        updateAvailable: !!updates.get(ex.id)?.outdated,
+        latest: embedded ? null : updates.get(ex.id)?.latest || null,
+        updateAvailable: !embedded && !!updates.get(ex.id)?.outdated,
         checkedAt: updates.get(ex.id)?.at || null,
         models: models[ex.id] || [],
         modes: modes || [],
@@ -419,7 +424,14 @@ async function providersModule(
   async function checkUpdates() {
     const executors = await adaptersOf();
     let changed = false;
+
     for (const ex of executors.values()) {
+      if (ex.distribution?.(config)?.kind === 'embedded') {
+        changed = updates.delete(ex.id) || changed;
+
+        continue;
+      }
+
       if (typeof ex.latestVersion !== 'function') continue;
       let latest = '';
       try { latest = String(await ex.latestVersion(config) || ''); } catch { latest = ''; }
@@ -624,9 +636,16 @@ async function providersModule(
    * до кокпита без правок кода.
    */
   fastify.post<ProviderRoute>('/api/providers/:id/update', async (request, reply) => {
-    const ex = (await getProviderAdapters()).get(String(request.params.id));
+    const ex = (await adaptersOf()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
-    if (!ex.updateCmd) return reply.code(400).send({ error: 'no_update', message: `у исполнителя ${ex.name} нет команды обновления` });
+    if (ex.distribution?.(config)?.kind === 'embedded') {
+      return reply.code(400).send({ error: 'no_update', message: 'Обновление доступно вместе с Cockpit' });
+    }
+    if (!ex.updateCmd) {
+      return reply.code(400).send({
+        error: 'no_update', message: `у исполнителя ${ex.name} нет команды обновления`,
+      });
+    }
     const before = (await ex.probe(config))?.version || '';
     const updateCmd = ex.updateCmd;
     const out = await new Promise<{ ok: boolean; text: string }>((resolve) => {

@@ -1,12 +1,9 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
-import { DEEPSEEK_PIN } from './contract.ts';
+import { probeDeepSeekRuntime } from './runtimeProcess.ts';
 
-const execFileAsync = promisify(execFile);
 const PASSTHROUGH_ENV = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'] as const;
 
 export interface DeepSeekEnvError extends Error {
@@ -67,31 +64,14 @@ export async function ensurePrivateDir(directory: string): Promise<string> {
   return directory;
 }
 
+/**
+ * Совместимая обёртка старых callers сохраняет явный выбор внешнего CLI.
+ * Версию проверяет общий descriptor, поэтому Node не подменяет бинарь Harness.
+ */
 export async function probeDeepSeekBin(bin: string): Promise<{
   ok: boolean;
   version: string | null;
   error?: string;
 }> {
-  try {
-    const { stdout } = await execFileAsync(bin, ['-V'], {
-      encoding: 'utf8',
-      timeout: 10_000,
-      maxBuffer: 64 * 1024,
-    });
-    const version = stdout.trim().split(/\s+/u)[0] || null;
-    return {
-      ok: version === DEEPSEEK_PIN.version,
-      version,
-      ...(version === DEEPSEEK_PIN.version
-        ? {}
-        : { error: `Ожидалась версия ${DEEPSEEK_PIN.version}` }),
-    };
-  } catch (error) {
-    const value = error as NodeJS.ErrnoException;
-    return {
-      ok: false,
-      version: null,
-      error: value.code === 'ENOENT' ? 'Бинарь DeepSeek Harness не найден' : String(value.message || error),
-    };
-  }
+  return probeDeepSeekRuntime({ deepseekBinOverride: bin });
 }

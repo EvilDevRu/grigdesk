@@ -35,6 +35,9 @@ echo "→ node:   $NODE_BIN ($(node -v))"
 
 echo "→ Зависимости сервера…"
 ( cd "$COCKPIT_DIR/server" && npm install --no-audit --no-fund )
+# DeepSeek — один из исполнителей: без компилятора или сети установка Cockpit продолжается.
+( cd "$COCKPIT_DIR/server" && npm run deepseek:prepare ) || \
+  echo "⚠ DeepSeek не подготовлен; повтор после установки: bin/cockpit deps" >&2
 
 echo "→ Зависимости web + сборка…"
 ( cd "$COCKPIT_DIR/web" && npm install --no-audit --no-fund && npm run build )

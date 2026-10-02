@@ -10,6 +10,7 @@ import { nearestProjectRoot, prepareDeepSeekLaunch, validateMcpServers } from '.
 import type { runDeepSeekTurn } from './runtime.ts';
 import { runDeepSeekServerTurn } from './serverTurn.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './serverRuntime.ts';
+import { assertDeepSeekPreparedRuntime, resolveDeepSeekRuntimeAsync } from './runtimeProcess.ts';
 
 type BaseOptions = Parameters<typeof runDeepSeekTurn>[0];
 type WebOptions = BaseOptions & {
@@ -29,12 +30,17 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
     ? await fs.realpath(options.projectRoot) : await nearestProjectRoot(cwd);
   const mode = options.permissionMode === 'read-only' ? 'read-only' : 'workspace-write';
   const mcpServers = validateMcpServers(options.mcpServers || []);
+  const runtime = await resolveDeepSeekRuntimeAsync(options.config);
+
+  assertDeepSeekPreparedRuntime(runtime, options.nativeSettings);
+
   const launch = await prepareDeepSeekLaunch({
     config: options.config, cwd, workspaceRoot: cwd, chatKey: options.chatKey,
     mode, approval: options.factory ? 'never' : 'ask', projectRoot,
     providerSettings: options.providerSettings,
     nativeSettings: options.nativeSettings,
     transport: 'web', mcpServers,
+    runtime,
   });
   try {
     const env = buildDeepSeekChildEnv({ source: options.env || process.env, dshHome: launch.dshHome });
@@ -42,6 +48,7 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
     const workToolNames = new Set((Array.isArray(tools) ? tools : [])
       .map((entry) => String(entry?.name || entry?.function?.name || '')).filter(Boolean));
     const result = await runDeepSeekServerTurn({
+      runtime,
       bin: options.config.deepseekBin,
       overlayPath: launch.overlayPath,
       cwd,

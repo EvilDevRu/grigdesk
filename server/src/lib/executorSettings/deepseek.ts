@@ -3,8 +3,10 @@
 
 import type { NativeSettingsContext, NativeSettingsOwnership, NativeSettingsSnapshot } from './types.ts';
 import type { NativeSettingsEvidence, PreparedNativeSettings } from './types.ts';
-import type { DeepSeekWebClient } from '../deepseek/serverClient.ts';
+import { startDeepSeekAcpSettings } from '../deepseek/nativeSettingsRpc.ts';
+import type { DeepSeekSettingsRpc } from '../deepseek/nativeSettingsRpc.ts';
 import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import type { SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -12,10 +14,52 @@ import path from 'node:path';
 import { startDeepSeekServer } from '../deepseek/serverRuntime.ts';
 import { createNativeSettingsCapability } from './capability.ts';
 import { verifyNativeSettings } from './capability.ts';
+import { ProviderSettingsCatalogCache } from './catalog.ts';
+import { validateNativeSetting } from './validation.ts';
+import { mergeNativeSettingsConsumers } from './consumers.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { readSettingsCliVersion } from './probe.ts';
+import { resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
+import type { DeepSeekRuntimeConfig, DeepSeekRuntimeDescriptor } from '../deepseek/runtimeProcess.ts';
 
-type DeepSeekSettingsConfig = { deepseekBin: string };
+type DeepSeekSettingsConfig = DeepSeekRuntimeConfig & { deepseekBin: string };
+
+const contextRuntimes = new WeakMap<NativeSettingsContext, DeepSeekRuntimeDescriptor>();
+const acpOwnership = new Map<string, NativeSettingsOwnership[]>();
+
+/**
+ * Контекст закрепляет descriptor до discovery и хранит только identity в публичном объекте.
+ * Последующая смена current не меняет профиль процесса, который описывает этот контекст.
+ */
+async function deepSeekSettingsContext(
+  config: DeepSeekSettingsConfig,
+  cwd: string,
+  consumer: SettingsConsumer,
+) {
+  const runtime = await resolveDeepSeekRuntimeAsync(config);
+
+  if (consumer === 'pipeline' && !runtime.capabilities.settingsAcp) {
+    throw Object.assign(new Error('Настройки DeepSeek для конвейера не подтверждены этим runtime'), {
+      code: 'native_settings_unverified',
+    });
+  }
+
+  const context: NativeSettingsContext = {
+    providerId: 'deepseek',
+    binaryIdentity: runtime.identity,
+    runtimeIdentity: runtime.identity,
+    ...(runtime.buildId ? { buildId: runtime.buildId } : {}),
+    profileFingerprint: DEEPSEEK_PROFILE_REVISION,
+    transport: consumer === 'pipeline' ? 'acp' : 'web',
+    consumer,
+    mode: 'default',
+    cwdRealpath: await fs.realpath(cwd),
+  };
+
+  contextRuntimes.set(context, runtime);
+
+  return context;
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -34,8 +78,10 @@ export async function readDeepSeekSettings(
   context: NativeSettingsContext,
   { signal }: { signal: AbortSignal },
   startServer = startDeepSeekServer,
+  startAcp = startDeepSeekAcpSettings,
 ): Promise<NativeSettingsSnapshot> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-settings-dsh-'));
+  const runtime = contextRuntimes.get(context) || await resolveDeepSeekRuntimeAsync(config);
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
 
   try {
@@ -43,6 +89,7 @@ export async function readDeepSeekSettings(
 
     await fs.writeFile(overlayPath, '[]\n', { mode: 0o600 });
     server = await startServer({
+      runtime,
       bin: config.deepseekBin,
       overlayPath,
       cwd: context.cwdRealpath,
@@ -61,9 +108,46 @@ export async function readDeepSeekSettings(
       context,
     );
 
-    snapshot.source.version = await readSettingsCliVersion(config.deepseekBin, signal);
+    snapshot.source.version = runtime.kind === 'embedded'
+      ? runtime.upstreamVersion : await readSettingsCliVersion(runtime.command, signal);
 
-    return snapshot;
+    if (!runtime.capabilities.settingsAcp) {
+      return mergeNativeSettingsConsumers(snapshot, null, { pipelineSupported: false });
+    }
+
+    let acp: Awaited<ReturnType<typeof startAcp>> | undefined;
+    let pipeline: NativeSettingsSnapshot | null = null;
+    const ownershipKey = settingsFingerprint([runtime.identity, context.cwdRealpath, context.mode]);
+
+    try {
+      const acpHome = path.join(root, 'acp');
+
+      await fs.mkdir(acpHome, { mode: 0o700 });
+      acp = await startAcp({
+        runtime,
+        overlayPath,
+        cwd: context.cwdRealpath,
+        signal,
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          DSH_HOME: acpHome,
+          DSH_TELEMETRY_DISABLED: '1',
+          NO_COLOR: '1',
+        },
+      });
+      pipeline = deepSeekSettingsSnapshot(
+        await acp.client.rpc('settings/describe', {}, 10_000, signal), context,
+      );
+      acpOwnership.set(ownershipKey, pipeline.ownership);
+    } catch {
+      // Неуспешное discovery не доказывает web-only; известные запреты остаются закрытыми.
+      snapshot.ownership.push(...(acpOwnership.get(ownershipKey) ?? []));
+    } finally {
+      await acp?.stop();
+    }
+
+    return mergeNativeSettingsConsumers(snapshot, pipeline);
   } finally {
     await server?.stop();
     await fs.rm(root, { recursive: true, force: true });
@@ -72,11 +156,13 @@ export async function readDeepSeekSettings(
 
 export const deepSeekNativeSettings = createNativeSettingsCapability<DeepSeekSettingsConfig>({
   id: 'deepseek',
+  consumers: ['chat', 'pipeline'],
   bin: (config) => config.deepseekBin,
-  profile: () => ({
-    transport: 'web',
+  context: deepSeekSettingsContext,
+  profile: (_config, consumer) => ({
+    transport: consumer === 'pipeline' ? 'acp' : 'web',
     mode: 'default',
-    identity: ['web', DEEPSEEK_PROFILE_REVISION],
+    identity: [consumer, DEEPSEEK_PROFILE_REVISION],
   }),
   discover: readDeepSeekSettings,
 });
@@ -86,11 +172,30 @@ export const deepSeekNativeSettings = createNativeSettingsCapability<DeepSeekSet
  * Возвращаемые факты принятия слоя не означают применение моделью.
  */
 export async function applyDeepSeekNativeSettings(
-  client: Pick<DeepSeekWebClient, 'rpc'>,
+  client: DeepSeekSettingsRpc,
   plan: PreparedNativeSettings,
+  signal?: AbortSignal,
 ): Promise<NativeSettingsEvidence[]> {
-  const description = record(await client.rpc('settings/describe'));
+  const description = record(await client.rpc('settings/describe', {}, 10_000, signal));
   const namespaces = Array.isArray(description.namespaces) ? description.namespaces.map(record) : [];
+  const context: NativeSettingsContext = {
+    providerId: 'deepseek',
+    binaryIdentity: plan.runtimeIdentity || 'launch',
+    profileFingerprint: plan.contextFingerprint || 'launch',
+    transport: 'web',
+    mode: 'default',
+    cwdRealpath: '/',
+  };
+  const read = await new ProviderSettingsCatalogCache().read({
+    discover: async () => deepSeekSettingsSnapshot(description, context),
+  }, context);
+
+  for (const entry of plan.accepted) {
+    if (validateNativeSetting(read.fields, entry.fieldId, entry.value, plan.accepted)) {
+      throw new Error('Нативное поле DeepSeek недоступно или несовместимо в запуске');
+    }
+  }
+
   const readback = [];
 
   for (const name of new Set(plan.accepted.map((entry) => entry.path[0]!))) {
@@ -110,7 +215,7 @@ export async function applyDeepSeekNativeSettings(
           path: entry.path.slice(1),
           value: entry.value,
         })),
-      }),
+      }, 10_000, signal),
     );
 
     for (const entry of entries) {
@@ -130,11 +235,57 @@ export async function applyDeepSeekNativeSettings(
 
   const evidence = verifyNativeSettings(plan, readback);
 
-  if (evidence.some((item) => item.result === 'overridden' || item.result === 'rejected')) {
+  if (evidence.some((item) => ['overridden', 'rejected', 'unknown'].includes(item.result))) {
     throw new Error('CLI DeepSeek не принял нативные настройки запуска');
   }
 
   return evidence;
+}
+
+/**
+ * Повторный readback проверяет слой после restart и после настройки рабочей сессии.
+ * Unknown столь же закрыт, как mismatch: ни одно принятое поле не теряется перед prompt.
+ */
+export async function verifyDeepSeekNativeSettings(
+  client: DeepSeekSettingsRpc,
+  plan: PreparedNativeSettings,
+  signal?: AbortSignal,
+): Promise<NativeSettingsEvidence[]> {
+  const description = record(await client.rpc('settings/describe', {}, 10_000, signal));
+  const namespaces = Array.isArray(description.namespaces) ? description.namespaces.map(record) : [];
+  const readback = plan.accepted.map((entry) => {
+    const namespace = namespaces.find((item) => item.ns === entry.path[0]);
+    let value: unknown = namespace?.value;
+
+    for (const segment of entry.path.slice(1)) {
+      value = value && typeof value === 'object' ? (value as Record<string, unknown>)[segment] : undefined;
+    }
+
+    return {
+      fieldId: entry.fieldId,
+      basis: 'effective' as const,
+      ...(value !== undefined ? { value: decodeSettingsJson(value) } : {}),
+    };
+  });
+  const evidence = verifyNativeSettings(plan, readback);
+
+  if (evidence.some((item) => ['overridden', 'rejected', 'unknown'].includes(item.result))) {
+    throw new Error('Нативные настройки DeepSeek не подтверждены перед prompt');
+  }
+
+  return evidence;
+}
+
+/**
+ * Restart определяется исходным namespace descriptor, без догадок по именам полей.
+ * Повторный процесс читает тот же уже изменённый приватный документ запуска.
+ */
+export async function deepSeekSettingsNeedRestart(client: DeepSeekSettingsRpc, plan: PreparedNativeSettings) {
+  const description = record(await client.rpc('settings/describe'));
+  const namespaces = Array.isArray(description.namespaces) ? description.namespaces.map(record) : [];
+
+  return plan.accepted.some((entry) =>
+    namespaces.find((item) => item.ns === entry.path[0])?.applies === 'restart');
 }
 
 const OWNERSHIP: NativeSettingsOwnership[] = [
@@ -145,6 +296,28 @@ const OWNERSHIP: NativeSettingsOwnership[] = [
       reason: 'Управляется выбором модели и effort чата',
     })),
   ),
+  ...['llm-deepseek', 'llm-pi-ai', 'web-search-deepseek'].flatMap((namespace) =>
+    ['apiKey', 'apiKeyEnv'].map((key) => ({
+      path: [namespace, key],
+      owner: 'Авторизация исполнителя',
+      reason: 'Credentials управляются отдельным источником авторизации',
+    })),
+  ),
+  ...['credentials', 'credentials-local', 'mcp', 'mcp-client'].map((namespace) => ({
+    path: [namespace],
+    owner: 'Авторизация и MCP',
+    reason: 'Credentials и MCP задаёт собственный редактор',
+  })),
+  ...['permission-presets', 'fs-sandbox'].map((namespace) => ({
+    path: [namespace],
+    owner: 'Права запуска',
+    reason: 'Sandbox и permissions задаёт Cockpit',
+  })),
+  {
+    path: ['web-search-deepseek', 'model'],
+    owner: 'Модель и effort',
+    reason: 'Модель задаёт собственный редактор',
+  },
   {
     path: ['agent-default-model'],
     owner: 'Модель и effort',
