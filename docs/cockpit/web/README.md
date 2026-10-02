@@ -11,7 +11,6 @@
 ## Устройство
 
 - [Веб (web/src/)](frontend-architecture.md)
-- [Пошаговый план устранения фризов в чатах с тестами и совместимостью сохранения](chat-freeze-fix-plan.md)
 - [Исправление фризов: функциональные проверки, полная серия до/после и остаточные задержки](chat-freeze-fix-results.md)
 - [Чаты на отдельном полном сервере: production UI, SSE, запись, reload и архив](chat-runtime-smoke-check.md)
 - [История чата: Blob уменьшает синхронную стоимость передачи большого JSON в fetch](chat-history-request-body.md)

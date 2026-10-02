@@ -23,8 +23,6 @@
 
 ### Чат
 
-- [TDD-план подготовки чатов к продакшну: MySQL, ручной перенос, удаление Legacy и быстрая постраничная история](mysql-production-plan.md)
-- [Ревью MySQL-плана: исправленные гонки, исполнимость TDD и порядок удаления Legacy](mysql-plan-review.md)
 - [«Требуют вмешательства»: чипы, чтобы вопрос не проехал мимо](intervention-badges.md)
 - [Автопрокрутка](auto-scroll.md)
 - [Вложения (фото) и диктовка](attachments-and-dictation.md)
@@ -59,10 +57,6 @@
 
 ### Исполнители и модели
 
-- [GLM: план интеграции через OpenCode ACP маленькими шагами TDD](glm-integration-tdd-plan.md)
-- [GLM: проверенные основания выбора runtime и открытые границы совместимости](glm-integration-research.md)
-- [GLM: ревью плана — допуск, восстановление сессии, усилия моделей и готовность MCP](glm-plan-review.md)
-- [GLM: повторное ревью — точная идентификация инструментов, коллизии MCP и допуск режимов](glm-plan-trust-gates.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке Claude — только свежая версия каждого семейства](claude-model-shortlist.md)
@@ -76,7 +70,6 @@
 - [Нативные настройки чатов: динамическая форма, API и проверенные транспорты](executor-native-settings.md)
 - [Обнаружение нативных настроек: источники CLI, пробелы схем и общий контракт](executor-settings-discovery.md)
 - [Границы настроек: конкурирующие записи, публичные prefs и fingerprint запуска](executor-settings-storage-boundaries.md)
-- [План TDD динамических настроек: этапы, контракты, тесты и проверка применения](executor-settings-tdd-plan.md)
 - [Смена ИИ внутри чата](executor-switching.md)
 - [Смена рабочей папки посреди разговора: Claude и Codex помнят разговор, DeepSeek начинает заново](workdir-switch.md)
 - [Список моделей Claude — ИЗ БИНАРЯ УСТАНОВЛЕННОГО CLI](claude-model-catalog.md)
@@ -85,8 +78,6 @@
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
 - [DeepSeek: MCP в запуске и списке настроек](deepseek-mcp-visibility.md)
 - [DeepSeek: безопасный список проектных MCP, состояния и общие границы](deepseek-mcp-status.md)
-- [План TDD списка MCP DeepSeek: изолированные проверки API, интерфейса и ошибок](deepseek-mcp-tdd-plan.md)
-- [Ревью плана MCP DeepSeek: обходы подмены зависимостей, warnings и браузерный стенд](deepseek-mcp-plan-review.md)
 
 ### Авторизация Claude
 

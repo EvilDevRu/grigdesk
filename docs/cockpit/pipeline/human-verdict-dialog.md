@@ -87,7 +87,6 @@
   погибший демон, `resume` остаётся явным действием человека и требует exact attempt.
   Прежние тумблер, эндпоинт `/api/factory/recovery` и чистый решатель удалены — они
   описывали поведение, которого в runtime не было, и решали по provider-writable
-  `.pipeline`. Условия возврата автоматики — локальный черновик
-  `docs/plans/pipeline-autonomy-plan.md`.
+  `.pipeline`.
 
 Источник до переноса: docs/cockpit/architecture.md § вердикт human — вопрос человеку, и у ответа на него СВОЯ модалка.
