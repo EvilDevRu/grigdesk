@@ -265,6 +265,17 @@ async function request(
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
+
+    // Chromium синхронно копирует большое строковое тело при fetch; Blob передаёт готовые байты.
+    // JSON фиксируется до ожидания сети, а сервер получает прежнее UTF-8 тело с тем же Content-Type.
+    const chatHistoryPut = method === 'PUT' && [
+      '/api/chat/store/chat',
+      '/api/chat/store/chat/step-reuse',
+    ].includes(path.split(/[?#]/u, 1)[0] ?? '');
+
+    if (chatHistoryPut && typeof opts.body === 'string') {
+      opts.body = new Blob([opts.body], { type: 'application/json' });
+    }
   }
 
   // GET — с таймаутом: во время docker-манипуляций со стендами fetch может не

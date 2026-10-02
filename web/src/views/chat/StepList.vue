@@ -313,10 +313,11 @@ function toolLabel(name) {
 .summary-disclosure {
   align-self: flex-start;
 }
-.activity-summary { color: var(--ink-mid); }
+.activity-summary { color: var(--ink-low); }
 
 .sum {
   font-size: 12px;
+  color: var(--ink-low);
 }
 .list { display: flex; flex-direction: column; gap: 2px; }
 .step.nested { padding-left: 16px; border-left: 1px dashed var(--line); }
@@ -336,18 +337,18 @@ function toolLabel(name) {
   text-align: left;
 }
 .head .ico { flex: none; width: 15px; text-align: center; font-size: 12px; }
-.head .nm { flex: none; color: var(--ink); font-weight: 600; font-size: 12px; }
-.head .ttl { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+.head .nm { flex: none; color: var(--ink-mid); font-weight: 500; font-size: 12px; }
+.head .ttl { color: var(--ink-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   font-family: var(--mono, monospace); font-size: 11.5px; }
 .head.think .ttl { font-family: inherit; font-size: 12px; }
 .head .stat { flex: none; font-size: 11px; color: var(--ink-mid); opacity: .85; }
 .head .mark { flex: none; color: var(--good); font-size: 11px; }
 .head .mark.bad { color: var(--bad); }
 .head .mark.run { color: var(--accent); }
-.head.bash .ico { color: var(--accent); }
-.head.write .ico { color: var(--warn, #e0a33a); }
+.head.bash .ico { color: color-mix(in srgb, var(--accent) 70%, var(--ink-low)); }
+.head.write .ico { color: color-mix(in srgb, var(--warn) 70%, var(--ink-low)); }
 .head.read .ico, .head.find .ico { color: var(--ink-mid); }
-.head.task .ico, .head.mcp .ico { color: var(--accent); }
+.head.task .ico, .head.mcp .ico { color: color-mix(in srgb, var(--accent) 70%, var(--ink-low)); }
 .head.ask .ico { color: var(--warn, #e0a33a); }
 
 .body-wrap { padding: 2px 0 6px 26px; display: flex; flex-direction: column; gap: 4px; }
@@ -384,11 +385,11 @@ function toolLabel(name) {
   padding: 2px 4px 2px 26px;
   font-size: 11.5px;
   line-height: 1.45;
-  color: var(--ink-mid);
+  color: var(--ink-low);
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
 .section .step > .note { padding-left: 27px; }
 .note.warn { color: var(--warn, #e0a33a); }
-.note.start b { color: var(--ink); font-weight: 600; }
+.note.start b { color: var(--ink-mid); font-weight: 500; }
 </style>

@@ -5,6 +5,7 @@ import type {
   InTurnReceipt,
 } from '../../../shared/chatInTurnContracts.ts';
 import { canTransition } from '../../../shared/chatInTurnContracts.ts';
+import { ownHistorySteps } from '../shared/chatHistorySnapshot.ts';
 
 export type InTurnEntry = InTurnReceipt | InTurnAssistantBlock;
 
@@ -147,6 +148,44 @@ export function mergeInTurnPage(run: ChatInTurnRun, page: InTurnPage): void {
 }
 
 /**
+ * Плоский DTO сравнивается по собственным полям без рекурсивного обхода.
+ * Receipt содержит только скаляры; ссылки на тяжёлые steps сравниваются как значения.
+ */
+function sameFields(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') {
+    return false;
+  }
+
+  const old = left as Record<string, unknown>;
+  const next = right as Record<string, unknown>;
+  const keys = Object.keys(old);
+
+  return keys.length === Object.keys(next).length
+    && keys.every((key) => Object.hasOwn(next, key) && old[key] === next[key]);
+}
+
+/**
+ * Повтор страницы сохраняет прежний объект, включая метаданные финального ответа.
+ * Новая оболочка receipt с прежними скалярами не делает всю историю изменённой.
+ */
+function reuseHistoryMessage(old: HistoryMessage | undefined, next: HistoryMessage): HistoryMessage {
+  if (!old) {
+    return next;
+  }
+
+  const keys = Object.keys(next);
+  const equal = keys.length === Object.keys(old).length && keys.every((key) => (
+    Object.hasOwn(old, key)
+      && (key === 'receipt' ? sameFields(old[key], next[key]) : old[key] === next[key])
+  ));
+
+  return equal ? old : next;
+}
+
+/**
  * Запись журнала дополняет существующее сообщение, сохраняя метаданные финала.
  * Поля текста, порядка и доставки всегда берутся из подтверждённой записи сервера.
  */
@@ -155,7 +194,7 @@ function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: Histor
     const old = previous.find((message) => message.runId === entry.runId
       && message.messageId === entry.messageId);
 
-    return {
+    return reuseHistoryMessage(old, {
       ...old,
       role: 'user',
       kind: 'in-turn',
@@ -167,13 +206,13 @@ function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: Histor
       receipt: entry,
       sentAt: entry.sentAt || entry.acceptedAt,
       serverCanonical: true,
-    };
+    });
   }
 
   const old = previous.find((message) => message.runId === entry.runId
     && message.assistantMessageId === entry.assistantMessageId);
 
-  return {
+  return reuseHistoryMessage(old, {
     ...old,
     role: 'assistant',
     kind: 'assistant-block',
@@ -185,7 +224,7 @@ function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: Histor
     revision: entry.revision,
     complete: entry.complete,
     serverCanonical: true,
-  };
+  });
 }
 
 /**
@@ -211,7 +250,9 @@ export function materializeInTurnMessages(messages: HistoryMessage[], run: ChatI
 
   kept.splice(at, 0, ...group);
 
-  return kept;
+  return kept.length === messages.length && kept.every((message, index) => message === messages[index])
+    ? messages
+    : kept;
 }
 
 /**
@@ -230,6 +271,7 @@ export function applyAssistantFinal(
     : null;
   const message = {
     ...final,
+    ...(Array.isArray(final.steps) ? { steps: ownHistorySteps(final.steps) } : {}),
     ...(result.runId ? { runId: result.runId } : {}),
     ...(finalId ? { assistantMessageId: finalId, finalAssistantMessageId: finalId } : {}),
   };

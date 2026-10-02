@@ -17,6 +17,10 @@
 - [Фрагмент записи: посмотреть до постановки и приложить к задаче](clip-preview-and-attachments.md)
 - [Хранилище раздела: что остаётся на диске и когда уходит](storage-and-retention.md)
 
+## Проверенные модели
+
+- [VibeVoice: русский в распознавании и ограничения синтеза](vibevoice-russian-support.md)
+
 ## Грабли
 
 - [Медиа: runtime отдельно от исходников](runtime-storage-boundary.md)

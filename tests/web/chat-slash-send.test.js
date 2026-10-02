@@ -55,6 +55,14 @@ function patch(source) {
       'const sseSubscribe = () => () => {};',
     )
     .replace("import { mdToText } from '../shared/md.ts';", 'const mdToText = (x) => x;')
+    .replace("'../shared/chatListPreview.ts'",
+      JSON.stringify(new URL('../../web/src/shared/chatListPreview.ts', import.meta.url).href))
+    .replace("'../shared/chatHistorySnapshot.ts'",
+      JSON.stringify(new URL('../../web/src/shared/chatHistorySnapshot.ts', import.meta.url).href))
+    .replace("'../shared/chatPersistenceProjection.ts'",
+      JSON.stringify(new URL('../../web/src/shared/chatPersistenceProjection.ts', import.meta.url).href))
+    .replace("'../shared/chatHistoryStepReuse.ts'",
+      JSON.stringify(new URL('../../web/src/shared/chatHistoryStepReuse.ts', import.meta.url).href))
     .replace(
       "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
       `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,

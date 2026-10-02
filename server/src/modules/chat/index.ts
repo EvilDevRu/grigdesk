@@ -40,6 +40,8 @@ import { stoppedTurnBrief } from '../../lib/chat/stoppedBrief.ts';
 import { autoDecision } from '../../lib/chat/autoApprove.ts';
 import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
 import { normalizeContextUsage } from '../../../../shared/chatContextUsage.ts';
+import { decodeHistoryStepReuseRequest, HISTORY_STEP_REUSE_ROUTE }
+  from '../../../../shared/chatHistoryStepReuse.ts';
 import type { ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
 import type { ChatRunSnapshot } from '../../../../shared/chatRun.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
@@ -170,6 +172,7 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
   sessions?: StoredChat[];
   archived?: StoredChat[] | boolean;
   chat?: StoredChat;
+  reuseSteps?: unknown;
 }
 
 type ChatRoute = {
@@ -4163,6 +4166,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // на прежней отправке следом — молчаливой поломки не будет.
       inTurnProtocol: IN_TURN_PROTOCOL,
       workdirProtocol: 1,
+      historyStepReuseProtocol: 1,
       compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
       speech: {
         ...publicSpeech,
@@ -4263,9 +4267,20 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // на компьютере только после F5. Пишущее окно помечает запрос своим `origin`, чтобы не
   // принимать собственное эхо; остальные тянут ровно изменившийся чат
   // (`GET /api/chat/store/chat/:id`), а не всю историю.
-  fastify.put<ChatRoute>('/api/chat/store/chat', async (request, reply) => {
+  /**
+   * Оба маршрута используют одну очередь, CAS, durable запись и уведомления.
+   * Сокращённый запрос защищён отдельным URI: старый сервер не сможет принять его как полный.
+   */
+  async function saveChat(request: FastifyRequest<ChatRoute>, reply: FastifyReply, sparse = false) {
     const { chat, archived, origin } = request.body || {};
     if (!chat?.id) return reply.code(400).send({ error: 'bad_chat' });
+
+    const reuseSteps = sparse ? decodeHistoryStepReuseRequest(request.body?.reuseSteps, chat.messages) : null;
+
+    if (sparse && !reuseSteps) {
+      return reply.code(400).send({ error: 'bad_step_reuse' });
+    }
+
     const chatId = String(chat.id);
     if (deletingChats.has(chatId)) {
       return reply.code(409).send({
@@ -4274,10 +4289,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
     const releaseChatSave = beginChatSaves([chatId]);
+
     try {
       let result;
+
       try {
-        result = await history.saveOne(chat, !!archived);
+        result = await history.saveOne(chat, !!archived, reuseSteps ? { reuseSteps } : {});
       } catch (error) {
         if (!(error instanceof ChatHistoryError)) throw error;
         return reply.code(error.statusCode || 409).send({ error: error.code, message: error.message });
@@ -4302,12 +4319,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           });
         }, 500).unref?.();
       }
+
       return {
         ok: true,
         written,
         restored,
         dropped,
         stale,
+        stepReuseAck: result.stepReuseAck,
         revision: saved?.revision ?? null,
         schema: saved?.schema ?? null,
         surface: saved?.surface ?? null,
@@ -4324,7 +4343,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     } finally {
       releaseChatSave();
     }
-  });
+  }
+
+  fastify.put<ChatRoute>('/api/chat/store/chat', (request, reply) => saveChat(request, reply));
+  fastify.put<ChatRoute>(HISTORY_STEP_REUSE_ROUTE, (request, reply) => saveChat(request, reply, true));
 
   fastify.get<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
     const chat = await history.readOne(String(request.params.id));

@@ -13,6 +13,8 @@ import type { WorkdirState } from './workdirTransition.ts';
 import { mergeChat } from './mergeChat.ts';
 import type { ChatRecord } from './mergeChat.ts';
 import { messageKey } from './messageIdentity.ts';
+import { historyStepReuseAck, restoreHistorySteps } from './historyStepReuse.ts';
+import type { HistoryStepReuseAck } from '../../../../shared/chatHistoryStepReuse.ts';
 import type { ModelRegistry } from './modelRef.ts';
 import {
   CHAT_SCHEMA,
@@ -68,6 +70,7 @@ export interface SaveResult {
   dropped: number;
   stale?: boolean;
   chat?: StoredChat;
+  stepReuseAck?: HistoryStepReuseAck;
 }
 
 // Итог ensureByPurpose. `restored` здесь означает «поднят из архива», а не число
@@ -580,14 +583,21 @@ export class ChatHistoryStore {
   async saveOne(
     chat: StoredChat | null | undefined,
     archived = false,
-    { serverIdentity = '' } = {},
+    { serverIdentity = '', reuseSteps }: { serverIdentity?: string; reuseSteps?: unknown } = {},
   ): Promise<SaveResult> {
     if (!chat?.id) return { written: false, restored: 0, dropped: 0 };
+
+    const incoming = chat;
+
     await this.ensureMigrated();
-    return this.withChatLock(chat.id, async () => {
+
+    return this.withChatLock(incoming.id!, async () => {
       await this.ensureDir();
       // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
-      const prev = await this.readEntry(chat.id);
+      const prev = await this.readEntry(incoming.id);
+      const chat = reuseSteps === undefined
+        ? incoming
+        : restoreHistorySteps(incoming, prev?.chat || null, reuseSteps);
       const registry = await this.registry();
       const incomingRevision = Number.isSafeInteger(chat.revision) ? chat.revision : null;
       const currentRevision = Number.isSafeInteger(prev?.chat?.revision)
@@ -708,14 +718,30 @@ export class ChatHistoryStore {
       const target = this.fileOf(c);
       // Нет семантического изменения — revision не накручиваем из-за повторного PUT.
       const currentShape = prev ? { ...c, revision: currentRevision } : null;
+
       if (prev && prev.path === target && stableJson(currentShape) === prev.json) {
-        return { written: false, restored, dropped, stale, chat: prev.chat };
+        return {
+          written: false,
+          restored,
+          dropped,
+          stale,
+          chat: prev.chat,
+          stepReuseAck: historyStepReuseAck(chat, prev.chat)
+        };
       }
       c.revision = currentRevision + 1;
       const json = stableJson(c);
       await this.writeAtomic(target, json);
       if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
-      return { written: true, restored, dropped, stale, chat: c };
+
+      return {
+        written: true,
+        restored,
+        dropped,
+        stale,
+        chat: c,
+        stepReuseAck: historyStepReuseAck(chat, c)
+      };
     });
   }
 

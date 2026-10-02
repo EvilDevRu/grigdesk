@@ -10,6 +10,7 @@ import {
 } from '../deepseek/catalog.ts';
 import { runDeepSeekWebTurn } from '../deepseek/webRuntime.ts';
 import { mergeMcpServers, readProjectMcpServers } from '../deepseek/projectMcp.ts';
+import { readDeepSeekMcpStatus } from '../deepseek/mcpStatus.ts';
 import { deepSeekUsage } from '../deepseek/balance.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
@@ -17,6 +18,7 @@ import { directSshSetting } from './_directSshPolicy.ts';
 import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
 type DeepSeekConfig = {
+  rootDir?: string;
   deepseekBin: string;
   deepseekRuntimeHome: string;
 };
@@ -77,6 +79,10 @@ export default {
   // Лимитов подписки у DeepSeek нет — есть предоплаченный счёт. Вместо «CLI не отдаёт
   // лимиты» всплывашка получает остаток по валютам и темп его расхода.
   usage(config: DeepSeekConfig) { return deepSeekUsage({ config, env: process.env }); },
+
+  mcpStatus(config: DeepSeekConfig) {
+    return readDeepSeekMcpStatus(config);
+  },
 
   async modes() {
     return [

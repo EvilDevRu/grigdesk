@@ -19,7 +19,7 @@ const PROVIDER = {
  * Настоящий композер получает управляемые стор и канал активного хода.
  * Счётчики различают немедленный ввод, очередь и остановку без вызова исполнителя.
  */
-async function mountChat(t, { sending = true, available = true, accept = true } = {}) {
+async function mountChat(t, { sending = true, available = true, accept = true, renderMarkdown } = {}) {
   const browser = await installUiBrowser(t, 'https://cockpit.test/#/chats');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
@@ -52,6 +52,7 @@ async function mountChat(t, { sending = true, available = true, accept = true } 
     async upload() { return { file: 'file-1', name: 'test.txt', url: '/test.txt' }; },
   };
   globalThis[`${PREFIX}ChatStore`] = () => store;
+  globalThis[`${PREFIX}MarkdownRenderer`] = renderMarkdown;
   globalThis[`${PREFIX}TasksStore`] = () => ({ async load() { return null; } });
   globalThis[`${PREFIX}UiStore`] = () => ({ openTaskLaunch() {} });
   globalThis[`${PREFIX}Router`] = { async push() {} };
@@ -68,9 +69,12 @@ async function mountChat(t, { sending = true, available = true, accept = true } 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'), props: { sid: session.id },
   });
+
   t.after(() => {
     wrapper.unmount();
-    for (const suffix of ['Api', 'ChatStore', 'TasksStore', 'UiStore', 'Router', 'ProvidersStore']) {
+
+    for (const suffix of ['Api', 'ChatStore', 'TasksStore', 'UiStore', 'Router', 'ProvidersStore',
+      'MarkdownRenderer']) {
       delete globalThis[`${PREFIX}${suffix}`];
     }
   });
@@ -104,6 +108,30 @@ test('одна кнопка и Enter отправляют в активный х
   assert.deepEqual(calls.following, []);
   await wrapper.get('[data-context="chat-stop"]').trigger('click');
   assert.equal(calls.stop, 1);
+});
+
+test('прогресс не разбирает Markdown старых ответов, изменение текста разбирает один', async (t) => {
+  let renders = 0;
+  const { session, flushPromises } = await mountChat(t, { renderMarkdown: (text) => {
+    renders += 1;
+
+    return text;
+  } });
+
+  session.messages.push({ role: 'assistant', text: 'Первый ответ' },
+    { role: 'assistant', text: 'Второй ответ' });
+  await flushPromises();
+  assert.equal(renders, 2);
+
+  for (let index = 1; index <= 10; index += 1) {
+    session.progressTokens = index * 100;
+    await flushPromises();
+  }
+
+  assert.equal(renders, 2);
+  session.messages[1].text = 'Изменённый ответ';
+  await flushPromises();
+  assert.equal(renders, 3);
 });
 
 test('Shift+Enter and IME composition do not send; rejection preserves draft', async (t) => {

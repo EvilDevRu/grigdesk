@@ -835,62 +835,13 @@
               </div>
               <!-- MCP занимает вторую колонку только у поддерживающего его исполнителя.
                    Длинный список прокручивается внутри, короткий не оставляет пустоты. -->
-              <div
+              <ProviderMcpStatus
                 v-if="p.mcp && p.installed"
-                class="pvset pvmcp provider-mcp-slot"
-                :data-provider-id="p.id"
-              >
-                <div class="pvsetttl">
-                  MCP-серверы
-                  <UiButton
-                    class="mcpbtn"
-                    data-role="settings-compact-action"
-                    :disabled="mcpOf(p)?.loading"
-                    @click="loadMcpFor(p, true)"
-                  >
-                    {{ mcpOf(p)?.loading ? 'Обновляем…' : 'Обновить' }}
-                  </UiButton>
-                </div>
-                <div
-                  class="mcpbody"
-                  tabindex="0"
-                  :aria-label="`MCP-серверы ${p.name}`"
-                  aria-live="polite"
-                >
-                  <p
-                    v-if="!mcpOf(p) || (mcpOf(p).loading && !mcpOf(p).servers)"
-                    class="muted small"
-                  >
-                    Получаем список от исполнителя…
-                  </p>
-                  <p v-else-if="mcpOf(p).state === 'error'" class="msg err">
-                    Не удалось получить список: {{ mcpOf(p).error }}
-                  </p>
-                  <template v-else>
-                    <p v-if="mcpOf(p).note" class="mcpnote muted small">{{ mcpOf(p).note }}</p>
-                    <div v-for="g in mcpGroups(p)" :key="g.id" class="mcpgrp">
-                      <div class="mcpgrpttl muted">{{ g.label }} ({{ g.servers.length }})</div>
-                      <div v-if="g.hint" class="mcpgrphint muted">{{ g.hint }}</div>
-                      <div v-for="s in g.servers" :key="s.name" class="mcprow">
-                        <div class="mcpline">
-                          <span class="mcpdot" :class="mcpState(s).cls"></span>
-                          <span class="mcpname" :title="s.target || undefined">{{ s.name }}</span>
-                          <span class="mcpst" :class="mcpState(s).cls">{{ mcpState(s).label }}</span>
-                        </div>
-                        <!-- Причина/подсказка принадлежит адаптеру, поэтому Vue не знает CLI. -->
-                        <div v-if="s.state !== 'ok' && s.detail" class="mcpdetail muted">
-                          {{ s.detail }}
-                        </div>
-                        <div v-if="s.hint" class="mcpdetail muted">{{ s.hint }}</div>
-                      </div>
-                    </div>
-                    <p v-if="!mcpGroups(p).length" class="muted small">Серверов не настроено.</p>
-                    <p v-if="mcpOf(p).checkedAt" class="muted small">
-                      обновлено {{ new Date(mcpOf(p).checkedAt).toLocaleTimeString('ru') }}
-                    </p>
-                  </template>
-                </div>
-              </div>
+                :provider-id="p.id"
+                :provider-name="p.name"
+                :status="prov.mcp[p.id] || null"
+                @refresh="loadMcpFor(p, true)"
+              />
             </div>
             <!-- Обновление CLI и его итог стоят вместе после настроек и диагностики.
                  У исполнителя без обновлений пустого футера нет. -->
@@ -2129,6 +2080,7 @@ import ServerLauncher from './settings/ServerLauncher.vue';
 import WebLogPanel from './settings/WebLogPanel.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
 import ProviderNativeSettings from './settings/ProviderNativeSettings.vue';
+import ProviderMcpStatus from './settings/ProviderMcpStatus.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
@@ -2966,25 +2918,6 @@ const updating = computed(() => prov.updating || '');
 const updMsg = computed(() => prov.updateResults || {});
 const updateProvider = (p) => prov.updateCli(p.id);
 
-// ── MCP-серверы исполнителя ──
-// Адаптер сам решает, отдаёт он live health-check или безопасный inventory конфигов.
-// UI знает только нейтральные scope/state и опрашивает capability лениво.
-const MCP_SCOPES = [
-  { id: 'user', label: 'Пользователь' },
-  { id: 'project', label: 'Проект' },
-  { id: 'account', label: 'Аккаунт' },
-];
-const MCP_STATES = {
-  ok: { label: 'Подключён', cls: 'ok' },
-  failed: { label: 'Не подключился', cls: 'err' },
-  'needs-auth': { label: 'Нужна авторизация', cls: 'warn' },
-  configured: { label: 'Настроен', cls: 'idle' },
-  disabled: { label: 'Выключен', cls: 'idle' },
-  remote: { label: 'Включён на claude.ai', cls: 'idle' },
-  unknown: { label: 'Состояние неизвестно', cls: 'warn' },
-};
-function mcpOf(p) { return prov.mcp[p.id] || null; }
-
 /**
  * Ресурсы аккаунта исполнителя (доплата, кредиты, загруженные модели) — из того же
  * ответа о лимитах, что кормит всплывашку топбара. Пусто, пока ответ не пришёл или
@@ -2996,30 +2929,8 @@ function usageResourcesOf(p) {
   return Array.isArray(usage?.resources) ? usage.resources : [];
 }
 
-/**
- * Базовые scope общие, но адаптер может переименовать секцию и дать пояснение.
- * Незнакомый будущий scope не теряем: он появится с собственным id как подписью.
- */
-function mcpGroups(p) {
-  const servers = mcpOf(p)?.servers || [];
-  const overrides = new Map((Array.isArray(mcpOf(p)?.groups) ? mcpOf(p).groups : [])
-    .filter((group) => typeof group?.id === 'string' && group.id)
-    .map((group) => [group.id, group]));
-  const scopes = MCP_SCOPES.map((scope) => ({ ...scope, ...(overrides.get(scope.id) || {}) }));
-  const known = new Set(scopes.map((scope) => scope.id));
-  for (const group of overrides.values()) if (!known.has(group.id)) scopes.push(group);
-  for (const server of servers) {
-    const id = server.scope || 'user';
-    if (!scopes.some((scope) => scope.id === id)) scopes.push({ id, label: id });
-  }
-  return scopes
-    .map((scope) => ({
-      ...scope,
-      servers: servers.filter((server) => (server.scope || 'user') === scope.id),
-    }))
-    .filter((g) => g.servers.length);
-}
-function mcpState(server) { return MCP_STATES[server.state] || MCP_STATES.unknown; }
+// ── Загрузка MCP-серверов исполнителя ──
+// Страница владеет опросом; ProviderMcpStatus только показывает ответ и просит refresh.
 function loadMcpFor(p, refresh = false) {
   if (typeof p?.id !== 'string') return;
   prov.loadMcp(p.id, refresh);
@@ -4448,36 +4359,9 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 /* Ручка объявлена исполнителем, но ещё не подключена к ходу */
 .pvsoon { font-size: 11px; border: 1px solid var(--line); border-radius: 999px;
   padding: 1px 8px; color: var(--mut, var(--ink-mid)); }
-/* Настройки растут по содержимому; ограничен только длинный список MCP.
-   При коротком ответе и во время загрузки заранее зарезервированной пустоты нет. */
+/* Настройки растут по содержимому без заранее зарезервированной пустоты. */
 .pvsetttl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .pvsetbody { display: flex; flex-direction: column; gap: 14px; }
-.mcpbody { display: grid; gap: 10px; max-block-size: 360px; overflow-y: auto;
-  padding-right: 2px; scrollbar-gutter: stable; overscroll-behavior: contain; }
-.mcpbody:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.mcpnote { margin-top: 0; }
-.mcpgrp { display: grid; gap: 4px; }
-.mcpgrpttl { font-size: 11.5px; }
-.mcpgrphint { font-size: 11px; line-height: 1.4; opacity: .8; }
-.mcprow { display: grid; gap: 2px; padding: 3px 0; }
-.mcpline { display: flex; align-items: center; gap: 8px; }
-.mcpdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-mid); }
-.mcpdot.ok { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
-.mcpdot.err { background: var(--bad); }
-.mcpdot.warn { background: var(--warn, #e0a33a); }
-/* Аккаунтный коннектор: локальной проверки нет, поэтому и цвета тревоги нет */
-.mcpdot.idle { background: var(--ink-mid); }
-/* Имя может быть длинным (у коннекторов оно с префиксом) — режем его, а не колонку:
-   без min-width: 0 флекс-элемент не сжимается ниже своего содержимого и распирает плашку */
-.mcpname { flex: 1; min-width: 0; font-size: 13px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
-.mcpst { flex: none; font-size: 12px; }
-.mcpst.ok { color: var(--good); }
-.mcpst.err { color: var(--bad); }
-.mcpst.warn { color: var(--warn, #e0a33a); }
-.mcpst.idle { color: var(--ink-mid); }
-.mcpdetail { font-size: 11.5px; line-height: 1.45; padding-left: 16px;
-  overflow-wrap: anywhere; }
 .pvfoot { display: flex; align-items: center; justify-content: flex-end; gap: 10px;
   border-top: 1px solid var(--line); padding-top: 12px; }
 .pvfootmsg { flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; text-align: start; }

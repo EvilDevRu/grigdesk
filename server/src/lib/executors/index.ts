@@ -38,14 +38,14 @@
 //                              лимита): такую ручку видно и во всплывашке
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
 //   mcpStatus?(config)       — состояние MCP-серверов этого CLI для его плашки:
-//                              { state: 'ok'|'error', error?, note?, groups?, servers:
+//                              { state: 'ok'|'error', error?, note?, emptyText?, groups?, servers:
 //                              [{ name, target, scope: 'user'|'project'|'account',
 //                              state: 'ok'|'failed'|'needs-auth'|'configured'|'disabled'|
 //                              'remote'|'unknown', detail, hint? }] }. groups переименовывает
 //                              scope для конкретного CLI. Метод ЛЕНИВЫЙ: его зовёт только
 //                              `GET /api/providers/:id/mcp`, потому что живой health-check
-//                              может стоить секунд. Не объявлен — UI всё равно резервирует
-//                              место, но показывает нейтральный placeholder без запроса
+//                              может стоить секунд. emptyText задаёт подпись пустого списка.
+//                              Не объявлен — UI скрывает блок и не запрашивает список
 //   updateCmd?               — команда обновления CLI (кнопка «Обновить» в настройках)
 //   settings?                — СВОИ настройки исполнителя для его плашки в
 //                              «Настройках → Исполнители»: [{ id, kind, label, hint?,

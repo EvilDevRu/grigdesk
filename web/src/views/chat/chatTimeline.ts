@@ -55,6 +55,17 @@ interface TimelineTurn {
   anchor: number;
 }
 
+interface CachedTurn {
+  dependencies: unknown[][];
+  rows: { row: ChatTimelineRow; slot: number }[];
+}
+
+const MESSAGE_DEPENDENCIES = [
+  'role', 'kind', 'runId', 'turnId', 'parentTurnId', 'messageId', 'assistantMessageId',
+  'finalAssistantMessageId', 'sequence', 'startedAt', 'text', 'complete', 'revision',
+  'model', 'actualModel', 'effort',
+] as const;
+
 function isIntermediate(message: TimelineMessage): boolean {
   return message.kind === 'assistant-block'
     && !message.finalAssistantMessageId && !Array.isArray(message.steps);
@@ -246,11 +257,12 @@ export function groupChatTimeline(rows: ChatTimelineRow[]): ChatTimelineGroup[] 
  * История и активный запуск получают общую проекцию; исходные сообщения не переставляются.
  * Группа занимает место после своего запроса, поэтому ответы не оказываются выше старта.
  */
-export function chatTimeline(
+function projectTimeline(
   messages: TimelineMessage[],
   steps: TimelineStep[],
   sending: boolean,
   run: ChatInTurnRun | null,
+  projectTurn: (turn: TimelineTurn) => ChatTimelineRow[],
 ): ChatTimelineRow[] {
   const rows = messages.map(messageRow);
   const turns = new Map<string, TimelineTurn>();
@@ -332,7 +344,7 @@ export function chatTimeline(
 
   for (let index = 0; index <= rows.length; index += 1) {
     for (const turn of anchored.get(index) || []) {
-      result.push(...turnRows(turn));
+      result.push(...projectTurn(turn));
     }
 
     const row = rows[index];
@@ -343,4 +355,106 @@ export function chatTimeline(
   }
 
   return result;
+}
+
+/**
+ * Чистая проекция остаётся доступна потребителям без жизненного цикла сессии.
+ * Кэш включается только явно созданным владельцем через фабрику ниже.
+ */
+export function chatTimeline(
+  messages: TimelineMessage[],
+  steps: TimelineStep[],
+  sending: boolean,
+  run: ChatInTurnRun | null,
+): ChatTimelineRow[] {
+  return projectTimeline(messages, steps, sending, run, turnRows);
+}
+
+/**
+ * Снимок читает скаляры каждый раз, сохраняя подписки computed при попадании в кэш.
+ * Тела исторических шагов неизменяемы; достаточно ссылки и длины их массива.
+ */
+function turnDependencies(turn: TimelineTurn): unknown[][] {
+  return [[turn.steps, turn.steps.length], ...turn.messages.map(({ message }) => [
+    ...MESSAGE_DEPENDENCIES.map((key) => message[key]),
+    message.receipt?.acceptedAt,
+    message.steps,
+    message.steps?.length,
+  ])];
+}
+
+/**
+ * Кэш одной сессии хранит разбиение шагов, а сообщения и индексы получает из текущей истории.
+ * Текущий запуск пересчитывается всегда; исчезнувшие группы освобождаются после проекции.
+ */
+export function createChatTimelineProjector() {
+  const cache = new Map<string, CachedTurn>();
+
+  return {
+    /**
+     * Каждая проекция перечитывает зависимости и текущие ссылки на сообщения.
+     * Переиспользуются только исторические массивы участков, нужные неизменившимся StepList.
+     */
+    project(
+      messages: TimelineMessage[],
+      steps: TimelineStep[],
+      sending: boolean,
+      run: ChatInTurnRun | null,
+    ): ChatTimelineRow[] {
+      const alive = new Set<string>();
+      /**
+       * Текущий запуск остаётся живым, а исторический разворачивается один раз на набор зависимостей.
+       * Кэш хранит позиции сообщений и не удерживает их устаревшие метаданные.
+       */
+      const projectTurn = (turn: TimelineTurn): ChatTimelineRow[] => {
+        alive.add(turn.key);
+
+        if (turn.live || turn.key === run?.runId) {
+          cache.delete(turn.key);
+
+          return turnRows(turn);
+        }
+
+        const dependencies = turnDependencies(turn);
+        const previous = cache.get(turn.key);
+        const equal = previous?.dependencies.length === dependencies.length
+          && dependencies.every((values, index) => values.every((value, field) => (
+            value === previous.dependencies[index]![field]
+          )));
+
+        if (equal && previous) {
+          return previous.rows.map(({ row, slot }) => slot < 0 ? row : {
+            ...row,
+            message: turn.messages[slot]!.message,
+            index: turn.messages[slot]!.index,
+          });
+        }
+
+        const rows = turnRows(turn);
+
+        cache.set(turn.key, {
+          dependencies,
+          rows: rows.map((row) => ({
+            // Сообщения не удерживаются кэшем: только позиции и участки действий.
+            row: row.index < 0 ? row : { ...row, message: { role: row.message.role } },
+            slot: turn.messages.findIndex((message) => message.index === row.index),
+          })),
+        });
+
+        return rows;
+      };
+      const result = projectTimeline(messages, steps, sending, run, projectTurn);
+
+      for (const key of cache.keys()) {
+        if (!alive.has(key)) {
+          cache.delete(key);
+        }
+      }
+
+      return result;
+    },
+    clear(): void {
+      cache.clear();
+    },
+  };
 }

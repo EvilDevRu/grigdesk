@@ -308,9 +308,8 @@
                 </svg>
               </span>
               <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
-              <div v-if="m.role === 'assistant'" class="text md"
-                   v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
-                   @click="onMarkdownClick"></div>
+              <ChatMarkdown v-if="m.role === 'assistant'" :text="m.text || ''"
+                            @click="onMarkdownClick" />
               <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
                 v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
                 :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
@@ -663,7 +662,7 @@ import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
 import ChatInTurnReply from './ChatInTurnReply.vue';
 import { inTurnComposerState, inTurnDeliveryText } from './chatInTurn.ts';
-import { chatTimeline, groupChatTimeline } from './chatTimeline.ts';
+import { createChatTimelineProjector, groupChatTimeline } from './chatTimeline.ts';
 import ChatStatusBar from './ChatStatusBar.vue';
 import { chatStatus } from './chatStatus.ts';
 import { providerUsageSummary } from '../../features/providers/providerUsageSummary.ts';
@@ -681,9 +680,9 @@ import {
   UiTextarea,
   UiTooltip,
 } from '../../ui';
-import { mdToHtml } from '../../shared/md.ts';
+import ChatMarkdown from './ChatMarkdown.vue';
 import { documentLinkFromClick } from '../../features/documents/links.js';
-import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.ts';
+import { codeLinkFromClick, loadCodeRoots } from '../../features/code/links.ts';
 import { useToolLauncher } from '../../shared/tools/launcher.ts';
 import { useDocumentPreviewStore } from '../../stores/documentPreview.ts';
 import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
@@ -759,12 +758,17 @@ const inTurnComposer = computed(() => inTurnComposerState({
   pendingCount: pending.value.length,
   text: input.value,
 }));
-const timeline = computed(() => chatTimeline(
+const timelineProjector = createChatTimelineProjector();
+const timeline = computed(() => timelineProjector.project(
   sess.value?.messages || [],
   sess.value?.steps || [],
   ['running', 'legacy', 'background'].includes(status.value.phase),
   inTurnRun.value,
 ));
+
+watch(() => props.sid, () => timelineProjector.clear(), { flush: 'sync' });
+onUnmounted(() => timelineProjector.clear());
+
 const timelineGroups = computed(() => groupChatTimeline(timeline.value).map((group) => {
   const provider = group.current ? liveProvider.value : runProvider(group.agent);
 

@@ -119,6 +119,55 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   assert.equal(summary.find('button, [role="button"], [tabindex]').exists(), false);
   assert.match(summary.attributes('title'), /\/running\/source/);
   assert.match(summary.attributes('title'), /\/running\/shared/);
+
+  for (const state of ['unavailable', 'unsupported', 'auth_required', 'blocked', 'rate_limited']) {
+    providers.applyUsage({ 'running-provider': {
+      state,
+      stale: true,
+      bars: [{
+        key: 'week',
+        label: 'Неделя',
+        pct: 35,
+      }],
+    } });
+    await flushPromises();
+    assert.equal(wrapper.find('[data-role="chat-status-usage"]').exists(), false, state);
+    assert.equal(summary.findAll('.chat-status__sep').length, 1, state);
+    assert.doesNotMatch(summary.attributes('title'), /лимит|устарели|Неделя/iu, state);
+    assert.match(summary.text(), /Модель запуска/);
+  }
+
+  providers.applyUsage({ 'running-provider': {
+    state: 'ok',
+    bars: [{
+      key: 'unknown',
+      label: 'Неизвестное окно',
+      pct: null,
+    }],
+  } });
+  await flushPromises();
+  assert.equal(wrapper.find('[data-role="chat-status-usage"]').exists(), false);
+
+  providers.applyUsage({ 'running-provider': {
+    state: 'ok',
+    bars: [
+      {
+        key: 'unknown',
+        label: 'Неизвестное окно',
+        pct: null,
+      },
+      {
+        key: 'week',
+        label: 'Неделя',
+        pct: 100,
+      },
+    ],
+  } });
+  await flushPromises();
+  assert.match(wrapper.get('[data-role="chat-status-usage"]').text(), /Неделя:\s*0%/u);
+  assert.doesNotMatch(summary.text(), /нет данных|Неизвестное окно|\+1/u);
+  assert.match(summary.attributes('title'), /Неделя: 0%/u);
+
   await summary.trigger('click');
   await flushPromises();
   assert.equal(Boolean(browser.document.querySelector('[data-role="chat-status-popover"]')), false);

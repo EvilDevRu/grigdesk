@@ -111,7 +111,12 @@ export function compileChatSession(prefix, { realSteps = false } = {}) {
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
       './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub'),
       '../../ui': uiFacadeStub(prefix),
-      '../../shared/md.ts': 'export const mdToHtml = (text) => String(text || "");',
+      '../../shared/md.ts': [
+        'export const mdToHtml = (...args) => {',
+        `  const renderer = globalThis.${prefix}MarkdownRenderer;`,
+        '  return renderer ? renderer(...args) : String(args[0] || "");',
+        '};',
+      ].join('\n'),
       '../../features/documents/links.js': 'export const documentLinkFromClick = () => "";',
       '../../features/code/links.ts': [
         'export const chatFileLinkHref = () => "";',

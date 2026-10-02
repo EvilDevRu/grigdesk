@@ -105,11 +105,11 @@ function providers() {
 // ЧИТАЕТ `mcp` (чтобы не потерять прошлый список на время загрузки), потом ждёт сеть
 // и пишет ответ туда же. На плоском объекте без reactive Vue ничего не отслеживает, и
 // зацикливание опроса такой стенд пропускает — проверять было бы нечего.
-async function makeProvidersStore(mcpByProvider = {}, providerPatch = {}) {
+async function makeProvidersStore(mcpByProvider = {}, providerPatch = {}, extraProviders = []) {
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const calls = [];
   const store = reactive({
-    providers: providers().map((p) => ({ ...p, ...(providerPatch[p.id] || {}) })),
+    providers: [...providers(), ...extraProviders].map((p) => ({ ...p, ...(providerPatch[p.id] || {}) })),
     usage: {},
     mcp: {},
     loaded: true,
@@ -149,9 +149,13 @@ async function makeProvidersStore(mcpByProvider = {}, providerPatch = {}) {
 // один заход от самоперезапуска, а память стенда остаётся целой.
 const MCP_CALLS_LIMIT = 30;
 
-async function mountSettings(t, { mcpByProvider, providerPatch } = {}) {
+/**
+ * Настоящая страница монтируется с реактивным асинхронным источником MCP.
+ * Дополнительные providers задаются отдельно и сохраняют исходный состав по умолчанию.
+ */
+async function mountSettings(t, { mcpByProvider, providerPatch, extraProviders } = {}) {
   const browser = await installBrowser(t, { 'cockpit-settings-tab': 'providers' });
-  const { store: prov, calls } = await makeProvidersStore(mcpByProvider, providerPatch);
+  const { store: prov, calls } = await makeProvidersStore(mcpByProvider, providerPatch, extraProviders);
   // Настройки тянут полдюжины разделов сразу — все ответы пустые, кроме нужного нам реестра.
   globalThis.__settingsApi = {
     async get() { return {}; },
@@ -429,4 +433,176 @@ test('общего списка доверенных каталогов боль
 
   assert.equal(wrapper.find('[data-testid="trusted-directory-providers"]').exists(), false);
   assert.doesNotMatch(wrapper.text(), /Доверенные каталоги/u);
+});
+
+const DEEPSEEK_EMPTY_TEXT = 'Для папки кокпита нет MCP-серверов, выбранных для запуска.';
+const DEEPSEEK_NOTE = 'Показана конфигурация MCP для папки кокпита. '
+  + 'В другой папке чата список может отличаться. '
+  + 'Соединение не проверялось. Показаны только stdio-серверы, выбранные для запуска.';
+const DEEPSEEK_MCP = {
+  state: 'ok',
+  note: DEEPSEEK_NOTE,
+  emptyText: DEEPSEEK_EMPTY_TEXT,
+  checkedAt: Date.parse('2026-10-01T10:20:30Z'),
+  servers: [{
+    name: 'Документы',
+    target: '',
+    scope: 'project',
+    state: 'configured',
+    detail: '',
+  }],
+};
+
+/**
+ * Недоступность модельного входа не препятствует чтению MCP установленного CLI.
+ * Capability адаптера отдельно доказана серверным тестом настоящего DeepSeek.
+ */
+function deepSeekProvider(patch = {}) {
+  return {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    vendor: 'DeepSeek',
+    available: false,
+    installed: true,
+    chatEnabled: true,
+    mcp: true,
+    models: [],
+    settings: [],
+    ...patch,
+  };
+}
+
+/**
+ * Дополнительный provider после mount сохраняет исходные ожидания трёх запросов.
+ * Явное чтение готовит его ответ; изменение реестра само по себе не запускает опрос.
+ */
+async function openDeepSeek(fixture, patch = {}) {
+  fixture.prov.providers.push(deepSeekProvider(patch));
+  await fixture.prov.loadMcp('deepseek');
+  await fixture.flushPromises();
+  await fixture.wrapper.get('#provider-toggle-deepseek').trigger('click');
+
+  return fixture.wrapper.find('.provider-mcp-slot[data-provider-id="deepseek"]');
+}
+
+test('пустой MCP-ответ показывает emptyText адаптера и пояснение о папке кокпита', async (t) => {
+  const fixture = await mountSettings(t, {
+    mcpByProvider: { deepseek: { ...DEEPSEEK_MCP, servers: [] } },
+  });
+  const slot = await openDeepSeek(fixture);
+
+  assert.equal(slot.isVisible(), true);
+  assert.match(slot.text(), /Для папки кокпита нет MCP-серверов, выбранных для запуска\./);
+  assert.doesNotMatch(slot.text(), /Серверов не настроено/);
+  assert.equal(slot.get('.mcpnote').text(), DEEPSEEK_NOTE);
+});
+
+test('пустой MCP-ответ без emptyText сохраняет общий fallback', async (t) => {
+  const { wrapper } = await mountSettings(t);
+  const slot = wrapper.get('.provider-mcp-slot[data-provider-id="kimi"]');
+
+  assert.match(slot.text(), /Серверов не настроено\./);
+});
+
+test('DeepSeek показывает configured и границы списка при недоступном модельном входе', async (t) => {
+  const fixture = await mountSettings(t, { mcpByProvider: { deepseek: DEEPSEEK_MCP } });
+  const slot = await openDeepSeek(fixture);
+
+  assert.equal(slot.isVisible(), true);
+  assert.equal(slot.get('.mcpgrpttl').text(), 'Проект (1)');
+  assert.equal(slot.get('.mcpname').text(), 'Документы');
+  assert.equal(slot.get('.mcpst').text(), 'Настроен');
+  assert.equal(slot.get('.mcpdot').classes().includes('idle'), true);
+  assert.equal(slot.get('.mcpname').attributes('title'), undefined);
+  assert.equal(slot.get('.mcpnote').text(), DEEPSEEK_NOTE);
+  assert.doesNotMatch(slot.text(), /Подключён|mcp login|cockpit-work|cockpit-perm|canary/);
+});
+
+test('имя DeepSeek MCP с HTML остаётся текстом без элементов и обработчиков', async (t) => {
+  const name = '<img src=x onerror="alert(1)">';
+  const fixture = await mountSettings(t, {
+    mcpByProvider: {
+      deepseek: { ...DEEPSEEK_MCP, servers: [{ ...DEEPSEEK_MCP.servers[0], name }] },
+    },
+  });
+  const slot = await openDeepSeek(fixture);
+
+  assert.equal(slot.get('.mcpname').text(), name);
+  assert.equal(slot.find('img').exists(), false);
+  assert.equal(slot.find('[onerror]').exists(), false);
+});
+
+test('частичный DeepSeek MCP-ответ показывает хорошую карточку и нейтральный note', async (t) => {
+  const note = `${DEEPSEEK_NOTE} Конфигурация MCP для папки кокпита прочитана или проверена не полностью. `
+    + 'Список может быть неполным; проверьте `.mcp.json` и команды запуска.';
+  const fixture = await mountSettings(t, {
+    mcpByProvider: { deepseek: { ...DEEPSEEK_MCP, note } },
+  });
+  const slot = await openDeepSeek(fixture);
+
+  assert.equal(slot.get('.mcpname').text(), 'Документы');
+  assert.equal(slot.get('.mcpnote').text(), note);
+  assert.equal(slot.find('.msg.err').exists(), false);
+});
+
+test('полная ошибка DeepSeek MCP не выглядит успешным пустым списком', async (t) => {
+  const error = 'Не удалось получить список MCP для папки кокпита. '
+    + 'Проверьте `.mcp.json` и команды запуска.';
+  const fixture = await mountSettings(t, {
+    mcpByProvider: { deepseek: {
+      state: 'error',
+      error,
+      servers: [],
+    } },
+  });
+  const slot = await openDeepSeek(fixture);
+
+  assert.equal(slot.get('.msg.err').text(), `Не удалось получить список: ${error}`);
+  assert.equal(slot.find('.mcpgrp').exists(), false);
+  assert.doesNotMatch(slot.text(), /Серверов не настроено|нет MCP-серверов, выбранных/);
+});
+
+test('refresh DeepSeek добавляет ровно один запрос, асинхронный ответ не создаёт цикл', async (t) => {
+  const fixture = await mountSettings(t, { mcpByProvider: { deepseek: DEEPSEEK_MCP } });
+  const slot = await openDeepSeek(fixture);
+  const before = fixture.calls.length;
+
+  await slot.get('.mcpbtn').trigger('click');
+
+  for (let i = 0; i < 20; i += 1) {
+    await fixture.flushPromises();
+  }
+
+  assert.equal(fixture.calls.length, before + 1);
+  assert.deepEqual(fixture.calls.at(-1), { id: 'deepseek', refresh: true });
+});
+
+for (const patch of [{ installed: false }, { mcp: false }]) {
+  test(`DeepSeek MCP скрыт при ${JSON.stringify(patch)}`, async (t) => {
+    const fixture = await mountSettings(t, { mcpByProvider: { deepseek: DEEPSEEK_MCP } });
+    const slot = await openDeepSeek(fixture, patch);
+
+    assert.equal(slot.exists(), false);
+  });
+}
+
+test('первый опрос включает установленный DeepSeek без модельной авторизации', async (t) => {
+  const { calls, flushPromises } = await mountSettings(t, {
+    extraProviders: [deepSeekProvider()],
+    mcpByProvider: { deepseek: DEEPSEEK_MCP },
+  });
+
+  for (let i = 0; i < 20; i += 1) {
+    await flushPromises();
+  }
+
+  assert.deepEqual(calls, ['claude', 'codex', 'kimi', 'deepseek'].map((id) => ({ id, refresh: false })));
+});
+
+test('первый опрос пропускает отсутствующий CLI DeepSeek', async (t) => {
+  const { calls } = await mountSettings(t, {
+    extraProviders: [deepSeekProvider({ installed: false })],
+  });
+
+  assert.deepEqual(calls.map((call) => call.id), ['claude', 'codex', 'kimi']);
 });

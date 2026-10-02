@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chatTimeline, groupChatTimeline } from '../../web/src/views/chat/chatTimeline.ts';
+import { chatTimeline, createChatTimelineProjector, groupChatTimeline }
+  from '../../web/src/views/chat/chatTimeline.ts';
 
 const RUN = 'run-timeline';
 const parent = {
@@ -267,4 +268,104 @@ test('линия объединяет ход с уточнениями, но н�
   ]);
   assert.equal(groups.at(-1).turn, false);
   assert.equal(groups.at(-1).rows[0].message.text, queued.text);
+});
+
+test('активный шаг переиспользует исторические участки, а индексы и объекты обновляются', () => {
+  const projector = createChatTimelineProjector();
+  const final = {
+    ...answer,
+    steps,
+    model: 'old-model',
+    actualModel: 'old-actual',
+    effort: 'low'
+  };
+  const history = [parent, reply, clarification, final];
+  const active = { ...run, runId: 'new-run' };
+  const before = projector.project(history, [], true, active);
+  const replacement = {
+    ...final,
+    attachments: [{
+    file: 'new-file'
+  }],
+    cost: 0.2
+  };
+  const after = projector.project([{ role: 'user', text: 'Вставка' },
+    parent, reply, clarification, replacement], [{ k: 'think', text: 'Новый шаг' }], true, active);
+  const oldSections = before.filter((row) => row.turnKey === RUN && row.steps.length);
+  const newSections = after.filter((row) => row.turnKey === RUN && row.steps.length);
+
+  assert.ok(oldSections.length > 0);
+  assert.equal(oldSections.every((row, index) => row.steps === newSections[index].steps), true);
+  assert.equal(after.find((row) => row.message === replacement).index, 4);
+  assert.equal(after.find((row) => row.message === replacement).message.cost, 0.2);
+  assert.equal(after.find((row) => row.message === clarification).index, 3);
+});
+
+test('снимок скаляров ловит правку receipt и финала на месте, новый массив и длину steps', () => {
+  const projector = createChatTimelineProjector();
+  const middle = { ...clarification, receipt: { acceptedAt: 40 } };
+  const final = {
+    ...answer,
+    steps: [...steps],
+    model: 'old',
+    effort: 'low'
+  };
+  const history = [parent, reply, middle, final];
+  const project = () => projector.project(history, [], false, null);
+  let before = project();
+
+  project();
+  project();
+  middle.receipt.acceptedAt = 65;
+
+  const moved = project();
+
+  assert.notEqual(labels(before).join('|'), labels(moved).join('|'));
+  before = moved;
+  final.actualModel = 'actual';
+  final.effort = 'high';
+
+  const metadata = project();
+
+  assert.equal(metadata.find((row) => row.steps.length).message.actualModel, 'actual');
+  assert.equal(metadata.find((row) => row.steps.length).message.effort, 'high');
+
+  const oldSteps = before.find((row) => row.steps.length).steps;
+  const metadataSteps = metadata.find((row) => row.steps.length).steps;
+
+  assert.equal(oldSteps === metadataSteps, false);
+  final.steps = [...final.steps];
+
+  const replaced = project();
+
+  const replacedSteps = replaced.find((row) => row.steps.length).steps;
+
+  assert.equal(metadataSteps === replacedSteps, false);
+  final.steps.push({ k: 'note', text: 'Дополнение' });
+  assert.ok(labels(project()).includes('Дополнение'));
+  projector.clear();
+  assert.deepEqual(labels(project()), labels(chatTimeline(history, [], false, null)));
+});
+
+test('попадания в кэш не теряют реактивную подписку на вложенный receipt', async () => {
+  const { computed, reactive } = await import('../../web/node_modules/vue/index.mjs');
+  const middle = reactive({ ...clarification, receipt: { acceptedAt: 40 } });
+  const history = reactive([parent, reply, middle, { ...answer, steps }]);
+  const activeSteps = reactive([]);
+  const projector = createChatTimelineProjector();
+  const timeline = computed(() => projector.project(history, activeSteps, true, {
+    ...run, runId: 'current-other',
+  }));
+
+  void timeline.value;
+
+  for (let index = 0; index < 3; index += 1) {
+    activeSteps.push({ k: 'note', text: 'Живой шаг' });
+    void timeline.value;
+  }
+
+  const before = labels(timeline.value).join('|');
+
+  middle.receipt.acceptedAt = 65;
+  assert.notEqual(labels(timeline.value).join('|'), before);
 });

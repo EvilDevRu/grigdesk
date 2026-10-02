@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
+import { materializeInTurnMessages } from '../../web/src/stores/chatInTurn.ts';
 
 const CHAT = 'in-turn-chat';
 const RUN = 'run-12345678';
@@ -257,4 +258,76 @@ test('потерянный ответ POST восстанавливает ту �
   assert.equal(await chat.sendInTurn(CHAT, 'уточнение 1'), true);
   assert.equal(chat.inTurnAttempts[CHAT], undefined);
   assert.equal(chat.sessions[0].messages.filter((message) => message.messageId === sent.messageId).length, 1);
+});
+
+test('повтор страницы сохраняет массив и сообщения, не читая тела исторических шагов', () => {
+  const steps = [{ get text() { throw new Error('Прочитано тяжёлое тело'); } }];
+  const run = {
+    runId: RUN,
+    parentTurnId: TURN,
+    entries: [receipt(1, 'msg-12345678'),
+    block(2, 'answer-12345678')]
+  };
+  const history = materializeInTurnMessages([
+    {
+      role: 'assistant',
+      text: 'Прежний ответ',
+      steps
+    }, ...base().messages,
+  ], run);
+  const repeated = materializeInTurnMessages(history, {
+    ...run,
+    entries: run.entries.map((entry) => ({ ...entry })),
+  });
+
+  assert.equal(repeated === history, true);
+  assert.equal(repeated[0].steps === steps, true);
+});
+
+test('повтор SSE и draft после блока не материализуют историю и не ставят запись', async () => {
+  const chat = await chatStoreFixture({ sessions: [base()] });
+  const sse = sseOf(chat);
+  let writes = 0;
+
+  chat._persist = () => {
+     writes += 1;
+  };
+  chat._ensureInTurn(CHAT, RUN, TURN);
+
+  const completed = block(1, 'answer-12345678');
+
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: completed
+  });
+
+  const messages = chat.sessions[0].messages;
+  const updatedAt = chat.sessions[0].updatedAt;
+
+  assert.equal(writes, 1);
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: {
+    ...completed
+  }
+  });
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: block(2, 'answer-draft', false)
+  });
+  assert.equal(chat.sessions[0].messages === messages, true);
+  assert.equal(chat.sessions[0].updatedAt, updatedAt);
+  assert.equal(writes, 1);
+  assert.equal(chat.inTurnFor(CHAT).entries.at(-1).text, 'ответ 2');
+
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: block(2, 'answer-draft', true, 2)
+  });
+  assert.equal(writes, 2);
+  assert.equal(chat.sessions[0].messages.length, 3);
 });

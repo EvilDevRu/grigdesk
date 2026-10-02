@@ -21,25 +21,22 @@
           </span>
           <span class="chat-status__sep" aria-hidden="true">·</span>
           <span class="chat-status__cwd" data-role="chat-status-cwd">{{ status.cwdLabel }}</span>
-          <span class="chat-status__sep" aria-hidden="true">·</span>
-          <span class="chat-status__usage" :class="[usage.tone, { windows: !usage.label }]"
+          <span v-if="usageItems.length" class="chat-status__sep" aria-hidden="true">·</span>
+          <span v-if="usageItems.length" class="chat-status__usage" :class="[usage.tone, 'windows']"
                 data-role="chat-status-usage">
-            <span v-if="usage.label" class="chat-status__value">{{ usage.label }}</span>
-            <template v-else>
-              <template v-for="(item, index) in usage.items.slice(0, 2)" :key="item.key">
-                <span v-if="index" class="chat-status__sep secondary" aria-hidden="true">·</span>
-                <span class="chat-status__item" :class="{ secondary: index === 1 }">
-                  <span class="chat-status__value">{{ item.label }}:</span>
-                  <span>{{ item.value }}</span>
-                </span>
-              </template>
-              <span v-if="usage.items.length > 1" class="chat-status__more narrow">
-                +{{ usage.items.length - 1 }}
-              </span>
-              <span v-if="usage.items.length > 2" class="chat-status__more wide">
-                +{{ usage.items.length - 2 }}
+            <template v-for="(item, index) in usageItems.slice(0, 2)" :key="item.key">
+              <span v-if="index" class="chat-status__sep secondary" aria-hidden="true">·</span>
+              <span class="chat-status__item" :class="{ secondary: index === 1 }">
+                <span class="chat-status__value">{{ item.label }}:</span>
+                <span>{{ item.value }}</span>
               </span>
             </template>
+            <span v-if="usageItems.length > 1" class="chat-status__more narrow">
+              +{{ usageItems.length - 1 }}
+            </span>
+            <span v-if="usageItems.length > 2" class="chat-status__more wide">
+              +{{ usageItems.length - 2 }}
+            </span>
             <span v-if="usage.stale" class="chat-status__stale">устарели</span>
           </span>
         </span>
@@ -76,12 +73,15 @@ const shortModelKind = computed(() => ({
   запрошена: 'запр.',
   сообщена: '',
 } as Record<string, string>)[props.status.modelKind] || '');
+const usageItems = computed(() => props.usage.label
+  ? []
+  : props.usage.items.filter((item) => item.value !== 'нет данных'));
 const fullSummary = computed(() => [
   `${props.status.modelKind} ${props.status.modelLabel}`.trim(),
   props.status.cwd || props.status.cwdLabel,
   props.status.extraDirs.length ? `Дополнительные каталоги: ${props.status.extraDirs.join(', ')}` : '',
-  props.usage.label || props.usage.items.map((item) => `${item.label}: ${item.value}`).join(' · '),
-  props.usage.stale ? 'Данные устарели' : '',
+  usageItems.value.map((item) => `${item.label}: ${item.value}`).join(' · '),
+  usageItems.value.length && props.usage.stale ? 'Данные устарели' : '',
 ].filter(Boolean).join(' · '));
 </script>
 
@@ -112,6 +112,7 @@ const fullSummary = computed(() => [
   width: 12em;
 }
 .chat-status__summary {
+  color: color-mix(in srgb, var(--ink-low) 88%, var(--surface));
   flex: 0 1 auto;
   min-width: 0;
   max-width: 58%;
@@ -157,7 +158,8 @@ const fullSummary = computed(() => [
 .chat-status__item { display: flex; align-items: baseline; gap: 3px; min-width: 0; }
 .chat-status__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-status__sep, .chat-status__more, .chat-status__stale { flex: none; }
-.chat-status__sep { color: var(--ink-mid); }
+.chat-status__sep { color: inherit; }
+.chat-status__usage.muted { color: inherit; }
 .chat-status__usage.warn { color: var(--warn); }
 .chat-status__usage.bad { color: var(--bad); }
 .chat-status__item.secondary, .chat-status__sep.secondary, .chat-status__more.wide { display: none; }

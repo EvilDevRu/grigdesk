@@ -238,6 +238,12 @@ function avatarTitle(row) {
  * Относительное время сохраняет компактный телеграмный формат строки.
  * После недели календарная дата устойчивее постоянно растущего числа дней.
  */
+const calendarDate = new Intl.DateTimeFormat('ru', { day: '2-digit', month: '2-digit' });
+
+/**
+ * Форматтер принадлежит смонтированному списку и создаётся один раз, а не для каждой строки.
+ * При пересортировке сохраняется прежний календарный и относительный формат времени.
+ */
 function ago(ts) {
   if (!ts) {
     return '';
@@ -258,7 +264,7 @@ function ago(ts) {
     return `${Math.floor(elapsed / 86400e3)}д`;
   }
 
-  return new Date(ts).toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+  return calendarDate.format(new Date(ts));
 }
 
 const editId = ref(null);

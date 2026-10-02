@@ -23,6 +23,8 @@
 
 ### Чат
 
+- [TDD-план подготовки чатов к продакшну: MySQL, ручной перенос, удаление Legacy и быстрая постраничная история](mysql-production-plan.md)
+- [Ревью MySQL-плана: исправленные гонки, исполнимость TDD и порядок удаления Legacy](mysql-plan-review.md)
 - [«Требуют вмешательства»: чипы, чтобы вопрос не проехал мимо](intervention-badges.md)
 - [Автопрокрутка](auto-scroll.md)
 - [Вложения (фото) и диктовка](attachments-and-dictation.md)
@@ -36,6 +38,7 @@
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
+- [Приглушённые подписи инструментов и служебных сведений](activity-visual-hierarchy.md)
 - [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
 - [Общая линия хода, иконки ответов и выравнивание](turn-rail.md)
 - [Сведения о запуске и лимитах справа на существующей линии](run-status-placement.md)
@@ -46,6 +49,8 @@
 - [Режимы прав (--permission-mode)](permission-modes.md)
 - [Спрос ВИСИТ, пока не ответишь (без короткого UI-таймаута)](pending-question-lifetime.md)
 - [Хранилище истории — chats/ в корне проекта](history-storage.md)
+- [Ссылки на сохранённые шаги: отдельный PUT, durable ACK, снимок и fallback](history-step-reuse.md)
+- [Сохранение: реактивные кэши отпечатка и страховочного JSON каждого чата](chat-save-projection-cache.md)
 - [Смена папки требует согласования истории, очереди и памяти](workdir-transition-preconditions.md)
 - [Чат (modules/chat)](chat-module.md)
 - [Рабочая папка чата: приоритет задачи, выбор проекта и границы записи](chat-workspace.md)
@@ -54,6 +59,10 @@
 
 ### Исполнители и модели
 
+- [GLM: план интеграции через OpenCode ACP маленькими шагами TDD](glm-integration-tdd-plan.md)
+- [GLM: проверенные основания выбора runtime и открытые границы совместимости](glm-integration-research.md)
+- [GLM: ревью плана — допуск, восстановление сессии, усилия моделей и готовность MCP](glm-plan-review.md)
+- [GLM: повторное ревью — точная идентификация инструментов, коллизии MCP и допуск режимов](glm-plan-trust-gates.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке Claude — только свежая версия каждого семейства](claude-model-shortlist.md)
@@ -74,6 +83,10 @@
 - [Список моделей Codex — ИЗ ОФИЦИАЛЬНОГО APP-SERVER](codex-model-catalog.md)
 - [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
+- [DeepSeek: MCP в запуске и списке настроек](deepseek-mcp-visibility.md)
+- [DeepSeek: безопасный список проектных MCP, состояния и общие границы](deepseek-mcp-status.md)
+- [План TDD списка MCP DeepSeek: изолированные проверки API, интерфейса и ошибок](deepseek-mcp-tdd-plan.md)
+- [Ревью плана MCP DeepSeek: обходы подмены зависимостей, warnings и браузерный стенд](deepseek-mcp-plan-review.md)
 
 ### Авторизация Claude
 
@@ -84,6 +97,8 @@
 
 ## Грабли
 
+- [Неудачный запуск Claude: необработанная ошибка stdin может завершить сервер](claude-startup-pipe-error.md)
+- [DeepSeek: сотни строк «Размышление» = web-транспорт публиковал каждый фрагмент отдельно](deepseek-reasoning-chunks.md)
 - [Снятие адаптера: сохранённый каталог, сброс памяти и барьер записи истории](executor-removal-boundaries.md)
 - [Сообщение во время работы: прежняя очередь и границы уточнения](in-turn-message-gap.md)
 - [Ответ в pending ещё не входит в историю следующего хода](queued-turn-history-gap.md)
@@ -93,6 +108,7 @@
 - [«Кольцо контекста врёт» = цифра менялась раз в ход, а CLI сжимал контекст посреди хода](live-context-usage.md)
 - [«Переписка потёрлась» = PUT истории упёрся в лимит тела, и клиент ретраил молча](history-request-size-limit.md)
 - [«Чат уходит на сервер целиком при каждом сохранении» = отпечаток отправленного включал поле ответа, которого нет в снимке](chat-save-fingerprint.md)
+- [Ссылки на сохранённые шаги: ограничения старого PUT, ACK, отпечатка и снимка отправки](step-reuse-constraints.md)
 - [«Я послежу и сообщу» = обещание, которое некому выполнить](agent-lifetime-and-promises.md)
 - [«Codex сжал контекст хода» через четверть часа после ручного сжатия и досье вместо ответа = выжимка не закрывала живую сессию](compaction-session-reset.md)
 - [«DeepSeek не пишет в соседний каталог» = граница записи — папка разговора, доверенный каталог её не расширяет](deepseek-write-boundary.md)

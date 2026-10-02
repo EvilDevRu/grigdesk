@@ -943,7 +943,16 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .status { margin-left: auto; }
 .mlogo { display: none; color: var(--accent); font-size: 18px; }
 .page { margin: 0; font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
-.status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
+.status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  /* Текст центрируется по той же оси, что и иконки: при 1.4 строка 12px
+     давала дробный сдвиг глифов вверх, особенно заметный при масштабе экрана. */
+  line-height: 1;
+  white-space: nowrap;
+}
 .settings-link {
   width: 32px; height: 32px; flex: none; display: grid; place-items: center;
   border-radius: 8px; color: var(--ink-mid); transition: background .12s, color .12s;
@@ -1033,7 +1042,13 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .pu-head b.lv-warn { color: var(--warn); }
 .pu-head b.lv-bad { color: var(--bad); }
 .sysnote { font-size: 10.5px; color: var(--ink-mid); padding-top: 8px; border-top: 1px solid var(--line); }
-.netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
+.netbox {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  gap: 6px;
+  color: var(--ink-mid);
+}
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }
 .lv-ok { color: var(--ink); } .lv-warn { color: var(--warn); } .lv-bad { color: var(--bad); }
@@ -1041,7 +1056,14 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; }
 .conn.on .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
 .conn.off .dot { background: var(--bad); }
-.host { display: inline-flex; align-items: center; height: 32px; line-height: 1; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+/* IP и имя хоста наследуют общий интерлиньяж строки состояния.
+   Имя занимает строку текста; центрирование задаёт внешний блок связи. */
+.host {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
 
 /* scrollbar-gutter: stable — место под полосу прокрутки зарезервировано всегда,
    иначе контент «скачет» по горизонтали, когда скролл появляется/исчезает при смене

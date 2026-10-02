@@ -40,6 +40,7 @@ export interface ProvidersModuleOptions {
   prefs?: PrefsStore;
   // Точка подмены для офлайн-тестов: реестр не знает про конкретных вендоров.
   getProviderAdapters?: () => Promise<Map<string, ExecutorAdapter>>;
+  getModelsRegistry?: typeof getModelsRegistry;
   // Период фонового чтения лимитов; офлайн-тесты укорачивают его до миллисекунд.
   usageTickMs?: number;
 }
@@ -131,6 +132,7 @@ async function providersModule(
   const { config, claudeAuth, prefs } = opts;
   const deps = { claudeAuth };
   const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
+  const modelsOf = opts.getModelsRegistry || getModelsRegistry;
 
   registerProviderNativeSettings(fastify, {
     config,
@@ -175,9 +177,13 @@ async function providersModule(
     }
   }
 
+  /**
+   * Собирает карточки из общих источников адаптеров и моделей без чтения MCP.
+   * Возможности объявляет исполнитель; подменённые источники изолируют офлайн-стенд.
+   */
   async function buildRegistry() {
     const executors = await adaptersOf();
-    const models = await getModelsRegistry(config);
+    const models = await modelsOf(config);
     const providers = [];
     for (const ex of executors.values()) {
       const [{ ok, version }, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
@@ -406,8 +412,12 @@ async function providersModule(
   const CHECK_EVERY_MS = 6 * 60 * 60 * 1000; // раз в 6 часов: релизы выходят не чаще
   const FIRST_CHECK_MS = 30_000;             // после старта — не мешая подъёму сервера
 
+  /**
+   * Проверяет версии только у адаптеров текущего источника, включая фоновый таймер.
+   * Обновление остаётся ручным; изменившийся снимок сбрасывает кэш карточек.
+   */
   async function checkUpdates() {
-    const executors = await getProviderAdapters();
+    const executors = await adaptersOf();
     let changed = false;
     for (const ex of executors.values()) {
       if (typeof ex.latestVersion !== 'function') continue;
@@ -517,7 +527,7 @@ async function providersModule(
 
   fastify.get<ProviderRoute>('/api/providers/:id/mcp', async (request, reply) => {
     const id = String(request.params.id);
-    const ex = (await getProviderAdapters()).get(id);
+    const ex = (await adaptersOf()).get(id);
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     if (typeof ex.mcpStatus !== 'function') {
       return reply.code(400).send({ error: 'no_mcp', message: `исполнитель ${ex.name} не сообщает о MCP-серверах` });
@@ -575,7 +585,9 @@ async function providersModule(
     // решает настройка: тумблер в UI не должен ходить за новым списком на сервер.
     const showAllModels = !!prefs?.read().showAllModels;
     if (!force && cache && Date.now() - cache.at < CACHE_MS) return { providers: cache.providers, showAllModels };
-    if (force) await getModelsRegistry(config, { refresh: true }); // пересобрать каталог моделей
+    if (force) {
+      await modelsOf(config, { refresh: true }); // пересобрать каталог моделей
+    }
     const providers = await buildRegistry();
     cache = { at: Date.now(), providers };
     return { providers, showAllModels };
@@ -628,7 +640,7 @@ async function providersModule(
     cache = null;
     const after = (await ex.probe(config))?.version || '';
     // Версия сменилась → каталог моделей нового CLI (скан бинаря) подхватится сразу.
-    await getModelsRegistry(config, { refresh: true }).catch(() => null);
+    await modelsOf(config, { refresh: true }).catch(() => null);
     // И индикатор «доступно обновление» должен погаснуть сразу, а не через 6 часов.
     await checkUpdates().catch(() => null);
     return { ok: out.ok, before, after, changed: before !== after, output: out.text };

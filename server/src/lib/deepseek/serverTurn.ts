@@ -10,6 +10,7 @@ import { openDeepSeekStream } from './serverEvents.ts';
 import type { DeepSeekWireFrame } from './serverEvents.ts';
 import { startDeepSeekServer } from './serverRuntime.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './serverRuntime.ts';
+import { createDeepSeekServerThoughtNormalizer } from './serverThoughts.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { applyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
@@ -116,6 +117,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       });
     }
     const sink = createStepSink(options.onStep);
+    const thoughts = createDeepSeekServerThoughtNormalizer();
     const drafts = new Map<string, string>();
     const completed = new Set<string>();
     const toolContexts = new Map<string, { title: string; rawInput: unknown }>();
@@ -148,14 +150,30 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       sink.emit({ k: 'text', id, text });
       save({ assistantMessageId: id, text, sourceRevision: text.length, complete });
     };
+    /**
+     * Ошибка закрывает ход и сохраняет уже полученное размышление в ленте.
+     * Повторное закрытие сокета после завершения не меняет результат хода.
+     */
     const fail = (error: Error) => {
-      if (finished) return;
+      if (finished) {
+        return;
+      }
+
+      sink.emitAll(thoughts.flush());
       failure = error;
       finished = true;
       notify();
     };
+    /**
+     * Завершение отдаёт хвост размышления, даже когда DSH не прислал block-end.
+     * Канал уточнений закрывается вместе с исходным ходом, до возврата результата.
+     */
     const finish = () => {
-      if (finished) return;
+      if (finished) {
+        return;
+      }
+
+      sink.emitAll(thoughts.flush());
       finished = true;
       options.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
       notify();
@@ -169,14 +187,15 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     const handleChunk = (frame: Record<string, unknown>) => {
       const chunk = record(frame.chunk);
       const id = `${String(frame.attemptId || currentAttempt)}-${String(chunk.index ?? '0')}`;
+
+      sink.emitAll(thoughts(id, chunk));
+
       if (chunk.type === 'text-delta') {
         const delta = String(chunk.text || '');
         const text = `${drafts.get(id) || ''}${delta}`;
         producedChars += delta.length;
         emitText(id, text, false);
         options.onProgress?.(Math.round(producedChars / 3), { tokensIsEstimate: true });
-      } else if (chunk.type === 'reasoning-delta') {
-        sink.emit({ k: 'think', text: String(chunk.text || '') });
       } else if (chunk.type === 'block-end') {
         const text = blockText(chunk.block) || drafts.get(id) || '';
         if (text) emitText(id, text, true);
@@ -188,10 +207,19 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         });
       }
     };
+    /**
+     * Сводит live chunks и события DSH в общую ленту и блоки ответов.
+     * Граница попытки или действия закрывает накопленное размышление до следующего шага.
+     */
     const handleFollow = (item: DeepSeekWireFrame) => {
       if (item.type === 'assistant-stream') {
         const frame = record(item.frame);
-        if (frame.type === 'start') currentAttempt = String(frame.attemptId || '');
+
+        if (frame.type === 'start') {
+          sink.emitAll(thoughts.flush());
+          currentAttempt = String(frame.attemptId || '');
+        }
+
         if (frame.type === 'chunk') handleChunk(frame);
         return;
       }
@@ -200,6 +228,8 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       const data = record(event.data);
       if (event.type === 'turn/start') turnStarted = true;
       if (event.type === 'tool/call') {
+        sink.emitAll(thoughts.flush());
+
         const name = String(data.name || 'Инструмент');
         let rawInput: unknown = {};
 
@@ -222,6 +252,8 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         });
       }
       if (event.type === 'assistant/message') {
+        sink.emitAll(thoughts.flush());
+
         const id = `${String(data.turn || 'turn')}-${String(data.step || 'step')}-0`;
         const text = compactText(data.stream);
         if (text && !reply) emitText(id, text, true);

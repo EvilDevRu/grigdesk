@@ -4,7 +4,7 @@
     <div :id="bodyId" class="chat-in-turn-reply__body"
          :class="{ collapsed: !expanded, faded: !expanded && overflows }">
       <div ref="content" class="text md"
-           v-html="mdToHtml(block.text, { resolveHref: chatFileLinkHref })"></div>
+           v-html="html"></div>
     </div>
     <UiDisclosureButton v-if="overflows" v-model:open="expanded" density="compact" :controls="bodyId"
                         data-role="chat-reply-expand">
@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { mdToHtml } from '../../shared/md.ts';
 import { chatFileLinkHref } from '../../features/code/links.ts';
 import { UiDisclosureButton } from '../../ui';
@@ -34,6 +34,9 @@ const content = ref<HTMLElement | null>(null);
 const expanded = ref(false);
 const overflows = ref(false);
 let observer: ResizeObserver | null = null;
+
+const text = computed(() => props.block.text || '');
+const html = computed(() => mdToHtml(text.value, { resolveHref: chatFileLinkHref }));
 
 /**
  * Раскрытие нужно только там, где текст действительно длиннее четырёх строк.
@@ -53,7 +56,7 @@ function measurePreview(): void {
   overflows.value = element.scrollHeight > lineHeight * lines + 1;
 }
 
-watch(() => props.block.text, async () => {
+watch(html, async () => {
   await nextTick();
   measurePreview();
 });
