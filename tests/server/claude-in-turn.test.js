@@ -9,15 +9,22 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { ChatAssistantMessages } from '../../server/src/lib/chat/assistantMessages.ts';
+import { ChatAssistantPublisher } from '../../server/src/lib/chat/assistantPublisher.ts';
 import claude from '../../server/src/lib/executors/claude.ts';
-import { openClaudeStreamSession } from '../../server/src/lib/executors/_claudeStream.ts';
+import { claudeSessionArgs, openClaudeStreamSession } from '../../server/src/lib/executors/_claudeStream.ts';
 import { parseInTurnCapability } from '../../shared/chatInTurnContracts.ts';
 import { assertInTurnConformance } from './helpers/in-turn-conformance.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FIXTURE = path.join(ROOT, 'tests/fixtures/claude-in-turn/fake-claude.mjs');
 
-async function fixture(t, { holdFinal = false, steers = 1 } = {}) {
+/**
+ * Каждый тест получает собственный процесс фикстуры и управляемые файловые барьеры.
+ * Режимы воспроизводят два подтверждённых порядка событий настоящего CLI.
+ */
+async function fixture(t, { holdFinal = false, steers = 1, mode = 'merge',
+  noLifecycle = false, holdStart = false } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-in-turn-'));
   const bin = path.join(dir, 'claude-fixture');
   const trace = path.join(dir, 'trace.jsonl');
@@ -27,10 +34,18 @@ async function fixture(t, { holdFinal = false, steers = 1 } = {}) {
   t.after(() => rm(dir, { recursive: true, force: true }));
 
   return {
-    dir, bin, trace,
-    env: { ...process.env, COCKPIT_CLAUDE_FIXTURE_TRACE: trace,
+    dir,
+    bin,
+    trace,
+    env: {
+      ...process.env,
+      COCKPIT_CLAUDE_FIXTURE_TRACE: trace,
       ...(holdFinal ? { COCKPIT_CLAUDE_FIXTURE_HOLD_FINAL: '1' } : {}),
-      ...(steers > 1 ? { COCKPIT_CLAUDE_FIXTURE_STEERS: String(steers) } : {}) },
+      COCKPIT_CLAUDE_FIXTURE_MODE: mode,
+      ...(noLifecycle ? { COCKPIT_CLAUDE_FIXTURE_NO_LIFECYCLE: '1' } : {}),
+      ...(holdStart ? { COCKPIT_CLAUDE_FIXTURE_HOLD_START: '1' } : {}),
+      ...(steers > 1 ? { COCKPIT_CLAUDE_FIXTURE_STEERS: String(steers) } : {}),
+    },
   };
 }
 
@@ -126,7 +141,7 @@ test('Claude: живая stream-json сессия принимает уточн�
   const f = await fixture(t, { holdFinal: true });
   const session = openClaudeStreamSession({
     bin: f.bin,
-    args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'],
+    args: claudeSessionArgs({}),
     cwd: f.dir,
     env: f.env,
   });
@@ -149,6 +164,18 @@ test('Claude: живая stream-json сессия принимает уточн�
 
   assert.equal(clientLines.length, 2, 'оба сообщения ушли в один процесс');
   assert.equal(clientLines[1].message.message.content[0].text, 'Почему первый файл?');
+  assert.equal(
+    trace.find((entry) => entry.direction === 'process').argv.includes('--replay-user-messages'),
+    true,
+  );
+  assert.equal(trace.filter((entry) => entry.message?.type === 'result').length, 1);
+  assert.equal(evidence.result.assistantMessageId, 'assistant-final');
+
+  for (const entry of clientLines) {
+    assert.match(entry.message.uuid, /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/u);
+  }
+
+  assert.notEqual(clientLines[0].message.uuid, clientLines[1].message.uuid);
   assert.equal(trace.filter((entry) => entry.direction === 'process').length, 1, 'второго процесса нет');
   assertInTurnConformance({
     name: 'Claude', capability: claude.inTurnInput,
@@ -192,6 +219,7 @@ test('Claude: разовый запуск поднимает stream-json на в
   const processEntry = trace.find((entry) => entry.direction === 'process');
 
   assert.ok(processEntry.argv.includes('--input-format'), 'разовый ход идёт через stream-json');
+  assert.ok(processEntry.argv.includes('--replay-user-messages'), 'разовый ход запрашивает lifecycle');
   assert.ok(
     !processEntry.argv.includes('Проверь два файла.'),
     'текст хода не передан аргументом argv',
@@ -202,7 +230,7 @@ test('Claude: два уточнения идут по порядку в один
   const f = await fixture(t, { holdFinal: true, steers: 2 });
   const session = openClaudeStreamSession({
     bin: f.bin,
-    args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'],
+    args: claudeSessionArgs({}),
     cwd: f.dir,
     env: f.env,
   });
@@ -277,4 +305,385 @@ test('Claude: текстовый шаг несёт id блока, а capability 
     parseInTurnCapability(claude.inTurnInput),
     { protocol: 1, text: true, confirmation: 'consumed' },
   );
+});
+
+/**
+ * Сценарий собирает транспортный trace, квитанции и ответы реального адаптера.
+ * Ошибка хода сразу перехватывается, чтобы красная проверка не теряла teardown.
+ */
+async function lifecycleFixture(t, options = {}) {
+  const f = await fixture(t, options);
+  const assistant = [];
+  const receipts = [];
+  const background = [];
+  const backgroundStarts = [];
+  const steps = [];
+  let port;
+  let settled = false;
+  const session = openClaudeStreamSession({
+    bin: f.bin,
+    args: options.withoutFlag
+      ? claudeSessionArgs({}).filter((arg) => arg !== '--replay-user-messages')
+      : claudeSessionArgs({}),
+    cwd: f.dir,
+    env: f.env,
+    hooks: {
+      onBackgroundStart: () => backgroundStarts.push(true),
+      onBackground: (event) => background.push(event),
+    },
+  });
+
+  t.after(() => session.close());
+
+  const run = session.send({
+    message: 'Проверь два файла.',
+    onInTurnReady: (given) => {
+      port = given;
+    },
+    onAssistantMessage: (event) => assistant.push(event),
+    onInTurnReceipt: (event) => receipts.push(event),
+    onStep: (step) => steps.push(step),
+  });
+
+  void run.then(() => {
+    settled = true;
+  }, () => {
+    settled = true;
+  });
+
+  await waitFor(() => port, 'порт уточнения');
+  await port.deliver({
+    messageId: 'cockpit-non-uuid',
+    text: 'Вопрос',
+    sequence: 1,
+  });
+
+  return {
+    ...f,
+    session,
+    run,
+    port,
+    assistant,
+    receipts,
+    background,
+    backgroundStarts,
+    steps,
+    isSettled: () => settled,
+  };
+}
+
+test('Claude merge: consumed приходит на started до единственного result, блоки завершены', async (t) => {
+  const f = await lifecycleFixture(t, { holdStart: true, holdFinal: true });
+
+  await waitFor(async () => (await readTrace(f.trace))
+    .filter((row) => row.message?.state === 'queued').length === 2, 'уточнение в очереди');
+  assert.equal(f.receipts.length, 0);
+
+  await writeFile(`${f.trace}.start`, '');
+  await waitFor(() => f.receipts.some((event) => event.state === 'consumed'), 'consumed на started');
+
+  assert.deepEqual(f.receipts, [{ messageId: 'cockpit-non-uuid', state: 'consumed' }]);
+  assert.equal((await readTrace(f.trace)).some((row) => row.message?.type === 'result'), false);
+  assert.equal(f.isSettled(), false);
+
+  await writeFile(`${f.trace}.release`, '');
+  await waitFor(f.isSettled, 'merge закрывает ход на одном result');
+
+  const result = await f.run;
+  const complete = f.assistant.filter((event) => event.complete);
+
+  assert.deepEqual(complete.map((event) => event.assistantMessageId), [
+    'assistant-first', 'assistant-injected', 'assistant-final',
+  ]);
+  assert.equal(result.assistantMessageId, 'assistant-final');
+  assert.equal(f.session.busy, false);
+  assert.equal(f.steps.some((step) => step.k === 'text' && step.text === 'Вопрос'), false);
+});
+
+test('Claude next-turn: два result, финал связан с последним блоком', async (t) => {
+  const f = await lifecycleFixture(t, { mode: 'next-turn' });
+
+  await waitFor(() => f.assistant.some((event) => event.complete), 'завершённый итог задачи');
+  assert.equal(f.isSettled(), false);
+  assert.equal(f.session.busy, true);
+  assert.equal(f.receipts.length, 0);
+
+  await writeFile(`${f.trace}.next`, '');
+  await waitFor(f.isSettled, 'закрытие на втором result');
+
+  const result = await f.run;
+  const complete = f.assistant.filter((event) => event.complete);
+
+  assert.deepEqual(complete.map((event) => [event.assistantMessageId, event.text]), [
+    ['assistant-final', 'Второй файл проверен.'],
+    ['assistant-injected', 'Отвечаю: Вопрос'],
+  ]);
+  assert.equal(result.reply, 'Отвечаю: Вопрос');
+  assert.equal(result.assistantMessageId, 'assistant-injected');
+  assert.equal(f.receipts[0]?.state, 'consumed');
+  assert.equal(f.backgroundStarts.length, 0);
+});
+
+test('Claude: lifecycle и replay вне хода не создают фон, result без lifecycle закрывает ход', async (t) => {
+  for (const withoutFlag of [false, true]) {
+    const f = await lifecycleFixture(t, { withoutFlag });
+
+    await waitFor(f.isSettled, 'result закрывает ход даже без lifecycle');
+    await f.run;
+    await waitFor(async () => (await readTrace(f.trace))
+      .some((row) => row.message?.type === 'result'), 'финал в trace');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(f.session.busy, false);
+    assert.equal(f.backgroundStarts.length, 0);
+    assert.equal(f.background.length, 0);
+
+    if (withoutFlag) {
+      assert.equal(f.receipts.length, 0, 'без started нельзя подтверждать consumed');
+    }
+  }
+});
+
+test('Claude: stop очереди даёт failed, поздний запуск CLI сразу прерывается и молчит', async (t) => {
+  const f = await lifecycleFixture(t, { holdStart: true });
+  const rejected = assert.rejects(f.run, (error) => error.stopped === true);
+
+  await waitFor(async () => (await readTrace(f.trace))
+    .filter((row) => row.message?.state === 'queued').length === 2, 'queued без started');
+  await f.session.interrupt();
+  await waitFor(f.isSettled, 'stop закрыл ход');
+  await rejected;
+
+  assert.deepEqual(f.receipts, [{ messageId: 'cockpit-non-uuid', state: 'failed' }]);
+  assert.equal(f.session.busy, false);
+
+  let nextSettled = false;
+  const nextAssistant = [];
+  const next = f.session.send({
+    message: 'Новая задача',
+    onAssistantMessage: (event) => nextAssistant.push(event),
+  });
+
+  void next.then(() => {
+    nextSettled = true;
+  }, () => {
+    nextSettled = true;
+  });
+
+  assert.equal((await f.port.deliver({ messageId: 'late', text: 'Поздний ввод' })).ok, false);
+  await waitFor(async () => (await readTrace(f.trace)).filter((row) => row.direction === 'client'
+    && row.message.request?.subtype === 'interrupt').length === 2, 'автоматический стоп уточнения');
+  await waitFor(() => nextSettled, 'следующий заказанный ход');
+  await writeFile(`${f.trace}.background`, '');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  const users = (await readTrace(f.trace))
+    .filter((row) => row.direction === 'client' && row.message.type === 'user');
+
+  assert.equal(users.length, 3);
+  assert.equal(users[2].message.message.content[0].text, 'Новая задача');
+  assert.equal((await next).reply, 'Новый ход завершён.');
+  assert.equal(f.backgroundStarts.length, 0, 'отменённое уточнение не открывает фоновый ход');
+  assert.equal(f.background.length, 0);
+  assert.equal(nextAssistant.some((event) => event.assistantMessageId === 'assistant-background'), false);
+  assert.equal(f.receipts.some((event) => event.state === 'consumed'), false);
+});
+
+test('Claude: stop нового send во время ожидания очереди не отправляет отменённый ввод', async (t) => {
+  const f = await lifecycleFixture(t, { holdStart: true });
+  const rejected = assert.rejects(f.run, (error) => error.stopped === true);
+
+  await waitFor(async () => (await readTrace(f.trace))
+    .filter((row) => row.message?.state === 'queued').length === 2, 'queued без started');
+  await f.session.interrupt();
+  await rejected;
+
+  const next = f.session.send({ message: 'Отменённая новая задача' });
+  const nextRejected = assert.rejects(next, (error) => error.stopped === true);
+
+  assert.equal(f.session.busy, true, 'ожидание очереди считается занятым ходом');
+  await f.session.interrupt();
+  await nextRejected;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal((await readTrace(f.trace))
+    .filter((row) => row.direction === 'client' && row.message.type === 'user').length, 2);
+  assert.equal(f.backgroundStarts.length, 0);
+});
+
+test('Claude late: queued после финала даёт consumed, ответ уходит в фон, новый send ждёт', async (t) => {
+  const f = await lifecycleFixture(t, { mode: 'late' });
+  const result = await f.run;
+
+  assert.equal(result.reply, 'Второй файл проверен.');
+  await waitFor(async () => (await readTrace(f.trace))
+    .filter((row) => row.message?.state === 'queued').length === 2, 'queued после финала');
+
+  let nextSettled = false;
+  const next = f.session.send({ message: 'Новая задача' });
+
+  void next.then(() => {
+    nextSettled = true;
+  }, () => {
+    nextSettled = true;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(nextSettled, false);
+  assert.equal((await readTrace(f.trace))
+    .filter((row) => row.direction === 'client' && row.message.type === 'user').length, 2,
+  'новый ввод не вливается в запущенное уточнение');
+
+  await writeFile(`${f.trace}.next`, '');
+  await waitFor(() => nextSettled, 'новый ход после позднего уточнения');
+
+  assert.deepEqual(f.receipts, [{ messageId: 'cockpit-non-uuid', state: 'consumed' }]);
+  assert.deepEqual(f.background.map((event) => event.reply), ['Отвечаю: Вопрос']);
+  assert.equal((await next).reply, 'Новый ход завершён.');
+});
+
+const runId = 'synthetic-run-0001';
+const chatKey = 'synthetic-chat';
+const commentaryText = [
+  'Проверяю документ 1.',
+  'Проверяю документ 2.\nПродолжаю проверку.\nКоманда подготовлена.',
+  'Проверяю документ 3.',
+];
+
+/**
+ * Изолированный процесс использует настоящий адаптер и журнал без вызовов модели.
+ * Общий teardown закрывает только процесс этой проверки и удаляет её временные файлы.
+ */
+async function startFixture(t, { mode = 'session', exit = false } = {}) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'claude-assistant-blocks-'));
+  const bin = path.join(dir, 'claude-fixture');
+  const release = path.join(dir, 'release');
+  const journalDir = path.join(dir, 'assistant');
+  const events = [];
+  const published = [];
+  const steps = [];
+  const messages = new ChatAssistantMessages({ dir: journalDir });
+  const env = {
+    ...process.env,
+    COCKPIT_CLAUDE_FIXTURE_BLOCKS: '1',
+    CLAUDE_BLOCKS_RELEASE: release,
+    CLAUDE_BLOCKS_EXIT: exit ? '1' : '0',
+  };
+  let sequence = 0;
+
+  await copyFile(FIXTURE, bin);
+  await chmod(bin, 0o755);
+
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => sequence += 1,
+    onMessage: (block) => published.push(block),
+  });
+  const options = {
+    message: 'Проверь три документа.',
+    onStep: (step) => steps.push(step),
+    onAssistantMessage(event) {
+      events.push(event);
+
+      return publisher.publish(runId, chatKey, event);
+    },
+  };
+  const session = mode === 'session' ? openClaudeStreamSession({
+    bin,
+    args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'],
+    cwd: dir,
+    env,
+  }) : null;
+
+  t.after(async () => {
+    await session?.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const run = session ? session.send(options) : claude.run({
+    ...options,
+    config: { claudeBin: bin },
+    env,
+    cwd: dir,
+    sessionId: null,
+    permissionMode: 'default',
+    providerSettings: {},
+  });
+
+  return {
+    run,
+    session,
+    release,
+    journalDir,
+    messages,
+    publisher,
+    events,
+    published,
+    steps,
+  };
+}
+
+for (const mode of ['session', 'run']) {
+  test(`Claude: ${mode} завершает три реплики до финала и восстанавливает полный текст`, async (t) => {
+    const f = await startFixture(t, { mode });
+    let settled = false;
+    const run = f.run.finally(() => {
+      settled = true;
+    });
+
+    await waitFor(
+      () => f.steps.filter((step) => step.k === 'res').length === 3,
+      'три результата инструментов',
+    );
+    await f.publisher.flush(runId);
+
+    assert.equal(settled, false, 'Исходный ход ещё работает.');
+    assert.equal(f.messages.live(runId).length, 0, 'Готовые реплики больше не показывают «Пишет…».');
+    assert.deepEqual(f.messages.byRun(runId).map((block) => block.text), commentaryText);
+    assert.equal(f.events.some((event) => event.assistantMessageId === 'subagent-message-1'), false);
+
+    for (let index = 1; index <= 3; index += 1) {
+      const id = `commentary-block-${index}`;
+      const published = f.published.filter((block) => block.assistantMessageId === id);
+
+      assert.equal(published.at(-1)?.complete, true);
+      assert.equal(published.at(-1)?.text, commentaryText[index - 1]);
+      assert.equal(f.events.filter((event) => event.assistantMessageId === id && event.complete).length, 1);
+    }
+
+    await writeFile(f.release, '');
+
+    const result = await run;
+
+    await f.publisher.flush(runId);
+
+    const restored = new ChatAssistantMessages({ dir: f.journalDir });
+
+    await restored.load();
+
+    assert.equal(result.reply, 'Проверка закончена.\nВсе документы проверены.');
+    assert.equal(result.assistantMessageId, 'assistant-final', 'Финал дополняет уже показанный блок.');
+    assert.equal(restored.byRun(runId).every((block) => block.complete), true);
+    assert.deepEqual(restored.byRun(runId).map((block) => block.text), [...commentaryText, result.reply]);
+    assert.equal(f.messages.live(runId).length, 0);
+  });
+}
+
+test('Claude: обрыв процесса сохраняет завершённые реплики и не завершает текущий черновик', async (t) => {
+  const f = await startFixture(t, { exit: true });
+  const rejected = assert.rejects(f.run, /процесс агента завершился/);
+
+  await waitFor(
+    () => f.steps.filter((step) => step.k === 'res').length === 3,
+    'три результата инструментов',
+  );
+  await writeFile(f.release, '');
+  await rejected;
+  await f.publisher.flush(runId);
+
+  assert.deepEqual(f.messages.byRun(runId).filter((block) => block.complete).map((block) => block.text),
+    commentaryText);
+  assert.deepEqual(f.messages.live(runId).map((block) => block.assistantMessageId), ['assistant-final']);
+  assert.equal(f.events.some((event) => event.assistantMessageId === 'assistant-final'
+    && event.complete), false);
 });

@@ -112,7 +112,7 @@
 ## Грабли
 
 - [Неудачный запуск Claude: необработанная ошибка stdin может завершить сервер](claude-startup-pipe-error.md)
-- [Claude: завершённые реплики остаются «Пишет…» и не закрываются в журнале блоков](claude-assistant-block-completion.md)
+- [Claude: границы завершения реплик, исчезновение «Пишет…» и запись полного текста](claude-assistant-block-completion.md)
 - [DeepSeek: сотни строк «Размышление» = web-транспорт публиковал каждый фрагмент отдельно](deepseek-reasoning-chunks.md)
 - [Снятие адаптера: сохранённый каталог, сброс памяти и барьер записи истории](executor-removal-boundaries.md)
 - [Сообщение во время работы: прежняя очередь и границы уточнения](in-turn-message-gap.md)
@@ -134,6 +134,7 @@
 - [Окно Codex 258 400 у модели «на 1M» = стандартное окно thread, большое включается конфигом](codex-context-window.md)
 - [Переезд Codex на app-server молча сузил рабочую область агента до cwd](codex-workspace-scope.md)
 - [Codex: живое уточнение требует подсказки вернуться к исходной задаче](codex-in-turn-live.md)
+- [Claude: lifecycle уточнений, закрытие по result и прерывание очереди после «Стопа»](claude-in-turn-live.md)
 - [Полоса «Неделя · Fable» растёт без Fable = расход вне этой машины, а не ошибка кокпита](provider-account-usage.md)
 - [Фризы при наборе в чате = черновик сохранялся тем же тяжёлым путём, что и переписка](draft-save-performance.md)
 - [MCP «не удалось получить» и мёртвые кнопки карточки = опрос перезапускал сам себя](mcp-polling-restart-loop.md)

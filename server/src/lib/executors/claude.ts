@@ -1923,7 +1923,9 @@ export default {
     // сессия, и закрывается после общего завершения: иначе дополнительный ввод некуда
     // писать — `claude -p <текст>` читает stdin только как признак конца.
     if (nativeSettings || onInTurnReady || onInTurnAvailability || onInTurnReceipt || onAssistantMessage) {
-      const streamArgs = ['-p', '--input-format', 'stream-json', ...args.slice(2)];
+      const streamArgs = [
+        '-p', '--input-format', 'stream-json', '--replay-user-messages', ...args.slice(2),
+      ];
 
       return (async () => {
         const session = openClaudeStreamSession({
@@ -2047,8 +2049,8 @@ export default {
    * на лету нечем, поэтому пул переоткрывает сессию с прежним sessionId.
    */
   // Канал ввода в активный ход: дополнительное user-сообщение в тот же stream-json
-  // процесс. Ответ приходит отдельным result — по нему подтверждается потребление,
-  // а разовый режим поднимает stream-json на время хода и закрывает после финала.
+  // процесс. Lifecycle started подтверждает потребление; текст вливается в текущий
+  // ход либо запускает следующий. Разовый режим держит процесс до общего финала.
   inTurnInput: {
     protocol: 1,
     text: true,

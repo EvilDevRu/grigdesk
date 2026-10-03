@@ -13,6 +13,7 @@
 // Разбор потока здесь общий с разовым `run()`: событие CLI одно и то же, и вторая
 // копия правил про usage, компакт и пустой ответ разошлась бы с первой.
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { verifyNativeSettings } from '../executorSettings/capability.ts';
@@ -75,6 +76,11 @@ interface ClaudeEvent {
   total_cost_usd?: number;
   response?: { request_id?: unknown };
   request_id?: unknown;
+  command_uuid?: string;
+  state?: string;
+  uuid?: string;
+  isReplay?: boolean;
+  user_message_uuid?: string;
 }
 
 /**
@@ -422,6 +428,7 @@ export function claudeSessionArgs({
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
     '--verbose',
+    '--replay-user-messages',
     '--permission-mode', permissionMode || 'default',
   ];
   args.push(...providerSettingsArgs);
@@ -453,6 +460,17 @@ export function claudeSessionArgs({
 const INTERRUPT_WAIT_MS = 5_000;
 const CLOSE_WAIT_MS = 3_000;
 const STDERR_TAIL = 4_000;
+
+interface ClaudeInputCommand {
+  messageId: string;
+  queued: boolean;
+  started: boolean;
+  completed: boolean;
+  failed: boolean;
+  // Ход закрылся раньше, чем CLI подтвердил очередь: квитанция уходит прежнему ходу.
+  late?: boolean;
+  onReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
+}
 
 /**
  * Живая сессия: процесс поднимается один раз и обслуживает все ходы чата, пока его
@@ -494,10 +512,10 @@ export function openClaudeStreamSession({
       onInTurnReceipt?: (event: InTurnReceiptEvent) => void | Promise<void>;
       onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
       assistantRevision: number;
-      injectedPending: number;
-      injectedMessageIds: string[];
-      injectedAssistantId: string;
-      injectedAssistantText: string;
+      commands: Map<string, ClaudeInputCommand>;
+      assistantMessageId: string;
+      assistantText: string;
+      lastAssistant: InTurnAssistantEvent | null;
     } | null;
     background: ClaudeTurnCollector | null;
     interruptRequested: boolean;
@@ -519,8 +537,27 @@ export function openClaudeStreamSession({
   let controlSeq = 0;
   let stdoutBuf = '';
   let stderrTail = '';
+  const detachedCommands = new Map<string, ClaudeInputCommand>();
+  const detachedWaiters: Array<() => void> = [];
+  let detachedActive = '';
+  let waitingSend = false;
+  let interruptRevision = 0;
 
   const exitWaiters: Array<() => void> = [];
+
+  /**
+   * Следующий stdin-ввод нельзя влить в уточнение, оставшееся в CLI после stop.
+   * Ожидаем только подтверждённую очередь; отсутствие lifecycle не блокирует новые ходы.
+   */
+  async function waitForDetachedCommands(revision: number): Promise<void> {
+    while (!state.exited && revision === interruptRevision
+      && (detachedActive || [...detachedCommands.values()]
+      .some((command) => command.queued && !command.completed))) {
+      await new Promise<void>((resolve) => {
+        detachedWaiters.push(resolve);
+      });
+    }
+  }
 
   function writeLine(payload: unknown): void {
     if (state.exited || child.stdin?.destroyed) {
@@ -531,19 +568,21 @@ export function openClaudeStreamSession({
 
   /**
    * Порт уточнений активного хода. Пишем дополнительное user-сообщение в тот же stdin:
-   * CLI в режиме stream-json принимает его, не завершая процесс. Подтверждение записи —
-   * только `forwarded`; ответ придёт отдельным result и закроет обмен, а не исходный ход.
+   * CLI в режиме stream-json принимает его, не завершая процесс. Запись даёт forwarded,
+   * а lifecycle started подтверждает включение уточнения в контекст модели.
    */
   function inTurnPortForTurn(): InTurnPort {
+    const owner = state.turn;
+
     return {
       /**
        * Запись дополнительного вопроса в stdin активного хода. Подтверждается только факт
-       * записи: ответ придёт отдельным result и закроет обмен, а не исходный ход.
+       * записи: CLI может влить текст в текущий ход или запустить следующим ходом.
        */
       async deliver({ messageId, text }: { messageId: string; text: string }) {
         const turn = state.turn;
 
-        if (!turn || state.exited) {
+        if (!turn || turn !== owner || state.exited || state.interruptRequested) {
           return {
             ok: false,
             code: 'turn_changed',
@@ -551,12 +590,25 @@ export function openClaudeStreamSession({
           };
         }
 
+        const uuid = randomUUID();
+
+        turn.commands.set(uuid, {
+          messageId,
+          queued: false,
+          started: false,
+          completed: false,
+          failed: false,
+        });
+
         try {
           writeLine({
             type: 'user',
+            uuid,
             message: { role: 'user', content: [{ type: 'text', text }] },
           });
         } catch (error) {
+          turn.commands.delete(uuid);
+
           return {
             ok: false,
             code: 'transport_lost',
@@ -564,9 +616,6 @@ export function openClaudeStreamSession({
             uncertain: true,
           };
         }
-
-        turn.injectedPending += 1;
-        turn.injectedMessageIds.push(messageId);
 
         return { ok: true, state: 'forwarded' };
       },
@@ -602,6 +651,195 @@ export function openClaudeStreamSession({
     hooks.onBackground?.(result as never);
   }
 
+  /**
+   * Граница сообщения закрывает накопленный текст с прежним id до финала всего хода.
+   * Сброс буфера предотвращает повторное завершение на следующем result.
+   */
+  function finishAssistantMessage(): InTurnAssistantEvent | null {
+    const turn = state.turn;
+
+    if (!turn?.assistantMessageId || !turn.assistantText) {
+      return null;
+    }
+
+    const event: InTurnAssistantEvent = {
+      assistantMessageId: turn.assistantMessageId,
+      text: turn.assistantText,
+      sourceRevision: ++turn.assistantRevision,
+      complete: true,
+    };
+
+    turn.assistantMessageId = '';
+    turn.assistantText = '';
+    turn.lastAssistant = event;
+    void turn.onAssistantMessage?.(event);
+
+    return event;
+  }
+
+  /**
+   * CLI присылает отдельные content-блоки одного сообщения с общим id.
+   * Склеиваем весь текст; новый id завершает предыдущую реплику даже без текста.
+   */
+  function rememberAssistantMessage(ev: ClaudeEvent): void {
+    const turn = state.turn;
+    const id = String(ev.message?.id || '');
+
+    if (!turn || !id) {
+      return;
+    }
+    if (turn.assistantMessageId && turn.assistantMessageId !== id) {
+      finishAssistantMessage();
+    }
+
+    const text = claudeMessageText(ev.message);
+
+    if (!text) {
+      return;
+    }
+
+    turn.assistantMessageId = id;
+    turn.assistantText = turn.assistantText ? `${turn.assistantText}\n${text}` : text;
+    turn.assistantRevision += 1;
+    void turn.onAssistantMessage?.({
+      assistantMessageId: id,
+      text: turn.assistantText,
+      sourceRevision: turn.assistantRevision,
+      complete: false,
+    });
+  }
+
+  /**
+   * Lifecycle связывается с UUID входа, а не с id сообщения Кокпита или порядком result.
+   * Отложенные после stop команды принадлежат фону даже при новом заказанном ходе.
+   */
+  function handleCommandLifecycle(ev: ClaudeEvent): void {
+    const uuid = ev.command_uuid || '';
+
+    const detached = detachedCommands.get(uuid);
+
+    if (detached) {
+      if (ev.state === 'started') {
+        detached.started = true;
+        detachedActive = uuid;
+
+        if (detached.failed) {
+          stopDetachedCommand();
+        } else if (detached.late && detached.messageId) {
+          void detached.onReceipt?.({ messageId: detached.messageId, state: 'consumed' });
+        }
+      } else if (ev.state === 'queued') {
+        detached.queued = true;
+      } else if (ev.state === 'completed') {
+        detached.completed = true;
+      } else if (ev.state === 'cancelled') {
+        detachedCommands.delete(uuid);
+
+        if (detachedActive === uuid) {
+          detachedActive = '';
+        }
+
+        for (const resolve of detachedWaiters.splice(0)) {
+          resolve();
+        }
+      }
+
+      return;
+    }
+
+    const turn = state.turn;
+    const command = turn?.commands.get(uuid);
+
+    if (!turn || !command) {
+      return;
+    }
+
+    if (ev.state === 'queued') {
+      command.queued = true;
+    } else if (ev.state === 'started' && !command.started) {
+      command.started = true;
+
+      if (command.messageId && !command.failed) {
+        void turn.onInTurnReceipt?.({ messageId: command.messageId, state: 'consumed' });
+      }
+    } else if (ev.state === 'completed') {
+      command.completed = true;
+    }
+  }
+
+  /**
+   * После stop CLI всё равно запускает уточнение из своей очереди и продолжает работу.
+   * Человек нажал «Стоп», а квитанция уже сказала failed, поэтому такой запуск сразу гасим.
+   */
+  function stopDetachedCommand(): void {
+    void control('interrupt').catch((error) => {
+      log?.warn?.(
+        { err: (error as Error)?.message },
+        'чат: отложенное уточнение после остановки не прервано',
+      );
+    });
+  }
+
+  /**
+   * Итог отложенной команды снимает её из очереди и будит ожидающий send().
+   * Один result может закрыть сразу несколько уточнений, слитых самим CLI.
+   */
+  function settleDetachedCommands(ev: ClaudeEvent): void {
+    for (const [uuid, command] of detachedCommands) {
+      if (command.started || command.completed || uuid === ev.user_message_uuid) {
+        detachedCommands.delete(uuid);
+      }
+    }
+
+    detachedActive = '';
+
+    for (const resolve of detachedWaiters.splice(0)) {
+      resolve();
+    }
+  }
+
+  /**
+   * Ход закрылся до queued уточнения: CLI запустит его отдельным ходом после финала.
+   * Такой ввод переходит в отложенные, чтобы подтвердить потребление и не влить в него новый send.
+   */
+  function detachLateCommands(turn: NonNullable<typeof state.turn>): void {
+    for (const [uuid, command] of turn.commands) {
+      if (!command.messageId || command.started || command.completed || command.failed) {
+        continue;
+      }
+
+      command.late = true;
+      command.onReceipt = turn.onInTurnReceipt;
+      detachedCommands.set(uuid, command);
+    }
+  }
+
+  /**
+   * Stop закрывает канал и явно отклоняет уточнения, которые CLI ещё не начал.
+   * Их UUID сохраняются отдельно для маршрутизации возможного позднего запуска в фон.
+   */
+  function failUnstartedCommands(): void {
+    const turn = state.turn;
+
+    if (!turn) {
+      return;
+    }
+
+    for (const [uuid, command] of turn.commands) {
+      if (!command.messageId || command.started || command.failed) {
+        continue;
+      }
+
+      command.failed = true;
+      detachedCommands.set(uuid, command);
+      void turn.onInTurnReceipt?.({ messageId: command.messageId, state: 'failed' });
+    }
+  }
+
+  /**
+   * События CLI обновляют ленту и закрывают реплики на подтверждённых границах сообщений.
+   * После result ждать разрешено только подтверждённую очередь без started; stop закрывает всё.
+   */
   function handleEvent(ev: ClaudeEvent): void {
     if (ev?.type === 'control_response') {
       const requestId = String(ev.response?.request_id || ev.request_id || '');
@@ -613,38 +851,51 @@ export function openClaudeStreamSession({
       return;
     }
 
-    const collector = state.turn ? state.turn.collector : backgroundCollector();
+    if (ev.type === 'command_lifecycle') {
+      handleCommandLifecycle(ev);
+
+      return;
+    }
+
+    if (ev.type === 'user' && ev.isReplay) {
+      return;
+    }
+
+    const detachedCommand = detachedActive
+      ? detachedCommands.get(detachedActive)
+      : ev.type === 'result' ? detachedCommands.get(ev.user_message_uuid || '') : undefined;
+    const detached = !!detachedActive || !!detachedCommand;
+
+    // Отменённое уточнение не попадает ни в ленту, ни в фон: его прерывание уже запрошено.
+    if (detachedCommand?.failed) {
+      if (ev.type === 'result') {
+        settleDetachedCommands(ev);
+      }
+
+      return;
+    }
+
+    const activeTurn = detached ? null : state.turn;
+    const collector = activeTurn ? activeTurn.collector : backgroundCollector();
     collector.push(ev);
 
-    // Видимый текст хода: id сообщения связывает блок с шагом ленты. Пока ждём ответ на
-    // побочный ввод, копим именно его — этот текст закроется первым result.
-    if (ev?.type === 'assistant' && state.turn) {
-      const turn = state.turn;
-      const text = claudeMessageText((ev as { message?: { content?: unknown } }).message);
-      const id = String((ev as { message?: { id?: unknown } }).message?.id || '');
-
-      if (id && text) {
-        turn.assistantRevision += 1;
-
-        if (turn.injectedPending > 0) {
-          turn.injectedAssistantId = id;
-          turn.injectedAssistantText = text;
-        }
-
-        void turn.onAssistantMessage?.({
-          assistantMessageId: id,
-          text,
-          sourceRevision: turn.assistantRevision,
-          complete: false,
-        });
+    // Ответы субагента остаются вложенными шагами и не закрывают реплику главного агента.
+    // Результат инструмента означает, что все content-блоки его вызова уже получены.
+    if (activeTurn && !ev.parent_tool_use_id) {
+      if (ev.type === 'assistant') {
+        rememberAssistantMessage(ev);
+      } else if (ev.type === 'result' || (ev.type === 'user'
+        && Array.isArray(ev.message?.content)
+        && ev.message.content.some((block) => block?.type === 'tool_result'))) {
+        finishAssistantMessage();
       }
     }
 
     // Id сессии известен с первого события хода: сообщаем его вызывающему сразу, а не
     // в конце хода, — иначе перезапуск сервера посреди первого хода оставлял чат без
     // сессии, и следующее сообщение начинало разговор с нуля.
-    if (state.turn && !state.turn.sessionAnnounced && ev.session_id) {
-      const turn = state.turn;
+    if (activeTurn && !activeTurn.sessionAnnounced && ev.session_id) {
+      const turn = activeTurn;
       turn.sessionAnnounced = true;
       if (!state.sessionId) state.sessionId = ev.session_id;
       void Promise.resolve()
@@ -656,36 +907,15 @@ export function openClaudeStreamSession({
 
     if (ev?.type !== 'result') return;
 
-    if (state.turn && state.turn.injectedPending > 0) {
-      // Первый result после побочного ввода закрывает ОБМЕН с уточнением, а не исходный
-      // ход: публикуем ответ, подтверждаем потребление и продолжаем ждать свой result.
-      const turn = state.turn;
-
-      turn.injectedPending -= 1;
-
-      const messageId = turn.injectedMessageIds.shift() || '';
-      const id = turn.injectedAssistantId || `claude-injected-${turn.assistantRevision + 1}`;
-
-      turn.assistantRevision += 1;
-      void turn.onAssistantMessage?.({
-        assistantMessageId: id,
-        text: turn.injectedAssistantText,
-        sourceRevision: turn.assistantRevision,
-        complete: true,
-      });
-
-      if (messageId) {
-        void turn.onInTurnReceipt?.({ messageId, state: 'consumed' });
-      }
-
-      turn.injectedAssistantId = '';
-      turn.injectedAssistantText = '';
+    if (activeTurn && !state.interruptRequested && [...activeTurn.commands.values()]
+      .some((command) => command.messageId && command.queued && !command.started
+        && !command.completed && !command.failed)) {
 
       return;
     }
 
-    if (state.turn) {
-      const turn = state.turn;
+    if (activeTurn) {
+      const turn = activeTurn;
       state.turn = null;
       const result = buildClaudeTurnResult(turn.collector, {
         fallbackSessionId: state.sessionId,
@@ -710,10 +940,21 @@ export function openClaudeStreamSession({
         turn.reject(stopped);
         return;
       }
-      turn.resolve(result);
+
+      detachLateCommands(turn);
+
+      // Явный id связывает финал с уже показанным блоком и после очистки маркера названия.
+      // При другом тексте result итог остаётся самостоятельным сообщением.
+      turn.resolve({
+        ...result,
+        ...(turn.lastAssistant?.text === String(ev.result || '').trim()
+          ? { assistantMessageId: turn.lastAssistant.assistantMessageId }
+          : {}),
+      });
       return;
     }
     finishBackground();
+    settleDetachedCommands(ev);
   }
 
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -767,6 +1008,13 @@ export function openClaudeStreamSession({
     // Непрошеный ход, оборванный на середине, наружу не отдаём: у него нет result,
     // а придуманный ответ хуже отсутствующего.
     state.background = null;
+    detachedActive = '';
+    detachedCommands.clear();
+
+    for (const resolve of detachedWaiters.splice(0)) {
+      resolve();
+    }
+
     hooks.onExit?.({ code, signal, reason: state.exitReason } as never);
     for (const resolve of exitWaiters.splice(0)) resolve();
   });
@@ -824,7 +1072,7 @@ export function openClaudeStreamSession({
     get pid() { return child.pid; },
     get sessionId() { return state.sessionId; },
     get alive() { return !state.exited; },
-    get busy() { return !!state.turn; },
+    get busy() { return !!state.turn || waitingSend; },
 
     /** Заказанный ход: пишем сообщение в stdin и ждём его result. */
     /**
@@ -850,13 +1098,53 @@ export function openClaudeStreamSession({
         await nativeReady;
       }
 
-      if (state.exited) return Promise.reject(new Error(state.exitReason || 'Сессия агента закрыта.'));
-      if (state.turn) return Promise.reject(new Error('В этой сессии уже идёт ход.'));
+      if (state.exited) {
+        return Promise.reject(new Error(state.exitReason || 'Сессия агента закрыта.'));
+      }
+      if (state.turn || waitingSend) {
+        return Promise.reject(new Error('В этой сессии уже идёт ход.'));
+      }
+
+      const revision = interruptRevision;
+
+      // Поздний ввод без lifecycle (старый CLI) не должен копиться между ходами.
+      for (const [uuid, command] of detachedCommands) {
+        if (command.late && !command.queued) {
+          detachedCommands.delete(uuid);
+        }
+      }
+
+      waitingSend = true;
+
+      try {
+        await waitForDetachedCommands(revision);
+      } finally {
+        waitingSend = false;
+      }
+
+      if (revision !== interruptRevision) {
+        onInTurnAvailability?.({ available: false, reason: 'not_ready' });
+
+        throw Object.assign(new Error('Ход остановлен.'), {
+          stopped: true,
+          steps: [],
+          sessionId: state.sessionId,
+        });
+      }
+
+      if (state.exited) {
+        return Promise.reject(new Error(state.exitReason || 'Сессия агента закрыта.'));
+      }
+      if (state.turn) {
+        return Promise.reject(new Error('В этой сессии уже идёт ход.'));
+      }
 
       // Непрошеный ход не может идти одновременно с заказанным: CLI обрабатывает
       // сообщения по очереди. Если он ещё не закрыт — закрываем его сейчас, иначе
       // его шаги прилипли бы к новому ходу.
-      if (state.background) finishBackground();
+      if (state.background && !detachedActive) {
+        finishBackground();
+      }
 
       const collector = createClaudeTurnCollector({
         onStep,
@@ -877,15 +1165,25 @@ export function openClaudeStreamSession({
           ...(onInTurnReceipt ? { onInTurnReceipt } : {}),
           ...(onAssistantMessage ? { onAssistantMessage } : {}),
           assistantRevision: 0,
-          injectedPending: 0,
-          injectedMessageIds: [],
-          injectedAssistantId: '',
-          injectedAssistantText: '',
+          commands: new Map(),
+          assistantMessageId: '',
+          assistantText: '',
+          lastAssistant: null,
         };
 
         try {
+          const uuid = randomUUID();
+
+          state.turn.commands.set(uuid, {
+            messageId: '',
+            queued: false,
+            started: false,
+            completed: false,
+            failed: false,
+          });
           writeLine({
             type: 'user',
+            uuid,
             message: { role: 'user', content: [{ type: 'text', text: String(message || '') }] },
           });
 
@@ -905,12 +1203,23 @@ export function openClaudeStreamSession({
      */
     async interrupt() {
       if (state.exited) return;
-      if (state.turn) state.interruptRequested = true;
+
+      interruptRevision += 1;
+
+      for (const resolve of detachedWaiters.splice(0)) {
+        resolve();
+      }
+
+      if (state.turn) {
+        state.interruptRequested = true;
+        state.turn.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
+        failUnstartedCommands();
+      }
+
       try {
         await control('interrupt');
       } catch (error) {
         // Ход мог закончиться сам, пока запрос летел: это не повод падать.
-        state.interruptRequested = false;
         log?.warn?.({ err: (error as Error)?.message }, 'чат: прерывание хода не подтверждено');
       }
     },

@@ -71,6 +71,7 @@ import {
 } from '../../lib/chat/modelRef.ts';
 import {
   finishChatTitleHook,
+  readChatTitle,
   visibleChatTitleStep,
   withChatTitleHook,
 } from '../../lib/chat/titleHook.ts';
@@ -3224,7 +3225,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           });
         },
         onAssistantMessage: async (event: InTurnAssistantEvent) => {
-          await assistantPublisher.publish(runId, String(chatKey || ''), event);
+          const { reply: text } = readChatTitle(event.text, wantsTitle);
+
+          await assistantPublisher.publish(runId, String(chatKey || ''), { ...event, text });
         },
         onPermission: (presentation) => {
           // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
