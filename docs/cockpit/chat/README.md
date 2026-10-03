@@ -59,6 +59,20 @@
 
 ### Исполнители и модели
 
+- [Исполнитель GLM (Z.ai): допуск режима, живая проверка и ограничения](glm-executor.md)
+- [Контракт доступа и допуска GLM: два режима, отдельные ключи, отпечаток и setup-only карточка](glm-access-contract.md)
+- [Входы сборки GLM: exact-версии, проверка notices и запрет записи llm-pi-ai](glm-build-inputs.md)
+- [Notices GLM: точные версии, закреплённые источники и offline supplements](glm-license-inventory.md)
+- [Workspace-исходники GLM: полное замыкание плагина и отказ неполного snapshot](glm-workspace-source-closure.md)
+- [Факты runtime GLM: маршрут zai, коды ошибок, hooks в песочнице, approval и MCP](glm-runtime-facts.md)
+- [Профиль запуска GLM: overlay, hooks с matcher *, homes и server-owned settings](glm-launch-profile.md)
+- [Ход GLM: порядок, таблица исходов, отсутствие повторов, сжатие и replay размышлений](glm-turn-runtime.md)
+- [Политика инструментов GLM: hook с matcher *, сверка approval и остаточный риск fail-open](glm-tool-policy.md)
+- [MCP у GLM: только cockpit-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
+- [Каталог GLM: ACP-чтение без prompt, уровни по модели, glm-4.7 и glm-5-turbo без выбора](glm-catalog.md)
+- [Память GLM: привязка, проверка журнала перед resume, сброс и summary-сжатие](glm-session-memory.md)
+- [Стоп и падение GLM: cancel, ограниченное ожидание, kill своего процесса, без повтора эффекта](glm-stop-recovery.md)
+- [GLM в маршруте чата: auth guard, turnId и pending, режимы, знак и modelRef](glm-chat-route.md)
 - [Снимок исходников DeepSeek: manifest в Git, кэш исходников по commit, integrity и публикация](deepseek-source-snapshot.md)
 - [Состав host runtime DeepSeek: воспроизводимая сборка, ресурсы и compiled проверки](deepseek-vendored-composition.md)
 - [Граница LLM-провайдеров DSH: исключённый pi-ai, зависимости и пределы проверки](deepseek-llm-provider-boundary.md)
@@ -117,6 +131,7 @@
 - [Абсолютный путь в правах CLI пишется ДВУМЯ слэшами, иначе правило молчит](cli-absolute-path-permissions.md)
 - [Запрет прямого SSH — рубеж кооперативного агента, не same-uid sandbox](ssh-policy-sandbox-limits.md)
 - [Модель Codex пропала из селекта = урезанный каталог устаревшему CLI, а не снятая модель](codex-cli-catalog-compatibility.md)
+- [Окно Codex 258 400 у модели «на 1M» = стандартное окно thread, большое включается конфигом](codex-context-window.md)
 - [Переезд Codex на app-server молча сузил рабочую область агента до cwd](codex-workspace-scope.md)
 - [Codex: живое уточнение требует подсказки вернуться к исходной задаче](codex-in-turn-live.md)
 - [Полоса «Неделя · Fable» растёт без Fable = расход вне этой машины, а не ошибка кокпита](provider-account-usage.md)

@@ -6,7 +6,8 @@
   Для безопасного trusted-триажа adapter отдельно объявляет `scopedWorkspace` и принимает
   `workspaceAccess` с раздельными readable/writable roots; одного plan-mode недостаточно.
   Папка сканируется при старте — ядро (providers, chat)
-  про вендоров не знает. Сейчас: `claude.ts`, `codex.ts`, `deepseek.ts`, `kimi.ts`.
+  про вендоров не знает. Сейчас: `claude.ts`, `codex.ts`, `deepseek.ts`, `glm.ts`, `kimi.ts` (`glm.ts` — setup-only,
+  пока режим доступа не допущен).
 - `GET /api/providers` — `{ id, name, vendor, bin, color, version, auth, authLabel, available, installed, models[], modes[], settings[] }`.
   Тарифной отсечки в описании provider-а нет: факты prompt cache относятся к конкретному
   model request и приходят через `contextCache`, а не через этот каталог.

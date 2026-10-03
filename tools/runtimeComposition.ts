@@ -25,11 +25,12 @@ export function assertRuntimeClosure(
 
 const requireBuild = createRequire(new URL('./deepseek-build/package.json', import.meta.url));
 
-export const COMPOSITION_REVISION = 'cockpit-host-web-acp-v2';
+export const COMPOSITION_REVISION = 'cockpit-host-web-acp-v3';
 
 export const HOST_OVERLAY_PACKAGES = [
   '@deepseek-ai/dsh-hooks-claude-code',
   '@deepseek-ai/dsh-mcp-client',
+  '@deepseek-ai/dsh-llm-pi-ai',
 ] as const;
 
 const OMITTED_BUNDLE_PACKAGES = new Set([
@@ -68,8 +69,8 @@ function omitBundlePackage(name: string): boolean {
 }
 
 /**
- * Композиция меняет только строки browser roster и неиспользуемый второй LLM.
- * Исходный YAML остаётся побайтовым snapshot; результат принадлежит сборке Cockpit.
+ * Композиция убирает browser roster и автоматически монтируемый pi-ai.
+ * Его пакет доступен только явному overlay; исходный YAML остаётся неизменным.
  */
 export async function readRuntimeComposition(sourceDir: string): Promise<Record<string, any[]>> {
   const yaml = runtimeYaml();

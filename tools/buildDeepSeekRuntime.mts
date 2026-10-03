@@ -48,6 +48,17 @@ export async function deepSeekBuildInputs(vendorDir: string): Promise<Record<str
     'tools/deepseek-build/licenses/xterm-6.0.0-LICENSE.txt',
     'tools/deepseek-build/licenses/LGPL-3.0.txt', 'tools/deepseek-build/licenses/GPL-3.0.txt'];
   const hashes: Record<string, string> = {};
+  const licenses = JSON.parse(await fs.readFile(
+    path.join(dependencyRoot, 'licenses/sources.json'), 'utf8',
+  ));
+
+  for (const entry of licenses.files) {
+    const input = `tools/deepseek-build/licenses/${entry.file}`;
+
+    if (!inputs.includes(input)) {
+      inputs.push(input);
+    }
+  }
 
   for (const input of inputs) {
     hashes[input] = vendorHash(await fs.readFile(path.join(repositoryRoot, input)));
@@ -274,6 +285,42 @@ async function compileWorkspace(
 }
 
 /**
+ * Сведения о плагине llm-pi-ai входят в контракт generation и тем самым в её buildId.
+ * Snapshot без исходников плагина поля не получает: GLM видит отказ, DeepSeek — нет.
+ */
+async function llmPiAiContract(manifest: {
+  files: readonly { path: string; sha256: string }[];
+  patches: readonly { path: string; sha256: string }[];
+}): Promise<Record<string, unknown> | null> {
+  const sources = manifest.files
+    // Сборка переписывает tsconfig пакета; commit upstream и так входит в identity допуска.
+    .filter((file) => file.path.startsWith('packages/llm/llm-pi-ai/'))
+    .filter((file) => !/\/tsconfig[^/]*\.json$/u.test(file.path))
+    .map((file) => ({ path: file.path, sha256: file.sha256 }))
+    .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+
+  if (sources.length === 0) {
+    return null;
+  }
+
+  const lock = JSON.parse(await fs.readFile(path.join(dependencyRoot, 'package-lock.json'), 'utf8'));
+  const piAi = lock.packages?.['node_modules/@earendil-works/pi-ai'];
+
+  if (typeof piAi?.version !== 'string' || typeof piAi.integrity !== 'string') {
+    throw new Error('В lock сборки нет exact pi-ai с integrity');
+  }
+
+  return {
+    piAi: {
+      version: piAi.version,
+      integrity: piAi.integrity,
+    },
+    sourceHash: vendorHash(JSON.stringify(sources)),
+    patches: manifest.patches.map((patch) => ({ path: patch.path, sha256: patch.sha256 })),
+  };
+}
+
+/**
  * Сборка никогда не пишет в current и не зависит от server/node_modules.
  * Source snapshot проверяется до копирования, патчи накладываются только в staging.
  */
@@ -319,7 +366,9 @@ export async function buildDeepSeekRuntime(options: {
       path.join(dependencyRoot, 'dynamic-imports.json'), 'utf8',
     ));
 
-    const references = await scanDynamicRuntimeReferences(staging, closure.packages);
+    const references = await scanDynamicRuntimeReferences(staging, closure.packages, [
+      'node_modules/@earendil-works/pi-ai/dist',
+    ]);
 
     assertKnownDynamicReferences(references, dynamicImports);
 
@@ -350,7 +399,7 @@ export async function buildDeepSeekRuntime(options: {
       path.join(staging, 'presetsHost.mjs'));
 
     // Compiler и bundler уже завершили работу; runtime не получает их executable dependencies.
-    for (const name of ['typescript', 'esbuild', '@esbuild', '@types']) {
+    for (const name of ['typescript', 'esbuild', '@esbuild']) {
       await fs.rm(path.join(staging, 'node_modules', name), { recursive: true, force: true });
     }
 
@@ -362,6 +411,7 @@ export async function buildDeepSeekRuntime(options: {
     closure.packages = closure.packages.filter((item) => item.name !== '@deepseek-ai/dsh-typert-generator');
     await fs.writeFile(path.join(staging, 'composition.json'), JSON.stringify(closure, null, 2));
     await writeDeepSeekLicenseInventory(staging, closure.packages);
+    await fs.rm(path.join(staging, 'node_modules/@types'), { recursive: true, force: true });
 
     const finalInputs = await deepSeekBuildInputs(options.vendorDir);
 
@@ -370,6 +420,7 @@ export async function buildDeepSeekRuntime(options: {
     }
 
     const payload = await hashRuntimePayload(staging);
+    const llmPiAi = await llmPiAiContract(manifest);
     const contract = {
       format: 1,
       hostContract: 1,
@@ -387,6 +438,7 @@ export async function buildDeepSeekRuntime(options: {
         settingsWeb: true,
         settingsAcp: true,
       },
+      ...(llmPiAi ? { llmPiAi } : {}),
     };
     const inputIdentity = {
       contract,

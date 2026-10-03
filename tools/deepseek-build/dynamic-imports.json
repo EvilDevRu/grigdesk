@@ -38,5 +38,25 @@
     "file": "vendor/loader/src/internal.ts",
     "expression": "require(id)",
     "reason": "Cordis loader importRequire получает идентификатор из разрешения plugin; package map принадлежит host, не модели."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/env-api-keys.js",
+    "expression": "import(__rewriteRelativeImportExtension(specifier))",
+    "reason": "Только node:fs, node:os и node:path из констант shipped кода; обращений к сети нет."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/auth/context.js",
+    "expression": "import(__rewriteRelativeImportExtension(specifier))",
+    "reason": "Только node:fs/promises и node:os для auth context; GLM передаёт явный служебный ключ."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/auth/oauth/load.js",
+    "expression": "import(__rewriteRelativeImportExtension(runtimeSpecifier))",
+    "reason": "Относительные OAuth-модули перечислены в shipped loaders и сохранены в dist; GLM не использует OAuth."
+  },
+  {
+    "file": "node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
+    "expression": "import(__rewriteRelativeImportExtension(runtimeSpecifier))",
+    "reason": "Относительный bedrock-converse-stream.js сохранён вместе с exact AWS closure; GLM использует zai."
   }
 ]

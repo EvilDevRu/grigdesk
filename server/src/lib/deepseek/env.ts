@@ -16,6 +16,41 @@ function envError(message: string): DeepSeekEnvError {
   return error;
 }
 
+/**
+ * Общий allowlist процесса DSH: системные имена, служебные флаги и один ключ маршрута.
+ * Имя и значение ключа задаёт исполнитель; остальные credentials и proxy не наследуются.
+ */
+export function buildHarnessChildEnv({
+  source,
+  dshHome,
+  credential,
+}: {
+  source: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  dshHome: string;
+  credential: { name: string; value: string };
+}): Record<string, string> {
+  if (!path.isAbsolute(dshHome)) {
+    throw new TypeError('DSH_HOME должен быть абсолютным путём');
+  }
+
+  const env: Record<string, string> = {};
+
+  for (const key of PASSTHROUGH_ENV) {
+    const value = source[key];
+
+    if (typeof value === 'string' && value.length > 0 && !value.includes('\0')) {
+      env[key] = value;
+    }
+  }
+
+  env.DSH_HOME = dshHome;
+  env.DSH_TELEMETRY_DISABLED = '1';
+  env[credential.name] = credential.value;
+  env.NO_COLOR = '1';
+
+  return env;
+}
+
 /** Окружение DSH строится allowlist-ом: чужие provider credentials и proxy не наследуются. */
 export function buildDeepSeekChildEnv({
   source,
@@ -28,22 +63,12 @@ export function buildDeepSeekChildEnv({
   if (!apiKey) {
     throw envError('Для DeepSeek нужен DEEPSEEK_API_KEY в окружении службы');
   }
-  if (!path.isAbsolute(dshHome)) {
-    throw new TypeError('DSH_HOME должен быть абсолютным путём');
-  }
 
-  const env: Record<string, string> = {};
-  for (const key of PASSTHROUGH_ENV) {
-    const value = source[key];
-    if (typeof value === 'string' && value.length > 0 && !value.includes('\0')) {
-      env[key] = value;
-    }
-  }
-  env.DSH_HOME = dshHome;
-  env.DSH_TELEMETRY_DISABLED = '1';
-  env.DEEPSEEK_API_KEY = apiKey;
-  env.NO_COLOR = '1';
-  return env;
+  return buildHarnessChildEnv({
+    source,
+    dshHome,
+    credential: { name: 'DEEPSEEK_API_KEY', value: apiKey },
+  });
 }
 
 export function chatHomeFor(runtimeHome: string, chatKey: string): string {

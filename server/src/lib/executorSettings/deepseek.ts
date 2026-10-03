@@ -289,6 +289,11 @@ export async function deepSeekSettingsNeedRestart(client: DeepSeekSettingsRpc, p
 }
 
 const OWNERSHIP: NativeSettingsOwnership[] = [
+  {
+    path: ['llm-pi-ai'],
+    owner: 'Маршруты моделей Кокпита',
+    reason: 'Подключение и параметры llm-pi-ai задаёт профиль запуска Кокпита',
+  },
   ...['llm-deepseek', 'llm-pi-ai'].flatMap((namespace) =>
     ['reasoningEffort', 'thinking'].map((key) => ({
       path: [namespace, key],

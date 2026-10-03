@@ -12,6 +12,78 @@ export interface DynamicRuntimeReference {
   expression: string;
 }
 
+export interface LockedExternalDependency {
+  name: string;
+  version: string;
+  integrity: string;
+}
+
+/**
+ * Зависимости модельного плагина берутся из разрешённых записей upstream lock.
+ * Диапазоны версий и отсутствующая integrity не становятся входами сборки.
+ */
+export function llmPiAiExternalDependencies(lock: Record<string, any>): LockedExternalDependency[] {
+  const importer = lock.importers?.['packages/llm/llm-pi-ai'];
+  const roots = Object.entries(importer?.dependencies ?? {}) as [string, { version: string }][];
+  const queue = roots.filter(([, entry]) => !entry.version.startsWith('link:'))
+    .map(([name, entry]) => [name, entry.version] as const);
+  const visited = new Set<string>();
+  const resolved = new Map<string, LockedExternalDependency>();
+
+  if (queue.length === 0) {
+    throw new Error('В upstream lock отсутствуют внешние зависимости llm-pi-ai');
+  }
+
+  for (let offset = 0; offset < queue.length; offset += 1) {
+    const [name, reference] = queue[offset]!;
+    const snapshotId = `${name}@${reference}`;
+
+    if (visited.has(snapshotId)) {
+      continue;
+    }
+
+    visited.add(snapshotId);
+
+    const version = reference.split('(')[0]!;
+    const packageId = `${name}@${version}`;
+    const snapshot = lock.snapshots?.[snapshotId];
+    const declaration = lock.packages?.[packageId];
+    const integrity = declaration?.resolution?.integrity;
+
+    if (!snapshot) {
+      throw new Error(`Отсутствует upstream snapshot: ${snapshotId}`);
+    }
+
+    if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/u.test(version)
+      || typeof integrity !== 'string' || !/^sha(?:256|384|512)-[A-Za-z0-9+/]+=*$/u.test(integrity)) {
+      throw new Error(`Отсутствует exact версия или integrity: ${packageId}`);
+    }
+
+    if (declaration.requiresBuild || snapshot.requiresBuild) {
+      throw new Error(`Замыкание llm-pi-ai требует нативной сборки: ${packageId}`);
+    }
+
+    resolved.set(packageId, {
+      name,
+      version,
+      integrity,
+    });
+
+    const children = { ...snapshot.dependencies, ...snapshot.optionalDependencies };
+
+    for (const [child, childReference] of Object.entries(children)) {
+      if (typeof childReference !== 'string' || childReference.startsWith('link:')) {
+        throw new Error(`Некорректная внешняя зависимость ${snapshotId}: ${child}`);
+      }
+
+      queue.push([child, childReference]);
+    }
+  }
+
+  return [...resolved.values()].sort((left, right) =>
+    `${left.name}@${left.version}`.localeCompare(`${right.name}@${right.version}`, 'en'));
+}
+
 /**
  * AST проверяет dynamic import и createRequire-пути в реальных host-входах.
  * Browser face не участвует, а новая неизвестная ссылка должна получить отдельное обоснование.
@@ -19,9 +91,11 @@ export interface DynamicRuntimeReference {
 export async function scanDynamicRuntimeReferences(
   sourceDir: string,
   packages: readonly WorkspacePackage[],
+  externalRoots: readonly string[] = [],
 ): Promise<DynamicRuntimeReference[]> {
   const ts = requireBuild('typescript');
   const output: DynamicRuntimeReference[] = [];
+  const filenames = new Set<string>();
 
   for (const item of packages) {
     const host = path.join(sourceDir, item.root, 'tsconfig.host.json');
@@ -36,32 +110,56 @@ export async function scanDynamicRuntimeReferences(
     const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, path.dirname(config));
 
     for (const filename of parsed.fileNames) {
-      const content = await fs.readFile(filename, 'utf8');
-      const source = ts.createSourceFile(filename, content, ts.ScriptTarget.Latest, true);
-
-      /**
-       * Только динамические загрузчики требуют явной таблицы разрешения.
-       * Статические импорты проверяет компилятор и Node при compiled smoke.
-       */
-      const visit = (node: any): void => {
-        if (ts.isCallExpression(node) && node.arguments.length > 0) {
-          const callee = node.expression.getText(source);
-          const dynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword
-            || callee === 'require' || callee === 'require.resolve' || callee === 'import.meta.resolve';
-
-          if (dynamic && !ts.isStringLiteralLike(node.arguments[0])) {
-            output.push({
-              file: path.relative(sourceDir, filename).split(path.sep).join('/'),
-              expression: node.getText(source),
-            });
-          }
-        }
-
-        ts.forEachChild(node, visit);
-      };
-
-      visit(source);
+      filenames.add(filename);
     }
+  }
+
+  /**
+   * Внешний JS-пакет не имеет host tsconfig, поэтому его runtime-файлы обходятся явно.
+   * Проверяется весь dist, включая ленивые загрузчики остальных shipped providers.
+   */
+  const collectExternalFiles = async (directory: string): Promise<void> => {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const filename = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        await collectExternalFiles(filename);
+      } else if (entry.isFile() && /\.[cm]?js$/u.test(entry.name)) {
+        filenames.add(filename);
+      }
+    }
+  };
+
+  for (const relative of externalRoots) {
+    await collectExternalFiles(path.join(sourceDir, relative));
+  }
+
+  for (const filename of filenames) {
+    const content = await fs.readFile(filename, 'utf8');
+    const source = ts.createSourceFile(filename, content, ts.ScriptTarget.Latest, true);
+
+    /**
+     * Только динамические загрузчики требуют явной таблицы разрешения.
+     * Статические импорты проверяет компилятор и Node при compiled smoke.
+     */
+    const visit = (node: any): void => {
+      if (ts.isCallExpression(node) && node.arguments.length > 0) {
+        const callee = node.expression.getText(source);
+        const dynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword
+          || callee === 'require' || callee === 'require.resolve' || callee === 'import.meta.resolve';
+
+        if (dynamic && !ts.isStringLiteralLike(node.arguments[0])) {
+          output.push({
+            file: path.relative(sourceDir, filename).split(path.sep).join('/'),
+            expression: node.getText(source),
+          });
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(source);
   }
 
   return output.sort((a, b) => `${a.file}:${a.expression}`.localeCompare(`${b.file}:${b.expression}`));

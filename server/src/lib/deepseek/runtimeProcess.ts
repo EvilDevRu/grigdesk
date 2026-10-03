@@ -13,7 +13,11 @@ import {
   readDeepSeekArtifactAsync,
   readDeepSeekArtifactHeader,
 } from './runtimeArtifact.ts';
-import type { DeepSeekArtifact, DeepSeekArtifactContract } from './runtimeArtifact.ts';
+import type {
+  DeepSeekArtifact,
+  DeepSeekArtifactContract,
+  DeepSeekArtifactHeader,
+} from './runtimeArtifact.ts';
 
 export interface DeepSeekRuntimeConfig {
   deepseekBin?: string;
@@ -206,6 +210,34 @@ export function requireDeepSeekRuntimeIdentity(config: DeepSeekRuntimeConfig): s
 }
 
 /**
+ * Заголовок выбранного поколения без проверки файлов. Отсутствие каталога и выход
+ * за каталог сборок дают стабильные коды runtime.
+ */
+function headerOf(selection: GenerationSelection): DeepSeekArtifactHeader {
+  let root: string;
+
+  try {
+    root = fs.realpathSync(selection.directory);
+  } catch {
+    throw deepSeekRuntimeError('deepseek_runtime_missing', 'Встроенный runtime DeepSeek отсутствует');
+  }
+
+  assertWithinBuilds(selection, root);
+
+  return readDeepSeekArtifactHeader(root);
+}
+
+/**
+ * Заголовок выбранного встроенного поколения для адаптеров на той же сборке; внешний бинарь — null.
+ * Целостность файлов здесь не доказывается — её проверяют descriptor и probe.
+ */
+export function readSelectedDeepSeekHeader(config: DeepSeekRuntimeConfig): DeepSeekArtifactHeader | null {
+  const selection = selectDeepSeekRuntime(config);
+
+  return 'external' in selection ? null : headerOf(selection);
+}
+
+/**
  * Лёгкое описание выбранной сборки для карточки и ключей кэша: identity и версии.
  * Целостность файлов здесь не доказывается — её проверяют descriptor и probe.
  */
@@ -224,17 +256,7 @@ export function describeDeepSeekRuntime(config: DeepSeekRuntimeConfig): {
     };
   }
 
-  let root: string;
-
-  try {
-    root = fs.realpathSync(selection.directory);
-  } catch {
-    throw deepSeekRuntimeError('deepseek_runtime_missing', 'Встроенный runtime DeepSeek отсутствует');
-  }
-
-  assertWithinBuilds(selection, root);
-
-  const header = readDeepSeekArtifactHeader(root);
+  const header = headerOf(selection);
 
   return {
     identity: `deepseek-build:${header.buildId}`,

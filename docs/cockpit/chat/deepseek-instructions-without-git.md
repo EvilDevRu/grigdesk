@@ -7,6 +7,9 @@ Hook `server/scripts/deepseekInstructionsHook.mts` больше не требу�
 
 Роль hook ограничена точными отдельными строками `@путь` в инструкциях между root и cwd.
 Основные AGENTS/CLAUDE читает модуль `agent-instructions` DSH; hook их не дублирует.
+DSH читает и `AGENTS.local.md`/`CLAUDE.local.md` цепочки root→cwd, поэтому импорт такого файла
+(частый `@CLAUDE.local.md` в `CLAUDE.md`) hook пропускает со статусом `skipped: native` и без
+текста в контексте: иначе файл попадал в запрос дважды (проверено на собранной DSH).
 Проверки realpath цели, типа, размера, глубины и циклов остаются. Импорт через симлинк
 за пределы root запрещён. Повреждённый stdin остаётся fail-open с диагностикой.
 

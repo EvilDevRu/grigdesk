@@ -21,6 +21,7 @@ const MARKED = [
   { id: 'codex', name: 'GPT' },
   { id: 'kimi', name: 'Kimi' },
   { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'glm', name: 'GLM (Z.ai)' },
 ];
 
 async function compileIcon() {
@@ -104,4 +105,19 @@ test('незнакомому исполнителю остаётся кружо�
   assert.ok(fb.exists());
   assert.equal(fb.text(), 'М');
   assert.match(fb.attributes('style'), /width:\s*20px/);
+});
+
+test('знак glm есть в MARKED и рисуется в 12, 15, 19 и 20 px', async (t) => {
+  assert.ok(MARKED.some((provider) => provider.id === 'glm'));
+
+  for (const size of [12, 15, 19, 20]) {
+    const wrapper = await mountIcon(t, { id: 'glm', name: 'GLM (Z.ai)' }, size);
+    const svg = wrapper.find('svg');
+
+    assert.ok(svg.exists(), `${size}: ожидался svg-знак`);
+    assert.equal(wrapper.find('.fb').exists(), false, `${size}: показан фоллбэк-кружок`);
+    assert.equal(svg.attributes('width'), String(size));
+    assert.equal(svg.attributes('height'), String(size));
+    assert.ok(svg.element.querySelectorAll('path, circle, polygon').length > 0);
+  }
 });

@@ -35,19 +35,41 @@ async function unusedPort(): Promise<number> {
   return port;
 }
 
-async function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill('SIGTERM');
+/**
+ * Ждёт выхода процесса не дольше заданного; таймер снимается в любом исходе.
+ * Возвращает, вышел ли процесс за это время.
+ */
+async function exited(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true;
+  }
+
   let timer: ReturnType<typeof setTimeout>;
 
   await Promise.race([
     new Promise<void>((resolve) => child.once('exit', () => resolve())),
-    new Promise<void>((resolve) => { timer = setTimeout(resolve, 2_000); }),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
   ]);
 
   clearTimeout(timer!);
 
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+/**
+ * SIGTERM, ограниченное ожидание, затем SIGKILL — только своему процессу. После SIGKILL
+ * остановка тоже ждёт выхода, иначе порт и файлы запуска освобождались бы позже возврата.
+ */
+async function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGTERM');
+
+  if (!await exited(child, 2_000)) {
+    child.kill('SIGKILL');
+    await exited(child, 2_000);
+  }
 }
 
 /**

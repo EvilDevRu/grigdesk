@@ -16,6 +16,9 @@ const routesDir = process.env.COCKPIT_ROUTES_DIR || path.join(home, '.factory', 
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
 const deepseekRuntimeHome = process.env.COCKPIT_DEEPSEEK_RUNTIME_HOME
   || path.join(factoryStateDir, 'cockpit-deepseek');
+// Корень private homes GLM. Абсолютность проверяет адаптер: кривое значение закрывает
+// только карточку GLM, а не старт всей службы.
+const glmRuntimeHome = process.env.COCKPIT_GLM_RUNTIME_HOME || path.join(factoryStateDir, 'cockpit-glm');
 const publicDomain = process.env.COCKPIT_PUBLIC_DOMAIN || '';
 
 // Запуск kimi-чатов: host — прямой дочерний процесс сервера (parity с claude: host
@@ -97,6 +100,8 @@ export const config = {
   deepseekGenerationRoot: path.join(rootDir, 'server', 'runtime', 'deepseek'),
   deepseekBin: process.env.COCKPIT_DEEPSEEK_BIN
     || path.join(deepseekRuntimeHome, 'install', 'current', 'node_modules', '.bin', 'dsh'),
+  // GLM (Z.ai) работает на той же встроенной сборке DSH, но со своими homes и ключами.
+  glmRuntimeHome,
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
   modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
   // Ряды прогноза лимитов (modules/usage-forecast): снимки полос и журнал сбросов.

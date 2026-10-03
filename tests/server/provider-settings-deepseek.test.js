@@ -10,7 +10,10 @@ import {
   applyDeepSeekNativeSettings,
 } from '../../server/src/lib/executorSettings/deepseek.ts';
 import { ProviderSettingsCatalogCache } from '../../server/src/lib/executorSettings/catalog.ts';
-import { flattenNativeSettings } from '../../server/src/lib/executorSettings/validation.ts';
+import {
+  flattenNativeSettings,
+  validateNativeSetting,
+} from '../../server/src/lib/executorSettings/validation.ts';
 import { projectNativeSettingsCatalog } from '../../server/src/lib/executorSettings/projection.ts';
 import { prepareDeepSeekLaunch } from '../../server/src/lib/deepseek/runtime.ts';
 import { runDeepSeekWebTurn } from '../../server/src/lib/deepseek/webRuntime.ts';
@@ -154,6 +157,37 @@ test('DSH не создаёт второй редактор effort и thinking, 
   assert.equal(fields.find((field) => field.id === '["llm-deepseek","reasoningEffort"]').writable, false);
   assert.equal(fields.find((field) => field.id === '["llm-deepseek","thinking"]').writable, false);
   assert.equal(fields.find((field) => field.id === '["llm-deepseek","maxTokens"]').writable, true);
+});
+
+test('namespace llm-pi-ai в describe DeepSeek целиком принадлежит Кокпиту и не пишется', async () => {
+  const native = structuredClone(description);
+
+  native.namespaces.push({
+    ns: 'llm-pi-ai',
+    revision: 0,
+    applies: 'live',
+    secrets: [],
+    value: { baseURL: 'https://fixture.invalid', futureFlag: true },
+    schema: {
+      type: 'object',
+      dict: {
+        baseURL: { type: 'string' },
+        futureFlag: { type: 'boolean' },
+      },
+    },
+  });
+
+  const cache = new ProviderSettingsCatalogCache();
+  const read = await cache.read({ discover: async () => deepSeekSettingsSnapshot(native, context) }, context);
+  const fields = flattenNativeSettings(read.fields).filter((field) => field.path[0] === 'llm-pi-ai');
+
+  assert.equal(fields.length, 2);
+
+  for (const field of fields) {
+    assert.equal(field.writable, false);
+    assert.ok(field.owner);
+    assert.equal(validateNativeSetting(read.fields, field.id, field.value)?.code, 'readonly_field');
+  }
 });
 
 test('DSH отправляет новый leaf через адресный mutate и проверяет принятое значение', async () => {

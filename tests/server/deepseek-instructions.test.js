@@ -57,3 +57,17 @@ test('отклоняет cwd за пределами projectRoot', async (t) => 
     cwd: f.parent,
   }), /внутри projectRoot/u);
 });
+
+test('импорт файла инструкций, который DSH читает сам, не дублируется в контексте', async (t) => {
+  const f = await createInstructionProject(t);
+
+  await fs.writeFile(path.join(f.root, 'CLAUDE.local.md'), 'LOCAL-NATIVE-MARK\n');
+
+  const result = await expandInstructionImports({ projectRoot: f.root, cwd: f.sub });
+
+  assert.doesNotMatch(result.context, /LOCAL-NATIVE-MARK/u);
+  assert.doesNotMatch(result.context, /CLAUDE\.local\.md/u);
+  assert.ok(result.sources.some((entry) => entry.target === 'CLAUDE.local.md'
+    && entry.status === 'skipped: native'));
+  assert.match(result.context, /A-V1/u);
+});

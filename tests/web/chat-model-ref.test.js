@@ -541,3 +541,42 @@ test('снятая модель не запускает отправку и со
   assert.equal(chat.sessions[0].sending, false);
   assert.match(chat.sessions[0].error, /недоступна в реестре/);
 });
+
+test("modelRef { provider: 'glm', model: '[\"zai\",\"glm-5.3\"]' } переживает перезагрузку; "
+  + 'отсутствие runtime не стирает выбор', async () => {
+  const glmRef = { provider: 'glm', model: '["zai","glm-5.3"]' };
+  const chat = await chatStoreFixture({
+    sessions: [{
+      id: 'glm-chat',
+      modelRef: { ...glmRef },
+      revision: 2,
+      messages: [{ role: 'user', text: 'Вопрос к GLM' }],
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  });
+  let payload;
+
+  // Runtime GLM недоступен: реестр не знает модель, но выбор чата не стирается.
+  setChatProviders({ modelOf: () => ({ provider: null, model: null }) });
+  apiHarness.put = async (_url, body) => {
+    payload = body;
+
+    return {
+      revision: 3,
+      schema: 2,
+      surface: 'chats',
+      modelRef: body.chat.modelRef,
+      modelRefState: { state: 'unavailable' },
+    };
+  };
+  await chat._saveChatNow(chat.sessions[0]);
+
+  assert.deepEqual(chat.sessions[0].modelRef, glmRef);
+  assert.deepEqual(payload.chat.modelRef, glmRef);
+
+  const reloaded = await chatStoreFixture({ sessions: [{ ...payload.chat, revision: 3 }] });
+
+  assert.deepEqual(reloaded.sessions[0].modelRef, glmRef);
+  assert.equal(reloaded.sessions[0].messages[0].text, 'Вопрос к GLM');
+});

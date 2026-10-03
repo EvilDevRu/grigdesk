@@ -89,6 +89,7 @@ export async function expandInstructionImports(options: {
   const sources: DeepSeekInstructionSource[] = [];
   const context: string[] = [];
   const visited = new Set<string>();
+  const native = new Set<string>();
   let totalBytes = 0;
 
   const recordSkip = (
@@ -128,6 +129,17 @@ export async function expandInstructionImports(options: {
     }
     if (!inside(projectRoot, target)) {
       recordSkip(sourceFile, directive, 'outside_root');
+      return;
+    }
+    // Файл цепочки root→cwd DSH уже включил сам: повторный импорт только дублировал бы его.
+    if (native.has(target)) {
+      sources.push({
+        file: projectPath(projectRoot, sourceFile),
+        line: directive.line,
+        target: directive.target,
+        status: 'skipped: native',
+      });
+
       return;
     }
     if (stack.has(target)) {
@@ -180,6 +192,17 @@ export async function expandInstructionImports(options: {
   const directories = [projectRoot];
   for (let index = 1; index <= parts.length; index += 1) {
     directories.push(path.join(projectRoot, ...parts.slice(0, index)));
+  }
+  for (const directory of directories) {
+    for (const name of INSTRUCTION_FILES) {
+      try {
+        native.add(await fs.realpath(path.join(directory, name)));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+    }
   }
   for (const directory of directories) {
     for (const name of INSTRUCTION_FILES) {

@@ -1,5 +1,5 @@
 // Веб-ход DeepSeek: Remote follow, события спросов и steer в тот же Agent loop.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { InTurnAssistantEvent, InTurnPort } from '../../../../shared/chatInTurnContracts.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
@@ -47,6 +47,51 @@ export interface DeepSeekServerTurnOptions {
   factory?: boolean;
   workToolNames?: ReadonlySet<string>;
   startServer?: (options: StartDeepSeekServerOptions) => Promise<DeepSeekServerProcess>;
+  onPromptAttempted?: () => void;
+  variant?: DeepSeekTurnVariant;
+}
+
+// Ход другого исполнителя на той же сборке DSH. Без варианта поведение DeepSeek прежнее.
+export interface DeepSeekTurnVariant {
+  labels: {
+    stopped: string;
+    blocked: string;
+    modelError: string;
+    action: string;
+    source: string;
+  };
+  // Ошибка модели из turn/end: Error — провал хода, null — сбой доставки («Продолжить ход»).
+  classifyModelError: (failure: Record<string, unknown>) => Error | null;
+  // Обратное чтение выбора модели по snapshot session/follow до prompt; Error — отказ.
+  verifySnapshot?: (snapshot: Record<string, unknown>) => Error | null;
+  // Разрешение без человека; заменяет автоодобрение DeepSeek по префиксу cockpit-work.
+  autoApprove: (toolName: string) => boolean;
+  // Событие хода, при котором ход нужно остановить (например, нарушена регистрация hooks).
+  inspectEvent?: (event: Record<string, unknown>) => Error | null;
+  // Перевод approval/request: отказ без человека либо представление для onPermission.
+  approve?: (request: Record<string, unknown>) => Promise<{ allow: boolean } | {
+    presentation: Record<string, unknown>;
+  }>;
+  // Последнее слово над ответом человека: например, отказ, если ход уже остановлен.
+  settle?: (answer: PermissionAnswer | null | undefined) => PermissionAnswer;
+  // Ошибка хода, который DSH заблокировал (например, hook отклонил prompt).
+  blocked?: () => Error;
+}
+
+/**
+ * Id блока ответа для общего хранилища: DSH строит его из attemptId вида `<сессия>:<номер>`,
+ * а хранилище принимает только `[A-Za-z0-9_-]{8,80}`. Замена и хвост хэша сохраняют уникальность.
+ */
+export function storageMessageId(id: string): string {
+  const safe = id.replace(/[^A-Za-z0-9_-]/gu, '_');
+
+  if (safe === id && safe.length >= 8 && safe.length <= 80) {
+    return safe;
+  }
+
+  const digest = createHash('sha256').update(id).digest('hex').slice(0, 12);
+
+  return `${safe.slice(0, 67)}_${digest}`.padStart(8, '_');
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -105,6 +150,24 @@ function compactText(stream: unknown): string {
  * Настройки принимаются до session/prompt; private URL остаётся внутри клиента.
  */
 export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) {
+  const variant = options.variant;
+  const labels = variant?.labels ?? {
+    stopped: 'Ход DeepSeek остановлен.',
+    blocked: 'Ход DeepSeek заблокирован.',
+    modelError: 'Ошибка модели DeepSeek',
+    action: 'Действие DeepSeek',
+    source: 'DeepSeek',
+  };
+  const stoppedError = () => Object.assign(new Error(labels.stopped), { stopped: true });
+  /**
+   * Вариант проверяет abort после каждого ожидания до prompt: остановленный ход
+   * не доходит до модели. DeepSeek прежде проверял abort только перед prompt.
+   */
+  const checkpoint = () => {
+    if (variant && options.signal?.aborted) {
+      throw stoppedError();
+    }
+  };
   const start = () => (options.startServer || startDeepSeekServer)({
     runtime: options.runtime,
     bin: options.bin,
@@ -116,6 +179,8 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
   let server = await start();
 
   try {
+    checkpoint();
+
     if (options.nativeSettings?.accepted.length) {
       const restart = await deepSeekSettingsNeedRestart(server.client, options.nativeSettings);
 
@@ -130,7 +195,10 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     }
 
     const sessionId = await server.client.createSession(options.cwd, options.sessionId);
+
+    checkpoint();
     await options.onSessionCreated?.(sessionId);
+    checkpoint();
     if (options.model) {
       const selected = modelSelection(options.model);
 
@@ -140,12 +208,14 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
           ...(options.effort ? { reasoningEffort: options.effort } : {}),
         },
       });
+      checkpoint();
     }
 
     if (options.nativeSettings?.accepted.length) {
       await verifyDeepSeekNativeSettings(server.client, options.nativeSettings, options.signal);
     }
 
+    let cancellation: Promise<void> | null = null;
     const sink = createStepSink(options.onStep);
     const thoughts = createDeepSeekServerThoughtNormalizer();
     const drafts = new Map<string, string>();
@@ -192,7 +262,12 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         }
       }
 
-      save({ assistantMessageId: id, text, sourceRevision: text.length, complete });
+      save({
+        assistantMessageId: storageMessageId(id),
+        text,
+        sourceRevision: text.length,
+        complete,
+      });
     };
     /**
      * Ошибка закрывает ход и сохраняет уже полученное размышление в ленте.
@@ -256,6 +331,15 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
      * Граница попытки или действия закрывает накопленное размышление до следующего шага.
      */
     const handleFollow = (item: DeepSeekWireFrame) => {
+      if (item.type === 'snapshot') {
+        const mismatch = variant?.verifySnapshot?.(item);
+
+        if (mismatch) {
+          fail(mismatch);
+        }
+
+        return;
+      }
       if (item.type === 'assistant-stream') {
         const frame = record(item.frame);
 
@@ -270,6 +354,14 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       if (item.type !== 'event') return;
       const event = record(item.event);
       const data = record(event.data);
+      const violation = variant?.inspectEvent?.(event);
+
+      if (violation) {
+        fail(violation);
+        cancellation ||= server.client.cancel(sessionId).catch(() => {});
+
+        return;
+      }
       if (event.type === 'turn/start') turnStarted = true;
       if (event.type === 'tool/call') {
         sink.emitAll(thoughts.flush());
@@ -304,20 +396,27 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       }
       if (event.type === 'turn/end' && turnStarted) {
         const reason = record(data.reason);
+
         if (reason.kind === 'aborted' || reason.kind === 'interrupted') {
-          fail(Object.assign(new Error('Ход DeepSeek остановлен.'), { stopped: true }));
+          fail(stoppedError());
         } else if (reason.kind === 'error') {
           const llmFailure = record(reason.error);
-          const message = String(llmFailure.message || 'Ошибка модели DeepSeek');
-          if (Number(llmFailure.status) === 401 || /Authentication Fails/iu.test(message)) {
-            fail(new Error(message));
+          const message = String(llmFailure.message || labels.modelError);
+          const classified = variant ? variant.classifyModelError(llmFailure)
+            : Number(llmFailure.status) === 401 || /Authentication Fails/iu.test(message)
+              ? new Error(message) : null;
+
+          if (classified) {
+            fail(classified);
           } else {
             deliveryFailure = message;
             finish();
           }
         } else if (reason.kind === 'blocked') {
-          fail(new Error('Ход DeepSeek заблокирован.'));
-        } else finish();
+          fail(variant?.blocked?.() ?? new Error(labels.blocked));
+        } else {
+          finish();
+        }
       }
     };
     const handleRemote = (item: DeepSeekWireFrame) => {
@@ -331,18 +430,40 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       void (async () => {
         const request = record(item.request);
         let outcome: { kind: string; value?: unknown } = { kind: 'next' };
+
         if (item.event === 'approval/request') {
-          const tool = String(request.toolName || 'Действие DeepSeek');
-          const answer = options.factory || options.permissionMode === 'read-only'
-            ? { allow: false }
+          const tool = String(request.toolName || labels.action);
+          const automatic = variant ? variant.autoApprove(tool)
             : tool.startsWith('mcp__cockpit-work__')
-              && options.workToolNames?.has(tool.slice('mcp__cockpit-work__'.length))
-              ? { allow: true }
-              : await options.onPermission?.({
-                ...deepSeekPermissionPresentation({}, toolContexts.get(String(request.callId || ''))
-                  || { title: tool, rawInput: {} }),
-                raw: request, signal: options.signal,
-              });
+              && options.workToolNames?.has(tool.slice('mcp__cockpit-work__'.length));
+          const blocked = options.factory || options.permissionMode === 'read-only';
+          let answer: PermissionAnswer | null | undefined;
+
+          if (blocked || automatic) {
+            answer = { allow: !blocked };
+          } else if (variant?.approve) {
+            // Вариант сам переводит approval: отказ без UI или своё представление человеку.
+            const verdict = await variant.approve(request);
+
+            answer = 'presentation' in verdict
+              ? await options.onPermission?.({
+                ...verdict.presentation,
+                raw: request,
+                signal: options.signal,
+              })
+              : verdict;
+          } else {
+            answer = await options.onPermission?.({
+              ...deepSeekPermissionPresentation({}, toolContexts.get(String(request.callId || ''))
+                || { title: tool, rawInput: {} }),
+              raw: request, signal: options.signal,
+            });
+          }
+
+          if (variant?.settle) {
+            answer = variant.settle(answer);
+          }
+
           outcome = { kind: 'result', value: answer?.allow === true ? 'allowed-once' : 'rejected' };
         } else {
           const questions = Array.isArray(request.questions) ? request.questions.map((value, index) => {
@@ -357,8 +478,13 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
             };
           }) : [];
           const answer = await options.onPermission?.({
-            tool: 'Вопрос агента', isQuestion: true, questions,
-            acceptsText: true, source: 'DeepSeek', raw: request, signal: options.signal,
+            tool: 'Вопрос агента',
+            isQuestion: true,
+            questions,
+            acceptsText: true,
+            source: labels.source,
+            raw: request,
+            signal: options.signal,
           });
           outcome = { kind: 'result', value: {
             answers: questions.map((question, index) => ({
@@ -382,16 +508,18 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       client: server.client, endpoint: '$events', args: {},
       onItem: handleRemote, onClose: fail,
     });
-    let cancellation: Promise<void> | null = null;
     const abort = () => {
-      fail(Object.assign(new Error('Ход DeepSeek остановлен.'), { stopped: true }));
+      fail(stoppedError());
       cancellation ||= server.client.cancel(sessionId).catch(() => {});
     };
     options.signal?.addEventListener('abort', abort, { once: true });
+
     try {
       await Promise.all([follow.ready, remote.ready]);
       if (options.signal?.aborted) abort();
       if (failure) throw failure;
+
+      options.onPromptAttempted?.();
       await server.client.prompt(sessionId, options.message, randomUUID(), 'queue');
       const port: InTurnPort = {
         async deliver({ messageId, text }) {
@@ -425,15 +553,26 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       }
       if (failure) throw failure;
       await Promise.all([...writes]);
+
       return {
         reply: deliveryFailure || reply,
-        assistantMessageId: deliveryFailure ? '' : replyMessageId,
+        assistantMessageId: deliveryFailure || !replyMessageId ? '' : storageMessageId(replyMessageId),
         sessionId,
         steps: sink.steps,
         ...(deliveryFailure ? { deliveryFailure: true, stopReason: 'error' } : {
           stopReason: 'completed', ...(reply ? {} : { emptyRun: true }),
         }),
       };
+    } catch (error) {
+      // Вариант не теряет полученное: sessionId и шаги едут вместе с ошибкой хода.
+      if (variant && error && typeof error === 'object') {
+        const failed = error as { sessionId?: string; steps?: unknown };
+
+        failed.sessionId ??= sessionId;
+        failed.steps ??= sink.steps;
+      }
+
+      throw error;
     } finally {
       options.signal?.removeEventListener('abort', abort);
       if (cancellation) await cancellation;

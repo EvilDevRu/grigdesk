@@ -50,6 +50,12 @@ export interface DeepSeekArtifactHeader {
   buildId: string;
   runtimeVersion: string;
   version: string;
+  // Входы допуска модельного плагина GLM; DeepSeek их не читает. Заголовок не проверяет
+  // целостность: перед запуском identity сверяется по полностью проверенному артефакту.
+  commit: string;
+  composition: string | null;
+  dependencyLock: string | null;
+  llmPiAi: unknown;
 }
 
 /**
@@ -377,10 +383,15 @@ export function readDeepSeekArtifactHeader(root: string): DeepSeekArtifactHeader
       throw new Error('header');
     }
 
+    const identity = artifact.inputIdentity as Record<string, unknown> | undefined;
     const header = Object.freeze({
       buildId: artifact.buildId,
       runtimeVersion: artifact.runtimeVersion,
       version: artifact.source.version,
+      commit: String(artifact.source.commit ?? ''),
+      composition: typeof identity?.composition === 'string' ? identity.composition : null,
+      dependencyLock: typeof identity?.dependencyLock === 'string' ? identity.dependencyLock : null,
+      llmPiAi: (artifact as { llmPiAi?: unknown }).llmPiAi ?? null,
     });
 
     headers.set(root, { key, header });

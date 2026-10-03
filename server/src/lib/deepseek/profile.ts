@@ -41,7 +41,29 @@ export interface DeepSeekLaunchFiles {
   version: string;
 }
 
-type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
+export type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
+
+// Вариант профиля другого исполнителя на той же сборке DSH. Без варианта overlay и hooks
+// DeepSeek не меняются ни на байт.
+export interface HarnessLaunchVariant {
+  // Входит в отпечаток запуска вместо версии DeepSeek: версия runtime и ревизия профиля.
+  pin: string;
+  // Строки overlay после agent-instructions; заменяют список выключенных строк DeepSeek.
+  rows: readonly YamlValue[];
+  // Строки insert перед мостом hooks: модельный плагин, сторож адреса.
+  insert: readonly YamlValue[];
+  // Единственный PreToolUse вместо hook SSH/БД DeepSeek.
+  preToolUse: {
+    matcher: string;
+    command: string;
+    timeout: number;
+  };
+  // Дополнительные UserPromptSubmit hooks после hook инструкций.
+  userPromptSubmit?: readonly { command: string; timeout: number }[];
+  // Дополнительные поля config моста hooks и каждой MCP-строки.
+  hooksConfig?: { [key: string]: YamlValue };
+  mcpConfig?: { [key: string]: YamlValue };
+}
 
 const DISABLED_ROWS = Object.freeze([
   'subagent',
@@ -134,9 +156,13 @@ async function privateFile(file: string, content: string): Promise<void> {
   await fs.chmod(file, 0o600);
 }
 
-/** Строит единственные server-owned patch и hooks для одного процесса DSH. */
+/**
+ * Строит единственные server-owned patch и hooks для одного процесса DSH.
+ * Вариант задаёт профиль другого исполнителя на той же сборке; без него — DeepSeek.
+ */
 export async function buildLaunchFiles(
   options: DeepSeekLaunchFilesOptions,
+  variant?: HarnessLaunchVariant,
 ): Promise<DeepSeekLaunchFiles> {
   const { launchDir, cwd, workspaceRoot, mode, approval, hooks } = options;
   assertAbsolute('launchDir', launchDir);
@@ -196,16 +222,29 @@ export async function buildLaunchFiles(
     '--cwd',
     shellQuote(cwd),
   ].join(' ');
+  const preToolUse = variant ? {
+    PreToolUse: [{
+      matcher: variant.preToolUse.matcher,
+      hooks: [{
+        type: 'command',
+        command: variant.preToolUse.command,
+        timeout: variant.preToolUse.timeout,
+      }],
+    }],
+  } : (hooks.ssh || hooks.db) ? {
+    PreToolUse: [{
+      matcher: hooks.bashToolName,
+      hooks: [{ type: 'command', command: policyCommand, timeout: 5 }],
+    }],
+  } : {};
   const hooksDocument = {
     hooks: {
-      ...((hooks.ssh || hooks.db) ? {
-        PreToolUse: [{
-          matcher: hooks.bashToolName,
-          hooks: [{ type: 'command', command: policyCommand, timeout: 5 }],
-        }],
-      } : {}),
+      ...preToolUse,
       UserPromptSubmit: [{
-        hooks: [{ type: 'command', command: instructionsCommand, timeout: 20 }],
+        hooks: [
+          { type: 'command', command: instructionsCommand, timeout: 20 },
+          ...(variant?.userPromptSubmit ?? []).map((hook) => ({ type: 'command', ...hook })),
+        ],
       }],
     },
   };
@@ -235,12 +274,17 @@ export async function buildLaunchFiles(
     { id: 'agent-instructions', config: { maxBytes: 262_144 } },
     // Web-профиль монтирует стандартный Agent preset: его инструменты зависят
     // от host-сервисов. ACP-список нельзя переносить сюда по id строк.
-    ...(options.transport === 'web' ? [] : DISABLED_ROWS.map((id) => ({ id, disabled: true }))),
+    ...(variant ? variant.rows
+      : options.transport === 'web' ? [] : DISABLED_ROWS.map((id) => ({ id, disabled: true }))),
     {
-      insert: [{
+      insert: [...(variant?.insert ?? []), {
         id: 'hooks-claude-code',
         name: '@deepseek-ai/dsh-hooks-claude-code',
-        config: { configPath: hooksPath, projectDir: cwd },
+        config: {
+          configPath: hooksPath,
+          projectDir: cwd,
+          ...variant?.hooksConfig,
+        },
       }, ...webMcp.map((server) => ({
         id: `cockpit-mcp-${server.name}`,
         name: '@deepseek-ai/dsh-mcp-client',
@@ -250,6 +294,7 @@ export async function buildLaunchFiles(
           command: server.command,
           args: [...server.args],
           env: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
+          ...variant?.mcpConfig,
         },
       }))],
     },
@@ -259,8 +304,9 @@ export async function buildLaunchFiles(
     privateFile(hooksPath, hooksJson),
     privateFile(overlayPath, overlay),
   ]);
+
   const fingerprint = createHash('sha256')
-    .update(DEEPSEEK_PIN.version)
+    .update(variant?.pin ?? DEEPSEEK_PIN.version)
     .update('\0')
     .update(overlay)
     .update('\0')

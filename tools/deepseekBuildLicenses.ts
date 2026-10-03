@@ -73,6 +73,28 @@ export async function writeDeepSeekLicenseInventory(
     }
 
     if (originals.length === 0) {
+      const supplement = sources.files.find((entry: any) => entry.packages?.some((item: any) =>
+        item.name === manifest.name && item.version === manifest.version
+        && item.license === manifest.license));
+
+      if (supplement) {
+        originals.push(`supplement:${supplement.file}`);
+      }
+    }
+
+    if (originals.length === 0 && manifest.name === 'data-uri-to-buffer' && manifest.version === '4.0.1') {
+      const readme = await fs.readFile(path.join(absolute, 'README.md'), 'utf8');
+
+      if (manifest.license !== 'MIT' || !readme.includes('Copyright (c) 2014 Nathan Rajlich')
+        || !readme.includes('Permission is hereby granted, free of charge')
+        || !readme.includes("THE SOFTWARE IS PROVIDED 'AS IS'")) {
+        throw new Error('Отсутствует полный MIT notice data-uri-to-buffer');
+      }
+
+      originals.push(path.posix.join(relative, 'README.md'));
+    }
+
+    if (originals.length === 0) {
       throw new Error(`Отсутствует license/notice: ${manifest.name}@${manifest.version}`);
     }
 

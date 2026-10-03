@@ -45,7 +45,16 @@ async function runGate(): Promise<void> {
     path.join(repositoryRoot, 'tests/server/deepseek-vendored-chat.test.js'),
     path.join(repositoryRoot, 'tests/server/deepseek-factory-settings.test.js'),
     path.join(repositoryRoot, 'tests/server/deepseek-runtime-rollback.test.js'),
-    path.join(repositoryRoot, 'tests/server/deepseek-vendored-settings.test.js')], {
+    path.join(repositoryRoot, 'tests/server/deepseek-vendored-settings.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-build.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-protocol.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-profile.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-turn.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-policy.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-mcp.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-catalog.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-session.test.js'),
+    path.join(repositoryRoot, 'tests/server/glm-vendored-stop.test.js')], {
     cwd: repositoryRoot,
     env,
     stdio: 'inherit',

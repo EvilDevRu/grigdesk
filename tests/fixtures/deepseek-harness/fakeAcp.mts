@@ -4,6 +4,8 @@ import { createInterface } from 'node:readline';
 
 interface Scenario {
   configOptions?: unknown[];
+  // Необязательные опции после выбора модели: значение модели → configOptions.
+  configByModel?: Record<string, unknown[]>;
   updates?: unknown[];
   stopReason?: string;
   delays?: Record<string, number>;
@@ -256,7 +258,15 @@ function handle(message: any) {
       } });
       if (scenario.eof === 'after_session_new') process.stdout.end();
     } else if (method === 'session/set_config_option') {
-      send({ jsonrpc: '2.0', id, result: { configOptions: scenario.configOptions || [] } });
+      const byModel = params?.configId === 'model'
+        ? scenario.configByModel?.[String(params?.value)]
+        : undefined;
+
+      send({
+        jsonrpc: '2.0',
+        id,
+        result: { configOptions: byModel || scenario.configOptions || [] },
+      });
     } else if (method === 'session/prompt') {
       void runPrompt(Number(id), params);
     } else if (method === 'session/close') {
