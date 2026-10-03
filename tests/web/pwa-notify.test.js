@@ -18,10 +18,17 @@ async function fixture(t, { permission = 'granted', registration = null } = {}) 
     }
 
     constructor(title, options) {
-      constructed.push({ title, options });
+      constructed.push({
+        title,
+        options,
+        instance: this,
+      });
+      this.closed = 0;
     }
 
-    close() {}
+    close() {
+      this.closed += 1;
+    }
   }
 
   const window = {
@@ -71,4 +78,59 @@ test('разрешение запрашивается только явным в
 
   assert.equal(await api.ensureNotifyPermission(), true);
   assert.equal(FakeNotification.permission, 'granted');
+});
+
+test('N1: service worker получает ссылку нужного чата', async (t) => {
+  const shown = [];
+  const registration = {
+    async showNotification(title, options) {
+      shown.push({ title, options });
+    },
+  };
+  const { api } = await fixture(t, { registration });
+  const url = 'https://cockpit.test/#/chats?openChat=c1';
+
+  await api.notify('t', 'b', 'chat-1', url);
+  assert.equal(shown[0].options.data.url, url);
+});
+
+test('N2: щелчок по обычному уведомлению открывает адрес и закрывает его', async (t) => {
+  const { api, constructed } = await fixture(t);
+  const url = 'https://cockpit.test/#/chats?openChat=c1';
+
+  await api.notify('t', 'b', 'chat-1', url);
+  constructed[0].instance.onclick();
+  assert.equal(globalThis.window.location.href, url);
+  assert.equal(constructed[0].instance.closed, 1);
+});
+
+test('N3: закрытие по tag гасит все уведомления service worker', async (t) => {
+  const queried = [];
+  let closed = 0;
+  const registration = {
+    async getNotifications(options) {
+      queried.push(options);
+
+      return [0, 1].map(() => ({
+        close() {
+          closed += 1;
+        },
+      }));
+    },
+  };
+  const { api } = await fixture(t, { registration });
+
+  await api.closeSystemNotification('chat-1');
+  assert.equal(closed, 2);
+  assert.deepEqual(queried, [{ tag: 'chat-1' }]);
+  await api.closeSystemNotification('');
+  assert.equal(queried.length, 1);
+});
+
+test('N3: закрытие по tag находит экземпляр конструктора', async (t) => {
+  const { api, constructed } = await fixture(t);
+
+  await api.notify('t', 'b', 'chat-1');
+  await api.closeSystemNotification('chat-1');
+  assert.equal(constructed[0].instance.closed, 1);
 });

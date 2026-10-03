@@ -35,6 +35,14 @@ const { activeId } = storeToRefs(chat);
 // источник правды о ширине экрана рассинхронизируется на поворотах и ресайзе.
 // Стартуем со списка — как в мессенджерах на телефоне.
 const pane = ref('list');
+
+watch(() => chat.revealRequest, (id) => {
+  if (id) {
+    pane.value = 'chat';
+    chat.consumeReveal();
+  }
+}, { immediate: true });
+
 const { dockCapable } = useDockViewport();
 const chatsContext = useUiContextSource('chats', { layer: 'page', active: false });
 watch(activeId, (chatId) => {

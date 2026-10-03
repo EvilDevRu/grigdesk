@@ -43,6 +43,7 @@ function uiOwned(file) {
     || /^web\/src\/types\/ui[A-Z].*\.ts$/.test(file)
     || /^web\/src\/composables\/useUi(?:Field|Layer|Tabs)/.test(file)
     || file === 'web/src/services/dialogs.ts'
+    || file === 'web/src/services/toasts.ts'
     || file.startsWith('web/src/services/layers/');
 }
 
@@ -119,6 +120,7 @@ function isPrivateUiTarget(target) {
   return target.startsWith('web/src/components/')
     || /^web\/src\/types\/ui[A-Z]/.test(target)
     || target === 'web/src/services/dialogs'
+    || target === 'web/src/services/toasts'
     || target.startsWith('web/src/services/layers/')
     || /^web\/src\/composables\/useUi(?:Field|Layer|Tabs)/.test(target);
 }

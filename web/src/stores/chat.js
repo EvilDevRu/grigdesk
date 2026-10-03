@@ -10,7 +10,8 @@ import { api } from '../shared/apiClient.ts';
 import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
 import { useProvidersStore } from './providers.js';
-import { notify } from '../shared/notify.ts';
+import { alertUser, dismissAlert, dismissAlertScope } from '../shared/alerts.ts';
+import { quickPermission } from '../shared/quickPermission.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { mdToText } from '../shared/md.ts';
 import { createChatListPreviewCache } from '../shared/chatListPreview.ts';
@@ -744,6 +745,7 @@ export const useChatStore = defineStore('chat', {
   state: () => ({
     ...pickStore(null),
     loaded: false,
+    revealRequest: '',
     conveyorIds: [],
     pending: {},
     saveError: null,
@@ -1752,11 +1754,27 @@ export const useChatStore = defineStore('chat', {
      * ходила за человеком по всем чатам и превращалась в шум.
      */
     _saveFailed(bad, msg = '') {
-      if (!bad) { this.saveError = null; saveWarned = false; return; }
+      if (!bad) {
+        this.saveError = null;
+        saveWarned = false;
+        dismissAlert('chat-save-error');
+
+        return;
+      }
       this.saveError = msg || 'сервер не принял запись';
-      if (saveWarned) return;
+
+      if (saveWarned) {
+        return;
+      }
+
       saveWarned = true;
-      notify('История чата не сохраняется', `${this.saveError}. Не закрывай вкладку — идут повторные попытки.`, 'chat-save-error');
+      alertUser({
+        id: 'chat-save-error',
+        tone: 'danger',
+        sticky: true,
+        title: 'История чата не сохраняется',
+        body: `${this.saveError}. Не закрывай вкладку — идут повторные попытки.`,
+      });
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
     _find(id) { return this._get(id) || (this.archived || []).find((s) => s.id === id) || null; },
@@ -1810,10 +1828,22 @@ export const useChatStore = defineStore('chat', {
     registerSurface(owner, initial = {}) {
       return chatVisibility.register(owner, initial);
     },
-    // Чат увидели — гасим метку. Зовёт открытый на экране ChatSession.
+    /**
+     * Видимая поверхность гасит оповещения чата даже без метки непрочитанного.
+     * Скрытый, но смонтированный чат не меняет ни тосты, ни unread.
+     */
     markRead(id) {
+      if (!this._visible(id)) {
+        return;
+      }
+
+      dismissAlertScope(`chat:${id}`);
+
       const s = this._get(id) || this.archived.find((x) => x.id === id);
-      if (!s?.unread || !this._visible(id)) return;
+
+      if (!s?.unread) {
+        return;
+      }
       s.unread = false;
       this._persist();
     },
@@ -1829,7 +1859,14 @@ export const useChatStore = defineStore('chat', {
         || messageNoticeKey(s.id, { role: 'assistant', text }, (s.messages || []).length - 1);
       if (!rememberReplyNotice(key)) return false;
       s.unread = true;
-      notify(`Агент ответил — ${this.tabLabel(s)}`, String(text || '').slice(0, 120), `chat-${s.id}`);
+      alertUser({
+        id: `chat-${s.id}`,
+        scope: `chat:${s.id}`,
+        tone: 'accent',
+        title: `Агент ответил — ${this.tabLabel(s)}`,
+        body: String(text || '').slice(0, 120),
+        target: { kind: 'chat', chatId: s.id },
+      });
       return true;
     },
 
@@ -1915,7 +1952,7 @@ export const useChatStore = defineStore('chat', {
           // Вопрос агента (AskUserQuestion): не разрешение, а диалог с вариантами ответа.
           this._addPending({ ...d, kind: 'question' });
         } else if (name === 'chat-permission-done') {
-          delete this.pending[d.pid];
+          this._dropPending(d.pid);
         } else if (name === 'hello') {
           // Связь восстановилась (в т.ч. после рестарта сервера) — пока её не было,
           // спросы и ходы могли и появиться, и умереть: сверяем списки целиком.
@@ -2140,12 +2177,24 @@ export const useChatStore = defineStore('chat', {
       });
     },
     /**
+     * Снимает общий запрос и связанное оповещение одним действием.
+     * Этот путь одинаков для своего ответа и события из другого окна.
+     */
+    _dropPending(pid) {
+      delete this.pending[pid];
+      dismissAlert(`chat-ask-${pid}`);
+    },
+    /**
      * Новый спрос агента. Оповещаем, если на этот чат сейчас не смотрят: агент СТОИТ,
      * пока не ответят, — пропустить такое дороже, чем пропустить обычный ответ.
      */
     _addPending(req) {
       this.pending[req.pid] = req;
-      if (this._visible(req.chatKey)) return;
+
+      if (this._visible(req.chatKey)) {
+        return;
+      }
+
       const s = this._find(req.chatKey);
       const who = s ? this.tabLabel(s) : 'чат';
       const what = req.kind === 'question'
@@ -2153,7 +2202,35 @@ export const useChatStore = defineStore('chat', {
         : (req.input?.kind === 'external_url'
           ? (req.input?.description || 'Сервис просит завершить действие на внешней странице')
           : `Агент просит разрешение: ${req.tool || 'действие'}`);
-      notify(`Нужен твой ответ — ${who}`, what.slice(0, 120), `chat-ask-${req.chatKey || req.pid}`);
+      const quick = quickPermission(req);
+      const actions = quick ? [
+        {
+          id: 'allow',
+          label: 'Разрешить',
+          tone: 'success',
+          variant: 'solid',
+          run: () => this.answerPerm(req.pid, true),
+        },
+        {
+          id: 'deny',
+          label: 'Отклонить',
+          tone: 'danger',
+          variant: 'outline',
+          run: () => this.answerPerm(req.pid, false),
+        },
+      ] : [];
+
+      alertUser({
+        id: `chat-ask-${req.pid}`,
+        scope: req.chatKey ? `chat:${req.chatKey}` : '',
+        tone: 'warning',
+        sticky: true,
+        title: `Нужен твой ответ — ${who}`,
+        body: what.slice(0, 120),
+        detail: quick?.detail || '',
+        target: req.chatKey ? { kind: 'chat', chatId: req.chatKey } : undefined,
+        actions,
+      });
     },
     /**
      * Спросы, которые уже висели: SSE доставляет событие один раз, поэтому после F5
@@ -2170,6 +2247,12 @@ export const useChatStore = defineStore('chat', {
       for (const w of waiting || []) {
         fresh[w.pid] = this.pending[w.pid] || { ...w, kind: w.questions ? 'question' : 'perm' };
       }
+      for (const pid of Object.keys(this.pending)) {
+        if (!fresh[pid]) {
+          dismissAlert(`chat-ask-${pid}`);
+        }
+      }
+
       this.pending = fresh;
     },
     /**
@@ -2500,7 +2583,7 @@ export const useChatStore = defineStore('chat', {
       if (p.origin === 'ssh') {
         try {
           await api.post(`/api/ssh/approvals/${p.pid}`, { allow, comment: String(comment || '') });
-          delete this.pending[pid];
+          this._dropPending(pid);
         } catch {
           // Ответ мог принять другое окно. Истина — общая очередь сервера; при
           // сетевой ошибке _loadWaiting оставит карточку на месте.
@@ -2511,13 +2594,15 @@ export const useChatStore = defineStore('chat', {
       if (p.origin === 'db') {
         try {
           await api.post(`/api/db/approvals/${p.pid}`, { allow });
-          delete this.pending[pid];
+          this._dropPending(pid);
         } catch {
           await this._loadWaiting();
         }
         return;
       }
-      delete this.pending[pid];
+
+      this._dropPending(pid);
+
       const mayRemember = canRememberPermission(p);
       if (allow && remember && mayRemember && p.chatKey && p.tool) {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
@@ -2573,12 +2658,12 @@ export const useChatStore = defineStore('chat', {
         // общую очередь, чтобы не потерять карточку принятого или непринятого ответа.
         try {
           res = await api.post(`/api/chat/permission/${pid}`, body);
-          delete this.pending[pid];
+          this._dropPending(pid);
         } catch {
           await this._loadWaiting();
         }
       } else {
-        delete this.pending[pid];
+        this._dropPending(pid);
         try { res = await api.post(`/api/chat/permission/${pid}`, body); }
         catch { /* запрос уже снят (стоп/конец хода/другое окно) */ }
       }
@@ -2647,6 +2732,25 @@ export const useChatStore = defineStore('chat', {
     setTitle(id, title) { const s = this._find(id); if (!s) return; s.title = title; this._persist(); },
     // Выбор чата из сайдбара ничего не говорит о его месте хранения: архивный
     // открываем для чтения на месте. Вернуть его можно явной кнопкой или отправкой.
+    /**
+     * Сначала загружает историю, затем выбирает существующий чат по ссылке.
+     * Запрос показа отделён от activeId: на телефоне выбранный чат может быть скрыт списком.
+     */
+    async revealChat(id) {
+      await this._load();
+
+      if (!this._find(id)) {
+        return false;
+      }
+
+      this.selectChat(id);
+      this.revealRequest = id;
+
+      return true;
+    },
+    consumeReveal() {
+      this.revealRequest = '';
+    },
     selectChat(id) {
       if (!this._find(id)) return;
       this.activeId = id;

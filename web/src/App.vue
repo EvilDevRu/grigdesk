@@ -19,13 +19,15 @@
       <TaskModal />
       <DiffModal />
       <DocumentModal />
+      <UiToastHost />
     </SpeechProvider>
   </template>
 </template>
 
 <script setup>
 import { onMounted, watch } from 'vue';
-import { UiDialogHost } from './ui';
+import { UiDialogHost, UiToastHost } from './ui';
+import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import LoginView from './views/LoginView.vue';
 import CockpitVersionTile from './features/cockpit-update/CockpitVersionTile.vue';
@@ -77,6 +79,8 @@ watch(() => auth.authenticated, (on, was) => {
     useTaskFavoritesStore().clear();
     useTaskShelfStore().stop();
     useTaskShelfStore().clear();
+    dismissAllAlerts();
+    clearAlertHistory();
     useTaskSeenStore().clear();
     // Разбор встречи набран человеком и потому переживает выход, а вот его поллинг —
     // нет: без сессии он молотил бы в закрытый API теми же 401 каждые две секунды.

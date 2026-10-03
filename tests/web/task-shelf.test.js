@@ -14,8 +14,14 @@ try {
 
 let storeModule;
 let storeModuleError;
+
 try {
-  storeModule = await import('../../web/src/stores/taskShelf.ts');
+  storeModule = await compileModule(webFile('src/stores/taskShelf.ts'), {
+    stubs: {
+      '../shared/alerts.ts': 'export const alertUser = () => true;'
+        + ' export const dismissAlert = () => {};',
+    },
+  });
 } catch (error) {
   storeModuleError = error;
 }
@@ -527,10 +533,11 @@ async function reactiveStoreFixture({
     stubs: {
       '../shared/apiClient.ts': 'export const api = globalThis.__taskShelfStoreHarness.api;',
       './apiClient.ts': 'export const api = globalThis.__taskShelfStoreHarness.api;',
-      '../shared/notify.ts': [
-        'export const notify = (...args) => {',
-        '  globalThis.__taskShelfStoreHarness.notifications.push(args);',
-        '  return Promise.resolve(true);',
+      '../shared/alerts.ts': [
+        'export const alertUser = (notice) => {',
+        '  globalThis.__taskShelfStoreHarness.notifications.push(',
+        '    [notice.title, notice.body, notice.id, notice]);',
+        '  return true;',
         '};',
       ].join('\n'),
       '../composables/useSse.ts': [
@@ -1223,4 +1230,35 @@ test('Панель, чип и оповещение не содержат вто�
     storeImportsDecision: true,
     duplicateRules: false,
   });
+});
+
+test('Новое событие полки задаёт область и открывает карточку задачи', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.analysis.byTask[42].status = {
+    ...harness.analysis.byTask[42].status,
+    state: 'done',
+    finishedAt: 1_787_731_800_000,
+  };
+  harness.analysis.byTask[42].analysis = {
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  await settleStore();
+  harness.analysis.byTask[42] = { ...harness.analysis.byTask[42] };
+  await settleStore();
+
+  assert.equal(harness.notifications.length, 1);
+
+  const notice = harness.notifications[0][3];
+
+  assert.equal(notice?.scope, 'task:42');
+  assert.equal(notice.tone, 'accent');
+  assert.deepEqual(notice.target, { kind: 'task', taskId: '42' });
+  assert.equal(Boolean(notice.sticky), false);
 });

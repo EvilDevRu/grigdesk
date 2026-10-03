@@ -402,6 +402,32 @@
   height: 16px;
 }
 
+/* «+N» в строке хода чата: текст той же тихой строки, без коробки, чтобы не спорить с
+   индикатором. Поле по горизонтали только расширяет мишень пальца; рамки и вертикальных
+   отступов нет — иначе кнопка вылезла бы из общей базовой линии строки. */
+.ui-pressable[data-context='chat-status-more'] {
+  flex: none;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='chat-status-more']:hover,
+.ui-pressable[data-context='chat-status-more'][aria-expanded='true'] {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='chat-status-more']:focus-visible {
+  outline: 1px solid transparent;
+  box-shadow: var(--control-focus-ring);
+}
+
 .ui-pressable[data-context='code-commit-disclosure'] {
   min-height: 28px;
   border-radius: 6px;
@@ -1458,8 +1484,10 @@
 
 /* Подписанный выбор папки остаётся рядом с задачей и сохраняет геометрию шапки.
    Состояние открытого окна использует общий pressed-скин кнопки. */
+/* Папку не ужимают соседи: короткое имя важнее пустоты в выборе задачи; длинное
+   режется только по потолку max-width. */
 .ui-button[data-context='chat-workdir'] {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   max-width: min(240px, 45%);
   height: 30px;
   min-height: 30px;

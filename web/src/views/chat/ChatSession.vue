@@ -138,8 +138,6 @@
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
           </UiSelect>
         </div>
-        <!-- Обёртки быть не должно: соседние правила (`.sel + .eff`, `.eff + .ctx-tip`)
-             рисуют разделители по сиблингам, и лишний узел их погасил бы. -->
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
                       :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
@@ -2003,18 +2001,21 @@ async function openDebug() {
 }
 
 .col { width: 100%; min-width: 0; }
+/* Шапка подстраивается под ширину самого чата, а не окна: рядом со списком, ширину
+   которого тянут мышью, чату на одном и том же экране остаётся от 400 до 1300 px. */
+.cs { container: chat / inline-size; }
 
-.cs-top { display: flex; flex-direction: column; gap: 4px; padding: 8px 22px; border-bottom: 1px solid var(--line);
-  min-height: var(--chat-head-h); justify-content: center; }
+.cs-top { --chat-head-gap: 16px; display: flex; flex-direction: column; gap: 4px; padding: 8px 22px;
+  border-bottom: 1px solid var(--line); min-height: var(--chat-head-h); justify-content: center; }
 /* На странице высота шапки — общий с левым списком токен, иначе две разделительные линии
    расходятся. min-height, а не height: редкое предупреждение о модели важнее ровной линии —
    пусть шапка подрастёт, чем текст обрежется. */
 /* Ряд настроек на странице НЕ переносится: перенос — это плюс 30px к шапке и разъехавшиеся
    линии. Вместо переноса ряд ужимается (см. shrink у .factbar), а на узком экране страница
    и так уходит в одну колонку, где шапке разрешено расти. */
-.hrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hrow { display: flex; align-items: center; column-gap: var(--chat-head-gap); min-width: 0; }
 /* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
-.back { display: none; flex: none; margin-left: -6px; place-items: center; }
+.back { display: none; flex: none; margin: 0 calc(8px - var(--chat-head-gap)) 0 -6px; place-items: center; }
 /* Название чата — как заголовок карточки, рядом карандаш переименования */
 .ttl { display: flex; align-items: center; gap: 3px; flex: 1 1 auto; min-width: 0; }
 .ctitle { font-size: 15px; font-weight: 600; cursor: default; line-height: 1.3;
@@ -2022,19 +2023,25 @@ async function openDebug() {
 /* Карандаш приглушён, пока не наводишь на шапку, но остаётся виден и доступен с клавиатуры. */
 .tedit { flex: none; }
 .ctitle-edit { width: 100%; }
-.bar { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.bar { display: flex; column-gap: var(--chat-head-gap); align-items: center; flex-wrap: nowrap; }
 .spacer { flex: 1; }
 .sel { position: relative; }
-/* На странице задача делит верхний ряд с названием чата: ей — правая половина, но
-   ужимается она первой (название важнее). Полное название задачи доступно по ховеру
-   в общем UiTooltip — внешний overflow страницы его не обрежет. */
-.task-tip { flex: 0 1 420px; max-width: 520px; min-width: 150px; }
-.sel.task { width: 100%; min-width: 0; }
+/* Задача делит верхний ряд с названием чата и стоит у папки. Ширина — по выбранному
+   значению (field-sizing в скине селекта), а не пустая половина ряда с шевроном на краю;
+   при нехватке места ужимается первой (shrink 100): название важнее. Полное название
+   задачи доступно по ховеру в общем UiTooltip — внешний overflow страницы его не обрежет. */
+.task-tip { flex: 0 100 auto; max-width: min(420px, 50%); }
+/* Минимум — целое «без задачи»: дальше ужимается название чата. Это тот же элемент,
+   что .task-tip (класс триггера подсказки), поэтому min-width задаётся здесь. */
+.sel.task { min-width: 104px; }
+.sel.task :deep(.ui-select-wrap) { flex: 0 1 auto; width: auto; min-width: 0; }
 /* Модель получает ширину выбранного названия, а не фиксированные 140px.
    При нехватке места первой сокращается информационная строка последнего хода. */
 .sel.model { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 /* Строка состояния — не отдельная форма: у контролов нет своих коробок, только
-   подпись-метка, значение и шеврон. Разделители — тонкие вертикальные линии. */
+   подпись-метка, значение и шеврон. Вертикальных черт между ними нет ни в одном ряду и ни
+   на одной ширине: группы разводит один зазор --chat-head-gap, а подписи-метки и так
+   отмечают начало каждой. Черты по соседству элементов ложились через раз. */
 .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
 .sel .lbl { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; }
 /* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, слайдеру
@@ -2146,7 +2153,7 @@ async function openDebug() {
 .factbar { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden;
   flex: 0 100 auto; font-size: 11px; color: var(--ink-mid); }
 .fb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fb b { font-weight: 600; font-family: var(--mono, monospace); color: var(--ink); }
+.fb b { font-weight: 600; color: var(--ink); }
 .fb.warn { color: var(--warn, #e0a33a); }
 .fb.warn b { color: var(--warn, #e0a33a); }
 /* Маркдаун ответа */
@@ -2268,8 +2275,42 @@ async function openDebug() {
   .cs-top { padding: 8px 14px; }
   .cs-body { padding: 0 11px 0 14px; }
   .cs-act, .cs-input { padding-left: 14px; padding-right: 14px; }
-  .task-tip { flex: 0 1 300px; }
-  .sel.model .lbl, .sel.mode .lbl, .bar :deep(.eff .cap) { display: none; }
+}
+
+/* ── Шапка уже 900 px: ряд настроек без подписей-меток ──────────────────────────
+   Значение каждого контрола говорит само за себя (задача, модель, режим, уровень), а
+   полное название есть в подсказке по ховеру. Порог — по ширине чата: на 1440 рядом с
+   широким списком шапка уже, чем на планшете без списка. */
+@container chat (max-width: 899px) {
+  .sel .lbl, .bar :deep(.eff .cap) { display: none; }
+}
+
+/* ── Шапка уже 640 px: строка последнего хода уходит ───────────────────────────
+   Рядом с контролами от неё оставалось «пос…». То же видно в заголовке каждого ответа
+   («АГЕНТ Opus 5.5 · xhigh»). Предупреждение о модели не прячется: оно встаёт своим
+   рядом, шапка ради него подрастает. */
+@container chat (max-width: 639px) {
+  .factbar:not(:has(.warn)) { display: none; }
+  .factbar:has(.warn) { order: 9; flex: 1 1 100%; }
+  .bar:has(.factbar .warn) { flex-wrap: wrap; }
+}
+
+/* ── Шапка уже 480 px (телефон): блоки раскладываются по рядам ──────────────────
+   Название с «назад» занимает верхний ряд целиком — рядом с папкой от него оставалось
+   «Мете…». Ниже задача делит ряд с папкой, затем модель, режим, усилие и кольцо, последней —
+   строка хода. Зазор между контролами здесь меньше: на 320 px иначе кольцо уходило бы
+   своим рядом. */
+@container chat (max-width: 479px) {
+  .cs-top { --chat-head-gap: 12px; }
+  .hrow { flex-wrap: wrap; row-gap: 6px; }
+  .ttl { flex: 1 1 calc(100% - 44px); }
+  .task-tip { flex: 1 1 0; max-width: none; }
+  .bar { flex-wrap: wrap; row-gap: 6px; }
+  .factbar { order: 9; flex: 1 1 100%; }
+  .spacer { display: none; }
+  /* Резерв под самое длинное слово уровня снят: на 320 px он сталкивал кольцо в свой ряд */
+  :deep(.eff .eff-slider) { width: 56px; }
+  :deep(.eff .val) { min-width: 0; }
 }
 
 /* ── Планшет-портрет и телефон: список и чат делят одну колонку ──────────────────
@@ -2279,25 +2320,13 @@ async function openDebug() {
    ширины теперь хватает: колонка одна. */
 @media (max-width: 899px) {
   .back { display: grid; }
-  .task-tip { flex: 0 1 380px; }
 }
 
 /* ── Телефон: шапке разрешено расти ──────────────────────────────────────────────
-   Выравнивать тут нечего (шапка на экране одна), а ряд контролов в 340px не влезает:
-   название с задачей и настройки расходятся по своим рядам, поля — к минимуму. */
+   Выравнивать тут нечего (шапка на экране одна): высота по содержимому, поля — к
+   минимуму. Раскладку рядов решают container-правила выше — по ширине самого чата. */
 @media (max-width: 759px) {
   .cs-top { min-height: 0; justify-content: flex-start; padding: 8px 10px; }
-  /* Задача идёт после названия и папки: иначе выбор папки занимает отдельный ряд.
-     Кнопка «назад», название и папка остаются вместе на узком экране. */
-  .hrow { flex-wrap: wrap; }
-  .ttl { flex-basis: 0; }
-  .task-tip { order: 1; flex: 1 1 100%; max-width: none; min-width: 0; }
-  .bar { flex-wrap: wrap; }
-  /* Факт-строка своим рядом — в одном ряду с контролами от неё осталось бы три буквы */
-  .factbar { order: 9; flex: 1 1 100%; }
-  .spacer { display: none; }
-  .sel.task .lbl { display: none; }
-  :deep(.eff .track) { width: 62px; }
   .cs-body { padding: 0 0px 0 12px; margin: 18px 0; }
   .cs-act, .cs-input { padding-left: 12px; padding-right: 12px; }
   .cs-input { padding-bottom: 12px; }

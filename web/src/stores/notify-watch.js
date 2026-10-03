@@ -6,7 +6,7 @@
 // по SSE state-change (AppShell) + редкий страховочный интервал.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
-import { notify } from '../shared/notify.ts';
+import { alertUser, dismissAlert } from '../shared/alerts.ts';
 import { stripEmoji, waitingReason } from '../../../shared/pipelineWait.ts';
 import { silenceReason } from '../../../shared/agentActivity.ts';
 import {
@@ -115,11 +115,15 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
               const crashed = t.stall.kind === 'crashed';
               // У аварии заголовок карточки общий («оборвался»), а полезное — подсказка;
               // у затыка наоборот: заголовок называет узел и причину.
-              notify(
-                `${crashed ? 'Конвейер оборвался' : 'Конвейер встал'} — #${id}`,
-                (crashed ? t.stall.hint || t.stall.title : t.stall.title) || '',
-                `stall-${key}`,
-              );
+              alertUser({
+                id: `stall-${key}`,
+                scope: `task:${id}`,
+                tone: 'danger',
+                sticky: true,
+                title: `${crashed ? 'Конвейер оборвался' : 'Конвейер встал'} — #${id}`,
+                body: (crashed ? t.stall.hint || t.stall.title : t.stall.title) || '',
+                target: { kind: 'pipeline', taskId: id },
+              });
             }
           }
           const q = silenceReason(t, silenceWindow);
@@ -128,8 +132,17 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
             // Звоним на переходе и отдельно по каждому этапу: следующий узел, зависший
             // так же, — это новая беда, а не продолжение старой.
             const key = `${id}:${q.stage}`;
+
             if (!silenceNotified.has(key) && !silent) {
-              notify(`Ход завис — #${id}`, q.text, `silence-${key}`);
+              alertUser({
+                id: `silence-${key}`,
+                scope: `task:${id}`,
+                tone: 'warning',
+                sticky: true,
+                title: `Ход завис — #${id}`,
+                body: q.text,
+                target: { kind: 'pipeline', taskId: id },
+              });
             }
           }
           let g = null;
@@ -165,15 +178,48 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
             text: w.text,
             premature: w.premature,
           });
-          if (!notified.has(id) && !silent) notify(`Конвейер ждёт тебя — #${id}`, w.text, `conveyor-${id}`);
+
+          if (!notified.has(id) && !silent) {
+            alertUser({
+              id: `conveyor-${id}`,
+              scope: `task:${id}`,
+              tone: 'warning',
+              sticky: true,
+              title: `Конвейер ждёт тебя — #${id}`,
+              body: w.text,
+              target: { kind: 'pipeline', taskId: id },
+            });
+          }
         }
         // Право на звонок возвращается, как только задача ушла с ворот.
+        const waitingIds = new Set(waiting.map((entry) => entry.task));
+
+        for (const id of notified) {
+          if (!waitingIds.has(id)) {
+            dismissAlert(`conveyor-${id}`);
+          }
+        }
+
         notified.clear();
         waiting.forEach((w) => notified.add(w.task));
         // Тем же порядком по молчанию: заговорил — забыли, замолчит снова — позвоним.
+        const silenceKeys = new Set(silentRuns.map((entry) => `${entry.task}:${entry.stage}`));
+
+        for (const key of silenceNotified) {
+          if (!silenceKeys.has(key)) {
+            dismissAlert(`silence-${key}`);
+          }
+        }
+
         silenceNotified.clear();
         silentRuns.forEach((x) => silenceNotified.add(`${x.task}:${x.stage}`));
         // И по авариям: прогон продолжили — забыли, оборвался снова — позвоним снова.
+        for (const key of stallNotified) {
+          if (!stalledKeys.includes(key)) {
+            dismissAlert(`stall-${key}`);
+          }
+        }
+
         stallNotified.clear();
         stalledKeys.forEach((key) => stallNotified.add(key));
         this.waiting = waiting;

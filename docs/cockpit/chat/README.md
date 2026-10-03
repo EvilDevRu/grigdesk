@@ -107,7 +107,7 @@
 - [Авторизация Claude](claude-authentication.md)
 - [Стоп агента](agent-stop.md)
 - [Строка состояния полного чата — не отдельная форма](chat-status-bar.md)
-- [Шапка чата: полная модель, риски усилия и имя текущей папки](header-controls.md)
+- [Шапка чата: выборы по значению, раскладка по ширине чата, риски усилия и папка](header-controls.md)
 
 ## Грабли
 
@@ -135,6 +135,7 @@
 - [Окно Codex 258 400 у модели «на 1M» = стандартное окно thread, большое включается конфигом](codex-context-window.md)
 - [Переезд Codex на app-server молча сузил рабочую область агента до cwd](codex-workspace-scope.md)
 - [Codex: живое уточнение требует подсказки вернуться к исходной задаче](codex-in-turn-live.md)
+- [Песочница Codex в чате: сеть и loopback есть, `systemctl --user`, FUSE и запись в `$HOME` — нет](codex-sandbox-capabilities.md)
 - [Claude: lifecycle уточнений, закрытие по result и прерывание очереди после «Стопа»](claude-in-turn-live.md)
 - [Полоса «Неделя · Fable» растёт без Fable = расход вне этой машины, а не ошибка кокпита](provider-account-usage.md)
 - [Фризы при наборе в чате = черновик сохранялся тем же тяжёлым путём, что и переписка](draft-save-performance.md)

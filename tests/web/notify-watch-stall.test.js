@@ -29,9 +29,18 @@ const NO_PROGRESS = {
   since: '2026-08-27 01:10:00',
 };
 
-/** Свежий модуль на каждый тест: наборы отзвонившего живут на уровне модуля. */
+/**
+ * Свежий модуль изолирует наборы отзвонившего, живущие на уровне модуля.
+ * Общий канал собирает показ и гашение без браузерных оповещений.
+ */
 async function makeWatch(t) {
-  const harness = { tasks: [], graphs: {}, notifications: [] };
+  const harness = {
+    tasks: [],
+    graphs: {},
+    notifications: [],
+    dismissed: [],
+    failTasks: false,
+  };
   globalThis.__notifyWatchHarness = harness;
   t.after(() => { delete globalThis.__notifyWatchHarness; });
 
@@ -41,6 +50,7 @@ async function makeWatch(t) {
         'export const api = {',
         '  async get(url) {',
         '    const harness = globalThis.__notifyWatchHarness;',
+        '    if (harness.failTasks && url === "/api/tasks") throw new Error("нет сети");',
         '    if (url === "/api/tasks") return { tasks: harness.tasks, silenceWindow: 0 };',
         '    const taskId = url.match(/^\\/api\\/tasks\\/(\\d+)\\/graph$/)?.[1];',
         '    if (taskId && harness.graphs[taskId]) return harness.graphs[taskId];',
@@ -48,10 +58,18 @@ async function makeWatch(t) {
         '  },',
         '};',
       ].join('\n'),
-      '../shared/notify.ts': [
-        'export const notify = (title, body, tag) => {',
-        '  globalThis.__notifyWatchHarness.notifications.push({ title, body, tag });',
-        '  return Promise.resolve(true);',
+      '../shared/alerts.ts': [
+        'export const alertUser = (notice) => {',
+        '  globalThis.__notifyWatchHarness.notifications.push({',
+        '    title: notice.title,',
+        '    body: notice.body,',
+        '    tag: notice.id,',
+        '    notice,',
+        '  });',
+        '  return true;',
+        '};',
+        'export const dismissAlert = (id) => {',
+        '  globalThis.__notifyWatchHarness.dismissed.push(id);',
         '};',
       ].join('\n'),
     },
@@ -165,4 +183,89 @@ test('наблюдаемая проекция несёт уже загружен
     stage: 'Проверка в браузере',
     progress: { done: 3, total: 7 },
   }]);
+});
+
+test('авария: срочное оповещение с целью конвейера', async (t) => {
+  const { store, harness } = await makeWatch(t);
+
+  harness.tasks = [task(8324, CRASHED)];
+  await store.check();
+
+  const notice = harness.notifications[0].notice;
+
+  assert.equal(notice?.id, 'stall-8324:crashed:');
+  assert.equal(notice.scope, 'task:8324');
+  assert.equal(notice.tone, 'danger');
+  assert.equal(notice.sticky, true);
+  assert.deepEqual(notice.target, { kind: 'pipeline', taskId: '8324' });
+});
+
+test('снятая авария гасит оповещение', async (t) => {
+  const { store, harness } = await makeWatch(t);
+
+  harness.tasks = [task(8324, CRASHED)];
+  await store.check();
+  harness.tasks = [{
+    task: 8324,
+    daemonAlive: true,
+    stall: null,
+  }];
+  await store.check();
+  assert.deepEqual(harness.dismissed, ['stall-8324:crashed:']);
+});
+
+/**
+ * Граф держит задачу на воротах, не добавляя аварию или молчание.
+ * Это отделяет правило ворот от остальных причин оповещения.
+ */
+function gateGraph(status = 'wait') {
+  return {
+    route: 'feature',
+    nodes: {
+      gate_plan: ['gate', 'Подтвердить план'],
+    },
+    pos: {
+      gate_plan: [0, 0],
+    },
+    keys: {},
+    statuses: {
+      gate_plan: status,
+    },
+  };
+}
+
+test('ворота: срочный тост ждёт решения человека', async (t) => {
+  const { store, harness } = await makeWatch(t);
+
+  harness.tasks = [task(900001, null)];
+  harness.graphs['900001'] = gateGraph();
+  await store.check();
+
+  const notice = harness.notifications[0]?.notice;
+
+  assert.equal(notice?.id, 'conveyor-900001');
+  assert.match(notice.title, /Конвейер ждёт тебя — #900001/);
+  assert.equal(notice.tone, 'warning');
+  assert.equal(notice.sticky, true);
+});
+
+test('пройденные ворота гасят оповещение', async (t) => {
+  const { store, harness } = await makeWatch(t);
+
+  harness.tasks = [task(900001, null)];
+  harness.graphs['900001'] = gateGraph();
+  await store.check();
+  harness.graphs['900001'] = gateGraph('done');
+  await store.check();
+  assert.deepEqual(harness.dismissed, ['conveyor-900001']);
+});
+
+test('ошибка списка задач сохраняет срочные оповещения', async (t) => {
+  const { store, harness } = await makeWatch(t);
+
+  harness.tasks = [task(8324, CRASHED)];
+  await store.check();
+  harness.failTasks = true;
+  await store.check();
+  assert.deepEqual(harness.dismissed, []);
 });

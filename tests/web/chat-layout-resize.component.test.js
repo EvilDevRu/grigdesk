@@ -105,7 +105,11 @@ function stubHostWidth(el, width) {
   el.getBoundingClientRect = () => ({ left: 0, top: 0, right: width, bottom: 800, width, height: 800, x: 0, y: 0 });
 }
 
-async function mountChats(t, browser, { storedWidth, activeId = '', wide = true } = {}) {
+/**
+ * Монтирует страницу с независимым стором и наблюдаемой поверхностью чата.
+ * Запрос показа позволяет проверить открытие из ссылки на узком экране.
+ */
+async function mountChats(t, browser, { storedWidth, activeId = '', wide = true, revealRequest = '' } = {}) {
   const [{ mount }, { createPinia, defineStore }, { ref }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
@@ -121,9 +125,13 @@ async function mountChats(t, browser, { storedWidth, activeId = '', wide = true 
   const read = [];
   globalThis.__chatsDockCapable = ref(wide);
   globalThis.__chatsResizeStore = defineStore(`chats-resize-${nonce}`, {
-    state: () => ({ activeId }),
+    state: () => ({ activeId, revealRequest }),
     actions: {
-      ensure() {}, loadConveyor() {},
+      ensure() {},
+      loadConveyor() {},
+      consumeReveal() {
+        this.revealRequest = '';
+      },
       registerSurface(owner, initial) { surface.owner = owner; surface.value = { ...initial }; return surface; },
       markRead(id) { read.push(id); },
     },
@@ -331,4 +339,17 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   );
   assert.match(session, /'cockpit-chat-composer-h'/);
   assert.doesNotMatch(session, /cockpit-chat-panel-composer-h/);
+});
+
+test('COMP-ALERT: ссылка раскрывает сам чат на узком экране', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser, {
+    activeId: 'chat-mobile',
+    wide: false,
+    revealRequest: 'chat-mobile',
+  });
+
+  await wrapper.vm.$nextTick();
+  assert.deepEqual(wrapper.__surface.value, { chatId: 'chat-mobile', visible: true });
+  assert.equal(globalThis.__chatsResizeStore().revealRequest, '');
 });

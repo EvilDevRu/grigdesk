@@ -11,6 +11,7 @@ import {
   THINKING_WORDS,
   formatElapsed,
   formatTurnTokens,
+  formatTurnTokensShort,
   runningTool,
   shuffledOrder,
   thinkingWord,
@@ -144,4 +145,14 @@ test('THINK-07: расход хода; ноль значит «неизвест�
     '≈ 1 234 ток.',
     'оценку (Claude и DeepSeek считают вывод по символам) обязан помечать знак «≈»',
   );
+});
+
+test('THINK-07b: в строке хода большой расход сокращён и не мельтешит на каждом тике', () => {
+  const short = (tokens, estimate = false) => formatTurnTokensShort(tokens, estimate).replace(/\u00a0/g, ' ');
+
+  assert.equal(short(0), '', 'ноль по-прежнему значит «нет данных»');
+  assert.equal(short(9_999), '9 999', 'до десяти тысяч число точное');
+  assert.equal(short(113_437, true), '≈ 113 тыс.');
+  assert.equal(short(113_999), '113 тыс.', 'округление вниз: тысяча не «прыгает» раньше времени');
+  assert.equal(short(1_250_000), '1,2 млн');
 });

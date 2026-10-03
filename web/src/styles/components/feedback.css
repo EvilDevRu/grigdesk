@@ -179,3 +179,193 @@
     animation-duration: 3s;
   }
 }
+
+/* Стопка оповещений: под верхней панелью, справа. Снизу тост закрывал бы кнопку отправки
+   в чате, а срочный тост висит, пока человек не ответит. */
+.ui-toast-host {
+  position: fixed;
+  top: calc(62px + env(safe-area-inset-top, 0px));
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100dvh - 80px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.ui-toast-host > * {
+  pointer-events: auto;
+}
+
+/* С 900 px справа стоит рейка дока шириной 44 px: тост не закрывает её кнопки. */
+@media (min-width: 900px) {
+  .ui-toast-host {
+    right: 56px;
+  }
+}
+
+/* Телефон: верхняя панель 52 px, внизу навигация и поле ввода — стопка во всю ширину сверху. */
+@media (max-width: 759px) {
+  .ui-toast-host {
+    top: calc(58px + env(safe-area-inset-top, 0px));
+    right: 8px;
+    left: 8px;
+    width: auto;
+  }
+}
+
+/* Карточка: значок тона и текст в две колонки, крестик висит в углу и не отнимает
+   ширину у кнопок. Тон окрашивает значок, рамку и едва заметно фон — сразу видно,
+   что срочно, не читая текст. */
+.ui-toast {
+  --ui-toast-tone: var(--accent);
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  padding: 10px 12px 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--ui-toast-tone) 30%, var(--line-2));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ui-toast-tone) 7%, var(--surface));
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 14px 34px #0000009c, inset 0 1px 0 #ffffff0d;
+}
+
+.ui-toast[data-tone='warning'] {
+  --ui-toast-tone: var(--warn);
+}
+
+.ui-toast[data-tone='danger'] {
+  --ui-toast-tone: var(--bad);
+}
+
+.ui-toast__icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ui-toast-tone) 18%, transparent);
+  color: var(--ui-toast-tone);
+}
+
+.ui-toast__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-toast__content {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.ui-toast__title {
+  display: block;
+  padding-right: 20px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast__body {
+  display: -webkit-box;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--ink-mid);
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ui-toast__detail {
+  max-height: 14em;
+  margin: 6px 0 0;
+  padding: 5px 7px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ground);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ui-toast-host__more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 2px 6px 2px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 11.5px;
+  box-shadow: 0 8px 22px #0000007a;
+}
+
+/* Появление — въезд справа, уход — туда же; соседи доезжают на место плавно. */
+.ui-toast-enter-active,
+.ui-toast-leave-active,
+.ui-toast-move {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.ui-toast-enter-from,
+.ui-toast-leave-to {
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.ui-toast-leave-active {
+  position: absolute;
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast-enter-active,
+  .ui-toast-leave-active,
+  .ui-toast-move {
+    transition: none;
+  }
+}
+
+/* Кнопки тоста компактнее обычных: карточка — подсказка, а не форма. */
+.ui-button[data-context='toast-action'] {
+  height: 26px;
+  min-height: 26px;
+  padding-inline: 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='toast-close'] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  color: var(--ink-mid);
+  font-size: 16px;
+}
+
+.ui-icon-button[data-context='toast-close']:hover {
+  color: var(--ink);
+}

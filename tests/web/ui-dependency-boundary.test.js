@@ -70,3 +70,12 @@ test('UI dependencies: удаление legacy deep import разрешено, �
   fs.writeFileSync(path.join(root, 'web/src/shared/ui/Legacy.vue'), '<template><div /></template><script setup lang="ts"></script>');
   assert.deepEqual(compareUiDependencyBoundary(collectUiDependencyBoundary(root), baseline), []);
 });
+
+test('UI dependencies: сервис тостов закрыт публичной границей', (t) => {
+  const root = fixtureRepo(t, {
+    'web/src/shared/BadAlerts.ts': "import { showToast } from '../services/toasts';",
+  });
+  const errors = compareUiDependencyBoundary(collectUiDependencyBoundary(root), EMPTY);
+
+  assert.match(errors.join('\n'), /обходит web\/src\/ui\.ts/);
+});

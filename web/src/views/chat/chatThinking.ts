@@ -193,3 +193,26 @@ export function formatTurnTokens(tokens: unknown, estimate: boolean, includeUnit
 
   return `${estimate ? '≈ ' : ''}${value.toLocaleString('ru')}${includeUnit ? ' ток.' : ''}`;
 }
+
+/**
+ * Короткая запись расхода для строки хода: от десяти тысяч — «113 тыс.», от миллиона —
+ * «1,2 млн». Округление вниз, чтобы разряд не сменялся раньше времени, а строка не
+ * мельтешила цифрами на каждом тике. Точное число остаётся в подсказке (formatTurnTokens).
+ */
+export function formatTurnTokensShort(tokens: unknown, estimate: boolean): string {
+  const value = Number(tokens);
+
+  if (!Number.isSafeInteger(value) || value < 10_000) {
+    return formatTurnTokens(tokens, estimate, false);
+  }
+
+  const mark = estimate ? '≈ ' : '';
+
+  if (value < 1_000_000) {
+    return `${mark}${Math.floor(value / 1_000)}\u00a0тыс.`;
+  }
+
+  const millions = Math.floor(value / 100_000) / 10;
+
+  return `${mark}${millions.toLocaleString('ru')}\u00a0млн`;
+}

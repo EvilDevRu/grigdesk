@@ -116,9 +116,22 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
 
   const summary = wrapper.find('[data-role="chat-status-summary"]');
 
-  assert.equal(summary.find('button, [role="button"], [tabindex]').exists(), false);
+  const more = summary.get('[data-role="chat-status-more"]');
+
+  // Дополнительный каталог в строку не входит никогда — его и показывает «+1».
+  assert.equal(more.text(), '+1');
+  assert.equal(summary.findAll('button, [role="button"], [tabindex]').length, 1, 'кнопка в сведениях только «+N»');
   assert.match(summary.attributes('title'), /\/running\/source/);
   assert.match(summary.attributes('title'), /\/running\/shared/);
+
+  await more.trigger('click');
+  await flushPromises();
+
+  const popover = browser.document.querySelector('[data-role="chat-status-popover"]');
+
+  assert.match(popover?.textContent || '', /Доп\. каталоги[\s\S]*\/running\/shared/u);
+  await more.trigger('click');
+  await flushPromises();
 
   for (const state of ['unavailable', 'unsupported', 'auth_required', 'blocked', 'rate_limited']) {
     providers.applyUsage({ 'running-provider': {
@@ -165,7 +178,8 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   } });
   await flushPromises();
   assert.match(wrapper.get('[data-role="chat-status-usage"]').text(), /Неделя:\s*0%/u);
-  assert.doesNotMatch(summary.text(), /нет данных|Неизвестное окно|\+1/u);
+  assert.doesNotMatch(summary.text(), /нет данных|Неизвестное окно/u);
+  assert.equal(summary.get('[data-role="chat-status-more"]').text(), '+1', 'пустое окно не считается');
   assert.match(summary.attributes('title'), /Неделя: 0%/u);
 
   await summary.trigger('click');

@@ -18,6 +18,7 @@ const IN_TURN_STORE_URL = new URL('../../../web/src/stores/chatInTurn.ts', impor
 export const apiHarness = {};
 globalThis.__chatApi = apiHarness;
 globalThis.__chatNotifications = [];
+globalThis.__chatDismissed = [];
 globalThis.__chatVisibility = {
   ids: new Set(),
   isVisible(id) { return this.ids.has(id); },
@@ -49,6 +50,15 @@ let instance = 0;
 
 function patch(source) {
   return source
+    .replace(
+      "import { alertUser, dismissAlert, dismissAlertScope } from '../shared/alerts.ts';",
+      'const alertUser = (notice) => globalThis.__chatNotifications.push('
+      + '[notice.title, notice.body, notice.id, notice]);'
+      + ' const dismissAlert = (id) => globalThis.__chatDismissed.push(id);'
+      + ' const dismissAlertScope = (scope) => globalThis.__chatDismissed.push(`scope:${scope}`);',
+    )
+    .replace("'../shared/quickPermission.ts'",
+      JSON.stringify(new URL('../../../web/src/shared/quickPermission.ts', import.meta.url).href))
     .replace("'../../../shared/chatRun.ts'",
       JSON.stringify(new URL('../../../shared/chatRun.ts', import.meta.url).href))
     .replace("'../../../shared/chatWorkdir.ts'",
@@ -67,10 +77,6 @@ function patch(source) {
     .replace(
       "import { useProvidersStore } from './providers.js';",
       'const useProvidersStore = () => globalThis.__chatProviders;',
-    )
-    .replace(
-      "import { notify } from '../shared/notify.ts';",
-      'const notify = (...args) => globalThis.__chatNotifications.push(args);',
     )
     .replace(
       "import { sseSubscribe } from '../composables/useSse.ts';",
@@ -118,6 +124,7 @@ function patch(source) {
  */
 export async function chatStoreFixture(state = {}, { api = null, fromServer = false } = {}) {
   globalThis.__chatNotifications = [];
+  globalThis.__chatDismissed = [];
   globalThis.__chatProviders = defaultProviders();
   globalThis.__chatVisibility.ids.clear();
   globalThis.__chatUiContext.capture = () => ({
@@ -179,4 +186,12 @@ export function setChatContextCapture(capture) {
 export function sseOf(chat) {
   chat.initPerms();
   return globalThis.__chatSse;
+}
+
+/**
+ * Возвращает скалярные id погашенных оповещений для проверки сверок и ответов.
+ * Подмена общего канала сохраняет формат прежних проверок notifications.
+ */
+export function chatDismissed() {
+  return globalThis.__chatDismissed;
 }

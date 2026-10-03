@@ -5,6 +5,7 @@
 
 let blinkTimer: ReturnType<typeof setInterval> | null = null;
 let baseTitle: string | null = null;
+const systemNotifications = new Map<string, Notification>();
 
 /**
  * Notification API там, где он вообще есть. Вне браузера и в insecure-контексте
@@ -105,7 +106,7 @@ export async function ensureNotifyPermission(): Promise<boolean> {
  * с тем же тегом, а не копится в шторке. Возврат говорит, показали ли системное
  * уведомление, — на `false` вызывающий уже ничего не должен делать, фоллбэк отработал.
  */
-export async function notify(title: string, body = '', tag = ''): Promise<boolean> {
+export async function notify(title: string, body = '', tag = '', url = ''): Promise<boolean> {
   const NotificationApi = notificationApi();
 
   if (NotificationApi?.permission === 'granted') {
@@ -116,7 +117,7 @@ export async function notify(title: string, body = '', tag = ''): Promise<boolea
       body,
       tag: tag || undefined,
       icon: notificationIcon(),
-      data: { url: typeof window !== 'undefined' ? window.location.href : '' },
+      data: { url: url || (typeof window !== 'undefined' ? window.location.href : '') },
     };
 
     try {
@@ -134,8 +135,22 @@ export async function notify(title: string, body = '', tag = ''): Promise<boolea
     try {
       const n = new NotificationApi(title, options);
 
+      if (tag) {
+        systemNotifications.set(tag, n);
+      }
+
+      n.onclose = () => {
+        if (systemNotifications.get(tag) === n) {
+          systemNotifications.delete(tag);
+        }
+      };
       n.onclick = () => {
         window.focus();
+
+        if (url) {
+          window.location.href = url;
+        }
+
         n.close();
       };
 
@@ -148,4 +163,31 @@ export async function notify(title: string, body = '', tag = ''): Promise<boolea
   }
 
   return false;
+}
+
+/**
+ * Закрывает системное оповещение с тем же id, что у тоста.
+ * Отсутствие доступного канала не мешает остальным действиям окна.
+ */
+export async function closeSystemNotification(tag: string): Promise<void> {
+  if (!tag) {
+    return;
+  }
+
+  try {
+    systemNotifications.get(tag)?.close();
+    systemNotifications.delete(tag);
+  } catch {
+    // Закрытие экземпляра не блокирует очистку канала service worker.
+  }
+
+  try {
+    const registration = typeof navigator !== 'undefined'
+      ? await navigator.serviceWorker?.getRegistration?.() : null;
+    const notifications = await registration?.getNotifications?.({ tag });
+
+    notifications?.forEach((notification) => notification.close());
+  } catch {
+    // Канал ОС может исчезнуть вместе с регистрацией service worker.
+  }
 }

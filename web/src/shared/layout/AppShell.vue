@@ -389,6 +389,8 @@
           </template>
         </UiTooltip>
       </div>
+      <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
+      <AlertHistoryPopover />
       <router-link to="/settings" class="settings-link" active-class="active"
                    title="Настройки" aria-label="Настройки">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
@@ -425,6 +427,8 @@
 </template>
 
 <script setup>
+import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
+import { setAlertTargetOpener } from '../alerts.ts';
 import { ref, computed, nextTick, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
@@ -466,6 +470,7 @@ import ProviderUsageResources from '../../features/providers/ProviderUsageResour
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.js';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
+import AlertHistoryPopover from '../../features/alerts/AlertHistoryPopover.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
 import { toolById } from '../tools/registry.ts';
@@ -583,6 +588,22 @@ function flagOf(cc) { if (!cc || cc.length !== 2) return '🏳'; return cc.toUpp
 // Чаты: сколько чатов ждут МЕНЯ (агент задал вопрос и стоит) и сколько просто
 // непрочитано. Ждущие важнее — их бейдж перекрывает непрочитанные.
 const chatStore = useChatStore();
+
+// Тост и системное оповещение ведут в одно место: открывалку ставит оболочка,
+// а командные параметры ссылки поглощает общий обработчик.
+const alertLinkDeps = {
+  route,
+  router,
+  chat: chatStore,
+  ui,
+};
+const stopAlertLinks = installAlertDeepLinks(alertLinkDeps);
+
+setAlertTargetOpener((target) => openAlertTarget(target, alertLinkDeps));
+onUnmounted(() => {
+  stopAlertLinks();
+  setAlertTargetOpener(null);
+});
 chatStore.ensure();
 const unreadChats = computed(() => chatStore.unreadCount);
 const waitingChats = computed(() => chatStore.waitingCount);
@@ -1146,6 +1167,9 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
     background: var(--sidebar); box-shadow: -1px 0 0 var(--line);
   }
   .topbar { grid-row: 1; grid-column: 1; padding: 0 16px; }
+  /* Сводка статуса на телефоне шире экрана: сжимается и обрезается она, а колокольчик
+     истории и настройки у правого края остаются видны. */
+  .status { min-width: 0; overflow: hidden; }
   .mlogo { display: inline; }
   .content { grid-row: 2; grid-column: 1; padding: 16px; }
   .host { display: none; }

@@ -17,7 +17,8 @@ async function chatStore(t, api) {
       '../router.js': 'export const router = { currentRoute: { value: {} }, push() {} };',
       './ui-context.js': 'export const useUiContextStore = () => ({ current: null });',
       './providers.js': 'export const useProvidersStore = () => ({ providers: [] });',
-      '../shared/notify.ts': 'export const notify = () => {};',
+      '../shared/alerts.ts': 'export const alertUser = () => true; export const dismissAlert = () => {};'
+        + ' export const dismissAlertScope = () => {};',
     },
   });
   const { createPinia, setActivePinia } = await import(

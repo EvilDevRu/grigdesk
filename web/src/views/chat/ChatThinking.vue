@@ -18,8 +18,8 @@
     <!-- Ключ по слову: смена слова пересоздаёт узел, и CSS-анимация проигрывает её входом.
          Троеточие — отдельный блок внутри той же ячейки: оно не участвует в подмене слова и
          потому не перезапускается вместе с ним. -->
-    <span class="said">
-      <span :key="word" class="word">{{ word }}</span>
+    <span ref="saidEl" class="said" :class="{ cut: wordCut }">
+      <span :key="word" ref="wordEl" class="word">{{ word }}</span>
       <!-- Точки проявляются по одной — одна, две, три — и цикл идёт заново. Блок всегда
            занимает место всех трёх, поэтому счётчик времени и расход не дёргаются. -->
       <span class="dots" aria-hidden="true">
@@ -38,7 +38,7 @@
         <path d="M9.6 2.6h4.8" />
       </svg>{{ elapsed }}
     </span>
-    <span v-if="tokensText" class="fact tok" :title="TOKENS_HINT">
+    <span v-if="tokensText" class="fact tok" :title="tokensHint">
       <svg class="fico" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="8.6" />
         <circle cx="12" cy="12" r="3.4" />
@@ -48,9 +48,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
-  THINKING_WORDS, formatElapsed, formatTurnTokens, shuffledOrder, thinkingWord,
+  THINKING_WORDS, formatElapsed, formatTurnTokens, formatTurnTokensShort, shuffledOrder, thinkingWord,
 } from './chatThinking.ts';
 
 // Живая строка идущего хода. Три факта рядом: чем агент занят сейчас (слово), сколько
@@ -86,12 +86,55 @@ const order = shuffledOrder(THINKING_WORDS.length);
 const tick = computed(() => Math.floor((now.value - mountedAt.value) / WORD_MS));
 const word = computed(() => thinkingWord(props.steps, tick.value, order));
 const elapsed = computed(() => formatElapsed(props.startedAt, now.value));
-const tokensText = computed(() => formatTurnTokens(props.tokens, props.tokensEstimate, false));
+// В строке — короткая запись («113 тыс.»), точное число — в подсказке.
+const tokensText = computed(() => formatTurnTokensShort(props.tokens, props.tokensEstimate));
+const tokensHint = computed(() => `${TOKENS_HINT}: ${formatTurnTokens(props.tokens, props.tokensEstimate)}`);
+
+// Слово, не влезшее в ячейку, уже кончается многоточием обрезки — анимированные точки
+// после него дали бы второе («Работаю с инструме… ...»). Поэтому обрезанное слово точки
+// прячет. Замер — только на смене слова и ширины ячейки, а не на своём же переключении:
+// спрятанные точки освобождают место, и замер по нему качал бы строку туда-обратно.
+const saidEl = ref<HTMLElement | null>(null);
+const wordEl = ref<HTMLElement | null>(null);
+const wordCut = ref(false);
+let saidObserver: ResizeObserver | null = null;
+let saidWidth = 0;
+
+// Замер с чистого листа: точки сначала возвращаются, чтобы слово мерилось в той же
+// ячейке, в какой его увидит человек, и только потом решается, прятать ли их снова.
+async function measureWord(): Promise<void> {
+  wordCut.value = false;
+  await nextTick();
+
+  const element = wordEl.value;
+
+  wordCut.value = Boolean(element && element.scrollWidth > element.clientWidth + 1);
+}
+
+watch(word, () => {
+  void measureWord();
+});
 
 onMounted(() => {
   timer = setInterval(() => {
     now.value = Date.now();
   }, TICK_MS);
+
+  if (saidEl.value && typeof ResizeObserver !== 'undefined') {
+    saidObserver = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+
+      const width = Math.round(entry.contentRect.width);
+
+      if (width !== saidWidth) {
+        saidWidth = width;
+        void measureWord();
+      }
+    });
+    saidObserver.observe(saidEl.value);
+  }
 });
 onUnmounted(() => {
   if (timer) {
@@ -99,6 +142,8 @@ onUnmounted(() => {
   }
 
   timer = null;
+  saidObserver?.disconnect();
+  saidObserver = null;
 });
 </script>
 
@@ -194,6 +239,7 @@ onUnmounted(() => {
   display: flex;
   flex: none;
 }
+.said.cut .dots { display: none; }
 .dot {
   animation-duration: 1.5s;
   animation-timing-function: step-end;
@@ -212,13 +258,15 @@ onUnmounted(() => {
   100% { opacity: 1; }
 }
 
-/* Числа — табличными цифрами: иначе строка дёргается на каждом тике секунд. Цвет тише
-   слова и тише подсказок: это фон хода, а не ответ. Зазор между словом и числами чуть
-   шире зазора столбцов (7 + 2): числа — отдельные факты, а не продолжение слова. */
+/* Числа — табличными цифрами: иначе строка дёргается на каждом тике секунд. Кегль
+   мельче слова, цвет тише: это фон хода, а не ответ, — но ярче сведений справа
+   (ChatStatusBar), потому что время и расход меняются на глазах. Зазор между словом и
+   числами чуть шире зазора столбцов (7 + 2): числа — отдельные факты. */
 .fact {
   flex: none;
   margin-left: 2px;
-  color: color-mix(in srgb, var(--ink-mid) 78%, transparent);
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--ink-mid) 72%, var(--surface));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -227,10 +275,10 @@ onUnmounted(() => {
    узлом и держит общую базовую линию строки. Кегль знака — как у цифр, линия — как у мозга,
    цвет наследует приглушённый цвет факта. */
 .fico {
-  width: 12px;
-  height: 12px;
-  margin-right: 4px;
-  vertical-align: -1.5px;
+  width: 11px;
+  height: 11px;
+  margin-right: 3px;
+  vertical-align: -1px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;

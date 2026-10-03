@@ -26,6 +26,12 @@ let instance = 0;
 
 function patch(source) {
   return source
+    .replace(
+      "import { alertUser, dismissAlert, dismissAlertScope } from '../shared/alerts.ts';",
+      'const alertUser = () => true; const dismissAlert = () => {}; const dismissAlertScope = () => {};',
+    )
+    .replace("'../shared/quickPermission.ts'",
+      JSON.stringify(new URL('../../web/src/shared/quickPermission.ts', import.meta.url).href))
     .replace("'../../../shared/chatWorkdir.ts'",
       JSON.stringify(new URL('../../shared/chatWorkdir.ts', import.meta.url).href))
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
@@ -45,10 +51,6 @@ function patch(source) {
       + ' const id = typeof value === "object" ? value.model : (value || "test-model");'
       + ' const provider = typeof value === "object" && value.provider ? value.provider : "test-provider";'
       + ' return { id, model: { id }, provider: { id: provider } }; } });',
-    )
-    .replace(
-      "import { notify } from '../shared/notify.ts';",
-      'const notify = () => {};',
     )
     .replace(
       "import { sseSubscribe } from '../composables/useSse.ts';",

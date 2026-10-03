@@ -28,6 +28,9 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/shared/layout/AppShell.vue',
   'web/src/views/BoardView.vue',
   'web/src/views/chat/ChatList.vue',
+  // «+N» строки хода — текст той же тихой строки без коробки: кнопка с рамкой и высотой
+  // выбилась бы из базовой линии индикатора.
+  'web/src/views/chat/ChatStatusBar.vue',
   'web/src/views/code/CodePanel.vue',
   'web/src/views/code/PatchReview.vue',
   'web/src/views/diff/DiffPanel.vue',

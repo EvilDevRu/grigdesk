@@ -13,6 +13,7 @@ function uiFacadeStub(prefix) {
     ['UiFilePicker', 'src/components/composites/UiFilePicker.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
     ['UiInput', 'src/components/primitives/UiInput.vue'],
+    ['UiPressable', 'src/components/primitives/UiPressable.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],

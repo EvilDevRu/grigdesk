@@ -10,6 +10,8 @@
 
 ## Устройство
 
+- [Оповещения: тост в окне и системный канал в фоне](in-app-alerts.md)
+
 - [Веб (web/src/)](frontend-architecture.md)
 - [Исправление фризов: функциональные проверки, полная серия до/после и остаточные задержки](chat-freeze-fix-results.md)
 - [Чаты на отдельном полном сервере: production UI, SSE, запись, reload и архив](chat-runtime-smoke-check.md)

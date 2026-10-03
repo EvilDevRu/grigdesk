@@ -389,9 +389,17 @@
   width: auto;
 }
 
-.ui-select[data-role='chat-model'] {
+/* Все выборы строки настроек чата — по выбранному значению: родной select иначе берёт
+   ширину самого длинного варианта, и шеврон «Авто» уезжал на сотню пикселей вправо. */
+.ui-select[data-role='chat-model'],
+.ui-select[data-context='chat-session-toolbar'] {
   width: auto;
   field-sizing: content;
+}
+
+.cs .sel.mode .ui-select-wrap {
+  flex: 0 1 auto;
+  width: auto;
 }
 
 /* Сообщение коммита — часть того же композера в 30px, что и его кнопки, но
@@ -496,14 +504,6 @@
 .trusted-add .ui-input[data-context='settings-field'] {
   height: 38px;
   min-height: 38px;
-}
-
-.cs .sel + .sel:has(.ui-select[data-context='chat-session-toolbar']),
-.cs .bar > .sel:has(.ui-select[data-context='chat-session-toolbar']) + .eff,
-.cs .bar > .eff + .ui-icon-button[data-context='chat-context'] {
-  margin-left: 4px;
-  padding-left: 12px;
-  border-left: 1px solid var(--line);
 }
 
 .ui-file-picker[data-role='chat-attachment'] {

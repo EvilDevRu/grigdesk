@@ -3,7 +3,7 @@
 import { markRaw, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
-import { notify } from '../shared/notify.ts';
+import { alertUser } from '../shared/alerts.ts';
 import { shelfApi } from '../shared/shelfApi.ts';
 import taskShelfDecision, { isShelfTaskCompleted } from '../shared/taskShelfDecision.ts';
 import type {
@@ -877,11 +877,14 @@ export const useTaskShelfStore = defineStore('taskShelf', {
 
         if (!silent && previous?.state === 'neutral' && decision.state === 'lit'
           && sourceWasPrimed && setting(controller, 'browserNotifications', true)) {
-          void notify(
-            `Полка — задача #${entry.taskId}`,
-            decision.message,
-            `task-shelf-${entry.taskId}-${decision.fingerprint}`,
-          );
+          alertUser({
+            id: `task-shelf-${entry.taskId}-${decision.fingerprint}`,
+            scope: `task:${entry.taskId}`,
+            tone: 'accent',
+            title: `Полка — задача #${entry.taskId}`,
+            body: decision.message,
+            target: { kind: 'task', taskId: String(entry.taskId) },
+          });
         }
 
         nextRuntime[entry.taskId] = {
