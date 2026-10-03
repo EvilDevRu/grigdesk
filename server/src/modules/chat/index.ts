@@ -3600,6 +3600,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...(err.sessionResetFailed ? { sessionResetFailed: true } : {}),
       });
     } finally {
+      // Исполнитель отпустил запуск: недописанная реплика уже не продолжится. Закрываем её
+      // для всех исполнителей сразу, иначе окно держало бы «Пишет…» до перезагрузки.
+      // До finish(): слив остановки сразу после него сверяет activeRuns, лишнее ожидание
+      // между ними выдало бы законченный ход за зависший.
+      await assistantPublisher.settleRun(runId).catch(() => {});
       runRec.finish();
 
       if (chatKey) {

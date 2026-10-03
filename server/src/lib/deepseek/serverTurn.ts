@@ -220,6 +220,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     const thoughts = createDeepSeekServerThoughtNormalizer();
     const drafts = new Map<string, string>();
     const completed = new Set<string>();
+    const abandoned = new Set<string>();
     const textSteps = new Map<string, Record<string, unknown>>();
     const toolContexts = new Map<string, { title: string; rawInput: unknown }>();
     const writes = new Set<Promise<void>>();
@@ -240,8 +241,15 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       writes.add(write);
       write.finally(() => writes.delete(write)).catch(() => {});
     };
+    /**
+     * Текст блока ответа: черновик по дельтам или завершённый блок. Завершённый и брошенный
+     * блоки уже не меняются — поздняя дельта не должна переоткрыть их в окне.
+     */
     const emitText = (id: string, text: string, complete: boolean) => {
-      if (!id || !text || completed.has(id)) return;
+      if (!id || !text || completed.has(id) || abandoned.has(id)) {
+        return;
+      }
+
       drafts.set(id, text);
       if (complete) {
         completed.add(id);
@@ -268,6 +276,26 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         sourceRevision: text.length,
         complete,
       });
+    };
+    /**
+     * Черновики, которые попытка уже не допишет, уходят окну с отметкой обрыва.
+     * Префикс ограничивает закрытие одной попыткой; без него закрываются все открытые.
+     */
+    const abandonDrafts = (prefix = '') => {
+      for (const [id, text] of drafts) {
+        if (completed.has(id) || abandoned.has(id) || !id.startsWith(prefix)) {
+          continue;
+        }
+
+        abandoned.add(id);
+        save({
+          assistantMessageId: storageMessageId(id),
+          text,
+          sourceRevision: text.length,
+          complete: false,
+          abandoned: true,
+        });
+      }
     };
     /**
      * Ошибка закрывает ход и сохраняет уже полученное размышление в ленте.
@@ -345,7 +373,13 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
         if (frame.type === 'start') {
           sink.emitAll(thoughts.flush());
+          // Новая попытка отвечает с нуля: текст прежней уже не продолжится.
+          abandonDrafts();
           currentAttempt = String(frame.attemptId || '');
+        }
+        if (frame.type === 'end') {
+          // Попытка закончилась, чем бы ни кончилась: текст без block-end из неё не придёт.
+          abandonDrafts(`${String(frame.attemptId || currentAttempt)}-`);
         }
 
         if (frame.type === 'chunk') handleChunk(frame);

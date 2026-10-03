@@ -38,7 +38,13 @@ function isAssistantBlock(value: unknown): value is AssistantBlockRecord {
     && Number.isSafeInteger(entry.revision)
     && typeof entry.text === 'string'
     && typeof entry.complete === 'boolean'
+    && (entry.abandoned === undefined || typeof entry.abandoned === 'boolean')
     && Number.isSafeInteger(entry.startedAt);
+}
+
+/** Блок больше не нужен окну и истории: перенесён в историю или брошен транспортом. */
+function isSettledBlock(block: AssistantBlockRecord): boolean {
+  return block.abandoned === true || (block.complete && !!block.savedToHistoryAt);
 }
 
 export class ChatAssistantMessages {
@@ -90,7 +96,7 @@ export class ChatAssistantMessages {
   /** Незавершённые блоки: их текст ещё копится в памяти и честно помечается `complete: false`. */
   live(runId: string): AssistantBlockRecord[] {
     return this.byRun(runId)
-      .filter((block) => !block.complete)
+      .filter((block) => !block.complete && !block.abandoned)
       .map((block) => ({
         ...block,
         text: this.drafts.get(this.keyOf(runId, block.assistantMessageId)) || block.text,
@@ -142,7 +148,7 @@ export class ChatAssistantMessages {
     const key = this.keyOf(runId, assistantMessageId);
     const block = this.blocks.get(key);
 
-    if (!block || block.complete) {
+    if (!block || block.complete || block.abandoned) {
       return block?.text || '';
     }
 
@@ -161,7 +167,7 @@ export class ChatAssistantMessages {
     const key = this.keyOf(runId, assistantMessageId);
     const block = this.blocks.get(key);
 
-    if (!block || block.complete) {
+    if (!block || block.complete || block.abandoned) {
       return;
     }
 
@@ -187,8 +193,10 @@ export class ChatAssistantMessages {
 
     const source = options.text !== undefined ? String(options.text) : (this.drafts.get(key) || '');
     const cut = cutInTurnText(source, IN_TURN_BLOCK_TEXT_LIMIT);
+    // Поздно завершённый брошенный черновик становится обычным полным блоком.
+    const { abandoned: _abandoned, ...open } = block;
     const next: AssistantBlockRecord = {
-      ...block,
+      ...open,
       text: cut.text,
       ...(cut.truncated ? { truncated: true } : {}),
       complete: true,
@@ -204,22 +212,29 @@ export class ChatAssistantMessages {
   }
 
   /**
-   * Снять незавершённый блок при закрытии запуска: накопленный текст сохраняется и
-   * остаётся видимым, но полным блок не объявляется — после обрыва это было бы неправдой.
+   * Снять незавершённый блок при обрыве или закрытии запуска: накопленный текст сохраняется
+   * и остаётся видимым, но полным блок не объявляется — после обрыва это было бы неправдой.
+   * Отметка `abandoned` говорит окну, что текст больше не пишется. Текст можно передать явно.
    */
-  async abandon(runId: string, assistantMessageId: string): Promise<AssistantBlockRecord | null> {
+  async abandon(
+    runId: string,
+    assistantMessageId: string,
+    options: { text?: string } = {},
+  ): Promise<AssistantBlockRecord | null> {
     const key = this.keyOf(runId, assistantMessageId);
     const block = this.blocks.get(key);
 
-    if (!block || block.complete) {
+    if (!block || block.complete || block.abandoned) {
       return block || null;
     }
 
+    const source = options.text !== undefined ? String(options.text) : (this.drafts.get(key) || '');
     const next: AssistantBlockRecord = {
       ...block,
-      text: cutInTurnText(this.drafts.get(key) || '').text,
+      text: cutInTurnText(source).text,
       revision: block.revision + 1,
       completedAt: this.now(),
+      abandoned: true,
     };
 
     this.blocks.set(key, next);
@@ -247,7 +262,8 @@ export class ChatAssistantMessages {
 
   /**
    * Уборка завершённых блоков старше срока. Незавершённые и не перенесённые в историю
-   * не трогаются: после падения сервера они — единственная копия ответа.
+   * не трогаются: после падения сервера они — единственная копия ответа. Брошенный блок
+   * в историю не переносится никогда, поэтому уходит по одному сроку.
    */
   async prune(): Promise<void> {
     const cutoff = this.now() - this.retentionMs;
@@ -255,7 +271,7 @@ export class ChatAssistantMessages {
     for (const [key, block] of [...this.blocks]) {
       const old = (block.completedAt || block.startedAt) < cutoff;
 
-      if (!block.complete || !old || !block.savedToHistoryAt) {
+      if (!old || !isSettledBlock(block)) {
         continue;
       }
 
@@ -384,7 +400,7 @@ export class ChatAssistantMessages {
 
         const old = (entry.completedAt || entry.startedAt) < cutoff;
 
-        if (entry.complete && old && entry.savedToHistoryAt) {
+        if (old && isSettledBlock(entry)) {
           await fs.rm(full, { force: true }).catch(() => {});
           continue;
         }

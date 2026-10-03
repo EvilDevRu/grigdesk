@@ -204,7 +204,10 @@ interface CodexTurn {
   onPermission?: (ask: Record<string, unknown>) => unknown;
   messageDeltas: Map<string, string>;
   reply: string;
+  // Id видимого блока, чей текст стал итогом: финал прикрепляется к нему без дубля.
+  replyMessageId: string;
   lastCommentary: string;
+  lastCommentaryId: string;
   appContext: CodexContextInfo | null;
   progressTokens: number;
   // Накопитель вывода ПОТОКА к началу этого хода: расход хода — прирост, а не последний
@@ -1296,7 +1299,9 @@ export function openCodexSession({
       onPermission,
       messageDeltas: new Map(),
       reply: '',
+      replyMessageId: '',
       lastCommentary: '',
+      lastCommentaryId: '',
       appContext: null,
       progressTokens: 0,
       baseOutputTokens: threadOutputTokens,
@@ -1327,6 +1332,7 @@ export function openCodexSession({
    */
   function closeTurn(current: CodexTurn) {
     clearTimeout(current.interruptTimer ?? undefined);
+    abandonMessages(current);
     // Ход закрыт — канал уточнений больше не принимает: позднее сообщение не должно
     // выглядеть как часть следующего хода.
     current.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
@@ -1355,9 +1361,12 @@ export function openCodexSession({
   async function finishTurnSuccess(current: CodexTurn | null) {
     if (!current || current.settled) return;
     // Ход, завершившийся без `final_answer`, всё равно нёс работу: его итог остался
-    // в последнем commentary. Дубль в ленте дешевле потерянного ответа, а отказ
+    // в последнем commentary. Финал прикрепляется к уже показанному блоку, а отказ
     // «codex не вернул ответ» на нормально закрытом turn читается как поломка.
-    if (!current.reply.trim() && current.lastCommentary.trim()) current.reply = current.lastCommentary;
+    if (!current.reply.trim() && current.lastCommentary.trim()) {
+      current.reply = current.lastCommentary;
+      current.replyMessageId = current.lastCommentaryId;
+    }
     if (!current.reply.trim()) {
       finishTurnError(current, new Error('codex не вернул ответ'));
       return;
@@ -1369,8 +1378,10 @@ export function openCodexSession({
     if (!context) {
       try { context = await tokenInfoReader(threadId, { env }); } catch { /* точная метрика необязательна */ }
     }
+
     current.resolve({
       reply: current.reply,
+      ...(current.replyMessageId ? { assistantMessageId: current.replyMessageId } : {}),
       sessionId: threadId,
       cost: null,
       contextTokens: context?.contextTokens ?? 0,
@@ -1458,6 +1469,26 @@ export function openCodexSession({
       sourceRevision: current.assistantRevision,
       complete: false,
     });
+  }
+
+  /**
+   * Начатые реплики больше не продолжатся: при обрыве потока app-server повторяет запрос
+   * модели с нуля и ответ приходит под новым id, а закрытый ход не допишет ничего.
+   * Окну отдаём последний текст с отметкой обрыва вместо вечного «Пишет…».
+   */
+  function abandonMessages(current: CodexTurn) {
+    for (const [id, text] of current.messageDeltas) {
+      current.assistantRevision += 1;
+      void current.onAssistantMessage?.({
+        assistantMessageId: id,
+        text,
+        sourceRevision: current.assistantRevision,
+        complete: false,
+        abandoned: true,
+      });
+    }
+
+    current.messageDeltas.clear();
   }
 
   /**
@@ -1638,20 +1669,32 @@ export function openCodexSession({
       const id = String(item.id || '');
       const text = String(item.text || current.messageDeltas.get(id) || '');
       current.messageDeltas.delete(id);
+
+      if (!text.trim()) {
+        return;
+      }
+
       // Commentary уже ушёл отдельным text-шагом. Ответом считается явный final
       // либо legacy-модель без phase, где последняя agentMessage была ответом.
       if (item.phase === 'final_answer' || item.phase == null) {
-        if (text.trim()) current.reply = text;
-      } else if (text.trim()) {
+        current.reply = text;
+        current.replyMessageId = id;
+      } else {
         current.lastCommentary = text;
-        current.assistantRevision += 1;
-        void current.onAssistantMessage?.({
-          assistantMessageId: id,
-          text,
-          sourceRevision: current.assistantRevision,
-          complete: true,
-        });
+        current.lastCommentaryId = id;
       }
+      // Итог тоже был виден черновиком по дельтам: без завершения он висел бы «Пишет…»
+      // до конца хода, а финал не нашёл бы свой блок.
+      current.assistantRevision += 1;
+      void current.onAssistantMessage?.({
+        assistantMessageId: id,
+        text,
+        sourceRevision: current.assistantRevision,
+        complete: true,
+      });
+    } else if (method === 'error') {
+      // Ошибка потока: при повторе ответ модели начнётся заново, без повтора ход упадёт.
+      abandonMessages(current);
     } else if (method === 'thread/tokenUsage/updated') {
       rememberUsage(current, params);
     } else if (method === 'turn/completed') {

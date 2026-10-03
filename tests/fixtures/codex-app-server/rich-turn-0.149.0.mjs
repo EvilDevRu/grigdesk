@@ -383,6 +383,90 @@ function runFixture() {
     setTimeout(() => process.exit(0), 20);
   }
 
+  // Обрыв потока посреди ответа: app-server объявляет повтор, и модель отвечает
+  // заново под новым id. Начатая реплика так и не получает item/completed.
+  function emitStreamRetryTurn() {
+    const reply = 'Ответ после повтора.';
+    const scope = {
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+    };
+    const answer = (id, text) => ({
+      type: 'agentMessage',
+      id,
+      text,
+      phase: 'final_answer',
+      memoryCitation: null,
+      delivery: null,
+    });
+
+    send({
+      method: 'item/started',
+      params: {
+        ...scope,
+        startedAtMs: 1_700_000_001_100,
+        item: answer('answer-cut', ''),
+      },
+    });
+    send({
+      method: 'item/agentMessage/delta',
+      params: {
+        ...scope,
+        itemId: 'answer-cut',
+        delta: 'Ответ до обр',
+      },
+    });
+    send({
+      method: 'error',
+      params: {
+        ...scope,
+        willRetry: true,
+        error: {
+          message: 'Reconnecting... 1/5',
+          codexErrorInfo: null,
+          additionalDetails: 'stream disconnected before completion',
+        },
+      },
+    });
+    send({
+      method: 'item/started',
+      params: {
+        ...scope,
+        startedAtMs: 1_700_000_001_300,
+        item: answer('answer-retry', ''),
+      },
+    });
+    send({
+      method: 'item/agentMessage/delta',
+      params: {
+        ...scope,
+        itemId: 'answer-retry',
+        delta: reply,
+      },
+    });
+    send({
+      method: 'item/completed',
+      params: {
+        ...scope,
+        completedAtMs: 1_700_000_001_400,
+        item: answer('answer-retry', reply),
+      },
+    });
+    send({
+      method: 'turn/completed',
+      params: {
+        threadId: THREAD_ID,
+        turn: {
+          ...runningTurn,
+          status: 'completed',
+          completedAt: 1_700_000_002,
+          durationMs: 1_000,
+        },
+      },
+    });
+    setTimeout(() => process.exit(0), 20);
+  }
+
   function emitInterruptibleTurn() {
     send({ method: 'item/started', params: {
       threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_100,
@@ -689,6 +773,13 @@ function runFixture() {
         : ['ssh-tool', 'lookup-tool', 'mcp-elicitation', 'mcp-resolved', 'steer'].includes(scenario)
           ? scenario
           : 'complete';
+
+      if (scenario === 'stream-retry') {
+        emitStreamRetryTurn();
+
+        return;
+      }
+
       if (scenario === 'context-usage') {
         emitContextUsage();
         emitRichTurn();

@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { STEP_THINK_LIMIT } from '../../server/src/lib/chat/streamSteps.ts';
 import { DeepSeekWebClient } from '../../server/src/lib/deepseek/serverClient.ts';
-import { runDeepSeekServerTurn } from '../../server/src/lib/deepseek/serverTurn.ts';
+import { runDeepSeekServerTurn, storageMessageId } from '../../server/src/lib/deepseek/serverTurn.ts';
 
 const requireServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireServer('fastify');
@@ -235,4 +235,68 @@ test('web: ошибка и остановка сохраняют незакры�
       assert.deepEqual(result.steps, broadcast);
     }
   }
+});
+
+function attemptFrame(type, attemptId, extra = {}) {
+  return {
+    type: 'assistant-stream',
+    frame: {
+      type,
+      attemptId,
+      ...extra,
+    },
+  };
+}
+
+function textDelta(text, attemptId = 'attempt-1') {
+  return streamChunk({
+    type: 'text-delta',
+    index: 0,
+    text,
+  }, attemptId);
+}
+
+function textEnd(text, attemptId) {
+  return streamChunk({
+    type: 'block-end',
+    index: 0,
+    block: {
+      type: 'text',
+      text,
+    },
+  }, attemptId);
+}
+
+test('web: конец брошенной попытки закрывает её черновик ответа', async (t) => {
+  const { result, messages } = await runWire(t, [
+    attemptFrame('start', 'attempt-1'),
+    textDelta('Ответ до обр'),
+    attemptFrame('end', 'attempt-1', {
+      outcome: {
+        kind: 'abandoned',
+      },
+    }),
+    attemptFrame('start', 'attempt-2'),
+    textDelta('Полный ответ.', 'attempt-2'),
+    textEnd('Полный ответ.', 'attempt-2'),
+  ]);
+  const cut = messages.filter((event) => event.assistantMessageId === storageMessageId('attempt-1-0'));
+
+  assert.equal(result.reply, 'Полный ответ.');
+  assert.equal(cut.at(-1).abandoned, true);
+  assert.equal(cut.at(-1).text, 'Ответ до обр');
+  assert.equal(cut.some((event) => event.complete), false);
+});
+
+test('web: новая попытка без кадра конца тоже бросает прежний черновик', async (t) => {
+  const { messages } = await runWire(t, [
+    attemptFrame('start', 'attempt-1'),
+    textDelta('Первая попытка'),
+    attemptFrame('start', 'attempt-2'),
+    textEnd('Готово.', 'attempt-2'),
+  ]);
+  const cut = messages.filter((event) => event.assistantMessageId === storageMessageId('attempt-1-0'));
+
+  assert.equal(cut.at(-1).abandoned, true);
+  assert.equal(messages.filter((event) => event.abandoned).length, 1, 'завершённый ответ не бросается');
 });

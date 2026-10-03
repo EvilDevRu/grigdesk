@@ -253,3 +253,38 @@ test('Codex: видимый комментарий связывает шаг и 
   await port.deliver({ messageId: 'message-fixture-0001', text: 'Вопрос', sequence: 1 });
   await run;
 });
+
+test('Codex: итоговый ответ завершает свой блок и связывается с финалом хода', async (t) => {
+  const f = await fixture(t, 'rich');
+  const assistant = [];
+  const result = await codex.run(runOptions(f, {
+    onAssistantMessage(event) {
+      assistant.push(event);
+    },
+  }));
+  const final = assistant.filter((event) => event.assistantMessageId === 'answer-1');
+
+  assert.equal(final.at(-1).complete, true, 'итоговый ответ не остаётся черновиком «Пишет…»');
+  assert.equal(final.at(-1).text, result.reply);
+  assert.equal(final.filter((event) => event.complete).length, 1);
+  assert.equal(result.assistantMessageId, 'answer-1');
+});
+
+test('Codex: обрыв потока с повтором бросает начатую реплику', async (t) => {
+  const f = await fixture(t, 'stream-retry');
+  const assistant = [];
+  const result = await codex.run(runOptions(f, {
+    onAssistantMessage(event) {
+      assistant.push(event);
+    },
+  }));
+  const cut = assistant.filter((event) => event.assistantMessageId === 'answer-cut');
+  const retry = assistant.filter((event) => event.assistantMessageId === 'answer-retry');
+
+  assert.equal(cut.at(-1).abandoned, true, 'повтор начинает ответ заново, старый текст не допишется');
+  assert.equal(cut.at(-1).text, 'Ответ до обр');
+  assert.equal(cut.some((event) => event.complete), false);
+  assert.equal(retry.at(-1).complete, true);
+  assert.equal(result.reply, 'Ответ после повтора.');
+  assert.equal(result.assistantMessageId, 'answer-retry');
+});

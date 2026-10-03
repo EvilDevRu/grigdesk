@@ -82,6 +82,9 @@ export interface InTurnAssistantBlock {
   startedAt: number;
   completedAt?: number;
   truncated?: boolean;
+  // Черновик брошен: транспорт его не допишет (обрыв, повтор, конец запуска). Блок не полный,
+  // но и «Пишет…» про него уже неправда.
+  abandoned?: boolean;
 }
 
 // Уровень подтверждения, который транспорт реально умеет. `consumed` не синтезируется.
@@ -102,6 +105,9 @@ export interface InTurnAssistantEvent {
   text: string;
   sourceRevision: number;
   complete: boolean;
+  // Адаптер знает, что начатый текст не продолжится: например, провайдер повторяет запрос
+  // с нуля и ответ придёт новым блоком.
+  abandoned?: boolean;
 }
 
 // Готовность канала у конкретного запуска; ревизия защищает от поздних событий.

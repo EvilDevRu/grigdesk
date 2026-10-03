@@ -66,6 +66,7 @@
       "tests/server/b24-dashboard.test.js",
       "tests/server/b24-groups.test.js",
       "tests/server/b24-task-update.test.js",
+      "tests/server/chat-assistant-draft-settle.test.js",
       "tests/server/chat-companion-contract.test.js",
       "tests/server/chat-concurrent-sends.test.js",
       "tests/server/chat-context-cache.test.js",

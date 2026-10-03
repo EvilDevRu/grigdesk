@@ -10,7 +10,9 @@
                         data-role="chat-reply-expand">
       {{ expanded ? 'Свернуть' : 'Показать полностью' }}
     </UiDisclosureButton>
-    <span v-if="block.complete === false" class="chat-in-turn-reply__draft">Пишет…</span>
+    <!-- Брошенный черновик уже не допишется: обещать «Пишет…» про него нельзя. -->
+    <span v-if="block.abandoned" class="chat-in-turn-reply__draft">Ответ оборван</span>
+    <span v-else-if="block.complete === false" class="chat-in-turn-reply__draft">Пишет…</span>
     <span v-if="block.truncated" class="chat-in-turn-reply__draft">Ответ сокращён</span>
   </div>
 </template>
@@ -26,6 +28,7 @@ const props = defineProps<{
     text?: string;
     complete?: boolean;
     truncated?: boolean;
+    abandoned?: boolean;
   };
 }>();
 

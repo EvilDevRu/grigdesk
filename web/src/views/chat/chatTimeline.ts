@@ -62,7 +62,7 @@ interface CachedTurn {
 
 const MESSAGE_DEPENDENCIES = [
   'role', 'kind', 'runId', 'turnId', 'parentTurnId', 'messageId', 'assistantMessageId',
-  'finalAssistantMessageId', 'sequence', 'startedAt', 'text', 'complete', 'revision',
+  'finalAssistantMessageId', 'sequence', 'startedAt', 'text', 'complete', 'abandoned', 'revision',
   'model', 'actualModel', 'effort',
 ] as const;
 

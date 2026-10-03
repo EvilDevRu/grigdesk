@@ -203,3 +203,150 @@ test('ошибка завершившейся записи доходит до �
   await assert.rejects(publisher.flush('fixture-run-0001'), { code: 'ENOTDIR' });
   await publisher.flush('fixture-run-0001');
 });
+
+test('брошенный черновик помечен, больше не живой и не принимает поздние дельты', async (t) => {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir, now: () => 1000 });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await messages.begin({
+    runId: 'fixture-run-0001',
+    chatKey: 'fixture-chat',
+    assistantMessageId: 'fixture-block-0001',
+    sequence: 1,
+  });
+  messages.setDraft('fixture-run-0001', 'fixture-block-0001', 'Половина отв');
+
+  const abandoned = await messages.abandon('fixture-run-0001', 'fixture-block-0001');
+
+  assert.equal(abandoned.abandoned, true, 'обрыв виден по флагу, а не по догадке');
+  assert.equal(abandoned.complete, false);
+  assert.equal(messages.live('fixture-run-0001').length, 0, 'брошенный блок уже не пишется');
+
+  messages.setDraft('fixture-run-0001', 'fixture-block-0001', 'Поздняя дельта');
+  assert.equal(messages.get('fixture-run-0001', 'fixture-block-0001').text, 'Половина отв');
+
+  const restored = new ChatAssistantMessages({ dir, now: () => 1000 });
+
+  await restored.load();
+  assert.equal(restored.get('fixture-run-0001', 'fixture-block-0001').abandoned, true);
+
+  const done = await messages.complete('fixture-run-0001', 'fixture-block-0001', { text: 'Полный ответ' });
+
+  assert.equal(done.complete, true);
+  assert.equal(Object.hasOwn(done, 'abandoned'), false, 'позднее завершение снимает отметку обрыва');
+});
+
+test('уборка убирает старые брошенные блоки: в историю они не переносятся', async (t) => {
+  const dir = await tmpDir();
+  let now = 1000;
+  const messages = new ChatAssistantMessages({
+    dir,
+    now: () => now,
+    retentionMs: 10,
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await messages.begin({
+    runId: 'fixture-run-0001',
+    chatKey: 'fixture-chat',
+    assistantMessageId: 'fixture-block-0001',
+    sequence: 1,
+  });
+  await messages.begin({
+    runId: 'fixture-run-0001',
+    chatKey: 'fixture-chat',
+    assistantMessageId: 'fixture-block-0002',
+    sequence: 2,
+  });
+  await messages.abandon('fixture-run-0001', 'fixture-block-0001');
+  now = 2000;
+  await messages.prune();
+
+  assert.equal(messages.get('fixture-run-0001', 'fixture-block-0001'), null);
+  assert.ok(
+    messages.get('fixture-run-0001', 'fixture-block-0002'),
+    'незавершённый блок после падения не трогаем',
+  );
+});
+
+test('событие обрыва закрывает черновик с его текстом и публикуется один раз', async (t) => {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir });
+  const published = [];
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => 1,
+    onMessage: (block) => published.push(block),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const events = [
+    ['Начало ответа', false],
+    ['Начало ответа', true],
+    ['Начало ответа и поздняя дельта', false],
+    ['Начало ответа', true],
+  ];
+
+  for (const [text, abandoned] of events) {
+    await publisher.publish('fixture-run-0001', 'fixture-chat', {
+      assistantMessageId: 'fixture-block-0001',
+      text,
+      sourceRevision: 1,
+      complete: false,
+      abandoned,
+    });
+  }
+
+  const block = messages.get('fixture-run-0001', 'fixture-block-0001');
+
+  assert.equal(block.abandoned, true);
+  assert.equal(block.text, 'Начало ответа');
+  assert.deepEqual(published.map((entry) => [entry.text, entry.abandoned === true]), [
+    ['Начало ответа', false],
+    ['Начало ответа', true],
+  ]);
+});
+
+test('конец запуска бросает незакрытые черновики только этого запуска', async (t) => {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir });
+  const published = [];
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => 1,
+    onMessage: (block) => published.push(block),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const events = [
+    ['fixture-run-0001', 'fixture-block-0001', 'Готовая реплика', true],
+    ['fixture-run-0001', 'fixture-block-0002', 'Недописанная репл', false],
+    ['fixture-run-0002', 'fixture-block-0003', 'Чужой черновик', false],
+  ];
+
+  for (const [runId, assistantMessageId, text, complete] of events) {
+    void publisher.publish(runId, 'fixture-chat', {
+      assistantMessageId,
+      text,
+      sourceRevision: 1,
+      complete,
+    });
+  }
+
+  await publisher.settleRun('fixture-run-0001');
+
+  assert.equal(messages.get('fixture-run-0001', 'fixture-block-0001').abandoned, undefined);
+  assert.equal(messages.get('fixture-run-0001', 'fixture-block-0002').abandoned, true);
+  assert.equal(messages.get('fixture-run-0001', 'fixture-block-0002').text, 'Недописанная репл');
+  assert.equal(messages.get('fixture-run-0002', 'fixture-block-0003').abandoned, undefined);
+  assert.equal(published.at(-1).assistantMessageId, 'fixture-block-0002');
+  assert.equal(published.at(-1).abandoned, true);
+
+  const count = published.length;
+
+  await publisher.settleRun('fixture-run-0001');
+  assert.equal(published.length, count, 'повторный конец запуска ничего не публикует');
+});

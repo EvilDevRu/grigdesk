@@ -326,3 +326,34 @@ test('StepList hides a text step only when its assistant id is explicitly displa
   await wrapper.setProps({ displayedAssistantIds: ['answer-12345678'] });
   assert.doesNotMatch(wrapper.text(), /Один ответ/);
 });
+
+test('оборванный черновик не обещает «Пишет…», а говорит об обрыве', async (t) => {
+  const { wrapper, run, flushPromises } = await mountChat(t);
+  const draft = {
+    runId: run.runId,
+    chatKey: 'in-turn-chat',
+    assistantMessageId: 'reply-cut-12345678',
+    sequence: 1,
+    revision: 1,
+    text: 'Начало ответа',
+    complete: false,
+    startedAt: 1,
+  };
+
+  run.entries.push(draft);
+  await flushPromises();
+  assert.match(wrapper.get('[data-role="chat-in-turn-reply"]').text(), /Пишет…/);
+
+  run.entries.splice(0, 1, {
+    ...draft,
+    revision: 2,
+    abandoned: true,
+  });
+  await flushPromises();
+
+  const reply = wrapper.get('[data-role="chat-in-turn-reply"]').text();
+
+  assert.match(reply, /Начало ответа/);
+  assert.match(reply, /Ответ оборван/);
+  assert.doesNotMatch(reply, /Пишет/);
+});
