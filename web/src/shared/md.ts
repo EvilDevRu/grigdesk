@@ -6,7 +6,7 @@ import type { Token, Tokens } from 'marked';
 
 // Расширение ссылок вызывающим кодом. Строгий `false` — вердикт «ведёт в никуда»:
 // такую ссылку рендерим текстом, чтобы синий цвет не обещал открытие.
-type HrefResolver = (href: string) => string | false | null | undefined;
+export type HrefResolver = (href: string) => string | false | null | undefined;
 
 // Настройки рендера. `sanitizerDocument` подменяется в тестах: вне браузера
 // санитизировать нечем, и raw HTML тогда не включается вовсе.
@@ -128,6 +128,35 @@ function linkAttributes(href: string): string {
   return ' target="_blank" rel="noopener noreferrer"';
 }
 
+const ALERT_TITLES: Record<string, string> = {
+  note: 'Заметка',
+  tip: 'Совет',
+  important: 'Важно',
+  warning: 'Внимание',
+  caution: 'Осторожно',
+};
+
+/**
+ * Снимает только первую строку маркера из уже разобранной цитаты.
+ * Остальные inline-токены сохраняют ссылки-сноски и структуру исходного документа.
+ */
+function alertBody(tokens: Token[]): Token[] {
+  const first = tokens[0];
+
+  if (first?.type !== 'paragraph') {
+    return tokens;
+  }
+
+  const paragraph = first as Tokens.Paragraph;
+  const inline = paragraph.tokens.slice(1);
+
+  if (inline[0]?.type === 'br') {
+    inline.shift();
+  }
+
+  return inline.length ? [{ ...paragraph, tokens: inline }, ...tokens.slice(1)] : tokens.slice(1);
+}
+
 /**
  * Рендерер marked с нашими правилами: raw HTML по умолчанию показывается текстом,
  * а каждая ссылка и картинка проходят allowlist уже ПОСЛЕ расширения — резолвер
@@ -141,6 +170,20 @@ function createRenderer({
   const renderer = new Renderer();
 
   renderer.html = ({ text }) => (allowHtml ? text : escapeHtml(text));
+
+  renderer.blockquote = function ({ text, tokens }) {
+    const kind = text.split('\n')[0]?.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/i)
+      ?.[1]?.toLowerCase();
+
+    if (!kind) {
+      return `<blockquote>\n${this.parser.parse(tokens)}</blockquote>\n`;
+    }
+
+    const body = this.parser.parse(alertBody(tokens));
+
+    return `<blockquote class="md-alert md-alert--${kind}">\n` +
+      `<p class="md-alert__title">${ALERT_TITLES[kind]}</p>\n${body}</blockquote>\n`;
+  };
 
   renderer.link = function ({ href, title, tokens }) {
     const text = this.parser.parseInline(tokens);
@@ -185,6 +228,35 @@ const ALLOWED_HTML_TAGS = new Set([
 ]);
 const ALIGN_TAGS = new Set(['div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'td', 'th']);
 
+const MARKDOWN_OPTIONS = {
+  gfm: true,
+  breaks: true,
+} as const;
+
+/**
+ * Разбирает Markdown с общими настройками показа и разрешает ссылки-сноски.
+ * Готовые токены можно передавать рендереру частями без повторного разбора текста.
+ */
+export function lexMarkdown(src: unknown): Token[] {
+  return marked.lexer(String(src || ''), MARKDOWN_OPTIONS);
+}
+
+/**
+ * Рендерит готовые токены с теми же защитами, что и целый документ.
+ * Raw HTML включается только явно и только при наличии документа для санитизации.
+ */
+export function mdTokensToHtml(tokens: Token[], options: MarkdownOptions = {}): string {
+  const sanitizerDocument = options.sanitizerDocument || globalThis.document;
+  const allowHtml = !!options.allowHtml && !!sanitizerDocument?.createElement;
+  const html = marked.parser(tokens, {
+    ...MARKDOWN_OPTIONS,
+    renderer: createRenderer({ ...options, allowHtml }),
+    async: false,
+  });
+
+  return allowHtml ? sanitizeRenderedHtml(html, options) : html;
+}
+
 /**
  * Целое из атрибута в объявленных границах или пустая строка. Границы обязательны:
  * `width="999999"` в чужом HTML — это не размер, а способ подвесить раскладку.
@@ -226,6 +298,19 @@ function sanitizeElement(element: Element, {
 
   if (ALIGN_TAGS.has(tag) && ['left', 'center', 'right'].includes(align)) {
     element.setAttribute('align', align);
+  }
+
+  const alertClasses = String(attrs.class || '').split(/\s+/).filter((name) => {
+    if (tag === 'p') {
+      return name === 'md-alert__title';
+    }
+
+    return tag === 'blockquote' && (name === 'md-alert' ||
+      /^md-alert--(?:note|tip|important|warning|caution)$/.test(name));
+  });
+
+  if (alertClasses.length) {
+    element.setAttribute('class', alertClasses.join(' '));
   }
 
   if (tag === 'a') {
@@ -354,17 +439,7 @@ export function sanitizeRenderedHtml(html: unknown, options: MarkdownOptions = {
  * там, где есть чем санитизировать: вне браузера правило fail closed.
  */
 export function mdToHtml(src: unknown, options: MarkdownOptions = {}): string {
-  const sanitizerDocument = options.sanitizerDocument || globalThis.document;
-  // Вне браузера fail closed: raw HTML не включаем, если его нечем санитизировать.
-  const allowHtml = !!options.allowHtml && !!sanitizerDocument?.createElement;
-  const html = marked.parse(String(src || ''), {
-    renderer: createRenderer({ ...options, allowHtml }),
-    gfm: true,
-    breaks: true,
-    async: false,
-  });
-
-  return allowHtml ? sanitizeRenderedHtml(html, options) : html;
+  return mdTokensToHtml(lexMarkdown(src), options);
 }
 
 // Однострочные превью не должны показывать служебный синтаксис Markdown:

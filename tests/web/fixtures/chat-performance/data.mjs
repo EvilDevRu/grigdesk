@@ -55,7 +55,8 @@ export function performanceData(legacy = false) {
     };
     const final = {
       role: 'assistant',
-      text,
+      text: turn === 49 ? text + '\n\n```ts\nconst historical = 1;\n```\n\n' +
+        '```js\nlet retained = true;\n```\n\n```mermaid\nflowchart TD\n A-->B\n```' : text,
       model: 'fixture-model',
       steps
     };

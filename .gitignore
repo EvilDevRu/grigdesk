@@ -43,3 +43,6 @@ BUGS.md
 
 # Локальная точка входа Claude Code: ведёт в docs/local/. В свежем клоне её нет.
 /CLAUDE.local.md
+
+# Изолированный renderer Markdown генерируется перед dev/build.
+web/.generated/markdown/

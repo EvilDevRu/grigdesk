@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { ChatTurnLocks } from '../../server/src/lib/chat/turnLocks.ts';
 import { ChatSessionBindingStore } from '../../server/src/lib/chat/sessionBindingStore.ts';
+import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 import {
   KIMI_RETRY_CONTRACT,
   mayRetryEmptyRun,
@@ -769,7 +770,8 @@ test('resume после стопа; при проглатывании — инв
   assert.ok(briefed.includes('[Досье прерванного хода]'), 'досье подмешано в сообщение');
   assert.ok(briefed.includes('- Edit: chat.js'));
   assert.ok(briefed.includes('- Ошибка: 1 failing test'));
-  assert.ok(briefed.endsWith('продолжай'), 'сообщение пользователя остаётся последним');
+  assert.ok(briefed.endsWith(withChatImageHint('продолжай')),
+    'подсказка следует за исходной просьбой');
 
   // Клиент дописал обычный ответ: досье одноразовое и дальше не подмешивается.
   const followupPut = await app.inject({

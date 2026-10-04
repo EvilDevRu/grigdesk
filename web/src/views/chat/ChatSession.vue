@@ -295,7 +295,7 @@
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </span>
-              <ChatInTurnReply :block="m" @click="onMarkdownClick" />
+              <ChatInTurnReply :block="m" :chat-id="sid" @click="onMarkdownClick" />
             </div>
             <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow"
                  :class="{ 'agent-reply': m.role === 'assistant' }">
@@ -306,7 +306,7 @@
                 </svg>
               </span>
               <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
-              <ChatMarkdown v-if="m.role === 'assistant'" :text="m.text || ''"
+              <ChatMarkdown v-if="m.role === 'assistant'" :text="m.text || ''" :chat-id="sid"
                             @click="onMarkdownClick" />
               <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
                 v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"

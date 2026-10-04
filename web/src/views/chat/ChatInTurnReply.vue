@@ -3,8 +3,9 @@
        aria-label="Реплика агента">
     <div :id="bodyId" class="chat-in-turn-reply__body"
          :class="{ collapsed: !expanded, faded: !expanded && overflows }">
-      <div ref="content" class="text md"
-           v-html="html"></div>
+      <div ref="content" class="text md">
+        <RichMarkdown :text="text" :resolve-href="chatFileLinkHref" :resolve-image-href="imageHref" />
+      </div>
     </div>
     <UiDisclosureButton v-if="overflows" v-model:open="expanded" density="compact" :controls="bodyId"
                         data-role="chat-reply-expand">
@@ -19,11 +20,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
-import { mdToHtml } from '../../shared/md.ts';
+import RichMarkdown from '../../shared/markdown/RichMarkdown.vue';
+import { chatImageHref } from './chatImages.ts';
 import { chatFileLinkHref } from '../../features/code/links.ts';
 import { UiDisclosureButton } from '../../ui';
 
 const props = defineProps<{
+  chatId?: string;
   block: {
     text?: string;
     complete?: boolean;
@@ -39,7 +42,7 @@ const overflows = ref(false);
 let observer: ResizeObserver | null = null;
 
 const text = computed(() => props.block.text || '');
-const html = computed(() => mdToHtml(text.value, { resolveHref: chatFileLinkHref }));
+const imageHref = (href: string) => chatImageHref(href, props.chatId || '');
 
 /**
  * Раскрытие нужно только там, где текст действительно длиннее четырёх строк.
@@ -59,7 +62,7 @@ function measurePreview(): void {
   overflows.value = element.scrollHeight > lineHeight * lines + 1;
 }
 
-watch(html, async () => {
+watch(text, async () => {
   await nextTick();
   measurePreview();
 });

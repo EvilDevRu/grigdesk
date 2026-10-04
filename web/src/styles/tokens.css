@@ -63,4 +63,21 @@
   --shadow: inset 0 1px 0 #ffffff0a, 0 1px 2px #00000050, 0 6px 22px #00000055;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  /* Подсветка кода в ответах: shiki (тема css-variables) пишет цвета как var(--md-code-*).
+     Тона — тёмная тема GitHub, приглушённые роли — из палитры кокпита. */
+  --md-code-foreground: var(--ink);
+  --md-code-background: transparent;
+  --md-code-token-comment: var(--ink-low);
+  --md-code-token-keyword: #ff7b72;
+  --md-code-token-string: #a5d6ff;
+  --md-code-token-string-expression: #a5d6ff;
+  --md-code-token-constant: #79c0ff;
+  --md-code-token-function: #d2a8ff;
+  --md-code-token-parameter: #ffa657;
+  --md-code-token-punctuation: var(--ink-mid);
+  --md-code-token-link: var(--accent);
+  --md-code-token-inserted: var(--good);
+  --md-code-token-deleted: var(--bad);
+  --md-code-token-changed: var(--warn);
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
-import { mdToHtml } from '../../web/src/shared/md.ts';
+import { mdToHtml, mdTokensToHtml } from '../../web/src/shared/md.ts';
 
 test('Markdown обновляет реактивный href без смены текста и сохраняет санитаризацию', async (t) => {
   const browser = await installUiBrowser(t);
@@ -15,7 +15,7 @@ test('Markdown обновляет реактивный href без смены т
   globalThis.__markdownRenderer = (...args) => {
     renders += 1;
 
-    return mdToHtml(...args);
+    return typeof args[0] === 'string' ? mdToHtml(...args) : mdTokensToHtml(...args);
   };
   globalThis.__markdownHref = () => target.value;
 
@@ -25,7 +25,17 @@ test('Markdown обновляет реактивный href без смены т
   }] = await Promise.all([
     compileVue(webFile('src/views/chat/ChatMarkdown.vue'), {
       stubs: {
-        '../../shared/md.ts': 'export const mdToHtml = (...args) => globalThis.__markdownRenderer(...args);',
+        '../../shared/md.ts': [
+          "export * from './src/shared/md.ts';",
+          'export const mdToHtml = (...args) => globalThis.__markdownRenderer(...args);',
+        ].join('\n'),
+        '../md.ts': [
+          "export * from './src/shared/md.ts';",
+          'export const mdTokensToHtml = (...args) => globalThis.__markdownRenderer(...args);',
+        ].join('\n'),
+        './codeHighlight.ts': 'export const highlightCode = async () => null;',
+        './mermaidRender.ts': 'export const renderMermaid = async () => null;',
+        '../clipboard.ts': 'export const writeClipboardText = async () => false;',
         '../../features/code/links.ts': 'export const chatFileLinkHref = (...args) => ' +
           'globalThis.__markdownHref(...args);',
       }
@@ -35,7 +45,8 @@ test('Markdown обновляет реактивный href без смены т
   const wrapper = mount(component, {
     attachTo: browser.document.querySelector('#mount'),
     props: {
-      text: '[Файл](/repo/file.ts)\n\n<script>alert(1)</script>'
+      text: '[Файл](/repo/file.ts)\n\n<script>alert(1)</script>\n\n![кадр](/repo/frame.png)',
+      chatId: 'c1',
     }
   });
 
@@ -46,6 +57,7 @@ test('Markdown обновляет реактивный href без смены т
   });
   assert.equal(wrapper.get('a').attributes('href'), '#/code?path=first');
   assert.equal(wrapper.find('script').exists(), false);
+  assert.equal(wrapper.get('img').attributes('src'), '/api/chat/c1/image?path=%2Frepo%2Fframe.png');
   assert.equal(renders, 1);
   await wrapper.setProps({
     title: 'Изменённый статус'

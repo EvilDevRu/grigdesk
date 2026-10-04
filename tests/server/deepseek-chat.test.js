@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
+import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -316,5 +317,5 @@ test('досье прерванного хода доезжает до DeepSeek,
   const text = String(prompt?.message?.params?.request?.content?.[0]?.text || '');
   assert.ok(text.includes('[Досье прерванного хода]'), 'досье подмешано в задание');
   assert.ok(text.includes('- Edit: chat.js'), 'досье называет сделанное');
-  assert.ok(text.endsWith('продолжай'), 'сообщение человека остаётся последним');
+  assert.ok(text.endsWith(withChatImageHint('продолжай')), 'подсказка следует за просьбой человека');
 });

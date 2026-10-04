@@ -1,15 +1,18 @@
 <template>
-  <div class="text md" v-html="html"></div>
+  <RichMarkdown class="text md" :text="text" :resolve-href="chatFileLinkHref"
+                :resolve-image-href="imageHref" />
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { mdToHtml } from '../../shared/md.ts';
+import RichMarkdown from '../../shared/markdown/RichMarkdown.vue';
 import { chatFileLinkHref } from '../../features/code/links.ts';
+import { chatImageHref } from './chatImages.ts';
 
-const props = defineProps<{ text: string }>();
+const props = defineProps<{
+  text: string;
+  chatId?: string;
+}>();
 
-// Резолвер читает реактивную карту файлов внутри computed.
-// Изменение карты обновляет ссылки даже при прежнем тексте сообщения.
-const html = computed(() => mdToHtml(props.text, { resolveHref: chatFileLinkHref }));
+// Путь на диске ищется сервером в текущей рабочей области именно этого разговора.
+const imageHref = (href: string) => chatImageHref(href, props.chatId || '');
 </script>

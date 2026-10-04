@@ -30,14 +30,18 @@
     "typecheck:telegram": "vue-tsc -p tsconfig.telegram.json --noEmit",
     "typecheck": "vue-tsc -p tsconfig.json --noEmit",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
-    "typecheck:tests": "vue-tsc -p tsconfig.tests.json --noEmit"
+    "typecheck:tests": "vue-tsc -p tsconfig.tests.json --noEmit",
+    "predev": "node scripts/buildMarkdownRenderer.mjs",
+    "prebuild": "node scripts/buildMarkdownRenderer.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "marked": "^14.0.0",
+    "mermaid": "12.1.0",
     "monaco-editor": "^0.56.0",
     "pinia": "^2.2.6",
+    "shiki": "4.5.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"
   },

@@ -1,12 +1,17 @@
 import { createApp, nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import App from './App.vue';
+import { mdToHtml, mdToText } from '../../../../web/src/shared/md.ts';
 import { useChatStore } from '../../../../web/src/stores/chat.js';
 import '../../../../web/src/styles/index.css';
 
 interface Stats {
   mdToText: number;
   mdToHtml: number;
+  lexMarkdown: number;
+  mdTokensToHtml: number;
+  highlightCode: number;
+  renderMermaid: number;
   historicalTurns: number;
   historicalSteps: number;
   stepLists: number;
@@ -56,6 +61,10 @@ function resetStats(): void {
   host.__chatPerformanceStats = {
     mdToText: 0,
     mdToHtml: 0,
+    lexMarkdown: 0,
+    mdTokensToHtml: 0,
+    highlightCode: 0,
+    renderMermaid: 0,
     historicalTurns: 0,
     historicalSteps: 0,
     stepLists: 0,
@@ -180,6 +189,77 @@ async function event(kind: string, index: number) {
   };
 }
 
+/**
+ * Один и тот же текущий ответ дописывается через SSE: закрытие запускает новую
+ * схему, а хвост сохраняет готовые блоки, раскрытие и показанный исходник.
+ */
+async function control() {
+  const fence = '```';
+  const long = Array.from({ length: 30 }, (_, index) => `строка ${index}`).join('\n');
+  const head = `Контроль\n\n${fence}ts\nconst control = 1;\n${fence}\n\n` +
+    `${fence}text\n${long}\n${fence}\n\n`;
+  const open = `${head}${fence}mermaid\nflowchart TD\n A-->B`;
+  const send = async (text: string, revision: number) => {
+    host.__performanceSse('chat-assistant-message', {
+      chatKey: target.id,
+      runId: 'current-run',
+      block: {
+        chatKey: target.id,
+        runId: 'current-run',
+        assistantMessageId: 'control-stream',
+        sequence: 10,
+        revision,
+        complete: false,
+        text,
+      },
+    });
+    await nextTick();
+    await pause(800);
+  };
+
+  resetStats();
+  mdToHtml('Контроль HTML');
+  mdToText('Контроль превью');
+  await send(open, 1);
+
+  const reply = [...document.querySelectorAll('.chat-in-turn-reply')].at(-1)!;
+
+  (reply.querySelector('[data-role="chat-reply-expand"]') as HTMLElement)?.click();
+  await nextTick();
+
+  const code = reply.querySelector('.md-fence[data-lang="ts"]')!;
+
+  code.setAttribute('data-perf-kept', 'yes');
+  (reply.querySelector('[data-context="md-fence-expand"]') as HTMLElement).click();
+  await nextTick();
+
+  const initial = structuredClone(host.__chatPerformanceStats);
+
+  resetStats();
+  await send(`${open}\n${fence}`, 2);
+
+  for (let attempt = 0; attempt < 100 && !reply.querySelector('.md-diagram__image'); attempt += 1) {
+    await pause(100);
+  }
+
+  const closed = structuredClone(host.__chatPerformanceStats);
+
+  (reply.querySelector('[data-context="md-diagram-code"]') as HTMLElement).click();
+  await nextTick();
+  resetStats();
+  await send(`${open}\n${fence}\n\nХвост`, 3);
+
+  return {
+    initial,
+    closed,
+    tail: structuredClone(host.__chatPerformanceStats),
+    kept: reply.querySelector('.md-fence[data-lang="ts"]') === code,
+    expanded: !reply.querySelector('.md-fence[data-lang="text"]')!.classList
+      .contains('md-fence--collapsed'),
+    showingCode: !!reply.querySelector('[data-context="md-diagram-show"]'),
+  };
+}
+
 dispatch('duplicate', 0);
 await nextTick();
 await pause(500);
@@ -189,5 +269,6 @@ host.__chatPerformance = {
   chat,
   event,
   dispatch,
-  resetStats
+  resetStats,
+  control
 };

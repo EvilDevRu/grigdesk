@@ -53,6 +53,20 @@ function chromeBinary() {
 }
 
 /**
+ * Счётчик привязан к единственной точке в исходнике; исчезновение или дублирование
+ * этой точки прерывает сборку, чтобы зелёный отчёт не скрывал слепую проверку.
+ */
+function replaceOnce(source, needle, replacement) {
+  const matches = typeof needle === 'string'
+    ? source.split(needle).length - 1
+    : [...source.matchAll(new RegExp(needle.source, 'gu'))].length;
+
+  assert.equal(matches, 1, `Точка инструментирования: ${needle}`);
+
+  return source.replace(needle, replacement);
+}
+
+/**
  * Инструментирование считает вызовы и размер обхода, не подменяя результат функций.
  * Ни одного прототипного кэша или обходного пути обновления здесь нет.
  */
@@ -66,8 +80,8 @@ function instrument(source, id) {
   if (relative === 'web/src/shared/md.ts') {
     let code = source;
 
-    for (const name of ['mdToText', 'mdToHtml']) {
-      code = code.replace(new RegExp(`(export function ${name}[^]*?\\n)(  )`, 'u'),
+    for (const name of ['mdToText', 'mdToHtml', 'lexMarkdown', 'mdTokensToHtml']) {
+      code = replaceOnce(code, new RegExp(`(export function ${name}[^]*?\\n)(  )`, 'u'),
         `$1  if (window.__chatPerformanceStats) window.__chatPerformanceStats.${name} += 1;\n$2`);
     }
 
@@ -76,8 +90,24 @@ function instrument(source, id) {
       map: null
     };
   }
+
+  const heavyFunctions = {
+    'web/src/shared/markdown/codeHighlight.ts': 'highlightCode',
+    'web/src/shared/markdown/mermaidRender.ts': 'renderMermaid',
+  };
+  const heavyName = heavyFunctions[relative];
+
+  if (heavyName) {
+    const entry = new RegExp(`(export (?:async )?function ${heavyName}[^]*?\\{\\n)`, 'u');
+
+    return {
+      code: replaceOnce(source, entry,
+        `$1  if (window.__chatPerformanceStats) window.__chatPerformanceStats.${heavyName} += 1;\n`),
+      map: null
+    };
+  }
   if (relative === 'web/src/views/chat/chatTimeline.ts') {
-    const code = source.replace('function turnRows(turn: TimelineTurn): ChatTimelineRow[] {', `
+    const code = replaceOnce(source, 'function turnRows(turn: TimelineTurn): ChatTimelineRow[] {', `
 function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
   if (!turn.live && window.__chatPerformanceStats) {
     window.__chatPerformanceStats.historicalTurns += 1;
@@ -91,13 +121,13 @@ function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
   }
   if (relative === 'web/src/views/chat/StepList.vue') {
     return {
-      code: source.replace('const rows = computed(() => {', `const rows = computed(() => {
+      code: replaceOnce(source, 'const rows = computed(() => {', `const rows = computed(() => {
   if (window.__chatPerformanceStats) window.__chatPerformanceStats.stepLists += 1;`),
       map: null
     };
   }
   if (relative === 'web/src/shared/apiClient.ts') {
-    const measured = source.replace('opts.body = JSON.stringify(body);', `
+    const measured = replaceOnce(source, 'opts.body = JSON.stringify(body);', `
     const serializationStart = performance.now();
     opts.body = JSON.stringify(body);
     if (method === 'PUT' && path.startsWith('/api/chat/store/chat')) {
@@ -109,7 +139,7 @@ function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
     }`);
 
     return {
-      code: measured.replace("opts.body = new Blob([opts.body], { type: 'application/json' });", `
+      code: replaceOnce(measured, "opts.body = new Blob([opts.body], { type: 'application/json' });", `
       opts.body = new Blob([opts.body], { type: 'application/json' });
       const prepared = window.__chatPerformanceStats?.put.at(-1);
       if (prepared) prepared.prepareMs = performance.now() - serializationStart;`),
@@ -722,7 +752,10 @@ function checkCachedBehavior(result) {
 
     if (['reorder', 'waiting', 'progress', 'step', 'duplicate'].includes(result.kind)) {
       assert.equal(sample.stats.mdToText, 0, `${result.kind}: разобрано неизменённое превью`);
-      assert.equal(sample.stats.mdToHtml, 0, `${result.kind}: разобран неизменённый Markdown`);
+
+      for (const name of ['mdToHtml', 'lexMarkdown', 'mdTokensToHtml', 'highlightCode', 'renderMermaid']) {
+        assert.equal(sample.stats[name], 0, `${result.kind}: вызван ${name}`);
+      }
     }
   }
 
@@ -807,6 +840,7 @@ async function main() {
   let browser;
   const results = [];
   const errors = [];
+  let positiveControl;
   const metadata = {
     node: process.version,
     cpu: cpus()[0]?.model,
@@ -826,6 +860,37 @@ async function main() {
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
     metadata.browser = browser.version();
+
+    if (label !== 'before') {
+      await backend.reset(false);
+
+      const controlPage = await browser.newPage();
+
+      try {
+        controlPage.on('pageerror', (error) => errors.push(error.message));
+        await controlPage.goto(backend.address);
+        await controlPage.waitForFunction(() => !!window.__chatPerformance);
+        positiveControl = await controlPage.evaluate(() => window.__chatPerformance.control());
+      } finally {
+        await controlPage.close();
+      }
+
+      for (const name of ['mdToText', 'mdToHtml', 'lexMarkdown', 'mdTokensToHtml',
+        'highlightCode', 'renderMermaid']) {
+        assert.ok(positiveControl.initial[name] + positiveControl.closed[name] > 0,
+          `Positive control не видит ${name}`);
+      }
+
+      assert.equal(positiveControl.closed.renderMermaid, 1);
+      // Закрытая Mermaid временно показывает исходник: его неизвестный язык даёт null,
+      // а два уже готовых блока кода не вызывают подсветчик повторно.
+      assert.equal(positiveControl.closed.highlightCode, 1);
+      assert.equal(positiveControl.tail.highlightCode, 0);
+      assert.equal(positiveControl.tail.renderMermaid, 0);
+      assert.equal(positiveControl.kept, true);
+      assert.equal(positiveControl.expanded, true);
+      assert.equal(positiveControl.showingCode, true);
+    }
 
     if (process.env.CHAT_PERFORMANCE_PROFILE) {
       await profileTasks(browser, backend);
@@ -932,6 +997,7 @@ async function main() {
         interaction
       } : {}),
       boundaries,
+      positiveControl,
       errors,
       complete: errors.length === 0,
     }));

@@ -36,6 +36,8 @@ import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
 import { mayRetryEmptyRun } from '../../lib/chat/retryContract.ts';
 import { resolveChatAttachment } from '../../lib/chat/attachments.ts';
+import { readChatImage } from '../../lib/chat/chatImages.ts';
+import { withChatImageHint } from '../../lib/chat/imageHint.ts';
 import { stoppedTurnBrief } from '../../lib/chat/stoppedBrief.ts';
 import { autoDecision } from '../../lib/chat/autoApprove.ts';
 import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
@@ -2735,11 +2737,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     let fullMessage = slash ? String(message || '').trim() : plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
-        contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock
-        + (workspace.copies.length > 1
-          ? `Рабочие копии:\n${workspace.copies.map((copy) => `${copy.key} → ${copy.path}`).join('\n')}\n\n`
-          : '')
-        + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
+        withChatImageHint(
+          contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock
+          + (workspace.copies.length > 1
+            ? `Рабочие копии:\n${workspace.copies.map((copy) => `${copy.key} → ${copy.path}`).join('\n')}\n\n`
+            : '')
+          + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
+        ),
         wantsTitle,
       );
     // Режим прав выбирает только пользователь в чате. UI-context не является
@@ -3201,7 +3205,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             return;
           }
 
-          inTurnMessages.registerPort(runId, port);
+          inTurnMessages.registerPort(runId, {
+            deliver: (input) => port.deliver({
+              ...input,
+              text: withChatImageHint(input.text),
+            }),
+            close: (reason) => port.close?.(reason),
+          });
 
           if (questionHolds.has(runId)) {
             const hold = questionHolds.get(runId)!;
@@ -3676,6 +3686,52 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     } catch {
       return reply.code(404).send({ error: 'not_found' });
     }
+  });
+
+  // Рабочая область берётся из durable чата, а query задаёт только запрошенный файл.
+  // no-store ставится до schema validation, чтобы отказ тоже не оставался в кэше.
+  fastify.get<ChatRoute>('/api/chat/:id/image', {
+    schema: {
+      querystring: {
+        type: 'object',
+        required: ['path'],
+        properties: {
+          path: { type: 'string' },
+        },
+      },
+    },
+    onRequest: async (_request, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+    },
+  }, async (request, reply) => {
+    const record = await history.readOne(String(request.params.id));
+
+    if (!record) {
+      return reply.code(404).send({ error: 'no_chat' });
+    }
+
+    let workspace: ResolvedWorkdir;
+
+    try {
+      workspace = await workspaceOf(record);
+    } catch {
+      return reply.code(404).send({ error: 'no_workdir' });
+    }
+
+    const result = await readChatImage({
+      cwd: workspace.cwd,
+      extraDirs: workspace.extraDirs,
+      requested: request.query.path,
+    });
+
+    if ('status' in result) {
+      return reply.code(result.status).send({ error: result.error });
+    }
+
+    return reply.type(result.type)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cross-Origin-Resource-Policy', 'same-origin')
+      .send(result.bytes);
   });
 
   // Диктовка с микрофона: multipart-аудио (webm/ogg) → whisper → { text }.

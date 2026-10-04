@@ -5,6 +5,7 @@
 // одного чата и второе окно.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 
 import { chatStoreFixture, sseOf } from '../web/helpers/chat-store.js';
 import {
@@ -393,7 +394,8 @@ test('несколько сообщений одного чата и второ�
     ['Ответ 1', 'Ответ 2', 'Ответ 3', 'Ответ 4'],
   );
   assert.deepEqual(
-    w.runs.map((run) => run.message.match(/(раз|два|три|четыре)$/)?.[1]),
+    w.runs.map((run) => ['раз', 'два', 'три', 'четыре']
+      .find((text) => run.message.endsWith(withChatImageHint(text)))),
     ['раз', 'два', 'три', 'четыре'],
     'исполнитель получил сообщения в порядке отправки',
   );

@@ -17,6 +17,7 @@ export const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // и `.state` — состояние машины: ни то, ни другое не переносится руками.
 const SKIP_DIRS = new Set([
     '.git',
+    '.generated',
     '.state',
     'node_modules',
     'dist',

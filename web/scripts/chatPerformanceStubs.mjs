@@ -9,7 +9,10 @@ export const performanceStubs = new Map([
       capture: () => ({ routingScope: null, promptContext: { page: 'Чаты', path: '/chats' } }),
     });
   `],
-  ['web/src/shared/notify.ts', 'export const notify = () => {};'],
+  ['web/src/shared/notify.ts', `
+    export const notify = () => {};
+    export const closeSystemNotification = () => {};
+  `],
   ['web/src/composables/useSse.ts', `
     export const sseSubscribe = (handler) => {
       window.__performanceSse = handler;

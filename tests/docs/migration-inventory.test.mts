@@ -31,7 +31,7 @@ test('снимок миграции не считает остатком чуж�
   const all = [...Object.values(inventory.legacy).flat(), ...inventory.vue];
 
   assert.deepEqual(
-    all.filter((path) => /(^|\/)(node_modules|dist|\.state|profiles)\//.test(path)),
+    all.filter((path) => /(^|\/)(node_modules|dist|\.generated|\.state|profiles)\//.test(path)),
     [],
   );
 });

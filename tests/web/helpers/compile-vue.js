@@ -14,6 +14,10 @@ const SINGLETONS = new Map([
   ['pinia', path.join(WEB_ROOT, 'node_modules/pinia/dist/pinia.mjs')],
   ['vue-router', path.join(WEB_ROOT, 'node_modules/vue-router/dist/vue-router.mjs')],
 ]);
+// Тяжёлые библиотеки не включаются в каждую тестовую сборку чата.
+// В component tests подсветка и схемы подменяются явными загрузчиками.
+const LAZY_EXTERNALS = ['mermaid', 'shiki', 'shiki/*'];
+
 let nonce = 0;
 
 // Data-URL навсегда оставляет в ESM cache и сам base64-код, и очень длинный
@@ -106,6 +110,7 @@ export async function compileVue(filename, { stubs = {} } = {}) {
     entryPoints: [filename],
     absWorkingDir: WEB_ROOT,
     bundle: true,
+    external: LAZY_EXTERNALS,
     write: false,
     format: 'esm',
     platform: 'node',
@@ -119,12 +124,16 @@ export async function compileVue(filename, { stubs = {} } = {}) {
   return (await importCompiled(code)).default;
 }
 
-/** Бандлит обычный JS/TS entry тем же resolver-ом, что и Vue component tests. */
+/**
+ * Бандлит обычный JS/TS entry тем же resolver-ом, что и компонентные проверки.
+ * Тяжёлые lazy imports остаются внешними; тест задаёт их результат явным loader-ом.
+ */
 export async function compileModule(filename, { stubs = {} } = {}) {
   const result = await build({
     entryPoints: [filename],
     absWorkingDir: WEB_ROOT,
     bundle: true,
+    external: LAZY_EXTERNALS,
     write: false,
     format: 'esm',
     platform: 'node',

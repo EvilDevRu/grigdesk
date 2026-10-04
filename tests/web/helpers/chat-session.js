@@ -112,6 +112,18 @@ export function compileChatSession(prefix, { realSteps = false } = {}) {
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
       './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub'),
       '../../ui': uiFacadeStub(prefix),
+      './codeHighlight.ts': 'export const highlightCode = async () => null;',
+      './mermaidRender.ts': 'export const renderMermaid = async () => null;',
+      '../clipboard.ts': 'export const writeClipboardText = async () => false;',
+      '../md.ts': [
+        "export * from './src/shared/md.ts';",
+        "import { mdTokensToHtml as realTokensToHtml } from './src/shared/md.ts';",
+        'export const mdTokensToHtml = (tokens, ...rest) => {',
+        `  const renderer = globalThis.${prefix}MarkdownRenderer;`,
+        '  if (!renderer) return realTokensToHtml(tokens, ...rest);',
+        "  return renderer(tokens.map((token) => token.raw).join(''), ...rest);",
+        '};',
+      ].join('\n'),
       '../../shared/md.ts': [
         'export const mdToHtml = (...args) => {',
         `  const renderer = globalThis.${prefix}MarkdownRenderer;`,
