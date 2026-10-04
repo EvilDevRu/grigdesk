@@ -30,11 +30,14 @@ test('парсер сохраняет opaque model id и берёт efforts то
   assert.equal(parsed.currentEffort, 'high');
   assert.deepEqual(parsed.efforts, ['off', 'low', 'high', 'max']);
   assert.deepEqual(parsed.models.map((model) => [model.id, model.name, model.family]), [
-    ['["deepseek-official","deepseek-flash"]', 'DeepSeek-V41-Flash', 'default'],
-    ['["deepseek-official","deepseek-v4-flash"]', 'DeepSeek-V4-Flash', 'default'],
-    ['["deepseek-official","deepseek-v4-pro"]', 'DeepSeek-V4-Pro', 'default'],
-    ['["deepseek-official","deepseek-v4-flash-vision-exp"]', 'DeepSeek-V4-Flash-Vision-Exp', 'default'],
+    ['["deepseek-official","deepseek-flash"]', 'DeepSeek-V41-Flash', undefined],
+    ['["deepseek-official","deepseek-v4-flash"]', 'DeepSeek-V4-Flash', undefined],
+    ['["deepseek-official","deepseek-v4-pro"]', 'DeepSeek-V4-Pro', undefined],
+    ['["deepseek-official","deepseek-v4-flash-vision-exp"]', 'DeepSeek-V4-Flash-Vision-Exp', undefined],
   ]);
+  // Общее семейство на все модели краткий список прочёл бы как версии одной модели.
+  assert.equal(deepSeekSeedModels().some((model) => 'family' in model), false);
+  assert.equal(String(deepseek.modelFamily?.({ id: 'deepseek-v4-pro' }) ?? ''), '');
   assert.deepEqual(parsed.models.map((model) => model.efforts), [
     parsed.efforts, parsed.efforts, parsed.efforts, parsed.efforts,
   ]);

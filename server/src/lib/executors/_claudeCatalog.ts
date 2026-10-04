@@ -339,6 +339,8 @@ export async function claudeCatalog(config: { claudeBin?: unknown }) {
             : { effortUnverified: true }),
           inputModalities: ['text', 'image'],
           extra: vi >= KEEP_VERSIONS,
+          // Форма той же версии: общий краткий список держит её рядом с базовой моделью.
+          ...(m.big && { variantOf: baseId }),
         });
       }
     });

@@ -2,7 +2,7 @@
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
-import { familyModels } from '../shared/modelFamily.ts';
+import { familyModels } from '../../../shared/modelFamily.ts';
 
 export const useProvidersStore = defineStore('providers', {
   // showAllModels — настройка «показывать все модели, включая старые версии» (server prefs).

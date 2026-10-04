@@ -134,6 +134,8 @@ test('efforts модели — прочитанный список; из одн�
     [pair('glm-5.2')]: ['off', 'high', 'max'],
     [pair('glm-5.3')]: ['low', 'high', 'max'],
   });
+  // ACP не публикует семейств: общее семейство краткий список прочёл бы как версии одной модели.
+  assert.equal(models.some((model) => 'family' in model), false);
 });
 
 test('glm-4.7 и glm-5-turbo без выбора уровня', () => {

@@ -91,6 +91,9 @@ test('[1m] у модели со встроенным миллионом стан
   assert.deepEqual(by.get('claude-opus-5').aliases, ['opus']);
   // У Opus 4.6 суффикс меняет окно, поэтому остаётся отдельным пунктом.
   assert.equal(by.has('claude-opus-4-6[1m]'), true);
+  // Пункт — форма базовой модели: краткий список держит её вместе с ней, а не как версию.
+  assert.equal(by.get('claude-opus-4-6[1m]').variantOf, 'claude-opus-4-6');
+  assert.equal(by.get('claude-opus-4-6').variantOf, undefined);
 });
 
 test('парсер ограничен одним объектом и не берёт отсутствующие поля у соседней модели', async (t) => {

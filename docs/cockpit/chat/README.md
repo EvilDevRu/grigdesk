@@ -84,7 +84,7 @@
 - [Обновление upstream DeepSeek и совместимый откат журналов](deepseek-upstream-update-rollback.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
-- [В кратком списке Claude — только свежая версия каждого семейства](claude-model-shortlist.md)
+- [В кратком списке моделей — только свежая версия каждого семейства](model-shortlist.md)
 - [Грабли исполнителей и моделей](executor-and-model-pitfalls.md)
 - [Запрет прямого SSH — настройка каждого исполнителя, а не общая политика UI](executor-ssh-policy.md)
 - [Инвалидация каталога учитывает ВСЕ входы](model-catalog-invalidation.md)

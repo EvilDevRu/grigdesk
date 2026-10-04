@@ -4,12 +4,14 @@
 //     дописал строку в json, код не трогаем;
 //   • уровни эффорта обнаруживаются динамически (executor.efforts(), например парсинг
 //     `claude --help`) — добавит вендор новый уровень (ultra и т.п.) — подхватится само;
-//   • сортировка по tier (сильнее = больше = выше в списке), тоже данные из файла.
+//   • сортировка по tier (сильнее = больше = выше в списке), тоже данные из файла;
+//   • краткий список общий для всех: прежние версии семейства получают `extra`.
 // У каждой модели: id (что передаём CLI), family (долгоживущая policy), name
 // (с версией — для UI), context (окно), efforts (уровни; null = взять обнаруженные
 // у исполнителя), tier (ранг силы).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { markSupersededModels } from '../../../shared/modelFamily.ts';
 import { getExecutors } from './executors/index.ts';
 import type { ExecutorAdapter } from './executors/index.ts';
 
@@ -22,7 +24,9 @@ import type { ExecutorAdapter } from './executors/index.ts';
 //    от динамических CLI-алиасов.
 // 10: Codex model/list не содержит окно; каталог помечает его runtime-only вместо
 //     прежней безусловной заглушки 400k, которую UI выдавал за свойство модели.
-const CATALOG_SCHEMA = 10;
+// 11: краткий список считает реестр по семействам любого исполнителя, поэтому DeepSeek
+//     и GLM больше не пишут всем моделям общее `family: 'default'`.
+const CATALOG_SCHEMA = 11;
 
 // Запись каталога моделей. Форма открытая: файл редактируется руками, и поля,
 // которых ядро не знает, обязаны переживать мёрж.
@@ -252,7 +256,8 @@ export function resolveModelEfforts(
 
 /**
  * Готовит копии моделей зарегистрированного исполнителя для runtime-каталога.
- * Семейства и уровни усилия уточняются адаптером, сохранённые записи не меняются.
+ * Семейства и уровни усилия уточняются адаптером, прежние версии семейства уходят
+ * в `extra` по общему правилу краткого списка; сохранённые записи не меняются.
  */
 async function resolveRuntimeModels(
   models: CatalogModel[],
@@ -269,7 +274,7 @@ async function resolveRuntimeModels(
     }
   }
 
-  return models
+  const resolved = models
     .map((model) => {
       let family = String(model.family || '').trim();
 
@@ -302,8 +307,9 @@ async function resolveRuntimeModels(
         ...(family && { family }),
         efforts,
       };
-    })
-    .sort((a, b) => (b.tier || 0) - (a.tier || 0));
+    });
+
+  return markSupersededModels(resolved).sort((a, b) => (b.tier || 0) - (a.tier || 0));
 }
 
 /**

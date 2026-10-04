@@ -30,10 +30,11 @@ interface ConfigOption {
   options?: unknown;
 }
 
+// Семейства нет: ACP-каталог его не публикует, а общее на все модели краткий список
+// прочёл бы как версии одной модели. Политика `default` конвейера живёт в его каталоге.
 export interface DeepSeekCatalogModel {
   id: string;
   name: string;
-  family: 'default';
   tier: number;
   efforts: string[];
   contextRuntimeOnly: true;
@@ -75,12 +76,11 @@ export function parseDeepSeekConfigOptions(options: unknown): DeepSeekCatalogRes
   ));
   const efforts = flattenedOptions(effort?.options).map((entry) => entry.value).filter(Boolean);
   const rawModels = flattenedOptions(model?.options);
+
   return {
     models: rawModels.map((entry, index) => ({
       id: entry.value,
       name: entry.name,
-      // ACP-каталог не публикует стабильное family metadata: имя модели не угадываем.
-      family: 'default',
       tier: (rawModels.length - index) * 10,
       efforts: [...efforts],
       contextRuntimeOnly: true,
@@ -91,11 +91,14 @@ export function parseDeepSeekConfigOptions(options: unknown): DeepSeekCatalogRes
   };
 }
 
+/**
+ * Запись до первого чтения каталога: модель по умолчанию pinned-сборки DSH, чтобы выбор
+ * не был пустым. Живой ACP-каталог заменит её целиком, `seed` отмечает происхождение.
+ */
 export function deepSeekSeedModels(): DeepSeekCatalogModel[] {
   return [{
     id: '["deepseek-official","deepseek-v4-flash"]',
     name: 'DeepSeek-V4-Flash',
-    family: 'default',
     tier: 100,
     efforts: ['off', 'low', 'high', 'max'],
     contextRuntimeOnly: true,

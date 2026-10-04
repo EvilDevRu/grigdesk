@@ -1,6 +1,7 @@
 // Семейство — стабильная policy-настройка («sol»), а конкретный id каталога
 // («gpt-5.6-sol») меняется с rollout. Эти helpers не знают исполнителей заранее:
-// новый provider просто отдаёт поле family в своей записи каталога.
+// новый provider просто отдаёт поле family в своей записи каталога. Одно правило
+// выбора актуальной модели служит и разрешению ссылок, и краткому списку в выборе.
 
 // Запись каталога моделей. Форму объявляет сам provider, поэтому здесь перечислено
 // ровно то, по чему выбирается актуальная модель семейства.
@@ -9,6 +10,7 @@ export interface CatalogModel extends Record<string, unknown> {
   family?: string;
   tier?: unknown;
   extra?: unknown;
+  variantOf?: unknown;
   aliases?: string[];
   modelRefAliases?: string[];
 }
@@ -141,6 +143,34 @@ export function resolveModelFamily(
   }
 
   return null;
+}
+
+/**
+ * Краткий список: в каждом семействе актуальна одна модель, прежние версии получают
+ * `extra` и уходят под настройку «Показывать все модели». Правило только добавляет флаг:
+ * скрытое исполнителем не всплывает, записи без семейства и формы актуальной модели
+ * (`variantOf`, например другое окно контекста) остаются. Вход не меняется.
+ */
+export function markSupersededModels<T extends CatalogModel>(models: T[]): T[] {
+  const current = new Map<string, CatalogModel>();
+
+  for (const model of models) {
+    const family = modelFamilyOf(model);
+
+    if (family && isBetterFamilyCandidate(model, current.get(family))) {
+      current.set(family, model);
+    }
+  }
+
+  return models.map((model) => {
+    const latest = current.get(modelFamilyOf(model));
+
+    if (!latest || latest === model || model.extra || model.variantOf === latest.id) {
+      return model;
+    }
+
+    return { ...model, extra: true };
+  });
 }
 
 /**

@@ -14,10 +14,11 @@ import type { GlmAccessMode } from './contract.ts';
 import { assertGlmRuntimeHome, buildGlmChildEnv } from './env.ts';
 import { buildGlmLaunchFiles } from './profile.ts';
 
+// Семейства нет: ACP-каталог его не публикует, а общее на все модели краткий список
+// прочёл бы как версии одной модели.
 export interface GlmCatalogEntry {
   id: string;
   name: string;
-  family: 'default';
   tier: number;
   efforts: string[];
   contextRuntimeOnly: true;
@@ -86,7 +87,6 @@ export function parseGlmCatalog(created: unknown, perModel: Record<string, unkno
     return {
       id: entry.value,
       name: entry.name,
-      family: 'default',
       tier: (models.length - index) * 10,
       efforts: efforts.length > 1 ? efforts : [],
       contextRuntimeOnly: true,

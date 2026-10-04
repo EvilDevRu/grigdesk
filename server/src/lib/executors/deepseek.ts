@@ -229,9 +229,6 @@ export default {
   catalogCacheKey(config: DeepSeekConfig) {
     return deepSeekCatalogCacheKey(config, process.env);
   },
-  modelFamily(model: { family?: unknown } | null | undefined) {
-    return String(model?.family || 'default');
-  },
 
   // Проектные и служебные MCP входят в одноразовый overlay web-профиля до старта хода.
   async run(options: Parameters<typeof runDeepSeekWebTurn>[0]) {

@@ -33,7 +33,7 @@ const registry = {
  * Подменяет общий Map недоступным исполнителем без каталога и восстанавливает его после теста.
  * Счётчики отличают фильтрацию по регистрации от ошибочного опроса доступности или входа.
  */
-async function unavailableExecutorFixture(t) {
+async function unavailableExecutorFixture(t, adapter = {}) {
   const executors = await getExecutors();
   const originalExecutors = new Map(executors);
 
@@ -64,6 +64,7 @@ async function unavailableExecutorFixture(t) {
     async run() {
       assert.fail('Проверка каталога не должна запускать ИИ.');
     },
+    ...adapter,
   });
 
   return calls;
@@ -102,6 +103,16 @@ async function writeRetiredChat(root, modelRef) {
   }));
 
   return { chatsDir, messages };
+}
+
+// Запись models.json без лишних полей: семейство пустое, если его объявляет адаптер.
+function catalogModel(id, family, tier) {
+  return {
+    id,
+    ...(family && { family }),
+    tier,
+    efforts: [],
+  };
 }
 
 test('model registry resolves family policy to its current catalog model', () => {
@@ -210,4 +221,40 @@ test('runtime-каталог исключает снятого исполнит�
   assert.equal(state.defModelRefState.state, 'unknown_provider');
   assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
   assert.deepEqual(calls, { probe: 0, auth: 0 });
+});
+
+test('runtime-каталог любого исполнителя прячет прежние версии семейства, не переписывая файл', async (t) => {
+  await unavailableExecutorFixture(t, {
+    modelFamily: (model) => (String(model?.id || '').startsWith('line-b') ? 'line-b' : ''),
+  });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-superseded-catalog-'));
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const modelsPath = path.join(root, 'models.json');
+  const catalogJson = JSON.stringify({
+    'test-live': [
+      catalogModel('line-a-2', 'line-a', 100),
+      catalogModel('line-a-1', 'line-a', 90),
+      catalogModel('line-b-2', '', 80),
+      catalogModel('line-b-1', '', 70),
+      catalogModel('solo', '', 60),
+    ],
+    _meta: { 'test-live': { catalogVersion: 'fixture' } },
+  }, null, 2);
+
+  await fs.writeFile(modelsPath, catalogJson);
+
+  const runtimeRegistry = await getModelsRegistry({ modelsPath }, { refresh: true });
+
+  assert.deepEqual(runtimeRegistry['test-live'].map((model) => [model.id, !!model.extra]), [
+    ['line-a-2', false],
+    ['line-a-1', true],
+    ['line-b-2', false],
+    ['line-b-1', true],
+    ['solo', false],
+  ]);
+  assert.equal(modelInfoFromRegistry('line-a', runtimeRegistry).model.id, 'line-a-2');
+  assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
 });
