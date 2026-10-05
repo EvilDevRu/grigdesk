@@ -118,7 +118,7 @@ test('Плитка версии кокпита', async (t) => {
     assert.equal(wrapper.get('.version-label').text(), 'v0.1.0');
     assert.ok(wrapper.get('.version-label').classes('mono'));
     assert.ok(wrapper.get('.version-tile').classes('is-idle'));
-    assert.equal(tile(wrapper).attributes('title'), 'Версия Cockpit актуальна');
+    assert.equal(tile(wrapper).attributes('data-ui-tooltip'), 'Версия Cockpit актуальна');
     assert.equal(wrapper.find('.version-dot').exists(), false);
 
     // Есть релиз: та же подпись, точка на знаке и жёлтый тон.
@@ -129,7 +129,7 @@ test('Плитка версии кокпита', async (t) => {
     assert.ok(wrapper.get('.version-tile').classes('is-release'));
     assert.ok(tile(wrapper).classes('release'));
     assert.ok(wrapper.find('.version-dot').exists());
-    assert.equal(tile(wrapper).attributes('title'), 'Доступен новый стабильный релиз Cockpit');
+    assert.equal(tile(wrapper).attributes('data-ui-tooltip'), 'Доступен новый стабильный релиз Cockpit');
   });
 
   await t.test('VERSION-TILE-02: идущая установка показывает стадию со спиннером вместо знака', async (scenario) => {
@@ -143,7 +143,7 @@ test('Плитка версии кокпита', async (t) => {
     assert.equal(wrapper.get('.version-label').classes('mono'), false);
     assert.ok(wrapper.find('.ui-spinner').exists());
     assert.equal(wrapper.find('.version-icon').exists(), false);
-    assert.equal(tile(wrapper).attributes('title'), 'Обновление: Собираю web');
+    assert.equal(tile(wrapper).attributes('data-ui-tooltip'), 'Обновление: Собираю web');
   });
 
   await t.test('VERSION-TILE-03: готовая сборка — громкая плитка, один клик обновляет', async (scenario) => {

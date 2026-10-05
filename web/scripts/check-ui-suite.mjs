@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { checkNativeTitles } from './check-native-titles.mjs';
 import { checkUiBoundary } from './check-ui-boundary.mjs';
 import { checkUiDependencyBoundary } from './check-ui-dependency-boundary.mjs';
 import { checkUiFileNaming } from './check-ui-file-naming.mjs';
@@ -12,6 +13,7 @@ const checks = [
   ['file naming', checkUiFileNaming],
   ['gallery boundary', checkUiGalleryBoundary],
   ['style injection boundary', checkUiStyleInjection],
+  ['native title', checkNativeTitles],
 ];
 
 /**

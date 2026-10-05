@@ -99,7 +99,7 @@ test('папка открывается одним кликом, выбор и �
   });
 
   assert.equal(wrapper.get('[data-context="chat-workdir"]').text(), 'current');
-  assert.equal(wrapper.get('[data-context="chat-workdir"]').attributes('title'),
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').attributes('data-ui-tooltip'),
     'Работаем в: /workspace/current');
   await wrapper.get('[data-context="chat-workdir"]').trigger('click');
   await flushPromises();

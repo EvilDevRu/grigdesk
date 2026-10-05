@@ -121,8 +121,8 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   // Дополнительный каталог в строку не входит никогда — его и показывает «+1».
   assert.equal(more.text(), '+1');
   assert.equal(summary.findAll('button, [role="button"], [tabindex]').length, 1, 'кнопка в сведениях только «+N»');
-  assert.match(summary.attributes('title'), /\/running\/source/);
-  assert.match(summary.attributes('title'), /\/running\/shared/);
+  assert.match(summary.attributes('data-ui-tooltip'), /\/running\/source/);
+  assert.match(summary.attributes('data-ui-tooltip'), /\/running\/shared/);
 
   await more.trigger('click');
   await flushPromises();
@@ -146,7 +146,7 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
     await flushPromises();
     assert.equal(wrapper.find('[data-role="chat-status-usage"]').exists(), false, state);
     assert.equal(summary.findAll('.chat-status__sep').length, 1, state);
-    assert.doesNotMatch(summary.attributes('title'), /лимит|устарели|Неделя/iu, state);
+    assert.doesNotMatch(summary.attributes('data-ui-tooltip'), /лимит|устарели|Неделя/iu, state);
     assert.match(summary.text(), /Модель запуска/);
   }
 
@@ -180,7 +180,7 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   assert.match(wrapper.get('[data-role="chat-status-usage"]').text(), /Неделя:\s*0%/u);
   assert.doesNotMatch(summary.text(), /нет данных|Неизвестное окно/u);
   assert.equal(summary.get('[data-role="chat-status-more"]').text(), '+1', 'пустое окно не считается');
-  assert.match(summary.attributes('title'), /Неделя: 0%/u);
+  assert.match(summary.attributes('data-ui-tooltip'), /Неделя: 0%/u);
 
   await summary.trigger('click');
   await flushPromises();

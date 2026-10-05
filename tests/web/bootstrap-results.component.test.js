@@ -28,7 +28,8 @@ const uiStub = [
 ].join('\n');
 const stubs = {
   '../../shared/apiClient.ts': 'export const api = globalThis.__bootstrapApi;',
-  '../../ui': uiStub,
+  '../../ui': (uiStub) +
+    "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
 };
 
 /**

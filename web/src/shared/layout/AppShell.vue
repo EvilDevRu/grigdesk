@@ -7,7 +7,10 @@
       </div>
       <nav class="nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active"
-                     :title="item.to === '/board' && boardChipVisible ? `${item.label} · ${boardChipTitle}` : item.label">
+                     :aria-label="item.label"
+                     v-tooltip.right="item.to === '/board' && boardChipVisible
+                       ? `${item.label} · ${boardChipTitle}`
+                       : item.label">
           <span class="icwrap">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
             <span v-if="item.to === '/board' && boardChipVisible"
@@ -16,7 +19,7 @@
                     timing: boardNavActivity.activeTimerCount,
                     'only-new': !boardNavActivity.activeTimerCount,
                   }"
-                  role="status" :aria-label="boardChipTitle" :title="boardChipTitle">
+                  role="status" :aria-label="boardChipTitle" v-tooltip="boardChipTitle">
               <span v-if="boardNavActivity.activeTimerCount">
                 {{ boardNavActivity.activeTimerCount > 99 ? '99+' : boardNavActivity.activeTimerCount }}
               </span>
@@ -31,18 +34,19 @@
                   :class="[badges[item.to].kind, badges[item.to].pulseKind]"
                   :style="badges[item.to].style"
                   role="status" :aria-label="badges[item.to].title"
-                  :title="badges[item.to].title">{{ badges[item.to].n }}</span>
+                  v-tooltip="badges[item.to].title">{{ badges[item.to].n }}</span>
           </span>
           <span class="lbl">{{ item.label }}</span>
         </router-link>
         <!-- Плагины: под основными разделами, за разделителем. Состав живёт в «Настройки → Плагины». -->
         <template v-if="pluginNav.length">
           <div class="navsep"></div>
-          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active"
+                       :aria-label="item.label" v-tooltip.right="item.label">
             <span class="icwrap">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
               <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
-                    role="status" :aria-label="badges[item.to].title" :title="badges[item.to].title">
+                    role="status" :aria-label="badges[item.to].title" v-tooltip="badges[item.to].title">
                 {{ badges[item.to].n > 99 ? '99+' : badges[item.to].n }}
               </span>
             </span>
@@ -52,24 +56,26 @@
         <template v-if="toolsNav.length">
           <div class="navsep"></div>
           <UiPressable ref="toolsTrigger" class="navitem tools-trigger"
-                       :class="{ active: toolsActive }" title="Инструменты"
+                       :class="{ active: toolsActive }" aria-label="Инструменты"
+                       v-tooltip.right="'Инструменты'"
                        :aria-expanded="toolsOpen" aria-haspopup="true" @click="toggleTools">
             <span class="icwrap">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                    stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
               <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
-                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
+                    role="status" :aria-label="badges['/tools'].title" v-tooltip="badges['/tools'].title">
                 {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
               </span>
             </span>
             <span class="lbl">Инструменты</span>
           </UiPressable>
-          <router-link to="/tools" class="navitem tools-mobile" active-class="active" title="Инструменты">
+          <router-link to="/tools" class="navitem tools-mobile" active-class="active"
+                       aria-label="Инструменты" v-tooltip.right="'Инструменты'">
             <span class="icwrap">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                    stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
               <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
-                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
+                    role="status" :aria-label="badges['/tools'].title" v-tooltip="badges['/tools'].title">
                 {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
               </span>
             </span>
@@ -78,12 +84,14 @@
         </template>
       </nav>
       <nav class="nav nav-bottom dock-route-nav">
-        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" active-class="active"
+                       :aria-label="item.label" v-tooltip.right="item.label">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
           <span class="lbl">{{ item.label }}</span>
         </router-link>
       </nav>
-      <UiPressable class="collapse-btn" :title="collapsed ? 'Развернуть' : 'Свернуть'"
+      <UiPressable class="collapse-btn" :aria-label="collapsed ? 'Развернуть' : 'Свернуть'"
+                   v-tooltip.right="collapsed ? 'Развернуть' : 'Свернуть'"
                    @click="toggleSidebar">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="collapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'" /></svg>
         <span class="lbl">Свернуть</span>
@@ -228,7 +236,7 @@
                       v-if="p.updateAvailable"
                       class="ptip-upd"
                       data-testid="provider-popover-update-dot"
-                      :title="`Доступно обновление: ${p.latest}`"
+                      v-tooltip="`Доступно обновление: ${p.latest}`"
                     ></span>
                     <!-- Ставится по нажатию и отсюда: точка сообщала о новой версии, а идти
                          за ней приходилось в настройки. Ход один на весь кокпит, поэтому
@@ -238,7 +246,7 @@
                       data-context="topbar-popover-update"
                       role="embedded"
                       :label="`Обновить до ${p.latest}`"
-                      :title="`Обновить CLI до ${p.latest}. Каталог моделей перечитается.`"
+                      v-tooltip="`Обновить CLI до ${p.latest}. Каталог моделей перечитается.`"
                       :disabled="!!prov.updating"
                       :loading="prov.updating === p.id"
                       loading-label="Обновляю"
@@ -257,7 +265,7 @@
                       data-context="topbar-popover-refresh"
                       role="embedded"
                       label="Проверить лимиты сейчас"
-                      :title="usagePauseOf(p)
+                      v-tooltip="usagePauseOf(p)
                         ? `Вендор попросил не проверять. Следующая проверка ${usagePauseOf(p)}.`
                         : 'Проверить лимиты сейчас'"
                       :disabled="!!usagePauseOf(p)"
@@ -274,7 +282,7 @@
                       data-context="topbar-popover-settings"
                       role="embedded"
                       label="Настройки исполнителей"
-                      title="Настройки исполнителей"
+                      v-tooltip="'Настройки исполнителей'"
                       @click="close('action'); toProviders()"
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
@@ -330,7 +338,7 @@
                         {{ b.label }}
                         <!-- Ведро, которого раньше не было: появление нового лимита
                              иначе замечается только случайно. Гаснет само. -->
-                        <span v-if="b.fresh" class="pu-new" title="Это ведро лимитов появилось недавно">новое</span>
+                        <span v-if="b.fresh" class="pu-new" v-tooltip="'Это ведро лимитов появилось недавно'">новое</span>
                       </span>
                       <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
                     </span>
@@ -392,7 +400,7 @@
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <AlertHistoryPopover />
       <router-link to="/settings" class="settings-link" active-class="active"
-                   title="Настройки" aria-label="Настройки">
+                   v-tooltip="'Настройки'" aria-label="Настройки">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path :d="ICONS.settings" />
@@ -440,6 +448,7 @@ import {
   UiPressable,
   UiTooltip,
   useUiLayer,
+  vTooltip,
 } from '../../ui';
 import { api } from '../apiClient.ts';
 import { useSse } from '../../composables/useSse.ts';

@@ -171,7 +171,7 @@ test('знак статуса не двигает название, а его с
   assert.equal(label.text(), 'Сборка', 'знак больше не сдвигает подпись узла');
   assert.equal(label.find('.mk').exists(), false, 'знак отделён от текста');
   assert.equal(state.get('.mk').text(), '✓');
-  assert.match(node.get('title').text(), /Готово/, 'подсказка называет состояние словами');
+  assert.match(node.attributes('data-ui-tooltip'), /Готово/, 'подсказка называет состояние словами');
   assert.match(node.attributes('aria-description'), /Готово/, 'состояние доступно скринридеру');
   assert.equal(Number(state.attributes('x')) > Number(label.attributes('x')), true);
 
@@ -180,7 +180,7 @@ test('знак статуса не двигает название, а его с
   assert.equal(node.find('.node-state').exists(), false);
   assert.equal(node.find('.node-state-bg').exists(), false);
   assert.equal(node.find('.node-run-outline').exists(), true);
-  assert.match(node.get('title').text(), /В работе/);
+  assert.match(node.attributes('data-ui-tooltip'), /В работе/);
   assert.match(node.attributes('aria-description'), /В работе/);
   assert.deepEqual([label.attributes('x'), label.attributes('y')], titlePosition);
 });
@@ -332,7 +332,7 @@ test('след арбитра помечает узел и после того, 
   assert.equal(marks[0].classes().includes('node-arb-human'), true);
   // Подсказка обязана называть исход: «здесь был арбитр» без вердикта не говорит,
   // ждёт ли узел человека.
-  assert.equal(/вернул решение тебе/.test(wrapper.get('.ng title').text()), true);
+  assert.equal(/вернул решение тебе/.test(wrapper.get('.ng').attributes('data-ui-tooltip')), true);
 });
 
 // Эталонная схема маршрута к прогонам отношения не имеет: следов там быть не может.
@@ -409,7 +409,11 @@ test('петля всегда показывает две передачи и д
   const back = '[data-source="review"][data-destination="build"]';
 
   assert.equal(wrapper.get(`${back} text`).text(), 'Задание на круг');
-  assert.match(wrapper.get(`${back} title`).text(), /failed/, 'исход перехода остаётся в подсказке');
+  assert.match(
+    wrapper.get(back).attributes('data-ui-tooltip'),
+    /failed/,
+    'исход перехода остаётся в подсказке',
+  );
   assert.equal(wrapper.get(`${forward} text`).text(), 'На проверку');
   assert.equal(wrapper.get(`${back} path`).classes().includes('e-flow'), true);
   assert.equal(wrapper.findAll('.e-flow').length, 1);

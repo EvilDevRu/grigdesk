@@ -5,7 +5,7 @@
     :pressed="active"
     :loading="pending"
     :label="label"
-    :title="label"
+    v-tooltip="label"
     @click="emit('toggle')"
   >
     <svg
@@ -27,7 +27,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { UiIconButton } from '../../ui';
+import { UiIconButton, vTooltip } from '../../ui';
 
 const props = defineProps({
   active: { type: Boolean, default: false },

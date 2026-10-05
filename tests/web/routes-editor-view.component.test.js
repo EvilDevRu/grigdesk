@@ -120,8 +120,10 @@ async function fixture(t, {
   };
   globalThis.__routesViewHarness = { route, router, api };
   setActivePinia(createPinia());
+
   const component = await compileVue(VIEW, { stubs: {
-    '../ui': UI_STUB,
+    '../ui': (UI_STUB) +
+      "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     '../shared/apiClient.ts': 'export const api = globalThis.__routesViewHarness.api;'
       + ' export const failureText = (error) => error.message;',
     './apiClient.ts': 'export const api = globalThis.__routesViewHarness.api;'

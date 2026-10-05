@@ -83,7 +83,8 @@ async function mountCard(t, state, props = {}) {
     compileVue(webFile('src/views/settings/ServerLauncher.vue'), {
       stubs: {
         '../../shared/apiClient.ts': 'export const api = globalThis.__serverLauncherApi;',
-        '../../ui': UI_STUB,
+        '../../ui': (UI_STUB) +
+          "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       },
     }),
   ]);

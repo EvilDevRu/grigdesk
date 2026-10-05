@@ -27,7 +27,7 @@
           <UiIconButton
             data-context="task-modal-header"
             label="Обновить задачу"
-            title="Обновить"
+            v-tooltip="'Обновить'"
             :loading="loading"
             :disabled="Boolean(editForm) || busy === 'edit'"
             loading-label="Обновляю задачу"
@@ -38,7 +38,7 @@
           <UiIconButton
             data-context="task-modal-header"
             label="Закрыть задачу"
-            title="Закрыть (Esc)"
+            v-tooltip="'Закрыть (Esc)'"
             @click="ui.close()"
           >
             ✕
@@ -83,7 +83,7 @@
             <UiButton
               v-if="detail && !editForm"
               data-role="task-edit-open"
-              title="Редактировать задачу"
+              v-tooltip="'Редактировать задачу'"
               :disabled="loading || busy === 'edit'"
               @click="openTaskEdit"
             >
@@ -318,7 +318,7 @@
                 <dd>{{ metric.value }}</dd>
               </div>
             </dl>
-            <p v-if="triage?.analysis" class="triage-route" :title="triage.analysis.route_reason || ''">
+            <p v-if="triage?.analysis" class="triage-route" v-tooltip="triage.analysis.route_reason || ''">
               {{ triageWorkLabel }}
               <span v-if="triageDepthLabel">· {{ triageDepthLabel }} маршрут</span>
             </p>
@@ -449,7 +449,7 @@
                         density="compact"
                         label="Приложить фото"
                         loading-label="Прикладываю фото"
-                        title="Приложить фото к ответу"
+                        v-tooltip="'Приложить фото к ответу'"
                         :busy="clarifyUploading"
                         :show-summary="false"
                         :show-reset="false"
@@ -472,7 +472,7 @@
                       </UiFilePicker>
                       <UiIconButton
                         :label="`Начать диктовку ответа на вопрос: ${question.text}`"
-                        title="Начать диктовку"
+                        v-tooltip="'Начать диктовку'"
                         @click="startClarifyDictation(question.id)"
                       >
                         <svg
@@ -500,7 +500,7 @@
                       <span class="attname">{{ attachment.name }}</span>
                       <UiIconButton
                         :label="`Убрать ${attachment.name}`"
-                        title="Убрать"
+                        v-tooltip="'Убрать'"
                         @click="dropClarifyAtt(question.id, attachment.file)"
                       >
                         ✕
@@ -688,7 +688,7 @@
               data-context="task-footer-action"
               :tone="conveyor.stall ? 'danger' : 'accent'"
               variant="outline"
-              :title="conveyor.stall
+              v-tooltip="conveyor.stall
                 ? `${conveyor.stall.title} — ${conveyor.stall.hint}`
                 : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`"
               @click="openConveyor"
@@ -705,7 +705,7 @@
               :loading="busy === 'launch' || launchOptionsBusy"
               :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm"
               loading-label="Читаю параметры запуска"
-              :title="launchOpenHint"
+              v-tooltip="launchOpenHint"
               @click="openLaunch"
             >
               🏭 На конвейер
@@ -720,7 +720,7 @@
               :loading="sandboxBusy"
               :disabled="sandboxBusy"
               loading-label="Сношу стенд"
-              :title="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+              v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
               @click="sandboxDown"
             >
               ⏏ Снести стенд
@@ -785,7 +785,7 @@
               <span
                 v-else-if="routeSuggestion"
                 class="lhint"
-                :title="routeSuggestionReason"
+                v-tooltip="routeSuggestionReason"
               >триаж предлагает: {{ routeSuggestion }}</span>
               <span v-if="launchRouteIsSuggested && routeSuggestionReason" class="lhint lreason">
                 почему: {{ routeSuggestionReason }}
@@ -950,6 +950,7 @@ import {
   UiTabs,
   UiTextarea,
   UiTooltip,
+  vTooltip,
 } from '../ui';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';

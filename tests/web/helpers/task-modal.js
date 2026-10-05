@@ -161,7 +161,8 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         '  return helper ? helper(id) : String(id || "");',
         '};',
       ].join('\n'),
-      '../ui': uiFacadeStub(prefix, { stubDialog }),
+      '../ui': (uiFacadeStub(prefix, { stubDialog })) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       './OpenDiffButton.vue': [
         'export default {',
         '  props: ["taskId"],',

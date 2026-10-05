@@ -202,7 +202,7 @@ test('одноимённые сессии показывают проект и �
       project: tab.get('[data-ssh-session-project]').text(),
       target: tab.get('[data-ssh-session-target]').text(),
       ariaLabel: tab.attributes('aria-label'),
-      title: tab.attributes('title'),
+      title: tab.attributes('data-ui-tooltip'),
     })),
     [
       {

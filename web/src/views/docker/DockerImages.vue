@@ -25,12 +25,12 @@
     <ul v-else class="docker-list" aria-label="Локальные образы">
       <li v-for="image in visible" :key="image.id" class="docker-image">
         <div class="docker-image__main">
-          <strong :title="formatTags(image)">{{ formatTags(image) }}</strong>
+          <strong v-tooltip="formatTags(image)">{{ formatTags(image) }}</strong>
           <div class="docker-image__meta">
             <span class="docker-image__id">{{ image.shortId }}</span>
             <span>создан {{ formatAge(image.createdAt) }} назад</span>
           </div>
-          <p v-if="image.inUse" class="docker-image__used" :title="image.usedBy.join(', ')">
+          <p v-if="image.inUse" class="docker-image__used" v-tooltip="image.usedBy.join(', ')">
             Контейнеры: {{ image.usedBy.join(', ') }}
           </p>
         </div>
@@ -45,7 +45,7 @@
         <UiIconButton
           role="embedded"
           :label="`Удалить образ ${formatTags(image)}`"
-          :title="image.inUse ? 'Образ используется контейнером' : 'Удалить образ'"
+          v-tooltip="image.inUse ? 'Образ используется контейнером' : 'Удалить образ'"
           tone="danger"
           :disabled="image.inUse"
           :loading="store.isBusy(image.id)"
@@ -78,7 +78,7 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 import type { DockerImage } from '../../../../shared/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
-import { UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog } from '../../ui';
+import { UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog, vTooltip } from '../../ui';
 import { formatAge, formatSize, formatTags } from './format';
 
 interface DockerFeedback {

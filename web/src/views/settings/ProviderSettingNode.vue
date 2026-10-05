@@ -135,7 +135,7 @@
             variant="ghost"
             :disabled="busy && !hasDraft"
             :aria-label="`Сбросить параметр «${field.label}»`"
-            title="Вернуть значение исполнителя"
+            v-tooltip="'Вернуть значение исполнителя'"
             @click="emit('unset', field.id)"
           >
             Сбросить
@@ -160,7 +160,7 @@
 
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue';
-import { UiButton, UiDisclosureButton } from '../../ui.ts';
+import { UiButton, UiDisclosureButton, vTooltip } from '../../ui.ts';
 import ProviderSettingValue from './ProviderSettingValue.vue';
 import type { JsonValue, ProviderSettingNode } from '../../../../shared/providerSettingsContracts.ts';
 

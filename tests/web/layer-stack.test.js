@@ -16,7 +16,7 @@ for (const [key, value] of Object.entries({
   Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
 }
 
-const { activeLayerId, registerUiLayer } = await compileModule(
+const { activeLayerId, registerUiLayer, getUiLayerDiagnostics } = await compileModule(
   webFile('src/services/layers/stack.ts'),
 );
 
@@ -81,4 +81,29 @@ test('xterm и Monaco владеют Escape внутри своих област
   assert.equal(event.defaultPrevented, false);
   assert.equal(closed, 0);
   layer.unregister();
+});
+
+test('TIP-LAYER-01: справка сохраняет верхний диалог и меню, получает Escape первой', (t) => {
+  for (const name of ['dialog', 'popover']) {
+    const closed = [];
+    const layer = registerUiLayer(`tip-${name}`, { name, close: () => closed.push(name) });
+    const tip = registerUiLayer('tip', { name: 'tooltip', close: () => closed.push('tooltip') });
+
+    t.after(() => layer.unregister());
+    t.after(() => tip.unregister());
+    assert.equal(layer.isTop(), true);
+    escape();
+    assert.deepEqual(closed, ['tooltip']);
+    tip.unregister();
+    layer.unregister();
+  }
+});
+
+test('TIP-LAYER-02: журнал окна не получает наведения', (t) => {
+  const dialog = registerUiLayer('diagnostic-dialog', { name: 'dialog', close: () => true });
+  const tip = registerUiLayer('diagnostic-tip', { name: 'tooltip', close: () => true });
+
+  t.after(() => dialog.unregister());
+  t.after(() => tip.unregister());
+  assert.deepEqual(getUiLayerDiagnostics().map((layer) => layer.kind), ['dialog']);
 });

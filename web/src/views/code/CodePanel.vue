@@ -6,14 +6,15 @@
       <!-- Выбор рабочей копии живёт в шапке, а не отдельным блоком панели: там он
            виден и при свёрнутом дереве, а панели остаётся один смысл — содержимое. -->
       <div class="head-ctx">
-        <div v-if="showsProjectPicker" class="head-pick project" title="Проект">
+        <div v-if="showsProjectPicker" class="head-pick project" v-tooltip="'Проект'">
           <label for="code-project">проект</label>
           <UiSelect id="code-project" compact data-context="code-head-select"
                     :model-value="project" @change="selectProject">
             <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
           </UiSelect>
         </div>
-        <div v-if="showsContextPicker" class="head-pick tree" :title="context?.treePath || 'Рабочая копия'">
+        <div v-if="showsContextPicker" class="head-pick tree"
+             v-tooltip="context?.treePath || 'Рабочая копия'">
           <label for="code-context">рабочая копия</label>
           <UiSelect id="code-context" compact data-context="code-head-select"
                     :model-value="contextId" @change="selectContext">
@@ -31,7 +32,8 @@
             </template>
           </UiSelect>
         </div>
-        <span v-else-if="headContext" class="tlabel mono" :title="context?.treePath">{{ headContext }}</span>
+        <span v-else-if="headContext" class="tlabel mono"
+              v-tooltip="context?.treePath">{{ headContext }}</span>
       </div>
       <span class="grow"></span>
       <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
@@ -39,7 +41,7 @@
       <UiIconButton v-if="!codePanelNarrow" class="navigator-toggle" role="embedded"
                     data-context="tool-dock-navigator"
                     :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
-                    :label="navigatorToggleLabel" :title="navigatorToggleLabel"
+                    :label="navigatorToggleLabel" v-tooltip="navigatorToggleLabel"
                     @click="navigatorCollapsed = !navigatorCollapsed">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -83,7 +85,7 @@
       <aside class="rail" aria-label="Разделы кода">
         <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="files"
                       aria-controls="code-navigator" :pressed="mainTab === 'files'"
-                      label="Файлы" title="Файлы: дерево и поиск по коду"
+                      label="Файлы" v-tooltip="'Файлы: дерево и поиск по коду'"
                       @click="setMainTab('files')">
           <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -92,7 +94,7 @@
         </UiIconButton>
         <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="changes"
                       aria-controls="code-navigator" :pressed="mainTab === 'changes'"
-                      :label="changesRailLabel" :title="changesRailLabel"
+                      :label="changesRailLabel" v-tooltip="changesRailLabel"
                       @click="setMainTab('changes')">
           <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -102,7 +104,7 @@
         </UiIconButton>
         <UiIconButton class="rail-item" role="rail" data-context="code-rail-item" data-tab="commits"
                       aria-controls="code-navigator" :pressed="mainTab === 'commits'"
-                      label="Коммиты" title="Коммиты: журнал и отрезки ветки"
+                      label="Коммиты" v-tooltip="'Коммиты: журнал и отрезки ветки'"
                       @click="setMainTab('commits')">
           <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -160,7 +162,7 @@
                 <template #trigger>
                   <UiIconButton role="embedded" data-context="code-commit"
                                 data-action="commit-more" label="Дополнительные действия коммита"
-                                title="Дополнительные действия коммита">
+                                v-tooltip="'Дополнительные действия коммита'">
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                       <circle cx="3" cy="8" r="1.15" />
                       <circle cx="8" cy="8" r="1.15" />
@@ -173,13 +175,15 @@
                     <strong class="code-popover-title">Действия коммита</strong>
                     <UiSwitch v-model="amendCommit" class="amend-toggle"
                               data-context="code-commit-amend" data-action="amend"
-                              :disabled="gitActionBusy || !amendAvailable" :title="amendTitle"
+                              :disabled="gitActionBusy || !amendAvailable"
+                              v-tooltip="amendTitle"
+                              :aria-description="amendTitle"
                               @change="changeAmend">
                       Дополнить последний коммит
                     </UiSwitch>
                     <UiButton block variant="ghost" data-context="code-popover-action"
                               data-action="undo-commit" :loading="gitBusy === 'undo'"
-                              :disabled="gitActionBusy || !undoAvailable" :title="undoTitle"
+                              :disabled="gitActionBusy || !undoAvailable" v-tooltip="undoTitle"
                               @click="undoGitCommit(); close('action')">
                       Отменить последний коммит
                     </UiButton>
@@ -216,7 +220,7 @@
                   role="embedded"
                   data-context="code-commit"
                   label="Составить сообщение по staged diff"
-                  title="Составить сообщение по staged diff"
+                  v-tooltip="'Составить сообщение по staged diff'"
                   :loading="gitBusy === 'generate'"
                   :disabled="gitActionBusy || !git.staged.length"
                   @click="generateCommitMessage"
@@ -248,7 +252,7 @@
             </UiInlineMessage>
             <p v-else-if="trackingNote" class="git-notice git-tracking-note"
                :class="trackingNote.type"
-               :title="trackingNote.hint">
+               v-tooltip="trackingNote.hint">
               {{ trackingNote.text }}
             </p>
             <span v-else class="grow"></span>
@@ -259,7 +263,7 @@
                 data-context="code-commit"
                 data-action="fetch"
                 label="Проверить удалённый репозиторий"
-                title="Проверить удалённый репозиторий"
+                v-tooltip="'Проверить удалённый репозиторий'"
                 :loading="gitBusy === 'fetch'"
                 :disabled="gitActionBusy || !fetchRemoteLabel"
                 @click="fetchGitRemote"
@@ -276,7 +280,7 @@
                 :label="pushLabel"
                 :loading="gitBusy === 'push'"
                 :disabled="gitActionBusy || git.tracking?.detached"
-                :title="pushTitle"
+                v-tooltip="pushTitle"
                 @click="pushGitChanges"
               >
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
@@ -292,19 +296,19 @@
           <div class="subhead file-history-head">
             <UiIconButton role="embedded" data-context="code-group-action"
                           data-action="close-file-history" label="Вернуться"
-                          title="Вернуться к дереву" @click="closeFileHistory()">←</UiIconButton>
+                          v-tooltip="'Вернуться к дереву'" @click="closeFileHistory()">←</UiIconButton>
             <span class="subtitle">История</span>
             <span class="grow"></span>
             <span class="cnt mono">{{ fileHistoryEntries.length }}</span>
           </div>
-          <div class="history-path mono" :title="fileHistoryPath">{{ fileHistoryPath }}</div>
+          <div class="history-path mono" v-tooltip="fileHistoryPath">{{ fileHistoryPath }}</div>
           <div v-if="fileHistoryLoading" class="pnote">Читаю историю…</div>
           <div v-else-if="fileHistoryError" class="perr">{{ fileHistoryError }}</div>
           <div v-else-if="!fileHistoryEntries.length" class="pnote">История файла пуста.</div>
           <UiPressable v-for="entry in fileHistoryEntries" :key="entry.hash"
                        class="commit file-history-entry" data-context="code-commit-row"
                        :data-hash="entry.hash" :class="{ sel: fileHistorySelected === entry.hash }"
-                       :pressed="fileHistorySelected === entry.hash" :title="entry.when"
+                       :pressed="fileHistorySelected === entry.hash" v-tooltip="entry.when"
                        @click="openFileHistoryEntry(entry)">
             <span class="hash mono">{{ entry.hash.slice(0, 7) }}</span>
             <span class="subj">{{ entry.subject }}</span>
@@ -326,7 +330,7 @@
               </div>
               <UiPressable v-for="file in searchResult.files" :key="`file:${file.path}`"
                            class="trow search-result" data-search-kind="file"
-                           :data-search-path="file.path" :title="file.path"
+                           :data-search-path="file.path" v-tooltip="file.path"
                            @click="openSearchResult(file.path, 1)">
                 <span class="search-file mono">{{ file.path }}</span>
               </UiPressable>
@@ -343,7 +347,7 @@
                 data-search-kind="match"
                 :data-search-path="match.path"
                 :data-search-line="match.line"
-                :title="`${match.path}:${match.line}`"
+                v-tooltip="`${match.path}:${match.line}`"
                 @click="openSearchResult(match.path, match.line)"
               >
                 <span class="search-location mono">{{ match.path }}:{{ match.line }}</span>
@@ -366,7 +370,7 @@
           <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey">
             <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
                          :data-dir-path="row.rel" :data-depth="row.depth"
-                         :title="fileTreeDecorations.directories.has(row.rel)
+                         v-tooltip="fileTreeDecorations.directories.has(row.rel)
                            ? 'В каталоге есть изменения' : undefined"
                          :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
                          @click="toggleDir(row.rel)">
@@ -382,7 +386,7 @@
                          :class="{ sel: fileSel === row.rel }"
                          :pressed="fileSel === row.rel" :data-file-path="row.rel" :data-depth="row.depth"
                          :data-status="fileTreeDecorations.files.get(row.rel)"
-                         :title="fileTreeDecorations.files.get(row.rel) === 'U'
+                         v-tooltip="fileTreeDecorations.files.get(row.rel) === 'U'
                            ? CONFLICT_HINT : undefined"
                          :style="rowDepth(row.depth)" @click="openFile(row.rel)">
               <span class="chev" aria-hidden="true"></span>
@@ -405,7 +409,7 @@
             <div class="git-view-toggle" role="group" aria-label="Вид изменений">
               <UiIconButton class="git-view-action" role="embedded"
                             data-context="code-group-action" data-view="tree"
-                            title="Показать деревом" label="Показать деревом"
+                            v-tooltip="'Показать деревом'" label="Показать деревом"
                             :pressed="gitView === 'tree'" @click="setGitView('tree')">
                 <svg aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" />
@@ -413,7 +417,7 @@
               </UiIconButton>
               <UiIconButton class="git-view-action" role="embedded"
                             data-context="code-group-action" data-view="list"
-                            title="Показать списком" label="Показать списком"
+                            v-tooltip="'Показать списком'" label="Показать списком"
                             :pressed="gitView === 'list'" @click="setGitView('list')">
                 <svg aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" />
@@ -442,12 +446,12 @@
                        сводке ниже, в шапке журнала третьей кнопки нет. -->
                   <UiButton variant="ghost" data-context="code-group-action"
                             data-action="commits-with-work"
-                            :title="commitsWorkTitle" :pressed="commitsWorkActive"
+                            v-tooltip="commitsWorkTitle" :pressed="commitsWorkActive"
                             :aria-disabled="!commitsWorkAvailable"
                             @click="toggleCommitsWork">+ текущие</UiButton>
                   <UiIconButton role="embedded" data-context="code-group-action"
                                 data-action="branch-diff" label="Показать всю ветку"
-                                :title="branchDiffAvailability.title"
+                                v-tooltip="branchDiffAvailability.title"
                                 :pressed="branchMode" :loading="commitsLoading && branchMode"
                                 :disabled="!branchDiffAvailability.enabled"
                                 @click="toggleBranchDiff">
@@ -466,7 +470,7 @@
                   <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
                                data-context="code-commit-row" :data-hash="c.hash"
                                :class="{ sel: commitSel.has(c.hash) }"
-                               :pressed="commitSel.has(c.hash)" :title="c.when"
+                               :pressed="commitSel.has(c.hash)" v-tooltip="c.when"
                                @click="pickCommit(c, $event)">
                     <span class="hash mono">{{ c.hash }}</span>
                     <span class="subj">{{ c.subject }}</span>
@@ -480,7 +484,7 @@
                    прячется за длинным деревом, а журнал над ней остаётся местом выбора. -->
               <div v-if="group.id === 'commits'" class="subhead commit-range-summary"
                    :data-group="group.id">
-                <span class="subtitle" :title="group.hint">{{ group.title }}</span>
+                <span class="subtitle" v-tooltip="group.hint">{{ group.title }}</span>
                 <UiIconButton
                   class="git-group-action"
                   role="embedded"
@@ -488,7 +492,7 @@
                   data-action="patch-review"
                   :data-group="group.id"
                   :label="`Обзор группы «${group.title}»`"
-                  title="Показать все изменения одной страницей"
+                  v-tooltip="'Показать все изменения одной страницей'"
                   :pressed="patchReviewActive && patchReviewGroupId === group.id"
                   :loading="patchLoading && patchReviewGroupId === group.id"
                   :disabled="!group.files.length"
@@ -505,7 +509,7 @@
                   data-context="code-group-action"
                   data-action="clear-commits"
                   label="Снять выбор коммитов"
-                  title="Сбросить отрезок и вернуться к журналу"
+                  v-tooltip="'Сбросить отрезок и вернуться к журналу'"
                   @click="clearCommitSelection"
                 >
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
@@ -516,11 +520,11 @@
                 <span class="commit-range-meta">
                   <span class="cnt mono">{{ fileCountLabel(group.files.length) }}</span>
                   <span v-if="group.stat.total" class="diffstat mono"
-                        :title="gitStatTitle(group.stat)">
+                        v-tooltip="gitStatTitle(group.stat)">
                     <i v-if="group.stat.add" class="a">+{{ group.stat.add }}</i>
                     <i v-if="group.stat.del" class="d">−{{ group.stat.del }}</i>
                   </span>
-                  <span v-if="group.note" class="group-note" :title="group.note">
+                  <span v-if="group.note" class="group-note" v-tooltip="group.note">
                     {{ group.note }}
                   </span>
                 </span>
@@ -531,14 +535,14 @@
                 <UiPressable class="group-toggle" data-context="code-group-toggle"
                              data-action="toggle-group"
                              :aria-expanded="!collapsedGroups.has(group.id)"
-                             :title="group.hint" @click="toggleGroupCollapsed(group.id)">
+                             v-tooltip="group.hint" @click="toggleGroupCollapsed(group.id)">
                   <span class="subtitle">{{ group.title }}</span>
                 </UiPressable>
                 <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
                 <!-- Итог группы, как сводка pull request на GitHub: сумма строк по всем файлам
                      и полоска из пяти квадратиков. Без строк (бинарные файлы, чистое дерево)
                      итога нет, чтобы не рисовать «+0». -->
-                <span v-if="group.stat.total" class="diffstat mono" :title="gitStatTitle(group.stat)">
+                <span v-if="group.stat.total" class="diffstat mono" v-tooltip="gitStatTitle(group.stat)">
                   <i v-if="group.stat.add" class="a">+{{ group.stat.add }}</i>
                   <i v-if="group.stat.del" class="d">−{{ group.stat.del }}</i>
                   <span class="bar" aria-hidden="true">
@@ -553,7 +557,7 @@
                   data-action="patch-review"
                   :data-group="group.id"
                   :label="`Обзор группы «${group.title}»`"
-                  title="Показать все изменения одной страницей"
+                  v-tooltip="'Показать все изменения одной страницей'"
                   :pressed="patchReviewActive && patchReviewGroupId === group.id"
                   :loading="patchLoading && patchReviewGroupId === group.id"
                   :disabled="!group.files.length"
@@ -570,7 +574,7 @@
                   <template #trigger>
                     <UiIconButton class="git-group-action" role="embedded"
                                   data-context="code-group-action" data-action="group-more"
-                                  label="Действия группы" title="Действия группы">
+                                  label="Действия группы" v-tooltip="'Действия группы'">
                       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                         <circle cx="3" cy="8" r="1.15" />
                         <circle cx="8" cy="8" r="1.15" />
@@ -594,7 +598,7 @@
                   data-context="code-group-action"
                   :data-action="group.id === 'staged' ? 'unstage-all' : 'stage-all'"
                   :label="gitGroupActionLabel(group.id)"
-                  :title="gitGroupActionLabel(group.id)"
+                  v-tooltip="gitGroupActionLabel(group.id)"
                   :loading="gitBusy === gitGroupActionKey(group.id)"
                   :disabled="gitActionBusy"
                   @click="changeGitGroup(group)"
@@ -618,7 +622,7 @@
                                  :aria-expanded="gitOpenDirs.has(row.ref)"
                                  :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
                       <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
-                      <span class="dname" :title="row.path">{{ row.name }}</span>
+                      <span class="dname" v-tooltip="row.path">{{ row.name }}</span>
                     </UiPressable>
                     <span v-if="group.mutable" class="git-row-actions">
                       <UiIconButton
@@ -628,7 +632,7 @@
                         :data-action="group.id === 'staged' ? 'unstage-dir' : 'stage-dir'"
                         :data-dir="row.path"
                         :label="gitDirActionLabel(group, row.path)"
-                        :title="gitDirActionLabel(group, row.path)"
+                        v-tooltip="gitDirActionLabel(group, row.path)"
                         :loading="gitBusy === gitDirActionKey(group.id, row.path)"
                         :disabled="gitActionBusy"
                         @click="changeGitDir(group, row.path)"
@@ -640,13 +644,13 @@
                                  data-context="code-tree-row"
                                  :class="{ sel: gitSel === row.ref }" :pressed="gitSel === row.ref"
                                  :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
-                                 :title="gitFileHint(row.file)"
+                                 v-tooltip="gitFileHint(row.file)"
                                  :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
                       <span class="chev" aria-hidden="true"></span>
                       <span class="st" :class="row.file.status">
                         {{ STLABEL[row.file.status] || row.file.status }}
                       </span>
-                      <span class="nm mono" :title="row.path">{{ row.name }}</span>
+                      <span class="nm mono" v-tooltip="row.path">{{ row.name }}</span>
                       <span class="cnt mono">
                         <i v-if="row.file.add" class="a">+{{ row.file.add }}</i>
                         <i v-if="row.file.del" class="d">−{{ row.file.del }}</i>
@@ -662,7 +666,7 @@
                           <UiIconButton class="git-file-action" role="embedded"
                                         data-context="code-row-action" data-action="row-more"
                                         :data-file="row.path" label="Действия с файлом"
-                                        :title="`Действия с ${row.path}`">
+                                        v-tooltip="`Действия с ${row.path}`">
                             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                               <circle cx="3" cy="8" r="1.15" />
                               <circle cx="8" cy="8" r="1.15" />
@@ -690,7 +694,7 @@
                         :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
                         :data-file="row.path"
                         :label="gitFileActionLabel(group.id, row.file)"
-                        :title="gitFileActionLabel(group.id, row.file)"
+                        v-tooltip="gitFileActionLabel(group.id, row.file)"
                         :loading="gitBusy === gitFileActionKey(group.id, row.path)"
                         :disabled="gitActionBusy"
                         @click="changeGitFile(group, row.file)"
@@ -709,12 +713,12 @@
                                  :class="{ sel: gitSel === gitRef(group.id, entry.file.path) }"
                                  :pressed="gitSel === gitRef(group.id, entry.file.path)"
                                  :data-path="entry.file.path" :data-group="group.id"
-                                 :title="gitFileHint(entry.file)"
+                                 v-tooltip="gitFileHint(entry.file)"
                                  @click="selectGit(gitRef(group.id, entry.file.path))">
                       <span class="st" :class="entry.file.status">
                         {{ STLABEL[entry.file.status] || entry.file.status }}
                       </span>
-                      <span class="nm split mono" :title="entry.file.path">
+                      <span class="nm split mono" v-tooltip="entry.file.path">
                         <b class="nm-base">{{ entry.name }}</b>
                         <i v-if="entry.dir" class="nm-dir">{{ entry.dir }}</i>
                       </span>
@@ -733,7 +737,7 @@
                           <UiIconButton class="git-file-action" role="embedded"
                                         data-context="code-row-action" data-action="row-more"
                                         :data-file="entry.file.path" label="Действия с файлом"
-                                        :title="`Действия с ${entry.file.path}`">
+                                        v-tooltip="`Действия с ${entry.file.path}`">
                             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                               <circle cx="3" cy="8" r="1.15" />
                               <circle cx="8" cy="8" r="1.15" />
@@ -761,7 +765,7 @@
                         :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
                         :data-file="entry.file.path"
                         :label="gitFileActionLabel(group.id, entry.file)"
-                        :title="gitFileActionLabel(group.id, entry.file)"
+                        v-tooltip="gitFileActionLabel(group.id, entry.file)"
                         :loading="gitBusy === gitFileActionKey(group.id, entry.file.path)"
                         :disabled="gitActionBusy"
                         @click="changeGitFile(group, entry.file)"
@@ -792,7 +796,7 @@
         <div class="ehead file-head-row">
           <UiIconButton v-if="codePanelNarrow && narrowPane === 'editor'" role="embedded"
                         data-context="code-editor-action" data-action="back-to-navigator"
-                        :label="narrowBackLabel" :title="narrowBackLabel"
+                        :label="narrowBackLabel" v-tooltip="narrowBackLabel"
                         @click="showNarrowNavigator">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -804,7 +808,7 @@
               <span v-if="fileHistoryDiff" class="st" :class="fileHistoryDiff.status">
                 {{ STLABEL[fileHistoryDiff.status] || fileHistoryDiff.status }}
               </span>
-              <span class="epath mono" :title="fileHistoryDiff?.path || fileHistoryPath">
+              <span class="epath mono" v-tooltip="fileHistoryDiff?.path || fileHistoryPath">
                 <i v-if="headPath(fileHistoryDiff?.path || fileHistoryPath).dir" class="epath-dir">
                   {{ headPath(fileHistoryDiff?.path || fileHistoryPath).dir }}/
                 </i><!-- -->
@@ -816,7 +820,7 @@
               </span>
             </template>
             <template v-else-if="tab === 'files' && fileSel">
-              <span class="epath mono" :title="fileSel">
+              <span class="epath mono" v-tooltip="fileSel">
                 <i v-if="headPath(fileSel).dir" class="epath-dir">{{ headPath(fileSel).dir }}/</i><!-- -->
                 <b class="epath-name">{{ headPath(fileSel).name }}</b>
               </span>
@@ -830,7 +834,7 @@
               <span v-else-if="blameError" class="note diff-error">{{ blameError }}</span>
             </template>
             <template v-else-if="tab === 'git' && patchReviewActive">
-              <span class="epath review-title" :title="patchReviewGroup?.title">
+              <span class="epath review-title" v-tooltip="patchReviewGroup?.title">
                 Обзор · {{ patchReviewGroup?.title }}
               </span>
               <span v-if="patchReviewGroup" class="note mono range-summary">
@@ -844,7 +848,7 @@
               <span class="st" :class="gitFile.status">
                 {{ STLABEL[gitFile.status] || gitFile.status }}
               </span>
-              <span class="epath mono" :title="gitFile.path">
+              <span class="epath mono" v-tooltip="gitFile.path">
                 <i v-if="headPath(gitFile.path).dir" class="epath-dir">
                   {{ headPath(gitFile.path).dir }}/
                 </i><!-- -->
@@ -862,7 +866,7 @@
           <div class="file-head-actions" role="group" aria-label="Действия файла">
               <UiButton v-if="tab === 'git' && patchReviewActive" variant="ghost"
                         data-context="code-editor-action" data-action="close-patch-review"
-                        title="Вернуться к файлу" @click="closePatchReview">
+                        v-tooltip="'Вернуться к файлу'" @click="closePatchReview">
                 <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16" fill="none"
                      stroke="currentColor" stroke-width="1.45" stroke-linecap="round"
                      stroke-linejoin="round">
@@ -872,7 +876,7 @@
               </UiButton>
               <UiButton v-if="canShowFileHistory && !editorNarrowActions" variant="ghost"
                         data-context="code-editor-action" data-action="file-history"
-                        title="Показать историю файла" @click="openFileHistory">
+                        v-tooltip="'Показать историю файла'" @click="openFileHistory">
                 <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.3a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4zM7.4 4h1.2v4.2l2.9 1.7-.6 1-3.5-2.1z" />
                 </svg>
@@ -881,7 +885,7 @@
               <UiButton v-if="canAskAgent && !editorNarrowActions" variant="ghost"
                         data-context="code-editor-action"
                         data-action="ask-agent" :loading="askAgentBusy" :disabled="askAgentBusy"
-                        title="Создать чат с черновиком вопроса" @click="askAgentAboutCode">
+                        v-tooltip="'Создать чат с черновиком вопроса'" @click="askAgentAboutCode">
                 <svg class="glyph" aria-hidden="true" viewBox="0 0 16 16">
                   <path d="M2 2.5h12v8.5H6.2L3 13.6V11H2z" />
                 </svg>
@@ -892,7 +896,7 @@
                 <template #trigger>
                   <UiIconButton role="embedded" data-context="code-editor-action"
                                 data-action="file-actions" label="Действия файла"
-                                title="Действия файла">
+                                v-tooltip="'Действия файла'">
                     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                       <circle cx="3" cy="8" r="1.15" />
                       <circle cx="8" cy="8" r="1.15" />
@@ -917,7 +921,7 @@
                     <UiButton v-if="tab === 'files' && fileSel && !fileHistoryActive"
                               block variant="ghost" data-context="code-popover-action"
                               data-action="blame" :pressed="blameEnabled" :disabled="!canUseBlame"
-                              :title="blameTitle" @click="toggleBlame">
+                              v-tooltip="blameTitle" @click="toggleBlame">
                       Авторство строк
                     </UiButton>
                     <UiButton v-if="canCopyCodeLink" block variant="ghost"
@@ -938,7 +942,7 @@
         <div v-if="showsComparisonRow" class="diffhead">
           <div class="comparison-identity">
             <span v-if="comparisonBadge" class="comparison-sides mono"
-                  :title="comparisonBadge.hint">
+                  v-tooltip="comparisonBadge.hint">
               {{ comparisonBadge.label }}
             </span>
             <span v-if="rangeSummary" class="note mono range-summary">{{ rangeSummary }}</span>
@@ -947,7 +951,7 @@
           </div>
           <UiButton v-if="tab === 'git' && gitPane === 'changes' && (commitSel.size || branchMode)"
                     variant="ghost" data-context="code-editor-action"
-                    data-action="clear-commits" title="Сбросить выбранный диапазон"
+                    data-action="clear-commits" v-tooltip="'Сбросить выбранный диапазон'"
                     @click="clearCommitSelection">
             Сбросить диапазон
           </UiButton>
@@ -955,7 +959,7 @@
           <div v-if="gitFileNavigation" class="file-navigation" role="group"
                :aria-label="`Навигация по файлам изменений: файл ${gitFileNavigation.index + 1} из ${gitFileNavigation.total}`">
             <UiIconButton role="embedded" data-context="code-editor-action"
-                          label="Предыдущий файл" title="Предыдущий файл"
+                          label="Предыдущий файл" v-tooltip="'Предыдущий файл'"
                           :disabled="!gitFileNavigation.previous"
                           @click="navigateGitFile(-1)">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -968,7 +972,7 @@
               {{ gitFileNavigation.total }}
             </span>
             <UiIconButton role="embedded" data-context="code-editor-action"
-                          label="Следующий файл" title="Следующий файл"
+                          label="Следующий файл" v-tooltip="'Следующий файл'"
                           :disabled="!gitFileNavigation.next"
                           @click="navigateGitFile(1)">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -982,7 +986,7 @@
             <template #trigger>
               <UiButton class="diff-view-trigger" variant="ghost"
                         data-context="code-editor-action" data-action="diff-view"
-                        :title="`Вид сравнения: ${diffLayoutLabel}`">
+                        v-tooltip="`Вид сравнения: ${diffLayoutLabel}`">
                 <span>Вид сравнения</span>
                 <span class="diff-view-mode">· {{ diffLayoutLabel }}</span>
                 <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -1163,6 +1167,7 @@ import {
   UiTextarea,
   confirmDialog,
   promptDialog,
+  vTooltip,
 } from '../../ui';
 
 type CodeTab = 'files' | 'git';

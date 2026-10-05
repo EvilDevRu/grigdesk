@@ -17,7 +17,7 @@
         class="ad-x"
         data-context="pipeline-arbiter-close"
         label="Закрыть разбор"
-        title="Закрыть (Esc)"
+        v-tooltip="'Закрыть (Esc)'"
         @click="emit('close')"
       >
         ✕
@@ -46,7 +46,7 @@
             <span class="ad-qnum">{{ index + 1 }}</span>
             <span class="ad-qsum">
               {{ question.summary }}
-              <span v-if="question.anchor" class="ad-anchor mono" :title="question.anchor">{{
+              <span v-if="question.anchor" class="ad-anchor mono" v-tooltip="question.anchor">{{
                 shortAnchor(question.anchor)
               }}</span>
             </span>
@@ -97,7 +97,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { UiButton, UiDialog, UiIconButton, UiTextarea } from '../../ui';
+import { UiButton, UiDialog, UiIconButton, UiTextarea, vTooltip } from '../../ui';
 import { buildRewindNote } from '../../shared/rewind-note.js';
 
 // Разбор арбитра и ответ на него. Отдельная модалка, потому что узел отвечает на другой

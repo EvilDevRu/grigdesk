@@ -31,14 +31,14 @@
     <!-- Факты подписаны знаками, а не словами: секундомер у времени, монета у расхода —
          строка остаётся короткой, а два числа рядом не путаются между собой. Знаки
          декоративные (aria-hidden): смысл чисел объясняют подсказки title. -->
-    <span v-if="elapsed" class="fact" :title="ELAPSED_HINT">
+    <span v-if="elapsed" class="fact" v-tooltip="ELAPSED_HINT">
       <svg class="fico" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="13.5" r="7.5" />
         <path d="M12 9.6v3.9l2.6 1.6" />
         <path d="M9.6 2.6h4.8" />
       </svg>{{ elapsed }}
     </span>
-    <span v-if="tokensText" class="fact tok" :title="tokensHint">
+    <span v-if="tokensText" class="fact tok" v-tooltip="tokensHint">
       <svg class="fico" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="8.6" />
         <circle cx="12" cy="12" r="3.4" />
@@ -52,6 +52,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   THINKING_WORDS, formatElapsed, formatTurnTokens, formatTurnTokensShort, shuffledOrder, thinkingWord,
 } from './chatThinking.ts';
+import { vTooltip } from '../../ui';
 
 // Живая строка идущего хода. Три факта рядом: чем агент занят сейчас (слово), сколько
 // ход идёт (по часам ЭТОГО окна) и сколько токенов вывода он потратил (если исполнитель

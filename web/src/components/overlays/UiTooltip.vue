@@ -6,11 +6,7 @@
     role="group"
     tabindex="0"
     :aria-label="disabledLabel || text || 'Подсказка'"
-    :aria-describedby="tooltipId"
-    @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave"
-    @focusin="onFocus"
-    @focusout="onFocusOut"
+    v-bind="triggerAttributes"
   >
     <slot v-if="slots.trigger" name="trigger" v-bind="triggerSlotProps" />
     <slot v-else v-bind="triggerSlotProps" />
@@ -31,11 +27,7 @@
     class="ui-tooltip__fallback-trigger"
     tabindex="0"
     aria-label="Подсказка"
-    :aria-describedby="tooltipId"
-    @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave"
-    @focusin="onFocus"
-    @focusout="onFocusOut"
+    v-bind="triggerAttributes"
     >?</span
   >
 
@@ -80,6 +72,8 @@ import {
   type PropType,
   type VNode,
 } from 'vue';
+import { computeOverlayPlacement } from '../../services/overlayPlacement.ts';
+import { isKeyboardFocus, isTouchPointer } from '../../services/tooltipInput.ts';
 import { useUiLayer } from '../../composables/useUiLayer';
 import type {
   UiOverlayPlacement,
@@ -92,6 +86,8 @@ type TriggerElement = HTMLElement | SVGElement;
 interface Props {
   text?: string;
   placement?: UiOverlayPlacement;
+  disabled?: boolean;
+  pressDismiss?: boolean;
   disabledTrigger?: boolean;
   disabledLabel?: string;
   offset?: number;
@@ -104,6 +100,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   text: '',
   placement: 'top',
+  disabled: false,
+  pressDismiss: false,
   disabledTrigger: false,
   disabledLabel: '',
   offset: 9,
@@ -238,6 +236,8 @@ const positionStyle = ref<Record<string, string>>({
   top: '0px',
   visibility: 'hidden',
 });
+let pressSuppressed = false;
+
 let showTimer: ReturnType<typeof setTimeout> | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
 let resizeObserver: ResizeObserver | null = null;
@@ -252,9 +252,15 @@ const triggerSlotProps: UiOverlayTriggerSlotProps = {
 };
 
 const triggerAttributes = computed<Record<string, unknown>>(() => ({
-  'aria-describedby': tooltipId,
-  onMouseenter: onMouseEnter,
-  onMouseleave: onMouseLeave,
+  'aria-describedby': props.disabled ? undefined : tooltipId,
+  ...(props.pressDismiss ? {
+    onPointerenter: onPointerEnter,
+    onPointerleave: onPointerLeave,
+    onPointerdown: onPointerDown,
+  } : {
+    onMouseenter: onMouseEnter,
+    onMouseleave: onMouseLeave,
+  }),
   onFocusin: onFocus,
   onFocusout: onFocusOut,
 }));
@@ -292,7 +298,15 @@ function clearTimers(): void {
   hideTimer = null;
 }
 
+/**
+ * Выключенная подсказка не монтирует содержимое даже при прямом вызове show.
+ * Повторное открытие только обновляет позицию уже существующей поверхности.
+ */
 function showNow(): void {
+  if (props.disabled) {
+    return;
+  }
+
   if (visible.value) {
     void nextTick(place);
 
@@ -313,6 +327,10 @@ function hideNow(): void {
  * Задержка нормализуется до неотрицательной перед передачей браузеру.
  */
 function scheduleShow(): void {
+  if (props.disabled) {
+    return;
+  }
+
   if (hideTimer) {
     clearTimeout(hideTimer);
   }
@@ -362,6 +380,22 @@ function scheduleHide(): void {
   );
 }
 
+function onPointerEnter(event: Event): void {
+  if (!isTouchPointer(event) && !pressSuppressed) {
+    onMouseEnter();
+  }
+}
+
+function onPointerLeave(): void {
+  pressSuppressed = false;
+  onMouseLeave();
+}
+
+function onPointerDown(): void {
+  pressSuppressed = true;
+  hideNow();
+}
+
 function onMouseEnter(): void {
   hovered.value = true;
   scheduleShow();
@@ -372,7 +406,11 @@ function onMouseLeave(): void {
   scheduleHide();
 }
 
-function onFocus(): void {
+function onFocus(event: Event): void {
+  if (props.pressDismiss && (pressSuppressed || !isKeyboardFocus(event))) {
+    return;
+  }
+
   focused.value = true;
   scheduleShow();
 }
@@ -393,52 +431,9 @@ function onFocusOut(event: FocusEvent): void {
     return;
   }
 
+  pressSuppressed = false;
   focused.value = false;
   scheduleHide();
-}
-
-function axisPlacement(
-  placement: UiOverlayPlacement,
-): 'top' | 'right' | 'bottom' | 'left' {
-  return placement.split('-')[0] as 'top' | 'right' | 'bottom' | 'left';
-}
-
-/**
- * Start/end выравнивают tooltip по поперечной оси trigger-а.
- * Placement без суффикса получает симметричное центрирование.
- */
-function alignedCoordinate(
-  start: number,
-  triggerSize: number,
-  surfaceSize: number,
-  placement: UiOverlayPlacement,
-): number {
-  if (placement.endsWith('-start')) {
-    return start;
-  }
-  if (placement.endsWith('-end')) {
-    return start + triggerSize - surfaceSize;
-  }
-
-  return start + (triggerSize - surfaceSize) / 2;
-}
-
-/**
- * Противоположная сторона сохраняет исходный start/end-суффикс.
- * Благодаря этому flip не меняет ожидаемое поперечное выравнивание.
- */
-function flippedPlacement(placement: UiOverlayPlacement): UiOverlayPlacement {
-  if (placement.startsWith('top')) {
-    return placement.replace('top', 'bottom') as UiOverlayPlacement;
-  }
-  if (placement.startsWith('bottom')) {
-    return placement.replace('bottom', 'top') as UiOverlayPlacement;
-  }
-  if (placement.startsWith('left')) {
-    return placement.replace('left', 'right') as UiOverlayPlacement;
-  }
-
-  return placement.replace('right', 'left') as UiOverlayPlacement;
 }
 
 /**
@@ -453,75 +448,22 @@ function place(): void {
     return;
   }
 
-  const triggerRect = trigger.getBoundingClientRect();
-  const width = surface.offsetWidth;
-  const height = surface.offsetHeight;
-  const edge = 8;
-  const gap = Math.max(0, props.offset);
-  let placement = requestedPlacement.value;
-  let axis = axisPlacement(placement);
+  const result = computeOverlayPlacement({
+    trigger: trigger.getBoundingClientRect(),
+    surface: { width: surface.offsetWidth, height: surface.offsetHeight },
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    placement: requestedPlacement.value,
+    offset: props.offset,
+  });
 
-  const room = {
-    top: triggerRect.top - edge,
-    right: window.innerWidth - triggerRect.right - edge,
-    bottom: window.innerHeight - triggerRect.bottom - edge,
-    left: triggerRect.left - edge,
-  };
-  const needed =
-    axis === 'top' || axis === 'bottom' ? height + gap : width + gap;
-  const opposite =
-    axis === 'top'
-      ? 'bottom'
-      : axis === 'bottom'
-        ? 'top'
-        : axis === 'left'
-          ? 'right'
-          : 'left';
-
-  if (room[axis] < needed && room[opposite] > room[axis]) {
-    placement = flippedPlacement(placement);
-    axis = axisPlacement(placement);
-  }
-
-  let left = alignedCoordinate(
-    triggerRect.left,
-    triggerRect.width,
-    width,
-    placement,
-  );
-  let top = alignedCoordinate(
-    triggerRect.top,
-    triggerRect.height,
-    height,
-    placement,
-  );
-
-  if (axis === 'top') {
-    top = triggerRect.top - height - gap;
-  } else if (axis === 'bottom') {
-    top = triggerRect.bottom + gap;
-  } else if (axis === 'left') {
-    left = triggerRect.left - width - gap;
-  } else {
-    left = triggerRect.right + gap;
-  }
-
-  left = Math.min(
-    Math.max(left, edge),
-    Math.max(edge, window.innerWidth - width - edge),
-  );
-  top = Math.min(
-    Math.max(top, edge),
-    Math.max(edge, window.innerHeight - height - edge),
-  );
-  actualPlacement.value = placement;
+  actualPlacement.value = result.placement;
   positionStyle.value = {
     position: 'fixed',
-    left: `${Math.round(left)}px`,
-    top: `${Math.round(top)}px`,
+    left: `${result.left}px`,
+    top: `${result.top}px`,
     visibility: 'visible',
-    '--ui-overlay-anchor-x': `${Math.round(triggerRect.left + triggerRect.width / 2 - left)}px`,
-    '--ui-overlay-anchor-y': `${Math.round(triggerRect.top + triggerRect.height / 2 - top)}px`,
+    '--ui-overlay-anchor-x': `${result.anchorX}px`,
+    '--ui-overlay-anchor-y': `${result.anchorY}px`,
   };
 }
 
@@ -553,6 +495,12 @@ function onViewportMove(): void {
 
   place();
 }
+
+watch(() => props.disabled, (disabled) => {
+  if (disabled) {
+    hideNow();
+  }
+});
 
 watch(
   visible,

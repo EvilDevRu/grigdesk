@@ -206,13 +206,14 @@ async function mountHost(t) {
         '  !item ? "disabled" : (!item.plugin || plugins.enabled(item.plugin) ? "enabled" : "disabled");',
       ].join('\n'),
       './ToolDock.vue': 'export default { template: "<section><slot /></section>" };',
-      '../../ui': [
+      '../../ui': ([
         'export const UiIconButton = {',
         '  inheritAttrs: false, props: ["title", "label", "pressed"],',
         '  template: `<button v-bind="$attrs" :title="title"><slot /></button>`,',
         '};',
         'export const useUiLayer = () => {};',
-      ].join('\n'),
+      ].join('\n')) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     },
   });
   setActivePinia(createPinia());
@@ -253,5 +254,8 @@ test('клавиша открывает и закрывает панель, а �
 
   await press({ code: 'Digit1', key: '1', ctrlKey: true, shiftKey: true });
   assert.deepEqual({ tool: dock.activeTool, open: dock.isOpen }, { tool: 'code', open: true });
-  assert.match(wrapper.get('button[title^="Код"]').attributes('title'), /Ctrl \+ Shift \+ 1/);
+  assert.match(
+    wrapper.get('button[data-ui-tooltip^="Код"]').attributes('data-ui-tooltip'),
+    /Ctrl \+ Shift \+ 1/,
+  );
 });

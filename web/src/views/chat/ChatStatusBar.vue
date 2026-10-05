@@ -11,7 +11,7 @@
         </span>
       </div>
       <div v-if="status.phase !== 'compact'" ref="summaryEl" class="chat-status__summary"
-           data-role="chat-status-summary" :title="fullSummary">
+           data-role="chat-status-summary" v-tooltip="fullSummary">
         <span class="chat-status__facts">
           <span v-if="layout.model" class="chat-status__model" data-role="chat-status-model">
             <span v-if="layout.kind && shortModelKind" class="chat-status__kind" aria-hidden="true">
@@ -66,7 +66,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
-import { UiPopover, UiPressable, UiSpinner } from '../../ui';
+import { UiPopover, UiPressable, UiSpinner, vTooltip } from '../../ui';
 import type { UsageSummary } from '../../features/providers/providerUsageSummary.ts';
 import type { ChatStatus } from './chatStatus.ts';
 import { statusOverflow, statusSummaryLayout } from './chatStatusLayout.ts';

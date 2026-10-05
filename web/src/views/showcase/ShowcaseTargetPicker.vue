@@ -42,7 +42,7 @@
             <span class="picker__dot" aria-hidden="true"></span>
             <div class="picker__copy">
               <span class="picker__line">
-                <strong class="picker__label" :title="titleOf(target)">{{ titleOf(target) }}</strong>
+                <strong class="picker__label" v-tooltip="titleOf(target)">{{ titleOf(target) }}</strong>
                 <!-- Есть ли уже ролик — видно чипом, а не догадкой по кнопке. -->
                 <span class="picker__chip" :data-tone="filmChipOf(target).tone">
                   {{ filmChipOf(target).label }}
@@ -130,7 +130,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiActionLink, UiButton, UiSpinner } from '../../ui';
+import { UiActionLink, UiButton, UiSpinner, vTooltip } from '../../ui';
 import { sandboxUrl } from '../../shared/sandbox.js';
 import type {
   ShowcaseOverview,

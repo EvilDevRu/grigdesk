@@ -275,11 +275,11 @@ test('включённое состояние видно по самой кно�
 
   assert.equal(power('code').attributes('data-variant'), 'solid');
   assert.equal(power('code').attributes('data-tone'), 'accent');
-  assert.equal(power('code').attributes('title'), 'Плагин включён');
+  assert.equal(power('code').attributes('data-ui-tooltip'), 'Плагин включён');
 
   assert.equal(power('secure-shell').attributes('data-variant'), 'ghost');
   assert.equal(power('secure-shell').attributes('data-tone'), 'neutral');
-  assert.equal(power('secure-shell').attributes('title'), 'Плагин выключен');
+  assert.equal(power('secure-shell').attributes('data-ui-tooltip'), 'Плагин выключен');
 });
 
 test('модалка открывается по плитке и сохраняет значения всех полей плагина', async (t) => {

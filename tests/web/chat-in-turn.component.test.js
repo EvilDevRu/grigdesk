@@ -165,7 +165,10 @@ test('та же кнопка ставит вложения и сообщение
     dataTransfer: { types: ['Files'], files: [new Blob(['x'], { type: 'text/plain' })] },
   });
   await flushPromises();
-  assert.match(wrapper.get('[data-context="chat-send"]').attributes('title'), /после текущего хода/);
+  assert.match(
+    wrapper.get('[data-context="chat-send"]').attributes('data-ui-tooltip'),
+    /после текущего хода/,
+  );
   assert.notEqual(wrapper.get('[data-context="chat-send"]').attributes('disabled'), '');
   await wrapper.get('[data-context="chat-send"]').trigger('click');
   assert.equal(calls.following[0][2].length, 1);
@@ -173,7 +176,10 @@ test('та же кнопка ставит вложения и сообщение
   await input.setValue('Новый вопрос');
   run.availability = { runId: run.runId, available: false, reason: 'awaiting_answer', revision: 3 };
   await flushPromises();
-  assert.match(wrapper.get('[data-context="chat-send"]').attributes('title'), /после текущего хода/);
+  assert.match(
+    wrapper.get('[data-context="chat-send"]').attributes('data-ui-tooltip'),
+    /после текущего хода/,
+  );
   await input.trigger('keydown', { key: 'Enter' });
   assert.deepEqual(calls.following[1], ['in-turn-chat', 'Новый вопрос', []]);
   assert.equal(calls.inTurn.length, 0);

@@ -2,7 +2,7 @@
   <UiInlineMessage
     v-if="failure"
     tone="warning"
-    :title="failure"
+    v-tooltip="failure"
     data-context="plugin-slot-failure"
   >
     Плагин «{{ placement.pluginId }}» не отрисовался
@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { onErrorCaptured, ref, watch } from 'vue';
 
-import { UiInlineMessage } from '../ui';
+import { UiInlineMessage, vTooltip } from '../ui';
 import type { PluginPlacement } from './registry.ts';
 
 // Одно размещение в своей границе ошибок: упавший компонент плагина показывает

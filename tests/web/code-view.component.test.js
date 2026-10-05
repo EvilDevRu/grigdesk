@@ -66,7 +66,7 @@ async function compileCodeView() {
       '../../router.js': `
         export const router = globalThis.__codeViewRouter;
       `,
-      '../../ui': `
+      '../../ui': (`
         export { default as UiButton } from './src/components/primitives/UiButton.vue';
         export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
         export { default as UiInlineMessage } from './src/components/feedback/UiInlineMessage.vue';
@@ -80,7 +80,8 @@ async function compileCodeView() {
         export { default as UiTextarea } from './src/components/primitives/UiTextarea.vue';
         export const confirmDialog = (text, options) => globalThis.__codeViewConfirm(text, options);
         export const promptDialog = (options) => globalThis.__codeViewPrompt(options);
-      `,
+      `) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     },
   });
 }
@@ -1118,10 +1119,13 @@ test('конфликт помечен в Git, разрешается через 
   const resolve = wrapper.get('button[data-action="stage"][data-file="conflict.txt"]');
 
   assert.equal(row.get('.st').text(), '!');
-  assert.equal(row.attributes('title'), 'конфликт: разреши в файле, затем добавь в индекс');
+  assert.equal(row.attributes('data-ui-tooltip'), 'конфликт: разреши в файле, затем добавь в индекс');
   assert.equal(wrapper.get('.diffhead .comparison-sides').text(), 'наша версия → рабочая копия');
-  assert.match(wrapper.get('.diffhead .comparison-sides').attributes('title'), /файл с маркерами конфликта/);
-  assert.match(resolve.attributes('title'), /Пометить разрешённым/);
+  assert.match(
+    wrapper.get('.diffhead .comparison-sides').attributes('data-ui-tooltip'),
+    /файл с маркерами конфликта/,
+  );
+  assert.match(resolve.attributes('data-ui-tooltip'), /Пометить разрешённым/);
   assert.equal(wrapper.find('button[data-action="discard"][data-file="conflict.txt"]').exists(), false);
   assert.equal(wrapper.find('button[data-action="row-more"][data-file="conflict.txt"]').exists(), false);
   assert.equal(wrapper.find('button[data-action="group-more"]').exists(), false);
@@ -2102,7 +2106,10 @@ test('заголовок группы несёт итог строк, как с�
     { group: 'staged', stat: '+25−6', blocks: ['add', 'add', 'add', 'add', 'del'] },
     { group: 'work', stat: '', blocks: [] },
   ]);
-  assert.equal(wrapper.get('.diffstat').attributes('title'), 'добавлено строк: 25, удалено строк: 6');
+  assert.equal(
+    wrapper.get('.diffstat').attributes('data-ui-tooltip'),
+    'добавлено строк: 25, удалено строк: 6',
+  );
   // Счётчик файлов рядом с заголовком итогом строк не подменяется.
   assert.deepEqual(groupHeads(wrapper).map((head) => head.count), ['2', '1']);
 });
@@ -2352,7 +2359,7 @@ test('«Обзор» кеширует patch, рисует строки и воз
   assert.equal(wrapper.findAll('.patch-line.del').length, 1);
   assert.match(wrapper.get('.patch-limit').text(), /первые 2 МБ/);
   assert.ok(monacoState.colorizeCalls.includes('COLORIZE_REJECT'));
-  assert.equal(wrapper.get('.patch-file-head').attributes('title'), 'src/a.ts');
+  assert.equal(wrapper.get('.patch-file-head').attributes('data-ui-tooltip'), 'src/a.ts');
   assert.match(wrapper.get('.patch-file-head').attributes('aria-label'), /изменён.*добавлено 2.*удалено 1/);
 
   const patchLines = wrapper.findAll('.patch-line');
@@ -2877,7 +2884,10 @@ test('amend опубликованного HEAD недоступен и объя
   const amend = panel.querySelector('input[data-action="amend"]');
 
   assert.equal(amend.disabled, true);
-  assert.match(amend.getAttribute('title'), /коммит уже отправлен.*push без force невозможен/i);
+  assert.match(
+    amend.closest('.ui-switch').getAttribute('data-ui-tooltip'),
+    /коммит уже отправлен.*push без force невозможен/i,
+  );
 });
 
 test('отмена локального HEAD требует подтверждения и возвращает сообщение в композер', async (t) => {
@@ -2928,7 +2938,7 @@ test('отмена опубликованного HEAD недоступна с �
   const undo = panel.querySelector('button[data-action="undo-commit"]');
 
   assert.equal(undo.disabled, true);
-  assert.match(undo.getAttribute('title'), /коммит уже отправлен.*push без force невозможен/i);
+  assert.match(undo.getAttribute('data-ui-tooltip'), /коммит уже отправлен.*push без force невозможен/i);
 });
 
 test('Enter набирает тело сообщения, а коммит уходит по Ctrl+Enter', async (t) => {
@@ -3029,7 +3039,10 @@ test('шаг лесенки и направляющие живут в стиля
   // happy-dom раскладку не считает, поэтому правило стережём статически: живой замер
   // ширины остаётся ручным шагом в браузере.
   assert.match(styles, /--tree-step:\s*\d+px/);
-  assert.match(styles, /padding-left:\s*calc\(var\(--tree-lead\)\s*\+\s*var\(--depth,\s*0\)\s*\*\s*var\(--tree-step\)\)/);
+  assert.match(
+    styles,
+    /padding-left:\s*calc\(var\(--tree-lead\)\s*\+\s*var\(--depth,\s*0\)\s*\*\s*var\(--tree-step\)\)/,
+  );
   assert.match(styles, /background-image:\s*repeating-linear-gradient\(to right, var\(--tree-guide\)/);
 });
 
@@ -3243,7 +3256,7 @@ test('режим «с текущими» включается подписанн
   assert.equal(toggle.element.tagName, 'BUTTON');
   assert.match(toggle.text(), /\+ текущие/);
   assert.equal(toggle.attributes('aria-pressed'), 'true');
-  assert.ok(toggle.attributes('title'));
+  assert.ok(toggle.attributes('data-ui-tooltip'));
 });
 
 test('фон строки дерева задаёт общий скин и только background-color', async () => {
@@ -3354,11 +3367,14 @@ test('повреждённые Git и ответ генератора не за�
   assert.equal(models.modified.disposed, false);
   assert.match(wrapper.get('.perr').text(), /git\.staged\[0\]/);
 
-  await wrapper.get('button[title="Составить сообщение по staged diff"]').trigger('click');
+  await wrapper.get('button[data-ui-tooltip="Составить сообщение по staged diff"]').trigger('click');
   await settle(flushPromises);
   assert.equal(wrapper.get('textarea').element.value, 'Моё сообщение');
   assert.match(wrapper.get('.git-notice[role="alert"]').text(), /commitTitle\.title/);
-  assert.equal(wrapper.get('button[title="Составить сообщение по staged diff"]').element.disabled, false);
+  assert.equal(
+    wrapper.get('button[data-ui-tooltip="Составить сообщение по staged diff"]').element.disabled,
+    false,
+  );
   assert.equal(reads, 2);
 });
 
@@ -3620,7 +3636,7 @@ test('«с текущими» включён по умолчанию: отрез
   assert.equal(query(olderCall).has('work'), false);
   const olderToggle = wrapper.get('[data-action="commits-with-work"]');
   assert.equal(olderToggle.attributes('aria-disabled'), 'true');
-  assert.match(olderToggle.attributes('title'), /последнего коммита/);
+  assert.match(olderToggle.attributes('data-ui-tooltip'), /последнего коммита/);
 });
 
 test('при «+ текущие» слитый диф открывается по клику на файл в любой группе', async (t) => {
@@ -3707,7 +3723,10 @@ test('при «+ текущие» слитый диф открывается п�
   assert.equal(monacoState.diffEditors[0].model.modified.content, 'new commits merged');
   assert.match(wrapper.get('.ehead').text(), /shared\.js/s);
   assert.match(wrapper.get('.diffhead').text(), /→ рабочая копия/s);
-  assert.equal(fileCalls().filter((url) => url.includes('path=shared.js') && url.includes('group=work')).length, 1);
+  assert.equal(
+    fileCalls().filter((url) => url.includes('path=shared.js') && url.includes('group=work')).length,
+    1,
+  );
 
   // Новый файл только с диска в отрезке тоже есть — слитый диф равен его собственному.
   await wrapper.get('button.git-file[data-group="work"][data-path="fresh.js"]').trigger('click');
@@ -3767,7 +3786,7 @@ test('каталог в группе индексируется и возвра�
   const dirLine = wrapper.get('.git-dir-line[data-ui-row="code-change"][data-dir="src"][data-group="work"]');
   const stageDir = dirLine.get('[data-action="stage-dir"]');
 
-  assert.match(stageDir.attributes('title'), /src.*2 файла/);
+  assert.match(stageDir.attributes('data-ui-tooltip'), /src.*2 файла/);
   await stageDir.trigger('click');
   await settle(flushPromises);
   assert.equal(posts.length, 1);
@@ -4060,7 +4079,7 @@ test('«Вся ветка» недоступна у основного дере�
   const branch = wrapper.get('button[data-action="branch-diff"]');
 
   assert.equal(branch.attributes('disabled'), '');
-  assert.match(branch.attributes('title'), /нет upstream/);
+  assert.match(branch.attributes('data-ui-tooltip'), /нет upstream/);
 });
 
 test('chat-done и возврат вкладки тихо обновляют Git одним запросом в полёте', async (t) => {

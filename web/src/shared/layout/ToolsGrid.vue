@@ -8,7 +8,7 @@
           <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
         </svg>
         <span v-if="badges[item.to]" class="tile-badge" :class="badges[item.to].kind"
-              role="status" :aria-label="badges[item.to].title" :title="badges[item.to].title">
+              role="status" :aria-label="badges[item.to].title" v-tooltip="badges[item.to].title">
           {{ badges[item.to].n > 99 ? '99+' : badges[item.to].n }}
         </span>
       </span>
@@ -19,6 +19,7 @@
 
 <script setup>
 import { NAV_ICONS } from '../navIcons.ts';
+import { vTooltip } from '../../ui';
 
 defineProps({
   items: { type: Array, default: () => [] },

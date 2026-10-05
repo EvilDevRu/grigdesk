@@ -64,7 +64,8 @@ async function mountCleanup(t, { values = {}, prune = async () => ({ ok: true, r
       '../../stores/plugins.js': (
         'export const usePluginsStore = () => globalThis.__dockerCleanupHarness.plugins;'
       ),
-      '../../ui': UI_STUB,
+      '../../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     },
   });
   const { mount, flushPromises } = await import(

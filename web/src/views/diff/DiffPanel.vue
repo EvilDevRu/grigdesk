@@ -45,10 +45,10 @@
           </template>
           <span class="grow"></span>
           <UiToggleButton v-model="sideBySide" class="layout-toggle"
-                          :title="sideBySide ? 'Рядом' : 'В строку'">
+                          v-tooltip="sideBySide ? 'Рядом' : 'В строку'">
             {{ sideBySide ? '⇆ рядом' : '≡ в строку' }}
           </UiToggleButton>
-          <UiIconButton role="embedded" label="Обновить" title="Обновить"
+          <UiIconButton role="embedded" label="Обновить" v-tooltip="'Обновить'"
                         :loading="loading" @click="load">↻</UiIconButton>
         </div>
         <div ref="host" class="editor"></div>
@@ -62,7 +62,12 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.ts';
 import { api } from '../../shared/apiClient.ts';
 import {
-  UiButton, UiIconButton, UiPressable, UiSpinner, UiToggleButton,
+  UiButton,
+  UiIconButton,
+  UiPressable,
+  UiSpinner,
+  UiToggleButton,
+  vTooltip,
 } from '../../ui';
 
 // Ядро дифа задачи (дерево файлов + Monaco). Переиспользуется на роуте /diff и в модале.

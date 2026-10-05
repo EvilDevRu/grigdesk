@@ -34,7 +34,8 @@ async function fixture(t, initial = makeDraft(), templates = [], focusPath = '')
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RoutePromptEditor.vue'), {
     stubs: {
-      '../../ui': UI_STUB,
+      '../../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       './RouteMarkdownInput.vue': MARKDOWN_STUB,
     },
   });
@@ -66,7 +67,9 @@ async function fixture(t, initial = makeDraft(), templates = [], focusPath = '')
 test('RE-F7-01: форма инструкции bootstrap меняет только bootstrapPrompts', async (t) => {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RoutePromptEditor.vue'), {
-    stubs: { '../../ui': UI_STUB, './RouteMarkdownInput.vue': MARKDOWN_STUB },
+    stubs: { '../../ui': (UI_STUB) +
+      "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
+      './RouteMarkdownInput.vue': MARKDOWN_STUB },
   });
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

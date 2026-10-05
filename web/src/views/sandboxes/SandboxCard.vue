@@ -69,7 +69,7 @@
         :href="feHref"
         target="_blank"
         rel="noopener"
-        :title="`Открыть фронт стенда: ${feHref}`"
+        v-tooltip="`Открыть фронт стенда: ${feHref}`"
       >Фронт <b>:{{ entry.fePort }}</b><span aria-hidden="true"> ↗</span></a>
 
       <a
@@ -78,7 +78,7 @@
         :href="apiHref"
         target="_blank"
         rel="noopener"
-        :title="`Открыть API стенда: ${apiHref}`"
+        v-tooltip="`Открыть API стенда: ${apiHref}`"
       >API <b>:{{ entry.apiPort }}</b><span aria-hidden="true"> ↗</span></a>
 
       <span class="sandbox-card__alive" :data-state="aliveState">{{ aliveLabel }}</span>
@@ -87,14 +87,14 @@
     <ul v-if="entry.repos.length" class="sandbox-card__repos">
       <li v-for="repo in entry.repos" :key="repo.path" class="sandbox-repo">
         <span class="sandbox-repo__name">{{ repo.name }}</span>
-        <span class="sandbox-repo__branch" :title="repo.branch || undefined">
+        <span class="sandbox-repo__branch" v-tooltip="repo.branch || undefined">
           {{ repo.branch || 'ветка неизвестна' }}
         </span>
-        <code class="sandbox-repo__path" :title="repo.path">{{ repo.path }}</code>
+        <code class="sandbox-repo__path" v-tooltip="repo.path">{{ repo.path }}</code>
         <UiIconButton
           role="embedded"
           :label="copyLabel(repo.path)"
-          :title="copyLabel(repo.path)"
+          v-tooltip="copyLabel(repo.path)"
           @click="copyPath(repo.path)"
         >
           <svg v-if="copied === repo.path" v-bind="ICON" aria-hidden="true">
@@ -116,7 +116,7 @@
         :key="action.id"
         variant="ghost"
         tone="accent"
-        :title="action.description"
+        v-tooltip="action.description"
         :aria-disabled="busy || (job !== null && job.state === 'running')"
         @click="emit('run', { task: entry.task, action })"
       >
@@ -155,7 +155,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import {
-  UiButton, UiDisclosureButton, UiIconButton, UiInlineMessage, UiProgress,
+  UiButton,
+  UiDisclosureButton,
+  UiIconButton,
+  UiInlineMessage,
+  UiProgress,
+  vTooltip,
 } from '../../ui';
 import { loadSandboxJobLog } from '../../actions/sandboxes';
 import { sandboxUrl } from '../../shared/sandbox.js';

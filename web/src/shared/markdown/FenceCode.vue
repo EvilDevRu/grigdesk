@@ -7,7 +7,7 @@
       <UiIconButton
         role="embedded"
         :label="copied ? 'Скопировано' : 'Копировать код'"
-        :title="copied ? 'Скопировано' : 'Копировать код'"
+        v-tooltip="copied ? 'Скопировано' : 'Копировать код'"
         data-context="md-fence-copy"
         @click="copy"
       >
@@ -30,11 +30,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
-import type { FunctionalComponent } from 'vue';
+import { computed, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 
-import { UiDisclosureButton, UiIconButton } from '../../ui';
+import { UiDisclosureButton, UiIconButton, vTooltip } from '../../ui';
 import { writeClipboardText } from '../clipboard.ts';
+import { FenceCodeLines } from './fenceCodeLines.ts';
 import { highlightCode } from './codeHighlight.ts';
 import { diffLines, isDiffLanguage, plainLines, shouldCollapse } from './fenceLines.ts';
 import type { FenceLine, FenceToken } from './fenceLines.ts';
@@ -68,27 +68,6 @@ const lines = computed<FenceLine[]>(() => {
 });
 const long = computed(() => shouldCollapse(props.code));
 const collapsed = computed(() => long.value && !expanded.value);
-
-/**
- * Строки кода строятся render-функцией: шаблон внутри <pre> сохранил бы свои отступы и
- * переносы как текст кода. Между строками — ровно один перенос, как в исходнике.
- */
-const FenceCodeLines: FunctionalComponent<{ lines: FenceLine[] }> = (lineProps) => h(
-  'code',
-  null,
-  lineProps.lines.flatMap((line, index) => {
-    const node = h(
-      'span',
-      { class: line.kind ? ['md-line', `md-line--${line.kind}`] : 'md-line' },
-      line.tokens.map((token) => h('span', token.color ? { style: { color: token.color } } : null,
-        token.content)),
-    );
-
-    return index < lineProps.lines.length - 1 ? [node, '\n'] : [node];
-  }),
-);
-
-FenceCodeLines.props = ['lines'];
 
 /**
  * Подсвечивает только закрытый блок: пока агент печатает, текст меняется, и подсветка

@@ -70,7 +70,7 @@
           <span class="attention-actions">
             <UiIconButton
               :label="`Перезапустить оценку #${item.task}`"
-              title="Перезапустить оценку"
+              v-tooltip="'Перезапустить оценку'"
               role="embedded"
               :disabled="busy === item.task"
               @click="restart(item.task)"
@@ -79,7 +79,7 @@
             </UiIconButton>
             <UiIconButton
               :label="`Скрыть оценку #${item.task}`"
-              title="Скрыть (не перезапускать)"
+              v-tooltip="'Скрыть (не перезапускать)'"
               role="embedded"
               :disabled="busy === item.task"
               @click="dismiss(item.task)"
@@ -106,6 +106,7 @@ import {
   UiFormActions,
   UiIconButton,
   UiPopover,
+  vTooltip,
 } from '../../ui';
 
 const analysis = useAnalysisStore();

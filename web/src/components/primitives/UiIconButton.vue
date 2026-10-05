@@ -13,7 +13,6 @@
     :aria-disabled="ariaDisabled"
     :pressed="pressed"
     :aria-label="label"
-    :title="title"
     @click="$emit('click', $event)"
     ><slot
   /></UiButton>
@@ -34,7 +33,6 @@ defineOptions({ inheritAttrs: false });
 const props = withDefaults(
   defineProps<{
     label: string;
-    title?: string;
     role?: UiIconRole;
     type?: UiButtonType;
     variant?: UiActionVariant;
@@ -46,7 +44,6 @@ const props = withDefaults(
     pressed?: boolean;
   }>(),
   {
-    title: undefined,
     role: 'peer',
     type: 'button',
     variant: 'ghost',

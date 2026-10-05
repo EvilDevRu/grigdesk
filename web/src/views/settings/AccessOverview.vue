@@ -46,7 +46,7 @@
           <h4>Напрямую к мозгу</h4>
           <p>Планшет и рабочий компьютер заходят по локальному адресу машины.</p>
         </div>
-        <code class="access-route-url" :title="localUrl">{{ localUrl }}</code>
+        <code class="access-route-url" v-tooltip="localUrl">{{ localUrl }}</code>
         <div class="access-route-control">
           <UiSwitch
             :model-value="localControlOn"
@@ -103,7 +103,10 @@
           <h4>Через VPS-шлюз</h4>
           <p>Публичный домен ведёт в отдельные обратные туннели кокпита и стендов.</p>
         </div>
-        <code class="access-route-url" :title="`https://${gatewayDomain}`">https://{{ gatewayDomain }}</code>
+        <code
+          class="access-route-url"
+          v-tooltip="`https://${gatewayDomain}`"
+        >https://{{ gatewayDomain }}</code>
         <div class="access-route-control gateway-control">
           <UiDisclosureButton
             class="route-action"
@@ -151,7 +154,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { UiButton, UiDisclosureButton, UiSwitch } from '../../ui';
+import { UiButton, UiDisclosureButton, UiSwitch, vTooltip } from '../../ui';
 
 const props = defineProps({
   localHttpsEnabled: { type: Boolean, default: false },

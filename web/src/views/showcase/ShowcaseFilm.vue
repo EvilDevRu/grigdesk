@@ -9,7 +9,7 @@
           <h2 id="showcase-film-title">{{ project.title }}</h2>
           <UiIconButton
             label="Переименовать ролик"
-            title="Переименовать"
+            v-tooltip="'Переименовать'"
             variant="ghost"
             :disabled="busy"
             @click="emit('rename')"
@@ -240,6 +240,7 @@ import {
   UiInlineMessage,
   UiSpinner,
   UiVideo,
+  vTooltip,
 } from '../../ui';
 import { continuesPrevious } from '../../../../shared/showcaseChains';
 import type {

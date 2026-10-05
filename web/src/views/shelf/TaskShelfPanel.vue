@@ -13,7 +13,8 @@
             v-model="query"
             aria-label="Поиск задач на полке"
             placeholder="Найти задачу…"
-            title="Поиск по номеру, названию, проекту и ответственному"
+            v-tooltip="'Поиск по номеру, названию, проекту и ответственному'"
+            aria-description="Поиск по номеру, названию, проекту и ответственному"
           />
         </div>
         <UiControlGroup label="Фильтр задач на полке">
@@ -93,7 +94,7 @@
                   </template>
                 </span>
 
-                <strong class="shelf-title" :title="row.title">{{ row.title }}</strong>
+                <strong class="shelf-title" v-tooltip="row.title">{{ row.title }}</strong>
 
                 <span v-if="row.state === 'lit'" class="shelf-event">
                   <span class="shelf-event-label">
@@ -141,7 +142,7 @@
                     <span v-if="row.details?.unread" class="shelf-unread">
                       <span class="ui-visually-hidden">, </span>{{ unreadLabel(row.details.unread) }}
                     </span>
-                    <time :datetime="row.addedAt" :title="fullDate(row.addedAt)">
+                    <time :datetime="row.addedAt" v-tooltip="fullDate(row.addedAt)">
                       {{ ageLabel(row.addedAt) }}
                     </time>
                   </span>
@@ -165,7 +166,7 @@
                       :max="bar.progress!.total"
                       :indeterminate="!bar.progress!.total"
                       :value-text="progressText(bar.progress!)"
-                      :title="progressText(bar.progress!)"
+                      v-tooltip="progressText(bar.progress!)"
                     />
                   </span>
                 </span>
@@ -175,7 +176,7 @@
                 <UiIconButton
                   v-if="row.state === 'lit'"
                   label="Отметить событие просмотренным"
-                  title="Отметить событие просмотренным"
+                  v-tooltip="'Отметить событие просмотренным'"
                   role="embedded"
                   tone="success"
                   :loading="shelf.isPending?.(row.taskId)"
@@ -194,7 +195,7 @@
                 -->
                 <UiIconButton
                   label="Убрать с полки"
-                  title="Убрать с полки"
+                  v-tooltip="'Убрать с полки'"
                   role="embedded"
                   tone="neutral"
                   :loading="row.state !== 'lit' && shelf.isPending?.(row.taskId)"
@@ -220,7 +221,15 @@ import { computed, nextTick, ref } from 'vue';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';
 import { useUiStore } from '../../stores/ui.js';
-import { UiButton, UiControlGroup, UiIconButton, UiProgress, UiSearchInput, UiSelectableRow } from '../../ui';
+import {
+  UiButton,
+  UiControlGroup,
+  UiIconButton,
+  UiProgress,
+  UiSearchInput,
+  UiSelectableRow,
+  vTooltip,
+} from '../../ui';
 import type { UiActionTone } from '../../ui';
 
 type PluralForms = [string, string, string];

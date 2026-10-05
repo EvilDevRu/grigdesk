@@ -44,6 +44,10 @@ function uiOwned(file) {
     || /^web\/src\/composables\/useUi(?:Field|Layer|Tabs)/.test(file)
     || file === 'web/src/services/dialogs.ts'
     || file === 'web/src/services/toasts.ts'
+    || file === 'web/src/services/tooltips.ts'
+    || file === 'web/src/services/tooltipDirective.ts'
+    || file === 'web/src/services/tooltipInput.ts'
+    || file === 'web/src/services/overlayPlacement.ts'
     || file.startsWith('web/src/services/layers/');
 }
 
@@ -121,6 +125,10 @@ function isPrivateUiTarget(target) {
     || /^web\/src\/types\/ui[A-Z]/.test(target)
     || target === 'web/src/services/dialogs'
     || target === 'web/src/services/toasts'
+    || target === 'web/src/services/tooltips'
+    || target === 'web/src/services/tooltipDirective'
+    || target === 'web/src/services/tooltipInput'
+    || target === 'web/src/services/overlayPlacement'
     || target.startsWith('web/src/services/layers/')
     || /^web\/src\/composables\/useUi(?:Field|Layer|Tabs)/.test(target);
 }

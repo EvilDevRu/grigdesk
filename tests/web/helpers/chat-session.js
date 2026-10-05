@@ -27,6 +27,7 @@ function uiFacadeStub(prefix) {
 
   return [
     ...imports,
+    'export { vTooltip } from "./src/services/tooltipDirective.ts";',
     `export { ${names} };`,
     'export const confirmDialog = (...args) => {',
     `  const handler = globalThis.${prefix}ConfirmDialog;`,

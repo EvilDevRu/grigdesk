@@ -35,7 +35,7 @@
         <UiIconButton
           role="embedded"
           :label="`${collapsed.has(group.key) ? 'Развернуть' : 'Свернуть'} проект ${group.title}`"
-          :title="collapsed.has(group.key) ? 'Развернуть проект' : 'Свернуть проект'"
+          v-tooltip="collapsed.has(group.key) ? 'Развернуть проект' : 'Свернуть проект'"
           :aria-expanded="!collapsed.has(group.key)"
           :aria-controls="groupId(group)"
           @click="toggleGroup(group.key)"
@@ -45,8 +45,8 @@
           </svg>
         </UiIconButton>
         <div class="docker-group__title">
-          <strong :title="group.title">{{ group.title }}</strong>
-          <small v-if="group.workingDir" :title="group.workingDir">{{ group.workingDir }}</small>
+          <strong v-tooltip="group.title">{{ group.title }}</strong>
+          <small v-if="group.workingDir" v-tooltip="group.workingDir">{{ group.workingDir }}</small>
           <small v-else>Отдельные контейнеры</small>
         </div>
         <span class="docker-group__count" :class="{ 'is-running': group.running > 0 }">
@@ -63,7 +63,7 @@
             v-if="group.running"
             role="embedded"
             :label="`Остановить проект ${group.title}`"
-            title="Остановить весь проект"
+            v-tooltip="'Остановить весь проект'"
             :disabled="projectBusy(group)"
             @click="runProject(group, 'stop')"
           >
@@ -90,11 +90,11 @@
             <div class="docker-row__main">
               <div class="docker-row__name">
                 <span class="docker-row__dot" aria-hidden="true"></span>
-                <strong :title="container.name">{{ container.compose?.service || container.name }}</strong>
+                <strong v-tooltip="container.name">{{ container.compose?.service || container.name }}</strong>
               </div>
-              <small class="docker-row__image" :title="container.image">{{ container.image }}</small>
+              <small class="docker-row__image" v-tooltip="container.image">{{ container.image }}</small>
               <div class="docker-row__state">
-                <span :title="container.status">{{ stateLabel(container.state) }}</span>
+                <span v-tooltip="container.status">{{ stateLabel(container.state) }}</span>
                 <span v-if="container.health" class="docker-row__health" :data-health="container.health">
                   {{ healthLabel(container.health) }}
                 </span>
@@ -112,7 +112,7 @@
                   :href="sandboxUrl(port.published) || undefined"
                   target="_blank"
                   rel="noopener"
-                  :title="`Открыть ${formatPort(port)}`"
+                  v-tooltip="`Открыть ${formatPort(port)}`"
                 >{{ formatPort(port) }}<span aria-hidden="true"> ↗</span></a>
                 <span v-else class="docker-port is-internal">{{ formatPort(port) }}</span>
               </template>
@@ -132,7 +132,7 @@
               <UiIconButton
                 role="embedded"
                 :label="`Логи ${container.name}`"
-                title="Логи"
+                v-tooltip="'Логи'"
                 @click="emit('logs', container)"
               >
                 <svg v-bind="ICON" aria-hidden="true">
@@ -142,7 +142,7 @@
               <UiIconButton
                 role="embedded"
                 :label="`Терминал в контейнере ${container.name}`"
-                :title="allowExec ? 'Терминал' : 'Терминал выключен в настройках плагина'"
+                v-tooltip="allowExec ? 'Терминал' : 'Терминал выключен в настройках плагина'"
                 :disabled="container.state !== 'running' || !allowExec"
                 @click="emit('exec', container)"
               >
@@ -153,7 +153,7 @@
               <UiIconButton
                 role="embedded"
                 :label="`${container.state === 'running' ? 'Перезапустить' : 'Запустить'} ${container.name}`"
-                :title="container.state === 'running' ? 'Перезапустить' : 'Запустить'"
+                v-tooltip="container.state === 'running' ? 'Перезапустить' : 'Запустить'"
                 :disabled="store.isBusy(group.project)"
                 :loading="store.isBusy(container.id)"
                 @click="run(container, container.state === 'running' ? 'restart' : 'start')"
@@ -170,7 +170,7 @@
                 v-if="container.state === 'running'"
                 role="embedded"
                 :label="`Остановить ${container.name}`"
-                title="Остановить"
+                v-tooltip="'Остановить'"
                 :disabled="store.isBusy(group.project)"
                 :loading="store.isBusy(container.id)"
                 @click="run(container, 'stop')"
@@ -180,7 +180,7 @@
               <UiIconButton
                 role="embedded"
                 :label="`Удалить контейнер ${container.name}`"
-                title="Удалить контейнер"
+                v-tooltip="'Удалить контейнер'"
                 tone="danger"
                 :disabled="store.isBusy(group.project)"
                 :loading="store.isBusy(container.id)"
@@ -214,7 +214,15 @@ import type {
 import { sandboxUrl } from '../../shared/sandbox.js';
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.js';
-import { UiButton, UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog } from '../../ui';
+import {
+  UiButton,
+  UiCheckbox,
+  UiIconButton,
+  UiInlineMessage,
+  UiSearchInput,
+  confirmDialog,
+  vTooltip,
+} from '../../ui';
 import { formatPort, formatSize, stateLabel, stateTone } from './format';
 import { dockerSettings } from './settings';
 

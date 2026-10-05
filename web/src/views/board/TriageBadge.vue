@@ -1,9 +1,9 @@
 <template>
-  <span v-if="busy" class="tri busy" :title="busyTitle">
+  <span v-if="busy" class="tri busy" v-tooltip="busyTitle">
     <span class="dot"></span>{{ busyTitle }}
   </span>
   <span v-else-if="state === 'failed' && !a" class="tri chip bad"
-        :title="row?.status?.error || 'Не удалось оценить задачу'">
+        v-tooltip="row?.status?.error || 'Не удалось оценить задачу'">
     Ошибка оценки
   </span>
   <UiTooltip v-else-if="a" placement="top-end">
@@ -58,7 +58,7 @@
 // Подробности (расшифровка шкал, резюме, вопросы) — в общем тултипе по ховеру.
 // Пока анализ в очереди/идёт, прежние баллы скрыты и видно название текущего этапа.
 import { computed } from 'vue';
-import { UiTooltip } from '../../ui';
+import { UiTooltip, vTooltip } from '../../ui';
 import type { AnalysisQuestion, AnalysisRow } from '../../../../shared/analysisContracts.ts';
 
 const props = withDefaults(defineProps<{

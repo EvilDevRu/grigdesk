@@ -46,26 +46,39 @@
 
         <!-- Вызов инструмента + его результат -->
         <template v-else-if="r.k === 'tool'">
-          <UiDisclosureButton
-            class="step-disclosure"
-            density="compact"
-            :open="Boolean(expanded[i])"
-            :controls="`${baseId}-step-${i}`"
-            :disabled="!hasBody(r)"
-            @update:open="toggle(i, r)"
+          <UiTooltip
+            :disabled="!hasStepTip(r)"
+            press-dismiss
+            placement="bottom-start"
+            :show-delay="300"
+            surface-class="ui-tooltip--code"
           >
-            <span class="head" :class="kindOf(r.name).cls">
-              <span class="ico">{{ kindOf(r.name).ico }}</span>
-              <span class="nm">{{ toolLabel(r.name) }}</span>
-              <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
-              <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
-              <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
-              <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">
-                {{ r.res.ok ? '✓' : '✕' }}
-              </span>
-              <span v-else-if="live" class="mark run">…</span>
-            </span>
-          </UiDisclosureButton>
+            <template #trigger>
+              <UiDisclosureButton
+                class="step-disclosure"
+                density="compact"
+                :open="Boolean(expanded[i])"
+                :controls="`${baseId}-step-${i}`"
+                :disabled="!hasBody(r)"
+                @update:open="toggle(i, r)"
+              >
+                <span class="head" :class="kindOf(r.name).cls">
+                  <span class="ico">{{ kindOf(r.name).ico }}</span>
+                  <span class="nm">{{ toolLabel(r.name) }}</span>
+                  <span class="ttl">{{ r.title }}</span>
+                  <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
+                  <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+                  <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">
+                    {{ r.res.ok ? '✓' : '✕' }}
+                  </span>
+                  <span v-else-if="live" class="mark run">…</span>
+                </span>
+              </UiDisclosureButton>
+            </template>
+            <template #tip>
+              <CodeTipContent v-bind="stepTip(r)" />
+            </template>
+          </UiTooltip>
           <div v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body-wrap">
             <div v-if="pathOf(r)" class="path">{{ pathOf(r) }}</div>
             <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
@@ -137,7 +150,9 @@
 <script setup>
 import { ref, computed, useId, watch } from 'vue';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
-import { UiDisclosureButton } from '../../ui';
+import { UiDisclosureButton, UiTooltip } from '../../ui';
+import CodeTipContent from '../../shared/markdown/CodeTipContent.vue';
+import { hasStepTip, stepTip } from './stepTip.ts';
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая

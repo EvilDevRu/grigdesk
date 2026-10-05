@@ -18,7 +18,7 @@
       <ul v-else class="docker-list" aria-label="Тома Docker">
         <li v-for="volume in visibleVolumes" :key="volume.name" class="docker-item">
           <div class="docker-item__main">
-            <strong :title="volume.name">{{ volume.name }}</strong>
+            <strong v-tooltip="volume.name">{{ volume.name }}</strong>
             <div class="docker-item__meta">
               <span>{{ volume.compose ? `проект ${volume.compose}` : volume.driver }}</span>
               <span v-if="volume.anonymous">безымянный</span>
@@ -26,7 +26,7 @@
                 {{ volume.inUse ? 'используется' : 'не используется' }}
               </span>
             </div>
-            <p v-if="volume.usedBy.length" class="docker-item__used" :title="volume.usedBy.join(', ')">
+            <p v-if="volume.usedBy.length" class="docker-item__used" v-tooltip="volume.usedBy.join(', ')">
               Контейнеры: {{ volume.usedBy.join(', ') }}
             </p>
           </div>
@@ -38,7 +38,7 @@
             <UiIconButton
               role="embedded"
               :label="`Удалить том ${volume.name}`"
-              :title="volumeRemovalTitle(volume)"
+              v-tooltip="volumeRemovalTitle(volume)"
               tone="danger"
               :disabled="volume.inUse || !allowVolumeRemoval"
               :loading="store.isBusy(volume.name)"
@@ -65,7 +65,7 @@
       <ul v-else class="docker-list" aria-label="Сети Docker">
         <li v-for="network in store.networks" :key="network.id" class="docker-item">
           <div class="docker-item__main">
-            <strong :title="network.name">{{ network.name }}</strong>
+            <strong v-tooltip="network.name">{{ network.name }}</strong>
             <div class="docker-item__meta">
               <span>{{ network.driver }}</span>
               <span v-if="network.subnets.length">{{ network.subnets.join(', ') }}</span>
@@ -78,7 +78,7 @@
             <UiIconButton
               role="embedded"
               :label="`Удалить сеть ${network.name}`"
-              :title="networkRemovalTitle(network)"
+              v-tooltip="networkRemovalTitle(network)"
               tone="danger"
               :disabled="network.builtin || network.containers > 0"
               :loading="store.isBusy(network.id)"
@@ -107,7 +107,7 @@ import type { DockerActionResult, DockerNetwork, DockerVolume } from '../../../.
 
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.js';
-import { UiCheckbox, UiIconButton, UiInlineMessage, confirmDialog } from '../../ui';
+import { UiCheckbox, UiIconButton, UiInlineMessage, confirmDialog, vTooltip } from '../../ui';
 import { formatSize } from './format';
 import { dockerSettings } from './settings';
 

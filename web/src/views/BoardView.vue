@@ -73,7 +73,7 @@
           <li v-for="task in activeTasks" :key="task.id" class="active-timer-item">
             <UiPressable
               data-context="active-timer-card"
-              :title="task.title"
+              v-tooltip="task.title"
               @click="ui.openTask(task.id)"
             >
               <span class="active-timer-card-head">
@@ -162,7 +162,7 @@
                 variant="outline"
                 tone="warning"
                 :disabled="!favorites.loaded || favorites.loading"
-                :title="favorites.loaded ? 'Только избранные задачи' : 'Избранное загружается'"
+                v-tooltip="favorites.loaded ? 'Только избранные задачи' : 'Избранное загружается'"
               >
                 <template #leading>
                   <svg
@@ -186,7 +186,7 @@
                 variant="outline"
                 tone="accent"
                 :disabled="!seen.ready || seen.loading"
-                :title="seen.ready ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
+                v-tooltip="seen.ready ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
               >
                 <template #leading>
                   <svg
@@ -220,7 +220,7 @@
                 v-if="hasListFilters || activeFilterCount"
                 class="filter-reset"
                 variant="text"
-                title="Вернуть порядок B24 и показать все задачи"
+                v-tooltip="'Вернуть порядок B24 и показать все задачи'"
                 @click="resetTaskFilters"
               >
                 Сбросить
@@ -232,7 +232,7 @@
                   variant="solid"
                   tone="accent"
                   :aria-label="`Оценить все задачи без оценки: ${unrated.length}`"
-                  title="Поставить все задачи без оценки в очередь триажа"
+                  v-tooltip="'Поставить все задачи без оценки в очередь триажа'"
                   @click="analyzeAllUnrated"
                 >
                   <template #leading>
@@ -308,16 +308,16 @@
                         'on-shelf': shelfEnabled && shelf.isOnShelf(t.id),
                       }"
                       :style="{ background: dotColor(t) }"
-                      :title="dotTitle(t)"
+                      v-tooltip="dotTitle(t)"
                     ></span>
                     {{ taskStateLabel(t) }}
                   </span>
                   <span v-else class="tstat" :class="{ 'on-shelf': shelfEnabled && shelf.isOnShelf(t.id) }"
-                        :style="{ background: dotColor(t) }" :title="dotTitle(t)"></span>
+                        :style="{ background: dotColor(t) }" v-tooltip="dotTitle(t)"></span>
                   <span v-if="shelfEnabled && shelf.isOnShelf(t.id)" class="shelf-mark">На полке</span>
                   <span v-if="isNewTask(t)" class="newbadge" role="img"
                         aria-label="Новая задача — ещё не открывали"
-                        title="Новая задача — ещё не открывали">Новая</span>
+                        v-tooltip="'Новая задача — ещё не открывали'">Новая</span>
                   <span v-if="t.unread" class="badge" :aria-label="`Непрочитанных сообщений: ${t.unread}`">
                     {{ t.unread }} сообщ.
                   </span>
@@ -451,6 +451,7 @@ import {
   UiTab,
   UiTabs,
   UiToggleButton,
+  vTooltip,
 } from '../ui';
 
 const ui = useUiStore();

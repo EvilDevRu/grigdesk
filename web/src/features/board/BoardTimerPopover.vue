@@ -43,7 +43,7 @@
                 <UiButton
                   data-context="topbar-timer-task"
                   variant="ghost"
-                  :title="task.title"
+                  v-tooltip="task.title"
                   @click="openTask(task.id, close)"
                 >
                   <span class="board-timers-popover-copy">
@@ -64,7 +64,7 @@
                   role="embedded"
                   :tone="task.timerRunning ? 'warning' : 'success'"
                   :label="timerActionLabel(task)"
-                  :title="timerActionLabel(task)"
+                  v-tooltip="timerActionLabel(task)"
                   :loading="isTimerBusy(task)"
                   :disabled="timerControlsBusy"
                   @click="emit('toggleTimer', task)"
@@ -114,7 +114,7 @@
 import { computed, onUnmounted, ref } from 'vue';
 
 import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.ts';
-import { UiButton, UiIconButton, UiInlineMessage, UiPopover } from '../../ui';
+import { UiButton, UiIconButton, UiInlineMessage, UiPopover, vTooltip } from '../../ui';
 
 const props = defineProps({
   tasks: {

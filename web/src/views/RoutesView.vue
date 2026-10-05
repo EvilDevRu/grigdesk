@@ -25,7 +25,7 @@
                        :selected="r.id === selectedRoute" @select="selectRoute(r.id)">
         <span class="route-item-content">
           <span class="rid mono">{{ r.id }}</span>
-          <span v-if="r.hash" class="chip mono" :title="r.hash">{{ shortHash(r.hash) }}</span>
+          <span v-if="r.hash" class="chip mono" v-tooltip="r.hash">{{ shortHash(r.hash) }}</span>
         </span>
       </UiSelectableRow>
     </aside>
@@ -182,7 +182,7 @@
       <template v-else>
       <header class="phead">
         <span class="ttl">{{ profile || '—' }}</span>
-        <span v-if="published" class="hash mono" :title="currentHash ?? undefined">current {{ shortHash(currentHash) }}</span>
+        <span v-if="published" class="hash mono" v-tooltip="currentHash ?? undefined">current {{ shortHash(currentHash) }}</span>
         <span v-else class="muted">маршрутов ещё нет</span>
         <span class="grow"></span>
         <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
@@ -197,7 +197,7 @@
         <span v-else-if="routesStore.editorInfo?.source.mode === 'editor'" class="muted nopub">
           источник маршрутов — редактор
         </span>
-        <span v-else class="muted nopub" title="Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs">
+        <span v-else class="muted nopub" v-tooltip="'Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs'">
           нет скрипта публикации
         </span>
       </header>
@@ -228,7 +228,7 @@
       </template>
 
       <RouteRevisionHistory v-if="revisions.length" :revisions="revisions" :busy="!!busy || !pageReady"
-                            :title="helpRevisions" @view="viewRevision"
+                            v-tooltip="helpRevisions" @view="viewRevision"
                             @create="createFromRevision" @compare="compareRevision"
                             @rollback="rollback" />
       <RouteCompare v-if="historyCompareReport" :report="historyCompareReport"
@@ -258,6 +258,7 @@ import {
   UiSpinner,
   UiTooltip,
   confirmDialog,
+  vTooltip,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import ProjectSwitcher from '../features/projects/ProjectSwitcher.vue';

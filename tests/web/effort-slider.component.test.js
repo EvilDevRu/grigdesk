@@ -63,8 +63,10 @@ test('EFFORT-02: неактивный слайдер молчит, но знач
 test('EFFORT-03: подсказка объясняет, где менять уровень, вместо обычного title', async (t) => {
   const hint = 'Модель и усилие задаются в «Настройки → Приложение».';
   const wrapper = await mountSlider(t, { modelValue: 'high', levels: LEVELS, disabled: true, hint });
-  assert.equal(wrapper.attributes('title'), hint);
+
+  assert.equal(wrapper.attributes('data-ui-tooltip'), hint);
 
   const plain = await mountSlider(t, { modelValue: 'high', levels: LEVELS });
-  assert.match(plain.attributes('title'), /Усилие рассуждения: high/);
+
+  assert.match(plain.attributes('data-ui-tooltip'), /Усилие рассуждения: high/);
 });

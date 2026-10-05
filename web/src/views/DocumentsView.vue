@@ -1,7 +1,7 @@
 <template>
   <TopbarActions>
-    <UiIconButton role="rail" label="Назад" title="Назад" @click="close">←</UiIconButton>
-    <span class="title" :title="document?.displayPath || title">{{ title }}</span>
+    <UiIconButton role="rail" label="Назад" v-tooltip="'Назад'" @click="close">←</UiIconButton>
+    <span class="title" v-tooltip="document?.displayPath || title">{{ title }}</span>
   </TopbarActions>
   <main class="documents-view">
     <div v-if="resolving" class="resolve-state"><UiSpinner decorative /> Проверяю ссылку…</div>
@@ -17,7 +17,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { api } from '../shared/apiClient.ts';
 import TopbarActions from '../shared/layout/TopbarActions.vue';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
-import { UiIconButton, UiSpinner } from '../ui';
+import { UiIconButton, UiSpinner, vTooltip } from '../ui';
 
 const route = useRoute();
 const router = useRouter();

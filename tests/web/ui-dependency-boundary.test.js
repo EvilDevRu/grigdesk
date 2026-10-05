@@ -79,3 +79,16 @@ test('UI dependencies: сервис тостов закрыт публичной
 
   assert.match(errors.join('\n'), /обходит web\/src\/ui\.ts/);
 });
+
+test('TIP-WIRE-03: product не импортирует приватный сервис подсказок', () => {
+  const report = {
+    parseErrors: [],
+    imports: [{
+      file: 'web/src/views/BadView.ts',
+      specifier: '../services/tooltips',
+      target: 'web/src/services/tooltips',
+    }],
+  };
+
+  assert.match(compareUiDependencyBoundary(report, EMPTY).join('\n'), /обходит web\/src\/ui\.ts/);
+});

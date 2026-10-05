@@ -424,7 +424,7 @@ test('ChatSession передаёт в тултип полное загружен
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   }).format(new Date(sentAt)));
   assert.equal(messageTime.attributes('datetime'), new Date(sentAt).toISOString());
-  assert.match(messageTime.attributes('title'), /^Отправлено /);
+  assert.match(messageTime.attributes('data-ui-tooltip'), /^Отправлено /);
 
   await wrapper.find('.m-atts a').trigger('click');
   assert.deepEqual(previewedImages, [{
@@ -1004,8 +1004,9 @@ test('ChatSession показывает неподтверждённое окно
   assert.match(contextTip.text(), /Контекст пуст/);
   assert.match(contextTooltipRows(contextTip).Окно, /200[\s\u00a0]000 · неточно/);
 
-  const select = wrapper.find('.sel.model select');
-  assert.match(select.attributes('title'), /окно не подтверждено/);
+  const select = wrapper.find('.sel.model .ui-select-wrap');
+
+  assert.match(select.attributes('data-ui-tooltip'), /окно не подтверждено/);
   const option = wrapper.find('.sel.model option[value="claude-fable-5"]');
   assert.match(option.text(), /Fable 5 · окно не подтверждено/);
   assert.match(option.attributes('title'), /окно не подтверждено/);
@@ -1087,9 +1088,10 @@ test('ChatSession показывает рабочее окно Codex из жив
   t.after(() => wrapper.unmount());
   await flushPromises();
 
-  const select = wrapper.get('.sel.model select');
-  assert.match(select.attributes('title'), /рабочее окно 258[\s\u00a0]400 токенов/);
-  assert.doesNotMatch(select.attributes('title'), /400[\s\u00a0]?000|400K/i);
+  const select = wrapper.get('.sel.model .ui-select-wrap');
+
+  assert.match(select.attributes('data-ui-tooltip'), /рабочее окно 258[\s\u00a0]400 токенов/);
+  assert.doesNotMatch(select.attributes('data-ui-tooltip'), /400[\s\u00a0]?000|400K/i);
 
   const option = wrapper.get('.sel.model option[value="gpt-5.6-sol"]');
   assert.equal(option.text(), 'GPT-5.6-Sol');

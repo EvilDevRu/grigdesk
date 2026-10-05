@@ -5,6 +5,7 @@
        а не с закрытым API. После входа тот же компонент стоит плиткой в конце рейки. -->
   <CockpitVersionTile v-if="!auth.authenticated" standalone />
   <UiDialogHost />
+  <UiTooltipHost />
 
   <template v-if="auth.ready">
     <LoginView v-if="!auth.authenticated" />
@@ -26,7 +27,7 @@
 
 <script setup>
 import { onMounted, watch } from 'vue';
-import { UiDialogHost, UiToastHost } from './ui';
+import { UiDialogHost, UiTooltipHost, UiToastHost } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import LoginView from './views/LoginView.vue';

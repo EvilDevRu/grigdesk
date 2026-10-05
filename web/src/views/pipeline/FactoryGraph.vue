@@ -58,10 +58,10 @@
             v-for="edge in edgeElements"
             :key="edge.key"
             :class="{ 'edge-muted': focusedNode && !edge.related, 'edge-related': edge.related }"
+            v-tooltip="edge.visible ? edge.title : ''"
             :data-source="edge.source"
             :data-destination="edge.destination"
           >
-            <title v-if="edge.visible">{{ edge.title }}</title>
             <path
               v-if="edge.visible"
               :d="edge.d"
@@ -100,6 +100,7 @@
           :aria-current="node.id === selectedNode ? 'true' : undefined"
           :aria-label="nodeInteractive && node.executable ? node.label : undefined"
           :aria-description="nodeInteractive && node.executable ? node.description : undefined"
+          v-tooltip="node.title"
           :data-node="node.id"
           @mouseenter="focusedNode = node.id"
           @mouseleave="focusedNode = null"
@@ -107,7 +108,6 @@
           @focusout="focusedNode = null"
           @click="onNodeActivate(node, $event)"
         >
-          <title v-if="node.title">{{ node.title }}</title>
           <text
             v-if="node.loopRole"
             :x="node.cx"
@@ -241,7 +241,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
 
-import { UiSvgPressable } from '../../ui';
+import { UiSvgPressable, vTooltip } from '../../ui';
 import {
   computeViewBox,
   edgePath,

@@ -22,7 +22,7 @@
             variant="ghost"
             :pressed="activeProject === option.id"
             :aria-label="`${option.label}: ${option.count}`"
-            :title="`${option.label} · ${option.count}`"
+            v-tooltip="`${option.label} · ${option.count}`"
             @click="setProject(option.id)"
           >
             <span class="project-option-copy">
@@ -46,7 +46,7 @@
               data-role="pipeline-project-overflow"
               variant="ghost"
               :aria-label="`Ещё проектов: ${hiddenProjectOptions.length}`"
-              :title="`Ещё проектов: ${hiddenProjectOptions.length}`"
+              v-tooltip="`Ещё проектов: ${hiddenProjectOptions.length}`"
             >
               <span class="mono">+{{ hiddenProjectOptions.length }}</span>
               <svg class="project-more-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -66,7 +66,7 @@
                 role="menuitem"
                 block
                 variant="ghost"
-                :title="option.label"
+                v-tooltip="option.label"
                 @click="setProject(option.id); close('action')"
               >
                 <span class="project-menu-copy">
@@ -122,7 +122,7 @@
               variant="text"
               :pressed="activeStatus === option.id"
               :aria-label="`${option.label}: ${option.count}`"
-              :title="option.hint"
+              v-tooltip="option.hint"
               @click="setStatus(option.id)"
             >
               <span class="status-filter-copy">
@@ -148,7 +148,7 @@
                 :tone="currentStatusOption.tone"
                 variant="text"
                 :aria-label="`Состояние: ${currentStatusOption.label}, ${currentStatusOption.count}`"
-                :title="currentStatusOption.label"
+                v-tooltip="currentStatusOption.label"
               >
                 <span class="status-menu-trigger-copy">
                   <span
@@ -198,7 +198,7 @@
             :pressed="loopsOn"
             :disabled="compact"
             label="Показывать все возвраты"
-            :title="compact
+            v-tooltip="compact
               ? 'Возвраты доступны в подробном виде'
               : 'Показывать все возможные возвратные связи на схемах'"
             @click="toggleLoops(!loopsOn)"
@@ -214,7 +214,7 @@
             variant="ghost"
             :pressed="compact"
             label="Компактный вид"
-            title="Сворачивать все карточки до краткой сводки"
+            v-tooltip="'Сворачивать все карточки до краткой сводки'"
             @click="toggleCompact(!compact)"
           >
             <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -242,7 +242,7 @@
           class="chev"
           role="rail"
           :label="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
-          :title="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
+          v-tooltip="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
           @click="toggleCard(t.task)"
         >
           {{ collapsedSet.has(t.task) ? '▸' : '▾' }}
@@ -250,7 +250,7 @@
         <UiButton
           class="task mono"
           data-role="pipeline-task-id"
-          title="Свернуть/развернуть"
+          v-tooltip="'Свернуть/развернуть'"
           variant="text"
           @click="toggleCard(t.task)"
         >
@@ -258,14 +258,14 @@
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
         <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
-              :title="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
+              v-tooltip="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
           ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
         </span>
         <UiButton
           v-if="b24Title(t.task)"
           class="ctitle"
           data-role="pipeline-title"
-          :title="title(t)"
+          v-tooltip="title(t)"
           variant="text"
           @click="ui.openTask(t.task)"
         >
@@ -274,7 +274,7 @@
         <span
           v-else-if="title(t)"
           class="ctitle pipeline-title-static ticket"
-          :title="title(t)"
+          v-tooltip="title(t)"
         >
           {{ title(t) }}
         </span>
@@ -290,12 +290,12 @@
           :class="b24TimerState(t)"
           data-role="pipeline-b24-timer"
           :data-state="b24TimerState(t)"
-          title="Таймер Битрикс24 по этой задаче"
+          v-tooltip="'Таймер Битрикс24 по этой задаче'"
         >
           {{ b24TimerLabel(t) }}
         </span>
         <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
-        <span v-if="t.graph.timing" class="elapsed mono" :title="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
+        <span v-if="t.graph.timing" class="elapsed mono" v-tooltip="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
       </header>
 
       <div class="progress">
@@ -563,7 +563,7 @@
             class="sx"
             data-context="pipeline-stage-close"
             label="Закрыть этап"
-            title="Закрыть (Esc)"
+            v-tooltip="'Закрыть (Esc)'"
             @click="closeStage()"
           >
             ✕
@@ -585,7 +585,7 @@
         <div id="stage-task-context" class="stage-context">
           <div class="stage-task-context">
             <span class="stage-context-label">Задача <b class="mono">#{{ stage.task }}</b></span>
-            <span v-if="stageTaskTitle" class="stage-task-title" :title="stageTaskTitle">{{ stageTaskTitle }}</span>
+            <span v-if="stageTaskTitle" class="stage-task-title" v-tooltip="stageTaskTitle">{{ stageTaskTitle }}</span>
             <span v-else class="stage-task-title muted">Название загружается…</span>
           </div>
           <div class="stage-stand-context">
@@ -661,7 +661,7 @@
                     :key="f.id || i"
                     :class="f.severity"
                   >
-                    <span v-if="f.anchor" class="svanchor mono" :title="f.anchor">{{ shortAnchor(f.anchor) }}</span>
+                    <span v-if="f.anchor" class="svanchor mono" v-tooltip="f.anchor">{{ shortAnchor(f.anchor) }}</span>
                     <span class="svsum">{{ f.summary }}</span>
                   </li>
                 </ul>
@@ -792,7 +792,7 @@
                       {{ q.summary }}
                       <!-- Якорь ушёл сюда вместе с самой находкой: без него человек знает,
                            ЧТО не так, но не знает где, а второго списка находок больше нет. -->
-                      <span v-if="q.anchor" class="svanchor mono" :title="q.anchor">{{ shortAnchor(q.anchor) }}</span>
+                      <span v-if="q.anchor" class="svanchor mono" v-tooltip="q.anchor">{{ shortAnchor(q.anchor) }}</span>
                     </span>
                   </label>
                   <UiTextarea
@@ -847,13 +847,13 @@
                    запретили нужный запуск, склонен подобрать похожий и выдать его результат за
                    доказательство. -->
               <span v-if="stage.meta.denials" class="smchip failed"
-                title="Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.">
+                v-tooltip="'Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.'">
                 {{ stage.meta.denials }} отказ. прав</span>
               <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
               <span v-if="stage.meta.fails" class="smchip failed">{{ stage.meta.fails }} возвр.</span>
               <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
               <span v-if="stage.meta.verdict?.reviewed?.length" class="smchip"
-                :title="stage.meta.verdict.reviewed.join('\n')">
+                v-tooltip="stage.meta.verdict.reviewed.join('\n')">
                 просм. файлов: {{ stage.meta.verdict.reviewed.length }}</span>
             </div>
 
@@ -912,7 +912,9 @@
                   <span v-if="i" class="runner-arrow">→</span>
                   <span class="runner-hop"
                         :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }"
-                        :title="i ? 'резерв: подхватит этап, если основной отпадёт' : 'основной исполнитель'">
+                        v-tooltip="i
+                          ? 'резерв: подхватит этап, если основной отпадёт'
+                          : 'основной исполнитель'">
                     {{ providerLabel(id) }}
                     <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
                   </span>
@@ -930,7 +932,7 @@
                   <b>{{ providerLabel(a.runner) }}</b>
                   <span v-if="runnerAttemptModelLabel(a)" class="runner-attempt-model mono">{{ runnerAttemptModelLabel(a) }}</span>
                   <span v-if="attemptCostLabel(a)" class="runner-attempt-cost mono"
-                        :title="attemptCostTitle(a)">{{ attemptCostLabel(a) }}</span>
+                        v-tooltip="attemptCostTitle(a)">{{ attemptCostLabel(a) }}</span>
                   <span class="runner-result" :class="{
                     success: a.result === 'ok',
                     switched: a.result === 'manual_switch',
@@ -1066,6 +1068,7 @@ import {
   UiPopover,
   UiSpinner,
   UiTextarea,
+  vTooltip,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.js';
 import { agentActivityLabel, silenceReason } from '../../../shared/agentActivity.ts';

@@ -1,7 +1,25 @@
+process.env.NODE_ENV = 'test';
+
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { compileVue, webFile } from './helpers/compile-vue.js';
-import { installUiBrowser } from './helpers/ui-components.js';
+import { createUiBrowser } from './helpers/ui-components.js';
+import { vTooltip } from '../../web/src/services/tooltipDirective.ts';
+
+let sharedBrowser;
+
+before(async () => {
+  sharedBrowser = await createUiBrowser();
+});
+
+after(async () => {
+  await sharedBrowser.close();
+});
+
+async function installUiBrowser() {
+  return sharedBrowser;
+}
+
 
 test('UiInput сохраняет modifiers и composition semantics', async (t) => {
   const browser = await installUiBrowser(t);
@@ -133,4 +151,28 @@ test('UiFilePicker dropzone передаёт файлы и может скрыт
   assert.equal(wrapper.find('.ui-file-picker__summary').exists(), false);
   assert.equal(wrapper.findAll('button').length, 1);
   wrapper.unmount();
+});
+
+test('TIP-MIG-02: составные поля сохраняют описание и справку на корне', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, { h, withDirectives }] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/vue/index.mjs'),
+  ]);
+
+  for (const [file, field] of [
+    ['src/components/primitives/UiSelect.vue', 'select'],
+    ['src/components/primitives/UiSwitch.vue', 'input'],
+    ['src/components/composites/UiSearchInput.vue', 'input'],
+  ]) {
+    const control = await compileVue(webFile(file));
+    const wrapper = mount({
+      render: () => withDirectives(h(control, { 'aria-description': 'x' }), [[vTooltip, 'x']]),
+    }, { attachTo: browser.document.querySelector('#mount') });
+
+    t.after(() => wrapper.unmount());
+    assert.equal(wrapper.element.getAttribute('data-ui-tooltip'), 'x');
+    assert.equal(wrapper.get(field).attributes('aria-description'), 'x');
+    wrapper.unmount();
+  }
 });

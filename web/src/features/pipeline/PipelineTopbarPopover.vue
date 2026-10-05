@@ -92,7 +92,7 @@
                 :data-state="item.kind"
               >
                 <span class="pipeline-topbar-popover-copy">
-                  <span class="pipeline-topbar-popover-title" :title="item.title">
+                  <span class="pipeline-topbar-popover-title" v-tooltip="item.title">
                     <span class="mono">#{{ item.task }}</span>
                     <span>{{ item.title || 'Без названия' }}</span>
                   </span>
@@ -103,7 +103,7 @@
                     <span
                       v-if="item.detail || item.stage"
                       class="pipeline-topbar-popover-detail"
-                      :title="item.detail || item.stage"
+                      v-tooltip="item.detail || item.stage"
                     >
                       {{ item.detail || item.stage }}
                     </span>
@@ -145,7 +145,7 @@
 <script setup>
 import { computed } from 'vue';
 
-import { UiButton, UiInlineMessage, UiPopover } from '../../ui';
+import { UiButton, UiInlineMessage, UiPopover, vTooltip } from '../../ui';
 
 const ATTENTION_LIMIT = 3;
 

@@ -12,7 +12,7 @@
           class="new"
           data-context="chat-list-new"
           label="Новый чат"
-          title="Новый чат"
+          v-tooltip="'Новый чат'"
           tone="accent"
           @click="newChat"
         >
@@ -44,7 +44,7 @@
               brand: Boolean(r.provider?.color),
             }"
             :style="r.provider?.color ? { '--prov': r.provider.color } : null"
-            :title="avatarTitle(r)"
+            v-tooltip="avatarTitle(r)"
           >
             <ProviderIcon
               v-if="r.provider"
@@ -55,7 +55,7 @@
             <span
               v-if="r.unread"
               class="udot"
-              title="непрочитанный ответ"
+              v-tooltip="'непрочитанный ответ'"
             />
           </span>
           <span class="mid">
@@ -86,7 +86,7 @@
               brand: Boolean(r.provider?.color),
             }"
             :style="r.provider?.color ? { '--prov': r.provider.color } : null"
-            :title="avatarTitle(r)"
+            v-tooltip="avatarTitle(r)"
           >
             <ProviderIcon
               v-if="r.provider"
@@ -97,7 +97,7 @@
             <span
               v-if="r.unread"
               class="udot"
-              title="непрочитанный ответ"
+              v-tooltip="'непрочитанный ответ'"
             />
           </span>
 
@@ -107,7 +107,7 @@
               <span
                 v-if="r.waiting"
                 class="wchip"
-                title="агент ждёт твоего ответа — работа стоит"
+                v-tooltip="'агент ждёт твоего ответа — работа стоит'"
               >
                 ждёт ответа
               </span>
@@ -128,7 +128,7 @@
             data-context="chat-list-action"
             role="rail"
             label="Достать чат из архива"
-            title="Достать из архива"
+            v-tooltip="'Достать из архива'"
             tone="accent"
             @click="restore(r)"
           >
@@ -138,7 +138,7 @@
             data-context="chat-list-action"
             role="rail"
             label="Переименовать чат"
-            title="Переименовать"
+            v-tooltip="'Переименовать'"
             @click="startEdit(r)"
           >
             ✎
@@ -147,7 +147,7 @@
             data-context="chat-list-action"
             role="rail"
             :label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
-            :title="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
+            v-tooltip="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
             :tone="r.archived ? 'danger' : 'accent'"
             @click="del(r)"
           >
@@ -171,6 +171,7 @@ import {
   UiPressable,
   UiSearchInput,
   UiSwitch,
+  vTooltip,
 } from '../../ui';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.

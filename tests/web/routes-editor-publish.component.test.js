@@ -13,12 +13,13 @@ test('RE-E6-01: проблема адресует узел и путь, прав
     '../../web/node_modules/pinia/dist/pinia.mjs'
   );
   const Component = await compileVue(webFile('src/views/routes/RouteProblems.vue'), {
-    stubs: { '../../ui': `
+    stubs: { '../../ui': (`
       import { defineComponent, h } from 'vue';
       export const UiButton = defineComponent({ emits: ['click'], setup(_, { emit, slots, attrs }) {
         return () => h('button', { ...attrs, onClick: () => emit('click') }, slots.default?.());
       } });
-    ` },
+    `) +
+      "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
   });
   const { mount } = await import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs');
   const issue = { code: 'prompt_required', severity: 'error', scope: 'route',
@@ -146,12 +147,13 @@ test('RE-E6-02: compare показывает человеку инструкци
   async (t) => {
     const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RouteCompare.vue'), {
-      stubs: { '../../ui': `
+      stubs: { '../../ui': (`
         import { defineComponent, h } from 'vue';
         export const UiButton = defineComponent({ emits: ['click'], setup(_, { emit, slots, attrs }) {
           return () => h('button', { ...attrs, onClick: () => emit('click') }, slots.default?.());
         } });
-      ` },
+      `) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
     });
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -271,7 +273,7 @@ test('RE-E6-06: подтверждение показывает точный с�
   async (t) => {
     const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RoutePublishDialog.vue'), {
-      stubs: { '../../ui': `
+      stubs: { '../../ui': (`
         import { defineComponent, h } from 'vue';
         export const UiButton = defineComponent({ emits: ['click'], setup(_, { emit, slots, attrs }) {
           return () => h('button', { ...attrs, onClick: () => emit('click') }, slots.default?.());
@@ -283,7 +285,8 @@ test('RE-E6-06: подтверждение показывает точный с�
               onInput: (event) => emit('update:modelValue', event.target.value) });
           },
         });
-      ` },
+      `) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
     });
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

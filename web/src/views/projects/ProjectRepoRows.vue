@@ -25,7 +25,7 @@
           :model-value="repo.dir"
           data-role="project-repo-dir"
           :disabled="readonly"
-          :title="repo.dir"
+          v-tooltip="repo.dir"
           placeholder="/srv/project/service"
           @update:model-value="setDir(index, $event)"
           @blur="emit('check', [repo.dir])"
@@ -55,7 +55,7 @@
           data-context="project-repo-action"
           variant="ghost"
           :aria-label="`Переместить ${repo.key || 'репозиторий'} выше`"
-          title="Переместить выше"
+          v-tooltip="'Переместить выше'"
           :disabled="readonly || index === 0"
           @click="move(index, -1)"
         >
@@ -68,7 +68,7 @@
           data-context="project-repo-action"
           variant="ghost"
           :aria-label="`Переместить ${repo.key || 'репозиторий'} ниже`"
-          title="Переместить ниже"
+          v-tooltip="'Переместить ниже'"
           :disabled="readonly || index === draft.repos.length - 1"
           @click="move(index, 1)"
         >
@@ -83,7 +83,7 @@
           tone="danger"
           :aria-label="`Убрать ${repo.key || 'репозиторий'}`"
           :disabled="readonly"
-          title="Убрать строку"
+          v-tooltip="'Убрать строку'"
           @click="remove(index)"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -121,6 +121,7 @@ import {
   UiField,
   UiInput,
   UiRadio,
+  vTooltip,
 } from '../../ui';
 import { moveRepo, removeRepo, renameRepoKey } from './projectDraft';
 import type { ProjectDraft } from './projectDraft';

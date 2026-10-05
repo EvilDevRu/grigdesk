@@ -58,7 +58,7 @@
           class="db-refresh"
           role="embedded"
           label="Обновить базы"
-          title="Обновить"
+          v-tooltip="'Обновить'"
           :loading="refreshLoading"
           loading-label="Обновляю"
           @click="refresh"
@@ -137,7 +137,7 @@
                       v-if="item.result"
                       variant="text"
                       :disabled="!querySessionOpen(item)"
-                      :title="querySessionOpen(item)
+                      v-tooltip="querySessionOpen(item)
                         ? 'Показать результат в его сессии'
                         : 'Сессия этого запроса уже закрыта'"
                       @click="inspectQuery(item)"
@@ -189,7 +189,7 @@
                       class="db-tab"
                       :value="session.id"
                       controls="db-workbench"
-                      :title="sessionTabTitle(session)"
+                      v-tooltip="sessionTabTitle(session)"
                     >
                       <span class="db-tab__content" aria-hidden="true">
                         <span class="db-tab__dot"></span>
@@ -208,7 +208,7 @@
                   role="embedded"
                   tone="danger"
                   :label="`Закрыть активную сессию ${activeSession.label}`"
-                  :title="`Закрыть ${activeSession.label}`"
+                  v-tooltip="`Закрыть ${activeSession.label}`"
                   :loading="closingSessionId === activeSession.id"
                   loading-label="Закрываю сессию"
                   @click="closeActiveSession"
@@ -247,7 +247,7 @@
                     <UiIconButton
                       role="embedded"
                       label="Обновить схему"
-                      title="Обновить схему"
+                      v-tooltip="'Обновить схему'"
                       :loading="schemaLoadingIds.has(selectedSessionId)"
                       :disabled="!selectedSessionId"
                       @click="loadSchema"
@@ -739,6 +739,7 @@ import {
   UiTabs,
   UiTextarea,
   alertDialog,
+  vTooltip,
 } from '../../ui';
 import type {
   DbEngine,

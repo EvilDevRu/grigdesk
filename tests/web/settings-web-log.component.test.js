@@ -45,7 +45,7 @@ async function mountPanel(t) {
     import('../../web/node_modules/vue/index.mjs'),
     compileVue(webFile('src/views/settings/WebLogPanel.vue'), {
       stubs: {
-        '../../ui': `
+        '../../ui': (`
           import { defineComponent, h } from 'vue';
           export const UiButton = defineComponent({
             inheritAttrs: false,
@@ -60,7 +60,8 @@ async function mountPanel(t) {
                 onInput: (event) => emit('update:modelValue', event.target.value) });
             },
           });
-        `,
+        `) +
+          "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
         '../../shared/apiClient.ts': 'export const api = { downloadGet: async () => { throw new Error("unused"); } };',
         '../../shared/webLogRuntime.ts': 'export const getWebLogRuntime = () => globalThis.__webLogPanelRuntime;',
         '../../stores/webLog.ts': 'export const useWebLogStore = () => globalThis.__webLogPanelStatus;',

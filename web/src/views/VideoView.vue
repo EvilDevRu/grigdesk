@@ -373,7 +373,7 @@
         <div v-for="(d, i) in drafts" :key="i" class="draft" :class="{ done: d.createdId }">
           <div class="draft-head">
             <span class="draft-index mono">{{ String(i + 1).padStart(2, '0') }}</span>
-            <span v-if="d.confidence !== null" class="conf" :class="{ low: d.confidence < 0.6 }" :title="d.reason">
+            <span v-if="d.confidence !== null" class="conf" :class="{ low: d.confidence < 0.6 }" v-tooltip="d.reason">
               модель: {{ Math.round(d.confidence * 100) }}%
             </span>
             <span v-else class="draft-kind">ручной черновик</span>
@@ -383,7 +383,7 @@
               role="embedded"
               tone="danger"
               label="Удалить черновик"
-              title="Удалить черновик"
+              v-tooltip="'Удалить черновик'"
               @click="removeDraft(i)"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
@@ -423,7 +423,7 @@
               data-context="meeting-frame-preview"
               :data-muted="d.frameOff ? 'true' : undefined"
               :aria-label="`Открыть кадр записи на ${mmss(d.frame.at)} крупно`"
-              title="Открыть крупно"
+              v-tooltip="'Открыть крупно'"
               @click="showFrame(d)"
             >
               <!-- Пропавший кадр (истёк TTL, начат новый разбор) убираем молча:
@@ -472,7 +472,7 @@
                 </span>
                 <UiButton
                   class="btn compact-action"
-                  title="Открыть фрагмент крупно"
+                  v-tooltip="'Открыть фрагмент крупно'"
                   @click="showClip(d)"
                 >
                   Крупнее
@@ -489,7 +489,7 @@
                   class="btn compact-action"
                   :loading="d.clipBusy"
                   loading-label="Режу фрагмент"
-                  title="Взять на 15 секунд больше с каждой стороны"
+                  v-tooltip="'Взять на 15 секунд больше с каждой стороны'"
                   @click="widenClip(d)"
                 >
                   Шире
@@ -506,7 +506,7 @@
             <UiSelect
               v-model="d.createdById"
               compact
-              title="постановщик — от кого задача"
+              v-tooltip="'постановщик — от кого задача'" aria-description="постановщик — от кого задача"
               :disabled="Boolean(d.createdId)"
             >
               <option value="">от меня</option>
@@ -515,7 +515,7 @@
             <UiSelect
               v-model="d.responsibleId"
               compact
-              title="исполнитель"
+              v-tooltip="'исполнитель'" aria-description="исполнитель"
               :disabled="Boolean(d.createdId)"
             >
               <option value="">на себя</option>
@@ -524,7 +524,7 @@
             <UiSelect
               v-model="d.groupId"
               compact
-              title="проект"
+              v-tooltip="'проект'" aria-description="проект"
               :disabled="Boolean(d.createdId)"
             >
               <option value="">без проекта</option>
@@ -533,7 +533,7 @@
             <UiSelect
               v-model.number="d.priority"
               compact
-              title="приоритет"
+              v-tooltip="'приоритет'" aria-description="приоритет"
               :disabled="Boolean(d.createdId)"
             >
               <option :value="0">низкий</option>
@@ -555,7 +555,7 @@
                 <UiButton
                   class="btn compact-action"
                   :aria-label="`Открыть задачу ${d.createdId}`"
-                  title="Открыть задачу в Cockpit"
+                  v-tooltip="'Открыть задачу в Cockpit'"
                   @click="ui.openTask(d.createdId)"
                 >
                   Открыть
@@ -645,7 +645,7 @@
             :key="i"
             class="seg"
             data-role="transcript-segment"
-            title="Добавить в черновик задачи"
+            v-tooltip="'Добавить в черновик задачи'"
             :aria-label="`Добавить реплику ${mmss(s.start)} в черновик задачи: ${s.text}`"
             @click="appendSegment(s)"
           >
@@ -729,6 +729,7 @@ import {
   UiTooltip,
   UiToggleButton,
   confirmDialog,
+  vTooltip,
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
 import { mediaApi } from '../shared/mediaApi.ts';

@@ -137,7 +137,7 @@ test('ToolHost слушает клавиши в capture, молчит во вр�
   assert.match(host, /hotkeys\.toolByCombo\[comboFromEvent\(event\)\]/);
   assert.match(host, /railItems\.value\.some\(\(entry\) => entry\.id === id\)/);
   assert.match(host, /event\.preventDefault\(\);\s*\n\s*event\.stopPropagation\(\);/);
-  assert.match(host, /:title="railTitle\(item\)"/);
+  assert.match(host, /v-tooltip\.left="railTitle\(item\)"/);
 });
 
 test('настройка клавиш открыта в разделе устройства и не заводит второй источник состава', async () => {

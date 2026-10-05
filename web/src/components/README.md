@@ -32,6 +32,9 @@ Script разделяется пустыми строками на imports, publ
 через `UiDialog` и единый stack, а простые Promise-вопросы — через `confirmDialog`,
 `promptDialog` и `alertDialog`.
 
+Строковая справка задаётся через `v-tooltip` и общий `UiTooltipHost`;
+HTML-атрибут `title` для подсказок не используется.
+
 Обязательные локальные проверки: `npm run typecheck:ui`, `npm run check:sfc`,
 `npm run check:ui`, `npm run check:ui-styles`, `npm run check:readability` и `npm test`.
 Настоящую раскладку проверяет `npm run test:ui-browser`: команда поднимает отдельный Vite

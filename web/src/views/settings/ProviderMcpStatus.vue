@@ -31,7 +31,7 @@
           <div v-for="server in group.servers" :key="server.name" class="mcprow">
             <div class="mcpline">
               <span class="mcpdot" :class="mcpState(server).cls"></span>
-              <span class="mcpname" :title="server.target || undefined">{{ server.name }}</span>
+              <span class="mcpname" v-tooltip="server.target || undefined">{{ server.name }}</span>
               <span class="mcpst" :class="mcpState(server).cls">{{ mcpState(server).label }}</span>
             </div>
             <!-- Причина/подсказка принадлежит адаптеру, поэтому Vue не знает CLI. -->
@@ -55,7 +55,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiButton } from '../../ui.ts';
+import { UiButton, vTooltip } from '../../ui.ts';
 
 interface McpServer {
   name: string;

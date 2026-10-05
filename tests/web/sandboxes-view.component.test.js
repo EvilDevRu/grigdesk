@@ -122,8 +122,10 @@ async function mountView(t, {
     stubs: {
       '../actions/sandboxes': ACTIONS_STUB,
       '../../actions/sandboxes': ACTIONS_STUB,
-      '../ui': UI_STUB,
-      '../../ui': UI_STUB,
+      '../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
+      '../../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     },
   });
   const { mount, flushPromises } = await import(

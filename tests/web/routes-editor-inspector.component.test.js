@@ -31,7 +31,8 @@ async function fixture(t, initial = makeDraft(), nodeId = 'build',
   routeScope = { kind: 'route', routeId: 'quick' }, policyResult = null) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteNodeInspector.vue'), {
-    stubs: { '../../ui': UI_STUB,
+    stubs: { '../../ui': (UI_STUB) +
+      "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       '../../shared/routesApi.ts': `export const routesApi = {
         effectivePolicy: async () => (${JSON.stringify(policyResult)})
       };`,
@@ -86,7 +87,8 @@ async function transitionFixture(t, initial = makeDraft(), nodeId = 'build',
   routeScope = { kind: 'route', routeId: 'quick' }) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteTransitionInspector.vue'), {
-    stubs: { '../../ui': UI_STUB },
+    stubs: { '../../ui': (UI_STUB) +
+      "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
   });
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

@@ -244,7 +244,7 @@ test('серверы сгруппированы по области видимо
   assert.ok(details.some((t2) => t2.includes('claude.ai')), 'нет подсказки про коннекторы claude.ai');
   assert.ok(!details.some((t2) => t2.includes('claude mcp login claude.ai Google Drive')));
   // Команда запуска не в тексте, а в подсказке имени: длинный docker-вызов распёр бы плашку.
-  assert.equal(wrapper.findAll('.mcpname')[1].attributes('title'), 'docker run -i --rm bitrix-mcp');
+  assert.equal(wrapper.findAll('.mcpname')[1].attributes('data-ui-tooltip'), 'docker run -i --rm bitrix-mcp');
 });
 
 test('опрашиваем всех установленных исполнителей с MCP capability', async (t) => {

@@ -12,11 +12,12 @@ let badgePromise;
 function compileBadge() {
   badgePromise ||= compileVue(BADGE_PATH, {
     stubs: {
-      '../../ui': [
+      '../../ui': ([
         'export const UiTooltip = {',
         '  template: `<section><slot name="trigger" /><slot name="tip" /></section>`,',
         '};',
-      ].join('\n'),
+      ].join('\n')) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     },
   });
 
@@ -99,7 +100,7 @@ test('идущий заход прячет цифры и называет себ
   });
   t.after(() => wrapper.unmount());
 
-  assert.equal(wrapper.get('.tri.busy').attributes('title'), 'переоценка идёт');
+  assert.equal(wrapper.get('.tri.busy').attributes('data-ui-tooltip'), 'переоценка идёт');
   assert.equal(wrapper.text().includes('сложн'), false);
 });
 
@@ -120,7 +121,7 @@ test('первый заход по неоценённой задаче назы�
   });
   t.after(() => wrapper.unmount());
 
-  assert.equal(wrapper.get('.tri.busy').attributes('title'), 'разведка идёт');
+  assert.equal(wrapper.get('.tri.busy').attributes('data-ui-tooltip'), 'разведка идёт');
 });
 
 test('неизвестные показатели не превращаются в нулевой итог', async (t) => {

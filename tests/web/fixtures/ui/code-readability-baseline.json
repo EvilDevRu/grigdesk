@@ -163,7 +163,6 @@
         "export function refreshLayerStack(): void { notify(); }": 1,
         "export function subscribeLayerStack(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }": 1,
         "export function activeLayerId(): string | null { return topLayer()?.id ?? null; }": 1,
-        "export function isTopLayerToken(token: symbol): boolean { return topLayer()?.token === token; }": 1,
         "export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle { ensureListener(); const token = Symbol(id); const entry: LayerEntry = { token, id,": 1,
         "export function resetLayerStackForTests(): void { layers.clear(); listeners.clear(); sequence = 0; removeListenerWhenIdle(); }": 1
       }

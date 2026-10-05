@@ -1,6 +1,6 @@
 <template>
   <div class="eff" :class="{ off: disabled }" :data-lvl="model"
-       :title="hint || (model ? `Усилие рассуждения: ${model}` : 'Усилие рассуждения: дефолт CLI')">
+       v-tooltip="hint || (model ? `Усилие рассуждения: ${model}` : 'Усилие рассуждения: дефолт CLI')">
     <span class="cap">эффорт</span>
     <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
                       :max="Math.max(0, levels.length - 1)" :step="1"
@@ -11,7 +11,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { UiDiscreteSlider } from '../../ui';
+import { UiDiscreteSlider, vTooltip } from '../../ui';
 
 // Слайдер усилия рассуждения — как переключатель в расширении VS Code:
 // дискретные точки, клик по точке (или трек) задаёт уровень.

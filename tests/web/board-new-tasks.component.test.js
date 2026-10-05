@@ -98,7 +98,7 @@ test('BOARD-NEW-04: без базовой линии новых не бывае�
   const filter = wrapper.get('button.newfilter');
   assert.equal(filter.attributes('disabled'), '');
   assert.match(filter.text(), /Новые\s*0/);
-  assert.match(filter.attributes('title'), /загружаются/);
+  assert.match(filter.attributes('data-ui-tooltip'), /загружаются/);
   assert.equal(wrapper.findAll('li.trow').length, 2);
 });
 

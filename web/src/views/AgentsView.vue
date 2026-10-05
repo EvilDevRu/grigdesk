@@ -21,7 +21,7 @@
         </UiPopover>
         <span class="grow"></span>
         <UiButton class="btn" :loading="installing"
-                title="Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются"
+                v-tooltip="'Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются'"
                 loading-label="Устанавливаю набор" @click="install">⇩ Набор</UiButton>
         <UiButton class="btn accent" tone="accent" @click="createNew">+ Новый</UiButton>
       </div>
@@ -41,8 +41,8 @@
           <span class="item-content">
             <span class="ic" :class="`k-${a.kind}`">{{ kindIcon[a.kind] }}</span>
             <span class="item-main">
-              <span class="nm" :title="a.label || a.id">{{ a.label || a.id }}</span>
-              <span v-if="a.tier || a.effort" class="advice" :title="adviceTitle(a)">
+              <span class="nm" v-tooltip="a.label || a.id">{{ a.label || a.id }}</span>
+              <span v-if="a.tier || a.effort" class="advice" v-tooltip="adviceTitle(a)">
                 <span v-if="a.tier" class="chip tier-chip">{{ tierLabel[a.tier] || a.tier }}</span>
                 <span v-if="a.effort" class="chip effort-chip mono">{{ a.effort }}</span>
               </span>
@@ -64,7 +64,7 @@
         <span class="grow"></span>
         <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
         <UiSwitch v-model="pro"
-                  title="Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги">профи</UiSwitch>
+                  v-tooltip="'Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги'" aria-description="Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги">профи</UiSwitch>
         <UiButton v-if="!isNew" class="btn danger" tone="danger" @click="del">Удалить</UiButton>
         <UiButton class="btn accent" tone="accent" :loading="saving"
                   :disabled="!dirty || (isNew && !form.id)" loading-label="Сохраняю" @click="save">Сохранить</UiButton>
@@ -126,10 +126,10 @@
           <span class="lbl">Флаги <UiTooltip :text="help.flags" /></span>
           <div class="row">
             <UiToggleButton v-model="form.readonly" class="tag"
-                    title="Советовать запрет записи в репозиторий: этап только смотрит и отчитывается"
+                    v-tooltip="'Советовать запрет записи в репозиторий: этап только смотрит и отчитывается'"
                     >read-only</UiToggleButton>
             <UiToggleButton v-model="form.optional" class="tag"
-                    title="Советовать разрешить пропуск: конвейер идёт дальше, если этап нечего делать"
+                    v-tooltip="'Советовать разрешить пропуск: конвейер идёт дальше, если этап нечего делать'"
                     >optional</UiToggleButton>
           </div>
         </div>
@@ -160,9 +160,11 @@ import type { AgentCard } from '../../../shared/agentsContracts.ts';
 import { agentsApi } from '../shared/agentsApi.ts';
 import { failureText } from '../shared/apiClient.ts';
 import {
-  UiButton, UiIconButton,
+  UiButton,
+  UiIconButton,
   UiInput,
-  UiNumberField, UiPopover,
+  UiNumberField,
+  UiPopover,
   UiSelect,
   UiSelectableRow,
   UiSpinner,
@@ -171,6 +173,7 @@ import {
   UiToggleButton,
   UiTooltip,
   confirmDialog,
+  vTooltip,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 

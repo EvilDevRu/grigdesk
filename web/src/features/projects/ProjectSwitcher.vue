@@ -15,7 +15,7 @@
 
       <UiIconButton
         label="Новый проект"
-        title="Новый проект"
+        v-tooltip="'Новый проект'"
         tone="accent"
         @click="emit('create')"
       >
@@ -30,7 +30,7 @@
 //
 // Заведение проекта — не его дело: форма, проверка идентификатора и запись живут
 // в разделе «Проекты», и второй вход создавал бы вторую запись в том же реестре.
-import { UiButton, UiControlGroup, UiIconButton } from '../../ui';
+import { UiButton, UiControlGroup, UiIconButton, vTooltip } from '../../ui';
 
 defineProps({
   profiles: {

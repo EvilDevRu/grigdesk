@@ -297,8 +297,10 @@ async function mountView(t, {
       });`,
       '../actions/projects': ACTIONS_STUB,
       '../../actions/projects': ACTIONS_STUB,
-      '../ui': UI_STUB,
-      '../../ui': UI_STUB,
+      '../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
+      '../../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       '../composables/useUiContextSource.ts': CONTEXT_STUB,
       'vue-router': ROUTER_STUB,
     },

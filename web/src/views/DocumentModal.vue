@@ -23,7 +23,7 @@
         <UiIconButton
           role="embedded"
           label="Закрыть документ"
-          title="Закрыть (Esc)"
+          v-tooltip="'Закрыть (Esc)'"
           @click="close('action')"
         >
           <svg
@@ -75,7 +75,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { UiDialog, UiIconButton, UiSpinner } from '../ui';
+import { UiDialog, UiIconButton, UiSpinner, vTooltip } from '../ui';
 import { documentsApi } from '../shared/documentsApi.ts';
 import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';

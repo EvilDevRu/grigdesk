@@ -6,7 +6,7 @@
         {{ status === 'open' ? 'подключено' : status === 'connecting' ? 'подключение…' : 'отключено' }}
       </span>
       <div class="chips">
-        <UiCommandButton class="chip" title="Авторизация Claude" @click="insert('claude\n')">claude login</UiCommandButton>
+        <UiCommandButton class="chip" v-tooltip="'Авторизация Claude'" @click="insert('claude\n')">claude login</UiCommandButton>
         <UiCommandButton class="chip" @click="insert('claude --version\n')">claude --version</UiCommandButton>
         <UiCommandButton class="chip" @click="insert('clear\n')">clear</UiCommandButton>
       </div>
@@ -24,7 +24,7 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { api } from '../../shared/apiClient.ts';
-import { UiButton, UiCommandButton } from '../../ui';
+import { UiButton, UiCommandButton, vTooltip } from '../../ui';
 
 const props = defineProps({
   active: { type: Boolean, default: true },

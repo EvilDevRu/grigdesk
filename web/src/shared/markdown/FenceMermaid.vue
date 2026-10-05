@@ -3,7 +3,7 @@
     <img class="md-diagram__image" :src="image.src" :width="image.width" :height="image.height"
          alt="Схема Mermaid" @error="imageFailed">
     <div class="md-fence__tools">
-      <UiIconButton role="embedded" label="Показать код" title="Показать код"
+      <UiIconButton role="embedded" label="Показать код" v-tooltip="'Показать код'"
                     data-context="md-diagram-code" @click="showDiagram = false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -16,7 +16,7 @@
   <template v-else>
     <FenceCode :code="code" lang="mermaid" :closed="closed">
       <template v-if="image" #tools>
-        <UiIconButton role="embedded" label="Показать схему" title="Показать схему"
+        <UiIconButton role="embedded" label="Показать схему" v-tooltip="'Показать схему'"
                       data-context="md-diagram-show" @click="showDiagram = true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -34,7 +34,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref, shallowRef, watch } from 'vue';
 
-import { UiIconButton } from '../../ui';
+import { UiIconButton, vTooltip } from '../../ui';
 import FenceCode from './FenceCode.vue';
 import { renderMermaid } from './mermaidRender.ts';
 import type { MermaidImage } from './mermaidRender.ts';

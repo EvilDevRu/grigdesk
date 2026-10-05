@@ -403,7 +403,7 @@
                     role="embedded"
                     tone="danger"
                     label="Убрать правило"
-                    title="Убрать правило"
+                    v-tooltip="'Убрать правило'"
                     @click="rules.splice(i, 1)"
                   >
                     ×
@@ -853,6 +853,7 @@ import {
   UiNumberInput,
   UiSelect,
   UiSpinner,
+  vTooltip,
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
 import {

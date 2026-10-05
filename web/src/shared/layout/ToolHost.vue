@@ -4,7 +4,7 @@
                   :ref="(value) => setRailButton(item.id, value)" role="rail"
                   data-context="tool-rail-item"
                   class="tool-rail-item" :class="{ active: presentedTool === item.id }"
-                  :title="railTitle(item)" :label="item.label"
+                  v-tooltip.left="railTitle(item)" :label="item.label"
                   :pressed="presentation === 'dock' && presentedTool === item.id"
                   @click="clickRail(item)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -58,7 +58,7 @@ import { useDockViewport } from '../tools/viewport.ts';
 import { comboFromEvent, formatCombo } from '../hotkeys/combo.ts';
 import { useHotkeysStore } from '../../stores/hotkeys.js';
 import ToolDock from './ToolDock.vue';
-import { UiIconButton, useUiLayer } from '../../ui';
+import { UiIconButton, useUiLayer, vTooltip } from '../../ui';
 
 const route = useRoute();
 const router = useRouter();

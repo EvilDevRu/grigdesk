@@ -168,3 +168,41 @@ test('всплывашка исполнителя короткая и сама �
     /data-context='topbar-popover-status-link'\][^{]*\{[^}]*height:\s*auto;/u,
   );
 });
+
+test('TIP-MIG-01: скрываемая подпись рейки имеет доступное имя на своей цели', async () => {
+  const { parse } = await import('../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js');
+  const source = await readFile(APP_SHELL_PATH, 'utf8');
+  const { descriptor } = parse(source);
+  const targets = [];
+
+  /**
+   * Имя требуется у непосредственного владельца подписи, а не у всех предков nav.
+   * Разбор шаблона не путает атрибуты с CSS-селекторами или текстом script.
+   */
+  function visit(node) {
+    const ownsLabel = (node.children ?? []).some((child) => child.type === 1 && child.tag === 'span'
+      && child.props.some((prop) => prop.type === 6 && prop.name === 'class'
+        && prop.value?.content.split(' ').includes('lbl')));
+
+    if (ownsLabel) {
+      targets.push(node);
+    }
+
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+    for (const branch of node.branches ?? []) {
+      visit(branch);
+    }
+  }
+
+  visit(descriptor.template.ast);
+  assert.equal(targets.length, 6);
+
+  for (const node of targets) {
+    const named = node.props.some((prop) => (prop.type === 6 && prop.name === 'aria-label')
+      || (prop.type === 7 && prop.name === 'bind' && prop.arg?.content === 'aria-label'));
+
+    assert.equal(named, true, `${node.tag}:${node.loc.start.line}`);
+  }
+});

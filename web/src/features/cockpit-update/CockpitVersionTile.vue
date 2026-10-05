@@ -12,7 +12,7 @@
       data-context="cockpit-version-strip"
       :loading="pwa.updating"
       :aria-label="REFRESH_HINT"
-      :title="REFRESH_HINT"
+      v-tooltip="REFRESH_HINT"
       @click="pwa.doUpdate()"
     >
       <svg class="version-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -70,7 +70,7 @@
           data-context="cockpit-version"
           :class="view.kind"
           :aria-label="view.title"
-          :title="view.title"
+          v-tooltip="view.title"
         >
           <span class="version-mark">
             <UiSpinner v-if="view.kind === 'busy'" role="standalone" decorative />
@@ -136,7 +136,7 @@ import {
   blockReasonLabel,
   useCockpitUpdateStore,
 } from '../../stores/cockpit-update.js';
-import { UiButton, UiPopover, UiPressable, UiSpinner, UiTooltip } from '../../ui';
+import { UiButton, UiPopover, UiPressable, UiSpinner, UiTooltip, vTooltip } from '../../ui';
 
 type TileKind = 'refresh' | 'busy' | 'idle' | 'release' | 'checkout' | 'error';
 

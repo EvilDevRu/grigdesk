@@ -164,8 +164,10 @@ async function mountForm(t, {
       '../stores/chat.js': 'export const useChatStore = () => ({ _load: async () => {} });',
       '../actions/projects': ACTIONS_STUB,
       '../../actions/projects': ACTIONS_STUB,
-      '../ui': UI_STUB,
-      '../../ui': UI_STUB,
+      '../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
+      '../../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       '../composables/useUiContextSource.ts': CONTEXT_STUB,
       'vue-router': ROUTER_STUB,
     },

@@ -26,7 +26,7 @@
             v-if="stats.custom"
             v-model="customOnly"
             aria-label="Только пользовательские плагины"
-            title="Пользовательские плагины"
+            v-tooltip="'Пользовательские плагины'"
           >
             Свои {{ stats.custom }}
           </UiToggleButton>
@@ -93,7 +93,7 @@
                 :tone="plugin.enabled ? 'accent' : 'neutral'"
                 :disabled="togglingId === plugin.id"
                 :label="`${plugin.enabled ? 'Выключить' : 'Включить'} ${plugin.name}`"
-                :title="plugin.enabled ? 'Плагин включён' : 'Плагин выключен'"
+                v-tooltip="plugin.enabled ? 'Плагин включён' : 'Плагин выключен'"
                 @click="toggle(plugin, !plugin.enabled)"
               >
                 <svg
@@ -170,6 +170,7 @@ import {
   UiSegmentedControl,
   UiSpinner,
   UiToggleButton,
+  vTooltip,
 } from '../../ui';
 import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.js';
 import { pluginIconPath } from '../../shared/navIcons.ts';

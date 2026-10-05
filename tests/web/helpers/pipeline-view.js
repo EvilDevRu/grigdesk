@@ -69,7 +69,8 @@ export function compilePipelineView(prefix) {
         '  };',
         '}',
       ].join('\n'),
-      '../ui': uiFacadeStub(prefix),
+      '../ui': (uiFacadeStub(prefix)) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       './pipeline/FactoryGraph.vue': `export default globalThis.${prefix}FactoryGraph;`,
       './OpenDiffButton.vue': [
         'export default {',

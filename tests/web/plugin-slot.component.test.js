@@ -38,10 +38,16 @@ test('реестр: порядок по order и id, повтор заменяе
   registerPlacement({ pluginId: 'alpha', slot: 'provider.popover.after-bars', component: b, order: 10 });
   const off = registerPlacement({ pluginId: 'late', slot: 'provider.popover.after-bars', component: a });
 
-  assert.deepEqual(placementsOf('provider.popover.after-bars').map((p) => p.pluginId), ['alpha', 'zeta', 'late']);
+  assert.deepEqual(
+    placementsOf('provider.popover.after-bars').map((p) => p.pluginId),
+    ['alpha', 'zeta', 'late'],
+  );
 
   registerPlacement({ pluginId: 'zeta', slot: 'provider.popover.after-bars', component: b, order: 1 });
-  assert.deepEqual(placementsOf('provider.popover.after-bars').map((p) => p.pluginId), ['zeta', 'alpha', 'late']);
+  assert.deepEqual(
+    placementsOf('provider.popover.after-bars').map((p) => p.pluginId),
+    ['zeta', 'alpha', 'late'],
+  );
 
   off();
   assert.deepEqual(placementsOf('provider.popover.after-bars').map((p) => p.pluginId), ['zeta', 'alpha']);
@@ -97,7 +103,10 @@ test('слот рисует включённые размещения с кон�
   assert.equal(wrapper.findAll('.fine').length, 1);
   assert.equal(wrapper.get('.fine').text(), 'fine:codex');
   assert.match(wrapper.text(), /Плагин «broken» не отрисовался/);
-  assert.equal(wrapper.get('[data-context="plugin-slot-failure"]').attributes('title'), 'нет данных для рисования');
+  assert.equal(
+    wrapper.get('[data-context="plugin-slot-failure"]').attributes('data-ui-tooltip'),
+    'нет данных для рисования',
+  );
   assert.doesNotMatch(wrapper.text(), /off|hidden/);
 
   // Пока список плагинов не загружен — слот пуст, а не «мигает».

@@ -56,7 +56,7 @@
         class="ssh-refresh"
         role="embedded"
         label="Обновить SSH"
-        title="Обновить"
+        v-tooltip="'Обновить'"
         :loading="refreshLoading"
         loading-label="Обновляю"
         @click="refresh"
@@ -158,7 +158,7 @@
                   controls="ssh-terminal-panel"
                   :data-session-id="session.id"
                   :aria-label="sessionTabAriaLabel(session)"
-                  :title="sessionTabTitle(session)"
+                  v-tooltip="sessionTabTitle(session)"
                 >
                   <span class="ssh-tab__content" aria-hidden="true">
                     <span class="ssh-tab__dot"></span>
@@ -184,7 +184,7 @@
               role="embedded"
               tone="danger"
               :label="`Закрыть активную сессию ${activeSession.label}`"
-              :title="`Закрыть ${activeSession.label}`"
+              v-tooltip="`Закрыть ${activeSession.label}`"
               :loading="closingSessionId === activeSession.id"
               loading-label="Закрываю сессию"
               @click="closeActiveSession"
@@ -603,6 +603,7 @@ import {
   UiTabs,
   alertDialog,
   confirmDialog,
+  vTooltip,
 } from '../../ui';
 import type { SshAuditEntry, SshConnection, SshSession } from '../../../../shared/sshContracts.ts';
 import {

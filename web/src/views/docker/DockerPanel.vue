@@ -30,7 +30,7 @@
         <UiIconButton
           role="embedded"
           label="Обновить состояние Docker"
-          title="Обновить состояние Docker"
+          v-tooltip="'Обновить состояние Docker'"
           :loading="store.loading"
           @click="refresh"
         >
@@ -111,7 +111,7 @@
           <UiIconButton
             role="embedded"
             label="Закрыть просмотр контейнера"
-            title="Закрыть просмотр контейнера"
+            v-tooltip="'Закрыть просмотр контейнера'"
             @click="closeViewer"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -133,7 +133,7 @@ import type { DockerContainer } from '../../../../shared/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
 import { NAV_ICONS } from '../../shared/navIcons.ts';
-import { UiIconButton, UiInlineMessage, UiTab, UiTabs } from '../../ui';
+import { UiIconButton, UiInlineMessage, UiTab, UiTabs, vTooltip } from '../../ui';
 import DockerCleanup from './DockerCleanup.vue';
 import DockerContainers from './DockerContainers.vue';
 import DockerExec from './DockerExec.vue';

@@ -46,6 +46,10 @@ async function compileSfc(path, id, patch = (code) => code) {
 }
 
 const compileChatsView = () => compileSfc(CHATS_VIEW_PATH, 'data-v-chats-resize', (code) => code
+  .replace(
+    "import { vTooltip } from '../ui';",
+    `import { vTooltip } from '${pathToFileURL(webFile('src/services/tooltipDirective.ts')).href}';`,
+  )
   .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__chatsResizeStore;')
   .replace("import { useUiContextSource } from '../composables/useUiContextSource.ts';", 'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });')
   .replace("import { useDockViewport } from '../shared/tools/viewport.ts';", 'const useDockViewport = () => ({ dockCapable: globalThis.__chatsDockCapable });')

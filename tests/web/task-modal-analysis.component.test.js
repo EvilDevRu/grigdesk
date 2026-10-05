@@ -281,7 +281,7 @@ test('квадратная кнопка вложения показывает и
   assert.deepEqual({
     icon: picker.find('.ui-button__leading svg').exists(),
     label: picker.text().includes('Приложить фото'),
-    title: picker.attributes('title'),
+    title: picker.attributes('data-ui-tooltip'),
   }, {
     icon: true,
     label: true,

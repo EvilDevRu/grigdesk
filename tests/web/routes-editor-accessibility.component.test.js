@@ -32,8 +32,10 @@ test('RE-H4-01: подтверждение публикации получает
     document.querySelector('#mount').append(opener);
     opener.focus();
     assert.ok(document.activeElement === opener);
+
     const Component = await compileVue(webFile('src/views/routes/RoutePublishDialog.vue'), {
-      stubs: { '../../ui': UI },
+      stubs: { '../../ui': (UI) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
     });
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

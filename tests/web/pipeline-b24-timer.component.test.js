@@ -60,7 +60,7 @@ function timerSnapshot(card) {
     exists: true,
     state: timer.attributes('data-state'),
     text: timer.text(),
-    title: timer.attributes('title'),
+    title: timer.attributes('data-ui-tooltip'),
     tag: timer.element.tagName,
   };
 }
@@ -292,7 +292,7 @@ test('карточки конвейера различают три состоя
     const accessibleText = [
       button.text(),
       button.attributes('aria-label'),
-      button.attributes('title'),
+      button.attributes('data-ui-tooltip'),
     ].filter(Boolean).join(' ');
 
     return /таймер/iu.test(accessibleText) && /запуст|пауз|останов/iu.test(accessibleText);
@@ -307,7 +307,7 @@ test('карточки конвейера различают три состоя
       b24: initialRunning.text,
       pipeline: elapsed?.text(),
       b24HasStopwatch: initialRunning.text?.includes('⏱'),
-      titlesDiffer: initialRunning.title !== elapsed?.attributes('title'),
+      titlesDiffer: initialRunning.title !== elapsed?.attributes('data-ui-tooltip'),
     },
     afterCollapse: {
       collapsed: runningCard?.classes().includes('collapsed'),

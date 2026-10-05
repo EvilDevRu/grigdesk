@@ -15,7 +15,7 @@
         <UiIconButton
           role="embedded"
           label="Закрыть диф"
-          title="Закрыть (Esc)"
+          v-tooltip="'Закрыть (Esc)'"
           @click="close('action')"
         >
           <svg
@@ -40,7 +40,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue';
-import { UiDialog, UiIconButton } from '../ui';
+import { UiDialog, UiIconButton, vTooltip } from '../ui';
 import { useDiffStore } from '../stores/diff.js';
 import DiffPanel from './diff/DiffPanel.vue';
 

@@ -491,13 +491,14 @@ async function mountToolHost(t, { totalCount, litCount }) {
           '  item && plugins.enabled(item.plugin) ? "enabled" : "disabled";',
         ].join('\n'),
         './ToolDock.vue': 'export default { template: "<section><slot /></section>" };',
-        '../../ui': [
+        '../../ui': ([
           'export const UiIconButton = {',
           '  inheritAttrs: false, props: ["title", "label", "pressed"],',
           '  template: `<button v-bind="$attrs" :title="title"><slot /></button>`,',
           '};',
           'export const useUiLayer = () => {};',
-        ].join('\n'),
+        ].join('\n')) +
+          "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       },
     });
   } catch (error) {
@@ -515,7 +516,7 @@ async function mountToolHost(t, { totalCount, litCount }) {
 
 test('Закрытый док показывает нейтральный чип с общим числом записей', async (t) => {
   const wrapper = await mountToolHost(t, { totalCount: 3, litCount: 0 });
-  const badge = wrapper.get('button[title="Полка"] .tool-badge');
+  const badge = wrapper.get('button[data-ui-tooltip="Полка"] .tool-badge');
 
   assert.deepEqual({ text: badge.text(), wait: badge.classes().includes('wait') }, {
     text: '3',
@@ -525,7 +526,7 @@ test('Закрытый док показывает нейтральный чип
 
 test('Закрытый док показывает жёлтый пульсирующий чип с числом огней', async (t) => {
   const wrapper = await mountToolHost(t, { totalCount: 3, litCount: 2 });
-  const badge = wrapper.get('button[title="Полка"] .tool-badge');
+  const badge = wrapper.get('button[data-ui-tooltip="Полка"] .tool-badge');
 
   assert.deepEqual({
     text: badge.text(),

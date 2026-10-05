@@ -153,10 +153,11 @@ test('RE-G5-03: JSON-компонент показывает typed issues и о�
     const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
     const component = await compileVue(webFile('src/views/routes/RouteJsonEditor.vue'), {
       stubs: {
-        '../../ui': `import { defineComponent, h } from 'vue';
+        '../../ui': (`import { defineComponent, h } from 'vue';
           export const UiButton = defineComponent({ props: ['disabled'], emits: ['click'],
             setup(props, { emit, slots }) { return () => h('button',
-              { disabled: props.disabled, onClick: () => emit('click') }, slots.default?.()); } });`,
+              { disabled: props.disabled, onClick: () => emit('click') }, slots.default?.()); } });`) +
+          "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
         './RouteMarkdownInput.vue': `import { defineComponent, h } from 'vue';
           export default defineComponent({ props: ['modelValue', 'language'],
             emits: ['update:modelValue', 'save'],

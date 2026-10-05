@@ -237,7 +237,7 @@ test('якорь показывает имя файла, полный путь �
 
   const anchor = wrapper.get('.sverdict .svanchor');
   assert.equal(anchor.text(), 'useProxyScroll.ts');
-  assert.equal(anchor.attributes('title'), 'src/views/checking/useProxyScroll.ts');
+  assert.equal(anchor.attributes('data-ui-tooltip'), 'src/views/checking/useProxyScroll.ts');
 });
 
 // Якорь уехал в форму вместе с самой находкой: без него человек знает, ЧТО не так,
@@ -248,7 +248,7 @@ test('вопрос в форме возврата несёт якорь свое
 
   const anchor = wrapper.get('.rwq .svanchor');
   assert.equal(anchor.text(), 'useProxyScroll.ts');
-  assert.equal(anchor.attributes('title'), 'src/views/checking/useProxyScroll.ts');
+  assert.equal(anchor.attributes('data-ui-tooltip'), 'src/views/checking/useProxyScroll.ts');
 });
 
 test('без вердикта блок не рисуется вовсе', async (t) => {

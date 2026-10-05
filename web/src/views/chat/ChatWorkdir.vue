@@ -10,7 +10,7 @@
       <UiButton
         variant="ghost"
         :aria-label="`Рабочая папка: ${directoryName}`"
-        :title="`Работаем в: ${currentDirectory || directory}`"
+        v-tooltip="`Работаем в: ${currentDirectory || directory}`"
         :pressed="open"
         :disabled="busy"
         data-context="chat-workdir"
@@ -69,8 +69,8 @@
                     <path :d="option.workdir.kind === 'cockpit' ? NAV_ICONS.board : NAV_ICONS.projects" />
                   </svg>
                   <span class="workdir-choice-copy">
-                    <span class="workdir-choice-title" :title="option.title">{{ option.title }}</span>
-                    <span class="workdir-choice-detail" :title="option.detail">{{ option.detail }}</span>
+                    <span class="workdir-choice-title" v-tooltip="option.title">{{ option.title }}</span>
+                    <span class="workdir-choice-detail" v-tooltip="option.detail">{{ option.detail }}</span>
                   </span>
                   <svg v-if="option.selected" class="workdir-check" viewBox="0 0 24 24" fill="none"
                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -144,7 +144,15 @@
 import { computed, ref, watch } from 'vue';
 
 import {
-  UiButton, UiDialog, UiField, UiInlineMessage, UiInput, UiPopover, UiSelect, UiSelectableRow,
+  UiButton,
+  UiDialog,
+  UiField,
+  UiInlineMessage,
+  UiInput,
+  UiPopover,
+  UiSelect,
+  UiSelectableRow,
+  vTooltip,
 } from '../../ui.ts';
 import type { UiOverlayContentSlotProps } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';

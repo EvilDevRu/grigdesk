@@ -749,7 +749,7 @@
                 Исправить:
                 <UiCommandButton
                   data-role="settings-command"
-                  title="Кликни — откроется терминал с введённой командой"
+                  v-tooltip="'Кликни — откроется терминал с введённой командой'"
                   @click="fixDistributionInTerminal(p)"
                 >
                   {{ p.distribution.problem.command }}
@@ -761,7 +761,7 @@
               {{ p.installed ? 'Авторизация' : 'Установка' }}:
               <UiCommandButton
                 data-role="settings-command"
-                title="Кликни — откроется терминал с введённой командой"
+                v-tooltip="'Кликни — откроется терминал с введённой командой'"
                 @click="installInTerminal(p)"
               >
                 {{ p.setupCommand || p.install }}
@@ -900,7 +900,7 @@
                 :class="{ hot: p.updateAvailable }"
                 data-role="settings-action"
                 :disabled="!!updating"
-                title="Обновить CLI исполнителя. После обновления каталог моделей перечитается."
+                v-tooltip="'Обновить CLI исполнителя. После обновления каталог моделей перечитается.'"
                 @click="updateProvider(p)"
               >
                 {{ updating === p.id ? 'Обновление…' : 'Обновить CLI' }}
@@ -932,7 +932,10 @@
           <UiButton
             data-role="settings-action"
             :disabled="checking"
-            title="Кокпит и сам проверяет раз в 6 часов; обновление никогда не запускается автоматически"
+            v-tooltip="
+              'Кокпит и сам проверяет раз в 6 часов; ' +
+              'обновление никогда не запускается автоматически'
+            "
             @click="checkUpdates"
           >
             {{ checking ? 'Смотрю…' : 'Проверить обновления' }}
@@ -1132,7 +1135,7 @@
                     aria-hidden="true"
                   ></span>
                   <div class="live-copy">
-                    <span class="live-name" :title="item.chatKey">{{ liveTitle(item) }}</span>
+                    <span class="live-name" v-tooltip="item.chatKey">{{ liveTitle(item) }}</span>
                     <span class="live-run">{{ liveRunLabel(item) }}</span>
                   </div>
                 </div>
@@ -1156,7 +1159,7 @@
               </div>
               <div class="live-meta muted">
                 <span class="live-detail">{{ liveDetail(item) }}</span>
-                <code v-if="item.cwd" class="live-path" :title="item.cwd">{{ item.cwd }}</code>
+                <code v-if="item.cwd" class="live-path" v-tooltip="item.cwd">{{ item.cwd }}</code>
               </div>
             </li>
           </ul>
@@ -2148,6 +2151,7 @@ import {
   UiSwitch,
   UiTextarea,
   UiTooltip,
+  vTooltip,
 } from '../ui';
 import { useSse } from '../composables/useSse.ts';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';

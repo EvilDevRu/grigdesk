@@ -5,7 +5,7 @@
          aria-label="Ширина списка чатов"
          :aria-valuemin="LIST_MIN_W" :aria-valuemax="Math.round(listMaxW)"
          :aria-valuenow="Math.round(listWidth ?? LIST_DEF_W)"
-         title="Потяни — ширина списка. Двойной клик — вернуть обычную"
+         v-tooltip="'Потяни — ширина списка. Двойной клик — вернуть обычную'"
          @pointerdown.prevent="startListResize" @pointermove.prevent="moveListResize"
          @pointerup.prevent="finishListResize" @pointercancel.prevent="cancelListResize"
          @dblclick="resetListWidth" @keydown="onListResizeKey">
@@ -25,6 +25,7 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
 import ChatList from './chat/ChatList.vue';
 import ChatSession from './chat/ChatSession.vue';
+import { vTooltip } from '../ui';
 
 // Рабочее место агентов в телеграм-раскладке: слева список чатов, справа активный чат.
 const chat = useChatStore();

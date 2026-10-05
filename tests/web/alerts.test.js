@@ -112,7 +112,8 @@ async function alertsModule(t, {
 
   return compileModule(webFile('src/shared/alerts.ts'), {
     stubs: {
-      '../ui': UI_STUB,
+      '../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
       './notify.ts': NOTIFY_STUB,
     },
   });

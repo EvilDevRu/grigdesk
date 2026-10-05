@@ -15,7 +15,7 @@
           class="back"
           role="rail"
           label="К списку чатов"
-          title="К списку чатов"
+          v-tooltip="'К списку чатов'"
           data-context="chat-session-back"
           @click="emit('back')"
         >
@@ -33,7 +33,7 @@
             @blur="commitTitle"
           />
           <template v-else>
-            <span class="ctitle" :title="chat.tabLabel(sess)">
+            <span class="ctitle" v-tooltip="chat.tabLabel(sess)">
               {{ chat.tabLabel(sess) }}
             </span>
             <!-- Единственная точка переименования доступна мышью, клавиатурой и touch. -->
@@ -41,7 +41,7 @@
               class="tedit"
               role="embedded"
               label="Переименовать чат"
-              title="Переименовать чат"
+              v-tooltip="'Переименовать чат'"
               data-context="chat-title-edit"
               @click="startTitleEdit"
             >
@@ -86,7 +86,7 @@
             <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
           </template>
           <span v-if="modelUnknown" class="fb warn"
-                title="установленный CLI не знает эту модель — обнови его в настройках">
+                v-tooltip="'установленный CLI не знает эту модель — обнови его в настройках'">
             установленный CLI не знает эту модель — обнови его в настройках
           </span>
         </div>
@@ -99,7 +99,7 @@
             data-role="chat-model"
             :model-value="modelId"
             :disabled="frozen"
-            :title="currentModelTitle"
+            v-tooltip="currentModelTitle" :aria-description="currentModelTitle"
             @change="onModelChange"
           >
             <option v-if="modelId && !currentModel" :value="modelId" disabled>
@@ -132,7 +132,7 @@
             data-context="chat-session-toolbar"
             :model-value="currentMode"
             :disabled="frozen"
-            :title="modeHint"
+            v-tooltip="modeHint" :aria-description="modeHint"
             @change="chat.setMode(sid, $event.target.value)"
           >
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
@@ -234,7 +234,7 @@
             <div v-if="m.attachments?.length" class="m-atts">
               <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
                  @click="onAttachmentClick($event, a)">
-                <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
+                <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" v-tooltip="a.name" />
                 <span v-else class="m-file">📄 {{ a.name }}</span>
               </a>
             </div>
@@ -310,7 +310,7 @@
                             @click="onMarkdownClick" />
               <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
                 v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
-                :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
+                :datetime="messageTimeIso(m.sentAt)" v-tooltip="messageTimeTitle(m.sentAt)"
                 :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
               <UiIconButton
                 v-if="m.text"
@@ -318,7 +318,7 @@
                 :class="{ done: copiedIdx === i }"
                 role="stepper"
                 :label="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
-                :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
+                v-tooltip="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
                 data-context="chat-message-copy"
                 @click="copyMsg(m, i)"
               >
@@ -420,7 +420,7 @@
            aria-label="Высота поля ввода"
            :aria-valuemin="COMPOSER_MIN" :aria-valuemax="composerMax()"
            :aria-valuenow="Math.round(composerH ?? COMPOSER_MIN)"
-           title="Потяни — высота поля ввода. Двойной клик — вернуть обычную"
+           v-tooltip="'Потяни — высота поля ввода. Двойной клик — вернуть обычную'"
            @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
            @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
            @dblclick="resetComposerHeight" @keydown="onComposerResizeKey">
@@ -436,7 +436,7 @@
               class="x"
               role="stepper"
               label="Убрать вложение"
-              title="Убрать"
+              v-tooltip="'Убрать'"
               data-context="chat-pending-remove"
               @click="removePending(i)"
             >
@@ -546,7 +546,7 @@
             :show-reset="false"
             label="Приложить файл"
             loading-label="Прикладываю файл"
-            title="Приложить файл (или перетащи/вставь из буфера)"
+            v-tooltip="'Приложить файл (или перетащи/вставь из буфера)'"
             @change="onPick"
           >
             <template #leading>
@@ -607,7 +607,7 @@
             :disabled="sess.stopping"
             :label="sess.stopping ? 'Останавливаю…'
               : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'"
-            :title="sess.stopping ? 'Останавливаю…'
+            v-tooltip="sess.stopping ? 'Останавливаю…'
               : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'"
             data-context="chat-stop"
             @click="chat.stop(sid)"
@@ -625,7 +625,7 @@
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
               : 'Отправить (Enter)'"
-            :title="speechBusy ? 'Сначала заверши диктовку'
+            v-tooltip="speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
@@ -677,6 +677,7 @@ import {
   UiSpinner,
   UiTextarea,
   UiTooltip,
+  vTooltip,
 } from '../../ui';
 import ChatMarkdown from './ChatMarkdown.vue';
 import { documentLinkFromClick } from '../../features/documents/links.js';

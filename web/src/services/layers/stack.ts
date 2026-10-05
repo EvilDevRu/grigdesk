@@ -131,7 +131,9 @@ export function subscribeLayerStack(listener: () => void): () => void {
  * Строковый id регистрации и DOM-элементы наружу не отдаются.
  */
 export function getUiLayerDiagnostics(): { id: number; kind: UiLayerName }[] {
-  return enabledLayers().map((layer) => ({ id: layer.sequence, kind: layer.name }));
+  return enabledLayers()
+    .filter((layer) => layer.name !== 'tooltip')
+    .map((layer) => ({ id: layer.sequence, kind: layer.name }));
 }
 
 export const subscribeUiLayerDiagnostics = subscribeLayerStack;
@@ -158,8 +160,16 @@ export function activeLayerElement(): HTMLElement | null {
   }
 }
 
+/**
+ * Подсказка получает Escape первой, но не меняет владельца фокуса.
+ * Верхний интерактивный слой сохраняет замыкание Tab и обработку фона.
+ */
 export function isTopLayerToken(token: symbol): boolean {
-  return topLayer()?.token === token;
+  const top = enabledLayers()
+    .filter((layer) => layer.name !== 'tooltip')
+    .sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)[0];
+
+  return top?.token === token;
 }
 
 export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle {

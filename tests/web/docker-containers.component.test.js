@@ -111,7 +111,8 @@ async function mountContainers(t, { values = {}, stats = {}, busyIds = [] } = {}
       '../../stores/plugins.js': (
         'export const usePluginsStore = () => globalThis.__dockerContainersHarness.plugins;'
       ),
-      '../../ui': UI_STUB,
+      '../../ui': (UI_STUB) +
+        "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     },
   });
   const { mount, flushPromises } = await import(
@@ -252,7 +253,7 @@ test('выключенный настройкой терминал не откр
   const terminal = wrapper.get('button[aria-label="Терминал в контейнере demo-web-1"]');
 
   assert.equal(terminal.attributes('disabled'), '');
-  assert.match(terminal.attributes('title'), /выключен в настройках/u);
+  assert.match(terminal.attributes('data-ui-tooltip'), /выключен в настройках/u);
 
   await terminal.trigger('click');
 

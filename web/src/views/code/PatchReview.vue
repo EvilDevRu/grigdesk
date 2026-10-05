@@ -9,7 +9,7 @@
     <article v-for="(file, fileIndex) in orderedFiles" :key="`${file.path}:${fileIndex}`"
              class="patch-file" :data-file="file.path">
       <UiPressable class="patch-file-head" data-context="code-patch-file"
-                   :data-path="file.path" :title="file.path"
+                   :data-path="file.path" v-tooltip="file.path"
                    :aria-label="patchFileLabel(file.path, file.status, file.oldPath, file.add, file.del)"
                    @click="emit('open', file.path, 0, 'new')">
         <span class="patch-status" :class="file.status">{{ file.status }}</span>
@@ -56,7 +56,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { CodeGitEntry } from '../../../../shared/codeContracts';
 import { monaco, langOf } from '../../shared/monaco';
-import { UiPressable } from '../../ui';
+import { UiPressable, vTooltip } from '../../ui';
 import { parseUnifiedDiff } from '../../shared/patch';
 import type { UnifiedDiffLineKind } from '../../shared/patch';
 
