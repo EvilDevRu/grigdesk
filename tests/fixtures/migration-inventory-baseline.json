@@ -526,6 +526,8 @@
       "tests/web/chat-compact-sync.test.js",
       "tests/web/chat-debug-session.test.js",
       "tests/web/chat-dictation.component.test.js",
+      "tests/web/chat-draft-attachments.component.test.js",
+      "tests/web/chat-draft-attachments.test.js",
       "tests/web/chat-draft-persist.test.js",
       "tests/web/chat-elicitation-routing.test.js",
       "tests/web/chat-images.test.js",

@@ -1539,14 +1539,20 @@ async function submit() {
   // уже после отправки, и в списке чат остался бы «с черновиком».
   clearTimeout(draftTimer);
   chat.setDraft(props.sid, '');
-  pending.value = [];
+
+  if (atts.length) {
+    chat.setDraftAttachments(props.sid, []);
+  }
 
   const accepted = await chat.send(props.sid, t, atts);
 
   if (accepted === false) {
     input.value = t;
-    pending.value = atts;
     chat.setDraft(props.sid, t);
+
+    if (atts.length) {
+      chat.setDraftAttachments(props.sid, atts);
+    }
   }
 }
 
@@ -1728,25 +1734,36 @@ async function runCommand(command) {
     cmdIndex.value = 0;
     clearTimeout(draftTimer);
     chat.setDraft(props.sid, '');
-    if (skill) pending.value = [];
+
+    if (atts.length) {
+      chat.setDraftAttachments(props.sid, []);
+    }
+
     const accepted = skill
       ? await chat.send(props.sid, c.cmd, atts)
       : await chat.send(props.sid, c.cmd, [], { slashCommand: c.cmd });
     // Как в submit(): отклонённая отправка не теряет ни набранное, ни вложения.
     if (accepted === false) {
       input.value = c.cmd;
-      if (skill) pending.value = atts;
       chat.setDraft(props.sid, c.cmd);
+
+      if (atts.length) {
+        chat.setDraftAttachments(props.sid, atts);
+      }
     }
     return;
   }
   input.value = '';
   cmdIndex.value = 0;
+
   if (c.cmd === '/compact') {
     // Тот же путь, что у кольца: подтверждение обязательно — сжатие тратит ход агента.
     onCtxClick({ altKey: false });
   } else if (c.cmd === '/clear') {
-    pending.value = [];
+    if (pending.value.length) {
+      chat.setDraftAttachments(props.sid, []);
+    }
+
     chat.clearChat(props.sid);
     // Историю только что вычистили — плашка о сбросе осталась бы единственной записью.
     chat.resetContext(props.sid, { note: false });
@@ -1758,17 +1775,27 @@ async function runCommand(command) {
 }
 
 // ── Вложения (фото): кнопка 📎 + вставка из буфера. Файл сразу уходит на сервер
-// (chats/attachments/), к сообщению прикладывается ссылка — агент читает через Read. ──
-const pending = ref([]); // [{ file, name, url, mime }]
+// (chats/attachments/), к сообщению прикладывается ссылка — агент читает через Read.
+// Неотправленные вложения — часть черновика чата в сторе, а не этого компонента:
+// при переключении чатов компонент пересоздаётся, и локальный список терялся. ──
+const pending = computed(() => sess.value?.draftAttachments || []); // [{ file, name, url, mime }]
 const attachBusy = ref(false);
+
+/**
+ * Загружает файлы по одному и дописывает их в черновик того чата, где их приложили.
+ * Чат фиксируется до первой загрузки: ответ сервера может прийти уже после переключения.
+ */
 async function addFiles(files) {
+  const sid = props.sid;
+
   for (const f of files) {
     if (!f) continue;
     attachBusy.value = true;
+
     try {
       const fd = new FormData();
       fd.append('file', f, f.name || 'image.png');
-      pending.value.push(await api.upload('/api/chat/upload', fd));
+      chat.addDraftAttachment(sid, await api.upload('/api/chat/upload', fd));
     } catch (e) {
       inputErr.value = `Загрузка: ${e.message}`;
     } finally { attachBusy.value = false; }
@@ -1783,7 +1810,10 @@ function onPaste(e) {
   e.preventDefault();
   addFiles(imgs.map((i) => i.getAsFile()).filter(Boolean));
 }
-function removePending(i) { pending.value.splice(i, 1); }
+
+function removePending(i) {
+  chat.setDraftAttachments(props.sid, pending.value.filter((_, at) => at !== i));
+}
 function isImg(a) { return (a.mime || '').startsWith('image/'); }
 
 // Drag&drop файлов на весь чат: счётчик enter/leave (leave стреляет на каждом

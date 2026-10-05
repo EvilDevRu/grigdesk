@@ -457,7 +457,30 @@ export function normalizeContextCache(value) {
     : { scope: 'request', status: 'unavailable' };
 }
 
-// Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
+/**
+ * Неотправленные вложения черновика — те же ссылки на серверные файлы, что уходят в
+ * историю вместе с сообщением. Абсолютный путь с диска, который отдаёт загрузка,
+ * в JSON чата не кладём; мусорные записи старых или чужих копий отбрасываем.
+ */
+function draftAttachmentsOf(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((a) => typeof a?.file === 'string' && a.file)
+    .map((a) => ({
+      file: a.file,
+      name: String(a.name || a.file),
+      url: String(a.url || ''),
+      mime: String(a.mime || ''),
+    }));
+}
+
+/**
+ * Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
+ * Пустые вложения черновика не пишем — запись чата без черновика не меняется.
+ */
 function slimOf(s) {
   return {
 
@@ -507,6 +530,7 @@ function slimOf(s) {
     compactedAt: s.compactedAt || 0,
 
     draft: s.draft || '',
+    ...(s.draftAttachments?.length ? { draftAttachments: s.draftAttachments } : {}),
     unread: !!s.unread,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
@@ -824,6 +848,8 @@ export const useChatStore = defineStore('chat', {
         } else if ((sess.draft || '').trim()) {
           // Неотправленный текст показываем вместо последнего сообщения — как в телеграме.
           snippet = sess.draft;
+        } else if (sess.draftAttachments?.length) {
+          snippet = `📎 ${sess.draftAttachments.map((a) => a.name).join(', ')}`;
         } else if (msgs.length) {
           const last = msgs[msgs.length - 1];
           snippet = (last.role === 'user' ? 'Ты: ' : last.role === 'error' ? '⚠ ' : '') + last.text;
@@ -834,7 +860,7 @@ export const useChatStore = defineStore('chat', {
           title,
           snippet: previews.get(sess.id, snippet),
           archived,
-          draft: !t && !!(sess.draft || '').trim(),
+          draft: !t && (!!(sess.draft || '').trim() || !!sess.draftAttachments?.length),
           // Модель чата — для иконки исполнителя и подписи в строке списка.
           model: sess.model || sess.modelRef?.model || '',
           modelRef: sess.modelRef || null,
@@ -1808,6 +1834,7 @@ export const useChatStore = defineStore('chat', {
         s.error ??= null;
         s.steps ||= [];
         s.draft ??= '';
+        s.draftAttachments = draftAttachmentsOf(s.draftAttachments);
         s.pendingSeed ??= '';
 
         if (s.workdir === undefined) {
@@ -1918,6 +1945,7 @@ export const useChatStore = defineStore('chat', {
         sending: false,
         error: null,
         draft: opts.draft || '',
+        draftAttachments: [],
         pendingSeed: '',
         compactedAt: 0,
 
@@ -2704,7 +2732,7 @@ export const useChatStore = defineStore('chat', {
       if (i < 0) return false;
       const [s] = this.sessions.splice(i, 1);
       // Черновик — тоже содержимое: закрытие вкладки не должно молча его терять.
-      if (keepEmpty || s.messages?.length || (s.draft || '').trim()) {
+      if (keepEmpty || s.messages?.length || (s.draft || '').trim() || s.draftAttachments?.length) {
         delete s.archived;
         s.closedAt = Date.now();
         this.archived.unshift(s);
@@ -3013,9 +3041,11 @@ export const useChatStore = defineStore('chat', {
         });
         const transition = result.chat?.workdirState?.transition;
         const draft = session.draft;
+        const draftAttachments = session.draftAttachments;
 
         this._applyRemoteChat(result.chat, false, { notifyReply: false });
         session.draft = draft;
+        session.draftAttachments = draftAttachments;
         session.workdirPreview = null;
         session.workdirProposal = null;
 
@@ -3129,6 +3159,34 @@ export const useChatStore = defineStore('chat', {
       // дешёвым: снимок здесь не нужен (терять при рестарте сервера нечего — текст
       // на экране и так перед глазами), а именно он и подвешивал ввод.
       this._persist(false, { snapshot: false });
+    },
+    /**
+     * Вложения черновика живут в чате рядом с его текстом: компонент чата пересоздаётся
+     * при переключении, и локальный список пропадал вместе с ним. Сохраняются тем же
+     * дешёвым путём без снимка, что и текст.
+     */
+    setDraftAttachments(id, list) {
+      const s = this._find(id);
+
+      if (!s) {
+        return;
+      }
+
+      s.draftAttachments = draftAttachmentsOf(list);
+      this._persist(false, { snapshot: false });
+    },
+    /**
+     * Загрузка файла заканчивается асинхронно: к этому моменту человек мог уйти в другой
+     * чат. Вложение дописывается туда, где его начали прикладывать, а не в открытый чат.
+     */
+    addDraftAttachment(id, attachment) {
+      const s = this._find(id);
+
+      if (!s) {
+        return;
+      }
+
+      this.setDraftAttachments(id, [...(s.draftAttachments || []), attachment]);
     },
     setEffort(id, e) {
       const s = this._find(id); if (!s) return;

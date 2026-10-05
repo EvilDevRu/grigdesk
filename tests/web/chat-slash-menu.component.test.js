@@ -100,8 +100,15 @@ function makeSession(overrides = {}) {
   };
 }
 
+/**
+ * Монтирует настоящий ChatSession с подменёнными сторами и API. Сессия реактивна,
+ * потому что вложения черновика композер берёт из чата стора, а не держит у себя.
+ */
 async function mountChat(t, { session = makeSession(), provider = KIMI_PROVIDER, sendResult = true } = {}) {
   const browser = await browserHarness();
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+  // Вложения черновика живут в чате стора: композер видит их через реактивную сессию.
+  const live = reactive(session);
   const sendCalls = [];
   const calls = { newSession: 0, clearChat: 0, resetContext: 0 };
   globalThis.__slashMenuApi = {
@@ -110,11 +117,17 @@ async function mountChat(t, { session = makeSession(), provider = KIMI_PROVIDER,
     async upload() { return { file: 'shot.png', name: 'shot.png', url: '/api/chat/attachment/shot.png', mime: 'image/png' }; },
   };
   globalThis.__slashMenuChatStore = () => ({
-    sessions: [session],
+    sessions: [live],
     compactWindow: 0,
     loadConveyor() {},
     markRead() {},
     setDraft() {},
+    setDraftAttachments(id, list) {
+      live.draftAttachments = list;
+    },
+    addDraftAttachment(id, attachment) {
+      live.draftAttachments = [...(live.draftAttachments || []), attachment];
+    },
     setEffort() {},
     setMode() {},
     setTask() {},

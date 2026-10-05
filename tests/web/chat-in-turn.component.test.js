@@ -40,6 +40,12 @@ async function mountChat(t, { sending = true, available = true, accept = true, r
     inTurnFor: () => run, compactWindow: 0,
     loadConveyor() {}, markRead() {}, setDraft() {}, setEffort() {}, setMode() {},
     setTask() {}, setTitle() {}, permFor() { return null; },
+    setDraftAttachments(id, list) {
+      session.draftAttachments = list;
+    },
+    addDraftAttachment(id, attachment) {
+      session.draftAttachments = [...(session.draftAttachments || []), attachment];
+    },
     questionFor() { return null; }, isOnConveyor() { return false; },
     tabLabel() { return session.title; },
     async sendInTurn(...args) { calls.inTurn.push(args); return accept; },
