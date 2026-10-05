@@ -61,6 +61,15 @@
 //                              не работает). `confirm.on/off` — направленное подтверждение
 //                              `{ text, label?, danger? }`; сервер принимает такую смену
 //                              только с точным `confirmed: true`.
+//   credentials?             — ключи доступа, которые человек задаёт окном «Ключи доступа»
+//                              в карточке исполнителя: [{ env, kind, label, hint?,
+//                              options? }] либо async-функция (config) → такой же массив.
+//                              env — имя переменной корневого .env (A-Z, 0-9, _);
+//                              kind: 'secret' (значение наружу не отдаётся, видны только
+//                              «задан» и хвост) | 'choice' (options: [{ value, label }]).
+//                              Сервер пишет только объявленные имена общим писателем
+//                              lib/envFile.ts и сразу переносит их в process.env, поэтому
+//                              адаптер продолжает читать ключ из окружения без перезапуска
 //   directSshPolicy?         — как адаптер обеспечивает запрет прямого SSH: объект
 //                              либо `(config) => object`, где enforcement — один из
 //                              command-hook|network-sandbox|fail-closed|
@@ -267,6 +276,7 @@ export interface ExecutorAdapter {
   validateWorkdir?: WorkdirValidator;
   directSshPolicy?: unknown;
   settings?: unknown;
+  credentials?: unknown;
   nativeSettings?: NativeSettingsCapability;
   sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;

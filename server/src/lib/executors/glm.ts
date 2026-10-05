@@ -163,6 +163,31 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     settings: [directSshSetting({
       note: 'Запрет обеспечивает server-owned PreToolUse hook внутри профиля GLM.',
     })],
+    // Режим и ключи задаются окном «Ключи доступа»; ключ другого режима не подставляется.
+    credentials: [
+      {
+        env: 'COCKPIT_GLM_API_MODE',
+        kind: 'choice',
+        label: 'Режим доступа Z.ai',
+        hint: 'Ключ берётся только из поля выбранного режима.',
+        options: [
+          { value: 'api', label: 'Обычный API' },
+          { value: 'coding-plan', label: 'Coding Plan' },
+        ],
+      },
+      {
+        env: 'ZAI_API_KEY',
+        kind: 'secret',
+        label: 'Ключ обычного API',
+        hint: 'Нужен в режиме «Обычный API».',
+      },
+      {
+        env: 'ZAI_CODING_API_KEY',
+        kind: 'secret',
+        label: 'Ключ Coding Plan',
+        hint: 'Нужен в режиме Coding Plan.',
+      },
+    ],
 
     /**
      * Доставка — только встроенная generation; внешний override DeepSeek для GLM — отказ.
@@ -172,8 +197,8 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
       const base = {
         kind: 'embedded' as const,
         label: 'Входит в Cockpit',
-        authHint: 'Задайте COCKPIT_GLM_API_MODE (api или coding-plan) и ключ режима '
-          + '(ZAI_API_KEY или ZAI_CODING_API_KEY) в окружении службы Cockpit.',
+        authHint: 'Задайте режим и ключ кнопкой «Ключи доступа» ниже или COCKPIT_GLM_API_MODE '
+          + 'и ZAI_API_KEY / ZAI_CODING_API_KEY в корневом .env.',
       };
 
       try {

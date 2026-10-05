@@ -544,17 +544,20 @@ test('Claude late: queued после финала даёт consumed, ответ 
 
 const runId = 'synthetic-run-0001';
 const chatKey = 'synthetic-chat';
-const commentaryText = [
-  'Проверяю документ 1.',
-  'Проверяю документ 2.\nПродолжаю проверку.\nКоманда подготовлена.',
-  'Проверяю документ 3.',
+// Вызов инструмента закрывает текст перед ним; текст после вызова с тем же id — новый блок.
+const commentaryBlocks = [
+  ['commentary-block-1', 'Проверяю документ 1.'],
+  ['commentary-block-2', 'Проверяю документ 2.\nПродолжаю проверку.'],
+  ['commentary-block-2-2', 'Команда подготовлена.'],
+  ['commentary-block-3', 'Проверяю документ 3.'],
 ];
+const commentaryText = commentaryBlocks.map(([, text]) => text);
 
 /**
  * Изолированный процесс использует настоящий адаптер и журнал без вызовов модели.
  * Общий teardown закрывает только процесс этой проверки и удаляет её временные файлы.
  */
-async function startFixture(t, { mode = 'session', exit = false } = {}) {
+async function startFixture(t, { mode = 'session', exit = false, blocks = '1' } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'claude-assistant-blocks-'));
   const bin = path.join(dir, 'claude-fixture');
   const release = path.join(dir, 'release');
@@ -565,7 +568,7 @@ async function startFixture(t, { mode = 'session', exit = false } = {}) {
   const messages = new ChatAssistantMessages({ dir: journalDir });
   const env = {
     ...process.env,
-    COCKPIT_CLAUDE_FIXTURE_BLOCKS: '1',
+    COCKPIT_CLAUDE_FIXTURE_BLOCKS: blocks,
     CLAUDE_BLOCKS_RELEASE: release,
     CLAUDE_BLOCKS_EXIT: exit ? '1' : '0',
   };
@@ -595,7 +598,11 @@ async function startFixture(t, { mode = 'session', exit = false } = {}) {
     env,
   }) : null;
 
+  // Проваленная проверка не дошла до барьера: отпускаем фикстуру, иначе разовый процесс
+  // так и ждёт файла и держит весь тестовый файл незавершённым.
   t.after(async () => {
+    await writeFile(release, '');
+    await run.catch(() => {});
     await session?.close();
     await rm(dir, { recursive: true, force: true });
   });
@@ -642,12 +649,11 @@ for (const mode of ['session', 'run']) {
     assert.deepEqual(f.messages.byRun(runId).map((block) => block.text), commentaryText);
     assert.equal(f.events.some((event) => event.assistantMessageId === 'subagent-message-1'), false);
 
-    for (let index = 1; index <= 3; index += 1) {
-      const id = `commentary-block-${index}`;
+    for (const [id, text] of commentaryBlocks) {
       const published = f.published.filter((block) => block.assistantMessageId === id);
 
       assert.equal(published.at(-1)?.complete, true);
-      assert.equal(published.at(-1)?.text, commentaryText[index - 1]);
+      assert.equal(published.at(-1)?.text, text);
       assert.equal(f.events.filter((event) => event.assistantMessageId === id && event.complete).length, 1);
     }
 
@@ -687,3 +693,34 @@ test('Claude: обрыв процесса сохраняет завершённ�
   assert.equal(f.events.some((event) => event.assistantMessageId === 'assistant-final'
     && event.complete), false);
 });
+
+for (const mode of ['session', 'run']) {
+  test(`Claude: ${mode} закрывает реплику на вызове инструмента, не дожидаясь его результата`, async (t) => {
+    const f = await startFixture(t, { mode, blocks: 'held-tool' });
+    let settled = false;
+    const run = f.run.finally(() => {
+      settled = true;
+    });
+
+    await waitFor(() => f.steps.some((step) => step.k === 'tool'), 'вызов долгой команды');
+    await f.publisher.flush(runId);
+
+    assert.equal(settled, false, 'Команда ещё выполняется.');
+    assert.equal(f.steps.some((step) => step.k === 'res'), false, 'Результата команды ещё нет.');
+    assert.equal(f.messages.live(runId).length, 0, 'Реплика перед командой не висит «Пишет…».');
+    assert.deepEqual(f.messages.byRun(runId).map((block) => [block.assistantMessageId, block.text]),
+      [['held-tool-message', 'Ветки нет — создам.']]);
+
+    await writeFile(f.release, '');
+
+    const result = await run;
+
+    await f.publisher.flush(runId);
+
+    assert.equal(result.reply, 'Ветка создана.');
+    assert.equal(result.assistantMessageId, 'held-tool-final');
+    assert.equal(f.events.filter((event) => event.assistantMessageId === 'held-tool-message'
+      && event.complete).length, 1, 'Результат команды не завершает реплику повторно.');
+    assert.equal(f.messages.byRun(runId).every((block) => block.complete), true);
+  });
+}

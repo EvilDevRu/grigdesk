@@ -224,13 +224,57 @@ function startAssistantBlocks() {
 }
 
 /**
+ * Долгая команда: реплика и вызов инструмента с тем же id приходят сразу, а результат
+ * ждёт файла-барьера, как Bash на минуты. Реплика обязана закрыться до результата.
+ */
+function startHeldTool() {
+  send({
+    type: 'system',
+    subtype: 'init',
+    session_id: SESSION_ID,
+  });
+  assistant('held-tool-message', [{ type: 'text', text: 'Ветки нет — создам.' }]);
+  assistant('held-tool-message', [{
+    type: 'tool_use',
+    id: 'synthetic-held-tool',
+    name: 'Bash',
+    input: { command: 'sleep 600' },
+  }]);
+
+  const barrier = setInterval(() => {
+    if (!existsSync(process.env.CLAUDE_BLOCKS_RELEASE)) {
+      return;
+    }
+
+    clearInterval(barrier);
+    toolResult('synthetic-held-tool');
+    assistant('held-tool-final', [{ type: 'text', text: 'Ветка создана.' }]);
+    send({
+      type: 'result',
+      session_id: SESSION_ID,
+      subtype: 'success',
+      result: 'Ветка создана.',
+      num_turns: 2,
+    });
+    setTimeout(() => process.exit(0), 10);
+  }, 5);
+}
+
+/**
  * Первый ввод открывает задачу, уточнения либо вливаются в неё, либо запускаются следующим ходом.
- * Режим завершения реплик сохраняет отдельный сценарий предыдущей проверки.
+ * Режимы завершения реплик сохраняют отдельные сценарии проверки блоков.
  */
 function handle(message, index) {
   if (process.env.COCKPIT_CLAUDE_FIXTURE_BLOCKS === '1') {
     if (index === 1) {
       startAssistantBlocks();
+    }
+
+    return;
+  }
+  if (process.env.COCKPIT_CLAUDE_FIXTURE_BLOCKS === 'held-tool') {
+    if (index === 1) {
+      startHeldTool();
     }
 
     return;

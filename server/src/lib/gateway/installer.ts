@@ -32,6 +32,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { EnvFileError, updateEnvFile } from '../envFile.ts';
 import { CloudflareError, ensureGatewayDns, inspectGatewayDns } from './cloudflare.ts';
 import {
   SshError,
@@ -398,56 +399,27 @@ export function dnsAnswersAbsent(addresses: unknown): boolean {
 }
 
 /**
- * Атомарная правка корневого `.env`.
+ * Правка корневого `.env` через общий писатель `lib/envFile.ts`.
  *
  * Своё место у этих переменных — только он: его читают ВСЕ три способа запуска (юнит systemd,
  * `bin/cockpit`, `bin/restart`). Строки `Environment=` в юните не годятся — `deploy/install.sh`
  * перегенерирует юнит из шаблона на каждом прогоне (docs/cockpit/gotchas.md).
- * Синтаксис — общий знаменатель systemd и `node --env-file`: `KEY=VALUE`, без `export`
- * и без подстановок, поэтому значения проверяем, а не кавычим.
+ * Писатель общий с окном ключей исполнителей: правки одного файла идут одной очередью,
+ * соседние строки не трогаются, а неоднозначный для systemd и Node файл не правится.
  */
 export async function upsertEnvFile(
   envPath: string,
   values: Record<string, string>,
 ): Promise<{ changed: string[]; path: string }> {
-  for (const [key, value] of Object.entries(values)) {
-    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) throw new GatewaySetupError('bad_env', `Недопустимое имя переменной: ${key}`);
-    if (/[\r\n"'\s]/.test(String(value))) {
-      throw new GatewaySetupError('bad_env', `Значение ${key} не влезает в синтаксис .env: «${value}»`);
-    }
-  }
-
-  let text = '';
   try {
-    text = await fs.readFile(envPath, 'utf8');
-  } catch (e) {
-    if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
-  }
-  const hadTrailingNewline = text.endsWith('\n');
-  const lines = text.length ? text.replace(/\n$/, '').split('\n') : [];
-  const changed: string[] = [];
-
-  for (const [key, value] of Object.entries(values)) {
-    const line = `${key}=${value}`;
-    const idx = lines.findIndex((l) => new RegExp(`^\\s*${key}\\s*=`).test(l));
-    if (idx >= 0) {
-      if (lines[idx] === line) continue;
-      lines[idx] = line;
-      changed.push(key);
-    } else {
-      lines.push(line);
-      changed.push(key);
+    return await updateEnvFile(envPath, values);
+  } catch (error) {
+    if (error instanceof EnvFileError) {
+      throw new GatewaySetupError('bad_env', error.message);
     }
-  }
-  if (!changed.length) return { changed, path: envPath };
 
-  const body = `${lines.join('\n')}${hadTrailingNewline || lines.length ? '\n' : ''}`;
-  // Временный файл создаём сразу 0600: в `.env` лежат и секреты, и ловить их из чужого
-  // процесса между `writeFile` и `chmod` никто не должен.
-  const tmp = `${envPath}.tmp-${process.pid}`;
-  await fs.writeFile(tmp, body, { mode: 0o600 });
-  await fs.rename(tmp, envPath);
-  return { changed, path: envPath };
+    throw error;
+  }
 }
 
 /* ─────────────────────────────────────── задача ─────────────────────────────────────── */

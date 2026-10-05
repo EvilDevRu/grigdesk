@@ -140,7 +140,7 @@ export default {
     const base = {
       kind: 'embedded' as const,
       label: 'Входит в Cockpit',
-      authHint: 'Добавьте DEEPSEEK_API_KEY в окружение службы Cockpit.',
+      authHint: 'Задайте ключ кнопкой «Ключи доступа» ниже или DEEPSEEK_API_KEY в корневом .env.',
     };
 
     try {
@@ -179,6 +179,13 @@ export default {
   settings: [directSshSetting({
     note: 'Запрет обеспечивает server-owned PreToolUse hook внутри штатного профиля DSH.',
   })],
+  // Ключ задаётся окном «Ключи доступа»: сервер пишет его в корневой .env и в process.env.
+  credentials: [{
+    env: 'DEEPSEEK_API_KEY',
+    kind: 'secret',
+    label: 'API-ключ DeepSeek',
+    hint: 'Ключ из личного кабинета platform.deepseek.com.',
+  }],
 
   bin(config: DeepSeekConfig) { return config.deepseekBin; },
   probe(config: DeepSeekConfig) {

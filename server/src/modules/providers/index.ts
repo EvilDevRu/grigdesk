@@ -14,6 +14,7 @@ import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
 import { parseInTurnCapability } from '../../../../shared/chatInTurnContracts.ts';
 import { isOutdated } from '../../lib/executors/_npmLatest.ts';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/providerSettings.ts';
+import { credentialViews, declaredCredentials, envFileNames } from '../../lib/executorCredentials.ts';
 import {
   createUsageReadCache,
   executeProviderUsageAction,
@@ -26,12 +27,15 @@ import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/providerUsageSee
 import type { ProviderUsage } from '../../lib/providerUsage.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import { registerProviderNativeSettings } from './settings.ts';
+import { registerProviderCredentials } from './credentials.ts';
 
 // Серверный config в объёме, который читает реестр. Полная его форма объявлена
 // в config.ts; адаптеры получают его целиком и разбирают сами.
 type ProvidersConfig = {
   modelsPath: string;
   providerUsageSeenPath: string;
+  // Корневой .env: туда окно «Ключи доступа» пишет объявленные исполнителем ключи.
+  envPath?: string;
 };
 
 export interface ProvidersModuleOptions {
@@ -43,6 +47,8 @@ export interface ProvidersModuleOptions {
   getModelsRegistry?: typeof getModelsRegistry;
   // Период фонового чтения лимитов; офлайн-тесты укорачивают его до миллисекунд.
   usageTickMs?: number;
+  // Окружение, которое видят исполнители. Тесты подменяют его, чтобы не трогать process.env.
+  env?: NodeJS.ProcessEnv;
 }
 
 // Маршруты исполнителя адресуются его id; действие и список добавляют свои части.
@@ -131,6 +137,7 @@ async function providersModule(
 ): Promise<void> {
   const { config, claudeAuth, prefs } = opts;
   const deps = { claudeAuth };
+  const serviceEnv = opts.env || process.env;
   const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
   const modelsOf = opts.getModelsRegistry || getModelsRegistry;
 
@@ -184,6 +191,7 @@ async function providersModule(
   async function buildRegistry() {
     const executors = await adaptersOf();
     const models = await modelsOf(config);
+    const fileNames = await envFileNames(config.envPath);
     const providers = [];
 
     for (const ex of executors.values()) {
@@ -253,6 +261,8 @@ async function providersModule(
         commands,
         // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
         settings: await settingsOf(ex),
+        // Ключи доступа: что задано и откуда. Значения секретов сюда не попадают.
+        credentials: credentialViews(await declaredCredentials(ex, config), serviceEnv, fileNames),
       });
     }
     return providers;
@@ -627,6 +637,18 @@ async function providersModule(
 
     cache = null; // следующий /api/providers отдаст новое значение
     return { ok: true, settings: applied.settings };
+  });
+
+  // Окно «Ключи доступа»: маршрут в credentials.ts, кэши реестра и лимитов — здесь.
+  registerProviderCredentials(fastify, {
+    config,
+    adaptersOf,
+    env: serviceEnv,
+    resetRegistry: () => {
+      cache = null;
+    },
+    resetUsage: () => usageCache.clear(),
+    refreshModels: () => modelsOf(config, { refresh: true }),
   });
 
   /**

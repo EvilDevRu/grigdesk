@@ -52,6 +52,16 @@ function claudeMessageText(message: { content?: unknown } | undefined): string {
     .trim();
 }
 
+/**
+ * Есть ли в событии вызов инструмента. CLI присылает его отдельным content-блоком
+ * с id сообщения: текст перед вызовом к этому моменту уже дописан.
+ */
+function claudeMessageCallsTool(message: { content?: unknown } | undefined): boolean {
+  const blocks = Array.isArray(message?.content) ? message.content : [];
+
+  return blocks.some((block) => (block as { type?: unknown } | null)?.type === 'tool_use');
+}
+
 // Событие stream-json CLI. Форма зависит от типа, поэтому объявлено ровно читаемое.
 interface ClaudeEvent {
   type?: string;
@@ -513,8 +523,12 @@ export function openClaudeStreamSession({
       onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
       assistantRevision: number;
       commands: Map<string, ClaudeInputCommand>;
+      // Открытый блок: id сообщения CLI и опубликованный id (с суффиксом части).
+      assistantSourceId: string;
       assistantMessageId: string;
       assistantText: string;
+      // Сколько блоков уже закрыто у сообщения: текст после вызова инструмента — новая часть.
+      assistantParts: Map<string, number>;
       lastAssistant: InTurnAssistantEvent | null;
     } | null;
     background: ClaudeTurnCollector | null;
@@ -668,7 +682,10 @@ export function openClaudeStreamSession({
       sourceRevision: ++turn.assistantRevision,
       complete: true,
     };
+    const closed = turn.assistantParts.get(turn.assistantSourceId) || 0;
 
+    turn.assistantParts.set(turn.assistantSourceId, closed + 1);
+    turn.assistantSourceId = '';
     turn.assistantMessageId = '';
     turn.assistantText = '';
     turn.lastAssistant = event;
@@ -678,8 +695,10 @@ export function openClaudeStreamSession({
   }
 
   /**
-   * CLI присылает отдельные content-блоки одного сообщения с общим id.
-   * Склеиваем весь текст; новый id завершает предыдущую реплику даже без текста.
+   * CLI присылает отдельные content-блоки одного сообщения с общим id. Текст до вызова
+   * инструмента склеивается; новый id завершает предыдущую реплику даже без текста.
+   * Вызов инструмента закрывает текст перед ним: результата команды можно ждать минутами,
+   * а реплика всё это время висела «Пишет…». Текст после вызова — следующая часть с суффиксом.
    */
   function rememberAssistantMessage(ev: ClaudeEvent): void {
     const turn = state.turn;
@@ -688,25 +707,29 @@ export function openClaudeStreamSession({
     if (!turn || !id) {
       return;
     }
-    if (turn.assistantMessageId && turn.assistantMessageId !== id) {
+    if (turn.assistantSourceId && turn.assistantSourceId !== id) {
       finishAssistantMessage();
     }
 
     const text = claudeMessageText(ev.message);
 
-    if (!text) {
-      return;
-    }
+    if (text) {
+      const closed = turn.assistantParts.get(id) || 0;
 
-    turn.assistantMessageId = id;
-    turn.assistantText = turn.assistantText ? `${turn.assistantText}\n${text}` : text;
-    turn.assistantRevision += 1;
-    void turn.onAssistantMessage?.({
-      assistantMessageId: id,
-      text: turn.assistantText,
-      sourceRevision: turn.assistantRevision,
-      complete: false,
-    });
+      turn.assistantSourceId = id;
+      turn.assistantMessageId ||= closed ? `${id}-${closed + 1}` : id;
+      turn.assistantText = turn.assistantText ? `${turn.assistantText}\n${text}` : text;
+      turn.assistantRevision += 1;
+      void turn.onAssistantMessage?.({
+        assistantMessageId: turn.assistantMessageId,
+        text: turn.assistantText,
+        sourceRevision: turn.assistantRevision,
+        complete: false,
+      });
+    }
+    if (claudeMessageCallsTool(ev.message)) {
+      finishAssistantMessage();
+    }
   }
 
   /**
@@ -1166,8 +1189,10 @@ export function openClaudeStreamSession({
           ...(onAssistantMessage ? { onAssistantMessage } : {}),
           assistantRevision: 0,
           commands: new Map(),
+          assistantSourceId: '',
           assistantMessageId: '',
           assistantText: '',
+          assistantParts: new Map(),
           lastAssistant: null,
         };
 

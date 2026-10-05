@@ -291,6 +291,35 @@ export const useProvidersStore = defineStore('providers', {
       }
     },
     /**
+     * Ключи доступа исполнителя (окно «Ключи доступа»): values — имя переменной → значение
+     * или null для удаления. Сервер пишет их в корневой .env; каталог моделей он перечитывает
+     * в фоне и сообщает о нём событием providers-update, поэтому здесь refresh не нужен.
+     */
+    async saveCredentials(providerId, values) {
+      try {
+        const r = await api.post(
+          `/api/providers/${encodeURIComponent(providerId)}/credentials`,
+          { values },
+        );
+
+        if (!r?.ok) {
+          return { ok: false, error: r?.message || 'сервер не принял ключи' };
+        }
+
+        const p = this.providers.find((x) => x.id === providerId);
+
+        if (p && r.credentials) {
+          p.credentials = r.credentials;
+        }
+
+        await this.load();
+
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.data?.message || e.message };
+      }
+    },
+    /**
      * MCP-серверы исполнителя (блок в его плашке настроек). Запрос отдельный и
      * ленивый: адаптер может проверять соединения или читать несколько конфигов,
      * поэтому дёргается по открытию вкладки и вручную, а не вместе с реестром.

@@ -92,6 +92,7 @@
 - [Новые модели Anthropic обнаруживаются сами](anthropic-model-discovery.md)
 - [Подключение нового ИИ — модульное](executor-adapter-boundary.md)
 - [Свои настройки исполнителя объявляет сам executor](executor-settings.md)
+- [Ключи доступа исполнителей задаются окном и живут в корневом .env](executor-credentials.md)
 - [Нативные настройки исполнителей: форма, API и области применения](executor-native-settings.md)
 - [Обнаружение нативных настроек: источники CLI, пробелы схем и общий контракт](executor-settings-discovery.md)
 - [Границы настроек: конкурирующие записи, публичные prefs и fingerprint запуска](executor-settings-storage-boundaries.md)

@@ -7,6 +7,7 @@
 ## Устройство
 
 - [Авторизация и CLI-токен](authentication-and-cli-token.md)
+- [Программная правка .env — только через общий писатель lib/envFile.ts](env-file-writer.md)
 - [Встроенный DeepSeek: переход updater, публикация и восстановление](deepseek-release-transition.md)
 
 ## Грабли

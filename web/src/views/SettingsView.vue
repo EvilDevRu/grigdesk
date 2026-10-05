@@ -769,6 +769,22 @@
             </div>
             <div class="pvsections">
               <div class="pvoptions">
+                <!-- Ключи доступа объявляет executor; значения пишутся в корневой .env сервером,
+                     а секреты обратно не приходят — только признак «задан» и хвост ключа. -->
+                <div
+                  v-if="p.credentials?.length"
+                  class="pvset pvcreds"
+                  data-testid="provider-credentials-slot"
+                >
+                  <div class="pvsetttl">Ключи доступа</div>
+                  <div class="pvsetbody">
+                    <ProviderCredentials
+                      :provider-id="p.id"
+                      :provider-name="p.name"
+                      :credentials="p.credentials"
+                    />
+                  </div>
+                </div>
                 <!-- Свои настройки объявляет executor; высота зависит от числа ручек.
                      Ресурсы остаются рядом с ними в левой колонке раскрытого исполнителя. -->
                 <div class="pvset pvsettings" data-testid="provider-settings-slot">
@@ -2107,6 +2123,7 @@ import WebLogPanel from './settings/WebLogPanel.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
 import ProviderNativeSettings from './settings/ProviderNativeSettings.vue';
 import ProviderMcpStatus from './settings/ProviderMcpStatus.vue';
+import ProviderCredentials from './settings/ProviderCredentials.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
