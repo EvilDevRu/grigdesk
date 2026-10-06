@@ -304,6 +304,31 @@ test('Codex normalizer не теряет незнакомый тип элеме�
   assert.equal(future?.title, '{"a":1}');
 });
 
+test('Codex imageView приходит строкой Read с путём картинки', () => {
+  // Лента показывает рассмотренную картинку по общему правилу строки Read, поэтому
+  // просмотр у Codex обязан прийти тем же видом шага, а не безымянным fallback.
+  const normalize = createCodexStepNormalizer();
+  const steps = normalize({
+    method: 'item/completed',
+    params: {
+      item: {
+        type: 'imageView',
+        id: 'img-1',
+        path: '/repo/.state/artifacts/shot.png',
+      },
+    },
+  });
+
+  assert.deepEqual(steps.find((step) => step.k === 'tool'), {
+    k: 'tool',
+    id: 'img-1',
+    name: 'Read',
+    title: 'shot.png',
+    sub: '/repo/.state/artifacts/shot.png',
+  });
+  assert.equal(steps.find((step) => step.k === 'res')?.ok, true);
+});
+
 test('Codex события без вызова показываются служебной строкой', () => {
   const normalize = createCodexStepNormalizer();
   const steps = [

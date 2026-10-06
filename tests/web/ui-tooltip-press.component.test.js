@@ -77,48 +77,7 @@ test('TIP-UIT-02: disabled снимает описание и отменяет �
   assert.equal(shown(), false);
 });
 
-test('TIP-UIT-03: мышь показывает с задержкой, касание игнорируется', async (t) => {
-  const wrapper = setup(t, { pressDismiss: true });
-
-  await wrapper.get('button').trigger('pointerenter', { pointerType: 'touch' });
-  await settle();
-  assert.equal(shown(), false);
-  await wrapper.get('button').trigger('pointerenter', { pointerType: 'mouse' });
-  assert.equal(shown(), false);
-  await settle();
-  assert.equal(shown(), true);
-});
-
-test('TIP-UIT-04: нажатие подавляет показ до ухода курсора', async (t) => {
-  const wrapper = setup(t, { pressDismiss: true });
-  const button = wrapper.get('button');
-
-  await button.trigger('pointerenter', { pointerType: 'mouse' });
-  await settle();
-  assert.equal(shown(), true);
-  await button.trigger('pointerdown', { pointerType: 'mouse' });
-  assert.equal(shown(), false);
-  button.element.focus();
-  await settle();
-  assert.equal(shown(), false);
-  await button.trigger('pointerleave');
-  await button.trigger('pointerenter', { pointerType: 'pen' });
-  await settle();
-  assert.equal(shown(), true);
-});
-
-test('TIP-UIT-05: клавиатурный фокус открывает, уход закрывает', async (t) => {
-  const wrapper = setup(t, { pressDismiss: true });
-
-  wrapper.get('button').element.focus();
-  await settle();
-  assert.equal(shown(), true);
-  wrapper.get('button').element.blur();
-  await settle();
-  assert.equal(shown(), false);
-});
-
-test('TIP-UIT-06: прежние mouseenter и focusin остаются рабочими', async (t) => {
+test('TIP-UIT-06: mouseenter и focusin показывают и прячут справку', async (t) => {
   const wrapper = setup(t);
 
   await wrapper.get('button').trigger('mouseenter');

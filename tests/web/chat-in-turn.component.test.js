@@ -96,6 +96,46 @@ async function mountChat(t, { sending = true, available = true, accept = true, r
   };
 }
 
+test('щелчок по картинке в ленте действий открывает общий просмотрщик чата', async (t) => {
+  const previewed = [];
+
+  // Стор просмотрщика берётся при монтировании, поэтому подмена ставится до mountChat.
+  globalThis[`${PREFIX}DocumentPreview`] = {
+    show() {},
+    showImage(image) {
+      previewed.push(image);
+    },
+  };
+  t.after(() => {
+    delete globalThis[`${PREFIX}DocumentPreview`];
+  });
+
+  const { wrapper, session, flushPromises } = await mountChat(t);
+
+  session.steps.push({
+    k: 'tool',
+    id: 'read-1',
+    name: 'Read',
+    title: 'shot.png',
+    sub: '/repo/shot.png',
+  }, {
+    k: 'res',
+    id: 'read-1',
+    ok: true,
+    text: '[изображение]',
+  });
+  await flushPromises();
+  await wrapper.get('.step.tool .step-disclosure').trigger('click');
+  await wrapper.get('.step-image img').trigger('click', { button: 0, ctrlKey: true });
+  assert.deepEqual(previewed, [], 'щелчок с модификатором остаётся ссылкой');
+  await wrapper.get('.step-image img').trigger('click', { button: 0 });
+  assert.deepEqual(previewed, [{
+    src: 'https://cockpit.test/api/chat/in-turn-chat/image?path=%2Frepo%2Fshot.png',
+    name: 'shot.png',
+    mime: '',
+  }]);
+});
+
 test('одна кнопка и Enter отправляют в активный ход, стоп остаётся отдельным', async (t) => {
   const { wrapper, calls } = await mountChat(t);
   const input = wrapper.get('textarea');

@@ -1,6 +1,8 @@
 // Адрес картинки из ответа агента. Путь на диске превращается в маршрут сервера,
 // который отдаёт файл из рабочей папки разговора; остальное проходит как есть.
 const RASTER_PATH = /\.(?:png|jpe?g|gif|webp)$/i;
+// Адрес со схемой, кроме file://: его отдаёт не рабочая папка разговора.
+const URL_SCHEME = /^(?!file:)[a-z][a-z0-9+.-]*:/i;
 
 /**
  * Внешний URL, собственный /api кокпита, якорь и запрос проходят без изменений.
@@ -9,11 +11,25 @@ const RASTER_PATH = /\.(?:png|jpe?g|gif|webp)$/i;
  */
 export function chatImageHref(href: string, chatId: string): string {
   const raw = String(href || '').trim();
-  const scheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^file:/i.test(raw);
 
-  if (!raw || scheme || raw.startsWith('//') || raw.startsWith('#') || raw.startsWith('?')
+  if (!raw || URL_SCHEME.test(raw) || raw.startsWith('//') || raw.startsWith('#') || raw.startsWith('?')
       || raw.startsWith('/api/')) {
     return raw;
+  }
+
+  return chatWorkdirImageHref(raw, chatId);
+}
+
+/**
+ * Только путь на диске: растр из рабочей папки разговора получает маршрут
+ * /api/chat/:id/image, а внешний URL, готовый адрес /api и не растр — пустую строку.
+ * Так строка ленты не превратит произвольный путь инструмента в чужой адрес.
+ */
+export function chatWorkdirImageHref(file: string, chatId: string): string {
+  const raw = String(file || '').trim();
+
+  if (URL_SCHEME.test(raw) || raw.startsWith('/api/')) {
+    return '';
   }
 
   let filePath: string;

@@ -1,11 +1,11 @@
 process.env.NODE_ENV = 'test';
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 
+import { STEP_IMAGE_TEXT } from '../../shared/chatSteps.ts';
 import { compileVue, webFile } from './helpers/compile-vue.js';
-import { MARKDOWN_STUBS } from './helpers/rich-markdown.js';
 import { createUiBrowser } from './helpers/ui-components.js';
 
 const STEP_LIST_PATH = webFile('src/views/chat/StepList.vue');
@@ -14,27 +14,14 @@ const ACTION_STYLES_PATH = webFile('src/styles/components/actions.css');
 let browser;
 let StepList;
 let mount;
-let nextTick;
-let highlightCalls;
 
 before(async () => {
   browser = await createUiBrowser();
-  StepList = await compileVue(STEP_LIST_PATH, { stubs: MARKDOWN_STUBS });
+  StepList = await compileVue(STEP_LIST_PATH);
   ({ mount } = await import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'));
-  ({ nextTick } = await import('../../web/node_modules/vue/index.mjs'));
-});
-
-beforeEach(() => {
-  highlightCalls = [];
-  globalThis.__mdHighlight = async (...args) => {
-    highlightCalls.push(args);
-
-    return null;
-  };
 });
 
 after(async () => {
-  delete globalThis.__mdHighlight;
   await browser.close();
 });
 
@@ -42,9 +29,13 @@ after(async () => {
  * Все сценарии живут в одном документе, который запоминает Vue runtime.
  * Каждый mount прикреплён к DOM и обязательно размонтируется по завершении теста.
  */
-async function mountStepList(t, steps) {
+async function mountStepList(t, steps, props = {}) {
   const wrapper = mount(StepList, {
-    props: { live: true, steps },
+    props: {
+      live: true,
+      steps,
+      ...props,
+    },
     attachTo: browser.document.querySelector('#mount'),
   });
 
@@ -159,126 +150,74 @@ test('StepList не сдвигает служебную строку вдвое'
   assert.doesNotMatch(component, /^\.note\s*\{/m);
 });
 
-const tipCommand = "cd /srv/app && rg -n 'TODO' src | head -20; echo ---; sed -n 1,80p src/main.ts | cat";
-const tipFormatted = [
-  'cd /srv/app &&',
-  "  rg -n 'TODO' src |",
-  '  head -20',
-  'echo ---',
-  'sed -n 1,80p src/main.ts |',
-  '  cat',
-].join('\n');
-
-async function hoverStep(wrapper) {
-  await wrapper.get('.step-disclosure').trigger('pointerenter', { pointerType: 'mouse' });
-  await new Promise((resolve) => setTimeout(resolve, 320));
-  await nextTick();
-}
-
-function currentTip() {
-  return browser.document.querySelector('.ui-tooltip');
-}
-
-test('TIP-LIST-01: живая лента не форматирует и не подсвечивает до открытия', async (t) => {
-  const row = {
-    k: 'tool',
-    name: 'Bash',
-    command: tipCommand,
-    title: 'Команда',
-  };
-  const wrapper = await mountStepList(t, [row]);
-
-  assert.equal(wrapper.get('.ttl').attributes('title'), undefined);
-  assert.equal(Boolean(currentTip()), false);
-  assert.equal(highlightCalls.length, 0);
-  await wrapper.setProps({ steps: [row, { k: 'note', text: 'Продолжение' }] });
-  assert.equal(highlightCalls.length, 0);
-});
-
-test('TIP-LIST-02: наведение показывает формат и вызывает подсветку', async (t) => {
-  const wrapper = await mountStepList(t, [{
-    k: 'tool',
-    name: 'Bash',
-    command: tipCommand,
-    title: 'Команда',
-  }]);
-
-  await hoverStep(wrapper);
-  assert.equal(Boolean(currentTip()?.classList.contains('ui-tooltip--code')), true);
-  assert.equal(currentTip()?.querySelector('pre')?.textContent, tipFormatted);
-  assert.deepEqual(highlightCalls, [[tipFormatted, 'bash']]);
-});
-
-test('TIP-LIST-03: preview исполнителя, путь Read и заголовок Task', async (t) => {
-  for (const [row, expected] of [
-    [{
-    name: 'Bash',
-    preview: tipCommand,
-    lang: 'bash',
-  }, tipFormatted],
-    [{
-    name: 'Read',
-    sub: '/full/file.ts',
-    title: 'file.ts',
-  }, '/full/file.ts'],
-    [{
-    name: 'Task',
-    sub: 'Explore',
-    title: 'Изучить код',
-  }, 'Изучить код'],
-  ]) {
-    const wrapper = await mountStepList(t, [{ k: 'tool', ...row }]);
-
-    await hoverStep(wrapper);
-    assert.equal(currentTip()?.querySelector('pre')?.textContent, expected);
-    wrapper.unmount();
-  }
-});
-
-test('TIP-LIST-04: нажатие прячет справку, раскрытие сохраняет исходник', async (t) => {
-  for (const field of ['command', 'preview']) {
-    const wrapper = await mountStepList(t, [{
+/**
+ * Строка Read с растром и успешным итогом — тот случай, ради которого лента показывает
+ * картинку. Путь лежит в рабочей папке чата, итог несёт общую заглушку нормализатора.
+ */
+function imageRead(res = {}, tool = {}) {
+  return [
+    {
       k: 'tool',
-      name: 'Bash',
-      title: 'Команда',
-      lang: 'bash',
-      [field]: tipCommand,
-    }]);
+      id: 'read-1',
+      name: 'Read',
+      title: 'shot.png',
+      sub: '/repo/.state/artifacts/shot.png',
+      ...tool,
+    },
+    {
+      k: 'res',
+      id: 'read-1',
+      ok: true,
+      text: STEP_IMAGE_TEXT,
+      ...res,
+    },
+  ];
+}
 
-    await hoverStep(wrapper);
-    await wrapper.get('.step-disclosure').trigger('pointerdown', { pointerType: 'mouse' });
-    assert.equal(Boolean(currentTip()), false);
+test('StepList не вешает справку на строку действия', async () => {
+  const component = await readFile(STEP_LIST_PATH, 'utf8');
+
+  assert.doesNotMatch(component, /<UiTooltip|v-tooltip/);
+});
+
+test('StepList показывает рассмотренную картинку через маршрут рабочей папки чата', async (t) => {
+  const wrapper = await mountStepList(t, imageRead(), { chatId: 'chat 1' });
+
+  assert.equal(wrapper.find('.step-image').exists(), false);
+  await wrapper.get('.step-disclosure').trigger('click');
+
+  const src = '/api/chat/chat%201/image?path=%2Frepo%2F.state%2Fartifacts%2Fshot.png';
+
+  assert.equal(wrapper.get('.step-image img').attributes('src'), src);
+  assert.equal(wrapper.get('.step-image img').attributes('alt'), 'shot.png');
+  assert.equal(wrapper.get('.step-image').attributes('href'), src);
+  assert.equal(wrapper.find('.body.res').exists(), false, 'рядом с картинкой осталась заглушка');
+  assert.equal(wrapper.get('.path').text(), '/repo/.state/artifacts/shot.png');
+});
+
+test('StepList показывает картинку только у Read с успешным итогом в чате', async (t) => {
+  const cases = [
+    ['без итога', imageRead().slice(0, 1)],
+    ['итог с ошибкой', imageRead({ ok: false, text: 'File does not exist.' })],
+    ['без чата', imageRead(), ''],
+    ['не Read', imageRead({}, { name: 'Write' })],
+  ];
+
+  for (const [name, steps, chatId = 'c1'] of cases) {
+    const wrapper = await mountStepList(t, steps, { chatId });
+
     await wrapper.get('.step-disclosure').trigger('click');
-    assert.equal(wrapper.get(field === 'command' ? 'pre.command' : '.body-wrap pre').text(), tipCommand);
-    wrapper.unmount();
+    assert.equal(wrapper.find('.step-image').exists(), false, name);
+    assert.equal(wrapper.find('.step-image-missing').exists(), false, name);
   }
 });
 
-test('TIP-LIST-05: Tab описывает кнопку, касание не показывает', async (t) => {
-  const wrapper = await mountStepList(t, [{
-    k: 'tool',
-    name: 'Bash',
-    command: 'echo ok',
-    title: 'echo',
-  }]);
-  const button = wrapper.get('.step-disclosure');
+test('StepList заменяет неотданную картинку честной подписью', async (t) => {
+  const wrapper = await mountStepList(t, imageRead(), { chatId: 'c1' });
 
-  await button.trigger('pointerenter', { pointerType: 'touch' });
-  await new Promise((resolve) => setTimeout(resolve, 320));
-  await nextTick();
-  assert.equal(Boolean(currentTip()), false);
-  button.element.focus();
-  await new Promise((resolve) => setTimeout(resolve, 320));
-  await nextTick();
-  assert.equal(currentTip()?.id, button.attributes('aria-describedby'));
-  assert.equal(currentTip()?.querySelector('pre')?.textContent, 'echo ok');
-});
-
-test('TIP-LIST-06: пустой шаг не создаёт справку', async (t) => {
-  const wrapper = await mountStepList(t, [{ k: 'tool', name: 'Bash' }]);
-
-  assert.equal(wrapper.get('.step-disclosure').attributes('aria-describedby'), undefined);
-  await hoverStep(wrapper);
-  assert.equal(Boolean(currentTip()), false);
-  assert.equal(highlightCalls.length, 0);
+  await wrapper.get('.step-disclosure').trigger('click');
+  await wrapper.get('.step-image img').trigger('error');
+  assert.equal(wrapper.find('.step-image').exists(), false);
+  assert.equal(wrapper.get('.step-image-missing').text(), 'Изображение недоступно');
+  assert.equal(wrapper.find('.body.res').exists(), false);
 });

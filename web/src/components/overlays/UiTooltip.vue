@@ -73,7 +73,6 @@ import {
   type VNode,
 } from 'vue';
 import { computeOverlayPlacement } from '../../services/overlayPlacement.ts';
-import { isKeyboardFocus, isTouchPointer } from '../../services/tooltipInput.ts';
 import { useUiLayer } from '../../composables/useUiLayer';
 import type {
   UiOverlayPlacement,
@@ -87,7 +86,6 @@ interface Props {
   text?: string;
   placement?: UiOverlayPlacement;
   disabled?: boolean;
-  pressDismiss?: boolean;
   disabledTrigger?: boolean;
   disabledLabel?: string;
   offset?: number;
@@ -101,7 +99,6 @@ const props = withDefaults(defineProps<Props>(), {
   text: '',
   placement: 'top',
   disabled: false,
-  pressDismiss: false,
   disabledTrigger: false,
   disabledLabel: '',
   offset: 9,
@@ -236,7 +233,6 @@ const positionStyle = ref<Record<string, string>>({
   top: '0px',
   visibility: 'hidden',
 });
-let pressSuppressed = false;
 
 let showTimer: ReturnType<typeof setTimeout> | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -253,14 +249,8 @@ const triggerSlotProps: UiOverlayTriggerSlotProps = {
 
 const triggerAttributes = computed<Record<string, unknown>>(() => ({
   'aria-describedby': props.disabled ? undefined : tooltipId,
-  ...(props.pressDismiss ? {
-    onPointerenter: onPointerEnter,
-    onPointerleave: onPointerLeave,
-    onPointerdown: onPointerDown,
-  } : {
-    onMouseenter: onMouseEnter,
-    onMouseleave: onMouseLeave,
-  }),
+  onMouseenter: onMouseEnter,
+  onMouseleave: onMouseLeave,
   onFocusin: onFocus,
   onFocusout: onFocusOut,
 }));
@@ -380,22 +370,6 @@ function scheduleHide(): void {
   );
 }
 
-function onPointerEnter(event: Event): void {
-  if (!isTouchPointer(event) && !pressSuppressed) {
-    onMouseEnter();
-  }
-}
-
-function onPointerLeave(): void {
-  pressSuppressed = false;
-  onMouseLeave();
-}
-
-function onPointerDown(): void {
-  pressSuppressed = true;
-  hideNow();
-}
-
 function onMouseEnter(): void {
   hovered.value = true;
   scheduleShow();
@@ -406,11 +380,7 @@ function onMouseLeave(): void {
   scheduleHide();
 }
 
-function onFocus(event: Event): void {
-  if (props.pressDismiss && (pressSuppressed || !isKeyboardFocus(event))) {
-    return;
-  }
-
+function onFocus(): void {
   focused.value = true;
   scheduleShow();
 }
@@ -431,7 +401,6 @@ function onFocusOut(event: FocusEvent): void {
     return;
   }
 
-  pressSuppressed = false;
   focused.value = false;
   scheduleHide();
 }

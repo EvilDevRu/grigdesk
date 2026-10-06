@@ -46,41 +46,37 @@
 
         <!-- Вызов инструмента + его результат -->
         <template v-else-if="r.k === 'tool'">
-          <UiTooltip
-            :disabled="!hasStepTip(r)"
-            press-dismiss
-            placement="bottom-start"
-            :show-delay="300"
-            surface-class="ui-tooltip--code"
+          <UiDisclosureButton
+            class="step-disclosure"
+            density="compact"
+            :open="Boolean(expanded[i])"
+            :controls="`${baseId}-step-${i}`"
+            :disabled="!hasBody(r)"
+            @update:open="toggle(i, r)"
           >
-            <template #trigger>
-              <UiDisclosureButton
-                class="step-disclosure"
-                density="compact"
-                :open="Boolean(expanded[i])"
-                :controls="`${baseId}-step-${i}`"
-                :disabled="!hasBody(r)"
-                @update:open="toggle(i, r)"
-              >
-                <span class="head" :class="kindOf(r.name).cls">
-                  <span class="ico">{{ kindOf(r.name).ico }}</span>
-                  <span class="nm">{{ toolLabel(r.name) }}</span>
-                  <span class="ttl">{{ r.title }}</span>
-                  <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
-                  <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
-                  <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">
-                    {{ r.res.ok ? '✓' : '✕' }}
-                  </span>
-                  <span v-else-if="live" class="mark run">…</span>
-                </span>
-              </UiDisclosureButton>
-            </template>
-            <template #tip>
-              <CodeTipContent v-bind="stepTip(r)" />
-            </template>
-          </UiTooltip>
+            <span class="head" :class="kindOf(r.name).cls">
+              <span class="ico">{{ kindOf(r.name).ico }}</span>
+              <span class="nm">{{ toolLabel(r.name) }}</span>
+              <span class="ttl">{{ r.title }}</span>
+              <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
+              <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+              <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">
+                {{ r.res.ok ? '✓' : '✕' }}
+              </span>
+              <span v-else-if="live" class="mark run">…</span>
+            </span>
+          </UiDisclosureButton>
           <div v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body-wrap">
             <div v-if="pathOf(r)" class="path">{{ pathOf(r) }}</div>
+            <!-- Рассмотренная картинка идёт через защищённый маршрут рабочей папки чата.
+                 Обычный щелчок по ней перехватывает чат и открывает общий просмотрщик. -->
+            <template v-if="imageOf(r)">
+              <div v-if="brokenImages.has(imageOf(r))" class="step-image-missing">Изображение недоступно</div>
+              <a v-else class="step-image" :href="imageOf(r)" target="_blank" rel="noopener">
+                <img :src="imageOf(r)" :alt="r.title || 'Изображение'" loading="lazy"
+                     @error="brokenImages.add(imageOf(r))" />
+              </a>
+            </template>
             <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
             <pre v-if="r.command" class="body command">{{ r.command }}</pre>
             <!-- Один вызов инструмента может изменить несколько файлов. -->
@@ -105,7 +101,7 @@
               </div>
             </div>
             <pre v-if="r.preview" class="body">{{ r.preview }}</pre>
-            <pre v-if="r.res?.text" class="body res" :class="{ bad: !r.res.ok }">{{ r.res.text }}</pre>
+            <pre v-if="resTextOf(r)" class="body res" :class="{ bad: !r.res.ok }">{{ resTextOf(r) }}</pre>
           </div>
         </template>
 
@@ -148,11 +144,12 @@
 </template>
 
 <script setup>
-import { ref, computed, useId, watch } from 'vue';
+import { ref, reactive, computed, useId, watch } from 'vue';
+import { STEP_IMAGE_TEXT } from '../../../../shared/chatSteps.ts';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
-import { UiDisclosureButton, UiTooltip } from '../../ui';
-import CodeTipContent from '../../shared/markdown/CodeTipContent.vue';
-import { hasStepTip, stepTip } from './stepTip.ts';
+import { api } from '../../shared/apiClient.ts';
+import { UiDisclosureButton } from '../../ui';
+import { chatWorkdirImageHref } from './chatImages.ts';
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
@@ -165,11 +162,16 @@ const props = defineProps({
   // Подпись модели в шаге «старт»: id → имя из каталога. Реестр знает чат, а не лента,
   // поэтому функция приходит снаружи; без неё показывается id как есть.
   modelLabel: { type: Function, default: (id) => id },
+  // Разговор, из рабочей папки которого сервер отдаёт рассмотренные агентом картинки.
+  chatId: { type: String, default: '' },
 });
 
 // Свёрнутая по умолчанию сохранённая лента (в живой всё видно сразу).
 const open = ref(props.live);
 const expanded = ref({}); // индекс шага → раскрыт ли
+// Адреса, которые сервер или браузер не отдали. Ключ — адрес, а не номер строки: окно
+// ленты сдвигает номера, а повторное раскрытие не перезапрашивает уже битый файл.
+const brokenImages = reactive(new Set());
 const baseId = `chat-steps-${useId().replaceAll(':', '')}`;
 
 // После финала тот же участок становится свёрнутой историей.
@@ -286,6 +288,27 @@ function pathOf(row) {
   return typeof row.sub === 'string' ? row.sub : '';
 }
 
+// Картинка, которую агент рассмотрел инструментом Read, показывается после успешного итога.
+// Адрес даёт только маршрут рабочей папки разговора: внешний URL и готовый адрес /api
+// из пути инструмента в ленту не попадают, а сервер отдаёт лишь растр из этой папки.
+function imageOf(row) {
+  if (row.name !== 'Read' || !row.res?.ok) {
+    return '';
+  }
+
+  const href = chatWorkdirImageHref(pathOf(row), props.chatId);
+
+  return href ? api.url(href) : '';
+}
+
+// Нормализатор заменяет блок картинки в итоге общей заглушкой STEP_IMAGE_TEXT.
+// Рядом с самой картинкой или с отметкой о её недоступности эта строка ничего не добавляет.
+function resTextOf(row) {
+  const text = row.res?.text || '';
+
+  return text.trim() === STEP_IMAGE_TEXT && imageOf(row) ? '' : text;
+}
+
 // Вложенный шаг — шаг субагента: у него `parent` (id вызова Task). Старые ленты несли
 // вместо него `sub: true` — их читаем так же, чтобы сохранённые ходы не поменяли вид.
 function isNested(row) {
@@ -376,6 +399,28 @@ function toolLabel(name) {
 .body.command { color: var(--ink); overflow-wrap: anywhere; }
 .step.think .body { margin-left: 26px; }
 .body.res.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+
+/* Миниатюра рассмотренной картинки: целиком в рамке, полный размер — в просмотрщике. */
+.step-image {
+  align-self: flex-start;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+.step-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}
+.step-image-missing {
+  font-size: 11.5px;
+  color: var(--ink-low);
+}
 
 /* Дифф правки — две колонки: слева было, справа стало */
 .diff { border: 1px solid var(--line); border-radius: 8px; overflow: auto; max-height: 320px; background: var(--ground); }

@@ -264,6 +264,8 @@
               :model-label="modelLabelOf"
               :live="live"
               :section="group.turn"
+              :chat-id="sid"
+              @click="onMarkdownClick"
             />
             <div v-if="m.kind === 'assistant-block' && compact" class="agent-reply">
               <span class="reply-mark" role="img" aria-label="Ответ агента">

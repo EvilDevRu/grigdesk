@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Изолированная приёмка настоящих подсказок и подсветки в Chromium.
+// Изолированная приёмка настоящих подсказок в Chromium.
 // Собственный Vite не обращается к серверу кокпита и закрывается в finally.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,9 +18,6 @@ const browserArtifacts = path.join(artifacts, 'browser');
 const profile = path.join(browserArtifacts, 'chromium-profile');
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const { chromium } = requireFromServer('playwright-core');
-const command = "cd /srv/app && rg -n 'TODO' src | head -20; echo ---; sed -n 1,80p src/main.ts | cat";
-const formatted = "cd /srv/app &&\n  rg -n 'TODO' src |\n  head -20\necho ---\n"
-  + 'sed -n 1,80p src/main.ts |\n  cat';
 const report = {
   checks: [],
   browserErrors: [],
@@ -62,80 +59,6 @@ async function expectText(page, selector, text) {
 async function screenshot(page, name) {
   await page.screenshot({ path: path.join(browserArtifacts, name) });
   report.screenshots.push(name);
-}
-
-/**
- * Проверяем реальную Shiki, исходное раскрытие и клавиатурный показ на той же кнопке.
- * Перезагрузка сбрасывает фокус перед Tab и не зависит от предыдущего щелчка мышью.
- */
-async function checkCommand(page) {
-  const row = page.locator('[data-test="bash"] .step-disclosure');
-
-  await row.hover();
-  await expectText(page, '.ui-tooltip--code pre', formatted);
-  await page.waitForFunction(() => {
-    const tokens = document.querySelectorAll('.ui-tooltip--code pre .md-line span');
-    const colors = new Set([...tokens].map((token) => getComputedStyle(token).color));
-
-    return colors.size >= 2;
-  });
-  await screenshot(page, 'bash-hover-1280x800.png');
-  report.checks.push('Наведение: форматированный литерал и не менее двух цветов Shiki');
-  await row.click();
-  await page.locator('.ui-tooltip--code').waitFor({ state: 'detached' });
-  assert.equal(await page.locator('[data-test="bash"] pre.command').textContent(), command);
-  report.checks.push('Щелчок: подсказка закрыта, раскрыта исходная команда');
-  await page.mouse.move(2, 2);
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.keyboard.press('Tab');
-  assert.equal(await row.evaluate((element) => element === document.activeElement), true);
-  await expectText(page, '.ui-tooltip--code pre', formatted);
-  report.checks.push('Tab: та же кнопка открывает командную справку');
-  await page.keyboard.press('Escape');
-  await page.locator('.ui-tooltip--code').waitFor({ state: 'detached' });
-  await page.keyboard.press('Tab');
-}
-
-/**
- * Короткое окно должно сохранять видимый хвост даже при обрезанном коде.
- * Замеряем поверхность и сам хвост, а не только наличие текста в DOM.
- */
-async function checkShortWindow(page) {
-  await page.setViewportSize({ width: 1280, height: 420 });
-  await page.locator('[data-test="long"] .step-disclosure').hover();
-  await page.locator('.ui-tooltip--code .code-tip__more').waitFor();
-
-  const boxes = await page.locator('.ui-tooltip--code').evaluate((surface) => {
-    const rect = surface.getBoundingClientRect();
-    const footer = surface.querySelector('.code-tip__more').getBoundingClientRect();
-
-    return {
-      surface: {
-        left: rect.left,
-        right: rect.right,
-        top: rect.top,
-        bottom: rect.bottom,
-      },
-      footer: {
-        top: footer.top,
-        bottom: footer.bottom,
-        height: footer.height,
-      },
-      text: surface.querySelector('.code-tip__more').textContent.trim(),
-    };
-  });
-
-  assert.equal(boxes.text, '… ещё 6 строк — раскрой шаг для сохранённого текста');
-  assert.ok(boxes.surface.left >= 0 && boxes.surface.right <= 1280);
-  assert.ok(boxes.surface.top >= 0 && boxes.surface.bottom <= 420);
-  assert.ok(boxes.footer.height > 0 && boxes.footer.top >= boxes.surface.top);
-  assert.ok(boxes.footer.bottom <= boxes.surface.bottom && boxes.footer.bottom <= 420);
-  report.shortWindow = boxes;
-  await screenshot(page, 'long-command-1280x420.png');
-  report.checks.push('30 строк: хвост с шестью строками виден, поверхность внутри 1280×420');
-  await page.mouse.move(2, 2);
-  await page.keyboard.press('Escape');
-  await page.setViewportSize({ width: 1280, height: 800 });
 }
 
 /**
@@ -234,8 +157,6 @@ async function main() {
       }
     });
     await page.goto(`http://127.0.0.1:${address.port}`, { waitUntil: 'networkidle' });
-    await checkCommand(page);
-    await checkShortWindow(page);
     await checkPlain(page);
     await checkDialog(page);
     assert.equal(await page.locator('[title], svg title').count(), 0);

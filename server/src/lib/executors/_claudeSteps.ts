@@ -4,6 +4,7 @@ import {
   base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../../../shared/chatSteps.ts';
 
 /**
  * Заголовок и превью вызова инструмента — по одному на каждый знакомый инструмент,
@@ -95,7 +96,8 @@ function resultText(content: unknown): string {
       .map((raw) => raw as { type?: string; text?: string } | null)
       .map((item) => {
         if (item?.type === 'text') return item.text || '';
-        return item?.type === 'image' ? '[изображение]' : '';
+
+        return item?.type === 'image' ? STEP_IMAGE_TEXT : '';
       })
       .filter(Boolean)
       .join('\n');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { chatImageHref } from '../../web/src/views/chat/chatImages.ts';
+import { chatImageHref, chatWorkdirImageHref } from '../../web/src/views/chat/chatImages.ts';
 import { mdToHtml } from '../../web/src/shared/md.ts';
 
 test('CHAT-IMG-WEB-01: путь на диске уходит в маршрут разговора', () => {
@@ -56,4 +56,16 @@ test('CHAT-IMG-WEB-05: опасные scheme отбрасывает allowlist Ma
     assert.doesNotMatch(html, /<img/);
     assert.match(html, /кадр/);
   }
+});
+
+test('CHAT-IMG-WEB-06: путь инструмента даёт только маршрут рабочей папки', () => {
+  assert.equal(chatWorkdirImageHref('/repo/.state/artifacts/a.png', 'c1'),
+    '/api/chat/c1/image?path=%2Frepo%2F.state%2Fartifacts%2Fa.png');
+
+  // Строка ленты не пропускает адрес как есть: внешний URL и готовый /api — не файлы папки.
+  for (const file of ['https://x/a.png', '/api/chat/attachment/a.png', '/repo/logo.svg', '']) {
+    assert.equal(chatWorkdirImageHref(file, 'c1'), '', file);
+  }
+
+  assert.equal(chatWorkdirImageHref('/repo/a.png', ''), '');
 });

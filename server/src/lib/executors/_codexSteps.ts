@@ -246,7 +246,7 @@ function describeItem(item: CodexItem): string {
 
 /**
  * Незнакомый тип элемента обязан деградировать в честную строку ленты, а не исчезать.
- * Codex дописывает типы (`functionCallOutput`, `imageView`, `sleep`, …) быстрее, чем
+ * Codex дописывает типы (`functionCallOutput`, `sleep`, …) быстрее, чем
  * Кокпит разбирает их поимённо, а молча пропущенное действие заставляет человека
  * читать ленту как полный отчёт и верить, что агент сделал меньше, чем сделал.
  */
@@ -329,6 +329,19 @@ function toolOf(item: CodexItem | null | undefined): Record<string, unknown> | n
       files: changes.map((change) => change.path),
       changes,
       ...(omittedChanges > 0 ? { omittedChanges } : {}),
+    };
+  }
+
+  // Просмотр картинки — то же, что Read растра у Claude: лента показывает файл миниатюрой
+  // по общему правилу строки Read, без знания о типах элементов Codex.
+  if (item.type === 'imageView' || item.type === 'image_view') {
+    const file = textOf(item.path);
+
+    return {
+      id,
+      name: 'Read',
+      title: base(file),
+      sub: file,
     };
   }
 
