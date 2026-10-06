@@ -279,9 +279,10 @@ async function saveImageChat(f, workdir, id = 'image-chat', headers = {}) {
 
 /**
  * Настоящий модуль чата получает проект с двумя реальными временными корнями.
- * Auth проверяется отдельным сценарием через настоящий общий guard.
+ * Auth проверяется отдельным сценарием через настоящий общий guard; `adapter` дополняет
+ * тестового исполнителя объявленными возможностями.
  */
-async function httpFixture(t) {
+async function httpFixture(t, adapter = {}) {
   const f = await fixture(t);
   const executor = {
     id: 'test-provider',
@@ -289,6 +290,7 @@ async function httpFixture(t) {
     run: async () => {
       throw new Error('Чтение картинки не должно запускать модель');
     },
+    ...adapter,
   };
   const http = await chatAppFixture(t, {
     root: f.root,
@@ -341,6 +343,33 @@ test('CHAT-IMG-06: HTTP отдаёт bytes/MIME/headers и читает теку
     assert.equal(response.statusCode, 400);
     assert.match(response.headers['cache-control'], /no-store/);
   }
+});
+
+test('CHAT-IMG-06b: каталог картинок исполнителя читается вне рабочей папки', async (t) => {
+  // Codex сохраняет сгенерированную картинку в своём каталоге, а не в рабочей папке.
+  // Каталог объявляет адаптер; отсутствующий каталог не ломает чтение из самой папки.
+  let generated = '';
+  const f = await httpFixture(t, {
+    imageRoots: () => [generated, path.join(generated, 'missing')],
+  });
+
+  generated = path.join(f.root, 'generated');
+
+  await saveImageChat(f, { kind: 'path', path: f.cwd });
+  await fs.mkdir(generated, { recursive: true });
+  await fs.writeFile(path.join(generated, 'gen.png'), CHAT_IMAGE_FIXTURES.png);
+  await fs.writeFile(path.join(f.cwd, 'frame.png'), CHAT_IMAGE_FIXTURES.png);
+
+  for (const requested of [path.join(generated, 'gen.png'), 'frame.png']) {
+    const response = await f.app.inject(imageUrl(requested));
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.rawPayload.equals(CHAT_IMAGE_FIXTURES.png), true);
+  }
+
+  const outside = await f.app.inject(imageUrl(path.join(f.outside, 'frame.png')));
+
+  assert.equal(outside.statusCode, 403);
 });
 
 test('CHAT-IMG-07: HTTP отказы не кэшируются и смена workdir снимает старый доступ', async (t) => {

@@ -288,11 +288,12 @@ function pathOf(row) {
   return typeof row.sub === 'string' ? row.sub : '';
 }
 
-// Картинка, которую агент рассмотрел инструментом Read, показывается после успешного итога.
-// Адрес даёт только маршрут рабочей папки разговора: внешний URL и готовый адрес /api
-// из пути инструмента в ленту не попадают, а сервер отдаёт лишь растр из этой папки.
+// Картинка, которую агент рассмотрел (Read) или создал (GenerateImage), показывается
+// после успешного итога. Адрес даёт только маршрут картинок разговора: внешний URL и готовый
+// адрес /api из пути инструмента в ленту не попадают, а сервер отдаёт лишь растр из
+// рабочей папки или объявленного исполнителем каталога.
 function imageOf(row) {
-  if (row.name !== 'Read' || !row.res?.ok) {
+  if (!IMAGE_STEPS.has(row.name) || !row.res?.ok) {
     return '';
   }
 
@@ -315,10 +316,13 @@ function isNested(row) {
   return Boolean(row.parent) || row.sub === true;
 }
 
+const IMAGE_STEPS = new Set(['Read', 'GenerateImage']);
+
 // Иконка и подпись вида шага.
 const KIND = {
   Bash: { ico: '❯', cls: 'bash' },
   Read: { ico: '👁', cls: 'read' },
+  GenerateImage: { ico: '🖼', cls: 'read' },
   Write: { ico: '✎', cls: 'write' },
   Edit: { ico: '✎', cls: 'write' },
   NotebookEdit: { ico: '✎', cls: 'write' },

@@ -7,6 +7,7 @@ import {
   base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../../../shared/chatSteps.ts';
 
 // Rich fileChange у app-server может содержать сотни файлов и мегабайты unified
 // diff. Шаг одновременно уходит в SSE и историю, поэтому лимитируем сам контракт,
@@ -57,6 +58,8 @@ interface CodexItem {
   durationMs?: unknown;
   revisedPrompt?: unknown;
   savedPath?: unknown;
+  saved_path?: unknown;
+  revised_prompt?: unknown;
 }
 
 // Элементы, у которых нет вызова инструмента. Одни показывают отдельные ветки
@@ -345,6 +348,20 @@ function toolOf(item: CodexItem | null | undefined): Record<string, unknown> | n
     };
   }
 
+  // Сгенерированная картинка: байты из `result` в ленту не идут, строка несёт только путь
+  // сохранённого файла. Миниатюру по нему рисует лента, отдаёт — маршрут картинок чата.
+  if (item.type === 'imageGeneration' || item.type === 'image_generation') {
+    const file = textOf(item.savedPath ?? item.saved_path);
+    const prompt = textOf(item.revisedPrompt ?? item.revised_prompt);
+
+    return {
+      id,
+      name: 'GenerateImage',
+      title: cut(prompt || base(file), 200),
+      sub: file,
+    };
+  }
+
   if (item.type === 'mcp_tool_call' || item.type === 'mcpToolCall') {
     const server = String(item.server || item.server_name || 'mcp');
     const tool = String(item.tool || item.tool_name || item.name || 'вызов');
@@ -528,6 +545,10 @@ export function createCodexStepNormalizer({
       const streamed = commandOutputs.get(id) || '';
       if (!resultOf(item) && streamed) completed = { ...item, aggregatedOutput: streamed };
       commandOutputs.delete(id);
+    }
+    // Неудачная генерация оставляет итогу текст ошибки, base64 не уходит ни в каком исходе.
+    if (item.type === 'imageGeneration' || item.type === 'image_generation') {
+      completed = { ...item, result: itemOk(item) ? STEP_IMAGE_TEXT : undefined };
     }
     const tool = ensureTool(completed, out);
     if (!tool) return;

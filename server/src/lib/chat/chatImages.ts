@@ -8,6 +8,8 @@ export const CHAT_IMAGE_MAX_BYTES = 10_000_000;
 export interface ChatImageRequest {
   cwd: string;
   extraDirs?: string[];
+  // Каталоги исполнителя вне рабочей папки; несуществующий каталог просто не участвует.
+  imageRoots?: string[];
   requested: unknown;
 }
 
@@ -15,11 +17,12 @@ export type ChatImageResult = { bytes: Buffer; type: string } | { status: number
 export type ChatImageFileSystem = Pick<typeof fs, 'realpath' | 'open'>;
 
 /**
- * Читает подтверждённый растровый файл из текущей рабочей области разговора.
+ * Читает подтверждённый растровый файл из текущей рабочей области разговора
+ * или из объявленного исполнителем каталога картинок.
  * Возвращает только байты или контролируемую ошибку, без путей и сырых fs сообщений.
  */
 export async function readChatImage(
-  { cwd, extraDirs = [], requested }: ChatImageRequest,
+  { cwd, extraDirs = [], imageRoots = [], requested }: ChatImageRequest,
   fileSystem: ChatImageFileSystem = fs,
 ): Promise<ChatImageResult> {
   if (typeof requested !== 'string' || !requested.trim() || requested.length > 4096 ||
@@ -28,8 +31,11 @@ export async function readChatImage(
   }
 
   try {
-    const requestedRoots = [cwd, ...extraDirs].map((root) => path.resolve(root));
-    const canonicalRoots = await Promise.all(requestedRoots.map((root) => fileSystem.realpath(root)));
+    const workRoots = [cwd, ...extraDirs].map((root) => path.resolve(root));
+    const workCanonical = await Promise.all(workRoots.map((root) => fileSystem.realpath(root)));
+    const executorRoots = await existingRoots(imageRoots, fileSystem);
+    const requestedRoots = [...workRoots, ...executorRoots.map(([root]) => root)];
+    const canonicalRoots = [...workCanonical, ...executorRoots.map(([, canonical]) => canonical)];
     const file = path.resolve(cwd, requested);
 
     if (!requestedRoots.some((root) => isWithinChatImageRoot(file, root))) {
@@ -100,6 +106,27 @@ export async function readChatImage(
 
     return { status: 500, error: 'image_read_failed' };
   }
+}
+
+/**
+ * Каталог картинок исполнителя появляется только после первой генерации.
+ * Отсутствующий каталог отбрасывается, а не превращает любой запрос в отказ.
+ */
+async function existingRoots(
+  roots: string[],
+  fileSystem: ChatImageFileSystem,
+): Promise<Array<[string, string]>> {
+  const found = await Promise.all(roots.map(async (root): Promise<[string, string] | null> => {
+    const resolved = path.resolve(root);
+
+    try {
+      return [resolved, await fileSystem.realpath(resolved)];
+    } catch {
+      return null;
+    }
+  }));
+
+  return found.filter((entry): entry is [string, string] => entry !== null);
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = {

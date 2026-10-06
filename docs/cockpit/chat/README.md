@@ -43,7 +43,7 @@
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
-- [Картинка в строке Read: миниатюра через маршрут рабочей папки вместо «[изображение]»](step-images.md)
+- [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
 - [Приглушённые подписи инструментов и служебных сведений](activity-visual-hierarchy.md)
 - [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
 - [Общая линия хода, иконки ответов и выравнивание](turn-rail.md)

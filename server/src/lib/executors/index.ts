@@ -274,6 +274,9 @@ export interface ExecutorAdapter {
   scopedWorkspace?: boolean | ((config: unknown) => unknown);
   workdir?: WorkdirCapability | ((config: unknown) => unknown);
   validateWorkdir?: WorkdirValidator;
+  // Каталоги, куда исполнитель сам сохраняет картинки вне рабочей папки (генерация).
+  // Маршрут картинок чата читает из них растр так же строго, как из рабочей папки.
+  imageRoots?: (config: unknown) => string[];
   directSshPolicy?: unknown;
   settings?: unknown;
   credentials?: unknown;

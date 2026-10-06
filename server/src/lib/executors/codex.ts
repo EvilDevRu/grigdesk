@@ -2641,6 +2641,10 @@ export default {
   statusPage: 'https://status.openai.com',
   // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
   workdir: { switch: 'resume', roots: 'multi' },
+  // Встроенная генерация картинок сохраняет файл в CODEX_HOME, а не в рабочей папке.
+  imageRoots() {
+    return [path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'generated_images')];
+  },
   directSshPolicy: { enforcement: 'command-hook' },
   settings: [directSshSetting()],
 

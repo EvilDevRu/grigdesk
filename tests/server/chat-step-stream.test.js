@@ -11,6 +11,7 @@ import { toClaudeSteps } from '../../server/src/lib/executors/_claudeSteps.ts';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
 import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimiSteps.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
+import { STEP_IMAGE_TEXT } from '../../shared/chatSteps.ts';
 
 test('Claude Write объявляет изменяемый файл в нейтральном шаге', () => {
   const steps = toClaudeSteps({
@@ -327,6 +328,56 @@ test('Codex imageView приходит строкой Read с путём кар�
     sub: '/repo/.state/artifacts/shot.png',
   });
   assert.equal(steps.find((step) => step.k === 'res')?.ok, true);
+});
+
+test('Codex imageGeneration приходит строкой GenerateImage без base64', () => {
+  // Codex кладёт байты картинки в `result`; в ленту и историю они попадать не должны —
+  // строка несёт путь сохранённого файла, а итог — общую заглушку картинки.
+  const normalize = createCodexStepNormalizer();
+  const base64 = 'iVBORw0KGgoAAAANSUhEUgAAB'.repeat(40);
+  const steps = [
+    ...normalize({
+      method: 'item/started',
+      params: {
+        item: {
+          type: 'imageGeneration',
+          id: 'gen-1',
+          status: 'inProgress',
+          result: '',
+        },
+      },
+    }),
+    ...normalize({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'imageGeneration',
+          id: 'gen-1',
+          status: 'completed',
+          revisedPrompt: 'Рыжий кот на подоконнике',
+          savedPath: '/home/u/.codex/generated_images/t-1/exec-1.png',
+          result: base64,
+        },
+      },
+    }),
+  ];
+  const tools = steps.filter((step) => step.k === 'tool');
+
+  assert.deepEqual(tools.at(-1), {
+    k: 'tool',
+    id: 'gen-1',
+    name: 'GenerateImage',
+    title: 'Рыжий кот на подоконнике',
+    sub: '/home/u/.codex/generated_images/t-1/exec-1.png',
+  });
+  assert.deepEqual(steps.find((step) => step.k === 'res'), {
+    k: 'res',
+    id: 'gen-1',
+    ok: true,
+    text: STEP_IMAGE_TEXT,
+    lines: 1,
+  });
+  assert.equal(JSON.stringify(steps).includes('iVBORw0KGgo'), false);
 });
 
 test('Codex события без вызова показываются служебной строкой', () => {

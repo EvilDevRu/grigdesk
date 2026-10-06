@@ -262,6 +262,7 @@ interface ChatExecutor {
   compaction?: { kind: string; message?: string };
   workdir?: ExecutorAdapter['workdir'];
   validateWorkdir?: ExecutorAdapter['validateWorkdir'];
+  imageRoots?: ExecutorAdapter['imageRoots'];
 }
 
 interface ExecutorTurnOptions extends ExecutorRunInput {
@@ -3741,6 +3742,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   });
 
   // Рабочая область берётся из durable чата, а query задаёт только запрошенный файл.
+  // Каталог картинок, сохранённых самим исполнителем, объявляет его адаптер.
   // no-store ставится до schema validation, чтобы отказ тоже не оставался в кэше.
   fastify.get<ChatRoute>('/api/chat/:id/image', {
     schema: {
@@ -3770,9 +3772,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return reply.code(404).send({ error: 'no_workdir' });
     }
 
+    const ref = normalizeModelRef(record.modelRef);
+    const executor = ref ? await executorResolver(ref.provider) : null;
     const result = await readChatImage({
       cwd: workspace.cwd,
       extraDirs: workspace.extraDirs,
+      imageRoots: executor?.imageRoots?.(config) || [],
       requested: request.query.path,
     });
 

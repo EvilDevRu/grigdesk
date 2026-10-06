@@ -212,6 +212,22 @@ test('StepList показывает картинку только у Read с у�
   }
 });
 
+test('StepList показывает сгенерированную картинку у строки GenerateImage', async (t) => {
+  const steps = imageRead({}, {
+    name: 'GenerateImage',
+    title: 'Рыжий кот',
+    sub: '/home/u/.codex/generated_images/t-1/exec-1.png',
+  });
+  const wrapper = await mountStepList(t, steps, { chatId: 'c1' });
+
+  await wrapper.get('.step-disclosure').trigger('click');
+
+  const src = '/api/chat/c1/image?path=%2Fhome%2Fu%2F.codex%2Fgenerated_images%2Ft-1%2Fexec-1.png';
+
+  assert.equal(wrapper.get('.step-image img').attributes('src'), src);
+  assert.equal(wrapper.find('.body.res').exists(), false, 'рядом с картинкой осталась заглушка');
+});
+
 test('StepList заменяет неотданную картинку честной подписью', async (t) => {
   const wrapper = await mountStepList(t, imageRead(), { chatId: 'c1' });
 
