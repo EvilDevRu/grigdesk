@@ -253,31 +253,8 @@
                 {{ runModelLabel(m) }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
               </span>
             </div>
-            <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
-                 а не наперегонки (два CLI на одну сессию убивают друг друга). -->
-            <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
             <div v-if="m.kind === 'in-turn'" class="m-delivery" data-role="chat-in-turn-delivery">
               {{ inTurnDeliveryText(m.receipt?.state, m.receipt?.error) }}
-            </div>
-            <!-- Сервер ещё не подтвердил приём сообщения. Пока подтверждения нет, агент не
-                 работает, поэтому здесь честное состояние доставки, а не «думает…». -->
-            <div
-              v-if="m.role === 'user' && m.delivery === 'sending'"
-              class="m-delivery"
-              :class="deliveryView(m).tone"
-              data-role="chat-delivery"
-            >
-              <span>{{ deliveryView(m).text }}</span>
-              <UiButton
-                v-if="deliveryView(m).retry"
-                variant="outline"
-                tone="accent"
-                data-role="chat-delivery-retry"
-                :disabled="frozen"
-                @click="retryDelivery(m)"
-              >
-                Отправить ещё раз
-              </UiButton>
             </div>
             <!-- Действия стоят между репликами в порядке хода. После завершения
                  участки свёрнуты отдельно, а старт остаётся перед первым ответом. -->
@@ -297,7 +274,8 @@
               </span>
               <ChatInTurnReply :block="m" :chat-id="sid" @click="onMarkdownClick" />
             </div>
-            <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow"
+            <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))
+                   || deliveryMark(m)" class="mrow"
                  :class="{ 'agent-reply': m.role === 'assistant' }">
               <span v-if="m.role === 'assistant'" class="reply-mark" role="img" aria-label="Ответ агента">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -308,10 +286,50 @@
               <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
               <ChatMarkdown v-if="m.role === 'assistant'" :text="m.text || ''" :chat-id="sid"
                             @click="onMarkdownClick" />
-              <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
-                v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
-                :datetime="messageTimeIso(m.sentAt)" v-tooltip="messageTimeTitle(m.sentAt)"
-                :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
+              <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><span
+                v-if="m.role === 'user' && (validMessageTime(m.sentAt) || deliveryMark(m)?.kind === 'pending')"
+                class="m-meta">
+                <time v-if="validMessageTime(m.sentAt)" class="m-time"
+                  :datetime="messageTimeIso(m.sentAt)" v-tooltip="messageTimeTitle(m.sentAt)"
+                  :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time>
+                <span v-if="deliveryMark(m)?.kind === 'pending'" class="m-pending" role="img"
+                  data-role="chat-message-pending" :aria-label="deliveryMark(m).label"
+                  v-tooltip="deliveryMark(m).label">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <template v-if="deliveryMark(m).icon === 'offline'">
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                      <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+                      <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+                      <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
+                      <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+                      <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                      <line x1="12" y1="20" x2="12.01" y2="20" />
+                    </template>
+                    <template v-else>
+                      <circle cx="12" cy="12" r="9" />
+                      <polyline points="12 7 12 12 15 14" />
+                    </template>
+                  </svg>
+                </span>
+              </span></div>
+              <!-- Сервер не подтвердил приём: значок у пузыря, как в Telegram. Повтор идёт тем же
+                   turnId, поэтому дошедшее всё-таки сообщение второй раз агента не запустит. -->
+              <UiIconButton
+                v-if="deliveryMark(m)?.kind === 'failed'"
+                :label="`${deliveryMark(m).label}. Повторить отправку`"
+                v-tooltip="`${deliveryMark(m).label}. Нажмите, чтобы повторить отправку`"
+                data-context="chat-delivery-retry"
+                :disabled="frozen"
+                @click="confirmRetryDelivery(m)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <line x1="12" y1="7.5" x2="12" y2="12.5" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              </UiIconButton>
               <UiIconButton
                 v-if="m.text"
                 class="copy"
@@ -623,6 +641,7 @@ import ChatInTurnReply from './ChatInTurnReply.vue';
 import { inTurnComposerState, inTurnDeliveryText } from './chatInTurn.ts';
 import { createChatTimelineProjector, groupChatTimeline } from './chatTimeline.ts';
 import ChatStatusBar from './ChatStatusBar.vue';
+import { messageDeliveryMark } from './messageDeliveryMark.ts';
 import { chatStatus } from './chatStatus.ts';
 import { providerUsageSummary } from '../../features/providers/providerUsageSummary.ts';
 import ChatQuestion from './ChatQuestion.vue';
@@ -708,6 +727,7 @@ function onAttachmentClick(event, attachment) {
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
   || (chat.archived || []).find((s) => s.id === props.sid)
   || null);
+const runtime = computed(() => chat.runtimeFor?.(props.sid) || null);
 const inTurnRun = computed(() => chat.inTurnFor?.(props.sid) || null);
 const inTurnComposer = computed(() => inTurnComposerState({
   run: inTurnRun.value,
@@ -722,6 +742,7 @@ const timeline = computed(() => timelineProjector.project(
   sess.value?.steps || [],
   ['running', 'legacy', 'background'].includes(status.value.phase),
   inTurnRun.value,
+  runtime.value?.active ? runtime.value.runId : '',
 ));
 
 watch(() => props.sid, () => timelineProjector.clear(), { flush: 'sync' });
@@ -763,7 +784,7 @@ prov.load();
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
 const current = computed(() => prov.modelOf(sess.value?.modelRef || sess.value?.model));
 const status = computed(() => {
-  const view = chatStatus(sess.value || { id: props.sid }, chat.runtimeFor?.(props.sid) || null, {
+  const view = chatStatus(sess.value || { id: props.sid }, runtime.value, {
     providerId: current.value.provider?.id || sess.value?.modelRef?.provider || '',
     modelId: current.value.id,
     modelLabel: current.value.model?.name || current.value.id,
@@ -1533,33 +1554,28 @@ function resumeTextFor(m) {
   return typeof reason === 'string' && Object.hasOwn(RESUME_TEXT, reason) ? RESUME_TEXT[reason] : '';
 }
 
-// Строка доставки реплики, приём которой сервер ещё не подтвердил, — по состоянию из
-// стора. Без записи о доставке окно ещё сверяет реплику с сервером (после F5 или hello).
-const DELIVERY_VIEWS = Object.freeze({
-  posting: {
-    text: '⏳ Отправляется…',
-    tone: '',
-    retry: false,
-  },
-  retrying: {
-    text: '📡 Нет связи с сервером — повторяю отправку…',
-    tone: 'warn',
-    retry: false,
-  },
-  lost: {
-    text: '⚠ Не доставлено: сервер не подтвердил приём.',
-    tone: 'warn',
-    retry: true,
-  },
-  checking: {
-    text: '⏳ Проверяю доставку…',
-    tone: '',
-    retry: false,
-  },
-});
+function deliveryMark(m) {
+  return messageDeliveryMark(m, chat.deliveries?.[m.turnId]?.state);
+}
 
-function deliveryView(m) {
-  return DELIVERY_VIEWS[chat.deliveries[m.turnId]?.state] || DELIVERY_VIEWS.checking;
+/**
+ * Повтор недоставленного сообщения — осознанное действие: значок мог быть задет случайно.
+ * Общий диалог проекта спрашивает подтверждение и только потом отправляет тот же turnId.
+ */
+async function confirmRetryDelivery(m) {
+  if (!sess.value || frozen.value) {
+    return;
+  }
+
+  const ok = await confirmDialog(
+    'Сервер не подтвердил приём этого сообщения. Повтор безопасен: если оно всё-таки дошло, '
+      + 'агент не выполнит его второй раз.',
+    { title: 'Сообщение не доставлено', okText: 'Повторить отправку' },
+  );
+
+  if (ok) {
+    await retryDelivery(m);
+  }
 }
 
 // Повтор идёт тем же turnId: если прежний запрос всё-таки дошёл, второго запуска не будет.
@@ -2060,8 +2076,26 @@ function skipQuestion() {
   padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
 /* Время запроса — внутри нижнего правого угла пузыря, как в Telegram: часы и минуты
    не спорят с текстом, полная дата доступна по наведению. */
-.m-time { float: right; margin: .72em 0 0 9px; color: color-mix(in srgb, var(--ink-mid) 82%, transparent);
-  font-size: 10px; font-weight: 400; line-height: 1; white-space: nowrap; user-select: none; }
+.m-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  float: right;
+  margin: .72em 0 0 9px;
+  color: color-mix(in srgb, var(--ink-mid) 82%, transparent);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+.m-pending {
+  display: inline-flex;
+}
+.m-pending svg {
+  width: 11px;
+  height: 11px;
+}
 /* Нейтральный знак ответа занимает тот же столбец, что и знак действия в StepList.
    5px слева учитывают поле и рамку кнопки; текст всех строк начинается после 27px. */
 .msg.assistant { align-self: stretch; }
@@ -2142,11 +2176,8 @@ function skipQuestion() {
   border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; text-align: center; }
 
 /* Вложения в сообщениях: картинка открывается в общем viewer-е, файл — как оригинал. */
-.m-queued { font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
-.msg.user .m-queued { text-align: right; }
 .m-delivery { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px;
   font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
-.m-delivery.warn { color: var(--warn); }
 .m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg.user .m-atts { justify-content: flex-end; }
 .m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block;

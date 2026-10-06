@@ -120,6 +120,7 @@ export async function chatAppFixture(t, {
   root: givenRoot = '',
   onEvent = null,
   withSsePlugin = false,
+  backgroundStopGraceMs,
   shutdownGraceMs = 30,
   shutdownInterruptMs = 150,
   extraRoutes = null,
@@ -192,6 +193,7 @@ export async function chatAppFixture(t, {
     internalToken: 'test',
     modelsRegistry: async () => ({ 'test-provider': [{ id: 'test-model', efforts: [] }] }),
     executorResolver: async () => executor,
+    backgroundStopGraceMs,
     shutdownGraceMs,
     shutdownInterruptMs,
   });

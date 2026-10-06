@@ -262,11 +262,12 @@ function projectTimeline(
   steps: TimelineStep[],
   sending: boolean,
   run: ChatInTurnRun | null,
+  activeRunId: string,
   projectTurn: (turn: TimelineTurn) => ChatTimelineRow[],
 ): ChatTimelineRow[] {
   const rows = messages.map(messageRow);
   const turns = new Map<string, TimelineTurn>();
-  const activeKey = sending ? (run?.active ? run.runId : 'live') : '';
+  const activeKey = sending ? (activeRunId || (run?.active ? run.runId : 'live')) : '';
 
   for (const row of rows) {
     const key = row.message.runId;
@@ -293,8 +294,10 @@ function projectTimeline(
   }
 
   if (activeKey && !turns.has(activeKey)) {
-    const parent = messages.findIndex((message) => message.role === 'user'
-      && !!run?.parentTurnId && message.turnId === run.parentTurnId);
+    const parent = run?.runId === activeKey
+      ? messages.findIndex((message) => message.role === 'user'
+        && !!run.parentTurnId && message.turnId === run.parentTurnId)
+      : -1;
 
     turns.set(activeKey, {
       key: activeKey,
@@ -308,11 +311,11 @@ function projectTimeline(
   const current = turns.get(activeKey || run?.runId || '');
 
   if (current) {
-    if (!current.steps.length) {
+    if (current.live && !current.steps.length) {
       current.steps = steps;
     }
 
-    for (const entry of run?.entries || []) {
+    for (const entry of run?.runId === current.key ? run.entries : []) {
       if (isInTurnReceipt(entry)) {
         continue;
       }
@@ -366,8 +369,9 @@ export function chatTimeline(
   steps: TimelineStep[],
   sending: boolean,
   run: ChatInTurnRun | null,
+  activeRunId = '',
 ): ChatTimelineRow[] {
-  return projectTimeline(messages, steps, sending, run, turnRows);
+  return projectTimeline(messages, steps, sending, run, activeRunId, turnRows);
 }
 
 /**
@@ -400,6 +404,7 @@ export function createChatTimelineProjector() {
       steps: TimelineStep[],
       sending: boolean,
       run: ChatInTurnRun | null,
+      activeRunId = '',
     ): ChatTimelineRow[] {
       const alive = new Set<string>();
       /**
@@ -443,7 +448,7 @@ export function createChatTimelineProjector() {
 
         return rows;
       };
-      const result = projectTimeline(messages, steps, sending, run, projectTurn);
+      const result = projectTimeline(messages, steps, sending, run, activeRunId, projectTurn);
 
       for (const key of cache.keys()) {
         if (!alive.has(key)) {

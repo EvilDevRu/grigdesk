@@ -908,7 +908,7 @@ export const useChatStore = defineStore('chat', {
         turnId: data.turnId || '',
         active: true,
         compact: !!data.compact,
-        source: 'managed',
+        source: data.source === 'background' ? 'background' : 'managed',
         snapshot: snapshot?.chatKey === chatKey && snapshot.runId === data.runId ? snapshot : null,
       };
       this._touchRun(chatKey);
@@ -1235,7 +1235,7 @@ export const useChatStore = defineStore('chat', {
 
         // Даже уже видимый pid не доказывает, что страницы уточнений этого run записаны.
         // Пока сверка не закончилась, pending остаётся на сервере как страховка.
-        if (p.runId && !await this._reconcileInTurn(place.id, p.runId)) {
+        if (p.runId && p.source !== 'background' && !await this._reconcileInTurn(place.id, p.runId)) {
           continue;
         }
 
@@ -1403,7 +1403,7 @@ export const useChatStore = defineStore('chat', {
       // Строку хода старого синхронного запуска снимаем здесь. У принятого хода её
       // снимает chat-done или сверка активных ходов: в очереди чата мог стартовать
       // следующий ход, и ответ предыдущего не должен гасить его «думает…».
-      if (!p.turnId && ownsRuntime) {
+      if (!p.turnId && p.source !== 'background' && ownsRuntime) {
         s.sending = false;
       }
       // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
@@ -2092,7 +2092,31 @@ export const useChatStore = defineStore('chat', {
           // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
           const s = this._find(d.chatKey);
 
+          const previousRunId = this.runtimeRuns[d.chatKey]?.runId;
+
           this._setRuntimeRun(d.chatKey, d);
+
+          if (d.source === 'background') {
+            if (this.inTurnRuns[d.chatKey]) {
+              this.inTurnRuns[d.chatKey].active = false;
+            }
+            if (!s) {
+              this._pullChat(d.chatKey, false);
+
+              return;
+            }
+
+            s.compacting = false;
+            // «Стоп» относился к прошлому ходу: фоновый ход начинается со свободной кнопкой,
+            // иначе она висела бы в «Останавливаю…» до его конца.
+            s.stopping = false;
+            this._hydrateLiveRun(s, d, previousRunId);
+            s.turnStartedAt = typeof d.elapsedMs === 'number'
+              ? turnStartFromElapsed(d.elapsedMs)
+              : Date.now();
+
+            return;
+          }
 
           if (d.runId) {
             this._mergeInTurnSnapshot(d.chatKey, d.runId, d.inTurn, d.turnId);
@@ -2157,10 +2181,20 @@ export const useChatStore = defineStore('chat', {
             return;
           }
 
+          if (current?.finishing) {
+            return;
+          }
+
+          const delayed = !!d.turnId || d.source === 'background';
           const revision = this._touchRun(d.chatKey);
 
           if (current) {
-            current.active = false;
+            if (delayed) {
+              current.finishing = true;
+            } else {
+              current.active = false;
+            }
+
             current.queuedCount = Number(d.queued) || 0;
           }
           if (inTurn?.active && (!d.runId || inTurn.runId === d.runId)) {
@@ -2173,7 +2207,15 @@ export const useChatStore = defineStore('chat', {
           // Снять строку хода и кольцо. queued — принятые ходы этого чата, ещё ждущие
           // очереди: пока они есть, работа продолжается и «думает…» остаётся.
           const finish = () => {
-            if (this.runRevisions[d.chatKey] !== revision) {
+            if (delayed && current) {
+              if (this.runtimeRuns[d.chatKey] !== current || !current.finishing) {
+                return;
+              }
+
+              current.active = false;
+              delete current.finishing;
+              this._touchRun(d.chatKey);
+            } else if (this.runRevisions[d.chatKey] !== revision) {
               return;
             }
 
@@ -2193,7 +2235,7 @@ export const useChatStore = defineStore('chat', {
           };
           // Итог принятого хода уже лежит в pending: строку хода снимаем, когда ответ
           // встал в переписку, иначе между ними мелькала бы пустота.
-          if (d.turnId) {
+          if (delayed) {
             this._collectPending().finally(finish);
           }
           else {
@@ -2282,6 +2324,35 @@ export const useChatStore = defineStore('chat', {
       this.pending = fresh;
     },
     /**
+     * SSE и сверка active восстанавливают одинаковые метрики живого запуска.
+     * Новый run заменяет ленту целиком, прежний принимает лишь более полный или свежий снимок.
+     */
+    _hydrateLiveRun(s, a, previousRunId) {
+      s.compacting = false;
+      s.sending = true;
+      s.progressTokens = a.tokens || 0;
+      s.progressTokensEstimate = a.tokensIsEstimate === true;
+      s.liveContext = 0;
+      s.liveContextUsage = null;
+      s.liveContextCache = null;
+      applyLiveContextUsage(s, a);
+
+      if (a.runId && a.runId !== previousRunId) {
+        s.steps = Array.isArray(a.steps) ? a.steps : [];
+
+        return;
+      }
+
+      const mine = s.steps?.length || 0;
+      const theirs = a.steps?.length || 0;
+      const myLast = s.steps?.[mine - 1]?.at || 0;
+      const theirLast = a.steps?.[theirs - 1]?.at || 0;
+
+      if (theirs > mine || theirLast > myLast) {
+        s.steps = a.steps;
+      }
+    },
+    /**
      * Ходы, идущие ПРЯМО СЕЙЧАС, — по данным сервера. Правда о работе агента живёт в
      * процессе сервера (activeRuns), а не в окне: иначе второе устройство не знает ни
      * что чат занят, ни чем именно. Зовём при загрузке (после F5) и на восстановление
@@ -2338,6 +2409,13 @@ export const useChatStore = defineStore('chat', {
         }
 
         const a = byKey.get(s.id);
+        const previous = this.runtimeRuns[s.id];
+        const previousRunId = previous?.runId;
+
+        if (previous?.finishing && (!a || a.runId === previous.runId)) {
+          continue;
+        }
+
         const waiting = waitingTurns.get(s.id) || [];
 
         if (a) {
@@ -2348,7 +2426,7 @@ export const useChatStore = defineStore('chat', {
           this._touchRun(s.id);
         }
 
-        if (a?.runId) {
+        if (a?.runId && a.source !== 'background') {
           this._mergeInTurnSnapshot(s.id, a.runId, a.inTurn, a.turnId);
         } else if (this.inTurnRuns[s.id]) {
           this.inTurnRuns[s.id].active = false;
@@ -2378,28 +2456,9 @@ export const useChatStore = defineStore('chat', {
           s.compacting = true; s.sending = false;
           s.progressTokens = 0; s.progressTokensEstimate = false; s.turnStartedAt = 0;
         } else if (a) {
-          s.compacting = false; s.sending = true; s.progressTokens = a.tokens || 0;
-          s.progressTokensEstimate = a.tokensIsEstimate === true;
-          // Начало хода это окно не видело (F5 или другое устройство), но сервер сказал,
-          // сколько ход уже идёт, — переносим отметку на часы ЭТОГО окна. Серверный
-          // `startedAt` напрямую не годится: часы машин расходятся. Старый сервер без
-          // длительности — таймер молчит: чужое время хуже, чем никакого.
+          this._hydrateLiveRun(s, a, previousRunId);
+          // Длительность сервера переносим на часы окна, не сравнивая абсолютные даты.
           s.turnStartedAt = turnStartFromElapsed(a.elapsedMs);
-          // Ход идёт час, а сохранённая цифра контекста — с прошлого хода (у claude она
-          // бывает ещё и ДО автокомпакта CLI). Поэтому живой размер тоже восстанавливаем.
-          s.liveContext = 0;
-          s.liveContextUsage = null;
-          s.liveContextCache = null;
-          applyLiveContextUsage(s, a);
-          // Вместе с живой строкой возвращаем и уже показанную ленту шагов текущего хода.
-          // Серверную копию берём, если она полнее ИЛИ свежее нашей: обе стороны держат
-          // скользящее окно одного размера, поэтому у отставшего окна (связь рвалась,
-          // шаги прошли мимо) длина такая же, а хвост — вчерашний.
-          const mine = s.steps?.length || 0;
-          const theirs = a.steps?.length || 0;
-          const myLast = s.steps?.[mine - 1]?.at || 0;
-          const theirLast = a.steps?.[theirs - 1]?.at || 0;
-          if (theirs > mine || theirLast > myLast) s.steps = a.steps;
         } else if (waiting.length) {
           // Предыдущий ход только что кончился, следующий вот-вот стартует: чат занят.
           s.sending = true;
@@ -2412,7 +2471,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
-      await Promise.all(accepted.filter((a) => a?.runId)
+      await Promise.all(accepted.filter((a) => a?.runId && a.source !== 'background')
         .map((a) => this._reconcileInTurn(a.chatKey, a.runId)));
     },
     /**

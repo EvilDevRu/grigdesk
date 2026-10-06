@@ -31,6 +31,7 @@ import { ChatAssistantMessages } from '../../lib/chat/assistantMessages.ts';
 import { ChatAssistantPublisher } from '../../lib/chat/assistantPublisher.ts';
 import { InTurnHistory } from '../../lib/chat/inTurnHistory.ts';
 import { InTurnMessages } from '../../lib/chat/inTurnMessages.ts';
+import { ChatBackgroundRuns, visibleExtraDirs } from '../../lib/chat/backgroundRuns.ts';
 import { ChatLiveSessions } from '../../lib/chat/liveSessions.ts';
 import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
@@ -297,6 +298,7 @@ interface ChatModuleOptions {
   taskExists?: (taskId: string) => Promise<boolean>;
   // Бюджеты слива на остановке: сколько ждать естественного конца хода и сколько —
   // после прерывания. Подменяются в тестах.
+  backgroundStopGraceMs?: number;
   shutdownGraceMs?: number;
   shutdownInterruptMs?: number;
 }
@@ -783,6 +785,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   const shutdownInterruptMs = Number.isInteger(opts.shutdownInterruptMs) && opts.shutdownInterruptMs! >= 0
     ? opts.shutdownInterruptMs!
     : SHUTDOWN_INTERRUPT_MS;
+  const backgroundStopGraceMs = Number.isInteger(opts.backgroundStopGraceMs)
+    && opts.backgroundStopGraceMs! >= 0
+    ? opts.backgroundStopGraceMs!
+    : 10_000;
+  const backgroundRuns = new ChatBackgroundRuns({
+    broadcast: (event, data) => fastify.sse.broadcast(event, data),
+    hiddenDirs: [path.join(config.chatsDir, 'attachments')],
+    managedActive: (key) => activeRuns.has(key),
+    queuedCount: (key) => turnLedger.queued(key).length,
+    log: fastify.log,
+  });
 
   /** Отказ новому ходу на остановке: окно покажет причину, человек повторит после подъёма. */
   function restartingReply(reply: FastifyReply) {
@@ -799,22 +812,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // после закрытого окна (chats/pending + SSE), поэтому доезжает во все окна разом.
   const liveSessions = new ChatLiveSessions({
     log: fastify.log,
-    onBackgroundStep: ({ chatKey, step }) => {
-      fastify.sse.broadcast('chat-step', { chatKey, step });
+    onBackgroundStart: ({ identity, session }) => {
+      backgroundRuns.start(identity, session);
     },
-    onBackgroundProgress: ({ chatKey, tokens, extra }) => {
-      const contextCache = normalizeContextCache((extra as Record<string, unknown> | null)?.contextCache);
-      const isEstimate = typeof (extra as Record<string, unknown> | null)?.tokensIsEstimate === 'boolean'
-        ? { tokensIsEstimate: (extra as Record<string, unknown>).tokensIsEstimate as boolean }
-        : {};
-
-      fastify.sse.broadcast('chat-progress', {
-        chatKey,
-        tokens,
-        ...isEstimate,
-        ...normalizeContextUsage(extra),
-        ...(contextCache ? { contextCache } : {}),
-      });
+    onBackgroundStep: ({ identity, step }) => {
+      backgroundRuns.step(identity, step as ChatStep);
+    },
+    onBackgroundProgress: ({ identity, tokens, extra }) => {
+      backgroundRuns.progress(identity, tokens, extra);
+    },
+    onSessionClosed: ({ sessionToken }) => {
+      backgroundRuns.closeSession(sessionToken);
     },
     // Состав живых процессов виден человеку («Настройки → Запуски»), поэтому его
     // изменения не должны ждать опроса. Событие означает «перечитай список», а не
@@ -822,23 +830,24 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     onChange: () => {
       fastify.sse.broadcast('chat-sessions', {});
     },
-    onBackgroundTurn: async ({ chatKey, result }) => {
-      try {
-        await writeOrphan({
-          id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey,
-          role: 'assistant',
-          ...normalizeExecutorContextCache(result as ExecutorRunResult),
-          unsolicited: true,
-          at: Date.now(),
-        });
-        fastify.sse.broadcast('chat-orphan', { chatKey });
-        fastify.log.info({ chatKey }, 'чат: непрошеный ход агента доставлен');
-      } catch (errorValue) {
-      const error = errorValue as ChatFailure;
-        fastify.log.error({ chatKey, err: error?.message }, 'чат: непрошеный ход не сохранён');
-      }
-    },
+    onBackgroundTurn: ({ chatKey, result, identity }) => backgroundRuns.publish(identity, async (runId) => {
+      await writeOrphan({
+        id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+        chatKey,
+        role: 'assistant',
+        ...normalizeExecutorContextCache(result as ExecutorRunResult),
+        unsolicited: true,
+        runId,
+        source: 'background',
+        at: Date.now(),
+      });
+      fastify.sse.broadcast('chat-orphan', {
+        chatKey,
+        runId,
+        source: 'background',
+      });
+      fastify.log.info({ chatKey }, 'чат: непрошеный ход агента доставлен');
+    }),
   });
   /** Ждать конца всех идущих ходов, но не дольше бюджета. */
   function settleRuns(ms: number): Promise<void> {
@@ -870,6 +879,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // Принятые ходы, не дождавшиеся очереди, на этом процессе уже не стартуют. Окно
       // подтверждение приёма получило, поэтому молчать нельзя: итог — явная ошибка.
       await refuseQueuedTurns(QUEUED_CUT_REPLY);
+      backgroundRuns.close();
+      await backgroundRuns.whenPublished(shutdownInterruptMs);
     }
   }
 
@@ -1068,7 +1079,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   const workdirTransitions = new ChatWorkdirTransitions({
     history,
     busy: (id) => draining || deletingChats.has(id) || !!savingChats.get(id)
-      || !!acceptedTurns.get(id) || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id }),
+      || !!acceptedTurns.get(id) || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id })
+      || backgroundRuns.has(id),
     lock: (id, job) => turnLocks.run({ chatKey: id }, job),
     resolve: workspaceOf,
     capability: async (record) => {
@@ -1200,7 +1212,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   fastify.get<ChatRoute>('/api/chat/active', async () => ({
     protocol: IN_TURN_PROTOCOL,
     // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
-    active: [...activeRuns.entries()].map(([chatKey, v]) => ({
+    active: [...[...activeRuns.entries()].map(([chatKey, v]) => ({
       chatKey,
       runId: v.runId,
       snapshot: v.snapshot,
@@ -1219,7 +1231,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // возвращал кольцо к цифре с прошлого хода (у claude она бывает ДО автокомпакта).
       ...normalizeContextUsage(v),
       ...(v.contextCache ? { contextCache: v.contextCache } : {}),
-    })),
+    })), ...backgroundRuns.list().filter((run) => !activeRuns.has(String(run.chatKey)))],
     // Принятые ходы, которые ждут своей очереди: после F5 окно показывает их «в очереди»,
     // а не голыми репликами без исполнителя.
     queued: turnLedger.queued().map((entry) => ({
@@ -1341,7 +1353,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         taskId: head.taskId,
         // Ход может идти и вне живой сессии (её тумблер выключили после старта), поэтому
         // занятость сверяем с реестром ходов, а не только с признаком самого пула.
-        running: activeRuns.has(session.chatKey) || turnLocks.isBusy({ chatKey: session.chatKey }),
+        running: activeRuns.has(session.chatKey) || turnLocks.isBusy({ chatKey: session.chatKey })
+          || backgroundRuns.has(session.chatKey),
       };
     }));
     return {
@@ -1363,7 +1376,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     if (!liveSessions.has(chatKey)) return reply.code(404).send({ error: 'no_live_session' });
 
     const force = String(request.query?.force || '') === '1';
-    const busy = activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey });
+    const busy = activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey }) || backgroundRuns.has(chatKey);
     if (busy && !force) {
       return reply.code(409).send({
         error: 'chat_busy',
@@ -1414,7 +1427,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return reply.code(400).send({ error: 'bad_chat_key' });
     }
     if (workdirTransitions.isBusy(chatKey) || acceptedTurns.get(chatKey)
-      || deletingChats.has(chatKey) || turnLocks.isBusy({ chatKey })) {
+      || deletingChats.has(chatKey) || turnLocks.isBusy({ chatKey }) || backgroundRuns.has(chatKey)) {
       return reply.code(409).send({ error: 'chat_busy', message: 'Сначала дождитесь окончания хода.' });
     }
 
@@ -1460,7 +1473,34 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   fastify.post<ChatRoute>('/api/chat/stop', async (request) => {
     const chatKey = String(request.body?.chatKey || '');
     const run = activeRuns.get(chatKey);
-    if (!run) return { ok: false, reason: 'нет активного хода' };
+
+    if (!run) {
+      const identity = backgroundRuns.runningIdentity(chatKey);
+
+      if (!identity) {
+        return { ok: false, reason: 'нет активного хода' };
+      }
+
+      dropPending(chatKey, 'Фоновый ход остановлен пользователем');
+
+      if (!liveSessions.interruptBackground(identity)) {
+        return { ok: false, reason: 'процесс фонового хода уже закрыт' };
+      }
+
+      const timer = setTimeout(() => {
+        if (backgroundRuns.runningIdentity(chatKey)?.runId === identity.runId) {
+          void liveSessions.closeGeneration(identity, 'фоновый ход не ответил на стоп');
+        }
+      }, backgroundStopGraceMs);
+
+      timer.unref?.();
+
+      return {
+        ok: true,
+        source: 'background',
+        runId: identity.runId,
+      };
+    }
     dropPending(chatKey, 'Ход остановлен пользователем');
     run.ac?.abort();
     fastify.log.info({ chatKey }, 'чат: ход остановлен пользователем');
@@ -2452,7 +2492,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...(userSentAt ? { userSentAt } : {}),
       });
       // Между проверкой очереди и постановкой в неё нет await: ход либо ждёт, либо стартует.
-      const queued = turnLocks.isBusy(prepared.scope);
+      const queued = turnLocks.isBusy(prepared.scope) || backgroundRuns.has(chatKey);
 
       launchAcceptedTurn(entry, opts, prepared, queued, releaseAcceptedTurn);
       launched = true;
@@ -2495,6 +2535,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   ) {
     const { target, context, scope } = prepared;
     const job = turnLocks.run(scope, async () => {
+      await backgroundRuns.waitUntilIdle(entry.chatKey);
+
       // Итог уже выдан сливом остановки — запускать нечего.
       if (turnLedger.get(entry.turnId)?.state === 'done') {
         return;
@@ -2576,7 +2618,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       const { target, context, scope } = prepared;
-      const queued = turnLocks.isBusy(scope);
+      const queued = turnLocks.isBusy(scope) || backgroundRuns.has(chatKey);
 
       if (queued) {
         fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
@@ -2585,6 +2627,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       return await turnLocks.run(scope, async () => {
+        await backgroundRuns.waitUntilIdle(chatKey);
+
         // Сообщение дождалось очереди уже на остановке: запускать его некуда.
         if (draining) {
           return restartingReply(reply);
@@ -2941,7 +2985,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         providerId: executor.id,
         requestedModelId: model,
         cwd,
-        extraDirs: [...uniqueExtraDirs],
+        extraDirs: visibleExtraDirs(uniqueExtraDirs, [attachDir]),
       },
       startedAt: Date.now(),
       tokens: 0,
@@ -2995,6 +3039,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
+      backgroundRuns.hide(chatKey);
       // Канал уточнений открывается на этот запуск; транспорт зарегистрирует порт сам.
 
       inTurnMessages.beginRun({
@@ -3625,13 +3670,20 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         if (current) {
           activeRuns.delete(chatKey);
           // Снимаем спросы только этого исполнения: поздний finally не закрывает новый ход.
-          dropPending(chatKey, 'Ход завершён — ответ уже не нужен');
+          if (!backgroundRuns.runningIdentity(chatKey)) {
+            dropPending(chatKey, 'Ход завершён — ответ уже не нужен');
+          }
+
           fastify.sse.broadcast('chat-done', {
             chatKey,
             runId,
             ...(channel.turnId ? { turnId: channel.turnId } : {}),
             queued: turnLedger.queued(chatKey).length,
           });
+
+          if (!draining) {
+            backgroundRuns.reveal(chatKey);
+          }
         }
       }
     }
@@ -4449,7 +4501,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // либо увидит deletingChats и не сможет стартовать по удаляемой durable identity.
     if (workdirTransitions.isBusy(id) || (acceptedTurns.get(id) || 0) > 0
       || (savingChats.get(id) || 0) > 0 || deletingChats.has(id)
-      || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id })) {
+      || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id }) || backgroundRuns.has(id)) {
       return reply.code(409).send({
         error: 'chat_busy',
         message: 'Нельзя удалить чат, пока идёт его сохранение, ожидание или ход.',

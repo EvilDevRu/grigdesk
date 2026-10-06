@@ -1474,6 +1474,28 @@
   color: var(--good);
 }
 
+/* Недоставленное сообщение: значок ошибки вплотную к пузырю, как в Telegram. Виден всегда —
+   в отличие от копирования, это состояние, а не действие по наведению. */
+.ui-icon-button[data-context='chat-delivery-retry'] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin-bottom: 3px;
+  padding: 1px;
+  border: 0;
+  background: transparent;
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-delivery-retry'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-icon-button[data-context='chat-delivery-retry']:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--bad) 70%, var(--ink));
+}
+
 /* Подписанный выбор папки остаётся рядом с задачей и сохраняет геометрию шапки.
    Состояние открытого окна использует общий pressed-скин кнопки. */
 /* Папку не ужимают соседи: короткое имя важнее пустоты в выборе задачи; длинное

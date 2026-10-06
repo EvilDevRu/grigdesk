@@ -536,6 +536,7 @@
       "tests/web/chat-list-preview.test.js",
       "tests/web/chat-live-context.test.js",
       "tests/web/chat-markdown.component.test.js",
+      "tests/web/chat-message-pending-mark.component.test.js",
       "tests/web/chat-model-availability.component.test.js",
       "tests/web/chat-model-ref.test.js",
       "tests/web/chat-model-run.test.js",

@@ -120,3 +120,11 @@ test('переход папки оставляет committed, чужой сни�
   },
     null, selection).cwdDetail, 'Папка для следующего запуска');
 });
+
+test('фоновый запуск со снимком показывает модель и папку процесса', () => {
+  const view = chatStatus(session, { ...runtime, source: 'background' }, selection);
+
+  assert.equal(view.phase, 'running');
+  assert.equal(view.modelId, snapshot.requestedModelId);
+  assert.equal(view.cwd, snapshot.cwd);
+});

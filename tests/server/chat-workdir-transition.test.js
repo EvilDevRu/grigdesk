@@ -496,3 +496,56 @@ test('обычный ход записывает исполняемое сост
   assert.equal((await send(f.app)).statusCode, 200);
   assert.equal((await read(f.app)).revision, before + 1);
 });
+
+/**
+ * Тестовый процесс переживает управляемый ход и открывает фон через hooks.
+ * Запусками по-прежнему управляет исходный исполнитель, без настоящего CLI.
+ */
+function withLiveSession(executor) {
+  const handles = [];
+
+  executor.session = {
+    mode: 'persistent',
+    unsolicited: true,
+    open(spec) {
+      const handle = {
+        spec,
+        pid: 7000 + handles.length,
+        alive: true,
+        interrupted: 0,
+        send: (turn) => executor.run({ ...spec, ...turn }),
+        async interrupt() {
+          handle.interrupted += 1;
+        },
+        async close() {
+          handle.alive = false;
+          spec.hooks?.onExit?.({ reason: 'закрыт' });
+        },
+      };
+
+      handles.push(handle);
+
+      return handle;
+    },
+  };
+
+  return handles;
+}
+
+test('перенос папки отклоняется, пока идёт фон', async (t) => {
+  const f = await fixture(t);
+  const handles = withLiveSession(f.executor);
+
+  assert.equal((await send(f.app)).statusCode, 200);
+
+  const hooks = handles[0].spec.hooks;
+
+  hooks.onBackgroundStart();
+
+  const denied = await change(f, f.second, 'reset', 'op-bg-0001');
+
+  assert.equal(denied.response.statusCode, 409);
+  assert.equal(denied.response.json().error, 'chat_busy');
+  await hooks.onBackground({ reply: 'фон', steps: [] });
+  assert.equal((await change(f, f.second, 'reset', 'op-bg-0002')).response.statusCode, 200);
+});

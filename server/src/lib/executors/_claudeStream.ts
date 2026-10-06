@@ -530,8 +530,11 @@ export function openClaudeStreamSession({
       // Сколько блоков уже закрыто у сообщения: текст после вызова инструмента — новая часть.
       assistantParts: Map<string, number>;
       lastAssistant: InTurnAssistantEvent | null;
+      // UUID главного ввода хода: по его lifecycle видно, когда CLI взялся именно за этот ход.
+      mainUuid: string;
     } | null;
     background: ClaudeTurnCollector | null;
+    backgroundInterrupted: boolean;
     interruptRequested: boolean;
   } = {
     sessionId: sessionId || null,
@@ -539,6 +542,7 @@ export function openClaudeStreamSession({
     exitReason: '',
     turn: null,          // активный заказанный ход
     background: null,    // непрошеный ход, начавшийся сам
+    backgroundInterrupted: false,
     // Прерванный ход CLI закрывает обычным result с subtype error_during_execution.
     // Без этой отметки «стоп» выглядел бы как ход без ответа, а человеку нужна лента
     // сделанного и пометка остановки — ровно как у разового запуска.
@@ -553,7 +557,11 @@ export function openClaudeStreamSession({
   let stderrTail = '';
   const detachedCommands = new Map<string, ClaudeInputCommand>();
   const detachedWaiters: Array<() => void> = [];
+  const backgroundWaiters: Array<() => void> = [];
+  const preBackground: ClaudeEvent[] = [];
   let detachedActive = '';
+  // CLI сообщает lifecycle команд (флаг --replay-user-messages). Без него начало хода не видно.
+  let lifecycleSeen = false;
   let waitingSend = false;
   let interruptRevision = 0;
 
@@ -637,7 +645,11 @@ export function openClaudeStreamSession({
     };
   }
 
-  // Непрошеный ход начинается с любого события, пришедшего вне заказанного хода.
+  /**
+   * Непрошеный ход открывают содержательные события главного агента и начало запроса
+   * модели (system/init); прочие служебные события ждут в буфере. Коллектор передаёт
+   * шаги и метрики после объявления цикла пулу.
+   */
   function backgroundCollector() {
     if (!state.background) {
       state.background = createClaudeTurnCollector({
@@ -652,6 +664,10 @@ export function openClaudeStreamSession({
     return state.background;
   }
 
+  /**
+   * Естественный result закрывает фон, сохраняя отдельный итог для публикации.
+   * Остановка без текста получает привычную отметку и будит ожидающий ввод.
+   */
   function finishBackground() {
     const collector = state.background;
     state.background = null;
@@ -662,7 +678,19 @@ export function openClaudeStreamSession({
       log,
     });
     state.sessionId = result.sessionId || state.sessionId;
-    hooks.onBackground?.(result as never);
+
+    const stopped = state.backgroundInterrupted;
+
+    state.backgroundInterrupted = false;
+    hooks.onBackground?.((stopped ? {
+      ...result,
+      stopped: true,
+      reply: collector.state.resultEv?.result?.trim() ? result.reply : '⏹ Ход остановлен.',
+    } : result) as never);
+
+    for (const resolve of backgroundWaiters.splice(0)) {
+      resolve();
+    }
   }
 
   /**
@@ -739,6 +767,10 @@ export function openClaudeStreamSession({
   function handleCommandLifecycle(ev: ClaudeEvent): void {
     const uuid = ev.command_uuid || '';
 
+    if (uuid) {
+      lifecycleSeen = true;
+    }
+
     const detached = detachedCommands.get(uuid);
 
     if (detached) {
@@ -781,6 +813,12 @@ export function openClaudeStreamSession({
       command.queued = true;
     } else if (ev.state === 'started' && !command.started) {
       command.started = true;
+
+      // CLI взялся за наш ход — значит, предыдущий ход в нём закончен. Незакрытый фон
+      // (result не дошёл) закрываем здесь, иначе он навсегда держал бы очередь чата.
+      if (uuid === turn.mainUuid && state.background) {
+        finishBackground();
+      }
 
       if (command.messageId && !command.failed) {
         void turn.onInTurnReceipt?.({ messageId: command.messageId, state: 'consumed' });
@@ -860,6 +898,19 @@ export function openClaudeStreamSession({
   }
 
   /**
+   * Заказанный ход владеет потоком с момента, когда CLI начал его главную команду.
+   * До этого CLI ещё ведёт предыдущий ход — проснувшегося агента — и его события не наши.
+   * Старый CLI без lifecycle начало не сообщает: тогда ход владеет потоком сразу.
+   */
+  function turnOwnsStream(turn: NonNullable<typeof state.turn>): boolean {
+    if (!lifecycleSeen || !turn.mainUuid) {
+      return true;
+    }
+
+    return !!turn.commands.get(turn.mainUuid)?.started;
+  }
+
+  /**
    * События CLI обновляют ленту и закрывают реплики на подтверждённых границах сообщений.
    * После result ждать разрешено только подтверждённую очередь без started; stop закрывает всё.
    */
@@ -881,6 +932,12 @@ export function openClaudeStreamSession({
     }
 
     if (ev.type === 'user' && ev.isReplay) {
+      const main = state.turn?.commands.get(ev.uuid || '');
+
+      if (main && ev.uuid === state.turn?.mainUuid) {
+        main.started = true;
+      }
+
       return;
     }
 
@@ -898,8 +955,32 @@ export function openClaudeStreamSession({
       return;
     }
 
-    const activeTurn = detached ? null : state.turn;
+    // Пока CLI не начал команду заказанного хода, он ведёт другой ход — проснувшегося агента.
+    const turnWaits = !detached && !!state.turn && !turnOwnsStream(state.turn);
+    const activeTurn = detached || turnWaits ? null : state.turn;
+
+    if (!activeTurn && !detached && !turnWaits && !state.background) {
+      const opensBackground = !ev.parent_tool_use_id
+        && (['assistant', 'result', 'user'].includes(ev.type || '')
+          || (ev.type === 'system' && ev.subtype === 'init'));
+
+      if (!opensBackground) {
+        if (preBackground.length < 20) {
+          preBackground.push(ev);
+        }
+
+        return;
+      }
+    }
+
     const collector = activeTurn ? activeTurn.collector : backgroundCollector();
+
+    if (!activeTurn) {
+      for (const buffered of preBackground.splice(0)) {
+        collector.push(buffered);
+      }
+    }
+
     collector.push(ev);
 
     // Ответы субагента остаются вложенными шагами и не закрывают реплику главного агента.
@@ -1031,10 +1112,16 @@ export function openClaudeStreamSession({
     // Непрошеный ход, оборванный на середине, наружу не отдаём: у него нет result,
     // а придуманный ответ хуже отсутствующего.
     state.background = null;
+    state.backgroundInterrupted = false;
+    preBackground.length = 0;
     detachedActive = '';
     detachedCommands.clear();
 
     for (const resolve of detachedWaiters.splice(0)) {
+      resolve();
+    }
+
+    for (const resolve of backgroundWaiters.splice(0)) {
       resolve();
     }
 
@@ -1141,6 +1228,11 @@ export function openClaudeStreamSession({
 
       try {
         await waitForDetachedCommands(revision);
+
+        while (state.background && !state.exited && revision === interruptRevision) {
+          await new Promise<void>((resolve) => backgroundWaiters.push(resolve));
+          await waitForDetachedCommands(revision);
+        }
       } finally {
         waitingSend = false;
       }
@@ -1160,13 +1252,6 @@ export function openClaudeStreamSession({
       }
       if (state.turn) {
         return Promise.reject(new Error('В этой сессии уже идёт ход.'));
-      }
-
-      // Непрошеный ход не может идти одновременно с заказанным: CLI обрабатывает
-      // сообщения по очереди. Если он ещё не закрыт — закрываем его сейчас, иначе
-      // его шаги прилипли бы к новому ходу.
-      if (state.background && !detachedActive) {
-        finishBackground();
       }
 
       const collector = createClaudeTurnCollector({
@@ -1194,10 +1279,13 @@ export function openClaudeStreamSession({
           assistantText: '',
           assistantParts: new Map(),
           lastAssistant: null,
+          mainUuid: '',
         };
 
         try {
           const uuid = randomUUID();
+
+          state.turn.mainUuid = uuid;
 
           state.turn.commands.set(uuid, {
             messageId: '',
@@ -1206,6 +1294,7 @@ export function openClaudeStreamSession({
             completed: false,
             failed: false,
           });
+          preBackground.length = 0;
           writeLine({
             type: 'user',
             uuid,
@@ -1230,6 +1319,14 @@ export function openClaudeStreamSession({
       if (state.exited) return;
 
       interruptRevision += 1;
+
+      if (state.background && (!state.turn || !turnOwnsStream(state.turn))) {
+        state.backgroundInterrupted = true;
+      }
+
+      for (const resolve of backgroundWaiters.splice(0)) {
+        resolve();
+      }
 
       for (const resolve of detachedWaiters.splice(0)) {
         resolve();

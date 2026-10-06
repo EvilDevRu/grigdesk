@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 import { createClaudeTurnCollector } from '../../server/src/lib/executors/_claudeStream.ts';
 import { normalizeUsageResources } from '../../server/src/lib/providerUsage.ts';
@@ -45,6 +47,7 @@ for (const persistent of [false, true]) {
       assert.equal(started.snapshot.actualModelId, undefined);
 
       first.options.onRunMetadata({ actualModelId: 'model-confirmed', modelSource: 'session' });
+
       const active = (await app.inject('/api/chat/active')).json().active[0];
 
       assert.equal(active.snapshot.actualModelId, 'model-confirmed');
@@ -124,4 +127,32 @@ test('балансы не подставляют ноль вместо отсу�
     kind: 'balance',
     balance: { amount: '0', currency: 'USD' },
   }])[0].balance, undefined);
+});
+
+test('папка вложений открыта агенту, но не показывается в снимке хода', async (t) => {
+  const controlled = controlledExecutor();
+  const { app, events, root } = await chatAppFixture(t, { executor: controlled.executor });
+
+  await saveChat(app, 'attach-chat');
+
+  const attachments = path.join(root, 'chats', 'attachments');
+
+  await fs.mkdir(attachments, { recursive: true });
+  await fs.writeFile(path.join(attachments, 'shot.png'), 'png');
+  await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: turnBody('attach-chat', 'turn-attach-0001', 'смотри', { attachments: [{ file: 'shot.png' }] }),
+  });
+
+  const [run] = await controlled.waitForRuns(1);
+  const started = events.find((event) => event.event === 'chat-turn-start').data;
+
+  assert.equal(run.options.extraDirs.includes(path.resolve(attachments)), true);
+  assert.equal(started.snapshot.extraDirs.includes(path.resolve(attachments)), false);
+  const active = (await app.inject('/api/chat/active')).json().active[0];
+
+  assert.equal(active.snapshot.extraDirs.includes(path.resolve(attachments)), false);
+  run.release();
+  await waitFor(() => events.some((event) => event.event === 'chat-done'));
 });

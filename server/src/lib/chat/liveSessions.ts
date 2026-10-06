@@ -9,6 +9,10 @@
 // между ходами, объявляет он сам полем `session` своего контракта; пул только владеет
 // временем жизни, потолком и доставкой непрошеных ходов.
 
+import { randomUUID } from 'node:crypto';
+
+import type { BackgroundIdentity, BackgroundSession } from './backgroundRuns.ts';
+
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 4;
 // Что нельзя поменять на лету: это флаги командной строки, зафиксированные при запуске
@@ -28,6 +32,7 @@ export interface LiveSessionSpec {
   permissionMode?: string;
   cwd?: string;
   extraDirs?: string[];
+  signal?: AbortSignal;
   [field: string]: unknown;
 }
 
@@ -62,7 +67,11 @@ interface LiveEntry {
   permissionMode: string;
   cwd: string;
   extraDirs: string[];
-  busy: boolean;
+  sessionToken: string;
+  managed: boolean;
+  background: { backgroundId: string } | null;
+  closedNotified: boolean;
+  backgroundWaiters: Array<() => void>;
   openedAt: number;
   lastUsed: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -72,7 +81,7 @@ interface LiveEntry {
 // Событие состава пула для окон: сессия открылась или закрылась.
 export interface LiveSessionsEvent {
   chatKey: string;
-  event: 'opened' | 'closed';
+  event: 'opened' | 'closed' | 'busy';
   reason?: string;
 }
 
@@ -91,6 +100,12 @@ function fingerprintOf(spec: LiveSessionSpec, fields: readonly string[]): string
   return JSON.stringify(parts);
 }
 
+interface BackgroundStartEvent {
+  chatKey: string;
+  identity: BackgroundIdentity;
+  session: BackgroundSession;
+}
+
 export class ChatLiveSessions {
   readonly maxSessions: number;
 
@@ -98,15 +113,35 @@ export class ChatLiveSessions {
 
   readonly log: LiveLog | null;
 
-  private onBackgroundTurn:
-  ((event: { chatKey: string; executorId: string; result: unknown }) => void) | null;
+  private onBackgroundStart: ((event: BackgroundStartEvent) => void) | null;
 
-  private onBackgroundStep: ((event: { chatKey: string; step: unknown }) => void) | null;
+  private onBackgroundTurn:
+  ((event: {
+    chatKey: string;
+    executorId: string;
+    result: unknown;
+    identity: BackgroundIdentity;
+  }) => void) | null;
+
+  private onBackgroundStep: ((event: {
+    chatKey: string;
+    step: unknown;
+    identity: BackgroundIdentity;
+  }) => void) | null;
 
   private onBackgroundProgress:
-  ((event: { chatKey: string; tokens: unknown; extra: unknown }) => void) | null;
+  ((event: {
+    chatKey: string;
+    tokens: unknown;
+    extra: unknown;
+    identity: BackgroundIdentity;
+  }) => void) | null;
 
-  private onSessionClosed: ((event: { chatKey: string; reason: string }) => void) | null;
+  private onSessionClosed: ((event: {
+    chatKey: string;
+    reason: string;
+    sessionToken: string;
+  }) => void) | null;
 
   private onChange: ((event: LiveSessionsEvent) => void) | null;
 
@@ -114,10 +149,15 @@ export class ChatLiveSessions {
 
   private closed: boolean;
 
+  // Закрытие процесса по чату ещё идёт: новый CLI на ту же сессию поднимать нельзя,
+  // второй процесс с тем же sessionId падает сразу.
+  private closing: Map<string, Promise<void>>;
+
   constructor({
     maxSessions = DEFAULT_MAX_SESSIONS,
     idleMs = DEFAULT_IDLE_MS,
     log = null,
+    onBackgroundStart = null,
     onBackgroundTurn = null,
     onBackgroundStep = null,
     onBackgroundProgress = null,
@@ -127,23 +167,35 @@ export class ChatLiveSessions {
     maxSessions?: number;
     idleMs?: number;
     log?: LiveLog | null;
+    onBackgroundStart?: ((event: BackgroundStartEvent) => void) | null;
     onBackgroundTurn?: ((event: {
       chatKey: string;
       executorId: string;
       result: unknown;
+      identity: BackgroundIdentity;
     }) => void) | null;
-    onBackgroundStep?: ((event: { chatKey: string; step: unknown }) => void) | null;
+    onBackgroundStep?: ((event: {
+      chatKey: string;
+      step: unknown;
+      identity: BackgroundIdentity;
+    }) => void) | null;
     onBackgroundProgress?: ((event: {
       chatKey: string;
       tokens: unknown;
       extra: unknown;
+      identity: BackgroundIdentity;
     }) => void) | null;
-    onSessionClosed?: ((event: { chatKey: string; reason: string }) => void) | null;
+    onSessionClosed?: ((event: {
+      chatKey: string;
+      reason: string;
+      sessionToken: string;
+    }) => void) | null;
     onChange?: ((event: LiveSessionsEvent) => void) | null;
   } = {}) {
     this.maxSessions = Math.max(1, Number(maxSessions) || DEFAULT_MAX_SESSIONS);
     this.idleMs = Math.max(60_000, Number(idleMs) || DEFAULT_IDLE_MS);
     this.log = log;
+    this.onBackgroundStart = onBackgroundStart;
     this.onBackgroundTurn = onBackgroundTurn;
     this.onBackgroundStep = onBackgroundStep;
     this.onBackgroundProgress = onBackgroundProgress;
@@ -153,6 +205,7 @@ export class ChatLiveSessions {
     this.onChange = onChange;
     this.entries = new Map();
     this.closed = false;
+    this.closing = new Map();
   }
 
   /**
@@ -161,7 +214,16 @@ export class ChatLiveSessions {
    */
   async run(spec: LiveSessionSpec, turn: unknown): Promise<{ sessionId?: string } | null> {
     const entry = await this._acquire(spec);
-    entry.busy = true;
+
+    if (spec.signal?.aborted) {
+      throw Object.assign(new Error('Ход остановлен.'), {
+        stopped: true,
+        steps: [],
+        sessionId: entry.sessionId,
+      });
+    }
+
+    entry.managed = true;
     this._clearIdle(entry);
     // Id сессии пул узнаёт с первого события хода, а не по его итогу: по нему сессия
     // переоткроется после смерти процесса, даже если ход до result не дожил.
@@ -184,9 +246,12 @@ export class ChatLiveSessions {
       if (result?.sessionId) entry.sessionId = result.sessionId;
       return result;
     } finally {
-      entry.busy = false;
+      entry.managed = false;
       entry.lastUsed = Date.now();
-      if (this.entries.get(entry.chatKey) === entry) this._armIdle(entry);
+
+      if (!entry.background && this.entries.get(entry.chatKey) === entry) {
+        this._armIdle(entry);
+      }
     }
   }
 
@@ -207,15 +272,23 @@ export class ChatLiveSessions {
     const entry = this.entries.get(String(chatKey || ''));
     if (!entry) return false;
     this._forget(entry, reason);
-    await entry.handle.close().catch(() => {});
+    await this._closeHandle(entry);
     return true;
   }
 
+  /**
+   * Закрывает все поколения пула и будит ожидающие фон ходы.
+   * Уведомление о каждой entry отправляется до ожидания закрытия транспорта.
+   */
   async closeAll(reason = 'остановка сервера'): Promise<void> {
     this.closed = true;
     const entries = [...this.entries.values()];
     this.entries.clear();
-    for (const entry of entries) this._clearIdle(entry);
+
+    for (const entry of entries) {
+      this._clearIdle(entry);
+      this._notifyClosed(entry, reason);
+    }
     await Promise.all(entries.map((entry) => entry.handle.close().catch(() => {})));
     if (entries.length) {
       this.log?.info?.({ count: entries.length, reason }, 'чат: живые сессии закрыты');
@@ -235,7 +308,7 @@ export class ChatLiveSessions {
       executor: entry.executorId,
       pid: entry.handle?.pid ?? null,
       alive: !!entry.handle?.alive,
-      busy: !!entry.busy,
+      busy: !!entry.managed || !!entry.background,
       unsolicited: !!entry.unsolicited,
       sessionId: entry.sessionId || null,
       model: entry.model || '',
@@ -246,7 +319,7 @@ export class ChatLiveSessions {
       openedAt: entry.openedAt,
       lastUsed: entry.lastUsed,
       // Занятая сессия по простою не гаснет: таймер перевзводится, пока идёт ход.
-      idleAtMs: entry.busy ? null : Math.max(now, entry.lastUsed + this.idleMs),
+      idleAtMs: (entry.managed || entry.background) ? null : Math.max(now, entry.lastUsed + this.idleMs),
     }));
   }
 
@@ -269,7 +342,23 @@ export class ChatLiveSessions {
       : DEFAULT_RESTART_ON;
     const fingerprint = fingerprintOf(spec, fields);
 
-    const existing = this.entries.get(chatKey);
+    let existing = this.entries.get(chatKey);
+
+    while (existing?.handle.alive && existing.background && !this.closed && !spec.signal?.aborted) {
+      await this._waitBackground(existing, spec.signal);
+      existing = this.entries.get(chatKey);
+    }
+
+    if (this.closed) {
+      throw new Error('Сервер останавливается — новая сессия не открывается.');
+    }
+    if (spec.signal?.aborted) {
+      throw Object.assign(new Error('Ход остановлен.'), {
+        stopped: true,
+        steps: [],
+        sessionId: existing?.sessionId,
+      });
+    }
     if (existing) {
       // Присланный клиентом id сессии сравниваем, только когда он НЕПУСТ: пустой значит
       // «окно ещё не знает id», а не «начни заново». Осознанный сброс памяти закрывает
@@ -300,7 +389,16 @@ export class ChatLiveSessions {
       this._forget(existing, reason);
       const inherited = sameExecutor ? existing.sessionId : null;
       spec = { ...spec, sessionId: spec.sessionId || inherited };
-      await existing.handle.close().catch(() => {});
+      await this._closeHandle(existing);
+    }
+
+    // Процесс этого чата мог закрываться другим путём (стоп фона, простой): ждём его конца.
+    while (this.closing.has(chatKey)) {
+      await this.closing.get(chatKey);
+    }
+
+    if (this.closed) {
+      throw new Error('Сервер останавливается — новая сессия не открывается.');
     }
 
     await this._enforceLimit();
@@ -319,7 +417,11 @@ export class ChatLiveSessions {
       permissionMode: spec.permissionMode || '',
       cwd: spec.cwd || '',
       extraDirs: Array.isArray(spec.extraDirs) ? [...spec.extraDirs] : [],
-      busy: false,
+      sessionToken: `live-${randomUUID()}`,
+      managed: false,
+      background: null,
+      closedNotified: false,
+      backgroundWaiters: [],
       openedAt: Date.now(),
       lastUsed: Date.now(),
       idleTimer: null,
@@ -331,26 +433,94 @@ export class ChatLiveSessions {
       log: this.log,
       hooks: {
         onBackgroundStart: () => {
+          if (entry.background || entry.closedNotified) {
+            return;
+          }
+
+          entry.background = { backgroundId: `bg-${randomUUID()}` };
+          this._clearIdle(entry);
           this.log?.info?.({ chatKey }, 'чат: агент проснулся сам');
+          this.onBackgroundStart?.({
+            chatKey,
+            identity: this._backgroundIdentity(entry),
+            session: {
+              executorId: entry.executorId,
+              model: entry.model,
+              cwd: entry.cwd,
+              extraDirs: [...entry.extraDirs],
+            },
+          });
+          this.onChange?.({ chatKey, event: 'busy' });
         },
-        onBackgroundStep: (step: unknown) => this.onBackgroundStep?.({ chatKey, step }),
-        onBackgroundProgress: (tokens: unknown, extra: unknown) => (
-          this.onBackgroundProgress?.({ chatKey, tokens, extra })
-        ),
+        onBackgroundStep: (step: unknown) => {
+          if (entry.background) {
+            this.onBackgroundStep?.({
+              chatKey,
+              step,
+              identity: this._backgroundIdentity(entry),
+            });
+          }
+        },
+        onBackgroundProgress: (tokens: unknown, extra: unknown) => {
+          if (entry.background) {
+            this.onBackgroundProgress?.({
+              chatKey,
+              tokens,
+              extra,
+              identity: this._backgroundIdentity(entry),
+            });
+          }
+        },
         onBackground: (result: { sessionId?: string } | null) => {
-          if (result?.sessionId) entry.sessionId = result.sessionId;
+          if (result?.sessionId) {
+            entry.sessionId = result.sessionId;
+          }
+          if (!entry.background) {
+            this.log?.warn?.({ chatKey }, 'чат: итог без открытого фона');
+
+            return;
+          }
+
+          const identity = this._backgroundIdentity(entry);
+
+          entry.background = null;
+          this._wakeBackground(entry);
           entry.lastUsed = Date.now();
-          this.onBackgroundTurn?.({ chatKey, executorId: entry.executorId, result });
+
+          if (!entry.managed && this.entries.get(chatKey) === entry) {
+            this._armIdle(entry);
+          }
+
+          this.onChange?.({ chatKey, event: 'busy' });
+
+          return Promise.resolve(this.onBackgroundTurn?.({
+            chatKey,
+            executorId: entry.executorId,
+            result,
+            identity,
+          })).catch((error) => {
+            this.log?.warn?.(
+              { err: (error as Error)?.message, chatKey },
+              'чат: публикация фонового ответа не завершилась',
+            );
+          });
         },
         onExit: ({ reason }: { reason?: string }) => {
-          if (this.entries.get(chatKey) === entry) this._forget(entry, reason || 'процесс завершился');
-          this.onSessionClosed?.({ chatKey, reason: reason || '' });
+          if (this.entries.get(chatKey) === entry) {
+            this._forget(entry, reason || 'процесс завершился');
+          } else {
+            this._notifyClosed(entry, reason || 'процесс завершился');
+          }
         },
       },
     });
 
     this.entries.set(chatKey, entry);
-    this._armIdle(entry);
+
+    if (!entry.background) {
+      this._armIdle(entry);
+    }
+
     this.log?.info?.(
       { chatKey, executor: entry.executorId, pid: entry.handle.pid },
       'чат: открыта живая сессия',
@@ -367,7 +537,7 @@ export class ChatLiveSessions {
   async _enforceLimit(): Promise<void> {
     while (this.entries.size >= this.maxSessions) {
       const idle = [...this.entries.values()]
-        .filter((entry) => !entry.busy)
+        .filter((entry) => !entry.managed && !entry.background)
         .sort((a, b) => a.lastUsed - b.lastUsed)[0];
       if (!idle) {
         this.log?.warn?.(
@@ -377,21 +547,38 @@ export class ChatLiveSessions {
         return;
       }
       this._forget(idle, 'вытеснена по потолку живых сессий');
-      await idle.handle.close().catch(() => {});
+      await this._closeHandle(idle);
     }
   }
 
   _armIdle(entry: LiveEntry): void {
     this._clearIdle(entry);
     entry.idleTimer = setTimeout(() => {
-      if (entry.busy) {
+      if (entry.managed || entry.background) {
         this._armIdle(entry);
         return;
       }
       this._forget(entry, 'простой');
-      entry.handle.close().catch(() => {});
+      void this._closeHandle(entry);
     }, this.idleMs);
     entry.idleTimer?.unref?.();
+  }
+
+  /**
+   * Закрывает процесс entry и помнит это закрытие по чату, пока оно не кончится.
+   * Новый процесс того же чата `_acquire` поднимает только после него.
+   */
+  _closeHandle(entry: LiveEntry): Promise<void> {
+    const done = entry.handle.close().then(() => {}, () => {});
+    const tracked = done.finally(() => {
+      if (this.closing.get(entry.chatKey) === tracked) {
+        this.closing.delete(entry.chatKey);
+      }
+    });
+
+    this.closing.set(entry.chatKey, tracked);
+
+    return tracked;
   }
 
   _clearIdle(entry: LiveEntry): void {
@@ -399,13 +586,114 @@ export class ChatLiveSessions {
     entry.idleTimer = null;
   }
 
+  /**
+   * Убирает entry из пула и однократно закрывает её фоновое поколение.
+   * Поздний exit уже вытесненной entry не меняет нового владельца chatKey.
+   */
   _forget(entry: LiveEntry, reason: string): void {
     this._clearIdle(entry);
+    this._notifyClosed(entry, reason);
     const owned = this.entries.get(entry.chatKey) === entry;
     if (owned) this.entries.delete(entry.chatKey);
     this.log?.info?.({ chatKey: entry.chatKey, reason }, 'чат: живая сессия закрыта');
     // Оповещаем только владельца записи: вытесненная запись уже сообщила о себе,
     // и второй раз перечитывать список окнам незачем.
     if (owned) this.onChange?.({ chatKey: entry.chatKey, event: 'closed', reason });
+  }
+
+  /**
+   * Прерывание относится к поколению процесса, породившему фон.
+   * Поздняя команда старого поколения не затрагивает новый процесс чата.
+   */
+  interruptBackground(identity: BackgroundIdentity): boolean {
+    const entry = this.entries.get(identity.chatKey);
+
+    if (!entry?.handle.alive || entry.sessionToken !== identity.sessionToken || !entry.background) {
+      return false;
+    }
+
+    void entry.handle.interrupt().catch((error) => {
+      this.log?.warn?.({ err: (error as Error)?.message }, 'чат: фон не подтвердил прерывание');
+    });
+
+    return true;
+  }
+
+  /**
+   * Страховочный стоп гасит только процесс нужного поколения.
+   * Сохранённый id разговора позволяет следующему ходу восстановить сессию.
+   */
+  async closeGeneration(identity: BackgroundIdentity, reason: string): Promise<boolean> {
+    if (this.entries.get(identity.chatKey)?.sessionToken !== identity.sessionToken) {
+      return false;
+    }
+
+    await this.close(identity.chatKey, reason);
+
+    return true;
+  }
+
+  private _backgroundIdentity(entry: LiveEntry): BackgroundIdentity {
+    return {
+      chatKey: entry.chatKey,
+      sessionToken: entry.sessionToken,
+      backgroundId: entry.background!.backgroundId,
+    };
+  }
+
+  /**
+   * Ожидание работающего фона снимается завершением, закрытием или abort хода.
+   * Обработчик abort и запись ожидания удаляются при каждом исходе.
+   */
+  private _waitBackground(entry: LiveEntry, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      /**
+       * Пробуждение снимает обработчик abort и своё ожидание из entry.
+       * Повторный сигнал не оставляет подписку и не затрагивает следующий ход.
+       */
+      const wake = () => {
+        signal?.removeEventListener('abort', wake);
+
+        const index = entry.backgroundWaiters.indexOf(wake);
+
+        if (index >= 0) {
+          entry.backgroundWaiters.splice(index, 1);
+        }
+
+        resolve();
+      };
+
+      entry.backgroundWaiters.push(wake);
+      signal?.addEventListener('abort', wake, { once: true });
+
+      if (signal?.aborted) {
+        wake();
+      }
+    });
+  }
+
+  private _wakeBackground(entry: LiveEntry): void {
+    for (const resolve of entry.backgroundWaiters.splice(0)) {
+      resolve();
+    }
+  }
+
+  /**
+   * Каждая entry сообщает о своём закрытии ровно один раз независимо от exit hook.
+   * Ожидающие фон просыпаются и перечитывают текущего владельца chatKey.
+   */
+  private _notifyClosed(entry: LiveEntry, reason: string): void {
+    if (entry.closedNotified) {
+      return;
+    }
+
+    entry.closedNotified = true;
+    entry.background = null;
+    this._wakeBackground(entry);
+    this.onSessionClosed?.({
+      chatKey: entry.chatKey,
+      reason,
+      sessionToken: entry.sessionToken,
+    });
   }
 }

@@ -369,3 +369,68 @@ test('попадания в кэш не теряют реактивную под
   middle.receipt.acceptedAt = 65;
   assert.notEqual(labels(timeline.value).join('|'), before);
 });
+test('неактивный прошлый запуск не тянет живую ленту к своей реплике', () => {
+  const old = { role: 'assistant', text: 'Итог прошлого хода' };
+  const rows = chatTimeline([parent, old], steps.slice(0, 1), true, { ...run, active: false });
+
+  assert.deepEqual(labels(rows), ['Задача', 'Итог прошлого хода', 'start', 'Работает']);
+});
+
+test('фоновый запуск: живые шаги и итог B — одна группа в конце, A не якорь', () => {
+  const finalA = {
+    role: 'assistant',
+    runId: RUN,
+    text: 'Итог A',
+    steps: [],
+  };
+  const live = [{ k: 'start', at: 100 }, {
+    k: 'tool',
+    id: 'bg-tool',
+    at: 110,
+    title: 'Фон',
+  }];
+  const finalB = {
+    role: 'assistant',
+    runId: 'run-bg',
+    text: 'Итог B',
+    steps: live,
+  };
+  const inactiveA = { ...run, active: false };
+  const projector = createChatTimelineProjector();
+  const phases = [
+    ['до pending', [parent, finalA], true, 'run-bg'],
+    ['pending до конца хода', [parent, finalA, finalB], true, 'run-bg'],
+    ['после конца хода', [parent, finalA, finalB], false, ''],
+  ];
+
+  for (const [name, messages, sending, activeRunId] of phases) {
+    const pure = chatTimeline(messages, live, sending, inactiveA, activeRunId);
+    const cached = projector.project(messages, live, sending, inactiveA, activeRunId);
+
+    for (const rows of [pure, cached]) {
+      const text = labels(rows);
+
+      assert.equal(text.filter((label) => label === 'Фон').length, 1, name);
+      assert.equal(rows.filter((row) => row.thinking).length, sending ? 1 : 0, name);
+      assert.ok(text.indexOf('Итог A') < text.indexOf('Фон'), name);
+
+      if (sending) {
+        assert.equal(rows.find((row) => row.thinking).turnKey, 'run-bg', name);
+      }
+    }
+
+    assert.deepEqual(labels(cached), labels(pure), name);
+  }
+});
+
+test('завершающийся управляемый запуск остаётся у своей реплики, хотя канал уже неактивен', () => {
+  const queued = {
+    role: 'user',
+    turnId: 'next',
+    text: 'Следом',
+    queued: true,
+  };
+  const rows = chatTimeline([parent, queued], steps.slice(0, 1), true, { ...run, active: false }, RUN);
+
+  assert.deepEqual(labels(rows), ['Задача', 'start', 'Работает', 'Следом']);
+});

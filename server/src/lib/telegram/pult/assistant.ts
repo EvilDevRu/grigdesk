@@ -865,6 +865,11 @@ export class TelegramPultAssistant {
     if (!['chat-turn-start', 'chat-progress', 'chat-step', 'chat-done'].includes(event)) return;
 
     const payload = (data || {}) as Payload;
+
+    if (payload.source === 'background') {
+      return;
+    }
+
     const chatKey = String(payload.chatKey || '');
 
     if (event === 'chat-done' && this.observing.has(chatKey)) {

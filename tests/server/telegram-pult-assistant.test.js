@@ -539,11 +539,20 @@ test('итог хода считает файлы только после усп
   f.emit('chat-progress', { chatKey: 'server-owned-companion', tokens: 12_400 });
   f.emit('chat-step', {
     chatKey: 'server-owned-companion',
-    step: { k: 'tool', id: 'edit-1', name: 'Edit', files: ['src/a.js', 'src/b.js'] },
+    step: {
+      k: 'tool',
+      id: 'edit-1',
+      name: 'Edit',
+      files: ['src/a.js', 'src/b.js'],
+    },
   });
   f.emit('chat-step', {
     chatKey: 'server-owned-companion',
-    step: { k: 'res', id: 'edit-1', ok: true },
+    step: {
+      k: 'res',
+      id: 'edit-1',
+      ok: true,
+    },
   });
   f.emit('chat-step', {
     chatKey: 'server-owned-companion',
@@ -757,6 +766,7 @@ test('боевой onReady не ждёт сверку через внутрен�
 
 test('маркер без active-хода после рестарта убирает Стоп и один раз просит повторить вопрос', async (t) => {
   const f = await fixture(t);
+
   await f.store.write({ turns: [restartTurn()] });
   await f.actions.start();
   assert.deepEqual({
@@ -964,4 +974,66 @@ test('сброс памяти всегда вызывает session reset и б�
     }],
     messages: before,
   });
+});
+
+test('фоновый chat-done не закрывает наблюдение за ходом пульта', async (t) => {
+  const f = await fixture(t, { initiallyBusy: true });
+  await f.store.write({ turns: [restartTurn()] });
+  await f.actions.start();
+  f.emit('chat-done', {
+    chatKey: 'server-owned-companion',
+    runId: 'run-bg',
+    source: 'background',
+  });
+  await flushAsyncWork();
+  assert.equal((await f.store.read()).turns[0]?.phase, 'observing');
+  assert.equal(f.botCalls.filter((call) => call.method === 'deleteMessage').length, 0);
+  f.emit('chat-done', { chatKey: 'server-owned-companion' });
+  await flushAsyncWork();
+  assert.deepEqual((await f.store.read()).turns, []);
+  assert.equal(f.botCalls.filter((call) => call.method === 'deleteMessage').length, 1);
+});
+
+test('фоновые шаги и метрики не попадают в итог хода пульта', async (t) => {
+  const f = await fixture(t);
+  const { delivery } = await beginTurn(f, message('Измени два файла'));
+  const chatKey = 'server-owned-companion';
+
+  f.emit('chat-progress', { chatKey, tokens: 12_400 });
+  f.emit('chat-step', {
+    chatKey,
+    step: { k: 'tool', id: 'edit-1', name: 'Edit', files: ['src/a.js', 'src/b.js'] },
+  });
+  f.emit('chat-step', { chatKey, step: { k: 'res', id: 'edit-1', ok: true } });
+
+  const background = {
+    chatKey,
+    runId: 'run-bg',
+    source: 'background',
+  };
+
+  f.emit('chat-progress', { ...background, tokens: 99_000 });
+  f.emit('chat-step', {
+    ...background,
+    step: {
+      k: 'tool',
+      id: 'edit-bg',
+      name: 'Edit',
+      files: ['src/bg.js'],
+    },
+  });
+  f.emit('chat-step', { ...background, step: {
+    k: 'res',
+    id: 'edit-bg',
+    ok: true,
+  } });
+  f.model.resolve({ statusCode: 200, body: { reply: 'Готово' } });
+  await delivery;
+  await flushAsyncWork();
+
+  const replies = f.botCalls.filter((call) => (
+    call.method === 'sendMessage' && /Готово/u.test(call.body.text)
+  ));
+
+  assert.deepEqual(replies.map((call) => call.body.text), ['Готово\n\n— 2 файла · 12.4k ток.']);
 });

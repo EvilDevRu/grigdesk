@@ -379,3 +379,245 @@ test('история объявляет протокол приёма, стар�
   assert.equal(response.json().reply, 'Синхронно', 'Telegram-пульт и старые окна получают ответ как прежде');
   assert.deepEqual(await pendingOf(app), []);
 });
+
+/**
+ * Тестовый процесс переживает управляемый ход и открывает фон через hooks.
+ * Запусками по-прежнему управляет исходный исполнитель, без настоящего CLI.
+ */
+function withLiveSession(executor) {
+  const handles = [];
+
+  executor.session = {
+    mode: 'persistent',
+    unsolicited: true,
+    open(spec) {
+      const handle = {
+        spec,
+        pid: 7000 + handles.length,
+        alive: true,
+        interrupted: 0,
+        send: (turn) => executor.run({ ...spec, ...turn }),
+        async interrupt() {
+          handle.interrupted += 1;
+        },
+        async close() {
+          handle.alive = false;
+          spec.hooks?.onExit?.({ reason: 'закрыт' });
+        },
+      };
+
+      handles.push(handle);
+
+      return handle;
+    },
+  };
+
+  return handles;
+}
+
+/**
+ * Завершает первый ход перед каждым сценарием очереди на фоне.
+ * Дожидается done, чтобы тест проверял именно фоновую, а не прежнюю занятость.
+ */
+async function backgroundFixture(t, options = {}) {
+  const controlled = controlledExecutor();
+  const handles = withLiveSession(controlled.executor);
+  const f = await chatAppFixture(t, { executor: controlled.executor, ...options });
+
+  await saveChat(f.app, 'bg-chat');
+  await post(f.app, turnBody('bg-chat', 'turn-bg-0001'));
+  await controlled.waitForRuns(1);
+  controlled.runs[0].release();
+  await waitFor(() => f.events.some((e) => e.event === 'chat-done'));
+
+  const hooks = handles[0].spec.hooks;
+
+  hooks.onBackgroundStart();
+
+  return {
+    ...f,
+    ...controlled,
+    handles,
+    hooks,
+  };
+}
+
+test('ходы, принятые во время фона, ждут его итога и идут по очереди', async (t) => {
+  const f = await backgroundFixture(t);
+  const ids = ['turn-bg-0002', 'turn-bg-0003'];
+  const acks = [];
+
+  for (const [index, id] of ids.entries()) {
+    acks.push((await post(f.app, turnBody('bg-chat', id, index ? 'третий' : 'второй'))).json());
+  }
+
+  assert.deepEqual(acks.map((ack) => ack.state), ['queued', 'queued']);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(f.runs.length, 1);
+  assert.ok(Object.values(await turnsOf(f.app, ids)).every((turn) => turn.state === 'queued'));
+  assert.equal((await f.app.inject('/api/chat/active')).json().active[0].source, 'background');
+  await f.hooks.onBackground({ reply: 'Фон готов', steps: [] });
+  await f.waitForRuns(2);
+  assert.match(f.runs[1].message, /второй/);
+  f.runs[1].release();
+  await f.waitForRuns(3);
+  assert.match(f.runs[2].message, /третий/);
+  f.runs[2].release();
+  await waitFor(() => f.events.some((e) => e.event === 'chat-done' && e.data.turnId === ids[1]));
+
+  const orphan = f.events.findIndex((e) => e.event === 'chat-orphan' && e.data.source === 'background');
+  const done = f.events.findIndex((e) => e.event === 'chat-done' && e.data.source === 'background');
+  const start = f.events.findIndex((e) => e.event === 'chat-turn-start' && e.data.turnId === ids[0]);
+
+  assert.ok(orphan >= 0 && orphan < done && done < start);
+  await post(f.app, turnBody('bg-chat', ids[0]));
+  assert.equal(f.runs.length, 3);
+});
+
+test('старый синхронный запуск без turnId тоже ждёт фон', async (t) => {
+  const f = await backgroundFixture(t);
+  const body = turnBody('bg-chat', 'unused-turn');
+
+  delete body.turnId;
+
+  const legacy = post(f.app, body);
+  // inject ленивый: начинаем HTTP-запрос до проверки очереди.
+  const completed = legacy.then((response) => response);
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(f.runs.length, 1);
+  await f.hooks.onBackground({ reply: 'фон', steps: [] });
+  await f.waitForRuns(2);
+  f.runs[1].release();
+  assert.equal((await completed).statusCode, 200);
+});
+
+test('фон, начавшийся сразу за ответом хода, объявляется после его chat-done тем же runId', async (t) => {
+  const f = await backgroundFixture(t);
+
+  await f.hooks.onBackground({ reply: 'старый фон', steps: [] });
+  await post(f.app, turnBody('bg-chat', 'turn-bg-0002'));
+  await f.waitForRuns(2);
+
+  const offset = f.events.length;
+
+  f.runs[1].release('Ответ 2');
+  f.hooks.onBackgroundStart();
+  f.hooks.onBackgroundStep({
+    k: 'text',
+    text: 'фон',
+    at: 1,
+  });
+  assert.equal(f.events.slice(offset).filter((e) => e.data.source === 'background').length, 0);
+  await waitFor(() => f.events.some((e) => e.event === 'chat-done' && e.data.turnId === 'turn-bg-0002'));
+
+  const bg = f.events.slice(offset).filter((e) => e.data.source === 'background');
+
+  assert.equal(bg.length, 1);
+  assert.equal(bg[0].event, 'chat-turn-start');
+  assert.equal(bg[0].data.restored, true);
+  assert.equal(bg[0].data.steps.length, 1);
+  assert.ok(bg[0].data.elapsedMs >= 0);
+
+  const active = (await f.app.inject('/api/chat/active')).json().active;
+
+  assert.equal(bg[0].data.runId, active[0].runId);
+});
+
+test('стоп фона прерывает его процесс и снимает спросы', async (t) => {
+  const f = await backgroundFixture(t);
+  const permission = f.app.inject({
+    method: 'POST',
+    url: '/api/chat/permission-request',
+    payload: {
+      tool_name: 'Bash',
+      input: {},
+      chatKey: 'bg-chat',
+    },
+  }).then((response) => response);
+
+  await waitFor(() => f.events.some((e) => e.event === 'chat-permission'));
+
+  const stopped = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat/stop',
+    payload: { chatKey: 'bg-chat' },
+  });
+
+  assert.equal(stopped.json().ok, true);
+  assert.equal(stopped.json().source, 'background');
+  assert.match(stopped.json().runId, /^run-/);
+  assert.equal(f.handles[0].interrupted, 1);
+  assert.equal(f.handles[0].alive, true);
+  assert.equal((await permission).json().behavior, 'deny');
+  assert.equal((await f.app.inject('/api/chat/active')).json().active.length, 1);
+  await f.hooks.onBackground({
+    reply: '⏹ Ход остановлен.',
+    stopped: true,
+    steps: [],
+  });
+  assert.deepEqual((await f.app.inject('/api/chat/active')).json().active, []);
+});
+
+test('фон, не ответивший на стоп, закрывается вместе с процессом', async (t) => {
+  const f = await backgroundFixture(t, { backgroundStopGraceMs: 30 });
+  const stopped = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat/stop',
+    payload: { chatKey: 'bg-chat' },
+  });
+
+  assert.equal(stopped.json().ok, true);
+  await waitFor(() => f.handles[0].alive === false);
+  assert.ok(f.events.some((e) => e.event === 'chat-done' && e.data.source === 'background'));
+  assert.deepEqual((await f.app.inject('/api/chat/active')).json().active, []);
+});
+
+test('занятый фоном чат не сбрасывает память и не удаляется', async (t) => {
+  const f = await backgroundFixture(t);
+  const requests = [
+    {
+      method: 'POST',
+      url: '/api/chat/session/reset',
+      payload: { chatKey: 'bg-chat' },
+    },
+    { method: 'DELETE', url: '/api/chat/store/chat/bg-chat' },
+    { method: 'DELETE', url: '/api/chat/sessions/bg-chat' },
+  ];
+
+  for (const request of requests) {
+    const response = await f.app.inject(request);
+
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().error, 'chat_busy');
+  }
+
+  const sessions = (await f.app.inject('/api/chat/sessions')).json().sessions;
+
+  assert.equal(sessions[0].running, true);
+  assert.equal(sessions[0].busy, true);
+  assert.equal((await f.app.inject({ method: 'DELETE', url: '/api/chat/sessions' })).json().skipped, 1);
+
+  const forced = await f.app.inject({ method: 'DELETE', url: '/api/chat/sessions/bg-chat?force=1' });
+
+  assert.equal(forced.statusCode, 200);
+  assert.equal(f.handles[0].alive, false);
+  assert.ok(f.events.some((e) => e.event === 'chat-done' && e.data.source === 'background'));
+});
+
+test('слив остановки с фоном: ход из очереди получает итог и не стартует', async (t) => {
+  const f = await backgroundFixture(t);
+  const response = await post(f.app, turnBody('bg-chat', 'turn-bg-0002'));
+
+  assert.equal(response.json().state, 'queued');
+  await f.drain();
+
+  const pending = (await pendingOf(f.app)).find((entry) => entry.turnId === 'turn-bg-0002');
+
+  assert.ok(pending);
+  assert.equal(pending.role, 'error');
+  assert.match(pending.reply, /перезапуск/);
+  assert.equal((await turnsOf(f.app, ['turn-bg-0002']))['turn-bg-0002'].state, 'done');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(f.runs.length, 1);
+});
