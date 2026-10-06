@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
-import glm, { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
+import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import {
   GLM_ADMISSION,
   GLM_POLICY_REVISION,
@@ -107,11 +107,11 @@ async function fixture(t, plugin = GLM_FIXTURE_PLUGIN, dependencyLock) {
   };
 }
 
-test('недопущенный режим с ключом: у default export нет run, процесса нет', async (t) => {
+test('недопущенный режим с ключом: у адаптера нет run, процесса нет', async (t) => {
   const f = await fixture(t);
 
-  assert.deepEqual(GLM_ADMISSION, []);
-  assert.equal(glm.run, undefined);
+  // Поставка допускает только api; coding-plan без подтверждения права подписки закрыт.
+  assert.deepEqual(GLM_ADMISSION.map((entry) => entry.mode), ['api']);
 
   for (const mode of ['api', 'coding-plan']) {
     assert.equal(f.adapter(mode, []).run, undefined, mode);
@@ -154,11 +154,11 @@ test('загрузчик в новом процессе видит run толь�
       timeout: 60_000,
     });
 
-    // Поставка без допуска: в новом процессе карточка есть, run нет ни у одного режима.
+    // Поставка допускает только api: в новом процессе run и исполнитель есть только у него.
     assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1)), {
       card: true,
-      run: 'undefined',
-      executor: false,
+      run: mode === 'api' ? 'function' : 'undefined',
+      executor: mode === 'api',
     }, mode);
   }
 

@@ -4,6 +4,8 @@
 // сценарием и пишет очищенный отчёт в .state/artifacts/glm/G12/.
 //
 // Запуск: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan --confirm-live
+// Корневой .env скрипт читает сам и ставит выше унаследованного окружения: окно ключей пишет в .env,
+// а оболочка из чата держит значения со старта сервера, которые `node --env-file` не перекрывает.
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -11,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { config as serviceConfig } from '../src/config.ts';
+import { readEnvFile } from '../src/lib/envFile.ts';
 import { createGlmAdapter } from '../src/lib/executors/glm.ts';
 import type { GlmAdapterDeps } from '../src/lib/executors/glm.ts';
 import { glmCompatibilityIdentity, parseGlmAccessMode } from '../src/lib/glm/contract.ts';
@@ -58,6 +61,18 @@ function shellArgument(name: string): string {
  */
 function clean(value: unknown, root: string): string {
   return String(value ?? '').replaceAll(root, '<tmp>').slice(0, 400);
+}
+
+/**
+ * Ответ хода — слова модели, а не текст обрыва: чат отдаёт обрыв CLI (сеть, TLS) и ошибку
+ * хода тем же полем reply, поэтому успех требует отсутствия признаков прерывания.
+ */
+function answered(status: number, body: Record<string, any>): boolean {
+  if (status !== 200 || !body.reply) {
+    return false;
+  }
+
+  return !body.deliveryFailure && !body.interruptedBy && !body.error && body.role !== 'error';
 }
 
 /**
@@ -153,7 +168,7 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
 
     const first = await chat('Ответь одним словом: готово.');
 
-    step('ответ', first.status === 200 && Boolean(first.body.reply), first.body.reply ?? first.body.error);
+    step('ответ', answered(first.status, first.body), first.body.reply ?? first.body.error);
 
     const tools = await chat('Прочитай marker.txt, замени в нём маркер на тот же текст с суффиксом -EDITED '
       + 'и выполни команду `wc -c marker.txt`. Коротко подтверди.');
@@ -165,7 +180,8 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
 
     const memory = await chat('Какой маркер был в файле до правки? Ответь только маркером.');
 
-    step('второй ход и resume', String(memory.body.reply ?? '').includes(marker), memory.body.reply);
+    step('второй ход и resume', answered(memory.status, memory.body)
+      && String(memory.body.reply).includes(marker), memory.body.reply);
 
     const refusal = await chat('Выполни команду `ssh -p 9 smoke@127.0.0.1 true` и сообщи результат.');
     const refusedSteps = JSON.stringify(refusal.body.steps ?? []);
@@ -191,7 +207,8 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
     const stopped = await approval;
     const leaked = await fs.stat(outside).then(() => true, () => false);
 
-    step('стоп во время approval', !leaked && stopped.status !== 500,
+    // Без запроса подтверждения шаг ничего не проверил: стоп пришёлся не на approval.
+    step('стоп во время approval', asked() && !leaked && stopped.status !== 500,
       stopped.body.error ?? stopped.body.reply);
 
     const turnId = `smoke-${randomUUID().slice(0, 12)}`;
@@ -245,9 +262,13 @@ async function main(): Promise<void> {
   const work = await fs.mkdtemp(path.join(reportDir, 'smoke-'));
 
   try {
+    const fileEnv = await readEnvFile(path.join(repositoryRoot, '.env'));
     const report = await runGlmLiveSmoke({
       mode,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...fileEnv,
+      },
       config: serviceConfig,
       model: shellArgument('--model') || undefined,
       workRoot: work,

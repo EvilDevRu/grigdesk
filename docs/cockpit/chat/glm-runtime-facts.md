@@ -27,6 +27,8 @@
 
 ## Ошибки и повторы
 
+- `dsh-llm-retry` исполняет `retryPolicy` маршрута; сорванное до ответа соединение pi-ai сообщает
+  как «Connection error.» и относит к `TRANSPORT`, который повторяется по умолчанию.
 - При `retryPolicy: { mode: normal, maxRetries: 0 }` ответ 429 и обрыв потока дают ровно один
   запрос. Ошибка модели приходит в `turn/end` как `reason.kind: error` с `reason.error.code`;
   HTTP-статуса нет.

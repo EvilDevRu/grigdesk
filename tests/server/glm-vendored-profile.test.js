@@ -120,11 +120,12 @@ test('настоящий процесс GLM не берёт DEEPSEEK_API_KEY и 
 test('настоящий процесс GLM не применяет retryPolicy, baseURL и headers, подложенные в settings-документ',
   async (t) => {
     const other = await startGlmLoopback({ expectedKey: GLM_SERVICE_KEY, respond: () => glmTextReply() });
+    // 401 маршрут не повторяет, а подложенный mode always повторил бы: один запрос — документ не применён.
     const f = await fixture(t, { scenarios: [{
       kind: 'http-error',
-      status: 429,
-      code: '1302',
-      message: 'Rate limit reached for requests',
+      status: 401,
+      code: '1000',
+      message: 'Authentication parameter not received in Header',
     }] });
 
     t.after(() => other.stop());
@@ -133,7 +134,7 @@ test('настоящий процесс GLM не применяет retryPolicy,
       beforeLaunch: ({ dshHome }) => fs.writeFile(path.join(dshHome, 'settings.yaml'), JSON.stringify({
         'llm-pi-ai': { providers: { zai: {
           baseURL: other.endpoint,
-          retryPolicy: { mode: 'normal', maxRetries: 3 },
+          retryPolicy: { mode: 'always' },
           headers: { 'x-cockpit-hijack': '1' },
         } } },
       })),
@@ -150,7 +151,7 @@ test('настоящий процесс GLM не применяет retryPolicy,
     const document = runtimeYaml().load(await fs.readFile(launch.settingsDocument, 'utf8'));
 
     assert.equal(Object.hasOwn(document ?? {}, 'llm-pi-ai'), false);
-    assert.equal(turn.turnEnd.data.reason.error.code, 'RATE_LIMIT');
+    assert.equal(turn.turnEnd.data.reason.error.code, 'AUTH');
     assert.equal(other.requests.length, 0);
     assert.equal(f.mock.requests.length, 1);
     assert.equal(f.mock.requests[0].headerNames.includes('x-cockpit-hijack'), false);

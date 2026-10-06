@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
 import glm, { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.ts';
@@ -46,10 +49,30 @@ function adapter(env = {}) {
   });
 }
 
-test("карточка glm есть в getProviderAdapters, а getExecutor('glm') возвращает null", async () => {
+const INDEX_URL = pathToFileURL(path.resolve(import.meta.dirname, '../../server/src/lib/executors/index.ts'))
+  .href;
+
+test("карточка glm есть в getProviderAdapters, а без режима getExecutor('glm') возвращает null", async () => {
   assert.equal((await getProviderAdapters()).get('glm'), glm);
-  assert.equal(await getExecutor('glm'), null);
-  assert.equal(glm.run, undefined);
+  assert.equal(await getExecutor('glm'), glm.run ? glm : null);
+
+  // Default export читает окружение при загрузке: «без режима» проверяется в чистом процессе.
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', [
+    `const { getExecutor, getProviderAdapters } = await import(${JSON.stringify(INDEX_URL)});`,
+    'const card = (await getProviderAdapters()).get("glm");',
+    'console.log(JSON.stringify({ run: typeof card.run, executor: await getExecutor("glm") }));',
+  ].join('\n')], {
+    env: {
+      PATH: process.env.PATH,
+      HOME: os.tmpdir(),
+    },
+    timeout: 60_000,
+  });
+
+  assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1)), {
+    run: 'undefined',
+    executor: null,
+  });
   assert.deepEqual([glm.id, glm.name, glm.vendor, glm.color, glm.order], [
     'glm',
     'GLM (Z.ai)',

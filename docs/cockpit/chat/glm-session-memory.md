@@ -4,7 +4,7 @@ GLM объявляет `sessionBinding` и `workdir: { switch: 'reseed', roots: 
 привязки, ротация и сброс памяти — общие механизмы чата.
 
 - `authProfileId` — `glm-env-key:<16 hex>` от режима доступа и ключа; ключ наружу не выходит.
-- `securityProfile` — `cockpit-glm-profile-v1:<sha256>` от ревизии профиля, identity сборки,
+- `securityProfile` — `cockpit-glm-profile-v2:<sha256>` от ревизии профиля, identity сборки,
   режима и флагов SSH/БД. Недоступная сборка — отказ с кодом `glm_*`, который чат показывает.
 - Смена ключа, режима, identity сборки, флагов или cwd начинает новую сессию; home чата —
   `<корень homes>/<identity[:16]>/<sha256(chatKey)>`, отдельно от homes DeepSeek, переноса home

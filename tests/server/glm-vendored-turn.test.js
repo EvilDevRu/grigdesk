@@ -114,22 +114,48 @@ test('настоящий ход: 401 даёт один запрос и glm_auth_
   assert.equal(f.mock.requests.length, 1);
 });
 
-test('настоящий ход: 429 даёт один запрос и deliveryFailure', async (t) => {
-  const f = await fixture(t, { scenarios: [httpError(429, 'Rate limit reached for requests', '1302')] });
-  const result = await f.run();
+test('настоящий ход: нехватка баланса даёт один запрос и glm_quota_exhausted', async (t) => {
+  const f = await fixture(t, {
+    scenarios: [httpError(429, 'Insufficient balance or no resource package. Please recharge.', '1113')],
+  });
 
+  await assert.rejects(f.run(), { code: 'glm_quota_exhausted' });
   await new Promise((resolve) => setTimeout(resolve, 500));
-  assert.equal(result.deliveryFailure, true);
   assert.equal(f.mock.requests.length, 1);
 });
 
-test('настоящий ход: обрыв потока даёт один запрос', async (t) => {
-  const f = await fixture(t, { scenarios: [{ kind: 'disconnect', deltas: [{ content: 'partial' }] }] });
-  const result = await f.run();
+test('настоящий ход: обрыв соединения, обрыв потока и 429 повторяются тем же ходом', async (t) => {
+  const observed = {};
 
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  assert.equal(result.deliveryFailure, true);
-  assert.equal(f.mock.requests.length, 1);
+  for (const [label, failures] of [
+    ['reset', [{ kind: 'reset' }, { kind: 'reset' }]],
+    ['disconnect', [{ kind: 'disconnect', deltas: [{ content: 'partial' }] }]],
+    ['429', [httpError(429, 'Rate limit reached for requests', '1302')]],
+  ]) {
+    await t.test(label, async (sub) => {
+      const f = await fixture(sub, { scenarios: [...failures, glmTextReply('after-retry')] });
+      const result = await f.run();
+
+      observed[label] = {
+        reply: result.reply,
+        deliveryFailure: Boolean(result.deliveryFailure),
+        requests: f.mock.requests.length,
+      };
+    });
+  }
+
+  const recovered = (requests) => ({
+    reply: 'after-retry',
+    deliveryFailure: false,
+    requests,
+  });
+
+  t.diagnostic(JSON.stringify(observed));
+  assert.deepEqual(observed, {
+    reset: recovered(3),
+    disconnect: recovered(2),
+    429: recovered(2),
+  });
 });
 
 test('настоящий ход: переполнение контекста сжимается и повторяется только после ошибки переполнения',

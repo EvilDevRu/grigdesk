@@ -20,7 +20,12 @@ export interface GlmDisconnectScenario {
   deltas?: Record<string, unknown>[];
 }
 
-export type GlmScenario = GlmStreamScenario | GlmErrorScenario | GlmDisconnectScenario;
+// Соединение рвётся до ответа: так выглядит сорванное TLS-рукопожатие для клиента.
+export interface GlmResetScenario {
+  kind: 'reset';
+}
+
+export type GlmScenario = GlmStreamScenario | GlmErrorScenario | GlmDisconnectScenario | GlmResetScenario;
 
 export interface GlmRequestRecord {
   path: string;
@@ -102,6 +107,12 @@ export async function startGlmLoopback(options: GlmLoopbackOptions = {}) {
       headerNames: Object.keys(request.headers).sort(),
       payload,
     });
+
+    if (scenario?.kind === 'reset') {
+      request.socket.destroy();
+
+      return;
+    }
 
     if (scenario?.kind === 'http-error') {
       response.writeHead(scenario.status, { 'content-type': 'application/json' });

@@ -27,18 +27,23 @@ test('маршрут coding-plan не задаёт baseURL, маршрут api �
   assert.equal(buildGlmRoute('api').baseURL, 'https://api.z.ai/api/paas/v4');
 });
 
-test('маршрут задаёт apiKeyEnv COCKPIT_GLM_ROUTE_KEY и retryPolicy normal с maxRetries 0', () => {
+test('маршрут задаёт apiKeyEnv COCKPIT_GLM_ROUTE_KEY и retryPolicy normal с maxRetries 10', () => {
   for (const mode of ['api', 'coding-plan']) {
     const route = buildGlmRoute(mode);
 
     assert.equal(route.apiKeyEnv, 'COCKPIT_GLM_ROUTE_KEY');
-    assert.deepEqual(route.retryPolicy, { mode: 'normal', maxRetries: 0 });
+    // Повторяются только транзиентные коды dsh-llm-retry по умолчанию: обрыв, 429, 5xx, таймаут.
+    assert.deepEqual(route.retryPolicy, { mode: 'normal', maxRetries: 10 });
   }
 });
 
-test('GLM_ADMISSION в поставке пуст', () => {
-  assert.deepEqual(GLM_ADMISSION, []);
+test('GLM_ADMISSION допускает только api с identity, прошедшей живую проверку', () => {
+  assert.deepEqual(GLM_ADMISSION, [{
+    mode: 'api',
+    compatibility: 'f38161e4c8bd327edc0b27bd1919ff61fec7c96e0e5a31ced0dcf2ac022d66e5',
+  }]);
   assert.equal(Object.isFrozen(GLM_ADMISSION), true);
+  assert.equal(GLM_ADMISSION.every((entry) => Object.isFrozen(entry)), true);
 });
 
 /**

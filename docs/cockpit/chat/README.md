@@ -68,7 +68,7 @@
 - [Workspace-исходники GLM: полное замыкание плагина и отказ неполного snapshot](glm-workspace-source-closure.md)
 - [Факты runtime GLM: маршрут zai, коды ошибок, hooks в песочнице, approval и MCP](glm-runtime-facts.md)
 - [Профиль запуска GLM: overlay, hooks с matcher *, homes и server-owned settings](glm-launch-profile.md)
-- [Ход GLM: порядок, таблица исходов, отсутствие повторов, сжатие и replay размышлений](glm-turn-runtime.md)
+- [Ход GLM: порядок, таблица исходов, повторы запроса при обрыве сети, сжатие и replay размышлений](glm-turn-runtime.md)
 - [Политика инструментов GLM: hook с matcher *, сверка approval и остаточный риск fail-open](glm-tool-policy.md)
 - [MCP у GLM: только cockpit-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
 - [Каталог GLM: ACP-чтение без prompt, уровни по модели, glm-4.7 и glm-5-turbo без выбора](glm-catalog.md)

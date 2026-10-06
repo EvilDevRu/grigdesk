@@ -20,11 +20,18 @@ export interface GlmCompatibilityRuntime {
   };
 }
 
-export const GLM_PROFILE_REVISION = 'cockpit-glm-profile-v1';
+export const GLM_PROFILE_REVISION = 'cockpit-glm-profile-v2';
 export const GLM_POLICY_REVISION = 'cockpit-glm-policy-v1';
 export const GLM_DEFAULT_EFFORT = 'high';
 
-export const GLM_ADMISSION: readonly { mode: GlmAccessMode; compatibility: string }[] = Object.freeze([]);
+// Допуск — только после зелёной живой проверки режима на этой identity (06.10.2026: api на
+// glm-5.3-flash, 7/7 шагов). Coding Plan закрыт до подтверждения права использовать подписку.
+export const GLM_ADMISSION: readonly { mode: GlmAccessMode; compatibility: string }[] = Object.freeze([
+  Object.freeze({
+    mode: 'api',
+    compatibility: 'f38161e4c8bd327edc0b27bd1919ff61fec7c96e0e5a31ced0dcf2ac022d66e5',
+  }),
+]);
 
 // Факты G2 на настоящей generation. Инструменты профиля, которые hook разрешает по точному
 // имени: без делегирующих, субагентных, workflow, jobs, goal, plan, skill и web-инструментов.
@@ -75,9 +82,11 @@ export function buildGlmRoute(mode: GlmAccessMode): Record<string, unknown> {
   return {
     ...(mode === 'api' ? { baseURL: 'https://api.z.ai/api/paas/v4' } : {}),
     apiKeyEnv: 'COCKPIT_GLM_ROUTE_KEY',
+    // Сеть до Z.ai нестабильна: dsh-llm-retry повторяет запрос к модели при обрыве, 429, 5xx и
+    // таймауте (коды по умолчанию). Это повтор запроса, а не хода: инструменты не выполнялись.
     retryPolicy: {
       mode: 'normal',
-      maxRetries: 0,
+      maxRetries: 10,
     },
     // У glm-4.7 и glm-5-turbo нет reasoning_effort на wire: все уровни дают одно и то же
     // thinking enabled, поэтому выбор уровня не предлагается — только high.

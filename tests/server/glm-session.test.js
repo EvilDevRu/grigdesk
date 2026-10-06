@@ -280,6 +280,6 @@ test('capability binding GLM видна чату', async (t) => {
   assert.deepEqual(f.adapter.workdir, { switch: 'reseed', roots: 'single' });
   assert.ok(binding.sessionId);
   assert.match(binding.authProfileId, /^glm-env-key:[a-f0-9]{16}$/u);
-  assert.match(binding.securityProfile, /^cockpit-glm-profile-v1:[a-f0-9]{64}$/u);
+  assert.match(binding.securityProfile, /^cockpit-glm-profile-v2:[a-f0-9]{64}$/u);
   assert.equal(binding.cwdRealpath, await fs.realpath(f.root));
 });
