@@ -440,6 +440,24 @@ function codexSpendControl(result: unknown, buckets: CodexBucket[]) {
   };
 }
 
+/**
+ * OpenAI отдаёт баланс кредитов строкой с десятью знаками после запятой.
+ * Показываем до сотых с разрядами; нечисловое значение оставляем как есть.
+ */
+function codexCreditAmount(balance: unknown): string {
+  const amount = typeof balance === 'number' || typeof balance === 'string' ? Number(balance) : NaN;
+
+  if (typeof balance === 'string' && !balance.trim()) {
+    return balance;
+  }
+
+  if (!Number.isFinite(amount)) {
+    return String(balance);
+  }
+
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(amount);
+}
+
 export function parseCodexUsageResources(value: unknown): Array<Record<string, unknown>> {
   if (!value || typeof value !== 'object') return [];
   const result = value as {
@@ -468,10 +486,10 @@ export function parseCodexUsageResources(value: unknown): Array<Record<string, u
   }
 
   if (creditState) {
-    const balance = creditState.balance;
-    const summary = creditState.unlimited
-      ? 'Без ограничений'
-      : `Баланс: ${balance ?? (creditState.hasCredits ? 'доступен' : '0')}`;
+    const balance = creditState.balance == null
+      ? (creditState.hasCredits ? 'доступен' : '0')
+      : codexCreditAmount(creditState.balance);
+    const summary = creditState.unlimited ? 'Без ограничений' : `Баланс: ${balance}`;
     resources.push({
       key: 'chatgpt-credits',
       label: 'Дополнительные кредиты',

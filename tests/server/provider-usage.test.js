@@ -411,6 +411,20 @@ test('Codex exposes purchased credits and earned resets through generic resource
   assert.deepEqual(usage.resources, resources);
 });
 
+test('Codex credit balance is rounded to hundredths with grouped thousands', () => {
+  const summaryOf = (balance) => parseCodexUsageResources({
+    credits: {
+      hasCredits: true,
+      unlimited: false,
+      balance,
+    },
+  })[0].summary;
+
+  assert.equal(summaryOf('62420.0214700000'), 'Баланс: 62 420,02');
+  assert.equal(summaryOf(1500), 'Баланс: 1 500');
+  assert.equal(summaryOf('не число'), 'Баланс: не число');
+});
+
 test('Codex reset consumption forwards a stable idempotency key and maps outcomes', async () => {
   const calls = [];
   const reset = await consumeCodexRateLimitReset('codex', {

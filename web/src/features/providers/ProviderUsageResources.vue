@@ -318,10 +318,13 @@ function updateConfirmation(resource, control, open) {
   font-size: 11.5px;
 }
 
+/* Значение держится одной строкой у правого края, переносится подпись слева. */
 .usage-resource-heading b {
   color: var(--ink);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .usage-resource.is-warn .usage-resource-heading b {
