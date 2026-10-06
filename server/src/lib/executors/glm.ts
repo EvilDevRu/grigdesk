@@ -17,6 +17,7 @@ import { describeGlmGeneration } from '../glm/generation.ts';
 import { readGlmCatalog } from '../glm/catalog.ts';
 import { glmMcpStatus } from '../glm/mcp.ts';
 import { runGlmTurn } from '../glm/runtime.ts';
+import { glmUsage } from '../glm/usage.ts';
 import type { GlmRuntimeDeps, GlmTurnOptions } from '../glm/runtime.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 
@@ -25,7 +26,11 @@ type GlmConfig = DeepSeekRuntimeConfig & {
   glmRuntimeHome?: string;
 };
 
-export type GlmAdapterDeps = GlmRuntimeDeps;
+// usageFetch и usageNow подменяют сеть и часы состояния счёта в тестах.
+export type GlmAdapterDeps = GlmRuntimeDeps & {
+  usageFetch?: typeof fetch;
+  usageNow?: () => number;
+};
 
 type Problem = { message: string; command?: string };
 
@@ -114,7 +119,8 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     id: 'glm',
     name: 'GLM (Z.ai)',
     vendor: 'Z.ai',
-    color: '#3F3F46',
+    // Белый, как знак на логотипе Z.ai: тёмный цвет читался как «недоступен».
+    color: '#FFFFFF',
     order: 5,
     workToolsTransport: 'mcp',
     workdir: { switch: 'reseed', roots: 'single' },
@@ -153,6 +159,16 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
         return `${GLM_PROFILE_REVISION}:${fingerprint}`;
       },
     },
+    /**
+     * Состояние счёта или подписки по выбранному режиму: баланс Обычного API или окна
+     * Coding Plan. Режим и ключ читаются из живого окружения: окно ключей меняет их без рестарта.
+     */
+    usage: (config: GlmConfig) => glmUsage({
+      env: deps.env,
+      runtimeHome: assertGlmRuntimeHome(String(config.glmRuntimeHome ?? '')),
+      ...(deps.usageFetch ? { fetchImpl: deps.usageFetch } : {}),
+      ...(deps.usageNow ? { now: deps.usageNow } : {}),
+    }),
     catalogLive: false,
     retryContract: RETRY_CONTRACT.NEVER,
     compaction: { kind: 'summary' },
@@ -163,29 +179,39 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     settings: [directSshSetting({
       note: 'Запрет обеспечивает server-owned PreToolUse hook внутри профиля GLM.',
     })],
-    // Режим и ключи задаются окном «Ключи доступа»; ключ другого режима не подставляется.
+    // Режим и ключи задаются окном «Ключи доступа»: окно и карточка показывают только ключ
+    // выбранного режима, ключ другого режима не подставляется.
     credentials: [
       {
         env: 'COCKPIT_GLM_API_MODE',
         kind: 'choice',
         label: 'Режим доступа Z.ai',
-        hint: 'Ключ берётся только из поля выбранного режима.',
         options: [
-          { value: 'api', label: 'Обычный API' },
-          { value: 'coding-plan', label: 'Coding Plan' },
+          {
+            value: 'api',
+            label: 'Обычный API',
+            hint: 'Оплата по расходу с баланса Z.ai; карточка показывает остаток счёта.',
+          },
+          {
+            value: 'coding-plan',
+            label: 'Coding Plan',
+            hint: 'Подписка Z.ai с окнами лимитов на 5 часов и неделю.',
+          },
         ],
       },
       {
         env: 'ZAI_API_KEY',
         kind: 'secret',
-        label: 'Ключ обычного API',
-        hint: 'Нужен в режиме «Обычный API».',
+        label: 'API-ключ',
+        hint: 'Кабинет z.ai → API Keys. Ключ целиком, вида «id.secret», около 49 символов.',
+        when: { env: 'COCKPIT_GLM_API_MODE', value: 'api' },
       },
       {
         env: 'ZAI_CODING_API_KEY',
         kind: 'secret',
-        label: 'Ключ Coding Plan',
-        hint: 'Нужен в режиме Coding Plan.',
+        label: 'API-ключ Coding Plan',
+        hint: 'Ключ аккаунта с подпиской Coding Plan: кабинет z.ai → API Keys.',
+        when: { env: 'COCKPIT_GLM_API_MODE', value: 'coding-plan' },
       },
     ],
 

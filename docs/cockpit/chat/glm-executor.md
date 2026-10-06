@@ -39,4 +39,4 @@ identity (commit DSH, патчи, композиция, lock сборки, pi-ai
   DeepSeek и повторяет host preflight конвейера; публикация обновлений DSH требует зелёных
   compiled-тестов GLM.
 - Нет Factory, триажа, анализатора, ввода в активный ход, нативных настроек, картинок на вход,
-  показа квоты, режима «Только чтение» и других endpoint-ов (BigModel, OpenRouter).
+  режима «Только чтение» и других endpoint-ов (BigModel, OpenRouter).

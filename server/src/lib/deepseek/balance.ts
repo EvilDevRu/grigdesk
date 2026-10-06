@@ -255,6 +255,26 @@ function forecastNote(forecast: DeepSeekSpendForecast, currency: string): string
 }
 
 /**
+ * Ресурс «Прогноз» по снимкам баланса одной валюты — общий для счетов с предоплатой
+ * (DeepSeek, Z.ai). Пока наблюдений меньше двух часов, прогноз честно отсутствует.
+ */
+export function balanceForecastResource(
+  samples: DeepSeekBalanceSample[],
+  currency: string,
+  now = Date.now(),
+): Record<string, unknown> {
+  const forecast = forecastDeepSeekSpend(samples, currency, now);
+
+  return {
+    key: 'forecast',
+    label: 'Прогноз',
+    summary: forecastSummary(forecast),
+    note: forecastNote(forecast, currency),
+    tone: forecastTone(forecast),
+  };
+}
+
+/**
  * Ресурсы всплывашки: строки валют счёта, текущий тариф и прогноз по первой валюте с
  * деньгами. Проценты баланса не выдумываются — у предоплаты нет «окна» для их расчёта.
  */
@@ -300,15 +320,9 @@ export function deepSeekBalanceResources(
 
   const measured = balance.balances.filter((entry) => entry.total !== null);
   const primary = measured.find((entry) => entry.total! > 0) || measured[0];
+
   if (primary) {
-    const forecast = forecastDeepSeekSpend(samples, primary.currency, now);
-    resources.push({
-      key: 'forecast',
-      label: 'Прогноз',
-      summary: forecastSummary(forecast),
-      note: forecastNote(forecast, primary.currency),
-      tone: forecastTone(forecast),
-    });
+    resources.push(balanceForecastResource(samples, primary.currency, now));
   }
 
   return resources;

@@ -255,6 +255,7 @@
       "tests/server/glm-runtime.test.js",
       "tests/server/glm-session.test.js",
       "tests/server/glm-stop.test.js",
+      "tests/server/glm-usage.test.js",
       "tests/server/glm-vendor-build.test.js",
       "tests/server/glm-vendored-build.test.js",
       "tests/server/glm-vendored-catalog.test.js",

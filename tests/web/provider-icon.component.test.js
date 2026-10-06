@@ -121,3 +121,16 @@ test('знак glm есть в MARKED и рисуется в 12, 15, 19 и 20 px
     assert.ok(svg.element.querySelectorAll('path, circle, polygon').length > 0);
   }
 });
+
+// Официальный знак Z.ai (набор LobeHub, MIT) — заливка, а не нарисованная штрихом буква.
+const ZAI_MARK = 'M12.105 2L9.927 4.953H.653L2.83 2h9.276zM23.254 19.048L21.078 22h-9.242l2.174-2.952h9.244z'
+  + 'M24 2L9.264 22H0L14.736 2H24z';
+
+test('знак glm — официальный знак Z.ai с заливкой цветом текста', async (t) => {
+  const wrapper = await mountIcon(t, { id: 'glm', name: 'GLM (Z.ai)' });
+  const svg = wrapper.find('svg');
+
+  assert.equal(svg.attributes('fill'), 'currentColor');
+  assert.equal(svg.attributes('stroke'), undefined);
+  assert.equal(svg.find('path').attributes('d'), ZAI_MARK);
+});

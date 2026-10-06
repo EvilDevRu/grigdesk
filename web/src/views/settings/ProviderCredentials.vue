@@ -1,7 +1,7 @@
 <template>
   <div class="creds" data-testid="provider-credentials">
     <ul class="creds__list">
-      <li v-for="item in credentials" :key="item.env" class="creds__row">
+      <li v-for="item in cardItems" :key="item.env" class="creds__row">
         <span class="creds__label">{{ item.label }}</span>
         <span class="creds__state" :class="{ 'creds__state--missing': !item.set }">
           {{ stateText(item) }}
@@ -30,35 +30,54 @@
         <p class="creds__note">
           Значения сохраняются в корневой .env сервера и действуют сразу, без перезапуска.
         </p>
-        <div v-for="item in credentials" :key="item.env" class="creds__field">
-          <UiField :label="item.label" :hint="fieldHint(item)">
-            <UiPasswordInput
-              v-if="item.kind === 'secret'"
-              v-model="drafts[item.env]"
-              :name="item.env"
-              autocomplete="new-password"
-              spellcheck="false"
-              :placeholder="item.set ? 'Оставьте пустым, чтобы не менять' : 'Вставьте ключ'"
+        <UiField
+          v-for="item in dialogItems"
+          :key="item.env"
+          :label="item.label"
+          :hint="fieldHint(item)"
+        >
+          <div class="creds__control">
+            <div v-if="item.kind === 'secret'" class="creds__input">
+              <UiPasswordInput
+                v-model="drafts[item.env]"
+                :name="item.env"
+                autocomplete="new-password"
+                spellcheck="false"
+                :placeholder="placeholder(item)"
+                :disabled="saving"
+              />
+            </div>
+            <UiSegmentedControl
+              v-else-if="segmented(item)"
+              :model-value="choices[item.env] ?? ''"
+              class="creds__choice"
+              :label="item.label"
+              :options="segmentOptions(item)"
               :disabled="saving"
+              @update:model-value="(value) => (choices[item.env] = String(value))"
             />
-            <UiSelect v-else v-model="choices[item.env]" :name="item.env" :disabled="saving">
-              <option v-if="!item.value" value="">Не выбран</option>
-              <option v-for="option in item.options" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </UiSelect>
-          </UiField>
-          <UiButton
-            v-if="item.inFile"
-            class="creds__remove"
-            variant="text"
-            tone="danger"
-            :disabled="saving"
-            @click="remove(item)"
-          >
-            Удалить из .env
-          </UiButton>
-        </div>
+            <div v-else class="creds__input">
+              <UiSelect v-model="choices[item.env]" :name="item.env" :disabled="saving">
+                <option v-if="!item.value" value="">Не выбран</option>
+                <option v-for="option in item.options" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </UiSelect>
+            </div>
+            <!-- Удаляется только секрет: режим не удаляют, а переключают. -->
+            <UiButton
+              v-if="item.kind === 'secret' && item.inFile"
+              v-tooltip="'Удалить значение из .env'"
+              variant="ghost"
+              tone="danger"
+              data-testid="credential-remove"
+              :disabled="saving"
+              @click="remove(item)"
+            >
+              Удалить
+            </UiButton>
+          </div>
+        </UiField>
         <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
       </form>
       <template #footer>
@@ -91,13 +110,16 @@ import {
   UiFormActions,
   UiInlineMessage,
   UiPasswordInput,
+  UiSegmentedControl,
   UiSelect,
   confirmDialog,
+  vTooltip,
 } from '../../ui.ts';
 
 interface CredentialOption {
   value: string;
   label: string;
+  hint?: string;
 }
 
 // Проекция сервера: у секрета нет значения, только признак, хвост и источник.
@@ -107,6 +129,8 @@ interface CredentialView {
   label: string;
   hint?: string;
   options?: readonly CredentialOption[];
+  // Запись нужна, только пока выбор `env` равен `value`: ключ своего режима доступа.
+  when?: { env: string; value: string };
   set: boolean;
   inFile: boolean | null;
   preview: string | null;
@@ -128,12 +152,28 @@ const error = ref('');
 const drafts = reactive<Record<string, string>>({});
 const choices = reactive<Record<string, string>>({});
 
-const anyMissing = computed(() => props.credentials.some((item) => item.kind === 'secret' && !item.set));
+// Выбор до четырёх вариантов — переключатель кнопками: все варианты видны сразу.
+const SEGMENTED_MAX_OPTIONS = 4;
+
+/**
+ * Нужна ли запись при текущих значениях выбора. Без условия — всегда; с условием — только
+ * пока выбранный вариант совпадает, поэтому ключ чужого режима не показывается и не уходит.
+ */
+function shown(item: CredentialView, values: Record<string, string>): boolean {
+  return !item.when || values[item.when.env] === item.when.value;
+}
+
+const savedChoices = computed(() => Object.fromEntries(props.credentials
+  .filter((item) => item.kind === 'choice')
+  .map((item) => [item.env, item.value || ''])));
+const cardItems = computed(() => props.credentials.filter((item) => shown(item, savedChoices.value)));
+const dialogItems = computed(() => props.credentials.filter((item) => shown(item, choices)));
+const anyMissing = computed(() => cardItems.value.some((item) => !item.set));
 
 const changes = computed(() => {
   const values: Record<string, string> = {};
 
-  for (const item of props.credentials) {
+  for (const item of dialogItems.value) {
     const next = item.kind === 'secret' ? (drafts[item.env] || '').trim() : choices[item.env] || '';
 
     if (next && (item.kind === 'secret' || next !== item.value)) {
@@ -164,12 +204,40 @@ function stateText(item: CredentialView): string {
   return item.inFile === false ? `задан вне .env${tail}` : `задан${tail}`;
 }
 
+function segmented(item: CredentialView): boolean {
+  return (item.options?.length || 0) <= SEGMENTED_MAX_OPTIONS;
+}
+
+function segmentOptions(item: CredentialView): Array<{ value: string; label: string }> {
+  return (item.options || []).map((option) => ({
+    value: option.value,
+    label: option.label,
+  }));
+}
+
+/**
+ * Заглушка поля секрета: у заданного ключа — его хвост и то, что пустое поле его не тронет,
+ * у незаданного — приглашение вставить ключ.
+ */
+function placeholder(item: CredentialView): string {
+  if (!item.set) {
+    return 'Вставьте ключ';
+  }
+
+  return `Задан${item.preview ? ` ${item.preview}` : ''}. Пустое поле — без изменений`;
+}
+
+/**
+ * Подсказка поля: смысл выбранного варианта, общая подсказка записи и предупреждение,
+ * что значение сейчас задано вне .env и сохранение перенесёт его в файл.
+ */
 function fieldHint(item: CredentialView): string {
+  const option = item.options?.find((entry) => entry.value === choices[item.env]);
   const outside = item.set && item.inFile === false
     ? 'Сейчас значение задано вне .env; сохранение запишет его в .env.'
     : '';
 
-  return [item.hint, outside].filter(Boolean).join(' ');
+  return [option?.hint, item.hint, outside].filter(Boolean).join(' ');
 }
 
 /**
@@ -296,12 +364,22 @@ async function remove(item: CredentialView): Promise<void> {
   font-size: 12.5px;
 }
 
-.creds__field {
-  display: grid;
-  gap: 4px;
+.creds__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.creds__remove {
-  justify-self: start;
+.creds__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.creds__input > * {
+  width: 100%;
+}
+
+.creds__choice {
+  flex: none;
 }
 </style>

@@ -150,6 +150,55 @@ test('декларация отбрасывает сломанные запис�
   assert.deepEqual(await declaredCredentials(adapterWith(undefined), {}), []);
 });
 
+test('условие when и подсказки вариантов: верные сохраняются, ссылка не на выбор отбрасывается', async () => {
+  const declared = await declaredCredentials(adapterWith([
+    {
+      env: 'TEST_MODE',
+      kind: 'choice',
+      label: 'Режим',
+      options: [
+        {
+          value: 'api',
+          label: 'API',
+          hint: 'Оплата по расходу.',
+        },
+        { value: 'plan', label: 'План' },
+      ],
+    },
+    {
+      ...secretDeclaration('TEST_API_KEY', 'Ключ API'),
+      when: { env: 'TEST_MODE', value: 'api' },
+    },
+    {
+      ...secretDeclaration('TEST_PLAN_KEY', 'Ключ плана'),
+      when: { env: 'TEST_MODE', value: 'plan' },
+    },
+    {
+      ...secretDeclaration('TEST_ODD_VALUE', 'Неизвестный вариант'),
+      when: { env: 'TEST_MODE', value: 'other' },
+    },
+    {
+      ...secretDeclaration('TEST_ODD_TARGET', 'Ссылка на секрет'),
+      when: { env: 'TEST_API_KEY', value: 'api' },
+    },
+  ]), {});
+  const byEnv = Object.fromEntries(declared.map((item) => [item.env, item]));
+
+  assert.deepEqual(byEnv.TEST_MODE.options, [
+    {
+      value: 'api',
+      label: 'API',
+      hint: 'Оплата по расходу.',
+    },
+    { value: 'plan', label: 'План' },
+  ]);
+  assert.deepEqual(byEnv.TEST_API_KEY.when, { env: 'TEST_MODE', value: 'api' });
+  assert.deepEqual(byEnv.TEST_PLAN_KEY.when, { env: 'TEST_MODE', value: 'plan' });
+  // Сломанное условие не прячет поле навсегда: запись остаётся, но без условия.
+  assert.equal(Object.hasOwn(byEnv.TEST_ODD_VALUE, 'when'), false);
+  assert.equal(Object.hasOwn(byEnv.TEST_ODD_TARGET, 'when'), false);
+});
+
 test('проекция не содержит значения секрета и честно говорит об источнике', () => {
   const env = {
     TEST_API_KEY: SECRET,

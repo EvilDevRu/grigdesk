@@ -77,7 +77,8 @@ test("карточка glm есть в getProviderAdapters, а без режим
     'glm',
     'GLM (Z.ai)',
     'Z.ai',
-    '#3F3F46',
+    // Белый: тёмный фирменный цвет на тёмной теме читался как «недоступен».
+    '#FFFFFF',
     5,
   ]);
   assert.equal(glm.catalogLive, false);
@@ -86,7 +87,9 @@ test("карточка glm есть в getProviderAdapters, а без режим
   assert.equal(glm.workToolsTransport, 'mcp');
   assert.deepEqual(glm.seedModels(), []);
 
-  for (const field of ['install', 'login', 'usage', 'statusPage', 'nativeSettings', 'inTurnInput',
+  assert.equal(typeof glm.usage, 'function');
+
+  for (const field of ['install', 'login', 'statusPage', 'nativeSettings', 'inTurnInput',
     'scopedWorkspace', 'untrustedInput', 'runUntrusted', 'session', 'efforts', 'modelEfforts', 'commands']) {
     assert.equal(glm[field], undefined, field);
   }

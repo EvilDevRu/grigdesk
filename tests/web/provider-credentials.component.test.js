@@ -53,7 +53,7 @@ async function browserHarness() {
  * Монтирует блок ключей с поддельным стором исполнителей: тест видит, что именно
  * ушло бы на сервер, и задаёт ответ сохранения.
  */
-async function mountCredentials(t, browser, store) {
+async function mountCredentials(t, browser, store, credentials = CREDENTIALS) {
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
@@ -69,7 +69,7 @@ async function mountCredentials(t, browser, store) {
     props: {
       providerId: 'keyed',
       providerName: 'Keyed',
-      credentials: CREDENTIALS,
+      credentials,
     },
     attachTo: browser.document.querySelector('#mount'),
   });
@@ -126,15 +126,16 @@ test('карточка показывает только признак и хв�
   const save = () => buttonText(browser, 'Сохранить');
 
   assert.equal(save()?.disabled, true);
-  assert.equal(Boolean(buttonText(browser, 'Удалить из .env')), true);
+  // Удаление — кнопка в строке своего поля, только у значения из .env.
+  assert.equal(browser.document.querySelectorAll('[data-testid="credential-remove"]').length, 1);
 
   const secondKey = browser.document.querySelector('input[name="TEST_SECOND_KEY"]');
-  const mode = browser.document.querySelector('select[name="TEST_MODE"]');
 
   assert.equal(secondKey?.type, 'password');
+  assert.equal(Boolean(browser.document.querySelector('select[name="TEST_MODE"]')), false);
   typeInto(browser, secondKey, '  new-secret-value  ');
-  mode.value = 'plan';
-  mode.dispatchEvent(new browser.window.Event('change', { bubbles: true }));
+  // Выбор из двух–четырёх вариантов — переключатель кнопками.
+  buttonText(browser, 'Coding Plan').click();
   await flushPromises();
 
   assert.equal(save()?.disabled, false);
@@ -172,4 +173,93 @@ test('отказ сервера остаётся в окне вместе с в�
 
   assert.match(browser.document.body.textContent, /Строка 3 файла окружения/);
   assert.equal(browser.document.querySelector('input[name="TEST_API_KEY"]')?.value, 'replacement-key');
+});
+
+const MODE_KEYS = [
+  {
+    env: 'TEST_MODE',
+    kind: 'choice',
+    label: 'Режим',
+    options: [
+      {
+        value: 'api',
+        label: 'Обычный API',
+        hint: 'Оплата по расходу.',
+      },
+      {
+        value: 'plan',
+        label: 'Coding Plan',
+        hint: 'Подписка.',
+      },
+    ],
+    set: true,
+    inFile: true,
+    preview: null,
+    value: 'api',
+  },
+  {
+    env: 'TEST_API_KEY',
+    kind: 'secret',
+    label: 'Ключ API',
+    when: { env: 'TEST_MODE', value: 'api' },
+    set: true,
+    inFile: true,
+    preview: '…cdef',
+    value: null,
+  },
+  {
+    env: 'TEST_PLAN_KEY',
+    kind: 'secret',
+    label: 'Ключ плана',
+    when: { env: 'TEST_MODE', value: 'plan' },
+    set: false,
+    inFile: false,
+    preview: null,
+    value: null,
+  },
+];
+
+test('карточка и окно показывают только ключ выбранного режима', async (t) => {
+  const browser = await browserHarness();
+  const saves = [];
+  const store = {
+    async saveCredentials(providerId, values) {
+      saves.push(values);
+
+      return { ok: true };
+    },
+  };
+  const { flushPromises } = await mountCredentials(t, browser, store, MODE_KEYS);
+  const card = browser.document.querySelector('[data-testid="provider-credentials"]').textContent;
+
+  assert.match(card, /Ключ API\s*задан · …cdef/);
+  assert.doesNotMatch(card, /Ключ плана/u, 'ключ другого режима в карточке не показан');
+  assert.equal(Boolean(buttonText(browser, 'Изменить ключи…')), true, 'ключ режима задан — ничего не нужно');
+
+  buttonText(browser, 'Изменить ключи…').click();
+  await flushPromises();
+
+  const field = (name) => browser.document.querySelector(`input[name="${name}"]`);
+
+  assert.ok(field('TEST_API_KEY'));
+  assert.equal(field('TEST_PLAN_KEY'), null);
+  // Режим из .env не удаляют, а переключают: «Удалить» есть только у ключа.
+  assert.equal(browser.document.querySelectorAll('[data-testid="credential-remove"]').length, 1);
+  assert.match(browser.document.body.textContent, /Оплата по расходу\./u);
+
+  typeInto(browser, field('TEST_API_KEY'), 'typed-but-hidden');
+  buttonText(browser, 'Coding Plan').click();
+  await flushPromises();
+
+  assert.equal(field('TEST_API_KEY'), null);
+  assert.ok(field('TEST_PLAN_KEY'));
+  assert.match(browser.document.body.textContent, /Подписка\./u);
+
+  typeInto(browser, field('TEST_PLAN_KEY'), 'plan-secret');
+  await flushPromises();
+  buttonText(browser, 'Сохранить').click();
+  await flushPromises();
+
+  // Скрытое поле не уходит: сохраняется ровно то, что видит человек.
+  assert.deepEqual(saves, [{ TEST_MODE: 'plan', TEST_PLAN_KEY: 'plan-secret' }]);
 });

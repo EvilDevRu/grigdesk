@@ -9,10 +9,17 @@ import { EnvFileError, applyEnvChanges, isEnvName, readEnvFile, updateEnvFile } 
 
 export type CredentialKind = 'secret' | 'choice';
 
-// Вариант выбора для `kind: 'choice'`: значение пишется в .env, подпись видит человек.
+// Вариант выбора для `kind: 'choice'`: значение пишется в .env, подпись и подсказку видит человек.
 export interface CredentialOption {
   value: string;
   label: string;
+  hint?: string;
+}
+
+// Условие показа: запись нужна, только пока выбор `env` равен `value` (ключ своего режима).
+export interface CredentialCondition {
+  env: string;
+  value: string;
 }
 
 // Одна объявленная адаптером переменная окружения.
@@ -22,6 +29,7 @@ export interface CredentialDeclaration {
   label: string;
   hint?: string;
   options?: CredentialOption[];
+  when?: CredentialCondition;
 }
 
 // Безопасная проекция для браузера: у секрета нет значения, только признак и хвост.
@@ -75,11 +83,15 @@ function normalizeDeclaration(raw: unknown): CredentialDeclaration | null {
   }
 
   const hint = boundedText(item?.hint, 300);
+  const when = item?.when as Partial<CredentialCondition> | undefined;
   const declaration: CredentialDeclaration = {
     env,
     kind,
     label,
     ...(hint ? { hint } : {}),
+    ...(typeof when?.env === 'string' && typeof when.value === 'string'
+      ? { when: { env: when.env, value: when.value } }
+      : {}),
   };
 
   if (kind === 'secret') {
@@ -87,10 +99,15 @@ function normalizeDeclaration(raw: unknown): CredentialDeclaration | null {
   }
 
   const options = (Array.isArray(item?.options) ? item.options : [])
-    .map((option: Partial<CredentialOption> | null) => ({
-      value: typeof option?.value === 'string' ? option.value : '',
-      label: boundedText(option?.label, 120),
-    }))
+    .map((option: Partial<CredentialOption> | null) => {
+      const optionHint = boundedText(option?.hint, 200);
+
+      return {
+        value: typeof option?.value === 'string' ? option.value : '',
+        label: boundedText(option?.label, 120),
+        ...(optionHint ? { hint: optionHint } : {}),
+      };
+    })
     .filter((option) => OPTION_RE.test(option.value) && option.label);
 
   return options.length ? { ...declaration, options } : null;
@@ -114,8 +131,7 @@ export async function declaredCredentials(
   }
 
   const seen = new Set<string>();
-
-  return (Array.isArray(list) ? list : [])
+  const declarations = (Array.isArray(list) ? list : [])
     .map(normalizeDeclaration)
     .filter((item): item is CredentialDeclaration => {
       if (!item || seen.has(item.env)) {
@@ -126,6 +142,31 @@ export async function declaredCredentials(
 
       return true;
     });
+
+  return declarations.map((item) => withValidCondition(item, declarations));
+}
+
+/**
+ * Условие показа держится, только если ссылается на объявленный выбор и его вариант.
+ * Сломанное условие снимается, а не прячет поле: ключ без поля нельзя было бы задать.
+ */
+function withValidCondition(
+  item: CredentialDeclaration,
+  declarations: readonly CredentialDeclaration[],
+): CredentialDeclaration {
+  if (!item.when) {
+    return item;
+  }
+
+  const target = declarations.find((other) => other.env === item.when?.env && other.kind === 'choice');
+
+  if (target?.options?.some((option) => option.value === item.when?.value)) {
+    return item;
+  }
+
+  const { when: _dropped, ...rest } = item;
+
+  return rest;
 }
 
 /**
