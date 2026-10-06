@@ -60,7 +60,9 @@ watch([activeId, dockCapable, pane], ([chatId, wide, currentPane]) => {
   pageSurface.update({ chatId: chatId || null, visible });
   if (visible) chat.markRead(chatId);
 }, { immediate: true });
-onMounted(() => { chat.ensure(); chat.loadConveyor(); });
+onMounted(() => {
+  chat.ensure();
+});
 
 // ── Ширина списка чатов ─────────────────────────────────────────────────────────
 // Настройка устройства, а не аккаунта (localStorage, как ширина дока и дерева «Кода»):

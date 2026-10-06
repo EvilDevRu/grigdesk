@@ -524,7 +524,6 @@
       "tests/web/bootstrap-results.component.test.js",
       "tests/web/chat-archive-selection.test.js",
       "tests/web/chat-compact-sync.test.js",
-      "tests/web/chat-debug-session.test.js",
       "tests/web/chat-dictation.component.test.js",
       "tests/web/chat-draft-attachments.component.test.js",
       "tests/web/chat-draft-attachments.test.js",

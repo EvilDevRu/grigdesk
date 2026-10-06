@@ -363,43 +363,6 @@
       </div>
     </div>
 
-    <!-- Действия задачи: конвейер или отдельный Debug-чат в той же песочнице. -->
-    <div v-if="sess.taskId && (sess.messages?.length || sess.purpose !== 'debug')" class="cs-act">
-      <div class="col act-row">
-        <UiButton
-          v-if="sess.messages?.length"
-          class="act"
-          :class="{ onconv: onConveyor }"
-          variant="outline"
-          :tone="onConveyor ? 'accent' : 'neutral'"
-          data-role="chat-task-action"
-          :disabled="frozen"
-          @click="toConveyor"
-        >
-          🏭 {{ onConveyor ? 'Уже на конвейере →' : 'На конвейер' }}
-        </UiButton>
-        <UiTooltip
-          v-if="sess.purpose !== 'debug'"
-          :text="DEBUG_HINT"
-          placement="top-start"
-        >
-          <template #trigger>
-            <UiButton
-              class="act debug-act"
-              variant="outline"
-              data-role="chat-task-action"
-              :disabled="frozen || debugOpening"
-              @click="openDebug"
-            >
-              🐞 {{ debugOpening ? 'Открываю…' : 'Исправлять' }}
-            </UiButton>
-          </template>
-        </UiTooltip>
-        <span v-if="launchMsg" class="lm muted">{{ launchMsg }}</span>
-        <span v-if="debugMsg" class="lm muted">{{ debugMsg }}</span>
-      </div>
-    </div>
-
     <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
     <ChatQuestion
       v-if="question"
@@ -647,14 +610,12 @@
 import ChatWorkdir from './ChatWorkdir.vue';
 import { chatWorkdirLabel } from '../../../../shared/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { api } from '../../shared/apiClient.ts';
 import { useDictationController } from '../../features/speech/provider.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { contextFill } from '../../../../shared/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.js';
-import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
@@ -694,10 +655,8 @@ const props = defineProps({
 // где список и чат делят одну колонку (показом управляет CSS, не JS).
 const emit = defineEmits(['back']);
 
-const router = useRouter();
 const chat = useChatStore();
 const tasks = useTasksStore();
-const ui = useUiStore();
 const documentPreview = useDocumentPreviewStore();
 const { openTool } = useToolLauncher();
 // Карта деревьев репозиториев для моста «ссылка на файл кода → панель „Код“».
@@ -1030,12 +989,13 @@ function fetchTaskList() {
   return taskListPromise;
 }
 const taskOpts = ref([]); // [{ task, route, title }]
+
 onMounted(async () => {
   // При открытии — сразу в конец истории
   await nextTick();
   scrollDown();
-  chat.loadConveyor();
   const list = await fetchTaskList();
+
   taskOpts.value = list.map((t) => ({ task: String(t.task), route: t.route, title: '' }));
   // Подтягиваем названия из B24 (для «#<TASK> · Название задачи…»).
   list.forEach((t) => tasks.load(t.task).then((d) => {
@@ -1970,53 +1930,6 @@ function answerQuestion(payload) {
 function skipQuestion() {
   if (question.value) void chat.answerQuestion(question.value.pid, []);
 }
-
-// ── Действие «На конвейер» с защитой ──
-const onConveyor = computed(() => chat.isOnConveyor(sess.value?.taskId));
-const launchMsg = ref(null);
-async function toConveyor() {
-  const s = sess.value; if (!s?.taskId) return;
-  if (onConveyor.value) { router.push('/pipeline'); return; }
-  ui.openTaskLaunch(s.taskId);
-  launchMsg.value = 'выбери маршрут и проверь параметры запуска в карточке задачи';
-}
-
-// Debug открывается отдельным разговором, но остаётся в worktree этой же задачи.
-// Здесь только готовим черновик: ни отправки агенту, ни запуска конвейера по клику нет.
-const DEBUG_HINT = 'Откроется отдельный Debug-чат в той же песочнице задачи. Новый конвейер не создаётся, черновик останется неотправленным.';
-const debugOpening = ref(false);
-const debugMsg = ref('');
-const debugTaskTitle = computed(() => {
-  const task = String(sess.value?.taskId || '');
-  return taskOpts.value.find((o) => o.task === task)?.title || sess.value?.title || '';
-});
-function recentDebugContext(messages = []) {
-  return messages
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && String(m.text || '').trim())
-    .slice(-6)
-    .map((m) => `${m.role === 'user' ? 'Пользователь' : 'Агент'}: ${String(m.text).trim()}`)
-    .join('\n\n')
-    .slice(-3000);
-}
-async function openDebug() {
-  const s = sess.value;
-  if (!s?.taskId || s.purpose === 'debug' || debugOpening.value) return;
-  debugOpening.value = true;
-  debugMsg.value = '';
-  try {
-    await chat.openDebugFor({
-      taskId: s.taskId,
-      taskTitle: debugTaskTitle.value,
-      sourceChatId: s.id,
-      context: recentDebugContext(s.messages),
-    });
-    await router.push('/chats');
-  } catch (e) {
-    debugMsg.value = `ошибка: ${e.message}`;
-  } finally {
-    debugOpening.value = false;
-  }
-}
 </script>
 
 <style scoped>
@@ -2075,10 +1988,10 @@ async function openDebug() {
    отмечают начало каждой. Черты по соседству элементов ложились через раз. */
 .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
 .sel .lbl { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; }
-/* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, слайдеру
-   усилия своего disabled не заводили — гасим его вместе с рядом действий. Композер не
-   трогаем: печатать во время сжатия можно, нельзя только отправить. */
-.cs.frozen .bar :deep(.eff), .cs.frozen .cs-act { opacity: .5; pointer-events: none; }
+/* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, а слайдеру
+   усилия своего disabled не заводили — гасим его отдельно. Композер не трогаем: печатать
+   во время сжатия можно, нельзя только отправить. */
+.cs.frozen .bar :deep(.eff) { opacity: .5; pointer-events: none; }
 
 /* Кольцо контекста — маленькое, кликабельное (сжатие; Alt — сброс) */
 .ctx-tip { flex: none; align-items: center; }
@@ -2228,12 +2141,6 @@ async function openDebug() {
 .msg.note .text { font-size: 12.5px; color: var(--ink-mid); background: var(--surface-2);
   border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; text-align: center; }
 
-/* Запись истории не проходит — предупреждение поперёк всей ширины, над лентой:
-   это не ошибка одного сообщения, а риск потерять весь разговор. */
-.cs-act { padding: 8px 22px; border-top: 1px solid var(--line); }
-.act-row { display: flex; align-items: center; gap: 10px; }
-.lm { font-size: 12px; }
-
 /* Вложения в сообщениях: картинка открывается в общем viewer-е, файл — как оригинал. */
 .m-queued { font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
 .msg.user .m-queued { text-align: right; }
@@ -2305,7 +2212,7 @@ async function openDebug() {
 @media (max-width: 1099px) {
   .cs-top { padding: 8px 14px; }
   .cs-body { padding: 0 11px 0 14px; }
-  .cs-act, .cs-input { padding-left: 14px; padding-right: 14px; }
+  .cs-input { padding-left: 14px; padding-right: 14px; }
 }
 
 /* ── Шапка уже 900 px: ряд настроек без подписей-меток ──────────────────────────
@@ -2359,7 +2266,7 @@ async function openDebug() {
 @media (max-width: 759px) {
   .cs-top { min-height: 0; justify-content: flex-start; padding: 8px 10px; }
   .cs-body { padding: 0 0px 0 12px; margin: 18px 0; }
-  .cs-act, .cs-input { padding-left: 12px; padding-right: 12px; }
+  .cs-input { padding-left: 12px; padding-right: 12px; }
   .cs-input { padding-bottom: 12px; }
   /* Иначе длинный текст режется в узкий столбик */
   .msg.user { max-width: 92%; }

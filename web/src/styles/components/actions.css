@@ -1474,14 +1474,6 @@
   color: var(--good);
 }
 
-.ui-button[data-role='chat-task-action'] {
-  height: 30px;
-  min-height: 30px;
-  padding: 0 11px;
-  border-radius: 8px;
-  font-size: 12.5px;
-}
-
 /* Подписанный выбор папки остаётся рядом с задачей и сохраняет геометрию шапки.
    Состояние открытого окна использует общий pressed-скин кнопки. */
 /* Папку не ужимают соседи: короткое имя важнее пустоты в выборе задачи; длинное
@@ -1498,12 +1490,6 @@
 .ui-button[data-context='chat-workdir'] .ui-button__trailing > svg {
   width: 12px;
   height: 12px;
-}
-
-.ui-button[data-role='chat-task-action'].onconv {
-  --ui-action-background: color-mix(in srgb, var(--accent) 16%, transparent);
-  --ui-action-border: color-mix(in srgb, var(--accent) 45%, var(--line));
-  --ui-action-color: var(--accent);
 }
 
 .ui-icon-button[data-context='chat-pending-remove'] {

@@ -290,9 +290,7 @@ test('кольцо контекста открывает форматирова�
 test('ChatSession передаёт в тултип полное загруженное название выбранной задачи', async (t) => {
   const browser = await browserHarness(t);
   const title = 'Ключевые фразы | Сохранить полный заголовок без обрезания';
-  const debugCalls = [];
-  const routes = [];
-  const openedTasks = [];
+  let loadConveyorCalls = 0;
   const previewedImages = [];
   const sentAt = new Date(2030, 0, 1, 12, 0).getTime();
   const session = {
@@ -335,25 +333,27 @@ test('ChatSession передаёт в тултип полное загружен
   };
   globalThis.__chatTaskTooltipChatStore = () => ({
     sessions: [session],
-    loadConveyor() {},
+    loadConveyor() {
+      loadConveyorCalls += 1;
+    },
     markRead() {},
     setDraft() {},
     permFor() { return null; },
     questionFor() { return null; },
     isOnConveyor() { return false; },
     tabLabel() { return session.title; },
-    async openDebugFor(payload) { debugCalls.push(payload); },
   });
-  globalThis.__chatTaskTooltipRouter = { async push(path) { routes.push(path); } };
+  globalThis.__chatTaskTooltipRouter = {
+    async push() {
+    },
+  };
   globalThis.__chatTaskTooltipTasksStore = () => ({
     async load(id) {
       assert.equal(String(id), '42');
       return { title };
     },
   });
-  globalThis.__chatTaskTooltipUiStore = () => ({
-    openTaskLaunch(id) { openedTasks.push(String(id)); },
-  });
+  globalThis.__chatTaskTooltipUiStore = () => ({});
   globalThis.__chatTaskTooltipProvidersStore = () => ({
     providers: [],
     load() {},
@@ -433,21 +433,13 @@ test('ChatSession передаёт в тултип полное загружен
     mime: 'image/png',
   }]);
 
-  const debugTip = await openTooltip(wrapper, '.debug-act');
-  assert.match(debugTip.text(), /отдельный Debug-чат в той же песочнице/);
-  assert.match(debugTip.text(), /Новый конвейер не создаётся, черновик останется неотправленным/);
-  await wrapper.find('.cs-act .act:not(.debug-act)').trigger('click');
-  assert.deepEqual(openedTasks, ['42']);
-  assert.match(wrapper.find('.lm').text(), /проверь параметры запуска в карточке задачи/);
-  await wrapper.find('.debug-act').trigger('click');
-  await flushPromises();
-  assert.deepEqual(debugCalls, [{
-    taskId: '42',
-    taskTitle: title,
-    sourceChatId: 'chat-42',
-    context: 'Пользователь: Ошибка в форме\n\nАгент: Воспроизвел проблему',
-  }]);
-  assert.deepEqual(routes, ['/chats']);
+  // Сессия привязана к задаче и содержит сообщения: раньше обе кнопки были доступны.
+  // Проверяем узлы интерфейса, не пользовательский текст ленты или название задачи.
+  assert.equal(wrapper.find('.cs').exists(), true);
+  assert.equal(wrapper.find('.cs-input').exists(), true);
+  assert.equal(wrapper.find('.cs-act').exists(), false);
+  assert.equal(wrapper.findAll('[data-role="chat-task-action"]').length, 0);
+  assert.equal(loadConveyorCalls, 0, 'чат не загружает статус конвейера ради снятой кнопки');
 });
 
 test('ChatSession сохраняет выбранную модель после асинхронного reset Kimi', async (t) => {

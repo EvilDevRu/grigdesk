@@ -15,4 +15,6 @@
 - [Упавший assert с узлом happy-dom съедает всю память — веб-тест запускай через сторож памяти](happy-dom-assert-memory.md)
 - [Фоновый Bash может сделать проверку SIGINT ложно красной](background-sigint.md)
 - [Playwright падает до первой спеки: в общем кэше нет ревизии chromium под версию проекта](playwright-browser-revision.md)
+- [Перенаправленный XDG_CACHE_HOME прячет браузеры Playwright](playwright-xdg-cache.md)
+- [Удалённый JS-файл валит снимок миграции, хотя код рабочий](migration-inventory-snapshot.md)
 - [Настройки роняют вкладку headless-проверки = нужен полный Chromium](headless-shell-settings-crash.md)

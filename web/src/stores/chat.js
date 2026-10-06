@@ -770,7 +770,6 @@ export const useChatStore = defineStore('chat', {
     ...pickStore(null),
     loaded: false,
     revealRequest: '',
-    conveyorIds: [],
     pending: {},
     saveError: null,
     compactWindow: 0,
@@ -802,7 +801,6 @@ export const useChatStore = defineStore('chat', {
     isArchived: (s) => (id) => (s.archived || []).some((x) => x.id === id),
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
-    isOnConveyor: (s) => (taskId) => !!taskId && s.conveyorIds.includes(String(taskId)),
     // Непрочитанные: агент ответил, а мы на этот чат ещё не смотрели. Считаем и архивные —
     // чат могли закрыть, пока агент думал, и ответ приехал уже в архив.
     unreadCount: (s) => s.sessions.filter((x) => x.unread).length
@@ -2806,51 +2804,6 @@ export const useChatStore = defineStore('chat', {
     },
 
     /**
-     * Открыть один устойчивый Debug-разговор для песочницы задачи.
-     *
-     * Кнопка намеренно только ГОТОВИТ черновик: отдельный chatKey не означает
-     * отдельный worktree, и автозапуск мог бы начать писать файлы одновременно с
-     * Hunt. Человек видит постановку и отправляет её, когда читающий конвейер закончил.
-     */
-    async openDebugFor({ taskId, taskTitle = '', sourceChatId = '', context = '' } = {}) {
-      await this.ensure();
-      const task = String(taskId || '');
-      if (!task) throw new Error('Debug-чат требует задачу с песочницей');
-
-      const matches = (s) => s?.purpose === 'debug' && String(s.taskId || '') === task;
-      let target = this.sessions.find(matches);
-      let created = false;
-      if (!target) {
-        const archived = (this.archived || []).find(matches);
-        if (archived) {
-          this.restoreArchived(archived.id);
-          target = this._get(archived.id);
-        }
-      }
-      if (!target) {
-        const excerpt = String(context || '').trim().slice(-3000);
-        const draft = [
-          `Работай в песочнице задачи #${task} в режиме Debug: воспроизведи описанную ошибку, докажи первопричину, внеси минимальное исправление и выполни релевантные проверки.`,
-          'Не начинай менять worktree, пока Hunt или другой читающий конвейер этой задачи ещё выполняется.',
-          excerpt ? `\nКонтекст исходного разговора:\n${excerpt}` : '',
-        ].filter(Boolean).join('\n');
-        const id = this.newSession({
-          taskId: task,
-          title: `Debug · #${task}${taskTitle ? ` · ${taskTitle}` : ''}`,
-          purpose: 'debug',
-          sourceChatId: sourceChatId || null,
-          draft,
-        });
-        target = this._get(id);
-        created = true;
-      }
-
-      this.activeId = target.id;
-      this._persist(true);
-      return { id: target.id, created };
-    },
-
-    /**
      * Задача меняет эффективную папку и проходит тот же переход памяти; её название чат
      * получает после подтверждения. Отказ без окна выбора пишется в разговор: иначе селект
      * молча вернулся бы к прежней задаче. Старый сервер — прежний путь без перехода.
@@ -3993,14 +3946,6 @@ export const useChatStore = defineStore('chat', {
       });
 
       return reconnectJob;
-    },
-
-    // Список номеров задач, уже находящихся на конвейере (для защиты «На конвейер»).
-    async loadConveyor() {
-      try {
-        const { tasks } = await api.get('/api/tasks');
-        this.conveyorIds = (tasks || []).map((t) => String(t.task));
-      } catch { /* нет данных фабрики */ }
     },
   },
 });

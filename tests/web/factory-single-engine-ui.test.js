@@ -36,7 +36,7 @@ test('route launch, resume and goto use the single API contract', async () => {
   assert.doesNotMatch(modal, /deliveryTargets:\s*launchNeedsDelivery/);
   assert.match(modal, /<details[\s\S]*Дополнительные параметры[\s\S]*launch-instrumentation/);
   assert.doesNotMatch(modal, /\bticket:\s*`/);
-  assert.match(chat, /ui\.openTaskLaunch\(s\.taskId\)/);
+  assert.doesNotMatch(chat, /openTaskLaunch/);
   assert.doesNotMatch(chat, /tasks\.launch\(/);
 
   assert.match(pipeline, /api\.post\(`\/api\/tasks\/\$\{task\}\/resume`\)/);

@@ -2,11 +2,15 @@
 import { defineStore } from 'pinia';
 
 export const useUiStore = defineStore('ui', {
-  state: () => ({ taskId: null, launchRequested: false }),
+  state: () => ({ taskId: null }),
+
   actions: {
-    openTask(id) { this.launchRequested = false; this.taskId = String(id); },
-    openTaskLaunch(id) { this.launchRequested = true; this.taskId = String(id); },
-    consumeTaskLaunch() { this.launchRequested = false; },
-    close() { this.taskId = null; this.launchRequested = false; },
+    openTask(id) {
+      this.taskId = String(id);
+    },
+
+    close() {
+      this.taskId = null;
+    },
   },
 });

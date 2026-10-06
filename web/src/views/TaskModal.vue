@@ -1921,11 +1921,6 @@ watch(
   ([id]) => { if (id) taskContext.update({ details: taskContextDetails(id) }); },
   { immediate: true },
 );
-watch(() => ui.launchRequested, (requested) => {
-  if (!requested || !taskId.value) return;
-  ui.consumeTaskLaunch();
-  openLaunch();
-}, { flush: 'post', immediate: true });
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
   if (triageTimer) clearInterval(triageTimer);
