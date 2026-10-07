@@ -62,10 +62,42 @@ export function parseDocumentHref(href, { basePath = '' } = {}) {
   return { path: absolute, line, anchor };
 }
 
-export function documentRouteHref(href, options) {
+// Область ссылки (`chat:<id>`) называет владельца, чьи папки сервер добавит к общим
+// корням. Источник корня области — `вид:id:номер`, из него область восстанавливается.
+const SCOPE_RE = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,128}$/;
+const SCOPED_SOURCE_RE = /^([a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,128}):\d{1,4}$/;
+
+/**
+ * Пропускает только корректную область `вид:id`. Остальное — пустая строка,
+ * и ссылка остаётся в общих корнях, а не уходит на сервер мусором.
+ */
+export function documentScope(value) {
+  const scope = String(value || '');
+
+  return SCOPE_RE.test(scope) ? scope : '';
+}
+
+/**
+ * Восстанавливает область из источника открытого документа (`вид:id:номер`), чтобы
+ * абсолютная ссылка внутри него искалась в тех же папках разговора.
+ */
+export function documentScopeOfSource(source) {
+  return SCOPED_SOURCE_RE.exec(String(source || ''))?.[1] || '';
+}
+
+/**
+ * Строит route просмотрщика для абсолютной ссылки. Область передаётся отдельным
+ * параметром: без неё сервер ищет файл только в общих корнях.
+ */
+export function documentRouteHref(href, options = {}) {
   const target = parseDocumentHref(href, options);
   if (!target) return '';
   const query = new URLSearchParams({ open: target.path });
+  const scope = documentScope(options.scope);
+
+  if (scope) {
+    query.set('scope', scope);
+  }
   if (target.line) query.set('line', String(target.line));
   if (target.anchor) query.set('anchor', target.anchor);
   return `#/documents?${query}`;
@@ -111,7 +143,9 @@ export function documentRefRouteHref(href, { source, basePath } = {}) {
   if (!source || !basePath) return '';
   const target = relativeDocumentTarget(href, basePath);
   if (!target) return '';
-  if (target.absoluteHref) return documentRouteHref(target.absoluteHref);
+  if (target.absoluteHref) {
+    return documentRouteHref(target.absoluteHref, { scope: documentScopeOfSource(source) });
+  }
   const query = new URLSearchParams({ source, path: target.path });
   if (target.line) query.set('line', String(target.line));
   if (target.anchor) query.set('anchor', target.anchor);
@@ -131,6 +165,7 @@ export function parseDocumentRouteHref(href) {
   if (!open && (!source || !documentPath)) return null;
   return {
     open,
+    scope: documentScope(query.get('scope')),
     source,
     path: documentPath,
     line: Math.max(0, Number.parseInt(query.get('line'), 10) || 0),

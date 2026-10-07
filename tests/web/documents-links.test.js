@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { chatFileLinkHref } from '../../web/src/features/code/links.ts';
 import {
   documentLinkFromClick,
   documentRefAssetHref,
@@ -44,7 +45,12 @@ test('DOC-WEB-05: Markdown renderer применяет link resolver, но по�
 test('DOC-WEB-06: обычный клик по route документа предназначен для модального viewer-а', () => {
   const href = '#/documents?source=cockpit&path=README.md&line=12';
   assert.deepEqual(parseDocumentRouteHref(href), {
-    open: '', source: 'cockpit', path: 'README.md', line: 12, anchor: '',
+    open: '',
+    scope: '',
+    source: 'cockpit',
+    path: 'README.md',
+    line: 12,
+    anchor: '',
   });
   const event = {
     button: 0,
@@ -81,4 +87,27 @@ test('DOC-WEB-03: внешние URL, каталоги и неподдержан
   for (const href of ['https://example.com/a.md', 'mailto:a@example.com', '/srv/repo', '/srv/repo/data.json']) {
     assert.equal(documentRouteHref(href), '');
   }
+});
+
+test('DOC-WEB-08: ссылка из чата несёт область чата, документ внутри неё — тоже', () => {
+  const href = chatFileLinkHref('/srv/game/docs/hero.md', { roots: [], scope: 'chat:abc_1' });
+
+  assert.equal(href, '#/documents?open=%2Fsrv%2Fgame%2Fdocs%2Fhero.md&scope=chat%3Aabc_1');
+  assert.equal(parseDocumentRouteHref(href).scope, 'chat:abc_1');
+  assert.equal(
+    documentRefRouteHref('/srv/game/docs/other.md', { source: 'chat:abc_1:0', basePath: 'docs/hero.md' }),
+    '#/documents?open=%2Fsrv%2Fgame%2Fdocs%2Fother.md&scope=chat%3Aabc_1',
+  );
+});
+
+test('DOC-WEB-09: повреждённая область не попадает в route', () => {
+  assert.equal(
+    documentRouteHref('/srv/plan.md', { scope: 'chat:../x' }),
+    '#/documents?open=%2Fsrv%2Fplan.md',
+  );
+  assert.equal(parseDocumentRouteHref('#/documents?open=%2Fa.md&scope=%3Cx%3E').scope, '');
+  assert.equal(
+    documentRefRouteHref('/srv/plan.md', { source: 'cockpit', basePath: 'README.md' }),
+    '#/documents?open=%2Fsrv%2Fplan.md',
+  );
 });

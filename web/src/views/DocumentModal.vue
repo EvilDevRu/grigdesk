@@ -154,7 +154,7 @@ watch(
     resolving.value = true;
 
     try {
-      const resolved = await documentsApi.resolve(target.open);
+      const resolved = await documentsApi.resolve(target.open, target.scope);
 
       if (currentGeneration !== generation) {
         return;

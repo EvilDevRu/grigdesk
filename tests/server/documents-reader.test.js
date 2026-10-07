@@ -257,3 +257,87 @@ test('DOC-11: самый узкий root владеет document и asset при
     '# Только inner\n');
   assert.equal((await reader.readAsset({ source: 'inner', path: 'secret.png' })).size, 4);
 });
+
+test('DOC-12: папки области видны только ссылке, назвавшей эту область', async (t) => {
+  const { dir, root, reader } = await fixture(t);
+  const game = path.join(dir, 'game');
+  const other = path.join(dir, 'other');
+  const file = path.join(game, 'docs', 'hero.md');
+  const folders = { a1: [path.join(dir, 'missing'), game, root], b2: [other] };
+
+  await fs.mkdir(path.join(game, 'docs'), { recursive: true });
+  await fs.mkdir(other);
+  await fs.writeFile(file, '# Герой\n');
+  await fs.writeFile(path.join(game, 'docs', 'hero.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await fs.writeFile(path.join(other, 'secret.md'), 'секрет');
+  await fs.writeFile(path.join(root, 'own.md'), '# Свой\n');
+  reader.addScopeProvider('chat', (id) => (folders[id] || []).map((folder) => ({
+    label: 'Чат',
+    path: folder,
+  })));
+
+  await assert.rejects(() => reader.resolveAbsolute(file), { code: 'document_outside_roots' });
+  await assert.rejects(() => reader.resolveAbsolute(file, 'chat:b2'), { code: 'document_outside_roots' });
+  await assert.rejects(() => reader.resolveAbsolute(file, 'chat:../a1'), { code: 'document_outside_roots' });
+
+  const resolved = await reader.resolveAbsolute(file, 'chat:a1');
+  const document = await reader.read(resolved.ref);
+  const asset = await reader.readAsset({ source: 'chat:a1:1', path: 'docs/hero.png' });
+
+  assert.deepEqual(resolved.ref, { source: 'chat:a1:1', path: 'docs/hero.md' });
+  assert.equal(document.content, '# Герой\n');
+  assert.equal(asset.contentType, 'image/png');
+
+  // Общий корень с тем же путём побеждает: документ Cockpit остаётся ссылкой `test`.
+  const own = await reader.resolveAbsolute(path.join(root, 'own.md'), 'chat:a1');
+
+  assert.deepEqual(own.ref, { source: 'test', path: 'own.md' });
+  await assert.rejects(() => reader.read({ source: 'chat:a1:2', path: 'own.md' }), {
+    code: 'document_unknown_source',
+  });
+  await assert.rejects(() => reader.read({ source: 'chat:b2:0', path: '../game/docs/hero.md' }), {
+    code: 'document_outside_roots',
+  });
+});
+
+test('DOC-13: сбой поставщика области не расширяет и не ломает общие корни', async (t) => {
+  const { root, reader } = await fixture(t);
+
+  await fs.writeFile(path.join(root, 'plan.md'), '# План\n');
+  reader.addScopeProvider('chat', () => {
+    throw new Error('нет чата');
+  });
+
+  const resolved = await reader.resolveAbsolute(path.join(root, 'plan.md'), 'chat:x');
+
+  assert.deepEqual(resolved.ref, { source: 'test', path: 'plan.md' });
+  assert.throws(() => reader.addScopeProvider('chat', () => []), TypeError);
+});
+
+test('DOC-14: HTTP resolve передаёт область поставщику', async (t) => {
+  const { dir, reader } = await fixture(t);
+  const game = path.join(dir, 'game');
+  const app = Fastify();
+
+  t.after(() => app.close());
+  await fs.mkdir(game);
+  await fs.writeFile(path.join(game, 'hero.md'), '# Герой\n');
+  reader.addScopeProvider('chat', (id) => (id === 'a1' ? [{ label: 'game', path: game }] : []));
+  await app.register(documentsModule, { reader });
+
+  const outside = await app.inject({
+    method: 'POST',
+    url: '/api/documents/resolve',
+    payload: { path: path.join(game, 'hero.md') },
+  });
+  const scoped = await app.inject({
+    method: 'POST',
+    url: '/api/documents/resolve',
+    payload: { path: path.join(game, 'hero.md'), scope: 'chat:a1' },
+  });
+
+  assert.equal(outside.statusCode, 403);
+  assert.equal(scoped.statusCode, 200);
+  assert.deepEqual(scoped.json().ref, { source: 'chat:a1:0', path: 'hero.md' });
+  assert.deepEqual(scoped.json().source, { id: 'chat:a1:0', label: 'game' });
+});

@@ -11,7 +11,7 @@ export interface DocumentsModuleOptions {
 
 // Ссылку на документ несёт запрос: bridge — телом, чтение — строкой запроса.
 interface DocumentResolveRoute {
-  Body: { path?: unknown };
+  Body: { path?: unknown; scope?: unknown };
 }
 
 interface DocumentFileRoute {
@@ -53,13 +53,17 @@ async function documentsModule(
   // в source/path и не является адресом файлового API. Клиент тут же заменяет URL.
   // POST не оставляет абсолютный host path в access-log query. Сам путь до replace()
   // живёт только во fragment браузера, который HTTP-серверу вообще не отправляется.
+  // `scope` называет владельца ссылки (`chat:<id>`) — его папки тоже становятся корнями.
   fastify.post<DocumentResolveRoute>('/api/documents/resolve', async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     const filePath = String(request.body?.path || '');
     if (!filePath) {
       return reply.code(400).send({ error: 'document_path_required', message: 'Не указан путь к документу' });
     }
-    return answer(reply, request, () => reader.resolveAbsolute(filePath));
+
+    const scope = String(request.body?.scope || '');
+
+    return answer(reply, request, () => reader.resolveAbsolute(filePath, scope));
   });
 
   fastify.get<DocumentFileRoute>('/api/documents/file', async (request, reply) => {

@@ -11,6 +11,8 @@ import { documentRouteHref } from '../documents/links.js';
 type LinkRoot = Pick<CodeRoot, 'project' | 'repo' | 'root'>;
 interface LinkOptions {
   roots?: readonly LinkRoot[];
+  // Область документа (`chat:<id>`): папки разговора, откуда пришла ссылка.
+  scope?: string;
 }
 
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
@@ -224,9 +226,9 @@ export function codeLinkHref(target: CodeTarget, origin = globalThis.location?.o
  */
 export function chatFileLinkHref(
   href: string,
-  { roots = codeRoots.value }: LinkOptions = {},
+  { roots = codeRoots.value, scope = '' }: LinkOptions = {},
 ): string | false {
-  const doc = documentRouteHref(href);
+  const doc = documentRouteHref(href, { scope });
 
   if (doc) {
     return doc;

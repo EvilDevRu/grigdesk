@@ -9,8 +9,9 @@ import type { ResolvedDocument } from '../../../shared/documentsContracts.ts';
 import { api } from './apiClient.ts';
 
 export const documentsApi = {
-  async resolve(absolutePath: string): Promise<ResolvedDocument> {
-    const value: unknown = await api.post('/api/documents/resolve', { path: absolutePath });
+  async resolve(absolutePath: string, scope = ''): Promise<ResolvedDocument> {
+    const body = scope ? { path: absolutePath, scope } : { path: absolutePath };
+    const value: unknown = await api.post('/api/documents/resolve', body);
 
     return parseResolvedDocument(value);
   },

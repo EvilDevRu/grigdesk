@@ -1195,6 +1195,7 @@ async function build() {
     permissionQueue,
     sshBroker,
     dbBroker,
+    documentReader,
   });
   // `config` и `claudeAuth` сюда не передаются: раздел «Настройки» их не читает —
   // авторизацию Claude показывает раздел исполнителей, а пути берутся из сервисов.

@@ -4,7 +4,7 @@
     <div :id="bodyId" class="chat-in-turn-reply__body"
          :class="{ collapsed: !expanded, faded: !expanded && overflows }">
       <div ref="content" class="text md">
-        <RichMarkdown :text="text" :resolve-href="chatFileLinkHref" :resolve-image-href="imageHref" />
+        <RichMarkdown :text="text" :resolve-href="fileHref" :resolve-image-href="imageHref" />
       </div>
     </div>
     <UiDisclosureButton v-if="overflows" v-model:open="expanded" density="compact" :controls="bodyId"
@@ -43,6 +43,10 @@ let observer: ResizeObserver | null = null;
 
 const text = computed(() => props.block.text || '');
 const imageHref = (href: string) => chatImageHref(href, props.chatId || '');
+// Документ по ссылке агента ищется и в папках этого разговора, не только в Cockpit.
+const fileHref = (href: string) => chatFileLinkHref(href, {
+  scope: props.chatId ? `chat:${props.chatId}` : '',
+});
 
 /**
  * Раскрытие нужно только там, где текст действительно длиннее четырёх строк.

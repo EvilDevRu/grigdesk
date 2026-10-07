@@ -17,6 +17,10 @@ export interface DocumentRoot {
 // Поставщик корней: сборка приложения объявляет, откуда вообще можно читать.
 export type DocumentRootProvider = () => Promise<unknown> | unknown;
 
+// Поставщик корней области: отдаёт папки одного владельца (например, одного чата)
+// по его id. Такие корни видны только ссылкам, которые назвали эту область.
+export type DocumentScopeProvider = (scopeId: string) => Promise<unknown> | unknown;
+
 // Ссылка на документ. Приходит из запроса, поэтому оба поля недоверенные.
 export interface DocumentRef {
   source?: unknown;
@@ -39,6 +43,11 @@ const ALLOWED_ASSET_EXTENSIONS = new Map([
   ['.gif', 'image/gif'],
   ['.webp', 'image/webp'],
 ]);
+
+// Область — `вид:id`, источник её корня — `вид:id:номер`. Номер — позиция в ответе
+// поставщика, поэтому исчезнувшая папка не сдвигает ссылки на соседние.
+const SCOPE_RE = /^([a-z][a-z0-9-]{0,31}):([A-Za-z0-9_-]{1,128})$/;
+const SCOPED_SOURCE_RE = /^([a-z][a-z0-9-]{0,31}:[A-Za-z0-9_-]{1,128}):\d{1,4}$/;
 
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_ASSET_BYTES = 5_000_000;
@@ -204,6 +213,8 @@ function publicReadError(value: unknown) {
 export class DocumentReader {
   private readonly rootProviders: DocumentRootProvider[];
 
+  private readonly scopeProviders = new Map<string, DocumentScopeProvider>();
+
   readonly maxBytes: number;
 
   readonly maxAssetBytes: number;
@@ -261,7 +272,31 @@ export class DocumentReader {
     return this;
   }
 
-  async roots(): Promise<DocumentRoot[]> {
+  /**
+   * Зарегистрировать поставщика корней области `kind`. Корни области не попадают в общий
+   * список: их видит только запрос, который явно назвал область (`kind:id`).
+   */
+  addScopeProvider(kind: string, provider: DocumentScopeProvider) {
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(kind)) {
+      throw new TypeError('document scope kind is invalid');
+    }
+    if (typeof provider !== 'function') {
+      throw new TypeError('document scope provider must be a function');
+    }
+    if (this.scopeProviders.has(kind)) {
+      throw new TypeError(`document scope ${kind} is already registered`);
+    }
+
+    this.scopeProviders.set(kind, provider);
+
+    return this;
+  }
+
+  /**
+   * Общие корни плюс корни названной области. Общий корень с тем же путём побеждает:
+   * один каталог не получает двух id, а документ Cockpit остаётся ссылкой `cockpit`.
+   */
+  async roots(scope: unknown = ''): Promise<DocumentRoot[]> {
     const declared: unknown[] = [];
     for (const provider of this.rootProviders) {
       const entries = await provider();
@@ -286,15 +321,71 @@ export class DocumentReader {
       byPath.set(root.path, root);
       roots.push(root);
     }
+    for (const root of await this.scopeRoots(scope)) {
+      if (byPath.has(root.path)) {
+        continue;
+      }
+
+      byPath.set(root.path, root);
+      roots.push(root);
+    }
     // Самый узкий корень владеет документом при вложенных источниках.
     return roots.sort((a, b) => b.path.length - a.path.length);
   }
 
   /**
+   * Канонические корни одной области с id `вид:id:номер`. Неизвестная или пустая область
+   * ничего не добавляет: отказ поставщика не расширяет и не ломает общий список.
+   */
+  private async scopeRoots(scope: unknown): Promise<DocumentRoot[]> {
+    const match = SCOPE_RE.exec(String(scope || ''));
+    const [name = '', kind = '', scopeId = ''] = match || [];
+    const provider = this.scopeProviders.get(kind);
+
+    if (!name || !provider) {
+      return [];
+    }
+
+    let entries: unknown;
+
+    try {
+      entries = await provider(scopeId);
+    } catch {
+      return [];
+    }
+
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+
+    const roots = await Promise.all(entries.map((entry, index) => {
+      const declared = entry as { label?: unknown; path?: unknown } | null;
+
+      return canonicalDirectory({
+        id: `${name}:${index}`,
+        label: String(declared?.label || ''),
+        path: declared?.path,
+      });
+    }));
+    const seen = new Set<string>();
+
+    return roots.filter((root): root is DocumentRoot => {
+      if (!root || seen.has(root.path)) {
+        return false;
+      }
+
+      seen.add(root.path);
+
+      return true;
+    });
+  }
+
+  /**
    * Превратить старую абсолютную ссылку агента в стабильный DocumentRef. Этот метод
    * не читает содержимое; HTTP использует его только на входе bridge-route.
+   * `scope` добавляет к общим корням папки названной области (`chat:<id>`).
    */
-  async resolveAbsolute(inputPath: unknown) {
+  async resolveAbsolute(inputPath: unknown, scope: unknown = '') {
     const requested = String(inputPath || '');
     if (!requested || requested.includes('\0') || !path.isAbsolute(requested)) {
       fail('document_bad_path', 'Нужен абсолютный путь к документу', 400);
@@ -314,7 +405,7 @@ export class DocumentReader {
       fail('document_type_not_allowed', 'Целевой файл имеет неподдерживаемый тип', 415);
     }
 
-    const roots = await this.roots();
+    const roots = await this.roots(scope);
     const source = roots.find((root) => isInside(root.path, canonical));
     if (!source) {
       fail('document_outside_roots', 'Документ находится вне разрешённых корней', 403);
@@ -337,7 +428,8 @@ export class DocumentReader {
     if (!formatOf(relativePath)) {
       fail('document_type_not_allowed', 'Можно просматривать только .md, .markdown и .txt', 415);
     }
-    const roots = await this.roots();
+
+    const roots = await this.roots(SCOPED_SOURCE_RE.exec(sourceId)?.[1] || '');
     const source = roots.find((root) => root.id === sourceId);
     if (!source) fail('document_unknown_source', 'Источник документов не найден', 404);
     const candidate = path.resolve(source.path, relativePath);
@@ -407,7 +499,8 @@ export class DocumentReader {
     if (!assetTypeOf(relativePath)) {
       fail('document_asset_type_not_allowed', 'Поддерживаются PNG, JPEG, GIF и WebP', 415);
     }
-    const roots = await this.roots();
+
+    const roots = await this.roots(SCOPED_SOURCE_RE.exec(sourceId)?.[1] || '');
     const source = roots.find((root) => root.id === sourceId);
     if (!source) fail('document_unknown_source', 'Источник документов не найден', 404);
     const candidate = path.resolve(source.path, relativePath);

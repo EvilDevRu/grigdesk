@@ -17,6 +17,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { api } from '../shared/apiClient.ts';
 import TopbarActions from '../shared/layout/TopbarActions.vue';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
+import { documentScope } from '../features/documents/links.js';
 import { UiIconButton, UiSpinner, vTooltip } from '../ui';
 
 const route = useRoute();
@@ -39,7 +40,9 @@ watch(() => String(route.query.open || ''), async (openPath) => {
   if (!openPath) { resolving.value = false; return; }
   resolving.value = true;
   try {
-    const resolved = await api.post('/api/documents/resolve', { path: openPath });
+    const scope = documentScope(route.query.scope);
+    const body = scope ? { path: openPath, scope } : { path: openPath };
+    const resolved = await api.post('/api/documents/resolve', body);
     if (generation !== resolveGeneration) return;
     await router.replace({
       name: 'documents',

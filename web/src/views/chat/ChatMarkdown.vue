@@ -1,5 +1,5 @@
 <template>
-  <RichMarkdown class="text md" :text="text" :resolve-href="chatFileLinkHref"
+  <RichMarkdown class="text md" :text="text" :resolve-href="fileHref"
                 :resolve-image-href="imageHref" />
 </template>
 
@@ -15,4 +15,8 @@ const props = defineProps<{
 
 // Путь на диске ищется сервером в текущей рабочей области именно этого разговора.
 const imageHref = (href: string) => chatImageHref(href, props.chatId || '');
+// Документ по ссылке агента ищется и в папках этого разговора, не только в Cockpit.
+const fileHref = (href: string) => chatFileLinkHref(href, {
+  scope: props.chatId ? `chat:${props.chatId}` : '',
+});
 </script>

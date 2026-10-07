@@ -95,6 +95,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { RawData } from 'ws';
 import type { CockpitConfig } from '../../config.ts';
 import type { FactoryStateAdapter } from '../../adapters/factoryState.ts';
+import type { DocumentReader } from '../../lib/documents/reader.ts';
 import type { SseBus } from '../../lib/fastifyDecorations.ts';
 import type { ClaudeAuthStore } from '../../lib/claudeAuthStore.ts';
 import type { StoredChat, ChatMeta } from '../../lib/chat/historyStore.ts';
@@ -302,6 +303,8 @@ interface ChatModuleOptions {
   backgroundStopGraceMs?: number;
   shutdownGraceMs?: number;
   shutdownInterruptMs?: number;
+  // Просмотрщик документов: чат объявляет ему свои папки областью `chat:<id>`.
+  documentReader?: Pick<DocumentReader, 'addScopeProvider'>;
 }
 
 interface ModelTarget {
@@ -3789,6 +3792,25 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Cross-Origin-Resource-Policy', 'same-origin')
       .send(result.bytes);
+  });
+
+  /**
+   * Ссылка на документ из ответа агента открывается в папках именно этого разговора:
+   * рабочей и дополнительных. Чужие чаты и остальной диск в область не попадают.
+   */
+  opts.documentReader?.addScopeProvider('chat', async (chatId) => {
+    const record = await history.readOne(chatId);
+
+    if (!record) {
+      return [];
+    }
+
+    const workspace = await workspaceOf(record);
+
+    return [workspace.cwd, ...workspace.extraDirs].map((dir) => ({
+      label: path.basename(dir) || dir,
+      path: dir,
+    }));
   });
 
   // Диктовка с микрофона: multipart-аудио (webm/ogg) → whisper → { text }.
