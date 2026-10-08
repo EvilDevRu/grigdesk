@@ -301,7 +301,13 @@ export interface ExecutorAdapter {
   catalogCacheKey?: (config: unknown) => unknown;
   discoverModels?: (config: unknown) => unknown;
   modelFamily?: (model: unknown) => unknown;
-  modelEfforts?: (model: unknown, efforts: string[]) => unknown;
+  // Третий аргумент — свежий discovery до fallback на сохранённые ступени.
+  // null/undefined не подтверждает поддержку CLI; custom обходит фильтр.
+  modelEfforts?: (
+    model: unknown,
+    efforts: string[],
+    discoveredEfforts?: readonly string[] | null,
+  ) => unknown;
   familyClass?: (family: unknown) => unknown;
   usage?: (...args: never[]) => unknown;
   mcpStatus?: (config: unknown, deps?: unknown) => unknown;

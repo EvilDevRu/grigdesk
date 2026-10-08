@@ -7,6 +7,7 @@ import test from 'node:test';
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 import { resolveLegacyModel } from '../../server/src/lib/chat/modelRef.ts';
 import { getExecutors } from '../../server/src/lib/executors/index.ts';
+import claude from '../../server/src/lib/executors/claude.ts';
 import {
   getModelsRegistry,
   mergeCatalogModel,
@@ -52,7 +53,7 @@ test('справка усилия следует доступным ступен
   assert.deepEqual(resolveEffortHints(model, executor, []), {});
 });
 
-test('каждый зарегистрированный исполнитель объявляет справку; делегирование принадлежит Codex', async () => {
+test('справка описывает делегирование только у ultra Codex и ultracode Claude', async () => {
   const executors = await getExecutors();
 
   for (const executor of executors.values()) {
@@ -60,9 +61,21 @@ test('каждый зарегистрированный исполнитель �
   }
 
   assert.match(executors.get('codex').effortHints.ultra, /делегированием/);
+  assert.equal(executors.get('claude').effortHints.ultracode,
+    'Глубина xhigh; запрашивает делегирование задач при доступном workflow. Расход может вырасти.');
 
-  for (const id of ['claude', 'kimi', 'deepseek', 'glm']) {
-    assert.doesNotMatch(Object.values(executors.get(id).effortHints).join(' '), /делегирован/);
+  for (const executor of executors.values()) {
+    for (const [level, hint] of Object.entries(executor.effortHints)) {
+      if (executor.id === 'codex' && level === 'ultra') {
+        continue;
+      }
+
+      if (executor.id === 'claude' && level === 'ultracode') {
+        continue;
+      }
+
+      assert.doesNotMatch(hint, /делегирован/);
+    }
   }
 });
 
@@ -318,4 +331,106 @@ test('runtime-каталог отдаёт справку только разре
   assert.deepEqual(model.efforts, ['high']);
   assert.deepEqual(model.effortHints, { high: 'Тщательная работа.' });
   assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
+});
+
+test('общий фильтр получает исходный discovery до fallback, включая неизвестный результат', async (t) => {
+  let discovered;
+  const received = [];
+
+  await unavailableExecutorFixture(t, {
+    efforts: () => discovered,
+    modelEfforts: (_model, ladder, fresh) => {
+      received.push({ ladder, fresh });
+
+      return ladder;
+    },
+  });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-discovery-contract-'));
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const modelsPath = path.join(root, 'models.json');
+
+  await fs.writeFile(modelsPath, JSON.stringify({ 'test-live': [{ id: 'synthetic', efforts: ['stored'] }] }));
+
+  for (const value of [null, undefined, 'invalid', ['fresh']]) {
+    discovered = value;
+    await getModelsRegistry({ modelsPath }, { refresh: true });
+    assert.deepEqual(received.at(-1), {
+      ladder: Array.isArray(value) ? value : ['stored'],
+      fresh: Array.isArray(value) ? value : null,
+    });
+  }
+});
+
+test('runtime Claude снимает старый ultracode без свежего discovery и сохраняет custom', async (t) => {
+  const ladder = ['high', 'xhigh', 'ultracode'];
+  let discovered = ladder;
+  const filtered = [];
+
+  await unavailableExecutorFixture(t, {
+    effortHints: claude.effortHints,
+    efforts: () => discovered,
+    modelEfforts: (model, levels, fresh) => {
+      filtered.push(model.id);
+
+      return claude.modelEfforts(model, levels, fresh);
+    },
+  });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-ultracode-registry-'));
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const modelsPath = path.join(root, 'models.json');
+  const compatible = {
+    efforts: ladder,
+    capabilities: ['effort', 'xhigh_effort'],
+    effortGates: ['xhigh'],
+  };
+  const customHint = 'Ручной режим';
+  const catalogJson = JSON.stringify({
+    'test-live': [
+      { ...compatible, id: 'compatible' },
+      {
+        ...compatible,
+        id: 'incompatible',
+        capabilities: ['effort'],
+      },
+      { id: 'unknown', efforts: ladder },
+      {
+        ...compatible,
+        id: 'unverified',
+        effortUnverified: true,
+      },
+      {
+        id: 'manual',
+        custom: true,
+        efforts: ['ultracode'],
+        effortHints: { ultracode: customHint },
+      },
+    ],
+  });
+
+  await fs.writeFile(modelsPath, catalogJson);
+
+  for (const fresh of [ladder, null, ['high', 'xhigh'], ladder]) {
+    discovered = fresh;
+
+    const registry = await getModelsRegistry({ modelsPath }, { refresh: true });
+    const by = new Map(registry['test-live'].map((model) => [model.id, model]));
+    const hasMode = fresh === ladder;
+
+    assert.deepEqual(by.get('compatible').efforts, hasMode ? ladder : ['high', 'xhigh']);
+    assert.equal(by.get('compatible').effortHints.ultracode,
+      hasMode ? claude.effortHints.ultracode : undefined);
+    assert.deepEqual(by.get('incompatible').efforts, ['high']);
+    assert.deepEqual(by.get('unknown').efforts, ['high', 'xhigh']);
+    assert.deepEqual(by.get('unverified').efforts, []);
+    assert.deepEqual(by.get('manual').efforts, ['ultracode']);
+    assert.deepEqual(by.get('manual').effortHints, { ultracode: customHint });
+    assert.equal(filtered.includes('manual'), false);
+    assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
+  }
 });

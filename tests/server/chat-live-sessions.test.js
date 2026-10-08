@@ -15,7 +15,7 @@ import {
   claudeSessionArgs,
   openClaudeStreamSession,
 } from '../../server/src/lib/executors/_claudeStream.ts';
-import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
+import claude, { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 import { ChatBackgroundRuns, visibleExtraDirs } from '../../server/src/lib/chat/backgroundRuns.ts';
 import { ChatLiveSessions } from '../../server/src/lib/chat/liveSessions.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
@@ -204,6 +204,34 @@ test('пул переиспользует одну сессию и переот�
   assert.equal(opened[1].spec.sessionId, 'sid-1');
 
   await pool.closeAll();
+});
+
+test('пул переоткрывает high → ultracode → high с прежним sessionId и новым argv', async (t) => {
+  const opened = [];
+  const executor = fakeExecutor({ opened, restartOn: claude.session.restartOn });
+  const pool = new ChatLiveSessions({ maxSessions: 4 });
+
+  t.after(() => pool.closeAll());
+
+  for (const effort of ['high', 'ultracode', 'ultracode', 'high']) {
+    await pool.run({
+      chatKey: 'effort-switch',
+      executor,
+      effort,
+    }, { message: 'ход' });
+  }
+
+  assert.deepEqual(opened.map((handle) => handle.spec.effort), ['high', 'ultracode', 'high']);
+  assert.deepEqual(opened.map((handle) => handle.closed), [true, true, false]);
+  assert.equal(opened[1].sends, 2, 'тот же effort переиспользует процесс');
+
+  for (const handle of opened.slice(1)) {
+    const args = claudeSessionArgs(handle.spec);
+
+    assert.equal(handle.spec.sessionId, 'sid-1');
+    assert.equal(args[args.indexOf('--resume') + 1], 'sid-1');
+    assert.equal(args[args.indexOf('--effort') + 1], handle.spec.effort);
+  }
 });
 
 test('смена blockDirectSsh переоткрывает процесс, равное значение не переоткрывает', async () => {

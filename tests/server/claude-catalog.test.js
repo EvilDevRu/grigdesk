@@ -140,6 +140,54 @@ test('без данных о возможностях гейт молчит и �
   assert.equal(claude.modelEfforts({ capabilities: ['effort'], effortGates: [] }, null), null);
 });
 
+const MODE_LADDER = Object.freeze(['low', 'high', 'xhigh', 'max', 'ultracode']);
+const VERIFIED_MODEL = Object.freeze({
+  capabilities: Object.freeze(['effort', 'xhigh_effort', 'max_effort']),
+  effortGates: Object.freeze(['xhigh', 'max']),
+});
+const MODE_CASES = [
+  ['проверенная модель', VERIFIED_MODEL, MODE_LADDER, MODE_LADDER, MODE_LADDER],
+  ['нет разрешённой базы',
+    { capabilities: ['effort', 'max_effort'], effortGates: ['xhigh', 'max'] },
+    MODE_LADDER, MODE_LADDER, ['low', 'high', 'max']],
+  ['нет effort', { capabilities: [], effortGates: [] }, MODE_LADDER, MODE_LADDER, []],
+  ['нет capabilities', {}, MODE_LADDER, MODE_LADDER, MODE_LADDER.slice(0, -1)],
+  ['null модель', null, MODE_LADDER, MODE_LADDER, MODE_LADDER.slice(0, -1)],
+  ['undefined модель', undefined, MODE_LADDER, MODE_LADDER, MODE_LADDER.slice(0, -1)],
+  ['непроверенная запись', { effortUnverified: true }, MODE_LADDER, MODE_LADDER, []],
+  ['last-known caps непроверенной записи', { ...VERIFIED_MODEL, effortUnverified: true },
+    MODE_LADDER, MODE_LADDER, []],
+  ['негейтованная база', { capabilities: ['effort'], effortGates: [] },
+    MODE_LADDER, MODE_LADDER, MODE_LADDER],
+  ['нет базы в ladder', VERIFIED_MODEL, ['high', 'ultracode'], MODE_LADDER, ['high']],
+  ['discovery отсутствует', VERIFIED_MODEL, MODE_LADDER, null, MODE_LADDER.slice(0, -1)],
+  ['третий аргумент отсутствует', VERIFIED_MODEL, MODE_LADDER, undefined, MODE_LADDER.slice(0, -1)],
+  ['discovery отверг режим', VERIFIED_MODEL, MODE_LADDER, ['high', 'xhigh'], MODE_LADDER.slice(0, -1)],
+  ['собственный гейт запрещает режим',
+    { ...VERIFIED_MODEL, effortGates: ['xhigh', 'max', 'ultracode'] },
+    MODE_LADDER, MODE_LADDER, MODE_LADDER.slice(0, -1)],
+  ['собственный гейт разрешает режим',
+    { capabilities: [...VERIFIED_MODEL.capabilities, 'ultracode_effort'],
+      effortGates: ['xhigh', 'max', 'ultracode'] },
+    MODE_LADDER, MODE_LADDER, MODE_LADDER],
+  ['пустой ladder', VERIFIED_MODEL, [], MODE_LADDER, null],
+  ['отсутствующий ladder', VERIFIED_MODEL, undefined, MODE_LADDER, null],
+];
+
+for (const [name, model, ladder, discovered, expected] of MODE_CASES) {
+  test(`модельный допуск ultracode: ${name}`, () => {
+    const inputs = {
+      model,
+      ladder,
+      discovered,
+    };
+    const before = structuredClone(inputs);
+
+    assert.deepEqual(claude.modelEfforts(model, ladder, discovered), expected);
+    assert.deepEqual(inputs, before, 'фильтр не меняет входные данные');
+  });
+}
+
 test('сломанный разбор реестра не выдаёт заглушку за факт', async (t) => {
   // Бандл чужого CLI не контракт: реестр однажды переедет или сменит форму. Тогда
   // id по-прежнему находятся, а свойства — нет, и без признака кокпит молча вернул бы

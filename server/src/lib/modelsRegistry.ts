@@ -313,7 +313,9 @@ async function resolveRuntimeModels(
 
       if (!model.custom && typeof executor.modelEfforts === 'function') {
         try {
-          const allowed = executor.modelEfforts(model, efforts);
+          const allowed = executor.modelEfforts(
+            model, efforts, Array.isArray(discovered) ? discovered : null,
+          );
 
           if (Array.isArray(allowed)) {
             efforts = allowed;

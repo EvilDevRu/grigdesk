@@ -171,6 +171,94 @@ function exec(bin: string, args: readonly string[], { timeout = 15_000, anyExit 
   });
 }
 
+const CLAUDE_EFFORT_BASES: Readonly<Record<string, string>> = Object.freeze({
+  ultracode: 'xhigh',
+});
+const CLAUDE_INVALID_EFFORT = '__cockpit_invalid_effort__';
+
+interface ClaudeEffortProbe {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+function claudeEffortDepth(effort: string): string {
+  return Object.hasOwn(CLAUDE_EFFORT_BASES, effort) ? CLAUDE_EFFORT_BASES[effort] ?? effort : effort;
+}
+
+/**
+ * Проверяет только парсер CLI без prompt и модельного запроса.
+ * Срок и буфер ограничены одинаково для кандидата и отрицательного контроля.
+ */
+function probeClaudeEffort(bin: string, effort: string): Promise<ClaudeEffortProbe> {
+  return new Promise((resolve) => {
+    execFile(bin, ['--effort', effort, '--version'], {
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+    }, (error, stdout, stderr) => {
+      resolve({
+        success: !error,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
+/**
+ * Строка версии должна быть самостоятельным ответом Claude Code в stdout.
+ * Ненулевой exit, timeout и случайный semver внутри ошибки ничего не подтверждают.
+ */
+function hasClaudeProbeVersion(probe: ClaudeEffortProbe): boolean {
+  return probe.success
+    && /^\d+\.\d+\.\d+(?:[-+][\w.-]+)? \(Claude Code\)\s*$/m.test(probe.stdout);
+}
+
+/**
+ * Неизвестное имя обязано быть отвергнуто именно этой комбинацией флагов.
+ * CLI, печатающий версию до разбора effort, не подтверждает скрытые режимы.
+ */
+function rejectsClaudeEffortControl(probe: ClaudeEffortProbe): boolean {
+  const output = `${probe.stdout}\n${probe.stderr}`;
+  const rejection = new RegExp(
+    `Unknown --effort value:?\\s*["']?${CLAUDE_INVALID_EFFORT}["']?(?=[\\s,.;:]|$)`,
+    'i',
+  );
+
+  return hasClaudeProbeVersion(probe) && rejection.test(output);
+}
+
+/**
+ * Сохраняет порядок обычных ступеней, а известные режимы помещает по одному в конец.
+ * Справка подтверждает публичное имя; скрытому нужны база, кандидат и отрицательный контроль.
+ */
+async function discoverClaudeEfforts(bin: string, listed: string[]): Promise<string[]> {
+  const ordinary = listed.filter((level) => !Object.hasOwn(CLAUDE_EFFORT_BASES, level));
+  const modes = Object.entries(CLAUDE_EFFORT_BASES).filter(([, base]) => ordinary.includes(base));
+  const hasHidden = modes.some(([mode]) => !listed.includes(mode));
+  const control = hasHidden ? await probeClaudeEffort(bin, CLAUDE_INVALID_EFFORT) : null;
+  const canProbe = control !== null && rejectsClaudeEffortControl(control);
+
+  for (const [mode] of modes) {
+    if (listed.includes(mode)) {
+      ordinary.push(mode);
+    } else if (canProbe) {
+      const candidate = await probeClaudeEffort(bin, mode);
+      const rejected = /Unknown --effort value/i.test(`${candidate.stdout}\n${candidate.stderr}`);
+
+      if (hasClaudeProbeVersion(candidate) && !rejected) {
+        ordinary.push(mode);
+      }
+    }
+  }
+
+  return ordinary;
+}
+
+/**
+ * Читает имена и порядок ступеней из блока справки, включая переносы строки.
+ * Отсутствующий список не заменяется зашитыми значениями.
+ */
 export function parseClaudeEfforts(help: unknown) {
   const block = String(help || '').match(
     /^[ \t]*--effort\b[^\r\n]*(?:\r?\n(?![ \t]*--)[ \t]+[^\r\n]*){0,3}/mi,
@@ -1062,8 +1150,15 @@ export function buildClaudeUntrustedArgs({ model, effort, providerSettings = {} 
     '--no-session-persistence',
     ...claudeProviderSettingsArgs(providerSettings, { directSshPolicy: false }),
   ];
-  if (model) args.push('--model', model);
-  if (effort) args.push('--effort', effort);
+
+  if (model) {
+    args.push('--model', model);
+  }
+
+  if (effort) {
+    args.push('--effort', claudeEffortDepth(effort));
+  }
+
   return args;
 }
 
@@ -1506,6 +1601,7 @@ export default {
     high: 'Тщательная работа над сложными задачами, кодом и вызовами инструментов.',
     xhigh: 'Повышенное усилие для сложного кода и длительных задач агента.',
     max: 'Максимальная тщательность для самых трудных задач; выше расход токенов.',
+    ultracode: 'Глубина xhigh; запрашивает делегирование задач при доступном workflow. Расход может вырасти.',
   },
   nativeSettings: claudeNativeSettings,
   name: 'Claude',
@@ -1631,41 +1727,68 @@ export default {
   },
 
   /**
-   * Уровни эффорта — из списка допустимых значений `--effort` в `claude --help`:
-   * добавит Anthropic новый уровень — подхватится без правок кода.
+   * Публичные ступени приходят из --help, известные скрытые проходят проверку парсера.
+   * Это подтверждение синтаксиса; доступность workflow конкретной сессии здесь неизвестна.
    */
   async efforts(config: ClaudeConfig) {
     const out = await exec(config.claudeBin, ['--help']);
-    return parseClaudeEfforts(out);
+    const listed = parseClaudeEfforts(out);
+
+    return listed ? discoverClaudeEfforts(config.claudeBin, listed) : null;
   },
 
   /**
    * Какие ступени общего ладдера доступны КОНКРЕТНОЙ модели.
    * `--help` перечисляет все уровни, которые понимает CLI, но принимает их не каждая
    * модель: `--effort xhigh` на Opus 4.6 — не «игнор», а падение с ошибкой валидации.
-   * Разрешения объявляет реестр внутри бинаря (`capabilities`), поэтому ни имён
-   * уровней, ни списка моделей здесь не зашито: появится новая ступень — её пропустит
-   * общий ладдер, появится новая модель — её возможности приедут со своей записью.
-   * null — «данных нет», тогда остаётся общий ладдер, как раньше.
+   * Обычные гейты приходят из реестра бинаря. Известный режим дополнительно требует
+   * разрешённой базовой глубины и свежего discovery, не сохранённого списка.
+   * Без capabilities обычный fallback сохраняется, режимы делегирования удаляются.
    */
-  modelEfforts(model: {
-    effortUnverified?: unknown;
-    capabilities?: unknown;
-    effortGates?: unknown;
-  } | null | undefined, ladder: readonly string[] | null | undefined) {
+  modelEfforts(
+    model: {
+      effortUnverified?: unknown;
+      capabilities?: unknown;
+      effortGates?: unknown;
+    } | null | undefined,
+    ladder: readonly string[] | null | undefined,
+    discoveredEfforts?: readonly string[] | null,
+  ) {
     // Частично прочитанная запись не имеет права получить общий ladder: неизвестная
     // ступень не игнорируется CLI, а роняет запуск. Сохранённые metadata остаются в
     // реестре для диагностики/восстановления, но до здорового скана флаг не передаём.
-    if (model?.effortUnverified) return [];
+    if (model?.effortUnverified) {
+      return [];
+    }
+
+    if (!Array.isArray(ladder) || !ladder.length) {
+      return null;
+    }
+
     const caps = (Array.isArray(model?.capabilities) ? model.capabilities : null) as string[] | null;
-    if (!caps || !Array.isArray(ladder) || !ladder.length) return null;
+
+    if (!caps) {
+      const ordinary = ladder.filter((level) => !Object.hasOwn(CLAUDE_EFFORT_BASES, level));
+
+      return ordinary.length === ladder.length ? null : ordinary;
+    }
+
     // Модель без `effort` вовсе не принимает флаг — слайдер ей не показываем.
-    if (!caps.includes('effort')) return [];
+    if (!caps.includes('effort')) {
+      return [];
+    }
+
     // Какие ступени вообще требуют отдельного разрешения, знает не эта модель, а весь
     // реестр: `effortGates` собран по нему в каталоге. Негейтованная ступень (low,
     // medium, high) доступна всем, у гейтованной обязан быть свой флаг `<уровень>_effort`.
     const gated = (Array.isArray(model?.effortGates) ? model.effortGates : []) as string[];
-    return ladder.filter((level) => !gated.includes(level) || caps.includes(`${level}_effort`));
+    const allowed = ladder.filter((level) => !gated.includes(level) || caps.includes(`${level}_effort`));
+
+    return allowed.filter((level) => {
+      const base = claudeEffortDepth(level);
+
+      return base === level || (allowed.includes(base) && discoveredEfforts?.includes(level) === true);
+    });
   },
 
   /**

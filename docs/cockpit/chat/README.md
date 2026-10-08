@@ -108,7 +108,7 @@
 - [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
 - [Codex: глубина xhigh и max, автоматическое делегирование ultra](codex-effort-modes.md)
 - [Краткие подсказки усилия каждого исполнителя в чате и настройках](effort-hints.md)
-- [Claude: ultracode — скрытое значение `--effort` (xhigh и делегирование субагентам)](claude-ultracode.md)
+- [Claude: ступень ultracode запрашивает workflow; discovery, модельный допуск и ограничения](claude-ultracode.md)
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
 - [DeepSeek: MCP в запуске и списке настроек](deepseek-mcp-visibility.md)
 - [DeepSeek: безопасный список проектных MCP, состояния и общие границы](deepseek-mcp-status.md)
