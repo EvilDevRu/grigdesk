@@ -62,7 +62,17 @@ type ModelsFile = Record<string, CatalogModel[] | Record<string, Record<string, 
 // Итоговый реестр: провайдер → модели с разрешёнными efforts.
 export type ModelsRegistry = Record<string, CatalogModel[]>;
 
-let cache: { at: number; registry: ModelsRegistry } | null = null;
+// Кэш одного файла реестра. registry/at — последний успешный результат и время его
+// проверки; building — идущая обычная сборка, к которой присоединяются вызовы;
+// queue — хвост очереди сборок этого файла, он никогда не отклоняется.
+interface RegistryCacheEntry {
+  registry: ModelsRegistry | null;
+  at: number;
+  building: Promise<ModelsRegistry> | null;
+  queue: Promise<unknown>;
+}
+
+const registryCache = new Map<string, RegistryCacheEntry>();
 const CACHE_MS = 60_000;
 
 /**
@@ -339,12 +349,124 @@ async function resolveRuntimeModels(
 /**
  * Итоговый реестр: { providerId: [модели с efforts, сортированные по tier desc] }.
  * Снятые исполнители остаются в файле, но не участвуют в runtime-каталоге.
+ *
+ * Устаревший реестр отдаётся сразу, а пересборка идёт в фоне, одна на файл: её
+ * проверки запускают CLI исполнителей и занимают секунды, а сохранение чата и приём
+ * сообщения не должны их ждать. Без готового реестра вызов ждёт общую сборку;
+ * refresh всегда ждёт сборку, начатую после запроса.
  */
 export async function getModelsRegistry(
   config: { modelsPath: string },
   { refresh = false } = {},
 ): Promise<ModelsRegistry> {
-  if (!refresh && cache && Date.now() - cache.at < CACHE_MS) return cache.registry;
+  const entry = registryCacheEntry(config.modelsPath);
+
+  if (refresh) {
+    return enqueueRegistryBuild(entry, config, true);
+  }
+
+  if (!entry.registry) {
+    return sharedRegistryBuild(entry, config);
+  }
+
+  if (Date.now() - entry.at >= CACHE_MS) {
+    refreshInBackground(entry, config);
+  }
+
+  return entry.registry;
+}
+
+/**
+ * Запись кэша для файла реестра. Ключ — абсолютный путь файла, поэтому разные
+ * конфиги и тесты с разными файлами не получают чужой каталог.
+ */
+function registryCacheEntry(modelsPath: string): RegistryCacheEntry {
+  const key = path.resolve(modelsPath);
+  let entry = registryCache.get(key);
+
+  if (!entry) {
+    entry = {
+      registry: null,
+      at: 0,
+      building: null,
+      queue: Promise.resolve(),
+    };
+    registryCache.set(key, entry);
+  }
+
+  return entry;
+}
+
+/**
+ * Ставит сборку в очередь файла: сборки одного файла идут строго по одной, поэтому
+ * поздняя фоновая не затирает итог refresh, а записи models.json не пересекаются.
+ * Успех обновляет кэш; отказ уходит вызывающему, очередь продолжает работать.
+ */
+function enqueueRegistryBuild(
+  entry: RegistryCacheEntry,
+  config: { modelsPath: string },
+  refresh: boolean,
+): Promise<ModelsRegistry> {
+  const build = entry.queue.then(() => buildModelsRegistry(config, refresh));
+
+  entry.queue = build.catch(() => undefined);
+
+  return build.then((registry) => {
+    entry.registry = registry;
+    entry.at = Date.now();
+
+    return registry;
+  });
+}
+
+/**
+ * Обычная сборка без refresh — одна на файл: пока она идёт, все вызовы получают
+ * то же обещание, а не запускают проверки исполнителей заново.
+ */
+function sharedRegistryBuild(
+  entry: RegistryCacheEntry,
+  config: { modelsPath: string },
+): Promise<ModelsRegistry> {
+  if (entry.building) {
+    return entry.building;
+  }
+
+  const building = enqueueRegistryBuild(entry, config, false);
+  const release = () => {
+    if (entry.building === building) {
+      entry.building = null;
+    }
+  };
+
+  entry.building = building;
+  building.then(release, release);
+
+  return building;
+}
+
+/**
+ * Фоновая пересборка устаревшего реестра. Отказ наружу не уходит: вызывающие уже
+ * получили прежний реестр. Следующая попытка — не раньше CACHE_MS, чтобы сломанная
+ * сборка не запускалась на каждом сохранении чата.
+ */
+function refreshInBackground(entry: RegistryCacheEntry, config: { modelsPath: string }): void {
+  if (entry.building) {
+    return;
+  }
+
+  sharedRegistryBuild(entry, config).catch(() => {
+    entry.at = Date.now();
+  });
+}
+
+/**
+ * Одна сборка реестра: досев файла, каталоги CLI, автообнаружение моделей и
+ * runtime-копии. refresh заставляет пересобрать каталог CLI независимо от версии.
+ */
+async function buildModelsRegistry(
+  config: { modelsPath: string },
+  refresh: boolean,
+): Promise<ModelsRegistry> {
   const executors = await getExecutors();
   const file = await loadFile(config.modelsPath);
 
@@ -376,7 +498,7 @@ export async function getModelsRegistry(
 
     registry[prov] = await resolveRuntimeModels((models || []) as CatalogModel[], executor, config);
   }
-  cache = { at: Date.now(), registry };
+
   return registry;
 }
 
