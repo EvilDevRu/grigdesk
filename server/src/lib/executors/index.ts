@@ -293,6 +293,8 @@ export interface ExecutorAdapter {
   auth: (config: unknown, deps?: unknown) => Promise<ExecutorAuth> | ExecutorAuth;
   latestVersion?: (config: unknown) => unknown;
   efforts?: (config: unknown) => unknown;
+  // Краткие русские объяснения уровней; состав доступных ступеней задаёт каталог модели.
+  effortHints?: Record<string, string>;
   modes?: (config: unknown) => unknown;
   seedModels?: () => unknown[];
   catalog?: (config: unknown) => unknown;

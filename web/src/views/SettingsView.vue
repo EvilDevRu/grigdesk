@@ -1320,13 +1320,15 @@
               data-context="settings-field"
               :disabled="arbiterBusy"
               :model-value="arbiterRun.effort"
+              v-tooltip="arbiterEffortHints[arbiterRun.effort]"
               @change="setArbiterEffort($event.target.value)"
             >
               <option value="">по умолчанию исполнителя</option>
               <option v-if="arbiterEffortLost" :value="arbiterEffortLost">
                 {{ arbiterEffortLost }} — нет у этой модели
               </option>
-              <option v-for="e in arbiterEffortLevels" :key="e" :value="e">{{ e }}</option>
+              <option v-for="e in arbiterEffortLevels" :key="e" :value="e"
+                      :title="arbiterEffortHints[e]">{{ e }}</option>
             </UiSelect>
           </div>
         </div>
@@ -2273,6 +2275,9 @@ const arbiterEffortLost = computed(() => {
   if (!effort) return null;
   return arbiterEffortLevels.value.includes(effort) ? null : effort;
 });
+const arbiterEffortHints = computed(() => (
+  prov.modelOf(arbiterRun.value.modelRef).model?.effortHints || {}
+));
 
 async function saveArbiter(next) {
   arbiterMsg.value = null;

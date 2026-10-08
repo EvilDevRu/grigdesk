@@ -61,6 +61,7 @@
 - [«Конвейер встал» при живом этапе: правило линейности гасило сам фронт](active-stage-linearity.md)
 - [«Маршрут требует файл инструментации» = форма открылась на чужом профиле](launch-profile-consistency.md)
 - [«Нет событий N мин» на штатной паузе = свежесть считали по чужому ACTIVE_RUN](active-run-freshness.md)
+- [«Ход завис — молчит N мин» сразу после «Продолжить» = молчание считали по журналу убитого хода](dead-runner-silence.md)
 - [«Перейти сюда» без пояснения = агент повторит ту же ошибку](rewind-comment-requirement.md)
 - [«fail-closed (код 75)» после прогона e2e = сторож state-only поймал runtime-артефакт Playwright](state-only-playwright-artifacts.md)
 - [«TESTS: узел вернул решение человеку» при победном отчёте агента = сторож отверг manifest тестов, а сторож отстал от проекта](test-manifest-validation.md)

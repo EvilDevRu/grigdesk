@@ -38,6 +38,7 @@ export interface CatalogModel {
   maxOutput?: number;
   tier?: number;
   efforts?: string[] | null;
+  effortHints?: Record<string, string>;
   aliases?: string[];
   modelRefAliases?: string[];
   capabilities?: unknown[];
@@ -255,6 +256,26 @@ export function resolveModelEfforts(
 }
 
 /**
+ * Объяснения принадлежат исполнителю, а доступные ступени — конкретной модели.
+ * Новый уровень остаётся в выборе даже без справки; ручная модель может задать свою.
+ */
+export function resolveEffortHints(
+  model: CatalogModel,
+  executor: Pick<ExecutorAdapter, 'effortHints'>,
+  efforts: string[],
+): Record<string, string> {
+  const hints = model.custom
+    ? { ...executor.effortHints, ...model.effortHints }
+    : { ...model.effortHints, ...executor.effortHints };
+
+  return Object.fromEntries(efforts.map((effort) => {
+    const hint = typeof hints[effort] === 'string' ? hints[effort].trim() : '';
+
+    return [effort, hint || 'Описание этого уровня пока недоступно.'];
+  }));
+}
+
+/**
  * Готовит копии моделей зарегистрированного исполнителя для runtime-каталога.
  * Семейства и уровни усилия уточняются адаптером, прежние версии семейства уходят
  * в `extra` по общему правилу краткого списка; сохранённые записи не меняются.
@@ -306,6 +327,7 @@ async function resolveRuntimeModels(
         ...model,
         ...(family && { family }),
         efforts,
+        effortHints: resolveEffortHints(model, executor, efforts),
       };
     });
 

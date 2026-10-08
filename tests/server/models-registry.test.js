@@ -11,6 +11,7 @@ import {
   getModelsRegistry,
   mergeCatalogModel,
   modelInfoFromRegistry,
+  resolveEffortHints,
   resolveModelEfforts,
 } from '../../server/src/lib/modelsRegistry.ts';
 
@@ -28,6 +29,42 @@ const registry = {
     },
   ],
 };
+
+test('справка усилия следует доступным ступеням и не придумывает смысл новой', () => {
+  const model = {
+    id: 'synthetic',
+    effortHints: {
+      high: 'Upstream high',
+      future: 'Upstream future',
+      stale: 'Stale',
+    },
+  };
+  const executor = { effortHints: { high: 'Русское описание', ultra: 'Делегирование' } };
+
+  assert.deepEqual(resolveEffortHints(model, executor, ['high', 'future', 'unknown']), {
+    high: 'Русское описание',
+    future: 'Upstream future',
+    unknown: 'Описание этого уровня пока недоступно.',
+  });
+  assert.deepEqual(resolveEffortHints({ ...model, custom: true }, executor, ['high']), {
+    high: 'Upstream high',
+  });
+  assert.deepEqual(resolveEffortHints(model, executor, []), {});
+});
+
+test('каждый зарегистрированный исполнитель объявляет справку; делегирование принадлежит Codex', async () => {
+  const executors = await getExecutors();
+
+  for (const executor of executors.values()) {
+    assert.ok(Object.keys(executor.effortHints || {}).length, executor.id);
+  }
+
+  assert.match(executors.get('codex').effortHints.ultra, /делегированием/);
+
+  for (const id of ['claude', 'kimi', 'deepseek', 'glm']) {
+    assert.doesNotMatch(Object.values(executors.get(id).effortHints).join(' '), /делегирован/);
+  }
+});
 
 /**
  * Подменяет общий Map недоступным исполнителем без каталога и восстанавливает его после теста.
@@ -256,5 +293,29 @@ test('runtime-каталог любого исполнителя прячет п
     ['solo', false],
   ]);
   assert.equal(modelInfoFromRegistry('line-a', runtimeRegistry).model.id, 'line-a-2');
+  assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
+});
+
+test('runtime-каталог отдаёт справку только разрешённых уровней без записи в файл', async (t) => {
+  await unavailableExecutorFixture(t, {
+    effortHints: { high: 'Тщательная работа.', ultra: 'Делегирование.' },
+    efforts: () => ['high', 'ultra'],
+    modelEfforts: () => ['high'],
+  });
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-effort-hints-'));
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const modelsPath = path.join(root, 'models.json');
+  const catalogJson = JSON.stringify({ 'test-live': [{ id: 'synthetic' }] });
+
+  await fs.writeFile(modelsPath, catalogJson);
+
+  const runtimeRegistry = await getModelsRegistry({ modelsPath }, { refresh: true });
+  const model = runtimeRegistry['test-live'][0];
+
+  assert.deepEqual(model.efforts, ['high']);
+  assert.deepEqual(model.effortHints, { high: 'Тщательная работа.' });
   assert.equal(await fs.readFile(modelsPath, 'utf8'), catalogJson);
 });

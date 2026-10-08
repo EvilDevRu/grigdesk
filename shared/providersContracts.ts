@@ -14,6 +14,7 @@ export interface ProviderModelEntry {
   name: string;
   extra?: boolean;
   efforts?: string[];
+  effortHints?: Record<string, string>;
 }
 
 // Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —

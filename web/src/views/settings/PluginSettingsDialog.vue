@@ -235,6 +235,7 @@
                   class="inp"
                   data-context="settings-field"
                   :model-value="modelValue(s.key)?.effort || ''"
+                  v-tooltip="pluginEffortHint(modelValue(s.key), modelValue(s.key)?.effort || '')"
                   @change="setPluginEffort(plugin, s.key, selectValue($event))"
                 >
                   <option value="">по умолчанию исполнителя</option>
@@ -250,6 +251,7 @@
                     v-for="e in pluginEffortLevels(modelValue(s.key))"
                     :key="e"
                     :value="e"
+                    :title="pluginEffortHint(modelValue(s.key), e)"
                   >
                     {{ e }}
                   </option>
@@ -401,6 +403,7 @@ import {
   UiSelect,
   UiSpinner,
   UiSwitch,
+  vTooltip,
 } from '../../ui';
 import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -809,6 +812,18 @@ function pluginEffortLevels(stored: unknown): string[] {
   const { model } = prov.modelOf(stored);
 
   return Array.isArray(model?.efforts) ? model.efforts : [];
+}
+
+// Описание относится к выбранной паре исполнитель/модель.
+// Подмена пары сразу меняет справку, без отдельного запроса или таблицы вендоров в окне.
+function pluginEffortHint(stored: unknown, effort: string): string {
+  if (!stored || typeof stored !== 'object') {
+    return '';
+  }
+
+  const { model } = prov.modelOf(stored);
+
+  return model?.effortHints?.[effort] || '';
 }
 
 // Сохранённый уровень, которого у модели больше нет, показываем с оговоркой: сервер

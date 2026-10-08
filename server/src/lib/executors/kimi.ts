@@ -284,6 +284,11 @@ async function nearestKimiProjectRoot(cwd?: string): Promise<string | null> {
 
 export default {
   id: 'kimi',
+  effortHints: {
+    low: 'Короткое рассуждение для простых задач; быстрее и экономнее.',
+    high: 'Глубокое рассуждение для сложного кода, отладки и анализа.',
+    max: 'Максимальное усилие рассуждения для самых трудных задач.',
+  },
   nativeSettings: kimiNativeSettings,
   name: 'Kimi Code',
   vendor: 'Moonshot AI',

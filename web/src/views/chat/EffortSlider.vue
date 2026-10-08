@@ -1,10 +1,11 @@
 <template>
   <div class="eff" :class="{ off: disabled }" :data-lvl="model"
-       v-tooltip="hint || (model ? `Усилие рассуждения: ${model}` : 'Усилие рассуждения: дефолт CLI')">
+       v-tooltip="hint || effortTooltip">
     <span class="cap">эффорт</span>
     <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
                       :max="Math.max(0, levels.length - 1)" :step="1"
-                      :labels="sliderLabels" ticks :disabled="disabled" label="Усилие рассуждения" />
+                      :labels="sliderLabels" :value-text="selectedDescription"
+                      ticks :disabled="disabled" label="Усилие рассуждения" />
     <span class="val">{{ model || '—' }}</span>
   </div>
 </template>
@@ -19,6 +20,7 @@ import { UiDiscreteSlider, vTooltip } from '../../ui';
 // (у каждой модели свой набор; появится новый уровень — отрисуется сам).
 const props = defineProps({
   levels: { type: Array, default: () => [] },
+  hints: { type: Object, default: () => ({}) },
   // Уровень показан, но менять его здесь нельзя (замороженный разговор). Слайдер
   // тогда остаётся индикатором и молча ничего не эмитит.
   disabled: { type: Boolean, default: false },
@@ -26,6 +28,33 @@ const props = defineProps({
   hint: { type: String, default: '' },
 });
 const model = defineModel({ type: String, default: '' });
+
+// Скринридер получает выбранный уровень вместе с его смыслом.
+// Пустой выбор означает умолчание исполнителя, а не первую риску слайдера.
+const selectedDescription = computed(() => {
+  if (!model.value) {
+    return 'Усилие по умолчанию исполнителя';
+  }
+
+  const description = props.hints[model.value];
+
+  return description ? `${model.value} — ${description}` : model.value;
+});
+
+// Справка позволяет сравнить все доступные ступени до смены значения.
+// Список задаёт модель, поэтому чужие и неподдерживаемые уровни сюда не попадают.
+const effortTooltip = computed(() => {
+  const heading = model.value
+    ? `Усилие рассуждения: ${model.value}`
+    : 'Усилие рассуждения: по умолчанию исполнителя';
+  const descriptions = props.levels.map((level) => {
+    const description = props.hints[level] || 'Описание этого уровня пока недоступно.';
+
+    return `${level} — ${description}`;
+  });
+
+  return [heading, ...descriptions].join('\n');
+});
 
 const sliderLabels = computed(() => Object.fromEntries(
   props.levels.map((level, index) => [index, level]),

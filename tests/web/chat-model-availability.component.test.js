@@ -278,3 +278,34 @@ test('сохранённый seed снятого исполнителя треб
   assert.deepEqual(resetCalls, [{ sid: session.id, modelRef: RETIRED_SESSION.modelRef }]);
   assert.deepEqual(setModelCalls, [{ sid: session.id, modelId: 'gpt-5.6-sol' }]);
 });
+
+test('смена исполнителя меняет справку усилия вместе с каталогом модели', async (t) => {
+  const claudeModel = PROVIDERS[0].models[0];
+  const codexModel = PROVIDERS[1].models[0];
+  const originalClaude = { ...claudeModel };
+  const originalCodex = { ...codexModel };
+
+  t.after(() => {
+    Object.assign(claudeModel, originalClaude);
+    Object.assign(codexModel, originalCodex);
+    delete claudeModel.effortHints;
+    delete codexModel.effortHints;
+  });
+
+  claudeModel.efforts = ['low', 'high'];
+  claudeModel.effortHints = { low: 'Экономное усилие.', high: 'Тщательная работа.' };
+  codexModel.efforts = ['high', 'ultra'];
+  codexModel.effortHints = { high: 'Глубокое рассуждение.', ultra: 'Делегирование субагентам.' };
+
+  const { wrapper, flushPromises } = await mountChat(t);
+
+  assert.deepEqual(wrapper.findComponent({ name: 'EffortSlider' }).props('hints'), claudeModel.effortHints);
+
+  await wrapper.find('.sel.model select').setValue(codexModel.id);
+  await flushPromises();
+
+  const slider = wrapper.findComponent({ name: 'EffortSlider' });
+
+  assert.deepEqual(slider.props('levels'), ['high', 'ultra']);
+  assert.deepEqual(slider.props('hints'), codexModel.effortHints);
+});

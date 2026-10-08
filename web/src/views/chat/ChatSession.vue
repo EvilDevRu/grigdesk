@@ -139,6 +139,7 @@
           </UiSelect>
         </div>
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
+                      :hints="currentModel?.effortHints || {}"
                       :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
              Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.

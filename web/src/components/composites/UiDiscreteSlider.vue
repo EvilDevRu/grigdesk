@@ -7,7 +7,7 @@
       :step="step"
       :disabled="disabled"
       :aria-disabled="readonly"
-      :aria-value-text="valueLabel"
+      :aria-value-text="valueText || valueLabel"
       :aria-label="label"
     />
     <div
@@ -38,6 +38,7 @@ const props = withDefaults(
     readonly?: boolean;
     ticks?: boolean;
     label?: string;
+    valueText?: string;
     labels?: Record<number, string>;
   }>(),
   {
@@ -48,6 +49,7 @@ const props = withDefaults(
     readonly: false,
     ticks: false,
     label: undefined,
+    valueText: undefined,
     labels: () => ({}),
   },
 );

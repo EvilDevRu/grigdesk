@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { JOURNAL_FRESH_SEC } from '../../../shared/agentActivity.ts';
+import { readProcessIdentity } from './speech/modelJobsProcess.ts';
 import { parseStagesLog } from './stagesParse.ts';
 
 // Реестр задачи — плоская проекция t<TASK>.pipeline.
@@ -104,13 +105,40 @@ const SAFE_STAGE = /^[A-Z][A-Z0-9_]*$/;
 const SAFE_RUN = /^[A-Za-z0-9._-]+$/;
 
 /**
+ * Ушёл ли раннер хода. Паспорт хода — PID и STARTTIME из его meta.env: launcher берёт их
+ * из /proc при старте. Номер без времени старта ничего не доказывает — после перезагрузки
+ * машины он мог достаться постороннему процессу.
+ * Паспорта нет (launcher ещё не дописал meta.env) — судить не о чем, ход считается живым.
+ */
+function runnerGone(runDir: string): boolean {
+  let meta = '';
+
+  try {
+    meta = fs.readFileSync(path.join(runDir, 'meta.env'), 'utf8');
+  } catch {
+    return false;
+  }
+
+  const pid = Number(meta.match(/^PID=(\d+)$/m)?.[1]);
+  const starttime = meta.match(/^STARTTIME=(\d+)$/m)?.[1];
+
+  if (!pid || !starttime) {
+    return false;
+  }
+
+  return readProcessIdentity(pid)?.starttime !== starttime;
+}
+
+/**
  * Возвращает артефакты именно активного запуска по каноническим ACTIVE_RUN_<STAGE>.
  * Это общий путь и для Claude, и для Codex; orch.log оставлен только для старых прогонов.
+ * liveOnly отбрасывает ход, чей раннер уже умер: так выглядит этап после TERM.
  */
-function activeRunArtifacts({ stateDir, task, registry = {} }: {
+function activeRunArtifacts({ stateDir, task, registry = {}, liveOnly = false }: {
   stateDir: string;
   task: string | number;
   registry?: Registry;
+  liveOnly?: boolean;
 }): ActiveRun | null {
   if (!SAFE_TASK.test(String(task))) return null;
   const candidates: ActiveRun[] = [];
@@ -124,6 +152,13 @@ function activeRunArtifacts({ stateDir, task, registry = {} }: {
     // запись из журнала BUILD отменённой попытки.
     if (registry[stage] !== 'running') continue;
     const runDir = path.join(stateDir, 'logs', 'runs', `t${task}`, stage, String(runId));
+    // TERM (выключили машину, остановили прогон) оставляет этап `running`, а ACTIVE_RUN —
+    // ссылкой на убитый ход, пока следующий не зарегистрируется. Лента и дальше показывает,
+    // что ход успел сделать, а молчать мёртвый ход не может: см. readRunSilence.
+    if (liveOnly && runnerGone(runDir)) {
+      continue;
+    }
+
     const eventsFile = path.join(runDir, 'events.jsonl');
     try {
       const stat = fs.statSync(eventsFile);
@@ -151,7 +186,9 @@ const SILENCE_TAIL_BYTES = 32 * 1024;
  * Исполнитель без хартбитов (Codex) даёт хвост из обычных событий, и ответ вырождается
  * в прежний возраст файла — то есть правило не требует ничего от нового исполнителя.
  *
- * null — активного хода нет: молчать некому.
+ * null — живого активного хода нет: молчать некому. Ход, чей раннер умер, сюда не
+ * попадает: после выключения машины и «Продолжить» возраст журнала убитого хода
+ * выдавался за молчание нового, ещё не стартовавшего, — «молчит 599 мин».
  */
 export function readRunSilence({ stateDir, task, registry = {}, now = Date.now() }: {
   stateDir: string;
@@ -159,7 +196,12 @@ export function readRunSilence({ stateDir, task, registry = {}, now = Date.now()
   registry?: Registry;
   now?: number;
 }): RunSilence | null {
-  const active = activeRunArtifacts({ stateDir, task, registry });
+  const active = activeRunArtifacts({
+    stateDir,
+    task,
+    registry,
+    liveOnly: true,
+  });
   if (!active) return null;
   const fileAgeSec = Math.max(0, Math.floor((now - active.mtimeMs) / 1000));
   const tail = readTail(active.eventsFile, SILENCE_TAIL_BYTES);

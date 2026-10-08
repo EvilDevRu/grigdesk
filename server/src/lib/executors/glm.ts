@@ -170,6 +170,12 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
       ...(deps.usageNow ? { now: deps.usageNow } : {}),
     }),
     catalogLive: false,
+    effortHints: {
+      off: 'Рассуждение выключено: быстрые ответы без этапа обдумывания.',
+      low: 'Короткое рассуждение для простых задач; быстрее и экономнее.',
+      high: 'Глубокое рассуждение для сложного кода и анализа.',
+      max: 'Максимальное усилие рассуждения для самых трудных задач.',
+    },
     retryContract: RETRY_CONTRACT.NEVER,
     compaction: { kind: 'summary' },
     directSshPolicy: {

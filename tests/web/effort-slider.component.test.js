@@ -70,3 +70,47 @@ test('EFFORT-03: подсказка объясняет, где менять ур
 
   assert.match(plain.attributes('data-ui-tooltip'), /Усилие рассуждения: high/);
 });
+
+test('EFFORT-04: справка сравнивает доступные уровни, клавиатура получает смысл выбранного', async (t) => {
+  const hints = {
+    high: 'Глубокое рассуждение.',
+    max: 'Максимальная глубина.',
+    ultra: 'Максимальное рассуждение с делегированием.',
+  };
+  const wrapper = await mountSlider(t, {
+    modelValue: 'max',
+    levels: ['high', 'max', 'ultra'],
+    hints,
+  });
+
+  assert.equal(wrapper.attributes('data-ui-tooltip'), [
+    'Усилие рассуждения: max',
+    'high — Глубокое рассуждение.',
+    'max — Максимальная глубина.',
+    'ultra — Максимальное рассуждение с делегированием.',
+  ].join('\n'));
+  assert.equal(wrapper.get('input').attributes('aria-valuetext'), 'max — Максимальная глубина.');
+
+  await wrapper.setProps({
+    modelValue: 'high',
+    levels: ['off', 'high'],
+    hints: { off: 'Рассуждение выключено.', high: 'Анализ сложных задач.' },
+  });
+
+  const tooltip = wrapper.attributes('data-ui-tooltip');
+
+  assert.match(tooltip, /high — Анализ сложных задач/);
+  assert.doesNotMatch(tooltip, /ultra|делегированием|max/);
+  assert.equal(wrapper.get('input').attributes('aria-valuetext'), 'high — Анализ сложных задач.');
+});
+
+test('EFFORT-05: новая ступень остаётся выбираемой, умолчание не выдаётся за первую риску', async (t) => {
+  const wrapper = await mountSlider(t, { modelValue: '', levels: ['low', 'future'] });
+
+  assert.equal(wrapper.get('input').attributes('aria-valuetext'), 'Усилие по умолчанию исполнителя');
+  assert.match(wrapper.attributes('data-ui-tooltip'), /future — Описание этого уровня пока недоступно/);
+
+  await wrapper.get('input').setValue(1);
+
+  assert.deepEqual(wrapper.emitted('update:modelValue'), [['future']]);
+});

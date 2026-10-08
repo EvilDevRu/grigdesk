@@ -113,6 +113,12 @@ export function deepSeekSecurityProfile(
 
 export default {
   id: 'deepseek',
+  effortHints: {
+    off: 'Рассуждение выключено: быстрые ответы без этапа обдумывания.',
+    low: 'Короткое рассуждение для простых задач; быстрее и экономнее.',
+    high: 'Глубокое рассуждение для сложного кода и анализа.',
+    max: 'Максимальное усилие рассуждения для самых трудных задач.',
+  },
   nativeSettings: deepSeekNativeSettings,
   name: 'DeepSeek',
   vendor: 'DeepSeek',
