@@ -3,14 +3,12 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import type { AuthStore } from '../../lib/authStore.ts';
-import type { CockpitConfig } from '../../config.ts';
 import {
-  sessionCookie, clearCookie, readCookie, SESSION_COOKIE, isSecureRequest, cookieDomain,
+  sessionCookie, clearCookie, readCookie, SESSION_COOKIE, isSecureRequest,
 } from '../../plugins/auth.ts';
 
 export interface AuthModuleOptions {
   authStore: AuthStore;
-  config: Pick<CockpitConfig, 'publicDomain'>;
 }
 
 // Тело запросов входа: приходит из сети, поэтому каждое поле недоверенное.
@@ -69,17 +67,17 @@ function failureText(error: unknown): string {
   return String((error as { message?: unknown } | null)?.message || error);
 }
 
+/**
+ * Вход, смена пароля и выход используют одно серверное хранилище сессий.
+ * Cookie остаётся ограниченной хостом, её Secure определяется сокетом запроса.
+ */
 async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Promise<void> {
-  const { authStore, config } = opts;
+  const { authStore } = opts;
 
-  // Параметры cookie считаем по КАЖДОМУ запросу, а не один раз на старте:
-  //  - Secure: за шлюзом браузер идёт по https, а до нас доезжает http — решение «на старте»
-  //    ставило бы cookie без Secure именно снаружи, где он и нужен;
-  //  - Domain: нужен, чтобы cookie уезжала на поддомены стендов, но только когда запрос
-  //    пришёл на публичный домен (на localhost чужой Domain браузер отбросит).
+  // Secure вычисляется для каждого запроса; заголовки пересылки его не меняют.
+  // При локальном HTTP браузер получает обычную сессионную cookie.
   const cookieOpts = (request: FastifyRequest) => ({
     secure: isSecureRequest(request),
-    domain: cookieDomain(request, config?.publicDomain),
   });
 
   // Состояние входа — публичный эндпоинт: с него оболочка решает, что показать.

@@ -420,11 +420,12 @@ test('PrefsStore сохраняет speech атомарно поверх уже 
   prefs.write({ showAllModels: true });
   const speech = new SpeechSettingsStore({ prefs });
   const changed = speech.update({ language: 'auto' });
-  prefs.write({ accessGateway: true });
+
+  prefs.write({ runSilenceWindow: 600 });
 
   const stored = JSON.parse(await readFile(prefsPath, 'utf8'));
   assert.equal(stored.showAllModels, true);
-  assert.equal(stored.accessGateway, true);
+  assert.equal(stored.runSilenceWindow, 600);
   assert.equal(stored.speech.language, 'auto');
   assert.equal('schemaVersion' in stored.speech, false);
   assert.equal(stored.speech._revision, changed.revision);

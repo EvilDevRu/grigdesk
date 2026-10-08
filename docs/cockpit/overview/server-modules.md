@@ -7,7 +7,7 @@
 | `task-favorites`, `task-shelf`, `task-seen` | `GET /api/b24/task-favorites` + `PUT/DELETE .../:taskId`, `GET/PUT/DELETE /api/b24/task-shelf[/:taskId]`, `GET/POST /api/b24/task-seen` | личное состояние человека (избранное, полка, «просмотрено») — отдельные schema-versioned файлы по opaque-scope аккаунта портала ([детали](../b24/personal-task-state.md)) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
 | `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame,plan-tasks,frame/:run/:file,clip,clip/:run/:file}` | общий `SpeechRuntime`, ffmpeg + локальный whisper; хранилище раздела — `lib/media/storage.ts` (запись кладётся по содержимому, уборка по возрасту, занятое место в `doctor`); разбор расшифровки на черновики задач — `runUntrusted` выбранной модели, кадр и фрагмент записи к задаче — декораторы `mediaFramePath`/`mediaClipPath`, байты фрагмента отдаются с Range ([детали](../media/README.md)) |
-| `settings` | `/api/settings/{prefs,factory-debug,b24,tls,speech*}` | prefs, speech capabilities/model jobs, engine debug CLI, `CredsStore`, `LocalTls` |
+| `settings` | `/api/settings/{prefs,factory-debug,b24,speech*}` | prefs, speech capabilities/model jobs, engine debug CLI, `CredsStore` |
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission, `/api/chat/transcribe*` | выбранный executor + `chats/`; процесс исполнителя живёт между ходами (`lib/chat/liveSessions.ts`; список и гашение — `/api/chat/sessions`), непрошеный ход агента едет через `chats/pending`; browser/локальная диктовка использует тот же speech-контракт ([детали](../chat/README.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
 | `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_DIR`); проекты кокпита — prefs |
@@ -19,24 +19,15 @@
 | `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, отдельный CAS `PUT /api/telegram/rules/agent-search`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}`, пульт `POST /api/telegram/pult{,/confirm,/disable}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,pult-state.json,inbox-state.json}` — `config.telegramDir` |
 | `github` | `GET /api/github/status`, `GET/PUT /api/github/rules`, CAS `PUT /api/github/rules/agent-search`, `POST /api/github/{connect,recheck,disconnect,force-forget}`, public HMAC ingress `POST /hooks/github/:ingressRef` | GitHub REST + repository webhook `issues/opened`; PAT/secret в private state, bindings и `accounts/<accountRef>/{archive/,ingress-state.json,rules.json,inbox-state.json}` — `config.githubDir` |
 | `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
-| `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
+| `auth` | `/api/auth*` | учётная запись, сессии и CLI token |
 | `terminal` | `/api/terminal` (WebSocket: `in`, `resize`) | stdlib Python helper: `pty.fork()`, `TIOCSWINSZ`/`SIGWINCH`, cleanup process group |
 | `health` | `/api/health` | — |
 
-Fastify-плагины: `sse` (fs.watch → broadcast), `http-scope` (область http-сокета, когда поднят
-https: с loopback — всё, из сети — только корневой сертификат и `301`), `auth` (весь `/api`, WS,
-`/shots` закрыт сессией; исключения — login/setup/state, gateway TLS allow и выдача
-корневого сертификата; локальные CLI используют `X-Cockpit-Token`), `static` (web/dist, кэш
-index=no-cache, assets=immutable). Порядок важен: `http-scope` идёт ПЕРЕД `auth`, иначе устройство
-из сети получало бы `401` вместо редиректа и не добиралось до экрана входа.
-
-**Два сокета в одном процессе:** Fastify создаётся без опции `https`, второй сервер
-(`lib/tls/httpsListener.ts`) получает тот же роутер (`fastify.routing`) и перенесённые слушатели
-`upgrade`. Что положить в сокет, решает `lib/tls/source.ts`: `COCKPIT_TLS_KEY`/`COCKPIT_TLS_CERT`,
-иначе — выпущенное из «Настроек» (`lib/tls/local.ts`) и только при включённом тумблере режима
-(prefs `accessLocalHttps`, читается в `app.js` до сборки: сокет создаётся один раз при старте).
-Почему http остаётся полнофункциональным для loopback и чем это грозит,
-если переставить — [gotchas](../server/local-https-listeners.md).
+Fastify-плагины: `auth` (весь `/api`, WebSocket и `/shots` закрыты сессией;
+публичны state/login/setup, локальные CLI используют `X-Cockpit-Token`), `sse`
+(fs.watch → broadcast), `static` (web/dist, index=no-cache, assets=immutable).
+Гард регистрируется до модулей. Сервер использует один HTTP-сокет на loopback;
+[локальный доступ](../server/loopback-access.md) описывает cookie и настройки запуска.
 
 **Общий Inbox (`lib/inbox/`): immutable account context вместо mutable current.**
 `app.js` явно композирует Telegram и GitHub capabilities. Каждый list/action захватывает

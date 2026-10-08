@@ -31,7 +31,7 @@
 - [Входящие](cockpit/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
 - [Telegram-пульт](cockpit/telegram/README.md) — вотчер, действия, ассистент.
 - [Интерфейс](cockpit/web/README.md) — раскладка, слои, всплывашки, PWA.
-- [Сервер и доступ](cockpit/server/README.md) — юнит, авторизация, сеть, TLS, шлюз.
+- [Сервер и доступ](cockpit/server/README.md) — юнит, авторизация, сеть; только loopback.
 - [Видео и речь](cockpit/media/README.md) — записи встреч, расшифровка, речь.
 - [Плагины](cockpit/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
 - [Тесты и проверка](cockpit/testing/README.md) — happy-dom, Playwright, ловушки.

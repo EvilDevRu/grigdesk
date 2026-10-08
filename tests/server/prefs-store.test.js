@@ -94,3 +94,40 @@ test('read даёт projectsMeta по умолчанию: schemaVersion 0, tombs
   });
   assert.deepEqual(prefs.readStored(), {});
 });
+
+test('LO-06: запись удаляет старые режимы доступа и сохраняет соседние prefs', async (t) => {
+  const { prefs, prefsPath } = await withPrefs(t);
+  const original = {
+    accessLocalHttps: true,
+    accessGateway: true,
+    runSilenceWindow: 600,
+    legacyExample: { enabled: true },
+    speech: { language: 'en', _revision: 'synthetic-revision' },
+  };
+
+  await writeFile(prefsPath, JSON.stringify(original));
+  assert.deepEqual(prefs.readStored(), original);
+
+  for (const patch of [
+    { runSilenceWindow: 700 },
+    { accessLocalHttps: true, accessGateway: true },
+  ]) {
+    const view = prefs.read();
+
+    assert.equal(view.runSilenceWindow, patch.runSilenceWindow === 700 ? 600 : 700);
+    assert.equal(Object.hasOwn(view, 'accessLocalHttps'), false);
+    assert.equal(Object.hasOwn(view, 'accessGateway'), false);
+    assert.deepEqual(view.legacyExample, { enabled: true });
+
+    const written = prefs.write(patch);
+    const stored = JSON.parse(await readFile(prefsPath, 'utf8'));
+
+    assert.equal(Object.hasOwn(written, 'accessLocalHttps'), false);
+    assert.equal(Object.hasOwn(written, 'accessGateway'), false);
+    assert.equal(Object.hasOwn(stored, 'accessLocalHttps'), false);
+    assert.equal(Object.hasOwn(stored, 'accessGateway'), false);
+    assert.equal(stored.runSilenceWindow, 700);
+    assert.deepEqual(stored.legacyExample, { enabled: true });
+    assert.equal(stored.speech._revision, 'synthetic-revision');
+  }
+});

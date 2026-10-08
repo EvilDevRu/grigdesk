@@ -19,7 +19,6 @@ const deepseekRuntimeHome = process.env.COCKPIT_DEEPSEEK_RUNTIME_HOME
 // Корень private homes GLM. Абсолютность проверяет адаптер: кривое значение закрывает
 // только карточку GLM, а не старт всей службы.
 const glmRuntimeHome = process.env.COCKPIT_GLM_RUNTIME_HOME || path.join(factoryStateDir, 'cockpit-glm');
-const publicDomain = process.env.COCKPIT_PUBLIC_DOMAIN || '';
 
 // Запуск kimi-чатов: host — прямой дочерний процесс сервера (parity с claude: host
 // fs/config/credentials, без namespace/cgroup/egress allowlist), contained — прежний
@@ -44,9 +43,10 @@ const sandboxManualRange = {
 };
 
 export const config = {
-  // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось по локальной сети и через шлюз.
+  // Доступ только с этой машины: HTTP-сокет не должен принимать пароль из сети.
+  // Адрес фиксирован; окружение выбирает лишь номер порта.
   port: Number(process.env.COCKPIT_PORT) || 8140,
-  host: process.env.COCKPIT_HOST || '0.0.0.0',
+  host: '127.0.0.1',
   // Бюджет остановки целиком: слив ходов чата, закрытие сессий исполнителей и сокетов.
   // Должен быть меньше ожидания bin/restart и TimeoutStopSec юнита — иначе SIGKILL
   // придёт раньше, чем сервер успеет сохранить прерванные ходы.
@@ -143,8 +143,7 @@ export const config = {
     || path.join(__dirname, '..', '.state', 'github-creds.json'),
   // База callback-а принадлежит оператору. В request body адрес не принимается: иначе
   // connect превратился бы в SSRF/создание webhook на произвольный endpoint.
-  githubWebhookBaseUrl: process.env.COCKPIT_GITHUB_WEBHOOK_BASE_URL
-    || (publicDomain ? `https://${publicDomain}/hooks/github` : ''),
+  githubWebhookBaseUrl: process.env.COCKPIT_GITHUB_WEBHOOK_BASE_URL || '',
 
   // База агентов (стадий конвейера) — папка в корне проекта (внутри свой .gitignore,
   // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
@@ -291,62 +290,8 @@ export const config = {
   // Пользовательские плагины: plugins/<id>/plugin.json (+server.js) в корне проекта.
   userPluginsDir: process.env.COCKPIT_PLUGINS_DIR || path.join(__dirname, '..', '..', 'plugins'),
 
-  // TLS. Сертификат есть → поднимается ВТОРОЙ сокет (https) на своём порту, а http остаётся
-  // жить на `port` — но из сети отдаёт только корневой сертификат и редирект на https
-  // (см. lib/tls/local.js и plugins/http-scope.js).
-  //
-  // Почему не «https вместо http»: 8140 — внутренняя шина. По нему ходят MCP разрешений чата
-  // (иначе каждое действие агента автоматически отклоняется), `bin/b24` (через него SHIP-этап
-  // фабрики пишет комментарий в задачу), `bin/restart`, dev-прокси Vite и шлюз с VPS. Все они
-  // остаются на http/loopback и ничего не знают про сертификат. Бонусом `http://localhost:8140`
-  // — сам по себе secure context, поэтому на самом мозге PWA работает без установки корня.
-  //
-  // Прямо связано с авторизацией: по http пароль уходит открытым текстом, поэтому для доступа
-  // вне localhost TLS обязателен, иначе вход декоративный. От него же зависит флаг Secure
-  // у сессионной cookie (решается по запросу — Fastify смотрит на сокет).
-  //
-  // Терминируем сами, без прокси: на этом порту живут SSE (`/api/events`) и
-  // WebSocket-терминал (`/api/terminal`) — именно эти потоки обычно и ломает лишний прокси.
-  //
-  // Пути из env — приоритетный override (шлюз, ручные случаи). Пусто → берём то, что
-  // выпущено из «Настроек» и лежит в `tlsDir` с маркером `state.json`.
-  tlsKeyPath: process.env.COCKPIT_TLS_KEY || '',
-  tlsCertPath: process.env.COCKPIT_TLS_CERT || '',
-  tlsPort: Number(process.env.COCKPIT_TLS_PORT) || 8143,
-  tlsDir: process.env.COCKPIT_TLS_DIR || path.join(__dirname, '..', '.state', 'tls'),
-  // Ключ корневого сертификата — ВНЕ репозитория. Причины конкретные: `server/.state` лежит
-  // внутри дерева проекта, поэтому его утащит любой `tar` папки, а плагин «Код» отдаёт по HTTP
-  // любой файл под корнем зарегистрированного репозитория — `GET /api/code/<проект>/file?path=
-  // server/.state/tls/ca.key` вернул бы приватный ключ CA прямо в JSON.
-  tlsCaDir: process.env.COCKPIT_TLS_CA_DIR || path.join(home, '.config', 'cockpit', 'ca'),
-
-  // Работа за доверенным шлюзом (VPS с Caddy + обратный туннель). Пусто → выключено.
-  //
-  // Значение уходит в Fastify как `trustProxy` и должно перечислять ИМЕННО адрес соседа,
-  // от которого приходят запросы (для SSH-туннеля это `127.0.0.1`), а НЕ `true`. С `true`
-  // любой клиент сам назначал бы себе адрес через `X-Forwarded-For`: лимит попыток входа
-  // обходился бы сменой заголовка, а проверка «настройка только с localhost» — подделкой.
-  //
-  // Что включается: `request.protocol` начинает учитывать `X-Forwarded-Proto` (от него зависит
-  // флаг Secure у сессионной cookie) и `request.ip` становится реальным адресом клиента,
-  // а не адресом шлюза (иначе все попытки входа схлопнулись бы в одно ведро).
-  trustProxy: process.env.COCKPIT_TRUST_PROXY || '',
-
-  // Публичный домен кокпита за шлюзом (например `cockpit.example.ru`). Пусто → шлюза нет.
-  // Нужен валидатору имён для сертификатов по требованию: разрешаем сам домен и `p<порт>.<домен>`
-  // с портом из диапазонов стендов, остальное — отказ (иначе нас заставят выпускать сертификаты
-  // на чужие имена, пока не упрёмся в лимиты Let's Encrypt).
-  publicDomain,
-
-  // Установка шлюза из «Настроек»: свой ключ доступа к VPS, свой known_hosts и слепок установки.
-  // Отдельный каталог, а не `tlsDir`: у ключа доступа к чужой машине и у сертификата разная цена
-  // ошибки, и складывать их в одну кучу нельзя. Секретов человека (пароль root, токен DNS) здесь
-  // НЕТ вовсе — они живут только в памяти процесса на время установки.
-  gatewayDir: process.env.COCKPIT_GATEWAY_DIR || path.join(__dirname, '..', '.state', 'gateway'),
-
-  // Машинные переменные кокпита. Установщик шлюза дописывает сюда `COCKPIT_TRUST_PROXY`
-  // и `COCKPIT_PUBLIC_DOMAIN` — их читают ВСЕ три способа запуска (юнит systemd, bin/cockpit,
-  // bin/restart), поэтому другого места у них нет (см. docs/cockpit/gotchas.md).
+  // Машинные переменные читают все штатные способы запуска.
+  // Общий writer сохраняет соседние настройки и порядок строк.
   envPath: process.env.COCKPIT_ENV_FILE || path.join(rootDir, '.env'),
 
   // Режим.

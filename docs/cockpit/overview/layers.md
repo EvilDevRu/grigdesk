@@ -1,7 +1,7 @@
 # Слои
 
 ```
-web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :8143 https)  ──▶  источники
+web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140, только 127.0.0.1)  ──▶  источники
                                      │
    Pinia stores                      ├─ adapters/factory-state ─▶ ~/.factory/state
    (chat, tasks, providers,          ├─ engine/bin/factory* ────▶ engine + CLI runners
@@ -13,8 +13,7 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :814
 `*` — встроенный путь по умолчанию; внешний engine возможен только через явный config/env.
 
 Сервер — **host-native** (см. [эксплуатационные грабли](../server/host-native-runtime.md)). Окна (браузер) ходят
-на сервер по `VITE_BRAIN_URL`
-(пусто = тот же origin). Реалтайм — SSE (`/api/events`), `fs.watch` на `~/.factory/state`.
+на свой origin. Реалтайм — SSE (`/api/events`), `fs.watch` на `~/.factory/state`.
 
 Речь имеет один серверный lifecycle: `server/src/app.ts` создаёт `SpeechRuntime` и инъецирует его в
 chat/media/settings. Runtime разрешает валидированный preset в полный immutable job,

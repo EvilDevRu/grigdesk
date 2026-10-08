@@ -13,8 +13,6 @@ export const useAuthStore = defineStore('auth', {
     configured: true,
     authenticated: false,
     login: '',
-    // Браузер говорит с сервером по защищённой схеме (локальный TLS либо https на шлюзе).
-    secure: false,
     error: null,
     busy: false,
     // Отдельное подтверждение каждой удачной проверки сессии нужно транспорту журнала.
@@ -22,11 +20,6 @@ export const useAuthStore = defineStore('auth', {
     logEpoch: 0,
     logReason: 'load',
   }),
-  getters: {
-    // Открыто с самой машины: там http безопасен по определению, предупреждать не о чем.
-    isLocal: () => typeof location !== 'undefined'
-      && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname),
-  },
   actions: {
     async load(reason = 'load') {
       const epoch = this.logEpoch;
@@ -36,7 +29,6 @@ export const useAuthStore = defineStore('auth', {
         this.configured = s.configured;
         this.authenticated = s.authenticated;
         this.login = s.login || '';
-        this.secure = !!s.secure;
         this.logReason = reason;
         if (s.authenticated) this.logConfirmation += 1;
       } catch {

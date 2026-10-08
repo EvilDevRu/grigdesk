@@ -33,12 +33,6 @@ const DEFAULTS = {
   // Порог должен пропускать долгую сборку, но срабатывать раньше таймаута зависшего MCP.
   // 0 — не оповещать.
   runSilenceWindow: 900,
-  // Локальный HTTPS («Настройки → Доступ»): намерение загрузить state-сертификат и поднять
-  // :8143 при следующем старте. Выключение НЕ закрывает LAN (остаётся HTTP :8140) и не
-  // стирает сертификат/корень. accessGateway — прежний маркер раскрытого визарда, оставленный
-  // для совместимости сохранённых prefs; runtime шлюза им никогда не гейтится.
-  accessLocalHttps: false,
-  accessGateway: false,
   // Плагины: вкл/выкл по id (отсутствие ключа = дефолт: системный вкл, пользовательский выкл)
   // и значения их настроек. Схемы настроек — в lib/plugins-registry.js и манифестах.
   plugins: {},
@@ -67,7 +61,11 @@ const DEFAULTS = {
   projectsMeta: { schemaVersion: 0, migratedAt: null, tombstones: {} },
 };
 
-// Настройки кокпита целиком: ключи DEFAULTS плюс всё, что уже лежало в файле.
+// Снятые режимы доступа не выдаются и не переносятся при следующей записи prefs.
+// Сырое чтение остаётся прежним: диск меняется только после успешного write().
+const REMOVED_PREF_KEYS = ['accessLocalHttps', 'accessGateway'];
+
+// Настройки кокпита целиком: актуальные ключи DEFAULTS и сохранённые соседние значения.
 export type CockpitPrefs = Record<string, unknown>;
 
 /**
@@ -154,6 +152,10 @@ export class PrefsStore {
     // Старый общий доступ больше не участвует в запуске. Следующая запись prefs
     // удалит устаревший ключ с диска, не перенося его в настройки отдельных чатов.
     delete loaded.trustedDirectories;
+
+    for (const key of REMOVED_PREF_KEYS) {
+      delete loaded[key];
+    }
 
     return {
       ...DEFAULTS,

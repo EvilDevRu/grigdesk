@@ -72,7 +72,6 @@ function sandbox(t, { unit = true, aliveAfter = 0, port = 18149 } = {}) {
   // Порты живого сервера приехали бы наследованным окружением (оно старше .env) — тогда
   // песочница целилась бы в настоящий кокпит.
   delete env.COCKPIT_PORT;
-  delete env.COCKPIT_TLS_PORT;
   const run = () => spawnSync('bash', [path.join(repo, 'bin', 'launch')], {
     encoding: 'utf8', env, timeout: 60_000,
   });

@@ -53,7 +53,6 @@ const EVENT_NAMES = [
   'showcase-progress',
   'showcase-build-progress',
   'showcase-voice',
-  'gateway-setup',
   'usage-forecast',
 ] as const;
 
@@ -139,7 +138,7 @@ function ensure(): void {
     return;
   }
 
-  // withCredentials — чтобы сессионная cookie уходила и при VITE_BRAIN_URL на другом origin.
+  // События используют тот же origin и сессионную cookie, что и остальной API.
   es = new EventSource(api.eventsUrl(), { withCredentials: true });
 
   const source = es;

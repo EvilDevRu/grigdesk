@@ -20,7 +20,6 @@ function storeStub(prefix, name) {
  */
 export function compileSettingsView({
   prefix = '__settings',
-  accessOverview = false,
   confirm = false,
   nativeSettings = false,
 } = {}) {
@@ -37,9 +36,6 @@ export function compileSettingsView({
   const confirmCall = confirm
     ? `globalThis[${globalName(prefix, 'Confirm')}](...args)`
     : 'Promise.resolve(true)';
-  const overview = accessOverview
-    ? `export default globalThis[${globalName(prefix, 'Overview')}];`
-    : 'export default { template: \'<div class="access-overview-stub"></div>\' };';
 
   return compileVue(SETTINGS_VIEW, {
     stubs: {
@@ -74,7 +70,6 @@ export function compileSettingsView({
       '../shared/ProviderIcon.vue': `
         export default { props: ['id'], template: '<i class="picon"></i>' };
       `,
-      './settings/AccessOverview.vue': overview,
       './settings/ToolHotkeys.vue': `
         export default { template: '<div class="tool-hotkeys-stub"></div>' };
       `,

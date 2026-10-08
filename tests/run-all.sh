@@ -44,7 +44,9 @@ export COCKPIT_RELEASE_PUBLISH_CONTRACT=1
 
 bash "$PROJECT_ROOT/tests/layout.sh" || RC=1
 # Часть проверок уже на TypeScript: с минимумом Node 22.18 они исполняются как есть.
-node --test "$PROJECT_ROOT"/tests/docs/*.test.mjs "$PROJECT_ROOT"/tests/docs/*.test.mts || RC=1
+NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \
+  --test-concurrency=2 "$PROJECT_ROOT"/tests/docs/*.test.mjs \
+  "$PROJECT_ROOT"/tests/docs/*.test.mts || RC=1
 bash "$PROJECT_ROOT/tests/engine/run-offline.sh" || RC=1
 npm --prefix "$PROJECT_ROOT/server" test || RC=1
 npm --prefix "$PROJECT_ROOT/web" test || RC=1

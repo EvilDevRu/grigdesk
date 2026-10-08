@@ -4,8 +4,6 @@
 // статус исполнителей отдаёт реестр /api/providers.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import net from 'node:net';
-import qrcode from 'qrcode-generator';
 import { FactoryDebugInputError } from '../../lib/factoryDebug.ts';
 import { DiagnosticLoggingPolicy } from '../../lib/diagnosticLogging.ts';
 import { ModelJobError } from '../../lib/speech/modelJobs.ts';
@@ -14,7 +12,6 @@ import {
   SpeechSettingsInputError,
   SpeechSettingsStore,
 } from '../../lib/speechSettings.ts';
-import { TlsInputError, isPrivateAddress } from '../../lib/tls/local.ts';
 import type { ModelJobManager } from '../../lib/speech/modelJobs.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 import type { FactoryDebugSettings } from '../../lib/factoryDebug.ts';
@@ -32,23 +29,12 @@ export interface B24Port {
   testAuth: () => Promise<unknown>;
 }
 
-// Локальный HTTPS: выпуск корня, состояние и его отключение.
-export interface LocalTlsPort {
-  readState: () => { addresses?: string[] } | null;
-  status: (runtime: unknown) => Promise<unknown>;
-  generate: (input: { addresses?: unknown }) => Promise<Record<string, unknown>>;
-  caCertificate: () => { pem: string };
-  disable: () => unknown;
-}
-
 export interface SettingsModuleOptions {
   credsStore: CredsStorePort;
   b24: B24Port;
   prefs: PrefsStore;
   factoryDebug: FactoryDebugSettings;
   diagnosticLogging?: DiagnosticLoggingPolicy;
-  localTls: LocalTlsPort;
-  tlsRuntime: { httpPort: number };
   speechRuntime?: SpeechRuntime | null;
   speechSettings?: SpeechSettingsStore;
   modelJobs?: ModelJobManager | null;
@@ -99,12 +85,16 @@ const UNAVAILABLE_SPEECH_BENCHMARK = Object.freeze({
   reason: 'Эталонная запись benchmark не настроена оператором.',
 });
 
+/**
+ * Настройки подключают серверные сервисы через явные зависимости.
+ * Учётные данные, диагностика и речь сохраняют собственные контракты записи.
+ */
 async function settingsModule(
   fastify: FastifyInstance,
   opts: SettingsModuleOptions,
 ): Promise<void> {
   const {
-    credsStore, b24, prefs, factoryDebug, localTls, tlsRuntime, speechRuntime,
+    credsStore, b24, prefs, factoryDebug, speechRuntime,
   } = opts;
   const diagnosticLogging = opts.diagnosticLogging ?? new DiagnosticLoggingPolicy(factoryDebug);
   const speechSettings = opts.speechSettings || new SpeechSettingsStore({ prefs });
@@ -397,101 +387,6 @@ async function settingsModule(
 
   // Проверить авторизацию: логинимся, возвращаем результат.
   fastify.post('/api/settings/b24/test', async () => b24.testAuth());
-
-  // ── Локальный HTTPS ────────────────────────────────────────────────────────────────────
-  // Тумблера «включить сейчас» здесь нет и быть не может: сертификат читается один раз при
-  // создании сокета, поэтому выпуск вступает в силу только после перезапуска сервера.
-
-  /** Адрес, который попадёт в QR и в подсказку «открыть по https». */
-  function preferredAddress(request: SettingsRequest): string {
-    const asked = String(request.query?.address || '').trim();
-    if (asked && net.isIP(asked) && isPrivateAddress(asked)) return asked;
-    const state = localTls.readState();
-    if (state?.addresses?.length) return state.addresses[0] ?? '';
-    return '';
-  }
-
-  /**
-   * Корень и QR отдаём БЕЗ сессии, но только клиентам из локальной сети.
-   *
-   * Иначе получается ловушка: устройство, где кокпит ещё не открывали, по QR получит 401,
-   * а поставить корень без этого файла нельзя. Сам корень — публичная часть сертификата,
-   * секрета в нём нет; наружу через шлюз он всё равно не уходит (`request.ip` за доверенным
-   * прокси — это адрес реального клиента, а не туннеля).
-   */
-  function requirePrivateClient(request: FastifyRequest, reply: FastifyReply): boolean {
-    if (isPrivateAddress(request.ip)) return true;
-    reply.code(401).send({
-      error: 'unauthorized',
-      message: 'Корневой сертификат отдаётся только в локальной сети.',
-    });
-    return false;
-  }
-
-  fastify.get('/api/settings/tls', async () => localTls.status(tlsRuntime));
-
-  fastify.post('/api/settings/tls/generate', async (request: SettingsRequest, reply) => {
-    try {
-      // Сессии здесь НЕ сбрасываем: человек в этот момент стоит с планшетом посреди
-      // установки корня, и разлогинить его — значит потребовать пароль по тому самому
-      // непроверенному соединению, от которого мы уходим.
-      const result = await localTls.generate({ addresses: request.body?.addresses });
-      return { ok: true, ...result, status: await localTls.status(tlsRuntime) };
-    } catch (err) {
-      if (err instanceof TlsInputError) {
-        return reply.code(400).send({ error: 'bad_tls_input', message: err.message });
-      }
-      return reply.code(500).send({
-        error: 'tls_generate_failed',
-        message: (err as Error).message,
-      });
-    }
-  });
-
-  fastify.get('/api/settings/tls/ca.crt', async (request: SettingsRequest, reply) => {
-    if (!requirePrivateClient(request, reply)) return reply;
-    try {
-      const { pem } = localTls.caCertificate();
-      return reply
-        // Расширение и тип важны: установщик Android смотрит именно на них.
-        .header('content-type', 'application/x-x509-ca-cert')
-        .header('content-disposition', 'attachment; filename="cockpit-ca.crt"')
-        .send(pem);
-    } catch (err) {
-      return reply.code(404).send({ error: 'no_ca', message: (err as Error).message });
-    }
-  });
-
-  fastify.get('/api/settings/tls/ca.svg', async (request: SettingsRequest, reply) => {
-    if (!requirePrivateClient(request, reply)) return reply;
-    const address = preferredAddress(request);
-    if (!address) {
-      return reply.code(404).send({ error: 'no_ca', message: 'Сертификат ещё не выпущен.' });
-    }
-    // QR ведёт на HTTP-адрес: он работает и до перезапуска, и после (по нему http-сокет
-    // отдаёт корень даже клиентам из сети). Веди он на https — корень пришлось бы качать
-    // через то самое предупреждение браузера, которое он и убирает.
-    const url = `http://${address}:${tlsRuntime.httpPort}/api/settings/tls/ca.crt`;
-    const qr = qrcode(0, 'M');
-    qr.addData(url);
-    qr.make();
-    return reply
-      .header('content-type', 'image/svg+xml')
-      .header('cache-control', 'no-store')
-      .send(qr.createSvgTag({ cellSize: 4, margin: 2 }));
-  });
-
-  fastify.post('/api/settings/tls/disable', async (request: SettingsRequest, reply) => {
-    // Не DELETE: нужно тело с подтверждением — выключение роняет доступ с планшета.
-    if (request.body?.confirm !== true) {
-      return reply.code(400).send({
-        error: 'confirm_required',
-        message: 'Выключение HTTPS требует подтверждения.',
-      });
-    }
-    localTls.disable();
-    return { ok: true, status: await localTls.status(tlsRuntime) };
-  });
 }
 
 export default fp(settingsModule, { name: 'module-settings' });

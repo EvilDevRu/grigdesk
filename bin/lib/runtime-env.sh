@@ -71,17 +71,15 @@ cockpit_load_runtime_env() {
 
   if ! output=$(node "${COCKPIT_NODE_ENV_ARGS[@]}" -e '
     const port = Number(process.env.COCKPIT_PORT) || 8140;
-    const tlsPort = Number(process.env.COCKPIT_TLS_PORT) || 8143;
-    process.stdout.write(`${port}\t${tlsPort}\n`);
+    process.stdout.write(`${port}\n`);
   '); then
     echo "не удалось прочитать параметры запуска из $env_file" >&2
     return 1
   fi
 
-  IFS=$'\t' read -r COCKPIT_EFFECTIVE_PORT COCKPIT_EFFECTIVE_TLS_PORT <<<"$output"
-  [[ "$COCKPIT_EFFECTIVE_PORT" =~ ^[0-9]+$ &&
-     "$COCKPIT_EFFECTIVE_TLS_PORT" =~ ^[0-9]+$ ]] || {
-    echo "не удалось определить порты кокпита" >&2
+  read -r COCKPIT_EFFECTIVE_PORT <<<"$output"
+  [[ "$COCKPIT_EFFECTIVE_PORT" =~ ^[0-9]+$ ]] || {
+    echo "не удалось определить порт кокпита" >&2
     return 1
   }
 }

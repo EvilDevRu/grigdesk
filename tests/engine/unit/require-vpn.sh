@@ -78,8 +78,4 @@ source_text=$(cat "$gate")
 assert_contains "$source_text" '[[ "${FACTORY_TESTING:-0}" == 1 ]]' \
   "filesystem and ip overrides remain test-only"
 
-brain_setup=$(cat "$FACTORY_HOME/../deploy/gateway/brain-setup.sh")
-assert_contains "$brain_setup" 'ExecStartPre=/usr/bin/env COCKPIT_REQUIRE_VPN=1 $VPN_GATE' \
-  "gateway tunnel units force the gate even after a server opt-out"
-
 finish_tests

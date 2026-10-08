@@ -112,7 +112,7 @@ const autostartNote = computed(() => {
       + ' или systemctl --user start cockpit-server.';
   }
   if (autostart.linger === true) {
-    return 'Сервер стартует при включении машины, до входа в систему — планшет и Telegram живы сразу.';
+    return 'Сервер стартует при включении машины, до входа в систему — Telegram-пульт жив сразу.';
   }
   if (autostart.linger === false) {
     return 'Сервер стартует только при входе в систему. Чтобы стартовал до входа, выполни в терминале '

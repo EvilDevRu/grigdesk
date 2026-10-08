@@ -587,8 +587,8 @@ test('у живого стенда одна кнопка «Снять ролик
   );
   assert.equal(
     links[1].attributes('href'),
-    'https://p5192.cockpit.test/',
-    'адрес песочницы строится через шлюз хоста, на котором открыт Cockpit',
+    'http://cockpit.test:5192/',
+    'адрес песочницы использует прямой порт хоста, на котором открыт Cockpit',
   );
   assert.equal(wrapper.find('select').exists(), false, 'выбор стенда — строки, а не список с «Далее»');
 

@@ -83,7 +83,7 @@ async function main() {
     app.addHook('onRoute', (route) => apiRoutes.add(route.url));
     await app.register(authPlugin, { authStore: {
       isConfigured: () => true, isValidSession: (sid) => sid === 'fixture-session',
-    }, tlsEnabled: true });
+    } });
     app.addHook('preHandler', async (request, reply) => {
       if (!online && request.method === 'POST' && request.routeOptions?.url === '/api/web-log') {
         return reply.code(503).send({ error: 'fixture_offline' });

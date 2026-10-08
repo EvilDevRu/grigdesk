@@ -29,7 +29,7 @@ Environment=NODE_ENV=production
 # этот файл install.sh каждый раз перегенерирует из шаблона, и правки в установленной копии
 # молча пропадут на первой же переустановке. Так же .env читает bin/cockpit (--env-file), то
 # есть все три способа запуска (systemd, bin/cockpit, bin/restart) видят одно и то же.
-# Через это задаются COCKPIT_MEDIA_PYTHON (python из venv с faster-whisper), COCKPIT_TLS_*,
+# Через это задаются COCKPIT_MEDIA_PYTHON (python из venv с faster-whisper),
 # COCKPIT_SANDBOX_DOWN_CMD, ключи API. Ворота VPN ниже читают оттуда же
 # (ExecStartPre берёт окружение юнита) — COCKPIT_REQUIRE_VPN/COCKPIT_VPN_IFACE/
 # COCKPIT_VPN_PROBE.

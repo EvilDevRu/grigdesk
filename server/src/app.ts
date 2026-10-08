@@ -87,14 +87,10 @@ import { createShowcaseService } from './lib/showcase/service.ts';
 import { resolveInboxTriageTarget } from './lib/inbox/triage.ts';
 
 import authPlugin from './plugins/auth.ts';
-import httpScopePlugin from './plugins/httpScope.ts';
 import ssePlugin from './plugins/sse.ts';
 import webLogModule from './modules/web-log/index.ts';
 import { createApiRouteRegistry } from './lib/webLog/apiRoutes.ts';
 import staticPlugin from './plugins/static.ts';
-import { LocalTls } from './lib/tls/local.ts';
-import { loadTlsSource } from './lib/tls/source.ts';
-import { startHttpsListener } from './lib/tls/httpsListener.ts';
 
 import healthModule from './modules/health/index.ts';
 import factoryModule from './modules/factory/index.ts';
@@ -113,7 +109,6 @@ import providersModule from './modules/providers/index.ts';
 import usageForecastModule from './modules/usage-forecast/index.ts';
 import analysisModule from './modules/analysis/index.ts';
 import authModule from './modules/auth/index.ts';
-import gatewayModule from './modules/gateway/index.ts';
 import pluginsModule from './modules/plugins/index.ts';
 import projectsModule from './modules/projects/index.ts';
 import { createProjectsService } from './modules/projects/service.ts';
@@ -142,39 +137,9 @@ import { DocumentReader } from './lib/documents/reader.ts';
 // Дочерние процессы наследуют этот PATH независимо от рабочего каталога задачи.
 process.env.PATH = cockpitCliPath(config.rootDir);
 
-// Настройки нужны ещё до сборки приложения: тумблер режима доступа решает, поднимать ли
-// https-сокет, а сокет создаётся один раз при старте.
+// Общие настройки передаются сервисам из одного хранилища.
+// Чтение не изменяет сохранённые настройки этой установки.
 const prefs = new PrefsStore({ prefsPath: config.prefsPath });
-
-// Локальный HTTPS: выпуск сертификата из «Настроек» и состояние https-сокета в рантайме.
-// `tlsRuntime` — общий мутируемый объект: его читают и плагин области http-сокета, и
-// `/api/settings/tls` (чтобы отличать «файлы на диске» от «процесс действительно слушает»).
-const localTls = new LocalTls({ dir: config.tlsDir, caDir: config.tlsCaDir });
-const tlsLoaded = loadTlsSource({
-  keyPath: config.tlsKeyPath,
-  certPath: config.tlsCertPath,
-  modeEnabled: prefs.read().accessLocalHttps === true,
-  localTls,
-});
-// Состояние второго сокета. Живёт вне `build()`, потому что https поднимается уже
-// ПОСЛЕ `listen()`, а раздел «Доступ» показывает его в любой момент.
-const tlsRuntime: {
-  source: string;
-  port: number;
-  httpPort: number;
-  up: boolean;
-  error: string;
-  fingerprint: string;
-  server: import('node:https').Server | null;
-} = {
-  source: tlsLoaded.source,
-  port: config.tlsPort,
-  httpPort: config.port,
-  up: false,
-  error: tlsLoaded.error || '',
-  fingerprint: '',
-  server: null,
-};
 
 /**
  * Соединение готовой службы с портом модуля.
@@ -209,9 +174,6 @@ async function build() {
   const initialLogLevel = await diagnosticLogging.level().catch(() => 'off' as const);
   const fastify = Fastify({
     logger: { level: serverLogLevel(initialLogLevel) },
-    // trustProxy — только по явной настройке и только для адреса шлюза (см. config.trustProxy).
-    // Без неё заголовки `X-Forwarded-*` игнорируются: иначе клиент сам назначал бы себе адрес.
-    ...(config.trustProxy ? { trustProxy: config.trustProxy } : {}),
     // Дефолтного мегабайта fastify хватало ровно до того дня, когда история чатов доросла
     // до него: PUT /api/chat/store начал отвечать 413, клиент молча ретраил каждые 15 с —
     // и переписка перестала сохраняться совсем (терялась на F5 и «стопе»). Тело чатов
@@ -1002,14 +964,9 @@ async function build() {
   }
 
   // Плагины платформы.
-  // Область http-сокета — ПЕРЕД гардом: разлогиненное устройство из сети должно получить
-  // редирект на https, а не 401, иначе оно не доберётся даже до экрана входа.
-  await fastify.register(httpScopePlugin, { tlsRuntime });
-  // Гард — сразу следом: он закрывает весь /api, включая upgrade вебсокета.
+  // Гард закрывает весь /api, включая upgrade вебсокета.
   await fastify.register(authPlugin, {
     authStore,
-    tlsEnabled: tlsLoaded.source !== 'none',
-    trustProxy: config.trustProxy,
     internalToken,
     cliToken,
   });
@@ -1023,8 +980,7 @@ async function build() {
   });
 
   // Модули.
-  await fastify.register(authModule, { authStore, config });
-  await fastify.register(gatewayModule, { config, prefs });
+  await fastify.register(authModule, { authStore });
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register<FactoryModuleOptions>(factoryModule, {
     factoryState,
@@ -1214,8 +1170,6 @@ async function build() {
     prefs,
     factoryDebug,
     diagnosticLogging,
-    localTls: asPort(localTls),
-    tlsRuntime,
     speechRuntime,
   });
   await fastify.register(terminalModule);
@@ -1400,51 +1354,7 @@ async function build() {
     await speechRuntime.shutdown();
   });
 
-  // Второй сокет закрываем вместе с сервером: иначе `bin/restart` поднимет новый процесс,
-  // а тот упрётся в EADDRINUSE на порту, который скрипт даже не проверяет.
-  fastify.addHook('onClose', async () => {
-    const server = tlsRuntime.server;
-
-    if (!server) return;
-    // Как и у http-сокета: SSE с планшета держал бы `close()` до SIGKILL.
-    server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
-    tlsRuntime.server = null;
-    tlsRuntime.up = false;
-  });
-
   return fastify;
-}
-
-/**
- * Поднять https и записать результат в `tlsRuntime` — от него зависит область http-сокета.
- * Вызывать ПОСЛЕ `listen()`: до готовности приложения плагин вебсокета ещё не повесил upgrade.
- */
-async function startHttps(app: FastifyInstance): Promise<void> {
-  if (!tlsLoaded.key) {
-    if (tlsRuntime.error) {
-      app.log.error(`HTTPS не поднят: ${tlsRuntime.error}. Кокпит работает по http — сертификат можно перевыпустить в «Настройки → Доступ».`);
-    }
-    return;
-  }
-  const result = await startHttpsListener({
-    app,
-    key: tlsLoaded.key,
-    cert: tlsLoaded.cert as Buffer,
-    port: config.tlsPort,
-    host: config.host,
-  });
-  if (!result.ok) {
-    // Занятый порт или отказ в биндинге — не повод убивать процесс: http живёт, UI доступен
-    // с мозга, причина видна в «Настройки → Доступ».
-    tlsRuntime.error = String(result.error);
-    app.log.error(`HTTPS не поднят на :${config.tlsPort}: ${result.error}`);
-    return;
-  }
-  tlsRuntime.server = result.server ?? null;
-  tlsRuntime.up = true;
-  tlsRuntime.fingerprint = String(tlsLoaded.fingerprint ?? '');
-  app.log.info(`HTTPS слушает :${config.tlsPort} (сертификат из «${tlsLoaded.source}»); http на :${config.port} — loopback и корневой сертификат.`);
 }
 
 // Версию проверяем до сборки сервисов: дальше отказ выглядел бы поломкой
@@ -1452,11 +1362,17 @@ async function startHttps(app: FastifyInstance): Promise<void> {
 assertSupportedNode();
 
 const app = await build();
+
+if (process.env.COCKPIT_HOST !== undefined) {
+  app.log.warn('COCKPIT_HOST больше не поддерживается: кокпит слушает только 127.0.0.1');
+}
+
 try {
   await app.listen({ port: config.port, host: config.host });
 } catch (err) {
   app.log.error(err);
   process.exit(1);
 }
-await startHttps(app);
+
+app.log.info(`Кокпит слушает http://127.0.0.1:${config.port}`);
 app.shutdown?.arm();

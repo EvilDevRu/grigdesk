@@ -22,7 +22,7 @@ const KEY_LEN = 64;
 // лимит Node — вызов упирается в него и падает «memory limit exceeded». Даём запас вдвое.
 const SCRYPT_MAXMEM = 64 * 1024 * 1024;
 
-const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 30 дней: пульт открывают с планшета, каждый день логиниться незачем
+const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 30 дней: каждый день логиниться незачем
 const SESSION_ID_BYTES = 32;
 
 /**
@@ -159,7 +159,7 @@ export class AuthStore {
     } catch { /* не смогли сохранить — сессии переживут только до перезапуска */ }
   }
 
-  /** Новая сессия. Сохраняем на диск: рестарт сервера не должен выкидывать с планшета. */
+  /** Новая сессия. Сохраняем на диск: рестарт сервера не должен разлогинивать. */
   createSession(): { id: string; maxAgeSec: number } {
     const id = crypto.randomBytes(SESSION_ID_BYTES).toString('hex');
     this.sessions.set(id, Date.now() + SESSION_TTL_MS);

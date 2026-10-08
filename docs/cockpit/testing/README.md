@@ -6,6 +6,8 @@
 
 ## Грабли
 
+- [Проверка старта сервера использует своё состояние](boot-smoke-state-isolation.md)
+
 - [Веб-тест монтирует SFC дважды — а работает со сторами первого теста](sfc-store-isolation.md)
 - [Всплывашка открывается только в первом тесте файла = Vue запомнил document первого окна](vue-document-cache.md)
 - [Модалка «не открылась» в веб-тесте = стаб Teleport работает только при NODE_ENV=test](teleport-test-environment.md)

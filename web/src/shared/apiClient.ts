@@ -4,11 +4,10 @@
 // доменная модель, и превращать одно в другое обязан декодер раздела. Пока клиент
 // раздавал выведенные типы, ошибка формы всплывала в шаблоне компонента.
 //
-// base URL из VITE_BRAIN_URL (пусто = тот же origin — так работает и в проде, где фронт
-// отдаёт сам сервер, и в dev через vite-proxy). Задел «сменный мозг»: адрес — одна настройка.
-const BASE = (import.meta.env?.VITE_BRAIN_URL || '').replace(/\/$/, '');
+// Интерфейс обращается к своему origin: в production его отдаёт сервер,
+// а в dev те же относительные пути обслуживает Vite proxy.
 // База для WebSocket (терминал): тот же хост, схема http→ws / https→wss.
-const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : '')).replace(
+const WS_BASE = (typeof location !== 'undefined' ? location.origin : '').replace(
   /^http/,
   'ws',
 );
@@ -16,7 +15,7 @@ const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : ''
 // Авторизация — сессионная httpOnly-cookie, её ставит сервер на входе. Никаких секретов
 // в клиентском коде: прежний VITE_COCKPIT_TOKEN попадал в бандл открытым текстом (Vite
 // подставляет env на сборке), то есть был доступен любому, кто открыл страницу.
-// credentials: 'include' — чтобы cookie уходила и при VITE_BRAIN_URL на другом origin.
+// Сессионная cookie сопровождает все запросы к своему серверу.
 const FETCH_OPTS: RequestInit = { credentials: 'include' };
 
 /**
@@ -86,7 +85,7 @@ function notifyUnauthorized(data: unknown): void {
 }
 
 function url(path: string): string {
-  return BASE + path;
+  return path;
 }
 
 /**
@@ -461,7 +460,6 @@ async function postBytes(
 
 // Транспорт кокпита. Все методы отдают `unknown`: форму подтверждает декодер раздела.
 export interface ApiClient {
-  base: string;
   url: (path: string) => string;
   onUnauthorized: (handler: UnauthorizedHandler) => () => void;
   wsUrl: (path: string) => string;
@@ -480,7 +478,6 @@ export interface ApiClient {
 }
 
 export const api: ApiClient = {
-  base: BASE,
   url,
   onUnauthorized,
   wsUrl: (path: string) => WS_BASE + path,

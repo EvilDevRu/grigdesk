@@ -14,7 +14,7 @@
     "check:ui": "node scripts/check-ui-suite.mjs",
     "check:ui-styles": "node scripts/check-ui-control-styles.mjs",
     "test:ui-browser": "node scripts/check-ui-geometry.mjs",
-    "test:components": "NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=6144 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=4 ../tests/web/*.test.js",
+    "test:components": "NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=6144 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=4 ../tests/web/*.test.js ../tests/web/sandbox-url.test.mts ../tests/web/api-same-origin.test.mts",
     "test": "npm run typecheck && npm run typecheck:tests && npm run typecheck:scripts && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components",
     "typecheck:docker": "vue-tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "vue-tsc -p tsconfig.code.json --noEmit",

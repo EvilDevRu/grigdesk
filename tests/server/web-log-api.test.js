@@ -20,7 +20,7 @@ test('приёмник закрыт auth guard и пишет только очи
   t.after(() => app.close());
   await app.register(authPlugin, { authStore: {
     isConfigured: () => true, isValidSession: (id) => id === 'test-session',
-  }, tlsEnabled: true });
+  } });
   await app.register(webLogModule, { dir, policy: { level: async () => 'verbose' },
     now: () => new Date('2026-09-23T11:00:00Z') });
 
@@ -58,7 +58,7 @@ test('приёмник отвергает неверную пачку целик
   t.after(() => app.close());
   await app.register(authPlugin, { authStore: {
     isConfigured: () => true, isValidSession: () => true,
-  }, tlsEnabled: true });
+  } });
   await app.register(webLogModule, { dir, policy: { level: async () => 'verbose' } });
 
   const headers = { cookie: 'cockpit_sid=test-session' };
@@ -80,7 +80,7 @@ test('сервер проверяет глобальный уровень для
 
   await app.register(authPlugin, { authStore: {
     isConfigured: () => true, isValidSession: () => true,
-  }, tlsEnabled: true });
+  } });
   await app.register(webLogModule, { dir, policy: { level: async () => level },
     now: () => new Date('2026-09-23T11:00:00Z') });
 
@@ -123,7 +123,7 @@ test('каталог шаблонов /api закрыт auth guard, а приё�
   app.addHook('onRoute', (route) => apiRoutes.add(route.url));
   await app.register(authPlugin, { authStore: {
     isConfigured: () => true, isValidSession: (id) => id === 'test-session',
-  }, tlsEnabled: true });
+  } });
   app.get('/api/tasks/:id/graph', async () => ({}));
   app.get('/outside', async () => ({}));
   await app.register(webLogModule, { dir, policy: { level: async () => 'verbose' }, apiRoutes,

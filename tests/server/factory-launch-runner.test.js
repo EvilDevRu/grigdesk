@@ -153,11 +153,10 @@ exit 0
   };
   const app = Fastify({ logger: false });
   const auth = { internalToken: 'runner-internal-secret', cliToken: 'runner-cli-secret' };
+
   if (withAuth) {
     await app.register(authPlugin, {
       authStore: { isConfigured: () => true, isValidSession: () => false },
-      tlsEnabled: true,
-      trustProxy: false,
       ...auth,
     });
   }

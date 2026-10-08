@@ -136,14 +136,13 @@ async function chatFixture(t, {
   app.decorate('sse', { broadcast() {} });
   await app.register(multipartPlugin);
   await app.register(websocketPlugin, { options: { maxPayload: 1024 ** 2 } });
+
   if (withAuth) {
     await app.register(authPlugin, {
       authStore: {
         isConfigured: () => true,
         isValidSession: (sid) => sid === 'valid-speech-session',
       },
-      tlsEnabled: false,
-      trustProxy: false,
       internalToken: '',
       cliToken: '',
     });

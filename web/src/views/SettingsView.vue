@@ -67,7 +67,7 @@
         <div class="card-head">
           <div>
             <h3>Экран устройства</h3>
-            <p class="muted small">Локальная настройка — не влияет на другие компьютеры и планшеты.</p>
+            <p class="muted small">Локальная настройка — хранится только в этом браузере.</p>
           </div>
           <span class="scope-pill">Это устройство</span>
         </div>
@@ -88,7 +88,7 @@
         <p v-else-if="pwa.wakeLockError" class="msg err">{{ pwa.wakeLockError }}</p>
         <p v-else-if="!pwa.wakeLockSupported" class="msg warn">
           {{ wakeLockNeedsHttps
-            ? 'Функция доступна только при открытии кокпита через HTTPS.'
+            ? 'Функция доступна только при открытии кокпита по адресу localhost.'
             : 'Этот браузер не поддерживает удержание экрана.' }}
         </p>
         <p v-else-if="pwa.wakeLockEnabled" class="muted small">
@@ -120,7 +120,7 @@
           <p v-else-if="pwa.notificationError" class="msg err">{{ pwa.notificationError }}</p>
           <p v-else-if="!pwa.notificationSupported" class="msg warn">
             {{ notificationNeedsHttps
-              ? 'Оповещения доступны только при открытии кокпита через HTTPS.'
+              ? 'Оповещения доступны только при открытии кокпита по адресу localhost.'
               : 'Этот браузер не поддерживает системные оповещения.' }}
           </p>
           <p v-else class="muted small">
@@ -1519,37 +1519,7 @@
 
     <!-- Доступ: вход в сам кокпит (один пользователь) -->
     <section v-else-if="tab === 'access'">
-      <!-- Предупреждение только когда оно по делу: на localhost соединение и так не выходит
-           за пределы машины, а за шлюзом браузер идёт по https. -->
-      <p v-if="!auth.secure && !auth.isLocal" class="msg err">
-        Текущее соединение без HTTPS — пароль передаётся открытым текстом. В карточке
-        «В домашней сети» включи локальный HTTPS.
-      </p>
-
-      <!-- Сводка строится по фактическим путям, а не по двум неравноценным prefs-флагам:
-           LAN без локального TLS остаётся доступен по HTTP, а шлюз вообще живёт отдельно. -->
-      <div v-if="!prefs" class="card"><span class="muted">Загрузка способов подключения…</span></div>
-      <AccessOverview
-        v-else
-        :local-https-enabled="prefs.accessLocalHttps === true"
-        :local-https-busy="accessBusy === 'accessLocalHttps'"
-        :local-message="accessMsg"
-        :tls="tls"
-        :tls-state="tlsState"
-        :tls-error="tlsLoadError"
-        :gateway-setup="gwSaved"
-        :gateway-job="gwJob"
-        :gateway-public-domain="gwPublicDomain"
-        :gateway-checks="gwChecks"
-        :gateway-state="gatewaySetupState"
-        :gateway-error="gatewayLoadError"
-        :active-details="activeAccessDetails"
-        @set-local-https="setLocalHttpsMode"
-        @reload-tls="loadTls"
-        @toggle-details="toggleAccessDetails"
-      />
-
-      <!-- Учётная запись остаётся доступной независимо от того, раскрыт ли длинный мастер шлюза. -->
+      <!-- Учётная запись и действия с активными сессиями. -->
       <section class="access-account" aria-labelledby="access-account-title">
         <h3 id="access-account-title" class="sechead">Защита входа</h3>
         <div class="card">
@@ -1626,490 +1596,7 @@
           <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
         </div>
       </section>
-
-      <!-- Локальный HTTPS: свой корень + сертификат на адрес мозга -->
-      <template v-if="tls?.source !== 'env' && activeAccessDetails === 'local'">
-      <section
-        id="local-https-settings"
-        class="access-detail-region"
-        role="region"
-        aria-labelledby="local-https-settings-title"
-        tabindex="-1"
-      >
-      <div class="access-detail-head">
-      <h3 id="local-https-settings-title" class="sechead">Локальный HTTPS</h3>
-      <p class="muted">
-        Дома PWA не ставится без HTTPS: <code>navigator.serviceWorker</code> существует только
-        в защищённом контексте, а сертификат на домашний адрес публичный центр не выпишет.
-        Кокпит выпускает свой: корень ставится на устройства один раз, дальше всё как в интернете.
-        Порт <code>{{ tls?.httpPort || 8140 }}</code> остаётся как был — по нему кокпит ходит
-        сам с собой (фабрика, <code>bin/b24</code>, терминал с мозга).
-      </p>
-      </div>
-
-      <!-- Ошибку показываем прямо здесь: до перезапуска сервера этих эндпоинтов ещё нет,
-           и «Загрузка…» навсегда выглядела бы как зависший запрос. -->
-      <div v-if="!tls" class="card">
-        <span v-if="!tlsMsg" class="muted">Загрузка…</span>
-        <template v-else>
-          <p class="msg err">{{ tlsMsg.text }}</p>
-          <p class="muted small">
-            Если сервер ещё не перезапускался после обновления — перезапусти его на вкладке
-            «Сервер»: раздел появится вместе с новыми эндпоинтами.
-          </p>
-        </template>
-      </div>
-      <template v-else>
-        <p v-if="!tls.openssl" class="msg err">
-          На машине нет <code>openssl</code> — выпустить сертификат нечем.
-          Поставь его (<code>sudo apt install openssl</code>) и обнови страницу.
-        </p>
-
-        <div class="card">
-          <p class="tlsline">
-            Состояние:
-            <b v-if="tls.https.up && tls.needsRestart" class="warn">
-              работает с прежней конфигурацией на порту {{ tls.https.port }}
-            </b>
-            <b v-else-if="tls.https.up" class="ok">работает на порту {{ tls.https.port }}</b>
-            <b v-else-if="tls.enabled" class="warn">выпущен, но не поднят</b>
-            <b v-else class="off">выключен</b>
-            <span v-if="tls.source === 'env'" class="muted"> · сертификат задан переменными окружения</span>
-          </p>
-          <p v-if="tls.https.error" class="msg err">{{ tls.https.error }}</p>
-          <p v-if="tls.needsRestart" class="msg warn">
-            Изменения вступят в силу после перезапуска сервера — сертификат читается один раз
-            при старте. Кнопка на вкладке «Сервер».
-          </p>
-
-          <p v-if="tls.leaf.exists" class="muted small">
-            Выписан на {{ tls.leaf.addresses.join(', ') }} ·
-            действует до {{ new Date(tls.leaf.notAfter).toLocaleDateString('ru-RU') }}
-            ({{ tls.leaf.daysLeft }} дн.)
-            <template v-if="tls.ca.exists">
-              · корень до {{ new Date(tls.ca.notAfter).toLocaleDateString('ru-RU') }}
-            </template>
-          </p>
-          <p v-if="tls.missingAddresses.length" class="msg warn small">
-            Адрес машины изменился: {{ tls.missingAddresses.join(', ') }} нет в сертификате.
-            Перевыпусти — устройства при этом трогать не нужно, корень остаётся прежним.
-          </p>
-
-          <div class="tlsaddrs">
-            <span class="muted small">Адреса, по которым будешь открывать кокпит:</span>
-            <div v-for="a in tls.addresses" :key="a.address" class="tlsaddr">
-              <UiCheckbox
-                :checked="tlsPicked.includes(a.address)"
-                @change="toggleTlsAddress(a.address, $event.target.checked)"
-              />
-              <code>{{ a.address }}</code><span class="muted small">{{ a.iface }}</span>
-            </div>
-            <p v-if="!tls.addresses.length" class="muted small">
-              Сетевых адресов не видно — машина не в сети?
-            </p>
-          </div>
-
-          <div class="row">
-            <UiButton
-              variant="solid"
-              tone="accent"
-              data-role="settings-action"
-              :disabled="tlsBusy || !tlsPicked.length || !tls.openssl"
-              @click="generateTls"
-            >
-              {{ tlsBusy ? 'Выпускаю…' : (tls.leaf.exists ? 'Перевыпустить сертификат' : 'Выпустить сертификат') }}
-            </UiButton>
-            <UiButton
-              v-if="tls.enabled"
-              variant="ghost"
-              tone="danger"
-              data-role="settings-action"
-              :disabled="tlsBusy"
-              @click="dropTlsCertificate"
-            >
-              Удалить сертификат
-            </UiButton>
-          </div>
-          <p v-if="tlsMsg" class="msg" :class="tlsMsg.type">{{ tlsMsg.text }}</p>
-        </div>
-
-        <!-- Установка корня. QR ведёт на HTTP-адрес намеренно: он работает и до перезапуска,
-             и после (http отдаёт корень даже клиентам из сети). Веди он на https — файл
-             пришлось бы качать через то самое предупреждение, которое он и убирает. -->
-        <div v-if="tls.ca.exists && tlsAddress()" class="card">
-          <p class="tlsline"><b>Поставить корень на устройство</b></p>
-          <div class="tlsqr">
-            <img :src="`/api/settings/tls/ca.svg?address=${tlsAddress()}`" alt="QR со ссылкой на корневой сертификат" width="180" height="180" />
-            <ol class="tlssteps small">
-              <li>Наведи камеру планшета — откроется скачивание <code>cockpit-ca.crt</code>.</li>
-              <li>Android: «Настройки → Безопасность → Шифрование → Установить сертификат →
-                Сертификат ЦС». iOS/iPadOS: профиль установится сам, потом
-                «Настройки → Основные → Об устройстве → Доверие сертификатам» — включить тумблер.</li>
-              <li>Открой <code>{{ tlsUrl() || `https://${tlsAddress()}:8143` }}</code> — замок без предупреждений,
-                и «Установить приложение» появится в меню браузера.</li>
-            </ol>
-          </div>
-          <p class="muted small">
-            На самом мозге ставить ничего не нужно: <code>http://localhost:{{ tls.httpPort || 8140 }}</code>
-            и так защищённый контекст.
-            <a :href="'/api/settings/tls/ca.crt'" download>Скачать корень файлом</a> ·
-            отпечаток <code class="fp">{{ (tls.ca.fingerprint || '').slice(0, 29) }}…</code>
-          </p>
-        </div>
-      </template>
-      </section>
-      </template>
-
-      <!-- Шлюз: установка формой. Руками это два идемпотентных скрипта плюс reconciliation
-           двух точных DNS-имён, которых ни один скрипт сделать не может. -->
-      <template v-if="activeAccessDetails === 'gateway'">
-      <section
-        id="gateway-settings"
-        class="access-detail-region"
-        role="region"
-        aria-labelledby="gateway-settings-title"
-        tabindex="-1"
-      >
-      <div class="access-detail-head">
-      <h3 id="gateway-settings-title" class="sechead">Доступ снаружи (VPS-шлюз)</h3>
-      <p class="muted">
-        Кокпит виден по публичному домену, а домашний адрес наружу не выставлен: с мозга на VPS
-        идут два исходящих SSH-туннеля (один — кокпит, второй — стенды, чтобы трафик стендов не
-        придавливал SSE и терминал). Схема не зависит ни от CGNAT, ни от смены сети.
-      </p>
-      <p class="section-note">
-        Эта панель только настраивает и проверяет шлюз. Если её скрыть, уже установленные
-        туннели, публичный домен и внешний доступ продолжат работать.
-      </p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Что настраиваем</h3>
-            <p class="muted small">Выделенный поддомен и временный VPS, через который кокпит виден снаружи.</p>
-          </div>
-          <span v-if="gwSaved" class="status-pill ok"><i class="dot"></i>{{ gwSaved.domain }}</span>
-        </div>
-        <div class="form-grid">
-          <label>Выделенный поддомен шлюза
-            <UiInput
-              v-model="gw.domain"
-              data-context="settings-field"
-              placeholder="cockpit.example.com"
-              :disabled="gwRunning"
-            />
-          </label>
-          <label>Адрес VPS (IPv4)
-            <UiInput
-              v-model="gw.gateway"
-              data-context="settings-field"
-              placeholder="203.0.113.10"
-              :disabled="gwRunning"
-            />
-          </label>
-          <label>Пользователь SSH
-            <UiInput
-              v-model="gw.sshUser"
-              data-context="settings-field"
-              placeholder="root"
-              :disabled="gwRunning"
-            />
-          </label>
-          <label>Порт SSH
-            <UiNumberInput
-              v-model="gw.sshPort"
-              data-context="settings-field"
-              :min="1"
-              :max="65535"
-              :disabled="gwRunning"
-            />
-          </label>
-        </div>
-        <p class="muted small">
-          Стенды поедут на поддомены <code>p&lt;порт&gt;.{{ gw.domain || 'домен' }}</code>, поэтому
-          Cockpit резервирует два точных имени: этот поддомен и <code>*</code>. При каждой
-          установке они заново сверяются с адресом текущего VPS.
-        </p>
-      </div>
-
-      <!-- Cloudflare опционален: у другого провайдера DNS записи заводятся руками, и шаг
-           честно превращается в подсказку, а не в отказ установки. -->
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>DNS-записи</h3>
-            <p class="muted small">Единственный шаг, который ни один скрипт не сделает сам.</p>
-          </div>
-        </div>
-        <UiSwitch v-model="gw.useCloudflare" :disabled="gwRunning">
-          Домен на Cloudflare — синхронизировать записи автоматически
-        </UiSwitch>
-        <template v-if="gw.useCloudflare">
-          <div class="form-grid">
-            <label class="full">API-токен Cloudflare
-              <UiInput
-                v-model="gw.cloudflareToken"
-                data-context="settings-field"
-                type="password"
-                autocomplete="off"
-                placeholder="токен с Zone:Read и DNS:Edit"
-                :disabled="gwRunning"
-              />
-            </label>
-          </div>
-          <p class="muted small">
-            Логин и пароль аккаунта тут не годятся: API Cloudflare ими не управляется вовсе
-            (а с двухфакторной — тем более). Нужен токен: кабинет → My&nbsp;Profile →
-            API&nbsp;Tokens → Create&nbsp;Token → шаблон «Edit zone DNS». В Permissions должны
-            получиться ровно две строки: <code>Zone → Zone → Read</code> и
-            <code>Zone → DNS → Edit</code>. Во второй строке средняя колонка — именно
-            <b>DNS</b>, не Zone: похожее разрешение <code>Zone → Zone → Edit</code> не даёт
-            права менять DNS и закончится отказом. В Zone&nbsp;Resources выбери Include →
-            Specific&nbsp;zone → родительскую зону (для <code>cockpit.example.com</code>
-            обычно <code>example.com</code>). Токен уходит на сервер только для сверки и
-            установки, нигде не сохраняется.
-          </p>
-          <p class="muted small">
-            Облако у записей будет <b>серым</b> (proxied выключен). Оранжевое — это уже прокси
-            Cloudflare, а с ним возвращаются 100 секунд на ответ (рвёт долгий ход агента),
-            100&nbsp;МБ на тело (рубит загрузку видео) и чужая терминация TLS.
-          </p>
-          <p class="muted small">
-            Перед подтверждением Cockpit прочитает текущие записи и покажет изменения. У двух
-            управляемых имён останется ровно по одной A-записи на текущий VPS; старые A,
-            AAAA и CNAME удалятся. TXT, MX, CAA и вся остальная зона не затрагиваются.
-          </p>
-        </template>
-        <p v-else class="muted small">
-          Записи заведёшь сам в панели своего провайдера — установка их дождётся и назовёт,
-          что именно нужно создать.
-        </p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Доступ к VPS</h3>
-            <p class="muted small">Пароль уйдёт один раз — положить туда наш ключ. Нигде не сохраняется.</p>
-          </div>
-        </div>
-        <div class="row">
-          <UiButton
-            data-role="settings-action"
-            :disabled="gwBusy || gwRunning || !gw.gateway.trim()"
-            @click="gwProbeHost"
-          >
-            Проверить сервер
-          </UiButton>
-          <span v-if="gwBusy && !gwProbe" class="muted small">стучимся…</span>
-        </div>
-        <template v-if="gwProbe">
-          <p class="tlsline">Отпечаток ключа: <code class="fp">{{ gwProbe.fingerprint }}</code>
-            <span class="muted small"> ({{ gwProbe.fingerprintType }})</span></p>
-          <div class="tlsaddr">
-            <UiCheckbox v-model="gwHostOk" :disabled="gwRunning">
-              Тип и SHA256-отпечаток SSH-ключа совпали с данными хостера
-            </UiCheckbox>
-          </div>
-          <p class="muted small">
-            Это отпечаток ключа самого VPS (SSH host key), а не твоего ключа для входа.
-            Ищи в панели хостера поле SSH host key/fingerprint. Если его там нет, открой
-            встроенную веб-консоль/VNC хостера — не подключение по SSH — и выполни
-            <code>for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done</code>.
-            Найди строку того же типа и сравни всё значение <code>SHA256:…</code> посимвольно.
-            При несовпадении не ставь галку: сначала проверь IP и не закончилась ли
-            переустановка VPS. Без сверки пароль root может уйти чужому серверу посередине.
-            Подтверждённый отпечаток запомнится, и при следующем изменении установка
-            остановится сама.
-          </p>
-          <div v-if="gwNeedsPassword" class="form-grid">
-            <label class="full">Пароль {{ gw.sshUser || 'root' }} на VPS
-              <UiInput
-                v-model="gw.sshPassword"
-                data-context="settings-field"
-                type="password"
-                autocomplete="off"
-                placeholder="пароль из письма хостера"
-                :disabled="gwRunning"
-              />
-            </label>
-          </div>
-          <p v-else class="msg ok">Сервер уже пускает по нашему ключу — пароль не нужен.</p>
-          <p v-if="gwNeedsPassword" class="muted small">
-            Нужен ровно один раз: положить на сервер наш ключ туннеля. Дальше вход только по
-            ключу, пароль никуда не сохраняется.
-          </p>
-        </template>
-        <p v-else class="muted small">
-          Сначала проверяем сервер — жив ли он и тот ли это сервер. Пароль спросим после.
-        </p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Мозг и сертификаты</h3>
-            <p class="muted small">Всё необязательное: без этих полей установка тоже проходит.</p>
-          </div>
-        </div>
-        <div class="form-grid">
-          <label class="full">Пароль sudo на мозге (необязательно)
-            <UiInput
-              v-model="gw.sudoPassword"
-              data-context="settings-field"
-              type="password"
-              autocomplete="off"
-              placeholder="оставь пустым — дадим команду для терминала"
-              :disabled="gwRunning"
-            />
-          </label>
-          <label class="full">Почта для Let’s Encrypt (необязательно)
-            <UiInput
-              v-model="gw.acmeEmail"
-              data-context="settings-field"
-              placeholder="для писем об истечении сертификата"
-              :disabled="gwRunning"
-            />
-          </label>
-        </div>
-        <UiSwitch v-model="gw.acmeStaging" :disabled="gwRunning">
-          Тестовые сертификаты Let’s Encrypt (для проверки схемы)
-        </UiSwitch>
-        <p class="muted small">
-          У Let’s Encrypt пять неудач на имя в час. Тестовый режим выдаёт недоверенный
-          сертификат (браузер ругнётся), зато лимит не тратит — включай, если гоняешь установку
-          повторно.
-        </p>
-      </div>
-
-      <div class="row">
-        <UiButton
-          data-role="settings-action"
-          variant="solid"
-          tone="accent"
-          :disabled="!gwCanStart"
-          @click="gwStart"
-        >
-          Установить
-        </UiButton>
-        <UiButton
-          data-role="settings-action"
-          :disabled="gwBusy || gwRunning || (!gwSaved && !gw.domain.trim())"
-          @click="gwVerify"
-        >
-          Проверить связь
-        </UiButton>
-      </div>
-      <p v-if="gwMsg" class="msg" :class="gwMsg.type">{{ gwMsg.text }}</p>
-      <p v-if="!gwCanStart && !gwRunning" class="muted small">
-        Кнопка ждёт: домен, адрес VPS, сверенный отпечаток<span v-if="gw.useCloudflare">,
-        токен Cloudflare</span><span v-if="gwNeedsPassword">, пароль VPS</span>.
-      </p>
-      <p v-if="gw.useCloudflare" class="muted small">
-        Выключение или удаление VPS само по себе DNS не очищает: токен не хранится, поэтому
-        Cockpit не может изменить Cloudflare после установки. Следующий запуск снова заменит
-        старый адрес текущим; перед окончательным освобождением IP запись пока нужно удалить вручную.
-      </p>
-
-      <!-- Ход установки. Живёт на сервере и уезжает по SSE: начали с компьютера — видно
-           и с планшета, F5 картину не теряет. -->
-      <div v-if="gwJob" class="card">
-        <div class="card-head">
-          <div>
-            <h3>Установка</h3>
-            <p class="muted small">Восемь шагов; сорвавшийся называет причину и не идёт дальше.</p>
-          </div>
-          <span
-            class="status-pill"
-            :class="gwJobConfirmed ? 'ok' : (gwJob.state === 'failed' ? 'danger' : 'warn')"
-          ><i class="dot"></i>{{ gwJob.state === 'done' ? (gwJobConfirmed ? 'готово и проверено' : 'шаги завершены')
-            : (gwJob.state === 'failed' ? 'сорвалась' : 'идёт') }}</span>
-        </div>
-        <ul class="gwsteps small">
-          <li v-for="s in gwJob.steps" :key="s.key">
-            <b :class="{ ok: s.state === 'ok', warn: s.state === 'run', off: s.state === 'skip' }">
-              {{ GW_MARK[s.state] || '·' }}
-            </b>
-            <span>{{ s.title }}<span v-if="s.detail" class="muted"> — {{ s.detail }}</span></span>
-          </li>
-        </ul>
-        <p v-if="gwJob.error" class="msg err">{{ gwJob.error.message }}</p>
-        <p v-if="gwJob.state === 'done'" class="msg" :class="gwJobConfirmed ? 'ok' : 'warn'">
-          <template v-if="gwJobConfirmed">
-            Автоматические шаги завершены, внешний адрес проверен:
-            <code>https://{{ gwJob.domain }}</code>.
-          </template>
-          <template v-else>
-            Автоматические шаги завершены, но это ещё не подтверждает внешний доступ.
-            Выполни оставшиеся действия, перезапуск, если он указан, затем нажми «Проверить связь».
-          </template>
-        </p>
-        <!-- Не «осталось сделать», а чего ждать: трогать VPN визард не просит и не будет. -->
-        <p v-if="gwJob.state === 'done'" class="muted small">
-          Туннель ходит через VPN — так задумано, менять в нём ничего не нужно. Отсюда две
-          особенности: до планшета крюк через выходной узел VPN, а вместе с VPN туннель падает
-          и поднимается. Юниты туннеля этого и ждут, поэтому «activating» при опущенном
-          VPN — ожидание, а не поломка. Если VPN уже работает через не-TUN интерфейс,
-          его имя задаётся как <code>COCKPIT_VPN_IFACE</code> в корневом <code>.env</code>.
-        </p>
-        <p v-if="gwJob.needsRestart" class="msg warn">
-          Нужен перезапуск сервера: домен и режим за прокси читаются один раз при старте.
-          Кнопка — во вкладке «Сервер». Из чата агенту перезапускать нельзя: он сам дочерний
-          процесс этого сервера.
-        </p>
-        <details v-if="gwJob.log?.length" class="gwlog">
-          <summary class="muted small">Журнал ({{ gwJob.log.length }})</summary>
-          <pre>{{ gwJob.log.join('\n') }}</pre>
-        </details>
-      </div>
-
-      <!-- Что установка сделать не может: чужая панель DNS, root на мозге. Правила для VPN
-           здесь нет намеренно — туннель ходит через него, и настройки VPN мы не трогаем. -->
-      <div v-if="gwJob?.manual?.length" class="card">
-        <div class="card-head">
-          <div>
-            <h3>Осталось сделать руками</h3>
-            <p class="muted small">Шаги, которые кокпит за человека делать не имеет права.</p>
-          </div>
-        </div>
-        <div v-for="m in gwJob.manual" :key="m.key" class="gwman">
-          <p class="tlsline"><b>{{ m.title }}</b></p>
-          <p class="muted small">{{ m.text }}</p>
-          <template v-if="m.command">
-            <pre class="gwcmd">{{ m.command }}</pre>
-            <div class="row">
-              <UiButton data-role="settings-action" @click="gwManualToTerminal(m)">
-                Открыть в терминале
-              </UiButton>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <div v-if="gwChecks" class="card">
-        <div class="card-head">
-          <div>
-            <h3>Проверка связи</h3>
-            <p class="muted small">Живые запросы снаружи: туннели, кокпит и стенд под входом.</p>
-          </div>
-          <span class="status-pill" :class="gwChecks.ok ? 'ok' : 'warn'">
-            <i class="dot"></i>{{ gwChecks.ok ? 'всё сходится' : 'есть замечания' }}
-          </span>
-        </div>
-        <ul class="gwsteps small">
-          <li v-for="c in gwChecks.checks" :key="c.key">
-            <b :class="c.ok ? 'ok' : 'warn'">{{ c.ok ? '✓' : '✗' }}</b>
-            <span>{{ c.title }}<span v-if="c.detail" class="muted"> — {{ c.detail }}</span></span>
-          </li>
-        </ul>
-        <p v-if="gwSaved && !gwPublicDomain" class="muted small">
-          Стенды проверятся после перезапуска сервера — до него домен в конфиг не попал.
-        </p>
-      </div>
-      </section>
-      </template>
-        </section>
+    </section>
       </div>
     </div>
   </div>
@@ -2123,7 +1610,6 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useToolLauncher } from '../shared/tools/launcher.ts';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import ProviderUsageResources from '../features/providers/ProviderUsageResources.vue';
-import AccessOverview from './settings/AccessOverview.vue';
 import PluginsCatalog from './settings/PluginsCatalog.vue';
 import ServerLauncher from './settings/ServerLauncher.vue';
 import WebLogPanel from './settings/WebLogPanel.vue';
@@ -2199,8 +1685,11 @@ const TABS = [
     icon: 'M5 4h14v6H5z M5 14h14v6H5z M8 7h.01 M8 17h.01',
   },
   {
-    id: 'access', label: 'Доступ', group: 'Система', short: 'Вход, HTTPS и шлюз',
-    description: 'Учётная запись, активные способы подключения и сертификаты для других устройств.',
+    id: 'access',
+    label: 'Доступ',
+    group: 'Система',
+    short: 'Учётная запись и сессии',
+    description: 'Учётная запись и активные сессии.',
     icon: 'M7 10V7a5 5 0 0 1 10 0v3 M5 10h14v11H5z M12 14v3',
   },
 ];
@@ -3010,13 +2499,12 @@ const prefs = ref(null);
 const prefsMsg = ref(null);
 
 /**
- * Загружаем общие настройки и согласуем раскрытие блока доступа.
+ * Загружаем общие серверные настройки: запуски, арбитр, модели и чат.
  * При недоступном сервере не показываем устаревший снимок как действующий.
  */
 async function loadPrefs() {
   try {
     prefs.value = await api.get('/api/settings/prefs');
-    syncInitialAccessDetails();
   } catch {
     prefs.value = null;
   }
@@ -3370,395 +2858,6 @@ async function logoutAll() {
   auth.authenticated = false;
 }
 
-// ── Способы доступа ──
-// У LAN и шлюза разная семантика: локальный флаг управляет HTTPS-сокетом на следующем
-// старте, а установленный VPS-шлюз отдельным prefs-флагом не выключается вовсе. Поэтому
-// одинаковых тумблеров здесь больше нет: один переключатель отвечает только за защиту LAN,
-// а панели подробностей раскрываются локально и всегда по одной.
-const accessBusy = ref('');
-const accessMsg = ref(null);
-const activeAccessDetails = ref('');
-let accessDetailsTouched = false;
-
-async function toggleAccessDetails(kind) {
-  accessDetailsTouched = true;
-  activeAccessDetails.value = activeAccessDetails.value === kind ? '' : kind;
-  if (kind === 'gateway' && gatewaySetupState.value === 'error') loadGatewaySetup();
-  if (!activeAccessDetails.value) return;
-  await nextTick();
-  // Подробности — единая область после сводки и защиты входа. Переводим к ней фокус
-  // и прокрутку: на телефоне иначе клик выглядит безрезультатным, а screen reader не
-  // получает явного перехода от disclosure-кнопки к управляемому region.
-  const region = document.getElementById(`${kind === 'local' ? 'local-https' : 'gateway'}-settings`);
-  region?.focus?.({ preventScroll: true });
-  region?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-}
-
-async function setLocalHttpsMode(on) {
-  if (tls.value?.source === 'env') {
-    accessMsg.value = {
-      type: 'warn',
-      text: 'HTTPS задан переменными окружения сервера. Изменить его можно только в конфигурации системы.',
-    };
-    return;
-  }
-  if (!on) {
-    const ok = await confirmDialog(
-      'Выключить локальный HTTPS? После перезапуска сервера кокпит перестанет слушать порт '
-      + `${tls.value?.https?.port || 8143}. В домашней сети останется HTTP на порту `
-      + `${tls.value?.httpPort || 8140}: пароль пойдёт без шифрования, PWA ставиться не будет. `
-      + 'Localhost и доступ через VPS-шлюз не изменятся; сертификат и корень останутся на месте.',
-      { danger: true, okText: 'Выключить' },
-    );
-    if (!ok) return;
-  }
-  accessDetailsTouched = true;
-  accessBusy.value = 'accessLocalHttps';
-  accessMsg.value = null;
-  try {
-    prefs.value = await api.post('/api/settings/prefs', { accessLocalHttps: on });
-    await loadTls();
-    if (on) activeAccessDetails.value = 'local';
-    else if (activeAccessDetails.value === 'local') activeAccessDetails.value = '';
-    if (!tls.value) {
-      accessMsg.value = {
-        type: 'err',
-        text: `Настройка сохранена, но состояние HTTPS не удалось перечитать: ${tlsMsg.value?.text || 'нет ответа сервера'}`,
-      };
-      return;
-    }
-    const managedByEnv = tls.value?.source === 'env';
-    accessMsg.value = {
-      type: 'ok',
-      text: managedByEnv
-        ? 'Локальная настройка сохранена, но действующий HTTPS задан переменными окружения и этим переключателем не управляется.'
-        : (on
-          ? (tls.value?.leaf?.exists
-            ? 'Локальный HTTPS включён. Сокет поднимется при следующем перезапуске сервера.'
-            : 'Локальный HTTPS включён. Теперь выпусти сертификат для адреса домашней сети.')
-          : 'Локальный HTTPS выключен. После перезапуска дома останется HTTP; localhost и VPS-шлюз не изменятся.'),
-    };
-  } catch (e) {
-    accessMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { accessBusy.value = ''; }
-}
-
-// ── Локальный HTTPS (свой корневой сертификат) ──
-// Без него на планшете нет PWA: `navigator.serviceWorker` существует только в secure context,
-// а публичный сертификат на домашний адрес не выпишет никто.
-const tls = ref(null);          // ответ /api/settings/tls
-const tlsState = ref('loading'); // loading | ready | error — null сам по себе не различает их
-const tlsLoadError = ref('');
-const tlsPicked = ref([]);      // адреса, отмеченные галками
-const tlsBusy = ref(false);
-const tlsMsg = ref(null);
-
-async function loadTls({ keepMessage = false } = {}) {
-  if (!keepMessage) tlsMsg.value = null;
-  tlsState.value = 'loading';
-  tlsLoadError.value = '';
-  try {
-    tls.value = await api.get('/api/settings/tls');
-    // По умолчанию отмечаем то, что уже в сертификате, иначе — все адреса машины:
-    // дома их один-два, и лишняя галка дешевле, чем «почему не открывается».
-    const covered = tls.value.leaf?.addresses || [];
-    const all = (tls.value.addresses || []).map((a) => a.address);
-    tlsPicked.value = covered.length ? all.filter((a) => covered.includes(a)) : all;
-    if (!tlsPicked.value.length) tlsPicked.value = all;
-    tlsState.value = 'ready';
-    syncInitialAccessDetails();
-  } catch (e) {
-    tls.value = null;
-    tlsState.value = 'error';
-    tlsLoadError.value = e.data?.message || e.message;
-    tlsMsg.value = { type: 'err', text: tlsLoadError.value };
-  }
-}
-
-function toggleTlsAddress(addr, on) {
-  const set = new Set(tlsPicked.value);
-  if (on) set.add(addr); else set.delete(addr);
-  tlsPicked.value = [...set];
-}
-
-async function generateTls() {
-  if (tls.value?.source === 'env') {
-    tlsMsg.value = {
-      type: 'warn',
-      text: 'Системный HTTPS нельзя перевыпустить из Cockpit: измени сертификат в конфигурации сервера.',
-    };
-    return;
-  }
-  tlsBusy.value = true; tlsMsg.value = null;
-  try {
-    const r = await api.post('/api/settings/tls/generate', { addresses: tlsPicked.value });
-    tls.value = r.status;
-    tlsState.value = 'ready';
-    tlsMsg.value = {
-      type: 'ok',
-      text: `Сертификат выпущен до ${new Date(r.notAfter).toLocaleDateString('ru-RU')}. `
-        + (prefs.value?.accessLocalHttps
-          ? 'Поставь корень на устройства (QR ниже) и перезапусти сервер — HTTPS включается только при старте.'
-          : 'Поставь корень на устройства (QR ниже), затем включи HTTPS в карточке домашней сети и перезапусти сервер.'),
-    };
-  } catch (e) {
-    tlsMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { tlsBusy.value = false; }
-}
-
-// Отдельно от тумблера режима: тот просто не поднимает сокет, а это — стереть выпущенное.
-// Нужно редко (сменилась сеть, хочется чистого листа), поэтому и кнопка вторичная.
-async function dropTlsCertificate() {
-  if (tls.value?.source === 'env') {
-    tlsMsg.value = {
-      type: 'warn',
-      text: 'Системный HTTPS нельзя удалить из Cockpit: им управляет конфигурация сервера.',
-    };
-    return;
-  }
-  const ok = await confirmDialog(
-    'Удалить выпущенный сертификат? Кокпит с планшета снова откроется только по http, и PWA '
-    + 'перестанет ставиться. Корень на устройствах останется — после нового выпуска '
-    + 'переустанавливать его не нужно.',
-    { danger: true, okText: 'Удалить' },
-  );
-  if (!ok) return;
-  tlsBusy.value = true; tlsMsg.value = null;
-  try {
-    const r = await api.post('/api/settings/tls/disable', { confirm: true });
-    tls.value = r.status;
-    tlsState.value = 'ready';
-    tlsMsg.value = { type: 'ok', text: 'Сертификат удалён. HTTPS погаснет после перезапуска сервера.' };
-  } catch (e) {
-    tlsMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { tlsBusy.value = false; }
-}
-
-// Адрес для QR и подсказок — первый из тех, что в сертификате.
-const tlsAddress = () => tls.value?.leaf?.addresses?.[0] || '';
-const tlsUrl = () => (tlsAddress() && tls.value?.https?.port
-  ? `https://${tlsAddress()}:${tls.value.https.port}` : '');
-
-// ── Шлюз наружу: установка формой ──
-//
-// Секреты живут ТОЛЬКО в памяти вкладки и в теле одного запроса: ни в prefs (те целиком
-// уезжают в браузер), ни в слепке установки их нет. После успеха гасим и в памяти —
-// держать пароль root во вкладке до конца дня незачем.
-const gw = ref({
-  domain: '',
-  gateway: '',
-  sshPort: 22,
-  sshUser: 'root',
-  sshPassword: '',
-  sudoPassword: '',
-  useCloudflare: false,
-  cloudflareToken: '',
-  acmeEmail: '',
-  acmeStaging: false,
-});
-const gwSaved = ref(null); // слепок прошлой установки (без секретов)
-const gwJob = ref(null); // снимок идущей или последней установки
-const gwPublicDomain = ref(''); // домен, который процесс подхватил при СТАРТЕ
-const gwBusy = ref(false);
-const gwMsg = ref(null);
-const gwProbe = ref(null); // отпечаток ключа хоста + нужен ли пароль
-const gwHostOk = ref(false); // человек сверил отпечаток с панелью хостера
-const gwChecks = ref(null); // результат кнопки «Проверить связь»
-const gatewaySetupState = ref('loading'); // loading | ready | error — не выдаём неизвестность за «не настроен»
-const gatewayLoadError = ref('');
-let gatewaySetupLoaded = false;
-
-// На первом открытии ведём сразу к незавершённой работе, но после первого клика выбор
-// человека не перехватываем поздно приехавшими параллельными GET-запросами.
-function syncInitialAccessDetails() {
-  if (accessDetailsTouched || !prefs.value || !tls.value || !gatewaySetupLoaded) return;
-  if (gwJob.value && ['running', 'failed'].includes(gwJob.value.state)) {
-    activeAccessDetails.value = 'gateway';
-  } else if (tls.value.source !== 'env' && prefs.value.accessLocalHttps === true
-      && (!tls.value.https?.up || tls.value.needsRestart)) {
-    activeAccessDetails.value = 'local';
-  }
-}
-
-const GW_MARK = { wait: '·', run: '…', ok: '✓', fail: '✗', skip: '—' };
-const gwRunning = computed(() => gwJob.value?.state === 'running');
-const gwJobVerifyState = computed(() => gwJob.value?.steps
-  ?.find((step) => step.key === 'verify')?.state || '');
-const gwJobConfirmed = computed(() => gwJob.value?.state === 'done'
-  && gwJobVerifyState.value === 'ok'
-  && !gwJob.value?.needsRestart);
-// Пароль требуем, только если сервер и правда не пускает по ключу (повторная установка — пускает).
-const gwNeedsPassword = computed(() => gwProbe.value?.passwordNeeded !== false);
-const gwCanStart = computed(() => !!gw.value.domain.trim()
-  && !!gw.value.gateway.trim()
-  && gwHostOk.value
-  && (!gw.value.useCloudflare || !!gw.value.cloudflareToken.trim())
-  && (!gwNeedsPassword.value || !!gw.value.sshPassword)
-  && !gwRunning.value && !gwBusy.value);
-
-/** Успех — единственный момент, когда секреты в памяти вкладки больше не нужны. */
-function gwApplyJob(job) {
-  const wasDone = gwJob.value?.state === 'done';
-  gwJob.value = job || null;
-  if (job?.state === 'running' && !accessDetailsTouched) {
-    activeAccessDetails.value = 'gateway';
-  }
-  if (job?.state === 'done' && !wasDone) {
-    gw.value.sshPassword = '';
-    gw.value.sudoPassword = '';
-    gw.value.cloudflareToken = '';
-    loadGatewaySetup({ keepJob: true });
-  }
-}
-// Прогресс идёт по общему SSE вкладки: установку начали с компьютера — видно и с планшета.
-useSse((name, data) => { if (name === 'gateway-setup') gwApplyJob(data); });
-
-async function loadGatewaySetup({ keepJob = false } = {}) {
-  gatewaySetupState.value = 'loading';
-  gatewayLoadError.value = '';
-  try {
-    const r = await api.get('/api/gateway/setup');
-    gwSaved.value = r.setup || null;
-    gwPublicDomain.value = r.publicDomain || '';
-    if (!keepJob) gwJob.value = r.job || null;
-    // Поля формы дозаполняем прошлой установкой, но НЕ затираем набранное руками.
-    const s = r.setup;
-    if (s) {
-      if (!gw.value.domain) gw.value.domain = s.domain || '';
-      if (!gw.value.gateway) gw.value.gateway = s.gateway || '';
-      if (s.sshPort) gw.value.sshPort = s.sshPort;
-      if (s.sshUser) gw.value.sshUser = s.sshUser;
-      if (s.dns === 'cloudflare') gw.value.useCloudflare = true;
-    }
-    gatewaySetupState.value = 'ready';
-    gatewaySetupLoaded = true;
-    syncInitialAccessDetails();
-  } catch (e) {
-    gatewaySetupState.value = 'error';
-    gatewayLoadError.value = e.data?.message || e.message;
-    gatewaySetupLoaded = true;
-    gwMsg.value = { type: 'err', text: gatewayLoadError.value };
-    syncInitialAccessDetails();
-  }
-}
-
-/** Проба ДО пароля: жив ли сервер и тот ли это сервер. */
-async function gwProbeHost() {
-  gwBusy.value = true;
-  gwMsg.value = null;
-  gwProbe.value = null;
-  gwHostOk.value = false;
-  try {
-    gwProbe.value = await api.post('/api/gateway/setup/probe', {
-      gateway: gw.value.gateway.trim(),
-      sshPort: Number(gw.value.sshPort) || 22,
-      sshUser: gw.value.sshUser.trim() || 'root',
-    });
-    if (!gwProbe.value.passwordNeeded) gw.value.sshPassword = '';
-  } catch (e) {
-    gwMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { gwBusy.value = false; }
-}
-
-async function gwStart() {
-  let dnsPlan = null;
-  if (gw.value.useCloudflare) {
-    gwBusy.value = true;
-    gwMsg.value = null;
-    try {
-      dnsPlan = await api.post('/api/gateway/setup/dns-plan', {
-        domain: gw.value.domain.trim(),
-        gateway: gw.value.gateway.trim(),
-        useCloudflare: true,
-        cloudflareToken: gw.value.cloudflareToken.trim(),
-      });
-    } catch (e) {
-      gwMsg.value = { type: 'err', text: e.data?.message || e.message };
-      return;
-    } finally {
-      gwBusy.value = false;
-    }
-  }
-
-  const dnsChanges = dnsPlan?.records?.filter((r) => r.action !== 'unchanged') || [];
-  const removed = dnsPlan?.removed || [];
-  const removedText = removed.length
-    ? ` Будут удалены ${removed.length} лишних адресных записей: ${removed.slice(0, 6)
-      .map((r) => `${r.type} ${r.name} → ${r.content || 'пусто'}`).join('; ')}${removed.length > 6 ? '; …' : ''}.`
-    : '';
-  const dnsText = dnsPlan
-    ? ` Cloudflare: зона ${dnsPlan.zone.name}; Cockpit управляет только ${dnsPlan.domain} и `
-      + `*.${dnsPlan.domain}. Обе записи будут указывать только на ${dnsPlan.ip} `
-      + `(DNS-only, TTL 60).${removedText} Остальные имена и служебные записи не меняются.`
-    : '';
-  const ok = await confirmDialog(
-    `Настроить шлюз на ${gw.value.gateway.trim()} и открыть кокпит по адресу `
-    + `https://${gw.value.domain.trim()}?\n\n`
-    + 'На VPS встанет Caddy и пользователь туннеля, на мозге — юниты обратных туннелей, '
-    + 'в .env кокпита допишутся домен и режим за прокси. Пароль уйдёт на сервер один раз '
-    + '(положить туда наш ключ) и нигде не сохранится.'
-    + dnsText,
-    {
-      title: 'Установить VPS-шлюз',
-      okText: dnsPlan ? 'Синхронизировать и установить' : 'Установить',
-      danger: removed.length > 0 || dnsChanges.length > 0,
-    },
-  );
-  if (!ok) return;
-  gwBusy.value = true;
-  gwMsg.value = null;
-  gwChecks.value = null;
-  try {
-    const r = await api.post('/api/gateway/setup/start', {
-      domain: gw.value.domain.trim(),
-      gateway: gw.value.gateway.trim(),
-      sshPort: Number(gw.value.sshPort) || 22,
-      sshUser: gw.value.sshUser.trim() || 'root',
-      sshPassword: gw.value.sshPassword,
-      sudoPassword: gw.value.sudoPassword,
-      useCloudflare: gw.value.useCloudflare,
-      cloudflareToken: gw.value.useCloudflare ? gw.value.cloudflareToken.trim() : '',
-      cloudflarePlanFingerprint: dnsPlan?.fingerprint || '',
-      acmeEmail: gw.value.acmeEmail.trim(),
-      acmeStaging: gw.value.acmeStaging,
-      hostKeyFingerprint: gwProbe.value?.fingerprint || '',
-    });
-    gwJob.value = r.job || null;
-  } catch (e) {
-    gwMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { gwBusy.value = false; }
-}
-
-async function gwVerify() {
-  gwBusy.value = true;
-  gwMsg.value = null;
-  try {
-    const body = {};
-    if (gw.value.domain.trim() && gw.value.gateway.trim()) {
-      body.domain = gw.value.domain.trim();
-      body.gateway = gw.value.gateway.trim();
-      body.sshPort = Number(gw.value.sshPort) || 22;
-      body.sshUser = gw.value.sshUser.trim() || 'root';
-    }
-    const result = await api.post('/api/gateway/setup/verify', body);
-    // Ответ проверки не хранится на сервере. Привязываем его к точной цели в памяти
-    // вкладки, чтобы последующая правка формы не красила зелёным другой домен.
-    gwChecks.value = {
-      ...result,
-      domain: body.domain || gwSaved.value?.domain || '',
-      gateway: body.gateway || gwSaved.value?.gateway || '',
-    };
-  } catch (e) {
-    gwChecks.value = null;
-    gwMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { gwBusy.value = false; }
-}
-
-/** Ручной шаг с командой — в терминал кокпита, без Enter: запуск остаётся за человеком. */
-function gwManualToTerminal(entry) {
-  if (entry?.command) openTerminal({ insert: entry.command });
-}
-
 // ── Плагины ──
 const pluginsStore = usePluginsStore();
 
@@ -3928,8 +3027,6 @@ onMounted(() => {
   pluginsStore.load();
   loadServer();
   cockpitUpdate.load();
-  loadTls();
-  loadGatewaySetup();
   acc.value.login = auth.login || '';
 });
 </script>
@@ -4454,25 +3551,11 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .runs-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Локальный HTTPS */
+/* Учётная запись и действия с сессиями. */
 .sechead { margin: 12px 0 0; font-size: 14px; font-weight: 640; }
 .access-account { display: grid; gap: 8px; }
 .access-account > .sechead { margin: 0; }
-.access-detail-region {
-  display: grid;
-  gap: 12px;
-  scroll-margin-top: 18px;
-}
-.access-detail-region:focus { outline: none; }
-.access-detail-region:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-  border-radius: 8px;
-}
-.access-detail-head { display: grid; gap: 8px; padding-top: 4px; }
-.access-detail-head .sechead, .access-detail-head > p { margin: 0; }
-
-/* Режим доступа: тумблер + пояснение под ним, выровненное по подписи тумблера. */
+/* Общий тумблер с пояснением, выровненным по его подписи. */
 .mode { display: grid; gap: 2px; }
 .mode > p { margin: 0 0 0 39px; }
 .mode + .mode { border-top: 1px solid var(--line); padding-top: 12px; }
@@ -4481,49 +3564,7 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 .notification-line > div { display: grid; gap: 2px; }
 .notification-line p { margin: 0; }
 .notification-line .ui-button { flex: none; }
-.tlsline { margin: 0; font-size: 13.5px; }
-.tlsline b { font-weight: 640; }
-.tlsline b.ok { color: var(--good); }
-.tlsline b.warn { color: var(--warn, #e0a33a); }
-.tlsline b.off { color: var(--ink-mid); }
 .msg.warn { color: var(--warn, #e0a33a); }
-.tlsaddrs { display: grid; gap: 6px; }
-.tlsaddr { flex-direction: row; align-items: center; gap: 8px; }
-.tlsaddr code { background: var(--ground); border: 1px solid var(--line); border-radius: 6px;
-  padding: 2px 7px; font-size: 12.5px; }
-.tlsqr { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
-/* QR всегда на белом: тёмный фон карточки камера читает через раз */
-.tlsqr img { flex: none; background: #fff; border-radius: 8px; padding: 6px; }
-.tlssteps { flex: 1; min-width: 240px; margin: 0; padding-left: 18px; display: grid; gap: 6px;
-  color: var(--ink-mid); }
-.tlssteps code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
-.fp { font-size: 11px; }
-
-/* Шлюз наружу: ход установки, ручные шаги и журнал.
-   Свой список, а не .tlssteps: там <ol> с номерами, а у шага уже есть своя метка
-   состояния — номер рядом с «✓» читается как второй значок. */
-.gwsteps { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; color: var(--ink-mid); }
-.gwsteps li { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
-.gwsteps li > span { min-width: 0; overflow-wrap: anywhere; }
-.gwsteps b { flex: none; width: 12px; text-align: center; font-weight: 700; color: var(--ink-mid); }
-.gwsteps b.ok { color: var(--good); }
-.gwsteps b.warn { color: var(--warn, #e0a33a); }
-.gwsteps b.off { color: var(--ink-dim, var(--ink-mid)); }
-
-.gwman { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--line);
-  border-radius: 9px; background: var(--ground); }
-.gwman + .gwman { margin-top: 8px; }
-.gwman p { margin: 0; }
-/* Команда показывается ЦЕЛИКОМ с переносом: по ней принимают решение, многоточие тут вредно.
-   Без overflow-wrap длинный путь распирал бы всю колонку настроек (см. грабли про min-width). */
-.gwcmd { margin: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--surface-2); font-size: 12px; line-height: 1.5;
-  white-space: pre-wrap; overflow-wrap: anywhere; }
-.gwlog summary { cursor: pointer; }
-.gwlog pre { margin: 8px 0 0; max-height: 260px; overflow: auto; padding: 9px 10px;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
-  font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-
 /* Планшет: вертикальная рейка превращается в липкую горизонтальную навигацию. */
 @media (max-width: 1099px) {
   .settings { gap: 18px; }
@@ -4611,10 +3652,5 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .notification-line { align-items: stretch; flex-direction: column; }
   .notification-line .ui-button { width: 100%; }
   .version-facts > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  .tlsaddr { flex-wrap: wrap; }
-  .tlsqr { display: grid; justify-items: center; }
-  .tlsqr img { width: min(180px, 100%); height: auto; }
-  .tlssteps { min-width: 0; width: 100%; }
-  .fp { overflow-wrap: anywhere; }
 }
 </style>

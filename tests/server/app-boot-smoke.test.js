@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import os from 'node:os';
@@ -35,8 +36,8 @@ function isolatedEnv(root, port) {
     HOME: root,
     NODE_ENV: 'production',
     COCKPIT_PORT: String(port),
-    COCKPIT_TLS_PORT: String(port + 1),
-    COCKPIT_HOST: '127.0.0.1',
+    COCKPIT_HOST: '0.0.0.0',
+    COCKPIT_TRUST_PROXY: '127.0.0.1',
     COCKPIT_CHATS_DIR: path.join(root, 'chats'),
     COCKPIT_TELEGRAM_DIR: path.join(root, 'telegram'),
     COCKPIT_GITHUB_DIR: path.join(root, 'github'),
@@ -46,12 +47,11 @@ function isolatedEnv(root, port) {
     FACTORY_PROFILES_DIR: path.join(root, 'profiles'),
     COCKPIT_AGENTS_DIR: path.join(root, 'agents'),
     COCKPIT_MEDIA_DIR: path.join(root, 'media'),
+    COCKPIT_MEDIA_HF_DIR: path.join(root, 'hf'),
     COCKPIT_PLUGINS_DIR: path.join(root, 'plugins'),
     COCKPIT_TICKETS_DIR: path.join(root, 'tickets'),
     COCKPIT_ROUTES_DIR: path.join(root, 'routes'),
-    COCKPIT_GATEWAY_DIR: path.join(root, 'gateway'),
     COCKPIT_ANALYSIS_DIR: path.join(root, 'analysis'),
-    COCKPIT_TLS_DIR: path.join(root, 'tls'),
     COCKPIT_SSH_AUDIT_DIR: path.join(root, 'ssh'),
     COCKPIT_DB_AUDIT_DIR: path.join(root, 'db'),
     COCKPIT_SANDBOX_JOURNAL_DIR: path.join(root, 'sandbox'),
@@ -63,6 +63,8 @@ function isolatedEnv(root, port) {
     COCKPIT_SHOWCASE_VOICE_DIR: path.join(root, 'showcase-voice'),
     COCKPIT_SHOWCASE_BROWSER_DIR: path.join(root, 'showcase-browser'),
     COCKPIT_MODELS_PATH: path.join(root, 'state/models.json'),
+    COCKPIT_USAGE_FORECAST_PATH: path.join(root, 'state/usage-forecast.json'),
+    COCKPIT_WEB_LOG_DIR: path.join(root, 'web-log'),
     COCKPIT_PREFS_PATH: path.join(root, 'state/prefs.json'),
     COCKPIT_AUTH_ACCOUNT: path.join(root, 'state/auth.json'),
     COCKPIT_AUTH_SESSIONS: path.join(root, 'state/sessions.json'),
@@ -87,6 +89,26 @@ function isolatedEnv(root, port) {
 }
 
 /**
+ * /proc показывает реальные LISTEN-сокеты namespace, независимо от firewall.
+ * Выделенный порт принадлежит успешно запущенному child; IPv6 проверяется отдельно.
+ */
+async function listeningAddresses(pid, port) {
+  const wanted = `:${port.toString(16).toUpperCase().padStart(4, '0')}`;
+  const records = {};
+
+  for (const family of ['tcp', 'tcp6']) {
+    const table = await readFile(`/proc/${pid}/net/${family}`, 'utf8');
+
+    records[family] = table.trim().split('\n').slice(1)
+      .map((line) => line.trim().split(/\s+/u))
+      .filter((columns) => columns[3] === '0A' && columns[1].endsWith(wanted))
+      .map((columns) => columns[1]);
+  }
+
+  return records;
+}
+
+/**
  * Единственная проверка, которая ловит «сервер не поднялся». Модульные тесты берут
  * каждый кусок по отдельности, а сборка сервисов в app.js собирается только при
  * настоящем старте: переименованный модуль, разошедшийся конструктор адаптера или
@@ -104,7 +126,13 @@ test('сервер поднимается и закрывает /api гардо�
   child.stdout.on('data', (chunk) => { log += chunk; });
   child.stderr.on('data', (chunk) => { log += chunk; });
   t.after(async () => {
-    child.kill('SIGKILL');
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+
+      child.kill('SIGKILL');
+      await exited;
+    }
+
     await rm(root, { recursive: true, force: true });
   });
 
@@ -134,6 +162,27 @@ test('сервер поднимается и закрывает /api гардо�
     status: 401,
     error: 'unauthorized',
   });
+
+  const sockets = await listeningAddresses(child.pid, port);
+  const expected = `0100007F:${port.toString(16).toUpperCase().padStart(4, '0')}`;
+
+  assert.deepEqual(sockets, { tcp: [expected], tcp6: [] });
+
+  const external = Object.values(os.networkInterfaces()).flat()
+    .find((item) => item?.family === 'IPv4' && !item.internal);
+
+  await t.test('LO-03: внешний IPv4 не отвечает на порт Cockpit', { skip: !external }, async () => {
+    await assert.rejects(fetch(`http://${external.address}:${port}/api/health`, {
+      signal: AbortSignal.timeout(1500),
+    }));
+  });
+
+  const state = await fetch(`${address}/api/auth/state`, {
+    headers: { 'X-Forwarded-Proto': 'https' },
+  });
+
+  assert.equal(state.status, 200);
+  assert.equal((await state.json()).secure, false);
 
   // Каталог шаблонов журнала окна собирает хук onRoute до регистрации модулей:
   // в нём должны оказаться маршруты модулей, а не только самого журнала.

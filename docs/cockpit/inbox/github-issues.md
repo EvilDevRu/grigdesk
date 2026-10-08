@@ -40,6 +40,9 @@ disconnect повторяет cleanup. Operator-only `POST /api/github/force-for
 `{"confirmOrphanHook":true}` и допускает оставшийся remote orphan hook. Account data purge
 в v1 отсутствует.
 
+Своего публичного адреса у Cockpit нет: без `COCKPIT_GITHUB_WEBHOOK_BASE_URL`
+connect невозможен, запасного варианта нет.
+
 До реального connect оператор задаёт `COCKPIT_GITHUB_WEBHOOK_BASE_URL` как публичный HTTPS
 base без query/fragment, создаёт fine-grained PAT для одного repository с Metadata read,
 Issues read и Webhooks write, затем выбирает B24 project в rules и явно активирует GitHub

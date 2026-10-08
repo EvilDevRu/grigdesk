@@ -20,7 +20,7 @@ cockpit_install_parse_args "$@"
 cockpit_install_choice INSTALL_AUTOSTART "Запускать кокпит при включении машины?" 1
 cockpit_install_choice INSTALL_SHORTCUT "Создать ярлык «Кокпит» на рабочем столе?" 0
 
-# Сообщения после установки должны показывать те же порты, что прочитает сервер.
+# Сообщения после установки должны показывать тот же порт, что прочитает сервер.
 # .env разбирает Node: его содержимое не исполняется shell'ом.
 source "$COCKPIT_DIR/bin/lib/runtime-env.sh"
 source "$COCKPIT_DIR/bin/lib/media-runtime.sh"
@@ -28,7 +28,6 @@ cockpit_install_media "$COCKPIT_DIR" ${INSTALL_PASSTHRU[@]+"${INSTALL_PASSTHRU[@
 # Версию проверяем до любой записи: юнит, который не сможет стартовать, ставить нельзя.
 cockpit_load_runtime_env "$COCKPIT_DIR"
 PORT="$COCKPIT_EFFECTIVE_PORT"
-TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
 
 echo "→ Кокпит: $COCKPIT_DIR"
 echo "→ node:   $NODE_BIN ($(node -v))"
@@ -54,7 +53,7 @@ case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.lo
 
 systemctl --user daemon-reload
 # Автозапуск — это enable юнита плюс linger: без него пользовательский systemd поднимается
-# только при входе в сессию, а кокпит нужен планшету и Telegram сразу после включения.
+# только при входе в сессию, а кокпит и Telegram нужны сразу после включения.
 # Сервер поднимается в любом случае; сам выбор потом переключается в «Настройки → Сервер».
 if [ "$INSTALL_AUTOSTART" = 1 ]; then
   echo "→ Автозапуск при включении машины…"
@@ -88,12 +87,6 @@ if [ -f "$COCKPIT_DIR/server/.state/auth-account.json" ]; then
   echo "  Вход:  пароль уже задан (Настройки → Доступ, чтобы сменить)"
 else
   echo "  Вход:  открой http://localhost:$PORT и задай пароль — до этого API закрыт."
-  echo "         ВАЖНО: сделай это ДО того, как откроешь кокпит из сети: экран первичной"
-  echo "         настройки доступен любому, кто зайдёт первым."
 fi
 echo
-echo "  Доступ из сети: нужен HTTPS, иначе пароль уйдёт открытым текстом."
-echo "                  «Настройки → Доступ»: включить режим «Из домашней сети», выпустить"
-echo "                  сертификат, поставить корень на планшет по QR, перезапустить сервер"
-echo "                  (второй порт — $TLS_PORT). Без включённого режима кокпит слушает только $PORT."
-echo "                  Готовый сертификат подключается через COCKPIT_TLS_KEY/COCKPIT_TLS_CERT."
+echo "  Доступ: только с этой машины, http://localhost:$PORT"

@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 
-// Hash-history — чтобы SPA работал при отдаче статики без серверных rewrite-правил
-// (и одинаково из поддиректории, и с VPS-витрины).
+// Hash history сохраняет навигацию SPA при обычной отдаче статики.
+// Переходы между разделами не требуют серверных rewrite-правил.
 const routes = [
   { path: '/', redirect: '/board' },
   { path: '/board', name: 'board', component: () => import('./views/BoardView.vue'), meta: { title: 'Доска' } },

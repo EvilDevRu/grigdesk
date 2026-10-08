@@ -151,7 +151,7 @@ function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
 }
 
 /**
- * Production-сборка размещается в артефактах и запрещает внешнюю базу API.
+ * Production-сборка размещается в артефактах и обращается к своему origin.
  * Подмена служб выполняется до сборки SFC, Markdown и хронология остаются настоящими.
  */
 async function buildFixture() {
@@ -166,9 +166,6 @@ async function buildFixture() {
     configFile: false,
     mode: 'production',
     logLevel: 'warn',
-    define: {
-      'import.meta.env.VITE_BRAIN_URL': '""'
-    },
     plugins: [{
       name: 'chat-performance-counters',
       enforce: 'pre',

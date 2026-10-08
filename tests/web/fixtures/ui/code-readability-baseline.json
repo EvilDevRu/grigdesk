@@ -185,56 +185,6 @@
         "{ type: 'button'; label: string; description?: string; tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }": 1,
         "{ type: 'link'; label: string; description?: string; href: string; external?: boolean }": 1
       }
-    },
-    "web/src/views/settings/AccessOverview.vue": {
-      "line-length": {
-        "38:const desiredGatewayDomain = computed(() => (props.gatewayJob?.state === 'done' ? props.gatewayJob.domain : '')": 1
-      },
-      "logical-spacing": {
-        "branch->declaration: const desired = normalizeDomain(desiredGatewayDomain.value);": 1,
-        "declaration->branch: if (!desired) return false;": 1,
-        "branch->exit: return desired !== normalizeDomain(props.gatewayPublicDomain);": 1,
-        "declaration->branch: if (!checked || checked !== normalizeDomain(gatewayDomain.value)) return false;": 1,
-        "branch->declaration: const configuredGateway = String(props.gatewaySetup?.gateway || '').trim();": 1,
-        "declaration->branch: if (!configuredGateway) return true;": 1,
-        "branch->exit: return String(props.gatewayChecks?.gateway || '').trim() === configuredGateway;": 1,
-        "declaration->branch: if (props.tlsState === 'loading') return { kind: 'idle', label: 'Проверяем…' };": 1,
-        "branch->exit: return { kind: 'danger', label: 'HTTPS не поднялся' };": 1,
-        "branch->exit: return { kind: 'off', label: 'HTTP без шифрования' };": 1,
-        "branch->exit: return `http://${localAddress.value}:${httpPort.value}`;": 1,
-        "branch->exit: return { kind: 'off', label: 'Не настроен' };": 1,
-        "branch->exit: return gatewayConfigured.value ? 'Управление и проверка' : 'Настроить шлюз';": 1
-      },
-      "unbraced-control": {
-        "if (props.gatewayJob?.state === 'done' && props.gatewayJob.needsRestart) return true;": 1,
-        "if (!desired) return false;": 1,
-        "if (!checked || checked !== normalizeDomain(gatewayDomain.value)) return false;": 1,
-        "if (!configuredGateway) return true;": 1,
-        "if (props.tlsState === 'loading') return { kind: 'idle', label: 'Проверяем…' };": 1,
-        "if (props.tlsState === 'error') return { kind: 'danger', label: 'Статус недоступен' };": 1,
-        "if (!tls) return { kind: 'danger', label: 'Нет данных' };": 1,
-        "if (tls.https?.up) return { kind: 'warn', label: 'Отключится после рестарта' };": 1,
-        "if (tls.https?.error) return { kind: 'danger', label: 'HTTPS не поднялся' };": 1,
-        "if (!tls.leaf?.exists) return { kind: 'warn', label: 'Нужен сертификат' };": 1,
-        "if (tls.missingAddresses?.length) return { kind: 'warn', label: 'Адрес не в сертификате' };": 1,
-        "if (tls.needsRestart) return { kind: 'warn', label: 'Нужен перезапуск' };": 1,
-        "if (tls.https?.up) return { kind: 'ok', label: 'HTTPS работает' };": 1,
-        "if (props.tlsState === 'loading') return 'проверяем адрес…';": 1,
-        "if (props.tlsState === 'error') return 'адрес не удалось определить';": 1,
-        "if (props.tls?.https?.up) return `https://${localAddress.value}:${httpsPort.value}`;": 1,
-        "if (props.tlsState === 'loading') return 'Сверяем настройку с фактически поднятым сокетом.';": 1,
-        "if (props.gatewayJob?.state === 'running') return { kind: 'warn', label: 'Настройка идёт' };": 1,
-        "if (props.gatewayJob?.state === 'failed') return { kind: 'danger', label: 'Настройка сорвалась' };": 1,
-        "if (gatewayRestartPending.value) return { kind: 'warn', label: 'Нужен перезапуск' };": 1,
-        "if (props.gatewayState === 'loading') return { kind: 'idle', label: 'Проверяем…' };": 1,
-        "if (props.gatewayState === 'error') return { kind: 'danger', label: 'Статус недоступен' };": 1,
-        "if (gatewayVerified.value) return { kind: 'ok', label: 'Связь проверена' };": 1,
-        "if (gatewayHasRemarks.value) return { kind: 'warn', label: 'Есть замечания' };": 1,
-        "if (gatewayConfigured.value) return { kind: 'warn', label: 'Не проверен' };": 1,
-        "if (props.activeDetails === 'gateway') return 'Скрыть настройки';": 1,
-        "if (props.gatewayState === 'loading') return 'Проверяем состояние…';": 1,
-        "if (props.gatewayState === 'error') return 'Повторить и открыть';": 1
-      }
     }
   }
 }
