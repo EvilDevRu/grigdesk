@@ -12,15 +12,15 @@
 // Вход ограничен по размеру, и обрезка помечается явно. Без пометки модель выдала
 // бы разбор половины изменений за разбор всей работы, а человек об этом не узнал бы.
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { promisify } from 'node:util';
+
+import { readUntrackedText } from './untracked.ts';
 
 const run = promisify(execFile);
 
 // Предел объёма diff. Он щедрый для обычной задачи и жёсткий для «переписали всё»:
 // длинный контекст не улучшает сценарий, зато делает вызов дорогим и медленным.
-const DIFF_LIMIT = 90_000;
+export const DIFF_LIMIT = 90_000;
 
 // Предел на один файл. Обрезка по общему объёму срезала бы хвост diff целиком —
 // у задачи 8665 за бортом остался весь фронтенд с диалогом, ради которого ролик и
@@ -34,7 +34,8 @@ const UNTRACKED_FILES_MAX = 12;
 
 // Тесты в контекст не идут: ролик рассказывает о видимом поведении, а тестовый
 // код занимает место, из-за которого обрезался сам продуктовый.
-const TEST_PATH = /(^|\/)(tests?|__tests__|e2e|spec|specs)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$/;
+export const TEST_PATH =
+  /(^|\/)(tests?|__tests__|e2e|spec|specs)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$/;
 
 // База сравнения. Первым идёт то, что сам remote называет главной веткой; остальные
 // имена — на случай, если `origin/HEAD` у клона не выставлен.
@@ -42,7 +43,7 @@ const BASE_CANDIDATES = ['origin/HEAD', 'origin/main', 'origin/master', 'main', 
 
 // Что не попадает в контекст: замороженные зависимости бесполезны модели, а файлы
 // окружения стенд переписывает своими схемами и паролями — им в промпте не место.
-const EXCLUDED_PATHS = [
+export const EXCLUDED_PATHS = [
   ':(exclude)*.lock',
   ':(exclude)package-lock.json',
   ':(exclude).env*',
@@ -75,7 +76,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
  * главная: иначе в diff попадут чужие коммиты, приехавшие в неё после ответвления,
  * и сценарий расскажет о чужой работе.
  */
-async function mergeBase(cwd: string, head: string): Promise<string> {
+export async function mergeBase(cwd: string, head: string): Promise<string> {
   for (const candidate of BASE_CANDIDATES) {
     const base = await git(cwd, ['merge-base', candidate, head])
       .then((value) => value.trim())
@@ -93,26 +94,28 @@ async function mergeBase(cwd: string, head: string): Promise<string> {
  * Новые файлы, которых git ещё не знает. Бинарные пропускаются по признаку нулевого
  * байта: их содержимое модели не прочитать, а место в контексте они бы заняли.
  */
-async function untrackedFiles(cwd: string): Promise<string> {
+async function untrackedFiles(cwd: string): Promise<{ text: string; trimmed: boolean }> {
   const listed = await git(cwd, ['ls-files', '--others', '--exclude-standard'])
     .then((value) => value.split('\n').map((item) => item.trim()).filter(Boolean))
     .catch(() => [] as string[]);
   const parts: string[] = [];
 
   const product = listed.filter((relative) => !TEST_PATH.test(relative));
+  let trimmed = product.length > UNTRACKED_FILES_MAX;
 
   for (const relative of product.slice(0, UNTRACKED_FILES_MAX)) {
     if (/(^|\/)\.env/.test(relative) || relative.endsWith('.lock')) {
       continue;
     }
 
-    const content = await fs.readFile(path.join(cwd, relative)).catch(() => null);
+    const text = await readUntrackedText(cwd, relative, UNTRACKED_FILE_LIMIT).catch(() => null);
 
-    if (!content || content.includes(0)) {
+    if (text === null) {
       continue;
     }
 
-    const text = content.toString('utf8');
+    trimmed = trimmed || text.length > UNTRACKED_FILE_LIMIT;
+
     const shown = text.length > UNTRACKED_FILE_LIMIT
       ? `${text.slice(0, UNTRACKED_FILE_LIMIT)}\n… (файл обрезан)`
       : text;
@@ -120,7 +123,7 @@ async function untrackedFiles(cwd: string): Promise<string> {
     parts.push(`## новый файл ${relative}\n${shown}`);
   }
 
-  return parts.join('\n\n');
+  return { text: parts.join('\n\n'), trimmed };
 }
 
 /**
@@ -140,6 +143,8 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
     'diff',
     base,
     '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
     '--stat',
     '--patch',
     '--',
@@ -148,7 +153,7 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
   ]).catch(() => '');
   const untracked = await untrackedFiles(repo.path);
   const patch = trimPatch(tracked.trim());
-  const diff = [patch.text, untracked].filter(Boolean).join('\n\n');
+  const diff = [patch.text, untracked.text].filter(Boolean).join('\n\n');
 
   if (!diff.trim()) {
     return null;
@@ -158,7 +163,7 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
     diff,
     base,
     head,
-    truncated: patch.trimmed,
+    truncated: patch.trimmed || untracked.trimmed,
   };
 }
 
@@ -167,7 +172,7 @@ async function repoDiff(repo: RepoRef): Promise<DiffContext | null> {
  * тестовые файлы выбрасываются, а каждый оставшийся получает не больше своей доли.
  * Обрезанный файл помечается прямо в тексте — модель видит, что хвоста нет.
  */
-function trimPatch(patch: string): { text: string; trimmed: boolean } {
+export function trimPatch(patch: string): { text: string; trimmed: boolean } {
   const sections = patch.split(/^(?=diff --git )/m);
   const kept: string[] = [];
   let trimmed = false;

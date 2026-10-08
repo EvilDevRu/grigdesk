@@ -61,6 +61,16 @@
               >
                 Открыть стенд <span aria-hidden="true">↗</span>
               </UiActionLink>
+              <!-- Ролик без запуска: человек сначала отмечает, о чём рассказать, —
+                   коммиты, незакоммиченное, своё пожелание — и снимает из блока. -->
+              <UiButton
+                variant="ghost"
+                :data-testid="`showcase-configure-${choiceKey(target)}`"
+                :disabled="busy"
+                @click="emit('configure', { ref: { ...target.ref } })"
+              >
+                Выбрать, о чём…
+              </UiButton>
               <!-- Ролик про этот стенд уже есть: главное действие — открыть его,
                    а не завести второй такой же; второй остаётся тихой кнопкой. -->
               <template v-if="existingOf(target)">
@@ -152,6 +162,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   create: [payload: { ref: ShowcaseSelectableTargetRef }];
+  // Завести ролик без запуска и открыть блок «О чём ролик».
+  configure: [payload: { ref: ShowcaseSelectableTargetRef }];
   open: [projectId: string];
 }>();
 

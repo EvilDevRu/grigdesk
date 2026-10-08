@@ -1738,26 +1738,34 @@ async function factoryModule(
       return reply.code(400).send({ error: 'comment_too_long', message: sanitized.message });
     }
     const comment = sanitized.value;
-    const committed = await runRouteEngine(config, routeGateArgs(config, {
-      task: id,
-      profile: trusted.profile,
-      attempt,
-      node: gateNode,
-      decision: value,
-      comment,
-    }));
-    if (!committed.ok) {
-      return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
+    // От записи решения до подхвата ORCH_PID продолжением демона нет — это передача хода,
+    // а не обрыв (см. beginHandoff).
+    const doneHandoff = factoryState.beginHandoff(id);
+
+    try {
+      const committed = await runRouteEngine(config, routeGateArgs(config, {
+        task: id,
+        profile: trusted.profile,
+        attempt,
+        node: gateNode,
+        decision: value,
+        comment,
+      }));
+      if (!committed.ok) {
+        return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
+      }
+      const resumed = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'после ворот' });
+      return {
+        ok: true,
+        key,
+        value,
+        resumed: resumed.ok,
+        resumeError: resumed.message || null,
+        resumeFailure: resumed.failure || null,
+      };
+    } finally {
+      doneHandoff();
     }
-    const resumed = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'после ворот' });
-    return {
-      ok: true,
-      key,
-      value,
-      resumed: resumed.ok,
-      resumeError: resumed.message || null,
-      resumeFailure: resumed.failure || null,
-    };
   });
 
   // Доверенный человеческий возврат курсора. Произвольная запись статуса удалена.
@@ -1788,22 +1796,28 @@ async function factoryModule(
       return reply.code(400).send({ error: 'comment_too_long', message: sanitized.message });
     }
     const comment = sanitized.value;
-    const rewound = await runRouteEngine(config, routeGotoArgs(config, {
-      task: id, profile: trusted.profile, attempt: trusted.attempt, node, reason: comment,
-    }));
-    if (!rewound.ok) return reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
-    const resumed = await resumeRouteAttempt(id, {
-      profile: trusted.profile, attempt: trusted.attempt, why: 'после возврата',
-    });
-    return {
-      ok: true,
-      key,
-      status: 'running',
-      node,
-      resumed: resumed.ok,
-      resumeError: resumed.message || null,
-      resumeFailure: resumed.failure || null,
-    };
+    const doneHandoff = factoryState.beginHandoff(id);
+
+    try {
+      const rewound = await runRouteEngine(config, routeGotoArgs(config, {
+        task: id, profile: trusted.profile, attempt: trusted.attempt, node, reason: comment,
+      }));
+      if (!rewound.ok) return reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+      const resumed = await resumeRouteAttempt(id, {
+        profile: trusted.profile, attempt: trusted.attempt, why: 'после возврата',
+      });
+      return {
+        ok: true,
+        key,
+        status: 'running',
+        node,
+        resumed: resumed.ok,
+        resumeError: resumed.message || null,
+        resumeFailure: resumed.failure || null,
+      };
+    } finally {
+      doneHandoff();
+    }
   });
 
   // Арбитр типизированной остановки: снимает тупик вместо человека и предъявляет решение.
@@ -1893,6 +1907,8 @@ async function factoryModule(
       actor,
       model: `${target.ref.provider}/${target.ref.model}`,
     }) || (() => {});
+    // Передача хода начинается только с возврата курсора; до него снимать нечего.
+    let doneHandoff = () => {};
     let output: ArbiterRunOutput;
     try {
       const providerSettings = prefs?.read()?.providerSettings as
@@ -1976,6 +1992,9 @@ async function factoryModule(
         reply.code(409).send({ error: 'comment_too_long', message: sanitized.message });
         return null;
       }
+
+      doneHandoff = factoryState.beginHandoff(id);
+
       const rewound = await runRouteEngine(config, routeGotoArgs(config, {
         task: id,
         profile: trusted.profile,
@@ -2018,6 +2037,7 @@ async function factoryModule(
         resumeFailure: resumed.failure || null,
       };
     } finally {
+      doneHandoff();
       doneLive();
     }
   };

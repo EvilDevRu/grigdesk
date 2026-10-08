@@ -31,7 +31,7 @@
       :build-run="store.latestBuildOf(store.opened.id)"
       :manifest="store.currentManifest"
       :manifest-status="store.manifestStatus"
-      :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id"
+      :busy="store.isBusy(store.opened.id) || store.analyzing === store.opened.id || applyingSource"
       :analyzing="store.analyzing === store.opened.id"
       :max-scenes="store.limits.maxScenes"
       :target-url="openedTargetUrl"
@@ -39,6 +39,9 @@
       :voice-ref="effectiveVoiceRef"
       :voice-capabilities="effectiveVoiceCapabilities"
       :load-scene-preview="loadShowcaseNarrationPreview"
+      :source-options="sourceOptions"
+      :source-loading="sourceLoading"
+      :source-error="sourceError"
       @close="close"
       @build="build"
       @generate-bindings="generateBindings"
@@ -56,6 +59,8 @@
       @scene-continues="setSceneContinues"
       @scene-audio="uploadAudio"
       @select-scene="selectedSceneId = $event"
+      @apply-source="applySource"
+      @reload-source="reloadSource"
     >
       <template #voice>
         <ShowcaseVoicePanel
@@ -88,6 +93,7 @@
           :loading="store.loading"
           :error="store.error"
           @create="create"
+          @configure="configure"
           @open="open"
         />
       </section>
@@ -173,6 +179,7 @@ import {
   loadShowcaseDictionary,
   loadShowcaseManifest,
   loadShowcaseNarrationPreview,
+  loadShowcaseSource,
   loadShowcaseVoicePreview,
   loadShowcaseVoices,
   markShowcaseDataUpdated,
@@ -182,6 +189,7 @@ import {
   renameShowcaseProject,
   reorderShowcaseScenes,
   saveShowcaseDictionary,
+  saveShowcaseSource,
   setShowcaseVoice,
   updateShowcaseScene,
   useShowcaseStore,
@@ -191,7 +199,12 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { sandboxUrl } from '../shared/sandbox.js';
 import { showcaseApi } from '../shared/showcaseApi';
 import type { SeedStatus, ShowcaseVoiceChoice } from '../actions/showcase';
-import type { ShowcaseDoctor, ShowcaseSelectableTargetRef } from '../../../shared/showcaseContracts';
+import type {
+  ShowcaseDoctor,
+  ShowcaseSelectableTargetRef,
+  ShowcaseSourceOptions,
+  ShowcaseStorySource,
+} from '../../../shared/showcaseContracts';
 import ShowcaseFilm from './showcase/ShowcaseFilm.vue';
 import ShowcaseProjectRow from './showcase/ShowcaseProjectRow.vue';
 import ShowcaseTargetPicker from './showcase/ShowcaseTargetPicker.vue';
@@ -207,6 +220,15 @@ const creating = ref(false);
 const doctor = ref<ShowcaseDoctor | null>(null);
 const seed = ref<SeedStatus | null>(null);
 const selectedSceneId = ref('');
+// «О чём ролик»: живая история репозиториев открытого ролика и её отказ — у блока.
+const sourceOptions = ref<ShowcaseSourceOptions | null>(null);
+const sourceLoading = ref(false);
+const sourceError = ref('');
+// Цепочка «подтверждение → сохранение → разбор или сборка» одна на вид: повторный клик
+// не запускает вторую, пока идёт первая.
+const applyingSource = ref(false);
+// Билет чтения списка: поздний ответ прежнего запроса не меняет ни список, ни подпись.
+let sourceTicket = 0;
 
 // Без этого записи не будет вовсе. Голос и распознавание сюда не входят: без
 // голоса остаётся свой звук, а проверка речи рекомендательная.
@@ -337,6 +359,19 @@ watch(() => store.opened?.id, async (id) => {
   seed.value = id ? await loadSeedStatus(store) : null;
 }, { immediate: true });
 
+// Историю репозиториев спрашиваем при появлении карточки и когда цель стала готова:
+// вчерашний список коммитов сегодня может не совпасть с веткой стенда.
+watch(() => `${store.opened?.id ?? ''}:${store.opened?.target.status ?? ''}`, () => {
+  sourceTicket += 1;
+  sourceOptions.value = null;
+  sourceError.value = '';
+  sourceLoading.value = false;
+
+  if (store.opened?.target.status === 'ready') {
+    void reloadSource();
+  }
+}, { immediate: true });
+
 // Manifest относится к конкретному immutable final. Смена project/revision без
 // смены этой пары повторного чтения не запускает, а новый final загружается сам.
 watch(() => {
@@ -398,26 +433,116 @@ async function create(payload: { ref: ShowcaseSelectableTargetRef }) {
 }
 
 /**
- * Разбор стенда заново. Новый сценарий ЗАМЕНЯЕТ сцены, а вместе с ними уходят и
- * правки текста, поэтому при живых сценах спрашиваем; голос и темп остаются.
+ * «Выбрать, о чём…»: ролик заводится без запуска. Человек отмечает коммиты и своё
+ * пожелание в блоке «О чём ролик» и снимает ролик оттуда же.
  */
-async function analyze() {
-  if (store.opened?.scenes.length) {
-    const accepted = await confirmDialog(
-      'Разобрать заново? Сцены заменятся новым сценарием, и правки текста в них пропадут. '
-        + 'Голос и темп ролика сохранятся.',
-      {
-        title: 'Повторный разбор',
-        okText: 'Разобрать',
-      },
-    );
+async function configure(payload: { ref: ShowcaseSelectableTargetRef }) {
+  creating.value = true;
 
-    if (!accepted) {
-      return;
+  try {
+    const id = await createShowcaseProject(store, { ref: payload.ref });
+
+    if (id) {
+      await router.replace(`/showcase/${id}`);
     }
+  } finally {
+    creating.value = false;
+  }
+}
+
+/**
+ * Повторный разбор ЗАМЕНЯЕТ сцены, а вместе с ними уходят и правки текста, поэтому
+ * при живых сценах спрашиваем; голос и темп остаются.
+ */
+async function confirmReanalyze(): Promise<boolean> {
+  if (!store.opened?.scenes.length) {
+    return true;
   }
 
-  await analyzeShowcase(store);
+  return confirmDialog(
+    'Разобрать заново? Сцены заменятся новым сценарием, и правки текста в них пропадут. '
+      + 'Голос и темп ролика сохранятся.',
+    {
+      title: 'Повторный разбор',
+      okText: 'Разобрать',
+    },
+  );
+}
+
+async function analyze() {
+  if (await confirmReanalyze()) {
+    await analyzeShowcase(store);
+  }
+}
+
+/**
+ * Список коммитов открытого ролика. Отказ — подпись у блока, а не красная строка над
+ * всем разделом: без списка ролик всё равно можно собрать по умолчанию. Ответ и снятие
+ * ожидания принимает только последний запрос — по билету, а не по id ролика.
+ */
+async function reloadSource() {
+  const ticket = ++sourceTicket;
+
+  sourceLoading.value = true;
+
+  try {
+    const read = await loadShowcaseSource(store.opened);
+
+    if (ticket === sourceTicket) {
+      sourceOptions.value = read.options;
+      sourceError.value = read.error;
+    }
+  } finally {
+    if (ticket === sourceTicket) {
+      sourceLoading.value = false;
+    }
+  }
+}
+
+/**
+ * «О чём ролик»: выбор сохраняется, затем ролик без сцен снимается целиком, а ролик со
+ * сценами разбирается заново — с тем же вопросом, что и у «Разобрать заново». Ролик и
+ * его редакция захватываются до вопроса: сменился ролик за время подтверждения —
+ * выбор не применяется, а следующий шаг идёт только после успешного сохранения.
+ */
+async function applySource(source: ShowcaseStorySource | null) {
+  const opened = store.opened;
+
+  if (!opened || applyingSource.value) {
+    return;
+  }
+
+  const { id, revision } = opened;
+  const hasScenes = opened.scenes.length > 0;
+
+  applyingSource.value = true;
+
+  try {
+    if (!await confirmReanalyze()) {
+      return;
+    }
+
+    if (store.opened?.id !== id || store.opened.revision !== revision) {
+      store.setError('Ролик изменился, пока вы подтверждали, — выбор «О чём ролик» не применён. '
+        + 'Проверьте его и примените ещё раз.');
+
+      return;
+    }
+
+    const saved = await saveShowcaseSource(store, {
+      id,
+      revision,
+      source,
+    });
+
+    if (!saved || store.opened?.id !== id) {
+      return;
+    }
+
+    await (hasScenes ? analyzeShowcase(store) : buildShowcaseFilm(store));
+  } finally {
+    applyingSource.value = false;
+  }
 }
 
 /**

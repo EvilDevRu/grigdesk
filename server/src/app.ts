@@ -122,6 +122,7 @@ import {
   countTelegramRules,
 } from './lib/projects/dependencySources.ts';
 import { isProjectArchived } from './lib/projects/archive.ts';
+import { projectRepos } from './lib/projects.ts';
 import { RoutesStore } from './modules/routes/store.ts';
 import codeModule from './modules/code/index.ts';
 import telegramModule from './modules/telegram/index.ts';
@@ -844,6 +845,13 @@ async function build() {
       title?: unknown;
       description?: unknown;
     } | null,
+    // Репозитории постоянного стенда — из паспорта проекта, тот же источник путей,
+    // что у «Кода». Разбор читает их только по выбору человека в «О чём ролик».
+    projectRepos: async (profile: string) => (await projectRepos({
+      config,
+      prefs,
+      id: profile,
+    })).map((repo) => ({ name: repo.key, path: repo.dir })),
     // Каналы доставки: сессией портала и аккаунтом Telegram владеет сервер, раздел
     // получает их готовыми и вторых не заводит.
     deliveryDeps: {

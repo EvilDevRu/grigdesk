@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  normalizeShowcaseSource,
   SHOWCASE_BUILD_REQUEST_ID_RE,
 } from '../../../../shared/showcaseContracts.ts';
 import type {
@@ -121,10 +122,14 @@ function sceneSnapshot(
  */
 export function buildRunSnapshotOf(project: ShowcaseProject): BuildRunSnapshot {
   const target = targetSnapshot(project);
+  const source = normalizeShowcaseSource(project.source);
+  // Выбор «О чём ролик» — вход сценария. Без выбора объект прежней формы: сохранённые
+  // запуски не должны стать «чужими» из-за пустого нового поля.
   const base = {
     schemaVersion: project.schemaVersion,
     ref: project.ref,
     target,
+    ...(source ? { source } : {}),
   };
   const scriptBaseHash = hash(base);
   const full = {

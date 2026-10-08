@@ -17,6 +17,7 @@ const UI_STUB = `
 export { default as UiActionLink } from '${webFile('src/components/primitives/UiActionLink.vue')}';
 export { default as UiAudio } from '${webFile('src/components/primitives/UiAudio.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
+export { default as UiCheckbox } from '${webFile('src/components/primitives/UiCheckbox.vue')}';
 export { default as UiIconButton } from '${webFile('src/components/primitives/UiIconButton.vue')}';
 export { default as UiInput } from '${webFile('src/components/primitives/UiInput.vue')}';
 export { default as UiSelect } from '${webFile('src/components/primitives/UiSelect.vue')}';
@@ -39,6 +40,7 @@ export { default as UiInlineMessage } from '${webFile('src/components/feedback/U
 export { default as UiProgress } from '${webFile('src/components/feedback/UiProgress.vue')}';
 export const confirmDialog = async (text, options) => {
   globalThis.__showcaseViewHarness.confirmations.push({ text, options });
+  await globalThis.__showcaseViewHarness.confirmGate;
   return globalThis.__showcaseViewHarness.confirmed;
 };
 export const promptDialog = async (options) => {
@@ -48,6 +50,7 @@ export const promptDialog = async (options) => {
 `;
 
 const ACTIONS_STUB = `
+import { showcaseSourceEqual } from '${webFile('../shared/showcaseContracts.ts')}';
 const harness = () => globalThis.__showcaseViewHarness;
 export const useShowcaseStore = () => harness().store;
 export const watchShowcase = () => {
@@ -145,6 +148,19 @@ export const showcaseScriptOutdated = (project) => Boolean(
   && project.scriptMapRevision && project.target.scope.mapRevision
   && project.scriptMapRevision !== project.target.scope.mapRevision,
 );
+export const loadShowcaseSource = async (project) => {
+  harness().calls.push(['load-source', project?.id ?? null]);
+  const queued = harness().sourceReads.shift();
+  return queued ?? { options: harness().sourceOptions, error: harness().sourceError };
+};
+export const saveShowcaseSource = async (store, request) => {
+  harness().calls.push(['save-source', request.source]);
+  harness().saveRequests.push(request);
+  return harness().saveSourceResult;
+};
+export const SOURCE_OUTDATED_TEXT = 'Выбор «О чём ролик» изменился после разбора.';
+export const showcaseSourceOutdated = (project) => Boolean(project && project.scenes.length)
+  && !showcaseSourceEqual(project.source, project.scriptSource);
 `;
 
 const API_STUB = `
@@ -398,6 +414,12 @@ async function mountView(t, {
   narrationPreview = async () => new Blob(),
   updateResult = true,
   openResult = true,
+  sourceOptions = null,
+  sourceError = '',
+  sourceReads = [],
+  saveSourceResult = true,
+  confirmGate = null,
+  reactiveStore = false,
 } = {}) {
   const browser = await createUiBrowser(url);
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -405,6 +427,12 @@ async function mountView(t, {
   const route = reactive({ params: { id: routeId } });
   const harness = {
     confirmed,
+    confirmGate,
+    sourceOptions,
+    sourceError,
+    sourceReads,
+    saveRequests: [],
+    saveSourceResult,
     preview,
     narrationPreview,
     updateResult,
@@ -454,7 +482,9 @@ async function mountView(t, {
         run.state === 'queued' || run.state === 'running' || run.state === 'cancelling'
       )),
       setOpened: () => {},
-      setError: () => {},
+      setError: (text) => {
+        calls.push(['set-error', text]);
+      },
       currentManifest: manifest,
       manifestStatus,
       voices,
@@ -468,6 +498,12 @@ async function mountView(t, {
       },
     },
   };
+
+  // Реактивный двойник стора нужен только проверкам, где открытый ролик меняется на
+  // глазах у вида; остальным хватает простого объекта.
+  if (reactiveStore) {
+    harness.store = reactive(harness.store);
+  }
 
   globalThis.__showcaseViewHarness = harness;
 
@@ -2032,4 +2068,341 @@ test('счётчик пересъёмки считает всю цепочку �
   });
 
   assert.match(wrapper.find('.build__note').text(), /Нужна запись: 3 сцен/);
+});
+
+const COMMIT_OLD = 'a'.repeat(40);
+const COMMIT_NEW = 'b'.repeat(40);
+
+/**
+ * Список «О чём ролик» песочницы: два своих коммита ветки и незакоммиченное. Умолчание
+ * отмечает всё — так разбор прочитал бы стенд без выбора человека.
+ */
+function sourceOptions() {
+  return {
+    taskAvailable: true,
+    noteMax: 2000,
+    defaults: {
+      task: true,
+      note: '',
+      code: true,
+      repos: [{
+        name: 'frontend',
+        work: true,
+        commits: [COMMIT_NEW, COMMIT_OLD],
+      }],
+    },
+    requiresExplicitSelectionConfirmation: false,
+    selectedOutsideCatalog: [],
+    repos: [{
+      name: 'frontend',
+      branch: 'route-task-1',
+      workFiles: 2,
+      commits: [
+        {
+          id: COMMIT_NEW,
+          subject: 'Диалог массового съёма',
+          date: '2026-10-08T10:00:00+07:00',
+          own: true,
+          merge: false,
+        },
+        {
+          id: COMMIT_OLD,
+          subject: 'Фильтры доски',
+          date: '2026-10-07T10:00:00+07:00',
+          own: true,
+          merge: false,
+        },
+      ],
+      error: null,
+    }],
+  };
+}
+
+test('«Выбрать, о чём…» заводит ролик без запуска и открывает его', async (t) => {
+  const { wrapper, flushPromises, calls } = await mountView(t, { opened: null });
+
+  await wrapper.find('[data-testid="showcase-configure-project:parser"]').trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(calls.filter(([name]) => name === 'create'), [[
+    'create',
+    { ref: { kind: 'project', id: 'parser' } },
+  ]]);
+  assert.ok(calls.some(([name, to]) => name === 'route' && to === '/showcase/project-new'));
+  assert.equal(calls.some(([name]) => name === 'build'), false, 'снимать сразу нельзя: сначала выбор');
+  assert.equal(calls.some(([name]) => name === 'analyze'), false);
+});
+
+test('пустой ролик показывает выбор открытым, а «Снять ролик» сохраняет его и снимает', async (t) => {
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    opened: project({ scenes: [] }),
+    sourceOptions: sourceOptions(),
+  });
+
+  assert.ok(calls.some(([name]) => name === 'load-source'), 'список коммитов читается при открытии');
+  assert.equal(wrapper.find('[data-testid="showcase-source"]').exists(), true);
+  assert.equal(wrapper.find('[data-testid="showcase-source-apply"]').text(), 'Снять ролик');
+  assert.match(wrapper.text(), /Диалог массового съёма/);
+
+  await wrapper.find(`[data-testid="showcase-source-commit-${COMMIT_NEW.slice(0, 7)}"]`).setValue(false);
+  await wrapper.find('[data-testid="showcase-source-note"]').setValue('Упор на фильтры');
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await flushPromises();
+
+  const names = calls.map(([name]) => name);
+
+  assert.deepEqual(calls.filter(([name]) => name === 'save-source'), [[
+    'save-source',
+    {
+      task: true,
+      note: 'Упор на фильтры',
+      code: true,
+      repos: [{
+        name: 'frontend',
+        work: true,
+        commits: [COMMIT_OLD],
+      }],
+    },
+  ]]);
+  assert.ok(names.indexOf('save-source') < names.indexOf('build'), 'выбор сохраняется до съёмки');
+  assert.equal(harness.confirmations.length, 0, 'у пустого ролика заменять нечего');
+});
+
+test('нетронутый выбор уходит умолчанием, а при живых сценах спрашивает и разбирает заново', async (t) => {
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    sourceOptions: sourceOptions(),
+  });
+
+  assert.equal(
+    wrapper.find('[data-testid="showcase-source"]').isVisible(),
+    false,
+    'у ролика со сценами блок свёрнут',
+  );
+
+  await buttonByText(wrapper, 'О чём ролик').trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.find('[data-testid="showcase-source-apply"]').text(), 'Разобрать по этому выбору');
+
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(harness.confirmations.length, 1);
+  assert.match(harness.confirmations[0].text, /правки текста в них пропадут/);
+  assert.deepEqual(calls.filter(([name]) => name === 'save-source'), [['save-source', null]]);
+  assert.deepEqual(calls.filter(([name]) => name === 'analyze'), [['analyze']]);
+  assert.equal(calls.some(([name]) => name === 'build'), false);
+
+  const declined = await mountView(t, { confirmed: false, sourceOptions: sourceOptions() });
+
+  await buttonByText(declined.wrapper, 'О чём ролик').trigger('click');
+  await declined.flushPromises();
+  await declined.wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await declined.flushPromises();
+
+  assert.equal(declined.calls.some(([name]) => name === 'save-source'), false, 'отказ ничего не сохраняет');
+  assert.equal(declined.calls.some(([name]) => name === 'analyze'), false);
+});
+
+test('сцены по прежнему выбору предупреждают, а заблокированный стенд список не читает', async (t) => {
+  const chosen = {
+    task: false,
+    note: 'Упор на фильтры',
+    code: true,
+    repos: null,
+  };
+  const outdated = await mountView(t, { opened: project({ source: chosen, scriptSource: null }) });
+
+  assert.equal(outdated.wrapper.find('[data-role="source-outdated"]').exists(), true);
+  assert.match(outdated.wrapper.text(), /свой выбор/);
+
+  const fresh = await mountView(t, { opened: project({ source: chosen, scriptSource: chosen }) });
+
+  assert.equal(fresh.wrapper.find('[data-role="source-outdated"]').exists(), false);
+
+  const blocked = await mountView(t, {
+    opened: project({
+      target: {
+        status: 'blocked',
+        ref: { kind: 'sandbox', id: '990001' },
+        profile: 'demo-profile',
+        reason: 'Стенд не найден в реестре.',
+        nextAction: null,
+      },
+    }),
+  });
+
+  assert.equal(blocked.calls.some(([name]) => name === 'load-source'), false);
+});
+
+test('слияние не выбирается, а «Снять все» и «Коммиты по умолчанию» меняют выбор целиком', async (t) => {
+  const options = sourceOptions();
+  const merge = 'c'.repeat(40);
+
+  options.repos[0].commits.unshift({
+    id: merge,
+    subject: 'Слияние главной',
+    date: '2026-10-08T11:00:00+07:00',
+    own: true,
+    merge: true,
+  });
+
+  const { wrapper, flushPromises, calls } = await mountView(t, {
+    opened: project({ scenes: [] }),
+    sourceOptions: options,
+  });
+  const mergeBox = wrapper.find(`[data-testid="showcase-source-commit-${merge.slice(0, 7)}"]`);
+
+  assert.equal(mergeBox.attributes('disabled'), '', 'слияние видно, но не выбирается');
+
+  await buttonByText(wrapper, 'Снять все').trigger('click');
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await flushPromises();
+  await buttonByText(wrapper, 'Коммиты по умолчанию').trigger('click');
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(calls.filter(([name]) => name === 'save-source'), [
+    ['save-source', {
+      task: true,
+      note: '',
+      code: true,
+      repos: [],
+    }],
+    ['save-source', null],
+  ]);
+});
+
+test('у постоянного стенда задачи нет, а умолчание ничего не читает', async (t) => {
+  const { wrapper } = await mountView(t, {
+    opened: project({
+      ref: { kind: 'project', id: 'parser' },
+      scenes: [],
+    }),
+    sourceOptions: {
+      ...sourceOptions(),
+      taskAvailable: false,
+      defaults: {
+        task: false,
+        note: '',
+        code: true,
+        repos: [{
+          name: 'frontend',
+          work: false,
+          commits: [],
+        }],
+      },
+    },
+  });
+  const commitBox = wrapper.find(`[data-testid="showcase-source-commit-${COMMIT_NEW.slice(0, 7)}"]`);
+
+  assert.match(wrapper.text(), /изменения не читаются/);
+  assert.equal(wrapper.find('[data-testid="showcase-source-task"]').attributes('disabled'), '');
+  assert.equal(commitBox.element.checked, false, 'у постоянного стенда ничего не отмечено');
+});
+
+/**
+ * Обещание с ручным исходом: тест держит ответ или подтверждение, пока проверяет, что
+ * вид делает в это окно.
+ */
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+
+  return {
+    promise,
+    resolve,
+  };
+}
+
+test('повторный клик применения не запускает вторую цепочку', async (t) => {
+  const gate = deferred();
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    sourceOptions: sourceOptions(),
+    confirmGate: gate.promise,
+  });
+
+  await buttonByText(wrapper, 'О чём ролик').trigger('click');
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  gate.resolve();
+  await flushPromises();
+
+  assert.equal(harness.confirmations.length, 1, 'вопрос задан один раз');
+  assert.equal(calls.filter(([name]) => name === 'save-source').length, 1);
+  assert.deepEqual(calls.filter(([name]) => name === 'analyze'), [['analyze']]);
+  assert.deepEqual(harness.saveRequests.map(({ id, revision }) => [id, revision]), [['project-1', 3]]);
+});
+
+test('ролик, сменившийся за время подтверждения, выбора не получает', async (t) => {
+  const gate = deferred();
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    sourceOptions: sourceOptions(),
+    confirmGate: gate.promise,
+  });
+
+  await buttonByText(wrapper, 'О чём ролик').trigger('click');
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  harness.store.opened = project({ id: 'project-2', revision: 9 });
+  gate.resolve();
+  await flushPromises();
+
+  assert.equal(calls.some(([name]) => name === 'save-source'), false, 'выбор не ушёл в другой ролик');
+  assert.equal(calls.some(([name]) => name === 'analyze'), false);
+  assert.ok(calls.some(([name, text]) => name === 'set-error' && /не применён/.test(text)));
+});
+
+test('отказ сохранения выбора не запускает ни разбор, ни сборку', async (t) => {
+  const { wrapper, flushPromises, calls } = await mountView(t, {
+    opened: project({ scenes: [] }),
+    sourceOptions: sourceOptions(),
+    saveSourceResult: null,
+  });
+
+  await wrapper.find('[data-testid="showcase-source-apply"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(calls.filter(([name]) => name === 'save-source').length, 1);
+  assert.equal(calls.some(([name]) => name === 'build' || name === 'analyze'), false);
+});
+
+test('поздний ответ списка прежнего ролика не затирает список нового', async (t) => {
+  const first = deferred();
+  const second = deferred();
+  const fresh = sourceOptions();
+
+  fresh.repos[0].commits[0] = {
+    ...fresh.repos[0].commits[0],
+    subject: 'Свежий коммит',
+  };
+
+  const stale = sourceOptions();
+
+  stale.repos[0].commits[0] = {
+    ...stale.repos[0].commits[0],
+    subject: 'Устаревший коммит',
+  };
+
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    opened: project({ scenes: [] }),
+    sourceReads: [first.promise, second.promise],
+    reactiveStore: true,
+  });
+
+  harness.store.opened = project({ id: 'project-2', scenes: [] });
+  await flushPromises();
+  second.resolve({ options: fresh, error: '' });
+  await flushPromises();
+  first.resolve({ options: stale, error: '' });
+  await flushPromises();
+
+  assert.deepEqual(
+    calls.filter(([name]) => name === 'load-source'),
+    [['load-source', 'project-1'], ['load-source', 'project-2']],
+  );
+  assert.match(wrapper.text(), /Свежий коммит/);
+  assert.doesNotMatch(wrapper.text(), /Устаревший коммит/);
+  assert.equal(wrapper.find('[data-testid="showcase-source"]').text().includes('Читаю историю'), false);
 });

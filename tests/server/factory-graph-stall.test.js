@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir, mkdtemp, readFile, rm, writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -164,6 +166,34 @@ test('архивный журнал v1 по-прежнему читается к
     daemonAlive: false,
     logText: '2026-05-01 10:00:00 [t7001] конвейер завершён\n',
   });
+  assert.equal(stall, null);
+});
+
+// Выгрузку отложенных находок движок пишет следом за финалом. Живой журнал 08.10.2026
+// кончался ею, и доведённый до публикации маршрут читался как «✖ оборвалась».
+test('доведённый маршрут с отложенными находками не читается как оборванный', async () => {
+  const factory = await readFile(new URL('../../engine/bin/factory', import.meta.url), 'utf8');
+
+  assert.ok(
+    factory.includes('v2_log "отложено находок: $count — список в t${task}.deferred.md"'),
+    'движок сменил строку выгрузки — правило хвоста в stall.ts осталось без источника',
+  );
+
+  const stall = detectStall({
+    registry: {
+      WF_STATUS: 'running',
+      RESULT: 'completed',
+      STALLED_HUMAN: '0',
+    },
+    daemonAlive: false,
+    logText: [
+      '2026-10-08 14:59:57 [t90004] route: узел ship: подготовка к исполнению',
+      '2026-10-08 15:03:52 [t90004] route: маршрут завершён; хвост маршрута подтверждён',
+      '2026-10-08 15:03:52 [t90004] route: отложено находок: 6 — список в t90004.deferred.md',
+      '',
+    ].join('\n'),
+  });
+
   assert.equal(stall, null);
 });
 

@@ -20,13 +20,18 @@ import type {
   ShowcaseOverview,
   ShowcaseProject,
   ShowcaseProjectSummary,
+  ShowcaseStorySource,
   ShowcaseTarget,
   ShowcaseTargetOption,
   ShowcaseTargetRef,
 } from '../../../../shared/showcaseContracts.ts';
 import type { SandboxOverview } from '../../../../shared/sandboxContracts.ts';
 import type { PluginSetupItem, PluginSetupStatus } from '../../../../shared/pluginsContracts.ts';
-import { SHOWCASE_SCHEMA_VERSION, toProjectSummary } from '../../../../shared/showcaseContracts.ts';
+import {
+  SHOWCASE_SCHEMA_VERSION,
+  showcaseSourceEqual,
+  toProjectSummary,
+} from '../../../../shared/showcaseContracts.ts';
 import { artifactFile, finalIsCurrent, hashFile, sceneFreshness } from './artifacts.ts';
 import { chainLineage } from '../../../../shared/showcaseChains.ts';
 import type { ArtifactInputs } from './artifacts.ts';
@@ -137,6 +142,9 @@ export interface ShowcaseServiceOptions {
     title?: unknown;
     description?: unknown;
   } | null>;
+  // Репозитории постоянного стенда по имени профиля — из паспорта проекта. Без
+  // зависимости разбор постоянного стенда идёт без изменений, как и раньше.
+  projectRepos?: (profile: string) => Promise<{ name: string; path: string }[]>;
   // Каналы доставки приходят снаружи: сессией портала и аккаунтом Telegram владеет
   // сервер, и раздел не заводит вторых.
   deliveryDeps?: DeliveryChannelDeps;
@@ -649,6 +657,9 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       scriptGaps: [],
       scriptMapRevision: null,
       scriptProofHash: null,
+      source: null,
+      briefSource: null,
+      scriptSource: null,
       decisions: [],
       latestFinal: null,
       createdAt: now,
@@ -1133,7 +1144,15 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     publish,
   });
 
-  const { analyze, ensurePrepared, generateBindings, generateBrief, generateScript } = createScriptOps({
+  const {
+    analyze,
+    ensurePrepared,
+    generateBindings,
+    generateBrief,
+    generateScript,
+    saveSource,
+    sourceOptions,
+  } = createScriptOps({
     acquireTargetLease,
     assertEnabled,
     broadcast: options.broadcast,
@@ -1145,6 +1164,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     executorConfig: options.executorConfig ?? null,
     providerSettings: options.providerSettings ?? null,
     taskDetails: options.taskDetails ?? null,
+    projectRepos: options.projectRepos ?? null,
     store,
     targets,
     publish,
@@ -1260,18 +1280,28 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
   }
 
   const manualScriptRequests = new Map<string, Promise<ShowcaseProject>>();
+  const sourceSaveRequests = new Set<string>();
+  const pendingBuildStarts = new Map<string, number>();
 
   /**
    * Вторая модель не должна менять бриф под уже идущей проверкой и срывать её
-   * сохранение конфликтом ревизий. Проверка действует и для другой вкладки.
+   * сохранение конфликтом ревизий. Проверка действует и для другой вкладки. Тот же
+   * допуск держит сохранение выбора «О чём ролик»: проверка и регистрация идут
+   * синхронно до первого await. Выбор не меняется и во время регистрации сборки,
+   * пока она уже читает снимок, но ещё не появилась в списке активных запусков.
    */
   async function requestScript(
     id: string,
     operation: () => Promise<ShowcaseProject>,
+    changesSource = false,
   ): Promise<ShowcaseProject> {
     assertEnabled();
 
-    if (buildRuns.active(id).length > 0 || manualScriptRequests.has(id)) {
+    if (
+      buildRuns.active(id).length > 0
+      || manualScriptRequests.has(id)
+      || (changesSource && pendingBuildStarts.has(id))
+    ) {
       throw new ShowcaseError(
         'script_busy',
         'Сценарий этого ролика уже готовится. Дождитесь результата текущей сборки или отмените её.',
@@ -1281,11 +1311,47 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
 
     const request = Promise.resolve().then(operation).finally(() => {
       manualScriptRequests.delete(id);
+      sourceSaveRequests.delete(id);
     });
 
     manualScriptRequests.set(id, request);
 
+    if (changesSource) {
+      sourceSaveRequests.add(id);
+    }
+
     return request;
+  }
+
+  /**
+   * Снимок сборки и запись выбора взаимоисключаются с начала HTTP-операции. Ожидание
+   * сохранения внутри этапа сценария было бы поздним: снимок уже содержит старый source.
+   * Счётчик держит допуск до ответа всех параллельных повторов запроса запуска.
+   */
+  async function startBuild(id: string, revision: number, requestId: string): Promise<ShowcaseBuildRun> {
+    assertEnabled();
+
+    if (sourceSaveRequests.has(id)) {
+      throw new ShowcaseError(
+        'script_busy',
+        'Выбор «О чём ролик» сохраняется. Дождитесь сохранения и запустите сборку ещё раз.',
+        409,
+      );
+    }
+
+    pendingBuildStarts.set(id, (pendingBuildStarts.get(id) ?? 0) + 1);
+
+    try {
+      return await buildOps.startBuild(id, revision, requestId);
+    } finally {
+      const pending = (pendingBuildStarts.get(id) ?? 1) - 1;
+
+      if (pending > 0) {
+        pendingBuildStarts.set(id, pending);
+      } else {
+        pendingBuildStarts.delete(id);
+      }
+    }
   }
 
   /**
@@ -1314,7 +1380,9 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     readProject,
     analyze,
     prepareScript,
+    // Готовый proof сцен прежнего выбора годен только для прежнего выбора.
     scriptReady: async (project) => !manualScriptRequests.has(project.id)
+      && showcaseSourceEqual(project.source, project.scriptSource)
       && Boolean(await readScriptProof(store.namesOf(project.id).dir, project)),
     generateBindings,
     synthesizeScenes,
@@ -1589,11 +1657,15 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     reorder,
     runSetup,
     saveDictionary,
+    saveSource: (id: string, expectedRevision: number, source: ShowcaseStorySource | null) => (
+      requestScript(id, () => saveSource(id, expectedRevision, source), true)
+    ),
     seedStatus,
     setupStatus,
     setVoice,
+    sourceOptions,
     startRecording,
-    startBuild: buildOps.startBuild,
+    startBuild,
     store,
     synthesizeScenes,
     targets,

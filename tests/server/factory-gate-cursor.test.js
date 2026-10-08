@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import {
   access, chmod, mkdir, mkdtemp, readFile, rm, writeFile,
 } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -332,4 +333,95 @@ test('/gate отказывает замечанию свыше потолка и
   assert.equal(response.statusCode, 400, response.body);
   assert.equal(response.json().error, 'comment_too_long');
   await assert.rejects(access(fx.callsLog), 'движок не вызван: отказ дан до команды');
+});
+
+// Реестр и журнал ровно в той точке, где `gate --commit-only` уже вышел, а resume ещё не
+// взял ORCH_PID: флаг остановки снят, демона нет, последняя строка — зафиксированные ворота.
+async function writeHandoffWindow(fx) {
+  await writeFile(path.join(fx.stateDir, 't7.pipeline'), [
+    'PROFILE=demo', 'ROUTE=feature', 'RUN_PROTOCOL=2', 'CATALOG_PROTOCOL=route-v2',
+    `ATTEMPT_ID=${ATTEMPT}`, `ROUTE_HASH=${ROUTE_HASH}`, 'DELIVERY_MODE=disabled',
+    'WF_STATUS=running', 'STALLED_HUMAN=0', 'ORCH_PID=', 'BUILD=done', 'LINT=done',
+    'GATE_ACCEPT=approved', 'SHIP=pending', '',
+  ].join('\n'));
+  await writeFile(path.join(fx.stateDir, 'logs', 't7.stages.log'), [
+    '2026-10-07 16:05:31 [t7] route: узел lint: подготовка к исполнению',
+    '2026-10-07 16:36:11 [t7] route: пауза на human gate gate_accept',
+    '2026-10-08 14:59:32 [t7] route: gate gate_accept=approved зафиксирован',
+    '',
+  ].join('\n'));
+}
+
+// Живой случай 08.10.2026: человек нажал «Принять», а через секунду получил «Конвейер
+// оборвался — демона нет, а конвейер не закрыт». Публикация при этом шла и дошла до конца.
+test('передача хода после ворот не читается как обрыв прогона', async (t) => {
+  const fx = await fixture(t, { cursor: { node: 'ship', state: 'ready' } });
+
+  await writeHandoffWindow(fx);
+
+  const unmarked = await fx.adapter.getTaskSummary('7');
+
+  assert.equal(unmarked.stall?.kind, 'crashed', 'без отметки окно передачи неотличимо от обрыва');
+
+  const done = fx.adapter.beginHandoff('7');
+  const handing = await fx.adapter.getTaskSummary('7');
+
+  assert.equal(handing.stall, null);
+  assert.equal(handing.daemonAlive, true, 'продолжение поднимается — прогон идёт');
+  assert.equal(fx.adapter.isDaemonAlive('', '7'), false, 'подтверждение подъёма видит только демона');
+
+  done();
+  done();
+
+  const released = await fx.adapter.getTaskSummary('7');
+
+  assert.equal(released.stall?.kind, 'crashed', 'не поднявшееся продолжение снова видно как обрыв');
+});
+
+test('/gate держит передачу хода от записи решения до попытки продолжения', async (t) => {
+  const fx = await fixture(t, { cursor: { node: 'gate_accept', state: 'paused' } });
+  const binDir = path.join(fx.root, 'bin');
+
+  // Юнит «вышел сразу»: подтверждение подъёма отвечает за 250 мс, а не за 26 секунд.
+  await writeFile(
+    path.join(binDir, 'systemd-run'),
+    `#!/usr/bin/env bash\nprintf 'systemd-run %s\\n' "$*" >> "${fx.callsLog}"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  await writeFile(
+    path.join(binDir, 'systemctl'),
+    '#!/usr/bin/env bash\necho inactive\nexit 3\n',
+    { mode: 0o755 },
+  );
+
+  const marks = [];
+  const begin = fx.adapter.beginHandoff.bind(fx.adapter);
+  // Синхронно: снимок обязан отражать журнал вызовов ровно в момент отметки.
+  const callsNow = () => (existsSync(fx.callsLog) ? readFileSync(fx.callsLog, 'utf8') : '');
+
+  fx.adapter.beginHandoff = (task) => {
+    const done = begin(task);
+
+    marks.push({ at: 'begin', calls: callsNow() });
+
+    return () => {
+      marks.push({ at: 'done', calls: callsNow() });
+      done();
+    };
+  };
+
+  const app = await server(t, fx);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/gate/GATE_ACCEPT/approve',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().resumed, false);
+  assert.deepEqual(marks.map((mark) => mark.at), ['begin', 'done']);
+  assert.equal(marks[0].calls, '', 'отметка поставлена до записи решения');
+  assert.match(marks[1].calls, /--decision approved --commit-only/);
+  assert.match(marks[1].calls, /systemd-run .* resume /, 'отметка снята только после попытки продолжения');
+  assert.equal(fx.adapter.isRunLive('', '7'), false, 'после ответа отметки не остаётся');
 });

@@ -71,11 +71,24 @@
       <div class="film__empty-copy">
         <strong id="showcase-empty-title">Сцен пока нет</strong>
         <p>
-          Разбор не дал сцен. Можно повторить его — постановка и изменения читаются
-          заново — или добавить сцены руками.
+          Отметьте, о чём ролик, и снимите его. Разбор можно повторить с прежним
+          выбором или добавить сцены руками.
         </p>
       </div>
-      <UiButton variant="solid" tone="accent" :loading="busy" @click="emit('analyze')">
+      <!-- У пустого ролика выбор открыт сразу: «Выбрать, о чём…» ведёт именно сюда. -->
+      <div class="film__source-empty" aria-labelledby="showcase-source-empty-title" role="group">
+        <h3 id="showcase-source-empty-title">О чём ролик</h3>
+        <ShowcaseSourcePanel
+          :project="project"
+          :options="sourceOptions"
+          :loading="sourceLoading"
+          :error="sourceError"
+          :busy="busy"
+          @apply="emit('apply-source', $event)"
+          @reload="emit('reload-source')"
+        />
+      </div>
+      <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">
         Разобрать заново
       </UiButton>
       <ShowcaseScriptGaps :gaps="project.scriptGaps" />
@@ -90,6 +103,13 @@
            записи, а не после просмотра ролика. -->
       <UiInlineMessage v-if="scriptOutdated" tone="warning">
         {{ SCRIPT_OUTDATED_TEXT }}
+        <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">Разобрать заново</UiButton>
+      </UiInlineMessage>
+
+      <!-- Выбор «О чём ролик» сменили после разбора, а новый разбор не прошёл: сцены
+           рассказывают о прежнем, и человек должен узнать это до сборки. -->
+      <UiInlineMessage v-if="sourceOutdated" tone="warning" data-role="source-outdated">
+        {{ SOURCE_OUTDATED_TEXT }}
         <UiButton variant="ghost" :loading="busy" @click="emit('analyze')">Разобрать заново</UiButton>
       </UiInlineMessage>
 
@@ -162,6 +182,28 @@
             </UiDisclosureButton>
             <div v-show="addOpen" id="showcase-add-scene">
               <ShowcaseSceneForm :screens="screens" :busy="busy" @add="emit('add-scene', $event)" />
+            </div>
+          </section>
+
+          <!-- Свёрнутый блок скрыт, а не снят: черновик человека переживает сворачивание. -->
+          <section class="film__source" aria-labelledby="showcase-source-title">
+            <div class="film__block-head">
+              <UiDisclosureButton v-model:open="sourceOpen" controls="showcase-source-body" density="compact">
+                <span id="showcase-source-title">О чём ролик</span>
+              </UiDisclosureButton>
+              <span class="film__meta">{{ project.source ? 'свой выбор' : 'по умолчанию' }}</span>
+            </div>
+            <div id="showcase-source-body">
+              <ShowcaseSourcePanel
+                v-show="sourceOpen"
+                :project="project"
+                :options="sourceOptions"
+                :loading="sourceLoading"
+                :error="sourceError"
+                :busy="busy"
+                @apply="emit('apply-source', $event)"
+                @reload="emit('reload-source')"
+              />
             </div>
           </section>
 
@@ -248,16 +290,24 @@ import type {
   ShowcaseJob,
   ShowcaseProject,
   ShowcaseScene,
+  ShowcaseSourceOptions,
+  ShowcaseStorySource,
   ShowcaseVoiceInfo,
 } from '../../../../shared/showcaseContracts';
 import { sceneStartsMs } from '../../../../shared/showcaseTimeline';
 import type { ShowcaseFinalManifest } from '../../../../shared/showcaseTimeline';
 import type { SeedStatus } from '../../actions/showcase';
-import { SCRIPT_OUTDATED_TEXT, showcaseScriptOutdated } from '../../actions/showcase';
+import {
+  SCRIPT_OUTDATED_TEXT,
+  SOURCE_OUTDATED_TEXT,
+  showcaseScriptOutdated,
+  showcaseSourceOutdated,
+} from '../../actions/showcase';
 import ShowcaseBuildBar from './ShowcaseBuildBar.vue';
 import ShowcaseSceneEditor from './ShowcaseSceneEditor.vue';
 import ShowcaseSceneForm from './ShowcaseSceneForm.vue';
 import ShowcaseScriptGaps from './ShowcaseScriptGaps.vue';
+import ShowcaseSourcePanel from './ShowcaseSourcePanel.vue';
 import ShowcaseStandPanel from './ShowcaseStandPanel.vue';
 import ShowcaseStoryboard from './ShowcaseStoryboard.vue';
 import {
@@ -295,6 +345,10 @@ const props = defineProps<{
     input: SceneNarrationPreviewInput,
     signal?: AbortSignal,
   ) => Promise<Blob>;
+  // «О чём ролик»: список из живой истории стенда читает вид при открытии ролика.
+  sourceOptions: ShowcaseSourceOptions | null;
+  sourceLoading: boolean;
+  sourceError: string;
 }>();
 
 const emit = defineEmits<{
@@ -318,11 +372,15 @@ const emit = defineEmits<{
   'scene-continues': [payload: { id: string; value: boolean }];
   'generate-bindings': [pending: SceneTextPayload[]];
   'select-scene': [id: string];
+  // Выбор «О чём ролик» уходит виду: сохранить, затем снять или разобрать заново.
+  'apply-source': [source: ShowcaseStorySource | null];
+  'reload-source': [];
 }>();
 
 const selectedId = ref('');
 const addOpen = ref(false);
 const briefOpen = ref(false);
+const sourceOpen = ref(false);
 const player = ref<InstanceType<typeof UiVideo> | null>(null);
 const rebuilding = computed(() => Boolean(
   props.buildRun && ['queued', 'running', 'cancelling'].includes(props.buildRun.state),
@@ -412,6 +470,8 @@ const nextAction = computed(() => (
 ));
 
 const scriptOutdated = computed(() => showcaseScriptOutdated(props.project));
+
+const sourceOutdated = computed(() => showcaseSourceOutdated(props.project));
 
 const briefTitle = computed(() => (
   props.project.brief.length ? `План ролика · ${props.project.brief.length} п.` : 'План ролика'
@@ -711,6 +771,19 @@ function seekTo(startMs: number): void {
   min-width: 0;
 }
 
+.film__source-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.film__source-empty h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 660;
+}
+
 .film__empty-copy strong {
   font-size: 15px;
 }
@@ -745,6 +818,7 @@ function seekTo(startMs: number): void {
 
 .film__final,
 .film__scenes,
+.film__source,
 .film__brief {
   display: flex;
   flex-direction: column;

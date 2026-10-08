@@ -4,9 +4,11 @@
 // разбор сам берёт текст связанной задачи, а файлы не живут дольше своего срока.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { createShowcaseService } from '../../server/src/lib/showcase/service.ts';
 import { createScene } from '../../server/src/lib/showcase/scenes.ts';
@@ -36,6 +38,44 @@ const SCREENS_CONTRACT = {
     },
   ],
 };
+
+const TERMINAL_JOB = new Set(['succeeded', 'failed', 'interrupted', 'cancelled', 'awaiting_review']);
+
+// Ожидание ограничено временем, а не числом проходов: журнал заданий пишется на диск,
+// и под параллельным прогоном число проходов event loop ничего не гарантирует.
+async function waitUntil(check) {
+  const deadline = Date.now() + 3000;
+
+  while (Date.now() < deadline) {
+    if (check()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.fail('Условие не наступило за 3 с.');
+}
+
+/**
+ * Доводит полный запуск до конечного состояния: в тесте нет таймера сервера, и запуск
+ * продвигается только опросом службы. Уборка каталога после этого не спорит с журналом.
+ */
+async function settleRun(service, runId) {
+  const deadline = Date.now() + 3000;
+
+  while (Date.now() < deadline) {
+    await service.pollWorkers();
+
+    if (TERMINAL_JOB.has(service.readBuild(runId).state)) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.fail('Запуск не остановился за 3 с.');
+}
 
 async function fixture(t, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'showcase-wizard-'));
@@ -203,8 +243,10 @@ test('сборка дожидается уже начатого разбора �
   const job = service.jobs.list().find((entry) => entry.kind === 'script');
 
   assert.ok(job);
-  assert.equal(job.state, 'running');
-  assert.match(job.progress.label, /уже запущенного разбора/);
+  // Подпись «дожидаюсь разбора» приходит после первой подписи задания отдельной записью:
+  // одно чтение сразу после появления задания видело прежнюю подпись под нагрузкой.
+  await waitUntil(() => /уже запущенного разбора/.test(service.jobs.read(job.id).progress.label));
+  assert.equal(service.jobs.read(job.id).state, 'running');
   await assert.rejects(() => service.generateBrief(project.id, ''), (error) => error.code === 'script_busy');
   assert.equal(calls, 1);
   release();
@@ -622,4 +664,614 @@ test('построение только связей сохраняет ручн
     'ручной cue сохраняется вместе с ID',
   );
   assert.equal(after.syncBindings.cues.find((cue) => cue.origin === 'generated').actionIndex, 0);
+});
+
+const execGit = promisify(execFile);
+
+const GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'test',
+  GIT_AUTHOR_EMAIL: 'test@example.test',
+  GIT_COMMITTER_NAME: 'test',
+  GIT_COMMITTER_EMAIL: 'test@example.test',
+};
+
+/**
+ * Репозиторий постоянного стенда: база и два коммита поверх неё. Человек отмечает
+ * второй, и первый не должен доехать до модели ни кодом, ни описанием.
+ */
+async function standRepository(root) {
+  const repo = path.join(root, 'stand-app');
+  const git = async (args) => (await execGit('git', ['-C', repo, ...args], { env: GIT_ENV })).stdout.trim();
+  // Коммит одного файла; возвращает полный идентификатор — им человек и отмечает
+  // коммит в списке «О чём ролик».
+  const commit = async (file, content, message) => {
+    await writeFile(path.join(repo, file), content, 'utf8');
+    await git(['add', file]);
+    await git(['commit', '-q', '-m', message]);
+
+    return git(['rev-parse', 'HEAD']);
+  };
+
+  await mkdir(repo, { recursive: true });
+  await git(['init', '-q', '-b', 'main']);
+  await commit('app.js', 'export const base = 0;\n', 'база');
+
+  const first = await commit('filters.js', 'export const filters = "первый";\n', 'Фильтры доски');
+  const second = await commit('dialog.vue', '<template>Диалог съёма</template>\n', 'Диалог массового съёма');
+
+  return {
+    repo,
+    git,
+    first,
+    second,
+  };
+}
+
+/**
+ * Выбор одного репозитория постоянного стенда: отмеченные коммиты без
+ * незакоммиченного, с задачей и кодом, как их ставит блок по умолчанию.
+ */
+function standChoice(commits, name = 'app') {
+  return {
+    task: true,
+    note: '',
+    code: true,
+    repos: [{
+      name,
+      work: false,
+      commits,
+    }],
+  };
+}
+
+const DIALOG_SCENES = {
+  scenes: [{
+    title: 'Диалог',
+    screenId: 'overview',
+    narration: 'Показываю диалог съёма.',
+    caption: 'Диалог',
+    subtitleText: 'Показываю диалог съёма.',
+    actions: [],
+  }],
+};
+
+// Постоянный стенд раньше не давал модели изменений вовсе. Теперь человек сам
+// отмечает коммиты: модель видит только их и его пожелание, а сцены помнят выбор.
+test('«О чём ролик» постоянного стенда: только отмеченный коммит и пожелание человека', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  const stand = { repos: [] };
+  const { service, root } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: async () => stand.repos,
+    },
+  });
+  const { repo, first, second } = await standRepository(root);
+
+  stand.repos = [{ name: 'app', path: repo }, { name: 'app-alias', path: repo }];
+
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const options = await service.sourceOptions(project.id);
+
+  assert.deepEqual(
+    options.repos.map((item) => item.name),
+    ['app'],
+    'два ключа одного каталога — один репозиторий',
+  );
+  assert.deepEqual(options.defaults.repos[0].commits, [], 'у постоянного стенда умолчание пустое');
+  assert.equal(options.taskAvailable, false);
+
+  const source = {
+    ...standChoice([second]),
+    note: 'Упор на диалог съёма',
+  };
+  const saved = await service.saveSource(project.id, project.revision, source);
+
+  assert.deepEqual(saved.source, source);
+
+  const analyzed = await service.analyze(project.id);
+  const [brief] = model.prompts;
+
+  assert.match(brief, /<human_focus>\nУпор на диалог съёма\n<\/human_focus>/);
+  assert.match(brief, /Диалог массового съёма/, 'описание выбранного коммита видно модели');
+  assert.match(brief, /<template>Диалог съёма<\/template>/);
+  assert.doesNotMatch(brief, /первый|Фильтры доски/, 'невыбранный коммит не читается');
+  assert.match(brief, new RegExp(`<diff_range>app:${first.slice(0, 12)}\\.\\.app:${second.slice(0, 12)}`));
+  assert.deepEqual(analyzed.scriptSource, source, 'сцены помнят выбор, по которому собраны');
+
+  const changed = await service.saveSource(analyzed.id, analyzed.revision, {
+    ...source,
+    note: 'Другой упор',
+  });
+
+  assert.notDeepEqual(changed.scriptSource, changed.source, 'новый выбор после разбора виден расхождением');
+});
+
+test('неверный выбор не сохраняется, а пропавший после rebase коммит останавливает разбор', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  const stand = { repos: [] };
+  const { service, root } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: async () => stand.repos,
+    },
+  });
+  const { repo, git, first, second } = await standRepository(root);
+
+  stand.repos = [{ name: 'app', path: repo }];
+
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+
+  await assert.rejects(
+    service.saveSource(project.id, project.revision, standChoice(['f'.repeat(40)])),
+    (error) => error.code === 'bad_source' && error.status === 400 && /не найден/.test(error.message),
+  );
+  await assert.rejects(
+    service.saveSource(project.id, project.revision, standChoice([second], 'чужой')),
+    (error) => error.code === 'bad_source' && /не принадлежит стенду/.test(error.message),
+  );
+
+  const saved = await service.saveSource(project.id, project.revision, standChoice([second]));
+
+  await git(['reset', '-q', '--hard', first]);
+  await assert.rejects(service.analyze(saved.id), (error) => {
+    assert.equal(error.code, 'source_outdated');
+    assert.equal(error.status, 409);
+    assert.match(error.message, /Выберите заново в блоке «О чём ролик»/);
+
+    return true;
+  });
+  assert.equal(model.prompts.length, 0, 'модель не зовётся по устаревшему выбору');
+
+  const reset = await service.saveSource(saved.id, saved.revision, null);
+
+  assert.equal(reset.source, null, 'null возвращает умолчание цели');
+});
+
+test('выбор «О чём ролик» не меняется под идущим разбором', async (t) => {
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const { service } = await fixture(t, {
+    deps: {
+      resolveScriptModel: async () => ({
+        ok: true,
+        ref: { provider: 'claude', model: 'claude-opus-5' },
+        executor: {
+          runUntrusted: async () => {
+            entered();
+            await gate;
+
+            throw Object.assign(new Error('модель остановлена тестом'), { code: 'model_failed' });
+          },
+        },
+      }),
+    },
+  });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const analysis = service.analyze(project.id).catch(() => null);
+
+  await started;
+  await assert.rejects(
+    service.saveSource(project.id, project.revision, null),
+    (error) => error.code === 'script_busy',
+  );
+  release();
+  await analysis;
+});
+
+/**
+ * Паспорт проекта, который отвечает только по сигналу теста: сохранение выбора стоит
+ * на чтении репозиториев, и тест успевает войти в гонку без пауз по времени.
+ */
+function gatedRepos() {
+  let release;
+  let entered;
+  const state = {
+    repos: [],
+    gate: new Promise((resolve) => {
+      release = resolve;
+    }),
+    started: new Promise((resolve) => {
+      entered = resolve;
+    }),
+  };
+
+  return {
+    state,
+    release: () => release(),
+    projectRepos: async () => {
+      entered();
+      await state.gate;
+
+      return state.repos;
+    },
+  };
+}
+
+test('сохранение выбора держит общий допуск ролика до самой записи', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  const gated = gatedRepos();
+  const { service, root } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: gated.projectRepos,
+    },
+  });
+  const { repo, second } = await standRepository(root);
+
+  gated.state.repos = [{ name: 'app', path: repo }];
+
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const saving = service.saveSource(project.id, project.revision, standChoice([second]));
+
+  await gated.state.started;
+  await assert.rejects(service.analyze(project.id), (error) => error.code === 'script_busy');
+  await assert.rejects(
+    service.saveSource(project.id, project.revision, null),
+    (error) => error.code === 'script_busy',
+  );
+  gated.release();
+
+  const saved = await saving;
+
+  assert.deepEqual(saved.source, standChoice([second]));
+  await assert.rejects(
+    service.saveSource(project.id, project.revision, null),
+    (error) => error.code === 'revision_conflict',
+  );
+  assert.equal(model.prompts.length, 0, 'разбор под сохранением модель не звал');
+});
+
+test('сборка во время сохранения выбора отказывает до создания снимка', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  const gated = gatedRepos();
+  const { service, root } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: gated.projectRepos,
+    },
+  });
+  const { repo, second } = await standRepository(root);
+
+  gated.state.repos = [{ name: 'app', path: repo }];
+
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const saving = service.saveSource(project.id, project.revision, standChoice([second]));
+
+  await gated.state.started;
+
+  const attempt = await service.startBuild(project.id, project.revision, 'build-during-source-save')
+    .then((run) => ({ run, error: null }), (error) => ({ run: null, error }));
+
+  gated.release();
+
+  const saved = await saving;
+
+  if (attempt.run) {
+    await settleRun(service, attempt.run.id);
+  }
+
+  assert.equal(attempt.error?.code, 'script_busy', 'выбор нельзя сменить под снимком новой сборки');
+  assert.equal(service.jobs.list().length, 0, 'задания по прежнему выбору не создаются');
+  assert.deepEqual((await service.readProject(project.id)).source, standChoice([second]));
+
+  const retry = await service.startBuild(saved.id, saved.revision, 'build-after-source-save');
+
+  await settleRun(service, retry.id);
+  assert.notEqual(service.readBuild(retry.id).error?.code, 'build_inputs_changed');
+});
+
+test('выбор не меняется и пока сборка ещё читает проект перед регистрацией', async (t) => {
+  const { service } = await fixture(t);
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const readProject = service.store.readProject;
+  let release;
+  let entered;
+  let firstRead = true;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+
+  service.store.readProject = async (id) => {
+    const read = await readProject(id);
+
+    if (firstRead) {
+      firstRead = false;
+      entered();
+      await gate;
+    }
+
+    return read;
+  };
+
+  const building = service.startBuild(project.id, project.revision, 'build-before-source-save');
+
+  await started;
+
+  const result = await service.saveSource(project.id, project.revision, {
+    task: false,
+    note: 'Новый упор',
+    code: true,
+    repos: null,
+  }).then(() => null, (error) => error);
+
+  release();
+
+  const run = await building;
+
+  await settleRun(service, run.id);
+  assert.equal(result?.code, 'script_busy', 'регистрация запуска уже держит выбор');
+  assert.equal((await service.readProject(project.id)).source, null);
+});
+
+/**
+ * Модель с ответами по очереди: тест сам решает, где разбор ломается и что модель
+ * вернёт после смены выбора. Каждый промпт сохраняется для проверки контекста.
+ */
+function queuedModel(replies) {
+  const prompts = [];
+
+  return {
+    prompts,
+    deps: {
+      taskDetails: async () => null,
+      scriptModelRef: () => ({ provider: 'claude', model: 'claude-opus-5' }),
+      executorConfig: () => ({ claudeBin: '/usr/bin/claude' }),
+      resolveScriptModel: async () => ({
+        ok: true,
+        ref: { provider: 'claude', model: 'claude-opus-5' },
+        executor: {
+          runUntrusted: async ({ message }) => {
+            prompts.push(message);
+
+            return { reply: JSON.stringify(replies.shift() ?? {}) };
+          },
+        },
+      }),
+    },
+  };
+}
+
+// Разбор успел записать бриф и сломался на сценах. Человек сменил выбор — новый
+// сценарий не вправе стоять на плане, составленном по прежнему выбору.
+test('бриф прежнего выбора перестраивается перед сценами нового', async (t) => {
+  const model = queuedModel([
+    { points: ['А1', 'А2', 'А3'] },
+    { scenes: 'не сцены' },
+    { scenes: 'не сцены' },
+    { points: ['Б1', 'Б2', 'Б3'] },
+    DIALOG_SCENES,
+  ]);
+  const stand = { repos: [] };
+  const { service, root } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: async () => stand.repos,
+    },
+  });
+  const { repo, second } = await standRepository(root);
+
+  stand.repos = [{ name: 'app', path: repo }];
+
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+
+  await assert.rejects(service.analyze(project.id), (error) => error.code === 'model_reply_invalid');
+
+  const failed = await service.readProject(project.id);
+
+  assert.deepEqual(failed.brief, ['А1', 'А2', 'А3']);
+  assert.equal(failed.scenes.length, 0);
+
+  const source = {
+    ...standChoice([second]),
+    note: 'Упор на диалог',
+  };
+  const saved = await service.saveSource(project.id, failed.revision, source);
+  const scripted = await service.generateScript(saved.id, '');
+
+  assert.match(model.prompts[3], /"points"/, 'после смены выбора первым идёт новый бриф');
+  assert.match(model.prompts[3], /Упор на диалог/);
+  assert.deepEqual(scripted.brief, ['Б1', 'Б2', 'Б3']);
+  assert.deepEqual(scripted.briefSource, source);
+  assert.deepEqual(scripted.scriptSource, source);
+  assert.equal(scripted.scenes.length, 1);
+});
+
+/**
+ * Ролик со сценами и годной проверкой сценария: готов к сборке без модели. Выбор, по
+ * которому собраны сцены, задаёт тест.
+ */
+async function provenProject(service, scriptSource) {
+  let project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+
+  project = await service.store.updateProject(project.id, project.revision, (current) => ({
+    ...current,
+    brief: ['Прежний план'],
+    source: scriptSource,
+    briefSource: scriptSource,
+    scriptSource,
+    scenes: [createScene(current, {
+      title: 'Прежняя сцена',
+      screenId: 'overview',
+      narration: 'Прежний текст.',
+      caption: 'Обзор',
+      subtitleText: 'Прежний текст.',
+      actions: [],
+      startState: null,
+      readyCondition: null,
+    })],
+  }));
+
+  const proof = await writeScriptProof(service.store.namesOf(project.id).dir, {
+    version: SCRIPT_VERIFICATION_VERSION,
+    targetFingerprint: project.target.scope.targetFingerprint,
+    policyRevision: project.target.scope.policyRevision,
+    dataRevision: project.target.scope.dataRevision,
+    briefHash: briefHashOf(project.brief),
+    scriptHash: scriptHashOf(project.scenes),
+    rehearsal: {
+      screens: [],
+      observations: [],
+      completed: true,
+    },
+  });
+
+  return service.store.updateProject(project.id, project.revision, (current) => ({
+    ...current,
+    scriptProofHash: proof,
+  }));
+}
+
+test('сборка не выдаёт сцены прежнего выбора за новый, даже с годной проверкой сценария', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  const { service } = await fixture(t, { deps: model.deps });
+  const proven = await provenProject(service, null);
+  const saved = await service.saveSource(proven.id, proven.revision, {
+    task: true,
+    note: 'Новый упор',
+    code: true,
+    repos: null,
+  });
+
+  const run = await service.startBuild(saved.id, saved.revision, 'build-after-source-change');
+
+  await waitUntil(() => service.jobs.list().some((entry) => entry.kind === 'script'));
+
+  const job = service.jobs.list().find((entry) => entry.kind === 'script');
+
+  await waitUntil(() => TERMINAL_JOB.has(service.jobs.read(job.id).state));
+  await settleRun(service, run.id);
+
+  const after = await service.readProject(saved.id);
+
+  assert.equal(service.jobs.read(job.id).state, 'failed');
+  assert.match(service.jobs.read(job.id).error, /прежнему выбору/);
+  assert.deepEqual(
+    service.jobs.list().map((entry) => entry.kind),
+    ['script'],
+    'озвучка и запись не начались',
+  );
+  assert.deepEqual(after.scenes.map((entry) => entry.id), proven.scenes.map((entry) => entry.id));
+  assert.equal(model.prompts.length, 0, 'модель не звалась');
+});
+
+// Rebase или squash-слияние ветки после разбора: принятые сцены пересобираются без
+// чтения истории, иначе каждое переписывание ветки заставляло бы разбирать заново.
+test('принятые сцены при том же выборе собираются, даже если выбранный коммит пропал', async (t) => {
+  const stand = { repos: [] };
+  const { service, root } = await fixture(t, { deps: { projectRepos: async () => stand.repos } });
+  const { repo, git, first, second } = await standRepository(root);
+
+  stand.repos = [{ name: 'app', path: repo }];
+
+  const proven = await provenProject(service, standChoice([second]));
+
+  await git(['reset', '-q', '--hard', first]);
+
+  const run = await service.startBuild(proven.id, proven.revision, 'build-after-rebase');
+
+  await settleRun(service, run.id);
+
+  const finished = service.readBuild(run.id);
+
+  // Голос в этой проверке не настроен: запуск останавливается позже сценария.
+  assert.notEqual(finished.stage, 'script-if-empty', 'этап сценария пройден без разбора');
+  assert.equal(service.jobs.list().some((entry) => entry.kind === 'script'), false, 'история не читалась');
+});
+
+test('недоступный паспорт проекта — отказ списка и явного выбора, а разбор без выбора идёт', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  let calls = 0;
+  const { service } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: async () => {
+        calls += 1;
+
+        throw new Error('/home/private/секретный путь не читается');
+      },
+    },
+  });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const unavailable = (error) => (
+    error.code === 'source_unavailable' && error.status === 503 && !error.message.includes('/home/private')
+  );
+
+  await assert.rejects(service.sourceOptions(project.id), unavailable);
+  await assert.rejects(service.saveSource(project.id, project.revision, standChoice([])), unavailable);
+
+  const before = calls;
+  const analyzed = await service.analyze(project.id);
+
+  assert.equal(calls, before, 'разбор без выбора паспорт не читает');
+  assert.equal(analyzed.scenes.length, 1);
+});
+
+test('явно пустой выбор репозиториев не требует чтения паспорта проекта', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  let reads = 0;
+  const { service } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: async () => {
+        reads += 1;
+
+        throw new Error('Паспорт недоступен');
+      },
+    },
+  });
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const source = {
+    task: false,
+    note: 'Обзор готового интерфейса',
+    code: false,
+    repos: [],
+  };
+
+  await service.saveSource(project.id, project.revision, source);
+
+  const analyzed = await service.analyze(project.id);
+
+  assert.equal(reads, 0, 'снятые репозитории не читаются даже для проверки выбора');
+  assert.equal(analyzed.scenes.length, 1);
+  assert.deepEqual(analyzed.scriptSource, source);
+});
+
+test('отказ чтения выбранной части останавливает разбор до вызова модели', async (t) => {
+  const model = scriptedModel(DIALOG_SCENES);
+  const stand = { repos: [] };
+  const { service, root } = await fixture(t, {
+    deps: {
+      ...model.deps,
+      projectRepos: async () => stand.repos,
+    },
+  });
+  const { repo } = await standRepository(root);
+
+  stand.repos = [{ name: 'app', path: repo }];
+
+  const project = await service.createProject({ ref: { kind: 'project', id: 'demo-profile' } });
+  const workOnly = {
+    ...standChoice([]),
+    repos: [{
+      name: 'app',
+      work: true,
+      commits: [],
+    }],
+  };
+
+  await service.saveSource(project.id, project.revision, workOnly);
+  await rm(path.join(repo, '.git'), { recursive: true, force: true });
+  await assert.rejects(service.analyze(project.id), (error) => error.code === 'source_unavailable');
+  assert.equal(model.prompts.length, 0, 'неполный контекст модели не уходит');
 });

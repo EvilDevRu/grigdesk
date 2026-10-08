@@ -709,3 +709,236 @@ test('словарь ударений уходит текстом целиком
   assert.equal(store.dictionary.errors[0].line, 2, 'негодная строка показана, а не потеряна');
   assert.equal(store.error, '');
 });
+
+const READY_PROJECT = {
+  schemaVersion: 1,
+  id: 'project-1',
+  title: 'Ролик о готовой работе',
+  revision: 4,
+  ref: { kind: 'sandbox', id: '990001' },
+  target: {
+    status: 'ready',
+    ref: { kind: 'sandbox', id: '990001' },
+    scope: {
+      targetKind: 'sandbox',
+      targetLabel: 'стенд 990001',
+      profile: 'demo-profile',
+      viewUrl: null,
+      environment: 'read-only',
+      capabilities: ['record'],
+      screens: [],
+      targetFingerprint: 'target',
+      policyRevision: 'policy',
+      dataRevision: 'data',
+      buildRevision: null,
+    },
+  },
+  brief: [],
+  scenes: [],
+  decisions: [],
+  latestFinal: null,
+  createdAt: '2026-10-08T10:00:00.000Z',
+  updatedAt: '2026-10-08T10:00:00.000Z',
+};
+
+const SOURCE_OPTIONS = {
+  taskAvailable: true,
+  noteMax: 2000,
+  defaults: {
+    task: true,
+    note: '',
+    code: true,
+    repos: [],
+  },
+  requiresExplicitSelectionConfirmation: false,
+  selectedOutsideCatalog: [],
+  repos: [],
+};
+
+test('выбор «О чём ролик» читается справкой, а сохраняется с редакцией ролика', async (t) => {
+  const requests = [];
+  const source = {
+    task: false,
+    note: 'Упор на фильтры',
+    code: true,
+    repos: null,
+  };
+  const { store, loadShowcaseSource, saveShowcaseSource, showcaseSourceOutdated } = await sectionFixture(t, {
+    get: async (path) => {
+      requests.push(['get', path]);
+
+      return SOURCE_OPTIONS;
+    },
+    put: async (path, body) => {
+      requests.push(['put', path, body]);
+
+      return {
+        ...READY_PROJECT,
+        revision: 5,
+        source,
+      };
+    },
+  });
+
+  store.setOpened(READY_PROJECT);
+
+  const read = await loadShowcaseSource(store.opened);
+  const saved = await saveShowcaseSource(store, {
+    id: READY_PROJECT.id,
+    revision: READY_PROJECT.revision,
+    source,
+  });
+
+  assert.equal(read.error, '');
+  assert.equal(read.options.noteMax, 2000);
+  assert.equal(saved.revision, 5, 'операция отдаёт сохранённый ролик');
+  assert.deepEqual(requests, [
+    ['get', '/api/showcase/project-1/source'],
+    ['put', '/api/showcase/project-1/source', { expectedRevision: 4, source }],
+  ]);
+  assert.equal(store.opened.revision, 5);
+  assert.deepEqual(store.opened.source, source);
+  assert.equal(showcaseSourceOutdated(store.opened), false, 'без сцен устаревать нечему');
+  assert.equal(
+    showcaseSourceOutdated({ ...store.opened, scenes: [{ id: 'scene-1' }] }),
+    true,
+    'сцены собраны по другому выбору',
+  );
+});
+
+test('отказ чтения выбора остаётся у блока, а не становится ошибкой раздела', async (t) => {
+  const { store, loadShowcaseSource } = await sectionFixture(t, {
+    get: async () => {
+      throw { data: { error: 'target_busy', message: 'Стенд сейчас поднимается или сносится.' } };
+    },
+  });
+
+  store.setOpened(READY_PROJECT);
+
+  const read = await loadShowcaseSource(store.opened);
+
+  assert.equal(read.options, null);
+  assert.equal(read.error, 'Стенд сейчас поднимается или сносится.');
+  assert.equal(store.error, '', 'общая строка ошибки раздела не загорается');
+});
+
+/**
+ * Обещание с ручным исходом: тест держит ответ сервера, пока человек переходит к другому
+ * ролику, и только потом отпускает его.
+ */
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+
+  return {
+    promise,
+    resolve,
+    reject,
+  };
+}
+
+const OTHER_PROJECT = {
+  ...READY_PROJECT,
+  id: 'project-2',
+  title: 'Другой ролик',
+};
+
+test('поздний ответ сохранения выбора не открывает прежний ролик поверх нового', async (t) => {
+  const answer = deferred();
+  const failure = deferred();
+  const replies = [answer, failure];
+  const source = {
+    task: true,
+    note: 'Упор на фильтры',
+    code: true,
+    repos: null,
+  };
+  const { store, saveShowcaseSource } = await sectionFixture(t, {
+    put: async () => replies.shift().promise,
+  });
+
+  store.setOpened(READY_PROJECT);
+
+  const late = saveShowcaseSource(store, {
+    id: READY_PROJECT.id,
+    revision: 4,
+    source,
+  });
+
+  store.setOpened(OTHER_PROJECT);
+  answer.resolve({
+    ...READY_PROJECT,
+    revision: 5,
+    source,
+  });
+
+  assert.equal((await late).revision, 5, 'сохранение своего ролика состоялось');
+  assert.equal(store.opened.id, 'project-2', 'открытым остался ролик, к которому перешёл человек');
+
+  store.setOpened(READY_PROJECT);
+
+  const refused = saveShowcaseSource(store, {
+    id: READY_PROJECT.id,
+    revision: 5,
+    source,
+  });
+
+  store.setOpened(OTHER_PROJECT);
+  failure.reject({ data: { error: 'script_busy', message: 'Сценарий этого ролика уже готовится.' } });
+
+  assert.equal(await refused, null);
+  assert.equal(store.error, '', 'отказ прежнего ролика не зажигает ошибку нового');
+});
+
+test('конфликт редакции перечитывает ролик и называет причину, а не применяет выбор', async (t) => {
+  const requests = [];
+  const fresh = {
+    ...READY_PROJECT,
+    revision: 7,
+  };
+  const { store, saveShowcaseSource } = await sectionFixture(t, {
+    put: async () => {
+      const message = 'Ролик изменился в другом месте: сейчас редакция 7.';
+
+      throw { data: { error: 'revision_conflict', message } };
+    },
+    get: async (path) => {
+      requests.push(path);
+
+      return fresh;
+    },
+  });
+
+  store.setOpened(READY_PROJECT);
+
+  const saved = await saveShowcaseSource(store, {
+    id: READY_PROJECT.id,
+    revision: 4,
+    source: null,
+  });
+
+  assert.equal(saved, null);
+  assert.deepEqual(requests, ['/api/showcase/project-1'], 'запись перечитана с сервера');
+  assert.equal(store.opened.revision, 7);
+  assert.match(store.error, /редакция 7/);
+});
+
+test('список выбора читается для ролика, который назвал вид, а не для открытого сейчас', async (t) => {
+  const requests = [];
+  const { store, loadShowcaseSource } = await sectionFixture(t, {
+    get: async (path) => {
+      requests.push(path);
+
+      return SOURCE_OPTIONS;
+    },
+  });
+
+  store.setOpened(READY_PROJECT);
+  await loadShowcaseSource(OTHER_PROJECT);
+
+  assert.deepEqual(requests, ['/api/showcase/project-2/source']);
+});

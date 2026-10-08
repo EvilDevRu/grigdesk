@@ -26,6 +26,13 @@ export {
   showcaseScriptOutdated,
 } from './analyzeShowcase';
 export { buildShowcaseFilm, cancelShowcaseBuild } from './buildShowcaseFilm';
+export {
+  loadShowcaseSource,
+  saveShowcaseSource,
+  showcaseSourceOutdated,
+  SOURCE_OUTDATED_TEXT,
+} from './showcaseSource';
+export type { ShowcaseSourceRead, ShowcaseSourceSave } from './showcaseSource';
 export { cancelShowcaseJob } from './cancelShowcaseJob';
 export { closeShowcaseProject, openShowcaseProject } from './openShowcaseProject';
 export {

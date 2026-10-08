@@ -11,6 +11,7 @@ import path from 'node:path';
 import { createBuildOps, buildRunSnapshotOf } from '../../server/src/lib/showcase/buildOps.ts';
 import {
   createShowcaseBuildRuns,
+  isBuildRunTerminal,
   toPublicBuildRun,
 } from '../../server/src/lib/showcase/buildRuns.ts';
 import { ShowcaseError } from '../../server/src/lib/showcase/errors.ts';
@@ -965,4 +966,88 @@ test('журнал не превышает maxRuns, если освободит�
     (error) => error.code === 'build_run_limit' && error.status === 429,
   );
   assert.equal(item.buildRuns.list().length, 1);
+});
+
+const SOURCE_FORWARD = {
+  task: true,
+  note: 'Упор на запуск',
+  code: true,
+  repos: [{
+    name: 'app',
+    work: false,
+    commits: ['a'.repeat(40), 'b'.repeat(40)],
+  }],
+};
+
+const SOURCE_BACKWARD = {
+  ...SOURCE_FORWARD,
+  repos: [{
+    ...SOURCE_FORWARD.repos[0],
+    commits: ['b'.repeat(40), 'a'.repeat(40)],
+  }],
+};
+
+// Выбор «О чём ролик» — вход сценария: новый выбор — новый содержательный снимок. Без
+// выбора снимок прежний, иначе сохранённые запуски стали бы «чужими» после обновления.
+test('выбор источника входит в снимок сборки, а умолчание снимок не меняет', () => {
+  // Одна запись на все варианты: у каждой новой связи сцены свой идентификатор.
+  const record = project();
+  const plain = buildRunSnapshotOf(record);
+  const nullSource = buildRunSnapshotOf({ ...record, source: null });
+  const chosen = buildRunSnapshotOf({ ...record, source: SOURCE_FORWARD });
+  const reordered = buildRunSnapshotOf({ ...record, source: SOURCE_BACKWARD });
+  const results = buildRunSnapshotOf({
+    ...record,
+    briefSource: SOURCE_FORWARD,
+    scriptSource: SOURCE_FORWARD,
+  });
+
+  assert.equal(nullSource.inputHash, plain.inputHash);
+  assert.equal(nullSource.scriptBaseHash, plain.scriptBaseHash);
+  assert.notEqual(chosen.scriptBaseHash, plain.scriptBaseHash);
+  assert.notEqual(chosen.inputHash, plain.inputHash);
+  assert.equal(reordered.inputHash, chosen.inputHash, 'порядок коммитов смысла не несёт');
+  assert.equal(results.inputHash, plain.inputHash, 'бриф и сцены выбора — результаты, а не входы');
+});
+
+/**
+ * Доводит запуск до конца, чтобы уборка каталога теста не спорила с записью журнала:
+ * либо он уже остановился сам, либо ждёт озвучку — тогда она завершается отказом.
+ */
+async function settle(item, runId) {
+  await waitUntil(() => isBuildRunTerminal(item.buildRuns.read(runId).state) || item.childIds.has('voice'));
+
+  if (!isBuildRunTerminal(item.buildRuns.read(runId).state)) {
+    await item.finish('voice', 'failed', 'тест остановил озвучку');
+    await item.ops.poll();
+    await waitUntil(() => isBuildRunTerminal(item.buildRuns.read(runId).state));
+  }
+}
+
+test('повтор requestId после смены выбора — конфликт, а перестановка коммитов — тот же запуск', async (t) => {
+  const item = await fixture(t);
+  const first = await item.ops.startBuild(PROJECT_ID, 1, REQUEST_ID);
+
+  item.setProject({
+    ...item.project,
+    revision: 2,
+    source: SOURCE_FORWARD,
+  });
+  await assert.rejects(
+    () => item.ops.startBuild(PROJECT_ID, 1, REQUEST_ID),
+    (error) => error.code === 'build_request_conflict' && error.status === 409,
+  );
+  await settle(item, first.id);
+
+  const chosen = await fixture(t, { project: { ...project(), source: SOURCE_FORWARD } });
+  const run = await chosen.ops.startBuild(PROJECT_ID, 1, 'build-request-chosen');
+
+  chosen.setProject({
+    ...chosen.project,
+    revision: 2,
+    source: SOURCE_BACKWARD,
+  });
+
+  assert.equal((await chosen.ops.startBuild(PROJECT_ID, 1, 'build-request-chosen')).id, run.id);
+  await settle(chosen, run.id);
 });

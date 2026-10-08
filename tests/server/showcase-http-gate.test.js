@@ -195,6 +195,9 @@ const REQUESTS = [
   ['PUT', `/api/showcase/${PROJECT_ID}`, { expectedRevision: 1, title: 'Ролик' }],
   ['DELETE', `/api/showcase/${PROJECT_ID}`, undefined],
   ['POST', `/api/showcase/${PROJECT_ID}/build`, { revision: 1, requestId: REQUEST_ID }],
+  // Выбор «О чём ролик» читает историю репозиториев стенда — тоже только человеку.
+  ['GET', `/api/showcase/${PROJECT_ID}/source`, undefined],
+  ['PUT', `/api/showcase/${PROJECT_ID}/source`, { expectedRevision: 1, source: null }],
   ['GET', `/api/showcase/builds/${BUILD_ID}`, undefined],
   ['POST', `/api/showcase/builds/${BUILD_ID}/cancel`, {}],
   ['GET', `/api/showcase/${PROJECT_ID}/manifests/${MANIFEST_ID}`, undefined],
@@ -620,4 +623,146 @@ test('словарь ударений читается и сохраняется
 
   assert.equal(saved.statusCode, 200);
   assert.deepEqual(service.calls, [['read-dictionary'], ['save-dictionary', 'дин+амика\n']]);
+});
+
+test('выбор «О чём ролик» проверяет редакцию и форму до обращения к службе', async (t) => {
+  const saved = [];
+  const { app } = await fixture(t, {
+    service: serviceStub({
+      sourceOptions: async (id) => ({ id, repos: [] }),
+      saveSource: async (id, revision, source) => {
+        saved.push([id, revision, source]);
+
+        return { id, revision: revision + 1 };
+      },
+    }),
+  });
+  const url = `/api/showcase/${PROJECT_ID}/source`;
+  const source = {
+    task: false,
+    note: 'Упор на фильтры',
+    code: true,
+    repos: [{
+      name: 'frontend',
+      work: true,
+      commits: [],
+    }],
+  };
+
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 200);
+
+  const noRevision = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { source },
+  });
+  const badShape = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 2, source: { ...source, code: 'да' } },
+  });
+
+  assert.equal(noRevision.json().error, 'bad_revision');
+  assert.equal(badShape.statusCode, 400);
+  assert.equal(badShape.json().error, 'bad_source');
+  assert.deepEqual(saved, [], 'служба не трогается, пока форма запроса неверна');
+
+  const accepted = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 2, source },
+  });
+  const reset = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 3, source: null },
+  });
+
+  assert.equal(accepted.statusCode, 200);
+  assert.equal(reset.statusCode, 200);
+  assert.deepEqual(saved, [[PROJECT_ID, 2, source], [PROJECT_ID, 3, null]]);
+});
+
+// Редакция — счёт, а не строка: приведение Number() пропустило бы "2" и true как
+// настоящую редакцию, и правка ушла бы в службу с чужим смыслом.
+test('редакция выбора принимается только положительным целым числом, без приведения', async (t) => {
+  const saved = [];
+  const { app } = await fixture(t, {
+    service: serviceStub({
+      sourceOptions: async (id) => ({ id, repos: [] }),
+      saveSource: async (id, revision, source) => {
+        saved.push(revision);
+
+        return {
+          id,
+          revision: revision + 1,
+          source,
+        };
+      },
+    }),
+  });
+  const url = `/api/showcase/${PROJECT_ID}/source`;
+  const wrong = ['2', true, null, 1.5, Number.MAX_SAFE_INTEGER + 1, 0];
+
+  for (const expectedRevision of wrong) {
+    const response = await app.inject({
+      method: 'PUT',
+      url,
+      payload: { expectedRevision, source: null },
+    });
+
+    assert.equal(response.json().error, 'bad_revision', `редакция ${JSON.stringify(expectedRevision)}`);
+  }
+
+  const missing = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { source: null },
+  });
+  const accepted = await app.inject({
+    method: 'PUT',
+    url,
+    payload: { expectedRevision: 2, source: null },
+  });
+  const read = await app.inject({ method: 'GET', url });
+
+  assert.equal(missing.json().error, 'bad_revision');
+  assert.equal(accepted.statusCode, 200);
+  assert.deepEqual(saved, [2], 'служба получает только проверенную редакцию');
+  assert.equal(read.json().id, PROJECT_ID, 'чтение списка идёт в службу с идентификатором ролика');
+});
+
+test('отказы выбора «О чём ролик» доходят до клиента своим кодом и текстом', async (t) => {
+  const failures = [
+    ['bad_source', 400],
+    ['revision_conflict', 409],
+    ['script_busy', 409],
+    ['target_unavailable', 409],
+    ['source_outdated', 409],
+    ['source_unavailable', 503],
+  ];
+  const url = `/api/showcase/${PROJECT_ID}/source`;
+
+  for (const [code, status] of failures) {
+    const fail = async () => {
+      throw Object.assign(new Error(`отказ ${code}`), { code, status });
+    };
+    const { app } = await fixture(t, {
+      service: serviceStub({
+        sourceOptions: fail,
+        saveSource: fail,
+      }),
+    });
+    const read = await app.inject({ method: 'GET', url });
+    const save = await app.inject({
+      method: 'PUT',
+      url,
+      payload: { expectedRevision: 1, source: null },
+    });
+
+    for (const response of [read, save]) {
+      assert.equal(response.statusCode, status, code);
+      assert.deepEqual(response.json(), { error: code, message: `отказ ${code}` });
+    }
+  }
 });

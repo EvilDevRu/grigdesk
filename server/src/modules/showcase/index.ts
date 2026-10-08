@@ -22,12 +22,14 @@ import {
   SHOWCASE_ID_RE,
   SHOWCASE_PACES,
   parseShowcaseDirection,
+  parseShowcaseStorySource,
 } from '../../../../shared/showcaseContracts.ts';
 import { SHOWCASE_SYNC_CUE_KINDS } from '../../../../shared/showcaseSync.ts';
 import { SHOWCASE_MANIFEST_ID_RE } from '../../../../shared/showcaseTimeline.ts';
 import type {
   ShowcaseAction,
   ShowcasePace,
+  ShowcaseStorySource,
   ShowcaseTargetRef,
 } from '../../../../shared/showcaseContracts.ts';
 import { mediaTypeOf } from '../../lib/showcase/artifacts.ts';
@@ -69,6 +71,13 @@ interface RenameRoute extends ProjectRoute {
   Body: {
     title?: unknown;
     expectedRevision?: unknown;
+  };
+}
+
+interface SourceRoute extends ProjectRoute {
+  Body: {
+    expectedRevision?: unknown;
+    source?: unknown;
   };
 }
 
@@ -361,6 +370,22 @@ function readText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+/**
+ * Выбор «О чём ролик» из тела запроса: null — умолчание цели, иначе строгая форма
+ * контракта. undefined значит «не по форме»: имена и коммиты проверит служба.
+ */
+function readStorySource(value: unknown): ShowcaseStorySource | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  try {
+    return parseShowcaseStorySource(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, { service }) {
   fastify.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/api/showcase')) {
@@ -650,6 +675,41 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
     try {
       return await service.generateBrief(request.params.id, readText(request.body?.taskText));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  // Источник рассказа: из чего выбирать и что выбрано. Выбор — данные человека, но
+  // форму проверяет ручка, а имена репозиториев и коммиты — служба по живой истории:
+  // браузер называет только имя репозитория, путь к нему знает сервер.
+  fastify.get<ProjectRoute>('/api/showcase/:id/source', async (request, reply) => {
+    try {
+      return await service.sourceOptions(request.params.id);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  fastify.put<SourceRoute>('/api/showcase/:id/source', async (request, reply) => {
+    const expectedRevision = request.body?.expectedRevision;
+    const source = readStorySource(request.body?.source);
+
+    // Редакция — счёт, а не строка: Number() пропустил бы "2" и true.
+    const revisionValid = typeof expectedRevision === 'number'
+      && Number.isSafeInteger(expectedRevision)
+      && expectedRevision >= 1;
+
+    if (!revisionValid) {
+      return reply.code(400).send({ error: 'bad_revision' });
+    }
+
+    if (source === undefined) {
+      return reply.code(400).send({ error: 'bad_source', message: 'Выбор «О чём ролик» не по форме.' });
+    }
+
+    try {
+      return await service.saveSource(request.params.id, expectedRevision, source);
     } catch (error) {
       return sendError(reply, error);
     }

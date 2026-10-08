@@ -1,5 +1,9 @@
 // Бриф и сцены, предложенные моделью.
 //
+// Что читать при разборе, выбирает человек блоком «О чём ролик»: задача, коммиты,
+// незакоммиченное, код и своё пожелание. Выбор хранится в ролике, а коммиты и имена
+// репозиториев сервер сверяет с живой историей цели перед каждым чтением.
+//
 // Текст задачи и diff — НЕДОВЕРЕННЫЕ данные. Поэтому модель зовётся одноразовым
 // безопасным режимом: без инструментов, рабочей области и продолжения сессии.
 // Обычный `run` не используется даже как запасной путь.
@@ -19,7 +23,8 @@ import {
   verifyAndRepairScript,
   writeScriptProof,
 } from './script/verification.ts';
-import { collectDiffContext } from './script/context.ts';
+import { collectStoryContext, readSourceOptions, sourceProblem } from './script/source.ts';
+import type { RepoRef } from './script/context.ts';
 import {
   buildBindingsPrompt,
   buildBriefPrompt,
@@ -41,9 +46,15 @@ import {
   sceneSyncBindingsState,
 } from './scenes.ts';
 import { mapRevisionOf } from './targets.ts';
-import type { ShowcaseProject, ShowcaseScene } from '../../../../shared/showcaseContracts.ts';
+import { normalizeShowcaseSource, showcaseSourceEqual } from '../../../../shared/showcaseContracts.ts';
+import type {
+  ShowcaseProject,
+  ShowcaseScene,
+  ShowcaseSourceOptions,
+  ShowcaseStorySource,
+} from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
-import type { ShowcaseTargets } from './targets.ts';
+import type { ShowcaseResolvedScope, ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';
 
 // Пометка о неполном diff. Модель видела не все изменения — план и сцены построены
@@ -113,6 +124,9 @@ export interface ScriptOpsDeps {
     title?: unknown;
     description?: unknown;
   } | null>) | null;
+  // Репозитории постоянного стенда по имени профиля: у него нет реестра песочницы,
+  // и пути приходят из паспорта проекта. Без зависимости у стенда репозиториев нет.
+  projectRepos?: ((profile: string) => Promise<{ name: string; path: string }[]>) | null;
   // Серверный config исполнителей и настройки провайдеров: путь к CLI и каталог
   // моделей объявлены в config.ts, и без них вызов падает на запуске процесса.
   executorConfig: (() => Record<string, unknown>) | null;
@@ -245,15 +259,54 @@ export function createScriptOps(deps: ScriptOpsDeps) {
   }
 
   /**
-   * Контекст генерации. Пути и Git-ссылки сервер берёт у зарегистрированных
-   * репозиториев стенда: модель не выбирает, что ей показать.
+   * Репозитории цели: у песочницы — из её реестра, у постоянного стенда — из паспорта
+   * проекта. Путь резолвит сервер, браузер называет только имя; два ключа одного
+   * каталога дают один репозиторий, иначе история читалась бы дважды. Нечитаемый
+   * паспорт — отказ без пути: пустой список выглядел бы стендом без репозиториев.
    */
-  async function scriptContextOf(project: ShowcaseProject, taskText: string): Promise<{
-    context: ScriptContext;
-    // Ревизия словаря карты, по которому собран контекст: сценарий запоминает её,
-    // чтобы после правки карты экранов интерфейс мог сказать «сцены старше карты».
-    mapRevision: string;
-  }> {
+  async function reposOf(project: ShowcaseProject, scope: ShowcaseResolvedScope): Promise<RepoRef[]> {
+    if (project.ref.kind !== 'project') {
+      return scope.sandbox?.repos ?? [];
+    }
+
+    let listed: { name: string; path: string }[] = [];
+
+    try {
+      listed = await deps.projectRepos?.(scope.profile) ?? [];
+    } catch {
+      throw new ShowcaseError('source_unavailable', 'Не удалось прочитать репозитории проекта.', 503);
+    }
+
+    const seen = new Set<string>();
+    const repos: RepoRef[] = [];
+
+    for (const repo of listed) {
+      const resolved = path.resolve(repo.path);
+
+      if (!seen.has(resolved)) {
+        seen.add(resolved);
+        repos.push({
+          name: repo.name,
+          path: repo.path,
+          branch: '',
+        });
+      }
+    }
+
+    return repos;
+  }
+
+  /**
+   * Работа с репозиториями цели под арендой стенда: песочницу не сносят и не
+   * переподнимают, пока читается её история. Цель перепроверяется по отпечатку.
+   * Репозитории читаются только когда нужны: разбор постоянного стенда без выбора от
+   * паспорта проекта не зависит.
+   */
+  async function withStoryRepos<Result>(
+    project: ShowcaseProject,
+    needRepos: boolean,
+    work: (scope: ShowcaseResolvedScope, repos: RepoRef[]) => Promise<Result>,
+  ): Promise<Result> {
     if (project.target.status !== 'ready') {
       throw new ShowcaseError('target_unavailable', project.target.reason, 409);
     }
@@ -269,16 +322,41 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
       await lease?.assertPathIdentity();
 
-      const diff = await collectDiffContext(scope.sandbox?.repos ?? []);
+      return await work(scope, needRepos ? await reposOf(project, scope) : []);
+    } finally {
+      await lease?.release();
+    }
+  }
+
+  /**
+   * Контекст генерации по выбору «О чём ролик». Пути и Git-ссылки сервер берёт у
+   * зарегистрированных репозиториев цели; выбранный коммит, пропавший из истории
+   * после rebase, останавливает разбор с понятной причиной, а не подменяется веткой.
+   */
+  async function scriptContextOf(project: ShowcaseProject, taskText: string): Promise<{
+    context: ScriptContext;
+    // Ревизия словаря карты, по которому собран контекст: сценарий запоминает её,
+    // чтобы после правки карты экранов интерфейс мог сказать «сцены старше карты».
+    mapRevision: string;
+  }> {
+    const source = project.source ?? null;
+    const needRepos = project.ref.kind !== 'project' || Boolean(source?.repos?.length);
+
+    return withStoryRepos(project, needRepos, async (scope, repos) => {
+      // Проверка выбора, чтение по одному HEAD и сверка, что он не сдвинулся, — внутри:
+      // пропавший коммит и нечитаемая часть останавливают разбор до вызова модели.
+      const story = await collectStoryContext(repos, source, project.ref.kind);
 
       return {
         context: {
           taskTitle: project.title,
           taskText,
-          diff: diff.diff,
-          diffBase: diff.base,
-          diffHead: diff.head,
-          diffTruncated: diff.truncated,
+          note: source?.note ?? '',
+          commits: story.commits,
+          diff: story.diff,
+          diffBase: story.base,
+          diffHead: story.head,
+          diffTruncated: story.truncated,
           screens: scope.screens.map((screen) => ({
             id: screen.id,
             title: screen.title,
@@ -289,9 +367,55 @@ export function createScriptOps(deps: ScriptOpsDeps) {
         },
         mapRevision: mapRevisionOf(scope.screens),
       };
-    } finally {
-      await lease?.release();
+    });
+  }
+
+  /**
+   * Из чего выбирать источник рассказа: история и незакоммиченное по репозиториям
+   * цели и выбор, равный умолчанию. Наружу уходят имена, а не пути.
+   */
+  async function sourceOptions(id: string): Promise<ShowcaseSourceOptions> {
+    assertEnabled();
+
+    const project = await readProject(id);
+
+    return withStoryRepos(project, true, (_scope, repos) => readSourceOptions(repos, {
+      kind: project.ref.kind,
+      taskAvailable: project.ref.kind !== 'project' && Boolean(deps.taskDetails),
+      saved: project.source ?? null,
+    }));
+  }
+
+  /**
+   * Сохраняет выбор «О чём ролик». Коммиты проверяются по живой истории сейчас, а не
+   * через минуты разбора; null возвращает умолчание цели и git не трогает.
+   */
+  async function saveSource(
+    id: string,
+    expectedRevision: number,
+    source: ShowcaseStorySource | null,
+  ): Promise<ShowcaseProject> {
+    assertEnabled();
+
+    const project = await readProject(id);
+    const next = normalizeShowcaseSource(source);
+    const needRepos = Boolean(next?.repos?.length);
+    const problem = next
+      ? await withStoryRepos(project, needRepos, (_scope, repos) => sourceProblem(next, repos))
+      : null;
+
+    if (problem) {
+      throw new ShowcaseError('bad_source', problem, 400);
     }
+
+    const saved = await store.updateProject(id, expectedRevision, (current) => ({
+      ...current,
+      source: next,
+    }));
+
+    broadcast('showcase-changed', { projectId: id, revision: saved.revision });
+
+    return publish(saved);
   }
 
   /**
@@ -328,6 +452,8 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     const saved = await store.updateProject(id, project.revision, (current) => ({
       ...current,
       brief: points,
+      // План составлен по этому выбору: сцены другого выбора на нём не строятся.
+      briefSource: project.source ?? null,
       decisions: [
         ...current.decisions.filter((item) => item.kind !== 'script'),
         {
@@ -367,6 +493,14 @@ export function createScriptOps(deps: ScriptOpsDeps) {
 
     if (project.brief.length === 0) {
       throw new ShowcaseError('no_brief', 'Сначала нужен бриф: без него сценарий не о чем.', 409);
+    }
+
+    // Бриф составлен по другому выбору «О чём ролик» — например, разбор упал на сценах,
+    // а человек сменил выбор. Новые сцены строятся на новом плане, а не на прежнем.
+    if (!keepScenes && !showcaseSourceEqual(project.briefSource, project.source)) {
+      await generateBrief(id, taskText, onProgress);
+
+      return generateScript(id, taskText, false, onProgress);
     }
 
     const { context, mapRevision } = await scriptContextOf(project, taskText);
@@ -498,6 +632,9 @@ export function createScriptOps(deps: ScriptOpsDeps) {
         scriptGaps: gaps,
         scriptMapRevision: mapRevision,
         scriptProofHash,
+        // Сцены собраны по выбору, с которым читался контекст: его сменят — интерфейс
+        // увидит расхождение и попросит разобрать заново.
+        scriptSource: project.source ?? null,
       };
 
       for (const item of drafts) {
@@ -685,7 +822,7 @@ export function createScriptOps(deps: ScriptOpsDeps) {
    * не может. Любая беда портала здесь — не отказ разбора, а пустой текст.
    */
   async function taskTextOf(project: ShowcaseProject): Promise<string> {
-    if (project.ref.kind === 'project' || !deps.taskDetails) {
+    if (project.ref.kind === 'project' || !deps.taskDetails || project.source?.task === false) {
       return '';
     }
 
@@ -705,12 +842,26 @@ export function createScriptOps(deps: ScriptOpsDeps) {
     }
   }
 
-  /** Полный запуск старого автоматического сценария сам обновляет его проверку. */
+  /**
+   * Полный запуск старого автоматического сценария сам обновляет его проверку. Сцены
+   * прежнего выбора «О чём ролик» сценарием нового выбора не становятся.
+   */
   async function ensurePrepared(
     id: string,
     onProgress?: (label: string) => Promise<void>,
   ): Promise<ShowcaseProject> {
     const project = await readProject(id);
+
+    // Сцены прежнего выбора не становятся сценарием нового ни через годный proof, ни
+    // молча: новый сценарий даёт только разбор, который человек подтверждает сам.
+    if (project.scenes.length > 0 && !showcaseSourceEqual(project.source, project.scriptSource)) {
+      throw new ShowcaseError(
+        'source_outdated',
+        'Сцены собраны по прежнему выбору «О чём ролик». '
+          + 'Разберите заново, чтобы снять ролик по новому выбору.',
+        409,
+      );
+    }
 
     if (await readScriptProof(store.namesOf(id).dir, project)) {
       return project;
@@ -725,5 +876,13 @@ export function createScriptOps(deps: ScriptOpsDeps) {
       : analyze(id, onProgress);
   }
 
-  return { analyze, ensurePrepared, generateBindings, generateBrief, generateScript };
+  return {
+    analyze,
+    ensurePrepared,
+    generateBindings,
+    generateBrief,
+    generateScript,
+    saveSource,
+    sourceOptions,
+  };
 }

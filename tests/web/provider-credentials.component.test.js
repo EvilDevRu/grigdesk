@@ -242,7 +242,7 @@ test('карточка и окно показывают только ключ в
   const field = (name) => browser.document.querySelector(`input[name="${name}"]`);
 
   assert.ok(field('TEST_API_KEY'));
-  assert.equal(field('TEST_PLAN_KEY'), null);
+  assert.equal(field('TEST_PLAN_KEY') === null, true);
   // Режим из .env не удаляют, а переключают: «Удалить» есть только у ключа.
   assert.equal(browser.document.querySelectorAll('[data-testid="credential-remove"]').length, 1);
   assert.match(browser.document.body.textContent, /Оплата по расходу\./u);
@@ -251,7 +251,7 @@ test('карточка и окно показывают только ключ в
   buttonText(browser, 'Coding Plan').click();
   await flushPromises();
 
-  assert.equal(field('TEST_API_KEY'), null);
+  assert.equal(field('TEST_API_KEY') === null, true);
   assert.ok(field('TEST_PLAN_KEY'));
   assert.match(browser.document.body.textContent, /Подписка\./u);
 

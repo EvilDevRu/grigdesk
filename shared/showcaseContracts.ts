@@ -35,6 +35,12 @@ export const SHOWCASE_ID_RE = /^[a-z0-9]{10,32}$/;
  */
 export const SHOWCASE_SCHEMA_VERSION = 1;
 
+/**
+ * Предел пожелания человека к ролику. Это подсказка модели о сути, а не постановка:
+ * длинный текст вытеснил бы из промпта изменения и карту экранов.
+ */
+export const SHOWCASE_SOURCE_NOTE_MAX = 2000;
+
 export class ShowcaseContractError extends Error {
   constructor(path: string) {
     super(`Некорректные данные раздела «Презентации»: поле ${path}`);
@@ -357,6 +363,80 @@ const finalArtifact = objectOf({
   current: boolean,
 });
 
+// Источник рассказа: что модель читает при разборе. Выбор принадлежит человеку —
+// модель не называет коммиты и не расширяет выбор, она получает готовый текст.
+// Репозиторий назван именем из реестра стенда, путь на диске наружу не уходит.
+const storySourceRepo = objectOf({
+  name: text,
+  // Незакоммиченные правки и новые файлы рабочего дерева.
+  work: boolean,
+  // Полные идентификаторы выбранных коммитов.
+  commits: listOf(text),
+});
+
+const storySource = objectOf({
+  // Текст связанной задачи из портала.
+  task: boolean,
+  // Пожелание человека своими словами: что показать и на что сделать упор.
+  note: text,
+  // Показывать ли модели код изменений; без него — описания коммитов и список файлов.
+  code: boolean,
+  // null — выбор по умолчанию цели: у песочницы вся ветка с незакоммиченным, у
+  // постоянного стенда изменения не читаются.
+  repos: nullable(listOf(storySourceRepo)),
+});
+
+// Из чего выбирать источник: история и незакоммиченное по репозиториям цели. Пути
+// и содержимое изменений сюда не входят — только то, что человек видит в списке.
+const sourceCommit = objectOf({
+  id: text,
+  subject: text,
+  date: text,
+  // Коммит своей ветки — после общего предка с главной.
+  own: boolean,
+  // Коммит слияния не выбирается: его изменения принесла другая ветка.
+  merge: boolean,
+});
+
+const sourceRepoOption = objectOf({
+  name: text,
+  branch: text,
+  workFiles: wholeNumber,
+  commits: listOf(sourceCommit),
+  // Репозиторий не прочитался: причина словами, без пути.
+  error: nullable(text),
+});
+
+// Сохранённый коммит вне видимого списка. available — найден в окне истории за пределами
+// списка; outdated — пропал из линии ветки или вышел из окна; unavailable — историю
+// репозитория не удалось прочитать.
+const sourceOutsideCommit = objectOf({
+  id: text,
+  subject: nullable(text),
+  state: oneOf('available', 'outdated', 'unavailable'),
+});
+
+const sourceOutsideGroup = objectOf({
+  name: text,
+  // Репозитория больше нет у цели: выбор виден и снимается, но не читается.
+  missing: boolean,
+  commits: listOf(sourceOutsideCommit),
+});
+
+const sourceOptions = objectOf({
+  taskAvailable: boolean,
+  noteMax: wholeNumber,
+  // Видимая проекция умолчания цели: с неё начинается черновик. Само умолчание шире —
+  // у песочницы это diff всей ветки, а не только показанные коммиты.
+  defaults: storySource,
+  // Переход от умолчания к явным отметкам сузит чтение: история ветки глубже списка,
+  // слияния внутри ветки или нечитаемый репозиторий. Интерфейс спрашивает человека.
+  requiresExplicitSelectionConfirmation: boolean,
+  // Сохранённый выбор вне видимого списка: его видно и можно снять.
+  selectedOutsideCatalog: listOf(sourceOutsideGroup),
+  repos: listOf(sourceRepoOption),
+});
+
 const projectSummary = objectOf({
   id: text,
   title: text,
@@ -387,6 +467,13 @@ const project = objectOf({
   scriptMapRevision: optional(text),
   // Ссылка на серверную приёмку живого сценария, без селекторов и наблюдений DOM.
   scriptProofHash: optional(text),
+  // Что читать при разборе. Старые записи поля не имеют — это выбор по умолчанию.
+  source: optional(storySource),
+  // Выбор, по которому составлен бриф: план другого выбора для новых сцен не годится.
+  briefSource: optional(storySource),
+  // Выбор, по которому собраны текущие сцены. Расходится с `source` — сцены
+  // рассказывают о прежнем, и интерфейс просит разобрать заново.
+  scriptSource: optional(storySource),
   decisions: listOf(decision),
   latestFinal: nullable(finalArtifact),
   createdAt: text,
@@ -692,6 +779,13 @@ export type ShowcasePronunciationOverride = ReturnType<typeof pronunciationOverr
 export type ShowcaseTiming = ReturnType<typeof timing>;
 export type ShowcaseScene = ReturnType<typeof scene>;
 export type ShowcaseDecision = ReturnType<typeof decision>;
+export type ShowcaseStorySource = ReturnType<typeof storySource>;
+export type ShowcaseStorySourceRepo = ReturnType<typeof storySourceRepo>;
+export type ShowcaseSourceCommit = ReturnType<typeof sourceCommit>;
+export type ShowcaseSourceRepoOption = ReturnType<typeof sourceRepoOption>;
+export type ShowcaseSourceOutsideCommit = ReturnType<typeof sourceOutsideCommit>;
+export type ShowcaseSourceOutsideGroup = ReturnType<typeof sourceOutsideGroup>;
+export type ShowcaseSourceOptions = ReturnType<typeof sourceOptions>;
 export type ShowcaseFinal = ReturnType<typeof finalArtifact>;
 export type ShowcaseTargetProfile = ReturnType<typeof targetProfile>;
 export type ShowcaseTargetOption = ReturnType<typeof targetOption>;
@@ -774,6 +868,63 @@ export function parseShowcaseChangedEvent(value: unknown): ShowcaseChangedEvent 
 
 export function parseShowcaseVoiceEvent(value: unknown): ShowcaseVoiceEvent {
   return voiceEvent(value, 'voice');
+}
+
+/**
+ * Выбор «О чём ролик» из тела запроса или ответа. Форма проверяется здесь, а
+ * имена репозиториев и коммиты — сервером по живой истории стенда.
+ */
+export function parseShowcaseStorySource(value: unknown): ShowcaseStorySource {
+  return storySource(value, 'source');
+}
+
+/**
+ * Список, из которого человек выбирает источник рассказа. Ответ проходит декодер
+ * до вида: по нему строятся галочки, и чужое поле не должно стать коммитом.
+ */
+export function parseShowcaseSourceOptions(value: unknown): ShowcaseSourceOptions {
+  return sourceOptions(value, 'sourceOptions');
+}
+
+/**
+ * Канонический вид выбора: репозитории по имени, коммиты по порядку строк, заметка без
+ * пробелов по краям. Сервер хранит выбор в нём, поэтому сравнение не зависит от того,
+ * в каком порядке человек ставил галочки. null и отсутствие поля — одно умолчание.
+ */
+export function normalizeShowcaseSource(
+  source: ShowcaseStorySource | null | undefined,
+): ShowcaseStorySource | null {
+  if (!source) {
+    return null;
+  }
+
+  const repos = source.repos === null
+    ? null
+    : source.repos
+      .map((repo) => ({
+        name: repo.name,
+        work: repo.work,
+        commits: [...repo.commits].sort(),
+      }))
+      .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+
+  return {
+    task: source.task,
+    note: source.note.trim(),
+    code: source.code,
+    repos,
+  };
+}
+
+/**
+ * Один ли это выбор источника по смыслу. Умолчание (`repos: null`) следует за веткой и
+ * не равно явному списку, даже если сейчас совпадает с ним по коммитам.
+ */
+export function showcaseSourceEqual(
+  left: ShowcaseStorySource | null | undefined,
+  right: ShowcaseStorySource | null | undefined,
+): boolean {
+  return JSON.stringify(normalizeShowcaseSource(left)) === JSON.stringify(normalizeShowcaseSource(right));
 }
 
 /**

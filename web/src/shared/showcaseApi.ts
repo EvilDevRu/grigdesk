@@ -5,6 +5,7 @@ import {
   parseShowcaseJob,
   parseShowcaseOverview,
   parseShowcaseProject,
+  parseShowcaseSourceOptions,
   parseShowcaseTarget,
   parseShowcaseVoiceCatalog,
   parseShowcaseVoiceDictionary,
@@ -15,6 +16,7 @@ import type {
   ShowcaseDirection,
   ShowcasePace,
   ShowcaseSelectableTargetRef,
+  ShowcaseStorySource,
   ShowcaseSyncCueKind,
   ShowcaseTargetRef,
 } from '../../../shared/showcaseContracts';
@@ -199,6 +201,29 @@ export const showcaseApi = {
   async proposeScript(id: string, taskText: string) {
     const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/script`, {
       taskText,
+    });
+
+    return parseShowcaseProject(value);
+  },
+
+  /**
+   * Из чего выбирать «О чём ролик»: история и незакоммиченное по репозиториям стенда.
+   * Пути сервер не отдаёт — по ответу строятся только галочки.
+   */
+  async sourceOptions(id: string) {
+    const value: unknown = await api.get(`/api/showcase/${encodeURIComponent(id)}/source`);
+
+    return parseShowcaseSourceOptions(value);
+  },
+
+  /**
+   * Сохраняет выбор «О чём ролик» со своей редакцией ролика: null возвращает
+   * умолчание цели. Коммиты и имена репозиториев сервер сверяет с историей стенда.
+   */
+  async saveSource(id: string, expectedRevision: number, source: ShowcaseStorySource | null) {
+    const value: unknown = await api.put(`/api/showcase/${encodeURIComponent(id)}/source`, {
+      expectedRevision,
+      source,
     });
 
     return parseShowcaseProject(value);

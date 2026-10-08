@@ -130,6 +130,11 @@ export class FactoryStateAdapter {
 
   private _routesStore: RoutesStore | null = null;
 
+  // Задачи, которым сервер прямо сейчас передаёт ход, и сколько таких передач идёт.
+  // Реестр в памяти намеренно: передачу ведёт HTTP-запрос этого процесса, и после
+  // рестарта отметка обязана исчезнуть вместе с ним, а не висеть фантомом.
+  private readonly _handoffs = new Map<string, number>();
+
   constructor({
     stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
     arbiterCards = null,
@@ -288,6 +293,46 @@ export class FactoryStateAdapter {
     } catch {
       return false; // нет /proc/<pid> → мёртв
     }
+  }
+
+  /**
+   * Отметить передачу хода: сервер записывает решение (ворота, возврат курсора) и сразу
+   * поднимает продолжение. Демона между ними нет по устройству: `gate --commit-only` уже
+   * вышел и снял ORCH_PID, а resume берёт его только после подготовки — секунды и
+   * десятки секунд. Без отметки сводка видела «демона нет, а маршрут не закрыт» и звонила
+   * «Конвейер оборвался» сразу после «Принять». Снять отметку вызывающий обязан в `finally`.
+   */
+  beginHandoff(task: string | number): () => void {
+    const key = String(task);
+
+    this._handoffs.set(key, (this._handoffs.get(key) || 0) + 1);
+
+    let done = false;
+
+    return () => {
+      if (done) {
+        return;
+      }
+
+      done = true;
+
+      const left = (this._handoffs.get(key) || 1) - 1;
+
+      if (left > 0) {
+        this._handoffs.set(key, left);
+      } else {
+        this._handoffs.delete(key);
+      }
+    };
+  }
+
+  /**
+   * Живость прогона для витрины — сводки, графа и вотчеров: демон работает или сервер
+   * прямо сейчас поднимает продолжение. Подтверждение подъёма и отказы мутаций смотрят
+   * только isDaemonAlive: иначе resume «подтвердил» бы сам себя собственной отметкой.
+   */
+  isRunLive(orchPid: unknown, task: string | number) {
+    return this.isDaemonAlive(orchPid, task) || this._handoffs.has(String(task));
   }
 
   /** Список номеров задач из единственного runtime root. */
@@ -476,7 +521,7 @@ export class FactoryStateAdapter {
   async getTaskSummary(task: string | number) {
     const { registry, mtime } = await this.readRegistry(task);
     const { route, stages, map } = this.buildStageMap(registry);
-    const daemonAlive = this.isDaemonAlive(registry.ORCH_PID, task);
+    const daemonAlive = this.isRunLive(registry.ORCH_PID, task);
     const env = await this.readEnv(task);
     const sandbox = parseSandboxRepositories(env, { allowLegacy: true });
     let trusted: TrustedAttempt | null = null;
@@ -640,7 +685,7 @@ export class FactoryStateAdapter {
 
     // Честный статус ромба песочницы: порты есть → готова; идёт сборка → running
     // (при живом демоне), демон умер посреди сборки → fail. Иначе — как посчитала цепочка.
-    const alive = this.isDaemonAlive(registry.ORCH_PID, task);
+    const alive = this.isRunLive(registry.ORCH_PID, task);
     // Узел под курсором журнала обязан гореть работой всё время, пока этап идёт. Реестр
     // тут не помощник: свой статус узел переписывает по завершении, а на повторном заходе
     // до тех пор несёт `done` от прошлого круга — схема показывала «нигде ничего не идёт»
