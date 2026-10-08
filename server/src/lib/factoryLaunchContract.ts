@@ -54,7 +54,8 @@ export interface ScopeSuggestion {
 
 const RECORD_SEPARATOR = '\x1e';
 const TASK_RE = /^[1-9][0-9]{0,18}$/;
-const REPOSITORY_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// Имя репозитория профиля и ключ триажа: им же названы каталоги снимков триажа.
+export const REPOSITORY_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 const DIAGNOSIS_KINDS = new Set(['functional', 'performance', 'data', 'integration']);
 // Дополнительные действия доставки, которые профиль может разрешить прогону. Словарь
@@ -358,10 +359,11 @@ export function normalizeFactoryLaunchInputs({
 }
 
 /**
- * Каталоги репозиториев, которые триаж ЭТОЙ задачи фактически читал: он пишет их в
- * `analysis.repos.<alias>.dir` из `PROFILE_TRIAGE_REPOS` профиля прогона, а
- * `loadFactoryLaunchProfile` тем же путём (`source`) связывает repo с `triageKey`.
- * Поэтому сравнение буквальное — обе стороны берут путь из одной переменной профиля.
+ * Рабочие копии репозиториев, по которым триаж ЭТОЙ задачи оценивал код: он пишет их в
+ * `analysis.repos.<alias>.dir` из `PROFILE_TRIAGE_REPOS` профиля прогона, даже когда
+ * читал собственный снимок, а `loadFactoryLaunchProfile` тем же путём (`source`)
+ * связывает repo с `triageKey`. Поэтому сравнение буквальное — обе стороны берут путь
+ * из одной переменной профиля.
  */
 function triageRepositoryDirs(analysis: TriageAnalysis | null | undefined): string[] {
   const repos = analysis?.repos;

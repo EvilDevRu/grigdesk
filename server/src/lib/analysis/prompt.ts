@@ -4,6 +4,7 @@
 
 import { DISCUSSION_SECTION_TITLE } from '../telegram/discussion.ts';
 import type { TriageProfile } from './profile.ts';
+import type { TriageSourceRepo } from './triageSource.ts';
 
 const CAP_DESC = 8000;    // описание тикета, символов
 const CAP_COMMENT = 1500; // один комментарий
@@ -43,9 +44,33 @@ export interface TriagePromptInput {
   answered?: TriageAnsweredQuestion[];
   discussion?: string;
   profile: TriageProfile;
+  // Код захода (lib/analysis/triageSource.ts): что читает агент и на какой ревизии.
+  sources?: readonly TriageSourceRepo[];
   routeChoice?: TriageRouteChoice | null;
   jsonPath: string;
   notePath: string;
+}
+
+/**
+ * Подпись репозитория в списке: модель должна знать, какую ревизию она читает, и
+ * почему читает рабочую копию, если у isolated-профиля снимка нет.
+ */
+function revisionNote(repo: TriageSourceRepo): string {
+  const sha = String(repo.sha || '').slice(0, 12);
+
+  if (repo.ref) {
+    return ` (снимок ${repo.ref}${sha ? ` @ ${sha}` : ''})`;
+  }
+
+  return repo.note ? ` (рабочая копия: ${repo.note})` : '';
+}
+
+/**
+ * Список кода захода «ключ: каталог (ревизия)» — один для триажа и арбитра его
+ * вопросов: оба читают одни и те же снимки и должны знать одну и ту же ревизию.
+ */
+export function repoListText(sources: readonly TriageSourceRepo[]): string {
+  return sources.map((repo) => `${repo.key}: ${repo.dir}${revisionNote(repo)}`).join('\n');
 }
 
 /**
@@ -55,14 +80,14 @@ export interface TriagePromptInput {
  */
 export function buildTriagePrompt({
   task, title, description, comments, clarifications, answered, discussion, profile,
-  routeChoice, jsonPath, notePath,
+  sources = [], routeChoice, jsonPath, notePath,
 }: TriagePromptInput): string {
   const comm = (comments || [])
     .slice(-MAX_COMMENTS)
     .map((c) => `- ${c.author}${c.time ? ` (${c.time})` : ''}: ${String(c.text || '').slice(0, CAP_COMMENT)}`)
     .join('\n');
 
-  const repoList = (profile.repos || []).map((r) => `${r.key}: ${r.dir}`).join('\n');
+  const repoList = repoListText(sources);
 
   // Род работы модель выбирает из объявленных профилем; глубину она не выбирает вовсе.
   const kinds = (routeChoice?.kinds || []).filter(Boolean);

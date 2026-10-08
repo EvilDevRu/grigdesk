@@ -437,6 +437,33 @@ test('машинный ответ и фактические provider/model/effor
   });
 });
 
+test('подробности оценки называют код, по которому она шла', async (t) => {
+  const detail = triageDetail();
+
+  detail.analysis.repos = {
+    be: {
+      sha: '62addc56aa11bb22cc33dd44ee55ff6677889900',
+      ref: 'origin/master',
+    },
+    fe: {
+      sha: '3b5adc1aee455a6c19ab85844aab6dedbedd28fb',
+      note: 'у репозитория нет origin/HEAD, origin/master или origin/main',
+    },
+  };
+
+  const { wrapper } = await mountTriage(t, { detail });
+
+  await wrapper.get('[aria-controls="task-analysis-details"]').trigger('click');
+
+  assert.deepEqual(
+    wrapper.findAll('[data-role="task-analysis-source"]').map((row) => row.text()),
+    [
+      'be: origin/master @ 62addc5',
+      'fe: рабочая копия @ 3b5adc1 — у репозитория нет origin/HEAD, origin/master или origin/main',
+    ],
+  );
+});
+
 test('неизвестная оценка не становится нулевой, а уверенность и тип работы читаются по-русски', async (t) => {
   const detail = triageDetail();
   detail.analysis.complexity = null;

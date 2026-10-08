@@ -100,6 +100,7 @@
 - [Стенд старой задачи не сносился: попытка родилась раньше lifecycle-журнала](legacy-sandbox-cleanup.md)
 - [Первый снос после вопроса человеку: историческая ссылка не открывает визит](human-stop-cleanup.md)
 - [Транзакционный узел БЕЗ пары instrument делает маршрут заложником формы запуска](transactional-node-instrument-pair.md)
+- [«Триаж читает старый код» при включённом обновлении = рабочая копия стояла не на master](triage-source-snapshot.md)
 - [Узлы маршрута обязаны ходить в общий runtime под ОДНИМ uid](shared-runtime-uid.md)
 - [Command-узел тянет за собой артефакт своего узла-источника](command-node-source-artifacts.md)
 - [plan не песочница от записи, а арбитру десяти минут не хватало](plan-permissions-and-arbiter-timeout.md)

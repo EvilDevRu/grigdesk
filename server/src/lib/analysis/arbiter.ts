@@ -5,7 +5,9 @@ import { resolveModelRef } from '../chat/modelRef.ts';
 import { supportsScopedWorkspace } from '../executors/index.ts';
 import { createWorkIpc } from '../executors/workIpc.ts';
 import { createRepoHistoryTools } from './repoHistory.ts';
+import { repoListText } from './prompt.ts';
 import type { Analyzer } from './analyzer.ts';
+import type { TriageSourceLease } from './triageSource.ts';
 import { questionKey } from '../../../../shared/analysisContracts.ts';
 import type {
   AnalysisArbiterAnswerInput,
@@ -135,19 +137,30 @@ export class AnalysisArbiter {
       ? triageModel?.effort
       : null;
     const profile = await this.analyzer.profile();
-    const staging = await fs.mkdtemp(path.join(this.analyzer.dir, `.t${id}.arbiter-`));
+    let lease: TriageSourceLease | null = null;
+    let staging = '';
+
     try {
+      // Арбитр отвечает по тому же коду, что читает триаж: у isolated-профиля это снимок
+      // интеграционной ветки, а не рабочая копия человека.
+      lease = await this.analyzer._sources.acquire(profile);
+      staging = await fs.mkdtemp(path.join(this.analyzer.dir, `.t${id}.arbiter-`));
+
       const output = path.join(staging, 'output');
+
       await fs.mkdir(output);
-      const readableRoots = await this.analyzer._readableRoots(profile, output);
+
+      const readableRoots = await this.analyzer._readableRoots([...lease.roots, output]);
+      const codeList = repoListText(lease.repos);
       const prompt = [
         'Ты — арбитр вопросов триажа. Проверь вопросы по доступному коду.',
+        ...(codeList ? [`Код проекта:\n${codeList}`] : []),
         'factual можно закрыть только доказанным ответом с proof (путь:строка).',
         'product_choice, priority и scope_change всегда верни human_required без ответа.',
         'Верни только JSON {"answers":[{"questionId","kind","status","text","proof":[]}]}',
         JSON.stringify({ task: Number(id), questions }),
       ].join('\n\n');
-      const workTools = createRepoHistoryTools(profile.repos || []);
+      const workTools = createRepoHistoryTools(lease.repos);
       const workIpc = executor.workToolsTransport === 'mcp'
         ? await createWorkIpc({ workTools, root: staging })
         : null;
@@ -230,7 +243,11 @@ export class AnalysisArbiter {
 
       return { ok: false, error: String(failure.message || error) };
     } finally {
-      await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+      lease?.release();
+
+      if (staging) {
+        await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 }

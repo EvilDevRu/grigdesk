@@ -600,8 +600,9 @@ async function factoryModule(
   }));
 
   // Правило кокпита: isolated-конвейер стартует со свежего кода (worktree задачи
-  // форкается от локального master). Безопасно: ff-only и только чистый master;
-  // сбой обновления запуск не блокирует — фиксируется в ответе.
+  // создаётся от ветки origin после fetch). Безопасно: ff-only и только чистый master;
+  // сбой обновления запуск не блокирует — фиксируется в ответе. Идущий fetch триажа
+  // по тому же каталогу запуск ждёт, а не дублирует (lib/gitRefresh.ts).
   async function maybeRefreshRepos(id: string, profile: string) {
     if (!prefs?.read().gitRefreshBeforeRun) return null;
     try {

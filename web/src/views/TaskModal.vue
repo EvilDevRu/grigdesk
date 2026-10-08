@@ -575,6 +575,18 @@
                   <dt>Получена</dt>
                   <dd>{{ new Date(triage.analysis.generated_at).toLocaleString('ru-RU') }}</dd>
                 </template>
+                <template v-if="Object.keys(triage.analysis.repos || {}).length">
+                  <dt>Код</dt>
+                  <dd>
+                    <div
+                      v-for="(repo, key) in triage.analysis.repos"
+                      :key="key"
+                      data-role="task-analysis-source"
+                    >
+                      {{ triageSourceLabel(key, repo) }}
+                    </div>
+                  </dd>
+                </template>
                 <template v-if="triage.analysis.meta?.provider">
                   <dt>Исполнитель</dt><dd>{{ triage.analysis.meta.provider }}</dd>
                 </template>
@@ -1295,6 +1307,16 @@ function triageScore(value) {
   const score = Number(value);
 
   return Number.isInteger(score) && score >= 1 && score <= 5 ? `${score}/5` : '—';
+}
+
+// По какому коду шла оценка: снимок ветки origin или рабочая копия, с короткой ревизией
+// и причиной, если снимок подготовить не удалось.
+function triageSourceLabel(key, repo) {
+  const where = repo.ref || 'рабочая копия';
+  const revision = repo.sha ? ` @ ${repo.sha.slice(0, 7)}` : '';
+  const note = repo.note ? ` — ${repo.note}` : '';
+
+  return `${key}: ${where}${revision}${note}`;
 }
 
 // Заход триажа идёт с момента нажатия и до готовой оценки: сначала уходят ответы

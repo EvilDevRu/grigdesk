@@ -4,7 +4,6 @@
 // Очередь in-process (конкуренция 1): анализ идёт минуты, при рестарте сервера
 // незавершённые помечаются failed — кнопка «Оценить» запускает заново.
 import { createHash, randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadTriageProfile } from './profile.ts';
@@ -12,9 +11,12 @@ import type { TriageProfile } from './profile.ts';
 import { buildTriagePrompt, type TriageAnsweredQuestion } from './prompt.ts';
 import { parseRouteMap, resolveRoute } from './routePolicy.ts';
 import { createRepoHistoryTools } from './repoHistory.ts';
+import { TriageSources } from './triageSource.ts';
+import type { TriageSourceLease, TriageSourceRepo } from './triageSource.ts';
 import { supportsScopedWorkspace } from '../executors/index.ts';
 import { createWorkIpc } from '../executors/workIpc.ts';
-import { refreshRepos } from '../gitRefresh.ts';
+import { git, refreshRepos } from '../gitRefresh.ts';
+import type { RepoRefreshResult } from '../gitRefresh.ts';
 import {
   resolveChatAttachment,
   resolveLegacyChatAttachment,
@@ -79,6 +81,21 @@ export interface ClarificationBatchResult {
 }
 
 const CLARIFICATION_MARKER_RE = /<!-- cockpit-clarification:v1 ([A-Za-z0-9_-]+) -->/g;
+// Сколько живёт посчитанный diff sha..ref: анализы одной волны делят одну ревизию.
+const DIFF_CACHE_MS = 120_000;
+// Насколько свежим должно быть обновление репозиториев перед заходом: волна задач
+// переиспользует один fetch, а не дёргает его на каждую задачу.
+const REFRESH_MAX_AGE_MS = 10 * 60_000;
+
+// Запись оценки о репозитории. dir — рабочая копия из профиля: по ней форма запуска
+// узнаёт профиль оценки; ref — ветка снимка, от неё считается протухание; note —
+// почему оценка шла не по снимку.
+interface AnalysisRepoRecord {
+  dir: string;
+  sha: string | null;
+  ref?: string;
+  note?: string;
+}
 
 function boundedText(value: unknown, limit = 4000): string {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
@@ -272,15 +289,14 @@ export class Analyzer {
 
   _ready: Promise<void>;
 
-  _gitRefresh?: unknown;
+  // Код, который читают заходы: снимки isolated-профиля или рабочие копии.
+  _sources: TriageSources;
 
   _legacyMigrationUnavailable?: boolean;
 
   _diffCache?: Map<string, { at: number; files: Set<string> | null }>;
 
   _active?: number;
-
-  _lastRefreshAt?: number;
 
   onAnalyzed?: ((id: string) => unknown) | null;
 
@@ -306,6 +322,7 @@ export class Analyzer {
     this._queue = [];
     this._jobs = new Map(); // id → 'queued' | 'running'
     this._profile = null;   // кеш профиля триажа
+    this._sources = new TriageSources(path.join(config.analysisDir, '.source'));
     this._started = false;
     this._ready = this._init();
   }
@@ -669,34 +686,51 @@ export class Analyzer {
   /**
    * Протухание анализа: какие из его files[] изменились в репо с момента оценки.
    * Движение master само по себе не сигнал (коммиты летят часто) — сигнал только
-   * пересечение диффа с файлами, на которые опирается оценка.
+   * пересечение диффа с файлами, на которые опирается оценка. Оценку по снимку
+   * сверяем с той же веткой origin, по рабочей копии — с её HEAD.
    */
   async _staleFiles(analysis: any): Promise<string[]> {
-    const out: string[] = [];
-    const repos: Record<string, { dir?: string; sha?: string }> = analysis.repos || {};
-    for (const [key, r] of Object.entries(repos)) {
-      if (!r?.sha || !r?.dir) continue;
-      const changed = await this._changedSince(r.dir, r.sha);
-      if (!changed) continue;
-      const mine: string[] = (analysis.files || [])
-        .filter((f: unknown) => String(f).startsWith(key + ':'))
-        .map((f: unknown) => String(f).slice(key.length + 1));
-      out.push(...mine.filter((f) => changed.has(f)).map((f) => `${key}:${f}`));
-    }
-    return out;
+    const repos: Record<string, Partial<AnalysisRepoRecord>> = analysis.repos || {};
+    const files: string[] = (analysis.files || []).map(String);
+    const perRepo = await Promise.all(Object.entries(repos).map(async ([key, r]) => {
+      const changed = r?.sha && r?.dir ? await this._changedSince(r.dir, r.sha, r.ref) : null;
+      const prefix = `${key}:`;
+
+      return changed
+        ? files.filter((f) => f.startsWith(prefix) && changed.has(f.slice(prefix.length)))
+        : [];
+    }));
+
+    return perRepo.flat();
   }
 
-  /** Изменённые файлы sha..HEAD с кешем: анализы одной волны делят один SHA. */
-  async _changedSince(dir: string, sha: string): Promise<Set<string> | null> {
-    const key = `${dir}|${sha}`;
-    const hit = this._diffCache?.get(key);
-    if (hit && Date.now() - hit.at < 120000) return hit.files;
-    const files = await new Promise<Set<string> | null>((resolve) => {
-      execFile('git', ['-C', dir, 'diff', '--name-only', `${sha}..HEAD`], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 },
-        (err, out) => resolve(err ? null : new Set(out.split('\n').filter(Boolean))));
-    });
-    this._diffCache = this._diffCache || new Map();
-    this._diffCache.set(key, { at: Date.now(), files });
+  /**
+   * Изменённые файлы sha..ref (по умолчанию HEAD) с кешем: анализы одной волны делят
+   * ревизию. Переименование считается удалением старого пути — для протухания так
+   * точнее, а git не тратит время на поиск переименований.
+   */
+  async _changedSince(dir: string, sha: string, ref = 'HEAD'): Promise<Set<string> | null> {
+    const key = `${dir}|${sha}|${ref}`;
+    const now = Date.now();
+    const cache = this._diffCache ??= new Map();
+    const hit = cache.get(key);
+
+    if (hit && now - hit.at < DIFF_CACHE_MS) {
+      return hit.files;
+    }
+
+    const diff = await git(dir, ['diff', '--no-renames', '--name-only', `${sha}..${ref}`], 10000);
+    const files = diff.ok ? new Set(diff.out.split('\n').filter(Boolean)) : null;
+
+    // Просроченные записи вычищаются здесь же: иначе ревизия каждой волны жила бы до рестарта.
+    for (const [stale, entry] of cache) {
+      if (now - entry.at >= DIFF_CACHE_MS) {
+        cache.delete(stale);
+      }
+    }
+
+    cache.set(key, { at: now, files });
+
     return files;
   }
 
@@ -781,24 +815,19 @@ export class Analyzer {
     this._jobs.set(id, 'running');
     await this._writeStatus(id, { state: 'running', startedAt });
     let staging = null;
+    let lease: TriageSourceLease | null = null;
     try {
       const selected = await this._resolveRunSelection();
       if (!selected.ok) {
         throw Object.assign(new Error(selected.error), { analysisCode: selected.error });
       }
       const profile = await this.profile();
-      // Оцениваем свежий код: перед запуском подтягиваем изменения (правило кокпита,
-      // выключается в настройках). Безопасно: ff-only и только чистый master.
-      let gitRefresh = null;
-      // Не чаще раза в 10 минут: волна из десятков задач не должна дёргать pull
-      // на каждую (и параллельные воркеры не гоняют git по одному репо разом).
-      if (this.prefs?.read().gitRefreshBeforeRun
-          && (!this._lastRefreshAt || Date.now() - this._lastRefreshAt > 10 * 60_000)) {
-        this._lastRefreshAt = Date.now();
-        gitRefresh = await refreshRepos(profile.repos);
-        this.log?.info({ task: id, gitRefresh }, 'репозитории обновлены перед триажем');
-      }
-      this._gitRefresh = gitRefresh;
+      const gitRefresh = await this._refreshBeforeRun(id, profile);
+      // Оцениваем тот код, с которого начнёт конвейер: у isolated-профиля это снимок
+      // интеграционной ветки, а не рабочая копия человека (lib/analysis/triageSource.ts).
+      lease = await this._sources.acquire(profile);
+
+      const { repos: sources, roots } = lease;
       const ticket = await this._fetchTicket(id);
       staging = await fs.mkdtemp(path.join(this.dir, `.t${id}.run-`));
       const inputDir = path.join(staging, 'input');
@@ -820,6 +849,7 @@ export class Analyzer {
         answered: await this.readAnsweredQuestions(id),
         discussion: await this._discussion(id, ticket),
         profile,
+        sources,
         routeChoice: {
           kinds: parseRouteMap(profile.routeMap).kinds,
           routes: (catalog?.routes || []).map((routeId: string) => ({
@@ -830,7 +860,7 @@ export class Analyzer {
         jsonPath: outputJson,
         notePath: outputNote,
       });
-      const readableRoots = await this._readableRoots(profile, inputDir);
+      const readableRoots = await this._readableRoots([...roots, inputDir]);
       const workspaceAccess = {
         readableRoots,
         writableRoots: [await fs.realpath(outputDir)],
@@ -841,7 +871,7 @@ export class Analyzer {
         allowBash: false,
         tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'repo_history'],
       };
-      const workTools = createRepoHistoryTools(profile.repos || []);
+      const workTools = createRepoHistoryTools(sources);
       const workIpc = selected.executor.workToolsTransport === 'mcp'
         ? await createWorkIpc({ workTools, root: staging })
         : null;
@@ -875,6 +905,7 @@ export class Analyzer {
         questions: normalizeAnalysisQuestions(analysis.questions),
         scope: normalizeAnalysisScope(analysis.scope),
       };
+
       await this._enrich(outputJson, normalized, {
         ticket,
         profile,
@@ -882,6 +913,8 @@ export class Analyzer {
         run,
         startedAt,
         selected,
+        sources,
+        gitRefresh,
       });
       await fs.rename(outputJson, p.json);
       if (await fs.stat(outputNote).then(() => true, () => false)) {
@@ -897,10 +930,29 @@ export class Analyzer {
       this.log?.warn({ task: id, err: failureText(e) }, 'триаж упал');
       return { ok: false, error };
     } finally {
+      lease?.release();
+
       if (staging) {
         await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
       }
     }
+  }
+
+  /**
+   * Обновление репозиториев перед заходом — правило кокпита, выключается в настройках.
+   * Итог не старше REFRESH_MAX_AGE_MS переиспользуется, идущий fetch ждут, а не читают
+   * код посреди него (общий механизм в lib/gitRefresh.ts).
+   */
+  async _refreshBeforeRun(id: string, profile: TriageProfile): Promise<RepoRefreshResult[] | null> {
+    if (!this.prefs?.read().gitRefreshBeforeRun) {
+      return null;
+    }
+
+    const result = await refreshRepos(profile.repos, { maxAgeMs: REFRESH_MAX_AGE_MS });
+
+    this.log?.info({ task: id, gitRefresh: result }, 'репозитории обновлены перед триажем');
+
+    return result;
   }
 
   async _resolveRunSelection() {
@@ -943,20 +995,21 @@ export class Analyzer {
     };
   }
 
-  async _readableRoots(profile: TriageProfile, inputDir: string): Promise<string[]> {
-    const values = [
-      profile.cwd,
-      ...(profile.dirs || []),
-      ...(profile.repos || []).map((repo) => repo.dir),
-      inputDir,
-    ].filter(Boolean);
+  /**
+   * Канонические каталоги, открытые агенту на чтение: код захода из аренды и его входные
+   * файлы. Несуществующие пропускаются, дубли по realpath схлопываются.
+   */
+  async _readableRoots(paths: readonly string[]): Promise<string[]> {
     const roots: string[] = [];
-    for (const value of values) {
+
+    for (const value of paths.filter(Boolean)) {
       const canonical = await fs.realpath(value).catch(() => null);
+
       if (canonical && !roots.includes(canonical)) {
         roots.push(canonical);
       }
     }
+
     return roots;
   }
 
@@ -1093,19 +1146,28 @@ export class Analyzer {
   async _enrich(
     jsonPath: string,
     analysis: any,
-    { ticket, profile, catalog, run, startedAt, selected }: {
+    { ticket, profile, catalog, run, startedAt, selected, sources, gitRefresh }: {
       ticket: any;
       profile: TriageProfile;
       catalog: any;
       run: any;
       startedAt: number;
       selected: any;
+      sources: readonly TriageSourceRepo[];
+      gitRefresh: RepoRefreshResult[] | null;
     },
   ): Promise<void> {
-    const repos: Record<string, { dir: string; sha: string | null }> = {};
-    for (const r of profile.repos) {
-      repos[r.key] = { dir: r.dir, sha: await gitSha(r.dir) };
+    const repos: Record<string, AnalysisRepoRecord> = {};
+
+    for (const r of sources) {
+      repos[r.key] = {
+        dir: r.source,
+        sha: r.sha,
+        ...(r.ref ? { ref: r.ref } : {}),
+        ...(r.note ? { note: r.note } : {}),
+      };
     }
+
     const decision = resolveRoute(analysis, {
       routeMap: profile.routeMap,
       routes: catalog?.routes || [],
@@ -1135,19 +1197,11 @@ export class Analyzer {
         duration_ms: Date.now() - startedAt,
         cost_usd: run.cost ?? run.costUsd ?? null,
         context_tokens: run.contextTokens ?? null,
-        git_refresh: this._gitRefresh,
+        git_refresh: gitRefresh,
       },
     };
     await fs.writeFile(jsonPath, JSON.stringify(enriched, null, 2));
   }
-}
-
-function gitSha(dir: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile('git', ['-C', dir, 'rev-parse', 'HEAD'], { timeout: 5000 }, (err, out) => {
-      resolve(err ? null : out.trim());
-    });
-  });
 }
 
 /** Описание задачи приходит HTML'ом Битрикса — сводим к тексту для промпта. */

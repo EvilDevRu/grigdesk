@@ -15,6 +15,7 @@ export class AnalysisContractError extends Error {
 const {
   boolean,
   listOf,
+  mapOf,
   numeric,
   objectOf,
   oneOf,
@@ -69,6 +70,15 @@ const analysisMeta = objectOf({
   context_tokens: optional(numeric),
 });
 
+// Код, по которому шла оценка, по ключу репозитория: снимок ветки origin (`ref`) или
+// рабочая копия (`ref` пуст); `note` объясняет, почему оценка шла не по снимку.
+// Каталог рабочей копии (`dir`) остаётся серверу: клиенту он не нужен.
+const analysisRepo = objectOf({
+  sha: optional(text),
+  ref: optional(text),
+  note: optional(text),
+});
+
 // Объём работы словами результата для пользователя: `do` — по пункту на каждый пункт
 // постановки, `skip` — что не делаем и почему. `do` предзаполняет критерии приёмки в форме
 // запуска: человек видит и правит объём ДО конвейера, а не узнаёт о сужении на приёмке.
@@ -95,6 +105,7 @@ const analysis = objectOf({
   route_reason: optional(text),
   title: optional(text),
   generated_at: optional(text),
+  repos: optional(mapOf(analysisRepo)),
   meta: optional(analysisMeta),
 });
 

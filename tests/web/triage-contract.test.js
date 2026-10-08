@@ -50,6 +50,19 @@ const analysis = {
     cost_usd: 0.42,
     context_tokens: 120000,
   },
+  // По какому коду шла оценка: снимок ветки origin или рабочая копия с причиной.
+  repos: {
+    be: {
+      sha: '62addc56aa11bb22cc33dd44ee55ff6677889900',
+      ref: 'origin/master',
+      note: null,
+    },
+    fe: {
+      sha: '3b5adc1aee455a6c19ab85844aab6dedbedd28fb',
+      ref: null,
+      note: 'у репозитория нет origin/HEAD, origin/master или origin/main',
+    },
+  },
 };
 const status = {
   task: 42,

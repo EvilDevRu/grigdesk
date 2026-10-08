@@ -19,6 +19,9 @@ export interface TriageProfile {
   repos: TriageRepo[];
   markers: string;
   routeMap: string;
+  // Где конвейер профиля работает с кодом: isolated — в новом worktree от ветки origin,
+  // shared — прямо в рабочей копии; null — профиль хук не объявил.
+  workspaceMode: 'isolated' | 'shared' | null;
 }
 
 export interface TriageProfilePaths {
@@ -34,11 +37,21 @@ export async function loadTriageProfile(
   { factoryHome, profilesDir }: TriageProfilePaths,
   name?: string,
 ): Promise<TriageProfile> {
-  const empty: TriageProfile = { ctx: '', cwd: '', dirs: [], repos: [], markers: '', routeMap: '' };
+  const empty: TriageProfile = {
+    ctx: '',
+    cwd: '',
+    dirs: [],
+    repos: [],
+    markers: '',
+    routeMap: '',
+    workspaceMode: null,
+  };
   if (!name || !factoryHome || !profilesDir) return empty;
   const file = path.join(profilesDir, name, 'profile.sh');
   const script = `source "${file}" >/dev/null 2>&1 || exit 1
-printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PROFILE_TRIAGE_REPOS" "$PROFILE_TRIAGE_MARKERS" "$PROFILE_TRIAGE_ROUTES"`;
+__triage_mode=$(declare -F profile_workspace_mode >/dev/null && profile_workspace_mode 2>/dev/null)
+printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PROFILE_TRIAGE_REPOS" \
+  "$PROFILE_TRIAGE_MARKERS" "$PROFILE_TRIAGE_ROUTES" "$__triage_mode"`;
   const out = await new Promise<string | null>((resolve) => {
     execFile('bash', ['-c', script], {
       env: { ...process.env, FACTORY_HOME: factoryHome, FACTORY_PROFILES_DIR: profilesDir },
@@ -46,7 +59,17 @@ printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PR
     }, (err, stdout) => resolve(err ? null : stdout));
   });
   if (out === null) return empty;
-  const [ctx = '', cwd = '', dirsRaw = '', reposRaw = '', markers = '', routeMap = ''] = out.split(SEP);
+
+  const [
+    ctx = '',
+    cwd = '',
+    dirsRaw = '',
+    reposRaw = '',
+    markers = '',
+    routeMap = '',
+    modeRaw = '',
+  ] = out.split(SEP);
+  const mode = modeRaw.trim();
   return {
     ctx,
     cwd,
@@ -60,5 +83,7 @@ printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PR
     // «род:глубина=маршрут» — соответствие оценки триажа маршрутам ЭТОГО проекта.
     // Профиль без карты работает по-старому: род должен совпасть с именем маршрута.
     routeMap,
+    // От режима зависит, какой код читает триаж (lib/analysis/triageSource.ts).
+    workspaceMode: mode === 'isolated' || mode === 'shared' ? mode : null,
   };
 }

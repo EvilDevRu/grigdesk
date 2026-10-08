@@ -13,6 +13,8 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
 
+import { withPathLock } from './pathLock.ts';
+
 export type EnvFileErrorCode =
   | 'env_changes_invalid'
   | 'env_name_invalid'
@@ -70,9 +72,6 @@ const COMMENT_RE = /^\s*(?:[#;]|$)/;
 const ASSIGNMENT_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
 // После закрывающей кавычки допустимы только пробелы и простой комментарий.
 const QUOTED_TAIL_RE = /^\s*(?:#[^"'`\\]*)?$/;
-
-// Правки одного файла выполняются строго по очереди внутри процесса.
-const pathLocks = new Map<string, Promise<unknown>>();
 
 /**
  * Имя переменной, которое писатель согласен записать: латиница в верхнем регистре,
@@ -470,26 +469,6 @@ async function replaceFile(target: string, text: string, snapshot: EnvSnapshot):
   }
 
   return replaced;
-}
-
-/**
- * Выполняет функцию под очередью конкретного файла. Ошибка одной правки не ломает
- * очередь: следующая правка всё равно дождётся завершения предыдущей.
- */
-async function withPathLock<T>(key: string, task: () => Promise<T>): Promise<T> {
-  const previous = pathLocks.get(key) ?? Promise.resolve();
-  const run = previous.catch(() => undefined).then(task);
-  const tail = run.catch(() => undefined);
-
-  pathLocks.set(key, tail);
-
-  try {
-    return await run;
-  } finally {
-    if (pathLocks.get(key) === tail) {
-      pathLocks.delete(key);
-    }
-  }
 }
 
 /**
