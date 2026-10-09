@@ -22,6 +22,7 @@
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)
 - [Стадии — глобальный enum (server/src/lib/stages.ts)](stage-catalog.md)
 - [Триаж называет род работы, глубину маршрута считает политика](triage-routing-policy.md)
+- [Триаж сверяет задачу с правилами продукта, соседями и режимами](triage-product-rules.md)
 - [Ручной выбор маршрута принадлежит человеку](manual-route-choice.md)
 
 ### Данные фабрики

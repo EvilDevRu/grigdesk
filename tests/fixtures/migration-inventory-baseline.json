@@ -51,6 +51,7 @@
       "tests/server/analysis-model-migration.test.js",
       "tests/server/analysis-open-questions.test.js",
       "tests/server/analysis-plugin-gate.test.js",
+      "tests/server/analysis-product-rules.test.js",
       "tests/server/analysis-questions.test.js",
       "tests/server/analysis-route-policy.test.js",
       "tests/server/analysis-runner.test.js",
