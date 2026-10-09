@@ -240,6 +240,15 @@ test('capability канала публикуется только из разо�
     parseInTurnCapability({ protocol: 1, text: true, confirmation: 'consumed' }),
     { protocol: 1, text: true, confirmation: 'consumed' },
   );
+  assert.deepEqual(
+    parseInTurnCapability({ protocol: 1, text: true, confirmation: 'forwarded', images: true }),
+    { protocol: 1, text: true, confirmation: 'forwarded', images: true },
+  );
+  assert.equal(
+    'images' in parseInTurnCapability({ protocol: 1, text: true, images: 'да' }),
+    false,
+    'картинки объявляются только явным true',
+  );
   assert.equal(parseInTurnCapability({ protocol: 0, text: true }), null);
   assert.equal(parseInTurnCapability({ protocol: 2, text: false }), null);
   assert.equal(parseInTurnCapability('да'), null);

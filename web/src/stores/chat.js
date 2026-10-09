@@ -1057,23 +1057,28 @@ export const useChatStore = defineStore('chat', {
     /**
      * Повтор текста в том же запуске использует прежний id, пока исход не подтверждён.
      * При потере ответа POST сначала ищем receipt, чтобы не отправить второй экземпляр.
+     * Картинки входят в отпечаток попытки: тот же текст с другим файлом — новая реплика.
      */
-    async sendInTurn(chatKey, text) {
+    async sendInTurn(chatKey, text, attachments = []) {
       const run = this.inTurnRuns[chatKey];
       const value = String(text || '').trim();
+      const files = attachments.map((a) => ({ file: a.file, name: a.name }));
+      const filesKey = files.map((a) => a.file).join('\n');
 
       if (this.inTurnProtocol !== IN_TURN_PROTOCOL || !run?.active
-        || !run.availability?.available || !value
+        || !run.availability?.available || (!value && !files.length)
         || utf8Bytes(value) > IN_TURN_TEXT_LIMIT_BYTES) {
         return false;
       }
 
       const prior = this.inTurnAttempts[chatKey];
       const attempt = prior?.runId === run.runId && prior?.text === value
+        && (prior.filesKey || '') === filesKey
         ? prior
         : {
           runId: run.runId,
           text: value,
+          filesKey,
           messageId: newTurnId(),
           sentAt: Date.now(),
         };
@@ -1086,6 +1091,7 @@ export const useChatStore = defineStore('chat', {
           targetRunId: run.runId,
           messageId: attempt.messageId,
           text: value,
+          ...(files.length ? { attachments: files } : {}),
           sentAt: attempt.sentAt,
         });
 

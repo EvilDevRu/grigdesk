@@ -1079,15 +1079,23 @@ async function configureClaudeExtraUsage(patch: {
 export function claudeProviderSettingsArgs(settings: ClaudeSettings = {}, {
   directSshPolicy = true,
   nativeSettings,
-}: { directSshPolicy?: boolean; nativeSettings?: PreparedNativeSettings } = {}) {
+  readOnlyDirs = [],
+}: {
+  directSshPolicy?: boolean;
+  nativeSettings?: PreparedNativeSettings;
+  readOnlyDirs?: readonly string[];
+} = {}) {
   const blockDirectSsh = directSshPolicy && settings.blockDirectSsh !== false;
   const hookCommand = directCommandHook({
     blockDirectSsh,
     blockDirectDb: settings.blockDirectDb === true,
     strictUnknownDbClient: settings.strictUnknownDbClient === true,
   });
+  const native = nativeSettings?.payload as Record<string, unknown> ?? {};
+  const permissions = withReadOnlyDirs(native.permissions, readOnlyDirs);
   const payload = {
-    ...(nativeSettings?.payload as Record<string, unknown> ?? {}),
+    ...native,
+    ...(permissions && { permissions }),
     fastMode: settings.fastMode === true,
     ...(hookCommand && {
       hooks: {
@@ -1103,6 +1111,25 @@ export function claudeProviderSettingsArgs(settings: ClaudeSettings = {}, {
     '--settings',
     JSON.stringify(payload),
   ];
+}
+
+/**
+ * Право читать каталоги без вопроса человеку дописывается к нативным правилам, а не
+ * заменяет их. Абсолютный путь в правиле CLI пишется двумя слэшами, иначе оно молчит;
+ * в настройках, а не в --allowedTools, — путь с пробелом там не разрезается.
+ */
+function withReadOnlyDirs(current: unknown, dirs: readonly string[]): Record<string, unknown> | null {
+  if (!dirs.length) {
+    return null;
+  }
+
+  const base = current && typeof current === 'object' ? current as Record<string, unknown> : {};
+  const allow = Array.isArray(base.allow) ? base.allow : [];
+
+  return {
+    ...base,
+    allow: [...allow, ...dirs.map((dir) => `Read(//${dir.replace(/^\/+/, '')}/**)`)],
+  };
 }
 
 const CLAUDE_UNTRUSTED_MEDIA_TYPES = Object.freeze([
@@ -1942,7 +1969,7 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, onProgress, onStep, signal,
-    workspaceAccess, workTools, onSessionCreated, onRunMetadata,
+    workspaceAccess, workTools, onSessionCreated, onRunMetadata, attachmentsDir,
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
   }: {
     config: ClaudeConfig;
@@ -1950,6 +1977,7 @@ export default {
     message?: string;
     cwd?: string;
     extraDirs?: readonly string[];
+    attachmentsDir?: string;
     model?: string;
     effort?: string;
     sessionId?: string | null;
@@ -2009,7 +2037,10 @@ export default {
         ]),
       },
     } : null;
-    const providerArgs = claudeProviderSettingsArgs(providerSettings, { nativeSettings });
+    const providerArgs = claudeProviderSettingsArgs(providerSettings, {
+      nativeSettings,
+      readOnlyDirs: attachmentsDir ? [attachmentsDir] : [],
+    });
     if (scopedPermissions) {
       const settingsAt = providerArgs.lastIndexOf('--settings');
       const current = JSON.parse(providerArgs[settingsAt + 1] || '{}') as Record<string, unknown>;
@@ -2181,10 +2212,13 @@ export default {
   // Канал ввода в активный ход: дополнительное user-сообщение в тот же stream-json
   // процесс. Lifecycle started подтверждает потребление; текст вливается в текущий
   // ход либо запускает следующий. Разовый режим держит процесс до общего финала.
+  // Картинки уточнения агент открывает инструментом Read по путям из текста: байты в
+  // stream-json упираются в предел строки 1 МиБ, а обычный скриншот бывает больше.
   inTurnInput: {
     protocol: 1,
     text: true,
     confirmation: 'consumed',
+    images: true,
   },
 
   session: {
@@ -2204,11 +2238,13 @@ export default {
     open({
       config, env, cwd, extraDirs = [], model, effort, permissionMode, sessionId,
       mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, hooks, workTools,
+      attachmentsDir,
     }: {
       config: ClaudeConfig;
       env?: NodeJS.ProcessEnv;
       cwd?: string;
       extraDirs?: readonly string[];
+      attachmentsDir?: string;
       model?: string;
       effort?: string;
       permissionMode?: string;
@@ -2231,7 +2267,10 @@ export default {
           extraDirs,
           mcpConfig,
           permissionPromptTool,
-          providerSettingsArgs: claudeProviderSettingsArgs(providerSettings, { nativeSettings }),
+          providerSettingsArgs: claudeProviderSettingsArgs(providerSettings, {
+            nativeSettings,
+            readOnlyDirs: attachmentsDir ? [attachmentsDir] : [],
+          }),
           workTools,
         }),
         cwd,

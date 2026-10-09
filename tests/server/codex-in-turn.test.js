@@ -288,3 +288,42 @@ test('Codex: обрыв потока с повтором бросает нача
   assert.equal(result.reply, 'Ответ после повтора.');
   assert.equal(result.assistantMessageId, 'answer-retry');
 });
+
+test('Codex: картинка уточнения уходит в тот же ход как localImage', async (t) => {
+  const f = await fixture(t, 'steer');
+  let port = null;
+  let releasePort;
+
+  const portReady = new Promise((resolve) => {
+    releasePort = resolve;
+  });
+  const run = codex.run(runOptions(f, {
+    onInTurnReady(given) {
+      port = given;
+      releasePort();
+    },
+  }));
+
+  await portReady;
+
+  const forwarded = await port.deliver({
+    messageId: 'message-fixture-0001',
+    text: 'Сравни с референсом',
+    sequence: 1,
+    images: [{ path: '/tmp/reference.png' }],
+  });
+
+  assert.deepEqual(forwarded, { ok: true, state: 'forwarded' });
+  await run;
+
+  const trace = await readTrace(f.trace);
+  const steer = trace.find((entry) => entry.message?.method === 'turn/steer').message;
+
+  assert.equal(steer.params.input[0].text, 'Сравни с референсом');
+  assert.deepEqual(
+    steer.params.input.filter((part) => part.type === 'localImage'),
+    [{ type: 'localImage', path: '/tmp/reference.png' }],
+  );
+  assert.match(steer.params.input.at(-1).text, /вернись к ранее поставленной задаче/);
+  assert.equal(codex.inTurnInput.images, true, 'адаптер объявляет картинки в ходе');
+});

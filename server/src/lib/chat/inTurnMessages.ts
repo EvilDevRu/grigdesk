@@ -7,6 +7,7 @@
 import {
   IN_TURN_ACTIVE_LIMIT,
   IN_TURN_ACTIVE_TEXT_LIMIT,
+  IN_TURN_ATTACHMENT_LIMIT,
   IN_TURN_BACKLOG_LIMIT,
   IN_TURN_ID_RE,
   IN_TURN_PAGE_LIMIT,
@@ -19,6 +20,7 @@ import {
 } from '../../../../shared/chatInTurnContracts.ts';
 import type {
   InTurnAssistantBlock,
+  InTurnAttachment,
   InTurnAvailability,
   InTurnPage,
   InTurnPort,
@@ -34,6 +36,7 @@ export interface InTurnAcceptInput {
   runId: string;
   messageId: string;
   text: string;
+  attachments?: InTurnAttachment[];
   sentAt?: number;
   context?: unknown;
 }
@@ -75,6 +78,7 @@ interface RunState {
   chatKey: string;
   runId: string;
   parentTurnId?: string;
+  images: boolean;
   availability: InTurnAvailability;
   sequence: number;
   revision: number;
@@ -127,6 +131,7 @@ export class InTurnMessages {
     chatKey: string;
     runId: string;
     parentTurnId?: string;
+    images?: boolean;
   }): void {
     if (!IN_TURN_SEGMENT_RE.test(options.chatKey) || !IN_TURN_ID_RE.test(options.runId)) {
       throw new Error('in_turn_bad_run_identity');
@@ -136,6 +141,7 @@ export class InTurnMessages {
       chatKey: options.chatKey,
       runId: options.runId,
       ...(options.parentTurnId ? { parentTurnId: options.parentTurnId } : {}),
+      images: options.images === true,
       availability: {
         runId: options.runId,
         available: false,
@@ -256,16 +262,24 @@ export class InTurnMessages {
    */
   async accept(input: InTurnAcceptInput): Promise<InTurnAcceptResult> {
     const text = String(input.text ?? '');
+    const attachments = input.attachments || [];
 
     if (!IN_TURN_SEGMENT_RE.test(input.chatKey) || !IN_TURN_ID_RE.test(input.messageId)
       || !IN_TURN_ID_RE.test(input.runId)) {
       return reject(400, 'invalid_in_turn_message', 'Некорректный идентификатор сообщения или запуска.');
     }
-    if (!text.trim()) {
+    if (!text.trim() && !attachments.length) {
       return reject(400, 'invalid_in_turn_message', 'Пустой текст уточнения.');
     }
     if (utf8Bytes(text) > IN_TURN_TEXT_LIMIT_BYTES) {
       return reject(413, 'message_too_large', 'Текст уточнения длиннее 32 КиБ.');
+    }
+    if (attachments.length > IN_TURN_ATTACHMENT_LIMIT) {
+      return reject(
+        413,
+        'message_too_large',
+        `В одном уточнении не больше ${IN_TURN_ATTACHMENT_LIMIT} картинок.`,
+      );
     }
 
     await this.ledger.load();
@@ -276,6 +290,7 @@ export class InTurnMessages {
       text,
       ...(input.sentAt ? { sentAt: input.sentAt } : {}),
       ...(input.context !== undefined ? { context: input.context } : {}),
+      files: attachments.map((attachment) => attachment.file),
     });
     const known = this.ledger.get(input.chatKey, input.messageId);
 
@@ -291,6 +306,14 @@ export class InTurnMessages {
 
     if (!run || run.closing || run.closed || run.chatKey !== input.chatKey) {
       return reject(409, 'turn_changed', 'Ход уже завершился: сообщение не передано.');
+    }
+    if (attachments.length && !run.images) {
+      return reject(
+        409,
+        'in_turn_unavailable',
+        'Этот исполнитель не принимает картинки во время хода.',
+        'unsupported',
+      );
     }
     if (!run.availability.available) {
       return reject(
@@ -314,6 +337,7 @@ export class InTurnMessages {
       revision: 1,
       sequence,
       text,
+      ...(attachments.length ? { attachments } : {}),
       fingerprint,
       acceptedAt: this.now(),
       updatedAt: this.now(),
@@ -496,6 +520,7 @@ export class InTurnMessages {
       revision: record.revision,
       sequence: record.sequence,
       text: record.text,
+      ...(record.attachments?.length ? { attachments: record.attachments } : {}),
       acceptedAt: record.acceptedAt,
       updatedAt: record.updatedAt,
       ...(record.sentAt ? { sentAt: record.sentAt } : {}),
@@ -566,6 +591,7 @@ export class InTurnMessages {
         messageId,
         text: delivering.text,
         sequence: delivering.sequence,
+        ...(delivering.attachments?.length ? { attachments: delivering.attachments } : {}),
       });
     } catch (error) {
       const reason = (error as Error)?.message || 'сбой транспорта';

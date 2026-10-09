@@ -1,5 +1,9 @@
-import { IN_TURN_PROTOCOL, IN_TURN_TEXT_LIMIT_BYTES, utf8Bytes }
-  from '../../../../shared/chatInTurnContracts.ts';
+import {
+  IN_TURN_ATTACHMENT_LIMIT,
+  IN_TURN_PROTOCOL,
+  IN_TURN_TEXT_LIMIT_BYTES,
+  utf8Bytes,
+} from '../../../../shared/chatInTurnContracts.ts';
 import type {
   InTurnCapability,
   InTurnDeliveryState,
@@ -31,14 +35,48 @@ function composerState(active: boolean, ready: boolean, reason: string): Compose
 }
 
 /**
+ * Почему вложения черновика не могут уйти в текущий ход. Пустая строка — могут:
+ * исполнитель объявил картинки, все вложения картинки и их не больше предела.
+ */
+function attachmentsReason(
+  capability: InTurnCapability | null | undefined,
+  pendingCount: number,
+  pendingImages: boolean,
+): string {
+  if (!pendingCount) {
+    return '';
+  }
+  if (capability?.images !== true) {
+    return 'Вложения нельзя передать в текущий ход.';
+  }
+  if (!pendingImages) {
+    return 'В текущий ход передаются только картинки.';
+  }
+  if (pendingCount > IN_TURN_ATTACHMENT_LIMIT) {
+    return `В одном уточнении не больше ${IN_TURN_ATTACHMENT_LIMIT} картинок.`;
+  }
+
+  return '';
+}
+
+/**
  * Выбор действия композера зависит от подтверждённого активного run и capability.
  * Причину отказа возвращаем словами, чтобы окно могло показать её рядом с кнопкой.
+ * `pendingImages` подтверждает, что все вложения черновика — картинки.
  */
-export function inTurnComposerState({ run, protocol, capability, pendingCount, text }: {
+export function inTurnComposerState({
+  run,
+  protocol,
+  capability,
+  pendingCount,
+  pendingImages = false,
+  text,
+}: {
   run: ChatInTurnRun | null;
   protocol: number;
   capability: InTurnCapability | null | undefined;
   pendingCount: number;
+  pendingImages?: boolean;
   text: string;
 }): ComposerState {
   if (!run?.active || !run.runId) {
@@ -51,8 +89,11 @@ export function inTurnComposerState({ run, protocol, capability, pendingCount, t
   if (capability?.protocol !== IN_TURN_PROTOCOL || capability.text !== true) {
     return composerState(true, false, REASONS.unsupported);
   }
-  if (pendingCount) {
-    return composerState(true, false, 'Вложения нельзя передать в текущий ход.');
+
+  const attachments = attachmentsReason(capability, pendingCount, pendingImages);
+
+  if (attachments) {
+    return composerState(true, false, attachments);
   }
   if (utf8Bytes(text || '') > IN_TURN_TEXT_LIMIT_BYTES) {
     return composerState(true, false, 'Уточнение длиннее 32 КиБ.');

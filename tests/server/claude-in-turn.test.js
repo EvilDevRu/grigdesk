@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ChatAssistantMessages } from '../../server/src/lib/chat/assistantMessages.ts';
 import { ChatAssistantPublisher } from '../../server/src/lib/chat/assistantPublisher.ts';
-import claude from '../../server/src/lib/executors/claude.ts';
+import claude, { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 import { claudeSessionArgs, openClaudeStreamSession } from '../../server/src/lib/executors/_claudeStream.ts';
 import { parseInTurnCapability } from '../../shared/chatInTurnContracts.ts';
 import { assertInTurnConformance } from './helpers/in-turn-conformance.js';
@@ -303,7 +303,7 @@ test('Claude: текстовый шаг несёт id блока, а capability 
 
   assert.deepEqual(
     parseInTurnCapability(claude.inTurnInput),
-    { protocol: 1, text: true, confirmation: 'consumed' },
+    { protocol: 1, text: true, confirmation: 'consumed', images: true },
   );
 });
 
@@ -724,3 +724,89 @@ for (const mode of ['session', 'run']) {
     assert.equal(f.messages.byRun(runId).every((block) => block.complete), true);
   });
 }
+
+/** Настройки, которые адаптер передал процессу фикстуры флагом --settings. */
+async function settingsOfProcess(trace) {
+  const argv = (await readTrace(trace)).find((entry) => entry.direction === 'process').argv;
+
+  return JSON.parse(argv[argv.lastIndexOf('--settings') + 1]);
+}
+
+/**
+ * Один ход с уточнением: картинку агент откроет по пути из текста, поэтому запуску
+ * нужно только право чтения каталога вложений без вопроса человеку.
+ */
+async function runWithAttachments(t, open) {
+  const f = await fixture(t);
+  const attachmentsDir = path.join(f.dir, 'chat attachments');
+  let port = null;
+  let releasePort;
+
+  const portReady = new Promise((resolve) => {
+    releasePort = resolve;
+  });
+  const run = open(f, attachmentsDir, (given) => {
+    port = given;
+    releasePort();
+  });
+
+  await portReady;
+  await port.deliver({ messageId: 'message-fixture-0001', text: 'Вопрос', sequence: 1 });
+  await run;
+
+  return { settings: await settingsOfProcess(f.trace), attachmentsDir };
+}
+
+test('Claude: папка вложений читается без вопроса, правило не теряет нативные', () => {
+  const args = claudeProviderSettingsArgs({}, {
+    readOnlyDirs: ['/data/chat attachments'],
+    nativeSettings: {
+      payload: { permissions: { allow: ['Bash(git status)'], deny: ['WebFetch'] } },
+    },
+  });
+  const payload = JSON.parse(args[args.indexOf('--settings') + 1]);
+
+  assert.deepEqual(payload.permissions, {
+    allow: ['Bash(git status)', 'Read(//data/chat attachments/**)'],
+    deny: ['WebFetch'],
+  });
+  assert.equal(
+    JSON.parse(claudeProviderSettingsArgs({})[1 + claudeProviderSettingsArgs({}).indexOf('--settings')])
+      .permissions,
+    undefined,
+    'без каталога правил не добавляется',
+  );
+});
+
+test('Claude: разовый запуск и живая сессия получают чтение папки вложений', async (t) => {
+  const once = await runWithAttachments(t, (f, attachmentsDir, onInTurnReady) => claude.run({
+    config: { claudeBin: f.bin },
+    env: f.env,
+    message: 'Проверь два файла.',
+    cwd: f.dir,
+    sessionId: null,
+    permissionMode: 'default',
+    providerSettings: {},
+    attachmentsDir,
+    onInTurnReady,
+  }));
+
+  assert.ok(once.settings.permissions.allow.includes(`Read(/${once.attachmentsDir}/**)`));
+
+  const live = await runWithAttachments(t, (f, attachmentsDir, onInTurnReady) => {
+    const session = claude.session.open({
+      config: { claudeBin: f.bin },
+      env: f.env,
+      cwd: f.dir,
+      permissionMode: 'default',
+      providerSettings: {},
+      attachmentsDir,
+    });
+
+    t.after(() => session.close());
+
+    return session.send({ message: 'Проверь два файла.', onInTurnReady });
+  });
+
+  assert.ok(live.settings.permissions.allow.includes(`Read(/${live.attachmentsDir}/**)`));
+});

@@ -50,6 +50,7 @@ function isInTurnRecord(value: unknown): value is InTurnRecord {
     && IN_TURN_ID_RE.test(entry.runId)
     && STATES.has(String(entry.state))
     && typeof entry.text === 'string'
+    && (entry.attachments === undefined || Array.isArray(entry.attachments))
     && Number.isSafeInteger(entry.revision)
     && Number.isSafeInteger(entry.sequence)
     && Number.isSafeInteger(entry.acceptedAt);

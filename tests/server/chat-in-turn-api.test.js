@@ -3,6 +3,8 @@
 // Проверяем настоящий модуль чата и настоящий Fastify: окно получает короткий ответ сразу
 // после устойчивой записи, а доставку выполняет координатор, не создавая второй обычный ход.
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -25,13 +27,18 @@ function deferred() {
  * Исполнитель под управлением теста: сам объявляет канал, отдаёт порт и записывает,
  * что именно ему передали. Настоящих моделей и процессов здесь нет.
  */
-function inTurnExecutor({ registerPort = true } = {}) {
+function inTurnExecutor({ registerPort = true, images = false } = {}) {
   const runs = [];
   const delivered = [];
 
   const executor = {
     id: 'test-provider',
-    inTurnInput: { protocol: 1, text: true, confirmation: 'forwarded' },
+    inTurnInput: {
+      protocol: 1,
+      text: true,
+      confirmation: 'forwarded',
+      ...(images ? { images: true } : {}),
+    },
     async run(options) {
       const hold = deferred();
       const run = {
@@ -370,4 +377,107 @@ test('Claude MCP-вопрос использует тот же барьер ак
   await waitFor(async () => (await activeRun(app, 'chat-fixture'))?.inTurn?.available, {
     what: 'возобновление после MCP-вопроса',
   });
+});
+
+/** Готовый канал запуска: тест ждёт, пока транспорт объявит порт. */
+async function readyRun(app, chatKey) {
+  return waitFor(async () => {
+    const run = await activeRun(app, chatKey);
+
+    return run?.inTurn?.available ? run : null;
+  }, { what: 'готовый канал запуска' });
+}
+
+test('картинка уточнения доходит до порта путём из каталога вложений и видна в receipt', async (t) => {
+  const { executor, delivered } = inTurnExecutor({ images: true });
+  const { app, config } = await chatAppFixture(t, { executor });
+  const attachDir = path.join(config.chatsDir, 'attachments');
+
+  await fs.mkdir(attachDir, { recursive: true });
+  await fs.writeFile(path.join(attachDir, '1700000000000-shot.png'), 'png-bytes');
+  await fs.writeFile(path.join(attachDir, '1700000000001-notes.txt'), 'text');
+  await saveChat(app, 'chat-fixture');
+  await startTurn(app, 'chat-fixture', 'turn-fixture-0001');
+
+  const started = await readyRun(app, 'chat-fixture');
+  const payload = {
+    chatKey: 'chat-fixture',
+    targetRunId: started.runId,
+    messageId: 'message-fixture-0001',
+    text: 'Сравни с референсом',
+    attachments: [{ file: '1700000000000-shot.png', name: 'shot.png' }],
+  };
+  const accepted = await app.inject({ method: 'POST', url: '/api/chat/in-turn', payload });
+
+  assert.equal(accepted.statusCode, 202, accepted.body);
+  assert.deepEqual(accepted.json().attachments, [{
+    file: '1700000000000-shot.png',
+    name: 'shot.png',
+    url: '/api/chat/attachment/1700000000000-shot.png',
+    mime: 'image/png',
+  }]);
+
+  const sent = await waitFor(() => delivered.find((item) => item.messageId === 'message-fixture-0001'), {
+    what: 'передачу картинки в порт',
+  });
+  const realPath = await fs.realpath(path.join(attachDir, '1700000000000-shot.png'));
+
+  assert.deepEqual(sent.images, [{ path: realPath }]);
+  assert.match(sent.text, /\[Вложения\]/);
+  assert.ok(sent.text.includes(realPath), 'агент видит путь файла и может открыть его сам');
+  assert.match(sent.text, /Сравни с референсом/);
+
+  const missing = await app.inject({
+    method: 'POST',
+    url: '/api/chat/in-turn',
+    payload: {
+      ...payload,
+      messageId: 'message-fixture-0002',
+      attachments: [{ file: '1700000000009-gone.png', name: 'gone.png' }],
+    },
+  });
+
+  assert.equal(missing.statusCode, 400);
+  assert.equal(missing.json().error, 'invalid_in_turn_message');
+
+  const notImage = await app.inject({
+    method: 'POST',
+    url: '/api/chat/in-turn',
+    payload: {
+      ...payload,
+      messageId: 'message-fixture-0003',
+      attachments: [{ file: '1700000000001-notes.txt', name: 'notes.txt' }],
+    },
+  });
+
+  assert.equal(notImage.statusCode, 400, 'в текущий ход передаются только картинки');
+});
+
+test('исполнитель без картинок в ходе отказывает уточнению с вложением', async (t) => {
+  const { executor, delivered } = inTurnExecutor();
+  const { app, config } = await chatAppFixture(t, { executor });
+  const attachDir = path.join(config.chatsDir, 'attachments');
+
+  await fs.mkdir(attachDir, { recursive: true });
+  await fs.writeFile(path.join(attachDir, '1700000000000-shot.png'), 'png-bytes');
+  await saveChat(app, 'chat-fixture');
+  await startTurn(app, 'chat-fixture', 'turn-fixture-0001');
+
+  const started = await readyRun(app, 'chat-fixture');
+  const refused = await app.inject({
+    method: 'POST',
+    url: '/api/chat/in-turn',
+    payload: {
+      chatKey: 'chat-fixture',
+      targetRunId: started.runId,
+      messageId: 'message-fixture-0001',
+      text: 'Сравни с референсом',
+      attachments: [{ file: '1700000000000-shot.png', name: 'shot.png' }],
+    },
+  });
+
+  assert.equal(refused.statusCode, 409);
+  assert.equal(refused.json().error, 'in_turn_unavailable');
+  assert.equal(refused.json().reason, 'unsupported');
+  assert.equal(delivered.length, 0);
 });

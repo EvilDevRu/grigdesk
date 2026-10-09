@@ -36,7 +36,11 @@ import { ChatLiveSessions } from '../../lib/chat/liveSessions.ts';
 import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
 import { mayRetryEmptyRun } from '../../lib/chat/retryContract.ts';
-import { resolveChatAttachment } from '../../lib/chat/attachments.ts';
+import {
+  chatAttachmentsBlock,
+  resolveChatAttachment,
+  resolveInTurnAttachments,
+} from '../../lib/chat/attachments.ts';
 import { readChatImage } from '../../lib/chat/chatImages.ts';
 import { withChatImageHint } from '../../lib/chat/imageHint.ts';
 import { stoppedTurnBrief } from '../../lib/chat/stoppedBrief.ts';
@@ -49,9 +53,11 @@ import type { ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
 import type { ChatRunSnapshot } from '../../../../shared/chatRun.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
+  IN_TURN_ATTACHMENT_LIMIT,
   IN_TURN_ID_RE,
   IN_TURN_PROTOCOL,
   IN_TURN_PAGE_LIMIT,
+  parseInTurnCapability,
   utf8Bytes,
 } from '../../../../shared/chatInTurnContracts.ts';
 import type {
@@ -1250,7 +1256,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // выполняет координатор: HTTP-соединение не держится ни до ответа модели, ни до ACK.
   fastify.post<ChatRoute>('/api/chat/in-turn', async (request, reply) => {
     const body = (request.body || {}) as Record<string, unknown>;
-    const allowed = new Set(['chatKey', 'targetRunId', 'messageId', 'text', 'sentAt', 'context']);
+    const allowed = new Set([
+      'chatKey',
+      'targetRunId',
+      'messageId',
+      'text',
+      'attachments',
+      'sentAt',
+      'context',
+    ]);
     const unknown = Object.keys(body).filter((key) => !allowed.has(key));
 
     if (unknown.length) {
@@ -1272,12 +1286,30 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         message: 'Некорректный чат, id сообщения или запуска.',
       });
     }
+    if (Array.isArray(body.attachments) && body.attachments.length > IN_TURN_ATTACHMENT_LIMIT) {
+      return reply.code(413).send({
+        error: 'message_too_large',
+        message: `В одном уточнении не больше ${IN_TURN_ATTACHMENT_LIMIT} картинок.`,
+      });
+    }
+
+    // Картинки проверяются тем же правилом, что вложения обычного хода: только файлы
+    // каталога вложений, без симлинков и выхода по пути.
+    const attachments = await resolveInTurnAttachments(attachDir, body.attachments);
+
+    if (!attachments) {
+      return reply.code(400).send({
+        error: 'invalid_in_turn_message',
+        message: 'Вложение не найдено или не является картинкой.',
+      });
+    }
 
     const result = await inTurnMessages.accept({
       chatKey,
       runId: targetRunId,
       messageId,
       text,
+      ...(attachments.length ? { attachments } : {}),
       ...(sentAt > 0 ? { sentAt } : {}),
       ...(body.context !== undefined ? { context: body.context } : {}),
     });
@@ -2721,12 +2753,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     let attachBlock = '';
     const attachPaths = (await Promise.all(
       (attachments || []).map((a) => attachFile(a?.file)),
-    )).filter(Boolean);
+    )).filter((file): file is string => Boolean(file));
     if (attachPaths.length) {
       // Kimi получает private staging только из перечисленных файлов. Весь каталог
       // вложений в его mount namespace не попадает.
       if (target.provider !== 'kimi') extraDirs.push(attachDir);
-      attachBlock = `[Вложения]\nПользователь приложил файлы (открой их инструментом Read):\n${attachPaths.map((p) => `- ${p}`).join('\n')}\n[/Вложения]\n\n`;
+      attachBlock = chatAttachmentsBlock(attachPaths);
     }
     // Один и тот же каталог может прийти из репозиториев проекта, worktree и вложений.
     // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
@@ -3050,6 +3082,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         chatKey,
         runId,
         ...(channel.turnId ? { parentTurnId: channel.turnId } : {}),
+        images: parseInTurnCapability(executor.inTurnInput)?.images === true,
       });
 
       if (plan) {
@@ -3165,6 +3198,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         effort: runEffort,
         sessionId,
         attachmentPaths: attachPaths,
+        // Каталог вложений чата: адаптер может открыть его агенту на чтение заранее, чтобы
+        // картинка из уточнения посреди хода открылась без вопроса человеку.
+        attachmentsDir: attachDir,
         permissionMode,
         mcpConfig,
         mcpServers: workIpc ? [{ name: 'cockpit-work', ...workIpc.mcpServer }] : [],
@@ -3255,10 +3291,28 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           }
 
           inTurnMessages.registerPort(runId, {
-            deliver: (input) => port.deliver({
-              ...input,
-              text: withChatImageHint(input.text),
-            }),
+            deliver: async (input) => {
+              const images = await inTurnImagePaths(input.attachments);
+
+              if (!images) {
+                return {
+                  ok: false,
+                  code: 'attachment_missing',
+                  message: 'Картинка уточнения пропала до передачи агенту.',
+                };
+              }
+
+              const paths = images.map((image) => image.path);
+              const text = images.length
+                ? chatAttachmentsBlock(paths) + (input.text || 'Посмотри вложения.')
+                : input.text;
+
+              return port.deliver({
+                ...input,
+                text: withChatImageHint(text),
+                ...(images.length ? { images } : {}),
+              });
+            },
             close: (reason) => port.close?.(reason),
           });
 
@@ -3698,6 +3752,26 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
   function safeName(name: unknown) {
     return String(name || 'file').replace(/[^\w.\-а-яё]+/gi, '_');
+  }
+
+  /**
+   * Принятые картинки уточнения → пути для транспорта. Проверка повторяется перед
+   * передачей: файл мог исчезнуть после приёма, и агент не должен получить пустую ссылку.
+   */
+  async function inTurnImagePaths(attachments: readonly { file: string }[] = []) {
+    const images: Array<{ path: string }> = [];
+
+    for (const attachment of attachments) {
+      const resolved = await resolveChatAttachment(attachDir, attachment.file, { imageOnly: true });
+
+      if (!resolved) {
+        return null;
+      }
+
+      images.push({ path: resolved.path });
+    }
+
+    return images;
   }
 
   /**

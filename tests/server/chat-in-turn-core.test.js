@@ -12,7 +12,7 @@ import test from 'node:test';
 import { ChatAssistantMessages } from '../../server/src/lib/chat/assistantMessages.ts';
 import { ChatInTurnLedger } from '../../server/src/lib/chat/inTurnLedger.ts';
 import { InTurnMessages } from '../../server/src/lib/chat/inTurnMessages.ts';
-import { IN_TURN_BACKLOG_LIMIT } from '../../shared/chatInTurnContracts.ts';
+import { IN_TURN_ATTACHMENT_LIMIT, IN_TURN_BACKLOG_LIMIT } from '../../shared/chatInTurnContracts.ts';
 
 async function tmpDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-core-'));
@@ -455,4 +455,67 @@ test('готовая страница отдаёт уточнения по seque
   assert.deepEqual(rest.entries.map((entry) => entry.sequence), [3]);
   assert.equal(rest.truncated, false);
   assert.equal(rest.nextAfterSequence, null);
+});
+
+test('картинки уточнения: приём без текста, receipt, порт и отказ без поддержки', async () => {
+  const inTurn = await makeCoordinator();
+  const attachments = [{
+    file: '1-shot.png',
+    name: 'shot.png',
+    url: '/api/chat/attachment/1-shot.png',
+    mime: 'image/png',
+  }];
+  const seen = [];
+
+  inTurn.beginRun({ chatKey: 'fixture-chat', runId: 'fixture-run-0001', images: true });
+  inTurn.registerPort('fixture-run-0001', {
+    async deliver(input) {
+      seen.push(input);
+
+      return { ok: true, state: 'forwarded' };
+    },
+  });
+
+  const accepted = await inTurn.accept(acceptInput({ text: '', attachments }));
+
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.receipt.attachments, attachments);
+  await waitUntil(() => seen.length === 1);
+  assert.deepEqual(seen[0].attachments, attachments);
+  assert.equal(seen[0].text, '');
+
+  const conflict = await inTurn.accept(acceptInput({
+    text: '',
+    attachments: [{ ...attachments[0], file: '2-other.png' }],
+  }));
+
+  assert.equal(conflict.code, 'message_conflict', 'другой набор картинок под тем же id');
+
+  const empty = await inTurn.accept(acceptInput({ messageId: 'fixture-message-0002', text: '  ' }));
+
+  assert.equal(empty.code, 'invalid_in_turn_message', 'без текста и картинок уточнения нет');
+
+  const tooMany = await inTurn.accept(acceptInput({
+    messageId: 'fixture-message-0003',
+    attachments: Array.from({ length: IN_TURN_ATTACHMENT_LIMIT + 1 }, (_, index) => ({
+      ...attachments[0],
+      file: `${index}-shot.png`,
+    })),
+  }));
+
+  assert.equal(tooMany.code, 'message_too_large');
+
+  const plain = await makeCoordinator();
+
+  plain.beginRun({ chatKey: 'fixture-chat', runId: 'fixture-run-0002' });
+  plain.registerPort('fixture-run-0002', {
+    async deliver() {
+      return { ok: true, state: 'forwarded' };
+    },
+  });
+
+  const refused = await plain.accept(acceptInput({ runId: 'fixture-run-0002', attachments }));
+
+  assert.equal(refused.code, 'in_turn_unavailable');
+  assert.equal(refused.reason, 'unsupported');
 });

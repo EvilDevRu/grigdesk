@@ -199,6 +199,7 @@ function historyMessage(entry: InTurnEntry, run: ChatInTurnRun, previous: Histor
       role: 'user',
       kind: 'in-turn',
       text: entry.text,
+      ...(entry.attachments?.length ? { attachments: entry.attachments } : {}),
       messageId: entry.messageId,
       runId: entry.runId,
       parentTurnId: entry.parentTurnId || run.parentTurnId,

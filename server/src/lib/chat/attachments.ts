@@ -1,7 +1,18 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import type { InTurnAttachment } from '../../../../shared/chatInTurnContracts.ts';
+
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+// Тип картинки по расширению: окно рисует миниатюру только для image/*.
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
+const ATTACHMENT_NAME_LIMIT = 200;
 
 /**
  * Превращает присланный клиентом token в обычный файл внутри server-owned каталога.
@@ -75,6 +86,55 @@ export async function resolveLegacyChatAttachment(
   } catch {
     return null;
   }
+}
+
+/**
+ * Блок вложений в prompt агента: пути файлов, которые он откроет сам. Одна формулировка
+ * для обычного хода и уточнения, чтобы агент видел приложенное одинаково.
+ */
+export function chatAttachmentsBlock(paths: readonly string[]): string {
+  if (!paths.length) {
+    return '';
+  }
+
+  const list = paths.map((file) => `- ${file}`).join('\n');
+
+  return `[Вложения]\nПользователь приложил файлы (открой их инструментом Read):\n${list}\n[/Вложения]\n\n`;
+}
+
+/**
+ * Картинки уточнения от окна → записи вложений в форме сообщения истории. Любой негодный
+ * элемент отклоняет весь список: молча потерянная картинка выглядела бы переданной агенту.
+ */
+export async function resolveInTurnAttachments(
+  root: string,
+  value: unknown,
+): Promise<InTurnAttachment[] | null> {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const attachments: InTurnAttachment[] = [];
+
+  for (const item of value as Array<{ file?: unknown; name?: unknown } | null>) {
+    const resolved = await resolveChatAttachment(root, item?.file, { imageOnly: true });
+
+    if (!resolved) {
+      return null;
+    }
+
+    attachments.push({
+      file: resolved.file,
+      name: String(item?.name || resolved.file).slice(0, ATTACHMENT_NAME_LIMIT),
+      url: `/api/chat/attachment/${resolved.file}`,
+      mime: IMAGE_MIME[path.extname(resolved.file).toLowerCase()] || '',
+    });
+  }
+
+  return attachments;
 }
 
 export default resolveChatAttachment;

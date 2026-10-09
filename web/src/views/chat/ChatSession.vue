@@ -737,6 +737,7 @@ const inTurnComposer = computed(() => inTurnComposerState({
   protocol: chat.inTurnProtocol,
   capability: current.value.provider?.inTurn,
   pendingCount: pending.value.length,
+  pendingImages: pending.value.every(isImg),
   text: input.value,
 }));
 const timelineProjector = createChatTimelineProjector();
@@ -1499,7 +1500,7 @@ async function submit() {
     return;
   }
   if (sess.value.sending && inTurnComposer.value.ready) {
-    const accepted = await chat.sendInTurn(props.sid, t);
+    const accepted = await chat.sendInTurn(props.sid, t, atts);
 
     if (!accepted) {
       inputErr.value = chat.inTurnError || 'Не удалось отправить уточнение.';
@@ -1511,6 +1512,11 @@ async function submit() {
     input.value = '';
     clearTimeout(draftTimer);
     chat.setDraft(props.sid, '');
+
+    if (atts.length) {
+      chat.setDraftAttachments(props.sid, []);
+    }
+
     atBottom.value = true;
 
     return;

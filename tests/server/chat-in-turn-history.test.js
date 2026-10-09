@@ -451,3 +451,34 @@ test('FLOW-13: слияние опознаёт сообщения по id, а н
 
   assert.equal(keyed.messages.filter((message) => message.text === 'да').length, 1);
 });
+
+test('картинки уточнения переходят в историю вместе с сообщением', async () => {
+  const { ledger, assistant } = await tmpHistory();
+  const history = new InTurnHistory({ ledger, assistant });
+  const attachments = [{
+    file: '1700000000000-shot.png',
+    name: 'shot.png',
+    url: '/api/chat/attachment/1700000000000-shot.png',
+    mime: 'image/png',
+  }];
+
+  await ledger.put({
+    chatKey: 'chat-fixture',
+    messageId: 'message-fixture-0001',
+    runId: 'run-fixture-0001',
+    state: 'forwarded',
+    revision: 1,
+    sequence: 1,
+    text: 'Сравни с референсом',
+    attachments,
+    fingerprint: 'fp-1',
+    acceptedAt: 1000,
+    updatedAt: 1000,
+  });
+
+  const [message] = history.runMessages('run-fixture-0001');
+
+  assert.equal(message.kind, 'in-turn');
+  assert.deepEqual(message.attachments, attachments);
+  assert.deepEqual(message.receipt.attachments, attachments);
+});

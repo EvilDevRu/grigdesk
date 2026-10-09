@@ -19,7 +19,14 @@ const PROVIDER = {
  * Настоящий композер получает управляемые стор и канал активного хода.
  * Счётчики различают немедленный ввод, очередь и остановку без вызова исполнителя.
  */
-async function mountChat(t, { sending = true, available = true, accept = true, renderMarkdown } = {}) {
+async function mountChat(t, {
+  sending = true,
+  available = true,
+  accept = true,
+  renderMarkdown,
+  provider = PROVIDER,
+  upload = { file: 'file-1', name: 'test.txt', url: '/test.txt' },
+} = {}) {
   const browser = await installUiBrowser(t, 'https://cockpit.test/#/chats');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
@@ -55,7 +62,7 @@ async function mountChat(t, { sending = true, available = true, accept = true, r
   globalThis[`${PREFIX}Api`] = {
     url: (value) => value,
     async get() { return { tasks: [] }; },
-    async upload() { return { file: 'file-1', name: 'test.txt', url: '/test.txt' }; },
+    async upload() { return upload; },
   };
   globalThis[`${PREFIX}ChatStore`] = () => store;
   globalThis[`${PREFIX}MarkdownRenderer`] = renderMarkdown;
@@ -63,9 +70,9 @@ async function mountChat(t, { sending = true, available = true, accept = true, r
   globalThis[`${PREFIX}UiStore`] = () => ({ openTaskLaunch() {} });
   globalThis[`${PREFIX}Router`] = { async push() {} };
   globalThis[`${PREFIX}ProvidersStore`] = () => ({
-    providers: [PROVIDER], load() {},
-    modelOf() { return { id: 'test-model', model: PROVIDER.models[0], provider: PROVIDER }; },
-    visibleModels() { return PROVIDER.models; }, modesOf() { return []; },
+    providers: [provider], load() {},
+    modelOf() { return { id: 'test-model', model: provider.models[0], provider }; },
+    visibleModels() { return provider.models; }, modesOf() { return []; },
   });
 
   const [{ mount, flushPromises }, ChatSession] = await Promise.all([
@@ -145,12 +152,12 @@ test('одна кнопка и Enter отправляют в активный х
   await input.setValue('Какой сейчас шаг?');
   assert.match(wrapper.get('[data-context="chat-send"]').attributes('aria-label'), /Уточнить сейчас/);
   await input.trigger('keydown', { key: 'Enter' });
-  assert.deepEqual(calls.inTurn, [['in-turn-chat', 'Какой сейчас шаг?']]);
+  assert.deepEqual(calls.inTurn, [['in-turn-chat', 'Какой сейчас шаг?', []]]);
   assert.deepEqual(calls.following, []);
   assert.equal(input.element.value, '');
   await input.setValue('Отдельная задача');
   await wrapper.get('[data-context="chat-send"]').trigger('click');
-  assert.deepEqual(calls.inTurn[1], ['in-turn-chat', 'Отдельная задача']);
+  assert.deepEqual(calls.inTurn[1], ['in-turn-chat', 'Отдельная задача', []]);
   assert.deepEqual(calls.following, []);
   await wrapper.get('[data-context="chat-stop"]').trigger('click');
   assert.equal(calls.stop, 1);
@@ -199,7 +206,7 @@ test('exact $skill stays an ordinary prompt to the active agent', async (t) => {
   const input = wrapper.get('textarea');
   await input.setValue('$review');
   await input.trigger('keydown', { key: 'Enter' });
-  assert.deepEqual(calls.inTurn, [['in-turn-chat', '$review']]);
+  assert.deepEqual(calls.inTurn, [['in-turn-chat', '$review', []]]);
   assert.deepEqual(calls.following, []);
 });
 
@@ -408,4 +415,65 @@ test('оборванный черновик не обещает «Пишет…�
   assert.match(reply, /Начало ответа/);
   assert.match(reply, /Ответ оборван/);
   assert.doesNotMatch(reply, /Пишет/);
+});
+
+test('картинка при готовом канале уходит в текущий ход, черновик вложений очищается', async (t) => {
+  const image = {
+    file: '1700000000000-shot.png',
+    name: 'shot.png',
+    url: '/api/chat/attachment/1700000000000-shot.png',
+    mime: 'image/png',
+  };
+  const provider = { ...PROVIDER, inTurn: { ...PROVIDER.inTurn, images: true } };
+  const { wrapper, calls, session, flushPromises } = await mountChat(t, { provider, upload: image });
+  const input = wrapper.get('textarea');
+
+  await input.setValue('Сравни с референсом');
+  await wrapper.trigger('drop', {
+    dataTransfer: { types: ['Files'], files: [new Blob(['x'], { type: 'image/png' })] },
+  });
+  await flushPromises();
+  assert.match(wrapper.get('[data-context="chat-send"]').attributes('aria-label'), /Уточнить сейчас/);
+  await wrapper.get('[data-context="chat-send"]').trigger('click');
+  await flushPromises();
+  assert.deepEqual(calls.inTurn, [['in-turn-chat', 'Сравни с референсом', [image]]]);
+  assert.deepEqual(calls.following, []);
+  assert.deepEqual(session.draftAttachments, [], 'принятая картинка уходит из черновика');
+});
+
+test('не картинка идёт после хода даже у исполнителя с картинками', async (t) => {
+  const provider = { ...PROVIDER, inTurn: { ...PROVIDER.inTurn, images: true } };
+  const { wrapper, calls, flushPromises } = await mountChat(t, { provider });
+
+  await wrapper.get('textarea').setValue('Разбери файл');
+  await wrapper.trigger('drop', {
+    dataTransfer: { types: ['Files'], files: [new Blob(['x'], { type: 'text/plain' })] },
+  });
+  await flushPromises();
+  assert.match(
+    wrapper.get('[data-context="chat-send"]').attributes('data-ui-tooltip'),
+    /после текущего хода/,
+  );
+  await wrapper.get('[data-context="chat-send"]').trigger('click');
+  assert.equal(calls.following.length, 1);
+  assert.equal(calls.inTurn.length, 0);
+});
+
+test('картинка у исполнителя без картинок в ходе идёт после хода', async (t) => {
+  const image = {
+    file: '1700000000000-shot.png',
+    name: 'shot.png',
+    url: '/api/chat/attachment/1700000000000-shot.png',
+    mime: 'image/png',
+  };
+  const { wrapper, calls, flushPromises } = await mountChat(t, { upload: image });
+
+  await wrapper.get('textarea').setValue('Сравни с референсом');
+  await wrapper.trigger('drop', {
+    dataTransfer: { types: ['Files'], files: [new Blob(['x'], { type: 'image/png' })] },
+  });
+  await flushPromises();
+  await wrapper.get('[data-context="chat-send"]').trigger('click');
+  assert.deepEqual(calls.following, [['in-turn-chat', 'Сравни с референсом', [image]]]);
+  assert.equal(calls.inTurn.length, 0);
 });

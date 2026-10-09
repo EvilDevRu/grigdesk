@@ -331,3 +331,38 @@ test('повтор SSE и draft после блока не материализ�
   assert.equal(writes, 2);
   assert.equal(chat.sessions[0].messages.length, 3);
 });
+
+test('картинка уходит в текущий ход вместе с текстом и остаётся в пузыре уточнения', async () => {
+  const chat = await chatStoreFixture({ sessions: [base()] });
+  const image = {
+    file: '1700000000000-shot.png',
+    name: 'shot.png',
+    url: '/api/chat/attachment/1700000000000-shot.png',
+    mime: 'image/png',
+  };
+
+  chat.inTurnProtocol = 1;
+  chat._mergeInTurnSnapshot(CHAT, RUN, { ...availability, ...page([], null, 0) }, TURN);
+
+  const sent = [];
+
+  apiHarness.post = async (_url, body) => {
+    sent.push(body);
+
+    return {
+      accepted: true,
+      ...receipt(1, body.messageId, 'accepted', 1),
+      text: body.text,
+      attachments: [image],
+    };
+  };
+  assert.equal(await chat.sendInTurn(CHAT, '', [image]), true, 'одна картинка без текста');
+  assert.deepEqual(sent[0].attachments, [{ file: image.file, name: image.name }]);
+  assert.equal(sent[0].text, '');
+
+  const shown = chat.sessions[0].messages.find((m) => m.messageId === sent[0].messageId);
+
+  assert.deepEqual(shown.attachments, [image]);
+  assert.equal(await chat.sendInTurn(CHAT, 'Сравни', [image]), true);
+  assert.notEqual(sent[1].messageId, sent[0].messageId, 'новая попытка — новый id');
+});

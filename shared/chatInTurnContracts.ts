@@ -14,6 +14,7 @@ export const IN_TURN_SEGMENT_RE = /^[A-Za-z0-9_-]{1,120}$/;
 
 // Продуктовые пределы. Числа живут в одном месте, чтобы сервер и окно не расходились.
 export const IN_TURN_TEXT_LIMIT_BYTES = 32 * 1024;
+export const IN_TURN_ATTACHMENT_LIMIT = 10;
 export const IN_TURN_BACKLOG_LIMIT = 20;
 export const IN_TURN_ACTIVE_LIMIT = 50;
 export const IN_TURN_ACTIVE_TEXT_LIMIT = 64 * 1024;
@@ -53,6 +54,20 @@ export type InTurnRejectCode =
   | 'server_restarting'
   | 'not_found';
 
+// Картинка уточнения: файл из каталога вложений чата в той же форме, что у обычного
+// сообщения истории, — окно показывает её миниатюрой без отдельного преобразования.
+export interface InTurnAttachment {
+  file: string;
+  name: string;
+  url: string;
+  mime: string;
+}
+
+// Проверенный сервером путь картинки для транспорта. Адаптер не строит пути сам.
+export interface InTurnImage {
+  path: string;
+}
+
 // Запись о приёме и доставке, которую окно показывает и восстанавливает после F5.
 export interface InTurnReceipt {
   chatKey: string;
@@ -63,6 +78,7 @@ export interface InTurnReceipt {
   revision: number;
   sequence: number;
   text: string;
+  attachments?: InTurnAttachment[];
   sentAt?: number;
   acceptedAt: number;
   updatedAt: number;
@@ -96,6 +112,8 @@ export interface InTurnCapability {
   protocol: number;
   text: boolean;
   confirmation: InTurnConfirmation;
+  // Агент получает картинки уточнения в том же ходе. Без объявления вложение ждёт очереди.
+  images?: boolean;
 }
 
 // Событие видимого ответа агента от адаптера. Идентичность и текст приходят от
@@ -129,11 +147,15 @@ export type InTurnDeliverResult =
   };
 
 // Порт конкретного запуска. Ядро не знает, чей это транспорт, и не хранит очередь само.
+// Ядро передаёт принятые `attachments`, модуль чата переводит их в проверенные пути `images`:
+// адаптер видит только пути, а каталог вложений и правила его проверки остаются в ядре.
 export interface InTurnPort {
   deliver(input: {
     messageId: string;
     text: string;
     sequence: number;
+    attachments?: InTurnAttachment[];
+    images?: InTurnImage[];
   }): Promise<InTurnDeliverResult>;
   close?(reason: string): void;
 }
@@ -176,6 +198,7 @@ export function parseInTurnCapability(value: unknown): InTurnCapability | null {
     protocol,
     text: true,
     confirmation,
+    ...(raw.images === true ? { images: true } : {}),
   };
 }
 
@@ -240,13 +263,19 @@ export function inTurnFingerprint(input: {
   text: string;
   sentAt?: number;
   context?: unknown;
+  files?: readonly string[];
 }): string {
+  // Файлы дописываются только при наличии: отпечатки уже принятых текстовых уточнений
+  // лежат в журнале и обязаны совпасть с повтором после обновления сервера.
+  const files = input.files?.length ? [[...input.files]] : [];
+
   return JSON.stringify([
     input.chatKey,
     input.runId,
     String(input.text ?? ''),
     Number.isSafeInteger(input.sentAt) ? input.sentAt : 0,
     input.context ?? null,
+    ...files,
   ]);
 }
 

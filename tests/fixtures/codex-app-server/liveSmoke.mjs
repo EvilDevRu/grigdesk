@@ -3,6 +3,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 import codex from '../../../server/src/lib/executors/codex.ts';
 
@@ -57,7 +58,11 @@ let settled = false;
 let runError = null;
 let runValue = null;
 
-const question = 'Зачем нужен step-one.txt в этой проверке? Ответ начни словами «Ответ на уточнение:».';
+// Режим image передаёт уточнение с картинкой: цвет не назван в тексте, его видно
+// только на самом изображении, поэтому верный ответ доказывает доставку картинки.
+const question = mode === 'image'
+  ? 'Какого цвета приложенная картинка? Ответ начни словами «Ответ на уточнение:».'
+  : 'Зачем нужен step-one.txt в этой проверке? Ответ начни словами «Ответ на уточнение:».';
 const fileTask = [
   'В этой тестовой папке выполни три действия строго по порядку отдельными вызовами инструмента.',
   'Сначала создай step-one.txt с текстом ONE.',
@@ -74,7 +79,62 @@ const textTask = [
   'после чего самостоятельно заверши второй этап.',
   'Файловые инструменты для этой задачи не нужны.',
 ].join(' ');
-const task = mode === 'text' ? textTask : fileTask;
+const task = mode === 'file' || mode === 'files' ? fileTask : textTask;
+const textual = task === textTask;
+
+/**
+ * Однотонный PNG без зависимостей: IHDR, одна строка IDAT на пиксельную строку, IEND.
+ * Красный квадрат 64×64 — цвет, который модель назовёт только глядя на картинку.
+ */
+function solidPng(size, [red, green, blue]) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+
+    return c >>> 0;
+  });
+  const crc = (buffer) => {
+    let c = 0xffffffff;
+
+    for (const byte of buffer) {
+      c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+    }
+
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(4);
+    const tail = Buffer.alloc(4);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+
+    head.writeUInt32BE(data.length);
+    tail.writeUInt32BE(crc(body));
+
+    return Buffer.concat([head, body, tail]);
+  };
+  const header = Buffer.alloc(13);
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3).fill(Buffer.from([red, green, blue]))]);
+
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', zlib.deflateSync(Buffer.concat(Array.from({ length: size }, () => row)))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const imagePath = path.join(root, 'reference.png');
+
+if (mode === 'image') {
+  await fs.writeFile(imagePath, solidPng(64, [220, 20, 20]));
+}
 
 const run = codex.run({
   config: { codexBin: path.resolve(binary) },
@@ -145,15 +205,16 @@ async function waitFor(check, what, timeoutMs = 90_000) {
 }
 
 try {
-  await waitFor(async () => mode === 'text'
+  await waitFor(async () => textual
     ? port && blocks.some((block) => block.text.includes('ЭТАП 1 ГОТОВ'))
     : port && await exists(path.join(work, 'step-one.txt')),
-  mode === 'text' ? 'порт и первый этап' : 'порт и первый файл');
+  textual ? 'порт и первый этап' : 'порт и первый файл');
 
   const delivery = await port.deliver({
     messageId: 'message-codex-live-0001',
     text: question,
     sequence: 1,
+    ...(mode === 'image' ? { images: [{ path: imagePath }] } : {}),
   });
   const answer = await waitFor(
     () => blocks.find((block) => block.beforeFinal && block.text.includes('Ответ на уточнение:')),
@@ -162,10 +223,12 @@ try {
   const result = await run;
   const second = await fs.readFile(path.join(work, 'step-two.txt'), 'utf8').catch(() => '');
   const answerCopies = blocks.filter((block) => block.id === answer.id).length;
+  const sawImage = mode !== 'image' || /красн/i.test(answer.text);
   const success = delivery.ok === true
     && answer.beforeFinal
     && answerCopies === 1
-    && (mode === 'text'
+    && sawImage
+    && (textual
       ? result.reply.includes('ЭТАП 2 ГОТОВ')
       : second.trim() === 'TWO')
     && !question.toLowerCase().includes('продолжай')
@@ -189,7 +252,8 @@ try {
     delivered: delivery.ok,
     answerBeforeFinal: answer.beforeFinal,
     answerCopies,
-    secondStep: mode === 'text'
+    sawImage,
+    secondStep: textual
       ? result.reply.includes('ЭТАП 2 ГОТОВ')
       : second.trim() === 'TWO',
     answerWithoutContinueWord: !answer.text.toLowerCase().includes('продолжай'),

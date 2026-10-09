@@ -1520,7 +1520,11 @@ export function openCodexSession({
        * Передача уточнения в активный ход. Проверка ожидаемого turn id — часть протокола:
        * без неё app-server принял бы текст в другой ход того же thread.
        */
-      async deliver({ messageId, text }: { messageId: string; text: string }) {
+      async deliver({ messageId, text, images = [] }: {
+        messageId: string;
+        text: string;
+        images?: ReadonlyArray<{ path: string }>;
+      }) {
         if (!threadId || !current.turnId || current.settled) {
           return {
             ok: false,
@@ -1540,6 +1544,12 @@ export function openCodexSession({
                 text,
                 text_elements: [],
               },
+              // Картинка идёт в модель самим app-server: он читает файл по пути и сам
+              // приводит размер, поэтому крупный скриншот не упирается в предел строки.
+              ...images.map((image) => ({
+                type: 'localImage',
+                path: image.path,
+              })),
               // Живой turn/steer трактует голый вопрос как новую цель и может
               // завершить ход, бросив исходную работу. Подсказка принадлежит
               // адаптеру; человек отправляет только свой вопрос.
@@ -2842,10 +2852,12 @@ export default {
    */
   // Канал ввода в активный ход: `turn/steer` установленного app-server. Живой сессии
   // для него не требуется — разовый запуск держит тот же turn до своего финала.
+  // Картинки уточнения уходят в тот же steer элементами `localImage`.
   inTurnInput: {
     protocol: 1,
     text: true,
     confirmation: 'forwarded',
+    images: true,
   },
 
   session: {
