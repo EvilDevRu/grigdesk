@@ -76,6 +76,11 @@ export function compileSettingsView({
       './settings/WebLogPanel.vue': `
         export default { template: '<div class="web-log-panel-stub"></div>' };
       `,
+      // Мобильные настройки имеют отдельную проверку сети, QR и подтверждения отзыва.
+      // Здесь проверяется собственная форма SettingsView без второго набора запросов.
+      './settings/MobileAccess.vue': `
+        export default { template: '<div class="mobile-access-stub"></div>' };
+      `,
       // Каталог плагинов — самостоятельный подраздел со своими stores и модалкой;
       // его поведение стережёт settings-plugins-catalog.component.test.js.
       './settings/PluginsCatalog.vue': `

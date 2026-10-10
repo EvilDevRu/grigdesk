@@ -1596,6 +1596,7 @@
           <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
         </div>
       </section>
+      <MobileAccess />
     </section>
       </div>
     </div>
@@ -1613,6 +1614,7 @@ import ProviderUsageResources from '../features/providers/ProviderUsageResources
 import PluginsCatalog from './settings/PluginsCatalog.vue';
 import ServerLauncher from './settings/ServerLauncher.vue';
 import WebLogPanel from './settings/WebLogPanel.vue';
+import MobileAccess from './settings/MobileAccess.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
 import ProviderNativeSettings from './settings/ProviderNativeSettings.vue';
 import ProviderMcpStatus from './settings/ProviderMcpStatus.vue';

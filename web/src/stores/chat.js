@@ -1232,7 +1232,7 @@ export const useChatStore = defineStore('chat', {
 
         if (place === 'gone') {
           // Чата нет и на сервере — ответ класть некуда, запись только копилась бы.
-          api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
+          await api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
           continue;
         }
         if (!place) {
@@ -1263,7 +1263,7 @@ export const useChatStore = defineStore('chat', {
         }
 
         for (const id of ids) {
-          api.del(`/api/chat/pending/${id}`).catch(() => { /* подберём в следующий раз */ });
+          await api.del(`/api/chat/pending/${id}`).catch(() => { /* подберём в следующий раз */ });
         }
       }
     },

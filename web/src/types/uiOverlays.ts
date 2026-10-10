@@ -69,6 +69,7 @@ export interface ConfirmDialogOptions {
   okText?: string;
   cancelText?: string;
   danger?: boolean;
+  touchTargets?: boolean;
   action?: DialogAction<true>;
 }
 

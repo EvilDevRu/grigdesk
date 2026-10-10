@@ -81,3 +81,9 @@
   --md-code-token-deleted: var(--bad);
   --md-code-token-changed: var(--warn);
 }
+
+/* Сенсорный размер задаёт общая граница UI, consumer включает его на своём контейнере.
+   Диалоги получают тот же атрибут на собственном teleported surface. */
+[data-ui-touch] {
+  --control-height: 44px;
+}

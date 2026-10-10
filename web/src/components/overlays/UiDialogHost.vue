@@ -6,6 +6,7 @@
     layer="confirm"
     size="compact"
     :title="dialogTitle"
+    :data-ui-touch="request?.kind === 'confirm' && request.options.touchTargets ? '' : undefined"
     :label="dialogTitle"
     :persistent="busy"
     :busy="busy"

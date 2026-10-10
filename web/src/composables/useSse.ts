@@ -42,6 +42,7 @@ const EVENT_NAMES = [
   'diagnostic-logging',
   'inbox-changed',
   'telegram-status',
+  'mobile-changed',
   'task-shelf-changed',
   'arbiter-live',
   'sandboxes-changed',
