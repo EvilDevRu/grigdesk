@@ -698,10 +698,11 @@ _route_v2_commit_and_project() {
   local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
   local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0}
   local target_budget=${9:-0} reject_feedback=${10:-} loop_max_rounds=${11:-0} cursor rc
+  local expected_sequence=${12:-} expected_hash=${13:-}
   cursor=$(attempt_stage_state_commit_v2 \
     "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
     "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget" \
-    "$reject_feedback" "$loop_max_rounds") || return
+    "$reject_feedback" "$loop_max_rounds" "$expected_sequence" "$expected_hash") || return
   _route_v2_lifecycle_finish_visit_after_commit "$task" "$attempt" "$outcome" || return
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
@@ -2526,6 +2527,7 @@ route_v2_gate_decide() {
   node=$(_attempt_stage_state_node_id "${3:-}") || return
   outcome=${4:-}
   reject_feedback=${5:-}
+  local expected_sequence=${6:-} expected_hash=${7:-}
   [[ "$outcome" == approved || "$outcome" == rejected ]] || return 2
   [[ "$outcome" == rejected ]] || reject_feedback=
   # Ошибка получения списка не позволяет принять ворота вслепую.
@@ -2568,7 +2570,8 @@ route_v2_gate_decide() {
   fi
   local ROUTE_V2_GATE_DECISION=$outcome ROUTE_V2_GATE_FEEDBACK=$reject_feedback
   _route_v2_commit_and_project \
-    "$task" "$attempt" "$node" "$outcome" 0 '' 0 0 0 "$reject_feedback"
+    "$task" "$attempt" "$node" "$outcome" 0 '' 0 0 0 "$reject_feedback" 0 \
+    "$expected_sequence" "$expected_hash"
 }
 
 # Сводка учтённого времени попытки: работа узлов без ворот отдельно от ожидания

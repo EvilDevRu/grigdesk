@@ -1,0 +1,24 @@
+{
+  "chats": [
+    {
+      "id": "chat-alpha",
+      "title": "Тестовый разговор",
+      "updatedAt": 1760000000000,
+      "taskId": null,
+      "model": "test-model",
+      "state": "idle",
+      "waiting": 0
+    },
+    {
+      "id": "chat-beta",
+      "title": "Ждёт решения",
+      "updatedAt": 1760000000000,
+      "taskId": "101",
+      "model": "test-model",
+      "state": "running",
+      "waiting": 1
+    }
+  ],
+  "hasMore": false,
+  "nextCursor": null
+}

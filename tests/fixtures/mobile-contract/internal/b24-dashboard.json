@@ -1,0 +1,25 @@
+{
+  "tasks": [
+    {
+      "id": 101,
+      "title": "Первая задача",
+      "status": 2,
+      "statusLabel": "В работе",
+      "statusKind": "in_progress",
+      "statusText": "В работе",
+      "deadline": "завтра",
+      "deadlineRaw": "2026-10-09T10:00:00Z",
+      "priority": 1,
+      "responsible": "Тестовый исполнитель"
+    },
+    {
+      "id": 103,
+      "title": "Вторая задача",
+      "status": 1,
+      "statusLabel": "Новая",
+      "deadlineRaw": "",
+      "priority": 0,
+      "responsible": "Тестовый исполнитель"
+    }
+  ]
+}

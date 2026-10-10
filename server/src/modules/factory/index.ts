@@ -3,9 +3,13 @@
 // добавятся отдельным этапом через factory-cli.
 import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {
+  factoryMobileIdentity, factorySnapshotHash, sameFactoryIdentity,
+} from '../../lib/mobile/factoryIdentity.ts';
 import { STAGES, StageKind } from '../../lib/stages.ts';
 import { readInstruction, readActivity, readAgentLive } from '../../lib/factoryCli.ts';
 import { taskDiff } from '../../lib/git.ts';
@@ -315,20 +319,108 @@ async function factoryModule(
   // marker. Следующий start разрешается только после появления проверяемого прогона.
   const taskLaunchTails = new Map<string, Promise<void>>();
   const taskLaunchPending = new Map<string, { startedAt: number }>();
+  const taskMutationContext = new AsyncLocalStorage<{ key: string; held: boolean }>();
+
+  /**
+   * Допуск охватывает все HTTP-мутации одной задачи, включая клики веба и пульта.
+   * Повторный вход той же операции не создаёт deadlock у существующего launch/retry.
+   */
   async function withTaskLaunchLock<Value>(task: unknown, operation: () => Promise<Value>) {
     const key = String(task);
+    const current = taskMutationContext.getStore();
+
+    if (current?.held && current.key === key) {
+      return operation();
+    }
+
     const previous: Promise<unknown> = taskLaunchTails.get(key) || Promise.resolve();
     let release = () => {};
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const tail = previous.catch(() => {}).then(() => gate);
     taskLaunchTails.set(key, tail);
     await previous.catch(() => {});
-    try { return await operation(); }
+
+    const lease = { key, held: true };
+
+    try { return await taskMutationContext.run(lease, operation); }
     finally {
+      lease.held = false;
       release();
       if (taskLaunchTails.get(key) === tail) taskLaunchTails.delete(key);
     }
   }
+
+  fastify.addHook('onRoute', (route) => {
+    const methods = Array.isArray(route.method) ? route.method : [route.method];
+
+    if (!route.url.startsWith('/api/tasks/:id/') || !methods.some((method) => method === 'POST')) {
+      return;
+    }
+
+    const handler = route.handler;
+
+    // Сверка и эффект принадлежат одному допуску фабрики; внешнее окно не обходит его.
+    // Engine gate дополнительно сравнивает sequence/head внутри своего durable task lock.
+    route.handler = async function guardedTaskMutation(request, reply) {
+      const id = String((request.params as { id?: string }).id || '');
+      const body = request.body as Record<string, unknown> | undefined;
+
+      return withTaskLaunchLock(id, async () => {
+        if (body?.expectedMobile !== undefined) {
+          const managed = await managedRegistry(id, reply);
+
+          if (!managed) {
+            return reply;
+          }
+
+          const current = factoryMobileIdentity(managed.trusted, managed.registry);
+
+          if (!sameFactoryIdentity(body.expectedMobile, current)) {
+            return reply.code(409).send({
+              error: 'state_changed',
+              message: 'Попытка или заход этапа изменились; обновите карточку.',
+            });
+          }
+        }
+        if (body?.expectedBasis !== undefined) {
+          const expected = body.expectedBasis as { name?: unknown; hash?: unknown };
+
+          if (!expected || !['plan', 'report', 'diag'].includes(String(expected.name))) {
+            return reply.code(400).send({ error: 'bad_request' });
+          }
+
+          const document = await fastify.inject({
+            method: 'GET',
+            url: `/api/tasks/${id}/doc/${expected.name}`,
+            headers: request.headers,
+          });
+
+          if (document.statusCode !== 200 || factorySnapshotHash(document.json().text) !== expected.hash) {
+            return reply.code(409).send({
+              error: 'state_changed',
+              message: 'Основание решения изменилось; прочитайте его заново.',
+            });
+          }
+        }
+        if (body?.expectedLaunch !== undefined) {
+          const options = await fastify.inject({
+            method: 'GET',
+            url: `/api/tasks/${id}/launch-options?profile=${encodeURIComponent(String(body.profile || ''))}`,
+            headers: request.headers,
+          });
+
+          if (options.statusCode !== 200 || factorySnapshotHash(options.json()) !== body.expectedLaunch) {
+            return reply.code(409).send({
+              error: 'state_changed',
+              message: 'Варианты запуска изменились; выберите заново.',
+            });
+          }
+        }
+
+        return handler.call(this, request, reply);
+      });
+    };
+  });
 
   const hasRouteProjectionIdentity = (registry: Registry | null | undefined) => (
     typeof factoryState.hasRouteProjectionIdentity === 'function'
@@ -468,6 +560,25 @@ async function factoryModule(
     } catch (err) {
       return reply.code(404).send({ error: 'not_found', message: errorMessage(err) });
     }
+  });
+
+  fastify.get<FactoryRoute>('/api/tasks/:id/mobile-state', async (request, reply) => {
+    const id = request.params.id || '';
+
+    if (!/^[1-9][0-9]{0,18}$/.test(id || '')) {
+      return reply.code(400).send({ error: 'bad_task_id' });
+    }
+
+    const managed = await managedRegistry(id, reply);
+
+    if (!managed) {
+      return reply;
+    }
+
+    return {
+      identity: factoryMobileIdentity(managed.trusted, managed.registry),
+      running: factoryState.isDaemonAlive(managed.registry.ORCH_PID, id),
+    };
   });
 
   // Документ этапа — человеку у ворот: план (утверждение), разведнота, диагноз,
@@ -1755,6 +1866,10 @@ async function factoryModule(
         node: gateNode,
         decision: value,
         comment,
+        expectedStage: request.body?.expectedMobile as {
+          sequence: number;
+          headEventHash: string;
+        } | undefined,
       }));
       if (!committed.ok) {
         return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
@@ -1785,6 +1900,7 @@ async function factoryModule(
         message: 'Доступен только возврат на пройденный узел («перейти сюда»).',
       });
     }
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     const { trusted } = managed;
@@ -2065,6 +2181,7 @@ async function factoryModule(
     if (!id || !/^[A-Z][A-Z0-9_]*$/.test(stage) || !/^[a-z][a-z0-9_-]*$/.test(target)) {
       return reply.code(400).send({ error: 'bad_runner_switch' });
     }
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     if (managed.trusted.terminal) {
@@ -2117,6 +2234,7 @@ async function factoryModule(
         || (primary && !/^[a-z][a-z0-9_-]*$/.test(primary))) {
       return reply.code(400).send({ error: 'bad_runner_override' });
     }
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     if (managed.trusted.terminal) {
@@ -2172,6 +2290,7 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/instruction', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     return reply.code(409).send({
@@ -2459,6 +2578,7 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/resume', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     const { registry, trusted } = managed;
@@ -2500,6 +2620,7 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/stop', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     const managed = await managedRegistry(id, reply);
     if (!managed) return reply;
     const { registry } = managed;
@@ -2507,6 +2628,7 @@ async function factoryModule(
       task: id,
       orchPid: Number(registry.ORCH_PID),
       isAlive: () => factoryState.isDaemonAlive(registry.ORCH_PID, id),
+      exactPid: request.body?.expectedMobile !== undefined,
     });
     if (!stop.ok) return reply.code(500).send({ error: 'stop_failed', message: stop.message });
     return stop;

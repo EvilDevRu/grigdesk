@@ -247,6 +247,7 @@ V2_STATE="${STATE_DIR:-${FACTORY_STATE:-$FACTORY_USER_HOME/.factory/state}}"
 CONTROL_ROOT="${FACTORY_CONTROL_ROOT:-$FACTORY_USER_HOME/.factory/control}"
 TICKET_JSON=""
 EXPECTED_ATTEMPT=""
+EXPECTED_STAGE=""
 REASON=""
 ACTOR=""
 DIAGNOSIS_KIND=""
@@ -376,6 +377,12 @@ while (( $# > 0 )); do
       EXPECTED_ATTEMPT=$2
       shift 2
       ;;
+    --expected-stage)
+      (( $# >= 2 )) || die "после --expected-stage нужен sequence:sha256"
+      [[ -z "$EXPECTED_STAGE" ]] || die "--expected-stage указан повторно"
+      EXPECTED_STAGE=$2
+      shift 2
+      ;;
     --reason)
       (( $# >= 2 )) || die "после --reason нужен текст"
       [[ -z "$REASON" ]] || die "--reason указан повторно"
@@ -495,6 +502,13 @@ done
    "$MODE" == goto || "$MODE" == work-time || "$MODE" == findings-export ||
    "$MODE" == bootstrap-answer ]] ||
   die "укажи check, start, resume, gate, abandon, recover, goto или work-time/findings-export"
+# Exact stage CAS адресует только gate; старые CLI без флага сохраняют прежний контракт.
+# Значение передаётся durable commit, где сравнивается под task lock.
+if [[ -n "$EXPECTED_STAGE" ]]; then
+  [[ "$MODE" == gate && "$EXPECTED_STAGE" =~ ^(0|[1-9][0-9]{0,11}):[a-f0-9]{64}$ ]] ||
+    die "--expected-stage допустим только у gate, формат sequence:sha256"
+fi
+
 # Task-level override исполнителя рождается только вместе с новой попыткой;
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
@@ -2478,7 +2492,8 @@ v2_gate_commit() {
   pipeline_gate_key=$(v2_gate_pipeline_key "$GATE_NODE") ||
     die "нет UI-проекции для gate node: $GATE_NODE"
   route_v2_gate_decide \
-    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" "$GATE_COMMENT" >/dev/null || {
+    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" "$GATE_COMMENT" \
+    "${EXPECTED_STAGE%%:*}" "${EXPECTED_STAGE#*:}" >/dev/null || {
     rc=$?
     v2_log "gate CAS не принят (код $rc)"
     return "$rc"

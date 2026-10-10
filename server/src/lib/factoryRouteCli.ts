@@ -205,15 +205,19 @@ export function routeBootstrapAnswerArgs(config: RouteConfig, {
  * а вызывающий по HTTP упирается в свой таймаут. Продолжение — отдельным resume.
  */
 export function routeGateArgs(config: RouteConfig, {
-  task, profile, attempt, node, decision, comment,
+  task, profile, attempt, node, decision, comment, expectedStage,
 }: RouteIdentityArgs & {
   node: string;
   decision: string;
   comment?: string;
+  expectedStage?: { sequence: number; headEventHash: string };
 }): string[] {
   const args = [String(task), 'gate', '--profile', profile, '--attempt', attempt,
     '--node', node, '--decision', decision, '--commit-only'];
   if (comment) args.push('--comment', comment);
+  if (expectedStage) {
+    args.push('--expected-stage', `${expectedStage.sequence}:${expectedStage.headEventHash}`);
+  }
   return [...args, ...routePathArgs(config)];
 }
 
@@ -476,19 +480,23 @@ function runCmd(cmd: string, args: string[], { timeout = 70000 } = {}): Promise<
  * дальше работает обычный resume.
  */
 export async function stopRouteOrchestrator({
-  task, orchPid, isAlive, waitMs = 10000, stepMs = 300,
+  task, orchPid, isAlive, waitMs = 10000, stepMs = 300, exactPid = false,
   run = runCmd, kill = (pid: number) => process.kill(pid, 'SIGTERM'),
 }: {
   task: string | number;
   orchPid: string | number;
   isAlive: () => boolean;
+  exactPid?: boolean;
   waitMs?: number;
   stepMs?: number;
   run?: (cmd: string, args: string[]) => Promise<CmdResult>;
   kill?: (pid: number) => void;
 }): Promise<{ ok: boolean; outcome: 'not_running' | 'stopped' | 'stop_sent'; message?: string }> {
   if (!isAlive()) return { ok: true, outcome: 'not_running' };
-  const viaUnit = await run('systemctl', ['--user', 'stop', routeUnitName(task)]);
+
+  const viaUnit = exactPid
+    ? { ok: false, message: 'Остановка точного PID вместо меняющегося имени юнита.' }
+    : await run('systemctl', ['--user', 'stop', routeUnitName(task)]);
   if (!viaUnit.ok && isAlive()) {
     // Нет systemd (или юнита): detached-запуск останавливается прямым сигналом.
     try { kill(Number(orchPid)); } catch { /* умер между проверками */ }

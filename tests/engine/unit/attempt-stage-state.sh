@@ -1058,4 +1058,25 @@ legacy_after=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \
   "all stage-ledger operations leave legacy STATE_DIR byte-for-byte untouched"
 
+# Старая identity не принимает решение даже на том же текущем узле после новой паузы.
+# Достоверная revision проверяется в том же lock, что append commit.
+cas_attempt=$(begin_selected 81 a_81818181818181818181818181818181)
+attempt_stage_state_init_v2 81 "$cas_attempt" debug >/dev/null
+cas_dir="$(factory_control_root)/protocol-v2/tasks/t81/attempts/$cas_attempt"
+cas_envelope=$(cat "$cas_dir/stage-results/runtime.json")
+cas_sequence=$(json_field "$cas_envelope" runtime sequence)
+cas_hash=$(json_field "$cas_envelope" runtime headEventHash)
+attempt_stage_state_pause_v2 81 "$cas_attempt" instrument 'новая пауза' >/dev/null
+cas_before=$(event_count "$cas_dir")
+attempt_stage_state_commit_v2 81 "$cas_attempt" instrument done 0 '' 0 0 0 '' 0 \
+  "$cas_sequence" "$cas_hash" >/dev/null 2>&1
+assert_rc 75 "$?" "старая revision на том же узле отвергнута"
+assert_eq "$cas_before" "$(event_count "$cas_dir")" "stale CAS не пишет событие"
+cas_envelope=$(cat "$cas_dir/stage-results/runtime.json")
+cas_sequence=$(json_field "$cas_envelope" runtime sequence)
+cas_hash=$(json_field "$cas_envelope" runtime headEventHash)
+attempt_stage_state_commit_v2 81 "$cas_attempt" instrument done 0 '' 0 0 0 '' 0 \
+  "$cas_sequence" "$cas_hash" >/dev/null
+assert_rc 0 "$?" "точная revision разрешает единственный commit"
+
 finish_tests

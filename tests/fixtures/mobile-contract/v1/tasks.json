@@ -1,0 +1,27 @@
+{
+  "tasks": [
+    {
+      "id": "101",
+      "title": "Ждёт ворот",
+      "state": "waiting",
+      "stage": "GATE_PLAN",
+      "needsHuman": {
+        "kind": "gate",
+        "gate": "GATE_PLAN",
+        "text": "утвердить план работ",
+        "actionToken": "cccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "updatedAt": 1760000000000
+    },
+    {
+      "id": "102",
+      "title": "В работе",
+      "state": "running",
+      "stage": "BUILD",
+      "needsHuman": null,
+      "updatedAt": 1760000000000
+    }
+  ],
+  "hasMore": false,
+  "nextCursor": null
+}

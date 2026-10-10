@@ -1,0 +1,29 @@
+{
+  "tasks": [
+    {
+      "task": "101",
+      "profile": "test-profile",
+      "route": "feature",
+      "attempt": "attempt-alpha",
+      "daemonAlive": false,
+      "stages": {
+        "PLAN": "done",
+        "GATE_PLAN": "wait"
+      },
+      "mtime": 1760000000000,
+      "title": "Ждёт ворот"
+    },
+    {
+      "task": "102",
+      "profile": "test-profile",
+      "attempt": "attempt-beta",
+      "daemonAlive": true,
+      "stages": {
+        "BUILD": "run"
+      },
+      "mtime": 1760000000000,
+      "title": "В работе"
+    }
+  ],
+  "silenceWindow": 30
+}

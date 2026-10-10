@@ -165,3 +165,96 @@ test('точечная запись перечитывает свежую сер
   assert.deepEqual((await store.readOne('target')).messages, fresh.messages);
   assert.equal(await store.readOne('../../outside'), null);
 });
+
+// Список чатов телефона перечитывается по каждому событию: полная история весит сотни
+// мегабайт, поэтому шапки берутся из кэша и файл читается заново только после изменения.
+test('heads отдаёт шапки без сообщений и перечитывает только изменённые файлы', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-heads-'));
+
+  t.after(() => fs.rm(root, {
+    recursive: true,
+    force: true,
+  }));
+
+  const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
+  const created = Date.UTC(2026, 9, 9);
+
+  await store.saveOne({
+    id: 'chat-live',
+    title: 'Живой',
+    model: 'test-model',
+    modelRef: { provider: 'test', model: 'test-model' },
+    taskId: '42',
+    messages: [{ role: 'user', text: 'x'.repeat(4096) }],
+    createdAt: created,
+    updatedAt: created + 1,
+  }, false);
+  await store.saveOne({
+    id: 'chat-old',
+    title: 'Старый',
+    messages: [{ role: 'user', text: 'архив' }],
+    createdAt: created - 1,
+    updatedAt: created,
+  }, true);
+
+  const companion = (await store.ensureByPurpose({ purpose: 'companion' })).chat;
+
+  const readFile = fs.readFile;
+  const reads = [];
+
+  fs.readFile = async (file, ...rest) => {
+    reads.push(path.basename(String(file)));
+
+    return readFile.call(fs, file, ...rest);
+  };
+  t.after(() => {
+    fs.readFile = readFile;
+  });
+
+  const first = await store.heads();
+
+  assert.deepEqual(first.map((head) => head.id), ['chat-old', 'chat-live', companion.id]);
+  assert.equal(first.every((head) => !('messages' in head)), true);
+  assert.equal(first[0].archived, true);
+  assert.equal(first[0].preview, 'Ты: архив');
+  assert.equal(first[1].preview.length, 300);
+  assert.equal(first[2].purpose, 'companion');
+  assert.equal(first[2].logicalIdentity, companion.logicalIdentity);
+  assert.deepEqual(
+    {
+      title: first[1].title,
+      model: first[1].model,
+      modelRef: first[1].modelRef,
+      taskId: first[1].taskId,
+      updatedAt: first[1].updatedAt,
+    },
+    {
+      title: 'Живой',
+      model: 'test-model',
+      modelRef: { provider: 'test', model: 'test-model' },
+      taskId: '42',
+      updatedAt: created + 1,
+    },
+  );
+
+  reads.length = 0;
+  await store.heads();
+  assert.deepEqual(reads.filter((name) => name.startsWith('chat-')), []);
+
+  const live = await store.readOne('chat-live');
+
+  await store.saveOne({
+    ...live,
+    title: 'Переименован',
+    updatedAt: created + 5,
+  }, false);
+  reads.length = 0;
+
+  const renamed = await store.heads();
+
+  assert.deepEqual(reads.filter((name) => name.startsWith('chat-')), ['chat-live.json']);
+  assert.equal(renamed.find((head) => head.id === 'chat-live').title, 'Переименован');
+
+  assert.equal(await store.remove('chat-old'), true);
+  assert.deepEqual((await store.heads()).map((head) => head.id), ['chat-live', companion.id]);
+});

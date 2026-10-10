@@ -102,10 +102,11 @@ export class InTurnHistory {
    * pending. Одинаковые тексты с разными id остаются разными записями, а уже известное
    * по ключу не дублируется — окно могло сохранить часть данных само.
    */
-  project({ chatKey, base = [], pending = [] }: {
+  project({ chatKey, base = [], pending = [], excludedRuns = [] }: {
     chatKey: string;
     base?: unknown;
     pending?: readonly PendingLike[];
+    excludedRuns?: readonly string[];
   }): ProjectedMessage[] {
     const messages: ProjectedMessage[] = Array.isArray(base) ? [...base as ProjectedMessage[]] : [];
     const known = new Map<string, number>();
@@ -143,7 +144,8 @@ export class InTurnHistory {
       }
     };
 
-    const ownPending = pending.filter((entry) => String(entry?.chatKey || '') === chatKey);
+    const ownPending = pending.filter((entry) => String(entry?.chatKey || '') === chatKey
+      && !excludedRuns.includes(String(entry.runId || '')));
 
     // У закрытого окна исходный user-текст есть только в pending. Он обязан стоять
     // перед уточнениями своего запуска, даже если окно уже сохранило следующий ход.
@@ -172,8 +174,23 @@ export class InTurnHistory {
     }
 
     if (chatKey) {
-      for (const runId of this.ledger.byChat(chatKey)) {
-        for (const message of this.runMessages(runId)) {
+      // Завершённые блоки бывают и без пользовательских уточнений в in-turn ledger.
+      // RunId устойчивого pending дополняет источник запусков того же общего проектора.
+      const runs = new Set([
+        ...this.ledger.byChat(chatKey),
+        ...ownPending.map((entry) => String(entry.runId || '')).filter(Boolean),
+      ]);
+
+      for (const runId of runs) {
+        if (excludedRuns.includes(runId)) {
+          continue;
+        }
+
+        const parentTurnId = String(ownPending.find((entry) => entry.runId === runId)?.turnId || '');
+
+        for (const projected of this.runMessages(runId)) {
+          const message = parentTurnId && !projected.parentTurnId
+            ? { ...projected, parentTurnId } : projected;
           const anchor = messages.findLastIndex((candidate) => candidate.runId === runId
             || (!!message.parentTurnId && candidate.role === 'user'
               && candidate.turnId === message.parentTurnId));

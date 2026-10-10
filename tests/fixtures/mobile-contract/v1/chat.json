@@ -1,0 +1,74 @@
+{
+  "chat": {
+    "id": "chat-alpha",
+    "title": "Тестовый разговор",
+    "updatedAt": 1760000000000,
+    "taskId": null,
+    "model": "test-model",
+    "state": "idle",
+    "waiting": 0,
+    "effort": "medium",
+    "revision": 3,
+    "actions": {}
+  },
+  "messages": [
+    {
+      "index": 0,
+      "id": "message-alpha",
+      "role": "user",
+      "turnId": "turn-alpha-001",
+      "clientId": null,
+      "at": 1760000000000,
+      "stopped": false,
+      "error": false,
+      "parts": [
+        {
+          "type": "text",
+          "text": "Покажи схему"
+        }
+      ],
+      "media": [
+        {
+          "ref": "u:test-image.png",
+          "alt": "Схема",
+          "from": "upload"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "id": "message-beta",
+      "role": "assistant",
+      "turnId": "turn-alpha-001",
+      "clientId": "client-alpha-001",
+      "at": 1760000000100,
+      "stopped": false,
+      "error": false,
+      "parts": [
+        {
+          "type": "text",
+          "text": "Вот схема:"
+        },
+        {
+          "type": "image",
+          "ref": "w:c2NyZWVucy90ZXN0LnBuZw",
+          "alt": "схема"
+        },
+        {
+          "type": "code",
+          "lang": "ts",
+          "text": "const a = 1;"
+        }
+      ],
+      "media": [
+        {
+          "ref": "w:c2NyZWVucy90ZXN0LnBuZw",
+          "alt": "Read: test.png",
+          "from": "step"
+        }
+      ]
+    }
+  ],
+  "hasMore": false,
+  "nextBefore": null
+}

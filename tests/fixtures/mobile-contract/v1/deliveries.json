@@ -1,0 +1,10 @@
+{
+  "deliveries": [
+    {
+      "clientId": "client-alpha-001",
+      "turnId": "turn-alpha-001",
+      "state": "done",
+      "outcome": "reply"
+    }
+  ]
+}

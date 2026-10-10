@@ -394,8 +394,10 @@ test('serverRequest/resolved снимает прямой MCP-спрос и за�
     payload: { message: 'открой макет', modelRef: { provider: 'fake', model: 'fake-1' } },
   });
   let event;
-  for (let i = 0; i < 50 && !event; i += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
+  const deadline = Date.now() + 2000;
+
+  while (!event && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
     event = events.find((entry) => entry.name === 'chat-question');
   }
   assert.ok(event);

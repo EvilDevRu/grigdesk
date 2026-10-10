@@ -1,0 +1,41 @@
+{
+  "task": "103",
+  "profile": "test-profile",
+  "profiles": [
+    "test-profile"
+  ],
+  "runners": [
+    {
+      "id": "test-runner",
+      "title": "Тестовый исполнитель"
+    }
+  ],
+  "defaultRunner": "test-runner",
+  "onConveyor": false,
+  "running": false,
+  "readOnly": false,
+  "routes": [
+    "feature",
+    "trivial"
+  ],
+  "defaultRoute": "feature",
+  "catalogHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "routeOptions": {
+    "feature": {
+      "title": "Разработка",
+      "instrumentationRequired": false
+    },
+    "trivial": {
+      "title": "Небольшая правка",
+      "instrumentationRequired": false
+    }
+  },
+  "repositories": [],
+  "scopeSuggestion": {},
+  "instrumentationSuggestions": [],
+  "diagnosisSuggestion": {
+    "kind": "functional",
+    "signal": ""
+  },
+  "profileContractError": null
+}

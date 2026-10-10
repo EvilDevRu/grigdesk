@@ -47,6 +47,11 @@ export const config = {
   // Адрес фиксирован; окружение выбирает лишь номер порта.
   port: Number(process.env.COCKPIT_PORT) || 8140,
   host: '127.0.0.1',
+  // Отдельный TLS-вход мобильного контракта также принимает только loopback.
+  // Ключи и привязки отделены от истории чатов и веб-сессий.
+  mobileDir: process.env.COCKPIT_MOBILE_DIR || path.join(home, '.config', 'cockpit', 'mobile'),
+  mobilePort: Number(process.env.COCKPIT_MOBILE_PORT) || 8144,
+  mobileApkDir: process.env.COCKPIT_MOBILE_APK_DIR || path.join(rootDir, '.state', 'mobile'),
   // Бюджет остановки целиком: слив ходов чата, закрытие сессий исполнителей и сокетов.
   // Должен быть меньше ожидания bin/restart и TimeoutStopSec юнита — иначе SIGKILL
   // придёт раньше, чем сервер успеет сохранить прерванные ходы.

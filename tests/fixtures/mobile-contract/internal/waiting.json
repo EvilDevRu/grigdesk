@@ -1,0 +1,64 @@
+{
+  "waiting": [
+    {
+      "pid": "permission-alpha",
+      "chatKey": "chat-beta",
+      "at": 1760000000000,
+      "chatTitle": "Ждёт решения",
+      "taskId": "101",
+      "tool": "ExitPlanMode",
+      "input": {
+        "plan": "Полный синтетический план"
+      },
+      "canRemember": false
+    },
+    {
+      "pid": "question-alpha",
+      "chatKey": "chat-alpha",
+      "questions": [
+        {
+          "header": "Вариант",
+          "question": "Как продолжить?",
+          "multiSelect": false,
+          "options": [
+            {
+              "label": "Первый",
+              "description": "Описание первого"
+            },
+            {
+              "label": "Второй",
+              "description": "Описание второго"
+            }
+          ]
+        }
+      ],
+      "prompt": "Уточни вариант",
+      "structured": false,
+      "actions": []
+    },
+    {
+      "pid": "typed-alpha",
+      "chatKey": "chat-alpha",
+      "structured": true,
+      "actions": [
+        "accept",
+        "cancel"
+      ],
+      "questions": [
+        {
+          "key": "count",
+          "question": "Сколько попыток?",
+          "inputType": "integer",
+          "required": true,
+          "minimum": 1,
+          "maximum": 3
+        },
+        {
+          "key": "enabled",
+          "question": "Включить?",
+          "inputType": "boolean"
+        }
+      ]
+    }
+  ]
+}

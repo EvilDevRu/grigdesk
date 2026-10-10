@@ -124,6 +124,7 @@ export async function chatAppFixture(t, {
   shutdownGraceMs = 30,
   shutdownInterruptMs = 150,
   extraRoutes = null,
+  taskEnv = null,
 } = {}) {
   const root = givenRoot || await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-turns-'));
 
@@ -176,7 +177,7 @@ export async function chatAppFixture(t, {
     config,
     factoryState: {
       async readEnv() {
-        return {};
+        return taskEnv ?? {};
       },
     },
     prefs: {

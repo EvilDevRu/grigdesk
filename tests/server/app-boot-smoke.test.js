@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const APP = fileURLToPath(new URL('../../server/src/app.ts', import.meta.url));
+const INSTALLED_APP = fileURLToPath(new URL('../../server/src/app.js', import.meta.url));
 
 /**
  * Свободный порт спрашивается у системы. Ноль в COCKPIT_PORT не подходит: сервер
@@ -30,12 +31,15 @@ function freePort() {
 
 // Всё состояние сервера уводится во временный каталог: проверка запуска не имеет
 // права трогать живой кокпит — ни переписку, ни модели, ни состояние фабрики.
-function isolatedEnv(root, port) {
+function isolatedEnv(root, port, mobilePort = port + 1) {
   return {
     PATH: '/usr/bin:/bin',
     HOME: root,
     NODE_ENV: 'production',
     COCKPIT_PORT: String(port),
+    COCKPIT_MOBILE_DIR: path.join(root, 'mobile'),
+    COCKPIT_MOBILE_PORT: String(mobilePort),
+    COCKPIT_MOBILE_APK_DIR: path.join(root, 'mobile-apk'),
     COCKPIT_HOST: '0.0.0.0',
     COCKPIT_TRUST_PROXY: '127.0.0.1',
     COCKPIT_CHATS_DIR: path.join(root, 'chats'),
@@ -123,8 +127,12 @@ test('сервер поднимается и закрывает /api гардо�
   });
   let log = '';
 
-  child.stdout.on('data', (chunk) => { log += chunk; });
-  child.stderr.on('data', (chunk) => { log += chunk; });
+  child.stdout.on('data', (chunk) => {
+    log += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    log += chunk;
+  });
   t.after(async () => {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit');
@@ -197,4 +205,96 @@ test('сервер поднимается и закрывает /api гардо�
   assert.ok(catalog.includes('/api/tasks'), 'маршрут модуля задач есть в каталоге');
   assert.ok(catalog.includes('/api/web-log/routes'));
   assert.ok(catalog.every((template) => template.startsWith('/api')));
+});
+
+/**
+ * Настоящий app.ts запускается с чистым либо повреждённым мобильным состоянием.
+ * Отказ отдельного TLS listener не должен мешать локальному входу и остальным API.
+ */
+test('мобильный вход поднимается отдельно, его отказ не роняет Cockpit', { timeout: 120_000 }, async (t) => {
+  for (const mode of ['ready', 'occupied', 'corrupt']) {
+    await t.test(mode, async (scope) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-mobile-boot-'));
+      const port = await freePort();
+      let mobilePort = mode === 'occupied' ? port : await freePort();
+
+      while (mode !== 'occupied' && mobilePort === port) {
+        mobilePort = await freePort();
+      }
+
+      if (mode === 'corrupt') {
+        await mkdir(path.join(root, 'mobile'), { recursive: true });
+        await writeFile(path.join(root, 'mobile/devices.json'), '{broken', { mode: 0o600 });
+      }
+
+      const child = spawn(process.execPath, [INSTALLED_APP], {
+        env: isolatedEnv(root, port, mobilePort),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let log = '';
+
+      child.stdout.on('data', (chunk) => {
+        log += chunk;
+      });
+      child.stderr.on('data', (chunk) => {
+        log += chunk;
+      });
+      scope.after(async () => {
+        if (child.exitCode === null && child.signalCode === null) {
+          const exited = once(child, 'exit');
+
+          child.kill('SIGKILL');
+          await exited;
+        }
+
+        await rm(root, { recursive: true, force: true });
+      });
+
+      const address = `http://127.0.0.1:${port}`;
+      const deadline = Date.now() + 30000;
+      let mobile = null;
+      let headers;
+
+      while (Date.now() < deadline) {
+        assert.equal(child.exitCode, null, 'app.ts завершился: ' + log);
+
+        try {
+          const token = (await readFile(path.join(root, 'state/cli-token'), 'utf8')).trim();
+
+          headers = { 'X-Cockpit-Token': token };
+
+          const response = await fetch(address + '/api/mobile/status', {
+            headers,
+            signal: AbortSignal.timeout(1000),
+          });
+          const status = await response.json();
+
+          if (response.status === 200 && (status.server.up || status.server.error)) {
+            mobile = status;
+            break;
+          }
+        } catch {
+          // Свежий child ещё пишет свой auth token и регистрирует API.
+          // Ожидание ограничено deadline и не обращается к рабочему серверу.
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      assert.ok(mobile, 'Не получили статус мобильного сервиса: ' + log);
+      assert.equal(mobile.server.up, mode === 'ready');
+      assert.equal((await fetch(address + '/api/health', { headers })).status, 200);
+      assert.equal((await fetch(address + '/api/chat/active', { headers })).status, 200);
+      assert.equal((await fetch(address + '/api/mobile/status')).status, 401);
+
+      if (mode === 'ready') {
+        const sockets = await listeningAddresses(child.pid, mobilePort);
+        const expected = `0100007F:${mobilePort.toString(16).toUpperCase().padStart(4, '0')}`;
+
+        assert.deepEqual(sockets, { tcp: [expected], tcp6: [] });
+      } else {
+        assert.equal(typeof mobile.server.error, 'string');
+      }
+    });
+  }
 });

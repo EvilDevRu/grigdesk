@@ -603,6 +603,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   // файла ещё не имеет: null, а не отказ — иначе вновь запущенная задача на
   // минуты стала бы read-only.
   let cursor: StageCursor | null = null;
+  let stageIdentity: { sequence: number; headEventHash: string } | null = null;
   const stageResultsDir = path.join(attemptDir, 'stage-results');
   if (await fs.lstat(stageResultsDir).then(
     (stat) => stat.isDirectory() && !stat.isSymbolicLink(),
@@ -613,6 +614,10 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     if (await fs.lstat(runtimeFile).then(() => true, () => false)) {
       const { value } = await regularJson<StageRuntimeEnvelope>(runtimeFile, 'stage runtime');
       cursor = validateStageRuntime(value, task, attempt);
+      stageIdentity = {
+        sequence: value.runtime!.sequence!,
+        headEventHash: value.runtime!.headEventHash!,
+      };
     }
   }
 
@@ -663,6 +668,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     terminal,
     terminalRecord,
     cursor,
+    stageIdentity,
     bootstrapStop,
     ...contract,
   };

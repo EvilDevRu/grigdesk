@@ -82,6 +82,7 @@ function withTransitionNote(messages: StoredChat['messages'], note: {
 
 export const EMPTY_WORKDIR_MEMORY = {
   sessionId: null,
+  executionRunId: null,
   pendingSeed: '',
   contextTokens: 0,
   contextWindow: 0,
@@ -142,7 +143,8 @@ export class ChatWorkdirTransitions {
     const current = committed || memory.workspace || null;
     const alreadyCommitted = committed?.workspaceKey === target.workspaceKey;
     const sameRoots = memory.workspace?.cwd === target.cwd
-      && memory.workspace.provider === target.provider;
+      && memory.workspace.provider === target.provider
+      && JSON.stringify(memory.workspace.extraDirs) === JSON.stringify(target.extraDirs);
     const hasSeed = Boolean(record.workdirState?.seed || record.pendingSeed);
     const transfer = !memory.sessionId || sameRoots || alreadyCommitted
       ? 'none'
@@ -482,6 +484,7 @@ export class ChatWorkdirTransitions {
 
     return this.patch(id, (current) => ({
       ...(transition.reset ? EMPTY_WORKDIR_MEMORY : {}),
+      executionRunId: null,
       taskId: transition.target.taskId,
       workdir: transition.target.workdir,
       workdirState: {

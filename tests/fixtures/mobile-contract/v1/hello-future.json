@@ -1,0 +1,13 @@
+{
+  "api": 1,
+  "minApp": "0.1.0",
+  "serverTime": 1760000000000,
+  "server": {
+    "name": "Кокпит",
+    "version": "0.1.0"
+  },
+  "device": null,
+  "optionalFuture": {
+    "label": "Новое поле"
+  }
+}

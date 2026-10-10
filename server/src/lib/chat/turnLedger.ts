@@ -11,6 +11,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import type { ResolvedWorkdir } from './workdir.ts';
+import { writeDurableFile } from '../durableFile.ts';
+
+export type MobileTurnOwner = {
+  deviceId: string;
+  clientId: string;
+  contentHash: string;
+};
 
 export type TurnState = 'queued' | 'running' | 'done';
 
@@ -28,6 +35,11 @@ export interface TurnEntry {
   userSentAt?: number;
   hadAttachments?: boolean;
   workspace?: ResolvedWorkdir;
+  // Назначает только серверный порт mobileChat; HTTP-тело не переносит это поле.
+  mobileOwner?: MobileTurnOwner;
+  runId?: string;
+  mobileHistoryEpoch?: number;
+  historySuppressed?: boolean;
 }
 
 export const TURN_ID_RE = /^[A-Za-z0-9_-]{8,80}$/;
@@ -98,6 +110,15 @@ export class ChatTurnLedger {
     return this.entries.get(turnId) || null;
   }
 
+  /**
+   * Принятые мобильные ходы нужны сверке истории после падения и перед чтением.
+   * Возвращает копии метаданных, не создавая вторую очередь исполнения.
+   */
+  mobileTurns(chatKey?: string): TurnEntry[] {
+    return [...this.entries.values()].filter((entry) => entry.mobileOwner
+      && (!chatKey || entry.chatKey === chatKey)).map((entry) => ({ ...entry }));
+  }
+
   /** Принятые, но ещё не начатые ходы в порядке приёма; по чату или все. */
   queued(chatKey = ''): TurnEntry[] {
     return [...this.entries.values()]
@@ -113,7 +134,17 @@ export class ChatTurnLedger {
     const stored = { ...entry };
 
     this.entries.set(stored.turnId, stored);
-    await this.persist(stored.turnId);
+
+    try {
+      await this.persist(stored.turnId);
+    } catch (error) {
+      if (this.entries.get(stored.turnId) === stored) {
+        this.entries.delete(stored.turnId);
+      }
+
+      throw error;
+    }
+
     this.putsSincePrune += 1;
 
     if (this.putsSincePrune >= PRUNE_EVERY_PUTS) {
@@ -176,6 +207,12 @@ export class ChatTurnLedger {
       }
 
       const file = this.fileOf(turnId);
+
+      if (entry.mobileOwner) {
+        await writeDurableFile(file, JSON.stringify(entry));
+
+        return;
+      }
 
       await fs.mkdir(this.dir, { recursive: true });
       await fs.writeFile(`${file}.tmp`, JSON.stringify(entry));

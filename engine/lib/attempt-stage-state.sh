@@ -1420,12 +1420,19 @@ elif OP == "prepare-commit":
         loop_lead,
         loop_worker,
         loop_max_rounds_raw,
+        expected_sequence_raw,
+        expected_hash,
     ) = ARGS
     if recovery_raw not in {"0", "1"}:
         fail()
     loop = loop_spec(loop_lead, loop_worker)
     loop_max_rounds = decimal(loop_max_rounds_raw, LOOP_MAX_ROUNDS_LIMIT)
     runtime = regular_json(runtime_path)
+    if expected_sequence_raw or expected_hash:
+        expected_sequence = decimal(expected_sequence_raw, 10**12)
+        identifier(expected_hash, HASH_RE)
+        if runtime.get("sequence") != expected_sequence or runtime.get("headEventHash") != expected_hash:
+            fail(75)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
         fail()
@@ -2790,6 +2797,11 @@ attempt_stage_state_commit_v2() {
   # Одиннадцатый — потолок кругов цикла из профиля (1..100). Нужен только передаче
   # lead → worker маршрута с `loop`; у остальных коммитов не читается.
   local loop_max_rounds=${11:-0}
+  # Телефон адресует exact заход ворот, а не только повторяющееся имя узла.
+  # Сверка sequence/hash происходит внутри этого же task lock до commit/idempotency.
+  local expected_sequence=${12:-} expected_hash=${13:-}
+  [[ -z "$expected_sequence" || "$expected_sequence" =~ ^(0|[1-9][0-9]{0,11})$ ]] || return 2
+  [[ -z "$expected_hash" || "$expected_hash" =~ ^[a-f0-9]{64}$ ]] || return 2
   [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$target_budget" =~ ^(0|[1-9]|10)$ ]] || return 2
@@ -2843,7 +2855,8 @@ attempt_stage_state_commit_v2() {
       "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" \
       "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" "$recovery" \
       "$target_budget" "$reject_feedback" \
-      "$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER" "$loop_max_rounds" >"$event_tmp"
+      "$ASTAGE_LOOP_LEAD" "$ASTAGE_LOOP_WORKER" "$loop_max_rounds" \
+      "$expected_sequence" "$expected_hash" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$transition_tmp" "$runtime_tmp"

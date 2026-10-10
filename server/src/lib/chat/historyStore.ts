@@ -3,6 +3,8 @@
 // мета (активный чат, дефолты модели/усилия) — chats/meta.json. Битый файл одного чата
 // не валит остальную историю: он пропускается с предупреждением.
 import { randomUUID } from 'node:crypto';
+import { chatPreview } from './chatPreview.ts';
+import { writeDurableFile } from '../durableFile.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -26,6 +28,7 @@ import {
 const SERVER_CHAT_KEYS = new Set([
   'schema', 'surface', 'revision', 'modelRefState', 'sessionBindingState',
   'logicalIdentity', 'workdirState',
+  'executionRunId', 'mobileHistoryAppliedAt', 'mobileHistoryEpoch',
   // Binding не должен оказаться в chat JSON даже под выдуманным клиентом именем.
   'binding', 'bindingGeneration', 'sessionBinding',
 ]);
@@ -55,6 +58,22 @@ export interface StoredChat extends ChatRecord {
   modelRef?: unknown;
   modelRefState?: unknown;
 }
+
+// Шапка чата для лёгких списков: поля строки списка без сообщений и состояния хода.
+export type ChatHead = Pick<
+  StoredChat,
+  | 'id'
+  | 'title'
+  | 'purpose'
+  | 'taskId'
+  | 'logicalIdentity'
+  | 'model'
+  | 'modelRef'
+  | 'unread'
+  | 'archived'
+  | 'createdAt'
+  | 'updatedAt'
+> & { preview: string };
 
 // Файл чата вместе с исходными байтами: они нужны сравнению и переносу.
 export interface ChatEntry {
@@ -186,9 +205,25 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Клиентское представление не получает серверные identity и durable receipt.
+ * Сохранение старого окна сравнивается только с разрешёнными клиенту полями.
+ */
 function clientChat(value: StoredChat | null | undefined): StoredChat {
   const next: StoredChat = { ...(value || {}) };
-  for (const key of SERVER_CHAT_KEYS) delete next[key];
+
+  for (const key of SERVER_CHAT_KEYS) {
+    delete next[key];
+  }
+
+  if (Array.isArray(next.messages)) {
+    next.messages = next.messages.map((message) => {
+      const { mobileId: _mobileId, ...clientMessage } = message;
+
+      return clientMessage;
+    });
+  }
+
   return next;
 }
 
@@ -253,7 +288,16 @@ export class ChatHistoryStore {
 
   private logicalLocks: Map<string, Promise<void>>;
 
-  private canonicalMessages: ((chatId: string) => ChatRecord['messages']) | null = null;
+  private canonicalMessages: ((chatId: string, chat: StoredChat) => ChatRecord['messages']) | null = null;
+
+  // Путь чат-файла → признаки файла и его шапка. Список чатов телефона не разбирает
+  // неизменённые файлы заново: полная история весит сотни мегабайт.
+  private headCache = new Map<string, {
+    ino: number;
+    size: number;
+    mtimeMs: number;
+    head: ChatHead | null;
+  }>();
 
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
   constructor({
@@ -286,7 +330,7 @@ export class ChatHistoryStore {
   }
 
   /** Привязка durable-журналов уточнений после создания их владельцев в chat module. */
-  setCanonicalMessages(source: (chatId: string) => ChatRecord['messages']): void {
+  setCanonicalMessages(source: (chatId: string, chat: StoredChat) => ChatRecord['messages']): void {
     this.canonicalMessages = source;
   }
 
@@ -374,11 +418,116 @@ export class ChatHistoryStore {
   }
 
   /**
-   * Запись через tmp+rename: оборванная запись не оставляет полуфайл.
+   * Шапки всех чатов без сообщений для частых лёгких списков (мобильный фасад).
+   * Файл разбирается заново только при смене inode, размера или mtime; при повторе id,
+   * как и в scan(), остаётся последний найденный файл. Удалённые файлы покидают кэш.
    */
-  async writeAtomic(p: string, data: string): Promise<void> {
+  async heads(): Promise<ChatHead[]> {
+    await this.ensureMigrated();
+
+    const map = new Map<string, ChatHead>();
+    const seen = new Set<string>();
+    let months: string[] = [];
+
+    try {
+      months = await fs.readdir(this.dir);
+    } catch {
+      return [];
+    }
+
+    for (const month of months) {
+      if (!/^\d{4}-\d{2}$/.test(month)) {
+        continue;
+      }
+
+      const directory = path.join(this.dir, month);
+
+      for (const name of await fs.readdir(directory)) {
+        if (!name.endsWith('.json')) {
+          continue;
+        }
+
+        const file = path.join(directory, name);
+
+        seen.add(file);
+
+        try {
+          const head = await this.headOf(file);
+
+          if (head?.id) {
+            map.set(head.id, head);
+          }
+        } catch (e) {
+          this.log?.warn?.({ file, err: (e as Error).message }, 'чат-файл не читается, пропущен');
+        }
+      }
+    }
+
+    for (const file of [...this.headCache.keys()]) {
+      if (!seen.has(file)) {
+        this.headCache.delete(file);
+      }
+    }
+
+    return [...map.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  }
+
+  /**
+   * Шапка одного файла: из кэша по признакам файла либо из свежего разбора JSON.
+   * В кэше остаются только поля списка, сообщения после разбора освобождаются.
+   */
+  private async headOf(file: string): Promise<ChatHead | null> {
+    const stat = await fs.stat(file);
+    const cached = this.headCache.get(file);
+
+    if (cached && cached.ino === stat.ino && cached.size === stat.size
+      && cached.mtimeMs === stat.mtimeMs) {
+      return cached.head;
+    }
+
+    const chat = JSON.parse(await fs.readFile(file, 'utf8')) as StoredChat;
+    const head: ChatHead | null = chat?.id
+      ? {
+        id: chat.id,
+        title: chat.title,
+        purpose: chat.purpose,
+        taskId: chat.taskId,
+        logicalIdentity: chat.logicalIdentity,
+        model: chat.model,
+        modelRef: chat.modelRef,
+        unread: chat.unread,
+        archived: chat.archived,
+        createdAt: chat.createdAt,
+        updatedAt: chat.updatedAt,
+        preview: chatPreview(chat),
+      }
+      : null;
+
+    this.headCache.set(file, {
+      ino: stat.ino,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      head,
+    });
+
+    return head;
+  }
+
+  /**
+   * Запись через tmp+rename: оборванная запись не оставляет полуфайл.
+   * При durable приёме сообщения fsync завершается до ответа об успешной записи.
+   */
+  async writeAtomic(p: string, data: string, durable = false): Promise<void> {
+    if (durable) {
+      await writeDurableFile(p, data);
+
+      return;
+    }
+
     await fs.mkdir(path.dirname(p), { recursive: true });
+
     const temp = `${p}.${process.pid}.${randomUUID()}.tmp`;
+
     await fs.writeFile(temp, data, { mode: 0o600, flag: 'wx' });
     await fs.rename(temp, p);
     await fs.chmod(p, 0o600).catch(() => {});
@@ -694,18 +843,62 @@ export class ChatHistoryStore {
         archived: !!archived,
       };
 
-      c.messages = protectCanonicalMessages(
+      // Маркеры исполнения принадлежат серверу даже у свежего клиентского PUT.
+      // Подтверждённая очистка меняет поколение, чтобы ledger не вернул старые реплики.
+      for (const key of ['executionRunId', 'mobileHistoryAppliedAt', 'mobileHistoryEpoch']) {
+        if (prev?.chat[key] !== undefined) {
+          c[key] = prev.chat[key];
+        }
+      }
+
+      const cleared = !stale && !!prev?.chat.messages?.length
+        && Array.isArray(chat.messages) && chat.messages.length === 0;
+
+      if (cleared) {
+        c.mobileHistoryEpoch = Number(prev?.chat.mobileHistoryEpoch || 0) + 1;
+        c.executionRunId = null;
+        c.mobileHistoryAppliedAt = 0;
+      }
+
+      c.messages = cleared ? [] : protectCanonicalMessages(
         c.messages,
         [
           ...(prev?.chat.messages || []).filter((message) => message.serverCanonical),
-          ...(this.canonicalMessages?.(String(chat.id)) || []),
+          ...(this.canonicalMessages?.(String(chat.id), c) || []),
         ],
       );
+
+      // Идентификаторы старых реплик принадлежат серверу, включая неканоническую историю веба.
+      // Кратность одинаковых legacy-реплик сохраняется: один прежний id не назначается двум сообщениям.
+      const mobileIds = new Map<string, string[]>();
+
+      for (const message of prev?.chat.messages || []) {
+        if (typeof message.mobileId !== 'string') {
+          continue;
+        }
+
+        const key = messageKey(message);
+        const ids = mobileIds.get(key) || [];
+
+        ids.push(message.mobileId);
+        mobileIds.set(key, ids);
+      }
+
+      for (const message of c.messages || []) {
+        const id = mobileIds.get(messageKey(message))?.shift();
+
+        if (id) {
+          message.mobileId = id;
+        }
+      }
 
       if (stale && prev?.chat) {
         c.model = prev.chat.model;
         c.modelRef = prev.chat.modelRef;
         c.modelRefState = prev.chat.modelRefState;
+        c.effort = prev.chat.effort;
+        c.mode = prev.chat.mode;
+        c.unread = prev.chat.unread;
       }
       if (prev?.chat.workdirState) {
         c.workdirState = prev.chat.workdirState;
@@ -747,11 +940,13 @@ export class ChatHistoryStore {
 
   /**
    * Серверная мутация исполняемого состояния поверх свежей записи.
-   * Короткий lock не держится во время запроса модели и сохраняет новые черновики/сообщения.
+   * Async callback завершает атомарный сброс сессии до допуска следующего PUT.
+   * Генерация ответа модели под этим lock не выполняется.
    */
   async patchExecution(
     id: string,
-    patch: (chat: StoredChat) => Partial<StoredChat>,
+    patch: (chat: StoredChat) => Partial<StoredChat> | Promise<Partial<StoredChat>>,
+    options: { durable?: boolean; skipUnchanged?: boolean } = {},
   ): Promise<StoredChat> {
     await this.ensureMigrated();
 
@@ -762,13 +957,23 @@ export class ChatHistoryStore {
         throw new ChatHistoryError('unknown_chat', 'Чат не найден.', { statusCode: 404 });
       }
 
+      const before = stableJson(entry.chat);
       const next = {
         ...entry.chat,
-        ...patch(entry.chat),
-        revision: Number(entry.chat.revision || 0) + 1,
+        ...await patch(entry.chat),
       };
 
-      await this.writeAtomic(entry.path, stableJson(next));
+      if (options.skipUnchanged && stableJson(next) === before) {
+        if (options.durable) {
+          await this.writeAtomic(entry.path, entry.json, true);
+        }
+
+        return entry.chat;
+      }
+
+      next.revision = Number(entry.chat.revision || 0) + 1;
+
+      await this.writeAtomic(entry.path, stableJson(next), options.durable);
 
       return next;
     });
@@ -780,7 +985,7 @@ export class ChatHistoryStore {
    */
   async syncMessages(
     id: string,
-    project: (messages: ChatRecord['messages']) => ChatRecord['messages'],
+    project: (messages: ChatRecord['messages'], chat: StoredChat) => ChatRecord['messages'],
   ): Promise<StoredChat> {
     await this.ensureMigrated();
 
@@ -791,10 +996,10 @@ export class ChatHistoryStore {
         throw new ChatHistoryError('unknown_chat', 'Чат не найден.', { statusCode: 404 });
       }
 
-      const messages = project(entry.chat.messages);
+      const messages = project(entry.chat.messages, entry.chat);
       const protectedMessages = protectCanonicalMessages(
         messages,
-        this.canonicalMessages?.(id),
+        this.canonicalMessages?.(id, entry.chat),
       );
 
       if (stableJson(protectedMessages) === stableJson(entry.chat.messages)) {

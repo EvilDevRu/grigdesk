@@ -43,6 +43,7 @@
     "ioredis": "^6.0.0",
     "mysql2": "^3.24.3",
     "playwright-core": "^1.62.1",
+    "qrcode-generator": "^2.0.4",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {

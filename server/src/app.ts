@@ -13,6 +13,12 @@ import websocket from '@fastify/websocket';
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { config } from './config.ts';
+import { MobileService } from './lib/mobile/service.ts';
+import { ActionTokens } from './lib/mobile/actionTokens.ts';
+import { recoverChatOperation } from './lib/mobile/chatTurns.ts';
+import { registerMobileFacade } from './lib/mobile/facade/index.ts';
+import { relayVpnGate } from './lib/mobile/vpn.ts';
+import mobileModule from './modules/mobile/index.ts';
 import { cockpitCliPath } from './lib/cliPath.ts';
 import { AuthStore } from './lib/authStore.ts';
 import { FactoryStateAdapter } from './adapters/factoryState.ts';
@@ -1196,7 +1202,7 @@ async function build() {
   // ── Телеграм-пульт: вотчер «требует человека» + команды/кнопки владельца ──
   // Пульт — ещё одно «окно» кокпита: действия идут через inject в те же ручки,
   // что жмёт браузер (X-Cockpit-Internal — как у permission-mcp чата).
-  const pultCallApi = async (method: string, url: string, payload?: unknown) => {
+  const internalCallApi = async (method: string, url: string, payload?: unknown) => {
     const res = await fastify.inject({
       method,
       url,
@@ -1207,6 +1213,42 @@ async function build() {
     try { body = res.json(); } catch { /* не-JSON ответа у этих ручек не бывает */ }
     return { statusCode: res.statusCode, body };
   };
+  const internalCallRaw = async (method: string, url: string) => {
+    const res = await fastify.inject({
+      method,
+      url,
+      headers: { 'x-cockpit-internal': internalToken },
+    } as InjectOptions);
+
+    return {
+      statusCode: res.statusCode,
+      headers: res.headers,
+      payload: res.rawPayload,
+    };
+  };
+  const pultCallApi = internalCallApi;
+  const mobile = new MobileService({
+    directory: config.mobileDir,
+    port: config.mobilePort,
+    vpnGate: relayVpnGate,
+    registerRoutes: (app) => registerMobileFacade(app, {
+      callApi: internalCallApi,
+      callRaw: internalCallRaw,
+      chat: fastify.mobileChat!,
+      tokens: new ActionTokens(),
+      apkDirectory: config.mobileApkDir,
+      subscribe: (listener) => fastify.sse?.subscribe?.(listener) ?? (() => {}),
+    }),
+    recoverOperation: (device, proof) => recoverChatOperation(fastify.mobileChat!, device, proof),
+    changed: () => fastify.sse?.broadcast?.('mobile-changed', { at: Date.now() }),
+    log: (event) => fastify.log.warn({ event }, 'мобильный доступ: изменение состояния'),
+  });
+
+  await fastify.register(mobileModule, { service: mobile });
+  fastify.addHook('onListen', () => mobile.start());
+  shutdown.register('mobile', () => mobile.close());
+  fastify.addHook('onClose', () => mobile.close());
+
   const pultStores = new Map<string, TelegramPultStateStore>();
   // Одна фабрика state на вотчер и действия: карточки, экран навигации и реестр
   // служебных ответов живут в одном pult-state.json (merge-запись по полям).

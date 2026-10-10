@@ -16,6 +16,7 @@ import { prepareChatNativeSettings } from '../../lib/executorSettings/launch.ts'
 import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
+import { MobileChatControls } from '../../lib/chat/mobileControls.ts';
 import { resolveRequestedEffort } from '../../lib/modelEffort.ts';
 import {
   ChatHistoryError,
@@ -30,6 +31,10 @@ import { ChatInTurnLedger } from '../../lib/chat/inTurnLedger.ts';
 import { ChatAssistantMessages } from '../../lib/chat/assistantMessages.ts';
 import { ChatAssistantPublisher } from '../../lib/chat/assistantPublisher.ts';
 import { InTurnHistory } from '../../lib/chat/inTurnHistory.ts';
+import { MobileHistory } from '../../lib/chat/mobileHistory.ts';
+import { waitingIdentity } from '../../lib/chat/waitingIdentity.ts';
+import type { MobileTurnOwner } from '../../lib/chat/turnLedger.ts';
+import { writeDurableFile } from '../../lib/durableFile.ts';
 import { InTurnMessages } from '../../lib/chat/inTurnMessages.ts';
 import { ChatBackgroundRuns, visibleExtraDirs } from '../../lib/chat/backgroundRuns.ts';
 import { ChatLiveSessions } from '../../lib/chat/liveSessions.ts';
@@ -141,6 +146,8 @@ interface ChatTurnInput {
   // Устойчивый id отправки из окна: с ним ход принимается коротко и исполняется без
   // HTTP-соединения, а повтор с тем же id не запускает исполнителя второй раз.
   turnId?: unknown;
+  // Этот маркер передаёт только внутренний mobileChat, startTurnRoute его не читает.
+  mobileOwner?: MobileTurnOwner;
 }
 
 interface AnswerInput {
@@ -164,6 +171,8 @@ interface PermissionInput extends Record<string, unknown> {
 }
 
 interface ChatBody extends ChatTurnInput, ChatMeta {
+  expected?: { runId?: unknown; queued?: unknown };
+  expectedVersion?: unknown;
   tool_name?: string;
   input?: PermissionInput;
   action?: string;
@@ -635,6 +644,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // пока ход ещё только проходит strict preflight и потому не виден ни activeRuns,
   // ни turnLocks.
   const acceptedTurns = new Map<string, number>(); // chatKey -> число preflight/queued/locked/running ходов
+  const stoppedQueuedTurns = new Set<string>();
   const savingChats = new Map<string, number>(); // chatKey -> число принятых point/full PUT
   const deletingChats = new Set<string>();
   // Журнал ходов, принятых по turnId: идемпотентность приёма, статус после F5 и итог
@@ -647,7 +657,20 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Проекция разговора для следующего хода: уточнения и ответы прошлых запусков.
   const inTurnHistory = new InTurnHistory({ ledger: inTurnLedger, assistant: assistantMessages });
 
-  history.setCanonicalMessages((chatId) => inTurnHistory.project({ chatKey: chatId }));
+  /**
+   * Очистка мобильного разговора подавляет старые запуски в общей проекции.
+   * Поколение берётся из свежего chat-файла под его существующим lock.
+   */
+  function excludedMobileRuns(chatId: string, record: StoredChat): string[] {
+    return turnLedger.mobileTurns(chatId).filter((entry) => entry.historySuppressed
+      || Number(entry.mobileHistoryEpoch || 0) !== Number(record.mobileHistoryEpoch || 0))
+      .map((entry) => entry.runId || '').filter(Boolean);
+  }
+
+  history.setCanonicalMessages((chatId, record) => inTurnHistory.project({
+    chatKey: chatId,
+    excludedRuns: excludedMobileRuns(chatId, record),
+  }));
   // Координатор уточнений: приём и доставка живут отдельно от очереди обычных ходов.
   const inTurnMessages = new InTurnMessages({
     ledger: inTurnLedger,
@@ -1485,6 +1508,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
       await history.patchExecution(chatKey, (current) => ({
         ...EMPTY_WORKDIR_MEMORY,
+        executionRunId: null,
         workdirState: {
           ...current.workdirState,
           seed: '',
@@ -1506,8 +1530,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * ошибкой `stopped`, и чат покажет «Ход остановлен» вместо бесконечного «думает…».
    * Ждущий ответа запрос разрешения тоже снимаем: отвечать уже некому.
    */
-  fastify.post<ChatRoute>('/api/chat/stop', async (request) => {
-    const chatKey = String(request.body?.chatKey || '');
+  async function stopCurrentChat(chatKey: string) {
     const run = activeRuns.get(chatKey);
 
     if (!run) {
@@ -1541,6 +1564,57 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     run.ac?.abort();
     fastify.log.info({ chatKey }, 'чат: ход остановлен пользователем');
     return { ok: true };
+  }
+
+  fastify.post<ChatRoute>('/api/chat/stop', async (request, reply) => {
+    const chatKey = String(request.body?.chatKey || '');
+    const expected = request.body?.expected as { runId?: unknown; queued?: unknown } | undefined;
+
+    if (expected === undefined) {
+      return stopCurrentChat(chatKey);
+    }
+
+    return inAdmissionOrder(chatKey, async () => {
+      const runId = activeRuns.get(chatKey)?.runId || backgroundRuns.runningIdentity(chatKey)?.runId || null;
+      const queued = turnLedger.queued(chatKey);
+      const ids = queued.map((entry) => entry.turnId).sort();
+
+      if (!expected || expected.runId !== runId || !Array.isArray(expected.queued)
+        || expected.queued.some((id) => typeof id !== 'string')
+        || JSON.stringify([...expected.queued].sort()) !== JSON.stringify(ids)) {
+        return reply.code(409).send({
+          error: 'state_changed',
+          message: 'Запуск или очередь изменились; обновите карточку.',
+        });
+      }
+
+      // Проверка, блокирование queued и abort выполняются без await между ними.
+      // Барьер запуска временный; durable done появляется лишь ПОСЛЕ recoverable pending.
+      // Сбой одного queued результата не мешает записать итог остальным остановленным ходам.
+      queued.forEach((entry) => stoppedQueuedTurns.add(entry.turnId));
+
+      const result = await stopCurrentChat(chatKey);
+
+      const results = await Promise.allSettled(queued.map(async (entry) => {
+        try {
+          await failTurn(entry, 'Ход из очереди остановлен пользователем.', { stopped: true });
+        } finally {
+          if (turnLedger.get(entry.turnId)?.state === 'done') {
+            stoppedQueuedTurns.delete(entry.turnId);
+          }
+        }
+      }));
+
+      await mobileHistory.reconcile(chatKey);
+
+      for (const settled of results) {
+        if (settled.status === 'rejected') {
+          throw settled.reason;
+        }
+      }
+
+      return { ...result, ok: result.ok || queued.length > 0 };
+    });
   });
 
   // ── Всплывашка разрешений и диалог с агентом: ожидающие ответа пользователя запросы ──
@@ -1787,8 +1861,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           ...p.presentation,
         };
       }
+
       return {
-        pid, chatKey: p.chatKey, at: p.at,
+        pid,
+        chatKey: p.chatKey,
+        at: p.at,
+        version: waitingIdentity(p),
+        direct: p.direct === true,
+        acceptsComment: !p.direct || p.acceptsComment === true,
+        acceptsText: !p.direct || p.acceptsText === true,
         chatTitle: head.title,
         taskId: head.taskId,
         ...(p.isQuestion ? {
@@ -1880,6 +1961,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return reply.code(409).send({ error: 'origin_mismatch' });
     }
     const body = request.body || {};
+
+    if (body.expectedVersion !== undefined && body.expectedVersion !== waitingIdentity(p)) {
+      return reply.code(409).send({
+        error: 'state_changed',
+        message: 'Запрос изменился; перечитайте его перед решением.',
+      });
+    }
+
     let structuredDecision = null;
     if (p.direct && p.isQuestion && p.structuredAnswers) {
       const action = typeof body.action === 'string' ? body.action : '';
@@ -1960,8 +2049,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   async function writeOrphan(entry: Record<string, unknown> & { id: string }) {
     await fs.mkdir(pendingDir, { recursive: true });
     const p = path.join(pendingDir, `${entry.id}.json`);
-    await fs.writeFile(p + '.tmp', JSON.stringify(entry));
-    await fs.rename(p + '.tmp', p);
+    const turn = turnLedger.get(String(entry.turnId || entry.id || ''));
+
+    if (turn?.mobileOwner) {
+      await writeDurableFile(p, JSON.stringify(entry));
+    } else {
+      await fs.writeFile(p + '.tmp', JSON.stringify(entry));
+      await fs.rename(p + '.tmp', p);
+    }
   }
 
   /**
@@ -1995,7 +2090,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    */
   async function parkTurnResult(turnId: string, result: Record<string, unknown>, outcome: string) {
     const chatKey = String(result.chatKey || turnLedger.get(turnId)?.chatKey || '');
-    const runId = activeRuns.get(chatKey)?.runId;
+    const entry = turnLedger.get(turnId);
+    const runId = String(result.runId || entry?.runId
+      || (entry?.state === 'running' ? activeRuns.get(chatKey)?.runId : '') || '');
 
     await writeOrphan({
       ...result,
@@ -2012,6 +2109,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }).catch((error) => {
       fastify.log.error({ turnId, err: (error as Error)?.message }, 'чат: журнал хода не обновлён');
     });
+
+    if (turnLedger.get(turnId)?.mobileOwner) {
+      await mobileHistory.reconcile(chatKey).catch(() => {
+        fastify.log.warn('чат: мобильный итог остался в pending для повторной сверки');
+      });
+    }
+
     fastify.sse.broadcast('chat-orphan', { chatKey, turnId });
   }
 
@@ -2025,8 +2129,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       role: 'error',
       reply: message,
       ...turnUserOf(entry),
+      ...(entry.runId ? { runId: entry.runId } : {}),
       ...extra,
-    }, extra.interruptedBy ? 'interrupted' : 'refused');
+    }, extra.interruptedBy ? 'interrupted' : extra.stopped ? 'stopped' : 'refused');
   }
 
   /**
@@ -2081,11 +2186,51 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     return pending;
   }
 
+  const mobileHistory = new MobileHistory({
+    history,
+    ledger: turnLedger,
+    projection: inTurnHistory,
+    readPending: readPendingRecords,
+    pendingDir,
+    activeRunId: (chatKey) => activeRuns.get(chatKey)?.runId ?? null,
+    changed: (chatKey) => fastify.sse.broadcast('chat-store', {
+      id: chatKey,
+      origin: '',
+      at: Date.now(),
+    }),
+  });
+  const mobileHistoryTimer = setInterval(() => {
+    void mobileHistory.reconcile().catch(() => {
+      fastify.log.warn('чат: сверка мобильной истории отложена после ошибки записи');
+    });
+  }, 10000);
+
+  mobileHistoryTimer.unref();
+  fastify.addHook('onClose', async () => {
+    clearInterval(mobileHistoryTimer);
+  });
   fastify.get<ChatRoute>('/api/chat/pending', async () => ({ pending: await readPendingRecords() }));
 
-  fastify.delete<ChatRoute>('/api/chat/pending/:id', async (request) => {
+  fastify.delete<ChatRoute>('/api/chat/pending/:id', async (request, reply) => {
     const id = String(request.params.id).replace(/[^\w.-]/g, '');
-    if (id) await fs.rm(path.join(pendingDir, `${id}.json`), { force: true });
+    const pending = (await readPendingRecords()).find((entry) => entry.id === id);
+    const turn = turnLedger.get(String(pending?.turnId || id));
+
+    if (turn?.mobileOwner) {
+      // Веб и автоматическая mobile сверка подтверждают один и тот же durable итог.
+      // Ошибка ledger/history оставляет pending даже после успешного клиентского PUT.
+      try {
+        await mobileHistory.reconcile(turn.chatKey);
+      } catch {
+        return reply.code(503).send({
+          error: 'history_not_durable',
+          message: 'Итог ещё не записан устойчиво; подтверждение будет повторено.',
+        });
+      }
+    } else if (id) {
+      await fs.rm(path.join(pendingDir, `${id}.json`), { force: true });
+    }
+
     return { ok: true };
   });
 
@@ -2289,7 +2434,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (opts.workspaceKey && opts.workspaceKey !== target.workspace.workspaceKey) {
         throw new ChatWorkdirError('stale_chat_workdir', 'Рабочие пути изменились после предпросмотра.');
       }
-      if ((opts.workspaceKey || opts.compact) && target.record) {
+      if ((opts.workspaceKey || opts.compact ||
+        (opts.mobileOwner && target.record?.workdirState?.committed)) && target.record) {
         const preview = await workdirTransitions.preview(target.record);
 
         if (['reseed', 'unavailable'].includes(preview.transfer)) {
@@ -2297,6 +2443,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             'workdir_transfer_required', 'Подтвердите перенос памяти в новую папку.',
           );
         }
+      }
+      if (opts.mobileOwner) {
+        // Доверенный admission закрепляет свежий hash, включая изменившиеся capabilities.
+        // Перенос памяти уже проверен выше; старый committed hash не является клиентским CAS.
+        opts.workspaceKey = target.workspace.workspaceKey;
       }
     } catch (error) {
       const failure = error as ChatWorkdirError;
@@ -2434,21 +2585,21 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * в фоне той же очередью чата, итог уходит в pending под тем же id. Повтор с известным
    * turnId — в том числе пришедший, пока первый ещё принимается, — ничего не запускает.
    */
-  async function acceptTurn(reply: FastifyReply, opts: ChatTurnInput) {
+  async function acceptTurnAnswer(opts: ChatTurnInput): Promise<TurnReply> {
     const turnId = typeof opts.turnId === 'string' && TURN_ID_RE.test(opts.turnId) ? opts.turnId : '';
     const chatKey = String(opts.chatKey || '');
 
     if (!turnId) {
-      return reply.code(400).send({
+      return { status: 400, body: {
         error: 'bad_turn_id',
         message: 'Id хода — строка 8–80 символов из латиницы, цифр, «_» и «-».',
-      });
+      } };
     }
     if (!chatKey) {
-      return reply.code(400).send({
+      return { status: 400, body: {
         error: 'bad_chat_key',
         message: 'Принять можно только ход сохранённого чата.',
-      });
+      } };
     }
 
     await turnLedger.load();
@@ -2474,6 +2625,31 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         }
       }
     }
+
+    const entry = turnLedger.get(turnId);
+    const owner = entry?.mobileOwner;
+
+    if (entry && (Boolean(owner) !== Boolean(opts.mobileOwner) || (owner && (!opts.mobileOwner
+      || owner.deviceId !== opts.mobileOwner.deviceId || owner.clientId !== opts.mobileOwner.clientId
+      || owner.contentHash !== opts.mobileOwner.contentHash)))) {
+      return {
+        status: 409,
+        body: {
+          error: 'turn_conflict',
+          message: 'Id хода принадлежит другой отправке.',
+        },
+      };
+    }
+
+    return answer;
+  }
+
+  /**
+   * HTTP-обёртка прежнего контракта приёма сохраняет статус и тело ответа.
+   * Веб и доверенный мобильный порт используют одну сериализацию admission.
+   */
+  async function acceptTurn(reply: FastifyReply, opts: ChatTurnInput) {
+    const answer = await acceptTurnAnswer(opts);
 
     return reply.code(answer.status).send(answer.body);
   }
@@ -2507,6 +2683,27 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     let launched = false;
 
     try {
+      if (opts.mobileOwner) {
+        // Чтение входит в общий admission, иначе медленный диск переставит mobile и web.
+        // Модель, задача и рабочая папка берутся из свежей записи до общего preflight.
+        const record = await history.readOne(chatKey);
+
+        if (!record) {
+          return { status: 404, body: { error: 'chat_not_found', message: 'Чат не найден.' } };
+        }
+
+        Object.assign(opts, {
+          id: record.taskId ?? null,
+          modelRef: record.modelRef,
+          model: String(record.model || ''),
+          effort: String(record.effort || ''),
+          mode: String(record.mode || ''),
+          workdir: record.workdir,
+          sessionId: record.sessionId || null,
+          requestTitle: !record.title && !(record.messages || []).some((message) => message.role === 'user'),
+        });
+      }
+
       const prepared = await prepareTurn(opts);
 
       if (!prepared.ok) {
@@ -2525,8 +2722,27 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         userText: opts.message || '',
         hadAttachments: !!opts.attachments?.length,
         workspace: prepared.target.workspace,
+        ...(opts.mobileOwner ? {
+          mobileOwner: { ...opts.mobileOwner },
+          mobileHistoryEpoch: Number(prepared.target.record?.mobileHistoryEpoch || 0),
+        } : {}),
         ...(userSentAt ? { userSentAt } : {}),
       });
+
+      if (entry.mobileOwner) {
+        try {
+          await mobileHistory.accepted(entry);
+        } catch {
+          await failTurn(entry, 'История хода не записана — сообщение не выполнено.');
+
+          return { status: 202, body: {
+            accepted: true,
+            turnId,
+            state: 'done',
+          } };
+        }
+      }
+
       // Между проверкой очереди и постановкой в неё нет await: ход либо ждёт, либо стартует.
       const queued = turnLocks.isBusy(prepared.scope) || backgroundRuns.has(chatKey);
 
@@ -2574,7 +2790,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       await backgroundRuns.waitUntilIdle(entry.chatKey);
 
       // Итог уже выдан сливом остановки — запускать нечего.
-      if (turnLedger.get(entry.turnId)?.state === 'done') {
+      if (turnLedger.get(entry.turnId)?.state === 'done' || stoppedQueuedTurns.has(entry.turnId)) {
         return;
       }
       if (draining) {
@@ -2692,6 +2908,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   async function runChatTurn(channel: TurnChannel, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target, summaryWorkspace, workspaceKey,
+    mobileOwner,
   }: ChatTurnInput & {
     model: string;
     target: RunTarget;
@@ -3134,6 +3351,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
 
     try {
+      if (channel.turnId && turnLedger.get(channel.turnId)?.mobileOwner) {
+        await turnLedger.update(channel.turnId, { runId });
+      }
+      if (chatKey && target.record && turnLedger.mobileTurns(chatKey).length) {
+        // Новый запуск владеет памятью до executor, даже если завершится ошибкой.
+        // Обычные чаты без mobile ownership сохраняют прежнее число записей истории.
+        await history.patchExecution(chatKey, () => ({ executionRunId: runId }), { durable: true });
+      }
+
       // Живой показ шага: служебный маркер заголовка не виден ни в ленте, ни после F5,
       // копия в activeRuns нужна окну, открытому ПОСРЕДИ хода. Окно скользящее, как у
       // sink: раньше здесь копились первые 400 шагов, и после F5 длинный ход показывал
@@ -3159,7 +3385,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       };
 
       if (!plan && !slash && chatKey) {
-        const seed = await workdirTransitions.claimSeed(chatKey, channel.turnId, Boolean(workspaceKey));
+        // Доверенный mobile port всегда использует общий claim даже у legacy compact-записи.
+        // Это сохраняет выжимку без ручной склейки и не дублирует её при повторе turnId.
+        const seed = await workdirTransitions.claimSeed(
+          chatKey, channel.turnId, Boolean(workspaceKey || mobileOwner),
+        );
 
         if (seed) {
           fullMessage = `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}`
@@ -3179,10 +3409,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       const pendingHistory = await readPendingRecords();
 
       if (chatKey && target.record) {
-        await history.syncMessages(chatKey, (messages) => inTurnHistory.project({
+        await history.syncMessages(chatKey, (messages, record) => inTurnHistory.project({
           chatKey,
           base: messages,
           pending: pendingHistory,
+          excludedRuns: excludedMobileRuns(chatKey, record),
         }));
       }
 
@@ -3544,6 +3775,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         const seedConsumed = !plan && !slash && !out.deliveryFailure;
 
         await history.patchExecution(chatKey, (record) => ({
+          executionRunId: runId,
           sessionId: out.sessionId || runRec.sessionId || null,
           ...(plan?.kind === 'summary' ? {
             ...EMPTY_WORKDIR_MEMORY,
@@ -3620,7 +3852,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         err.sessionReset ||= seedReset;
 
         if (err.sessionReset && !seedReset) {
-          await history.patchExecution(chatKey, () => ({ ...EMPTY_WORKDIR_MEMORY }));
+          await history.patchExecution(chatKey, () => ({ ...EMPTY_WORKDIR_MEMORY, executionRunId: runId }));
         }
       }
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
@@ -3657,6 +3889,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
         if (chatKey && !summaryWorkspace && !seedReset) {
           await history.patchExecution(chatKey, (record) => ({
+            executionRunId: runId,
             sessionId: stoppedOut.sessionId,
             ...normalizeContextUsage(stoppedOut),
             workdirState: {
@@ -4315,6 +4548,107 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Свободный чат без задачи (корень фабрики).
   fastify.post<ChatRoute>('/api/chat', async (request, reply) => startTurnRoute(reply, request, null));
 
+  fastify.decorate('mobileChat', {
+    controls: new MobileChatControls({
+      history,
+      registry: () => modelsRegistry(config),
+      busy: (id) => Boolean(acceptedTurns.get(id) || savingChats.get(id) || deletingChats.has(id)
+        || activeRuns.has(id) || workdirTransitions.isBusy(id)
+        || turnLocks.isBusy({ chatKey: id }) || backgroundRuns.has(id)),
+      lock: (id, action) => turnLocks.run({ chatKey: id }, action),
+      reset: resetWorkspaceMemory,
+      changed: (id) => fastify.sse.broadcast('chat-store', {
+        id,
+        origin: '',
+        at: Date.now(),
+      }),
+    }),
+    compactWindow: () => Math.max(0, Number(prefs.read().chatAutoCompactWindow) || 0),
+    defaults: () => history.readMetaRaw(),
+    /**
+     * Назначает server-owned history из доверенного адаптера устройства.
+     * Выбор модели и рабочей области всегда берётся из свежей durable записи чата.
+     */
+    async send(input) {
+      if (typeof input.message !== 'string' || !input.message.trim()
+        || !/^d[a-f0-9]{8,32}$/.test(input.owner.deviceId)
+        || !/^[A-Za-z0-9_-]{8,80}$/.test(input.owner.clientId)
+        || !/^[a-f0-9]{64}$/.test(input.owner.contentHash)) {
+        return { status: 400, body: { error: 'bad_text', message: 'Сообщение или id отправки повреждены.' } };
+      }
+
+      return acceptTurnAnswer({
+        chatKey: input.chatKey,
+        turnId: input.turnId,
+        message: input.message,
+        sentAt: input.sentAt,
+        mobileOwner: input.owner,
+      });
+    },
+    reconcile: (chatKey) => mobileHistory.reconcile(chatKey),
+    // Список телефона берёт шапки из кэша файлов: полная история для него не нужна.
+    heads: () => history.heads(),
+    /**
+     * Старый operation intent доказывается только записью с тем же владельцем и hash текста.
+     * Восстановление не вызывает admission; материализация сверяет уже принятый ход.
+     */
+    async recover(input) {
+      await turnLedger.load();
+
+      const entry = turnLedger.get(input.turnId);
+      const owner = entry?.mobileOwner;
+
+      if (!entry || !owner || entry.chatKey !== input.chatId || owner.deviceId !== input.deviceId
+        || owner.clientId !== input.clientId || owner.contentHash !== input.contentHash) {
+        return null;
+      }
+
+      await mobileHistory.reconcile(input.chatId);
+
+      return { state: turnLedger.get(input.turnId)!.state };
+    },
+    /**
+     * Стабильный id старой реплики назначается сервером один раз под общим history lock.
+     * Чтение сперва завершает materialization и не требует браузерного PUT.
+     */
+    async read(chatKey) {
+      await mobileHistory.reconcile(chatKey);
+
+      const record = await history.readOne(chatKey);
+
+      if (!record || (record.messages || []).every((message) => message.mobileId)) {
+        return record;
+      }
+
+      return history.patchExecution(chatKey, (current) => ({
+        messages: (current.messages || []).map((message) => message.mobileId
+          ? message : { ...message, mobileId: `m${randomUUID()}` }),
+      }), { durable: true });
+    },
+    /**
+     * Доставка читается из того же turn ledger и только для отправителя этого устройства.
+     * Чужой clientId выглядит неизвестным, не раскрывая другого телефона или разговора.
+     */
+    async deliveries(deviceId, chatKey, clientIds) {
+      await turnLedger.load();
+
+      const owned = new Map(turnLedger.mobileTurns(chatKey)
+        .filter((entry) => entry.mobileOwner?.deviceId === deviceId)
+        .map((entry) => [entry.mobileOwner!.clientId, entry]));
+
+      return clientIds.map((clientId) => {
+        const entry = owned.get(clientId);
+
+        return {
+          clientId,
+          turnId: entry?.turnId ?? null,
+          state: entry?.state ?? 'unknown',
+          outcome: entry?.outcome ?? null,
+        };
+      });
+    },
+  } satisfies NonNullable<FastifyInstance['mobileChat']>);
+
   /**
    * Состояние принятых ходов по их id: окно после F5 или долгого обрыва отличает
    * «сервер не получил» (null — можно отправить тем же id ещё раз) от «принят и идёт»
@@ -4613,7 +4947,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // Живой процесс агента удалённого чата держать не за чем: разговора больше нет,
       // а он занимает память и свои MCP-серверы.
       await liveSessions.close(id, 'чат удалён');
-      const removed = await history.remove(id);
+
+      const removed = await mobileHistory.remove(id, () => history.remove(id));
       // origin в query: DELETE у нас без тела (см. shared/api-client.js).
       if (removed) {
         fastify.sse.broadcast('chat-store', {
@@ -4653,10 +4988,21 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   await assistantMessages.load();
   await inTurnLedger.sweepDeadRuns(new Set([...activeRuns.keys()].filter((key): key is string => !!key)));
 
+  const recoveredPending = await readPendingRecords();
+
   for (const entry of await turnLedger.load()) {
     const wasRunning = entry.state === 'running';
 
     try {
+      if (entry.mobileOwner && recoveredPending.some((pending) =>
+        pending.chatKey === entry.chatKey && String(pending.turnId || pending.id) === entry.turnId)) {
+        // Сначала завершается ledger по доказанному pending, затем материализуется ответ.
+        // Падение между этими записями не заменяет готовый результат ошибкой recovery.
+        await mobileHistory.reconcile(entry.chatKey);
+
+        continue;
+      }
+
       await failTurn(
         entry,
         wasRunning ? CRASH_RUNNING_REPLY : CRASH_QUEUED_REPLY,
@@ -4673,6 +5019,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       );
     }
   }
+
+  await mobileHistory.reconcile().catch(() => {
+    fastify.log.warn('чат: восстановление мобильной истории оставило pending для повторной сверки');
+  });
 }
 
 export default fp(chatModule, { name: 'module-chat' });
