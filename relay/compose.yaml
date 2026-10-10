@@ -1,0 +1,28 @@
+services:
+  relay:
+    build: .
+    image: cockpit-relay:local
+    restart: unless-stopped
+    init: true
+    env_file: ${RELAY_ENV_FILE:-relay.env}
+    ports:
+      - "${RELAY_PUBLISH_PORT:-443}:7443"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: "1m"
+        max-file: "1"
+        compress: "false"
+    healthcheck:
+      test: ["CMD", "node", "src/healthcheck.ts"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
