@@ -1,5 +1,13 @@
 node_modules/
 web/dist/
+mobile/dist/
+relay/*.env
+mobile/android/**/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/**/*.apk
+mobile/android/**/*.jks
+mobile/android/**/*.keystore
 # Краткоживущие rollback-копии update-worker-а. Они удаляются только после того,
 # как новый сервер подтвердил SHA, и не должны делать checkout dirty в это окно.
 web/dist.cockpit-backup-*/

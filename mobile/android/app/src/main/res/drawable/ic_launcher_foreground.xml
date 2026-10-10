@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Та же синяя рамка, что у публичной иконки Кокпита.
+         Фигура остаётся внутри безопасной области adaptive icon. -->
+    <path
+        android:fillColor="#579EF8"
+        android:fillType="evenOdd"
+        android:pathData="M38,30H70C74.4,30 78,33.6 78,38V70C78,74.4 74.4,78 70,78H38
+            C33.6,78 30,74.4 30,70V38C30,33.6 33.6,30 38,30Z
+            M38,37C37.4,37 37,37.4 37,38V70C37,70.6 37.4,71 38,71H70
+            C70.6,71 71,70.6 71,70V38C71,37.4 70.6,37 70,37Z" />
+</vector>
