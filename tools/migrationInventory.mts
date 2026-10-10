@@ -19,6 +19,7 @@ const SKIP_DIRS = new Set([
     '.git',
     '.generated',
     '.state',
+    '.vite',
     'node_modules',
     'dist',
     'profiles',
@@ -34,6 +35,10 @@ const AREAS: readonly { id: string; prefix: string }[] = [
     { id: 'deploy', prefix: 'deploy/' },
     { id: 'server', prefix: 'server/src/' },
     { id: 'serverScripts', prefix: 'server/scripts/' },
+    { id: 'relay', prefix: 'relay/' },
+    { id: 'mobile', prefix: 'mobile/src/' },
+    { id: 'mobileConfig', prefix: 'mobile/vite.config.' },
+    { id: 'mobileConfig', prefix: 'mobile/capacitor.config.' },
     { id: 'web', prefix: 'web/src/' },
     { id: 'webDev', prefix: 'web/dev/' },
     { id: 'webScripts', prefix: 'web/scripts/' },
@@ -261,6 +266,8 @@ const GENERAL_PROJECTS: readonly { config: string; compiler: string }[] = [
     // проверять покрытие интерфейса им значило бы «не вижу, значит нет».
     { config: 'web/tsconfig.json', compiler: 'web/node_modules/.bin/vue-tsc' },
     { config: 'web/tsconfig.scripts.json', compiler: 'web/node_modules/.bin/tsc' },
+    { config: 'relay/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
+    { config: 'mobile/tsconfig.json', compiler: 'mobile/node_modules/.bin/vue-tsc' },
     // Тесты проверяются той же базой, что и проверяемый ими код: до этих проектов
     // перенесённый на TypeScript тест компилятор не открывал вовсе.
     { config: 'server/tsconfig.tests.json', compiler: 'server/node_modules/.bin/tsc' },

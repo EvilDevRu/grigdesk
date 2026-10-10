@@ -45,7 +45,7 @@ test('весь собственный TypeScript входит в общую пр
   assert.deepEqual(
     uncheckedTypeScript(),
     [],
-    'Файл не входит ни в server/tsconfig.json, ни в web/tsconfig.json:'
+    'Файл не входит в общую проверку server, web, relay или mobile:'
       + ' добавь его в include нужной среды либо в остаток миграции.',
   );
 });

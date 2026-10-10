@@ -11,7 +11,9 @@ for required in \
   tests/docs \
   tests/engine \
   tests/server \
-  tests/web; do
+  tests/web \
+  tests/relay \
+  tests/mobile; do
   if [[ -d "$PROJECT_ROOT/$required" ]]; then
     printf 'ok - %s\n' "$required"
   else
@@ -28,7 +30,11 @@ for forbidden in \
   server/test \
   server/tests \
   web/test \
-  web/tests; do
+  web/tests \
+  relay/test \
+  relay/tests \
+  mobile/test \
+  mobile/tests; do
   if [[ ! -e "$PROJECT_ROOT/$forbidden" ]]; then
     printf 'ok - нет устаревшего %s\n' "$forbidden"
   else

@@ -50,5 +50,8 @@ NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --te
 bash "$PROJECT_ROOT/tests/engine/run-offline.sh" || RC=1
 npm --prefix "$PROJECT_ROOT/server" test || RC=1
 npm --prefix "$PROJECT_ROOT/web" test || RC=1
+npm --prefix "$PROJECT_ROOT/relay" test || RC=1
+NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \
+  --test-concurrency=2 "$PROJECT_ROOT"/tests/mobile/*.test.js || RC=1
 
 exit "$RC"
