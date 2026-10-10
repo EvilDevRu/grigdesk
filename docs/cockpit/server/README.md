@@ -7,6 +7,8 @@
 ## Устройство
 
 - [Локальный доступ: один HTTP-сокет и прежняя авторизация](loopback-access.md)
+- [Удалённый доступ через приложение и посредника](../mobile/architecture.md) — оба входа Кокпита остаются на loopback.
+- [Отказ отдельного мобильного TLS-входа не мешает запуску основного кокпита](mobile-startup-isolation.md)
 
 - [Авторизация и CLI-токен](authentication-and-cli-token.md)
 - [Программная правка .env — только через общий писатель lib/envFile.ts](env-file-writer.md)
@@ -18,7 +20,7 @@
 - [Ворота VPN проверяют маршрут, а не конкретный клиент](vpn-route-check.md)
 - [Вход в кокпит: один пользователь, сессионная cookie, гард на ВЕСЬ /api](session-authentication.md)
 - [Два владельца порта 8140: systemd-юнит vs bin/restart](server-port-ownership.md)
-- [Доступ с других устройств снят: кокпит слушает только loopback](remote-access-options.md)
+- [Браузерный удалённый доступ снят; приложение использует отдельный туннель](remote-access-options.md)
 - [Машинные переменные — только в корневом .env, у всех трёх способов запуска](machine-environment.md)
 - [Первичная настройка пароля — только с самой машины](local-password-bootstrap.md)
 - [Сервер — host-native, не контейнеризуется](host-native-runtime.md)

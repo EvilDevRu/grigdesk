@@ -155,3 +155,6 @@
 - [MCP «не удалось получить» и мёртвые кнопки карточки = опрос перезапускал сам себя](mcp-polling-restart-loop.md)
 - [MCP-серверы: «отвалился» = не поднялся на этой сессии, переподключать нечего](mcp-session-startup.md)
 - [UI-context — данные, а не полномочия; identity companion-чата принадлежит серверу](ui-context-trust-boundary.md)
+
+- [История без открытого окна и mobileId](mobile-history.md)
+- [Подтверждение pending после записи истории и ответа сервера](pending-ack.md)

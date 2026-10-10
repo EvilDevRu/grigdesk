@@ -84,6 +84,7 @@
 - [Telegram-пульт](docs/cockpit/telegram/README.md) — вотчер, действия, ассистент.
 - [Интерфейс](docs/cockpit/web/README.md) — раскладка, слои, всплывашки, PWA.
 - [Сервер и доступ](docs/cockpit/server/README.md) — юнит, авторизация, сеть; только loopback.
+- [Приложение на телефоне](docs/cockpit/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
 - [Видео и речь](docs/cockpit/media/README.md) — записи встреч, расшифровка, речь.
 - [Плагины](docs/cockpit/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
 - [Тесты и проверка](docs/cockpit/testing/README.md) — happy-dom, Playwright, ловушки.
