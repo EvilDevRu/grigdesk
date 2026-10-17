@@ -28,3 +28,12 @@ test('RL-24/RL-25: Docker запускает supervisor с ограничени�
     assert.equal(compose.includes(expected), true, expected);
   }
 });
+
+test('RL-49: контекст Docker не уносит секреты, зависимости и кэш сборки SEA', async () => {
+  const ignore = await readFile(new URL('../../relay/.dockerignore', import.meta.url), 'utf8');
+  const lines = ignore.split('\n').map((line) => line.trim());
+
+  for (const expected of ['node_modules', '*.env', '.cache']) {
+    assert.equal(lines.includes(expected), true, expected);
+  }
+});

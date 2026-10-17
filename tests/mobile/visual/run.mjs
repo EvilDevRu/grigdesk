@@ -3,9 +3,11 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import os from 'node:os';
 import path from 'node:path';
 
 import { chromium } from '../../../mobile/node_modules/playwright-core/index.mjs';
+import { artifactsPath } from '../../../shared/runtime/dataHome.ts';
 import { fixture, scenarios, sizes } from './scenarios.mjs';
 import { inspectFrame, navCoversContent, scrollToEnd } from './rules.mjs';
 import { chromiumPath } from './browser.mjs';
@@ -15,7 +17,9 @@ const root = path.resolve(new URL('../../../', import.meta.url).pathname);
 const outputIndex = process.argv.indexOf('--output');
 const output = path.resolve(
   root,
-  outputIndex > 0 ? process.argv[outputIndex + 1] : '.state/artifacts/mobile-remote/visual',
+  outputIndex > 0
+    ? process.argv[outputIndex + 1]
+    : path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'mobile-remote/visual'),
 );
 const dist = path.join(output, 'dist');
 const execute = promisify(execFile);

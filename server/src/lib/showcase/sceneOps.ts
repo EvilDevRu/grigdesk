@@ -30,8 +30,8 @@ import type { SceneDraft } from './scenes.ts';
 import type {
   ShowcaseProject,
   ShowcaseScene,
-} from '../../../../shared/showcaseContracts.ts';
-import type { ShowcaseSyncCueKind } from '../../../../shared/showcaseSync.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import type { ShowcaseSyncCueKind } from '../../../../shared/plugins/showcase/showcaseSync.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
 import { canonicalTextOf } from './voice/contract.ts';

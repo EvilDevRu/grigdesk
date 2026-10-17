@@ -3,6 +3,8 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { normalizeGitHubRepositoryId } from '../../lib/github/accountBindings.ts';
 import { GITHUB_WEBHOOK_BODY_LIMIT } from '../../lib/github/webhook.ts';
 
@@ -93,15 +95,9 @@ interface IngressRoute {
   };
 }
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactBody(value: unknown, keys: string[]): Payload | null {
   const body = value ?? {};
-  if (!isPlainObject(body)) return null;
+  if (!isPlainRecord(body)) return null;
   const actual = Object.keys(body).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
@@ -277,7 +273,7 @@ async function githubModule(fastify: FastifyInstance, opts: GitHubModuleOptions)
       message: 'Ожидались ровно canonical repositoryId и rules.',
     });
     if (Array.isArray(body.rules) && (body.rules as unknown[]).some((rule) => (
-      isPlainObject(rule) && Object.hasOwn(rule, 'agentSearch')
+      isPlainRecord(rule) && Object.hasOwn(rule, 'agentSearch')
     ))) {
       return reply.code(400).send({
         error: 'invalid_request',

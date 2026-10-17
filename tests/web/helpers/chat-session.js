@@ -92,7 +92,7 @@ export function compileChatSession(prefix, { realSteps = false } = {}) {
         `export const CONTEXT_WINDOW = globalThis.${prefix}ContextWindow || 200000;`,
         `export const useChatStore = globalThis.${prefix}ChatStore;`,
       ].join('\n'),
-      '../../../../shared/chatContext.ts': [
+      '../../../../shared/chat/chatContext.ts': [
         'export const contextFill = (...args) =>',
         '  globalThis.__sharedChatContextFill(...args);',
       ].join('\n'),

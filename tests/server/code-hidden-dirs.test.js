@@ -8,14 +8,14 @@
 // + `git status --porcelain`), а гитигнорённое туда не попадает.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import codeModule, { isHiddenPath } from '../../server/src/modules/code/index.ts';
+import codeModule, { isHiddenPath, isHiddenReal } from '../../server/src/modules/code/index.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -41,6 +41,9 @@ async function fixture(t) {
   const other = path.join(root, 'other');
 
   await writeTree(main, {
+    'private-data/state/secret.json': '{}',
+    'private-data/mobile/key': 'fake',
+    'settings.env': 'FAKE=1',
     'src/app.js': 'export const ok = 1;\n',
     'chats/2026-08/abc.json': '{"messages":["секрет переписки"]}',
     'telegram/archive/-1001/2026-08.ndjson': '{"text":"секрет чата"}\n',
@@ -55,6 +58,9 @@ async function fixture(t) {
   for (const dir of [main, other]) await exec('git', ['-C', dir, 'init', '-q', '.']);
 
   const config = {
+    dataStateDir: path.join(main, 'private-data/state'),
+    mobileDir: path.join(main, 'private-data/mobile'),
+    envPath: path.join(main, 'settings.env'),
     profilesDir: path.join(root, 'profiles'), // не существует → проект кокпитный
     chatsDir: path.join(main, 'chats'),
     telegramDir: path.join(main, 'telegram'),
@@ -91,7 +97,7 @@ test('ls не показывает служебные каталоги кокп�
 
   const top = await ls('');
   assert.equal(top.statusCode, 200);
-  assert.deepEqual(names(top).sort(), ['server', 'src']);
+  assert.deepEqual(names(top).sort(), ['private-data', 'server', 'src']);
 
   // `.state` закрыт на любой глубине, а не только в корне.
   const server = await ls('server');
@@ -158,4 +164,33 @@ test('isHiddenPath: сегмент в любом месте дерева, кат
   // Префикс имени — не вложенность: chats-backup рядом с chats остаётся видимым.
   assert.equal(isHiddenPath('/srv/cockpit/chats-backup/x.json', dirs), false);
   assert.equal(isHiddenPath('/srv/cockpit/src/.stateful/x.js', dirs), false);
+});
+
+
+test('CODE-DH папка состояния, мобильные ключи и настройки скрыты', async (t) => {
+  const f = await fixture(t);
+
+  for (const name of ['private-data/state/secret.json', 'private-data/mobile/key', 'settings.env']) {
+    assert.equal((await f.file(name)).statusCode, 404, name);
+  }
+
+  assert.deepEqual(names(await f.ls('private-data')), []);
+});
+
+test('CODE-DH-2 ссылка на скрытый файл скрыта по настоящему пути', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'code-hidden-link-')));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const secret = path.join(root, 'data', '.env');
+  const link = path.join(root, 'code', '.env');
+
+  await mkdir(path.dirname(secret), { recursive: true });
+  await mkdir(path.dirname(link), { recursive: true });
+  await writeFile(secret, 'KEY=value');
+  await symlink(secret, link);
+
+  assert.equal(isHiddenPath(link, [secret]), false);
+  assert.equal(isHiddenReal(link, [secret]), true);
+  assert.equal(isHiddenReal(path.join(root, 'code', 'missing'), [secret]), false);
 });

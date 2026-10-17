@@ -1,12 +1,6 @@
 <template>
   <span v-if="tasks.length" class="board-timers-topbar">
-    <UiPopover
-      trigger-mode="both"
-      focus-policy="none"
-      placement="bottom-end"
-      :hover-delay="160"
-      :style="{ width: 'min(430px, calc(100vw - 20px))' }"
-    >
+    <UiTopbarPanel title="Таймеры задач">
       <template #trigger>
         <UiButton
           data-context="board-timers-topbar"
@@ -20,19 +14,17 @@
         </UiButton>
       </template>
 
+      <template #meta>
+        <span class="board-timers-popover-summary">
+          Активно
+          <span class="board-timers-popover-active mono">{{ activeCount }}</span>
+          <span aria-hidden="true">·</span>
+          сегодня
+          <span class="board-timers-popover-today mono">{{ workedToday }}</span>
+        </span>
+      </template>
       <template #default="{ close }">
         <section class="board-timers-popover" aria-label="Таймеры задач">
-          <header class="board-timers-popover-head">
-            <strong class="board-timers-popover-titlebar">Таймеры задач</strong>
-            <span class="board-timers-popover-summary">
-              Активно
-              <span class="board-timers-popover-active mono">{{ activeCount }}</span>
-              <span aria-hidden="true">·</span>
-              сегодня
-              <span class="board-timers-popover-today mono">{{ workedToday }}</span>
-            </span>
-          </header>
-
           <ul class="board-timers-popover-list">
             <li
               v-for="task in tasks"
@@ -93,20 +85,21 @@
           <UiInlineMessage v-if="error" tone="danger">
             {{ error }}
           </UiInlineMessage>
-
-          <span class="board-timers-popover-footer">
-            <UiButton
-              block
-              data-context="topbar-popover-footer"
-              variant="outline"
-              @click="openBoard(close)"
-            >
-              Открыть доску
-            </UiButton>
-          </span>
         </section>
       </template>
-    </UiPopover>
+      <template #footer="{ close }">
+        <span class="board-timers-popover-footer">
+          <UiButton
+            block
+            data-context="topbar-popover-footer"
+            variant="outline"
+            @click="openBoard(close)"
+          >
+            Открыть доску
+          </UiButton>
+        </span>
+      </template>
+    </UiTopbarPanel>
   </span>
 </template>
 
@@ -114,7 +107,7 @@
 import { computed, onUnmounted, ref } from 'vue';
 
 import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.ts';
-import { UiButton, UiIconButton, UiInlineMessage, UiPopover, vTooltip } from '../../ui';
+import { UiButton, UiIconButton, UiInlineMessage, UiTopbarPanel, vTooltip } from '../../ui';
 
 const props = defineProps({
   tasks: {
@@ -193,19 +186,6 @@ onUnmounted(() => clearInterval(ticker));
   width: 100%;
   min-width: 0;
 }
-.board-timers-popover-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-.board-timers-popover-titlebar {
-  flex: none;
-  color: var(--ink);
-  font-size: 13px;
-  white-space: nowrap;
-}
 .board-timers-popover-summary {
   display: inline-flex;
   align-items: baseline;
@@ -229,7 +209,7 @@ onUnmounted(() => clearInterval(ticker));
   list-style: none;
   margin: 0;
   padding: 2px 0;
-  border-block: 1px solid var(--line);
+  border-top: 1px solid var(--line);
 }
 .board-timers-popover-list li + li {
   border-top: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
@@ -262,7 +242,7 @@ onUnmounted(() => clearInterval(ticker));
   gap: 6px;
   min-width: 0;
   color: var(--ink-mid);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 .board-timers-popover-project {
   overflow: hidden;

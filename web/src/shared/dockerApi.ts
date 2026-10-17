@@ -6,12 +6,12 @@ import {
   parseDockerProjectActionResponse,
   parseDockerPruneResponse,
   parseDockerUsage,
-} from '../../../shared/dockerContracts';
+} from '../../../shared/plugins/docker/dockerContracts';
 import type {
   DockerContainerAction,
   DockerProjectAction,
   DockerPruneTarget,
-} from '../../../shared/dockerContracts';
+} from '../../../shared/plugins/docker/dockerContracts';
 
 export interface DockerPruneOptions {
   targets?: DockerPruneTarget[];

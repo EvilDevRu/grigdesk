@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { mkdir, mkdtemp, readFile, writeFile, rm, copyFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -11,11 +11,12 @@ import { PhoneEmulator, startEmulator } from './emulator.mts';
 import { decodeContract } from '../../mobile/src/api/contract.ts';
 import type { Chat, QuestionWaiting, Waiting } from '../../mobile/src/api/contract.ts';
 import { parseQr } from '../../mobile/src/link/qr.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { browserFlow } from './browserFlow.mts';
 import { dockerCheck } from './dockerCheck.mts';
 
 const execute = promisify(execFile);
-const output = path.resolve('.state/artifacts/mobile-remote/e2e');
+const output = path.join(artifactsPath({ env: process.env, home: homedir() }), 'mobile-remote/e2e');
 const checks: Array<{
   id: string;
   state: string;

@@ -2,7 +2,7 @@
 // Ключи inline table сохраняют буквальную точку как часть сегмента.
 
 import type { PreparedNativeSettings } from './types.ts';
-import type { JsonValue } from '../../../../shared/providerSettingsContracts.ts';
+import type { JsonValue } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 /**
  * TOML basic string экранирует управляющие символы по собственному синтаксису.

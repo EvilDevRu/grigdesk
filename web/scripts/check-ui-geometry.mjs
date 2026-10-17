@@ -66,7 +66,7 @@ async function waitForHttp(url, timeout, processState) {
   let lastError = null;
 
   while (Date.now() < deadline) {
-    if (processState?.child.exitCode !== null) {
+    if (processState?.child && processState.child.exitCode !== null) {
       throw new Error(
         `Процесс завершился до готовности ${url}\n${processState.output()}`,
       );
@@ -309,7 +309,10 @@ const BASE_GEOMETRY_AUDIT = `(() => {
   const viewportWidth = window.innerWidth;
   const tolerance = 1;
   const rootStyle = getComputedStyle(document.documentElement);
-  const expectedHeight = parseFloat(rootStyle.getPropertyValue('--control-height'));
+  const touch = !!document.querySelector('.ui-gallery[data-ui-touch]');
+  const expectedHeight = touch ? 44 : 36;
+  const toolbarHeight = touch ? 44 : 28;
+  const dockHeight = touch ? 44 : 30;
   const expectedRadius = parseFloat(rootStyle.getPropertyValue('--control-radius'));
   const describe = (element) => {
     const marker = [...element.attributes]
@@ -512,7 +515,7 @@ const BASE_GEOMETRY_AUDIT = `(() => {
     const chatStyle = getComputedStyle(chatToolbarSelect);
 
     if (
-      Math.abs(chatRect.height - 28) > tolerance
+      Math.abs(chatRect.height - toolbarHeight) > tolerance
       || parseFloat(chatStyle.borderTopLeftRadius) > tolerance
       || parseFloat(chatStyle.borderTopWidth) > tolerance
       || Math.abs(parseFloat(chatStyle.borderBottomWidth) - 1) > tolerance
@@ -527,7 +530,7 @@ const BASE_GEOMETRY_AUDIT = `(() => {
   } else {
     const heights = dockActions.map((action) => action.getBoundingClientRect().height);
 
-    if (heights.some((height) => Math.abs(height - 30) > tolerance)) {
+    if (heights.some((height) => Math.abs(height - dockHeight) > tolerance)) {
       errors.push('dock actions: разная высота ' + heights.join(', '));
     }
   }
@@ -554,7 +557,6 @@ const BASE_GEOMETRY_AUDIT = `(() => {
     errors.push('task footer: контрольная тройка отсутствует');
   } else {
     const heights = taskFooterButtons.map((button) => button.getBoundingClientRect().height);
-    const expectedHeight = window.innerWidth <= 600 ? 40 : 36;
 
     if (heights.some((height) => Math.abs(height - expectedHeight) > tolerance)) {
       errors.push('task footer: ожидалось ' + expectedHeight + 'px, получено ' + heights.join(', '));
@@ -688,6 +690,13 @@ const DIALOG_GEOMETRY_AUDIT = `(() => {
     errors.push('dialog: потерян aria-modal=true');
   }
 
+  const expectedHeight = surface.hasAttribute('data-ui-touch') ? 44 : 36;
+  const control = surface.querySelector('.ui-button');
+
+  if (!control || Math.abs(control.getBoundingClientRect().height - expectedHeight) > tolerance) {
+    errors.push('dialog: высота teleported control не равна ' + expectedHeight);
+  }
+
   return { errors };
 })()`;
 
@@ -695,7 +704,7 @@ const DIALOG_GEOMETRY_AUDIT = `(() => {
  * Каждый viewport загружает gallery заново, поэтому состояния overlays и focus не текут
  * между соседними точками матрицы. Ошибка всегда получает точную ширину и selector-контекст.
  */
-async function auditViewport(cdp, galleryUrl, width) {
+async function auditViewport(cdp, galleryUrl, width, touch = false) {
   await cdp.call('Emulation.setDeviceMetricsOverride', {
     width,
     height: 1000,
@@ -704,7 +713,7 @@ async function auditViewport(cdp, galleryUrl, width) {
     screenWidth: width,
     screenHeight: 1000,
   });
-  await cdp.call('Page.navigate', { url: galleryUrl });
+  await cdp.call('Page.navigate', { url: galleryUrl + (touch ? '?touch=1' : '') });
   await waitForExpression(
     cdp,
     "document.readyState === 'complete' && document.querySelector('.ui-gallery')",
@@ -769,7 +778,7 @@ async function auditViewport(cdp, galleryUrl, width) {
     errors.push('dialog: focus не вернулся к trigger после Escape');
   }
 
-  return errors.map((error) => `[${width}px] ${error}`);
+  return errors.map((error) => `[${touch ? "touch " : ""}${width}px] ${error}`);
 }
 
 /**
@@ -834,20 +843,25 @@ async function main() {
       errors.push(...viewportErrors);
     }
 
+    errors.push(...await auditViewport(cdp, gallery.galleryUrl, 600, true));
+
     if (errors.length > 0) {
       throw new Error(`UI geometry нарушена:\n- ${errors.join('\n- ')}`);
     }
 
     process.stdout.write('UI geometry matrix: OK\n');
   } finally {
+    await cdp?.call('Browser.close').catch(() => {});
     cdp?.close();
     await stopProcess(chrome?.child);
     await stopProcess(gallery?.child);
 
     if (chrome?.profile) {
-      fs.rmSync(chrome.profile, {
+      await fs.promises.rm(chrome.profile, {
         recursive: true,
         force: true,
+        maxRetries: 10,
+        retryDelay: 100,
       });
     }
   }

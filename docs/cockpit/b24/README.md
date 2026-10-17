@@ -2,7 +2,7 @@
 
 Клиент портала, статусы, доска, полка и личное состояние задач.
 
-Читай перед правкой: `server/src/lib/b24`, `server/src/modules/b24`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`.
+Читай перед правкой: `server/src/lib/b24`, `server/src/modules/b24`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `b24/` (команда `b24`).
 
 ## Устройство
 
@@ -14,6 +14,7 @@
 - [Протокол портала](portal-protocol.md)
 - [Статусы и приоритет обработки](statuses-and-priority.md)
 - [CLI для агента и оператора](agent-and-operator-cli.md)
+- [Команда b24: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
 - [HTTP API Cockpit](http-api-cockpit.md)
 
 ## Грабли

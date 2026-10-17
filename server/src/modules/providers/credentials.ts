@@ -17,8 +17,8 @@ export interface ProviderCredentialsOptions {
   adaptersOf: () => Promise<Map<string, ExecutorAdapter>>;
   // Окружение, которое видят исполнители; в тестах — подменённый объект.
   env: NodeJS.ProcessEnv;
-  resetRegistry: () => void;
-  resetUsage: () => void;
+  resetRegistry: (providerId: string) => void;
+  resetUsage: (providerId: string) => void;
   refreshModels: () => Promise<unknown>;
 }
 
@@ -71,14 +71,16 @@ export function registerProviderCredentials(
       { provider: adapter.id, changed: result.changed },
       'ключи доступа исполнителя обновлены',
     );
-    resetRegistry();
-    resetUsage();
-    refreshModels()
+    resetRegistry(adapter.id);
+    resetUsage(adapter.id);
+    fastify.sse?.broadcast?.('providers-update', { credentials: adapter.id });
+    Promise.resolve()
+      .then(() => refreshModels())
       .catch(() => null)
       .finally(() => {
         // Снимок, собранный во время перечитывания, мог взять прежний каталог.
-        resetRegistry();
-        fastify.sse?.broadcast?.('providers-update', { credentials: adapter.id });
+        resetRegistry(adapter.id);
+        fastify.sse?.broadcast?.('providers-update', {});
       });
 
     return {

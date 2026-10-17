@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/dockerContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/docker/dockerContracts.ts",
     "src/stores/docker.ts",
     "src/shared/dockerApi.ts",
     "src/views/docker/**/*.vue",

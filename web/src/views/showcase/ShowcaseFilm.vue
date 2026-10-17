@@ -284,7 +284,7 @@ import {
   UiVideo,
   vTooltip,
 } from '../../ui';
-import { continuesPrevious } from '../../../../shared/showcaseChains';
+import { continuesPrevious } from '../../../../shared/plugins/showcase/showcaseChains';
 import type {
   ShowcaseBuildRun,
   ShowcaseJob,
@@ -293,9 +293,9 @@ import type {
   ShowcaseSourceOptions,
   ShowcaseStorySource,
   ShowcaseVoiceInfo,
-} from '../../../../shared/showcaseContracts';
-import { sceneStartsMs } from '../../../../shared/showcaseTimeline';
-import type { ShowcaseFinalManifest } from '../../../../shared/showcaseTimeline';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
+import { sceneStartsMs } from '../../../../shared/plugins/showcase/showcaseTimeline';
+import type { ShowcaseFinalManifest } from '../../../../shared/plugins/showcase/showcaseTimeline';
 import type { SeedStatus } from '../../actions/showcase';
 import {
   SCRIPT_OUTDATED_TEXT,

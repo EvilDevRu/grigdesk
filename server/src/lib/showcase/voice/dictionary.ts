@@ -12,8 +12,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { narrationWords } from '../../../../../shared/showcaseNarration.ts';
-import type { NarrationStress } from '../../../../../shared/showcaseNarration.ts';
+import { narrationWords } from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
+import type { NarrationStress } from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
 import { ShowcaseError } from '../errors.ts';
 
 export interface StressEntry {

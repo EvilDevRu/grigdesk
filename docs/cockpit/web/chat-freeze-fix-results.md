@@ -40,7 +40,7 @@ CAS, canonical protection, проверки модели/workspace, snapshot, с
 
 ## Методика и происхождение результатов
 
-Новый прогон находится в `.state/artifacts/chat-freeze-final/`, вне git:
+Новый прогон находится в `~/.cockpit/artifacts/chat-freeze-final/`, вне git:
 
 - `related.log` / `related.exit`: 152 теста прошли, код выхода 0.
 - `preflight.log` / `preflight.exit`: typecheck web/server, tests, web scripts,
@@ -73,7 +73,7 @@ Markdown, Vue, Pinia, timeline, `StepList` и API-сериализация на�
 Рабочие переписки, cookies и приватное состояние не читались. Fixture не меняла
 используемый `web/dist`; CPU throttling отключён.
 
-Прежние `.state/artifacts/chat-freeze-fix/` не перезаписаны. Их промежуточный общий
+Прежние `~/.cockpit/artifacts/chat-freeze-fix/` не перезаписаны. Их промежуточный общий
 прогон был красным из-за учёта ожидаемого 409; отдельная проверка boundaries не
 делала его зелёным. Актуальный driver записывает частичные режимы в отдельные
 файлы и исключает только ожидаемый конфликт заданного сценария и URI. Итоговая

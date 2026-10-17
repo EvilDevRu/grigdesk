@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import {

@@ -8,7 +8,7 @@ import test from 'node:test';
 import routesModule from '../../server/src/modules/routes/index.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
 import { makeCatalogInput, makeDraft } from '../fixtures/routes-editor.mjs';
-import { ROUTES_EDITOR_LIMITS } from '../../shared/routesEditorContracts.ts';
+import { ROUTES_EDITOR_LIMITS } from '../../shared/pipeline/routesEditorContracts.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

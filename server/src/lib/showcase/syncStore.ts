@@ -4,19 +4,22 @@
 // собственный хеш содержимого. Ссылка связывает сразу редакцию сцены и конкретный
 // WAV: метки от прежней озвучки нельзя незаметно приложить к новому звуку с тем
 // же текстом.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { contractDecoders } from '../../../../shared/contractDecoders.ts';
+import { shortSha256 } from '../../../../shared/node/hash.ts';
+import { recordOrNull } from '../../../../shared/lib/objects.ts';
+import { contractDecoders } from '../../../../shared/lib/contractDecoders.ts';
+
 import type {
   ShowcaseDerivedArtifactRef,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import {
   parseShowcaseFinalManifest,
   SHOWCASE_MANIFEST_ID_RE,
-} from '../../../../shared/showcaseTimeline.ts';
-import type { ShowcaseFinalManifest } from '../../../../shared/showcaseTimeline.ts';
+} from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
+import type { ShowcaseFinalManifest } from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
 import type {
   VoiceSpeechSpanTiming,
   VoiceSpeechTiming,
@@ -204,16 +207,12 @@ const speechAlignmentDocument = objectOf({
   reason: text,
 });
 
-function contentHashOf(value: Buffer | string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 32);
-}
-
 /** Хеш входов меток включает и редакцию сцены, и байты опубликованного WAV. */
 export function speechTimingInputHash(
   sceneInputHash: string,
   audioContentHash: string,
 ): string {
-  return contentHashOf(JSON.stringify({
+  return shortSha256(JSON.stringify({
     version: SPEECH_TIMING_VERSION,
     kind: 'speech-timing',
     sceneInputHash,
@@ -227,7 +226,7 @@ export function speechAlignmentInputHash(
   audioContentHash: string,
   speechTimingContentHash: string,
 ): string {
-  return contentHashOf(JSON.stringify({
+  return shortSha256(JSON.stringify({
     version: SPEECH_ALIGNMENT_VERSION,
     kind: 'speech-alignment',
     textHash,
@@ -238,17 +237,11 @@ export function speechAlignmentInputHash(
 
 /** Отпечаток канонического текста для меток загруженной человеком дорожки. */
 export function recordedSpeechTextInputHash(canonicalText: string): string {
-  return contentHashOf(JSON.stringify({
+  return shortSha256(JSON.stringify({
     version: SPEECH_TIMING_VERSION,
     kind: 'recorded-speech-text',
     canonicalText,
   }));
-}
-
-function recordOf(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 function normalizedSpans(
@@ -263,7 +256,7 @@ function normalizedSpans(
   let previousEndMs = 0;
 
   for (const raw of value) {
-    const span = recordOf(raw);
+    const span = recordOrNull(raw);
     const spanText = span?.text;
     const startMs = span?.startMs;
     const sourceEndMs = span?.endMs;
@@ -298,7 +291,7 @@ function normalizedSpans(
 }
 
 function documentOf(input: PublishSpeechTimingInput): SpeechTimingDocument | null {
-  const timing = recordOf(input.timing);
+  const timing = recordOrNull(input.timing);
 
   if (
     !timing
@@ -540,7 +533,7 @@ export async function publishSpeechTiming(
   speechTimingDocument(document, 'speechTiming');
 
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, 'utf8');
-  const contentHash = contentHashOf(bytes);
+  const contentHash = shortSha256(bytes);
   const id = `speech-timing-${randomBytes(6).toString('hex')}`;
   const file = path.join(input.targetDir, `${id}.json`);
   const temporary = `${file}.tmp-${randomBytes(4).toString('hex')}`;
@@ -585,7 +578,7 @@ export async function readSpeechTiming(
   if (
     !bytes
     || bytes.length !== input.ref.byteSize
-    || contentHashOf(bytes) !== input.ref.contentHash
+    || shortSha256(bytes) !== input.ref.contentHash
   ) {
     return null;
   }
@@ -641,7 +634,7 @@ export async function publishSpeechAlignment(
   speechAlignmentDocument(document, 'speechAlignment');
 
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, 'utf8');
-  const contentHash = contentHashOf(bytes);
+  const contentHash = shortSha256(bytes);
   const id = `speech-alignment-${randomBytes(6).toString('hex')}`;
   const file = path.join(input.targetDir, `${id}.json`);
   const temporary = `${file}.tmp-${randomBytes(4).toString('hex')}`;
@@ -691,7 +684,7 @@ export async function readSpeechAlignment(
   if (
     !bytes
     || bytes.length !== input.ref.byteSize
-    || contentHashOf(bytes) !== input.ref.contentHash
+    || shortSha256(bytes) !== input.ref.contentHash
   ) {
     return null;
   }
@@ -744,7 +737,7 @@ export async function publishFinalManifest(
 ): Promise<PublishedFinalManifest> {
   const manifest = parseShowcaseFinalManifest(input.manifest);
   const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  const contentHash = contentHashOf(bytes);
+  const contentHash = shortSha256(bytes);
   const id = `manifest-${contentHash}`;
   const file = path.join(input.targetDir, `${id}.json`);
   const temporary = `${file}.tmp-${randomBytes(4).toString('hex')}`;
@@ -782,7 +775,7 @@ export async function readFinalManifest(
     !bytes
     || bytes.length === 0
     || bytes.length > MANIFEST_MAX_BYTES
-    || contentHashOf(bytes) !== expectedHash
+    || shortSha256(bytes) !== expectedHash
   ) {
     return null;
   }

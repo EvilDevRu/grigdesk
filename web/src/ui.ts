@@ -43,6 +43,7 @@ export { default as UiDialog } from './components/overlays/UiDialog.vue';
 export { default as UiDialogHost } from './components/overlays/UiDialogHost.vue';
 export { default as UiFloatingDialog } from './components/overlays/UiFloatingDialog.vue';
 export { default as UiPopover } from './components/overlays/UiPopover.vue';
+export { default as UiTopbarPanel } from './components/overlays/UiTopbarPanel.vue';
 export { default as UiTooltip } from './components/overlays/UiTooltip.vue';
 export { default as UiTooltipHost } from './components/overlays/UiTooltipHost.vue';
 export { vTooltip } from './services/tooltipDirective.ts';

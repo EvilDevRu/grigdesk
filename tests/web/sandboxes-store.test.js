@@ -92,7 +92,7 @@ test('стор состояния не знает ни про HTTP, ни про 
   const source = await readFile(STORE_PATH, 'utf8');
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
-  assert.deepEqual(imports.sort(), ['../../../shared/sandboxContracts', 'pinia']);
+  assert.deepEqual(imports.sort(), ['../../../shared/plugins/sandboxes/sandboxContracts', 'pinia']);
 });
 
 test('обзор раскладывается на профили, стенды и задания', async (t) => {

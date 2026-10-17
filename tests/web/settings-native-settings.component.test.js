@@ -50,7 +50,7 @@ test('карточка загружает нативную схему тольк
       async load() {},
     }),
     useChatStore: () => ({ compactWindow: 0 }),
-    usePwaStore: () => ({ canInstall: false, wakeLock: false }),
+    useDeviceStore: () => ({ canInstall: false, wakeLock: false }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
   globalThis.__nativeSettingsPageApi = {

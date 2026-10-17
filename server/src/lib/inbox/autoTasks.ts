@@ -1,6 +1,8 @@
 // Один provider-neutral auto-worker общего Inbox. Он читает server-only snapshot,
 // но любые решения проводит через тот же InboxTaskService, что и HTTP-кнопки.
 
+import { lexical } from '../../../../shared/lib/text.ts';
+
 import { safeInboxSourceUrl, visibleInboxMessages } from './draft.ts';
 import {
   buildInboxAutoTask,
@@ -135,7 +137,7 @@ export const INBOX_AUTO_TICK = Object.freeze({
 });
 
 const DAY_MS = 86_400_000;
-const lexical = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 const autoItemOrder = (a: { lastAt: number; ref: string }, b: { lastAt: number; ref: string }) => (
   b.lastAt - a.lastAt
   || lexical(a.ref, b.ref)

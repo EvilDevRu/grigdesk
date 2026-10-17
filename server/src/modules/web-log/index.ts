@@ -2,10 +2,10 @@ import fp from 'fastify-plugin';
 
 import type { FastifyInstance } from 'fastify';
 
-import { WEB_LOG_LIMITS, projectWebLogEntry } from '../../../../shared/webLogContracts.ts';
-import { filterWebLogEntry } from '../../../../shared/diagnosticLogging.ts';
+import { WEB_LOG_LIMITS, projectWebLogEntry } from '../../../../shared/web-log/webLogContracts.ts';
+import { filterWebLogEntry } from '../../../../shared/web-log/diagnosticLogging.ts';
 import { createWebLogStore, validUtcDay } from '../../lib/webLog/store.ts';
-import type { WebLogEntry } from '../../../../shared/webLogContracts.ts';
+import type { WebLogEntry } from '../../../../shared/web-log/webLogContracts.ts';
 import type { ApiRouteRegistry } from '../../lib/webLog/apiRoutes.ts';
 import type { DiagnosticLoggingPolicy } from '../../lib/diagnosticLogging.ts';
 

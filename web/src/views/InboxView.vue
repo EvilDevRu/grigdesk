@@ -218,11 +218,12 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { errorMessage } from '../../../shared/lib/errors.ts';
+
 import {
   inboxApi,
   inboxBlockedAttachments,
   inboxErrorCode,
-  inboxErrorMessage,
   inboxPluginDisabled,
 } from '../shared/inboxApi.ts';
 import type {
@@ -235,7 +236,7 @@ import type {
   InboxItem,
   InboxList,
   InboxMessage,
-} from '../../../shared/inboxContracts.ts';
+} from '../../../shared/inbox/inboxContracts.ts';
 import {
   UiActionLink,
   UiButton,
@@ -496,7 +497,7 @@ async function load(): Promise<void> {
         worker: null,
       };
     } else {
-      error.value = inboxErrorMessage(err, 'Не удалось загрузить входящие.');
+      error.value = errorMessage(err, 'Не удалось загрузить входящие.');
     }
   } finally {
     if (own === loadVersion) {
@@ -712,13 +713,13 @@ async function mutateItem(
       // пересказать суть. Модалка открывается сразу — отдельная плашка с кнопкой
       // означала бы лишний клик ровно там, где решение уже принято.
       openNoteDialog(item, messageRefs, {
-        message: inboxErrorMessage(err, 'Содержимое вложений разобрано не полностью.'),
+        message: errorMessage(err, 'Содержимое вложений разобрано не полностью.'),
         attachments: inboxBlockedAttachments(err),
       });
     } else {
       itemAlerts[item.ref] = {
         kind: 'bad',
-        text: inboxErrorMessage(err, 'Не удалось выполнить действие с обращением.'),
+        text: errorMessage(err, 'Не удалось выполнить действие с обращением.'),
       };
     }
   } finally {
@@ -825,7 +826,7 @@ async function changeParticipation(channel: InboxChannel, action: string): Promi
       : `${channel.label}: приём остановлен; пауза не станет backlog.`;
     await load();
   } catch (err) {
-    error.value = inboxErrorMessage(err, 'Не удалось изменить приём канала.');
+    error.value = errorMessage(err, 'Не удалось изменить приём канала.');
   } finally {
     busy.value = '';
   }

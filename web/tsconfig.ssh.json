@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/sshContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/ssh/sshContracts.ts",
     "src/shared/sshApi.ts",
     "src/stores/ssh.ts",
     "src/actions/ssh/**/*.ts",

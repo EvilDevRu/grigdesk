@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeChatRunSnapshot } from '../../shared/chatRun.ts';
+import { normalizeChatRunSnapshot } from '../../shared/chat/chatRun.ts';
 import { chatStatus } from '../../web/src/views/chat/chatStatus.ts';
 
 const selection = {

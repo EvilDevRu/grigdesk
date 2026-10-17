@@ -13,10 +13,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import {
-  hashRoutesBytes,
-  RoutesStore,
-} from '../../server/src/modules/routes/store.ts';
+import { sha256 } from '../../shared/node/hash.ts';
+
+import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import {
   validatePromptFiles,
   validateRoute,
@@ -291,7 +290,7 @@ test('ROUTES-V2-01: route bundle публикуется целиком и пов
     first.routeHash,
   );
   const manifestBytes = await readFile(path.join(revisionDir, 'manifest.json'));
-  assert.equal(hashRoutesBytes(manifestBytes), first.routeHash);
+  assert.equal(sha256(manifestBytes), first.routeHash);
   const manifest = JSON.parse(manifestBytes);
   assert.deepEqual(
     manifest.files.map((entry) => entry.path),

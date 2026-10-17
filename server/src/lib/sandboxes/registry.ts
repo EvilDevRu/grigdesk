@@ -13,8 +13,14 @@ import path from 'node:path';
 
 import { parsePipeline } from '../pipelineParse.ts';
 import { parseSandboxRepositories } from '../sandboxEnv.ts';
-import { parseSandboxJournalRecord, SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts.ts';
-import type { SandboxJournalRecord, SandboxRepo } from '../../../../shared/sandboxContracts.ts';
+import {
+  parseSandboxJournalRecord,
+  SANDBOX_TASK_RE,
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
+import type {
+  SandboxJournalRecord,
+  SandboxRepo,
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 
 export interface SandboxRegistryEntry {
   task: string;

@@ -3,6 +3,8 @@
 // нового правила выключен, пока человек не включит его явно.
 import { createHash, timingSafeEqual } from 'node:crypto';
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 import {
   GitHubStoreError,
@@ -63,14 +65,8 @@ function fail(code: string, message: string, cause: unknown = null): never {
   throw new GitHubStoreError(code, message, cause);
 }
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('github_rules_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('github_rules_invalid', `${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, index) => key !== expected[index])) {
@@ -79,7 +75,7 @@ function exactObject(value: unknown, keys: string[], where: string): void {
 }
 
 function hasExactKeys(value: unknown, keys: string[]): boolean {
-  if (!isPlainObject(value)) return false;
+  if (!isPlainRecord(value)) return false;
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   return own.length === expected.length
@@ -152,7 +148,7 @@ function validateRule(
   source: unknown,
   { repositoryId, projects = null, stored = false }: ValidateRuleOptions,
 ): GitHubRule {
-  if (!isPlainObject(source)) fail('github_rules_invalid', 'GitHub rule должен быть объектом.');
+  if (!isPlainRecord(source)) fail('github_rules_invalid', 'GitHub rule должен быть объектом.');
   const raw = source as Payload;
   if (stored) {
     if (!hasExactKeys(raw, RULE_KEYS) && !hasExactKeys(raw, LEGACY_RULE_KEYS)) {

@@ -13,13 +13,15 @@ import { promises as fs } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
+import { jsonHash32 } from '../../../../shared/node/hash.ts';
+
 import type {
   ShowcaseArtifactRef,
   ShowcaseProject,
   ShowcaseScene,
-} from '../../../../shared/showcaseContracts.ts';
-import { chainLineage } from '../../../../shared/showcaseChains.ts';
-import { parseNarration } from '../../../../shared/showcaseNarration.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import { chainLineage } from '../../../../shared/plugins/showcase/showcaseChains.ts';
+import { parseNarration } from '../../../../shared/plugins/showcase/showcaseNarration.ts';
 import { ShowcaseError } from './errors.ts';
 import { dictionaryStresses } from './voice/dictionary.ts';
 import type { StressEntry } from './voice/dictionary.ts';
@@ -56,10 +58,6 @@ export interface ArtifactInputs {
   // ложатся на текст этой сцены: правка словаря старит сцены с этими словами, а
   // не все ролики.
   stressDictionary?: readonly StressEntry[];
-}
-
-function hashOf(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
 }
 
 /**
@@ -111,7 +109,7 @@ export function audioInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): st
     }
   }
 
-  return hashOf({
+  return jsonHash32({
     kind: 'tts',
     narration: scene.narration,
     direction: scene.direction,
@@ -125,7 +123,7 @@ export function audioInputHash(scene: ShowcaseScene, inputs: ArtifactInputs): st
 }
 
 // Сцены цепочки до данной: их экран и действия задают её начальное состояние.
-// Считаются общей формулой `chainLineage` из shared/showcaseChains.ts.
+// Считаются общей формулой `chainLineage` из shared/plugins/showcase/showcaseChains.ts.
 export type SceneLineage = readonly Pick<ShowcaseScene, 'screenId' | 'readyCondition' | 'actions'>[];
 
 /**
@@ -142,7 +140,7 @@ export function clipInputHash(
   inputs: ArtifactInputs,
   lineage: SceneLineage = [],
 ): string {
-  return hashOf({
+  return jsonHash32({
     screenId: scene.screenId,
     startState: scene.startState,
     readyCondition: scene.readyCondition,
@@ -203,7 +201,7 @@ export function finalInputHash(project: ShowcaseProject, inputs: ArtifactInputs)
       timing: scene.timing,
     }));
 
-  return hashOf({
+  return jsonHash32({
     scenes,
     style: inputs.style,
     syncPlanVersion: 1,

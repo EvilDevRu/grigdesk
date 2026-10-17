@@ -10,7 +10,7 @@
 <script setup lang="ts" generic="Name extends PluginSlotName">
 import { computed } from 'vue';
 
-import type { PluginSlotContexts, PluginSlotName } from '../../../shared/slots/index.ts';
+import type { PluginSlotContexts, PluginSlotName } from '../../../shared/plugins/slots/index.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import PluginSlotItem from './PluginSlotItem.vue';
 import { placementsOf } from './registry.ts';

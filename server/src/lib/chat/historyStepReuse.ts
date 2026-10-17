@@ -1,8 +1,8 @@
-import { decodeHistoryStepReuseRequest } from '../../../../shared/chatHistoryStepReuse.ts';
+import { decodeHistoryStepReuseRequest } from '../../../../shared/chat/chatHistoryStepReuse.ts';
 import type {
   HistoryStepReuseAck
-} from '../../../../shared/chatHistoryStepReuse.ts';
-import { messageKey } from '../../../../shared/chatMessageIdentity.ts';
+} from '../../../../shared/chat/chatHistoryStepReuse.ts';
+import { messageKey } from '../../../../shared/chat/chatMessageIdentity.ts';
 import { ChatHistoryError } from './historyStore.ts';
 import type {
   StoredChat

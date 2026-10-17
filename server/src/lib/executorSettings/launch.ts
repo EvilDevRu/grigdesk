@@ -9,7 +9,7 @@ import { readNativeSettingsStorage } from './overrides.ts';
 import { flattenNativeSettings, validateNativeSetting } from './validation.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import { NativeSettingsError } from './errors.ts';
-import type { SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
+import type { SettingsConsumer } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 const chatCatalogCache = new ProviderSettingsCatalogCache();
 

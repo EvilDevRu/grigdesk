@@ -4,19 +4,20 @@
 // а BuildRun сохраняет порядок, снимок входов и решение о продолжении. Благодаря
 // этому закрытие вкладки ничего не меняет, а перезапуск сервера продолжает журнал
 // с последнего подтверждённого результата.
-import { createHash } from 'node:crypto';
+
+import { jsonHash32 } from '../../../../shared/node/hash.ts';
 
 import {
   normalizeShowcaseSource,
   SHOWCASE_BUILD_REQUEST_ID_RE,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type {
   ShowcaseBuildRun,
   ShowcaseBuildStage,
   ShowcaseBuildStopReason,
   ShowcaseJob,
   ShowcaseProject,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type {
   BuildRunRecord,
   BuildRunSnapshot,
@@ -60,10 +61,6 @@ export interface BuildOpsDeps {
   finalReady: (project: ShowcaseProject) => Promise<boolean> | boolean;
   validateFinal: (project: ShowcaseProject) => Promise<void> | void;
   restorePreviousFinal: (run: BuildRunRecord) => Promise<void> | void;
-}
-
-function hash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
 }
 
 function targetSnapshot(project: ShowcaseProject) {
@@ -131,7 +128,7 @@ export function buildRunSnapshotOf(project: ShowcaseProject): BuildRunSnapshot {
     target,
     ...(source ? { source } : {}),
   };
-  const scriptBaseHash = hash(base);
+  const scriptBaseHash = jsonHash32(base);
   const full = {
     ...base,
     brief: project.brief,
@@ -142,14 +139,14 @@ export function buildRunSnapshotOf(project: ShowcaseProject): BuildRunSnapshot {
   };
 
   return {
-    inputHash: hash(full),
-    targetHash: hash(target),
+    inputHash: jsonHash32(full),
+    targetHash: jsonHash32(target),
     scriptBaseHash,
-    withoutBindingsHash: hash({
+    withoutBindingsHash: jsonHash32({
       ...full,
       scenes: sceneSnapshot(project, { bindings: false, voice: true }),
     }),
-    withoutVoiceHash: hash({
+    withoutVoiceHash: jsonHash32({
       ...full,
       scenes: sceneSnapshot(project, { bindings: true, voice: false }),
     }),
@@ -252,7 +249,7 @@ export function createBuildOps(deps: BuildOpsDeps) {
       const { record, reused } = await jobs.enqueue({
         projectId: run.projectId,
         kind: 'script',
-        idempotencyKey: hash({
+        idempotencyKey: jsonHash32({
           kind: 'showcase-build-model',
           projectId: run.projectId,
           stage: run.stage,

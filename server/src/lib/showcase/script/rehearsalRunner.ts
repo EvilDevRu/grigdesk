@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { setTimeout as pause } from 'node:timers/promises';
+
 import { ShowcaseError } from '../errors.ts';
 import { RENDER_STYLE } from '../formats.ts';
 import { launchWorker, stopWorker } from '../render/runner.ts';
@@ -104,7 +106,7 @@ export async function launchRehearsal(input: {
         throw new ShowcaseError('rehearsal_failed', result?.error ?? 'Проверка сценария прервалась.', 502);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await pause(300);
     }
 
     throw new ShowcaseError('rehearsal_timeout', 'Проверка сценария превысила отведённое время.', 504);

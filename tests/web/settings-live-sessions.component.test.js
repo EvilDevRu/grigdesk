@@ -142,7 +142,7 @@ async function mountRuns(t, { confirmAnswer = true } = {}) {
       async saveSettings() {},
     }),
     useChatStore: () => ({ compactWindow: 0, setActive() {} }),
-    usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
+    useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
 

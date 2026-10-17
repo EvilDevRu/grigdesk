@@ -20,7 +20,10 @@ import path from 'node:path';
 
 import type { Browser, Page } from 'playwright-core';
 
-import type { ShowcaseAction, ShowcaseScene } from '../../../../../shared/showcaseContracts.ts';
+import type {
+  ShowcaseAction,
+  ShowcaseScene,
+} from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { ShowcaseError } from '../errors.ts';
 import { browserLaunchArgs } from '../browserPolicy.ts';
 import { DEFAULT_QUIET, trackNetwork } from './networkQuiet.ts';

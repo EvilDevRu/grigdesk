@@ -9,6 +9,9 @@ CSS-декларации `--control-*` остаются запрещёнными
 диалог за пределы родительского контейнера. Для общего `confirmDialog` опция
 `touchTargets: true` включает тот же атрибут в `UiDialogHost`.
 
+В touch-контейнере controls, toolbar и действия дока сохраняют 44 px. Ширина viewport сама по себе touch не включает:
+при 600 px обычные элементы имеют 36 px. Fullscreen-диалоги сохраняются.
+
 Режим действует только в отмеченном контейнере. Проверки публичной границы и
 стилей — `npm --prefix web run check:ui` и `check:ui-styles`; поведение настроек
 проверяет `tests/web/settings-mobile.component.test.js`.

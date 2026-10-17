@@ -18,6 +18,10 @@
 // Резервация — МОСТИК, а не источник правды: она нужна ровно до того момента, когда
 // подъём допишет SB_K в реестр песочниц. Дальше занятость видна фабрике самой, и
 // резервация снимается (по факту передачи или по TTL, если подъём не дожил).
+import { setTimeout as sleep } from 'node:timers/promises';
+
+import { config as runtimeConfig } from '../config.ts';
+
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -84,8 +88,6 @@ export class SlotsFullError extends Error {
   }
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms); });
-
 function slotsDir(stateDir: string): string {
   const dir = path.join(stateDir, 'slots');
   fs.mkdirSync(dir, { recursive: true });
@@ -123,6 +125,7 @@ function slotsSnapshot({
       {
         env: {
           ...process.env,
+          COCKPIT_HOME: runtimeConfig.dataHome,
           STATE_DIR: stateDir,
           ...(profilesDir ? { FACTORY_PROFILES_DIR: profilesDir } : {}),
         },

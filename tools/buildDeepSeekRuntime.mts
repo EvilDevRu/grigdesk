@@ -6,11 +6,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
+import { sha256 } from '../shared/node/hash.ts';
+
 import {
   checkDeepSeekPatches,
   verifyDeepSeekSnapshot,
   verifyDeepSeekVendorMetadata,
-  vendorHash,
 } from './deepseekVendorManifest.ts';
 import { writeDeepSeekLicenseInventory } from './deepseekBuildLicenses.ts';
 import {
@@ -61,7 +62,7 @@ export async function deepSeekBuildInputs(vendorDir: string): Promise<Record<str
   }
 
   for (const input of inputs) {
-    hashes[input] = vendorHash(await fs.readFile(path.join(repositoryRoot, input)));
+    hashes[input] = sha256(await fs.readFile(path.join(repositoryRoot, input)));
   }
 
   return {
@@ -69,7 +70,7 @@ export async function deepSeekBuildInputs(vendorDir: string): Promise<Record<str
     source: {
       commit: source.commit,
       version: source.version,
-      manifest: vendorHash(JSON.stringify(source)),
+      manifest: sha256(JSON.stringify(source)),
     },
     nodeMajor: Number(process.versions.node.split('.')[0]),
     nativeAbi: process.versions.modules,
@@ -100,7 +101,7 @@ export async function hashRuntimePayload(root: string, relative = ''): Promise<R
 
       const bytes = await fs.readFile(file);
 
-      output[name] = vendorHash(`${mode}:${bytes.toString('base64')}`);
+      output[name] = sha256(`${mode}:${bytes.toString('base64')}`);
     } else if (entry.isSymbolicLink()) {
       const target = await fs.readlink(path.join(root, name));
       const resolved = path.relative(root, path.resolve(root, path.dirname(name), target));
@@ -110,7 +111,7 @@ export async function hashRuntimePayload(root: string, relative = ''): Promise<R
       }
 
       await fs.stat(path.join(root, name));
-      output[name] = vendorHash(`link:${target}`);
+      output[name] = sha256(`link:${target}`);
     } else {
       throw new Error(`Runtime содержит специальный файл: ${name}`);
     }
@@ -315,7 +316,7 @@ async function llmPiAiContract(manifest: {
       version: piAi.version,
       integrity: piAi.integrity,
     },
-    sourceHash: vendorHash(JSON.stringify(sources)),
+    sourceHash: sha256(JSON.stringify(sources)),
     patches: manifest.patches.map((patch) => ({ path: patch.path, sha256: patch.sha256 })),
   };
 }
@@ -442,16 +443,16 @@ export async function buildDeepSeekRuntime(options: {
     };
     const inputIdentity = {
       contract,
-      source: vendorHash(JSON.stringify(originalInputs.source)),
+      source: sha256(JSON.stringify(originalInputs.source)),
       composition: COMPOSITION_REVISION,
-      compositionSource: vendorHash(await fs.readFile(
+      compositionSource: sha256(await fs.readFile(
         path.join(repositoryRoot, 'tools/runtimeComposition.ts'),
       )),
-      dynamicImports: vendorHash(JSON.stringify(dynamicImports)),
-      builder: vendorHash(await fs.readFile(fileURLToPath(import.meta.url))),
-      launcher: vendorHash(await fs.readFile(path.join(staging, 'entry.mjs'))),
-      webHost: vendorHash(await fs.readFile(path.join(staging, 'webHost.mjs'))),
-      dependencyLock: vendorHash(await fs.readFile(path.join(dependencyRoot, 'package-lock.json'))),
+      dynamicImports: sha256(JSON.stringify(dynamicImports)),
+      builder: sha256(await fs.readFile(fileURLToPath(import.meta.url))),
+      launcher: sha256(await fs.readFile(path.join(staging, 'entry.mjs'))),
+      webHost: sha256(await fs.readFile(path.join(staging, 'webHost.mjs'))),
+      dependencyLock: sha256(await fs.readFile(path.join(dependencyRoot, 'package-lock.json'))),
       platform: process.platform,
       arch: process.arch,
       nativeAbi: process.versions.modules,

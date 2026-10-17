@@ -279,7 +279,7 @@ test('стор SSH не знает ни путей API, ни транспорт�
   const source = await readFile(STORE_PATH, 'utf8');
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
-  assert.deepEqual(imports.sort(), ['../../../shared/sshContracts.ts', 'pinia']);
+  assert.deepEqual(imports.sort(), ['../../../shared/plugins/ssh/sshContracts.ts', 'pinia']);
   assert.equal(/\/api\//u.test(source), false, 'адреса API живут в слое операций');
   assert.equal(/WebSocket/u.test(source), false, 'канал терминала живёт в слое операций');
 });

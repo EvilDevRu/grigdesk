@@ -20,7 +20,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import type { FactoryGraphData } from '../../../../shared/factoryGraphContracts.ts';
+import type { FactoryGraphData } from '../../../../shared/pipeline/factoryGraphContracts.ts';
 import { factoryLoopView } from '../../shared/factoryLoopView.ts';
 
 const props = defineProps<{ graph: FactoryGraphData }>();

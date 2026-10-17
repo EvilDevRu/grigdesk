@@ -65,6 +65,28 @@ export function messageIntent(chatId: string, text: string): OperationIntent {
 }
 
 /**
+ * Очередь UI расширяет намерение состоянием доставки и текстом ошибки.
+ * Native получает только транспортный контракт, сохраняя идентичность повторов.
+ */
+function transportIntent(intent: OperationIntent): OperationIntent {
+  const operation: OperationIntent = {
+    method: intent.method,
+    path: intent.path,
+    body: intent.body,
+    idempotencyKey: intent.idempotencyKey,
+    createdAt: intent.createdAt,
+  };
+
+  for (const field of ['clientId', 'chatId', 'order'] as const) {
+    if (intent[field] !== undefined) {
+      Object.assign(operation, { [field]: intent[field] });
+    }
+  }
+
+  return operation;
+}
+
+/**
  * Единственный клиент обслуживает JSON v1 и четыре сетевые попытки одной операции.
  * 202 pending разбирается до route decoder; прикладные отказы никогда не повторяют эффект.
  */
@@ -108,7 +130,7 @@ export class ApiClient {
       );
     }
 
-    const operation =
+    const source =
       method === 'POST'
         ? intent || {
             method,
@@ -118,6 +140,7 @@ export class ApiClient {
             createdAt: Date.now(),
           }
         : undefined;
+    const operation = source ? transportIntent(source) : undefined;
     const attempts = method === 'POST' ? 4 : 1;
 
     if (operation) {

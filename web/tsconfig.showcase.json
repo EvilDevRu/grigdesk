@@ -7,10 +7,10 @@
     "allowImportingTsExtensions": true
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/showcaseContracts.ts",
-    "../shared/showcaseNarration.ts",
-    "../shared/showcaseTimeline.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/showcase/showcaseContracts.ts",
+    "../shared/plugins/showcase/showcaseNarration.ts",
+    "../shared/plugins/showcase/showcaseTimeline.ts",
     "src/actions/showcase/**/*.ts",
     "src/stores/showcase.ts",
     "src/shared/showcaseApi.ts",

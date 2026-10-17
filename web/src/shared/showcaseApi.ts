@@ -1,3 +1,5 @@
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseShowcaseBuildRun,
@@ -9,8 +11,8 @@ import {
   parseShowcaseTarget,
   parseShowcaseVoiceCatalog,
   parseShowcaseVoiceDictionary,
-} from '../../../shared/showcaseContracts';
-import { parseShowcaseFinalManifest } from '../../../shared/showcaseTimeline';
+} from '../../../shared/plugins/showcase/showcaseContracts';
+import { parseShowcaseFinalManifest } from '../../../shared/plugins/showcase/showcaseTimeline';
 import type {
   ShowcaseAction,
   ShowcaseDirection,
@@ -19,7 +21,7 @@ import type {
   ShowcaseStorySource,
   ShowcaseSyncCueKind,
   ShowcaseTargetRef,
-} from '../../../shared/showcaseContracts';
+} from '../../../shared/plugins/showcase/showcaseContracts';
 
 export interface ShowcaseSyncCueDraft {
   id?: string | null;
@@ -242,7 +244,7 @@ export const showcaseApi = {
    */
   async seedStatus(id: string) {
     const value: unknown = await api.get(`/api/showcase/${encodeURIComponent(id)}/seed`);
-    const source = asRecord(value);
+    const source = objectOrEmpty(value);
 
     return {
       available: source.available === true,
@@ -261,7 +263,7 @@ export const showcaseApi = {
     const value: unknown = await api.post(`/api/showcase/${encodeURIComponent(id)}/seed`, {
       recipeFingerprint,
     });
-    const source = asRecord(value);
+    const source = objectOrEmpty(value);
 
     return {
       state: typeof source.state === 'string' ? source.state : 'failed',
@@ -374,19 +376,19 @@ export const showcaseApi = {
       requestId,
     });
 
-    return parseShowcaseBuildRun(asRecord(value).run);
+    return parseShowcaseBuildRun(objectOrEmpty(value).run);
   },
 
   async buildRun(id: string) {
     const value: unknown = await api.get(`/api/showcase/builds/${encodeURIComponent(id)}`);
 
-    return parseShowcaseBuildRun(asRecord(value).run);
+    return parseShowcaseBuildRun(objectOrEmpty(value).run);
   },
 
   async cancelBuild(id: string) {
     const value: unknown = await api.post(`/api/showcase/builds/${encodeURIComponent(id)}/cancel`, {});
 
-    return parseShowcaseBuildRun(asRecord(value).run);
+    return parseShowcaseBuildRun(objectOrEmpty(value).run);
   },
 
   async finalManifest(projectId: string, manifestId: string) {
@@ -448,17 +450,13 @@ const MESSAGES: Record<string, string> = {
   showcase_error: 'Сервер не смог выполнить действие — подробности в журнале кокпита.',
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Текст отказа для человека. Общий клиент кладёт тело ответа в `data`: текст
  * сервера точнее всего, а карта кодов закрывает отказы, приходящие без пояснения.
  */
 /** Код отказа сервера. Нужен там, где стадия отличает «нечего делать» от беды. */
 export function showcaseErrorCode(error: unknown): string {
-  const data = asRecord(asRecord(error).data);
+  const data = objectOrEmpty(objectOrEmpty(error).data);
 
   return typeof data.error === 'string' ? data.error : '';
 }
@@ -468,7 +466,7 @@ export function showcaseErrorCode(error: unknown): string {
  * ответил голым кодом: свой текст поверх серверного разошёлся бы с ним по смыслу.
  */
 export function showcaseErrorMessage(error: unknown, fallback = 'Действие не удалось.'): string {
-  const data = asRecord(asRecord(error).data);
+  const data = objectOrEmpty(objectOrEmpty(error).data);
   const detail = typeof data.message === 'string' ? data.message : '';
   const code = typeof data.error === 'string' ? data.error : '';
 

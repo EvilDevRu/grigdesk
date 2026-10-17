@@ -2,13 +2,16 @@
 // Репозиторий может содержать недоверенный текст, поэтому модель запускается только
 // через одноразовый runUntrusted: без инструментов, cwd, MCP и продолжения сессии.
 
+import { isRecord } from '../../../shared/lib/objects.ts';
+import { trimmedText } from '../../../shared/lib/text.ts';
+
 import { resolveInboxTriageTarget } from './inbox/triage.ts';
 import { COMMIT_MESSAGE_MAX, stagedCommitContext } from './git.ts';
-import { exactKeys, jsonCandidates, modelText } from './modelJson.ts';
+import { exactKeys, jsonCandidates } from './modelJson.ts';
 import type {
   CodeCommitTitleResponse,
   CodeStagedContext,
-} from '../../../shared/codeContracts.ts';
+} from '../../../shared/plugins/code/codeContracts.ts';
 
 export interface CommitLogger {
   warn?: (data: unknown, message: string) => unknown;
@@ -57,10 +60,6 @@ export interface GenerateCommitTitleOptions {
   log?: CommitLogger;
   signal?: AbortSignal;
   resolveTarget?: CommitTargetResolver;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**
@@ -201,7 +200,7 @@ export function parseCommitTitle(reply: unknown): string | null {
         continue;
       }
 
-      const title = modelText(parsed.title).replace(/\s+/gu, ' ');
+      const title = trimmedText(parsed.title).replace(/\s+/gu, ' ');
 
       if (!title || title.length > COMMIT_TITLE_MAX) {
         continue;

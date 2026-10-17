@@ -1,10 +1,10 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
-import { showcaseSourceEqual } from '../../../../shared/showcaseContracts';
+import { showcaseSourceEqual } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type {
   ShowcaseProject,
   ShowcaseSourceOptions,
   ShowcaseStorySource,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
 
 export interface ShowcaseSourceRead {

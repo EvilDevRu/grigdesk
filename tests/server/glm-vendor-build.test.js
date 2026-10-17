@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { sha256 } from '../../shared/node/hash.ts';
+
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import {
   COMPOSITION_REVISION,
   discoverRuntimeClosure,
@@ -16,10 +20,9 @@ import {
 } from '../../tools/deepseekBuildInputs.ts';
 import { writeDeepSeekLicenseInventory } from '../../tools/deepseekBuildLicenses.ts';
 import { deepSeekBuildInputs } from '../../tools/buildDeepSeekRuntime.mts';
-import { vendorHash } from '../../tools/deepseekVendorManifest.ts';
 
 const PLUGIN = '@deepseek-ai/dsh-llm-pi-ai';
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G1');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G1');
 const UPSTREAM = path.resolve(import.meta.dirname, '../../third_party/deepseek-harness/upstream');
 
 /**
@@ -173,7 +176,7 @@ test('license supplements входят в identity сборки и не разр
   for (const source of sources.files) {
     const bytes = await fs.readFile(path.join(directory, source.file));
 
-    assert.equal(inputs.hashes[`tools/deepseek-build/licenses/${source.file}`], vendorHash(bytes));
+    assert.equal(inputs.hashes[`tools/deepseek-build/licenses/${source.file}`], sha256(bytes));
   }
 
   const root = await fs.mkdtemp(path.join(ARTIFACTS, 'unknown-license-'));

@@ -10,11 +10,11 @@
 // «задача создана» в inbox-channel.js.
 //
 // «Что делает агент» карточки НЕ вычисляют: правило одно на всех и живёт в
-// shared/agentActivity.ts — там же, откуда его берут плашка конвейера и
+// shared/pipeline/agentActivity.ts — там же, откуда его берут плашка конвейера и
 // чип навигации.
-import { activityFromSilence, agentActivityLabel } from '../../../../../shared/agentActivity.ts';
-import type { AgentSilence } from '../../../../../shared/agentActivity.ts';
-import { contextFill } from '../../../../../shared/chatContext.ts';
+import { activityFromSilence, agentActivityLabel } from '../../../../../shared/pipeline/agentActivity.ts';
+import type { AgentSilence } from '../../../../../shared/pipeline/agentActivity.ts';
+import { contextFill } from '../../../../../shared/chat/chatContext.ts';
 
 type Payload = Record<string, unknown>;
 

@@ -4,7 +4,7 @@
 // `<PluginSlot>` по стору плагинов в момент отрисовки, поэтому тумблер действует сразу.
 import type { Component } from 'vue';
 
-import type { PluginSlotName } from '../../../shared/slots/index.ts';
+import type { PluginSlotName } from '../../../shared/plugins/slots/index.ts';
 
 export interface PluginPlacement {
   pluginId: string;

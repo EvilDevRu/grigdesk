@@ -8,6 +8,8 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
+import { setTimeout as pause } from 'node:timers/promises';
+
 import { KimiServerClient } from './serverClient.ts';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 20_000;
@@ -227,7 +229,7 @@ export async function startKimiServer({
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await pause(100);
   }
 
   child.kill('SIGKILL');

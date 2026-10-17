@@ -3,7 +3,10 @@ import path from 'node:path';
 
 import type { spawn } from 'node:child_process';
 
-import type { InTurnAssistantEvent } from '../../../../shared/chatInTurnContracts.ts';
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
+import type { InTurnAssistantEvent, InTurnPort } from '../../../../shared/chat/chatInTurnContracts.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import { nearestProjectRoot } from '../deepseek/projectMcp.ts';
@@ -71,9 +74,12 @@ export interface GlmTurnOptions {
   extraDirs?: readonly string[];
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onSessionCreated?: (sessionId: string) => void | Promise<void>;
   onPermission?: (presentation: Record<string, unknown>) => Promise<PermissionAnswer | null | undefined>;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
+  onInTurnReady?: (port: InTurnPort) => void;
+  onInTurnAvailability?: (status: { available: boolean; reason?: 'not_ready' | 'awaiting_answer' }) => void;
   log?: { warn?: (value: unknown, message?: string) => void };
 }
 
@@ -122,10 +128,6 @@ function modelPair(value: unknown): string | null {
   } catch {
     return null;
   }
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function hasToolSteps(steps: readonly ChatStep[]): boolean {
@@ -263,7 +265,9 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
 
   const descriptors = (options.workTools as { descriptors?: unknown } | null)?.descriptors;
   const workTools = (Array.isArray(descriptors) ? descriptors : [])
-    .map((entry) => String(record(entry).name || record(record(entry).function).name || ''))
+    .map((entry) => String(
+      recordOrEmpty(entry).name || recordOrEmpty(recordOrEmpty(entry).function).name || ''
+    ))
     .filter(Boolean);
   const settings = options.providerSettings ?? {};
   const launch = await prepareGlmLaunch({
@@ -332,7 +336,10 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       signal: options.signal,
       onStep: options.onStep,
       onProgress: options.onProgress,
+      onRunMetadata: options.onRunMetadata,
       onAssistantMessage: options.onAssistantMessage,
+      onInTurnReady: options.onInTurnReady,
+      onInTurnAvailability: options.onInTurnAvailability,
       /**
        * Отказ CAS привязки чата — не сбой GLM: он возвращается вызывающему как есть,
        * а prompt после него не отправляется.
@@ -367,7 +374,9 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
           return code ? glmAccessError(code, MODEL_ERROR_MESSAGES[code]!) : null;
         },
         verifySnapshot: (snapshot) => {
-          const next = record(record(record(record(snapshot.projections).values).modelSelection).next);
+          const next = recordOrEmpty(
+            recordOrEmpty(recordOrEmpty(recordOrEmpty(snapshot.projections).values).modelSelection).next
+          );
 
           if (next.provider !== expected.provider || next.model !== expected.model) {
             return glmAccessError('glm_model_mismatch', 'GLM подтвердил другую модель.');

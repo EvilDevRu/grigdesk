@@ -1,6 +1,6 @@
 import type {
   RouteTransferBundle, RouteTransferImportResult,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { loadDraft } from './loadDraft.ts';
 import { runtimeOf } from './routesRuntime.ts';

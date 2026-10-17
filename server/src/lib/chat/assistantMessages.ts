@@ -13,8 +13,8 @@ import {
   IN_TURN_RETENTION_MS,
   IN_TURN_SEGMENT_RE,
   cutInTurnText,
-} from '../../../../shared/chatInTurnContracts.ts';
-import type { InTurnAssistantBlock } from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
+import type { InTurnAssistantBlock } from '../../../../shared/chat/chatInTurnContracts.ts';
 
 export interface AssistantBlockRecord extends InTurnAssistantBlock {
   savedToHistoryAt?: number;
@@ -279,6 +279,31 @@ export class ChatAssistantMessages {
       this.drafts.delete(key);
       await this.chain(key, () => this.removeFile(block.runId, block.assistantMessageId));
     }
+  }
+
+  /**
+   * Восстановление после падения: незавершённые блоки мёртвых запусков уже никто не допишет.
+   * Текст берётся с диска — черновик в памяти погиб вместе с прошлым процессом. Блок не
+   * объявляется полным, а отметка обрыва даёт ему общий срок хранения. Повтор ничего не меняет.
+   */
+  async sweepDeadRuns(activeRunIds: ReadonlySet<string>): Promise<AssistantBlockRecord[]> {
+    await this.load();
+
+    const touched: AssistantBlockRecord[] = [];
+
+    for (const block of [...this.blocks.values()]) {
+      if (activeRunIds.has(block.runId) || block.complete || block.abandoned) {
+        continue;
+      }
+
+      const abandoned = await this.abandon(block.runId, block.assistantMessageId, { text: block.text });
+
+      if (abandoned) {
+        touched.push(abandoned);
+      }
+    }
+
+    return touched;
   }
 
   private keyOf(runId: string, assistantMessageId: string): string {

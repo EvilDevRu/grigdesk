@@ -1,7 +1,7 @@
-import type { AgentCard, AgentDraft } from '../../shared/agentsContracts';
-import type { ProjectRepoInput } from '../../shared/projectsContracts';
-import type { RouteRevision } from '../../shared/routesContracts';
-import type { FactoryGraphData } from '../../shared/factoryGraphContracts';
+import type { AgentCard, AgentDraft } from '../../shared/pipeline/agentsContracts';
+import type { ProjectRepoInput } from '../../shared/runtime/projectsContracts';
+import type { RouteRevision } from '../../shared/pipeline/routesContracts';
+import type { FactoryGraphData } from '../../shared/pipeline/factoryGraphContracts';
 import { agentsApi } from '../../web/src/shared/agentsApi';
 import { projectsApi } from '../../web/src/shared/projectsApi';
 import { routesApi } from '../../web/src/shared/routesApi';

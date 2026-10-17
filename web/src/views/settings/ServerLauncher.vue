@@ -26,7 +26,11 @@
           Запускать при включении машины
         </UiSwitch>
         <p class="launcher-note" data-testid="autostart-note">{{ autostartNote }}</p>
-        <p v-if="systemd === false" class="launcher-note">
+        <p v-if="systemd === false && mode === 'desktop'" class="launcher-note">
+          Сейчас сервером управляет приложение Кокпита — переключатель касается юнита, а не этого
+          процесса.
+        </p>
+        <p v-else-if="systemd === false" class="launcher-note">
           Сейчас сервер запущен вручную — переключатель касается юнита, а не этого процесса.
         </p>
       </div>
@@ -47,7 +51,7 @@
           </UiButton>
         </div>
         <p class="launcher-note">
-          Файл кладётся на рабочий стол и в меню приложений и запускает <code>bin/launch</code>:
+          Файл кладётся на рабочий стол и в меню приложений и запускает <code>cockpit open</code>:
           открывает кокпит в браузере, а если сервер не отвечает — сначала поднимает его.
         </p>
       </div>
@@ -66,8 +70,10 @@ import { api } from '../../shared/apiClient.ts';
 import { UiButton, UiSwitch } from '../../ui';
 
 // Режим процесса из карточки «Процесс Cockpit»: null — ещё не известен.
+// mode — 'desktop', 'systemd' или 'manual'; у сервера до перезапуска его нет.
 defineProps({
   systemd: { type: Boolean, default: null },
+  mode: { type: String, default: null },
 });
 
 // { autostart: { unit, active, linger, mode }, shortcut: { desktopDir, desktop, menu } }
@@ -108,7 +114,7 @@ const autostartNote = computed(() => {
     return 'Юнит systemd не установлен — один раз выполни deploy/install.sh, тогда переключатель заработает.';
   }
   if (autostart.unit === 'disabled') {
-    return 'После перезагрузки сервер поднимет ярлык «Кокпит», bin/launch'
+    return 'После перезагрузки сервер поднимет ярлык «Кокпит», cockpit open'
       + ' или systemctl --user start cockpit-server.';
   }
   if (autostart.linger === true) {

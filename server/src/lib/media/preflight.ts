@@ -11,6 +11,8 @@
 
 import { spawn as spawnProcess, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import os from 'node:os';
+import { dataHome, dataPath } from '../../../../shared/runtime/dataHome.ts';
 
 // Одна проверка окружения: что именно не готово и чем это чинится. Пара
 // «отказ + шаг починки» неразделима — без второго человеку некуда идти.
@@ -27,7 +29,7 @@ export interface PreflightReport {
 }
 
 // Python из venv с faster-whisper. Путь приходит из окружения: рекомендуемый
-// server/.state/media-venv создаёт deploy/install.sh, но custom path остаётся допустим.
+// state/media-venv в папке данных создаёт deploy/install.sh, но custom path остаётся допустим.
 // Модели в размер venv не входят и лежат в отдельном COCKPIT_MEDIA_HF_DIR.
 //
 // Runtime-функции получают pythonPath явно из SpeechRuntime; эта константа нужна только
@@ -83,12 +85,13 @@ export function preflight({
     });
 
     const venv = Boolean(pythonPath) && pathExists(pythonPath);
+
     checks.push({
         name: pythonPath
             ? `python venv (${pythonPath})`
             : 'python venv (COCKPIT_MEDIA_PYTHON не задан)',
         ok: venv,
-        fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в корневом .env кокпита + перезапуск сервера',
+        fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
     });
 
     // faster-whisper проверяем только если venv вообще есть.
@@ -162,7 +165,7 @@ export async function preflightAsync({
                 ? `python venv (${pythonPath})`
                 : 'python venv (COCKPIT_MEDIA_PYTHON не задан)',
             ok: venv,
-            fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в корневом .env кокпита + перезапуск сервера',
+            fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
         },
         {
             name: 'faster-whisper (распознавание речи)',
@@ -185,8 +188,10 @@ export function preflightReport(pf: PreflightReport): string {
     const fixes = [...new Set(pf.checks.filter((c) => !c.ok).map((c) => c.fix))];
     // При ручном обходе deploy/install.sh подсказываем воспроизводимый локальный путь.
     const venvMissing = pf.checks.some((c) => c.name.startsWith('python venv') && !c.ok);
+    const venv = dataPath(dataHome({ env: process.env, home: os.homedir() }), 'mediaVenv');
     const notes = venvMissing
-        ? ['', 'Штатно: deploy/install.sh --no-cuda (или --with-cuda). Вручную: python3 -m venv server/.state/media-venv && server/.state/media-venv/bin/pip install -r server/requirements-media.txt']
+        ? ['', 'Штатно: deploy/install.sh --no-cuda (или --with-cuda). '
+            + `Вручную: python3 -m venv ${venv} && ${venv}/bin/pip install -r server/requirements-media.txt`]
         : [];
     return [
         '🩺 Окружение для разбора видео НЕ готово:',

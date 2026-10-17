@@ -3,6 +3,8 @@
 // нельзя незаметно протащить shell, provider/model policy или новый недетерминированный
 // оператор шаблонов.
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import type {
   RouteCatalogDoc,
   RouteEscalationRecord,
@@ -11,7 +13,7 @@ import type {
   RouteNodeDoc,
   RoutePromptBlock,
   RouteTransitionDoc,
-} from '../../../../shared/routeDefinition.ts';
+} from '../../../../shared/pipeline/routeDefinition.ts';
 
 export type {
   RouteCatalogDoc,
@@ -26,7 +28,7 @@ export type {
   RouteRetry,
   RouteTransitionDoc,
   RouteWhen,
-} from '../../../../shared/routeDefinition.ts';
+} from '../../../../shared/pipeline/routeDefinition.ts';
 
 const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ENTITY_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
@@ -85,12 +87,8 @@ function fail(code: string, message: string, path = ''): never {
   throw new RoutesError(code, message, path ? { path } : {});
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function assertObject(value: unknown, path: string): asserts value is Record<string, unknown> {
-  if (!isObject(value)) fail('ROUTES_V2_INVALID_SCHEMA', `${path}: ожидался объект`, path);
+  if (!isRecord(value)) fail('ROUTES_V2_INVALID_SCHEMA', `${path}: ожидался объект`, path);
 }
 
 function assertExactKeys(
@@ -183,7 +181,7 @@ function assertNoExecutionPolicy(value: unknown, path = '$'): void {
     value.forEach((item, index) => assertNoExecutionPolicy(item, `${path}[${index}]`));
     return;
   }
-  if (!isObject(value)) return;
+  if (!isRecord(value)) return;
   for (const [key, child] of Object.entries(value)) {
     if (FORBIDDEN_ROUTE_FIELDS.has(key)) {
       fail(

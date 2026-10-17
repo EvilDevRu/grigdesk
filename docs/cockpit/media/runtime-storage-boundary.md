@@ -2,15 +2,15 @@
 
 `server/src/lib/media/` — локальный медиа-конвейер, а `lib/speech/SpeechRuntime` — единый
 шов диктовки и видео. Python-venv принадлежит Cockpit и обычно лежит в
-`server/.state/media-venv` (gitignore). `deploy/install.sh` идемпотентно создаёт его из
+`<папка данных>/state/media-venv`. `deploy/install.sh` идемпотентно создаёт его из
 закреплённого `server/requirements-media.txt`; CUDA-вариант после явного выбора дополняет
 `requirements-media-cuda.txt`. Установщик атомарно фиксирует абсолютные
-`COCKPIT_MEDIA_PYTHON` и `COCKPIT_MEDIA_HF_DIR` в корневом `.env`. Уже заданный собственный
+`COCKPIT_MEDIA_PYTHON` и `COCKPIT_MEDIA_HF_DIR` в `.env` папки данных. Уже заданный собственный
 Python не переписывает. Temp для `.env` создаётся с 0600 до записи секретов;
 `--no-cuda`/`COCKPIT_MEDIA_CUDA=0` удаляет `nvidia-cublas-cu12` и из старого venv.
 
 Модели whisper живут **не в общем пользовательском кэше**, а в собственном
-`COCKPIT_MEDIA_HF_DIR` (`server/.state/hf` по умолчанию). Runtime очищает унаследованные
+`COCKPIT_MEDIA_HF_DIR` (`<папка данных>/state/hf` по умолчанию). Runtime очищает унаследованные
 `HF_HUB_CACHE`/`HUGGINGFACE_HUB_CACHE`, закрепляет каталог и commit revision модели и
 работает `local_files_only`: неполный snapshot означает «модель не готова», а не фоновую
 загрузку из сети. Скачивание/копирование общего кэша — отдельные отменяемые model jobs в
@@ -26,9 +26,12 @@ blob уже существует; отсутствующий обязатель�
 даёт `cached:false`.
 
 Ручное создание нужно только при обходе установщика:
-`python3 -m venv server/.state/media-venv`, затем
-`server/.state/media-venv/bin/pip install -r server/requirements-media.txt`; после этого
+`python3 -m venv "${COCKPIT_HOME:-$HOME/.cockpit}/state/media-venv"`, затем
+`"${COCKPIT_HOME:-$HOME/.cockpit}/state/media-venv/bin/python" -m pip install -r server/requirements-media.txt`; после этого
 нужно явно задать оба абсолютных пути в `.env`.
+После переноса старые `bin/pip` и `activate` могут содержать прежний путь:
+после удаления совместимых ссылок используйте `bin/python -m pip`.
+
 До переноса fallback считался как `<каталог файла>/../.venv/bin/python`: исходный файл
 лежал в `src/media/`, и `..` попадал в корень прежнего проекта, а в Cockpit он стал
 указывать на `server/src/lib/.venv`, которого не существует. Диктовка отвечала

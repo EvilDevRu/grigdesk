@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { SshFailure, failureCode } from './failure.ts';
+import { errorCode } from '../../../../shared/lib/errors.ts';
+
+import { SshFailure } from './failure.ts';
 
 export interface HostKey {
   host: string;
@@ -63,7 +65,7 @@ export async function createHostKeyStore(options: HostKeyStoreOptions): Promise<
   try {
     known = (JSON.parse(await fs.readFile(file, 'utf8')) || {}) as Record<string, TrustedHostKey>;
   } catch (error) {
-    if (failureCode(error) !== 'ENOENT') {
+    if (errorCode(error) !== 'ENOENT') {
       throw error;
     }
   }

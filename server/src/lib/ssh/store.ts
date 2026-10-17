@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { SshFailure, failureCode } from './failure.ts';
+import { errorCode } from '../../../../shared/lib/errors.ts';
+
+import { SshFailure } from './failure.ts';
 
 export interface SshConnection {
   id: string;
@@ -88,7 +90,7 @@ export async function createSshStore(
     const parsed: unknown = JSON.parse(await fs.readFile(target, 'utf8'));
     connections = storedConnections(parsed);
   } catch (error) {
-    if (failureCode(error) !== 'ENOENT') {
+    if (errorCode(error) !== 'ENOENT') {
       throw error;
     }
   }

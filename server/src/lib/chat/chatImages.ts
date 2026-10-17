@@ -2,6 +2,7 @@
 import { constants, promises as fs } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
+import { config } from '../../config.ts';
 
 export const CHAT_IMAGE_MAX_BYTES = 10_000_000;
 
@@ -152,6 +153,10 @@ export function isWithinChatImageRoot(file: string, root: string): boolean {
  * Исключение принадлежит только artifacts непосредственно в объявленном корне.
  */
 function hiddenPath(file: string, roots: string[]): boolean {
+  if ([config.dataStateDir, config.mobileDir].some((directory) => isWithinChatImageRoot(file, directory))) {
+    return true;
+  }
+
   const base = path.parse(file).root;
   const parts = path.relative(base, file).split(path.sep);
 

@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/mediaContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/media/mediaContracts.ts",
     "src/shared/mediaApi.ts",
     "src/stores/videoSession.ts",
     "src/views/VideoView.vue",

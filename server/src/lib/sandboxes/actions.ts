@@ -11,13 +11,18 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { PROFILE_RE } from '../profiles.ts';
 import {
   parseSandboxActionDecl,
   SANDBOX_ACTION_ID_RE,
   SandboxContractError,
-} from '../../../../shared/sandboxContracts.ts';
-import type { SandboxActionArg, SandboxActionDecl } from '../../../../shared/sandboxContracts.ts';
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
+import type {
+  SandboxActionArg,
+  SandboxActionDecl,
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 
 export interface SandboxProfileAction extends SandboxActionDecl {
   // Абсолютный путь скрипта — остаётся на сервере, наружу уходит только объявление.
@@ -36,10 +41,6 @@ export class SandboxActionsManifestError extends Error {
 
 const TEXT_ARG_LIMIT = 200;
 const NUMBER_ARG_RE = /^(?:0|[1-9][0-9]{0,17})$/;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * Путь скрипта разрешается внутри каталога профиля. Абсолютный путь и `..` наружу

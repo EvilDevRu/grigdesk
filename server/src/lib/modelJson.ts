@@ -5,17 +5,14 @@
 // Живёт отдельно от Inbox и media: обоим нужен один и тот же разбор, а вторая копия
 // разошлась бы с первой на первой же правке.
 
-/** Нормализует значение в строку без ведущих и хвостовых пробелов. */
-export function modelText(value: unknown): string {
-    return typeof value === 'string' ? value.trim() : '';
-}
+import { trimmedText } from '../../../shared/lib/text.ts';
 
 /**
  * Кандидаты на JSON внутри ответа модели, от точного к грубому:
  * содержимое markdown-забора → срез от первой `{` до последней `}` → весь ответ.
  */
 export function jsonCandidates(reply: unknown): string[] {
-    const source = modelText(reply);
+    const source = trimmedText(reply);
 
     if (!source) {
         return [];
@@ -45,7 +42,7 @@ export function jsonCandidates(reply: unknown): string[] {
  * Байтовый потолок отдельно, иначе строка из эмодзи проходит по длине и раздувает хранение.
  */
 export function boundedText(value: unknown, limit: number): string | null {
-    const result = modelText(value);
+    const result = trimmedText(value);
 
     if (result.length > limit || Buffer.byteLength(result, 'utf8') > limit * 4) {
         return null;

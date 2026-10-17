@@ -6,8 +6,8 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
-    "../shared/dbContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/db/dbContracts.ts",
     "src/lib/db/**/*.ts",
     "src/lib/executors/work-tools/supervisedDb.ts",
     "src/modules/db/**/*.ts",

@@ -1,8 +1,10 @@
 // OpenAPI задаёт отдельно форму GET и допустимый запрос POST конфигурации Kimi.
 // Redacted ответ не используется как полный документ для замены настроек.
 
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import type { NativeSettingsContext, NativeSettingsSnapshot } from './types.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -20,14 +22,10 @@ type KimiSettingsConfig = {
   kimiLaunchMode?: string;
 };
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 function jsonSchema(content: unknown): Record<string, unknown> {
-  return record(record(record(record(content).content)['application/json']).schema);
+  return recordOrEmpty(
+    recordOrEmpty(recordOrEmpty(recordOrEmpty(content).content)['application/json']).schema
+  );
 }
 
 /**
@@ -39,25 +37,26 @@ export function kimiSettingsSnapshot(
   read: unknown,
   context: NativeSettingsContext,
 ): NativeSettingsSnapshot {
-  const description = record(openapi);
+  const description = recordOrEmpty(openapi);
   const dialect =
     typeof description.openapi === 'string'
       ? `openapi-${description.openapi.split('.').slice(0, 2).join('.')}`
       : 'openapi-3.0';
-  const route = record(record(description.paths)['/api/v1/config']);
-  const request = jsonSchema(record(route.post).requestBody);
-  const response = jsonSchema(record(record(route.get).responses)['200']);
-  const publicResponse = record(record(response.properties).data);
-  const data = record(record(read).data ?? read);
+  const route = recordOrEmpty(recordOrEmpty(description.paths)['/api/v1/config']);
+  const request = jsonSchema(recordOrEmpty(route.post).requestBody);
+  const response = jsonSchema(recordOrEmpty(recordOrEmpty(route.get).responses)['200']);
+  const publicResponse = recordOrEmpty(recordOrEmpty(response.properties).data);
+  const data = recordOrEmpty(recordOrEmpty(read).data ?? read);
 
-  if (request.type !== 'object' || !request.properties || (record(read).code && record(read).code !== 0)) {
+  if (request.type !== 'object' || !request.properties
+    || (recordOrEmpty(read).code && recordOrEmpty(read).code !== 0)) {
     throw new Error('Kimi не подтвердил request schema конфигурации');
   }
 
-  const properties = { ...record(publicResponse.properties), ...record(request.properties) };
+  const properties = { ...recordOrEmpty(publicResponse.properties), ...recordOrEmpty(request.properties) };
   const getOnly = new Set(
-    [...Object.keys(record(publicResponse.properties)), ...Object.keys(data)].filter(
-      (key) => !Object.hasOwn(record(request.properties), key),
+    [...Object.keys(recordOrEmpty(publicResponse.properties)), ...Object.keys(data)].filter(
+      (key) => !Object.hasOwn(recordOrEmpty(request.properties), key),
     ),
   );
 
@@ -219,7 +218,7 @@ export async function applyKimiNativeSettings(
       let value: unknown = changed;
 
       for (const segment of entry.path) {
-        value = value && typeof value === 'object' ? record(value)[segment] : undefined;
+        value = value && typeof value === 'object' ? recordOrEmpty(value)[segment] : undefined;
       }
 
       return {

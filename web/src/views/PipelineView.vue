@@ -1071,12 +1071,12 @@ import {
   vTooltip,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.js';
-import { agentActivityLabel, silenceReason } from '../../../shared/agentActivity.ts';
+import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
 import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiter-run.js';
 import { buildRewindNote, rewindQuestionsOf } from '../shared/rewind-note.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
-import { waitingReason, stripEmoji } from '../../../shared/pipelineWait.ts';
+import { waitingReason, stripEmoji } from '../../../shared/pipeline/pipelineWait.ts';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,
@@ -3094,7 +3094,7 @@ function cardState(g) {
 
 /* Телефон: тот же fullscreen-паттерн, что у просмотра документа. */
 @media (max-width: 600px) {
-  .sh { min-height: 66px; grid-template-columns: minmax(0, 1fr) 44px; grid-template-rows: auto auto;
+  .sh { min-height: 66px; grid-template-columns: minmax(0, 1fr) var(--control-height); grid-template-rows: auto auto;
     column-gap: 10px; row-gap: 5px; padding: 8px 10px 8px 14px; }
   .shead-copy { grid-column: 1; grid-row: 1; }
   .shead-state { grid-column: 1; grid-row: 2; justify-content: flex-start; }

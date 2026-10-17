@@ -89,7 +89,7 @@ function stores(chatStore) {
     useAuthStore: () => ({ login: 'me', async logoutAll() {} }),
     usePluginsStore: () => ({ loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {} }),
     useChatStore: () => chatStore,
-    usePwaStore: () => ({ canInstall: false, wakeLock: false, notificationSupported: false, async install() {} }),
+    useDeviceStore: () => ({ canInstall: false, wakeLock: false, notificationSupported: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
 }

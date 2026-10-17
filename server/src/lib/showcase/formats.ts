@@ -5,7 +5,7 @@
 // значения лежат в одном месте — разъехавшиеся копии означали бы, что часть
 // ролика пересчитана по одним правилам, а часть по другим.
 import type { RenderStyle } from './artifacts.ts';
-import type { ShowcaseArtifactRef } from '../../../../shared/showcaseContracts.ts';
+import type { ShowcaseArtifactRef } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 
 // Формат ИТОГА, а не обещание о частоте исходной записи браузера: она своя и
 // приводится к этой при сборке сцены.

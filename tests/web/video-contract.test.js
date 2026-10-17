@@ -8,7 +8,7 @@ import {
   parseMediaJob,
   parseMediaPlan,
   parseMediaUpload,
-} from '../../shared/mediaContracts.ts';
+} from '../../shared/media/mediaContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { mediaApi } from '../../web/src/shared/mediaApi.ts';
 

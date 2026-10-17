@@ -26,7 +26,7 @@ const PREFIX = '/api/mobile/v1/';
  * Ошибки сокета и протокола посредника означают временную потерю сети, а не отказ команды.
  * Только известные терминальные причины закрывают сессию или требуют решения человека.
  */
-function transportCode(error: unknown): string {
+export function transportCode(error: unknown): string {
   const code = error instanceof Error ? error.message : '';
 
   if (code.includes('pin')) {
@@ -55,7 +55,7 @@ function transportCode(error: unknown): string {
  * Дополнительный байт обнаруживает превышение лимита, прежде чем JSON попадает в память приложения.
  */
 async function boundedText(file: string, limit: number) {
-  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
 
   try {
     const information = await handle.stat();
@@ -102,9 +102,70 @@ function validIntent(item: any): item is OperationIntent {
   );
 }
 
+export type DeviceIdentity = {
+  key: string;
+  cert: string;
+};
+
+export type IdentityStore = {
+  load(directory: string): Promise<DeviceIdentity>;
+  create(directory: string, name: string): Promise<DeviceIdentity>;
+};
+
+export type PhoneOptions = {
+  monotonic?: () => number;
+  identity?: IdentityStore;
+  deviceName?: string;
+  unlockMs?: number;
+};
+
 /**
- * Эмулятор хранит только синтетический экспортируемый ключ во временном тестовом каталоге.
- * Это dev-инструмент; Android никогда не импортирует его или fallback ключ.
+ * Ключ DevLink и тестов: синтетическая пара от openssl в открытых файлах каталога.
+ * Клиент для компьютера подставляет своё хранилище под защитой ОС.
+ */
+export const opensslIdentity: IdentityStore = {
+  async load(directory) {
+    return {
+      key: await boundedText(path.join(directory, 'device-key.pem'), 16384),
+      cert: await boundedText(path.join(directory, 'device-cert.pem'), 16384),
+    };
+  },
+  /**
+   * Сохраняет прежнюю генерацию синтетического ключа DevLink через openssl.
+   * Desktop заменяет всё хранилище, поэтому открытый PEM туда не попадает.
+   */
+  async create(directory) {
+    const keyFile = path.join(directory, 'device-key.pem');
+    const certFile = path.join(directory, 'device-cert.pem');
+
+    await execute('openssl', [
+      'req',
+      '-x509',
+      '-newkey',
+      'ec',
+      '-pkeyopt',
+      'ec_paramgen_curve:prime256v1',
+      '-nodes',
+      '-days',
+      '30',
+      '-subj',
+      '/CN=cockpit-emulator',
+      '-keyout',
+      keyFile,
+      '-out',
+      certFile,
+    ]);
+
+    return {
+      key: await readFile(keyFile, 'utf8'),
+      cert: await readFile(certFile, 'utf8'),
+    };
+  },
+};
+
+/**
+ * Node-движок связи телефона: DevLink держит синтетический ключ, desktop — ключ под защитой ОС.
+ * Options задаёт хранилище ключа, имя устройства и срок разблокировки без копии транспорта.
  */
 export class PhoneEmulator {
   readonly directory: string;
@@ -124,6 +185,8 @@ export class PhoneEmulator {
   private calls = new Set<ClientRequest>();
   private deadline = 0;
   private monotonic: () => number;
+  private identity: IdentityStore;
+  private unlockMs: number;
   private key = '';
   private cert = '';
   private outbox: OperationIntent[] = [];
@@ -145,9 +208,19 @@ export class PhoneEmulator {
   private cleanup: Promise<unknown> = Promise.resolve();
   private outboxWork: Promise<unknown> = Promise.resolve();
 
-  constructor(directory: string, monotonic: () => number = () => performance.now()) {
+  constructor(directory: string, options: PhoneOptions | (() => number) = {}) {
+    const normalized = typeof options === 'function' ? { monotonic: options } : options;
+    const unlockMs = normalized.unlockMs ?? 600000;
+
+    if (!Number.isSafeInteger(unlockMs) || unlockMs <= 0) {
+      throw new Error('bad_input');
+    }
+
     this.directory = directory;
-    this.monotonic = monotonic;
+    this.monotonic = normalized.monotonic ?? (() => performance.now());
+    this.identity = normalized.identity ?? opensslIdentity;
+    this.unlockMs = unlockMs;
+    this.state.deviceName = normalized.deviceName ?? 'Эмулятор телефона';
   }
 
   /**
@@ -155,88 +228,89 @@ export class PhoneEmulator {
    * Повреждённый файл не трактуется как новая пустая привязка.
    */
   async load() {
-    let config;
-
     try {
-      config = JSON.parse(await boundedText(path.join(this.directory, 'link.json'), 262144));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return;
-      }
+      let config;
 
-      throw new Error('store_corrupt');
-    }
-
-    if (!Array.isArray(config.relays) || config.relays.length > 64) {
-      throw new Error('store_corrupt');
-    }
-
-    const qrText = (value: unknown) =>
-      'cockpitlink:1:' + Buffer.from(JSON.stringify(value)).toString('base64url');
-
-    this.qr = parseQr(qrText(config.qr));
-
-    const relays = config.relays.map(
-      (relay: QrPayload['relay']) =>
-        parseQr(
-          qrText({
-            v: 1,
-            brain: this.qr!.brain,
-            relay,
-          }),
-        ).relay,
-    );
-
-    this.relays = new Map(relays.map((relay: QrPayload['relay']) => [relay.id, relay]));
-
-    if (
-      this.relays.size !== relays.length ||
-      (config.activeRelayId !== null && !this.relays.has(config.activeRelayId))
-    ) {
-      throw new Error('store_corrupt');
-    }
-
-    this.state.activeRelayId = config.activeRelayId;
-    this.state.brainName = this.qr!.brain.name;
-    this.refreshRelays();
-    this.key = await boundedText(path.join(this.directory, 'device-key.pem'), 16384);
-    this.cert = await boundedText(path.join(this.directory, 'device-cert.pem'), 16384);
-
-    const paired = await boundedText(path.join(this.directory, 'paired.json'), 4096).catch(
-      (error) => {
-        if (error.code === 'ENOENT') {
-          return '{}';
+      try {
+        config = JSON.parse(await boundedText(path.join(this.directory, 'link.json'), 262144));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return;
         }
 
         throw error;
-      },
-    );
-    const device = JSON.parse(paired).device;
+      }
 
-    if (device && (typeof device.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(device.id))) {
-      throw new Error('store_corrupt');
-    }
+      if (!Array.isArray(config.relays) || config.relays.length > 64) {
+        throw new Error('store_corrupt');
+      }
 
-    this.state.paired = Boolean(device);
-    this.state.deviceId = device?.id;
-    this.outbox = JSON.parse(
-      await boundedText(path.join(this.directory, 'outbox.json'), 2 * 1024 * 1024).catch(
-        (error) => {
+      const qrText = (value: unknown) =>
+        'cockpitlink:1:' + Buffer.from(JSON.stringify(value)).toString('base64url');
+      const qr = parseQr(qrText(config.qr));
+      const relayList = config.relays.map((relay: QrPayload['relay']) => parseQr(qrText({
+        v: 1,
+        brain: qr.brain,
+        relay,
+      })).relay);
+      const relays = new Map<string, QrPayload['relay']>(relayList.map(
+        (relay: QrPayload['relay']) => [relay.id, relay],
+      ));
+
+      if (relays.size !== relayList.length ||
+        (config.activeRelayId !== null && !relays.has(config.activeRelayId))) {
+        throw new Error('store_corrupt');
+      }
+
+      const identity = await this.identity.load(this.directory);
+      const paired = await boundedText(path.join(this.directory, 'paired.json'), 4096).catch(
+        (error: NodeJS.ErrnoException) => {
           if (error.code === 'ENOENT') {
-            return '[]';
+            return '{}';
           }
 
           throw error;
         },
-      ),
-    );
+      );
+      const device = JSON.parse(paired).device;
 
-    if (
-      !Array.isArray(this.outbox) ||
-      this.outbox.length > 100 ||
-      !this.outbox.every(validIntent) ||
-      new Set(this.outbox.map((item) => item.idempotencyKey)).size !== this.outbox.length
-    ) {
+      if (device && (typeof device.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(device.id))) {
+        throw new Error('store_corrupt');
+      }
+
+      const outbox: OperationIntent[] = JSON.parse(
+        await boundedText(path.join(this.directory, 'outbox.json'), 2 * 1024 * 1024).catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') {
+              return '[]';
+            }
+
+            throw error;
+          },
+        ),
+      );
+
+      if (!Array.isArray(outbox) || outbox.length > 100 || !outbox.every(validIntent) ||
+        new Set(outbox.map((item) => item.idempotencyKey)).size !== outbox.length) {
+        throw new Error('store_corrupt');
+      }
+
+      // Вся конфигурация проверена: отказ выше не публикует частично восстановленное состояние.
+      this.qr = qr;
+      this.relays = relays;
+      this.key = identity.key;
+      this.cert = identity.cert;
+      this.outbox = outbox;
+      this.state.activeRelayId = config.activeRelayId;
+      this.state.brainName = qr.brain.name;
+      this.state.paired = Boolean(device);
+      this.state.deviceId = device?.id;
+      this.refreshRelays();
+    } catch (error) {
+      if (error instanceof Error && error.message === 'secure_store_unavailable') {
+        throw error;
+      }
+
       throw new Error('store_corrupt');
     }
   }
@@ -299,7 +373,7 @@ export class PhoneEmulator {
   unlock() {
     this.lock();
     this.state.unlocked = true;
-    this.deadline = this.monotonic() + 600000;
+    this.deadline = this.monotonic() + this.unlockMs;
     this.emit('linkState', this.getState());
   }
 
@@ -359,28 +433,10 @@ export class PhoneEmulator {
     });
 
     if (!this.cert) {
-      const keyFile = path.join(this.directory, 'device-key.pem');
-      const certFile = path.join(this.directory, 'device-cert.pem');
+      const identity = await this.identity.create(this.directory, this.state.deviceName);
 
-      await execute('openssl', [
-        'req',
-        '-x509',
-        '-newkey',
-        'ec',
-        '-pkeyopt',
-        'ec_paramgen_curve:prime256v1',
-        '-nodes',
-        '-days',
-        '30',
-        '-subj',
-        '/CN=cockpit-emulator',
-        '-keyout',
-        keyFile,
-        '-out',
-        certFile,
-      ]);
-      this.key = await readFile(keyFile, 'utf8');
-      this.cert = await readFile(certFile, 'utf8');
+      this.key = identity.key;
+      this.cert = identity.cert;
     }
 
     this.qr = payload;
@@ -1233,6 +1289,16 @@ export class PhoneEmulator {
     }
 
     await rename(temporary, path.join(this.directory, name));
+  }
+
+  /**
+   * Закрытие отзывает транспорт и дожидается durable записи и удаления media.
+   * Личность и outbox сохраняются для следующего запуска приложения.
+   */
+  async close() {
+    this.lock();
+    await this.outboxWork;
+    await this.cleanup;
   }
 
   /**

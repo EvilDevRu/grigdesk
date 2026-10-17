@@ -209,7 +209,7 @@ import type {
   DockerProjectAction,
   DockerProjectActionResponse,
   DockerStatsMap,
-} from '../../../../shared/dockerContracts';
+} from '../../../../shared/plugins/docker/dockerContracts';
 
 import { sandboxUrl } from '../../shared/sandbox.js';
 import { useDockerStore } from '../../stores/docker';

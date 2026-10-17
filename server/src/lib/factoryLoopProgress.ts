@@ -1,4 +1,4 @@
-import type { GraphLoopProgress } from '../../../shared/factoryGraphContracts.ts';
+import type { GraphLoopProgress } from '../../../shared/pipeline/factoryGraphContracts.ts';
 
 /**
  * Счётчики реестра служат только представлению; пустое или повреждённое поле не равно нулю.

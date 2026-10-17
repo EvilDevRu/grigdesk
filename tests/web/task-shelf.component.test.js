@@ -424,6 +424,7 @@ function hostDock() {
     resetAllRuntime() {},
     rememberTool(id) { this.activeTool = id; },
     setWidth() {},
+    fitWidth() {},
     setRuntime() {},
     toggleExpanded() {},
     setExpanded(value) { this.isExpanded = value; },
@@ -431,7 +432,11 @@ function hostDock() {
   };
 }
 
-async function mountToolHost(t, { totalCount, litCount }) {
+/**
+ * Монтирует настоящий ToolHost с явными строками полки и изолированными сторами.
+ * Полнота строк позволяет проверять внимание, не подменяя его готовым числом.
+ */
+async function mountToolHost(t, rows) {
   const browser = await installBrowser(t);
   browser.innerWidth = 1200;
   const [{ mount }, { reactive }] = await Promise.all([
@@ -446,7 +451,7 @@ async function mountToolHost(t, { totalCount, litCount }) {
       dockNav: [{ id: 'shelf' }],
       enabled: (id) => id === 'shelf',
     },
-    shelf: { totalCount, litCount },
+    shelf: { rows },
   });
   globalThis.__taskShelfHost = state;
   let ToolHost;
@@ -494,7 +499,7 @@ async function mountToolHost(t, { totalCount, litCount }) {
         '../../ui': ([
           'export const UiIconButton = {',
           '  inheritAttrs: false, props: ["title", "label", "pressed"],',
-          '  template: `<button v-bind="$attrs" :title="title"><slot /></button>`,',
+          '  template: `<button v-bind="$attrs" :aria-label="label" :title="title"><slot /></button>`,',
           '};',
           'export const useUiLayer = () => {};',
         ].join('\n')) +
@@ -514,27 +519,42 @@ async function mountToolHost(t, { totalCount, litCount }) {
   return wrapper;
 }
 
-test('Закрытый док показывает нейтральный чип с общим числом записей', async (t) => {
-  const wrapper = await mountToolHost(t, { totalCount: 3, litCount: 0 });
-  const badge = wrapper.get('button[data-ui-tooltip="Полка"] .tool-badge');
+test('Закрытый док не показывает обычное ожидание и завершённые задачи в счётчике', async (t) => {
+  const wrapper = await mountToolHost(t, [row(), row({
+    taskId: 'done',
+    state: 'lit',
+    completed: true,
+  })]);
 
-  assert.deepEqual({ text: badge.text(), wait: badge.classes().includes('wait') }, {
-    text: '3',
-    wait: false,
-  });
+  assert.equal(wrapper.find('.navigation-count').exists(), false);
+  assert.equal(wrapper.get('button').attributes('aria-label'), 'Полка');
 });
 
-test('Закрытый док показывает жёлтый пульсирующий чип с числом огней', async (t) => {
-  const wrapper = await mountToolHost(t, { totalCount: 3, litCount: 2 });
-  const badge = wrapper.get('button[data-ui-tooltip="Полка"] .tool-badge');
+test('Счётчик полки сохраняет просмотренные ожидания решения и полное число в подсказке', async (t) => {
+  const rows = [
+    row({ taskId: 'event', state: 'lit' }),
+    row({ taskId: 'human', needsHuman: true }),
+    row({
+      taskId: 'both',
+      state: 'lit',
+      needsHuman: true,
+    }),
+    row(),
+  ];
+  const wrapper = await mountToolHost(t, rows);
+  const badge = wrapper.get('.navigation-count');
 
-  assert.deepEqual({
-    text: badge.text(),
-    wait: badge.classes().includes('wait'),
-    pulse: badge.classes().includes('pulse'),
-  }, {
-    text: '2',
-    wait: true,
-    pulse: true,
-  });
+  assert.equal(badge.text(), '3');
+  assert.equal(badge.classes().includes('wait'), true);
+  assert.match(wrapper.get('button').attributes('data-ui-tooltip'), /Требуют внимания: 3/);
+  assert.match(wrapper.get('button').attributes('aria-label'), /ждут решения: 2/);
+
+  globalThis.__taskShelfHost.shelf.rows = Array.from({ length: 1000 }, (_, index) =>
+    row({ taskId: String(index), state: 'lit' }));
+  await wrapper.vm.$nextTick();
+
+  assert.equal(wrapper.get('.navigation-count').text(), '999+');
+  assert.equal(wrapper.get('.navigation-count').classes().includes('info'), true);
+  assert.match(wrapper.get('button').attributes('data-ui-tooltip'), /Требуют внимания: 1000/);
+  assert.match(wrapper.get('button').attributes('aria-label'), /Требуют внимания: 1000/);
 });

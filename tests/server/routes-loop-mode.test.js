@@ -400,7 +400,7 @@ test('архив задачи уносит отчёты визитов цикл�
 });
 
 // Пробный сценарий редактора: потолок кругов живёт в профиле, поэтому сценарий цикла
-// передаёт его через публичный API, а предел шагов цикла вмещает потолок 100.
+// передаёт его через публичный API, а предел шагов цикла вмещает потолок 300.
 function loopDraft() {
   const draft = makeDraft();
   const quick = draft.routes.quick;
@@ -467,15 +467,15 @@ test('пробный шаг цикла принимает потолок кру�
   const byDefault = await stepAt(2, {});
   assert.equal(byDefault.statusCode, 200, byDefault.body);
   assert.equal(byDefault.json().stop, null, 'без поля действует потолок по умолчанию 20');
-  const hundred = await stepAt(100, { loopMaxRounds: 100, stepIndex: 201 });
-  assert.equal(hundred.statusCode, 200, hundred.body);
-  assert.equal(hundred.json().stop, 'loop-ceiling', 'потолок 100 достижим на 201-м шаге');
-  for (const bad of [0, 101, 2.5, '2']) {
+  const highest = await stepAt(300, { loopMaxRounds: 300, stepIndex: 601 });
+  assert.equal(highest.statusCode, 200, highest.body);
+  assert.equal(highest.json().stop, 'loop-ceiling', 'потолок 300 достижим на 601-м шаге');
+  for (const bad of [0, 301, 2.5, '2']) {
     const rejected = await stepAt(2, { loopMaxRounds: bad });
     assert.equal(rejected.statusCode, 400, `потолок ${bad} отвергается`);
   }
   assert.equal((await stepAt(2, { stepIndex: 201 })).statusCode, 400,
     'без потолка цикла предел шагов прежний — 200');
-  assert.equal((await stepAt(2, { loopMaxRounds: 100, stepIndex: 401 })).statusCode, 400,
-    'у цикла предел шагов тоже есть — 400');
+  assert.equal((await stepAt(2, { loopMaxRounds: 300, stepIndex: 1201 })).statusCode, 400,
+    'у цикла предел шагов тоже есть — 1200');
 });

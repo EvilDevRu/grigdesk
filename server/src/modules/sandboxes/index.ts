@@ -7,8 +7,13 @@
 import fp from 'fastify-plugin';
 import type { FastifyReply } from 'fastify';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { PROFILE_RE } from '../../lib/profiles.ts';
-import { SANDBOX_ACTION_ID_RE, SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts.ts';
+import {
+  SANDBOX_ACTION_ID_RE,
+  SANDBOX_TASK_RE,
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 import type { SandboxService } from '../../lib/sandboxes/service.ts';
 
 interface SandboxesModuleOptions {
@@ -45,10 +50,6 @@ interface TaskRoute {
   Params: {
     task: string;
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

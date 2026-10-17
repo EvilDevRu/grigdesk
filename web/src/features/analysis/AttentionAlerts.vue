@@ -1,9 +1,8 @@
 <template>
-  <UiPopover
+  <UiTopbarPanel
     v-if="items.length"
+    title="Прерванные оценки"
     trigger-mode="both"
-    placement="bottom-end"
-    :style="popoverStyle"
   >
     <template #trigger>
       <UiButton
@@ -90,7 +89,7 @@
         </div>
       </div>
     </div>
-  </UiPopover>
+  </UiTopbarPanel>
 </template>
 
 <script setup lang="ts">
@@ -105,7 +104,7 @@ import {
   UiButton,
   UiFormActions,
   UiIconButton,
-  UiPopover,
+  UiTopbarPanel,
   vTooltip,
 } from '../../ui';
 
@@ -117,10 +116,6 @@ if (!analysis.disabled) {
 }
 
 const busy = ref<string | number | null>(null);
-const popoverStyle = {
-  width: 'min(400px, calc(100vw - 20px))',
-};
-
 const items = computed(() => (analysis.disabled ? [] : analysis.issues).map((issue) => ({
   task: issue.task,
   reason: issue.status?.error || (

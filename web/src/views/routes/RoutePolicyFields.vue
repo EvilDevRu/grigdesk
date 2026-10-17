@@ -55,8 +55,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { RouteFanout, RoutePolicy } from '../../../../shared/routeDefinition.ts';
-import type { RouteEditorInfo } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteFanout, RoutePolicy } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteEditorInfo } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiInput, UiNumberInput, UiSelect } from '../../ui';
 
 const props = defineProps<{

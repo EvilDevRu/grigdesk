@@ -2,6 +2,8 @@
 // remote hook и reconciliation не переходят в общий data-plane contract.
 import { randomBytes as cryptoRandomBytes, timingSafeEqual } from 'node:crypto';
 
+import { errorCode } from '../../../../shared/lib/errors.ts';
+
 import { AccountRuntimeManager } from '../accountRuntime.ts';
 import {
   createRepositoryHook,
@@ -136,15 +138,6 @@ const fail: (code: string, message: string, statusCode?: number, cause?: unknown
 ) => {
   throw new GitHubConnectionError(code, message, statusCode, cause);
 };
-
-// Чужая ошибка своего типа не обещает: код нужен и для причины degraded, и для лога.
-function failureCode(error: unknown): string {
-  const code = error !== null && typeof error === 'object'
-    ? (error as { code?: unknown }).code
-    : undefined;
-
-  return typeof code === 'string' ? code : '';
-}
 
 function failureMessage(error: unknown): string {
   const message = error !== null && typeof error === 'object'
@@ -448,9 +441,9 @@ export class GitHubConnection {
           this._setConnection('degraded', 'remote_cleanup_pending');
         } else this._setConnection('disconnected');
       } catch (err) {
-        this._setConnection('degraded', failureCode(err) || 'invalid_state');
+        this._setConnection('degraded', errorCode(err) || 'invalid_state');
         this.log.error?.(
-          { code: failureCode(err) },
+          { code: errorCode(err) },
           'github: startup state fail-closed',
         );
       }
@@ -469,7 +462,7 @@ export class GitHubConnection {
         fullName: null,
         connectedAt: null,
         connection: 'degraded',
-        reason: safeReason(failureCode(err)) || 'invalid_state',
+        reason: safeReason(errorCode(err)) || 'invalid_state',
         cleanupPending: false,
       };
     }
@@ -718,7 +711,7 @@ export class GitHubConnection {
         this._setConnection('connecting');
         return this.status();
       } catch (err) {
-        this._setConnection('degraded', failureCode(err) || 'provider_failure');
+        this._setConnection('degraded', errorCode(err) || 'provider_failure');
         throw err;
       }
     });
@@ -827,7 +820,7 @@ export class GitHubConnection {
         await this._restoreOffline(offline || drained, 'cleanup_pending_offline')
           .catch((restoreError: unknown) => {
             this.log.error?.(
-              { code: failureCode(restoreError) },
+              { code: errorCode(restoreError) },
               'github: offline context restore failed',
             );
           });
@@ -878,7 +871,7 @@ export class GitHubConnection {
         return this.status();
       } catch (err) {
         await this._restoreOffline(offline || drained, 'force_forget_failed_offline').catch(() => {});
-        this._setConnection('degraded', failureCode(err) || 'invalid_state');
+        this._setConnection('degraded', errorCode(err) || 'invalid_state');
         throw err;
       }
     });
@@ -1054,7 +1047,7 @@ export class GitHubConnection {
       if (!this.running) return;
       try { await this.tick(); } catch (err) {
         this.log.error?.(
-          { code: failureCode(err) },
+          { code: errorCode(err) },
           'github: reconciliation tick failed',
         );
       }

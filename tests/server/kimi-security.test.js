@@ -164,7 +164,7 @@ test('слишком длинный Unix socket path отклоняется до
   );
 });
 
-test('sandbox argv не bind-mount-ит host root/control state и хранит trusted assets вне KIMI home', async (t) => {
+test('KS-DH sandbox закрывает control state и хранит trusted assets вне KIMI home', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-sandbox-'));
   const workspace = path.join(root, 'workspace');
   const safeExtra = path.join(root, 'safe-extra');
@@ -201,6 +201,12 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     kimiSystemdRunBin: '/usr/bin/systemd-run',
     kimiCaBundle: '/etc/ssl/certs/ca-certificates.crt',
   };
+
+  config.dataHome = path.join(root, 'data');
+  config.envPath = path.join(config.dataHome, '.env');
+  await fs.mkdir(path.join(config.dataHome, 'state'), { recursive: true });
+  await fs.writeFile(config.envPath, 'FAKE=1');
+
   const envFile = path.join(config.rootDir, '.env');
   await fs.mkdir(path.join(config.rootDir, 'server', '.state'), { recursive: true });
   await fs.writeFile(envFile, 'SECRET=1\n', { mode: 0o600 });
@@ -237,7 +243,9 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
   const emptyDir = path.join(broker, 'empty', 'agents');
   const roMaskOver = (source, destination) => launch.args.some((value, index) => value === '--ro-bind'
     && launch.args[index + 1] === source && launch.args[index + 2] === destination);
+
   for (const masked of [
+    config.dataHome,
     path.join(root, 'state'),
     chatsDir,
     hostHome,
@@ -248,6 +256,28 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
   assert.ok(roMaskOver(path.join(broker, 'empty', 'EMPTY'), envFile), 'ожидалась file-маска поверх .env');
   assert.ok(launch.maskedWorkspacePaths.includes(chatsDir));
   assert.ok(launch.maskedWorkspacePaths.includes(envFile));
+  assert.equal(launch.maskedWorkspacePaths.includes(config.envPath), false);
+
+  const buildAgain = () => buildKimiSandboxLaunch({
+    config,
+    cwd: workspace,
+    extraDirs: [root, safeExtra, chatsDir],
+    egressSocketPath: proxy.socketPath,
+    unit: 'cockpit-kimi-test.service',
+  });
+
+  config.envPath = path.join(root, 'outside.env');
+  await fs.writeFile(config.envPath, 'FAKE=1');
+  assert.ok((await buildAgain()).maskedWorkspacePaths.includes(config.envPath));
+  await fs.rename(envFile, envFile + '.original');
+  await fs.rename(path.join(config.rootDir, 'server/.state'), path.join(root, 'old-state'));
+  await fs.symlink(path.join(config.dataHome, '.env'), envFile);
+  await fs.symlink(path.join(config.dataHome, 'state'), path.join(config.rootDir, 'server/.state'));
+
+  const linked = await buildAgain();
+
+  assert.equal(linked.maskedWorkspacePaths.includes(envFile), false);
+  assert.equal(linked.maskedWorkspacePaths.includes(path.join(config.rootDir, 'server/.state')), false);
   // Parity с codex --add-dir: дополнительные каталоги объявляются сессии
   // через server-owned local.toml внутри per-run каталога-маски, который заменяет
   // <projectRoot>/.kimi-code целиком (workspace без .git → projectRoot = cwd).

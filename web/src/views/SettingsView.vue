@@ -1,6 +1,6 @@
 <template>
   <div class="settings" :class="{ 'settings-plugins': tab === 'plugins' }">
-    <header class="settings-hero">
+    <header v-if="!props.windowActions" class="settings-hero">
       <div>
         <p class="eyebrow">Центр управления</p>
         <h2>Настройте Cockpit под свой процесс</h2>
@@ -61,37 +61,37 @@
           </div>
         </header>
 
-    <!-- Приложение: локальные настройки устройства, не уезжают на другие окна -->
+    <!-- Приложение: настройки устройства синхронизируются между его окнами. -->
     <section v-if="tab === 'app'">
       <div class="card">
         <div class="card-head">
           <div>
             <h3>Экран устройства</h3>
-            <p class="muted small">Локальная настройка — хранится только в этом браузере.</p>
+            <p class="muted small">Локальная настройка — хранится только в этом приложении.</p>
           </div>
           <span class="scope-pill">Это устройство</span>
         </div>
         <div class="mode">
           <UiSwitch
-            :model-value="pwa.wakeLockEnabled"
-            :disabled="pwa.wakeLockBusy || (!pwa.wakeLockSupported && !pwa.wakeLockEnabled)"
-            @update:model-value="pwa.setWakeLockEnabled"
+            :model-value="device.wakeLockEnabled"
+            :disabled="device.wakeLockBusy || (!device.wakeLockSupported && !device.wakeLockEnabled)"
+            @update:model-value="device.setWakeLockEnabled"
           >
             Не гасить экран
           </UiSwitch>
           <p class="muted small">
-            Удерживает экран включённым на всех страницах кокпита. При сворачивании PWA
+            Удерживает экран включённым на всех страницах кокпита. При сворачивании окна
             блокировка снимается системой и автоматически возвращается после открытия.
           </p>
         </div>
-        <p v-if="pwa.wakeLockActive" class="msg ok">Экран удерживается включённым.</p>
-        <p v-else-if="pwa.wakeLockError" class="msg err">{{ pwa.wakeLockError }}</p>
-        <p v-else-if="!pwa.wakeLockSupported" class="msg warn">
+        <p v-if="device.wakeLockActive" class="msg ok">Экран удерживается включённым.</p>
+        <p v-else-if="device.wakeLockError" class="msg err">{{ device.wakeLockError }}</p>
+        <p v-else-if="!device.wakeLockSupported" class="msg warn">
           {{ wakeLockNeedsHttps
             ? 'Функция доступна только при открытии кокпита по адресу localhost.'
             : 'Этот браузер не поддерживает удержание экрана.' }}
         </p>
-        <p v-else-if="pwa.wakeLockEnabled" class="muted small">
+        <p v-else-if="device.wakeLockEnabled" class="muted small">
           Блокировка включится, когда приложение снова станет активным.
         </p>
 
@@ -106,25 +106,25 @@
             </div>
             <UiButton
               data-role="settings-action"
-              :disabled="pwa.notificationBusy || !pwa.notificationSupported"
-              @click="pwa.testNotification"
+              :disabled="device.notificationBusy || !device.notificationSupported"
+              @click="device.testNotification"
             >
-              {{ pwa.notificationBusy
+              {{ device.notificationBusy
                 ? 'Проверяю…'
-                : (pwa.notificationPermission === 'granted' ? 'Проверить' : 'Включить и проверить') }}
+                : (device.notificationPermission === 'granted' ? 'Проверить' : 'Включить и проверить') }}
             </UiButton>
           </div>
-          <p v-if="pwa.notificationPermission === 'granted'" class="msg ok">
+          <p v-if="device.notificationPermission === 'granted'" class="msg ok">
             Оповещения разрешены на этом устройстве.
           </p>
-          <p v-else-if="pwa.notificationError" class="msg err">{{ pwa.notificationError }}</p>
-          <p v-else-if="!pwa.notificationSupported" class="msg warn">
+          <p v-else-if="device.notificationError" class="msg err">{{ device.notificationError }}</p>
+          <p v-else-if="!device.notificationSupported" class="msg warn">
             {{ notificationNeedsHttps
               ? 'Оповещения доступны только при открытии кокпита по адресу localhost.'
               : 'Этот браузер не поддерживает системные оповещения.' }}
           </p>
           <p v-else class="muted small">
-            Разрешение спрашивается только по этой кнопке — автоматический запрос PWA браузер блокирует.
+            Разрешение спрашивается только по этой кнопке — автоматический запрос система блокирует.
           </p>
         </div>
 
@@ -671,7 +671,12 @@
            Это сохраняет обзор реестра без высоких карточек с пустыми участками. -->
       <div v-if="!prov.loaded" class="card muted">Загрузка…</div>
       <div v-else class="pvcards">
-        <div v-for="p in prov.providers" :key="p.id" class="card pvcard" :data-provider-id="p.id">
+        <template v-for="group in providerGroups" :key="group.id">
+          <div v-if="providerGroups.length > 1" class="pvgroup" :data-executor-type="group.id">
+            <h3>{{ group.label }}</h3>
+            <p class="muted">{{ group.hint }}</p>
+          </div>
+        <div v-for="p in group.providers" :key="p.id" class="card pvcard" :data-provider-id="p.id">
           <UiDisclosureButton
             :id="`provider-toggle-${p.id}`"
             :open="activeProvider === p.id"
@@ -698,7 +703,8 @@
                   </UiTooltip>
                 </span>
                 <span class="pvsub muted">
-                  {{ p.vendor }} · {{ p.kind }}<template v-if="p.version"> · {{ p.version }}</template>
+                  {{ p.vendor }} · {{ p.kind === 'api' ? 'API' : 'CLI' }}
+                  <template v-if="p.version"> · {{ p.version }}</template>
                 </span>
               </span>
               <span v-if="p.models?.length" class="pvmodels muted">Модели: {{ p.models.length }}</span>
@@ -722,7 +728,8 @@
               <div class="pvsub muted">
                 {{ p.authLabel }}<template v-if="p.version"> · {{ p.version }}</template>
               </div>
-              <div v-if="p.chatEnabled === false" class="pvsub pvsoon">
+              <div v-if="normalizeExecutorType(p.type) === 'universal' && p.chatEnabled === false"
+                   class="pvsub pvsoon">
                 Установка доступна; подключение к чатам пока не включено.
               </div>
               <div v-if="p.models?.length" class="pvsub muted">
@@ -769,7 +776,7 @@
             </div>
             <div class="pvsections">
               <div class="pvoptions">
-                <!-- Ключи доступа объявляет executor; значения пишутся в корневой .env сервером,
+                <!-- Ключи доступа объявляет executor; значения пишутся в .env папки данных сервером,
                      а секреты обратно не приходят — только признак «задан» и хвост ключа. -->
                 <div
                   v-if="p.credentials?.length"
@@ -908,6 +915,7 @@
             </div>
           </div>
         </div>
+        </template>
       </div>
       <!-- Общее для всех исполнителей — отдельной карточкой под плашками -->
       <div class="card narrow">
@@ -1095,6 +1103,19 @@
           <p class="muted small">
             Процесс переживает ответ, а Claude может сам сообщить о завершении фоновой работы.
             После простоя процесс гаснет, но следующий ход продолжает прежнюю сессию.
+          </p>
+        </div>
+
+        <div v-if="prefs" class="run-option live-mode" data-testid="runs-auto-continue">
+          <UiSwitch
+            :model-value="prefs.chatAutoContinue !== false"
+            @update:model-value="toggleAutoContinue"
+          >
+            Продолжать ход сам после обрыва связи
+          </UiSwitch>
+          <p class="muted small">
+            Сеть, перегрузка или сбой у поставщика: пауза и до трёх попыток подряд; «Стоп» или
+            новое сообщение отменяют. Лимиты, вход и переполнение контекста не повторяются.
           </p>
         </div>
 
@@ -1395,19 +1416,17 @@
               <dd>{{ fmtChecked(cockpitStatus.checkedAt) }}</dd>
             </div>
             <div>
-              <dt>Web-бандл</dt>
+              <dt>Интерфейс приложения</dt>
               <dd>
                 {{ clientBuildVersion }} · <code>{{ shortSha(clientBuildSha) }}</code>
-                <span v-if="clientBuildSha !== 'dev' && clientBuildSha !== cockpitStatus.running.sha" class="dirty-mark">
-                  ожидает обновления PWA
-                </span>
+
               </dd>
             </div>
           </dl>
 
           <p v-if="cockpitStatus.checkoutChanged" class="msg info">
-            Checkout изменился после запуска сервера. Чтобы запущенный процесс и web-бандл
-            соответствовали ему, примените локальные изменения.
+            Checkout изменился после запуска сервера. Чтобы сервер использовал этот код,
+            примените локальные изменения. Интерфейс приложения обновляется установкой нового пакета.
           </p>
           <p v-if="cockpitStatus.checkError" class="msg warn">
             {{ cockpitStatus.checkError.message }} Последний успешный результат сохранён.
@@ -1469,20 +1488,21 @@
             <h3>Процесс Cockpit</h3>
             <p class="muted small">Перезапуск применяет свежий серверный код и состав плагинов.</p>
           </div>
-          <span v-if="srv" class="status-pill" :class="srv.systemd ? 'ok' : 'warn'">
-            <span class="dot"></span>{{ srv.systemd ? 'Под управлением systemd' : 'Ручной запуск' }}
+          <span v-if="srv" class="status-pill" :class="serverText.tone">
+            <span class="dot"></span>{{ serverText.pill }}
           </span>
         </div>
         <div v-if="!srv" class="muted">Загрузка…</div>
         <template v-else>
           <p class="srvline">
-            Режим: <b>{{ srv.systemd ? 'демон systemd' : 'запущен вручную' }}</b>
+            Режим: <b>{{ serverText.modeLine }}</b>
             <span class="muted"> · PID {{ srv.pid }} · работает {{ fmtUptime(srv.uptimeSec) }}</span>
           </p>
-          <p v-if="!srv.systemd" class="muted small">
-            Ручной запуск — режим разработки. Чтобы демон поднимался сам, один раз выполни
-            <code>deploy/install.sh</code>. Режимы не смешивать: ручной экземпляр держит порт,
-            и юнит будет падать в цикле.
+          <!-- Команда установщика внутри подсказки остаётся в <code>, как в прежней разметке. -->
+          <p v-if="serverText.hint" class="muted small">
+            <template v-for="(part, index) in serverText.hint.split(SERVER_INSTALL_COMMAND)" :key="index">
+              <code v-if="index > 0">{{ SERVER_INSTALL_COMMAND }}</code>{{ part }}
+            </template>
           </p>
           <div class="row">
             <UiButton
@@ -1507,10 +1527,10 @@
         </template>
       </div>
 
-      <!-- Автозапуск и ярлык: продуктовая ручка над юнитом (enable + linger) и .desktop на bin/launch.
-           Механизм остаётся systemd — лаунчер процессом не владеет. -->
+      <!-- Автозапуск и ярлык: продуктовая ручка над юнитом (enable + linger) и .desktop
+           из deploy/shortcut.sh. Механизм остаётся systemd — лаунчер процессом не владеет. -->
       <div class="card">
-        <ServerLauncher :systemd="srv ? srv.systemd : null" />
+        <ServerLauncher :systemd="srv ? srv.systemd : null" :mode="srv?.mode ?? null" />
       </div>
       <div class="card">
         <WebLogPanel />
@@ -1519,81 +1539,14 @@
 
     <!-- Доступ: вход в сам кокпит (один пользователь) -->
     <section v-else-if="tab === 'access'">
-      <!-- Учётная запись и действия с активными сессиями. -->
       <section class="access-account" aria-labelledby="access-account-title">
-        <h3 id="access-account-title" class="sechead">Защита входа</h3>
+        <h3 id="access-account-title" class="sechead">Вход в приложение</h3>
         <div class="card">
-          <div class="card-head">
-            <div>
-              <h3>Учётная запись</h3>
-              <p class="muted small">Один пользователь Cockpit и его активные сессии.</p>
-            </div>
-            <span class="scope-pill">Сервер</span>
-          </div>
+          <p>Автоматический вход по локальному ключу этого компьютера.</p>
           <p class="muted small">
-            Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер не
-            попадает — клиент получает только сессионную cookie.
+            Если сессия потеряется, главное окно восстановит вход само.
+            Чтобы защитить доступ, блокируйте экран компьютера.
           </p>
-          <div class="form-grid">
-            <label class="full">Логин
-              <UiInput
-                v-model="acc.login"
-                data-context="settings-field"
-                autocomplete="username"
-                placeholder="необязательно"
-              />
-            </label>
-            <label class="full">Текущий пароль
-              <UiInput
-                v-model="acc.currentPassword"
-                type="password"
-                data-context="settings-field"
-                autocomplete="current-password"
-              />
-            </label>
-            <label>Новый пароль
-              <UiInput
-                v-model="acc.password"
-                type="password"
-                data-context="settings-field"
-                autocomplete="new-password"
-                placeholder="минимум 8 символов"
-              />
-            </label>
-            <label>Новый пароль ещё раз
-              <UiInput
-                v-model="acc.password2"
-                type="password"
-                data-context="settings-field"
-                autocomplete="new-password"
-              />
-            </label>
-          </div>
-          <p class="muted small">
-            Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
-            Текущее устройство останется в системе.
-          </p>
-          <div class="row">
-            <UiButton
-              variant="solid"
-              tone="accent"
-              data-role="settings-action"
-              :disabled="accBusy || !acc.currentPassword || !acc.password"
-              @click="saveAccount"
-            >
-              {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
-            </UiButton>
-            <UiButton data-role="settings-action" @click="auth.doLogout()">Выйти</UiButton>
-            <UiButton
-              variant="ghost"
-              tone="danger"
-              data-role="settings-action"
-              @click="logoutAll"
-            >
-              Выйти со всех устройств
-            </UiButton>
-          </div>
-          <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
         </div>
       </section>
       <MobileAccess />
@@ -1607,6 +1560,7 @@
 import { computed, nextTick, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue';
 import { api } from '../shared/apiClient.ts';
 import { useProvidersStore } from '../stores/providers.js';
+import { executorTypeGroups, normalizeExecutorType } from '../../../shared/chat/executorTypes.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useToolLauncher } from '../shared/tools/launcher.ts';
 import ProviderIcon from '../shared/ProviderIcon.vue';
@@ -1619,10 +1573,10 @@ import ToolHotkeys from './settings/ToolHotkeys.vue';
 import ProviderNativeSettings from './settings/ProviderNativeSettings.vue';
 import ProviderMcpStatus from './settings/ProviderMcpStatus.vue';
 import ProviderCredentials from './settings/ProviderCredentials.vue';
-import { useAuthStore } from '../stores/auth.js';
+import { SERVER_INSTALL_COMMAND, serverModeText } from './settings/serverMode.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
-import { usePwaStore } from '../stores/pwa.js';
+import { useDeviceStore } from '../stores/device.js';
 import {
   blockReasonLabel,
   UPDATE_STAGE_LABELS,
@@ -1649,11 +1603,16 @@ import { useSse } from '../composables/useSse.ts';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
 import { getWebLogRuntime } from '../shared/webLogRuntime.ts';
 
+const props = defineProps({ windowActions: { type: Object, default: null } });
+
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
 const TABS = [
   {
-    id: 'app', label: 'Приложение', group: 'Основное', short: 'Экран и PWA',
-    description: 'Поведение Cockpit на этом устройстве: экран, установка и локальные возможности браузера.',
+    id: 'app',
+    label: 'Приложение',
+    group: 'Основное',
+    short: 'Экран и оповещения',
+    description: 'Поведение Cockpit на этом устройстве: экран, оповещения и локальные возможности.',
     icon: 'M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M9 21h6 M12 17v4',
   },
   {
@@ -1690,8 +1649,8 @@ const TABS = [
     id: 'access',
     label: 'Доступ',
     group: 'Система',
-    short: 'Учётная запись и сессии',
-    description: 'Учётная запись и активные сессии.',
+    short: 'Ключ и телефон',
+    description: 'Автоматический вход и подключение телефона.',
     icon: 'M7 10V7a5 5 0 0 1 10 0v3 M5 10h14v11H5z M12 14v3',
   },
 ];
@@ -1728,7 +1687,7 @@ const settingsContext = useUiContextSource('settings', {
 watchEffect(() => settingsContext.update({ details: { tab: currentTab.value.label } }));
 
 // ── Приложение (настройки именно этого окна/устройства) ──
-const pwa = usePwaStore();
+const device = useDeviceStore();
 // ── Арбитр типизированной остановки конвейера ──
 // Настройка серверная: арбитр живёт на сервере и ходит сам, поэтому выбор обязан быть
 // один на все окна.
@@ -2352,6 +2311,7 @@ async function testAuth() {
 
 // ── Исполнители (реестр LLM-агентов) ──
 const prov = useProvidersStore();
+const providerGroups = computed(() => executorTypeGroups(prov.providers));
 const activeProvider = ref('');
 const refreshing = ref(false);
 
@@ -2367,12 +2327,24 @@ async function refreshProv() {
 // Команда установки или авторизации недоступного исполнителя — клик открывает терминал
 // с уже введённой командой (выполнение — Enter'ом пользователя).
 const { openTerminal } = useToolLauncher();
+/**
+ * Окно настроек передаёт команду главному окну с подтверждением доставки.
+ * Страница браузера сохраняет обычное открытие инструмента через launcher.
+ */
+function runInTerminal(insert) {
+  if (props.windowActions) {
+    void props.windowActions.openTerminal(insert);
+  } else {
+    void openTerminal({ insert });
+  }
+}
+
 function installInTerminal(p) {
-  openTerminal({ insert: p.setupCommand || p.install });
+  runInTerminal(p.setupCommand || p.install);
 }
 
 function fixDistributionInTerminal(p) {
-  openTerminal({ insert: p.distribution.problem.command });
+  runInTerminal(p.distribution.problem.command);
 }
 
 // Свои настройки исполнителя: что за ключ и какое направление опасно — знает адаптер.
@@ -2536,6 +2508,18 @@ async function toggleLiveSessions(v) {
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
 
+// Автопродолжение хода после временного сбоя поставщика. Тумблер читается ядром
+// при каждом решении и ещё раз перед следующей попыткой, поэтому выключение
+// действует сразу — но уже начатую попытку не прерывает.
+async function toggleAutoContinue(v) {
+  prefsMsg.value = null;
+
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { chatAutoContinue: v });
+    prefsMsg.value = { type: 'ok', text: 'Сохранено.' };
+  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
+}
+
 // ── Живые процессы агентов ───────────────────────────────────────────────────
 // Свободную сессию в `ps` не отличить от разового запуска, а держит она и память,
 // и MCP-серверы, и незакрытые фоновые команды. Поэтому список и кнопка гашения — здесь.
@@ -2607,7 +2591,17 @@ function liveDetail(item) {
 
 // Роутер сюда не тащим: настройки живут без него, а хеш-навигация — тот же переход
 // для vue-router с `createWebHashHistory`, но без инъекции в каждый тест этой страницы.
+/**
+ * Модальное окно просит главное переключить чат и закрывается после ответа.
+ * В обычной странице сохраняется прежняя навигация через hash.
+ */
 function openLiveChat(item) {
+  if (props.windowActions) {
+    void props.windowActions.openChat(item.chatKey);
+
+    return;
+  }
+
   if (typeof chatStore.setActive === 'function') chatStore.setActive(item.chatKey);
   location.hash = '#/chats';
 }
@@ -2809,57 +2803,6 @@ async function toggleShowAllModels(v) {
   } catch (e) { modelsMsg.value = { type: 'err', text: e.message }; }
 }
 
-// ── Доступ (вход в кокпит) ──
-const auth = useAuthStore();
-const acc = ref({ currentPassword: '', login: '', password: '', password2: '' });
-const accBusy = ref(false);
-const accMsg = ref(null);
-
-async function saveAccount() {
-  accMsg.value = null;
-  if (acc.value.password.length < 8) { accMsg.value = { type: 'err', text: 'Новый пароль — не короче 8 символов.' }; return; }
-  if (acc.value.password !== acc.value.password2) { accMsg.value = { type: 'err', text: 'Пароли не совпадают.' }; return; }
-  accBusy.value = true;
-  try {
-    const r = await api.post('/api/auth/password', {
-      currentPassword: acc.value.currentPassword,
-      login: acc.value.login,
-      password: acc.value.password,
-    });
-    acc.value = { currentPassword: '', login: acc.value.login, password: '', password2: '' };
-    accMsg.value = { type: 'ok', text: `Сохранено. ${r.note || ''}`.trim() };
-    await auth.load();
-  } catch (e) {
-    accMsg.value = { type: 'err', text: e.data?.message || e.message };
-  } finally { accBusy.value = false; }
-}
-
-/**
- * Массовый выход инвалидирует и текущую сессию, поэтому действие подтверждается
- * через общий dialog host до запроса, а после запроса клиент всегда уходит на вход.
- */
-async function logoutAll() {
-  const confirmed = await confirmDialog(
-    'Разлогинить все устройства, включая это?',
-    {
-      danger: true,
-      okText: 'Выйти со всех',
-    },
-  );
-
-  if (!confirmed) {
-    return;
-  }
-
-  try {
-    await api.post('/api/auth/logout-all');
-  } catch {
-    // Сервер мог инвалидировать cookie раньше ответа — клиент всё равно уходит на вход.
-  }
-
-  auth.authenticated = false;
-}
-
 // ── Плагины ──
 const pluginsStore = usePluginsStore();
 
@@ -2871,7 +2814,9 @@ const modelGroups = computed(() => prov.providers
   .filter((p) => p.models.length));
 
 // ── Сервер (режим запуска и перезапуск) ──
-const srv = ref(null);          // { systemd, pid, uptimeSec }
+const srv = ref(null);          // { systemd, mode, pid, uptimeSec }
+// Тексты карточки и подтверждения перезапуска по режиму: приложение, systemd или ручной.
+const serverText = computed(() => serverModeText(srv.value));
 const restarting = ref(false);
 const srvMsg = ref(null);
 const cockpitUpdate = useCockpitUpdateStore();
@@ -2915,8 +2860,8 @@ async function startCockpitAction(kind) {
   if (!job && cockpitUpdate.error) srvMsg.value = { type: 'err', text: cockpitUpdate.error };
 }
 
-// Проверку service worker после успешного задания делает плитка версии в рейке — она
-// есть на каждой странице. Здесь только перечитываем карточку сервера.
+// Обновление сервера не меняет закреплённый интерфейс приложения.
+// Здесь перечитываем карточку процесса после завершения задания.
 watchEffect(() => {
   const job = cockpitJob.value;
   if (job?.status !== 'done' || job.id === confirmedUpdateJob) return;
@@ -2938,9 +2883,7 @@ async function restartServer() {
   // несколько секунд закончить, остальные останавливает как кнопкой «стоп» с сохранением
   // ленты и id сессии. Честно предупреждаем числом, а не общими словами.
   const active = await activeChatTurns();
-  const mode = srv.value?.systemd
-    ? 'Сервер выйдет, юнит systemd поднимет его сам.'
-    : 'Сервер запущен вручную — перезапустится через bin/restart.';
+  const mode = serverText.value.restartConfirm;
   const warn = active
     ? ` Сейчас идут ходы агентов: ${active} — им дадут закончить, остальные прервут`
       + ' как «стоп»: лента и память сессии сохранятся.'
@@ -2948,17 +2891,29 @@ async function restartServer() {
   if (!(await confirmDialog(`Перезапустить сервер кокпита? ${mode}${warn}`, { danger: !!active, okText: 'Перезапустить' }))) return;
   restarting.value = true; srvMsg.value = null;
   try { await api.post('/api/system/restart'); } catch { /* процесс мог умереть раньше ответа — это норм */ }
-  // Ждём возвращения по публичному /api/auth/state (как bin/restart) и перезагружаем
-  // страницу — она подтянет свежий бандл; ради применения нового кода кнопка и нужна.
+  // Сервер обновляется независимо от закреплённого интерфейса приложения.
+  // После восстановления связи перечитываем карточку, сохраняя документ и текущий ввод.
   const t0 = Date.now();
   // Слив ходов перед выходом занимает до ~20 с, потом подъём: ждём с запасом.
   while (Date.now() - t0 < 60_000) {
     await new Promise((r) => { setTimeout(r, 1000); });
-    try { await api.get('/api/auth/state'); location.reload(); return; }
+
+    try {
+      await api.get('/api/auth/state');
+      await loadServer();
+      restarting.value = false;
+      srvMsg.value = { type: 'ok', text: 'Сервер снова доступен.' };
+
+      return;
+    }
     catch { /* ещё поднимается */ }
   }
   restarting.value = false;
-  srvMsg.value = { type: 'err', text: 'Сервер не вернулся за 60 секунд — смотри journalctl --user -u cockpit-server или server/.state/cockpit-server.log.' };
+  srvMsg.value = {
+    type: 'err',
+    text: 'Сервер не вернулся за 60 секунд — смотри journalctl --user -u cockpit-server '
+      + 'или state/cockpit-server.log в папке данных.',
+  };
 }
 
 // ── Пересборка web-бандла из рабочего дерева (без checkout и рестарта) ──
@@ -2982,9 +2937,10 @@ async function rebuildWeb() {
     try { state = (await api.get('/api/system/web-rebuild')).rebuild; } catch { continue; }
     if (state?.status === 'running') continue;
     if (state?.status === 'done') {
-      srvMsg.value = { type: 'ok', text: 'Web-бандл пересобран. Страница обновится и подтянет новую сборку.' };
-      pwa.checkForUpdate();
-      setTimeout(() => location.reload(), 1500);
+      srvMsg.value = {
+        type: 'ok',
+        text: 'Рабочая сборка готова. Интерфейс приложения обновится после установки нового пакета.',
+      };
     } else if (state?.status === 'failed') {
       srvMsg.value = { type: 'err', text: state.error?.message || 'Пересборка завершилась ошибкой.' };
     } else {
@@ -3029,7 +2985,6 @@ onMounted(() => {
   pluginsStore.load();
   loadServer();
   cockpitUpdate.load();
-  acc.value.login = auth.login || '';
 });
 </script>
 
@@ -3478,6 +3433,9 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 /* Гармошка показывает весь реестр компактными строками. Подробности одного
    исполнителя занимают естественную высоту и не выравниваются с соседними. */
 .pvcards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.pvgroup { padding: 10px 4px 0; }
+.pvgroup h3 { margin: 0 0 4px; }
+.pvgroup p { margin: 0; font-size: 12px; }
 .pvcard { gap: 0; padding: 8px; }
 .pvhead { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; }
 .pvtitle { display: grid; flex: 1; min-width: 0; gap: 5px; }

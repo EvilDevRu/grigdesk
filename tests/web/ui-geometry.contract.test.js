@@ -17,6 +17,8 @@ test('Chrome geometry matrix закрепляет viewports и overlay/disclosur
   assert.equal(packageJson.scripts['test:ui-browser'], 'node scripts/check-ui-geometry.mjs');
   assert.match(script, /\[340, 360, 600, 759, 760, 899, 900, 1200, 1500\]/u);
   assert.match(script, /process\.env\.CHROME_BIN/u);
+  assert.match(script, /touch \? 44 : 36/u);
+  assert.doesNotMatch(script, /innerWidth <= 600 \? 40/u);
   assert.match(script, /data-geometry-disclosure/u);
   assert.match(script, /data-geometry-popover-trigger/u);
   assert.match(script, /data-geometry-dialog-trigger/u);

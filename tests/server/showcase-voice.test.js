@@ -28,7 +28,7 @@ import {
   narrationWords,
   parseNarration,
   plainNarration,
-} from '../../shared/showcaseNarration.ts';
+} from '../../shared/plugins/showcase/showcaseNarration.ts';
 import {
   audioStats,
   checkSpeech,

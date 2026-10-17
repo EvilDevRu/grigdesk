@@ -31,7 +31,7 @@ public class TransportTest {
   private File root() {
     File directory = new File(System.getProperty("user.dir")).getAbsoluteFile();
 
-    while (directory != null && !new File(directory, "bin/mobile").isFile()) {
+    while (directory != null && !new File(directory, "tools/mobile").isFile()) {
       directory = directory.getParentFile();
     }
 

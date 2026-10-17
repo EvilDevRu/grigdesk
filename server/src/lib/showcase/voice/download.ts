@@ -20,6 +20,8 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 
+import { setTimeout as pause } from 'node:timers/promises';
+
 import type { PiperVoicePackage } from './piperCatalog.ts';
 import type { QwenModelFile, QwenVoicePackage } from './qwenCatalog.ts';
 import type { SileroVoicePackage } from './sileroCatalog.ts';
@@ -209,12 +211,6 @@ export class SourceError extends Error {
     this.name = 'SourceError';
     this.transient = transient;
   }
-}
-
-function pause(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 async function sizeOf(file: string): Promise<number> {

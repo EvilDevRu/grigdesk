@@ -6,20 +6,22 @@
 // Старый монтаж возвращается отдельным результатом `legacy` и потому никогда не
 // выдаётся за точную синхронизацию.
 
-import type { ShowcaseTiming } from '../../../../../shared/showcaseContracts.ts';
+import { splitsUtf16Character } from '../../../../../shared/lib/text.ts';
+
+import type { ShowcaseTiming } from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import {
   validateShowcaseSyncBindings,
-} from '../../../../../shared/showcaseSync.ts';
+} from '../../../../../shared/plugins/showcase/showcaseSync.ts';
 import type {
   ShowcaseSyncCue,
   ShowcaseSyncCueKind,
   ShowcaseSyncValidationInput,
-} from '../../../../../shared/showcaseSync.ts';
+} from '../../../../../shared/plugins/showcase/showcaseSync.ts';
 import {
   planScene,
   POST_ROLL_MS,
   PRE_ROLL_MS,
-} from '../../../../../shared/showcaseTimeline.ts';
+} from '../../../../../shared/plugins/showcase/showcaseTimeline.ts';
 
 export interface SpeechSpanTiming {
   from: number;
@@ -445,18 +447,6 @@ function optionsOf(input: SyncPlanInput): PlannerOptions | null {
   }
 
   return options;
-}
-
-/** Граница текстовой метки не должна разрезать UTF-16 surrogate pair. */
-function splitsUtf16Character(text: string, at: number): boolean {
-  if (at <= 0 || at >= text.length) {
-    return false;
-  }
-
-  const before = text.charCodeAt(at - 1);
-  const after = text.charCodeAt(at);
-
-  return before >= 0xD800 && before <= 0xDBFF && after >= 0xDC00 && after <= 0xDFFF;
 }
 
 /**

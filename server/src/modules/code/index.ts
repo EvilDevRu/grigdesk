@@ -12,8 +12,10 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { Dirent } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { PROFILE_RE, listProjects } from '../../lib/profiles.ts';
 import { projectRepos } from '../../lib/projects.ts';
 import { generateCommitTitle } from '../../lib/codeCommitMessage.ts';
@@ -34,7 +36,7 @@ import type {
   CodeRootsResponse,
   CodeSearchResponse,
   CodeWorktree,
-} from '../../../../shared/codeContracts.ts';
+} from '../../../../shared/plugins/code/codeContracts.ts';
 import {
   branchDiff,
   blameFile,
@@ -58,9 +60,13 @@ import {
 
 export interface CodeModuleConfig extends Record<string, unknown> {
   profilesDir: string;
+  dataStateDir?: string;
+  mobileDir?: string;
+  envPath?: string;
   chatsDir?: string | null;
   telegramDir?: string | null;
   githubDir?: string | null;
+  studio3dDir?: string | null;
 }
 
 export interface CodePreferences {
@@ -105,10 +111,6 @@ interface RootContext {
 // Флаг «с текущими изменениями» в query: только буквальные 1/true, всё остальное — нет.
 function workFlag(value: unknown): boolean {
   return value === '1' || value === 'true';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function requestBody(req: FastifyRequest<CodeRoute>): Record<string, unknown> {
@@ -195,19 +197,20 @@ export const RAW_MAX_BYTES = 10_000_000;
 
 // Сегменты, закрытые в ЛЮБОМ дереве: внутренности гита (в .git/config лежат токены
 // remote-ов) и конвенция `.state` — в проекте она гитигнорится целиком (`**/.state/`)
-// и означает «секреты и рантайм» (server/.state: креды B24, cli-token, хеш пароля входа).
+// и означает «секреты и рантайм» (служебные каталоги проектов и прежняя раскладка Кокпита).
 const HIDDEN_SEGMENTS = new Set(['.git', '.state']);
 
 /**
- * Каталоги данных САМОГО кокпита (chats/, telegram/, github/): они лежат внутри его дерева,
- * гитигнорятся — и потому в дифе не видны, а в `ls`/`file` были бы видны целиком.
+ * Данные САМОГО кокпита (чаты, Telegram, GitHub, 3D, служебное состояние, ключи телефона,
+ * файл .env): в дифе их нет, а в `ls`/`file` они были бы видны, если попали в дерево проекта.
  *
  * Закрываются по фактическому пути из config, а НЕ по имени: имена настраиваются
  * переменными окружения, а одноимённый каталог в чужом репозитории — чужой код,
  * прятать его нельзя (сравни с `git`: там путь от клиента не приходит вовсе).
  */
 function hiddenDirs(config: CodeModuleConfig): string[] {
-  return [config.chatsDir, config.telegramDir, config.githubDir]
+  return [config.chatsDir, config.telegramDir, config.githubDir, config.studio3dDir,
+    config.dataStateDir, config.mobileDir, config.envPath]
     .filter((dir): dir is string => typeof dir === 'string' && Boolean(dir))
     .map((d) => path.resolve(d));
 }
@@ -224,6 +227,22 @@ export function isHiddenPath(abs: string, dirs: readonly string[] = []): boolean
   }
 
   return dirs.some((dir) => p === dir || p.startsWith(dir + path.sep));
+}
+
+/**
+ * Скрытость проверяется и по настоящему пути: после переноса данных в коде остаются ссылки
+ * (`.env` → файл настроек в папке данных), а чтение файла идёт по ссылке к ключам.
+ */
+export function isHiddenReal(abs: string, dirs: readonly string[] = []): boolean {
+  if (isHiddenPath(abs, dirs)) {
+    return true;
+  }
+
+  try {
+    return isHiddenPath(realpathSync(abs), dirs);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -503,7 +522,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       return reply;
     }
 
-    if (isHiddenPath(abs, hidden)) {
+    if (isHiddenReal(abs, hidden)) {
       return reply.code(404).send({
         error: 'no_dir',
         message: 'служебный каталог закрыт для просмотра',
@@ -523,7 +542,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
 
     return {
       entries: entries
-        .filter((e) => !isHiddenPath(path.join(abs, e.name), hidden))
+        .filter((e) => !isHiddenReal(path.join(abs, e.name), hidden))
         .map((e) => ({
           name: e.name,
           dir: e.isDirectory(),
@@ -550,7 +569,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       return reply;
     }
 
-    if (isHiddenPath(abs, hidden)) {
+    if (isHiddenReal(abs, hidden)) {
       return reply.code(404).send({
         error: 'no_file',
         message: 'служебный каталог закрыт для просмотра',
@@ -597,7 +616,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       return reply;
     }
 
-    if (isHiddenPath(abs, hidden)) {
+    if (isHiddenReal(abs, hidden)) {
       return reply.code(404).send({
         error: 'no_file',
         message: 'служебный каталог закрыт для просмотра',
@@ -830,7 +849,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     if (!abs) {
       return reply;
     }
-    if (isHiddenPath(abs, hidden)) {
+    if (isHiddenReal(abs, hidden)) {
       return reply.code(404).send({
         error: 'no_file',
         message: 'служебный каталог закрыт для просмотра',
@@ -863,7 +882,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     if (!abs) {
       return reply;
     }
-    if (isHiddenPath(abs, hidden)) {
+    if (isHiddenReal(abs, hidden)) {
       return reply.code(404).send({
         error: 'no_file',
         message: 'служебный каталог закрыт для просмотра',
@@ -894,7 +913,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     try {
       return await searchTree(ctx.tree.path, String(req.query.q || ''), {
         limit: opts.searchMaxBytes,
-        isHidden: (relPath) => isHiddenPath(path.join(ctx.tree.path, relPath), hidden),
+        isHidden: (relPath) => isHiddenReal(path.join(ctx.tree.path, relPath), hidden),
       }) satisfies CodeSearchResponse;
     } catch (routeError) {
       return sendGitError(reply, routeError);
@@ -913,7 +932,6 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       return reply;
     }
 
-
     return mutateRoot(ctx, reply, (root) => stageWorktreeChanges(root, {
       all: requestBody(req).all === true,
       paths: requestBody(req).paths,
@@ -931,7 +949,6 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     if (!ctx) {
       return reply;
     }
-
 
     return mutateRoot(ctx, reply, (root) => unstageWorktreeChanges(root, {
       all: requestBody(req).all === true,
@@ -986,7 +1003,6 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       return reply;
     }
 
-
     return mutateRoot(ctx, reply, (root) => commitStagedChanges(
       root,
       requestBody(req).message,
@@ -1021,7 +1037,6 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
       return reply;
     }
 
-
     return mutateRoot(ctx, reply, (root) => pushCurrentBranch(root));
   });
 
@@ -1051,7 +1066,6 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     if (!ctx) {
       return reply;
     }
-
 
     const settings = fastify.pluginSettings?.('code');
     const setting = isRecord(settings) ? settings.commitMessageModel ?? null : null;

@@ -6,8 +6,8 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
-    "../shared/mediaContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/media/mediaContracts.ts",
     "src/modules/media/**/*.ts",
     "../tests/types/video-server-contract.test.mts"
   ]

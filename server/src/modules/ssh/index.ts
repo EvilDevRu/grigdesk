@@ -7,6 +7,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {} from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 
+import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { isLocalRequest, isSecureRequest } from '../../plugins/auth.ts';
 
 /**
@@ -76,10 +78,6 @@ interface AuditRoute {
   Querystring: Record<string, unknown>;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Вызов метода службы с запасным ответом. Служба приходит извне и может оказаться
  * неполной; результат остаётся unknown — маршрут разбирает его сам, а не принимает
@@ -119,7 +117,7 @@ const call = {
  * тексту: «сессия потеряна» и «так нельзя» ведут человека к разным следующим шагам.
  */
 function sendError(reply: FastifyReply, error: unknown) {
-  const source = asRecord(error);
+  const source = objectOrEmpty(error);
   const value = source.code || source.error;
   const code = typeof value === 'string' && value ? value : 'ssh_error';
   const statuses: Record<string, number> = {
@@ -211,7 +209,7 @@ async function sshModule(fastify: FastifyInstance, options: SshModuleOptions): P
       return await call.decideHostKey(
         service,
         String(request.params.challengeId),
-        String(asRecord(request.body).decision || ''),
+        String(objectOrEmpty(request.body).decision || ''),
       );
     } catch (error) {
       return sendError(reply, error);
@@ -248,7 +246,7 @@ async function sshModule(fastify: FastifyInstance, options: SshModuleOptions): P
       return await call.setAgentAccess(
         service,
         String(request.params.sid),
-        asRecord(request.body).allowed === true,
+        objectOrEmpty(request.body).allowed === true,
       );
     } catch (error) {
       return sendError(reply, error);
@@ -282,7 +280,7 @@ async function sshModule(fastify: FastifyInstance, options: SshModuleOptions): P
         let message: Record<string, unknown>;
 
         try {
-          message = asRecord(JSON.parse(String(raw)));
+          message = objectOrEmpty(JSON.parse(String(raw)));
         } catch {
           return;
         }
@@ -314,7 +312,7 @@ async function sshModule(fastify: FastifyInstance, options: SshModuleOptions): P
         String(request.params.sid),
         request.query?.path,
       );
-      const source = asRecord(result);
+      const source = objectOrEmpty(result);
       if (typeof source.contentType === 'string') {
         reply.type(source.contentType);
       }
@@ -344,7 +342,7 @@ async function sshModule(fastify: FastifyInstance, options: SshModuleOptions): P
     // Пояснение необязательно: трение стоит на разрешении, а не на отказе. Требование
     // текста заворачивало пустой отказ в 400, клиент молча перечитывал очередь, и
     // карточка возвращалась на экран без единого слова о причине.
-    const source = asRecord(request.body);
+    const source = objectOrEmpty(request.body);
     const body = {
       allow: source.allow === true,
       comment: String(source.comment || '').trim().slice(0, 4_000),
@@ -352,7 +350,7 @@ async function sshModule(fastify: FastifyInstance, options: SshModuleOptions): P
 
     try {
       const result = await call.answerApproval(service, String(request.params.pid), body);
-      if (asRecord(result).ok === false) {
+      if (objectOrEmpty(result).ok === false) {
         return sendError(reply, result);
       }
       return result;

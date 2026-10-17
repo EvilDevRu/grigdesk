@@ -1,140 +1,118 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = fileURLToPath(new URL('../../', import.meta.url));
 
 /**
- * Песочница лаунчера: ОТДЕЛЬНЫЙ корень репозитория с копией bin/launch и заглушкой вместо
- * bin/restart. Настоящий скрипт перезапуска здесь звать нельзя ни при каких условиях: он
- * гасит процессы на портах кокпита, а агент из чата — дочерний процесс сервера, и прогон
- * убил бы сам себя. По той же причине порт берётся из .env песочницы, а не корневого.
- *
- * Живость сервера изображает поддельный curl: первые `aliveAfter` опросов отвечают отказом,
- * дальше успехом — так проверяется и ожидание подъёма, и открытие окна ровно по факту ответа.
+ * Щелчок по переходному ярлыку проверяется на копии deploy/shortcut.sh с записывающей
+ * заглушкой cockpit. Остальные внешние инструменты перекрыты и проверены до запуска скрипта.
  */
-function sandbox(t, { unit = true, aliveAfter = 0, port = 18149 } = {}) {
+function sandbox(t, suffix = 'repo') {
   const home = mkdtempSync(path.join(os.tmpdir(), 'cockpit-launch-'));
-  t.after(() => rmSync(home, { recursive: true, force: true }));
-  const repo = path.join(home, 'repo');
-  const fakeBin = path.join(home, 'fake-bin');
+  const repo = path.join(home, suffix);
+  const stubs = path.join(home, 'stubs');
   const log = path.join(home, 'calls.log');
-  const counter = path.join(home, 'curl-calls');
 
-  mkdirSync(path.join(repo, 'bin', 'lib'), { recursive: true });
-  mkdirSync(fakeBin, { recursive: true });
-  copyFileSync(path.join(root, 'bin', 'launch'), path.join(repo, 'bin', 'launch'));
-  copyFileSync(
-    path.join(root, 'bin', 'lib', 'runtime-env.sh'),
-    path.join(repo, 'bin', 'lib', 'runtime-env.sh'),
-  );
-  writeFileSync(path.join(repo, '.env'), `COCKPIT_PORT=${port}\n`);
-  writeFileSync(
-    path.join(repo, 'bin', 'restart'),
-    `#!/usr/bin/env bash\necho "bin/restart $*" >> "${log}"\n`,
-    { mode: 0o755 },
-  );
-  if (unit) {
-    const unitDir = path.join(home, '.config', 'systemd', 'user');
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(path.join(repo, 'bin'), { recursive: true });
+  mkdirSync(path.join(repo, 'deploy/lib'), { recursive: true });
+  mkdirSync(stubs);
 
-    mkdirSync(unitDir, { recursive: true });
-    writeFileSync(path.join(unitDir, 'cockpit-server.service'), '[Unit]\n');
+  // Скрипт ярлыка при любом действии подключает общий путь окна: копия нужна и для open.
+  for (const file of ['deploy/shortcut.sh', 'deploy/lib/desktop-app.sh']) {
+    copyFileSync(path.join(root, file), path.join(repo, file));
   }
 
-  const fake = (name, body) => {
-    const text = `#!/usr/bin/env bash\necho "${name} $*" >> "${log}"\n${body}\n`;
+  writeFileSync(path.join(repo, '.env'), 'COCKPIT_PORT=18149\n');
+  writeFileSync(path.join(repo, 'bin/cockpit'), `#!/bin/bash
+printf 'cockpit %s\\n' "$*" >> "$STUB_LOG"
+printf 'first-path %s\\n' "\${PATH%%:*}" >> "$STUB_LOG"
+printf '%s' "\${STUB_STDERR:-}" >&2
+exit "\${STUB_CODE:-0}"
+`, { mode: 0o755 });
 
-    writeFileSync(path.join(fakeBin, name), text, { mode: 0o755 });
-  };
-  fake('curl', [
-    `n=$(cat "${counter}" 2>/dev/null || echo 0)`,
-    `echo $((n + 1)) > "${counter}"`,
-    `[ "$n" -ge ${aliveAfter} ]`,
-  ].join('\n'));
-  fake('systemctl', '');
-  fake('xdg-open', '');
-  fake('notify-send', '');
+  for (const command of ['systemctl', 'journalctl', 'docker', 'xdg-open', 'notify-send', 'curl']) {
+    writeFileSync(path.join(stubs, command), `#!/bin/bash
+printf '${command} %s\\n' "$*" >> "$STUB_LOG"
+exit 0
+`, { mode: 0o755 });
+  }
 
   const env = {
     ...process.env,
     HOME: home,
-    XDG_CONFIG_HOME: path.join(home, '.config'),
-    PATH: `${fakeBin}:${process.env.PATH}`,
-    COCKPIT_LAUNCH_WAIT_SEC: '3',
+    COCKPIT_HOME: path.join(home, '.cockpit'),
+    XDG_CONFIG_HOME: path.join(home, 'config'),
+    XDG_DATA_HOME: path.join(home, 'data'),
+    PATH: `${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
+    STUB_LOG: log,
   };
 
-  // Порты живого сервера приехали бы наследованным окружением (оно старше .env) — тогда
-  // песочница целилась бы в настоящий кокпит.
   delete env.COCKPIT_PORT;
-  const run = () => spawnSync('bash', [path.join(repo, 'bin', 'launch')], {
-    encoding: 'utf8', env, timeout: 60_000,
-  });
-  const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : []);
+  delete env.COCKPIT_NODE_DIR;
 
-  return { home, repo, port, run, calls };
+  const guard = spawnSync('bash', ['-c',
+    'command -v systemctl journalctl docker xdg-open notify-send curl'], { env, encoding: 'utf8' });
+
+  assert.equal(guard.status, 0, guard.stderr);
+
+  for (const command of guard.stdout.trim().split('\n')) {
+    assert.ok(command.startsWith(stubs + '/'), command);
+  }
+
+  return {
+    home,
+    run: (overrides = {}) => spawnSync('bash', [path.join(repo, 'deploy/shortcut.sh'), 'open'], {
+      env: { ...env, ...overrides },
+      encoding: 'utf8',
+      timeout: 10000,
+    }),
+    calls: () => existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : [],
+  };
 }
 
-test('живой сервер: лаунчер просто открывает окно, ничего не запуская', (t) => {
+test('LN-1 ярлык вызывает cockpit open без уведомления при успехе', (t) => {
   const box = sandbox(t);
-
   const result = box.run();
 
   assert.equal(result.status, 0, result.stderr);
-  assert.ok(box.calls().includes(`xdg-open http://localhost:${box.port}/`), box.calls().join('\n'));
-  assert.ok(!box.calls().some((call) => call.startsWith('systemctl ')), 'живой сервер не трогаем');
-  assert.ok(!box.calls().some((call) => call.startsWith('bin/restart')));
+  assert.deepEqual(box.calls().filter((call) => call.startsWith('cockpit ')), ['cockpit open']);
+  assert.ok(!box.calls().some((call) => call.startsWith('notify-send ')));
 });
 
-test('спящий сервер с юнитом: systemctl --user start, затем окно', (t) => {
-  const box = sandbox(t, { aliveAfter: 2 });
-
-  const result = box.run();
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.ok(box.calls().includes('systemctl --user start cockpit-server.service'));
-  assert.ok(
-    !box.calls().some((call) => call.startsWith('bin/restart')),
-    'режимы не смешиваем: bin/restart против юнита поднял бы второй экземпляр',
-  );
-  assert.ok(box.calls().some((call) => call.startsWith('xdg-open ')));
-});
-
-test('без юнита — bin/restart; окно открывается только после ответа сервера', (t) => {
-  const box = sandbox(t, { unit: false, aliveAfter: 2 });
-
-  const result = box.run();
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.ok(box.calls().some((call) => call.startsWith('bin/restart')));
-  assert.ok(!box.calls().some((call) => call.startsWith('systemctl ')));
-  const opened = box.calls().findIndex((call) => call.startsWith('xdg-open '));
-  const probes = box.calls().slice(0, opened).filter((call) => call.startsWith('curl ')).length;
-  assert.ok(probes >= 3, `окно открыто после ${probes} опросов — ждать сервер обязательно`);
-});
-
-test('сервер не поднялся: код 1 и уведомление с путями журналов', (t) => {
-  const box = sandbox(t, { aliveAfter: 10_000 });
-
-  const result = box.run();
+test('LN-2 отказ передаёт stderr в уведомление', (t) => {
+  const box = sandbox(t);
+  const result = box.run({ STUB_CODE: '3', STUB_STDERR: 'Причина тестового отказа' });
 
   assert.equal(result.status, 1);
-  assert.ok(!box.calls().some((call) => call.startsWith('xdg-open ')), 'пустое окно не открываем');
-  const notice = box.calls().filter((call) => call.startsWith('notify-send ')).join('\n');
-  assert.match(notice, /journalctl/);
-  assert.match(result.stdout, /cockpit-server\.log/);
+  assert.ok(box.calls().some((call) =>
+    call.startsWith('notify-send ') && call.includes('Причина тестового отказа')));
 });
 
-test('порт берётся из .env своего корня — лаунчер и сервер открывают один адрес', (t) => {
-  const box = sandbox(t, { port: 18151 });
+test('LN-3 каталог явного Node первый в PATH', (t) => {
+  const box = sandbox(t);
+  const directory = path.join(box.home, 'node directory');
 
+  mkdirSync(directory);
+  writeFileSync(path.join(directory, 'node'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
+
+  const result = box.run({ COCKPIT_NODE_DIR: directory });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(box.calls().includes('first-path ' + directory));
+});
+
+test('LN-4 корень с пробелами и кириллицей', (t) => {
+  const box = sandbox(t, 'копия с пробелами');
   const result = box.run();
 
   assert.equal(result.status, 0, result.stderr);
-  assert.ok(box.calls().includes('xdg-open http://localhost:18151/'), box.calls().join('\n'));
+  assert.ok(box.calls().includes('cockpit open'));
 });

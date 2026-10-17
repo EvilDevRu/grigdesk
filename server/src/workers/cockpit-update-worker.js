@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, mkdtemp, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -403,23 +403,89 @@ async function publishBuild(root, source, job, runtime, publisher, progress) {
   };
 }
 
-async function restart(root, mode) {
+/**
+ * Просит приложение перезапустить опубликованный сервер через защищённый локальный API.
+ * Уже остановившийся сервер оставляет задание для подтверждения при следующем запуске.
+ */
+async function restartDesktop({ origin, tokenFile, jobId }) {
+  try {
+    const token = (await readFile(tokenFile, 'utf8')).trim();
+    const response = await fetch(`${origin}/api/system/update-restart`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cockpit-token': token,
+      },
+      body: JSON.stringify({ jobId }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    await response.body?.cancel();
+
+    if (response.status !== 202) {
+      throw new Error('restart_rejected');
+    }
+  } catch (cause) {
+    if (cause.code === 'ECONNREFUSED' || cause.cause?.code === 'ECONNREFUSED') {
+      return;
+    }
+
+    const error = new Error('Не удалось запросить перезапуск сервера после обновления.');
+
+    error.safeCode = 'restart_failed';
+
+    throw error;
+  }
+}
+
+/**
+ * Передаёт перезапуск текущему владельцу сервера после публикации сборки.
+ * Приложение использует API, прежние режимы сохраняют свои системные команды.
+ */
+async function restart(root, mode, desktopOptions) {
+  if (mode === 'desktop') {
+    await restartDesktop(desktopOptions);
+
+    return;
+  }
+
   if (mode === 'systemd') {
     await command('systemctl', ['--user', 'restart', 'cockpit-server.service'], { cwd: root, timeout: 60_000 },
       'restart_failed', 'systemd не смог перезапустить Cockpit.');
     return;
   }
-  await command('bash', [path.join(root, 'bin', 'restart')], { cwd: root, timeout: 60_000 },
+
+  await command('bash', [path.join(root, 'deploy', 'restart.sh')], { cwd: root, timeout: 60_000 },
     'restart_failed', 'Скрипт не смог перезапустить Cockpit.');
 }
 
+/**
+ * Проверяет аргументы и выполняет обновление под собственным межпроцессным замком.
+ * После публикации ошибка перезапуска записывается без отката установленного релиза.
+ */
 async function main() {
   const options = argsFromCli(process.argv.slice(2));
   const { root: rootDir, state: statePath, job: jobId, mode } = options;
+
   if (!path.isAbsolute(rootDir || '') || !path.isAbsolute(statePath || '')
-      || !/^[0-9a-f-]{36}$/i.test(jobId || '') || !['systemd', 'script'].includes(mode)) {
+      || !/^[0-9a-f-]{36}$/i.test(jobId || '') || !['systemd', 'script', 'desktop'].includes(mode)) {
     throw new Error('invalid_worker_arguments');
   }
+
+  if (mode === 'desktop') {
+    const origin = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/.exec(options.origin || '');
+
+    if (!origin || Number(origin[1]) > 65535 || !path.isAbsolute(options['token-file'] || '')) {
+      throw new Error('invalid_worker_arguments');
+    }
+  }
+
+  const workRoot = options['work-root'] || path.dirname(statePath);
+
+  if (!path.isAbsolute(workRoot)) {
+    throw new Error('invalid_worker_arguments');
+  }
+
   const jobLockPath = `${statePath}.job-lock`;
   const logPath = `${statePath}.log`;
   let workDir = null;
@@ -440,11 +506,22 @@ async function main() {
     // Незавершённая публикация прежнего job проверяется до долгой установки и сборки.
     await assertNoForeignPending(rootDir, jobId);
 
-    await ensureFreeSpace(rootDir);
+    await mkdir(workRoot, { recursive: true });
+    // Публикация — переименование из рабочей папки в дерево кода: другой диск дал бы EXDEV
+    // только после долгой сборки, поэтому проверяем заранее.
+    if ((await stat(workRoot)).dev !== (await stat(rootDir)).dev) {
+      const error = new Error('Рабочая папка обновления должна быть на одном диске с кодом.');
+
+      error.safeCode = 'work_root_other_disk';
+
+      throw error;
+    }
+
+    await ensureFreeSpace(workRoot);
     await ensureCheckout(rootDir, job, { requireMain: job.kind === 'update' });
     if (job.kind === 'update') releasePreparation = await prepareRelease(rootDir, job);
 
-    workDir = await mkdtemp(path.join(path.dirname(statePath), 'cockpit-update-work.'));
+    workDir = await mkdtemp(path.join(workRoot, 'cockpit-update-work.'));
     const source = await archiveSource(rootDir, job.targetSha, workDir);
 
     await assertReleaseNodeRuntime(source);
@@ -587,7 +664,11 @@ async function main() {
     }
 
     await setJob(statePath, jobId, { status: 'restarting', stage: 'restarting', backups });
-    await restart(rootDir, mode);
+    await restart(rootDir, mode, {
+      origin: options.origin,
+      tokenFile: options['token-file'],
+      jobId,
+    });
     await appendFile(logPath, `${new Date().toISOString()} ${jobId} restart-command-completed\n`, { mode: 0o600 });
     // Успех подтверждает только новый server process, увидев свой running SHA.
   } catch (error) {

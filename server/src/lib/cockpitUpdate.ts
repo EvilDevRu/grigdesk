@@ -1,9 +1,12 @@
+import { config as runtimeConfig } from '../config.ts';
+
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { ACTIVE_UPDATE_STATUSES } from '../../../shared/runtime/cockpitUpdateContracts.ts';
 import {
   CockpitReleaseError,
   defaultCommandRunner,
@@ -17,7 +20,7 @@ import type {
   UpdateJob,
 } from './cockpitRelease.ts';
 
-const ACTIVE = new Set(['queued', 'preparing', 'installing', 'building', 'testing', 'applying', 'restarting']);
+const ACTIVE = new Set<string>(ACTIVE_UPDATE_STATUSES);
 const WORKER_PATH = fileURLToPath(new URL('../workers/cockpit-update-worker.js', import.meta.url));
 
 function assertExpectedSha(value: unknown): void {
@@ -48,6 +51,9 @@ export interface CockpitUpdateManagerOptions {
   runner?: CommandRunner;
   spawnProcess?: typeof spawn;
   underSystemd?: () => boolean;
+  desktop?: () => boolean;
+  origin?: string;
+  cliTokenPath?: string;
 }
 
 export class CockpitUpdateManager {
@@ -63,6 +69,12 @@ export class CockpitUpdateManager {
 
   private readonly underSystemd: () => boolean;
 
+  private readonly desktop: () => boolean;
+
+  private readonly origin: string | undefined;
+
+  private readonly cliTokenPath: string | undefined;
+
   private readonly jobLockPath: string;
 
   constructor({
@@ -72,6 +84,9 @@ export class CockpitUpdateManager {
     runner = defaultCommandRunner,
     spawnProcess = spawn,
     underSystemd = () => !!process.env.INVOCATION_ID,
+    desktop = () => false,
+    origin,
+    cliTokenPath,
   }: CockpitUpdateManagerOptions) {
     this.releases = releases;
     this.rootDir = rootDir;
@@ -79,6 +94,9 @@ export class CockpitUpdateManager {
     this.runner = runner;
     this.spawnProcess = spawnProcess;
     this.underSystemd = underSystemd;
+    this.desktop = desktop;
+    this.origin = origin;
+    this.cliTokenPath = cliTokenPath;
     this.jobLockPath = `${statePath}.job-lock`;
   }
 
@@ -88,6 +106,16 @@ export class CockpitUpdateManager {
     // Первый запрос после возвращения API должен сам подтвердить новый процесс; нельзя
     // полагаться на то, что параллельно уже открыли GET /version.
     return (await this.releases.getStatus({ fresh: true })).job;
+  }
+
+  /**
+   * Сверяет запрос worker с сохранённым заданием перезапуска.
+   * Проверка не подтверждает новый сервер через fresh-статус релизов.
+   */
+  async isRestarting(jobId: string): Promise<boolean> {
+    const job = (await readPersistentState(this.statePath)).job;
+
+    return job?.id === jobId && job.status === 'restarting';
   }
 
   async recover(): Promise<void> {
@@ -213,21 +241,32 @@ export class CockpitUpdateManager {
     }
   }
 
+  /**
+   * Выбирает владельца перезапуска и запускает worker прежним способом каждого режима.
+   * Приложение получает только origin и путь токена, содержимое токена не входит в argv.
+   */
   async #launch(job: UpdateJob): Promise<void> {
-    const mode = this.underSystemd() ? 'systemd' : 'script';
+    const mode = this.desktop() ? 'desktop' : this.underSystemd() ? 'systemd' : 'script';
     const workerArgs = [
       WORKER_PATH,
       '--root', this.rootDir,
+      '--work-root', path.join(this.rootDir, '.state'),
       '--state', this.statePath,
       '--job', job.id,
       '--mode', mode,
     ];
+
+    if (mode === 'desktop') {
+      workerArgs.push('--origin', this.origin ?? '', '--token-file', this.cliTokenPath ?? '');
+    }
+
     if (mode === 'systemd') {
       const result = await this.runner('systemd-run', [
         '--user', '--collect', '--quiet',
         '--unit=cockpit-update-worker',
         '--property=Type=exec',
         `--working-directory=${this.rootDir}`,
+        `--setenv=COCKPIT_HOME=${runtimeConfig.dataHome}`,
         `--setenv=PATH=${process.env.PATH || ''}`,
         process.execPath, ...workerArgs,
       ], { cwd: this.rootDir, timeout: 15_000, maxBuffer: 256 * 1024 });

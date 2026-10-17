@@ -1,17 +1,19 @@
 // Живая проверка режима GLM до допуска (G12). Запускает человек, когда выбран режим, ключ
 // режима лежит в окружении службы, а для coding-plan подтверждено право использовать подписку.
 // Скрипт не меняет GLM_ADMISSION, не читает и не печатает ключ, ограничивает число ходов
-// сценарием и пишет очищенный отчёт в .state/artifacts/glm/G12/.
+// сценарием и пишет очищенный отчёт в glm/G12/ папки артефактов.
 //
 // Запуск: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan --confirm-live
-// Корневой .env скрипт читает сам и ставит выше унаследованного окружения: окно ключей пишет в .env,
+// Файл .env папки данных скрипт читает сам и ставит выше унаследованного окружения: окно ключей пишет в .env,
 // а оболочка из чата держит значения со старта сервера, которые `node --env-file` не перекрывает.
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { artifactsPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import { config as serviceConfig } from '../src/config.ts';
 import { readEnvFile } from '../src/lib/envFile.ts';
 import { createGlmAdapter } from '../src/lib/executors/glm.ts';
@@ -23,7 +25,6 @@ import chatModule from '../src/modules/chat/index.ts';
 
 const requireServer = createRequire(new URL('../package.json', import.meta.url));
 const Fastify = requireServer('fastify');
-const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Потолок ходов сценария: живая проверка не должна расходовать квоту сверх нужного.
 export const GLM_SMOKE_MAX_TURNS = 8;
@@ -255,14 +256,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  const reportDir = path.join(repositoryRoot, '.state/artifacts/glm/G12');
+  const reportDir = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G12');
 
   await fs.mkdir(reportDir, { recursive: true });
 
   const work = await fs.mkdtemp(path.join(reportDir, 'smoke-'));
 
   try {
-    const fileEnv = await readEnvFile(path.join(repositoryRoot, '.env'));
+    const fileEnv = await readEnvFile(envFilePath({ env: process.env, home: os.homedir() }));
     const report = await runGlmLiveSmoke({
       mode,
       env: {
@@ -276,7 +277,7 @@ async function main(): Promise<void> {
     const file = path.join(reportDir, `live-smoke-${mode}-${Date.now()}.json`);
 
     await fs.writeFile(file, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-    process.stdout.write(`${report.ok ? 'OK' : 'FAIL'} ${path.relative(repositoryRoot, file)}\n`);
+    process.stdout.write(`${report.ok ? 'OK' : 'FAIL'} ${file}\n`);
     process.exitCode = report.ok ? 0 : 1;
   } finally {
     await fs.rm(work, { recursive: true, force: true });

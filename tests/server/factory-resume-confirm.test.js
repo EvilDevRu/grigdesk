@@ -102,6 +102,69 @@ test('нечитаемый реестр в окне подтверждения �
   assert.equal(res.ok, true);
 });
 
+// Lifecycle полностью проверяется до публикации identity: 20 секунд могло не хватить.
+// Часы зависят от опросов юнита, поэтому тест не ждёт реальные две минуты.
+test('окно по умолчанию дожидается identity на 60-й и 125-й секундах', async (t) => {
+  let clockMs = 0;
+
+  t.mock.method(Date, 'now', () => clockMs);
+
+  for (const readyAt of [60_000, 125_000]) {
+    clockMs = 0;
+
+    const identityReads = [];
+    const res = await confirmRouteResume({
+      attempt: ATTEMPT,
+      identity: async () => {
+        identityReads.push(clockMs);
+
+        return { attempt: ATTEMPT, alive: clockMs >= readyAt };
+      },
+      unitAlive: async () => {
+        clockMs += 1000;
+
+        return true;
+      },
+      reason: async () => '',
+      stepMs: 1,
+    });
+
+    assert.deepEqual(res, { ok: true, outcome: 'running' }, `identity готова на ${readyAt} мс`);
+    assert.equal(identityReads[0], 6000, 'identity читается после окна быстрых отказов');
+  }
+});
+
+// Второй deadline создаётся после settle; точное равенство проверяет только fake clock.
+// Асинхронные callbacks в production могут добавить время к номинальной сумме окон.
+test('неопределённая identity исчерпывает 6 плюс 120 секунд по умолчанию', async (t) => {
+  let clockMs = 0;
+  const identityReads = [];
+
+  t.mock.method(Date, 'now', () => clockMs);
+
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => {
+      identityReads.push(clockMs);
+
+      return { attempt: ATTEMPT, alive: false };
+    },
+    unitAlive: async () => {
+      clockMs += 1000;
+
+      return true;
+    },
+    reason: async () => '',
+    stepMs: 1,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'unconfirmed');
+  assert.equal(res.message, 'оркестратор не подтвердил запуск попытки');
+  assert.equal(clockMs, 126_000);
+  assert.equal(identityReads[0], 6000, 'identity читается после окна быстрых отказов');
+});
+
 test('чужая попытка отвечает сразу, не выбирая окно подтверждения', async () => {
   // Ждать тут нечего: реестр назвал ДРУГУЮ попытку, и от времени это не изменится.
   const started = Date.now();

@@ -29,7 +29,7 @@
   второго пути к вендору не появляется, а без окон походов впятеро меньше, чем с ними.
   Хук необязателен: без него ряды копятся лишь при открытой вкладке. Шаг задаёт
   настройка плагина (умолчание — опция модуля `sampleTickMs`). Ряды и журнал сбросов лежат в
-  `.state/usage-forecast.json`
+  `state/usage-forecast.json` папки данных
   (путь — `config.usageForecastPath`, env `COCKPIT_USAGE_FORECAST_PATH`); замеры
   держатся двое суток, журнал — 200 последних сбросов.
 
@@ -77,14 +77,14 @@
 
 У исполнителя без полос-окон (DeepSeek) блока нет: прогноз предоплаченного
 счёта DeepSeek его адаптер отдаёт сам, ресурсом «Прогноз» (см. [DeepSeek](deepseek.md)).
-Контракт ответа — `shared/usageForecastContracts.ts`; веб проверяет и запрос, и тело SSE
+Контракт ответа — `shared/chat/usageForecastContracts.ts`; веб проверяет и запрос, и тело SSE
 `usage-forecast` одним декодером.
 
 ## Как снять
 
 Выключить — тумблером плагина. Удалить из кода: запись `usage-forecast` в `SYSTEM`
 (`server/src/lib/pluginsRegistry.ts`), `server/src/modules/usage-forecast/`,
-`server/src/lib/usage-forecast/`, `shared/usageForecastContracts.ts`,
+`server/src/lib/usage-forecast/`, `shared/chat/usageForecastContracts.ts`,
 `web/src/plugins/usage-forecast/`, `web/src/stores/usageForecast.ts`,
 `web/src/actions/usageForecast/`, `web/src/features/providers/ProviderUsageForecast.vue`,
 `web/src/features/providers/usageForecastText.ts`, тесты `tests/server/usage-forecast.test.js`

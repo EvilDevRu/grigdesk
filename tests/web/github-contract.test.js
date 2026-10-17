@@ -7,7 +7,7 @@ import {
   parseGitHubPolicy,
   parseGitHubRulesSaved,
   parseGitHubStatus,
-} from '../../shared/githubContracts.ts';
+} from '../../shared/inbox/githubContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { githubApi, githubPluginDisabled } from '../../web/src/shared/githubApi.ts';
 

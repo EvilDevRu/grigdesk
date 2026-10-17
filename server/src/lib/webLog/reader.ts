@@ -2,9 +2,9 @@ import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { projectWebLogEntry } from '../../../../shared/webLogContracts.ts';
+import { projectWebLogEntry } from '../../../../shared/web-log/webLogContracts.ts';
 
-import type { WebLogEntry, WebLogKey, WebLogLevel } from '../../../../shared/webLogContracts.ts';
+import type { WebLogEntry, WebLogKey, WebLogLevel } from '../../../../shared/web-log/webLogContracts.ts';
 
 import { validUtcDay } from './store.ts';
 

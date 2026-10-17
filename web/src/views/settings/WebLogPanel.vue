@@ -44,7 +44,7 @@ import { api } from '../../shared/apiClient.ts';
 import { getWebLogRuntime } from '../../shared/webLogRuntime.ts';
 import { useWebLogStore } from '../../stores/webLog.ts';
 
-import type { WebLogKey } from '../../../../shared/webLogContracts.ts';
+import type { WebLogKey } from '../../../../shared/web-log/webLogContracts.ts';
 
 const status = useWebLogStore();
 const comment = ref('');

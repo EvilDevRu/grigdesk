@@ -60,7 +60,11 @@ async function fixture(t) {
   await write('web/build.js', 'import fs from "node:fs/promises";\n'
     + 'await fs.mkdir("dist", {recursive:true});\n'
     + 'await fs.copyFile("../VERSION", "dist/index.html");\n');
+  // Замороженный legacy worker перезапускает через bin/restart, текущий — через deploy/restart.sh.
+  // В настоящих релизах bin/restart нет: старый обновлятель в ручном режиме после перехода
+  // перезапускают руками. Заглушка здесь держит тест на логике перехода, а не на перезапуске.
   await write('bin/restart', '#!/bin/sh\nexit 0\n');
+  await write('deploy/restart.sh', '#!/bin/sh\nexit 0\n');
   await write('bin/cockpit', '#!/bin/sh\nmkdir -p server/.state\nprintf "%s\\n" "$1" '
     + '>>server/.state/prepared\n');
   await write('server/src/lib/cockpitRelease.ts', await fs.readFile(
@@ -301,7 +305,10 @@ test('неизменённый legacy updater требует промежуто�
     '7559f158ba3c39cb9c32c26aa29e23944a00a911001c5fb9254be8599f9b3b71');
 
   const f = await fixture(t);
-  const oldService = new CockpitReleaseService({ rootDir: f.root });
+  const oldService = new CockpitReleaseService({
+    rootDir: f.root,
+    statePath: path.join(f.root, 'server/.state/cockpit-update.json'),
+  });
   const latest = await oldService.checkRemote();
 
   assert.equal(latest.latest.tag, 'v0.3.0');
@@ -375,7 +382,7 @@ test('неизменённая сборка DeepSeek переиспользуе�
 
 test('точная процедура промежуточного релиза сохраняет dirty checkout и проверяет tag/SHA', async (t) => {
   const f = await fixture(t);
-  const script = path.join(ROOT, 'bin/upgrade-publish-contract');
+  const script = path.join(ROOT, 'tools/upgrade-publish-contract');
   const run = (sha = f.intermediateSha) => exec('bash', [script,
     '--tag', 'v0.2.0', '--sha', sha], {
     cwd: f.root,

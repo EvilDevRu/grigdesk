@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeCatalogInput } from '../fixtures/routes-editor.mjs';
-import { projectRouteMachine } from '../../shared/routeProjection.ts';
+import { projectRouteMachine } from '../../shared/pipeline/routeProjection.ts';
 
 test('RE-A3-01: линия skipped строится по переходу, а не по соседству sequence', () => {
   const machine = makeCatalogInput().routes.quick.route;

@@ -4,7 +4,11 @@
 // а здесь речь про образы на 163 ГБ, и «167000.0 МБ» человек не прочитает. Поэтому у
 // докера своя шкала, до терабайт, и она живёт рядом со своими экранами.
 
-import type { DockerContainer, DockerImage, DockerPort } from '../../../../shared/dockerContracts';
+import type {
+  DockerContainer,
+  DockerImage,
+  DockerPort,
+} from '../../../../shared/plugins/docker/dockerContracts';
 
 const UNITS = [
   { limit: 1024 ** 4, suffix: 'ТБ' },

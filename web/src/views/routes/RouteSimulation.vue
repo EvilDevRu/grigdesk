@@ -91,8 +91,8 @@ import { computed, ref, watch } from 'vue';
 
 import {
   ROUTES_EDITOR_LIMITS, ROUTES_LOOP_DEFAULT_MAX_ROUNDS, routeSimulationStepLimit,
-} from '../../../../shared/routesEditorContracts.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteSimulationObservation, RouteSimulationState } from '../../stores/routes.ts';
 import { UiButton, UiCheckbox, UiNumberInput, UiSelect } from '../../ui';
 import type { UiNumberValue } from '../../ui';

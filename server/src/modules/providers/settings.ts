@@ -8,7 +8,7 @@ import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import {
   decodeProviderSettingsOverrideRequest,
   ProviderSettingsContractError,
-} from '../../../../shared/providerSettingsContracts.ts';
+} from '../../../../shared/chat/providerSettingsContracts.ts';
 import { ProviderSettingsCatalogCache } from '../../lib/executorSettings/catalog.ts';
 import { nativeSettingsContext } from '../../lib/executorSettings/context.ts';
 import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';

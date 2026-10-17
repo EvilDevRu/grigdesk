@@ -4,7 +4,7 @@ Android-приложение обращается к Кокпиту через �
 байты. Основной HTTP-сервер и отдельный мобильный TLS-вход остаются на loopback.
 
 Читай перед правкой: `mobile/`, `relay/`, `server/src/lib/mobile/`,
-`server/src/modules/mobile/`, `tools/mobile-phone/`, `bin/mobile`.
+`server/src/modules/mobile/`, `tools/mobile-phone/`, `tools/mobile`.
 
 ## Контракты продукта
 
@@ -16,9 +16,13 @@ Android-приложение обращается к Кокпиту через �
 
 ## Устройство
 
+- [Привязка в настройках: карточки посредников, телефоны и диалог QR](pairing-settings.md)
 - [Развёртывание и перенос посредника](relay-deploy.md)
+- [Посредник одним файлом: сборка и выпуск](relay-binary.md)
 - [Ограниченный журнал контейнера и отключение compression](relay-log.md)
 - [Сборка Android, версии и ключ подписи](android-build.md)
+- [Локальное окружение Android: FEX, Docker, Termux и Linux-VM](android-runtime.md)
+- [Упаковка Linux в APK: rootfs, PRoot и target SDK в DroidDeck](android-linux-packaging.md)
 - [Gradle Wrapper в git: зачем хранится, сверка jar и `cap migrate`](gradle-wrapper.md)
 - [Проверка release-варианта без создания ключа](release-check.md)
 - [Нативная сессия, сертификаты и граница WebView](native-security.md)

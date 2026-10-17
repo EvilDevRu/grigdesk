@@ -1,3 +1,5 @@
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseInboxActivation,
@@ -5,8 +7,8 @@ import {
   parseInboxDecisionResult,
   parseInboxList,
   parseInboxSummary,
-} from '../../../shared/inboxContracts.ts';
-import type { InboxDecisionInput } from '../../../shared/inboxContracts.ts';
+} from '../../../shared/inbox/inboxContracts.ts';
+import type { InboxDecisionInput } from '../../../shared/inbox/inboxContracts.ts';
 
 function itemPath(ref: string, action: string): string {
   return `/api/inbox/items/${encodeURIComponent(ref)}/${action}`;
@@ -49,18 +51,14 @@ export const inboxApi = {
   },
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Выключенный плагин отвечает своим кодом под 404. Раздел различает его с поломкой:
  * это штатное состояние, и показывать вместо него красную ошибку нельзя.
  */
 export function inboxPluginDisabled(error: unknown): boolean {
-  const failure = asRecord(error);
+  const failure = objectOrEmpty(error);
 
-  return failure.status === 404 && asRecord(failure.data).error === 'plugin_disabled';
+  return failure.status === 404 && objectOrEmpty(failure.data).error === 'plugin_disabled';
 }
 
 /**
@@ -69,7 +67,7 @@ export function inboxPluginDisabled(error: unknown): boolean {
  * красный текст вместо кода отправил бы человека нажимать наугад.
  */
 export function inboxErrorCode(error: unknown): string {
-  const code = asRecord(asRecord(error).data).error;
+  const code = objectOrEmpty(objectOrEmpty(error).data).error;
 
   return typeof code === 'string' ? code : '';
 }
@@ -79,15 +77,5 @@ export function inboxErrorCode(error: unknown): string {
  * видел их в самом канале и может пересказать суть, а для этого их надо показать.
  */
 export function inboxBlockedAttachments(error: unknown) {
-  return parseInboxBlockedAttachments(asRecord(asRecord(error).data).attachments);
-}
-
-/**
- * Текст отказа для человека. Сервер входящих присылает готовое сообщение вместе с
- * машинным кодом, а обрыв сети приходит без тела — тогда остаётся текст операции.
- */
-export function inboxErrorMessage(error: unknown, fallback: string): string {
-  const message = asRecord(error).message;
-
-  return typeof message === 'string' && message ? message : fallback;
+  return parseInboxBlockedAttachments(objectOrEmpty(objectOrEmpty(error).data).attachments);
 }

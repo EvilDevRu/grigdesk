@@ -161,3 +161,14 @@ test('настройка клавиш открыта в разделе устр�
     assert.match(text, /tools\/catalog\.ts/);
   }
 });
+
+
+test('SW-D04 Ctrl+Alt+S занято настройками', () => {
+  installStorage({ [HOTKEYS_KEY]: JSON.stringify({ terminal: 'Ctrl+Alt+KeyS' }) });
+
+  const hotkeys = useHotkeysStore();
+
+  assert.match(comboIssue('Ctrl+Alt+KeyS'), /настройки/);
+  assert.equal(hotkeys.assign('terminal', 'Ctrl+Alt+KeyS').ok, false);
+  assert.equal(hotkeys.comboOf('terminal'), DEFAULT_HOTKEYS.terminal);
+});

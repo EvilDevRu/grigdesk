@@ -4,6 +4,8 @@
 // archive. Она входит и в ключ, и в localBundleId, поэтому custom key никогда
 // не протянет связку через период, когда участие канала было выключено.
 
+import { lexical } from '../../../../shared/lib/text.ts';
+
 import { validateInboxMessage } from './message.ts';
 import type { InboxMessageRecord } from './message.ts';
 import { assertAccountRef, assertChannel, assertNativeSegment } from './identity.ts';
@@ -173,7 +175,7 @@ function assertEntry(
 }
 
 const activityAt = (message: InboxMessageRecord) => message.editedAt ?? message.occurredAt;
-const lexical = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 const identityOf = (entry: InboxBundleEntry) => canonicalKey([
   entry.message.channel,
   entry.message.accountRef,

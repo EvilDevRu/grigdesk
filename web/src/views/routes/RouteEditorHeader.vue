@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiButton } from '../../ui';
 
 defineProps<{

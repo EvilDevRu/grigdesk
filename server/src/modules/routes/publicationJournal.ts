@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { parseRoutePublication } from '../../../../shared/routesEditorContracts.ts';
-import type { RoutePublication } from '../../../../shared/routesEditorContracts.ts';
+import { parseRoutePublication } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RoutePublication } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
 import { assertProfileId } from './schema.ts';

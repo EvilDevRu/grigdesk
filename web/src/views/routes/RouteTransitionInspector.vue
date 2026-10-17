@@ -75,8 +75,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { RouteTransitionDoc } from '../../../../shared/routeDefinition.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteTransitionDoc } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteCommandScope } from './routeCommands.ts';
 import { setEscalation, setFailureRoutes, setTransition } from './routeCommands.ts';
 import { UiButton, UiSelect } from '../../ui';

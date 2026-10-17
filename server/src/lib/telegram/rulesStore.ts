@@ -31,6 +31,9 @@ import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 
+import { errorText } from '../../../../shared/lib/errors.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 import {
   atomicWriteTelegramJson,
@@ -75,7 +78,6 @@ interface StrictDirectory {
 type LogPort = { warn?: (details: unknown, message: string) => void };
 
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const KINDS = ['bug', 'wish'];
 const DRAFTS = ['manual', 'auto'];
@@ -235,14 +237,8 @@ function codedError(code: string, message: string, statusCode: number): Error {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactObject(value: unknown, keys: string[]): boolean {
-  if (!isPlainObject(value)) return false;
+  if (!isPlainRecord(value)) return false;
 
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -252,7 +248,7 @@ function exactObject(value: unknown, keys: string[]): boolean {
 
 function legacyRulesDocument(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
-  if (isPlainObject(data) && !Object.hasOwn(data, 'schemaVersion') && Array.isArray(data.rules)) {
+  if (isPlainRecord(data) && !Object.hasOwn(data, 'schemaVersion') && Array.isArray(data.rules)) {
     return data.rules as unknown[];
   }
   throw new Error('Telegram rules не соответствуют legacy либо owner-bound schema.');
@@ -295,10 +291,10 @@ function canonicalSubset(raw: unknown, normalized: unknown): boolean {
       && raw.length === normalized.length
       && raw.every((item, index) => canonicalSubset(item, (normalized as unknown[])[index]));
   }
-  if (isPlainObject(raw)) {
+  if (isPlainRecord(raw)) {
     const other = normalized as Payload;
 
-    return isPlainObject(normalized)
+    return isPlainRecord(normalized)
       && Object.keys(raw).every((key) => (
         Object.hasOwn(other, key) && canonicalSubset(raw[key], other[key])
       ));
@@ -850,7 +846,7 @@ export class TelegramRulesStore {
         throw new Error('allowlist изменился во время чтения');
       }
       const data = JSON.parse(bytes.toString('utf8'));
-      const ownerBound = isPlainObject(data) && Object.hasOwn(data, 'schemaVersion');
+      const ownerBound = isPlainRecord(data) && Object.hasOwn(data, 'schemaVersion');
       const rawRules = ownerBound
         ? ownerBoundRulesDocument(data, { accountRef: this.accountRef, botId: this.botId })
         : legacyRulesDocument(data);

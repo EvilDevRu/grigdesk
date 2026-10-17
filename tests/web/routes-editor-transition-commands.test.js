@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeAgentNode, makeDraft } from '../fixtures/routes-editor.mjs';
-import { projectRouteMachine } from '../../shared/routeProjection.ts';
+import { projectRouteMachine } from '../../shared/pipeline/routeProjection.ts';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';

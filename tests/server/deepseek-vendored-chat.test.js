@@ -11,6 +11,7 @@ import { runDeepSeekWebTurn } from '../../server/src/lib/deepseek/webRuntime.ts'
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { prepareChatNativeSettings } from '../../server/src/lib/executorSettings/launch.ts';
 import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from '../helpers/deepseekLoopback.mts';
 
@@ -24,7 +25,8 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
 async function fixture(t, mockOptions, { outsideTemp = false } = {}) {
   const artifact = await ensureTestDeepSeekArtifact();
   const parent = outsideTemp
-    ? path.join(REPO_ROOT, '.state/artifacts/deepseek-vendoring/fs-fixtures') : os.tmpdir();
+    ? path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'deepseek-vendoring/fs-fixtures')
+    : os.tmpdir();
 
   await fs.mkdir(parent, { recursive: true });
 

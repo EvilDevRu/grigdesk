@@ -3,7 +3,7 @@ import type {
   ShowcaseOverview,
   ShowcaseProject,
   ShowcaseTarget,
-} from '../../shared/showcaseContracts';
+} from '../../shared/plugins/showcase/showcaseContracts';
 import {
   cancelShowcaseJob,
   createShowcaseProject,

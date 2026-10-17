@@ -1,13 +1,15 @@
 // Состав полей задаёт схема источника, а право записи — проверенный канал.
 // Нормализатор не знает имён исполнителей и их нативных ключей.
 
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import type {
   JsonValue,
   SettingsConstraints,
   SettingsFieldKind,
   SettingsValueSlot,
-} from '../../../../shared/providerSettingsContracts.ts';
+} from '../../../../shared/chat/providerSettingsContracts.ts';
 import type { NativeSettingsOwnership, NativeSettingsWriteChannel, NormalizedSettingNode } from './types.ts';
 import { canonicalSettingsJson } from './fingerprint.ts';
 
@@ -56,12 +58,6 @@ const OBJECT_KEYS = new Set([
 ]);
 const ARRAY_KEYS = new Set([...SCALAR_KEYS, 'items']);
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 /**
  * Раскрываются только локальные ссылки; чужой URL никогда не вызывает fetch.
  * Цикл и неоднозначное сочетание ограничений закрывают отдельную ветку.
@@ -71,7 +67,7 @@ function resolveSchema(
   root: Record<string, unknown>,
   visited = new Set<string>(),
 ): Record<string, unknown> {
-  const schema = asRecord(raw);
+  const schema = recordOrEmpty(raw);
 
   if (visited.size > SETTINGS_SCHEMA_LIMITS.depth) {
     return {};
@@ -94,7 +90,7 @@ function resolveSchema(
   let target: unknown = root;
 
   for (const segment of segments) {
-    const current = asRecord(target);
+    const current = recordOrEmpty(target);
 
     if (!Object.hasOwn(current, segment) || ['__proto__', 'prototype', 'constructor'].includes(segment)) {
       return {};
@@ -338,7 +334,7 @@ export function normalizeJsonSchema(schema: unknown, options: JsonSchemaOptions)
     throw new Error('Схема настроек превышает допустимый объём');
   }
 
-  const root = asRecord(schema);
+  const root = recordOrEmpty(schema);
   const normalized = normalizeNode(root, root, options.path, options, options.base, [], false, false, {
     remaining: 5000,
   });
@@ -441,8 +437,8 @@ function normalizeNode(
   };
 
   if (shape.kind === 'object' || schema.properties) {
-    const properties = { ...asRecord(schema.properties) };
-    const baseObject = asRecord(base);
+    const properties = { ...recordOrEmpty(schema.properties) };
+    const baseObject = recordOrEmpty(base);
 
     if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
       for (const key of Object.keys(baseObject)) {

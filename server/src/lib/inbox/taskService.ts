@@ -5,6 +5,9 @@
 // одно сообщение, а второй вызов B24 всё равно обязан увидеть decision первого
 // ДО внешнего side effect.
 
+import { lexical } from '../../../../shared/lib/text.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import {
   buildInboxDraft,
   INBOX_DRAFT_LIMITS,
@@ -132,7 +135,6 @@ const MAX_OPERATOR_NOTE = 4_000;
 const MAX_UNANALYZED_LINES = 12;
 const SAFE_REASON_RE = /^[a-z0-9_]{1,80}$/u;
 const ACTION_OPTION_KEYS = new Set(['by', 'note', 'requireAllAttachments']);
-const lexical = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 export class InboxTaskServiceError extends Error {
   code: string;
@@ -170,19 +172,13 @@ const fail: (
 
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
 
-const isPlainObject = (value: unknown): value is Payload => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-};
-
 function exactBody(
   source: unknown,
   allowed: Set<string>,
   required: string[],
   where: string,
 ): void {
-  if (!isPlainObject(source)) fail('invalid_request', `${where}: ожидался JSON object.`);
+  if (!isPlainRecord(source)) fail('invalid_request', `${where}: ожидался JSON object.`);
 
   const body = source as Payload;
   const keys = Object.keys(body);
@@ -241,7 +237,7 @@ function unanalyzedEntries(
       reason: value?.reason,
     }))
     : (Array.isArray(skipped) ? skipped : []).map((value) => {
-      const attachment = (isPlainObject(value?.attachment)
+      const attachment = (isPlainRecord(value?.attachment)
         ? value.attachment
         : (value || {})) as Payload;
 
@@ -312,7 +308,7 @@ function actionOptions(value: unknown, { attachments = false }: {
   attachments?: boolean;
 } = {}): ActionOptions {
   if (value === undefined) return { by: 'human', note: '', requireAllAttachments: false };
-  if (!isPlainObject(value)
+  if (!isPlainRecord(value)
       || Object.keys(value).some((key) => !ACTION_OPTION_KEYS.has(key))) {
     fail('invalid_service_call', 'Internal action options не совпадают с контрактом.', 500);
   }
@@ -422,7 +418,7 @@ function attachmentGroup(file: Payload | InboxDraftAttachment): string {
 }
 
 export function inboxAttachmentPolicy(raw: unknown): { photos: boolean; videos: boolean } {
-  const value = isPlainObject(raw) ? raw : {};
+  const value = isPlainRecord(raw) ? raw : {};
   // Умолчания повторяют манифест плагина: фотографии полезны в задаче, видео
   // раздувает портал и уже пересказано транскриптом.
   return {
@@ -445,7 +441,7 @@ export function selectAttachableFiles(files: unknown, policy: unknown, { by = 'h
 }
 
 function materialized(value: unknown): PreparedAttachments {
-  if (!isPlainObject(value)
+  if (!isPlainRecord(value)
       || !Array.isArray(value.files)
       || !Array.isArray(value.skipped)) {
     fail('channel_materialize_failed', 'Канал вернул неверный результат подготовки вложений.', 503);
@@ -466,8 +462,8 @@ function boundedPublicText(value: unknown): string {
 
 function publicSkipped(entries: SkippedAttachment[]) {
   return entries.map((entry) => {
-    const envelope = isPlainObject(entry) ? entry : {};
-    const attachment = isPlainObject(envelope.attachment) ? envelope.attachment : envelope;
+    const envelope = isPlainRecord(entry) ? entry : {};
+    const attachment = isPlainRecord(envelope.attachment) ? envelope.attachment : envelope;
     const rawReason = typeof envelope.reason === 'string' ? envelope.reason : '';
     return {
       kind: boundedPublicText(attachment.kind),
@@ -499,7 +495,7 @@ function notificationFailureReason(err: unknown): string {
 }
 
 function publicNotification(outcome: unknown, fallbackReason = '') {
-  const value = isPlainObject(outcome) ? outcome : {};
+  const value = isPlainRecord(outcome) ? outcome : {};
   const enabled = value.enabled !== false;
   const sent = value.sent === true;
   const reason = typeof value.reason === 'string' && SAFE_REASON_RE.test(value.reason)
@@ -517,7 +513,7 @@ function safeTaskId(value: unknown): string | null {
 }
 
 function validDecisionResult(value: unknown): boolean {
-  return isPlainObject(value)
+  return isPlainRecord(value)
     && typeof value.decisionId === 'string'
     && value.decisionId.length > 0
     && Number.isSafeInteger(value.version)

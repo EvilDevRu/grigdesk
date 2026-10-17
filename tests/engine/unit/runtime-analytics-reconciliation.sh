@@ -154,8 +154,11 @@ runtime_lifecycle_set_context_v2 \
 crashed_start=$(runtime_lifecycle_session_begin_v2 resume os_11111111111111111111111111111111)
 assert_rc 0 "$?" "session used by crash fixture starts durably"
 open_session="$TEST_ROOT/open-session.json"
-runtime_lifecycle_previous_open_session_v2 "$task" "$attempt" "$open_session"
+session_stderr="$TEST_ROOT/open-session.stderr"
+runtime_lifecycle_previous_open_session_v2 "$task" "$attempt" "$open_session" 2>"$session_stderr"
 assert_rc 0 "$?" "unclosed prior orchestrator session is detected"
+[[ ! -s "$session_stderr" ]]
+assert_rc 0 "$?" "успешный поиск открытой сессии не пишет в stderr"
 assert_eq os_22222222222222222222222222222222 \
   "$(json_file_value "$open_session" orchestratorSessionId)" \
   "crash detector returns the exact open session"
@@ -169,8 +172,11 @@ runtime_lifecycle_attempt_interrupted_v2 crash_detected "$crashed_hash" >/dev/nu
 assert_rc 0 "$?" "new writer records crash_detected against prior start hash"
 runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
 assert_rc 0 "$?" "replacement session closes normally"
-runtime_lifecycle_previous_open_session_v2 "$task" "$attempt" "$open_session" >/dev/null 2>&1
+runtime_lifecycle_previous_open_session_v2 "$task" "$attempt" "$open_session" \
+  >/dev/null 2>"$session_stderr"
 assert_rc 3 "$?" "crash marker prevents rediscovering the old open session forever"
+[[ ! -s "$session_stderr" ]]
+assert_rc 0 "$?" "штатное отсутствие открытой сессии не пишет в stderr"
 assert_eq 1 "$(lifecycle_count attempt_interrupted)" \
   "exact crashed session receives one interruption marker"
 
@@ -334,4 +340,33 @@ assert_eq 3 "$(lifecycle_count node_visit_finished)" \
   "каждый визит закрыт ровно один раз"
 
 runtime_lifecycle_session_finish_v2 succeeded normal '' >/dev/null
+
+# Ошибка самого find-open-session должна остаться видна после успешного чтения ledger.
+# Подмена только аналитического помощника отличает этот путь от отказа trusted reader.
+(
+  runtime_analytics_python_v2() {
+    printf '%s\n' 'ошибка поиска открытой сессии в тестовой фикстуре' >&2
+    return 78
+  }
+
+  runtime_lifecycle_previous_open_session_v2 "$task" "$attempt" "$open_session" \
+    >/dev/null 2>"$session_stderr"
+)
+assert_rc 78 "$?" "ошибка find-open-session сохраняет свой код"
+assert_contains "$(cat "$session_stderr")" 'ошибка поиска открытой сессии' \
+  "диагностика ошибки find-open-session остаётся в stderr"
+
+# Повреждение настоящего сегмента не должно превратиться в штатное отсутствие сессии.
+# Последний отрицательный сценарий использует только ledger своей временной попытки.
+lifecycle_dir="$(attempt_state_v2_task_root "$task")/attempts/$attempt/lifecycle"
+active_segment=$(json_file_value "$lifecycle_dir/manifest.json" activeSegment)
+printf '%s\n' '{bad-json}' >>"$lifecycle_dir/segments/$active_segment"
+runtime_lifecycle_previous_open_session_v2 "$task" "$attempt" "$open_session" \
+  >/dev/null 2>"$session_stderr"
+corrupt_rc=$?
+[[ "$corrupt_rc" -ne 0 && "$corrupt_rc" -ne 3 ]]
+assert_rc 0 "$?" "повреждённый журнал возвращает ошибку, отличную от отсутствия сессии"
+[[ -s "$session_stderr" ]]
+assert_rc 0 "$?" "диагностика повреждённого журнала остаётся в stderr"
+
 finish_tests

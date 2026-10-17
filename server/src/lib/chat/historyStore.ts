@@ -9,14 +9,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { normalizeChatWorkdir, normalizeRecentWorkdirs, sameChatWorkdir }
-  from '../../../../shared/chatWorkdir.ts';
+  from '../../../../shared/chat/chatWorkdir.ts';
 import type { WorkdirState } from './workdirTransition.ts';
 
 import { mergeChat } from './mergeChat.ts';
 import type { ChatRecord } from './mergeChat.ts';
 import { messageKey } from './messageIdentity.ts';
 import { historyStepReuseAck, restoreHistorySteps } from './historyStepReuse.ts';
-import type { HistoryStepReuseAck } from '../../../../shared/chatHistoryStepReuse.ts';
+import type { HistoryStepReuseAck } from '../../../../shared/chat/chatHistoryStepReuse.ts';
 import type { ModelRegistry } from './modelRef.ts';
 import {
   CHAT_SCHEMA,

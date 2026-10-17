@@ -1,13 +1,12 @@
 // Единственная точка, где локальный файловый href превращается в web-route Cockpit.
 // Сервер всё равно заново проверяет тип, realpath и разрешённый корень: эта функция —
 // удобство навигации, а не граница безопасности.
+
+import { decodeUriComponentOrOriginal } from '../../../../shared/lib/text.ts';
+
 const DOCUMENT_EXT = /\.(?:md|markdown|txt)$/i;
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp)$/i;
 const LINE_SUFFIX = /^(.*\.(?:md|markdown|txt)):(\d+)(?::\d+)?$/i;
-
-function decodePath(value) {
-  try { return decodeURIComponent(value); } catch { return value; }
-}
 
 function normalizeAbsolute(value) {
   const parts = [];
@@ -39,12 +38,12 @@ export function parseDocumentHref(href, { basePath = '' } = {}) {
   let anchor = '';
   const hashAt = raw.indexOf('#');
   if (hashAt >= 0) {
-    anchor = decodePath(raw.slice(hashAt + 1));
+    anchor = decodeUriComponentOrOriginal(raw.slice(hashAt + 1));
     raw = raw.slice(0, hashAt);
   }
   if (!raw && basePath && anchor) raw = basePath;
 
-  raw = decodePath(raw);
+  raw = decodeUriComponentOrOriginal(raw);
   let line = 0;
   const lineMatch = raw.match(LINE_SUFFIX);
   if (lineMatch) {
@@ -112,12 +111,12 @@ function relativeDocumentTarget(href, basePath) {
   let anchor = '';
   const hashAt = raw.indexOf('#');
   if (hashAt >= 0) {
-    anchor = decodePath(raw.slice(hashAt + 1));
+    anchor = decodeUriComponentOrOriginal(raw.slice(hashAt + 1));
     raw = raw.slice(0, hashAt);
   }
   const sameDocument = !raw && !!anchor;
   if (sameDocument) raw = basePath;
-  raw = decodePath(raw);
+  raw = decodeUriComponentOrOriginal(raw);
   let line = 0;
   const lineMatch = raw.match(LINE_SUFFIX);
   if (lineMatch) {
@@ -186,7 +185,7 @@ function relativeAssetTarget(href, basePath) {
   let raw = String(href || '').trim();
   if (!raw || /[\u0000-\u001f\u007f]/.test(raw)) return '';
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//') || raw.startsWith('/')) return '';
-  raw = decodePath(raw.split(/[?#]/, 1)[0]);
+  raw = decodeUriComponentOrOriginal(raw.split(/[?#]/, 1)[0]);
   if (!IMAGE_EXT.test(raw)) return '';
 
   const stack = dirname(basePath).split('/').filter(Boolean);

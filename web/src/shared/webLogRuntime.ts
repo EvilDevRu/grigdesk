@@ -2,11 +2,11 @@ import type { App } from 'vue';
 import type { Pinia } from 'pinia';
 import type { Router } from 'vue-router';
 
-import { createApiRouteMatcher, isApiRouteTemplate } from '../../../shared/webLogApiRoutes.ts';
-import type { WebLogData } from '../../../shared/webLogContracts.ts';
+import { createApiRouteMatcher, isApiRouteTemplate } from '../../../shared/web-log/webLogApiRoutes.ts';
+import type { WebLogData } from '../../../shared/web-log/webLogContracts.ts';
 import { diagnosticLevel, DIAGNOSTIC_TIMER_LIMIT_MS }
-  from '../../../shared/diagnosticLogging.ts';
-import type { DiagnosticLevel } from '../../../shared/diagnosticLogging.ts';
+  from '../../../shared/web-log/diagnosticLogging.ts';
+import type { DiagnosticLevel } from '../../../shared/web-log/diagnosticLogging.ts';
 import { createWebLog } from './webLog.ts';
 import type { WebLog } from './webLog.ts';
 import { attachTransport } from './webLogTransport.ts';
@@ -22,9 +22,6 @@ const ROUTES_LIMIT = 2000;
 // их отказы возможны раньше, чем сервер отдаст полный список.
 const EARLY_API_ROUTES = [
   '/api/auth/state',
-  '/api/auth/login',
-  '/api/auth/logout',
-  '/api/auth/setup',
   '/api/web-log',
   '/api/web-log/routes',
   '/api/settings/factory-debug',
@@ -70,8 +67,6 @@ export type WebLogRuntime = {
   recordApi: (event: ApiEvent, data: Record<string, unknown>) => void;
   attachAuthStore: (store: AuthStoreLike) => void;
   setBoot: (value: string | null) => void;
-  onSwUpdateFound: () => void;
-  onSwNeedRefresh: () => void;
   refreshPolicy: () => Promise<void>;
   loadApiRoutes: () => Promise<void>;
   applyPolicy: (level: DiagnosticLevel, expiresAt?: number) => void;
@@ -659,14 +654,6 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     }
   }
 
-  function onSwUpdateFound(): void {
-    log.record('sw.updatefound', {});
-  }
-
-  function onSwNeedRefresh(): void {
-    log.record('sw.needRefresh', {});
-  }
-
   /**
    * Останавливаем ловушки, транспорт и подписки runtime.
    * Повторный вызов безопасен и не оставляет таймеров.
@@ -714,8 +701,6 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     recordApi,
     attachAuthStore,
     setBoot,
-    onSwUpdateFound,
-    onSwNeedRefresh,
     refreshPolicy,
     loadApiRoutes,
     applyPolicy,

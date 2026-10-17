@@ -19,6 +19,10 @@ const SOURCE_EXTENSIONS = new Set(['.vue', '.js', '.ts']);
 
 // UiPressable остаётся skinless-исключением, поэтому его consumers перечислены явно.
 const PRESSABLE_CONSUMERS = new Set([
+  'web/src/views/studio3d/Studio3dPanel.vue',
+  'web/src/views/studio3d/ViewSlots.vue',
+  'web/src/views/studio3d/LibraryPanel.vue',
+  'web/src/views/studio3d/VersionTree.vue',
   'web/dev/ui-gallery/UiGallery.vue',
   'web/src/components/composites/UiChoiceList.vue',
   'web/src/components/composites/UiSelectableRow.vue',

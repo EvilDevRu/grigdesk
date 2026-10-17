@@ -10,7 +10,7 @@ import {
   parseDbQueries,
   parseDbSchema,
   parseDbSessions,
-} from '../../shared/dbContracts.ts';
+} from '../../shared/plugins/db/dbContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { dbApi } from '../../web/src/shared/dbApi.ts';
 

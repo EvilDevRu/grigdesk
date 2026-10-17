@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { RouteDraft, RouteDraftContent, RoutePublication,
-  RouteRebaseResolution } from '../../../../shared/routesEditorContracts.ts';
+  RouteRebaseResolution } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { listProjects } from '../../lib/profiles.ts';
 import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
 

@@ -6,7 +6,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 import { api } from '../../web/src/shared/apiClient.ts';
 
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 process.env.NODE_ENV = 'test';
 
 test('ChatSession: snapshot, живые квоты, один таймер и сведения обычным текстом', async (t) => {

@@ -1,6 +1,6 @@
 // Общая точечная правка env-файлов кокпита: корневого `.env` и любого другого файла
 // формата `KEY=VALUE`. Один файл читают сразу три стороны: systemd (EnvironmentFile юнита),
-// `node --env-file` (bin/cockpit, bin/restart) и человек руками. Поэтому правка консервативна:
+// `node --env-file` (bin/cockpit, deploy/restart.sh) и человек руками. Поэтому правка консервативна:
 //   - меняются только строки названных переменных, остальные байты файла остаются как были;
 //   - значение пишется без кавычек и только из символов, которые оба парсера читают одинаково;
 //   - файл, где границу строки парсеры могут понять по-разному (многострочные значения,
@@ -496,6 +496,17 @@ export async function updateEnvFile(envPath: string, changes: EnvFileChanges): P
 
     throw new EnvFileError('env_file_conflict', `${target} меняется параллельно; повторите правку позже.`);
   });
+}
+
+/**
+ * Проверяет будущую правку тем же парсером и алфавитом, что атомарный писатель.
+ * Сухой прогон переноса получает результат без открытия или изменения файлов.
+ */
+export function previewEnvFile(bytes: Buffer | null, changes: EnvFileChanges): {
+  text: string;
+  changed: string[];
+} {
+  return planText(bytes, validateChanges(changes));
 }
 
 /**

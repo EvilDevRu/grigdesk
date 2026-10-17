@@ -1,6 +1,6 @@
 import { analysisApi } from '../../shared/analysisApi.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
-import type { AnalysisDetail } from '../../../../shared/analysisContracts.ts';
+import type { AnalysisDetail } from '../../../../shared/pipeline/analysisContracts.ts';
 
 /**
  * Полная оценка одной задачи: чипы, разведнота и протухание. Читается каждый раз

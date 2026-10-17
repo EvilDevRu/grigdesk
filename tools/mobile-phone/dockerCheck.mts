@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { writeFile, mkdir } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const execute = promisify(execFile);
 
@@ -83,7 +86,8 @@ export async function dockerCheck(options: {
       const diagnostic = String((failure as { stderr?: string }).stderr || '');
 
       await writeFile(
-        path.resolve('.state/artifacts/mobile-remote/docker-build-diagnostic.log'),
+        path.join(artifactsPath({ env: process.env, home: os.homedir() }),
+          'mobile-remote/docker-build-diagnostic.log'),
         diagnostic.replace(/[A-Za-z0-9_-]{32,}/g, '[скрыто]'),
       );
 

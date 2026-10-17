@@ -117,7 +117,7 @@ async function mountSettings(t, { arbiter = null } = {}) {
       async saveSettings() {},
     }),
     useChatStore: () => ({ compactWindow: 0 }),
-    usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
+    useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
   const [{ mount, flushPromises }, SettingsView] = await Promise.all([

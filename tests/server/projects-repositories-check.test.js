@@ -14,7 +14,7 @@ import test from 'node:test';
 import { checkRepositoryPath } from '../../server/src/lib/projects/repositoryCheck.ts';
 import projectsModule from '../../server/src/modules/projects/index.ts';
 import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
-import { parseRepositoryCheck } from '../../shared/projectsContracts.ts';
+import { parseRepositoryCheck } from '../../shared/runtime/projectsContracts.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

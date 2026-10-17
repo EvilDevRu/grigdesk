@@ -1,5 +1,5 @@
-import { ROUTES_EDITOR_LIMITS } from '../../../../shared/routesEditorContracts.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import { ROUTES_EDITOR_LIMITS } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RoutesStore } from './routesRuntime.ts';
 
 export interface RouteHistorySnapshot {

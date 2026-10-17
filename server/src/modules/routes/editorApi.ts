@@ -2,10 +2,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import {
   ROUTES_EDITOR_LIMITS, RoutesEditorContractError, routeSimulationStepLimit,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type {
   RouteRebaseResolution, RouteSimulationStepRequest,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
 import { loadRunnerConfig, resolveRunnerState } from '../../lib/runnerState.ts';
 

@@ -5,7 +5,7 @@ import {
   familyModels,
   markSupersededModels,
   resolveModelFamily,
-} from '../../shared/modelFamily.ts';
+} from '../../shared/chat/modelFamily.ts';
 
 const providers = [{
   id: 'codex',

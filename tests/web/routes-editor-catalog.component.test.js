@@ -5,7 +5,7 @@ import { makeDraft } from '../fixtures/routes-editor.mjs';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 import { toRuntimeCatalogInput } from '../../server/src/modules/routes/draftModel.ts';
-import { projectRouteCatalog } from '../../shared/routeProjection.ts';
+import { projectRouteCatalog } from '../../shared/pipeline/routeProjection.ts';
 import { addNode, renameNode, setEscalation, setTransition } from '../../web/src/views/routes/routeCommands.ts';
 import { createRoute, cloneRoute, renameRoute, removeRoute,
   inspectRouteReferences, copyNodesFromRoute } from '../../web/src/views/routes/catalogCommands.ts';

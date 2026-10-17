@@ -1,6 +1,8 @@
 // Нормализация данных о потреблении из потоков провайдеров в единые аналитические образцы и сегменты.
 import { createHash } from 'node:crypto';
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { canonicalJson } from './canonical.ts';
 import { addDecimals } from './decimal.ts';
 import {
@@ -66,12 +68,6 @@ function deterministicId(prefix: string, tuple: readonly unknown[]): string {
   return `${prefix}_${digest(canonicalJson([1, prefix, tuple])).slice(0, 32)}`;
 }
 
-function isRecord(value: unknown): value is Row {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
 function canonicalInstant(value: unknown): string | null {
   if (typeof value !== 'string' || !INSTANT_RE.test(value)) return null;
   const milliseconds = Date.parse(value);
@@ -96,13 +92,13 @@ function billingWindow(run: RunContext | undefined): Row {
 function selected(record: unknown, keys: readonly string[]): Row {
   const output = Object.create(null);
   for (const key of keys) {
-    if (isRecord(record) && Object.hasOwn(record, key)) output[key] = record[key];
+    if (isPlainRecord(record) && Object.hasOwn(record, key)) output[key] = record[key];
   }
   return output;
 }
 
 function sanitizeModelUsage(value: unknown): unknown {
-  if (!isRecord(value)) return value;
+  if (!isPlainRecord(value)) return value;
   const output = Object.create(null);
   for (const rawModel of Object.keys(value)) {
     output[rawModel] = selected(value[rawModel], [
@@ -140,7 +136,7 @@ function sanitizeProviderValue(provider: string, value: Row): Row | null {
 
       output.message = message;
 
-      if (isRecord(value.message) && Object.hasOwn(value.message, 'usage')) {
+      if (isPlainRecord(value.message) && Object.hasOwn(value.message, 'usage')) {
         const usage = selected(value.message.usage, [
           'input_tokens', 'output_tokens', 'cache_read_input_tokens',
           'cache_creation_input_tokens', 'service_tier', 'inference_geo', 'speed',
@@ -148,7 +144,7 @@ function sanitizeProviderValue(provider: string, value: Row): Row | null {
 
         message.usage = usage;
 
-        if (isRecord(value.message.usage)
+        if (isPlainRecord(value.message.usage)
             && Object.hasOwn(value.message.usage, 'cache_creation')) {
           usage.cache_creation = selected(value.message.usage.cache_creation, [
             'ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens',
@@ -210,7 +206,7 @@ export function parseProviderUsageRow({
   } catch {
     fail('rawJsonInvalid', 'Provider JSON line невалидна.');
   }
-  if (!isRecord(envelope)) fail('rawRowInvalid', 'Provider JSON line обязана быть object.');
+  if (!isPlainRecord(envelope)) fail('rawRowInvalid', 'Provider JSON line обязана быть object.');
   const supportedEnvelope = provider === 'codex'
     ? envelope.type === 'thread.started' || envelope.type === 'turn.completed'
     : envelope.type === 'assistant' || envelope.type === 'result'
@@ -226,7 +222,7 @@ export function parseProviderUsageRow({
     }
     throw error;
   }
-  if (!isRecord(value)) fail('rawRowInvalid', 'Provider JSON line обязана быть object.');
+  if (!isPlainRecord(value)) fail('rawRowInvalid', 'Provider JSON line обязана быть object.');
   const sanitized = sanitizeProviderValue(provider, value);
   if (sanitized === null) return null;
   return { value: sanitized, sourceOrdinal, byteOffset, lineHash };
@@ -314,7 +310,7 @@ function emptyTokenSummary(): TokenSummary {
 }
 
 function exactUint(record: Row, key: string, where: string): string | null {
-  if (!isRecord(record) || !Object.hasOwn(record, key)) {
+  if (!isPlainRecord(record) || !Object.hasOwn(record, key)) {
     fail('counterComponentMissing', `${where}.${key}: required counter отсутствует.`);
   }
   try {
@@ -332,7 +328,7 @@ function exactUint(record: Row, key: string, where: string): string | null {
 }
 
 function exactCost(record: Row, key: string, where: string): string | null {
-  if (!isRecord(record) || !Object.hasOwn(record, key)) {
+  if (!isPlainRecord(record) || !Object.hasOwn(record, key)) {
     fail('modelCostMissing', `${where}.${key}: exact cost отсутствует.`);
   }
   try {
@@ -580,14 +576,14 @@ function codexResumeBaseline(
 ): CodexBaseline {
   const reference = run?.parentUsageRef;
 
-  if (!isRecord(reference)) {
+  if (!isPlainRecord(reference)) {
     return { baseline: null, diagnostic: 'baselineMissing' };
   }
 
   const checkpoint = reference.terminalCounterCheckpoint;
 
-  if (reference.resumeVerified !== true || !isRecord(checkpoint)
-      || checkpoint.resumeEligible !== true || !isRecord(checkpoint.vector)) {
+  if (reference.resumeVerified !== true || !isPlainRecord(checkpoint)
+      || checkpoint.resumeEligible !== true || !isPlainRecord(checkpoint.vector)) {
     return { baseline: null, diagnostic: 'baselineMissing' };
   }
 
@@ -635,7 +631,7 @@ function normalizeCodex({ provider, dialect, parsed, run }: {
   let firstUsageIndex: number | null = null;
   for (const [index, row] of parsed.rows.entries()) {
     if (row.value.type === 'thread.started') threadRows.push({ ...row, rowIndex: index });
-    if (row.value.type === 'turn.completed' && isRecord(row.value.usage)) {
+    if (row.value.type === 'turn.completed' && isPlainRecord(row.value.usage)) {
       if (firstUsageIndex === null) firstUsageIndex = index;
       usageRows.push(row);
     }
@@ -745,7 +741,7 @@ function normalizeCodex({ provider, dialect, parsed, run }: {
       diagnostics.add('cumulativeResetAccepted');
       continue;
     }
-    if (row.value.type === 'turn.completed' && isRecord(row.value.usage)) {
+    if (row.value.type === 'turn.completed' && isPlainRecord(row.value.usage)) {
       active.rows.push(row);
     }
   }
@@ -969,7 +965,7 @@ interface ClaudeModelEntry {
 }
 
 function claudeModelEntry(rawModel: string, entry: unknown): ClaudeModelEntry {
-  if (!isRecord(entry)) fail('modelUsageInvalid', `modelUsage.${rawModel} обязан быть object.`);
+  if (!isPlainRecord(entry)) fail('modelUsageInvalid', `modelUsage.${rawModel} обязан быть object.`);
   if (typeof rawModel !== 'string' || rawModel.length < 1 || rawModel.length > 160
       || /[\u0000-\u001f\u007f]/u.test(rawModel)) {
     fail('modelUsageInvalid', 'modelUsage raw model identity invalid.');
@@ -1088,8 +1084,8 @@ function assistantEntry(
   const value = row.value;
   const message = value.message;
 
-  if (value.session_id !== outerSession || !isRecord(message)
-      || !isRecord(message.usage)) return null;
+  if (value.session_id !== outerSession || !isPlainRecord(message)
+      || !isPlainRecord(message.usage)) return null;
   const requestId = optionalStableText(value.request_id, 'assistant.request_id');
   const messageId = optionalStableText(message.id, 'assistant.message.id');
   if (requestId === null && messageId === null) {
@@ -1101,7 +1097,7 @@ function assistantEntry(
 
   const usage = message.usage;
   const cacheCreation = usage.cache_creation;
-  if (!isRecord(cacheCreation)) {
+  if (!isPlainRecord(cacheCreation)) {
     fail('assistantCacheSplitMissing', 'Assistant cache_creation split отсутствует.');
   }
   const vector = {
@@ -1412,7 +1408,7 @@ function normalizeClaude({ provider, dialect, parsed, run }: {
     if (value.type !== 'result' || value.session_id !== outerSession) continue;
     const parentAbsent = !Object.hasOwn(value, 'parent_tool_use_id') || value.parent_tool_use_id === null;
     const originAbsent = !Object.hasOwn(value, 'origin') || value.origin === null;
-    const taskNotification = isRecord(value.origin) && value.origin.kind === 'task-notification';
+    const taskNotification = isPlainRecord(value.origin) && value.origin.kind === 'task-notification';
     if (!originAbsent && !taskNotification) {
       diagnostics.add('unsupportedResultOrigin');
       if (parentAbsent) lastUnsupportedResultIndex = rowIndex;
@@ -1463,7 +1459,7 @@ function normalizeClaude({ provider, dialect, parsed, run }: {
   try {
     for (const row of billingRows) {
       const usage = row.value.modelUsage;
-      if (!isRecord(usage)) fail('modelUsageInvalid', 'modelUsage обязан быть object map.');
+      if (!isPlainRecord(usage)) fail('modelUsageInvalid', 'modelUsage обязан быть object map.');
       const rawModels = Object.keys(usage).sort();
       if (rawModels.length === 0) {
         sawEmpty = true;
@@ -1756,7 +1752,7 @@ export function normalizeProviderUsageRows({
     return { ...unknownResult(provider, dialect, ['rawRowsInvalid']), completeness: 'conflict' };
   }
   for (const row of rows) {
-    if (!isRecord(row) || !isRecord(row.value)
+    if (!isPlainRecord(row) || !isPlainRecord(row.value)
         || typeof row.sourceOrdinal !== 'string'
         || typeof row.byteOffset !== 'string'
         || typeof row.lineHash !== 'string') {

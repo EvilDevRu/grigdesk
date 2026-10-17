@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ExecutorAdapter } from '../executors/index.ts';
 import type { NativeSettingsContext } from './types.ts';
-import type { SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
+import type { SettingsConsumer } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 /**
  * Базовая карточка и запуск строят одинаковую идентичность источника.

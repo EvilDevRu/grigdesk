@@ -13,7 +13,7 @@
 //  - отказ Telegram не роняет вотчер и не портит state: карточка уйдёт следующим
 //    обходом;
 //  - порог молчания берётся из ответа /api/tasks (silenceWindow), не из константы;
-//  - вотчер и /status считают одним правилом (shared/pipelineWait + agentActivity).
+//  - вотчер и /status считают одним правилом (shared/pipeline/pipelineWait + agentActivity).
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';

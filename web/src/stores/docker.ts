@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { dockerApi, dockerErrorMessage } from '../shared/dockerApi';
-import { parseDockerStatsMessage } from '../../../shared/dockerContracts';
+import { parseDockerStatsMessage } from '../../../shared/plugins/docker/dockerContracts';
 import type { DockerPruneOptions } from '../shared/dockerApi';
 import type {
   DockerActionResult,
@@ -18,7 +18,7 @@ import type {
   DockerStatsInput,
   DockerUsage,
   DockerVolume,
-} from '../../../shared/dockerContracts';
+} from '../../../shared/plugins/docker/dockerContracts';
 
 interface DockerState {
   health: DockerHealth | null;

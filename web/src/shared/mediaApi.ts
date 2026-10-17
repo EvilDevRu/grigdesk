@@ -5,8 +5,8 @@ import {
   parseMediaJob,
   parseMediaPlan,
   parseMediaUpload,
-} from '../../../shared/mediaContracts.ts';
-import type { MediaClipRequest, MediaPlanRequest } from '../../../shared/mediaContracts.ts';
+} from '../../../shared/media/mediaContracts.ts';
+import type { MediaClipRequest, MediaPlanRequest } from '../../../shared/media/mediaContracts.ts';
 
 /**
  * Загрузка записи идёт СВОИМ fetch, а не общим клиентом: тело — multipart на сотни

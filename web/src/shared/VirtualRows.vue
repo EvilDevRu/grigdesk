@@ -63,6 +63,7 @@ let view = {
 };
 let scroller: HTMLElement | null = null;
 let resizeObserver: ResizeObserver | null = null;
+let measuredRow: Element | null = null;
 let intersectionObserver: IntersectionObserver | null = null;
 let syncRequest: ReturnType<typeof setTimeout> | number | null = null;
 
@@ -200,6 +201,28 @@ function cancelSync() {
 }
 
 /**
+ * CSS может поменять высоту строки без рендера и ресайза scroll-контейнера.
+ * Тот же observer следит за одной живой строкой и меняет цель вместе с окном списка.
+ */
+function observeRow() {
+  const next = topGap.value?.nextElementSibling;
+  const row = next && next !== bottomGap.value ? next : null;
+
+  if (!resizeObserver || row === measuredRow) {
+    return;
+  }
+  if (measuredRow) {
+    resizeObserver.unobserve(measuredRow);
+  }
+
+  measuredRow = row;
+
+  if (row) {
+    resizeObserver.observe(row);
+  }
+}
+
+/**
  * Подписывает окно на всё, что двигает список относительно видимой области: прокрутку,
  * размер предка и появление распорки в кадре. Последнее ловит сдвиг списка из-за соседей
  * выше (свернули группу над ним), когда ни прокрутки, ни смены размера предка нет.
@@ -221,6 +244,7 @@ function attach() {
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(scheduleSync);
     resizeObserver.observe(scroller);
+    observeRow();
   }
 
   if (typeof IntersectionObserver !== 'undefined') {
@@ -247,6 +271,7 @@ function detach() {
   intersectionObserver?.disconnect();
   scroller = null;
   resizeObserver = null;
+  measuredRow = null;
   intersectionObserver = null;
 }
 
@@ -272,6 +297,7 @@ onMounted(() => {
 // Рендер мог сдвинуть список или поменять высоту строк — сверяем окно на следующем кадре.
 onUpdated(() => {
   if (active.value) {
+    observeRow();
     scheduleSync();
   }
 });

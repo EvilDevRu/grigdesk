@@ -42,10 +42,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { DraftMachine } from '../../../../shared/routeDefinition.ts';
-import type { AgentCard } from '../../../../shared/agentsContracts.ts';
+import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { AgentCard } from '../../../../shared/pipeline/agentsContracts.ts';
 import type { RouteDraft, RouteEditorInfo,
-  RouteEditorIssue } from '../../../../shared/routesEditorContracts.ts';
+  RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteCommandScope } from './routeCommands.ts';
 import { UiSelect } from '../../ui';
 import RouteCanvas from './RouteCanvas.vue';

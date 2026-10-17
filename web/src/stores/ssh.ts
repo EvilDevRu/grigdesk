@@ -11,7 +11,7 @@ import type {
   SshConnection,
   SshFile,
   SshSession,
-} from '../../../shared/sshContracts.ts';
+} from '../../../shared/plugins/ssh/sshContracts.ts';
 
 // Признак архива приходит с сервера вместе со списком: форма по нему решает,
 // можно ли заводить на проект новую связь.

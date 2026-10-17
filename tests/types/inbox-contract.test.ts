@@ -1,5 +1,5 @@
-import type { InboxChannel, InboxItem, InboxSummary } from '../../shared/inboxContracts.ts';
-import { parseInboxList, parseInboxSummary } from '../../shared/inboxContracts.ts';
+import type { InboxChannel, InboxItem, InboxSummary } from '../../shared/inbox/inboxContracts.ts';
+import { parseInboxList, parseInboxSummary } from '../../shared/inbox/inboxContracts.ts';
 import { inboxApi } from '../../web/src/shared/inboxApi.ts';
 import { refreshInboxSummary, useInboxStore } from '../../web/src/actions/inbox';
 

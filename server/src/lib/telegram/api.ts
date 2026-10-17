@@ -11,6 +11,8 @@
 //
 // Токен живёт в URL, поэтому любая ошибка чистится от него перед выбросом:
 // сообщение уедет и в лог, и на экран.
+import { setTimeout as wait } from 'node:timers/promises';
+
 import { maskToken } from './token.ts';
 
 type Payload = Record<string, unknown>;
@@ -35,10 +37,6 @@ const RETRY_DELAYS_MS = Object.freeze([500, 1500]);
 function apiError(message: string, kind: string, extra: Payload = {}): Error {
   return Object.assign(new Error(message), { kind, ...extra });
 }
-
-const wait = (ms: number) => new Promise<void>((resolve) => {
-  setTimeout(resolve, ms);
-});
 
 /**
  * Повтор ТОЛЬКО транспортного отказа и ТОЛЬКО там, где повтор безопасен.

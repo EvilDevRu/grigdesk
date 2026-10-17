@@ -9,7 +9,7 @@ import type {
   InTurnAssistantEvent,
   InTurnPort,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import { openKimiEventStream } from './serverEvents.ts';
 import type { KimiRawEvent } from './serverEvents.ts';
 import type { KimiServerProcess } from './serverRuntime.ts';

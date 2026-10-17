@@ -7,6 +7,8 @@
 // Скрипт ничего не выбирает за человека: он собирает образцы, версии, задержку и
 // предупреждения, а качество оценивается на слух. Совпадение расшифровки и один
 // удачный абзац планкой «не отличить от живого человека» не являются.
+import os from 'node:os';
+import { dataHome } from '../../shared/runtime/dataHome.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,7 +170,7 @@ ${blocks}
 // Каталог локального синтеза берётся тот же, что и у раздела: сравнивать нужно
 // установленный голос, а не свежесобранный ради сравнения.
 const voiceDir = process.env.COCKPIT_SHOWCASE_VOICE_DIR
-  || fileURLToPath(new URL('../.state/showcase-voice', import.meta.url));
+  || path.join(dataHome({ env: process.env, home: os.homedir() }), 'state/showcase-voice');
 
 async function main(): Promise<void> {
   // Тот же порядок, что у раздела. Фраза с латиницей у Silero честно даст отказ —

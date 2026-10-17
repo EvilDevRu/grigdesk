@@ -19,7 +19,7 @@
 import { computed, ref, watch } from 'vue';
 
 import { UiButton, UiField, UiInput, UiSelect } from '../../ui';
-import type { ShowcaseScreen } from '../../../../shared/showcaseContracts';
+import type { ShowcaseScreen } from '../../../../shared/plugins/showcase/showcaseContracts';
 
 const props = defineProps<{
   screens: ShowcaseScreen[];

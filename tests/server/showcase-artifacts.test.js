@@ -13,7 +13,7 @@ import {
   finalIsCurrent,
   sceneFreshness,
 } from '../../server/src/lib/showcase/artifacts.ts';
-import { chainLineage } from '../../shared/showcaseChains.ts';
+import { chainLineage } from '../../shared/plugins/showcase/showcaseChains.ts';
 
 const INPUTS = {
   targetFingerprint: 'target-1',

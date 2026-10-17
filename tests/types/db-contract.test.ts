@@ -1,5 +1,5 @@
-import type { DbProfile, DbQuery, DbSession } from '../../shared/dbContracts.ts';
-import { parseDbQueries, parseDbSessions } from '../../shared/dbContracts.ts';
+import type { DbProfile, DbQuery, DbSession } from '../../shared/plugins/db/dbContracts.ts';
+import { parseDbQueries, parseDbSessions } from '../../shared/plugins/db/dbContracts.ts';
 import { dbApi } from '../../web/src/shared/dbApi.ts';
 import { runDbQuery, setDbAgentAccess, useDbStore } from '../../web/src/actions/db';
 

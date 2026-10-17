@@ -1,5 +1,18 @@
 <template>
   <div class="plugins" data-testid="plugins-catalog">
+    <UiInlineMessage v-if="installer.recoveryError" tone="danger" data-role="plugins-install-recovery">
+      {{ installer.recoveryError.message }}
+    </UiInlineMessage>
+    <UiInlineMessage
+      v-else-if="installer.job?.status === 'recovery_required'"
+      tone="danger"
+      data-role="plugins-install-recovery"
+    >
+      {{ installer.job.error?.message ?? 'Сохранённые копии требуют ручной проверки.' }}
+    </UiInlineMessage>
+    <UiInlineMessage v-if="pluginsStore.loadError" tone="danger">
+      {{ pluginsStore.loadError }}
+    </UiInlineMessage>
     <div v-if="!pluginsStore.loaded" class="plugin-loading">
       <UiSpinner decorative /> Загружаю плагины…
     </div>
@@ -31,6 +44,24 @@
             Свои {{ stats.custom }}
           </UiToggleButton>
         </div>
+        <UiButton
+          variant="solid"
+          tone="accent"
+          data-role="plugins-install-git"
+          :disabled="recoveryBlocked"
+          @click="openInstall()"
+        >
+          Установить из git
+        </UiButton>
+        <UiButton
+          v-if="hasManaged"
+          data-role="plugins-check-updates"
+          :loading="installer.checking"
+          :disabled="installer.checking || recoveryBlocked"
+          @click="installer.checkUpdates()"
+        >
+          Проверить обновления
+        </UiButton>
       </div>
 
       <section
@@ -78,6 +109,13 @@
                   </svg>
                 </span>
                 <span class="plugin-tile-name">{{ plugin.name }}</span>
+                <span
+                  v-if="pluginInstallBadge(plugin)"
+                  class="plugin-tile-badge"
+                  :data-badge="pluginInstallBadge(plugin)"
+                >
+                  {{ pluginInstallBadge(plugin) === 'restart' ? 'ждёт перезапуска' : 'обновление' }}
+                </span>
                 <span class="plugin-tile-meta">
                   {{ settingCount(plugin)
                     ? settingCountLabel(settingCount(plugin))
@@ -91,7 +129,7 @@
                 role="rail"
                 :variant="plugin.enabled ? 'solid' : 'ghost'"
                 :tone="plugin.enabled ? 'accent' : 'neutral'"
-                :disabled="togglingId === plugin.id"
+                :disabled="togglingId === plugin.id || recoveryBlocked"
                 :label="`${plugin.enabled ? 'Выключить' : 'Включить'} ${plugin.name}`"
                 v-tooltip="plugin.enabled ? 'Плагин включён' : 'Плагин выключен'"
                 @click="toggle(plugin, !plugin.enabled)"
@@ -144,27 +182,37 @@
           Как добавить пользовательский плагин
         </UiDisclosureButton>
         <p v-if="guideOpen" id="plugin-user-guide" class="plugin-guide-note">
-          Пользовательский модуль — папка <code>plugins/&lt;id&gt;/</code> с
-          <code>plugin.json</code>. Серверная часть подключается после рестарта Cockpit.
+          Кнопка «Установить из git» ставит плагин по адресу репозитория с тегами vX.Y.Z.
+          Папку <code>plugins/&lt;id&gt;/</code> с <code>plugin.json</code>
+          по-прежнему можно положить вручную.
+          Серверная часть подключается после перезапуска Cockpit.
         </p>
       </div>
 
       <PluginSettingsDialog
         v-model:open="dialogOpen"
         :plugin="openedPlugin"
-        :toggling="togglingId === openedPluginId"
+        :toggling="togglingId === openedPluginId || recoveryBlocked"
         @toggle="(value) => openedPlugin && toggle(openedPlugin, value)"
+        @update-plugin="(id) => openInstall('update', id)"
+        @bind-source="(id) => openInstall('install', id)"
+      />
+      <PluginInstallDialog
+        v-model:open="installOpen"
+        :mode="installMode"
+        :plugin="installPlugin"
       />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
 import {
   UiButton,
   UiDisclosureButton,
   UiIconButton,
+  UiInlineMessage,
   UiPressable,
   UiSearchInput,
   UiSegmentedControl,
@@ -173,15 +221,19 @@ import {
   vTooltip,
 } from '../../ui';
 import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.js';
+import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
+import { pluginInstallBadge } from '../../shared/pluginInstall.ts';
 import { pluginIconPath } from '../../shared/navIcons.ts';
-import { PLUGIN_CATEGORIES } from '../../../../shared/pluginsContracts.ts';
-import type { PluginListItem } from '../../../../shared/pluginsContracts.ts';
+import { PLUGIN_CATEGORIES } from '../../../../shared/plugins/pluginsContracts.ts';
+import type { PluginListItem } from '../../../../shared/plugins/pluginsContracts.ts';
 import PluginSettingsDialog from './PluginSettingsDialog.vue';
+import PluginInstallDialog from './PluginInstallDialog.vue';
 
 // Каталог плагинов: плитки по роду работы. Список коротких имён со своими иконками
 // человек читает целиком за один взгляд, а описание и параметры нужны только тому
 // модулю, который он открыл, — их забирает модалка.
 const pluginsStore = usePluginsStore();
+const installer = usePluginInstallStore();
 
 const query = ref('');
 const stateFilter = ref('all');
@@ -191,11 +243,19 @@ const guideOpen = ref(false);
 const togglingId = ref('');
 const openedPluginId = ref('');
 const dialogOpen = ref(false);
+const installOpen = ref(false);
+const installMode = ref<'install' | 'update'>('install');
+const installPluginId = ref('');
 
 // Список приходит из общего store, поэтому форма записи объявлена контрактом раздела.
 const pluginList = computed<PluginListItem[]>(() => (Array.isArray(pluginsStore.list)
   ? pluginsStore.list as PluginListItem[]
   : []));
+const hasManaged = computed(() => pluginList.value.some((plugin) => !!plugin.install));
+const recoveryBlocked = computed(() => !!installer.recoveryError
+  || installer.job?.status === 'recovery_required');
+const installPlugin = computed(() => pluginList.value
+  .find((plugin) => plugin.id === installPluginId.value) ?? null);
 
 function settingCount(plugin: PluginListItem): number {
   return (plugin.settings?.length || 0) + (plugin.placements?.length || 0);
@@ -308,8 +368,24 @@ function settingCountLabel(value: number): string {
 }
 
 function openPlugin(id: string): void {
+  installOpen.value = false;
   openedPluginId.value = id;
   dialogOpen.value = true;
+}
+
+/**
+ * Установка и карточка используют один переход, закрывающий прежнюю модалку.
+ * Id остаётся ключом актуального списка; привязка передаст его как expectedId.
+ */
+function openInstall(mode: 'install' | 'update' = 'install', id = ''): void {
+  if (recoveryBlocked.value) {
+    return;
+  }
+
+  dialogOpen.value = false;
+  installMode.value = mode;
+  installPluginId.value = id;
+  installOpen.value = true;
 }
 
 // Сброс возвращает каталог целиком: пустая выдача — это чаще всего забытый фильтр,
@@ -328,7 +404,7 @@ function clearFilters(): void {
  * из-под пальца сразу после переключения.
  */
 async function toggle(plugin: PluginListItem, enabled: boolean): Promise<void> {
-  if (togglingId.value) {
+  if (togglingId.value || recoveryBlocked.value) {
     return;
   }
 
@@ -345,6 +421,10 @@ async function toggle(plugin: PluginListItem, enabled: boolean): Promise<void> {
     togglingId.value = '';
   }
 }
+
+onMounted(() => {
+  void installer.loadJob();
+});
 </script>
 
 <style scoped>
@@ -400,6 +480,7 @@ async function toggle(plugin: PluginListItem, enabled: boolean): Promise<void> {
 }
 .plugin-tile.off .plugin-tile-name { color: var(--ink-mid); }
 .plugin-tile-meta { color: var(--ink-mid); font-size: 10.5px; }
+.plugin-tile-badge { color: var(--warn); font-size: 10.5px; }
 .plugin-tile-power { position: absolute; top: 8px; right: 8px; display: inline-flex; }
 .plugin-tile-power svg { width: 15px; height: 15px; }
 .plugin-empty {

@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RouteEditorIssue } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiButton } from '../../ui';
 
 defineProps<{ issues: RouteEditorIssue[]; stale: boolean }>();

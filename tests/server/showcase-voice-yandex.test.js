@@ -10,7 +10,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createYandexEngine, wavOf, yandexMarkup } from '../../server/src/lib/showcase/voice/yandex.ts';
+import { wavOfPcm } from '../../server/src/lib/showcase/voice/pcm.ts';
+
+import { createYandexEngine, yandexMarkup } from '../../server/src/lib/showcase/voice/yandex.ts';
 import { YANDEX_VOICES } from '../../server/src/lib/showcase/voice/yandexCatalog.ts';
 
 const DIRECTION = {
@@ -404,7 +406,7 @@ test('тишина вместо речи — отказ, а не готовый 
 
 test('обёртка WAV честно описывает отсчёты', () => {
   const pcm = pcmSine({ seconds: 0.1 });
-  const wav = wavOf(pcm, 48_000);
+  const wav = wavOfPcm(pcm, 48_000);
 
   assert.equal(wav.length, 44 + pcm.length);
   assert.equal(wav.subarray(8, 12).toString(), 'WAVE');

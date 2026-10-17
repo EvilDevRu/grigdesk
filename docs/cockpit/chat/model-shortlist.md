@@ -2,7 +2,7 @@
 
 - **Правило одно для всех исполнителей.** `resolveRuntimeModels()` в
   `server/src/lib/modelsRegistry.ts` прогоняет runtime-копию каталога через
-  `markSupersededModels()` из `shared/modelFamily.ts`: в каждом семействе актуальной
+  `markSupersededModels()` из `shared/chat/modelFamily.ts`: в каждом семействе актуальной
   остаётся одна модель, прежние версии получают `extra: true`. Актуальная выбирается тем же
   правилом, что разрешает ссылку на семейство (`sol` → свежая Sol): не-`extra` сильнее,
   затем больший `tier`. Поэтому модель по умолчанию и разрешение семейства от краткого списка

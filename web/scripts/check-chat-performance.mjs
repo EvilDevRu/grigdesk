@@ -6,14 +6,15 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
-import { cpus, loadavg } from 'node:os';
+import { cpus, homedir, loadavg } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { build } from '../node_modules/vite/dist/node/index.js';
 import vue from '../node_modules/@vitejs/plugin-vue/dist/index.mjs';
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
-import { decodeHistoryStepReuseRequest } from '../../shared/chatHistoryStepReuse.ts';
+import { decodeHistoryStepReuseRequest } from '../../shared/chat/chatHistoryStepReuse.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { performanceData } from '../../tests/web/fixtures/chat-performance/data.mjs';
 import { performanceStubs } from './chatPerformanceStubs.mjs';
 
@@ -21,7 +22,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const web = path.join(root, 'web');
 const fixture = path.join(root, 'tests/web/fixtures/chat-performance');
 const artifactName = process.env.CHAT_PERFORMANCE_ARTIFACTS || 'chat-freeze-fix';
-const artifacts = path.join(root, '.state/artifacts', artifactName);
+const artifacts = path.join(artifactsPath({ env: process.env, home: homedir() }), artifactName);
 const label = process.env.CHAT_PERFORMANCE_LABEL || 'after';
 const repeats = Number(process.env.CHAT_PERFORMANCE_REPEATS || 5);
 const samples = Number(process.env.CHAT_PERFORMANCE_SAMPLES || 20);

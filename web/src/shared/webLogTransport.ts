@@ -1,7 +1,7 @@
-import { WEB_LOG_LIMITS, projectWebLogEntry, utf8Bytes } from '../../../shared/webLogContracts.ts';
-import { diagnosticLevel, filterWebLogEntry } from '../../../shared/diagnosticLogging.ts';
+import { WEB_LOG_LIMITS, projectWebLogEntry, utf8Bytes } from '../../../shared/web-log/webLogContracts.ts';
+import { diagnosticLevel, filterWebLogEntry } from '../../../shared/web-log/diagnosticLogging.ts';
 
-import type { WebLogData, WebLogEntry, WebLogKey } from '../../../shared/webLogContracts.ts';
+import type { WebLogData, WebLogEntry, WebLogKey } from '../../../shared/web-log/webLogContracts.ts';
 import type { WebLog, WebLogLoss } from './webLog.ts';
 
 const STORAGE_KEY = 'cockpit-web-log-queue-v1';

@@ -13,7 +13,7 @@ import { ChatAssistantMessages } from '../../server/src/lib/chat/assistantMessag
 import { ChatAssistantPublisher } from '../../server/src/lib/chat/assistantPublisher.ts';
 import claude, { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 import { claudeSessionArgs, openClaudeStreamSession } from '../../server/src/lib/executors/_claudeStream.ts';
-import { parseInTurnCapability } from '../../shared/chatInTurnContracts.ts';
+import { parseInTurnCapability } from '../../shared/chat/chatInTurnContracts.ts';
 import { assertInTurnConformance } from './helpers/in-turn-conformance.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -809,4 +809,43 @@ test('Claude: разовый запуск и живая сессия получ�
   });
 
   assert.ok(live.settings.permissions.allow.includes(`Read(/${live.attachmentsDir}/**)`));
+});
+
+test('Claude: документация плагинов читается без вопроса, смена каталогов переоткрывает сессию', async (t) => {
+  const docsDir = '/srv/cockpit plugins/audit/docs';
+  const once = await runWithAttachments(t, (f, attachmentsDir, onInTurnReady) => claude.run({
+    config: { claudeBin: f.bin },
+    env: f.env,
+    message: 'Проверь два файла.',
+    cwd: f.dir,
+    sessionId: null,
+    permissionMode: 'default',
+    providerSettings: {},
+    attachmentsDir,
+    pluginDocsDirs: [docsDir],
+    onInTurnReady,
+  }));
+
+  assert.ok(once.settings.permissions.allow.includes(`Read(/${once.attachmentsDir}/**)`));
+  assert.ok(once.settings.permissions.allow.includes(`Read(/${docsDir}/**)`));
+
+  const live = await runWithAttachments(t, (f, attachmentsDir, onInTurnReady) => {
+    const session = claude.session.open({
+      config: { claudeBin: f.bin },
+      env: f.env,
+      cwd: f.dir,
+      permissionMode: 'default',
+      providerSettings: {},
+      attachmentsDir,
+      pluginDocsDirs: [docsDir],
+    });
+
+    t.after(() => session.close());
+
+    return session.send({ message: 'Проверь два файла.', onInTurnReady });
+  });
+
+  assert.ok(live.settings.permissions.allow.includes(`Read(/${docsDir}/**)`));
+  assert.ok(claude.session.restartOn.includes('pluginDocsDirs'),
+    'право чтения задаётся при запуске процесса — новый набор каталогов требует переоткрытия');
 });

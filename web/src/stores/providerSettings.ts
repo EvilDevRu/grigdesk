@@ -5,8 +5,8 @@ import { defineStore } from 'pinia';
 import { reactive } from 'vue';
 import { providerSettingsApi } from '../shared/providerSettingsApi.ts';
 import type { ProviderSettingsApi } from '../shared/providerSettingsApi.ts';
-import type { JsonValue, ProviderSettingsCatalog } from '../../../shared/providerSettingsContracts.ts';
-import type { ProviderSettingsOverrideRequest } from '../../../shared/providerSettingsContracts.ts';
+import type { JsonValue, ProviderSettingsCatalog } from '../../../shared/chat/providerSettingsContracts.ts';
+import type { ProviderSettingsOverrideRequest } from '../../../shared/chat/providerSettingsContracts.ts';
 
 export interface NativeSettingsPanelState {
   catalog: ProviderSettingsCatalog | null;

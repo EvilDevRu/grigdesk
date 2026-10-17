@@ -723,6 +723,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { errorMessage } from '../../../../shared/lib/errors.ts';
+
 import {
   UiButton,
   UiField,
@@ -746,7 +748,7 @@ import type {
   DbQuery,
   DbResult,
   DbSession,
-} from '../../../../shared/dbContracts.ts';
+} from '../../../../shared/plugins/db/dbContracts.ts';
 import {
   cancelDbQuery,
   closeDbSession,
@@ -808,16 +810,6 @@ const draft = reactive({
 });
 
 const visibleError = computed(() => localError.value || store.error || '');
-
-// Отказ приходит из сети и своего типа не обещает: человеку показывается сообщение
-// ошибки, а при его отсутствии — понятный текст самой операции.
-function errorText(error: unknown, fallback: string): string {
-  const message = error !== null && typeof error === 'object'
-    ? (error as { message?: unknown }).message
-    : undefined;
-
-  return typeof message === 'string' && message ? message : fallback;
-}
 
 const refreshLoading = computed(() => store.loading || store.projectsLoading);
 const selectedProfile = computed(() => (
@@ -1133,7 +1125,7 @@ async function openSession(): Promise<void> {
       selectedSessionId.value = session.id;
     }
   } catch (error) {
-    localError.value = errorText(error, 'Не удалось открыть сессию базы');
+    localError.value = errorMessage(error, 'Не удалось открыть сессию базы');
   } finally {
     password.value = '';
     openingProfileId.value = '';
@@ -1157,7 +1149,7 @@ async function loadSchema(): Promise<void> {
   try {
     await loadDbSchema(sessionId);
   } catch (error) {
-    localError.value = errorText(error, 'Не удалось загрузить схему');
+    localError.value = errorMessage(error, 'Не удалось загрузить схему');
   } finally {
     schemaLoadingIds.delete(sessionId);
   }
@@ -1181,7 +1173,7 @@ async function runQuery(): Promise<void> {
     resultQueryIds[sessionId] = await runDbQuery(sessionId, query.value);
     fallbackResults[sessionId] = null;
   } catch (error) {
-    localError.value = errorText(error, 'Не удалось запустить запрос');
+    localError.value = errorMessage(error, 'Не удалось запустить запрос');
   } finally {
     submittingQuery.value = false;
   }
@@ -1211,7 +1203,7 @@ async function cancelQuery(queryId: string): Promise<void> {
   try {
     await cancelDbQuery(queryId);
   } catch (error) {
-    localError.value = errorText(error, 'Не удалось прервать запрос');
+    localError.value = errorMessage(error, 'Не удалось прервать запрос');
   }
 }
 
@@ -1239,7 +1231,7 @@ async function closeActiveSession(): Promise<void> {
     selectedSessionId.value = (store.sessions || [])
       .some((session) => session.id === replacementId) ? replacementId : '';
   } catch (error) {
-    await alertDialog(errorText(error, 'Не удалось закрыть сессию базы'), { title: 'Базы' });
+    await alertDialog(errorMessage(error, 'Не удалось закрыть сессию базы'), { title: 'Базы' });
   } finally {
     closingSessionId.value = '';
   }
@@ -1252,7 +1244,7 @@ async function setAgentAccess(sessionId: string, allowed: boolean): Promise<void
     await setDbAgentAccess(sessionId, allowed);
   } catch (error) {
     await alertDialog(
-      errorText(error, 'Не удалось изменить доступ агента'),
+      errorMessage(error, 'Не удалось изменить доступ агента'),
       { title: 'Базы' },
     );
   }
@@ -1292,7 +1284,7 @@ async function saveProfile(): Promise<void> {
       selectedProfileId.value = saved.id;
     }
   } catch (error) {
-    await alertDialog(errorText(error, 'Не удалось сохранить профиль'), { title: 'Базы' });
+    await alertDialog(errorMessage(error, 'Не удалось сохранить профиль'), { title: 'Базы' });
   } finally {
     savingProfile.value = false;
   }
@@ -1306,7 +1298,7 @@ watch(selectedProfileId, async () => {
     try {
       await loadDbSshSessions();
     } catch (error) {
-      localError.value = errorText(error, 'Не удалось загрузить SSH-сессии');
+      localError.value = errorMessage(error, 'Не удалось загрузить SSH-сессии');
     }
   }
 });

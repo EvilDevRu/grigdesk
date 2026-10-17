@@ -224,3 +224,15 @@ test('ручной запуск сервера оговаривается отд
 
   assert.match(card.text(), /запущен вручную/);
 });
+
+test('сервер под приложением не называется ручным: тумблер про юнит, не про процесс', async (t) => {
+  const card = await mountCard(t, {
+    launcher: {
+      autostart: AUTOSTART.off,
+      shortcut: { desktopDir: '/home/test/Desktop', desktop: false, menu: false },
+    },
+  }, { systemd: false, mode: 'desktop' });
+
+  assert.match(card.text(), /сервером управляет приложение Кокпита/);
+  assert.doesNotMatch(card.text(), /запущен вручную/);
+});

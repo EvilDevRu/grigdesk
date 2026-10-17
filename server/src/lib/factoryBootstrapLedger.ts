@@ -1,7 +1,8 @@
-import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+
+import { sha256 } from '../../../shared/node/hash.ts';
 
 import { RoutesStore } from '../modules/routes/store.ts';
 
@@ -95,10 +96,6 @@ function canonical(value: unknown): string {
   };
 
   return `${JSON.stringify(ordered(value), null, 2)}\n`;
-}
-
-function hash(bytes: string | Buffer): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 
 /**
@@ -292,7 +289,7 @@ export async function readBootstrapStop(
         || event.schema !== 1 || event.protocolVersion !== 2 || event.phase !== 'bootstrap'
         || event.node !== 'scout' || event.runKey !== 'SCOUT' || event.sequence !== index + 1
         || Number(match[1]) !== event.sequence || event.previousEventHash !== previous
-        || hash(bytes) !== match[2] || bytes.toString('utf8') !== canonical(event)
+        || sha256(bytes) !== match[2] || bytes.toString('utf8') !== canonical(event)
         || !VISIT_RE.test(event.visitId) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(event.at)
         || !Number.isFinite(Date.parse(event.at))) {
       invalid('identity, predecessor или digest');
@@ -341,7 +338,7 @@ export async function readBootstrapStop(
 
         if (catalog.catalog.routes[expected.routeId] !== expected.routeHash
             || !action || Object.keys(action).join(',') !== 'stop' || action.stop !== 'human'
-            || event.transitionHash !== hash(canonical(transition))) {
+            || event.transitionHash !== sha256(canonical(transition))) {
           invalid('закреплённый переход не подтверждён');
         }
 
@@ -378,7 +375,7 @@ export async function readBootstrapStop(
 
         const bytes = await immutableBytes(path.join(attemptDir, 'artifacts', 'bootstrap.json'));
 
-        if (hash(bytes) !== event.checkpointHash) {
+        if (sha256(bytes) !== event.checkpointHash) {
           invalid('completed не подтверждён checkpoint');
         }
 
@@ -452,7 +449,7 @@ export async function readBootstrapStop(
 
     if (!action?.escalate?.routes.includes(expected.routeId) || policy?.requiresHumanWhenPinned !== true
         || catalog.catalog.routes[expected.routeId] !== expected.routeHash
-        || value.transitionHash !== hash(canonical(transition))) {
+        || value.transitionHash !== sha256(canonical(transition))) {
       invalid('checkpoint не подтверждает закреплённый переход');
     }
 

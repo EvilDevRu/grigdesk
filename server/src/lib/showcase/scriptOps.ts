@@ -46,13 +46,16 @@ import {
   sceneSyncBindingsState,
 } from './scenes.ts';
 import { mapRevisionOf } from './targets.ts';
-import { normalizeShowcaseSource, showcaseSourceEqual } from '../../../../shared/showcaseContracts.ts';
+import {
+  normalizeShowcaseSource,
+  showcaseSourceEqual,
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type {
   ShowcaseProject,
   ShowcaseScene,
   ShowcaseSourceOptions,
   ShowcaseStorySource,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseResolvedScope, ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';

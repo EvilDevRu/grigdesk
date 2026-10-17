@@ -145,8 +145,8 @@ test('стор состояния не знает ни про HTTP, ни про 
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
   assert.deepEqual(imports.sort(), [
-    '../../../shared/showcaseContracts',
-    '../../../shared/showcaseTimeline',
+    '../../../shared/plugins/showcase/showcaseContracts',
+    '../../../shared/plugins/showcase/showcaseTimeline',
     'pinia',
   ]);
 });

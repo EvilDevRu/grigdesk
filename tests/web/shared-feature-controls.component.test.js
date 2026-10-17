@@ -147,7 +147,7 @@ test('AttentionAlerts запускает и скрывает оценки чер
     attachTo: browser.document.querySelector('#mount'),
     global: {
       stubs: {
-        UiPopover: {
+        UiTopbarPanel: {
           template: '<section><slot name="trigger" /><slot /></section>',
         },
       },
@@ -194,7 +194,7 @@ test('AttentionAlerts не опрашивает и не показывает о�
     attachTo: browser.document.querySelector('#mount'),
     global: {
       stubs: {
-        UiPopover: {
+        UiTopbarPanel: {
           template: '<section><slot name="trigger" /><slot /></section>',
         },
       },

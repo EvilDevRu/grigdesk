@@ -20,7 +20,7 @@ import {
   parseCodePushResponse,
   parseCodeUndoCommitResponse,
   parseCodeCommitTitleResponse,
-} from '../../shared/codeContracts.ts';
+} from '../../shared/plugins/code/codeContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { codeApi, codeErrorMessage } from '../../web/src/shared/codeApi.ts';
 import { codeRoots, loadCodeRoots } from '../../web/src/features/code/links.ts';

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const MODULE = webFile('../shared/showcaseTimeline.ts');
+const MODULE = webFile('../shared/plugins/showcase/showcaseTimeline.ts');
 
 function artifact(kind, id, durationMs) {
   return {

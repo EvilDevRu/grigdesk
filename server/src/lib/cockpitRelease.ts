@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as pause } from 'node:timers/promises';
+
 import type {
   CheckoutState,
   DisplayVersion,
@@ -10,11 +12,11 @@ import type {
   ReleaseStatus,
   RunningRelease,
   UpdateJob,
-} from '../../../shared/cockpitUpdateContracts.ts';
+} from '../../../shared/runtime/cockpitUpdateContracts.ts';
 
 // Форму снимка версии читает и веб (плитка версии, настройки сервера): она объявлена в
 // общем контракте, а здесь остаётся доступной прежним импортёрам.
-export type { ReleaseStatus, UpdateJob } from '../../../shared/cockpitUpdateContracts.ts';
+export type { ReleaseStatus, UpdateJob } from '../../../shared/runtime/cockpitUpdateContracts.ts';
 
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const TAG_RE = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -298,7 +300,8 @@ async function withStateWriteLock<Value>(statePath: string, fn: () => Promise<Va
           continue;
         }
       } catch { continue; }
-      await new Promise((resolve) => { setTimeout(resolve, 20); });
+
+      await pause(20);
       continue;
     }
     // Ошибка самого writer-а не является конфликтом lock-а, даже если случайно имеет
@@ -347,7 +350,7 @@ function safeCheckError(result: CommandResult | null | undefined): ReleaseCheckE
 
 export interface CockpitReleaseServiceOptions {
   rootDir: string;
-  statePath?: string;
+  statePath: string;
   runner?: CommandRunner;
   now?: () => Date;
   broadcast?: (name: string, payload?: unknown) => void;
@@ -382,13 +385,17 @@ export class CockpitReleaseService {
 
   constructor({
     rootDir,
-    statePath = path.join(rootDir, 'server', '.state', 'cockpit-update.json'),
+    statePath,
     runner = defaultCommandRunner,
     now = () => new Date(),
     broadcast = () => {},
     checkIntervalMs = CHECK_INTERVAL_MS,
     initialCheckDelayMs = 30_000,
   }: CockpitReleaseServiceOptions) {
+    if (!statePath) {
+      throw new Error('CockpitReleaseService: statePath is required');
+    }
+
     this.rootDir = rootDir;
     this.statePath = statePath;
     this.runner = runner;

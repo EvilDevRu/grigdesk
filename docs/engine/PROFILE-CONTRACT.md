@@ -115,7 +115,7 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 | `PROFILE_TRIAGE_RULES` | файлы правил продукта для триажа кокпита: `ключ:путь` от корня репозитория из `PROFILE_TRIAGE_REPOS`; читаются в снимке кода захода ([правила продукта](../cockpit/pipeline/triage-product-rules.md)) |
 | `PROFILE_AGENT_ALLOW` / `PROFILE_AGENT_DENY` | project-specific command policy |
 | `PROFILE_SERVICE_HOST` | hostname без схемы и порта |
-| `PROFILE_LOOP_MAX_ROUNDS` | потолок кругов маршрутов в режиме «цикл» (`loop`): целое 1..100, без строки — 20; пустое, 0, больше 100 и мусор — отказ до запуска модели. Читается при start/resume/gate, на обычные маршруты не влияет. Resume остановки `loop-ceiling` без подъёма потолка ничего не меняет и не запускает — задача остаётся ждать человека |
+| `PROFILE_LOOP_MAX_ROUNDS` | потолок кругов маршрутов в режиме «цикл» (`loop`): целое 1..300, без строки — 20; пустое, 0, больше 300 и мусор — отказ до запуска модели. Читается при start/resume/gate, на обычные маршруты не влияет. Resume остановки `loop-ceiling` без подъёма потолка ничего не меняет и не запускает — задача остаётся ждать человека |
 
 Topology и prompt-файлы не задаются shell-массивами или функциями профиля. Они читаются только
 из опубликованного immutable route bundle. Обязательные workspace/stand hooks перечислены ниже

@@ -1,6 +1,6 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcaseSceneDraft } from '../../shared/showcaseApi';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts';
+import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
 
 /**

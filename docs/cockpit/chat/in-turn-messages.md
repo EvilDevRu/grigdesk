@@ -3,8 +3,8 @@
 Пока ход подтверждённо активен, человек может передать текст в **тот же ход** и получить
 ответ до его финала. Исходная работа после ответа продолжается сама. Возможность объявляет
 адаптер: Claude использует дополнительный ввод в `stream-json`, Codex — `turn/steer`,
-Kimi — серверный `prompts:steer`, DeepSeek — `session/prompt` с `mode: 'steer'` в web
-профиле. Тумблер `chatLiveSessions` определяет жизнь
+Kimi — серверный `prompts:steer`, DeepSeek и GLM — `session/prompt` с `mode: 'steer'` в
+web-транспорте DSH ([GLM](glm-turn-runtime.md)). Тумблер `chatLiveSessions` определяет жизнь
 процесса **между** ходами и не отключает уточнение внутри уже идущего хода.
 
 ## Путь и состояние

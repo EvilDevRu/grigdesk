@@ -7,7 +7,7 @@ import {
   parseTelegramChats,
   parseTelegramRules,
   parseTelegramStatus,
-} from '../../shared/telegramContracts.ts';
+} from '../../shared/telegram/telegramContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { telegramApi, telegramPluginDisabled } from '../../web/src/shared/telegramApi.ts';
 

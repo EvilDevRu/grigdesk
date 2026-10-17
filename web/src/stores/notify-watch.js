@@ -1,14 +1,14 @@
-// Вотчер конвейера: следит, что остановилось на человеке. Отсюда живут двое —
-// системное оповещение «конвейер отработал и ждёт тебя», чип на пункте «Конвейер»
-// и общий счётчик активных прогонов в топбаре. Оповещение — только на переходе
+// Вотчер конвейера: следит, что остановилось на человеке. Отсюда живут
+// системные оповещения, сводка топбара и счётчик внимания в сайдбаре.
+// Оповещение — только на переходе
 // (не ждала → ждёт), чтобы не спамить; сводка пересчитывается на каждой проверке.
 // Данные — те же /api/tasks + /api/tasks/:id/graph, что у страницы конвейера; дёргается
 // по SSE state-change (AppShell) + редкий страховочный интервал.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { alertUser, dismissAlert } from '../shared/alerts.ts';
-import { stripEmoji, waitingReason } from '../../../shared/pipelineWait.ts';
-import { silenceReason } from '../../../shared/agentActivity.ts';
+import { stripEmoji, waitingReason } from '../../../shared/pipeline/pipelineWait.ts';
+import { silenceReason } from '../../../shared/pipeline/agentActivity.ts';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,
@@ -24,8 +24,8 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
   // Три разные беды плюс обычная работа, поэтому списки раздельные: waiting — конвейер стоит на воротах и ждёт
   // РЕШЕНИЯ (это штатно, в интерфейсе есть кнопка); stalled — движок упёрся или оборвался
   // (само не рассосётся, надо разбираться); silent — формально всё идёт, но агент молчит дольше
-  // порога, и без звонка это заметно только по сгоревшему лимиту этапа. Смешивать их
-  // в одну цифру нельзя. running нужен синему сектору и общему числу в топбаре,
+  // порога, и без звонка это заметно только по сгоревшему лимиту этапа. Причины
+  // сохраняются раздельно в подсказке и топбаре. running нужен счётчику выполняемых задач в топбаре,
   // но в цифру внимания не входит.
   state: () => ({
     waiting: [],
@@ -37,12 +37,12 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
     error: null,
   }),
   getters: {
-    // Число в центре — только задачи, требующие человека. Обычные живые ходы участвуют
-    // в синем секторе круга, но это число не увеличивают.
+    // Сводка внимания считает только задачи, требующие человека.
+    // Обычные живые ходы сохраняются в отдельном runningCount.
     badgeSummary: (s) => pipelineBadgeSummary(s),
     topbarItems: (s) => pipelineTopbarItems(s),
     attentionCount() { return this.badgeSummary.attentionCount; },
-    // Подсказка чипа: сводка + поимённо, чтобы не открывать конвейер ради «кто именно».
+    // Текстовая сводка: количества и причины поимённо для потребителей стора.
     attentionTitle: (s) => {
       const lines = [];
       if (s.waiting.length) {

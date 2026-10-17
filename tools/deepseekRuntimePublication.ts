@@ -2,7 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { deepSeekRuntimeError, readDeepSeekArtifact } from '../server/src/lib/deepseek/runtimeArtifact.ts';
+import {
+  deepSeekRuntimeError,
+  readDeepSeekArtifactAsync,
+} from '../server/src/lib/deepseek/runtimeArtifact.ts';
 
 type SavedGeneration = 'absent' | 'valid' | 'damaged';
 
@@ -18,9 +21,9 @@ export async function activateDeepSeekGeneration(runtimeRoot: string, buildId: s
   }
 
   const generation = path.join(runtimeRoot, 'builds', buildId);
-  const { root, artifact } = readDeepSeekArtifact(generation);
+  const { root, artifact } = await readDeepSeekArtifactAsync(generation);
 
-  // readDeepSeekArtifact возвращает realpath: корень за символической ссылкой не ошибка.
+  // Проверка возвращает realpath: корень за символической ссылкой не ошибка.
   if (root !== path.join(await fs.realpath(runtimeRoot), 'builds', buildId) || artifact.buildId !== buildId) {
     throw new Error('Поколение не соответствует immutable build path');
   }
@@ -134,7 +137,7 @@ async function savedGenerationState(destination: string, buildId: string): Promi
   }
 
   try {
-    const saved = readDeepSeekArtifact(destination);
+    const saved = await readDeepSeekArtifactAsync(destination);
 
     if (saved.artifact.buildId !== buildId) {
       throw new Error('Build path уже занят другой сборкой');
@@ -159,7 +162,7 @@ export async function publishDeepSeekGeneration(source: string, runtimeRoot: str
     throw new Error('runtime root должен быть абсолютным');
   }
 
-  const { root, artifact } = readDeepSeekArtifact(source);
+  const { root, artifact } = await readDeepSeekArtifactAsync(source);
   const builds = path.join(runtimeRoot, 'builds');
 
   await fs.mkdir(builds, { recursive: true });
@@ -177,7 +180,7 @@ export async function publishDeepSeekGeneration(source: string, runtimeRoot: str
 
     if (saved !== 'valid') {
       await fs.cp(root, temporary, { recursive: true, verbatimSymlinks: true });
-      readDeepSeekArtifact(temporary);
+      await readDeepSeekArtifactAsync(temporary);
 
       if (saved === 'damaged') {
         await fs.rename(destination, damaged);

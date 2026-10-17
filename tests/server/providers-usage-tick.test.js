@@ -76,6 +76,7 @@ async function tickFixture(t, { clients, usageTickMs, adapter }) {
       'ticking-provider',
       (adapter ?? tickingAdapter)(() => { usageReads += 1; }),
     ]]),
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 

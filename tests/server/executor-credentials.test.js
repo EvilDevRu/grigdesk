@@ -294,11 +294,11 @@ test('маршрут пишет ключ в .env, а карточка видит
   assert.deepEqual(response.json().changed, ['TEST_API_KEY']);
   assert.equal(await fs.readFile(fixture.file, 'utf8'), `# шапка\nTEST_API_KEY=${SECRET}\n`);
   assert.equal(fixture.env.TEST_API_KEY, SECRET);
-  // Каталог перечитывается в фоне, событие уходит по его завершении.
+  // Invalidation уходит сразу; итог фонового каталога даёт обычное обновление реестра.
   await new Promise((resolve) => {
     setImmediate(resolve);
   });
-  assert.deepEqual(fixture.broadcasts.map((item) => item.name), ['providers-update']);
+  assert.deepEqual(fixture.broadcasts.map((item) => item.name), ['providers-update', 'providers-update']);
 
   const list = await fixture.app.inject({ method: 'GET', url: '/api/providers' });
   const card = list.json().providers.find((provider) => provider.id === 'keyed-provider');

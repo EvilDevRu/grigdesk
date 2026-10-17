@@ -1,7 +1,7 @@
 # Рабочая папка чата и границы записи
 
 Выбор хранится в `workdir`: `cockpit`, `project {projectId, repoKey}` или `path {path}`.
-Форму проверяет `shared/chatWorkdir.ts`, фактические пути —
+Форму проверяет `shared/chat/chatWorkdir.ts`, фактические пути —
 `server/src/lib/chat/workdir.ts`. Старый чат без поля означает Кокпит; явное повреждённое
 значение не нормализуется в разрешённую папку. Продуктовый контракт —
 [рабочая папка разговора](../guide/chat-workdir.md).

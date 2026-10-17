@@ -9,6 +9,9 @@
 // сервере и перечитывается по jobId, а её копия в браузере копила бы мегабайты.
 import { defineStore } from 'pinia';
 
+import { textOr } from '../../../shared/lib/text.ts';
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from '../shared/apiClient.ts';
 import { mmss } from '../shared/format.ts';
 import { mediaApi } from '../shared/mediaApi.ts';
@@ -17,7 +20,7 @@ import type {
   MediaFrame,
   MediaJob,
   MediaTranscriptSegment,
-} from '../../../shared/mediaContracts.ts';
+} from '../../../shared/media/mediaContracts.ts';
 import { usePluginsStore } from './plugins.js';
 
 // Окно фрагмента: 15 секунд до и после места задачи, шаг расширения тот же, потолок
@@ -153,14 +156,6 @@ export function canWidenClip(draft: { clipWindow?: unknown } | null | undefined)
   return (Number(draft?.clipWindow) || CLIP_WINDOW_STEP) < CLIP_WINDOW_MAX;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
-function text(value: unknown): string {
-  return typeof value === 'string' ? value : '';
-}
-
 /**
  * Чтение снимка. Приватный режим браузера бросает на самом обращении к хранилищу,
  * и для раздела это просто «снимка нет», а не повод упасть.
@@ -206,17 +201,13 @@ function savedFlag(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function savedText(value: unknown, fallback: string): string {
-  return typeof value === 'string' ? value : fallback;
-}
-
 /**
  * Кадр из снимка. Вложение уезжает на портал по имени, поэтому повреждённое имя или
  * потерянная секунда означают «кадра нет»: черновик при этом остаётся, а показывать
  * и прикладывать нечего.
  */
 function restoredFrame(value: unknown): MediaFrame | null {
-  const frame = asRecord(value);
+  const frame = objectOrEmpty(value);
   const at = finiteNumber(frame.at, null);
 
   if (typeof frame.name !== 'string' || !frame.name || at === null) {
@@ -231,7 +222,7 @@ function restoredFrame(value: unknown): MediaFrame | null {
  * без «от» и «до» его нечем показать, а без веса непонятно, вырезался ли он вообще.
  */
 function restoredClip(value: unknown): MediaClip | null {
-  const clip = asRecord(value);
+  const clip = objectOrEmpty(value);
   const at = finiteNumber(clip.at, null);
   const from = finiteNumber(clip.from, null);
   const to = finiteNumber(clip.to, null);
@@ -257,19 +248,19 @@ function restoredClip(value: unknown): MediaClip | null {
  * прошлой вкладке, и поднятый с ними черновик выглядел бы навсегда занятым.
  */
 function restoredDraft(value: unknown, base: VideoDraft): VideoDraft {
-  const draft = asRecord(value);
+  const draft = objectOrEmpty(value);
   const createdId = draft.createdId;
 
   return {
     ...base,
-    title: savedText(draft.title, base.title),
-    description: savedText(draft.description, base.description),
-    createdById: savedText(draft.createdById, base.createdById),
-    responsibleId: savedText(draft.responsibleId, base.responsibleId),
-    groupId: savedText(draft.groupId, base.groupId),
+    title: textOr(draft.title, base.title),
+    description: textOr(draft.description, base.description),
+    createdById: textOr(draft.createdById, base.createdById),
+    responsibleId: textOr(draft.responsibleId, base.responsibleId),
+    groupId: textOr(draft.groupId, base.groupId),
     priority: finiteNumber(draft.priority, base.priority) ?? base.priority,
     confidence: finiteNumber(draft.confidence, base.confidence),
-    reason: savedText(draft.reason, base.reason),
+    reason: textOr(draft.reason, base.reason),
     frame: restoredFrame(draft.frame),
     frameOff: savedFlag(draft.frameOff, base.frameOff),
     at: finiteNumber(draft.at, base.at),
@@ -453,7 +444,7 @@ export const useVideoSessionStore = defineStore('video-session', {
         return;
       }
 
-      const snapshot = asRecord(parsed);
+      const snapshot = objectOrEmpty(parsed);
       const savedAt = Number(snapshot.savedAt) || 0;
 
       if (snapshot.v !== SESSION_SCHEMA || Date.now() - savedAt > SESSION_TTL_MS) {
@@ -465,10 +456,10 @@ export const useVideoSessionStore = defineStore('video-session', {
       const parts = Array.isArray(snapshot.parts) ? snapshot.parts : [];
 
       this.parts = parts.map((raw) => {
-        const part = asRecord(raw);
+        const part = objectOrEmpty(raw);
 
         return {
-          name: text(part.name),
+          name: textOr(part.name),
           size: Number(part.size) || 0,
           jobId: part.jobId ? String(part.jobId) : null,
           job: null,
@@ -476,7 +467,7 @@ export const useVideoSessionStore = defineStore('video-session', {
         };
       });
 
-      const uploaded = asRecord(snapshot.uploaded);
+      const uploaded = objectOrEmpty(snapshot.uploaded);
 
       this.uploaded = typeof uploaded.name === 'string' && uploaded.name
         ? { name: uploaded.name, size: finiteNumber(uploaded.size, 0) ?? 0 }
@@ -485,10 +476,10 @@ export const useVideoSessionStore = defineStore('video-session', {
         .filter((id: unknown): id is string | number => (
           typeof id === 'string' || typeof id === 'number'
         ));
-      this.planHint = text(snapshot.planHint);
-      this.defCreator = text(snapshot.defCreator);
-      this.defResponsible = text(snapshot.defResponsible);
-      this.defGroup = text(snapshot.defGroup);
+      this.planHint = textOr(snapshot.planHint);
+      this.defCreator = textOr(snapshot.defCreator);
+      this.defResponsible = textOr(snapshot.defResponsible);
+      this.defGroup = textOr(snapshot.defGroup);
       this.defPriority = finiteNumber(snapshot.defPriority, 1) ?? 1;
 
       const drafts: unknown[] = Array.isArray(snapshot.drafts) ? snapshot.drafts : [];
@@ -613,7 +604,7 @@ export const useVideoSessionStore = defineStore('video-session', {
 
         this.startPoll();
       } catch (err) {
-        this.error = text(asRecord(err).message);
+        this.error = textOr(objectOrEmpty(err).message);
       } finally {
         this.uploading = false;
       }
@@ -657,7 +648,7 @@ export const useVideoSessionStore = defineStore('video-session', {
         } catch (err) {
           // Пропавший job — не сбой сети: сервер потерял разбор (чистили каталог,
           // переезжал mediaDir), и ждать его возвращения бессмысленно.
-          if (asRecord(err).status === 404) {
+          if (objectOrEmpty(err).status === 404) {
             part.gone = true;
             this.error = `Разбор части «${part.name}» больше не найден на сервере`
               + ' — запись придётся загрузить заново.';
@@ -673,7 +664,7 @@ export const useVideoSessionStore = defineStore('video-session', {
 
         if (this.pollFailures >= POLL_FAILURES_MAX) {
           this.stopPoll();
-          this.error = 'Сервер не отвечает — статус разбора не обновляется. Обнови страницу.';
+          this.error = 'Сервер не отвечает — статус разбора не обновляется. Перезапусти приложение.';
         }
 
         return;
@@ -791,9 +782,9 @@ export const useVideoSessionStore = defineStore('video-session', {
       } catch (err) {
         // Машинный код лежит в `data.error`; фразу для человека собираем здесь, потому что
         // сервер отдаёт только код — у «модель не выбрана» и «модель не ответила» разные выходы.
-        const code = text(asRecord(asRecord(err).data).error);
+        const code = textOr(objectOrEmpty(objectOrEmpty(err).data).error);
 
-        this.planError = PLAN_ERRORS[code] || text(asRecord(err).message) || 'Разбор не удался.';
+        this.planError = PLAN_ERRORS[code] || textOr(objectOrEmpty(err).message) || 'Разбор не удался.';
       } finally {
         this.planning = false;
       }
@@ -824,7 +815,7 @@ export const useVideoSessionStore = defineStore('video-session', {
         draft.clip = cut.clip;
         draft.clipWindow = window;
       } catch (err) {
-        draft.clipError = text(asRecord(asRecord(err).data).message)
+        draft.clipError = textOr(objectOrEmpty(objectOrEmpty(err).data).message)
           || 'Фрагмент записи не вырезан.';
       } finally {
         draft.clipBusy = false;
@@ -912,7 +903,7 @@ export const useVideoSessionStore = defineStore('video-session', {
           // выглядят для портала одинаково: вложения просто нет.
           clips: draft.clip && !draft.clipOff ? [draft.clip.name] : [],
         });
-        const id = asRecord(created).id;
+        const id = objectOrEmpty(created).id;
 
         draft.createdId = typeof id === 'number' || typeof id === 'string' ? id : '✓';
         this.created.push(draft.createdId);
@@ -921,7 +912,7 @@ export const useVideoSessionStore = defineStore('video-session', {
       } catch (err) {
         // Ошибка остаётся У СВОЕГО черновика: при постановке пачкой общая плашка не
         // говорила бы, какая именно задача не уехала.
-        draft.error = text(asRecord(err).message);
+        draft.error = textOr(objectOrEmpty(err).message);
 
         return null;
       } finally {

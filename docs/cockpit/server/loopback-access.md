@@ -1,4 +1,4 @@
-# Локальный доступ: один HTTP-сокет и прежняя авторизация
+# Локальный доступ: один HTTP-сокет и вход по ключу
 
 После ручного перезапуска сервер слушает только `127.0.0.1:<COCKPIT_PORT>`;
 штатный адрес — `http://localhost:8140`. `COCKPIT_PORT` по-прежнему выбирает порт.
@@ -7,11 +7,10 @@
 Второго сокета приложения, выпуска сертификатов и встроенного шлюза нет.
 Уже установленный внешний проброс проверяет и отключает владелец машины отдельно.
 
-Fastify использует protocol/ip сокета и не доверяет `X-Forwarded-*`. Cookie входа
-и её удаления ограничена выдавшим её хостом, без `Domain`; `Secure` определяется
+Fastify использует protocol/ip сокета и не доверяет `X-Forwarded-*`. Cookie входа ограничена выдавшим её хостом, без `Domain`; `Secure` определяется
 `request.protocol === 'https'`, поэтому на локальном HTTP его нет. `HttpOnly`,
-`SameSite=Lax`, `Path=/`, вход по паролю, общий гард `/api`/WebSocket, сессии и
-CLI-токен сохраняются. Любой forwarded-заголовок по-прежнему запрещает первичный setup.
+`SameSite=Lax` и `Path=/` сохраняются. Вход только по ключу; общий гард закрывает
+API/WebSocket и статику. CLI-токен сохраняется. Любой forwarded-заголовок запрещает обмен ключа.
 
 Prefs `accessLocalHttps` и `accessGateway` не выдаются через `read()`.
 Следующий успешный `write()` удаляет их из файла даже при patch старого клиента,
@@ -23,7 +22,7 @@ Prefs `accessLocalHttps` и `accessGateway` не выдаются через `re
 `COCKPIT_GITHUB_WEBHOOK_BASE_URL`; запасного адреса из домена больше нет.
 VPN-ворота запуска и Telegram-пульт сохраняют прежнее поведение.
 
-Проверки: `tests/server/loopback-only.test.mts` (конфигурация, вход/cookie/выход,
-setup и forwarded), `tests/server/app-boot-smoke.test.js` (настоящий старт и
+Проверки: `tests/server/loopback-only.test.mts` (конфигурация, вход по ключу/cookie,
+снятые пути и forwarded), `tests/server/app-boot-smoke.test.js` (настоящий старт и
 адрес LISTEN через `/proc`), `tests/server/prefs-store.test.js` (соседние prefs).
 Тестовый сервер использует временное состояние и отдельный свободный порт.

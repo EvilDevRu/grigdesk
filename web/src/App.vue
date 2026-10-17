@@ -1,15 +1,14 @@
 <template>
-  <!-- Пока не знаем состояние входа — не рисуем ничего: иначе на миг мелькает либо форма
-       у вошедшего, либо интерфейс у невошедшего. -->
-  <!-- На экране входа обновление остаётся доступно без AppShell: оно работает с SW,
-       а не с закрытым API. После входа тот же компонент стоит плиткой в конце рейки. -->
-  <CockpitVersionTile v-if="!auth.authenticated" standalone />
+  <SettingsWindowShell v-if="settingsWindow" />
+  <template v-else>
+  <!-- До проверки сессии не рисуем интерфейс или отказ: оба могут оказаться неверными
+       в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
   <UiTooltipHost />
 
   <template v-if="auth.ready">
-    <LoginView v-if="!auth.authenticated" />
-    <!-- Provider существует только в authenticated-ветке: logout размонтирует его
+    <NoAccessView v-if="!auth.authenticated" />
+    <!-- Provider существует только в authenticated-ветке: потеря сессии размонтирует его
          вместе с единственным mic-controller и немедленно отзывает browser resources. -->
     <SpeechProvider v-else>
       <AppShell>
@@ -23,15 +22,17 @@
       <UiToastHost />
     </SpeechProvider>
   </template>
+  </template>
 </template>
 
 <script setup>
+import { asyncView } from './shared/asyncView.ts';
 import { onMounted, watch } from 'vue';
 import { UiDialogHost, UiTooltipHost, UiToastHost } from './ui';
+import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
-import LoginView from './views/LoginView.vue';
-import CockpitVersionTile from './features/cockpit-update/CockpitVersionTile.vue';
+import NoAccessView from './views/NoAccessView.vue';
 import TaskModal from './views/TaskModal.vue';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';
@@ -45,10 +46,20 @@ import { useTaskSeenStore } from './stores/task-seen.js';
 import { useVideoSessionStore } from './stores/videoSession.ts';
 
 const auth = useAuthStore();
+const settingsWindow = currentDesktopMode() === 'settings';
+const SettingsWindowShell = asyncView(() => import('./shared/layout/SettingsWindowShell.vue'));
+
+let pollingStarted = false;
 
 // Фоновые поллинги запускаем ТОЛЬКО после входа: иначе они молотят в закрытый API,
-// ловят 401 и засоряют консоль на экране логина.
+// ловят 401 и засоряют консоль на экране отказа.
 function startPolling() {
+  if (settingsWindow || pollingStarted) {
+    return;
+  }
+
+  pollingStarted = true;
+
   // Отметки просмотра нужны всему приложению, а не только доске: без них чип «Доска»
   // в навигации не знает, какие задачи новые, на какой бы странице человек ни стоял.
   useTaskSeenStore().load(true);
@@ -67,14 +78,25 @@ onMounted(async () => {
   } catch { /* storage может быть недоступен */ }
   auth.watchUnauthorized();
   await auth.load();
-  if (auth.authenticated) startPolling();
+
+  if (auth.authenticated) {
+    startPolling();
+  }
 });
 
-// Вошли позже (через форму) — поднимаем поллинги тогда. Потеряли сессию — гасим:
+// Подтверждённый вход запускает поллинги. Потеря сессии останавливает их:
 // иначе интервалы продолжают долбить закрытый API и сыплют 401 в консоль на экране входа.
 watch(() => auth.authenticated, (on, was) => {
-  if (on && !was) startPolling();
+  if (settingsWindow) {
+    return;
+  }
+
+  if (on && !was) {
+    startPolling();
+  }
+
   if (!on && was) {
+    pollingStarted = false;
     useBoardStore().stopPolling();
     useSystemStore().stopPolling();
     useTaskFavoritesStore().clear();
@@ -83,7 +105,7 @@ watch(() => auth.authenticated, (on, was) => {
     dismissAllAlerts();
     clearAlertHistory();
     useTaskSeenStore().clear();
-    // Разбор встречи набран человеком и потому переживает выход, а вот его поллинг —
+    // Разбор встречи набран человеком и потому переживает потерю сессии, а вот его поллинг —
     // нет: без сессии он молотил бы в закрытый API теми же 401 каждые две секунды.
     useVideoSessionStore().stopPoll();
   }

@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { Dirent, Stats } from 'node:fs';
 
+import { setTimeout as pause } from 'node:timers/promises';
+
 import { SPEECH_MODEL_CATALOG, speechModel } from './catalog.ts';
 import { pythonEnv } from './transport.ts';
 import {
@@ -219,7 +221,7 @@ export class ModelJobManager {
       captureProcessIdentity,
       processIdentityMatches,
       signalOwnedProcess,
-      sleep: (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }),
+      sleep: pause,
       ...deps,
     } as ModelJobDeps;
     // mode задаём в самом mkdir: chmod после обычного создания оставлял бы окно,

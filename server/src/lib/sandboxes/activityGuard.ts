@@ -6,7 +6,7 @@
 // `orch.lock` принадлежит другому протоколу и здесь намеренно не используется.
 import path from 'node:path';
 
-import { SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts.ts';
+import { SANDBOX_TASK_RE } from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 import { acquireKernelFileLock } from '../kernelLock.ts';
 import type { KernelFileLock } from '../kernelLock.ts';
 

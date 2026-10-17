@@ -4,21 +4,22 @@
 // произносимая строка с локальными заменами, а все диапазоны указаний переводятся
 // из координат канонической строки в её координаты. Та же карта возвращает
 // измеренные слова обратно к экранному тексту для cue и субтитров.
+import { splitsUtf16Character } from '../../../../../shared/lib/text.ts';
+
 import type {
   ShowcasePronunciationOverride,
   ShowcaseScene,
-} from '../../../../../shared/showcaseContracts.ts';
+} from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import {
   applyPronunciationReplacements,
   parseNarration,
   pronunciationOutputOffset,
   pronunciationSourceOffset,
-  splitsUtf16Character,
-} from '../../../../../shared/showcaseNarration.ts';
+} from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
 import type {
   AppliedPronunciationText,
   NarrationStress,
-} from '../../../../../shared/showcaseNarration.ts';
+} from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
 import { ShowcaseError } from '../errors.ts';
 import { syncTextHash } from '../scenes.ts';
 import type { SpeechAlignment } from './alignment.ts';

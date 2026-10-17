@@ -9,8 +9,12 @@
 
 ## Устройство
 
+- [Каталог общего кода: области shared, помощники и границы сред](shared-code.md)
+
+- [Состояние миграции на TypeScript: остаток JS/Vue, границы проверок и совместимость](typescript-migration-state.md)
 - [Перенос знаний в документацию: полнота и правила поддержки](documentation-migration.md)
 - [Модули сервера (server/src/modules/)](server-modules.md)
+- [Что лежит в bin/: единая команда, собранные b24 и посредник, иконка](bin-directory.md)
 - [Слои](layers.md)
 
 ## Грабли

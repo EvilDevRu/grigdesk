@@ -1,9 +1,11 @@
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseSandboxAction,
   parseSandboxJobLog,
   parseSandboxOverview,
-} from '../../../shared/sandboxContracts';
+} from '../../../shared/plugins/sandboxes/sandboxContracts';
 
 export interface SandboxRaiseOptions {
   profile: string;
@@ -65,16 +67,12 @@ const MESSAGES: Record<string, string> = {
   sandbox_error: 'Сервер не смог выполнить действие — подробности в журнале кокпита.',
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Текст отказа для человека. Общий клиент кладёт тело ответа в `data`: текст сервера
  * точнее всего, а карта кодов закрывает те отказы, которые приходят без пояснения.
  */
 export function sandboxErrorMessage(error: unknown, fallback = 'Действие не удалось.'): string {
-  const data = asRecord(asRecord(error).data);
+  const data = objectOrEmpty(objectOrEmpty(error).data);
   const detail = typeof data.message === 'string' ? data.message : '';
   const code = typeof data.error === 'string' ? data.error : '';
 

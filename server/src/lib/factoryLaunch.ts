@@ -1,3 +1,5 @@
+import { config as runtimeConfig } from '../config.ts';
+
 // Аргументы transient-юнита route-оркестратора (resume после ворот и после возврата).
 //
 // KillMode=mixed вместо дефолтного control-group — не украшение. Оркестратор по TERM
@@ -21,6 +23,7 @@ export function factoryUnitArgs(task: string | number): string[] {
 
 // Пути фабрики, которые обязаны доехать до дочернего процесса.
 export interface FactoryLaunchPaths {
+  dataHome?: string;
   factoryHome: string;
   profilesDir: string;
   stateDir: string;
@@ -35,6 +38,7 @@ export function factoryLaunchEnv(
 ): Record<string, string> {
   return {
     ...extra,
+    COCKPIT_HOME: config.dataHome ?? runtimeConfig.dataHome,
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_STATE: config.stateDir,

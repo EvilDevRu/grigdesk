@@ -6,7 +6,7 @@
 порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
 старых серверных manifest только для известных встроенных `system: true` плагинов;
 пользовательский legacy-manifest остаётся в `rail`. Реестр: `server/src/lib/pluginsRegistry.ts` (SYSTEM =
-video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, studio3d) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
 в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
@@ -43,7 +43,7 @@ InboxView, TelegramView, GitHubView и `ToolHost` для Code/Shelf показы
 
 **Категория (`category` манифеста) режет каталог по РОДУ РАБОТЫ, а не по месту в
 интерфейсе**: место объявляет `nav.group` и отвечает на другой вопрос. Список категорий
-общий для сервера и веба — `shared/pluginsContracts.ts`: `work` («Задачи и связь»), `dev`
+общий для сервера и веба — `shared/plugins/pluginsContracts.ts`: `work` («Задачи и связь»), `dev`
 («Разработка»), `knowledge` («Показ работы») и `other` («Прочее»). Неизвестное или
 пустое значение нормализуется в `other` — чужой плагин не заводит на экране свою группу;
 подмену заявленной категории скан пишет в журнал. Разнесённый rollout работает как с
@@ -75,3 +75,16 @@ model-only генератором Code): настройка живёт
 пометкой «нет у этой модели».
 
 Источник до переноса: docs/cockpit/architecture.md § Плагины кокпита
+
+
+## Жизненный цикл 3D
+
+Системный studio3d выключен по умолчанию. Его `/api/studio3d/*` закрыт auth guard
+и живым plugin gate (404 plugin_disabled); заказы/reconcile/close требуют human session.
+При выключенном старте нет файловых эффектов, scan, history или обращения к исполнителю.
+Включение открывает проверенную библиотеку и lock, выполняет resume и расписание.
+Выключение прекращает новые отправки и автоимпорт, сохраняет исход уже отправленного
+POST и дочитывает принятые платные результаты в прежнюю библиотеку. После выключенного
+перезапуска resume ждёт включения. Смена libraryDir проходит prepare/commit/rollback
+до prefs; активные/unknown/leased входы закрывают переход. Подробнее —
+[API и lifecycle](studio3d-server.md), [контракт раздела](../guide/studio3d.md).

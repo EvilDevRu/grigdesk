@@ -825,3 +825,45 @@ test('usage read cache: refresh не дублирует уже начатое ч
     { generation: 1 },
   ]);
 });
+
+test('usage cache: clear перенаправляет старый результат и отказ к актуальному чтению', async () => {
+  for (const rejected of [false, true]) {
+    let finishOld;
+    let rejectOld;
+    let finishNew;
+    let calls = 0;
+    const cache = createUsageReadCache(() => {
+      calls += 1;
+
+      return new Promise((resolve, reject) => {
+        if (calls === 1) {
+          finishOld = resolve;
+          rejectOld = reject;
+        } else {
+          finishNew = resolve;
+        }
+      });
+    });
+    const old = cache.read();
+
+    await Promise.resolve();
+    cache.clear();
+
+    const reading = cache.read();
+    const refreshing = cache.refresh();
+
+    await Promise.resolve();
+
+    finishNew('B');
+    assert.deepEqual(await Promise.all([old, reading, refreshing]), ['B', 'B', 'B']);
+
+    if (rejected) {
+      rejectOld(new Error('old failure'));
+    } else {
+      finishOld('A');
+    }
+
+    assert.equal(await cache.read(), 'B');
+    assert.equal(calls, 2);
+  }
+});

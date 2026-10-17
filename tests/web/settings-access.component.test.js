@@ -1,5 +1,5 @@
-// Настройки доступа сохраняют учётную запись и управление активными сессиями.
-// Подменяются сеть и stores, а форма и общий danger-dialog остаются настоящими.
+// Вкладка «Доступ» объясняет вход по локальному ключу и не предлагает пароль или выход.
+// Подменяются сеть и stores, а карточки и мобильный раздел остаются настоящими.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -103,7 +103,7 @@ async function mountSettingsAccess(t, { confirmAnswers = [] } = {}) {
     useProvidersStore: () => providersStore,
     useUiContextStore: () => ({ set() {}, clear() {} }),
     useAuthStore: () => ({
-      login: 'me',
+      clientScope: 'me',
       authenticated: true,
       async load() {},
     }),
@@ -115,7 +115,7 @@ async function mountSettingsAccess(t, { confirmAnswers = [] } = {}) {
       async setEnabled() {},
     }),
     useChatStore: () => ({ compactWindow: 0 }),
-    usePwaStore: () => ({
+    useDeviceStore: () => ({
       canInstall: false,
       wakeLock: false,
       async install() {},
@@ -127,7 +127,11 @@ async function mountSettingsAccess(t, { confirmAnswers = [] } = {}) {
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  const SettingsView = await compileSettingsView({ prefix: '__accessSettings', confirm: true });
+  const SettingsView = await compileSettingsView({
+    prefix: '__accessSettings',
+    confirm: true,
+    mobileAccess: true,
+  });
   const wrapper = mount(SettingsView, {
     attachTo: browser.document.querySelector('#mount'),
     global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
@@ -153,14 +157,24 @@ async function mountSettingsAccess(t, { confirmAnswers = [] } = {}) {
   };
 }
 
-test('LO-10: доступ сохраняет форму учётной записи при смене вкладок', async (t) => {
+test('LO-10: доступ объясняет вход по ключу и сохраняет мобильный раздел', async (t) => {
   const { wrapper, gets, posts, flushPromises } = await mountSettingsAccess(t);
-  // Учётная запись остаётся рабочим содержимым вкладки после каждого перехода.
-  // Сравниваем скалярные значения, чтобы отказ happy-dom не раздувал память.
+  /**
+   * Проверяет вкладку после открытия и повторного перехода из приложения.
+   * Мобильный раздел настоящий, парольных полей и действий выхода нет.
+   */
   const checkAccess = () => {
     assert.equal(wrapper.find('.access-account').exists(), true);
-    assert.equal(wrapper.findAll('.access-account input[type="password"]').length, 3);
-    assert.match(wrapper.text(), /Учётная запись и активные сессии\./u);
+    assert.match(wrapper.text(), /вход по локальному ключу/u);
+    assert.equal(wrapper.find('#mobile-access-title').exists(), true);
+
+    // Формы пароля, смены пароля и кнопок выхода в новом интерфейсе нет.
+    assert.equal(wrapper.findAll('.access-account input[type="password"]').length, 0);
+    assert.equal(wrapper.findAll('.access-account input').length, 0);
+
+    for (const removed of ['Сменить пароль', 'Выйти со всех устройств', 'Текущий пароль']) {
+      assert.equal(wrapper.text().includes(removed), false, removed);
+    }
 
     for (const removed of ['Пути подключения', 'Локальный HTTPS', 'VPS-шлюз', 'Сертификат и устройства']) {
       assert.equal(wrapper.text().includes(removed), false);
@@ -189,38 +203,16 @@ test('LO-10: доступ сохраняет форму учётной запи�
   const requests = [...gets, ...posts.map((call) => call.path)];
 
   assert.equal(requests.some((path) => /^\/api\/(?:settings\/tls|gateway)\b/u.test(path)), false);
+  assert.equal(requests.some((path) => path.startsWith('/api/auth/')), false);
 });
 
-test('ACCESS-WEB-18: выход со всех устройств проходит через общий danger-dialog', async (t) => {
-  const {
-    wrapper,
-    posts,
-    confirmations,
-    flushPromises,
-  } = await mountSettingsAccess(t, {
-    confirmAnswers: [false, true],
-  });
-  const logoutAllButton = wrapper.findAll('button')
-    .find((button) => button.text() === 'Выйти со всех устройств');
+test('ACCESS-WEB-18: во вкладке «Доступ» нет выхода и смены пароля', async (t) => {
+  const { wrapper, posts, confirmations, flushPromises } = await mountSettingsAccess(t);
 
-  assert.ok(logoutAllButton);
-
-  await logoutAllButton.trigger('click');
   await flushPromises();
-  assert.equal(posts.some((call) => call.path === '/api/auth/logout-all'), false);
-
-  await logoutAllButton.trigger('click');
-  await flushPromises();
-  assert.equal(confirmations.length, 2);
-  assert.deepEqual(confirmations[1], {
-    message: 'Разлогинить все устройства, включая это?',
-    options: {
-      danger: true,
-      okText: 'Выйти со всех',
-    },
-  });
-  assert.equal(
-    posts.filter((call) => call.path === '/api/auth/logout-all').length,
-    1,
-  );
+  assert.deepEqual(confirmations, []);
+  assert.equal(posts.some((call) => call.path.startsWith('/api/auth/')), false);
+  assert.equal(wrapper.findAll('button')
+    .some((button) => ['Выйти', 'Выйти со всех устройств', 'Сменить пароль']
+      .includes(button.text())), false);
 });

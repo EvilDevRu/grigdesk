@@ -13,9 +13,9 @@ const PINIA_URL = pathToFileURL(fileURLToPath(
 const CHAT_TITLE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/chat-title.js', import.meta.url),
 )).href;
-const CONTEXT_USAGE_URL = new URL('../../shared/chatContextUsage.ts', import.meta.url).href;
-const CHAT_RUN_URL = new URL('../../shared/chatRun.ts', import.meta.url).href;
-const IN_TURN_CONTRACT_URL = new URL('../../shared/chatInTurnContracts.ts', import.meta.url).href;
+const CONTEXT_USAGE_URL = new URL('../../shared/chat/chatContextUsage.ts', import.meta.url).href;
+const CHAT_RUN_URL = new URL('../../shared/chat/chatRun.ts', import.meta.url).href;
+const IN_TURN_CONTRACT_URL = new URL('../../shared/chat/chatInTurnContracts.ts', import.meta.url).href;
 const IN_TURN_STORE_URL = new URL('../../web/src/stores/chatInTurn.ts', import.meta.url).href;
 
 const apiHarness = {};
@@ -32,8 +32,8 @@ function patch(source) {
     )
     .replace("'../shared/quickPermission.ts'",
       JSON.stringify(new URL('../../web/src/shared/quickPermission.ts', import.meta.url).href))
-    .replace("'../../../shared/chatWorkdir.ts'",
-      JSON.stringify(new URL('../../shared/chatWorkdir.ts', import.meta.url).href))
+    .replace("'../../../shared/chat/chatWorkdir.ts'",
+      JSON.stringify(new URL('../../shared/chat/chatWorkdir.ts', import.meta.url).href))
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
     .replace("import { api } from '../shared/apiClient.ts';", 'const api = globalThis.__slashChatApi;')
     .replace(
@@ -66,11 +66,11 @@ function patch(source) {
     .replace("'../shared/chatHistoryStepReuse.ts'",
       JSON.stringify(new URL('../../web/src/shared/chatHistoryStepReuse.ts', import.meta.url).href))
     .replace(
-      "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
+      "import { normalizeContextUsage } from '../../../shared/chat/chatContextUsage.ts';",
       `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,
     )
-    .replace("from '../../../shared/chatRun.ts';", `from '${CHAT_RUN_URL}';`)
-    .replace("from '../../../shared/chatInTurnContracts.ts';",
+    .replace("from '../../../shared/chat/chatRun.ts';", `from '${CHAT_RUN_URL}';`)
+    .replace("from '../../../shared/chat/chatInTurnContracts.ts';",
       `from '${IN_TURN_CONTRACT_URL}';`)
     .replace("from './chatInTurn.ts';", `from '${IN_TURN_STORE_URL}';`)
     .replace(

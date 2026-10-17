@@ -1,4 +1,4 @@
-import { parseSandboxJob } from '../../../../shared/sandboxContracts';
+import { parseSandboxJob } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 import { sseSubscribe } from '../../composables/useSse.ts';
 import { useSandboxesStore } from '../../stores/sandboxes';
 import { loadSandboxes } from './loadSandboxes';

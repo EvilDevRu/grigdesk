@@ -32,7 +32,7 @@ import type {
   CodeStagedContext,
   CodeUndoCommitResponse,
   CodeWorktreeChanges,
-} from '../../../shared/codeContracts.ts';
+} from '../../../shared/plugins/code/codeContracts.ts';
 
 export type StagedCommitContext = CodeStagedContext;
 

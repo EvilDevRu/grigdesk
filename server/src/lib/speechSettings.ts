@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+import { isRecord } from '../../../shared/lib/objects.ts';
+
 import { DEFAULT_VIDEO_INITIAL_PROMPT, INITIAL_PROMPT_MAX_CHARS } from './speech/options.ts';
 
 // Поля nullable — именно ручные override: null означает «возьми значение из пресета».
@@ -69,10 +71,6 @@ export class SpeechSettingsConflictError extends Error {
     this.name = 'SpeechSettingsConflictError';
     this.code = 'stale_speech_settings';
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function oneOf(value: unknown, allowed: Set<string>, key: string): string {
@@ -179,7 +177,7 @@ function validateField(
  * а неизвестные поля не попадают ни в публичный снимок, ни в следующую запись.
  */
 export function normalizeSpeechSettings(value: unknown): SpeechSettings {
-  const source = isPlainObject(value) ? value : {};
+  const source = isRecord(value) ? value : {};
   const out: SpeechSettings = {};
   for (const [key, fallback] of Object.entries(SPEECH_DEFAULTS)) {
     if (!(key in source)) {
@@ -197,7 +195,7 @@ export function normalizeSpeechSettings(value: unknown): SpeechSettings {
 
 /** Строгая проверка частичного HTTP-патча: неизвестное не отбрасывается молча. */
 export function validateSpeechPatch(value: unknown): SpeechSettings {
-  if (!isPlainObject(value)) {
+  if (!isRecord(value)) {
     throw new SpeechSettingsInputError('Тело настройки речи должно быть JSON-объектом.');
   }
   const out: SpeechSettings = {};
@@ -249,7 +247,7 @@ export function updateSpeech(
   }
   const current = normalizeSpeechSettings(prefs.read().speech);
   const candidate = transform({ ...current });
-  if (!isPlainObject(candidate)) {
+  if (!isRecord(candidate)) {
     throw new TypeError('updateSpeech transform должен вернуть объект настроек.');
   }
   const next = normalizeSpeechSettings(candidate);

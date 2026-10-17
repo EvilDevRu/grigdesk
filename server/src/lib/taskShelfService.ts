@@ -3,7 +3,7 @@
 import { b24AccountScope } from './b24AccountScope.ts';
 import type { B24Identity } from './b24AccountScope.ts';
 import type { ShelfSnapshot, TaskShelfStore } from './taskShelfStore.ts';
-import type { ShelfState } from '../../../shared/shelfContracts.ts';
+import type { ShelfState } from '../../../shared/b24/shelfContracts.ts';
 
 export interface TaskShelfIdentitySource {
   accountIdentity(): Promise<unknown>;

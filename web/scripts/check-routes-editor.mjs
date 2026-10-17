@@ -13,6 +13,7 @@ import vue from '../node_modules/@vitejs/plugin-vue/dist/index.mjs';
 import routesModule from '../../server/src/modules/routes/index.ts';
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import { DraftStore } from '../../server/src/modules/routes/draftStore.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { makeCatalogInput, makeDraft } from '../../tests/fixtures/routes-editor.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -72,8 +73,16 @@ function largeDraft(currentHash) {
   return draft;
 }
 
+/**
+ * Каждый прогон получает свой каталог в папке артефактов: стенд, снимки и report.json
+ * остаются для разбора, а профиль Chromium удаляется в finally при любом исходе.
+ */
 async function main() {
-  const artifacts = await mkdtemp(path.join(root, '.state/artifacts/routes-editor/browser-'));
+  const parent = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'routes-editor');
+
+  await mkdir(parent, { recursive: true });
+
+  const artifacts = await mkdtemp(path.join(parent, 'browser-'));
   const profilesDir = path.join(artifacts, 'profiles');
   const routesDir = path.join(artifacts, 'routes');
   const authoringDir = path.join(artifacts, 'authoring');

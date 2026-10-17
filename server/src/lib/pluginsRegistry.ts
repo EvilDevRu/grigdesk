@@ -4,28 +4,28 @@
 // Два источника:
 //  • СИСТЕМНЫЕ (из коробки) — описаны в SYSTEM ниже. Их код — обычные модули сервера
 //    и вьюхи фронта, собранные в бандл; «плагинность» для них = вкл/выкл + настройки.
-//  • ПОЛЬЗОВАТЕЛЬСКИЕ — папки plugins/<id>/ в корне проекта: plugin.json (манифест
+//  • ПОЛЬЗОВАТЕЛЬСКИЕ — папки plugins/<id>/ в папке данных: plugin.json (манифест
 //    той же формы, что SYSTEM-записи) + опционально server.js (default-экспорт
 //    fastify-плагина; регистрируется на старте, роуты обязаны жить под /api/ext/<id>/)
 //    + опционально своя страница (`web`: папка с index.html — кокпит раздаёт её под
 //    /api/ext/<id>/web/ и показывает панелью в рейке или страницей по nav.path).
 //    Выключенный пользовательский плагин не регистрируется вовсе (вкл/выкл — рестарт).
 //
-// Состояние (вкл/выкл, значения настроек) — в prefs (server/.state/prefs.json):
+// Состояние (вкл/выкл, значения настроек) — в prefs (state/prefs.json в папке данных):
 //   plugins:        { <id>: true|false }   — отсутствие ключа = дефолт манифеста
 //                                            (defaultEnabled, иначе системный вкл / пользовательский выкл)
 //   pluginSettings: { <id>: {key: value} }
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { normalizePluginCategory } from '../../../shared/pluginsContracts.ts';
+import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
 import type {
   PluginNav,
   PluginPlacementDecl,
   PluginPlacementState,
   PluginSetting,
   PluginSetup,
-} from '../../../shared/pluginsContracts.ts';
-import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/slots/index.ts';
+} from '../../../shared/plugins/pluginsContracts.ts';
+import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/plugins/slots/index.ts';
 
 export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
@@ -459,6 +459,50 @@ export const SYSTEM: PluginManifest[] = [
     ],
   },
   {
+    id: 'studio3d',
+    system: true,
+    defaultEnabled: false,
+    name: '3D',
+    version: '1.0.0',
+    description: 'Трёхмерные модели через 3D-исполнителей: создание, библиотека с поиском '
+      + 'и версиями, просмотр, скелет и движения, экспорт в проект. Выключение блокирует '
+      + 'новые заказы; принятые продолжаются. После запуска сервера с выключенным плагином '
+      + 'скачивание ждёт включения; срок хранения результатов у поставщика не гарантирован.',
+    category: 'dev',
+    nav: {
+      path: '/3d',
+      label: '3D',
+      icon: 'cube',
+      group: 'dock',
+      order: 30,
+    },
+    settings: [
+      {
+        key: 'autoImport',
+        label: 'Подтягивать прошлые заказы и заказы агентов',
+        type: 'checkbox',
+        default: true,
+        hint: 'Записи task.json в проектах и история трат исполнителя.',
+      },
+      {
+        key: 'lowDiskGb',
+        label: 'Предупреждать, когда свободно меньше, ГБ',
+        type: 'number',
+        default: 10,
+        min: 1,
+        max: 1000,
+        step: 1,
+      },
+      {
+        key: 'libraryDir',
+        label: 'Папка библиотеки',
+        type: 'text',
+        default: '',
+        hint: 'Пусто — 3d в папке данных. Смена после завершения заданий, без переноса файлов.',
+      },
+    ],
+  },
+  {
     id: 'usage-forecast',
     system: true,
     // Включён по умолчанию: блок читает те же снимки лимитов, что и полосы, ничего не
@@ -494,8 +538,58 @@ export const SYSTEM: PluginManifest[] = [
   },
 ];
 
-const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
+
+export type UserManifestFields = Pick<PluginManifest,
+  'id' | 'system' | 'name' | 'api' | 'version' | 'description'
+  | 'category' | 'nav' | 'settings' | 'placements'
+> & { webDir: string | null };
+
+/**
+ * Installer и scanner читают принятый manifest через одну чистую функцию.
+ * Политика допуска и проверки файлов остаётся у соответствующего caller.
+ */
+export function decodeUserPluginManifest(
+  raw: Record<string, unknown>,
+  warn: (message: string) => void = () => {},
+): UserManifestFields {
+  const name = String(raw.name || raw.id);
+  const nav = raw.nav !== null && typeof raw.nav === 'object' && !Array.isArray(raw.nav)
+    ? raw.nav : null;
+
+  return {
+    id: String(raw.id),
+    system: false,
+    name,
+    api: Number(raw.api || 1),
+    version: String(raw.version || '0.0.0'),
+    description: String(raw.description || ''),
+    category: userPluginCategory(raw.category, warn),
+    nav: normalizePluginNav(nav, name, warn),
+    settings: Array.isArray(raw.settings) ? raw.settings as PluginSetting[] : [],
+    placements: normalizePlacements(raw.placements, warn),
+    webDir: normalizePluginPackagePath(raw.web, false),
+  };
+}
+
+/**
+ * Относительный путь пакета использует posix форму и не может выйти из корня.
+ * Корень разрешён только для npm; scanner и installer получают одинаковую форму web.
+ */
+export function normalizePluginPackagePath(raw: unknown, rootAllowed: boolean): string | null {
+  if (typeof raw !== 'string' || !raw || path.posix.isAbsolute(raw) || /[\\\x00-\x1f\x7f]/u.test(raw)) {
+    return null;
+  }
+
+  const relative = path.posix.normalize(raw).replace(/\/$/u, '');
+
+  if (relative === '..' || relative.startsWith('../') || relative === '.' && !rootAllowed) {
+    return null;
+  }
+
+  return relative;
+}
 
 /**
  * Положение ссылки — только декларация навигации. Оно не даёт пользовательскому
@@ -578,33 +672,36 @@ export async function scanUserPlugins(
 ): Promise<PluginManifest[]> {
   const out: PluginManifest[] = [];
   let entries = [];
-  try { entries = await fs.readdir(userPluginsDir, { withFileTypes: true }); } catch { return out; }
+  try {
+    entries = await fs.readdir(userPluginsDir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+
   for (const e of entries) {
-    if (!e.isDirectory() || !ID_RE.test(e.name)) continue;
+    if (!e.isDirectory() || !PLUGIN_ID_RE.test(e.name)) {
+      continue;
+    }
+
     const dir = path.join(userPluginsDir, e.name);
+
     try {
       const m = JSON.parse(await fs.readFile(path.join(dir, 'plugin.json'), 'utf8'));
-      if (!m.id || m.id !== e.name) throw new Error(`id в манифесте («${m.id}») не совпадает с папкой «${e.name}»`);
+
+      if (!m.id || m.id !== e.name) {
+        throw new Error(`id в манифесте («${m.id}») не совпадает с папкой «${e.name}»`);
+      }
+
+      const decoded = decodeUserPluginManifest(m, (message: string) => {
+        log?.warn?.({ plugin: e.name }, message);
+      });
+      const { webDir, ...fields } = decoded;
+
       out.push({
-        id: m.id,
-        system: false,
-        name: String(m.name || m.id),
-        api: Number(m.api || 1),
-        version: String(m.version || '0.0.0'),
-        description: String(m.description || ''),
-        category: userPluginCategory(m.category, (message: string) => {
-          log?.warn?.({ plugin: e.name }, message);
-        }),
-        nav: normalizePluginNav(m.nav, String(m.name || m.id), (message: string) => {
-          log?.warn?.({ plugin: e.name }, message);
-        }),
-        settings: Array.isArray(m.settings) ? m.settings : [],
-        placements: normalizePlacements(m.placements, (message: string) => {
-          log?.warn?.({ plugin: m.id }, message);
-        }),
+        ...fields,
         dir,
         hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
-        web: await resolvePluginWeb(dir, m.id, m.web, (message: string) => {
+        web: await resolvePluginWeb(dir, m.id, webDir ?? m.web, (message: string) => {
           log?.warn?.({ plugin: e.name }, message);
         }),
       });

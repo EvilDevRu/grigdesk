@@ -1,5 +1,6 @@
 // Ядро сервера кокпита. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
+import './startDataHome.ts';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +13,7 @@ import websocket from '@fastify/websocket';
 
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
+import { attachDesktopParent } from './lib/desktopParent.ts';
 import { config } from './config.ts';
 import { MobileService } from './lib/mobile/service.ts';
 import { ActionTokens } from './lib/mobile/actionTokens.ts';
@@ -21,6 +23,9 @@ import { relayVpnGate } from './lib/mobile/vpn.ts';
 import mobileModule from './modules/mobile/index.ts';
 import { cockpitCliPath } from './lib/cliPath.ts';
 import { AuthStore } from './lib/authStore.ts';
+import { registerWindowKeyLifecycle } from './lib/windowKey.ts';
+import type { WindowAuthState } from './lib/windowKey.ts';
+import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { FactoryStateAdapter } from './adapters/factoryState.ts';
 import { ArbiterCardsStore } from './lib/arbiterCards.ts';
 import { B24Adapter } from './adapters/b24.ts';
@@ -30,6 +35,9 @@ import { extractSceneFrames } from './lib/media/ingest.ts';
 import { CredsStore } from './lib/b24/credsStore.ts';
 import { ClaudeAuthStore } from './lib/claudeAuthStore.ts';
 import { PrefsStore } from './lib/prefsStore.ts';
+import { PluginInstallService } from './lib/pluginInstall/service.ts';
+import { readPluginInstallConfiguration } from './lib/pluginInstall/configuration.ts';
+import { SYSTEM } from './lib/pluginsRegistry.ts';
 import { SpeechRuntime } from './lib/speech/index.ts';
 import { ModelJobManager } from './lib/speech/modelJobs.ts';
 import { listProjects } from './lib/profiles.ts';
@@ -126,6 +134,7 @@ import { isProjectArchived } from './lib/projects/archive.ts';
 import { projectRepos } from './lib/projects.ts';
 import { RoutesStore } from './modules/routes/store.ts';
 import codeModule from './modules/code/index.ts';
+import studio3dModule from './modules/studio3d/index.ts';
 import telegramModule from './modules/telegram/index.ts';
 import githubModule from './modules/github/index.ts';
 import inboxModule from './modules/inbox/index.ts';
@@ -169,7 +178,12 @@ function readPluginSettings(
   return (fastify.pluginSettings?.(id) || {}) as Record<string, unknown>;
 }
 
+/**
+ * Пути installer и VERSION проверяются до создания ресурсов приложения.
+ * Закрытие Fastify ждёт installer lifetime прежде завершения процесса.
+ */
 async function build() {
+  const installOptions = await readPluginInstallConfiguration(config);
   const factoryDebug = new FactoryDebugSettings({
     factoryBin: config.factoryBin,
     stateDir: config.stateDir,
@@ -196,6 +210,9 @@ async function build() {
     // ответы, и `server.close()` ждал бы их вечно. К этому моменту слив уже прошёл, и
     // долгих запросов, которым есть что терять, на сервере нет.
     forceCloseConnections: true,
+    // Дефолтных 10 с на старт модуля не хватает чату с большой историей: сервер падал
+    // на AVV_ERR_PLUGIN_EXEC_TIMEOUT и уходил в бесконечный цикл перезапусков systemd.
+    pluginTimeout: 60_000,
   });
   // Журнал окна хранит пути /api шаблонами; каталог шаблонов собирается здесь,
   // до регистрации модулей, чтобы в него попал каждый маршрут сервера.
@@ -943,7 +960,7 @@ async function build() {
     executorFor: asPort((id: string) => fastify.executorFor?.(id) || null),
   });
   const authStore = new AuthStore({
-    accountPath: config.authAccountPath,
+    legacyAccountPath: config.authAccountPath,
     sessionsPath: config.authSessionsPath,
   });
   // Просмотрщик ничего не знает о структуре Cockpit: приложение подключает первый
@@ -969,6 +986,19 @@ async function build() {
     writeFileSync(config.cliTokenPath, cliToken + '\n', { mode: 0o600 });
   }
 
+  // До успешного bind ключа нет ни в памяти, ни в новой публикации файла.
+  // Тот же state видит auth-модуль после асинхронного завершения onListen.
+  const windowAuth: WindowAuthState = {
+    origin: new URL(`http://127.0.0.1:${config.port}`).origin,
+    key: null,
+  };
+
+  registerWindowKeyLifecycle(fastify, windowAuth, windowKeyPath({
+    env: process.env,
+    uid: process.getuid?.(),
+    port: config.port,
+  }));
+
   // Плагины платформы.
   // Гард закрывает весь /api, включая upgrade вебсокета.
   await fastify.register(authPlugin, {
@@ -986,7 +1016,10 @@ async function build() {
   });
 
   // Модули.
-  await fastify.register(authModule, { authStore });
+  await fastify.register(authModule, {
+    authStore,
+    windowAuth,
+  });
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register<FactoryModuleOptions>(factoryModule, {
     factoryState,
@@ -1001,11 +1034,29 @@ async function build() {
   await fastify.register(b24Module, { b24 });
   await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
   await fastify.register(taskSeenModule, { seen: taskSeen });
-  await fastify.register(systemModule, { system, config });
+  await fastify.register(systemModule, {
+    system,
+    config,
+    desktop: desktopParent,
+  });
+  // Сервис получает полный список встроенных id и только проверенные boot paths.
+  // Recovery выполняется модулем до scan/import пользовательского runtime.
+  const pluginInstalls = new PluginInstallService({
+    ...installOptions,
+    reservedIds: SYSTEM.map((manifest) => manifest.id),
+    log: fastify.log,
+  });
+
+  fastify.addHook('onClose', async () => {
+    await pluginInstalls.close();
+  });
+
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, {
     config,
     prefs,
+    installs: pluginInstalls,
+    prepareChange: (id, change) => id === 'studio3d' ? fastify.studio3d?.prepareChange(change) : undefined,
     onToggle: async (id, enabled) => {
       if (id === 'ssh' && !enabled) {
         await sshService.disable();
@@ -1040,6 +1091,11 @@ async function build() {
     providerSettings: () => (prefs.read().providerSettings || {}) as Record<string, unknown>,
   });
   await fastify.register(codeModule, { config, prefs });
+  await fastify.register(studio3dModule, {
+    config,
+    documentReader,
+    projects: () => fastify.projects,
+  });
   await fastify.register<GitHubModuleOptions>(githubModule, {
     connection: asPort(githubConnection),
     listProjects: () => listProjects(config, prefs),
@@ -1197,7 +1253,11 @@ async function build() {
   await fastify.register(analysisModule, { analyzer, arbiter: analysisArbiter });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
-  await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });
+  await fastify.register(staticPlugin, {
+    webDist: config.webDist,
+    stateDir: config.stateDir,
+    uiReleasesDir: config.uiReleasesDir,
+  });
 
   // ── Телеграм-пульт: вотчер «требует человека» + команды/кнопки владельца ──
   // Пульт — ещё одно «окно» кокпита: действия идут через inject в те же ручки,
@@ -1403,6 +1463,12 @@ async function build() {
 // конкретного модуля, а не устаревшим рантаймом.
 assertSupportedNode();
 
+const desktopParent = attachDesktopParent({
+  env: process.env,
+  channel: typeof process.send === 'function' ? process : null,
+  exit: (code) => process.exit(code),
+});
+
 const app = await build();
 
 if (process.env.COCKPIT_HOST !== undefined) {
@@ -1418,3 +1484,9 @@ try {
 
 app.log.info(`Кокпит слушает http://127.0.0.1:${config.port}`);
 app.shutdown?.arm();
+
+if (desktopParent && app.shutdown) {
+  const shutdown = app.shutdown;
+
+  desktopParent.bindShutdown((reason) => shutdown.begin(reason));
+}

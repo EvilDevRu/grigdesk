@@ -4,7 +4,7 @@
 import type {
   ProviderSettingsCatalog,
   ProviderSettingNode,
-} from '../../../../shared/providerSettingsContracts.ts';
+} from '../../../../shared/chat/providerSettingsContracts.ts';
 import type { NativeSettingsCatalogRead } from './catalog.ts';
 import type { NativeSettingsStorage, NormalizedSettingNode } from './types.ts';
 import { flattenNativeSettings, validateNativeSetting } from './validation.ts';

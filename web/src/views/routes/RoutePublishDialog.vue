@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RouteCompareReport } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteCompareReport } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { onMounted, onUnmounted, ref } from 'vue';
 import { UiButton, UiTextarea } from '../../ui';
 

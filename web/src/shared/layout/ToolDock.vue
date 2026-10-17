@@ -1,6 +1,6 @@
 <template>
-  <section class="tool-surface"
-           :class="[`is-${mode}`, { 'is-expanded': expanded, 'is-resizing': resizing }]"
+  <section ref="surface" class="tool-surface"
+           :class="[`is-${mode}`, { 'is-expanded': expanded, 'is-resizing': resizing, 'is-workspace': workspace }]"
            :style="style"
            :role="mode === 'dock' ? 'complementary' : undefined"
            :aria-label="mode === 'dock' ? label : undefined">
@@ -42,6 +42,7 @@ import { UiIconButton, vTooltip } from '../../ui';
 
 const props = defineProps({
   mode: { type: String, default: 'hidden' },
+  workspace: { type: Boolean, default: false },
   label: { type: String, required: true },
   width: { type: Number, required: true },
   minWidth: { type: Number, required: true },
@@ -50,6 +51,7 @@ const props = defineProps({
   expandedWidth: { type: Number, default: 0 },
 });
 const emit = defineEmits(['hide', 'toggle-expanded', 'resize', 'resize-end']);
+const surface = ref(null);
 const expandButton = ref(null);
 const resizing = ref(false);
 let pointer = null;
@@ -59,7 +61,8 @@ const style = computed(() => {
   const width = props.expanded && props.expandedWidth > 0 ? props.expandedWidth : props.width;
   return { width: `${width}px` };
 });
-const nextWidth = (clientX) => window.innerWidth - 44 - clientX;
+// Край поверхности уже учитывает рейку, плотность и текущий viewport.
+const nextWidth = (clientX) => (surface.value?.getBoundingClientRect().right ?? clientX) - clientX;
 
 function start(event) {
   if (event.button !== undefined && event.button !== 0) return;
@@ -105,11 +108,10 @@ defineExpose({ focusHeader: () => expandButton.value?.focus?.() });
 <style scoped>
 .tool-surface { min-width: 0; min-height: 0; background: var(--ground); overflow: hidden; }
 .tool-surface.is-hidden { display: none; }
-.tool-surface.is-page { grid-row: 2; grid-column: 2; z-index: 20; padding: 22px; }
+.tool-surface.is-page { grid-row: 2; grid-column: 2; z-index: 20; padding: var(--page-gutter); }
 .tool-surface.is-dock {
-  position: fixed; z-index: 80; top: 54px; right: 44px; bottom: 0;
+  position: fixed; z-index: 80; top: var(--app-topbar-h); right: var(--app-rail-w); bottom: 0;
   --tool-dock-actions-space: 82px;
-  --tool-dock-action-size: 30px;
   --tool-dock-action-top: 4px;
   display: grid; grid-template-rows: minmax(0, 1fr);
   border-left: 1px solid var(--line-2); box-shadow: -18px 0 42px #0009;
@@ -192,6 +194,5 @@ defineExpose({ focusHeader: () => expandButton.value?.focus?.() });
   :deep(.code-loading-split), :deep(.code-loading-editor) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .tool-surface.is-dock { transition: none; } }
-@media (min-width: 760px) and (max-width: 1099px) { .tool-surface.is-page { padding: 18px; } }
-@media (max-width: 759px) { .tool-surface.is-page { grid-column: 1; padding: 16px; } }
+.tool-surface.is-page.is-workspace { padding: 0; }
 </style>

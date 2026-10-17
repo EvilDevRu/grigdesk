@@ -13,9 +13,9 @@ import {
   parseDbSchema,
   parseDbSessionOpened,
   parseDbSessions,
-} from '../../../shared/dbContracts.ts';
-import type { DbProfileInput } from '../../../shared/dbContracts.ts';
-import { parseSshSessions } from '../../../shared/sshContracts.ts';
+} from '../../../shared/plugins/db/dbContracts.ts';
+import type { DbProfileInput } from '../../../shared/plugins/db/dbContracts.ts';
+import { parseSshSessions } from '../../../shared/plugins/ssh/sshContracts.ts';
 
 function profilePath(id: string, suffix = ''): string {
   return `/api/db/profiles/${encodeURIComponent(id)}${suffix}`;
@@ -150,17 +150,3 @@ export const dbApi = {
     return parseDbCancel(value);
   },
 };
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
-/**
- * Текст отказа для человека. Сервер баз отвечает машинным кодом, а обрыв сети
- * приходит без тела вовсе — тогда остаётся сообщение самой ошибки транспорта.
- */
-export function dbErrorMessage(error: unknown, fallback: string): string {
-  const message = asRecord(error).message;
-
-  return typeof message === 'string' && message ? message : fallback;
-}

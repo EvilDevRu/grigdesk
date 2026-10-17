@@ -1,170 +1,114 @@
-// Модуль входа: состояние, логин, выход, первичная настройка и смена пароля.
+// Модуль входа: состояние доступа и обмен локального ключа окна на сессию.
+// Пароля, первичной настройки и выхода нет: приложение входит по ключу, а от чужих
+// защищает блокировка экрана компьютера.
+import { timingSafeEqual } from 'node:crypto';
+
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-
 import type { AuthStore } from '../../lib/authStore.ts';
+import type { WindowAuthState } from '../../lib/windowKey.ts';
 import {
-  sessionCookie, clearCookie, readCookie, SESSION_COOKIE, isSecureRequest,
+  sessionCookie, readCookie, SESSION_COOKIE, isSecureRequest,
+  isLocalRequest,
 } from '../../plugins/auth.ts';
 
 export interface AuthModuleOptions {
   authStore: AuthStore;
+  windowAuth?: WindowAuthState;
 }
 
-// Тело запросов входа: приходит из сети, поэтому каждое поле недоверенное.
-interface AuthBody {
-  login?: unknown;
-  password?: unknown;
-  currentPassword?: unknown;
+/**
+ * Адрес обмена определяется конфигурацией сервера, а не недоверенным Host.
+ * Канонический HTTP-порт 80 разрешает обе обычные формы authority.
+ */
+function windowOriginAllowed(request: FastifyRequest, origin: string): boolean {
+  const expected = new URL(origin);
+  const host = request.headers.host;
+  const site = request.headers['sec-fetch-site'];
+  const sameHost = host === expected.host
+    || (expected.port === '' && expected.protocol === 'http:'
+      && expected.hostname === '127.0.0.1' && host === '127.0.0.1:80');
+
+  return sameHost && (request.headers.origin === undefined || request.headers.origin === origin)
+    && site !== 'cross-site' && (site === undefined || typeof site === 'string');
 }
 
-// Ограничение попыток входа. Без него пароль перебирается по сети за вечер.
-const WINDOW_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 10;
-// Счётчик неудач по адресу: ключ — адрес клиента, значение — сколько и до какого
-// момента. Живёт в памяти процесса: перезапуск обнуляет, и это допустимо.
-const attempts = new Map<string, { count: number; until: number }>();
-
-function attemptKey(request: FastifyRequest): string {
-  return request.ip || 'unknown';
-}
-
-function tooMany(request: FastifyRequest): boolean {
-  const rec = attempts.get(attemptKey(request));
-  if (!rec) return false;
-  if (rec.until <= Date.now()) {
-    attempts.delete(attemptKey(request));
+/**
+ * Только одиночный заголовок точного формата допускается к сравнению секрета.
+ * Равенство размеров проверяется до timingSafeEqual, чтобы отказ не стал исключением.
+ */
+function windowKeyMatches(provided: unknown, key: string): boolean {
+  if (typeof provided !== 'string' || provided.length !== 43 || !/^[A-Za-z0-9_-]+$/u.test(provided)) {
     return false;
   }
-  return rec.count >= MAX_ATTEMPTS;
-}
 
-function registerFailure(request: FastifyRequest): void {
-  const key = attemptKey(request);
-  const rec = attempts.get(key);
-  if (!rec || rec.until <= Date.now()) {
-    attempts.set(key, { count: 1, until: Date.now() + WINDOW_MS });
-    return;
-  }
-  rec.count += 1;
-  rec.until = Date.now() + WINDOW_MS;
-}
+  const actual = Buffer.from(provided, 'utf8');
+  const expected = Buffer.from(key, 'utf8');
 
-function clearFailures(request: FastifyRequest): void {
-  attempts.delete(attemptKey(request));
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 /**
- * Задержка на неудачный вход: тормозит перебор и заодно сглаживает разницу во времени
- * между «нет такого логина» и «пароль неверный».
- */
-const slowDown = () => new Promise<void>((resolve) => {
-  setTimeout(resolve, 400);
-});
-
-/** Текст отказа хранилища: сообщение о слабом пароле человек должен увидеть целиком. */
-function failureText(error: unknown): string {
-  return String((error as { message?: unknown } | null)?.message || error);
-}
-
-/**
- * Вход, смена пароля и выход используют одно серверное хранилище сессий.
- * Cookie остаётся ограниченной хостом, её Secure определяется сокетом запроса.
+ * Обмен ключа создаёт обычную сессию AuthStore и ограниченную хостом cookie.
+ * Secure определяется сокетом запроса; заголовки пересылки его не меняют.
  */
 async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Promise<void> {
   const { authStore } = opts;
 
-  // Secure вычисляется для каждого запроса; заголовки пересылки его не меняют.
-  // При локальном HTTP браузер получает обычную сессионную cookie.
-  const cookieOpts = (request: FastifyRequest) => ({
-    secure: isSecureRequest(request),
-  });
+  fastify.post('/api/auth/window-session', {
+    logLevel: 'silent',
+    onRequest: async (_request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+    },
+  }, async (request, reply) => {
+    const state = opts.windowAuth;
 
-  // Состояние входа — публичный эндпоинт: с него оболочка решает, что показать.
-  fastify.get('/api/auth/state', async (request) => {
-    const sid = readCookie(request.headers.cookie, SESSION_COOKIE);
-    return {
-      configured: authStore.isConfigured(),
-      authenticated: authStore.isValidSession(sid),
-      login: authStore.publicView().login,
+    if (!state?.key) {
+      return reply.code(503).send({ error: 'window_key_unavailable' });
+    }
+
+    const forwarded = ['forwarded', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host']
+      .some((name) => request.headers[name] !== undefined);
+
+    if (!isLocalRequest(request) || forwarded) {
+      return reply.code(403).send({ error: 'local_only' });
+    }
+
+    if (!windowOriginAllowed(request, state.origin)) {
+      return reply.code(403).send({ error: 'bad_window_origin' });
+    }
+
+    if (!windowKeyMatches(request.headers['x-cockpit-window-key'], state.key)) {
+      return reply.code(401).send({ error: 'bad_window_key' });
+    }
+
+    const session = authStore.createSession();
+
+    return reply.header('Set-Cookie', sessionCookie(session.id, {
+      maxAgeSec: session.maxAgeSec,
       secure: isSecureRequest(request),
+    })).send({ ok: true });
+  });
+
+  // Состояние входа — публичный эндпоинт: по нему оболочка и заставка окна понимают,
+  // опубликован ли ключ и действует ли сессия. Ни логина, ни хеша, ни признака
+  // «пароль не задан» здесь больше нет.
+  fastify.get('/api/auth/state', {
+    onRequest: async (_request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+    },
+  }, async (request) => {
+    const sid = readCookie(request.headers.cookie, SESSION_COOKIE);
+    const authenticated = authStore.isValidSession(sid);
+
+    return {
+      method: 'window-key',
+      configured: Boolean(opts.windowAuth?.key),
+      authenticated,
+      secure: isSecureRequest(request),
+      // Владелец локальных данных нужен только действующей сессии.
+      ...(authenticated ? { clientScope: authStore.clientScope } : {}),
     };
-  });
-
-  // Первичная настройка: доступна ТОЛЬКО пока пароль не задан. Иначе кто угодно
-  // переустановил бы пароль и вошёл.
-  fastify.post('/api/auth/setup', async (request, reply) => {
-    if (authStore.isConfigured()) {
-      return reply.code(409).send({ error: 'already_configured', message: 'Пароль уже задан. Меняется в настройках после входа.' });
-    }
-    const { login, password } = (request.body || {}) as AuthBody;
-
-    try {
-      authStore.setCredentials({ login: String(login ?? ''), password: String(password ?? '') });
-    } catch (err) {
-      return reply.code(400).send({ error: 'bad_password', message: failureText(err) });
-    }
-    // Сразу впускаем — иначе пользователь задал пароль и тут же вводит его снова.
-    const s = authStore.createSession();
-    return reply
-      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
-      .send({ ok: true, login: String(login ?? '') });
-  });
-
-  fastify.post('/api/auth/login', async (request, reply) => {
-    if (!authStore.isConfigured()) {
-      return reply.code(409).send({ error: 'not_configured', message: 'Пароль ещё не задан.' });
-    }
-    if (tooMany(request)) {
-      return reply.code(429).send({ error: 'too_many_attempts', message: 'Слишком много попыток. Подождите 15 минут.' });
-    }
-    const { login, password } = (request.body || {}) as AuthBody;
-
-    if (!authStore.check({ login, password })) {
-      registerFailure(request);
-      await slowDown();
-      return reply.code(401).send({ error: 'bad_credentials', message: 'Неверный логин или пароль.' });
-    }
-    clearFailures(request);
-    const s = authStore.createSession();
-    return reply
-      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
-      .send({ ok: true });
-  });
-
-  // Выход. Под гардом — сюда попадают только с валидной сессией.
-  fastify.post('/api/auth/logout', async (request, reply) => {
-    authStore.dropSession(readCookie(request.headers.cookie, SESSION_COOKIE));
-    return reply.header('Set-Cookie', clearCookie(cookieOpts(request))).send({ ok: true });
-  });
-
-  fastify.post('/api/auth/logout-all', async (request, reply) => {
-    authStore.dropAllSessions();
-    return reply.header('Set-Cookie', clearCookie(cookieOpts(request))).send({ ok: true });
-  });
-
-  // Смена логина/пароля из настроек. Требуем текущий пароль: украденная сессия не должна
-  // позволять сменить пароль и запереть владельца.
-  fastify.post('/api/auth/password', async (request, reply) => {
-    const { currentPassword, login, password } = (request.body || {}) as AuthBody;
-    const acc = authStore.readAccount();
-    if (!authStore.check({ login: acc?.login, password: currentPassword })) {
-      await slowDown();
-      return reply.code(401).send({ error: 'bad_current_password', message: 'Текущий пароль неверен.' });
-    }
-    try {
-      // setCredentials сбрасывает все сессии — сразу выдаём новую, чтобы не выкинуть себя.
-      authStore.setCredentials({
-        login: String(login ?? acc?.login ?? ''),
-        password: String(password ?? ''),
-      });
-    } catch (err) {
-      return reply.code(400).send({ error: 'bad_password', message: failureText(err) });
-    }
-    const s = authStore.createSession();
-    return reply
-      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
-      .send({ ok: true, note: 'Остальные устройства разлогинены.' });
   });
 }
 

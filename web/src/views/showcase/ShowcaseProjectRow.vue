@@ -41,7 +41,10 @@
 import { computed } from 'vue';
 
 import { UiButton, UiSelectableRow } from '../../ui';
-import type { ShowcaseJob, ShowcaseProjectSummary } from '../../../../shared/showcaseContracts';
+import type {
+  ShowcaseJob,
+  ShowcaseProjectSummary,
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 
 const props = defineProps<{
   project: ShowcaseProjectSummary;

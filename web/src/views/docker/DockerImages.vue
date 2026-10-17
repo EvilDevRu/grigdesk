@@ -75,7 +75,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
 
-import type { DockerImage } from '../../../../shared/dockerContracts';
+import type { DockerImage } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
 import { UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog, vTooltip } from '../../ui';

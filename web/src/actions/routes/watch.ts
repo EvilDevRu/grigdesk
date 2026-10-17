@@ -1,3 +1,5 @@
+import { recordOrNull } from '../../../../shared/lib/objects.ts';
+
 import { sseSubscribe } from '../../composables/useSse.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { cancelDraftSave } from './save.ts';
@@ -5,11 +7,6 @@ import { loadDraft } from './loadDraft.ts';
 import { loadDrafts } from './loadDrafts.ts';
 import { loadEditor } from './loadEditor.ts';
 import { runtimeOf } from './routesRuntime.ts';
-
-function objectAt(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown> : null;
-}
 
 /**
  * Останавливает запись при обнаружении другой ревизии черновика.
@@ -82,7 +79,7 @@ function handleEvent(profile: string, name: string, payload: unknown): void {
     return;
   }
 
-  const data = objectAt(payload);
+  const data = recordOrNull(payload);
 
   if (!data || data.profile !== profile) {
     return;

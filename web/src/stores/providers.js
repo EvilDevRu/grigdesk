@@ -2,7 +2,7 @@
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
-import { familyModels } from '../../../shared/modelFamily.ts';
+import { familyModels } from '../../../shared/chat/modelFamily.ts';
 
 export const useProvidersStore = defineStore('providers', {
   // showAllModels — настройка «показывать все модели, включая старые версии» (server prefs).
@@ -26,6 +26,8 @@ export const useProvidersStore = defineStore('providers', {
     },
     mcp: {},
     loaded: false,
+    registryVersion: 0,
+    registryRequest: 0,
     showAllModels: false,
     updating: '',
     updateResults: {},
@@ -118,13 +120,46 @@ export const useProvidersStore = defineStore('providers', {
     },
   },
   actions: {
+    /**
+     * Только последний запрос текущей проекции может заменить карточки.
+     * Смена credentials отсеивает поздний GET прежнего аккаунта вместе с его ошибкой.
+     */
     async load(refresh = false) {
+      const request = ++this.registryRequest;
+      const version = this.registryVersion;
+
       try {
         const { providers, showAllModels } = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
+
+        if (request !== this.registryRequest || version !== this.registryVersion) {
+          return;
+        }
+
         this.providers = providers || [];
         this.showAllModels = !!showAllModels;
       } catch { /* сервер молчит — иконок просто нет */ }
-      this.loaded = true;
+
+      if (request === this.registryRequest && version === this.registryVersion) {
+        this.loaded = true;
+      }
+    },
+    /**
+     * Сбрасывает счёт изменённого аккаунта сразу при ACK или общем SSE-событии.
+     * Новый GET обходит throttle, а сетевой отказ относится к проверке, не к записи ключа.
+     */
+    invalidateCredentials(providerId) {
+      const next = { ...this.usage };
+
+      delete next[providerId];
+      this.usage = next;
+      this.usageVersion += 1;
+      this.usageRequest += 1;
+      this.registryVersion += 1;
+      this.registryRequest += 1;
+      this.usageAt = 0;
+      this.usageTransport.error = '';
+
+      return Promise.all([this.load(), this.loadUsage(true)]);
     },
     /**
      * Использует существующий минутный GET; компоненты читают единый снимок.
@@ -195,6 +230,7 @@ export const useProvidersStore = defineStore('providers', {
      */
     noteUsageConnection(connected) {
       const transport = this.usageTransport;
+      const reconnect = connected && transport.everConnected && !transport.connected;
 
       if (transport.everConnected && transport.connected && !connected) {
         transport.deliveryStale = true;
@@ -202,6 +238,16 @@ export const useProvidersStore = defineStore('providers', {
 
       transport.connected = connected;
       transport.everConnected ||= connected;
+
+      if (reconnect) {
+        this.usage = {};
+        this.usageVersion += 1;
+        this.usageRequest += 1;
+        this.registryVersion += 1;
+        this.registryRequest += 1;
+        void this.load();
+        void this.loadUsage(true);
+      }
     },
     /**
      * Проверка по кнопке остаётся общей для всех всплывашек.
@@ -306,13 +352,7 @@ export const useProvidersStore = defineStore('providers', {
           return { ok: false, error: r?.message || 'сервер не принял ключи' };
         }
 
-        const p = this.providers.find((x) => x.id === providerId);
-
-        if (p && r.credentials) {
-          p.credentials = r.credentials;
-        }
-
-        await this.load();
+        void this.invalidateCredentials(providerId);
 
         return { ok: true };
       } catch (e) {

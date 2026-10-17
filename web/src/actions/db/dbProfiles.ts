@@ -1,5 +1,5 @@
 import { dbApi } from '../../shared/dbApi.ts';
-import type { DbProfile, DbProfileInput, DbSession } from '../../../../shared/dbContracts.ts';
+import type { DbProfile, DbProfileInput, DbSession } from '../../../../shared/plugins/db/dbContracts.ts';
 import { useDbStore } from '../../stores/db.ts';
 import { loadDb } from './loadDb.ts';
 

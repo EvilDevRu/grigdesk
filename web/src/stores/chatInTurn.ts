@@ -3,8 +3,8 @@ import type {
   InTurnAvailability,
   InTurnPage,
   InTurnReceipt,
-} from '../../../shared/chatInTurnContracts.ts';
-import { canTransition } from '../../../shared/chatInTurnContracts.ts';
+} from '../../../shared/chat/chatInTurnContracts.ts';
+import { canTransition } from '../../../shared/chat/chatInTurnContracts.ts';
 import { ownHistorySteps } from '../shared/chatHistorySnapshot.ts';
 
 export type InTurnEntry = InTurnReceipt | InTurnAssistantBlock;
@@ -145,6 +145,27 @@ export function mergeInTurnPage(run: ChatInTurnRun, page: InTurnPage): void {
   if (page.nextAfterSequence === null) {
     run.completeThrough = Math.max(run.completeThrough, page.throughSequence || 0);
   }
+}
+
+/**
+ * Локальная отметка обрыва для черновиков запуска, который это окно больше не считает
+ * идущим. Ревизию не трогаем: свежая запись сервера обязана перезаписать отметку целиком.
+ * Возвращает true, если что-то изменилось.
+ */
+export function closeOpenDrafts(run: ChatInTurnRun): boolean {
+  let changed = false;
+
+  run.entries = run.entries.map((entry) => {
+    if (isInTurnReceipt(entry) || entry.complete || entry.abandoned) {
+      return entry;
+    }
+
+    changed = true;
+
+    return { ...entry, abandoned: true };
+  });
+
+  return changed;
 }
 
 /**

@@ -27,13 +27,20 @@
           <h2 class="section-title">Приложение</h2>
           <UiCard>
             <p>Версия приложения: {{ version }}</p>
-            <UiButton :busy="busy" @click="check">
+            <UiButton v-if="!isDesktop" :busy="busy" @click="check">
               <UiIcon name="refresh" />
               <span>Проверить обновление</span>
             </UiButton>
-            <p v-if="checked && !update">Установлена последняя версия</p>
-            <p v-if="update">Доступна версия {{ update.version }}</p>
-            <UiButton v-if="update" kind="primary" variant="solid" :busy="busy" @click="download">
+            <p v-if="isDesktop">Новая версия для компьютера ставится установщиком.</p>
+            <p v-if="!isDesktop && checked && !update">Установлена последняя версия</p>
+            <p v-if="!isDesktop && update">Доступна версия {{ update.version }}</p>
+            <UiButton
+              v-if="!isDesktop && update"
+              kind="primary"
+              variant="solid"
+              :busy="busy"
+              @click="download"
+            >
               <UiIcon name="download" />
               <span>Скачать и установить</span>
             </UiButton>
@@ -91,6 +98,7 @@ import { isNewer } from '../api/version.ts';
 import { UiButton, UiCard, UiDialog, UiError, UiIcon, UiListRow, UiPaneHeader } from '../ui.ts';
 import { initial } from '../ui/format.ts';
 import { useLinkStore } from '../stores/link.ts';
+import { isDesktop } from '../platform.ts';
 
 const link = useLinkStore();
 const version = import.meta.env.VITE_APP_VERSION || '0.1.0';

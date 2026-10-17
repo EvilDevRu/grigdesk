@@ -14,10 +14,10 @@
 // копия правил про usage, компакт и пустой ответ разошлась бы с первой.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { verifyNativeSettings } from '../executorSettings/capability.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import type { ContextCache } from '../chat/contextCache.ts';
@@ -28,8 +28,9 @@ import type {
   InTurnPort,
   InTurnReceiptEvent,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import { toClaudeSteps } from './_claudeSteps.ts';
+import { claudeTurnFailure } from './_claudeTurnFailures.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
 
 // Служебная модель внутренних вызовов CLI: её usage к контексту разговора не относится.
@@ -62,6 +63,59 @@ function claudeMessageCallsTool(message: { content?: unknown } | undefined): boo
   return blocks.some((block) => (block as { type?: unknown } | null)?.type === 'tool_use');
 }
 
+/**
+ * Положительная дельта оценки рассуждений текущего обращения. Ноль, отсутствие поля
+ * и нечисловое значение работой не являются: CLI шлёт такие события и на служебных
+ * шагах, где модель ничего не сказала.
+ */
+function claudeThinkingDelta(ev: ClaudeEvent): boolean {
+  if (ev.type !== 'system' || ev.subtype !== 'thinking_tokens') {
+    return false;
+  }
+
+  const delta = Number(ev.estimated_tokens_delta);
+
+  return Number.isFinite(delta) && delta > 0;
+}
+
+/**
+ * Работала ли модель в этом событии. Считается ТОЛЬКО настоящий вывод текущей попытки:
+ * непустой текст, размышление или вызов инструмента. Synthetic-сообщение CLI (сбой
+ * доставки), повторно показанные старые сообщения, init, result, нулевой usage, события
+ * субагентов и границы сжатия работой не являются — иначе сбой сам себе подтверждал бы
+ * продвижение и бюджет автопродолжения сбрасывался бы на пустом месте.
+ */
+function claudeEventIsRealWork(ev: ClaudeEvent): boolean {
+  if (ev.type !== 'assistant' || ev.isReplay || ev.parent_tool_use_id) {
+    return false;
+  }
+
+  const model = ev.message?.model;
+
+  if (!model || model === SYNTHETIC_MODEL) {
+    return false;
+  }
+
+  if (claudeMessageCallsTool(ev.message)) {
+    return true;
+  }
+
+  const blocks = Array.isArray(ev.message?.content) ? ev.message.content : [];
+
+  return blocks.some((block) => {
+    const item = block as {
+      type?: unknown;
+      text?: unknown;
+      thinking?: unknown;
+    } | null;
+    const text = item?.type === 'text'
+      ? String(item.text ?? '')
+      : (item?.type === 'thinking' ? String(item.thinking ?? '') : '');
+
+    return text.trim().length > 0;
+  });
+}
+
 // Событие stream-json CLI. Форма зависит от типа, поэтому объявлено ровно читаемое.
 interface ClaudeEvent {
   type?: string;
@@ -91,6 +145,9 @@ interface ClaudeEvent {
   uuid?: string;
   isReplay?: boolean;
   user_message_uuid?: string;
+  // Корневое поле synthetic-сообщения: код причины сбоя доставки от самого CLI
+  // (authentication_failed, overloaded, rate_limit и т.п.). Обычные ответы его не несут.
+  error?: unknown;
 }
 
 /**
@@ -147,6 +204,13 @@ interface TurnState {
   // доставки, обрыв соединения, «No response requested.». Сбрасывается, как только
   // заговорила настоящая модель, — тогда ход сбой пережил.
   lastSyntheticText: string;
+  // Код причины из корневого `error` того же synthetic-сообщения. Пустая строка —
+  // CLI кода не назвал, и вид сбоя решают общие слова реестра.
+  lastSyntheticError: string;
+  // Монотонный признак работы ТЕКУЩЕЙ попытки: настоящее слово модели или её
+  // инструмент. Лента шагов для этого не годится — она усечена и содержит служебные
+  // строки; повторно показанные старые сообщения работой не являются.
+  madeProgress: boolean;
 }
 
 // Сборщик хода: лента шагов плюс его состояние.
@@ -188,12 +252,25 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     actualModel: '',
     streamSessionId: '',
     lastSyntheticText: '',
+    lastSyntheticError: '',
+    madeProgress: false,
   };
 
+  /**
+   * Приём одного события потока: лента шагов, метрики хода и признак реальной работы.
+   * Служебные и повторные события работу не подтверждают, поэтому порядок проверок
+   * здесь важнее экономии строк.
+   */
   function push(value: unknown): void {
     if (!value || typeof value !== 'object') return;
 
     const ev = value as ClaudeEvent;
+
+    // Признак работы читается ДО усечения ленты и независимо от неё: вытесненный из
+    // sink инструмент работу не отменяет, а synthetic-текст её не подтверждает.
+    if (claudeEventIsRealWork(ev) || claudeThinkingDelta(ev)) {
+      state.madeProgress = true;
+    }
 
     stepSink.emitAll(toClaudeSteps(ev));
 
@@ -227,7 +304,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
       const delta = Number(ev.estimated_tokens_delta);
 
-      if (Number.isFinite(delta) && delta > 0) {
+      if (claudeThinkingDelta(ev)) {
         state.thinkingEstimated += delta;
         refreshEstimate();
 
@@ -245,6 +322,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     // который таким сообщением и ЗАКОНЧИЛСЯ, от нормального ответа.
     if (ev.type === 'assistant' && ev.message?.model === SYNTHETIC_MODEL) {
       state.lastSyntheticText = claudeMessageText(ev.message);
+      state.lastSyntheticError = typeof ev.error === 'string' ? ev.error : '';
       return;
     }
 
@@ -254,8 +332,9 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     }
 
     if (ev.type === 'assistant' && ev.message?.usage && ev.message.model !== SYNTHETIC_MODEL) {
-      // Модель заговорила после сбоя — ход его пережил, прежняя отметка недействительна.
+      // Модель заговорила после сбоя — ход его пережил, обе отметки недействительны.
       state.lastSyntheticText = '';
+      state.lastSyntheticError = '';
       const usage = ev.message.usage as Record<string, number>;
 
       // Событие несёт один блок содержимого. Текст и аргументы инструмента — вывод модели,
@@ -396,6 +475,18 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
   // модель успела ответить, отметка уже сброшена и ход считается обычным.
   const cliCut = String(state.lastSyntheticText || '').trim();
   const deliveryFailure = !!cliCut && cliCut === String(reply || '').trim();
+  // Автоматика продолжает ход только по явному подтверждению адаптера: ход принят в
+  // сохранённый разговор, попытка окончательно завершена и разговор можно продолжить.
+  // Настоящий result текущего collector и id сессии из его событий обязательны —
+  // одного fallbackSessionId при неполном потоке для этого недостаточно.
+  const canContinue = deliveryFailure && !!ev.type && !!state.streamSessionId;
+
+  if (deliveryFailure && !canContinue) {
+    log?.warn?.({
+      resultType: ev.type || '',
+      hasEventSession: !!state.streamSessionId,
+    }, 'чат: сбой доставки claude без подтверждения Р2 — автопродолжение недоступно');
+  }
 
   return {
     reply,
@@ -409,6 +500,10 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
     steps,
     emptyRun,
     deliveryFailure,
+    ...(deliveryFailure ? {
+      turnFailure: claudeTurnFailure(cliCut, state.lastSyntheticError),
+      turnRecovery: { canContinue, madeProgress: state.madeProgress },
+    } : {}),
     subtype: ev.subtype || '',
   };
 }

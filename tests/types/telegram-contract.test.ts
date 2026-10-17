@@ -1,5 +1,5 @@
-import type { TelegramBot, TelegramRule, TelegramStatus } from '../../shared/telegramContracts.ts';
-import { parseTelegramRules, parseTelegramStatus } from '../../shared/telegramContracts.ts';
+import type { TelegramBot, TelegramRule, TelegramStatus } from '../../shared/telegram/telegramContracts.ts';
+import { parseTelegramRules, parseTelegramStatus } from '../../shared/telegram/telegramContracts.ts';
 import { telegramApi } from '../../web/src/shared/telegramApi.ts';
 
 type IsUnchecked<Value> = 0 extends (1 & Value) ? true : false;

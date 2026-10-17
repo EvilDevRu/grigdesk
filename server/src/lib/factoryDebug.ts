@@ -1,5 +1,7 @@
 // Adapter к engine-owned debug settings. Формат файлов здесь намеренно неизвестен:
 // Cockpit вызывает только `factory ... debug`, чтобы не заводить второго writer-а.
+import { config as runtimeConfig } from '../config.ts';
+
 import { execFile } from 'node:child_process';
 import type { ExecFileOptions } from 'node:child_process';
 
@@ -157,6 +159,7 @@ export class FactoryDebugSettings {
 
   async command(args: string[]): Promise<DebugRunResult> {
     const env = {
+      COCKPIT_HOME: runtimeConfig.dataHome,
       PATH: process.env.PATH || '/usr/bin:/bin',
       HOME: process.env.HOME || '',
       LANG: process.env.LANG || 'C',

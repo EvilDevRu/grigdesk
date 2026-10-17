@@ -35,22 +35,26 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
 });
 
 test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаются независимо', async () => {
-  const [registry, codeLoading] = await Promise.all([
+  const [registry, codeLoading, asyncView] = await Promise.all([
     source('web/src/shared/tools/registry.ts'),
     source('web/src/views/code/codePanelLoading.ts'),
+    source('web/src/shared/asyncView.ts'),
   ]);
 
-  // Шесть встроенных панелей плюс одна общая панель-iframe для страниц плагинов.
-  assert.equal(count(registry, /defineAsyncComponent\(/g), 7);
+  // Семь встроенных панелей плюс одна общая панель-iframe для страниц плагинов.
+  assert.equal(count(registry, /asyncView\(/g), 8);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginFramePanel\.vue'\)/);
+  assert.match(registry, /import\('\.\.\/\.\.\/views\/studio3d\/Studio3dPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/terminal\/TerminalPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ssh\/SshPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/db\/DbPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/docker\/DockerPanel\.vue'\)/);
-  assert.match(registry, /loadingComponent: CodePanelLoading/);
-  assert.match(registry, /delay: 0/);
+  assert.match(registry, /CodePanelLoading\)/);
+  assert.match(asyncView, /delay: 0/);
+  assert.match(asyncView, /errorComponent: LoadFailure/);
+  assert.match(asyncView, /timeout: 30000/);
   assert.match(codeLoading, /'aria-busy': 'true'/);
   assert.match(codeLoading, /class: \['code-loading-layout', \{ compact: props\.compact \}\]/);
   assert.match(codeLoading, /class: 'code-loading-rail'/);
@@ -85,24 +89,20 @@ test('планшет 760–899 остаётся route-only, док и треть
   ]);
 
   assert.match(viewport, /DOCK_BREAKPOINT = 900/);
-  assert.match(shell, /@media \(min-width: 760px\) and \(max-width: 899px\)/);
-  assert.match(shell, /grid-template-columns: 62px minmax\(0, 1fr\);/);
+  assert.match(shell, /@media \(max-width: 899px\)/);
+  assert.match(shell, /grid-template-columns: var\(--app-rail-w\) minmax\(0, 1fr\);/);
   assert.match(shell, /\.dock-route-nav \{ display: flex; \}/);
-  assert.match(shell, /@media \(min-width: 900px\) and \(max-width: 1099px\)/);
-  assert.match(shell, /grid-template-columns: 62px minmax\(0, 1fr\) 44px;/);
+  assert.match(shell, /grid-template-columns: var\(--app-rail-w\) minmax\(0, 1fr\) var\(--app-rail-w\);/);
   assert.match(host, /@media \(max-width: 899px\) \{ \.tool-rail \{ display: none; \} \}/);
 });
 
-test('переключатель desktop-сайдбара закреплён снизу, а смена ширины не происходит скачком', async () => {
+test('desktop-сайдбар всегда узкий и не содержит переключателя или плитки обновлений', async () => {
   const shell = await source('web/src/shared/layout/AppShell.vue');
 
-  assert.match(shell, /\.collapse-btn \{ margin-top: auto; \}/);
-  assert.match(shell, /transition: grid-template-columns \.16s ease-out;/);
-  assert.match(shell, /prefers-reduced-motion: reduce[\s\S]*\.shell \{ transition: none; \}/);
-  assert.match(
-    shell,
-    /@media \(min-width: 760px\) and \(max-width: 899px\)[\s\S]*\.dock-route-nav \{ display: flex; \}[\s\S]*\.collapse-btn \{ margin-top: 4px; \}/,
-  );
+  assert.doesNotMatch(shell, /collapse-btn|toggleSidebar|cockpit-sidebar|CockpitVersionTile/);
+  assert.match(shell, /grid-row: 1; grid-column: 1 \/ -1;/);
+  assert.match(shell, /grid-row: 2; grid-column: 1;/);
+  assert.match(shell, /class="app-mark"/);
 });
 
 test('док использует строку инструмента, а разворачивание меняет только геометрию того же render-site', async () => {
@@ -118,7 +118,8 @@ test('док использует строку инструмента, а раз
   assert.match(dockView, /:pressed="expanded"/);
   assert.match(dockView, /mode === 'dock' && !expanded/);
   assert.match(dockView, /emit\('toggle-expanded'\)/);
-  assert.match(dockView, /--tool-dock-action-size:\s*30px;/);
+  assert.doesNotMatch(dockView, /--tool-dock-action-size:\s*30px;/);
+  assert.match(dockView, /var\(--tool-dock-action-size/);
   assert.match(dockView, /--tool-dock-action-top:\s*4px;/);
   assert.match(host, /function toggleDockExpanded\(\)\s*{\s*dock\.toggleExpanded\(\);\s*}/);
   assert.match(host, /:expanded="expandedOf\(item\.id\)" :expanded-width="contentWidth"/);
@@ -144,7 +145,7 @@ test('Escape у развёрнутого дока сначала возвращ�
   assert.equal(count(host, /useUiLayer\('dock'/g), 1);
   assert.match(host, /useUiLayer\('dock', \{[\s\S]*id: 'tool-dock'[\s\S]*onEscape: closeDockLayer/);
   assert.match(host, /watch\(\(\) => route\.path,[\s\S]*dock\.isExpanded[\s\S]*dock\.setExpanded\(false, \{ persist: false \}\)/);
-  assert.match(shell, /<main class="content" :inert="toolDock\.isExpanded"/);
+  assert.match(shell, /<main class="content"[^>]*:inert="toolDock\.isExpanded"/);
   assert.match(shell, /:aria-hidden="toolDock\.isExpanded \? 'true' : undefined"/);
 });
 

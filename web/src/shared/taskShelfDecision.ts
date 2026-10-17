@@ -1,5 +1,8 @@
 // Единственное решение полки: нормализует доступные источники, строит новый снимок
 // и называет наступившее событие. Панель, чип и оповещение получают уже готовый row.
+
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 const TERMINAL_ANALYSIS = new Set(['done', 'finished', 'failed', 'interrupted']);
 const TERMINAL_B24 = new Set(['completed', 'done', 'closed']);
 
@@ -72,10 +75,6 @@ export function isShelfTaskCompleted(value: ShelfObservedB24 | null | undefined)
   return value?.present === false || (typeof kind === 'string' && TERMINAL_B24.has(kind));
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 function text(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
 }
@@ -106,7 +105,7 @@ function analysisSnapshot(value: unknown): ShelfObservedAnalysis | null {
     return null;
   }
 
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
 
   return {
     state: text(source.state),
@@ -122,7 +121,7 @@ function pipelineSnapshot(value: unknown): ShelfObservedPipeline | null {
     return null;
   }
 
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
 
   return {
     attempt: text(source.attempt),
@@ -139,7 +138,7 @@ function b24Snapshot(value: unknown): ShelfObservedB24 | null {
     return null;
   }
 
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
 
   return {
     present: source.present === true,
@@ -150,7 +149,7 @@ function b24Snapshot(value: unknown): ShelfObservedB24 | null {
 }
 
 function normalized(value: unknown): ShelfObservedSnapshot {
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
 
   return {
     analysis: analysisSnapshot(source.analysis),

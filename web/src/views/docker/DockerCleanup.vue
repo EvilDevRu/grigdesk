@@ -103,7 +103,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
 
-import type { DockerPruneTarget } from '../../../../shared/dockerContracts';
+import type { DockerPruneTarget } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.js';

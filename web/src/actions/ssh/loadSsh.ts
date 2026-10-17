@@ -1,4 +1,6 @@
-import { sshApi, sshErrorMessage } from '../../shared/sshApi.ts';
+import { errorMessage } from '../../../../shared/lib/errors.ts';
+
+import { sshApi } from '../../shared/sshApi.ts';
 import { useSshStore } from '../../stores/ssh.ts';
 import { detachSshTerminal } from './sshTerminal.ts';
 
@@ -30,7 +32,7 @@ export async function loadSsh(): Promise<void> {
       detachSshTerminal();
     }
   } catch (error) {
-    store.setError(sshErrorMessage(error, 'Не удалось загрузить SSH'));
+    store.setError(errorMessage(error, 'Не удалось загрузить SSH'));
   } finally {
     store.setLoading(false);
   }
@@ -49,7 +51,7 @@ export async function loadSshProjects(): Promise<void> {
   try {
     store.setProjects(await sshApi.projects());
   } catch (error) {
-    store.setProjectsError(sshErrorMessage(error, 'Не удалось загрузить проекты'));
+    store.setProjectsError(errorMessage(error, 'Не удалось загрузить проекты'));
   } finally {
     store.setProjectsLoading(false);
   }

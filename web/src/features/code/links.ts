@@ -4,8 +4,10 @@
 // навигации, а не граница безопасности: чтение всё равно идёт обычными роутами
 // плагина «Код» с их проверками root/скрытых каталогов.
 import { ref } from 'vue';
+import { decodeUriComponentOrOriginal } from '../../../../shared/lib/text.ts';
+
 import { codeApi } from '../../shared/codeApi.ts';
-import type { CodeRoot, CodeTarget } from '../../../../shared/codeContracts.ts';
+import type { CodeRoot, CodeTarget } from '../../../../shared/plugins/code/codeContracts.ts';
 import { documentRouteHref } from '../documents/links.js';
 
 type LinkRoot = Pick<CodeRoot, 'project' | 'repo' | 'root'>;
@@ -20,18 +22,6 @@ const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 // такую ссылку честнее сразу показать текстом, а не кнопкой к отказу.
 const HIDDEN_SEGMENTS = new Set(['.git', '.state']);
 const LINE_SUFFIX = /^(.*):(\d+)(?::\d+)?$/;
-
-/**
- * Декодирует URL-путь, сохраняя исходный текст при повреждённом escape.
- * Некорректная ссылка не должна прерывать отрисовку сообщения.
- */
-function decodePath(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
 
 /**
  * Убирает точки и переходы к родителю до сравнения с картой деревьев.
@@ -131,7 +121,7 @@ export function parseCodeTarget(href: string, roots: readonly LinkRoot[]): CodeT
     return null;
   }
 
-  raw = decodePath(raw.split('#', 1)[0] || '');
+  raw = decodeUriComponentOrOriginal(raw.split('#', 1)[0] || '');
 
   let line = 0;
   const lineMatch = raw.match(LINE_SUFFIX);

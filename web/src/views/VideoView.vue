@@ -740,7 +740,7 @@ import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
 import { useUiStore } from '../stores/ui.js';
 import { canWidenClip, useVideoSessionStore } from '../stores/videoSession.ts';
 import type { VideoDraft } from '../stores/videoSession.ts';
-import type { MediaStorageUsage, MediaTranscriptSegment } from '../../../shared/mediaContracts.ts';
+import type { MediaStorageUsage, MediaTranscriptSegment } from '../../../shared/media/mediaContracts.ts';
 
 // Соседние сторы ещё на JavaScript: раздел объявляет ровно то, что читает у них.
 interface VideoPluginsSource {

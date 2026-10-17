@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { createScene, createSyncBindings } from '../../server/src/lib/showcase/scenes.ts';
 import { createShowcaseStore, newShowcaseId } from '../../server/src/lib/showcase/store.ts';
-import { SHOWCASE_SCHEMA_VERSION } from '../../shared/showcaseContracts.ts';
+import { SHOWCASE_SCHEMA_VERSION } from '../../shared/plugins/showcase/showcaseContracts.ts';
 
 const LEGACY_PROJECT_FIXTURE = new URL(
   './fixtures/showcase-project-v1-without-sync.json',

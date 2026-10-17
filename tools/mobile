@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+# Сборка приложения на телефоне без sudo и без изменения системного Java/SDK.
+# Команды: deps, doctor, check, build, release, devlink. Пути можно перенести в разрешённый каталог.
+set -euo pipefail
+
+MOBILE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MOBILE_COMMAND="${1:-doctor}"
+source "$MOBILE_ROOT/deploy/lib/runtime-env.sh"
+# Перенос нужен только командам, которые пишут: остановить и проверить DevLink можно и до него.
+if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release
+  || ( "$MOBILE_COMMAND" == devlink && "${2:-status}" == start ) ]]; then
+  cockpit_require_migrated "$MOBILE_ROOT"
+fi
+if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release || "$MOBILE_COMMAND" == devlink ]]; then
+  MOBILE_DATA_HOME=$(cockpit_data_home) || exit 1
+  MOBILE_APK_DIR="${COCKPIT_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/state/mobile-apk}"
+fi
+MOBILE_LOCK="$MOBILE_ROOT/mobile/toolchain.lock.json"
+MOBILE_DOWNLOADS="${COCKPIT_MOBILE_DOWNLOADS:-$MOBILE_ROOT/.state/mobile-downloads}"
+export JAVA_HOME="${COCKPIT_ANDROID_JDK:-$HOME/.local/share/cockpit-android/jdk-21}"
+export ANDROID_HOME="${COCKPIT_ANDROID_HOME:-$HOME/Android/Sdk}"
+export ANDROID_USER_HOME="${COCKPIT_ANDROID_USER_HOME:-$MOBILE_ROOT/.state/android-user}"
+export GRADLE_USER_HOME="${COCKPIT_ANDROID_GRADLE_HOME:-$MOBILE_ROOT/.state/android-gradle}"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+
+# JSON читается как данные: содержимое lock не исполняется shell-ом.
+# Поля URL/hash передаются curl и sha256sum отдельными аргументами.
+lock_field() {
+  node --input-type=module -e '
+    import fs from "node:fs";
+
+    let value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+
+    for (const key of process.argv[2].split(".")) {
+      value = value[key];
+    }
+
+    if (typeof value !== "string" && typeof value !== "number") {
+      process.exit(1);
+    }
+
+    process.stdout.write(String(value));
+  ' "$MOBILE_LOCK" "$1"
+}
+
+# Незавершённый архив сохраняется для продолжения, но готовым считается только после hash.
+# Повтор после сбоя curl заново определяет текущую длину локального файла.
+archive() {
+  local field="$1" file="$2" url hash attempt
+  url="$(lock_field "$field.url")"
+  hash="$(lock_field "$field.sha256")"
+  mkdir -p "$MOBILE_DOWNLOADS"
+
+  if [[ -f "$file" ]] && printf '%s  %s\n' "$hash" "$file" | sha256sum -c - >/dev/null 2>&1; then
+    return
+  fi
+
+  for attempt in 1 2 3 4 5; do
+    if curl --silent --show-error -fL -C - --retry 5 --retry-all-errors "$url" -o "$file"; then
+      printf '%s  %s\n' "$hash" "$file" | sha256sum -c -
+      return
+    fi
+  done
+
+  echo 'Загрузка не завершена; повторите tools/mobile deps.' >&2
+  return 1
+}
+
+# Готовые каталоги публикуются только после проверки архива и исполнимого инструмента.
+# Чужая существующая установка не перезаписывается автоматически.
+install_deps() {
+  local staged licenses_status
+  mkdir -p "$MOBILE_DOWNLOADS" "$ANDROID_USER_HOME" "$GRADLE_USER_HOME"
+
+  if [[ ! -x "$JAVA_HOME/bin/java" ]]; then
+    [[ ! -e "$JAVA_HOME" ]] || {
+      echo 'Каталог JDK существует, но установка неполна.' >&2
+      return 1
+    }
+
+    archive jdk "$MOBILE_DOWNLOADS/jdk.tar.gz"
+    mkdir -p "$(dirname "$JAVA_HOME")"
+    staged="$(mktemp -d "$(dirname "$JAVA_HOME")/.jdk-XXXXXX")"
+    tar -xzf "$MOBILE_DOWNLOADS/jdk.tar.gz" --strip-components=1 -C "$staged"
+    "$staged/bin/java" -version
+    mv "$staged" "$JAVA_HOME"
+  fi
+
+  if [[ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]]; then
+    [[ ! -e "$ANDROID_HOME/cmdline-tools/latest" ]] || {
+      echo 'Каталог command-line tools существует, но установка неполна.' >&2
+      return 1
+    }
+
+    archive commandLineTools "$MOBILE_DOWNLOADS/tools.zip"
+    mkdir -p "$ANDROID_HOME/cmdline-tools"
+    staged="$(mktemp -d "$ANDROID_HOME/cmdline-tools/.tools-XXXXXX")"
+    unzip -q "$MOBILE_DOWNLOADS/tools.zip" -d "$staged"
+    test -x "$staged/cmdline-tools/bin/sdkmanager"
+    mv "$staged/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+    rmdir "$staged"
+  fi
+
+  # yes получает SIGPIPE после последнего вопроса; проверяется именно sdkmanager.
+  # Его ненулевой код не скрывается общей успешностью распаковки.
+  set +e
+  yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+  licenses_status="${PIPESTATUS[1]}"
+  set -e
+  [[ "$licenses_status" == 0 ]] || return "$licenses_status"
+  sdkmanager --sdk_root="$ANDROID_HOME" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+  doctor
+}
+
+# Doctor проверяет реальные исполнимые файлы и пакеты, а не наличие каталога-заготовки.
+# Он не скачивает зависимости и возвращает отказ при неполной среде.
+# Jar Gradle Wrapper сверяется с lock: этот бинарник из git исполняется при каждой сборке.
+doctor() {
+  local result=0 java_version cap_version wrapper_jar wrapper_hash
+  java_version="$(java -version 2>&1)" || result=1
+  printf '%s\n' "$java_version"
+  [[ "$java_version" == *'version "21.'* ]] || result=1
+  node --version || result=1
+  cap_version="$(cd "$MOBILE_ROOT/mobile" && ./node_modules/.bin/cap --version)" || result=1
+  printf 'Capacitor %s\n' "$cap_version"
+  [[ "$cap_version" == "$(lock_field capacitor)" ]] || result=1
+  [[ -x "$ANDROID_HOME/platform-tools/adb" ]] || result=1
+  [[ -f "$ANDROID_HOME/platforms/android-36/android.jar" ]] || result=1
+  [[ -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]] || result=1
+  sdkmanager --sdk_root="$ANDROID_HOME" --list_installed || result=1
+  wrapper_jar="$MOBILE_ROOT/mobile/android/gradle/wrapper/gradle-wrapper.jar"
+  wrapper_hash="$(lock_field gradleWrapperJar.sha256)" || result=1
+  printf '%s  %s\n' "$wrapper_hash" "$wrapper_jar" | sha256sum -c - || result=1
+  df -h "$MOBILE_ROOT"
+  return "$result"
+}
+
+# Архив wrapper поступает из того же закреплённого официального выпуска через curl.
+# Java wrapper проверяет SHA256 повторно; неполная загрузка не получает отметку готовности.
+gradle_archive() {
+  local url hash directory
+  url="$(lock_field gradleDistribution.url)"
+  hash="$(node --input-type=module -e '
+    import {createHash} from "node:crypto";
+
+    const hex=createHash("md5").update(process.argv[1]).digest("hex");
+
+    process.stdout.write(BigInt("0x"+hex).toString(36));
+  ' "$url")"
+  directory="$GRADLE_USER_HOME/wrapper/dists/gradle-8.14.3-bin/$hash"
+
+  if [[ -x "$directory/gradle-8.14.3/bin/gradle" ]]; then
+    return
+  fi
+
+  archive gradleDistribution "$MOBILE_DOWNLOADS/gradle-8.14.3-bin.zip"
+  mkdir -p "$directory"
+  cp "$MOBILE_DOWNLOADS/gradle-8.14.3-bin.zip" "$directory/gradle-8.14.3-bin.zip"
+}
+
+# Проверки запускают только тестовые сервисы; пользовательский Кокпит не перезапускается.
+# Android-тесты и сборка используют отдельный Gradle cache этой рабочей папки.
+check() {
+  doctor
+  gradle_archive
+  NODE_TEST_MAX_RSS_MB=4096 bash "$MOBILE_ROOT/tests/run-node-tests-safe.sh" --test \
+    --test-concurrency=2 "$MOBILE_ROOT"/tests/mobile/*.test.js
+  npm --prefix "$MOBILE_ROOT/mobile" run typecheck
+  (
+    cd "$MOBILE_ROOT/mobile/android"
+    ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintDebug
+  )
+}
+
+# Собранный WebView копируется в Android до получения установочного APK.
+# Debug-сборка публикуется только в артефакты, не заменяя release для обновлений телефона.
+build() {
+  doctor
+  gradle_archive
+  npm --prefix "$MOBILE_ROOT/mobile" run build
+  (
+    cd "$MOBILE_ROOT/mobile"
+    ./node_modules/.bin/cap sync android
+  )
+  (
+    cd "$MOBILE_ROOT/mobile/android"
+    ./gradlew --no-daemon --max-workers=2 :app:assembleDebug
+  )
+  mkdir -p "$MOBILE_APK_DIR"
+  cp "$MOBILE_ROOT/mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
+    "$MOBILE_APK_DIR/cockpit-mobile-debug.apk"
+}
+
+# DevLink — браузерный телефон для разработки поверх настоящего посредника и мозга.
+# Отдельный user-юнит переживает ход агента и перезапуск Кокпита; входы только на 127.0.0.1.
+devlink() {
+  local action="${1:-status}" unit=cockpit-mobile-devlink offset deadline
+  local log="${COCKPIT_MOBILE_DEVLINK_LOG:-$MOBILE_APK_DIR/devlink.log}"
+  local port="${COCKPIT_MOBILE_DEVLINK_PORT:-8150}"
+
+  case "$action" in
+    start)
+      if systemctl --user is-active --quiet "$unit"; then
+        echo "DevLink уже запущен: http://127.0.0.1:$port/"
+        return 0
+      fi
+
+      mkdir -p "$(dirname "$log")"
+      touch "$log"
+      offset="$(stat -c %s "$log")"
+      systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+      systemd-run --user --quiet --unit="$unit" -p KillMode=control-group \
+        -p "StandardOutput=append:$log" -p "StandardError=append:$log" \
+        --working-directory="$MOBILE_ROOT" --setenv=PATH="$PATH" --setenv=HOME="$HOME" \
+        --setenv=COCKPIT_MOBILE_DEVLINK_PORT="$port" --setenv=COCKPIT_HOME="$MOBILE_DATA_HOME" \
+        ${COCKPIT_MOBILE_DEVLINK_DIR:+--setenv=COCKPIT_MOBILE_DEVLINK_DIR="$COCKPIT_MOBILE_DEVLINK_DIR"} \
+        node "$MOBILE_ROOT/tools/mobile-phone/devlink.mts"
+      deadline=$((SECONDS + 180))
+
+      while ((SECONDS < deadline)); do
+        if tail -c +"$((offset + 1))" "$log" | grep -q '"ev":"devlink_ready"'; then
+          echo "DevLink запущен: http://127.0.0.1:$port/"
+          return 0
+        fi
+
+        if ! systemctl --user is-active --quiet "$unit"; then
+          break
+        fi
+
+        sleep 1
+      done
+
+      tail -c +"$((offset + 1))" "$log" | tail -n 20 >&2
+      echo 'DevLink не запустился; журнал выше.' >&2
+      return 1
+      ;;
+    stop)
+      systemctl --user stop "$unit" 2>/dev/null || true
+      systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+      echo 'DevLink остановлен.'
+      ;;
+    status)
+      if systemctl --user is-active --quiet "$unit"; then
+        echo "DevLink работает: http://127.0.0.1:$port/"
+      else
+        echo 'DevLink не запущен.'
+      fi
+
+      tail -n 5 "$log" 2>/dev/null || true
+      ;;
+    *)
+      echo 'Команды: tools/mobile devlink start|stop|status' >&2
+      return 1
+      ;;
+  esac
+}
+
+case "$MOBILE_COMMAND" in
+  devlink)
+    devlink "${2:-status}"
+    ;;
+  deps)
+    install_deps
+    ;;
+  doctor)
+    doctor
+    ;;
+  check)
+    check
+    ;;
+  build)
+    build
+    ;;
+  release)
+    doctor
+    gradle_archive
+    node "$MOBILE_ROOT/tools/mobile-phone/release.mts"
+    ;;
+  *)
+    echo 'Команды: tools/mobile deps|doctor|check|build|release|devlink' >&2
+    exit 1
+    ;;
+esac

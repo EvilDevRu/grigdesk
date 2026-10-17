@@ -1,92 +1,90 @@
-// Состояние входа в кокпит.
-//
-// Секретов здесь не хранится: сервер отдаёт сессионную httpOnly-cookie, JS её не видит и
-// видеть не должен. Стор знает только «пущен или нет».
+// Состояние входа хранит только подтверждение сессии и владельца локальных данных.
+// HttpOnly-cookie и локальный ключ недоступны этому стору и остальному renderer.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 
+const RELOAD_KEY = 'cockpit-auth-reload-at';
+const RELOAD_INTERVAL_MS = 60_000;
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    // null = ещё не спрашивали. До ответа приложение не рисуем, иначе на миг мелькнёт
-    // либо экран входа у вошедшего, либо интерфейс у невошедшего.
     ready: false,
     configured: true,
     authenticated: false,
-    login: '',
-    error: null,
-    busy: false,
-    // Отдельное подтверждение каждой удачной проверки сессии нужно транспорту журнала.
+    clientScope: '',
     logConfirmation: 0,
     logEpoch: 0,
     logReason: 'load',
   }),
+
   actions: {
+    /**
+     * Проверка подтверждает сессию для журнала и сохраняет владельца локальных данных.
+     * Ответ старой эпохи не может восстановить вход после полученного 401.
+     */
     async load(reason = 'load') {
       const epoch = this.logEpoch;
+
       try {
         const s = await api.get('/api/auth/state');
-        if (epoch !== this.logEpoch) return;
+
+        if (epoch !== this.logEpoch) {
+          return;
+        }
+
         this.configured = s.configured;
         this.authenticated = s.authenticated;
-        this.login = s.login || '';
+        this.clientScope = s.clientScope ?? s.login ?? '';
         this.logReason = reason;
-        if (s.authenticated) this.logConfirmation += 1;
+
+        if (s.authenticated) {
+          this.logConfirmation += 1;
+        }
       } catch {
-        if (epoch !== this.logEpoch) return;
-        // Сервер недоступен — считаем невошедшим, экран входа покажет ошибку при попытке.
+        if (epoch !== this.logEpoch) {
+          return;
+        }
+
         this.authenticated = false;
         this.logReason = reason;
       } finally {
-        if (epoch === this.logEpoch) this.ready = true;
+        if (epoch === this.logEpoch) {
+          this.ready = true;
+        }
       }
     },
 
-    // Любой 401 из обычного запроса = сессия истекла или отозвана → назад на вход.
-    // Подписку ставим один раз при старте приложения.
-    watchUnauthorized() {
-      api.onUnauthorized((data) => {
-        this.authenticated = false;
-        this.logReason = '401';
-        if (data && typeof data.needsSetup === 'boolean') this.configured = !data.needsSetup;
-      });
-    },
-
-    async doLogin({ login, password }) {
-      this.busy = true;
-      this.error = null;
-      try {
-        await api.post('/api/auth/login', { login, password });
-        await this.load('login');
-        return this.authenticated;
-      } catch (e) {
-        this.error = e.data?.message || e.message;
-        return false;
-      } finally {
-        this.busy = false;
-      }
-    },
-
-    // Первичная настройка: доступна, пока пароль не задан. Сервер сразу впускает.
-    async doSetup({ login, password }) {
-      this.busy = true;
-      this.error = null;
-      try {
-        await api.post('/api/auth/setup', { login, password });
-        await this.load('setup');
-        return this.authenticated;
-      } catch (e) {
-        this.error = e.data?.message || e.message;
-        return false;
-      } finally {
-        this.busy = false;
-      }
-    },
-
-    async doLogout() {
+    /**
+     * Первый отказ перезагружает документ, чтобы главное окно восстановило cookie.
+     * Метка переживает reload; закрытый storage запрещает цикл повторных навигаций.
+     */
+    handleUnauthorized() {
       this.logEpoch += 1;
-      this.logReason = 'logout';
+      this.logReason = '401';
       this.authenticated = false;
-      try { await api.post('/api/auth/logout'); } catch { /* всё равно уходим на вход */ }
+
+      try {
+        const previous = Number(sessionStorage.getItem(RELOAD_KEY));
+        const now = Date.now();
+
+        if (previous > 0 && now - previous < RELOAD_INTERVAL_MS) {
+          return;
+        }
+
+        sessionStorage.setItem(RELOAD_KEY, String(now));
+      } catch {
+        return;
+      }
+
+      location.reload();
+    },
+
+    /**
+     * Общий API-клиент сообщает об отказе без повтора исходного запроса.
+     * Подписка устанавливается при запуске документа, обмена ключом здесь нет.
+     */
+    watchUnauthorized() {
+      api.onUnauthorized(() => this.handleUnauthorized());
     },
   },
 });

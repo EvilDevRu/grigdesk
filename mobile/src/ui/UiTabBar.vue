@@ -1,7 +1,7 @@
 <template>
   <nav class="app-nav" aria-label="Разделы">
     <div class="app-nav-brand" aria-hidden="true">
-      <span class="brand-mark">◧</span>
+      <UiBrandMark class="brand-mark" />
       <span class="app-brand-name">Кокпит</span>
     </div>
     <RouterLink
@@ -35,6 +35,7 @@
 import { RouterLink, useRoute } from 'vue-router';
 
 import type { IconName } from './icons.ts';
+import UiBrandMark from './UiBrandMark.vue';
 import UiIcon from './UiIcon.vue';
 import UiLinkStatus from './UiLinkStatus.vue';
 import { useAttentionStore } from '../stores/attention.ts';

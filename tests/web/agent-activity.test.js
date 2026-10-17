@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { agentActivityLabel, silenceReason } from '../../shared/agentActivity.ts';
+import { agentActivityLabel, silenceReason } from '../../shared/pipeline/agentActivity.ts';
 
 test('agent activity label distinguishes a live journal, silence duration and missing telemetry', () => {
   assert.equal(agentActivityLabel({ journalFresh: true, journalAgeSec: 4 }), 'агент пишет');

@@ -241,13 +241,13 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 
-import type { FactoryGraphData } from '../../../shared/factoryGraphContracts.ts';
-import type { RouteRevision } from '../../../shared/routesContracts.ts';
-import type { AgentCard } from '../../../shared/agentsContracts.ts';
+import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
+import type { RouteRevision } from '../../../shared/pipeline/routesContracts.ts';
+import type { AgentCard } from '../../../shared/pipeline/agentsContracts.ts';
 import type { RouteDraft, RouteRebaseResolution,
-  RouteRevisionCompareReport } from '../../../shared/routesEditorContracts.ts';
-import type { RouteEditorIssue } from '../../../shared/routesEditorContracts.ts';
-import { publishSummary } from '../../../shared/routesContracts.ts';
+  RouteRevisionCompareReport } from '../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteEditorIssue } from '../../../shared/pipeline/routesEditorContracts.ts';
+import { publishSummary } from '../../../shared/pipeline/routesContracts.ts';
 import { failureText } from '../shared/apiClient.ts';
 import { routesApi } from '../shared/routesApi.ts';
 import type { DraftCreateRequest } from '../shared/routesApi.ts';

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -48,8 +49,8 @@ async function fixtureRepository(temp, { brokenBuild = false, runtimeGate = null
   await writeFile(path.join(publisher, '.gitignore'), 'server/node_modules/\nserver/.state/\nweb/node_modules/\nweb/dist/\n');
   await writeFile(path.join(publisher, 'VERSION'), '0.1.0\n');
   await writeFile(path.join(publisher, 'release.txt'), 'one\n');
-  await mkdir(path.join(publisher, 'bin'), { recursive: true });
-  await writeFile(path.join(publisher, 'bin', 'restart'), [
+  await mkdir(path.join(publisher, 'deploy'), { recursive: true });
+  await writeFile(path.join(publisher, 'deploy', 'restart.sh'), [
     '#!/usr/bin/env bash',
     'mkdir -p server/.state',
     'touch server/.state/restarted',
@@ -277,4 +278,130 @@ test('a remote tag moved after check is rejected before merge', async (t) => {
   const state = await readPersistentState(statePath);
   assert.equal(state.job.status, 'failed');
   assert.equal(state.job.error.code, 'remote_tag_changed');
+});
+
+/**
+ * Worker получает только выбранные переменные и собственный домашний каталог.
+ * Ключи и параметры живого сервера не наследуются новой проверкой обновления.
+ */
+function desktopWorkerEnv(env, home) {
+  return {
+    PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+    HOME: home,
+    NODE_ENV: 'production',
+    npm_config_cache: env.npm_config_cache,
+    XDG_CACHE_HOME: env.XDG_CACHE_HOME,
+  };
+}
+
+/**
+ * Публикует релиз только в временный репозиторий и ловит локальный запрос worker.
+ * Закрытая заглушка моделирует отсутствие сервера, не обращаясь к порту установки.
+ */
+async function desktopUpdateFixture(t, responseCode, refused = false) {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'cockpit-worker-desktop-'));
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    let body = '';
+
+    for await (const chunk of request) {
+      body += chunk;
+    }
+
+    requests.push({
+      method: request.method,
+      url: request.url,
+      token: request.headers['x-cockpit-token'],
+      body: JSON.parse(body),
+    });
+    response.writeHead(responseCode);
+    response.end();
+  });
+
+  t.after(async () => {
+    if (server.listening) {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    await rm(temp, { recursive: true, force: true });
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const origin = `http://127.0.0.1:${server.address().port}`;
+
+  if (refused) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  const { root, first, second } = await fixtureRepository(temp);
+  const { id, statePath } = await queueJob(root, first, second);
+  const tokenPath = path.join(temp, 'cli-token');
+
+  await writeFile(tokenPath, 'fixture-cli-token\n', { mode: 0o600 });
+
+  let code = 0;
+
+  try {
+    await exec(process.execPath, [
+      worker,
+      '--root', root,
+      '--state', statePath,
+      '--job', id,
+      '--mode', 'desktop',
+      '--origin', origin,
+      '--token-file', tokenPath,
+    ], {
+      cwd: root,
+      env: desktopWorkerEnv(process.env, path.join(temp, 'home')),
+      timeout: 120_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  } catch (error) {
+    code = error.code;
+  }
+
+  return {
+    code,
+    requests,
+    root,
+    id,
+    second,
+    job: (await readPersistentState(statePath)).job,
+  };
+}
+
+test('UP-02 desktop worker публикует релиз и делает один POST с CLI-токеном', async (t) => {
+  const fixture = await desktopUpdateFixture(t, 202);
+
+  assert.equal(fixture.code, 0);
+  assert.deepEqual(fixture.requests, [{
+    method: 'POST',
+    url: '/api/system/update-restart',
+    token: 'fixture-cli-token',
+    body: { jobId: fixture.id },
+  }]);
+  assert.equal(fixture.job.status, 'restarting');
+  assert.equal(await git(fixture.root, 'rev-parse', 'HEAD'), fixture.second);
+  assert.equal((await readFile(path.join(fixture.root, 'web/dist/index.html'), 'utf8')).trim(), 'two');
+  await assert.rejects(readFile(path.join(fixture.root, 'server/.state/restarted')), { code: 'ENOENT' });
+});
+
+test('UP-03 ECONNREFUSED оставляет задание restarting и код worker 0', async (t) => {
+  const fixture = await desktopUpdateFixture(t, 202, true);
+
+  assert.equal(fixture.code, 0);
+  assert.equal(fixture.job.status, 'restarting');
+  assert.deepEqual(fixture.requests, []);
+  await assert.rejects(readFile(path.join(fixture.root, 'server/.state/restarted')), { code: 'ENOENT' });
+});
+
+test('UP-04 ответ 409 после публикации даёт restart_failed без отката', async (t) => {
+  const fixture = await desktopUpdateFixture(t, 409);
+
+  assert.equal(fixture.code, 1);
+  assert.equal(fixture.job.status, 'failed');
+  assert.equal(fixture.job.error?.code, 'restart_failed');
+  assert.equal(fixture.requests.length, 1);
+  assert.equal(await git(fixture.root, 'rev-parse', 'HEAD'), fixture.second);
 });

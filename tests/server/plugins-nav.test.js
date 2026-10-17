@@ -11,7 +11,7 @@ import {
   scanUserPlugins,
   settingsValues,
 } from '../../server/src/lib/pluginsRegistry.ts';
-import { normalizePluginCategory } from '../../shared/pluginsContracts.ts';
+import { normalizePluginCategory } from '../../shared/plugins/pluginsContracts.ts';
 
 test('системные инструменты имеют явные group/order, а неизвестная группа нормализуется в rail', () => {
   assert.deepEqual(NAV_GROUPS, ['rail', 'tools', 'dock']);
@@ -31,6 +31,7 @@ test('системные инструменты имеют явные group/orde
       db: ['dock', 50],
       docker: ['dock', 60],
       showcase: ['tools', 50],
+      studio3d: ['dock', 30],
     },
   );
 
@@ -92,6 +93,7 @@ test('каждый системный плагин объявляет род р�
       db: 'dev',
       docker: 'dev',
       showcase: 'knowledge',
+      studio3d: 'dev',
       'usage-forecast': 'dev',
     },
   );

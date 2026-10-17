@@ -89,10 +89,10 @@ import { computed, ref, watch } from 'vue';
 
 import {
   parseRouteTransferBundle, ROUTES_EDITOR_LIMITS,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type {
   RouteDraft, RouteTransferBundle, RouteTransferImportResult,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import {
   addRouteTransfer, exportRouteTransfer, importRouteTransfer,
 } from '../../actions/routes';

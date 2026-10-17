@@ -6,7 +6,7 @@ import test from 'node:test';
 import { messageDeliveryMark } from '../../web/src/views/chat/messageDeliveryMark.ts';
 
 globalThis.__sharedChatContextFill = (await import(
-  '../../shared/chatContext.ts')).contextFill;
+  '../../shared/chat/chatContext.ts')).contextFill;
 
 const { installUiBrowser } = await import('./helpers/ui-components.js');
 const { compileChatSession } = await import('./helpers/chat-session.js');

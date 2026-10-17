@@ -10,7 +10,7 @@ import test from 'node:test';
 
 import { ChatAssistantMessages } from '../../server/src/lib/chat/assistantMessages.ts';
 import { ChatAssistantPublisher } from '../../server/src/lib/chat/assistantPublisher.ts';
-import { IN_TURN_BLOCK_TEXT_LIMIT, utf8Bytes } from '../../shared/chatInTurnContracts.ts';
+import { IN_TURN_BLOCK_TEXT_LIMIT, utf8Bytes } from '../../shared/chat/chatInTurnContracts.ts';
 
 async function tmpDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-replies-'));
@@ -349,4 +349,276 @@ test('конец запуска бросает незакрытые чернов
 
   await publisher.settleRun('fixture-run-0001');
   assert.equal(published.length, count, 'повторный конец запуска ничего не публикует');
+});
+
+/**
+ * Публикатор над временным журналом: тест видит и durable-блоки, и всё, что ушло окну.
+ * Каталог убирается после теста.
+ */
+async function publisherFixture(t) {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir });
+  const published = [];
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => 1,
+    onMessage: (block) => published.push(block),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  return {
+    messages,
+    published,
+    publisher,
+  };
+}
+
+/** Событие адаптера: по умолчанию незавершённый черновик, поля можно переопределить. */
+function draftEvent(assistantMessageId, extra = {}) {
+  return {
+    assistantMessageId,
+    text: 'Текст черновика',
+    sourceRevision: 1,
+    complete: false,
+    ...extra,
+  };
+}
+
+test('после конца запуска поздний черновик не заводит блок', async (t) => {
+  const { messages, published, publisher } = await publisherFixture(t);
+
+  await publisher.settleRun('fixture-run-0001');
+  await publisher.publish('fixture-run-0001', 'fixture-chat', draftEvent('fixture-late-0001'));
+
+  assert.equal(messages.get('fixture-run-0001', 'fixture-late-0001'), null, 'блок не заводится');
+  assert.deepEqual(published, [], 'окно ничего не получает');
+});
+
+test('черновик, пришедший во время конца запуска, не остаётся открытым', async (t) => {
+  const { messages, publisher } = await publisherFixture(t);
+
+  await publisher.publish('fixture-run-0001', 'fixture-chat', draftEvent('fixture-open-0001'));
+
+  // settleRun уже бросает первый блок (идёт запись на диск), а адаптер шлёт новую дельту.
+  const settling = publisher.settleRun('fixture-run-0001');
+  const late = publisher.publish('fixture-run-0001', 'fixture-chat',
+    draftEvent('fixture-late-0001'));
+
+  await Promise.all([settling, late]);
+
+  assert.deepEqual(messages.live('fixture-run-0001'), [], 'открытых блоков нет');
+  assert.equal(messages.get('fixture-run-0001', 'fixture-late-0001'), null);
+  assert.equal(messages.get('fixture-run-0001', 'fixture-open-0001').abandoned, true);
+});
+
+test('сторож: после конца запуска итог принимается, обрыв незнакомого блока — нет',
+  async (t) => {
+    const { messages, published, publisher } = await publisherFixture(t);
+
+    await publisher.settleRun('fixture-run-0001');
+    await publisher.publish('fixture-run-0001', 'fixture-chat', draftEvent('fixture-final-0001', {
+      text: 'Итог',
+      complete: true,
+    }));
+    await publisher.publish('fixture-run-0001', 'fixture-chat', draftEvent('fixture-gone-0001', {
+      abandoned: true,
+    }));
+
+    assert.equal(messages.get('fixture-run-0001', 'fixture-final-0001').complete, true);
+    assert.equal(messages.get('fixture-run-0001', 'fixture-gone-0001'), null);
+    assert.deepEqual(published.map((block) => block.assistantMessageId), ['fixture-final-0001']);
+  });
+
+/**
+ * Блок журнала прямо на диске — так его оставил прошлый процесс. Текст непустой нарочно:
+ * уборка обязана сохранить именно его, а не пустой черновик из памяти нового процесса.
+ */
+async function writeBlock(dir, runId, assistantMessageId, extra = {}) {
+  await fs.mkdir(path.join(dir, runId), { recursive: true });
+  await fs.writeFile(path.join(dir, runId, `${assistantMessageId}.json`), JSON.stringify({
+    runId,
+    chatKey: 'fixture-chat',
+    assistantMessageId,
+    sequence: 1,
+    revision: 1,
+    text: 'Начало ответа',
+    complete: false,
+    startedAt: 1000,
+    ...extra,
+  }));
+}
+
+test('уборка мёртвых запусков бросает их открытые блоки и не трогает живые', async (t) => {
+  const dir = await tmpDir();
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await writeBlock(dir, 'fixture-run-0001', 'fixture-open-0001');
+  await writeBlock(dir, 'fixture-run-0001', 'fixture-done-0001', {
+    complete: true,
+    completedAt: 2000,
+  });
+  await writeBlock(dir, 'fixture-run-0002', 'fixture-live-0002');
+
+  const messages = new ChatAssistantMessages({ dir });
+  const touched = await messages.sweepDeadRuns(new Set(['fixture-run-0002']));
+  const open = messages.get('fixture-run-0001', 'fixture-open-0001');
+  const onDisk = JSON.parse(await fs.readFile(
+    path.join(dir, 'fixture-run-0001', 'fixture-open-0001.json'), 'utf8'));
+
+  assert.deepEqual(touched.map((block) => block.assistantMessageId), ['fixture-open-0001']);
+  assert.equal(open.abandoned, true);
+  assert.equal(open.complete, false, 'брошенный блок не объявляется полным');
+  assert.equal(open.text, 'Начало ответа', 'текст с диска сохраняется');
+  assert.equal(onDisk.abandoned, true, 'отметка обязана быть durable');
+  assert.equal(messages.get('fixture-run-0001', 'fixture-done-0001').abandoned, undefined);
+  assert.equal(messages.get('fixture-run-0002', 'fixture-live-0002').abandoned, undefined);
+  assert.deepEqual(await messages.sweepDeadRuns(new Set(['fixture-run-0002'])), [],
+    'повторная уборка ничего не меняет');
+});
+
+// ── Барьер публикации перед автопродолжением (этап 7 плана) ──
+// Перед паузой ядро закрывает недописанные блоки упавшей попытки и ждёт известные
+// записи. Ошибку записи барьер не глотает: продолжать модель после неё нельзя.
+
+test('abandonOpen закрывает незавершённый блок и не трогает завершённый', async (t) => {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir });
+  const published = [];
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => 1,
+    onMessage: (block) => published.push(block),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await publisher.publish('fixture-run-0001', 'fixture-chat', {
+    assistantMessageId: 'fixture-block-0001',
+    text: 'Готовый ответ',
+    sourceRevision: 1,
+    complete: true,
+  });
+  await publisher.publish('fixture-run-0001', 'fixture-chat', {
+    assistantMessageId: 'fixture-block-0002',
+    text: 'Половина отв',
+    sourceRevision: 2,
+  });
+  published.length = 0;
+  await publisher.abandonOpen('fixture-run-0001');
+
+  const abandoned = published.filter((block) => block.abandoned);
+
+  assert.equal(abandoned.length, 1, 'брошен ровно один блок');
+  assert.equal(abandoned[0].assistantMessageId, 'fixture-block-0002');
+  assert.equal(abandoned[0].complete, false);
+  assert.equal(messages.get('fixture-run-0001', 'fixture-block-0001').complete, true);
+  assert.equal(publisher.errors.has('fixture-run-0001'), false, 'карта ошибок не очищена');
+});
+
+test('abandonOpen не дублирует событие брошенного блока', async (t) => {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir });
+  const published = [];
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => 1,
+    onMessage: (block) => published.push(block),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await publisher.publish('fixture-run-0001', 'fixture-chat', {
+    assistantMessageId: 'fixture-block-0001',
+    text: 'Черновик',
+    sourceRevision: 1,
+  });
+  await publisher.abandonOpen('fixture-run-0001');
+  await publisher.abandonOpen('fixture-run-0001');
+
+  assert.equal(published.filter((block) => block.abandoned).length, 1);
+});
+
+test('ошибка завершившейся записи видна после abandonOpen', async (t) => {
+  const dir = await tmpDir();
+  const file = path.join(dir, 'not-a-directory');
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.writeFile(file, 'Каталог недоступен');
+
+  const publisher = new ChatAssistantPublisher({
+    messages: new ChatAssistantMessages({ dir: file }),
+    nextSequence: () => 1,
+    onMessage: () => {},
+  });
+
+  void publisher.publish('fixture-run-0001', 'fixture-chat', {
+    assistantMessageId: 'fixture-block-0001',
+    text: 'Ответ',
+    sourceRevision: 1,
+    complete: true,
+  }).catch(() => {});
+
+  await publisher.abandonOpen('fixture-run-0001').catch(() => {});
+
+  await assert.rejects(
+    () => publisher.flush('fixture-run-0001'),
+    /ENOTDIR|not a directory|Каталог/u,
+    'ошибка записи не теряется барьером',
+  );
+});
+
+test('abandonOpen ждёт удержанную запись и не мешает следующей попытке', async (t) => {
+  const dir = await tmpDir();
+  const messages = new ChatAssistantMessages({ dir });
+  const original = messages.complete.bind(messages);
+  let release = null;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  messages.complete = async (...args) => {
+    await held;
+
+    return original(...args);
+  };
+
+  const published = [];
+  const publisher = new ChatAssistantPublisher({
+    messages,
+    nextSequence: () => 1,
+    onMessage: (block) => published.push(block),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const writing = publisher.publish('fixture-run-0001', 'fixture-chat', {
+    assistantMessageId: 'fixture-block-0001',
+    text: 'Держится',
+    sourceRevision: 1,
+    complete: true,
+  });
+  let barrierDone = false;
+  const barrier = publisher.abandonOpen('fixture-run-0001').then(() => {
+    barrierDone = true;
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(barrierDone, false, 'барьер не прошёл мимо удержанной записи');
+
+  release();
+  await Promise.all([writing.catch(() => {}), barrier]);
+
+  assert.equal(barrierDone, true);
+
+  // Следующая попытка того же запуска пишет новый блок и завершает его.
+  await publisher.publish('fixture-run-0001', 'fixture-chat', {
+    assistantMessageId: 'fixture-block-0002',
+    text: 'Новая попытка',
+    sourceRevision: 2,
+    complete: true,
+  });
+
+  const fresh = messages.get('fixture-run-0001', 'fixture-block-0002');
+
+  assert.equal(fresh.complete, true);
+  assert.equal(published.some((block) => block.assistantMessageId === 'fixture-block-0002'), true);
 });

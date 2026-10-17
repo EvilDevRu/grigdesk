@@ -5,6 +5,8 @@ import { randomInt } from 'node:crypto';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import * as realBotApi from '../../lib/telegram/api.ts';
 import { normalizeTelegramBotId } from '../../lib/telegram/accountBindings.ts';
 import { scrubToken } from '../../lib/telegram/api.ts';
@@ -103,15 +105,9 @@ const PUBLIC_MESSAGES = Object.freeze({
   telegram_failed: 'Операция Telegram временно не выполнена.',
 });
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactBody(value: unknown, keys: string[]): Payload | null {
   const body = value ?? {};
-  if (!isPlainObject(body)) return null;
+  if (!isPlainRecord(body)) return null;
   const actual = Object.keys(body).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length

@@ -60,7 +60,11 @@ test("карточка glm есть в getProviderAdapters, а без режим
   const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', [
     `const { getExecutor, getProviderAdapters } = await import(${JSON.stringify(INDEX_URL)});`,
     'const card = (await getProviderAdapters()).get("glm");',
-    'console.log(JSON.stringify({ run: typeof card.run, executor: await getExecutor("glm") }));',
+    'console.log(JSON.stringify({',
+    '  run: typeof card.run,',
+    '  executor: await getExecutor("glm"),',
+    '  inTurnInput: card.inTurnInput ?? null,',
+    '}));',
   ].join('\n')], {
     env: {
       PATH: process.env.PATH,
@@ -72,6 +76,7 @@ test("карточка glm есть в getProviderAdapters, а без режим
   assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1)), {
     run: 'undefined',
     executor: null,
+    inTurnInput: null,
   });
   assert.deepEqual([glm.id, glm.name, glm.vendor, glm.color, glm.order], [
     'glm',
@@ -89,10 +94,17 @@ test("карточка glm есть в getProviderAdapters, а без режим
 
   assert.equal(typeof glm.usage, 'function');
 
-  for (const field of ['install', 'login', 'statusPage', 'nativeSettings', 'inTurnInput',
+  for (const field of ['install', 'login', 'statusPage', 'nativeSettings',
     'scopedWorkspace', 'untrustedInput', 'runUntrusted', 'session', 'efforts', 'modelEfforts', 'commands']) {
     assert.equal(glm[field], undefined, field);
   }
+
+  // Ввод в активный ход объявлен вместе с run: setup-only карточке принимать уточнения нечем.
+  assert.deepEqual(glm.inTurnInput, glm.run ? {
+    protocol: 1,
+    text: true,
+    confirmation: 'forwarded',
+  } : undefined);
 
   assert.deepEqual((await glm.modes()).map((mode) => mode.id), ['default', 'auto']);
 });

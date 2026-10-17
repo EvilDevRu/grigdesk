@@ -1,38 +1,40 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
-import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
+import { chatImageHint, withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 import { withChatTitleHook } from '../../server/src/lib/chat/titleHook.ts';
 import {
   chatAppFixture, controlledExecutor, saveChat, TEST_MODEL_REF, turnBody, waitFor,
 } from './helpers/chat-turns.js';
 
-const HINT = [
+const FIXED_HINT = [
   '[Подсказка Cockpit: картинки в ответе]',
   'Чтобы показать картинку, вставь Markdown ![подпись](путь).',
-  'Поддержаны PNG, JPEG, GIF и WebP до 10 МБ внутри рабочей папки разговора.',
+  'Поддержаны PNG, JPEG, GIF и WebP до 10 МБ из рабочей папки разговора и папки артефактов.',
   'Относительный путь считается от основной папки; абсолютный — также из дополнительных папок.',
-  'Новую картинку сохраняй в рабочей папке там, где git её не отслеживает:',
-  'есть .state/artifacts/ — клади туда, иначе в каталог, игнор которого подтверждает git check-ignore.',
-  'Если такого каталога нет, сохрани в рабочей папке и скажи человеку, что файл не игнорируется.',
-  'Файл вне рабочей папки сначала скопируй туда же. SVG не поддержан.',
+  'Новые картинки, снимки и временные файлы сохраняй в /data/artifacts/<тема>/.',
+  'В .state/ папки кода не пиши. Нет доступа к папке артефактов — скажи об этом человеку.',
+  'Файл вне этих папок сначала скопируй в папку артефактов. SVG не поддержан.',
   'Для пути с пробелами используй ![подпись](<путь с пробелами.png>).',
   '[/Подсказка]',
 ].join('\n');
+// Ход фикстуры называет её папку артефактов; остальные строки те же.
+const liveHint = (root) => chatImageHint(path.join(root, 'artifacts'));
 
 test('CHAT-HINT-01: helper добавляет точный блок и сохраняет исходный текст', () => {
-  assert.equal(withChatImageHint('  просьба\n'), '  просьба\n\n\n' + HINT);
+  assert.equal(withChatImageHint('  просьба\n', '/data/artifacts'), '  просьба\n\n\n' + FIXED_HINT);
 });
 
 test('CHAT-HINT-02: пользовательский маркер не подавляет серверный блок', () => {
   const original = '[Подсказка Cockpit: картинки в ответе]\nЦитирую пример';
 
-  assert.equal(withChatImageHint(original), original + '\n\n' + HINT);
+  assert.equal(withChatImageHint(original, '/data/artifacts'), original + '\n\n' + FIXED_HINT);
 });
 
 test('CHAT-HINT-03: обычный ход получает одну подсказку перед title hook', async (t) => {
   const control = controlledExecutor();
-  const { app } = await chatAppFixture(t, { executor: control.executor });
+  const { app, root } = await chatAppFixture(t, { executor: control.executor });
 
   await saveChat(app, 'hint-chat');
 
@@ -46,7 +48,7 @@ test('CHAT-HINT-03: обычный ход получает одну подска
 
   const [run] = await control.waitForRuns(1);
 
-  assert.equal(run.message, withChatTitleHook('Покажи картинку\n\n' + HINT, true));
+  assert.equal(run.message, withChatTitleHook('Покажи картинку\n\n' + liveHint(root), true));
   assert.equal(run.message.split('[Подсказка Cockpit: картинки в ответе]').length - 1, 1);
   assert.equal(run.message.endsWith('[/Служебный хук Cockpit]'), true);
   run.release('Готово');
@@ -61,7 +63,7 @@ test('CHAT-HINT-04: подсказка только порту, оригинал
     confirmation: 'forwarded',
   };
 
-  const { app, events } = await chatAppFixture(t, { executor: control.executor });
+  const { app, events, root } = await chatAppFixture(t, { executor: control.executor });
 
   await saveChat(app, 'hint-chat');
   await app.inject({
@@ -106,7 +108,7 @@ test('CHAT-HINT-04: подсказка только порту, оригинал
   await waitFor(() => delivered.length === 1);
   assert.deepEqual(delivered[0], {
     messageId: payload.messageId,
-    text: payload.text + '\n\n' + HINT,
+    text: payload.text + '\n\n' + liveHint(root),
     sequence: 1,
   });
 
@@ -150,7 +152,7 @@ test('CHAT-HINT-05: retry и ход без title собираются из ор�
       } : { reply: 'Готово' };
     },
   };
-  const { app } = await chatAppFixture(t, { executor });
+  const { app, root } = await chatAppFixture(t, { executor });
   const response = await app.inject({
     method: 'POST',
     url: '/api/chat',
@@ -158,7 +160,7 @@ test('CHAT-HINT-05: retry и ход без title собираются из ор�
   });
 
   assert.equal(response.statusCode, 200, response.body);
-  assert.deepEqual(calls, ['Покажи кадр\n\n' + HINT, 'Покажи кадр\n\n' + HINT]);
+  assert.deepEqual(calls, ['Покажи кадр\n\n' + liveHint(root), 'Покажи кадр\n\n' + liveHint(root)]);
 });
 
 test('CHAT-HINT-06: native slash и обе ветки compaction побайтово прежние', async (t) => {

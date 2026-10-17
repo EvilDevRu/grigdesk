@@ -11,7 +11,7 @@ npm --prefix mobile run visual
 node tools/mobile-phone/e2e-local.mts
 node tools/mobile-phone/e2e-local.mts --browser
 node tests/mobile/visual/settings.mjs
-bin/mobile check
+tools/mobile check
 ```
 
 Visual/E2E требуют установленный полный Chromium. Его путь можно явно передать через
@@ -56,12 +56,12 @@ touch/mobile context. Реальные размеры планшета свер�
 контрола: строка, уехавшая под шапку, обрезана своим контейнером и пальцу недоступна.
 При доводке экрана матрицу сужают: `--only chat-long,tasks --sizes phone-m,pad7-land`;
 приёмка — прогон без фильтров.
-Аргумент `--output .state/artifacts/<каталог>` сохраняет отдельный отчёт доводки,
+Аргумент `--output ~/.cockpit/artifacts/<каталог>` сохраняет отдельный отчёт доводки,
 не перезаписывая результаты полной матрицы.
 
-Отчёты и PNG — `.state/artifacts/mobile-remote/visual/`; настройки Кокпита —
-`.state/artifacts/mobile-remote/settings-visual/`. Сквозной отчёт —
-`.state/artifacts/mobile-remote/e2e/report.md`; browser путь использует phone-m,
+Отчёты и PNG — `~/.cockpit/artifacts/mobile-remote/visual/`; настройки Кокпита —
+`~/.cockpit/artifacts/mobile-remote/settings-visual/`. Сквозной отчёт —
+`~/.cockpit/artifacts/mobile-remote/e2e/report.md`; browser путь использует phone-m,
 phone-xl, tablet-port со шрифтом 100/130% и кадры отдельных шагов.
 
 ## Предел автоматической приёмки

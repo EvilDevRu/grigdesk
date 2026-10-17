@@ -1128,7 +1128,7 @@ import type {
   CodeRequestContext,
   CodeSearchResponse,
   CodeTarget,
-} from '../../../../shared/codeContracts';
+} from '../../../../shared/plugins/code/codeContracts';
 import PatchReview from './PatchReview.vue';
 import VirtualRows from '../../shared/VirtualRows.vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco';

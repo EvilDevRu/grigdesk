@@ -1,6 +1,8 @@
 // Durable REST reconciliation cursor одного GitHub account namespace.
 // Activation epochs живут отдельно в InboxStateStore; этот файл отвечает только
 // за transport recovery и никогда не становится границей доступа Inbox.
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 import {
   GitHubStoreError,
@@ -79,14 +81,8 @@ const fail: (code: string, message: string, cause?: unknown) => never = (
   throw new GitHubStoreError(code, message, cause);
 };
 
-const isPlainObject = (value: unknown): value is Payload => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-};
-
 function exact(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('github_ingress_state_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('github_ingress_state_invalid', `${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, index) => key !== expected[index])) {
@@ -239,7 +235,7 @@ export class GitHubIngressStateStore {
   }
 
   async record(result: unknown): Promise<GitHubIngressState> {
-    if (!isPlainObject(result)) {
+    if (!isPlainRecord(result)) {
       fail('github_ingress_state_invalid', 'Reconciliation result должен быть объектом.');
     }
     return this._enqueue(async () => {

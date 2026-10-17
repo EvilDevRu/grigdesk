@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { sha256 } from '../../shared/node/hash.ts';
+
 import { deepSeekBuildInputs, hashRuntimePayload } from '../../tools/buildDeepSeekRuntime.mts';
-import { vendorHash } from '../../tools/deepseekVendorManifest.ts';
+
 import { readDeepSeekArtifact } from '../../server/src/lib/deepseek/runtimeArtifact.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -45,8 +49,9 @@ export async function ensureTestDeepSeekArtifact(): Promise<string> {
   }
 
   const inputs = await deepSeekBuildInputs(path.join(repositoryRoot, 'third_party/deepseek-harness'));
-  const identity = vendorHash(JSON.stringify(inputs));
-  const cache = path.join(repositoryRoot, '.state/artifacts/deepseek-vendoring/test-builds');
+  const identity = sha256(JSON.stringify(inputs));
+  const cache = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
+    'deepseek-vendoring/test-builds');
   const directory = path.join(cache, identity);
   const lock = `${directory}.lock`;
 

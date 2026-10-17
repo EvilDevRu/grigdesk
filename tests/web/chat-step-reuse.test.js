@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { chatStoreFixture } from './helpers/chat-store.js';
 import { applyAssistantFinal } from '../../web/src/stores/chatInTurn.ts';
-import { messageKey } from '../../shared/chatMessageIdentity.ts';
+import { messageKey } from '../../shared/chat/chatMessageIdentity.ts';
 import { historyStepReuseAck, restoreHistorySteps } from '../../server/src/lib/chat/historyStepReuse.ts';
 
 const baseChat = () => ({

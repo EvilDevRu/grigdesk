@@ -5,7 +5,7 @@
 // сообщение, а `prompts:steer` превращает поставленный в очередь prompt в указание
 // активному ходу. Модуль знает только про этот HTTP-контракт: ни процессов, ни sandbox —
 // ими владеет runtime, который поднимает сервер и выдаёт токен.
-import type { InTurnDeliverResult } from '../../../../shared/chatInTurnContracts.ts';
+import type { InTurnDeliverResult } from '../../../../shared/chat/chatInTurnContracts.ts';
 import { readSettingsJson } from '../executorSettings/probe.ts';
 
 export interface KimiServerOptions {

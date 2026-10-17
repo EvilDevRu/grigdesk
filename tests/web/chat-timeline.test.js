@@ -434,3 +434,42 @@ test('завершающийся управляемый запуск остаё�
 
   assert.deepEqual(labels(rows), ['Задача', 'start', 'Работает', 'Следом']);
 });
+
+test('устаревший черновик store не перекрывает законченный блок истории', () => {
+  const stale = {
+    chatKey: 'chat-timeline',
+    runId: RUN,
+    assistantMessageId: reply.assistantMessageId,
+    sequence: 1,
+    revision: 1,
+    text: 'Проверяю фа',
+    complete: false,
+    abandoned: true,
+    startedAt: 1,
+  };
+  // Законченный блок в истории: серверная строка без complete (inTurnHistory.runMessages)
+  // и строка, которую перенесло окно (materializeInTurnMessages), с complete: true.
+  const server = {
+    role: 'assistant',
+    kind: 'assistant-block',
+    runId: RUN,
+    assistantMessageId: reply.assistantMessageId,
+    sequence: 1,
+    revision: 2,
+    text: reply.text,
+    serverCanonical: true,
+  };
+
+  for (const history of [server, { ...server, complete: true }]) {
+    const rows = chatTimeline([parent, history], [], false, {
+      ...run,
+      active: false,
+      entries: [stale],
+    });
+    const row = rows.find((item) => item.message.assistantMessageId === reply.assistantMessageId);
+
+    assert.equal(row.message.text, reply.text);
+    assert.notEqual(row.message.complete, false, 'черновик store не открывает законченный блок');
+    assert.notEqual(row.message.abandoned, true, 'отметка store не обрывает законченный блок');
+  }
+});

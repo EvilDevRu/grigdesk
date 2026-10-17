@@ -125,6 +125,10 @@ export async function chatAppFixture(t, {
   shutdownInterruptMs = 150,
   extraRoutes = null,
   taskEnv = null,
+  modelsRegistry = async () => ({ 'test-provider': [{ id: 'test-model', efforts: [] }] }),
+  // Паузы автопродолжения для интеграционных проверок: короткие значения вместо
+  // боевых минут, чтобы тест ждал событие, а не реальное время.
+  autoContinueDelaysMs = null,
 } = {}) {
   const root = givenRoot || await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-turns-'));
 
@@ -170,6 +174,7 @@ export async function chatAppFixture(t, {
     rootDir: root,
     factoryHome: root,
     agentsDir: path.join(root, 'agents'),
+    artifactsDir: path.join(root, 'artifacts'),
     port: 18140,
   };
 
@@ -192,8 +197,9 @@ export async function chatAppFixture(t, {
     },
     claudeAuth: null,
     internalToken: 'test',
-    modelsRegistry: async () => ({ 'test-provider': [{ id: 'test-model', efforts: [] }] }),
+    modelsRegistry,
     executorResolver: async () => executor,
+    ...(autoContinueDelaysMs ? { autoContinueDelaysMs } : {}),
     backgroundStopGraceMs,
     shutdownGraceMs,
     shutdownInterruptMs,

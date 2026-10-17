@@ -1,12 +1,14 @@
 // Автоматическая приёмка сценария. Формально годный JSON ещё не доказывает,
 // что диктор рассказывает о том, что получилось после действий браузера.
-import { createHash } from 'node:crypto';
+
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { jsonHash32 } from '../../../../../shared/node/hash.ts';
+
 import { exactKeys, jsonCandidates } from '../../modelJson.ts';
 import { ShowcaseError } from '../errors.ts';
-import type { ShowcaseProject } from '../../../../../shared/showcaseContracts.ts';
+import type { ShowcaseProject } from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { buildScriptPrompt } from './prompt.ts';
 import type { ScriptContext } from './prompt.ts';
 import { parseScriptReplyResult } from './writer.ts';
@@ -151,12 +153,8 @@ export interface ScriptProof {
   rehearsal: RehearsalResult;
 }
 
-function hash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
-}
-
 export function briefHashOf(brief: string[]): string {
-  return hash(brief);
+  return jsonHash32(brief);
 }
 
 /** Ошибка экранирования в пояснении модели не должна расходовать проход браузера. */
@@ -180,7 +178,7 @@ function reviewJson(reply: string): Record<string, unknown> | null {
 
 /** Речь, порядок и действия образуют один проверенный сценарий, независимо от голоса. */
 export function scriptHashOf(scenes: ShowcaseProject['scenes'] | DraftScript['scenes']): string {
-  return hash(scenes.map((scene) => ({
+  return jsonHash32(scenes.map((scene) => ({
     screenId: scene.screenId,
     startState: scene.startState ?? null,
     readyCondition: scene.readyCondition ?? null,
@@ -437,7 +435,7 @@ function coverageComplete(value: unknown, pointCount: number, sceneCount: number
 
 /** Неизменяемое доказательство публикуется раньше ссылки на него в project.json. */
 export async function writeScriptProof(dir: string, proof: ScriptProof): Promise<string> {
-  const id = hash(proof);
+  const id = jsonHash32(proof);
   const file = path.join(dir, `script-proof-${id}.json`);
   const temporary = `${file}.tmp`;
 
@@ -464,7 +462,7 @@ export async function readScriptProof(
     const proof = JSON.parse(file) as ScriptProof;
     const scope = project.target.scope;
 
-    return hash(proof) === id && proof.version === SCRIPT_VERIFICATION_VERSION
+    return jsonHash32(proof) === id && proof.version === SCRIPT_VERIFICATION_VERSION
       && (!requireScriptMatch
         || (proof.scriptHash === scriptHashOf([...project.scenes].sort((a, b) => a.order - b.order))
           && proof.briefHash === briefHashOf(project.brief)))

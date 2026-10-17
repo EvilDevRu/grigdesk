@@ -2,6 +2,8 @@
 // PUT/DELETE, а rows — локальная проекция существующих board/analysis/pipeline stores.
 import { markRaw, watch } from 'vue';
 import { defineStore } from 'pinia';
+import { textOr } from '../../../shared/lib/text.ts';
+
 import { api } from '../shared/apiClient.ts';
 import { alertUser } from '../shared/alerts.ts';
 import { shelfApi } from '../shared/shelfApi.ts';
@@ -11,8 +13,8 @@ import type {
   ShelfEventSource,
   ShelfObservedSnapshot,
 } from '../shared/taskShelfDecision.ts';
-import { parseShelfState } from '../../../shared/shelfContracts.ts';
-import type { ShelfEntry, ShelfReason } from '../../../shared/shelfContracts.ts';
+import { parseShelfState } from '../../../shared/b24/shelfContracts.ts';
+import type { ShelfEntry, ShelfReason } from '../../../shared/b24/shelfContracts.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { useAnalysisStore } from './analysis.ts';
 import { useNotifyWatchStore } from './notify-watch.js';
@@ -196,10 +198,6 @@ const TASK_DETAIL_RETRY_MS = 60_000;
 
 function taskKey(value: unknown): string {
   return String(value ?? '').trim();
-}
-
-function text(value: unknown): string {
-  return typeof value === 'string' ? value : '';
 }
 
 function emptySnapshot(): ShelfObservedSnapshot {
@@ -399,7 +397,7 @@ function observedTask(controller: ShelfController, taskId: string): ShelfObserve
         queuedAt: row.status.queuedAt,
         startedAt: row.status.startedAt,
         finishedAt: row.status.finishedAt,
-        generatedAt: text(row.analysis?.generated_at) || null,
+        generatedAt: textOr(row.analysis?.generated_at) || null,
       };
     }
   }
@@ -671,10 +669,10 @@ function presentation(
   const unread = Number(task?.unread);
 
   return {
-    title: text(task?.title) || text(detail?.title) || entry.title,
-    project: text(task?.group) || detailProject(detail),
-    responsible: text(task?.responsible),
-    deadline: text(task?.deadline),
+    title: textOr(task?.title) || textOr(detail?.title) || entry.title,
+    project: textOr(task?.group) || detailProject(detail),
+    responsible: textOr(task?.responsible),
+    deadline: textOr(task?.deadline),
     overdue: task?.overdue === true,
     unread: Number.isSafeInteger(unread) && unread > 0 ? unread : 0,
     activities,
@@ -940,7 +938,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
         reason,
       }).snapshot;
       const task = boardTask(controller, key);
-      const title = existing?.title || text(task?.title) || `Задача #${key}`;
+      const title = existing?.title || textOr(task?.title) || `Задача #${key}`;
       const epoch = this._epoch;
       const requestSeq = ++this._requestSeq;
 

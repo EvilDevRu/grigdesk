@@ -7,7 +7,7 @@ import type {
   ProjectDependencies,
   ProjectDetail,
   ProjectSummary,
-} from '../../../shared/projectsContracts';
+} from '../../../shared/runtime/projectsContracts';
 import type { ProjectDraft } from '../views/projects/projectDraft';
 
 /** Расхождение ревизий: что показать человеку, прежде чем он решит, чья версия новее. */

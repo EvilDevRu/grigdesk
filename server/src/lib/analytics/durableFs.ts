@@ -2,7 +2,7 @@
 // и очистки. Все операции с целями привязаны к уже проверенному дескриптору каталога;
 // пути и необработанные сообщения системных вызовов не пересекают публичную границу ошибок.
 import { spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { constants as FS_CONSTANTS } from 'node:fs';
 import {
   lstat as fsLstat,
@@ -11,6 +11,8 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { sha256 } from '../../../../shared/node/hash.ts';
 
 const HELPER_PATH = fileURLToPath(new URL('./dirfd-helper.py', import.meta.url));
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
@@ -121,10 +123,6 @@ function asBytes(value: unknown, maxBytes: number): Buffer {
   if (!bytes) fail('invalidBytes', 'Immutable publication требует bytes или UTF-8 строку.');
   if (bytes.length > maxBytes) fail('fileTooLarge', 'Durable state превышает допустимый размер.');
   return Buffer.from(bytes);
-}
-
-function sha256(bytes: Buffer): string {
-  return createHash('sha256').update(bytes).digest('hex');
 }
 
 // Статистика читается в BigInt: inode и наносекунды не помещаются в number.

@@ -3,8 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
-import type { ChatRunSnapshot } from '../../../../shared/chatRun.ts';
-import { normalizeContextUsage, type ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
+import type { ChatRunSnapshot } from '../../../../shared/chat/chatRun.ts';
+import { normalizeContextUsage, type ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
 import { normalizeContextCache, type ContextCache } from './contextCache.ts';
 import { MAX_CHAT_STEPS, pushChatStep, type ChatStep } from './streamSteps.ts';
 

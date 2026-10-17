@@ -15,12 +15,22 @@
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+
+import { config as runtimeConfig } from '../config.ts';
 
 import { factoryUnitArgs } from './factoryLaunch.ts';
 import { cockpitCliPath } from './cliPath.ts';
 
+/**
+ * На длинной попытке goto записал решение, но прежних 30 секунд не хватило на выход.
+ * Lifecycle-журнал растёт с кругами; 180 секунд дают запас до серверного предела запроса.
+ */
+export const ROUTE_DECISION_TIMEOUT_MS = 180_000;
+
 // Пути и бинари, без которых команду движку не собрать.
 export interface RouteConfig {
+  dataHome?: string;
   routesDir: string;
   stateDir: string;
   factoryControlDir: string;
@@ -36,6 +46,7 @@ export interface RouteConfig {
   deepseekGenerationRoot?: string;
   deepseekRuntimeHome?: string;
   prefsPath?: string;
+  decisionTimeoutMs?: number;
 }
 
 // Кого именно продолжаем: задача, профиль и закреплённая попытка.
@@ -49,6 +60,7 @@ export interface RouteIdentityArgs {
 export interface RouteEngineResult {
   code: number;
   ok: boolean;
+  timedOut: boolean;
   stdout: string;
   stderr: string;
   message: string;
@@ -310,13 +322,14 @@ export function routeLaunchEnv(
   extra: Record<string, string> = {},
 ): Record<string, string> {
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
-  const prefsPath = config.prefsPath || (root ? path.join(root, 'server/.state/prefs.json') : '');
+  const prefsPath = config.prefsPath;
   const generationRoot = config.deepseekGenerationRoot
     || (root ? path.join(root, 'server/runtime/deepseek') : '');
 
   return {
     ...extra,
     PATH: cockpitCliPath(config.rootDir),
+    COCKPIT_HOME: config.dataHome ?? runtimeConfig.dataHome,
     ...(prefsPath ? { COCKPIT_PROVIDER_PREFS_PATH: path.resolve(prefsPath) } : {}),
     COCKPIT_DEEPSEEK_NODE_BIN: process.execPath,
     COCKPIT_DEEPSEEK_RUNTIME_MODE: config.deepseekRuntimeMode || 'embedded',
@@ -349,7 +362,10 @@ export function stageAutoCompactEnv(
   return { FACTORY_STAGE_AUTO_COMPACT: String(n) };
 }
 
-/** Синхронный вызов route-движка (check, gate --commit-only, abandon, goto). */
+/**
+ * Синхронный вызов движка сохраняет код выхода и отдельно отмечает убийство по сроку.
+ * При таймауте stderr не объясняет отказ: решение могло уже попасть в журнал.
+ */
 export function runRouteEngine(
   config: RouteConfig,
   args: string[],
@@ -363,16 +379,29 @@ export function runRouteEngine(
     }, (err, stdout, stderr) => {
       const rawCode = (err as { code?: unknown } | null)?.code;
       const code = err ? (typeof rawCode === 'number' ? rawCode : 1) : 0;
+      const timedOut = err?.killed === true;
       const output = stderr || stdout || err?.message || '';
+
       resolve({
         code,
-        ok: code === 0,
+        ok: !timedOut && code === 0,
+        timedOut,
         stdout: String(stdout || ''),
         stderr: String(stderr || ''),
-        message: routeMessage(code, output),
-        failure: routeFailure(output),
+        message: timedOut ? `движок не уложился за ${timeout / 1000} с` : routeMessage(code, output),
+        failure: timedOut ? null : routeFailure(output),
       });
     });
+  });
+}
+
+/**
+ * Решения получают отдельный срок: их запись и закрытие lifecycle-сессии растут с журналом.
+ * Настройка срока позволяет офлайн-тестам проверить таймаут без трёхминутного ожидания.
+ */
+export function runRouteDecision(config: RouteConfig, args: string[]): Promise<RouteEngineResult> {
+  return runRouteEngine(config, args, {
+    timeout: config.decisionTimeoutMs ?? ROUTE_DECISION_TIMEOUT_MS,
   });
 }
 
@@ -452,8 +481,6 @@ export function routeMessage(code: number, output: string | null | undefined): s
   if (failure) return `${failure.message} (код ${code})`;
   return [tail, hint ? `(код ${code}: ${hint})` : `(код ${code})`].filter(Boolean).join(' ');
 }
-
-const sleep = (ms: number) => new Promise<void>((res) => { setTimeout(res, ms); });
 
 // Итог вспомогательной команды: успех и обрезанный текст отказа.
 export interface CmdResult {
@@ -572,13 +599,18 @@ export async function readLogSince(
  * девятнадцать секунд, из них львиная доля на preflight исполнителей. Человек при этом
  * видел плашку «Записано, но прогон не поехал» над идущим прогоном.
  *
+ * До публикации identity движок несколько раз полностью проверяет lifecycle-журнал;
+ * число чтений зависит от восстановления. Второе окно даёт на подъём 120 секунд после
+ * шести секунд settle: около 126 секунд номинально. Это не общий timeout callbacks
+ * identity/unitAlive/reason и не жёсткий предел времени HTTP-запроса.
+ *
  * Ждём только НЕОПРЕДЕЛЁННОСТЬ (реестр не прочитан, попытка ещё не записана, демона
  * пока нет). ЧУЖАЯ непустая попытка в реестре — ответ авторитетный и мгновенный: ждать
  * тут нечего, ситуация от времени не изменится.
  */
 export async function confirmRouteResume({
   attempt, identity, unitAlive, reason,
-  settleMs = 6000, stepMs = 250, confirmMs = 20000,
+  settleMs = 6000, stepMs = 250, confirmMs = 120000,
 }: {
   attempt: string;
   identity: () => Promise<{ alive?: boolean; attempt?: string } | null>;

@@ -29,7 +29,7 @@ for (const persistent of [false, true]) {
         };
       }
 
-      const { app, events } = await chatAppFixture(t, { executor: controlled.executor });
+      const { app, events, root } = await chatAppFixture(t, { executor: controlled.executor });
 
       await saveChat(app, 'snapshot-chat');
       await app.inject({
@@ -42,7 +42,9 @@ for (const persistent of [false, true]) {
 
       assert.equal(started.snapshot.requestedModelId, first.options.model);
       assert.equal(started.snapshot.cwd, first.options.cwd);
-      assert.deepEqual(started.snapshot.extraDirs, first.options.extraDirs);
+      // Папка артефактов открыта агенту, но в снимке хода, как и вложения, не показывается.
+      assert.deepEqual(started.snapshot.extraDirs,
+        first.options.extraDirs.filter((dir) => dir !== path.join(root, 'artifacts')));
       assert.equal(started.snapshot.providerId, 'test-provider');
       assert.equal(started.snapshot.actualModelId, undefined);
 
@@ -155,4 +157,55 @@ test('папка вложений открыта агенту, но не пок�
   assert.equal(active.snapshot.extraDirs.includes(path.resolve(attachments)), false);
   run.release();
   await waitFor(() => events.some((event) => event.event === 'chat-done'));
+});
+
+test('общая папка артефактов открыта агенту на запись, но не показывается в снимке хода', async (t) => {
+  const controlled = controlledExecutor();
+
+  // Папку получает только адаптер, объявивший несколько корней, как Claude и Codex.
+  controlled.executor.workdir = { switch: 'resume', roots: 'multi' };
+
+  const { app, events, root } = await chatAppFixture(t, { executor: controlled.executor });
+  const artifacts = path.join(root, 'artifacts');
+
+  await saveChat(app, 'artifacts-chat');
+  await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: turnBody('artifacts-chat', 'turn-artifacts-0001', 'сделай снимок'),
+  });
+
+  const [run] = await controlled.waitForRuns(1);
+  const started = events.find((event) => event.event === 'chat-turn-start').data;
+  const active = (await app.inject('/api/chat/active')).json().active[0];
+
+  assert.equal(run.options.extraDirs.includes(artifacts), true);
+  assert.equal((await fs.stat(artifacts)).isDirectory(), true);
+  assert.equal(started.snapshot.extraDirs.includes(artifacts), false);
+  assert.equal(active.snapshot.extraDirs.includes(artifacts), false);
+  run.release();
+  await waitFor(() => events.some((event) => event.event === 'chat-done'));
+});
+
+test('однокорневой исполнитель папку артефактов не получает: его граница — рабочая папка', async (t) => {
+  for (const workdir of [{ switch: 'reseed', roots: 'single' }, undefined]) {
+    const controlled = controlledExecutor();
+
+    controlled.executor.workdir = workdir;
+
+    const { app, events, root } = await chatAppFixture(t, { executor: controlled.executor });
+
+    await saveChat(app, 'single-chat');
+    await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: turnBody('single-chat', 'turn-single-0001', 'сделай снимок'),
+    });
+
+    const [run] = await controlled.waitForRuns(1);
+
+    assert.equal(run.options.extraDirs.includes(path.join(root, 'artifacts')), false, String(workdir?.roots));
+    run.release();
+    await waitFor(() => events.some((event) => event.event === 'chat-done'));
+  }
 });

@@ -28,7 +28,7 @@
     >
       <form class="creds__form" autocomplete="off" @submit.prevent="save">
         <p class="creds__note">
-          Значения сохраняются в корневой .env сервера и действуют сразу, без перезапуска.
+          Значения сохраняются в .env папки данных и действуют сразу, без перезапуска.
         </p>
         <UiField
           v-for="item in dialogItems"

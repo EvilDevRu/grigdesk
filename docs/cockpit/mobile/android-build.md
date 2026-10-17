@@ -10,10 +10,10 @@ compile/target SDK 36, min SDK 30 и версии нативных библио�
 
 ```bash
 npm --prefix mobile ci --include=dev
-bin/mobile deps
-bin/mobile doctor
-bin/mobile check
-bin/mobile build
+tools/mobile deps
+tools/mobile doctor
+tools/mobile check
+tools/mobile build
 ```
 
 `deps` загружает и проверяет закреплённые архивы, принимает SDK-лицензии и устанавливает
@@ -25,12 +25,12 @@ bin/mobile build
 
 `check` запускает мобильные unit/UI/contract тесты под memory guard, typecheck и app-scoped
 Gradle unit/lint. `build` собирает интерфейс для native bridge, делает cap sync из `mobile/`
-и создаёт `.state/mobile/cockpit-mobile-debug.apk`. Android-сборка не входит в общий
+и создаёт `<папка данных>/state/mobile-apk/cockpit-mobile-debug.apk`. Android-сборка не входит в общий
 `tests/run-all.sh` и не перезапускает рабочий Кокпит.
 
 ## Подписанный выпуск
 
-Первый `bin/mobile release` создаёт ключ только после решения владельца.
+Первый `tools/mobile release` создаёт ключ только после решения владельца.
 По умолчанию каталог — `~/.config/cockpit/android-signing/` с правами 0700:
 `release.jks` и `release.properties` с правами 0600. Перенесённый каталог задаётся
 `COCKPIT_ANDROID_SIGNING_DIR` и также обязан быть вне репозитория. Частично существующее
@@ -46,8 +46,10 @@ minor/patch ограничены 99. Новый выпуск должен име
 Сборка, apksigner verify, сверка packageId/versionCode/сертификата проходят до публикации.
 Ошибка сохраняет предыдущий опубликованный APK.
 
-Готовые файлы — `.state/mobile/cockpit-mobile.apk` и `cockpit-mobile.json` с
+Готовые файлы — `<папка данных>/state/mobile-apk/cockpit-mobile.apk` и `cockpit-mobile.json` с
 `version`, `versionCode`, `size`, `sha256`, `builtAt`. APK публикуется атомарно, JSON последним.
+`COCKPIT_MOBILE_APK_DIR` переопределяет каталог. Сборка и выпуск заранее проверяют,
+закончен ли перенос данных; ключ подписи и Android SDK остаются снаружи.
 Сервер сверяет fixed файл через no-follow FD; конкурентная замена даёт согласованный hash
 либо явный `apk_mismatch`. Телефон проверяет размер/hash до FileProvider-установщика;
 системное разрешение установки из этого источника выдаёт человек на устройстве.

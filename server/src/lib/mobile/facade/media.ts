@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import type { MobileApp } from '../mobileServer.ts';
 import { MobileInputError } from '../errors.ts';
-import { record, resourceId } from './common.ts';
+import { resourceId } from './common.ts';
 import type { FacadeDeps } from './common.ts';
 
 /**
@@ -69,7 +71,7 @@ export function registerMediaRoutes(app: MobileApp, deps: Pick<FacadeDeps, 'chat
         const file = ref.slice(2);
         const owned = (chat.messages || []).some((message) =>
           (Array.isArray(message.attachments) ? message.attachments : []).some(
-            (item) => record(item).file === file,
+            (item) => recordOrEmpty(item).file === file,
           ),
         );
 

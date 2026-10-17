@@ -1,7 +1,7 @@
 import {
   parseRouteDraftContent, RoutesEditorContractError,
-} from '../../../../shared/routesEditorContracts.ts';
-import type { RouteDraft, RouteDraftContent } from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteDraft, RouteDraftContent } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 export interface RouteJsonAuthoringDocument extends RouteDraftContent {
   title: string;

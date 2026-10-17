@@ -14,7 +14,7 @@ import type {
   ShowcaseDoctor,
   ShowcaseTarget,
   ShowcaseTargetRef,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { VoiceEngineStatus } from './voice/registry.ts';
 
 const run = promisify(execFile);

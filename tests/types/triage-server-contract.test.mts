@@ -2,7 +2,7 @@ import { normalizeAnalysisQuestions } from '../../server/src/lib/analysis/analyz
 import type { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 import { resolveDepth, resolveRoute } from '../../server/src/lib/analysis/routePolicy.ts';
 import type { AnalysisModuleOptions } from '../../server/src/modules/analysis/index.ts';
-import type { AnalysisAnswerInput } from '../../shared/analysisContracts.ts';
+import type { AnalysisAnswerInput } from '../../shared/pipeline/analysisContracts.ts';
 
 type IsUnchecked<Value> = 0 extends (1 & Value) ? true : false;
 type Checked<Value extends false> = Value;

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseInTurnCapability } from '../../shared/chatInTurnContracts.ts';
+import { parseInTurnCapability } from '../../shared/chat/chatInTurnContracts.ts';
 import {
   chatAppFixture,
   saveChat,

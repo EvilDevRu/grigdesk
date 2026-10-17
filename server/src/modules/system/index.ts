@@ -6,6 +6,8 @@ import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 import { CockpitReleaseService } from '../../lib/cockpitRelease.ts';
 import { CockpitUpdateManager } from '../../lib/cockpitUpdate.ts';
+import { DESKTOP_RESTART_EXIT_CODE } from '../../lib/desktopParent.ts';
+import type { DesktopParent } from '../../lib/desktopParent.ts';
 import { LauncherError, LauncherService } from '../../lib/launcher.ts';
 import type { SystemAdapter } from '../../adapters/system.ts';
 
@@ -39,6 +41,10 @@ interface UpdateRoute {
   Body: { targetTag: string; expectedCheckoutSha: string };
 }
 
+interface UpdateRestartRoute {
+  Body: { jobId: string };
+}
+
 interface AutostartRoute {
   Body: { enabled: boolean };
 }
@@ -47,6 +53,8 @@ interface AutostartRoute {
 interface SystemModuleConfig {
   rootDir: string;
   cockpitUpdateStatePath: string;
+  port: number;
+  cliTokenPath: string;
 }
 
 export interface SystemModuleOptions {
@@ -58,13 +66,38 @@ export interface SystemModuleOptions {
   webRebuilder?: () => Promise<RebuildFailure | null>;
   // Подмена для тестов: systemctl и ярлык в них не трогаем.
   launcher?: LauncherService;
+  serverMode?: () => 'desktop' | 'systemd' | 'manual';
+  restartViaScript?: (rootDir: string) => void;
+  desktop?: DesktopParent | null;
 }
 
+/**
+ * Ручной сервер передаёт перезапуск прежнему скрипту вне текущего процесса.
+ * В тестах этот эффект заменяется портом, чтобы не затронуть живой Кокпит.
+ */
+function restartViaScript(rootDir: string): void {
+  const child = spawn('bash', [path.join(rootDir, 'deploy', 'restart.sh')], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: rootDir,
+  });
+
+  child.unref();
+}
+
+/**
+ * Связывает настройки сервера с безопасным выбором режима и способа перезапуска.
+ * Порты эффектов позволяют проверить маршруты без запуска настоящих системных команд.
+ */
 async function systemModule(
   fastify: FastifyInstance,
   opts: SystemModuleOptions,
 ): Promise<void> {
   const { system, config } = opts;
+  const serverMode = opts.serverMode ?? (() => opts.desktop ? 'desktop'
+    : process.env.INVOCATION_ID ? 'systemd' : 'manual');
+  const restartScript = opts.restartViaScript ?? restartViaScript;
+
   const releases = opts.releases || new CockpitReleaseService({
     rootDir: config.rootDir,
     statePath: config.cockpitUpdateStatePath,
@@ -74,6 +107,9 @@ async function systemModule(
     releases,
     rootDir: config.rootDir,
     statePath: config.cockpitUpdateStatePath,
+    desktop: () => Boolean(opts.desktop?.connected),
+    origin: `http://127.0.0.1:${config.port}`,
+    cliTokenPath: config.cliTokenPath,
   });
   // Статус пересборки web-бандла (см. эндпоинты ниже). В памяти процесса: перезапуск
   // сервера обнуляет его, а сиротевший npm при этом дособирает сам — dist не портится.
@@ -144,35 +180,58 @@ async function systemModule(
     } catch (error) { return sendReleaseError(reply, error); }
   });
 
-  // Под systemd у процесса сервиса есть INVOCATION_ID — по нему выбирается способ перезапуска.
-  const underSystemd = () => !!process.env.INVOCATION_ID;
-
   // Режим запуска — для блока «Сервер» в настройках.
-  fastify.get('/api/system/server', async () => ({
-    systemd: underSystemd(),
-    pid: process.pid,
-    uptimeSec: Math.round(process.uptime()),
-  }));
+  fastify.get('/api/system/server', async () => {
+    const mode = serverMode();
+
+    return {
+      systemd: mode === 'systemd',
+      mode,
+      pid: process.pid,
+      uptimeSec: Math.round(process.uptime()),
+    };
+  });
 
   // Перезапуск сервера. Ответ уходит ДО остановки (задержка), иначе кнопка не узнает,
-  // что нажалась. Оба режима идут через координатор остановки (lib/shutdown.js): чат
+  // что нажалась. Все режимы идут через координатор остановки (lib/shutdown.ts): чат
   // сначала даёт ходам закончиться и прерывает остальные с сохранением ленты и id сессии,
   // и только потом процесс выходит. Под systemd этого достаточно: юнит с Restart=always
   // поднимет чистую копию и подтянет новый код после деплоя. При ручном запуске поднимать
-  // некому, поэтому bin/restart отвязанным процессом (переживает смерть родителя:
+  // некому, поэтому deploy/restart.sh отвязанным процессом (переживает смерть родителя:
   // detached здесь + setsid внутри самого скрипта); он шлёт SIGTERM и ждёт освобождения
-  // порта, а слив запускает уже обработчик сигнала. РЕЖИМЫ НЕ СМЕШИВАЕМ: bin/restart под
+  // порта, а слив запускает уже обработчик сигнала. РЕЖИМЫ НЕ СМЕШИВАЕМ: deploy/restart.sh под
   // systemd поднял бы второй экземпляр против юнита и отправил service в бесконечный
   // restart loop (см. комментарий в deploy/cockpit-server.service).
   fastify.post('/api/system/restart', async (_request, reply) => {
     // Рестарт гасит процесс → статус пересборки (в памяти) потеряется, а клиент
     // останется ждать. Проще запретить, чем восстанавливать неизвестное состояние.
-    if (rebuildBusy()) return rebuildConflict(reply);
-    try { await updates.assertIdle(); }
-    catch (error) { return sendReleaseError(reply, error); }
-    const systemd = underSystemd();
+    if (rebuildBusy()) {
+      return rebuildConflict(reply);
+    }
+
+    try {
+      await updates.assertIdle();
+    } catch (error) {
+      return sendReleaseError(reply, error);
+    }
+
+    const mode = serverMode();
+
+    if (mode === 'desktop' && !opts.desktop?.connected) {
+      return reply.code(503).send({
+        error: 'desktop_parent_unavailable',
+        message: 'Приложение Кокпита не на связи.',
+      });
+    }
+
     setTimeout(() => {
-      if (systemd) {
+      if (mode === 'desktop') {
+        void fastify.shutdown!.begin('кнопка «Перезапустить»', DESKTOP_RESTART_EXIT_CODE);
+
+        return;
+      }
+
+      if (mode === 'systemd') {
         if (fastify.shutdown) {
           void fastify.shutdown.begin('кнопка «Перезапустить»');
         } else {
@@ -180,17 +239,65 @@ async function systemModule(
         }
         return;
       }
-      const child = spawn('bash', [path.join(config.rootDir, 'bin', 'restart')], {
-        detached: true, stdio: 'ignore', cwd: config.rootDir,
-      });
-      child.unref();
+
+      restartScript(config.rootDir);
     }, 400);
-    return { ok: true, mode: systemd ? 'systemd' : 'script' };
+
+    return {
+      ok: true,
+      mode: mode === 'manual' ? 'script' : mode,
+    };
+  });
+
+  fastify.post<UpdateRestartRoute>('/api/system/update-restart', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['jobId'],
+        propertyNames: { enum: ['jobId'] },
+        properties: {
+          jobId: {
+            type: 'string',
+            pattern: '^[0-9a-f-]{36}$',
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (request.authKind !== 'cli') {
+      return reply.code(403).send({ error: 'cli_token_required' });
+    }
+
+    if (serverMode() !== 'desktop') {
+      return reply.code(409).send({ error: 'not_desktop_mode' });
+    }
+
+    if (!opts.desktop?.connected) {
+      return reply.code(503).send({ error: 'desktop_parent_unavailable' });
+    }
+
+    if (!await updates.isRestarting(request.body.jobId)) {
+      return reply.code(409).send({ error: 'update_job_mismatch' });
+    }
+
+    if (fastify.shutdown?.active) {
+      return reply.code(202).send({
+        ok: true,
+        already: true,
+      });
+    }
+
+    setTimeout(() => {
+      void fastify.shutdown!.begin('обновление Кокпита', DESKTOP_RESTART_EXIT_CODE);
+    }, 400);
+
+    return reply.code(202).send({ ok: true });
   });
 
   // ── Автозапуск и ярлык «Кокпит» ──
   // Механизм остаётся systemd (надзор, ворота VPN, старт до входа через linger); здесь
-  // только продуктовая ручка над ним и ярлык на bin/launch через deploy/shortcut.sh.
+  // только продуктовая ручка над ним и ярлык через deploy/shortcut.sh.
   const launcher = opts.launcher || new LauncherService({ rootDir: config.rootDir });
 
   /**

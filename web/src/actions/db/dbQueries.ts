@@ -1,5 +1,5 @@
 import { dbApi } from '../../shared/dbApi.ts';
-import type { DbCancelOutcome } from '../../../../shared/dbContracts.ts';
+import type { DbCancelOutcome } from '../../../../shared/plugins/db/dbContracts.ts';
 import { useDbStore } from '../../stores/db.ts';
 import { refreshDbQueries } from './loadDb.ts';
 

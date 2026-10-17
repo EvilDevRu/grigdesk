@@ -12,7 +12,7 @@ import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 
-import type { DockerLogFrame } from '../../../../shared/dockerContracts.ts';
+import type { DockerLogFrame } from '../../../../shared/plugins/docker/dockerContracts.ts';
 
 export type DockerQuery = Record<string, unknown>;
 

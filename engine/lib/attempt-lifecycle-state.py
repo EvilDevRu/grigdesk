@@ -56,6 +56,7 @@ SEALED_DESCRIPTOR_KEYS = {
 CHAIN_KEYS = {"sequence", "previousEventHash", "eventHash"}
 ACTIVE_RE = re.compile(r"^active-([0-9]{16})\.ndjson$")
 SEALED_RE = re.compile(r"^sealed-([0-9]{16})\.ndjson$")
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 SPAN_FAMILIES = {
     "orchestrator_session_started": "orchestrator_session",
     "orchestrator_session_finished": "orchestrator_session",
@@ -141,9 +142,8 @@ def strict_json(data: bytes, where: str) -> Any:
 
 
 def _assert_unicode(value: str, where: str) -> None:
-    for char in value:
-        if 0xD800 <= ord(char) <= 0xDFFF:
-            fail("lifecycle-schema-invalid", f"{where}: unpaired surrogate is forbidden")
+    if _SURROGATE_RE.search(value) is not None:
+        fail("lifecycle-schema-invalid", f"{where}: unpaired surrogate is forbidden")
 
 
 @dataclass
@@ -250,6 +250,11 @@ class Contract:
         if len(data) > JSON_INPUT_LIMIT:
             fail("lifecycle-schema-invalid", "shared schema is too large")
         self.schema = strict_json(data, "shared schema")
+        # Кэши принадлежат неизменной схеме этого Contract, а не прочитанным событиям.
+        # self.schema удерживает узлы всю жизнь контракта, поэтому их id не переиспользуются.
+        self._one_of_plans: dict[int, tuple[str, dict[bytes, list[Any]]] | None] = {}
+        self._constant_sets: dict[tuple[int, str], frozenset[bytes]] = {}
+
         defs = self.schema.get("$defs") if isinstance(self.schema, dict) else None
         properties = self.schema.get("properties") if isinstance(self.schema, dict) else None
         required = self.schema.get("required") if isinstance(self.schema, dict) else None
@@ -299,6 +304,77 @@ class Contract:
             return isinstance(value, dict)
         fail("lifecycle-schema-invalid", f"shared schema uses unsupported type {expected!r}")
 
+    def _one_of_plan(self, one_of: list[Any], where: str) -> tuple[str, dict[bytes, list[Any]]] | None:
+        """Выбирает общее обязательное поле с чистым const после не более одного ref.
+        Таблица удерживает все исходные ветки с одинаковыми байтами: oneOf требует ровно одно совпадение.
+        """
+        resolved = []
+        common_names: set[str] | None = None
+        for branch in one_of:
+            schema = branch
+            if isinstance(schema, dict) and "$ref" in schema:
+                schema = self._resolve(schema["$ref"], where)
+
+            if not isinstance(schema, dict) or "$ref" in schema or schema.get("type") != "object":
+                return None
+
+            properties = schema.get("properties")
+            required = schema.get("required")
+            if not isinstance(properties, dict) or not isinstance(required, list):
+                return None
+
+            if any(not isinstance(name, str) for name in required):
+                return None
+
+            names = set()
+            for name in required:
+                field = properties.get(name)
+                if isinstance(field, dict) and set(field) == {"const"}:
+                    names.add(name)
+
+            common_names = names if common_names is None else common_names & names
+            resolved.append(schema)
+
+        if not common_names:
+            return None
+
+        discriminator = min(common_names)
+        table: dict[bytes, list[Any]] = {}
+        for branch, schema in zip(one_of, resolved):
+            key = canonical_bytes(schema["properties"][discriminator]["const"])
+            table.setdefault(key, []).append(branch)
+
+        return discriminator, table
+
+    def _one_of_candidates(self, one_of: list[Any], where: str, value: Any) -> list[Any]:
+        """Кэширует только план схемы и выбирает кандидатов по canonical JSON текущего значения.
+        Неподдерживаемые union сохраняют полный перебор; ошибки построения таблицы не скрываются.
+        """
+        cache_key = id(one_of)
+        if cache_key not in self._one_of_plans:
+            self._one_of_plans[cache_key] = self._one_of_plan(one_of, where)
+
+        plan = self._one_of_plans[cache_key]
+        if plan is None:
+            return one_of
+
+        discriminator, table = plan
+        if not isinstance(value, dict) or discriminator not in value:
+            return []
+
+        return table.get(canonical_bytes(value[discriminator]), [])
+
+    def _constant_set(self, schema: dict[str, Any], keyword: str) -> frozenset[bytes]:
+        """Кодирует const/enum один раз за жизнь неизменного Contract.
+        Байтовые ключи сохраняют различие boolean/integer/null и порядок внутри структурных значений.
+        """
+        cache_key = (id(schema), keyword)
+        if cache_key not in self._constant_sets:
+            choices = [schema["const"]] if keyword == "const" else schema["enum"]
+            self._constant_sets[cache_key] = frozenset(canonical_bytes(choice) for choice in choices)
+
+        return self._constant_sets[cache_key]
+
     def _schema_errors(
         self,
         value: Any,
@@ -318,14 +394,14 @@ class Contract:
                 fail("lifecycle-schema-invalid", f"shared schema at {where} has unsupported type union")
             if not self._has_type(value, expected_type):
                 return [f"{where}: expected {expected_type}"]
-        if "const" in schema and canonical_bytes(value) != canonical_bytes(schema["const"]):
+        if "const" in schema and canonical_bytes(value) not in self._constant_set(schema, "const"):
             errors.append(f"{where}: value does not match const")
         choices = schema.get("enum")
         if choices is not None:
             if not isinstance(choices, list):
                 fail("lifecycle-schema-invalid", f"shared schema at {where} has invalid enum")
             encoded_value = canonical_bytes(value)
-            if not any(encoded_value == canonical_bytes(choice) for choice in choices):
+            if encoded_value not in self._constant_set(schema, "enum"):
                 errors.append(f"{where}: value is outside the closed enum")
         if isinstance(value, str):
             minimum_length = schema.get("minLength")
@@ -397,7 +473,8 @@ class Contract:
         if one_of is not None:
             if not isinstance(one_of, list):
                 fail("lifecycle-schema-invalid", f"shared schema at {where} has invalid oneOf")
-            matches_count = sum(not self._schema_errors(value, branch, where) for branch in one_of)
+            candidates = self._one_of_candidates(one_of, where, value)
+            matches_count = sum(not self._schema_errors(value, branch, where) for branch in candidates)
             if matches_count != 1:
                 errors.append(f"{where}: expected exactly one discriminated schema branch")
         condition = schema.get("if")

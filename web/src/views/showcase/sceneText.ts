@@ -1,7 +1,7 @@
 // Слова про сцену, общие для списка сцен и редактора: что запись делает на экране
 // и в каком состоянии её клип. Два места обязаны говорить одинаково, поэтому
 // формулировка одна.
-import type { ShowcaseAction, ShowcaseScene } from '../../../../shared/showcaseContracts';
+import type { ShowcaseAction, ShowcaseScene } from '../../../../shared/plugins/showcase/showcaseContracts';
 
 // Ожидания и паузы в строку не попадают: зрителю важно, куда нажали и что
 // подсветили, а не сколько миллисекунд между этим прошло.

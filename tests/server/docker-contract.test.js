@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { createDockerService } from '../../server/src/lib/docker/service.ts';
 import dockerModule from '../../server/src/modules/docker/index.ts';
-import * as contracts from '../../shared/dockerContracts.ts';
+import * as contracts from '../../shared/plugins/docker/dockerContracts.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

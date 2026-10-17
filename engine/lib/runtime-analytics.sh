@@ -107,19 +107,32 @@ print(last)
 # Возвращает последний старт сессии без соответствующего завершения и без точной
 # метки crash_detected от более позднего писателя. Это только чтение; новая writable
 # сессия сама решает, дописывать ли событие прерывания.
+# Диагностика поиска при кодах 0 и 3 отбрасывается: отсутствие сессии штатно.
+# Остальные ошибки остаются в stderr, чтобы повреждение журнала не стало тихим отказом.
 runtime_lifecycle_previous_open_session_v2() {
-  local task=${1#[tT]} attempt=$2 output=$3 root ledger rc
+  local task=${1#[tT]} attempt=$2 output=$3 root ledger stderr_file rc
   [[ "$task" =~ ^[1-9][0-9]{0,18}$ &&
      "$attempt" =~ ^a_[a-f0-9]{32}$ && -n "$output" ]] || return 2
   root=$(factory_control_root) || return
   ledger=$(mktemp "$root/.runtime-lifecycle-session.XXXXXX") || return 1
+  stderr_file=$(mktemp "$root/.runtime-lifecycle-session-stderr.XXXXXX") || {
+    rm -f -- "$ledger"
+    return 1
+  }
+
   attempt_lifecycle_read_v2 "$task" "$attempt" >"$ledger"
   rc=$?
+
   if (( rc == 0 )); then
-    runtime_analytics_python_v2 find-open-session "$ledger" >"$output"
+    runtime_analytics_python_v2 find-open-session "$ledger" >"$output" 2>"$stderr_file"
     rc=$?
+
+    if (( rc != 0 && rc != 3 )); then
+      cat -- "$stderr_file" >&2
+    fi
   fi
-  rm -f -- "$ledger"
+
+  rm -f -- "$ledger" "$stderr_file"
   return "$rc"
 }
 

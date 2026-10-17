@@ -14,17 +14,17 @@ import type {
   ShowcaseAction,
   ShowcaseProject,
   ShowcaseScene,
-} from '../../../../shared/showcaseContracts.ts';
-import { parseNarration, plainNarration } from '../../../../shared/showcaseNarration.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import { parseNarration, plainNarration } from '../../../../shared/plugins/showcase/showcaseNarration.ts';
 import {
   SHOWCASE_SYNC_BINDING_VERSION,
   validateShowcaseSyncBindings,
-} from '../../../../shared/showcaseSync.ts';
+} from '../../../../shared/plugins/showcase/showcaseSync.ts';
 import type {
   ShowcaseSyncBindings,
   ShowcaseSyncCue,
   ShowcaseSyncValidation,
-} from '../../../../shared/showcaseSync.ts';
+} from '../../../../shared/plugins/showcase/showcaseSync.ts';
 import { ShowcaseError, notFound } from './errors.ts';
 
 export interface SceneDraft {

@@ -1,5 +1,5 @@
-import type { SshAuditEntry, SshFile, SshSession } from '../../shared/sshContracts.ts';
-import { parseSshHostKeyCheck, parseSshSessions } from '../../shared/sshContracts.ts';
+import type { SshAuditEntry, SshFile, SshSession } from '../../shared/plugins/ssh/sshContracts.ts';
+import { parseSshHostKeyCheck, parseSshSessions } from '../../shared/plugins/ssh/sshContracts.ts';
 import { sshApi } from '../../web/src/shared/sshApi.ts';
 import { closeSshSession, setSshAgentAccess, useSshStore } from '../../web/src/actions/ssh';
 

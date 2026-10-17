@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { allowsWebLogEvent } from '../../shared/diagnosticLogging.ts';
+import { allowsWebLogEvent } from '../../shared/web-log/diagnosticLogging.ts';
 import { createWebLog } from '../../web/src/shared/webLog.ts';
 import { attachTransport } from '../../web/src/shared/webLogTransport.ts';
 

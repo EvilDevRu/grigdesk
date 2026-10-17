@@ -57,10 +57,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import type { DraftMachine } from '../../../../shared/routeDefinition.ts';
-import type { RouteWhen } from '../../../../shared/routeDefinition.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
-import type { AgentCard } from '../../../../shared/agentsContracts.ts';
+import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteWhen } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { AgentCard } from '../../../../shared/pipeline/agentsContracts.ts';
 import { mdToHtml } from '../../shared/md.ts';
 import { UiButton, UiSelect } from '../../ui';
 import RoutePromptBlocks from './RoutePromptBlocks.vue';

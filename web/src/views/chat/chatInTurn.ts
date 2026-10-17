@@ -3,12 +3,12 @@ import {
   IN_TURN_PROTOCOL,
   IN_TURN_TEXT_LIMIT_BYTES,
   utf8Bytes,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type {
   InTurnCapability,
   InTurnDeliveryState,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type { ChatInTurnRun } from '../../stores/chatInTurn.ts';
 
 const REASONS: Record<InTurnUnavailableReason, string> = {

@@ -1,4 +1,4 @@
-import type { FactoryGraphData } from '../../../shared/factoryGraphContracts.ts';
+import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
 
 /**
  * Петлю определяет закреплённый маршрут, а движение — живость демона и текущий узел.

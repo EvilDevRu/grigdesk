@@ -1,4 +1,6 @@
 // Сборка, проверка и атомарная публикация неизменяемых документов потребления раннеров.
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { canonicalJson } from './canonical.ts';
 import { assertAnalyticsIdentity } from './contracts.ts';
 import { canonicalDecimal } from './decimal.ts';
@@ -102,19 +104,13 @@ export interface UsageDocumentInput {
   normalization: Record<string, unknown>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
 /** Ровно объявленный набор полей: лишнее поле означает документ не по контракту. */
 function exactKeys(
   record: unknown,
   keys: readonly string[],
   where: string,
 ): asserts record is Record<string, unknown> {
-  if (!isRecord(record)) fail('invalidDocument', `${where}: ожидался object.`);
+  if (!isPlainRecord(record)) fail('invalidDocument', `${where}: ожидался object.`);
   const actual = Object.keys(record).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
@@ -199,7 +195,7 @@ function validateFingerprint(value: unknown): void {
 }
 
 function validateBillingWindow(value: unknown, where: string): void {
-  if (!isRecord(value)) fail('invalidDocument', `${where}: billingWindow обязан быть object.`);
+  if (!isPlainRecord(value)) fail('invalidDocument', `${where}: billingWindow обязан быть object.`);
   if (value.kind === 'unknown') {
     exactKeys(value, ['kind', 'basis'], where);
     if (value.basis !== 'unknown') fail('invalidDocument', `${where}: unknown basis обязан быть unknown.`);
@@ -227,7 +223,7 @@ function validateSamples(samples: unknown): Set<unknown> {
   const ids = new Set<unknown>();
 
   for (const [index, sample] of samples.entries()) {
-    if (!isRecord(sample) || !SAMPLE_ID_RE.test(String(sample.sampleId ?? ''))) {
+    if (!isPlainRecord(sample) || !SAMPLE_ID_RE.test(String(sample.sampleId ?? ''))) {
       fail('invalidDocument', `usageSamples[${index}]: invalid sampleId.`);
     }
     if (ids.has(sample.sampleId)) fail('invalidDocument', `usageSamples[${index}]: duplicate sampleId.`);
@@ -235,7 +231,7 @@ function validateSamples(samples: unknown): Set<unknown> {
     uint(sample.sourceOrdinal, `usageSamples[${index}].sourceOrdinal`, { positive: true });
     uint(sample.byteOffset, `usageSamples[${index}].byteOffset`);
     hash(sample.lineHash, `usageSamples[${index}].lineHash`);
-    if (!isRecord(sample.vector)) fail('invalidDocument', `usageSamples[${index}].vector invalid.`);
+    if (!isPlainRecord(sample.vector)) fail('invalidDocument', `usageSamples[${index}].vector invalid.`);
 
     for (const [key, quantity] of Object.entries(sample.vector)) {
       if (!DIALECT_RE.test(key)) fail('invalidDocument', `usageSamples[${index}].vector key invalid.`);
@@ -254,14 +250,14 @@ function validateSegments(segments: unknown, sampleIds: Set<unknown>): void {
   for (const [index, segment] of segments.entries()) {
     const where = `usageSegments[${index}]`;
 
-    if (!isRecord(segment) || !SEGMENT_ID_RE.test(String(segment.segmentId ?? ''))) {
+    if (!isPlainRecord(segment) || !SEGMENT_ID_RE.test(String(segment.segmentId ?? ''))) {
       fail('invalidDocument', `${where}: invalid segmentId.`);
     }
     if (ids.has(segment.segmentId)) fail('invalidDocument', `${where}: duplicate segmentId.`);
     ids.add(segment.segmentId);
     const range = segment.sampleRange;
 
-    if (!isRecord(range)
+    if (!isPlainRecord(range)
         || !sampleIds.has(range.firstSampleId)
         || !sampleIds.has(range.lastSampleId)) {
       fail('invalidDocument', `${where}.sampleRange не ссылается на usageSamples.`);
@@ -309,14 +305,14 @@ function validateReportedCost(value: unknown): void {
 
 function validateCheckpoint(value: unknown, where: string): void {
   if (value === null) return;
-  if (!isRecord(value) || typeof value.resumeEligible !== 'boolean') {
+  if (!isPlainRecord(value) || typeof value.resumeEligible !== 'boolean') {
     fail('invalidDocument', `${where}: invalid counter checkpoint.`);
   }
   if (Object.hasOwn(value, 'checkpointHash')) hash(value.checkpointHash, `${where}.checkpointHash`);
   if (Object.hasOwn(value, 'lifecycleEventHash')) {
     hash(value.lifecycleEventHash, `${where}.lifecycleEventHash`, { nullable: true });
   }
-  if (!isRecord(value.vector)) fail('invalidDocument', `${where}.vector invalid.`);
+  if (!isPlainRecord(value.vector)) fail('invalidDocument', `${where}.vector invalid.`);
   for (const [key, quantity] of Object.entries(value.vector)) {
     if (!DIALECT_RE.test(key)) fail('invalidDocument', `${where}.vector key invalid.`);
     decimal(quantity, `${where}.vector.${key}`);
@@ -437,7 +433,7 @@ export function buildUsageDocument({
   parentUsageRef = null,
   normalization,
 }: UsageDocumentInput): UsageDocument {
-  if (!isRecord(identity) || !isRecord(normalization)) {
+  if (!isPlainRecord(identity) || !isPlainRecord(normalization)) {
     fail('invalidDocument', 'identity и normalization обязательны.');
   }
   if (!Array.isArray(normalization.usageSegments)

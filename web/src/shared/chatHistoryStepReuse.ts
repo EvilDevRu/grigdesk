@@ -2,12 +2,12 @@ import { toRaw } from 'vue';
 import {
   decodeHistoryStepReuseAck,
   HISTORY_STEP_REUSE_ROUTE,
-} from '../../../shared/chatHistoryStepReuse.ts';
+} from '../../../shared/chat/chatHistoryStepReuse.ts';
 import type {
   HistoryStepRef,
   HistoryStepReuseRequest,
-} from '../../../shared/chatHistoryStepReuse.ts';
-import { messageKey } from '../../../shared/chatMessageIdentity.ts';
+} from '../../../shared/chat/chatHistoryStepReuse.ts';
+import { messageKey } from '../../../shared/chat/chatMessageIdentity.ts';
 import type { ChatHistorySnapshot } from './chatHistorySnapshot.ts';
 
 interface StepSignature {

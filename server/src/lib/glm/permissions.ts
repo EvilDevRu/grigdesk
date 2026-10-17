@@ -1,3 +1,7 @@
+import { setTimeout as pause } from 'node:timers/promises';
+
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { glmAccessError } from './env.ts';
 import { glmMcpLossError } from './mcp.ts';
 import { GLM_WORK_SERVER_NAME, glmArgumentsHash, glmMcpToolName, glmToolKind } from './policy.ts';
@@ -20,10 +24,6 @@ export type GlmApprovalVerdict = { allow: boolean } | { presentation: Record<str
 const MARKER = 'GLM-POLICY ';
 const HOOK_MISSING = 'Hooks политики GLM не подтвердили этот вызов; ход остановлен.';
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
 /**
  * Дескрипторы hook из stderr события hook/result: строки с префиксом GLM-POLICY.
  * Неразбираемая строка пропускается: без дескриптора вызов дальше не пройдёт.
@@ -31,7 +31,7 @@ function record(value: unknown): Record<string, unknown> {
 function descriptorsOf(summary: unknown): Record<string, unknown>[] {
   return String(summary ?? '').split('\n').filter((line) => line.startsWith(MARKER)).flatMap((line) => {
     try {
-      return [record(JSON.parse(line.slice(MARKER.length)))];
+      return [recordOrEmpty(JSON.parse(line.slice(MARKER.length)))];
     } catch {
       return [];
     }
@@ -59,7 +59,7 @@ export function createGlmTurnGuard(options: {
    * инструмента идёт без маркера hooks этого хода или результат — без дескриптора hook.
    */
   const inspect = (event: Record<string, unknown>): (Error & { code: string }) | null => {
-    const data = record(event.data);
+    const data = recordOrEmpty(event.data);
 
     if (event.type === 'hook/result') {
       for (const item of descriptorsOf(data.stderrSummary)) {
@@ -90,7 +90,7 @@ export function createGlmTurnGuard(options: {
       calls.set(String(data.callId ?? ''), {
         name: String(data.name ?? ''),
         hash,
-        input: record(input),
+        input: recordOrEmpty(input),
       });
 
       return markerTurn !== null && markerTurn === Number(data.turn) ? null
@@ -99,10 +99,13 @@ export function createGlmTurnGuard(options: {
 
     if (event.type === 'tool/result') {
       // DSH кладёт id вызова в source сообщения и в каждый tool-result блок.
-      const message = record(data.message);
-      const content = Array.isArray(message.content) ? message.content.map(record) : [];
-      const id = String(record(message.source).callId ?? content.find((block) => block.toolCallId)?.toolCallId
-        ?? message.toolCallId ?? '');
+      const message = recordOrEmpty(data.message);
+      const content = Array.isArray(message.content) ? message.content.map(recordOrEmpty) : [];
+      const id = String(
+        recordOrEmpty(message.source).callId
+        ?? content.find((block) => block.toolCallId)?.toolCallId
+        ?? message.toolCallId ?? ''
+      );
 
       if (!descriptors.has(id)) {
         return glmAccessError('glm_policy_hook_missing', HOOK_MISSING);
@@ -124,7 +127,7 @@ export function createGlmTurnGuard(options: {
     const deadline = Date.now() + waitMs;
 
     while (!descriptors.has(callId) && Date.now() < deadline && !options.signal?.aborted) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await pause(20);
     }
 
     return descriptors.get(callId);

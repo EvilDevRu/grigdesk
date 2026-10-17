@@ -4,8 +4,8 @@ import type { App, ComponentPublicInstance } from 'vue';
 import type { Pinia } from 'pinia';
 import type { NavigationFailure, Router } from 'vue-router';
 
-import { vueErrorSource } from '../../../shared/webLogContracts.ts';
-import type { SafeError, WebLogData } from '../../../shared/webLogContracts.ts';
+import { vueErrorSource } from '../../../shared/web-log/webLogContracts.ts';
+import type { SafeError, WebLogData } from '../../../shared/web-log/webLogContracts.ts';
 import type { WebLog } from './webLog.ts';
 
 type CaptureOptions = {

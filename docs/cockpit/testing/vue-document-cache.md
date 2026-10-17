@@ -20,4 +20,4 @@ installUiBrowser(t); … })` и сценарии подтестами `await t.t
 и `scenario.after(() => wrapper.unmount())`. Компонент тоже компилируется один раз, а заглушки
 сторов читают `globalThis[KEY]` при ВЫЗОВЕ (`export const useX = () => globalThis[KEY].x`),
 а не в top-level `const` — тогда у каждого подтеста свежие сторы. Образец —
-`tests/web/cockpit-version-tile.component.test.js`.
+`tests/web/alert-history-popover.component.test.js`.

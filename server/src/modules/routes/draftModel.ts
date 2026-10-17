@@ -1,13 +1,15 @@
+import { jsonPointerPart } from '../../../../shared/lib/text.ts';
+
 import {
   parseRouteDraft,
   ROUTES_EDITOR_LIMITS,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type {
   DraftOperation,
   RouteDraft,
   RouteEditorIssue,
-} from '../../../../shared/routesEditorContracts.ts';
-import type { DraftMachine, RouteTransitionDoc } from '../../../../shared/routeDefinition.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { DraftMachine, RouteTransitionDoc } from '../../../../shared/pipeline/routeDefinition.ts';
 
 import { assertProfileId, assertRouteId } from './schema.ts';
 import type { StoredCatalog, StoredRoute } from './store.ts';
@@ -165,10 +167,6 @@ function shapeMachine(
   });
 }
 
-function pointer(value: string): string {
-  return value.replaceAll('~', '~0').replaceAll('/', '~1');
-}
-
 /**
  * Отмечает незаполненные поля, сохраняя точный путь до редактора.
  * Эти случаи допустимы при сохранении и блокируют только публикацию.
@@ -214,8 +212,12 @@ function incompleteIssues(
 
   for (const [file, text] of Object.entries(prompts)) {
     if (text.trim().length === 0) {
-      addIssue('prompt_required', null, `${basePath.replace(/\/route$/, '')}/prompts/${pointer(file)}`,
-        'Заполните инструкцию');
+      addIssue(
+        'prompt_required',
+        null,
+        `${basePath.replace(/\/route$/, '')}/prompts/${jsonPointerPart(file)}`,
+        'Заполните инструкцию'
+      );
     }
   }
 
@@ -226,7 +228,7 @@ function incompleteIssues(
           addIssue(
             'transition_required',
             node.id,
-            `${basePath}/nodes/${index}/${channel}/${pointer(outcome)}`,
+            `${basePath}/nodes/${index}/${channel}/${jsonPointerPart(outcome)}`,
             'Выберите переход',
           );
         }
@@ -235,7 +237,9 @@ function incompleteIssues(
             addIssue(
               'route_reference_missing',
               node.id,
-              `${basePath}/nodes/${index}/${channel}/${pointer(outcome)}/escalate/routes/${targetIndex}`,
+              `${basePath}/nodes/${index}/${channel}/${
+                jsonPointerPart(outcome)
+              }/escalate/routes/${targetIndex}`,
               `Маршрут «${target}» отсутствует в черновике каталога`,
             );
           }
@@ -385,7 +389,7 @@ export function toRuntimeCatalogInput(draft: RouteDraft): RuntimeCatalogResult {
       knownRoutes,
       'route',
       routeId,
-      `/routes/${pointer(routeId)}/route`,
+      `/routes/${jsonPointerPart(routeId)}/route`,
     ));
   }
   issues.push(...incompleteIssues(

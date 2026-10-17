@@ -1,3 +1,4 @@
+import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
 import { base, cut, lineCount, STEP_DIFF_LIMIT, STEP_THINK_LIMIT } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 
@@ -33,10 +34,15 @@ function kindFor(title: string): string {
   return 'other';
 }
 
-function toolStep(update: DeepSeekUpdate, id: string): ChatStep {
-  const title = String(update.title || 'Действие');
-  const raw = update.rawInput && typeof update.rawInput === 'object'
-    ? update.rawInput as Record<string, unknown>
+/**
+ * Строка ленты из вызова инструмента DSH: имя и разобранные аргументы модели.
+ * Словарь общий для ACP-потока и web-потока, поэтому DeepSeek и GLM рисуют
+ * одни и те же Bash/Read/Write/Edit с заголовком, командой или диффом.
+ */
+export function deepSeekToolStep(name: string, rawInput: unknown, id: string): ChatStep {
+  const title = name || 'Действие';
+  const raw = rawInput && typeof rawInput === 'object'
+    ? rawInput as Record<string, unknown>
     : {};
   const kind = kindFor(title);
   const file = String(raw.file_path || '');
@@ -79,7 +85,73 @@ function toolStep(update: DeepSeekUpdate, id: string): ChatStep {
     };
   }
   if (kind === 'search') return { k: 'tool', id, name: title === 'glob' ? 'Glob' : 'Grep', title: cut(raw.pattern || title, 200) };
-  return { k: 'tool', id, name: title, title: cut(title, 200), preview: cut(JSON.stringify(raw), 600) };
+
+  // MCP и прочие инструменты: имя уже стоит в строке ленты, поэтому заголовок — аргументы,
+  // как у Claude. Не поместившиеся в заголовок аргументы видны целиком в раскрытии.
+  const args = JSON.stringify(raw);
+
+  return {
+    k: 'tool',
+    id,
+    name: title,
+    title: args === '{}' ? '' : cut(args, 200),
+    ...(args.length > 200 ? { preview: cut(args, 600) } : {}),
+  };
+}
+
+// Блок итога инструмента в сообщении `tool/result` web-потока DSH.
+interface DeepSeekToolResultBlock {
+  type?: unknown;
+  toolCallId?: unknown;
+  content?: unknown;
+  isError?: unknown;
+}
+
+/**
+ * Текст итога из блоков tool-result DSH. Картинка становится общей заглушкой ленты,
+ * прочие блоки (файлы, ссылки) в строку итога не попадают.
+ */
+function toolResultText(content: unknown): string {
+  const blocks = Array.isArray(content) ? content : [];
+
+  return blocks
+    .map((value) => {
+      const block = value as { type?: unknown; text?: unknown } | null;
+
+      if (block?.type === 'text') {
+        return String(block.text || '');
+      }
+
+      return block?.type === 'image' ? STEP_IMAGE_TEXT : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Итог инструмента из события `tool/result` web-потока DSH. Id вызова DSH кладёт в source
+ * сообщения и в блок tool-result, исход — в `isError` блока. Верхних `toolCallId` и
+ * `isError` у сообщения нет: по ним итог не находил свой вызов и всегда выглядел успехом.
+ */
+export function deepSeekToolResultStep(data: Record<string, unknown>): ChatStep {
+  const message = (data.message && typeof data.message === 'object' ? data.message : {}) as {
+    source?: { callId?: unknown } | null;
+    content?: unknown;
+  };
+  const blocks = (Array.isArray(message.content) ? message.content : []) as
+    Array<DeepSeekToolResultBlock | null>;
+  const id = String(message.source?.callId || blocks.find((item) => item?.toolCallId)?.toolCallId || '');
+  const block = blocks.find((item) => item?.type === 'tool-result' && item.toolCallId === id) || blocks[0];
+  const ok = block?.isError !== true;
+  const text = toolResultText(block?.content);
+
+  return {
+    k: 'res',
+    id,
+    ok,
+    text: cut(text, ok ? 400 : 600),
+    lines: lineCount(text),
+  };
 }
 
 export function createDeepSeekStepNormalizer({ model = '', cwd = '', mode = '' } = {}) {
@@ -130,8 +202,9 @@ export function createDeepSeekStepNormalizer({ model = '', cwd = '', mode = '' }
       title: update.title ?? state.update.title,
     };
     const terminal = ['completed', 'failed'].includes(String(update.status || ''));
+
     if (!state.emitted && (event === 'tool_call' || terminal)) {
-      out.push(toolStep(state.update, id));
+      out.push(deepSeekToolStep(String(state.update.title || ''), state.update.rawInput, id));
       state.emitted = true;
     }
     if (terminal && !state.resultEmitted) {

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 
 import type { FileHandle } from 'node:fs/promises';
-import type { WebLogEntry } from '../../../../shared/webLogContracts.ts';
+import type { WebLogEntry } from '../../../../shared/web-log/webLogContracts.ts';
 
 export type WebLogAck = {
   accepted: number;

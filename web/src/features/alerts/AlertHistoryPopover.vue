@@ -1,8 +1,7 @@
 <template>
-  <UiPopover
+  <UiTopbarPanel
+    title="Оповещения"
     trigger-mode="click"
-    placement="bottom-end"
-    :style="{ width: 'min(380px, calc(100vw - 20px))' }"
     @open="onOpen"
     @close="onClose"
   >
@@ -24,20 +23,19 @@
       </UiIconButton>
     </template>
 
+    <template #actions>
+      <UiButton
+        v-if="entries.length"
+        data-context="toast-action"
+        variant="text"
+        @click="clearAlertHistory()"
+      >
+        Очистить
+      </UiButton>
+    </template>
+
     <template #default="{ close }">
       <section class="alert-history" aria-label="История оповещений">
-        <header class="alert-history-head">
-          <strong>Оповещения</strong>
-          <UiButton
-            v-if="entries.length"
-            data-context="toast-action"
-            variant="text"
-            @click="clearAlertHistory()"
-          >
-            Очистить
-          </UiButton>
-        </header>
-
         <p v-if="!entries.length" class="alert-history-empty">
           Пока пусто. Здесь собираются оповещения этого окна, в том числе ушедшие сами.
         </p>
@@ -72,7 +70,7 @@
         </ol>
       </section>
     </template>
-  </UiPopover>
+  </UiTopbarPanel>
 </template>
 
 <script setup lang="ts">
@@ -82,7 +80,7 @@ import {
   onMounted,
   shallowRef,
 } from 'vue';
-import { UiButton, UiIconButton, UiPopover, vTooltip } from '../../ui';
+import { UiButton, UiIconButton, UiTopbarPanel, vTooltip } from '../../ui';
 import {
   clearAlertHistory,
   markAlertHistorySeen,
@@ -206,15 +204,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 4px 2px 2px;
-}
-
-.alert-history-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4px 0 6px;
-  font-size: 13px;
 }
 
 .alert-history-empty {
@@ -242,7 +231,6 @@ onBeforeUnmount(() => {
   column-gap: 9px;
   align-items: start;
   padding: 7px 4px 7px 6px;
-  border-radius: 8px;
 }
 
 .alert-history-row[data-tone='warning'] {

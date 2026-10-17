@@ -241,25 +241,70 @@ export function unsupportedProviderUsage(
  * остаётся previous: слияние при сбое держит старые полосы, только если ему есть что.
  */
 export function createUsageReadCache<Value>(
-  load: (previous: Value | null) => Promise<Value> | Value,
+  load: (previous: Value | null, context: { isCurrent: () => boolean }) => Promise<Value> | Value,
   { maxAgeMs = 60_000, now = Date.now } = {},
 ) {
   let cache: { at: number; value: Value } | null = null;
   let inFlight: Promise<Value> | null = null;
   let generation = 0;
+  const invalidationWaiters = new Set<() => void>();
 
-  // Одна живая загрузка на всех: начатую не дублируем, а результат, переживший
-  // `clear`, в кэш не кладём — он отвечает на вопрос, который уже сняли.
+  /**
+   * Делит загрузку актуального поколения между всеми читателями.
+   * Запоздавший результат после clear присоединяется к новому чтению, включая отказ.
+   */
+  async function read(): Promise<Value> {
+    if (cache && now() - cache.at < maxAgeMs) {
+      return cache.value;
+    }
+
+    return inFlight ?? start();
+  }
+
+  /**
+   * Проверяет поколение перед записью и перед возвращением снимка читателю.
+   * Контекст позволяет loader защитить собственные побочные эффекты тем же барьером.
+   */
   function start(): Promise<Value> {
     const startedGeneration = generation;
-    const pending = Promise.resolve()
-      .then(() => load(cache?.value ?? null))
-      .then((value) => {
-        if (generation === startedGeneration) cache = { at: now(), value };
-        return value;
+    const previous = cache?.value ?? null;
+    const isCurrent = () => generation === startedGeneration;
+    let invalidate: () => void = () => {};
+    const invalidated = new Promise<{ current: false }>((resolve) => {
+      invalidate = () => resolve({ current: false });
+      invalidationWaiters.add(invalidate);
+    });
+    const loading = Promise.resolve().then(async () => {
+      if (!isCurrent()) {
+        return { current: false as const };
+      }
+
+      const value = await load(previous, { isCurrent });
+
+      return { current: true as const, value };
+    });
+    const pending = Promise.race([loading, invalidated])
+      .then((result) => {
+        if (!result.current || !isCurrent()) {
+          return read();
+        }
+
+        cache = { at: now(), value: result.value };
+
+        return result.value;
+      }, (error: unknown) => {
+        if (!isCurrent()) {
+          return read();
+        }
+
+        throw error;
       })
       .finally(() => {
-        if (inFlight === pending) inFlight = null;
+        invalidationWaiters.delete(invalidate);
+
+        if (inFlight === pending) {
+          inFlight = null;
+        }
       });
 
     inFlight = pending;
@@ -267,12 +312,7 @@ export function createUsageReadCache<Value>(
   }
 
   return {
-    async read() {
-      if (cache && now() - cache.at < maxAgeMs) return cache.value;
-      if (inFlight) return inFlight;
-
-      return start();
-    },
+    read,
 
     async refresh() {
       if (inFlight) return inFlight;
@@ -286,12 +326,26 @@ export function createUsageReadCache<Value>(
       return cache ? now() - cache.at : Number.POSITIVE_INFINITY;
     },
 
+    version() {
+      return generation;
+    },
+
+    /**
+     * Сбрасывает снимок и немедленно переводит ожидающих читателей на новое поколение.
+     * Начатый read-only запрос может завершиться, но его результат уже никому не отдаётся.
+     */
     clear() {
       generation += 1;
       cache = null;
       // Уже начатую read-only операцию не убиваем, но после явного сброса новый
       // читатель не должен получить её потенциально устаревший результат.
       inFlight = null;
+
+      for (const invalidate of invalidationWaiters) {
+        invalidate();
+      }
+
+      invalidationWaiters.clear();
     },
   };
 }

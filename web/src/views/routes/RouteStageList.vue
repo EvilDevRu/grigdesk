@@ -89,8 +89,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { DraftNode } from '../../../../shared/routeDefinition.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import type { DraftNode } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteCommandIssue, RouteCommandResult, RouteCommandScope,
   NewExecutor, NodeInspection } from './routeCommands.ts';
 import { addNode, inspectNodeReferences, moveStage, removeNodes, setTransition } from './routeCommands.ts';

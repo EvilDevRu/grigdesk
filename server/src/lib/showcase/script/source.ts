@@ -29,7 +29,7 @@ import {
 } from './context.ts';
 import type { RepoRef } from './context.ts';
 import { readUntrackedText } from './untracked.ts';
-import { SHOWCASE_SOURCE_NOTE_MAX } from '../../../../../shared/showcaseContracts.ts';
+import { SHOWCASE_SOURCE_NOTE_MAX } from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type {
   ShowcaseSourceOptions,
   ShowcaseSourceOutsideGroup,
@@ -37,7 +37,7 @@ import type {
   ShowcaseStorySource,
   ShowcaseStorySourceRepo,
   ShowcaseTargetKind,
-} from '../../../../../shared/showcaseContracts.ts';
+} from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 
 const run = promisify(execFile);
 

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { normalizeContextUsage } from '../../../../shared/chatContextUsage.ts';
+import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
 import type { ChatHead, ChatHistoryStore, StoredChat } from './historyStore.ts';
 import type { InTurnHistory } from './inTurnHistory.ts';
 import { messageKey } from './messageIdentity.ts';

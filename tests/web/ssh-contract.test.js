@@ -10,7 +10,7 @@ import {
   parseSshHostKeyCheck,
   parseSshSessionOpened,
   parseSshSessions,
-} from '../../shared/sshContracts.ts';
+} from '../../shared/plugins/ssh/sshContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { sshApi } from '../../web/src/shared/sshApi.ts';
 

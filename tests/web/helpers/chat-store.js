@@ -10,8 +10,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', import.meta.url));
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const PINIA_URL = pathToFileURL(PINIA_PATH).href;
-const CONTEXT_USAGE_URL = new URL('../../../shared/chatContextUsage.ts', import.meta.url).href;
-const IN_TURN_CONTRACT_URL = new URL('../../../shared/chatInTurnContracts.ts', import.meta.url).href;
+const CONTEXT_USAGE_URL = new URL('../../../shared/chat/chatContextUsage.ts', import.meta.url).href;
+const IN_TURN_CONTRACT_URL = new URL('../../../shared/chat/chatInTurnContracts.ts', import.meta.url).href;
 const IN_TURN_STORE_URL = new URL('../../../web/src/stores/chatInTurn.ts', import.meta.url).href;
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
@@ -59,10 +59,10 @@ function patch(source) {
     )
     .replace("'../shared/quickPermission.ts'",
       JSON.stringify(new URL('../../../web/src/shared/quickPermission.ts', import.meta.url).href))
-    .replace("'../../../shared/chatRun.ts'",
-      JSON.stringify(new URL('../../../shared/chatRun.ts', import.meta.url).href))
-    .replace("'../../../shared/chatWorkdir.ts'",
-      JSON.stringify(new URL('../../../shared/chatWorkdir.ts', import.meta.url).href))
+    .replace("'../../../shared/chat/chatRun.ts'",
+      JSON.stringify(new URL('../../../shared/chat/chatRun.ts', import.meta.url).href))
+    .replace("'../../../shared/chat/chatWorkdir.ts'",
+      JSON.stringify(new URL('../../../shared/chat/chatWorkdir.ts', import.meta.url).href))
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
     .replace("import { api } from '../shared/apiClient.ts';", 'const api = globalThis.__chatApi;')
     .replace(
@@ -92,10 +92,10 @@ function patch(source) {
     .replace("'../shared/chatHistoryStepReuse.ts'",
       JSON.stringify(new URL('../../../web/src/shared/chatHistoryStepReuse.ts', import.meta.url).href))
     .replace(
-      "import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';",
+      "import { normalizeContextUsage } from '../../../shared/chat/chatContextUsage.ts';",
       `import { normalizeContextUsage } from '${CONTEXT_USAGE_URL}';`,
     )
-    .replace("from '../../../shared/chatInTurnContracts.ts';",
+    .replace("from '../../../shared/chat/chatInTurnContracts.ts';",
       `from '${IN_TURN_CONTRACT_URL}';`)
     .replace("from './chatInTurn.ts';", `from '${IN_TURN_STORE_URL}';`)
     .replace(

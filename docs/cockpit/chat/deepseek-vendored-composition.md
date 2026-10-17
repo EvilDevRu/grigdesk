@@ -59,12 +59,13 @@ npm --prefix server run deepseek:verify
 `current`. Первая подготовка требует сети (npm-пакеты сборки и, без копии, исходники);
 дальше сборки идут offline. В `bin/cockpit` и `deploy/install.sh` сбой подготовки DeepSeek
 не останавливает Cockpit: выводится предупреждение, карточка DeepSeek показывает
-причину недоступности и команду исправления; `bin/release` и `bin/release-check` подготовку требуют. Нужны C compiler, Node
+причину недоступности и команду исправления; `tools/release` и `tools/release-check` подготовку требуют. Нужны C compiler, Node
 headers выбранного runtime и native prerequisites npm-пакетов. Для Linux sandbox
 сохраняется требование работоспособного bubblewrap. Native flock использует stable
 Node-API; остальные native dependencies остаются привязаны к ABI Node сборки.
 
-Общий test helper создаёт один candidate под writer lock в `.state/artifacts/`,
+Общий test helper создаёт один candidate под writer lock в `~/.cockpit/artifacts/`
+(сторож тестов передаёт настоящую папку артефактов, и candidate переживает прогон),
 переиспользует его только при совпадении всех входов и проверяет весь payload.
 Отсутствующие зависимости дают отказ с командой подготовки; скрытого download/skip
 нет. Homes и порты проверок изолированы. Тесты не меняют production `current`.

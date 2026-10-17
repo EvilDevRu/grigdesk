@@ -73,9 +73,9 @@ test('SSH объявляет единый ограниченный лимит в
 
 test('SSH metadata known-hosts и audit имеют отдельные приватные пути состояния', () => {
   assert.deepEqual({
-    connections: config.sshConnectionsPath?.endsWith('/server/.state/ssh/connections.json'),
-    knownHosts: config.sshKnownHostsPath?.endsWith('/server/.state/ssh/known-hosts.json'),
-    audit: config.sshAuditDir?.endsWith('/server/.state/ssh/audit'),
+    connections: config.sshConnectionsPath?.endsWith('/state/ssh/connections.json'),
+    knownHosts: config.sshKnownHostsPath?.endsWith('/state/ssh/known-hosts.json'),
+    audit: config.sshAuditDir?.endsWith('/state/ssh/audit'),
     prefsIsSshState: config.prefsPath?.includes('/ssh/'),
   }, {
     connections: true,

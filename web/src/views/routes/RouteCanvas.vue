@@ -47,10 +47,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 
-import { buildRouteGraph } from '../../../../shared/routeGraphView.ts';
-import type { RouteGraphDef, RouteMachine } from '../../../../shared/routeGraphView.ts';
-import type { DraftMachine } from '../../../../shared/routeDefinition.ts';
-import type { RouteDraft, RouteEditorIssue } from '../../../../shared/routesEditorContracts.ts';
+import { buildRouteGraph } from '../../../../shared/pipeline/routeGraphView.ts';
+import type { RouteGraphDef, RouteMachine } from '../../../../shared/pipeline/routeGraphView.ts';
+import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteDraft, RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import FactoryGraph from '../pipeline/FactoryGraph.vue';
 import type { RouteCommandScope } from './routeCommands.ts';
 import { setTransition } from './routeCommands.ts';

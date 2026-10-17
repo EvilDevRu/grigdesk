@@ -13,8 +13,8 @@ import {
   IN_TURN_SEGMENT_RE,
   canTransition,
   isPendingDelivery,
-} from '../../../../shared/chatInTurnContracts.ts';
-import type { InTurnDeliveryState, InTurnReceipt } from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
+import type { InTurnDeliveryState, InTurnReceipt } from '../../../../shared/chat/chatInTurnContracts.ts';
 
 export interface InTurnRecord extends InTurnReceipt {
   fingerprint: string;

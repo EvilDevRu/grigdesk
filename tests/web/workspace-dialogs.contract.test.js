@@ -37,8 +37,10 @@ test('Действия TaskModal используют общее оформле�
     [...taskModal.matchAll(/data-context="task-footer-action"/gu)].length,
     7,
   );
-  assert.match(
-    actions,
-    /data-context='task-footer-action'\]\s*\{[^}]*height:\s*36px;[^}]*min-height:\s*36px;/u,
-  );
+
+  const footerRule = actions.match(/data-context='task-footer-action'\]\s*\{([^}]+)\}/u)?.[1];
+
+  assert.ok(footerRule, 'Общий skin действий TaskModal существует');
+  assert.match(footerRule, /height:\s*var\(--control-height\);/u);
+  assert.match(footerRule, /min-height:\s*var\(--control-height\);/u);
 });

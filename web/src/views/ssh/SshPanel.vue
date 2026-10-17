@@ -587,6 +587,8 @@ import { Terminal } from '@xterm/xterm';
 import type { IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 
+import { errorMessage } from '../../../../shared/lib/errors.ts';
+
 import {
   UiButton,
   UiField,
@@ -605,7 +607,11 @@ import {
   confirmDialog,
   vTooltip,
 } from '../../ui';
-import type { SshAuditEntry, SshConnection, SshSession } from '../../../../shared/sshContracts.ts';
+import type {
+  SshAuditEntry,
+  SshConnection,
+  SshSession,
+} from '../../../../shared/plugins/ssh/sshContracts.ts';
 import {
   activateSshSession,
   bindSshTerminal,
@@ -1010,22 +1016,12 @@ async function closeActiveSession(): Promise<void> {
       await focusSessionTab(sessionId);
     }
 
-    await alertDialog(errorText(error, 'Не удалось закрыть SSH-сессию'), { title: 'SSH' });
+    await alertDialog(errorMessage(error, 'Не удалось закрыть SSH-сессию'), { title: 'SSH' });
   } finally {
     if (closingSessionId.value === sessionId) {
       closingSessionId.value = '';
     }
   }
-}
-
-// Отказ приходит из сети и своего типа не обещает: человеку показывается сообщение
-// ошибки, а при его отсутствии — понятный текст самой операции.
-function errorText(error: unknown, fallback: string): string {
-  const message = error !== null && typeof error === 'object'
-    ? (error as { message?: unknown }).message
-    : undefined;
-
-  return typeof message === 'string' && message ? message : fallback;
 }
 
 onMounted(async () => {
@@ -1123,7 +1119,7 @@ async function openConnection(connection: SshConnection): Promise<void> {
 
     await connectSshSession(connection.id, passwords[connection.id] || '');
   } catch (error) {
-    await alertDialog(errorText(error, 'Не удалось подключиться'), { title: 'SSH' });
+    await alertDialog(errorMessage(error, 'Не удалось подключиться'), { title: 'SSH' });
   } finally {
     passwords[connection.id] = '';
 
@@ -1158,7 +1154,7 @@ async function saveConnection(): Promise<void> {
       user: '',
     });
   } catch (error) {
-    await alertDialog(errorText(error, 'Не удалось сохранить соединение'), { title: 'SSH' });
+    await alertDialog(errorMessage(error, 'Не удалось сохранить соединение'), { title: 'SSH' });
   } finally {
     savingConnection.value = false;
   }

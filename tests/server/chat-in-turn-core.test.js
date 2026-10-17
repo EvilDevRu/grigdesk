@@ -12,7 +12,7 @@ import test from 'node:test';
 import { ChatAssistantMessages } from '../../server/src/lib/chat/assistantMessages.ts';
 import { ChatInTurnLedger } from '../../server/src/lib/chat/inTurnLedger.ts';
 import { InTurnMessages } from '../../server/src/lib/chat/inTurnMessages.ts';
-import { IN_TURN_ATTACHMENT_LIMIT, IN_TURN_BACKLOG_LIMIT } from '../../shared/chatInTurnContracts.ts';
+import { IN_TURN_ATTACHMENT_LIMIT, IN_TURN_BACKLOG_LIMIT } from '../../shared/chat/chatInTurnContracts.ts';
 
 async function tmpDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-core-'));

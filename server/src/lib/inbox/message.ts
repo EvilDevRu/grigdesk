@@ -5,6 +5,8 @@
 // не дополняет и не приводит к строкам: числовой provider id, забытый null или лишнее
 // нативное поле означают ошибку adapter-а, а не повод угадать формат.
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef, assertChannel, assertNativeSegment } from './identity.ts';
 
 const TOP_LEVEL_KEYS = [
@@ -92,14 +94,8 @@ const fail: (message: string) => never = (message) => {
   throw new InboxMessageValidationError(message);
 };
 
-const isPlainObject = (value: unknown): value is Payload => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-};
-
 function assertExactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail(`${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail(`${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, i) => key !== expected[i])) {

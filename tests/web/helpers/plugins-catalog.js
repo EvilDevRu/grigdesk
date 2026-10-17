@@ -2,6 +2,7 @@ import { compileVue, webFile } from './compile-vue.js';
 
 const CATALOG = webFile('src/views/settings/PluginsCatalog.vue');
 const PLUGINS_STORE = webFile('src/stores/plugins.js');
+const INSTALL_FIXTURE = new URL('./pluginInstallUiFixture.js', import.meta.url).pathname;
 
 /**
  * Раздел «Настройки → Плагины» — самостоятельный подраздел, поэтому тесты монтируют
@@ -13,6 +14,13 @@ export function compilePluginsCatalog({ prefix = '__plugins' } = {}) {
 
   return compileVue(CATALOG, {
     stubs: {
+      '../../stores/pluginInstall.ts': `
+        import { reactive } from 'vue';
+        import { pluginInstallUiDouble } from ${JSON.stringify(INSTALL_FIXTURE)};
+        const fallback = pluginInstallUiDouble(reactive).state;
+        export const usePluginInstallStore = () =>
+          globalThis[${stores}].usePluginInstallStore?.() ?? fallback;
+      `,
       '../../stores/plugins.js': `
         export { pluginCategoryOf } from ${JSON.stringify(PLUGINS_STORE)};
         export const usePluginsStore = (...args) =>

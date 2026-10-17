@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const contract = await compileModule(webFile('../shared/dockerContracts.ts'));
+const contract = await compileModule(webFile('../shared/plugins/docker/dockerContracts.ts'));
 
 test('логи проверяют варианты сообщений и не принимают повреждённые строки', () => {
   const message = {

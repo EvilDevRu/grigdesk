@@ -4,7 +4,7 @@ import type {
   RouteDraftContent,
   RouteRebaseConflict,
   RouteRebaseResolution,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
 

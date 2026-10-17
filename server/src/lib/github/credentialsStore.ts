@@ -4,6 +4,8 @@
 // `clear()` намеренно требует уже опубликованного cleanup_pending и явного
 // подтверждения завершённой очистки. Так disconnect не может сначала стереть
 // единственные данные, которыми ещё надо удалить/инвалидировать webhook.
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import {
   GitHubStoreError,
   atomicWriteJson,
@@ -57,14 +59,8 @@ function fail(code: string, message: string, cause: unknown = null): never {
   throw new GitHubStoreError(code, message, cause);
 }
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('github_credentials_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('github_credentials_invalid', `${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, index) => key !== expected[index])) {
@@ -279,7 +275,7 @@ export class GitHubCredentialsStore {
 
   /** Exact patch существующего lifecycle; неизвестные поля отвергаются. */
   async update(patch: unknown): Promise<GitHubCredentials> {
-    if (!isPlainObject(patch)) {
+    if (!isPlainRecord(patch)) {
       fail('github_credentials_invalid', 'GitHub credentials patch должен быть объектом.');
     }
     const allowed = new Set(INPUT_KEYS);

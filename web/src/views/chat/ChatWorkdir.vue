@@ -160,8 +160,8 @@ import { NAV_ICONS } from '../../shared/navIcons.ts';
 import { useChatStore } from '../../stores/chat.js';
 import {
   chatWorkdirLabel, normalizeRecentWorkdirs, sameChatWorkdir,
-} from '../../../../shared/chatWorkdir.ts';
-import type { ChatWorkdir as WorkdirChoice } from '../../../../shared/chatWorkdir.ts';
+} from '../../../../shared/chat/chatWorkdir.ts';
+import type { ChatWorkdir as WorkdirChoice } from '../../../../shared/chat/chatWorkdir.ts';
 
 interface WorkdirPreview {
   transfer?: string;

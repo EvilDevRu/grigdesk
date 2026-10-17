@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { ROUTES_EDITOR_LIMITS } from '../../../../shared/routesEditorContracts.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
+import { ROUTES_EDITOR_LIMITS } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type {
   RouteDraft, RouteSimulationStepRequest, RouteSimulationStepResponse,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 const ROUTE_TOOL = fileURLToPath(new URL('../../../../engine/bin/factory-route', import.meta.url));
 const MAX_OUTPUT = 16 * 1024 * 1024;
@@ -25,10 +27,6 @@ export interface EditorPreviewResult {
   includedBlocks: string[];
   excludedBlocks: string[];
   issues: Array<{ code: string; path: string; message: string; severity?: string }>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

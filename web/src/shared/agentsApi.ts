@@ -8,9 +8,9 @@ import {
   parseAgentCard,
   parseAgentInstallResult,
   parseAgentList,
-} from '../../../shared/agentsContracts.ts';
-import type { AgentCard, AgentDraft, AgentInstallResult } from '../../../shared/agentsContracts.ts';
-import { parseProviderEfforts } from '../../../shared/providersContracts.ts';
+} from '../../../shared/pipeline/agentsContracts.ts';
+import type { AgentCard, AgentDraft, AgentInstallResult } from '../../../shared/pipeline/agentsContracts.ts';
+import { parseProviderEfforts } from '../../../shared/chat/providersContracts.ts';
 import { api } from './apiClient.ts';
 
 function agentPath(id: string): string {

@@ -3,7 +3,7 @@
 // раздела (web/src/actions/analysis/), а сюда приходит уже проверенный контрактом снимок.
 import { defineStore } from 'pinia';
 
-import type { AnalysisRow } from '../../../shared/analysisContracts.ts';
+import type { AnalysisRow } from '../../../shared/pipeline/analysisContracts.ts';
 import { usePluginsStore } from './plugins.js';
 
 export interface AnalysisStoreState {

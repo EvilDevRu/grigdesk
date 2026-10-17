@@ -68,6 +68,7 @@ export const useDockStore = defineStore('dock', {
       expandedPreferences: storedExpandedPreferences(activeTool),
       activeTool,
       width: clampDockWidth(stored(DOCK_WIDTH_KEY, String(DEFAULT_DOCK_WIDTH))),
+      preferredWidth: clampDockWidth(stored(DOCK_WIDTH_KEY, String(DEFAULT_DOCK_WIDTH))),
       mounted: {},
       intents: {},
       nextIntentId: 1,
@@ -122,12 +123,21 @@ export const useDockStore = defineStore('dock', {
       if (value) this.mounted[id] = true;
       else delete this.mounted[id];
     },
+    /**
+     * Явный ресайз становится желаемой шириной и при завершении сохраняется.
+     * Временное ограничение viewport выполняет fitWidth без изменения предпочтения.
+     */
     setWidth(value, { max, min = MIN_DOCK_WIDTH, persist = false } = {}) {
       this.width = clampDockWidth(value, max, min);
+      this.preferredWidth = this.width;
       if (persist) {
         try { localStorage.setItem(DOCK_WIDTH_KEY, String(Math.round(this.width))); } catch { /* ignore */ }
       }
       return this.width;
+    },
+    // Временный clamp не меняет выбор человека и не пишет localStorage.
+    fitWidth({ max, min = MIN_DOCK_WIDTH } = {}) {
+      this.width = clampDockWidth(this.preferredWidth, max, min);
     },
     enqueue(id, payload = {}) {
       const intent = { ...payload, id: this.nextIntentId++ };

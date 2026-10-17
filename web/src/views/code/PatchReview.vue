@@ -54,7 +54,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { CodeGitEntry } from '../../../../shared/codeContracts';
+import type { CodeGitEntry } from '../../../../shared/plugins/code/codeContracts';
 import { monaco, langOf } from '../../shared/monaco';
 import { UiPressable, vTooltip } from '../../ui';
 import { parseUnifiedDiff } from '../../shared/patch';

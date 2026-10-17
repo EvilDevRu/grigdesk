@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { probeDeepSeekRuntime } from './runtimeProcess.ts';
 
-const PASSTHROUGH_ENV = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'] as const;
+const PASSTHROUGH_ENV = ['PATH', 'HOME', 'COCKPIT_HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'] as const;
 
 export interface DeepSeekEnvError extends Error {
   code: 'deepseek_api_key_missing';

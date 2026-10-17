@@ -59,7 +59,7 @@
 // Пока анализ в очереди/идёт, прежние баллы скрыты и видно название текущего этапа.
 import { computed } from 'vue';
 import { UiTooltip, vTooltip } from '../../ui';
-import type { AnalysisQuestion, AnalysisRow } from '../../../../shared/analysisContracts.ts';
+import type { AnalysisQuestion, AnalysisRow } from '../../../../shared/pipeline/analysisContracts.ts';
 
 const props = withDefaults(defineProps<{
   row?: AnalysisRow | null;

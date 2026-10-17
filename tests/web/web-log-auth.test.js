@@ -22,26 +22,72 @@ test('каждый успешный auth.load подтверждает сесс�
   }
 });
 
-test('logout меняет эпоху и старый ответ проверки не возобновляет вход', async () => {
+test('потеря сессии меняет эпоху, перезагружает документ и не возобновляет вход', async (t) => {
   setActivePinia(createPinia());
   const store = useAuthStore();
   const originalGet = api.get;
-  const originalPost = api.post;
+  const originalOn = api.onUnauthorized;
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
   let resolveGet;
-  api.get = () => new Promise((resolve) => { resolveGet = resolve; });
-  api.post = async () => ({});
-  try {
-    const oldLoad = store.load();
-    const epoch = store.logEpoch;
-    await store.doLogout();
-    resolveGet({ configured: true, authenticated: true, login: 'test', secure: true });
-    await oldLoad;
-    assert.equal(store.logEpoch, epoch + 1);
-    assert.equal(store.authenticated, false);
-    assert.equal(store.ready, false);
-    assert.equal(store.logReason, 'logout');
-  } finally {
+  let handler;
+  let reloads = 0;
+
+  api.get = () => new Promise((resolve) => {
+    resolveGet = resolve;
+  });
+  api.onUnauthorized = (fn) => {
+    handler = fn;
+
+    return () => {};
+  };
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: {
+      reload: () => {
+        reloads += 1;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => {},
+    },
+  });
+
+  t.after(() => {
     api.get = originalGet;
-    api.post = originalPost;
-  }
+    api.onUnauthorized = originalOn;
+
+    for (const [name, descriptor] of [['location', originalLocation],
+      ['sessionStorage', originalStorage]]) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, name, descriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, name);
+      }
+    }
+  });
+
+  store.watchUnauthorized();
+
+  const oldLoad = store.load();
+  const epoch = store.logEpoch;
+
+  handler({});
+
+  resolveGet({
+    configured: true,
+    authenticated: true,
+    clientScope: 'me',
+  });
+  await oldLoad;
+
+  assert.equal(store.logEpoch, epoch + 1);
+  assert.equal(store.authenticated, false);
+  assert.equal(store.ready, false);
+  assert.equal(store.logReason, '401');
+  assert.equal(reloads, 1);
 });

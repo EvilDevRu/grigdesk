@@ -9,10 +9,14 @@
   "scripts": {
     "start": "node src/supervisor.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run typecheck && NODE_TEST_MAX_RSS_MB=4096 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=2 ../tests/relay/*.test.js"
+    "test": "npm run typecheck && NODE_TEST_MAX_RSS_MB=4096 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=2 ../tests/relay/*.test.js",
+    "test:sea": "NODE_TEST_MAX_RSS_MB=4096 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=1 ../tests/relay/sea/*.test.js",
+    "build": "node scripts/build.mts"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "@types/node": "22.20.1"
+    "@types/node": "22.20.1",
+    "esbuild": "0.25.12",
+    "postject": "1.0.0-alpha.6",
+    "typescript": "5.9.3"
   }
 }

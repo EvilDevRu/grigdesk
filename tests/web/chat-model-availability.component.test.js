@@ -4,7 +4,8 @@
 // все модели исполнителя — решение отбиралось у человека. Пометка обязана остаться,
 // блокировка — нет: отказ приходит от самого запуска и называет настоящую причину.
 import assert from 'node:assert/strict';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import test from 'node:test';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
 

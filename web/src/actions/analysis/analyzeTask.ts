@@ -3,7 +3,7 @@ import { useAnalysisStore } from '../../stores/analysis.ts';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { scheduleAnalysisPolling } from './pollAnalysis.ts';
-import type { AnalysisQueueResponse } from '../../../../shared/analysisContracts.ts';
+import type { AnalysisQueueResponse } from '../../../../shared/pipeline/analysisContracts.ts';
 
 interface AnalysisPluginsSource {
   enabled(id: string): boolean;

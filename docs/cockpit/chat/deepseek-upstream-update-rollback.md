@@ -12,7 +12,7 @@ commits не используются; в commit обновления попад
 
 ```bash
 UPSTREAM_SHA='<полный-40-символьный-SHA>'
-SYNC_DIR=$(mktemp -d "$PWD/.state/artifacts/deepseek-sync.XXXXXX")
+SYNC_DIR=$(mktemp -d "$HOME/.cockpit/artifacts/deepseek-sync.XXXXXX")
 node tools/syncDeepSeekHarness.mts --commit "$UPSTREAM_SHA" \
   --staging-parent "$SYNC_DIR" --candidate "$SYNC_DIR/candidate.json"
 ```
@@ -80,6 +80,9 @@ Activation повторно проверяет hashes, contract и Node/native A
 артефакт отвергается до смены current; несовместимый host требует отката согласованного
 релиза Cockpit. Pending update сначала восстанавливается по
 [контракту публикации](../server/deepseek-release-transition.md).
+
+Публикация, activation и fork проверяют artifact асинхронно, сохраняя
+[обработку heartbeat уже работающего A](deepseek-publication-event-loop.md).
 
 Приватные homes разделены по buildId. Новый build не изменяет прежний home;
 новая runtime session может получить сохранённую историю Cockpit. Общие prefs

@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { RouteWhen } from '../../../../shared/routeDefinition.ts';
+import type { RouteWhen } from '../../../../shared/pipeline/routeDefinition.ts';
 import { UiInput, UiSelect } from '../../ui';
 
 const props = defineProps<{ requiredContext: string[]; when?: RouteWhen }>();

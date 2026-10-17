@@ -1,4 +1,4 @@
-import { DIAGNOSTIC_LEVELS } from '../../../shared/diagnosticLogging.ts';
+import { DIAGNOSTIC_LEVELS } from '../../../shared/web-log/diagnosticLogging.ts';
 
 const LABELS = {
   off: 'Выключено',

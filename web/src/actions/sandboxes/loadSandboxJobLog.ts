@@ -1,4 +1,4 @@
-import type { SandboxJobLog } from '../../../../shared/sandboxContracts';
+import type { SandboxJobLog } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 import { sandboxApi, sandboxErrorMessage } from '../../shared/sandboxApi';
 import { useSandboxesStore } from '../../stores/sandboxes';
 

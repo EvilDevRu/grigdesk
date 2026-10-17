@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { vendorHash } from './deepseekVendorManifest.ts';
+import { sha256 } from '../shared/node/hash.ts';
+
 import type { WorkspacePackage } from './runtimeComposition.ts';
 
 /**
@@ -113,7 +114,7 @@ export async function writeDeepSeekLicenseInventory(
       const bytes = await fs.readFile(supplement
         ? path.join(supplements, supplement)
         : path.join(root, original));
-      const digest = vendorHash(bytes);
+      const digest = sha256(bytes);
       const copy = `${digest}-${path.basename(supplement ?? original)}`;
 
       if (supplement && (!source || source.sha256 !== digest)) {

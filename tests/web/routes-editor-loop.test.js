@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeDraft } from '../fixtures/routes-editor.mjs';
-import { parseRouteDraft } from '../../shared/routesContracts.ts';
+import { parseRouteDraft } from '../../shared/pipeline/routesContracts.ts';
 import { compileModule, compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
@@ -53,7 +53,7 @@ test('удаление ведущего называет висячую связ
 });
 
 // Пробный сценарий цикла: потолок кругов живёт в профиле, поэтому сценарий несёт свой и
-// передаёт его в каждом шаге; предел шагов цикла вмещает потолок 100 (201 шаг).
+// передаёт его в каждом шаге; предел шагов цикла вмещает потолок 300 (601 шаг).
 async function simulationStore(t, draft) {
   await installUiBrowser(t, 'http://cockpit.test/#/routes');
   const { createPinia, setActivePinia } = await import(
@@ -91,10 +91,10 @@ test('сценарий цикла передаёт выбранный потол
   store.simulation.stepIndex = 201;
   await actions.stepRouteSimulation(observation);
   assert.equal(calls.length, 2, 'двести первый шаг цикла разрешён');
-  store.simulation.stepIndex = 401;
+  store.simulation.stepIndex = 1201;
   await actions.stepRouteSimulation(observation);
   assert.equal(calls.length, 2);
-  assert.match(store.simulation.error, /400/);
+  assert.match(store.simulation.error, /1200/);
 });
 
 test('сценарий цикла без выбора берёт потолок 20, неверный потолок не стартует', async (t) => {
@@ -103,9 +103,9 @@ test('сценарий цикла без выбора берёт потолок 
   actions.startRouteSimulation('route', 'quick', false);
   assert.equal(store.simulation.loopMaxRounds, 20);
   store.simulation = null;
-  actions.startRouteSimulation('route', 'quick', false, 101);
+  actions.startRouteSimulation('route', 'quick', false, 301);
   assert.equal(store.simulation, null);
-  assert.match(store.simulationError, /1 до 100/);
+  assert.match(store.simulationError, /1 до 300/);
 });
 
 test('обычный маршрут не несёт потолка кругов, предел шагов прежний', async (t) => {

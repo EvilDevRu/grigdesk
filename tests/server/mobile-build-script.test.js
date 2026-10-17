@@ -17,6 +17,7 @@ const root = path.resolve(new URL('../../', import.meta.url).pathname);
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'cockpit-mobile-build-'));
   const project = path.join(directory, 'project');
+  const dataHome = path.join(directory, 'data');
   const signing = path.join(directory, 'signing');
   const sdk = path.join(directory, 'sdk');
   const jdk = path.join(directory, 'jdk');
@@ -41,7 +42,12 @@ async function fixture(t) {
   );
 
   for (const file of [
-    'bin/mobile',
+    'deploy/lib/runtime-env.sh',
+    'shared/runtime/dataHome.ts',
+    'shared/package.json',
+    'server/scripts/dataHomeCheck.mts',
+    'server/src/lib/dataHomeBoot.ts',
+    'tools/mobile',
     'tools/mobile-phone/release.mts',
     'mobile/toolchain.lock.json',
     'mobile/android/gradle/wrapper/gradle-wrapper.jar',
@@ -54,16 +60,16 @@ async function fixture(t) {
 
   await mkdir(signing, { recursive: true });
   await mkdir(commands, { recursive: true });
-  await mkdir(path.join(project, '.state/mobile'), { recursive: true });
+  await mkdir(path.join(dataHome, 'state/mobile-apk'), { recursive: true });
   await writeFile(path.join(project, 'mobile/package.json'), '{"version":"0.1.0"}');
   await writeFile(path.join(signing, 'release.jks'), 'existing-private-key');
   await writeFile(
     path.join(signing, 'release.properties'),
     'storePassword=test-only\nkeyPassword=test-only\nkeyAlias=cockpit\n',
   );
-  await writeFile(path.join(project, '.state/mobile/cockpit-mobile.apk'), 'previous-apk');
-  await writeFile(path.join(project, '.state/mobile/cockpit-mobile-debug.apk'), 'previous-debug');
-  await writeFile(path.join(project, '.state/mobile/cockpit-mobile.json'), '{"versionCode":99}');
+  await writeFile(path.join(dataHome, 'state/mobile-apk/cockpit-mobile.apk'), 'previous-apk');
+  await writeFile(path.join(dataHome, 'state/mobile-apk/cockpit-mobile-debug.apk'), 'previous-debug');
+  await writeFile(path.join(dataHome, 'state/mobile-apk/cockpit-mobile.json'), '{"versionCode":99}');
 
   for (const [file, script] of [
     [
@@ -88,7 +94,9 @@ async function fixture(t) {
     [cachedGradle, 'exit 0'],
     [
       path.join(project, 'mobile/android/gradlew'),
-      'printf "gradle:%s\\n" "$PWD" >> "$COCKPIT_FAKE_LOG"\nexit 19',
+      'printf "gradle:%s\\n" "$PWD" >> "$COCKPIT_FAKE_LOG"\n' +
+      'if [[ "$COCKPIT_FAKE_FAIL" != success ]]; then exit 19; fi\n' +
+      'mkdir -p app/build/outputs/apk/debug\nprintf debug-apk > app/build/outputs/apk/debug/app-debug.apk',
     ],
   ]) {
     await mkdir(path.dirname(file), { recursive: true });
@@ -104,7 +112,10 @@ async function fixture(t) {
     signing,
     logs,
     env: {
-      ...process.env,
+      HOME: directory,
+      COCKPIT_HOME: dataHome,
+      NODE_ENV: 'test',
+      npm_config_cache: process.env.npm_config_cache,
       PATH: commands + ':' + process.env.PATH,
       COCKPIT_ANDROID_HOME: sdk,
       COCKPIT_ANDROID_JDK: jdk,
@@ -117,9 +128,9 @@ async function fixture(t) {
 }
 
 test('MB-24: shell синтаксис и явные команды сборки/подписи', async () => {
-  await execute('bash', ['-n', path.join(root, 'bin/mobile')]);
+  await execute('bash', ['-n', path.join(root, 'tools/mobile')]);
 
-  const script = await readFile(path.join(root, 'bin/mobile'), 'utf8');
+  const script = await readFile(path.join(root, 'tools/mobile'), 'utf8');
   const release = await readFile(path.join(root, 'tools/mobile-phone/release.mts'), 'utf8');
 
   for (const command of ['deps', 'doctor', 'check', 'build', 'release']) {
@@ -135,7 +146,7 @@ test('MB-24: сбой Gradle сохраняет прежний APK/ключ и �
   const fx = await fixture(t);
 
   await assert.rejects(
-    execute('bash', ['bin/mobile', 'release'], {
+    execute('bash', ['tools/mobile', 'release'], {
       cwd: fx.project,
       env: {
         ...fx.env,
@@ -145,7 +156,7 @@ test('MB-24: сбой Gradle сохраняет прежний APK/ключ и �
     (error) => error.code !== 0,
   );
   assert.equal(
-    await readFile(path.join(fx.project, '.state/mobile/cockpit-mobile.apk'), 'utf8'),
+    await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile.apk'), 'utf8'),
     'previous-apk',
   );
   assert.equal(
@@ -164,7 +175,7 @@ test('MB-24: незелёный doctor останавливает сборку �
   const fx = await fixture(t);
 
   await assert.rejects(
-    execute('bash', ['bin/mobile', 'build'], {
+    execute('bash', ['tools/mobile', 'build'], {
       cwd: fx.project,
       env: {
         ...fx.env,
@@ -175,7 +186,7 @@ test('MB-24: незелёный doctor останавливает сборку �
   );
   assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
   assert.equal(
-    await readFile(path.join(fx.project, '.state/mobile/cockpit-mobile-debug.apk'), 'utf8'),
+    await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile-debug.apk'), 'utf8'),
     'previous-debug',
   );
 });
@@ -183,7 +194,7 @@ test('MB-24: незелёный doctor останавливает сборку �
 test('MB-24: doctor сверяет gradle-wrapper.jar с отпечатком из lock', async (t) => {
   const fx = await fixture(t);
 
-  const { stdout } = await execute('bash', ['bin/mobile', 'doctor'], {
+  const { stdout } = await execute('bash', ['tools/mobile', 'doctor'], {
     cwd: fx.project,
     env: fx.env,
   });
@@ -198,7 +209,7 @@ test('MB-24: подменённый gradle-wrapper.jar останавливае�
   await writeFile(jar, 'tampered-wrapper');
 
   await assert.rejects(
-    execute('bash', ['bin/mobile', 'build'], {
+    execute('bash', ['tools/mobile', 'build'], {
       cwd: fx.project,
       env: fx.env,
     }),
@@ -206,7 +217,21 @@ test('MB-24: подменённый gradle-wrapper.jar останавливае�
   );
   assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
   assert.equal(
-    await readFile(path.join(fx.project, '.state/mobile/cockpit-mobile-debug.apk'), 'utf8'),
+    await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile-debug.apk'), 'utf8'),
     'previous-debug',
   );
+});
+
+
+test('MB-DH успешная сборка публикует APK только в общей папке', async (t) => {
+  const fx = await fixture(t);
+
+  await execute('bash', ['tools/mobile', 'build'], {
+    cwd: fx.project,
+    env: { ...fx.env, COCKPIT_FAKE_FAIL: 'success' },
+  });
+  assert.equal(await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile-debug.apk'),
+    'utf8'), 'debug-apk');
+  await assert.rejects(readFile(path.join(fx.project, '.state/mobile/cockpit-mobile-debug.apk')),
+    (error) => error.code === 'ENOENT');
 });

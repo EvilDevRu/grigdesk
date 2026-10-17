@@ -9,6 +9,10 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { lexical } from '../../../../shared/lib/text.ts';
+import { errorText } from '../../../../shared/lib/errors.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import {
   decodeActivationMarker,
   encodeActivationMarker,
@@ -163,13 +167,9 @@ export interface InboxActivationWindow {
   endMarker: unknown;
 }
 
-// Чужая ошибка своего типа не обещает: текст и код читаются мягко, а решение
-// принимается по ним, а не по instanceof.
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
 
 const clone = <Value>(value: Value): Value => structuredClone(value);
-const lexical = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 // Последняя epoch есть всегда: пустой список отвергает валидатор, а до первой
 // активации состояния нет вовсе. Отдельный helper избавляет от `at(-1)!` в каждом чтении.
@@ -203,14 +203,8 @@ const stateError: (
   throw new InboxStateStoreError(code, message, statusCode, cause);
 };
 
-const isPlainObject = (value: unknown): value is Payload => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-};
-
 function exactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) stateError('invalid_state', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) stateError('invalid_state', `${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, i) => key !== expected[i])) {

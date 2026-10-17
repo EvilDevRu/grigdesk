@@ -366,3 +366,144 @@ test('картинка уходит в текущий ход вместе с т�
   assert.equal(await chat.sendInTurn(CHAT, 'Сравни', [image]), true);
   assert.notEqual(sent[1].messageId, sent[0].messageId, 'новая попытка — новый id');
 });
+
+/** Открытые черновики текущего запуска: после конца хода их быть не должно. */
+function openDrafts(chat) {
+  return chat.inTurnFor(CHAT).entries
+    .filter((entry) => entry.complete === false && !entry.abandoned);
+}
+
+test('конец хода закрывает черновики, даже если страница не ответила', async () => {
+  const chat = await chatStoreFixture({ sessions: [base()] });
+  const sse = sseOf(chat);
+
+  apiHarness.get = async () => {
+    throw new Error('сеть легла');
+  };
+  sse('chat-turn-start', {
+    chatKey: CHAT,
+    runId: RUN,
+    turnId: TURN,
+  });
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: block(1, 'answer-draft', false),
+  });
+  assert.equal(openDrafts(chat).length, 1, 'черновик идущего хода открыт');
+
+  sse('chat-done', {
+    chatKey: CHAT,
+    runId: RUN,
+    turnId: TURN,
+  });
+
+  assert.deepEqual(openDrafts(chat), [], 'после конца хода открытых черновиков нет');
+});
+
+test('chat-done своего runId закрывает черновики, даже если окно не знает запуск', async () => {
+  const chat = await chatStoreFixture({ sessions: [base()] });
+  const sse = sseOf(chat);
+
+  apiHarness.get = async () => {
+    throw new Error('сеть легла');
+  };
+  chat._ensureInTurn(CHAT, RUN, TURN);
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: block(1, 'answer-draft', false),
+  });
+  sse('chat-done', {
+    chatKey: CHAT,
+    runId: RUN,
+    turnId: TURN,
+  });
+
+  assert.deepEqual(openDrafts(chat), []);
+});
+
+test('сторож: chat-done без runId не бросает черновик идущего хода', async () => {
+  const chat = await chatStoreFixture({ sessions: [base()] });
+  const sse = sseOf(chat);
+
+  apiHarness.get = async () => {
+    throw new Error('сеть легла');
+  };
+  sse('chat-turn-start', {
+    chatKey: CHAT,
+    runId: RUN,
+    turnId: TURN,
+  });
+  sse('chat-assistant-message', {
+    chatKey: CHAT,
+    runId: RUN,
+    block: block(1, 'answer-draft', false),
+  });
+  sse('chat-done', {
+    chatKey: CHAT,
+  });
+
+  assert.equal(openDrafts(chat).length, 1, 'ход идёт — черновик не брошен');
+});
+
+test('пропавший запуск без ответа страницы не оставляет открытых черновиков', async () => {
+  const chat = await chatStoreFixture({ sessions: [base()] });
+
+  chat._ensureInTurn(CHAT, RUN, TURN);
+  chat.inTurnFor(CHAT).entries.push(block(1, 'answer-draft', false));
+  apiHarness.get = async (url) => {
+    if (url === '/api/chat/active') {
+      return {
+        protocol: 1,
+        active: [],
+        queued: [],
+      };
+    }
+
+    throw new Error(url);
+  };
+  await chat._loadActive();
+
+  assert.deepEqual(openDrafts(chat), []);
+  assert.equal(chat.inTurnFor(CHAT).active, false);
+});
+
+test('пропавший запуск сверяется страницей: законченный блок не помечается оборванным',
+  async () => {
+    const chat = await chatStoreFixture({ sessions: [base()] });
+    const pages = [];
+
+    chat._ensureInTurn(CHAT, RUN, TURN);
+    chat.inTurnFor(CHAT).entries.push(block(1, 'answer-done', false));
+    apiHarness.get = async (url) => {
+      if (url === '/api/chat/active') {
+        return {
+          protocol: 1,
+          active: [],
+          queued: [],
+        };
+      }
+      if (url.startsWith('/api/chat/in-turn?')) {
+        pages.push(url);
+
+        return {
+          entries: [block(1, 'answer-done', true, 2)],
+          nextAfterSequence: null,
+          throughSequence: 1,
+          runRevision: 1,
+          truncated: false,
+          availability: null,
+        };
+      }
+
+      throw new Error(url);
+    };
+    await chat._loadActive();
+
+    const [entry] = chat.inTurnFor(CHAT).entries;
+
+    assert.equal(pages.length, 1, 'пропавший запуск обязан свериться со страницей');
+    assert.equal(entry.complete, true);
+    assert.equal(entry.abandoned, undefined);
+  });

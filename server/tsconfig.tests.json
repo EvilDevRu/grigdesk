@@ -12,6 +12,9 @@
   "include": [
     "src/lib/fastifyDecorations.ts",
     "../tests/server/**/*",
+    "../tests/shared/**/*.mts",
+    "../tests/desktop/e2e/**/*.mjs",
+    "../tests/cli/**/*.mts",
     "../tests/engine/**/*.js",
     "../tests/engine/**/*.mjs",
     "../tests/engine/**/*.ts",

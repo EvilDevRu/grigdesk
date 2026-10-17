@@ -7,7 +7,7 @@ import test from 'node:test';
 import { makeDraft } from '../fixtures/routes-editor.mjs';
 import { DraftStore } from '../../server/src/modules/routes/draftStore.ts';
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
-import { ROUTES_EDITOR_LIMITS } from '../../shared/routesEditorContracts.ts';
+import { ROUTES_EDITOR_LIMITS } from '../../shared/pipeline/routesEditorContracts.ts';
 
 const DRAFT_ID = '44444444-4444-4444-8444-444444444444';
 

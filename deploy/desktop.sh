@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Установка работает с уже собранным файлом, без запуска сборки или сервера.
+# Status и remove остаются доступны без Node и без чтения .env.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/deploy/lib/desktop-app.sh"
+
+desktop_temporary=''
+desktop_data_home=''
+desktop_explicit_home=0
+
+# Уборка знает только уникальный temporary текущего шага установки.
+# После успешного rename имя забывается, остальные файлы не удаляются.
+cleanup_desktop_copy() {
+  if [ -n "$desktop_temporary" ]; then
+    rm -f -- "$desktop_temporary"
+  fi
+}
+
+# runtime.json говорит окну, где сервер этой копии и каким Node его запускать. Корень —
+# без символических ссылок, Node — тот, что прошёл проверку версии. JSON собирает Node из
+# argv, файл заменяется атомарно с правами 0600; сбой оставляет прежнее описание.
+write_runtime_descriptor() {
+  local runtime
+  local root
+  local node_path
+
+  runtime="$(cockpit_desktop_runtime_path)"
+  root="$(cd "$ROOT" && pwd -P)"
+  node_path="$(node -p 'process.execPath')"
+
+  mkdir -p -- "$(dirname "$runtime")"
+  desktop_temporary="$(mktemp "$(dirname "$runtime")/runtime.json.tmp.XXXXXX")"
+  node -e '
+    const [root, node, home, explicit] = process.argv.slice(1);
+    const descriptor = explicit === "1" ? { version: 2, root, node, home } : { version: 1, root, node };
+    process.stdout.write(JSON.stringify(descriptor) + "\n");
+  ' -- "$root" "$node_path" "$desktop_data_home" "$desktop_explicit_home" > "$desktop_temporary"
+  chmod 600 "$desktop_temporary"
+  mv -fT -- "$desktop_temporary" "$runtime"
+  desktop_temporary=''
+}
+
+# Node ищется только в явном каталоге и штатном PATH, без менеджеров версий.
+# Источник берётся по manifest, установка не читает .env и не запускает сборку.
+install_desktop() {
+  if [ -n "${COCKPIT_NODE_DIR:-}" ] && [ -x "$COCKPIT_NODE_DIR/node" ]; then
+    export PATH="$COCKPIT_NODE_DIR:$PATH"
+  fi
+
+  source "$ROOT/deploy/lib/runtime-env.sh"
+  cockpit_add_cli_paths "$ROOT"
+  cockpit_require_node
+  desktop_data_home=$(cockpit_data_home) || return 1
+  if [[ -n "${COCKPIT_HOME:-}" && "$desktop_data_home" != "${HOME%/}/.cockpit" ]]; then
+    desktop_explicit_home=1
+  fi
+
+  # Папка может ещё отсутствовать; проверяем реальные границы по ближайшему предку.
+  # Установка окна не создаёт папку и не переносит данные сервера.
+  node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    function canonical(file) {
+      try { return fs.realpathSync(file); }
+      catch (error) {
+        if (error.code !== "ENOENT" || path.dirname(file) === file) throw error;
+        return path.join(canonical(path.dirname(file)), path.basename(file));
+      }
+    }
+    const [selected, home, code] = process.argv.slice(1).map(canonical);
+    const contains = (a, b) => a === b || b.startsWith(a + path.sep);
+    if (selected === home || contains(code, selected) || contains(selected, code)) {
+      console.error("Папка данных не должна совпадать с HOME, лежать внутри кода или содержать его.");
+      process.exit(1);
+    }
+  ' -- "$desktop_data_home" "$HOME" "$ROOT" || return 1
+
+  local version
+  local source_file
+  local destination
+
+  version="$(node -p 'require(process.argv[1]).version' "$ROOT/desktop/package.json")"
+  source_file="$ROOT/desktop/release/cockpit-desktop-$version-x86_64.AppImage"
+  destination="$(cockpit_desktop_app_path)"
+
+  if [ ! -f "$source_file" ]; then
+    echo 'Готового окна нет. Собери: npm --prefix desktop run dist' >&2
+    return 1
+  fi
+
+  # Версия 1 совместима с установленным окном и пишется перед заменой AppImage.
+  # Версия 2 становится доступна только после установки окна, умеющего читать home.
+  trap cleanup_desktop_copy EXIT
+  if [[ "$desktop_explicit_home" == 0 ]]; then
+    write_runtime_descriptor
+  fi
+
+  mkdir -p -- "$(dirname "$destination")"
+  desktop_temporary="$(mktemp "$destination.tmp.XXXXXX")"
+  cp -- "$source_file" "$desktop_temporary"
+  chmod 755 "$desktop_temporary"
+  mv -fT -- "$desktop_temporary" "$destination"
+  desktop_temporary=''
+  if [[ "$desktop_explicit_home" == 1 ]]; then
+    write_runtime_descriptor
+  fi
+
+  # Метка: установлена сборка, которая знает папку данных. Без неё команда переноса не уберёт
+  # ссылки совместимости — старая сборка окна пишет журнал и интерфейс через них.
+  : > "$(dirname "$destination")/data-home"
+}
+
+# Статус отражает пригодный к запуску файл и общий путь без требования Node.
+# Три TAB-строки остаются машиночитаемыми и не запускают окно; runtime — наличие файла
+# описания: разбор требовал бы Node, а status работает и без него.
+desktop_status() {
+  local destination
+  local runtime
+  local installed=0
+  local described=0
+
+  destination="$(cockpit_desktop_app_path)"
+  runtime="$(cockpit_desktop_runtime_path)"
+
+  if [ -f "$destination" ] && [ -x "$destination" ]; then
+    installed=1
+  fi
+
+  if [ -f "$runtime" ]; then
+    described=1
+  fi
+
+  printf 'installed\t%s\npath\t%s\nruntime\t%s\n' "$installed" "$destination" "$described"
+}
+
+case "${1:-}" in
+  install)
+    install_desktop
+    ;;
+  remove)
+    desktop_app="$(cockpit_desktop_app_path)"
+    rm -f -- "$desktop_app" "$(cockpit_desktop_runtime_path)" "$(dirname "$desktop_app")/data-home"
+    ;;
+  status)
+    desktop_status
+    ;;
+  *)
+    echo 'использование: cockpit desktop install|remove|status' >&2
+    exit 2
+    ;;
+esac

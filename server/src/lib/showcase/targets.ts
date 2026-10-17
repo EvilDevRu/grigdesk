@@ -11,25 +11,27 @@
 // контракта и состояния стенда. По ним задание перед каждым шагом отличает «та же
 // цель» от «слот переиспользован под другую задачу», и это единственный способ
 // не записать чужой стенд под именем прежней задачи.
-import { createHash } from 'node:crypto';
+
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { contractDecoders } from '../../../../shared/contractDecoders.ts';
+import { jsonHash32 } from '../../../../shared/node/hash.ts';
+import { contractDecoders } from '../../../../shared/lib/contractDecoders.ts';
+
 import { parsePipeline } from '../pipelineParse.ts';
 import { PROFILE_RE } from '../profiles.ts';
 import { readPipelineHold, readSandboxRegistry } from '../sandboxes/registry.ts';
 import { readLoginCredentials } from './loginCredentials.ts';
 import type { LoginCredentials } from './loginCredentials.ts';
 import type { PipelineHold, SandboxRegistryEntry } from '../sandboxes/registry.ts';
-import type { SandboxEntry, SandboxOverview } from '../../../../shared/sandboxContracts.ts';
+import type { SandboxEntry, SandboxOverview } from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 import type {
   ShowcaseCapability,
   ShowcaseScope,
   ShowcaseTarget,
   ShowcaseTargetOption,
   ShowcaseTargetRef,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { ShowcaseError } from './errors.ts';
 
 export class ShowcaseProfileError extends Error {
@@ -161,10 +163,6 @@ const DEFAULT_SCREEN: ShowcaseScreenContract['screens'][number] = {
   readySelector: 'body',
   elements: [],
 };
-
-function hashOf(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
-}
 
 function unquote(value: string): string {
   const trimmed = value.trim();
@@ -601,7 +599,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       sandbox,
       // Отпечаток цели включает состояние стенда: смена портов, репозиториев или
       // владельца делает прежний отпечаток недействительным, и задание остановится.
-      targetFingerprint: hashOf({
+      targetFingerprint: jsonHash32({
         ref,
         profile,
         recordUrl,
@@ -616,7 +614,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
           pipeline: sandbox.pipeline,
         },
       }),
-      policyRevision: hashOf({ target: target.raw, screens: screens.raw, login: login?.raw ?? null }),
+      policyRevision: jsonHash32({ target: target.raw, screens: screens.raw, login: login?.raw ?? null }),
       dataRevision,
       // Ревизия сборки на стенде подтверждается, только если профиль её публикует.
       buildRevision: null,
@@ -868,7 +866,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
         screens,
         login: login?.value ?? null,
         sandbox,
-        targetFingerprint: hashOf({
+        targetFingerprint: jsonHash32({
           ref,
           profile,
           profileBinding: choice.profileBinding,
@@ -884,7 +882,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
             pipeline: sandbox.pipeline,
           },
         }),
-        policyRevision: hashOf({
+        policyRevision: jsonHash32({
           target: target?.raw ?? null,
           screens: declared?.raw ?? null,
           login: login?.raw ?? null,
@@ -1014,7 +1012,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
  * после исправленного селектора было бы ложной тревогой.
  */
 export function mapRevisionOf(screens: ShowcaseScreenContract['screens']): string {
-  return hashOf(screens.map((screen) => [
+  return jsonHash32(screens.map((screen) => [
     screen.id,
     screen.title,
     screen.path,

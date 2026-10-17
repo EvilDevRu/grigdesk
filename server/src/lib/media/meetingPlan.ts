@@ -19,15 +19,11 @@
 // Транскрипт недоверенный: он собран из чужой речи и попадает в prompt, поэтому
 // запуск идёт только через capability-gated runUntrusted без tools и workspace —
 // тем же резолвером, что и у Inbox.
+import { trimmedText } from '../../../../shared/lib/text.ts';
+
 import { resolveInboxTriageTarget } from '../inbox/triage.ts';
 import type { MeetingSegment } from './meetingFrames.ts';
-import {
-  boundedText,
-  confidenceValue,
-  exactKeys,
-  jsonCandidates,
-  modelText,
-} from '../modelJson.ts';
+import { boundedText, confidenceValue, exactKeys, jsonCandidates } from '../modelJson.ts';
 
 type LogPort = {
   warn?: (details: unknown, message: string) => void;
@@ -96,7 +92,7 @@ export function meetingTranscript(
   let truncated = false;
   const source = Array.isArray(segments) ? segments : [];
   for (const segment of source) {
-    const value = modelText(segment?.text);
+    const value = trimmedText(segment?.text);
     if (!value) continue;
     const row = `#${rows.length + 1} [${timecode(segment?.start)}] ${value}`;
     if (used + row.length + 1 > limit) { truncated = true; break; }
@@ -111,7 +107,7 @@ export function buildMeetingPlanPrompt(
   { hint = '' }: { hint?: string } = {},
 ) {
   const ctx = meetingTranscript(segments);
-  const extra = modelText(hint);
+  const extra = trimmedText(hint);
   return {
     count: ctx.count,
     truncated: ctx.truncated,

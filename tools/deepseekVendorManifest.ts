@@ -10,6 +10,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { sha256 } from '../shared/node/hash.ts';
+
 const exec = promisify(execFile);
 
 export const DEEPSEEK_UPSTREAM_REPOSITORY = 'https://github.com/deepseek-ai/deepseek-harness';
@@ -74,14 +76,6 @@ export interface PreparedDeepSeekSync {
     changed: string[];
     deleted: string[];
   };
-}
-
-/**
- * Один алгоритм identity используется файлами, patch и dependency lock.
- * Хеш не зависит от времени подготовки или случайного staging directory.
- */
-export function vendorHash(value: string | Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 /**
@@ -272,7 +266,7 @@ export async function verifyDeepSeekVendorMetadata(directory: string): Promise<D
   }
 
   for (const patch of manifest.patches) {
-    if (vendorHash(await fs.readFile(path.join(directory, 'patches', patch.path))) !== patch.sha256) {
+    if (sha256(await fs.readFile(path.join(directory, 'patches', patch.path))) !== patch.sha256) {
       throw new Error(`Hash патча изменён вручную: ${patch.path}`);
     }
   }
@@ -280,7 +274,7 @@ export async function verifyDeepSeekVendorMetadata(directory: string): Promise<D
   for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     const file = manifest.files.find((file) => file.path === name)!;
 
-    if (vendorHash(await fs.readFile(path.join(directory, name))) !== file.sha256) {
+    if (sha256(await fs.readFile(path.join(directory, name))) !== file.sha256) {
       throw new Error(`Лицензия или notice изменены: ${name}`);
     }
   }
@@ -304,7 +298,7 @@ async function verifyUpstreamFiles(upstream: string, manifest: DeepSeekVendorMan
     const target = path.join(upstream, file.path);
     const mode = (await fs.stat(target)).mode;
 
-    if (vendorHash(await fs.readFile(target)) !== file.sha256
+    if (sha256(await fs.readFile(target)) !== file.sha256
       || Boolean(mode & 0o111) !== (file.mode === '100755')) {
       throw new Error(`Hash или режим изменён вручную: ${file.path}`);
     }
@@ -447,7 +441,7 @@ async function extractSelectedUpstream(options: GitSelection, destination: strin
       throw new Error(`Git archive изменил байты upstream blob: ${file.path}`);
     }
 
-    file.sha256 = vendorHash(bytes);
+    file.sha256 = sha256(bytes);
   }
 
   return files;
@@ -669,7 +663,7 @@ export async function prepareDeepSeekSync(options: DeepSeekSyncOptions): Promise
       files,
       patches: await Promise.all(patchFiles.map(async (name) => ({
         path: name,
-        sha256: vendorHash(await fs.readFile(path.join(patches, name))),
+        sha256: sha256(await fs.readFile(path.join(patches, name))),
       }))),
       dependencyLock: { path: dependency.path, sha256: dependency.sha256 },
       requiredGates: previous?.requiredGates ?? ['snapshot-integrity', 'patch-apply'],
@@ -695,7 +689,7 @@ export async function prepareDeepSeekSync(options: DeepSeekSyncOptions): Promise
     return {
       stagingDir,
       vendorDir,
-      previousManifestHash: previous ? vendorHash(JSON.stringify(previous)) : null,
+      previousManifestHash: previous ? sha256(JSON.stringify(previous)) : null,
       manifest,
       diff: {
         added: [...newFiles.keys()].filter((name) => !oldFiles.has(name)),
@@ -780,7 +774,7 @@ export async function publishDeepSeekSync(
     locked = true;
 
     const previous = await previousSnapshot(vendorDir);
-    const hash = previous ? vendorHash(JSON.stringify(previous)) : null;
+    const hash = previous ? sha256(JSON.stringify(previous)) : null;
 
     if (hash !== candidate.previousManifestHash) {
       throw new Error('Снимок изменился после подготовки candidate');
@@ -802,7 +796,7 @@ export async function publishDeepSeekSync(
 
     const rechecked = await previousSnapshot(vendorDir);
 
-    if ((rechecked ? vendorHash(JSON.stringify(rechecked)) : null) !== candidate.previousManifestHash) {
+    if ((rechecked ? sha256(JSON.stringify(rechecked)) : null) !== candidate.previousManifestHash) {
       throw new Error('Снимок изменился во время gate');
     }
 

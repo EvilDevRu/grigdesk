@@ -1,6 +1,6 @@
 import { showcaseApi, showcaseErrorCode, showcaseErrorMessage } from '../../shared/showcaseApi';
 import type { ShowcasePronunciationOverrideDraft } from '../../shared/showcaseApi';
-import type { ShowcaseDirection, ShowcasePace } from '../../../../shared/showcaseContracts';
+import type { ShowcaseDirection, ShowcasePace } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { ShowcaseStore } from './showcaseRuntime';
 
 export interface ShowcaseVoiceChoice {

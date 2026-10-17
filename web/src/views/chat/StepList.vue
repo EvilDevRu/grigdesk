@@ -145,7 +145,7 @@
 
 <script setup>
 import { ref, reactive, computed, useId, watch } from 'vue';
-import { STEP_IMAGE_TEXT } from '../../../../shared/chatSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
 import { api } from '../../shared/apiClient.ts';
 import { UiDisclosureButton } from '../../ui';

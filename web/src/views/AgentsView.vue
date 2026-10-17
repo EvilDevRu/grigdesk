@@ -156,7 +156,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 
-import type { AgentCard } from '../../../shared/agentsContracts.ts';
+import type { AgentCard } from '../../../shared/pipeline/agentsContracts.ts';
 import { agentsApi } from '../shared/agentsApi.ts';
 import { failureText } from '../shared/apiClient.ts';
 import {

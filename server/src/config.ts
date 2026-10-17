@@ -1,17 +1,20 @@
 // Единая конфигурация сервера кокпита.
 // Всё, что зависит от машины/окружения, — только здесь (задел «сменный мозг»).
 import os from 'node:os';
+import { dataHome as resolveDataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
+const dataHome = resolveDataHome({ env: process.env, home });
+const dataStateDir = dataPath(dataHome, 'state');
 const rootDir = path.join(__dirname, '..', '..');
 const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
-const chatsDir = process.env.COCKPIT_CHATS_DIR || path.join(rootDir, 'chats');
-const telegramDir = process.env.COCKPIT_TELEGRAM_DIR || path.join(rootDir, 'telegram');
-const githubDir = process.env.COCKPIT_GITHUB_DIR || path.join(rootDir, 'github');
+const chatsDir = process.env.COCKPIT_CHATS_DIR || dataPath(dataHome, 'chats');
+const telegramDir = process.env.COCKPIT_TELEGRAM_DIR || dataPath(dataHome, 'telegram');
+const githubDir = process.env.COCKPIT_GITHUB_DIR || dataPath(dataHome, 'github');
 const routesDir = process.env.COCKPIT_ROUTES_DIR || path.join(home, '.factory', 'routes');
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
 const deepseekRuntimeHome = process.env.COCKPIT_DEEPSEEK_RUNTIME_HOME
@@ -49,17 +52,22 @@ export const config = {
   host: '127.0.0.1',
   // Отдельный TLS-вход мобильного контракта также принимает только loopback.
   // Ключи и привязки отделены от истории чатов и веб-сессий.
-  mobileDir: process.env.COCKPIT_MOBILE_DIR || path.join(home, '.config', 'cockpit', 'mobile'),
+  mobileDir: process.env.COCKPIT_MOBILE_DIR || dataPath(dataHome, 'mobile'),
   mobilePort: Number(process.env.COCKPIT_MOBILE_PORT) || 8144,
-  mobileApkDir: process.env.COCKPIT_MOBILE_APK_DIR || path.join(rootDir, '.state', 'mobile'),
+  mobileApkDir: process.env.COCKPIT_MOBILE_APK_DIR || dataPath(dataHome, 'mobileApk'),
   // Бюджет остановки целиком: слив ходов чата, закрытие сессий исполнителей и сокетов.
-  // Должен быть меньше ожидания bin/restart и TimeoutStopSec юнита — иначе SIGKILL
+  // Должен быть меньше ожидания deploy/restart.sh и TimeoutStopSec юнита — иначе SIGKILL
   // придёт раньше, чем сервер успеет сохранить прерванные ходы.
   shutdownTimeoutMs: Number(process.env.COCKPIT_SHUTDOWN_TIMEOUT_MS) || 30 * 1000,
 
   // Пути «мозга».
-  // Корень репозитория кокпита — от него считаются bin/restart, plugins/ и базы в корне.
+  // Корень репозитория кокпита — от него считаются скрипты запуска и ресурсы кода.
   rootDir,
+  dataHome,
+  dataStateDir,
+  // Библиотека 3D отделена от чатов и проектных деревьев; плагин открывает её
+  // только после включения, тестовые серверы задают собственный каталог.
+  studio3dDir: process.env.COCKPIT_3D_DIR || dataPath(dataHome, 'studio3d'),
   stateDir: factoryStateDir,
   // Доверенный control-каталог протокола маршрутов (движок пишет туда то, что провайдеру
   // менять нельзя). Задаём явно, а не полагаемся на дефолт по $HOME: прогон уезжает
@@ -108,10 +116,10 @@ export const config = {
   // GLM (Z.ai) работает на той же встроенной сборке DSH, но со своими homes и ключами.
   glmRuntimeHome,
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
-  modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
+  modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(dataStateDir, 'models.json'),
   // Ряды прогноза лимитов (modules/usage-forecast): снимки полос и журнал сбросов.
   usageForecastPath: process.env.COCKPIT_USAGE_FORECAST_PATH
-    || path.join(__dirname, '..', '.state', 'usage-forecast.json'),
+    || path.join(dataStateDir, 'usage-forecast.json'),
   // Автообнаружение новых моделей Anthropic ХОСТОВЫМ OAuth-токеном CLI (~/.claude/.credentials.json).
   // Явный опт-ин пользователя: токен предназначен для claude CLI, использовать его для прямых
   // API-запросов без разрешения нельзя. ANTHROPIC_API_KEY в окружении работает и без флага.
@@ -119,9 +127,9 @@ export const config = {
 
   // Свой API-ключ кокпита для claude (опционально). Хранится в .state (gitignore, 0600).
   // Пусто → чат использует авторизацию хостового CLI (`claude login` / ANTHROPIC_API_KEY).
-  claudeAuthPath: process.env.COCKPIT_CLAUDE_AUTH_PATH || path.join(__dirname, '..', '.state', 'claude-auth.json'),
+  claudeAuthPath: process.env.COCKPIT_CLAUDE_AUTH_PATH || path.join(dataStateDir, 'claude-auth.json'),
 
-  // История чатов с агентами — папка в корне проекта (внутри свой .gitignore):
+  // История чатов с агентами — каталог chats в папке данных (внутри свой .gitignore):
   // каждый чат — отдельный файл chats/YYYY-MM/<id>.json, мета — meta.json.
   // Общая для всех окон/устройств, битый файл одного чата не трогает остальные.
   chatsDir,
@@ -130,32 +138,35 @@ export const config = {
   chatBindingsDir: process.env.COCKPIT_CHAT_BINDINGS_DIR
     || path.join(chatsDir, '.bindings'),
   // Старое хранилище одним файлом — только для одноразовой миграции.
-  chatStoreLegacyPath: process.env.COCKPIT_CHAT_STORE || path.join(__dirname, '..', '.state', 'chats.json'),
+  chatStoreLegacyPath: process.env.COCKPIT_CHAT_STORE || path.join(dataStateDir, 'chats.json'),
 
-  // Архив входящих из Telegram — папка в корне проекта (внутри свой .gitignore,
+  // Архив входящих из Telegram — каталог telegram в папке данных (внутри свой .gitignore,
   // как chats/): NDJSON по месяцам плюс индекс. В дереве проекта, чтобы дамп
   // делался одной командой, а не собирался по системе.
   telegramDir,
   // Токен бота — в strict account-aware .state файле (0600), а НЕ в prefs:
   // prefs целиком уезжают в браузер ответом /api/settings/prefs.
   telegramAccountCredsPath: process.env.COCKPIT_TELEGRAM_ACCOUNT_CREDS_PATH
-    || path.join(__dirname, '..', '.state', 'telegram-account-creds.json'),
+    || path.join(dataStateDir, 'telegram-account-creds.json'),
 
   // GitHub Issues — второй channel общего Inbox. Нативный archive/rules/account binding
   // лежат отдельно от Telegram, а PAT и webhook secret — только в private .state.
   githubDir,
   githubCredsPath: process.env.COCKPIT_GITHUB_CREDS_PATH
-    || path.join(__dirname, '..', '.state', 'github-creds.json'),
+    || path.join(dataStateDir, 'github-creds.json'),
   // База callback-а принадлежит оператору. В request body адрес не принимается: иначе
   // connect превратился бы в SSRF/создание webhook на произвольный endpoint.
   githubWebhookBaseUrl: process.env.COCKPIT_GITHUB_WEBHOOK_BASE_URL || '',
 
-  // База агентов (стадий конвейера) — папка в корне проекта (внутри свой .gitignore,
+  // База агентов (стадий конвейера) — каталог agents в папке данных (внутри свой .gitignore,
   // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
-  agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
+  agentsDir: process.env.COCKPIT_AGENTS_DIR || dataPath(dataHome, 'agents'),
   // Версионируемый стандартный набор агентов: отсюда кнопка «Установить набор»
   // доустанавливает отсутствующих (create-only, существующие файлы не трогает).
   agentsSeedDir: process.env.COCKPIT_AGENTS_SEED_DIR || path.join(__dirname, '..', 'seed', 'agents'),
+  // Рабочая папка агентов: снимки, дампы, скрипты и отчёты проверок. Вне дерева кода;
+  // ход чата получает её на запись, картинки и документы из неё показываются.
+  artifactsDir: process.env.COCKPIT_ARTIFACTS_DIR || dataPath(dataHome, 'artifacts'),
 
   // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов — runtime-артефакт движка,
   // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Каталог
@@ -166,43 +177,45 @@ export const config = {
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
+  uiReleasesDir: process.env.COCKPIT_UI_RELEASES_DIR
+    || dataPath(dataHome, 'uiReleases'),
   // Файловый журнал окна: дневные NDJSON, доступны только владельцу сервера.
-  webLogDir: process.env.COCKPIT_WEB_LOG_DIR || path.join(__dirname, '..', '.state', 'web-log'),
+  webLogDir: process.env.COCKPIT_WEB_LOG_DIR || path.join(dataStateDir, 'web-log'),
 
 
   // Битрикс24. Куки и креды — В СВОЁМ каталоге (изоляция: свой cookie-файл = нет
   // session-thrash). Портал/креды задаются из «Настроек» и живут в .state (gitignore).
   // Никаких проектных значений по умолчанию в коде — пустой кокпит не знает ничего.
   b24BaseUrl: process.env.COCKPIT_B24_BASE_URL || '',
-  b24CookiePath: process.env.B24_COOKIE_PATH || path.join(__dirname, '..', '.state', 'b24-cookies.json'),
-  b24CredsPath: process.env.B24_CREDS_PATH || path.join(__dirname, '..', '.state', 'b24-creds.json'),
+  b24CookiePath: process.env.B24_COOKIE_PATH || path.join(dataStateDir, 'b24-cookies.json'),
+  b24CredsPath: process.env.B24_CREDS_PATH || path.join(dataStateDir, 'b24-creds.json'),
 
   // Постановки задач для immutable route-прогонов. Хранилище кокпита, а НЕ
   // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент
   // может переписать. Движок делает себе доверенную копию сам.
-  ticketsDir: process.env.COCKPIT_TICKETS_DIR || path.join(__dirname, '..', '.state', 'tickets'),
+  ticketsDir: process.env.COCKPIT_TICKETS_DIR || path.join(dataStateDir, 'tickets'),
 
   // Ручные песочницы: журнал подъёмов кокпита и служебный диапазон номеров стендов,
   // которые поднимают без задачи B24. Диапазон отделён от номеров задач намеренно:
   // стенд «поиграться» не должен занять номер, который завтра придёт из портала.
   sandboxJournalDir: process.env.COCKPIT_SANDBOX_JOURNAL_DIR
-    || path.join(__dirname, '..', '.state', 'sandboxes'),
+    || path.join(dataStateDir, 'sandboxes'),
   sandboxManualRange,
 
   // Ролики раздела «Презентации»: записи, сцены и артефакты сборки. Каталог тяжёлый
   // и растёт от каждого прогона, поэтому вынесен переменной — на этой машине его
   // держат на диске побольше.
-  showcaseDir: process.env.COCKPIT_SHOWCASE_DIR || path.join(__dirname, '..', '.state', 'showcase'),
+  showcaseDir: process.env.COCKPIT_SHOWCASE_DIR || path.join(dataStateDir, 'showcase'),
   // Снимок входа тестовой учётки лежит ОТДЕЛЬНО от артефактов ролика и с правами
   // 0700: это действующие права на стенде, и попасть в скачиваемый файл, экспорт
   // или журнал он не должен.
   showcaseAuthDir: process.env.COCKPIT_SHOWCASE_AUTH_DIR
-    || path.join(__dirname, '..', '.state', 'showcase-auth'),
+    || path.join(dataStateDir, 'showcase-auth'),
   // Локальный синтез речи раздела: своё python-окружение и скачанные голоса.
   // Отдельно от media-venv распознавания намеренно — обновление голосового движка
   // не должно менять состав, на котором проверена диктовка.
   showcaseVoiceDir: process.env.COCKPIT_SHOWCASE_VOICE_DIR
-    || path.join(__dirname, '..', '.state', 'showcase-voice'),
+    || path.join(dataStateDir, 'showcase-voice'),
   // Браузер записи объявляется явно. Найденный в чужом кэше бинарник установкой
   // зависимости раздела не считается: версия Playwright требует свою ревизию, и
   // случайная чужая даёт то падающую запись, то пустой клип.
@@ -211,7 +224,7 @@ export const config = {
   // текущий playwright-core и манифест с версией. Явный COCKPIT_SHOWCASE_BROWSER
   // сильнее него.
   showcaseBrowserDir: process.env.COCKPIT_SHOWCASE_BROWSER_DIR
-    || path.join(__dirname, '..', '.state', 'showcase-browser'),
+    || path.join(dataStateDir, 'showcase-browser'),
   // Облачный голос раздела: ключ сервисного аккаунта Yandex SpeechKit. Пусто —
   // говорят только локальные движки. Ключ остаётся серверной настройкой: интерфейс
   // получает статус «задан/не задан», а не значение.
@@ -223,41 +236,41 @@ export const config = {
   showcaseEdgeTts: process.env.COCKPIT_SHOWCASE_EDGE_TTS !== '0',
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
-  prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),
+  prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(dataStateDir, 'prefs.json'),
   // SSH-профили, известные host keys и журнал команд агента содержат адреса боевых
   // машин и вывод команд, поэтому живут в отдельном приватном namespace, не в prefs.
   sshConnectionsPath: process.env.COCKPIT_SSH_CONNECTIONS_PATH
-    || path.join(__dirname, '..', '.state', 'ssh', 'connections.json'),
+    || path.join(dataStateDir, 'ssh', 'connections.json'),
   sshKnownHostsPath: process.env.COCKPIT_SSH_KNOWN_HOSTS_PATH
-    || path.join(__dirname, '..', '.state', 'ssh', 'known-hosts.json'),
+    || path.join(dataStateDir, 'ssh', 'known-hosts.json'),
   sshAuditDir: process.env.COCKPIT_SSH_AUDIT_DIR
-    || path.join(__dirname, '..', '.state', 'ssh', 'audit'),
+    || path.join(dataStateDir, 'ssh', 'audit'),
   // DB-профили и журнал содержат адреса боевых систем и тексты запросов, поэтому
   // живут в своём приватном namespace, а не в общих prefs.
   dbProfilesPath: process.env.COCKPIT_DB_PROFILES_PATH
-    || path.join(__dirname, '..', '.state', 'db', 'profiles.json'),
+    || path.join(dataStateDir, 'db', 'profiles.json'),
   dbAuditDir: process.env.COCKPIT_DB_AUDIT_DIR
-    || path.join(__dirname, '..', '.state', 'db', 'audit'),
+    || path.join(dataStateDir, 'db', 'audit'),
   // Личная подборка B24-задач. Отдельно от prefs: это пользовательские данные,
   // а не настройки интерфейса.
   taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH
-    || path.join(__dirname, '..', '.state', 'task-favorites.json'),
+    || path.join(dataStateDir, 'task-favorites.json'),
   // Разбор арбитра последней остановки задачи. Хранится у кокпита, а не в журнале
   // попытки: журнал immutable и принадлежит движку, а это подсказка человеку, которую
   // перекрывает следующая остановка той же задачи.
   arbiterCardsPath: process.env.COCKPIT_ARBITER_CARDS_PATH
-    || path.join(__dirname, '..', '.state', 'arbiter-cards.json'),
+    || path.join(dataStateDir, 'arbiter-cards.json'),
   // Личная полка B24-задач с серверными снимками наблюдаемого состояния.
   taskShelfPath: process.env.COCKPIT_TASK_SHELF_PATH
-    || path.join(__dirname, '..', '.state', 'task-shelf.json'),
+    || path.join(dataStateDir, 'task-shelf.json'),
   // Просмотренные B24-задачи: набор серверный, чтобы метка «новая» снималась на всех
   // устройствах сразу.
   taskSeenPath: process.env.COCKPIT_TASK_SEEN_PATH
-    || path.join(__dirname, '..', '.state', 'task-seen.json'),
+    || path.join(dataStateDir, 'task-seen.json'),
   // Когда впервые увидели каждое ведро лимитов исполнителя. Серверный файл, потому что
   // метка «новое» обязана быть одинаковой во всех окнах.
   providerUsageSeenPath: process.env.COCKPIT_PROVIDER_USAGE_SEEN_PATH
-    || path.join(__dirname, '..', '.state', 'provider-usage-seen.json'),
+    || path.join(dataStateDir, 'provider-usage-seen.json'),
 
   // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
   // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.
@@ -270,34 +283,41 @@ export const config = {
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.COCKPIT_SANDBOX_DOWN_CMD || '',
 
-  // Медиа-конвейер (распознавание речи). Runtime-venv из server/.state подключается через
+  // Медиа-конвейер (распознавание речи). Venv из state/ папки данных подключается через
   // COCKPIT_MEDIA_PYTHON; читается в media/preflight.ts. Хранилище job'ов/медиа.
-  mediaDir: process.env.COCKPIT_MEDIA_DIR || path.join(__dirname, '..', '.state', 'media'),
+  mediaDir: process.env.COCKPIT_MEDIA_DIR || path.join(dataStateDir, 'media'),
   mediaPython: process.env.COCKPIT_MEDIA_PYTHON || '',
   // Собственный кэш моделей речи: обычный transcribe работает fail-closed и никогда
   // не скачивает веса в общий ~/.cache. Все Python-spawn получают этот HF_HOME.
-  mediaHfDir: process.env.COCKPIT_MEDIA_HF_DIR || path.join(__dirname, '..', '.state', 'hf'),
+  mediaHfDir: process.env.COCKPIT_MEDIA_HF_DIR || path.join(dataStateDir, 'hf'),
   // Эталон для воспроизводимого speed benchmark задаёт оператор: голосовой бинарный
   // asset не тащим в исходники и не подменяем речь бессмысленным тоном/тишиной.
   speechBenchmarkAudioPath: process.env.COCKPIT_SPEECH_BENCHMARK_AUDIO || '',
 
-  // Вход в кокпит: учётка (логин + scrypt-хеш пароля) и сессии. Оба файла в .state (0600).
-  // Один пользователь — пульт личный. Пароль задаётся при первом открытии или в install.sh,
-  // меняется в настройках.
-  authAccountPath: process.env.COCKPIT_AUTH_ACCOUNT || path.join(__dirname, '..', '.state', 'auth-account.json'),
-  authSessionsPath: process.env.COCKPIT_AUTH_SESSIONS || path.join(__dirname, '..', '.state', 'auth-sessions.json'),
+  // Вход в кокпит: файл сессий (формат 2) и прежний файл учётной записи. Оба в .state (0600).
+  // Пароля больше нет: `authAccountPath` читается один раз как источник строки `clientScope`
+  // (владельца незавершённых операций 3D) и продуктом не переписывается.
+  authAccountPath: process.env.COCKPIT_AUTH_ACCOUNT || path.join(dataStateDir, 'auth-account.json'),
+  authSessionsPath: process.env.COCKPIT_AUTH_SESSIONS || path.join(dataStateDir, 'auth-sessions.json'),
   // Токен для ЛОКАЛЬНЫХ CLI-потребителей API (bin/b24, ship-этап фабрики, скиллы):
   // файл 0600 на этой же машине. Кто может его прочитать — уже владеет всеми кредами .state.
-  cliTokenPath: process.env.COCKPIT_CLI_TOKEN_PATH || path.join(__dirname, '..', '.state', 'cli-token'),
+  cliTokenPath: process.env.COCKPIT_CLI_TOKEN_PATH || path.join(dataStateDir, 'cli-token'),
   // Проверка и применение релизов Cockpit. Это runtime-state машины, не часть релиза.
   cockpitUpdateStatePath: process.env.COCKPIT_UPDATE_STATE_PATH
-    || path.join(__dirname, '..', '.state', 'cockpit-update.json'),
-  // Пользовательские плагины: plugins/<id>/plugin.json (+server.js) в корне проекта.
-  userPluginsDir: process.env.COCKPIT_PLUGINS_DIR || path.join(__dirname, '..', '..', 'plugins'),
+    || path.join(dataStateDir, 'cockpit-update.json'),
+  // Пользовательские плагины: plugins/<id>/plugin.json (+server.js) в папке данных.
+  userPluginsDir: process.env.COCKPIT_PLUGINS_DIR || dataPath(dataHome, 'plugins'),
+  // Данные пользовательского runtime находятся вне заменяемой папки пакета.
+  // Путь передаётся server.js через options.dataDir и сохраняется при обновлении.
+  userPluginsDataDir: process.env.COCKPIT_PLUGINS_DATA_DIR || dataPath(dataHome, 'pluginData'),
+  // Durable source/version, предыдущая копия и известные исходы installer.
+  // Boot fixtures задают собственный путь, независимо от конфигурации машины.
+  pluginInstallsStatePath: process.env.COCKPIT_PLUGIN_INSTALLS_STATE_PATH
+    || path.join(dataStateDir, 'plugin-installs.json'),
 
   // Машинные переменные читают все штатные способы запуска.
   // Общий writer сохраняет соседние настройки и порядок строк.
-  envPath: process.env.COCKPIT_ENV_FILE || path.join(rootDir, '.env'),
+  envPath: envFilePath({ env: process.env, home }),
 
   // Режим.
   isDev: process.env.NODE_ENV === 'development',

@@ -5,7 +5,7 @@ import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 
 const PREFIX = '__inTurnComponent';
 const PROVIDER = {
@@ -477,3 +477,69 @@ test('картинка у исполнителя без картинок в хо
   assert.deepEqual(calls.following, [['in-turn-chat', 'Сравни с референсом', [image]]]);
   assert.equal(calls.inTurn.length, 0);
 });
+
+test('устаревший черновик store не даёт «Пишет…» под законченным ответом истории', async (t) => {
+  const { wrapper, session, run, flushPromises } = await mountChat(t, { sending: false });
+
+  run.entries.push({
+    runId: run.runId,
+    chatKey: 'in-turn-chat',
+    assistantMessageId: 'answer-done-12345678',
+    sequence: 1,
+    revision: 1,
+    text: 'Готовый отв',
+    complete: false,
+    startedAt: 1,
+  });
+  // Законченный блок в истории так, как его отдаёт сервер: без complete и abandoned.
+  session.messages.push({
+    role: 'assistant',
+    kind: 'assistant-block',
+    text: 'Готовый ответ целиком.',
+    assistantMessageId: 'answer-done-12345678',
+    runId: run.runId,
+    sequence: 1,
+    revision: 2,
+    serverCanonical: true,
+  });
+  await flushPromises();
+
+  const reply = wrapper.get('[data-role="chat-in-turn-reply"]').text();
+
+  assert.match(reply, /Готовый ответ целиком\./);
+  assert.doesNotMatch(reply, /Пишет|Ответ оборван/);
+});
+
+test('подпись строки истории: черновик законченного хода оборван, готовый блок без подписи',
+  async (t) => {
+    const { wrapper, session, flushPromises } = await mountChat(t, { sending: false });
+
+    session.messages.push({
+      role: 'assistant',
+      kind: 'assistant-block',
+      runId: 'run-12345678',
+      assistantMessageId: 'answer-stale-12345678',
+      sequence: 1,
+      text: 'Пишу файл плана.',
+      complete: false,
+    }, {
+      role: 'assistant',
+      kind: 'assistant-block',
+      runId: 'run-12345678',
+      assistantMessageId: 'answer-done-12345678',
+      sequence: 2,
+      text: 'План записан.',
+      complete: true,
+      abandoned: true,
+    });
+    await flushPromises();
+
+    const [stale, done] = wrapper.findAll('[data-role="chat-in-turn-reply"]')
+      .map((row) => row.text());
+
+    assert.match(stale, /Пишу файл плана\./);
+    assert.match(stale, /Ответ оборван/);
+    assert.doesNotMatch(stale, /Пишет/);
+    assert.match(done, /План записан\./);
+    assert.doesNotMatch(done, /Пишет|Ответ оборван/);
+  });

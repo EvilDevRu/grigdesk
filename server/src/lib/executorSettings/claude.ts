@@ -1,20 +1,16 @@
 // Claude публикует значения и отдельные applied-факты через control protocol.
 // Внешняя схема не превращает отсутствующее effective значение в известный default.
 
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import type { NativeSettingsContext, NativeSettingsSnapshot } from './types.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import { normalizeJsonSchema } from './jsonSchema.ts';
 import { flattenNativeSettings, validateNativeSetting } from './validation.ts';
 import { createNativeSettingsCapability } from './capability.ts';
 import { readSettingsCliVersion, withSettingsStdioProbe } from './probe.ts';
 import { readPublishedSettingsSchema } from './publishedSchema.ts';
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
 
 /**
  * Опубликованная схема задаёт типы, но её соответствие версии не заявляется полным.
@@ -25,15 +21,15 @@ export function claudeSettingsSnapshot(
   schema: unknown,
   context: NativeSettingsContext,
 ): NativeSettingsSnapshot {
-  const response = record(settings);
+  const response = recordOrEmpty(settings);
 
   if (!response.effective || !response.sources || !response.applied) {
     throw new Error('Claude не подтвердил get_settings');
   }
 
-  const effective = record(response.effective);
-  const external = record(schema);
-  const properties = { ...record(external.properties) };
+  const effective = recordOrEmpty(response.effective);
+  const external = recordOrEmpty(schema);
+  const properties = { ...recordOrEmpty(external.properties) };
 
   for (const key of Object.keys(effective)) {
     if (!Object.hasOwn(properties, key)) {
@@ -164,9 +160,9 @@ export async function readClaudeSettings(
             request: { subtype },
           },
           (response) =>
-            response.type === 'control_response' && record(response.response).request_id === requestId,
+            response.type === 'control_response' && recordOrEmpty(response.response).request_id === requestId,
         );
-        const response = record(result.response);
+        const response = recordOrEmpty(result.response);
 
         if (response.subtype !== 'success') {
           throw new Error('Claude не подтвердил control protocol настроек');

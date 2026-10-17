@@ -6,8 +6,8 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
-    "../shared/analysisContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/pipeline/analysisContracts.ts",
     "src/lib/analysis/**/*.ts",
     "src/modules/analysis/**/*.ts",
     "../tests/types/triage-server-contract.test.mts"

@@ -29,7 +29,7 @@ git fetch --no-tags origin "refs/tags/$INTERMEDIATE_TAG"
 test "$(git cat-file -t FETCH_HEAD)" = tag
 test "$(git rev-list -n 1 FETCH_HEAD)" = "$INTERMEDIATE_SHA"
 BOOTSTRAP=$(mktemp /tmp/cockpit-upgrade.XXXXXX)
-git show "$INTERMEDIATE_SHA:bin/upgrade-publish-contract" > "$BOOTSTRAP"
+git show "$INTERMEDIATE_SHA:tools/upgrade-publish-contract" > "$BOOTSTRAP"
 COCKPIT_UPGRADE_ROOT="$PWD" bash "$BOOTSTRAP" \
   --tag "$INTERMEDIATE_TAG" --sha "$INTERMEDIATE_SHA"
 rm "$BOOTSTRAP"
@@ -40,6 +40,11 @@ rm "$BOOTSTRAP"
 затем выполняет штатные `bin/cockpit deps` и `build`. Dirty/diverged checkout
 останавливает процедуру без reset или очистки. После ручного restart оператора
 обычная кнопка обновления может установить embedded-релиз.
+
+Неизменённый legacy worker без systemd перезапускает сервер через `bin/restart`. Скрипт
+переехал в `deploy/restart.sh`, поэтому у такой установки обновление проходит, а шаг
+перезапуска завершается отказом: сервер перезапускают руками. Под systemd legacy worker
+перезапускает юнит и переезда не замечает.
 
 ## Публикация generation
 

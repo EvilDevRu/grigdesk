@@ -1,4 +1,4 @@
-import type { RouteRebaseResolution } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteRebaseResolution } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';

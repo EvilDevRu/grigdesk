@@ -2,7 +2,7 @@ import { useRoute, useRouter } from 'vue-router';
 import type { RouteLocationNormalizedLoaded, Router } from 'vue-router';
 
 import { useDockStore } from '../../stores/dock.js';
-import { TOOL_BY_ID } from './registry.ts';
+import { TOOL_META_BY_ID } from './catalog.ts';
 import { viewportCanDock } from './viewport.ts';
 
 // Команда, которую инструмент должен выполнить сразу после открытия. Тип задаёт сам
@@ -22,9 +22,6 @@ interface DockPort {
   setRuntime: (id: string, value: Record<string, unknown>) => void;
 }
 
-// Реестр инструментов тоже JavaScript: отсюда нужен только адрес страницы.
-const toolRoute = TOOL_BY_ID as Map<string, { route: string } | undefined>;
-
 export interface LaunchContext {
   route: RouteLocationNormalizedLoaded;
   router: Router;
@@ -41,7 +38,7 @@ export async function launchTool(
   id: string,
   intent: ToolIntent | null = null,
 ): Promise<boolean> {
-  const item = toolRoute.get(id);
+  const item = TOOL_META_BY_ID.get(id);
 
   if (!item) {
     return false;

@@ -4,6 +4,8 @@
 // данные попадают в состояние. Отказ сервера приходит телом §1.2: его разбирает
 // `projectsErrorData`, а форма по `fieldErrors` ставит подсказки у своих полей.
 
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseProjectDependencies,
@@ -11,7 +13,7 @@ import {
   parseProjectSummaries,
   parseProjectsError,
   parseRepositoryCheck,
-} from '../../../shared/projectsContracts.ts';
+} from '../../../shared/runtime/projectsContracts.ts';
 import type {
   ProjectDependencies,
   ProjectDetail,
@@ -19,7 +21,7 @@ import type {
   ProjectRepositoryCheck,
   ProjectSummary,
   ProjectsErrorBody,
-} from '../../../shared/projectsContracts.ts';
+} from '../../../shared/runtime/projectsContracts.ts';
 
 export const projectsApi = {
   async list(): Promise<ProjectSummary[]> {
@@ -81,17 +83,13 @@ export const projectsApi = {
   },
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Тело отказа раздела. У `ApiError` в `data` лежит сырой ответ сети, и пока его форма
  * не подтверждена декодером, показывать по нему подсказки у полей нельзя. Пустое или
  * чужое тело — тоже не отказ контракта: просто «подробностей нет».
  */
 export function projectsErrorData(error: unknown): ProjectsErrorBody | null {
-  const data = asRecord(error).data;
+  const data = objectOrEmpty(error).data;
 
   if (data === null || data === undefined) {
     return null;

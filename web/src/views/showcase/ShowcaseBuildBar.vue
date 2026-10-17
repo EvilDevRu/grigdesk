@@ -66,14 +66,14 @@
 import { computed } from 'vue';
 
 import { UiButton, UiInlineMessage, UiProgress, UiSpinner } from '../../ui';
-import { sceneChains } from '../../../../shared/showcaseChains';
-import { SHOWCASE_BUILD_STAGES } from '../../../../shared/showcaseContracts';
+import { sceneChains } from '../../../../shared/plugins/showcase/showcaseChains';
+import { SHOWCASE_BUILD_STAGES } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type {
   ShowcaseBuildRun,
   ShowcaseBuildStage,
   ShowcaseJob,
   ShowcaseProject,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 
 const props = defineProps<{
   project: ShowcaseProject;

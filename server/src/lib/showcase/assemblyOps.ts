@@ -12,6 +12,8 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { jsonHash32 } from '../../../../shared/node/hash.ts';
+
 import {
   artifactFile,
   finalInputHash,
@@ -35,18 +37,18 @@ import type {
   ShowcaseProject,
   ShowcaseScene,
   ShowcaseTiming,
-} from '../../../../shared/showcaseContracts.ts';
-import { chainLineage } from '../../../../shared/showcaseChains.ts';
-import { parseNarration } from '../../../../shared/showcaseNarration.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import { chainLineage } from '../../../../shared/plugins/showcase/showcaseChains.ts';
+import { parseNarration } from '../../../../shared/plugins/showcase/showcaseNarration.ts';
 import {
   SHOWCASE_MANIFEST_MEDIA_TOLERANCE_MS,
   SHOWCASE_MANIFEST_VERSION,
-} from '../../../../shared/showcaseTimeline.ts';
+} from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
 import type {
   ShowcaseFinalManifest,
   ShowcaseManifestPhrase,
   ShowcaseManifestSubtitleCue,
-} from '../../../../shared/showcaseTimeline.ts';
+} from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
 import { toPublicJob } from './jobs.ts';
 import type { ShowcaseJobs } from './jobs.ts';
 import { readRecordingTiming } from './recordingOps.ts';
@@ -101,10 +103,6 @@ interface LoadedSpeech {
 interface LoadedRecording {
   fixture: RecordingFixtureTiming | null;
   error: string | null;
-}
-
-function shortHash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
 }
 
 function sidecarDir(store: ShowcaseStore, projectId: string, sceneId: string): string {
@@ -632,7 +630,7 @@ export function createAssemblyOps(deps: AssemblyOpsDeps) {
         file: outFile,
         mode: result.status === 'exact' ? 'exact' : 'legacy',
         quality: speech.quality,
-        planHash: shortHash(result.status === 'exact' ? result.plan : {
+        planHash: jsonHash32(result.status === 'exact' ? result.plan : {
           mode: 'legacy',
           timing: result.timing,
           diagnostics: result.diagnostics.map((item) => item.code),

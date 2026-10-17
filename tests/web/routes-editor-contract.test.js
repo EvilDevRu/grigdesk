@@ -7,7 +7,7 @@ import {
   parseRouteDraftList,
   parseRouteEditorIssue,
   parseRoutePublication,
-} from '../../shared/routesContracts.ts';
+} from '../../shared/pipeline/routesContracts.ts';
 
 test('RE-A1-01: DTO сохраняет полный документ без потери полей и байтов текста', () => {
   const original = makeDraft();

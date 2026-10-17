@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, lstatSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -44,6 +44,8 @@ export const KIMI_SANDBOX_NODE = '/opt/cockpit/node';
 export const KIMI_SANDBOX_WORK_SOCKET = '/run/cockpit-work/work.sock';
 
 export interface KimiSandboxConfig {
+  dataHome?: string;
+  envPath?: string;
   kimiHome: string;
   kimiRuntimeHome: string;
   kimiRuntimeBroker?: string;
@@ -213,7 +215,7 @@ async function canonicalDirectory(candidate: unknown, label: string): Promise<st
 }
 
 /**
- * Server-owned control state: OAuth credentials, чужие токены (server/.state),
+ * Server-owned control state: OAuth credentials, чужие токены (state/ в папке данных),
  * история чатов и session bindings, runtime/broker contained-профиля, control/state
  * каталоги маршрутов, .env репозитория. Эти пути нельзя отдавать в mount namespace
  * даже внутри доверенного каталога: прочитанное моделью попадает в контекст (а это
@@ -222,7 +224,10 @@ async function canonicalDirectory(candidate: unknown, label: string): Promise<st
 function workspaceControlStatePaths(
   config: KimiSandboxConfig,
 ): { dirs: string[]; files: string[] } {
+  const legacyState = config.rootDir ? path.join(config.rootDir, 'server', '.state') : '';
+  const legacyEnv = config.rootDir ? path.join(config.rootDir, '.env') : '';
   const dirs = [
+    config.dataHome,
     config.kimiHome,
     config.kimiRuntimeHome,
     config.kimiRuntimeBroker,
@@ -231,12 +236,17 @@ function workspaceControlStatePaths(
     config.chatBindingsDir,
     config.stateDir,
     config.factoryControlDir,
-    config.rootDir ? path.join(config.rootDir, 'server', '.state') : null,
+    legacyState && lstatSync(legacyState, { throwIfNoEntry: false })?.isDirectory() ? legacyState : null,
   ].filter((value): value is string => Boolean(value)).map((value) => path.resolve(value));
   // Вложенные пути (chats/.bindings, broker внутри runtime home, runtime home
   // внутри factory state) маскирует ближайший перечисленный предок.
   const topLevel = dirs.filter((dir) => !dirs.some((other) => other !== dir && isWithin(other, dir)));
-  const files = config.rootDir ? [path.join(config.rootDir, '.env')] : [];
+  const files = [
+    config.envPath,
+    legacyEnv && lstatSync(legacyEnv, { throwIfNoEntry: false })?.isFile() ? legacyEnv : null,
+  ].filter((file): file is string => Boolean(file))
+    .map((file) => path.resolve(file))
+    .filter((file) => !topLevel.some((directory) => isWithin(directory, file)));
   return { dirs: topLevel, files };
 }
 

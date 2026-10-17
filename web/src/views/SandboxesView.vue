@@ -121,7 +121,7 @@ import {
   useSandboxesStore,
   watchSandboxes,
 } from '../actions/sandboxes';
-import type { SandboxActionDecl, SandboxJob } from '../../../shared/sandboxContracts';
+import type { SandboxActionDecl, SandboxJob } from '../../../shared/plugins/sandboxes/sandboxContracts';
 import SandboxCard from './sandboxes/SandboxCard.vue';
 import SandboxRaiseForm from './sandboxes/SandboxRaiseForm.vue';
 

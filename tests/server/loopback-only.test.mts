@@ -15,7 +15,8 @@ import authModule from '../../server/src/modules/auth/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 const configUrl = new URL('../../server/src/config.ts', import.meta.url).href;
-const credentials = { login: 'test', password: 'test-password-123' };
+const origin = 'http://127.0.0.1:28140';
+const windowKey = 'LOOPBACK_WINDOW_KEY_MARKER'.padEnd(43, '_');
 
 interface ConfigProbe {
   host: string;
@@ -55,13 +56,13 @@ async function readConfig(t: TestContext, extraEnv: Record<string, string> = {})
 }
 
 /**
- * Вход и общий гард проверяются с настоящим хранилищем во временном каталоге.
+ * Сессия выдаётся только обменом ключа окна, а общий гард проверяется настоящим плагином.
  * Fastify использует адрес сокета и не доверяет заголовкам пересылки.
  */
-async function authFixture(t: TestContext, configured = true) {
+async function authFixture(t: TestContext) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loopback-auth-'));
   const authStore = new AuthStore({
-    accountPath: path.join(root, 'account.json'),
+    legacyAccountPath: path.join(root, 'account.json'),
     sessionsPath: path.join(root, 'sessions.json'),
   });
   const app: FastifyInstance = Fastify({ logger: false });
@@ -71,22 +72,18 @@ async function authFixture(t: TestContext, configured = true) {
     await rm(root, { recursive: true, force: true });
   });
 
-  if (configured) {
-    authStore.setCredentials(credentials);
-  }
-
   await app.register(authPlugin, { authStore });
-  await app.register(authModule, { authStore });
+  await app.register(authModule, { authStore, windowAuth: { origin, key: windowKey } });
   app.get('/api/private', async (request) => ({ ip: request.ip, protocol: request.protocol }));
 
   return app;
 }
 
 /**
- * Cookie остаётся ограниченной выдавшим её хостом, а HTTP не получает Secure.
- * Проверяем атрибуты и для создания сессии, и для её удаления.
+ * Cookie выдаётся только обменом ключа и остаётся ограниченной хостом.
+ * Снятие сессии удалённым путём выхода больше не существует и её не отзывает.
  */
-function assertLocalCookie(value: string | string[] | undefined, cleared = false): string {
+function assertLocalCookie(value: string | string[] | undefined): string {
   assert.equal(typeof value, 'string');
 
   const cookie = value as string;
@@ -95,12 +92,7 @@ function assertLocalCookie(value: string | string[] | undefined, cleared = false
   assert.match(cookie, /(?:^|; )HttpOnly(?:;|$)/u);
   assert.match(cookie, /(?:^|; )SameSite=Lax(?:;|$)/u);
   assert.doesNotMatch(cookie, /(?:^|; )(?:Domain=|Secure(?:;|$))/iu);
-
-  if (cleared) {
-    assert.match(cookie, /(?:^|; )Max-Age=0(?:;|$)/u);
-  } else {
-    assert.match(cookie, /(?:^|; )Max-Age=[1-9]\d*(?:;|$)/u);
-  }
+  assert.match(cookie, /(?:^|; )Max-Age=[1-9]\d*(?:;|$)/u);
 
   return cookie.split(';', 1)[0]!;
 }
@@ -126,25 +118,41 @@ test('LO-02: GitHub callback задаётся только явной перем
   assert.equal(explicit.githubWebhookBaseUrl, 'https://hooks.example.test/hooks/github');
 });
 
-test('LO-08: локальный вход, cookie и выход игнорируют forwarded protocol/ip', async (t) => {
+test('LO-08: cookie обмена ключа ограничена хостом, а удалённый выход не отзывает сессию', async (t) => {
   const app = await authFixture(t);
   const headers = {
-    host: 'example.test',
+    host: new URL(origin).host,
     'x-forwarded-proto': 'https',
     'x-forwarded-for': '192.0.2.10',
   };
-  const login = await app.inject({
+  const forwarded = await app.inject({
     method: 'POST',
-    url: '/api/auth/login',
+    url: '/api/auth/window-session',
     remoteAddress: '127.0.0.1',
-    headers,
-    payload: credentials,
+    headers: {
+      ...headers,
+      'x-cockpit-window-key': windowKey,
+    },
   });
 
-  assert.equal(login.statusCode, 200);
+  assert.equal(forwarded.statusCode, 403);
+  assert.equal(forwarded.json().error, 'local_only');
+  assert.equal(forwarded.headers['set-cookie'], undefined);
 
-  const cookie = assertLocalCookie(login.headers['set-cookie']);
-  const authorized = { ...headers, cookie };
+  const exchange = await app.inject({
+    method: 'POST',
+    url: '/api/auth/window-session',
+    remoteAddress: '127.0.0.1',
+    headers: {
+      host: new URL(origin).host,
+      'x-cockpit-window-key': windowKey,
+    },
+  });
+
+  assert.equal(exchange.statusCode, 200);
+
+  const cookie = assertLocalCookie(exchange.headers['set-cookie']);
+  const authorized = { host: new URL(origin).host, cookie };
   const privateView = await app.inject({
     method: 'GET',
     url: '/api/private',
@@ -155,40 +163,43 @@ test('LO-08: локальный вход, cookie и выход игнориру�
   assert.equal(privateView.statusCode, 200);
   assert.deepEqual(privateView.json(), { ip: '127.0.0.1', protocol: 'http' });
 
-  const logout = await app.inject({
+  const removedLogout = await app.inject({
     method: 'POST',
     url: '/api/auth/logout',
     headers: authorized,
   });
 
-  assert.equal(logout.statusCode, 200);
-  assertLocalCookie(logout.headers['set-cookie'], true);
-  assert.equal((await app.inject({ url: '/api/private', headers: { cookie } })).statusCode, 401);
+  assert.equal(removedLogout.statusCode, 404);
+  assert.equal(removedLogout.headers['set-cookie'], undefined);
+  assert.equal((await app.inject({
+    url: '/api/private',
+    headers: { cookie },
+  })).statusCode, 200);
 });
 
-test('первичная настройка допускает localhost и отвергает каждый forwarded-заголовок', async (t) => {
-  const local = await authFixture(t, false);
-  const setup = await local.inject({
-    method: 'POST',
-    url: '/api/auth/setup',
-    remoteAddress: '127.0.0.1',
-    payload: credentials,
-  });
+test('удалённые парольные пути недоступны и с локального адреса', async (t) => {
+  const app = await authFixture(t);
 
-  assert.equal(setup.statusCode, 200);
-  assertLocalCookie(setup.headers['set-cookie']);
-
-  for (const header of ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'forwarded']) {
-    const app = await authFixture(t, false);
-    const denied = await app.inject({
+  for (const path of ['/api/auth/setup', '/api/auth/login', '/api/auth/password',
+    '/api/auth/logout-all']) {
+    const anonymous = await app.inject({
       method: 'POST',
-      url: '/api/auth/setup',
+      url: path,
       remoteAddress: '127.0.0.1',
-      headers: { [header]: 'test' },
-      payload: credentials,
+      payload: { login: 'test', password: 'test-password-123' },
+    });
+    const withCookie = await app.inject({
+      method: 'POST',
+      url: path,
+      remoteAddress: '127.0.0.1',
+      headers: { cookie: 'cockpit_sid=fixture-session' },
+      payload: { login: 'test', password: 'test-password-123' },
     });
 
-    assert.equal(denied.statusCode, 403, header);
-    assert.equal(denied.json().error, 'setup_local_only');
+    assert.ok([401, 404].includes(anonymous.statusCode), `${path}: ${anonymous.statusCode}`);
+    assert.equal(anonymous.headers['set-cookie'], undefined, path);
+    assert.equal(anonymous.json().needsSetup, undefined, path);
+    assert.equal(withCookie.statusCode, 404, path);
+    assert.equal(withCookie.headers['set-cookie'], undefined, path);
   }
 });

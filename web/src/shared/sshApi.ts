@@ -11,8 +11,8 @@ import {
   parseSshProjects,
   parseSshSessionOpened,
   parseSshSessions,
-} from '../../../shared/sshContracts.ts';
-import type { SshConnectionInput } from '../../../shared/sshContracts.ts';
+} from '../../../shared/plugins/ssh/sshContracts.ts';
+import type { SshConnectionInput } from '../../../shared/plugins/ssh/sshContracts.ts';
 
 const AUDIT_LIMIT = 50;
 
@@ -134,15 +134,3 @@ export const sshApi = {
     return typeof api.wsUrl === 'function';
   },
 };
-
-/**
- * Текст отказа для человека. Сервер SSH отвечает машинным кодом, а обрыв сети приходит
- * без тела вовсе — тогда остаётся сообщение самой ошибки транспорта.
- */
-export function sshErrorMessage(error: unknown, fallback: string): string {
-  const message = error !== null && typeof error === 'object'
-    ? (error as { message?: unknown }).message
-    : undefined;
-
-  return typeof message === 'string' && message ? message : fallback;
-}

@@ -6,7 +6,7 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
+    "../shared/lib/contractDecoders.ts",
     "src/lib/telegram/**/*.ts",
     "src/modules/telegram/**/*.ts",
     "../tests/types/telegram-server-contract.test.mts"

@@ -11,6 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
 import { prepareChatNativeSettings } from '../../lib/executorSettings/launch.ts';
 import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
@@ -42,20 +44,31 @@ import { validateStructuredAnswers } from '../../lib/chat/structuredAnswers.ts';
 import { createPermissionQueue } from '../../lib/chat/permissionQueue.ts';
 import { mayRetryEmptyRun } from '../../lib/chat/retryContract.ts';
 import {
+  AUTO_CONTINUE_PROMPT,
+  continueAfterFailures,
+  createContinueGate,
+  deliveryFailureView,
+} from '../../lib/chat/autoContinue.ts';
+import type { AutoContinueResult, ContinueSummary } from '../../lib/chat/autoContinue.ts';
+import { AUTO_CONTINUE_DELAYS_MS } from '../../lib/chat/turnFailures.ts';
+import type { ContinuableKind } from '../../lib/chat/turnFailures.ts';
+import {
   chatAttachmentsBlock,
   resolveChatAttachment,
   resolveInTurnAttachments,
 } from '../../lib/chat/attachments.ts';
 import { readChatImage } from '../../lib/chat/chatImages.ts';
 import { withChatImageHint } from '../../lib/chat/imageHint.ts';
+import { withPluginDocsHint } from '../../lib/chat/pluginDocsHint.ts';
+import type { PluginDocsEntry } from '../../lib/pluginDocs.ts';
 import { stoppedTurnBrief } from '../../lib/chat/stoppedBrief.ts';
 import { autoDecision } from '../../lib/chat/autoApprove.ts';
 import { normalizeContextCache } from '../../lib/chat/contextCache.ts';
-import { normalizeContextUsage } from '../../../../shared/chatContextUsage.ts';
+import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
 import { decodeHistoryStepReuseRequest, HISTORY_STEP_REUSE_ROUTE }
-  from '../../../../shared/chatHistoryStepReuse.ts';
-import type { ChatContextUsage } from '../../../../shared/chatContextUsage.ts';
-import type { ChatRunSnapshot } from '../../../../shared/chatRun.ts';
+  from '../../../../shared/chat/chatHistoryStepReuse.ts';
+import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+import type { ChatRunSnapshot } from '../../../../shared/chat/chatRun.ts';
 import { MAX_CHAT_STEPS, pushChatStep } from '../../lib/chat/streamSteps.ts';
 import {
   IN_TURN_ATTACHMENT_LIMIT,
@@ -64,13 +77,13 @@ import {
   IN_TURN_PAGE_LIMIT,
   parseInTurnCapability,
   utf8Bytes,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type {
   InTurnAssistantEvent,
   InTurnPort,
   InTurnReceiptEvent,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import {
   contextPrefix,
   normalizeUiContext,
@@ -89,7 +102,7 @@ import {
   visibleChatTitleStep,
   withChatTitleHook,
 } from '../../lib/chat/titleHook.ts';
-import { normalizeChatWorkdir, sameChatWorkdir } from '../../../../shared/chatWorkdir.ts';
+import { normalizeChatWorkdir, sameChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
 import { resolveChatWorkdir, resolveWorkdirCapability, ChatWorkdirError } from '../../lib/chat/workdir.ts';
 import type { ResolvedWorkdir } from '../../lib/chat/workdir.ts';
 import {
@@ -270,6 +283,8 @@ interface ChatExecutor {
   workToolsTransport?: string;
   autoCompactEnv?: string;
   retryContract?: string;
+  // Таблицу видов сбоя объявляет адаптер; отсутствие — работают общие признаки.
+  turnFailureRules?: ExecutorAdapter['turnFailureRules'];
   modes?: (config: CockpitConfig) => Promise<Array<{ id: string }> | null>;
   commands?: (config: CockpitConfig) => Promise<Array<{ cmd: string; run?: string }>>;
   run: NonNullable<ExecutorAdapter['run']>;
@@ -320,6 +335,9 @@ interface ChatModuleOptions {
   shutdownInterruptMs?: number;
   // Просмотрщик документов: чат объявляет ему свои папки областью `chat:<id>`.
   documentReader?: Pick<DocumentReader, 'addScopeProvider'>;
+  // Паузы автопродолжения: боевые берутся из реестра, тесты подставляют короткие,
+  // чтобы не ждать реальные минуты.
+  autoContinueDelaysMs?: Partial<Record<ContinuableKind, readonly number[]>>;
 }
 
 interface ModelTarget {
@@ -457,17 +475,13 @@ const SPEECH_STREAM_PUBLIC_ERRORS: Readonly<Record<string, string>> = Object.fre
   stale_speech_settings: 'Настройки речи изменились — начни диктовку заново.',
 });
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 /** Multipart допускает массивы и файлы: только одиночное текстовое поле несёт value. */
 function multipartValue(value: unknown): unknown {
   return (value as { value?: unknown } | null | undefined)?.value;
 }
 
 function normalizeExecutorContextCache<T>(out: T): T {
-  if (!isPlainObject(out) || !Object.hasOwn(out, 'contextCache')) return out;
+  if (!isRecord(out) || !Object.hasOwn(out, 'contextCache')) return out;
   const contextCache = normalizeContextCache(out.contextCache);
   if (contextCache) return { ...out, contextCache };
   const clean = { ...out };
@@ -476,7 +490,7 @@ function normalizeExecutorContextCache<T>(out: T): T {
 }
 
 function hasExactKeys(value: unknown, expected: readonly string[]): value is Record<string, unknown> {
-  if (!isPlainObject(value)) return false;
+  if (!isRecord(value)) return false;
   const actual = Object.keys(value).sort();
   const keys = [...expected].sort();
   return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
@@ -552,6 +566,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   const {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
   } = opts;
+  // Папка артефактов общая для всех разговоров. Частичная конфигурация (тесты, служебные
+  // сборки модуля) её не задаёт — тогда ход идёт без неё, как до появления папки.
+  const artifactsDir = config.artifactsDir ? path.resolve(config.artifactsDir) : '';
+  const artifactsDirs = artifactsDir ? [artifactsDir] : [];
   const sshBroker = opts.sshBroker || fastify.sshBroker as SshBroker | null || null;
   const dbBroker = opts.dbBroker || fastify.dbBroker as DbBroker | null || null;
   const permissionQueue = (opts.permissionQueue || createPermissionQueue()) as InteractionQueue;
@@ -644,6 +662,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // пока ход ещё только проходит strict preflight и потому не виден ни activeRuns,
   // ни turnLocks.
   const acceptedTurns = new Map<string, number>(); // chatKey -> число preflight/queued/locked/running ходов
+  // Один gate на модуль: область отмены открывается по chatKey синхронно, поэтому
+  // сообщение или «Стоп», пришедшие в окне подготовки/паузы, отменяют продолжение.
+  const continueGate = createContinueGate();
   const stoppedQueuedTurns = new Set<string>();
   const savingChats = new Map<string, number>(); // chatKey -> число принятых point/full PUT
   const deletingChats = new Set<string>();
@@ -710,6 +731,24 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     };
   }
 
+  /**
+   * Ожидание паузы автопродолжения. Запись области отмены живёт в общем gate, а таймер
+   * создаётся только на время самой паузы: тесты подставляют управляемый планировщик.
+   */
+  function openContinueWait(chatKey: string, signal?: AbortSignal | null) {
+    return continueGate.open(chatKey, signal);
+  }
+
+  /**
+   * Есть ли у чата ожидающая работа человека. Принятый ход занимает один слот в
+   * acceptedTurns до собственного finally, поэтому второй слот означает новое сообщение,
+   * даже если очередь журнала ещё не успела его записать. Уточнение, уже принятое в
+   * текущую модель, отдельным ходом не является и здесь не считается.
+   */
+  function hasQueuedTurn(chatKey: string): boolean {
+    return turnLedger.queued(chatKey).length > 0 || (acceptedTurns.get(chatKey) || 0) > 1;
+  }
+
   function beginChatSaves(chatIds: readonly string[]) {
     const ids = [...new Set(chatIds.filter(Boolean).map(String))];
     for (const id of ids) savingChats.set(id, (savingChats.get(id) || 0) + 1);
@@ -743,6 +782,20 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return String(registry?.PROFILE || '').trim() || null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Документация включённых плагинов для хода. Реестра плагинов может не быть (сборка
+   * без модуля), а чтение диска может упасть — ход тогда идёт без подсказки.
+   */
+  async function pluginDocsForTurn(): Promise<PluginDocsEntry[]> {
+    try {
+      return await fastify.pluginDocs?.() ?? [];
+    } catch (error) {
+      fastify.log.warn({ err: (error as Error)?.message }, 'чат: документация плагинов не прочитана');
+
+      return [];
     }
   }
 
@@ -824,7 +877,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     : 10_000;
   const backgroundRuns = new ChatBackgroundRuns({
     broadcast: (event, data) => fastify.sse.broadcast(event, data),
-    hiddenDirs: [path.join(config.chatsDir, 'attachments')],
+    hiddenDirs: [path.join(config.chatsDir, 'attachments'), ...artifactsDirs],
     managedActive: (key) => activeRuns.has(key),
     queuedCount: (key) => turnLedger.queued(key).length,
     log: fastify.log,
@@ -1273,7 +1326,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       acceptedAt: entry.acceptedAt,
     })),
   }));
-
 
   // Приём уточнения в активный ход. Отвечает коротко после устойчивой записи, а доставку
   // выполняет координатор: HTTP-соединение не держится ни до ответа модели, ни до ACK.
@@ -2714,6 +2766,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       const userSentAt = Number.isSafeInteger(opts.sentAt) && opts.sentAt! > 0 ? opts.sentAt! : 0;
+      // Приём подтверждён: ожидающее сообщение человека отменяет автопродолжение того же
+      // чата ещё до того, как встанет в очередь ходов.
+      continueGate.notifyQueued(chatKey);
+
       const entry = await turnLedger.put({
         turnId,
         chatKey,
@@ -2872,6 +2928,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       const { target, context, scope } = prepared;
       const queued = turnLocks.isBusy(scope) || backgroundRuns.has(chatKey);
 
+      // Синхронный путь (пульт, сжатие) тоже означает нового человека в этом чате.
+      continueGate.notifyQueued(chatKey);
+
       if (queued) {
         fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
         // Второму окну (и своему же, если оно захочет показать «в очереди») — сигнал.
@@ -2977,14 +3036,28 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (target.provider !== 'kimi') extraDirs.push(attachDir);
       attachBlock = chatAttachmentsBlock(attachPaths);
     }
-    // Один и тот же каталог может прийти из репозиториев проекта, worktree и вложений.
-    // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
-    const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
 
     // Target уже разрешён строго по сохранённому modelRef до взятия locks. Никакого
     // fallback к Claude здесь больше нет.
     const info = { provider: target.provider, model: target.modelInfo };
     const executor = await executorResolver(target.provider);
+
+    // Папка артефактов — рабочая папка агентов вне дерева кода: ход получает её на запись,
+    // если адаптер объявил несколько корней. Однокорневые (их граница записи — рабочая папка)
+    // её не получают; Kimi держит свою изоляцию без папки данных — как с вложениями.
+    const multiRoot = (await resolveWorkdirCapability(executor, config))?.roots === 'multi';
+
+    if (artifactsDir && multiRoot && target.provider !== 'kimi') {
+      const artifactsReady = await fs.mkdir(artifactsDir, { recursive: true, mode: 0o700 })
+        .then(() => true, () => false);
+
+      if (artifactsReady) {
+        extraDirs.push(artifactsDir);
+      }
+    }
+    // Один и тот же каталог может прийти из репозиториев проекта, worktree и вложений.
+    // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
+    const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
 
     // Служебный слэш-ход провайдерской команды (меню «/» в чате). Признак принимаем
     // строго: команда обязана быть в списке commands() исполнителя с run:'prompt', а
@@ -3031,15 +3104,23 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const stoppedBrief = (!plan && !slash && Boolean(executor?.sessionBinding) && !target.binding?.sessionId)
       ? stoppedTurnBrief(target.record?.messages)
       : '';
+    // Документацию плагинов читаем на каждом ходе, а подсказку получает только обычный:
+    // сжатию и слэш-команде карта не нужна. Каталоги для права чтения при этом одни и те
+    // же у всех ходов — иначе служебный ход зря переоткрывал бы живую сессию.
+    const pluginDocs = await pluginDocsForTurn();
+    const copiesBlock = workspace.copies.length > 1
+      ? `Рабочие копии:\n${workspace.copies.map((copy) => `${copy.key} → ${copy.path}`).join('\n')}\n\n`
+      : '';
     let fullMessage = slash ? String(message || '').trim() : plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
         withChatImageHint(
-          contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock
-          + (workspace.copies.length > 1
-            ? `Рабочие копии:\n${workspace.copies.map((copy) => `${copy.key} → ${copy.path}`).join('\n')}\n\n`
-            : '')
-          + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
+          withPluginDocsHint(
+            contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock + copiesBlock
+            + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
+            pluginDocs,
+          ),
+          artifactsDir,
         ),
         wantsTitle,
       );
@@ -3123,6 +3204,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
     let providerBinding: BindingRecord | null = null;
     let providerIdentity: (BindingIdentity & { chatKey: string }) | null = null;
+    // Буфер шагов ТЕКУЩЕЙ попытки: обнуляется перед каждым фактическим запуском.
+    let attemptSteps: ChatStep[] = [];
+    // Сводка цепочки попыток для catch: переменная присваивается только внутри callback,
+    // поэтому TS не смог бы сузить её тип без отдельного поля-держателя.
+    const continuationState: { summary: ContinueSummary | null } = { summary: null };
 
     if (executor.sessionBinding) {
       const cwdRealpath = await fs.realpath(cwd);
@@ -3238,7 +3324,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         providerId: executor.id,
         requestedModelId: model,
         cwd,
-        extraDirs: visibleExtraDirs(uniqueExtraDirs, [attachDir]),
+        extraDirs: visibleExtraDirs(uniqueExtraDirs, [attachDir, ...artifactsDirs]),
       },
       startedAt: Date.now(),
       tokens: 0,
@@ -3432,6 +3518,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // Каталог вложений чата: адаптер может открыть его агенту на чтение заранее, чтобы
         // картинка из уточнения посреди хода открылась без вопроса человеку.
         attachmentsDir: attachDir,
+        // Каталоги документации включённых плагинов — так же только на чтение: подсказка
+        // называет оглавления, а рабочая папка разговора может лежать вне каталога плагинов.
+        pluginDocsDirs: pluginDocs.map((entry) => entry.dir),
         permissionMode,
         mcpConfig,
         mcpServers: workIpc ? [{ name: 'cockpit-work', ...workIpc.mcpServer }] : [],
@@ -3540,7 +3629,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
               return port.deliver({
                 ...input,
-                text: withChatImageHint(text),
+                text: withChatImageHint(text, artifactsDir),
                 ...(images.length ? { images } : {}),
               });
             },
@@ -3618,31 +3707,52 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         } : undefined,
         // Лента хода (размышления, инструменты, их результаты) — живьём в окно.
         // Копия в activeRuns: перезагрузка страницы посреди хода не теряет показанное.
+        // Параллельно шаги копятся в буфере ПОПЫТКИ: он нужен только как запасная лента
+        // для исключения без steps и никогда не решает, был ли прогресс.
         onStep: chatKey ? (step) => {
+          pushChatStep(attemptSteps, step, MAX_CHAT_STEPS);
           publishStep(step);
         } : undefined,
       };
       runRec.onPermission = runArgs.onPermission;
       // Один вход для обоих путей: живая сессия отдаёт то же, что разовый запуск,
       // поэтому остальной код хода про смену модели работы ничего не знает.
-      const runTurn = (): Promise<ExecutorRunResult> => (liveTurn
-        ? liveSessions.run({ ...runArgs, executor }, {
-          message: runArgs.message,
-          onStep: runArgs.onStep,
-          onProgress: runArgs.onProgress,
-          onPermission: runArgs.onPermission,
-          onSessionCreated: runArgs.onSessionCreated,
-          onRunMetadata: runArgs.onRunMetadata,
-          // Канал уточнений живого режима идёт тем же путём, что разовый: иначе
-          // у живой сессии он молча закрывался бы, а окно показывало «недоступно».
-          onInTurnReady: runArgs.onInTurnReady,
-          onInTurnAvailability: runArgs.onInTurnAvailability,
-          onInTurnReceipt: runArgs.onInTurnReceipt,
-          onAssistantMessage: runArgs.onAssistantMessage,
-        }) as Promise<ExecutorRunResult>
-        : executor.run(runArgs));
+      // Попытка автопродолжения подменяет ТОЛЬКО сообщение и сессию: рабочие корни,
+      // модель, права и вложения уже зафиксированы исходным ходом. Оба пути —
+      // живой и разовый — получают одинаковые значения, иначе они разошлись бы.
+      const runTurn = (attempt?: { message: string; sessionId: string }): Promise<ExecutorRunResult> => {
+        const attemptArgs = attempt
+          ? {
+            ...runArgs,
+            message: attempt.message,
+            sessionId: attempt.sessionId,
+            // Вложения исходного запроса повторно не отправляются: агент сверяет уже
+            // сохранённые файлы сам, а каталог вложений остаётся ему доступен.
+            attachmentPaths: [],
+          }
+          : runArgs;
 
-      let out = await runTurn();
+        return liveTurn
+          ? liveSessions.run({ ...attemptArgs, executor }, {
+            message: attemptArgs.message,
+            onStep: attemptArgs.onStep,
+            onProgress: attemptArgs.onProgress,
+            onPermission: attemptArgs.onPermission,
+            onSessionCreated: attemptArgs.onSessionCreated,
+            onRunMetadata: attemptArgs.onRunMetadata,
+            // Канал уточнений живого режима идёт тем же путём, что разовый: иначе
+            // у живой сессии он молча закрывался бы, а окно показывало «недоступно».
+            onInTurnReady: attemptArgs.onInTurnReady,
+            onInTurnAvailability: attemptArgs.onInTurnAvailability,
+            onInTurnReceipt: attemptArgs.onInTurnReceipt,
+            onAssistantMessage: attemptArgs.onAssistantMessage,
+          }) as Promise<ExecutorRunResult>
+          : executor.run(attemptArgs);
+      };
+
+      // Тип шире результата адаптера: после петли у хода появляются поля цепочки
+      // (вид сбоя, число начатых продолжений, исход) — их читает итог.
+      let out: ExecutorRunResult & Partial<AutoContinueResult> = await runTurn();
       // Пустой ход (ноль шагов, ноль стоимости) = CLI умер на старте и НИЧЕГО не сделал.
       // Повторить его безопасно — и честнее, чем отдать человеку заглушку и ждать, что
       // он пришлёт сообщение заново (а он пришлёт — и получит то же самое).
@@ -3650,6 +3760,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // локальный, в поток он не идёт), так что «пустой ход» тут — норма, а второй прогон
       // сжал бы уже сжатое. Та же логика у служебного слэш-хода: команда выполнена, повтор
       // небезопасен (например claude /clear начал бы ещё одну сессию).
+      attemptSteps = [];
+
       if (!slash && mayRetryEmptyRun(executor, out, { compact: !!plan })) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         // Повтор человек видит вторым «стартом» в ленте, и без объяснения это читается
@@ -3665,9 +3777,45 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // Ленту пустого запуска не выбрасываем: сохранённый ход обязан совпасть с тем,
         // что человек видел живьём, — старт, отметка, второй старт.
         const emptySteps = Array.isArray(out.steps) ? out.steps : [];
+
+        attemptSteps = [];
         out = await runTurn();
         const retrySteps = Array.isArray(out.steps) ? out.steps : [];
         out = { ...out, steps: [...emptySteps, retryNote, ...retrySteps] };
+      }
+
+      // Автопродолжение: тот же ход, тот же runId, только просьба продолжить. Исходный
+      // запрос не повторяется ни при каком значении признаков адаптера, поэтому решение
+      // принимается по явному turnRecovery Р2 и реестру видов сбоя.
+      const continuationMode = !plan && !slash && !summaryWorkspace && Boolean(chatKey)
+        && !out?.stopped && !out?.sessionReset && !out?.sessionResetFailed;
+
+      if (out?.deliveryFailure && continuationMode) {
+        out = await continueAfterFailures(out, {
+          isEnabled: () => (prefs?.read?.() || {}).chatAutoContinue !== false,
+          rules: executor.turnFailureRules,
+          delaysMs: opts.autoContinueDelaysMs || AUTO_CONTINUE_DELAYS_MS,
+          signal: ac.signal,
+          continueMessage: withChatTitleHook(AUTO_CONTINUE_PROMPT, wantsTitle),
+          run: (attempt) => runTurn(attempt),
+          attemptSteps: () => attemptSteps,
+          openWait: () => openContinueWait(String(chatKey), ac.signal),
+          hasQueued: () => hasQueuedTurn(String(chatKey)),
+          beforeWait: async () => {
+            // Поддерживающий уточнения адаптер теряет канал упавшей попытки: его блоки
+            // закрываются, а записи доводятся до диска ДО паузы. Ошибка здесь —
+            // обычная ошибка хода, а не повод продолжать модель.
+            inTurnMessages.setAvailability(runId, false, 'not_ready');
+
+            await assistantPublisher.abandonOpen(runId);
+            await assistantPublisher.flush(runId);
+          },
+          publishNote: (step) => publishStep(step),
+          onSummary: (summary) => {
+            continuationState.summary = summary;
+          },
+          log: fastify.log,
+        });
       }
 
       await assistantPublisher.flush(runId);
@@ -3761,13 +3909,31 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       // доставляет этот же ответ текстом).
       if (out?.deliveryFailure) {
         const cliSaid = String(out.reply || '').trim();
+        // Полный id разговора пригоден только без сброса сессии: сброшенная память
+        // кнопкой не возвращается, и обещать её человеку нельзя.
+        const resumeAvailable = Boolean(out.sessionId)
+          && !out.sessionReset && !out.sessionResetFailed;
+        const continued = typeof out.autoContinued === 'number' ? out.autoContinued : undefined;
+        const view = deliveryFailureView({
+          said: cliSaid,
+          resumeAvailable,
+          ...(out.failureKind !== undefined ? { kind: out.failureKind } : {}),
+          ...(out.autoContinueOutcome !== undefined ? { outcome: out.autoContinueOutcome } : {}),
+          ...(continued !== undefined ? { attempts: continued } : {}),
+        });
+        const recovered = out.autoContinueOutcome === 'recovered';
+
         out = {
           ...out,
-          interruptedBy: 'delivery_failure',
-          reply: `⚠ Ход оборвал сам CLI, ответа модели не было: «${cliSaid}».`
-            + ' Контекст сохранён — нажми «Продолжить ход» или напиши «Продолжай»,'
-            + ' и агент продолжит с этого места.',
+          reply: view.reply,
+          // Метка прерывания — только у НЕзавершённого хода: успешное продолжение
+          // является обычным ответом и кнопки не показывает.
+          ...(view.resumable && !recovered ? { interruptedBy: 'delivery_failure' } : {}),
         };
+
+        if (!view.resumable) {
+          delete (out as Record<string, unknown>).interruptedBy;
+        }
       }
       if (chatKey && !summaryWorkspace) {
         // Выжимку прежнего сжатия старое окно и пульт вклеивают в сообщение сами: успешный
@@ -3857,6 +4023,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
+      // Сводка цепочки автопродолжения: её лента и известная стоимость обязаны доехать
+      // до итога даже тогда, когда ход закончился остановкой или ошибкой.
+      const summary = continuationState.summary;
+      const summarySteps = summary ? summary.steps : null;
+      const summaryCost = summary ? summary.cost : undefined;
+      const summaryContinued = summary ? summary.continued : 0;
+
+      // Сводка уже отдана ошибке самой петлёй: второй раз те же шаги не добавляются.
+      if (summarySteps && !Array.isArray(err.steps)) {
+        err.steps = [...summarySteps];
+      }
+
+      if (summaryCost !== undefined && err.cost === undefined) {
+        err.cost = summaryCost;
+      }
+
       if (err.stopped) {
         // Оборванную session СОХРАНЯЕМ: следующий ход сделает resume и агент продолжит
         // с полным контекстом — не теряется ни работа, ни память. Баг pinned 0.31.1
@@ -3881,7 +4063,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           ...normalizeContextUsage(runRec),
           ...normalizeContextUsage(err),
           ...(contextCache ? { contextCache } : {}),
-          cost: null, model: model || null, effort: runEffort || null, stopped: true,
+          // Известная стоимость цепочки, а не безусловный null: работа предыдущих
+          // попыток уже оплачена, и человек вправе её увидеть.
+          cost: summaryCost === undefined ? null : summaryCost,
+          autoContinued: summaryContinued,
+          model: model || null, effort: runEffort || null, stopped: true,
           runId,
           ...(seedReset ? EMPTY_WORKDIR_MEMORY : {}),
           sessionReset: seedReset,
@@ -3929,7 +4115,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           role: 'error',
           reply: err.message,
           ...orphanUser,
-          steps: [...runRec.steps],
+          steps: summarySteps ? [...summarySteps] : [...runRec.steps],
           runId,
           sessionReset: !!err.sessionReset,
           sessionResetFailed: !!err.sessionResetFailed,
@@ -4087,7 +4273,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const result = await readChatImage({
       cwd: workspace.cwd,
       extraDirs: workspace.extraDirs,
-      imageRoots: executor?.imageRoots?.(config) || [],
+      imageRoots: [...artifactsDirs, ...(executor?.imageRoots?.(config) || [])],
       requested: request.query.path,
     });
 
@@ -4103,7 +4289,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
   /**
    * Ссылка на документ из ответа агента открывается в папках именно этого разговора:
-   * рабочей и дополнительных. Чужие чаты и остальной диск в область не попадают.
+   * рабочей, дополнительных и общей папке артефактов. Чужие чаты и остальной диск в область
+   * не попадают.
    */
   opts.documentReader?.addScopeProvider('chat', async (chatId) => {
     const record = await history.readOne(chatId);
@@ -4114,7 +4301,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
     const workspace = await workspaceOf(record);
 
-    return [workspace.cwd, ...workspace.extraDirs].map((dir) => ({
+    return [workspace.cwd, ...workspace.extraDirs, ...artifactsDirs].map((dir) => ({
       label: path.basename(dir) || dir,
       path: dir,
     }));
@@ -4240,7 +4427,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // Поля публичного события перечислены явно: traceback, argv и локальные пути
     // не могут случайно попасть в браузер даже при ошибке нижнего слоя.
     const forwardRuntimeEvent = (event: unknown) => {
-      if (!isPlainObject(event) || typeof event.type !== 'string') {
+      if (!isRecord(event) || typeof event.type !== 'string') {
         protocolFailure();
         return;
       }
@@ -4986,6 +5173,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // ходов. Восстановление только читает журналы и агента не запускает.
   await inTurnLedger.load();
   await assistantMessages.load();
+  // Запуски прошлого процесса мертвы: их недописанные реплики уже не продолжатся, а
+  // открытыми после рестарта они обещали бы «Пишет…» и не уходили бы по сроку хранения.
+  await assistantMessages.sweepDeadRuns(new Set([...activeRuns.values()].map((run) => run.runId)));
   await inTurnLedger.sweepDeadRuns(new Set([...activeRuns.keys()].filter((key): key is string => !!key)));
 
   const recoveredPending = await readPendingRecords();
@@ -5020,8 +5210,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
   }
 
-  await mobileHistory.reconcile().catch(() => {
+  // Первая сверка запускает разовую миграцию чатов и сборку реестра моделей с пробами всех
+  // исполнителей — это дольше лимита старта модуля, и сервер падал по кругу. Поэтому старт
+  // её не ждёт: сверки сериализованы, а сбой оставляет pending до следующего прохода.
+  const startupReconcile = mobileHistory.reconcile().catch(() => {
     fastify.log.warn('чат: восстановление мобильной истории оставило pending для повторной сверки');
+  });
+
+  fastify.addHook('onClose', async () => {
+    await startupReconcile;
   });
 }
 

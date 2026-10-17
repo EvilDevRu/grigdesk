@@ -51,6 +51,15 @@ export const TOOL_CATALOG: ToolMeta[] = [
     plugin: 'shelf',
   },
   {
+    id: 'studio3d',
+    route: '/3d',
+    label: '3D',
+    icon: 'cube',
+    order: 30,
+    hotkey: 'Ctrl+Shift+Digit7',
+    plugin: 'studio3d',
+  },
+  {
     id: 'ssh',
     route: '/ssh',
     label: 'SSH',

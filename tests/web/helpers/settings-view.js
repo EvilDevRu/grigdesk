@@ -22,13 +22,15 @@ export function compileSettingsView({
   prefix = '__settings',
   confirm = false,
   nativeSettings = false,
+  terminal = false,
+  mobileAccess = false,
 } = {}) {
   const stores = [
     ['../stores/providers.js', 'useProvidersStore'],
     ['../stores/auth.js', 'useAuthStore'],
     ['../stores/plugins.js', 'usePluginsStore'],
     ['../stores/chat.js', 'useChatStore'],
-    ['../stores/pwa.js', 'usePwaStore'],
+    ['../stores/device.js', 'useDeviceStore'],
   ];
   const storeStubs = Object.fromEntries(
     stores.map(([specifier, name]) => [specifier, storeStub(prefix, name)]),
@@ -65,7 +67,11 @@ export function compileSettingsView({
         });
       `,
       '../shared/tools/launcher.ts': `
-        export const useToolLauncher = () => ({ openTerminal() {} });
+        export const useToolLauncher = () => ({
+          openTerminal: ${terminal
+            ? `(...args) => globalThis[${globalName(prefix, 'Terminal')}](...args)`
+            : '() => {}'}
+        });
       `,
       '../shared/ProviderIcon.vue': `
         export default { props: ['id'], template: '<i class="picon"></i>' };
@@ -78,9 +84,18 @@ export function compileSettingsView({
       `,
       // Мобильные настройки имеют отдельную проверку сети, QR и подтверждения отзыва.
       // Здесь проверяется собственная форма SettingsView без второго набора запросов.
-      './settings/MobileAccess.vue': `
-        export default { template: '<div class="mobile-access-stub"></div>' };
-      `,
+      ...(mobileAccess ? {
+        '../../composables/useSse.ts': `
+          export const useSse = () => ({ connected: { value: false } });
+        `,
+        '../../shared/apiClient.ts': `
+          export const api = globalThis[${globalName(prefix, 'Api')}];
+        `,
+      } : {
+        './settings/MobileAccess.vue': `
+          export default { template: '<div class="mobile-access-stub"></div>' };
+        `,
+      }),
       // Каталог плагинов — самостоятельный подраздел со своими stores и модалкой;
       // его поведение стережёт settings-plugins-catalog.component.test.js.
       './settings/PluginsCatalog.vue': `

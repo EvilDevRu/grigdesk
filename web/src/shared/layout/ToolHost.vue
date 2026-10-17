@@ -4,19 +4,18 @@
                   :ref="(value) => setRailButton(item.id, value)" role="rail"
                   data-context="tool-rail-item"
                   class="tool-rail-item" :class="{ active: presentedTool === item.id }"
-                  v-tooltip.left="railTitle(item)" :label="item.label"
+                  v-tooltip.left="railTitle(item)" :label="railTitle(item)"
                   :pressed="presentation === 'dock' && presentedTool === item.id"
                   @click="clickRail(item)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
-      </svg>
+      <span class="rail-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
+        </svg>
+        <NavigationCount :badge="toolBadges[item.id]" />
+      </span>
       <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(dock.runtime.terminal?.status)"
             class="runtime-dot" :class="dock.runtime.terminal.status" aria-hidden="true"></span>
-      <span v-if="toolBadges[item.id]" class="tool-badge"
-            :class="{ wait: toolBadges[item.id].wait, pulse: toolBadges[item.id].wait }">
-        {{ toolBadges[item.id].count }}
-      </span>
     </UiIconButton>
   </aside>
 
@@ -24,6 +23,7 @@
     <ToolDock v-if="dock.mounted[item.id]"
               :ref="(value) => setDockRef(item.id, value)" :mode="modeOf(item.id)"
               :label="item.label" :width="dock.width" :min-width="minWidth" :max-width="maxWidth"
+              :workspace="route.meta.layout === 'workspace'"
               :expanded="expandedOf(item.id)" :expanded-width="contentWidth"
               @hide="hideDock(item.id)" @toggle-expanded="toggleDockExpanded"
               @resize="resize($event)" @resize-end="resize($event, true)">
@@ -58,6 +58,8 @@ import { useDockViewport } from '../tools/viewport.ts';
 import { comboFromEvent, formatCombo } from '../hotkeys/combo.ts';
 import { useHotkeysStore } from '../../stores/hotkeys.js';
 import ToolDock from './ToolDock.vue';
+import NavigationCount from './NavigationCount.vue';
+import { shelfNavBadge } from '../nav-badges.js';
 import { UiIconButton, useUiLayer, vTooltip } from '../../ui';
 
 const route = useRoute();
@@ -100,16 +102,18 @@ const railItems = computed(() => tools.value.filter((item) => {
   return plugins.dockNav.some((nav) => nav.id === item.id);
 }));
 
+const toolBadges = computed(() => ({ shelf: shelfNavBadge(shelf.rows) }));
+
+/**
+ * Подсказка и доступное имя называют точное число с причинами внимания.
+ * Горячая клавиша остаётся частью того же описания кнопки инструмента.
+ */
 function railTitle(item) {
   const combo = formatCombo(hotkeys.comboOf(item.id));
-  return combo ? `${item.label} · ${combo}` : item.label;
-}
+  const detail = toolBadges.value[item.id]?.title;
 
-const toolBadges = computed(() => ({
-  shelf: shelf.totalCount > 0
-    ? { count: shelf.litCount || shelf.totalCount, wait: shelf.litCount > 0 }
-    : null,
-}));
+  return [item.label, detail, combo].filter(Boolean).join(' · ');
+}
 
 const contexts = reactive({});
 const panelRefs = new Map();
@@ -258,9 +262,10 @@ function resize(value, persist = false) {
 
 function measureContent() {
   const content = document.querySelector('.shell > .content');
+
   contentWidth.value = content?.getBoundingClientRect?.().width
-    || Math.max(0, window.innerWidth - 62 - (dockCapable.value ? 44 : 0));
-  resize(dock.width, false);
+    || 0;
+  dock.fitWidth({ min: minWidth.value, max: maxWidth.value });
 }
 
 watch([presentedTool, presentation, dockCapable], () => {
@@ -336,26 +341,16 @@ onBeforeUnmount(() => {
 <style scoped>
 .tool-rail {
   grid-row: 2; grid-column: 3; z-index: 70; min-height: 0;
-  display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 5px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; overflow-y: auto; scrollbar-width: none;
   background: var(--sidebar); border-left: 1px solid var(--line);
 }
 .tool-rail-item { position: relative; }
+.rail-mark { display: grid; justify-items: center; align-content: center; gap: 1px; }
 .runtime-dot { position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--good); box-shadow: 0 0 0 2px var(--sidebar); }
 .runtime-dot.connecting { background: var(--warn); }
-.tool-badge {
-  position: absolute; top: -2px; right: -3px; min-width: 16px; height: 16px;
-  display: inline-grid; place-items: center; box-sizing: border-box; padding: 0 4px;
-  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-2);
-  color: var(--ink-mid); font-size: 9px; font-weight: 750; line-height: 1;
-}
-.tool-badge.wait { border-color: var(--warn); background: var(--warn); color: #17130a; }
-.tool-badge.pulse { animation: tool-badge-pulse 1.6s ease-in-out infinite; }
-@keyframes tool-badge-pulse { 50% { opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .tool-badge.pulse { animation: none; } }
 .tool-placeholder { grid-row: 2; grid-column: 2; z-index: 20; min-width: 0; min-height: 0;
-  display: grid; place-items: center; padding: 24px; background: var(--ground); color: var(--ink-mid);
+  display: grid; place-items: center; padding: var(--page-gutter); background: var(--ground); color: var(--ink-mid);
   text-align: center; line-height: 1.55; }
 @media (max-width: 899px) { .tool-rail { display: none; } }
-@media (max-width: 759px) { .tool-placeholder { grid-column: 1; padding: 16px; } }
 </style>

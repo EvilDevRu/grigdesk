@@ -26,7 +26,11 @@ const kimiSessionBinding = {
   securityProfile: () => KIMI_SECURITY_PROFILE,
 };
 
-async function apiFixture(t, { executor = null } = {}) {
+/**
+ * Поднимает чат-модуль с урезанной конфигурацией и подставным исполнителем.
+ * withArtifacts добавляет временную папку артефактов, как у рабочего сервера.
+ */
+async function apiFixture(t, { executor = null, withArtifacts = false } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-routing-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
@@ -43,6 +47,7 @@ async function apiFixture(t, { executor = null } = {}) {
     factoryHome: root,
     agentsDir: path.join(root, 'agents'),
     port: 18140,
+    ...(withArtifacts ? { artifactsDir: path.join(root, 'artifacts') } : {}),
   };
 
   await app.register(chatModule, {
@@ -770,7 +775,7 @@ test('resume после стопа; при проглатывании — инв
   assert.ok(briefed.includes('[Досье прерванного хода]'), 'досье подмешано в сообщение');
   assert.ok(briefed.includes('- Edit: chat.js'));
   assert.ok(briefed.includes('- Ошибка: 1 failing test'));
-  assert.ok(briefed.endsWith(withChatImageHint('продолжай')),
+  assert.ok(briefed.endsWith(withChatImageHint('продолжай', '')),
     'подсказка следует за исходной просьбой');
 
   // Клиент дописал обычный ответ: досье одноразовое и дальше не подмешивается.
@@ -810,4 +815,41 @@ test('resume после стопа; при проглатывании — инв
   });
   assert.equal(fourth.statusCode, 200);
   assert.ok(!(received[3] || '').includes('[Досье прерванного хода]'), 'досье одноразовое');
+});
+
+test('ход Kimi не получает общую папку артефактов: у него своя изоляция', async (t) => {
+  const seen = [];
+  const executor = {
+    id: 'kimi',
+    retryContract: KIMI_RETRY_CONTRACT,
+    async run(options) {
+      seen.push(options.extraDirs || []);
+      await options.onSessionCreated('kimi-session');
+
+      return {
+        reply: 'готово',
+        sessionId: 'kimi-session',
+        steps: [],
+        cost: null,
+      };
+    },
+  };
+  const { app, root } = await apiFixture(t, { executor, withArtifacts: true });
+
+  await saveKimiChat(app, 'kimi-artifacts');
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'kimi-artifacts',
+      modelRef: { provider: 'kimi', model: 'kimi-test' },
+      model: 'kimi-test',
+      message: 'сделай снимок',
+    },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].includes(path.join(root, 'artifacts')), false);
 });

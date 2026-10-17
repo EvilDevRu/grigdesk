@@ -7,8 +7,8 @@
 // Длительность, хеш содержимого и идентификатор считает служба по готовому файлу.
 // Верить размеру и ревизии, которые вернул поставщик, нельзя: это его слова о
 // своём результате, а не проверенный факт.
-import { parseNarration } from '../../../../../shared/showcaseNarration.ts';
-import type { ShowcasePace } from '../../../../../shared/showcaseContracts.ts';
+import { parseNarration } from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
+import type { ShowcasePace } from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 
 export type VoicePace = ShowcasePace;
 

@@ -1,3 +1,122 @@
+.ui-pressable[data-context='studio-model-card'] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='studio-model-card']:hover {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+}
+
+.ui-pressable[data-context='studio-model-card']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ui-pressable[data-context='studio-version-row'] {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 60px;
+  padding: 8px;
+  text-align: left;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.ui-pressable[data-context='studio-version-row']:hover {
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='studio-version-row'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+/* Инструменты холста используют компактную геометрию toolbar внутри общего kit.
+   Подписи доступны через aria-label, состояния не зависят от оформления экрана. */
+.ui-icon-button[data-context='studio-view-tool'] {
+  width: var(--toolbar-control-h);
+  min-width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 5px;
+  border-radius: 4px;
+}
+
+.ui-icon-button[data-context='studio-view-tool'] svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-disclosure-button[data-context='studio-inspector-section'] {
+  padding-right: 0;
+  padding-left: 0;
+  font-size: 12px;
+}
+
+.ui-disclosure-button[data-context='studio-next-operation'] {
+  height: auto;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ground);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.ui-disclosure-button[data-context='studio-next-operation']:hover:not(:disabled),
+.ui-disclosure-button[data-context='studio-next-operation'][aria-expanded='true'] {
+  border-color: var(--line-2);
+  background: var(--surface);
+}
+
+.ui-disclosure-button[data-context='studio-next-operation'] .ui-button__label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.ui-pressable[data-context='studio-separator'] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.ui-pressable[data-context='studio-guide'] {
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+  font-size: 10px;
+}
+
 /* Строка каталога проектов: выбранный паспорт заметен и мышью, и с клавиатуры.
    Скин принадлежит UI-kit; сам экран задаёт только раскладку содержимого строки. */
 .ui-pressable[data-context='project-catalog-row'] {
@@ -439,9 +558,9 @@
 }
 
 .ui-icon-button[data-context='tool-rail-item'] {
-  width: 34px;
-  height: 34px;
-  min-height: 34px;
+  width: calc(var(--app-rail-w) - 6px);
+  height: calc(var(--app-rail-w) - 6px);
+  min-height: calc(var(--app-rail-w) - 6px);
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -464,8 +583,8 @@
 }
 
 .ui-icon-button[data-context='tool-rail-item'] svg {
-  width: 19px;
-  height: 19px;
+  width: 16px;
+  height: 16px;
 }
 
 /* Рейка разделов плагина «Код» — та же плитка, что у рейки инструментов, но активный
@@ -775,98 +894,24 @@
   padding: 0;
 }
 
-/* Плитка версии кокпита в конце рейки. Геометрия повторяет пункт навигации, чтобы
-   стоять с ним в одной колонке, но тише: это справка, а не раздел. Все состояния одной
-   высоты — конец рейки не прыгает, когда сборка готова. */
-.ui-pressable[data-context='cockpit-version'] {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  min-height: 37px;
-  padding: 9px 11px;
-  border-radius: 9px;
-  color: var(--ink-low);
-  font-size: 12px;
-  text-align: left;
-  transition: background 0.12s, color 0.12s;
-}
-
-.ui-pressable[data-context='cockpit-version']:hover:not([aria-busy='true']) {
-  background: var(--surface);
-  color: var(--ink);
-}
-
-/* Громкое состояние: сборка уже здесь, один клик. Не заливка, а кольцо и подсветка
-   тоном акцента — рецепт outline-кнопки библиотеки: сплошной синий блок в монохромной
-   рейке смотрелся чужим. Без пульсации — цветного кольца на тёмной рейке достаточно. */
-.ui-pressable[data-context='cockpit-version'].refresh,
-.ui-pressable[data-context='cockpit-version'].refresh:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 44%, var(--line));
-  font-weight: 600;
-}
-
-.ui-pressable[data-context='cockpit-version'].refresh:hover:not([aria-busy='true']) {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, var(--line));
-}
-
-/* Узкая рейка: только знак по центру, как у соседних пунктов. Порог — ширина самой
-   рейки, а не окна, поэтому свёрнутая и планшетная рейки ведут себя одинаково. */
-@container rail (max-width: 100px) {
-  .ui-pressable[data-context='cockpit-version'] {
-    justify-content: center;
-    gap: 0;
-    padding: 10px 0;
-  }
-}
-
-/* Нижний ряд телефона: плитка в колонку, как пункт мобильной навигации. */
-@media (max-width: 759px) {
-  .ui-pressable[data-context='cockpit-version'] {
-    flex-direction: column;
-    gap: 3px;
-    width: 62px;
-    min-width: 62px;
-    min-height: 0;
-    padding: 9px 2px;
-    border-radius: 0;
-    font-size: 10px;
-    text-align: center;
-  }
-
-  /* В нижнем ряду плитку и так отделяет линия слева; кольцо внутри было бы второй рамкой. */
-  .ui-pressable[data-context='cockpit-version'].refresh,
-  .ui-pressable[data-context='cockpit-version'].refresh:hover {
-    box-shadow: none;
-  }
-}
-
-/* Полоса «сборка готова» на экране входа: тот же тон и подпись, что у плитки. */
-.ui-pressable[data-context='cockpit-version-strip'] {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  width: 100%;
-  height: 44px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ui-pressable[data-context='cockpit-version-strip']:hover:not([aria-busy='true']) {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
 .ui-pressable[data-context='provider-status'] {
   position: relative;
   display: inline-grid;
   place-items: center;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.ui-icon-button[data-context='alert-history'] {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.ui-icon-button[data-context='alert-history'] svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* OpenAI и Kimi в шапке нейтральные: цвет здесь означает состояние, а не бренд. */
@@ -877,10 +922,15 @@
 
 .ui-pressable[data-context='provider-status'].off {
   color: var(--ink-mid);
+}
+
+/* Недоступность приглушает знак, сохраняя сплошной фон активной плитки.
+   Opacity всей кнопки разрывала бы её цветовой стык с панелью. */
+.ui-pressable[data-context='provider-status'].off > .prov-mark {
   opacity: 0.45;
 }
 
-.ui-pressable[data-context='provider-status'].upd {
+.ui-pressable[data-context='provider-status'].upd > .prov-mark {
   opacity: 1;
 }
 
@@ -1012,12 +1062,30 @@
   width: 100%;
   height: 30px;
   min-height: 30px;
-  padding: 0 10px;
-  border-color: var(--line-2);
-  border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--ink-mid);
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
   font-size: 11.5px;
+}
+
+.ui-pressable[data-context='topbar-metrics'],
+.ui-pressable[data-context='topbar-network'] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+}
+
+/* Активная кнопка получает общий фон псевдоэлементом на всю высоту топбара.
+   Собственный hover skin не должен рисовать поверх него скруглённое пятно. */
+[data-ui-topbar-trigger][aria-expanded='true'] {
+  --ui-action-background-hover: transparent;
+  border-radius: 0;
+  background: transparent;
 }
 
 .ui-button[data-context='topbar-popover-footer']:hover:not(:disabled) {
@@ -1028,6 +1096,7 @@
 /* Иконки в шапке всплывашки исполнителя. Там строка имени, а не панель инструментов:
    кнопка ростом с ручку панели перевешивала само имя, ради которого шапку и сократили. */
 .ui-icon-button[data-context='topbar-popover-settings'],
+.ui-icon-button[data-context='topbar-popover-refresh'],
 .ui-icon-button[data-context='topbar-popover-update'] {
   width: 22px;
   height: 22px;
@@ -1036,6 +1105,7 @@
 }
 
 .ui-icon-button[data-context='topbar-popover-settings'] svg,
+.ui-icon-button[data-context='topbar-popover-refresh'] svg,
 .ui-icon-button[data-context='topbar-popover-update'] svg {
   width: 14px;
   height: 14px;
@@ -1184,15 +1254,15 @@
 }
 
 .ui-button[data-role='task-compact-action'] {
-  height: 32px;
-  min-height: 32px;
+  height: var(--control-height);
+  min-height: var(--control-height);
   padding: 0 12px;
   font-size: 12px;
 }
 
 .ui-button[data-context='task-footer-action'] {
-  height: 36px;
-  min-height: 36px;
+  height: var(--control-height);
+  min-height: var(--control-height);
   padding: 0 13px;
   border-radius: 8px;
   font-size: 13px;
@@ -1203,8 +1273,8 @@
 @media (max-width: 600px) {
   .ui-button[data-context='task-footer-action'] {
     height: auto;
-    min-height: 40px;
-    padding-block: 7px;
+    min-height: var(--control-height);
+    padding-block: 4px;
     line-height: 1.3;
     white-space: normal;
   }
@@ -1532,9 +1602,9 @@
 .ui-icon-button[data-context='chat-microphone'] {
   isolation: isolate;
   overflow: visible;
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -1767,8 +1837,8 @@
 }
 
 .trusted-item .ui-button[data-role='settings-compact-action'] {
-  height: 36px;
-  min-height: 36px;
+  height: var(--control-height);
+  min-height: var(--control-height);
   padding: 0 10px;
   font-size: 12px;
 }
@@ -1842,9 +1912,9 @@
 
 .ui-icon-button[data-context='chat-send'],
 .ui-icon-button[data-context='chat-stop'] {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
   border: 0;
   border-radius: 10px;
   color: #fff;
@@ -1924,21 +1994,6 @@
 }
 
 @media (max-width: 600px) {
-  .ui-icon-button[data-context='task-modal-header'],
-  .ui-button[data-role='task-compact-action'],
-  .ui-dialog[data-role='task-modal'] .ui-button {
-    min-height: 40px;
-  }
-
-  .ui-icon-button[data-context='task-modal-header'] {
-    width: 40px;
-    height: 40px;
-  }
-
-  .ui-button[data-role='task-compact-action'] {
-    height: 40px;
-  }
-
   .ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
     width: 100%;
   }
@@ -1946,14 +2001,8 @@
   .ui-tab[data-context='task-modal-tab'] {
     flex: 1;
     justify-content: center;
-    min-height: 40px;
+    min-height: var(--control-height);
     padding-inline: 8px;
-  }
-
-  .ui-icon-button[data-context='pipeline-stage-close'] {
-    width: 44px;
-    height: 44px;
-    min-height: 44px;
   }
 
   .ui-button[data-role='pipeline-runner'] {
@@ -1961,4 +2010,71 @@
     min-width: 0;
     min-height: 44px;
   }
+}
+
+/* Шапки диалогов следуют высоте controls и в узком desktop-окне. */
+.ui-icon-button[data-context='task-modal-header'],
+.ui-icon-button[data-context='pipeline-stage-close'] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+}
+
+/* Общий skin навигационных ссылок и pressable оболочки. Раскладка остаётся в shell. */
+.shell [data-ui-shell-nav] {
+  width: var(--app-nav-row-h);
+  height: var(--app-nav-row-h);
+  min-height: var(--app-nav-row-h);
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  color: var(--ink-mid);
+  background: none;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+
+.shell [data-ui-shell-nav]:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.shell [data-ui-shell-nav].active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+/* Метрики и сеть топбара используют настоящие клавиатурные кнопки.
+   Геометрия и типографика живут рядом с остальными status controls. */
+.ui-pressable[data-context='topbar-metrics'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+}
+.ui-pressable[data-context='topbar-metrics'] b {
+  font-weight: 600;
+}
+
+.ui-pressable[data-context='topbar-metrics'].stale > span {
+  opacity: .5;
+}
+
+.ui-pressable[data-context='topbar-network'] {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  gap: 6px;
+  color: var(--ink-mid);
+}
+.ui-pressable[data-context='topbar-network'] .flag {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.ui-pressable[data-context='topbar-network'] .ip {
+  letter-spacing: .01em;
 }

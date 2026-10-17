@@ -1,3 +1,5 @@
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import { describeStatus } from '../../b24/status.ts';
 
 import { decodeContract } from '../contract.ts';
@@ -5,7 +7,7 @@ import type { B24Summary } from '../contract.ts';
 import { MobileInputError } from '../errors.ts';
 import { factorySnapshotHash } from '../factoryIdentity.ts';
 import type { MobileApp } from '../mobileServer.ts';
-import { paginate, record, text, upstream } from './common.ts';
+import { paginate, text, upstream } from './common.ts';
 import type { FacadeDeps, Payload } from './common.ts';
 import { taskId } from './tasks.ts';
 
@@ -49,10 +51,10 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
     const pipeline = await upstream(deps, 'GET', '/api/tasks');
     const ids = new Set(
       (Array.isArray(pipeline.tasks) ? pipeline.tasks : []).map((item) =>
-        String(record(item).task),
+        String(recordOrEmpty(item).task),
       ),
     );
-    const sourceTasks = Array.isArray(source.tasks) ? source.tasks.map(record) : [];
+    const sourceTasks = Array.isArray(source.tasks) ? source.tasks.map(recordOrEmpty) : [];
     const tasks: B24Summary[] = sourceTasks.map((task) => ({
       id: taskId(String(task.id)),
       title: text(task.title, 800),
@@ -93,7 +95,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
       const pipeline = await upstream(deps, 'GET', '/api/tasks');
       const existing =
         Array.isArray(pipeline.tasks) &&
-        pipeline.tasks.some((task) => String(record(task).task) === id);
+        pipeline.tasks.some((task) => String(recordOrEmpty(task).task) === id);
 
       if (existing) {
         return decodeContract('launch-options', {
@@ -124,7 +126,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
       const options = reason
         ? []
         : routes.map((route) => {
-            const option = record(record(snapshot.routeOptions)[String(route)]);
+            const option = recordOrEmpty(recordOrEmpty(snapshot.routeOptions)[String(route)]);
 
             return {
               id: String(route),
@@ -166,9 +168,9 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
       'launch',
       request.body?.actionToken,
     );
-    const snapshot = record(saved.snapshot);
+    const snapshot = recordOrEmpty(saved.snapshot);
     const optionId = request.body?.optionId;
-    const option = record(record(snapshot.routeOptions)[String(optionId)]);
+    const option = recordOrEmpty(recordOrEmpty(snapshot.routeOptions)[String(optionId)]);
 
     if (
       typeof optionId !== 'string' ||

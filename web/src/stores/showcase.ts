@@ -12,8 +12,8 @@ import type {
   ShowcaseProjectSummary,
   ShowcaseVoiceCatalog,
   ShowcaseVoiceDictionary,
-} from '../../../shared/showcaseContracts';
-import type { ShowcaseFinalManifest } from '../../../shared/showcaseTimeline';
+} from '../../../shared/plugins/showcase/showcaseContracts';
+import type { ShowcaseFinalManifest } from '../../../shared/plugins/showcase/showcaseTimeline';
 
 const ACTIVE_BUILD_STATES = new Set<ShowcaseBuildRun['state']>([
   'queued', 'running', 'cancelling',

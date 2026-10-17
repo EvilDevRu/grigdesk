@@ -3,12 +3,12 @@
 
 import { api } from './apiClient.ts';
 import type { ApiClient } from './apiClient.ts';
-import { decodeProviderSettingsCatalog } from '../../../shared/providerSettingsContracts.ts';
+import { decodeProviderSettingsCatalog } from '../../../shared/chat/providerSettingsContracts.ts';
 import type {
   ProviderSettingsCatalog,
   ProviderSettingsOverrideRequest,
   ProviderSettingsOverrideResponse,
-} from '../../../shared/providerSettingsContracts.ts';
+} from '../../../shared/chat/providerSettingsContracts.ts';
 
 export interface ProviderSettingsApi {
   catalog: (id: string, refresh?: boolean) => Promise<ProviderSettingsCatalog>;

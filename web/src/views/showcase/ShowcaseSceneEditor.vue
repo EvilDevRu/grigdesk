@@ -328,10 +328,10 @@ import type {
   ShowcaseCheck,
   ShowcaseScene,
   ShowcaseVoiceInfo,
-} from '../../../../shared/showcaseContracts';
-import type { ShowcaseSyncCueKind } from '../../../../shared/showcaseContracts';
-import { parseNarration } from '../../../../shared/showcaseNarration';
-import { SHOWCASE_SYNC_ACTIONS_BY_CUE } from '../../../../shared/showcaseSync';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
+import type { ShowcaseSyncCueKind } from '../../../../shared/plugins/showcase/showcaseContracts';
+import { parseNarration } from '../../../../shared/plugins/showcase/showcaseNarration';
+import { SHOWCASE_SYNC_ACTIONS_BY_CUE } from '../../../../shared/plugins/showcase/showcaseSync';
 import { actionsText, CONTINUATION_LABEL, sceneStateOf } from './sceneText';
 import {
   bindingStatusOf,

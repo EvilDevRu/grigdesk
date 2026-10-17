@@ -10,7 +10,7 @@ import {
   toRuntimeCatalogInput,
 } from '../../server/src/modules/routes/draftModel.ts';
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
-import { projectRouteCatalog } from '../../shared/routeProjection.ts';
+import { projectRouteCatalog } from '../../shared/pipeline/routeProjection.ts';
 
 const META = {
   id: '33333333-3333-4333-8333-333333333333',

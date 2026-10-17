@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -12,13 +13,14 @@ import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
 import { glmChatHome } from '../../server/src/lib/glm/launch.ts';
 import { glmSessionJournalDir } from '../../server/src/lib/glm/session.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_SERVICE_KEY, glmTextReply, writeGlmEgressGuard } from '../helpers/glmProductionFixture.mts';
 
 const requireServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireServer('fastify');
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G9/fixtures');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G9/fixtures');
 const MODEL = '["zai","glm-5.3"]';
 
 /**

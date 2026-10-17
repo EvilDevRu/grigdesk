@@ -1,7 +1,7 @@
 // Оповещения пользователю: системная нотификация, если доступна и разрешена,
 // иначе — мигание заголовком вкладки. Notification API требует secure context
 // (https/localhost) — на http://<ip> молча падаем в фоллбэк.
-// Задел на будущее: тот же интерфейс сможет дёргать Electron-обёртка.
+import { NOTIFICATION_ICON } from './notificationIcon.ts';
 
 let blinkTimer: ReturnType<typeof setInterval> | null = null;
 let baseTitle: string | null = null;
@@ -18,20 +18,6 @@ function notificationApi(): typeof Notification | null {
   }
 
   return window.Notification;
-}
-
-/**
- * Абсолютный адрес иконки собирается от текущего документа и базы интерфейса.
- * Уведомление получает тот же адрес ресурса, который обслуживает origin страницы.
- */
-function notificationIcon(): string {
-  const base = import.meta.env?.BASE_URL || './';
-
-  try {
-    return new URL(`${base}icon-96.png`, window.location.href).href;
-  } catch {
-    return `${base}icon-96.png`;
-  }
 }
 
 /**
@@ -110,27 +96,12 @@ export async function notify(title: string, body = '', tag = '', url = ''): Prom
   const NotificationApi = notificationApi();
 
   if (NotificationApi?.permission === 'granted') {
-    // На Android установленная PWA не разрешает `new Notification()` и бросает
-    // Illegal constructor. showNotification() активной регистрации — штатный путь и
-    // для Android, и для десктопа. URL нужен обработчику notificationclick в SW.
     const options: NotificationOptions = {
       body,
       tag: tag || undefined,
-      icon: notificationIcon(),
+      icon: NOTIFICATION_ICON,
       data: { url: url || (typeof window !== 'undefined' ? window.location.href : '') },
     };
-
-    try {
-      const registration = typeof navigator !== 'undefined'
-        ? await navigator.serviceWorker?.getRegistration?.()
-        : null;
-
-      if (typeof registration?.showNotification === 'function') {
-        await registration.showNotification(title, options);
-
-        return true;
-      }
-    } catch { /* попробуем обычный Notification (десктоп без живого SW) */ }
 
     try {
       const n = new NotificationApi(title, options);
@@ -178,16 +149,6 @@ export async function closeSystemNotification(tag: string): Promise<void> {
     systemNotifications.get(tag)?.close();
     systemNotifications.delete(tag);
   } catch {
-    // Закрытие экземпляра не блокирует очистку канала service worker.
-  }
-
-  try {
-    const registration = typeof navigator !== 'undefined'
-      ? await navigator.serviceWorker?.getRegistration?.() : null;
-    const notifications = await registration?.getNotifications?.({ tag });
-
-    notifications?.forEach((notification) => notification.close());
-  } catch {
-    // Канал ОС может исчезнуть вместе с регистрацией service worker.
+    // Канал ОС может исчезнуть вместе с окном приложения.
   }
 }

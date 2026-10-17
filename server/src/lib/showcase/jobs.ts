@@ -18,7 +18,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
 import { processAlive } from './processIdentity.ts';
-import type { ShowcaseJob, ShowcaseJobState } from '../../../../shared/showcaseContracts.ts';
+import type { ShowcaseJob, ShowcaseJobState } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { notFound, ShowcaseError } from './errors.ts';
 import type { ProcessIdentity } from './processIdentity.ts';
 

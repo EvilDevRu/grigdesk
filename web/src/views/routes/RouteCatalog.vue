@@ -110,7 +110,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { RouteDraft, RouteDraftSummary } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteDraft, RouteDraftSummary } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { CatalogCommandIssue, CatalogCommandResult } from './catalogCommands.ts';
 import { createRoute, cloneRoute, renameRoute, removeRoute, inspectRouteReferences,
   copyNodesFromRoute, setRouteProperties } from './catalogCommands.ts';

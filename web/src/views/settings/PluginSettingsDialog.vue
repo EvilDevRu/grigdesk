@@ -70,6 +70,13 @@
         Изменение состояния серверной части применится после рестарта Cockpit.
       </p>
 
+      <PluginSourcePanel
+        v-if="!plugin.system"
+        :plugin="plugin"
+        @update="emit('update-plugin', plugin.id)"
+        @bind="emit('bind-source', plugin.id)"
+      />
+
       <div v-if="!plugin.enabled" class="pd-state">
         <span class="pd-state-icon" aria-hidden="true">
           <svg
@@ -407,9 +414,10 @@ import {
 } from '../../ui';
 import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.js';
 import { useProvidersStore } from '../../stores/providers.js';
+import PluginSourcePanel from './PluginSourcePanel.vue';
 import { pluginIconPath } from '../../shared/navIcons.ts';
-import { pluginCategoryLabel } from '../../../../shared/pluginsContracts.ts';
-import type { ProviderEntry } from '../../../../shared/providersContracts.ts';
+import { pluginCategoryLabel } from '../../../../shared/plugins/pluginsContracts.ts';
+import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
 import type {
   PluginListItem,
   PluginModelValue,
@@ -417,7 +425,7 @@ import type {
   PluginSetting,
   PluginSetupItem,
   PluginSetupStatus,
-} from '../../../../shared/pluginsContracts.ts';
+} from '../../../../shared/plugins/pluginsContracts.ts';
 
 // Настройки одного плагина. Раздел показывает каталог плитками, а форма существует
 // только для того модуля, который человек открыл, — поэтому она живёт в модалке, а не
@@ -438,6 +446,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:open': [value: boolean];
   toggle: [enabled: boolean];
+  'update-plugin': [id: string];
+  'bind-source': [id: string];
 }>();
 
 const pluginsStore = usePluginsStore();

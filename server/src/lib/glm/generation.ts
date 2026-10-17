@@ -1,3 +1,5 @@
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { readSelectedDeepSeekHeader } from '../deepseek/runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
 import { glmAccessError } from './env.ts';
@@ -11,18 +13,14 @@ export interface GlmGeneration {
 
 type PluginContract = GlmCompatibilityRuntime['llmPiAi'];
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
 /**
  * Поле llmPiAi поколения принимается только целиком: версия и integrity pi-ai,
  * хэш исходников плагина и список патчей. Частичное поле означает «плагина нет».
  */
 function pluginContract(value: unknown): PluginContract | null {
-  const plugin = record(value);
-  const piAi = record(plugin.piAi);
-  const patches = Array.isArray(plugin.patches) ? plugin.patches.map(record) : null;
+  const plugin = recordOrEmpty(value);
+  const piAi = recordOrEmpty(plugin.piAi);
+  const patches = Array.isArray(plugin.patches) ? plugin.patches.map(recordOrEmpty) : null;
 
   if (typeof piAi.version !== 'string' || !piAi.version || typeof piAi.integrity !== 'string'
     || !piAi.integrity || typeof plugin.sourceHash !== 'string' || !/^[a-f0-9]{64}$/u.test(plugin.sourceHash)

@@ -1,10 +1,10 @@
 import type {
   RouteDraft,
   RouteEditorIssue,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type {
   DraftMachine,
-} from '../../../../shared/routeDefinition.ts';
+} from '../../../../shared/pipeline/routeDefinition.ts';
 
 import { toRuntimeCatalogInput, validateDraftShape } from './draftModel.ts';
 import {

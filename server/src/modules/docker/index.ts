@@ -9,6 +9,8 @@ import type { FastifyReply } from 'fastify';
 import type {} from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { createLogDemuxer } from '../../lib/docker/client.ts';
 import type { DockerService } from '../../lib/docker/service.ts';
 import type {
@@ -19,7 +21,7 @@ import type {
   DockerStatsInput,
   DockerStatsMap,
   DockerStatsMessage,
-} from '../../../../shared/dockerContracts.ts';
+} from '../../../../shared/plugins/docker/dockerContracts.ts';
 
 interface DockerModuleOptions {
   service: DockerService;
@@ -83,10 +85,6 @@ const LOG_BATCH_LIMIT = 64 * 1024;
 // Статистика — периодический срез. Чаще секунды её не считает и сам docker stats.
 const STATS_MIN_INTERVAL_MS = 1000;
 const STATS_MAX_CONTAINERS = 40;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 function errorMessage(error: unknown): string {
   return isRecord(error) && typeof error.message === 'string' ? error.message : 'Ошибка Docker';

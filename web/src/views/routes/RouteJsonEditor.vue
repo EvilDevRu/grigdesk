@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RouteEditorIssue } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteJsonBuffer } from '../../actions/routes/jsonDraftBuffer.ts';
 import { UiButton } from '../../ui';
 import RouteMarkdownInput from './RouteMarkdownInput.vue';

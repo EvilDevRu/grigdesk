@@ -10,11 +10,13 @@
 
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { PROFILE_RE, listFactoryProfiles, listProjects } from '../../lib/profiles.ts';
 import { cachedTriageProfile, readProjectRecord } from '../../lib/projects.ts';
 import { checkRepositoryPaths } from '../../lib/projects/repositoryCheck.ts';
 import { RoutesStore } from '../routes/store.ts';
-import { validateProjectInput } from '../../../../shared/projectsContracts.ts';
+import { validateProjectInput } from '../../../../shared/runtime/projectsContracts.ts';
 import { ProjectsError } from './errors.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import type { ProjectImport, ProjectRecord, ProjectRepoRef } from '../../lib/projects.ts';
@@ -23,7 +25,7 @@ import type {
   ProjectDetail,
   ProjectInput,
   ProjectSummary,
-} from '../../../../shared/projectsContracts.ts';
+} from '../../../../shared/runtime/projectsContracts.ts';
 
 export type ProjectsChangeKind =
   | 'created'
@@ -123,18 +125,12 @@ function errorText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error);
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
 /** Строки путей в записи: недоверенный файл настроек проверяется по форме. */
 function repoRefsOf(value: unknown): ProjectRepoRef[] {
   const refs: ProjectRepoRef[] = [];
 
   for (const row of Array.isArray(value) ? value : []) {
-    const source = asRecord(row);
+    const source = recordOrEmpty(row);
     const key = typeof source.key === 'string' ? source.key : '';
     const dir = typeof source.dir === 'string' ? source.dir : '';
 
@@ -381,11 +377,11 @@ export function createProjectsService({
   }
 
   function storedProjectsOf(stored: Record<string, unknown>): Record<string, unknown> {
-    return asRecord(stored.projects);
+    return recordOrEmpty(stored.projects);
   }
 
   function rawRecordOf(stored: Record<string, unknown>, id: string): Record<string, unknown> {
-    return asRecord(storedProjectsOf(stored)[id]);
+    return recordOrEmpty(storedProjectsOf(stored)[id]);
   }
 
   async function list(): Promise<ProjectSummary[]> {

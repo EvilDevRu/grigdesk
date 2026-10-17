@@ -1,0 +1,1008 @@
+{
+  "synthetic": true,
+  "description": "Только тестовые данные; не копия переписки или профиля пользователя. Подготовка шага 0, ещё не подключено к renderer.",
+  "store": {
+    "sessions": [
+      {
+        "id": "density-fixture-01",
+        "title": "Синтетический разговор 01 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950400000,
+        "unread": false,
+        "draft": "Синтетический черновик: сохранить при смене плотности",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетический запрос 1: согласовать размеры панели.",
+            "sentAt": 1791950400000,
+            "attachments": [
+              {
+                "file": "fixture.txt",
+                "name": "Синтетическое вложение.txt",
+                "mime": "text/plain",
+                "url": "/density-fixture/attachment.txt"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 1.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950401000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 2: согласовать размеры панели.",
+            "sentAt": 1791950402000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 2.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950403000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 3: согласовать размеры панели.",
+            "sentAt": 1791950404000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 3.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950405000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 4: согласовать размеры панели.",
+            "sentAt": 1791950406000
+          },
+          {
+            "role": "assistant",
+            "text": "Это синтетическая переписка для проверки плотности интерфейса.\n\nДлинная строка остаётся доступной внутри своей области прокрутки. Цвета, семейство шрифта и размер текста сохранены.\n\n| Проверка | Результат |\n| --- | --- |\n| Состояние чата | Сохраняется |\n| Пользовательская ширина | Сохраняется |\n\n```typescript\nconst message = 'Синтетический пример кода';\nconst longCommand = 'synthetic-long-command-abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';\n```\n\n> Важная строка для чтения выше конца ленты.\n\n- Проверить кнопку отправки.\n- Сохранить выделение и черновик.\n",
+            "model": "claude-fixture",
+            "sentAt": 1791950407000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 5: согласовать размеры панели.",
+            "sentAt": 1791950408000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 5.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950409000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 6: согласовать размеры панели.",
+            "sentAt": 1791950410000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 6.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950411000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 7: согласовать размеры панели.",
+            "sentAt": 1791950412000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 7.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950413000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 8: согласовать размеры панели.",
+            "sentAt": 1791950414000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 8.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950415000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 9: согласовать размеры панели.",
+            "sentAt": 1791950416000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 9.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950417000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 10: согласовать размеры панели.",
+            "sentAt": 1791950418000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 10.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950419000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 11: согласовать размеры панели.",
+            "sentAt": 1791950420000
+          },
+          {
+            "role": "assistant",
+            "text": "Синтетический ответ 11.\n\nВторой абзац для проверки интервала ленты и положения чтения.",
+            "model": "claude-fixture",
+            "sentAt": 1791950421000
+          },
+          {
+            "role": "user",
+            "text": "Синтетический запрос 12: согласовать размеры панели.",
+            "sentAt": 1791950422000
+          },
+          {
+            "role": "assistant",
+            "text": "Это синтетическая переписка для проверки плотности интерфейса.\n\nДлинная строка остаётся доступной внутри своей области прокрутки. Цвета, семейство шрифта и размер текста сохранены.\n\n| Проверка | Результат |\n| --- | --- |\n| Состояние чата | Сохраняется |\n| Пользовательская ширина | Сохраняется |\n\n```typescript\nconst message = 'Синтетический пример кода';\nconst longCommand = 'synthetic-long-command-abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';\n```\n\n> Важная строка для чтения выше конца ленты.\n\n- Проверить кнопку отправки.\n- Сохранить выделение и черновик.\n",
+            "model": "claude-fixture",
+            "sentAt": 1791950423000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        },
+        "draftAttachments": [
+          {
+            "file": "fixture.txt",
+            "name": "Синтетическое вложение.txt",
+            "mime": "text/plain",
+            "url": "/density-fixture/attachment.txt"
+          }
+        ]
+      },
+      {
+        "id": "density-fixture-02",
+        "title": "Синтетический разговор 02 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950340000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 2. Проверить геометрию окна.",
+            "sentAt": 1791950340000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791950341000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-03",
+        "title": "Синтетический разговор 03 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950280000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 3. Проверить геометрию окна.",
+            "sentAt": 1791950280000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791950281000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-04",
+        "title": "Синтетический разговор 04 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950220000,
+        "unread": true,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 4. Проверить геометрию окна.",
+            "sentAt": 1791950220000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791950221000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-05",
+        "title": "Синтетический разговор 05 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950160000,
+        "unread": false,
+        "draft": "Синтетический черновик: сохранить при смене плотности",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 5. Проверить геометрию окна.",
+            "sentAt": 1791950160000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791950161000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-06",
+        "title": "Синтетический разговор 06 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950100000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 6. Проверить геометрию окна.",
+            "sentAt": 1791950100000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791950101000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-07",
+        "title": "Синтетический разговор 07 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791950040000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 7. Проверить геометрию окна.",
+            "sentAt": 1791950040000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791950041000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-08",
+        "title": "Синтетический разговор 08 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949980000,
+        "unread": true,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 8. Проверить геометрию окна.",
+            "sentAt": 1791949980000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791949981000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-09",
+        "title": "Синтетический разговор 09 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949920000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 9. Проверить геометрию окна.",
+            "sentAt": 1791949920000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949921000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-10",
+        "title": "Синтетический разговор 10 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949860000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 10. Проверить геометрию окна.",
+            "sentAt": 1791949860000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791949861000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-11",
+        "title": "Синтетический разговор 11 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949800000,
+        "unread": true,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 11. Проверить геометрию окна.",
+            "sentAt": 1791949800000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791949801000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-12",
+        "title": "Синтетический разговор 12 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949740000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 12. Проверить геометрию окна.",
+            "sentAt": 1791949740000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949741000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-13",
+        "title": "Синтетический разговор 13 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949680000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 13. Проверить геометрию окна.",
+            "sentAt": 1791949680000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791949681000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-14",
+        "title": "Синтетический разговор 14 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949620000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 14. Проверить геометрию окна.",
+            "sentAt": 1791949620000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791949621000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-15",
+        "title": "Синтетический разговор 15 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949560000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 15. Проверить геометрию окна.",
+            "sentAt": 1791949560000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949561000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-16",
+        "title": "Синтетический разговор 16 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949500000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 16. Проверить геометрию окна.",
+            "sentAt": 1791949500000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791949501000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-17",
+        "title": "Синтетический разговор 17 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949440000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 17. Проверить геометрию окна.",
+            "sentAt": 1791949440000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791949441000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-18",
+        "title": "Синтетический разговор 18 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949380000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 18. Проверить геометрию окна.",
+            "sentAt": 1791949380000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949381000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-19",
+        "title": "Синтетический разговор 19 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949320000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 19. Проверить геометрию окна.",
+            "sentAt": 1791949320000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791949321000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-20",
+        "title": "Синтетический разговор 20 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949260000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 20. Проверить геометрию окна.",
+            "sentAt": 1791949260000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791949261000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-21",
+        "title": "Синтетический разговор 21 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949200000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 21. Проверить геометрию окна.",
+            "sentAt": 1791949200000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949201000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-22",
+        "title": "Синтетический разговор 22 — проверка длинного русского названия и доступности действий",
+        "model": "claude-fixture",
+        "modelRef": {
+          "provider": "claude",
+          "model": "claude-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949140000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 22. Проверить геометрию окна.",
+            "sentAt": 1791949140000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "claude-fixture",
+            "sentAt": 1791949141000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-23",
+        "title": "Синтетический разговор 23 — проверка длинного русского названия и доступности действий",
+        "model": "codex-fixture",
+        "modelRef": {
+          "provider": "codex",
+          "model": "codex-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949080000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 23. Проверить геометрию окна.",
+            "sentAt": 1791949080000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "codex-fixture",
+            "sentAt": 1791949081000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      },
+      {
+        "id": "density-fixture-24",
+        "title": "Синтетический разговор 24 — проверка длинного русского названия и доступности действий",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949020000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 24. Проверить геометрию окна.",
+            "sentAt": 1791949020000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949021000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        }
+      }
+    ],
+    "archived": [
+      {
+        "id": "density-archive-01",
+        "title": "Синтетический архив — длинное название",
+        "model": "kimi-fixture",
+        "modelRef": {
+          "provider": "kimi",
+          "model": "kimi-fixture"
+        },
+        "mode": "manual",
+        "effort": "high",
+        "updatedAt": 1791949020000,
+        "unread": false,
+        "draft": "",
+        "messages": [
+          {
+            "role": "user",
+            "text": "Синтетическое сообщение номер 24. Проверить геометрию окна.",
+            "sentAt": 1791949020000
+          },
+          {
+            "role": "assistant",
+            "text": "Ответ из фикстуры. Исполнитель не запускался.",
+            "model": "kimi-fixture",
+            "sentAt": 1791949021000
+          }
+        ],
+        "workdirState": {
+          "committed": {
+            "cwd": "/synthetic/проект-с-длинным-именем-для-проверки-шапки"
+          }
+        },
+        "closedAt": 1791950400000
+      }
+    ],
+    "activeId": "density-fixture-01"
+  },
+  "active": {
+    "protocol": 1,
+    "active": [
+      {
+        "chatKey": "density-fixture-02",
+        "model": "codex-fixture",
+        "providerId": "codex",
+        "runId": "synthetic-run",
+        "startedAt": 1791950400000,
+        "steps": []
+      }
+    ],
+    "queued": []
+  },
+  "question": {
+    "pid": "synthetic-question",
+    "chatKey": "density-fixture-01",
+    "questions": [
+      {
+        "question": "Как разместить длинное пояснение в узкой панели?",
+        "header": "Раскладка",
+        "options": [
+          {
+            "label": "Перенести по ширине",
+            "description": "Длинная подпись сохраняется целиком."
+          },
+          {
+            "label": "Открыть подробности",
+            "description": "Использовать существующий диалог."
+          }
+        ]
+      }
+    ]
+  },
+  "permission": {
+    "pid": "synthetic-permission",
+    "chatKey": "density-fixture-01",
+    "tool": "Bash",
+    "input": {
+      "command": "printf synthetic-fixture-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  "scenes": [
+    "chat",
+    "question",
+    "permission",
+    "warning",
+    "search",
+    "archive",
+    "board-badge-number-timer",
+    "board-badge-only-new",
+    "chat-unread-badge",
+    "pipeline-two-digit-badge",
+    "settings",
+    "dialog",
+    "popover",
+    "tooltip",
+    "virtual-list-300"
+  ]
+}

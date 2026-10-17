@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/analysisContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/pipeline/analysisContracts.ts",
     "src/shared/analysisApi.ts",
     "src/stores/analysis.ts",
     "src/actions/analysis/**/*.ts",

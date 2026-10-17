@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { parseCodeSearch } from '../../shared/codeContracts.ts';
+import { parseCodeSearch } from '../../shared/plugins/code/codeContracts.ts';
 import codeModule from '../../server/src/modules/code/index.ts';
 import { searchTree } from '../../server/src/lib/git.ts';
 

@@ -1,6 +1,6 @@
 // Реестр моделей исполнителей — данные, а не хардкод в компонентах:
 //   • сид собирается из исполнителей (lib/executors/*.seedModels) и один раз пишется
-//     в server/.state/models.json — файл РЕДАКТИРУЕМЫЙ: вышла новая модель →
+//     в state/models.json папки данных — файл РЕДАКТИРУЕМЫЙ: вышла новая модель →
 //     дописал строку в json, код не трогаем;
 //   • уровни эффорта обнаруживаются динамически (executor.efforts(), например парсинг
 //     `claude --help`) — добавит вендор новый уровень (ultra и т.п.) — подхватится само;
@@ -11,7 +11,7 @@
 // у исполнителя), tier (ранг силы).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { markSupersededModels } from '../../../shared/modelFamily.ts';
+import { markSupersededModels } from '../../../shared/chat/modelFamily.ts';
 import { getExecutors } from './executors/index.ts';
 import type { ExecutorAdapter } from './executors/index.ts';
 

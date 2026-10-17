@@ -6,8 +6,8 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
-    "../shared/shelfContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/b24/shelfContracts.ts",
     "src/lib/taskShelfStore.ts",
     "src/lib/taskShelfService.ts",
     "src/modules/task-shelf/**/*.ts",

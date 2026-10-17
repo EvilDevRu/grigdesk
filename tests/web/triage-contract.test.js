@@ -8,7 +8,7 @@ import {
   parseAnalysisDetail,
   parseAnalysisQueue,
   parseAnalysisRows,
-} from '../../shared/analysisContracts.ts';
+} from '../../shared/pipeline/analysisContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { analysisApi, analysisDisabledFailure } from '../../web/src/shared/analysisApi.ts';
 

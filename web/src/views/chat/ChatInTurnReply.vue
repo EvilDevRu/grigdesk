@@ -11,8 +11,10 @@
                         data-role="chat-reply-expand">
       {{ expanded ? 'Свернуть' : 'Показать полностью' }}
     </UiDisclosureButton>
-    <!-- Брошенный черновик уже не допишется: обещать «Пишет…» про него нельзя. -->
-    <span v-if="block.abandoned" class="chat-in-turn-reply__draft">Ответ оборван</span>
+    <!-- «Пишет…» обещаем только у незавершённого блока идущего хода. Брошенный черновик и
+         черновик законченного хода уже не допишутся; законченный блок подписи не получает. -->
+    <span v-if="block.complete === false && (block.abandoned || !live)"
+          class="chat-in-turn-reply__draft">Ответ оборван</span>
     <span v-else-if="block.complete === false" class="chat-in-turn-reply__draft">Пишет…</span>
     <span v-if="block.truncated" class="chat-in-turn-reply__draft">Ответ сокращён</span>
   </div>
@@ -27,6 +29,7 @@ import { UiDisclosureButton } from '../../ui';
 
 const props = defineProps<{
   chatId?: string;
+  live?: boolean;
   block: {
     text?: string;
     complete?: boolean;

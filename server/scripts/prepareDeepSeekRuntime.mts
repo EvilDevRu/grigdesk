@@ -5,8 +5,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
+import { sha256 } from '../../shared/node/hash.ts';
+
 import { buildDeepSeekRuntime, deepSeekBuildInputs } from '../../tools/buildDeepSeekRuntime.mts';
-import { materializeDeepSeekSnapshot, vendorHash } from '../../tools/deepseekVendorManifest.ts';
+import { materializeDeepSeekSnapshot } from '../../tools/deepseekVendorManifest.ts';
 import { acquireDeepSeekLock, publishDeepSeekGeneration } from '../../tools/deepseekRuntimePublication.ts';
 import { resolveDeepSeekRuntime } from '../src/lib/deepseek/runtimeProcess.ts';
 import { readDeepSeekArtifact } from '../src/lib/deepseek/runtimeArtifact.ts';
@@ -88,9 +90,9 @@ function currentGeneration(
       });
     }
 
-    const saved = vendorHash(JSON.stringify(artifact.inputIdentity.toolInputs));
+    const saved = sha256(JSON.stringify(artifact.inputIdentity.toolInputs));
 
-    if (saved !== vendorHash(JSON.stringify(inputs))) {
+    if (saved !== sha256(JSON.stringify(inputs))) {
       return null;
     }
 
@@ -150,7 +152,7 @@ async function buildAndPublish(): Promise<Record<string, unknown>> {
     staging = await fs.mkdtemp(path.join(runtimeRoot, '.prepare-'));
 
     const dependencyDir = path.join(root, 'tools/deepseek-build');
-    const lockHash = vendorHash(await fs.readFile(path.join(dependencyDir, 'package-lock.json')));
+    const lockHash = sha256(await fs.readFile(path.join(dependencyDir, 'package-lock.json')));
     const stamp = path.join(dependencyDir, 'node_modules/.cockpit-lock');
     let prepared = false;
 

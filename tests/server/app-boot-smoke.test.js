@@ -8,6 +8,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { pluginBootFixture } from './helpers/pluginBootFixture.js';
+
 const APP = fileURLToPath(new URL('../../server/src/app.ts', import.meta.url));
 const INSTALLED_APP = fileURLToPath(new URL('../../server/src/app.js', import.meta.url));
 
@@ -34,15 +36,18 @@ function freePort() {
 function isolatedEnv(root, port, mobilePort = port + 1) {
   return {
     PATH: '/usr/bin:/bin',
-    HOME: root,
+    HOME: path.join(root, 'home'),
+    COCKPIT_HOME: root,
     NODE_ENV: 'production',
     COCKPIT_PORT: String(port),
+    COCKPIT_WINDOW_KEY_PATH: path.join(root, 'window-auth/window-key'),
     COCKPIT_MOBILE_DIR: path.join(root, 'mobile'),
     COCKPIT_MOBILE_PORT: String(mobilePort),
     COCKPIT_MOBILE_APK_DIR: path.join(root, 'mobile-apk'),
     COCKPIT_HOST: '0.0.0.0',
     COCKPIT_TRUST_PROXY: '127.0.0.1',
     COCKPIT_CHATS_DIR: path.join(root, 'chats'),
+    COCKPIT_3D_DIR: path.join(root, '3d'),
     COCKPIT_TELEGRAM_DIR: path.join(root, 'telegram'),
     COCKPIT_GITHUB_DIR: path.join(root, 'github'),
     FACTORY_STATE_DIR: path.join(root, 'factory/state'),
@@ -53,6 +58,8 @@ function isolatedEnv(root, port, mobilePort = port + 1) {
     COCKPIT_MEDIA_DIR: path.join(root, 'media'),
     COCKPIT_MEDIA_HF_DIR: path.join(root, 'hf'),
     COCKPIT_PLUGINS_DIR: path.join(root, 'plugins'),
+    COCKPIT_PLUGINS_DATA_DIR: path.join(root, 'plugin-data'),
+    COCKPIT_PLUGIN_INSTALLS_STATE_PATH: path.join(root, 'state/plugin-installs.json'),
     COCKPIT_TICKETS_DIR: path.join(root, 'tickets'),
     COCKPIT_ROUTES_DIR: path.join(root, 'routes'),
     COCKPIT_ANALYSIS_DIR: path.join(root, 'analysis'),
@@ -69,6 +76,7 @@ function isolatedEnv(root, port, mobilePort = port + 1) {
     COCKPIT_MODELS_PATH: path.join(root, 'state/models.json'),
     COCKPIT_USAGE_FORECAST_PATH: path.join(root, 'state/usage-forecast.json'),
     COCKPIT_WEB_LOG_DIR: path.join(root, 'web-log'),
+    COCKPIT_UI_RELEASES_DIR: path.join(root, 'ui-releases'),
     COCKPIT_PREFS_PATH: path.join(root, 'state/prefs.json'),
     COCKPIT_AUTH_ACCOUNT: path.join(root, 'state/auth.json'),
     COCKPIT_AUTH_SESSIONS: path.join(root, 'state/sessions.json'),
@@ -121,8 +129,9 @@ async function listeningAddresses(pid, port) {
 test('сервер поднимается и закрывает /api гардом', { timeout: 120_000 }, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-boot-'));
   const port = await freePort();
+  const environment = isolatedEnv(root, port);
   const child = spawn(process.execPath, [APP], {
-    env: isolatedEnv(root, port),
+    env: environment,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -192,6 +201,44 @@ test('сервер поднимается и закрывает /api гардо�
   assert.equal(state.status, 200);
   assert.equal((await state.json()).secure, false);
 
+  await t.test('DW-K7: boot пишет ключ под своим root', async () => {
+    assert.equal(environment.COCKPIT_WINDOW_KEY_PATH, path.join(root, 'window-auth/window-key'));
+
+    const deadline = Date.now() + 3000;
+    let exchange;
+
+    while (Date.now() < deadline) {
+      try {
+        const key = await readFile(environment.COCKPIT_WINDOW_KEY_PATH, 'utf8');
+
+        exchange = await fetch(address + '/api/auth/window-session', {
+          method: 'POST',
+          headers: { 'x-cockpit-window-key': key },
+          signal: AbortSignal.timeout(1000),
+        });
+
+        if (exchange.status === 200) {
+          break;
+        }
+      } catch {
+        // Хук listen ещё может публиковать только свой файл.
+        // Срок ожидания не означает обращения к настоящему runtime.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    assert.equal(exchange?.status, 200);
+
+    const cookie = exchange.headers.get('set-cookie').split(';')[0];
+    const health = await fetch(address + '/api/health', {
+      headers: { cookie },
+      signal: AbortSignal.timeout(1000),
+    });
+
+    assert.equal(health.status, 200);
+  });
+
   // Каталог шаблонов журнала окна собирает хук onRoute до регистрации модулей:
   // в нём должны оказаться маршруты модулей, а не только самого журнала.
   const token = (await readFile(path.join(root, 'state/cli-token'), 'utf8')).trim();
@@ -205,6 +252,25 @@ test('сервер поднимается и закрывает /api гардо�
   assert.ok(catalog.includes('/api/tasks'), 'маршрут модуля задач есть в каталоге');
   assert.ok(catalog.includes('/api/web-log/routes'));
   assert.ok(catalog.every((template) => template.startsWith('/api')));
+});
+
+test('DW-K7: boot с невалидным родителем ключа остаётся жив', { timeout: 60000 }, async (t) => {
+  const fixture = await pluginBootFixture(t, {
+    before: async ({ env }) => {
+      await writeFile(path.dirname(env.COCKPIT_WINDOW_KEY_PATH), 'собственный обычный файл', {
+        mode: 0o600,
+      });
+    },
+  });
+  const exchange = await fetch(fixture.address + '/api/auth/window-session', {
+    method: 'POST',
+    signal: AbortSignal.timeout(1000),
+  });
+
+  assert.equal(exchange.status, 503);
+  assert.equal((await exchange.json()).error, 'window_key_unavailable');
+  assert.equal(fixture.child.exitCode, null);
+  assert.equal((await fixture.get('/api/health')).status, 200);
 });
 
 /**

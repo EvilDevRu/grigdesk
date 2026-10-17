@@ -18,7 +18,7 @@
   Anthropic ходит через тот же туннель.
 
 Корень ниже кокпита: исходящий контур `singbox_tun` терял **половину TLS-рукопожатий** к
-зарубежным хостам (замер `.state/artifacts/net-probe/tls-probe.sh`: api.anthropic.com 5/10,
+зарубежным хостам (замер `~/.cockpit/artifacts/net-probe/tls-probe.sh`: api.anthropic.com 5/10,
 chatgpt.com 4/10, example.com 4/6 отказов; ya.ru мимо туннеля — 0/6). TCP до всех ~40 мс,
 рвётся именно рукопожатие. Коллизии docker/VPN из соседних граблей не было (`ip_range`
 у `<PROFILE>_default` стоит, адрес шлюза `.2` свободен) — это сам outbound sing-box.

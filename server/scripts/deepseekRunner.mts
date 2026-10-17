@@ -1,3 +1,5 @@
+import os from 'node:os';
+import { dataHome } from '../../shared/runtime/dataHome.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -257,7 +259,7 @@ export async function runDeepSeekFactory(
     cwd: args.cwd,
     mode: args.mode,
     prefsPath: env.COCKPIT_PROVIDER_PREFS_PATH || env.COCKPIT_PREFS_PATH
-      || path.join(ROOT, 'server/.state/prefs.json'),
+      || path.join(dataHome({ env, home: env.HOME || os.homedir() }), 'state/prefs.json'),
   });
   const publish = deps.emit || emit;
   const prompt = await fs.readFile(args.promptFile, 'utf8');

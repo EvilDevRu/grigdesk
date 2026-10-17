@@ -2,7 +2,9 @@
 // Reviewable candidate публикуется отдельным явно выбранным действием.
 
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { artifactsPath } from '../shared/runtime/dataHome.ts';
 import {
   fetchDeepSeekUpstream,
   materializeDeepSeekSnapshot,
@@ -66,7 +68,7 @@ async function main(): Promise<void> {
 
   const vendorDir = path.resolve(args.get('--vendor-dir') ?? 'third_party/deepseek-harness');
   const stagingParent = path.resolve(args.get('--staging-parent')
-    ?? '.state/artifacts/deepseek-vendoring/sync');
+    ?? path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'deepseek-vendoring/sync'));
   const selectionFile = args.get('--selection');
 
   await fs.mkdir(stagingParent, { recursive: true });

@@ -6,9 +6,9 @@ import type {
   ShowcaseScene,
   ShowcaseSyncCueKind,
   ShowcaseSyncCueOrigin,
-} from '../../../../shared/showcaseContracts';
-import { parseNarration, plainNarration } from '../../../../shared/showcaseNarration';
-import { validateShowcaseSyncBindings } from '../../../../shared/showcaseSync';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
+import { parseNarration, plainNarration } from '../../../../shared/plugins/showcase/showcaseNarration';
+import { validateShowcaseSyncBindings } from '../../../../shared/plugins/showcase/showcaseSync';
 
 export interface SceneSyncCueDraft {
   id: string | null;

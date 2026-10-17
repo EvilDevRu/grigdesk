@@ -1,5 +1,5 @@
 <template>
-  <main class="ui-gallery">
+  <main class="ui-gallery" :data-ui-touch="touch ? '' : undefined">
     <header class="ui-gallery__header">
       <p class="muted">Dev/test entry · без store, API и авторизации</p>
       <h1>UI-kit Cockpit</h1>
@@ -321,6 +321,7 @@
       <UiDialog
         v-model:open="dialogOpen"
         data-geometry-dialog
+        :data-ui-touch="touch ? '' : undefined"
         title="Проверка геометрии"
         description="Диалог должен помещаться в каждый viewport матрицы."
         size="content"
@@ -338,6 +339,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+
 import {
   UiActionLink,
   UiButton,
@@ -367,6 +369,8 @@ import {
   type UiActionVariant,
   type UiSelectionOption,
 } from '../../src/ui';
+
+const touch = new URLSearchParams(location.search).has('touch');
 
 const variants: UiActionVariant[] = ['solid', 'outline', 'ghost', 'text'];
 const tones: UiActionTone[] = ['neutral', 'accent', 'success', 'warning', 'danger'];

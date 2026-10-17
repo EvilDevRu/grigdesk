@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/shelfContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/b24/shelfContracts.ts",
     "src/shared/shelfApi.ts",
     "src/shared/taskShelfDecision.ts",
     "src/stores/taskShelf.ts",

@@ -31,7 +31,7 @@ import {
   prepareVoiceText,
 } from '../../server/src/lib/showcase/voice/preparation.ts';
 import { SILERO_VOICES } from '../../server/src/lib/showcase/voice/sileroCatalog.ts';
-import { parseNarration } from '../../shared/showcaseNarration.ts';
+import { parseNarration } from '../../shared/plugins/showcase/showcaseNarration.ts';
 
 const run = promisify(execFile);
 

@@ -64,10 +64,25 @@ async function fixture(t, { askQuestion = false, expectedSteers = 1 } = {}) {
       } else {
         steerCount += 1;
         const currentSteer = steerCount;
+
         queueMicrotask(() => {
           text(currentSteer === 1 ? 'steer-attempt' : `steer-attempt-${currentSteer}`,
             `Отвечаю на вопрос ${currentSteer}.`);
-          event('tool/result', { message: { toolCallId: 'tool-1', content: [], isError: false } });
+          // Форма настоящего DSH: id вызова — в source сообщения и в блоке tool-result.
+          event('tool/result', {
+            message: {
+              role: 'user',
+              source: {
+                kind: 'tool',
+                callId: 'tool-1',
+              },
+              content: [{
+                type: 'tool-result',
+                toolCallId: 'tool-1',
+                content: [],
+              }],
+            },
+          });
           if (currentSteer >= expectedSteers) {
             void continueSecondStep.then(() => {
               text('final-attempt', 'Второй файл проверен.');

@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import type { ChildProcess } from 'node:child_process';
 
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
 import { ensurePrivateDir } from '../deepseek/env.ts';
 import { resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
@@ -24,10 +26,6 @@ export interface GlmCatalogEntry {
   contextRuntimeOnly: true;
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
 /**
  * Значения выбора ACP с вложенными группами — плоским списком в порядке DSH.
  * Записи без строкового значения пропускаются, их потомки — нет.
@@ -39,7 +37,7 @@ function choices(option: unknown): Array<{ value: string; name: string }> {
    * Группа без значения сама в список не попадает.
    */
   const visit = (entries: unknown): void => {
-    for (const entry of Array.isArray(entries) ? entries.map(record) : []) {
+    for (const entry of Array.isArray(entries) ? entries.map(recordOrEmpty) : []) {
       if (typeof entry.value === 'string') {
         output.push({ value: entry.value, name: String(entry.name || entry.value) });
       }
@@ -48,13 +46,13 @@ function choices(option: unknown): Array<{ value: string; name: string }> {
     }
   };
 
-  visit(record(option).options);
+  visit(recordOrEmpty(option).options);
 
   return output;
 }
 
 function find(options: unknown, id: string): unknown {
-  return (Array.isArray(options) ? options.map(record) : []).find((entry) => entry.id === id);
+  return (Array.isArray(options) ? options.map(recordOrEmpty) : []).find((entry) => entry.id === id);
 }
 
 /**
@@ -161,13 +159,15 @@ export async function readGlmCatalog({
     try {
       await initializeAcp(client, 15_000);
 
-      const created = record(await client.request('session/new', { cwd: project, mcpServers: [] }, 30_000));
+      const created = recordOrEmpty(await client.request(
+        'session/new', { cwd: project, mcpServers: [] }, 30_000
+      ));
       const sessionId = String(created.sessionId || '');
       const perModel: Record<string, unknown> = {};
 
       for (const model of choices(find(created.configOptions, GLM_ACP_MODEL_CONFIG))) {
         if (zaiModel(model.value)) {
-          const changed = record(await client.request('session/set_config_option', {
+          const changed = recordOrEmpty(await client.request('session/set_config_option', {
             sessionId,
             configId: GLM_ACP_MODEL_CONFIG,
             value: model.value,

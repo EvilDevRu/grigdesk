@@ -3,8 +3,8 @@
 // Каталог неизменяем; черновики хранят полный состав маршрутов, bootstrap и инструкции.
 // Публикация и откат используют ожидаемый хеш, чтобы сохранить CAS-семантику current.
 
-import { parseFactoryGraph } from '../../../shared/factoryGraphContracts.ts';
-import type { FactoryGraphData } from '../../../shared/factoryGraphContracts.ts';
+import { parseFactoryGraph } from '../../../shared/pipeline/factoryGraphContracts.ts';
+import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
 import {
   parseRouteDraft,
   parseRouteDraftContent,
@@ -21,7 +21,7 @@ import {
   parseRouteTransferImportResult,
   parseRoutePublication,
   RoutesEditorContractError,
-} from '../../../shared/routesEditorContracts.ts';
+} from '../../../shared/pipeline/routesEditorContracts.ts';
 import type {
   DraftOperation, RouteDraft, RouteDraftContent, RouteDraftSummary, RouteEditorInfo,
   RouteDraftValidationReport,
@@ -36,14 +36,14 @@ import type {
   RouteTransferImportResult,
   RoutePublication,
   RouteEffectivePolicy,
-} from '../../../shared/routesEditorContracts.ts';
+} from '../../../shared/pipeline/routesEditorContracts.ts';
 import {
   parseRouteGraph,
   parseRoutePublish,
   parseRouteProfiles,
   parseRouteRevisions,
-} from '../../../shared/routesContracts.ts';
-import type { RoutePublishResponse, RouteRevisionList } from '../../../shared/routesContracts.ts';
+} from '../../../shared/pipeline/routesContracts.ts';
+import type { RoutePublishResponse, RouteRevisionList } from '../../../shared/pipeline/routesContracts.ts';
 import { api } from './apiClient.ts';
 
 function profilePath(profile: string): string {

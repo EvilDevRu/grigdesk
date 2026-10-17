@@ -12,6 +12,8 @@ import 'fastify';
 
 import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
+import type { StudioRuntime } from '../modules/studio3d/runtime.ts';
+import type { PluginDocsEntry } from './pluginDocs.ts';
 
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
@@ -32,6 +34,8 @@ declare module 'fastify' {
     pluginEnabled(id: string): boolean;
     // Настройки плагина: их форму знает только сам раздел.
     pluginSettings?(id: string): unknown;
+    // Оглавления документации включённых пользовательских плагинов — для хода агента.
+    pluginDocs?(): Promise<PluginDocsEntry[]>;
     sse?: Partial<SseBus>;
     // Пути артефактов разбора видео: наружу уходит имя, а не путь на диске.
     mediaClipPath?(name: string): string | null;
@@ -49,6 +53,7 @@ declare module 'fastify' {
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
     projects?: ProjectsService;
+    studio3d?: StudioRuntime;
     // Остановка сервера: модули регистрируют слив, точка входа и кнопка перезапуска её начинают.
     shutdown?: ShutdownCoordinator;
   }

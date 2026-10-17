@@ -50,7 +50,7 @@ github/
     rules.json
     inbox-state.json
 
-server/.state/
+<папка данных>/state/
   telegram-account-creds.json
   github-creds.json
 ~~~

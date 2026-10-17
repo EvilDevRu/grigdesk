@@ -969,7 +969,7 @@ import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { analyzeTask, readAnalysisDetail, useAnalysisStore } from '../actions/analysis';
 import { analysisApi } from '../shared/analysisApi.ts';
-import { questionKey } from '../../../shared/analysisContracts.ts';
+import { questionKey } from '../../../shared/pipeline/analysisContracts.ts';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
 import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.js';

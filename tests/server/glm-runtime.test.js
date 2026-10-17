@@ -10,7 +10,7 @@ import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { runDeepSeekServerTurn } from '../../server/src/lib/deepseek/serverTurn.ts';
 import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
-import { IN_TURN_ID_RE } from '../../shared/chatInTurnContracts.ts';
+import { IN_TURN_ID_RE } from '../../shared/chat/chatInTurnContracts.ts';
 import { GLM_FIXTURE_PLUGIN, writeGlmArtifactFixture } from '../helpers/glmArtifactFixture.mts';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -381,7 +381,20 @@ test('ошибка модели с code AUTH — glm_auth_failed; QUOTA — glm_
 
     assert.equal(result.deliveryFailure, true);
     assert.equal(result.stopReason, 'error');
+    assert.equal(result.turnFailure.code, 'RATE_LIMIT', 'код причины доезжает до реестра');
+    assert.equal(result.turnRecovery.canContinue, true, 'окончательный исход принятого turn');
     assert.equal(await f.prompts(), 3);
+  });
+
+test('ход без сбоя доставки не несёт ни сигнала, ни разрешения продолжать',
+  async (t) => {
+    const f = await fixture(t, { hooks: true, updates: [READ_CALL] });
+
+    const result = await f.run();
+
+    assert.equal(result.deliveryFailure, undefined, 'обычный ход метки сбоя не получает');
+    assert.equal(result.turnFailure, undefined);
+    assert.equal(result.turnRecovery, undefined, 'Р2 не подтверждён — продолжать нечего');
   });
 
 test('turn/end без текста и без шагов — emptyRun с retryState post_prompt', async (t) => {
@@ -408,30 +421,53 @@ test('turn/end с шагами инструментов без текста — 
   assert.equal(result.emptyRun, undefined);
   assert.equal(result.retryState, undefined);
   assert.equal(result.sessionId, f.sessions[0]);
-  assert.ok(result.steps.some((step) => step.k === 'tool'));
+
+  // Строка ленты называет действие, а итог находит свой вызов по callId настоящего DSH.
+  const tool = result.steps.find((step) => step.k === 'tool');
+  const done = result.steps.find((step) => step.k === 'res');
+
+  assert.deepEqual([tool?.id, tool?.name, tool?.title], ['call-1', 'Read', 'a']);
+  assert.deepEqual([done?.id, done?.ok, done?.text], ['call-1', true, 'a']);
 });
 
-const RUNTIME_TEST_6 = 'GLM не вызывает ни onInTurnReady, ни'
-  + ' onInTurnAvailability, в том числе после approval и вопроса';
+const RUNTIME_TEST_6 = 'GLM отдаёт порт уточнений: сообщение уходит в тот же ход как steer,'
+  + ' политика его пропускает, а после конца хода порт отказывает словами GLM';
 
 test(RUNTIME_TEST_6, async (t) => {
-  const calls = [];
-  const f = await fixture(t);
+  const f = await fixture(t, {
+    hooks: true,
+    updates: [READ_CALL, {
+      sessionUpdate: 'tool_result',
+      toolCallId: 'call-1',
+      content: [{ type: 'text', text: 'a' }],
+    }],
+    steer: { reply: 'fixture-steer-answer' },
+  });
+  const states = [];
+  let port;
+  let delivered;
+  // Без порта фейк держит ход до уточнения: предел превращает зависание в явный провал.
+  const result = await f.run({
+    signal: AbortSignal.timeout(15_000),
+    onInTurnReady: (value) => {
+      port = value;
+      delivered = port.deliver({ messageId: 'steer-message-1', text: 'fixture-steer' });
+    },
+    onInTurnAvailability: (value) => states.push(value),
+  });
+  const steers = (await f.log()).filter((entry) => entry.message?.method === 'session/prompt'
+    && entry.message.params?.request?.mode === 'steer');
+  const late = await port.deliver({ messageId: 'steer-message-2', text: 'fixture-late' });
 
-  for (const scenario of [
-    { updates: [], permission: { toolCallId: 'call-1', toolName: 'write' } },
-    { updates: [], question: QUESTION },
-    TEXT_SCENARIO,
-  ]) {
-    await f.scenario(scenario);
-    await f.run({
-      onInTurnReady: () => calls.push('ready'),
-      onInTurnAvailability: () => calls.push('availability'),
-      onPermission: async () => ({ allow: false, rawAnswers: [{ selected: [], text: 'answer' }] }),
-    });
-  }
-
-  assert.deepEqual(calls, []);
+  assert.deepEqual(await delivered, { ok: true, state: 'forwarded' });
+  assert.equal(result.reply, 'fixture-steer-answer');
+  assert.deepEqual(steers.map((entry) => entry.message.params.request.content), [
+    [{ type: 'text', text: 'fixture-steer' }],
+  ]);
+  assert.ok(states.some((value) => value.available === true), JSON.stringify(states));
+  assert.equal(late.ok, false);
+  assert.match(late.message, /GLM/u);
+  assert.doesNotMatch(late.message, /DeepSeek/u);
 });
 
 test('вопрос агента доходит до onPermission с isQuestion', async (t) => {
@@ -585,4 +621,18 @@ test('id блока ответа годится для хранилища отв
   assert.ok(ids.length > 0);
   assert.ok(ids.every((id) => IN_TURN_ID_RE.test(id)), JSON.stringify(ids));
   assert.ok(IN_TURN_ID_RE.test(result.assistantMessageId), result.assistantMessageId);
+
+  // Шаг текста и реплика — один блок: по общему id окно прячет копию показанного ответа.
+  assert.deepEqual(result.steps.filter((step) => step.k === 'text').map((step) => step.id), [
+    result.assistantMessageId,
+  ]);
+});
+
+test('GLM сообщает подтверждённую модель сессии, и строка состояния не остаётся на «запр.»', async (t) => {
+  const f = await fixture(t, TEXT_SCENARIO);
+  const metadata = [];
+  const result = await f.run({ onRunMetadata: (value) => metadata.push(value) });
+
+  assert.deepEqual(metadata, [{ actualModelId: MODEL, modelSource: 'session' }]);
+  assert.equal(result.actualModel, MODEL);
 });

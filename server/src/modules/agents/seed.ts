@@ -17,7 +17,7 @@ import path from 'node:path';
 import { listFactoryProfiles } from '../../lib/profiles.ts';
 import { defaults } from './store.ts';
 import type { AgentRecord, AgentsStore } from './store.ts';
-import type { AgentCard } from '../../../../shared/agentsContracts.ts';
+import type { AgentCard } from '../../../../shared/pipeline/agentsContracts.ts';
 
 // Схема профиля фабрики. Читаются только статические поля: узел — кортеж
 // [kind, label, sub], keys — рекомендуемые ключи реестра, optional — штатные пропуски.

@@ -1,0 +1,23 @@
+{
+  "name": "cockpit-b24",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "build": "node scripts/build.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run typecheck",
+    "test": "node scripts/test.mts",
+    "test:sea": "node scripts/test.mts --sea"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "esbuild": "0.25.12",
+    "postject": "1.0.0-alpha.6",
+    "typescript": "5.9.3"
+  }
+}

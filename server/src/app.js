@@ -8,7 +8,7 @@
 // Проверка версии стоит ЗДЕСЬ и написана на голом JavaScript намеренно. Импорт `.ts`
 // на Node ниже 22.18 падает на разрешении модуля — до первой строки кода, — и человек
 // получил бы «unknown file extension» вместо ответа «нужен Node новее». Тот же минимум
-// объявлен в `lib/nodeVersion.ts` и `bin/lib/runtime-env.sh`; все три пинует
+// объявлен в `lib/nodeVersion.ts` и `deploy/lib/runtime-env.sh`; все три пинует
 // `tests/docs/entrypoint-launch.test.mts`, чтобы предела правды не стало два.
 const MIN_NODE_VERSION = '22.19.0';
 

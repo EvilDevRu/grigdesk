@@ -37,6 +37,8 @@
 //                              над рантаймом (выгрузить модель, использовать сброс
 //                              лимита): такую ручку видно и во всплывашке
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
+//   studio3d?                — исполнитель раздела «3D» (тип 3d): действия, цены,
+//                              заказы; см. lib/studio3d/provider.ts
 //   mcpStatus?(config)       — состояние MCP-серверов этого CLI для его плашки:
 //                              { state: 'ok'|'error', error?, note?, emptyText?, groups?, servers:
 //                              [{ name, target, scope: 'user'|'project'|'account',
@@ -132,6 +134,9 @@
 //                              opts.attachmentsDir — каталог вложений чата: адаптер может заранее
 //                              открыть его агенту только на чтение — картинку из уточнения
 //                              посреди хода агент откроет по пути без вопроса человеку
+//                              opts.pluginDocsDirs — каталоги документации включённых
+//                              плагинов: подсказка хода называет их оглавления, адаптер
+//                              может так же заранее открыть их только на чтение
 //                              opts.workspaceAccess — строгие readable/writable roots для
 //                              adapter-ов с capability scopedWorkspace; сеть и temp roots
 //                              задаются там же и не выводятся из cwd
@@ -159,7 +164,7 @@
 // для поэтапного подключения нового CLI: сначала обычная установка/авторизация, затем
 // отдельным изменением transport и модели.
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
-import type { WorkdirCapability } from '../../../../shared/chatWorkdir.ts';
+import type { WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
 import type { WorkdirValidator } from '../chat/workdir.ts';
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -172,12 +177,19 @@ import type {
   InTurnPort,
   InTurnReceiptEvent,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
-import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
+import type {
+  TurnFailureRule,
+  TurnFailureSignal,
+  TurnRecovery,
+} from '../chat/turnFailures.ts';
 import type { NativeSettingsCapability, PreparedNativeSettings } from '../executorSettings/types.ts';
+import type { Studio3dProvider } from '../studio3d/provider.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
+import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 
 // Ответ проверки установки: найден ли бинарь и какую версию он назвал сам.
 export interface ExecutorProbe {
@@ -200,6 +212,7 @@ export interface ExecutorRunInput {
   model?: string;
   cwd?: string;
   extraDirs?: readonly string[];
+  pluginDocsDirs?: readonly string[];
   effort?: string;
   sessionId?: string | null;
   permissionMode?: string;
@@ -224,6 +237,11 @@ export interface ExecutorRunInput {
 
 // Лента уже приведена адаптером к общему виду. Текст модели и данные кэша остаются
 // недоверенными до разбора потребителем; дополнительные метрики не теряются.
+//
+// `deliveryFailure` без явного `turnRecovery` автоматику НЕ включает: адаптер обязан
+// подтвердить, что попытка принята в сохранённый разговор, окончательно завершена и
+// разговор можно продолжить. `turnRecovery.madeProgress` — признак работы текущей
+// попытки, и он никогда не выводится из ленты UI или общего счётчика шагов.
 export interface ExecutorRunResult {
   reply?: unknown;
   sessionId?: string | null;
@@ -232,6 +250,9 @@ export interface ExecutorRunResult {
   emptyRun?: boolean;
   subtype?: unknown;
   note?: boolean;
+  deliveryFailure?: boolean;
+  turnFailure?: TurnFailureSignal;
+  turnRecovery?: TurnRecovery;
   [field: string]: unknown;
 }
 
@@ -250,6 +271,9 @@ export interface ExecutorSessionBinding {
 // только идентичность, бинарь и две проверки установки; всё остальное объявляет сам
 // адаптер, и ядро спрашивает наличие метода, а не вендора.
 export interface ExecutorAdapter {
+  studio3d?: Studio3dProvider;
+  type?: string;
+  kind?: string;
   id: string;
   name?: string;
   vendor?: string;
@@ -273,6 +297,9 @@ export interface ExecutorAdapter {
   catalogLive?: boolean;
   autoCompactEnv?: string;
   chatAutoCompact?: boolean;
+  // Вендорные коды и статусы сбоя хода объявляет сам адаптер; ядро читает таблицу
+  // и не ветвится по id исполнителя. Нет поля — работают только общие признаки.
+  turnFailureRules?: readonly TurnFailureRule[];
   retryContract?: string;
   scopedWorkspace?: boolean | ((config: unknown) => unknown);
   workdir?: WorkdirCapability | ((config: unknown) => unknown);
@@ -392,11 +419,23 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
  * наличие CLI на машине не означает, что Cockpit уже умеет безопасно передать ему ход.
  */
 export async function getExecutors(): Promise<Map<string, ExecutorAdapter>> {
-  if (loadedExecutors) return loadedExecutors;
+  if (loadedExecutors) {
+    return loadedExecutors;
+  }
+
   loadedExecutors = new Map(
-    [...(await getProviderAdapters()).entries()].filter(([, adapter]) => typeof adapter.run === 'function'),
+    [...(await getProviderAdapters()).entries()].filter(([, adapter]) => isChatExecutor(adapter)),
   );
+
   return loadedExecutors;
+}
+
+/**
+ * Чатовый transport допускается только у универсального исполнителя.
+ * Объявленный run узкого адаптера не открывает модели и запуск чата.
+ */
+export function isChatExecutor(adapter: { type?: unknown; run?: unknown }): boolean {
+  return typeof adapter.run === 'function' && normalizeExecutorType(adapter.type) === 'universal';
 }
 
 /**

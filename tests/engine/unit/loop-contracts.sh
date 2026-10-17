@@ -14,7 +14,7 @@ json_value() {
 import json, sys
 value = json.load(sys.stdin)
 for key in sys.argv[1].split("."):
-    value = value[key]
+    value = value[int(key)] if isinstance(value, list) else value[key]
 print(value)
 ' "$1"
 }
@@ -186,19 +186,19 @@ step=$(make_step 20 default | "$route_tool" --profile sample editor-step)
 assert_contains "$step" '"stop": "loop-ceiling"' "двадцатый круг упирается в потолок по умолчанию"
 step=$(make_step 2 2 | "$route_tool" --profile sample editor-step)
 assert_contains "$step" '"stop": "loop-ceiling"' "потолок из запроса симуляции соблюдается"
-step=$(make_step 1 101 | "$route_tool" --profile sample editor-step)
-assert_contains "$step" 'loopMaxRounds' "потолок выше 100 в симуляции отклоняется с причиной"
-# Потолок 100 — это 201 шаг до остановки: предел шагов цикла его вмещает, у обычного
+step=$(make_step 1 301 | "$route_tool" --profile sample editor-step)
+assert_contains "$step" 'loopMaxRounds' "потолок выше 300 в симуляции отклоняется с причиной"
+# Потолок 300 — это 601 шаг до остановки: предел шагов цикла его вмещает, у обычного
 # маршрута предел прежний — 200.
-step=$(make_step 100 100 201 | "$route_tool" --profile sample editor-step)
+step=$(make_step 300 300 601 | "$route_tool" --profile sample editor-step)
 assert_contains "$step" '"stop": "loop-ceiling"' \
-  "двести первый шаг сценария доводит потолок 100 до остановки"
-step=$(make_step 99 100 200 | "$route_tool" --profile sample editor-step)
-assert_contains "$step" '"rewind": "build"' "сотая передача при потолке 100 исполняется"
+  "шестьсот первый шаг сценария доводит потолок 300 до остановки"
+step=$(make_step 299 300 600 | "$route_tool" --profile sample editor-step)
+assert_contains "$step" '"rewind": "build"' "трёхсотая передача при потолке 300 исполняется"
 step=$(make_step 0 default 201 plain | "$route_tool" --profile sample editor-step)
 assert_contains "$step" 'stepIndex' "обычный маршрут по-прежнему ограничен 200 шагами"
-step=$(make_step 0 default 401 | "$route_tool" --profile sample editor-step)
-assert_contains "$step" 'stepIndex' "у цикла предел шагов тоже есть — 400"
+step=$(make_step 0 default 1201 | "$route_tool" --profile sample editor-step)
+assert_contains "$step" 'stepIndex' "у цикла предел шагов тоже есть — 1200"
 
 # --- Контекст узла цикла -------------------------------------------------------------
 root="$TEST_ROOT/loop-context"
@@ -260,6 +260,40 @@ assert_eq 'missing' "$(json_value evidence.loop <<<"$plain" 2>/dev/null || print
 "$context_tool" "${context_args[@]}" --node build --run-key BUILD \
   --loop-state-json "$loop_state" --loop-max-rounds 0 >/dev/null 2>&1
 assert_rc 78 "$?" "нулевой потолок в контексте отвергается"
+"$context_tool" "${context_args[@]}" --node build --run-key BUILD \
+  --loop-state-json "$loop_state" --loop-max-rounds 301 >/dev/null 2>&1
+assert_rc 78 "$?" "потолок выше 300 в контексте отвергается"
+
+# --- История результатов этапов: свежий хвост в контексте, опущенные — счётчиком ------
+# Промпт узла уходит раннеру одной строкой argv (128 КиБ), поэтому сотни кругов истории
+# в контекст целиком не идут; короткая история остаётся побайтно прежней.
+stage_args=()
+for sequence in $(seq 1 130); do
+  stage_args+=(--stage-result "review:failed:$sequence")
+done
+trimmed=$("$context_tool" "${context_args[@]}" --node review --run-key REVIEW \
+  --loop-state-json "$delivered_state" --loop-max-rounds 300 "${stage_args[@]}")
+assert_rc 0 "$?" "контекст с длинной историей этапов собирается при потолке 300"
+assert_eq 10 "$(json_value evidence.stageResultsOmitted <<<"$trimmed")" \
+  "опущенные записи истории посчитаны"
+assert_eq 11 "$(json_value evidence.stageResults.0.sequence <<<"$trimmed")" \
+  "в контексте остаётся свежий хвост истории"
+assert_eq 130 "$(json_value evidence.stageResults.119.sequence <<<"$trimmed")" \
+  "последняя запись истории не теряется"
+short=$("$context_tool" "${context_args[@]}" --node review --run-key REVIEW \
+  "${stage_args[@]:0:20}")
+assert_eq missing \
+  "$(json_value evidence.stageResultsOmitted <<<"$short" 2>/dev/null || printf missing)" \
+  "у короткой истории счётчика нет — контекст прежний"
+assert_eq 10 "$(json_value evidence.stageResults.9.sequence <<<"$short")" \
+  "короткая история идёт в контекст целиком"
+overflow=()
+for sequence in $(seq 1 1001); do
+  overflow+=(--stage-result "build:done:$sequence")
+done
+"$context_tool" "${context_args[@]}" --node review --run-key REVIEW "${overflow[@]}" \
+  >/dev/null 2>&1
+assert_rc 78 "$?" "история длиннее предела входа отвергается"
 
 # --- История находок длинного цикла: файлом и в ограниченном контексте ---------------
 # Двенадцать этапов по 16 находок ведущего с текстом в 300 кириллических символов:

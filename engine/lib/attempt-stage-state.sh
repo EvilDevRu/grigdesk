@@ -87,7 +87,7 @@ HUMAN_RESUMABLE_STOP_TARGETS = {"human", "rewind-limit", "no-progress", "loop-ce
 # делает. Форма снимка закреплена версией политики: изменить смысл полей можно только
 # новой версией, старые события переинтерпретировать нельзя.
 LOOP_POLICY_VERSION = 1
-LOOP_MAX_ROUNDS_LIMIT = 100
+LOOP_MAX_ROUNDS_LIMIT = 300
 LOOP_STAGE_REJECTIONS = {
     "no-transfer", "no-worker-result", "result-used", "closes-mismatch", "ids-reused",
 }
@@ -2794,7 +2794,7 @@ attempt_stage_state_commit_v2() {
   # Десятый — замечание человека у rejected-ворот. Оно ложится в immutable reason
   # коммита и адресуется узлу rewind через общий канал human note.
   reject_feedback=${10:-}
-  # Одиннадцатый — потолок кругов цикла из профиля (1..100). Нужен только передаче
+  # Одиннадцатый — потолок кругов цикла из профиля (1..300). Нужен только передаче
   # lead → worker маршрута с `loop`; у остальных коммитов не читается.
   local loop_max_rounds=${11:-0}
   # Телефон адресует exact заход ворот, а не только повторяющееся имя узла.
@@ -2805,7 +2805,7 @@ attempt_stage_state_commit_v2() {
   [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$target_budget" =~ ^(0|[1-9]|10)$ ]] || return 2
-  [[ "$loop_max_rounds" =~ ^(0|[1-9][0-9]?|100)$ ]] || return 2
+  [[ "$loop_max_rounds" =~ ^(0|[1-9][0-9]?|[12][0-9]{2}|300)$ ]] || return 2
   [[ "$recovery" == 0 || "$recovery" == 1 ]] || return 2
   [[ -z "$reject_feedback" ]] || _attempt_state_reason "$reject_feedback" || return
   run_state_verdict_validate "$outcome" "$verdict_b64" || return
@@ -2895,7 +2895,7 @@ attempt_stage_state_loop_continue_v2() {
   max_rounds=${3:-}
   expected_sequence=${4:-}
   expected_hash=${5:-}
-  [[ "$max_rounds" =~ ^([1-9][0-9]?|100)$ ]] || return 2
+  [[ "$max_rounds" =~ ^([1-9][0-9]?|[12][0-9]{2}|300)$ ]] || return 2
   [[ "$expected_sequence" =~ ^[1-9][0-9]*$ ]] || return 2
   [[ "$expected_hash" =~ ^[a-f0-9]{64}$ ]] || return 2
   root=$(attempt_state_v2_task_root "$task") || return

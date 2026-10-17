@@ -196,8 +196,8 @@ test('стор баз не знает ни путей API, ни транспор
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
   assert.deepEqual(imports.sort(), [
-    '../../../shared/dbContracts.ts',
-    '../../../shared/sshContracts.ts',
+    '../../../shared/plugins/db/dbContracts.ts',
+    '../../../shared/plugins/ssh/sshContracts.ts',
     'pinia',
   ]);
   assert.equal(/\/api\//u.test(source), false, 'адреса API живут в слое операций');

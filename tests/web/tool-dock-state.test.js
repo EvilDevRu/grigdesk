@@ -4,7 +4,13 @@ import test from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { useDockStore, clampDockWidth } from '../../web/src/stores/dock.js';
 import { normalizeNavItem, sortNavItems } from '../../web/src/stores/plugins.js';
-import { aggregateNavBadges, inboxNavBadge } from '../../web/src/shared/nav-badges.js';
+import {
+  aggregateNavBadges,
+  chatNavBadge,
+  inboxNavBadge,
+  pipelineNavBadge,
+  shelfNavBadge,
+} from '../../web/src/shared/nav-badges.js';
 import { launchTool } from '../../web/src/shared/tools/launcher.ts';
 
 function memoryStorage(seed = {}) {
@@ -233,4 +239,77 @@ test('nav placement сортируется стабильно, invalid group о�
     kind: 'stall',
     title: 'Видео: 2 · Входящие: 4 · База: 1',
   });
+});
+
+test('счётчик чатов объединяет вопросы и непрочитанное с учётом архива', () => {
+  const sessions = [{ id: 'both', unread: true }, { id: 'read', unread: false }];
+  const archived = [{ id: 'archived', unread: true }];
+  const badge = chatNavBadge({
+    sessions,
+    archived,
+    waitingChats: new Set(['both', 'waiting']),
+  });
+
+  assert.equal(badge.n, 3);
+  assert.equal(badge.kind, 'wait');
+  assert.match(badge.title, /ждут ответа: 2 · непрочитанные: 2/);
+  assert.equal(chatNavBadge({ sessions, archived }).n, 2);
+  assert.equal(chatNavBadge({ sessions, archived }).kind, 'info');
+  assert.equal(chatNavBadge(), null);
+});
+
+test('счётчик конвейера исключает работу и сохраняет обе причины вмешательства', () => {
+  assert.equal(pipelineNavBadge({ runningCount: 20 }), null);
+  assert.deepEqual(pipelineNavBadge({
+    errorCount: 2,
+    waitingCount: 3,
+    runningCount: 20,
+  }), {
+    n: 5,
+    kind: 'stall',
+    title: 'Требуют вмешательства: 5 · проблемы: 2 · ждут решения: 3',
+  });
+  assert.equal(pipelineNavBadge({ waitingCount: 3 }).kind, 'wait');
+});
+
+test('счётчик полки совпадает с вниманием, исключает завершённые и не дублирует событие', () => {
+  const rows = [
+    {
+      taskId: 'event',
+      state: 'lit',
+      needsHuman: false,
+    },
+    {
+      taskId: 'both',
+      state: 'lit',
+      needsHuman: true,
+    },
+    {
+      taskId: 'reviewed',
+      state: 'neutral',
+      needsHuman: true,
+    },
+    {
+      taskId: 'quiet',
+      state: 'neutral',
+      needsHuman: false,
+    },
+    {
+      taskId: 'done',
+      state: 'lit',
+      needsHuman: true,
+      completed: true,
+    },
+  ];
+  const badge = shelfNavBadge(rows);
+
+  assert.equal(badge.n, 3);
+  assert.equal(badge.kind, 'wait');
+  assert.match(badge.title, /ждут решения: 2 · новые события: 1/);
+  assert.equal(shelfNavBadge([rows[0], rows[0]]).n, 1);
+  assert.equal(shelfNavBadge([rows[0]]).kind, 'info');
+  assert.equal(shelfNavBadge(rows.slice(3)), null);
+  assert.equal(shelfNavBadge(), null);
+  rows[2].details = { activities: [{ tone: 'bad' }] };
+  assert.equal(shelfNavBadge(rows).kind, 'stall');
 });

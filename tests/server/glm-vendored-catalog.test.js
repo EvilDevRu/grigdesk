@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_SERVICE_KEY } from '../helpers/glmProductionFixture.mts';
 
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G8/fixtures');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G8/fixtures');
 const pair = (model) => JSON.stringify(['zai', model]);
 
 test('настоящий ACP-каталог GLM без prompt и без проектных MCP отдаёт efforts каждой модели', async (t) => {

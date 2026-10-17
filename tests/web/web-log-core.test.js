@@ -8,8 +8,8 @@ import {
   projectWebLogEntry,
   utf8Bytes,
   vueErrorSource,
-} from '../../shared/webLogContracts.ts';
-import { createApiRouteMatcher } from '../../shared/webLogApiRoutes.ts';
+} from '../../shared/web-log/webLogContracts.ts';
+import { createApiRouteMatcher } from '../../shared/web-log/webLogApiRoutes.ts';
 
 function makeLog() {
   let clock = 0;

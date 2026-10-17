@@ -1,6 +1,6 @@
 // Слова для блока прогноза во всплывашке исполнителя. Чистые функции от снимка и
 // «сейчас»: шаблон не должен считать даты, а тест — монтировать компонент ради строки.
-import type { UsageBarForecast } from '../../../../shared/usageForecastContracts.ts';
+import type { UsageBarForecast } from '../../../../shared/chat/usageForecastContracts.ts';
 
 // Тон строки: тем же словарём пользуются классы `is-*` состояний всплывашки.
 export type ForecastTone = 'ok' | 'warn' | 'bad' | 'muted';

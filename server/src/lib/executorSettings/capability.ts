@@ -1,7 +1,7 @@
 // Адаптер привязывает серверную конфигурацию к контексту через WeakMap.
 // Конфигурация, ключи доступа и временные пути не входят в публичный каталог и fingerprint.
 
-import type { JsonValue, SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
+import type { JsonValue, SettingsConsumer } from '../../../../shared/chat/providerSettingsContracts.ts';
 import type {
   NativeSettingsCapability,
   NativeSettingsContext,

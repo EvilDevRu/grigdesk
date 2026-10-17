@@ -57,6 +57,59 @@ export function failureText(error: unknown, fallback = 'Не удалось вы
 
 export type UnauthorizedHandler = (data: unknown) => void;
 
+export type MutationListener = () => void;
+
+const mutationListeners = new Set<MutationListener>();
+let mutationCount = 0;
+
+/**
+ * Подписка сообщает об успешном изменении без знания адресов API.
+ * Отписка удаляет только этого слушателя и безопасна при повторном вызове.
+ */
+export function onMutationSuccess(listener: MutationListener): () => void {
+  mutationListeners.add(listener);
+
+  return () => {
+    mutationListeners.delete(listener);
+  };
+}
+
+/**
+ * Оболочка ждёт завершения уже начатых изменений перед закрытием окна.
+ * Значение не включает чтения и не зависит от подписчиков успеха.
+ */
+export function pendingMutations(): number {
+  return mutationCount;
+}
+
+/**
+ * Счётчик растёт до первого await и уменьшается при любом исходе.
+ * Исключение слушателя не меняет ответ запроса и не запускает повторную мутацию.
+ */
+async function trackMutation<T>(method: Method, work: () => Promise<T>): Promise<T> {
+  if (method === 'GET') {
+    return work();
+  }
+
+  mutationCount += 1;
+
+  try {
+    const result = await work();
+
+    for (const listener of mutationListeners) {
+      try {
+        listener();
+      } catch {
+        // Подписчики не влияют на результат уже завершившегося изменения.
+      }
+    }
+
+    return result;
+  } finally {
+    mutationCount -= 1;
+  }
+}
+
 // Слушатели 401: истёкшая или отозванная сессия должна сразу возвращать на экран входа,
 // из какого бы места её ни поймали. Подписывается стор auth (без импорта стора сюда —
 // иначе circular import).
@@ -219,7 +272,7 @@ async function observed<T>(method: Method, path: string, work: () => Promise<T>)
   const start = performance.now();
 
   try {
-    const result = await work();
+    const result = await trackMutation(method, work);
 
     reportAttempt(method, path, elapsed(start), 1);
 
@@ -238,6 +291,8 @@ export interface RequestOptions {
   timeoutMs?: number;
   // Встроенный повтор чтения после обрыва. Опрос, который сам себе повтор, его выключает.
   retry?: boolean;
+  // Отмена consumer-а сильнее таймаута и не разрешает встроенный повтор.
+  signal?: AbortSignal;
 }
 
 // Таймаут чтения по умолчанию: покрывает даже медленный B24-портал.
@@ -248,7 +303,20 @@ const DEFAULT_GET_TIMEOUT_MS = 30000;
  * Здесь же живут таймаут и единственный повтор чтения — оба нужны из-за docker,
  * который рвёт летящие запросы при смене сети стенда.
  */
-async function request(
+function request(
+  method: Method,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<unknown> {
+  return trackMutation(method, () => performRequest(method, path, body, options));
+}
+
+/**
+ * Сетевой цикл сохраняет прежние таймауты, журнал и повтор только чтения.
+ * Учёт мутаций оборачивает весь результат, включая разбор ответа сервера.
+ */
+async function performRequest(
   method: Method,
   path: string,
   body?: unknown,
@@ -284,13 +352,19 @@ async function request(
   const isGet = method === 'GET';
   const timeoutMs = options.timeoutMs ?? (isGet ? DEFAULT_GET_TIMEOUT_MS : 0);
   const attempts = isGet && options.retry !== false ? 2 : 1;
-  const attempt = () =>
-    fetch(url(path), {
+  // Consumer отмена объединяется с deadline: оба охватывают fetch и чтение body.
+  // Отдельный signal не должен незаметно выключать прежний timeout GET.
+  const attempt = () => {
+    const deadline = timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs) : undefined;
+    const signal = options.signal && deadline && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([options.signal, deadline]) : options.signal ?? deadline;
+
+    return fetch(url(path), {
       ...opts,
-      ...(timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
-        ? { signal: AbortSignal.timeout(timeoutMs) }
-        : {}),
+      ...(signal ? { signal } : {}),
     });
+  };
 
   for (let number = 1; number <= attempts; number += 1) {
     const start = performance.now();
@@ -311,6 +385,7 @@ async function request(
 
       const willRetry =
         number < attempts &&
+        !options.signal?.aborted &&
         (error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError');
 
       reportAttempt(method, path, elapsed(start), number, error, willRetry);
@@ -451,7 +526,7 @@ async function postBytes(
   const res = await fetch(url(path), {
     ...FETCH_OPTS,
     method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/octet-stream' },
+    headers: { 'Content-Type': 'application/octet-stream', ...headers },
     body,
   });
 

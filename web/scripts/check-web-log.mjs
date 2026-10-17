@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
@@ -14,6 +15,7 @@ import vue from '../node_modules/@vitejs/plugin-vue/dist/index.mjs';
 import authPlugin from '../../server/src/plugins/auth.ts';
 import webLogModule from '../../server/src/modules/web-log/index.ts';
 import { createApiRouteRegistry } from '../../server/src/lib/webLog/apiRoutes.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const web = path.join(root, 'web');
@@ -59,8 +61,16 @@ function runCli(logDir, args) {
   });
 }
 
+/**
+ * Каждый прогон получает свой каталог в папке артефактов: сборка и принятый журнал
+ * остаются для разбора, а профиль Chrome удаляется в finally при любом исходе.
+ */
 async function main() {
-  const artifacts = await mkdtemp(path.join(root, '.state/artifacts/web-log/browser-'));
+  const parent = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'web-log');
+
+  await mkdir(parent, { recursive: true });
+
+  const artifacts = await mkdtemp(path.join(parent, 'browser-'));
   const outDir = path.join(artifacts, 'dist');
   const profile = path.join(artifacts, 'chrome-profile');
   const logDir = path.join(artifacts, 'received');

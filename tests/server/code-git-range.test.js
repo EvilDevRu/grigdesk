@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { parseCodeBlame, parseCodeCommitsDiff } from '../../shared/codeContracts.ts';
+import { parseCodeBlame, parseCodeCommitsDiff } from '../../shared/plugins/code/codeContracts.ts';
 import codeModule from '../../server/src/modules/code/index.ts';
 import {
   branchDiff,

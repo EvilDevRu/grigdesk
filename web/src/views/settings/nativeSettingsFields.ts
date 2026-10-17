@@ -1,7 +1,7 @@
 // Форма отделяет доступные действия от справочника ограничений установленного CLI.
 // Проекция сохраняет адреса, черновики и запреты исходного серверного каталога.
 
-import type { JsonValue, ProviderSettingNode } from '../../../../shared/providerSettingsContracts.ts';
+import type { JsonValue, ProviderSettingNode } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 export interface NativeSettingsFieldsView {
   editable: ProviderSettingNode[];

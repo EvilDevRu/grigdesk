@@ -1,15 +1,18 @@
 // Таймлайн сцены и общий таймлайн ролика.
 //
-// Расписание одной сцены живёт в общем модуле (`shared/showcaseTimeline.ts`): по той
+// Расписание одной сцены живёт в общем модуле (`shared/plugins/showcase/showcaseTimeline.ts`): по той
 // же формуле экран ролика считает, с какой секунды начинается сцена. Здесь остаётся
 // то, что нужно только сборке, — субтитры по измеренным длинам готовых клипов и SRT.
-import type { ShowcaseScene, ShowcaseTiming } from '../../../../../shared/showcaseContracts.ts';
+import type {
+  ShowcaseScene,
+  ShowcaseTiming,
+} from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import {
   planScene,
   POST_ROLL_MS,
   PRE_ROLL_MS,
-} from '../../../../../shared/showcaseTimeline.ts';
-import type { ScenePlanInput } from '../../../../../shared/showcaseTimeline.ts';
+} from '../../../../../shared/plugins/showcase/showcaseTimeline.ts';
+import type { ScenePlanInput } from '../../../../../shared/plugins/showcase/showcaseTimeline.ts';
 
 export { planScene, POST_ROLL_MS, PRE_ROLL_MS };
 export type { ScenePlanInput };

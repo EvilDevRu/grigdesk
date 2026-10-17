@@ -13,8 +13,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 
-import { parseDockerExecMessage } from '../../../../shared/dockerContracts';
-import type { DockerContainer, DockerExecInput } from '../../../../shared/dockerContracts';
+import { parseDockerExecMessage } from '../../../../shared/plugins/docker/dockerContracts';
+import type { DockerContainer, DockerExecInput } from '../../../../shared/plugins/docker/dockerContracts';
 import { api } from '../../shared/apiClient.ts';
 import { UiButton } from '../../ui';
 

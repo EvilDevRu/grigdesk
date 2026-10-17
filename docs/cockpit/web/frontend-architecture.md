@@ -5,7 +5,7 @@
   Projects, Code (дерево/файл/git), Shelf (полка задач), Documents (скрытый route просмотра MD/TXT),
   Diff (Monaco), Tools (агрегатор), Video, Terminal,
   Settings (Приложение / Речь / Битрикс24 /
-  Исполнители / Запуски / Плагины / Сервер / Доступ), Login
+  Исполнители / Запуски / Плагины / Сервер / Доступ), NoAccess
   и TaskModal. Полный `ChatSession` монтируется только в `ChatsView`; компактной chat
   surface поверх страниц больше нет (компаньон удалён 2026-09-10).
 

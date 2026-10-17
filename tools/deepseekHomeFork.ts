@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 
-import { readDeepSeekArtifact } from '../server/src/lib/deepseek/runtimeArtifact.ts';
+import { readDeepSeekArtifactAsync } from '../server/src/lib/deepseek/runtimeArtifact.ts';
 
 /**
  * Снимок проверяет обычные файлы и замкнутые ссылки, не публикуя имена или содержимое.
@@ -47,7 +47,7 @@ export async function forkDeepSeekHome(sourceHome: string, destinationHome: stri
     throw new Error('Пути fork должны быть абсолютными');
   }
 
-  const { artifact } = readDeepSeekArtifact(generation);
+  const { artifact } = await readDeepSeekArtifactAsync(generation);
   const source = await fs.realpath(sourceHome);
   const parent = path.dirname(destinationHome);
   const missing: string[] = [];

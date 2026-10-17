@@ -7,7 +7,7 @@ import type {
   SettingsSource,
   SettingsConsumer,
   ProviderSettingsCatalog,
-} from '../../../../shared/providerSettingsContracts.ts';
+} from '../../../../shared/chat/providerSettingsContracts.ts';
 
 export interface NativeSettingsContext {
   providerId: string;

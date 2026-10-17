@@ -100,7 +100,7 @@ const RETRY_DELAYS_MS = [300, 800, 1500];
 
 const WINDOWS_EPOCH_SECONDS = 11_644_473_600;
 
-const SWITCH_HINT = 'Уберите COCKPIT_SHOWCASE_EDGE_TTS=0 из корневого .env сервера и перезапустите его.';
+const SWITCH_HINT = 'Уберите COCKPIT_SHOWCASE_EDGE_TTS=0 из .env папки данных и перезапустите его.';
 
 // Ступени темпа — множитель к темпу голоса (у утверждённого голоса он уже +12 %).
 const EDGE_PACE_RATE: Record<VoicePace, number> = {

@@ -3,7 +3,7 @@
     <RouterLink v-if="back" :to="back" class="pane-back ui-icon-button" :aria-label="backLabel">
       <UiIcon name="back" />
     </RouterLink>
-    <span v-if="brand" class="brand-mark pane-brand" aria-hidden="true">◧</span>
+    <UiBrandMark v-if="brand" class="brand-mark pane-brand" />
     <div class="pane-title">
       <h1 :aria-label="title">{{ title }}</h1>
       <p v-if="sub" class="pane-sub" :aria-label="sub">{{ sub }}</p>
@@ -17,6 +17,7 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router';
 
+import UiBrandMark from './UiBrandMark.vue';
 import UiIcon from './UiIcon.vue';
 import UiLinkStatus from './UiLinkStatus.vue';
 

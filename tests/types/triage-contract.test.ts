@@ -1,5 +1,5 @@
-import type { Analysis, AnalysisRow, AnalysisStatus } from '../../shared/analysisContracts.ts';
-import { parseAnalysisRows } from '../../shared/analysisContracts.ts';
+import type { Analysis, AnalysisRow, AnalysisStatus } from '../../shared/pipeline/analysisContracts.ts';
+import { parseAnalysisRows } from '../../shared/pipeline/analysisContracts.ts';
 import { analysisApi } from '../../web/src/shared/analysisApi.ts';
 import { analyzeTask, dismissAnalysis, useAnalysisStore } from '../../web/src/actions/analysis';
 

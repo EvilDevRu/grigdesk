@@ -77,7 +77,7 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from 'vue';
 import { UiButton, UiField, UiInput, UiNumberInput, UiSelect, UiSwitch } from '../../ui.ts';
-import type { JsonValue, ProviderSettingNode } from '../../../../shared/providerSettingsContracts.ts';
+import type { JsonValue, ProviderSettingNode } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 const props = withDefaults(
   defineProps<{

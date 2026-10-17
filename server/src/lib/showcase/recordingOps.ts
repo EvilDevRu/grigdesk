@@ -13,9 +13,12 @@ import { promises as fs } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 
+import { shortSha256 } from '../../../../shared/node/hash.ts';
+import { recordOrNull } from '../../../../shared/lib/objects.ts';
+
 import { clipInputHash, publishArtifact, sceneFreshness } from './artifacts.ts';
 import type { ArtifactInputs } from './artifacts.ts';
-import { chainLineage, sceneChains } from '../../../../shared/showcaseChains.ts';
+import { chainLineage, sceneChains } from '../../../../shared/plugins/showcase/showcaseChains.ts';
 import { ShowcaseError } from './errors.ts';
 import { PRODUCER_VERSIONS, RENDER_STYLE } from './formats.ts';
 import { toPublicJob } from './jobs.ts';
@@ -26,7 +29,7 @@ import type {
   ShowcaseArtifactRef,
   ShowcaseJob,
   ShowcaseProject,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import { toPublicScope } from './targets.ts';
 import type { ShowcaseTargets } from './targets.ts';
@@ -40,7 +43,7 @@ import type {
   RecordingTimingWorkerCandidate,
   ScreenMap,
 } from './render/recorder.ts';
-import type { ShowcaseDerivedArtifactRef } from '../../../../shared/showcaseContracts.ts';
+import type { ShowcaseDerivedArtifactRef } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 
 export const RECORDING_TIMING_VERSION = 1 as const;
 export const RECORDING_TIMING_PRODUCER_VERSION = 'recording-timing-1';
@@ -58,28 +61,18 @@ interface RecordingTimingDocumentCommon {
 export type RecordingTimingDocument = RecordingTimingDocumentCommon
   & RecordingTimingWorkerCandidate;
 
-function timingHash(value: Buffer | string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 32);
-}
-
 export function recordingTimingInputHash(
   sceneInputHash: string,
   clipContentHash: string,
   actionsHash: string,
 ): string {
-  return timingHash(JSON.stringify({
+  return shortSha256(JSON.stringify({
     version: RECORDING_TIMING_VERSION,
     kind: 'recording-timing',
     sceneInputHash,
     clipContentHash,
     actionsHash,
   }));
-}
-
-function objectRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 function finiteNonNegative(value: unknown): value is number {
@@ -91,7 +84,7 @@ function geometryOf(value: unknown): RecordingTimingCandidate['actions'][number]
     return null;
   }
 
-  const source = objectRecord(value);
+  const source = recordOrNull(value);
 
   if (
     !source
@@ -115,8 +108,8 @@ function timingCandidateOf(
   value: unknown,
   expectedActions: ShowcaseProject['scenes'][number]['actions'],
 ): RecordingTimingCandidate | null {
-  const source = objectRecord(value);
-  const calibration = objectRecord(source?.calibration);
+  const source = recordOrNull(value);
+  const calibration = recordOrNull(source?.calibration);
   const frameMs = 1000 / RENDER_STYLE.fps;
 
   if (
@@ -152,7 +145,7 @@ function timingCandidateOf(
   let previousEndMs = 0;
 
   for (const [index, valueAction] of source.actions.entries()) {
-    const action = objectRecord(valueAction);
+    const action = recordOrNull(valueAction);
     const geometry = geometryOf(action?.geometry);
 
     if (
@@ -192,7 +185,7 @@ function timingCandidateOf(
   const stableIds = new Set<string>();
 
   for (const raw of source.stableIntervals) {
-    const interval = objectRecord(raw);
+    const interval = recordOrNull(raw);
 
     if (
       !interval
@@ -233,7 +226,7 @@ function timingCandidateOf(
   const removableWaits: RecordingTimingCandidate['removableWaits'] = [];
 
   for (const raw of source.removableWaits) {
-    const wait = objectRecord(raw);
+    const wait = recordOrNull(raw);
 
     if (
       !wait
@@ -265,7 +258,7 @@ function timingCandidateOf(
   const highlights: RecordingTimingCandidate['highlights'] = [];
 
   for (const raw of source.highlights) {
-    const highlight = objectRecord(raw);
+    const highlight = recordOrNull(raw);
     const geometry = geometryOf(highlight);
 
     if (
@@ -312,8 +305,8 @@ function timingCandidateOf(
 }
 
 function unavailableTimingOf(value: unknown): RecordingTimingUnavailableCandidate | null {
-  const source = objectRecord(value);
-  const calibration = objectRecord(source?.calibration);
+  const source = recordOrNull(value);
+  const calibration = recordOrNull(source?.calibration);
   const frameMs = 1000 / RENDER_STYLE.fps;
 
   if (
@@ -348,7 +341,7 @@ export async function publishRecordingTiming(input: {
   actions: ShowcaseProject['scenes'][number]['actions'];
   targetDir: string;
 }): Promise<ShowcaseDerivedArtifactRef | null> {
-  const timing = objectRecord(input.timing)?.status === 'unavailable'
+  const timing = recordOrNull(input.timing)?.status === 'unavailable'
     ? unavailableTimingOf(input.timing)
     : timingCandidateOf(input.timing, input.actions);
 
@@ -365,7 +358,7 @@ export async function publishRecordingTiming(input: {
     ...timing,
   };
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, 'utf8');
-  const contentHash = timingHash(bytes);
+  const contentHash = shortSha256(bytes);
   const id = `recording-timing-${randomBytes(6).toString('hex')}`;
   const file = path.join(input.targetDir, `${id}.json`);
   const temporary = `${file}.tmp-${randomBytes(4).toString('hex')}`;
@@ -415,13 +408,13 @@ export async function readRecordingTiming(input: {
   if (
     !bytes
     || bytes.length !== input.ref.byteSize
-    || timingHash(bytes) !== input.ref.contentHash
+    || shortSha256(bytes) !== input.ref.contentHash
   ) {
     return null;
   }
 
   try {
-    const source = objectRecord(JSON.parse(bytes.toString('utf8')));
+    const source = recordOrNull(JSON.parse(bytes.toString('utf8')));
 
     if (
       !source

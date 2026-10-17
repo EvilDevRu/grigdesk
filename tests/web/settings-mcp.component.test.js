@@ -167,7 +167,7 @@ async function mountSettings(t, { mcpByProvider, providerPatch, extraProviders }
     useAuthStore: () => ({ login: 'me', async logoutAll() {} }),
     usePluginsStore: () => ({ loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {} }),
     useChatStore: () => ({ compactWindow: 0 }),
-    usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
+    useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
   const [{ mount, flushPromises }, SettingsView] = await Promise.all([

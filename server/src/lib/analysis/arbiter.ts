@@ -8,11 +8,11 @@ import { createRepoHistoryTools } from './repoHistory.ts';
 import { repoListText } from './prompt.ts';
 import type { Analyzer } from './analyzer.ts';
 import type { TriageSourceLease } from './triageSource.ts';
-import { questionKey } from '../../../../shared/analysisContracts.ts';
+import { questionKey } from '../../../../shared/pipeline/analysisContracts.ts';
 import type {
   AnalysisArbiterAnswerInput,
   AnalysisQuestion,
-} from '../../../../shared/analysisContracts.ts';
+} from '../../../../shared/pipeline/analysisContracts.ts';
 
 export interface ArbiterOptions {
   analyzer: Analyzer;

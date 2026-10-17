@@ -8,7 +8,7 @@ import path from 'node:path';
 import { ShowcaseError } from './errors.ts';
 import { createSeedDecision, runSeed, seedAvailability } from './seed.ts';
 import type { SeedDecision } from './seed.ts';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
+import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { ShowcaseTargets } from './targets.ts';
 import type { SandboxActivityLease } from '../sandboxes/activityGuard.ts';

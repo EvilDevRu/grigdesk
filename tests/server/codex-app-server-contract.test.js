@@ -9,7 +9,9 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { createStepSink } from '../../server/src/lib/chat/streamSteps.ts';
+import { classifyTurnFailure } from '../../server/src/lib/chat/turnFailures.ts';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
+import { CODEX_TURN_FAILURE_RULES } from '../../server/src/lib/executors/_codexTurnFailures.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
 import { CODEX_APP_SERVER_COMPATIBILITY } from '../fixtures/codex-app-server/rich-turn-0.149.0.mjs';
 
@@ -603,4 +605,93 @@ test('неудачный thread/resume гасит живую сессию, а н
   // Отказ пришёл от «app-server», а не от самой fixture: процесс жил, пока его не погасили.
   const fixtureErrors = (await readTrace(f.trace)).filter((entry) => entry.direction === 'fixture-error');
   assert.deepEqual(fixtureErrors, []);
+});
+
+// ── Окончательный сбой и повторная отправка в ту же сессию (редакция 2 плана) ──
+// Ядро узнаёт об автоматическом продолжении только из явных полей результата:
+// deliveryFailure без turnRecovery автоматику не включает, а madeProgress приходит
+// из событий ТЕКУЩЕГО хода, а не из усечённой ленты.
+
+test('окончательный сетевой сбой: deliveryFailure, код причины и признак работы', async (t) => {
+  const f = await fixture(t, 'turn-failed-transport');
+  const result = await codex.run(runOptions(f));
+
+  assert.equal(result.deliveryFailure, true, 'ход закрыт сбоем доставки');
+  assert.equal(result.sessionId, '00000000-0000-7000-8000-000000000049', 'сессия сохранена');
+  assert.equal(result.turnRecovery.canContinue, true, 'принятый ход того же thread продолжаем');
+  assert.equal(result.turnRecovery.madeProgress, true, 'commentary — работа модели');
+  assert.equal(result.turnFailure.code, 'responseStreamDisconnected');
+  assert.match(result.turnFailure.message, /stream disconnected before completion/u);
+  assert.ok(Array.isArray(result.steps) && result.steps.length > 0);
+  assert.equal(result.cost, null);
+});
+
+test('окончательный отказ по лимиту: код ведёт реестр, продолжения нет', async (t) => {
+  const f = await fixture(t, 'turn-failed-usage-limit');
+  const result = await codex.run(runOptions(f));
+  const verdict = classifyTurnFailure(result.turnFailure, CODEX_TURN_FAILURE_RULES);
+
+  assert.equal(result.deliveryFailure, true);
+  assert.equal(verdict.kind, 'usage_limit');
+  assert.equal(verdict.continuable, false, 'лимит не продолжают автоматически');
+});
+
+test('финальная причина берётся из уведомления error, если turn.error пуст', async (t) => {
+  const f = await fixture(t, 'turn-failed-notification-only');
+  const result = await codex.run(runOptions(f));
+
+  assert.equal(result.deliveryFailure, true, 'уведомление willRetry false финализирует причину');
+  assert.match(result.turnFailure.message, /Reconnecting… 5\/5/u);
+  assert.equal(result.turnRecovery.madeProgress, true);
+});
+
+test('промежуточная причина не превращается в разрешение продолжать', async (t) => {
+  const f = await fixture(t, 'turn-failed-intermediate-error');
+  const result = await codex.run(runOptions(f));
+
+  assert.equal(result.deliveryFailure, true);
+  assert.equal(result.turnFailure.message, 'ход завершился ошибкой', 'willRetry true не финальна');
+  assert.equal(result.turnRecovery.canContinue, true, 'но сам ход принят и завершён');
+});
+
+test('промежуточный error, затем успех: обычный ход без внешнего продолжения', async (t) => {
+  const f = await fixture(t, 'turn-failed-intermediate-then-success');
+  const result = await codex.run(runOptions(f));
+
+  assert.equal(result.deliveryFailure, undefined, 'ход закончился успехом');
+  assert.equal(result.turnRecovery, undefined, 'разрешения продолжать нет');
+  assert.match(String(result.reply), /задача продолжена/u);
+});
+
+test('два send в одном thread: сбой, затем успех с новым turn и признаком заново', async (t) => {
+  const f = await fixture(t, 'turn-failed-then-success');
+  const first = await codex.run(runOptions(f));
+
+  assert.equal(first.deliveryFailure, true);
+  assert.equal(first.turnRecovery.madeProgress, true);
+
+  const second = await codex.run(runOptions(f, {
+    sessionId: '00000000-0000-7000-8000-000000000049',
+    message: 'Предыдущая попытка завершилась временным сбоем. Продолжай с места остановки.',
+  }));
+
+  assert.equal(second.deliveryFailure, undefined, 'второй ход успешен');
+  assert.equal(second.turnRecovery, undefined);
+  assert.equal(second.sessionId, '00000000-0000-7000-8000-000000000049', 'тот же thread');
+  assert.match(String(second.reply), /продолжение сохранено/u);
+
+  const trace = await readTrace(f.trace);
+  const starts = trace.filter((entry) => entry.direction === 'client'
+    && entry.message?.method === 'turn/start');
+  const ids = new Set(starts.map((entry) => entry.message?.params?.turnId
+    || entry.message?.params?.threadId));
+
+  assert.equal(starts.length, 2, 'ровно две отправки в один thread');
+  assert.ok(ids.size >= 1);
+
+  const serverTurns = trace.filter((entry) => entry.direction === 'server'
+    && entry.message?.method === 'turn/started')
+    .map((entry) => entry.message?.params?.turn?.id);
+
+  assert.ok(serverTurns.length >= 1);
 });

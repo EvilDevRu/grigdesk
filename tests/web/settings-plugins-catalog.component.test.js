@@ -7,6 +7,9 @@ import test from 'node:test';
 
 import { compilePluginsCatalog } from './helpers/plugins-catalog.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { singletonUrl, compileModule } from './helpers/compile-vue.js';
+import { pluginInstallUiDouble } from './helpers/pluginInstallUiFixture.js';
+import { webInstallInfo, webInstallJob } from './helpers/pluginInstallFixtures.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -126,14 +129,24 @@ function makeProvidersStore() {
   };
 }
 
-async function mountCatalog(t) {
+/**
+ * Stores могут быть настоящими Pinia instances или reactive doubles с управляемыми ответами.
+ * Старые проверки каталога сохраняют реальные controls и собственные настройки каждого теста.
+ */
+async function mountCatalog(t, {
+  installState = {},
+  initialList = PLUGINS,
+  makeStores = null,
+} = {}) {
   const prefix = `__pluginCatalog${mountNonce += 1}`;
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
 
   const toggles = [];
   const saves = [];
   const setups = [];
-  const list = structuredClone(PLUGINS);
+  const { reactive, nextTick } = await import(singletonUrl('vue'));
+  const list = reactive(structuredClone(initialList));
+  const installer = pluginInstallUiDouble(reactive, installState);
   // Готовность как её отдаёт сервер: одно требование с кнопкой, одно готовое.
   const setupStatus = () => ({
     checkedAt: '2026-09-11T00:00:00.000Z',
@@ -176,9 +189,12 @@ async function mountCatalog(t) {
     },
     async cancelSetup() { return setupStatus(); },
   };
+  const supplied = makeStores ? await makeStores() : null;
+
   globalThis[`${prefix}Stores`] = {
-    usePluginsStore: () => plugins,
+    usePluginsStore: () => supplied?.plugins ?? plugins,
     useProvidersStore: () => makeProvidersStore(),
+    usePluginInstallStore: () => supplied?.installer ?? installer.state,
   };
 
   const [vtu, PluginsCatalog] = await Promise.all([
@@ -198,7 +214,19 @@ async function mountCatalog(t) {
   });
   for (let index = 0; index < 3; index += 1) await flushPromises();
 
-  return { wrapper, flushPromises, toggles, saves, setups, browser, vtu };
+  return {
+    wrapper,
+    flushPromises,
+    toggles,
+    saves,
+    setups,
+    browser,
+    vtu,
+    nextTick,
+    list,
+    installer,
+    supplied,
+  };
 }
 
 function tileIds(wrapper) {
@@ -403,4 +431,219 @@ test('плагин без ручки готовности блока готов�
   const dialog = await openPlugin(mounted, 'code');
 
   assert.equal(dialog.find('.pd-setup').exists(), false);
+});
+
+test('P4: пользовательский плагин без параметров имеет панель источника', async (t) => {
+  const fixture = await mountCatalog(t);
+  const dialog = await openPlugin(fixture, 'team-alerts');
+
+  assert.equal(dialog.find('[data-role="plugin-source"]').exists(), true);
+  assert.match(dialog.text(), /Плагин установлен вручную/u);
+});
+
+test('K1: install открывает один диалог установки', async (t) => {
+  const { wrapper } = await mountCatalog(t);
+
+  assert.equal(wrapper.find('[data-role="plugins-install-git"]').exists(), true);
+  await wrapper.get('[data-role="plugins-install-git"]').trigger('click');
+  assert.equal(wrapper.findAll('[data-role="plugin-install-dialog"]').length, 1);
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-mode'), 'install');
+});
+
+test('K2: общая проверка появляется при managed и отражает checking', async (t) => {
+  const plain = await mountCatalog(t);
+
+  assert.equal(plain.wrapper.find('[data-role="plugins-check-updates"]').exists(), false);
+  plain.wrapper.unmount();
+
+  const initialList = structuredClone(PLUGINS);
+
+  initialList.at(-1).install = webInstallInfo();
+
+  const { wrapper, installer, nextTick } = await mountCatalog(t, { initialList });
+
+  assert.equal(wrapper.find('[data-role="plugins-check-updates"]').exists(), true);
+  await wrapper.get('[data-role="plugins-check-updates"]').trigger('click');
+  assert.equal(installer.calls.filter(([method]) => method === 'checkUpdates').length, 1);
+  installer.state.checking = true;
+  await nextTick();
+  assert.equal(wrapper.get('[data-role="plugins-check-updates"]').element.disabled, true);
+  assert.equal(wrapper.get('[data-role="plugins-check-updates"]').attributes('aria-busy'), 'true');
+});
+
+test('K3: badge обновления и приоритет ожидающего рестарта', async (t) => {
+  const initialList = structuredClone(PLUGINS);
+
+  initialList.at(-1).install = webInstallInfo({ updateAvailable: true });
+
+  const { wrapper, list, nextTick } = await mountCatalog(t, { initialList });
+  const tile = wrapper.get('[data-plugin-id="team-alerts"]');
+
+  assert.equal(tile.find('[data-badge="update"]').exists(), true);
+  assert.equal(tile.get('[data-badge="update"]').text(), 'обновление');
+  list.at(-1).install.restartRequired = true;
+  await nextTick();
+  assert.equal(tile.find('[data-badge="update"]').exists(), false);
+  assert.equal(tile.get('[data-badge="restart"]').text(), 'ждёт перезапуска');
+});
+
+test('K4: update/bind закрывают карточку; привязка сохраняет expectedId', async (t) => {
+  const initialList = structuredClone(PLUGINS);
+
+  initialList.at(-1).install = webInstallInfo({
+    updateAvailable: true,
+    latest: {
+      version: '1.2.0',
+      tag: 'v1.2.0',
+      sha: 'c'.repeat(40),
+    },
+  });
+
+  const update = await mountCatalog(t, { initialList });
+  const settings = await openPlugin(update, 'team-alerts');
+
+  await settings.get('[data-role="plugin-source-update"]').trigger('click');
+  await update.flushPromises();
+  assert.equal(update.wrapper.find('[data-role="plugin-settings"]').exists(), false);
+  assert.equal(update.wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-mode'), 'update');
+  assert.equal(update.wrapper.findAll('.ui-dialog').length, 1);
+  assert.equal(update.installer.calls.find(([method]) => method === 'listVersions')[1][0],
+    initialList.at(-1).install.source.url);
+  update.wrapper.unmount();
+
+  const bind = await mountCatalog(t);
+  const card = await openPlugin(bind, 'team-alerts');
+
+  await card.get('[data-role="plugin-source-bind"]').trigger('click');
+  await bind.flushPromises();
+  assert.equal(bind.wrapper.find('[data-role="plugin-settings"]').exists(), false);
+  assert.equal(bind.wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-mode'), 'install');
+  assert.equal(bind.wrapper.findAll('.ui-dialog').length, 1);
+  await bind.wrapper.get('[data-role="install-url"]').setValue('file:///fixture.git');
+  bind.installer.state.versionsUrl = 'file:///fixture.git';
+  bind.installer.state.versionsInputKey = 'file:///fixture.git';
+  bind.installer.state.versions = [{
+    version: '1.0.0',
+    tag: 'v1.0.0',
+    sha: 'a'.repeat(40),
+  }];
+  await bind.nextTick();
+  await bind.wrapper.get('[data-role="install-version"]').setValue('1.0.0');
+  await bind.wrapper.get('[data-role="install-start"]').trigger('click');
+  assert.equal(bind.installer.calls.find(([method]) => method === 'startInstall')[1][3], 'team-alerts');
+});
+
+test('K5: done обновляет каталог, prefs сохранены; неверный install сохраняет прежний DTO', async (t) => {
+  let response = structuredClone(PLUGINS);
+  const job = webInstallJob('done');
+  let currentJob = null;
+  let reads = 0;
+  const fixture = await mountCatalog(t, {
+    /**
+     * Общий Pinia связывает настоящий installer с настоящим каталогом.
+     * Подменена только сеть, поэтому done действительно вызывает plugins.load.
+     */
+    async makeStores() {
+      const entry = new URL('./helpers/pluginInstallCatalogEntry.js', import.meta.url).pathname;
+      const module = await compileModule(entry, {
+        stubs: {
+          '../shared/apiClient.ts': `
+            export const api = { get: (...args) => globalThis.__catalogInstallApi(...args) };
+            export const failureText = (error, fallback) => error?.message || fallback;
+          `,
+        },
+      });
+      const { createPinia } = await import(singletonUrl('pinia'));
+      const pinia = createPinia();
+
+      globalThis.__catalogInstallApi = async (url) => {
+        if (url === '/api/plugins') {
+          reads += 1;
+
+          return { plugins: response };
+        }
+
+        return { job: currentJob, recoveryError: null };
+      };
+
+      const plugins = module.usePluginsStore(pinia);
+      const installer = module.usePluginInstallStore(pinia);
+
+      t.after(() => {
+        installer.$dispose();
+        plugins.$dispose();
+        delete globalThis.__catalogInstallApi;
+      });
+      await plugins.load();
+
+      return { plugins, installer };
+    },
+  });
+
+  response = [...structuredClone(PLUGINS), {
+    ...structuredClone(PLUGINS.at(-1)),
+    id: 'demo',
+    name: 'Новая установка',
+    enabled: false,
+    values: {},
+    install: webInstallInfo({ previous: null, rollbackAvailable: false }),
+  }];
+  currentJob = job;
+  await fixture.supplied.installer.loadJob();
+  await fixture.flushPromises();
+  assert.equal(fixture.wrapper.find('[data-plugin-id="demo"]').exists(), true);
+  assert.equal(fixture.supplied.plugins.byId('demo').enabled, false);
+  assert.deepEqual(fixture.supplied.plugins.byId('video').values, { makeSummary: true });
+  assert.equal(fixture.supplied.plugins.byId('video').enabled, true);
+  await fixture.supplied.installer.loadJob();
+  assert.equal(reads, 2);
+
+  const before = JSON.stringify(fixture.supplied.plugins.list);
+
+  response = structuredClone(response);
+  response.at(-1).install = { rollbackAvailable: true, previous: { payloadDigest: '../unsafe' } };
+  await fixture.supplied.plugins.load();
+  assert.equal(JSON.stringify(fixture.supplied.plugins.list), before);
+});
+
+test('K6: health виден без job, блокирует мутации и сохраняет системные плитки', async (t) => {
+  const initialList = structuredClone(PLUGINS);
+
+  initialList.at(-1).install = webInstallInfo({ updateAvailable: true });
+
+  const fixture = await mountCatalog(t, {
+    initialList,
+    installState: {
+      recoveryError: { code: 'recovery_required', message: 'Установки заблокированы: копии сохранены.' },
+    },
+  });
+  const { wrapper, installer } = fixture;
+
+  assert.equal(wrapper.get('[data-role="plugins-install-git"]').element.disabled, true);
+  assert.equal(wrapper.get('[data-role="plugins-check-updates"]').element.disabled, true);
+  assert.equal(wrapper.find('[data-role="plugins-install-recovery"]').exists(), true);
+  assert.match(wrapper.get('[data-role="plugins-install-recovery"]').text(), /копии сохранены/u);
+  assert.equal(wrapper.find('[data-plugin-id="video"]').exists(), true);
+
+  const power = wrapper.get('[data-plugin-id="team-alerts"] .plugin-tile-power button');
+
+  assert.equal(power.element.disabled, true);
+  wrapper.get('[data-plugin-id="team-alerts"] .plugin-tile-power button').element.click();
+  assert.equal(fixture.toggles.length, 0);
+
+  const card = await openPlugin(fixture, 'team-alerts');
+
+  assert.equal(card.get('[data-role="plugin-source-update"]').element.disabled, true);
+  assert.equal(card.get('[data-role="plugin-source-rollback"]').element.disabled, true);
+  assert.equal(installer.calls.filter(([method]) => method === 'loadJob').length, 1);
+});
+
+test('K6: recovery job без отдельного health сохраняет видимую причину', async (t) => {
+  const { wrapper } = await mountCatalog(t, {
+    installState: { job: webInstallJob('recovery_required') },
+  });
+
+  assert.equal(wrapper.find('[data-role="plugins-install-recovery"]').exists(), true);
+  assert.match(wrapper.get('[data-role="plugins-install-recovery"]').text(), /Причина из фикстуры/u);
+  assert.equal(wrapper.get('[data-role="plugins-install-git"]').element.disabled, true);
 });

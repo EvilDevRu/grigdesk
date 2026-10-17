@@ -13,8 +13,8 @@ import type {
   DbQuery,
   DbResult,
   DbSession,
-} from '../../../shared/dbContracts.ts';
-import type { SshSession } from '../../../shared/sshContracts.ts';
+} from '../../../shared/plugins/db/dbContracts.ts';
+import type { SshSession } from '../../../shared/plugins/ssh/sshContracts.ts';
 
 // Признак архива приходит с сервера вместе со списком: форма по нему решает,
 // можно ли заводить на проект новый профиль базы.

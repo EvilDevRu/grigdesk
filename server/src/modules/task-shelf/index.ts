@@ -2,6 +2,8 @@
 // закрываются гейтом системного плагина; общий auth guard уже закрывает весь /api.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { errorCode } from '../../../../shared/lib/errors.ts';
+
 import { normalizeShelfTaskId } from '../../lib/taskShelfStore.ts';
 import type { TaskShelfResult, TaskShelfService } from '../../lib/taskShelfService.ts';
 
@@ -16,16 +18,8 @@ interface TaskShelfRoute {
   Body: unknown;
 }
 
-function failureCode(error: unknown): string {
-  const code = error !== null && typeof error === 'object'
-    ? (error as { code?: unknown }).code
-    : undefined;
-
-  return typeof code === 'string' ? code : '';
-}
-
 function publicError(reply: FastifyReply, error: unknown): FastifyReply {
-  const code = failureCode(error);
+  const code = errorCode(error);
   if (code === 'BAD_SHELF_TASK_ID') {
     return reply.code(400).send({ error: 'bad_task_id', message: 'Некорректный номер задачи.' });
   }
@@ -82,7 +76,7 @@ async function taskShelfModule(
       }
       return result;
     } catch (error) {
-      request.log?.error?.({ code: failureCode(error) }, 'Ошибка полки задач');
+      request.log?.error?.({ code: errorCode(error) }, 'Ошибка полки задач');
       return publicError(reply, error);
     }
   };

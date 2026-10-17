@@ -297,6 +297,7 @@ test('/api/providers отдаёт commands каждого исполнителя
     claudeAuth: null,
     prefs: { read: () => ({}) },
     getProviderAdapters: async () => adapters,
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 
@@ -340,6 +341,7 @@ test('/api/providers берёт смену папки из контракта а
     claudeAuth: null,
     prefs: { read: () => ({}) },
     getProviderAdapters: async () => adapters,
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 
@@ -384,6 +386,7 @@ test('/api/providers объявляет безопасный недоверен�
     claudeAuth: null,
     prefs: { read: () => ({}) },
     getProviderAdapters: async () => adapters,
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 
@@ -425,6 +428,7 @@ test('/api/providers нормализует способ запрета SSH бе
     claudeAuth: null,
     prefs: { read: () => ({}) },
     getProviderAdapters: async () => adapters,
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 

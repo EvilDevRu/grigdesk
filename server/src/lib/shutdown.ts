@@ -1,6 +1,6 @@
 // Координатор остановки сервера: сигнал → шаги слива → закрытие Fastify → выход.
 //
-// Раньше сервер не ловил сигналы вовсе: SIGTERM от systemd, bin/restart или кнопки
+// Раньше сервер не ловил сигналы вовсе: SIGTERM от systemd, deploy/restart.sh или кнопки
 // «Перезапустить» убивал процесс мгновенно, ни один onClose-хук не выполнялся, а живые
 // сессии агентов умирали посреди хода вместе с лентой и id сессии. Здесь остановка идёт
 // в два этапа. Сначала шаги слива (чат прерывает ходы и сохраняет их итог), пока сервер
@@ -30,7 +30,7 @@ export interface ShutdownCoordinator {
   // Зарегистрировать шаг слива; порядок — порядок регистрации.
   register(name: string, run: () => Promise<void>): void;
   // Начать остановку. Повторный вызов возвращает ту же остановку.
-  begin(reason: string): Promise<void>;
+  begin(reason: string, exitCode?: number): Promise<void>;
   // Повесить обработчики SIGTERM/SIGINT. Второй сигнал во время остановки — немедленный выход.
   arm(): void;
 }
@@ -64,14 +64,14 @@ export function createShutdownCoordinator({
    * обязаны уложиться в бюджет, иначе выходим с ошибкой — данные слива к этому моменту
    * уже записаны, а держать порт дольше значит поймать SIGKILL снаружи.
    */
-  async function run(reason: string): Promise<void> {
+  async function run(reason: string, exitCode: number): Promise<void> {
     const startedAt = Date.now();
 
     log?.info?.({ reason, steps: steps.map((step) => step.name) }, 'сервер: начинаю остановку');
 
     const hardStop = setTimeout(() => {
       log?.error?.({ reason, timeoutMs }, 'сервер: остановка не уложилась в бюджет — выхожу принудительно');
-      exit(1);
+      exit(exitCode || 1);
     }, timeoutMs);
     hardStop.unref?.();
 
@@ -88,19 +88,27 @@ export function createShutdownCoordinator({
     } catch (error) {
       clearTimeout(hardStop);
       log?.error?.({ err: (error as Error)?.message }, 'сервер: закрытие завершилось ошибкой');
-      exit(1);
+      exit(exitCode || 1);
       return;
     }
 
     clearTimeout(hardStop);
     log?.info?.({ reason, tookMs: Date.now() - startedAt }, 'сервер: остановлен');
-    exit(0);
+    exit(exitCode);
   }
 
-  function begin(reason: string): Promise<void> {
-    if (running) return running;
+  /**
+   * Первый запрос фиксирует причину и код выхода на весь слив.
+   * Повторный запрос ждёт ту же работу и не меняет принятое решение.
+   */
+  function begin(reason: string, exitCode = 0): Promise<void> {
+    if (running) {
+      return running;
+    }
+
     active = true;
-    running = run(reason);
+    running = run(reason, exitCode);
+
     return running;
   }
 

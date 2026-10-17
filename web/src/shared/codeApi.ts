@@ -18,8 +18,8 @@ import {
   parseCodeSearch,
   parseCodeStageResponse,
   parseCodeUndoCommitResponse,
-} from '../../../shared/codeContracts.ts';
-import type { CodeRequestContext } from '../../../shared/codeContracts.ts';
+} from '../../../shared/plugins/code/codeContracts.ts';
+import type { CodeRequestContext } from '../../../shared/plugins/code/codeContracts.ts';
 
 export interface CodeStageOptions {
   all?: boolean;

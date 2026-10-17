@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/codeContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/code/codeContracts.ts",
     "src/views/code/**/*.ts",
     "src/views/code/**/*.vue",
     "src/views/CodeView.vue",

@@ -5,7 +5,7 @@ import {
   ShelfContractError,
   parseShelfEntrySnapshot,
   parseShelfState,
-} from '../../shared/shelfContracts.ts';
+} from '../../shared/b24/shelfContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { shelfApi } from '../../web/src/shared/shelfApi.ts';
 

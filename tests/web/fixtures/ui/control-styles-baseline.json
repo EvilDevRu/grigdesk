@@ -1,68 +1,6 @@
 {
   "version": 1,
   "findings": {
-    "web/src/shared/layout/AppShell.vue": {
-      ".navitem, .collapse-btn": {
-        "padding": {
-          "9px 11px": 1,
-          "10px 0": 1
-        },
-        "border-radius": {
-          "9px": 1
-        },
-        "color": {
-          "var(--ink-mid)": 1
-        },
-        "font-size": {
-          "14px": 1
-        },
-        "background": {
-          "none": 1
-        },
-        "border": {
-          "none": 1
-        },
-        "cursor": {
-          "pointer": 1
-        },
-        "transition": {
-          "background .12s, color .12s": 1
-        }
-      },
-      ".navitem:hover, .collapse-btn:hover": {
-        "background": {
-          "var(--surface)": 1
-        },
-        "color": {
-          "var(--ink)": 1
-        }
-      },
-      ".navitem.active": {
-        "background": {
-          "color-mix(in srgb, var(--accent) 14%, transparent)": 1,
-          "none": 1
-        },
-        "color": {
-          "var(--accent)": 1
-        }
-      },
-      ".collapsed .navitem, .collapsed .collapse-btn": {
-        "padding": {
-          "10px 0": 1
-        }
-      },
-      ".navitem": {
-        "font-size": {
-          "10px": 1
-        },
-        "padding": {
-          "9px 2px": 1
-        },
-        "border-radius": {
-          "0": 1
-        }
-      }
-    },
     "web/src/views/AgentsView.vue": {
       ".item .ic": {
         "font-size": {

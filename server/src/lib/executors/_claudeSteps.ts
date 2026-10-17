@@ -4,7 +4,7 @@ import {
   base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
-import { STEP_IMAGE_TEXT } from '../../../../shared/chatSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
 
 /**
  * Заголовок и превью вызова инструмента — по одному на каждый знакомый инструмент,

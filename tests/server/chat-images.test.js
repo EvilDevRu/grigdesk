@@ -10,6 +10,7 @@ import { CHAT_IMAGE_MAX_BYTES, isWithinChatImageRoot, readChatImage }
   from '../../server/src/lib/chat/chatImages.ts';
 import { CHAT_IMAGE_FIXTURES } from '../fixtures/chatImages.mjs';
 import { chatAppFixture, TEST_MODEL_REF } from './helpers/chat-turns.js';
+import { config } from '../../server/src/config.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
 
 /**
@@ -372,6 +373,22 @@ test('CHAT-IMG-06b: каталог картинок исполнителя чи�
   assert.equal(outside.statusCode, 403);
 });
 
+test('CHAT-IMG-06c: общая папка артефактов читается из любого разговора', async (t) => {
+  // Снимки агенты кладут в папку артефактов вне дерева кода; сервер добавляет её к корням.
+  const f = await httpFixture(t);
+  const shots = path.join(f.root, 'artifacts', 'shots');
+
+  await saveImageChat(f, { kind: 'path', path: f.cwd });
+  await fs.mkdir(shots, { recursive: true });
+  await fs.writeFile(path.join(shots, 'shot.png'), CHAT_IMAGE_FIXTURES.png);
+
+  const response = await f.app.inject(imageUrl(path.join(shots, 'shot.png')));
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.rawPayload.equals(CHAT_IMAGE_FIXTURES.png), true);
+  assert.equal((await f.app.inject(imageUrl(path.join(f.outside, 'frame.png')))).statusCode, 403);
+});
+
 test('CHAT-IMG-07: HTTP отказы не кэшируются и смена workdir снимает старый доступ', async (t) => {
   const f = await httpFixture(t);
 
@@ -477,4 +494,24 @@ test('CHAT-IMG-09: память чтения пропорциональна фа
   assert.equal(result.type, 'image/png');
   assert.deepEqual(result.bytes, CHAT_IMAGE_FIXTURES.png);
   assert.ok(Math.max(0, ...sizes) < 64 * 1024, `выделено ${Math.max(0, ...sizes)} байт`);
+});
+
+
+test('CI-DH состояние и мобильные ключи скрыты даже в разрешённой рабочей области', async (t) => {
+  const f = await fixture(t);
+  const saved = { dataStateDir: config.dataStateDir, mobileDir: config.mobileDir };
+
+  config.dataStateDir = path.join(f.cwd, 'state');
+  config.mobileDir = path.join(f.cwd, 'mobile');
+
+  try {
+    for (const dir of [config.dataStateDir, config.mobileDir]) {
+      await fs.mkdir(dir);
+      await fs.writeFile(path.join(dir, 'secret.png'), CHAT_IMAGE_FIXTURES.png);
+      assert.deepEqual(await readChatImage({ cwd: f.cwd, requested: path.join(dir, 'secret.png') }),
+        { status: 404, error: 'hidden' });
+    }
+  } finally {
+    Object.assign(config, saved);
+  }
 });

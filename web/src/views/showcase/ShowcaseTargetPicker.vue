@@ -146,7 +146,7 @@ import type {
   ShowcaseOverview,
   ShowcaseProjectSummary,
   ShowcaseSelectableTargetRef,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 
 type TargetChoice = ShowcaseOverview['targets'][number];
 

@@ -15,6 +15,7 @@
 | Ворота | `conveyor-<taskId>` | `task:<taskId>` | warning | Нет | Открыть конвейер |
 | Авария или затык | `stall-<taskId>:<kind>:<stage>` | `task:<taskId>` | danger | Нет | Открыть конвейер |
 | Молчание | `silence-<taskId>:<stage>` | `task:<taskId>` | warning | Нет | Открыть конвейер |
+| Результат 3D | `studio-<versionId>` | `studio:<modelId>` | accent / danger | Ready: 8 секунд; failed: нет | Открыть модель и версию |
 | Ошибка сохранения истории | `chat-save-error` | — | danger | Нет | Крестик |
 | Новое событие полки | `task-shelf-<taskId>-<fingerprint>` | `task:<taskId>` | accent | Через 8 секунд | Открыть задачу поверх раздела |
 
@@ -27,9 +28,9 @@ SSH- и DB-подтверждения поступают отдельной св
 либо когда сверка waiting больше не содержит запрос. Видимый чат при `markRead` гасит все
 тосты своей области даже без unread. Снятые ворота, авария и молчание гасят свои события
 при успешной сверке конвейера; отказ чтения списка задач сохраняет прошлые оповещения.
-Восстановление сохранения истории гасит её ошибку. Выход из аккаунта очищает все тосты.
+Восстановление сохранения истории гасит её ошибку. Потеря сессии очищает все тосты.
 Исчезновение тоста закрывает системное уведомление с тем же id — через экземпляр
-Notification и `registration.getNotifications({ tag })`.
+Notification. Service worker не используется; иконка — встроенный PNG data URL.
 
 Быстрое разрешение допустимо только для объекта `kind: 'perm'`, который тост может
 показать целиком. Отклоняются источники SSH и DB; `ExitPlanMode` и запросы с планом;
@@ -65,7 +66,7 @@ Notification и `registration.getNotifications({ tag })`.
 Колокольчик в верхней панели, слева от настроек, открывает историю оповещений этого окна
 (`shared/alertHistory.ts`, вид — `features/alerts/AlertHistoryPopover.vue`). Запись создаётся
 на каждый показанный тост, новейшие сверху, не больше 50. История живёт в памяти вкладки:
-в ней текст переписки, поэтому на диск она не пишется. Её стирают выход из аккаунта
+в ней текст переписки, поэтому на диск она не пишется. Её стирают потеря сессии
 и кнопка «Очистить».
 
 Состояние записи определяется тем, как ушёл тост. Центр тостов сообщает причину ухода
@@ -94,9 +95,16 @@ Notification и `registration.getNotifications({ tag })`.
 
 Проверки поведения: `alert-history.test.js`, `alert-history-popover.component.test.js`,
 `ui-toasts.test.js`, `ui-toast-host.component.test.js`,
-`ui-dependency-boundary.test.js`, `pwa-notify.test.js`, `alert-targets.test.js`,
+`ui-dependency-boundary.test.js`, `device-notify.test.js`, `alert-targets.test.js`,
 `quick-permission.test.js`, `alerts.test.js`, `alert-deep-links.test.js`,
 `chat-store-reveal.test.js`, `chat-layout-resize.component.test.js`,
 `in-app-alerts-wiring.contract.test.js`, `chat-store-alerts.test.js`,
 `notify-watch-stall.test.js`, `task-shelf.test.js`, `task-shelf.component.test.js` и
 `shelf-contract.test.js`.
+
+
+Раздел 3D получает terminal состояние через постоянный shell subscriber и
+`studio-changed` → перечитывание задач. Семантический dedup не даёт повторить тост
+при reconnect. Текущая открытая модель подавляет свой тост; кеш после ухода со страницы
+его не подавляет. Цель `studio` открывает `#/3d?model=…&version=…` без token URL
+или абсолютного пути в уведомлении. Потеря сессии и отключение прекращают эту подписку.

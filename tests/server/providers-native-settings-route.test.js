@@ -8,7 +8,7 @@ import test from 'node:test';
 import providersModule from '../../server/src/modules/providers/index.ts';
 import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 import { syntheticProvider } from '../fixtures/executor-settings/syntheticProvider.js';
-import { decodeProviderSettingsCatalog } from '../../shared/providerSettingsContracts.ts';
+import { decodeProviderSettingsCatalog } from '../../shared/chat/providerSettingsContracts.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';

@@ -103,7 +103,11 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import type { SVGAttributes } from 'vue';
 
-import type { DockerActionResult, DockerNetwork, DockerVolume } from '../../../../shared/dockerContracts';
+import type {
+  DockerActionResult,
+  DockerNetwork,
+  DockerVolume,
+} from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.js';

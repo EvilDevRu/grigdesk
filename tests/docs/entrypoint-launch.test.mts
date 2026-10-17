@@ -21,14 +21,15 @@ const SQLITE_WARNING_ALLOWED = new Set<string>();
 // команды пакетов и общий прогон. Приватные каталоги и сборку сюда не включаем.
 const LAUNCH_FILES = [
   'bin/cockpit',
-  'bin/launch',
-  'bin/restart',
-  'bin/lib/runtime-env.sh',
+  'deploy/restart.sh',
+  'deploy/lib/runtime-env.sh',
   'deploy/install.sh',
   'deploy/shortcut.sh',
   'deploy/cockpit-server.service',
+  'desktop/src/serverProcess.ts',
   'server/package.json',
   'web/package.json',
+  'b24/package.json',
   'tests/run-all.sh',
 ];
 
@@ -63,7 +64,7 @@ test('минимум Node объявлен и проверяется на зап
   const [serverPkg, webPkg, runtimeEnv, gate] = await Promise.all([
     source('server/package.json'),
     source('web/package.json'),
-    source('bin/lib/runtime-env.sh'),
+    source('deploy/lib/runtime-env.sh'),
     source('server/src/lib/nodeVersion.ts'),
   ]);
 

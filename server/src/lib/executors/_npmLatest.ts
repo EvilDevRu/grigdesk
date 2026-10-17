@@ -3,6 +3,8 @@
 // и одинаковый для них источник «а не вышло ли новее»: один HTTP-запрос, без подпроцессов.
 // Обновление НИКОГДА не запускается само — это только индикатор для пользователя.
 
+import { setTimeout as pause } from 'node:timers/promises';
+
 /**
  * Версия пакета с тегом latest. null — сеть недоступна/пакет не найден
  * (тогда индикатор просто не показывается, ошибок в UI нет).
@@ -22,7 +24,10 @@ export async function npmLatest(pkg: string): Promise<string | null> {
         if (typeof d?.version === 'string') return d.version;
       }
     } catch { /* сетевой сбой — пробуем ещё раз */ }
-    if (i < 2) await new Promise((res) => setTimeout(res, 800));
+
+    if (i < 2) {
+      await pause(800);
+    }
   }
   return null;
 }

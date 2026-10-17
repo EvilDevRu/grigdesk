@@ -1,140 +1,80 @@
 <template>
-  <div class="shell" :class="{ collapsed }">
+  <div class="shell">
     <aside class="sidebar">
-      <div class="brand">
-        <span class="logo">◧</span>
-        <span class="name">Кокпит</span>
-      </div>
       <nav class="nav">
-        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active"
-                     :aria-label="item.label"
-                     v-tooltip.right="item.to === '/board' && boardChipVisible
-                       ? `${item.label} · ${boardChipTitle}`
-                       : item.label">
+        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
+                     :aria-label="navTitle(item)"
+                     v-tooltip.right="navTitle(item)">
           <span class="icwrap">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
-            <span v-if="item.to === '/board' && boardChipVisible"
-                  class="boardchip"
-                  :class="{
-                    timing: boardNavActivity.activeTimerCount,
-                    'only-new': !boardNavActivity.activeTimerCount,
-                  }"
-                  role="status" :aria-label="boardChipTitle" v-tooltip="boardChipTitle">
-              <span v-if="boardNavActivity.activeTimerCount">
-                {{ boardNavActivity.activeTimerCount > 99 ? '99+' : boardNavActivity.activeTimerCount }}
-              </span>
-              <span v-if="boardNavActivity.activeTimerCount" class="boardtimer" aria-hidden="true"></span>
-              <span v-if="boardNavActivity.unseenCount && boardNavActivity.activeTimerCount"
-                    class="boardnew" aria-hidden="true"></span>
-            </span>
-            <!-- У конвейера цветной круг показывает состав: красный — аварии, жёлтый —
-                 готовые задачи на воротах, синий — ещё выполняются. Число внутри не
-                 включает синие задачи. У остальных разделов чип остаётся одноцветным. -->
-            <span v-if="badges[item.to]" class="navbadge"
-                  :class="[badges[item.to].kind, badges[item.to].pulseKind]"
-                  :style="badges[item.to].style"
-                  role="status" :aria-label="badges[item.to].title"
-                  v-tooltip="badges[item.to].title">{{ badges[item.to].n }}</span>
+            <NavigationCount :badge="badges[item.to]" />
           </span>
-          <span class="lbl">{{ item.label }}</span>
         </router-link>
         <!-- Плагины: под основными разделами, за разделителем. Состав живёт в «Настройки → Плагины». -->
         <template v-if="pluginNav.length">
           <div class="navsep"></div>
-          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active"
-                       :aria-label="item.label" v-tooltip.right="item.label">
+          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
+                       :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
             <span class="icwrap">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
-              <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
-                    role="status" :aria-label="badges[item.to].title" v-tooltip="badges[item.to].title">
-                {{ badges[item.to].n > 99 ? '99+' : badges[item.to].n }}
-              </span>
+              <NavigationCount :badge="badges[item.to]" />
             </span>
-            <span class="lbl">{{ item.label }}</span>
-          </router-link>
+            </router-link>
         </template>
         <template v-if="toolsNav.length">
           <div class="navsep"></div>
-          <UiPressable ref="toolsTrigger" class="navitem tools-trigger"
-                       :class="{ active: toolsActive }" aria-label="Инструменты"
-                       v-tooltip.right="'Инструменты'"
+          <UiPressable ref="toolsTrigger" class="navitem tools-trigger" data-ui-shell-nav
+                       :class="{ active: toolsActive }" :aria-label="navTitle({ to: '/tools', label: 'Инструменты' })"
+                       v-tooltip.right="navTitle({ to: '/tools', label: 'Инструменты' })"
                        :aria-expanded="toolsOpen" aria-haspopup="true" @click="toggleTools">
             <span class="icwrap">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                    stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
-                    role="status" :aria-label="badges['/tools'].title" v-tooltip="badges['/tools'].title">
-                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
-              </span>
+              <NavigationCount :badge="badges['/tools']" />
             </span>
-            <span class="lbl">Инструменты</span>
           </UiPressable>
-          <router-link to="/tools" class="navitem tools-mobile" active-class="active"
-                       aria-label="Инструменты" v-tooltip.right="'Инструменты'">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
-                    role="status" :aria-label="badges['/tools'].title" v-tooltip="badges['/tools'].title">
-                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
-              </span>
-            </span>
-            <span class="lbl">Инструменты</span>
-          </router-link>
         </template>
       </nav>
       <nav class="nav nav-bottom dock-route-nav">
-        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" active-class="active"
-                       :aria-label="item.label" v-tooltip.right="item.label">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
-          <span class="lbl">{{ item.label }}</span>
+        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
+                       :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
+          <span class="icwrap">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+            <NavigationCount :badge="badges[item.to]" />
+          </span>
         </router-link>
       </nav>
-      <UiPressable class="collapse-btn" :aria-label="collapsed ? 'Развернуть' : 'Свернуть'"
-                   v-tooltip.right="collapsed ? 'Развернуть' : 'Свернуть'"
-                   @click="toggleSidebar">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="collapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'" /></svg>
-        <span class="lbl">Свернуть</span>
-      </UiPressable>
-      <!-- Конец рейки — версия кокпита и весь путь обновления: точка «есть релиз», стадия
-           установки, «Обновить кокпит». Отдельно от «Свернуть»: кнопка, которая иногда
-           перезагружает приложение вместо сворачивания, — ловушка для моторной памяти. -->
-      <CockpitVersionTile class="rail-version" />
     </aside>
 
-    <header class="topbar">
-      <div class="tbleft">
-        <span class="mlogo">◧</span>
-        <h1 class="page">{{ route.meta.title || 'Кокпит' }}</h1>
-      </div>
+    <header data-ui-topbar class="topbar" :class="{ 'window-titlebar': isDesktopMain }">
+      <span class="app-mark" aria-label="Кокпит"><CockpitMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <UiTooltip
-          v-if="sys"
-          placement="top-end"
-          :surface-style="{ maxWidth: '320px' }"
-        >
+        <UiTopbarPanel v-if="sys" title="Ресурсы компьютера">
+          <template #meta>{{ sys.cpu.cores }} ядер</template>
           <template #trigger>
             <!-- Опрос не удался — цифры остаются, но честно блекнут: пустое место в шапке
                  выглядело как «метрики пропали», хотя пропала только связь. -->
-            <span class="metric mono" :class="{ stale: sysStale }" tabindex="0">
-              CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
-              · RAM
-              <b :class="loadClass(sys.mem.percent)">
-                {{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}
-              </b>
-            </span>
+            <UiPressable class="metric mono" data-context="topbar-metrics"
+                         :class="{ stale: sysStale }" aria-label="Ресурсы компьютера">
+              <span>CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b></span>
+              <span class="sep" aria-hidden="true"></span>
+              <span>
+                RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}</b>
+              </span>
+            </UiPressable>
           </template>
           <!-- Разбивка нагрузки полосками: одной строкой «занято 22 из 47» не видно,
                кончилась физическая память или просто лежит холодный swap. -->
-          <template #tip>
+          <template #default>
             <span class="ptip">
               <span class="pu">
                 <span class="pu-row">
-                  <span class="pu-head"><span>Процессор · {{ sys.cpu.cores }} ядер</span><b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b></span>
+                  <span class="pu-head"><span>Процессор</span><b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b></span>
                   <span class="pu-bar"><span class="pu-fill" :class="loadClass(sys.cpu.percent)" :style="{ width: Math.min(100, sys.cpu.percent) + '%' }"></span></span>
                   <span class="pu-reset">средняя загрузка за минуту — {{ sys.cpu.load1 }}</span>
                 </span>
@@ -156,8 +96,8 @@
               </span>
             </span>
           </template>
-        </UiTooltip>
-        <span v-if="sys" class="sep" aria-hidden="true">·</span>
+        </UiTopbarPanel>
+        <span v-if="sys" class="sep metric-sep" aria-hidden="true"></span>
         <BoardTimerPopover
           v-if="topbarTimerTasks.length"
           :tasks="topbarTimerTasks"
@@ -172,7 +112,7 @@
           v-if="topbarTimerTasks.length && pipelineTopbar.total"
           class="sep"
           aria-hidden="true"
-        >·</span>
+        ></span>
         <PipelineTopbarPopover
           v-if="pipelineTopbar.total"
           :items="notifyWatch.topbarItems"
@@ -184,25 +124,21 @@
           v-if="topbarTimerTasks.length || pipelineTopbar.total"
           class="sep"
           aria-hidden="true"
-        >·</span>
+        ></span>
         <AttentionAlerts />
         <!-- Наведения на ряд иконок для чтения лимитов больше нет: свежий снимок сервер
              присылает сам (SSE providers-usage), а раскрытие всплывашки перечитывает
              его на случай оборванного потока и тикает, пока она открыта (см. usageWatch). -->
-        <span v-if="runtimeProviders.length" class="provbox">
+        <span v-if="runtimeProviders.length" v-svg-pixel-snap class="provbox">
           <span
             v-for="p in runtimeProviders"
             :key="p.id"
             :class="['prov-tip', `prov-${p.id}`]"
           >
-            <!-- Ширина ЗАДАНА, а не ограничена сверху: содержимое всплывашки меняется
-                 на каждом тике («4ч 59м» → «4ч», проценты, новое ведро), и от maxWidth
-                 она дышала между min-width поверхности и потолком прямо под курсором. -->
-            <UiPopover
-              trigger-mode="both"
-              focus-policy="none"
-              placement="top"
-              :style="{ width: 'min(320px, calc(100vw - 20px))' }"
+            <!-- Общая плитка сохраняет ширину, когда меняются отсчёт и набор лимитов:
+                 свежий снимок не сдвигает действия под курсором. -->
+            <UiTopbarPanel
+              :label="p.name"
               @open="usageWatch.open(p.id)"
               @close="usageWatch.close(p.id)"
             >
@@ -215,207 +151,198 @@
                   :aria-label="provTitle(p)"
                   :style="p.available ? { color: p.color } : null"
                 >
-                  <ProviderIcon :provider="p" :size="15" />
-                  <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
+                  <span class="prov-mark">
+                    <ProviderIcon
+                      :provider="p"
+                      :size="p.id === 'codex' || p.id === 'claude' ? 14 : 13"
+                      equal-height
+                    />
+                    <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
+                  </span>
                 </UiPressable>
               </template>
-              <template #default="{ close }">
-              <span class="ptip">
-                <!-- Шапка — только имя исполнителя: вендор, способ авторизации и версия
-                     живут в его плашке настроек, а здесь место нужно лимитам. Обновление
-                     сжато до точки справа; кокпит НИЧЕГО не обновляет сам — только сообщает.
-                     Переход в настройки — шестерёнка в той же строке: полосой во всю ширину
-                     внизу он занимал место, которого во всплывашке и так мало. -->
-                <span class="ptip-head">
-                  <b class="ptip-name">{{ p.name }}</b>
-                  <!-- «доступен» не пишем: это норма. Недоступность — единственный факт
-                       шапки, который нельзя потерять вместе со строкой подробностей. -->
-                  <span v-if="!p.available" class="ptip-off">недоступен</span>
-                  <span class="ptip-actions">
-                    <span
-                      v-if="p.updateAvailable"
-                      class="ptip-upd"
-                      data-testid="provider-popover-update-dot"
-                      v-tooltip="`Доступно обновление: ${p.latest}`"
-                    ></span>
-                    <!-- Ставится по нажатию и отсюда: точка сообщала о новой версии, а идти
-                         за ней приходилось в настройки. Ход один на весь кокпит, поэтому
-                         пока ставится один CLI, кнопки соседей заблокированы. -->
-                    <UiIconButton
-                      v-if="canUpdateCli(p)"
-                      data-context="topbar-popover-update"
-                      role="embedded"
-                      :label="`Обновить до ${p.latest}`"
-                      v-tooltip="`Обновить CLI до ${p.latest}. Каталог моделей перечитается.`"
-                      :disabled="!!prov.updating"
-                      :loading="prov.updating === p.id"
-                      loading-label="Обновляю"
-                      @click="prov.updateCli(p.id)"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M12 3v12 M7 10l5 5 5-5 M4 20h16" />
-                      </svg>
-                    </UiIconButton>
-                    <!-- Проверка «прямо сейчас»: фон ходит к вендору раз в пять минут, а
-                         человеку иногда нужна цифра этой минуты. Пока идёт пауза после
-                         отказа вендора, кнопка гаснет и называет время: клик всё равно
-                         вернул бы прошлый снимок, и молчащая кнопка честнее мёртвой. -->
-                    <UiIconButton
-                      data-context="topbar-popover-refresh"
-                      role="embedded"
-                      label="Проверить лимиты сейчас"
-                      v-tooltip="usagePauseOf(p)
-                        ? `Вендор попросил не проверять. Следующая проверка ${usagePauseOf(p)}.`
-                        : 'Проверить лимиты сейчас'"
-                      :disabled="!!usagePauseOf(p)"
-                      :loading="prov.usageRefreshing"
-                      loading-label="Проверяю"
-                      @click="prov.refreshUsage()"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1 M20.5 3.5v5.5H15" />
-                      </svg>
-                    </UiIconButton>
-                    <UiIconButton
-                      data-context="topbar-popover-settings"
-                      role="embedded"
-                      label="Настройки исполнителей"
-                      v-tooltip="'Настройки исполнителей'"
-                      @click="close('action'); toProviders()"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
-                           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path :d="ICONS.settings" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    </UiIconButton>
-                  </span>
-                </span>
-                <!-- Итог установки виден, только когда он что-то значит: успех и так
-                     виден пропавшим предложением обновиться. -->
-                <span
-                  v-if="updateNoteOf(p)"
-                  class="pu-state"
-                  :class="updateNoteOf(p).type === 'err' ? 'is-bad' : 'is-warn'"
-                >{{ updateNoteOf(p).text }}</span>
-                <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
-                     читали уже после того, как начинали гадать о причине сбоя. -->
-                <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
-                  <span>{{ usageOf(p).message }}</span>
-                  <!-- Срок паузы — рядом с отказом: «временно ограничил» без «до когда»
-                       оставляло человека гадать, ждать минуту или час. -->
-                  <span v-if="usagePauseOf(p)">Следующая проверка {{ usagePauseOf(p) }}.</span>
-                  <span v-if="statusHintOf(p)" class="pu-status">
-                    {{ statusHintOf(p).text }}
-                    <UiActionLink
-                      data-context="topbar-popover-status-link"
-                      :href="statusHintOf(p).url"
-                      variant="text"
-                      target="_blank"
-                    >{{ statusHintOf(p).host }}</UiActionLink>
-                  </span>
-                  <UiButton
-                    v-if="usageOf(p).action"
-                    data-context="topbar-popover-action"
-                    variant="outline"
-                    @click.stop="close('action'); runUsageAction(usageOf(p).action)"
-                  >
-                    {{ usageOf(p).action.label }}
-                  </UiButton>
-                </span>
-                <!-- Потребление лимитов подписки — как /usage в CLI -->
-                <span class="pu">
-                  <span
-                    v-for="b in usageOf(p).bars"
-                    :key="b.key"
-                    class="pu-row"
-                    :class="{ 'pu-split': b.separated }"
-                  >
-                    <span class="pu-head">
-                      <span class="pu-name">
-                        {{ b.label }}
-                        <!-- Ведро, которого раньше не было: появление нового лимита
-                             иначе замечается только случайно. Гаснет само. -->
-                        <span v-if="b.fresh" class="pu-new" v-tooltip="'Это ведро лимитов появилось недавно'">новое</span>
-                      </span>
-                      <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
-                    </span>
-                    <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
-                    <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
-                         одному «через 4д» нельзя. Полоса своей ширины не меняет, поэтому
-                         вторая половина уходит к правому краю, а не удлиняет строку. -->
-                    <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">
-                      <span>{{ b.note || resetIn(b.resetsAt) }}</span>
-                      <span v-if="!b.note && resetAt(b.resetsAt)" class="pu-reset-at">
-                        {{ resetAt(b.resetsAt) }}
-                      </span>
-                    </span>
-                  </span>
-                  <!-- Слот плагинов под полосами: кто здесь стоит, решают реестр размещений
-                       и настройки плагинов, всплывашка ни одного из них не знает. -->
-                  <PluginSlot name="provider.popover.after-bars" :context="{ providerId: p.id }" />
-                  <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
-                       можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
-                  <ProviderUsageResources
-                    :provider-id="p.id"
-                    :resources="usageOf(p).resources"
-                    readonly
-                  />
-                </span>
-              </span>
+              <template #title>
+                <b class="ptip-name">{{ p.name }}</b>
+                <!-- «доступен» не пишем: это норма. Недоступность — единственный факт
+                     шапки, который нельзя потерять вместе со строкой подробностей. -->
+                <span v-if="!p.available" class="ptip-off">недоступен</span>
               </template>
-            </UiPopover>
+              <template #actions="{ close }">
+                <span class="ptip-actions">
+                  <span
+                    v-if="p.updateAvailable"
+                    class="ptip-upd"
+                    data-testid="provider-popover-update-dot"
+                    v-tooltip="`Доступно обновление: ${p.latest}`"
+                  ></span>
+                  <!-- Ставится по нажатию и отсюда: точка сообщала о новой версии, а идти
+                       за ней приходилось в настройки. Ход один на весь кокпит, поэтому
+                       пока ставится один CLI, кнопки соседей заблокированы. -->
+                  <UiIconButton
+                    v-if="canUpdateCli(p)"
+                    data-context="topbar-popover-update"
+                    role="embedded"
+                    :label="`Обновить до ${p.latest}`"
+                    v-tooltip="`Обновить CLI до ${p.latest}. Каталог моделей перечитается.`"
+                    :disabled="!!prov.updating"
+                    :loading="prov.updating === p.id"
+                    loading-label="Обновляю"
+                    @click="prov.updateCli(p.id)"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 3v12 M7 10l5 5 5-5 M4 20h16" />
+                    </svg>
+                  </UiIconButton>
+                  <!-- Проверка «прямо сейчас»: фон ходит к вендору раз в пять минут, а
+                       человеку иногда нужна цифра этой минуты. Пока идёт пауза после
+                       отказа вендора, кнопка гаснет и называет время: клик всё равно
+                       вернул бы прошлый снимок, и молчащая кнопка честнее мёртвой. -->
+                  <UiIconButton
+                    data-context="topbar-popover-refresh"
+                    role="embedded"
+                    label="Проверить лимиты сейчас"
+                    v-tooltip="usagePauseOf(p)
+                      ? `Вендор попросил не проверять. Следующая проверка ${usagePauseOf(p)}.`
+                      : 'Проверить лимиты сейчас'"
+                    :disabled="!!usagePauseOf(p)"
+                    :loading="prov.usageRefreshing"
+                    loading-label="Проверяю"
+                    @click="prov.refreshUsage()"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1 M20.5 3.5v5.5H15" />
+                    </svg>
+                  </UiIconButton>
+                  <UiIconButton
+                    data-context="topbar-popover-settings"
+                    role="embedded"
+                    label="Настройки исполнителей"
+                    v-tooltip="'Настройки исполнителей'"
+                    @click="close('action'); toProviders()"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path :d="ICONS.settings" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </UiIconButton>
+                </span>
+              </template>
+              <template #default="{ close }">
+                <span class="ptip">
+                  <!-- Итог установки виден, только когда он что-то значит: успех и так
+                       виден пропавшим предложением обновиться. -->
+                  <span
+                    v-if="updateNoteOf(p)"
+                    class="pu-state"
+                    :class="updateNoteOf(p).type === 'err' ? 'is-bad' : 'is-warn'"
+                  >{{ updateNoteOf(p).text }}</span>
+                  <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
+                       читали уже после того, как начинали гадать о причине сбоя. -->
+                  <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
+                    <span>{{ usageOf(p).message }}</span>
+                    <!-- Срок паузы — рядом с отказом: «временно ограничил» без «до когда»
+                         оставляло человека гадать, ждать минуту или час. -->
+                    <span v-if="usagePauseOf(p)">Следующая проверка {{ usagePauseOf(p) }}.</span>
+                    <span v-if="statusHintOf(p)" class="pu-status">
+                      {{ statusHintOf(p).text }}
+                      <UiActionLink
+                        data-context="topbar-popover-status-link"
+                        :href="statusHintOf(p).url"
+                        variant="text"
+                        target="_blank"
+                      >{{ statusHintOf(p).host }}</UiActionLink>
+                    </span>
+                    <UiButton
+                      v-if="usageOf(p).action"
+                      data-context="topbar-popover-action"
+                      variant="outline"
+                      @click.stop="close('action'); runUsageAction(usageOf(p).action)"
+                    >
+                      {{ usageOf(p).action.label }}
+                    </UiButton>
+                  </span>
+                  <!-- Потребление лимитов подписки — как /usage в CLI -->
+                  <span class="pu">
+                    <span
+                      v-for="b in usageOf(p).bars"
+                      :key="b.key"
+                      class="pu-row"
+                      :class="{ 'pu-split': b.separated }"
+                    >
+                      <span class="pu-head">
+                        <span class="pu-name">
+                          {{ b.label }}
+                          <!-- Ведро, которого раньше не было: появление нового лимита
+                               иначе замечается только случайно. Гаснет само. -->
+                          <span v-if="b.fresh" class="pu-new" v-tooltip="'Это ведро лимитов появилось недавно'">новое</span>
+                        </span>
+                        <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
+                      </span>
+                      <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
+                      <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
+                           одному «через 4д» нельзя. Полоса своей ширины не меняет, поэтому
+                           вторая половина уходит к правому краю, а не удлиняет строку. -->
+                      <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">
+                        <span>{{ b.note || resetIn(b.resetsAt) }}</span>
+                        <span v-if="!b.note && resetAt(b.resetsAt)" class="pu-reset-at">
+                          {{ resetAt(b.resetsAt) }}
+                        </span>
+                      </span>
+                    </span>
+                    <!-- Слот плагинов под полосами: кто здесь стоит, решают реестр размещений
+                         и настройки плагинов, всплывашка ни одного из них не знает. -->
+                    <PluginSlot name="provider.popover.after-bars" :context="{ providerId: p.id }" />
+                    <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
+                         можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
+                    <ProviderUsageResources
+                      :provider-id="p.id"
+                      :resources="usageOf(p).resources"
+                      readonly
+                    />
+                  </span>
+                </span>
+              </template>
+            </UiTopbarPanel>
           </span>
         </span>
-        <span v-if="runtimeProviders.length && sys?.net" class="sep" aria-hidden="true">·</span>
-        <UiTooltip
-          v-if="sys?.net"
-          :text="`Публичный IP мозга: ${sys.net.ip}`
-            + (sys.net.country ? ` · ${sys.net.country}` : '')"
-        >
+        <span v-if="runtimeProviders.length && sys?.net" class="sep" aria-hidden="true"></span>
+        <UiTopbarPanel v-if="sys?.net" title="Сеть">
           <template #trigger>
-            <span class="netbox mono" tabindex="0">
+            <UiPressable class="netbox mono" data-context="topbar-network" aria-label="Сведения о сети">
               <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
               <span class="ip">{{ sys.net.ip }}</span>
-            </span>
+            </UiPressable>
           </template>
-        </UiTooltip>
-        <span v-if="sys?.net" class="sep" aria-hidden="true">·</span>
-        <UiTooltip
-          placement="top-end"
-          :text="connected
-            ? 'Связь с сервером кокпита — канал жив'
-            : 'Нет связи с сервером кокпита'"
-        >
-          <template #trigger>
-            <span class="conn" :class="connected ? 'on' : 'off'" tabindex="0">
-              <span class="dot"></span>
-              <span class="host mono">{{ health ? health.host : 'офлайн' }}</span>
-            </span>
+          <template #default>
+            Публичный IP мозга: {{ sys.net.ip }}
+            <template v-if="sys.net.country"> · {{ sys.net.country }}</template>
           </template>
-        </UiTooltip>
+        </UiTopbarPanel>
       </div>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
-      <AlertHistoryPopover />
-      <router-link to="/settings" class="settings-link" active-class="active"
+      <div class="topbar-actions">
+        <AlertHistoryPopover />
+        <router-link to="/settings" class="settings-link" active-class="active"
                    v-tooltip="'Настройки'" aria-label="Настройки">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path :d="ICONS.settings" />
           <circle cx="12" cy="12" r="3" />
         </svg>
-      </router-link>
+        </router-link>
+      </div>
     </header>
 
-    <main class="content" :inert="toolDock.isExpanded"
+    <main class="content" :class="{ 'is-workspace': route.meta.layout === 'workspace' }" :inert="toolDock.isExpanded"
           :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
     <ToolHost />
 
     <Teleport to="body">
       <section v-if="toolsOpen" ref="toolsPopover" class="tools-popover" :style="toolsPopoverStyle"
-               aria-label="Инструменты">
+               :aria-label="navTitle({ to: '/tools', label: 'Инструменты' })">
         <header>
           <strong>Инструменты</strong>
           <router-link to="/tools" @click="closeTools()">Все на странице →</router-link>
@@ -424,13 +351,6 @@
       </section>
     </Teleport>
 
-    <!-- Установка на устройство. Появляется только когда браузер сам счёл приложение
-         устанавливаемым (https + иконки + живой SW) — по http-адресу кнопки не будет. -->
-    <div v-if="pwa.canInstall" class="instbar">
-      <span>Установить кокпит как приложение</span>
-      <UiButton variant="solid" tone="accent" @click="pwa.install()">Установить</UiButton>
-      <UiButton variant="text" @click="pwa.installPrompt = null">Позже</UiButton>
-    </div>
   </div>
 </template>
 
@@ -444,18 +364,18 @@ import {
   UiActionLink,
   UiButton,
   UiIconButton,
-  UiPopover,
+  UiTopbarPanel,
   UiPressable,
-  UiTooltip,
   useUiLayer,
   vTooltip,
 } from '../../ui';
-import { api } from '../apiClient.ts';
 import { useSse } from '../../composables/useSse.ts';
 import { useSystemStore } from '../../stores/system.js';
-import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
+import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
 import { usePluginsStore } from '../../stores/plugins.js';
+import { useStudio3dStore } from '../../stores/studio3d.ts';
+import { useAuthStore } from '../../stores/auth.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useCockpitUpdateStore } from '../../stores/cockpit-update.js';
 import { useChatStore } from '../../stores/chat.js';
@@ -470,11 +390,20 @@ import {
   resetAt,
   resetIn,
 } from '../../features/providers/providerUsage.js';
-import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
+import {
+  aggregateNavBadges,
+  chatNavBadge,
+  inboxNavBadge,
+  pipelineNavBadge,
+  shelfNavBadge,
+} from '../nav-badges.js';
+import { useTaskShelfStore } from '../../stores/taskShelf.ts';
+import NavigationCount from './NavigationCount.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
-import CockpitVersionTile from '../../features/cockpit-update/CockpitVersionTile.vue';
 import ProviderIcon from '../ProviderIcon.vue';
+import { vSvgPixelSnap } from '../svgPixelSnap.ts';
+import CockpitMark from '../CockpitMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.js';
@@ -484,20 +413,26 @@ import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
 import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
+import { currentDesktopMode } from '../desktopSettings.ts';
+import { useDesktopSettingsSync } from '../../composables/useDesktopSettingsSync.ts';
+
+const isDesktopMain = currentDesktopMode() === 'main';
+
+if (isDesktopMain) {
+  useDesktopSettingsSync();
+}
 
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
 const toolDock = useDockStore();
-const health = ref(null);
 const { data: sys, stale: sysStale, updatedAt: sysUpdatedAt } = storeToRefs(useSystemStore());
 // Время последнего удачного снимка метрик — для подсказки «устарело».
 const sysSnapshotTime = computed(() => (sysUpdatedAt.value
   ? new Date(sysUpdatedAt.value).toLocaleTimeString('ru-RU')
   : '—'));
-const pwa = usePwaStore();
-// Снимок версии читает плитка в конце рейки; оболочка только запускает опрос и
-// перечитывает его по серверному событию — поток SSE один на вкладку.
+// Снимок обновления общий для настроек и уведомлений. Оболочка запускает опрос
+// и перечитывает его по серверному событию; поток SSE один на вкладку.
 const cockpitUpdate = useCockpitUpdateStore();
 cockpitUpdate.start();
 
@@ -505,9 +440,24 @@ cockpitUpdate.start();
 const prov = useProvidersStore();
 // Setup-only карточки (сейчас Kimi) живут в настройках, но не изображают работающего
 // чат-исполнителя в шапке до появления transport-а и каталога моделей.
-const runtimeProviders = computed(() => prov.providers.filter((p) => p.chatEnabled !== false));
+const runtimeProviders = computed(() => prov.providers.filter(isTopbarProvider));
 const plugins = usePluginsStore();
 plugins.load();
+
+const studio3d = useStudio3dStore();
+const studioAuth = useAuthStore();
+
+// Подписка живёт вместе с авторизованной оболочкой, включая переходы между страницами.
+// Disable и logout закрывают requests; повторный start не создаёт вторую SSE подписку.
+watch(() => [studioAuth.authenticated, studioAuth.clientScope, plugins.loaded, plugins.enabled('studio3d')],
+  ([authenticated, clientScope, loaded, enabled]) => {
+    if (authenticated && loaded && enabled) {
+      void studio3d.start(String(clientScope));
+    } else {
+      studio3d.stop();
+    }
+  }, { immediate: true });
+onUnmounted(() => studio3d.stop());
 const inboxStore = useInboxStore();
 watch(() => (plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
   if (enabled) startInboxSummary();
@@ -614,20 +564,13 @@ onUnmounted(() => {
   setAlertTargetOpener(null);
 });
 chatStore.ensure();
-const unreadChats = computed(() => chatStore.unreadCount);
-const waitingChats = computed(() => chatStore.waitingCount);
-const chatsBadgeTitle = computed(() => (waitingChats.value
-  ? `ждут твоего ответа: ${waitingChats.value}` + (unreadChats.value ? ` · непрочитанных: ${unreadChats.value}` : '')
-  : `непрочитанные чаты: ${unreadChats.value}`));
-
-// Доска: число в чипе — задачи с живым таймером; зелёная точка — таймер идёт;
-// синяя точка — после последнего просмотра появилась новая задача.
+// Таймеры доски показаны в топбаре: оттуда можно открыть задачу и управлять учётом.
+// При паузе сохраняем строку, чтобы таймер можно было сразу продолжить.
 const boardStore = useBoardStore();
 const taskStore = useTasksStore();
 const recentPausedTimerIds = ref([]);
 const timerActionTaskId = ref(null);
 const timerActionError = ref('');
-const boardNavActivity = computed(() => boardStore.activity);
 const boardTasks = computed(() => boardStore.data?.tasks || []);
 const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
 const topbarTimerTasks = computed(() => {
@@ -636,18 +579,6 @@ const topbarTimerTasks = computed(() => {
   return boardTasks.value.filter((task) => (
     task.timerRunning || recentIds.has(String(task.id))
   ));
-});
-const boardChipVisible = computed(() => {
-  const a = boardNavActivity.value;
-  return !!(a.activeTimerCount || a.unseenCount);
-});
-const boardChipTitle = computed(() => {
-  const a = boardNavActivity.value;
-  const parts = [a.activeTimerCount
-    ? `сейчас с таймером: ${a.activeTimerCount}`
-    : 'активных задач с таймером нет'];
-  if (a.unseenCount) parts.push(`новых задач: ${a.unseenCount}`);
-  return parts.join(' · ');
 });
 function openBoardTask(taskId) {
   ui.openTask(taskId);
@@ -695,7 +626,7 @@ async function toggleBoardTimer(task) {
 }
 
 // Конвейер: один классифицированный список питает и три числа popover, и его видимость.
-// Чип внимания использует сводку того же классификатора; второго запроса не заводим.
+// В боковой навигации считаем только вмешательство, а в топбаре сохраняем обычную работу.
 const notifyWatch = useNotifyWatchStore();
 notifyWatch.start();
 const pipelineTopbar = computed(() => {
@@ -703,46 +634,41 @@ const pipelineTopbar = computed(() => {
     total: notifyWatch.topbarItems.length,
   };
 });
-const pipelineBadgeStyle = computed(() => {
-  const s = notifyWatch.badgeSummary;
-  return {
-    '--pipeline-error-end': `${s.errorEnd}%`,
-    '--pipeline-waiting-end': `${s.waitingEnd}%`,
-  };
-});
-
+const shelfStore = useTaskShelfStore();
 const badges = computed(() => {
   const out = inboxNavBadge({ reviewCount: inboxStore.reviewCount });
-  if (waitingChats.value || unreadChats.value) {
-    out['/chats'] = {
-      n: waitingChats.value || unreadChats.value,
-      kind: waitingChats.value ? 'wait' : '',
-      title: chatsBadgeTitle.value,
-    };
-  }
-  if (notifyWatch.attentionCount) {
-    out['/pipeline'] = {
-      n: notifyWatch.attentionCount,
-      kind: 'pipeline',
-      // Вставший конвейер тревожнее ждущих ворот. Класс задаёт только цвет пульса,
-      // сам круг теперь всегда сохраняет все красные, жёлтые и синие доли.
-      pulseKind: notifyWatch.badgeSummary.errorCount ? 'stall' : 'wait',
-      style: pipelineBadgeStyle.value,
-      title: notifyWatch.attentionTitle,
-    };
-  }
+  const unseen = boardStore.activity.unseenCount;
+
+  out['/chats'] = chatNavBadge(chatStore);
+  out['/pipeline'] = pipelineNavBadge(notifyWatch.badgeSummary);
+  out['/shelf'] = shelfNavBadge(shelfStore.rows);
+  out['/board'] = unseen ? {
+    n: unseen,
+    kind: 'info',
+    title: `Новые задачи: ${unseen}`,
+  } : null;
+
   const toolsBadge = aggregateNavBadges(toolsNav.value.map((item) => ({
     label: item.label,
     badge: out[item.to],
   })));
-  if (toolsBadge) out['/tools'] = toolsBadge;
+
+  if (toolsBadge) {
+    out['/tools'] = toolsBadge;
+  }
+
   return out;
 });
 
-const collapsed = ref(localStorage.getItem('cockpit-sidebar') === '1');
-function toggleSidebar() { collapsed.value = !collapsed.value; localStorage.setItem('cockpit-sidebar', collapsed.value ? '1' : '0'); }
+
+function navTitle(item) {
+  const detail = badges.value[item.to]?.title;
+
+  return detail ? `${item.label} · ${detail}` : item.label;
+}
 
 const ICONS = {
+  cube: 'M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5',
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
   pipeline: 'M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9',
   // Песочница — отдельный ящик со своим содержимым: короб с крышкой и полкой внутри.
@@ -843,12 +769,18 @@ onUnmounted(() => {
   window.removeEventListener('resize', placeToolsPopover);
 });
 
-async function loadHealth() { try { health.value = await api.get('/api/health'); } catch { health.value = null; } }
-loadHealth();
 const { connected } = useSse((name, data) => {
-  if (name === 'state-change') { loadHealth(); notifyWatch.check(); }
+  if (name === 'state-change') {
+    notifyWatch.check();
+  }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
-  if (name === 'providers-update') prov.load();
+  if (name === 'providers-update') {
+    if (data?.credentials) {
+      void prov.invalidateCredentials(data.credentials);
+    } else {
+      void prov.load();
+    }
+  }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
   if (name === 'providers-usage') {
     prov.applyUsage(data?.usage);
@@ -862,158 +794,102 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 <style scoped>
 .shell {
   display: grid; height: 100%; min-width: 0; overflow: hidden;
-  grid-template-columns: 216px minmax(0, 1fr) 44px;
-  grid-template-rows: 54px 1fr;
-  transition: grid-template-columns .16s ease-out;
+  grid-template-columns: var(--app-rail-w) minmax(0, 1fr) var(--app-rail-w);
+  grid-template-rows: max(var(--app-topbar-h), env(titlebar-area-height, 0px)) minmax(0, 1fr);
 }
-.shell.collapsed { grid-template-columns: 62px minmax(0, 1fr) 44px; }
 
 /* ── Сайдбар ── */
 .sidebar {
-  grid-row: 1 / -1; grid-column: 1;
+  grid-row: 2; grid-column: 1;
   background: var(--sidebar); border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; padding: 12px 10px;
-  /* Рейка — контейнер для своих плиток: узкая она или широкая, они узнают по её
-     ширине, а не по окну, и не дублируют пороги оболочки. */
-  container: rail / inline-size;
+  display: flex; flex-direction: column; padding: 4px 2px; scrollbar-width: none;
+  min-height: 0; overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 11px; padding: 8px 10px 16px; }
-.brand .logo { color: var(--accent); font-size: 20px; line-height: 1; }
-.brand .name { font-weight: 680; font-size: 16px; letter-spacing: -.01em; }
-.nav { display: flex; flex-direction: column; gap: 2px; }
-.navsep { height: 1px; margin: 6px 8px; background: var(--line); }
-.navitem, .collapse-btn {
-  display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 9px;
-  color: var(--ink-mid); font-size: 14px; background: none; border: none; cursor: pointer; text-align: left; width: 100%;
-  transition: background .12s, color .12s;
+.nav { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; padding-block: 0; }
+.navsep { width: 14px; height: 1px; margin: 6px 8px; background: var(--line); }
+.navitem {
+  display: flex; align-items: center; justify-content: center; flex: none;
 }
-.navitem:hover, .collapse-btn:hover { background: var(--surface); color: var(--ink); }
-.navitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.ic { width: 19px; height: 19px; flex: none; }
-.icwrap { position: relative; display: inline-flex; flex: none; }
-/* Чип доски совмещает число задач с живым таймером (зелёная точка)
-   и новую непросмотренную задачу (синяя точка сверху). */
-.boardchip {
-  position: absolute; top: -6px; right: -16px; min-width: 17px; height: 16px; padding: 0 4px;
-  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-2); color: var(--ink);
-  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  font-size: 9.5px; font-weight: 750; font-variant-numeric: tabular-nums; line-height: 1;
-  box-shadow: 0 0 0 2px var(--sidebar); z-index: 1;
-}
-.boardchip.timing { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); }
-.boardtimer {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--good);
-  box-shadow: 0 0 5px color-mix(in srgb, var(--good) 75%, transparent);
-  animation: boardtimerpulse 1.6s ease-in-out infinite;
-}
-.boardnew {
-  position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--sidebar);
-}
-.boardchip.only-new {
-  top: -4px; right: -6px; width: 8px; min-width: 8px; height: 8px; padding: 0;
-  border: 0; background: var(--accent);
-}
-@keyframes boardtimerpulse { 50% { opacity: .35; } }
-/* Бейдж «N непрочитанных чатов» — виден и в свёрнутом сайдбаре. Без анимации:
-   непрочитанное висит до прочтения, пульсировать всё это время незачем. */
-.navbadge { position: absolute; top: -5px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
-  border-radius: 999px; background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700;
-  display: grid; place-items: center; line-height: 1; }
-/* «Ждут меня» — работа СТОИТ, пока не подойду (вопрос агента, ворота конвейера):
-   этот случай пульсирует, в отличие от непрочитанного, и перебивает его цветом.
-   «Встал» — конвейер упёрся или оборвался: там нет кнопки, поэтому цвет аварийный. */
-.navbadge.wait, .navbadge.stall { animation: badgepulse 1.9s ease-in-out infinite; }
-.navbadge.wait { background: var(--warn, #e0a33a); color: #1a1206; --pulse: var(--warn, #e0a33a); }
-.navbadge.stall { background: var(--bad, #f0564c); color: #fff; --pulse: var(--bad, #f0564c); }
-/* Составной чип — кольцо, чтобы число читалось одинаково и на красном, и на жёлтом.
-   Границы секторов приходят из реальных количеств; синий входит в знаменатель круга,
-   но не в число по центру. */
-.navbadge.pipeline {
-  width: 18px; min-width: 18px; height: 18px; padding: 0; color: #fff;
-  font-size: 9px; font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px #000, 0 0 2px #000;
-  background:
-    radial-gradient(circle, var(--sidebar) 0 42%, transparent 48%),
-    conic-gradient(
-      var(--bad, #f0564c) 0 var(--pipeline-error-end),
-      var(--warn, #e0a33a) var(--pipeline-error-end) var(--pipeline-waiting-end),
-      var(--accent) var(--pipeline-waiting-end) 100%
-    );
-}
-@keyframes badgepulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse, var(--warn, #e0a33a)) 65%, transparent); }
-  60% { box-shadow: 0 0 0 5px transparent; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .shell { transition: none; }
-  .boardtimer, .navbadge.wait, .navbadge.stall { animation: none; }
-}
+.ic { width: 16px; height: 16px; flex: none; }
+/* Счётчик занимает свою строку под рисунком внутри прежней кнопки 30 px.
+   Общий NavigationCount одинаково оформляет числа в обеих рейках. */
+.icwrap { display: grid; justify-items: center; align-content: center; gap: 1px; }
 .nav-bottom { margin-top: auto; }
 .dock-route-nav { display: none; }
-.collapse-btn { margin-top: auto; }
-.rail-version { margin-top: 2px; }
-.tools-mobile { display: none; }
-
-/* Свёрнутый сайдбар: только иконки по центру, подписи скрыты */
-.collapsed .brand .name, .collapsed .lbl { display: none; }
-.collapsed .brand { justify-content: center; padding: 8px 0 16px; }
-.collapsed .navitem, .collapsed .collapse-btn { justify-content: center; padding: 10px 0; gap: 0; }
-
 /* ── Топбар ── */
 .topbar {
-  grid-row: 1; grid-column: 2 / 4;
-  display: flex; align-items: center; justify-content: flex-start; gap: 14px;
-  padding: 0 22px; background: var(--topbar); border-bottom: 1px solid var(--line);
+  grid-row: 1; grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: flex-start; gap: 8px;
+  padding: 0;
+  /* Нижняя линия не участвует в высоте: ось содержимого совпадает с серединой
+     топбара и системных кнопок окна, а не поднимается на половину её толщины. */
+  box-shadow: inset 0 -1px 0 var(--line);
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--accent) 10%, var(--topbar)) 0%,
+    var(--topbar) 42%, var(--surface) 100%);
 }
-.tbleft { display: flex; align-items: center; gap: 10px; min-width: 0; flex: none; }
+/* Геометрия системных кнопок приходит от Electron с учётом стороны и масштаба.
+   Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши. */
+.window-titlebar {
+  padding-left: env(titlebar-area-x, 0px);
+  padding-right: max(0px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.window-titlebar :is(.tb-slot, .status, .topbar-actions) {
+  -webkit-app-region: no-drag;
+}
+.app-mark {
+  display: grid; place-items: center; flex: none; width: var(--app-rail-w); height: 100%;
+}
+.app-mark .logo { width: 16px; height: 16px; color: var(--ink); }
 /* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
 .tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .tb-slot:empty { display: none; }
 .status { margin-left: auto; }
-.mlogo { display: none; color: var(--accent); font-size: 18px; }
-.page { margin: 0; font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
 .status {
   display: flex;
+  height: 100%;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   font-size: 12px;
   /* Текст центрируется по той же оси, что и иконки: при 1.4 строка 12px
      давала дробный сдвиг глифов вверх, особенно заметный при масштабе экрана. */
   line-height: 1;
   white-space: nowrap;
 }
+.topbar-actions { display: flex; align-items: center; flex: none; gap: 0; }
 .settings-link {
-  width: 32px; height: 32px; flex: none; display: grid; place-items: center;
-  border-radius: 8px; color: var(--ink-mid); transition: background .12s, color .12s;
+  width: var(--app-rail-w); height: 32px; flex: none; display: grid; place-items: center;
+  border-radius: 8px; color: var(--ink-mid); line-height: 0; transition: background .12s, color .12s;
 }
-.settings-link { line-height: 0; }
-.settings-link .ic { display: block; }
-.settings-link .ic { width: 16px; height: 16px; }
+.settings-link .ic { display: block; width: 16px; height: 16px; }
 .settings-link:hover { background: var(--surface); color: var(--ink); }
 .settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
-.metric { color: var(--ink-mid); font-variant-numeric: tabular-nums; }
-.metric b { font-weight: 600; }
-.metric.stale { opacity: .5; }
 .stale-note { color: var(--warn); border-top: 0; padding-top: 4px; }
-.sep { color: var(--ink-mid); margin: 0 -4px; }
-.provbox { display: inline-flex; align-items: center; gap: 9px; }
-/* В топбаре это обычные знаки, без кнопочных контейнеров. Нулевая высота строки
-   убирает baseline-зазор SVG и ставит все три логотипа на одну оптическую ось. */
+/* Разделитель не зависит от шрифта: центр и отступы задаёт та же flex-строка.
+   Внутри метрик и между группами используется одна геометрия без отрицательных полей. */
+.sep {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  background: var(--line-2);
+}
+.provbox { display: inline-flex; align-items: center; gap: 0; }
+/* Нулевая высота строки убирает baseline-зазор SVG. ProviderIcon с equal-height
+   центрирует видимые рисунки и уравнивает их высоту, сохраняя пропорции каждого знака. */
 .prov-tip {
   display: inline-flex;
   align-items: center;
   line-height: 0;
   vertical-align: middle;
 }
-/* Оптические поля знаков выровнены viewBox-ами в ProviderIcon (все центрированы в кадре,
-   ширина 12,6–14,3 px), поэтому отдельных поправок зазоров между соседями здесь нет:
-   прежний сдвиг «-4px» делал этот зазор на 3 px теснее остальных. */
-/* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
+/* Точка обновления привязана к рисунку, а не к большой площадке нажатия.
+   Обёртка сохраняет это положение при изменении размера и пропорций логотипа. */
+.prov-mark { position: relative; display: inline-flex; }
 .updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--warn, #e0a33a); box-shadow: 0 0 0 2px var(--surface); }
 /* Шапка всплывашки: короткое имя слева, точка обновления — справа. */
-.ptip-head { display: flex; align-items: center; gap: 7px; }
 .ptip-name { color: var(--ink); font-weight: 600; }
 .ptip-off { color: var(--bad); font-size: 11px; }
 /* Точка обновления и переход в настройки живут одной группой у правого края: имя
@@ -1026,15 +902,15 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
    Цвет нейтральный: тревожный тон блока — про НАШУ беду с лимитами, а слова вендора о
    своём состоянии («о сбое не сообщает») красным читались бы как ещё одна поломка. */
 .pu-status { display: block; color: var(--ink-mid); }
-/* Тултип исполнителя: статус + прогрессбары потребления лимитов (ширина — :tip-style) */
-.ptip { display: flex; flex-direction: column; gap: 10px; min-width: 240px; text-align: left; }
-.pu { display: flex; flex-direction: column; gap: 9px; }
+/* Содержимое общей плитки: состояние, лимиты и дополнительные ресурсы. */
+.ptip { display: flex; flex-direction: column; gap: 12px; min-width: 0; text-align: left; }
+.pu { display: flex; flex-direction: column; gap: 14px; }
 .pu-row { display: flex; flex-direction: column; gap: 4px; }
 .pu-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; color: var(--ink-mid); }
 .pu-head b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .pu-head b.hot { color: var(--bad); }
-.pu-bar { height: 5px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
-.pu-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.pu-bar { height: 3px; background: var(--surface-2); overflow: hidden; }
+.pu-fill { display: block; height: 100%; background: var(--accent); }
 .pu-fill.hot { background: var(--bad); }
 .pu-reset {
   display: flex;
@@ -1072,34 +948,13 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .pu-head b.lv-warn { color: var(--warn); }
 .pu-head b.lv-bad { color: var(--bad); }
 .sysnote { font-size: 10.5px; color: var(--ink-mid); padding-top: 8px; border-top: 1px solid var(--line); }
-.netbox {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  gap: 6px;
-  color: var(--ink-mid);
-}
-.netbox .flag { font-size: 14px; line-height: 1; }
-.netbox .ip { letter-spacing: .01em; }
 .lv-ok { color: var(--ink); } .lv-warn { color: var(--warn); } .lv-bad { color: var(--bad); }
-.conn { display: flex; align-items: center; height: 32px; gap: 7px; color: var(--ink-mid); }
-.conn .dot { width: 8px; height: 8px; border-radius: 50%; }
-.conn.on .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
-.conn.off .dot { background: var(--bad); }
-/* IP и имя хоста наследуют общий интерлиньяж строки состояния.
-   Имя занимает строку текста; центрирование задаёт внешний блок связи. */
-.host {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-}
 
 /* scrollbar-gutter: stable — место под полосу прокрутки зарезервировано всегда,
    иначе контент «скачет» по горизонтали, когда скролл появляется/исчезает при смене
    раздела. Не overflow-y: scroll: на полноэкранных страницах (чаты) внешний скролл
    не нужен, и принудительная полоса висела бы там мёртвой. */
-.content { grid-row: 2; grid-column: 2; overflow-y: auto; scrollbar-gutter: stable; padding: 22px; }
+.content { grid-row: 2; grid-column: 2; overflow-y: auto; scrollbar-gutter: stable; padding: var(--page-gutter); }
 
 .tools-popover {
   position: fixed; z-index: 75; max-height: calc(100vh - 74px); overflow: auto;
@@ -1113,75 +968,11 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .tools-popover :deep(.tools-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .tools-popover :deep(.tool-tile) { min-height: 86px; }
 
-/* Планшет: полная рейка съедает четверть экрана и выталкивает рабочую область.
-   Оставляем узнаваемые иконки и все пункты, но освобождаем 154 px контенту. */
-@media (min-width: 760px) and (max-width: 1099px) {
-  .brand .name, .lbl { display: none; }
-  .brand { justify-content: center; padding: 8px 0 16px; }
-  .navitem, .collapse-btn { justify-content: center; padding: 10px 0; gap: 0; }
-  .content { padding: 18px; }
-  .topbar { padding-inline: 18px; }
-}
-@media (min-width: 900px) and (max-width: 1099px) {
-  .shell, .shell.collapsed { grid-template-columns: 62px minmax(0, 1fr) 44px; }
-}
-@media (min-width: 760px) and (max-width: 899px) {
-  .shell, .shell.collapsed { grid-template-columns: 62px minmax(0, 1fr); }
-  .topbar { grid-column: 2; }
+.content.is-workspace { padding: 0; scrollbar-gutter: auto; overflow: hidden; }
+@media (max-width: 899px) {
+  .shell { grid-template-columns: var(--app-rail-w) minmax(0, 1fr); }
   .dock-route-nav { display: flex; }
-  /* Здесь нижний блок Code/Terminal сам занимает свободное место над кнопкой. */
-  .collapse-btn { margin-top: 4px; }
-  .metric, .netbox .ip { display: none; }
-}
-
-/* Плашка установки — снизу, чтобы не спорить с баннером обновления сверху.
-   На мобиле поднята над нижней навигацией. */
-.instbar {
-  position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 200;
-  display: flex; align-items: center; gap: 10px;
-  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 999px;
-  padding: 8px 10px 8px 18px; font-size: 13px; box-shadow: 0 8px 26px #0009;
-  max-width: calc(100vw - 24px);
-}
-@media (max-width: 759px) {
-  .instbar { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
-}
-@media (max-width: 639px) {
-  .instbar { gap: 3px; padding: 5px; }
-  .instbar > span { display: none; }
-}
-
-/* ── Мобайл: сайдбар → нижняя навигация ── */
-@media (max-width: 759px) {
-  /* Содержимое верхней панели не должно расширять мобильную колонку за край экрана. */
-  .shell, .shell.collapsed {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 52px 1fr auto;
-  }
-  .sidebar { grid-row: 3; grid-column: 1; flex-direction: row; overflow-x: auto; padding: 0; border-right: none; border-top: 1px solid var(--line);
-    padding-bottom: env(safe-area-inset-bottom, 0); scrollbar-width: none; }
-  .sidebar::-webkit-scrollbar { display: none; }
-  .brand, .collapse-btn { display: none; }
-  .tools-trigger { display: none; }
-  .tools-mobile { display: flex; }
-  .dock-route-nav { display: contents; }
-  /* На мобиле обе навигации сливаются в один нижний ряд */
-  .nav, .nav-bottom { display: contents; }
-  .navitem { flex: 0 0 62px; min-width: 62px; flex-direction: column; gap: 3px; font-size: 10px; padding: 9px 2px; border-radius: 0; }
-  .navitem.active { background: none; }
-  /* Плитка версии липнет к правому краю ряда: обновление видно и в прокрученной
-     навигации. Фон и линия слева отделяют её от проезжающих под ней пунктов. */
-  .rail-version {
-    position: sticky; right: 0; flex: none; margin: 0; z-index: 1;
-    background: var(--sidebar); box-shadow: -1px 0 0 var(--line);
-  }
-  .topbar { grid-row: 1; grid-column: 1; padding: 0 16px; }
-  /* Сводка статуса на телефоне шире экрана: сжимается и обрезается она, а колокольчик
-     истории и настройки у правого края остаются видны. */
+  .metric, .metric-sep, .netbox .ip { display: none; }
   .status { min-width: 0; overflow: hidden; }
-  .mlogo { display: inline; }
-  .content { grid-row: 2; grid-column: 1; padding: 16px; }
-  .host { display: none; }
-  @media (max-width: 440px) { .metric { display: none; } .netbox .ip { display: none; } }
 }
 </style>

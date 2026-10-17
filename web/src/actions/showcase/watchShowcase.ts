@@ -3,7 +3,7 @@ import {
   parseShowcaseBuildProgressEvent,
   parseShowcaseChangedEvent,
   parseShowcaseProgressEvent,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 import { loadShowcase } from './loadShowcase';
 import { openShowcaseProject } from './openShowcaseProject';
 import { loadShowcaseVoices } from './setupShowcaseVoice';

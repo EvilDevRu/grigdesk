@@ -9,6 +9,7 @@ test('API sink видит отказ без query и содержимого; dow
   const originalFetch = globalThis.fetch;
   const calls = [];
   const events = [];
+
   setApiLogSink((ev, data) => events.push({ ev, data }));
   globalThis.fetch = async (url, options) => {
     calls.push({ url, method: options?.method || 'GET' });
@@ -38,6 +39,7 @@ test('API sink охватывает двоичные методы и upload бе
   const originalFetch = globalThis.fetch;
   const events = [];
   const methods = [];
+
   setApiLogSink((ev, data) => events.push({ ev, data }));
   globalThis.fetch = async (_url, options) => {
     methods.push(options?.method || 'GET');
@@ -67,6 +69,7 @@ test('повтор GET фиксирует неудачную попытку с w
   const originalFetch = globalThis.fetch;
   const events = [];
   let calls = 0;
+
   setApiLogSink((ev, data) => events.push({ ev, data }));
   globalThis.fetch = async () => {
     calls += 1;
@@ -85,10 +88,36 @@ test('повтор GET фиксирует неудачную попытку с w
   }
 });
 
+test('ответ 401 не повторяется и не помечается к повтору', async () => {
+  const originalFetch = globalThis.fetch;
+  const events = [];
+  let calls = 0;
+
+  setApiLogSink((ev, data) => events.push({ ev, data }));
+  globalThis.fetch = async () => {
+    calls += 1;
+
+    return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+  };
+
+  try {
+    const error = await api.get('/api/tasks').catch((reason) => reason);
+
+    assert.equal(error.status, 401);
+    assert.equal(calls, 1);
+    assert.deepEqual(events.map(({ ev, data }) => [ev, data.attempt, data.willRetry]),
+      [['api.fail', 1, false]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    setApiLogSink(null);
+  }
+});
+
 test('ошибка, записанная как api.fail, помечена для store.error', async () => {
   const originalFetch = globalThis.fetch;
   setApiLogSink(() => {});
   globalThis.fetch = async () => new Response('{}', { status: 502 });
+
   try {
     const error = await api.get('/api/tasks').catch((reason) => reason);
     assert.equal(error.status, 502);

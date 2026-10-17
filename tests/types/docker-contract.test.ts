@@ -7,7 +7,7 @@ import type {
   DockerOverview,
   DockerPruneItem,
   DockerStatsMessage,
-} from '../../shared/dockerContracts';
+} from '../../shared/plugins/docker/dockerContracts';
 import { useDockerStore } from '../../web/src/stores/docker';
 import { dockerApi } from '../../web/src/shared/dockerApi';
 

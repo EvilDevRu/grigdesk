@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { normalizeChatWorkdir, sameChatWorkdir } from '../../shared/chatWorkdir.ts';
+import { normalizeChatWorkdir, sameChatWorkdir } from '../../shared/chat/chatWorkdir.ts';
 import { resolveChatWorkdir, validateWorkdirPath } from '../../server/src/lib/chat/workdir.ts';
 
 /**

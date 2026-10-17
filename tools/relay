@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Собирает один исполняемый файл посредника через общий npm-конвейер.
+# Настройки работающего посредника и Кокпита не читаются.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Использует тот же поиск совместимого Node, что и локальное окно.
+# Устанавливает зависимости только при отсутствии инструмента сборки.
+build_relay() {
+  if [ -n "${COCKPIT_NODE_DIR:-}" ] && [ -x "$COCKPIT_NODE_DIR/node" ]; then
+    export PATH="$COCKPIT_NODE_DIR:$PATH"
+  fi
+
+  source "$ROOT/deploy/lib/runtime-env.sh"
+  cockpit_add_cli_paths "$ROOT"
+  cockpit_require_node
+
+  if [ ! -d "$ROOT/relay/node_modules/esbuild" ] || [ ! -d "$ROOT/relay/node_modules/postject" ]; then
+    env NODE_ENV=development npm --prefix "$ROOT/relay" ci --include=dev --no-audit --no-fund
+  fi
+
+  npm --prefix "$ROOT/relay" run build
+}
+
+case "${1:-}" in
+  build)
+    if [ "$#" -ne 1 ]; then
+      echo 'использование: tools/relay build' >&2
+      exit 2
+    fi
+
+    build_relay
+    ;;
+  *)
+    echo 'использование: tools/relay build' >&2
+    exit 2
+    ;;
+esac

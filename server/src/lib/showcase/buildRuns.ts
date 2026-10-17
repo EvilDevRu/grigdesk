@@ -8,11 +8,13 @@ import { promises as fs } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import {
   SHOWCASE_BUILD_REQUEST_ID_RE,
   SHOWCASE_BUILD_STAGES,
   SHOWCASE_BUILD_STATES,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import type {
   ShowcaseBuildRun,
   ShowcaseBuildStage,
@@ -20,7 +22,7 @@ import type {
   ShowcaseBuildStopReason,
   ShowcaseFinal,
   ShowcaseJobState,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { notFound, ShowcaseError } from './errors.ts';
 
 export const SHOWCASE_BUILD_RUN_VERSION = 1 as const;
@@ -93,10 +95,6 @@ export interface ShowcaseBuildRunsOptions {
   limits: () => { retentionDays: number; maxRuns?: number };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function isWhole(value: unknown, minimum = 0): value is number {
   return Number.isSafeInteger(value) && Number(value) >= minimum;
 }
@@ -107,7 +105,7 @@ function stringList(value: unknown, check: (entry: string) => boolean): value is
 }
 
 function snapshotOf(value: unknown): BuildRunSnapshot | null {
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     return null;
   }
 
@@ -138,7 +136,7 @@ function snapshotOf(value: unknown): BuildRunSnapshot | null {
 
 function childOf(value: unknown): BuildRunChildRecord | null {
   if (
-    !isObject(value)
+    !isRecord(value)
     || typeof value.stage !== 'string'
     || !BUILD_STAGES.has(value.stage)
     || typeof value.jobId !== 'string'
@@ -168,7 +166,7 @@ function stopReasonOf(value: unknown): ShowcaseBuildStopReason | null | undefine
   }
 
   if (
-    !isObject(value)
+    !isRecord(value)
     || typeof value.code !== 'string'
     || value.code.length === 0
     || typeof value.message !== 'string'
@@ -181,7 +179,7 @@ function stopReasonOf(value: unknown): ShowcaseBuildStopReason | null | undefine
 }
 
 function artifactRefLike(value: unknown): boolean {
-  return isObject(value)
+  return isRecord(value)
     && typeof value.id === 'string'
     && typeof value.kind === 'string'
     && typeof value.inputHash === 'string'
@@ -197,7 +195,7 @@ function finalOf(value: unknown): ShowcaseFinal | null | undefined {
   }
 
   if (
-    !isObject(value)
+    !isRecord(value)
     || !artifactRefLike(value.video)
     || !(value.subtitles === null || artifactRefLike(value.subtitles))
     || typeof value.manifestId !== 'string'
@@ -216,7 +214,7 @@ function finalOf(value: unknown): ShowcaseFinal | null | undefined {
  * должна получить путь из поля id или оживить терминальное состояние.
  */
 function runRecordOf(value: unknown): BuildRunRecord | null {
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     return null;
   }
 

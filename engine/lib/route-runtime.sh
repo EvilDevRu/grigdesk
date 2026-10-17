@@ -724,20 +724,20 @@ _route_v2_commit_and_project() {
 }
 
 # Потолок кругов режима «цикл» из профиля — снимок на процесс оркестратора: профиль
-# читается при start/resume. Нет строки — 20; каноническое целое 1..100 — заданный
-# потолок; пустое значение, 0, 101, дробь и мусор — отказ до запуска модели, чтобы
+# читается при start/resume. Нет строки — 20; каноническое целое 1..300 — заданный
+# потолок; пустое значение, 0, 301, дробь и мусор — отказ до запуска модели, чтобы
 # опечатка в профиле не превратилась в молчаливое значение по умолчанию.
 route_v2_loop_max_rounds() {
   if [[ -z "${PROFILE_LOOP_MAX_ROUNDS+set}" ]]; then
     printf '20\n'
     return 0
   fi
-  if [[ "$PROFILE_LOOP_MAX_ROUNDS" =~ ^([1-9][0-9]?|100)$ ]]; then
+  if [[ "$PROFILE_LOOP_MAX_ROUNDS" =~ ^([1-9][0-9]?|[12][0-9]{2}|300)$ ]]; then
     printf '%s\n' "$PROFILE_LOOP_MAX_ROUNDS"
     return 0
   fi
   _route_v2_fail \
-    "PROFILE_LOOP_MAX_ROUNDS: нужно целое 1..100, в профиле «${PROFILE_LOOP_MAX_ROUNDS}»"
+    "PROFILE_LOOP_MAX_ROUNDS: нужно целое 1..300, в профиле «${PROFILE_LOOP_MAX_ROUNDS}»"
 }
 
 # Проверка resume ДО любых побочных эффектов: остановка `loop-ceiling`, а потолок

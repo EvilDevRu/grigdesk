@@ -264,7 +264,7 @@ import type {
   FactoryGraphData,
   GraphPosition,
   LabelPosition,
-} from '../../../../shared/factoryGraphContracts.ts';
+} from '../../../../shared/pipeline/factoryGraphContracts.ts';
 
 interface GraphStall {
   node: string | null;

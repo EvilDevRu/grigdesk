@@ -2,6 +2,8 @@
 // filesystem path: единственный segment — проверенный случайный accountRef.
 import path from 'node:path';
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { InboxRefCodec, assertAccountRef } from '../inbox/identity.ts';
 import { InboxStateStore } from '../inbox/stateStore.ts';
 import * as defaultBotApi from './api.ts';
@@ -61,14 +63,8 @@ const fail: (code: string, message: string, cause?: unknown) => never = (
   throw new TelegramAccountContextError(code, message, cause);
 };
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exact(value: unknown, keys: string[], where: string, optional: string[] = []): void {
-  if (!isPlainObject(value)) fail('telegram_bot_settings_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('telegram_bot_settings_invalid', `${where}: ожидался объект.`);
 
   const allowed = new Set([...keys, ...optional]);
   const actual = Object.keys(value);
@@ -314,7 +310,7 @@ export class TelegramBotSettingsStore {
 }
 
 function pollState(raw: unknown): { offset: number; updatedAtMs: number } {
-  if (!isPlainObject(raw)) {
+  if (!isPlainRecord(raw)) {
     fail('telegram_poll_state_invalid', 'Telegram poll state не является объектом.');
   }
 
@@ -381,7 +377,7 @@ function credentialsSnapshot(
   accountRef: string,
 ): { botId: string; token: string } | null {
   if (value === null || value === undefined) return null;
-  if (!isPlainObject(value)) {
+  if (!isPlainRecord(value)) {
     fail('telegram_account_context_invalid', 'credentialLease должен быть объектом.');
   }
 

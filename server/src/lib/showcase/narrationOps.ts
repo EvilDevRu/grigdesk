@@ -56,8 +56,8 @@ import type {
 } from './voice/preparation.ts';
 import type { VoiceRegistry } from './voice/registry.ts';
 import { checkSpeech } from './voice/speechCheck.ts';
-import type { ShowcaseJob, ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
-import { SHOWCASE_NARRATION_MAX_CHARS } from '../../../../shared/showcaseNarration.ts';
+import type { ShowcaseJob, ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import { SHOWCASE_NARRATION_MAX_CHARS } from '../../../../shared/plugins/showcase/showcaseNarration.ts';
 import type { ShowcaseStore } from './store.ts';
 import type { SpeechTranscript } from '../speech/transport.ts';
 

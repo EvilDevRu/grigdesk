@@ -1,7 +1,7 @@
 // Профили имеют общие field IDs и один storage; отсутствие второго источника не доказывает web-only.
 // Ownership/secret ограничения объединяются раньше схем и публичных значений.
 
-import type { SettingsConsumerSupport } from '../../../../shared/providerSettingsContracts.ts';
+import type { SettingsConsumerSupport } from '../../../../shared/chat/providerSettingsContracts.ts';
 import type { NativeSettingsSnapshot, NormalizedSettingNode } from './types.ts';
 import { normalizeNativeSettingsSnapshot } from './catalog.ts';
 import { canonicalSettingsJson, settingsFingerprint } from './fingerprint.ts';

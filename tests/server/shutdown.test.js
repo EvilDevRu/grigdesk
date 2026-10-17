@@ -91,3 +91,52 @@ test('begin идемпотентен: вторая остановка не за�
   assert.equal(runs, 1);
   assert.deepEqual(exits, [0]);
 });
+
+test('DP-01 begin с кодом 75 сохраняет первый код и выходит после слива', async () => {
+  const order = [];
+  const { coordinator, exits } = harness({
+    close: async () => {
+      order.push('close');
+    },
+  });
+
+  coordinator.register('слив', async () => {
+    order.push('слив');
+  });
+
+  const first = coordinator.begin('перезапуск приложения', 75);
+  const repeated = coordinator.begin('повтор', 0);
+
+  assert.equal(repeated, first);
+  await first;
+  assert.deepEqual(order, ['слив', 'close']);
+  assert.deepEqual(exits, [75]);
+});
+
+test('DP-02 превышение бюджета сохраняет код 75, без кода выходит с 1', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  for (const code of [75, undefined]) {
+    const { coordinator, exits } = harness({ timeoutMs: 50 });
+
+    coordinator.register('вечный', () => new Promise(() => {}));
+    void coordinator.begin('проверка бюджета', code);
+    t.mock.timers.tick(50);
+
+    assert.deepEqual(exits, [code || 1]);
+  }
+});
+
+test('DP-02 ошибка close сохраняет код перезапуска и код ошибки обычной остановки', async () => {
+  for (const code of [75, undefined]) {
+    const { coordinator, exits } = harness({
+      close: async () => {
+        throw new Error('ошибка закрытия фикстуры');
+      },
+    });
+
+    await coordinator.begin('ошибка закрытия', code);
+
+    assert.deepEqual(exits, [code || 1]);
+  }
+});

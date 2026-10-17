@@ -161,8 +161,9 @@ export function buildCodexUntrustedArgs(directory: string) {
   settings.push('features.skip_host_skill_discovery=true');
   settings.push('features.omit_app_server_notification_media=true');
   // Текущий CLI объявляет оболочку вычислений и при выключенном исполнителе.
-  // Вложенных инструментов у неё нет; без среды также нет исполнителей файлов и команд.
-  settings.push('features.code_mode={ enabled=false, excluded_tool_namespaces=["clock"] }');
+  // Исключаем также декларации встроенных инструментов: новый CLI добавляет их
+  // в описание оболочки даже без среды. Исполнитель оболочки остаётся выключенным.
+  settings.push('features.code_mode={ enabled=false, excluded_tool_namespaces=["clock","functions"] }');
 
   return [...settings.flatMap((setting) => ['-c', setting]), 'app-server'];
 }

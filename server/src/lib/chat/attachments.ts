@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import type { InTurnAttachment } from '../../../../shared/chatInTurnContracts.ts';
+import type { InTurnAttachment } from '../../../../shared/chat/chatInTurnContracts.ts';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 // Тип картинки по расширению: окно рисует миниатюру только для image/*.

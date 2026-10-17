@@ -8,7 +8,7 @@ import type {
   SandboxJob,
   SandboxOverview,
   SandboxProfile,
-} from '../../../shared/sandboxContracts';
+} from '../../../shared/plugins/sandboxes/sandboxContracts';
 
 interface SandboxesState {
   profiles: SandboxProfile[];

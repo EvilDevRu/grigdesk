@@ -9,7 +9,7 @@ import test from 'node:test';
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const contract = await compileModule(webFile('../shared/showcaseContracts.ts'));
+const contract = await compileModule(webFile('../shared/plugins/showcase/showcaseContracts.ts'));
 const sceneDraft = await compileModule(webFile('src/views/showcase/sceneDraft.ts'));
 
 const SCOPE = {

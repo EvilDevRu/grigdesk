@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { chatWorkdirLabel, normalizeChatWorkdir, sameChatWorkdir } from '../../../../shared/chatWorkdir.ts';
-import type { ChatWorkdir, WorkdirCapability } from '../../../../shared/chatWorkdir.ts';
+import {
+  chatWorkdirLabel,
+  normalizeChatWorkdir,
+  sameChatWorkdir,
+} from '../../../../shared/chat/chatWorkdir.ts';
+import type { ChatWorkdir, WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
 import { ChatWorkdirError } from './workdir.ts';
 import type { ResolvedWorkdir } from './workdir.ts';
 import type { ChatHistoryStore, StoredChat } from './historyStore.ts';

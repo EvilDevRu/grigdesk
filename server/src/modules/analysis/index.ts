@@ -2,9 +2,11 @@
 // Очередь и раннер — в lib/analysis/analyzer.ts; здесь только HTTP-обвязка.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import type { Analyzer } from '../../lib/analysis/analyzer.ts';
 import type { AnalysisArbiter } from '../../lib/analysis/arbiter.ts';
-import type { AnalysisClarifications } from '../../../../shared/analysisContracts.ts';
+import type { AnalysisClarifications } from '../../../../shared/pipeline/analysisContracts.ts';
 
 export interface AnalysisModuleOptions {
   analyzer: Analyzer;
@@ -16,10 +18,6 @@ interface AnalysisRoute {
     id: string;
   };
   Body: unknown;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
 async function analysisModule(
@@ -75,7 +73,7 @@ async function analysisModule(
   }, async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const body = asRecord(request.body);
+    const body = objectOrEmpty(request.body);
     const answers = body.answers;
     if (Array.isArray(answers)) {
       const result = await analyzer.appendClarificationBatch(id, answers, { actor: 'human' });

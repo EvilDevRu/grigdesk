@@ -28,8 +28,7 @@
 - Широкий доверенный каталог (например, родитель репозитория cockpit) **не
   отклоняется**: он монтируется целиком, а server-owned control state внутри него
   (`workspaceControlStatePaths`: `kimiHome`, runtime/broker contained-профиль,
-  factory state/control, `chatsDir` с `.bindings`, `server/.state`, `.env`
-  репозитория) прячется пустым `--ro-bind` поверх — тем же паттерном, что и маска
+  factory state/control, вся папка данных и отдельно заданный `.env`) прячется пустым `--ro-bind` поверх — тем же паттерном, что и маска
   `.kimi-code`. Вложенные control-пути маскирует ближайший перечисленный предок.
   Отклоняются теперь только системные корни (`/`, `/usr`, …) и сам control state
   как отдельный extra (`kimi_workspace_mount_is_control_state`) — после масок он
@@ -66,8 +65,9 @@
   базовый сценарий (виден серверный `local.toml` с extra-каталогом), вложенный
   (`cwd` внутри доверенного предка с `.git` и «враждебным» проектным `local.toml`
   → виден серверный, проектный скрыт) и широкий доверенный родитель репозитория
-  (каталог смонтирован и writable; `chats/`, `server/.state`, `.env` — пустые
-  read-only маски, запись в них даёт EROFS).
+  (каталог смонтирован и writable; прежние `chats/`, `server/.state` и `.env` — пустые
+  read-only маски, запись в них даёт EROFS). Маски папки данных (вся папка каталогом,
+  отдельный `.env` только вне её) проверены по argv тестами, настоящим bwrap — нет.
 - `tests/server/kimi-security.test.js`: маска у cwd и у предка, пустой запуск
   без маски, содержимое `local.toml`, маски control state внутри широкого extra,
   отказ для самого control state, отдельный тест `resolveVisibleProjectRoot`.
@@ -78,7 +78,7 @@
 ## Раскатка
 
 1. Перезапустить cockpit-server (код рантайма загружается при старте):
-   `bin/restart` или `systemctl --user restart cockpit-server`.
+   `deploy/restart.sh` или `systemctl --user restart cockpit-server`.
 2. В чате выбрать проект кнопкой 📁 или привязать задачу с несколькими рабочими копиями.
    Сервер передаёт дополнительные корни в contained runtime, маскируя control state.
    Общая настройка доверенных каталогов удалена; host-профиль остаётся single-root.

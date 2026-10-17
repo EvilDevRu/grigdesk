@@ -2,9 +2,9 @@
   <div class="pair-form">
     <ol class="pair-steps">
       <li>Откройте в кокпите «Настройки → Доступ».</li>
-      <li>Нажмите «Сканировать QR» и наведите камеру на код.</li>
+      <li v-if="!isDesktop">Нажмите «Сканировать QR» и наведите камеру на код.</li>
     </ol>
-    <UiButton kind="primary" variant="solid" :busy="link.busy" @click="scan">
+    <UiButton v-if="!isDesktop" kind="primary" variant="solid" :busy="link.busy" @click="scan">
       <UiIcon name="camera" />
       <span>Сканировать QR</span>
     </UiButton>
@@ -32,6 +32,7 @@ import { useRouter } from 'vue-router';
 
 import { UiButton, UiError, UiField, UiIcon } from '../ui.ts';
 import { useLinkStore } from '../stores/link.ts';
+import { isDesktop } from '../platform.ts';
 
 const link = useLinkStore();
 const router = useRouter();

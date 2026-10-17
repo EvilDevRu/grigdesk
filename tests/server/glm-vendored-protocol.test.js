@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -8,8 +9,9 @@ import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_RESEARCH_KEY, writeGlmResearchOverlay } from '../helpers/glmResearchOverlay.mts';
 import { glmResearchEnv, runGlmTurn, startGlmAcp, startGlmWeb } from '../helpers/glmDriver.mts';
 import { openDeepSeekStream } from '../../server/src/lib/deepseek/serverEvents.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G2/fixtures');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G2/fixtures');
 
 /**
  * Стенд факта: настоящая generation, фейк Z.ai на loopback и отдельные каталоги.

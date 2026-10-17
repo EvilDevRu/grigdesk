@@ -11,6 +11,10 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 
+import { syncDirectory } from '../../../../shared/node/files.ts';
+import { errorCode } from '../../../../shared/lib/errors.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 import type { Stats } from 'node:fs';
 import {
@@ -87,23 +91,8 @@ function fail(code: string, message: string, cause: unknown = null): never {
   throw new GitHubStoreError(code, message, cause);
 }
 
-// Код ошибки файловой системы: пропажа файла — обычное состояние, остальное нет.
-function failureCode(error: unknown): string {
-  const code = error !== null && typeof error === 'object'
-    ? (error as { code?: unknown }).code
-    : undefined;
-
-  return typeof code === 'string' ? code : '';
-}
-
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('github_archive_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('github_archive_invalid', `${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, index) => key !== expected[index])) {
@@ -162,7 +151,7 @@ function canonicalJsonValue(value: unknown, depth: number, budget: { count: numb
   if (Array.isArray(value)) {
     return (value as unknown[]).map((item) => canonicalJsonValue(item, depth + 1, budget));
   }
-  if (!isPlainObject(value)) {
+  if (!isPlainRecord(value)) {
     fail('github_archive_invalid', 'snapshot должен состоять только из JSON-safe plain values.');
   }
   const out = Object.create(null) as Payload;
@@ -176,7 +165,7 @@ function canonicalJsonValue(value: unknown, depth: number, budget: { count: numb
 }
 
 function normalizeSnapshot(value: unknown): { value: Payload; json: string } {
-  if (!isPlainObject(value)) fail('github_archive_invalid', 'snapshot issue должен быть объектом.');
+  if (!isPlainRecord(value)) fail('github_archive_invalid', 'snapshot issue должен быть объектом.');
   const canonical = canonicalJsonValue(value, 0, { count: 0 });
   const json = JSON.stringify(canonical);
   if (Buffer.byteLength(json, 'utf8') > MAX_SNAPSHOT_BYTES) {
@@ -219,17 +208,6 @@ function sameFile(left: Stats, right: Stats): boolean {
     && left.ino === right.ino
     && left.size === right.size
     && left.mtimeMs === right.mtimeMs;
-}
-
-async function syncDirectory(dir: string): Promise<void> {
-  let handle;
-  try {
-    handle = await open(dir, constants.O_RDONLY
-      | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0));
-    await handle.sync();
-  } finally {
-    await handle?.close();
-  }
 }
 
 const clone = <Value>(value: Value): Value => JSON.parse(JSON.stringify(value)) as Value;
@@ -395,7 +373,7 @@ export class GitHubArchiveStore {
   async _assertUnchanged(): Promise<void> {
     let info: Stats;
     try { info = await lstat(this.file); } catch (err) {
-      if (failureCode(err) === 'ENOENT' && this.fileInfo === null) return;
+      if (errorCode(err) === 'ENOENT' && this.fileInfo === null) return;
       fail('github_store_changed', 'GitHub archive исчез или недоступен после snapshot.', err);
     }
     if (info.isSymbolicLink() || !info.isFile()) {
@@ -463,7 +441,7 @@ export class GitHubArchiveStore {
   async append(input: unknown): Promise<ArchiveAppendResult> {
     return this._enqueue(async () => {
       await this._ensureLoaded();
-      if (!isPlainObject(input)) fail('github_archive_invalid', 'GitHub archive append ожидает объект.');
+      if (!isPlainRecord(input)) fail('github_archive_invalid', 'GitHub archive append ожидает объект.');
       exactObject(input, APPEND_KEYS, 'GitHub archive append');
       const raw = input as Payload;
       const owner = normalizeGitHubRepositoryId(raw.repositoryId);

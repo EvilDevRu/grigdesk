@@ -7,7 +7,10 @@
       <h1>{{ link.state?.revoked ? 'Телефон отозван в кокпите' : 'Приложение заблокировано' }}</h1>
       <p class="mobile-muted">{{ link.state?.brainName }}</p>
     </div>
-    <p v-if="!link.state?.revoked">Подтвердите вход отпечатком пальца или кодом телефона.</p>
+    <p v-if="!link.state?.revoked && isDesktop">
+      Ключ защищён вашей учётной записью компьютера. Нажмите «Разблокировать» для входа.
+    </p>
+    <p v-else-if="!link.state?.revoked">Подтвердите вход отпечатком пальца или кодом телефона.</p>
     <p v-else>Чтобы снова пользоваться приложением, привяжите телефон по новому QR-коду.</p>
     <UiButton
       v-if="!link.state?.revoked"
@@ -22,6 +25,7 @@
       Отвязать
     </UiButton>
     <UiError v-if="link.error" :text="link.error" />
+    <UiError v-if="isDesktop && link.state?.error" :text="link.state.error" />
     <UiDialog
       v-if="reset"
       title="Отвязать телефон?"
@@ -44,6 +48,7 @@ import { ref } from 'vue';
 
 import { UiAuthLayout, UiButton, UiDialog, UiError, UiIcon } from '../ui.ts';
 import { useLinkStore } from '../stores/link.ts';
+import { isDesktop } from '../platform.ts';
 
 const link = useLinkStore();
 const reset = ref(false);

@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { checkNativeTitles, findNativeTitles } from '../../web/scripts/check-native-titles.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../web/scripts/check-native-titles.mjs', import.meta.url));
-const ARTIFACT_PREFIX = fileURLToPath(new URL(
-  '../../.state/artifacts/title-tooltips/native-guard-',
-  import.meta.url,
-));
+const ARTIFACT_PREFIX = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
+  'title-tooltips/native-guard-');
 
 test('TIP-GUARD-01: статичный title, bind с модификатором и обе ветки', () => {
   const source = `<template>

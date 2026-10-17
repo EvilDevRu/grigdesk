@@ -23,6 +23,7 @@ let seq = 0;
 let pendingApproval = null;
 let pendingQuestion = null;
 let pendingCancel = false;
+let pendingSteer = false;
 let selection = null;
 const nativeSettings = structuredClone(nativeSettingsDescription);
 const log = async (value) => appendFile(logFile, `${JSON.stringify(value)}\n`);
@@ -207,14 +208,25 @@ function playUpdate(update, describe) {
     });
   }
 
+  // Форма настоящего DSH: id вызова — в source сообщения и в блоке tool-result,
+  // исход — в `isError` блока; верхних `toolCallId` и `isError` у сообщения нет.
   if (update.sessionUpdate === 'tool_result') {
     emit('tool/result', {
       turn,
       step: 1,
       message: {
-        toolCallId: update.toolCallId,
-        content: update.content || [],
-        isError: false,
+        id: `result-${update.toolCallId}`,
+        role: 'user',
+        source: {
+          kind: 'tool',
+          callId: update.toolCallId,
+        },
+        content: [{
+          type: 'tool-result',
+          toolCallId: update.toolCallId,
+          content: update.content || [],
+          ...(update.isError ? { isError: true } : {}),
+        }],
       },
     });
   }
@@ -313,6 +325,24 @@ app.post('/api/*', async (request) => {
 
     selection = selected;
     value = { selected: params.request };
+  } else if (method === 'session/prompt' && params.request?.mode === 'steer') {
+    const scenario = JSON.parse(await readFile(scenarioFile, 'utf8'));
+
+    value = { accepted: true };
+
+    // Как настоящий DSH: уточнение встаёт в следующий шаг того же хода, хук приёма запроса
+    // срабатывает снова с тем же номером хода, затем модель отвечает и ход заканчивается.
+    if (pendingSteer) {
+      pendingSteer = false;
+      queueMicrotask(() => {
+        if (scenario.hooks && scenario.hooks !== 'no-marker') {
+          hookResult('UserPromptSubmit', { event: 'UserPromptSubmit', marker: 'hooks-alive' });
+        }
+
+        streamText(String(scenario.steer?.reply || 'steer-answer'));
+        finish();
+      });
+    }
   } else if (method === 'session/prompt') {
     const scenario = JSON.parse(await readFile(scenarioFile, 'utf8'));
 
@@ -353,6 +383,9 @@ app.post('/api/*', async (request) => {
         finish({ kind: 'error', error: scenario.turnError });
       } else if (scenario.waitForCancel) {
         pendingCancel = true;
+      } else if (scenario.steer) {
+        // Ход остаётся открытым, пока не придёт уточнение.
+        pendingSteer = true;
       } else {
         finish();
       }

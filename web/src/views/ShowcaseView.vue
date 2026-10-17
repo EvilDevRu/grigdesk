@@ -204,7 +204,7 @@ import type {
   ShowcaseSelectableTargetRef,
   ShowcaseSourceOptions,
   ShowcaseStorySource,
-} from '../../../shared/showcaseContracts';
+} from '../../../shared/plugins/showcase/showcaseContracts';
 import ShowcaseFilm from './showcase/ShowcaseFilm.vue';
 import ShowcaseProjectRow from './showcase/ShowcaseProjectRow.vue';
 import ShowcaseTargetPicker from './showcase/ShowcaseTargetPicker.vue';

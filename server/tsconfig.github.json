@@ -6,8 +6,8 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
-    "../shared/githubContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/inbox/githubContracts.ts",
     "src/lib/github/**/*.ts",
     "src/modules/github/**/*.ts",
     "../tests/types/github-server-contract.test.mts"

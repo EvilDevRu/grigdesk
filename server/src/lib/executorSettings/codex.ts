@@ -1,8 +1,10 @@
 // Codex разделяет схему RPC, полный опубликованный config и каталог feature flags.
 // Авторитет установленного CLI определяется отдельно от актуальности внешней схемы.
 
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import type { NativeSettingsContext, NativeSettingsOwnership, NativeSettingsSnapshot } from './types.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -16,12 +18,6 @@ import { readPublishedSettingsSchema } from './publishedSchema.ts';
 type CodexSettingsConfig = { codexBin: string };
 
 const execFileAsync = promisify(execFile);
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
 
 /**
  * Фиксированный официальный источник имеет ограниченный кэш и предел объёма.
@@ -96,7 +92,7 @@ export async function readCodexSettings(
 
           return response.result;
         };
-        const initialized = record(
+        const initialized = recordOrEmpty(
           await rpc('initialize', {
             clientInfo: { name: 'cockpit-settings', version: '1' },
             capabilities: { experimentalApi: true },
@@ -196,10 +192,12 @@ function publishedSchema(value: unknown): Record<string, unknown> {
     );
   }
 
-  const schema = record(visit(value));
+  const schema = recordOrEmpty(visit(value));
 
   schema.definitions = Object.fromEntries(
-    Object.entries(record(schema.definitions)).map(([key, definition]) => [`published_${key}`, definition]),
+    Object.entries(recordOrEmpty(schema.definitions)).map(([key, definition]) => [
+      `published_${key}`, definition
+    ]),
   );
 
   return schema;
@@ -215,16 +213,16 @@ export async function codexSettingsSnapshot(
   context: NativeSettingsContext,
   published?: unknown,
 ): Promise<NativeSettingsSnapshot> {
-  const installed = record(schema);
-  const configSchema = record(record(installed.definitions).Config);
+  const installed = recordOrEmpty(schema);
+  const configSchema = recordOrEmpty(recordOrEmpty(installed.definitions).Config);
 
   if (configSchema.type !== 'object' || !configSchema.properties) {
     throw new Error('CLI не объявил схему Config RPC');
   }
 
-  const read = record(await rpc('config/read', { cwd: context.cwdRealpath, includeLayers: false }));
-  const config = record(read.config);
-  const requirements = record(record(await rpc('configRequirements/read', {})).requirements);
+  const read = recordOrEmpty(await rpc('config/read', { cwd: context.cwdRealpath, includeLayers: false }));
+  const config = recordOrEmpty(read.config);
+  const requirements = recordOrEmpty(recordOrEmpty(await rpc('configRequirements/read', {})).requirements);
   const ownership: NativeSettingsOwnership[] = [
     ...OWNED.map((key) => ({
       path: [key],
@@ -244,14 +242,17 @@ export async function codexSettingsSnapshot(
   let cursor: string | undefined;
 
   do {
-    const page = record(await rpc('experimentalFeature/list', { limit: 200, ...(cursor ? { cursor } : {}) }));
+    const page = recordOrEmpty(await rpc('experimentalFeature/list', {
+      limit: 200,
+      ...(cursor ? { cursor } : {})
+    }));
 
     if (!Array.isArray(page.data) || seen.size > 100 || page.data.length > 10_000) {
       throw new Error('Повреждена пагинация feature flags');
     }
 
     for (const input of page.data) {
-      const feature = record(input);
+      const feature = recordOrEmpty(input);
 
       if (
         typeof feature.name !== 'string' ||
@@ -276,7 +277,7 @@ export async function codexSettingsSnapshot(
       });
       Object.defineProperty(featureBase, feature.name, { enumerable: true, value: feature.enabled });
 
-      if (!supported || Object.hasOwn(record(requirements.features), feature.name)) {
+      if (!supported || Object.hasOwn(recordOrEmpty(requirements.features), feature.name)) {
         ownership.push({
           path: ['features', feature.name],
           owner: 'Политика CLI',
@@ -301,8 +302,8 @@ export async function codexSettingsSnapshot(
   } while (cursor);
 
   const external = publishedSchema(published);
-  const externalProperties = record(external.properties);
-  const installedProperties = record(configSchema.properties);
+  const externalProperties = recordOrEmpty(external.properties);
+  const installedProperties = recordOrEmpty(configSchema.properties);
   const properties = { ...externalProperties, ...installedProperties };
 
   delete properties.features;
@@ -333,8 +334,8 @@ export async function codexSettingsSnapshot(
         type: 'object',
         properties,
         definitions: {
-          ...record(external.definitions),
-          ...record(installed.definitions),
+          ...recordOrEmpty(external.definitions),
+          ...recordOrEmpty(installed.definitions),
         },
       },
       writeChannel: channel,

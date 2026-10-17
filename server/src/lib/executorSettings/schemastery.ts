@@ -1,15 +1,11 @@
 // Schemastery сериализует граф uid/refs, поэтому значения не являются JSON Schema.
 // После проверенного преобразования применяется тот же общий нормализатор и валидатор.
 
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { normalizeJsonSchema } from './jsonSchema.ts';
 import type { JsonSchemaOptions } from './jsonSchema.ts';
 import type { NormalizedSettingNode } from './types.ts';
-
-function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
 
 /**
  * Meta — объявленный контейнер аннотаций Schemastery. Числовой step ограничивает
@@ -20,8 +16,8 @@ function convertNode(raw: unknown): Record<string, unknown> {
     return { $ref: `#/$defs/${raw}` };
   }
 
-  const source = record(raw);
-  const meta = record(source.meta);
+  const source = recordOrEmpty(raw);
+  const meta = recordOrEmpty(source.meta);
   const result: Record<string, unknown> = {};
   const types = ['boolean', 'string', 'number', 'object', 'array'];
 
@@ -40,7 +36,7 @@ function convertNode(raw: unknown): Record<string, unknown> {
 
   if (source.type === 'object') {
     result.properties = Object.fromEntries(
-      Object.entries(record(source.dict)).map(([key, child]) => [key, convertNode(child)]),
+      Object.entries(recordOrEmpty(source.dict)).map(([key, child]) => [key, convertNode(child)]),
     );
   }
 
@@ -105,8 +101,8 @@ function convertNode(raw: unknown): Record<string, unknown> {
  * Непонятная конструкция останется видимой с запретом записи.
  */
 export function normalizeSchemastery(schema: unknown, options: JsonSchemaOptions): NormalizedSettingNode[] {
-  const serialized = record(schema);
-  const refs = record(serialized.refs);
+  const serialized = recordOrEmpty(schema);
+  const refs = recordOrEmpty(serialized.refs);
   const root = Object.hasOwn(serialized, 'uid') ? convertNode(serialized.uid) : convertNode(serialized);
 
   root.$defs = Object.fromEntries(Object.entries(refs).map(([uid, node]) => [uid, convertNode(node)]));

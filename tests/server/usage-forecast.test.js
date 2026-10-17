@@ -14,7 +14,7 @@ import {
 } from '../../server/src/lib/usage-forecast/forecast.ts';
 import { readForecastState, writeForecastState } from '../../server/src/lib/usage-forecast/store.ts';
 import usageForecastModule from '../../server/src/modules/usage-forecast/index.ts';
-import { parseUsageForecastSnapshot } from '../../shared/usageForecastContracts.ts';
+import { parseUsageForecastSnapshot } from '../../shared/chat/usageForecastContracts.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

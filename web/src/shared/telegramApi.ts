@@ -1,3 +1,5 @@
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseTelegramBotResult,
@@ -7,7 +9,7 @@ import {
   parseTelegramRulesSaved,
   parseTelegramStatus,
   parseTelegramTopics,
-} from '../../../shared/telegramContracts.ts';
+} from '../../../shared/telegram/telegramContracts.ts';
 
 /**
  * Единственная граница сети нативного раздела «Телеграм». Проверка здесь не
@@ -111,26 +113,12 @@ export const telegramApi = {
   },
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Выключенный плагин отвечает своим кодом под 404. Раздел различает его с
  * поломкой: это штатное состояние, и красная ошибка вместо него врёт человеку.
  */
 export function telegramPluginDisabled(error: unknown): boolean {
-  const failure = asRecord(error);
+  const failure = objectOrEmpty(error);
 
-  return failure.status === 404 && asRecord(failure.data).error === 'plugin_disabled';
-}
-
-/**
- * Текст отказа для человека. Сервер раздела присылает готовое сообщение вместе
- * с машинным кодом, а обрыв сети приходит без тела — тогда остаётся запасной.
- */
-export function telegramErrorMessage(error: unknown, fallback: string): string {
-  const message = asRecord(error).message;
-
-  return typeof message === 'string' && message ? message : fallback;
+  return failure.status === 404 && objectOrEmpty(failure.data).error === 'plugin_disabled';
 }

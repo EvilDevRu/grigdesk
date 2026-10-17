@@ -59,8 +59,8 @@ test('безопасные настройки БД имеют утверждён
 
 test('профили и журнал БД вынесены из prefs в приватные пути', () => {
   assert.deepEqual({
-    profiles: config.dbProfilesPath?.endsWith('/server/.state/db/profiles.json'),
-    audit: config.dbAuditDir?.endsWith('/server/.state/db/audit'),
+    profiles: config.dbProfilesPath?.endsWith('/state/db/profiles.json'),
+    audit: config.dbAuditDir?.endsWith('/state/db/audit'),
     prefsIsDbState: config.prefsPath?.includes('/db/'),
   }, {
     profiles: true,

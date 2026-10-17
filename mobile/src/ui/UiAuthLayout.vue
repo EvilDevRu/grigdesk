@@ -2,7 +2,7 @@
   <main class="auth-screen">
     <section class="auth-card">
       <div class="auth-brand">
-        <span class="brand-mark" aria-hidden="true">◧</span>
+        <UiBrandMark class="brand-mark" />
         <span class="auth-brand-name">Кокпит</span>
       </div>
       <slot />
@@ -11,5 +11,7 @@
 </template>
 
 <script setup lang="ts">
+import UiBrandMark from './UiBrandMark.vue';
+
 defineOptions({ name: 'UiAuthLayout' });
 </script>

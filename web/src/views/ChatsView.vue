@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .agents { display: flex; height: 100%; min-height: 0;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  background: var(--surface); border: 0; border-radius: 0; overflow: hidden; }
 .stage { flex: 1; min-width: 0; display: flex; }
 .stage :deep(.cs) { flex: 1; }
 

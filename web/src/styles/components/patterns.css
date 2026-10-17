@@ -74,6 +74,71 @@
   min-width: 0;
 }
 
+/* Подписанные вкладки 3D занимают одну полосу в доке и в развёрнутой студии.
+   Общий UI-kit владеет состояниями control, экран задаёт только место навигации. */
+.ui-tabs[data-ui-studio-tabs] {
+  width: 100%;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-tabs[data-ui-studio-tabs] > .ui-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 8px;
+  min-height: var(--control-height);
+  height: auto;
+  padding: 8px 12px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.ui-tabs[data-ui-studio-tabs] > .ui-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.ui-tabs[data-ui-studio-tabs] > .ui-tab:hover {
+  background: var(--surface);
+}
+
+/* Источник и набор параметров могут переноситься внутри узкого дока.
+   Высота каждого действия по-прежнему принадлежит общей геометрии controls. */
+.ui-segmented-control[data-ui-studio-choice] {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.ui-segmented-control[data-ui-studio-choice] > .ui-button {
+  flex: 1 1 auto;
+}
+
+/* Шейдинг — компактный выбор в toolbar холста, с той же активной кнопкой UI-kit.
+   Это не меняет размер полей генерации и остальных segmented controls. */
+.ui-segmented-control[data-context='studio-view-mode'] {
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--ground);
+}
+
+.ui-segmented-control[data-context='studio-view-mode'] > .ui-button {
+  min-height: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 /* Навигация панели Docker: разделы отделены от строки фильтров и не слипаются со счётчиками. */
 .ui-tabs[data-ui-docker-tabs] {
   flex: none;

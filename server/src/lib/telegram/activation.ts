@@ -1,5 +1,7 @@
 // Telegram activation boundary: local serialized ingestion seq + provider time.
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 type Payload = Record<string, unknown>;
 
 // Граница приёма канала. `afterSeq` — локальная сериализованная позиция архива,
@@ -33,14 +35,8 @@ const fail: (code: string, message: string) => never = (code, message) => {
   throw new TelegramActivationError(code, message);
 };
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exact(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('telegram_activation_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('telegram_activation_invalid', `${where}: ожидался объект.`);
 
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -139,7 +135,7 @@ export function telegramActivationEpochFor(
 ): number | null {
   const windows = validateTelegramActivationWindows(activationWindows);
 
-  if (!isPlainObject(position)) {
+  if (!isPlainRecord(position)) {
     fail('telegram_activation_invalid', 'Telegram archive position не является объектом.');
   }
   if (position.seq === null || position.seq === undefined) return null;

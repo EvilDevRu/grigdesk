@@ -1,6 +1,9 @@
 node_modules/
 web/dist/
 mobile/dist/
+desktop/dist/
+desktop/.dist-staging-*/
+desktop/release/
 relay/*.env
 mobile/android/**/build/
 mobile/android/.gradle/
@@ -27,6 +30,8 @@ third_party/deepseek-harness.sync-lock/
 .DS_Store
 .state/
 **/.state/
+# После переноса это ссылка: шаблон каталога её не скрывает.
+/server/.state
 __pycache__/
 BUGS.md
 
@@ -54,3 +59,14 @@ BUGS.md
 
 # Изолированный renderer Markdown генерируется перед dev/build.
 web/.generated/markdown/
+
+# Готовый посредник и проверяемый кэш сборки SEA.
+/bin/cockpit-relay
+/bin/cockpit-relay.sha256
+/bin/.cockpit-relay-*.tmp
+/relay/.cache/
+
+# Готовый b24 и проверяемый кэш его сборки SEA.
+/bin/b24
+/bin/.b24-*.tmp
+/b24/.cache/

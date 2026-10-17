@@ -36,9 +36,9 @@
 
 <script setup lang="ts">
 import { UiSelectableRow } from '../../ui';
-import { continuesPrevious } from '../../../../shared/showcaseChains';
-import type { ShowcaseScene, ShowcaseScreen } from '../../../../shared/showcaseContracts';
-import { plainNarration } from '../../../../shared/showcaseNarration';
+import { continuesPrevious } from '../../../../shared/plugins/showcase/showcaseChains';
+import type { ShowcaseScene, ShowcaseScreen } from '../../../../shared/plugins/showcase/showcaseContracts';
+import { plainNarration } from '../../../../shared/plugins/showcase/showcaseNarration';
 import { actionsText, CONTINUATION_LABEL, sceneStateOf, screenLabelOf, timecode } from './sceneText';
 
 const props = defineProps<{

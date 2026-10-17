@@ -77,7 +77,7 @@ Git-ревизия), переход из страницы входа в чаты
 этой проверке не изменялись. Диагностический preload запуска CLI в итоговом прогоне
 не использовался.
 
-Артефакты находятся в `.state/artifacts/chat-runtime-smoke/` вне git:
+Артефакты находятся в `~/.cockpit/artifacts/chat-runtime-smoke/` вне git:
 `run.mjs`, `browser-check.mjs`, `fake-claude.mjs`, `run.log`, `run.exit`,
 `results.json`, `browser-network.json`, `source-check.json`, `final-check.json`
 и локальные снимки экрана.

@@ -1,5 +1,5 @@
 import { showcaseApi, showcaseErrorMessage } from '../../shared/showcaseApi';
-import type { ShowcaseSelectableTargetRef } from '../../../../shared/showcaseContracts';
+import type { ShowcaseSelectableTargetRef } from '../../../../shared/plugins/showcase/showcaseContracts';
 import { loadShowcase } from './loadShowcase';
 import type { ShowcaseStore } from './showcaseRuntime';
 

@@ -1,14 +1,13 @@
 // Плагин авторизации кокпита.
 //
-// Модель: ОДИН пользователь, вход по логину и паролю, дальше — сессионная httpOnly-cookie.
-// Гард стоит на ВСЁМ `/api`, включая GET и upgrade вебсокета. Прежняя модель («читать свободно
-// внутри доверенной сети») не годится: кокпит отдаёт историю чатов, дифы, состояние фабрики,
-// а через терминал — шелл на машину, поэтому чтение закрыто наравне с мутациями.
+// Модель: ОДИН пользователь, вход только обменом локального ключа окна на сессионную
+// httpOnly-cookie. Гард стоит на ВСЁМ `/api`, включая GET и upgrade вебсокета. Модель
+// «читать свободно внутри доверенной сети» не годится: кокпит отдаёт историю чатов, дифы,
+// состояние фабрики, а через терминал — шелл на машину, поэтому чтение закрыто наравне
+// с мутациями.
 //
-// Почему 401, а не редирект на страницу входа: фронт — PWA с service worker'ом, и серверный
-// редирект на навигации конфликтует с офлайн-оболочкой (SW отдаёт закешированное приложение
-// вместо страницы логина). Поэтому статика ПУБЛИЧНА (в ней нет секретов), оболочка грузится
-// всегда, спрашивает `/api/auth/state` и сама показывает экран входа по 401.
+// Почему 401, а не редирект на страницу входа: браузерный вход снят, приложение входит
+// по ключу, а отказ обязан быть машинно-читаемым ответом, а не HTML.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
@@ -29,33 +28,124 @@ export interface SessionCookieOptions {
 
 export const SESSION_COOKIE = 'cockpit_sid';
 
-// Эндпоинты, доступные без сессии: ТОЛЬКО то, что нужно экрану входа.
+// Эндпоинты, доступные без сессии: ТОЛЬКО состояние входа и обмен ключа окна.
 // `/api/health` сознательно НЕ здесь: он отдаёт имя хоста и абсолютные пути (`stateDir`,
-// `factoryHome`), а до входа его никто не запрашивает — экран логина обходится `auth/state`.
+// `factoryHome`), а до входа его никто не запрашивает.
 const PUBLIC_API = new Set([
   '/api/auth/state',
-  '/api/auth/login',
-  '/api/auth/setup',
+  '/api/auth/window-session',
 ]);
 
+// Шаблоны статики, которые тоже обязаны проверять вход: корневой wildcard @fastify/static
+// (оболочка, ассеты, SPA-fallback) и артефакты приёмки. Решение принимается по шаблону
+// маршрута, а не по сырому URL: закодированный префикс не должен обходить проверку.
+const GUARDED_STATIC = ['/*', '/shots/', '/ui/'];
+
+// Назначения fetch, для которых ответ — документ, а не данные. Форма отказа зависит
+// только от этого: доступ решён раньше и от заголовков не зависит.
+const DOCUMENT_DESTINATIONS = new Set(['document', 'iframe', 'frame']);
+
+// Короткая самостоятельная страница отказа: без скриптов, ссылок и личных сведений.
+const DENIED_PAGE = `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кокпит открывается в приложении</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0b0d11;
+      color: #e4e7ed;
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+    main {
+      max-width: 640px;
+      margin: 15vh auto;
+      padding: 24px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Кокпит открывается в приложении</h1>
+    <p>Запустите ярлык «Кокпит». Из браузера интерфейс больше не открывается.</p>
+  </main>
+</body>
+</html>`;
+
 // Артефакты приёмки (`/shots/*`) — это скриншоты тестируемого приложения: данные
-// проектов, содержимое задач, всё что было на экране.
-// Имена предсказуемы (`t<номер задачи>-…`), листинг не нужен. Закрываем наравне с API:
-// раньше они отдавались без сессии (проверено — реальный PNG приходил анонимно).
-const PROTECTED_STATIC = ['/shots/'];
+// проектов, содержимое задач, всё что было на экране. Имена предсказуемы
+// (`t<номер задачи>-…`), листинг не нужен; закрываются общим списком GUARDED_STATIC.
 
 /**
  * Значение одной cookie из заголовка. Своими руками, чтобы не тащить @fastify/cookie:
  * нужна ровно одна cookie, и та в одном месте.
+ *
+ * Нечитаемое процентное кодирование — это отсутствие cookie, а не исключение: иначе
+ * испорченный заголовок превращал бы отказ входа в 500.
  */
 export function readCookie(header: unknown, name: string): string | null {
-  if (!header) return null;
+  if (!header) {
+    return null;
+  }
+
   for (const part of String(header).split(';')) {
     const i = part.indexOf('=');
-    if (i < 0) continue;
-    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+
+    if (i < 0) {
+      continue;
+    }
+
+    if (part.slice(0, i).trim() !== name) {
+      continue;
+    }
+
+    try {
+      return decodeURIComponent(part.slice(i + 1).trim());
+    } catch {
+      return null;
+    }
   }
+
   return null;
+}
+
+/**
+ * Путь после декодирования percent-encoding, без query и hash.
+ * Это форма ответа 404, а не решение о доступе: доступ уже решён гардом по матченному
+ * роуту. Нечитаемая кодировка считается API-подобной — HTML оболочки отдавать нельзя.
+ */
+export function looksLikeApiPath(rawUrl: unknown): boolean {
+  try {
+    const pathname = new URL(String(rawUrl ?? '/'), 'http://127.0.0.1').pathname;
+
+    return decodeURIComponent(pathname).startsWith('/api/');
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Навигация к документу отличается от запроса данных: браузер сообщает назначение
+ * через Sec-Fetch-Dest, а без него — через Accept. Форма сообщения об отказе не меняет
+ * само решение о доступе.
+ */
+function wantsDocument(request: FastifyRequest): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return false;
+  }
+
+  const destination = request.headers['sec-fetch-dest'];
+
+  if (typeof destination === 'string') {
+    return DOCUMENT_DESTINATIONS.has(destination);
+  }
+
+  const accept = request.headers.accept;
+
+  return typeof accept === 'string' && accept.includes('text/html');
 }
 
 /**
@@ -69,11 +159,9 @@ export function isSecureRequest(request: FastifyRequest): boolean {
 /**
  * Запрос действительно с этой машины?
  *
- * Нужно для первичной настройки пароля: `setup` публичен по необходимости (иначе пароль не задать),
- * и на сетевом адресе кто угодно успел бы задать его первым, получив вместе с кокпитом PTY-шелл.
- *
- * Даже у локального обратного прокси адрес сокета будет loopback.
- * Поэтому любой forwarded-заголовок по-прежнему запрещает первичный setup.
+ * Нужно обмену ключа окна: ключ читается только владельцем машины, но сетевой адрес
+ * обязан быть loopback. Даже у локального обратного прокси адрес сокета будет loopback,
+ * поэтому любой forwarded-заголовок по-прежнему запрещает обмен.
  */
 export function isLocalRequest(request: FastifyRequest): boolean {
   const ip = request.ip || '';
@@ -110,22 +198,8 @@ export function sessionCookie(id: string, {
 }
 
 /**
- * Удаление использует ту же область cookie, что и вход.
- * Нулевой срок инвалидирует браузерную сессию без расширения на другие хосты.
- */
-export function clearCookie({ secure }: Omit<SessionCookieOptions, 'maxAgeSec'>): string {
-  const parts = [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
-
-  if (secure) {
-    parts.push('Secure');
-  }
-
-  return parts.join('; ');
-}
-
-/**
  * Общий гард закрывает API, WebSocket и защищённую статику до модульных обработчиков.
- * Публичны только вход и локальный setup; внутренние вызовы несут отдельные токены.
+ * Публичны только состояние входа и обмен ключа окна; внутренние вызовы несут отдельные токены.
  */
 async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Promise<void> {
   const { authStore, internalToken, cliToken } = opts;
@@ -134,10 +208,6 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
   // валидной сессии само по себе не делает запрос серверным: queue dispatch identity
   // вправе назначать только process-local internal caller.
   fastify.decorateRequest('authKind', null);
-
-  if (!authStore.isConfigured()) {
-    fastify.log.warn('Пароль кокпита НЕ задан. Задать можно ТОЛЬКО с этой машины (localhost) — с сети первичная настройка закрыта.');
-  }
 
   fastify.addHook('onRequest', async (request, reply) => {
     // Решение принимаем по МАТЧЕННОМУ РОУТУ, а НЕ по `request.raw.url`.
@@ -153,22 +223,10 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     // в SPA-fallback, никаких данных API там нет.
     const routeUrl = request.routeOptions?.url || '';
 
-    // Оболочка (web/dist) остаётся публичной — без неё не показать даже экран входа.
-    // Закрываем API и артефакты приёмки; всё остальное статика.
+    // Гард решает по матченному роуту; статика закрывается наравне с API.
     const guarded = routeUrl.startsWith('/api/')
-      || PROTECTED_STATIC.some((p) => routeUrl.startsWith(p));
+      || GUARDED_STATIC.some((prefix) => routeUrl === prefix || routeUrl.startsWith(prefix));
     if (!guarded) return;
-
-    // Первичная настройка пароля — только с самой машины. Пока пароль не задан, этот эндпоинт
-    // обязан быть открытым (иначе его нечем вызвать), и на сетевом адресе им бы завладел первый
-    // желающий — вместе с терминалом. Владелец задаёт пароль на мозге, где кокпит и живёт.
-    if (routeUrl === '/api/auth/setup') {
-      if (isLocalRequest(request)) return;
-      return reply.code(403).send({
-        error: 'setup_local_only',
-        message: 'Первичная настройка пароля возможна только с самой машины (localhost).',
-      });
-    }
 
     if (PUBLIC_API.has(routeUrl)) return;
 
@@ -199,9 +257,13 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     // no-store ставится здесь, до module-specific hooks: иначе закрытые private API
     // могли получить закэшированный 401 без своих headers.
     reply.header('Cache-Control', 'no-store');
+
+    if (wantsDocument(request)) {
+      return reply.code(401).type('text/html; charset=utf-8').send(DENIED_PAGE);
+    }
+
     reply.code(401).send({
       error: 'unauthorized',
-      needsSetup: !authStore.isConfigured(),
       message: 'Требуется вход в кокпит.',
     });
   });

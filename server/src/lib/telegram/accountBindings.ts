@@ -11,6 +11,9 @@ import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 
+import { syncDirectory } from '../../../../shared/node/files.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 
 type Payload = Record<string, unknown>;
@@ -60,14 +63,8 @@ const fail: (code: string, message: string, cause?: unknown) => never = (
 
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('telegram_bindings_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('telegram_bindings_invalid', `${where}: ожидался объект.`);
 
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -197,18 +194,6 @@ async function assertRegularTarget(file: string): Promise<void> {
     if (errorCode(err) === 'ENOENT') return;
     if (err instanceof TelegramAccountBindingsError) throw err;
     fail('telegram_bindings_unsafe', 'Telegram account bindings target нельзя проверить.', err);
-  }
-}
-
-async function syncDirectory(dir: string): Promise<void> {
-  let handle: FileHandle | null | undefined;
-
-  try {
-    handle = await open(dir, constants.O_RDONLY
-      | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0));
-    await handle.sync();
-  } finally {
-    await handle?.close();
   }
 }
 

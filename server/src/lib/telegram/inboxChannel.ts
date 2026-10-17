@@ -2,6 +2,8 @@
 //
 // Lifecycle, token rotation и poller остаются снаружи. Здесь только immutable
 // generation lease, native archive/rules и Telegram-specific materialization.
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { FILE_LIMIT, scrubToken } from './api.ts';
 import { normalizeTelegramBotId } from './accountBindings.ts';
 import {
@@ -102,14 +104,8 @@ const fail: (code: string, message: string, statusCode?: number, cause?: unknown
 
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exact(value: unknown, keys: string[], where: string, code = 'telegram_inbox_invalid_contract'): void {
-  if (!isPlainObject(value)) fail(code, `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail(code, `${where}: ожидался объект.`);
 
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -242,7 +238,7 @@ function boundedString(value: unknown, where: string, maxBytes: number, { empty 
 }
 
 function attachmentOf(raw: unknown, index: number) {
-  if (!isPlainObject(raw)) {
+  if (!isPlainRecord(raw)) {
     fail('telegram_inbox_invalid_archive', `media[${index}] не является объектом.`);
   }
 
@@ -278,7 +274,7 @@ function attachmentOf(raw: unknown, index: number) {
 export function toInboxMessage(source: unknown, { accountRef }: { accountRef?: unknown } = {}) {
   const owner = assertAccountRef(accountRef);
 
-  if (!isPlainObject(source)) {
+  if (!isPlainRecord(source)) {
     fail('telegram_inbox_invalid_archive', 'Telegram native message не является объектом.');
   }
 
@@ -301,7 +297,7 @@ export function toInboxMessage(source: unknown, { accountRef }: { accountRef?: u
   const editedAt = nativeMessage.editedAt === null || nativeMessage.editedAt === undefined
     ? null
     : nonNegative(nativeMessage.editedAt, 'message.editedAt');
-  if (!isPlainObject(nativeMessage.from)) {
+  if (!isPlainRecord(nativeMessage.from)) {
     fail('telegram_inbox_invalid_archive', 'message.from не является объектом.');
   }
   const authorId = nativeMessage.from.id === null || nativeMessage.from.id === undefined
@@ -392,7 +388,7 @@ function rulesOf(source: unknown): { read: () => Promise<unknown[]> } {
 
 function credentialsOf(value: unknown, botId: string) {
   if (value === null || value === undefined) return null;
-  if (!isPlainObject(value)) {
+  if (!isPlainRecord(value)) {
     fail('telegram_inbox_invalid_context', 'Telegram credential snapshot не является объектом.');
   }
 
@@ -422,7 +418,7 @@ function botApiOf(source: unknown): BotApiPort {
 }
 
 function leaseOf(source: unknown) {
-  if (!isPlainObject(source) || !isPlainObject(source.context)) {
+  if (!isPlainRecord(source) || !isPlainRecord(source.context)) {
     fail('telegram_inbox_invalid_context', 'acquireInboxLease вернул неверный lease.');
   }
 
@@ -507,7 +503,7 @@ function scopeIdOf(chatId: number, ruleThreadId: number | null): string {
 }
 
 function policyOf(source: unknown, position: { chatId: number }) {
-  if (!isPlainObject(source)) {
+  if (!isPlainRecord(source)) {
     fail('telegram_inbox_invalid_policy', 'Telegram rule имеет неверный формат.');
   }
 
@@ -517,7 +513,7 @@ function policyOf(source: unknown, position: { chatId: number }) {
     : telegramId(rule.threadId, 'rule.threadId', { positiveOnly: true });
   if (typeof rule.project !== 'string' || !rule.project
       || typeof rule.kind !== 'string'
-      || !isPlainObject(rule.b24) || !isPlainObject(rule.autoTask)) {
+      || !isPlainRecord(rule.b24) || !isPlainRecord(rule.autoTask)) {
     fail('telegram_inbox_invalid_policy', 'Telegram rule не содержит strict Inbox policy.');
   }
   return {
@@ -538,7 +534,7 @@ function policyOf(source: unknown, position: { chatId: number }) {
 }
 
 function snapshotMatchesPosition(snapshot: unknown, position: Payload): boolean {
-  return isPlainObject(snapshot)
+  return isPlainRecord(snapshot)
     && snapshot.chatId === position.chatId
     && snapshot.messageId === position.messageId
     && snapshot.date === position.occurredAt
@@ -658,7 +654,7 @@ export function createTelegramInboxChannel({
 
     async state() {
       const raw = await stateCallback();
-      if (!isPlainObject(raw)) {
+      if (!isPlainRecord(raw)) {
         fail('telegram_inbox_invalid_state', 'Telegram channel state callback вернул не объект.');
       }
       return {
@@ -938,7 +934,7 @@ export function createTelegramInboxChannel({
                 retries: ATTACHMENT_FETCH_RETRIES,
               });
               await assertCurrent();
-              if (!isPlainObject(found) || typeof found.filePath !== 'string'
+              if (!isPlainRecord(found) || typeof found.filePath !== 'string'
                   || (found.size !== null && found.size !== undefined
                     && (!Number.isSafeInteger(found.size) || Number(found.size) < 0))) {
                 throw new Error('Bot API вернул неверное описание файла');

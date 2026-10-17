@@ -2,7 +2,7 @@
 // Нативные ключи разрешаются только через поле достоверного каталога.
 
 import type { NativeSettingsOverride, NormalizedSettingNode } from './types.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import { canonicalSettingsJson } from './fingerprint.ts';
 import { overlayNativeSettings } from './values.ts';
 

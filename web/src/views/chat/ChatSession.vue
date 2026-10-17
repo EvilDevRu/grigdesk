@@ -275,7 +275,7 @@
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </span>
-              <ChatInTurnReply :block="m" :chat-id="sid" @click="onMarkdownClick" />
+              <ChatInTurnReply :block="m" :chat-id="sid" :live="current" @click="onMarkdownClick" />
             </div>
             <div v-else-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))
                    || deliveryMark(m)" class="mrow"
@@ -629,12 +629,12 @@
 
 <script setup>
 import ChatWorkdir from './ChatWorkdir.vue';
-import { chatWorkdirLabel } from '../../../../shared/chatWorkdir.ts';
+import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
 import { useDictationController } from '../../features/speech/provider.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
-import { contextFill } from '../../../../shared/chatContext.ts';
+import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -1076,7 +1076,7 @@ const ctxTokens = computed(() => (
 // он не меняет ни шкалу, ни цвет кольца.
 // Абсолютное число без потолка врало бы в другую сторону: у модели с окном 200k порог
 // 200k недостижим, кольцо осталось бы зелёным до самого конца разговора.
-// Сама арифметика — в `shared/chatContext.ts`: тот же порог показывает карточка
+// Сама арифметика — в `shared/chat/chatContext.ts`: тот же порог показывает карточка
 // Telegram-пульта, и две копии этой шкалы разъехались бы на первой же правке.
 const ctxFill = computed(() => contextFill({
   tokens: ctxTokens.value,
@@ -1974,7 +1974,7 @@ function skipQuestion() {
    которого тянут мышью, чату на одном и том же экране остаётся от 400 до 1300 px. */
 .cs { container: chat / inline-size; }
 
-.cs-top { --chat-head-gap: 16px; display: flex; flex-direction: column; gap: 4px; padding: 8px 22px;
+.cs-top { --chat-head-gap: 16px; display: flex; flex-direction: column; gap: 4px; padding: 4px var(--chat-gutter);
   border-bottom: 1px solid var(--line); min-height: var(--chat-head-h); justify-content: center; }
 /* На странице высота шапки — общий с левым списком токен, иначе две разделительные линии
    расходятся. min-height, а не height: редкое предупреждение о модели важнее ровной линии —
@@ -2049,9 +2049,10 @@ function skipQuestion() {
    на ширину скроллбара (11px, base.css) — края совпадают с композером.
    scrollbar-gutter: stable — место под скролл зарезервировано всегда, сообщения
    не «скачут» по горизонтали, когда полоса появляется/исчезает. */
-.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 0 11px 0 22px; margin: 26px 0; }
+.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 0 max(0px, calc(var(--chat-gutter) - 11px)) 0 var(--chat-gutter);
+  margin: var(--chat-flow-inset) 0; }
 /* min-height 100% — пустое состояние центрируется */
-.flow { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.flow { display: flex; flex-direction: column; gap: var(--chat-flow-gap); min-height: 100%; }
 .conversation-group { display: contents; }
 /* Линия принадлежит всему запуску: раскрытие действий и реплики человека
    меняют высоту группы, но не разрывают её и не добавляют вложенных полос. */
@@ -2141,7 +2142,11 @@ function skipQuestion() {
   flex: 0 100 auto; font-size: 11px; color: var(--ink-mid); }
 .fb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb b { font-weight: 600; color: var(--ink); }
-.fb.warn { color: var(--warn, #e0a33a); }
+.fb.warn {
+  color: var(--warn, #e0a33a); white-space: normal; overflow-wrap: anywhere;
+  overflow: visible; text-overflow: clip;
+}
+.factbar:has(.warn) { flex-wrap: wrap; overflow: visible; }
 .fb.warn b { color: var(--warn, #e0a33a); }
 /* Маркдаун ответа */
 .text.md :deep(p) { margin: 0 0 4px; }
@@ -2195,7 +2200,7 @@ function skipQuestion() {
 .m-atts a { text-decoration: none; }
 
 /* position — опора для разделителя высоты поля (.cs-resize) */
-.cs-input { position: relative; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+.cs-input { position: relative; padding: 12px var(--chat-gutter) 16px; border-top: 1px solid var(--line); }
 /* Чипы вложений до отправки */
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
@@ -2245,16 +2250,6 @@ function skipQuestion() {
   background: color-mix(in srgb, var(--ink-mid) 42%, transparent); transition: background .12s; }
 .cs-resize:hover span, .cs-resize:focus-visible span { background: var(--accent); }
 
-/* ── Планшет (до 1099): ряд настроек без подписей-меток ─────────────────────────
-   Рядом со списком чату остаётся ~400px, и в такую ширину ряд влезает только так.
-   Значение каждого контрола говорит само за себя (модель, режим, уровень), а полное
-   название есть в подсказке по ховеру. Поля страницы тоже ужимаем. */
-@media (max-width: 1099px) {
-  .cs-top { padding: 8px 14px; }
-  .cs-body { padding: 0 11px 0 14px; }
-  .cs-input { padding-left: 14px; padding-right: 14px; }
-}
-
 /* ── Шапка уже 900 px: ряд настроек без подписей-меток ──────────────────────────
    Значение каждого контрола говорит само за себя (задача, модель, режим, уровень), а
    полное название есть в подсказке по ховеру. Порог — по ширине чата: на 1440 рядом с
@@ -2300,13 +2295,9 @@ function skipQuestion() {
   .back { display: grid; }
 }
 
-/* ── Телефон: шапке разрешено расти ──────────────────────────────────────────────
-   Выравнивать тут нечего (шапка на экране одна): высота по содержимому, поля — к
-   минимуму. Раскладку рядов решают container-правила выше — по ширине самого чата. */
+/* Узкие сообщения сохраняют прежние размеры текста и предел ширины вложений. */
 @media (max-width: 759px) {
-  .cs-top { min-height: 0; justify-content: flex-start; padding: 8px 10px; }
-  .cs-body { padding: 0 0px 0 12px; margin: 18px 0; }
-  .cs-input { padding-left: 12px; padding-right: 12px; }
+  .cs-top { justify-content: flex-start; }
   .cs-input { padding-bottom: 12px; }
   /* Иначе длинный текст режется в узкий столбик */
   .msg.user { max-width: 92%; }

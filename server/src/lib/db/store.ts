@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { errorCode } from '../../../../shared/lib/errors.ts';
+
 // Профиль подключения: только описание. Пароля здесь нет и не появится — он
 // спрашивается при входе, живёт в памяти процесса и стирается сразу.
 export interface DbProfile {
@@ -48,14 +50,6 @@ class DbStoreError extends Error {
   }
 }
 
-function failureCode(error: unknown): string {
-  const code = error !== null && typeof error === 'object'
-    ? (error as { code?: unknown }).code
-    : undefined;
-
-  return typeof code === 'string' ? code : '';
-}
-
 function clean(input: DbProfileInput, id: string = randomUUID()): DbProfile {
   return {
     id,
@@ -95,7 +89,7 @@ export async function createDbStore(
       }).id || '')))
       : [];
   } catch (error) {
-    if (failureCode(error) !== 'ENOENT') throw error;
+    if (errorCode(error) !== 'ENOENT') throw error;
   }
 
   async function validate(profile: DbProfile, exceptId = ''): Promise<void> {

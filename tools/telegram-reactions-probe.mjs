@@ -15,18 +15,18 @@
 // Что делает: только ЧИТАЕТ (getMe, getWebhookInfo, getUpdates). Ничего не
 // отправляет, вебхук не трогает, настройки бота не меняет.
 //
-// Токен: server/.state/telegram-creds.json (поле token) либо env TELEGRAM_BOT_TOKEN.
+// Токен: state/telegram-creds.json в папке данных (поле token) либо env TELEGRAM_BOT_TOKEN.
 // В выводе токен маскируется всегда — отчёт можно показывать кому угодно.
 //
 // Запуск:
 //   node tools/telegram-reactions-probe.mjs [--sec 180] [--report /путь/report.json]
 
+import os from 'node:os';
+import { dataHome } from '../shared/runtime/dataHome.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CREDS = path.join(ROOT, 'server', '.state', 'telegram-creds.json');
+const CREDS = path.join(dataHome({ env: process.env, home: os.homedir() }), 'state/telegram-creds.json');
 
 // Без явного перечисления Telegram НЕ шлёт реакции вовсе — это и проверяем.
 const ALLOWED = [
@@ -51,11 +51,10 @@ function readToken() {
     raw = JSON.parse(readFileSync(CREDS, 'utf8'));
   } catch (e) {
     const why = e.code === 'ENOENT' ? 'файла нет' : e.message;
+
     return fail(`токен не прочитан (${CREDS}): ${why}.\n`
-      + '  Положить его так (токен — из @BotFather):\n'
-      + '    mkdir -p server/.state \\\n'
-      + '      && printf \'{"token":"ВСТАВЬ_ТОКЕН"}\' > server/.state/telegram-creds.json \\\n'
-      + '      && chmod 600 server/.state/telegram-creds.json');
+      + `  Сохраните токен из @BotFather в ${CREDS} как JSON с полем token.\n`
+      + '  Каталог должен иметь права 0700, файл — 0600.');
   }
   const token = String(raw.token || '').trim();
   if (token) return { token, from: CREDS };

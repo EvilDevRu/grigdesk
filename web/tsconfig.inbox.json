@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/inboxContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/inbox/inboxContracts.ts",
     "src/shared/inboxApi.ts",
     "src/stores/inbox.ts",
     "src/actions/inbox/**/*.ts",

@@ -6,19 +6,22 @@ import {
   parseAgentCard,
   parseAgentInstallResult,
   parseAgentList,
-} from '../../shared/agentsContracts.ts';
+} from '../../shared/pipeline/agentsContracts.ts';
 import {
   FactoryGraphContractError,
   parseFactoryGraph,
-} from '../../shared/factoryGraphContracts.ts';
-import { ProvidersContractError, parseProviderEfforts } from '../../shared/providersContracts.ts';
+} from '../../shared/pipeline/factoryGraphContracts.ts';
+import { ProvidersContractError, parseProviderEfforts } from '../../shared/chat/providersContracts.ts';
 import {
   RoutesContractError,
   parseRoutePublish,
   parseRouteRevisions,
   publishSummary,
-} from '../../shared/routesContracts.ts';
-import { DocumentsContractError, parseResolvedDocument } from '../../shared/documentsContracts.ts';
+} from '../../shared/pipeline/routesContracts.ts';
+import {
+  DocumentsContractError,
+  parseResolvedDocument,
+} from '../../shared/plugins/documents/documentsContracts.ts';
 
 const agent = {
   id: 'recon',

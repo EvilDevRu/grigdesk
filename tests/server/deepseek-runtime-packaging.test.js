@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 
 import { writeDeepSeekArtifactFixture } from '../helpers/deepSeekArtifactFixture.mts';
 import { resolveDeepSeekRuntime } from '../../server/src/lib/deepseek/runtimeProcess.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { forkDeepSeekHome } from '../../tools/deepseekHomeFork.ts';
 import { verifyDeepSeekSnapshot } from '../../tools/deepseekVendorManifest.ts';
 
@@ -165,7 +166,7 @@ test('повреждённое поколение с тем же buildId зам�
 async function cleanCheckout(sourceRoot, root) {
   const upstream = path.join(sourceRoot, 'third_party/deepseek-harness/upstream');
 
-  for (const relative of ['tools', 'third_party/deepseek-harness']) {
+  for (const relative of ['tools', 'shared', 'third_party/deepseek-harness']) {
     await fs.cp(path.join(sourceRoot, relative), path.join(root, relative), {
       recursive: true,
       filter: (source) => source !== upstream
@@ -194,7 +195,8 @@ test('настоящая общая подготовка clean checkout рабо
     PATH: process.env.PATH,
     HOME: root,
     NODE_ENV: 'production',
-    npm_config_cache: path.join(sourceRoot, '.state/artifacts/deepseek-vendoring/npm-cache'),
+    npm_config_cache: path.join(artifactsPath({ env: process.env, home: os.homedir() }),
+      'deepseek-vendoring/npm-cache'),
     COCKPIT_DEEPSEEK_UPSTREAM_SEED: path.join(sourceRoot, 'third_party/deepseek-harness/upstream'),
   };
   const staleLock = path.join(root, 'server/runtime/deepseek/.prepare-lock');

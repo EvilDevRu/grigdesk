@@ -64,7 +64,11 @@
   (`GET /api/chat/active` отдаёт `steps`).
 - **Развёрнутое Codex summary** запрашивается через thread config
   `model_reasoning_summary: "detailed"` и `turn/start.summary: "detailed"`. Дефолтное summary
-  у CLI короткое; приватную цепочку этот режим не включает. Kimi ACP присылает sparse lifecycle
+  у CLI короткое; приватную цепочку этот режим не включает. Объём размышления в ленте задаёт модель, а
+  не режим: у gpt-6-astra (и gpt-6-sol, gpt-5.6-sol) это с сентября 2026 только заголовок `**…**` около
+  50 знаков при `auto`, `detailed` и `none`, у gpt-6.1-sol — абзацы до ~2,3 тыс. знаков. С Codex CLI
+  0.162.1 (с 10.10.2026) `turn_context.summary` в ходах кокпита — `"none"`, но gpt-6.1-sol и с ним
+  присылает развёрнутые summary. Kimi ACP присылает sparse lifecycle
   `tool_call`/`tool_call_update`: stateful normalizer копит состояние по `toolCallId`, ждёт
   canonical upgrade либо terminal fallback и выпускает ровно один `tool` и один `res`.
   `agent_thought_chunk` склеивается в один `think` перед следующим действием или в конце хода;

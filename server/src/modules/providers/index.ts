@@ -8,10 +8,11 @@ import { resolveWorkdirCapability } from '../../lib/chat/workdir.ts';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { execFile } from 'node:child_process';
-import { getProviderAdapters, supportsScopedWorkspace } from '../../lib/executors/index.ts';
+import { getProviderAdapters, isChatExecutor, supportsScopedWorkspace } from '../../lib/executors/index.ts';
+import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 import type { ExecutorAdapter } from '../../lib/executors/index.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
-import { parseInTurnCapability } from '../../../../shared/chatInTurnContracts.ts';
+import { parseInTurnCapability } from '../../../../shared/chat/chatInTurnContracts.ts';
 import { isOutdated } from '../../lib/executors/_npmLatest.ts';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/providerSettings.ts';
 import { credentialViews, declaredCredentials, envFileNames } from '../../lib/executorCredentials.ts';
@@ -166,7 +167,10 @@ async function providersModule(
    * возможность молча: реестр честно показывает unsupported без списка вендоров.
    */
   async function directSshPolicyOf(ex: ExecutorAdapter) {
-    if (typeof ex.run !== 'function') return { enforcement: 'unsupported' };
+    if (!isChatExecutor(ex)) {
+      return { enforcement: 'unsupported' };
+    }
+
     try {
       const declared = (typeof ex.directSshPolicy === 'function'
         ? await ex.directSshPolicy(config)
@@ -195,25 +199,31 @@ async function providersModule(
     const providers = [];
 
     for (const ex of executors.values()) {
+      const type = normalizeExecutorType(ex.type);
+      const universal = type === 'universal';
+      const chatEnabled = isChatExecutor(ex);
       const [probe, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
       const { ok, version } = probe;
       const distribution = ex.distribution?.(config, probe) || null;
       const embedded = distribution?.kind === 'embedded';
       // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
       let modes = null;
-      if (ok && typeof ex.modes === 'function') {
+
+      if (universal && ok && typeof ex.modes === 'function') {
         try { modes = await ex.modes(config); } catch { modes = null; }
       }
       // Слэш-команды исполнителя для меню чата. Источники cwd-независимы, поэтому
       // легально едут в том же глобальном кэше; падение сканера одного ИИ не валит реестр.
-      const commands = typeof ex.commands === 'function'
+      const commands = universal && typeof ex.commands === 'function'
         ? normalizeCommands(await Promise.resolve(ex.commands(config)).catch(() => []))
         : [];
+
       providers.push({
         id: ex.id,
         name: ex.name,
         vendor: ex.vendor,
-        kind: 'cli',
+        type,
+        kind: ex.kind === 'api' ? 'api' : 'cli',
         bin: ex.bin(config),
         color: ex.color,
         version,
@@ -221,21 +231,21 @@ async function providersModule(
         authLabel: auth.label,
         available: ok && auth.available,
         // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
-        chatEnabled: typeof ex.run === 'function',
+        chatEnabled,
         capabilities: {
-          chatAutoCompact: ex.chatAutoCompact === true || !!ex.autoCompactEnv,
-          scopedWorkspace: await supportsScopedWorkspace(ex, config),
-          untrustedText: typeof ex.run === 'function'
+          chatAutoCompact: universal && (ex.chatAutoCompact === true || !!ex.autoCompactEnv),
+          scopedWorkspace: chatEnabled && await supportsScopedWorkspace(ex, config),
+          untrustedText: chatEnabled
             && typeof ex.runUntrusted === 'function'
             && ex.untrustedInput?.text === true,
         },
         // Канал ввода в активный ход: адаптер объявляет его сам, наружу идёт разобранная форма.
-        inTurn: parseInTurnCapability(ex.inTurnInput),
+        inTurn: parseInTurnCapability(universal ? ex.inTurnInput : null),
         // Resume id принадлежит server-owned sidecar, а не JSON чата/браузеру.
-        sessionBinding: typeof ex.run === 'function' && Boolean(ex.sessionBinding),
+        sessionBinding: chatEnabled && Boolean(ex.sessionBinding),
         // Как переносить память и применять рабочие корни, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
-        workdir: await resolveWorkdirCapability(ex, config),
+        workdir: universal ? await resolveWorkdirCapability(ex, config) : null,
         directSshPolicy: await directSshPolicyOf(ex),
         installed: ok,
         install: embedded ? null : ex.install || null,
@@ -256,7 +266,7 @@ async function providersModule(
         latest: embedded ? null : updates.get(ex.id)?.latest || null,
         updateAvailable: !embedded && !!updates.get(ex.id)?.outdated,
         checkedAt: updates.get(ex.id)?.at || null,
-        models: models[ex.id] || [],
+        models: chatEnabled ? models[ex.id] || [] : [],
         modes: modes || [],
         commands,
         // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
@@ -269,16 +279,34 @@ async function providersModule(
   }
 
   // Снимок ответа /api/providers: probe — подпроцессы, и гонять их на каждый запрос незачем.
-  let cache: { at: number; providers: Awaited<ReturnType<typeof buildRegistry>> } | null = null;
+  const registryCache = createUsageReadCache(buildRegistry, { maxAgeMs: CACHE_MS });
 
-  fastify.decorate('providerRegistry', async () => {
-    const providers = await buildRegistry();
-    return Object.fromEntries(
+  /**
+   * Защищает выход HTTP и декоратора после ожидания общей загрузки реестра.
+   * Поколение, сменившееся между завершением loader и продолжением читателя, перечитывается.
+   */
+  async function readRegistry<Result>(
+    consume: (providers: Awaited<ReturnType<typeof buildRegistry>>) => Result,
+  ): Promise<Result> {
+    for (;;) {
+      const version = registryCache.version();
+      const providers = await registryCache.read();
+
+      if (version === registryCache.version()) {
+        return consume(providers);
+      }
+    }
+  }
+
+  fastify.decorate('providerRegistry', () => readRegistry((providers) => Object.fromEntries(
       providers.filter((provider) => provider.available && provider.chatEnabled)
         .map((provider) => [provider.id, provider.models]),
-    );
+  )));
+  fastify.decorate('executorFor', async (id: unknown) => {
+    const executor = (await adaptersOf()).get(String(id));
+
+    return executor && isChatExecutor(executor) ? executor : null;
   });
-  fastify.decorate('executorFor', async (id: unknown) => (await adaptersOf()).get(String(id)) || null);
 
   // Метка «новое» — бухгалтерия кокпита, а не факт адаптера: адаптер называет ведро
   // полем `group`, а помнит ли человек это ведро — знает только сервер.
@@ -320,6 +348,8 @@ async function providersModule(
   // До какого момента исполнителя не трогаем. Пауза персональная: отказ по частоте у
   // одного аккаунта ничего не говорит про соседний, и глушить весь ряд было бы неверно.
   const usageBackoff = new Map<string, { until: number; ticks: number }>();
+  // Адресный сброс общего кэша сохраняет прошлые снимки и паузы соседних аккаунтов.
+  const usagePrevious = new Map<string, ProviderUsage>();
 
   /**
    * Отказ по частоте — единственная беда, на которую кокпит отвечает молчанием. Сеть,
@@ -363,16 +393,21 @@ async function providersModule(
     return until ? { ...usage, retryAt: until } : usage;
   }
 
-  const usageCache = createUsageReadCache<Record<string, ProviderUsage>>(async (previousUsage) => {
+  const usageCache = createUsageReadCache<Record<string, ProviderUsage>>(async (previousUsage, context) => {
     // Тот же источник адаптеров, что и у реестра (`adaptersOf`): иначе стенд подменял
     // исполнителей, а лимиты всё равно собирались у настоящих.
     const executors = await adaptersOf();
+
+    if (!context.isCurrent()) {
+      return {};
+    }
+
     const checkedAt = Date.now();
     // Аккаунты независимы: медленная проверка одного исполнителя не должна
     // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
     const entries = await Promise.all([...executors.values()].map(async (ex) => {
       const held = usageBackoff.get(ex.id);
-      const previous = previousUsage?.[ex.id];
+      const previous = previousUsage?.[ex.id] ?? usagePrevious.get(ex.id);
 
       // Идёт пауза после «стучитесь реже»: отдаём прошлый снимок как есть. Он уже несёт
       // и слова вендора, и последние полосы — новых мы честно не знаем, а сходить за
@@ -390,14 +425,21 @@ async function providersModule(
             providerName: String(ex.name),
             checkedAt,
           });
-        } catch (e) {
-          fastify.log.warn({ provider: ex.id, err: (e as Error)?.message }, 'usage исполнителя не получен');
+        } catch {
+          if (context.isCurrent()) {
+            fastify.log.warn({ provider: ex.id }, 'usage исполнителя не получен');
+          }
+
           current = normalizeProviderUsage({
             state: 'unavailable',
             message: `Не удалось получить лимиты ${ex.name}. Повторим проверку автоматически.`,
           }, { providerName: String(ex.name), checkedAt });
         }
       }
+      if (!context.isCurrent()) {
+        return [ex.id, current] as const;
+      }
+
       rememberUsageBackoff(ex.id, current, checkedAt);
       // `current` здесь есть всегда, поэтому слияние возвращает запись, а не прошлый снимок.
       const merged = withPauseUntil(ex.id, mergeProviderUsage(
@@ -406,15 +448,42 @@ async function providersModule(
       ) as ProviderUsage);
 
       if (!VENDOR_FAULT_USAGE_STATES.has(merged.state) || !ex.statusPage) {
+        usagePrevious.set(ex.id, merged);
+
         return [ex.id, merged] as const;
       }
 
       const vendorStatus = await statusProbe.read(ex.statusPage);
+      const result = vendorStatus ? { ...merged, vendorStatus } : merged;
 
-      return [ex.id, vendorStatus ? { ...merged, vendorStatus } : merged] as const;
+      if (context.isCurrent()) {
+        usagePrevious.set(ex.id, result);
+      }
+
+      return [ex.id, result] as const;
     }));
     return Object.fromEntries(entries);
   }, { maxAgeMs: usageTickMs });
+
+  /**
+   * Проверяет актуальность непосредственно перед выходом HTTP/SSE.
+   * Старый refresh разделяет чтение нового поколения, а не публикует прежний счёт.
+   */
+  async function readUsage<Result>(
+    refresh: boolean,
+    consume: (usage: Record<string, ProviderUsage>) => Result,
+  ): Promise<Result> {
+    for (;;) {
+      const version = usageCache.version();
+      const usage = await (refresh ? usageCache.refresh() : usageCache.read());
+
+      if (version === usageCache.version()) {
+        return consume(usage);
+      }
+
+      refresh = false;
+    }
+  }
 
   // ── Проверка новых версий CLI: периодически и по кнопке, НИКОГДА не обновляет сама ──
   // providerId → что показала последняя фоновая проверка новой версии CLI.
@@ -453,8 +522,9 @@ async function providersModule(
       updates.set(ex.id, { latest, outdated, current, at: Date.now() });
       if (outdated) fastify.log.info({ provider: ex.id, current, latest }, 'доступно обновление CLI (обновление — вручную из настроек)');
     }
+
     if (changed) {
-      cache = null; // в следующем ответе /api/providers поедут новые поля
+      registryCache.clear(); // в следующем ответе /api/providers поедут новые поля
       fastify.sse?.broadcast?.('providers-update', {
         updates: [...updates.entries()].map(([id, u]) => ({ id, latest: u.latest, updateAvailable: u.outdated })),
       });
@@ -473,21 +543,20 @@ async function providersModule(
   fastify.post('/api/providers/check-updates', async () => ({ updates: await checkUpdates() }));
 
   // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
-  fastify.get('/api/providers/usage', async () => ({ usage: await usageCache.read() }));
+  fastify.get('/api/providers/usage', (_, reply) => readUsage(false, (usage) => reply.send({ usage })));
 
   // Принудительная проверка по кнопке во всплывашке. Обходит TTL кэша, но не паузу после
   // отказа вендора: её соблюдает само чтение и вернёт прошлый снимок. Свежий снимок
   // отдаётся как есть — он уже в кэше, и read() к вендору не пойдёт. Итог рассылается
   // всем окнам: проверку попросило одно, а полосы общие.
-  fastify.post('/api/providers/usage/refresh', async () => {
-    const usage = usageCache.ageMs() < USAGE_FORCE_MIN_AGE_MS
-      ? await usageCache.read()
-      : await usageCache.refresh();
+  fastify.post('/api/providers/usage/refresh', (_, reply) => readUsage(
+    usageCache.ageMs() >= USAGE_FORCE_MIN_AGE_MS,
+    (usage) => {
+      fastify.sse?.broadcast?.('providers-usage', { usage });
 
-    fastify.sse?.broadcast?.('providers-usage', { usage });
-
-    return { usage };
-  });
+      return reply.send({ usage });
+    },
+  ));
 
   // ── Фоновая свежесть лимитов ──
   // Раньше лимиты читались только по запросу окна: первое наведение после минуты тишины
@@ -509,9 +578,9 @@ async function providersModule(
   async function refreshUsageIfStale(): Promise<void> {
     if (usageCache.ageMs() < usageTickMs / 2) return;
 
-    const usage = await usageCache.refresh();
-
-    fastify.sse?.broadcast?.('providers-usage', { usage });
+    await readUsage(true, (usage) => {
+      fastify.sse?.broadcast?.('providers-usage', { usage });
+    });
   }
 
   fastify.decorate('refreshProvidersUsage', refreshUsageIfStale);
@@ -601,18 +670,18 @@ async function providersModule(
     return r;
   });
 
-  fastify.get<ProvidersListRoute>('/api/providers', async (request) => {
+  fastify.get<ProvidersListRoute>('/api/providers', async (request, reply) => {
     const force = request.query?.refresh === '1';
     // Старые версии моделей приходят всегда (с `legacy: true`), а показывать ли их —
     // решает настройка: тумблер в UI не должен ходить за новым списком на сервер.
     const showAllModels = !!prefs?.read().showAllModels;
-    if (!force && cache && Date.now() - cache.at < CACHE_MS) return { providers: cache.providers, showAllModels };
+
     if (force) {
       await modelsOf(config, { refresh: true }); // пересобрать каталог моделей
+      registryCache.clear();
     }
-    const providers = await buildRegistry();
-    cache = { at: Date.now(), providers };
-    return { providers, showAllModels };
+
+    return readRegistry((providers) => reply.send({ providers, showAllModels }));
   });
 
   /**
@@ -635,7 +704,7 @@ async function providersModule(
       [ex.id]: { ...current[ex.id] as object, [settingId]: approved[settingId] },
     }));
 
-    cache = null; // следующий /api/providers отдаст новое значение
+    registryCache.clear(); // следующий /api/providers отдаст новое значение
     return { ok: true, settings: applied.settings };
   });
 
@@ -645,9 +714,13 @@ async function providersModule(
     adaptersOf,
     env: serviceEnv,
     resetRegistry: () => {
-      cache = null;
+      registryCache.clear();
     },
-    resetUsage: () => usageCache.clear(),
+    resetUsage: (id) => {
+      usageCache.clear();
+      usageBackoff.delete(id);
+      usagePrevious.delete(id);
+    },
     refreshModels: () => modelsOf(config, { refresh: true }),
   });
 
@@ -678,7 +751,8 @@ async function providersModule(
         resolve({ ok: !err, text: ((stdout || '') + (stderr || '')).trim().slice(-2000) });
       });
     });
-    cache = null;
+
+    registryCache.clear();
     const after = (await ex.probe(config))?.version || '';
     // Версия сменилась → каталог моделей нового CLI (скан бинаря) подхватится сразу.
     await modelsOf(config, { refresh: true }).catch(() => null);

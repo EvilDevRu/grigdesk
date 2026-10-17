@@ -6,17 +6,22 @@ pinned TLS-слоя, проходит через настоящего посре
 входу Кокпита. Ответы не подменяются fixtures. Это не доказательство Android-части:
 Keystore, биометрия, жизненный цикл и установка проверяются на устройстве.
 
+`PhoneEmulator` также проверяется в desktop node-link тестах. Нынешнее
+[локальное окно для компьютера](../web/desktop-window.md) загружает веб Кокпита;
+[модули личности прежнего клиента](../web/desktop-window.md#сохранённые-модули-прежнего-клиента)
+сохранены отдельно.
+
 ```bash
-bin/mobile devlink start    # собрать dev-интерфейс и поднять user-юнит
-bin/mobile devlink status   # адрес и последние строки журнала
-bin/mobile devlink stop     # закрыть соединения, привязка остаётся
+tools/mobile devlink start    # собрать dev-интерфейс и поднять user-юнит
+tools/mobile devlink status   # адрес и последние строки журнала
+tools/mobile devlink stop     # закрыть соединения, привязка остаётся
 ```
 
 `start` поднимает `systemd --user` юнит `cockpit-mobile-devlink`: процесс переживает ход
 агента и перезапуск Кокпита, но не перезагрузку машины. Адрес — `http://127.0.0.1:8150/`;
 порт меняется через `COCKPIT_MOBILE_DEVLINK_PORT`. Оба HTTP-входа — интерфейс и API
 эмулятора — слушают только IPv4 loopback. Журнал без секретов пишется в
-`.state/mobile/devlink.log`, путь меняется через `COCKPIT_MOBILE_DEVLINK_LOG`.
+`<папка данных>/state/mobile-apk/devlink.log`, путь меняется через `COCKPIT_MOBILE_DEVLINK_LOG`.
 
 Синтетический ключ телефона, сохранённый QR с токеном посредника, привязка и durable
 очередь лежат в `COCKPIT_MOBILE_DEVLINK_DIR`, по умолчанию `~/.config/cockpit/mobile-devlink`

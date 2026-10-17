@@ -3,7 +3,8 @@
 // помнит свою модель, поэтому шапка обязана брать исполнителя из неё, а не из селекта
 // сессии: ИИ меняют посреди разговора, и прошлые ходы остаются за прежним.
 import assert from 'node:assert/strict';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import test from 'node:test';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';

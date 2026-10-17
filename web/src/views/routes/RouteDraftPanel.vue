@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { RouteDraftContent } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteDraftContent } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiButton } from '../../ui';
 
 const props = defineProps<{ document: RouteDraftContent; routeId: string }>();

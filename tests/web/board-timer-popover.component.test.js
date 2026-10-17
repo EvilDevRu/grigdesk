@@ -48,14 +48,15 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
 
   const popover = browser.document.querySelector('.board-timers-popover');
   assert.ok(popover);
-  const header = popover.querySelector('.board-timers-popover-head');
+
+  const header = popover.closest('.ui-topbar-panel').querySelector('.ui-topbar-panel__head');
   assert.match(
     header?.textContent.replace(/\s+/gu, ' ').trim(),
     /^Таймеры задач Активно 1\s*·\s*сегодня 3ч 45мин$/u,
   );
   assert.equal(Boolean(header?.querySelector('.board-timers-popover-count')), false);
   assert.equal(
-    popover.querySelector('.board-timers-popover-today')?.textContent.trim(),
+    header.querySelector('.board-timers-popover-today')?.textContent.trim(),
     '3ч 45мин',
   );
   const taskButtons = [...popover.querySelectorAll('[data-context="topbar-timer-task"]')];

@@ -4,6 +4,10 @@
 
 import { createHash } from 'node:crypto';
 
+import { lexical } from '../../../../shared/lib/text.ts';
+import { errorText } from '../../../../shared/lib/errors.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { bundleInboxMessages, validateInboxGrouping } from './bundle.ts';
 import { buildInboxDraft, safeInboxSourceUrl } from './draft.ts';
 import type { InboxDraftAttachment } from './draft.ts';
@@ -200,11 +204,6 @@ const POLICY_KEYS = ['scopeId', 'project', 'kind', 'b24', 'autoTask'];
 const B24_KEYS = ['groupId', 'responsibleId', 'priority'];
 const AUTO_KEYS = ['enabled', 'minConfidence', 'maxPerDay'];
 
-// Чужая ошибка своего типа не обещает: текст читается мягко, а решение по нему
-// принимается уже своё.
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
-const lexical = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const clone = <Value>(value: Value): Value => structuredClone(value);
 const itemOrder = (a: InternalInboxItem, b: InternalInboxItem) => (
   b.lastAt - a.lastAt
@@ -259,19 +258,13 @@ const fail: (code: string, message: string, statusCode?: number, cause?: unknown
   throw new InboxCoordinatorError(code, message, statusCode, cause);
 };
 
-const isPlainObject = (value: unknown): value is Payload => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-};
-
 function exactObject(
   value: unknown,
   keys: string[],
   where: string,
   code = 'invalid_channel_contract',
 ): void {
-  if (!isPlainObject(value)) fail(code, `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail(code, `${where}: ожидался объект.`);
 
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -309,7 +302,7 @@ function validateNow(value: unknown): number {
 }
 
 function validateChannelCapability(source: unknown): ChannelMeta {
-  if (!isPlainObject(source)) {
+  if (!isPlainRecord(source)) {
     fail('invalid_channel_contract', 'Channel capability должен быть объектом.');
   }
 
@@ -434,7 +427,7 @@ function validateBatch(source_: unknown, index: number, { channel, accountRef, e
 }
 
 function validateContext(source: unknown, meta: ChannelMeta): InboxLease {
-  if (!isPlainObject(source)) {
+  if (!isPlainRecord(source)) {
     fail('invalid_channel_context', `Channel ${meta.id} не выдал context.`);
   }
 
@@ -684,7 +677,7 @@ export class InboxCoordinator {
   async _rawState(meta: ChannelMeta): Promise<Payload> {
     const raw = await meta.capability.state();
 
-    if (!isPlainObject(raw)) {
+    if (!isPlainRecord(raw)) {
       fail('invalid_channel_state', `Channel ${meta.id} state() вернул не объект.`);
     }
 

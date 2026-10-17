@@ -1,5 +1,5 @@
 import { dbApi } from '../../shared/dbApi.ts';
-import type { DbResult } from '../../../../shared/dbContracts.ts';
+import type { DbResult } from '../../../../shared/plugins/db/dbContracts.ts';
 import { useDbStore } from '../../stores/db.ts';
 
 /**

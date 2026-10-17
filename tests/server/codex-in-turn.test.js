@@ -93,6 +93,7 @@ test('Codex: уточнение доходит в активный ход и н�
   const assistant = [];
   let port = null;
   let settled = false;
+  let answerBeforeFinal = false;
   let releasePort;
 
   const portReady = new Promise((resolve) => {
@@ -108,6 +109,12 @@ test('Codex: уточнение доходит в активный ход и н�
     },
     onAssistantMessage(event) {
       assistant.push(event);
+
+      // Порядок фиксируется при доставке, а не после следующего опроса таймера:
+      // ответ и финал могут прийти в одном чтении stdout.
+      if (event.complete && event.assistantMessageId === 'steer-answer-1') {
+        answerBeforeFinal = !settled;
+      }
     },
   })).finally(() => { settled = true; });
 
@@ -127,7 +134,6 @@ test('Codex: уточнение доходит в активный ход и н�
     () => assistant.find((event) => event.complete && event.text.includes('Отвечаю на уточнение')),
     'ответ на уточнение до финала',
   );
-  const answerBeforeFinal = !settled;
 
   assert.equal(answer.assistantMessageId, 'steer-answer-1');
   assert.match(answer.text, /Почему начал с первого файла\?/);
@@ -135,6 +141,11 @@ test('Codex: уточнение доходит в активный ход и н�
   const result = await run;
 
   assert.match(String(result.reply), /Второй файл проверен/);
+  assert.ok(
+    assistant.findIndex((event) => event.complete
+      && event.assistantMessageId === 'answer-after-steer') > assistant.indexOf(answer),
+    'завершённый ответ на уточнение доставлен раньше завершённого итогового блока',
+  );
 
   const trace = await readTrace(f.trace);
   const clientMethods = trace

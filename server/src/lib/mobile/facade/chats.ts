@@ -1,10 +1,12 @@
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import type { MobileApp } from '../mobileServer.ts';
 import { decodeChat, decodeChats, decodeContract } from '../contract.ts';
 import type { ChatProvider, ChatSummary, MobileMessage } from '../contract.ts';
 import { getProviderAdapters } from '../../executors/index.ts';
 import { MobileChatTurns } from '../chatTurns.ts';
 import { MobileInputError } from '../errors.ts';
-import { count, paginate, record, resourceId, text, upstream } from './common.ts';
+import { count, paginate, resourceId, text, upstream } from './common.ts';
 import type { FacadeDeps, Payload } from './common.ts';
 import { collectMedia, splitMessageParts } from './messageParts.ts';
 import { chatActivity } from './chatActivity.ts';
@@ -32,17 +34,17 @@ function summary(
   providers: Map<string, ChatProvider>,
 ): ChatSummary {
   const id = resourceId(chat.id);
-  const runs = Array.isArray(active.active) ? active.active.map(record) : [];
-  const queued = Array.isArray(active.queued) ? active.queued.map(record) : [];
-  const pending = Array.isArray(waiting.waiting) ? waiting.waiting.map(record) : [];
-  const provider = providers.get(String(record(chat.modelRef).provider || ''));
+  const runs = Array.isArray(active.active) ? active.active.map(recordOrEmpty) : [];
+  const queued = Array.isArray(active.queued) ? active.queued.map(recordOrEmpty) : [];
+  const pending = Array.isArray(waiting.waiting) ? waiting.waiting.map(recordOrEmpty) : [];
+  const provider = providers.get(String(recordOrEmpty(chat.modelRef).provider || ''));
 
   return {
     id,
     title: text(chat.title || (chat.purpose === 'companion' ? 'Компаньон' : 'Разговор'), 800),
     updatedAt: timestamp(chat.updatedAt),
     taskId: chat.taskId == null ? null : String(chat.taskId),
-    model: text(chat.model || record(chat.modelRef).model, 200),
+    model: text(chat.model || recordOrEmpty(chat.modelRef).model, 200),
     ...(normalizeModelRef(chat.modelRef) ? { modelRef: normalizeModelRef(chat.modelRef)! } : {}),
     unread: chat.unread === true,
     state: runs.some((run) => run.chatKey === id)
@@ -72,7 +74,7 @@ function isLiveCompanion(chat: Payload) {
  */
 function messagePage(chat: Payload, query: Payload) {
   const revision = Number(chat.revision || 0);
-  const all = Array.isArray(chat.messages) ? chat.messages.map(record) : [];
+  const all = Array.isArray(chat.messages) ? chat.messages.map(recordOrEmpty) : [];
   const before = count(query.before, all.length, all.length);
   const limit = count(query.limit, 30);
 
@@ -148,7 +150,7 @@ export function registerChatRoutes(app: MobileApp, deps: FacadeDeps) {
     const waiting = await upstream(deps, 'GET', '/api/chat/waiting');
     const providers = await chatProviders();
     const chats = heads
-      .map((chat) => summary(record(chat), active, waiting, providers))
+      .map((chat) => summary(recordOrEmpty(chat), active, waiting, providers))
       .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
     const page = paginate(chats, request.query);
 
@@ -171,10 +173,10 @@ export function registerChatRoutes(app: MobileApp, deps: FacadeDeps) {
 
     const active = await upstream(deps, 'GET', '/api/chat/active');
     const waiting = await upstream(deps, 'GET', '/api/chat/waiting');
-    const run = (Array.isArray(active.active) ? active.active.map(record) : []).find(
+    const run = (Array.isArray(active.active) ? active.active.map(recordOrEmpty) : []).find(
       (item) => item.chatKey === id,
     );
-    const queued = (Array.isArray(active.queued) ? active.queued.map(record) : [])
+    const queued = (Array.isArray(active.queued) ? active.queued.map(recordOrEmpty) : [])
       .filter((item) => item.chatKey === id)
       .map((item) => String(item.turnId))
       .sort();

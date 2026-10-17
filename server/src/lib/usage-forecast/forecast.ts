@@ -5,7 +5,7 @@ import type {
   ObservedReset,
   ResetOrigin,
   UsageBarForecast,
-} from '../../../../shared/usageForecastContracts.ts';
+} from '../../../../shared/chat/usageForecastContracts.ts';
 
 // Один замер полосы: момент чтения у вендора, процент и срок сброса окна (epoch ms).
 export interface UsageSample {

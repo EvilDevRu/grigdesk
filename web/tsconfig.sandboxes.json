@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/sandboxContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/sandboxes/sandboxContracts.ts",
     "src/actions/sandboxes/**/*.ts",
     "src/stores/sandboxes.ts",
     "src/shared/sandboxApi.ts",

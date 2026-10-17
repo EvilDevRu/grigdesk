@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { RouteRevision } from '../../../../shared/routesContracts.ts';
+import type { RouteRevision } from '../../../../shared/pipeline/routesContracts.ts';
 import { UiButton, UiSelect } from '../../ui';
 
 const props = defineProps<{ revisions: RouteRevision[]; busy: boolean }>();

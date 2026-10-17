@@ -1,6 +1,6 @@
 import {
   ROUTES_EDITOR_LIMITS, ROUTES_LOOP_DEFAULT_MAX_ROUNDS, routeSimulationStepLimit,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import type { RouteSimulationObservation } from '../../stores/routes.ts';

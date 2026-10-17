@@ -7,7 +7,7 @@ import {
   base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
-import { STEP_IMAGE_TEXT } from '../../../../shared/chatSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
 
 // Rich fileChange у app-server может содержать сотни файлов и мегабайты unified
 // diff. Шаг одновременно уходит в SSE и историю, поэтому лимитируем сам контракт,

@@ -1,6 +1,6 @@
 import { api, failureText } from '../../shared/apiClient.ts';
 import { useUsageForecastStore } from '../../stores/usageForecast.ts';
-import { parseUsageForecastSnapshot } from '../../../../shared/usageForecastContracts.ts';
+import { parseUsageForecastSnapshot } from '../../../../shared/chat/usageForecastContracts.ts';
 
 /**
  * Свежий снимок прогноза. Проверка формы не формальность: по вердикту человек решает,

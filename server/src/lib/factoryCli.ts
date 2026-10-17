@@ -2,7 +2,7 @@
 // Cockpit меняет попытку только через exact route commands единственного движка.
 import fs from 'node:fs';
 import path from 'node:path';
-import { JOURNAL_FRESH_SEC } from '../../../shared/agentActivity.ts';
+import { JOURNAL_FRESH_SEC } from '../../../shared/pipeline/agentActivity.ts';
 import { readProcessIdentity } from './speech/modelJobsProcess.ts';
 import { parseStagesLog } from './stagesParse.ts';
 

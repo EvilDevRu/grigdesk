@@ -32,7 +32,7 @@ Timeout 30000ms exceeded… waiting for locator('button[role="combobox"]:has(svg
    ней — одна сцена. Экран `page:…` без прежнего отчёта восстанавливается из адреса
    (`screenFromPageId`, готовность `body`). Права не расширены: найденное остаётся read-only.
    В списке сцен такой экран подписан «страница /…» (`sceneText.ts` `screenLabelOf`).
-   Живой прогон на 8702 (`.state/artifacts/showcase-8702/discover/rehearse-dry-run.mts`, карта
+   Живой прогон на 8702 (`~/.cockpit/artifacts/showcase-8702/discover/rehearse-dry-run.mts`, карта
    без экрана настроек): клик «Настройки проекта» → `page:/389/settings` (34 элемента), клик
    «Частота» → `page:/389/settings/volume` (68 элементов, сводка найдена), голова сцены на нём +
    продолжение — completed; у <PROFILE> нет h1–h3, готовность вышла `main, [role=main]`.

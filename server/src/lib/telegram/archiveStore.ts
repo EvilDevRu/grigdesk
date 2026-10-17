@@ -21,6 +21,8 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 
+import { errorText } from '../../../../shared/lib/errors.ts';
+
 type Payload = Record<string, unknown>;
 
 // Сообщение в том виде, в каком его дописывает архив. Полный контракт живёт в
@@ -81,7 +83,6 @@ interface ChatMeta {
 type LogPort = { warn?: (details: unknown, message: string) => void };
 
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const NL = 0x0a;
 const POSITION_KEYS = [

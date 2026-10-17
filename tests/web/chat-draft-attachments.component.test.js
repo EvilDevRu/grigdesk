@@ -7,7 +7,7 @@ import { compileChatSession } from './helpers/chat-session.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 
 const PREFIX = '__draftAttachments';
 const MODEL = {

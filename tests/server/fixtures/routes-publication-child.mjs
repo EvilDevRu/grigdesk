@@ -10,7 +10,10 @@ const store = new RoutesStore({ baseDir: config.routesDir });
 const drafts = new DraftStore({ baseDir: config.authoringDir, routesStore: store });
 const coordinator = new RoutesPublicationCoordinator(store, drafts, config.profilesDir);
 
+// Неразрешённый Promise сам не удерживает процесс: после доставки сообщения child
+// должен оставаться на барьере до SIGKILL родителя, поэтому IPC-канал остаётся активным.
 async function barrier(name) {
+  process.channel?.ref();
   process.send?.({ type: 'barrier', stage: name });
   await new Promise(() => {});
 }

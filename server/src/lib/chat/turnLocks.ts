@@ -1,6 +1,8 @@
 // Сериализация ходов одновременно по chatKey и provider/sessionId. Два разных чата,
 // ошибочно связанных с одной provider-сессией, не могут продолжить её параллельно.
 
+import { trimmedText } from '../../../../shared/lib/text.ts';
+
 // Что сериализуем: чат и, если известна, provider-сессия того же хода.
 export interface TurnScope {
   chatKey?: unknown;
@@ -8,16 +10,11 @@ export interface TurnScope {
   sessionId?: unknown;
 }
 
-function clean(value: unknown): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text || '';
-}
-
 export function turnLockKeys({ chatKey, provider, sessionId }: TurnScope = {}): string[] {
   const keys: string[] = [];
-  const chat = clean(chatKey);
-  const prov = clean(provider);
-  const session = clean(sessionId);
+  const chat = trimmedText(chatKey);
+  const prov = trimmedText(provider);
+  const session = trimmedText(sessionId);
   if (chat) keys.push(`chat:${chat}`);
   if (prov && session) keys.push(`session:${prov}:${session}`);
   return [...new Set(keys)].sort();

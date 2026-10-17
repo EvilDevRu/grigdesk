@@ -5,8 +5,8 @@ import type { NativeSettingsContext, NativeSettingsOwnership, NativeSettingsSnap
 import type { NativeSettingsEvidence, PreparedNativeSettings } from './types.ts';
 import { startDeepSeekAcpSettings } from '../deepseek/nativeSettingsRpc.ts';
 import type { DeepSeekSettingsRpc } from '../deepseek/nativeSettingsRpc.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
-import type { SettingsConsumer } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
+import type { SettingsConsumer } from '../../../../shared/chat/providerSettingsContracts.ts';
 import { settingsFingerprint } from './fingerprint.ts';
 import fs from 'node:fs/promises';
 import os from 'node:os';

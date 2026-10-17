@@ -8,6 +8,8 @@
 //   transcribe.py  — faster-whisper, JSON с тайм-кодами
 //   ffmpeg → jpg   — (опц.) кадры по смене сцены (показанные на экране страницы/макеты)
 
+import os from 'node:os';
+import { dataHome, dataPath } from '../../../../shared/runtime/dataHome.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -195,7 +197,7 @@ export const DEFAULT_TRANSCRIBE_PY = process.env.COCKPIT_TRANSCRIBE_PY
     || fileURLToPath(new URL('./transcribe.py', import.meta.url));
 export const DEFAULT_WORKER_PATH = fileURLToPath(new URL('./ingestWorker.ts', import.meta.url));
 export const DEFAULT_MEDIA_HF_DIR = process.env.COCKPIT_MEDIA_HF_DIR
-    || fileURLToPath(new URL('../../../.state/hf/', import.meta.url));
+    || dataPath(dataHome({ env: process.env, home: os.homedir() }), 'mediaHf');
 
 /**
  * Promisified spawn: собирает stdout/stderr, реджектит при ненулевом коде.

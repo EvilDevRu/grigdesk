@@ -3,8 +3,8 @@ import { constants, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { normalizeChatWorkdir } from '../../../../shared/chatWorkdir.ts';
-import type { ChatWorkdir, WorkdirCapability } from '../../../../shared/chatWorkdir.ts';
+import { normalizeChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
+import type { ChatWorkdir, WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
 import { projectRepos, readProjectRecord, isProjectArchived } from '../projects.ts';
 import { listProjects } from '../profiles.ts';
 import { parseSandboxRepositories } from '../sandboxEnv.ts';

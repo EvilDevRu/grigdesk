@@ -1,4 +1,4 @@
-import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -28,7 +28,7 @@ import type {
   InTurnAssistantEvent,
   InTurnPort,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import { KIMI_MODELS } from './profile.ts';
 import { inspectKimiRuntimeHost } from './runtimePreflight.ts';
 import {

@@ -131,14 +131,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 
-import { githubApi, githubErrorMessage, githubPluginDisabled } from '../shared/githubApi.ts';
+import { errorMessage } from '../../../shared/lib/errors.ts';
+
+import { githubApi, githubPluginDisabled } from '../shared/githubApi.ts';
 import type {
   GitHubPolicy,
   GitHubRule,
   GitHubRuleAutoTask,
   GitHubRuleInput,
   GitHubStatus,
-} from '../../../shared/githubContracts.ts';
+} from '../../../shared/inbox/githubContracts.ts';
 import {
   UiButton,
   UiCheckbox,
@@ -284,7 +286,7 @@ async function load(): Promise<void> {
       rules.value = [];
       error.value = '';
     } else {
-      error.value = githubErrorMessage(err, 'Не удалось прочитать состояние GitHub.');
+      error.value = errorMessage(err, 'Не удалось прочитать состояние GitHub.');
     }
   } finally {
     loading.value = false;
@@ -313,7 +315,7 @@ async function connect(): Promise<void> {
     notice.value = 'Репозиторий проверен; ожидаю signed ping от webhook.';
     await load();
   } catch (err) {
-    error.value = githubErrorMessage(err, 'GitHub не принял подключение.');
+    error.value = errorMessage(err, 'GitHub не принял подключение.');
   } finally {
     busy.value = '';
   }
@@ -337,7 +339,7 @@ async function recheck(): Promise<void> {
     notice.value = 'Состояние GitHub перепроверено.';
     await load();
   } catch (err) {
-    error.value = githubErrorMessage(err, 'Перепроверка GitHub не выполнена.');
+    error.value = errorMessage(err, 'Перепроверка GitHub не выполнена.');
   } finally {
     busy.value = '';
   }
@@ -366,7 +368,7 @@ async function disconnect(): Promise<void> {
     notice.value = 'GitHub отключён.';
     await load();
   } catch (err) {
-    error.value = githubErrorMessage(err, 'Отключение GitHub не завершено.');
+    error.value = errorMessage(err, 'Отключение GitHub не завершено.');
   } finally {
     busy.value = '';
   }
@@ -435,7 +437,7 @@ async function saveRules(nextRules: GitHubRuleInput[]): Promise<void> {
     notice.value = nextRules.length ? 'Репозиторий допущен в Inbox.' : 'Allowlist GitHub пуст.';
     await loadRules();
   } catch (err) {
-    error.value = githubErrorMessage(err, 'Правило GitHub не сохранено.');
+    error.value = errorMessage(err, 'Правило GitHub не сохранено.');
   } finally {
     busy.value = '';
   }
@@ -502,7 +504,7 @@ async function changeAgentSearch(event: Event): Promise<void> {
  * могло не примениться, а если не читается и это — состояние неизвестно.
  */
 async function reportAmbiguousAgentSearch(failure: unknown, enabled: boolean): Promise<void> {
-  const mutationMessage = githubErrorMessage(failure, 'Ответ изменения доступа не получен.');
+  const mutationMessage = errorMessage(failure, 'Ответ изменения доступа не получен.');
 
   try {
     await readRulesSnapshot();
@@ -535,7 +537,7 @@ async function reportAmbiguousAgentSearch(failure: unknown, enabled: boolean): P
     rulesLoaded.value = true;
     notice.value = '';
     error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
-      + `${githubErrorMessage(refreshError, 'правила не удалось перечитать')}`;
+      + `${errorMessage(refreshError, 'правила не удалось перечитать')}`;
   }
 }
 

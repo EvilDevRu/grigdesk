@@ -1,10 +1,10 @@
 import {
   parseRouteTransferBundle, RoutesEditorContractError,
-} from '../../../../shared/routesEditorContracts.ts';
-import type { RouteTransitionDoc } from '../../../../shared/routeDefinition.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteTransitionDoc } from '../../../../shared/pipeline/routeDefinition.ts';
 import type {
   DraftOperation, RouteDraft, RouteDraftContent, RouteTransferBundle,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
 

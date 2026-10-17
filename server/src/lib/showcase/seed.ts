@@ -11,6 +11,8 @@
 // Разрешение привязано к отпечатку стенда и ревизии самого скрипта. Смена любого
 // из них делает его недействительным: подтверждали конкретный рецепт на конкретном
 // стенде, а не «подготовку данных вообще».
+import { config as runtimeConfig } from '../../config.ts';
+
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -181,6 +183,7 @@ export async function runSeed(input: RunSeedInput): Promise<SeedOutcome> {
         // Окружение — короткий явный список. Ключи, токены и адреса поставщиков
         // хуку не нужны, а унаследованное окружение сервера содержит их все.
         env: {
+          COCKPIT_HOME: runtimeConfig.dataHome,
           PATH: process.env.PATH ?? '',
           HOME: process.env.HOME ?? '',
           SHOWCASE_TASK: task,

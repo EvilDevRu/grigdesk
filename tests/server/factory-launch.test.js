@@ -6,12 +6,14 @@ import { routeStartArgs, stageAutoCompactEnv } from '../../server/src/lib/factor
 
 test('Cockpit passes every factory runtime root into the detached pipeline scope', () => {
   assert.deepEqual(factoryLaunchEnv({
+    dataHome: '/data/cockpit',
     factoryHome: '/engine',
     profilesDir: '/profiles',
     stateDir: '/state',
     factoryConfigRoot: '/config',
   }, { FACTORY_SB_K: '7' }), {
     FACTORY_SB_K: '7',
+    COCKPIT_HOME: '/data/cockpit',
     FACTORY_HOME: '/engine',
     FACTORY_PROFILES_DIR: '/profiles',
     FACTORY_STATE: '/state',

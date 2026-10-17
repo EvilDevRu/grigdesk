@@ -20,7 +20,7 @@ Kimi. Выключение не расширяет contained-сеть; оно в
 Что осознанно отключается относительно contained:
 
 - mount/pid/net namespace изоляция и маски control state: процесс видит host FS целиком,
-  включая `~/.factory`, `server/.state`, токены окружения сервера (как claude);
+  включая `~/.factory`, всю папку данных, токены окружения сервера (как claude);
 - egress allowlist: сеть прямая (как у claude/codex);
 - cgroup-лимиты (CPU/memory/RuntimeMaxSec): остаётся chat watchdog модуля;
 - per-chat KIMI_CODE_HOME и broker config: host config/skills/plugins/hooks/MCP
@@ -90,9 +90,11 @@ Preflight повторяется на каждой машине; его резу
   иначе читался бы напрямую и мог объявить workspace-ом, например, `/kimi-home`.
   Доверенный каталог, СОДЕРЖАЩИЙ server-owned control state (например, общий
   родитель репозитория cockpit), не отклоняется: он монтируется, а control state
-  внутри (kimi home, runtime/broker профиль, factory state/control, `chats/` с
-  `.bindings`, `server/.state`, `.env`) прячется пустым read-only mount-ом поверх —
+  внутри (kimi home, runtime/broker профиль, factory state/control, вся папка данных
+  и отдельно заданный `.env`) прячется пустым read-only mount-ом поверх —
   ни чтение токенов в контекст, ни порча session/bindings/wrapper невозможны.
+  Старые настоящие каталог `server/.state` и файл `.env` также маскируются;
+  совместимые символические ссылки не добавляются как отдельные маски.
   Отклоняются только системные корни и сам control state как отдельный extra;
 - Kimi получает заново построенные `HOME`, XDG и `KIMI_CODE_HOME`; provider, SSH, Git, npm/cloud
   credentials и host config/plugins/MCP/skills не наследуются;

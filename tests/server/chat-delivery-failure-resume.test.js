@@ -86,30 +86,80 @@ function startTurn(app, chatKey) {
 
 /** Исполнитель, чей ход закончился сообщением самого CLI: модель ответить не успела. */
 function cutExecutor() {
-  const steps = [{ k: 'text', text: 'работаю', at: 1 }];
+  const steps = [{
+    k: 'text',
+    text: 'работаю',
+    at: 1,
+  }];
+
   return {
     id: 'claude',
     async run(options) {
       await options.onSessionCreated?.('sess-cut');
-      for (const step of steps) options.onStep?.(step);
-      return { reply: CLI_SAID, sessionId: 'sess-cut', steps, deliveryFailure: true };
+
+      for (const step of steps) {
+        options.onStep?.(step);
+      }
+
+      return {
+        reply: CLI_SAID,
+        sessionId: 'sess-cut',
+        steps,
+        deliveryFailure: true,
+      };
     },
   };
 }
 
-test('обрыв CLI: ответ помечен меткой прерывания, несёт ленту и сессию', async (t) => {
+test('обрыв CLI: ответ называет причину, несёт ленту и сессию', async (t) => {
   const { app } = await apiFixture(t, { executor: cutExecutor() });
   await saveChat(app, 'cut-chat');
 
   const result = await startTurn(app, 'cut-chat');
   assert.equal(result.statusCode, 200);
   const body = result.json();
-  assert.equal(body.interruptedBy, 'delivery_failure', 'по метке окно рисует «Продолжить ход»');
+  // Текст этого сбоя — недельный лимит: причина не пройдёт сама, поэтому автоматика
+  // отказывается, а ручной кнопки нет. Сессия при этом сохранена и названа честно.
+  assert.equal(body.interruptedBy, undefined, 'лимит не даёт кнопки продолжения');
   assert.equal(body.deliveryFailure, true);
-  assert.equal(body.sessionId, 'sess-cut', 'продолжение возможно только по сохранённой сессии');
+  assert.equal(body.sessionId, 'sess-cut', 'разговор сохранён и назван');
   assert.equal(body.steps.length, 1, 'лента оборванного хода сохранена');
   assert.match(body.reply, /оборвал сам CLI/);
   assert.ok(body.reply.includes(CLI_SAID), 'слова CLI процитированы, а не выдуманы');
+  assert.match(body.reply, /Сам не продолжаю/u, 'причина отказа названа человеку');
+  assert.equal(body.reply.includes('«Продолжить ход»'), false, 'кнопки нет — и текста нет');
+});
+
+test('обрыв CLI по сети: метка прерывания и ручная кнопка на месте', async (t) => {
+  const steps = [{
+    k: 'text',
+    text: 'работаю',
+    at: 1,
+  }];
+  const executor = {
+    id: 'claude',
+    async run(options) {
+      await options.onSessionCreated?.('sess-net');
+
+      for (const step of steps) {
+        options.onStep?.(step);
+      }
+
+      return {
+        reply: 'API Error: Connection error.',
+        sessionId: 'sess-net',
+        steps,
+        deliveryFailure: true,
+      };
+    },
+  };
+  const { app } = await apiFixture(t, { executor });
+
+  await saveChat(app, 'net-chat');
+
+  const body = (await startTurn(app, 'net-chat')).json();
+
+  assert.equal(body.interruptedBy, 'delivery_failure', 'по метке окно рисует «Продолжить ход»');
   assert.match(body.reply, /«Продолжить ход»/, 'текст ведёт к кнопке окна');
   assert.match(body.reply, /«Продолжай»/, 'каналу без кнопки (Telegram) остаётся слово');
 });

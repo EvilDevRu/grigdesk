@@ -30,7 +30,12 @@ export interface AlertLinkDeps {
  * Чат использует тот же query-контракт, что и щелчок по системному уведомлению.
  */
 export function openAlertTarget(target: AlertTarget, deps: AlertLinkDeps): void {
-  if (target.kind === 'task') {
+  if (target.kind === 'studio') {
+    void deps.router.push({
+      path: '/3d',
+      query: { model: target.modelId, version: target.versionId }
+    });
+  } else if (target.kind === 'task') {
     deps.ui.openTask(target.taskId);
   } else if (target.kind === 'chat') {
     void deps.router.push({

@@ -4,13 +4,10 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { trimmedText } from '../../../../shared/lib/text.ts';
+
 import { resolveModelRef } from '../chat/modelRef.ts';
-import {
-  boundedText,
-  exactKeys,
-  jsonCandidates,
-  modelText,
-} from '../modelJson.ts';
+import { boundedText, exactKeys, jsonCandidates } from '../modelJson.ts';
 import { getExecutor } from '../executors/index.ts';
 import { getModelsRegistry } from '../modelsRegistry.ts';
 import { inboxTranscript, visibleInboxMessages, INBOX_DRAFT_LIMITS } from './draft.ts';
@@ -189,7 +186,7 @@ const VISUAL_MEDIA_TYPES = Object.freeze(new Map([
 ]));
 // Разбор ответа модели общий с разбором встречи (lib/media/meetingPlan.ts):
 // формат ответа один, и вторая копия этих проверок разошлась бы с первой.
-const text = modelText;
+const text = trimmedText;
 const bounded = boundedText;
 
 function clamp(value: unknown, limit: number): string {
@@ -200,7 +197,6 @@ function clamp(value: unknown, limit: number): string {
 
   return `${result.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
-
 
 export function normalizeInboxTriageModel(value: unknown): InboxTriageModelRef | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

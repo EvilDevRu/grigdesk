@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const helper = path.join(root, 'bin', 'lib', 'install-choices.sh');
+const helper = path.join(root, 'deploy', 'lib', 'install-choices.sh');
 
 // Задаёт оба вопроса и печатает решения одной строкой.
 // Строки одинарные: в шаблоне JS подставил бы shell-раскрытие ${…} как своё выражение.

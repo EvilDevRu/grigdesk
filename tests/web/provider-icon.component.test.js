@@ -22,6 +22,7 @@ const MARKED = [
   { id: 'kimi', name: 'Kimi' },
   { id: 'deepseek', name: 'DeepSeek' },
   { id: 'glm', name: 'GLM (Z.ai)' },
+  { id: 'tripo', name: 'Tripo' },
 ];
 
 async function compileIcon() {
@@ -133,4 +134,20 @@ test('знак glm — официальный знак Z.ai с заливкой 
   assert.equal(svg.attributes('fill'), 'currentColor');
   assert.equal(svg.attributes('stroke'), undefined);
   assert.equal(svg.find('path').attributes('d'), ZAI_MARK);
+});
+
+test('Tripo рисует оба контура оригинала, цвет текста и скрыт от accessibility tree', async (t) => {
+  const wrapper = await mountIcon(t, { id: 'tripo', name: 'Tripo' }, 15);
+  const svg = wrapper.get('svg');
+
+  assert.equal(svg.attributes('fill'), 'currentColor');
+  assert.equal(svg.attributes('aria-hidden'), 'true');
+  assert.equal(svg.findAll('path').length, 2);
+
+  const notice = await readFile(new URL('../../web/public/third-party-notices.txt', import.meta.url), 'utf8');
+
+  assert.match(notice, /packages\/static-svg\/icons\/tripo.svg/);
+  assert.match(notice, /c385b2b8d1f9e19aa86e628d4e23c91ee1111a47/);
+  assert.match(notice, /Copyright \(c\) 2023 LobeHub/);
+  assert.match(notice, /THE SOFTWARE IS PROVIDED "AS IS"/);
 });

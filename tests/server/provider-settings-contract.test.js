@@ -5,7 +5,7 @@ import {
   decodeProviderSettingsCatalog,
   decodeProviderSettingsOverrideRequest,
   decodeSettingsValueSlot,
-} from '../../shared/providerSettingsContracts.ts';
+} from '../../shared/chat/providerSettingsContracts.ts';
 
 import catalog from '../fixtures/executor-settings/synthetic-catalog.json' with { type: 'json' };
 

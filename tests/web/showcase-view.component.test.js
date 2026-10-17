@@ -50,7 +50,7 @@ export const promptDialog = async (options) => {
 `;
 
 const ACTIONS_STUB = `
-import { showcaseSourceEqual } from '${webFile('../shared/showcaseContracts.ts')}';
+import { showcaseSourceEqual } from '${webFile('../shared/plugins/showcase/showcaseContracts.ts')}';
 const harness = () => globalThis.__showcaseViewHarness;
 export const useShowcaseStore = () => harness().store;
 export const watchShowcase = () => {

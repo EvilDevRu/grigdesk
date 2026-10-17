@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeDraft } from '../fixtures/routes-editor.mjs';
-import { parseRouteDraft } from '../../shared/routesEditorContracts.ts';
+import { parseRouteDraft } from '../../shared/pipeline/routesEditorContracts.ts';
 import { toRuntimeCatalogInput } from '../../server/src/modules/routes/draftModel.ts';
 import { removeNodes } from '../../web/src/views/routes/routeCommands.ts';
 import { compileVue, webFile } from './helpers/compile-vue.js';

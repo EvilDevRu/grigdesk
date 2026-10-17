@@ -1,7 +1,7 @@
 import type {
   InTurnAssistantBlock,
   InTurnAssistantEvent,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type { ChatAssistantMessages } from './assistantMessages.ts';
 
 interface AssistantPublisherOptions {
@@ -23,6 +23,9 @@ export class ChatAssistantPublisher {
 
   private readonly errors = new Map<string, Error>();
 
+  // Запуски, чей конец уже начался: их поздние черновики не заводят открытых блоков.
+  private readonly closed = new Set<string>();
+
   constructor({ messages, nextSequence, onMessage }: AssistantPublisherOptions) {
     this.messages = messages;
     this.nextSequence = nextSequence;
@@ -30,10 +33,18 @@ export class ChatAssistantPublisher {
   }
 
   /**
-   * Каждый callback регистрируется до возврата адаптеру, даже если тот его не ждёт.
-   * Ошибка уже завершённой записи остаётся доступной барьеру финализации.
+   * Каждый callback идущего запуска регистрируется до возврата адаптеру, даже если тот его
+   * не ждёт; ошибка уже завершённой записи остаётся доступной барьеру финализации.
+   * Callback закрытого запуска не регистрируется: черновик после конца хода идёт обрывом,
+   * готовый текст принимается, а ошибку отдать уже некому.
    */
   publish(runId: string, chatKey: string, event: InTurnAssistantEvent): Promise<void> {
+    if (this.closed.has(runId)) {
+      const late = event.complete ? event : { ...event, abandoned: true };
+
+      return this.writeMessage(runId, chatKey, late).catch(() => {});
+    }
+
     const job = this.writeMessage(runId, chatKey, event);
     const jobs = this.writes.get(runId) || new Set<Promise<void>>();
 
@@ -73,29 +84,58 @@ export class ChatAssistantPublisher {
   }
 
   /**
-   * Запуск окончен: после его конца адаптер ничего не допишет. Ждём начатые записи и
-   * бросаем все незакрытые черновики, чтобы ни у одного исполнителя не залип «Пишет…».
-   * Ошибки записи здесь не поднимаются — их отдаёт `flush` успешного финала.
+   * Закрывает недописанные блоки запуска, НЕ снимая карты записей и ошибок: их читает
+   * барьер финала и обычный `flush`. Отметку «запуск закрыт» здесь НЕ ставим: ход ещё
+   * жив, и следующая попытка того же запуска обязана завести свой блок.
    */
-  async settleRun(runId: string): Promise<void> {
+  async abandonOpen(runId: string): Promise<void> {
     const jobs = this.writes.get(runId);
 
     if (jobs?.size) {
       await Promise.allSettled([...jobs]);
     }
 
-    this.writes.delete(runId);
-    this.errors.delete(runId);
+    for (const { assistantMessageId } of this.messages.byRun(runId)) {
+      // Свежая запись, а не снимок цикла: поздний обрыв мог уже закрыть блок.
+      const block = this.messages.get(runId, assistantMessageId);
 
-    for (const block of this.messages.byRun(runId)) {
-      if (block.complete || block.abandoned) {
+      if (!block || block.complete || block.abandoned) {
         continue;
       }
 
-      const abandoned = await this.messages.abandon(runId, block.assistantMessageId);
+      const abandoned = await this.messages.abandon(runId, assistantMessageId);
 
       if (abandoned) {
         this.onMessage(abandoned);
+      }
+    }
+  }
+
+  /**
+   * Запуск окончен: после его конца адаптер ничего не допишет. Отметка ставится до первого
+   * await — публикация во время ожидания записей уже поздняя. Ждём начатые записи и бросаем
+   * незакрытые черновики, чтобы ни у одного исполнителя не залип «Пишет…».
+   * Ошибки записи здесь не поднимаются — их отдаёт `flush` успешного финала.
+   */
+  async settleRun(runId: string): Promise<void> {
+    this.markClosed(runId);
+    await this.abandonOpen(runId);
+    this.writes.delete(runId);
+    this.errors.delete(runId);
+  }
+
+  /**
+   * Память о закрытых запусках ограничена: поздний колбэк приходит сразу после конца хода,
+   * а не через сотни ходов, поэтому старейшую отметку можно забыть.
+   */
+  private markClosed(runId: string): void {
+    this.closed.add(runId);
+
+    if (this.closed.size > 500) {
+      const oldest = this.closed.values().next().value;
+
+      if (oldest !== undefined) {
+        this.closed.delete(oldest);
       }
     }
   }

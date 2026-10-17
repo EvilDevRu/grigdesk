@@ -18,7 +18,7 @@ import {
   parseProjectDetail,
   parseProjectSummaries,
   parseProjectsError,
-} from '../../shared/projectsContracts.ts';
+} from '../../shared/runtime/projectsContracts.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

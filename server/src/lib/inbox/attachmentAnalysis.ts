@@ -5,10 +5,12 @@
 // файлов они не попадают: наружу выходят лишь производный текст, безопасные пути
 // локальных визуальных артефактов и человекочитаемые статусы.
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
+
+import { sha256 } from '../../../../shared/node/hash.ts';
 
 import { skipReasonText } from './skipReason.ts';
 
@@ -169,10 +171,6 @@ const TEXT_EXTENSIONS = new Set([
 // Чужая ошибка своего типа не обещает: код читается мягко, а решение по нему
 // принимается уже своё.
 const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code;
-
-function sha256(value: string | Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
-}
 
 function scalar(value: unknown): Scalar {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {

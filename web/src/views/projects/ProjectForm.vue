@@ -220,14 +220,14 @@ import {
   UiInput,
   UiTextarea,
 } from '../../ui';
-import { validateProjectInput } from '../../../../shared/projectsContracts';
+import { validateProjectInput } from '../../../../shared/runtime/projectsContracts';
 import { toInput } from './projectDraft';
 import ProjectProfileStatus from './ProjectProfileStatus.vue';
 import ProjectRepoRows from './ProjectRepoRows.vue';
 import type {
   ProjectDependencies,
   ProjectDetail,
-} from '../../../../shared/projectsContracts';
+} from '../../../../shared/runtime/projectsContracts';
 import type { ProjectDraft } from './projectDraft';
 import type { UiTextValue } from '../../ui';
 

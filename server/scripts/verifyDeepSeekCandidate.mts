@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { buildDeepSeekRuntime } from '../../tools/buildDeepSeekRuntime.mts';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -13,7 +15,7 @@ if (vendorIndex < 0 || !args[vendorIndex + 1]) {
   throw new Error('Candidate gate требует --vendor-dir');
 }
 
-const parent = path.join(repositoryRoot, '.state/artifacts/deepseek-vendoring/gates');
+const parent = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'deepseek-vendoring/gates');
 
 await fs.mkdir(parent, { recursive: true });
 

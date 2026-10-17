@@ -31,7 +31,7 @@ import {
   SANDBOX_ACTION_ID_RE,
   SANDBOX_TASK_RE,
   toSandboxJob,
-} from '../../../../shared/sandboxContracts.ts';
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 import type {
   SandboxActionResponse,
   SandboxEntry,
@@ -39,7 +39,7 @@ import type {
   SandboxJournalRecord,
   SandboxOverview,
   SandboxProfile,
-} from '../../../../shared/sandboxContracts.ts';
+} from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
 import {
   fileExists,
   hasPipelineRegistry,

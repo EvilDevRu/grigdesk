@@ -12,7 +12,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import type { ShowcaseTiming } from '../../../../../shared/showcaseContracts.ts';
+import type { ShowcaseTiming } from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { ShowcaseError } from '../errors.ts';
 import type { RenderStyle } from '../artifacts.ts';
 import type { ExactSyncPlan } from './syncPlan.ts';

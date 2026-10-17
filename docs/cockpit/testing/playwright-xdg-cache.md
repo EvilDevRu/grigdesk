@@ -13,3 +13,6 @@
 Что делать: если перенаправляешь `XDG_CACHE_HOME`, задавай рядом `PLAYWRIGHT_BROWSERS_PATH`
 на общий кэш браузеров (читать его можно и при `$HOME` только для чтения). Отказ с этим
 текстом — окружение, не регрессия; браузеры ради него не доустанавливай.
+
+Обёртка Electron-проверок `tests/desktop/e2e/isolated-session.sh` подменяет HOME и XDG и
+поэтому задаёт `PLAYWRIGHT_BROWSERS_PATH` сама; это держит `tests/desktop/e2e/isolation.test.mjs`.

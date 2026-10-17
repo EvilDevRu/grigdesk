@@ -6,7 +6,7 @@ import type {
   CodeGitLogEntry,
   CodeRepo,
   CodeWorktree,
-} from '../../../shared/codeContracts.ts';
+} from '../../../shared/plugins/code/codeContracts.ts';
 
 export interface CodeContext {
   id: string;

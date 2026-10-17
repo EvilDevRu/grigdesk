@@ -8,7 +8,7 @@ import { prepareDeliveryPlan, runDelivery } from './delivery.ts';
 import type { DeliveryChannel, DeliveryRecord } from './delivery.ts';
 import { deliveryChannelStatuses, senderFor } from './deliveryChannels.ts';
 import type { DeliveryChannelDeps } from './deliveryChannels.ts';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
+import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 
 export interface DeliveryOpsDeps {
   assertEnabled: () => void;

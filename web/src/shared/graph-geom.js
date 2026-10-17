@@ -71,11 +71,11 @@ export function nodeGeom(nid, pos, nodes) {
  * Сохраняет взаимное расположение серверных узлов, сжимая пустые промежутки.
  * Общий масштаб X оставляет вертикальные стыки змейки на месте. Одиночная параллельная
  * ветка занимает свободный левый край следующего ряда, если там хватает места.
- * @returns {Record<string, import('../../../shared/factoryGraphContracts.ts').GraphPosition>}
+ * @returns {Record<string, import('../../../shared/pipeline/factoryGraphContracts.ts').GraphPosition>}
  */
 export function layoutGraphPositions(pos, nodes, withReturns = false, parallelNodes = []) {
   const rows = new Map();
-  /** @type {Record<string, import('../../../shared/factoryGraphContracts.ts').GraphPosition>} */
+  /** @type {Record<string, import('../../../shared/pipeline/factoryGraphContracts.ts').GraphPosition>} */
   const result = {};
 
   for (const [id, [x, y]] of Object.entries(pos)) {

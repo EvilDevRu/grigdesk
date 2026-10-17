@@ -13,8 +13,13 @@
 //    повтора нет: сверку и решение делает человек.
 import { createHash, randomBytes } from 'node:crypto';
 
+import { errorText } from '../../../../shared/lib/errors.ts';
+
 import { ShowcaseError } from './errors.ts';
-import type { ShowcaseArtifactRef, ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
+import type {
+  ShowcaseArtifactRef,
+  ShowcaseProject,
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 
 export type DeliveryChannel = 'b24' | 'telegram';
 
@@ -228,7 +233,7 @@ export async function runDelivery(input: RunDeliveryInput): Promise<DeliveryReco
         state: unknownOutcome(error) ? 'outcome_unknown' : 'failed',
         reason: unknownOutcome(error)
           ? `Ответ по загрузке ${attachment.name} потерян: проверьте получателя вручную.`
-          : `Загрузка ${attachment.name} не удалась: ${messageOf(error)}`,
+          : `Загрузка ${attachment.name} не удалась: ${errorText(error)}`,
         finishedAt: new Date().toISOString(),
       };
     }
@@ -252,7 +257,7 @@ export async function runDelivery(input: RunDeliveryInput): Promise<DeliveryReco
       state: unknownOutcome(error) ? 'outcome_unknown' : 'failed',
       reason: unknownOutcome(error)
         ? 'Ответ по отправке потерян: получатель мог её уже получить, проверьте вручную.'
-        : `Отправка не удалась: ${messageOf(error)}`,
+        : `Отправка не удалась: ${errorText(error)}`,
       finishedAt: new Date().toISOString(),
     };
   }
@@ -271,8 +276,4 @@ function unknownOutcome(error: unknown): boolean {
     || code === 'UND_ERR_HEADERS_TIMEOUT'
     || name === 'TimeoutError'
     || name === 'AbortError';
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

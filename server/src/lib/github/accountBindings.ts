@@ -10,6 +10,10 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 
+import { syncDirectory } from '../../../../shared/node/files.ts';
+import { errorCode } from '../../../../shared/lib/errors.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 import type { Stats } from 'node:fs';
 
@@ -74,24 +78,8 @@ function fail(code: string, message: string, cause: unknown = null): never {
   throw new GitHubStoreError(code, message, cause);
 }
 
-// Ошибка файловой системы своего типа не обещает, а решение принимается по коду:
-// отсутствие файла — обычное состояние, всё остальное здесь фатально.
-function failureCode(error: unknown): string {
-  const code = error !== null && typeof error === 'object'
-    ? (error as { code?: unknown }).code
-    : undefined;
-
-  return typeof code === 'string' ? code : '';
-}
-
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exactObject(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('github_store_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('github_store_invalid', `${where}: ожидался объект.`);
   const own = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (own.length !== expected.length || own.some((key, index) => key !== expected[index])) {
@@ -168,7 +156,7 @@ export async function readStableFileNoFollow(file: string, {
   try {
     handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
   } catch (err) {
-    if (failureCode(err) === 'ENOENT') return missing;
+    if (errorCode(err) === 'ENOENT') return missing;
     fail('github_store_unsafe', 'GitHub store нельзя безопасно открыть.', err);
   }
 
@@ -218,20 +206,9 @@ async function assertRegularTarget(file: string): Promise<void> {
       fail('github_store_unsafe', 'GitHub store нельзя заменить: target не является обычным файлом.');
     }
   } catch (err) {
-    if (failureCode(err) === 'ENOENT') return;
+    if (errorCode(err) === 'ENOENT') return;
     if (err instanceof GitHubStoreError) throw err;
     fail('github_store_unsafe', 'GitHub store нельзя проверить перед записью.', err);
-  }
-}
-
-async function syncDirectory(dir: string): Promise<void> {
-  let handle;
-  try {
-    handle = await open(dir, constants.O_RDONLY
-      | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0));
-    await handle.sync();
-  } finally {
-    await handle?.close();
   }
 }
 
@@ -285,7 +262,7 @@ export async function unlinkRegularFile(file: string): Promise<boolean> {
   try {
     info = await lstat(file);
   } catch (err) {
-    if (failureCode(err) === 'ENOENT') return false;
+    if (errorCode(err) === 'ENOENT') return false;
     fail('github_store_unsafe', 'GitHub store нельзя проверить перед удалением.', err);
   }
   if (info.isSymbolicLink() || !info.isFile()) {

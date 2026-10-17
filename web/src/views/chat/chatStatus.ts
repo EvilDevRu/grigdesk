@@ -1,4 +1,4 @@
-import type { ChatRunSnapshot } from '../../../../shared/chatRun.ts';
+import type { ChatRunSnapshot } from '../../../../shared/chat/chatRun.ts';
 
 export interface ChatRuntimeRun {
   runId: string;

@@ -162,7 +162,7 @@
 import { computed, ref, useId, watch } from 'vue';
 import { UiButton, UiDisclosureButton, vTooltip } from '../../ui.ts';
 import ProviderSettingValue from './ProviderSettingValue.vue';
-import type { JsonValue, ProviderSettingNode } from '../../../../shared/providerSettingsContracts.ts';
+import type { JsonValue, ProviderSettingNode } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 const props = withDefaults(defineProps<{
   field: ProviderSettingNode;

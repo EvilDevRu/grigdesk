@@ -18,7 +18,7 @@ import {
   parseShowcaseFinalManifest,
   SHOWCASE_MANIFEST_ID_RE,
   ShowcaseManifestContractError,
-} from '../../shared/showcaseTimeline.ts';
+} from '../../shared/plugins/showcase/showcaseTimeline.ts';
 
 const HASH = {
   input: '1'.repeat(32),

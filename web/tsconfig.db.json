@@ -5,9 +5,9 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/dbContracts.ts",
-    "../shared/sshContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/db/dbContracts.ts",
+    "../shared/plugins/ssh/sshContracts.ts",
     "src/shared/dbApi.ts",
     "src/stores/db.ts",
     "src/actions/db/**/*.ts",

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { CockpitUpdateManager } from '../../server/src/lib/cockpitUpdate.ts';
-import { readPersistentState } from '../../server/src/lib/cockpitRelease.ts';
+import { readPersistentState, writePersistentState } from '../../server/src/lib/cockpitRelease.ts';
 
 const HEAD = 'a'.repeat(40);
 const TARGET = 'b'.repeat(40);
@@ -34,6 +34,7 @@ test('manager validates SHA race, checked target and uses an interprocess job lo
     releases, rootDir: root, statePath, underSystemd: () => false,
     spawnProcess(file, args, options) {
       launches.push({ file, args, options });
+
       return { unref() {} };
     },
   });
@@ -83,7 +84,11 @@ test('systemd mode launches a collected transient unit outside the server servic
   t.after(() => rm(root, { recursive: true, force: true }));
   const launches = [];
   const manager = new CockpitUpdateManager({
-    releases: { async getStatus() { return status(); }, invalidate() {} },
+    releases: { async getStatus() {
+       return status(); 
+    }, invalidate() {
+    
+      } },
     rootDir: root,
     statePath: path.join(root, 'state.json'),
     underSystemd: () => true,
@@ -100,4 +105,129 @@ test('systemd mode launches a collected transient unit outside the server servic
   assert.ok(launches[0].args.includes('--collect'));
   assert.ok(launches[0].args.includes('--unit=cockpit-update-worker'));
   assert.ok(launches[0].args.includes(process.execPath));
+});
+
+test('UP-01 desktop запускает отвязанный worker с origin и путём CLI-токена', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-update-desktop-'));
+  const launches = [];
+  let unrefs = 0;
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const tokenPath = path.join(root, 'cli-token');
+  const origin = 'http://127.0.0.1:9312';
+  const manager = new CockpitUpdateManager({
+    releases: {
+      async getStatus() {
+        return status();
+      },
+      invalidate() {},
+    },
+    rootDir: root,
+    statePath: path.join(root, 'state.json'),
+    desktop: () => true,
+    underSystemd: () => true,
+    origin,
+    cliTokenPath: tokenPath,
+    async runner() {
+      assert.fail('desktop не вызывает systemd-run');
+    },
+    spawnProcess(file, args, options) {
+      launches.push({
+        file,
+        args,
+        options,
+      });
+
+      return {
+        unref() {
+          unrefs += 1;
+        },
+      };
+    },
+  });
+  const job = await manager.startApply({ expectedCheckoutSha: HEAD });
+
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].file, process.execPath);
+  assert.deepEqual(launches[0].args.slice(1), [
+    '--root', root,
+    '--work-root', path.join(root, '.state'),
+    '--state', path.join(root, 'state.json'),
+    '--job', job.id,
+    '--mode', 'desktop',
+    '--origin', origin,
+    '--token-file', tokenPath,
+  ]);
+  assert.equal(launches[0].options.detached, true);
+  assert.equal(launches[0].options.stdio, 'ignore');
+  assert.equal(launches[0].options.cwd, root);
+  assert.equal(unrefs, 1);
+});
+
+test('UP-08 isRestarting сверяет id и статус без fresh-проверки релизов', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-update-job-state-'));
+  const statePath = path.join(root, 'state.json');
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const manager = new CockpitUpdateManager({
+    releases: {
+      async getStatus() {
+        assert.fail('isRestarting не запрашивает fresh-статус');
+      },
+    },
+    rootDir: root,
+    statePath,
+    underSystemd: () => false,
+  });
+
+  await writePersistentState(statePath, {
+    job: {
+      id: 'fixture-job',
+      status: 'restarting',
+    },
+  });
+  assert.equal(await manager.isRestarting('fixture-job'), true);
+  assert.equal(await manager.isRestarting('other-job'), false);
+
+  await writePersistentState(statePath, {
+    job: {
+      id: 'fixture-job',
+      status: 'building',
+    },
+  });
+  assert.equal(await manager.isRestarting('fixture-job'), false);
+  await writePersistentState(statePath, { job: null });
+  assert.equal(await manager.isRestarting('fixture-job'), false);
+});
+
+test('DH-17 worker размещает рабочую копию на диске кода', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-work-root-'));
+  let argv;
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const manager = new CockpitUpdateManager({
+    rootDir: root, 
+    statePath: path.join(root, 'data/state.json'),
+    releases: { async getStatus() {
+       return status(); 
+    }, invalidate() {
+    
+      } },
+    underSystemd: () => false,
+
+    spawnProcess(_file, args) {
+
+       argv = args;
+
+      return { unref() {
+    
+      } }; 
+    },
+  });
+
+  await manager.startApply({ expectedCheckoutSha: HEAD });
+  assert.equal(argv[argv.indexOf('--work-root') + 1], path.join(root, '.state'));
 });

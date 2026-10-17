@@ -293,7 +293,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     async upload() { return {}; },
   };
   globalThis.__uiContextApi = globalThis.__uiContextTaskApi;
-  globalThis.__uiContextPipelineWait = await import('../../shared/pipelineWait.ts');
+  globalThis.__uiContextPipelineWait = await import('../../shared/pipeline/pipelineWait.ts');
   globalThis.__uiContextRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__uiContextFactoryGraph = {
     name: 'FactoryGraph',

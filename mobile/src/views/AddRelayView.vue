@@ -15,6 +15,9 @@
       <p class="mobile-muted">Привяжите телефон к кокпиту на компьютере.</p>
     </div>
     <PairForm />
+    <UiButton v-if="isDesktop && link.state?.error" :busy="link.busy" @click="link.unlock">
+      Повторить
+    </UiButton>
     <UiButton
       v-if="link.state?.brainName || link.state?.error"
       kind="danger"
@@ -46,6 +49,7 @@ import { ref } from 'vue';
 import PairForm from '../components/PairForm.vue';
 import { UiAuthLayout, UiButton, UiCard, UiDialog, UiPaneHeader } from '../ui.ts';
 import { useLinkStore } from '../stores/link.ts';
+import { isDesktop } from '../platform.ts';
 
 const link = useLinkStore();
 const reset = ref(false);

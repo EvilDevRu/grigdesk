@@ -346,7 +346,7 @@ async function del(r) {
    разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
    центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
 .top { display: flex; flex-direction: column; justify-content: center; gap: 5px;
-  height: var(--chat-head-h); padding: 0 10px; border-bottom: 1px solid var(--line); }
+  min-height: var(--chat-head-h); flex: none; padding: 0 10px; border-bottom: 1px solid var(--line); }
 .tools { display: flex; align-items: center; gap: 7px; }
 .search { flex: 1; min-width: 0; }
 .archive-toggle { align-self: flex-start; }
@@ -355,7 +355,7 @@ async function del(r) {
 .rows { flex: 1; overflow-y: auto; padding: 5px; }
 .none { padding: 12px; font-size: 12.5px; text-align: center; }
 
-.row { position: relative; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 10px; }
+.row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px; min-height: var(--chat-list-row-h); border-radius: 10px; }
 .row-hit { display: flex; flex: 1; align-items: center; gap: 9px; width: 100%; min-width: 0; text-align: left; }
 .row:hover { background: var(--surface-2); }
 .row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
@@ -366,7 +366,7 @@ async function del(r) {
   border-radius: 0 3px 3px 0; background: var(--warn, #e0a33a); }
 .row.wait.cur { background: color-mix(in srgb, var(--warn, #e0a33a) 18%, transparent); }
 
-.ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+.ava { flex: none; width: var(--chat-avatar-size); height: var(--chat-avatar-size); border-radius: 50%; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   font-size: 15px; font-weight: 600; position: relative; }
 /* Знак исполнителя — в цвете исполнителя. Одинаково-серые аватары в списке из двадцати
@@ -434,6 +434,8 @@ async function del(r) {
   display: none; align-items: center; gap: 3px; }
 .row:hover .acts, .row:focus-within .acts { display: inline-flex; }
 .row:hover .ago, .row:focus-within .ago { visibility: hidden; }
+.row:hover, .row:focus-within { padding-right: 66px; }
+.row.archived:hover, .row.archived:focus-within { padding-right: 96px; }
 
 /* Пальцем ховера нет — на сенсорном экране действия строки были бы недостижимы.
    Показываем их всегда, а место под них освобождаем отступом самой строки. */

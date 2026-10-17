@@ -6,10 +6,10 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
+    "../shared/lib/contractDecoders.ts",
     "src/lib/docker/**/*.ts",
     "src/modules/docker/**/*.ts",
-    "../shared/dockerContracts.ts",
+    "../shared/plugins/docker/dockerContracts.ts",
     "../tests/types/docker-server-contract.test.mts"
   ]
 }

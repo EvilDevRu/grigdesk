@@ -1,5 +1,9 @@
-import type { DraftMachine, DraftNode, RouteTransitionDoc } from '../../../../shared/routeDefinition.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import type {
+  DraftMachine,
+  DraftNode,
+  RouteTransitionDoc,
+} from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 export type RouteCommandScope = { kind: 'route'; routeId: string } | { kind: 'bootstrap' };
 export type RunKeyFactory = (suggested: string, used: ReadonlySet<string>) => string;

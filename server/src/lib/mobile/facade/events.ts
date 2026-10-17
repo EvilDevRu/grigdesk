@@ -1,5 +1,7 @@
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import type { MobileApp } from '../mobileServer.ts';
-import { record } from './common.ts';
+
 import type { FacadeDeps } from './common.ts';
 
 const CHAT_KINDS: Record<string, string> = {
@@ -88,7 +90,7 @@ export class MobileEventStream {
       return;
     }
 
-    const data = record(payload);
+    const data = recordOrEmpty(payload);
     const chatId = name === 'chat-store' ? data.id : data.chatKey;
     const validChat = typeof chatId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(chatId);
 

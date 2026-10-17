@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
 

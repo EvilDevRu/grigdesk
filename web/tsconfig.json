@@ -21,6 +21,7 @@
   // нечем — типов у их же собственного кода пока нет. Список ведёт волна web и
   // сверяется со снимком остатка миграции, поэтому спрятать в нём новый файл нельзя.
   "exclude": [
+    "../shared/node/**",
     "src/App.vue",
     "src/features/board/BoardTimerPopover.vue",
     "src/features/documents/DocumentPanel.vue",

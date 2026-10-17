@@ -19,7 +19,7 @@ import type {
   DockerPruneResponse,
   DockerPruneTarget,
   DockerUsageSummary,
-} from '../../../../shared/dockerContracts.ts';
+} from '../../../../shared/plugins/docker/dockerContracts.ts';
 import {
   decodeEngineContainers,
   decodeEngineDiskUsage,

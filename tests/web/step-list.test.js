@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 
-import { STEP_IMAGE_TEXT } from '../../shared/chatSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../shared/chat/chatSteps.ts';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { createUiBrowser } from './helpers/ui-components.js';
 

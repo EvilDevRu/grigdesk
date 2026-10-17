@@ -7,20 +7,23 @@
 //
 // Негодный ответ не меняет сохранённую редакцию: у человека остаётся то, что он
 // уже принял, а не половина новой версии.
-import { exactKeys, jsonCandidates, modelText } from '../../modelJson.ts';
-import type { ShowcaseAction } from '../../../../../shared/showcaseContracts.ts';
+import { isRecord } from '../../../../../shared/lib/objects.ts';
+import { trimmedText } from '../../../../../shared/lib/text.ts';
+
+import { exactKeys, jsonCandidates } from '../../modelJson.ts';
+import type { ShowcaseAction } from '../../../../../shared/plugins/showcase/showcaseContracts.ts';
 import {
   SHOWCASE_NARRATION_MAX_CHARS,
   parseNarration,
   plainNarration,
-} from '../../../../../shared/showcaseNarration.ts';
+} from '../../../../../shared/plugins/showcase/showcaseNarration.ts';
 import {
   SHOWCASE_SYNC_ACTIONS_BY_CUE,
   SHOWCASE_SYNC_BINDING_VERSION,
   SHOWCASE_SYNC_CUE_KINDS,
   validateShowcaseSyncBindings,
-} from '../../../../../shared/showcaseSync.ts';
-import type { ShowcaseSyncCueKind } from '../../../../../shared/showcaseSync.ts';
+} from '../../../../../shared/plugins/showcase/showcaseSync.ts';
+import type { ShowcaseSyncCueKind } from '../../../../../shared/plugins/showcase/showcaseSync.ts';
 import { BRIEF_MAX, BRIEF_MIN } from './prompt.ts';
 import type { ScriptScreen } from './prompt.ts';
 
@@ -95,10 +98,6 @@ const CAPTION_MAX = 120;
 const GAP_MAX = 240;
 const GAPS_MAX = 12;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 /**
  * Бриф из ответа модели. Число пунктов проверяется по границам плана: слишком
  * короткий список нечего показывать, слишком длинный — не ролик, а пересказ.
@@ -117,7 +116,7 @@ export function parseBrief(reply: unknown): string[] | null {
       }
 
       const points = parsed.points
-        .map((point: unknown) => modelText(point).replace(/\s+/gu, ' '))
+        .map((point: unknown) => trimmedText(point).replace(/\s+/gu, ' '))
         .filter(Boolean);
 
       if (points.length < BRIEF_MIN || points.length > BRIEF_MAX) {
@@ -392,16 +391,16 @@ function parseScene(value: unknown, screens: ScriptScreen[], sceneIndex: number)
     return { scene: null, problem: null };
   }
 
-  const screen = screens.find((item) => item.id === modelText(value.screenId));
+  const screen = screens.find((item) => item.id === trimmedText(value.screenId));
 
   if (!screen) {
     return { scene: null, problem: null };
   }
 
-  const narration = modelText(value.narration).replace(/\s+/gu, ' ');
-  const caption = modelText(value.caption).replace(/\s+/gu, ' ');
-  const subtitleText = modelText(value.subtitleText).replace(/\s+/gu, ' ');
-  const title = modelText(value.title).replace(/\s+/gu, ' ');
+  const narration = trimmedText(value.narration).replace(/\s+/gu, ' ');
+  const caption = trimmedText(value.caption).replace(/\s+/gu, ' ');
+  const subtitleText = trimmedText(value.subtitleText).replace(/\s+/gu, ' ');
+  const title = trimmedText(value.title).replace(/\s+/gu, ' ');
 
   if (
     !narration
@@ -478,7 +477,7 @@ function parseGaps(value: unknown): string[] | null {
   }
 
   return value
-    .map((item: unknown) => modelText(item).replace(/\s+/gu, ' ').trim().slice(0, GAP_MAX))
+    .map((item: unknown) => trimmedText(item).replace(/\s+/gu, ' ').trim().slice(0, GAP_MAX))
     .filter(Boolean)
     .slice(0, GAPS_MAX);
 }

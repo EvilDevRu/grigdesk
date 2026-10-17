@@ -24,16 +24,16 @@ import type {
   ShowcaseTarget,
   ShowcaseTargetOption,
   ShowcaseTargetRef,
-} from '../../../../shared/showcaseContracts.ts';
-import type { SandboxOverview } from '../../../../shared/sandboxContracts.ts';
-import type { PluginSetupItem, PluginSetupStatus } from '../../../../shared/pluginsContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import type { SandboxOverview } from '../../../../shared/plugins/sandboxes/sandboxContracts.ts';
+import type { PluginSetupItem, PluginSetupStatus } from '../../../../shared/plugins/pluginsContracts.ts';
 import {
   SHOWCASE_SCHEMA_VERSION,
   showcaseSourceEqual,
   toProjectSummary,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { artifactFile, finalIsCurrent, hashFile, sceneFreshness } from './artifacts.ts';
-import { chainLineage } from '../../../../shared/showcaseChains.ts';
+import { chainLineage } from '../../../../shared/plugins/showcase/showcaseChains.ts';
 import type { ArtifactInputs } from './artifacts.ts';
 import { notFound, ShowcaseError } from './errors.ts';
 import { readProgressSince, readWorkerResult, stopWorker } from './render/runner.ts';
@@ -84,7 +84,7 @@ import type {
 } from '../sandboxes/activityGuard.ts';
 import type { SpeechTranscript } from '../speech/transport.ts';
 import { readFinalManifest } from './syncStore.ts';
-import type { ShowcaseFinalManifest } from '../../../../shared/showcaseTimeline.ts';
+import type { ShowcaseFinalManifest } from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
 
 export interface ShowcaseLimits {
   maxScenes: number;

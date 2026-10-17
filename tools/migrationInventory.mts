@@ -24,18 +24,26 @@ const SKIP_DIRS = new Set([
     'dist',
     'profiles',
     'chats',
+    '3d',
     'venv',
     '__pycache__',
 ]);
 
+// Эти корневые каталоги содержат данные пользователя, а не исходники продукта.
+// Исключение только для корня сохраняет обход server/src/plugins и одноимённых тестовых фикстур.
+const DATA_ROOT_DIRS = new Set(['agents', 'telegram', 'github', 'plugins', 'routes']);
+
 // Область плана: у каждой свой владелец правок и свой этап. Порядок важен —
 // файл относится к ПЕРВОЙ подошедшей области, поэтому вложенные пути идут выше.
 const AREAS: readonly { id: string; prefix: string }[] = [
+    { id: 'b24', prefix: 'b24/' },
     { id: 'bin', prefix: 'bin/' },
+    { id: 'cli', prefix: 'cli/' },
     { id: 'deploy', prefix: 'deploy/' },
     { id: 'server', prefix: 'server/src/' },
     { id: 'serverScripts', prefix: 'server/scripts/' },
     { id: 'relay', prefix: 'relay/' },
+    { id: 'desktop', prefix: 'desktop/' },
     { id: 'mobile', prefix: 'mobile/src/' },
     { id: 'mobileConfig', prefix: 'mobile/vite.config.' },
     { id: 'mobileConfig', prefix: 'mobile/capacitor.config.' },
@@ -95,12 +103,7 @@ export const COMPATIBILITY: readonly CompatibilityEntry[] = Object.freeze([
         reason: 'Старый воркер обновления прогоняет этот файл в НОВОМ дереве без флагов.',
         removeWhen: 'Обновлятель на TypeScript установлен минимум один релиз.',
     },
-    {
-        path: 'web/public/notification-sw.js',
-        reason: 'Workbox подключает его importScripts по литеральному имени; выпуск сборки.',
-        removeWhen: 'Никогда: это выход сборки, а не исходник. Источник — web/src/sw/.',
-        generated: true,
-    },
+
 ]);
 
 const CODE_EXTENSIONS = ['.js', '.mjs', '.cjs', '.jsx'];
@@ -117,14 +120,25 @@ export interface MigrationInventory {
     typecheckDebt: Record<string, number>;
 }
 
-/** Все файлы дерева, кроме чужого, собранного и приватного. */
-function walk(dir: string, out: string[] = []): string[] {
+/**
+ * Перечисляет исходники, исключая чужие зависимости, состояние и результаты сборки.
+ * Desktop release содержит распакованные ресурсы AppImage, а не дополнительный исходный JS.
+ */
+function walk(dir: string, out: string[] = [], root: string = dir): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
-            if (SKIP_DIRS.has(entry.name)) {
+            const nested = join(dir, entry.name);
+
+            const nestedPath = relative(root, nested).split(sep).join('/');
+
+            if (SKIP_DIRS.has(entry.name)
+                || (dir === root && DATA_ROOT_DIRS.has(entry.name))
+                || nestedPath === 'desktop/release'
+                || nestedPath === 'b24/.cache') {
                 continue;
             }
-            walk(join(dir, entry.name), out);
+
+            walk(nested, out, root);
         } else if (entry.isFile()) {
             out.push(join(dir, entry.name));
         }
@@ -267,6 +281,10 @@ const GENERAL_PROJECTS: readonly { config: string; compiler: string }[] = [
     { config: 'web/tsconfig.json', compiler: 'web/node_modules/.bin/vue-tsc' },
     { config: 'web/tsconfig.scripts.json', compiler: 'web/node_modules/.bin/tsc' },
     { config: 'relay/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
+    { config: 'desktop/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
+    // Собственный пакет b24 покрывает и свои тесты tests/b24. Для --showConfig хватает tsc
+    // сервера, как у relay и desktop: свежий клон без b24/node_modules не краснеет.
+    { config: 'b24/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
     { config: 'mobile/tsconfig.json', compiler: 'mobile/node_modules/.bin/vue-tsc' },
     // Тесты проверяются той же базой, что и проверяемый ими код: до этих проектов
     // перенесённый на TypeScript тест компилятор не открывал вовсе.

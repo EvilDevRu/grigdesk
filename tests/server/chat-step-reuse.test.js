@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { messageKey } from '../../shared/chatMessageIdentity.ts';
+import { messageKey } from '../../shared/chat/chatMessageIdentity.ts';
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 import { chatAppFixture, saveChat } from './helpers/chat-turns.js';
 

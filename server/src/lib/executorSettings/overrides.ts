@@ -1,8 +1,10 @@
 // Контейнер overrides принадлежит Cockpit и никогда не становится нативным ключом.
 // Короткая синхронная транзакция сохраняет соседей и проверяет ревизию всего provider.
 
-import type { ProviderSettingsOverrideRequest } from '../../../../shared/providerSettingsContracts.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
+import type { ProviderSettingsOverrideRequest } from '../../../../shared/chat/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import type { PrefsStore } from '../prefsStore.ts';
 import type { NativeSettingsStorage, NormalizedSettingNode } from './types.ts';
 import { NativeSettingsError } from './errors.ts';
@@ -21,8 +23,6 @@ export interface OverrideCatalog {
  */
 export function readNativeSettingsStorage(all: unknown, providerId: string): NativeSettingsStorage {
   const settings = all === undefined ? {} : all;
-  const isRecord = (value: unknown): value is Record<string, unknown> =>
-    value !== null && typeof value === 'object' && !Array.isArray(value);
 
   if (!isRecord(settings) || (Object.hasOwn(settings, providerId) && !isRecord(settings[providerId]))) {
     throw new NativeSettingsError('settings_storage_invalid', 500, 'Контейнер нативных настроек повреждён');

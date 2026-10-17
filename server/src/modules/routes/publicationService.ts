@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
 import { RoutesEditorEngineError } from './editorEngine.ts';

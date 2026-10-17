@@ -33,7 +33,7 @@
 import { computed } from 'vue';
 
 import { UiButton } from '../../ui';
-import type { ProjectDetail } from '../../../../shared/projectsContracts';
+import type { ProjectDetail } from '../../../../shared/runtime/projectsContracts';
 
 const props = defineProps<{ detail: ProjectDetail }>();
 

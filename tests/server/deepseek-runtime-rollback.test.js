@@ -10,7 +10,7 @@ import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from '../helpers/
 import { runDeepSeekWebTurn } from '../../server/src/lib/deepseek/webRuntime.ts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { chatHomeFor } from '../../server/src/lib/deepseek/env.ts';
-import { readDeepSeekArtifact } from '../../server/src/lib/deepseek/runtimeArtifact.ts';
+import { readDeepSeekArtifactAsync } from '../../server/src/lib/deepseek/runtimeArtifact.ts';
 import { activateDeepSeekGeneration, publishDeepSeekGeneration }
   from '../../tools/deepseekRuntimePublication.ts';
 import { forkDeepSeekHome } from '../../tools/deepseekHomeFork.ts';
@@ -38,7 +38,7 @@ async function variant(source, destination) {
   metadata.runtimeVersion = `${metadata.source.version}.cockpit.b${metadata.buildId.slice(0, 16)}`;
   await fs.writeFile(file, JSON.stringify(metadata));
 
-  return readDeepSeekArtifact(destination).artifact;
+  return (await readDeepSeekArtifactAsync(destination)).artifact;
 }
 
 /**
@@ -66,8 +66,11 @@ test('настоящий B сохраняет журнал, A продолжае
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-rollback-'));
   const runtimeRoot = path.join(root, 'runtime');
   const homeRoot = path.join(root, 'homes');
-  const a = readDeepSeekArtifact(artifact).artifact;
+  const a = (await readDeepSeekArtifactAsync(artifact)).artifact;
   const launches = [];
+  const firstAbort = new AbortController();
+  let firstDeadline;
+  let first;
   let release;
   let entered;
   const held = new Promise((resolve) => {
@@ -86,7 +89,10 @@ test('настоящий B сохраняет журнал, A продолжае
   } });
 
   t.after(async () => {
+    clearTimeout(firstDeadline);
+    firstAbort.abort();
     release();
+    await first?.catch(() => {});
     await mock.stop();
     await fs.rm(root, { recursive: true, force: true });
   });
@@ -132,9 +138,20 @@ test('настоящий B сохраняет журнал, A продолжае
     },
     ...extra,
   });
-  const first = run('running-A');
+  // Срок ограничивает активную работу первого хода, а не намеренный HTTP-барьер.
+  // После снятия барьера тот же срок снова ограничивает завершение и очистку.
+  const armFirstDeadline = () => {
+    firstDeadline = setTimeout(() => {
+      firstAbort.abort();
+    }, 45_000);
+  };
 
-  await firstHttp;
+  armFirstDeadline();
+  first = run('running-A', { signal: firstAbort.signal });
+
+  // Остановка первого хода до HTTP должна завершить тест и вызвать очистку ресурсов.
+  await Promise.race([firstHttp, first]);
+  clearTimeout(firstDeadline);
 
   const candidateB = path.join(root, 'candidate-B');
   const b = await variant(artifact, candidateB);
@@ -143,8 +160,10 @@ test('настоящий B сохраняет журнал, A продолжае
 
   const second = await run('written-B');
 
+  armFirstDeadline();
   release();
   await first;
+  clearTimeout(firstDeadline);
   assert.deepEqual(launches.slice(0, 2).map((launch) => launch.buildId), [a.buildId, b.buildId]);
   assert.notEqual(launches[0].home, launches[1].home);
 

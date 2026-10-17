@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+
+import { sha256 } from '../../shared/node/hash.ts';
 
 import { buildLaunchFiles } from '../../server/src/lib/deepseek/profile.ts';
 import {
@@ -12,14 +15,14 @@ import {
   resolveDeepSeekRuntime,
 } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import {
   ensureTestDeepSeekArtifact,
   verifyTestDeepSeekArtifact,
 } from '../helpers/deepseekRuntimeArtifact.mts';
-import { vendorHash } from '../../tools/deepseekVendorManifest.ts';
 
 const exec = promisify(execFile);
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G1');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G1');
 const PLUGIN = '@deepseek-ai/dsh-llm-pi-ai';
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -238,7 +241,7 @@ async function pluginSources(artifact) {
       } else if (entry.isFile()) {
         result.push({
           path: `packages/llm/llm-pi-ai/${name}`,
-          sha256: vendorHash(await fs.readFile(path.join(root, name))),
+          sha256: sha256(await fs.readFile(path.join(root, name))),
         });
       }
     }
@@ -257,7 +260,7 @@ test('настоящий runtime.json содержит версию и integrity
   const patchesDir = path.join(REPO_ROOT, 'third_party/deepseek-harness/patches');
   const patches = await Promise.all((await fs.readdir(patchesDir)).sort().map(async (name) => ({
     path: name,
-    sha256: vendorHash(await fs.readFile(path.join(patchesDir, name))),
+    sha256: sha256(await fs.readFile(path.join(patchesDir, name))),
   })));
   const pinned = lock.packages['node_modules/@earendil-works/pi-ai'];
   const sources = await pluginSources(artifact);
@@ -267,7 +270,7 @@ test('настоящий runtime.json содержит версию и integrity
     integrity: pinned.integrity,
   });
   assert.ok(sources.length > 0);
-  assert.equal(metadata.llmPiAi.sourceHash, vendorHash(JSON.stringify(sources)));
+  assert.equal(metadata.llmPiAi.sourceHash, sha256(JSON.stringify(sources)));
   assert.deepEqual(metadata.llmPiAi.patches, patches);
   assert.deepEqual(metadata.inputIdentity.contract.llmPiAi, metadata.llmPiAi);
 });

@@ -48,3 +48,14 @@ test('query: первый строковый элемент и пустые зн
     assert.equal(firstQueryValue(value), '');
   }
 });
+
+test('цель studio ведёт к версии и называет модель', () => {
+  const target = {
+    kind: 'studio',
+    modelId: 'model #1',
+    versionId: 'v01-model'
+  };
+
+  assert.equal(alertTargetHash(target), '#/3d?model=model%20%231&version=v01-model');
+  assert.equal(alertTargetLabel(target), 'Открыть модель');
+});

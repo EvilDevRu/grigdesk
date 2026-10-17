@@ -17,7 +17,7 @@ test('селекты чата сохраняют прежний плоский s
 
   const declarations = flatRule[1];
 
-  assert.match(declarations, /height:\s*28px/u);
+  assert.match(declarations, /height:\s*var\(--toolbar-control-h\)/u);
   assert.match(declarations, /border:\s*0/u);
   assert.match(declarations, /border-bottom:\s*1px solid transparent/u);
   assert.match(declarations, /border-radius:\s*0/u);

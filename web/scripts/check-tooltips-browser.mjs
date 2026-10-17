@@ -5,15 +5,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import vue from '../node_modules/@vitejs/plugin-vue/dist/index.mjs';
 import { createServer } from '../node_modules/vite/dist/node/index.js';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const web = path.join(root, 'web');
-const artifacts = path.join(root, '.state/artifacts/title-tooltips');
+const artifacts = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'title-tooltips');
 const browserArtifacts = path.join(artifacts, 'browser');
 const profile = path.join(browserArtifacts, 'chromium-profile');
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

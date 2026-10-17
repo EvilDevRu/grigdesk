@@ -167,7 +167,7 @@ import { sandboxUrl } from '../../shared/sandbox.js';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import type {
   SandboxActionDecl, SandboxEntry, SandboxJob,
-} from '../../../../shared/sandboxContracts';
+} from '../../../../shared/plugins/sandboxes/sandboxContracts';
 
 const ICON = {
   viewBox: '0 0 24 24',

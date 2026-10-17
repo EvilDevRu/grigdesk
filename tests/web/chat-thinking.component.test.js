@@ -37,10 +37,16 @@ async function mountThinking(t, props) {
 const flat = (wrapper) => wrapper.text().replace(/\u00a0/g, ' ');
 
 test('LINE-01: идущий инструмент, время хода и расход вывода — в одной строке', async (t) => {
+  // Компиляция и монтаж могут занять больше секунды; точный текст времени должен
+  // зависеть от заданных часов, а не от скорости подготовки браузерного стенда.
+  const now = 1_700_000_000_000;
+
+  t.mock.method(Date, 'now', () => now);
+
   const wrapper = await mountThinking(t, {
     steps: [{ k: 'tool', id: 't1', name: 'Bash', at: 1 }],
     tokens: 3000,
-    startedAt: Date.now() - 125_000,
+    startedAt: now - 125_000,
   });
   const text = flat(wrapper);
 

@@ -1,6 +1,8 @@
 // Versioned-ссылка на модель чата. Пара provider/model устраняет коллизии одинаковых
 // model id у разных исполнителей и запрещает исторический fallback «не нашли → Claude».
 
+import { trimmedText } from '../../../../shared/lib/text.ts';
+
 export const CHAT_SCHEMA = 2;
 export const CHAT_SURFACES = new Set(['chats', 'embedded']);
 export const LEGACY_DUAL_WRITE_PROVIDERS = new Set(['claude', 'codex']);
@@ -35,16 +37,11 @@ export type ModelResolution =
     candidates?: Array<{ provider: string; model?: string }>;
   };
 
-function nonEmpty(value: unknown): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text || '';
-}
-
 export function normalizeModelRef(value: unknown): ModelRef | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const source = value as { provider?: unknown; model?: unknown };
-  const provider = nonEmpty(source.provider);
-  const model = nonEmpty(source.model);
+  const provider = trimmedText(source.provider);
+  const model = trimmedText(source.model);
   if (!provider || !model) return null;
   return { provider, model };
 }
@@ -103,7 +100,7 @@ export function resolveModelRef(value: unknown, registry: ModelRegistry): ModelR
  * коллизия — отдельное состояние, а не выбор первого provider по порядку реестра.
  */
 export function resolveLegacyModel(modelId: unknown, registry: ModelRegistry): ModelResolution {
-  const wanted = nonEmpty(modelId);
+  const wanted = trimmedText(modelId);
   if (!wanted) return failed('missing_model');
   const matches: Array<{ provider: string; model: RegistryModel }> = [];
   for (const [provider, models] of Object.entries(registry || {})) {

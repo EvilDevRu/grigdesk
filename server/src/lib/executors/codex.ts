@@ -5,7 +5,7 @@
 // дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
 import { execFile, spawn } from 'node:child_process';
-import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -14,6 +14,7 @@ import { createInterface } from 'node:readline';
 import { npmLatest } from './_npmLatest.ts';
 import { withRetry } from '../retry.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
+import { CODEX_TURN_FAILURE_RULES, codexTurnFailure } from './_codexTurnFailures.ts';
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import { createCodexStepNormalizer } from './_codexSteps.ts';
 import { CODEX_UNTRUSTED_INPUT, runCodexUntrusted } from './_codexUntrusted.ts';
@@ -21,7 +22,7 @@ import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { codexNativeSettings } from '../executorSettings/codex.ts';
 import { nativeSettingsTomlArgs } from '../executorSettings/toml.ts';
 import { verifyNativeSettings } from '../executorSettings/capability.ts';
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import {
   codexElicitationPresentation,
   codexElicitationResponse,
@@ -40,7 +41,7 @@ import type {
   InTurnPort,
   InTurnReceiptEvent,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 const SCOPED_WORKSPACE_CACHE_MS = 60_000;
@@ -218,6 +219,13 @@ interface CodexTurn {
   totalInputTokens: number;
   cachedInputTokens: number;
   turnId: string | null;
+  // Последняя ОКОНЧАТЕЛЬНАЯ причина сбоя из уведомления `error` (willRetry === false).
+  // Промежуточное уведомление о повторе финальности не доказывает, поэтому им
+  // запасная причина не подменяется.
+  lastError: unknown;
+  // Монотонный признак работы ТЕКУЩЕГО хода: настоящий текст модели, её рассуждения
+  // или инструмент. Лента шагов для этого не годится — она усечена до хвоста.
+  madeProgress: boolean;
   workCalls: Map<string, { signature: string; outcome: Promise<Record<string, unknown>> }>;
   // Канал уточнений: порт отдаётся, когда провайдер назвал id активного хода.
   onInTurnReady?: (port: InTurnPort) => void;
@@ -1326,6 +1334,8 @@ export function openCodexSession({
       totalInputTokens: 0,
       cachedInputTokens: 0,
       turnId: null,
+      lastError: null,
+      madeProgress: false,
       workCalls: new Map(),
       ...(onInTurnReady ? { onInTurnReady } : {}),
       ...(onInTurnAvailability ? { onInTurnAvailability } : {}),
@@ -1376,6 +1386,58 @@ export function openCodexSession({
     finishTurnError(current, Object.assign(error, current.appContext || {}));
   }
 
+  /**
+   * Общие поля итога хода: контекст, кэш и модель одинаковы у успеха и у сбоя —
+   * иначе окно после сбоя теряло бы замер контекста и имя фактической модели.
+   */
+  async function turnOutcomePayload(current: CodexTurn) {
+    let context = current.appContext;
+    if (!context) {
+      try { context = await tokenInfoReader(threadId, { env }); } catch { /* точная метрика необязательна */ }
+    }
+
+    return {
+      sessionId: threadId,
+      cost: null,
+      contextTokens: context?.contextTokens ?? 0,
+      contextWindow: context?.contextWindow ?? 0,
+      contextMetric: context?.contextMetric || 'unavailable',
+      contextIsEstimate: context ? context.contextIsEstimate === true : true,
+      contextCache: context?.contextCache || contextCacheStatus('unavailable'),
+      totalInputTokens: context?.totalInputTokens ?? current.totalInputTokens,
+      cachedInputTokens: context?.cachedInputTokens ?? current.cachedInputTokens,
+      actualModel,
+      steps: current.stepSink.steps,
+    };
+  }
+
+  /**
+   * Ход закрыт ОКОНЧАТЕЛЬНЫМ сбоем, но разговор цел: результат отдаёт сигнал сбоя и
+   * явное подтверждение Р2. Это отдельный путь от finishTurnError — тот бросает
+   * исключение и разрешения продолжать не даёт по определению.
+   */
+  async function finishTurnFailed(current: CodexTurn | null, source: unknown) {
+    if (!current || current.settled) {
+      return;
+    }
+
+    const signal = codexTurnFailure(source || 'ход завершился ошибкой');
+
+    current.settled = true;
+    closeTurn(current);
+
+    current.resolve({
+      ...(await turnOutcomePayload(current)),
+      reply: signal.message,
+      deliveryFailure: true,
+      turnFailure: signal,
+      turnRecovery: {
+        canContinue: Boolean(threadId && current.turnId),
+        madeProgress: current.madeProgress === true,
+      },
+    });
+  }
+
   async function finishTurnSuccess(current: CodexTurn | null) {
     if (!current || current.settled) return;
     // Ход, завершившийся без `final_answer`, всё равно нёс работу: его итог остался
@@ -1392,25 +1454,10 @@ export function openCodexSession({
     current.settled = true;
     closeTurn(current);
 
-    let context = current.appContext;
-    if (!context) {
-      try { context = await tokenInfoReader(threadId, { env }); } catch { /* точная метрика необязательна */ }
-    }
-
     current.resolve({
+      ...(await turnOutcomePayload(current)),
       reply: current.reply,
       ...(current.replyMessageId ? { assistantMessageId: current.replyMessageId } : {}),
-      sessionId: threadId,
-      cost: null,
-      contextTokens: context?.contextTokens ?? 0,
-      contextWindow: context?.contextWindow ?? 0,
-      contextMetric: context?.contextMetric || 'unavailable',
-      contextIsEstimate: context ? context.contextIsEstimate === true : true,
-      contextCache: context?.contextCache || contextCacheStatus('unavailable'),
-      totalInputTokens: context?.totalInputTokens ?? current.totalInputTokens,
-      cachedInputTokens: context?.cachedInputTokens ?? current.cachedInputTokens,
-      actualModel,
-      steps: current.stepSink.steps,
     });
   }
 
@@ -1632,6 +1679,31 @@ export function openCodexSession({
   }
 
   /**
+   * Работала ли модель в этом уведомлении. Учитываются только настоящие признаки:
+   * непустая дельта ответа или резюме рассуждений, шаг инструмента и его результат.
+   * Уведомления о повторе, старте хода, расходе токенов и пустые блоки работой не
+   * являются — иначе сбой сам себе подтверждал бы продвижение.
+   */
+  function makesProgress(method: string, params: CodexNotificationParams, steps: ChatStep[]) {
+    if (method === 'item/agentMessage/delta') {
+      return Boolean(String(params.delta || '').trim());
+    }
+
+    if (method === 'item/reasoning/summaryTextDelta') {
+      return Boolean(String(params.delta || '').trim());
+    }
+
+    if (steps.some((step) => step.k === 'tool' || step.k === 'res')) {
+      return true;
+    }
+
+    // Завершённое сообщение и резюме рассуждений приходят шагом text/think: пустые
+    // блоки нормализатор отбрасывает, поэтому сам шаг уже означает сказанное слово.
+    return method === 'item/completed'
+      && steps.some((step) => step.k === 'text' || step.k === 'think');
+  }
+
+  /**
    * Один app-server мультиплексирует уведомления родителя и его субагентов. Чужой
    * `turn/completed` нельзя принимать за завершение текущего хода, а чужие items —
    * добавлять в его ленту. Пустые id оставляем совместимыми со старыми уведомлениями:
@@ -1684,7 +1756,16 @@ export function openCodexSession({
       // Ходов «сам заговорил» он не выдаёт (session.unsolicited = false).
       return;
     }
-    current.stepSink.emitAll(current.normalizeStep(event));
+
+    const normalized = current.normalizeStep(event);
+
+    // Признак работы фиксируется на ТЕКУЩЕМ событии до попадания в ограниченный sink:
+    // вытесненный из хвоста инструмент работу не отменяет.
+    if (makesProgress(method, params, normalized)) {
+      current.madeProgress = true;
+    }
+
+    current.stepSink.emitAll(normalized);
 
     if (method === 'turn/started') {
       current.turnId = params.turn?.id || current.turnId;
@@ -1723,6 +1804,12 @@ export function openCodexSession({
     } else if (method === 'error') {
       // Ошибка потока: при повторе ответ модели начнётся заново, без повтора ход упадёт.
       abandonMessages(current);
+
+      // Запасной причиной годится только ОКОНЧАТЕЛЬНОЕ уведомление: willRetry true
+      // означает, что Codex сам повторит запрос, и финальность ещё не наступила.
+      if (params.willRetry === false) {
+        current.lastError = params.error || null;
+      }
     } else if (method === 'thread/tokenUsage/updated') {
       rememberUsage(current, params);
     } else if (method === 'turn/completed') {
@@ -1734,7 +1821,9 @@ export function openCodexSession({
       if (current.abortRequested || status === 'interrupted') {
         finishTurnStopped(current);
       } else if (status === 'failed') {
-        finishTurnError(current, codexRpcError('turn/completed', params.turn?.error || 'ход завершился ошибкой'));
+        // Причина берётся из самого хода; пустой turn.error заменяется последним
+        // ОКОНЧАТЕЛЬНЫМ уведомлением error — промежуточное финальности не доказывает.
+        void finishTurnFailed(current, params.turn?.error || current.lastError);
       } else {
         void finishTurnSuccess(current);
       }
@@ -2637,6 +2726,9 @@ function readCodexMcpInventory(bin: string, cwd: string | undefined, {
 
 export default {
   id: 'codex',
+  // Виды сбоя хода объявляет сам адаптер: ядро не знает имён вендора. Общие признаки
+  // (статусы, слова) добавляет реестр — здесь только коды CodexErrorInfo.
+  turnFailureRules: CODEX_TURN_FAILURE_RULES,
   effortHints: {
     none: 'Без рассуждения: быстрые ответы на простые запросы.',
     minimal: 'Минимальное рассуждение: приоритет скорости.',

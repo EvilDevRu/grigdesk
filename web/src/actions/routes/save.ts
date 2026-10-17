@@ -1,4 +1,4 @@
-import type { DraftOperation, RouteDraft } from '../../../../shared/routesEditorContracts.ts';
+import type { DraftOperation, RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { failureText } from '../../shared/apiClient.ts';
 import { useRoutesStore } from '../../stores/routes.ts';
 import { runtimeOf } from './routesRuntime.ts';

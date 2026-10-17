@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import { MobileInputError } from '../errors.ts';
 import type { ActionTokens } from '../actionTokens.ts';
 import type { MobileChatPort } from '../../chat/mobileHistory.ts';
@@ -37,7 +39,7 @@ export async function upstream(
   body?: unknown,
 ): Promise<Payload> {
   const result = await deps.callApi(method, url, body);
-  const payload = record(result.body);
+  const payload = recordOrEmpty(result.body);
 
   if (result.statusCode >= 400) {
     const auth = [401, 403].includes(result.statusCode);
@@ -60,16 +62,6 @@ export async function upstream(
   }
 
   return payload;
-}
-
-/**
- * Объектная граница не принимает массивы, null и примитив вместо словаря.
- * Мягкое чтение внутренних DTO не ослабляет проверку выпускаемой схемы v1.
- */
-export function record(value: unknown): Payload {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Payload)
-    : {};
 }
 
 /**

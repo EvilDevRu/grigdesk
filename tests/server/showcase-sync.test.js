@@ -4,11 +4,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseNarration } from '../../shared/showcaseNarration.ts';
+import { parseNarration } from '../../shared/plugins/showcase/showcaseNarration.ts';
 import {
   SHOWCASE_SYNC_ACTIONS_BY_CUE,
   validateShowcaseSyncBindings,
-} from '../../shared/showcaseSync.ts';
+} from '../../shared/plugins/showcase/showcaseSync.ts';
 import {
   createScene,
   createSyncBindings,

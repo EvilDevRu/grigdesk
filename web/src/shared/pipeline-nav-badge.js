@@ -1,8 +1,10 @@
-// Сводка для составного чипа «Конвейер» в сайдбаре и popover в топбаре.
+// Сводка для счётчика внимания «Конвейер» в сайдбаре и popover в топбаре.
 // Категории обязаны быть взаимоисключающими: один ход может одновременно числиться
 // живым и молчащим, а задача на воротах — ещё и иметь аварийный флаг. В обоих
 // местах задача должна занимать ровно одно место: авария важнее ворот, ворота важнее
 // обычной работы.
+
+import { trimmedText } from '../../../shared/lib/text.ts';
 
 const PIPELINE_GROUPS = [
   { source: 'stalled', kind: 'error', label: 'Встал', detail: 'title' },
@@ -10,10 +12,6 @@ const PIPELINE_GROUPS = [
   { source: 'waiting', kind: 'waiting', label: 'Ждёт решения', detail: 'text' },
   { source: 'running', kind: 'running', label: 'В работе', detail: null },
 ];
-
-function cleanText(value) {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 /**
  * Один приоритетный список питает и цифры, и данные popover. Повтор задачи в более
@@ -76,11 +74,11 @@ export function pipelineTopbarItems(state = {}) {
 
     return {
       task: item.task,
-      title: cleanText(item.entry.taskTitle),
+      title: trimmedText(item.entry.taskTitle),
       kind: item.kind,
       stateLabel: item.label,
-      detail: item.detail ? cleanText(item.entry[item.detail]) : '',
-      stage: cleanText(observed.stage?.label),
+      detail: item.detail ? trimmedText(item.entry[item.detail]) : '',
+      stage: trimmedText(observed.stage?.label),
       progress: validProgress
         ? { done: progress.done, total: progress.total }
         : null,

@@ -1,11 +1,13 @@
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseGitHubAgentSearch,
   parseGitHubPolicy,
   parseGitHubRulesSaved,
   parseGitHubStatus,
-} from '../../../shared/githubContracts.ts';
-import type { GitHubRuleInput } from '../../../shared/githubContracts.ts';
+} from '../../../shared/inbox/githubContracts.ts';
+import type { GitHubRuleInput } from '../../../shared/inbox/githubContracts.ts';
 
 /**
  * Единственная граница сети раздела GitHub. Ответ сервера здесь и проверяется, и
@@ -76,26 +78,12 @@ export const githubApi = {
   },
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Выключенный плагин отвечает своим кодом под 404. Раздел различает его с поломкой:
  * это штатное состояние, и показывать вместо него красную ошибку нельзя.
  */
 export function githubPluginDisabled(error: unknown): boolean {
-  const failure = asRecord(error);
+  const failure = objectOrEmpty(error);
 
-  return failure.status === 404 && asRecord(failure.data).error === 'plugin_disabled';
-}
-
-/**
- * Текст отказа для человека. Сервер GitHub присылает готовое сообщение вместе с
- * машинным кодом, а обрыв сети приходит без тела — тогда остаётся текст операции.
- */
-export function githubErrorMessage(error: unknown, fallback: string): string {
-  const message = asRecord(error).message;
-
-  return typeof message === 'string' && message ? message : fallback;
+  return failure.status === 404 && objectOrEmpty(failure.data).error === 'plugin_disabled';
 }

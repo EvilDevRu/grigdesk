@@ -3,7 +3,7 @@
 // Подключён по причине, которую слышно: нейросетевые голоса поставщика держат
 // интонацию живой речи, а локальные движки до этой планки не дотягивают. Цена —
 // граница: текст сцен уходит поставщику, синтез платный (тарифицируется порциями
-// по 250 знаков). Ключ — серверная машинная настройка из корневого .env; интерфейс
+// по 250 знаков). Ключ — серверная машинная настройка из .env папки данных; интерфейс
 // получает только статус, сам ключ никуда не отдаётся.
 //
 // Речь запрашивается сырым PCM и заворачивается в WAV здесь: поставщик отдаёт
@@ -11,6 +11,9 @@
 // файлов даёт щелчки, а сырые отсчёты склеиваются без потерь.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+
+import { wavOfPcm, peakOfPcm } from './pcm.ts';
+import { recordOrNull } from '../../../../../shared/lib/objects.ts';
 
 import { ShowcaseError } from '../errors.ts';
 import { unsupportedDirections } from './contract.ts';
@@ -49,7 +52,7 @@ const MAX_PAUSE_MS = 7000;
 // длину порции или слова.
 const TIMING_TOLERANCE_MS = 1;
 
-const KEY_HINT = 'Задайте COCKPIT_SHOWCASE_YANDEX_API_KEY в корневом .env сервера '
+const KEY_HINT = 'Задайте COCKPIT_SHOWCASE_YANDEX_API_KEY в .env папки данных '
   + '(ключ сервисного аккаунта с ролью ai.speechkit-tts.user) и перезапустите сервер.';
 
 export interface YandexEngineOptions {
@@ -99,42 +102,6 @@ export function yandexMarkup(text: string, direction: VoiceDirection): string {
   }
 
   return result;
-}
-
-/**
- * WAV из сырых отсчётов: заголовок в 44 байта перед PCM 16 бит. Своя обёртка
- * вместо ffmpeg — потому что формат тривиален, а лишний процесс на каждую реплику
- * только добавил бы способ упасть.
- */
-export function wavOf(pcm: Buffer, sampleRate: number, channels = 1): Buffer {
-  const header = Buffer.alloc(44);
-  const blockAlign = channels * 2;
-
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + pcm.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(channels, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * blockAlign, 28);
-  header.writeUInt16LE(blockAlign, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(pcm.length, 40);
-
-  return Buffer.concat([header, pcm]);
-}
-
-function peakOf(pcm: Buffer): number {
-  let peak = 0;
-
-  for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
-    peak = Math.max(peak, Math.abs(pcm.readInt16LE(offset)));
-  }
-
-  return peak / 32_768;
 }
 
 // Ступени темпа в скорости поставщика (1 — как задумал автор голоса; обычный
@@ -189,12 +156,6 @@ function parseResponse(text: string): unknown[] {
   });
 }
 
-function recordOf(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
 // int64 в protobuf JSON приходит строкой. Не принимаем number даже для малого
 // значения: большой timestamp уже потерял бы точность до входа в адаптер.
 function int64Ms(value: unknown): number | null {
@@ -244,7 +205,7 @@ function timingChunkOf(
   const words: VoiceSpeechSpanTiming[] = [];
 
   for (const raw of wordsRaw) {
-    const word = recordOf(raw);
+    const word = recordOrNull(raw);
     const wordStartMs = int64Ms(word?.startMs);
     const wordLengthMs = int64Ms(word?.lengthMs);
     const text = word?.word;
@@ -277,7 +238,7 @@ function timingChunkOf(
   let segment: VoiceSpeechSpanTiming | null = null;
 
   if (item.textChunk !== undefined) {
-    const textChunk = recordOf(item.textChunk);
+    const textChunk = recordOrNull(item.textChunk);
     const text = textChunk?.text;
 
     if (!textChunk || typeof text !== 'string') {
@@ -336,11 +297,11 @@ function synthesisOf(objects: unknown[]): { pcm: Buffer; speechTiming?: VoiceSpe
   let timingValid = true;
 
   for (const object of objects) {
-    const outer = recordOf(object);
+    const outer = recordOrNull(object);
     const error = outer?.error;
 
     if (error) {
-      const message = recordOf(error)?.message;
+      const message = recordOrNull(error)?.message;
 
       throw new ShowcaseError(
         'voice_failed',
@@ -349,13 +310,13 @@ function synthesisOf(objects: unknown[]): { pcm: Buffer; speechTiming?: VoiceSpe
       );
     }
 
-    const item = recordOf(outer?.result ?? outer);
+    const item = recordOrNull(outer?.result ?? outer);
 
     if (!item) {
       continue;
     }
 
-    const audioChunk = recordOf(item.audioChunk);
+    const audioChunk = recordOrNull(item.audioChunk);
     const data = audioChunk?.data;
 
     if (typeof data !== 'string' || data.length === 0) {
@@ -437,7 +398,7 @@ function failureOf(status: number, text: string): ShowcaseError {
   if (status === 401) {
     return new ShowcaseError(
       'voice_failed',
-      'Yandex SpeechKit отверг ключ: проверьте COCKPIT_SHOWCASE_YANDEX_API_KEY в корневом .env.',
+      'Yandex SpeechKit отверг ключ: проверьте COCKPIT_SHOWCASE_YANDEX_API_KEY в .env папки данных.',
       502,
     );
   }
@@ -633,14 +594,14 @@ export function createYandexEngine(options: YandexEngineOptions): VoiceEngine {
       throw new ShowcaseError('voice_failed', 'Yandex SpeechKit не вернул звука.', 502);
     }
 
-    if (peakOf(pcm) < SILENCE_PEAK) {
+    if (peakOfPcm(pcm) < SILENCE_PEAK) {
       throw new ShowcaseError('voice_failed', 'Yandex SpeechKit вернул тишину вместо речи.', 502);
     }
 
     const file = path.join(synthesisOptions.outputDir, `voice-${Date.now()}.wav`);
 
     await fs.mkdir(synthesisOptions.outputDir, { recursive: true, mode: 0o700 });
-    await fs.writeFile(file, wavOf(pcm, SAMPLE_RATE));
+    await fs.writeFile(file, wavOfPcm(pcm, SAMPLE_RATE));
 
     const ignored = unsupportedDirections(input.direction, own);
 

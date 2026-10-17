@@ -3,7 +3,8 @@
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { pluginPageRoute } from '../shared/tools/catalog.ts';
-import { normalizePluginCategory } from '../../../shared/pluginsContracts.ts';
+import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
+import { decodeOptionalInstall } from '../shared/pluginInstallApi.ts';
 
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
 
@@ -70,7 +71,11 @@ export function sortNavItems(items) {
 }
 
 export const usePluginsStore = defineStore('plugins', {
-  state: () => ({ list: [], loaded: false }),
+  state: () => ({
+    list: [],
+    loaded: false,
+    loadError: null,
+  }),
   getters: {
     // Размещение объявляет manifest, но Vue-страницу/панель он не загружает.
     navItems: (s) => s.list.filter((p) => p.enabled && p.nav)
@@ -100,12 +105,29 @@ export const usePluginsStore = defineStore('plugins', {
       .find((placement) => placement.slot === slot)?.enabled,
   },
   actions: {
+    /**
+     * Полный ответ проверяется до публикации install capabilities в каталоге.
+     * Повреждённая карточка сохраняет прежний список целиком, без смешения DTO.
+     */
     async load() {
       try {
         const { plugins } = await api.get('/api/plugins');
-        this.list = plugins || [];
+
+        if (!Array.isArray(plugins)) {
+          throw new Error('Сервер вернул некорректный каталог плагинов.');
+        }
+
+        const checked = plugins.map((plugin) => ({
+          ...plugin,
+          ...(Object.hasOwn(plugin, 'install') ? { install: decodeOptionalInstall(plugin.install) } : {}),
+        }));
+
+        this.list = checked;
         this.loaded = true;
-      } catch { /* без сервера блок плагинов просто пуст */ }
+        this.loadError = null;
+      } catch (error) {
+        this.loadError = error instanceof Error ? error.message : 'Не удалось получить каталог плагинов.';
+      }
     },
     async toggle(id, enabled) {
       const p = this.byId(id);

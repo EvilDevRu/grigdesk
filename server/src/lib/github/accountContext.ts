@@ -4,6 +4,9 @@
 import path from 'node:path';
 import { lstat, mkdir } from 'node:fs/promises';
 
+import { errorCode } from '../../../../shared/lib/errors.ts';
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { InboxRefCodec, assertAccountRef } from '../inbox/identity.ts';
 import { InboxStateStore } from '../inbox/stateStore.ts';
 import {
@@ -59,29 +62,20 @@ const fail: (code: string, message: string, cause?: unknown) => never = (
   throw new GitHubStoreError(code, message, cause);
 };
 
-// Код ошибки файловой системы: отсутствие каталога — обычное состояние, остальное нет.
-function failureCode(error: unknown): string {
-  const code = error !== null && typeof error === 'object'
-    ? (error as { code?: unknown }).code
-    : undefined;
-
-  return typeof code === 'string' ? code : '';
-}
-
 async function directory(
   pathname: string,
   { create = false, label = '' }: { create?: boolean; label?: string } = {},
 ) {
   if (create) {
     try { await mkdir(pathname, { mode: 0o700 }); } catch (err) {
-      if (failureCode(err) !== 'EEXIST') {
+      if (errorCode(err) !== 'EEXIST') {
         fail('github_store_write_failed', `${label} не удалось создать безопасно.`, err);
       }
     }
   }
   let info;
   try { info = await lstat(pathname); } catch (err) {
-    if (failureCode(err) === 'ENOENT') {
+    if (errorCode(err) === 'ENOENT') {
       fail('github_metadata_missing', `${label} отсутствует.`);
     }
     fail('github_store_unsafe', `${label} нельзя безопасно проверить.`, err);
@@ -99,7 +93,7 @@ async function accountNamespace(
 ): Promise<string> {
   if (create) {
     try { await mkdir(root, { recursive: true, mode: 0o700 }); } catch (err) {
-      if (failureCode(err) !== 'EEXIST') {
+      if (errorCode(err) !== 'EEXIST') {
         fail('github_store_write_failed', 'GitHub trusted root не удалось создать.', err);
       }
     }
@@ -112,14 +106,8 @@ async function accountNamespace(
   return accountDir;
 }
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 function exact(value: unknown, keys: string[], where: string): void {
-  if (!isPlainObject(value)) fail('github_metadata_invalid', `${where}: ожидался объект.`);
+  if (!isPlainRecord(value)) fail('github_metadata_invalid', `${where}: ожидался объект.`);
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {

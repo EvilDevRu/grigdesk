@@ -3,8 +3,8 @@
 import { randomBytes } from 'node:crypto';
 
 import { resolveModelRef, sameModelRef } from '../../chat/modelRef.ts';
-import { contextFill } from '../../../../../shared/chatContext.ts';
-import { normalizeContextUsage } from '../../../../../shared/chatContextUsage.ts';
+import { contextFill } from '../../../../../shared/chat/chatContext.ts';
+import { normalizeContextUsage } from '../../../../../shared/chat/chatContextUsage.ts';
 import {
   cbData,
   clipText,

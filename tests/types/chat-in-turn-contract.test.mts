@@ -8,8 +8,8 @@ import type {
   InTurnDeliverResult,
   InTurnPort,
   InTurnReceipt,
-} from '../../shared/chatInTurnContracts.ts';
-import { IN_TURN_BACKLOG_LIMIT, canTransition, utf8Bytes } from '../../shared/chatInTurnContracts.ts';
+} from '../../shared/chat/chatInTurnContracts.ts';
+import { IN_TURN_BACKLOG_LIMIT, canTransition, utf8Bytes } from '../../shared/chat/chatInTurnContracts.ts';
 import { ChatInTurnLedger } from '../../server/src/lib/chat/inTurnLedger.ts';
 import { InTurnMessages } from '../../server/src/lib/chat/inTurnMessages.ts';
 

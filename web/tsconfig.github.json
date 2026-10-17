@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/githubContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/inbox/githubContracts.ts",
     "src/shared/githubApi.ts",
     "src/views/GitHubView.vue",
     "../tests/types/github-contract.test.ts"

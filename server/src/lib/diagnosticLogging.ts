@@ -1,6 +1,6 @@
-import { diagnosticLevel, DIAGNOSTIC_TIMER_LIMIT_MS } from '../../../shared/diagnosticLogging.ts';
+import { diagnosticLevel, DIAGNOSTIC_TIMER_LIMIT_MS } from '../../../shared/web-log/diagnosticLogging.ts';
 
-import type { DiagnosticLevel } from '../../../shared/diagnosticLogging.ts';
+import type { DiagnosticLevel } from '../../../shared/web-log/diagnosticLogging.ts';
 import type { FactoryDebugSettings, FactoryDebugView } from './factoryDebug.ts';
 
 const SERVER_LOG_LEVEL: Record<DiagnosticLevel, 'silent' | 'error' | 'info' | 'debug'> = {

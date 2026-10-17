@@ -324,7 +324,11 @@ function projectTimeline(
         === entry.assistantMessageId);
 
       if (known) {
-        known.message = { ...entry, ...known.message };
+        // В историю попадает только законченный блок: сервер и окно переносят лишь complete.
+        // Устаревшие флаги черновика из store её не перекрывают — иначе «Пишет…» до F5.
+        const { complete: _complete, abandoned: _abandoned, ...meta } = entry;
+
+        known.message = { ...meta, ...known.message };
       } else if (current.live && entry.text.trim() && run?.runId === current.key) {
         current.messages.push(messageRow({
           ...entry,

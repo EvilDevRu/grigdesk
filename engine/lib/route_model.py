@@ -45,11 +45,11 @@ FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
 # Потолок кругов режима «цикл» задаёт профиль (PROFILE_LOOP_MAX_ROUNDS); здесь только
 # значение по умолчанию для симуляции и верхняя граница, общие с движком.
 LOOP_DEFAULT_MAX_ROUNDS = 20
-LOOP_MAX_ROUNDS_LIMIT = 100
+LOOP_MAX_ROUNDS_LIMIT = 300
 # Предел шагов пробного сценария редактора (ROUTES_EDITOR_LIMITS в shared): у маршрута с
-# циклом он вмещает весь потолок кругов — 100 кругов это 201 шаг до `loop-ceiling`.
+# циклом он вмещает весь потолок кругов — 300 кругов это 601 шаг до `loop-ceiling`.
 SIMULATION_STEPS = 200
-LOOP_SIMULATION_STEPS = 400
+LOOP_SIMULATION_STEPS = 1200
 RETRY_STRATEGIES = {"none", "same-runner", "runner-failover"}
 OUTCOMES = {
     "agent": {"done", "skipped", "failed", "exhausted"},
@@ -954,7 +954,9 @@ def _editor_counter_map(value: Any, label: str) -> dict[str, int]:
     for key, count in value.items():
         if not isinstance(key, str) or not re.fullmatch(r"[a-zA-Z0-9_:/-]{1,160}", key):
             fail(f"{label}: недопустимый ключ")
-        assert_integer(count, 0, 200, f"{label}.{key}")
+        # Счётчик возвратов в цель цикла доходит до потолка кругов, поэтому верхняя граница
+        # следует за ним; у прочих счётчиков свои бюджеты намного меньше.
+        assert_integer(count, 0, max(200, LOOP_MAX_ROUNDS_LIMIT), f"{label}.{key}")
     return dict(value)
 
 

@@ -1,5 +1,5 @@
 import { sshApi } from '../../shared/sshApi.ts';
-import type { SshConnection, SshConnectionInput } from '../../../../shared/sshContracts.ts';
+import type { SshConnection, SshConnectionInput } from '../../../../shared/plugins/ssh/sshContracts.ts';
 import { useSshStore } from '../../stores/ssh.ts';
 import { activateSshSession } from './sshTerminal.ts';
 

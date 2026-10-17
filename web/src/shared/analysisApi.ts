@@ -1,3 +1,5 @@
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseAnalysisArbiter,
@@ -5,8 +7,8 @@ import {
   parseAnalysisDetail,
   parseAnalysisQueue,
   parseAnalysisRows,
-} from '../../../shared/analysisContracts.ts';
-import type { AnalysisAnswerInput } from '../../../shared/analysisContracts.ts';
+} from '../../../shared/pipeline/analysisContracts.ts';
+import type { AnalysisAnswerInput } from '../../../shared/pipeline/analysisContracts.ts';
 
 function taskPath(id: string | number, suffix = ''): string {
   return `/api/tasks/${encodeURIComponent(String(id))}${suffix}`;
@@ -65,19 +67,15 @@ export const analysisApi = {
   },
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 /**
  * Выключенный плагин отвечает своим кодом и приезжает и в теле ответа, и в поле
  * ошибки транспорта. Раздел различает его с поломкой: это штатное состояние.
  */
 export function analysisDisabledFailure(error: unknown): boolean {
-  const failure = asRecord(error);
+  const failure = objectOrEmpty(error);
 
   return failure.code === 'plugin_disabled'
-    || asRecord(failure.data).error === 'plugin_disabled';
+    || objectOrEmpty(failure.data).error === 'plugin_disabled';
 }
 
 /**
@@ -85,7 +83,7 @@ export function analysisDisabledFailure(error: unknown): boolean {
  * без тела вовсе — тогда остаётся сообщение самой ошибки.
  */
 export function analysisErrorMessage(error: unknown, fallback = 'Триаж недоступен'): string {
-  const message = asRecord(error).message;
+  const message = objectOrEmpty(error).message;
 
   return typeof message === 'string' && message ? message : fallback;
 }

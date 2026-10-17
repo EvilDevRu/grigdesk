@@ -5,7 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import type { RouteDraft, RouteEditorIssue } from '../../../../shared/routesEditorContracts.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
+import type { RouteDraft, RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { parseRouteMap } from '../../lib/analysis/routePolicy.ts';
 import { loadRunnerConfig } from '../../lib/runnerState.ts';
 
@@ -57,10 +59,6 @@ function profileIssue(code: string, message: string, pathName = '/profile'): Rou
     path: pathName,
     message,
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function exactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {

@@ -55,6 +55,8 @@ const EVENT_NAMES = [
   'showcase-build-progress',
   'showcase-voice',
   'usage-forecast',
+  'studio-changed',
+  'studio-progress',
 ] as const;
 
 // Имя события шины: ровно то, что сервер объявил выше.

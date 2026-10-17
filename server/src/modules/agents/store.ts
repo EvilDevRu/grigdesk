@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
-import type { AgentCard } from '../../../../shared/agentsContracts.ts';
+import type { AgentCard } from '../../../../shared/pipeline/agentsContracts.ts';
 
 // Карточка агента без идентификатора: id задаёт имя файла в базе.
 export type AgentRecord = Omit<AgentCard, 'id'>;

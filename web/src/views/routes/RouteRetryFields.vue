@@ -32,8 +32,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { RouteRetry } from '../../../../shared/routeDefinition.ts';
-import type { RouteEditorInfo } from '../../../../shared/routesEditorContracts.ts';
+import type { RouteRetry } from '../../../../shared/pipeline/routeDefinition.ts';
+import type { RouteEditorInfo } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiNumberInput, UiSelect } from '../../ui';
 
 const props = defineProps<{

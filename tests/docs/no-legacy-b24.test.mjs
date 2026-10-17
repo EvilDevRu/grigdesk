@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { lstatSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -11,9 +12,9 @@ const LEGACY = `b24${'-'}mcp`;
 const SKIP_FILES = new Set(['package-lock.json', path.basename(fileURLToPath(import.meta.url))]);
 const execFileAsync = promisify(execFile);
 
+// Только tracked и неигнорируемые новые файлы: .env, chats и runtime-state не являются
+// кодовой базой и могут законно содержать исторический пользовательский текст.
 async function sourceFiles() {
-  // Только tracked и неигнорируемые новые файлы: .env, chats и runtime-state не являются
-  // кодовой базой и могут законно содержать исторический пользовательский текст.
   const { stdout } = await execFileAsync(
     'git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -23,8 +24,11 @@ async function sourceFiles() {
     .filter(Boolean)
     .filter((file) => !SKIP_FILES.has(path.basename(file)))
     .map((file) => path.join(ROOT, file));
-  // Локальный .env не коммитится, но может незаметно сохранить runtime-зависимость.
-  return [...tracked, path.join(ROOT, '.env')];
+  // Локальный .env не коммитится, но может незаметно сохранить runtime-зависимость. После
+  // переноса данных на его месте ссылка в папку данных: настоящий файл проверяется только там.
+  const local = path.join(ROOT, '.env');
+
+  return lstatSync(local, { throwIfNoEntry: false })?.isFile() ? [...tracked, local] : tracked;
 }
 
 test('repository has no dependency or stale documentation for the retired B24 project', async () => {

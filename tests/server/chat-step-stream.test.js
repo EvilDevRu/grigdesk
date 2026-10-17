@@ -11,7 +11,7 @@ import { toClaudeSteps } from '../../server/src/lib/executors/_claudeSteps.ts';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
 import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimiSteps.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
-import { STEP_IMAGE_TEXT } from '../../shared/chatSteps.ts';
+import { STEP_IMAGE_TEXT } from '../../shared/chat/chatSteps.ts';
 
 test('Claude Write объявляет изменяемый файл в нейтральном шаге', () => {
   const steps = toClaudeSteps({

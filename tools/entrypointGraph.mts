@@ -17,6 +17,13 @@ export const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // Разница между ними только в том, кто нажимает кнопку: строковый путь одинаково
 // невидим компилятору во всех трёх случаях.
 export const ENTRYPOINTS: readonly string[] = [
+    // Единая команда: этот TS-вход запускает bin/cockpit после проверки Node.
+    'cli/main.ts',
+    // Команда задач Б24: исходный вход и сборка единственного файла SEA.
+    'b24/src/main.ts',
+    'b24/scripts/build.mts',
+    'tools/moveDataHome.mts',
+    'server/scripts/dataHomeCheck.mts',
     'server/src/app.js',
     'server/src/lib/chat/permission-mcp.js',
     'server/src/lib/executors/work-mcp.js',
@@ -106,7 +113,9 @@ export function entrypointsWithTypeScript(root: string = REPO_ROOT): string[] {
 }
 
 /** Относительные ссылки одного файла: импорты, динамический import и new URL. */
-function referencesOf(source: string): string[] {
+// Тот же разбор использует проверка раннего старта: граф не должен захватить config.
+// Относительные импорты и файловые URL разрешает вызывающий относительно исходника.
+export function referencesOf(source: string): string[] {
     const specs: string[] = [];
 
     for (const pattern of [SPEC_RE, BARE_IMPORT_RE, DYNAMIC_RE, URL_RE]) {

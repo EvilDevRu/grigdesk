@@ -270,6 +270,61 @@ test('WEB-11: ответ, пришедший синхронизацией в ф�
   assert.equal(chatNotifications().length, 1);
 });
 
+test('WEB-11b: промежуточная реплика идущего хода не помечает чат непрочитанным, итог хода — помечает',
+  async () => {
+    const chat = await fixture();
+    const block = {
+      role: 'assistant',
+      kind: 'assistant-block',
+      runId: 'run-1',
+      assistantMessageId: 'block-0001',
+      text: 'Смотрю файлы этапа.',
+      complete: true,
+    };
+
+    chat._visible = () => false;
+
+    const sse = sseOf(chat);
+
+    serveChat({
+      ...CHAT,
+      messages: [...CHAT.messages, block],
+      updatedAt: 300,
+    });
+    sse('chat-store', {
+      id: 'c1',
+      archived: false,
+      origin: 'сервер',
+      at: 10,
+    });
+    await new Promise(setImmediate);
+
+    assert.equal(chatNotifications().length, 0, 'промежуточная реплика — не ответ');
+    assert.equal(Boolean(chat.sessions[0].unread), false);
+
+    serveChat({
+      ...CHAT,
+      messages: [...CHAT.messages, block, {
+        role: 'assistant',
+        runId: 'run-1',
+        text: 'Этап готов.',
+        steps: [],
+      }],
+      updatedAt: 400,
+    });
+    sse('chat-store', {
+      id: 'c1',
+      archived: false,
+      origin: 'сервер',
+      at: 11,
+    });
+    await new Promise(setImmediate);
+
+    assert.equal(chatNotifications().length, 1);
+    assert.equal(chatNotifications()[0][1], 'Этап готов.');
+    assert.equal(chat.sessions[0].unread, true);
+  });
+
 test('WEB-12: ответ из pending после обрыва фонового запроса тоже показывает оповещение', async () => {
   const chat = await fixture({ sending: true, offline: true });
   chat._visible = () => false;

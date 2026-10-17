@@ -1,3 +1,5 @@
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import type { MobileApp } from '../mobileServer.ts';
 import { validateStructuredAnswers } from '../../chat/structuredAnswers.ts';
 import { decodeContract } from '../contract.ts';
@@ -9,7 +11,7 @@ import type {
   UnsupportedWaiting,
 } from '../contract.ts';
 import { MobileInputError } from '../errors.ts';
-import { TextPages, count, paginate, record, resourceId, text, upstream } from './common.ts';
+import { TextPages, count, paginate, resourceId, text, upstream } from './common.ts';
 import type { FacadeDeps, Payload } from './common.ts';
 
 /**
@@ -24,7 +26,7 @@ function questionsOf(value: Payload): Question[] {
   }
 
   return source.map((raw, index) => {
-    const question = record(raw);
+    const question = recordOrEmpty(raw);
     const options = Array.isArray(question.options) ? question.options : [];
     const inputType = value.structured
       ? String(question.inputType)
@@ -68,7 +70,7 @@ function questionsOf(value: Payload): Question[] {
       inputType: inputType as Question['inputType'],
       required: question.required === true,
       options: options.map((rawOption, optionIndex) => {
-        const option = record(rawOption);
+        const option = recordOrEmpty(rawOption);
 
         return {
           id: String(option.id ?? option.value ?? `o${optionIndex}`),
@@ -98,7 +100,7 @@ function questionsOf(value: Payload): Question[] {
  * Ни один HTML или shell-фрагмент из input не исполняется адаптером и интерфейсом.
  */
 function permissionText(item: Payload): string {
-  const input = record(item.input);
+  const input = recordOrEmpty(item.input);
 
   return item.tool === 'ExitPlanMode' && typeof input.plan === 'string'
     ? input.plan
@@ -119,7 +121,7 @@ export function registerWaitingRoutes(app: MobileApp, deps: FacadeDeps) {
   async function waiting() {
     const body = await upstream(deps, 'GET', '/api/chat/waiting');
 
-    return (Array.isArray(body.waiting) ? body.waiting : []).map(record);
+    return (Array.isArray(body.waiting) ? body.waiting : []).map(recordOrEmpty);
   }
 
   /**
@@ -355,9 +357,9 @@ export function registerWaitingRoutes(app: MobileApp, deps: FacadeDeps) {
 
         if (item.structured) {
           let value: unknown = answer.value;
-          const original = record((item.questions as unknown[])[questions.indexOf(question)]);
+          const original = recordOrEmpty((item.questions as unknown[])[questions.indexOf(question)]);
           const originalOptions = (Array.isArray(original.options) ? original.options : []).map(
-            record,
+            recordOrEmpty,
           );
           const selected = (answer.optionIds ?? []).map(
             (id) =>

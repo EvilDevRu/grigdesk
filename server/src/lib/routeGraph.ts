@@ -1,9 +1,9 @@
 // Форма графа route-задачи из ЗАКРЕПЛЁННОГО каталога попытки. Построитель общий с холстом
-// редактора и живёт в shared/routeGraphView.ts; сервер добавляет подписи из своего каталога
+// редактора и живёт в shared/pipeline/routeGraphView.ts; сервер добавляет подписи из своего каталога
 // стадий, чтобы узел без label назывался так же, как в остальном кокпите.
 import { resolveNode } from './stages.ts';
-import { buildRouteGraph } from '../../../shared/routeGraphView.ts';
-import type { RouteGraphDef, RouteMachine } from '../../../shared/routeGraphView.ts';
+import { buildRouteGraph } from '../../../shared/pipeline/routeGraphView.ts';
+import type { RouteGraphDef, RouteMachine } from '../../../shared/pipeline/routeGraphView.ts';
 
 export type {
   RouteGraphDef,
@@ -13,7 +13,7 @@ export type {
   RouteMachine,
   RouteMachineNode,
   RouteTransition,
-} from '../../../shared/routeGraphView.ts';
+} from '../../../shared/pipeline/routeGraphView.ts';
 
 /**
  * Строит форму графа по машине маршрута и, если передана, разведке его каталога.

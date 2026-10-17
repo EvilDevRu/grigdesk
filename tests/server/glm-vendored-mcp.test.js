@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import {
@@ -16,7 +18,7 @@ import {
   writeGlmEgressGuard,
 } from '../helpers/glmProductionFixture.mts';
 
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G7/fixtures');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G7/fixtures');
 const MODEL = '["zai","glm-5.3"]';
 
 /**

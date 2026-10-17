@@ -21,6 +21,7 @@ import { readDeepSeekMcpStatus } from '../deepseek/mcpStatus.ts';
 import { deepSeekUsage } from '../deepseek/balance.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
+import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 
@@ -146,7 +147,7 @@ export default {
     const base = {
       kind: 'embedded' as const,
       label: 'Входит в Cockpit',
-      authHint: 'Задайте ключ кнопкой «Ключи доступа» ниже или DEEPSEEK_API_KEY в корневом .env.',
+      authHint: 'Задайте ключ кнопкой «Ключи доступа» ниже или DEEPSEEK_API_KEY в .env папки данных.',
     };
 
     try {
@@ -176,6 +177,9 @@ export default {
   statusPage: 'https://status.deepseek.com',
   catalogLive: true,
   retryContract: RETRY_CONTRACT.PRE_PROMPT_ONLY,
+  // Виды сбоя хода объявляет сам адаптер: ядро не знает имён вендора. Общие признаки
+  // (статусы, слова) добавляет реестр — здесь только коды DSH из turn/end.reason.error.
+  turnFailureRules: DSH_TURN_FAILURE_RULES,
   inTurnInput: { protocol: 1, text: true, confirmation: 'forwarded' },
   compaction: { kind: 'summary' },
   directSshPolicy: {
@@ -185,7 +189,7 @@ export default {
   settings: [directSshSetting({
     note: 'Запрет обеспечивает server-owned PreToolUse hook внутри штатного профиля DSH.',
   })],
-  // Ключ задаётся окном «Ключи доступа»: сервер пишет его в корневой .env и в process.env.
+  // Ключ задаётся окном «Ключи доступа»: сервер пишет его в .env папки данных и в process.env.
   credentials: [{
     env: 'DEEPSEEK_API_KEY',
     kind: 'secret',

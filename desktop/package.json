@@ -1,0 +1,67 @@
+{
+  "name": "cockpit-desktop",
+  "productName": "Кокпит",
+  "version": "0.3.0",
+  "description": "Окно Кокпита для компьютера",
+  "author": "Кокпит",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mts",
+    "dist": "npm run build && electron-builder --linux AppImage --x64 --publish never",
+    "postinstall": "install-electron"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.25.12",
+    "playwright-core": "1.62.1",
+    "typescript": "5.9.3"
+  },
+  "build": {
+    "appId": "local.cockpit.desktop",
+    "electronFuses": {
+      "enableCookieEncryption": true,
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false
+    },
+    "productName": "Кокпит",
+    "artifactName": "cockpit-desktop-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/ui/**/*",
+      "package.json"
+    ],
+    "extraResources": [{ "from": "dist/ui", "to": "ui" }],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network",
+      "icon": "build/icon.png"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

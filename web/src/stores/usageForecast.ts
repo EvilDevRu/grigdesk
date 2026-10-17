@@ -1,13 +1,13 @@
 // Прогноз лимитов исполнителей: снимок с `GET /api/usage-forecast`, который дальше
 // обновляет SSE `usage-forecast`. Стор хранит только снимок; запросы и подписка живут
 // в операциях раздела (web/src/actions/usageForecast/). Раздел выпиливаемый — см.
-// заголовок shared/usageForecastContracts.ts.
+// заголовок shared/chat/usageForecastContracts.ts.
 import { defineStore } from 'pinia';
 
 import type {
   UsageBarForecast,
   UsageForecastSnapshot,
-} from '../../../shared/usageForecastContracts.ts';
+} from '../../../shared/chat/usageForecastContracts.ts';
 
 export interface UsageForecastState {
   snapshot: UsageForecastSnapshot | null;

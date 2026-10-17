@@ -4,7 +4,7 @@
 // переименование ключа, перенос выбора по умолчанию, порядок — можно проверить без
 // компонента, а форма не держит вторую копию правил.
 
-import type { ProjectDetail, ProjectInput } from '../../../../shared/projectsContracts';
+import type { ProjectDetail, ProjectInput } from '../../../../shared/runtime/projectsContracts';
 
 export interface ProjectRepoDraft {
   key: string;

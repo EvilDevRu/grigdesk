@@ -3,7 +3,8 @@
 // человеку предлагали набрать «Продолжай» руками. Обе метки прерывания ведут к одной
 // кнопке, но текст продолжения называет свою причину; без метки кнопки нет.
 import assert from 'node:assert/strict';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import test from 'node:test';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
 

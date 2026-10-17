@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/telegramContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/telegram/telegramContracts.ts",
     "src/shared/telegramApi.ts",
     "src/views/TelegramView.vue",
     "../tests/types/telegram-contract.test.ts"

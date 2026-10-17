@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import type { RoutePromptBlock } from '../../../../shared/routeDefinition.ts';
+import type { RoutePromptBlock } from '../../../../shared/pipeline/routeDefinition.ts';
 import { UiButton } from '../../ui';
 
 defineProps<{ blocks: RoutePromptBlock[]; selected: number }>();

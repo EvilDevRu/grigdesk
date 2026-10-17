@@ -40,7 +40,7 @@
 <script setup lang="ts">
 import type {
   RouteCompareReport, RouteRevisionCompareReport,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiButton } from '../../ui';
 
 defineProps<{ report: RouteCompareReport | RouteRevisionCompareReport; canPublish: boolean }>();

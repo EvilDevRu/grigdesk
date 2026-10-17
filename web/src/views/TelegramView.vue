@@ -795,7 +795,7 @@
             <details class="technical">
               <summary>Где хранится токен</summary>
               <div class="muted sub technical-data">
-                В account-aware credential store <code>server/.state/telegram-account-creds.json</code>,
+                В файле <code>state/telegram-account-creds.json</code> в папке данных,
                 доступном только владельцу.
               </div>
             </details>
@@ -836,13 +836,15 @@
 // Почему нет кнопки «создать бота»: у Телеграма нет API создания ботов вовсе —
 // бот заводится только личной перепиской человека с @BotFather. Кокпит берёт
 // на себя всё, что после: проверяет токен через getMe, называет бота по имени
-// и кладёт секрет в server/.state с правами 0600. Терминал для этого не нужен.
+// и кладёт секрет в state/ папки данных с правами 0600. Терминал для этого не нужен.
 //
 // Правила «чат или тема → проект» — не настройка удобства, а разрешение читать:
 // без правила ссылку на чат не развернёт никто. Поэтому редактор ничего не
 // придумывает за человека (пустой список значит «закрыто везде») и правит список
 // целиком: сервер и проверяет его целиком, одним валидатором.
 import { computed, onMounted, ref, watch } from 'vue';
+
+import { errorMessage } from '../../../shared/lib/errors.ts';
 
 import {
   confirmDialog,
@@ -856,12 +858,8 @@ import {
   vTooltip,
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
-import {
-  telegramApi,
-  telegramErrorMessage,
-  telegramPluginDisabled,
-} from '../shared/telegramApi.ts';
-import { isTelegramPolicyFingerprint } from '../../../shared/telegramContracts.ts';
+import { telegramApi, telegramPluginDisabled } from '../shared/telegramApi.ts';
+import { isTelegramPolicyFingerprint } from '../../../shared/telegram/telegramContracts.ts';
 import type {
   TelegramBot,
   TelegramChat,
@@ -871,7 +869,7 @@ import type {
   TelegramRules,
   TelegramStatus,
   TelegramTopic,
-} from '../../../shared/telegramContracts.ts';
+} from '../../../shared/telegram/telegramContracts.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 
 // Состояние канала закрыто перечислением на границе сети: «подключается» и
@@ -1060,7 +1058,7 @@ async function loadChats(): Promise<void> {
   } catch (e) {
     // Список чатов вторичен: из-за него не должно пропадать подключение бота.
     if (!telegramPluginDisabled(e)) {
-      error.value = telegramErrorMessage(e, 'Не удалось загрузить список чатов.');
+      error.value = errorMessage(e, 'Не удалось загрузить список чатов.');
     }
   }
 }
@@ -1126,7 +1124,7 @@ async function saveService(): Promise<void> {
       ? `Служебный чат — ${bot.value.serviceChatTitle || bot.value.serviceChatId}.`
       : 'Служебный чат снят: пересылать сообщения бот больше не будет.';
   } catch (e) {
-    error.value = telegramErrorMessage(e, 'Не удалось сохранить служебный чат.');
+    error.value = errorMessage(e, 'Не удалось сохранить служебный чат.');
     // Отказ сервера не должен оставлять в селекте то, чего сервер не принял.
     serviceChoice.value = serviceSaved.value;
   } finally {
@@ -1164,7 +1162,7 @@ async function pultRequest(): Promise<void> {
     pult.value = res.pult;
     note.value = 'Код отправлен в личку — введи его ниже, он действует 10 минут.';
   } catch (e) {
-    error.value = telegramErrorMessage(e, 'Не удалось отправить код.');
+    error.value = errorMessage(e, 'Не удалось отправить код.');
   } finally {
     busy.value = '';
   }
@@ -1189,7 +1187,7 @@ async function pultConfirm(): Promise<void> {
     note.value = `Пульт включён: бот слушает личку ${pult.value?.chatTitle || pult.value?.chatHint || ''}.`;
   } catch (e) {
     // Текст сервера уже человеческий (код не совпал / протух) — показываем как есть.
-    error.value = telegramErrorMessage(e, 'Не удалось включить пульт.');
+    error.value = errorMessage(e, 'Не удалось включить пульт.');
   } finally {
     busy.value = '';
   }
@@ -1218,7 +1216,7 @@ async function pultDisable(): Promise<void> {
     pult.value = res.pult;
     note.value = 'Пульт выключен.';
   } catch (e) {
-    error.value = telegramErrorMessage(e, 'Не удалось выключить пульт.');
+    error.value = errorMessage(e, 'Не удалось выключить пульт.');
   } finally {
     busy.value = '';
   }
@@ -1524,7 +1522,7 @@ async function loadTopics(chatId: unknown, { force = false }: { force?: boolean 
   } catch (e) {
     // Ручной ввод остаётся рабочим даже со старым сервером или временной ошибкой
     // архива; общей красной плашкой вторичный справочник страницу не перекрывает.
-    topicErrors.value[key] = telegramErrorMessage(e, 'Не удалось загрузить темы.');
+    topicErrors.value[key] = errorMessage(e, 'Не удалось загрузить темы.');
   } finally {
     topicLoading.value[key] = false;
   }
@@ -1637,7 +1635,7 @@ async function loadRules(): Promise<void> {
     await loadRuleTopics();
   } catch (e) {
     if (!telegramPluginDisabled(e)) {
-      error.value = telegramErrorMessage(e, 'Не удалось загрузить правила.');
+      error.value = errorMessage(e, 'Не удалось загрузить правила.');
     }
   }
 }
@@ -1701,7 +1699,7 @@ async function saveRules(): Promise<void> {
       : 'Правил не осталось — чаты снова закрыты.';
   } catch (e) {
     // Текст валидатора уже человеческий и с номером правила — показываем как есть.
-    error.value = telegramErrorMessage(e, 'Не удалось сохранить правила.');
+    error.value = errorMessage(e, 'Не удалось сохранить правила.');
   } finally {
     busy.value = '';
   }
@@ -1821,7 +1819,7 @@ async function setAgentSearch(r: RuleForm, event: Event): Promise<void> {
       ? 'Агентский поиск разрешён для выбранного правила.'
       : 'Агентский поиск для выбранного правила запрещён.';
   } catch (e) {
-    const mutationMessage = telegramErrorMessage(e, 'Ответ изменения доступа не получен.');
+    const mutationMessage = errorMessage(e, 'Ответ изменения доступа не получен.');
 
     try {
       await confirmAgentSearch(requestedRule, enabled, mutationMessage);
@@ -1830,7 +1828,7 @@ async function setAgentSearch(r: RuleForm, event: Event): Promise<void> {
       agentSearchStateKnown.value = false;
       note.value = '';
       error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
-        + `${telegramErrorMessage(refreshError, 'правила не удалось перечитать')}`;
+        + `${errorMessage(refreshError, 'правила не удалось перечитать')}`;
     }
   } finally {
     busy.value = '';
@@ -1862,7 +1860,7 @@ async function load(): Promise<void> {
   } catch (e) {
     // Выключенный плагин — не ошибка: заглушку покажет pluginOff.
     if (!telegramPluginDisabled(e)) {
-      error.value = telegramErrorMessage(e, 'Не удалось загрузить раздел.');
+      error.value = errorMessage(e, 'Не удалось загрузить раздел.');
     }
   } finally {
     loading.value = false;
@@ -1896,7 +1894,7 @@ async function connect(): Promise<void> {
     // не было и списка проектов — без этого селект проекта пустой до F5.
     await Promise.all([loadRules(), loadUsers(), loadGroups()]);
   } catch (e) {
-    error.value = telegramErrorMessage(e, 'Не удалось подключить бота.');
+    error.value = errorMessage(e, 'Не удалось подключить бота.');
   } finally {
     busy.value = '';
   }
@@ -1925,7 +1923,7 @@ async function recheck(): Promise<void> {
       : 'Проверено. Режим приватности всё ещё включён.';
     await loadChats();
   } catch (e) {
-    error.value = telegramErrorMessage(e, 'Не удалось перепроверить бота.');
+    error.value = errorMessage(e, 'Не удалось перепроверить бота.');
   } finally {
     busy.value = '';
   }
@@ -1966,7 +1964,7 @@ async function disconnect(): Promise<void> {
     note.value = 'Бот отключён, токен стёрт. Ранее принятые обращения остаются в общем Inbox '
       + 'только для чтения.';
   } catch (e) {
-    error.value = telegramErrorMessage(e, 'Не удалось отключить бота.');
+    error.value = errorMessage(e, 'Не удалось отключить бота.');
   } finally {
     busy.value = '';
   }

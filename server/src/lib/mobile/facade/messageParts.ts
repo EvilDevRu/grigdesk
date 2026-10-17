@@ -1,6 +1,8 @@
-import { STEP_IMAGE_TEXT } from '../../../../../shared/chatSteps.ts';
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
+import { STEP_IMAGE_TEXT } from '../../../../../shared/chat/chatSteps.ts';
 import type { Media, MessagePart } from '../contract.ts';
-import { record, text } from './common.ts';
+import { text } from './common.ts';
 
 const RASTER = /\.(png|jpe?g|gif|webp)$/i;
 
@@ -140,7 +142,7 @@ export function collectMedia(message: Record<string, unknown>): Media[] {
 
   if (message.role === 'user') {
     for (const value of Array.isArray(message.attachments) ? message.attachments : []) {
-      const attachment = record(value);
+      const attachment = recordOrEmpty(value);
       const file = text(attachment.file, 200);
 
       if (RASTER.test(file) && /^[A-Za-z0-9_.-]+$/.test(file)) {
@@ -152,7 +154,7 @@ export function collectMedia(message: Record<string, unknown>): Media[] {
       }
     }
   } else {
-    const steps = (Array.isArray(message.steps) ? message.steps : []).map(record);
+    const steps = (Array.isArray(message.steps) ? message.steps : []).map(recordOrEmpty);
     const results = new Map<string, Record<string, unknown>>();
 
     for (const step of steps) {

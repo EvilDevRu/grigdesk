@@ -112,10 +112,15 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue';
-import type { DraftNode, RouteFanout, RoutePolicy, RouteRetry } from '../../../../shared/routeDefinition.ts';
+import type {
+  DraftNode,
+  RouteFanout,
+  RoutePolicy,
+  RouteRetry,
+} from '../../../../shared/pipeline/routeDefinition.ts';
 import type {
   RouteDraft, RouteEditorInfo, RouteEffectivePolicy,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { NewExecutor, RouteCommandIssue, RouteCommandResult,
   RouteCommandScope } from './routeCommands.ts';
 import { changeNodeExecutor, renameNode, setNodeLabel, setNodeDescription,

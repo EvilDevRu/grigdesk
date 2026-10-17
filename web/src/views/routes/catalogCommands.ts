@@ -1,6 +1,6 @@
-import { ROUTES_EDITOR_LIMITS } from '../../../../shared/routesEditorContracts.ts';
-import type { RouteDraft } from '../../../../shared/routesEditorContracts.ts';
-import type { DraftNode, RouteTransitionDoc } from '../../../../shared/routeDefinition.ts';
+import { ROUTES_EDITOR_LIMITS } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import type { DraftNode, RouteTransitionDoc } from '../../../../shared/pipeline/routeDefinition.ts';
 
 export interface CatalogCommandIssue {
   code: string;

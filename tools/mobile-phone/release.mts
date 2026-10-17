@@ -5,11 +5,13 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { dataHome, dataPath } from '../../shared/runtime/dataHome.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const execute = promisify(execFile);
 const mobile = path.join(root, 'mobile');
-const output = path.join(root, '.state/mobile');
+const output = process.env.COCKPIT_MOBILE_APK_DIR
+  || dataPath(dataHome({ env: process.env, home: homedir() }), 'mobileApk');
 const signing =
   process.env.COCKPIT_ANDROID_SIGNING_DIR ||
   path.join(homedir(), '.config/cockpit/android-signing');
@@ -322,7 +324,7 @@ async function release() {
     await rename(apk, path.join(output, 'cockpit-mobile.apk'));
     await rename(path.join(stage, 'cockpit-mobile.json'), path.join(output, 'cockpit-mobile.json'));
     await syncDirectory(output);
-    process.stdout.write('APK опубликован в .state/mobile/cockpit-mobile.apk\n');
+    process.stdout.write(`APK опубликован в ${path.join(output, 'cockpit-mobile.apk')}\n`);
   } finally {
     await rm(stage, {
       recursive: true,

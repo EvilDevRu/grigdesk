@@ -395,7 +395,7 @@ test('несколько сообщений одного чата и второ�
   );
   assert.deepEqual(
     w.runs.map((run) => ['раз', 'два', 'три', 'четыре']
-      .find((text) => run.message.endsWith(withChatImageHint(text)))),
+      .find((text) => run.message.includes(`${text}\n\n[Подсказка Cockpit: картинки в ответе]`))),
     ['раз', 'два', 'три', 'четыре'],
     'исполнитель получил сообщения в порядке отправки',
   );

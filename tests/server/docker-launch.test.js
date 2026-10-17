@@ -21,16 +21,25 @@ function shellQuote(value) {
  * минимум 22.18 исполняет TypeScript сам, и проверяется именно это.
  */
 async function fixture(t, { stubNpm = false } = {}) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'docker-ts-launch-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const container = await mkdtemp(path.join(os.tmpdir(), 'docker-ts-launch-'));
+  const directory = path.join(container, 'code');
+
+  t.after(() => rm(container, { recursive: true, force: true }));
 
   for (const relative of [
-    'bin/lib', 'tools', 'server/src', 'server/scripts', 'server/node_modules', 'web/node_modules',
+    'bin', 'deploy/lib', 'tools', 'server/src', 'server/scripts', 'server/node_modules', 'web/node_modules',
   ]) {
     await mkdir(path.join(directory, relative), { recursive: true });
   }
+  for (const file of ['shared/runtime/dataHome.ts', 'shared/package.json',
+    'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts']) {
+    await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
+    await copyFile(path.join(root, file), path.join(directory, file));
+  }
+
   await copyFile(path.join(root, 'bin/cockpit'), path.join(directory, 'bin/cockpit'));
-  await copyFile(path.join(root, 'bin/lib/runtime-env.sh'), path.join(directory, 'bin/lib/runtime-env.sh'));
+  await copyFile(path.join(root, 'deploy/lib/runtime-env.sh'),
+    path.join(directory, 'deploy/lib/runtime-env.sh'));
   await writeFile(path.join(directory, 'tools/node'), [
     '#!/usr/bin/env bash',
     `exec ${shellQuote(process.execPath)} "$@"`,
@@ -65,7 +74,10 @@ async function fixture(t, { stubNpm = false } = {}) {
 
   const proof = path.join(directory, 'proof.json');
   const env = {
-    ...process.env,
+    HOME: directory,
+    COCKPIT_HOME: path.join(container, 'data'),
+    NODE_ENV: 'test',
+    npm_config_cache: process.env.npm_config_cache,
     PATH: `${path.join(directory, 'tools')}:${process.env.PATH || ''}`,
     DOCKER_TS_LAUNCH_PROOF: proof,
   };

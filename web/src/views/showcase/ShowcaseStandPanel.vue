@@ -61,7 +61,7 @@
 import { computed, ref } from 'vue';
 
 import { UiButton, UiDisclosureButton } from '../../ui';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts';
+import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts';
 import type { SeedStatus } from '../../actions/showcase';
 
 const props = defineProps<{

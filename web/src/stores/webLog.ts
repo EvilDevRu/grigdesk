@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { DiagnosticLevel } from '../../../shared/diagnosticLogging.ts';
+import type { DiagnosticLevel } from '../../../shared/web-log/diagnosticLogging.ts';
 
 export const useWebLogStore = defineStore('webLog', {
   state: () => ({

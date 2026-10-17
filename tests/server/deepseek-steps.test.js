@@ -127,3 +127,31 @@ test('превью и diff правки ограничены STEP_DIFF_LIMIT и 
   assert.ok(edit.diff.old.length <= STEP_DIFF_LIMIT + 1, 'старое обрезано');
   assert.ok(edit.diff.new.length <= STEP_DIFF_LIMIT + 1, 'новое обрезано');
 });
+
+test('MCP и прочие инструменты DSH: заголовок — аргументы, а не повтор имени', () => {
+  const mcp = firstTool(createDeepSeekStepNormalizer(), {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'm1',
+    title: 'mcp__cockpit-work__repo_history',
+    rawInput: { path: 'src/a.ts' },
+  });
+  const bare = firstTool(createDeepSeekStepNormalizer(), {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'g1',
+    title: 'get_goal',
+    rawInput: {},
+  });
+  const long = 'x'.repeat(500);
+  const wide = firstTool(createDeepSeekStepNormalizer(), {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'c1',
+    title: 'create_goal',
+    rawInput: { goal: long },
+  });
+
+  assert.deepEqual([mcp.name, mcp.title], ['mcp__cockpit-work__repo_history', '{"path":"src/a.ts"}']);
+  assert.equal('preview' in mcp, false, 'короткие аргументы целиком видны в заголовке');
+  assert.deepEqual([bare.name, bare.title], ['get_goal', '']);
+  assert.ok(wide.title.length <= 201, 'заголовок обрезан');
+  assert.equal(wide.preview, JSON.stringify({ goal: long }), 'полные аргументы — в раскрытии');
+});

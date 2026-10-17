@@ -6,11 +6,11 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
+    "../shared/lib/contractDecoders.ts",
     "src/modules/code/**/*.ts",
     "src/lib/codeCommitMessage.ts",
     "src/lib/git.ts",
-    "../shared/codeContracts.ts",
+    "../shared/plugins/code/codeContracts.ts",
     "../tests/types/code-server-contract.test.mts"
   ]
 }

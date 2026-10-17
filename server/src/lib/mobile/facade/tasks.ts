@@ -1,12 +1,14 @@
-import { waitingReason } from '../../../../../shared/pipelineWait.ts';
-import type { PipelineGraph } from '../../../../../shared/pipelineWait.ts';
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
+import { waitingReason } from '../../../../../shared/pipeline/pipelineWait.ts';
+import type { PipelineGraph } from '../../../../../shared/pipeline/pipelineWait.ts';
 
 import { decodeContract } from '../contract.ts';
 import type { Actions, TaskSummary } from '../contract.ts';
 import { MobileInputError } from '../errors.ts';
 import { factorySnapshotHash } from '../factoryIdentity.ts';
 import type { MobileApp } from '../mobileServer.ts';
-import { paginate, record, TextPages, text, upstream } from './common.ts';
+import { paginate, TextPages, text, upstream } from './common.ts';
 import type { FacadeDeps, Payload } from './common.ts';
 
 type Deps = Pick<FacadeDeps, 'callApi' | 'tokens'>;
@@ -33,7 +35,7 @@ function waitingTask(task: Payload) {
     task.stall ||
     task.bootstrapStop ||
     task.readOnly ||
-    Object.values(record(task.stages)).some((status) =>
+    Object.values(recordOrEmpty(task.stages)).some((status) =>
       ['wait', 'waiting', 'premature'].includes(String(status)),
     ),
   );
@@ -58,9 +60,9 @@ async function summary(deps: Deps, device: string, task: Payload) {
     }
   }
 
-  const identity = record(control.identity);
+  const identity = recordOrEmpty(control.identity);
   const wait = waitingReason(graph as PipelineGraph);
-  const gate = wait ? String(record(graph.keys)[wait.node] || '') : '';
+  const gate = wait ? String(recordOrEmpty(graph.keys)[wait.node] || '') : '';
   const canGate =
     wait &&
     /^GATE_[A-Z0-9_]{1,64}$/.test(gate) &&
@@ -82,15 +84,15 @@ async function summary(deps: Deps, device: string, task: Payload) {
           kind: 'other',
           gate: null,
           text: text(
-            record(task.stall).reason ||
-              record(task.bootstrapStop).reason ||
+            recordOrEmpty(task.stall).reason ||
+              recordOrEmpty(task.bootstrapStop).reason ||
               (task.readOnly ? 'Попытка доступна только для чтения.' : 'Требуется обычный Кокпит.'),
             4000,
           ),
           actionToken: null,
         }
       : null;
-  const stages = record(task.stages);
+  const stages = recordOrEmpty(task.stages);
   const stage =
     Object.keys(stages).find((key) =>
       ['run', 'running', 'wait', 'waiting', 'premature'].includes(String(stages[key])),
@@ -154,7 +156,7 @@ export function registerTaskRoutes(app: MobileApp, deps: Deps) {
 
   app.get<{ Querystring: Payload }>('/api/mobile/v1/tasks', async (request) => {
     const source = await upstream(deps, 'GET', '/api/tasks');
-    const tasks = Array.isArray(source.tasks) ? source.tasks.map(record) : [];
+    const tasks = Array.isArray(source.tasks) ? source.tasks.map(recordOrEmpty) : [];
     const page = paginate(tasks, request.query, 8192);
     const mapped = [];
 
@@ -178,11 +180,11 @@ export function registerTaskRoutes(app: MobileApp, deps: Deps) {
     const control = Object.keys(mapped.control).length
       ? mapped.control
       : await upstream(deps, 'GET', `/api/tasks/${id}/mobile-state`).catch(() => ({}));
-    const identity = record(record(control).identity);
+    const identity = recordOrEmpty(recordOrEmpty(control).identity);
     const actions: Actions = {};
 
     if (identity.attempt && !identity.terminal) {
-      const action = record(control).running ? 'stop' : 'resume';
+      const action = recordOrEmpty(control).running ? 'stop' : 'resume';
 
       actions[action] = deps.tokens.issue(request.mobileDevice!.id, `task:${id}`, action, {
         identity,
@@ -201,12 +203,12 @@ export function registerTaskRoutes(app: MobileApp, deps: Deps) {
       failed: 'failed',
       rejected: 'failed',
     };
-    const stages = Object.keys(record(graph.pos))
+    const stages = Object.keys(recordOrEmpty(graph.pos))
       .slice(0, 100)
       .map((node) => ({
-        key: text(record(graph.keys)[node] || node, 200),
-        title: text((record(graph.nodes)[node] as unknown[] | undefined)?.[1] || node, 800),
-        status: statuses[String(record(graph.statuses)[node])] || 'idle',
+        key: text(recordOrEmpty(graph.keys)[node] || node, 200),
+        title: text((recordOrEmpty(graph.nodes)[node] as unknown[] | undefined)?.[1] || node, 800),
+        status: statuses[String(recordOrEmpty(graph.statuses)[node])] || 'idle',
       }));
 
     return decodeContract('task', {
@@ -223,7 +225,7 @@ export function registerTaskRoutes(app: MobileApp, deps: Deps) {
   }>('/api/mobile/v1/tasks/:id/plan', async (request) => {
     const id = taskId(request.params.id);
     const control = await upstream(deps, 'GET', `/api/tasks/${id}/mobile-state`);
-    const identity = record(control.identity);
+    const identity = recordOrEmpty(control.identity);
     const source = await basis(deps, id, identity);
 
     return decodeContract(
@@ -253,7 +255,7 @@ export function registerTaskRoutes(app: MobileApp, deps: Deps) {
       'gate',
       body.actionToken,
     );
-    const identity = record(snapshot.identity);
+    const identity = recordOrEmpty(snapshot.identity);
 
     if (body.gate !== snapshot.gate || !/^GATE_[A-Z0-9_]{1,64}$/.test(String(body.gate))) {
       throw new MobileInputError('state_changed', 'Ворота изменились; обновите карточку.', 409);
@@ -305,7 +307,7 @@ export function registerTaskRoutes(app: MobileApp, deps: Deps) {
         action,
         request.body?.actionToken,
       );
-      const identity = record(snapshot.identity);
+      const identity = recordOrEmpty(snapshot.identity);
 
       await upstream(deps, 'POST', `/api/tasks/${id}/${action}`, {
         profile: identity.profile,

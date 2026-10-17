@@ -3,13 +3,13 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { NAV_ICONS } from '../../web/src/shared/navIcons.ts';
-import { TOOL_REGISTRY } from '../../web/src/shared/tools/registry.ts';
+import { TOOL_CATALOG } from '../../web/src/shared/tools/catalog.ts';
 import { SYSTEM } from '../../server/src/lib/pluginsRegistry.ts';
 
 const root = new URL('../../', import.meta.url);
 
 test('соседи по правой рейке не делят иконку', () => {
-  const used = TOOL_REGISTRY.map((tool) => tool.icon);
+  const used = TOOL_CATALOG.map((tool) => tool.icon);
 
   assert.deepEqual({
     duplicates: used.filter((icon, index) => used.indexOf(icon) !== index),
@@ -36,7 +36,7 @@ test('каждый рисунок в карте иконок уникален', 
 });
 
 test('иконка плагина в манифесте совпадает с иконкой его панели', () => {
-  const byPlugin = new Map(TOOL_REGISTRY
+  const byPlugin = new Map(TOOL_CATALOG
     .filter((tool) => tool.plugin)
     .map((tool) => [tool.plugin, tool.icon]));
   const mismatched = SYSTEM

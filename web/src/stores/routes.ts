@@ -3,7 +3,7 @@ import type {
   RouteDraft, RouteDraftContent, RouteDraftSummary, RouteEditorInfo, RouteEditorIssue,
   RouteCompareReport, RoutePublication, RouteRebasePreview, RoutePromptPreviewResponse,
   RouteSimulationCursor, RouteSimulationCounters, RouteSimulationStepResponse,
-} from '../../../shared/routesEditorContracts.ts';
+} from '../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteHistorySnapshot } from '../actions/routes/history.ts';
 import type { RouteJsonBuffer } from '../actions/routes/jsonDraftBuffer.ts';
 

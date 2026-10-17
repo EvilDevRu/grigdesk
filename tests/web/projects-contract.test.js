@@ -9,7 +9,7 @@ import test from 'node:test';
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const contract = await compileModule(webFile('../shared/projectsContracts.ts'));
+const contract = await compileModule(webFile('../shared/runtime/projectsContracts.ts'));
 
 const SUMMARY = {
   id: 'demo',

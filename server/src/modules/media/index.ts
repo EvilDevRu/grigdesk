@@ -5,11 +5,14 @@
 // каталог, настройки распознавания и имена промежуточных файлов — разделу они не нужны,
 // а публиковать пути машины в окно браузера незачем.
 import fp from 'fastify-plugin';
+import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
+
+import { parseByteRange } from '../../lib/httpRange.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { MediaClip, MediaFrame, MediaJob } from '../../../../shared/mediaContracts.ts';
+import type { MediaClip, MediaFrame, MediaJob } from '../../../../shared/media/mediaContracts.ts';
 import '@fastify/multipart';
 
 import { runMeetingPlan } from '../../lib/media/meetingPlan.ts';
@@ -150,10 +153,6 @@ function collectFailed(value: CollectedParts): value is CollectedFailure {
   return 'error' in value;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 function numberOr(value: unknown, fallback: number | null): number | null {
   const parsed = Number(value);
 
@@ -166,11 +165,11 @@ function numberOr(value: unknown, fallback: number | null): number | null {
  */
 export function toMediaJob(job: MediaJobRecord): MediaJob {
   const status = job.status === 'done' || job.status === 'failed' ? job.status : 'running';
-  const progress = asRecord(job.progress);
+  const progress = objectOrEmpty(job.progress);
   const done = numberOr(progress.done, null);
   const total = numberOr(progress.total, null);
-  const result = job.result ? asRecord(job.result) : null;
-  const transcript = result ? asRecord(result.transcript) : null;
+  const result = job.result ? objectOrEmpty(job.result) : null;
+  const transcript = result ? objectOrEmpty(result.transcript) : null;
   const segments = Array.isArray(transcript?.segments) ? transcript.segments : null;
 
   return {
@@ -181,7 +180,7 @@ export function toMediaJob(job: MediaJobRecord): MediaJob {
         duration: numberOr(result.duration, 0) ?? 0,
         transcript: {
           segments: segments.map((raw) => {
-            const segment = asRecord(raw);
+            const segment = objectOrEmpty(raw);
             const start = numberOr(segment.start, 0) ?? 0;
 
             return {
@@ -206,36 +205,7 @@ export function toMediaJob(job: MediaJobRecord): MediaJob {
  * Составные диапазоны не поддерживаются намеренно: `multipart/byteranges` плееру
  * не нужен, а отвечать на него абы чем хуже, чем честно отдать файл целиком.
  */
-export function parseByteRange(
-  header: unknown,
-  size: number,
-): { start: number; end: number } | 'invalid' | null {
-  if (typeof header !== 'string' || !size) return null;
-
-  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-  if (!match) return null;
-
-  const [, rawStart, rawEnd] = match;
-  if (!rawStart && !rawEnd) return null;
-
-  let start: number;
-  let end: number;
-
-  if (!rawStart) {
-    const suffix = Number(rawEnd);
-    if (!suffix) return 'invalid';
-    start = Math.max(0, size - suffix);
-    end = size - 1;
-  } else {
-    start = Number(rawStart);
-    end = rawEnd ? Number(rawEnd) : size - 1;
-  }
-
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return 'invalid';
-  if (start > end || start >= size) return 'invalid';
-
-  return { start, end: Math.min(end, size - 1) };
-}
+export { parseByteRange } from '../../lib/httpRange.ts';
 
 async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): Promise<void> {
   const {
@@ -250,7 +220,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
   } = opts;
   const currentSpeechSettings = (): unknown => {
     const value = typeof speechSettings === 'function' ? speechSettings() : speechSettings;
-    return asRecord(value).speech || value || {};
+    return objectOrEmpty(value).speech || value || {};
   };
   const currentMeetingModel = () => (typeof meetingModelRef === 'function'
     ? meetingModelRef()
@@ -260,7 +230,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
     : providerSettings || {});
   const fail = (reply: FastifyReply, err: unknown) => reply.code(500).send({
     error: 'media_error',
-    message: String(asRecord(err).message ?? ''),
+    message: String(objectOrEmpty(err).message ?? ''),
   });
   // Гейт плагина «video»: выключен — раздела нет. Проверка живая (по prefs),
   // тумблер в настройках действует без рестарта.
@@ -325,7 +295,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
   // Запуск распознавания → { jobId }. filePath — путь к видео/аудио на диске.
   fastify.post('/api/media/ingest', async (request, reply) => {
     if (gate(reply)) return reply;
-    const { filePath, model, lang, frames } = asRecord(request.body);
+    const { filePath, model, lang, frames } = objectOrEmpty(request.body);
     if (!filePath) return reply.code(400).send({ error: 'bad_input', message: 'filePath обязателен' });
     const settings = currentSpeechSettings();
     try {
@@ -379,7 +349,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
 
       parts.push({ filePath: job.filePath, offset, duration: Number(job.result?.duration) });
       for (const raw of job.result?.transcript?.segments || []) {
-        const segment = asRecord(raw);
+        const segment = objectOrEmpty(raw);
         segments.push({
           ...segment,
           start: Number(segment.start || 0) + offset,
@@ -392,7 +362,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
       const duration = Number(job.result?.duration);
       offset += Number.isFinite(duration) && duration > 0
         ? duration
-        : Number(asRecord(job.result?.transcript?.segments?.at(-1)).end || 0);
+        : Number(objectOrEmpty(job.result?.transcript?.segments?.at(-1)).end || 0);
     }
 
     return { parts, segments };
@@ -400,13 +370,13 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
 
   /** Список частей из тела запроса: те же правила у разбора и у фрагмента. */
   function meetingIds(body: unknown = {}): unknown[] {
-    const { jobId, jobIds } = asRecord(body);
+    const { jobId, jobIds } = objectOrEmpty(body);
     return Array.isArray(jobIds) && jobIds.length ? jobIds : (jobId ? [jobId] : []);
   }
 
   fastify.post('/api/media/plan-tasks', async (request, reply) => {
     if (gate(reply)) return reply;
-    const { hint } = asRecord(request.body);
+    const { hint } = objectOrEmpty(request.body);
     // Встреча законно лежит в НЕСКОЛЬКИХ файлах: инструменты записи режут длинный
     // созвон на части (живой случай — 17:04 и 1:18 подряд, разрыв девять секунд).
     // Разбирать их по отдельности значит терять поводы, начатые в одной части и
@@ -476,7 +446,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
   fastify.post('/api/media/clip', async (request, reply) => {
     if (gate(reply)) return reply;
 
-    const body = asRecord(request.body);
+    const body = objectOrEmpty(request.body);
     const ids = meetingIds(body);
     if (!ids.length) return reply.code(400).send({ error: 'bad_input', message: 'jobId обязателен' });
     if (ids.length > MAX_MEETING_PARTS) {
@@ -567,7 +537,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
   // Извлечь кадры по секундам.
   fastify.post('/api/media/extract-frame', async (request, reply) => {
     if (gate(reply)) return reply;
-    const { filePath, seconds, name } = asRecord(request.body);
+    const { filePath, seconds, name } = objectOrEmpty(request.body);
     if (!filePath || !Array.isArray(seconds)) return reply.code(400).send({ error: 'bad_input' });
     try { return await media.extractFrames({ filePath: String(filePath), seconds, name }); }
     catch (err) { return fail(reply, err); }

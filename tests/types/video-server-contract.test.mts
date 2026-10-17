@@ -1,6 +1,6 @@
 import { parseByteRange, toMediaJob } from '../../server/src/modules/media/index.ts';
 import type { MediaModuleOptions } from '../../server/src/modules/media/index.ts';
-import type { MediaJob } from '../../shared/mediaContracts.ts';
+import type { MediaJob } from '../../shared/media/mediaContracts.ts';
 
 type IsUnchecked<Value> = 0 extends (1 & Value) ? true : false;
 type Checked<Value extends false> = Value;

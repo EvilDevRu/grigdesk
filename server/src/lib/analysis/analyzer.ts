@@ -23,7 +23,7 @@ import {
 } from '../chat/attachments.ts';
 import { resolveLegacyModel, resolveModelRef } from '../chat/modelRef.ts';
 import { stripDiscussionSection } from '../telegram/discussion.ts';
-import { questionKey } from '../../../../shared/analysisContracts.ts';
+import { questionKey } from '../../../../shared/pipeline/analysisContracts.ts';
 import type {
   Analysis,
   AnalysisArbiterAnswerInput,
@@ -35,7 +35,7 @@ import type {
   AnalysisScope,
   AnalysisState,
   AnalysisStatus,
-} from '../../../../shared/analysisContracts.ts';
+} from '../../../../shared/pipeline/analysisContracts.ts';
 
 // Собеседники анализатора живут в соседних модулях на JavaScript: он объявляет ровно
 // то, что от них зовёт, и не выводит их формы из подсказок редактора.

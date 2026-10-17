@@ -55,6 +55,33 @@ assert_eq отказ "$(verdict_of 'git show HEAD:a.php > /home/user/worktree/.h
 assert_eq отказ "$(verdict_of 'echo x >> /home/user/worktree/file.txt')" \
   "дозапись в дерево проекта запрещена так же, как запись"
 
+# Отказ обязан назвать законный адрес записи. Голое «запрещено» уводило узел в запрещённые
+# формы той же записи: узел перевода диагноза после него перебрал `cp` и `tee`, получил ещё
+# четыре отказа и закрыл этап failed, хотя `cat` в абсолютный путь был разрешён.
+reason_of() {
+  decide "$1" | python3 -c 'import json, sys
+raw = sys.stdin.read().strip()
+print(json.loads(raw)["hookSpecificOutput"]["permissionDecisionReason"] if raw else "")'
+}
+
+reason=$(reason_of "cd $state && cat > t1.diag.human.md")
+assert_contains "$reason" "путь не абсолютный" \
+  "относительная цель после cd названа неабсолютной, а не просто запрещённой"
+assert_contains "$reason" "не учитывает cd" "отказ объясняет, почему не помог cd"
+assert_contains "$reason" "cat <откуда> > $state/<куда>" \
+  "отказ даёт рецепт копии с буквальным каталогом состояния"
+assert_contains "$(reason_of 'S=/x; echo a > $S/t1.md')" "путь не абсолютный" \
+  "цель через переменную сторож не раскрывает и говорит об этом"
+assert_contains "$(reason_of 'git show HEAD:a.php > /home/user/worktree/.head-check.bak')" \
+  "по абсолютному пути внутри $state" "отказ записи в дерево называет каталог состояния"
+
+# Рецепт из отказа обязан проходить сам: подсказка, которую сторож же и отклонит, хуже молчания.
+assert_eq разрешено "$(verdict_of "cat $state/t1.diag.md > $state/t1.diag.raw.md")" \
+  "копия через cat в абсолютный путь каталога состояния разрешена"
+assert_eq разрешено \
+  "$(verdict_of "cat $state/t1.diag.human.md $state/t1.diag.raw.md > $state/t1.diag.md")" \
+  "склейка через cat в абсолютный путь каталога состояния разрешена"
+
 # Неразобранная команда — отказ, а не пропуск: пропустить неразобранное значит отдать
 # рубеж целиком. Оболочка такую команду тоже не выполнит.
 assert_eq отказ "$(verdict_of "docker exec c sh -c 'echo \"незакрытая")" \

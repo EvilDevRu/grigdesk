@@ -22,7 +22,7 @@ import {
   parseCodeRepos,
   parseCodeRoots,
   parseCodeStageResponse,
-} from '../../shared/codeContracts.ts';
+} from '../../shared/plugins/code/codeContracts.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

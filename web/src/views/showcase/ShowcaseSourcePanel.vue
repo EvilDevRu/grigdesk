@@ -177,7 +177,7 @@ import {
   normalizeShowcaseSource,
   SHOWCASE_SOURCE_NOTE_MAX,
   showcaseSourceEqual,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 import type {
   ShowcaseProject,
   ShowcaseSourceCommit,
@@ -185,7 +185,7 @@ import type {
   ShowcaseSourceOutsideCommit,
   ShowcaseStorySource,
   ShowcaseStorySourceRepo,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 
 const props = defineProps<{
   project: Pick<ShowcaseProject, 'id' | 'ref' | 'target' | 'scenes' | 'source'>;

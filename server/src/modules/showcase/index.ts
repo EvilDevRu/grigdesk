@@ -17,21 +17,24 @@ import type { FastifyReply } from 'fastify';
 // расширяет сам запрос, а не приходит отдельным значением.
 import type {} from '@fastify/multipart';
 
+import { textOr } from '../../../../shared/lib/text.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import {
   SHOWCASE_BUILD_REQUEST_ID_RE,
   SHOWCASE_ID_RE,
   SHOWCASE_PACES,
   parseShowcaseDirection,
   parseShowcaseStorySource,
-} from '../../../../shared/showcaseContracts.ts';
-import { SHOWCASE_SYNC_CUE_KINDS } from '../../../../shared/showcaseSync.ts';
-import { SHOWCASE_MANIFEST_ID_RE } from '../../../../shared/showcaseTimeline.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import { SHOWCASE_SYNC_CUE_KINDS } from '../../../../shared/plugins/showcase/showcaseSync.ts';
+import { SHOWCASE_MANIFEST_ID_RE } from '../../../../shared/plugins/showcase/showcaseTimeline.ts';
 import type {
   ShowcaseAction,
   ShowcasePace,
   ShowcaseStorySource,
   ShowcaseTargetRef,
-} from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { mediaTypeOf } from '../../lib/showcase/artifacts.ts';
 import { PROFILE_RE } from '../../lib/profiles.ts';
 import { toPublicJob } from '../../lib/showcase/jobs.ts';
@@ -156,10 +159,6 @@ interface TargetQuery {
     kind?: unknown;
     id?: unknown;
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**
@@ -366,10 +365,6 @@ function readPronunciationOverrides(value: unknown): PronunciationOverrideInput[
   return replacements;
 }
 
-function readText(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback;
-}
-
 /**
  * Выбор «О чём ролик» из тела запроса: null — умолчание цели, иначе строгая форма
  * контракта. undefined значит «не по форме»: имена и коммиты проверит служба.
@@ -477,7 +472,6 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     const expectedRevision = Number(request.body?.expectedRevision);
     const title = typeof request.body?.title === 'string' ? request.body.title : '';
 
-
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       return reply.code(400).send({ error: 'bad_revision' });
     }
@@ -503,8 +497,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.post<SceneRoute>('/api/showcase/:id/scenes', async (request, reply) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const actions = readActions(request.body?.actions ?? []);
-    const screenId = readText(request.body?.screenId);
-
+    const screenId = textOr(request.body?.screenId);
 
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       return reply.code(400).send({ error: 'bad_revision' });
@@ -516,17 +509,17 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
 
     try {
       return await service.addScene(request.params.id, expectedRevision, {
-        title: readText(request.body?.title),
+        title: textOr(request.body?.title),
         screenId,
-        narration: readText(request.body?.narration),
-        caption: readText(request.body?.caption),
-        subtitleText: readText(request.body?.subtitleText),
+        narration: textOr(request.body?.narration),
+        caption: textOr(request.body?.caption),
+        subtitleText: textOr(request.body?.subtitleText),
         startState: request.body?.startState === undefined
           ? null
-          : readText(request.body?.startState) || null,
+          : textOr(request.body?.startState) || null,
         readyCondition: request.body?.readyCondition === undefined
           ? null
-          : readText(request.body?.readyCondition) || null,
+          : textOr(request.body?.readyCondition) || null,
         // Продолжение — только явное `true`: строка «true» или число из чужого
         // клиента не должны молча превращать сцену в продолжение.
         continuesPrevious: request.body?.continuesPrevious === true,
@@ -561,13 +554,13 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
         expectedRevision,
         request.params.sceneId,
         {
-          ...(request.body?.title === undefined ? {} : { title: readText(request.body.title) }),
-          ...(request.body?.screenId === undefined ? {} : { screenId: readText(request.body.screenId) }),
-          ...(request.body?.narration === undefined ? {} : { narration: readText(request.body.narration) }),
-          ...(request.body?.caption === undefined ? {} : { caption: readText(request.body.caption) }),
+          ...(request.body?.title === undefined ? {} : { title: textOr(request.body.title) }),
+          ...(request.body?.screenId === undefined ? {} : { screenId: textOr(request.body.screenId) }),
+          ...(request.body?.narration === undefined ? {} : { narration: textOr(request.body.narration) }),
+          ...(request.body?.caption === undefined ? {} : { caption: textOr(request.body.caption) }),
           ...(request.body?.subtitleText === undefined
             ? {}
-            : { subtitleText: readText(request.body.subtitleText) }),
+            : { subtitleText: textOr(request.body.subtitleText) }),
           ...(typeof request.body?.continuesPrevious === 'boolean'
             ? { continuesPrevious: request.body.continuesPrevious }
             : {}),
@@ -674,7 +667,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.post<SceneRoute>('/api/showcase/:id/brief', async (request, reply) => {
 
     try {
-      return await service.generateBrief(request.params.id, readText(request.body?.taskText));
+      return await service.generateBrief(request.params.id, textOr(request.body?.taskText));
     } catch (error) {
       return sendError(reply, error);
     }
@@ -729,7 +722,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   fastify.post<SceneRoute>('/api/showcase/:id/script', async (request, reply) => {
 
     try {
-      return await service.generateScript(request.params.id, readText(request.body?.taskText));
+      return await service.generateScript(request.params.id, textOr(request.body?.taskText));
     } catch (error) {
       return sendError(reply, error);
     }
@@ -756,8 +749,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   // План отправки готовится ДО подтверждения: человек видит канал, получателя и
   // точные файлы, а решение потом проверяется по отпечатку этого плана.
   fastify.post<SceneRoute>('/api/showcase/:id/delivery/plan', async (request, reply) => {
-    const channel = readText(request.body?.channel);
-
+    const channel = textOr(request.body?.channel);
 
     if (channel !== 'b24' && channel !== 'telegram') {
       return reply.code(400).send({ error: 'bad_channel' });
@@ -766,8 +758,8 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     try {
       return await service.planDelivery(request.params.id, {
         channel,
-        recipient: readText(request.body?.recipient),
-        recipientLabel: readText(request.body?.recipientLabel),
+        recipient: textOr(request.body?.recipient),
+        recipientLabel: textOr(request.body?.recipientLabel),
         includeSubtitles: request.body?.includeSubtitles === true,
       });
     } catch (error) {
@@ -776,9 +768,8 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   });
 
   fastify.post<SceneRoute>('/api/showcase/:id/delivery', async (request, reply) => {
-    const channel = readText(request.body?.channel);
-    const decisionFingerprint = readText(request.body?.decisionFingerprint);
-
+    const channel = textOr(request.body?.channel);
+    const decisionFingerprint = textOr(request.body?.decisionFingerprint);
 
     if (channel !== 'b24' && channel !== 'telegram') {
       return reply.code(400).send({ error: 'bad_channel' });
@@ -791,8 +782,8 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
     try {
       return await service.deliver(request.params.id, {
         channel,
-        recipient: readText(request.body?.recipient),
-        recipientLabel: readText(request.body?.recipientLabel),
+        recipient: textOr(request.body?.recipient),
+        recipientLabel: textOr(request.body?.recipientLabel),
         includeSubtitles: request.body?.includeSubtitles === true,
         decisionFingerprint,
       });
@@ -813,8 +804,7 @@ export default fp<ShowcaseModuleOptions>(async function showcaseModule(fastify, 
   // Подготовка данных подтверждается ОТПЕЧАТКОМ рецепта: человек соглашается на
   // конкретный скрипт на конкретном стенде, и подтверждение «вообще» тут не годится.
   fastify.post<SceneRoute>('/api/showcase/:id/seed', async (request, reply) => {
-    const recipeFingerprint = readText(request.body?.recipeFingerprint);
-
+    const recipeFingerprint = textOr(request.body?.recipeFingerprint);
 
     if (!/^[a-f0-9]{32}$/.test(recipeFingerprint)) {
       return reply.code(400).send({ error: 'bad_decision' });

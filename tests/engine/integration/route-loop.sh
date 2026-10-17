@@ -343,9 +343,9 @@ assert_eq '' "$(cat "$CALLS")" "модель при неверном потол�
 PROFILE_LOOP_MAX_ROUNDS=''
 route_v2_dispatch_next "$task" "$LOOP_ATTEMPT" >/dev/null 2>&1
 assert_rc 78 "$?" "пустой PROFILE_LOOP_MAX_ROUNDS — тоже отказ, а не значение по умолчанию"
-PROFILE_LOOP_MAX_ROUNDS=101
+PROFILE_LOOP_MAX_ROUNDS=301
 route_v2_dispatch_next "$task" "$LOOP_ATTEMPT" >/dev/null 2>&1
-assert_rc 78 "$?" "потолок выше 100 отклоняется"
+assert_rc 78 "$?" "потолок выше 300 отклоняется"
 unset PROFILE_LOOP_MAX_ROUNDS
 
 # --- 5. Граница этапа на первом входе не признаётся ---------------------------------

@@ -1,6 +1,8 @@
 // Модуль factory (read-only, M0) — отдаёт состояние конвейера в чистом JSON,
 // которого нет у Python-дашборда (там server-rendered HTML). Мутации (ворота/запуск)
 // добавятся отдельным этапом через factory-cli.
+import { setTimeout as pause } from 'node:timers/promises';
+
 import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -17,7 +19,7 @@ import { refreshRepos } from '../../lib/gitRefresh.ts';
 import { loadTriageProfile } from '../../lib/analysis/profile.ts';
 import { CAP_CLARIFICATIONS } from '../../lib/analysis/prompt.ts';
 import { resolveRoute } from '../../lib/analysis/routePolicy.ts';
-import { questionKey } from '../../../../shared/analysisContracts.ts';
+import { questionKey } from '../../../../shared/pipeline/analysisContracts.ts';
 import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.ts';
 import {
   hasSlotReservation, reserveSlot, releaseSlot, slotsOverview, SlotsFullError,
@@ -38,7 +40,7 @@ import {
 } from '../../lib/factoryLaunchContract.ts';
 import {
   confirmRouteResume, logLength, readLogSince,
-  runRouteEngine, spawnRouteEngine, routeUnitActive,
+  runRouteEngine, runRouteDecision, ROUTE_DECISION_TIMEOUT_MS, spawnRouteEngine, routeUnitActive,
   routeFailure, startRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
   routeFindingsArgs,
@@ -99,6 +101,14 @@ interface PreparedLaunch {
 interface RouteReply {
   status: number | null;
   body: Record<string, unknown>;
+}
+
+// Сверка после срока сравнивает два доверенных снимка той же exact попытки.
+type TrustedRouteAttempt = Awaited<ReturnType<FactoryStateAdapter['readTrustedAttempt']>>;
+
+interface RouteDecisionTarget {
+  kind: 'goto' | 'gate';
+  node: string;
 }
 
 // Подготовка сохраняет отказ отдельно от входов, которые уже прошли все проверки.
@@ -495,6 +505,56 @@ async function factoryModule(
       return null;
     }
   };
+
+  /**
+   * Движок мог записать решение до убийства по сроку и не успеть закрыть lifecycle-сессию.
+   * Свежий trusted снимок подтверждает сдвиг курсора; без него запрещены resume и повтор команды.
+   */
+  async function reconcileRouteDecisionTimeout(
+    id: string,
+    before: TrustedRouteAttempt,
+    { kind, node }: RouteDecisionTarget,
+    reply: RejectionReply,
+  ): Promise<boolean> {
+    const timeoutMs = config.decisionTimeoutMs ?? ROUTE_DECISION_TIMEOUT_MS;
+    let after: TrustedRouteAttempt | null = null;
+
+    try {
+      after = await factoryState.readTrustedAttempt(id);
+    } catch {
+      // Повреждение ledger или свежего реестра не позволяет подтвердить запись решения.
+    }
+
+    const sequenceAdvanced = before.stageIdentity && after?.stageIdentity
+      && after.stageIdentity.sequence > before.stageIdentity.sequence;
+    const cursor = after?.cursor;
+    const recorded = after?.attempt === before.attempt && after?.profile === before.profile
+      && sequenceAdvanced && cursor && (kind === 'goto'
+        ? cursor.node === node && cursor.state === 'ready'
+        : !(cursor.node === node && ['ready', 'paused'].includes(cursor.state)));
+
+    if (!recorded) {
+      reply.code(504).send({
+        error: 'engine_timeout',
+        message: `Движок не уложился за ${timeoutMs / 1000} с, `
+          + 'решение в журнале не найдено — обнови карточку и повтори.',
+      });
+
+      return false;
+    }
+
+    fastify.log.warn(
+      {
+        task: id,
+        timeoutMs,
+        decision: kind,
+        node,
+      },
+      'Движок не уложился в срок; решение подтверждено журналом, запускается обычное продолжение.',
+    );
+
+    return true;
+  }
 
   // Destructive stand/checkout lifecycle additionally requires an exact env projection.
   // WORKSPACE_MODE, STAND_OWNERSHIP and repo paths never come from provider-writable env.
@@ -1207,8 +1267,9 @@ async function factoryModule(
     // старту и оставляет быстрый отказ видимым как отказ.
     let launchIdentity = '';
     let launchConfirmations = 0;
+
     for (let i = 0; i < 40; i += 1) {
-      await new Promise((r) => { setTimeout(r, 250); });
+      await pause(250);
       let registry: Registry | null = null;
       try { registry = (await factoryState.readRegistry(id)).registry; } catch { /* реестр ещё пишется */ }
       const identity = startRegistryIdentity(registry, {
@@ -1767,7 +1828,7 @@ async function factoryModule(
 
       await fs.writeFile(answerFile, answer, { mode: 0o600 });
 
-      const recorded = await runRouteEngine(config, routeBootstrapAnswerArgs(config, {
+      const recorded = await runRouteDecision(config, routeBootstrapAnswerArgs(config, {
         task: id,
         profile: trusted.profile || '',
         attempt: trusted.attempt,
@@ -1859,7 +1920,7 @@ async function factoryModule(
     const doneHandoff = factoryState.beginHandoff(id);
 
     try {
-      const committed = await runRouteEngine(config, routeGateArgs(config, {
+      const committed = await runRouteDecision(config, routeGateArgs(config, {
         task: id,
         profile: trusted.profile,
         attempt,
@@ -1871,10 +1932,17 @@ async function factoryModule(
           headEventHash: string;
         } | undefined,
       }));
-      if (!committed.ok) {
+
+      if (committed.timedOut) {
+        if (!(await reconcileRouteDecisionTimeout(id, trusted, { kind: 'gate', node: gateNode }, reply))) {
+          return reply;
+        }
+      } else if (!committed.ok) {
         return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
       }
+
       const resumed = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'после ворот' });
+
       return {
         ok: true,
         key,
@@ -1882,6 +1950,7 @@ async function factoryModule(
         resumed: resumed.ok,
         resumeError: resumed.message || null,
         resumeFailure: resumed.failure || null,
+        ...(committed.timedOut ? { engineTimedOut: true } : {}),
       };
     } finally {
       doneHandoff();
@@ -1920,13 +1989,22 @@ async function factoryModule(
     const doneHandoff = factoryState.beginHandoff(id);
 
     try {
-      const rewound = await runRouteEngine(config, routeGotoArgs(config, {
+      const rewound = await runRouteDecision(config, routeGotoArgs(config, {
         task: id, profile: trusted.profile, attempt: trusted.attempt, node, reason: comment,
       }));
-      if (!rewound.ok) return reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+
+      if (rewound.timedOut) {
+        if (!(await reconcileRouteDecisionTimeout(id, trusted, { kind: 'goto', node }, reply))) {
+          return reply;
+        }
+      } else if (!rewound.ok) {
+        return reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+      }
+
       const resumed = await resumeRouteAttempt(id, {
         profile: trusted.profile, attempt: trusted.attempt, why: 'после возврата',
       });
+
       return {
         ok: true,
         key,
@@ -1935,6 +2013,7 @@ async function factoryModule(
         resumed: resumed.ok,
         resumeError: resumed.message || null,
         resumeFailure: resumed.failure || null,
+        ...(rewound.timedOut ? { engineTimedOut: true } : {}),
       };
     } finally {
       doneHandoff();
@@ -2116,7 +2195,7 @@ async function factoryModule(
 
       doneHandoff = factoryState.beginHandoff(id);
 
-      const rewound = await runRouteEngine(config, routeGotoArgs(config, {
+      const rewound = await runRouteDecision(config, routeGotoArgs(config, {
         task: id,
         profile: trusted.profile,
         attempt: trusted.attempt,
@@ -2124,10 +2203,22 @@ async function factoryModule(
         reason: sanitized.value,
         actor: ARBITER_ACTOR,
       }));
-      if (!rewound.ok) {
+
+      if (rewound.timedOut) {
+        const recorded = await reconcileRouteDecisionTimeout(id, trusted, {
+          kind: 'goto',
+          node: context.target,
+        }, reply);
+
+        if (!recorded) {
+          return null;
+        }
+      } else if (!rewound.ok) {
         reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+
         return null;
       }
+
       const resumed = await resumeRouteAttempt(id, {
         profile: trusted.profile, attempt: trusted.attempt, why: 'после арбитража',
       });
@@ -2156,6 +2247,7 @@ async function factoryModule(
         resumed: resumed.ok,
         resumeError: resumed.message || null,
         resumeFailure: resumed.failure || null,
+        ...(rewound.timedOut ? { engineTimedOut: true } : {}),
       };
     } finally {
       doneHandoff();
@@ -2387,8 +2479,9 @@ async function factoryModule(
     let attemptClosed = null;
     const attempt = trusted.attempt;
     const terminal = Boolean(trusted.terminal);
+
     if (!terminal) {
-      const done = await runRouteEngine(config, routeAbandonArgs(config, {
+      const done = await runRouteDecision(config, routeAbandonArgs(config, {
         task: id,
         profile: trusted.profile,
         attempt,
@@ -2445,8 +2538,9 @@ async function factoryModule(
     let attemptClosed = null;
     const attempt = trusted.attempt;
     const terminal = Boolean(trusted.terminal);
+
     if (!terminal) {
-      const done = await runRouteEngine(config, routeAbandonArgs(config, {
+      const done = await runRouteDecision(config, routeAbandonArgs(config, {
         task: id, profile: trusted.profile, attempt, reason: 'задача закрыта из кокпита',
       }));
       // 73 здесь означает «попытка и так уже терминальна» — закрытию это не мешает.
@@ -2537,8 +2631,9 @@ async function factoryModule(
       }
 
       const stateDir = config.stateDir;
+
       if (trusted.terminal !== 'abandoned') {
-        const done = await runRouteEngine(config, routeAbandonArgs(config, {
+        const done = await runRouteDecision(config, routeAbandonArgs(config, {
           task: id, profile: trusted.profile, attempt: trusted.attempt, reason: 'перезапуск стенда из кокпита',
         }));
         if (!done.ok && done.code !== 73) {

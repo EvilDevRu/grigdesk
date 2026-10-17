@@ -17,6 +17,8 @@
 // слияние идёт от СВЕЖЕГО содержимого файла внутри очереди (вотчер пишет cards,
 // действия — screen/sent, чужие поля не затираются). read() тоже стоит в той же
 // очереди и не обгоняет стоящую запись.
+import { isPlainRecord } from '../../../../../shared/lib/objects.ts';
+
 import {
   TelegramAccountBindingsError,
   atomicWriteTelegramJson,
@@ -106,19 +108,13 @@ export function pultOwnerKeyMatches(
     || key === `${String(accountRef)}:${Number(chatId)}:${Number(confirmedAtMs)}`;
 }
 
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
 /**
  * Карточка состояния. `messageId: null` законен — это «знали, но не слали»
  * (silent-снимок после старта): при уходе повода такой ключ просто забывается,
  * редактировать нечего.
  */
 function cleanCard(value: unknown): PultCard | null {
-  if (!isPlainObject(value)) return null;
+  if (!isPlainRecord(value)) return null;
   if (value.messageId !== null
       && (!Number.isSafeInteger(value.messageId) || Number(value.messageId) <= 0)) return null;
   if (!Number.isSafeInteger(value.at) || Number(value.at) <= 0) return null;
@@ -140,7 +136,7 @@ function cleanCard(value: unknown): PultCard | null {
 }
 
 function cleanReplyAction(value: unknown): PultReplyAction | null {
-  if (!isPlainObject(value)) return null;
+  if (!isPlainRecord(value)) return null;
   if (value.kind === 'gate-reject') {
     const taskId = String(value.taskId || '');
     const gateKey = String(value.gateKey || '');
@@ -156,7 +152,7 @@ function cleanReplyAction(value: unknown): PultReplyAction | null {
 }
 
 function cleanCards(raw: unknown): Record<string, PultCard> | null {
-  if (!isPlainObject(raw)) return null;
+  if (!isPlainRecord(raw)) return null;
 
   const cards: Record<string, PultCard> = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -171,7 +167,7 @@ function cleanCards(raw: unknown): Record<string, PultCard> | null {
 /** Экран навигации: одно сообщение на пульт, привязанное к подтверждённой личке. */
 function cleanScreen(value: unknown): PultScreen | null | undefined {
   if (value === null) return null;
-  if (!isPlainObject(value)) return undefined;
+  if (!isPlainRecord(value)) return undefined;
   if (!Number.isSafeInteger(value.messageId) || Number(value.messageId) <= 0) return undefined;
   if (!Number.isSafeInteger(value.at) || Number(value.at) <= 0) return undefined;
   if (typeof value.ownerKey !== 'string' || !value.ownerKey
@@ -185,7 +181,7 @@ function cleanScreen(value: unknown): PultScreen | null | undefined {
 }
 
 function cleanSentEntry(value: unknown): PultSentEntry | null {
-  if (!isPlainObject(value)) return null;
+  if (!isPlainRecord(value)) return null;
   if (!Number.isSafeInteger(value.messageId) || Number(value.messageId) <= 0) return null;
   if (!Number.isSafeInteger(value.at) || Number(value.at) <= 0) return null;
 
@@ -205,7 +201,7 @@ function cleanSent(raw: unknown): PultSentEntry[] | null {
 }
 
 function cleanTurn(value: unknown): PultTurn | null {
-  if (!isPlainObject(value)) return null;
+  if (!isPlainRecord(value)) return null;
 
   const id = String(value.id || '');
   const ownerKey = String(value.ownerKey || '');

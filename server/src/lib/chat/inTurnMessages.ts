@@ -17,7 +17,7 @@ import {
   inTurnFingerprint,
   isPendingDelivery,
   utf8Bytes,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type {
   InTurnAssistantBlock,
   InTurnAttachment,
@@ -27,7 +27,7 @@ import type {
   InTurnReceipt,
   InTurnReceiptEvent,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 import type { ChatAssistantMessages } from './assistantMessages.ts';
 import type { ChatInTurnLedger, InTurnRecord } from './inTurnLedger.ts';
 

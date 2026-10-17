@@ -3,7 +3,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import type { InTurnAssistantEvent, InTurnPort, InTurnUnavailableReason } from '../../../../shared/chatInTurnContracts.ts';
+import type {
+  InTurnAssistantEvent,
+  InTurnPort,
+  InTurnUnavailableReason,
+} from '../../../../shared/chat/chatInTurnContracts.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import { buildDeepSeekChildEnv } from './env.ts';
 import { nearestProjectRoot, prepareDeepSeekLaunch, validateMcpServers } from './runtime.ts';
@@ -17,6 +22,7 @@ type WebOptions = BaseOptions & {
   onInTurnReady?: (port: InTurnPort) => void;
   onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   startServer?: (options: StartDeepSeekServerOptions) => Promise<DeepSeekServerProcess>;
 };
 
@@ -61,6 +67,7 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       signal: options.signal,
       onStep: options.onStep,
       onProgress: options.onProgress,
+      onRunMetadata: options.onRunMetadata,
       onSessionCreated: options.onSessionCreated
         ? async (id) => { await options.onSessionCreated?.(id); } : undefined,
       onInTurnReady: options.onInTurnReady,

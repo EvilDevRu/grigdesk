@@ -7,12 +7,19 @@ import test from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { normalizeNavItem, usePluginsStore } from '../../web/src/stores/plugins.js';
 import { pluginPageRoute } from '../../web/src/shared/tools/catalog.ts';
-import {
-  TOOL_REGISTRY,
-  pluginTools,
-  toolById,
-  toolsOf,
-} from '../../web/src/shared/tools/registry.ts';
+import { compileModule, webFile } from './helpers/compile-vue.js';
+
+const { TOOL_REGISTRY, pluginTools, toolById, toolsOf } = await compileModule(
+  webFile('src/shared/tools/registry.ts'), {
+    stubs: {
+      '../asyncView.ts': 'export const asyncView = (loader) => ({ __asyncLoader: loader });',
+      ...Object.fromEntries([
+        'code/CodePanel', 'shelf/TaskShelfPanel', 'studio3d/Studio3dPanel', 'terminal/TerminalPanel',
+        'ssh/SshPanel', 'db/DbPanel', 'docker/DockerPanel', 'ext/PluginFramePanel',
+      ].map((name) => [`../../views/${name}.vue`, 'export default {};'])),
+    },
+  },
+);
 
 function plugin(overrides = {}) {
   return {

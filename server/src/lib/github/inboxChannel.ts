@@ -4,6 +4,8 @@
 // может принадлежать как живому runtime, так и сохранённому disconnected account:
 // во втором случае coordinator сам помечает результат read-only.
 
+import { isPlainRecord } from '../../../../shared/lib/objects.ts';
+
 import { assertAccountRef } from '../inbox/identity.ts';
 import { normalizeGitHubRepositoryId } from './accountBindings.ts';
 import {
@@ -70,12 +72,6 @@ const fail: (code: string, message: string, statusCode?: number, cause?: unknown
 ) => {
   throw new GitHubInboxChannelError(code, message, statusCode, cause);
 };
-
-function isPlainObject(value: unknown): value is Payload {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
 
 function callable(value: unknown, where: string): AnyFunction {
   if (typeof value !== 'function') {
@@ -149,7 +145,7 @@ function rulesOf(source: unknown): LeaseOwner['rules'] {
 }
 
 function leaseOf(raw: unknown): LeaseOwner {
-  if (!isPlainObject(raw) || !isPlainObject(raw.context)) {
+  if (!isPlainRecord(raw) || !isPlainRecord(raw.context)) {
     fail('github_inbox_invalid_context', 'acquireInboxLease вернул неверный lease.');
   }
   const context = raw.context as Payload;
@@ -209,7 +205,7 @@ function activationBounds(windows: unknown): ActivationBounds | null {
 }
 
 function policyOf(rule: unknown, repositoryId: string): Payload {
-  if (!isPlainObject(rule)) {
+  if (!isPlainRecord(rule)) {
     fail('github_inbox_invalid_policy', 'GitHub repository rule имеет неверный формат.');
   }
   let owner: string;
@@ -233,7 +229,7 @@ function policyOf(rule: unknown, repositoryId: string): Payload {
 }
 
 function issueUrl(issue: unknown, repositoryFullName: string): string {
-  if (!isPlainObject(issue) || typeof issue.number !== 'number'
+  if (!isPlainRecord(issue) || typeof issue.number !== 'number'
       || !Number.isSafeInteger(issue.number) || issue.number < 1) {
     fail('github_inbox_invalid_archive', 'GitHub issue не содержит безопасный issue number.');
   }
@@ -265,7 +261,7 @@ function issueUrl(issue: unknown, repositoryFullName: string): string {
 }
 
 function normalizedRow(row: unknown, index: number, owner: LeaseOwner) {
-  if (!isPlainObject(row)) {
+  if (!isPlainRecord(row)) {
     fail('github_inbox_invalid_archive', `GitHub archive row ${index} не является объектом.`);
   }
   if (row.channel !== CHANNEL || row.accountRef !== owner.accountRef) {
@@ -283,7 +279,7 @@ function normalizedRow(row: unknown, index: number, owner: LeaseOwner) {
       || typeof row.seq !== 'number' || !Number.isSafeInteger(row.seq) || row.seq < 1
       || typeof row.occurredAt !== 'number'
       || !Number.isSafeInteger(row.occurredAt) || row.occurredAt < 0
-      || !isPlainObject(row.snapshot)) {
+      || !isPlainRecord(row.snapshot)) {
     fail('github_inbox_invalid_archive', `GitHub archive row ${index} нарушает owner/position contract.`);
   }
   const message = normalizeOpenedIssue({
@@ -392,7 +388,7 @@ export function createGitHubInboxChannel({ enabled, state, acquireInboxLease }: 
 
     async state() {
       const raw = await stateCallback();
-      if (!isPlainObject(raw)) {
+      if (!isPlainRecord(raw)) {
         fail('github_inbox_invalid_state', 'GitHub channel state callback вернул не объект.');
       }
       // Fixed projection: provider identity, generation, PAT и webhook secret не могут

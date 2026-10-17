@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeDraft } from '../fixtures/routes-editor.mjs';
-import { ROUTES_EDITOR_LIMITS } from '../../shared/routesEditorContracts.ts';
+import { ROUTES_EDITOR_LIMITS } from '../../shared/pipeline/routesEditorContracts.ts';
 import {
   applyDraftOperations,
   validateDraftShape,

@@ -6,8 +6,8 @@
   },
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../shared/contractDecoders.ts",
-    "../shared/inboxContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/inbox/inboxContracts.ts",
     "src/lib/inbox/**/*.ts",
     "src/modules/inbox/**/*.ts",
     "../tests/types/inbox-server-contract.test.mts"

@@ -40,6 +40,7 @@ export async function createUiBrowser(url = 'https://cockpit.test/ui-gallery.htm
     CompositionEvent: browser.CompositionEvent,
     CustomEvent: browser.CustomEvent,
     MutationObserver: browser.MutationObserver,
+    ResizeObserver: browser.ResizeObserver,
     getComputedStyle: browser.getComputedStyle.bind(browser),
     requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
     cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),

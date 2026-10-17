@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
+import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { isLocalRequest, isSecureRequest } from '../../plugins/auth.ts';
 
 type Payload = Record<string, unknown>;
@@ -62,10 +64,6 @@ interface ApprovalRoute {
   Body: unknown;
 }
 
-function asRecord(value: unknown): Payload {
-  return value !== null && typeof value === 'object' ? value as Payload : {};
-}
-
 /**
  * Вызов метода службы с запасным ответом. Служба приходит извне и может оказаться
  * неполной; результат остаётся unknown — маршрут разбирает его сам, а не принимает
@@ -86,7 +84,7 @@ function operation(
 // Машинный код отказа переводится в статус ответа: панель решает по коду, а не по
 // тексту — «сессия потеряна» и «так нельзя» ведут человека к разным шагам.
 function sendError(reply: FastifyReply, error: unknown) {
-  const source = asRecord(error);
+  const source = objectOrEmpty(error);
   const value = source.code || source.error;
   const code = typeof value === 'string' && value ? value : 'db_error';
   const status: Record<string, number> = {
@@ -162,7 +160,7 @@ export default async function dbModule(
   fastify.put<SessionRoute>('/api/db/sessions/:sid/agent-access', async (request, reply) => {
     try {
       return await call('setAgentAccess', null)(
-        String(request.params.sid), asRecord(request.body).allowed === true,
+        String(request.params.sid), objectOrEmpty(request.body).allowed === true,
       );
     } catch (error) { return sendError(reply, error); }
   });
@@ -193,10 +191,10 @@ export default async function dbModule(
   fastify.post<ApprovalRoute>('/api/db/approvals/:pid', async (request, reply) => {
     try {
       const result = await call('answerApproval', { ok: false, error: 'not_found' })(
-        String(request.params.pid), { allow: asRecord(request.body).allow === true },
+        String(request.params.pid), { allow: objectOrEmpty(request.body).allow === true },
       );
 
-      return asRecord(result).ok === false ? sendError(reply, result) : result;
+      return objectOrEmpty(result).ok === false ? sendError(reply, result) : result;
     } catch (error) { return sendError(reply, error); }
   });
 }

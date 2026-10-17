@@ -144,6 +144,7 @@ function hostDock() {
     resetAllRuntime() {},
     rememberTool(id) { this.activeTool = id; },
     setWidth() {},
+    fitWidth() {},
     setRuntime() {},
     toggleExpanded() {},
     setExpanded() {},

@@ -1,12 +1,9 @@
 <template>
   <span v-if="total" class="pipeline-topbar-wrap">
-    <UiPopover
-      trigger-mode="both"
-      focus-policy="none"
-      placement="bottom-end"
-      :hover-delay="160"
-      :style="{ width: 'min(360px, calc(100vw - 20px))' }"
-    >
+    <UiTopbarPanel title="Конвейеры" trigger-mode="both">
+      <template #meta>
+        <span :aria-label="`Активных конвейеров: ${total}`">{{ total }} активных</span>
+      </template>
       <template #trigger>
         <UiButton
           data-context="pipeline-topbar"
@@ -30,25 +27,12 @@
         </UiButton>
       </template>
 
-      <template #default="{ close }">
+      <template #default>
         <section class="pipeline-topbar-popover" aria-label="Активные конвейеры">
-          <header class="pipeline-topbar-popover-head">
-            <span class="pipeline-topbar-popover-heading">
-              <strong>Конвейеры</strong>
-              <small>Активны сейчас</small>
-            </span>
-            <span
-              class="pipeline-topbar-popover-count mono"
-              :aria-label="`Активных конвейеров: ${total}`"
-            >
-              {{ total }}
-            </span>
-          </header>
-
           <dl class="pipeline-topbar-popover-summary" aria-label="Сводка по состояниям">
             <div class="running">
               <dt>В работе</dt>
-              <dd class="mono">{{ runningCount }}</dd>
+              <dd class="mono" :class="{ empty: !runningCount }">{{ runningCount }}</dd>
             </div>
             <div class="waiting">
               <dt>Ждут решения</dt>
@@ -59,18 +43,6 @@
               <dd class="mono" :class="{ empty: !issueCount }">{{ issueCount }}</dd>
             </div>
           </dl>
-
-          <div v-if="aggregateProgress" class="pipeline-topbar-popover-progress">
-            <span class="pipeline-topbar-popover-progress-copy">
-              <span>{{ progressLabel }}</span>
-              <small v-if="aggregateProgress.observed < total">
-                По {{ aggregateProgress.observed }} из {{ total }} конвейеров
-              </small>
-            </span>
-            <strong class="mono">
-              {{ aggregateProgress.done }} / {{ aggregateProgress.total }}
-            </strong>
-          </div>
 
           <section
             v-if="attentionItems.length"
@@ -111,10 +83,6 @@
                 </span>
               </li>
             </ul>
-
-            <small v-if="hiddenAttentionCount" class="pipeline-topbar-popover-more">
-              И ещё {{ hiddenAttentionCount }}
-            </small>
           </section>
 
           <div v-else class="pipeline-topbar-popover-ok">
@@ -122,30 +90,45 @@
             <small>Сейчас ничего не требует вашего решения.</small>
           </div>
 
+          <div v-if="aggregateProgress" class="pipeline-topbar-popover-progress">
+            <span class="pipeline-topbar-popover-progress-copy">
+              <span>{{ progressLabel }}</span>
+              <small v-if="aggregateProgress.observed < total">
+                По {{ aggregateProgress.observed }} из {{ total }} конвейеров
+              </small>
+            </span>
+            <strong class="mono">
+              {{ aggregateProgress.done }} / {{ aggregateProgress.total }}
+            </strong>
+          </div>
+
           <UiInlineMessage v-if="error" tone="warning">
             Состояние может быть устаревшим: {{ error }}
           </UiInlineMessage>
-
-          <span class="pipeline-topbar-popover-footer">
-            <UiButton
-              block
-              data-context="topbar-popover-footer"
-              variant="outline"
-              @click="openPipeline(close)"
-            >
-              Открыть конвейер
-            </UiButton>
-          </span>
         </section>
       </template>
-    </UiPopover>
+      <template #footer="{ close }">
+        <span class="pipeline-topbar-popover-footer">
+          <UiButton
+            data-context="topbar-popover-footer"
+            variant="outline"
+            @click="openPipeline(close)"
+          >
+            Открыть конвейер →
+          </UiButton>
+          <small v-if="hiddenAttentionCount" class="pipeline-topbar-popover-more">
+            Ещё {{ hiddenAttentionCount }}
+          </small>
+        </span>
+      </template>
+    </UiTopbarPanel>
   </span>
 </template>
 
 <script setup>
 import { computed } from 'vue';
 
-import { UiButton, UiInlineMessage, UiPopover, vTooltip } from '../../ui';
+import { UiButton, UiInlineMessage, UiTopbarPanel, vTooltip } from '../../ui';
 
 const ATTENTION_LIMIT = 3;
 
@@ -266,66 +249,27 @@ function openPipeline(close) {
   width: 100%;
   min-width: 0;
 }
-.pipeline-topbar-popover-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.pipeline-topbar-popover-heading {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.pipeline-topbar-popover-heading strong {
-  color: var(--ink);
-  font-size: 13px;
-}
-.pipeline-topbar-popover-heading small {
-  color: var(--ink-mid);
-  font-size: 10.5px;
-}
-.pipeline-topbar-popover-count {
-  min-width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 750;
-}
 .pipeline-topbar-popover-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin: 0;
 }
 .pipeline-topbar-popover-summary > div {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
+  display: inline-flex;
+  align-items: baseline;
   gap: 4px;
-  padding: 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface-2);
 }
 .pipeline-topbar-popover-summary dt {
-  overflow: hidden;
   color: var(--ink-mid);
-  font-size: 9.5px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 11px;
 }
 .pipeline-topbar-popover-summary dd {
+  order: -1;
   margin: 0;
-  font-size: 16px;
-  font-weight: 750;
+  font-size: 13px;
+  font-weight: 600;
 }
 .pipeline-topbar-popover-summary .running dd {
   color: var(--accent);
@@ -343,8 +287,8 @@ function openPipeline(close) {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 10px;
-  border-block: 1px solid var(--line);
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 .pipeline-topbar-popover-progress-copy {
   display: flex;
@@ -353,10 +297,10 @@ function openPipeline(close) {
   flex-direction: column;
   gap: 2px;
   color: var(--ink-mid);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .pipeline-topbar-popover-progress-copy small {
-  font-size: 9.5px;
+  font-size: 11px;
 }
 .pipeline-topbar-popover-progress strong {
   color: var(--ink);
@@ -367,17 +311,20 @@ function openPipeline(close) {
   min-width: 0;
   flex-direction: column;
   gap: 5px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 .pipeline-topbar-popover-attention-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: var(--ink-mid);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .pipeline-topbar-popover-attention-head strong {
-  color: var(--ink);
-  font-weight: 650;
+  color: var(--ink-mid);
+  font-weight: 500;
 }
 .pipeline-topbar-popover-attention-head span {
   color: var(--warn);
@@ -389,12 +336,11 @@ function openPipeline(close) {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-block: 1px solid var(--line);
 }
 .pipeline-topbar-popover-list li {
   display: flex;
   min-width: 0;
-  padding: 7px 5px;
+  padding: 9px 0;
 }
 .pipeline-topbar-popover-list li + li {
   border-top: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
@@ -412,7 +358,7 @@ function openPipeline(close) {
   overflow: hidden;
   color: var(--ink);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -430,11 +376,11 @@ function openPipeline(close) {
   gap: 5px;
   min-width: 0;
   color: var(--ink-mid);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 .pipeline-topbar-popover-state {
   flex: none;
-  font-weight: 650;
+  font-weight: 500;
 }
 .pipeline-topbar-popover-state.running {
   color: var(--accent);
@@ -452,18 +398,16 @@ function openPipeline(close) {
   white-space: nowrap;
 }
 .pipeline-topbar-popover-more {
+  flex: none;
   color: var(--ink-mid);
-  font-size: 9.5px;
+  font-size: 11px;
   text-align: right;
 }
 .pipeline-topbar-popover-ok {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--good) 32%, var(--line));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--good) 6%, var(--surface));
+  padding: 10px 0;
 }
 .pipeline-topbar-popover-ok strong {
   color: var(--good);
@@ -471,9 +415,12 @@ function openPipeline(close) {
 }
 .pipeline-topbar-popover-ok small {
   color: var(--ink-mid);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 .pipeline-topbar-popover-footer {
   display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
 }
 </style>

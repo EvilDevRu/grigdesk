@@ -103,10 +103,10 @@ test('клик по конвейерам раскрывает агрегиров
   assert.match(rows[2].textContent, /Принять план/u);
   assert.doesNotMatch(popover.textContent, /Обычный живой прогон/u);
   assert.doesNotMatch(popover.textContent, /Ещё одно решение/u);
-  assert.match(popover.textContent, /И ещё 1/u);
+  assert.match(popover.closest('.ui-topbar-panel').textContent, /Ещё 1/u);
   assert.match(popover.textContent, /Состояние может быть устаревшим/u);
 
-  const footer = popover.querySelector('.pipeline-topbar-popover-footer button');
+  const footer = popover.closest('.ui-topbar-panel').querySelector('.pipeline-topbar-popover-footer button');
   assert.ok(footer);
 
   footer.dispatchEvent(new browser.MouseEvent('click', { bubbles: true }));

@@ -5,7 +5,7 @@
 // (только включённые; их вкл/выкл требует рестарта — честно отражено в API).
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -16,14 +16,64 @@ import {
   settingsValues,
 } from '../../lib/pluginsRegistry.ts';
 import type { PluginManifest, PluginSetting } from '../../lib/pluginsRegistry.ts';
-import { normalizePluginCategory } from '../../../../shared/pluginsContracts.ts';
+import { resolvePluginDocs } from '../../lib/pluginDocs.ts';
+import type { PluginDocsEntry } from '../../lib/pluginDocs.ts';
+import { normalizePluginCategory } from '../../../../shared/plugins/pluginsContracts.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import type { CockpitConfig } from '../../config.ts';
+import type { PluginInstallPort } from '../../lib/pluginInstall/service.ts';
+import { createPluginLifecycle, PluginAdmission } from './lifecycle.ts';
+import installRoutes from './installRoutes.ts';
+import { preparePluginDataDir, preparePluginDataRoot } from './pluginData.ts';
+import { assertRealPackageRoot } from '../../lib/pluginInstall/packageTree.ts';
+import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
 
 export interface PluginsModuleOptions {
-  config: Pick<CockpitConfig, 'userPluginsDir'>;
+  config: Pick<CockpitConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
   prefs: PrefsStore;
+  installs?: PluginInstallPort;
   onToggle?: (id: string, enabled: boolean) => unknown;
+  prepareChange?: (id: string, change: { enabled?: boolean; values?: unknown }) =>
+    Promise<PluginTransition | undefined> | PluginTransition | undefined;
+}
+
+export interface PluginTransition {
+  commit(): void;
+  rollback(): Promise<void>;
+  afterCommit(): Promise<void>;
+}
+
+/**
+ * Подготовка плагина завершена до prefs.write; commit не уступает управление.
+ * Отказ записи откатывает только новые ресурсы, оставляя прежний runtime действующим.
+ */
+async function writePluginChange(prefs: PrefsStore, patch: Record<string, unknown>,
+  transition: PluginTransition | undefined): Promise<void> {
+  try {
+    prefs.write(patch);
+  } catch (error) {
+    await transition?.rollback();
+
+    throw error;
+  }
+
+  transition?.commit();
+  await transition?.afterCommit();
+}
+
+/**
+ * Hook выдаёт только собственные безопасные ошибки с явным HTTP кодом.
+ * Остальные отказы сохраняют прежнюю обработку Fastify и не маскируются успехом.
+ */
+function pluginChangeError(error: unknown, reply: FastifyReply): unknown {
+  const source = error as { statusCode?: number; code?: string; message?: string };
+
+  if (source.statusCode && source.statusCode >= 400 && source.statusCode < 500
+    && source.code && /^[a-z_]+$/.test(source.code)) {
+    return reply.code(source.statusCode).send({ error: source.code, message: source.message });
+  }
+
+  throw error;
 }
 
 // Запрос с id плагина в адресе и телом настройки.
@@ -36,15 +86,69 @@ type PluginRequest = FastifyRequest<{
   } | null;
 }>;
 
+/**
+ * Recovery предшествует scan и import, а зарегистрированные runtime держат свои gates.
+ * Installer обновляет каталог без загрузки новой версии кода в текущий процесс.
+ */
 async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOptions): Promise<void> {
-  const { config, prefs, onToggle } = opts;
+  const { config, prefs, onToggle, prepareChange } = opts;
 
-  const userPlugins = await scanUserPlugins(config.userPluginsDir, fastify.log);
+  const recovery = await opts.installs?.recover();
+  const dataRoot = config.userPluginsDataDir
+    ? await preparePluginDataRoot(config.userPluginsDir, config.userPluginsDataDir) : null;
+
+  if (opts.installs && !dataRoot) {
+    throw new TypeError('Для installer нужен отдельный userPluginsDataDir.');
+  }
+
+  const scanned = await scanUserPlugins(config.userPluginsDir, fastify.log);
+  const userPlugins = scanned.filter((manifest) => recovery?.blockedIds !== '*'
+    && !recovery?.blockedIds.includes(manifest.id));
+  const loaded = new Set<string>();
+  const gates = new Map<string, PluginAdmission>();
   // Признак `system` объявляет сам манифест (в SYSTEM и в скане) — здесь его не
   // дописываем: умолчание вкл/выкл считается по манифесту целиком, и вторая
   // копия правды разошлась бы с первой.
-  const all: PluginManifest[] = [...SYSTEM, ...userPlugins];
-  const byId = new Map(all.map((m) => [m.id, m]));
+  let all: PluginManifest[] = [...SYSTEM, ...userPlugins];
+  let byId = new Map(all.map((m) => [m.id, m]));
+
+  /**
+   * Новый scan публикуется целиком без import и регистрации runtime routes.
+   * Существующий каталог и byId сохраняются при отказе любого подготовительного шага.
+   */
+  async function refreshUserPlugins(): Promise<void> {
+    await assertRealPackageRoot(config.userPluginsDir);
+
+    const nextUser = await scanUserPlugins(config.userPluginsDir, fastify.log);
+    const next = [...SYSTEM, ...nextUser.filter((manifest) => recovery?.blockedIds !== '*'
+      && !recovery?.blockedIds.includes(manifest.id))];
+    const nextById = new Map(next.map((manifest) => [manifest.id, manifest]));
+
+    all = next;
+    byId = nextById;
+  }
+
+  /**
+   * Installer health не превращает ошибку одного дерева в отказ каталога ядра.
+   * Безопасная общая причина остаётся доступной в API исходов установки.
+   */
+  async function describeInstall(id: string): Promise<PluginInstallInfo | null> {
+    try {
+      return await opts.installs?.describe(id) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  opts.installs?.bindRuntime({
+    isLoaded: (id) => loaded.has(id),
+    prepareReplace: async (id, signal) => {
+      const gate = gates.get(id);
+
+      return gate ? gate.prepare(signal) : { async finish() {} };
+    },
+    refresh: refreshUserPlugins,
+  });
 
   // Живой гейт для системных модулей: читает prefs при каждом вызове.
   fastify.decorate('pluginEnabled', (id: string) => {
@@ -70,38 +174,110 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, кокпит даёт api=${PLUGIN_API} — пропущен`);
       continue;
     }
-    // Своя страница плагина раздаётся под тем же префиксом /api/ext/<id>/, что и его
-    // роуты: общий auth guard закрывает её вместе со всем /api, а ядро не исполняет
-    // ни строчки её кода — только отдаёт файлы папки. Кеша нет: правку страницы
-    // человек видит по обновлению вкладки, без рестарта.
-    if (m.web) {
-      await fastify.register(fastifyStatic, {
-        root: m.web.dir,
-        prefix: m.web.url,
-        decorateReply: false,
-        index: ['index.html'],
-        cacheControl: true,
-        maxAge: 0,
+
+    const dataDir = m.hasServer && dataRoot ? await preparePluginDataDir(dataRoot, m.id) : undefined;
+    const lifecycle = createPluginLifecycle();
+    const gate = new PluginAdmission({ lifecycle, hasServer: !!m.hasServer });
+
+    gates.set(m.id, gate);
+    await fastify.register(async (scope) => {
+      scope.addHook('onRequest', async (request, reply) => {
+        gate.admit(request, reply);
       });
-      fastify.log.info({ plugin: m.id }, `страница плагина раздаётся (${m.web.url})`);
-    }
-    if (!m.hasServer) continue;
-    try {
-      const mod = await import(pathToFileURL(path.join(String(m.dir), 'server.js')).href);
-      await fastify.register(mod.default, { config, prefs, plugin: m, prefix: `/api/ext/${m.id}` });
-      fastify.log.info({ plugin: m.id }, `пользовательский плагин зарегистрирован (/api/ext/${m.id})`);
-    } catch (err) {
-      fastify.log.warn(
-        { plugin: m.id, err: (err as Error).message },
-        'пользовательский плагин не поднялся — пропущен',
-      );
-    }
+
+      if (m.web) {
+        await scope.register(fastifyStatic, {
+          root: m.web.dir,
+          prefix: m.web.url,
+          decorateReply: false,
+          index: ['index.html'],
+          cacheControl: true,
+          maxAge: 0,
+        });
+        loaded.add(m.id);
+      }
+
+      if (!m.hasServer) {
+        return;
+      }
+
+      // Import может успеть создать timer или child даже перед исключением.
+      // Такой runtime остаётся загруженным и требует остановки после неудачи.
+      loaded.add(m.id);
+
+      try {
+        const mod = await import(pathToFileURL(path.join(String(m.dir), 'server.js')).href);
+
+        await scope.register(async (serverScope) => {
+          try {
+            const options = {
+              config,
+              prefs,
+              plugin: m,
+              prefix: `/api/ext/${m.id}`,
+              dataDir,
+              lifecycle,
+            };
+
+            if (mod.default.length >= 3) {
+              await new Promise<void>((resolve, reject) => {
+                mod.default(serverScope, options, (error?: Error) => error ? reject(error) : resolve());
+              });
+            } else {
+              await mod.default(serverScope, options);
+            }
+          } catch (error) {
+            gate.options.stopRequired = true;
+            fastify.log.warn({ plugin: m.id }, 'пользовательский сервер не зарегистрирован; нужен рестарт');
+          }
+        }, { prefix: `/api/ext/${m.id}` });
+      } catch (error) {
+        gate.options.stopRequired = true;
+        fastify.log.warn({ plugin: m.id }, 'пользовательский сервер не импортирован; нужен рестарт');
+      }
+    });
   }
 
-  fastify.get('/api/plugins', async () => {
+  /**
+   * Документация доступных плагинов для хода агента: включённых пользовательских, чей
+   * контракт кокпит поднимает. Оглавление ищется в постоянном месте при каждом вызове —
+   * установка, удаление и правка папки видны следующему ходу без рестарта.
+   */
+  fastify.decorate('pluginDocs', async () => {
     const p = prefs.read();
+    const available = all.filter((m) => !m.system && m.dir && isEnabled(p, m)
+      && (m.api || 1) === PLUGIN_API);
+    const found = await Promise.all(available.map(async (m): Promise<PluginDocsEntry | null> => {
+      const docs = await resolvePluginDocs(String(m.dir));
+
+      if (!docs) {
+        return null;
+      }
+
+      return {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        ...docs,
+      };
+    }));
+
+    return found
+      .filter((entry): entry is PluginDocsEntry => entry !== null)
+      .sort((a, b) => a.id.localeCompare(b.id));
+  });
+
+  fastify.get('/api/plugins', async () => {
+    if (opts.installs?.health()) {
+      // Commit остаётся достоверным при отказе scanner: следующее чтение повторяет refresh.
+      // Ошибка recovery сохраняет прежний каталог и не лишает ядро его системных API.
+      await opts.installs.refreshCatalog().catch(() => {});
+    }
+
+    const p = prefs.read();
+
     return {
-      plugins: all.map((m) => ({
+      plugins: await Promise.all(all.map(async (m) => ({
         id: m.id,
         name: m.name,
         version: m.version,
@@ -120,21 +296,33 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         // Пользовательский серверный код и страница подключаются на старте — тумблер
         // подействует после рестарта.
         needsRestart: !m.system && (m.hasServer || !!m.web),
-      })),
+        install: m.system ? null : await describeInstall(m.id),
+      }))),
     };
   });
 
   fastify.post('/api/plugins/:id/toggle', async (request: PluginRequest, reply) => {
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
-    const p = prefs.read();
     const enabled = !!(request.body || {}).enabled;
+    let transition: PluginTransition | undefined;
+
+    try {
+      transition = await prepareChange?.(m.id, { enabled });
+    } catch (error) {
+      return pluginChangeError(error, reply);
+    }
+
+    const p = prefs.read();
     const next = { ...(p.plugins as Record<string, unknown> || {}), [m.id]: enabled };
-    prefs.write({ plugins: next });
+
+    await writePluginChange(prefs, { plugins: next }, transition);
     try {
       await onToggle?.(m.id, enabled);
     } catch (error) {
-      prefs.write({ plugins: (p.plugins as Record<string, unknown>) || {} });
+      if (!transition) {
+        prefs.write({ plugins: (p.plugins as Record<string, unknown>) || {} });
+      }
       throw error;
     }
     return { ok: true, enabled: next[m.id] };
@@ -173,6 +361,18 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       const step = Number(setting.step) > 0 ? Number(setting.step) : 1;
       values[k] = Math.min(maximum, minimum + Math.round((clamped - minimum) / step) * step);
     }
+    let transition: PluginTransition | undefined;
+
+    if (hasValues) {
+      const preparedPrefs = { ...prefs.read(), pluginSettings: { [m.id]: values } };
+
+      try {
+        transition = await prepareChange?.(m.id, { values: settingsValues(preparedPrefs, m) });
+      } catch (error) {
+        return pluginChangeError(error, reply);
+      }
+    }
+
     const p = prefs.read();
     // Тумблеры размещений — только по слотам из манифеста: чужой слот не пишется.
     const declared = new Set((m.placements || []).map((decl) => decl.slot));
@@ -182,7 +382,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     }
     const storedPlacements = (p.pluginPlacements as Record<string, unknown> || {});
     const ownPlacements = (storedPlacements[m.id] as Record<string, unknown> || {});
-    prefs.write({
+    await writePluginChange(prefs, {
       // Отсутствие values сохраняет параметры; явный values: {} возвращает их умолчания.
       ...(hasValues && {
         pluginSettings: { ...(p.pluginSettings as Record<string, unknown> || {}), [m.id]: values },
@@ -190,7 +390,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       ...(Object.keys(placements).length && {
         pluginPlacements: { ...storedPlacements, [m.id]: { ...ownPlacements, ...placements } },
       }),
-    });
+    }, transition);
     // Размещения в ответе — только у плагина, который их объявил: остальным поле ни к чему.
     return {
       ok: true,
@@ -198,6 +398,10 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       ...(m.placements?.length && { placements: placementsState(prefs.read(), m) }),
     };
   });
+
+  if (opts.installs) {
+    await fastify.register(installRoutes, { installs: opts.installs });
+  }
 }
 
 export default fp(pluginsModule, { name: 'module-plugins' });

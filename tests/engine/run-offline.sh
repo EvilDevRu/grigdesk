@@ -25,6 +25,7 @@ if [[ "${1:-}" == "--one" ]]; then
   env -i \
     PATH="$FACTORY_TESTS_HOME/fakes/bin:/usr/bin:/bin" \
     LC_ALL=C \
+    COCKPIT_HOME="$test_root/cockpit-home" \
     FACTORY_HOME="$FACTORY_HOME" \
     FACTORY_PROFILES_DIR="$test_root/profiles" \
     FACTORY_TESTS_HOME="$FACTORY_TESTS_HOME" \

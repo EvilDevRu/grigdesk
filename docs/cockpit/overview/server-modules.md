@@ -1,5 +1,8 @@
 # Модули сервера (server/src/modules/)
 
+Относительные пути данных `chats/`, `agents/`, `plugins/`, `telegram/` и `github/` ниже
+считаются от [папки данных](../server/data-home.md), а не от дерева кода.
+
 | Модуль | Эндпоинты | Источник |
 |--------|-----------|----------|
 | `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд, `POST /api/tasks/:id/arbitrate` — арбитр типизированной остановки | `~/.factory/state` + `<factoryHome>/bin/factory` |
@@ -83,7 +86,7 @@ storage и operator gates описаны в [inbox.md](../inbox/README.md).
 **Телеграм-пульт** (`lib/telegram/pult/`) — живая картина конвейера и кнопки решений
 в подтверждённой кодом личке владельца, тем же ботом и тем же поллером
 (читатель getUpdates один; `callback_query` принимает общий цикл). Вотчер импортирует
-те же `shared/pipelineWait.ts` и `shared/agentActivity.ts`, что чип навигации, слушает
+те же `shared/pipeline/pipelineWait.ts` и `shared/pipeline/agentActivity.ts`, что чип навигации, слушает
 шину через `fastify.sse.subscribe` и ходит в те же ручки через inject; действия
 транслируются в существующие gate/permission/resume с CAS на сервере. Три сорта
 сообщений: тихая живая карточка попытки (правится на месте — узел, прогресс, активность

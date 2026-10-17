@@ -1,5 +1,5 @@
-import type { MediaJob, MediaPlanTask } from '../../shared/mediaContracts.ts';
-import { parseMediaJob } from '../../shared/mediaContracts.ts';
+import type { MediaJob, MediaPlanTask } from '../../shared/media/mediaContracts.ts';
+import { parseMediaJob } from '../../shared/media/mediaContracts.ts';
 import { mediaApi } from '../../web/src/shared/mediaApi.ts';
 import type { VideoDraft } from '../../web/src/stores/videoSession.ts';
 

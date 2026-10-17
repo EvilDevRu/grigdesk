@@ -14,6 +14,7 @@ export const ALLOWED_TITLE_TAGS = [
   'iframe',
   'UiDialog',
   'UiFloatingDialog',
+  'UiTopbarPanel',
   'MiniChart',
   'ProjectAvatar',
 ];

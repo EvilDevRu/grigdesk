@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="20" viewBox="0 0 360 20"
      role="img" aria-labelledby="title">
-  <title id="title">Linux · Node.js ≥22.18 · Vue 3 · PWA</title>
+  <title id="title">Linux · Node.js ≥22.18 · Vue 3 · AppImage</title>
   <g font-family="Verdana, Geneva, DejaVu Sans, sans-serif" font-size="11"
      text-anchor="middle" fill="#fff">
     <g>
@@ -21,10 +21,8 @@
       <text x="42.5" y="14" fill="#163b2e">3</text>
     </g>
     <g transform="translate(282)">
-      <path fill="#555" d="M0 0h38v20H0z"/>
-      <path fill="#5a0fc8" d="M38 0h40v20H38z"/>
-      <text x="19" y="14">PWA</text>
-      <text x="58" y="14">ready</text>
+      <path fill="#5a0fc8" d="M0 0h78v20H0z"/>
+      <text x="39" y="14">AppImage</text>
     </g>
   </g>
 </svg>

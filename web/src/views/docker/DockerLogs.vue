@@ -29,8 +29,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
-import { parseDockerLogMessage } from '../../../../shared/dockerContracts';
-import type { DockerContainer, DockerLogFrame, DockerLogMessage } from '../../../../shared/dockerContracts';
+import { parseDockerLogMessage } from '../../../../shared/plugins/docker/dockerContracts';
+import type {
+  DockerContainer,
+  DockerLogFrame,
+  DockerLogMessage,
+} from '../../../../shared/plugins/docker/dockerContracts';
 import { api } from '../../shared/apiClient.ts';
 import { UiCheckbox, UiSearchInput } from '../../ui';
 

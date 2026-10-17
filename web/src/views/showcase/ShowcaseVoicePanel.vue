@@ -230,7 +230,7 @@ import type {
   ShowcaseVoiceCatalog,
   ShowcaseVoiceDictionary,
   ShowcaseVoicePackage,
-} from '../../../../shared/showcaseContracts';
+} from '../../../../shared/plugins/showcase/showcaseContracts';
 
 type Pace = ShowcasePace;
 

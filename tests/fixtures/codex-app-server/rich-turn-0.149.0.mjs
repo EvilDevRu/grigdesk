@@ -19,6 +19,10 @@ const TURN_ID = '00000000-0000-7000-8000-00000000004a';
 const FOREIGN_THREAD_ID = '00000000-0000-7000-8000-00000000004b';
 const FOREIGN_TURN_ID = '00000000-0000-7000-8000-00000000004c';
 const STALE_TURN_ID = '00000000-0000-7000-8000-00000000004d';
+// Второй и третий ходы одного thread: сценарии отказа и повторной отправки в ту же
+// сессию обязаны называть РАЗНЫЕ turn/item id, иначе повтор неотличим от первого хода.
+const SECOND_TURN_ID = '00000000-0000-7000-8000-00000000004e';
+const THIRD_TURN_ID = '00000000-0000-7000-8000-00000000004f';
 const UPDATE_DIFF = '@@ -1 +1 @@\n-export const answer = 41;\n+export const answer = 42;\n';
 // Созданному файлу app-server кладёт в `diff` не patch, а само содержимое —
 // unified-форма у него есть только в общем `turn/diff/updated`.
@@ -59,6 +63,9 @@ function runFixture() {
   let resumed = false;
   let steerCount = 0;
   let fixtureInput = null;
+  // Номер хода в текущем разговоре: резюм того же thread означает продолжение,
+  // и такой ход обязан нести ДРУГОЙ turn id, чем исходный.
+  let turnsStarted = 0;
 
   function trace(entry) {
     if (!traceFile) return;
@@ -220,14 +227,19 @@ function runFixture() {
     } });
   }
 
-  function finishSteeredTurn(resumed = true) {
+  /**
+   * Успешное завершение хода с итоговым ответом. `turnId` обязателен для сценариев
+   * повторной отправки: второй ход того же thread несёт ДРУГОЙ id, и подмена его
+   * первым сделала бы продолжение неотличимым от исходного хода.
+   */
+  function finishSteeredTurn(resumed = true, turnId = TURN_ID, itemId = 'answer-after-steer') {
     const reply = resumed
       ? 'Второй файл проверен, задача продолжена.'
       : 'Ответ на вопрос дан, второй файл не проверен.';
     send({ method: 'item/completed', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_950,
+      threadId: THREAD_ID, turnId, completedAtMs: 1_700_000_001_950,
       item: {
-        type: 'agentMessage', id: 'answer-after-steer', text: reply, phase: 'final_answer',
+        type: 'agentMessage', id: itemId, text: reply, phase: 'final_answer',
         memoryCitation: null, delivery: null,
       },
     } });
@@ -235,6 +247,7 @@ function runFixture() {
       threadId: THREAD_ID,
       turn: {
         ...runningTurn,
+        id: turnId,
         status: 'completed',
         completedAt: 1_700_000_002,
         durationMs: 1_000,
@@ -243,10 +256,14 @@ function runFixture() {
     setTimeout(() => process.exit(0), 20);
   }
 
-  function emitRichTurn() {
+  /**
+   * Богатый успешный ход. `turnId` обязателен для продолжения: второй ход того же
+   * разговора несёт ДРУГОЙ id, и события с исходным id адаптер счёл бы чужими.
+   */
+  function emitRichTurn(turnId = TURN_ID) {
     send({ method: 'turn/plan/updated', params: {
       threadId: THREAD_ID,
-      turnId: TURN_ID,
+      turnId,
       explanation: 'Сначала проверка, затем правка.',
       plan: [
         { step: 'Проверить текущее состояние', status: 'completed' },
@@ -255,20 +272,20 @@ function runFixture() {
     } });
 
     send({ method: 'item/started', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_100,
+      threadId: THREAD_ID, turnId, startedAtMs: 1_700_000_001_100,
       item: {
         type: 'agentMessage', id: 'commentary-1', text: '', phase: 'commentary',
         memoryCitation: null, delivery: null,
       },
     } });
     send({ method: 'item/agentMessage/delta', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'commentary-1', delta: 'Проверяю ',
+      threadId: THREAD_ID, turnId, itemId: 'commentary-1', delta: 'Проверяю ',
     } });
     send({ method: 'item/agentMessage/delta', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'commentary-1', delta: 'файлы перед правкой.',
+      threadId: THREAD_ID, turnId, itemId: 'commentary-1', delta: 'файлы перед правкой.',
     } });
     send({ method: 'item/completed', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_200,
+      threadId: THREAD_ID, turnId, completedAtMs: 1_700_000_001_200,
       item: {
         type: 'agentMessage', id: 'commentary-1', text: 'Проверяю файлы перед правкой.',
         phase: 'commentary', memoryCitation: null, delivery: null,
@@ -276,7 +293,7 @@ function runFixture() {
     } });
 
     send({ method: 'item/started', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_300,
+      threadId: THREAD_ID, turnId, startedAtMs: 1_700_000_001_300,
       item: {
         type: 'commandExecution', id: 'command-1', pluginId: null, scriptPath: null,
         command: 'git status --short', cwd: process.cwd(), processId: null,
@@ -285,13 +302,13 @@ function runFixture() {
       },
     } });
     send({ method: 'item/commandExecution/outputDelta', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'command-1', delta: ' M src/answer.js\n',
+      threadId: THREAD_ID, turnId, itemId: 'command-1', delta: ' M src/answer.js\n',
     } });
     send({ method: 'item/commandExecution/outputDelta', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'command-1', delta: '?? src/ready.js\n',
+      threadId: THREAD_ID, turnId, itemId: 'command-1', delta: '?? src/ready.js\n',
     } });
     send({ method: 'item/completed', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_400,
+      threadId: THREAD_ID, turnId, completedAtMs: 1_700_000_001_400,
       item: {
         type: 'commandExecution', id: 'command-1', pluginId: null, scriptPath: null,
         command: 'git status --short', cwd: process.cwd(), processId: null,
@@ -305,36 +322,36 @@ function runFixture() {
       { path: 'src/ready.js', kind: { type: 'add' }, diff: ADD_CONTENT },
     ];
     send({ method: 'item/started', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_500,
+      threadId: THREAD_ID, turnId, startedAtMs: 1_700_000_001_500,
       // В 0.149 started может прийти раньше готового patch. Cockpit не должен
       // зафиксировать пустую shallow-копию tool до rich patchUpdated.
       item: { type: 'fileChange', id: 'file-change-1', changes: [], status: 'inProgress' },
     } });
     send({ method: 'item/fileChange/patchUpdated', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'file-change-1', changes,
+      threadId: THREAD_ID, turnId, itemId: 'file-change-1', changes,
     } });
     send({ method: 'turn/diff/updated', params: {
-      threadId: THREAD_ID, turnId: TURN_ID,
+      threadId: THREAD_ID, turnId,
       diff: `diff --git a/src/answer.js b/src/answer.js\n${UPDATE_DIFF}diff --git a/src/ready.js b/src/ready.js\n${ADD_DIFF}`,
     } });
     send({ method: 'item/completed', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_600,
+      threadId: THREAD_ID, turnId, completedAtMs: 1_700_000_001_600,
       item: { type: 'fileChange', id: 'file-change-1', changes, status: 'completed' },
     } });
 
     const reply = resumed ? 'Готово: продолжение сохранено.' : 'Готово: изменения сохранены.';
     send({ method: 'item/started', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_700,
+      threadId: THREAD_ID, turnId, startedAtMs: 1_700_000_001_700,
       item: {
         type: 'agentMessage', id: 'answer-1', text: '', phase: 'final_answer',
         memoryCitation: null, delivery: null,
       },
     } });
     send({ method: 'item/agentMessage/delta', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'answer-1', delta: reply,
+      threadId: THREAD_ID, turnId, itemId: 'answer-1', delta: reply,
     } });
     send({ method: 'item/completed', params: {
-      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_800,
+      threadId: THREAD_ID, turnId, completedAtMs: 1_700_000_001_800,
       item: {
         type: 'agentMessage', id: 'answer-1', text: reply, phase: 'final_answer',
         memoryCitation: null, delivery: null,
@@ -344,6 +361,7 @@ function runFixture() {
       threadId: THREAD_ID,
       turn: {
         ...runningTurn,
+        id: turnId,
         status: 'completed',
         completedAt: 1_700_000_002,
         durationMs: 1_000,
@@ -479,6 +497,61 @@ function runFixture() {
     } });
     send({ method: 'item/commandExecution/outputDelta', params: {
       threadId: THREAD_ID, turnId: TURN_ID, itemId: 'long-command-1', delta: 'работаю…\n',
+    } });
+  }
+
+  /**
+   * Один ход, который кончается ошибкой. Формы взяты из TurnError/CodexErrorInfo
+   * снимка app-server: сетевой сбой несёт объект с одним ключом и httpStatusCode,
+   * окончательный отказ — строку. `willRetry` уведомления `error` НЕ доказывает
+   * финальность само по себе: ход закрывает только turn/completed.
+   */
+  function emitFailureTurn({
+    turnId = TURN_ID,
+    itemId = 'failure-commentary-1',
+    commentary = 'Начинаю работу.',
+    error,
+    willRetry,
+    message = 'stream disconnected before completion',
+  } = {}) {
+    const failedTurn = { ...runningTurn, id: turnId };
+
+    send({ method: 'item/completed', params: {
+      threadId: THREAD_ID,
+      turnId,
+      completedAtMs: 1_700_000_001_500,
+      item: {
+        type: 'agentMessage',
+        id: itemId,
+        text: commentary,
+        phase: 'commentary',
+        memoryCitation: null,
+        delivery: null,
+      },
+    } });
+    send({ method: 'error', params: {
+      threadId: THREAD_ID,
+      turnId,
+      // По умолчанию уведомление окончательное: ход закрывается failed, и причина из
+      // него годится как финальная. Явный willRetry true проверяет промежуточный повтор.
+      willRetry: willRetry === true,
+      error: error === undefined
+        ? {
+          message,
+          codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+          additionalDetails: null,
+        }
+        : error,
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId: THREAD_ID,
+      turn: {
+        ...failedTurn,
+        status: 'failed',
+        completedAt: 1_700_000_001_600,
+        durationMs: 500,
+        error: error === undefined ? null : error,
+      },
     } });
   }
 
@@ -766,8 +839,110 @@ function runFixture() {
         phase = 'work-routing';
         return;
       }
-      send({ id: message.id, result: { turn: runningTurn } });
-      send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
+      // Номер хода внутри разговора: процесс поднимается на каждый ход, поэтому
+      // считать его в памяти нельзя. Второй ход того же thread приходит резюмом —
+      // по нему и видно, что это продолжение, а не новый разговор.
+      turnsStarted = resumed ? 2 : 1;
+
+      const activeTurn = turnsStarted === 1
+        ? runningTurn
+        : { ...runningTurn, id: turnsStarted === 2 ? SECOND_TURN_ID : THIRD_TURN_ID };
+
+      // Ответ на turn/start идёт ПЕРВЫМ: до него ход ещё не авторитетен, и уведомление
+      // с незнакомым turn id адаптер справедливо отбрасывает как чужое.
+      send({ id: message.id, result: { turn: activeTurn } });
+      send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: activeTurn } });
+
+      // Ход кончается окончательным сетевым сбоем, а следующий принимает просьбу
+      // продолжить в ТОМ ЖЕ thread: так проверяется реальное автопродолжение.
+      if (scenario === 'turn-failed-then-success') {
+        if (turnsStarted === 1) {
+          emitFailureTurn({
+            turnId: activeTurn.id,
+            itemId: 'failed-commentary-1',
+            commentary: 'Начинаю работу.',
+          });
+          phase = 'turn';
+          return;
+        }
+
+        phase = 'complete';
+        setTimeout(() => emitRichTurn(activeTurn.id), 10);
+        return;
+      }
+
+      // Одноразовые сценарии отказа закрывают процесс после одного хода.
+      if (scenario === 'turn-failed-transport') {
+        emitFailureTurn({
+          turnId: activeTurn.id,
+          itemId: 'failed-commentary-1',
+          commentary: 'Начинаю работу.',
+        });
+        phase = 'complete';
+        return;
+      }
+
+      // Промежуточное уведомление о повторе: turn.error пуст, а причина видна только
+      // в `error` с willRetry true — финальной она не является и продолжения не даёт.
+      if (scenario === 'turn-failed-intermediate-error') {
+        emitFailureTurn({
+          turnId: activeTurn.id,
+          itemId: 'failed-commentary-1',
+          commentary: 'Начинаю работу.',
+          willRetry: true,
+          error: null,
+        });
+        phase = 'complete';
+        return;
+      }
+
+      if (scenario === 'turn-failed-usage-limit') {
+        emitFailureTurn({
+          turnId: activeTurn.id,
+          itemId: 'failed-commentary-1',
+          commentary: 'Начинаю работу.',
+          willRetry: false,
+          error: {
+            message: 'You have hit your usage limit.',
+            codexErrorInfo: 'usageLimitExceeded',
+            additionalDetails: null,
+          },
+        });
+        phase = 'complete';
+        return;
+      }
+
+      if (scenario === 'turn-failed-notification-only') {
+        emitFailureTurn({
+          turnId: activeTurn.id,
+          itemId: 'failed-commentary-1',
+          commentary: 'Начинаю работу.',
+          willRetry: false,
+          message: 'Reconnecting… 5/5',
+          error: undefined,
+        });
+        phase = 'complete';
+        return;
+      }
+
+      // Промежуточный повтор, после которого Codex доводит ТОТ ЖЕ ход до успеха:
+      // второго turn/start быть не должно, ход остаётся обычным.
+      if (scenario === 'turn-failed-intermediate-then-success') {
+        send({ method: 'error', params: {
+          threadId: THREAD_ID,
+          turnId: activeTurn.id,
+          willRetry: true,
+          error: {
+            message: 'Reconnecting… 1/5',
+            codexErrorInfo: 'serverOverloaded',
+            additionalDetails: null,
+          },
+        } });
+        finishSteeredTurn(true, activeTurn.id);
+        phase = 'complete';
+        return;
+      }
+
       phase = ['interrupt', 'context-interrupt'].includes(scenario)
         ? 'interrupt'
         : ['ssh-tool', 'lookup-tool', 'mcp-elicitation', 'mcp-resolved', 'steer'].includes(scenario)
@@ -890,9 +1065,9 @@ function runFixture() {
           params: { threadId: THREAD_ID, requestId: 91013 },
         });
         phase = 'complete';
-        setTimeout(() => emitRichTurn(), 10);
+        setTimeout(() => emitRichTurn(activeTurn.id), 10);
       }
-      else emitRichTurn();
+      else emitRichTurn(activeTurn.id);
       return;
     }
 

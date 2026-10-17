@@ -95,6 +95,17 @@ test('D1: чат и конвейер переходят, задача откры
   assert.deepEqual(h.calls.opened, ['42']);
 });
 
+test('studio открывает /3d с точной моделью и версией', () => {
+  const h = deps(reactive, '/chats', {});
+
+  api.openAlertTarget({
+    kind: 'studio',
+    modelId: 'fixture-model',
+    versionId: 'v01-model'
+  }, h.deps);
+  assert.deepEqual(h.calls.push, [{ path: '/3d', query: { model: 'fixture-model', version: 'v01-model' } }]);
+});
+
 test('D2: ссылка чата поглощается один раз', async (t) => {
   const h = deps(reactive, '/chats', {
     openChat: 'c1'

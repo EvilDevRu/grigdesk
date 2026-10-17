@@ -82,7 +82,7 @@
 import { computed, ref } from 'vue';
 
 import { UiButton, UiInlineMessage, UiPressable, UiSearchInput, UiSelect } from '../../ui';
-import type { ProjectSummary } from '../../../../shared/projectsContracts';
+import type { ProjectSummary } from '../../../../shared/runtime/projectsContracts';
 import ProjectAvatar from './ProjectAvatar.vue';
 
 const props = defineProps<{

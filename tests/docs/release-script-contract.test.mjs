@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SCRIPT = path.join(REPO_ROOT, 'bin', 'release');
+const SCRIPT = path.join(REPO_ROOT, 'tools', 'release');
 
 async function git(cwd, ...args) {
   return (await exec('git', args, { cwd, encoding: 'utf8' })).stdout.trim();
@@ -17,7 +17,7 @@ async function git(cwd, ...args) {
 
 /**
  * Временный стенд выпуска: bare origin и рабочий клон на main с VERSION 0.1.0.
- * Копия bin/release лежит внутри дерева — скрипт считает корнем каталог над собой,
+ * Копия tools/release лежит внутри дерева — скрипт считает корнем каталог над собой,
  * как и в настоящем репозитории.
  */
 async function makeRepo(t) {
@@ -30,9 +30,9 @@ async function makeRepo(t) {
   await git(temp, 'init', '-q', '-b', 'main', work);
   await git(work, 'config', 'user.name', 'Cockpit Test');
   await git(work, 'config', 'user.email', 'cockpit@example.invalid');
-  await mkdir(path.join(work, 'bin'));
-  await copyFile(SCRIPT, path.join(work, 'bin', 'release'));
-  await chmod(path.join(work, 'bin', 'release'), 0o755);
+  await mkdir(path.join(work, 'tools'));
+  await copyFile(SCRIPT, path.join(work, 'tools', 'release'));
+  await chmod(path.join(work, 'tools', 'release'), 0o755);
   await writeFile(path.join(work, 'VERSION'), '0.1.0\n');
   await writeFile(path.join(work, 'README.md'), 'начало\n');
   await git(work, 'add', '.');
@@ -62,7 +62,7 @@ async function release(repo, args, { check } = {}) {
   };
 
   try {
-    const result = await exec('bash', [path.join(repo.work, 'bin', 'release'), ...args], options);
+    const result = await exec('bash', [path.join(repo.work, 'tools', 'release'), ...args], options);
     return { code: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     return { code: error.code ?? 1, stdout: String(error.stdout || ''), stderr: String(error.stderr || '') };
@@ -103,7 +103,7 @@ test('bump готовит release-коммит и тег локально, publi
   await stat(path.join(repo.temp, 'checked'));
   assert.equal(await git(repo.origin, 'tag', '-l'), '', 'до publish тег наружу не уходит');
   assert.notEqual(await git(repo.origin, 'rev-parse', 'main'), head, 'до publish main не отправляется');
-  assert.match(prepared.stdout, /Отправить: bin\/release publish/);
+  assert.match(prepared.stdout, /Отправить: tools\/release publish/);
 
   const published = await release(repo, ['publish', '--no-github']);
 
@@ -157,7 +157,7 @@ test('упавшие проверки не ставят тег; повтор с 
 
   assert.notEqual(failed.code, 0);
   assert.match(failed.stderr, new RegExp(`git reset --hard ${base}`));
-  assert.match(failed.stderr, /bin\/release 0\.1\.1/);
+  assert.match(failed.stderr, /tools\/release 0\.1\.1/);
   assert.equal(await git(repo.work, 'tag', '-l'), '');
   assert.equal(await git(repo.origin, 'rev-parse', 'main'), base, 'наружу ничего не ушло');
   assert.equal(await readFile(path.join(repo.work, 'VERSION'), 'utf8'), '0.1.1\n');

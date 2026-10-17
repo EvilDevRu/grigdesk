@@ -10,6 +10,10 @@ export type AlertTarget = {
 } | {
   kind: 'task';
   taskId: string;
+} | {
+  kind: 'studio';
+  modelId: string;
+  versionId: string;
 };
 
 /**
@@ -17,6 +21,9 @@ export type AlertTarget = {
  * Отдельные query-ключи не пересекаются с параметрами страницы «Диф».
  */
 export function alertTargetHash(target: AlertTarget): string {
+  if (target.kind === 'studio') {
+    return `#/3d?model=${encodeURIComponent(target.modelId)}&version=${encodeURIComponent(target.versionId)}`;
+  }
   if (target.kind === 'chat') {
     return `#/chats?${ALERT_CHAT_QUERY}=${encodeURIComponent(target.chatId)}`;
   }
@@ -32,6 +39,9 @@ export function alertTargetHash(target: AlertTarget): string {
  * Подпись не зависит от текущего раздела приложения.
  */
 export function alertTargetLabel(target: AlertTarget): string {
+  if (target.kind === 'studio') {
+    return 'Открыть модель';
+  }
   if (target.kind === 'chat') {
     return 'Открыть чат';
   }

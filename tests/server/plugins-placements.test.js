@@ -11,7 +11,7 @@ import {
   placementsState,
 } from '../../server/src/lib/pluginsRegistry.ts';
 import pluginsModule from '../../server/src/modules/plugins/index.ts';
-import { PLUGIN_SLOT_LABELS, PLUGIN_SLOT_NAMES, isPluginSlotName } from '../../shared/slots/index.ts';
+import { PLUGIN_SLOT_LABELS, PLUGIN_SLOT_NAMES, isPluginSlotName } from '../../shared/plugins/slots/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

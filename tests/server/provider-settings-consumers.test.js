@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { ProviderSettingsCatalogCache } from '../../server/src/lib/executorSettings/catalog.ts';
 import { projectNativeSettingsCatalog } from '../../server/src/lib/executorSettings/projection.ts';
-import { decodeProviderSettingsCatalog } from '../../shared/providerSettingsContracts.ts';
+import { decodeProviderSettingsCatalog } from '../../shared/chat/providerSettingsContracts.ts';
 import { prepareChatNativeSettings } from '../../server/src/lib/executorSettings/launch.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';

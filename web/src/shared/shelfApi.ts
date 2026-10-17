@@ -1,6 +1,6 @@
 import { api } from './apiClient.ts';
-import { parseShelfEntrySnapshot, parseShelfState } from '../../../shared/shelfContracts.ts';
-import type { ShelfPutInput, ShelfReason, ShelfState } from '../../../shared/shelfContracts.ts';
+import { parseShelfEntrySnapshot, parseShelfState } from '../../../shared/b24/shelfContracts.ts';
+import type { ShelfPutInput, ShelfReason, ShelfState } from '../../../shared/b24/shelfContracts.ts';
 
 // Снимок собирает решатель полки из живых источников, поэтому до проверки контрактом он
 // остаётся сырым: сервер такой же снимок проверяет у себя и отказывает по нему.

@@ -19,7 +19,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 
-import type { UsageForecastSnapshot } from '../../../../shared/usageForecastContracts.ts';
+import type { UsageForecastSnapshot } from '../../../../shared/chat/usageForecastContracts.ts';
 import { forecastAll, ingestUsage, type ForecastState } from '../../lib/usage-forecast/forecast.ts';
 import { readForecastState, writeForecastState } from '../../lib/usage-forecast/store.ts';
 

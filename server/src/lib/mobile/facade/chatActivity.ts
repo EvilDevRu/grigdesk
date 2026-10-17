@@ -1,12 +1,14 @@
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
 import type { ChatActivity, ChatActivityItem } from '../contract.ts';
-import { record, text } from './common.ts';
+import { text } from './common.ts';
 
 /**
  * Публикует ограниченную проекцию уже нормализованной ленты исполнителя.
  * Результат обновляет свой вызов, неизвестный шаг остаётся видимой служебной строкой.
  */
 export function chatActivity(source: unknown, live = false): ChatActivity {
-  const steps = Array.isArray(source) ? source.map(record) : [];
+  const steps = Array.isArray(source) ? source.map(recordOrEmpty) : [];
   const items: ChatActivityItem[] = [];
   const tools = new Map<string, ChatActivityItem>();
   let omitted = 0;

@@ -423,10 +423,21 @@
   }
 }
 
+/* Клип и скорость входят в единую строку анимации рядом с timeline холста. */
+.ui-select[data-context='studio-clip'],
+.ui-select[data-context='studio-speed'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding-top: 0;
+  padding-bottom: 0;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
 .ui-select[data-context='chat-session-toolbar'],
 .ui-select[data-context='code-head-select'] {
-  height: 28px;
-  min-height: 28px;
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
   padding: 0 22px 0 0;
   border: 0;
   border-bottom: 1px solid transparent;
@@ -488,8 +499,8 @@
 
 .ui-input.pvsetinput[data-context='settings-field'],
 .ui-number-input.pvsetinput[data-context='settings-field'] {
-  height: 30px;
-  min-height: 30px;
+  height: var(--control-height);
+  min-height: var(--control-height);
   padding: 0 9px;
   border-radius: 8px;
   font-size: 13px;
@@ -514,9 +525,9 @@
 }
 
 .ui-file-picker[data-role='chat-attachment'] .ui-file-picker__trigger {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
   padding: 0;
   border: 0;
   border-radius: 10px;
@@ -574,20 +585,9 @@
 }
 
 @media (max-width: 600px) {
-  .ui-file-picker[data-role='task-attachment'],
-  .ui-file-picker[data-role='task-attachment'] .ui-file-picker__trigger {
-    width: 40px;
-    height: 40px;
-    min-height: 40px;
-  }
-
   .ui-select-wrap:has(.ui-select[data-context='task-launch']) {
     flex: 1;
     min-width: 0;
-  }
-
-  .ui-input[data-context='task-launch'] {
-    min-height: 40px;
   }
 
   .ui-file-picker {

@@ -33,7 +33,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
 import type { RouteRebaseConflict, RouteRebasePreview,
-  RouteRebaseResolution } from '../../../../shared/routesEditorContracts.ts';
+  RouteRebaseResolution } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { UiButton, UiSelect } from '../../ui';
 
 const props = defineProps<{ preview: RouteRebasePreview; busy: boolean }>();

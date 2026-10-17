@@ -317,5 +317,6 @@ test('досье прерванного хода доезжает до DeepSeek,
   const text = String(prompt?.message?.params?.request?.content?.[0]?.text || '');
   assert.ok(text.includes('[Досье прерванного хода]'), 'досье подмешано в задание');
   assert.ok(text.includes('- Edit: chat.js'), 'досье называет сделанное');
-  assert.ok(text.endsWith(withChatImageHint('продолжай')), 'подсказка следует за просьбой человека');
+  assert.ok(text.endsWith(withChatImageHint('продолжай', '')),
+    'подсказка следует за просьбой человека');
 });

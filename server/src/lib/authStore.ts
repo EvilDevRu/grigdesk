@@ -1,202 +1,218 @@
-// Учётная запись кокпита и сессии входа.
+// Сессии входа и владелец локальных данных кокпита.
 //
-// Модель: ОДИН пользователь (логин + пароль). Пульт личный, поэтому пользователей и ролей нет —
-// нечего перечислять и нечего угадывать.
+// Модель: ОДИН пользователь, вход только обменом локального ключа окна. Пароля здесь больше
+// нет: прежний файл учётной записи читается один раз как источник строки `clientScope` —
+// владельца незавершённых операций 3D, сохранённых прежней версией. Хеш не проверяется,
+// не переносится и не публикуется, а сам старый файл не удаляется и не переписывается.
 //
-// Почему не `COCKPIT_TOKEN`: тот секрет обязан попасть во фронт через `VITE_COCKPIT_TOKEN`,
-// а Vite подставляет env-переменные в бандл на этапе сборки — секрет оказывается в публичном JS
-// открытым текстом (проверено). Здесь наоборот: на диске только ХЕШ пароля, клиент получает
-// лишь идентификатор сессии в httpOnly-cookie, и никакой секрет в JS не живёт.
-//
-// Без внешних зависимостей: scrypt и timingSafeEqual есть в node:crypto.
+// Файл сессий версии 2 хранит scope и карту «идентификатор → срок годности». Плоская карта
+// старого формата не принимается даже с неистёкшими сессиями: после перехода на вход
+// по ключу прежние сессии требуют одного повторного входа.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-// Параметры scrypt. N=2^15 — заметная стоимость перебора при незаметной задержке на вход.
-const SCRYPT_N = 32768;
-const SCRYPT_r = 8;
-const SCRYPT_p = 1;
-const KEY_LEN = 64;
-// maxmem задаём ЯВНО: scrypt требует 128*N*r = ровно 32 МиБ, а столько же составляет дефолтный
-// лимит Node — вызов упирается в него и падает «memory limit exceeded». Даём запас вдвое.
-const SCRYPT_MAXMEM = 64 * 1024 * 1024;
-
-const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 30 дней: каждый день логиниться незачем
+// 400 дней — предел срока cookie в Chromium: больший срок ничего не даёт.
+const SESSION_TTL_MS = 400 * 24 * 3600 * 1000;
+// Хранилище не растёт бесконечно: новая сессия вытесняет самую старую.
+const SESSION_LIMIT = 20;
 const SESSION_ID_BYTES = 32;
+const SESSIONS_VERSION = 2;
 
-/**
- * Хеш пароля в самодостаточном виде: параметры + соль + хеш в одной строке.
- * Так можно поднять стоимость в будущем, не ломая уже сохранённые пароли.
- */
-function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16);
-  const key = crypto.scryptSync(password, salt, KEY_LEN, {
-    N: SCRYPT_N, r: SCRYPT_r, p: SCRYPT_p, maxmem: SCRYPT_MAXMEM,
-  });
-  return `scrypt$${SCRYPT_N}$${SCRYPT_r}$${SCRYPT_p}$${salt.toString('hex')}$${key.toString('hex')}`;
+// Документ файла сессий. Версия обязательна: без неё файл считается чужим.
+export interface SessionsDocument {
+  version: number;
+  clientScope: string;
+  sessions: Record<string, number>;
+}
+
+export interface AuthStoreOptions {
+  // Прежний файл учётной записи. Источник миграции и ничего больше.
+  legacyAccountPath: string;
+  sessionsPath: string;
+  now?: () => number;
 }
 
 /**
- * Проверка пароля против сохранённого хеша. Сравнение — timing-safe: обычное `===`
- * на строках выходит из цикла на первом различии и подсказывает длину общего префикса.
+ * Новый документ сессий. Повреждённый файл, чужая версия и плоская карта старого формата
+ * дают ровно тот же результат — пустой набор и повторный перенос scope из прежней учётки.
  */
-function verifyPassword(password: string, stored: string): boolean {
+function readSessionsDocument(file: string): SessionsDocument | null {
   try {
-    const [scheme, N, r, p, saltHex = '', keyHex = ''] = String(stored).split('$');
+    const raw: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const document = raw as Partial<SessionsDocument>;
 
-    if (scheme !== 'scrypt') return false;
+    if (document === null || typeof document !== 'object'
+      || document.version !== SESSIONS_VERSION
+      || typeof document.clientScope !== 'string'
+      || document.sessions === null || typeof document.sessions !== 'object') {
+      return null;
+    }
 
-    const key = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), keyHex.length / 2, {
-      N: Number(N), r: Number(r), p: Number(p), maxmem: SCRYPT_MAXMEM,
-    });
-    const expected = Buffer.from(keyHex, 'hex');
-    if (expected.length !== key.length) return false;
-    return crypto.timingSafeEqual(key, expected);
+    return {
+      version: SESSIONS_VERSION,
+      clientScope: document.clientScope,
+      sessions: document.sessions as Record<string, number>,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
-// Учётная запись на диске: логин может быть пустым, хеш — нет. Отсутствие записи
-// означает «пароль ещё не задан», и кокпит показывает первичную настройку.
-export interface AuthAccount {
-  login: string;
-  hash: string;
-}
-
-// Что кокпит рассказывает о входе наружу: ни хеша, ни идентификаторов сессий.
-export interface AuthPublicView {
-  configured: boolean;
-  login: string;
-  sessions: number;
-}
-
 export class AuthStore {
-  readonly accountPath: string;
+  // Источник миграции. В авторизации не участвует и продуктом не переписывается.
+  readonly legacyAccountPath: string;
 
   readonly sessionsPath: string;
 
   // sessionId → срок годности в миллисекундах.
   readonly sessions: Map<string, number>;
 
-  constructor({ accountPath, sessionsPath }: { accountPath: string; sessionsPath: string }) {
-    this.accountPath = accountPath;
+  // Владелец сохранённых локальных данных. Пустая строка — как в прежнем API.
+  clientScope = '';
+
+  private readonly _now: () => number;
+
+  constructor({ legacyAccountPath, sessionsPath, now }: AuthStoreOptions) {
+    this.legacyAccountPath = legacyAccountPath;
     this.sessionsPath = sessionsPath;
+    this._now = now ?? Date.now;
     this.sessions = new Map();
-    this._loadSessions();
+    this._load();
   }
 
-  // ── Учётная запись ──
+  // ── Загрузка и миграция ──
 
-  /** { login, hash } или null, если пароль ещё не задан. */
-  readAccount(): AuthAccount | null {
-    try {
-      const a = JSON.parse(fs.readFileSync(this.accountPath, 'utf8')) as Partial<AuthAccount>;
+  /**
+   * Загрузка состояния с диска.
+   *
+   * Читается только документ версии 2. Всё остальное — отсутствие файла, повреждение,
+   * чужая версия, плоская карта старого формата — означает пустой набор сессий и
+   * повторный перенос scope из прежней учётной записи.
+   */
+  private _load(): void {
+    const document = readSessionsDocument(this.sessionsPath);
 
-      if (!a.hash) return null;
+    if (document === null) {
+      this.clientScope = this._readLegacyScope();
 
-      return { login: a.login || '', hash: a.hash };
-    } catch {
-      return null;
+      return;
     }
-  }
 
-  /** Настроен ли вход. Пока нет — кокпит показывает первичную настройку пароля. */
-  isConfigured(): boolean {
-    return this.readAccount() !== null;
+    this.clientScope = document.clientScope;
+
+    const now = this._now();
+
+    for (const [id, expiresAt] of Object.entries(document.sessions)) {
+      if (typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt > now) {
+        this.sessions.set(id, expiresAt);
+      }
+    }
   }
 
   /**
-   * Задать логин и пароль. Все существующие сессии сбрасываются: смена пароля обязана
-   * выкидывать всех, иначе украденная cookie продолжает работать.
+   * Строка владельца из прежнего файла учётной записи: `login` или пустая строка.
+   * Отсутствующее и нечитаемое значение одинаково дают пустую строку.
    */
-  setCredentials({ login, password }: { login?: string; password?: string }): { login: string } {
-    if (!password || password.length < 8) throw new Error('Пароль должен быть не короче 8 символов');
-    fs.mkdirSync(path.dirname(this.accountPath), { recursive: true });
-    fs.writeFileSync(
-      this.accountPath,
-      JSON.stringify({ login: login || '', hash: hashPassword(password) }, null, 2),
-      { mode: 0o600 },
-    );
-    this.dropAllSessions();
-    return { login: login || '' };
-  }
+  private _readLegacyScope(): string {
+    try {
+      const account: unknown = JSON.parse(fs.readFileSync(this.legacyAccountPath, 'utf8'));
+      const login = (account as { login?: unknown } | null)?.login;
 
-  /** Проверка логина и пароля. Логин сверяем, только если он задан. */
-  check({ login, password }: { login?: unknown; password?: unknown }): boolean {
-    const acc = this.readAccount();
-    if (!acc) return false;
-    if (acc.login && String(login || '') !== acc.login) {
-      // Пароль всё равно прогоняем: иначе по времени ответа видно, угадан ли логин.
-      verifyPassword(String(password || ''), acc.hash);
-      return false;
+      return typeof login === 'string' ? login : '';
+    } catch {
+      return '';
     }
-    return verifyPassword(String(password || ''), acc.hash);
   }
 
   // ── Сессии ──
 
-  private _loadSessions(): void {
-    try {
-      const raw: unknown = JSON.parse(fs.readFileSync(this.sessionsPath, 'utf8'));
-      const now = Date.now();
-
-      for (const [id, exp] of Object.entries((raw ?? {}) as Record<string, unknown>)) {
-        if (typeof exp === 'number' && exp > now) this.sessions.set(id, exp);
-      }
-    } catch { /* нет файла — пустой набор */ }
-  }
-
-  private _saveSessions(): void {
-    try {
-      fs.mkdirSync(path.dirname(this.sessionsPath), { recursive: true });
-      fs.writeFileSync(
-        this.sessionsPath,
-        JSON.stringify(Object.fromEntries(this.sessions)),
-        { mode: 0o600 },
-      );
-    } catch { /* не смогли сохранить — сессии переживут только до перезапуска */ }
-  }
-
-  /** Новая сессия. Сохраняем на диск: рестарт сервера не должен разлогинивать. */
+  /**
+   * Новая сессия сохраняется на диск: рестарт сервера не должен разлогинивать окно.
+   * Перед записью лишние сессии вытесняются, чтобы файл не противоречил памяти.
+   */
   createSession(): { id: string; maxAgeSec: number } {
     const id = crypto.randomBytes(SESSION_ID_BYTES).toString('hex');
-    this.sessions.set(id, Date.now() + SESSION_TTL_MS);
-    this._saveSessions();
+
+    this.sessions.set(id, this._now() + SESSION_TTL_MS);
+    this._evictOldest();
+    this._save();
+
     return { id, maxAgeSec: Math.floor(SESSION_TTL_MS / 1000) };
   }
 
-  /** Валидна ли сессия (с попутной очисткой просроченных). */
+  /**
+   * Валидна ли сессия.
+   *
+   * Просроченная запись попутно удаляется с записью файла: иначе карта росла бы
+   * неограниченно, а срок годности оставался бы только в комментариях.
+   */
   isValidSession(id: string | undefined | null): boolean {
-    if (!id) return false;
-    const exp = this.sessions.get(id);
-    if (!exp) return false;
-    if (exp <= Date.now()) {
-      this.sessions.delete(id);
-      this._saveSessions();
+    if (!id) {
       return false;
     }
+
+    const expiresAt = this.sessions.get(id);
+
+    if (!expiresAt) {
+      return false;
+    }
+
+    if (expiresAt <= this._now()) {
+      this.sessions.delete(id);
+      this._save();
+
+      return false;
+    }
+
     return true;
   }
 
-  dropSession(id: string | undefined | null): void {
-    if (id && this.sessions.delete(id)) this._saveSessions();
+  /**
+   * Вытеснение самой старой сессии: двадцатая по счёту остаётся, предыдущие уходят.
+   * Самая старая определяется по сроку годности, а не по порядку ключей в файле.
+   */
+  private _evictOldest(): void {
+    while (this.sessions.size > SESSION_LIMIT) {
+      let oldestId: string | null = null;
+      let oldestExpiry = Infinity;
+
+      for (const [id, expiresAt] of this.sessions) {
+        if (expiresAt < oldestExpiry) {
+          oldestId = id;
+          oldestExpiry = expiresAt;
+        }
+      }
+
+      if (oldestId === null) {
+        return;
+      }
+
+      this.sessions.delete(oldestId);
+    }
   }
 
-  /** «Выйти со всех устройств». */
-  dropAllSessions(): void {
-    this.sessions.clear();
-    this._saveSessions();
-  }
+  /**
+   * Атомарная запись: временный файл 0600 в том же каталоге, затем rename.
+   * Неудачная запись не оставляет временных файлов и не портит прежний документ.
+   */
+  private _save(): void {
+    const directory = path.dirname(this.sessionsPath);
+    const temporary = path.join(directory,
+      `.${path.basename(this.sessionsPath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
 
-  /** Безопасное представление для UI. */
-  publicView(): AuthPublicView {
-    const acc = this.readAccount();
-    return {
-      configured: !!acc,
-      login: acc?.login || '',
-      sessions: this.sessions.size,
-    };
+    try {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(temporary, JSON.stringify({
+        version: SESSIONS_VERSION,
+        clientScope: this.clientScope,
+        sessions: Object.fromEntries(this.sessions),
+      }), { mode: 0o600, flag: 'wx' });
+      fs.renameSync(temporary, this.sessionsPath);
+    } catch {
+      try {
+        fs.unlinkSync(temporary);
+      } catch { /* временного файла уже нет — убирать нечего */ }
+    }
   }
 }

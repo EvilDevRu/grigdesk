@@ -3,7 +3,8 @@
 // навигация мимо пунктов run:'none', dispatch провайдерской команды с признаком
 // slashCommand. Компонентный монтаж ChatSession.vue (test-first, план §3.5).
 import assert from 'node:assert/strict';
-globalThis.__sharedChatContextFill = (await import('../../shared/chatContext.ts')).contextFill;
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import test from 'node:test';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
 

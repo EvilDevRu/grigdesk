@@ -1,12 +1,13 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import type { RouteCompareChange, RouteDraftContent } from '../../../../shared/routesEditorContracts.ts';
+import { jsonPointerPart } from '../../../../shared/lib/text.ts';
+
+import type {
+  RouteCompareChange,
+  RouteDraftContent,
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 type FieldChange = RouteCompareChange['fields'][number];
-
-function pointerPart(value: string): string {
-  return value.replaceAll('~', '~0').replaceAll('/', '~1');
-}
 
 function fieldChanges(before: unknown, after: unknown, path = ''): FieldChange[] {
   if (isDeepStrictEqual(before, after)) return [];
@@ -20,7 +21,7 @@ function fieldChanges(before: unknown, after: unknown, path = ''): FieldChange[]
     return keys.flatMap((key) => {
       const oldExists = Object.hasOwn(oldRecord, key);
       const newExists = Object.hasOwn(newRecord, key);
-      const childPath = `${path}/${pointerPart(key)}`;
+      const childPath = `${path}/${jsonPointerPart(key)}`;
       if (!oldExists || !newExists) {
         return [{ path: childPath, kind: oldExists ? 'removed' : 'added',
           before: oldExists ? structuredClone(oldRecord[key]) : null,

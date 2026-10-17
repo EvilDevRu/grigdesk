@@ -3,6 +3,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { objectOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { parseB24TaskId } from './b24TaskId.ts';
 import type {
   ShelfAnalysisSnapshot,
@@ -13,7 +15,7 @@ import type {
   ShelfPipelineSnapshot,
   ShelfPutInput,
   ShelfReason,
-} from '../../../shared/shelfContracts.ts';
+} from '../../../shared/b24/shelfContracts.ts';
 
 const SCHEMA_VERSION = 1;
 
@@ -65,10 +67,6 @@ function isAnalysisState(value: unknown): value is ShelfAnalysisState {
     || value === 'finished' || value === 'failed' || value === 'interrupted';
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
 function nullableText(value: unknown, limit = 500): string | null {
   if (value === null) return null;
   if (typeof value !== 'string' || value.length > limit) throw new Error('invalid text');
@@ -105,7 +103,7 @@ function nullableMoment(value: unknown): number | null {
 
 function normalizeAnalysis(value: unknown): ShelfAnalysisSnapshot | null {
   if (value === null) return null;
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !isAnalysisState(source.state)) {
     throw new Error('invalid analysis snapshot');
@@ -122,7 +120,7 @@ function normalizeAnalysis(value: unknown): ShelfAnalysisSnapshot | null {
 
 function normalizePipeline(value: unknown): ShelfPipelineSnapshot | null {
   if (value === null) return null;
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof source.gateKnown !== 'boolean') {
     throw new Error('invalid pipeline snapshot');
@@ -140,7 +138,7 @@ function normalizePipeline(value: unknown): ShelfPipelineSnapshot | null {
 
 function normalizeB24(value: unknown): ShelfB24Snapshot | null {
   if (value === null) return null;
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof source.present !== 'boolean'
     || !Number.isSafeInteger(source.unread) || Number(source.unread) < 0) {
@@ -159,7 +157,7 @@ function normalizeSnapshot(value: unknown): ShelfEntrySnapshot {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('invalid snapshot');
   }
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
 
   return {
     analysis: normalizeAnalysis(source.analysis),
@@ -169,7 +167,7 @@ function normalizeSnapshot(value: unknown): ShelfEntrySnapshot {
 }
 
 function normalizeInput(value: unknown): ShelfPutInput {
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof source.title !== 'string' || !source.title.trim() || source.title.length > 300
     || !isReason(source.reason) || typeof source.createIfMissing !== 'boolean') {
@@ -189,7 +187,7 @@ function normalizeInput(value: unknown): ShelfPutInput {
 }
 
 function normalizeEntry(value: unknown): ShelfEntry {
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof source.title !== 'string' || !source.title.trim() || source.title.length > 300
     || !isReason(source.reason) || typeof source.addedAt !== 'string'
@@ -211,7 +209,7 @@ function emptyDocument(): ShelfDocument {
 }
 
 function normalizeDocument(value: unknown): ShelfDocument {
-  const source = asRecord(value);
+  const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || source.schemaVersion !== SCHEMA_VERSION
     || !source.scopes || typeof source.scopes !== 'object' || Array.isArray(source.scopes)) {
@@ -223,8 +221,8 @@ function normalizeDocument(value: unknown): ShelfDocument {
 
   const scopes: Record<string, ShelfScopeRecord> = {};
   try {
-    for (const [scope, rawRecord] of Object.entries(asRecord(source.scopes))) {
-      const record = asRecord(rawRecord);
+    for (const [scope, rawRecord] of Object.entries(objectOrEmpty(source.scopes))) {
+      const record = objectOrEmpty(rawRecord);
       if (!scope || !rawRecord || typeof rawRecord !== 'object' || Array.isArray(rawRecord)
         || !Number.isSafeInteger(record.revision) || Number(record.revision) < 0
         || !Array.isArray(record.entries)) {
@@ -280,7 +278,7 @@ export class TaskShelfStore {
     try {
       source = fs.readFileSync(this.filePath, 'utf8');
     } catch (error) {
-      if (asRecord(error).code === 'ENOENT') return emptyDocument();
+      if (objectOrEmpty(error).code === 'ENOENT') return emptyDocument();
       throw new TaskShelfStoreError(
         'TASK_SHELF_UNAVAILABLE',
         'Не удалось прочитать файл полки',

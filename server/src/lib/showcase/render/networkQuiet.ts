@@ -11,6 +11,8 @@
 // стенд, который грузит данные дольше предела, снимается таким, какой он есть, —
 // сцена не срывается, а исполнитель отмечает недождавшееся затишье.
 
+import { setTimeout as sleep } from 'node:timers/promises';
+
 type Listener = (request: object) => void;
 
 // Ровно те события страницы Playwright, что нужны для счёта: объявлены отдельно,
@@ -46,12 +48,6 @@ export interface NetworkTracker {
   inFlight(): number;
   quiet(options: QuietOptions): Promise<boolean>;
   dispose(): void;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 /**

@@ -139,7 +139,7 @@ test('стор триажа не знает ни путей API, ни транс
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
   assert.deepEqual(imports.sort(), [
-    '../../../shared/analysisContracts.ts',
+    '../../../shared/pipeline/analysisContracts.ts',
     './plugins.js',
     'pinia',
   ]);

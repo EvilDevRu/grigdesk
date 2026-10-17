@@ -3,6 +3,8 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
+
 import { safeInboxSourceUrl } from '../../lib/inbox/draft.ts';
 
 type Payload = Record<string, unknown>;
@@ -54,10 +56,6 @@ interface ListRoute {
   Querystring: {
     limit?: unknown;
   };
-}
-
-function asRecord(value: unknown): Payload {
-  return value !== null && typeof value === 'object' ? value as Payload : {};
 }
 
 const PUBLIC_MESSAGES = Object.freeze({
@@ -127,7 +125,7 @@ function safeFailedAttachments(value: unknown) {
 // Наружу уходит только объявленный машинный код и его готовый текст. Сообщение
 // самой ошибки не публикуется: в нём бывают и адреса, и ответы провайдера.
 function publicFailure(reply: FastifyReply, source: unknown) {
-  const error = asRecord(source);
+  const error = objectOrEmpty(source);
   const statusCode = Number(error.statusCode);
   const status = Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599
     ? statusCode
@@ -138,7 +136,7 @@ function publicFailure(reply: FastifyReply, source: unknown) {
   const messages = PUBLIC_MESSAGES as Record<string, string>;
   const publicCode = aliases[rawCode] || rawCode;
   const code = Object.hasOwn(PUBLIC_MESSAGES, publicCode) ? publicCode : fallbackCode;
-  const details = asRecord(error.details);
+  const details = objectOrEmpty(error.details);
   const payload: Payload = { error: code, message: messages[code] };
 
   if (code === 'attachment_analysis_required' || code === 'attachments_skipped') {
@@ -184,7 +182,7 @@ async function inboxModule(fastify: FastifyInstance, opts: InboxModuleOptions): 
     try {
       return await operation(request as FastifyRequest & { params: Params }, reply);
     } catch (error) {
-      request.log?.error?.({ code: asRecord(error).code }, 'inbox: HTTP operation failed');
+      request.log?.error?.({ code: objectOrEmpty(error).code }, 'inbox: HTTP operation failed');
       return publicFailure(reply, error);
     }
   };

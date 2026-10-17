@@ -21,6 +21,22 @@ MAX_RSS_KB=$((MAX_RSS_MB * 1024))
 PEAK_RSS_KB=0
 STOPPING=0
 
+# У каждого прогона своя папка: тесты не трогают настоящую папку пользователя.
+# Внешнее COCKPIT_HOME не наследуется, сбой mktemp запрещает запуск Node.
+if ! TEST_DATA_HOME=$(mktemp -d "${TMPDIR:-/tmp}/cockpit-test-home.XXXXXX") \
+  || [[ ! -d "$TEST_DATA_HOME" ]]; then
+  echo "node-test-watchdog: не удалось создать временную папку данных" >&2
+  exit 2
+fi
+
+# Снимает временное состояние после wait, в том числе при превышении RSS.
+# Удаляется только каталог, созданный текущим запуском сторожа.
+cleanup_test_home() {
+  rm -rf -- "$TEST_DATA_HOME"
+}
+
+trap cleanup_test_home EXIT
+
 terminate_group() {
   if (( STOPPING )); then
     return
@@ -43,8 +59,23 @@ forward_signal() {
   terminate_group
 }
 
-setsid env NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$HEAP_MB" \
-  node "$@" &
+# Папка артефактов — рабочая папка агентов, а не личные данные: снимки, кэши сборок и
+# временные стенды тестов должны пережить прогон. Поэтому она берётся из настоящей папки
+# данных до подмены COCKPIT_HOME; неверная внешняя папка оставляет артефакты во временной.
+ARTIFACTS_ENV=()
+if [[ -n "${COCKPIT_ARTIFACTS_DIR:-}" ]]; then
+  ARTIFACTS_ENV=("COCKPIT_ARTIFACTS_DIR=$COCKPIT_ARTIFACTS_DIR")
+elif source "$(dirname "${BASH_SOURCE[0]}")/../deploy/lib/runtime-env.sh" \
+  && REAL_DATA_HOME=$(cockpit_data_home 2>/dev/null); then
+  ARTIFACTS_ENV=("COCKPIT_ARTIFACTS_DIR=$REAL_DATA_HOME/artifacts")
+fi
+
+# Пути живого .env (сервер передаёт его ключи агентам) тоже не наследуются: иначе тесты
+# с ...process.env писали бы журнал и версии интерфейса в настоящую папку данных.
+setsid env -u COCKPIT_ENV_FILE -u COCKPIT_UI_RELEASES_DIR -u COCKPIT_LOG \
+  ${ARTIFACTS_ENV[@]+"${ARTIFACTS_ENV[@]}"} \
+  NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$HEAP_MB" \
+  COCKPIT_HOME="$TEST_DATA_HOME" node "$@" &
 TEST_PID=$!
 
 trap forward_signal INT TERM HUP

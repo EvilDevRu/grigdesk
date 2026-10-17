@@ -1,8 +1,8 @@
 // Наложение создаёт независимый JSON-документ и не пишет в native base.
 // Массивы заменяются атомарно; изменение отдельного индекса не разрешается.
 
-import { decodeSettingsJson } from '../../../../shared/providerSettingsContracts.ts';
-import type { JsonValue } from '../../../../shared/providerSettingsContracts.ts';
+import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
+import type { JsonValue } from '../../../../shared/chat/providerSettingsContracts.ts';
 import type { NativeSettingsOverride } from './types.ts';
 
 /**

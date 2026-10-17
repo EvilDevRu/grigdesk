@@ -33,7 +33,7 @@ BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
 MAX_JSON_BYTES = 256 * 1024
 # Проекция находок приходит файлом: одна строка argv или env в Linux не длиннее 128 КиБ
 # (MAX_ARG_STRLEN), а история цикла растёт с каждым этапом. У обычного маршрута пределы
-# проекции прежние. У цикла вход вмещает историю всего потолка кругов (до 100 кругов по
+# проекции прежние. У цикла вход вмещает историю всего потолка кругов (до 300 кругов по
 # 32 находки на вердикт у двух узлов), а в контекст узла история идёт ограниченной:
 # открытые — все, закрытые и отложенные — самые свежие в пределах бюджета, счёт
 # опущенных — в `omitted`. Полная история остаётся в журнале попытки, сторожа читают его.
@@ -42,6 +42,13 @@ MAX_JSON_BYTES = 256 * 1024
 LOOP_FINDINGS_BYTES = 32 * 1024 * 1024
 LOOP_FINDINGS_RECORDS = 20_000
 LOOP_FINDINGS_BUDGET = {"closed": 16 * 1024, "deferred": 16 * 1024}
+# Результаты этапов приходят по аргументу на коммит; у цикла их до трёх на круг, так что
+# потолок 300 кругов — это до 900 записей. В контекст узла идёт только свежий хвост: весь
+# список при сотнях кругов съел бы запас строки argv промпта (128 КиБ), а полная история
+# и так лежит в журнале попытки. Сколько записей опущено — `stageResultsOmitted`; у
+# короткой истории ключа нет, и контекст побайтно прежний.
+STAGE_RESULTS_LIMIT = 1000
+STAGE_RESULTS_IN_CONTEXT = 120
 DELIVERY_ACTIONS = {"commit", "push", "pull-request", "task-comment"}
 WORKSPACE_RESERVED_KEYS = {"mode", "generation", "repos", "stateDir", "containerName"}
 
@@ -499,8 +506,8 @@ def loop_context(raw: str, max_rounds_raw: str, node: str) -> dict[str, Any] | N
     for label, number in (("rounds", rounds), ("stage", stage)):
         if not isinstance(number, int) or isinstance(number, bool) or number < 0:
             fail(f"loop-state-json: {label} — неотрицательное целое")
-    if not re.fullmatch(r"[1-9][0-9]?|100", max_rounds_raw or ""):
-        fail("loop-max-rounds: нужно целое 1..100")
+    if not re.fullmatch(r"[1-9][0-9]?|[12][0-9]{2}|300", max_rounds_raw or ""):
+        fail("loop-max-rounds: нужно целое 1..300")
     max_rounds = int(max_rounds_raw)
     # Имена отчётов вычисляет журнал попытки: следующий визит исполнителя пишет в новый
     # файл, ведущий читает последний сданный с результатом.
@@ -645,7 +652,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             "outcome": matched.group(2),
             "sequence": sequence,
         })
-    if len(stage_results) > 500:
+    if len(stage_results) > STAGE_RESULTS_LIMIT:
         fail("stage-result: слишком много записей")
     if [item["sequence"] for item in stage_results] != sorted(
         item["sequence"] for item in stage_results
@@ -706,11 +713,15 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
         "councilAggregate": artifact("council.aggregate.json"),
         "councilBrief": artifact("council.brief.md"),
     }
+    # Длинная история цикла урезается до свежего хвоста (см. STAGE_RESULTS_IN_CONTEXT).
+    omitted_stage_results = max(0, len(stage_results) - STAGE_RESULTS_IN_CONTEXT)
     evidence = {
         "eventCount": event_count,
-        "stageResults": stage_results,
+        "stageResults": stage_results[omitted_stage_results:],
         "findings": findings,
     }
+    if omitted_stage_results:
+        evidence["stageResultsOmitted"] = omitted_stage_results
     if loop is not None:
         # У цикла свой отчёт на каждый круг: исполнитель пишет в отчёт своего круга,
         # ведущий читает отчёт последнего. Старый файл не может выдать себя за свежий —

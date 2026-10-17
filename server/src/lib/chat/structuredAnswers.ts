@@ -1,3 +1,5 @@
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 const MAX_ANSWERS = 50;
 const MAX_TEXT_LENGTH = 4_000;
 
@@ -26,10 +28,6 @@ export interface StructuredAnswer {
 export type StructuredAnswersResult =
   | { ok: true; answers: StructuredAnswer[] }
   | { ok: false; error: string };
-
-function plainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function validDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -108,7 +106,7 @@ export function validateStructuredAnswers(
 
   const expected = new Map<string, StructuredQuestion>();
   for (const question of questions as StructuredQuestion[]) {
-    if (!plainObject(question) || typeof question.key !== 'string' || !question.key
+    if (!isRecord(question) || typeof question.key !== 'string' || !question.key
       || expected.has(question.key)) {
       return { ok: false, error: 'invalid_questions' };
     }
@@ -118,7 +116,7 @@ export function validateStructuredAnswers(
   const seen = new Set<string>();
   const normalized: StructuredAnswer[] = [];
   for (const answer of answers as StructuredAnswer[]) {
-    if (!plainObject(answer) || typeof answer.key !== 'string' || seen.has(answer.key)) {
+    if (!isRecord(answer) || typeof answer.key !== 'string' || seen.has(answer.key)) {
       return { ok: false, error: 'invalid_answers' };
     }
     const question = expected.get(answer.key);

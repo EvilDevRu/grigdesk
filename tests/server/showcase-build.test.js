@@ -17,7 +17,7 @@ import {
 import { ShowcaseError } from '../../server/src/lib/showcase/errors.ts';
 import { createShowcaseJobs, toPublicJob } from '../../server/src/lib/showcase/jobs.ts';
 import { createSyncBindings } from '../../server/src/lib/showcase/scenes.ts';
-import { parseShowcaseBuildRun } from '../../shared/showcaseContracts.ts';
+import { parseShowcaseBuildRun } from '../../shared/plugins/showcase/showcaseContracts.ts';
 
 const PROJECT_ID = '0123456789abcdef';
 const REQUEST_ID = 'build-request-0001';

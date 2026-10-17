@@ -4,11 +4,14 @@
 // каталоге рядом с revisions/, валидируется и только затем публикуется atomic rename.
 // Единственный изменяемый файл — catalog/current.json; его замена защищена CAS и lock-файлом.
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
+
+import { sha256 } from '../../../../shared/node/hash.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
 import {
@@ -113,13 +116,9 @@ function storeError(
   return error;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function sortedJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortedJson);
-  if (!isObject(value)) return value;
+  if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.keys(value).sort().map((key) => [key, sortedJson(value[key])]),
   );
@@ -134,10 +133,6 @@ export function serializeRoutesJson(value: unknown): string {
   return `${JSON.stringify(sortedJson(value), null, 2)}\n`;
 }
 
-export function hashRoutesBytes(value: Buffer | string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
 function normalizePromptText(text: string): string {
   const normalized = text.replace(/\r\n?/g, '\n');
   return normalized.endsWith('\n') ? normalized : `${normalized}\n`;
@@ -148,7 +143,7 @@ function assertManifestKeys(
   required: readonly string[],
   pathName: string,
 ): asserts value is Record<string, unknown> {
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     throw storeError('ROUTES_V2_TAMPERED', `${pathName}: manifest не является объектом`);
   }
   const expected = new Set(required);
@@ -439,7 +434,7 @@ export class RoutesStore {
     }
 
     const manifestBytes = await fs.readFile(manifestPath);
-    if (hashRoutesBytes(manifestBytes) !== expectedHash) {
+    if (sha256(manifestBytes) !== expectedHash) {
       throw storeError(
         'ROUTES_V2_TAMPERED',
         'Hash manifest не совпадает с именем ревизии',
@@ -520,7 +515,7 @@ export class RoutesStore {
         throw storeError('ROUTES_V2_TAMPERED', `${entry.path}: не обычный файл`, { file: entry.path });
       }
       const bytes = await fs.readFile(filePath);
-      if (bytes.length !== entry.size || hashRoutesBytes(bytes) !== entry.sha256) {
+      if (bytes.length !== entry.size || sha256(bytes) !== entry.sha256) {
         throw storeError('ROUTES_V2_TAMPERED', `${entry.path}: содержимое не совпадает с manifest`, {
           file: entry.path,
         });
@@ -553,12 +548,12 @@ export class RoutesStore {
         algorithm: 'sha256',
         files: entries.map(([file, bytes]) => ({
           path: file,
-          sha256: hashRoutesBytes(bytes),
+          sha256: sha256(bytes),
           size: bytes.length,
         })),
       };
       const manifestBytes = Buffer.from(serializeRoutesJson(manifest));
-      const revisionHash = hashRoutesBytes(manifestBytes);
+      const revisionHash = sha256(manifestBytes);
       await writeDurable(path.join(temp, MANIFEST_FILE), manifestBytes);
       await this._verifyBundleAt(temp, revisionHash, manifestMeta);
 
@@ -902,7 +897,7 @@ export class RoutesStore {
     const bytes = await fs.readFile(currentPath);
     const pointer = parseCanonicalJson(bytes, CURRENT_FILE);
     if (
-      !isObject(pointer)
+      !isRecord(pointer)
       || Object.keys(pointer).length !== 2
       || pointer.schema !== 2
       || !Object.hasOwn(pointer, 'catalogHash')

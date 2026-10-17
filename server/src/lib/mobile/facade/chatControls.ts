@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 
-import { normalizeChatWorkdir, chatWorkdirLabel } from '../../../../../shared/chatWorkdir.ts';
-import { normalizeContextUsage } from '../../../../../shared/chatContextUsage.ts';
+import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
+
+import { normalizeChatWorkdir, chatWorkdirLabel } from '../../../../../shared/chat/chatWorkdir.ts';
+import { normalizeContextUsage } from '../../../../../shared/chat/chatContextUsage.ts';
 import { normalizeModelRef } from '../../chat/modelRef.ts';
 import { decodeContract } from '../contract.ts';
 import type { ChatModel, ChatOptions, ChatSettings } from '../contract.ts';
 import { MobileInputError } from '../errors.ts';
 import type { MobileApp } from '../mobileServer.ts';
-import { record, resourceId, text, upstream } from './common.ts';
+import { resourceId, text, upstream } from './common.ts';
 import type { FacadeDeps, Payload } from './common.ts';
 
 /**
@@ -19,7 +21,7 @@ export function chatSettings(chat: Payload, run: Payload | undefined, deps: Faca
   const current = Object.hasOwn(live, 'contextTokens') || live.contextMetric
     ? live : normalizeContextUsage(chat);
   const workdir = normalizeChatWorkdir(chat.workdir) || { kind: 'cockpit' as const };
-  const committed = record(record(chat.workdirState).committed);
+  const committed = recordOrEmpty(recordOrEmpty(chat.workdirState).committed);
 
   return {
     modelRef: normalizeModelRef(chat.modelRef),
@@ -49,12 +51,12 @@ async function options(deps: FacadeDeps): Promise<ChatOptions> {
   ]);
   const models: ChatModel[] = [];
 
-  for (const provider of Array.isArray(source.providers) ? source.providers.map(record) : []) {
+  for (const provider of Array.isArray(source.providers) ? source.providers.map(recordOrEmpty) : []) {
     if (provider.chatEnabled === false) {
       continue;
     }
 
-    for (const model of Array.isArray(provider.models) ? provider.models.map(record) : []) {
+    for (const model of Array.isArray(provider.models) ? provider.models.map(recordOrEmpty) : []) {
       models.push({
         provider: text(provider.id, 200),
         providerName: text(provider.name, 200),
@@ -64,15 +66,15 @@ async function options(deps: FacadeDeps): Promise<ChatOptions> {
         context: Number.isSafeInteger(model.context) && Number(model.context) > 0
           ? Number(model.context) : null,
         contextVerified: model.contextUnverified !== true && model.contextRuntimeOnly !== true,
-        autoCompact: record(provider.capabilities).chatAutoCompact === true,
+        autoCompact: recordOrEmpty(provider.capabilities).chatAutoCompact === true,
         available: provider.available === true,
       });
     }
   }
 
-  const taskList = Array.isArray(tasks.tasks) ? tasks.tasks.map(record) : [];
-  const projectList = Array.isArray(projects.projects) ? projects.projects.map(record) : [];
-  const defaults = record(saved);
+  const taskList = Array.isArray(tasks.tasks) ? tasks.tasks.map(recordOrEmpty) : [];
+  const projectList = Array.isArray(projects.projects) ? projects.projects.map(recordOrEmpty) : [];
+  const defaults = recordOrEmpty(saved);
   const explicit = normalizeModelRef(defaults.defModelRef);
   const selected = models.find((model) => explicit
     ? model.provider === explicit.provider && model.id === explicit.model
@@ -198,7 +200,7 @@ export function registerChatControlRoutes(app: MobileApp, deps: FacadeDeps) {
       const preview = await upstream(deps, 'POST', '/api/chat/workdir/preview', {
         chatKey: id, candidate: { workdir, taskId },
       });
-      const target = record(preview.target);
+      const target = recordOrEmpty(preview.target);
       const actionToken = deps.tokens.issue(request.mobileDevice!.id, `chat:${id}`, 'workspace', {
         revision: preview.revision,
         workspaceKey: preview.workspaceKey,
@@ -208,7 +210,7 @@ export function registerChatControlRoutes(app: MobileApp, deps: FacadeDeps) {
 
       return decodeContract('workspace-preview', {
         directory: text(target.cwd, 4096),
-        previousDirectory: text(record(preview.current).cwd, 4096),
+        previousDirectory: text(recordOrEmpty(preview.current).cwd, 4096),
         transfer: preview.transfer,
         summaryAvailable: preview.summaryAvailable === true,
         warnings: Array.isArray(target.warnings) ? target.warnings.map((value) => text(value)) : [],
@@ -233,7 +235,7 @@ export function registerChatControlRoutes(app: MobileApp, deps: FacadeDeps) {
         transfer: body.transfer,
       });
 
-      return result(record(changed.chat));
+      return result(recordOrEmpty(changed.chat));
     },
   );
 }

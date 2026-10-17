@@ -8,7 +8,7 @@ import type {
   RouteDraftContent,
   RouteDraftSummary,
   RoutePublication,
-} from '../../../../shared/routesEditorContracts.ts';
+} from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import type { RouteProfileMutation, RoutesStore } from './store.ts';
 import { applyDraftOperations, validateDraftShape } from './draftModel.ts';

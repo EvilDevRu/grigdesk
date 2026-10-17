@@ -17,8 +17,8 @@ import {
   parseShowcaseProject,
   SHOWCASE_ID_RE,
   SHOWCASE_SCHEMA_VERSION,
-} from '../../../../shared/showcaseContracts.ts';
-import type { ShowcaseProject } from '../../../../shared/showcaseContracts.ts';
+} from '../../../../shared/plugins/showcase/showcaseContracts.ts';
+import type { ShowcaseProject } from '../../../../shared/plugins/showcase/showcaseContracts.ts';
 import { notFound, revisionConflict, ShowcaseError } from './errors.ts';
 import { extensionOf } from './formats.ts';
 

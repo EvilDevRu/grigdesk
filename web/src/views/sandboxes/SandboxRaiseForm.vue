@@ -57,8 +57,8 @@ import {
   UiSelect,
   UiSwitch,
 } from '../../ui';
-import { SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts';
-import type { SandboxProfile } from '../../../../shared/sandboxContracts';
+import { SANDBOX_TASK_RE } from '../../../../shared/plugins/sandboxes/sandboxContracts';
+import type { SandboxProfile } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 
 const props = defineProps<{
   options: SandboxProfile[];

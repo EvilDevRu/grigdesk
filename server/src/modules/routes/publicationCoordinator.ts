@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { RoutePublication } from '../../../../shared/routesEditorContracts.ts';
+import type { RoutePublication } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { DraftStore, RoutesEditorStoreError } from './draftStore.ts';
 import { readEditorCapabilities, validateDraftCapabilities } from './editorCapabilities.ts';

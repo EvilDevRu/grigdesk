@@ -54,6 +54,85 @@
   margin-bottom: 8px;
 }
 
+/* Плитка продолжает топбар: её позиция и доступная высота приходят от UiPopover.
+   Skin живёт у общей поверхности, поскольку Teleport выносит её из AppShell. */
+.ui-popover.ui-topbar-panel {
+  width: min(352px, calc(100vw - 16px));
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  padding: 16px;
+  border: 0;
+  border-radius: 0;
+  background: var(--topbar-panel);
+  box-shadow: none;
+  font-size: 12px;
+  line-height: 1.45;
+  overscroll-behavior: contain;
+}
+
+.ui-topbar-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ui-topbar-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ui-topbar-panel__meta,
+.ui-topbar-panel__actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.ui-topbar-panel__body {
+  min-width: 0;
+}
+
+.ui-topbar-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+/* Псевдоэлемент заполняет высоту полосы без изменения размеров кнопки и оси значков.
+   Отрицательный z-index остаётся внутри собственного stacking context триггера. */
+[data-ui-topbar-trigger] {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-ui-topbar-trigger][aria-expanded='true']::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: var(--ui-topbar-trigger-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--ui-topbar-trigger-height, 100%);
+  background: var(--topbar-panel);
+  pointer-events: auto;
+}
+
 .ui-floating-dialog__body {
   min-width: 0;
 }
@@ -236,6 +315,12 @@
    и высота по содержимому прыгала бы. Высота задана по окну, тело прокручивается. */
 .ui-dialog[data-role='plugin-settings'][data-setup='true'] {
   height: min(920px, calc(100dvh - 40px));
+}
+
+/* Поиск версий, подготовка и итог меняют только прокручиваемое тело установки.
+   Размер окна и нижние действия остаются на месте, включая первый запрос current. */
+.ui-dialog[data-role='plugin-install-dialog'] {
+  height: min(600px, calc(100dvh - 40px));
 }
 
 .ui-dialog__footer {

@@ -5,7 +5,7 @@
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
 import { normalizeChatWorkdir, normalizeRecentWorkdirs, sameChatWorkdir }
-  from '../../../shared/chatWorkdir.ts';
+  from '../../../shared/chat/chatWorkdir.ts';
 import { api } from '../shared/apiClient.ts';
 import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
@@ -22,12 +22,13 @@ import {
 } from '../shared/chatPersistenceProjection.ts';
 import { createChatHistoryStepReuseState, mayRetryFullHistory } from '../shared/chatHistoryStepReuse.ts';
 import { chatVisibility } from '../shared/chat-visibility.js';
-import { normalizeContextUsage } from '../../../shared/chatContextUsage.ts';
-import { normalizeChatRunSnapshot } from '../../../shared/chatRun.ts';
+import { normalizeContextUsage } from '../../../shared/chat/chatContextUsage.ts';
+import { normalizeChatRunSnapshot } from '../../../shared/chat/chatRun.ts';
 import { IN_TURN_PROTOCOL, IN_TURN_TEXT_LIMIT_BYTES, utf8Bytes }
-  from '../../../shared/chatInTurnContracts.ts';
+  from '../../../shared/chat/chatInTurnContracts.ts';
 import {
   applyAssistantFinal,
+  closeOpenDrafts,
   materializeInTurnMessages,
   mergeInTurnAvailability,
   mergeInTurnEntry,
@@ -319,6 +320,14 @@ function rememberReplyNotice(key) {
 function messageNoticeKey(chatId, message, index) {
   if (message?.pid) return `${chatId}:pid:${message.pid}`;
   return `${chatId}:message:${index}:${message?.role || ''}:${message?.text || ''}`;
+}
+
+// Промежуточная реплика идущего хода — блок без итога: ни ленты шагов, ни прикреплённого финала.
+// Оповещение и «непрочитано» относятся к итогу хода; агент, который пишет реплику на каждом
+// шаге (GLM, DeepSeek), иначе звонил бы весь ход. Правило то же, что у ленты чата.
+function isIntermediateReply(message) {
+  return message?.kind === 'assistant-block'
+    && !message.finalAssistantMessageId && !Array.isArray(message.steps);
 }
 
 // Когда историю последний раз сверяли с сервером целиком. Нужно, чтобы первое `hello`
@@ -925,6 +934,17 @@ export const useChatStore = defineStore('chat', {
       }
 
       return !current?.active || !current.runId;
+    },
+    /**
+     * Запуск окончен: его недописанные черновики помечаются оборванными в этом окне.
+     * Без runId ничего не делаем — чужой или старый chat-done не трогает идущий ход.
+     */
+    _closeInTurnDrafts(chatKey, runId) {
+      const run = this.inTurnRuns[chatKey];
+
+      if (runId && run?.runId === runId) {
+        closeOpenDrafts(run);
+      }
     },
     /**
      * Канал привязан к запуску, поэтому новый run заменяет прежний целиком.
@@ -2176,6 +2196,10 @@ export const useChatStore = defineStore('chat', {
           const current = this.runtimeRuns[d.chatKey];
           const inTurn = this.inTurnRuns[d.chatKey];
 
+          // Конец своего запуска закрывает его черновики раньше ранних выходов: сверка
+          // страницей может не пройти, а повторного chat-done не будет.
+          this._closeInTurnDrafts(d.chatKey, d.runId);
+
           if (current?.active && (d.runId ? current.runId !== d.runId : !!current.runId)) {
             if (d.turnId) {
               this._collectPending();
@@ -2408,6 +2432,8 @@ export const useChatStore = defineStore('chat', {
       }
 
       const accepted = [];
+      // Запуски, пропавшие из ответа сервера: их черновики сверяются страницей журнала.
+      const vanished = [];
 
       for (const s of [...this.sessions, ...(this.archived || [])]) {
         if ((this.runRevisions[s.id] || 0) !== (revisions[s.id] || 0)) {
@@ -2435,6 +2461,10 @@ export const useChatStore = defineStore('chat', {
         if (a?.runId && a.source !== 'background') {
           this._mergeInTurnSnapshot(s.id, a.runId, a.inTurn, a.turnId);
         } else if (this.inTurnRuns[s.id]) {
+          if (this.inTurnRuns[s.id].active) {
+            vanished.push([s.id, this.inTurnRuns[s.id].runId]);
+          }
+
           this.inTurnRuns[s.id].active = false;
         }
 
@@ -2476,6 +2506,14 @@ export const useChatStore = defineStore('chat', {
           s.liveContextCache = null;
         }
       }
+
+      // Пропавший запуск сервер больше не ведёт: правду о черновиках даёт страница журнала.
+      // Локальная отметка обрыва — только если сверка не удалась, иначе она спорила бы с ответом.
+      await Promise.all(vanished.map(async ([chatKey, runId]) => {
+        if (!await this._reconcileInTurn(chatKey, runId)) {
+          this._closeInTurnDrafts(chatKey, runId);
+        }
+      }));
 
       await Promise.all(accepted.filter((a) => a?.runId && a.source !== 'background')
         .map((a) => this._reconcileInTurn(a.chatKey, a.runId)));
@@ -2556,7 +2594,8 @@ export const useChatStore = defineStore('chat', {
       // при восстановлении связи несколько старых сообщений не должны высыпаться пачкой.
       const freshReply = (applied.messages || [])
         .map((message, index) => ({ message, key: messageNoticeKey(applied.id, message, index) }))
-        .filter(({ message, key }) => message.role === 'assistant' && !knownMessages.has(key))
+        .filter(({ message, key }) => message.role === 'assistant' && !isIntermediateReply(message)
+          && !knownMessages.has(key))
         .at(-1);
       if (freshReply && notifyReply) this._notifyReply(applied, freshReply.message.text, freshReply.key);
 

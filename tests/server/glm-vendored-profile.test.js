@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { runtimeYaml } from '../../tools/runtimeComposition.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import { runGlmTurn } from '../helpers/glmDriver.mts';
@@ -15,7 +17,7 @@ import {
   startGlmProductionProcess,
 } from '../helpers/glmProductionFixture.mts';
 
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G4/fixtures');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G4/fixtures');
 
 /**
  * Стенд production-профиля: настоящая generation, фейк Z.ai и отдельные каталоги.

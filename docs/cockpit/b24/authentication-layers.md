@@ -12,10 +12,12 @@
   Клиент не потокобезопасен: параллельные операции с общей сессией приводили к
   `Client Error`. Подробность инцидента хранится в [gotchas.md](README.md#грабли).
 - `server/src/modules/b24/index.ts` — локальный HTTP API Cockpit.
-- `server/src/lib/b24/credsStore.ts` — credentials из `server/.state/b24-creds.json`
+- `server/src/lib/b24/credsStore.ts` — credentials из `<папка данных>/state/b24-creds.json`
   с режимом `0600`; менять и проверять их нужно через «Настройки → Битрикс24».
-- `bin/b24` — CLI поверх локального HTTP-порта. Токен берётся из `COCKPIT_TOKEN` либо
-  `server/.state/cli-token`.
+- `b24/` — команда `b24` (собранный `bin/b24`) поверх локального HTTP API Cockpit; портал
+  она не вызывает. Токен — `COCKPIT_TOKEN`, иначе файл `COCKPIT_CLI_TOKEN_PATH`, по умолчанию
+  `<папка данных>/state/cli-token`; адрес — `COCKPIT_URL`, иначе `http://localhost:<порт>`
+  по `COCKPIT_PORT` (8140). Старую раскладку команда не читает ([команда b24](binary-cli.md)).
 
 Локальное расширение резервного dashboard может использовать отдельный cookie-файл.
 Это допустимо только при полной изоляции от основного cookie jar Cockpit; конкретная

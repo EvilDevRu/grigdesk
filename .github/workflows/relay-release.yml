@@ -1,0 +1,83 @@
+name: Посредник — сборка файла
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Выпустить: метка relay-v<версия> и страница в Releases (только из ветки по умолчанию)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+
+      - name: Выпуск разрешён
+        id: tag
+        if: inputs.release
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node relay/scripts/releaseTag.mts
+
+      - name: Зависимости
+        run: npm --prefix relay ci --include=dev --no-audit --no-fund
+
+      - name: Тесты посредника
+        run: npm --prefix relay test
+
+      - name: Сборка файла
+        run: npm --prefix relay run build
+
+      - name: Проверка готового файла
+        run: npm --prefix relay run test:sea
+
+      - name: Контрольная сумма
+        working-directory: bin
+        run: sha256sum cockpit-relay > cockpit-relay.sha256
+
+      - name: Файл для проверки
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cockpit-relay-linux-x64
+          path: |
+            bin/cockpit-relay
+            bin/cockpit-relay.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Выпуск
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          NODE_VERSION: ${{ steps.tag.outputs.node }}
+        run: >-
+          gh release create "$TAG"
+          bin/cockpit-relay bin/cockpit-relay.sha256
+          --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false
+          --title "Посредник $TAG"
+          --notes "Linux x64, Node $NODE_VERSION.
+          Проверка: sha256sum -c cockpit-relay.sha256.
+          Лицензия Node: cockpit-relay --license"

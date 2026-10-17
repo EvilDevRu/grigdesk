@@ -20,6 +20,7 @@ import { runGlmTurn } from '../glm/runtime.ts';
 import { glmUsage } from '../glm/usage.ts';
 import type { GlmRuntimeDeps, GlmTurnOptions } from '../glm/runtime.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
+import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
 
 type GlmConfig = DeepSeekRuntimeConfig & {
   rootDir?: string;
@@ -115,7 +116,16 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
   const admitted = Boolean(mode) && deps.admission.some((entry) => entry.mode === mode);
 
   return {
-    ...(admitted ? { run: (input: GlmTurnOptions) => runGlmTurn(input, deps) } : {}),
+    // Ввод в активный ход — как у DeepSeek на той же сборке DSH: steer встаёт в следующий шаг
+    // того же хода, а хук приёма запроса снова отмечает этот ход, и политика его не обрывает.
+    ...(admitted ? {
+      run: (input: GlmTurnOptions) => runGlmTurn(input, deps),
+      inTurnInput: {
+        protocol: 1,
+        text: true,
+        confirmation: 'forwarded',
+      } as const,
+    } : {}),
     id: 'glm',
     name: 'GLM (Z.ai)',
     vendor: 'Z.ai',
@@ -177,6 +187,8 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
       max: 'Максимальное усилие рассуждения для самых трудных задач.',
     },
     retryContract: RETRY_CONTRACT.NEVER,
+    // Тот же DSH под другим вендором: коды причин общие, автопродолжение — тоже.
+    turnFailureRules: DSH_TURN_FAILURE_RULES,
     compaction: { kind: 'summary' },
     directSshPolicy: {
       enforcement: 'command-hook',
@@ -230,7 +242,7 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
         kind: 'embedded' as const,
         label: 'Входит в Cockpit',
         authHint: 'Задайте режим и ключ кнопкой «Ключи доступа» ниже или COCKPIT_GLM_API_MODE '
-          + 'и ZAI_API_KEY / ZAI_CODING_API_KEY в корневом .env.',
+          + 'и ZAI_API_KEY / ZAI_CODING_API_KEY в .env папки данных.',
       };
 
       try {

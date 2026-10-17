@@ -3,11 +3,11 @@ import {
   WEB_LOG_LIMITS,
   projectWebLogEntry,
   utf8Bytes,
-} from '../../../shared/webLogContracts.ts';
+} from '../../../shared/web-log/webLogContracts.ts';
 import {
   allowsWebLogEvent,
   filterWebLogEntry,
-} from '../../../shared/diagnosticLogging.ts';
+} from '../../../shared/web-log/diagnosticLogging.ts';
 
 import type {
   WebLogData,
@@ -16,8 +16,8 @@ import type {
   WebLogEvent,
   WebLogFlatEntry,
   WebLogKey,
-} from '../../../shared/webLogContracts.ts';
-import type { DiagnosticLevel } from '../../../shared/diagnosticLogging.ts';
+} from '../../../shared/web-log/webLogContracts.ts';
+import type { DiagnosticLevel } from '../../../shared/web-log/diagnosticLogging.ts';
 
 // Потери доставки: записи, которые должны были уйти на сервер, но не ушли.
 // Штатная ротация кольца и подавленные повторы сюда не входят.

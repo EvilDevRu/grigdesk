@@ -1,3 +1,5 @@
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { validateStructuredAnswers } from '../chat/structuredAnswers.ts';
 
 const MAX_TEXT = 4_000;
@@ -63,10 +65,6 @@ interface ToolSuggestion {
   installUrl: string;
 }
 
-function plainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
 function shortText(value: unknown, fallback = ''): string {
   const text = typeof value === 'string' ? value.trim() : '';
 
@@ -87,7 +85,7 @@ function nonNegativeInteger(value: unknown): number | undefined {
  */
 function optionsFrom(schema: FieldSchema, multiple: boolean): FieldOption[] | null {
   const source = multiple ? schema.items : schema;
-  if (!plainObject(source)) return null;
+  if (!isRecord(source)) return null;
 
   const titled = Array.isArray(source.anyOf)
     ? source.anyOf
@@ -95,7 +93,7 @@ function optionsFrom(schema: FieldSchema, multiple: boolean): FieldOption[] | nu
   if (titled) {
     if (!titled.length || titled.length > MAX_OPTIONS) return null;
     const options = titled.map((option): FieldOption | null => {
-      if (!plainObject(option) || typeof option.const !== 'string'
+      if (!isRecord(option) || typeof option.const !== 'string'
         || option.const.length > MAX_TEXT) return null;
       return {
         value: option.const,
@@ -156,7 +154,7 @@ function normalizeField(
   required: boolean,
 ): NormalizedField | null {
   if (typeof name !== 'string' || !name || name.length > 200) return null;
-  if (!plainObject(raw) || typeof raw.type !== 'string') return null;
+  if (!isRecord(raw) || typeof raw.type !== 'string') return null;
 
   const schema = raw as FieldSchema;
   const multiple = schema.type === 'array';
@@ -330,13 +328,13 @@ function externalPresentation({ serverName, message, url, approvalKind = '', sug
 export function codexElicitationPresentation(
   params: Record<string, unknown> = {},
 ): Record<string, unknown> | null {
-  if (!plainObject(params)) return null;
+  if (!isRecord(params)) return null;
 
   // В Codex 0.150.1 variant развёрнут в params через serde(flatten). Вложенный
   // request принимаем только как терпимый fallback для сторонних прокси.
   const request = (typeof params.mode === 'string'
     ? params
-    : (plainObject(params.request) ? params.request : params)) as Record<string, unknown>;
+    : (isRecord(params.request) ? params.request : params)) as Record<string, unknown>;
   const serverName = shortText(params.serverName, 'MCP-сервер');
   const message = shortText(request.message, 'Сервис запрашивает дополнительные данные.');
   if (request.mode === 'url') {
@@ -347,13 +345,13 @@ export function codexElicitationPresentation(
   }
 
   if (!['form', 'openai/form', 'openaiForm'].includes(String(request.mode))) return null;
-  const meta = (plainObject(request._meta)
+  const meta = (isRecord(request._meta)
     ? request._meta
-    : (plainObject(request.meta) ? request.meta : null)) as Record<string, unknown> | null;
+    : (isRecord(request.meta) ? request.meta : null)) as Record<string, unknown> | null;
   const schema = request.requestedSchema as FieldSchema | null;
-  const emptySchema = schema == null || (plainObject(schema)
+  const emptySchema = schema == null || (isRecord(schema)
     && schema.type === 'object'
-    && plainObject(schema.properties)
+    && isRecord(schema.properties)
     && Object.keys(schema.properties).length === 0);
   const suggestion = normalizedSuggestion(meta);
   if (meta?.codex_approval_kind
@@ -396,7 +394,7 @@ export function codexElicitationPresentation(
     };
   }
 
-  if (!plainObject(schema) || schema.type !== 'object' || !plainObject(schema.properties)) {
+  if (!isRecord(schema) || schema.type !== 'object' || !isRecord(schema.properties)) {
     return null;
   }
 
@@ -424,7 +422,7 @@ function valueFromAnswer(
   question: NormalizedField,
   answer: unknown,
 ): unknown {
-  if (!plainObject(answer)) return undefined;
+  if (!isRecord(answer)) return undefined;
   if (Object.hasOwn(answer, 'value')) return answer.value;
   if (question.inputType === 'text') return answer.text;
   if (question.inputType === 'multi-choice') return answer.selected;
@@ -439,7 +437,7 @@ function formContent(
   presentation: { questions?: NormalizedField[] },
   decision: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
-  const directContent = plainObject(decision?.content) ? decision.content : null;
+  const directContent = isRecord(decision?.content) ? decision.content : null;
   const answers = directContent
     ? Object.entries(directContent).map(([key, value]) => ({ key, value }))
     : (Array.isArray(decision?.answers) ? decision.answers.map((answer) => {

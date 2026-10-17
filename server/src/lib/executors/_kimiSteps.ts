@@ -1,3 +1,5 @@
+import { recordOrNull } from '../../../../shared/lib/objects.ts';
+
 import {
   base, cut, cutMiddle, lineCount, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/streamSteps.ts';
@@ -82,12 +84,6 @@ function splitContent(content: unknown): ParsedContent {
 
 function firstString(...values: unknown[]): string {
   return String(values.find((value) => typeof value === 'string' && value.trim()) || '');
-}
-
-function objectInput(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 function uniquePaths(values: unknown[]): string[] {
@@ -204,7 +200,7 @@ function canonicalPayload(update: KimiUpdate, parsed: ParsedContent): boolean {
   // всё ещё не канонический upgrade: безопасным самостоятельным сигналом без
   // meaningful kind служит только структурный diff.
   if ((!kind || kind === 'other') && !parsed.diffs.length) return false;
-  const raw = objectInput(update.rawInput);
+  const raw = recordOrNull(update.rawInput);
   return Boolean(
     (typeof update.title === 'string' && update.title.trim())
     || (raw && Object.keys(raw).length)
@@ -226,7 +222,7 @@ function mergeToolUpdate(
   }
   const title = typeof update.title === 'string' ? update.title.trim() : '';
   if (title && (title.toLowerCase() !== 'other' || !state.title)) state.title = String(update.title);
-  const raw = objectInput(update.rawInput);
+  const raw = recordOrNull(update.rawInput);
   if (raw) state.rawInput = { ...state.rawInput, ...raw };
   state.locations = mergeLocations(state.locations, update.locations);
   if (parsed.text) state.text = parsed.text;

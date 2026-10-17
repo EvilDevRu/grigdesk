@@ -1,5 +1,7 @@
 // Исполнитель Claude (Anthropic, Claude Code CLI).
-import type { ChatRunMetadata } from '../../../../shared/chatRun.ts';
+import { setTimeout as wait } from 'node:timers/promises';
+
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -27,6 +29,7 @@ import {
   openClaudeStreamSession,
 } from './_claudeStream.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
+import { CLAUDE_TURN_FAILURE_RULES } from './_claudeTurnFailures.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { claudeNativeSettings } from '../executorSettings/claude.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
@@ -35,7 +38,7 @@ import type {
   InTurnPort,
   InTurnReceiptEvent,
   InTurnUnavailableReason,
-} from '../../../../shared/chatInTurnContracts.ts';
+} from '../../../../shared/chat/chatInTurnContracts.ts';
 
 // Журнал сервера в том минимуме, который использует ход. Та же форма, что у потока.
 interface StreamLog {
@@ -325,14 +328,15 @@ function tokenNeedsRefresh(oauth: ClaudeOauth | null | undefined, now: number) {
   return Number.isFinite(expiresAt) && expiresAt <= now + OAUTH_REFRESH_SKEW_MS;
 }
 
-const wait = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
-
 /**
  * Claude Code вращает refresh token и защищает это общей директорией-lock.
  * Используем тот же lock, иначе одновременный ход CLI и фоновая проверка Cockpit
  * могут оба обновить один refresh token и затереть рабочие credentials.
  */
-async function acquireOauthRefreshLock(credentialsPath: string, sleep = wait) {
+async function acquireOauthRefreshLock(
+  credentialsPath: string,
+  sleep: (ms: number) => Promise<void> = wait,
+) {
   const lockPath = path.join(path.dirname(credentialsPath), '.oauth_refresh.lock');
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
@@ -622,7 +626,11 @@ function authHeaders(tok: string) {
  * состояния интерфейса: повтор их не изменит, а человека задержит. Читающая ручка
  * идемпотентна, ничего не расходует — право на повтор у неё есть.
  */
-async function requestUsage(tok: string, fetchImpl: typeof fetch, sleep = wait): Promise<{
+async function requestUsage(
+  tok: string,
+  fetchImpl: typeof fetch,
+  sleep: (ms: number) => Promise<void> = wait,
+): Promise<{
   response: Response | null;
   error: string;
 }> {
@@ -1130,6 +1138,14 @@ function withReadOnlyDirs(current: unknown, dirs: readonly string[]): Record<str
     ...base,
     allow: [...allow, ...dirs.map((dir) => `Read(//${dir.replace(/^\/+/, '')}/**)`)],
   };
+}
+
+/**
+ * Каталоги, которые агент читает без вопроса человеку: вложения чата и документация
+ * включённых плагинов. Оба обычно лежат вне рабочей папки разговора.
+ */
+function readOnlyDirsOf(attachmentsDir: string | undefined, pluginDocsDirs: readonly string[]): string[] {
+  return [...(attachmentsDir ? [attachmentsDir] : []), ...pluginDocsDirs];
 }
 
 const CLAUDE_UNTRUSTED_MEDIA_TYPES = Object.freeze([
@@ -1672,6 +1688,10 @@ export default {
   // (см. chatAutoCompactWindow в lib/prefs-store.js).
   autoCompactEnv: 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
 
+  // Виды сбоя хода объявляет сам адаптер: ядро не знает имён вендора. Общие признаки
+  // (статусы, слова) добавляет реестр — здесь только коды synthetic-сообщения Claude.
+  turnFailureRules: CLAUDE_TURN_FAILURE_RULES,
+
   // Родной компакт: слэш-команда работает и в режиме `-p --resume`; в сессии появляются
   // compact_boundary/isCompactSummary, id разговора
   // не меняется. НО stdout такого хода ПУСТОЙ (весь вывод команды локальный), поэтому
@@ -1969,7 +1989,7 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, onProgress, onStep, signal,
-    workspaceAccess, workTools, onSessionCreated, onRunMetadata, attachmentsDir,
+    workspaceAccess, workTools, onSessionCreated, onRunMetadata, attachmentsDir, pluginDocsDirs = [],
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
   }: {
     config: ClaudeConfig;
@@ -1978,6 +1998,7 @@ export default {
     cwd?: string;
     extraDirs?: readonly string[];
     attachmentsDir?: string;
+    pluginDocsDirs?: readonly string[];
     model?: string;
     effort?: string;
     sessionId?: string | null;
@@ -2039,7 +2060,7 @@ export default {
     } : null;
     const providerArgs = claudeProviderSettingsArgs(providerSettings, {
       nativeSettings,
-      readOnlyDirs: attachmentsDir ? [attachmentsDir] : [],
+      readOnlyDirs: readOnlyDirsOf(attachmentsDir, pluginDocsDirs),
     });
     if (scopedPermissions) {
       const settingsAt = providerArgs.lastIndexOf('--settings');
@@ -2233,18 +2254,20 @@ export default {
       'providerSettings',
       'nativeSettingsFingerprint',
       'workToolScopeKey',
+      'pluginDocsDirs',
     ],
 
     open({
       config, env, cwd, extraDirs = [], model, effort, permissionMode, sessionId,
       mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, hooks, workTools,
-      attachmentsDir,
+      attachmentsDir, pluginDocsDirs = [],
     }: {
       config: ClaudeConfig;
       env?: NodeJS.ProcessEnv;
       cwd?: string;
       extraDirs?: readonly string[];
       attachmentsDir?: string;
+      pluginDocsDirs?: readonly string[];
       model?: string;
       effort?: string;
       permissionMode?: string;
@@ -2269,7 +2292,7 @@ export default {
           permissionPromptTool,
           providerSettingsArgs: claudeProviderSettingsArgs(providerSettings, {
             nativeSettings,
-            readOnlyDirs: attachmentsDir ? [attachmentsDir] : [],
+            readOnlyDirs: readOnlyDirsOf(attachmentsDir, pluginDocsDirs),
           }),
           workTools,
         }),

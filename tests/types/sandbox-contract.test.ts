@@ -2,7 +2,7 @@ import type {
   SandboxEntry,
   SandboxJob,
   SandboxOverview,
-} from '../../shared/sandboxContracts';
+} from '../../shared/plugins/sandboxes/sandboxContracts';
 import { dismantleSandbox, raiseSandbox, useSandboxesStore } from '../../web/src/actions/sandboxes';
 import { sandboxApi } from '../../web/src/shared/sandboxApi';
 

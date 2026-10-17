@@ -15,7 +15,7 @@ import type {
   DockerUsage,
   DockerUsageSummary,
   DockerVolume,
-} from '../../../../shared/dockerContracts.ts';
+} from '../../../../shared/plugins/docker/dockerContracts.ts';
 import type {
   EngineBuildCache,
   EngineContainer,

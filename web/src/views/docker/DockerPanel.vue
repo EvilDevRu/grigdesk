@@ -129,7 +129,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
-import type { DockerContainer } from '../../../../shared/dockerContracts';
+import type { DockerContainer } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
 import { NAV_ICONS } from '../../shared/navIcons.ts';

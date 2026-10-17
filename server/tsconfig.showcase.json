@@ -5,8 +5,8 @@
     "checkJs": false
   },
   "include": [
-    "../shared/contractDecoders.ts",
-    "../shared/showcaseContracts.ts",
+    "../shared/lib/contractDecoders.ts",
+    "../shared/plugins/showcase/showcaseContracts.ts",
     "src/lib/showcase/**/*.ts",
     "src/modules/showcase/**/*.ts",
     "scripts/showcaseWorker.mts",

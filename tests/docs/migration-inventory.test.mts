@@ -31,7 +31,7 @@ test('снимок миграции не считает остатком чуж�
   const all = [...Object.values(inventory.legacy).flat(), ...inventory.vue];
 
   assert.deepEqual(
-    all.filter((path) => /(^|\/)(node_modules|dist|\.generated|\.state|profiles)\//.test(path)),
+    all.filter((path) => /(^|\/)(node_modules|dist|\.generated|\.state|profiles)\/|^desktop\/release\//.test(path)),
     [],
   );
 });
@@ -68,13 +68,13 @@ const FORBIDDEN_IN_SHARED = [
  * и сервер, и браузер, не имеет права привезти с собой чужое окружение. Иначе
  * единственная копия правила снова разъедется на две — по одной на каждую сторону.
  */
-test('общий слой не тянет за собой ни браузер, ни Node', async () => {
+test('общий слой вне shared/node не тянет ни браузер, ни Node', async () => {
   const { readdir, readFile } = await import('node:fs/promises');
   const dir = new URL('../../shared/', import.meta.url);
   const found: string[] = [];
 
-  for (const name of await readdir(dir)) {
-    if (!name.endsWith('.ts')) {
+  for (const name of await readdir(dir, { recursive: true })) {
+    if (!name.endsWith('.ts') || name.startsWith('node/')) {
       continue;
     }
 

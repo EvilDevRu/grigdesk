@@ -97,6 +97,7 @@ interface Props {
   offset?: number;
   hoverDelay?: number;
   returnFocus?: boolean;
+  attachment?: 'topbar';
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -265,10 +266,12 @@ const positionStyle = ref<Record<string, string>>({
   top: '0px',
   visibility: 'hidden',
 });
+const attachedTriggerStyle = ref<Record<string, string>>({});
 let openModality: OpenModality = 'programmatic';
 let lastCloseReason: UiPopoverCloseReason = 'programmatic';
 let closeRequested = false;
 let pinned = false;
+let restoringFocus = false;
 let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 
@@ -323,6 +326,8 @@ const contentSlotProps: UiOverlayContentSlotProps = {
 };
 
 const triggerAttributes = computed<Record<string, unknown>>(() => ({
+  'data-ui-topbar-trigger': props.attachment === 'topbar' ? '' : undefined,
+  style: props.attachment === 'topbar' ? attachedTriggerStyle.value : undefined,
   'aria-expanded': String(isOpen.value),
   'aria-controls': surfaceId,
   'aria-haspopup': popupRole.value,
@@ -461,7 +466,7 @@ function onTriggerMouseLeave(): void {
 }
 
 function onTriggerFocus(): void {
-  if (usesHover() && !isOpen.value) {
+  if (usesHover() && !isOpen.value && !restoringFocus) {
     requestOpen(true, 'trigger', 'keyboard');
   }
 }
@@ -615,7 +620,9 @@ function returnFocus(): void {
     }
   }
 
+  restoringFocus = true;
   trigger.focus({ preventScroll: true });
+  restoringFocus = false;
 }
 
 /**
@@ -753,6 +760,32 @@ function flippedPlacement(placement: UiOverlayPlacement): UiOverlayPlacement {
 }
 
 /**
+ * Плитка топбара сохраняет непрерывный стык с полосой даже у кнопки высотой 24 px.
+ * Высота ограничивается оставшимся экраном: длинное содержимое прокручивается, а не уезжает вверх.
+ */
+function placeTopbarPanel(trigger: TriggerElement, surface: HTMLElement): void {
+  const rect = trigger.getBoundingClientRect();
+  const bar = trigger.closest('[data-ui-topbar]')?.getBoundingClientRect() ?? rect;
+  const edge = 8;
+  const top = bar.bottom - 1;
+  const left = Math.max(edge, Math.min(rect.right - surface.offsetWidth,
+    window.innerWidth - surface.offsetWidth - edge));
+
+  attachedTriggerStyle.value = {
+    '--ui-topbar-trigger-top': `${bar.top - rect.top}px`,
+    '--ui-topbar-trigger-height': `${bar.height}px`,
+  };
+  actualPlacement.value = 'bottom-end';
+  positionStyle.value = {
+    position: 'fixed',
+    left: `${left}px`,
+    top: `${top}px`,
+    maxHeight: `${Math.max(0, window.innerHeight - top - edge)}px`,
+    visibility: 'visible',
+  };
+}
+
+/**
  * Surface переворачивается лишь когда противоположная сторона даёт больше места,
  * затем зажимается в viewport и публикует координаты anchor для стрелки.
  */
@@ -761,6 +794,12 @@ function place(): void {
   const surface = surfaceElement.value;
 
   if (!trigger || !surface || typeof window === 'undefined') {
+    return;
+  }
+
+  if (props.attachment === 'topbar') {
+    placeTopbarPanel(trigger, surface);
+
     return;
   }
 
@@ -835,6 +874,10 @@ function place(): void {
   };
 }
 
+/**
+ * Пересчитывает положение при прокрутке и изменении окна без потери привязки к шапке.
+ * Скрытый адаптивной раскладкой триггер закрывает свою плитку, чтобы она не зависла в углу.
+ */
 function onViewportMove(): void {
   const trigger = currentTrigger();
 
@@ -842,6 +885,16 @@ function onViewportMove(): void {
     requestOpen(false, 'programmatic');
 
     return;
+  }
+
+  if (props.attachment === 'topbar') {
+    const bar = trigger.closest('[data-ui-topbar]')?.getBoundingClientRect();
+
+    if (bar?.width && !trigger.getBoundingClientRect().width) {
+      requestOpen(false, 'outside');
+
+      return;
+    }
   }
 
   place();
@@ -868,6 +921,25 @@ watch(
       if (typeof ResizeObserver !== 'undefined' && surfaceElement.value) {
         resizeObserver = new ResizeObserver(place);
         resizeObserver.observe(surfaceElement.value);
+
+        if (props.attachment === 'topbar') {
+          const trigger = currentTrigger();
+          const bar = trigger?.closest('[data-ui-topbar]');
+
+          if (trigger) {
+            resizeObserver.observe(trigger);
+          }
+
+          // Новая иконка меняет ширину группы и сдвигает соседей, хотя размеры самой
+          // кнопки прежние. Наблюдаем её контейнеры вплоть до полосы топбара.
+          for (let parent = trigger?.parentElement; bar && parent; parent = parent.parentElement) {
+            resizeObserver.observe(parent);
+
+            if (parent === bar) {
+              break;
+            }
+          }
+        }
       }
 
       return;

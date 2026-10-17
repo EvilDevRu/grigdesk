@@ -4,8 +4,8 @@
 // разрешённого корня. Дальше раздел работает только ссылкой: так «открой соседний
 // файл» физически не может стать «открой любой файл машины».
 
-import { parseResolvedDocument } from '../../../shared/documentsContracts.ts';
-import type { ResolvedDocument } from '../../../shared/documentsContracts.ts';
+import { parseResolvedDocument } from '../../../shared/plugins/documents/documentsContracts.ts';
+import type { ResolvedDocument } from '../../../shared/plugins/documents/documentsContracts.ts';
 import { api } from './apiClient.ts';
 
 export const documentsApi = {

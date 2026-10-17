@@ -1,5 +1,9 @@
-import type { CodeGitFile, CodeGitResponse, CodeRequestContext } from '../../shared/codeContracts.ts';
-import { parseCodeGit } from '../../shared/codeContracts.ts';
+import type {
+  CodeGitFile,
+  CodeGitResponse,
+  CodeRequestContext,
+} from '../../shared/plugins/code/codeContracts.ts';
+import { parseCodeGit } from '../../shared/plugins/code/codeContracts.ts';
 import { codeApi } from '../../web/src/shared/codeApi.ts';
 import type { GitDirectoryRow, GitGroup } from '../../web/src/shared/codeTree.ts';
 

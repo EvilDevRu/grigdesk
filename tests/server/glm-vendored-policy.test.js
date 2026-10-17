@@ -3,12 +3,14 @@ import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { createServer } from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
 import { runGlmTurn } from '../helpers/glmDriver.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
@@ -21,7 +23,7 @@ import {
   writeGlmEgressGuard,
 } from '../helpers/glmProductionFixture.mts';
 
-const ARTIFACTS = path.resolve(import.meta.dirname, '../../.state/artifacts/glm/G6/fixtures');
+const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G6/fixtures');
 const MODEL = '["zai","glm-5.3"]';
 
 /**
@@ -408,3 +410,42 @@ test('настоящие неразбираемые аргументы инст�
   assert.equal(result.reply, 'done');
   assert.equal(await exists(path.join(f.project, 'broken.txt')), false);
 });
+
+test('настоящее уточнение посреди команды доходит до модели тем же ходом, политика его пропускает',
+  async (t) => {
+    let markToolRequested;
+    let markReady;
+    const toolRequested = new Promise((resolve) => {
+      markToolRequested = resolve;
+    });
+    const ready = new Promise((resolve) => {
+      markReady = resolve;
+    });
+    const f = await fixture(t, { respond: (payload, index) => {
+      if (index === 0) {
+        markToolRequested();
+
+        return glmToolCall('bash', { command: 'sleep 2; echo slept', description: 'wait' });
+      }
+
+      const seen = JSON.stringify(payload).includes('fixture-steer-text');
+
+      return glmTextReply(seen ? 'steer-seen' : 'steer-missed');
+    } });
+    const running = f.run({ onInTurnReady: (port) => markReady(port) });
+    const port = await Promise.race([ready, new Promise((_resolve, reject) => {
+      setTimeout(() => reject(new Error('GLM не выдал порт уточнений')), 30_000).unref();
+    })]);
+
+    await toolRequested;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const delivered = await port.deliver({ messageId: 'steer-message-1', text: 'fixture-steer-text' });
+    const result = await running;
+    const seen = f.mock.requests.filter((request) => JSON.stringify(request.payload)
+      .includes('fixture-steer-text'));
+
+    assert.deepEqual(delivered, { ok: true, state: 'forwarded' });
+    assert.equal(result.reply, 'steer-seen');
+    assert.ok(seen.length >= 1, 'текст уточнения дошёл до запроса модели');
+  });

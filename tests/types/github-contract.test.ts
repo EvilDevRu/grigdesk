@@ -1,5 +1,5 @@
-import type { GitHubRule, GitHubRuleInput, GitHubStatus } from '../../shared/githubContracts.ts';
-import { parseGitHubPolicy, parseGitHubStatus } from '../../shared/githubContracts.ts';
+import type { GitHubRule, GitHubRuleInput, GitHubStatus } from '../../shared/inbox/githubContracts.ts';
+import { parseGitHubPolicy, parseGitHubStatus } from '../../shared/inbox/githubContracts.ts';
 import { githubApi } from '../../web/src/shared/githubApi.ts';
 
 type IsUnchecked<Value> = 0 extends (1 & Value) ? true : false;

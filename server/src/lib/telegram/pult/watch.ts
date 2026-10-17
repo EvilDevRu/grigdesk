@@ -15,8 +15,8 @@
 // старта/включения — silent (правило notify-watch), state и message_id карточек
 // переживают рестарт в pult-state.json.
 import { createHash } from 'node:crypto';
-import { waitingReason } from '../../../../../shared/pipelineWait.ts';
-import { silenceReason } from '../../../../../shared/agentActivity.ts';
+import { waitingReason } from '../../../../../shared/pipeline/pipelineWait.ts';
+import { silenceReason } from '../../../../../shared/pipeline/agentActivity.ts';
 import {
   chatSubject,
   clipText,

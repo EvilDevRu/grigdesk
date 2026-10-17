@@ -7,6 +7,9 @@
 // Записи реестра бывают двух поколений: старая знает только `repos`, новая — весь
 // паспорт. Читатели получают одну форму через readProjectRecord: разбирать умолчания
 // каждому потребителю по-своему нельзя, иначе они разойдутся между собой.
+import { textOr } from '../../../shared/lib/text.ts';
+import { recordOrEmpty } from '../../../shared/lib/objects.ts';
+
 import { PROFILE_RE, listFactoryProfiles } from './profiles.ts';
 import { loadTriageProfile } from './analysis/profile.ts';
 import type { TriageProfilePaths } from './analysis/profile.ts';
@@ -105,16 +108,6 @@ function cacheKey(config: ProjectPathsConfig, name: string): string {
   return `${config.profilesDir}\u0000${config.factoryHome ?? ''}\u0000${name}`;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function textOr(value: unknown, fallback: string): string {
-  return typeof value === 'string' ? value : fallback;
-}
-
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
@@ -127,14 +120,14 @@ function wholeOr(value: unknown, fallback: number): number {
 // вместе со всем разделом. Форму каждой записи всё равно проверяет читатель.
 function readPrefs(prefs: ProjectsPrefsReader | null | undefined): Record<string, unknown> {
   try {
-    return asRecord(prefs?.read?.());
+    return recordOrEmpty(prefs?.read?.());
   } catch {
     return {};
   }
 }
 
 function storedProjects(prefs: ProjectsPrefsReader | null | undefined): Record<string, unknown> {
-  return asRecord(readPrefs(prefs).projects);
+  return recordOrEmpty(readPrefs(prefs).projects);
 }
 
 /** Репозитории из недоверенного значения: пустые и нестроковые строки отбрасываются. */
@@ -142,7 +135,7 @@ function repoRefs(value: unknown): ProjectRepoRef[] {
   const refs: ProjectRepoRef[] = [];
 
   for (const row of Array.isArray(value) ? value : []) {
-    const source = asRecord(row);
+    const source = recordOrEmpty(row);
     const key = typeof source.key === 'string' ? source.key : '';
     const dir = typeof source.dir === 'string' ? source.dir : '';
 
@@ -155,13 +148,13 @@ function repoRefs(value: unknown): ProjectRepoRef[] {
 }
 
 function normalizeImport(value: unknown): ProjectImport {
-  const source = asRecord(value);
+  const source = recordOrEmpty(value);
   const status = IMPORT_STATUSES.includes(source.status as ProjectImportStatus)
     ? source.status as ProjectImportStatus
     : 'none';
   const candidates = source.candidates === null || source.candidates === undefined
     ? null
-    : asRecord(source.candidates);
+    : recordOrEmpty(source.candidates);
 
   return {
     status,
@@ -177,8 +170,8 @@ function normalizeImport(value: unknown): ProjectImport {
 function tombstonesOf(value: unknown): ProjectsMeta['tombstones'] {
   const tombstones: ProjectsMeta['tombstones'] = {};
 
-  for (const [id, entry] of Object.entries(asRecord(value))) {
-    const source = asRecord(entry);
+  for (const [id, entry] of Object.entries(recordOrEmpty(value))) {
+    const source = recordOrEmpty(entry);
     const deletedAt = optionalText(source.deletedAt);
 
     if (deletedAt) {
@@ -238,7 +231,7 @@ export function listProjectRecords(
 
 /** Служебные данные реестра: отсутствие ключа читается как «миграции ещё не было». */
 export function readProjectsMeta(prefs: ProjectsPrefsReader | null | undefined): ProjectsMeta {
-  const source = asRecord(readPrefs(prefs).projectsMeta);
+  const source = recordOrEmpty(readPrefs(prefs).projectsMeta);
 
   return {
     schemaVersion: wholeOr(source.schemaVersion, 0),
