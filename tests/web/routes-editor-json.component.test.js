@@ -8,7 +8,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 async function fixture(t) {
-  await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const { createPinia, setActivePinia } = await import(
     '../../web/node_modules/pinia/dist/pinia.mjs'
   );
@@ -150,7 +150,7 @@ test('RE-G5-04: ACK прежней правки формы не блокируе
 
 test('RE-G5-03: JSON-компонент показывает typed issues и отдаёт точный raw-текст',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const component = await compileVue(webFile('src/views/routes/RouteJsonEditor.vue'), {
       stubs: {
         '../../ui': (`import { defineComponent, h } from 'vue';

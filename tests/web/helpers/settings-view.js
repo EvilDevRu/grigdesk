@@ -101,11 +101,11 @@ export function compileSettingsView({
       './settings/PluginsCatalog.vue': `
         export default { template: '<div class="plugins-catalog-stub"></div>' };
       `,
-      '../stores/cockpit-update.js': `
+      '../stores/grigdesk-update.js': `
         export const blockReasonLabel = (value) => String(value || '');
         export const UPDATE_STAGE_LABELS = {};
-        export const useCockpitUpdateStore = (...args) =>
-          globalThis[${globalName(prefix, 'Stores')}].useCockpitUpdateStore(...args);
+        export const useGrigDeskUpdateStore = (...args) =>
+          globalThis[${globalName(prefix, 'Stores')}].useGrigDeskUpdateStore(...args);
       `,
       '../composables/useSse.ts': `
         export const useSse = () => ({ connected: { value: false } });

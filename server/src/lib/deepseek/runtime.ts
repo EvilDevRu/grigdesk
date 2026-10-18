@@ -152,7 +152,7 @@ export async function prepareDeepSeekLaunch({
   await ensurePrivateDir(dshHome);
 
   try {
-    const binding = JSON.parse(await fs.readFile(path.join(dshHome, '.cockpit-runtime.json'), 'utf8'));
+    const binding = JSON.parse(await fs.readFile(path.join(dshHome, '.grigdesk-runtime.json'), 'utf8'));
 
     if (binding.buildId !== runtime.buildId || binding.journalFormat !== 1) {
       throw new Error('Копия home закреплена за другим или несовместимым runtime');

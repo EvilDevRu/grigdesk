@@ -10,7 +10,7 @@ globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContex
 process.env.NODE_ENV = 'test';
 
 test('ChatSession: snapshot, живые квоты, один таймер и сведения обычным текстом', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   const chat = await chatStoreFixture({ sessions: [{
     id: 'status-component',
     model: 'next-model',

@@ -6,7 +6,7 @@ process.env.NODE_ENV = 'test';
 
 async function browserHarness() {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -93,7 +93,7 @@ test('запись сочетания отказывает системной к
   await press({ code: 'KeyK', key: 'л', ctrlKey: true, altKey: true });
   assert.equal(hotkeys.recording, null);
   assert.equal(comboText('code'), 'Ctrl + Alt + K', 'русская раскладка не мешает записи');
-  assert.deepEqual(JSON.parse(localStorage.getItem('cockpit-tool-hotkeys')), {
+  assert.deepEqual(JSON.parse(localStorage.getItem('grigdesk-tool-hotkeys')), {
     code: 'Ctrl+Alt+KeyK',
   });
   assert.equal(wrapper.find('[data-testid="hotkey-error"]').exists(), false);

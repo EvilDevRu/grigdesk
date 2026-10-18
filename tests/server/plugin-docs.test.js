@@ -20,7 +20,7 @@ const Fastify = requireFromServer('fastify');
 
 /** Временный каталог плагинов: уборка — после теста. */
 async function pluginsRoot(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-docs-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-docs-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -89,7 +89,7 @@ test('PLUGIN-DOCS-01: оглавление — только docs/README.md об�
 });
 
 test('PLUGIN-DOCS-02: подсказка называет оглавления, без документации ход не меняется', () => {
-  const root = '/srv/cockpit/plugins';
+  const root = '/srv/grigdesk/plugins';
   const entries = [
     entry(root, 'audit', 'Проверка', 'Сравнение скорости'),
     entry(root, 'viewer', 'Обзор'),
@@ -99,11 +99,11 @@ test('PLUGIN-DOCS-02: подсказка называет оглавления, 
   assert.equal(withPluginDocsHint('просьба', entries), [
     'просьба',
     '',
-    '[Подсказка Cockpit: документация плагинов]',
+    '[Подсказка GrigDesk: документация плагинов]',
     'Включённые плагины держат документацию у себя, оглавление — docs/README.md в папке плагина.',
     'Открывай его, только если просьба касается плагина, и читай документы по ссылкам из него.',
-    '- «Проверка» (audit) — Сравнение скорости: /srv/cockpit/plugins/audit/docs/README.md',
-    '- «Обзор» (viewer): /srv/cockpit/plugins/viewer/docs/README.md',
+    '- «Проверка» (audit) — Сравнение скорости: /srv/grigdesk/plugins/audit/docs/README.md',
+    '- «Обзор» (viewer): /srv/grigdesk/plugins/viewer/docs/README.md',
     '[/Подсказка]',
   ].join('\n'));
 });

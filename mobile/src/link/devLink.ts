@@ -1,4 +1,4 @@
-import type { CockpitLink, LinkState, OperationIntent, RequestInput, Listener } from './types.ts';
+import type { GrigDeskLink, LinkState, OperationIntent, RequestInput, Listener } from './types.ts';
 
 const endpoint = import.meta.env.VITE_EMULATOR_URL || '/__mobile';
 const token = import.meta.env.VITE_EMULATOR_TOKEN || '';
@@ -181,4 +181,4 @@ class DevLink {
   }
 }
 
-export const devLink: CockpitLink = new DevLink();
+export const devLink: GrigDeskLink = new DevLink();

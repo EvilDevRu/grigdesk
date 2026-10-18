@@ -12,7 +12,7 @@ const fixture = JSON.parse(readFileSync(
 ));
 
 test('установленная версия Kimi покрыта проверенным ACP lifecycle fixture', async (t) => {
-  const binary = process.env.COCKPIT_KIMI_BIN?.trim() || 'kimi';
+  const binary = process.env.GRIGDESK_KIMI_BIN?.trim() || 'kimi';
   let stdout;
   let stderr;
   try {

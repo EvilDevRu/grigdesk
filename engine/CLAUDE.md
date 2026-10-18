@@ -1,7 +1,7 @@
 # Engine — движок конвейера (инструкции для агента)
 
-Движок фабрики задач — **часть кокпита** и канонически живёт в каталоге `engine/`.
-Кокпит — пульт (запускает `engine/bin/factory`, читает реестры), движок — станок.
+Движок фабрики задач — **часть GrigDesk** и канонически живёт в каталоге `engine/`.
+GrigDesk — пульт (запускает `engine/bin/factory`, читает реестры), движок — станок.
 Внешний checkout не является источником кода; он подключается только явными env-override.
 Общение и комментарии в коде — **только на русском**.
 
@@ -45,7 +45,7 @@
 bash -n bin/factory bin/factory-check lib/*.sh ../profiles/*/profile.sh
 python3 -m py_compile lib/dashboard.py
 bin/factory-check --quick        # все профили: capability/hooks, runner config, paths/host
-../tests/run-all.sh              # полный offline suite, без Cockpit и model call
+../tests/run-all.sh              # полный offline suite, без GrigDesk и model call
 ```
 
 Коммит и пуш — только по явной просьбе человека.
@@ -63,5 +63,5 @@ lib/      core.sh (ядро), multi-runner.sh (dispatcher), run-state.sh (protoc
 Состояние задач — вне репозитория: `~/.factory/state/` (`tNNNN.pipeline`, `logs/`, `archive/`,
 `shots/`, `quarantine/`). Путь берётся из `FACTORY_STATE`/`STATE_DIR`, хардкодить нельзя.
 
-Движок запускает и читает **кокпит** из корня текущего checkout — меняя формат
+Движок запускает и читает **GrigDesk** из корня текущего checkout — меняя формат
 реестра, вывод `factory slots` или переменные профиля, проверь и его.

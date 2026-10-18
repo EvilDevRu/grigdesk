@@ -111,7 +111,7 @@ test('DP-06 разрыв после bindShutdown начинает один шт�
   fixture.channel.emit('disconnect');
   await Promise.resolve();
 
-  assert.deepEqual(reasons, ['приложение Кокпита закрылось']);
+  assert.deepEqual(reasons, ['приложение GrigDesk закрылось']);
   assert.deepEqual(fixture.exits, []);
 });
 
@@ -120,12 +120,12 @@ test('DP-06 разрыв после bindShutdown начинает один шт�
  * До рестарта проверяется desktop mode, чтобы старый код не вызвал реальный deploy/restart.sh.
  */
 async function bootDesktopServer(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-desktop-parent-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-desktop-parent-'));
   const port = await freePort();
   const mobilePort = await freePort();
   const env = {
     ...isolatedEnv(root, port, mobilePort),
-    COCKPIT_DESKTOP_CHILD: '1',
+    GRIGDESK_DESKTOP_CHILD: '1',
   };
   const child = spawn(process.execPath, [APP_PATH], {
     env,
@@ -211,8 +211,8 @@ test('DP-13 настоящий app.ts отвечает desktop и выходит
   timeout: 120_000,
 }, async (t) => {
   const fixture = await bootDesktopServer(t);
-  const token = (await readFile(fixture.env.COCKPIT_CLI_TOKEN_PATH, 'utf8')).trim();
-  const headers = { 'x-cockpit-token': token };
+  const token = (await readFile(fixture.env.GRIGDESK_CLI_TOKEN_PATH, 'utf8')).trim();
+  const headers = { 'x-grigdesk-token': token };
   const state = await fetch(`${fixture.origin}/api/system/server`, {
     headers,
     signal: AbortSignal.timeout(10_000),

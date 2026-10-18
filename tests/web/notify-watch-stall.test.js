@@ -96,7 +96,7 @@ test('оборвавшийся прогон звонит, и в звонке с�
   assert.match(call.body, /запусти заново/);
 });
 
-test('первый снимок молчит: заход в кокпит — не событие', async (t) => {
+test('первый снимок молчит: заход в GrigDesk — не событие', async (t) => {
   const { store, harness } = await makeWatch(t);
   harness.tasks = [task(8324, CRASHED)];
 

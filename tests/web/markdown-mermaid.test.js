@@ -97,7 +97,7 @@ test('RMD-MM-05: только ответ своего frame с текущим re
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'https://cockpit.test/assets/mermaid.js',
+    rendererUrl: 'https://grigdesk.test/assets/mermaid.js',
     loadRenderer: () => new Promise(() => {}),
     timeoutMs: 2000,
   });
@@ -168,7 +168,7 @@ test('RMD-MM-06: очередь, отмена и таймаут не блоки�
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'https://cockpit.test/assets/mermaid.js',
+    rendererUrl: 'https://grigdesk.test/assets/mermaid.js',
     loadRenderer: () => new Promise(() => {}),
     timeoutMs: 100,
   });
@@ -262,7 +262,7 @@ test('RMD-MM-09: asset получает родитель, поздняя заг�
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'https://cockpit.test/assets/renderer.js',
+    rendererUrl: 'https://grigdesk.test/assets/renderer.js',
     loadRenderer: (url) => {
       loads.push(url);
 
@@ -276,7 +276,7 @@ test('RMD-MM-09: asset получает родитель, поздняя заг�
   const first = client.render('flowchart TD\n A-->B', { signal: controller.signal });
   const old = browser.document.querySelector('iframe');
 
-  assert.deepEqual(loads, ['https://cockpit.test/assets/renderer.js']);
+  assert.deepEqual(loads, ['https://grigdesk.test/assets/renderer.js']);
   controller.abort();
   assert.equal(await first, null);
 
@@ -320,7 +320,7 @@ test('RMD-MM-10: parent fetch без cookies ленивый, HTTP-ошибка �
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'https://cockpit.test/assets/renderer.js',
+    rendererUrl: 'https://grigdesk.test/assets/renderer.js',
   });
 
   t.after(() => client.dispose());
@@ -334,7 +334,7 @@ test('RMD-MM-10: parent fetch без cookies ленивый, HTTP-ошибка �
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls.length, 2);
-  assert.equal(calls[0].url, 'https://cockpit.test/assets/renderer.js');
+  assert.equal(calls[0].url, 'https://grigdesk.test/assets/renderer.js');
   assert.equal(calls[0].options.credentials, 'omit');
   assert.equal(calls[0].options.signal.aborted, true);
   assert.deepEqual(Object.keys(calls[0].options).sort(), ['credentials', 'signal']);
@@ -352,7 +352,7 @@ test('RMD-MM-11: зависшая загрузка отменяется тайм
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'https://cockpit.test/assets/renderer.js',
+    rendererUrl: 'https://grigdesk.test/assets/renderer.js',
     timeoutMs: 30,
     loadRenderer: (url, signal) => {
       loads.push({ url, signal });
@@ -375,7 +375,7 @@ test('RMD-MM-11: зависшая загрузка отменяется тайм
 });
 
 test('RMD-MM-12: nonce работает в HTTP-контексте без crypto.randomUUID', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/chat');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/chat');
   const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   const cryptoImpl = globalThis.crypto;
 
@@ -387,7 +387,7 @@ test('RMD-MM-12: nonce работает в HTTP-контексте без crypto
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'http://cockpit.test/assets/renderer.js',
+    rendererUrl: 'http://grigdesk.test/assets/renderer.js',
     loadRenderer: () => new Promise(() => {}),
   });
 
@@ -435,7 +435,7 @@ async function paintFixture(t, timeoutMs = 2000) {
 
   const client = createMermaidRenderer({
     document: browser.document,
-    rendererUrl: 'https://cockpit.test/assets/mermaid.js',
+    rendererUrl: 'https://grigdesk.test/assets/mermaid.js',
     loadRenderer: () => new Promise(() => {}),
     waitForPaint: () => new Promise((resolve) => paints.push(resolve)),
     timeoutMs,
@@ -537,7 +537,7 @@ test('RMD-MM-14: пустой SVG 16×16 пересоздаёт frame один �
 
       const client = createMermaidRenderer({
         document: browser.document,
-        rendererUrl: 'https://cockpit.test/assets/mermaid.js',
+        rendererUrl: 'https://grigdesk.test/assets/mermaid.js',
         loadRenderer: () => new Promise(() => {}),
       });
 

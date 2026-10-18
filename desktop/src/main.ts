@@ -17,7 +17,7 @@ import path from 'node:path';
 
 import { delayWithAbort } from '../../shared/lib/delay.ts';
 
-import { probeCockpit } from '../../shared/runtime/cockpitReadiness.ts';
+import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { uiReleaseUrl } from '../../shared/runtime/uiRelease.ts';
 import { publishUiRelease } from './uiRelease.ts';
@@ -33,7 +33,7 @@ import type { ConnectionLifecycle } from './connectionLifecycle.ts';
 import {
   applicationMenuTemplate, contextMenuTemplate, isReloadShortcut, isSettingsShortcut,
 } from './menu.ts';
-import { cockpitAlive, offlineUrl, waitForCockpit } from './offline.ts';
+import { grigDeskAlive, offlineUrl, waitForGrigDesk } from './offline.ts';
 import { accessUnavailableUrl } from './accessUnavailable.ts';
 import { createQuitController } from './quitController.ts';
 import { loadServerRuntime, runtimeDependencies } from './runtimeConfig.ts';
@@ -80,13 +80,13 @@ let exiting = false;
 const configuredWindows = new WeakSet<BrowserWindow>();
 const frames = createFrameTracker();
 
-app.setName('Кокпит');
+app.setName('GrigDesk');
 
-const dataDirectory = process.env.COCKPIT_DESKTOP_DATA_DIR;
+const dataDirectory = process.env.GRIGDESK_DESKTOP_DATA_DIR;
 
 if (dataDirectory !== undefined) {
   if (!path.isAbsolute(dataDirectory)) {
-    dialog.showErrorBox('Кокпит', 'Каталог данных приложения должен быть абсолютным.');
+    dialog.showErrorBox('GrigDesk', 'Каталог данных приложения должен быть абсолютным.');
     app.exit(1);
   } else {
     app.setPath('userData', dataDirectory);
@@ -115,7 +115,7 @@ function startOwnServer(runtime: ServerRuntime): ChildProcess {
   try {
     const child = spawnServer(runtime, descriptor);
 
-    child.on('error', (error) => writeLog(`Кокпит: процесс сервера: ${error.message}`));
+    child.on('error', (error) => writeLog(`GrigDesk: процесс сервера: ${error.message}`));
 
     return child;
   } finally {
@@ -134,7 +134,7 @@ const supervisor = createServerSupervisor({
     appDir: packageDir,
     bundledUi: true,
   }),
-  probe: (signal) => probeCockpit(selectedOrigin ?? '', { signal }),
+  probe: (signal) => probeGrigDesk(selectedOrigin ?? '', { signal }),
   unitState: (signal) => readUnitState(signal),
   runGate: (runtime, signal) => runVpnGate(runtime, signal),
   spawnServer: (runtime) => startOwnServer(runtime),
@@ -312,7 +312,7 @@ async function showFatalDialog(message: string, signal: AbortSignal): Promise<vo
 
   await dialog.showMessageBox({
     type: 'error',
-    title: 'Кокпит',
+    title: 'GrigDesk',
     message,
     buttons: ['Закрыть'],
     signal,
@@ -344,15 +344,15 @@ function timeoutMessage(phase: StartupPhase): string {
     }
 
     return reason
-      ? `Сервер Кокпита не готов за 90 секунд (${reason}).`
-      : 'Сервер Кокпита не готов за 90 секунд.';
+      ? `Сервер GrigDesk не готов за 90 секунд (${reason}).`
+      : 'Сервер GrigDesk не готов за 90 секунд.';
   }
 
   if (phase === 'connect') {
     return 'Не удалось войти по локальному ключу за 90 секунд.';
   }
 
-  return 'Интерфейс Кокпита не отрисовался.';
+  return 'Интерфейс GrigDesk не отрисовался.';
 }
 
 /**
@@ -360,7 +360,7 @@ function timeoutMessage(phase: StartupPhase): string {
  * оба порядка. Обещание разрешается на 'show' — от него считается минимум показа.
  */
 function showSplash(signal: AbortSignal): Promise<void> {
-  const splashSession = session.fromPartition('cockpit-splash');
+  const splashSession = session.fromPartition('grigdesk-splash');
   const window = new BrowserWindow(splashWindowOptions({
     icon: path.join(__dirname, 'icon.png'),
     packaged: app.isPackaged,
@@ -453,21 +453,21 @@ async function createMainWindow(
     },
   })));
 
-  const cockpitSession = session.fromPartition(LOCAL_PARTITION);
+  const grigDeskSession = session.fromPartition(LOCAL_PARTITION);
 
-  localSession = cockpitSession;
-  await configureSession(cockpitSession, origin);
+  localSession = grigDeskSession;
+  await configureSession(grigDeskSession, origin);
 
   const base = windowOptions(path.join(__dirname, 'icon.png'), app.isPackaged, stored.window);
   const options: BrowserWindowConstructorOptions = {
     ...base,
     webPreferences: {
       ...base.webPreferences,
-      session: cockpitSession,
+      session: grigDeskSession,
     },
   };
   const window = new BrowserWindow(options);
-  // Ярлык запускает приложение без --cockpit-url и пути ключа: путь берётся из окружения сервера.
+  // Ярлык запускает приложение без --grigdesk-url и пути ключа: путь берётся из окружения сервера.
   const keyFile = windowKeyPath({
     env: runtime?.env ?? process.env,
     uid: process.getuid?.(),
@@ -475,12 +475,12 @@ async function createMainWindow(
   });
   const connection = createConnectionLifecycle({
     origin,
-    alive: (signal) => cockpitAlive(origin, { signal }),
-    wait: (signal) => waitForCockpit(origin, { signal }),
+    alive: (signal) => grigDeskAlive(origin, { signal }),
+    wait: (signal) => waitForGrigDesk(origin, { signal }),
     ensureSession: (signal) => ensureSession({
       origin,
       keyFile,
-      cookies: cockpitSession.cookies,
+      cookies: grigDeskSession.cookies,
       signal,
     }),
     loadOffline: (signal) => revealed()
@@ -493,8 +493,8 @@ async function createMainWindow(
      * Проверяет выбранную версию до загрузки документа и сохраняет её при восстановлении входа.
      * Старый сервер не подменяет интерфейс рабочей сборкой и не запускает бесконечный retry.
      */
-    loadCockpit: (address, signal) => loadPinnedDocument({
-      fetch: (url, init) => cockpitSession.fetch(url, init),
+    loadGrigDesk: (address, signal) => loadPinnedDocument({
+      fetch: (url, init) => grigDeskSession.fetch(url, init),
       pinned: pinnedUi,
       window,
       address,
@@ -511,18 +511,18 @@ async function createMainWindow(
   installSettingsShortcut(window);
   settingsController = createSettingsWindow({
     parent: window,
-    session: cockpitSession,
+    session: grigDeskSession,
     origin,
     icon: path.join(__dirname, 'icon.png'),
     packaged: app.isPackaged,
     createWindow: (childOptions) => new BrowserWindow(childOptions),
     workArea: (bounds) => screen.getDisplayMatching(bounds).workArea,
     revealed,
-    sessionActive: () => sessionCookieActive({ origin, cookies: cockpitSession.cookies }),
+    sessionActive: () => sessionCookieActive({ origin, cookies: grigDeskSession.cookies }),
     pinnedUrl: () => pinnedUi?.url,
     configureChild: (child) => configureWindow(child, origin, options),
     installShortcut: installSettingsShortcut,
-    showLoadError: () => dialog.showErrorBox('Кокпит', 'Не удалось открыть настройки.')
+    showLoadError: () => dialog.showErrorBox('GrigDesk', 'Не удалось открыть настройки.')
   });
   lifecycle = connection;
   configureWindow(window, origin, options);
@@ -612,7 +612,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
   // иначе создало бы её до переноса, а в Windows-сборке упало бы на чужом формате пути.
   const releases = runtime
     ? runtime.uiReleasesDir
-    : process.env.COCKPIT_UI_RELEASES_DIR;
+    : process.env.GRIGDESK_UI_RELEASES_DIR;
 
   if (releases) {
     if (!path.isAbsolute(releases)) {
@@ -625,7 +625,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
 
     pinnedUi = { id: release.id, url: uiReleaseUrl(selectedOrigin, release.id) };
   } else if (app.isPackaged) {
-    throw new Error('Приложение не связано с установкой сервера. Выполните cockpit desktop install.');
+    throw new Error('Приложение не связано с установкой сервера. Выполните grigdesk-ctl desktop install.');
   }
 
   signal.throwIfAborted();
@@ -647,7 +647,7 @@ async function connectMain(signal: AbortSignal): Promise<void> {
   const connection = lifecycle;
 
   if (!connection) {
-    throw new Error('Главное окно Кокпита не создано.');
+    throw new Error('Главное окно GrigDesk не создано.');
   }
 
   connected = false;
@@ -655,13 +655,13 @@ async function connectMain(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
 
   if (!connected) {
-    throw new Error('Интерфейс Кокпита не загрузился.');
+    throw new Error('Интерфейс GrigDesk не загрузился.');
   }
 
   if (mainDocumentCode !== 200) {
     throw new Error(mainDocumentCode
-      ? `Интерфейс Кокпита не загрузился (HTTP ${mainDocumentCode}).`
-      : 'Интерфейс Кокпита не загрузился.');
+      ? `Интерфейс GrigDesk не загрузился (HTTP ${mainDocumentCode}).`
+      : 'Интерфейс GrigDesk не загрузился.');
   }
 }
 

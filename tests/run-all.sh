@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Единый офлайн-прогон проекта: не запускает Cockpit и не вызывает реальные ИИ.
+# Единый офлайн-прогон проекта: не запускает GrigDesk и не вызывает реальные ИИ.
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,11 +36,11 @@ fi
 
 # Все дочерние проверки получают одну проверенную generation под общим build lock.
 # Helper не загружает зависимости и не переключает production current.
-if ! COCKPIT_TEST_DEEPSEEK_ARTIFACT=$(node "$PROJECT_ROOT/tests/helpers/deepseekRuntimeArtifact.mts"); then
+if ! GRIGDESK_TEST_DEEPSEEK_ARTIFACT=$(node "$PROJECT_ROOT/tests/helpers/deepseekRuntimeArtifact.mts"); then
   exit 1
 fi
-export COCKPIT_TEST_DEEPSEEK_ARTIFACT
-export COCKPIT_RELEASE_PUBLISH_CONTRACT=1
+export GRIGDESK_TEST_DEEPSEEK_ARTIFACT
+export GRIGDESK_RELEASE_PUBLISH_CONTRACT=1
 
 bash "$PROJECT_ROOT/tests/layout.sh" || RC=1
 # Часть проверок уже на TypeScript: с минимумом Node 22.18 они исполняются как есть.

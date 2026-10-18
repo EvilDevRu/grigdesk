@@ -16,7 +16,7 @@ import {
 } from '../../desktop/src/autoLogin.ts';
 
 const key = 'A'.repeat(43);
-const setCookie = 'cockpit_sid=session_value; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600';
+const setCookie = 'grigdesk_sid=session_value; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600';
 const origin = 'http://127.0.0.1:28140';
 
 /**
@@ -31,7 +31,7 @@ function cookieJar(existing = []) {
     get: async (filter) => {
       assert.deepEqual(filter, {
         url: origin + '/',
-        name: 'cockpit_sid',
+        name: 'grigdesk_sid',
       });
 
       return existing;
@@ -69,7 +69,7 @@ async function observe(predicate) {
  * Cleanup не касается ни рабочего runtime, ни профиля настоящего окна.
  */
 async function keyFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-auto-login-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-auto-login-'));
   const file = path.join(root, 'key');
 
   t.after(() => rm(root, {
@@ -219,7 +219,7 @@ test('DW-28: разбирается только полная сессионна
 test('DW-29: действующая cookie не обменивается', async (t) => {
   const { file } = await keyFixture(t);
   const cookies = cookieJar([{
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'existing_sid',
   }]);
   const calls = [];
@@ -231,8 +231,8 @@ test('DW-29: действующая cookie не обменивается', async
       calls.push(url);
       assert.equal(options.method, 'GET');
       assert.equal(options.redirect, 'error');
-      assert.equal(new Headers(options.headers).get('cookie'), 'cockpit_sid=existing_sid');
-      assert.equal(new Headers(options.headers).has('x-cockpit-window-key'), false);
+      assert.equal(new Headers(options.headers).get('cookie'), 'grigdesk_sid=existing_sid');
+      assert.equal(new Headers(options.headers).has('x-grigdesk-window-key'), false);
 
       return response();
     },
@@ -261,7 +261,7 @@ test('DW-30: ключ обменивается до загрузки веба', 
       assert.equal(options.signal.aborted, false);
       assert.equal(options.body, undefined);
       assert.deepEqual(Object.fromEntries(new Headers(options.headers)), {
-        'x-cockpit-window-key': key,
+        'x-grigdesk-window-key': key,
       });
 
       return response();
@@ -272,7 +272,7 @@ test('DW-30: ключ обменивается до загрузки веба', 
   assert.equal(calls, 1);
   assert.deepEqual(cookies.sets, [{
     url: origin + '/',
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'session_value',
     httpOnly: true,
     sameSite: 'lax',
@@ -285,7 +285,7 @@ test('DW-30: ключ обменивается до загрузки веба', 
 test('DW-30: истёкшая cookie ведёт к ключу и заменяется новой', async (t) => {
   const { file } = await keyFixture(t);
   const cookies = cookieJar([{
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'expired_sid',
   }]);
   const methods = [];
@@ -309,7 +309,7 @@ test('DW-30: истёкшая cookie ведёт к ключу и заменяе�
   assert.deepEqual(methods, ['GET', 'POST']);
   assert.deepEqual(cookies.sets, [{
     url: origin + '/',
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'session_value',
     httpOnly: true,
     sameSite: 'lax',
@@ -402,7 +402,7 @@ test('DW-31: исключения JSON, cookies.get и cookies.set закрыв�
   }), 'unavailable');
 
   const existing = cookieJar([{
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'existing_sid',
   }]);
 
@@ -448,7 +448,7 @@ test('DW-32: ротация перечитывает новый ключ оди�
       keyFile: file,
       cookies,
       fetchImpl: async (_url, options) => {
-        sent.push(new Headers(options.headers).get('x-cockpit-window-key'));
+        sent.push(new Headers(options.headers).get('x-grigdesk-window-key'));
 
         if (sent.length === 1) {
           await writeFile(file, 'B'.repeat(43));
@@ -522,7 +522,7 @@ test('DW-33: GET и POST ограничены таймаутами', async (t) =
 
   for (const method of ['GET', 'POST']) {
     const cookies = cookieJar(method === 'GET' ? [{
-      name: 'cockpit_sid',
+      name: 'grigdesk_sid',
       value: 'existing_sid',
     }] : []);
     let signal;
@@ -650,7 +650,7 @@ test('DW-33: секрет не уходит при настоящем redirect',
   const fixture = await redirectFixture(t);
 
   for (const existing of [[], [{
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'existing_sid',
   }]]) {
     const sets = [];
@@ -676,7 +676,7 @@ test('DW-33: внешняя отмена прерывает зависший GET
   const { file } = await keyFixture(t);
 
   for (const existing of [[], [{
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: 'existing_sid',
   }]]) {
     const cookies = cookieJar(existing);
@@ -711,7 +711,7 @@ test('DW-33: внешняя отмена прерывает зависший GET
 
 test('SW-N06 проверка cookie без обмена ключом', async (t) => {
   const calls = [];
-  const cookies = cookieJar([{ name: 'cockpit_sid', value: 'session_value' }]);
+  const cookies = cookieJar([{ name: 'grigdesk_sid', value: 'session_value' }]);
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
 
@@ -725,12 +725,12 @@ test('SW-N06 проверка cookie без обмена ключом', async (t
   }), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, origin + '/api/auth/state');
-  assert.equal(calls[0].options.headers.Cookie, 'cockpit_sid=session_value');
+  assert.equal(calls[0].options.headers.Cookie, 'grigdesk_sid=session_value');
   assert.equal(calls[0].options.redirect, 'error');
 
   for (const existing of [[],
-    [{ name: 'cockpit_sid', value: 'bad!' }],
-    [{ name: 'cockpit_sid', value: 'a' }, { name: 'cockpit_sid', value: 'b' }]]) {
+    [{ name: 'grigdesk_sid', value: 'bad!' }],
+    [{ name: 'grigdesk_sid', value: 'a' }, { name: 'grigdesk_sid', value: 'b' }]]) {
     assert.equal(await sessionCookieActive({
     origin,
     cookies: cookieJar(existing),

@@ -38,31 +38,31 @@ function legacyEnv(root) {
 }
 
 test('sandbox env: single-repo generic и shared mode разбираются точно', () => {
-  const generic = parseSandboxRepositories(genericEnv('/tmp/cockpit-generic'));
+  const generic = parseSandboxRepositories(genericEnv('/tmp/grigdesk-generic'));
   assert.equal(generic.kind, 'generic');
   assert.deepEqual(generic.repos, [{
     name: 'project-alpha',
-    source: '/tmp/cockpit-generic/project-alpha-source',
-    path: '/tmp/cockpit-generic/project-alpha-worktree',
+    source: '/tmp/grigdesk-generic/project-alpha-source',
+    path: '/tmp/grigdesk-generic/project-alpha-worktree',
     branch: 'factory/t9123',
   }]);
 
   assert.equal(generic.workspaceMode, 'isolated');
 
   const shared = parseSandboxRepositories({
-    ...genericEnv('/tmp/cockpit-shared'),
+    ...genericEnv('/tmp/grigdesk-shared'),
     WORKSPACE_MODE: 'shared',
-    REPO_0_SOURCE: '/tmp/cockpit-shared/project-alpha-worktree',
+    REPO_0_SOURCE: '/tmp/grigdesk-shared/project-alpha-worktree',
   });
   assert.equal(shared.workspaceMode, 'shared');
 
-  assert.equal(parseSandboxRepositories(legacyEnv('/tmp/cockpit-legacy')).kind, 'invalid');
-  const legacy = parseSandboxRepositories(legacyEnv('/tmp/cockpit-legacy'), { allowLegacy: true });
+  assert.equal(parseSandboxRepositories(legacyEnv('/tmp/grigdesk-legacy')).kind, 'invalid');
+  const legacy = parseSandboxRepositories(legacyEnv('/tmp/grigdesk-legacy'), { allowLegacy: true });
   assert.equal(legacy.kind, 'legacy');
   assert.deepEqual(legacy.repos.map((repo) => repo.name), ['be', 'fe']);
   assert.deepEqual(legacy.repos.map((repo) => repo.path), [
-    '/tmp/cockpit-legacy/be-worktree',
-    '/tmp/cockpit-legacy/fe-worktree',
+    '/tmp/grigdesk-legacy/be-worktree',
+    '/tmp/grigdesk-legacy/fe-worktree',
   ]);
 });
 
@@ -114,7 +114,7 @@ async function factoryServer(t, env) {
 }
 
 test('factory API отдаёт и диффит single-repo generic без BE/FE aliases', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-api-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const env = genericEnv(root);
   await mkdir(env.REPO_0_WT, { recursive: true });
@@ -144,7 +144,7 @@ test('factory API отдаёт и диффит single-repo generic без BE/FE 
 });
 
 test('factory API сохраняет форму workspace старого BE/FE env', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-legacy-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-legacy-api-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const env = legacyEnv(root);
   await Promise.all([mkdir(env.BE_WT, { recursive: true }), mkdir(env.FE_WT, { recursive: true })]);
@@ -201,7 +201,7 @@ async function chatServer(t, root, env, calls) {
 }
 
 test('task-chat берёт первый generic repo как cwd, остальные как add-dir', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-chat-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-chat-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const first = path.join(root, 'project-alpha-worktree');
   const second = path.join(root, 'assets-worktree');
@@ -234,8 +234,8 @@ test('task-chat берёт первый generic repo как cwd, остальн�
   assert.deepEqual(calls, [{ cwd: first, extraDirs: [second] }]);
 });
 
-test('task-chat с повреждённым generic env не запускается в корне Cockpit', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-invalid-chat-'));
+test('task-chat с повреждённым generic env не запускается в корне GrigDesk', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-invalid-chat-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const calls = [];
   const app = await chatServer(t, root, {
@@ -261,7 +261,7 @@ test('task-chat с повреждённым generic env не запускает�
 });
 
 test('task-chat не открывает legacy cwd/add-dir', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-legacy-chat-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-legacy-chat-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const env = legacyEnv(root);
   await Promise.all([mkdir(env.BE_WT), mkdir(env.FE_WT)]);

@@ -445,7 +445,7 @@ export function buildClaudeTurnResult(collector: ClaudeTurnCollector, {
       stderr: String(stderrTail || '').trim().slice(-400),
     }, 'чат: пустой result от claude');
 
-    // AskUserQuestion кокпит «отклоняет» намеренно — так ответ человека доезжает до
+    // AskUserQuestion GrigDesk «отклоняет» намеренно — так ответ человека доезжает до
     // агента. Это не отказ в действии, в текст предупреждения его не тащим.
     const denied = [...new Set((ev.permission_denials || [])
       .map((entry) => entry.tool_name)
@@ -538,7 +538,7 @@ export function claudeSessionArgs({
   ];
   args.push(...providerSettingsArgs);
   if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
-  if (mcpConfig?.mcpServers?.['cockpit-work']) {
+  if (mcpConfig?.mcpServers?.['grigdesk-work']) {
     const descriptors = Array.isArray(workTools?.descriptors)
       ? workTools.descriptors
       : defaultWorkToolDescriptors('claude');
@@ -548,7 +548,7 @@ export function claudeSessionArgs({
     } | null>)
       .map((descriptor) => descriptor?.name || descriptor?.function?.name)
       .filter(Boolean)
-      .map((name) => `mcp__cockpit-work__${name}`)
+      .map((name) => `mcp__grigdesk-work__${name}`)
       .join(',');
     if (allowed) {
       args.push('--allowedTools', allowed);
@@ -856,7 +856,7 @@ export function openClaudeStreamSession({
   }
 
   /**
-   * Lifecycle связывается с UUID входа, а не с id сообщения Кокпита или порядком result.
+   * Lifecycle связывается с UUID входа, а не с id сообщения GrigDesk или порядком result.
    * Отложенные после stop команды принадлежат фону даже при новом заказанном ходе.
    */
   function handleCommandLifecycle(ev: ClaudeEvent): void {

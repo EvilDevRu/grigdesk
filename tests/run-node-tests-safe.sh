@@ -22,8 +22,8 @@ PEAK_RSS_KB=0
 STOPPING=0
 
 # У каждого прогона своя папка: тесты не трогают настоящую папку пользователя.
-# Внешнее COCKPIT_HOME не наследуется, сбой mktemp запрещает запуск Node.
-if ! TEST_DATA_HOME=$(mktemp -d "${TMPDIR:-/tmp}/cockpit-test-home.XXXXXX") \
+# Внешнее GRIGDESK_HOME не наследуется, сбой mktemp запрещает запуск Node.
+if ! TEST_DATA_HOME=$(mktemp -d "${TMPDIR:-/tmp}/grigdesk-test-home.XXXXXX") \
   || [[ ! -d "$TEST_DATA_HOME" ]]; then
   echo "node-test-watchdog: не удалось создать временную папку данных" >&2
   exit 2
@@ -36,6 +36,19 @@ cleanup_test_home() {
 }
 
 trap cleanup_test_home EXIT
+
+# Старые настройки не должны наследоваться даже до перехода на новые имена.
+# Префикс берётся из общего модуля, чтобы тесты не заводили второй список совместимости.
+LEGACY_ENV_PREFIX=$(node -e '
+  const path = require("node:path");
+  const legacy = require(path.resolve(process.argv[1]));
+  process.stdout.write(legacy.LEGACY.envPrefix);
+' "$(dirname "${BASH_SOURCE[0]}")/../shared/runtime/legacyBrand.ts") || exit $?
+while IFS= read -r key; do
+  if [[ "$key" == "$LEGACY_ENV_PREFIX"* ]]; then
+    unset "$key"
+  fi
+done < <(compgen -e)
 
 terminate_group() {
   if (( STOPPING )); then
@@ -61,21 +74,21 @@ forward_signal() {
 
 # Папка артефактов — рабочая папка агентов, а не личные данные: снимки, кэши сборок и
 # временные стенды тестов должны пережить прогон. Поэтому она берётся из настоящей папки
-# данных до подмены COCKPIT_HOME; неверная внешняя папка оставляет артефакты во временной.
+# данных до подмены GRIGDESK_HOME; неверная внешняя папка оставляет артефакты во временной.
 ARTIFACTS_ENV=()
-if [[ -n "${COCKPIT_ARTIFACTS_DIR:-}" ]]; then
-  ARTIFACTS_ENV=("COCKPIT_ARTIFACTS_DIR=$COCKPIT_ARTIFACTS_DIR")
+if [[ -n "${GRIGDESK_ARTIFACTS_DIR:-}" ]]; then
+  ARTIFACTS_ENV=("GRIGDESK_ARTIFACTS_DIR=$GRIGDESK_ARTIFACTS_DIR")
 elif source "$(dirname "${BASH_SOURCE[0]}")/../deploy/lib/runtime-env.sh" \
-  && REAL_DATA_HOME=$(cockpit_data_home 2>/dev/null); then
-  ARTIFACTS_ENV=("COCKPIT_ARTIFACTS_DIR=$REAL_DATA_HOME/artifacts")
+  && REAL_DATA_HOME=$(grigdesk_data_home 2>/dev/null) && [[ -d "$REAL_DATA_HOME" ]]; then
+  ARTIFACTS_ENV=("GRIGDESK_ARTIFACTS_DIR=$REAL_DATA_HOME/artifacts")
 fi
 
 # Пути живого .env (сервер передаёт его ключи агентам) тоже не наследуются: иначе тесты
 # с ...process.env писали бы журнал и версии интерфейса в настоящую папку данных.
-setsid env -u COCKPIT_ENV_FILE -u COCKPIT_UI_RELEASES_DIR -u COCKPIT_LOG \
+setsid env -u GRIGDESK_ENV_FILE -u GRIGDESK_UI_RELEASES_DIR -u GRIGDESK_LOG \
   ${ARTIFACTS_ENV[@]+"${ARTIFACTS_ENV[@]}"} \
   NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$HEAP_MB" \
-  COCKPIT_HOME="$TEST_DATA_HOME" node "$@" &
+  GRIGDESK_HOME="$TEST_DATA_HOME" node "$@" &
 TEST_PID=$!
 
 trap forward_signal INT TERM HUP

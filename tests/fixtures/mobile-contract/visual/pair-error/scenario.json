@@ -7,7 +7,7 @@
       "minApp": "0.1.0",
       "serverTime": 1760000000000,
       "server": {
-        "name": "Кокпит",
+        "name": "GrigDesk",
         "version": "0.1.0"
       },
       "device": {
@@ -274,7 +274,7 @@
     "unlocked": false,
     "fontScale": 1,
     "generation": 1,
-    "error": "Срок действия кода истёк. Создайте новый код в настройках Кокпита."
+    "error": "Срок действия кода истёк. Создайте новый код в настройках GrigDesk."
   },
   "outbox": []
 }

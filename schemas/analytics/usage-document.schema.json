@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cockpit.local/schemas/analytics/usage-document.schema.json",
+  "$id": "https://grigdesk.local/schemas/analytics/usage-document.schema.json",
   "title": "Неизменяемый нормализованный документ расхода раннера",
   "type": "object",
   "additionalProperties": false,

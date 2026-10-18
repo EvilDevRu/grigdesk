@@ -67,7 +67,7 @@ test('окна и валюты сохраняют порядок, квоты и�
 
 test('первый GET, ошибка, отсутствие записи, снятый исполнитель и вендорные отказы различаются', () => {
   assert.equal(providerUsageSummary('any', null, { status: 'loading' }).label, 'Лимиты: …');
-  assert.equal(providerUsageSummary('any', null, { status: 'error', error: 'Cockpit HTTP 401' }).label,
+  assert.equal(providerUsageSummary('any', null, { status: 'error', error: 'GrigDesk HTTP 401' }).label,
     'Лимиты недоступны');
   assert.equal(providerUsageSummary('any', null, fresh).label, 'Нет данных о лимитах');
   assert.equal(providerUsageSummary('removed', quota(), fresh, false).label, 'Исполнитель недоступен');
@@ -88,13 +88,13 @@ test('первый GET, ошибка, отсутствие записи, сня�
     {
       status: 'error',
       deliveryStale: true,
-      error: 'HTTP 401 Cockpit',
+      error: 'HTTP 401 GrigDesk',
     });
 
   assert.equal(stale.measuredAt, 100);
   assert.equal(stale.stale, true);
   assert.equal(stale.windows[0].value, '75%');
-  assert.match(stale.detail, /Cockpit/);
+  assert.match(stale.detail, /GrigDesk/);
 });
 
 test('поздний GET и refresh не заменяют новый SSE, включая позднюю ошибку', async (t) => {
@@ -132,7 +132,7 @@ test('ошибка первичной загрузки завершается, r
   const store = useProvidersStore();
 
   t.mock.method(api, 'get', async () => {
-    throw new Error('Cockpit HTTP 401');
+    throw new Error('GrigDesk HTTP 401');
   });
   await store.loadUsage(true);
   assert.equal(store.usageTransport.status, 'error');

@@ -11,7 +11,7 @@ export type JobIsChecked = Checked<IsUnchecked<Overview['jobs'][number]>>;
 
 /**
  * Отрицательные примеры выполняет только компилятор: подъём стенда обязан остаться
- * действием с явным профилем и явным номером, а журнал этапов и запись кокпита —
+ * действием с явным профилем и явным номером, а журнал этапов и запись GrigDesk —
  * значениями, которых может не быть.
  */
 async function checkServerContracts(service: Service, stateDir: string): Promise<void> {

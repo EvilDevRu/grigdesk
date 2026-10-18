@@ -42,7 +42,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 const ME = {
   id: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
 };
@@ -53,7 +53,7 @@ const EMPTY_POLICY_FINGERPRINT = telegramRulesPolicyFingerprint([]);
 const msg = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   chatType: 'supergroup',
   isForum: false,
   messageId: 100,
@@ -168,7 +168,7 @@ test('ссылка в привязанный чат раскрывается и�
   // `fileId` вложений, а потребителям нужен один и тот же текст обсуждения —
   // и человеку в карточке, и агенту в тикете.
   assert.equal(one.ok, true);
-  assert.equal(one.chat.title, 'Кокпит · баги');
+  assert.equal(one.chat.title, 'GrigDesk · баги');
   assert.equal(one.quotes.length, 3, 'ветка отдаётся целиком, а не одним сообщением');
   assert.ok(one.quotes.some((q) => q.target && q.text === SECRET), 'нет цитаты, ради которой дали ссылку');
   assert.match(body.text, new RegExp(SECRET));

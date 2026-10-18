@@ -39,7 +39,7 @@
             <h2 class="section-title">Описание</h2>
             <p class="mobile-prose detail-text">{{ current.task.description || 'Без описания' }}</p>
             <p v-if="current.task.truncated" class="mobile-muted">
-              Продолжение описания — в кокпите.
+              Продолжение описания — в GrigDesk.
             </p>
           </section>
           <UiButton kind="primary" variant="solid" :busy="busy" @click="loadOptions">

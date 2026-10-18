@@ -6,11 +6,11 @@
 // (не оракул). Плагин выключен — то же молчание: «не ходить в сеть вовсе».
 //
 // Действия транслируются в те же HTTP-ручки, что жмёт браузер (через inject):
-// пульт — ещё одно окно кокпита, второй копии валидации и CAS здесь нет. Ошибки
+// пульт — ещё одно окно GrigDesk, второй копии валидации и CAS здесь нет. Ошибки
 // ручек переводятся в человеческий текст в одном месте — тут.
 //
 // Пульт смотрит, разблокирует и поручает работу общему companion-ассистенту.
-// Постановка задач принадлежит «Входящим», запуск прогона и деньги — кокпиту.
+// Постановка задач принадлежит «Входящим», запуск прогона и деньги — GrigDesk.
 //
 // Личка не копит мусор (t91001): вся навигация живёт в ОДНОМ сообщении-экране
 // (запись screen в pult-state.json) и правится на месте, решённые карточки
@@ -108,7 +108,7 @@ const DELETE_WINDOW_MS = 48 * 3_600_000 - 5 * 60_000;
 const DELETE_BATCH_SIZE = 100;
 
 const HELP_TEXT = [
-  'Пульт кокпита смотрит, разблокирует и поручает, но не заменяет полный кокпит.',
+  'Пульт GrigDesk смотрит, разблокирует и поручает, но не заменяет полный GrigDesk.',
   '',
   'Сам присылает:',
   '🔵 живую карточку прогона — обновляется на месте, пока маршрут идёт;',
@@ -124,7 +124,7 @@ const HELP_TEXT = [
   'Решения — кнопками на карточках; решённая карточка удаляется, итог виден всплывашкой.',
   'Навигация (список, задача, узлы, план) живёт в одном сообщении-экране — закрывается кнопкой «✕ Закрыть».',
   'Свободный текст и голос — обычный auto-ход ассистента в общем разговоре «Компаньон».',
-  'Постановка задач живёт во «Входящих», запуск прогонов, дифы и деньги — только в кокпите.',
+  'Постановка задач живёт во «Входящих», запуск прогонов, дифы и деньги — только в GrigDesk.',
 ].join('\n');
 
 function commandOf(text: unknown): { name: string; args: string } | null {
@@ -473,7 +473,7 @@ export class TelegramPultActions {
 
   async _api(method: string, url: string, payload?: unknown): Promise<ApiResponse> {
     if (!this.callApi) {
-      return { statusCode: 503, body: { error: 'pult_not_wired', message: 'ручки кокпита не подключены' } };
+      return { statusCode: 503, body: { error: 'pult_not_wired', message: 'ручки GrigDesk не подключены' } };
     }
     return this.callApi(method, url, payload);
   }
@@ -645,7 +645,7 @@ export class TelegramPultActions {
       // Пойманная в UI грабля: решение записано, а прогон не поехал. По смыслу это
       // отказ: причину человек обязан прочитать, поэтому карточка остаётся текстом.
       if (res.body?.resumed === false) {
-        const why = `решение записано, но прогон не поехал: ${res.body?.resumeError || 'причина в кокпите'}`;
+        const why = `решение записано, но прогон не поехал: ${res.body?.resumeError || 'причина в GrigDesk'}`;
         await this._answer(lease, callback, why);
         await this._edit(lease, chatId, callback.messageId, `⚠ ${subject}: ${why}`);
       } else {
@@ -675,14 +675,14 @@ export class TelegramPultActions {
   }
 
   /** Старую/подделанную кнопку MCP не превращаем в обход browser-only формы. */
-  async _cockpitOnly({ lease, callback, chatId }: ActionContext, item: Payload): Promise<void> {
+  async _grigDeskOnly({ lease, callback, chatId }: ActionContext, item: Payload): Promise<void> {
     const subject = chatSubject(item);
-    await this._answer(lease, callback, 'Заверши это действие в Cockpit.');
+    await this._answer(lease, callback, 'Заверши это действие в GrigDesk.');
     await this._edit(
       lease,
       chatId,
       callback.messageId,
-      `🔔 ${subject} — требуется действие\nЗаверши в Cockpit.`,
+      `🔔 ${subject} — требуется действие\nЗаверши в GrigDesk.`,
     );
   }
 
@@ -692,7 +692,7 @@ export class TelegramPultActions {
   ): Promise<void> {
     const item = await this._waitingItem(pid);
     if (item?.structured === true) {
-      await this._cockpitOnly({ lease, callback, chatId, ownerKey: '' }, item);
+      await this._grigDeskOnly({ lease, callback, chatId, ownerKey: '' }, item);
       return;
     }
     const first = (item?.questions as Payload[] | undefined)?.[0];
@@ -726,7 +726,7 @@ export class TelegramPultActions {
       return;
     }
     if (item.structured === true) {
-      await this._cockpitOnly({ lease, callback, chatId, ownerKey: '' }, item);
+      await this._grigDeskOnly({ lease, callback, chatId, ownerKey: '' }, item);
       return;
     }
     const subject = chatSubject(item);
@@ -764,7 +764,7 @@ export class TelegramPultActions {
       return;
     }
     if ((pending.input as Payload | undefined)?.kind === 'external_url') {
-      await this._cockpitOnly({ lease, callback, chatId, ownerKey: '' }, pending as Payload);
+      await this._grigDeskOnly({ lease, callback, chatId, ownerKey: '' }, pending as Payload);
       return;
     }
     if (action === 'deny-comment') {
@@ -863,7 +863,7 @@ export class TelegramPultActions {
           // карточка остаётся текстом, как при отказе ручки.
           await this._edit(
             lease, pending.chatId, msg.replyToMessageId,
-            `⚠ #${pending.taskId}: отклонено, но прогон не поехал: ${res.body?.resumeError || 'причина в кокпите'}`,
+            `⚠ #${pending.taskId}: отклонено, но прогон не поехал: ${res.body?.resumeError || 'причина в GrigDesk'}`,
           );
         } else {
           await this._delete(lease, pending.chatId, msg.replyToMessageId);
@@ -1042,7 +1042,7 @@ export class TelegramPultActions {
       snapshot = await this._statusSnapshot();
     } catch (error) {
       this.log.warn?.({ code: errorCode(error) }, 'telegram-pult: подробный /status не собрался');
-      await this._screenShow(lease, msg.chatId, ownerKey, 'Статус сейчас не собрался — попробуй ещё раз или загляни в кокпит.');
+      await this._screenShow(lease, msg.chatId, ownerKey, 'Статус сейчас не собрался — попробуй ещё раз или загляни в GrigDesk.');
       return;
     }
     // Совместимость с внешним/старым summary-провайдером: строка всё ещё честно

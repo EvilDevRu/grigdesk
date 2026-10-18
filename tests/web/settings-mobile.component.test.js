@@ -88,7 +88,7 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
       return url.endsWith('/qr')
         ? {
             svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
-            text: 'cockpitlink:1:test',
+            text: 'grigdesklink:1:test',
             expiresAt: body.pair ? Date.now() + (expiredQr ? -1000 : 600000) : null,
           }
         : { relay };
@@ -158,7 +158,7 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
   assert.equal(document.body.querySelectorAll('[role="dialog"]').length, 1);
   assert.equal(body.find('#mobile-qr-text').exists(), false);
   await body.find('[aria-controls="mobile-qr-manual"]').trigger('click');
-  assert.equal(body.find('#mobile-qr-text').element.value, 'cockpitlink:1:test');
+  assert.equal(body.find('#mobile-qr-text').element.value, 'grigdesklink:1:test');
   assert.deepEqual(requests.find((item) => item.url.endsWith('/qr')).body, { pair: true });
   await body.find('[data-testid="mobile-copy-qr"]').trigger('click');
   await flushPromises();

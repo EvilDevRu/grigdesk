@@ -38,7 +38,7 @@ test('ACP bridge без capability и чужой метод отвергаютс
   assert.throws(() => acpDeepSeekSettingsRpc(client, {}));
 
   const rpc = acpDeepSeekSettingsRpc(client, {
-    agentCapabilities: { _meta: { 'cockpit.settings': { contract: 1 } } },
+    agentCapabilities: { _meta: { 'grigdesk.settings': { contract: 1 } } },
   });
 
   await assert.rejects(rpc.rpc('session/prompt'));
@@ -159,7 +159,7 @@ test('DSH не создаёт второй редактор effort и thinking, 
   assert.equal(fields.find((field) => field.id === '["llm-deepseek","maxTokens"]').writable, true);
 });
 
-test('namespace llm-pi-ai в describe DeepSeek целиком принадлежит Кокпиту и не пишется', async () => {
+test('namespace llm-pi-ai в describe DeepSeek целиком принадлежит GrigDesk и не пишется', async () => {
   const native = structuredClone(description);
 
   native.namespaces.push({

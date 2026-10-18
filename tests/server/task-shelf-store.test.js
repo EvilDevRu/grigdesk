@@ -45,7 +45,7 @@ function input(overrides = {}) {
 
 async function fixture(t) {
   const { TaskShelfStore } = requireShelfModule();
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-shelf-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-task-shelf-'));
   const filePath = path.join(root, 'task-shelf.json');
   t.after(() => rm(root, { recursive: true, force: true }));
   return { filePath, store: new TaskShelfStore({ filePath }) };

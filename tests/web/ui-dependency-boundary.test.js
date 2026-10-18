@@ -17,7 +17,7 @@ const REPO_ROOT = path.resolve(TEST_DIR, '../..');
 const EMPTY = { version: 1, legacyDeepImports: [] };
 
 function fixtureRepo(t, files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-ui-deps-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-ui-deps-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const [file, source] of Object.entries(files)) {
     const target = path.join(root, file);

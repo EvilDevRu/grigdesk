@@ -37,7 +37,7 @@ const T0 = Date.UTC(2026, 7, 19, 10, 0, 0);
 const ME = {
   id: BOT_ID,
   username: 'example_pult_bot',
-  firstName: 'Кокпит',
+  firstName: 'GrigDesk',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
 };

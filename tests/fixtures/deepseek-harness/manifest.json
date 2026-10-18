@@ -11,7 +11,7 @@
       "path": "dump-config.yml",
       "source": "upstream-live",
       "scenario": "Пустой DSH_HOME, штатный профиль acp, без overlay",
-      "expected": "Штатные строки base и acp-app до замен Cockpit",
+      "expected": "Штатные строки base и acp-app до замен GrigDesk",
       "synthetic": false
     },
     {
@@ -44,14 +44,14 @@
     },
     {
       "path": "hooks/p0-hooks.json",
-      "source": "cockpit-fake",
+      "source": "grigdesk-fake",
       "scenario": "Обезличенная ожидаемая форма hooks.json",
       "expected": "PreToolUse и UserPromptSubmit используют только абсолютные пути",
       "synthetic": true
     },
     {
       "path": "fakeMcpEcho.mts",
-      "source": "cockpit-fake",
+      "source": "grigdesk-fake",
       "scenario": "Безопасный MCP echo для будущего live-spike",
       "expected": "Один инструмент echo и запись только canary-переменной",
       "synthetic": true
@@ -130,7 +130,7 @@
       "path": "raw/f-mcp.ndjson",
       "source": "upstream-live",
       "scenario": "Fake stdio MCP в read-only-сессии",
-      "expected": "mcp__cockpit-echo__echo доступен, env передан, MCP пишет вне sandbox",
+      "expected": "mcp__grigdesk-echo__echo доступен, env передан, MCP пишет вне sandbox",
       "synthetic": false
     },
     {

@@ -148,7 +148,7 @@ export default async function dbModule(
       return await call('openSession', null)(
         String(request.params.id),
         password,
-        String(request.headers['x-cockpit-ssh-session-id'] || ''),
+        String(request.headers['x-grigdesk-ssh-session-id'] || ''),
       );
     } catch (error) {
       return sendError(reply, error);

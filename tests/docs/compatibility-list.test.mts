@@ -39,7 +39,7 @@ test('в списке нет дублей и он отсортирован по 
 
 /**
  * Настоящий счётчик миграции. «Сколько всего .js в дереве» им не является: часть
- * файлов остаётся по контракту с уже установленным кокпитом, и смешивать их с
+ * файлов остаётся по контракту с уже установленным GrigDesk, и смешивать их с
  * непереведённой реализацией значит не видеть ни того, ни другого.
  */
 test('остаток миграции считается без списка совместимости', () => {
@@ -62,10 +62,10 @@ test('остаток миграции считается без списка с�
  * или добавление ему флагов ломает обновление у того, кто ещё не на новом коде.
  */
 test('JS-вход smoke-теста обновления совпадает с тем, что зовёт воркер', async () => {
-  const worker = await readFile(new URL('server/src/workers/cockpit-update-worker.js', REPO), 'utf8');
+  const worker = await readFile(new URL('server/src/workers/grigdesk-update-worker.js', REPO), 'utf8');
   const called = /\['--test', '([^']+)'\]/.exec(worker);
 
-  assert.equal(called?.[1], 'tests/server/cockpit-release.test.js');
+  assert.equal(called?.[1], 'tests/server/grigdesk-release.test.js');
   assert.ok(existsSync(new URL(called[1], REPO)), 'файл smoke-теста обновления должен существовать');
   assert.ok(
     COMPATIBILITY.some((entry) => entry.path === called[1]),

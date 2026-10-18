@@ -129,7 +129,7 @@ test('WF-01 session/геометрия/UA и configureChild устанавлив
   assert.equal(configure < load, true);
   assert.equal(f.calls.indexOf('ua') < load, true);
   assert.deepEqual(f.calls[load], ['load', 'http://127.0.0.1:8140/?window=settings#/settings',
-    'FixtureAgent CockpitSettings/1 CockpitWindow/settings']);
+    'FixtureAgent GrigDeskSettings/1 GrigDeskWindow/settings']);
   assert.equal(f.calls.find((call) => Array.isArray(call) && call[0] === 'shortcut')[1], child);
 
   let prevented = 0;

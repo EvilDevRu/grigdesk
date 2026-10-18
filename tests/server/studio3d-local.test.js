@@ -15,7 +15,7 @@ import { makeGlb } from './helpers/studio3dGlb.js';
  * герой в T-позе, смотрящий вдоль Z.
  */
 async function fixture(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-local-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-local-'));
   const input = path.join(dir, 'hero.glb');
 
   await fs.writeFile(input, makeGlb({

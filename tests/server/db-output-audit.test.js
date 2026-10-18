@@ -100,7 +100,7 @@ test('прерванный поток не выдумывает полное ч�
 });
 
 test('журнал хранит авторазрешённый запрос без значений строк и пароля', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-audit-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-audit-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await load(
     '../../server/src/lib/db/audit.ts',
@@ -142,7 +142,7 @@ test('журнал хранит авторазрешённый запрос бе
 });
 
 test('очистка журнала удаляет записи старше тридцати дней', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-retention-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-retention-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, '2026-07-01.ndjson'), '{"query":"old"}\n');
   const module = await load(

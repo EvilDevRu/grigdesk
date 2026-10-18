@@ -72,7 +72,7 @@ interface VolumeRoute extends QueryRoute {
 type StreamMessage = DockerLogMessage | DockerStatsMessage | DockerExecMessage;
 
 // Потоки живут, пока открыта вкладка, поэтому потолки нужны: без них забытые вкладки
-// накапливают каналы к демону, и первым это заметит не кокпит, а сам docker.
+// накапливают каналы к демону, и первым это заметит не GrigDesk, а сам docker.
 const MAX_LOG_STREAMS = 6;
 const MAX_EXEC_SESSIONS = 4;
 const MAX_STATS_WATCHERS = 4;

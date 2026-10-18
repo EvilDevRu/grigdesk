@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { probeCockpit } from '../../../shared/runtime/cockpitReadiness.ts';
+import { probeGrigDesk } from '../../../shared/runtime/grigDeskReadiness.ts';
 import { splashBounds } from '../../../desktop/src/splashWindow.ts';
 import { freePort, isolatedEnv } from '../../server/helpers/pluginBootFixture.js';
 import { desktopLaunchOptions, isSplashPage, launchDesktopRaw } from './launch.mjs';
@@ -114,12 +114,12 @@ async function createRun(t, { descriptor = true } = {}) {
     root,
     port,
     origin: `http://127.0.0.1:${port}`,
-    fixture: path.join(root, 'cockpit'),
+    fixture: path.join(root, 'grigdesk'),
     dataDir: path.join(root, 'profile'),
     keyFile: path.join(root, 'window-auth/key'),
     fixtureLog: path.join(root, 'fixture.log'),
     gatePid: path.join(root, 'gate.pid'),
-    runtimeFile: path.join(process.env.XDG_DATA_HOME, 'cockpit/desktop/runtime.json'),
+    runtimeFile: path.join(process.env.XDG_DATA_HOME, 'grigdesk/desktop/runtime.json'),
     app: null,
     child: null,
     stderr: '',
@@ -162,13 +162,13 @@ async function createRun(t, { descriptor = true } = {}) {
   run.launchOptions = (extra = {}) => ({
     root,
     dataDir: run.dataDir,
-    args: [desktop, `--cockpit-url=${run.origin}`, '--password-store=gnome-libsecret'],
+    args: [desktop, `--grigdesk-url=${run.origin}`, '--password-store=gnome-libsecret'],
     isolateEnv: true,
     env: {
-      COCKPIT_PORT: String(port),
-      COCKPIT_WINDOW_KEY_PATH: run.keyFile,
-      COCKPIT_REQUIRE_VPN: '0',
-      COCKPIT_E2E_FIXTURE_LOG: run.fixtureLog,
+      GRIGDESK_PORT: String(port),
+      GRIGDESK_WINDOW_KEY_PATH: run.keyFile,
+      GRIGDESK_REQUIRE_VPN: '0',
+      GRIGDESK_E2E_FIXTURE_LOG: run.fixtureLog,
       ...extra,
     },
   });
@@ -242,9 +242,9 @@ async function startExternal(run) {
     env: {
       PATH: '/usr/bin:/bin',
       HOME: process.env.HOME,
-      COCKPIT_PORT: String(run.port),
-      COCKPIT_WINDOW_KEY_PATH: run.keyFile,
-      COCKPIT_E2E_FIXTURE_LOG: run.fixtureLog,
+      GRIGDESK_PORT: String(run.port),
+      GRIGDESK_WINDOW_KEY_PATH: run.keyFile,
+      GRIGDESK_E2E_FIXTURE_LOG: run.fixtureLog,
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -306,12 +306,12 @@ async function waitForMain(run, timeout = 60_000) {
 }
 
 /**
- * Отказ старта: строка «Кокпит: …» в stderr, затем SIGTERM закрывает диалог и даёт код 1.
+ * Отказ старта: строка «GrigDesk: …» в stderr, затем SIGTERM закрывает диалог и даёт код 1.
  * Нативный диалог тест не трогает.
  */
 async function expectFailure(run, pattern) {
   const failed = () => run.stderr.split('\n')
-    .some((line) => line.startsWith('Кокпит: ') && pattern.test(line));
+    .some((line) => line.startsWith('GrigDesk: ') && pattern.test(line));
 
   await waitFor(failed, 100_000, `Нет строки отказа ${pattern} в stderr.`);
 
@@ -381,7 +381,7 @@ test('SE-01: готовый внешний сервер — заставка, г
     assert.equal(code, 0);
     assert.equal(external.exitCode, null);
     assert.equal(await alive(external.pid), true);
-    assert.equal(await probeCockpit(run.origin), 'cockpit');
+    assert.equal(await probeGrigDesk(run.origin), 'grigdesk');
   });
 });
 
@@ -393,9 +393,9 @@ test('SE-02: сервера нет — приложение запускает �
   }
 
   await run.launch({
-    APPDIR: '/tmp/.mount_cockpit-e2e',
-    APPIMAGE: '/tmp/cockpit-e2e.AppImage',
-    LD_LIBRARY_PATH: '/tmp/.mount_cockpit-e2e/usr/lib',
+    APPDIR: '/tmp/.mount_grigdesk-e2e',
+    APPIMAGE: '/tmp/grigdesk-e2e.AppImage',
+    LD_LIBRARY_PATH: '/tmp/.mount_grigdesk-e2e/usr/lib',
     INVOCATION_ID: 'e2e-invocation',
     CLAUDECODE: '1',
   });
@@ -426,7 +426,7 @@ test('SE-02: сервера нет — приложение запускает �
 
     assert.equal(code, 0);
     await waitFor(async () => !await alive(start.pid), 10_000, 'Свой сервер жив после выхода.');
-    assert.equal(await probeCockpit(run.origin), 'refused');
+    assert.equal(await probeGrigDesk(run.origin), 'refused');
     assert.deepEqual((await fixtureEntries(run)).filter((entry) => entry.event === 'exit')
       .map((entry) => entry.code), [0]);
   });
@@ -440,7 +440,7 @@ test('SE-05: закрытие заставки во время ворот — в
       return;
     }
 
-    await run.launch({ COCKPIT_E2E_GATE_HOLD: run.gatePid });
+    await run.launch({ GRIGDESK_E2E_GATE_HOLD: run.gatePid });
     await waitFor(async () => /^\d+$/u.test((await readFile(run.gatePid, 'utf8')).trim()));
 
     const gate = Number((await readFile(run.gatePid, 'utf8')).trim());
@@ -462,7 +462,7 @@ test('SE-06: второй экземпляр во время заставки н
     return;
   }
 
-  const extra = { COCKPIT_E2E_GATE_HOLD: run.gatePid };
+  const extra = { GRIGDESK_E2E_GATE_HOLD: run.gatePid };
 
   await run.launch(extra);
   await waitFor(async () => /^\d+$/u.test((await readFile(run.gatePid, 'utf8')).trim()));
@@ -523,7 +523,7 @@ test('SE-07: после показа перезагрузка и 401 не соз
   assert.equal((await windowsState(run.app)).length, 1);
 });
 
-test('SE-08: чужой HTTP на порту — отказ «это не Кокпит», чужой сервер жив', options, async (t) => {
+test('SE-08: чужой HTTP на порту — отказ «это не GrigDesk», чужой сервер жив', options, async (t) => {
   const run = await createRun(t);
 
   if (!run) {
@@ -538,7 +538,7 @@ test('SE-08: чужой HTTP на порту — отказ «это не Кок
   await new Promise((resolve) => foreign.listen(run.port, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => foreign.close(resolve)));
   await run.launch();
-  await expectFailure(run, /это не Кокпит\./u);
+  await expectFailure(run, /это не GrigDesk\./u);
   assert.equal((await fetch(run.origin + '/api/auth/state')).status, 200);
 });
 
@@ -580,11 +580,11 @@ test('SE-09: закрытие настроек не выключает прил�
   await waitFor(async () => !await alive(pid), 10_000, 'Свой сервер жив после выхода.');
 });
 
-test('SE-10: настоящий Кокпит под приложением (нестабильный)', { timeout: 240_000 }, async (t) => {
-  const webDist = process.env.COCKPIT_E2E_WEB_DIST;
+test('SE-10: настоящий GrigDesk под приложением (нестабильный)', { timeout: 240_000 }, async (t) => {
+  const webDist = process.env.GRIGDESK_E2E_WEB_DIST;
 
   if (!webDist) {
-    t.skip('Не задан COCKPIT_E2E_WEB_DIST со сборкой web.');
+    t.skip('Не задан GRIGDESK_E2E_WEB_DIST со сборкой web.');
 
     return;
   }
@@ -602,14 +602,14 @@ test('SE-10: настоящий Кокпит под приложением (не
   await symlink(path.join(repo, 'server'), path.join(real, 'server'));
   await symlink(path.join(repo, 'shared'), path.join(real, 'shared'));
   await writeFile(path.join(real, 'deploy/require-vpn.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-  await writeFile(envFile, 'COCKPIT_REQUIRE_VPN=0\n');
+  await writeFile(envFile, 'GRIGDESK_REQUIRE_VPN=0\n');
   assert.notEqual(await realpath(envFile), await realpath(path.join(repo, '.env')).catch(() => ''));
   await writeRuntimeDescriptor(run.runtimeFile, real);
   await run.launch({
     ...isolatedEnv(real, run.port),
-    COCKPIT_ENV_FILE: envFile,
-    COCKPIT_WEB_DIST: webDist,
-    COCKPIT_LOG: path.join(run.root, 'cockpit-server.log'),
+    GRIGDESK_ENV_FILE: envFile,
+    GRIGDESK_WEB_DIST: webDist,
+    GRIGDESK_LOG: path.join(run.root, 'grigdesk-server.log'),
   });
 
   const { page } = await waitForMain(run, 200_000);
@@ -623,7 +623,7 @@ test('SE-10: настоящий Кокпит под приложением (не
   await run.app.close();
   assert.equal((await run.exited)[0], 0);
   await waitFor(async () => !await alive(server.pid), 60_000, 'Настоящий сервер жив после выхода.');
-  assert.equal(await probeCockpit(run.origin), 'refused');
+  assert.equal(await probeGrigDesk(run.origin), 'refused');
 });
 
 test('SE-11: перезапуск своего сервера кодом 75 — новое поколение без заставки', options, async (t) => {
@@ -667,7 +667,7 @@ test('SE-12: геометрия и вид заставки', options, async (t) 
     return;
   }
 
-  await run.launch({ COCKPIT_E2E_FIXTURE_DELAY_MS: '6000' });
+  await run.launch({ GRIGDESK_E2E_FIXTURE_DELAY_MS: '6000' });
 
   const { page } = await waitForSplash(run);
   const geometry = await run.app.evaluate(({ BrowserWindow, screen }) => {
@@ -704,9 +704,9 @@ test('SE-12: геометрия и вид заставки', options, async (t) 
   assert.equal(text.color, 'rgb(231, 234, 240)');
   assert.equal(text.background, 'rgb(21, 25, 31)');
 
-  if (process.env.COCKPIT_E2E_ARTIFACTS) {
-    await mkdir(process.env.COCKPIT_E2E_ARTIFACTS, { recursive: true });
-    await page.screenshot({ path: path.join(process.env.COCKPIT_E2E_ARTIFACTS, 'splash.png') });
+  if (process.env.GRIGDESK_E2E_ARTIFACTS) {
+    await mkdir(process.env.GRIGDESK_E2E_ARTIFACTS, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.GRIGDESK_E2E_ARTIFACTS, 'splash.png') });
   }
 
   await waitForMain(run);
@@ -764,7 +764,7 @@ test('SE-15: закрытие заставки до показа не трога
 
   await mkdir(run.dataDir, { recursive: true });
   await writeFile(file, content);
-  await run.launch({ COCKPIT_E2E_GATE_HOLD: run.gatePid });
+  await run.launch({ GRIGDESK_E2E_GATE_HOLD: run.gatePid });
   await waitFor(async () => /^\d+$/u.test((await readFile(run.gatePid, 'utf8')).trim()));
   await closeSplashLikeHuman(run);
 
@@ -775,7 +775,7 @@ test('SE-15: закрытие заставки до показа не трога
 });
 
 // Нестабильный: 95 с свободный порт сценария никто не держит, и под общей нагрузкой (например,
-// параллельный run-all) его может занять чужой HTTP — приложение верно ответит «не Кокпит».
+// параллельный run-all) его может занять чужой HTTP — приложение верно ответит «не GrigDesk».
 test('SE-16: VPN дольше 90 с не роняет старт — окно ждёт ворота (нестабильный)', {
   timeout: 240_000,
 }, async (t) => {
@@ -788,16 +788,16 @@ test('SE-16: VPN дольше 90 с не роняет старт — окно ж
   const open = path.join(run.root, 'vpn-up');
   const started = Date.now();
 
-  await run.launch({ COCKPIT_E2E_GATE_OPEN_FILE: open });
+  await run.launch({ GRIGDESK_E2E_GATE_OPEN_FILE: open });
   await waitForSplash(run);
   await new Promise((resolve) => setTimeout(resolve, 95_000));
   assert.equal(run.child.exitCode, null, `Окно вышло во время ожидания VPN: ${run.stderr.slice(-1500)}`);
-  assert.equal(run.stderr.includes('Кокпит: '), false, run.stderr.slice(-1500));
+  assert.equal(run.stderr.includes('GrigDesk: '), false, run.stderr.slice(-1500));
   assert.deepEqual(await fixtureEntries(run), []);
   await writeFile(open, '');
   await waitForMain(run, 60_000);
   assert.ok(Date.now() - started > 95_000);
-  assert.equal(run.stderr.includes('Кокпит: '), false, run.stderr.slice(-1500));
+  assert.equal(run.stderr.includes('GrigDesk: '), false, run.stderr.slice(-1500));
   await run.app.close();
   assert.equal((await run.exited)[0], 0);
 });

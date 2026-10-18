@@ -36,7 +36,7 @@ export type ProviderErrorKind =
   | 'network'
   | 'unknown';
 
-// Ошибка для человека: message написан по-русски кокпитом, detail — текст исполнителя.
+// Ошибка для человека: message написан по-русски GrigDesk, detail — текст исполнителя.
 export interface ProviderError {
   kind: ProviderErrorKind;
   code: number | null;

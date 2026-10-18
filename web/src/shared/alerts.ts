@@ -41,7 +41,7 @@ export function setAlertTargetOpener(open: ((target: AlertTarget) => void) | nul
 }
 
 /**
- * Видимость без фокуса не означает, что человек смотрит на кокпит.
+ * Видимость без фокуса не означает, что человек смотрит на GrigDesk.
  * В среде без метода hasFocus достаточно видимого документа.
  */
 export function userIsHere(): boolean {
@@ -165,7 +165,7 @@ export function markAlertHistorySeen(key?: string): void {
 }
 
 /**
- * История держит текст переписки, поэтому стирается целиком: при выходе из кокпита
+ * История держит текст переписки, поэтому стирается целиком: при выходе из GrigDesk
  * и по кнопке «Очистить» в колокольчике.
  */
 export function clearAlertHistory(): void {

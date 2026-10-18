@@ -7,7 +7,7 @@ import type {
   PluginInstalledVersion,
   PluginVersionRef,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { parseStableTag } from '../cockpitRelease.ts';
+import { parseStableTag } from '../grigDeskRelease.ts';
 import { installError, PluginInstallError } from './errors.ts';
 
 import { normalizeGitUrl } from './gitUrl.ts';
@@ -81,7 +81,7 @@ export class GitPluginSource implements PluginSource {
    */
   async listVersions(raw: string, signal?: AbortSignal): Promise<PluginVersionRef[]> {
     const url = this.normalizeUrl(raw);
-    const cwd = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-git-list-'));
+    const cwd = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-git-list-'));
 
     try {
       const result = await this.run('/usr/bin/git', [...GIT_POLICY_ARGS, 'ls-remote', '--tags', '--', url], {

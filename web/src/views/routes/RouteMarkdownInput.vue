@@ -30,7 +30,7 @@ onMounted(async () => {
   model = monaco.editor.createModel(props.modelValue, props.language);
   editor = monaco.editor.create(host.value, {
     model,
-    theme: 'cockpit-dark',
+    theme: 'grigdesk-dark',
     automaticLayout: true,
     fontSize: 13,
     minimap: { enabled: false },

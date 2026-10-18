@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Изолированная приёмка настоящих подсказок в Chromium.
-// Собственный Vite не обращается к серверу кокпита и закрывается в finally.
+// Собственный Vite не обращается к серверу GrigDesk и закрывается в finally.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';

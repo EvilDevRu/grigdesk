@@ -1411,7 +1411,7 @@ class Jobs {
 
   /**
    * History лишь предлагает кандидатов того же аккаунта/времени/типа.
-   * Даже единственное совпадение не доказывает корреляцию с Cockpit POST.
+   * Даже единственное совпадение не доказывает корреляцию с GrigDesk POST.
    */
   private async findUnknown(records: IntentRecord[]): Promise<void> {
     for (const provider of this.providers.values()) {

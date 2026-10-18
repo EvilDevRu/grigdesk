@@ -183,7 +183,7 @@ export async function runSeed(input: RunSeedInput): Promise<SeedOutcome> {
         // Окружение — короткий явный список. Ключи, токены и адреса поставщиков
         // хуку не нужны, а унаследованное окружение сервера содержит их все.
         env: {
-          COCKPIT_HOME: runtimeConfig.dataHome,
+          GRIGDESK_HOME: runtimeConfig.dataHome,
           PATH: process.env.PATH ?? '',
           HOME: process.env.HOME ?? '',
           SHOWCASE_TASK: task,
@@ -230,7 +230,7 @@ export async function runSeed(input: RunSeedInput): Promise<SeedOutcome> {
 }
 
 /**
- * Ревизия данных из вывода хука. Профиль объявляет её строкой, чтобы кокпит мог
+ * Ревизия данных из вывода хука. Профиль объявляет её строкой, чтобы GrigDesk мог
  * отличить одну подготовку от другой; без неё раздел ставит свою и не обещает,
  * что понял состояние данных.
  */

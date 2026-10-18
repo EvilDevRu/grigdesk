@@ -31,14 +31,14 @@ export interface FactoryLaunchPaths {
 }
 
 // Окружение процесса фабрики. Оно передаётся и обычному detached child, и
-// `systemd-run --setenv`: transient scope не обязан наследовать env Cockpit.
+// `systemd-run --setenv`: transient scope не обязан наследовать env GrigDesk.
 export function factoryLaunchEnv(
   config: FactoryLaunchPaths,
   extra: Record<string, string> = {},
 ): Record<string, string> {
   return {
     ...extra,
-    COCKPIT_HOME: config.dataHome ?? runtimeConfig.dataHome,
+    GRIGDESK_HOME: config.dataHome ?? runtimeConfig.dataHome,
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_STATE: config.stateDir,

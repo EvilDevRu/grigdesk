@@ -114,7 +114,7 @@ test('узел конвейера блокирует прямой SSH даже �
   ], {
     PATH: process.env.PATH,
     HOME: f.root,
-    COCKPIT_PROVIDER_PREFS_PATH: f.prefsPath,
+    GRIGDESK_PROVIDER_PREFS_PATH: f.prefsPath,
     FACTORY_RUN_TASK: '123',
     FACTORY_RUN_STAGE: 'BUILD',
     FACTORY_RUN_ID: 'ssh-policy',
@@ -178,8 +178,8 @@ test('настоящий Factory wrapper читает общие overrides и м
     ], {
       PATH: process.env.PATH,
       HOME: f.root,
-      DEEPSEEK_API_KEY: 'cockpit-loopback-only',
-      COCKPIT_PROVIDER_PREFS_PATH: f.prefsPath,
+      DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
+      GRIGDESK_PROVIDER_PREFS_PATH: f.prefsPath,
       FACTORY_RUN_TASK: '123',
       FACTORY_RUN_STAGE: 'BUILD',
       FACTORY_RUN_ID: `fixture-${index}`,
@@ -221,7 +221,7 @@ test('настоящий Factory wrapper читает общие overrides и м
   assert.notEqual(mock.payloads[2].max_tokens, 128);
   assert.equal(events.filter((event) => event.event === 'result').length, 3);
   assert.equal(JSON.stringify(events).includes(f.prefsPath), false);
-  assert.equal(JSON.stringify(events).includes('cockpit-loopback-only'), false);
+  assert.equal(JSON.stringify(events).includes('grigdesk-loopback-only'), false);
 });
 
 test('Factory только ENOENT считает отсутствием prefs; порча и unreadable запрещают launch', async (t) => {
@@ -261,8 +261,8 @@ test('настоящий compiled Factory завершает disposable узел
     FACTORY_STATE: state,
     STATE_DIR: state,
     FACTORY_TESTING: '1',
-    DEEPSEEK_API_KEY: 'cockpit-loopback-only',
-    COCKPIT_PROVIDER_PREFS_PATH: f.prefsPath,
+    DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
+    GRIGDESK_PROVIDER_PREFS_PATH: f.prefsPath,
     FACTORY_RUN_TASK: '123',
     FACTORY_RUN_STAGE: 'BUILD',
     FACTORY_RUN_ID: 'compiled-status',
@@ -352,29 +352,29 @@ test('настоящий compiled Factory завершает disposable узел
 
 test('Factory env закрепляет host prefs, Node и runtime поверх extra env', () => {
   const config = {
-    rootDir: '/opt/cockpit',
-    factoryHome: '/opt/cockpit/engine',
+    rootDir: '/opt/grigdesk',
+    factoryHome: '/opt/grigdesk/engine',
     profilesDir: '/opt/profiles',
     factoryConfigRoot: '/opt/config',
     prefsPath: '/private/host-prefs.json',
     deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: '/opt/cockpit/server/runtime/deepseek',
+    deepseekGenerationRoot: '/opt/grigdesk/server/runtime/deepseek',
   };
   const env = routeLaunchEnv(config, {
-    COCKPIT_PROVIDER_PREFS_PATH: '/project/fake-prefs',
-    COCKPIT_DEEPSEEK_NODE_BIN: '/project/node',
-    COCKPIT_DEEPSEEK_BIN: '/project/dsh',
-    COCKPIT_DEEPSEEK_ARTIFACT_DIR: '/project/generation',
-    COCKPIT_DEEPSEEK_RUNTIME_MODE: 'installed',
-    COCKPIT_DEEPSEEK_GENERATION_ROOT: '/project/runtime',
+    GRIGDESK_PROVIDER_PREFS_PATH: '/project/fake-prefs',
+    GRIGDESK_DEEPSEEK_NODE_BIN: '/project/node',
+    GRIGDESK_DEEPSEEK_BIN: '/project/dsh',
+    GRIGDESK_DEEPSEEK_ARTIFACT_DIR: '/project/generation',
+    GRIGDESK_DEEPSEEK_RUNTIME_MODE: 'installed',
+    GRIGDESK_DEEPSEEK_GENERATION_ROOT: '/project/runtime',
   });
 
-  assert.equal(env.COCKPIT_PROVIDER_PREFS_PATH, config.prefsPath);
-  assert.equal(env.COCKPIT_DEEPSEEK_NODE_BIN, process.execPath);
-  assert.equal(env.COCKPIT_DEEPSEEK_BIN, '');
-  assert.equal(env.COCKPIT_DEEPSEEK_ARTIFACT_DIR, '');
-  assert.equal(env.COCKPIT_DEEPSEEK_RUNTIME_MODE, 'embedded');
-  assert.equal(env.COCKPIT_DEEPSEEK_GENERATION_ROOT, config.deepseekGenerationRoot);
+  assert.equal(env.GRIGDESK_PROVIDER_PREFS_PATH, config.prefsPath);
+  assert.equal(env.GRIGDESK_DEEPSEEK_NODE_BIN, process.execPath);
+  assert.equal(env.GRIGDESK_DEEPSEEK_BIN, '');
+  assert.equal(env.GRIGDESK_DEEPSEEK_ARTIFACT_DIR, '');
+  assert.equal(env.GRIGDESK_DEEPSEEK_RUNTIME_MODE, 'embedded');
+  assert.equal(env.GRIGDESK_DEEPSEEK_GENERATION_ROOT, config.deepseekGenerationRoot);
 });
 
 test('external override без ACP bridge не игнорирует активную общую настройку', async (t) => {
@@ -395,8 +395,8 @@ test('external override без ACP bridge не игнорирует активн
     '--runtime-home', path.join(f.root, 'home'), '--prompt-file', prompt,
     '--model', '["deepseek-official","deepseek-v4-flash"]', '--mode', 'read-only',
   ], {
-    COCKPIT_DEEPSEEK_BIN: bin,
-    COCKPIT_PROVIDER_PREFS_PATH: f.prefsPath,
+    GRIGDESK_DEEPSEEK_BIN: bin,
+    GRIGDESK_PROVIDER_PREFS_PATH: f.prefsPath,
     FACTORY_RUN_TASK: '1',
     FACTORY_RUN_STAGE: 'BUILD',
     FACTORY_RUN_ID: 'external',

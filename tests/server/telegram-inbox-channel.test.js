@@ -59,7 +59,7 @@ function position(snapshot, seq, over = {}) {
 }
 
 const defaultRule = (over = {}) => normalizeRules([{
-  project: 'cockpit',
+  project: 'grigdesk',
   chatId: CHAT,
   threadId: THREAD,
   kind: 'bug',
@@ -266,7 +266,7 @@ test('authorized native row становится strict batch с topic policy sc
       id: String(CHAT), title: 'Команда Альфа · разработка', threadId: String(THREAD),
     });
     assert.deepEqual(batch.messages.map((message) => message.id), ['100']);
-    assert.equal(batch.policy.project, 'cockpit');
+    assert.equal(batch.policy.project, 'grigdesk');
     assert.equal(batch.policy.kind, 'bug');
     assert.deepEqual(batch.policy.b24, { responsibleId: 5, groupId: 42, priority: 2 });
     assert.deepEqual(batch.policy.autoTask, { enabled: false, minConfidence: 0.7, maxPerDay: 10 });
@@ -602,7 +602,7 @@ test('materialize соблюдает Bot API limit, продолжает пос�
     assert.equal(materialized.skipped.length, 3);
     assert.equal(JSON.stringify(materialized).includes(TOKEN), false);
     // Причина — машинный код, а не фраза: свободный текст ошибки провайдера
-    // может нести токен, а человеческую формулировку собирает сам кокпит.
+    // может нести токен, а человеческую формулировку собирает сам GrigDesk.
     assert.equal(materialized.skipped[0].reason, 'file_too_large');
     assert.equal(materialized.skipped[0].limitBytes, FILE_LIMIT);
     assert.ok(Number.isSafeInteger(materialized.skipped[0].sizeBytes));

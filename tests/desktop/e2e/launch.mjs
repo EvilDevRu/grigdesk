@@ -54,7 +54,7 @@ export function desktopLaunchOptions({
     throw new Error('Root проверки должен быть абсолютным.');
   }
 
-  for (const value of [dataDir, extra.COCKPIT_WINDOW_KEY_PATH]) {
+  for (const value of [dataDir, extra.GRIGDESK_WINDOW_KEY_PATH]) {
     if (typeof value !== 'string' || !path.isAbsolute(value)) {
       throw new Error('Профиль и путь ключа должны быть абсолютными.');
     }
@@ -74,7 +74,7 @@ export function desktopLaunchOptions({
     }
   }
 
-  env.COCKPIT_DESKTOP_DATA_DIR = dataDir;
+  env.GRIGDESK_DESKTOP_DATA_DIR = dataDir;
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.NODE_OPTIONS;
 
@@ -88,14 +88,14 @@ export function desktopLaunchOptions({
 }
 
 /**
- * Origin окна берётся из --cockpit-url; без аргумента подходит любая HTTP-страница.
+ * Origin окна берётся из --grigdesk-url; без аргумента подходит любая HTTP-страница.
  * Ошибка разбора адреса не прерывает ожидание, а сужает его до HTTP.
  */
 function selectedOrigin(args = []) {
-  const argument = args.find((value) => value.startsWith('--cockpit-url='));
+  const argument = args.find((value) => value.startsWith('--grigdesk-url='));
 
   try {
-    return argument ? new URL(argument.slice('--cockpit-url='.length)).origin : null;
+    return argument ? new URL(argument.slice('--grigdesk-url='.length)).origin : null;
   } catch {
     return null;
   }

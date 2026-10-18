@@ -71,7 +71,7 @@ function timerSnapshot(card) {
  */
 async function mountScenario(t) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   const browserGlobals = {
     window: browser,
     document: browser.document,

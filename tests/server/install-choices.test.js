@@ -15,14 +15,14 @@ const PROBE = [
   'set -euo pipefail',
   'source "$1"',
   'shift',
-  'cockpit_install_parse_args "$@"',
-  'cockpit_install_choice INSTALL_AUTOSTART "Автозапуск?" 1',
-  'cockpit_install_choice INSTALL_SHORTCUT "Ярлык?" 0',
+  'grigdesk_install_parse_args "$@"',
+  'grigdesk_install_choice INSTALL_AUTOSTART "Автозапуск?" 1',
+  'grigdesk_install_choice INSTALL_SHORTCUT "Ярлык?" 0',
   'printf "autostart=%s shortcut=%s passthru=%s\\n" \\',
   '  "$INSTALL_AUTOSTART" "$INSTALL_SHORTCUT" "${INSTALL_PASSTHRU[*]-}"',
 ].join('\n');
 
-const probeDir = mkdtempSync(path.join(os.tmpdir(), 'cockpit-install-choices-'));
+const probeDir = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-install-choices-'));
 const probeFile = path.join(probeDir, 'probe.sh');
 
 writeFileSync(probeFile, PROBE);

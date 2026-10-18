@@ -13,7 +13,7 @@ import { createMobileSeed, requestMobile, advanceFactory } from '../helpers/mobi
 const command = (seed, path, body, key) =>
   requestMobile(seed, path, 'POST', body, {
     'idempotency-key': key,
-    'x-cockpit-operation-created-at': String(Date.now()),
+    'x-grigdesk-operation-created-at': String(Date.now()),
   });
 
 /**

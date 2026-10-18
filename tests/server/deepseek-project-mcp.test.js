@@ -13,7 +13,7 @@ import deepseek from '../../server/src/lib/executors/deepseek.ts';
 
 
 async function tempProject(t, { git = false } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-mcp-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-mcp-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   if (git) await fs.mkdir(path.join(root, '.git'));
   const bin = path.join(root, 'bin');
@@ -52,7 +52,7 @@ test('parseProjectMcpServers: плохие записи пропускаются
       http: { type: 'http', url: 'http://127.0.0.1:9/mcp' },
       missing: { command: 'no-such-binary-anywhere' },
       off: { command: path.join(bin, 'motion-mcp'), disabled: true },
-      'cockpit-work': { command: path.join(bin, 'motion-mcp') },
+      'grigdesk-work': { command: path.join(bin, 'motion-mcp') },
       badArgs: { command: path.join(bin, 'motion-mcp'), args: [1] },
       badEnv: { command: path.join(bin, 'motion-mcp'), env: { 'A=B': 'x' } },
       noCommand: { args: [] },
@@ -62,7 +62,7 @@ test('parseProjectMcpServers: плохие записи пропускаются
   assert.equal(warnings.length, 6);
   assert.match(warnings.join('\n'), /http: DeepSeek V1 получает только stdio/);
   assert.match(warnings.join('\n'), /missing: исполняемый файл/);
-  assert.match(warnings.join('\n'), /cockpit-work: имя пустое или зарезервировано/);
+  assert.match(warnings.join('\n'), /grigdesk-work: имя пустое или зарезервировано/);
   assert.match(warnings.join('\n'), /badArgs: args/);
   assert.match(warnings.join('\n'), /badEnv: переменная A=B/);
   assert.match(warnings.join('\n'), /noCommand: нет command/);
@@ -102,15 +102,15 @@ test('readProjectMcpServers: файл ищется у корня репозит�
   assert.match(broken.warnings[0], /некорректный JSON/);
 });
 
-test('mergeMcpServers: cockpit-work первый, одноимённые проектные записи не дублируются', () => {
-  const work = { name: 'cockpit-work', command: '/usr/bin/node', args: [], env: [] };
+test('mergeMcpServers: grigdesk-work первый, одноимённые проектные записи не дублируются', () => {
+  const work = { name: 'grigdesk-work', command: '/usr/bin/node', args: [], env: [] };
   const merged = mergeMcpServers([work], [
-    { name: 'cockpit-work', command: '/tmp/fake', args: [], env: [] },
+    { name: 'grigdesk-work', command: '/tmp/fake', args: [], env: [] },
     { name: 'motion', command: '/tmp/motion', args: [], env: [] },
     { name: 'motion', command: '/tmp/motion-2', args: [], env: [] },
   ]);
   assert.deepEqual(merged.map((server) => `${server.name}:${server.command}`), [
-    'cockpit-work:/usr/bin/node',
+    'grigdesk-work:/usr/bin/node',
     'motion:/tmp/motion',
   ]);
 });
@@ -126,7 +126,7 @@ test('адаптер DeepSeek добавляет проектные MCP к сл�
     },
   }));
   const warnings = [];
-  const work = { name: 'cockpit-work', command: process.execPath, args: ['work.js'], env: [] };
+  const work = { name: 'grigdesk-work', command: process.execPath, args: ['work.js'], env: [] };
   let overlay = '';
   await assert.rejects(deepseek.run({
     config: { deepseekRuntimeHome: path.join(root, 'runtime'), deepseekBin: path.join(root, 'fake-dsh') },
@@ -145,7 +145,7 @@ test('адаптер DeepSeek добавляет проектные MCP к сл�
     },
   }), /overlay captured/u);
 
-  assert.match(overlay, /serverName: "cockpit-work"/u);
+  assert.match(overlay, /serverName: "grigdesk-work"/u);
   assert.match(overlay, /serverName: "motion"/u);
   assert.match(overlay, /args:\s*\n\s*- "--stdio"/u);
   assert.match(overlay, /KIMODO_URL: "http:\/\/127\.0\.0\.1:1"/u);

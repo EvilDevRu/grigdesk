@@ -20,7 +20,7 @@ export function createWorkMcpHandler({ workTools }) {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'cockpit-work', version: '1.0.0' },
+          serverInfo: { name: 'grigdesk-work', version: '1.0.0' },
         },
       };
     }

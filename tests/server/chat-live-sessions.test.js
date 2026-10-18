@@ -74,7 +74,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 `;
 
 async function fakeBin() {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-live-session-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-session-'));
   const file = path.join(dir, 'fake-cli.mjs');
   await writeFile(file, FAKE_CLI);
   return { dir, file };
@@ -411,14 +411,14 @@ test('модуль чата гейтит живую сессию настрой�
 
 // ── Список живых процессов и их гашение человеком ─────────────────────────────
 // Свободная сессия в `ps` неотличима от разового запуска, поэтому увидеть её и
-// погасить можно только из кокпита. Проверяем сквозняком: ход поднимает процесс,
+// погасить можно только из GrigDesk. Проверяем сквозняком: ход поднимает процесс,
 // список его показывает, кнопка гасит, а идущий ход не гасится без подтверждения.
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
 async function apiFixture(t, { liveEnabled = true } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-live-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const events = [];
@@ -1070,7 +1070,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
  * Возвращает сессию транспорта, журналы hooks и путь trace для users().
  */
 async function openSignalFake(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-bg-signal-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-bg-signal-'));
   const file = path.join(dir, 'cli.mjs');
   const trace = path.join(dir, 'trace.jsonl');
   const background = [];
@@ -1515,7 +1515,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
  * `wakeInit` решает, начинается ли пробуждение с system/init.
  */
 async function openWakeFake(t, { wakeInit }) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-bg-wake-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-bg-wake-'));
   const file = path.join(dir, 'cli.mjs');
   const trace = path.join(dir, 'trace.jsonl');
   const background = [];

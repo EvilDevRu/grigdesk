@@ -234,7 +234,7 @@ for (const [name, executor, config] of [
     const text = settings.find((setting) => setting.id === 'blockDirectSsh')?.confirm?.off?.text;
 
     assert.equal([
-      'Агент сможет запускать прямые SSH-клиенты с правами процесса Cockpit.',
+      'Агент сможет запускать прямые SSH-клиенты с правами процесса GrigDesk.',
       'Режим прав Bash не заменяет этот запрет.',
       'Подтверждений и журнала SSH-инструмента не будет.',
     ].every((consequence) => String(text || '').includes(consequence)), true);

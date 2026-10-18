@@ -34,7 +34,7 @@ const PROVIDERS = [
 
 async function installBrowser(t) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'https://cockpit.test/#/chats' });
+  const browser = new Window({ url: 'https://grigdesk.test/#/chats' });
 
   for (const [key, value] of Object.entries({
     window: browser,

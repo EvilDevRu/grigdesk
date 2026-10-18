@@ -27,7 +27,7 @@ const navigatorIcon = () => h('svg', {
  */
 function storedNavigatorWidth() {
   try {
-    const value = Number(localStorage.getItem('cockpit-code-dock-nav-width'));
+    const value = Number(localStorage.getItem('grigdesk-code-dock-nav-width'));
 
     return Number.isFinite(value) && value > 0 ? Math.min(420, Math.max(220, value)) : 320;
   } catch {

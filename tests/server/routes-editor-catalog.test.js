@@ -16,7 +16,7 @@ const Fastify = requireFromServer('fastify');
 const BASE = '/api/routes/sample/drafts';
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-editor-catalog-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-catalog-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   const profileDir = path.join(profilesDir, 'sample');

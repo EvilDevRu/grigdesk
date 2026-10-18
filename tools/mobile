@@ -9,18 +9,18 @@ source "$MOBILE_ROOT/deploy/lib/runtime-env.sh"
 # Перенос нужен только командам, которые пишут: остановить и проверить DevLink можно и до него.
 if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release
   || ( "$MOBILE_COMMAND" == devlink && "${2:-status}" == start ) ]]; then
-  cockpit_require_migrated "$MOBILE_ROOT"
+  grigdesk_require_migrated "$MOBILE_ROOT"
 fi
 if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release || "$MOBILE_COMMAND" == devlink ]]; then
-  MOBILE_DATA_HOME=$(cockpit_data_home) || exit 1
-  MOBILE_APK_DIR="${COCKPIT_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/state/mobile-apk}"
+  MOBILE_DATA_HOME=$(grigdesk_data_home) || exit 1
+  MOBILE_APK_DIR="${GRIGDESK_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/state/mobile-apk}"
 fi
 MOBILE_LOCK="$MOBILE_ROOT/mobile/toolchain.lock.json"
-MOBILE_DOWNLOADS="${COCKPIT_MOBILE_DOWNLOADS:-$MOBILE_ROOT/.state/mobile-downloads}"
-export JAVA_HOME="${COCKPIT_ANDROID_JDK:-$HOME/.local/share/cockpit-android/jdk-21}"
-export ANDROID_HOME="${COCKPIT_ANDROID_HOME:-$HOME/Android/Sdk}"
-export ANDROID_USER_HOME="${COCKPIT_ANDROID_USER_HOME:-$MOBILE_ROOT/.state/android-user}"
-export GRADLE_USER_HOME="${COCKPIT_ANDROID_GRADLE_HOME:-$MOBILE_ROOT/.state/android-gradle}"
+MOBILE_DOWNLOADS="${GRIGDESK_MOBILE_DOWNLOADS:-$MOBILE_ROOT/.state/mobile-downloads}"
+export JAVA_HOME="${GRIGDESK_ANDROID_JDK:-$MOBILE_ROOT/.state/android-jdk-21}"
+export ANDROID_HOME="${GRIGDESK_ANDROID_HOME:-$MOBILE_ROOT/.state/android-sdk}"
+export ANDROID_USER_HOME="${GRIGDESK_ANDROID_USER_HOME:-$MOBILE_ROOT/.state/android-user}"
+export GRADLE_USER_HOME="${GRIGDESK_ANDROID_GRADLE_HOME:-$MOBILE_ROOT/.state/android-gradle}"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 
 # JSON читается как данные: содержимое lock не исполняется shell-ом.
@@ -158,7 +158,7 @@ gradle_archive() {
   cp "$MOBILE_DOWNLOADS/gradle-8.14.3-bin.zip" "$directory/gradle-8.14.3-bin.zip"
 }
 
-# Проверки запускают только тестовые сервисы; пользовательский Кокпит не перезапускается.
+# Проверки запускают только тестовые сервисы; пользовательский GrigDesk не перезапускается.
 # Android-тесты и сборка используют отдельный Gradle cache этой рабочей папки.
 check() {
   doctor
@@ -188,15 +188,15 @@ build() {
   )
   mkdir -p "$MOBILE_APK_DIR"
   cp "$MOBILE_ROOT/mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
-    "$MOBILE_APK_DIR/cockpit-mobile-debug.apk"
+    "$MOBILE_APK_DIR/grigdesk-mobile-debug.apk"
 }
 
 # DevLink — браузерный телефон для разработки поверх настоящего посредника и мозга.
-# Отдельный user-юнит переживает ход агента и перезапуск Кокпита; входы только на 127.0.0.1.
+# Отдельный user-юнит переживает ход агента и перезапуск GrigDesk; входы только на 127.0.0.1.
 devlink() {
-  local action="${1:-status}" unit=cockpit-mobile-devlink offset deadline
-  local log="${COCKPIT_MOBILE_DEVLINK_LOG:-$MOBILE_APK_DIR/devlink.log}"
-  local port="${COCKPIT_MOBILE_DEVLINK_PORT:-8150}"
+  local action="${1:-status}" unit=grigdesk-mobile-devlink offset deadline
+  local log="${GRIGDESK_MOBILE_DEVLINK_LOG:-$MOBILE_APK_DIR/devlink.log}"
+  local port="${GRIGDESK_MOBILE_DEVLINK_PORT:-8150}"
 
   case "$action" in
     start)
@@ -212,8 +212,8 @@ devlink() {
       systemd-run --user --quiet --unit="$unit" -p KillMode=control-group \
         -p "StandardOutput=append:$log" -p "StandardError=append:$log" \
         --working-directory="$MOBILE_ROOT" --setenv=PATH="$PATH" --setenv=HOME="$HOME" \
-        --setenv=COCKPIT_MOBILE_DEVLINK_PORT="$port" --setenv=COCKPIT_HOME="$MOBILE_DATA_HOME" \
-        ${COCKPIT_MOBILE_DEVLINK_DIR:+--setenv=COCKPIT_MOBILE_DEVLINK_DIR="$COCKPIT_MOBILE_DEVLINK_DIR"} \
+        --setenv=GRIGDESK_MOBILE_DEVLINK_PORT="$port" --setenv=GRIGDESK_HOME="$MOBILE_DATA_HOME" \
+        ${GRIGDESK_MOBILE_DEVLINK_DIR:+--setenv=GRIGDESK_MOBILE_DEVLINK_DIR="$GRIGDESK_MOBILE_DEVLINK_DIR"} \
         node "$MOBILE_ROOT/tools/mobile-phone/devlink.mts"
       deadline=$((SECONDS + 180))
 

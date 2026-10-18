@@ -85,7 +85,7 @@ test('повреждённая ревизия каталога остаётся 
     integrity: 'ROUTES_V2_BUNDLE_CORRUPT',
   };
   const parsed = parseRouteRevisions({
-    profile: 'cockpit',
+    profile: 'grigdesk',
     publishSupported: true,
     currentCatalogHash: null,
     revisions: [broken],
@@ -93,7 +93,7 @@ test('повреждённая ревизия каталога остаётся 
 
   assert.deepEqual(parsed.revisions, [broken]);
   assert.throws(() => parseRouteRevisions({
-    profile: 'cockpit',
+    profile: 'grigdesk',
     publishSupported: true,
     currentCatalogHash: null,
     revisions: [{ ...broken, isCurrent: 'да' }],
@@ -102,13 +102,13 @@ test('повреждённая ревизия каталога остаётся 
 
 test('вывод публикатора остаётся данными профиля, а раздел читает из него два поля', () => {
   const response = parseRoutePublish({
-    profile: 'cockpit',
+    profile: 'grigdesk',
     mode: 'publish',
     result: { catalogCreated: false, catalogHash: 'b'.repeat(64), своё: 1 },
     currentCatalogHash: null,
   });
 
-  // Формат вывода принадлежит скрипту профиля: кокпит его не обрезает.
+  // Формат вывода принадлежит скрипту профиля: GrigDesk его не обрезает.
   assert.equal(response.result['своё'], 1);
   assert.deepEqual(publishSummary(response.result), {
     catalogCreated: false,
@@ -117,7 +117,7 @@ test('вывод публикатора остаётся данными проф
   // «Неизвестно» и «ревизия не изменилась» — разные ответы человеку.
   assert.deepEqual(publishSummary({}), { catalogCreated: null, catalogHash: null });
   assert.throws(() => parseRoutePublish({
-    profile: 'cockpit',
+    profile: 'grigdesk',
     mode: 'deploy',
     result: {},
     currentCatalogHash: null,
@@ -134,15 +134,15 @@ test('схема конвейера без узлов и рёбер отверг
 
 test('документ описывается ссылкой внутри корня, а не путём на диске', () => {
   const resolved = {
-    ref: { source: 'cockpit', path: 'docs/readme.md' },
+    ref: { source: 'grigdesk', path: 'docs/readme.md' },
     name: 'readme.md',
     format: 'md',
-    source: { id: 'cockpit', label: 'Кокпит' },
+    source: { id: 'grigdesk', label: 'GrigDesk' },
   };
 
   assert.deepEqual(parseResolvedDocument({ ...resolved, absolute: '/etc/passwd' }), resolved);
   assert.throws(
-    () => parseResolvedDocument({ ...resolved, ref: { source: 'cockpit' } }),
+    () => parseResolvedDocument({ ...resolved, ref: { source: 'grigdesk' } }),
     DocumentsContractError,
   );
 });

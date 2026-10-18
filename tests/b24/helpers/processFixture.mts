@@ -81,25 +81,25 @@ export async function runProcess(
 
 /**
  * Синтетическая домашняя папка под TMPDIR сторожа; удаление не требуется вне сторожа.
- * Возвращает HOME и COCKPIT_HOME, которые передаются ребёнку явно.
+ * Возвращает HOME и GRIGDESK_HOME, которые передаются ребёнку явно.
  */
 export async function syntheticHome(): Promise<{ home: string; data: string }> {
   const home = await mkdtemp(path.join(os.tmpdir(), 'b24-home-'));
 
   return {
     home,
-    data: path.join(home, '.cockpit'),
+    data: path.join(home, '.grigdesk'),
   };
 }
 
 /**
- * Окружение ребёнка по белому списку: без COCKPIT_TOKEN, прокси и NODE_OPTIONS хоста.
+ * Окружение ребёнка по белому списку: без GRIGDESK_TOKEN, прокси и NODE_OPTIONS хоста.
  * Пустые overrides сохраняются как заданные ключи.
  */
 export function childEnv(home: string, overrides: Record<string, string> = {}): Record<string, string> {
   return {
     HOME: home,
-    COCKPIT_HOME: path.join(home, '.cockpit'),
+    GRIGDESK_HOME: path.join(home, '.grigdesk'),
     PATH: '/usr/bin:/bin',
     ...overrides,
   };

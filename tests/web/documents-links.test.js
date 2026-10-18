@@ -25,10 +25,10 @@ test('DOC-WEB-01: абсолютная MD/TXT-ссылка превращает�
 test('DOC-WEB-04: внутри viewer ссылка остаётся стабильным source/path ref', () => {
   assert.equal(
     documentRefRouteHref('../notes/todo.md#later', {
-      source: 'cockpit',
+      source: 'grigdesk',
       basePath: 'docs/spec/current.md',
     }),
-    '#/documents?source=cockpit&path=docs%2Fnotes%2Ftodo.md&anchor=later',
+    '#/documents?source=grigdesk&path=docs%2Fnotes%2Ftodo.md&anchor=later',
   );
 });
 
@@ -43,11 +43,11 @@ test('DOC-WEB-05: Markdown renderer применяет link resolver, но по�
 });
 
 test('DOC-WEB-06: обычный клик по route документа предназначен для модального viewer-а', () => {
-  const href = '#/documents?source=cockpit&path=README.md&line=12';
+  const href = '#/documents?source=grigdesk&path=README.md&line=12';
   assert.deepEqual(parseDocumentRouteHref(href), {
     open: '',
     scope: '',
-    source: 'cockpit',
+    source: 'grigdesk',
     path: 'README.md',
     line: 12,
     anchor: '',
@@ -62,15 +62,15 @@ test('DOC-WEB-06: обычный клик по route документа пред
 
 test('DOC-WEB-07: относительная картинка остаётся внутри source документа', () => {
   assert.equal(
-    documentRefAssetHref('../assets/logo.png', { source: 'cockpit', basePath: 'docs/start/README.md' }),
-    '/api/documents/asset?source=cockpit&path=docs%2Fassets%2Flogo.png',
+    documentRefAssetHref('../assets/logo.png', { source: 'grigdesk', basePath: 'docs/start/README.md' }),
+    '/api/documents/asset?source=grigdesk&path=docs%2Fassets%2Flogo.png',
   );
   assert.equal(
-    documentRefAssetHref('../../../outside.png', { source: 'cockpit', basePath: 'README.md' }),
+    documentRefAssetHref('../../../outside.png', { source: 'grigdesk', basePath: 'README.md' }),
     '',
   );
   assert.equal(
-    documentRefAssetHref('diagram.svg', { source: 'cockpit', basePath: 'README.md' }),
+    documentRefAssetHref('diagram.svg', { source: 'grigdesk', basePath: 'README.md' }),
     '',
   );
 });
@@ -107,7 +107,7 @@ test('DOC-WEB-09: повреждённая область не попадает 
   );
   assert.equal(parseDocumentRouteHref('#/documents?open=%2Fa.md&scope=%3Cx%3E').scope, '');
   assert.equal(
-    documentRefRouteHref('/srv/plan.md', { source: 'cockpit', basePath: 'README.md' }),
+    documentRefRouteHref('/srv/plan.md', { source: 'grigdesk', basePath: 'README.md' }),
     '#/documents?open=%2Fsrv%2Fplan.md',
   );
 });

@@ -30,7 +30,7 @@ export interface PreflightReport {
 
 // Python из venv с faster-whisper. Путь приходит из окружения: рекомендуемый
 // state/media-venv в папке данных создаёт deploy/install.sh, но custom path остаётся допустим.
-// Модели в размер venv не входят и лежат в отдельном COCKPIT_MEDIA_HF_DIR.
+// Модели в размер venv не входят и лежат в отдельном GRIGDESK_MEDIA_HF_DIR.
 //
 // Runtime-функции получают pythonPath явно из SpeechRuntime; эта константа нужна только
 // legacy-вызовам. Раньше тут был fallback на
@@ -38,7 +38,7 @@ export interface PreflightReport {
 // src/media/ и `..` попадал в корень внешнего проекта. После переезда в server/src/lib/media/ он стал
 // указывать на server/src/lib/.venv, которого нет и не будет: вместо внятного «не настроено»
 // диктовка отвечала `spawn .../lib/.venv/bin/python ENOENT`.
-export const VENV_PYTHON = process.env.COCKPIT_MEDIA_PYTHON || '';
+export const VENV_PYTHON = process.env.GRIGDESK_MEDIA_PYTHON || '';
 
 /**
  * Проверяет, что бинарь существует в PATH (по коду ошибки ENOENT при spawn).
@@ -89,9 +89,9 @@ export function preflight({
     checks.push({
         name: pythonPath
             ? `python venv (${pythonPath})`
-            : 'python venv (COCKPIT_MEDIA_PYTHON не задан)',
+            : 'python venv (GRIGDESK_MEDIA_PYTHON не задан)',
         ok: venv,
-        fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
+        fix: 'GRIGDESK_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
     });
 
     // faster-whisper проверяем только если venv вообще есть.
@@ -163,9 +163,9 @@ export async function preflightAsync({
         {
             name: pythonPath
                 ? `python venv (${pythonPath})`
-                : 'python venv (COCKPIT_MEDIA_PYTHON не задан)',
+                : 'python venv (GRIGDESK_MEDIA_PYTHON не задан)',
             ok: venv,
-            fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
+            fix: 'GRIGDESK_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
         },
         {
             name: 'faster-whisper (распознавание речи)',

@@ -11,7 +11,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 test('RE-F4-07: профильная политика этапа читается без записи в route bundle', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-route-policy-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-route-policy-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   await fs.mkdir(path.join(profilesDir, 'sample'), { recursive: true });

@@ -92,11 +92,11 @@ test('M23-crash: native worker после SIGKILL owner завершён до st
     },
   });
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-service-crash-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-service-crash-'));
   const options = {
     pluginsDir: path.join(root, 'plugins'),
     statePath: path.join(root, 'state/install.json'),
-    cockpitVersion: '1.0.0',
+    grigDeskVersion: '1.0.0',
     reservedIds: [],
   };
 
@@ -175,7 +175,7 @@ async function recoverFixture(fixture, use) {
   const service = new PluginInstallService({
     pluginsDir: fixture.roots.pluginsDir,
     statePath: fixture.statePath,
-    cockpitVersion: '1.0.0',
+    grigDeskVersion: '1.0.0',
     reservedIds: [],
   });
 

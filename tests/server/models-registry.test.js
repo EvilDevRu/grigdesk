@@ -221,7 +221,7 @@ test('live CLI discovery replaces stale stored efforts unless the model is custo
 
 test('runtime-каталог исключает снятого исполнителя, сохраняя данные и историю', async (t) => {
   const calls = await unavailableExecutorFixture(t);
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-retired-catalog-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-retired-catalog-'));
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -278,7 +278,7 @@ test('runtime-каталог любого исполнителя прячет п
     modelFamily: (model) => (String(model?.id || '').startsWith('line-b') ? 'line-b' : ''),
   });
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-superseded-catalog-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-superseded-catalog-'));
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -316,7 +316,7 @@ test('runtime-каталог отдаёт справку только разре
     modelEfforts: () => ['high'],
   });
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-effort-hints-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-effort-hints-'));
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -346,7 +346,7 @@ test('общий фильтр получает исходный discovery до f
     },
   });
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-discovery-contract-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-discovery-contract-'));
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -379,7 +379,7 @@ test('runtime Claude снимает старый ultracode без свежего
     },
   });
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-ultracode-registry-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-ultracode-registry-'));
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 

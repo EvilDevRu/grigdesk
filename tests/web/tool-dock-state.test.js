@@ -25,9 +25,9 @@ function memoryStorage(seed = {}) {
 
 test('dock store клампит ширину, запоминает геометрию и не теряет intent при viewport-unmount', () => {
   const storage = memoryStorage({
-    'cockpit-dock-tool': 'code',
-    'cockpit-dock-width': 'oops',
-    'cockpit-dock-expanded': '0',
+    'grigdesk-dock-tool': 'code',
+    'grigdesk-dock-width': 'oops',
+    'grigdesk-dock-expanded': '0',
   });
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
   setActivePinia(createPinia());
@@ -40,16 +40,16 @@ test('dock store клампит ширину, запоминает геомет�
   assert.equal(clampDockWidth(500, 200), 200, 'узкий content временно уменьшает минимум');
 
   dock.setWidth(599, { max: 600 });
-  assert.equal(storage.value('cockpit-dock-width'), 'oops', 'drag не пишет каждый пиксель');
+  assert.equal(storage.value('grigdesk-dock-width'), 'oops', 'drag не пишет каждый пиксель');
   dock.setWidth(590, { max: 600, persist: true });
-  assert.equal(storage.value('cockpit-dock-width'), '590');
+  assert.equal(storage.value('grigdesk-dock-width'), '590');
 
   dock.open('terminal');
   dock.setRuntime('terminal', { status: 'open' });
   dock.setExpanded(true);
   assert.equal(dock.isExpanded, true);
   assert.equal(dock.expandedPreference, true);
-  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), {
+  assert.deepEqual(JSON.parse(storage.value('grigdesk-dock-expanded-tools')), {
     terminal: true,
   });
   assert.equal(dock.width, 590, 'разворачивание не подменяет сохранённую обычную ширину');
@@ -65,7 +65,7 @@ test('dock store клампит ширину, запоминает геомет�
 
   const first = dock.enqueue('terminal', { id: 999, type: 'insert', text: 'one' });
   const second = dock.enqueue('terminal', { type: 'insert', text: 'two' });
-  const code = dock.enqueue('code', { type: 'project', project: 'cockpit' });
+  const code = dock.enqueue('code', { type: 'project', project: 'grigdesk' });
   assert.deepEqual([first.id, second.id, code.id], [1, 2, 3], 'payload не подменяет монотонный id');
   dock.consume('terminal', first.id);
   assert.deepEqual(dock.intents.terminal.map((item) => item.id), [2]);
@@ -77,14 +77,14 @@ test('dock store клампит ширину, запоминает геомет�
   dock.setExpanded(false, { persist: false });
   assert.equal(dock.isExpanded, false, 'смена route может временно вернуть обычную ширину');
   assert.equal(dock.expandedPreference, true, 'техническое сворачивание не меняет настройку');
-  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), {
+  assert.deepEqual(JSON.parse(storage.value('grigdesk-dock-expanded-tools')), {
     terminal: true,
   });
   dock.close();
   dock.open('terminal');
   assert.equal(dock.isExpanded, true, 'после временного сворачивания настройка восстанавливается');
   dock.setExpanded(false);
-  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), {});
+  assert.deepEqual(JSON.parse(storage.value('grigdesk-dock-expanded-tools')), {});
   dock.close();
   dock.open('terminal');
   assert.equal(dock.isExpanded, false, 'явное сворачивание становится новой настройкой');
@@ -112,15 +112,15 @@ test('dock store клампит ширину, запоминает геомет�
 
 test('старый общий fullscreen мигрирует только к последнему инструменту', () => {
   const storage = memoryStorage({
-    'cockpit-dock-tool': 'code',
-    'cockpit-dock-expanded': '1',
+    'grigdesk-dock-tool': 'code',
+    'grigdesk-dock-expanded': '1',
   });
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
   setActivePinia(createPinia());
   const dock = useDockStore();
 
-  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), { code: true });
-  assert.equal(storage.value('cockpit-dock-expanded'), undefined);
+  assert.deepEqual(JSON.parse(storage.value('grigdesk-dock-expanded-tools')), { code: true });
+  assert.equal(storage.value('grigdesk-dock-expanded'), undefined);
   dock.open('shelf');
   assert.equal(dock.isExpanded, false, 'Полка не наследует прежнюю настройку Code');
   dock.open('code');

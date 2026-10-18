@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ворота VPN: по умолчанию возвращают 0, только если трафик РЕАЛЬНО идёт через TUN.
-# COCKPIT_REQUIRE_VPN=0 явно отключает защиту, а COCKPIT_VPN_IFACE задаёт интерфейс для
+# GRIGDESK_REQUIRE_VPN=0 явно отключает защиту, а GRIGDESK_VPN_IFACE задаёт интерфейс для
 # схем, которые нельзя распознать по `/sys/class/net/<iface>/tun_flags` (например WireGuard).
 # В ExecStartPre ненулевой код не даёт systemd запустить защищаемый процесс и оставляет
 # его ждать готового маршрута.
@@ -15,24 +15,24 @@
 # systemd --user это выполняется само.
 set -uo pipefail
 
-REQUIRED="${COCKPIT_REQUIRE_VPN:-1}"
+REQUIRED="${GRIGDESK_REQUIRE_VPN:-1}"
 
 fail() { echo "VPN-ворота: $1 — запуск запрещён" >&2; exit 1; }
 
 case "$REQUIRED" in
   0|false|no) exit 0 ;;
   1|true|yes) ;;
-  *) fail "COCKPIT_REQUIRE_VPN должен быть 0 или 1" ;;
+  *) fail "GRIGDESK_REQUIRE_VPN должен быть 0 или 1" ;;
 esac
 
-IFACE="${COCKPIT_VPN_IFACE:-}"
-PROBE="${COCKPIT_VPN_PROBE:-1.1.1.1}"
+IFACE="${GRIGDESK_VPN_IFACE:-}"
+PROBE="${GRIGDESK_VPN_PROBE:-1.1.1.1}"
 
 SYS_CLASS_NET=/sys/class/net
 IP_BIN=ip
 if [[ "${FACTORY_TESTING:-0}" == 1 ]]; then
-  SYS_CLASS_NET="${COCKPIT_VPN_SYS_CLASS_NET:-$SYS_CLASS_NET}"
-  IP_BIN="${COCKPIT_IP_BIN:-$IP_BIN}"
+  SYS_CLASS_NET="${GRIGDESK_VPN_SYS_CLASS_NET:-$SYS_CLASS_NET}"
+  IP_BIN="${GRIGDESK_IP_BIN:-$IP_BIN}"
 fi
 
 route=$("$IP_BIN" route get "$PROBE" 2>/dev/null | head -1)

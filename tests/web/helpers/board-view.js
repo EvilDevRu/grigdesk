@@ -77,7 +77,7 @@ export async function compileBoardView() {
 /** Браузерное окружение happy-dom с классами DOM в глобалях. */
 export async function installBrowser(t) {
   const { Window } = await import(HAPPY_DOM);
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

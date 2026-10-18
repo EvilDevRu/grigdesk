@@ -16,7 +16,7 @@ const CHILD = fileURLToPath(new URL('./fixtures/routes-publication-child.mjs', i
 const OPERATION = '77777777-7777-4777-8777-777777777777';
 
 async function fixture(t, { baseline = false } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-recovery-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-recovery-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   const profileDir = path.join(profilesDir, 'sample');

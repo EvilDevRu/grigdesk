@@ -38,7 +38,7 @@ export function when(at: number, now = Date.now()) {
 export const initial = (title: string) => (title.trim()[0] || '•').toUpperCase();
 
 /**
- * Чат использует компактное относительное время веб-Кокпита, а не полную дату с годом.
+ * Чат использует компактное относительное время веб-версии GrigDesk, а не полную дату с годом.
  * Календарная подпись после недели оставляет место названию в портретной колонке.
  */
 export function ago(at: number, now = Date.now()) {

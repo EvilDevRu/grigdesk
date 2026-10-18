@@ -36,7 +36,7 @@ function fixture(overrides = {}) {
     ensureSession: action('session', async () => 'session'),
     loadOffline: action('offline', async () => undefined),
     showUnavailable: action('unavailable', async () => undefined),
-    loadCockpit: action('cockpit', async (address) => {
+    loadGrigDesk: action('grigdesk', async (address) => {
       addresses.push(address);
     }),
     sleep: action('sleep', async (ms) => {
@@ -77,7 +77,7 @@ test('DW-C1: сессия обеспечена до loadURL', async () => {
   const f = fixture();
 
   await f.lifecycle.connect();
-  assert.deepEqual(f.calls, ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'session', 'grigdesk']);
 });
 
 test('DW-C2: offline сменяется сайтом', async () => {
@@ -92,14 +92,14 @@ test('DW-C2: offline сменяется сайтом', async () => {
   assert.deepEqual(f.calls, ['alive', 'offline', 'wait']);
   waiting.resolve(true);
   await pending;
-  assert.deepEqual(f.calls, ['alive', 'offline', 'wait', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'offline', 'wait', 'session', 'grigdesk']);
 });
 
 test('DW-C3: провал load после probe не теряется', async () => {
   const load = Promise.withResolvers();
   let loads = 0;
   const f = fixture({
-    cockpit: () => {
+    grigdesk: () => {
       loads += 1;
 
       return loads === 1 ? load.promise : Promise.resolve();
@@ -112,7 +112,7 @@ test('DW-C3: провал load после probe не теряется', async ()
   assert.strictEqual(f.lifecycle.connect(), pending);
   load.reject(new Error('главная загрузка не удалась'));
   await pending;
-  assert.deepEqual(f.calls, ['alive', 'session', 'cockpit', 'offline', 'wait', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'session', 'grigdesk', 'offline', 'wait', 'session', 'grigdesk']);
   assert.equal(loads, 2);
 });
 
@@ -171,7 +171,7 @@ test('DW-C4: повторный connect не размножает ожидани
 
   waiting.resolve(true);
   await first;
-  assert.deepEqual(f.calls, ['alive', 'offline', 'wait', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'offline', 'wait', 'session', 'grigdesk']);
 
   const before = f.calls.length;
 
@@ -181,7 +181,7 @@ test('DW-C4: повторный connect не размножает ожидани
   });
   assert.equal(f.calls.length, before);
   await f.lifecycle.loadFailed(failure);
-  assert.deepEqual(f.calls.slice(before), ['offline', 'wait', 'session', 'cockpit']);
+  assert.deepEqual(f.calls.slice(before), ['offline', 'wait', 'session', 'grigdesk']);
 });
 
 test('DW-C5: stop отменяет каждый await', async () => {
@@ -191,7 +191,7 @@ test('DW-C5: stop отменяет каждый await', async () => {
   await stopped.lifecycle.connect();
   assert.deepEqual(stopped.calls, []);
 
-  for (const blocked of ['alive', 'offline', 'wait', 'session', 'cockpit']) {
+  for (const blocked of ['alive', 'offline', 'wait', 'session', 'grigdesk']) {
     const deferred = Promise.withResolvers();
     const f = fixture({
       alive: async () => !['offline', 'wait'].includes(blocked),
@@ -231,7 +231,7 @@ test('DW-C5: после загрузки нет фонового входа ил
 
   await f.lifecycle.connect();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(f.calls, ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'session', 'grigdesk']);
 });
 
 test('DW-C6: unavailable показывает страницу отказа и не загружает интерфейс', async () => {
@@ -255,7 +255,7 @@ test('DW-C6: отказ повторяется через 10 секунд и с�
 
   await f.lifecycle.connect();
   assert.deepEqual(f.delays, [10_000]);
-  assert.deepEqual(f.calls, ['alive', 'session', 'unavailable', 'sleep', 'alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'session', 'unavailable', 'sleep', 'alive', 'session', 'grigdesk']);
   assert.deepEqual(f.addresses, [origin + '/']);
 });
 
@@ -269,7 +269,7 @@ test('DW-C7: главный документ с 401 входит заново и
   f.lifecycle.navigated({ url: origin + '/chats#turn-42', httpResponseCode: 401 });
   await f.lifecycle.connect();
 
-  assert.deepEqual(f.calls.slice(before), ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls.slice(before), ['alive', 'session', 'grigdesk']);
   assert.deepEqual(f.addresses, [origin + '/', origin + '/chats#turn-42']);
 });
 
@@ -314,7 +314,7 @@ test('DW-C7: адрес восстановления берётся из усп�
   f.lifecycle.navigated({ url: origin + '/settings', httpResponseCode: 401 });
   await f.lifecycle.connect();
 
-  assert.deepEqual(f.calls.slice(before), ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls.slice(before), ['alive', 'session', 'grigdesk']);
   assert.deepEqual(f.addresses.at(-1), origin + '/settings');
 });
 
@@ -327,7 +327,7 @@ test('DW-C8: повторный 401 в течение минуты не обме
 
   f.lifecycle.navigated({ url: origin + '/chats', httpResponseCode: 401 });
   await f.lifecycle.connect();
-  assert.deepEqual(f.calls.slice(before), ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls.slice(before), ['alive', 'session', 'grigdesk']);
   assert.deepEqual(f.addresses, [origin + '/', origin + '/chats']);
 
   const afterFirst = f.calls.length;
@@ -335,13 +335,13 @@ test('DW-C8: повторный 401 в течение минуты не обме
   f.setNow(f.clock() + 59_000);
   f.lifecycle.navigated({ url: origin + '/chats', httpResponseCode: 401 });
   await f.lifecycle.connect();
-  assert.deepEqual(f.calls.slice(afterFirst), ['unavailable', 'sleep', 'alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls.slice(afterFirst), ['unavailable', 'sleep', 'alive', 'session', 'grigdesk']);
   assert.deepEqual(f.delays, [10_000]);
 
   f.setNow(f.clock() + 61_000);
   f.lifecycle.navigated({ url: origin + '/chats', httpResponseCode: 401 });
   await f.lifecycle.connect();
-  assert.deepEqual(f.calls.slice(afterFirst + 5), ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls.slice(afterFirst + 5), ['alive', 'session', 'grigdesk']);
 });
 
 test('DW-C8: два одновременных запроса входа дают один обмен', async () => {
@@ -355,7 +355,7 @@ test('DW-C8: два одновременных запроса входа даю�
   assert.strictEqual(f.lifecycle.connect(), first);
   exchange.resolve();
   await first;
-  assert.deepEqual(f.calls, ['alive', 'session', 'cockpit']);
+  assert.deepEqual(f.calls, ['alive', 'session', 'grigdesk']);
 
   const second = fixture();
 
@@ -369,7 +369,7 @@ test('DW-C8: два одновременных запроса входа даю�
 
   assert.strictEqual(second.lifecycle.connect(), pending);
   await pending;
-  assert.deepEqual(second.calls.slice(before), ['alive', 'session', 'cockpit']);
+  assert.deepEqual(second.calls.slice(before), ['alive', 'session', 'grigdesk']);
 });
 
 test('DW-C10: сбой страницы отказа при восстановлении по 401 возвращается вызывающему', async () => {
@@ -435,7 +435,7 @@ test('LC-01: успешный цикл вызывает onConnected один р�
 
   await f.lifecycle.connect();
   assert.equal(connected, 1);
-  assert.deepEqual(f.calls, ['alive', 'session', 'cockpit', 'connected']);
+  assert.deepEqual(f.calls, ['alive', 'session', 'grigdesk', 'connected']);
 });
 
 test('LC-02: 401, сбой загрузки, повторный отказ и отмена не дают onConnected до успеха', async () => {
@@ -449,7 +449,7 @@ test('LC-02: 401, сбой загрузки, повторный отказ и о
   let loads = 0;
   const f = fixture({
     options,
-    cockpit: () => {
+    grigdesk: () => {
       loads += 1;
 
       return loads === 1 ? load.promise : Promise.resolve();
@@ -468,7 +468,7 @@ test('LC-02: 401, сбой загрузки, повторный отказ и о
   let failedLoads = 0;
   const g = fixture({
     options,
-    cockpit: () => {
+    grigdesk: () => {
       failedLoads += 1;
 
       return failedLoads === 1 ? failed.promise : Promise.resolve();
@@ -497,11 +497,11 @@ test('LC-02: 401, сбой загрузки, повторный отказ и о
   const cancelled = Promise.withResolvers();
   const h = fixture({
     options,
-    cockpit: () => cancelled.promise,
+    grigdesk: () => cancelled.promise,
   });
   const stopped = h.lifecycle.connect();
 
-  await observe(() => h.calls.includes('cockpit'));
+  await observe(() => h.calls.includes('grigdesk'));
   h.lifecycle.stop();
   cancelled.resolve();
   await stopped;
@@ -544,10 +544,10 @@ test('LC-04: без retryMs пауза прежняя — 10 000 мс', async ()
 
 test('несовместимый пакет завершает подключение явной ошибкой без повторов', async () => {
   const error = new PermanentConnectionError('Версия не обслуживается');
-  const run = fixture({ cockpit: async () => {
+  const run = fixture({ grigdesk: async () => {
     throw error;
   } });
 
   await assert.rejects(run.lifecycle.connect(), (failure) => failure === error);
-  assert.deepEqual(run.calls, ['alive', 'session', 'cockpit']);
+  assert.deepEqual(run.calls, ['alive', 'session', 'grigdesk']);
 });

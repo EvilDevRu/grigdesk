@@ -58,7 +58,7 @@ function item(attachments, over = {}) {
 }
 
 async function fixture(t, dependencies = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-inbox-attachment-analysis-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-inbox-attachment-analysis-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const cacheDir = path.join(root, 'cache');
   return {

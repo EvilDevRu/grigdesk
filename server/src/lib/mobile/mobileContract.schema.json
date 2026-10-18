@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:cockpit:mobile:v1",
-  "title": "Мобильный контракт Кокпита v1",
+  "$id": "urn:grigdesk:mobile:v1",
+  "title": "Мобильный контракт GrigDesk v1",
   "$defs": {
     "hello": {
       "type": "object",
@@ -1978,7 +1978,7 @@
           "properties": {
             "kind": {
               "enum": [
-                "cockpit"
+                "grigdesk"
               ]
             }
           },
@@ -2505,7 +2505,7 @@
       "status": 202,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "send-request"
     },
@@ -2522,7 +2522,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2545,7 +2545,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "waiting-request"
     },
@@ -2574,7 +2574,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "gate-request"
     },
@@ -2585,7 +2585,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2596,7 +2596,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2625,7 +2625,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "launch-request"
     },
@@ -2675,7 +2675,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "chat-create-request"
     },
@@ -2686,7 +2686,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "chat-settings-request"
     },
@@ -2697,7 +2697,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2708,7 +2708,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "workspace-request"
     },
@@ -2719,7 +2719,7 @@
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "workspace-change-request"
     }

@@ -43,7 +43,7 @@ import {
 import type { KimiSandboxConfig } from './sandbox.ts';
 
 const REQUIRED_KIMI_VERSION = '0.31.1';
-// Режим кокпита → режим ACP-сессии. Не перечисленное остаётся в `default`.
+// Режим GrigDesk → режим ACP-сессии. Не перечисленное остаётся в `default`.
 const ACP_MODE_BY_PERMISSION: Record<string, string> = { plan: 'plan', yolo: 'yolo' };
 
 // Серверный config в объёме этого хода: контракт песочницы плюс режим запуска
@@ -83,7 +83,7 @@ interface AcpPermissionParams {
   };
 }
 
-// Что кокпит запомнил про вызов из notification того же toolCallId.
+// Что GrigDesk запомнил про вызов из notification того же toolCallId.
 interface ToolCallContext {
   kind?: unknown;
   title?: unknown;
@@ -221,7 +221,7 @@ function questionPresentation(options: AcpPermissionOption[], question: string) 
 
 /**
  * ACP-запрос разрешения → нейтральное представление всплывашки.
- * `context` — то, что кокпит запомнил по этому же toolCallId из notification
+ * `context` — то, что GrigDesk запомнил по этому же toolCallId из notification
  * tool_call/tool_call_update: сам запрос разрешения не несёт ни `kind`, ни
  * аргументов вызова (buildPermissionToolCallUpdate кладёт только title и content).
  */
@@ -252,7 +252,7 @@ function permissionPresentation(value: unknown, context: ToolCallContext = {}) {
 
   return {
     isQuestion: false,
-    // ACP-outcome текста не несёт: пояснение к отказу кокпит отправит отдельным
+    // ACP-outcome текста не несёт: пояснение к отказу GrigDesk отправит отдельным
     // сообщением (флаг commentDelivered в modules/chat).
     acceptsComment: false,
     tool: firstString(toolCall.title, context.title) || 'Действие Kimi',
@@ -287,7 +287,7 @@ function selectPermissionOutcome(value: unknown, answer: PermissionAnswer | null
     const selected = answer?.selected?.[0] || '';
     const option = questionOptions.find((candidate) => candidate.name === selected);
     // Свой текст ACP не принимает. Подменять его «похожим» вариантом нельзя —
-    // отвечаем «пропустить», а текст кокпит отправит обычным сообщением.
+    // отвечаем «пропустить», а текст GrigDesk отправит обычным сообщением.
     return pick(option || options.find((candidate) => /_skip$/.test(candidate.optionId || '')));
   }
   if (answer?.allow) {
@@ -507,7 +507,7 @@ export async function runContainedKimi({
     .filter(Boolean));
   let containedWorkMcp: { scriptPath: string; socketPath: string } | null = null;
   if (launchMode === 'contained') {
-    const work = mcpServers.find((entry) => entry?.name === 'cockpit-work');
+    const work = mcpServers.find((entry) => entry?.name === 'grigdesk-work');
     if (work) {
       const socketAt = work.args?.indexOf('--socket') ?? -1;
       const nonceAt = work.args?.indexOf('--nonce') ?? -1;
@@ -518,7 +518,7 @@ export async function runContainedKimi({
       containedWorkMcp = { scriptPath, socketPath };
       sessionMcpServers = mcpServers.map((entry) => (entry === work ? {
         ...entry,
-        // Внутри песочницы работает Node кокпита, смонтированный сборкой запуска:
+        // Внутри песочницы работает Node GrigDesk, смонтированный сборкой запуска:
         // хостового `/usr/bin/node` на машине может не быть вовсе.
         command: KIMI_SANDBOX_NODE,
         args: [
@@ -606,7 +606,7 @@ export async function runContainedKimi({
         workMcp: containedWorkMcp,
         ...(transport === 'server' ? { serverControlDir: controlDir } : {}),
         ...(serverMcpFile ? { serverMcpFile } : {}),
-        unit: `cockpit-kimi-${runId}.service`,
+        unit: `grigdesk-kimi-${runId}.service`,
       });
     }
     if (launch.rejectedExtraDirs?.length) {
@@ -768,7 +768,7 @@ export async function runContainedKimi({
     let captureStatus = false;
     // Запрос разрешения не несёт ни kind, ни аргументов вызова — их несёт
     // notification того же toolCallId. Без этой памяти всплывашка показывала
-    // действие без команды, а кокпит-режим «Авто» fail-closed спрашивал человека
+    // действие без команды, а режим GrigDesk «Авто» fail-closed спрашивал человека
     // про каждое чтение файла: классификатор решает как раз по kind.
     const toolCalls = new Map<string, ToolCallContext>();
     const rememberToolCall = (update: KimiUpdate) => {
@@ -810,7 +810,7 @@ export async function runContainedKimi({
       async onReverseRequest(method, value) {
         if (method !== 'session/request_permission') throw new Error(`ACP reverse method не разрешён: ${method}`);
         const params = value as AcpPermissionParams | null;
-        const workPrefix = 'mcp__cockpit-work__';
+        const workPrefix = 'mcp__grigdesk-work__';
         const title = String(params?.toolCall?.title || '');
         if (title.startsWith(workPrefix) && workNames.has(title.slice(workPrefix.length))) {
           return selectPermissionOutcome(params, { allow: true });
@@ -898,11 +898,11 @@ export async function runContainedKimi({
       if (effort) await setConfigOption('thinking', effort);
     }
     // ACP-режимы Kimi (сверено с бинарём 0.33.0, ACP_MODES): default | plan | auto | yolo.
-    // Кокпит-режим «Авто» сюда НЕ маппится намеренно: это политика ОТВЕТОВ на
+    // режим GrigDesk «Авто» сюда НЕ маппится намеренно: это политика ОТВЕТОВ на
     // permission-запросы (auto-approve.js), и ACP обязан продолжать спрашивать —
-    // иначе классификатору кокпита нечего решать. А «yolo» — именно ACP-режим:
+    // иначе классификатору GrigDesk нечего решать. А «yolo» — именно ACP-режим:
     // агент не спрашивает вовсе, границу держит runtime (contained) либо доверие
-    // человека (host), поэтому в кокпите он отдельный пункт списка режимов.
+    // человека (host), поэтому в GrigDesk он отдельный пункт списка режимов.
     const acpMode = ACP_MODE_BY_PERMISSION[String(permissionMode)] || 'default';
     await client.request('session/set_config_option', {
       sessionId: currentSession, configId: 'mode', value: acpMode,
@@ -996,7 +996,7 @@ export async function runContainedKimi({
       });
     } catch { /* UI callback не влияет на ход */ }
     return {
-      reply: `${reply.trim()}${replyTruncated ? '\n\n[Ответ Kimi сокращён: превышен лимит вывода Cockpit.]' : ''}`,
+      reply: `${reply.trim()}${replyTruncated ? '\n\n[Ответ Kimi сокращён: превышен лимит вывода GrigDesk.]' : ''}`,
       sessionId: currentSession,
       cost: null,
       steps: stepSink.steps,

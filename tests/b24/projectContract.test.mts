@@ -23,7 +23,7 @@ test('BG-01: b24 имеет собственный пакет без runtime npm
   const manifest = JSON.parse(source('b24/package.json'));
   const lock = JSON.parse(source('b24/package-lock.json'));
 
-  assert.equal(manifest.name, 'cockpit-b24');
+  assert.equal(manifest.name, 'grigdesk-b24');
   assert.equal(manifest.private, true);
   assert.equal(manifest.type, 'module');
   assert.equal(manifest.dependencies, undefined);
@@ -33,7 +33,7 @@ test('BG-01: b24 имеет собственный пакет без runtime npm
     postject: '1.0.0-alpha.6',
     typescript: '5.9.3',
   });
-  assert.equal(lock.packages[''].name, 'cockpit-b24');
+  assert.equal(lock.packages[''].name, 'grigdesk-b24');
   assert.equal(manifest.scripts.test, 'node scripts/test.mts');
   assert.equal(manifest.scripts['test:sea'], 'node scripts/test.mts --sea');
   assert.equal(manifest.scripts.pretest, 'npm run typecheck');

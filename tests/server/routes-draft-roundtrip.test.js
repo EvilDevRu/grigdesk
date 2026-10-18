@@ -24,7 +24,7 @@ const META = {
  * В тестах сравниваются реально вычисленные store хеши, а не копия алгоритма хеширования.
  */
 async function publishedFixture(t, input = makeCatalogInput()) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-roundtrip-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-roundtrip-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new RoutesStore({ baseDir: path.join(root, 'routes') });
   const routeHashes = {};

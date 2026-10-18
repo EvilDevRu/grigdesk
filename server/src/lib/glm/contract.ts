@@ -20,8 +20,8 @@ export interface GlmCompatibilityRuntime {
   };
 }
 
-export const GLM_PROFILE_REVISION = 'cockpit-glm-profile-v2';
-export const GLM_POLICY_REVISION = 'cockpit-glm-policy-v1';
+export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v2';
+export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v1';
 export const GLM_DEFAULT_EFFORT = 'high';
 
 // Допуск — только после зелёной живой проверки режима на этой identity (06.10.2026: api на
@@ -81,7 +81,7 @@ export function parseGlmAccessMode(value: unknown): GlmAccessMode | null {
 export function buildGlmRoute(mode: GlmAccessMode): Record<string, unknown> {
   return {
     ...(mode === 'api' ? { baseURL: 'https://api.z.ai/api/paas/v4' } : {}),
-    apiKeyEnv: 'COCKPIT_GLM_ROUTE_KEY',
+    apiKeyEnv: 'GRIGDESK_GLM_ROUTE_KEY',
     // Сеть до Z.ai нестабильна: dsh-llm-retry повторяет запрос к модели при обрыве, 429, 5xx и
     // таймауте (коды по умолчанию). Это повтор запроса, а не хода: инструменты не выполнялись.
     retryPolicy: {

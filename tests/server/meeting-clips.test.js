@@ -118,7 +118,7 @@ test('вырезанный кусок описывает себя сквозны
 // ── Имя фрагмента — единственное, что уходит наружу ─────────────────────────
 
 test('имя фрагмента проверяется буквально, путь снаружи не принимается', (t) => {
-  const root = tempDir(t, 'cockpit-clips-');
+  const root = tempDir(t, 'grigdesk-clips-');
   fs.mkdirSync(path.join(root, RUN), { recursive: true });
   fs.writeFileSync(path.join(root, RUN, 'p0-00105-030s.mp4'), 'mp4-bytes');
 
@@ -143,7 +143,7 @@ test('имя фрагмента проверяется буквально, пу�
 });
 
 test('фрагменты прошлых разборов убираются по возрасту', (t) => {
-  const root = tempDir(t, 'cockpit-clips-ttl-');
+  const root = tempDir(t, 'grigdesk-clips-ttl-');
   const old = path.join(root, 'aaaaaaaaaaaaaaaa');
   const fresh = path.join(root, 'bbbbbbbbbbbbbbbb');
   fs.mkdirSync(old, { recursive: true });
@@ -214,7 +214,7 @@ function fakeCut(root, body = 'mp4-bytes-0123456789') {
 }
 
 test('фрагмент режется по секунде задачи, а его байты отдаются с перемоткой', async (t) => {
-  const root = tempDir(t, 'cockpit-clips-api-');
+  const root = tempDir(t, 'grigdesk-clips-api-');
   const { asked, cut } = fakeCut(root);
   const app = await buildMediaApp(t, { clipsRoot: root, meetingClip: cut });
 
@@ -257,7 +257,7 @@ test('фрагмент режется по секунде задачи, а ег�
 });
 
 test('человек может расширить окно, но только в известных границах', async (t) => {
-  const root = tempDir(t, 'cockpit-clips-window-');
+  const root = tempDir(t, 'grigdesk-clips-window-');
   const { asked, cut } = fakeCut(root);
   const app = await buildMediaApp(t, { clipsRoot: root, meetingClip: cut });
 
@@ -267,7 +267,7 @@ test('человек может расширить окно, но только �
 });
 
 test('запись без видеодорожки отвечает пустотой, а не ошибкой разбора', async (t) => {
-  const root = tempDir(t, 'cockpit-clips-audio-');
+  const root = tempDir(t, 'grigdesk-clips-audio-');
   const app = await buildMediaApp(t, {
     clipsRoot: root,
     meetingClip: async () => { throw Object.assign(new Error('нет видеодорожки'), { code: 'no_video' }); },
@@ -282,7 +282,7 @@ test('запись без видеодорожки отвечает пустот
 });
 
 test('без секунды и по чужому job не режем', async (t) => {
-  const root = tempDir(t, 'cockpit-clips-bad-');
+  const root = tempDir(t, 'grigdesk-clips-bad-');
   const { cut } = fakeCut(root);
   const app = await buildMediaApp(t, { clipsRoot: root, meetingClip: cut });
 
@@ -298,7 +298,7 @@ test('без секунды и по чужому job не режем', async (t)
 });
 
 test('выключенный плагин не режет, не отдаёт байтов и не даёт пути для вложения', async (t) => {
-  const root = tempDir(t, 'cockpit-clips-off-');
+  const root = tempDir(t, 'grigdesk-clips-off-');
   const { cut } = fakeCut(root);
   const app = await buildMediaApp(t, { clipsRoot: root, meetingClip: cut, enabled: () => false });
 

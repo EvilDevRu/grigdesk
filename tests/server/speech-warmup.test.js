@@ -128,7 +128,7 @@ test('warmup argv закрепляет repo, SHA, aliases и весь resolved c
     device: 'cuda',
     computeType: 'float16',
     beamSize: 7,
-    hotwords: 'Cockpit',
+    hotwords: 'GrigDesk',
     vadSilenceMs: 800,
     conditionOnPreviousText: false,
   };
@@ -145,7 +145,7 @@ test('warmup argv закрепляет repo, SHA, aliases и весь resolved c
     '--compute-type', 'float16',
     '--beam-size', '7',
     '--vad-silence-ms', '800',
-    '--hotwords', 'Cockpit',
+    '--hotwords', 'GrigDesk',
     '--no-condition-previous',
   ]);
   assert.equal(speechOptionsRevision(options), speechOptionsRevision({ ...options }));
@@ -227,7 +227,7 @@ test('warmup-worker возвращает ту же плоскую структу
 import contextlib, importlib.util, io, json, sys, types
 worker_path = sys.argv[1]
 requested = sys.argv[2] == 'true'
-spec = importlib.util.spec_from_file_location('cockpit_warmup_worker', worker_path)
+spec = importlib.util.spec_from_file_location('grigdesk_warmup_worker', worker_path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 calls = []

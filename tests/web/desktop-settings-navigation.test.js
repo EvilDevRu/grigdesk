@@ -148,7 +148,7 @@ test('SW-R07 режим из UA и адреса', async () => {
   ]) {
     Object.defineProperty(browser.navigator, 'userAgent', {
       configurable: true,
-      value: `Electron CockpitSettings/1 CockpitWindow/${role}`,
+      value: `Electron GrigDeskSettings/1 GrigDeskWindow/${role}`,
     });
     browser.location.search = search;
 

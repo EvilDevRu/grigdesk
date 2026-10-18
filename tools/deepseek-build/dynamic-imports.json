@@ -22,7 +22,7 @@
   {
     "file": "vendor/include/src/index.ts",
     "expression": "import(/* @vite-ignore */ this.filename)",
-    "reason": "Include разрешает host-owned composition относительно boot baseUrl; штатные и Cockpit overlays передаются явными путями."
+    "reason": "Include разрешает host-owned composition относительно boot baseUrl; штатные и GrigDesk overlays передаются явными путями."
   },
   {
     "file": "vendor/loader/src/config/tree.ts",

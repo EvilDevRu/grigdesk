@@ -26,7 +26,7 @@ export interface ConnectionLifecycleOptions {
   ensureSession: (signal: AbortSignal) => Promise<SessionResult>;
   loadOffline: (signal: AbortSignal) => Promise<unknown>;
   showUnavailable: (signal: AbortSignal) => Promise<unknown>;
-  loadCockpit: (address: string, signal: AbortSignal) => Promise<unknown>;
+  loadGrigDesk: (address: string, signal: AbortSignal) => Promise<unknown>;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
   // Успешный цикл: интерфейс загружен без повтора, восстановления и отказа.
@@ -166,7 +166,7 @@ export function createConnectionLifecycle(options: ConnectionLifecycleOptions): 
         }
 
         try {
-          await options.loadCockpit(address, signal);
+          await options.loadGrigDesk(address, signal);
         } catch (error) {
           if (signal.aborted || abortedLoad(error)) {
             return;

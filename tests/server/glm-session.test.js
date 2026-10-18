@@ -65,7 +65,7 @@ async function fixture(t, scenario = TEXT) {
     describeGlmGeneration({ ...config, deepseekArtifactDir: path.join(root, name) }).runtime, 'api'));
   const env = {
     PATH: process.env.PATH,
-    COCKPIT_GLM_API_MODE: 'api',
+    GRIGDESK_GLM_API_MODE: 'api',
     ZAI_API_KEY: 'synthetic-key-a',
   };
   const spawned = [];
@@ -123,10 +123,10 @@ test('смена ключа, режима, identity или cwd ротирует 
 
   f.env.ZAI_API_KEY = 'synthetic-key-b';
   assert.notEqual(await binding.authProfileId(f.config), auth, 'ключ');
-  f.env.COCKPIT_GLM_API_MODE = 'coding-plan';
+  f.env.GRIGDESK_GLM_API_MODE = 'coding-plan';
   f.env.ZAI_CODING_API_KEY = 'synthetic-key-a';
   assert.notEqual(await binding.authProfileId(f.config), auth, 'режим');
-  f.env.COCKPIT_GLM_API_MODE = 'api';
+  f.env.GRIGDESK_GLM_API_MODE = 'api';
   f.env.ZAI_API_KEY = 'synthetic-key-a';
   assert.equal(await binding.authProfileId(f.config), auth);
   assert.equal(auth.includes('synthetic-key-a'), false);
@@ -280,6 +280,6 @@ test('capability binding GLM видна чату', async (t) => {
   assert.deepEqual(f.adapter.workdir, { switch: 'reseed', roots: 'single' });
   assert.ok(binding.sessionId);
   assert.match(binding.authProfileId, /^glm-env-key:[a-f0-9]{16}$/u);
-  assert.match(binding.securityProfile, /^cockpit-glm-profile-v2:[a-f0-9]{64}$/u);
+  assert.match(binding.securityProfile, /^grigdesk-glm-profile-v2:[a-f0-9]{64}$/u);
   assert.equal(binding.cwdRealpath, await fs.realpath(f.root));
 });

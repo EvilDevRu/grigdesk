@@ -13,10 +13,10 @@ if (mobileCode < 1 || mobileCode > 2100000000) {
 }
 
 android {
-    namespace = "local.cockpit.mobile"
+    namespace = "local.grigdesk.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "local.cockpit.mobile"
+        applicationId "local.grigdesk.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode mobileCode
@@ -35,18 +35,18 @@ android {
             }
         }
         release {
-            def signingFile = System.getenv('COCKPIT_ANDROID_STORE_FILE')
+            def signingFile = System.getenv('GRIGDESK_ANDROID_STORE_FILE')
             if (signingFile) {
                 storeFile file(signingFile)
-                storePassword System.getenv('COCKPIT_ANDROID_STORE_PASSWORD')
-                keyPassword System.getenv('COCKPIT_ANDROID_KEY_PASSWORD')
-                keyAlias System.getenv('COCKPIT_ANDROID_KEY_ALIAS')
+                storePassword System.getenv('GRIGDESK_ANDROID_STORE_PASSWORD')
+                keyPassword System.getenv('GRIGDESK_ANDROID_KEY_PASSWORD')
+                keyAlias System.getenv('GRIGDESK_ANDROID_KEY_ALIAS')
             }
         }
     }
     buildTypes {
         release {
-            if (System.getenv('COCKPIT_ANDROID_STORE_FILE')) {
+            if (System.getenv('GRIGDESK_ANDROID_STORE_FILE')) {
                 signingConfig signingConfigs.release
             }
             minifyEnabled false

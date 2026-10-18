@@ -33,7 +33,7 @@ const SCREENS = {
  * молча пропускался бы при установленном голосе.
  */
 function voiceDirOf() {
-  return process.env.COCKPIT_SHOWCASE_VOICE_DIR || path.join(
+  return process.env.GRIGDESK_SHOWCASE_VOICE_DIR || path.join(
     fileURLToPath(new URL('../..', import.meta.url)),
     'server',
     '.state',

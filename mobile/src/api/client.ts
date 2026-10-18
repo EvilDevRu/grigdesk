@@ -22,7 +22,7 @@ import type {
   Waiting,
   WaitingAnswer,
 } from './contract.ts';
-import type { CockpitLink, OperationIntent } from '../link/types.ts';
+import type { GrigDeskLink, OperationIntent } from '../link/types.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -91,10 +91,10 @@ function transportIntent(intent: OperationIntent): OperationIntent {
  * 202 pending разбирается до route decoder; прикладные отказы никогда не повторяют эффект.
  */
 export class ApiClient {
-  readonly link: CockpitLink;
+  readonly link: GrigDeskLink;
   private options: Options;
 
-  constructor(link: CockpitLink, options: Options = {}) {
+  constructor(link: GrigDeskLink, options: Options = {}) {
     this.link = link;
     this.options = options;
   }
@@ -125,7 +125,7 @@ export class ApiClient {
         initial.revoked ? 403 : 0,
         code,
         initial.revoked
-          ? 'Телефон отозван в кокпите.'
+          ? 'Телефон отозван в GrigDesk.'
           : 'Приложение заблокировано. Подтвердите вход.',
       );
     }
@@ -162,7 +162,7 @@ export class ApiClient {
         const state = await this.link.getState();
 
         if (state.revoked) {
-          throw new ApiError(403, 'device_revoked', 'Телефон отозван в кокпите.', operation);
+          throw new ApiError(403, 'device_revoked', 'Телефон отозван в GrigDesk.', operation);
         }
         if (
           !state.unlocked ||
@@ -177,7 +177,7 @@ export class ApiClient {
         try {
           value = JSON.parse(response.body);
         } catch {
-          throw new ApiError(response.status, 'contract', 'Ответ Кокпита повреждён.', operation);
+          throw new ApiError(response.status, 'contract', 'Ответ GrigDesk повреждён.', operation);
         }
 
         if (response.status === 202 && value.operationPending === true) {
@@ -187,7 +187,7 @@ export class ApiClient {
           throw new ApiError(
             response.status,
             value.error || 'network',
-            value.message || 'Нет связи с Кокпитом.',
+            value.message || 'Нет связи с GrigDesk.',
             operation,
           );
         }
@@ -214,7 +214,7 @@ export class ApiClient {
         const failure =
           error instanceof ApiError
             ? error
-            : new ApiError(0, 'network', 'Нет связи с Кокпитом.', operation);
+            : new ApiError(0, 'network', 'Нет связи с GrigDesk.', operation);
 
         if (
           ['locked', 'device_revoked', 'device_unknown', 'pin_mismatch', 'contract'].includes(
@@ -238,7 +238,7 @@ export class ApiClient {
       }
     }
 
-    throw new ApiError(0, 'network', 'Нет связи с Кокпитом.', operation);
+    throw new ApiError(0, 'network', 'Нет связи с GrigDesk.', operation);
   }
 
   /**

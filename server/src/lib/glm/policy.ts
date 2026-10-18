@@ -23,7 +23,7 @@ export interface GlmToolDecision {
   reason: string;
 }
 
-export const GLM_WORK_SERVER_NAME = 'cockpit-work';
+export const GLM_WORK_SERVER_NAME = 'grigdesk-work';
 
 const KINDS: Readonly<Record<string, GlmToolKind>> = Object.freeze({
   read: 'read',
@@ -97,7 +97,7 @@ export function parseGlmToolPolicy(value: unknown): GlmToolPolicy {
 
 /**
  * Решение hook по точному имени и аргументам до эффекта: свои инструменты профиля,
- * shell через общую SSH/БД-политику, cockpit-work — только инструменты инвентаря запуска.
+ * shell через общую SSH/БД-политику, grigdesk-work — только инструменты инвентаря запуска.
  */
 export function decideGlmTool(name: string, input: unknown, policy: GlmToolPolicy): GlmToolDecision {
   const kind = glmToolKind(name);

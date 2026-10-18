@@ -54,7 +54,7 @@ export async function transcribePultVoice({
   if (!Buffer.isBuffer(bytes) || !bytes.length) {
     throw Object.assign(new Error('Голосовое сообщение не скачалось.'), { code: 'voice_empty' });
   }
-  const workDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-pult-voice-'));
+  const workDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-pult-voice-'));
   const safeExt = path.extname(String(fileName || '')).replace(/[^.a-z0-9]/giu, '').slice(0, 10) || '.oga';
   const filePath = path.join(workDir, `voice${safeExt}`);
   const abort = new AbortController();

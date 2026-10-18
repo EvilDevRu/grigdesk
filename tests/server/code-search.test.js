@@ -18,7 +18,7 @@ const git = (cwd, args) => exec('git', ['-C', cwd, ...args]);
 
 /** Создаёт tracked, untracked, бинарные и скрытые поисковые цели. */
 async function searchRepo(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-search-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-search-'));
   const privateDir = path.join(root, 'private-chat');
 
   await git(root, ['init', '-q', '-b', 'main', '.']);

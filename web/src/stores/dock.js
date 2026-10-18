@@ -3,10 +3,10 @@
 // и exact-once очереди команд.
 import { defineStore } from 'pinia';
 
-export const DOCK_TOOL_KEY = 'cockpit-dock-tool';
-export const DOCK_WIDTH_KEY = 'cockpit-dock-width';
-export const DOCK_EXPANDED_KEY = 'cockpit-dock-expanded-tools';
-const LEGACY_DOCK_EXPANDED_KEY = 'cockpit-dock-expanded';
+export const DOCK_TOOL_KEY = 'grigdesk-dock-tool';
+export const DOCK_WIDTH_KEY = 'grigdesk-dock-width';
+export const DOCK_EXPANDED_KEY = 'grigdesk-dock-expanded-tools';
+const LEGACY_DOCK_EXPANDED_KEY = 'grigdesk-dock-expanded';
 export const DEFAULT_DOCK_WIDTH = 560;
 export const MIN_DOCK_WIDTH = 380;
 

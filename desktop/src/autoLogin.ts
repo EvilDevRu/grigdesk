@@ -89,7 +89,7 @@ export function sessionFromSetCookie(headers: readonly string[]): SessionValue |
     const first = parts.shift()?.trim() ?? '';
     const equals = first.indexOf('=');
 
-    if (first.slice(0, equals) !== 'cockpit_sid') {
+    if (first.slice(0, equals) !== 'grigdesk_sid') {
       continue;
     }
 
@@ -173,7 +173,7 @@ export async function sessionCookieActive(
 
   const existing = await cookies.get({
     url: origin + '/',
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
   });
 
   if (signal?.aborted) {
@@ -182,11 +182,11 @@ export async function sessionCookieActive(
 
   const candidate = existing.length === 1 ? existing[0] : undefined;
 
-  if (candidate?.name === 'cockpit_sid' && /^[A-Za-z0-9_-]+$/u.test(candidate.value)) {
+  if (candidate?.name === 'grigdesk_sid' && /^[A-Za-z0-9_-]+$/u.test(candidate.value)) {
     const authenticated = await requestWithin(2000, signal, async (requestSignal) => {
       const response = await fetchImpl(origin + '/api/auth/state', {
         method: 'GET',
-        headers: { Cookie: `cockpit_sid=${candidate.value}` },
+        headers: { Cookie: `grigdesk_sid=${candidate.value}` },
         redirect: 'error',
         signal: requestSignal,
       });
@@ -250,7 +250,7 @@ export async function ensureSession(
         const response = await requestWithin(5000, signal, (requestSignal) => {
           return fetchImpl(origin + '/api/auth/window-session', {
             method: 'POST',
-            headers: { 'x-cockpit-window-key': key },
+            headers: { 'x-grigdesk-window-key': key },
             redirect: 'error',
             signal: requestSignal,
           });
@@ -275,7 +275,7 @@ export async function ensureSession(
 
           await cookies.set({
             url: origin + '/',
-            name: 'cockpit_sid',
+            name: 'grigdesk_sid',
             value: session.value,
             httpOnly: true,
             sameSite: 'lax',

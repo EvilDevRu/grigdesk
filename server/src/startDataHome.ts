@@ -29,7 +29,7 @@ try {
     // Иначе прямой запуск сервера потеряет настройку, которую запускалки уже видят.
     get waitMs() {
       // Пустое или нечисловое значение — умолчание, а не нулевое ожидание.
-      const raw = process.env.COCKPIT_LOCK_WAIT_MS ?? '';
+      const raw = process.env.GRIGDESK_LOCK_WAIT_MS ?? '';
       const value = /^\d+$/.test(raw) ? Number(raw) : 15000;
 
       return Number.isFinite(value) && value >= 0 ? value : 15000;

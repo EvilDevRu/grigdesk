@@ -39,7 +39,7 @@ export async function compileTelegramView(_prefix = 'telegram') {
 /** Браузерное окружение happy-dom с классами DOM в глобалях (Vue снимает разметку после теста). */
 export async function installBrowser(t) {
   const { Window } = await import(HAPPY_DOM);
-  const browser = new Window({ url: 'http://cockpit.test/#/telegram' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/telegram' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

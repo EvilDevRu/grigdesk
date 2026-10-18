@@ -41,7 +41,7 @@ const USAGE = {
  * интерфейса («что предложено удалить и что обещано вернуть»), а не сетевой слой.
  */
 async function mountCleanup(t, { values = {}, prune = async () => ({ ok: true, report: {} }) } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/docker');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/docker');
   const pruneCalls = [];
   globalThis.__dockerCleanupHarness = {
     store: {

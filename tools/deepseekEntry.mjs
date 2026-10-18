@@ -70,11 +70,13 @@ for (const bundle of ['base', profile === 'web' ? 'web-app' : 'acp-app']) {
 }
 
 if (profile === 'web') {
-  layers.push({ insert: [{ id: 'cockpit-web-auth', name: new URL('./webHost.mjs', import.meta.url).href }] });
+  layers.push({ insert: [
+    { id: 'grigdesk-web-auth', name: new URL('./webHost.mjs', import.meta.url).href },
+  ] });
 } else {
   layers.push({ insert: [
     { id: 'settings-controller', name: '@deepseek-ai/dsh-api-settings-controller' },
-    { id: 'cockpit-acp-settings', name: new URL('./acpSettingsBridge.mjs', import.meta.url).href },
+    { id: 'grigdesk-acp-settings', name: new URL('./acpSettingsBridge.mjs', import.meta.url).href },
   ] });
 }
 
@@ -87,7 +89,7 @@ if (process.env.DSH_TELEMETRY_DISABLED) {
 }
 
 const home = resolveDshHome();
-const config = path.join(home, 'cockpit-profile', profile, 'cordis.yml');
+const config = path.join(home, 'grigdesk-profile', profile, 'cordis.yml');
 
 await mkdir(path.dirname(config), { recursive: true });
 await writeFile(config, '[]\n');

@@ -17,7 +17,7 @@ const FIXTURE = path.join(ROOT, 'tests/fixtures/kimi-server/fake-kimi-turn.mjs')
  * Дом и переписка синтетические; shell-обёртка оставляет импорт Fastify у фикстуры.
  */
 async function fixture(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-adapter-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-adapter-'));
   const bin = path.join(dir, 'kimi-fixture');
   const home = path.join(dir, 'home');
   const chatsDir = path.join(dir, 'chats');
@@ -134,7 +134,7 @@ test('Kimi adapter сохраняет порядок двух уточнений
     model: 'kimi-code/k3',
     permissionMode: 'default',
     providerSettings: { blockDirectSsh: false },
-    env: { ...process.env, COCKPIT_KIMI_FIXTURE_STEERS: '2' },
+    env: { ...process.env, GRIGDESK_KIMI_FIXTURE_STEERS: '2' },
     onAssistantMessage: (event) => blocks.push(event),
     onInTurnReady: (given) => { port = given; },
   });
@@ -172,7 +172,7 @@ test('Kimi adapter проводит разрешение через всплыв
     model: 'kimi-code/k3',
     permissionMode: 'default',
     providerSettings: { blockDirectSsh: false },
-    env: { ...process.env, COCKPIT_KIMI_FIXTURE_APPROVAL: '1' },
+    env: { ...process.env, GRIGDESK_KIMI_FIXTURE_APPROVAL: '1' },
     onPermission: async (ask) => {
       asks.push(ask);
 
@@ -219,7 +219,7 @@ test('Kimi contained строит серверный запуск внутри �
         return {
           command: 'sandbox-fixture',
           args: ['web'],
-          unit: 'cockpit-kimi-fixture.service',
+          unit: 'grigdesk-kimi-fixture.service',
           cwdReal: f.dir,
         };
       },
@@ -244,5 +244,5 @@ test('Kimi contained строит серверный запуск внутри �
   assert.equal(launches.length, 1);
   assert.equal(launches[0].launch.command, 'sandbox-fixture');
   assert.match(launches[0].socketPath, /\/c\/s$/);
-  assert.deepEqual(stoppedUnits, ['cockpit-kimi-fixture.service']);
+  assert.deepEqual(stoppedUnits, ['grigdesk-kimi-fixture.service']);
 });

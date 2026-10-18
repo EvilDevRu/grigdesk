@@ -466,7 +466,7 @@ test('WA-01–07 transport, stale replies, SSE lifetime и durable UUID', async 
       await restored.loadTasks();
     }
 
-    const keys = JSON.parse(localStorage.getItem('cockpit-studio3d-seen:notification-user'));
+    const keys = JSON.parse(localStorage.getItem('grigdesk-studio3d-seen:notification-user'));
 
     assert.equal(keys.length, 500);
     assert.equal(new Set(keys).size, 500);

@@ -1,7 +1,7 @@
 <template>
   <div class="pair-form">
     <ol class="pair-steps">
-      <li>Откройте в кокпите «Настройки → Доступ».</li>
+      <li>Откройте в GrigDesk «Настройки → Доступ».</li>
       <li v-if="!isDesktop">Нажмите «Сканировать QR» и наведите камеру на код.</li>
     </ol>
     <UiButton v-if="!isDesktop" kind="primary" variant="solid" :busy="link.busy" @click="scan">
@@ -15,7 +15,7 @@
       multiline
       :rows="3"
       :max-length="4096"
-      placeholder="cockpitlink:1:…"
+      placeholder="grigdesklink:1:…"
       :disabled="link.busy"
     />
     <UiButton :busy="link.busy" :disabled="!text.trim()" @click="add">Добавить</UiButton>

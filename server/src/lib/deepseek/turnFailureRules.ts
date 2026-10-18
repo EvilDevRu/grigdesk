@@ -39,7 +39,7 @@ export const DSH_TURN_FAILURE_RULES: readonly TurnFailureRule[] = Object.freeze(
 /**
  * Общий сигнал из `turn/end.reason.error`. Код берётся только непустой строкой, статус —
  * целым положительным; пустые поля не кладутся, иначе отсутствие знания превратилось бы
- * в код и увело сбой мимо общих слов. Текст подменяется запасной подписью кокпита.
+ * в код и увело сбой мимо общих слов. Текст подменяется запасной подписью GrigDesk.
  */
 export function dshTurnFailure(
   failure: Record<string, unknown>,

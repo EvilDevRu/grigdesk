@@ -28,7 +28,7 @@ function botView(over = {}) {
     configured: true,
     botId: 8123456789,
     username: 'example_inbox_bot',
-    firstName: 'Кокпит · входящие',
+    firstName: 'GrigDesk · входящие',
     canReadAllGroupMessages: false,
     tokenHint: '…v5u6',
     connectedAt: Date.parse('2026-08-07T10:00:00Z'),
@@ -77,7 +77,7 @@ test('форма подключает бота: пробелы срезаны, �
   const { wrapper, flushPromises } = await mountView(t, { api });
 
   // Первое знакомство не свалено в длинную инструкцию: действие в Телеграме и
-  // действие в кокпите стоят двумя отдельными шагами, а следующий путь виден заранее.
+  // действие в GrigDesk стоят двумя отдельными шагами, а следующий путь виден заранее.
   assert.equal(wrapper.findAll('.setup-card').length, 2);
   assert.match(wrapper.text(), /Что произойдёт после подключения/);
   assert.match(wrapper.get('[data-state="provider-disconnected"]').text(), /только для чтения/);

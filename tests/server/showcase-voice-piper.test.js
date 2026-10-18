@@ -195,7 +195,7 @@ test('тишина вместо речи — отказ, а не готовый 
 });
 
 test('установленный движок произносит фразу по-настоящему', async (t) => {
-  const voiceDir = process.env.COCKPIT_SHOWCASE_VOICE_DIR || DEFAULT_VOICE_DIR;
+  const voiceDir = process.env.GRIGDESK_SHOWCASE_VOICE_DIR || DEFAULT_VOICE_DIR;
   const runtime = voiceRuntimePaths(voiceDir);
   const engine = createPiperEngine(runtime);
   const doctor = await engine.doctor();

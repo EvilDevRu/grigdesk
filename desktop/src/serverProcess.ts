@@ -121,7 +121,7 @@ export async function readUnitState(signal: AbortSignal, execFileImpl = execFile
   return new Promise((resolve) => {
     try {
       execFileImpl('systemctl', [
-        '--user', 'show', 'cockpit-server.service', '--property=ActiveState', '--value',
+        '--user', 'show', 'grigdesk-server.service', '--property=ActiveState', '--value',
       ], {
         timeout: 5000,
         signal,

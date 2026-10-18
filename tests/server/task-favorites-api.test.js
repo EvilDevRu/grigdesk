@@ -17,7 +17,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t, { identity, identityError } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-favorites-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-task-favorites-api-'));
   const filePath = path.join(root, 'task-favorites.json');
   t.after(() => rm(root, { recursive: true, force: true }));
 

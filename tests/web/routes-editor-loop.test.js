@@ -55,7 +55,7 @@ test('удаление ведущего называет висячую связ
 // Пробный сценарий цикла: потолок кругов живёт в профиле, поэтому сценарий несёт свой и
 // передаёт его в каждом шаге; предел шагов цикла вмещает потолок 300 (601 шаг).
 async function simulationStore(t, draft) {
-  await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const { createPinia, setActivePinia } = await import(
     '../../web/node_modules/pinia/dist/pinia.mjs'
   );
@@ -122,7 +122,7 @@ test('обычный маршрут не несёт потолка кругов,
 });
 
 test('панель сценария спрашивает потолок только у маршрута с циклом', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteSimulation.vue'));
   const { mount } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

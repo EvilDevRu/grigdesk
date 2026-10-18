@@ -73,8 +73,8 @@ onMounted(async () => {
   // чата и компактного компаньона. Ключ полноразмерного composer-а не трогаем: его
   // высота по-прежнему нужна /chats.
   try {
-    localStorage.removeItem('cockpit-chat-panel-composer-h');
-    localStorage.removeItem('cockpit-companion-device-v1');
+    localStorage.removeItem('grigdesk-chat-panel-composer-h');
+    localStorage.removeItem('grigdesk-companion-device-v1');
   } catch { /* storage может быть недоступен */ }
   auth.watchUnauthorized();
   await auth.load();

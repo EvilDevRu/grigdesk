@@ -7,7 +7,7 @@ import test from 'node:test';
 import { buildKimiHostWebHome } from '../../server/src/lib/kimi/hostWebHome.ts';
 
 test('Kimi host web сохраняет сессии и конфигурацию, служебный MCP изолирован на запуск', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-web-home-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-web-home-'));
   const kimiHome = path.join(root, 'user-home');
   const runtimeHome = path.join(root, 'runtime');
   const sessions = path.join(kimiHome, 'sessions');
@@ -23,7 +23,7 @@ test('Kimi host web сохраняет сессии и конфигурацию,
     kimiHome,
     runtimeHome,
     mcpServers: [{
-      name: 'cockpit-work',
+      name: 'grigdesk-work',
       command: '/bin/node',
       args: ['work.mjs'],
     }],
@@ -32,7 +32,7 @@ test('Kimi host web сохраняет сессии и конфигурацию,
 
   assert.equal(await readlink(path.join(overlay.home, 'sessions')), sessions);
   assert.equal(await readlink(path.join(overlay.home, 'config.toml')), path.join(kimiHome, 'config.toml'));
-  assert.deepEqual(Object.keys(merged.mcpServers).sort(), ['cockpit-work', 'user-tool']);
+  assert.deepEqual(Object.keys(merged.mcpServers).sort(), ['grigdesk-work', 'user-tool']);
   assert.deepEqual(JSON.parse(await readFile(path.join(kimiHome, 'mcp.json'), 'utf8')), {
     mcpServers: { 'user-tool': { command: '/bin/true' } },
   });

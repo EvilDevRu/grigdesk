@@ -104,7 +104,7 @@ export function pultReplyAction(text: unknown): string | null {
 }
 
 export const homeCard = () => [
-  'Пульт кокпита',
+  'Пульт GrigDesk',
   '',
   '📋 Конвейер — что сейчас идёт и где требуется решение.',
   '💬 Агент — разговор с ассистентом и управление его памятью.',
@@ -119,7 +119,7 @@ export const agentCard = () => [
   'Действия, требующие решения, ассистент спросит отдельной карточкой.',
 ].join('\n');
 
-export const tasksCard = () => '📥 Просмотр и запуск задач пока недоступны. Открой задачи в кокпите.';
+export const tasksCard = () => '📥 Просмотр и запуск задач пока недоступны. Открой задачи в GrigDesk.';
 
 function tokenCount(value: unknown): string {
   const n = Number(value);
@@ -200,7 +200,7 @@ export function gateCard({ subject, reason }: { subject?: unknown; reason?: unkn
 
 /**
  * Кто спрашивает. Голое «чат» бесполезно: чатов у человека несколько, и вопрос вроде
- * «что именно выпиливаем?» без имени разговора неотвечаем — приходится открывать кокпит,
+ * «что именно выпиливаем?» без имени разговора неотвечаем — приходится открывать GrigDesk,
  * то есть ровно то, ради чего пульт и заведён. Название чата даёт `/api/chat/waiting`;
  * нет ни его, ни задачи — честно остаётся «чат».
  */
@@ -255,7 +255,7 @@ export function permissionCard({ subject, tool, preview }: {
 }): string {
   const body = [
     `${collapseLine(tool)}: ${line(preview, LIMITS.preview)}`,
-    'Полный текст — в кокпите.',
+    'Полный текст — в GrigDesk.',
   ].join('\n');
   return withHeader(`🔐 ${subject} — агент просит разрешение`, body);
 }
@@ -379,7 +379,7 @@ function progressLine(task: PultTask | null | undefined): string {
 /**
  * Чем занят агент прямо сейчас: «пишет» против «нет событий 28 мин (playwright)».
  * Это главный ответ на вопрос «висит или работает», ради которого с телефона и
- * открывают кокпит. Формулировку даёт общий agentActivityLabel, здесь только шапка.
+ * открывают GrigDesk. Формулировку даёт общий agentActivityLabel, здесь только шапка.
  */
 export function activityLine(task: PultTask | null | undefined): string {
   const activity = activityFromSilence(task?.silence);
@@ -593,7 +593,7 @@ export function planPages(value: unknown): string[] {
     while (points[offset] === '\n') offset += 1;
   }
   if (offset < points.length && pages.length) {
-    const notice = '… План длиннее лимита Telegram-пульта; полностью он доступен в кокпите.';
+    const notice = '… План длиннее лимита Telegram-пульта; полностью он доступен в GrigDesk.';
     const bodyLimit = LIMITS.planPage - [...notice].length - 2;
     pages[pages.length - 1] = `${clipText(pages[pages.length - 1], bodyLimit)}\n\n${notice}`;
   }

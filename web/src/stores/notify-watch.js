@@ -77,7 +77,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
     },
     /**
      * silent=true — первичный снимок: заполняем состояние без оповещений
-     * (иначе каждый заход в кокпит «оповещал» бы о давно ждущих задачах).
+     * (иначе каждый заход в GrigDesk «оповещал» бы о давно ждущих задачах).
      */
     async check(silent = false) {
       if (checking) return;

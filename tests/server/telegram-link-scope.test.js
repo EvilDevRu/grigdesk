@@ -31,7 +31,7 @@ const one = (text) => {
 const message = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   threadId: null,
   messageId: 42,
   date: 1_770_000_000,

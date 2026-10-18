@@ -9,7 +9,7 @@ import { readActivity, readAgentLive, readRunSilence } from '../../server/src/li
 import { readProcessIdentity } from '../../server/src/lib/speech/modelJobsProcess.ts';
 
 test('activity follows the active run and renders Codex JSONL events', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-activity.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const runId = 'run-codex-1';
@@ -93,7 +93,7 @@ test('activity follows the active run and renders Codex JSONL events', async (t)
 // с него свежесть журнала нельзя. Иначе на штатной паузе у ворот модалка показывает
 // давнюю запись BUILD отменённой попытки, и это читается как «агент завис».
 test('a stale ACTIVE_RUN of a finished stage is not mistaken for live activity', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-activity-stale.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity-stale.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const staleDir = path.join(stateDir, 'logs', 'runs', 't42', 'BUILD', 'run-abandoned');
@@ -138,7 +138,7 @@ test('a stale ACTIVE_RUN of a finished stage is not mistaken for live activity',
 // возраст журнала убитого хода звенел «молчит 599 мин» над ходом, который только стартует.
 // Молчать может лишь ход, чей раннер жив: PID и STARTTIME из meta.env совпали с /proc.
 test('a run whose runner is gone is not read as silence', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-silence-gone.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-silence-gone.'));
 
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
@@ -203,10 +203,10 @@ function heartbeat(id, tool, sec) {
 
 // Хартбиты обновляют mtime журнала, поэтому свежесть файла перестала значить «агент
 // работает»: в регрессионном сценарии браузерная приёмка долго стояла на мёртвой странице, а
-// кокпит всё это время писал «агент пишет». Молчание считаем по последней осмысленной
+// GrigDesk всё это время писал «агент пишет». Молчание считаем по последней осмысленной
 // записи, длительность берём из самого хартбита — он её и сообщает.
 test('a tail of heartbeats reads as silence and names the hanging tool', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-silence.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-silence.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const runDir = path.join(stateDir, 'logs', 'runs', 't43', 'BROWSER', 'run-browser-1');
@@ -245,7 +245,7 @@ test('a tail of heartbeats reads as silence and names the hanging tool', async (
 // Обратная сторона того же правила: вызов ответил, ход снова заговорил — молчание
 // обнулилось, хотя хартбиты никуда из журнала не делись.
 test('a meaningful record after the heartbeats ends the silence', async (t) => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-silence-over.'));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-silence-over.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
 
   const runDir = path.join(stateDir, 'logs', 'runs', 't44', 'BROWSER', 'run-browser-2');

@@ -31,7 +31,7 @@ async function walkText(root) {
 }
 
 test('пароль не появляется в сохранённых SSH-профилях и клиентском DTO', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-secret-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-secret-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   let module;
   try {
@@ -64,7 +64,7 @@ test('пароль не появляется в сохранённых SSH-пр�
 });
 
 test('пара метка и роль уникальна только внутри одного проекта', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-profile-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-profile-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   let module;
   try {
@@ -151,7 +151,7 @@ test('SSH transport использует ssh2 и не запускает пар�
 });
 
 test('пароль из connect не попадает в prefs и их клиентский snapshot', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-prefs-secret-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-prefs-secret-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const prefsPath = path.join(root, 'prefs.json');
   const prefs = new PrefsStore({ prefsPath });

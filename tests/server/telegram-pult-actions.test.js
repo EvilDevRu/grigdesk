@@ -30,7 +30,7 @@ const OWNER_CHAT = 555001;
 const T0 = Date.UTC(2026, 7, 19, 10, 0, 0);
 const silent = { warn() {}, error() {}, info() {}, debug() {} };
 
-function fakeCockpit() {
+function fakeGrigDesk() {
   const calls = [];
   const routes = new Map();
   return {
@@ -78,13 +78,13 @@ async function fixture(t, { confirmed = true } = {}) {
     await seed.context.botSettings.setPult({ chatId: OWNER_CHAT, userId: OWNER_CHAT, confirmedAtMs: T0 });
   }
   await seed.release();
-  const cockpit = fakeCockpit();
+  const grigdesk = fakeGrigDesk();
   const forgotten = [];
   const clock = { at: T0 };
   const store = new TelegramPultStateStore({ file: path.join(dir, 'pult-state.json'), log: silent });
   const actions = new TelegramPultActions({
     isEnabled: () => true,
-    callApi: cockpit.callApi,
+    callApi: grigdesk.callApi,
     summary: async () => 'сводка',
     forget: (key) => forgotten.push(key),
     stateStoreFor: () => store,
@@ -97,7 +97,7 @@ async function fixture(t, { confirmed = true } = {}) {
     try { return await operation(lease); } finally { await lease.release(); }
   };
   return {
-    cockpit,
+    grigdesk,
     forgotten,
     clock,
     botCalls,
@@ -136,11 +136,11 @@ async function fixture(t, { confirmed = true } = {}) {
 
 test('ворота approve: inject в ту же ручку, итог всплывашкой, карточка удалена, ключ забыт', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
     statusCode: 200, body: { ok: true, resumed: true },
   });
   await f.tap('g:4187:GATE_PLAN:a');
-  assert.deepEqual(f.cockpit.calls[0], {
+  assert.deepEqual(f.grigdesk.calls[0], {
     method: 'POST', url: '/api/tasks/4187/gate/gate_plan/approve', payload: {},
   });
   assert.equal(f.answers().length, 1);
@@ -152,7 +152,7 @@ test('ворота approve: inject в ту же ручку, итог всплы�
 
 test('resumed:false не глотается: решение записано, но прогон не поехал', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
     statusCode: 200, body: { ok: true, resumed: false, resumeError: 'контракт профиля разошёлся' },
   });
   await f.tap('g:4187:GATE_PLAN:a');
@@ -162,7 +162,7 @@ test('resumed:false не глотается: решение записано, н
 
 test('409 gate_not_current и attempt_terminal доезжают словами', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
     statusCode: 409,
     body: { error: 'gate_not_current', message: 'маршрут не стоит на этих воротах: журнал на узле build (ready)' },
   });
@@ -176,17 +176,17 @@ test('409 gate_not_current и attempt_terminal доезжают словами',
 test('отклонение с пояснением: реплай на карточку уезжает в {comment}', async (t) => {
   const f = await fixture(t);
   await f.tap('g:4187:GATE_PLAN:r');
-  assert.equal(f.cockpit.calls.length, 0, 'первый тап — только вопрос, без inject');
+  assert.equal(f.grigdesk.calls.length, 0, 'первый тап — только вопрос, без inject');
   assert.match(f.edits()[0].body.text, /Ответь РЕПЛАЕМ/u);
   const buttons = f.edits()[0].body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
   assert.deepEqual(buttons, ['po:4187', 'g:4187:GATE_PLAN:rn', 'g:4187:GATE_PLAN:a']);
 
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/reject', (payload) => ({
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/reject', (payload) => ({
     statusCode: 200, body: { ok: true, resumed: true, got: payload },
   }));
   await f.say('Кнопка съезжает на мобиле, поправь отступы', { replyToMessageId: 42 });
-  assert.equal(f.cockpit.calls.length, 1);
-  assert.deepEqual(f.cockpit.calls[0].payload, { comment: 'Кнопка съезжает на мобиле, поправь отступы' });
+  assert.equal(f.grigdesk.calls.length, 1);
+  assert.deepEqual(f.grigdesk.calls[0].payload, { comment: 'Кнопка съезжает на мобиле, поправь отступы' });
   assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42], 'карточка ворот удаляется после решения');
   assert.match(f.sends().at(-1).body.text, /✓ #4187: отклонено, замечание уехало агенту/u,
     'всплывашки у реплая нет — итог приходит эфемерным сообщением');
@@ -204,14 +204,14 @@ test('durable-реплай на карточку ворот после рест�
       replyAction: { kind: 'gate-reject', taskId: '4187', gateKey: 'GATE_PLAN' },
     },
   } });
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
     statusCode: 200, body: { ok: true, resumed: true },
   });
   await f.say('/не запускай этот вариант', {
     replyToMessageId: 42,
     replyToFromId: BOT_ID,
   });
-  assert.deepEqual(f.cockpit.calls.map(({ method, url, payload }) => ({ method, url, payload })), [{
+  assert.deepEqual(f.grigdesk.calls.map(({ method, url, payload }) => ({ method, url, payload })), [{
     method: 'POST',
     url: '/api/tasks/4187/gate/gate_plan/reject',
     payload: { comment: '/не запускай этот вариант' },
@@ -223,21 +223,21 @@ test('реплай после TTL не уезжает: ожидание прот
   await f.tap('g:4187:GATE_PLAN:r');
   f.clock.at = T0 + 10 * 60_000 + 1;
   await f.say('поздний текст', { replyToMessageId: 42, replyToFromId: BOT_ID });
-  assert.equal(f.cockpit.calls.length, 0, 'inject не случился');
+  assert.equal(f.grigdesk.calls.length, 0, 'inject не случился');
 });
 
 test('«без пояснения» шлёт reject с пустым comment', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
     statusCode: 200, body: { ok: true, resumed: true },
   });
   await f.tap('g:4187:GATE_PLAN:rn');
-  assert.deepEqual(f.cockpit.calls[0].payload, {});
+  assert.deepEqual(f.grigdesk.calls[0].payload, {});
 });
 
 test('вопрос агента: вариант i уезжает в {answers} с label из живого /api/chat/waiting', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('GET', '/api/chat/waiting', {
+  f.grigdesk.set('GET', '/api/chat/waiting', {
     statusCode: 200,
     body: {
       waiting: [{
@@ -252,9 +252,9 @@ test('вопрос агента: вариант i уезжает в {answers} с
       }],
     },
   });
-  f.cockpit.set('POST', '/api/chat/permission/p1abc', { statusCode: 200, body: { ok: true } });
+  f.grigdesk.set('POST', '/api/chat/permission/p1abc', { statusCode: 200, body: { ok: true } });
   await f.tap('q:p1abc:1');
-  const post = f.cockpit.calls.find((c) => c.method === 'POST');
+  const post = f.grigdesk.calls.find((c) => c.method === 'POST');
   assert.deepEqual(post.payload, {
     answers: [{ header: 'Миграция', question: 'Какой способ миграции выбрать?', selected: ['Поэтапно'] }],
   });
@@ -263,9 +263,9 @@ test('вопрос агента: вариант i уезжает в {answers} с
   assert.deepEqual(f.forgotten, ['q:p1abc']);
 });
 
-test('старые кнопки structured form и external URL требуют завершения в Cockpit', async (t) => {
+test('старые кнопки structured form и external URL требуют завершения в GrigDesk', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('GET', '/api/chat/waiting', {
+  f.grigdesk.set('GET', '/api/chat/waiting', {
     statusCode: 200,
     body: {
       waiting: [{
@@ -280,7 +280,7 @@ test('старые кнопки structured form и external URL требуют �
   await f.tap('q:p1abc:0');
   await f.tap('q:p1abc:txt', { messageId: 43 });
 
-  f.cockpit.set('GET', '/api/chat/waiting', {
+  f.grigdesk.set('GET', '/api/chat/waiting', {
     statusCode: 200,
     body: {
       waiting: [{
@@ -293,20 +293,20 @@ test('старые кнопки structured form и external URL требуют �
   });
   await f.tap('p:p2xyz:a', { messageId: 44 });
 
-  assert.equal(f.cockpit.calls.filter((call) => call.method === 'POST').length, 0);
+  assert.equal(f.grigdesk.calls.filter((call) => call.method === 'POST').length, 0);
   assert.equal(f.answers().length, 3);
-  assert.ok(f.answers().every((call) => /Cockpit/u.test(call.body.text)));
+  assert.ok(f.answers().every((call) => /GrigDesk/u.test(call.body.text)));
   assert.ok(f.edits().every((call) => (
     call.body.reply_markup.inline_keyboard.length === 0
-    && /Заверши в Cockpit/u.test(call.body.text)
+    && /Заверши в GrigDesk/u.test(call.body.text)
   )));
 });
 
 test('протухший pid — «вопрос уже закрыт», без inject ответа', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('GET', '/api/chat/waiting', { statusCode: 200, body: { waiting: [] } });
+  f.grigdesk.set('GET', '/api/chat/waiting', { statusCode: 200, body: { waiting: [] } });
   await f.tap('q:p1abc:1');
-  assert.equal(f.cockpit.calls.filter((c) => c.method === 'POST').length, 0);
+  assert.equal(f.grigdesk.calls.filter((c) => c.method === 'POST').length, 0);
   assert.match(f.answers()[0].body.text, /уже закрыт/u);
   assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42],
     'повод ушёл — карточка удаляется наравне с решёнными');
@@ -314,22 +314,22 @@ test('протухший pid — «вопрос уже закрыт», без in
 
 test('разрешение: allow/deny уезжают в permission, отказ с пояснением — реплаем', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/chat/permission/p2xyz', (payload) => ({
+  f.grigdesk.set('POST', '/api/chat/permission/p2xyz', (payload) => ({
     statusCode: 200, body: { ok: true, got: payload },
   }));
   await f.tap('p:p2xyz:a');
   // Перед решением карточка дочитывает имя чата, поэтому сверяем именно решение.
-  assert.deepEqual(f.cockpit.calls.filter((c) => c.method === 'POST').at(-1).payload, { allow: true });
+  assert.deepEqual(f.grigdesk.calls.filter((c) => c.method === 'POST').at(-1).payload, { allow: true });
   assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42],
     'карточка разрешения удаляется после решения');
 
-  f.cockpit.set('GET', '/api/chat/waiting', {
+  f.grigdesk.set('GET', '/api/chat/waiting', {
     statusCode: 200,
     body: { waiting: [{ pid: 'p2xyz', chatKey: 'c1', at: T0, tool: 'Bash', input: { command: 'rm -rf dist' } }] },
   });
   await f.tap('p:p2xyz:c', { messageId: 43 });
   await f.say('Сначала покажи, что именно удалишь', { replyToMessageId: 43 });
-  const denies = f.cockpit.calls.filter((c) => c.method === 'POST');
+  const denies = f.grigdesk.calls.filter((c) => c.method === 'POST');
   assert.deepEqual(denies.at(-1).payload, { allow: false, comment: 'Сначала покажи, что именно удалишь' });
   assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42, 43],
     'карточка отказа с пояснением тоже удаляется');
@@ -338,7 +338,7 @@ test('разрешение: allow/deny уезжают в permission, отказ 
 
 test('Telegram-кнопка fail-closed не отвечает на SSH-origin ни одним endpoint', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('GET', '/api/chat/waiting', {
+  f.grigdesk.set('GET', '/api/chat/waiting', {
     statusCode: 200,
     body: {
       waiting: [{
@@ -351,18 +351,18 @@ test('Telegram-кнопка fail-closed не отвечает на SSH-origin н
       }],
     },
   });
-  f.cockpit.set('POST', '/api/chat/permission/ssh-private-pid', {
+  f.grigdesk.set('POST', '/api/chat/permission/ssh-private-pid', {
     statusCode: 200,
     body: { ok: true },
   });
-  f.cockpit.set('POST', '/api/ssh/approvals/ssh-private-pid', {
+  f.grigdesk.set('POST', '/api/ssh/approvals/ssh-private-pid', {
     statusCode: 200,
     body: { ok: true },
   });
   await f.tap('p:ssh-private-pid:a');
 
   assert.deepEqual(
-    f.cockpit.calls.filter((call) => call.method === 'POST'),
+    f.grigdesk.calls.filter((call) => call.method === 'POST'),
     [],
   );
 });
@@ -373,13 +373,13 @@ test('чужое нажатие — молча ноль вызовов: ни ans
   await f.tap('g:4187:GATE_PLAN:a', { chatId: 777333 });
   await f.tap('g:4187:GATE_PLAN:a', { chatType: 'supergroup', chatId: -100123 });
   assert.equal(f.botCalls.length, 0);
-  assert.equal(f.cockpit.calls.length, 0);
+  assert.equal(f.grigdesk.calls.length, 0);
 });
 
 test('мусорный callback_data владельцу отвечает «кнопка устарела»', async (t) => {
   const f = await fixture(t);
   await f.tap('nonsense:data');
-  assert.equal(f.cockpit.calls.length, 0);
+  assert.equal(f.grigdesk.calls.length, 0);
   assert.match(f.answers()[0].body.text, /устарела/u);
 });
 
@@ -387,7 +387,7 @@ test('мусорный callback_data владельцу отвечает «кн�
 
 test('ворота reject «без пояснения»: итог всплывашкой, карточка удалена', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
     statusCode: 200, body: { ok: true, resumed: true },
   });
   await f.tap('g:4187:GATE_PLAN:rn');
@@ -399,7 +399,7 @@ test('ворота reject «без пояснения»: итог всплыва
 
 test('свой ответ на вопрос реплаем: карточка удаляется, итог — эфемерным сообщением', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('GET', '/api/chat/waiting', {
+  f.grigdesk.set('GET', '/api/chat/waiting', {
     statusCode: 200,
     body: {
       waiting: [{
@@ -411,9 +411,9 @@ test('свой ответ на вопрос реплаем: карточка у�
     },
   });
   await f.tap('q:p1abc:txt'); // режим реплая на карточку 42
-  f.cockpit.set('POST', '/api/chat/permission/p1abc', { statusCode: 200, body: { ok: true } });
+  f.grigdesk.set('POST', '/api/chat/permission/p1abc', { statusCode: 200, body: { ok: true } });
   await f.say('Отвечаю своими словами', { replyToMessageId: 42 });
-  const post = f.cockpit.calls.find((c) => c.method === 'POST');
+  const post = f.grigdesk.calls.find((c) => c.method === 'POST');
   assert.deepEqual(post.payload, { answers: [{ text: 'Отвечаю своими словами' }] });
   assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42], 'карточка вопроса удалена');
   assert.match(f.sends().at(-1).body.text, /✓ .*: свой ответ уехал агенту/u);
@@ -433,7 +433,7 @@ test('«Отменено» на карточке подтверждения: в�
 test('реплай-отклонение ворот с resumed:false: карточка НЕ удаляется, причина видна текстом', async (t) => {
   const f = await fixture(t);
   await f.tap('g:4187:GATE_PLAN:r');
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/reject', {
     statusCode: 200, body: { ok: true, resumed: false, resumeError: 'контракт профиля разошёлся' },
   });
   await f.say('не нравится план', { replyToMessageId: 42 });
@@ -443,7 +443,7 @@ test('реплай-отклонение ворот с resumed:false: карто�
 
 test('отказ deleteMessage не роняет обработку нажатия', async (t) => {
   const f = await fixture(t);
-  f.cockpit.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
+  f.grigdesk.set('POST', '/api/tasks/4187/gate/gate_plan/approve', {
     statusCode: 200, body: { ok: true, resumed: true },
   });
   f.setFailDeletes(true);

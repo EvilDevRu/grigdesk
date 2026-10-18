@@ -1,7 +1,7 @@
 import schema from './synthetic-v1.json' with { type: 'json' };
 
 /**
- * Пятый исполнитель использует реальные общие сервисы Cockpit.
+ * Пятый исполнитель использует реальные общие сервисы GrigDesk.
  * Его schema и приватный payload меняются только через тестовую зависимость.
  */
 export function syntheticProvider({ readSchema = () => schema } = {}) {
@@ -48,7 +48,7 @@ export function syntheticProvider({ readSchema = () => schema } = {}) {
               coverage: 'complete',
               writeChannel: {
                 id: 'overlay',
-                scope: 'cockpit-chats',
+                scope: 'grigdesk-chats',
                 state: 'verified',
               },
               base: { enabled: true },

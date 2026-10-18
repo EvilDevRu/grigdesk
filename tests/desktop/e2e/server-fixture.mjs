@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 const dataHomeUrl = new URL('../../../shared/runtime/dataHome.ts', import.meta.url).href;
 const stubUrl = pathToFileURL(path.join(import.meta.dirname, 'stub.mjs')).href;
 
-// Сервер-фикстура: заглушка Кокпита на COCKPIT_PORT, ключ окна после listen, журнал событий.
+// Сервер-фикстура: заглушка GrigDesk на GRIGDESK_PORT, ключ окна после listen, журнал событий.
 // SIGTERM и разрыв IPC закрывают её с кодом 0, SIGUSR2 изображает перезапуск кодом 75.
 const FIXTURE_APP = `import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -14,7 +14,7 @@ import { startStub } from '${stubUrl}';
 import os from 'node:os';
 import { dataHome, dataPath } from '${dataHomeUrl}';
 
-const log = process.env.COCKPIT_E2E_FIXTURE_LOG;
+const log = process.env.GRIGDESK_E2E_FIXTURE_LOG;
 const record = (entry) => {
   if (log) {
     appendFileSync(log, JSON.stringify({ pid: process.pid, ...entry }) + '\\n');
@@ -26,11 +26,11 @@ record({
   names: Object.keys(process.env).sort(),
   path: process.env.PATH ?? null,
   ldLibraryPath: process.env.LD_LIBRARY_PATH ?? null,
-  desktopChild: process.env.COCKPIT_DESKTOP_CHILD ?? null,
+  desktopChild: process.env.GRIGDESK_DESKTOP_CHILD ?? null,
   connected: typeof process.send === 'function' && process.connected === true,
 });
 
-const delay = Number(process.env.COCKPIT_E2E_FIXTURE_DELAY_MS) || 0;
+const delay = Number(process.env.GRIGDESK_E2E_FIXTURE_DELAY_MS) || 0;
 
 if (delay > 0) {
   await new Promise((resolve) => setTimeout(resolve, delay));
@@ -38,13 +38,13 @@ if (delay > 0) {
 
 const authKey = randomBytes(32).toString('base64url');
 const stub = await startStub({
-  port: Number(process.env.COCKPIT_PORT),
+  port: Number(process.env.GRIGDESK_PORT),
   authKey,
-  packagedCookie: process.env.COCKPIT_E2E_FIXTURE_PACKAGED_COOKIE || null,
-  uiReleasesDir: process.env.COCKPIT_UI_RELEASES_DIR
+  packagedCookie: process.env.GRIGDESK_E2E_FIXTURE_PACKAGED_COOKIE || null,
+  uiReleasesDir: process.env.GRIGDESK_UI_RELEASES_DIR
     || dataPath(dataHome({ env: process.env, home: os.homedir() }), 'uiReleases'),
 });
-const keyFile = process.env.COCKPIT_WINDOW_KEY_PATH;
+const keyFile = process.env.GRIGDESK_WINDOW_KEY_PATH;
 
 mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 });
 writeFileSync(keyFile, authKey, { mode: 0o600 });
@@ -69,18 +69,18 @@ process.channel?.unref?.();
 `;
 
 // Ворота фикстуры: без режима hold пропускают; в режиме hold пишут pid и ждут SIGTERM.
-// С COCKPIT_E2E_GATE_OPEN_FILE отказывают строкой настоящих ворот, пока файла нет, — «ждём VPN».
+// С GRIGDESK_E2E_GATE_OPEN_FILE отказывают строкой настоящих ворот, пока файла нет, — «ждём VPN».
 const FIXTURE_GATE = `#!/usr/bin/env bash
-if [ -n "\${COCKPIT_E2E_GATE_OPEN_FILE:-}" ] && [ ! -e "$COCKPIT_E2E_GATE_OPEN_FILE" ]; then
+if [ -n "\${GRIGDESK_E2E_GATE_OPEN_FILE:-}" ] && [ ! -e "$GRIGDESK_E2E_GATE_OPEN_FILE" ]; then
   echo "VPN-ворота: нет маршрута до 1.1.1.1 — запуск запрещён" >&2
   exit 1
 fi
 
-if [ -z "\${COCKPIT_E2E_GATE_HOLD:-}" ]; then
+if [ -z "\${GRIGDESK_E2E_GATE_HOLD:-}" ]; then
   exit 0
 fi
 
-echo "$$" > "$COCKPIT_E2E_GATE_HOLD"
+echo "$$" > "$GRIGDESK_E2E_GATE_HOLD"
 sleep 600 &
 holder=$!
 trap 'kill "$holder" 2>/dev/null; exit 1' TERM
@@ -99,7 +99,7 @@ export async function writeServerFixture(root) {
   await writeFile(path.join(root, 'server/package.json'), '{"type":"module"}\n');
   await writeFile(path.join(root, 'server/src/app.ts'), FIXTURE_APP);
   await writeFile(path.join(root, 'deploy/require-vpn.sh'), FIXTURE_GATE, { mode: 0o755 });
-  await writeFile(path.join(root, 'web/dist/index.html'), '<!doctype html><title>Кокпит</title>\n');
+  await writeFile(path.join(root, 'web/dist/index.html'), '<!doctype html><title>GrigDesk</title>\n');
   await writeFile(path.join(root, '.env'), '');
 }
 

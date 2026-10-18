@@ -5,12 +5,12 @@
 - runtime-cutover и protocol v2 реализованы;
 - проектные профили изолированы в локальных `profiles/<name>/`, целиком исключённых из Git;
   engine/server/CLI используют единый `FACTORY_PROFILES_DIR`, плоской legacy-раскладки больше нет;
-- полный offline suite запускается без Cockpit и без model call;
+- полный offline suite запускается без GrigDesk и без model call;
 - live state мигрирован с backup в `~/.factory/state/migrations/`;
 - metadata-only host preflight проверен на локальных профилях с разными runner chain и
   workspace mode;
-- текущая поставка проверяется без перезапуска Cockpit и без вызова реальных моделей;
-- Cockpit API и UI поднимают canonical runner chain, task/stage override, model family/effort,
+- текущая поставка проверяется без перезапуска GrigDesk и без вызова реальных моделей;
+- GrigDesk API и UI поднимают canonical runner chain, task/stage override, model family/effort,
   actual provider/model/effort, причину failover и историю attempt; активный run можно
   безопасно переключить на разрешённый резерв;
 - всплывашка исполнителя показывает структурированное состояние лимитов: Claude — через
@@ -22,12 +22,12 @@
   и расход заработанного reset credit при наличии;
 - модельный селектор Codex строится по живому `model/list` его app-server, а не по
   захардкоженному seed; rollout, эффорты, default/hidden и рекомендуемые замены обновляются
-  без релиза Cockpit, дублирующие алиасы схлопываются;
-- незакрытые конвейеры после перезапуска Cockpit возобновляются его собственным механизмом
+  без релиза GrigDesk, дублирующие алиасы схлопываются;
+- незакрытые конвейеры после перезапуска GrigDesk возобновляются его собственным механизмом
   восстановления; human gates и semantic stop не пересекаются, после трёх аварий нужен человек;
 - редактор project/task policy, coverage каждого provider-а и breaker/cooldown в UI остаются
   отдельным этапом; engine CLI и debug-настройки уже доступны.
-- B24 и медиа работают только через код/runtime Cockpit; внешний checkout не является
+- B24 и медиа работают только через код/runtime GrigDesk; внешний checkout не является
   зависимостью, а regression-тест проверяет исходники, документацию и локальный `.env`.
 
 ## Зачем это нужно
@@ -83,7 +83,7 @@ engine/bin/factory profile <PROFILE> runner show
 engine/bin/factory <TASK> runner show
 ```
 
-## Интерфейс Cockpit
+## Интерфейс GrigDesk
 
 Граф читает ту же политику `profiles/<name>/runners.env`, task override и runtime telemetry,
 что и движок. Второй реестр совместимости или список версий моделей на фронте не заводится.
@@ -119,7 +119,7 @@ engine/bin/factory <TASK> runner show
 - причину предыдущего переключения;
 - команду «переключить этот run» на другого кандидата разрешённой цепочки.
 
-Launcher пишет `MODEL` и `EFFORT` каждого реального запуска в его `meta.env`; Cockpit отдаёт
+Launcher пишет `MODEL` и `EFFORT` каждого реального запуска в его `meta.env`; GrigDesk отдаёт
 оба поля в `runner.attempts[]`. В верхней карточке уже запускавшегося provider-а фактический
 effort последней попытки имеет приоритет над текущей policy: изменение `runners.env` не должно
 переписывать историю завершённого этапа. До первого запуска или для старой telemetry без
@@ -127,7 +127,7 @@ effort последней попытки имеет приоритет над т
 
 `POST /api/tasks/:id/runner/switch` доступен только при активной попытке, сверяет target
 с canonical chain и делегирует изменение `engine/bin/factory <task> runner switch`.
-CAS по `run/epoch` и точную process group проверяет engine; Cockpit не пишет control state.
+CAS по `run/epoch` и точную process group проверяет engine; GrigDesk не пишет control state.
 
 При автоматическом переключении одна карточка этапа не заменяется новой задачей: внутри неё
 добавляется попытка, например:
@@ -246,7 +246,7 @@ metadata, каталоги моделей и capabilities, после чего �
 текущее время. Тот же повтор запускает несовпадение сборки runtime-sensitive исполнителя
 с `RUNTIME_VERSION_<id>` снимка. Остальные отказы не запускают обновление; неуспешная
 перепроверка сохраняет `coverage_unavailable` до model call. Подробнее —
-[проверка внутри длинного маршрута](../cockpit/pipeline/coverage-expiry-during-route.md).
+[проверка внутри длинного маршрута](../grigdesk/pipeline/coverage-expiry-during-route.md).
 
 ## Классификация ошибок
 
@@ -256,7 +256,7 @@ Dispatcher принимает нормализованный результат 
 подтверждённые терминальные JSON-события. Отказ `Selected model is at capacity`
 имеет класс `transient`, без переключения модели или breaker квоты. Пояснение
 передаётся человеку отдельно от класса, поэтому даже `unknown` сохраняет текст
-ошибки. Формат — [диагностика отказов](../cockpit/pipeline/runner-failure-diagnostics.md).
+ошибки. Формат — [диагностика отказов](../grigdesk/pipeline/runner-failure-diagnostics.md).
 
 Переключение разрешено:
 
@@ -406,7 +406,7 @@ capability token или полный ответ модели. Глобальна
 8. metadata-only host preflight;
 9. отдельный контролируемый рабочий запуск позднее.
 
-Cockpit и реальные модели на шагах 1–8 не запускаются. Эти шаги выполнены; рабочий запуск
+GrigDesk и реальные модели на шагах 1–8 не запускаются. Эти шаги выполнены; рабочий запуск
 остаётся отдельной операцией после явного разрешения.
 
 Основные наборы:
@@ -465,8 +465,8 @@ tests/run-all.sh
 - Codex получает нужные write roots через `--add-dir` без отключения sandbox;
 - миграция создаёт backup и не оставляет fixed markers/ghost pipeline в live state;
 - debug выключаем, ограничен TTL и не пишет секреты;
-- все тесты зелёные без запуска Cockpit и без model call.
+- все тесты зелёные без запуска GrigDesk и без model call.
 
 Runtime-критерии этого раздела проверяются offline suite. Multi-AI UI и восстановление
-проверяются unit-тестами и production-сборкой; текущая версия не перезапускает Cockpit и
+проверяются unit-тестами и production-сборкой; текущая версия не перезапускает GrigDesk и
 не выполняет рабочий запуск.

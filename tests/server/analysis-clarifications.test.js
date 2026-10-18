@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 import analysisModule from '../../server/src/modules/analysis/index.ts';
+import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -44,7 +45,7 @@ test('пакет ответов хранится в единственном mar
     method: 'POST',
     url: '/api/tasks/42/clarifications',
     payload: {
-      actor: 'cockpit-arbiter',
+      actor: 'grigdesk-arbiter',
       answers: [{
         questionId: 'q-mode',
         optionIds: ['o-manual'],
@@ -59,7 +60,7 @@ test('пакет ответов хранится в единственном mar
     status: response.statusCode,
     human: /Ответ человека/.test(markdown),
     machine: /Разбор арбитра/.test(markdown),
-    marker: /cockpit-clarification:v1/.test(markdown),
+    marker: /grigdesk-clarification:v1/.test(markdown),
     files: (await readdir(dir)).filter((file) => file.includes('clarif')),
   }, {
     status: 200,
@@ -126,7 +127,7 @@ test('GET уточнений возвращает server-owned actor и status �
   const entry = {
     id: 'answer-code',
     questionId: 'q-code',
-    actor: 'cockpit-arbiter',
+    actor: 'grigdesk-arbiter',
     status: 'answered',
     selection: [],
     text: 'Поле уже есть.',
@@ -137,7 +138,7 @@ test('GET уточнений возвращает server-owned actor и status �
   await writeFile(path.join(dir, 't42.clarify.md'), [
     '## Разбор арбитра — машинный',
     'Поле уже есть.',
-    `<!-- cockpit-clarification:v1 ${marker} -->`,
+    `<!-- grigdesk-clarification:v1 ${marker} -->`,
     '',
   ].join('\n'));
   const analyzer = new Analyzer({
@@ -286,7 +287,7 @@ test('human_required арбитра остаётся видимым требов
   await analyzer.appendClarificationBatch(
     '77',
     [{ questionId: 'q-price', status: 'human_required' }],
-    { actor: 'cockpit-arbiter' },
+    { actor: 'grigdesk-arbiter' },
   );
   const markdown = await analyzer.readClarifications('77');
 
@@ -300,4 +301,49 @@ test('human_required арбитра остаётся видимым требов
     verdict: true,
     open: ['Как показывать стоимость?'],
   });
+});
+
+test('ответ арбитра со старым именем читается как grigdesk-arbiter', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-clarification-legacy-'));
+  const entry = {
+    id: 'answer-legacy',
+    questionId: 'q-code',
+    actor: LEGACY_VALUES.arbiterActor,
+    status: 'answered',
+    selection: [],
+    text: 'Поле уже есть.',
+    attachments: [],
+    proof: [],
+  };
+  const marker = Buffer.from(JSON.stringify(entry)).toString('base64url');
+
+  await writeFile(path.join(dir, 't42.clarify.md'), [
+    '## Разбор арбитра — машинный',
+    'Поле уже есть.',
+    `<!-- grigdesk-clarification:v1 ${marker} -->`,
+    '',
+  ].join('\n'));
+
+  const analyzer = new Analyzer({
+    config: { analysisDir: dir },
+    claudeAuth: null,
+    b24: null,
+    factoryState: {},
+    log: null,
+  });
+
+  await analyzer._ready;
+
+  const app = Fastify({ logger: false });
+
+  app.decorate('pluginEnabled', () => true);
+  await app.register(analysisModule, { analyzer });
+  t.after(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const response = await app.inject({ method: 'GET', url: '/api/tasks/42/clarifications' });
+
+  assert.equal(response.json().entries[0].actor, 'grigdesk-arbiter');
 });

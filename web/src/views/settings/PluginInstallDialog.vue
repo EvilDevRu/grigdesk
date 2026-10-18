@@ -18,7 +18,7 @@
             </svg>
           </span>
           <div class="install-head-copy">
-            <p>Плагины Cockpit</p>
+            <p>Плагины GrigDesk</p>
             <h2 class="install-heading" data-role="install-heading">{{ heading }}</h2>
           </div>
           <UiIconButton label="Закрыть окно установки" @click="onOpenChange(false)">
@@ -137,7 +137,7 @@
             </UiDisclosureButton>
             <p v-if="sourceHelpOpen" id="plugin-install-source-help" class="install-source-help">
               Поддерживаются https://…, ssh://…, git@хост:путь и file:///путь.
-              Для приватного репозитория настройте доступ Git на машине, где запущен Cockpit.
+              Для приватного репозитория настройте доступ Git на машине, где запущен GrigDesk.
             </p>
           </template>
         </form>

@@ -1,4 +1,4 @@
-// Хранилище общих настроек кокпита: запись обязана быть fail-closed, а чтение — fail-soft.
+// Хранилище общих настроек GrigDesk: запись обязана быть fail-closed, а чтение — fail-soft.
 //
 // Файл настроек один на всю установку: в нём лежат и паспорта проектов, и выбор человека.
 // Пока запись поверх нечитаемого файла считалась нормой, одна порча тихо превращала
@@ -12,7 +12,7 @@ import { PrefsStore, PrefsCorruptedError } from '../../server/src/lib/prefsStore
 import { SPEECH_DEFAULTS } from '../../server/src/lib/speechSettings.ts';
 
 async function withPrefs(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-prefs-store-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-prefs-store-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const prefsPath = path.join(dir, 'prefs.json');
   return { dir, prefsPath, prefs: new PrefsStore({ prefsPath }) };

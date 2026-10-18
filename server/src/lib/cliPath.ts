@@ -6,7 +6,7 @@ const FALLBACK_PATH = '/usr/local/bin:/usr/bin:/bin';
  * CLI этой установки доступны дочерним агентам без симлинков в домашнем каталоге.
  * Абсолютный bin не зависит от cwd задачи; повторная подготовка не дублирует путь.
  */
-export function cockpitCliPath(
+export function grigDeskCliPath(
     rootDir: string,
     inheritedPath: string | undefined = process.env.PATH,
 ): string {

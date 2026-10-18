@@ -113,7 +113,7 @@ test('RL-45: workflow посредника закрепляет сборку, п
     'npm --prefix relay test',
     'npm --prefix relay run build',
     'npm --prefix relay run test:sea',
-    'sha256sum cockpit-relay > cockpit-relay.sha256',
+    'sha256sum grigdesk-relay > grigdesk-relay.sha256',
   ]) {
     const index = text.indexOf(command);
 
@@ -137,14 +137,14 @@ test('RL-45: workflow посредника закрепляет сборку, п
   assert.match(release, /GH_TOKEN: \$\{\{ github.token \}\}/);
   assert.match(release, /TAG: \$\{\{ steps.tag.outputs.tag \}\}/);
   assert.match(release, /NODE_VERSION: \$\{\{ steps.tag.outputs.node \}\}/);
-  assert.match(release, /bin\/cockpit-relay bin\/cockpit-relay.sha256/);
+  assert.match(release, /bin\/grigdesk-relay bin\/grigdesk-relay.sha256/);
   assert.match(release, /--target "\$GITHUB_SHA"/);
   assert.match(release, /--latest=false/);
   assert.match(release, /--notes "Linux x64, Node \$NODE_VERSION\./);
   assert.doesNotMatch(release, /--verify-tag/);
   assert.match(upload, /if: \$\{\{ !inputs.release \}\}/);
   assert.match(upload, /retention-days: 7/);
-  assert.match(upload, /bin\/cockpit-relay\n\s+bin\/cockpit-relay.sha256/);
+  assert.match(upload, /bin\/grigdesk-relay\n\s+bin\/grigdesk-relay.sha256/);
   assert.match(upload, /if-no-files-found: error/);
   assert.doesNotMatch(text, /if:\s*!/);
 });

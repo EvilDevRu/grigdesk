@@ -21,7 +21,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-agents-safety-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-agents-safety-'));
   const config = {
     agentsDir: path.join(root, 'agents'),
     factoryHome: root,

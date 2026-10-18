@@ -294,7 +294,7 @@ export class DocumentReader {
 
   /**
    * Общие корни плюс корни названной области. Общий корень с тем же путём побеждает:
-   * один каталог не получает двух id, а документ Cockpit остаётся ссылкой `cockpit`.
+   * один каталог не получает двух id, а документ GrigDesk остаётся ссылкой `grigdesk`.
    */
   async roots(scope: unknown = ''): Promise<DocumentRoot[]> {
     const declared: unknown[] = [];

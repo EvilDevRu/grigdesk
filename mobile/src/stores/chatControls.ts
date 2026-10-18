@@ -23,7 +23,7 @@ export const useChatControlsStore = defineStore('chat-controls', () => {
    */
   async function load(force = false) {
     if (!supported.value) {
-      error.value = 'Для управления чатами обновите и перезапустите сервер Кокпита.';
+      error.value = 'Для управления чатами обновите и перезапустите сервер GrigDesk.';
 
       return;
     }

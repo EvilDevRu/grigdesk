@@ -343,7 +343,7 @@ watch([tab, modelId, () => props.active], () => {
  * Настройка выбранной вкладки локальна текущему браузеру.
  */
 function providerSettings(): void {
-  localStorage.setItem('cockpit-settings-tab', 'providers');
+  localStorage.setItem('grigdesk-settings-tab', 'providers');
 }
 
 /**
@@ -364,7 +364,7 @@ function bytes(value: number | null): string {
  */
 function savedWidth(): number {
   try {
-    const saved = localStorage.getItem('cockpit-studio3d-nav-width');
+    const saved = localStorage.getItem('grigdesk-studio3d-nav-width');
 
     return saved ? Math.max(240, Math.min(420, Number(saved) || 260)) : 260;
   } catch {
@@ -411,7 +411,7 @@ function resizeEnd(): void {
   drag = null;
 
   try {
-    localStorage.setItem('cockpit-studio3d-nav-width', String(navWidth.value));
+    localStorage.setItem('grigdesk-studio3d-nav-width', String(navWidth.value));
   } catch { /* Геометрия в памяти. */ }
 }
 
@@ -446,7 +446,7 @@ function resizeReset(): void {
   navWidth.value = 260;
 
   try {
-    localStorage.removeItem('cockpit-studio3d-nav-width');
+    localStorage.removeItem('grigdesk-studio3d-nav-width');
   } catch { /* Геометрия в памяти. */ }
 }
 

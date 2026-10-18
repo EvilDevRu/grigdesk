@@ -16,7 +16,7 @@ const descriptor = {
 
 type Payload = Record<string, unknown>;
 
-// Что кокпит даёт инструменту на запуск: проект и чат навязывает сервер, а сам
+// Что GrigDesk даёт инструменту на запуск: проект и чат навязывает сервер, а сам
 // вызов уходит в надзорный рубеж, который спросит человека.
 interface SupervisedDbOptions {
   projectId?: string;

@@ -1,4 +1,4 @@
-// Durable mapping проверенного Telegram bot к случайному accountRef Cockpit.
+// Durable mapping проверенного Telegram bot к случайному accountRef GrigDesk.
 //
 // Username и token меняются, поэтому owner identity строится только из bot.id,
 // подтверждённого getMe. Registry никогда не выходит в HTTP API.

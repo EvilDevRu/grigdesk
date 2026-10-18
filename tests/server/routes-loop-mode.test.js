@@ -99,7 +99,7 @@ test('граф сохраняет пару режима петли, обычны
 });
 
 test('граф задачи передаёт пару из бандла и счётчики из текущей проекции', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loop-graph-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loop-graph-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -297,7 +297,7 @@ test('отказ продолжать без подъёма потолка ос�
 // Обычный маршрут: признак цикла движок снимает пустым значением (recover из цикла) или не
 // пишет вовсе. В обоих случаях арбитр остаётся доступен; только `1` закрывает его.
 test('снятый признак цикла в реестре оставляет обычному маршруту арбитра', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loop-plain-arbiter-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loop-plain-arbiter-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const attempt = 'a_11111111111111111111111111111111';
   const results = path.join(root, 'control', 'protocol-v2', 'tasks', 't9', 'attempts', attempt,
@@ -334,7 +334,7 @@ test('снятый признак цикла в реестре оставляе�
 // Ворота приёмки читают отчёт исполнителя через /doc/report. В цикле это отчёт последнего
 // сданного визита из реестра; общий report.md — чужой, его показывать нельзя.
 test('документ report в цикле — последний сданный отчёт визита', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loop-report-doc-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loop-report-doc-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   await app.register(factoryModule, {
@@ -380,7 +380,7 @@ test('документ report в цикле — последний сданны�
 });
 
 test('архив задачи уносит отчёты визитов цикла и исходный замер', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loop-archive-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loop-archive-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const names = [
     't77.pipeline', 't77.report.md', 't77.report.r1.md', 't77.report.r1.v2.md',
@@ -424,7 +424,7 @@ function loopDraft() {
 }
 
 test('пробный шаг цикла принимает потолок кругов через HTTP', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loop-simulation-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loop-simulation-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   await app.register(routesModule, {

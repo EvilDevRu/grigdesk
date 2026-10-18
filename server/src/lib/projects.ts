@@ -1,8 +1,8 @@
-// Паспорта проектов: откуда кокпит знает пути репозиториев проекта на диске.
+// Паспорта проектов: откуда GrigDesk знает пути репозиториев проекта на диске.
 // Источник №1 — профиль фабрики (PROFILE_TRIAGE_REPOS, читается через loadTriageProfile):
 // пока идёт миграция, для проектов фабрики пути живут ТАМ, и второй источник тут же
 // разъехался бы с первым (инкремент B переведёт читателей на паспорт).
-// Источник №2 — реестр prefs.projects.<id>: паспорт проекта, заведённого в кокпите.
+// Источник №2 — реестр prefs.projects.<id>: паспорт проекта, заведённого в GrigDesk.
 //
 // Записи реестра бывают двух поколений: старая знает только `repos`, новая — весь
 // паспорт. Читатели получают одну форму через readProjectRecord: разбирать умолчания
@@ -265,9 +265,9 @@ async function factoryRepos(config: ProjectPathsConfig, name: string) {
 }
 
 /**
- * Репозитории проекта: [{key, dir, from: 'factory'|'cockpit'}]. Может быть пусто —
- * профиль без PROFILE_TRIAGE_REPOS или кокпитный проект, где пути ещё не заданы
- * (тогда кокпитные пути работают и для фабричного проекта — как фолбэк, не перекрытие).
+ * Репозитории проекта: [{key, dir, from: 'factory'|'grigdesk'}]. Может быть пусто —
+ * профиль без PROFILE_TRIAGE_REPOS или проект GrigDesk, где пути ещё не заданы
+ * (тогда пути GrigDesk работают и для фабричного проекта — как фолбэк, не перекрытие).
  * Пока идёт миграция, непустой профиль фабрики остаётся источником путей.
  */
 export async function projectRepos({ config, prefs, id, isFactory = null }: {
@@ -281,5 +281,5 @@ export async function projectRepos({ config, prefs, id, isFactory = null }: {
     const repos = await factoryRepos(config, id);
     if (repos.length) return normalizeProjectRepos(repos, 'factory');
   }
-  return normalizeProjectRepos(readProjectRecord(prefs, id)?.repos ?? [], 'cockpit');
+  return normalizeProjectRepos(readProjectRecord(prefs, id)?.repos ?? [], 'grigdesk');
 }

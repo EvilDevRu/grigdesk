@@ -122,7 +122,7 @@ export function createGitPolicyRunner(
         const supplied = await (options.credentialConfig?.() ?? readCredentialConfig(baseEnv));
         const config = credentialHelpersOnly(supplied);
 
-        directory = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-config-'));
+        directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-config-'));
         global = path.join(directory, 'global');
 
         await writeFile(global, config, { mode: 0o600, flag: 'wx' });

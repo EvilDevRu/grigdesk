@@ -194,7 +194,7 @@ function verifyMetadata(artifact: DeepSeekArtifact): void {
 
   if (
     artifact.buildId !== buildId ||
-    artifact.runtimeVersion !== `${artifact.source?.version}.cockpit.b${buildId.slice(0, 16)}`
+    artifact.runtimeVersion !== `${artifact.source?.version}.grigdesk.b${buildId.slice(0, 16)}`
   ) {
     throw deepSeekRuntimeError('deepseek_runtime_corrupt', 'Identity runtime не соответствует содержимому');
   }

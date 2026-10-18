@@ -596,15 +596,15 @@ assert_contains "$(cat "$TEST_ROOT/prompt")" '**150 вызовов инстру�
 # граница: переиспользование prompt cache проверяется только по фактическим read/write.
 FACTORY_ROUTE_TIMEOUT_CLASS=build FACTORY_STAGE_AUTO_COMPACT=120000 \
   run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
-assert_eq 120000 "$(cat "$TEST_ROOT/autocompact")" "порог из кокпита доезжает до раннера"
+assert_eq 120000 "$(cat "$TEST_ROOT/autocompact")" "порог из GrigDesk доезжает до раннера"
 FACTORY_ROUTE_TIMEOUT_CLASS=build run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
 assert_eq 0 "$(cat "$TEST_ROOT/autocompact")" "без настройки порога раннер не вмешивается"
 printf 'AUTO_COMPACT_WINDOW=90000\n' >>"$FACTORY_PROFILES_DIR/fixture/runners.env"
 FACTORY_ROUTE_TIMEOUT_CLASS=build run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
-assert_eq 90000 "$(cat "$TEST_ROOT/autocompact")" "без кокпита порог берётся из runners.env"
+assert_eq 90000 "$(cat "$TEST_ROOT/autocompact")" "без GrigDesk порог берётся из runners.env"
 FACTORY_ROUTE_TIMEOUT_CLASS=build FACTORY_STAGE_AUTO_COMPACT=200000 \
   run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
-assert_eq 200000 "$(cat "$TEST_ROOT/autocompact")" "кокпит сильнее профиля"
+assert_eq 200000 "$(cat "$TEST_ROOT/autocompact")" "GrigDesk сильнее профиля"
 FACTORY_ROUTE_TIMEOUT_CLASS=build FACTORY_STAGE_AUTO_COMPACT=нет \
   run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
 assert_eq 0 "$(cat "$TEST_ROOT/autocompact")" "мусор в пороге читается как «не вмешиваться»"

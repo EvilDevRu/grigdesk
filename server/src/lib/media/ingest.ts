@@ -193,10 +193,10 @@ const readIdentity = readProcessIdentity as (pid: number) => {
 } | null;
 
 // transcribe.py лежит рядом с этим файлом (перенесён вместе с медиа-кодом).
-export const DEFAULT_TRANSCRIBE_PY = process.env.COCKPIT_TRANSCRIBE_PY
+export const DEFAULT_TRANSCRIBE_PY = process.env.GRIGDESK_TRANSCRIBE_PY
     || fileURLToPath(new URL('./transcribe.py', import.meta.url));
 export const DEFAULT_WORKER_PATH = fileURLToPath(new URL('./ingestWorker.ts', import.meta.url));
-export const DEFAULT_MEDIA_HF_DIR = process.env.COCKPIT_MEDIA_HF_DIR
+export const DEFAULT_MEDIA_HF_DIR = process.env.GRIGDESK_MEDIA_HF_DIR
     || dataPath(dataHome({ env: process.env, home: os.homedir() }), 'mediaHf');
 
 /**
@@ -518,8 +518,8 @@ export async function ingestRecording(
     if (!pythonPath || !existsSync(pythonPath)) {
         throw failUnavailable(
             `Распознавание речи не настроено: ${pythonPath
-                ? `python не найден по COCKPIT_MEDIA_PYTHON (${pythonPath})`
-                : 'не задан COCKPIT_MEDIA_PYTHON (путь к python из venv с faster-whisper)'
+                ? `python не найден по GRIGDESK_MEDIA_PYTHON (${pythonPath})`
+                : 'не задан GRIGDESK_MEDIA_PYTHON (путь к python из venv с faster-whisper)'
             }. Подробности и что сделать — GET /api/media/doctor.`,
         );
     }
@@ -672,9 +672,9 @@ export function startIngestJob(
 
     // Детач: воркер живёт независимо от MCP-вызова, который сейчас вернётся.
     const childEnv = buildPythonEnv({ mediaHfDir, pythonPath, baseEnv });
-    if (pythonPath) childEnv.COCKPIT_MEDIA_PYTHON = pythonPath;
-    childEnv.COCKPIT_TRANSCRIBE_PY = transcribePath || DEFAULT_TRANSCRIBE_PY;
-    childEnv.COCKPIT_MEDIA_HF_DIR = mediaHfDir;
+    if (pythonPath) childEnv.GRIGDESK_MEDIA_PYTHON = pythonPath;
+    childEnv.GRIGDESK_TRANSCRIBE_PY = transcribePath || DEFAULT_TRANSCRIBE_PY;
+    childEnv.GRIGDESK_MEDIA_HF_DIR = mediaHfDir;
     const child = (deps.spawn || spawn)(process.execPath, [workerPath, statusPath], {
         detached: true,
         stdio: 'ignore',

@@ -12,23 +12,23 @@ import { fileURLToPath } from 'node:url';
 
 export const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 
-// Всё, что кокпит запускает как самостоятельную программу. Часть — своим процессом
+// Всё, что GrigDesk запускает как самостоятельную программу. Часть — своим процессом
 // (MCP-мосты, воркеры, CLI), часть — снаружи shell-лаунчерами, часть — прогоном тестов.
 // Разница между ними только в том, кто нажимает кнопку: строковый путь одинаково
 // невидим компилятору во всех трёх случаях.
 export const ENTRYPOINTS: readonly string[] = [
-    // Единая команда: этот TS-вход запускает bin/cockpit после проверки Node.
+    // Единая команда: этот TS-вход запускает bin/grigdesk-ctl после проверки Node.
     'cli/main.ts',
     // Команда задач Б24: исходный вход и сборка единственного файла SEA.
     'b24/src/main.ts',
     'b24/scripts/build.mts',
-    'tools/moveDataHome.mts',
+    'tools/brandMove.mts',
     'server/scripts/dataHomeCheck.mts',
     'server/src/app.js',
     'server/src/lib/chat/permission-mcp.js',
     'server/src/lib/executors/work-mcp.js',
     'server/src/lib/executors/_direct-ssh-policy-hook.js',
-    'server/src/workers/cockpit-update-worker.js',
+    'server/src/workers/grigdesk-update-worker.js',
     'server/src/lib/media/ingestWorker.ts',
     // Node-помощник движка: его зовут shell-скрипты runner-launcher.sh и
     // runtime-analytics.sh, и импортом это не видно вовсе.

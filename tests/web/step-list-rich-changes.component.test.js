@@ -16,7 +16,7 @@ let browser;
 async function mountSteps(t, steps) {
   if (!browser) {
     const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-    browser = new Window({ url: 'http://cockpit.test/#/chats' });
+    browser = new Window({ url: 'http://grigdesk.test/#/chats' });
     for (const [key, value] of Object.entries({
       window: browser,
       document: browser.document,
@@ -70,7 +70,7 @@ test('StepList показывает каждый файл и точные стр
         diff: [
           '@@ -0,0 +1,2 @@',
           '+export const ready = true;',
-          "+export const label = 'cockpit';",
+          "+export const label = 'grigdesk';",
         ].join('\n'),
       },
     ],
@@ -100,7 +100,7 @@ test('StepList показывает каждый файл и точные стр
       "const mode = 'new';",
       'const retries = 3;',
       'export const ready = true;',
-      "export const label = 'cockpit';",
+      "export const label = 'grigdesk';",
     ],
   );
 });

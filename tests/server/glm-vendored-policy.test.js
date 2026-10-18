@@ -27,7 +27,7 @@ const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir()
 const MODEL = '["zai","glm-5.3"]';
 
 /**
- * MCP-фикстура cockpit-work: инструмент echo, счётчик вызовов и имена своего окружения.
+ * MCP-фикстура grigdesk-work: инструмент echo, счётчик вызовов и имена своего окружения.
  * Пишет только в каталог стенда; значения окружения не сохраняются.
  */
 async function workMcp(root) {
@@ -57,7 +57,7 @@ async function workMcp(root) {
 
   return {
     server: {
-      name: 'cockpit-work',
+      name: 'grigdesk-work',
       command: process.execPath,
       args: [script, calls, env],
       env: [],
@@ -68,7 +68,7 @@ async function workMcp(root) {
 }
 
 /**
- * Стенд политики: настоящая generation, фейк Z.ai, cockpit-work и DI-адаптер с допуском
+ * Стенд политики: настоящая generation, фейк Z.ai, grigdesk-work и DI-адаптер с допуском
  * identity этой сборки. Запуск процесса можно перехватить, чтобы испортить файлы запуска.
  */
 async function fixture(t, loopbackOptions = {}, { beforeSpawn } = {}) {
@@ -94,7 +94,7 @@ async function fixture(t, loopbackOptions = {}, { beforeSpawn } = {}) {
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: GLM_SERVICE_KEY,
     },
     admission: [{ mode: 'api', compatibility: identity }],
@@ -333,7 +333,7 @@ test('настоящие правка, команда и MCP-вызов прох
       new_string: 'after',
     }],
     ['bash', { command: 'echo shell > shell.txt', description: 'shell' }],
-    ['mcp__cockpit-work__echo', {}],
+    ['mcp__grigdesk-work__echo', {}],
   ]) });
 
   await fs.writeFile(path.join(f.project, 'note.txt'), 'before\n');
@@ -345,14 +345,14 @@ test('настоящие правка, команда и MCP-вызов прох
     ['read', 'allow'],
     ['edit', 'allow'],
     ['bash', 'allow'],
-    ['mcp__cockpit-work__echo', 'allow'],
+    ['mcp__grigdesk-work__echo', 'allow'],
   ]);
   assert.equal(await fs.readFile(path.join(f.project, 'note.txt'), 'utf8'), 'after\n');
   assert.equal(await exists(path.join(f.project, 'shell.txt')), true);
   assert.equal(await f.work.calls(), 1);
 });
 
-test('настоящие shell и MCP процесса GLM не видят COCKPIT_GLM_ROUTE_KEY', async (t) => {
+test('настоящие shell и MCP процесса GLM не видят GRIGDESK_GLM_ROUTE_KEY', async (t) => {
   const f = await fixture(t, { respond: scripted([
     ['bash', { command: 'env | cut -d= -f1 | sort > env-names.txt', description: 'env' }],
   ]) });
@@ -365,7 +365,7 @@ test('настоящие shell и MCP процесса GLM не видят COCKP
   assert.ok(shell.includes('PATH'), 'положительный контроль shell');
   assert.ok(mcp.includes('PATH'), 'положительный контроль MCP');
 
-  for (const name of ['COCKPIT_GLM_ROUTE_KEY', 'ZAI_API_KEY', 'DEEPSEEK_API_KEY']) {
+  for (const name of ['GRIGDESK_GLM_ROUTE_KEY', 'ZAI_API_KEY', 'DEEPSEEK_API_KEY']) {
     assert.equal(shell.includes(name), false, `shell ${name}`);
     assert.equal(mcp.includes(name), false, `mcp ${name}`);
   }

@@ -40,7 +40,7 @@ function fakeScheduler() {
 }
 
 async function fixture(t, options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-publication-api-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-publication-api-'));
   const routesDir = path.join(root, 'routes');
   const authoringDir = path.join(root, 'authoring');
   const profilesDir = path.join(root, 'profiles');

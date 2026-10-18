@@ -19,7 +19,7 @@ async function fixture(t, {
   analysisExtra = null,
   answered = { ids: new Set(), keys: new Set() },
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-profiles-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-launch-profiles-'));
   const profilesDir = path.join(root, 'profiles');
   const installed = ['project-alpha', 'project-beta', ...(twinProfile ? ['project-gamma'] : [])];
   await Promise.all(installed.map(

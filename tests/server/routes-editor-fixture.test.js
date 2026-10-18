@@ -48,7 +48,7 @@ test('RE-A0-02: два вызова makeDraft не разделяют измен
 });
 
 test('RE-A0-03: публикация и чтение fixture сохраняют prompts и owned status', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-editor-a0-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-editor-a0-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const input = makeCatalogInput();

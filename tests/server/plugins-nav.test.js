@@ -103,7 +103,7 @@ test('каждый системный плагин объявляет род р�
     'категория системного манифеста обязана быть из общего контракта',
   );
 
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-category-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-category-'));
   try {
     const manifests = {
       helper: { id: 'helper', name: 'Помощник', category: 'dev' },

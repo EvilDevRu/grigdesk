@@ -38,7 +38,7 @@ export function glmResearchEnv(home: string, extra: Record<string, string> = {})
     DSH_HOME: home,
     DSH_TELEMETRY_DISABLED: '1',
     NO_COLOR: '1',
-    COCKPIT_GLM_ROUTE_KEY: GLM_RESEARCH_KEY,
+    GRIGDESK_GLM_ROUTE_KEY: GLM_RESEARCH_KEY,
     ...extra,
   };
 }

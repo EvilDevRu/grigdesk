@@ -1,6 +1,6 @@
-// Общая точечная правка env-файлов кокпита: корневого `.env` и любого другого файла
+// Общая точечная правка env-файлов GrigDesk: корневого `.env` и любого другого файла
 // формата `KEY=VALUE`. Один файл читают сразу три стороны: systemd (EnvironmentFile юнита),
-// `node --env-file` (bin/cockpit, deploy/restart.sh) и человек руками. Поэтому правка консервативна:
+// `node --env-file` (bin/grigdesk-ctl, deploy/restart.sh) и человек руками. Поэтому правка консервативна:
 //   - меняются только строки названных переменных, остальные байты файла остаются как были;
 //   - значение пишется без кавычек и только из символов, которые оба парсера читают одинаково;
 //   - файл, где границу строки парсеры могут понять по-разному (многострочные значения,
@@ -89,7 +89,7 @@ function isMissing(error: unknown): boolean {
 function unsupported(line: number, reason: string): EnvFileError {
   return new EnvFileError(
     'env_file_unsupported',
-    `Строка ${line} файла окружения: ${reason}. Исправьте её вручную, тогда правка из кокпита заработает.`,
+    `Строка ${line} файла окружения: ${reason}. Исправьте её вручную, тогда правка из GrigDesk заработает.`,
     line,
   );
 }
@@ -304,7 +304,7 @@ function planText(bytes: Buffer | null, planned: Map<string, string | null>): {
   if (bytes && !Buffer.from(source, 'utf8').equals(bytes)) {
     throw new EnvFileError(
       'env_file_unsupported',
-      'Файл окружения не в кодировке UTF-8: правка из кокпита отключена.',
+      'Файл окружения не в кодировке UTF-8: правка из GrigDesk отключена.',
     );
   }
 
@@ -531,4 +531,99 @@ export function applyEnvChanges(changes: EnvFileChanges, env: NodeJS.ProcessEnv 
       env[name] = value;
     }
   }
+}
+
+/**
+ * Переименовывает ключи на месте, сохраняя кавычки, пробелы и комментарии.
+ * Две формы допустимы лишь с одинаковыми значениями; секреты не попадают в ошибку.
+ */
+export function renameEnvKeys(content: Buffer, names: Readonly<Record<string, string>>): string {
+  const source = previewEnvFile(content, {}).text;
+  const bom = source.startsWith(BOM) ? BOM : '';
+  const lines = parseLines(source.slice(bom.length));
+
+  for (const [oldKey, newKey] of Object.entries(names)) {
+    if (!isEnvName(oldKey) || !isEnvName(newKey) || oldKey === newKey) {
+      throw new EnvFileError('env_name_invalid', 'Недопустимое переименование ключа.');
+    }
+
+    const oldLines = lines.filter((line) => line.key === oldKey);
+    const newLines = lines.filter((line) => line.key === newKey);
+    const values = new Set([...oldLines, ...newLines].map((line) => parseEnv(line.text)[line.key!]));
+
+    if (oldLines.length && values.size > 1) {
+      throw new EnvFileError('env_file_conflict', `Разные значения у ${oldKey} и ${newKey}.`);
+    }
+
+    if (newLines.length) {
+      removeAssignments(lines, oldKey);
+    } else {
+      for (const line of oldLines) {
+        line.text = line.text.replace(/^(\s*(?:export\s+)?)\w+(\s*=)/, `$1${newKey}$2`);
+        line.key = newKey;
+      }
+    }
+  }
+
+  return bom + lines.map((line) => line.text + line.eol).join('');
+}
+
+/**
+ * Меняет только значение указанной строки, сохраняя обрамление и хвост комментария.
+ * Сложное экранирование отклоняется, чтобы перенос пути не изменил смысл настройки.
+ */
+function rewriteAssignment(line: EnvLine, next: string): string {
+  const assignment = /^(\s*(?:export\s+)?\w+\s*=\s*)(.*)$/.exec(line.text)!;
+  const raw = assignment[2]!;
+  const quote = ['"', "'", '`'].includes(raw[0] ?? '') ? raw[0]! : '';
+  const start = quote.length;
+  const end = quote ? raw.indexOf(quote, 1) : (raw.indexOf('#') < 0 ? raw.length : raw.indexOf('#'));
+  const literal = raw.slice(start, end).trimEnd();
+  const value = parseEnv(line.text)[line.key!];
+
+  if (literal !== value || next.includes('\n') || (quote && next.includes(quote))) {
+    throw new EnvFileError('env_file_unsupported', `Неоднозначная запись ${line.key}.`);
+  }
+
+  return assignment[1] + raw.slice(0, start) + next + raw.slice(start + literal.length);
+}
+
+/**
+ * Подготавливает перенос абсолютных значений без записи файла и без потери комментариев.
+ * Возвращает только текст; права и резервную копию обеспечивает вызывающая транзакция.
+ */
+export function rewriteEnvValues(
+  content: Buffer, rewrite: (value: string) => string, defaults: Readonly<Record<string, string>> = {},
+): string {
+  const source = previewEnvFile(content, {}).text;
+  const bom = source.startsWith(BOM) ? BOM : '';
+  const lines = parseLines(source.slice(bom.length));
+  const result: string[] = [];
+
+  for (const line of lines) {
+    if (!line.key) {
+      result.push(line.text + line.eol);
+      continue;
+    }
+
+    const value = parseEnv(line.text)[line.key]!;
+    const next = rewrite(value);
+
+    if (defaults[line.key] === next) {
+      const raw = line.text.slice(line.text.indexOf('=') + 1).trimStart();
+      const quoted = ['"', "'", '`'].includes(raw[0] ?? '');
+      const tail = quoted ? raw.slice(raw.indexOf(raw[0]!, 1) + 1) : raw;
+      const comment = tail.indexOf('#');
+
+      if (comment >= 0) {
+        result.push(tail.slice(comment) + line.eol);
+      }
+
+      continue;
+    }
+
+    result.push((next === value ? line.text : rewriteAssignment(line, next)) + line.eol);
+  }
+
+  return bom + result.join('');
 }

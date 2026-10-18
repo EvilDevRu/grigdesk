@@ -1,4 +1,4 @@
-# Релизы Cockpit
+# Релизы GrigDesk
 
 Версия продукта хранится в корневом `VERSION` и имеет строгий формат SemVer
 `MAJOR.MINOR.PATCH`. Версии `server/package.json` и `web/package.json` описывают
@@ -22,12 +22,12 @@ patch-релизом. Теги с prerelease/build-суффиксами и light
 ## Выпуск одной командой
 
 `tools/release patch|minor|major` поднимает `VERSION`, делает release-коммит
-«Кокпит: релиз vX.Y.Z», прогоняет те же тесты и production-сборку, что и
+«GrigDesk: релиз vX.Y.Z», прогоняет те же тесты и production-сборку, что и
 `tools/release-check`, и ставит аннотированный тег на проверенный commit. Явная версия
 `tools/release X.Y.Z` работает так же; версия, равная текущему `VERSION`, выпускается без
 нового коммита — так ставится baseline и повторяется выпуск после исправления.
 
-Между релизами `VERSION` не трогают: число коммитов сверху последнего тега кокпит
+Между релизами `VERSION` не трогают: число коммитов сверху последнего тега GrigDesk
 показывает сам, в виде `vX.Y.Z+N.g<sha>`. Разряд выбирают по содержанию: patch — только
 исправления, minor — новые возможности, major — несовместимые изменения контрактов.
 
@@ -56,7 +56,7 @@ fast-forward, замены действующего web-бандла и пере
 исполнить TypeScript штатным запуском. Минимум версии берётся из целевого gate.
 
 Старый worker получает ту же защиту через сохранённый JS smoke
-`tests/server/cockpit-release.test.js`, который он запускает в новом дереве до применения.
+`tests/server/grigdesk-release.test.js`, который он запускает в новом дереве до применения.
 Этот вход должен оставаться JavaScript и требовать наличия gate. У старых релизов,
 которые ещё не имели `nodeVersion.ts`, новый worker сохраняет прежний путь проверки.
 При несовместимом Node обновление останавливается до стадии `applying`; сначала нужно
@@ -65,16 +65,16 @@ fast-forward, замены действующего web-бандла и пере
 ## Восстановление после ошибки
 
 Подробный локальный статус задания хранится в
-`server/.state/cockpit-update.json`, краткий журнал без command output — в
-`server/.state/cockpit-update.json.log`.
+`server/.state/grigdesk-update.json`, краткий журнал без command output — в
+`server/.state/grigdesk-update.json.log`.
 
 - Ошибка dependency/build/smoke до стадии `applying` не меняет main, рабочие файлы
   и действующий web-бандл. После исправления причины проверку можно повторить.
 - Если main уже fast-forward-нута, автоматического destructive rollback нет.
   Безопасный путь восстановления — собрать уже находящийся в checkout релиз через
-  `deploy/install.sh` либо `bin/cockpit build`, затем явно перезапустить Cockpit.
-- Резервные каталоги `web/dist.cockpit-backup-<job>` и
-  `server/node_modules.cockpit-backup-<job>` удаляются только после того, как новый
+  `deploy/install.sh` либо `bin/grigdesk-ctl build`, затем явно перезапустить GrigDesk.
+- Резервные каталоги `web/dist.grigdesk-backup-<job>` и
+  `server/node_modules.grigdesk-backup-<job>` удаляются только после того, как новый
   сервер подтвердил целевой SHA и новый process-instance. До подтверждения их не
   следует удалять.
 

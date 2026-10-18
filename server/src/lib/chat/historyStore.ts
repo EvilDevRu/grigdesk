@@ -769,7 +769,7 @@ export class ChatHistoryStore {
       }
 
       clean.workdir = prev
-        ? (Object.hasOwn(prev.chat, 'workdir') ? prev.chat.workdir : { kind: 'cockpit' })
+        ? (Object.hasOwn(prev.chat, 'workdir') ? prev.chat.workdir : { kind: 'grigdesk' })
         : choice;
 
       if (prev) {
@@ -808,7 +808,7 @@ export class ChatHistoryStore {
         || Object.hasOwn(chat, 'logicalIdentity')) {
         throw rebindError();
       }
-      if (identity && choice?.kind !== 'cockpit') {
+      if (identity && choice?.kind !== 'grigdesk') {
         throw new ChatHistoryError('workdir_change_required', 'Папка компаньона определяется его задачей.');
       }
       if (identity) {
@@ -1210,7 +1210,7 @@ export class ChatHistoryStore {
       // defMode клиент присылал, а мета его не хранила — выбранный режим прав не переживал
       // перезагрузку страницы и молча откатывался к режиму по умолчанию.
       defMode: meta.defMode,
-      defWorkdir: normalizeChatWorkdir(meta.defWorkdir) || { kind: 'cockpit' },
+      defWorkdir: normalizeChatWorkdir(meta.defWorkdir) || { kind: 'grigdesk' },
       recentWorkdirs: normalizeRecentWorkdirs(meta.recentWorkdirs),
     };
   }

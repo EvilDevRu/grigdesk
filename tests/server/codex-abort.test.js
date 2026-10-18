@@ -7,7 +7,7 @@ import test from 'node:test';
 import codex from '../../server/src/lib/executors/codex.ts';
 
 test('Codex executor aborts the CLI and returns a stopped turn with the new session id', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-abort-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-abort-'));
   const fake = path.join(dir, 'fake-codex');
   await writeFile(fake, `#!/bin/sh
 printf '%s\\n' '{"type":"thread.started","thread_id":"thread-from-stream"}'

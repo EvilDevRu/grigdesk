@@ -112,7 +112,7 @@ test('WV-02 настоящий GLTF/OBJ/STL parser без WebGL', async () => {
 test('WV-06 resource policy отвергает внешнее, traversal и чужой API до сети', () => {
   const token = 'a'.repeat(48);
   const root = `/api/studio3d/viewer/file/${token}/`;
-  const policy = createResourcePolicy(`${root}hero.gltf`, 'https://cockpit.test');
+  const policy = createResourcePolicy(`${root}hero.gltf`, 'https://grigdesk.test');
   
   assert.equal(policy.resolve('textures/skin.png'), `${root}textures/skin.png`);
   
@@ -122,8 +122,8 @@ test('WV-06 resource policy отвергает внешнее, traversal и чу
     assert.throws(() => policy.resolve(uri), undefined, uri);
   }
   
-  assert.throws(() => createResourcePolicy('/api/preferences', 'https://cockpit.test'));
-  assert.throws(() => createResourcePolicy('https://outside.test/model.glb', 'https://cockpit.test'));
+  assert.throws(() => createResourcePolicy('/api/preferences', 'https://grigdesk.test'));
+  assert.throws(() => createResourcePolicy('https://outside.test/model.glb', 'https://grigdesk.test'));
 });
 
 test('WV-06 реальные FBX/meshopt/skin/parts/splat fixtures', async () => {

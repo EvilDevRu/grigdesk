@@ -17,7 +17,7 @@ const pending = (overrides = {}) => ({
   token: 'github_pat_private_value',
   secret: 'webhook-secret-private-value',
   ingressRef: 'ingress_reference_0001',
-  callbackUrl: 'https://cockpit.example.test/hooks/github/ingress_reference_0001',
+  callbackUrl: 'https://grigdesk.example.test/hooks/github/ingress_reference_0001',
   hookId: null,
   generation: 1,
   accountRef: null,
@@ -186,8 +186,8 @@ test('lifecycle identity не бывает частичной, schema и secret 
     pending({ token: null }),
     connected({ token: null }),
     pending({ ingressRef: '../route' }),
-    pending({ callbackUrl: 'http://cockpit.example.test/hooks/github/ingress_reference_0001' }),
-    pending({ callbackUrl: 'https://cockpit.example.test/hooks/github/another_ingress_ref' }),
+    pending({ callbackUrl: 'http://grigdesk.example.test/hooks/github/ingress_reference_0001' }),
+    pending({ callbackUrl: 'https://grigdesk.example.test/hooks/github/another_ingress_ref' }),
     pending({ generation: 0 }),
   ]) {
     await assert.rejects(() => store.write(invalid), (err) => err.code === 'github_credentials_invalid');

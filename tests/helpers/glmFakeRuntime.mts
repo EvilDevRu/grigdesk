@@ -56,7 +56,7 @@ export async function createGlmFakeRuntime(t: { after: (fn: () => unknown) => vo
   const adapter = createGlmAdapter({
     env: {
       PATH: process.env.PATH,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: 'synthetic-zai-key',
     },
     admission: [{ mode: 'api', compatibility: identity }],

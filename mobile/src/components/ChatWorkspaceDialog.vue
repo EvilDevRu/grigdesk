@@ -11,7 +11,7 @@
       <UiError v-if="catalog.error" :text="catalog.error" @retry="catalog.load(true)" />
       <UiSelect v-model="task" label="Задача" :options="tasks" :disabled="busy" />
       <p v-if="catalog.options?.tasksOmitted" class="mobile-muted">
-        Показаны первые 2000 задач; остальные можно выбрать в веб-Кокпите.
+        Показаны первые 2000 задач; остальные можно выбрать в веб-версии GrigDesk.
       </p>
       <UiSelect v-model="kind" label="Папка" :options="kinds" :disabled="busy" />
       <UiSelect
@@ -22,7 +22,7 @@
         :disabled="busy"
       />
       <p v-if="kind === 'project' && catalog.options?.projectsOmitted" class="mobile-muted">
-        Показаны первые 500 проектов; остальные доступны в веб-Кокпите.
+        Показаны первые 500 проектов; остальные доступны в веб-версии GrigDesk.
       </p>
       <UiField
         v-if="kind === 'path'"
@@ -68,13 +68,13 @@ const link = useLinkStore();
 const { busy, error, intent, run } = useChatMutation();
 const initial = props.chat.settings?.workdir;
 const task = ref(props.chat.taskId || '');
-const kind = ref(initial?.kind || 'cockpit');
+const kind = ref(initial?.kind || 'grigdesk');
 const project = ref(initial?.kind === 'project' ? initial.projectId : '');
 const path = ref(initial?.kind === 'path' ? initial.path : '');
 const preview = ref<WorkspacePreview | null>(null);
 const transfer = ref('reset');
 const kinds = [
-  { value: 'cockpit', label: 'Кокпит' },
+  { value: 'grigdesk', label: 'GrigDesk' },
   { value: 'project', label: 'Проект' },
   { value: 'path', label: 'Указать путь' },
 ];
@@ -92,7 +92,7 @@ const projects = computed(() => [
   },
   ...(catalog.options?.projects || []).map((item) => ({ value: item.id, label: item.title })),
 ]);
-const valid = computed(() => kind.value === 'cockpit' || (kind.value === 'project'
+const valid = computed(() => kind.value === 'grigdesk' || (kind.value === 'project'
   ? Boolean(project.value) : path.value.trim().startsWith('/')));
 const transfers = computed(() => [
   ...(['none', 'resume'].includes(preview.value?.transfer || '')
@@ -125,7 +125,7 @@ async function save() {
     kind: 'project',
     projectId: project.value,
     repoKey: initial?.kind === 'project' && initial.projectId === project.value ? initial.repoKey : null,
-  } : kind.value === 'path' ? { kind: 'path', path: path.value.trim() } : { kind: 'cockpit' };
+  } : kind.value === 'path' ? { kind: 'path', path: path.value.trim() } : { kind: 'grigdesk' };
   const result = await run((saved) => link.api!.previewWorkspace(
     props.chat.id, task.value || null, workdir, saved,
   ));

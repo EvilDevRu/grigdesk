@@ -5,14 +5,14 @@ import { compileSettingsView } from './helpers/settings-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const RISK_TEXT = 'Агент сможет запускать прямые SSH-клиенты с правами процесса Cockpit. '
+const RISK_TEXT = 'Агент сможет запускать прямые SSH-клиенты с правами процесса GrigDesk. '
   + 'Режим прав Bash не заменяет этот запрет. Подтверждений и журнала SSH-инструмента не будет.';
 
 async function installBrowser(t) {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -31,7 +31,7 @@ async function installBrowser(t) {
   })) {
     Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   }
-  browser.localStorage.setItem('cockpit-settings-tab', 'providers');
+  browser.localStorage.setItem('grigdesk-settings-tab', 'providers');
   browser.document.body.innerHTML = '<div id="mount"></div>';
   t.after(() => browser.close());
   return browser;
@@ -119,7 +119,7 @@ async function mountSettings(t, {
     }),
     useChatStore: () => ({ compactWindow: 0 }),
     useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
   globalThis.__providerSettingsConfirm = (...args) => {
     confirmations.push(args);
@@ -166,7 +166,7 @@ test('embedded карточка без ключа объясняет автор�
     authLabel: 'Нет API key',
     distribution: {
       kind: 'embedded',
-      label: 'Входит в Cockpit',
+      label: 'Входит в GrigDesk',
       ready: true,
       authHint: 'Добавьте TEST_API_KEY в окружение службы.',
     },
@@ -181,7 +181,7 @@ test('embedded карточка без ключа объясняет автор�
   await wrapper.get('#provider-toggle-future-provider').trigger('click');
 
   assert.match(wrapper.get('[data-testid="provider-distribution"]').text(),
-    /Входит в Cockpit.*Сборка готова/);
+    /Входит в GrigDesk.*Сборка готова/);
   assert.match(wrapper.text(), /Авторизация: Добавьте TEST_API_KEY/);
   assert.equal(wrapper.find('[data-role="settings-command"]').exists(), false);
   assert.equal(wrapper.find('[data-testid="provider-update-result"]').exists(), false);
@@ -194,12 +194,12 @@ test('недоступная встроенная сборка показыва�
     installed: false,
     distribution: {
       kind: 'embedded',
-      label: 'Входит в Cockpit',
+      label: 'Входит в GrigDesk',
       ready: false,
       error: 'future_runtime_missing',
       problem: {
         message: 'Сборка ещё не подготовлена.',
-        command: '/opt/cockpit/bin/cockpit deps',
+        command: '/opt/grigdesk/bin/grigdesk-ctl deps',
       },
     },
     install: null,
@@ -214,7 +214,7 @@ test('недоступная встроенная сборка показыва�
 
   assert.match(wrapper.get('[data-testid="provider-distribution"]').text(), /Сборка недоступна/);
   assert.match(problem.text(), /Сборка ещё не подготовлена\./);
-  assert.equal(problem.get('[data-role="settings-command"]').text(), '/opt/cockpit/bin/cockpit deps');
+  assert.equal(problem.get('[data-role="settings-command"]').text(), '/opt/grigdesk/bin/grigdesk-ctl deps');
   assert.match(problem.text(), /Перепроверить/);
 });
 

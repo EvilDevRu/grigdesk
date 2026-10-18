@@ -22,7 +22,7 @@
     "cgroupV2": {
       "ok": false,
       "version": 2,
-      "basePath": "<COCKPIT_CGROUP>",
+      "basePath": "<GRIGDESK_CGROUP>",
       "controllers": [
         "memory",
         "pids"

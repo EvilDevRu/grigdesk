@@ -2,7 +2,7 @@
 // parity с executors/claude.js. Никаких namespace/cgroup/egress allowlist: доступ к файлам
 // и сети ограничивает собственная permission-система Kimi (ACP default/plan + промпты в UI),
 // а не mount namespace. Контраст с contained-профилем описан в
-// docs/cockpit/kimi-runtime-security.md.
+// docs/grigdesk/kimi-runtime-security.md.
 import {
   assertExecutable,
   assertPrivateCredentialDir,

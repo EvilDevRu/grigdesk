@@ -103,7 +103,7 @@ test('пункты готовности: браузер, сборка видео
 
   assert.equal(yandex.status, 'blocked');
   assert.equal(yandex.action, null, 'ключ задаёт человек, кнопки у него нет');
-  assert.match(yandex.reason, /COCKPIT_SHOWCASE_YANDEX_API_KEY/);
+  assert.match(yandex.reason, /GRIGDESK_SHOWCASE_YANDEX_API_KEY/);
 
   assert.equal(itemOf(status, 'media').action, null);
   assert.equal(itemOf(status, 'speech').action, null);
@@ -122,7 +122,7 @@ test('облако Microsoft без настройки не подключает
   assert.equal(edge.status, 'blocked');
   assert.equal(edge.action, null, 'облако включают настройкой, кнопки у него нет');
   assert.match(edge.reason, /выключен/);
-  assert.match(edge.reason, /COCKPIT_SHOWCASE_EDGE_TTS/);
+  assert.match(edge.reason, /GRIGDESK_SHOWCASE_EDGE_TTS/);
   assert.ok(ids.indexOf('edge') < ids.indexOf('yandex'), 'порядок облаков фиксированный');
 
   // Выключенный движок замыкает реестр голосов, а не занимает место по умолчанию.

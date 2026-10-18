@@ -14,7 +14,7 @@ const Fastify = requireFromServer('fastify');
 // задачи влиял только на cwd, и агент не видел, о чём задача, пока человек не
 // вставлял текст руками. Тикет читается из server-owned хранилища (ticketsDir).
 async function apiFixture(t, { executor, ticket = null } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-ticket-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-ticket-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const ticketsDir = path.join(root, 'tickets');
   await fs.mkdir(ticketsDir, { recursive: true });

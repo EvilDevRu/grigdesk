@@ -2,7 +2,7 @@
 
 # Ставит зависимости сборки с пятью попытками: обрыв сети не требует нового запуска установщика.
 # Одинаково используется при отсутствующих пакетах и при восстановлении неполной установки.
-cockpit_install_b24_dependencies() {
+grigdesk_install_b24_dependencies() {
   local root=$1
   local pause=$2
   local attempt
@@ -25,16 +25,16 @@ cockpit_install_b24_dependencies() {
 # После неудачной сборки npm ci выполняется только если его ещё не было в этом вызове.
 # Отказ сборки возвращает 1 до mkdir и ln;
 # чужой обычный файл в PATH не трогается и даёт 2 — сборка при этом прошла.
-cockpit_install_b24_cli() {
-  local root=${1:?корень cockpit обязателен}
+grigdesk_install_b24_cli() {
+  local root=${1:?корень grigdesk обязателен}
   local link_dir=${2:?каталог ссылок обязателен}
   local target="$root/bin/b24"
-  local pause=${COCKPIT_B24_INSTALL_PAUSE:-10}
+  local pause=${GRIGDESK_B24_INSTALL_PAUSE:-10}
   local temporary
   local ci_ran=0
 
   if [[ ! -d "$root/b24/node_modules/esbuild" || ! -d "$root/b24/node_modules/postject" ]]; then
-    cockpit_install_b24_dependencies "$root" "$pause" || return 1
+    grigdesk_install_b24_dependencies "$root" "$pause" || return 1
     ci_ran=1
   fi
 
@@ -45,7 +45,7 @@ cockpit_install_b24_cli() {
     fi
 
     echo "⚠ Сборка b24 не удалась; переустанавливаю зависимости и повторяю сборку." >&2
-    cockpit_install_b24_dependencies "$root" "$pause" || return 1
+    grigdesk_install_b24_dependencies "$root" "$pause" || return 1
 
     if ! npm --prefix "$root/b24" run build; then
       echo "✗ Не удалось собрать b24." >&2
@@ -75,6 +75,6 @@ cockpit_install_b24_cli() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  cockpit_install_b24_cli "$@"
+  grigdesk_install_b24_cli "$@"
   exit $?
 fi

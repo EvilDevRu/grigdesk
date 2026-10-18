@@ -13,7 +13,7 @@ const expected = {
   version: '1.0.0',
   expectedId: null,
   reservedIds: new Set(['code']),
-  cockpitVersion: '1.0.0',
+  grigDeskVersion: '1.0.0',
 };
 
 /**
@@ -21,7 +21,7 @@ const expected = {
  * Файлы создаются до вызова production validator, без подмены filesystem.
  */
 async function fixture(t, manifest = { id: 'demo', version: '1.0.0' }, files = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-package-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-package-'));
   const dir = path.join(root, 'demo');
 
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -113,30 +113,30 @@ test('V6: version строго совпадает с выбранной стаб
   await assert.rejects(validatePluginPackage(dir, expected), { code: 'version_mismatch' });
 });
 
-test('V7: minCockpitVersion проверяется и имеет безопасный detail', async (t) => {
+test('V7: minGrigDeskVersion проверяется и имеет безопасный detail', async (t) => {
   const newer = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    minCockpitVersion: '1.1.0',
+    minGrigDeskVersion: '1.1.0',
   });
   const invalid = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    minCockpitVersion: 'tomorrow',
+    minGrigDeskVersion: 'tomorrow',
   });
   const equal = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    minCockpitVersion: '1.0.0',
+    minGrigDeskVersion: '1.0.0',
   });
 
   await assert.rejects(validatePluginPackage(newer.dir, expected), {
-    code: 'cockpit_too_old',
+    code: 'grigdesk_too_old',
     message: /нужна 1\.1\.0, установлена 1\.0\.0/u,
   });
   await assert.rejects(validatePluginPackage(invalid.dir, expected), {
     code: 'manifest_invalid',
-    message: /minCockpitVersion должен быть вида X\.Y\.Z/u,
+    message: /minGrigDeskVersion должен быть вида X\.Y\.Z/u,
   });
   assert.equal((await validatePluginPackage(equal.dir, expected)).version, '1.0.0');
 });

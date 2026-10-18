@@ -329,7 +329,7 @@ test('чат: запрос разрешения показывает инстр�
   });
 });
 
-test('чат: structured form и external URL в Telegram только зовут в Cockpit', async (t) => {
+test('чат: structured form и external URL в Telegram только зовут в GrigDesk', async (t) => {
   const { world, watch, store, messages } = await fixture(t);
   await watch.check();
   world.waiting = [
@@ -366,7 +366,7 @@ test('чат: structured form и external URL в Telegram только зову�
 
   assert.equal(messages().length, 2);
   for (const message of messages()) {
-    assert.match(message.body.text, /Заверши в Cockpit\./u);
+    assert.match(message.body.text, /Заверши в GrigDesk\./u);
     assert.equal('reply_markup' in message.body, false);
   }
   const allText = messages().map((message) => message.body.text).join('\n');
@@ -417,7 +417,7 @@ test('отказ Telegram не роняет вотчер и не портит st
   assert.equal(messages().length, 1, 'после восстановления связи карточка ушла');
 });
 
-test('неподтверждённый пульт: вотчер молчит и не ходит в API кокпита', async (t) => {
+test('неподтверждённый пульт: вотчер молчит и не ходит в API GrigDesk', async (t) => {
   const { world, watch, messages } = await fixture(t, { confirmed: false });
   world.tasks = [{ task: 4187, daemonAlive: false }];
   world.graphs['4187'] = gateGraph();

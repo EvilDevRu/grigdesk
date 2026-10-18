@@ -1,8 +1,8 @@
-# Документация Cockpit
+# Документация GrigDesk
 
 Документация хранится отдельно от исполняемого кода и группируется по подсистемам.
-Текущую архитектуру описывают документы движка, работу с продуктом — `cockpit/guide/`, а
-устройство и грабли кокпита — папки областей `cockpit/<область>/` с README-оглавлением.
+Текущую архитектуру описывают документы движка, работу с продуктом — `grigdesk/guide/`, а
+устройство и грабли GrigDesk — папки областей `grigdesk/<область>/` с README-оглавлением.
 
 Общая документация описывает продукт и контракты, но не перечисляет реальные подключённые
 проекты: без их названий, доменов, стеков, task ID и конкретных путей в `profiles/`.
@@ -22,28 +22,28 @@
 строке на документ. Документ читается по ссылке, когда задача касается области.
 Имена файлов — короткие английские `kebab-case.md`, без транслита; заголовки и текст — русские.
 Правила поддержки и результат сверки переноса — в
-[документе о переносе знаний](cockpit/overview/documentation-migration.md).
+[документе о переносе знаний](grigdesk/overview/documentation-migration.md).
 
-- [Устройство кокпита](cockpit/overview/README.md) — слои, модули сервера, принципы.
-- [Чат и исполнители](cockpit/chat/README.md) — чат, модели, права, контекст, MCP.
-- [Конвейер](cockpit/pipeline/README.md) — фабрика, маршруты, граф, ворота, арбитр.
-- [Задачи Б24](cockpit/b24/README.md) — портал, статусы, доска и полка.
-- [Входящие](cockpit/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
-- [Telegram-пульт](cockpit/telegram/README.md) — вотчер, действия, ассистент.
-- [Интерфейс](cockpit/web/README.md) — раскладка, слои, всплывашки, PWA.
-- [Сервер и доступ](cockpit/server/README.md) — юнит, авторизация, сеть; только loopback.
-- [Приложение на телефоне](cockpit/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
-- [Видео и речь](cockpit/media/README.md) — записи встреч, расшифровка, речь.
-- [Плагины](cockpit/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
-- [Тесты и проверка](cockpit/testing/README.md) — happy-dom, Playwright, ловушки.
+- [Устройство GrigDesk](grigdesk/overview/README.md) — слои, модули сервера, принципы.
+- [Чат и исполнители](grigdesk/chat/README.md) — чат, модели, права, контекст, MCP.
+- [Конвейер](grigdesk/pipeline/README.md) — фабрика, маршруты, граф, ворота, арбитр.
+- [Задачи Б24](grigdesk/b24/README.md) — портал, статусы, доска и полка.
+- [Входящие](grigdesk/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
+- [Telegram-пульт](grigdesk/telegram/README.md) — вотчер, действия, ассистент.
+- [Интерфейс](grigdesk/web/README.md) — раскладка, слои, всплывашки, PWA.
+- [Сервер и доступ](grigdesk/server/README.md) — юнит, авторизация, сеть; только loopback.
+- [Приложение на телефоне](grigdesk/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
+- [Видео и речь](grigdesk/media/README.md) — записи встреч, расшифровка, речь.
+- [Плагины](grigdesk/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
+- [Тесты и проверка](grigdesk/testing/README.md) — happy-dom, Playwright, ловушки.
 
-## Работа с Cockpit
+## Работа с GrigDesk
 
-- [guide/tasks.md](cockpit/guide/tasks.md) — как оформить задачу и что с ней делает триаж.
-- [guide/gates.md](cockpit/guide/gates.md) — где конвейер останавливается и чего ждёт от человека.
-- [guide/projects.md](cockpit/guide/projects.md) — паспорт проекта, его репозитории и API раздела.
-- [guide/routes.md](cockpit/guide/routes.md) — черновики маршрутов, проверка, публикация и откат.
-- [reference/runtime-contracts.md](cockpit/reference/runtime-contracts.md) — SSH-плагин, надзорный
+- [guide/tasks.md](grigdesk/guide/tasks.md) — как оформить задачу и что с ней делает триаж.
+- [guide/gates.md](grigdesk/guide/gates.md) — где конвейер останавливается и чего ждёт от человека.
+- [guide/projects.md](grigdesk/guide/projects.md) — паспорт проекта, его репозитории и API раздела.
+- [guide/routes.md](grigdesk/guide/routes.md) — черновики маршрутов, проверка, публикация и откат.
+- [reference/runtime-contracts.md](grigdesk/reference/runtime-contracts.md) — SSH-плагин, надзорный
   доступ к базам и Telegram-пульт.
 
 ## Движок фабрики

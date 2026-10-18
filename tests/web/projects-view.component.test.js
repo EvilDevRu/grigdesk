@@ -185,7 +185,7 @@ async function mountView(t, {
   confirmed = true,
   saveResult = { ok: true, error: '', fieldErrors: [] },
 } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/projects');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/projects');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const route = reactive({ path: '/projects', params: {}, query: {} });
 

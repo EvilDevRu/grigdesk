@@ -310,7 +310,7 @@ test('M31: второй сервис и настоящий process не пишу
     const options = {
       pluginsDir: fixture.pluginsDir,
       statePath: fixture.statePath,
-      cockpitVersion: '1.0.0',
+      grigDeskVersion: '1.0.0',
       reservedIds: [],
     };
     const second = new PluginInstallService(options);

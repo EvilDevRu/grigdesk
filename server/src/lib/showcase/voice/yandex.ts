@@ -52,7 +52,7 @@ const MAX_PAUSE_MS = 7000;
 // длину порции или слова.
 const TIMING_TOLERANCE_MS = 1;
 
-const KEY_HINT = 'Задайте COCKPIT_SHOWCASE_YANDEX_API_KEY в .env папки данных '
+const KEY_HINT = 'Задайте GRIGDESK_SHOWCASE_YANDEX_API_KEY в .env папки данных '
   + '(ключ сервисного аккаунта с ролью ai.speechkit-tts.user) и перезапустите сервер.';
 
 export interface YandexEngineOptions {
@@ -389,7 +389,7 @@ function messageOf(text: string): string {
 
 /**
  * Отказ поставщика — словами о том, что делать. Код HTTP поставщика наружу не
- * пробрасывается: 401 от Яндекса клиент кокпита прочитал бы как выход из своей
+ * пробрасывается: 401 от Яндекса клиент GrigDesk прочитал бы как выход из своей
  * сессии.
  */
 function failureOf(status: number, text: string): ShowcaseError {
@@ -398,7 +398,7 @@ function failureOf(status: number, text: string): ShowcaseError {
   if (status === 401) {
     return new ShowcaseError(
       'voice_failed',
-      'Yandex SpeechKit отверг ключ: проверьте COCKPIT_SHOWCASE_YANDEX_API_KEY в .env папки данных.',
+      'Yandex SpeechKit отверг ключ: проверьте GRIGDESK_SHOWCASE_YANDEX_API_KEY в .env папки данных.',
       502,
     );
   }

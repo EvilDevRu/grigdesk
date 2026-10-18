@@ -99,7 +99,7 @@ test('планшет 760–899 остаётся route-only, док и треть
 test('desktop-сайдбар всегда узкий и не содержит переключателя или плитки обновлений', async () => {
   const shell = await source('web/src/shared/layout/AppShell.vue');
 
-  assert.doesNotMatch(shell, /collapse-btn|toggleSidebar|cockpit-sidebar|CockpitVersionTile/);
+  assert.doesNotMatch(shell, /collapse-btn|toggleSidebar|grigdesk-sidebar|GrigDeskVersionTile/);
   assert.match(shell, /grid-row: 1; grid-column: 1 \/ -1;/);
   assert.match(shell, /grid-row: 2; grid-column: 1;/);
   assert.match(shell, /class="app-mark"/);
@@ -126,8 +126,8 @@ test('док использует строку инструмента, а раз
   assert.match(host, /@toggle-expanded="toggleDockExpanded"/);
   assert.doesNotMatch(host, /function maximizeTool/);
   assert.match(dockStore, /isExpanded: false/);
-  assert.match(dockStore, /DOCK_EXPANDED_KEY = 'cockpit-dock-expanded-tools'/);
-  assert.match(dockStore, /LEGACY_DOCK_EXPANDED_KEY = 'cockpit-dock-expanded'/);
+  assert.match(dockStore, /DOCK_EXPANDED_KEY = 'grigdesk-dock-expanded-tools'/);
+  assert.match(dockStore, /LEGACY_DOCK_EXPANDED_KEY = 'grigdesk-dock-expanded'/);
   assert.match(dockStore, /expandedPreferences: storedExpandedPreferences\(activeTool\)/);
   assert.match(dockStore, /expandedPreferences\[state\.activeTool\] === true/);
   assert.match(dockStore, /setExpanded\(value, \{ persist = true \} = \{\}\)/);
@@ -156,7 +156,7 @@ test('Code держит рейку разделов и навигатор сле
     source('web/src/shared/layout/ToolDock.vue'),
   ]);
 
-  assert.match(code, /cockpit-code-dock-nav-width/);
+  assert.match(code, /grigdesk-code-dock-nav-width/);
   assert.match(code, /aria-orientation="vertical"/);
   // Рейка — первая колонка сетки; её ширина одна и та же в CSS-переменной и в расчёте
   // координаты разделителя. Шапка вкладок не держит.
@@ -176,7 +176,7 @@ test('Code держит рейку разделов и навигатор сле
   assert.match(dock, /:deep\(\.code-loading-layout\) \{[\s\S]*grid-template-columns: 44px minmax/);
   assert.match(code, /const NAVIGATOR_MIN_WIDTH = 220/);
   assert.match(code, /const NAVIGATOR_DEFAULT_WIDTH = 320/);
-  assert.doesNotMatch(code, /cockpit-code-dock-split/);
+  assert.doesNotMatch(code, /grigdesk-code-dock-split/);
   assert.match(code, /Math\.floor\(width \* 0\.42\)/);
   assert.match(code, /:aria-valuemax="Math\.round\(navigatorMaxWidth\)"/);
   assert.match(code, /--code-nav-width/);

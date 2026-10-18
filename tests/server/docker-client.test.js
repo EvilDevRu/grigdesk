@@ -17,7 +17,7 @@ import {
  * изолирован от Docker хоста; все соединения и файлы убираются даже при ошибке теста.
  */
 async function fakeEngine(t, handler) {
-  const directory = await mkdtemp(join(tmpdir(), 'cockpit-docker-client-'));
+  const directory = await mkdtemp(join(tmpdir(), 'grigdesk-docker-client-'));
   const socketPath = join(directory, 'engine.sock');
   const server = http.createServer(handler);
   const sockets = new Set();
@@ -154,7 +154,7 @@ test('таймаут и отсутствующий либо недоступны
     code: 'docker_timeout',
   });
 
-  const directory = await mkdtemp(join(tmpdir(), 'cockpit-docker-offline-'));
+  const directory = await mkdtemp(join(tmpdir(), 'grigdesk-docker-offline-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
 
   const socketPath = join(directory, 'missing.sock');

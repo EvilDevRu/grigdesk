@@ -1,4 +1,4 @@
-// Просмотренные B24-задачи. Метки живут только в state кокпита и в B24 не пишутся.
+// Просмотренные B24-задачи. Метки живут только в state GrigDesk и в B24 не пишутся.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 

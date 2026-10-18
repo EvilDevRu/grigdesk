@@ -15,7 +15,7 @@ const Fastify = requireFromServer('fastify');
 const DRAFT_BASE = '/api/routes/sample/drafts';
 
 async function fixture(t, { authenticated = false } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-editor-api-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-editor-api-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const config = {
     routesDir: path.join(root, 'routes'),

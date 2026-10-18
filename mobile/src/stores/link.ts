@@ -4,7 +4,7 @@ import { markRaw, ref, shallowRef } from 'vue';
 import { ApiClient } from '../api/client.ts';
 import { LinkEvents } from '../api/events.ts';
 import { getLink } from '../link/index.ts';
-import type { CockpitLink, LinkState } from '../link/types.ts';
+import type { GrigDeskLink, LinkState } from '../link/types.ts';
 import { parseQr } from '../link/qr.ts';
 import { isNewer } from '../api/version.ts';
 
@@ -34,7 +34,7 @@ export const onSignal = (callback: (name: string, value: any) => void) => {
  */
 export const useLinkStore = defineStore('link', () => {
   const state = ref<LinkState | null>(null);
-  const bridge = shallowRef<CockpitLink | null>(null);
+  const bridge = shallowRef<GrigDeskLink | null>(null);
   const api = shallowRef<ApiClient | null>(null);
   const error = ref('');
   const busy = ref(false);
@@ -59,11 +59,11 @@ export const useLinkStore = defineStore('link', () => {
       };
     }
     if (code === 'contract') {
-      error.value = 'Обновите приложение: ответ Кокпита не поддерживается.';
+      error.value = 'Обновите приложение: ответ GrigDesk не поддерживается.';
     } else if (code === 'pin_mismatch') {
-      error.value = 'Сертификат посредника или Кокпита изменился. Проверьте запись посредника.';
+      error.value = 'Сертификат посредника или GrigDesk изменился. Проверьте запись посредника.';
     } else if (code === 'device_unknown') {
-      error.value = 'Кокпит не узнаёт этот телефон. Проверьте привязку в настройках.';
+      error.value = 'GrigDesk не узнаёт этот телефон. Проверьте привязку в настройках.';
     }
 
     clearers.forEach((clear) => clear());
@@ -151,7 +151,7 @@ export const useLinkStore = defineStore('link', () => {
         features.value = hello.features || [];
         await link.startEvents();
       } catch (failure) {
-        error.value = failure instanceof Error ? failure.message : 'Нет связи с Кокпитом.';
+        error.value = failure instanceof Error ? failure.message : 'Нет связи с GrigDesk.';
       }
     }
   }
@@ -169,7 +169,7 @@ export const useLinkStore = defineStore('link', () => {
       signals.forEach((callback) => callback('ready', value));
     } catch (failure) {
       error.value =
-        failure instanceof Error ? failure.message : 'Не удалось проверить версию Кокпита.';
+        failure instanceof Error ? failure.message : 'Не удалось проверить версию GrigDesk.';
     }
   }
 

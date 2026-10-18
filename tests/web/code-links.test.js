@@ -4,7 +4,7 @@
 // Раньше просмотрщик документов принимал только .md/.markdown/.txt, а всё остальное
 // резолвер молча пропускал — и markdown-рендерер всё равно рисовал синюю ссылку
 // (обычный относительный путь проходит его allowlist). Клик по `chat.js` открывал
-// пустую вкладку на origin кокпита: ссылка выглядела живой и не работала.
+// пустую вкладку на origin GrigDesk: ссылка выглядела живой и не работала.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -20,17 +20,17 @@ import {
 import { mdToHtml } from '../../web/src/shared/md.ts';
 
 const ROOTS = [
-  { project: 'cockpit', repo: 'main', root: '/home/user/Workspace/cockpit', main: true, branch: 'dev' },
-  { project: 'cockpit', repo: 'main', root: '/home/user/Workspace/cockpit-t1234', main: false, branch: 'task-1234' },
+  { project: 'grigdesk', repo: 'main', root: '/home/user/Workspace/grigdesk', main: true, branch: 'dev' },
+  { project: 'grigdesk', repo: 'main', root: '/home/user/Workspace/grigdesk-t1234', main: false, branch: 'task-1234' },
   { project: 'other', repo: 'api', root: '/srv/api', main: true, branch: 'master' },
 ];
 const resolve = (href) => chatFileLinkHref(href, { roots: ROOTS });
 
 test('CODE-LINK-01: путь под известным деревом становится route панели', () => {
   assert.equal(
-    codeRouteHref('/home/user/Workspace/cockpit/web/src/stores/chat.js', { roots: ROOTS }),
-    '#/code?project=cockpit&repo=main'
-      + '&root=%2Fhome%2Fuser%2FWorkspace%2Fcockpit&path=web%2Fsrc%2Fstores%2Fchat.js',
+    codeRouteHref('/home/user/Workspace/grigdesk/web/src/stores/chat.js', { roots: ROOTS }),
+    '#/code?project=grigdesk&repo=main'
+      + '&root=%2Fhome%2Fuser%2FWorkspace%2Fgrigdesk&path=web%2Fsrc%2Fstores%2Fchat.js',
   );
   assert.deepEqual(parseCodeTarget('/srv/api/app/main.py:120', ROOTS), {
     project: 'other', repo: 'api', root: '/srv/api', path: 'app/main.py', line: 120,
@@ -41,11 +41,11 @@ test('CODE-LINK-02: worktree выигрывает у основного дере
   // Корни могут быть вложены друг в друга; побеждает самый длинный совпавший —
   // иначе ссылка на файл задачи открыла бы одноимённый файл основного дерева.
   const nested = [
-    { project: 'cockpit', repo: 'main', root: '/home/user/Workspace' },
-    { project: 'cockpit', repo: 'main', root: '/home/user/Workspace/cockpit-t1234' },
+    { project: 'grigdesk', repo: 'main', root: '/home/user/Workspace' },
+    { project: 'grigdesk', repo: 'main', root: '/home/user/Workspace/grigdesk-t1234' },
   ];
-  assert.equal(parseCodeTarget('/home/user/Workspace/cockpit-t1234/server/src/app.js', nested).root,
-    '/home/user/Workspace/cockpit-t1234');
+  assert.equal(parseCodeTarget('/home/user/Workspace/grigdesk-t1234/server/src/app.js', nested).root,
+    '/home/user/Workspace/grigdesk-t1234');
 
   assert.equal(parseCodeTarget('/etc/passwd', ROOTS), null);
   // Префикс имени — не вложенность.
@@ -54,8 +54,8 @@ test('CODE-LINK-02: worktree выигрывает у основного дере
 
 test('CODE-LINK-03: служебные каталоги в мост не попадают', () => {
   // Сервер их всё равно закроет: ссылка-кнопка вела бы прямиком в отказ.
-  assert.equal(parseCodeTarget('/home/user/Workspace/cockpit/.git/config', ROOTS), null);
-  assert.equal(parseCodeTarget('/home/user/Workspace/cockpit/server/.state/cli-token', ROOTS), null);
+  assert.equal(parseCodeTarget('/home/user/Workspace/grigdesk/.git/config', ROOTS), null);
+  assert.equal(parseCodeTarget('/home/user/Workspace/grigdesk/server/.state/cli-token', ROOTS), null);
 });
 
 test('CODE-LINK-04: мёртвая локальная ссылка рендерится текстом, а не синей ссылкой', () => {
@@ -67,9 +67,9 @@ test('CODE-LINK-04: мёртвая локальная ссылка рендер�
 
 test('CODE-LINK-05: у документов приоритет, у кода — свой признак клика', () => {
   // .md остаётся у просмотрщика документов, даже если лежит под известным деревом.
-  assert.match(resolve('/home/user/Workspace/cockpit/docs/cockpit/b24.md'), /^#\/documents\?open=/);
+  assert.match(resolve('/home/user/Workspace/grigdesk/docs/grigdesk/b24.md'), /^#\/documents\?open=/);
 
-  const html = mdToHtml('[стор](/home/user/Workspace/cockpit/web/src/stores/chat.js)', { resolveHref: resolve });
+  const html = mdToHtml('[стор](/home/user/Workspace/grigdesk/web/src/stores/chat.js)', { resolveHref: resolve });
   assert.match(html, /data-code-link="true"/);
   assert.doesNotMatch(html, /target="_blank"/);
 });
@@ -119,9 +119,9 @@ test('CODE-LINK-09: абсолютная ссылка обратно разби�
       path: 'src/новый файл.ts',
       line,
     };
-    const href = codeLinkHref(target, 'https://cockpit.example.test/');
+    const href = codeLinkHref(target, 'https://grigdesk.example.test/');
 
-    assert.match(href, /^https:\/\/cockpit\.example\.test\/#\/code\?/);
+    assert.match(href, /^https:\/\/grigdesk\.example\.test\/#\/code\?/);
     assert.equal(new URL(href).hash.includes('line=0'), line === 0);
     assert.deepEqual(parseCodeRouteHref(href), target);
   }

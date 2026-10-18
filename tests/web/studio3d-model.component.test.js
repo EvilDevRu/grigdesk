@@ -340,10 +340,10 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
     
     scenario.after(() => fs.rm(root, { recursive: true, force: true }));
     
-    const cockpit = path.join(root, 'cockpit');
+    const grigdesk = path.join(root, 'grigdesk');
     const modelDirectory = path.join(root, 'library', 'hero');
     
-    await fs.mkdir(cockpit, { recursive: true });
+    await fs.mkdir(grigdesk, { recursive: true });
     await fs.mkdir(path.join(modelDirectory, version.id), { recursive: true });
     await fs.mkdir(path.join(modelDirectory, 'incoming'));
     await fs.writeFile(path.join(modelDirectory, version.id, file.name), 'offline fixture');
@@ -367,7 +367,7 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
       workdir: body.candidate.workdir,
       provider: 'offline',
       caps: capability,
-      config: { rootDir: cockpit, profilesDir: path.join(cockpit, 'profiles') },
+      config: { rootDir: grigdesk, profilesDir: path.join(grigdesk, 'profiles') },
       prefs: { read: () => ({ projects: {} }) },
       factoryState: { readEnv: async () => ({}) },
       trustedProject: async () => null

@@ -9,7 +9,7 @@ import { getUiLayerDiagnostics, registerUiLayer, subscribeUiLayerDiagnostics }
   from '../../../../web/src/services/layers/stack.ts';
 
 // Изолированный стенд общего журнала: настоящие ядро, транспорт, ловушки и
-// API-клиент, но свой приёмник и никаких данных рабочего Кокпита.
+// API-клиент, но свой приёмник и никаких данных рабочего GrigDesk.
 const RouteBody = defineComponent({ render: () => h('div', 'Маршрут') });
 const router = createRouter({
   history: createWebHashHistory(),

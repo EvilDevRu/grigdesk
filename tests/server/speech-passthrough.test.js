@@ -55,7 +55,7 @@ function frameRunner({ scenes = 0, duration = 0, calls = [] } = {}) {
 }
 
 test('extractSceneFrames даёт локальному Inbox bounded набор кадров и передаёт abort signal', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-scene-frames-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-scene-frames-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.mp4');
   const destDir = path.join(root, 'frames');
@@ -83,7 +83,7 @@ test('extractSceneFrames даёт локальному Inbox bounded набор 
 });
 
 test('extractSceneFrames берёт кадры по всей длительности у записи экрана без смен сцен', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-static-video-frame-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-static-video-frame-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.mp4');
   const destDir = path.join(root, 'frames');
@@ -106,7 +106,7 @@ test('extractSceneFrames берёт кадры по всей длительно�
 });
 
 test('extractSceneFrames дополняет недобор сцен равномерными кадрами', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-mixed-video-frame-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-mixed-video-frame-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.mp4');
   const destDir = path.join(root, 'frames');
@@ -127,7 +127,7 @@ test('extractSceneFrames дополняет недобор сцен равном
 });
 
 test('extractSceneFrames откатывается к первому кадру, когда длительность неизвестна', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-unknown-duration-frame-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-unknown-duration-frame-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.mp4');
   const destDir = path.join(root, 'frames');
@@ -286,18 +286,18 @@ test('ingest job v2 переживает JSON round-trip, а decoder читае�
     model: 'large-v3',
     lang: 'en',
     beamSize: 7,
-    hotwords: 'Cockpit',
+    hotwords: 'GrigDesk',
     frames: 1,
   });
   assert.equal(legacy.schemaVersion, 1);
   assert.equal(legacy.speech.model, 'large-v3');
   assert.equal(legacy.speech.language, 'en');
   assert.equal(legacy.speech.beamSize, 7);
-  assert.equal(legacy.speech.hotwords, 'Cockpit');
+  assert.equal(legacy.speech.hotwords, 'GrigDesk');
 });
 
 test('one-shot ingest довозит resolved options до Python argv и изолированного env', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-one-shot-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-one-shot-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.webm');
   const pythonPath = path.join(root, 'python');
@@ -351,7 +351,7 @@ test('one-shot ingest довозит resolved options до Python argv и изо
 });
 
 test('abort signal действует уже во время ffprobe и извлечения audio', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-abort-pipeline-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-abort-pipeline-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.webm');
   const pythonPath = path.join(root, 'python');
@@ -395,7 +395,7 @@ test('abort signal действует уже во время ffprobe и извл
 });
 
 test('ingest помечает отсутствующий runtime и локальную модель стабильными error.code', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-errors-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-errors-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.webm');
   const pythonPath = path.join(root, 'python');
@@ -430,7 +430,7 @@ test('ingest помечает отсутствующий runtime и локаль
 });
 
 test('detached video job сохраняет speech целиком и передаёт worker тот же HF env', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-job-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-job-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'video.mp4');
   const jobsDir = path.join(root, 'jobs');
@@ -475,7 +475,7 @@ test('detached video job сохраняет speech целиком и перед�
   assert.equal(stored.startedAt, 123);
   assert.equal(spawned.options.detached, true);
   assert.equal(spawned.options.env.HF_HOME, mediaHfDir);
-  assert.equal(spawned.options.env.COCKPIT_MEDIA_HF_DIR, mediaHfDir);
+  assert.equal(spawned.options.env.GRIGDESK_MEDIA_HF_DIR, mediaHfDir);
   assert.equal('HF_HUB_CACHE' in spawned.options.env, false);
   assert.equal('HUGGINGFACE_HUB_CACHE' in spawned.options.env, false);
   assert.equal(unrefCalled, true);
@@ -498,7 +498,7 @@ test('detached video job сохраняет speech целиком и перед�
 });
 
 test('брошенная задача распознавания закрывается отказом, а готовая — нет', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-abandoned-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-abandoned-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const jobsDir = path.join(root, 'jobs');
   const filePath = path.join(root, 'video.mp4');
@@ -550,7 +550,7 @@ test('брошенная задача распознавания закрыва�
 });
 
 test('тонкий worker декодирует nested speech и пишет финальный v2 status', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-worker-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-worker-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const statusPath = path.join(root, 'job.json');
   const job = encodeIngestJob({
@@ -643,7 +643,7 @@ test('transcribe.py вызывает WhisperModel только fail-closed', () 
   const scriptPath = fileURLToPath(new URL('../../server/src/lib/media/transcribe.py', import.meta.url));
   const source = String.raw`
 import importlib.util, json, sys, types
-spec = importlib.util.spec_from_file_location('cockpit_transcribe', sys.argv[1])
+spec = importlib.util.spec_from_file_location('grigdesk_transcribe', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 calls = []
@@ -686,7 +686,7 @@ test('transcribe.py находит alias-only snapshot без сети и без
   const scriptPath = fileURLToPath(new URL('../../server/src/lib/media/transcribe.py', import.meta.url));
   const source = String.raw`
 import importlib.util, json, sys, types
-spec = importlib.util.spec_from_file_location('cockpit_transcribe', sys.argv[1])
+spec = importlib.util.spec_from_file_location('grigdesk_transcribe', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 calls = []
@@ -772,7 +772,7 @@ test('transcribe.py пробрасывает beam/hotwords/condition/VAD в fast
   const scriptPath = fileURLToPath(new URL('../../server/src/lib/media/transcribe.py', import.meta.url));
   const source = String.raw`
 import contextlib, importlib.util, io, json, sys, types
-spec = importlib.util.spec_from_file_location('cockpit_transcribe', sys.argv[1])
+spec = importlib.util.spec_from_file_location('grigdesk_transcribe', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 calls = []

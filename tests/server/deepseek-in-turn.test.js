@@ -18,7 +18,7 @@ const Fastify = requireServer('fastify');
 const websocket = requireServer('@fastify/websocket');
 
 async function fixture(t, { askQuestion = false, expectedSteers = 1 } = {}) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-web-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-web-'));
   const app = Fastify();
   await app.register(websocket);
   const sockets = new Map();

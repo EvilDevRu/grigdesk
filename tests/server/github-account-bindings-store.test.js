@@ -84,7 +84,7 @@ test('selected pointer переключается только на verified bin
     token: 'github_pat_cleanup_private_value',
     secret: 'webhook-secret',
     ingressRef: 'ingress_reference_01',
-    callbackUrl: 'https://cockpit.example.test/hooks/github/ingress_reference_01',
+    callbackUrl: 'https://grigdesk.example.test/hooks/github/ingress_reference_01',
     hookId: '900',
     generation: 3,
     accountRef: one.accountRef,

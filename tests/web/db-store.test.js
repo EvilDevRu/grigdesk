@@ -8,7 +8,7 @@ function session(overrides = {}) {
   return {
     id: 'session-a',
     profileId: 'fixture',
-    projectId: 'cockpit',
+    projectId: 'grigdesk',
     label: 'Боевая',
     role: 'read',
     engine: 'mysql',
@@ -26,7 +26,7 @@ const ACTIONS_PATH = webFile('src/actions/db/index.ts');
 const STORE_PATH = webFile('src/stores/db.ts');
 
 async function dbSection(t, api) {
-  await installUiBrowser(t, 'https://cockpit.test/#/db');
+  await installUiBrowser(t, 'https://grigdesk.test/#/db');
   globalThis.__dbStoreApi = api;
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
@@ -64,7 +64,7 @@ test('пароль DB-сессии отправляется raw bytes и не п
   assert.deepEqual(calls, [{
     path: '/api/db/profiles/fixture/sessions',
     body: 'DB_PASSWORD_SENTINEL_91012',
-    options: { headers: { 'x-cockpit-ssh-session-id': 'ssh-session-a' } },
+    options: { headers: { 'x-grigdesk-ssh-session-id': 'ssh-session-a' } },
   }]);
 });
 
@@ -98,7 +98,7 @@ test('DB store получает проекты отдельно от общег�
     async get(path) {
       assert.equal(path, '/api/projects');
 
-      return { projects: [{ id: 'cockpit' }, { id: 'shop' }] };
+      return { projects: [{ id: 'grigdesk' }, { id: 'shop' }] };
     },
   });
 
@@ -107,7 +107,7 @@ test('DB store получает проекты отдельно от общег�
   // Признак архива входит в контракт списка: по нему форма решает, кому можно
   // заводить новый профиль базы.
   assert.deepEqual(store.projects, [
-    { id: 'cockpit', archivedAt: null },
+    { id: 'grigdesk', archivedAt: null },
     { id: 'shop', archivedAt: null },
   ]);
   assert.equal(store.projectsLoading, false);
@@ -138,7 +138,7 @@ test('консоль человека отправляет серверный к
 });
 
 test('raw API сохраняет заголовок выбранной SSH-сессии', async (t) => {
-  await installUiBrowser(t, 'https://cockpit.test/#/db');
+  await installUiBrowser(t, 'https://grigdesk.test/#/db');
   const requests = [];
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options });
@@ -151,11 +151,11 @@ test('raw API сохраняет заголовок выбранной SSH-се�
   await api.postBytes(
     '/api/db/profiles/fixture/sessions',
     new TextEncoder().encode('secret'),
-    { headers: { 'x-cockpit-ssh-session-id': 'ssh-session-a' } },
+    { headers: { 'x-grigdesk-ssh-session-id': 'ssh-session-a' } },
   );
 
   assert.deepEqual(requests[0].options.headers, {
-    'x-cockpit-ssh-session-id': 'ssh-session-a',
+    'x-grigdesk-ssh-session-id': 'ssh-session-a',
     'Content-Type': 'application/octet-stream',
   });
 });

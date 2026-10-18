@@ -1,5 +1,5 @@
 // Карточка «Автозапуск и ярлык» («Настройки → Сервер»). Смысл проверки: человек решает,
-// поднимется ли кокпит сам после включения машины, и ему должно быть видно, ЧТО именно
+// поднимется ли GrigDesk сам после включения машины, и ему должно быть видно, ЧТО именно
 // случится — старт до входа в систему, только после входа или никогда. Плюс переключатель
 // не вправе трогать живой процесс, а кнопка ярлыка обязана и ставить, и убирать.
 import assert from 'node:assert/strict';
@@ -15,7 +15,7 @@ export { default as UiSwitch } from '${webFile('src/components/primitives/UiSwit
 
 async function browserHarness(t) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -166,7 +166,7 @@ test('выключение автозапуска идёт PUT-ом и обещ�
   assert.equal(card.wrapper.get('[data-testid="launcher-mode"]').text(), 'Выключен');
   assert.match(card.wrapper.get('[data-testid="launcher-message"]').text(), /живой сервер не тронут/);
   assert.match(card.wrapper.get('[data-testid="autostart-note"]').text(),
-    /ярлык «Кокпит»|systemctl --user start/);
+    /ярлык GrigDesk|systemctl --user start/);
 });
 
 test('отказ сервера показан человеку, состояние карточки не врёт', async (t) => {
@@ -203,7 +203,7 @@ test('кнопка ставит ярлык и после этого предла
   assert.deepEqual(card.calls[1], ['POST', '/api/system/launcher/shortcut']);
   assert.equal(card.wrapper.get('[data-testid="shortcut-toggle"]').text(), 'Убрать ярлык');
   assert.match(card.wrapper.get('[data-testid="launcher-message"]').text(),
-    /\/home\/test\/Desktop\/cockpit\.desktop/);
+    /\/home\/test\/Desktop\/grigdesk\.desktop/);
 
   state.nextShortcut = { desktopDir: '/home/test/Desktop', desktop: false, menu: false };
   await card.wrapper.get('[data-testid="shortcut-toggle"]').trigger('click');
@@ -233,6 +233,6 @@ test('сервер под приложением не называется ру�
     },
   }, { systemd: false, mode: 'desktop' });
 
-  assert.match(card.text(), /сервером управляет приложение Кокпита/);
+  assert.match(card.text(), /сервером управляет приложение GrigDesk/);
   assert.doesNotMatch(card.text(), /запущен вручную/);
 });

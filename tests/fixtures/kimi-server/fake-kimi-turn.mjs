@@ -19,9 +19,9 @@ const argv = process.argv.slice(2);
 const port = Number(argv[argv.indexOf('--port') + 1] || 0);
 const home = process.env.KIMI_CODE_HOME || '/tmp';
 const token = 'fixture-token-0123456789';
-const withApproval = process.env.COCKPIT_KIMI_FIXTURE_APPROVAL === '1';
-const realWire = process.env.COCKPIT_KIMI_FIXTURE_REAL_WIRE === '1';
-const steersExpected = Math.max(1, Number(process.env.COCKPIT_KIMI_FIXTURE_STEERS) || 1);
+const withApproval = process.env.GRIGDESK_KIMI_FIXTURE_APPROVAL === '1';
+const realWire = process.env.GRIGDESK_KIMI_FIXTURE_REAL_WIRE === '1';
+const steersExpected = Math.max(1, Number(process.env.GRIGDESK_KIMI_FIXTURE_STEERS) || 1);
 const trace = [];
 const traceFile = path.join(home, 'fixture-trace.jsonl');
 

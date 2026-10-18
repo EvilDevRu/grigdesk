@@ -1,0 +1,59 @@
+# Пользовательский сервис systemd для сервера GrigDesk (нативный для хоста, по образцу factory-dashboard.service).
+# Установка: см. deploy/install.sh. Управление:
+#   systemctl --user enable --now grigdesk-server
+#   systemctl --user status grigdesk-server
+#   journalctl --user -u grigdesk-server -f
+[Unit]
+Description=GrigDesk: API-сервер (Fastify)
+After=network.target
+# network-online.target здесь НЕ ставим: у пользовательского менеджера его нет
+# (LoadState=not-found), строка была бы декоративной. Готовность VPN
+# проверяется по фактическому маршруту в ExecStartPre, а не по имени device-юнита.
+# Дефолтный rate limit systemd несовместим с долгим ожиданием внешней зависимости:
+# несколько быстрых отказов ExecStartPre оставили бы unit в failed навсегда. Ноль даёт
+# воротам ждать VPN сколько нужно.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# NODE и рабочая директория подставит install.sh (шаблонные плейсхолдеры).
+ExecStart=__NODE__ __GRIGDESK_DIR__/server/src/app.ts
+WorkingDirectory=__GRIGDESK_DIR__/server
+# PATH задаём явно: у systemd user-сервиса он берётся из окружения сессии, зафиксированного
+# при логине, и НЕ содержит ~/.local/bin, ~/.kimi-code/bin и каталога node. Без этого GrigDesk не находит CLI
+# исполнителей (claude, codex) — они показываются «недоступен», а запуски из чата и
+# конвейера падают. __NODE_DIR__ (каталог node) подставит install.sh.
+Environment=PATH=%h/.kimi-code/bin:%h/.local/bin:__NODE_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+# МАШИННЫЕ НАСТРОЙКИ — в .env папки данных (см. .env.example), а НЕ строками Environment здесь:
+# этот файл install.sh каждый раз перегенерирует из шаблона, и правки в установленной копии
+# молча пропадут на первой же переустановке. Так же .env читает bin/grigdesk-ctl (--env-file), то
+# есть все три способа запуска (systemd, bin/grigdesk-ctl, deploy/restart.sh) видят одно и то же.
+# Через это задаются GRIGDESK_MEDIA_PYTHON (python из venv с faster-whisper),
+# GRIGDESK_SANDBOX_DOWN_CMD, ключи API. Ворота VPN ниже читают оттуда же
+# (ExecStartPre берёт окружение юнита) — GRIGDESK_REQUIRE_VPN/GRIGDESK_VPN_IFACE/
+# GRIGDESK_VPN_PROBE.
+# Синтаксис — systemd, не shell: без export, без подстановки $VAR и %h (пути только абсолютные).
+# «-» — файла может не быть.
+EnvironmentFile=-__ENV_FILE__
+__HOME_ENV__
+__ENV_FILE_ENV__
+# ВОРОТА VPN. По умолчанию автоматически распознают TUN из маршрута; для другой схемы
+# интерфейс задаётся в .env. Только GRIGDESK_REQUIRE_VPN=0 явно отключает gate.
+# Ненулевой код запрещает старт, а systemd повторяет попытку через RestartSec.
+ExecStartPre=__GRIGDESK_DIR__/deploy/require-vpn.sh
+Restart=always
+RestartPreventExitStatus=78
+# 5с вместо 2с: пауза заметна только при ожидании VPN, а журнал не забивается.
+RestartSec=5
+# Остановка — сливом, а не расстрелом cgroup. С control-group SIGTERM прилетал бы и в
+# CLI агентов одновременно с сервером, и тот не успевал бы ни дать ходам закончить, ни
+# прервать их с сохранением ленты и id сессии. mixed: SIGTERM только главному процессу,
+# он сам закрывает исполнителей; остаток cgroup добивает SIGKILL после его выхода.
+KillMode=mixed
+# Больше бюджета остановки сервера (GRIGDESK_SHUTDOWN_TIMEOUT_MS, по умолчанию 30 с):
+# SIGKILL раньше срока обесценил бы весь слив.
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target

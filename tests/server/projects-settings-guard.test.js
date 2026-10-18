@@ -16,7 +16,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function withPrefs(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-projects-settings-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-projects-settings-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const prefsPath = path.join(dir, 'prefs.json');
   return { dir, prefsPath, prefs: new PrefsStore({ prefsPath }) };

@@ -13,7 +13,7 @@ import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/p
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const STORAGE_KEY = 'cockpit-video-session';
+const STORAGE_KEY = 'grigdesk-video-session';
 
 const module = await compileModule(webFile('src/stores/videoSession.ts'), {
   stubs: {

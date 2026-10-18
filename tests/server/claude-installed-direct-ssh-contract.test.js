@@ -8,7 +8,7 @@ import test from 'node:test';
 
 import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 
-const CLAUDE_BIN = process.env.COCKPIT_CLAUDE_BIN || 'claude';
+const CLAUDE_BIN = process.env.GRIGDESK_CLAUDE_BIN || 'claude';
 
 function anthropicEvents(block, stopReason, sequence) {
   const id = `msg_fixture_${sequence}`;

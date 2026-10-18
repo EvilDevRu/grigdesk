@@ -336,7 +336,7 @@ export class ChatWorkdirTransitions {
     const id = record.id!;
 
     if (record.purpose === 'companion' && (input.taskId !== (record.taskId || null)
-      || input.workdir.kind !== 'cockpit' || !sameChatWorkdir(input.workdir, record.workdir))) {
+      || input.workdir.kind !== 'grigdesk' || !sameChatWorkdir(input.workdir, record.workdir))) {
       throw new ChatWorkdirError('workdir_change_required', 'Папка компаньона определяется его задачей.');
     }
     if (record.revision !== input.expectedRevision) {

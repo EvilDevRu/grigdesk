@@ -1,17 +1,17 @@
 import { delayWithAbort } from '../../shared/lib/delay.ts';
 
-import { probeCockpit } from '../../shared/runtime/cockpitReadiness.ts';
-import type { CockpitProbeOptions } from '../../shared/runtime/cockpitReadiness.ts';
+import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
+import type { GrigDeskProbeOptions } from '../../shared/runtime/grigDeskReadiness.ts';
 
-export type { CockpitProbeOptions } from '../../shared/runtime/cockpitReadiness.ts';
+export type { GrigDeskProbeOptions } from '../../shared/runtime/grigDeskReadiness.ts';
 
-export type CockpitWaitOptions = CockpitProbeOptions & {
+export type GrigDeskWaitOptions = GrigDeskProbeOptions & {
   intervalMs?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
 
 const OFFLINE_MESSAGE = 'Окно подключится само, как только сервер ответит. ' +
-  'Если ожидание затянулось, выполните в терминале <code>cockpit status</code>.';
+  'Если ожидание затянулось, выполните в терминале <code>grigdesk-ctl status</code>.';
 
 const HTML_ESCAPES: Record<string, string> = {
   '&': '&amp;',
@@ -36,7 +36,7 @@ export function offlineHtml(origin: string): string {
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ждём сервер Кокпита</title>
+  <title>Ждём сервер GrigDesk</title>
   <style>
     body {
       margin: 0;
@@ -64,7 +64,7 @@ export function offlineHtml(origin: string): string {
 </head>
 <body>
   <main>
-    <h1>Ждём сервер Кокпита</h1>
+    <h1>Ждём сервер GrigDesk</h1>
     <p class="address">${escapeHtml(origin)}</p>
     <p>${OFFLINE_MESSAGE}</p>
   </main>
@@ -84,23 +84,23 @@ export function offlineUrl(origin: string): string {
  * Ответ считается готовностью только после проверки схемы JSON auth/state.
  * Таймаут и внешняя отмена ограничивают запрос, включая чтение тела ответа.
  */
-export async function cockpitAlive(
+export async function grigDeskAlive(
   origin: string,
-  options: CockpitProbeOptions = {},
+  options: GrigDeskProbeOptions = {},
 ): Promise<boolean> {
-  return (await probeCockpit(origin, options)) === 'cockpit';
+  return (await probeGrigDesk(origin, options)) === 'grigdesk';
 }
 
 /**
  * Выполняет единственный последовательный цикл до ответа сервера или отмены.
  * Отмена во время запроса и сна завершает ожидание без необработанных исключений.
  */
-export async function waitForCockpit(
+export async function waitForGrigDesk(
   origin: string,
-  options: CockpitWaitOptions = {},
+  options: GrigDeskWaitOptions = {},
 ): Promise<boolean> {
   while (!options.signal?.aborted) {
-    const alive = await cockpitAlive(origin, options);
+    const alive = await grigDeskAlive(origin, options);
 
     if (options.signal?.aborted) {
       return false;

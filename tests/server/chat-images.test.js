@@ -12,13 +12,14 @@ import { CHAT_IMAGE_FIXTURES } from '../fixtures/chatImages.mjs';
 import { chatAppFixture, TEST_MODEL_REF } from './helpers/chat-turns.js';
 import { config } from '../../server/src/config.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
+import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 /**
  * Временная рабочая область содержит настоящие растры и отдельный внешний каталог.
  * Ни одна проверка не читает историю или рабочие файлы пользователя.
  */
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-images-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-images-'));
   const cwd = path.join(root, 'work');
   const extra = path.join(root, 'extra');
   const outside = path.join(root, 'work-neighbour');
@@ -32,6 +33,56 @@ async function fixture(t) {
     extra,
     outside,
   };
+}
+
+for (const [id, layout, status] of [
+  ['GA-01', 'same-link', 200],
+  ['GA-02', 'foreign-link', 403],
+  ['GA-03', 'directory', 403],
+]) {
+  test(`${id}: старый корень картинок — ${layout}`, async (t) => {
+    const f = await fixture(t);
+    const previousHome = process.env.HOME;
+    const previousData = config.dataHome;
+    const data = path.join(f.root, '.grigdesk');
+    const old = path.join(f.root, LEGACY.dataHomeDir);
+    const target = layout === 'same-link' ? data : f.outside;
+
+    await fs.mkdir(path.join(data, 'artifacts'), { recursive: true });
+    await fs.mkdir(path.join(target, 'artifacts'), { recursive: true });
+
+    if (layout === 'directory') {
+      await fs.mkdir(path.join(old, 'artifacts'), { recursive: true });
+    } else {
+      await fs.symlink(target, old);
+    }
+
+    await fs.writeFile(path.join(old, 'artifacts/a.png'), CHAT_IMAGE_FIXTURES.png);
+    process.env.HOME = f.root;
+    config.dataHome = data;
+
+    try {
+      const result = await readChatImage({
+        cwd: f.cwd,
+        imageRoots: [path.join(data, 'artifacts')],
+        requested: path.join(old, 'artifacts/a.png'),
+      });
+
+      assert.equal(result.status ?? 200, status);
+
+      if (status === 200) {
+        assert.deepEqual(result.bytes, CHAT_IMAGE_FIXTURES.png);
+      }
+    } finally {
+      config.dataHome = previousData;
+
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+    }
+  });
 }
 
 test('CHAT-IMG-01: absolute/relative, cwd/extraDir и имена файлов сохраняют байты/MIME', async (t) => {

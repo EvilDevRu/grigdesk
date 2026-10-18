@@ -15,7 +15,7 @@ async function verifiedApk(directory: string) {
   let file: Awaited<ReturnType<typeof fs.open>> | undefined;
 
   try {
-    const metadata = await fs.readFile(path.join(directory, 'cockpit-mobile.json'));
+    const metadata = await fs.readFile(path.join(directory, 'grigdesk-mobile.json'));
 
     if (metadata.length > 4096) {
       throw new Error('invalid_manifest');
@@ -24,7 +24,7 @@ async function verifiedApk(directory: string) {
     const manifest = decodeAppUpdate(JSON.parse(metadata.toString('utf8')));
 
     file = await fs.open(
-      path.join(directory, 'cockpit-mobile.apk'),
+      path.join(directory, 'grigdesk-mobile.apk'),
       constants.O_RDONLY | constants.O_NOFOLLOW,
     );
 

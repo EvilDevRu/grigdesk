@@ -35,7 +35,7 @@ async function variant(source, destination) {
     inputIdentity: metadata.inputIdentity,
     payload: metadata.payload,
   })).digest('hex');
-  metadata.runtimeVersion = `${metadata.source.version}.cockpit.b${metadata.buildId.slice(0, 16)}`;
+  metadata.runtimeVersion = `${metadata.source.version}.grigdesk.b${metadata.buildId.slice(0, 16)}`;
   await fs.writeFile(file, JSON.stringify(metadata));
 
   return (await readDeepSeekArtifactAsync(destination)).artifact;
@@ -117,7 +117,7 @@ test('настоящий B сохраняет журнал, A продолжае
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      DEEPSEEK_API_KEY: 'cockpit-loopback-only',
+      DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
     },
     signal: AbortSignal.timeout(45_000),
     startServer: async (options) => {

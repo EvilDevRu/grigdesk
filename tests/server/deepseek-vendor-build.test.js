@@ -86,7 +86,7 @@ test('registry проверяет точное выражение dynamic import
 
 test('настоящий runtime переносится и сохраняет web startup, cookie и settings RPC', async (t) => {
   const artifact = await ensureTestDeepSeekArtifact();
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-dsh-build-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-dsh-build-'));
   const relocated = path.join(temporary, 'runtime with spaces');
   const home = path.join(temporary, 'private-home');
   const cwd = path.join(temporary, 'workspace');
@@ -157,7 +157,7 @@ test('настоящий runtime воспроизводим: в payload нет �
 
 test('настоящий ACP initialize не требует ключа и сохраняет stdout только для frames', async (t) => {
   const artifact = await ensureTestDeepSeekArtifact();
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-dsh-acp-build-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-dsh-acp-build-'));
   const runtime = resolveDeepSeekRuntime({ deepseekArtifactDir: artifact });
   const child = spawn(runtime.command, [...runtime.prefixArgs, '--profile', 'acp'], {
     cwd: temporary,
@@ -190,7 +190,7 @@ test('настоящий ACP initialize не требует ключа и сох
   const initialized = await client.request('initialize', {
     protocolVersion: 1,
     clientCapabilities: {},
-    clientInfo: { name: 'cockpit-build-test', version: '1' },
+    clientInfo: { name: 'grigdesk-build-test', version: '1' },
   });
 
   assert.equal(initialized.protocolVersion, 1);

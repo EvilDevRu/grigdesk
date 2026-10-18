@@ -1,4 +1,4 @@
-// Модуль plugins — реестр плагинов кокпита: список, вкл/выкл, настройки.
+// Модуль plugins — реестр плагинов GrigDesk: список, вкл/выкл, настройки.
 // Регистрируется РАНЬШЕ модулей-плагинов: декорирует fastify.pluginEnabled(id),
 // которым системные модули (media/code) гейтят свои роуты на лету — тумблер
 // действует без рестарта. Пользовательские server.js подключаются здесь же
@@ -20,7 +20,7 @@ import { resolvePluginDocs } from '../../lib/pluginDocs.ts';
 import type { PluginDocsEntry } from '../../lib/pluginDocs.ts';
 import { normalizePluginCategory } from '../../../../shared/plugins/pluginsContracts.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 import type { PluginInstallPort } from '../../lib/pluginInstall/service.ts';
 import { createPluginLifecycle, PluginAdmission } from './lifecycle.ts';
 import installRoutes from './installRoutes.ts';
@@ -29,7 +29,7 @@ import { assertRealPackageRoot } from '../../lib/pluginInstall/packageTree.ts';
 import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
 
 export interface PluginsModuleOptions {
-  config: Pick<CockpitConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
+  config: Pick<GrigDeskConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
   prefs: PrefsStore;
   installs?: PluginInstallPort;
   onToggle?: (id: string, enabled: boolean) => unknown;
@@ -171,7 +171,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   for (const m of userPlugins) {
     if (!isEnabled(prefs.read(), m)) continue;
     if ((m.api || 1) !== PLUGIN_API) {
-      fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, кокпит даёт api=${PLUGIN_API} — пропущен`);
+      fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, GrigDesk даёт api=${PLUGIN_API} — пропущен`);
       continue;
     }
 
@@ -240,7 +240,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
 
   /**
    * Документация доступных плагинов для хода агента: включённых пользовательских, чей
-   * контракт кокпит поднимает. Оглавление ищется в постоянном месте при каждом вызове —
+   * контракт GrigDesk поднимает. Оглавление ищется в постоянном месте при каждом вызове —
    * установка, удаление и правка папки видны следующему ходу без рестарта.
    */
   fastify.decorate('pluginDocs', async () => {

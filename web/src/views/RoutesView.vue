@@ -342,7 +342,7 @@ interface RouteEntry {
 // Что сейчас делает кнопка. Пустая строка — ничего: раздел не занят.
 type BusyMode = '' | 'validate' | 'publish' | 'rollback';
 
-const PROJECT_KEY = 'cockpit-project';
+const PROJECT_KEY = 'grigdesk-project';
 const DRAFT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CATALOG_HASH_RE = /^[a-f0-9]{64}$/;
 
@@ -402,7 +402,7 @@ const graphLoading = ref(false);
 const busy = ref<BusyMode>('');
 const notice = ref('');
 // Сырой ответ публикатора — его показывают в «подробностях» как есть: формат
-// принадлежит скрипту профиля, и толковать его кокпит не вправе.
+// принадлежит скрипту профиля, и толковать его GrigDesk не вправе.
 const report = ref<Record<string, unknown> | null>(null);
 
 const helpPanel = 'Черновик можно редактировать и проверять до публикации.'
@@ -1147,7 +1147,7 @@ function openProjectCreate(): void {
 
 /**
  * Проверка и публикация делает сам профиль (routes/publish.mjs) — состав маршрутов,
- * промпты и bootstrap знает только он. Кокпит передаёт ровно два своих аргумента:
+ * промпты и bootstrap знает только он. GrigDesk передаёт ровно два своих аргумента:
  * куда публиковать и поверх какой ревизии.
  */
 async function run(mode: 'validate' | 'publish'): Promise<void> {

@@ -36,7 +36,7 @@ export function windowKeyPath({ env, uid, port }: WindowKeyPathInput): string | 
     return null;
   }
 
-  const override = env.COCKPIT_WINDOW_KEY_PATH;
+  const override = env.GRIGDESK_WINDOW_KEY_PATH;
 
   if (override !== undefined) {
     const name = override.split('/').at(-1);
@@ -51,6 +51,6 @@ export function windowKeyPath({ env, uid, port }: WindowKeyPathInput): string | 
     return null;
   }
 
-  return normalizedPath(`${runtime ?? `/run/user/${uid}`}/cockpit/window-key-${port}`);
+  return normalizedPath(`${runtime ?? `/run/user/${uid}`}/grigdesk/window-key-${port}`);
 }
 

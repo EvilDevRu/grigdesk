@@ -24,7 +24,7 @@ const STATUS = {
 };
 const RULE = {
   repositoryId: '123456',
-  project: 'cockpit',
+  project: 'grigdesk',
   kind: 'bug',
   b24: { responsibleId: null, groupId: 7, priority: 2 },
   autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
@@ -56,13 +56,13 @@ test('состояния привязки и канала закрыты пер�
 
 test('правило allowlist переживает отсутствие необязательных блоков', () => {
   const policy = parseGitHubPolicy({
-    rules: [{ repositoryId: '123456', project: 'cockpit', kind: 'wish' }],
+    rules: [{ repositoryId: '123456', project: 'grigdesk', kind: 'wish' }],
   });
 
   assert.deepEqual(policy, {
     rules: [{
       repositoryId: '123456',
-      project: 'cockpit',
+      project: 'grigdesk',
       kind: 'wish',
       b24: null,
       autoTask: null,

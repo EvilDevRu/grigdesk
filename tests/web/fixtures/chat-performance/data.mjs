@@ -20,7 +20,7 @@ export function performanceData(legacy = false) {
       model: 'fixture-model'
     },
     workdir: {
-      kind: 'cockpit'
+      kind: 'grigdesk'
     },
     revision: 1,
     schema: 2,

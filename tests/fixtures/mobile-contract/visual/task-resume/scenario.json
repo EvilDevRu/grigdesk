@@ -7,7 +7,7 @@
       "minApp": "0.1.0",
       "serverTime": 1760000000000,
       "server": {
-        "name": "Кокпит",
+        "name": "GrigDesk",
         "version": "0.1.0"
       },
       "device": {
@@ -171,7 +171,7 @@
     "task": {
       "task": {
         "id": "101",
-        "title": "Привести мобильные экраны к дизайну Кокпита",
+        "title": "Привести мобильные экраны к дизайну GrigDesk",
         "state": "waiting",
         "stage": "GATE_PLAN",
         "needsHuman": {

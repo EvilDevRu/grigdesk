@@ -149,7 +149,7 @@ export const opensslIdentity: IdentityStore = {
       '-days',
       '30',
       '-subj',
-      '/CN=cockpit-emulator',
+      '/CN=grigdesk-emulator',
       '-keyout',
       keyFile,
       '-out',
@@ -246,7 +246,7 @@ export class PhoneEmulator {
       }
 
       const qrText = (value: unknown) =>
-        'cockpitlink:1:' + Buffer.from(JSON.stringify(value)).toString('base64url');
+        'grigdesklink:1:' + Buffer.from(JSON.stringify(value)).toString('base64url');
       const qr = parseQr(qrText(config.qr));
       const relayList = config.relays.map((relay: QrPayload['relay']) => parseQr(qrText({
         v: 1,
@@ -701,7 +701,7 @@ export class PhoneEmulator {
               ...(input.idempotencyKey
                 ? {
                     'idempotency-key': input.idempotencyKey,
-                    'x-cockpit-operation-created-at': String(input.createdAt),
+                    'x-grigdesk-operation-created-at': String(input.createdAt),
                   }
                 : {}),
             },
@@ -1193,11 +1193,11 @@ export class PhoneEmulator {
         recursive: true,
         mode: 0o700,
       });
-      await writeFile(path.join(directory, 'cockpit-mobile.apk.tmp'), apk.bytes, { mode: 0o600 });
+      await writeFile(path.join(directory, 'grigdesk-mobile.apk.tmp'), apk.bytes, { mode: 0o600 });
       this.gate(generation);
       await rename(
-        path.join(directory, 'cockpit-mobile.apk.tmp'),
-        path.join(directory, 'cockpit-mobile.apk'),
+        path.join(directory, 'grigdesk-mobile.apk.tmp'),
+        path.join(directory, 'grigdesk-mobile.apk'),
       );
       this.gate(generation);
     });

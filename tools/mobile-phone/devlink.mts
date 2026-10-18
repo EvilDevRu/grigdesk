@@ -8,9 +8,9 @@ import { PhoneEmulator, startEmulator } from './emulator.mts';
 
 const root = path.resolve(new URL('../../', import.meta.url).pathname);
 const directory =
-  process.env.COCKPIT_MOBILE_DEVLINK_DIR || path.join(homedir(), '.config/cockpit/mobile-devlink');
-const port = Number(process.env.COCKPIT_MOBILE_DEVLINK_PORT || 8150);
-const deviceName = process.env.COCKPIT_MOBILE_DEVLINK_NAME || 'DevLink в браузере';
+  process.env.GRIGDESK_MOBILE_DEVLINK_DIR || path.join(homedir(), '.config/grigdesk/mobile-devlink');
+const port = Number(process.env.GRIGDESK_MOBILE_DEVLINK_PORT || 8150);
+const deviceName = process.env.GRIGDESK_MOBILE_DEVLINK_NAME || 'DevLink в браузере';
 
 /**
  * Собирает dev-интерфейс с токеном текущего запуска в приватный каталог вне дерева проекта.
@@ -40,7 +40,7 @@ async function buildInterface(token: string, outDir: string) {
  */
 async function main() {
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) {
-    throw new Error('COCKPIT_MOBILE_DEVLINK_PORT должен быть числом 1024–65535.');
+    throw new Error('GRIGDESK_MOBILE_DEVLINK_PORT должен быть числом 1024–65535.');
   }
 
   await mkdir(directory, {

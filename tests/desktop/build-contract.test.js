@@ -7,8 +7,11 @@ test('DW-B1: рецепт выпуска только Linux и сохраняе�
   const lockFile = new URL('../../desktop/package-lock.json', import.meta.url);
   const lock = JSON.parse(await readFile(lockFile, 'utf8'));
 
-  assert.equal(manifest.version, '0.3.0');
-  assert.equal(manifest.description, 'Окно Кокпита для компьютера');
+  assert.equal(manifest.version, '0.1.0');
+  assert.equal(manifest.description, 'Окно GrigDesk для компьютера');
+  assert.equal(manifest.build.executableName, 'grigdesk', 'GO-01: имя ELF и WM_CLASS');
+  assert.equal(manifest.build.appId, 'local.grigdesk.desktop');
+  assert.equal(manifest.build.artifactName, 'grigdesk-desktop-${version}-${arch}.${ext}');
   assert.equal(lock.version, manifest.version);
   assert.equal(lock.packages[''].version, manifest.version);
   assert.equal(manifest.scripts.dist,
@@ -28,7 +31,7 @@ test('DW-B1: рецепт выпуска только Linux и сохраняе�
 test('DW-B2: в сборке нет старого renderer или preload', async () => {
   const source = await readFile(new URL('../../desktop/scripts/build.mts', import.meta.url), 'utf8');
 
-  assert.doesNotMatch(source, /mobile|preload|cockpit-media/u);
+  assert.doesNotMatch(source, /mobile|preload|grigdesk-media/u);
   assert.match(source, /entryPoints:\s*\[path\.join\(desktop, 'src\/main\.ts'\)\]/u);
   assert.match(source, /outfile:\s*path\.join\(output, 'main\.cjs'\)/u);
   assert.match(source, /bundle:\s*true/u);
@@ -42,7 +45,8 @@ test('DW-B2: в сборке нет старого renderer или preload', asy
 test('SP-07: сборка копирует ресурсы заставки в dist/splash', async () => {
   const source = await readFile(new URL('../../desktop/scripts/build.mts', import.meta.url), 'utf8');
 
-  assert.match(source, /const splashFiles = \['index\.html', 'style\.css', 'illustration\.png'\];/u);
+  assert.match(source,
+    /const splashFiles = \['index\.html', 'style\.css', 'background\.png', 'wordmark\.svg'\];/u);
   assert.match(source, /await mkdir\(path\.join\(output, 'splash'\)\);/u);
   assert.match(source, /for \(const name of splashFiles\) \{\s*await copyFile\(/u);
   assert.match(source, /copyFile\(path\.join\(desktop, 'assets\/splash', name\),/u);

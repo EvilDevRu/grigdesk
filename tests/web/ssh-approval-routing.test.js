@@ -8,7 +8,7 @@ const CHAT_STORE = webFile('src/stores/chat.js');
 let nonce = 0;
 
 async function chatStore(t, api) {
-  await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   globalThis.__sshApprovalApi = api;
   const module = await compileModule(CHAT_STORE, {
     stubs: {

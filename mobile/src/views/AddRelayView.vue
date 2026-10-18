@@ -11,8 +11,8 @@
   </section>
   <UiAuthLayout v-else>
     <div class="auth-head">
-      <h1>Подключить Кокпит</h1>
-      <p class="mobile-muted">Привяжите телефон к кокпиту на компьютере.</p>
+      <h1>Подключить GrigDesk</h1>
+      <p class="mobile-muted">Привяжите телефон к GrigDesk на компьютере.</p>
     </div>
     <PairForm />
     <UiButton v-if="isDesktop && link.state?.error" :busy="link.busy" @click="link.unlock">

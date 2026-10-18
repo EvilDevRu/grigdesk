@@ -1,7 +1,7 @@
 services:
   relay:
     build: .
-    image: cockpit-relay:local
+    image: grigdesk-relay:local
     restart: unless-stopped
     init: true
     env_file: ${RELAY_ENV_FILE:-relay.env}

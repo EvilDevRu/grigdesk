@@ -3,7 +3,7 @@
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 
-const RELOAD_KEY = 'cockpit-auth-reload-at';
+const RELOAD_KEY = 'grigdesk-auth-reload-at';
 const RELOAD_INTERVAL_MS = 60_000;
 
 export const useAuthStore = defineStore('auth', {

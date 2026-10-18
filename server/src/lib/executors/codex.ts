@@ -184,7 +184,7 @@ interface CodexWorkspaceAccess {
   excludeSlashTmp?: boolean;
 }
 
-// Рабочие инструменты кокпита: ход знает их описания и способ вызвать по имени.
+// Рабочие инструменты GrigDesk: ход знает их описания и способ вызвать по имени.
 interface CodexWorkToolsPort {
   descriptors?: Array<{ name?: string; [field: string]: unknown }>;
   invoke: (name: string, args: unknown) => Promise<unknown>;
@@ -251,7 +251,7 @@ export async function codexSupportsRestrictedWorkspace(bin: unknown): Promise<bo
     return cached.value;
   }
   const value = (async () => {
-    const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-scope-'));
+    const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-scope-'));
     try {
       await new Promise<void>((resolve, reject) => {
         execFile(key, ['app-server', 'generate-ts', '--out', schemaDir], {
@@ -340,9 +340,9 @@ function bucketWindows(bucket: CodexBucket) {
  * Контракт app-server: account/rateLimits/read. `rateLimitsByLimitId` — текущий
  * многовёдерный вид, `rateLimits` остаётся совместимым запасным. Имена вёдер
  * приходят от сервиса, поэтому новое семейство Codex появляется в шапке без
- * релиза кокпита.
+ * релиза GrigDesk.
  *
- * Порядок полос принадлежит кокпиту, а не сервису: `rateLimitsByLimitId` — объект,
+ * Порядок полос принадлежит GrigDesk, а не сервису: `rateLimitsByLimitId` — объект,
  * и OpenAI отдаёт ключи в разном порядке на каждый ответ (замер: шесть запросов
  * подряд — три разных порядка). Минутное обновление шапки поэтому перетасовывало
  * полосы прямо под курсором. Поле `group` называет ведро, которому принадлежит
@@ -920,8 +920,8 @@ export function codexAppServerRequest(bin: string, { method, params }: {
       id: 1,
       params: {
         clientInfo: {
-          name: 'cockpit',
-          title: 'Cockpit',
+          name: 'grigdesk',
+          title: 'GrigDesk',
           version: '0.1.0',
         },
         capabilities: null,
@@ -2073,7 +2073,7 @@ export function openCodexSession({
         try {
           send({
             id: messageObject.id,
-            error: { code: -32601, message: `Cockpit не поддерживает server request ${messageObject.method}` },
+            error: { code: -32601, message: `GrigDesk не поддерживает server request ${messageObject.method}` },
           });
         } catch { /* основной отказ ниже */ }
         finishTurnError(turn, new Error(`Codex запросил неподдерживаемое действие: ${messageObject.method}`));
@@ -2138,7 +2138,7 @@ export function openCodexSession({
     }
 
     await request('initialize', {
-      clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+      clientInfo: { name: 'grigdesk', title: 'GrigDesk', version: '0.1.0' },
       // `experimentalApi` открывает `runtimeWorkspaceRoots`: без него app-server
       // отвечает «requires experimentalApi capability», и рабочим корнем остаётся
       // один cwd (в схеме: «Omitted defaults to cwd»). `requestAttestation` —
@@ -2195,7 +2195,7 @@ export function openCodexSession({
       ? await request('thread/resume', { threadId, ...common })
       : await request('thread/start', {
         ...common,
-        serviceName: 'cockpit',
+        serviceName: 'grigdesk',
         ...(dynamicTools.length ? { dynamicTools } : {}),
       })) as { thread?: { id?: string; sessionId?: string }; model?: unknown } | null;
     threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
@@ -2940,7 +2940,7 @@ export default {
    *
    * `unsolicited: false` — Codex не будит модель сам: фоновых агентов, которые
    * отчитались бы без запроса, у него нет. Живая сессия всё равно нужна: она сохраняет
-   * рабочее состояние процесса и позволяет разбудить агента сообщением от кокпита.
+   * рабочее состояние процесса и позволяет разбудить агента сообщением от GrigDesk.
    */
   // Канал ввода в активный ход: `turn/steer` установленного app-server. Живой сессии
   // для него не требуется — разовый запуск держит тот же turn до своего финала.

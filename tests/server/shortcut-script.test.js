@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,9 +14,18 @@ const script = path.join(root, 'deploy', 'shortcut.sh');
 
 // Песочница: свой HOME, рабочий стол с пробелом и кириллицей (как у русской локали) и
 // фальшивые xdg-user-dir/gio/update-desktop-database, которые лишь пишут журнал вызовов.
+// Скрипт запускается из копии кода: окно лежит в bin/ копии, настоящий bin/ не трогается.
 function sandbox(t, { desktop = true, data = path.join('.local', 'share') } = {}) {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'cockpit-shortcut-'));
+  const home = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-shortcut-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
+  const code = path.join(home, 'копия кода');
+  const copy = path.join(code, 'deploy', 'shortcut.sh');
+
+  for (const name of ['deploy/shortcut.sh', 'deploy/lib/desktop-app.sh', 'bin/grigdesk.png']) {
+    mkdirSync(path.dirname(path.join(code, name)), { recursive: true });
+    copyFileSync(path.join(root, name), path.join(code, name));
+  }
+
   const desktopDir = path.join(home, 'Рабочий стол');
   const fakeBin = path.join(home, 'fake-bin');
   const log = path.join(home, 'calls.log');
@@ -34,12 +44,12 @@ function sandbox(t, { desktop = true, data = path.join('.local', 'share') } = {}
   const env = {
     ...process.env,
     HOME: home,
-    COCKPIT_HOME: path.join(home, '.cockpit'),
+    GRIGDESK_HOME: path.join(home, '.grigdesk'),
     XDG_DATA_HOME: dataHome,
     XDG_CONFIG_HOME: path.join(home, '.config'),
     PATH: `${fakeBin}:${process.env.PATH}`,
   };
-  const run = (action, overrides = {}) => spawnSync('bash', [script, action], {
+  const run = (action, overrides = {}) => spawnSync('bash', [copy, action], {
     encoding: 'utf8',
     env: {
       ...env,
@@ -47,10 +57,12 @@ function sandbox(t, { desktop = true, data = path.join('.local', 'share') } = {}
     },
   });
   const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
-  const appsFile = path.join(dataHome, 'applications', 'cockpit.desktop');
+  const appsFile = path.join(dataHome, 'applications', 'grigdesk.desktop');
 
   return {
     home,
+    code,
+    script: copy,
     desktopDir,
     dataHome,
     fakeBin,
@@ -73,7 +85,7 @@ test('install кладёт ярлык на рабочий стол и в мен�
 
   const installed = box.run('install');
   assert.equal(installed.status, 0, installed.stderr);
-  const desktopFile = path.join(box.desktopDir, 'cockpit.desktop');
+  const desktopFile = path.join(box.desktopDir, 'grigdesk.desktop');
   assert.ok(existsSync(desktopFile));
   assert.ok(existsSync(box.appsFile));
   assert.ok(statSync(desktopFile).mode & 0o111, 'ярлык на рабочем столе исполняемый');
@@ -97,15 +109,18 @@ test('содержимое .desktop: переходный open с каталог
   const box = sandbox(t);
   assert.equal(box.run('install').status, 0);
 
-  const entry = readFileSync(path.join(box.desktopDir, 'cockpit.desktop'), 'utf8');
+  const entry = readFileSync(path.join(box.desktopDir, 'grigdesk.desktop'), 'utf8');
   const nodeDir = path.dirname(execFileSync('bash', ['-c', 'command -v node'], { encoding: 'utf8' }).trim());
-  const icon = path.join(root, 'bin', 'cockpit.png');
+  const icon = path.join(box.code, 'bin', 'grigdesk.png');
 
   assert.match(entry, /^\[Desktop Entry\]\n/);
   assert.match(entry, /^Type=Application$/m);
-  assert.match(entry, /^Name=Кокпит$/m);
+  assert.match(entry, /^Name=GrigDesk$/m);
+  assert.match(entry, /^StartupWMClass=grigdesk$/m, 'GO-02: класс окна');
+  assert.doesNotMatch(entry, /^Name\[en\]=/m);
+  assert.match(entry, /^Keywords=grigdesk;$/m);
   assert.match(entry, /^Terminal=false$/m);
-  assert.ok(entry.includes(`Exec=/usr/bin/env "COCKPIT_NODE_DIR=${nodeDir}" "${script}" open`), entry);
+  assert.ok(entry.includes(`Exec=/usr/bin/env "GRIGDESK_NODE_DIR=${nodeDir}" "${box.script}" open`), entry);
   assert.ok(entry.includes(`Icon=${icon}`));
   assert.ok(existsSync(icon), 'иконка ярлыка лежит в репозитории');
   assert.ok(statSync(script).mode & 0o111, 'скрипт ярлыка исполняемый: Exec зовёт его напрямую');
@@ -141,29 +156,29 @@ test('DW-S1: Comment без браузера', (t) => {
   const entry = readFileSync(box.appsFile, 'utf8');
   const nodeDir = path.dirname(execFileSync('bash', ['-c', 'command -v node'], { encoding: 'utf8' }).trim());
 
-  assert.match(entry, /^Comment=Открыть кокпит; спящий сервер поднимется сам$/mu);
-  assert.match(entry, /^Comment\[en\]=Open the cockpit; a stopped server is started first$/mu);
-  assert.ok(entry.includes(`Exec=/usr/bin/env "COCKPIT_NODE_DIR=${nodeDir}" "${script}" open`));
+  assert.match(entry, /^Comment=Открыть GrigDesk; спящий сервер поднимется сам$/mu);
+  assert.match(entry, /^Comment\[en\]=Open the grigdesk; a stopped server is started first$/mu);
+  assert.ok(entry.includes(`Exec=/usr/bin/env "GRIGDESK_NODE_DIR=${nodeDir}" "${box.script}" open`));
 });
 
 test('ярлык ведёт в приложение без браузерного пути лаунчера', () => {
   const source = readFileSync(script, 'utf8');
 
   assert.doesNotMatch(source, /xdg-open|open_browser|sensible-browser|gio open/u);
-  assert.match(source, /cockpit" open/u);
+  assert.match(source, /grigdesk-ctl" open/u);
 });
 
 const nodeDir = path.dirname(execFileSync('bash', ['-c', 'command -v node'], { encoding: 'utf8' }).trim());
-const legacyExec = `Exec=/usr/bin/env "COCKPIT_NODE_DIR=${nodeDir}" "${script}" open`;
+const legacyExec = (box) => `Exec=/usr/bin/env "GRIGDESK_NODE_DIR=${nodeDir}" "${box.script}" open`;
 const execLine = (entry) => entry.split('\n').find((line) => line.startsWith('Exec='));
 
 /**
- * Новое окно в песочнице: AppImage (исполняемый или нет) и его runtime.json. Ничего не
- * запускается — ярлык только ссылается на путь установленного файла.
+ * Новое окно в песочнице: bin/grigdesk-app копии (исполняемый или нет) и runtime.json в
+ * XDG. Ничего не запускается — ярлык только ссылается на путь установленного файла.
  */
 function installWindow(box, { app = true, executable = true, runtime = true } = {}) {
-  const directory = path.join(box.dataHome, 'cockpit/desktop');
-  const appImage = path.join(directory, 'cockpit-desktop.AppImage');
+  const directory = path.join(box.dataHome, 'grigdesk/desktop');
+  const appImage = path.join(box.code, 'bin/grigdesk-app');
 
   mkdirSync(directory, { recursive: true });
 
@@ -208,7 +223,7 @@ function pathWithoutNode(box) {
 test('SC-05 есть AppImage и descriptor: Exec — AppImage в кавычках, пробелы и кириллица, без node', (t) => {
   const box = sandbox(t, { data: 'Данные приложений/общие файлы' });
   const app = installWindow(box);
-  const desktopFile = path.join(box.desktopDir, 'cockpit.desktop');
+  const desktopFile = path.join(box.desktopDir, 'grigdesk.desktop');
 
   assert.equal(box.run('install').status, 0);
   assert.equal(execLine(readFileSync(box.appsFile, 'utf8')), `Exec="${app}"`);
@@ -223,8 +238,8 @@ test('SC-05 есть AppImage и descriptor: Exec — AppImage в кавычка
   const entry = readFileSync(box.appsFile, 'utf8');
 
   assert.equal(execLine(entry), `Exec="${app}"`);
-  assert.doesNotMatch(entry, /COCKPIT_NODE_DIR|shortcut\.sh/u);
-  assert.match(entry, /^Comment=Открыть кокпит; спящий сервер поднимется сам$/mu);
+  assert.doesNotMatch(entry, /GRIGDESK_NODE_DIR|shortcut\.sh/u);
+  assert.match(entry, /^Comment=Открыть GrigDesk; спящий сервер поднимется сам$/mu);
   assert.equal(readFileSync(desktopFile, 'utf8'), entry, 'меню и рабочий стол — одна запись');
   assert.ok(statSync(desktopFile).mode & 0o111, 'ярлык на рабочем столе исполняемый');
 });
@@ -239,16 +254,16 @@ test('SC-06 нет descriptor: переходный Exec на shortcut.sh open',
     const installed = box.run('install');
 
     assert.equal(installed.status, 0, installed.stderr);
-    assert.equal(execLine(readFileSync(box.appsFile, 'utf8')), legacyExec, JSON.stringify(window));
+    assert.equal(execLine(readFileSync(box.appsFile, 'utf8')), legacyExec(box), JSON.stringify(window));
   }
 });
 
 test('SC-07 повторная установка заменяет ярлык; remove как раньше', (t) => {
   const box = sandbox(t);
-  const desktopFile = path.join(box.desktopDir, 'cockpit.desktop');
+  const desktopFile = path.join(box.desktopDir, 'grigdesk.desktop');
 
   assert.equal(box.run('install').status, 0);
-  assert.equal(execLine(readFileSync(desktopFile, 'utf8')), legacyExec);
+  assert.equal(execLine(readFileSync(desktopFile, 'utf8')), legacyExec(box));
 
   const app = installWindow(box);
 
@@ -258,13 +273,10 @@ test('SC-07 повторная установка заменяет ярлык; r
     assert.equal(execLine(readFileSync(file, 'utf8')), `Exec="${app}"`, file);
   }
 
-  // Окно удалено (cockpit desktop remove): повторная установка возвращает переходный путь.
-  rmSync(path.dirname(app), {
-    recursive: true,
-    force: true,
-  });
+  // Окно удалено (grigdesk-ctl desktop remove): повторная установка возвращает переходный путь.
+  rmSync(app);
   assert.equal(box.run('install').status, 0);
-  assert.equal(execLine(readFileSync(box.appsFile, 'utf8')), legacyExec);
+  assert.equal(execLine(readFileSync(box.appsFile, 'utf8')), legacyExec(box));
 
   const removed = box.run('remove');
 
@@ -276,4 +288,24 @@ test('SC-07 повторная установка заменяет ярлык; r
     desktop: '0',
     menu: '0',
   });
+});
+
+test('SC-08 refresh переписывает только существующие файлы ярлыка', (t) => {
+  const box = sandbox(t);
+  const desktopFile = path.join(box.desktopDir, 'grigdesk.desktop');
+
+  // Без ярлыка refresh ничего не создаёт: установка окна не должна навязывать ярлык.
+  assert.equal(box.run('refresh').status, 0);
+  assert.ok(!existsSync(box.appsFile));
+  assert.ok(!existsSync(desktopFile));
+
+  assert.equal(box.run('install').status, 0);
+  rmSync(desktopFile);
+
+  const app = installWindow(box);
+  const refreshed = box.run('refresh');
+
+  assert.equal(refreshed.status, 0, refreshed.stderr);
+  assert.equal(execLine(readFileSync(box.appsFile, 'utf8')), `Exec="${app}"`);
+  assert.ok(!existsSync(desktopFile), 'убранный с рабочего стола ярлык не возвращается');
 });

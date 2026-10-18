@@ -30,7 +30,7 @@ const Fastify = requireFromServer('fastify');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function tempDir(t, prefix = 'cockpit-media-storage-') {
+function tempDir(t, prefix = 'grigdesk-media-storage-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
@@ -200,7 +200,7 @@ test('общая уборка отчитывается по каждому ви�
 
 async function buildApp(t) {
   const multipart = requireFromServer('@fastify/multipart');
-  const mediaDir = tempDir(t, 'cockpit-media-http-');
+  const mediaDir = tempDir(t, 'grigdesk-media-http-');
   const ingested = [];
 
   const app = Fastify({ logger: false });

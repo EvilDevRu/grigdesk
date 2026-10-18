@@ -272,7 +272,7 @@ function pricingRemark(
   if (pricing.kind === 'mismatch') {
     return {
       lead: `Страница тарифов DeepSeek говорит другое: ${pricing.details.join('; ')} — `
-        + 'расписание в кокпите устарело, поправьте константы в '
+        + 'расписание в GrigDesk устарело, поправьте константы в '
         + 'server/src/lib/deepseek/tariff.ts. ',
       tail: '',
       bad: true,

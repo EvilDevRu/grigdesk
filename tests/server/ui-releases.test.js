@@ -11,7 +11,7 @@ import { publishUiRelease, sealUiRelease } from '../../desktop/src/uiRelease.ts'
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = require('fastify');
-const cookie = 'cockpit_sid=fixture-session';
+const cookie = 'grigdesk_sid=fixture-session';
 
 /**
  * Настоящие static/auth плагины обслуживают две разные сборки и собственное состояние.

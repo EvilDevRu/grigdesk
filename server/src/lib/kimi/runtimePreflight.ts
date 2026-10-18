@@ -110,7 +110,7 @@ function systemdProperty(output: unknown, name: string): string {
 }
 
 /**
- * На пользовательской машине Cockpit обычно не владеет writable cgroup subtree,
+ * На пользовательской машине GrigDesk обычно не владеет writable cgroup subtree,
  * зато user systemd умеет создать отдельный service-cgroup и применить лимиты до
  * exec. Проверяем именно фактические свойства уже запущенного transient unit.
  */
@@ -123,7 +123,7 @@ async function inspectSystemdResourceControl({
   systemctlBin?: string;
   runner?: PreflightRunner;
 } = {}): Promise<PreflightCheck> {
-  const unit = `cockpit-kimi-preflight-${randomUUID()}.service`;
+  const unit = `grigdesk-kimi-preflight-${randomUUID()}.service`;
   const args = [
     '--user', '--pipe', '--wait', '--collect', `--unit=${unit}`,
     '-p', 'CPUQuota=25%',

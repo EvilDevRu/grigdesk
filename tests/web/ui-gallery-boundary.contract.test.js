@@ -13,7 +13,7 @@ const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '../..');
 
 function fixtureRepo(t, files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-ui-gallery-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-ui-gallery-'));
 
   t.after(() => fs.rmSync(root, {
     recursive: true,
@@ -39,7 +39,7 @@ test('UI gallery guard ловит private import, production link и dist artifa
     'web/dev/ui-gallery/main.ts': "import '../../src/stores/auth.js';",
     'web/src/App.vue': '<script setup>const marker = "dev/ui-gallery";</script>',
     'web/ui-gallery.html': '<script type="module" src="/dev/ui-gallery/main.ts"></script>',
-    'web/dist/assets/ui-gallery.js': 'Cockpit UI Gallery',
+    'web/dist/assets/ui-gallery.js': 'GrigDesk UI Gallery',
   });
   const errors = checkUiGalleryBoundary({ repoRoot: root }).errors.join('\n');
 

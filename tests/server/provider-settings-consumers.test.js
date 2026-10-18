@@ -39,7 +39,7 @@ function snapshot(properties, ownership = []) {
       schema: { type: 'object', properties },
       writeChannel: {
         id: 'fixture',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
     }],
@@ -97,7 +97,7 @@ test('common и web-only поля объединяются без нового s
     overrides: saved()['future-provider'].nativeSettings.overrides,
   }));
 
-  assert.equal(catalog.scope.id, 'cockpit-chats-and-pipelines');
+  assert.equal(catalog.scope.id, 'grigdesk-chats-and-pipelines');
   assert.deepEqual(catalog.fields.find((field) => field.id === '["enabled"]').appliesTo,
     ['chat', 'pipeline']);
   assert.deepEqual(catalog.fields.find((field) => field.id === '["webOnly"]').appliesTo, ['chat']);

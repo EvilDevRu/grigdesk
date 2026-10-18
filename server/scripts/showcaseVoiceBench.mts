@@ -169,7 +169,7 @@ ${blocks}
 
 // Каталог локального синтеза берётся тот же, что и у раздела: сравнивать нужно
 // установленный голос, а не свежесобранный ради сравнения.
-const voiceDir = process.env.COCKPIT_SHOWCASE_VOICE_DIR
+const voiceDir = process.env.GRIGDESK_SHOWCASE_VOICE_DIR
   || path.join(dataHome({ env: process.env, home: os.homedir() }), 'state/showcase-voice');
 
 async function main(): Promise<void> {

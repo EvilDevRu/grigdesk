@@ -27,7 +27,7 @@ async function mountChat(t, {
   provider = PROVIDER,
   upload = { file: 'file-1', name: 'test.txt', url: '/test.txt' },
 } = {}) {
-  const browser = await installUiBrowser(t, 'https://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/chats');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
     id: 'in-turn-chat', title: 'Тест', taskId: null, purpose: '',
@@ -137,7 +137,7 @@ test('щелчок по картинке в ленте действий откр
   assert.deepEqual(previewed, [], 'щелчок с модификатором остаётся ссылкой');
   await wrapper.get('.step-image img').trigger('click', { button: 0 });
   assert.deepEqual(previewed, [{
-    src: 'https://cockpit.test/api/chat/in-turn-chat/image?path=%2Frepo%2Fshot.png',
+    src: 'https://grigdesk.test/api/chat/in-turn-chat/image?path=%2Frepo%2Fshot.png',
     name: 'shot.png',
     mime: '',
   }]);

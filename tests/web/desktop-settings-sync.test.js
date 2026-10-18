@@ -180,8 +180,8 @@ async function syncFixture(t, prefs = Promise.resolve({ chatAutoCompactWindow: 6
     ['providers.js', 'useProvidersStore', 'providers', ''],
     ['chat.js', 'useChatStore', 'chat', ''],
     ['board.js', 'useBoardStore', 'board', ''],
-    ['hotkeys.js', 'useHotkeysStore', 'hotkeys', "export const HOTKEYS_KEY = 'cockpit-tool-hotkeys';"],
-    ['device.js', 'useDeviceStore', 'device', "export const WAKE_LOCK_KEY = 'cockpit-screen-wake-lock';"],
+    ['hotkeys.js', 'useHotkeysStore', 'hotkeys', "export const HOTKEYS_KEY = 'grigdesk-tool-hotkeys';"],
+    ['device.js', 'useDeviceStore', 'device', "export const WAKE_LOCK_KEY = 'grigdesk-screen-wake-lock';"],
   ]) {
     stubs['../stores/' + file] = `export const ${name} = () => globalThis.__settingsSync.${key}; ${extra}`;
   }

@@ -134,8 +134,8 @@ test('BS-04: SEA выполняет dashboard/comment/create/start через lo
   const { home } = await syntheticHome();
   const env = childEnv(home, {
     PATH: '',
-    COCKPIT_URL: fixture.baseUrl,
-    COCKPIT_TOKEN: TOKEN,
+    GRIGDESK_URL: fixture.baseUrl,
+    GRIGDESK_TOKEN: TOKEN,
   });
   const input = '{"title":"Задача 🌍"}\r\n';
   const cases: Array<[string[], string, string, string | null, string | undefined]> = [
@@ -156,7 +156,7 @@ test('BS-04: SEA выполняет dashboard/comment/create/start через lo
     assert.ok(request);
     assert.equal(request.method, method);
     assert.equal(request.url, url);
-    assert.equal(request.headers['x-cockpit-token'], TOKEN);
+    assert.equal(request.headers['x-grigdesk-token'], TOKEN);
     assert.equal(request.headers['content-type'], body === null ? undefined : 'application/json');
     assert.equal(request.body.toString(), body ?? '');
     assert.equal(result.code, 0, result.stderr.toString());
@@ -172,7 +172,7 @@ test('BS-04: SEA выполняет dashboard/comment/create/start через lo
 
 test('BS-05: SEA читает новые настройки и отказывает без токена', async (t) => {
   const fixture = await startHttpFixture(t, (request, response) => {
-    response.end(`{"token":"${String(request.headers['x-cockpit-token'])}"}`);
+    response.end(`{"token":"${String(request.headers['x-grigdesk-token'])}"}`);
   });
   const { home, data } = await syntheticHome();
   const envFile = path.join(home, 'custom.env');
@@ -180,15 +180,15 @@ test('BS-05: SEA читает новые настройки и отказыва�
   await mkdir(path.join(data, 'state'), { recursive: true });
   await writeFile(path.join(home, 'token-file'), 'tok-custom\n');
   await writeFile(envFile, [
-    `COCKPIT_PORT=${new URL(fixture.baseUrl).port}`,
-    `COCKPIT_CLI_TOKEN_PATH=${path.join(home, 'token-file')}`,
+    `GRIGDESK_PORT=${new URL(fixture.baseUrl).port}`,
+    `GRIGDESK_CLI_TOKEN_PATH=${path.join(home, 'token-file')}`,
     '',
   ].join('\n'));
 
   const ok = await runProcess(t, binary(), ['dashboard'], {
     env: childEnv(home, {
       PATH: '',
-      COCKPIT_ENV_FILE: envFile,
+      GRIGDESK_ENV_FILE: envFile,
     }),
   });
 
@@ -201,7 +201,7 @@ test('BS-05: SEA читает новые настройки и отказыва�
   const missing = await runProcess(t, binary(), ['dashboard'], {
     env: childEnv(home, {
       PATH: '',
-      COCKPIT_URL: fixture.baseUrl,
+      GRIGDESK_URL: fixture.baseUrl,
     }),
     cwd: path.join(home, 'code'),
   });
@@ -226,14 +226,14 @@ test('BS-06: SEA сохраняет ошибки source-контракта', asy
     const result = await runProcess(t, binary(), ['start', '1'], {
       env: {
         PATH: '',
-        COCKPIT_URL: fixture.baseUrl,
-        COCKPIT_TOKEN: TOKEN,
+        GRIGDESK_URL: fixture.baseUrl,
+        GRIGDESK_TOKEN: TOKEN,
       },
     });
 
     assert.equal(result.code, 22);
     assert.equal(result.stdout.length, 0);
-    assert.equal(result.stderr.toString(), `Запрос к Cockpit завершился ошибкой HTTP ${status}.\n`);
+    assert.equal(result.stderr.toString(), `Запрос к GrigDesk завершился ошибкой HTTP ${status}.\n`);
   }
 
   const cut = await startHttpFixture(t, (_request, response) => {
@@ -246,14 +246,14 @@ test('BS-06: SEA сохраняет ошибки source-контракта', asy
   const broken = await runProcess(t, binary(), ['dashboard'], {
     env: {
       PATH: '',
-      COCKPIT_URL: cut.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_URL: cut.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
     },
   });
 
   assert.equal(broken.code, 22);
   assert.equal(broken.stdout.length, 0);
-  assert.equal(broken.stderr.toString(), 'Не удалось связаться с Cockpit.\n');
+  assert.equal(broken.stderr.toString(), 'Не удалось связаться с GrigDesk.\n');
 
   const { home } = await syntheticHome();
   const noToken = await runProcess(t, binary(), ['dashboard'], { env: childEnv(home, { PATH: '' }) });
@@ -295,8 +295,8 @@ test('BS-08: SEA игнорирует прокси даже с NODE_USE_ENV_PROX
   const result = await runProcess(t, binary(), ['dashboard'], {
     env: childEnv(home, {
       PATH: '',
-      COCKPIT_URL: fixture.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_URL: fixture.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
       NODE_USE_ENV_PROXY: '1',
       HTTP_PROXY: proxy.baseUrl,
       http_proxy: proxy.baseUrl,

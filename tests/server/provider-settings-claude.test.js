@@ -101,8 +101,8 @@ test('Claude CLI принимает JSON override и resume после reset с�
     message: 'fixture',
     env: {
       ...process.env,
-      COCKPIT_CLAUDE_FIXTURE_TRACE: trace,
-      COCKPIT_CLAUDE_FIXTURE_SETTINGS: '1',
+      GRIGDESK_CLAUDE_FIXTURE_TRACE: trace,
+      GRIGDESK_CLAUDE_FIXTURE_SETTINGS: '1',
     },
     providerSettings: { fastMode: true },
     onInTurnReady(port) {

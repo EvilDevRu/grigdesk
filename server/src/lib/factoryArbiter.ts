@@ -29,12 +29,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { LEGACY_VALUES } from '../../../shared/runtime/legacyBrand.ts';
 import type { ModelRegistry } from './chat/modelRef.ts';
 import type { ExecutorRunInput, ExecutorRunResult } from './executors/index.ts';
 
 // Кто принял решение — уезжает в `factory goto --actor`. Движок пишет это поле в событие
 // журнала, и машинное решение перестаёт быть неотличимым от человеческого.
-export const ARBITER_ACTOR = 'cockpit-arbiter';
+export const ARBITER_ACTOR = 'grigdesk-arbiter';
 
 // Потолок на попытку. Возврат арбитра начинает новую серию дуги (как и человеческий),
 // то есть обнуляет замкнутый набор замечаний — без своего потолка арбитр мог бы съесть
@@ -54,7 +55,7 @@ export const ARBITER_MAX_PER_ATTEMPT = 2;
 // в `human` против 184 в `done`, то есть это САМАЯ частая объявленная остановка. И часть
 // её случаев — не вопрос к человеку по существу, а вопрос, который узел не смог проверить
 // сам: `state-only` политика не дала ему запустить проверку, и он честно вынес её
-// человеку (разобранный случай — в `docs/cockpit/gotchas.md`). У арбитра доступ к коду
+// человеку (разобранный случай — в `docs/grigdesk/gotchas.md`). У арбитра доступ к коду
 // есть, поэтому такой вопрос закрывается чтением, а не будильником в чужой голове.
 //
 // `rewind-limit` — то же топтание, что `no-progress`, только счётчик кончился у движка
@@ -194,7 +195,10 @@ export async function readArbitrationContext({ controlDir, task, attempt }: {
       loop = true;
     }
     if (event.kind === 'human-rewind') {
-      if (event.actor === ARBITER_ACTOR) arbitrations += 1;
+      // Возвраты арбитра до второго этапа переименования записаны прежним actor.
+      if (event.actor === ARBITER_ACTOR || event.actor === LEGACY_VALUES.arbiterActor) {
+        arbitrations += 1;
+      }
       series = [];
       stop = null;
       continue;
@@ -681,7 +685,7 @@ function cleanString(value: unknown, max: number): string {
   return trimmed.length && trimmed.length <= max ? trimmed : '';
 }
 
-/** Мягкая нормализация: испорченный prefs.json не должен ронять старт кокпита. */
+/** Мягкая нормализация: испорченный prefs.json не должен ронять старт GrigDesk. */
 export function normalizeArbiterSettings(value: unknown): ArbiterSettings {
   const raw = (value && typeof value === 'object' && !Array.isArray(value)
     ? value

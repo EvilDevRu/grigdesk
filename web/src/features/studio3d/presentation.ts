@@ -174,7 +174,7 @@ export function studioErrorMessage(cause: unknown): string {
   const codes: Record<string, string> = {
     price_changed: 'Цена изменилась. Подтвердите новую цену.',
     not_found: 'Запись не найдена.',
-    unauthorized: 'Требуется вход в кокпит.',
+    unauthorized: 'Требуется вход в GrigDesk.',
     plugin_disabled: 'Плагин «3D» выключен.',
     unavailable: 'Раздел временно недоступен.',
     invalid_request: 'Проверьте параметры запроса.'

@@ -53,7 +53,7 @@ test('Kimi malformed entry остаётся видимой как unknown, вн�
       mcpServers: {
         broken: 'not-an-object',
         targetless: { enabled: true },
-        'cockpit-work': { command: 'node', args: ['internal.js'] },
+        'grigdesk-work': { command: 'node', args: ['internal.js'] },
       },
     },
   });
@@ -64,7 +64,7 @@ test('Kimi malformed entry остаётся видимой как unknown, вн�
 });
 
 test('Kimi mcpStatus читает штатные слои mcp.json и применяет их приоритет', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-mcp-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-mcp-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
   await fs.mkdir(path.join(root, '.git'));
@@ -119,7 +119,7 @@ test('Kimi contained не обещает host MCP, битый JSON host-проф
   assert.deepEqual(contained.servers, []);
   assert.match(contained.note, /изолирует/);
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-mcp-bad-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-mcp-bad-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
   await fs.mkdir(home);

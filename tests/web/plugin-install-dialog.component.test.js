@@ -8,7 +8,7 @@ import { webInstallJob, webInstallInfo } from './helpers/pluginInstallFixtures.j
 
 process.env.NODE_ENV = 'test';
 
-const browser = await createUiBrowser('https://cockpit.test/#/settings');
+const browser = await createUiBrowser('https://grigdesk.test/#/settings');
 const { reactive, nextTick } = await import(singletonUrl('vue'));
 const { mount, flushPromises } = await import(
   '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -188,7 +188,7 @@ test('D6: ready показывает полный preview/diff/warnings и яв�
   assert.deepEqual(sensitive, ['true', 'false']);
   assert.match(text, /серверная часть или зависимости/u);
   assert.match(text, /Список сокращён/u);
-  assert.match(text, /Код плагина выполняется внутри Cockpit с его правами/u);
+  assert.match(text, /Код плагина выполняется внутри GrigDesk с его правами/u);
   assert.equal(wrapper.get('[data-role="install-apply"]').text(), 'Обновить');
   await wrapper.get('[data-role="install-apply"]').trigger('click');
   assert.equal(calls.filter(([method]) => method === 'apply').length, 1);
@@ -228,7 +228,7 @@ test('D8: done managed и rollback показывают различимый и�
   state.job = webInstallJob('done', 'rollback');
   await nextTick();
   assert.equal(wrapper.get('[data-role="install-result"]').text(),
-    'Версия v1.0.0 восстановлена. Перезапустите Cockpit.');
+    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk.');
   assert.equal(wrapper.find('[data-role="install-close"]').exists(), true);
 });
 
@@ -624,7 +624,7 @@ const dialogVisualCases = [
     "expected": {
       "screen": "unavailable",
       "tone": "danger",
-      "heading": "Нет связи с Cockpit",
+      "heading": "Нет связи с GrigDesk",
       "description": "Повторите загрузку, чтобы продолжить.",
       "icon": "M12 5v9m0 3v2",
       "footer": "Проверяем состояние установки.",
@@ -848,7 +848,7 @@ const dialogVisualCases = [
       "heading": "Установка завершена",
       "description": "Плагин сохранён. Ниже — дальнейшие действия.",
       "icon": "m5 12 4 4L19 6",
-      "footer": "Изменения сохранены в Cockpit.",
+      "footer": "Изменения сохранены в GrigDesk.",
       "resultClass": null,
       "steps": [
         [
@@ -879,7 +879,7 @@ const dialogVisualCases = [
       "heading": "Версия восстановлена",
       "description": "Плагин сохранён. Ниже — дальнейшие действия.",
       "icon": "m5 12 4 4L19 6",
-      "footer": "Изменения сохранены в Cockpit.",
+      "footer": "Изменения сохранены в GrigDesk.",
       "resultClass": null,
       "steps": [
         [

@@ -7,7 +7,7 @@ import test from 'node:test';
 import { buildKimiHostLaunch } from '../../server/src/lib/kimi/hostLaunch.ts';
 
 async function fixture(t, { credentialMode = 0o600 } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-host-launch-test-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-host-launch-test-'));
   const cwd = path.join(root, 'workspace');
   const kimiHome = path.join(root, 'kimi-home');
   const credentialDir = path.join(kimiHome, 'credentials');

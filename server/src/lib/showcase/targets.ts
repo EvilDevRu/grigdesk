@@ -391,7 +391,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
 
   /**
    * Стенд попытки читается только через её собственный реестр: профиль там пишет
-   * движок, а не браузер и не журнал кокпита. Ручной стенд такого реестра не имеет
+   * движок, а не браузер и не журнал GrigDesk. Ручной стенд такого реестра не имеет
    * и живёт по правилам раздела «Песочницы».
    */
   async function holdOf(sandbox: SandboxEntry): Promise<PipelineHold | null> {
@@ -435,7 +435,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
     const ref: ShowcaseTargetOption['ref'] = { kind: 'sandbox', id: sandbox.task };
     const profile = hold ? hold.profile : sandbox.profile ?? '';
     // Профиль попытки пишет движок в свой реестр, поэтому связь доказана так же,
-    // как у собственного up кокпита: подменить её из браузера нечем.
+    // как у собственного up GrigDesk: подменить её из браузера нечем.
     const profileBinding = hold ? 'verified' : sandbox.profileBinding ?? 'inferred';
     const label = labelOf(sandbox, hold, profile);
     let reason = '';
@@ -466,7 +466,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       // Название задачи дописывает служба: связь с порталом держит она, а не каталог.
       taskTitle: null,
       // localhost здесь относится к машине сервера и не является ссылкой для
-      // удалённого браузера. Клиент построит её из порта и своего cockpit host.
+      // удалённого браузера. Клиент построит её из порта и своего grigdesk host.
       viewUrl: null,
       viewPort: sandbox.fePort,
       status: reason || policy.reason ? 'blocked' : 'ready',

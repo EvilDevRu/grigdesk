@@ -597,7 +597,7 @@ test('M33: candidate bytes/manifest/HEAD после ready дают preview_stale
       } else if (change === 'manifest') {
         await writeFile(path.join(candidate, 'plugin.json'), '{"id":"demo","version":"9.9.9"}');
       } else {
-        await git(candidate, '-c', 'user.name=Cockpit Test', '-c', 'user.email=cockpit@example.invalid',
+        await git(candidate, '-c', 'user.name=GrigDesk Test', '-c', 'user.email=grigdesk@example.invalid',
           'commit', '--allow-empty', '-m', 'fixture HEAD changed without payload');
       }
 

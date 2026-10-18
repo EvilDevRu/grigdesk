@@ -9,7 +9,7 @@ export const GITHUB_API_REQUEST_LIMIT = 64 * 1024;
 export const GITHUB_LINK_HEADER_LIMIT = 16 * 1024;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-const USER_AGENT = 'cockpit-github-channel/1';
+const USER_AGENT = 'grigdesk-github-channel/1';
 
 /** Ошибка GitHub REST без PAT и сырых тел ответа. */
 export class GitHubApiError extends Error {

@@ -15,7 +15,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const FIXTURE = path.join(ROOT, 'tests/fixtures/kimi-server/fake-kimi-turn.mjs');
 
 async function fixture(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-turn-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-turn-'));
   const bin = path.join(dir, 'kimi-turn-fixture');
 
   // Обёртка, а не копия: фикстура ищет fastify относительно своего настоящего пути.
@@ -151,7 +151,7 @@ test('Kimi: спрос человека закрывает канал до от�
     home: f.home,
     cwd: f.dir,
     message: 'Задача с риском',
-    env: { ...process.env, COCKPIT_KIMI_FIXTURE_APPROVAL: '1' },
+    env: { ...process.env, GRIGDESK_KIMI_FIXTURE_APPROVAL: '1' },
     onInTurnReady: (given) => {
       port = given;
     },
@@ -218,7 +218,7 @@ test('Kimi: реальные границы шага сохраняют текс
     home: f.home,
     cwd: f.dir,
     message: 'Проверь два файла.',
-    env: { ...process.env, COCKPIT_KIMI_FIXTURE_REAL_WIRE: '1' },
+    env: { ...process.env, GRIGDESK_KIMI_FIXTURE_REAL_WIRE: '1' },
     onAssistantMessage: (event) => blocks.push(event),
     onInTurnReady: (given) => {
       port = given;

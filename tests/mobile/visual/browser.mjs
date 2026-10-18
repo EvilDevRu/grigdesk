@@ -7,10 +7,10 @@ import path from 'node:path';
  * Проверка использует полный Chromium, поскольку headless-shell не обслуживает часть Web API.
  */
 export async function chromiumPath() {
-  if (process.env.COCKPIT_CHROMIUM) {
-    await access(process.env.COCKPIT_CHROMIUM);
+  if (process.env.GRIGDESK_CHROMIUM) {
+    await access(process.env.GRIGDESK_CHROMIUM);
 
-    return process.env.COCKPIT_CHROMIUM;
+    return process.env.GRIGDESK_CHROMIUM;
   }
 
   const root = path.join(
@@ -36,5 +36,5 @@ export async function chromiumPath() {
     }
   }
 
-  throw new Error('Полный Chromium не установлен. Укажите COCKPIT_CHROMIUM.');
+  throw new Error('Полный Chromium не установлен. Укажите GRIGDESK_CHROMIUM.');
 }

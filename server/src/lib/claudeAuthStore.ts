@@ -1,14 +1,14 @@
-// Авторизация Claude для чата кокпита.
+// Авторизация Claude для чата GrigDesk.
 // По умолчанию чат использует авторизацию ХОСТОВОГО CLI (`claude login` кладёт токен в
-// ~/.claude/.credentials.json, либо ANTHROPIC_API_KEY в окружении). Опционально кокпит
+// ~/.claude/.credentials.json, либо ANTHROPIC_API_KEY в окружении). Опционально GrigDesk
 // может держать СВОЙ API-ключ (для отдельного биллинга инструмента) — он передаётся
 // подпроцессу `claude -p` как ANTHROPIC_API_KEY. Ключ лежит в .state (gitignore, 0600).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Чем именно авторизован чат. Различать обязательно: свой ключ кокпита — это отдельный
-// счёт, а хостовой CLI человек мог разлогинить, не трогая кокпит.
+// Чем именно авторизован чат. Различать обязательно: свой ключ GrigDesk — это отдельный
+// счёт, а хостовой CLI человек мог разлогинить, не трогая GrigDesk.
 export type ClaudeAuthMode = 'apikey' | 'env' | 'cli' | 'none';
 
 // Безопасное представление для UI: сам ключ наружу не уходит никогда.
@@ -26,7 +26,7 @@ export class ClaudeAuthStore {
     this.authPath = authPath;
   }
 
-  /** Свой ключ кокпита или null. */
+  /** Свой ключ GrigDesk или null. */
   read(): { apiKey: string } | null {
     try {
       const c = JSON.parse(fs.readFileSync(this.authPath, 'utf8')) as { apiKey?: unknown };
@@ -65,7 +65,7 @@ export class ClaudeAuthStore {
     const mode = own ? 'apikey' : host.hasEnvKey ? 'env' : host.hasCli ? 'cli' : 'none';
     return {
       mode,                                   // apikey | env | cli | none
-      configured: !!own,                      // задан ли собственный ключ кокпита
+      configured: !!own,                      // задан ли собственный ключ GrigDesk
       keyHint: own ? `…${own.apiKey.slice(-4)}` : null,
       hostLoggedIn: host.hasCli || host.hasEnvKey,
     };

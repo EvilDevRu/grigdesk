@@ -82,7 +82,7 @@ const tid = computed(() => String(props.taskId || '').replace(/[^0-9]/g, ''));
 const loading = ref(false);
 const error = ref('');
 const repos = ref([]);
-const sideBySide = ref(localStorage.getItem('cockpit-diff-side') !== '0');
+const sideBySide = ref(localStorage.getItem('grigdesk-diff-side') !== '0');
 // Полноэкранная загрузка — только когда данных ещё нет. При рефреше редактор НЕ прячем
 // (иначе размонтируется хост Monaco и редактор гаснет).
 const showLoading = computed(() => loading.value && !repos.value.length);
@@ -173,7 +173,7 @@ function showFile(f) {
   old.forEach((m) => m.dispose()); // старые модели снимаем ПОСЛЕ переустановки (иначе варнинг Monaco)
 }
 watch(selected, (f) => showFile(f));
-watch(sideBySide, (v) => { localStorage.setItem('cockpit-diff-side', v ? '1' : '0'); diffEditor?.updateOptions({ renderSideBySide: v }); });
+watch(sideBySide, (v) => { localStorage.setItem('grigdesk-diff-side', v ? '1' : '0'); diffEditor?.updateOptions({ renderSideBySide: v }); });
 
 async function load() {
   if (!tid.value) { error.value = 'не указана задача'; return; }

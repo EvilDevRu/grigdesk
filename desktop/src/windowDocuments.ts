@@ -105,7 +105,7 @@ export async function loadPinnedDocument(options: PinnedDocumentOptions): Promis
 
   if (release?.version !== 1 || release?.id !== pinned.id) {
     throw new PermanentConnectionError('Сервер не обслуживает интерфейс этого приложения. '
-      + 'Обновите сервер Кокпита и запустите приложение заново.');
+      + 'Обновите сервер GrigDesk и запустите приложение заново.');
   }
 
   const hash = new URL(address).hash;

@@ -14,7 +14,7 @@ const id = '00000000-0000-4000-8000-000000000001';
  * Повторное открытие читает тот же fsync JSON, без внешних услуг и состояния.
  */
 async function fixture(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-intents-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-intents-'));
   const library = createLibrary({ dir });
 
   await library.ensure();

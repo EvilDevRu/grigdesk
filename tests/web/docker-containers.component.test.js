@@ -68,7 +68,7 @@ const INVENTORY = [
  * содержит и скрытый поиском сервис, и остановленный контейнер для проверки границ действий.
  */
 async function mountContainers(t, { values = {}, stats = {}, busyIds = [] } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/docker');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/docker');
   const containerCalls = [];
   const projectCalls = [];
   const removalCalls = [];
@@ -156,7 +156,7 @@ test('поиск находит опубликованный и внутренн
 
   assert.equal(wrapper.findAll('.docker-row').length, 1);
   assert.equal(wrapper.get('.docker-row__name strong').text(), 'web');
-  assert.equal(wrapper.get('.docker-port').attributes('href'), 'http://cockpit.test:8088/');
+  assert.equal(wrapper.get('.docker-port').attributes('href'), 'http://grigdesk.test:8088/');
   assert.match(wrapper.get('.docker-containers__caption').text(), /1 из 4/u);
 
   await search.setValue('5432');

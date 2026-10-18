@@ -51,7 +51,7 @@ export async function writeGlmArtifactFixture(root: string, options: {
 
   const inputIdentity = {
     contract,
-    composition: 'cockpit-host-web-acp-v3',
+    composition: 'grigdesk-host-web-acp-v3',
     dependencyLock: options.dependencyLock ?? 'c'.repeat(64),
     platform: process.platform,
     arch: process.arch,
@@ -61,7 +61,7 @@ export async function writeGlmArtifactFixture(root: string, options: {
   const metadata = {
     ...contract,
     buildId,
-    runtimeVersion: `${contract.source.version}.cockpit.b${buildId.slice(0, 16)}`,
+    runtimeVersion: `${contract.source.version}.grigdesk.b${buildId.slice(0, 16)}`,
     inputIdentity,
     payload,
   };

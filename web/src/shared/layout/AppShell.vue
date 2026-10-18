@@ -59,7 +59,7 @@
     </aside>
 
     <header data-ui-topbar class="topbar" :class="{ 'window-titlebar': isDesktopMain }">
-      <span class="app-mark" aria-label="Кокпит"><CockpitMark class="logo" /></span>
+      <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
       <div class="status">
@@ -187,7 +187,7 @@
                     v-tooltip="`Доступно обновление: ${p.latest}`"
                   ></span>
                   <!-- Ставится по нажатию и отсюда: точка сообщала о новой версии, а идти
-                       за ней приходилось в настройки. Ход один на весь кокпит, поэтому
+                       за ней приходилось в настройки. Ход один на весь GrigDesk, поэтому
                        пока ставится один CLI, кнопки соседей заблокированы. -->
                   <UiIconButton
                     v-if="canUpdateCli(p)"
@@ -377,7 +377,7 @@ import { usePluginsStore } from '../../stores/plugins.js';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
 import { useAuthStore } from '../../stores/auth.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
-import { useCockpitUpdateStore } from '../../stores/cockpit-update.js';
+import { useGrigDeskUpdateStore } from '../../stores/grigdesk-update.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
 import { useTasksStore } from '../../stores/tasks.js';
@@ -403,7 +403,7 @@ import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import { vSvgPixelSnap } from '../svgPixelSnap.ts';
-import CockpitMark from '../CockpitMark.vue';
+import GrigDeskMark from '../GrigDeskMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.js';
@@ -433,8 +433,8 @@ const sysSnapshotTime = computed(() => (sysUpdatedAt.value
   : '—'));
 // Снимок обновления общий для настроек и уведомлений. Оболочка запускает опрос
 // и перечитывает его по серверному событию; поток SSE один на вкладку.
-const cockpitUpdate = useCockpitUpdateStore();
-cockpitUpdate.start();
+const grigDeskUpdate = useGrigDeskUpdateStore();
+grigDeskUpdate.start();
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
@@ -468,7 +468,7 @@ prov.load();
 prov.loadUsage();
 // Каталог Codex зависит не только от версии CLI, но и от rollout/доступа аккаунта.
 // Пока приложение открыто, перечитываем реестр раз в минуту: новая модель появляется
-// в селекторе без F5 и без обновления Cockpit.
+// в селекторе без F5 и без обновления GrigDesk.
 const providersTimer = setInterval(() => { prov.load(); }, 60_000);
 providersTimer.unref?.();
 onUnmounted(() => clearInterval(providersTimer));
@@ -480,7 +480,7 @@ function provTitle(p) {
 // (таб настроек запоминается в localStorage, поэтому просто задаём его).
 const { openTerminal } = useToolLauncher();
 function toProviders() {
-  localStorage.setItem('cockpit-settings-tab', 'providers');
+  localStorage.setItem('grigdesk-settings-tab', 'providers');
   router.push('/settings');
 }
 const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
@@ -498,7 +498,7 @@ const usagePauseOf = (p) => {
 // в API вендора, поэтому такое чтение к вендору не ходит.
 const usageWatch = createUsageWatch(() => prov.loadUsage(true));
 onUnmounted(() => usageWatch.stop());
-// Кнопка установки во всплывашке: только у отставшего CLI, который кокпит умеет ставить
+// Кнопка установки во всплывашке: только у отставшего CLI, который GrigDesk умеет ставить
 // сам. Пока идёт установка, кнопка остаётся на месте — иначе она исчезла бы вместе с
 // ходом, который сама и начала, и человек не понял бы, ставится ли ещё.
 function canUpdateCli(p) {
@@ -740,7 +740,7 @@ const { connected } = useSse((name, data) => {
   if (name === 'providers-usage') {
     prov.applyUsage(data?.usage);
   }
-  if (name === 'cockpit-update') cockpitUpdate.load({ quiet: true });
+  if (name === 'grigdesk-update') grigDeskUpdate.load({ quiet: true });
 });
 
 watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, flush: 'sync' });

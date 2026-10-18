@@ -57,7 +57,7 @@ const MCP_SCRIPT = [
 ].join('\n');
 
 /**
- * Стенд MCP: DI-адаптер на настоящей generation, фейк Z.ai и MCP-фикстура cockpit-work.
+ * Стенд MCP: DI-адаптер на настоящей generation, фейк Z.ai и MCP-фикстура grigdesk-work.
  * Журнал фикстуры показывает этапы готовности и каждый вызов инструмента.
  */
 async function fixture(t, loopbackOptions = {}) {
@@ -83,7 +83,7 @@ async function fixture(t, loopbackOptions = {}) {
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: GLM_SERVICE_KEY,
     },
     admission: [{ mode: 'api', compatibility: identity }],
@@ -144,7 +144,7 @@ async function fixture(t, loopbackOptions = {}) {
   };
 }
 
-const READY_TEST = 'настоящий cockpit-work готов до prompt; '
+const READY_TEST = 'настоящий grigdesk-work готов до prompt; '
   + 'сломанный initialize даёт glm_mcp_not_ready без prompt';
 
 test(READY_TEST, async (t) => {
@@ -157,25 +157,25 @@ test(READY_TEST, async (t) => {
       return glmTextReply();
     } });
 
-    work = f.mcp('cockpit-work', 'ok', ['echo']);
+    work = f.mcp('grigdesk-work', 'ok', ['echo']);
     await f.run(work, ['echo']);
 
     const names = f.mock.requests[0].payload.tools.map((tool) => tool.function.name);
 
     assert.deepEqual(atPrompt, ['spawn', 'initialize', 'tools/list']);
-    assert.ok(names.includes('mcp__cockpit-work__echo'));
+    assert.ok(names.includes('mcp__grigdesk-work__echo'));
   });
 
   await t.test('broken', async (sub) => {
     const f = await fixture(sub, { scenarios: [] });
-    const work = f.mcp('cockpit-work', 'broken', ['echo']);
+    const work = f.mcp('grigdesk-work', 'broken', ['echo']);
 
     await assert.rejects(f.run(work, ['echo']), { code: 'glm_mcp_not_ready' });
     assert.equal(f.mock.requests.length, 0);
   });
 });
 
-const LOSS_TEST = 'настоящая потеря cockpit-work после готовности '
+const LOSS_TEST = 'настоящая потеря grigdesk-work после готовности '
   + 'даёт glm_mcp_not_ready и запрещает действие';
 
 test(LOSS_TEST, async (t) => {
@@ -183,12 +183,12 @@ test(LOSS_TEST, async (t) => {
     if (index === 0) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      return glmToolCall('mcp__cockpit-work__echo', {});
+      return glmToolCall('mcp__grigdesk-work__echo', {});
     }
 
     return glmTextReply();
   } });
-  const work = f.mcp('cockpit-work', 'die', ['echo']);
+  const work = f.mcp('grigdesk-work', 'die', ['echo']);
   const outcome = await f.run(work, ['echo']).then((value) => ({ reply: value.reply }), (error) => ({
     code: error.code,
   }));
@@ -206,7 +206,7 @@ test('настоящий исключённый сервер не получае
   const f = await fixture(t, { respond: (_payload, index) => index === 0
     ? glmToolCall('mcp__project__ping', {})
     : glmTextReply() });
-  const work = f.mcp('cockpit-work', 'ok', ['echo']);
+  const work = f.mcp('grigdesk-work', 'ok', ['echo']);
   const project = f.mcp('project', 'ok', ['ping']);
 
   await fs.writeFile(path.join(f.project, '.mcp.json'), JSON.stringify({ mcpServers: {
@@ -227,12 +227,12 @@ test('настоящий исключённый сервер не получае
   assert.ok(warnings.some((warning) => /«project» не подключается к GLM/u.test(warning)));
 });
 
-test('настоящий инструмент cockpit-work, объявленный после старта, не выполняется', async (t) => {
+test('настоящий инструмент grigdesk-work, объявленный после старта, не выполняется', async (t) => {
   const f = await fixture(t, { respond: (_payload, index) => [
-    glmToolCall('mcp__cockpit-work__echo', {}, 'call-0'),
-    glmToolCall('mcp__cockpit-work__late', {}, 'call-1'),
+    glmToolCall('mcp__grigdesk-work__echo', {}, 'call-0'),
+    glmToolCall('mcp__grigdesk-work__late', {}, 'call-1'),
   ][index] ?? glmTextReply() });
-  const work = f.mcp('cockpit-work', 'late', ['echo']);
+  const work = f.mcp('grigdesk-work', 'late', ['echo']);
 
   await f.run(work, ['echo']);
 
@@ -241,7 +241,7 @@ test('настоящий инструмент cockpit-work, объявленны
   t.diagnostic(JSON.stringify(f.mock.requests.map((request) => request.payload.tools
     .map((tool) => tool.function.name).filter((name) => name.startsWith('mcp__')))));
   assert.deepEqual(calls, ['call:echo']);
-  assert.match(JSON.stringify(f.mock.requests[2].payload.messages), /запрещён политикой Cockpit/u);
+  assert.match(JSON.stringify(f.mock.requests[2].payload.messages), /запрещён политикой GrigDesk/u);
 });
 
 // Факт G2 (F13): проектные MCP в поставку не входят, поэтому их поздних инструментов тоже нет.
@@ -249,7 +249,7 @@ test('настоящий поздний инструмент проектног�
   const f = await fixture(t, { respond: (_payload, index) => index === 0
     ? glmToolCall('mcp__project__late', {})
     : glmTextReply() });
-  const work = f.mcp('cockpit-work', 'ok', ['echo']);
+  const work = f.mcp('grigdesk-work', 'ok', ['echo']);
   const project = f.mcp('project', 'late', ['ping']);
   let asked = 0;
 
@@ -272,18 +272,18 @@ test('настоящий поздний инструмент проектног�
 
 test('настоящий resume применяет текущий набор MCP, прежний инструмент недоступен', async (t) => {
   const f = await fixture(t, { respond: (_payload, index) => index === 1
-    ? glmToolCall('mcp__cockpit-work__echo', {})
+    ? glmToolCall('mcp__grigdesk-work__echo', {})
     : glmTextReply() });
-  const first = f.mcp('cockpit-work', 'ok', ['echo']);
-  const second = f.mcp('cockpit-work', 'ok', ['other']);
+  const first = f.mcp('grigdesk-work', 'ok', ['echo']);
+  const second = f.mcp('grigdesk-work', 'ok', ['other']);
   const opened = await f.run(first, ['echo']);
 
   await f.run(second, ['other'], { sessionId: opened.sessionId, message: 'second-prompt' });
 
   const names = f.mock.requests[1].payload.tools.map((tool) => tool.function.name);
 
-  assert.ok(names.includes('mcp__cockpit-work__other'));
-  assert.equal(names.includes('mcp__cockpit-work__echo'), false);
+  assert.ok(names.includes('mcp__grigdesk-work__other'));
+  assert.equal(names.includes('mcp__grigdesk-work__echo'), false);
   assert.deepEqual(second.lines().filter((line) => line.startsWith('call:')), []);
   assert.deepEqual(first.lines().filter((line) => line.startsWith('call:')), []);
 });

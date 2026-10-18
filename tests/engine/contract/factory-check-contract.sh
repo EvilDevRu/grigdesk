@@ -88,7 +88,7 @@ assert_rc 1 "$?" "profile without route capability fails closed"
 assert_contains "$(<"$TEST_ROOT/check-contract.out")" "запуск fail-closed" \
   "missing capability has explicit diagnostic"
 
-# Профиль, который задач не ведёт (triage-конфигурация кокпита), заявляет это вслух.
+# Профиль, который задач не ведёт (triage-конфигурация GrigDesk), заявляет это вслух.
 # Без этого проверка требовала route-контракт от каждого каталога в profiles/ и общий
 # код возврата не мог стать нулём никогда — красную проверку перестают читать.
 printf '%s\n' '{"capabilities":[],"launchable":false}' >"$profiles/fixture/graph.json"

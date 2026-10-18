@@ -18,7 +18,7 @@ const DRAFT_BASE = '/api/routes/sample/drafts';
 const OPERATION_ID = '22222222-2222-4222-8222-222222222222';
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-editor-publish-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-publish-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   const profileDir = path.join(profilesDir, 'sample');

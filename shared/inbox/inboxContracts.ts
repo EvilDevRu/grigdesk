@@ -60,7 +60,7 @@ function attachmentAnalysis(value: unknown, path: string) {
   return typeof value === 'string' ? value : analysisDetail(value, path);
 }
 
-// Вложение показывается подписью и размером: содержимое остаётся в канале, а кокпит
+// Вложение показывается подписью и размером: содержимое остаётся в канале, а GrigDesk
 // готовит его отдельно и только по решению человека. Ход разбора необязателен —
 // у канала без такой подготовки его нет вовсе.
 const inboxAttachment = objectOf({
@@ -145,7 +145,7 @@ const channelError = objectOf({
 });
 
 // Нехватка разбора вложения. Подпись та же, что уже видна в карточке, а причину
-// формулирует сам кокпит — пересказывать её человеку иначе нечем.
+// формулирует сам GrigDesk — пересказывать её человеку иначе нечем.
 const blockedAttachment = objectOf({
   label: text,
   reason: optional(text),

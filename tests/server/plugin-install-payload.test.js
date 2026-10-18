@@ -19,7 +19,7 @@ import { readPackageTree } from '../../server/src/lib/pluginInstall/packageTree.
  * Файлы manifest, lock и server остаются доступными для проверки неизменности.
  */
 async function fixture(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-payload-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-payload-'));
 
   t.after(() => rm(dir, { recursive: true, force: true }));
 

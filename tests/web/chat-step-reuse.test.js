@@ -18,7 +18,7 @@ const baseChat = () => ({
     model: 'test-model'
   },
   workdir: {
-    kind: 'cockpit'
+    kind: 'grigdesk'
   },
   messages: [{
     role: 'assistant',
@@ -307,7 +307,7 @@ test('более свежий browser snapshot не подтверждает ste
     draft: 'Восстановленный текст'
   };
   const data = new Map([
-    ['cockpit-chat-snapshot', JSON.stringify({
+    ['grigdesk-chat-snapshot', JSON.stringify({
       sessions: [snapshot],
       archived: []
     })]

@@ -18,7 +18,7 @@ export interface GlmAccess {
 
 type GlmEnv = NodeJS.ProcessEnv | Record<string, string | undefined>;
 
-export const GLM_ROUTE_KEY_ENV = 'COCKPIT_GLM_ROUTE_KEY';
+export const GLM_ROUTE_KEY_ENV = 'GRIGDESK_GLM_ROUTE_KEY';
 
 /**
  * Ошибка доступа несёт только публичный код: ни ключа, ни значения окружения в ней нет.
@@ -39,7 +39,7 @@ export function resolveGlmAccess({
   env: GlmEnv;
   admission: readonly { mode: GlmAccessMode; compatibility: string }[];
 }): GlmAccess {
-  const raw = env.COCKPIT_GLM_API_MODE;
+  const raw = env.GRIGDESK_GLM_API_MODE;
 
   if (raw === undefined || raw === '') {
     return { mode: null, reason: 'glm_access_mode_missing' };
@@ -94,7 +94,9 @@ export function buildGlmChildEnv({
  */
 export function assertGlmRuntimeHome(value: string): string {
   if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) {
-    throw glmAccessError('glm_runtime_home_invalid', 'COCKPIT_GLM_RUNTIME_HOME должен быть абсолютным путём');
+    throw glmAccessError(
+      'glm_runtime_home_invalid', 'GRIGDESK_GLM_RUNTIME_HOME должен быть абсолютным путём',
+    );
   }
 
   return value;

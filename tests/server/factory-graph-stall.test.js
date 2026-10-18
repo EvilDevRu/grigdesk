@@ -10,7 +10,7 @@ import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 import { detectStall } from '../../server/src/lib/stall.ts';
 
 test('graph exposes a human stall on the affected node instead of showing it as running', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-stall-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-graph-stall-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stateDir = path.join(root, 'state');
@@ -218,7 +218,7 @@ test('маршрут, не отпустивший shared lease, остаётся
 // никогда: 28.08.2026 арбитр вернул решение человеку, через час взял ту же остановку
 // повторно и решил её сам, сдвинув курсор задачи, о которой человека только что спросили.
 test('сводка задачи называет узел остановки, а не только граф', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-stall-summary-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-stall-summary-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const attempt = 'a_06d6476159f1ff19374909045f71ade7';

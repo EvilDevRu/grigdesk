@@ -45,7 +45,7 @@ function pluginContract(value: unknown): PluginContract | null {
  */
 export function describeGlmGeneration(config: DeepSeekRuntimeConfig): GlmGeneration {
   if (config.deepseekBinOverride) {
-    throw glmAccessError('glm_runtime_external', 'GLM работает только на встроенной сборке Cockpit');
+    throw glmAccessError('glm_runtime_external', 'GLM работает только на встроенной сборке GrigDesk');
   }
 
   let header: ReturnType<typeof readSelectedDeepSeekHeader>;
@@ -59,7 +59,7 @@ export function describeGlmGeneration(config: DeepSeekRuntimeConfig): GlmGenerat
   }
 
   if (!header) {
-    throw glmAccessError('glm_runtime_external', 'GLM работает только на встроенной сборке Cockpit');
+    throw glmAccessError('glm_runtime_external', 'GLM работает только на встроенной сборке GrigDesk');
   }
 
   const plugin = pluginContract(header.llmPiAi);

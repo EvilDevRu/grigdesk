@@ -82,7 +82,7 @@ test('RS-02: отказы с кодом 2 без эха аргумента', asy
       assert.equal(error.stdout, '');
       assert.equal(error.stderr, args[0] === '--worker'
         ? 'Внутренний режим запускает сам посредник.\n'
-        : 'Неизвестная команда. Справка: cockpit-relay --help\n');
+        : 'Неизвестная команда. Справка: grigdesk-relay --help\n');
 
       return true;
     });
@@ -90,7 +90,7 @@ test('RS-02: отказы с кодом 2 без эха аргумента', asy
 });
 
 test('RS-03: NODE_OPTIONS не действует на готовый файл', async () => {
-  const result = await run(['--version'], { NODE_OPTIONS: '--require /nonexistent-cockpit.js' });
+  const result = await run(['--version'], { NODE_OPTIONS: '--require /nonexistent-grigdesk.js' });
 
   assert.equal(result.stdout, `${versionLine(manifest.version, 'v24.21.0', 'linux', 'x64')}\n`);
   assert.equal(result.stderr, '');

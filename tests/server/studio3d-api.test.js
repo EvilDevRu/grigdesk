@@ -135,7 +135,7 @@ async function fixture(t, { enabled = true, settings = {}, realPlugins = false, 
 
   if (enabled) {
     // Старт библиотеки уходит в фон (AP-17): фикстура ждёт открытия контекста,
-    // чтобы тесты начинались с готовой библиотекой, как в живом кокпите.
+    // чтобы тесты начинались с готовой библиотекой, как в живом GrigDesk.
     for (let i = 0; i < 100 && !server.studio3d.context; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
@@ -152,8 +152,8 @@ async function fixture(t, { enabled = true, settings = {}, realPlugins = false, 
     url: `/api/studio3d${url}`,
     payload,
     headers: {
-      ...(auth && (realAuth ? auth === 'cli' ? { 'x-cockpit-token': 'fixture-cli-token' }
-        : { cookie: 'cockpit_sid=fixture-session' } : { 'x-fixture-auth': auth })),
+      ...(auth && (realAuth ? auth === 'cli' ? { 'x-grigdesk-token': 'fixture-cli-token' }
+        : { cookie: 'grigdesk_sid=fixture-session' } : { 'x-fixture-auth': auth })),
       ...headers
     }
   });
@@ -426,7 +426,7 @@ test('AP-11/14/17/19 viewer перепроверяет scope, соседей, id
   assert.equal((await f.call('GET', route)).statusCode, 404);
 });
 
-test('AP-14/17/19 scope revoke, expiry и библиотека вне Cockpit не расширяют доступ', async (t) => {
+test('AP-14/17/19 scope revoke, expiry и библиотека вне GrigDesk не расширяют доступ', async (t) => {
   let now = Date.now();
   const f = await fixture(t, { now: () => now });
   const directory = path.join(f.root, 'sandbox-worktree');
@@ -643,7 +643,7 @@ test('AP-12 production authPlugin закрывает studio3d, тестовая 
   assert.equal((await f.call('GET', '/state', undefined, null)).statusCode, 401);
   
   const authorized = await f.call('GET', '/state', undefined, null,
-    { cookie: 'cockpit_sid=fixture-session' });
+    { cookie: 'grigdesk_sid=fixture-session' });
 
   assert.equal(authorized.statusCode, 200);
   assert.equal(parseStudio3d.state(authorized.json()).library.ok, true);
@@ -1001,7 +1001,7 @@ test('AP-14b настоящий authPlugin: закодированные пла�
     values: { prompt: 'Фикстура' },
     expectedPrice: 30
   };
-  const cli = { 'x-cockpit-token': 'fixture-cli-token' };
+  const cli = { 'x-grigdesk-token': 'fixture-cli-token' };
   const routes = ['/ru%6E', '/batches/ru%6E', '/models/fixture/versions/v01-fixture/retr%79',
     '/jobs/fixture/children/fixture/reconcil%65', '/jobs/fixture/children/fixture/close-unknow%6E'];
 
@@ -1013,7 +1013,7 @@ test('AP-14b настоящий authPlugin: закодированные пла�
   }
 
   for (const route of ['/run', '/batches/run']) {
-    const allowed = await f.call('POST', route, request, null, { cookie: 'cockpit_sid=fixture-session' });
+    const allowed = await f.call('POST', route, request, null, { cookie: 'grigdesk_sid=fixture-session' });
 
     assert.notEqual(allowed.statusCode, 403, route);
     assert.notEqual(allowed.statusCode, 401, route);

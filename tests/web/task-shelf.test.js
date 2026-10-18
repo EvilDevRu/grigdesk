@@ -503,7 +503,7 @@ async function reactiveStoreFixture({
           harness.detailGetCalls += 1;
           harness.apiCalls.push({ method: 'GET', url });
           if (detailImpl) return detailImpl(url, harness.detailGetCalls);
-          return { title: 'Задача 42', group_name: 'Кокпит' };
+          return { title: 'Задача 42', group_name: 'GrigDesk' };
         }
         harness.apiGetCalls += 1;
         harness.apiCalls.push({ method: 'GET', url: '/api/b24/task-shelf' });
@@ -593,7 +593,7 @@ async function reactiveStoreFixture({
       tasks: taskOnBoard ? [{
         id: 42,
         title: 'Задача 42',
-        group: 'Кокпит',
+        group: 'GrigDesk',
         status: 'IN_PROGRESS',
         statusKind: 'active',
         statusText: 'В работе — таймер идёт',
@@ -842,7 +842,7 @@ test('Строка полки получает живую карточку B24, 
     })),
   }, {
     title: 'Задача 42',
-    project: 'Кокпит',
+    project: 'GrigDesk',
     responsible: 'Иван Петров',
     deadline: '29.08.2026',
     detailGetCalls: 0,

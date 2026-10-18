@@ -29,7 +29,7 @@ export const UiSelect = defineComponent({ props: ['modelValue'], emits: ['update
 
 async function fixture(t, initial = makeDraft(), nodeId = 'build',
   routeScope = { kind: 'route', routeId: 'quick' }, policyResult = null) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteNodeInspector.vue'), {
     stubs: { '../../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
@@ -85,7 +85,7 @@ test('RE-F7-04: инспектор удаляет висячую ссылку н
 
 async function transitionFixture(t, initial = makeDraft(), nodeId = 'build',
   routeScope = { kind: 'route', routeId: 'quick' }) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteTransitionInspector.vue'), {
     stubs: { '../../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },

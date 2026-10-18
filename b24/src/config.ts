@@ -16,12 +16,12 @@ export interface ConfigIO {
   readText(file: string): Promise<string | null>;
 }
 
-const ADDRESS_ERROR = 'Некорректный адрес Cockpit: нужен HTTP(S) URL без учётных данных и query.';
-const PORT_ERROR = 'Некорректный порт Cockpit: нужно целое число от 1 до 65535.';
-const TOKEN_ERROR = 'Некорректный токен Cockpit.';
+const ADDRESS_ERROR = 'Некорректный адрес GrigDesk: нужен HTTP(S) URL без учётных данных и query.';
+const PORT_ERROR = 'Некорректный порт GrigDesk: нужно целое число от 1 до 65535.';
+const TOKEN_ERROR = 'Некорректный токен GrigDesk.';
 
 /**
- * Проверяет адрес Cockpit и убирает конечные слэши перед добавлением /api/b24.
+ * Проверяет адрес GrigDesk и убирает конечные слэши перед добавлением /api/b24.
  * Учётные данные, query, fragment и чужие протоколы отвергаются до HTTP.
  */
 function baseUrlOf(value: string): string {
@@ -125,12 +125,12 @@ async function readToken(file: string, io: ConfigIO): Promise<string> {
 }
 
 /**
- * Вычисляет адрес и токен Cockpit в фиксированном порядке контракта b24.
- * Явные COCKPIT_URL и COCKPIT_TOKEN не трогают папку данных и файлы.
+ * Вычисляет адрес и токен GrigDesk в фиксированном порядке контракта b24.
+ * Явные GRIGDESK_URL и GRIGDESK_TOKEN не трогают папку данных и файлы.
  */
 export async function resolveConnection(env: DataHomeEnv, io: ConfigIO): Promise<Connection> {
-  const explicitUrl = env.COCKPIT_URL ?? '';
-  const explicitToken = env.COCKPIT_TOKEN ?? '';
+  const explicitUrl = env.GRIGDESK_URL ?? '';
+  const explicitToken = env.GRIGDESK_TOKEN ?? '';
 
   if (explicitUrl !== '' && explicitToken !== '') {
     return {

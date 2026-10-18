@@ -13,7 +13,7 @@ const DRAFT_ID = '44444444-4444-4444-8444-444444444444';
 const NOW = '2026-01-01T12:00:00.000Z';
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-draft-store-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-draft-store-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const baseDir = path.join(root, 'routes.authoring');
   const routesDir = path.join(root, 'routes');
@@ -143,8 +143,8 @@ test('RE-B1-06: config даёт соседний authoringDir и принима�
       cwd: path.resolve(new URL('../..', import.meta.url).pathname),
       env: {
         ...process.env,
-        COCKPIT_ROUTES_DIR: routesDir,
-        COCKPIT_ROUTES_AUTHORING_DIR: authoringDir,
+        GRIGDESK_ROUTES_DIR: routesDir,
+        GRIGDESK_ROUTES_AUTHORING_DIR: authoringDir,
       },
       encoding: 'utf8',
     });

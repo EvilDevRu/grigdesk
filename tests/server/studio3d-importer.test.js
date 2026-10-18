@@ -14,7 +14,7 @@ import { fakeTaskId, startFakeTripo } from './helpers/fakeTripo.js';
 import { makeGlb, pngHeader, pngImage } from './helpers/studio3dGlb.js';
 
 /**
- * Скану доступны только синтетические проекты, не Cockpit и не домашняя папка.
+ * Скану доступны только синтетические проекты, не GrigDesk и не домашняя папка.
  * Fake API и CDN позволяют доказать отсутствие сети при найденной копии.
  */
 async function fixture(t, options = {}) {

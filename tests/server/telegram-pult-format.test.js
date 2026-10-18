@@ -143,7 +143,7 @@ test('карточка вопроса: свой лимит 1500 и схлопн�
   assert.equal(long.startsWith('❓ #4187 — вопрос агента\n'), true);
 });
 
-test('карточка разрешения: имя инструмента, превью ~300 и отсылка в кокпит', () => {
+test('карточка разрешения: имя инструмента, превью ~300 и отсылка в GrigDesk', () => {
   const text = permissionCard({
     subject: '#4187',
     tool: 'Bash',
@@ -151,7 +151,7 @@ test('карточка разрешения: имя инструмента, пр
   });
   assert.equal(text.startsWith('🔐 #4187 — агент просит разрешение\n'), true);
   assert.equal(text.includes('Bash: npm run build && bash tests/run-all.sh'), true);
-  assert.equal(text.includes('кокпит'), true);
+  assert.equal(text.includes('GrigDesk'), true);
 
   const long = permissionCard({ subject: '#1', tool: 'Bash', preview: 'x'.repeat(2000) });
   const line = long.split('\n')[1];

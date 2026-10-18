@@ -97,7 +97,7 @@ async function fixture(t, scenario = { updates: [] }, options = {}) {
   const adapter = createGlmAdapter({
     env: {
       PATH: process.env.PATH,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: 'synthetic-zai-key',
     },
     admission: [{ mode: 'api', compatibility: identity }],
@@ -521,7 +521,7 @@ test(RUNTIME_TEST_7, async (t) => {
   await fs.writeFile(logFile, '');
   await fs.writeFile(scenarioFile, JSON.stringify({
     updates: [],
-    permission: { toolCallId: 'call-1', toolName: 'mcp__cockpit-work__repo_history' },
+    permission: { toolCallId: 'call-1', toolName: 'mcp__grigdesk-work__repo_history' },
   }));
   await fs.writeFile(bin, [
     '#!/bin/sh',

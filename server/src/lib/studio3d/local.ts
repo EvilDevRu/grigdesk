@@ -1,4 +1,4 @@
-// Встроенный исполнитель «Локально»: бесплатные помощники над GLB прямо в кокпите —
+// Встроенный исполнитель «Локально»: бесплатные помощники над GLB прямо в GrigDesk —
 // разворот и рост. Он второй исполнитель раздела и проверяет, что экран и очередь не
 // привязаны к Tripo: его действия рисуются из того же объявления и сцепляются с чужими.
 
@@ -181,7 +181,7 @@ async function runLocal(request: LocalRequest): Promise<LocalResult> {
 
     options = {
       rotation: turn?.rotation,
-      name: 'cockpit-rotate'
+      name: 'grigdesk-rotate'
     };
     label = turn?.label ?? 'Поворот';
   } else if (request.operation === 'scale') {
@@ -197,7 +197,7 @@ async function runLocal(request: LocalRequest): Promise<LocalResult> {
 
     options = {
       scale: height / current,
-      name: 'cockpit-scale'
+      name: 'grigdesk-scale'
     };
     label = `Рост ${height.toLocaleString('ru-RU')} м`;
   } else {

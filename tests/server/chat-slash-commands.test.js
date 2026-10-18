@@ -448,7 +448,7 @@ test('/api/providers нормализует способ запрета SSH бе
 // ── POST /api/chat + slashCommand ────────────────────────────────────────────
 
 async function chatFixture(t, { executor }) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-slash-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-slash-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   app.decorate('sse', { broadcast() {} });
@@ -547,7 +547,7 @@ test('slashCommand из списка провайдера проходит, те
   assert.equal(res.json().reply, 'ok');
   assert.equal(executor.calls.length, 1);
   assert.equal(executor.calls[0].message, '/status');
-  assert.doesNotMatch(executor.calls[0].message, /COCKPIT_CHAT_TITLE/);
+  assert.doesNotMatch(executor.calls[0].message, /GRIGDESK_CHAT_TITLE/);
 });
 
 test('slashCommand валидация: чужая команда, none-команда и подмена текста → 400', async (t) => {
@@ -659,5 +659,5 @@ test('kimi служебный ход с аргументом (/compact <текс
   });
   assert.equal(res.statusCode, 200);
   assert.equal(executor.calls[0].message, '/compact только решения');
-  assert.doesNotMatch(executor.calls[0].message, /COCKPIT_CHAT_TITLE/);
+  assert.doesNotMatch(executor.calls[0].message, /GRIGDESK_CHAT_TITLE/);
 });

@@ -21,7 +21,7 @@ const STREAM_AUDIO = Object.freeze({
 });
 
 function multipartFile(content = 'fake audio', filename = 'dictation.webm', fields = {}) {
-  const boundary = `----cockpit-speech-${Math.random().toString(16).slice(2)}`;
+  const boundary = `----grigdesk-speech-${Math.random().toString(16).slice(2)}`;
   const fieldParts = Object.entries(fields).flatMap(([name, value]) => [
     `--${boundary}`,
     `Content-Disposition: form-data; name="${name}"`,
@@ -69,7 +69,7 @@ async function chatFixture(t, {
   withAuth = false,
   speechStreamStartTimeoutMs = null,
 } = {}) {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-http-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-http-'));
   const settings = speechSettings();
   const revision = 'speech:11111111-1111-4111-8111-111111111111';
   let transcribeError = null;
@@ -98,7 +98,7 @@ async function chatFixture(t, {
           duration: 1.25,
           hotwordsTokens: 3,
           hotwordsTruncated: false,
-          segments: [{ text: 'hello cockpit' }],
+          segments: [{ text: 'hello grigdesk' }],
         },
       };
     },
@@ -448,7 +448,7 @@ test('chat snapshot и multipart-транскрипция идут через о
   });
   assert.equal(response.statusCode, 200, response.body);
   assert.deepEqual(response.json(), {
-    text: 'hello cockpit',
+    text: 'hello grigdesk',
     duration: 1.25,
     diagnostics: { hotwordsTokens: 3, hotwordsTruncated: false },
     execution: { engine: 'whisper', mode: 'one-shot' },
@@ -457,7 +457,7 @@ test('chat snapshot и multipart-транскрипция идут через о
   assert.equal(fixture.captured().settings.language, 'en');
   assert.equal(fixture.captured().fileExisted, true);
   assert.equal(fixture.captured().streamSessionId, 'dictation-test-1');
-  assert.match(path.basename(fixture.captured().workDir), /^cockpit-dictate-/);
+  assert.match(path.basename(fixture.captured().workDir), /^grigdesk-dictate-/);
 });
 
 test('chat API прогревает runtime, передаёт warmupId и умеет отменить прогрев', async (t) => {
@@ -565,7 +565,7 @@ test('реальный SpeechRuntime отдаёт HTTP 409 при cache miss в�
 });
 
 test('живой media upload читает video speech settings', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-media-http-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-media-http-'));
   let captured = null;
   const media = {
     mediaDir: root,

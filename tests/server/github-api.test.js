@@ -47,7 +47,7 @@ test('getRepository отправляет точные GitHub REST headers и н�
   assert.deepEqual(calls[0].options.headers, {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${TOKEN}`,
-    'User-Agent': 'cockpit-github-channel/1',
+    'User-Agent': 'grigdesk-github-channel/1',
     'X-GitHub-Api-Version': GITHUB_API_VERSION,
   });
 });
@@ -60,7 +60,7 @@ test('createRepositoryHook создаёт только web/issues hook с HTTPS 
   };
 
   const hook = await createRepositoryHook(TOKEN, OWNER, REPO, {
-    url: 'https://cockpit.example.test/hooks/github/ingress_abc',
+    url: 'https://grigdesk.example.test/hooks/github/ingress_abc',
     secret: SECRET,
   }, { fetchImpl });
 
@@ -73,7 +73,7 @@ test('createRepositoryHook создаёт только web/issues hook с HTTPS 
     active: false,
     events: ['issues'],
     config: {
-      url: 'https://cockpit.example.test/hooks/github/ingress_abc',
+      url: 'https://grigdesk.example.test/hooks/github/ingress_abc',
       content_type: 'json',
       insecure_ssl: '0',
       secret: SECRET,
@@ -83,8 +83,8 @@ test('createRepositoryHook создаёт только web/issues hook с HTTPS 
 
 test('createRepositoryHook отвергает HTTP и callback с query до fetch', async (t) => {
   for (const url of [
-    'http://cockpit.example.test/hook',
-    'https://cockpit.example.test/hook?account=123',
+    'http://grigdesk.example.test/hook',
+    'https://grigdesk.example.test/hook?account=123',
   ]) {
     await t.test(url, async () => {
       let fetched = false;

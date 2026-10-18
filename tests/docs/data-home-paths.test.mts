@@ -9,17 +9,17 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const forbidden = [
   new RegExp(
     String.raw`(?:\b(?:rootDir|root|ROOT|repositoryRoot|repoRoot|REPO_ROOT|codeRoot|projectRoot|`
-    + String.raw`cockpitRoot|PROJECT_ROOT|here)|import\.meta\.dirname|__d`
+    + String.raw`grigDeskRoot|PROJECT_ROOT|here)|import\.meta\.dirname|__d`
     + String.raw`irname(?:\s*,\s*'\.\.')*)\s*,\s*'(?:\.state(?:\/(?!android-|npm-|mobile-d`
     + String.raw`ownloads)[^']*)?|chats|telegram|github|3d|agents|plugins|\.env)'`,
   ),
   /['"`][^'"`\n]*server\/\.state[^'"`\n]*['"`]|'server',\s*'\.state'/,
   /'(?:\.\.\/)+(?:\.state|\.env|chats|telegram|github|3d|agents|plugins)\b/,
   new RegExp(
-    String.raw`\$\{?(?:ROOT|_root|COCKPIT_DIR|DIR|root|cockpit_root|MOBILE_ROOT)\}?\/(?:server\/\.st`
+    String.raw`\$\{?(?:ROOT|_root|GRIGDESK_DIR|DIR|root|grigdesk_root|MOBILE_ROOT)\}?\/(?:server\/\.st`
     + String.raw`ate|\.env\b|\.state\/(?:plugins|ui-releases|mobile|artifacts)(?=[/"'}\s]|$))`,
   ),
-  /__COCKPIT_DIR__\/\.env/,
+  /__GRIGDESK_DIR__\/\.env/,
 ];
 
 // Исключения узкие: имя файла и фрагмент строки, а не отключение проверки целого слоя.
@@ -27,14 +27,13 @@ const forbidden = [
 const exceptions: Array<[string, string, string]> = [
   ['server/src/lib/kimi/sandbox.ts', 'const legacyState =', 'Защита настоящей старой раскладки.'],
   ['server/src/lib/kimi/sandbox.ts', 'const legacyEnv =', 'Защита настоящей старой раскладки.'],
-  ['tools/moveDataHomeCore.ts', 'server/.state', 'Перенос и возврат прежнего состояния.'],
-  ['tools/moveDataHomeCore.ts', "context.codeRoot, '.env'", 'Перенос и возврат прежних настроек.'],
-  ['tools/moveDataHomeRuntime.ts', "context.codeRoot, '.env'", 'Проверка процессов до переноса.'],
+  ['tools/brandMovePlan.ts', 'server/.state', 'Перенос и возврат прежнего состояния.'],
+  ['tools/brandMovePlan.ts', "context.codeRoot, '.env'", 'Перенос и возврат прежних настроек.'],
   ['server/src/lib/dataHomeBoot.ts', 'server/.state', 'Сторож прежней раскладки.'],
   ['server/src/lib/dataHomeBoot.ts', "codeRoot, '.env'", 'Сторож прежнего файла настроек.'],
   ['cli/commands.ts', 'server/.state', 'Переходное чтение до ручного переноса.'],
   ['cli/commands.ts', "root, '.env'", 'Переходное чтение до ручного переноса.'],
-  ['server/src/lib/cockpitUpdate.ts', "'--work-root'", 'Рабочая копия обновления на диске кода.'],
+  ['server/src/lib/grigDeskUpdate.ts', "'--work-root'", 'Рабочая копия обновления на диске кода.'],
   ['server/scripts/glmLiveSmoke.mts', "chatsDir: path.join(root, 'chats')", 'Временная тестовая область.'],
 ];
 
@@ -67,7 +66,7 @@ function pathFindings(base: string, files: readonly string[]): string[] {
     const lines = readFileSync(path.join(base, file), 'utf8').split('\n');
 
     // «#» — комментарий только в shell и юните; в TS с него начинаются приватные члены класса.
-    const shell = /\.(?:sh|service)$/.test(file) || ['bin/cockpit', 'tools/mobile',
+    const shell = /\.(?:sh|service)$/.test(file) || ['bin/grigdesk-ctl', 'tools/mobile',
       'tools/relay'].includes(file);
     const comment = shell ? /^\s*#/ : /^\s*(?:\/\/|\*)/;
 
@@ -102,7 +101,7 @@ test('DP-1 данные не вычисляются от дерева кода',
     ...codeFiles('tools/mobile-phone', /\.mts$/),
     ...codeFiles('web/scripts', /\.(?:mjs|mts)$/),
     ...codeFiles('desktop/scripts', /\.mts$/),
-    'deploy/cockpit-server.service', 'bin/cockpit', 'tools/mobile', 'tools/relay',
+    'deploy/grigdesk-server.service', 'bin/grigdesk-ctl', 'tools/mobile', 'tools/relay',
     'web/vite.config.js',
   ];
   const findings = pathFindings(root, files);

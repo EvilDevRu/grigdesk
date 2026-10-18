@@ -223,7 +223,7 @@ export async function runDeepSeekFactory(
 ): Promise<void> {
   const args = await validatePaths(parseArguments(argv));
   const identity = runIdentity(env);
-  const runtimeMode = env.COCKPIT_DEEPSEEK_RUNTIME_MODE
+  const runtimeMode = env.GRIGDESK_DEEPSEEK_RUNTIME_MODE
     || deepSeekDistributionMode(path.join(ROOT, 'server/deepseek-runtime-contract.json'));
 
   if (runtimeMode !== 'installed' && runtimeMode !== 'embedded') {
@@ -233,11 +233,11 @@ export async function runDeepSeekFactory(
   const config = {
     deepseekRuntimeHome: args.runtimeHome,
     deepseekBin: args.bin,
-    deepseekBinOverride: env.COCKPIT_DEEPSEEK_BIN || undefined,
+    deepseekBinOverride: env.GRIGDESK_DEEPSEEK_BIN || undefined,
     deepseekRuntimeMode: runtimeMode as 'installed' | 'embedded',
-    deepseekGenerationRoot: env.COCKPIT_DEEPSEEK_GENERATION_ROOT
+    deepseekGenerationRoot: env.GRIGDESK_DEEPSEEK_GENERATION_ROOT
       || path.join(ROOT, 'server/runtime/deepseek'),
-    deepseekArtifactDir: args.artifactDir || env.COCKPIT_DEEPSEEK_ARTIFACT_DIR || undefined,
+    deepseekArtifactDir: args.artifactDir || env.GRIGDESK_DEEPSEEK_ARTIFACT_DIR || undefined,
     rootDir: ROOT,
   };
   const runtime = resolveDeepSeekRuntime(config);
@@ -258,7 +258,7 @@ export async function runDeepSeekFactory(
     config,
     cwd: args.cwd,
     mode: args.mode,
-    prefsPath: env.COCKPIT_PROVIDER_PREFS_PATH || env.COCKPIT_PREFS_PATH
+    prefsPath: env.GRIGDESK_PROVIDER_PREFS_PATH || env.GRIGDESK_PREFS_PATH
       || path.join(dataHome({ env, home: env.HOME || os.homedir() }), 'state/prefs.json'),
   });
   const publish = deps.emit || emit;

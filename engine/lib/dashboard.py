@@ -574,7 +574,7 @@ _PROFILE_STAGES = {}    # профиль → {маршрут: [этапы]}
 
 
 def profile_stages(profile):
-    """Legacy profile arrays удалены; route shape читает Cockpit из pinned bundle."""
+    """Legacy profile arrays удалены; route shape читает GrigDesk из pinned bundle."""
     return {}
 
 
@@ -1599,7 +1599,7 @@ def render():
             p.append('</div>')
 
             # ── Действия: решение на воротах и таймер. Запуск/возобновление доступны
-            # только через единый route control plane Cockpit, не через старый dashboard.
+            # только через единый route control plane GrigDesk, не через старый dashboard.
             p.append('<span class="tctl">')
             orch = pf_card.get('ORCH_PID', '')
             alive = orch and os.path.isdir(f'/proc/{orch}')
@@ -2139,11 +2139,11 @@ def render_stage(task, nid):
         body.append(f'<a class="sbtn doc" href="{doc_url}">&#128203; Открыть документ: {doc_what}</a>')
     body.append('</div>')
 
-    # Исполняемая control plane после cutover живёт только в Cockpit. Старый Python
+    # Исполняемая control plane после cutover живёт только в GrigDesk. Старый Python
     # dashboard намеренно заканчивает страницу здесь: он показывает проекцию и журнал,
     # но не рисует кнопок, способных обещать запись в trusted route ledger.
     body.append('<h3 class="sh">Только чтение</h3><div class="sub">Запуск, resume, gate, '
-                'goto и lifecycle доступны только в Cockpit для exact route-attempt.</div>')
+                'goto и lifecycle доступны только в GrigDesk для exact route-attempt.</div>')
     readonly_css = (
         '.shead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
         '.slabel{font-size:19px}.skind{font-size:11px;text-transform:uppercase;letter-spacing:.08em;'
@@ -2535,7 +2535,7 @@ def render_plan(task, doc='plan'):
              'waiting': 'ждёт решения'}.get(gate, gate)
     cls = {'approved': 'done', 'rejected': 'rej'}.get(gate, '')
     buttons = (f'<div class="gatebar sub gate-{cls}">Статус: {label}. '
-               'Этот dashboard работает только на чтение; решение принимается в Cockpit '
+               'Этот dashboard работает только на чтение; решение принимается в GrigDesk '
                'через exact route-attempt.</div>')
     gate_js = ''
     title = {'plan': 'План задачи', 'diag': 'Диагностика'}.get(doc, 'Приёмка задачи')
@@ -2603,7 +2603,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if re.match(r'^/api/(?:gate|stage|act|sandbox|run)/', self.path):
             body = json.dumps({
                 'ok': False,
-                'msg': 'read-only: действие доступно только через Cockpit с exact route-attempt',
+                'msg': 'read-only: действие доступно только через GrigDesk с exact route-attempt',
             }, ensure_ascii=False).encode('utf-8')
             self.send_response(409)
             self.send_header('Content-Type', 'application/json; charset=utf-8')

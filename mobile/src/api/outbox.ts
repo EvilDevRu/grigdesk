@@ -141,7 +141,7 @@ export class ChatOutbox {
           }
 
           const failure =
-            error instanceof ApiError ? error : new ApiError(0, 'network', 'Нет связи с Кокпитом.');
+            error instanceof ApiError ? error : new ApiError(0, 'network', 'Нет связи с GrigDesk.');
 
           // Просроченный приём сервер отвечает только на ключ, которого не видел: эффекта не было,
           // а повтор с тем же ключом снова просрочен. Решение о сообщении остаётся человеку.

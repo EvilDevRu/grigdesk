@@ -2,7 +2,7 @@
   "protocolVersion": 1,
   "providerId": "future-provider",
   "state": "ready",
-  "scope": { "id": "cockpit-chats", "label": "Для чатов Cockpit" },
+  "scope": { "id": "grigdesk-chats", "label": "Для чатов GrigDesk" },
   "source": {
     "kind": "synthetic",
     "version": "1",

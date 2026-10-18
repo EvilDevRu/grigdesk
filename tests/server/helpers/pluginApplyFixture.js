@@ -24,11 +24,11 @@ export async function createApplyFixture(
     root: fixtureRoot,
   } = {},
 ) {
-  const root = fixtureRoot ?? await mkdtemp(path.join(os.tmpdir(), 'cockpit-apply-'));
+  const root = fixtureRoot ?? await mkdtemp(path.join(os.tmpdir(), 'grigdesk-apply-'));
   const roots = { pluginsDir: path.join(root, 'plugins'), workDir: path.join(root, 'work') };
 
   if (workInside) {
-    roots.workDir = path.join(roots.pluginsDir, '.cockpit-install');
+    roots.workDir = path.join(roots.pluginsDir, '.grigdesk-install');
   }
 
   const state = applyingState(kind, unmanaged ? 'replaced' : kind === 'install' ? 'none' : 'previous');

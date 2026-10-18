@@ -38,7 +38,7 @@ test('LB-01 библиотека по умолчанию находится в d
     return JSON.parse(result.stdout);
   };
   const defaults = await run();
-  const custom = await run({ COCKPIT_3D_DIR: '/tmp/studio3d-config-fixture' });
+  const custom = await run({ GRIGDESK_3D_DIR: '/tmp/studio3d-config-fixture' });
 
   assert.equal(defaults.dir, path.join(defaults.root, '3d'));
   assert.equal(custom.dir, '/tmp/studio3d-config-fixture');
@@ -82,5 +82,5 @@ test('LB-02 код, inventory и boot fixture отделяют библиоте�
 
   assert.match(files[0], /hiddenDirs[\s\S]*config\.studio3dDir/);
   assert.match(files[1], /SKIP_DIRS = new Set\(\[[\s\S]*'3d'/);
-  assert.match(files[2], /COCKPIT_3D_DIR:\s*path\.join\(root, '3d'\)/);
+  assert.match(files[2], /GRIGDESK_3D_DIR:\s*path\.join\(root, '3d'\)/);
 });

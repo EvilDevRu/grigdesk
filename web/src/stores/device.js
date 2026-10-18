@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia';
 import { ensureNotifyPermission, notify } from '../shared/notify.ts';
 
-export const WAKE_LOCK_KEY = 'cockpit-screen-wake-lock';
+export const WAKE_LOCK_KEY = 'grigdesk-screen-wake-lock';
 
 // WakeLockSentinel — браузерный объект, его нельзя класть в реактивный state Pinia.
 // Держим дескриптор и незавершённый запрос рядом со стором: приложение создаёт один Pinia,
@@ -201,8 +201,8 @@ export const useDeviceStore = defineStore('device', {
       try {
         const shown = await notify(
           'Оповещения работают',
-          'Кокпит сообщит, когда агент ответит или работа потребует тебя.',
-          'cockpit-notification-test',
+          'GrigDesk сообщит, когда агент ответит или работа потребует тебя.',
+          'grigdesk-notification-test',
         );
         if (!shown) this.notificationError = 'Браузер не смог показать тестовое оповещение.';
         return shown;

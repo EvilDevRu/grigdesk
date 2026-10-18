@@ -244,7 +244,7 @@ function catalogDocument(routeHash) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const baseDir = path.join(root, 'routes');
   return {
@@ -721,7 +721,7 @@ test('ROUTES-V2-14: kernel lock переживает конкуренцию и �
 });
 
 test('ROUTES-V2-15: symlink в корне store не перенаправляет публикацию', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-root-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-root-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const outside = path.join(root, 'outside');
   const baseDir = path.join(root, 'routes-link');

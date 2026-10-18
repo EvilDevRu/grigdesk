@@ -7,7 +7,7 @@ import {
   decodeUserPluginManifest,
   normalizePluginPackagePath,
 } from '../pluginsRegistry.ts';
-import { compareSemVer, parseSemVer } from '../cockpitRelease.ts';
+import { compareSemVer, parseSemVer } from '../grigDeskRelease.ts';
 import { installError } from './errors.ts';
 import { assertRealPackageRoot, readPackageTree } from './packageTree.ts';
 import type { PackageEntry } from './packageTree.ts';
@@ -29,7 +29,7 @@ export interface PackageExpectations {
   version: string;
   expectedId: string | null;
   reservedIds: ReadonlySet<string>;
-  cockpitVersion: string;
+  grigDeskVersion: string;
 }
 
 export interface ValidatedPackage {
@@ -142,15 +142,15 @@ async function validatePackageTree(
     throw installError('version_mismatch');
   }
 
-  if (Object.hasOwn(manifest, 'minCockpitVersion')) {
-    const minimum = manifest.minCockpitVersion;
+  if (Object.hasOwn(manifest, 'minGrigDeskVersion')) {
+    const minimum = manifest.minGrigDeskVersion;
 
     if (typeof minimum !== 'string' || minimum.trim() !== minimum || !parseSemVer(minimum)) {
-      throw installError('manifest_invalid', 'minCockpitVersion должен быть вида X.Y.Z');
+      throw installError('manifest_invalid', 'minGrigDeskVersion должен быть вида X.Y.Z');
     }
 
-    if (compareSemVer(minimum, expected.cockpitVersion) > 0) {
-      throw installError('cockpit_too_old', `нужна ${minimum}, установлена ${expected.cockpitVersion}`);
+    if (compareSemVer(minimum, expected.grigDeskVersion) > 0) {
+      throw installError('grigdesk_too_old', `нужна ${minimum}, установлена ${expected.grigDeskVersion}`);
     }
   }
 

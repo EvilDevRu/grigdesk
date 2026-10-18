@@ -12,7 +12,7 @@ test('boolean принимает false и отклоняет строку без
     path: [],
     writeChannel: {
       id: 'overlay',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
     ownership: [],
@@ -47,7 +47,7 @@ test('валидация сохраняет JSON-типы enum и проверя
     path: [],
     writeChannel: {
       id: 'overlay',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
     ownership: [],
@@ -88,7 +88,7 @@ test('лист проверяется после наложения на native 
       path: [],
       writeChannel: {
         id: 'overlay',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
       ownership: [],
@@ -115,7 +115,7 @@ test('enum не отменяет объявленный тип и целочис
       ownership: [],
       writeChannel: {
         id: 'fixture',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
     },

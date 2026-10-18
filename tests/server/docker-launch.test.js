@@ -15,7 +15,7 @@ function shellQuote(value) {
 }
 
 /**
- * Запуск проверяется в отдельном каталоге без Cockpit и Docker хоста. `node` в PATH
+ * Запуск проверяется в отдельном каталоге без GrigDesk и Docker хоста. `node` в PATH
  * подменён обёрткой того же рантайма: фикстура должна видеть ровно тот Node, которым
  * идёт прогон, а не случайный из системного PATH. Флагов обёртка не добавляет —
  * минимум 22.18 исполняет TypeScript сам, и проверяется именно это.
@@ -32,12 +32,13 @@ async function fixture(t, { stubNpm = false } = {}) {
     await mkdir(path.join(directory, relative), { recursive: true });
   }
   for (const file of ['shared/runtime/dataHome.ts', 'shared/package.json',
+    'shared/runtime/legacyBrand.ts',
     'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts']) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await copyFile(path.join(root, file), path.join(directory, file));
   }
 
-  await copyFile(path.join(root, 'bin/cockpit'), path.join(directory, 'bin/cockpit'));
+  await copyFile(path.join(root, 'bin/grigdesk-ctl'), path.join(directory, 'bin/grigdesk-ctl'));
   await copyFile(path.join(root, 'deploy/lib/runtime-env.sh'),
     path.join(directory, 'deploy/lib/runtime-env.sh'));
   await writeFile(path.join(directory, 'tools/node'), [
@@ -75,7 +76,7 @@ async function fixture(t, { stubNpm = false } = {}) {
   const proof = path.join(directory, 'proof.json');
   const env = {
     HOME: directory,
-    COCKPIT_HOME: path.join(container, 'data'),
+    GRIGDESK_HOME: path.join(container, 'data'),
     NODE_ENV: 'test',
     npm_config_cache: process.env.npm_config_cache,
     PATH: `${path.join(directory, 'tools')}:${process.env.PATH || ''}`,
@@ -89,10 +90,10 @@ async function fixture(t, { stubNpm = false } = {}) {
   };
 }
 
-test('bin/cockpit запускает TS Docker без отдельной компиляции и без флагов', async (t) => {
+test('bin/grigdesk-ctl запускает TS Docker без отдельной компиляции и без флагов', async (t) => {
   const { directory, proof, env } = await fixture(t, { stubNpm: true });
 
-  await execute('bash', [path.join(directory, 'bin/cockpit'), 'run'], {
+  await execute('bash', [path.join(directory, 'bin/grigdesk-ctl'), 'run'], {
     cwd: directory,
     env,
     timeout: 10000,

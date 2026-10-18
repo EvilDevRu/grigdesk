@@ -162,18 +162,18 @@ test('BM-03: start ждёт renew, подавляет его отказ и во�
             await renewGate;
 
             if (renewOutcome === 'http') {
-              throw new B24Error(22, 'Запрос к Cockpit завершился ошибкой HTTP 400.');
+              throw new B24Error(22, 'Запрос к GrigDesk завершился ошибкой HTTP 400.');
             }
 
             if (renewOutcome === 'network') {
-              throw new B24Error(22, 'Не удалось связаться с Cockpit.');
+              throw new B24Error(22, 'Не удалось связаться с GrigDesk.');
             }
 
             return new Uint8Array(Buffer.from('renew-body'));
           }
 
           if (timerFails) {
-            throw new B24Error(22, 'Запрос к Cockpit завершился ошибкой HTTP 502.');
+            throw new B24Error(22, 'Запрос к GrigDesk завершился ошибкой HTTP 502.');
           }
 
           return new Uint8Array(Buffer.from('timer-body'));

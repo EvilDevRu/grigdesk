@@ -4,7 +4,7 @@ export const SPEECH_STREAM_ENDPOINT = '/api/chat/transcribe/stream';
 export const SPEECH_STREAM_PROTOCOL_VERSION = 1;
 export const SPEECH_PCM_SAMPLE_RATE = 16000;
 export const SPEECH_PCM_FRAME_SAMPLES = 1600;
-export const SPEECH_PCM_WORKLET_NAME = 'cockpit-speech-pcm16';
+export const SPEECH_PCM_WORKLET_NAME = 'grigdesk-speech-pcm16';
 export const SPEECH_STREAM_AUDIO = Object.freeze({
   encoding: 'pcm_s16le',
   sampleRate: SPEECH_PCM_SAMPLE_RATE,

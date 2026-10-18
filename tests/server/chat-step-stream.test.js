@@ -274,7 +274,7 @@ test('Codex normalizer показывает произвольные tool-call �
 });
 
 test('Codex normalizer не теряет незнакомый тип элемента', () => {
-  // Codex дописывает типы быстрее, чем Кокпит разбирает их поимённо. Раньше всё,
+  // Codex дописывает типы быстрее, чем GrigDesk разбирает их поимённо. Раньше всё,
   // чего не было в списке, исчезало бесследно — вместе с вызовом И его результатом,
   // и человек читал ленту как полный отчёт о ходе.
   const normalize = createCodexStepNormalizer();
@@ -467,7 +467,7 @@ test('Codex ретрай сети читается человеком, а не �
 });
 
 test('Codex executor передаёт JSONL-шаги живьём и сохраняет их в результате', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-stream-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-stream-'));
   const fake = path.join(dir, 'fake-codex');
   const events = [
     { type: 'thread.started', thread_id: 'thread-from-stream', model: 'gpt-actual' },

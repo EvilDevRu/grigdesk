@@ -11,8 +11,8 @@ import vue from '@vitejs/plugin-vue';
 const envDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function buildMetadata() {
-  let version = process.env.VITE_COCKPIT_VERSION || 'dev';
-  let sha = process.env.VITE_COCKPIT_SHA || 'dev';
+  let version = process.env.VITE_GRIGDESK_VERSION || 'dev';
+  let sha = process.env.VITE_GRIGDESK_SHA || 'dev';
   try { if (version === 'dev') version = readFileSync(path.join(envDir, 'VERSION'), 'utf8').trim(); }
   catch { /* dev checkout без VERSION */ }
   try {
@@ -27,11 +27,11 @@ function buildMetadata() {
 export default defineConfig(({ command }) => {
   let filePort;
 
-  if (command === 'serve' && process.env.COCKPIT_PORT === undefined) {
+  if (command === 'serve' && process.env.GRIGDESK_PORT === undefined) {
     try {
       const file = envFilePath({ env: process.env, home: os.homedir() });
 
-      filePort = parseEnv(readFileSync(file, 'utf8')).COCKPIT_PORT;
+      filePort = parseEnv(readFileSync(file, 'utf8')).GRIGDESK_PORT;
     } catch (error) {
       if (error.code !== 'ENOENT') {
         throw error;
@@ -39,18 +39,18 @@ export default defineConfig(({ command }) => {
     }
   }
 
-  const cockpitPort = Number(process.env.COCKPIT_PORT ?? filePort) || 8140;
-  const proxyTarget = `http://localhost:${cockpitPort}`;
+  const grigDeskPort = Number(process.env.GRIGDESK_PORT ?? filePort) || 8140;
+  const proxyTarget = `http://localhost:${grigDeskPort}`;
   const metadata = buildMetadata();
 
   return {
     plugins: [vue()],
     base: './',
     define: {
-      __COCKPIT_VERSION__: JSON.stringify(metadata.version),
-      __COCKPIT_SHA__: JSON.stringify(metadata.sha),
+      __GRIGDESK_VERSION__: JSON.stringify(metadata.version),
+      __GRIGDESK_SHA__: JSON.stringify(metadata.sha),
     },
-    // envDir — корень репозитория (VERSION, git, VITE_*); .env Кокпита лежит в папке данных.
+    // envDir — корень репозитория (VERSION, git, VITE_*); .env GrigDesk лежит в папке данных.
     envDir,
     server: {
       port: 5180,

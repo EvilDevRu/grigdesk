@@ -9,7 +9,7 @@
 //  • ЛИМИТ применяется ДО сборки тикета. Секции дописываются в хвост описания,
 //    а `fitDescription` режет описание с КОНЦА — то есть обсуждение обрезалось бы
 //    первым и молча. Значит объём ограничивает `buildDiscussion`, а не подрезка
-//    при сборке (docs/cockpit/inbox.md, раздел «Telegram»);
+//    при сборке (docs/grigdesk/inbox.md, раздел «Telegram»);
 //  • граница проекта работает и здесь. Профиль прогона — это и есть проект,
 //    поэтому чат, привязанный к ЧУЖОМУ проекту, в постановку не попадает: иначе
 //    ссылка в описании вытягивала бы переписку соседнего проекта прямо агенту;
@@ -48,7 +48,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 const ME = {
   id: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
 };
@@ -59,7 +59,7 @@ const link = (chatId, id) => `https://t.me/c/${String(chatId).replace('-100', ''
 const msg = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   chatType: 'supergroup',
   isForum: false,
   messageId: 100,
@@ -87,7 +87,7 @@ async function fixture(t, {
   archive: archiveStub = null,
   comments = [],
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ticket-tg-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ticket-tg-'));
   const stateDir = path.join(root, 'state');
   const profilesDir = path.join(root, 'profiles');
   const binDir = path.join(root, 'bin');
@@ -266,7 +266,7 @@ test('переписка по ссылке доезжает в постанов�
   // Секция дописана в хвост описания — как уточнения человека и комментарии.
   assert.match(ticket.description, new RegExp(HEAD));
   assert.match(ticket.description, new RegExp(SECRET), 'агент не увидит того, ради чего дали ссылку');
-  assert.match(ticket.description, /Кокпит · баги/, 'откуда цитаты — часть постановки');
+  assert.match(ticket.description, /GrigDesk · баги/, 'откуда цитаты — часть постановки');
   assert.match(ticket.description, /← ссылка/, 'на какое сообщение показывали пальцем');
   assert.match(ticket.description, /воспроизводится на любом чеке/, 'ветка, а не одно сообщение');
   // Само описание не тронуто: секция ДОПОЛНЯЕТ постановку.
@@ -293,7 +293,7 @@ test('одна ссылка в описании и в комментарии —
   });
 
   const ticket = await launch(4823);
-  const blocks = ticket.description.match(/Чат «Кокпит · баги»/g) || [];
+  const blocks = ticket.description.match(/Чат «GrigDesk · баги»/g) || [];
   assert.equal(blocks.length, 1, 'одну переписку показали дважды');
 });
 
@@ -307,7 +307,7 @@ test('чат чужого проекта в постановку не попад
 
   const ticket = await launch(4824);
   assert.equal(ticket.description.includes(SECRET), false, 'переписка чужого проекта уехала в тикет');
-  assert.equal(ticket.description.includes('Кокпит · баги'), false, 'даже имя чужого чата уехало в тикет');
+  assert.equal(ticket.description.includes('GrigDesk · баги'), false, 'даже имя чужого чата уехало в тикет');
   // Причина всё же названа: молчание агент прочитает как «в чате пусто».
   assert.match(ticket.description, /Ссылка не раскрыта/);
   assert.match(ticket.description, /привязан к проекту/i);
@@ -352,7 +352,7 @@ test('длинная ветка ограничена ДО сборки тике�
 
   assert.match(ticket.description, new RegExp(HEAD));
   assert.match(ticket.description, new RegExp(SECRET), 'целевое сообщение лимитом не срезают');
-  assert.equal(ticket.description.includes('[описание обрезано кокпитом'), false, 'секция дошла до подрезки');
+  assert.equal(ticket.description.includes('[описание обрезано GrigDesk'), false, 'секция дошла до подрезки');
   assert.ok(ticket.description.length < 20_000, `описание раздулось до ${ticket.description.length}`);
   // И честно сказано, что показано не всё.
   assert.match(ticket.description, /ещё \d+ сообщени\S* ветки не показан/);

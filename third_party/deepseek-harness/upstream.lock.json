@@ -239,7 +239,7 @@
       },
       {
         "path": "packages/hooks/hooks-claude-code",
-        "reason": "Cockpit server-owned overlay"
+        "reason": "GrigDesk server-owned overlay"
       },
       {
         "path": "packages/host/directory-picker",
@@ -315,7 +315,7 @@
       },
       {
         "path": "packages/llm/llm-pi-ai",
-        "reason": "Модельный плагин GLM в server-owned overlay Cockpit"
+        "reason": "Модельный плагин GLM в server-owned overlay GrigDesk"
       },
       {
         "path": "packages/llm/llm-retry",
@@ -3286,7 +3286,7 @@
   "patches": [
     {
       "path": "acp-settings-bridge.patch",
-      "sha256": "ca10960d0e15b6f8190a35c3d7dd6ad55f822ef3b7b7e7bcd6f377a336127df9"
+      "sha256": "904a2ae9975d0ce9fa66a8c9826284f4c9273a812f21cae83f8aff0691af75da"
     },
     {
       "path": "web-host-only.patch",

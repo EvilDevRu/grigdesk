@@ -3,10 +3,10 @@ import fp from 'fastify-plugin';
 import os from 'node:os';
 import type { FastifyInstance } from 'fastify';
 
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 
 export interface HealthModuleOptions {
-  config: Pick<CockpitConfig, 'stateDir' | 'factoryHome'>;
+  config: Pick<GrigDeskConfig, 'stateDir' | 'factoryHome'>;
   // Состояние фабрики ещё на JavaScript: отсюда нужен только счёт задач.
   factoryState: { listTaskIds(): Promise<unknown[]> };
 }

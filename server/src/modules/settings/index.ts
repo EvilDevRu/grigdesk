@@ -1,5 +1,5 @@
 // Модуль settings — редактирование кредов B24 из «Настроек» + проверка авторизации.
-// Кокпит хранит креды у себя (единственный владелец сессии).
+// GrigDesk хранит креды у себя (единственный владелец сессии).
 // Авторизация Claude настраивается не здесь: чат использует хостовый CLI (claude login),
 // статус исполнителей отдаёт реестр /api/providers.
 import fp from 'fastify-plugin';
@@ -172,7 +172,7 @@ async function settingsModule(
     throw err;
   }
 
-  // Общие настройки кокпита (правила запусков и пр.).
+  // Общие настройки GrigDesk (правила запусков и пр.).
   fastify.get('/api/settings/prefs', async () => publicPrefsView(prefs.read()));
   fastify.post('/api/settings/prefs', async (request: SettingsRequest, reply) => {
     const body = request.body || {};
@@ -195,7 +195,7 @@ async function settingsModule(
       return publicPrefsView(prefs.write(body));
     } catch (err) {
       // Файл настроек не читается — запись отклонена целиком, и человеку нужен не
-      // «внутренний сбой», а понятная причина: иначе порча выглядит как сбой кокпита.
+      // «внутренний сбой», а понятная причина: иначе порча выглядит как сбой GrigDesk.
       if (err instanceof PrefsCorruptedError) {
         return reply.code(500).send({ error: 'prefs_corrupted', message: err.message });
       }

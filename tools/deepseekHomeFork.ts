@@ -99,7 +99,7 @@ export async function forkDeepSeekHome(sourceHome: string, destinationHome: stri
       throw new Error('Home изменился во время fork');
     }
 
-    await fs.writeFile(path.join(staging, '.cockpit-runtime.json'), JSON.stringify({
+    await fs.writeFile(path.join(staging, '.grigdesk-runtime.json'), JSON.stringify({
       buildId: artifact.buildId,
       journalFormat: artifact.journalFormat,
       sourceDigest: before,

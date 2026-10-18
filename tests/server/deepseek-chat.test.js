@@ -29,7 +29,7 @@ async function waitFor(probe, attempts = 300) {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-chat-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-chat-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const scenarioFile = path.join(root, 'scenario.json');
   const logFile = path.join(root, 'fake.ndjson');

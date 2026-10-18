@@ -1,9 +1,9 @@
 // Выполненный прогон обязан иметь чем уйти с экрана.
 //
-// Кокпит не архивирует задачу сам: реестр в архив переносит человек кнопкой. У задачи
+// GrigDesk не архивирует задачу сам: реестр в архив переносит человек кнопкой. У задачи
 // со СВОЕЙ песочницей это «снести стенд», у задачи без стенда — «закрыть задачу». А у
 // shared-профиля (общий checkout, внешний стенд) не показывалась ни та, ни другая:
-// сносить чужой стенд кокпиту запрещено, а условие «закрыть» требовало отсутствия порта
+// сносить чужой стенд GrigDesk запрещено, а условие «закрыть» требовало отсутствия порта
 // фронта — в shared-режиме порт есть всегда. Доведённый до конца прогон висел на экране
 // навсегда. Тест держит кнопку на месте для всех трёх случаев.
 import assert from 'node:assert/strict';
@@ -49,7 +49,7 @@ function makeFixture({
 
 async function mountPipeline(t, { factoryTask, graph }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -148,7 +148,7 @@ test('shared-задача с внешним стендом: «закрыть з�
   await close.trigger('click');
   await flushPromises();
   assert.deepEqual(posts, ['/api/tasks/90002/close']);
-  // Общий checkout кокпит не трогает — обещать удаление веток нельзя.
+  // Общий checkout GrigDesk не трогает — обещать удаление веток нельзя.
   assert.ok(dialogs.some((text) => /Общий checkout и его ветки не затрагиваются/.test(text)));
 });
 

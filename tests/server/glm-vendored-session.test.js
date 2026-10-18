@@ -50,7 +50,7 @@ async function fixture(t, loopbackOptions) {
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: GLM_SERVICE_KEY,
     },
     admission: [{ mode: 'api', compatibility: identity }],

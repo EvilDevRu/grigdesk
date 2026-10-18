@@ -678,7 +678,7 @@ test('A18b: повтор blocked recovery не меняет job revision и со
   assert.equal(await readFile(path.join(fixture.transaction, 'parked/marker.txt'), 'utf8'), 'old');
 });
 
-test('A15c: production layout plugins/.cockpit-install поддерживает install и recovery', async (t) => {
+test('A15c: production layout plugins/.grigdesk-install поддерживает install и recovery', async (t) => {
   const fixture = await createApplyFixture(t, { workInside: true });
 
   assert.equal((await applyIntent(fixture.intent, fixture.store, fixture.fs)).outcome, 'completed');

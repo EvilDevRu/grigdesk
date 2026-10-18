@@ -8,7 +8,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as waitFor } from 'node:timers/promises';
 
-import { probeCockpit } from '../../shared/runtime/cockpitReadiness.ts';
+import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { openServerLog, runVpnGate, spawnServer } from '../../desktop/src/serverProcess.ts';
 import { createServerSupervisor, decideStart } from '../../desktop/src/serverSupervisor.ts';
 import { freePort } from '../server/helpers/pluginBootFixture.js';
@@ -51,7 +51,7 @@ function supervisorFixture(options = {}) {
   const logs = [];
   const controller = new AbortController();
   const child = options.child ?? new FakeChild();
-  const probes = [...(options.probes ?? ['refused', 'refused', 'cockpit'])];
+  const probes = [...(options.probes ?? ['refused', 'refused', 'grigdesk'])];
   const units = [...(options.units ?? ['inactive'])];
   const gates = [...(options.gates ?? [{ code: 0, lastLine: '' }])];
   let now = 0;
@@ -124,7 +124,7 @@ function supervisorFixture(options = {}) {
 test('SV-01 таблица decideStart покрывает все строки Р7', () => {
   for (const state of ['active', 'activating', 'reloading', 'deactivating', 'inactive', 'failed', '',
     'unavailable', 'unknown']) {
-    assert.equal(decideStart('cockpit', state), 'connect');
+    assert.equal(decideStart('grigdesk', state), 'connect');
     assert.equal(decideStart('other', state), 'conflict');
     assert.equal(decideStart('no_answer', state), 'wait');
     assert.equal(decideStart('refused', state),
@@ -133,7 +133,7 @@ test('SV-01 таблица decideStart покрывает все строки Р
 });
 
 test('SV-02 готовый внешний сервер не требует runtime, ворот и spawn', async () => {
-  const fixture = supervisorFixture({ probes: ['cockpit'] });
+  const fixture = supervisorFixture({ probes: ['grigdesk'] });
 
   await fixture.run();
 
@@ -144,7 +144,7 @@ test('SV-02 готовый внешний сервер не требует runti
 
 test('SV-03 activating и refused ждут службу, затем подключаются к внешнему', async () => {
   const fixture = supervisorFixture({
-    probes: ['refused', 'cockpit'],
+    probes: ['refused', 'grigdesk'],
     units: ['activating'],
   });
 
@@ -201,7 +201,7 @@ test('SV-06 проблема runtime и несовпадение origin дают
 
 test('SV-07 отказ VPN ждёт пять секунд и повторяет проверку, срок сохраняет строку ворот', async () => {
   const fixture = supervisorFixture({
-    probes: ['refused', 'refused', 'refused', 'cockpit'],
+    probes: ['refused', 'refused', 'refused', 'grigdesk'],
     gates: [{ code: 1, lastLine: 'нет туннеля' }, { code: 0, lastLine: '' }],
   });
 
@@ -222,7 +222,7 @@ test('SV-07 отказ VPN ждёт пять секунд и повторяет 
 });
 
 test('SV-08 ручной сервер после ворот становится внешним без spawn', async () => {
-  const fixture = supervisorFixture({ probes: ['refused', 'cockpit'] });
+  const fixture = supervisorFixture({ probes: ['refused', 'grigdesk'] });
 
   await fixture.run();
 
@@ -242,7 +242,7 @@ test('SV-09 свой процесс вышел до готовности, фин
         child.exit(2);
       }
 
-      return index === 3 ? 'cockpit' : 'refused';
+      return index === 3 ? 'grigdesk' : 'refused';
     },
   });
 
@@ -320,7 +320,7 @@ test('SV-11 stop во время готовности гасит появивш�
 
   await entered.promise;
   await fixture.supervisor.stop();
-  ready.resolve('cockpit');
+  ready.resolve('grigdesk');
   await starting;
   assert.deepEqual(fixture.child.signals, ['SIGTERM']);
   assert.equal(fixture.supervisor.ownership, 'none');
@@ -382,7 +382,7 @@ test('SV-12 два stop ждут одно завершение и посылаю
   await first;
   assert.deepEqual(fixture.child.signals, ['SIGTERM']);
 
-  const external = supervisorFixture({ probes: ['cockpit'] });
+  const external = supervisorFixture({ probes: ['grigdesk'] });
 
   await external.run();
   await external.supervisor.stop();
@@ -434,7 +434,7 @@ test('SV-14 код 75 проходит новый конвейер и читае
   await fixture.run();
 
   const second = new FakeChild();
-  const probes = ['refused', 'refused', 'cockpit'];
+  const probes = ['refused', 'refused', 'grigdesk'];
   const newRuntime = {
     ...RUNTIME,
     env: { RELOADED: 'новые настройки' },
@@ -443,7 +443,7 @@ test('SV-14 код 75 проходит новый конвейер и читае
   fixture.adapters.probe = async () => {
     fixture.calls.push('probe');
 
-    return probes.shift() ?? 'cockpit';
+    return probes.shift() ?? 'grigdesk';
   };
   fixture.adapters.loadRuntime = async () => {
     fixture.calls.push('runtime');
@@ -508,7 +508,7 @@ test('SV-15 другой exit не перезапускает процесс, п
     assert.equal(fixture.supervisor.ownership, 'none');
     assert.equal(fixture.calls.filter((call) => call === 'spawn').length, 1);
 
-    fixture.adapters.probe = async () => 'cockpit';
+    fixture.adapters.probe = async () => 'grigdesk';
 
     await fixture.run();
     assert.equal(fixture.supervisor.ownership, 'external');
@@ -536,7 +536,7 @@ test('SV-15 close и error с pid сохраняют владение, error б�
 });
 
 test('SV-16 недоступный systemd позволяет использовать HTTP или запустить свой сервер', async () => {
-  for (const probes of [['cockpit'], ['refused', 'refused', 'cockpit']]) {
+  for (const probes of [['grigdesk'], ['refused', 'refused', 'grigdesk']]) {
     const fixture = supervisorFixture({
       probes,
       units: ['unavailable'],
@@ -551,7 +551,7 @@ test('SV-16 недоступный systemd позволяет использов
 test('SV-17 настоящий Node запускается и останавливается, соседний сервер остаётся жив (нестабильный)', {
   timeout: 60_000,
 }, async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-supervisor-node-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-supervisor-node-'));
   const port = await freePort();
   const peer = createServer((_request, response) => {
     response.end('соседняя фикстура');
@@ -598,7 +598,7 @@ test('SV-17 настоящий Node запускается и останавли
     '  }));',
     '});',
     '',
-    "server.listen(Number(process.env.COCKPIT_PORT), '127.0.0.1');",
+    "server.listen(Number(process.env.GRIGDESK_PORT), '127.0.0.1');",
     "process.once('SIGTERM', () => {",
     '  server.close(() => process.exit(0));',
     '});',
@@ -614,14 +614,14 @@ test('SV-17 настоящий Node запускается и останавли
     origin: `http://127.0.0.1:${port}`,
     env: {
       PATH: '/usr/bin:/bin',
-      COCKPIT_PORT: String(port),
+      GRIGDESK_PORT: String(port),
     },
     logPath: path.join(root, 'server.log'),
   };
 
   supervisor = createServerSupervisor({
     loadRuntime: async () => ({ runtime }),
-    probe: (signal) => probeCockpit(runtime.origin, {
+    probe: (signal) => probeGrigDesk(runtime.origin, {
       signal,
       timeoutMs: 500,
     }),
@@ -652,7 +652,7 @@ test('SV-17 настоящий Node запускается и останавли
   assert.equal(supervisor.ownership, 'owned');
   await supervisor.stop();
   assert.deepEqual(await exited, [0, null]);
-  assert.equal(await probeCockpit(runtime.origin), 'refused');
+  assert.equal(await probeGrigDesk(runtime.origin), 'refused');
 
   const response = await fetch(`http://127.0.0.1:${peer.address().port}`, {
     signal: AbortSignal.timeout(1000),
@@ -665,7 +665,7 @@ test('SV-17 настоящий Node запускается и останавли
 test('SV-18 строка ворот со своим префиксом «VPN-ворота:» не дублирует его в причине ожидания', async () => {
   const reasons = [];
   const fixture = supervisorFixture({
-    probes: ['refused', 'refused', 'refused', 'cockpit'],
+    probes: ['refused', 'refused', 'refused', 'grigdesk'],
     gates: [
       {
         code: 1,

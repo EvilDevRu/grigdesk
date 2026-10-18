@@ -1,5 +1,7 @@
+import { LEGACY_VALUES } from '../runtime/legacyBrand.ts';
+
 export type ChatWorkdir =
-  | { kind: 'cockpit'; }
+  | { kind: 'grigdesk'; }
   | {
     kind: 'project';
     projectId: string;
@@ -14,11 +16,11 @@ export interface WorkdirCapability {
 
 /**
  * Общая проверка формы не обращается к файловой системе.
- * Только отсутствие поля означает старый чат; явный мусор не превращается в cockpit.
+ * Только отсутствие поля означает старый чат; явный мусор не превращается в grigdesk.
  */
 export function normalizeChatWorkdir(value: unknown): ChatWorkdir | null {
   if (value === undefined) {
-    return { kind: 'cockpit' };
+    return { kind: 'grigdesk' };
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -27,8 +29,9 @@ export function normalizeChatWorkdir(value: unknown): ChatWorkdir | null {
   const source = value as Record<string, unknown>;
   const keys = Object.keys(source);
 
-  if (source.kind === 'cockpit' && keys.length === 1) {
-    return { kind: 'cockpit' };
+  // Чаты до второго этапа переименования хранят прежнее значение; оно читается как текущее.
+  if ((source.kind === 'grigdesk' || source.kind === LEGACY_VALUES.workdirKind) && keys.length === 1) {
+    return { kind: 'grigdesk' };
   }
   if (source.kind === 'path' && keys.every((key) => ['kind', 'path'].includes(key))) {
     const input = typeof source.path === 'string' ? source.path.trim() : '';
@@ -56,7 +59,7 @@ export function normalizeChatWorkdir(value: unknown): ChatWorkdir | null {
 
 /**
  * Сравниваем нормализованный выбор без зависимости от порядка полей входного JSON.
- * Отсутствующее поле старого чата эквивалентно явному выбору Кокпита.
+ * Отсутствующее поле старого чата эквивалентно явному выбору GrigDesk.
  */
 export function sameChatWorkdir(left: unknown, right: unknown): boolean {
   return JSON.stringify(normalizeChatWorkdir(left)) === JSON.stringify(normalizeChatWorkdir(right));
@@ -76,7 +79,7 @@ export function chatWorkdirLabel(value: unknown): string {
     return workdir.repoKey ? `${workdir.projectId} · ${workdir.repoKey}` : workdir.projectId;
   }
 
-  return workdir ? 'Кокпит' : 'Папка не определена';
+  return workdir ? 'GrigDesk' : 'Папка не определена';
 }
 
 /**

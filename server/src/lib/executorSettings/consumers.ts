@@ -115,8 +115,8 @@ export function mergeNativeSettingsConsumers(
     ...chat,
     ownership,
     scope: pipelineSupported
-      ? { id: 'cockpit-chats-and-pipelines', label: 'Для чатов и конвейеров Cockpit' }
-      : { id: 'cockpit-chats', label: 'Для чатов Cockpit' },
+      ? { id: 'grigdesk-chats-and-pipelines', label: 'Для чатов и конвейеров GrigDesk' }
+      : { id: 'grigdesk-chats', label: 'Для чатов GrigDesk' },
     normalizedFields: fields,
     consumerFields: { chat: web, ...(pipeline ? { pipeline: acp } : {}) },
     generation: settingsFingerprint([chat.generation, pipeline?.generation ?? null, fields]),

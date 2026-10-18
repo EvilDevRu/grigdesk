@@ -15,7 +15,7 @@ const execute = promisify(execFile);
  * Очистка не затрагивает состояние живого сервера.
  */
 export async function temporary(t) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'cockpit-relay-test-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'grigdesk-relay-test-'));
 
   t.after(() =>
     rm(directory, {

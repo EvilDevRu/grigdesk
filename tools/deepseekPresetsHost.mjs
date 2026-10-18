@@ -3,7 +3,7 @@
 
 import AgentPresets from '@deepseek-ai/dsh-agent-presets';
 
-export default class CockpitAgentPresets extends AgentPresets {
+export default class GrigDeskAgentPresets extends AgentPresets {
   /**
    * Roster захватывает harnessBase из своего контекста один раз при создании.
    * Уточняем только этот контекст, сохраняя исходные shipped/user roots и lifecycle.

@@ -1,5 +1,5 @@
-// Продуктовый канон — то, что реально уезжает в поставку: документы docs/cockpit/guide/
-// и дополнительные runtime-контракты. Папки областей docs/cockpit/<область>/ сюда НЕ входят:
+// Продуктовый канон — то, что реально уезжает в поставку: документы docs/grigdesk/guide/
+// и дополнительные runtime-контракты. Папки областей docs/grigdesk/<область>/ сюда НЕ входят:
 // в них живёт и история снятых решений (удалённые панели, прежние API), которую сторожа
 // «устаревшее не вернулось» читали бы как возврат. Их целостность проверяет
 // documentation-structure.test.mts.
@@ -7,7 +7,7 @@ import { readFile, readdir } from 'node:fs/promises';
 
 const ROOT = new URL('../../../', import.meta.url);
 
-const CANON_DIRS = ['docs/cockpit/reference/', 'docs/cockpit/guide/'];
+const CANON_DIRS = ['docs/grigdesk/reference/', 'docs/grigdesk/guide/'];
 
 async function readMarkdown(relativeDir) {
   const dir = new URL(relativeDir, ROOT);

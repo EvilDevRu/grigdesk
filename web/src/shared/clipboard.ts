@@ -1,5 +1,5 @@
 /**
- * HTTP-доступ к Cockpit не даёт secure Clipboard API. Единственный невидимый
+ * HTTP-доступ к GrigDesk не даёт secure Clipboard API. Единственный невидимый
  * textarea fallback живёт здесь, чтобы product-компоненты не создавали DOM-контролы.
  */
 function copyWithLegacyTextarea(text: string): boolean {

@@ -19,7 +19,7 @@ export function desktopRuntimePath(input: { env: EnvMap; home: string }): string
   const dataHome = input.env.XDG_DATA_HOME;
   const base = dataHome?.startsWith('/') ? dataHome : `${input.home}/.local/share`;
 
-  return `${base}/cockpit/desktop/runtime.json`;
+  return `${base}/grigdesk/desktop/runtime.json`;
 }
 
 /**
@@ -85,7 +85,7 @@ export function effectiveValue(env: EnvMap, file: Record<string, string>, key: s
  * Отсутствующее или нечисловое значение выбирает стандартный порт.
  */
 export function effectivePort(env: EnvMap, file: Record<string, string>): number {
-  return Number(effectiveValue(env, file, 'COCKPIT_PORT')) || 8140;
+  return Number(effectiveValue(env, file, 'GRIGDESK_PORT')) || 8140;
 }
 
 /**
@@ -93,7 +93,7 @@ export function effectivePort(env: EnvMap, file: Record<string, string>): number
  * Даже короткий настроенный срок не уменьшает ожидание ниже 45 секунд.
  */
 export function stopGraceMs(env: EnvMap, file: Record<string, string>): number {
-  const configured = Number(effectiveValue(env, file, 'COCKPIT_SHUTDOWN_TIMEOUT_MS')) || 30_000;
+  const configured = Number(effectiveValue(env, file, 'GRIGDESK_SHUTDOWN_TIMEOUT_MS')) || 30_000;
 
   return Math.max(45_000, configured + 15_000);
 }

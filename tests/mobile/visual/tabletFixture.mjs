@@ -10,7 +10,7 @@ export function tabletFixture(options) {
     color: '#10a37f',
   };
   const titles = [
-    'Дизайн мобильного Кокпита',
+    'Дизайн мобильного GrigDesk',
     'Проверка перед выпуском',
     'Обновление документации',
     'План работ на неделю',
@@ -161,7 +161,7 @@ export function controlsFixture(data) {
   };
   data['workspace-preview'] = {
     directory: '/workspace/sample',
-    previousDirectory: '/workspace/cockpit',
+    previousDirectory: '/workspace/grigdesk',
     transfer: 'reseed',
     summaryAvailable: true,
     warnings: [],
@@ -170,8 +170,8 @@ export function controlsFixture(data) {
   data.chat.chat.modelRef = { provider: 'codex', model: 'gpt-6' };
   data.chat.chat.settings = {
     modelRef: data.chat.chat.modelRef,
-    workdir: { kind: 'cockpit' },
-    directory: '/workspace/cockpit',
+    workdir: { kind: 'grigdesk' },
+    directory: '/workspace/grigdesk',
     context: {
       tokens: 62000,
       window: 200000,

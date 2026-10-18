@@ -97,7 +97,7 @@ test('MC-19/20/21: текст Б24, onPipeline и закреплённый вы�
 
   const launch = (await app.inject('/api/mobile/v1/b24/tasks/102/launch-options')).json();
 
-  assert.equal(launch.options[1].disabledReason, 'Нужны параметры инструментации в Кокпите.');
+  assert.equal(launch.options[1].disabledReason, 'Нужны параметры инструментации в GrigDesk.');
 
   const bad = await mutation(app, '/api/mobile/v1/b24/tasks/102/launch', {
     optionId: 'forged',

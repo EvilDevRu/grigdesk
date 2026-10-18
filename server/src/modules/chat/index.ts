@@ -1,7 +1,7 @@
-// Модуль chat — интерактивное обсуждение с CLI-агентом прямо из кокпита.
+// Модуль chat — интерактивное обсуждение с CLI-агентом прямо из GrigDesk.
 // Два режима:
 //   • по задаче  — выбранный executor в worktree задачи, контекст через его sessionId;
-//   • без задачи — свободный вопрос в корне репозитория Cockpit.
+//   • без задачи — свободный вопрос в корне репозитория GrigDesk.
 // Интерактивные права реализованы Claude executor-ом через permission-prompt-tool
 // (lib/chat/permission-mcp.js): запрос показывается всплывашкой в браузере.
 import fp from 'fastify-plugin';
@@ -117,7 +117,7 @@ import {
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { RawData } from 'ws';
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 import type { FactoryStateAdapter } from '../../adapters/factoryState.ts';
 import type { DocumentReader } from '../../lib/documents/reader.ts';
 import type { SseBus } from '../../lib/fastifyDecorations.ts';
@@ -285,8 +285,8 @@ interface ChatExecutor {
   retryContract?: string;
   // Таблицу видов сбоя объявляет адаптер; отсутствие — работают общие признаки.
   turnFailureRules?: ExecutorAdapter['turnFailureRules'];
-  modes?: (config: CockpitConfig) => Promise<Array<{ id: string }> | null>;
-  commands?: (config: CockpitConfig) => Promise<Array<{ cmd: string; run?: string }>>;
+  modes?: (config: GrigDeskConfig) => Promise<Array<{ id: string }> | null>;
+  commands?: (config: GrigDeskConfig) => Promise<Array<{ cmd: string; run?: string }>>;
   run: NonNullable<ExecutorAdapter['run']>;
   sessionBinding?: ExecutorAdapter['sessionBinding'];
   session?: LiveExecutor['session'] & { mode?: string };
@@ -297,7 +297,7 @@ interface ChatExecutor {
 }
 
 interface ExecutorTurnOptions extends ExecutorRunInput {
-  config: CockpitConfig;
+  config: GrigDeskConfig;
   model: string;
   extraDirs?: string[];
   sessionId?: string | null;
@@ -314,7 +314,7 @@ interface ChatPrefs extends Record<string, unknown> {
 }
 
 interface ChatModuleOptions {
-  config: CockpitConfig;
+  config: GrigDeskConfig;
   factoryState: Pick<FactoryStateAdapter,
     'readRegistry' | 'readTrustedAttempt' | 'readEnv' | 'verifyTrustedEnvironment'>;
   claudeAuth?: Pick<ClaudeAuthStore, 'env'>;
@@ -325,7 +325,7 @@ interface ChatModuleOptions {
   dbBroker?: DbBroker;
   permissionQueue?: PermissionQueue;
   speechStreamStartTimeoutMs?: number;
-  modelsRegistry?: (config: CockpitConfig) => Promise<ModelRegistry>;
+  modelsRegistry?: (config: GrigDeskConfig) => Promise<ModelRegistry>;
   executorResolver?: (provider: string) => Promise<ExecutorAdapter | null>;
   taskExists?: (taskId: string) => Promise<boolean>;
   // Бюджеты слива на остановке: сколько ждать естественного конца хода и сколько —
@@ -459,9 +459,9 @@ const SHUTDOWN_CUT_REPLY = '⏹ Ход прерван перезапуском �
 const QUEUED_CUT_REPLY = 'Сервер перезапускается — сообщение не выполнено.'
   + ' Отправь его ещё раз, когда он вернётся.';
 // Итоги ходов, которые прошлый процесс принял, но не довёл до конца (падение без слива).
-const CRASH_RUNNING_REPLY = 'Ход прерван: сервер кокпита остановился посреди работы,'
+const CRASH_RUNNING_REPLY = 'Ход прерван: сервер GrigDesk остановился посреди работы,'
   + ' ответ и лента хода не сохранились.';
-const CRASH_QUEUED_REPLY = 'Сообщение не выполнено: сервер кокпита перезапустился до начала хода.'
+const CRASH_QUEUED_REPLY = 'Сообщение не выполнено: сервер GrigDesk перезапустился до начала хода.'
   + ' Отправь его ещё раз.';
 const SPEECH_STREAM_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SPEECH_STREAM_PUBLIC_ERRORS: Readonly<Record<string, string>> = Object.freeze({
@@ -504,7 +504,7 @@ function sameSpeechStreamAudio(value: unknown) {
     && value.frameSamples === SPEECH_STREAM_AUDIO.frameSamples;
 }
 
-/** WebSocket с cookie принимаем только со строгого origin самого Cockpit. */
+/** WebSocket с cookie принимаем только со строгого origin самого GrigDesk. */
 export function speechStreamOriginMatches(request: {
   headers?: Record<string, unknown>;
   host?: string;
@@ -517,7 +517,7 @@ export function speechStreamOriginMatches(request: {
     const origin = new URL(rawOrigin);
     const expected = new URL(`${request.protocol}://${host}`);
     // Header Origin не содержит path/query/credentials. Сравнение только `.origin`
-    // приняло бы искусственный `https://cockpit/evil`, что уже не является exact form.
+    // приняло бы искусственный `https://grigdesk/evil`, что уже не является exact form.
     return rawOrigin === origin.origin && origin.origin === expected.origin;
   } catch {
     return false;
@@ -1081,7 +1081,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
       workspace = {
         taskId: record.taskId || null,
-        workdir: normalizeChatWorkdir(record.workdir) || { kind: 'cockpit' },
+        workdir: normalizeChatWorkdir(record.workdir) || { kind: 'grigdesk' },
         provider: normalizeModelRef(record.modelRef)?.provider || '',
         cwd,
         extraDirs: live?.extraDirs || [],
@@ -1226,7 +1226,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       const record = body.chatKey ? await history.readOne(body.chatKey) : {
         modelRef: body.modelRef,
         taskId: null,
-        workdir: { kind: 'cockpit' },
+        workdir: { kind: 'grigdesk' },
       };
 
       if (!record) {
@@ -1854,7 +1854,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   }
 
   /**
-   * Шапка чата для висящего спроса: название и задача. Своего стора у окна кокпита
+   * Шапка чата для висящего спроса: название и задача. Своего стора у окна GrigDesk
    * достаточно, но у ВНЕШНИХ потребителей (телеграм-пульт) истории нет вовсе, и вопрос
    * «Что именно выпиливаем?» без имени чата не отвечаем — их у человека несколько.
    * Кэш короткий: `/api/chat/waiting` зовёт каждое окно на каждый `hello`, а чтение
@@ -1952,7 +1952,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       .filter((a) => a && (a.selected?.length || a.text))
       .map((a) => `• ${a.header || a.question || 'ответ'}: ${[...(a.selected || []), a.text].filter(Boolean).join(', ')}`);
     if (!lines.length) return 'Пользователь не стал отвечать на вопрос. Действуй по своему усмотрению или спроси иначе.';
-    return `Ответ пользователя из кокпита:\n${lines.join('\n')}\nПродолжай с учётом этого ответа, повторно спрашивать не нужно.`;
+    return `Ответ пользователя из GrigDesk:\n${lines.join('\n')}\nПродолжай с учётом этого ответа, повторно спрашивать не нужно.`;
   }
 
   /**
@@ -1961,10 +1961,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * доработкой по замечаниям и гаданием). Канал тот же, что у ответов на вопросы.
    */
   function denyText(tool: string | undefined, comment: string) {
-    if (!comment) return 'Пользователь отклонил действие в кокпите';
+    if (!comment) return 'Пользователь отклонил действие в GrigDesk';
     return tool === 'ExitPlanMode'
       ? `Пользователь отправил план на доработку. Что изменить: ${comment}`
-      : `Пользователь отклонил действие в кокпите. Пояснение: ${comment}`;
+      : `Пользователь отклонил действие в GrigDesk. Пояснение: ${comment}`;
   }
 
   // Сюда стучится permission-mcp.js (child-процесс claude). Держим запрос открытым,
@@ -2066,7 +2066,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     } else if (p.direct) {
       // `remember` («разрешать до конца сессии») и `choice` (кнопка плана) — часть
       // ответа КАНАЛУ: у ACP это выбор конкретного optionId (allow_always, plan_*),
-      // а не отдельная политика кокпита. Исполнитель, который таких вариантов не
+      // а не отдельная политика GrigDesk. Исполнитель, который таких вариантов не
       // предлагает, поля просто игнорирует.
       p.resolve({
         allow: body.allow === true,
@@ -3200,7 +3200,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
 
-    // Provider session принадлежит не браузеру, а sidecar-у Cockpit. Все медленные части
+    // Provider session принадлежит не браузеру, а sidecar-у GrigDesk. Все медленные части
     // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
     let providerBinding: BindingRecord | null = null;
     let providerIdentity: (BindingIdentity & { chatKey: string }) | null = null;
@@ -3285,7 +3285,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // наш MCP-инструмент → всплывашка в браузере.
     const mcpConfig = {
       mcpServers: {
-        'cockpit-perm': {
+        'grigdesk-perm': {
           command: process.execPath,
           args: [PERM_MCP_PATH],
           // Сколько CLI готов ждать ответа на вызов инструмента. Без этого он обрывает
@@ -3293,14 +3293,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           // а агент уже пошёл дальше. Дублируется переменной MCP_TOOL_TIMEOUT ниже.
           timeout: PERM_WAIT_MS,
           env: {
-            COCKPIT_PERM_URL: `http://127.0.0.1:${config.port}/api/chat/permission-request`,
-            COCKPIT_CHAT_KEY: chatKey || '',
-            // Секрет процесса: у дочернего claude нет сессионной cookie, а вход в кокпит
+            GRIGDESK_PERM_URL: `http://127.0.0.1:${config.port}/api/chat/permission-request`,
+            GRIGDESK_CHAT_KEY: chatKey || '',
+            // Секрет процесса: у дочернего claude нет сессионной cookie, а вход в GrigDesk
             // закрывает весь /api — без этого заголовка разрешения и вопросы упирались бы в 401.
-            COCKPIT_INTERNAL: internalToken || '',
+            GRIGDESK_INTERNAL: internalToken || '',
           },
         },
-        ...(workIpc ? { 'cockpit-work': workIpc.mcpServer } : {}),
+        ...(workIpc ? { 'grigdesk-work': workIpc.mcpServer } : {}),
       },
     };
 
@@ -3523,8 +3523,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         pluginDocsDirs: pluginDocs.map((entry) => entry.dir),
         permissionMode,
         mcpConfig,
-        mcpServers: workIpc ? [{ name: 'cockpit-work', ...workIpc.mcpServer }] : [],
-        permissionPromptTool: 'mcp__cockpit-perm__approve',
+        mcpServers: workIpc ? [{ name: 'grigdesk-work', ...workIpc.mcpServer }] : [],
+        permissionPromptTool: 'mcp__grigdesk-perm__approve',
         workTools: workToolsValue,
         workToolScopeKey,
         providerSettings,
@@ -3597,7 +3597,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
             });
           }
         },
-        // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (например, Kimi по
+        // Мост всплывашки для исполнителей, которые спрашивают GrigDesk напрямую (например, Kimi по
         // ACP). Выдаётся всем: не поддерживающий
         // его executor просто не вызовет колбэк, а вендорной ветки в ядре не остаётся.
         // Канал ввода в активный ход. Порт принадлежит конкретному запуску: чужой runId
@@ -3663,7 +3663,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           await assistantPublisher.publish(runId, String(chatKey || ''), { ...event, text });
         },
         onPermission: (presentation) => {
-          // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
+          // режим GrigDesk «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
           // в default), а на безопасные запросы отвечает общий классификатор.
           // Деструктивные и неизвестные формы по-прежнему уходят человеку во всплывашку.
           if (permissionMode === 'auto' && presentation?.requiresExplicitUser !== true) {
@@ -3765,7 +3765,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (!slash && mayRetryEmptyRun(executor, out, { compact: !!plan })) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         // Повтор человек видит вторым «стартом» в ленте, и без объяснения это читается
-        // как дубль показа. Отметку ставит кокпит: у исполнителя события на это нет, а
+        // как дубль показа. Отметку ставит GrigDesk: у исполнителя события на это нет, а
         // лента обязана объяснять собственные строки.
         const retryNote = {
           k: 'note',
@@ -3855,7 +3855,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         error.sessionReset = true;
         throw error;
       }
-      // Название — метаданные Cockpit, маркер из видимого ответа/истории уже удалён.
+      // Название — метаданные GrigDesk, маркер из видимого ответа/истории уже удалён.
       out = finishChatTitleHook(out, wantsTitle)!;
       // Итог сжатия. Наружу — короткая строка для ленты: сырой вывод тут либо пуст
       // (родной компакт), либо это сама выжимка — она не ответ агента человеку, а семя
@@ -4364,7 +4364,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (speechStreamOriginMatches(request)) return;
       return reply.code(403).send({
         error: 'speech_stream_origin_forbidden',
-        message: 'Origin live-распознавания не совпадает с Cockpit.',
+        message: 'Origin live-распознавания не совпадает с GrigDesk.',
       });
     },
   }, (socket, request) => {
@@ -4620,7 +4620,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: 'no_file' });
-    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-dictate-'));
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-dictate-'));
     const audioPath = path.join(workDir, safeName(data.filename || 'dictation.webm'));
     const abort = new AbortController();
     let timedOut = false;

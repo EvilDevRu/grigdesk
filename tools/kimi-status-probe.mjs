@@ -7,7 +7,7 @@ import path from 'node:path';
 
 import { createAcpClient, initializeKimiAcp } from '../server/src/lib/kimi/acpClient.ts';
 
-const KIMI_BIN = process.env.COCKPIT_KIMI_BIN || path.join(os.homedir(), '.kimi-code', 'bin', 'kimi');
+const KIMI_BIN = process.env.GRIGDESK_KIMI_BIN || path.join(os.homedir(), '.kimi-code', 'bin', 'kimi');
 
 function textOf(content) {
   if (!content) return '';

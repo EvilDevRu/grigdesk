@@ -103,7 +103,7 @@ test('chat/index в auto-режиме не применяет autoDecision и re
   }
   const createBroker = brokerModule.createSshBroker || brokerModule.default;
   assert.equal(typeof createBroker, 'function', 'broker.js обязан экспортировать фабрику');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-chat-auto-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-chat-auto-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   const source = path.join(root, 'source');

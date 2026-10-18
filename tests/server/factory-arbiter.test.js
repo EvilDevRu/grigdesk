@@ -23,6 +23,7 @@ import {
   stopIsArbitrable,
 } from '../../server/src/lib/factoryArbiter.ts';
 import { routeGotoArgs } from '../../server/src/lib/factoryRouteCli.ts';
+import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
 
 const TASK = '900022';
 const ATTEMPT = 'a_0123456789abcdef0123456789abcdef';
@@ -651,4 +652,21 @@ test('бюджет промпта берётся из лимита хода, а 
   assert.match(source, /const ARBITER_TURN_LIMIT_MIN = (\d+);/);
   assert.match(source, /ARBITER_TURN_LIMIT_MS = ARBITER_TURN_LIMIT_MIN \* 60 \* 1000/);
   assert.match(source, /budgetMin: ARBITER_TURN_LIMIT_MIN/);
+});
+
+test('возврат арбитра со старым actor тоже считается', async () => {
+  const root = await ledger([
+    failedCommit('skeptic', 'plan', [{ id: 'fresh', summary: 'до арбитража' }]),
+    {
+      kind: 'human-rewind',
+      node: 'plan',
+      action: { rewind: 'plan' },
+      actor: LEGACY_VALUES.arbiterActor,
+      reason: 'арбитр',
+    },
+    failedCommit('skeptic', 'plan', [{ id: 'latest', summary: 'после арбитража' }]),
+  ]);
+  const context = await readArbitrationContext({ controlDir: root, task: TASK, attempt: ATTEMPT });
+
+  assert.equal(context.arbitrations, 1, 'иначе старые возвраты не входят в лимит арбитража');
 });

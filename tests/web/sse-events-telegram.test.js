@@ -1,4 +1,4 @@
-// Реалтайм у кокпита односторонний: сервер шлёт что угодно (`fastify.sse.broadcast`
+// Реалтайм у GrigDesk односторонний: сервер шлёт что угодно (`fastify.sse.broadcast`
 // имён не фильтрует), а окно слушает ТОЛЬКО перечисленные в EVENT_NAMES — на каждое
 // имя вешается свой addEventListener. Забыл имя — событие уходит в пустоту молча,
 // без ошибки в консоли: страница просто «не обновляется сама».
@@ -30,7 +30,7 @@ test('общий inbox-changed и native telegram-status зарегистрир�
 
 test('единственный EventSource: своих в разделе «Телеграм» не заводим', async () => {
   // Лимит HTTP/1.1 — 6 соединений на хост, каждый лишний EventSource занимает одно
-  // навсегда (см. docs/cockpit/gotchas.md). Подписка идёт через sseSubscribe.
+  // навсегда (см. docs/grigdesk/gotchas.md). Подписка идёт через sseSubscribe.
   const src = await readFile(SSE_PATH, 'utf8');
   assert.equal((src.match(/new EventSource\(/g) || []).length, 1);
 });

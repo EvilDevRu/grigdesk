@@ -86,7 +86,7 @@ async function summary(deps: Deps, device: string, task: Payload) {
           text: text(
             recordOrEmpty(task.stall).reason ||
               recordOrEmpty(task.bootstrapStop).reason ||
-              (task.readOnly ? 'Попытка доступна только для чтения.' : 'Требуется обычный Кокпит.'),
+              (task.readOnly ? 'Попытка доступна только для чтения.' : 'Требуется обычный GrigDesk.'),
             4000,
           ),
           actionToken: null,
@@ -125,7 +125,7 @@ async function summary(deps: Deps, device: string, task: Payload) {
 }
 
 /**
- * Основание ворот берётся из того же документа, который показывает основной Кокпит.
+ * Основание ворот берётся из того же документа, который показывает основной GrigDesk.
  * Пустой/пропавший документ запрещает подтверждение вместо чтения выжимки.
  */
 async function basis(deps: Deps, id: string, identity: Payload) {

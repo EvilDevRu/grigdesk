@@ -64,7 +64,7 @@ test('M1: startInstall сразу running, затем durable ready latest, Git 
 
       const ready = await fixture.service.currentJob();
       const disk = JSON.parse(await readFile(fixture.statePath, 'utf8'));
-      const packageDir = path.join(fixture.pluginsDir, '.cockpit-install/jobs', ready.id, 'package');
+      const packageDir = path.join(fixture.pluginsDir, '.grigdesk-install/jobs', ready.id, 'package');
 
       assert.equal(ready.status, 'ready');
       assert.equal(ready.source.kind, kind);
@@ -121,7 +121,7 @@ test('M3: неизвестная версия даёт failed/version_not_found 
   assert.ok(job.finishedAt);
   assert.equal(state.completedJobs[job.id]?.status, 'failed');
   assert.equal(
-    await lstat(path.join(fixture.pluginsDir, '.cockpit-install/jobs', job.id)).catch(() => null), null,
+    await lstat(path.join(fixture.pluginsDir, '.grigdesk-install/jobs', job.id)).catch(() => null), null,
   );
 });
 
@@ -145,7 +145,7 @@ test('M5: manifest/tag mismatch сохраняет failed и удаляет ли
   await repo.release('1.0.0', { manifest: { version: '9.9.9' } });
 
   const fixture = await serviceFixture(t);
-  const unrelated = path.join(fixture.pluginsDir, '.cockpit-install/jobs/unknown-preserved');
+  const unrelated = path.join(fixture.pluginsDir, '.grigdesk-install/jobs/unknown-preserved');
 
   await fixture.service.store.mutate(() => {});
   await mkdir(unrelated, { recursive: true });
@@ -159,7 +159,7 @@ test('M5: manifest/tag mismatch сохраняет failed и удаляет ли
   assert.equal(job.stage, 'validating');
   assert.equal(job.error.code, 'version_mismatch');
   assert.equal(
-    await lstat(path.join(fixture.pluginsDir, '.cockpit-install/jobs', job.id)).catch(() => null), null,
+    await lstat(path.join(fixture.pluginsDir, '.grigdesk-install/jobs', job.id)).catch(() => null), null,
   );
   assert.equal(await readFile(path.join(unrelated, 'marker.txt'), 'utf8'), 'preserve');
 });
@@ -185,7 +185,7 @@ test('M6: каждое npmDir готовится ровно раз, failure бе
   await good.service.whenIdle();
 
   const ready = await good.service.currentJob();
-  const jobDir = path.join(good.pluginsDir, '.cockpit-install/jobs', ready.id, 'package');
+  const jobDir = path.join(good.pluginsDir, '.grigdesk-install/jobs', ready.id, 'package');
 
   assert.equal(ready.status, 'ready');
   assert.deepEqual(good.npmCalls, [jobDir, path.join(jobDir, 'browser')]);
@@ -245,7 +245,7 @@ test('M7: running/ready сохраняют единственный slot и toke
 
   assert.equal(cancelled.status, 'cancelled');
   assert.equal(
-    await lstat(path.join(fixture.pluginsDir, '.cockpit-install/jobs', ready.id)).catch(() => null), null,
+    await lstat(path.join(fixture.pluginsDir, '.grigdesk-install/jobs', ready.id)).catch(() => null), null,
   );
 
   const next = await fixture.service.startInstall({ url: 'mirror://fixture/demo' });
@@ -319,7 +319,7 @@ test('M8: cancel на npm barrier ждёт worker ACK и только затем
     assert.equal(unrelated.signal.aborted, false);
 
   
-  const jobRoot = path.join(fixture.pluginsDir, '.cockpit-install/jobs', running.id);
+  const jobRoot = path.join(fixture.pluginsDir, '.grigdesk-install/jobs', running.id);
 
     assert.equal((await lstat(jobRoot)).isDirectory(), true);
     assert.equal(JSON.parse(await readFile(fixture.statePath, 'utf8')).job.status, 'running');
@@ -335,7 +335,7 @@ test('M8: cancel на npm barrier ждёт worker ACK и только затем
   assert.equal(outcome.status, 'cancelled');
   assert.equal(outcome.error.code, 'cancelled');
 
-  const jobRoot = path.join(fixture.pluginsDir, '.cockpit-install/jobs', running.id);
+  const jobRoot = path.join(fixture.pluginsDir, '.grigdesk-install/jobs', running.id);
 
   assert.equal(await lstat(jobRoot).catch(() => null), null);
   assert.equal(

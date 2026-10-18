@@ -248,7 +248,7 @@ export class FactoryStateAdapter {
           instrumentationMode,
           instrumentationRequired: instrumentationMode === 'explicit',
           // Подпись из бандла: её читают человек в форме запуска и триаж в промпте.
-          // Своего словаря названий у кокпита нет — маршруты именует профиль.
+          // Своего словаря названий у GrigDesk нет — маршруты именует профиль.
           title: typeof route.title === 'string' ? route.title : '',
         }];
       }));

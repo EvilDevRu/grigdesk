@@ -22,7 +22,7 @@ export async function writeGlmEgressGuard(root: string): Promise<string> {
 
   await fs.mkdir(root, { recursive: true });
   await fs.writeFile(guard, [
-    'export const name = "cockpit-glm-egress-guard";',
+    'export const name = "grigdesk-glm-egress-guard";',
     'export function apply() {',
     '  const original = globalThis.fetch;',
     '  globalThis.fetch = (input, ...args) => {',

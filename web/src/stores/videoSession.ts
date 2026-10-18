@@ -28,14 +28,14 @@ import { usePluginsStore } from './plugins.js';
 export const CLIP_WINDOW_STEP = 15;
 export const CLIP_WINDOW_MAX = 60;
 
-const STORAGE_KEY = 'cockpit-video-session';
+const STORAGE_KEY = 'grigdesk-video-session';
 const SESSION_SCHEMA = 1;
 // Сеанс живёт столько же, сколько кадры и фрагменты записи на сервере: снимок,
 // переживший их уборку, показывал бы черновики с битыми вложениями.
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAVE_DEBOUNCE_MS = 500;
 const POLL_INTERVAL_MS = 2000;
-// Поллинг не имеет права молотить закрытый API вечно: после выхода из кокпита или
+// Поллинг не имеет права молотить закрытый API вечно: после выхода из GrigDesk или
 // падения сервера подряд идущие отказы гасят цикл, а причина остаётся на экране.
 const POLL_FAILURES_MAX = 5;
 
@@ -886,7 +886,7 @@ export const useVideoSessionStore = defineStore('video-session', {
       try {
         // Пустой выбор уезжает как null, а НЕ как 0: нулевой responsibleId портал
         // понимает буквально и отвечает ошибкой о несуществующем исполнителе
-        // (docs/cockpit/b24.md). Пропуск же означает «поставить на владельца сессии».
+        // (docs/grigdesk/b24.md). Пропуск же означает «поставить на владельца сессии».
         const created: unknown = await api.post('/api/b24/tasks', {
           title: draft.title.trim(),
           description: draft.description,

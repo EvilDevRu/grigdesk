@@ -48,7 +48,7 @@ async function fixture(t, {
   publishSupported = false, revisions = [], catalogInput = null, rebasePreview = null,
   editorGate = null,
 } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const { createPinia, setActivePinia } = await import(
     '../../web/node_modules/pinia/dist/pinia.mjs'

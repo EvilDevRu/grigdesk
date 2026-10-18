@@ -248,7 +248,7 @@ export class ContractError extends Error {
 }
 
 /**
- * Обходит закреплённую JSON Schema без привязки к внутренним DTO Кокпита.
+ * Обходит закреплённую JSON Schema без привязки к внутренним DTO GrigDesk.
  * Дополнительные поля допускаются, а обязательные поля, nullable и enum проверяются явно.
  */
 function validate(schema: Schema, value: unknown, field: string, depth = 0): void {

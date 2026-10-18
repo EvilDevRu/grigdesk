@@ -1,4 +1,4 @@
-// Нормализация Claude stream-json в нейтральную ленту хода Cockpit.
+// Нормализация Claude stream-json в нейтральную ленту хода GrigDesk.
 // Файл начинается с _, поэтому загрузчик executors не считает его отдельным ИИ.
 import {
   base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
@@ -127,7 +127,7 @@ export function toClaudeSteps(value: unknown): ChatStep[] {
     } else if (event.subtype === 'api_retry') {
       out.push({ k: 'note', level: 'warn', text: 'Повтор запроса к API (сеть)' });
     } else if (event.subtype === 'compact_boundary') {
-      // Сжатие посреди хода делает САМ CLI по своему порогу (кокпит задаёт его через
+      // Сжатие посреди хода делает САМ CLI по своему порогу (GrigDesk задаёт его через
       // CLAUDE_CODE_AUTO_COMPACT_WINDOW). Со стороны это выглядит как «агент забыл
       // разговор», поэтому в ленте оно называется вслух и с цифрой «было».
       const pre = Number(event.compactMetadata?.preTokens) || 0;

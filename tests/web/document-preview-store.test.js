@@ -8,7 +8,7 @@ test('общий viewer переключается между документо
   setActivePinia(createPinia());
   const preview = useDocumentPreviewStore();
 
-  preview.show('#/documents?source=cockpit&path=README.md');
+  preview.show('#/documents?source=grigdesk&path=README.md');
   assert.equal(preview.visible, true);
   assert.equal(preview.image, null);
 

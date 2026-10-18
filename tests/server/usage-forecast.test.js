@@ -447,7 +447,7 @@ test('модуль слушает тик providers, отдаёт снимок, �
   assert.deepEqual(snapshot.resets, []);
   assert.equal(bus.sent.filter((event) => event.name === 'usage-forecast').length, 4);
 
-  // Нажатие сброса в кокпите, через пять минут — окно с нуля: сброс «свой».
+  // Нажатие сброса в GrigDesk, через пять минут — окно с нуля: сброс «свой».
   clock = T0 + 40 * 60_000;
   const pressed = await app.inject({
     method: 'POST',

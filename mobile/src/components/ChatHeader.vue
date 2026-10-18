@@ -101,7 +101,7 @@ const folderLabel = computed(() => {
   return workdir?.kind === 'path' ? workdir.path.split('/').filter(Boolean).at(-1) || '/'
     : workdir?.kind === 'project'
       ? catalog.options?.projects.find((item) => item.id === workdir.projectId)?.title || workdir.projectId
-      : 'Кокпит';
+      : 'GrigDesk';
 });
 const status = computed(() => props.chat?.state === 'running' ? 'Агент работает'
   : props.chat?.state === 'queued' ? 'В очереди' : 'Готов к следующему ходу');

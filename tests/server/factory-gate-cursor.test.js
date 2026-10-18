@@ -88,7 +88,7 @@ async function writeContentAddressedJson(dir, prefix, value) {
 
 // Полный trusted ledger попытки; runtime.json пишется, только если cursor задан.
 async function fixture(t, { cursor = null } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-gate-cursor-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-gate-cursor-'));
   const stateDir = path.join(root, 'state');
   const controlDir = path.join(root, 'control');
   const routesDir = path.join(root, 'routes');

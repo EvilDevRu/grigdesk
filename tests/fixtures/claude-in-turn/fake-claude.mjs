@@ -8,13 +8,13 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, writeSync } from 'node:fs';
 
-const traceFile = process.env.COCKPIT_CLAUDE_FIXTURE_TRACE || '';
+const traceFile = process.env.GRIGDESK_CLAUDE_FIXTURE_TRACE || '';
 const argv = process.argv.slice(2);
 const SESSION_ID = 'session-claude-fixture';
-const steersExpected = Math.max(1, Number(process.env.COCKPIT_CLAUDE_FIXTURE_STEERS) || 1);
-const mode = process.env.COCKPIT_CLAUDE_FIXTURE_MODE || 'merge';
+const steersExpected = Math.max(1, Number(process.env.GRIGDESK_CLAUDE_FIXTURE_STEERS) || 1);
+const mode = process.env.GRIGDESK_CLAUDE_FIXTURE_MODE || 'merge';
 const replayEnabled = argv.includes('--replay-user-messages')
-  && process.env.COCKPIT_CLAUDE_FIXTURE_NO_LIFECYCLE !== '1';
+  && process.env.GRIGDESK_CLAUDE_FIXTURE_NO_LIFECYCLE !== '1';
 
 function trace(entry) {
   if (traceFile) {
@@ -265,14 +265,14 @@ function startHeldTool() {
  * Режимы завершения реплик сохраняют отдельные сценарии проверки блоков.
  */
 function handle(message, index) {
-  if (process.env.COCKPIT_CLAUDE_FIXTURE_BLOCKS === '1') {
+  if (process.env.GRIGDESK_CLAUDE_FIXTURE_BLOCKS === '1') {
     if (index === 1) {
       startAssistantBlocks();
     }
 
     return;
   }
-  if (process.env.COCKPIT_CLAUDE_FIXTURE_BLOCKS === 'held-tool') {
+  if (process.env.GRIGDESK_CLAUDE_FIXTURE_BLOCKS === 'held-tool') {
     if (index === 1) {
       startHeldTool();
     }
@@ -317,7 +317,7 @@ function handle(message, index) {
   }
 
   lifecycle(message, 'queued');
-  afterRelease('start',process.env.COCKPIT_CLAUDE_FIXTURE_HOLD_START === '1', () => {
+  afterRelease('start',process.env.GRIGDESK_CLAUDE_FIXTURE_HOLD_START === '1', () => {
     if (!stopped) {
       consume(message, index);
     }
@@ -363,7 +363,7 @@ function consume(message, index) {
     return;
   }
 
-  afterRelease('release', process.env.COCKPIT_CLAUDE_FIXTURE_HOLD_FINAL === '1', () => {
+  afterRelease('release', process.env.GRIGDESK_CLAUDE_FIXTURE_HOLD_FINAL === '1', () => {
     assistant('assistant-final', [{ type: 'text', text: 'Второй файл проверен.' }]);
     result(original, 'Второй файл проверен.', 1);
   });
@@ -525,7 +525,7 @@ process.stdin.on('data', (chunk) => {
 
         continue;
       }
-      if (process.env.COCKPIT_CLAUDE_FIXTURE_SETTINGS === '1' && message?.type === 'control_request') {
+      if (process.env.GRIGDESK_CLAUDE_FIXTURE_SETTINGS === '1' && message?.type === 'control_request') {
         trace({ direction: 'client', message });
 
         const settingsAt = argv.indexOf('--settings');

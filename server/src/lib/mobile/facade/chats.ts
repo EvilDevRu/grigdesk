@@ -245,7 +245,7 @@ export function registerChatRoutes(app: MobileApp, deps: FacadeDeps) {
 }
 
 /**
- * Имя и цвет берутся из адаптеров Кокпита без запуска probe, auth или discovery моделей.
+ * Имя и цвет берутся из адаптеров GrigDesk без запуска probe, auth или discovery моделей.
  * Мобильный интерфейс не угадывает исполнителя по строке названия модели.
  */
 async function chatProviders(): Promise<Map<string, ChatProvider>> {

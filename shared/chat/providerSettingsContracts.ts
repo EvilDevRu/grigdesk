@@ -75,7 +75,7 @@ export interface ProviderSettingsCatalog {
   providerId: string;
   state: 'ready' | 'partial' | 'stale' | 'unavailable';
   scope: {
-    id: 'cockpit-chats' | 'cockpit-chats-and-pipelines';
+    id: 'grigdesk-chats' | 'grigdesk-chats-and-pipelines';
     label: string;
   };
   source: SettingsSource;
@@ -348,7 +348,7 @@ export function decodeProviderSettingsCatalog(value: unknown): ProviderSettingsC
     providerId: text(catalog.providerId, 'providerId'),
     state: oneOf('ready', 'partial', 'stale', 'unavailable')(catalog.state, 'state'),
     scope: objectOf({
-      id: oneOf('cockpit-chats', 'cockpit-chats-and-pipelines'),
+      id: oneOf('grigdesk-chats', 'grigdesk-chats-and-pipelines'),
       label: text,
     })(catalog.scope, 'scope'),
     source: sourceOf(catalog.source, 'source'),

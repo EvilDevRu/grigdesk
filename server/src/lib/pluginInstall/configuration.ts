@@ -2,10 +2,10 @@ import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { CockpitConfig } from '../../config.ts';
-import { parseSemVer } from '../cockpitRelease.ts';
+import type { GrigDeskConfig } from '../../config.ts';
+import { parseSemVer } from '../grigDeskRelease.ts';
 
-export type PluginInstallConfiguration = Pick<CockpitConfig,
+export type PluginInstallConfiguration = Pick<GrigDeskConfig,
   'rootDir' | 'userPluginsDir' | 'userPluginsDataDir' | 'pluginInstallsStatePath'>;
 
 /**
@@ -15,7 +15,7 @@ export type PluginInstallConfiguration = Pick<CockpitConfig,
 export async function readPluginInstallConfiguration(config: PluginInstallConfiguration): Promise<{
   pluginsDir: string;
   statePath: string;
-  cockpitVersion: string;
+  grigDeskVersion: string;
 }> {
   const paths = [
     config.rootDir, config.userPluginsDir, config.userPluginsDataDir, config.pluginInstallsStatePath,
@@ -44,7 +44,7 @@ export async function readPluginInstallConfiguration(config: PluginInstallConfig
   await assertConfiguredPath(versionPath, true);
 
   const handle = await open(versionPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  let cockpitVersion: string;
+  let grigDeskVersion: string;
 
   try {
     const info = await handle.stat();
@@ -56,10 +56,10 @@ export async function readPluginInstallConfiguration(config: PluginInstallConfig
     const buffer = Buffer.alloc(4097);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 
-    cockpitVersion = buffer.subarray(0, bytesRead).toString('utf8').trim();
+    grigDeskVersion = buffer.subarray(0, bytesRead).toString('utf8').trim();
 
-    if (bytesRead > 4096 || !parseSemVer(cockpitVersion)) {
-      throw new TypeError('VERSION содержит некорректную версию Cockpit.');
+    if (bytesRead > 4096 || !parseSemVer(grigDeskVersion)) {
+      throw new TypeError('VERSION содержит некорректную версию GrigDesk.');
     }
   } finally {
     await handle.close();
@@ -68,7 +68,7 @@ export async function readPluginInstallConfiguration(config: PluginInstallConfig
   return {
     pluginsDir,
     statePath,
-    cockpitVersion,
+    grigDeskVersion,
   };
 }
 

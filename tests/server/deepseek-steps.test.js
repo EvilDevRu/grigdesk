@@ -49,7 +49,7 @@ test('таблица tool names даёт канонические шаги и о
     ['edit', { file_path: 'src/c.ts', old_string: 'a', new_string: 'b' }, 'Edit'],
     ['grep', { pattern: 'needle' }, 'Grep'],
     ['glob', { pattern: '**/*.ts' }, 'Glob'],
-    ['mcp__cockpit-work__supervised_ssh', { action: 'list' }, 'mcp__cockpit-work__supervised_ssh'],
+    ['mcp__grigdesk-work__supervised_ssh', { action: 'list' }, 'mcp__grigdesk-work__supervised_ssh'],
     ['future_tool', {}, 'future_tool'],
   ];
   const steps = calls.flatMap(([title, rawInput], index) => normalize({
@@ -132,7 +132,7 @@ test('MCP и прочие инструменты DSH: заголовок — а�
   const mcp = firstTool(createDeepSeekStepNormalizer(), {
     sessionUpdate: 'tool_call',
     toolCallId: 'm1',
-    title: 'mcp__cockpit-work__repo_history',
+    title: 'mcp__grigdesk-work__repo_history',
     rawInput: { path: 'src/a.ts' },
   });
   const bare = firstTool(createDeepSeekStepNormalizer(), {
@@ -149,7 +149,7 @@ test('MCP и прочие инструменты DSH: заголовок — а�
     rawInput: { goal: long },
   });
 
-  assert.deepEqual([mcp.name, mcp.title], ['mcp__cockpit-work__repo_history', '{"path":"src/a.ts"}']);
+  assert.deepEqual([mcp.name, mcp.title], ['mcp__grigdesk-work__repo_history', '{"path":"src/a.ts"}']);
   assert.equal('preview' in mcp, false, 'короткие аргументы целиком видны в заголовке');
   assert.deepEqual([bare.name, bare.title], ['get_goal', '']);
   assert.ok(wide.title.length <= 201, 'заголовок обрезан');

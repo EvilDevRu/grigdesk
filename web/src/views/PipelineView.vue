@@ -1189,26 +1189,26 @@ onUnmounted(() => {
 });
 
 // Тумблеры (переживают перезагрузку — как в старом дашборде).
-const compact = ref(localStorage.getItem('cockpit-compact') === '1');
-const loopsOn = ref(localStorage.getItem('cockpit-loops') === '1');
+const compact = ref(localStorage.getItem('grigdesk-compact') === '1');
+const loopsOn = ref(localStorage.getItem('grigdesk-loops') === '1');
 function toggleCompact(value) {
   compact.value = value;
-  localStorage.setItem('cockpit-compact', value ? '1' : '0');
+  localStorage.setItem('grigdesk-compact', value ? '1' : '0');
 }
 function toggleLoops(value) {
   loopsOn.value = value;
-  localStorage.setItem('cockpit-loops', value ? '1' : '0');
+  localStorage.setItem('grigdesk-loops', value ? '1' : '0');
 }
 
 // Две независимые оси фильтра: проект отвечает «где», состояние — «что требует внимания».
 // Обе настройки локальны устройству, как компактный режим страницы.
-const savedProject = localStorage.getItem('cockpit-pipeline-project')
-  || localStorage.getItem('cockpit-project')
+const savedProject = localStorage.getItem('grigdesk-pipeline-project')
+  || localStorage.getItem('grigdesk-project')
   || 'all';
 const activeProject = ref(savedProject);
 function setProject(project) {
   activeProject.value = project;
-  localStorage.setItem('cockpit-pipeline-project', project);
+  localStorage.setItem('grigdesk-pipeline-project', project);
 }
 const projects = computed(() => [...new Set(tasks.value.map((t) => t.profile).filter(Boolean))]);
 const projectCounts = computed(() => {
@@ -1351,11 +1351,11 @@ const projectTasks = computed(() => (activeProject.value === 'all'
   : tasks.value.filter((task) => task.profile === activeProject.value)));
 
 const STATUS_IDS = new Set(['all', 'running', 'waiting', 'error', 'inactive']);
-const savedStatus = localStorage.getItem('cockpit-pipeline-status') || 'all';
+const savedStatus = localStorage.getItem('grigdesk-pipeline-status') || 'all';
 const activeStatus = ref(STATUS_IDS.has(savedStatus) ? savedStatus : 'all');
 function setStatus(status) {
   activeStatus.value = STATUS_IDS.has(status) ? status : 'all';
-  localStorage.setItem('cockpit-pipeline-status', activeStatus.value);
+  localStorage.setItem('grigdesk-pipeline-status', activeStatus.value);
 }
 
 // Строим ту же взаимоисключающую сводку, что чип навигации и popover топбара:
@@ -1534,12 +1534,12 @@ watch(tasks, (list) => {
 });
 
 // По-карточное сворачивание (запоминается). Свёрнута, если глобальный compact ИЛИ отмечена.
-const collapsedSet = ref(new Set(JSON.parse(localStorage.getItem('cockpit-cards-collapsed') || '[]')));
+const collapsedSet = ref(new Set(JSON.parse(localStorage.getItem('grigdesk-cards-collapsed') || '[]')));
 function toggleCard(task) {
   const s = new Set(collapsedSet.value);
   s.has(task) ? s.delete(task) : s.add(task);
   collapsedSet.value = s;
-  localStorage.setItem('cockpit-cards-collapsed', JSON.stringify([...s]));
+  localStorage.setItem('grigdesk-cards-collapsed', JSON.stringify([...s]));
 }
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
 
@@ -1991,11 +1991,11 @@ async function sandboxDown(task) {
   )) return;
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
   try { await api.post(`/api/tasks/${task}/sandbox/down`); await load(); }
-  catch (e) { alertDialog(e.status === 501 ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.' : `Ошибка: ${e.message}`); }
+  catch (e) { alertDialog(e.status === 501 ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.' : `Ошибка: ${e.message}`); }
   finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
-// Ручная архивация нужна задаче, стенд которой кокпит не сносит: его либо уже нет
+// Ручная архивация нужна задаче, стенд которой GrigDesk не сносит: его либо уже нет
 // (подъём оборвался до выдачи порта), либо он не наш (shared checkout). Там, где стенд
 // наш, прогон архивирует сам «снести стенд».
 async function closeTask(t) {
@@ -2014,7 +2014,7 @@ async function closeTask(t) {
       + 'запускать заново.\n\n'
     : '';
 
-  // Про ветки говорим только там, где кокпит их правда трогает: в shared-режиме
+  // Про ветки говорим только там, где GrigDesk их правда трогает: в shared-режиме
   // основное рабочее дерево не наше, и никакой branch lifecycle к нему не применяется.
   const branchNote = canDestroySandbox(t)
     ? ' Пустая ветка будет удалена (ветка с коммитами останется).'
@@ -2055,7 +2055,7 @@ async function sandboxRetry(task) {
     else if (r.note) alertDialog(r.note);
   } catch (e) {
     alertDialog(e.status === 501
-      ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
       : `Не удалось перезапустить: ${e.message}`);
   } finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
@@ -2313,7 +2313,7 @@ function canRetrySandbox(t) {
 function canDestroySandbox(t) {
   return !t.readOnly && t.workspaceMode !== 'shared';
 }
-// «Закрыть задачу» = убрать прогон с экрана в архив. Разрешено, когда кокпиту нечего
+// «Закрыть задачу» = убрать прогон с экрана в архив. Разрешено, когда GrigDesk нечего
 // сносить: стенда нет ЛИБО стенд не его. Прежнее условие смотрело только на порт фронта
 // и молча означало «есть порт = есть НАША песочница, закрывать через снос стенда». В
 // shared-режиме порт есть всегда (стенд общий, живёт вне задачи и переживает её), а

@@ -4,7 +4,7 @@
       <div class="native-settings__intro">
         <h4>Дополнительные настройки</h4>
         <p class="native-settings__scope">
-          {{ state.catalog?.scope.label || 'Для чатов Cockpit' }} · со следующего запуска
+          {{ state.catalog?.scope.label || 'Для чатов GrigDesk' }} · со следующего запуска
         </p>
       </div>
       <UiButton

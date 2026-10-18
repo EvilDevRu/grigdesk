@@ -1367,7 +1367,7 @@ export async function fetchRemote(cwd: string): Promise<CodeFetchResponse> {
   } catch {
     throw new CodeGitError(
       'fetch_failed',
-      'Нужен доступ к remote: ключ или credential helper на машине кокпита.',
+      'Нужен доступ к remote: ключ или credential helper на машине GrigDesk.',
     );
   }
 

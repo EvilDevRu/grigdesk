@@ -11,7 +11,7 @@
                 {{ initial(link.state?.brainName || 'К') }}
               </span>
               <div class="settings-name">
-                <strong>{{ link.state?.brainName || 'Кокпит' }}</strong>
+                <strong>{{ link.state?.brainName || 'GrigDesk' }}</strong>
                 <span class="mobile-muted">{{ link.state?.deviceName }}</span>
               </div>
             </div>
@@ -147,7 +147,7 @@ function operationLabel(operation: OperationIntent) {
     workspace: 'Задача и папка чата',
     preview: 'Предпросмотр папки чата',
     read: 'Отметка прочтения чата',
-  })[action] || 'Действие в Кокпите';
+  })[action] || 'Действие в GrigDesk';
 }
 
 /**
@@ -197,7 +197,7 @@ async function verify(operation: OperationIntent) {
     operationNotice.value =
       result.state === 'done'
         ? 'Результат получен. Проверьте актуальное состояние в соответствующем разделе.'
-        : 'Результат пока неизвестен. Проверьте состояние в кокпите.';
+        : 'Результат пока неизвестен. Проверьте состояние в GrigDesk.';
 
     if (result.state === 'done') {
       await link.bridge!.removeOutbox({ idempotencyKey: operation.idempotencyKey });

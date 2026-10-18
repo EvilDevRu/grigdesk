@@ -161,12 +161,13 @@ test('внешний путь и проектный MCP требуют чело�
   assert.equal(mcp.presentation.input.kind, 'mcp');
 });
 
-test('cockpit-work одобряется без человека только по точному имени из инвентаря', () => {
+test('grigdesk-work одобряется без человека только по точному имени из инвентаря', () => {
   const guard = createGlmTurnGuard({ workTools: ['repo_history'], waitMs: 0 });
 
-  assert.equal(guard.autoApprove('mcp__cockpit-work__repo_history'), true);
+  assert.equal(guard.autoApprove('mcp__grigdesk-work__repo_history'), true);
 
-  for (const name of ['mcp__cockpit-work__repo_historyx', 'mcp__cockpit-work__other', 'mcp__cockpit-work__',
+  for (const name of [
+    'mcp__grigdesk-work__repo_historyx', 'mcp__grigdesk-work__other', 'mcp__grigdesk-work__',
     'repo_history', 'mcp__fixture__repo_history']) {
     assert.equal(guard.autoApprove(name), false, name);
   }

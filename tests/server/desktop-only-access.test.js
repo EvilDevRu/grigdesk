@@ -19,8 +19,8 @@ const windowKey = 'DESKTOP_ONLY_WINDOW_KEY_MARKER'.padEnd(43, '_');
 const SHELL_MARKER = 'SPA_SHELL_MARKER_UNIQUE';
 const ASSET_MARKER = 'SPA_ASSET_MARKER_UNIQUE';
 const SHOT_MARKER = 'SHOT_MARKER_UNIQUE';
-const DENIED_TITLE = 'Кокпит открывается в приложении';
-const legacyCookie = 'cockpit_sid=legacy-session-marker';
+const DENIED_TITLE = 'GrigDesk открывается в приложении';
+const legacyCookie = 'grigdesk_sid=legacy-session-marker';
 
 /**
  * Настоящие auth и static плагины работают на собственной сборке интерфейса.
@@ -28,7 +28,7 @@ const legacyCookie = 'cockpit_sid=legacy-session-marker';
  * что приложение действительно не отдано.
  */
 async function accessFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-desktop-only-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-desktop-only-'));
   const webDist = path.join(root, 'web-dist');
   const pluginWeb = path.join(root, 'plugin-web');
   const stateDir = path.join(root, 'state');
@@ -96,7 +96,7 @@ async function accessFixture(t) {
     remoteAddress: '127.0.0.1',
     headers: {
       host: new URL(origin).host,
-      'x-cockpit-window-key': windowKey,
+      'x-grigdesk-window-key': windowKey,
     },
   });
 
@@ -207,7 +207,7 @@ test('DO-02: анонимная навигация получает коротк
   assert.match(asset.headers['content-type'], /application\/json/u);
   assert.deepEqual(asset.json(), {
     error: 'unauthorized',
-    message: 'Требуется вход в кокпит.',
+    message: 'Требуется вход в GrigDesk.',
   });
 
   const electron = await fixture.app.inject({
@@ -215,7 +215,7 @@ test('DO-02: анонимная навигация получает коротк
     url: '/',
     headers: {
       accept: 'text/html',
-      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) CockpitWindow/main Electron/44.7.0',
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) GrigDeskWindow/main Electron/44.7.0',
     },
   });
 
@@ -308,8 +308,8 @@ test('DO-06: CLI и internal-токен открывают то же, что с�
   const fixture = await accessFixture(t);
 
   const tokens = [
-    { 'x-cockpit-token': 'test-cli-token' },
-    { 'x-cockpit-internal': 'test-internal-token' },
+    { 'x-grigdesk-token': 'test-cli-token' },
+    { 'x-grigdesk-internal': 'test-internal-token' },
   ];
 
   for (const token of tokens) {
@@ -328,7 +328,7 @@ test('DO-06: CLI и internal-токен открывают то же, что с�
   assert.equal((await fixture.app.inject({
     method: 'GET',
     url: '/api/private',
-    headers: { 'x-cockpit-token': 'test-cli-token' },
+    headers: { 'x-grigdesk-token': 'test-cli-token' },
   })).json().authKind, 'cli');
 });
 
@@ -367,7 +367,7 @@ test('DO-07: снятие cookie снова закрывает статику, �
 test('DO-08: нечитаемая cookie даёт 401, а не 500', async (t) => {
   const fixture = await accessFixture(t);
 
-  for (const cookie of ['cockpit_sid=%E0%A4%A', 'cockpit_sid=%', 'cockpit_sid=%zz']) {
+  for (const cookie of ['grigdesk_sid=%E0%A4%A', 'grigdesk_sid=%', 'grigdesk_sid=%zz']) {
     const response = await fixture.app.inject({
       method: 'GET',
       url: '/api/private',

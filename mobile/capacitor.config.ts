@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'local.cockpit.mobile',
-  appName: 'Кокпит',
+  appId: 'local.grigdesk.mobile',
+  appName: 'GrigDesk',
   webDir: 'dist',
   server: { androidScheme: 'https' },
 };

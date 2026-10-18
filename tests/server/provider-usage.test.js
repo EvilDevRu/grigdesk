@@ -217,7 +217,7 @@ test('Codex app-server rate limits become generic and model-family bars', () => 
   assert.equal(bars[0].resetsAt, '2026-08-05T03:20:00.000Z');
 });
 
-test('Codex bar order is owned by Cockpit, not by the service key order', () => {
+test('Codex bar order is owned by GrigDesk, not by the service key order', () => {
   // `rateLimitsByLimitId` — объект, и OpenAI перетасовывает ключи от ответа к ответу
   // (замер: шесть запросов подряд дали три разных порядка). Без своей сортировки
   // полосы в шапке скакали на каждом минутном обновлении реестра.
@@ -456,7 +456,7 @@ test('Codex reset consumption forwards a stable idempotency key and maps outcome
 });
 
 test('Claude usage refreshes an expired CLI token instead of asking for login', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-oauth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const now = 1_800_000_000_000;
@@ -513,7 +513,7 @@ test('Claude usage refreshes an expired CLI token instead of asking for login', 
 });
 
 test('temporary Claude token refresh failure is not reported as logout', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-oauth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const now = 1_800_000_000_000;
@@ -542,7 +542,7 @@ test('temporary Claude token refresh failure is not reported as logout', async (
 });
 
 test('OAuth-пара Claude извлекается из установленного бинаря единым источником', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-bin-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-bin-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const bin = path.join(dir, 'claude-fixture');
   await writeFile(bin, Buffer.from([
@@ -558,7 +558,7 @@ test('OAuth-пара Claude извлекается из установленно
 });
 
 test('без полной OAuth-пары refresh завершается до сетевого запроса', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-oauth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const bin = path.join(dir, 'claude-without-oauth');
@@ -679,7 +679,7 @@ test('successful but empty Claude payload is visible instead of a blank popup', 
 // повтор без неё удваивает трафик, не увеличивая шанс на ответ.
 
 test('Claude usage survives a blinking tunnel: retries with a pause, not instantly', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-usage-retry-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-usage-retry-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const now = 1_800_000_000_000;
@@ -716,7 +716,7 @@ test('Claude usage survives a blinking tunnel: retries with a pause, not instant
 });
 
 test('Claude usage does not retry a refusal the network cannot fix', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-usage-403-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-usage-403-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const credentialsPath = path.join(dir, '.credentials.json');
   const now = 1_800_000_000_000;

@@ -1,0 +1,163 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
+
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const brand = 'docs/images/brand';
+const android = 'mobile/android/app/src/main/res';
+const masters = ['wordmark', 'wordmark-reversed', 'stacked', 'gd', 'gd-reversed', 'gd-small',
+  'g-small', 'g-small-reversed', 'favicon-tile', 'app-icon', 'wordmark-light', 'wordmark-graphite'];
+const densities = {
+  mdpi: 48,
+  hdpi: 72,
+  xhdpi: 96,
+  xxhdpi: 144,
+  xxxhdpi: 192,
+};
+const files = [
+  ...masters.map((name) => `${brand}/grigdesk-${name}.svg`),
+  `${brand}/grigdesk-app-icon-1024.png`, `${brand}/grigdesk-maskable-512.png`,
+  'desktop/build/icon.png', 'desktop/build/window-icon.png', 'bin/grigdesk.png',
+  'web/public/icon-96.png',
+  ...['web', 'mobile'].flatMap((area) => ['192', '512', 'maskable-512']
+    .map((size) => `${area}/public/icon-${size}.png`)),
+  ...Object.keys(densities).flatMap((density) => ['', '_round']
+    .map((suffix) => `${android}/mipmap-${density}/ic_launcher${suffix}.png`)),
+  `${android}/drawable/ic_launcher_foreground.xml`, `${android}/values/ic_launcher_background.xml`,
+  'web/src/shared/notificationIcon.ts', 'web/index.html',
+];
+
+function read(file: string): Buffer {
+  assert.ok(existsSync(path.join(root, file)), `Отсутствует ${file}`);
+
+  return readFileSync(path.join(root, file));
+}
+
+function text(file: string): string {
+  return read(file).toString('utf8');
+}
+
+function paths(file: string): string[] {
+  return [...text(file).matchAll(/<path\b[^>]*\bd="([^"]+)"/g)].map((match) => match[1]!);
+}
+
+/**
+ * Сравнивает только существующие файлы, поэтому работает и до смены набора мастеров.
+ * Каталог векторов включён целиком: генератор не должен создавать лишние старые имена.
+ */
+function hashes(): Record<string, string> {
+  const candidates = new Set([
+    ...files,
+    ...readdirSync(path.join(root, brand)).map((name) => `${brand}/${name}`),
+  ]);
+
+  return Object.fromEntries([...candidates].filter((file) => existsSync(path.join(root, file))).sort()
+    .map((file) => [file, createHash('sha256').update(read(file)).digest('hex')]));
+}
+
+/**
+ * Получает пути компонента из литералов TypeScript без запуска Vue или браузера.
+ * Склеенные строки допускают читаемое хранение длинного SVG-контура в исходнике.
+ */
+function componentPaths(file: string): string[] {
+  const source = text(file);
+  const literal = /const (?:MARK|ARC|NEEDLE) = ([\s\S]*?);/g;
+
+  return [...source.matchAll(literal)].map((match) =>
+    [...match[1]!.matchAll(/'([^']*)'/g)].map((part) => part[1]).join(''));
+}
+
+test('GI-01: в продукте только утверждённые мастера нового знака', () => {
+  const expected = [...masters.map((name) => `grigdesk-${name}.svg`),
+    'grigdesk-app-icon-1024.png', 'grigdesk-maskable-512.png'].sort();
+  const actual = readdirSync(path.join(root, brand)).sort();
+
+  assert.deepEqual(actual, expected);
+  assert.ok(actual.every((name) => !name.startsWith(`${LEGACY.configDir}-`)));
+
+  for (const name of masters) {
+    assert.doesNotMatch(text(`${brand}/grigdesk-${name}.svg`), /M202\.31 42\.24A106|Шкала C/);
+  }
+});
+
+test('GI-02: все растры имеют утверждённые размеры', () => {
+  const sizes: Array<[string, number]> = [
+    ['desktop/build/icon.png', 512], ['desktop/build/window-icon.png', 64],
+    ['web/public/icon-96.png', 96], ['bin/grigdesk.png', 512],
+    ...['web', 'mobile'].flatMap((area): Array<[string, number]> => [
+      [`${area}/public/icon-192.png`, 192], [`${area}/public/icon-512.png`, 512],
+      [`${area}/public/icon-maskable-512.png`, 512],
+    ]),
+    ...Object.entries(densities).flatMap(([density, size]): Array<[string, number]> =>
+      ['', '_round'].map((suffix) => [`${android}/mipmap-${density}/ic_launcher${suffix}.png`, size])),
+  ];
+
+  for (const [file, size] of sizes) {
+    const bytes = read(file);
+
+    assert.equal(bytes.subarray(1, 4).toString('ascii'), 'PNG', file);
+    assert.equal(bytes.readUInt32BE(16), size, file);
+    assert.equal(bytes.readUInt32BE(20), size, file);
+  }
+});
+
+test('GI-03: значок команды побайтно равен значку веба', () => {
+  assert.ok(read('bin/grigdesk.png').equals(read('web/public/icon-512.png')));
+});
+
+test('GI-04: встроенные favicon и уведомление равны мастерам', () => {
+  const source = text('web/src/shared/notificationIcon.ts');
+  const declaration = source.match(/export const NOTIFICATION_ICON = ([\s\S]*);/)?.[1];
+
+  assert.ok(declaration);
+
+  const url = [...declaration.matchAll(/'([^']*)'/g)].map((match) => match[1]).join('');
+
+  assert.ok(url.startsWith('data:image/png;base64,'));
+  assert.ok(Buffer.from(url.slice('data:image/png;base64,'.length), 'base64')
+    .equals(read('web/public/icon-96.png')));
+
+  const href = text('web/index.html').match(/rel="icon" href="([^"]+)"/)?.[1];
+
+  assert.ok(href);
+  assert.ok(href.startsWith('data:image/svg+xml,'));
+  assert.equal(decodeURIComponent(href.slice('data:image/svg+xml,'.length)),
+    text(`${brand}/grigdesk-favicon-tile.svg`));
+});
+
+test('GI-05: компоненты используют G, Android — GD из утверждённых векторов', () => {
+  const small = paths(`${brand}/grigdesk-g-small-reversed.svg`);
+
+  for (const file of ['web/src/shared/GrigDeskMark.vue', 'mobile/src/ui/UiBrandMark.vue']) {
+    assert.deepEqual(componentPaths(file), small, file);
+    assert.match(text(file), /fill: currentColor/);
+    assert.doesNotMatch(text(file), /var\(--accent\)|\bmono\b/);
+  }
+
+  const foreground = text(`${android}/drawable/ic_launcher_foreground.xml`);
+
+  assert.deepEqual([...foreground.matchAll(/android:pathData="([^"]+)"/g)].map((match) => match[1]),
+    paths(`${brand}/grigdesk-gd-reversed.svg`));
+  assert.match(foreground, /android:scaleX="0.21459"/);
+  assert.match(foreground, /android:translateX="26.533"/);
+  assert.match(foreground, /android:fillColor="#F2F3F5"/);
+  assert.match(text(`${android}/values/ic_launcher_background.xml`), /#0B0D11/);
+});
+
+test('GI-06: повтор генератора не меняет байты ни одного результата', () => {
+  const before = hashes();
+  const result = spawnSync('python3', ['-I', 'web/scripts/gen-icons.py'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(hashes(), before);
+});

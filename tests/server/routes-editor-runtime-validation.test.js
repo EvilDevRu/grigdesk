@@ -72,7 +72,7 @@ test('RE-C4-02: fanout и command сверяются со схемой и metada
   assert.equal(validateDraft(degraded).issues.length, 0);
   assert.equal(engineCheck(degraded).ok, true);
 
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-runtime-capabilities-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-runtime-capabilities-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profile = path.join(root, 'sample');
   await fs.mkdir(profile);
@@ -203,7 +203,7 @@ test('RE-C4-04: pair и вход в закрытую зону отвергают
 });
 
 test('RE-C4-05: неизвестные context root и command ID блокируют публикацию', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-context-roots-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-context-roots-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profile = path.join(root, 'sample');
   await fs.mkdir(path.join(profile, 'routes'), { recursive: true });

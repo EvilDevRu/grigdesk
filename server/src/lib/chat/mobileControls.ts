@@ -60,7 +60,7 @@ export class MobileChatControls {
         modelRef: selected.modelRef,
         effort: '',
         taskId: null,
-        workdir: { kind: 'cockpit' },
+        workdir: { kind: 'grigdesk' },
         messages: [],
         createdAt: now,
         updatedAt: now,

@@ -243,7 +243,7 @@ function unanalyzedEntries(
 
       return {
         label: [attachment.displayLabel, attachment.name],
-        // Канал прислал код; фразу собирает кокпит — та же, что и в разборе.
+        // Канал прислал код; фразу собирает GrigDesk — та же, что и в разборе.
         reason: skipReasonText(value?.reason, {
           sizeBytes: value?.sizeBytes ?? null,
           limitBytes: value?.limitBytes ?? null,

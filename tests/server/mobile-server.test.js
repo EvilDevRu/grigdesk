@@ -116,7 +116,7 @@ test('MB-09…MB-12/MB-25/MB-30: guard, pair, отзыв и durable POST на о
 
   const headers = {
     'Idempotency-Key': 'operation-one',
-    'X-Cockpit-Operation-Created-At': String(Date.now()),
+    'X-GrigDesk-Operation-Created-At': String(Date.now()),
   };
   const first = await request(server, identity, client, '/api/mobile/v1/test', 'POST', {}, headers);
 

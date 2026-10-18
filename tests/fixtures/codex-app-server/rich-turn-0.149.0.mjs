@@ -30,15 +30,15 @@ const ADD_CONTENT = 'export function ready() {\n  return true;\n}\n';
 const ADD_DIFF = '@@ -0,0 +1,3 @@\n+export function ready() {\n+  return true;\n+}\n';
 
 function runFixture() {
-  const traceFile = process.env.COCKPIT_CODEX_FIXTURE_TRACE || '';
-  const scenario = process.env.COCKPIT_CODEX_FIXTURE_SCENARIO || 'rich';
+  const traceFile = process.env.GRIGDESK_CODEX_FIXTURE_TRACE || '';
+  const scenario = process.env.GRIGDESK_CODEX_FIXTURE_SCENARIO || 'rich';
   // Базовая fixture остаётся снимком 0.149, а dynamic tool сценарии могут
   // проверить актуальный wire-контракт без дублирования всего app-server.
-  const cliVersion = process.env.COCKPIT_CODEX_FIXTURE_CLI_VERSION || '0.149.0';
+  const cliVersion = process.env.GRIGDESK_CODEX_FIXTURE_CLI_VERSION || '0.149.0';
   // Сколько уточнений принимает сценарий steer: на последнем ход закрывается сам.
-  const steersExpected = Math.max(1, Number(process.env.COCKPIT_CODEX_FIXTURE_STEERS) || 1);
-  const expectHook = process.env.COCKPIT_CODEX_FIXTURE_EXPECT_HOOK !== '0';
-  const hookState = process.env.COCKPIT_CODEX_FIXTURE_HOOK_STATE || 'enabled';
+  const steersExpected = Math.max(1, Number(process.env.GRIGDESK_CODEX_FIXTURE_STEERS) || 1);
+  const expectHook = process.env.GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK !== '0';
+  const hookState = process.env.GRIGDESK_CODEX_FIXTURE_HOOK_STATE || 'enabled';
   const argv = process.argv.slice(2);
 
   // Строгий triage-вызов спрашивает схему до thread/start. Версионированная
@@ -323,7 +323,7 @@ function runFixture() {
     ];
     send({ method: 'item/started', params: {
       threadId: THREAD_ID, turnId, startedAtMs: 1_700_000_001_500,
-      // В 0.149 started может прийти раньше готового patch. Cockpit не должен
+      // В 0.149 started может прийти раньше готового patch. GrigDesk не должен
       // зафиксировать пустую shallow-копию tool до rich patchUpdated.
       item: { type: 'fileChange', id: 'file-change-1', changes: [], status: 'inProgress' },
     } });
@@ -557,7 +557,7 @@ function runFixture() {
 
   /**
    * app-server публикует события субагентов в том же JSONL-потоке. Они обязаны
-   * остаться видимыми самому Codex, но не могут завершить или загрязнить ход Cockpit.
+   * остаться видимыми самому Codex, но не могут завершить или загрязнить ход GrigDesk.
    */
   function emitForeignTurn(status) {
     const text = `Чужой субагент: ${status}.`;
@@ -1099,7 +1099,7 @@ function runFixture() {
       if (steerCount >= steersExpected) {
         const guided = message.params?.input?.slice(1).some((part) =>
           String(part?.text || '').includes('вернись к ранее поставленной задаче'));
-        const resumed = !process.env.COCKPIT_CODEX_FIXTURE_REQUIRE_RESUME || guided;
+        const resumed = !process.env.GRIGDESK_CODEX_FIXTURE_REQUIRE_RESUME || guided;
         finishSteeredTurn(resumed);
         phase = 'complete';
       }

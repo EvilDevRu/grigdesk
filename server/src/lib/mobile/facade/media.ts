@@ -114,7 +114,7 @@ export function registerMediaRoutes(app: MobileApp, deps: Pick<FacadeDeps, 'chat
 
         throw new MobileInputError(
           auth ? 'upstream_auth' : `upstream_${result.statusCode}`,
-          'Запрос картинки внутри Кокпита не выполнен.',
+          'Запрос картинки внутри GrigDesk не выполнен.',
           auth ? 502 : result.statusCode,
         );
       }

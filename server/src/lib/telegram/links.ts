@@ -6,7 +6,7 @@
 // может состоять в группе обсуждения и не состоять в самом канале. Поэтому
 // такая ссылка помечается `ambiguous`, а не угадывается здесь.
 //
-// Формы (см. docs/cockpit/inbox.md, раздел «Telegram»):
+// Формы (см. docs/grigdesk/inbox.md, раздел «Telegram»):
 //   t.me/<username>/<msg>                 публичный чат
 //   t.me/<username>/<thread>/<msg>        публичный форум
 //   t.me/c/<internal>/<msg>               приватная группа, chat_id = -100 + internal

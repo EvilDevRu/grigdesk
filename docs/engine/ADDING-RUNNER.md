@@ -109,7 +109,7 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
 Класс для автомата и пояснение человеку — отдельные данные. `unknown` не должен
 прятать терминальное сообщение. Для Codex retained-FD finalizer сохраняет
 диагностические `FAILURE_CODE/MESSAGE/DETAIL`; маршрут и сервер передают их в
-[карточку остановки](../cockpit/pipeline/runner-failure-diagnostics.md).
+[карточку остановки](../grigdesk/pipeline/runner-failure-diagnostics.md).
 
 ## Порядок поставки (менять нельзя)
 
@@ -125,7 +125,7 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
    непокрытые fail-closed ветки classify, фиктивные fixtures, пропущенные инварианты.
    Замечания встраиваются до реализации, разбор сохраняется рядом с планом/докой.
 4. **Реализация** `lib/runners/<id>.sh` до зелёного.
-5. **Полный offline suite** (`tests/run-all.sh`) без Cockpit и model calls.
+5. **Полный offline suite** (`tests/run-all.sh`) без GrigDesk и model calls.
 6. **Metadata-only host preflight** профиля с новым кандидатом.
 7. **Контролируемый live** — отдельная операция (см. ниже).
 

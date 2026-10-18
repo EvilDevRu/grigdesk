@@ -283,10 +283,10 @@ test('Каталог без приватных полей; счётчики от
 
 test('Настоящий владелец: запуск запрещает настройку, перенос папки проходит общий CAS', async (t) => {
   const { executor, runs, waitForRuns } = controlledExecutor();
-  const { app: cockpit } = await chatAppFixture(t, { executor });
-  const initial = await cockpit.mobileChat.controls.create('mobile-controls', TEST_MODEL_REF);
+  const { app: grigdesk } = await chatAppFixture(t, { executor });
+  const initial = await grigdesk.mobileChat.controls.create('mobile-controls', TEST_MODEL_REF);
 
-  await cockpit.mobileChat.send({
+  await grigdesk.mobileChat.send({
     ...turnBody('mobile-controls', 'mobile-controls-turn'),
     owner: {
       deviceId: testDevice.id,
@@ -295,7 +295,7 @@ test('Настоящий владелец: запуск запрещает на�
     },
   });
   await waitForRuns(1);
-  await assert.rejects(() => cockpit.mobileChat.controls.configure('mobile-controls', {
+  await assert.rejects(() => grigdesk.mobileChat.controls.configure('mobile-controls', {
     expectedRevision: initial.revision,
     modelRef: TEST_MODEL_REF,
     effort: '',
@@ -307,9 +307,9 @@ test('Настоящий владелец: запуск запрещает на�
   const { app } = await mobileFacadeFixture(t, async (app) => {
     registerChatControlRoutes(app, {
       tokens,
-      chat: cockpit.mobileChat,
+      chat: grigdesk.mobileChat,
       callApi: async (method, url, payload) => {
-        const response = await cockpit.inject({
+        const response = await grigdesk.inject({
           method,
           url,
           payload,
@@ -337,5 +337,5 @@ test('Настоящий владелец: запуск запрещает на�
   }, 'workspace-change-one');
 
   assert.equal(changed.statusCode, 200, changed.body);
-  assert.deepEqual((await cockpit.mobileChat.read(id)).workdir, { kind: 'path', path: '/tmp' });
+  assert.deepEqual((await grigdesk.mobileChat.read(id)).workdir, { kind: 'path', path: '/tmp' });
 });

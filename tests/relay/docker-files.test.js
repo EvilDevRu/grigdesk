@@ -13,6 +13,7 @@ test('RL-24/RL-25: Docker запускает supervisor с ограничени�
   assert.equal(dockerfile.includes('npm install'), false);
 
   for (const expected of [
+    'image: grigdesk-relay:local',
     'restart: unless-stopped',
     'init: true',
     'read_only: true',
@@ -27,6 +28,8 @@ test('RL-24/RL-25: Docker запускает supervisor с ограничени�
   ]) {
     assert.equal(compose.includes(expected), true, expected);
   }
+
+  assert.doesNotMatch(compose, /^name:/m, 'Имя существующего проекта Compose не меняется');
 });
 
 test('RL-49: контекст Docker не уносит секреты, зависимости и кэш сборки SEA', async () => {

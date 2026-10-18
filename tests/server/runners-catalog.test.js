@@ -10,7 +10,7 @@ import test from 'node:test';
 import { listInstalledRunners } from '../../server/src/lib/runnersCatalog.ts';
 
 test('каталог исполнителей: только валидные адаптеры, отсортированные', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runners-catalog-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runners-catalog-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const runnersDir = path.join(root, 'engine', 'lib', 'runners');
   await mkdir(runnersDir, { recursive: true });

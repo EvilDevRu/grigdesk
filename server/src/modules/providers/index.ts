@@ -1,4 +1,4 @@
-// Модуль providers — реестр LLM-исполнителей кокпита.
+// Модуль providers — реестр LLM-исполнителей GrigDesk.
 // Единая точка правды о том, какие исполнители есть, доступны ли и какие у них модели:
 // топбар рисует иконки, чат строит выбор модели/эффорта, схемы выбирают исполнителя по id.
 // ПОДКЛЮЧЕНИЕ НОВОГО ИИ — МОДУЛЬНОЕ: один файл в server/src/lib/executors/ (контракт там),
@@ -308,7 +308,7 @@ async function providersModule(
     return executor && isChatExecutor(executor) ? executor : null;
   });
 
-  // Метка «новое» — бухгалтерия кокпита, а не факт адаптера: адаптер называет ведро
+  // Метка «новое» — бухгалтерия GrigDesk, а не факт адаптера: адаптер называет ведро
   // полем `group`, а помнит ли человек это ведро — знает только сервер.
   const usageSeen = new ProviderUsageSeenStore({ filePath: config.providerUsageSeenPath });
 
@@ -352,7 +352,7 @@ async function providersModule(
   const usagePrevious = new Map<string, ProviderUsage>();
 
   /**
-   * Отказ по частоте — единственная беда, на которую кокпит отвечает молчанием. Сеть,
+   * Отказ по частоте — единственная беда, на которую GrigDesk отвечает молчанием. Сеть,
    * протухший вход и отсутствие API лечатся повтором или человеком, а вот на «стучитесь
    * реже» повтор в прежнем темпе держит аккаунт в отказе сам.
    *
@@ -564,7 +564,7 @@ async function providersModule(
   // Тик держит серверный кэш тёплым и рассылает снимок по SSE, поэтому окно читает
   // готовое, а полосы идут за временем и без наведения.
   //
-  // Цена фона — походы к вендору идут, пока открыт кокпит, а не пока водят мышью, поэтому
+  // Цена фона — походы к вендору идут, пока открыт GrigDesk, а не пока водят мышью, поэтому
   // шаг здесь свой (USAGE_CACHE_MS) и заметно длиннее реестра: минутный круглосуточно
   // ловил отказ по частоте у живого аккаунта.
 
@@ -728,13 +728,13 @@ async function providersModule(
    * Обновление CLI исполнителя (кнопка в настройках). Команда — свойство исполнителя
    * (`updateCmd`), ядро про вендоров не знает. После обновления сбрасываем кэши:
    * список моделей пересобирается из НОВОГО бинаря — так «вышел Opus 5» доезжает
-   * до кокпита без правок кода.
+   * до GrigDesk без правок кода.
    */
   fastify.post<ProviderRoute>('/api/providers/:id/update', async (request, reply) => {
     const ex = (await adaptersOf()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     if (ex.distribution?.(config)?.kind === 'embedded') {
-      return reply.code(400).send({ error: 'no_update', message: 'Обновление доступно вместе с Cockpit' });
+      return reply.code(400).send({ error: 'no_update', message: 'Обновление доступно вместе с GrigDesk' });
     }
     if (!ex.updateCmd) {
       return reply.code(400).send({

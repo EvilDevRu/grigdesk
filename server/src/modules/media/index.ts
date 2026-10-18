@@ -278,7 +278,7 @@ async function mediaModule(fastify: FastifyInstance, opts: MediaModuleOptions): 
       // при переразборе) переиспользует уже лежащий и не плодит вторую копию на
       // сотни мегабайт. Обрезанную загрузку `storeUpload` не оставляет на диске:
       // multipart при упоре в лимит рвёт поток молча, и огрызок распознался бы как
-      // короткая встреча — со стороны это неотличимо от «кокпит потерял половину».
+      // короткая встреча — со стороны это неотличимо от «GrigDesk потерял половину».
       const stored = await storeUpload({
         dir: media.uploadsDir,
         filename: data.filename,

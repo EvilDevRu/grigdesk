@@ -1,4 +1,4 @@
-// Карточка «Процесс Cockpit» в «Настройки → Сервер». Сервер под приложением Кокпита не
+// Карточка «Процесс GrigDesk» в «Настройки → Сервер». Сервер под приложением GrigDesk не
 // получает совета про deploy/install.sh: установщик запустил бы юнит рядом с ним. Старый
 // сервер без поля mode (до рестарта) читается по прежнему признаку systemd.
 import assert from 'node:assert/strict';
@@ -32,9 +32,9 @@ test('WB-01 desktop — тексты приложения без подсказ�
   assert.deepEqual(text, {
     pill: 'Под управлением приложения',
     tone: 'ok',
-    modeLine: 'приложение Кокпита',
+    modeLine: 'приложение GrigDesk',
     hint: null,
-    restartConfirm: 'Сервер перезапустит приложение Кокпита.',
+    restartConfirm: 'Сервер перезапустит приложение GrigDesk.',
   });
   assert.doesNotMatch(JSON.stringify(text), /install\.sh/u);
 });

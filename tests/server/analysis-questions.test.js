@@ -92,7 +92,7 @@ test('ответ арбитра закрывает factual-вопрос, а huma
     {
       id: 'answer-code',
       questionId: 'q-code',
-      actor: 'cockpit-arbiter',
+      actor: 'grigdesk-arbiter',
       status: 'answered',
       text: 'Поле уже есть.',
       proof: ['web/src/Form.vue:42'],
@@ -100,7 +100,7 @@ test('ответ арбитра закрывает factual-вопрос, а huma
     {
       id: 'answer-product',
       questionId: 'q-product',
-      actor: 'cockpit-arbiter',
+      actor: 'grigdesk-arbiter',
       status: 'human_required',
       text: '',
       proof: [],
@@ -109,7 +109,7 @@ test('ответ арбитра закрывает factual-вопрос, а huma
   const markdown = entries.map((entry) => [
     '## Разбор арбитра — машинный',
     entry.text || 'Нужно решение человека.',
-    `<!-- cockpit-clarification:v1 ${Buffer.from(JSON.stringify(entry)).toString('base64url')} -->`,
+    `<!-- grigdesk-clarification:v1 ${Buffer.from(JSON.stringify(entry)).toString('base64url')} -->`,
   ].join('\n')).join('\n\n');
   await writeFile(path.join(dir, 't42.clarify.md'), `${markdown}\n`);
 

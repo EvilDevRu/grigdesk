@@ -7,7 +7,7 @@ import path from 'node:path';
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 
 test('chat history moves from active to archive before permanent removal', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-history-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-history-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
@@ -50,7 +50,7 @@ test('chat history moves from active to archive before permanent removal', async
 // Точечное чтение — то, чем окна досинхронизируются по SSE `chat-store`: тянут ровно
 // изменившийся чат, а не всю историю.
 test('readOne отдаёт один чат и молчит про несуществующий', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-readone-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-readone-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
@@ -80,7 +80,7 @@ test('readOne отдаёт один чат и молчит про несущес
 });
 
 test('peek читает один чат по id, не поднимая всю историю с диска', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-peek-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-peek-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
 
@@ -107,7 +107,7 @@ test('peek читает один чат по id, не поднимая всю и
 });
 
 test('точечные операции после миграции не читают файлы остальных чатов', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-targeted-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-targeted-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
   const saved = await store.saveOne({
@@ -136,7 +136,7 @@ test('точечные операции после миграции не чит�
 });
 
 test('точечная запись перечитывает свежую серверную копию в старом месяце', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-fresh-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-fresh-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
   const first = await store.saveOne({
@@ -169,7 +169,7 @@ test('точечная запись перечитывает свежую сер
 // Список чатов телефона перечитывается по каждому событию: полная история весит сотни
 // мегабайт, поэтому шапки берутся из кэша и файл читается заново только после изменения.
 test('heads отдаёт шапки без сообщений и перечитывает только изменённые файлы', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-heads-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-heads-'));
 
   t.after(() => fs.rm(root, {
     recursive: true,

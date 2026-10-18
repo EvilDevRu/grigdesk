@@ -12,7 +12,7 @@ import test from 'node:test';
 import { ChatInTurnLedger } from '../../server/src/lib/chat/inTurnLedger.ts';
 
 async function tmpDir() {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-ledger-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-in-turn-ledger-'));
 }
 
 function record(overrides = {}) {

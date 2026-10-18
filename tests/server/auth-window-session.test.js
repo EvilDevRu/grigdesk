@@ -25,7 +25,7 @@ const credentials = {
  * Настоящий общий гард позволяет отличить session от CLI и internal авторизации.
  */
 async function authFixture(t, options = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-window-auth-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-window-auth-'));
   const authStore = new AuthStore({
     legacyAccountPath: path.join(root, 'account.json'),
     sessionsPath: path.join(root, 'sessions.json'),
@@ -104,7 +104,7 @@ function assertDenied(response, status, error) {
 
 test('DW-A1: ключ выдаёт сессию', async (t) => {
   const fixture = await authFixture(t);
-  const response = await request(fixture, { headers: { 'x-cockpit-window-key': windowKey } });
+  const response = await request(fixture, { headers: { 'x-grigdesk-window-key': windowKey } });
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), { ok: true });
@@ -134,10 +134,10 @@ test('DW-A1: ключ выдаёт сессию', async (t) => {
   const rotated = 'ROTATED_WINDOW_KEY'.padEnd(43, '_');
 
   fixture.windowAuth.key = rotated;
-  assertDenied(await request(fixture, { headers: { 'x-cockpit-window-key': windowKey } }),
+  assertDenied(await request(fixture, { headers: { 'x-grigdesk-window-key': windowKey } }),
     401, 'bad_window_key');
   assert.equal((await request(fixture, {
-    headers: { 'x-cockpit-window-key': rotated },
+    headers: { 'x-grigdesk-window-key': rotated },
   })).statusCode, 200);
 });
 
@@ -146,7 +146,7 @@ test('DW-A2: неверный ключ не создаёт сессию', async 
 
   for (const key of [undefined, 'B'.repeat(43), '', 'A'.repeat(42), 'A'.repeat(44), '!'.repeat(43),
     [windowKey, windowKey]]) {
-    const headers = key === undefined ? {} : { 'x-cockpit-window-key': key };
+    const headers = key === undefined ? {} : { 'x-grigdesk-window-key': key };
 
     assertDenied(await request(fixture, { headers }), 401, 'bad_window_key');
     assert.equal(fixture.authStore.sessions.size, 0);
@@ -155,7 +155,7 @@ test('DW-A2: неверный ключ не создаёт сессию', async 
 
 test('DW-A3: локальность по сокету и всем forwarded', async (t) => {
   const fixture = await authFixture(t);
-  const headers = { 'x-cockpit-window-key': windowKey };
+  const headers = { 'x-grigdesk-window-key': windowKey };
 
   assertDenied(await request(fixture, {
     remoteAddress: '192.0.2.10',
@@ -185,10 +185,10 @@ test('DW-A3: локальность по сокету и всем forwarded', as
 
 test('DW-A4: другой способ авторизации не заменяет ключ', async (t) => {
   const fixture = await authFixture(t);
-  const cookie = `cockpit_sid=${fixture.authStore.createSession().id}`;
+  const cookie = `grigdesk_sid=${fixture.authStore.createSession().id}`;
   const alternatives = [
-    { 'x-cockpit-token': 'test-cli-token' },
-    { 'x-cockpit-internal': 'test-internal-token' },
+    { 'x-grigdesk-token': 'test-cli-token' },
+    { 'x-grigdesk-internal': 'test-internal-token' },
     { cookie },
   ];
 
@@ -215,7 +215,7 @@ test('DW-A4: другой способ авторизации не заменя�
   const response = await request(fixture, {
     headers: {
       ...alternatives[0],
-      'x-cockpit-window-key': windowKey,
+      'x-grigdesk-window-key': windowKey,
     },
   });
 
@@ -229,12 +229,12 @@ test('DW-A4: другой способ авторизации не заменя�
 
 test('DW-A5: парольные пути и выход удалены', async (t) => {
   const fixture = await authFixture(t);
-  const cookie = `cockpit_sid=${fixture.authStore.createSession().id}`;
+  const cookie = `grigdesk_sid=${fixture.authStore.createSession().id}`;
   const variants = [
     ['без cookie', {}],
     ['с сессией', { cookie }],
-    ['с CLI-токеном', { 'x-cockpit-token': 'test-cli-token' }],
-    ['с internal-токеном', { 'x-cockpit-internal': 'test-internal-token' }],
+    ['с CLI-токеном', { 'x-grigdesk-token': 'test-cli-token' }],
+    ['с internal-токеном', { 'x-grigdesk-internal': 'test-internal-token' }],
   ];
 
   for (const path of ['/api/auth/login', '/api/auth/setup', '/api/auth/password',
@@ -252,8 +252,8 @@ test('DW-A5: парольные пути и выход удалены', async (t
       assert.equal(fixture.authStore.sessions.size, before, place);
       assert.doesNotMatch(String(response.headers['content-type'] ?? ''), /text\/html/u, place);
 
-      if (headers.cookie !== undefined || headers['x-cockpit-token'] !== undefined
-        || headers['x-cockpit-internal'] !== undefined) {
+      if (headers.cookie !== undefined || headers['x-grigdesk-token'] !== undefined
+        || headers['x-grigdesk-internal'] !== undefined) {
         assert.equal(response.statusCode, 404, place);
         assert.match(String(response.headers['content-type'] ?? ''), /application\/json/u, place);
       } else {
@@ -285,7 +285,7 @@ test('DW-A11: состояние входа описывает вход по к�
   });
   assert.equal(anonymous.headers['cache-control'], 'no-store');
 
-  const exchange = await request(fixture, { headers: { 'x-cockpit-window-key': windowKey } });
+  const exchange = await request(fixture, { headers: { 'x-grigdesk-window-key': windowKey } });
   const authorized = await request(fixture, {
     method: 'GET',
     url: '/api/auth/state',
@@ -314,7 +314,7 @@ test('DW-A12: отказ гарда не обещает пароль и не к�
   assert.equal(denied.headers['cache-control'], 'no-store');
   assert.deepEqual(denied.json(), {
     error: 'unauthorized',
-    message: 'Требуется вход в кокпит.',
+    message: 'Требуется вход в GrigDesk.',
   });
 });
 
@@ -330,7 +330,7 @@ test('DW-A6: ключ недоступен', async (t) => {
     remoteAddress: '192.0.2.10',
     headers: {
       host: 'foreign.test',
-      'x-cockpit-window-key': windowKey,
+      'x-grigdesk-window-key': windowKey,
     },
   }), 503, 'window_key_unavailable');
   await chmod(nullKey.root, 0o750);
@@ -354,13 +354,13 @@ test('DW-A7: Origin и Host не доверяют странице', async (t) =
     assertDenied(await request(fixture, {
       headers: {
         ...headers,
-        'x-cockpit-window-key': windowKey,
+        'x-grigdesk-window-key': windowKey,
       },
     }), 403, 'bad_window_origin');
     assertDenied(await request(fixture, {
       headers: {
         ...headers,
-        'x-cockpit-window-key': 'B'.repeat(43),
+        'x-grigdesk-window-key': 'B'.repeat(43),
       },
     }), 403, 'bad_window_origin');
   }
@@ -369,7 +369,7 @@ test('DW-A7: Origin и Host не доверяют странице', async (t) =
     assert.equal((await request(fixture, {
       headers: {
         ...headers,
-        'x-cockpit-window-key': windowKey,
+        'x-grigdesk-window-key': windowKey,
       },
     })).statusCode, 200);
   }
@@ -386,7 +386,7 @@ test('DW-A7: Origin и Host не доверяют странице', async (t) =
       headers: {
         host,
         origin: 'http://127.0.0.1',
-        'x-cockpit-window-key': windowKey,
+        'x-grigdesk-window-key': windowKey,
       },
     })).statusCode, 200);
   }
@@ -395,8 +395,8 @@ test('DW-A7: Origin и Host не доверяют странице', async (t) =
 test('DW-A8: секрет не журналируется и ответ не кэшируется', async (t) => {
   const fixture = await authFixture(t);
   const badKey = 'BAD_WINDOW_KEY_UNIQUE_MARKER'.padEnd(43, '_');
-  const success = await request(fixture, { headers: { 'x-cockpit-window-key': windowKey } });
-  const failed = await request(fixture, { headers: { 'x-cockpit-window-key': badKey } });
+  const success = await request(fixture, { headers: { 'x-grigdesk-window-key': windowKey } });
+  const failed = await request(fixture, { headers: { 'x-grigdesk-window-key': badKey } });
 
   assert.equal(success.statusCode, 200);
   assertDenied(failed, 401, 'bad_window_key');
@@ -416,7 +416,7 @@ test('DW-A9: неудачные обмены не блокируют вход, �
     assertDenied(await request(fixture), 401, 'bad_window_key');
   }
 
-  const response = await request(fixture, { headers: { 'x-cockpit-window-key': windowKey } });
+  const response = await request(fixture, { headers: { 'x-grigdesk-window-key': windowKey } });
   const cookie = response.headers['set-cookie'].split(';')[0];
   const removedLogout = await request(fixture, {
     url: '/api/auth/logout',

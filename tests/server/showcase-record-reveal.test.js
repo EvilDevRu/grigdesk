@@ -34,8 +34,8 @@ const STYLE = {
 const REGION_TOP = 10;
 
 async function findBrowser() {
-  if (process.env.COCKPIT_SHOWCASE_BROWSER) {
-    return process.env.COCKPIT_SHOWCASE_BROWSER;
+  if (process.env.GRIGDESK_SHOWCASE_BROWSER) {
+    return process.env.GRIGDESK_SHOWCASE_BROWSER;
   }
 
   const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

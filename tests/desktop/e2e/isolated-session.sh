@@ -80,7 +80,7 @@ for desktop_dependency in dbus-run-session gnome-keyring-daemon gdbus setsid xvf
   fi
 done
 
-desktop_test_home=$(mktemp -d /tmp/cockpit-desktop-home-XXXXXX) || exit 1
+desktop_test_home=$(mktemp -d /tmp/grigdesk-desktop-home-XXXXXX) || exit 1
 desktop_test_runtime=$(mktemp -d /tmp/cdr-XXXXXX) || {
   rm -rf -- "$desktop_test_home"
   exit 1

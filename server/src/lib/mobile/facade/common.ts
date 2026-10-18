@@ -56,7 +56,7 @@ export async function upstream(
 
     throw new MobileInputError(
       auth ? 'upstream_auth' : changed ? 'state_changed' : `upstream_${result.statusCode}`,
-      text(payload.message, 4000) || 'Внутренний запрос Кокпита не выполнен.',
+      text(payload.message, 4000) || 'Внутренний запрос GrigDesk не выполнен.',
       auth ? 502 : result.statusCode,
     );
   }

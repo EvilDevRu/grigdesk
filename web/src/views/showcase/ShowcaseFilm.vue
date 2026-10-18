@@ -336,7 +336,7 @@ const props = defineProps<{
   // Разбор моделью идёт прямо сейчас: план ещё не готов, править нечего.
   analyzing: boolean;
   maxScenes: number;
-  // Ссылка на стенд для человека; у песочницы её строит вид по хосту кокпита.
+  // Ссылка на стенд для человека; у песочницы её строит вид по хосту GrigDesk.
   targetUrl: string | null;
   artifactUrl: (artifactId: string) => string;
   voiceRef?: string | null;

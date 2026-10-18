@@ -1,3 +1,4 @@
+import './shared/legacyStorage.ts';
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import { router } from './router.js';

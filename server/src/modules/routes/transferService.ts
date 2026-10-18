@@ -55,7 +55,7 @@ export function exportRouteTransfer(draft: RouteDraft,
     };
   }
   return {
-    format: 'cockpit-route-authoring', schema: 1,
+    format: 'grigdesk-route-authoring', schema: 1,
     sourceProfile: draft.profile,
     content,
     dependencies: routeId === null ? [] : referencedRoutes(content),

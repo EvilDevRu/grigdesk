@@ -21,7 +21,7 @@ import {
 
 /** Фальшивый CLI: печатает готовый stream-json и завершается. */
 async function fakeClaude(t, events) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-ctx-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-ctx-'));
   const bin = path.join(dir, 'fake-claude');
   const lines = events.map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
   await writeFile(bin, `#!/bin/sh\n${lines}\n`);

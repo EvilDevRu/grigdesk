@@ -409,7 +409,7 @@ async function mountView(t, {
   analyzing = '',
   doctor = null,
   routeId = opened?.id ?? '',
-  url = 'http://cockpit.test/#/showcase',
+  url = 'http://grigdesk.test/#/showcase',
   preview = async () => new Blob(),
   narrationPreview = async () => new Blob(),
   updateResult = true,
@@ -576,7 +576,7 @@ test('у живого стенда одна кнопка «Снять ролик
   const { wrapper, flushPromises, calls } = await mountView(t, {
     opened: null,
     targets,
-    url: 'https://cockpit.test/#/showcase',
+    url: 'https://grigdesk.test/#/showcase',
   });
   const links = wrapper.findAll('.picker__link');
 
@@ -587,8 +587,8 @@ test('у живого стенда одна кнопка «Снять ролик
   );
   assert.equal(
     links[1].attributes('href'),
-    'http://cockpit.test:5192/',
-    'адрес песочницы использует прямой порт хоста, на котором открыт Cockpit',
+    'http://grigdesk.test:5192/',
+    'адрес песочницы использует прямой порт хоста, на котором открыт GrigDesk',
   );
   assert.equal(wrapper.find('select').exists(), false, 'выбор стенда — строки, а не список с «Далее»');
 

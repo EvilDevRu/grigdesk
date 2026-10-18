@@ -6,7 +6,7 @@
 // правило одно на всех (копий уже было две, и они расходились; см. gotchas).
 // Оба файла — чистые ESM без Vue-зависимостей, Node импортирует их напрямую.
 //
-// Данные — те же ручки кокпита через inject (`callApi`): /api/tasks (затыки,
+// Данные — те же ручки GrigDesk через inject (`callApi`): /api/tasks (затыки,
 // молчание, порог), /api/tasks/:id/graph (ворота), /api/chat/waiting (вопросы и
 // разрешения; после рестарта сервера pendingPerms умирают вместе с процессами
 // агентов — этот же обход закрывает карточки-фантомы).
@@ -151,12 +151,12 @@ export function permissionPreview(input: unknown): string {
 }
 
 /** Structured MCP-ввод доступен только в browser-session: пульт лишь будит человека. */
-function cockpitOnlyCard(subject: unknown, detail: unknown): string {
-  const body = collapseLine(detail || 'Сервис ждёт продолжения в кокпите.');
+function grigDeskOnlyCard(subject: unknown, detail: unknown): string {
+  const body = collapseLine(detail || 'Сервис ждёт продолжения в GrigDesk.');
   return clipText([
     `🔔 ${subject} — требуется действие`,
     body,
-    'Заверши в Cockpit.',
+    'Заверши в GrigDesk.',
   ].join('\n'), 1_000);
 }
 
@@ -386,7 +386,7 @@ export class TelegramPultWatch {
 
         return;
       }
-      // Пульт не подтверждён — не ходим даже в API кокпита: выключенный пульт
+      // Пульт не подтверждён — не ходим даже в API GrigDesk: выключенный пульт
       // не должен создавать фоновых обходов.
       if (settings.pultConfirmedAtMs == null || settings.pultChatId == null) {
         this._ownerKey = null;
@@ -457,7 +457,7 @@ export class TelegramPultWatch {
         };
         if (have) {
           // Править нечего у silent-карточки (сообщения не было). Иначе поводов два:
-          // миграция разметки после обновления кокпита и живая карточка, чьё
+          // миграция разметки после обновления GrigDesk и живая карточка, чьё
           // содержимое реально изменилось.
           const stale = have.hash !== meta.hash;
           const cooled = !have.editedAt || (this.now() - have.editedAt) >= this.liveEditMinMs;
@@ -717,7 +717,7 @@ export class TelegramPultWatch {
           kind: 'silence',
           subject,
           text: silenceCard({ subject, text: quiet.text }),
-          keyboard: null, // кнопки нет намеренно: зависшие ходы кокпит не глушит
+          keyboard: null, // кнопки нет намеренно: зависшие ходы GrigDesk не глушит
         });
       }
       const wait = (graph ? waitingReason(graph) : null) as Payload | null;
@@ -756,7 +756,7 @@ export class TelegramPultWatch {
           desired.set(`q:${pid}`, {
             kind: 'question',
             subject,
-            text: cockpitOnlyCard(subject, detail),
+            text: grigDeskOnlyCard(subject, detail),
             keyboard: null,
           });
         } else if ((item.input as Payload)?.kind === 'external_url') {
@@ -767,17 +767,17 @@ export class TelegramPultWatch {
           desired.set(`perm:${pid}`, {
             kind: 'perm',
             subject,
-            text: cockpitOnlyCard(subject, (item.input as Payload)?.description),
+            text: grigDeskOnlyCard(subject, (item.input as Payload)?.description),
             keyboard: null,
           });
         } else if (Array.isArray(item.questions)) {
           const first = ((item.questions as Payload[])[0] || {}) as Payload;
           const note = [
             item.questions.length > 1
-              ? `Вопросов несколько (${item.questions.length}) — остальные в кокпите.`
+              ? `Вопросов несколько (${item.questions.length}) — остальные в GrigDesk.`
               : '',
             first.multiSelect
-              ? 'Мультивыбор: кнопка отвечает одним вариантом, полный набор — в кокпите.'
+              ? 'Мультивыбор: кнопка отвечает одним вариантом, полный набор — в GrigDesk.'
               : '',
           ].filter(Boolean).join(' ');
           summary.chat.push({ pid, text: String(first.question || 'вопрос агента') });

@@ -23,7 +23,7 @@ export interface GlmLaunchFilesOptions {
     db: boolean;
     strictDb: boolean;
   };
-  // Сырые имена инструментов cockpit-work этого запуска: hook пропускает только их.
+  // Сырые имена инструментов grigdesk-work этого запуска: hook пропускает только их.
   workTools?: readonly string[];
   mcpServers?: readonly {
     name: string;
@@ -119,7 +119,7 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
         config: { providers: { zai: route } },
       },
       ...(options.egressGuard
-        ? [{ id: 'cockpit-glm-egress-guard', name: pathToFileURL(options.egressGuard).href }]
+        ? [{ id: 'grigdesk-glm-egress-guard', name: pathToFileURL(options.egressGuard).href }]
         : []),
     ],
     preToolUse: {
@@ -130,7 +130,7 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
     // Тот же hook на каждый prompt пишет маркер hooks-alive: регистрация проверяется ходом.
     userPromptSubmit: [{ command: policyCommand, timeout: 30 }],
     hooksConfig: { stderrSummaryMaxChars: HOOK_STDERR_LIMIT },
-    // Готовность cockpit-work обязательна до prompt, а потеря после неё останавливает ход:
+    // Готовность grigdesk-work обязательна до prompt, а потеря после неё останавливает ход:
     // без автоматического перезапуска сервера потерю видно как ошибку вызова.
     mcpConfig: {
       failOnStartupError: true,

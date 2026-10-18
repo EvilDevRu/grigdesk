@@ -1,8 +1,8 @@
-# UI-компоненты Cockpit
+# UI-компоненты GrigDesk
 
 `web/src/ui.ts` — единственная публичная точка импорта. Страницы, features и layout не
 импортируют deep paths из `components/`, `types/`, `services/` или private composables.
-Компоненты не знают о Pinia, router, API и доменных сущностях Cockpit.
+Компоненты не знают о Pinia, router, API и доменных сущностях GrigDesk.
 
 В Vue SFC блоки идут в порядке: `<template>`, затем `<script ...>`/`<script setup ...>`, затем
 `<style ...>` (если он есть). Новые компоненты `web/src/components/` пишутся с

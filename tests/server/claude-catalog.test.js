@@ -26,7 +26,7 @@ function entry(id, family, displayName, context, caps, out = 'default:64000,uppe
 }
 
 /**
- * Синтетический «бинарь»: строки те же, что кокпит вылавливает из настоящего CLI.
+ * Синтетический «бинарь»: строки те же, что GrigDesk вылавливает из настоящего CLI.
  * Каталог кэшируется по realpath, поэтому каждому тесту — свой файл.
  */
 async function fakeBin(t, body) {
@@ -190,11 +190,11 @@ for (const [name, model, ladder, discovered, expected] of MODE_CASES) {
 
 test('сломанный разбор реестра не выдаёт заглушку за факт', async (t) => {
   // Бандл чужого CLI не контракт: реестр однажды переедет или сменит форму. Тогда
-  // id по-прежнему находятся, а свойства — нет, и без признака кокпит молча вернул бы
+  // id по-прежнему находятся, а свойства — нет, и без признака GrigDesk молча вернул бы
   // всех к «окно 200k» — ровно к починенной ошибке, но уже без единого следа в интерфейсе.
   const bin = await fakeBin(t, 'claude-fable-5 claude-opus-5 claude-opus-4-6');
   const list = await claudeCatalog({ claudeBin: bin });
-  assert.equal(list.length, 3, 'модели обязаны остаться — кокпит должен работать');
+  assert.equal(list.length, 3, 'модели обязаны остаться — GrigDesk должен работать');
   assert.ok(list.every((m) => m.contextUnverified), 'окно не подтверждено — так и скажи');
 });
 
@@ -274,7 +274,7 @@ test('disable-1M policy не даёт деградационному merge во�
 });
 
 test('нечитаемое число окна не превращается в правдоподобную чушь', async (t) => {
-  // Разделители разрядов (`1_000_000`) регексп поймал бы как «1»: кокпит уверенно
+  // Разделители разрядов (`1_000_000`) регексп поймал бы как «1»: GrigDesk уверенно
   // показал бы окно в один токен вместо миллиона.
   const bin = await fakeBin(t, entry('claude-fable-5', 'fable', 'Fable 5',
     'window:1_000_000,native_1m:!0', ['effort']));

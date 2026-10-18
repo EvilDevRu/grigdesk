@@ -12,7 +12,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t, { withProfile = true } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-editor-capabilities-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-capabilities-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   const profileDir = path.join(profilesDir, 'sample');

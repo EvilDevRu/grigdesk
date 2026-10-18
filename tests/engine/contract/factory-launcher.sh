@@ -147,16 +147,16 @@ case "$source_text" in
     ;;
 esac
 assert_contains "$source_text" "gate_plan) printf 'GATE_PLAN" \
-  "plan gate has a compatibility projection for Cockpit"
+  "plan gate has a compatibility projection for GrigDesk"
 assert_contains "$source_text" "gate_cause) printf 'GATE_CAUSE" \
-  "cause gate has a compatibility projection for Cockpit"
+  "cause gate has a compatibility projection for GrigDesk"
 assert_contains "$source_text" "gate_accept) printf 'GATE_ACCEPT" \
-  "acceptance gate has a compatibility projection for Cockpit"
+  "acceptance gate has a compatibility projection for GrigDesk"
 assert_contains "$source_text" '"$pipeline_gate_key" "$GATE_DECISION"' \
-  "accepted or rejected gate decisions are projected to Cockpit"
+  "accepted or rejected gate decisions are projected to GrigDesk"
 assert_contains "$source_text" '"$pipeline_gate_key" waiting STALLED_HUMAN 1' \
-  "a paused trusted cursor is projected as a waiting Cockpit gate"
-# Синхронному вызывающему (кокпит по HTTP) нужен выход сразу после фиксации:
+  "a paused trusted cursor is projected as a waiting GrigDesk gate"
+# Синхронному вызывающему (GrigDesk по HTTP) нужен выход сразу после фиксации:
 # иначе gate ведёт маршрут дальше и переживает чужой таймаут только сиротой.
 # Снятие STALLED_HUMAN — строго ПОСЛЕ CAS: упавший commit-only не имеет права
 # стирать маркер остановки у стоящего маршрута.
@@ -166,7 +166,7 @@ assert_contains "$source_text" 'v2_gate_commit "$attempt" || return
   "--commit-only records the decision and leaves the route to a separate resume"
 assert_contains "$source_text" 'GATE_COMMIT_ONLY" == 1 ]] ||' \
   "commit-only is rejected outside the gate mode"
-# Реестр читает не только кокпит, но и агенты: иначе PLAN может увидеть в нём
+# Реестр читает не только GrigDesk, но и агенты: иначе PLAN может увидеть в нём
 # TESTS=done от отменённой попытки и пойти искать несуществующие тесты.
 assert_contains "$source_text" 'set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")"' \
   "recovery re-inits the registry from the newly pinned catalog"
@@ -531,7 +531,7 @@ assert_eq "$attempt" "$(awk -F= '$1=="ATTEMPT"{print $2}' "$lease_dir"/*.owner |
   "every durable resource lease belongs to the paused exact attempt"
 
 # Ветка закреплена НА РЕПОЗИТОРИЙ и едет в обоих артефактах попытки. Без этого поля
-# проект, у которого репозитории стоят на разных ветках, не описать: движку и кокпиту
+# проект, у которого репозитории стоят на разных ветках, не описать: движку и GrigDesk
 # пришлось бы требовать от всех checkout одну ветку — на этом и встала задача 90002.
 manifest="$shared_control/protocol-v2/tasks/t${fixture_task}/attempts/$attempt/artifacts/profile-contract.tsv"
 assert_eq shared-main "$(awk -F'\t' '$1=="repo" && $2=="app"{print $5}' "$manifest")" \
@@ -635,7 +635,7 @@ assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixtu
 
 # Решение прислали для ворот, на которых курсор НЕ стоит (в закреплённом
 # маршруте такого узла вовсе нет). Упавший commit-only обязан сохранить маркер
-# остановки: раньше STALLED_HUMAN сбрасывался ещё до CAS, и кокпит терял «ждёт
+# остановки: раньше STALLED_HUMAN сбрасывался ещё до CAS, и GrigDesk терял «ждёт
 # человека» у стоящего маршрута, дорисовывая ложные ворота дальше по цепочке.
 alien_gate=$(FACTORY_FORBID_LIVE=0 \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
@@ -779,8 +779,8 @@ assert_contains "$blocked_resume" 'FACTORY_ERROR=runner_preflight_unavailable RU
 assert_eq approved "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "failed resume preserves the already committed human decision"
 
-# Слишком длинная причина — самая частая ошибка человека за CLI и в модалке кокпита.
-# Отказ обязан прийти ДО локов и проекции, с названной границей: кокпит показывает
+# Слишком длинная причина — самая частая ошибка человека за CLI и в модалке GrigDesk.
+# Отказ обязан прийти ДО локов и проекции, с названной границей: GrigDesk показывает
 # человеку именно этот текст движка (routeMessage в server/src/lib/factory-route-cli.js).
 plan_before=$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")
 long_reason=$(python3 -c 'print("щ" * 20001, end="")')
@@ -819,7 +819,7 @@ assert_eq pending "$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_ta
 assert_eq pending "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "goto resets the downstream gate without a fixed stage list"
 assert_eq pending "$(awk -F= '$1=="PLAN_DECISION"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
-  "goto clears the stale Cockpit decision projection"
+  "goto clears the stale GrigDesk decision projection"
 assert_eq '' "$(awk -F= '$1=="GATE_PLAN_COMMENT"{sub(/^[^=]*=/, ""); print}' "$shared_state/t${fixture_task}.pipeline")" \
   "goto clears the stale rejected-gate comment"
 

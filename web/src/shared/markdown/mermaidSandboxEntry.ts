@@ -53,7 +53,7 @@ async function receive(event: MessageEvent): Promise<void> {
 
   busy = true;
 
-  const id = `cockpitMermaid${sequence += 1}`;
+  const id = `grigDeskMermaid${sequence += 1}`;
 
   try {
     mermaid.initialize({

@@ -14,8 +14,8 @@ import { installCapture } from './webLogCapture.ts';
 import { useWebLogStore } from '../stores/webLog.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 
-const POLICY_STORAGE_KEY = 'cockpit-diagnostic-level-v2';
-const ROUTES_STORAGE_KEY = 'cockpit-web-log-api-routes-v1';
+const POLICY_STORAGE_KEY = 'grigdesk-diagnostic-level-v2';
+const ROUTES_STORAGE_KEY = 'grigdesk-web-log-api-routes-v1';
 const ROUTES_LIMIT = 2000;
 
 // До загрузки живого каталога узнаются только пути входа и самого журнала:
@@ -58,7 +58,7 @@ type RuntimeOptions = {
   };
 };
 
-declare const __COCKPIT_SHA__: string;
+declare const __GRIGDESK_SHA__: string;
 
 export type WebLogRuntime = {
   log: WebLog;
@@ -195,12 +195,12 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
   let tabId = randomId('tab', win);
 
   try {
-    const existing = storage?.getItem('cockpit-web-log-tab-v1');
+    const existing = storage?.getItem('grigdesk-web-log-tab-v1');
 
     if (existing && /^tab-[A-Za-z0-9_-]{8,64}$/u.test(existing)) {
       tabId = existing;
     } else {
-      storage?.setItem('cockpit-web-log-tab-v1', tabId);
+      storage?.setItem('grigdesk-web-log-tab-v1', tabId);
     }
   } catch {
     /* sessionStorage может быть отключён */
@@ -265,8 +265,8 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     pageId,
     tabId,
     version:
-      typeof __COCKPIT_SHA__ === 'string' && /^[a-f0-9]{7,40}$/u.test(__COCKPIT_SHA__)
-        ? __COCKPIT_SHA__
+      typeof __GRIGDESK_SHA__ === 'string' && /^[a-f0-9]{7,40}$/u.test(__GRIGDESK_SHA__)
+        ? __GRIGDESK_SHA__
         : 'dev',
     context: () => ({
       route: router.currentRoute?.value?.path ?? 'other',
@@ -282,7 +282,7 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     beacon: options.beacon,
     auth,
   });
-  const oldGlobal = (win as Window & { __cockpitLog?: unknown }).__cockpitLog;
+  const oldGlobal = (win as Window & { __grigDeskLog?: unknown }).__grigDeskLog;
   const sweepTimer = setInterval(() => log.sweep(), 30_000);
 
   /**
@@ -481,7 +481,7 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     dump: () => log.dump(),
   };
 
-  (win as Window & { __cockpitLog?: unknown }).__cockpitLog = publicHandle;
+  (win as Window & { __grigDeskLog?: unknown }).__grigDeskLog = publicHandle;
 
   const stopCapture = installCapture({
     app,
@@ -687,7 +687,7 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
 
     stopCapture();
     transport.dispose();
-    (win as Window & { __cockpitLog?: unknown }).__cockpitLog = oldGlobal;
+    (win as Window & { __grigDeskLog?: unknown }).__grigDeskLog = oldGlobal;
 
     if (activeRuntime === runtime) {
       activeRuntime = null;

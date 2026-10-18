@@ -12,7 +12,7 @@ const exec = promisify(execFile);
 
 /**
  * Config читается в отдельном процессе с закрытым fixture env.
- * Системные COCKPIT overrides и private state машины в проверку не попадают.
+ * Системные GRIGDESK overrides и private state машины в проверку не попадают.
  */
 async function readFixtureConfig(root, overrides = {}) {
   const configUrl = new URL('../../server/src/config.ts', import.meta.url).href;
@@ -39,7 +39,7 @@ async function readFixtureConfig(root, overrides = {}) {
 }
 
 test('CFG1: config defaults/overrides, safe paths и VERSION проверяются до создания сервиса', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-install-config-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-install-config-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -57,9 +57,9 @@ test('CFG1: config defaults/overrides, safe paths и VERSION проверяют�
     pluginInstallsStatePath: path.join(root, 'state/install.json'),
   };
   const config = await readFixtureConfig(root, {
-    COCKPIT_PLUGINS_DIR: selected.userPluginsDir,
-    COCKPIT_PLUGINS_DATA_DIR: selected.userPluginsDataDir,
-    COCKPIT_PLUGIN_INSTALLS_STATE_PATH: selected.pluginInstallsStatePath,
+    GRIGDESK_PLUGINS_DIR: selected.userPluginsDir,
+    GRIGDESK_PLUGINS_DATA_DIR: selected.userPluginsDataDir,
+    GRIGDESK_PLUGIN_INSTALLS_STATE_PATH: selected.pluginInstallsStatePath,
   });
 
   assert.equal(config.userPluginsDir, selected.userPluginsDir);
@@ -69,12 +69,12 @@ test('CFG1: config defaults/overrides, safe paths и VERSION проверяют�
   assert.deepEqual(await readPluginInstallConfiguration(selected), {
     pluginsDir: selected.userPluginsDir,
     statePath: selected.pluginInstallsStatePath,
-    cockpitVersion: '1.2.3',
+    grigDeskVersion: '1.2.3',
   });
 
   for (const patch of [
     { userPluginsDataDir: path.join(selected.userPluginsDir, 'data') },
-    { pluginInstallsStatePath: path.join(selected.userPluginsDir, '.cockpit-install/state.json') },
+    { pluginInstallsStatePath: path.join(selected.userPluginsDir, '.grigdesk-install/state.json') },
     { userPluginsDir: 'relative/plugins' },
     { userPluginsDataDir: 'relative/data' },
     { pluginInstallsStatePath: 'relative/state.json' },
@@ -117,8 +117,8 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
       await native.fs.rename(native.current, path.join(native.transaction, 'parked'));
       state.apply = native.intent;
       state.job.status = 'applying';
-      await writeFile(env.COCKPIT_PLUGIN_INSTALLS_STATE_PATH, JSON.stringify(state));
-      await writeFile(env.COCKPIT_PREFS_PATH, JSON.stringify({ plugins: { demo: true } }));
+      await writeFile(env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH, JSON.stringify(state));
+      await writeFile(env.GRIGDESK_PREFS_PATH, JSON.stringify({ plugins: { demo: true } }));
     },
   });
   const current = await fixture.get('/api/plugin-installs/jobs/current');
@@ -141,9 +141,9 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
 
   const { PluginInstallService } = await import('../../server/src/lib/pluginInstall/service.ts');
   const next = new PluginInstallService({
-    pluginsDir: fixture.env.COCKPIT_PLUGINS_DIR,
-    statePath: fixture.env.COCKPIT_PLUGIN_INSTALLS_STATE_PATH,
-    cockpitVersion: '0.1.0',
+    pluginsDir: fixture.env.GRIGDESK_PLUGINS_DIR,
+    statePath: fixture.env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH,
+    grigDeskVersion: '0.1.0',
     reservedIds: ['studio3d'],
   });
 
@@ -161,14 +161,14 @@ test('CFG3: второй owner и blocked state сохраняют встрое�
   const { PluginInstallService } = await import('../../server/src/lib/pluginInstall/service.ts');
 
   for (const ownerHeld of [true, false]) {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-blocked-install-boot-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-blocked-install-boot-'));
     const pluginsDir = path.join(root, 'plugins');
     const statePath = path.join(root, 'state/plugin-installs.json');
     const marker = path.join(root, 'user-marker');
     const holder = ownerHeld ? new PluginInstallService({
       pluginsDir,
       statePath,
-      cockpitVersion: '0.1.0',
+      grigDeskVersion: '0.1.0',
       reservedIds: ['code'],
     }) : null;
 
@@ -253,7 +253,7 @@ test('CFG4: boot/close с native Git сливает workers, повторный 
   let executing = false;
 
   while (Date.now() < deadline) {
-    const disk = JSON.parse(await readFile(fixture.env.COCKPIT_PLUGIN_INSTALLS_STATE_PATH, 'utf8'));
+    const disk = JSON.parse(await readFile(fixture.env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH, 'utf8'));
 
     workers = Object.values(disk.workers);
 
@@ -281,7 +281,7 @@ test('CFG4: boot/close с native Git сливает workers, повторный 
     assert.deepEqual(await liveGroupMembers(worker.pgid), []);
   }
 
-  const stable = JSON.parse(await readFile(fixture.env.COCKPIT_PLUGIN_INSTALLS_STATE_PATH, 'utf8'));
+  const stable = JSON.parse(await readFile(fixture.env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH, 'utf8'));
 
   assert.deepEqual(stable.workers, {}, 'onClose записал finished до выхода app');
   assert.equal(stable.job.status, 'cancelled');

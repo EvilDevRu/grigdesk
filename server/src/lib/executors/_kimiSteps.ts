@@ -365,7 +365,7 @@ export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual'
 
     // Размышление Kimi — то же, что thinking у Claude: это опубликованный агентом
     // текст, а не приватная цепочка. Пряча его за «Kimi анализирует задачу…»,
-    // кокпит терял единственное, ради чего ленту и раскрывают.
+    // GrigDesk терял единственное, ради чего ленту и раскрывают.
     if (update.sessionUpdate === 'agent_thought_chunk') {
       const chunk = update.content as { type?: string; text?: unknown } | null;
       const text = chunk?.type === 'text' ? String(chunk.text || '') : '';

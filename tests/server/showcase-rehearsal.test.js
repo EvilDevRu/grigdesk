@@ -62,7 +62,7 @@ async function browserPathOf() {
   const require = createRequire(new URL('../../server/package.json', import.meta.url));
   const registry = require(path.join(path.dirname(require.resolve('playwright-core')), 'browsers.json'));
   const revision = registry.browsers.find((item) => item.name === 'chromium').revision;
-  const file = process.env.COCKPIT_SHOWCASE_BROWSER
+  const file = process.env.GRIGDESK_SHOWCASE_BROWSER
     || path.join(os.homedir(), '.cache/ms-playwright', `chromium-${revision}`, 'chrome-linux64/chrome');
 
   return access(file).then(() => file).catch(() => null);

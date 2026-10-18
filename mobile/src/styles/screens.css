@@ -56,7 +56,7 @@
   --ui-action-soft: color-mix(in srgb, var(--bad) 12%, transparent);
 }
 
-/* Без варианта тоновая кнопка — контурная, как outline в Кокпите. */
+/* Без варианта тоновая кнопка — контурная, как outline в GrigDesk. */
 .ui-button[data-tone='primary']:not([data-variant]),
 .ui-button[data-tone='danger']:not([data-variant]) {
   --ui-action-background-hover: var(--ui-action-soft);
@@ -205,7 +205,7 @@
   flex: 1 1 12rem;
 }
 
-/* ── Строки списков: как список чатов Кокпита, но под палец ── */
+/* ── Строки списков: как список чатов GrigDesk, но под палец ── */
 .list-tools {
   display: grid;
   flex: none;
@@ -676,7 +676,7 @@
   background: var(--good);
 }
 
-/* ── Чат: лента как в Кокпите — свои реплики пузырём справа, ответы агента лентой ── */
+/* ── Чат: лента как в GrigDesk — свои реплики пузырём справа, ответы агента лентой ── */
 .chat-feed {
   display: flex;
   flex-direction: column;
@@ -954,7 +954,7 @@
   object-fit: contain;
 }
 
-/* Геометрия composer совпадает с Кокпитом; сенсорные кнопки остаются не меньше 44 px. */
+/* Геометрия composer совпадает с GrigDesk; сенсорные кнопки остаются не меньше 44 px. */
 .chat-composer {
   --composer-bg: var(--ground);
   display: grid;
@@ -1672,7 +1672,7 @@
   background: var(--line);
 }
 
-/* ── Общие диалоги: та же поверхность, заголовок и подвал, что в Кокпите ── */
+/* ── Общие диалоги: та же поверхность, заголовок и подвал, что в GrigDesk ── */
 .mobile-dialog-overlay {
   position: fixed;
   z-index: 1000;
@@ -1764,7 +1764,7 @@
   }
 }
 
-/* Лента действий использует ту же колонку значков и сдержанные подписи, что Кокпит. */
+/* Лента действий использует ту же колонку значков и сдержанные подписи, что GrigDesk. */
 .chat-activity {
   min-width: 0;
   color: var(--ink-mid);

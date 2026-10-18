@@ -12,7 +12,7 @@ import { makeCatalogInput, makeDraft } from '../fixtures/routes-editor.mjs';
 const PROFILE = 'sample';
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-upgrade-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-upgrade-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const routesDir = path.join(root, 'routes');
   const authoringDir = path.join(root, 'authoring');

@@ -12,7 +12,7 @@
     <div class="app-main">
       <aside v-if="needsUpdate" class="app-banner" role="status">
         <UiIcon name="download" />
-        <p>Обнови приложение для работы с этим кокпитом.</p>
+        <p>Обнови приложение для работы с этим GrigDesk.</p>
       </aside>
       <MoreView v-if="needsUpdate" :key="link.state.generation" />
       <RouterView v-else :key="link.state.generation" />

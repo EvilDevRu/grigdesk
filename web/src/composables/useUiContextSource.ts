@@ -2,7 +2,7 @@ import { onBeforeUnmount, shallowReactive } from 'vue';
 
 import { useUiContextStore } from '../stores/ui-context.js';
 
-// Что компонент рассказывает о себе кокпиту. Слой отвечает на «где человек сейчас»,
+// Что компонент рассказывает о себе GrigDesk. Слой отвечает на «где человек сейчас»,
 // приоритет разводит одновременно открытые слои, `details` — свободная форма самого
 // раздела: её читает агент, и придумывать ей общую схему здесь нечем.
 export interface UiContextDescriptor {

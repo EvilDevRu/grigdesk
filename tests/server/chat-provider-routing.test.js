@@ -31,7 +31,7 @@ const kimiSessionBinding = {
  * withArtifacts добавляет временную папку артефактов, как у рабочего сервера.
  */
 async function apiFixture(t, { executor = null, withArtifacts = false } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-routing-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-routing-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   const events = [];

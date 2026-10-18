@@ -22,7 +22,7 @@ const bot = (over = {}) => ({
   configured: true,
   botId: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canReadAllGroupMessages: true,
   tokenHint: '…v5u6',
   connectedAt: Date.parse('2026-08-07T10:00:00Z'),

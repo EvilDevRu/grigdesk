@@ -133,7 +133,7 @@ function routeRegistry(extra = {}) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runner-override-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runner-override-'));
   const stateDir = path.join(root, 'state');
   const routesDir = path.join(root, 'routes');
   const profilesDir = path.join(root, 'profiles');
@@ -347,15 +347,15 @@ test('DeepSeek доступен для override, а его точный binary p
   assert.equal(response.statusCode, 200, response.body);
   assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD deepseek$/m);
 
-  const bin = '/opt/cockpit/deepseek/install/current/node_modules/.bin/dsh';
+  const bin = '/opt/grigdesk/deepseek/install/current/node_modules/.bin/dsh';
   const env = routeLaunchEnv({
-    rootDir: '/opt/cockpit', factoryHome: '/opt/cockpit/engine',
-    profilesDir: '/opt/cockpit/profiles', factoryConfigRoot: '/tmp/factory-config',
-    routesDir: '/opt/cockpit/routes', stateDir: '/tmp/factory-state',
-    factoryControlDir: '/tmp/factory-control', factoryBin: '/opt/cockpit/engine/bin/factory',
+    rootDir: '/opt/grigdesk', factoryHome: '/opt/grigdesk/engine',
+    profilesDir: '/opt/grigdesk/profiles', factoryConfigRoot: '/tmp/factory-config',
+    routesDir: '/opt/grigdesk/routes', stateDir: '/tmp/factory-state',
+    factoryControlDir: '/tmp/factory-control', factoryBin: '/opt/grigdesk/engine/bin/factory',
     deepseekBinOverride: bin,
   });
-  assert.equal(env.COCKPIT_DEEPSEEK_BIN, bin);
+  assert.equal(env.GRIGDESK_DEEPSEEK_BIN, bin);
 });
 
 test('пустой primary снимает override через runner clear, идемпотентно', async (t) => {

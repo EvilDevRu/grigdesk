@@ -20,7 +20,7 @@ const EMPTY_BASELINE = Object.freeze({
 });
 
 function fixtureRepo(t, files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-control-styles-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-control-styles-'));
 
   t.after(() => fs.rmSync(root, {
     recursive: true,

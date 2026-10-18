@@ -203,7 +203,7 @@ test('WD-08 несовместимый release даёт прежний Permanent
     }), (error) => {
       assert.equal(error instanceof PermanentConnectionError, true);
       assert.equal(error.message, 'Сервер не обслуживает интерфейс этого приложения. '
-        + 'Обновите сервер Кокпита и запустите приложение заново.');
+        + 'Обновите сервер GrigDesk и запустите приложение заново.');
 
       return true;
     });

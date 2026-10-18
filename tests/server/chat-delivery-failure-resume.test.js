@@ -17,7 +17,7 @@ const Fastify = requireFromServer('fastify');
 const CLI_SAID = 'API Error: You\'ve hit your weekly limit · resets Sep 18, 7am';
 
 async function apiFixture(t, { executor }) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-cut-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-cut-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   app.decorate('sse', { broadcast() {} });

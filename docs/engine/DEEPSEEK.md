@@ -1,6 +1,6 @@
-# DeepSeek Harness в Cockpit: контракт и статус внедрения
+# DeepSeek Harness в GrigDesk: контракт и статус внедрения
 
-Cockpit содержит выбранные исходники Harness `0.1.5-rc.2`, upstream commit
+GrigDesk содержит выбранные исходники Harness `0.1.5-rc.2`, upstream commit
 `c291e7961a515f6d7af9304e7fd1d257929aef26`. Общая подготовка собирает самодостаточное
 поколение; отдельная установка DSH больше не требуется. Generic-контракт раннера:
 [ADDING-RUNNER.md](ADDING-RUNNER.md).
@@ -8,15 +8,15 @@ Cockpit содержит выбранные исходники Harness `0.1.5-rc
 Настоящий compiled runtime проверен с loopback API: web RPC/events для чата,
 ACP для Factory, native settings обоих consumers, sandbox, MCP/status, hooks,
 cancel/resume, обновление и совместимый откат. Эти проверки не расходуют платный API.
-Состав и ограничения: [композиция](../cockpit/chat/deepseek-vendored-composition.md),
-[чатовый паритет](../cockpit/chat/deepseek-compiled-chat-parity.md),
-[настройки Factory](../cockpit/pipeline/deepseek-native-settings-runtime.md),
-[переход updater](../cockpit/server/deepseek-release-transition.md).
+Состав и ограничения: [композиция](../grigdesk/chat/deepseek-vendored-composition.md),
+[чатовый паритет](../grigdesk/chat/deepseek-compiled-chat-parity.md),
+[настройки Factory](../grigdesk/pipeline/deepseek-native-settings-runtime.md),
+[переход updater](../grigdesk/server/deepseek-release-transition.md).
 
 Инструкция оператора по установке, режимам и откату:
-[guide/deepseek.md](../cockpit/guide/deepseek.md).
+[guide/deepseek.md](../grigdesk/guide/deepseek.md).
 
-## Реализация Cockpit и Factory
+## Реализация GrigDesk и Factory
 
 Chat adapter живёт в `server/src/lib/executors/deepseek.ts`. Он запускает pinned DSH через
 web RPC/events, строит private overlay/hooks на каждый ход, хранит session binding только
@@ -31,7 +31,7 @@ run identity нельзя передать или подменить tool argume
 в MCP env, retained event stream или launcher argv. Text-only успех без terminal status
 повышается launcher-ом до protocol failure.
 
-Embedded runner различает сборки версией `0.1.5-rc.2.cockpit.b<hash16>`, проверяет её
+Embedded runner различает сборки версией `0.1.5-rc.2.grigdesk.b<hash16>`, проверяет её
 перед каждым узлом и публикует четыре opaque model id, capabilities
 `status status_request tools structured_output` и не заявляет sandbox/fanout только по
 факту наличия upstream-механизма. Billing dialect намеренно не зарегистрирован: usage
@@ -77,7 +77,7 @@ invalid-key до model/tool activity; timeout различим отдельно,
 - `sandbox-policy.mode` и абсолютный `workspaceRoot` заменяются; и в чате, и в Factory
   `workspaceRoot` равен realpath cwd. Для вызовов агента DSH берёт ту же границу из cwd
   сессии; общий каталог-предок из `extraDirs` её не расширяет
-  ([грабли](../cockpit/chat/deepseek-write-boundary.md));
+  ([грабли](../grigdesk/chat/deepseek-write-boundary.md));
 - `approval.policy` заменяется;
 - `permission.defaultPreset` задаётся явно. Помимо upstream-наборов объявлены
   `factory-state-only = read-only + never` и
@@ -118,7 +118,7 @@ Metadata-only handshake успешен без ключа, с синтетиче�
 | `bash` | `{ command, description, sandbox_permissions?, justification? }` | shell использует ту же файловую границу |
 | `glob` | `{ pattern }` | поиск без permission |
 | `grep` | `{ pattern }` | поиск без permission |
-| `mcp__cockpit-echo__echo` | `{ text }` | точная форма имени stdio MCP |
+| `mcp__grigdesk-echo__echo` | `{ text }` | точная форма имени stdio MCP |
 
 Все наблюдённые `tool_call.kind` равны `other`. `tool_call_update` использует тот же
 `toolCallId`, статус `completed`/`failed` и content-массив.
@@ -127,7 +127,7 @@ Metadata-only handshake успешен без ключа, с синтетиче�
 блоков результата, и слов `diff`/`oldText`/`newText` в нём нет вовсе. DSH считает хунки
 сам (`computeHunkDiffs`) и кладёт их в `tool/result.meta` для собственной карточки, но
 через ACP они не выходят, и в `tool_call_update` приходит лишь подтверждение вида
-`Created file` / `The file … has been updated successfully.` Поэтому лента Cockpit строит
+`Created file` / `The file … has been updated successfully.` Поэтому лента GrigDesk строит
 правку из `rawInput`: `edit` — структурный diff `old_string → new_string` (включая удаление
 с пустым `new_string`), `write` — превью содержимого (у перезаписи «до» неизвестно, и
 сплошное добавление соврало бы в стате `+N −0`). Обе формы обрезаны `STEP_DIFF_LIMIT`,
@@ -166,7 +166,7 @@ subagent/workflow/web/jobs отсутствуют. `bash` всё ещё опис
   host `/tmp`;
 - чтение sibling-файла вне cwd разрешено;
 - после отказа модель может повторить вызов с `sandbox_permissions`. DSH тогда предлагает
-  расширение до `workspace-write` или `danger-full-access`. Поэтому Cockpit обязан
+  расширение до `workspace-write` или `danger-full-access`. Поэтому GrigDesk обязан
   автоматически отклонять **все** такие запросы в режиме чата `read-only`; показывать
   пользователю allow нельзя. Factory `state-only` использует `approval: never`.
 
@@ -236,12 +236,12 @@ fail-open: hook result стал `pass`, ход и обычный `write` про�
 
 ## MCP
 
-Fake stdio-сервер появился как `mcp__cockpit-echo__echo`, получил только явно заданные
+Fake stdio-сервер появился как `mcp__grigdesk-echo__echo`, получил только явно заданные
 canary env и args и вернул вызов. В `read-only` он записал `mcp-env.json` вне cwd, то есть
 MCP действительно живёт вне песочницы агента. Это закрывает Factory-гейт: status MCP
 может писать через собственный ограниченный IPC, не открывая агенту второй writable root.
 
-Production `cockpit-work` в P10 выявил точность ACP V1 wire-контракта: stdio declaration
+Production `grigdesk-work` в P10 выявил точность ACP V1 wire-контракта: stdio declaration
 обязана содержать и `args`, и `env`, даже когда второй массив пуст. Без явного `env: []`
 SDK мягко убирал сервер из доступных tools. Stdio handler также не отвечает на JSON-RPC
 notification `notifications/initialized`. Оба свойства закреплены process-тестом, а
@@ -252,7 +252,7 @@ runtime отклоняет неполную MCP declaration до spawn.
 В первом ходе без инструментов модель видела `ROOT-A` и `ROOT-C`, но не `SUB` и не
 содержимое `IMPORT`: штатный plugin показывает строку `@docs/rule.md`, но не раскрывает
 её. После `cat sub/AGENTS.md` следующий ход видел `SUB`. Это подтверждает необходимость
-Cockpit-hook для `@`-импортов и upstream-поведение вложенных правил.
+GrigDesk-hook для `@`-импортов и upstream-поведение вложенных правил.
 
 Из-за sandbox hook не может хранить hash в launch/state-каталоге. Реализация импорта
 должна быть stateless и не писать в проект: контекст вычисляется и добавляется на каждый
@@ -331,7 +331,7 @@ product всегда запускает процесс из приватного
 
 Чистая установка pinned runtime, disposable chat smoke, metadata-only
 `factory-check --host-preflight` и Factory smoke завершились с rc 0. Production chat
-подтвердил импорт инструкций, resume между процессами, scoped `cockpit-work`, реальные
+подтвердил импорт инструкций, resume между процессами, scoped `grigdesk-work`, реальные
 `allow-once`/`reject-once`, все файловые границы и остановку команды без потомка.
 Production Factory подтвердил `stage_result`, неизменный source в `state-only`, правку
 проекта в `workspace-write`, отказ `transactional-write` до запуска и billing usage

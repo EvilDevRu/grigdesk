@@ -51,7 +51,7 @@ export function splashWindowOptions(input: {
     frame: false,
     resizable: false,
     fullscreenable: false,
-    title: 'Кокпит',
+    title: 'GrigDesk',
     icon: input.icon,
     backgroundColor: SPLASH_BACKGROUND,
     webPreferences: {

@@ -7,7 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 test('BOARD-TIMERS-03: топбар раскрывает таймеры и связывает задачи с доской', async (t) => {
-  const browser = await installUiBrowser(t, 'https://cockpit.test/#/pipeline');
+  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/pipeline');
   const [{ nextTick }, { mount }, BoardTimerPopover] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),

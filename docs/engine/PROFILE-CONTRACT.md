@@ -61,7 +61,7 @@ Id валидируется по установленным адаптерам (
 пишет `RUNNER_OVERRIDE_PRIMARY=<id>` и `RUNNER_OVERRIDE_FAILOVER` — профильный failover без
 выбранного id (task override целиком замещает пару primary/failover, профильный failover сам
 не подмешивается). Флаг допустим только при `start`; override хранится в реестре задачи и
-переживает resume. В Cockpit тот же override выставляет селект исполнителя в форме запуска,
+переживает resume. В GrigDesk тот же override выставляет селект исполнителя в форме запуска,
 а stage override — модалка узла (`POST /api/tasks/:id/runner/override` → `runner set/clear
 <STAGE>`; работающий этап — только `runner switch`).
 
@@ -85,7 +85,7 @@ provider-neutral, а смена модели или effort не требует �
 
 **`AUTO_COMPACT_WINDOW`** — необязательный ключ того же файла: порог автосжатия контекста
 ЭТАПА в токенах (`0` или отсутствие — не вмешиваться). Он читается только как **резерв**:
-запуск из кокпита передаёт своё значение переменной `FACTORY_STAGE_AUTO_COMPACT` и всегда,
+запуск из GrigDesk передаёт своё значение переменной `FACTORY_STAGE_AUTO_COMPACT` и всегда,
 включая осознанный `0`, — иначе выбор человека молча проигрывал бы настройке проекта. Профиль
 отвечает за запуски из CLI. Дальше движок отдаёт разрешённое число раннеру своим
 `RUNNER_AUTO_COMPACT_WINDOW`, и диалект CLI знает уже раннер, не профиль
@@ -112,7 +112,7 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 | `PROFILE_CTX` | общий стек, правила и проектные запреты для agent context |
 | `PROFILE_AGENT_CWD` | базовый рабочий каталог агента; route launcher закрепляет его по первому repository |
 | `PROFILE_AGENT_DIRS` | дополнительные разрешённые каталоги |
-| `PROFILE_TRIAGE_RULES` | файлы правил продукта для триажа кокпита: `ключ:путь` от корня репозитория из `PROFILE_TRIAGE_REPOS`; читаются в снимке кода захода ([правила продукта](../cockpit/pipeline/triage-product-rules.md)) |
+| `PROFILE_TRIAGE_RULES` | файлы правил продукта для триажа GrigDesk: `ключ:путь` от корня репозитория из `PROFILE_TRIAGE_REPOS`; читаются в снимке кода захода ([правила продукта](../grigdesk/pipeline/triage-product-rules.md)) |
 | `PROFILE_AGENT_ALLOW` / `PROFILE_AGENT_DENY` | project-specific command policy |
 | `PROFILE_SERVICE_HOST` | hostname без схемы и порта |
 | `PROFILE_LOOP_MAX_ROUNDS` | потолок кругов маршрутов в режиме «цикл» (`loop`): целое 1..300, без строки — 20; пустое, 0, больше 300 и мусор — отказ до запуска модели. Читается при start/resume/gate, на обычные маршруты не влияет. Resume остановки `loop-ceiling` без подъёма потолка ничего не меняет и не запускает — задача остаётся ждать человека |
@@ -248,7 +248,7 @@ instrumentation_tx_cleanup TASK TXID
 исторического `transactional-write` действует `derived`: движок собирает scope из diff перед
 узлом. Без транзакционных узлов режим `disabled`, и явный scope отклоняется. Поэтому новый
 алиас или переименование диагностического маршрута не требует изменений launcher-а, профиля
-или Cockpit; изменение самой topology меняет контракт и проверяется через `factory check`.
+или GrigDesk; изменение самой topology меняет контракт и проверяется через `factory check`.
 
 В isolated-режиме host выдаёт linked worktree только одной попытке и устанавливает
 `FACTORY_INSTRUMENTATION_ISOLATION=exclusive-worktree-v1`. В explicit shared-режиме допустим
@@ -347,7 +347,7 @@ bootstrap-источником, без выдуманного sequence осно�
 Ответ передаётся в evidence.bootstrapDecision и в служебном блоке полного вопроса/ответа
 через FACTORY_STAGE_BOOTSTRAP_DECISION_FILE. Pin и опубликованные prompts не меняются.
 Хранение, экспорт и человеческое решение —
-[контракт результатов bootstrap](../cockpit/pipeline/bootstrap-results.md).
+[контракт результатов bootstrap](../grigdesk/pipeline/bootstrap-results.md).
 
 У route-машины необязательное поле `bootstrap` принимает `required` (умолчание)
 или `skip`. При `skip` движок не вызывает отдельного SCOUT и не создаёт фиктивный
@@ -414,9 +414,9 @@ runner/триажа. Модели и бюджеты остаются в `runners
 | `profile_container TASK` | имя стенда/контейнера для typed context и resource lease |
 | `profile_stand_alive TASK` | только health существующего стенда, без create/start/delete |
 
-Для запуска publish-маршрутов из Cockpit профиль обязан объявить
+Для запуска publish-маршрутов из GrigDesk профиль обязан объявить
 `profile_delivery_targets TASK`: по одной строке `имя-repo<TAB>целевая-ветка` для каждого
-репозитория из `profile_repositories`. Это trusted-конфигурация Cockpit, а не
+репозитория из `profile_repositories`. Это trusted-конфигурация GrigDesk, а не
 редактируемый ввод браузера: сервер передаёт её движку явными `--delivery-target`.
 Сам движок ветки по profile hook не угадывает; прямой CLI-запуск по-прежнему обязан
 передать targets явно.
@@ -424,10 +424,10 @@ runner/триажа. Модели и бюджеты остаются в `runners
 Опциональный `profile_delivery_actions TASK` перечисляет дополнительные действия
 доставки — по одной строке на действие из словаря движка (сегодня это `task-comment`;
 обязательная для publish тройка commit/push/pull-request профилем не отключается).
-Каждое перечисленное действие Cockpit передаёт движку его флагом (`--task-comment`),
+Каждое перечисленное действие GrigDesk передаёт движку его флагом (`--task-comment`),
 неизвестное или повторное значение отклоняет запуск. Отсутствие хука или пустой вывод —
 ничего дополнительного не разрешено. Как и targets, это trusted-конфигурация профиля:
-набор действий принадлежит проекту, а не кокпиту.
+набор действий принадлежит проекту, а не GrigDesk.
 
 `source` всегда существует и каноничен. В `isolated` workspace — нормализованный
 планируемый путь, строго не пересекающийся ни с одним source; его создаёт профильный
@@ -439,7 +439,7 @@ primary Git checkout (`git-dir == git-common-dir`) и находиться на 
 Новую ветку задачи в `isolated` профильный `up.sh` создаёт от интеграционной ветки source:
 `origin/HEAD`, иначе `origin/master` или `origin/main`, а без ссылок origin — от HEAD.
 Ту же ветку читает триаж задачи и арбитр его вопросов
-([снимок триажа](../cockpit/pipeline/triage-source-snapshot.md)): профиль с другой базой
+([снимок триажа](../grigdesk/pipeline/triage-source-snapshot.md)): профиль с другой базой
 разойдётся с оценкой, а явная база запуска (`--backend-base`/`--frontend-base`) триажу
 неизвестна.
 
@@ -531,7 +531,7 @@ Cleanup использует прежний CAS и восстанавливае�
 движок кладёт `mcp__playwright*` в deny-правила запуска: браузер физически
 недоступен агенту, а не «не рекомендован промптом».
 
-Исполняемый узел route v2 обязан иметь `node.id == node.runKey.toLowerCase()`: Cockpit и
+Исполняемый узел route v2 обязан иметь `node.id == node.runKey.toLowerCase()`: GrigDesk и
 trusted runtime выводят ключ ворот/статуса из этой связи и отклоняют неоднозначный bundle.
 `timeoutClass` выбирается только из классов, известных движку. У маршрута с узлом `ship`
 этот узел канонический (`SHIP`, tail, `workspace-write`, класс `delivery`, required context
@@ -548,7 +548,7 @@ RUN_ID CONTEXT_FILE`. Диспетчер вызывает его после runn
 охват). Второй отказ подряд останавливает маршрут переходом `failed` у человека; причина при
 этом переезжает в `<RUN_KEY>_COMMENT` реестра поверх отчёта агента и в строку остановки
 журнала стадий (`маршрут остановлен: human — сторож отверг сдачу — …`), чтобы карточка
-кокпита называла её, а не отсылала к победному комментарию узла. Пиши диагноз последней
+GrigDesk называла её, а не отсылала к победному комментарию узла. Пиши диагноз последней
 строкой одной фразой: она едет в промпт и на карточку без обработки.
 Доверенные снимки такого hook должны лежать внутри `ROUTE_V2_ATTEMPT_DIR`/`FACTORY_CONTROL_ROOT`;
 копия в provider-writable `STATE_DIR` может использоваться для отчёта и UI, но не как источник
@@ -834,9 +834,9 @@ Shell-override по имени stage и fallback на старые маршру�
 фактический `timeout`, поэтому разойтись не могут. Агенту, убитому по таймауту, этап не
 засчитывается целиком — правки в worktree остаются, но следующий заход о них не знает.
 
-## Схема Cockpit
+## Схема GrigDesk
 
-`profiles/<name>/graph.json` обязательна как явный capability/config marker. Cockpit не строит
+`profiles/<name>/graph.json` обязательна как явный capability/config marker. GrigDesk не строит
 fallback-схему, а topology, подписи, переходы и optional outcomes читает из опубликованного
 immutable route catalog.
 
@@ -852,7 +852,7 @@ immutable route catalog.
 ### Профиль, который задач не ведёт
 
 Не каждый каталог в `profiles/` — конвейер. Профиль может существовать ради triage-конфигурации
-кокпита (`PROFILE_CTX`, `PROFILE_TRIAGE_*`, пути репозиториев) и allow-list команд агенту в чате,
+GrigDesk (`PROFILE_CTX`, `PROFILE_TRIAGE_*`, пути репозиториев) и allow-list команд агенту в чате,
 а задачи по проекту приходить прямым промптом без песочницы и этапов. Такой профиль заявляет это
 полем `graph.json`:
 
@@ -889,7 +889,7 @@ engine/bin/factory profile <name> debug clear
 
 ## Проверка профиля
 
-Без Cockpit и model call:
+Без GrigDesk и model call:
 
 ```bash
 engine/bin/factory-check <name> --quick

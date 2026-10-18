@@ -199,7 +199,7 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 // агента не нужно — создание от правки отличает адрес запроса, а не форма тела.
 type AgentForm = AgentCard;
 
-const PRO_KEY = 'cockpit-agents-pro';
+const PRO_KEY = 'grigdesk-agents-pro';
 
 const agents = ref<AgentCard[]>([]);
 const loading = ref(false);

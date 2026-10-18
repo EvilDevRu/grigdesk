@@ -16,13 +16,14 @@ import {
 import type { LockDeps, LockOwner } from '../../server/src/lib/dataHomeBoot.ts';
 import { referencesOf } from '../../tools/entrypointGraph.mts';
 import { freePort, isolatedEnv } from './helpers/pluginBootFixture.js';
+import { LEGACY, LEGACY_DATA_PATHS } from '../../shared/runtime/legacyBrand.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 // Любая проверка файловой системы ограничена собственным временным деревом.
 // Удаление регистрируется вместе с созданием и не зависит от результата assertions.
 function fixture(t: TestContext) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-data-boot-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-data-boot-'));
   const codeRoot = path.join(root, 'code');
   const home = path.join(root, 'user');
 
@@ -68,6 +69,80 @@ function lockDeps(extra: Partial<LockDeps> = {}): LockDeps {
   };
 }
 
+test('GB-01: старая папка требует шага владельца без создания новой', (t) => {
+  const f = fixture(t);
+
+  fs.mkdirSync(path.join(f.home, LEGACY.dataHomeDir));
+  assert.throws(() => prepareDataHome(f, { ...lockDeps(), owner: owner() }), (error: Error) => {
+    assert.ok(error.message.includes(`mv -T ~/${LEGACY.dataHomeDir} ~/.grigdesk`));
+
+    return true;
+  });
+  assert.equal(fs.existsSync(path.join(f.home, '.grigdesk')), false);
+});
+
+test('GB-02: ссылка старого имени на новую папку допустима', (t) => {
+  const f = fixture(t);
+  const data = path.join(f.home, '.grigdesk');
+
+  fs.mkdirSync(data);
+  fs.symlinkSync('.grigdesk', path.join(f.home, LEGACY.dataHomeDir));
+  assert.equal(checkDataHome(f, fs), fs.realpathSync(data));
+});
+
+test('GB-03: две настоящие папки запрещены', (t) => {
+  const f = fixture(t);
+
+  fs.mkdirSync(path.join(f.home, '.grigdesk'));
+  fs.mkdirSync(path.join(f.home, LEGACY.dataHomeDir));
+  assert.throws(() => checkDataHome(f, fs), /две папки данных/);
+});
+
+test('GB-04: новая установка создаёт новую папку данных', (t) => {
+  const f = fixture(t);
+  const result = prepareDataHome(f, { ...lockDeps(), owner: owner() });
+
+  assert.equal(result.home, path.join(f.home, '.grigdesk'));
+  assert.equal(fs.existsSync(result.home), true);
+});
+
+test('GB-05: явная независимая папка не зависит от старой папки HOME', (t) => {
+  const f = fixture(t);
+  const explicit = path.join(f.root, 'explicit');
+
+  fs.mkdirSync(path.join(f.home, LEGACY.dataHomeDir));
+  f.env.GRIGDESK_HOME = explicit;
+  assert.equal(checkDataHome(f, fs), explicit);
+});
+
+test('GB-06: неперенесённые внутренние пути блокируют любую выбранную папку', (t) => {
+  for (const explicit of [false, true]) {
+    for (const [oldPath] of LEGACY_DATA_PATHS) {
+      const f = fixture(t);
+      const data = explicit ? path.join(f.root, 'explicit') : path.join(f.home, '.grigdesk');
+
+      if (explicit) {
+        f.env.GRIGDESK_HOME = data;
+      }
+
+      write(path.join(data, oldPath), 'fixture');
+      assert.throws(() => checkDataHome(f, fs), /node tools\/brandMove.mts --apply/);
+    }
+  }
+});
+
+test('GB-08: старая раскладка в коде требует ручного переноса', (t) => {
+  const f = fixture(t);
+
+  write(path.join(f.codeRoot, '.env'), 'FIXTURE=1');
+  assert.throws(() => checkDataHome(f, fs), (error: Error) => {
+    assert.match(error.message, /вручную/);
+    assert.doesNotMatch(error.message, /tools\/moveDataHome.mts/);
+
+    return true;
+  });
+});
+
 test('DB-01 файл добавляет только отсутствующие ключи, включая пустые', (t) => {
   const f = fixture(t);
   const file = path.join(f.root, '.env');
@@ -87,7 +162,7 @@ test('DB-02 зарезервированные ключи запрещены д�
   const f = fixture(t);
   const file = path.join(f.root, '.env');
 
-  for (const key of ['COCKPIT_HOME', 'COCKPIT_ENV_FILE']) {
+  for (const key of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
     write(file, `${key}=\n`);
     assert.throws(() => loadDataHomeEnv(file, {}, fs), DataHomeError);
   }
@@ -124,20 +199,20 @@ test('DB-04 сторож объясняет чужую ссылку и неза�
   fs.symlinkSync(f.home, path.join(f.codeRoot, '.env'));
   assert.throws(() => checkDataHome(f, fs), new RegExp(f.home));
   fs.unlinkSync(path.join(f.codeRoot, '.env'));
-  write(path.join(f.home, '.cockpit/.move-journal.json'), '{"completed":false}');
-  assert.throws(() => checkDataHome(f, fs), /--apply.*--back/s);
-  write(path.join(f.home, '.cockpit/.move-journal.json'), '{"completed":true}');
+  write(path.join(f.home, '.grigdesk/.move-journal.json'), '{"completed":false}');
+  assert.throws(() => checkDataHome(f, fs), /Перенос не закончен.*вручную/s);
+  write(path.join(f.home, '.grigdesk/.move-journal.json'), '{"completed":true}');
   write(path.join(f.codeRoot, '.env'), 'X=1');
   assert.throws(() => checkDataHome(f, fs), /уже завершён.*вручную/s);
-  f.env.COCKPIT_HOME = path.join(f.root, 'explicit');
+  f.env.GRIGDESK_HOME = path.join(f.root, 'explicit');
   assert.doesNotThrow(() => checkDataHome(f, fs));
 });
 
 test('DB-13 вторая копия, журнал старого окна и висячая ссылка', (t) => {
   const f = fixture(t);
 
-  write(path.join(f.codeRoot, 'server/.state/cockpit-server.log'), 'log');
-  write(path.join(f.codeRoot, 'server/.state/cockpit-server.log.1'), 'log');
+  write(path.join(f.codeRoot, 'server/.state/grigdesk-server.log'), 'log');
+  write(path.join(f.codeRoot, 'server/.state/grigdesk-server.log.1'), 'log');
   assert.deepEqual(findLegacyData(f.codeRoot, fs), []);
   assert.doesNotThrow(() => checkDataHome(f, fs));
 
@@ -166,12 +241,12 @@ test('DB-05 права, канонический путь и границы па
   const alias = path.join(f.root, 'alias');
 
   fs.symlinkSync(result.home, alias);
-  f.env.COCKPIT_HOME = alias;
+  f.env.GRIGDESK_HOME = alias;
   prepareDataHome(f, deps);
-  assert.equal(f.env.COCKPIT_HOME, fs.realpathSync(result.home));
+  assert.equal(f.env.GRIGDESK_HOME, fs.realpathSync(result.home));
 
   for (const bad of [f.home, path.join(f.codeRoot, 'data'), f.root]) {
-    f.env.COCKPIT_HOME = bad;
+    f.env.GRIGDESK_HOME = bad;
     assert.throws(() => prepareDataHome(f, deps), DataHomeError);
   }
 });
@@ -302,9 +377,9 @@ async function boot(t: TestContext, root: string, overrides: NodeJS.ProcessEnv =
 }
 
 test('DB-08 SIGTERM снимает блокировку; DB-09 второй сервер получает 78', { timeout: 50_000 }, async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-data-server-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-data-server-'));
   // Удаление после процессов: после-hooks исполняются в порядке регистрации.
-  const first = await boot(t, root, { COCKPIT_CLI_TOKEN_PATH: undefined });
+  const first = await boot(t, root, { GRIGDESK_CLI_TOKEN_PATH: undefined });
 
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await first.ready();
@@ -314,7 +389,7 @@ test('DB-08 SIGTERM снимает блокировку; DB-09 второй се
 
   assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, first.child.pid);
 
-  const second = await boot(t, root, { COCKPIT_LOCK_WAIT_MS: '500' });
+  const second = await boot(t, root, { GRIGDESK_LOCK_WAIT_MS: '500' });
   const started = Date.now();
   const [code] = await second.exited;
 
@@ -328,11 +403,11 @@ test('DB-08 SIGTERM снимает блокировку; DB-09 второй се
 });
 
 test('DB-10 сервер сам читает файл настроек до config', { timeout: 30_000 }, async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-data-env-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-data-env-'));
 
-  write(path.join(root, '.env'), `COCKPIT_CLI_TOKEN_PATH=${root}/custom-token\n`);
+  write(path.join(root, '.env'), `GRIGDESK_CLI_TOKEN_PATH=${root}/custom-token\n`);
 
-  const server = await boot(t, root, { COCKPIT_CLI_TOKEN_PATH: undefined });
+  const server = await boot(t, root, { GRIGDESK_CLI_TOKEN_PATH: undefined });
 
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await server.ready();
@@ -359,7 +434,7 @@ test('DB-11 CLI проверки старой раскладки ничего н
   const result = run();
 
   assert.equal(result.status, 78);
-  assert.match(result.stderr, /moveDataHome/);
+  assert.match(result.stderr, /вручную/);
   assert.deepEqual(fs.readdirSync(f.home), []);
 });
 
@@ -367,7 +442,7 @@ test('DB-12 срок ожидания блокировки читается из
   const f = fixture(t);
   const data = path.join(f.root, 'data');
 
-  write(path.join(data, '.env'), 'COCKPIT_LOCK_WAIT_MS=0\n');
+  write(path.join(data, '.env'), 'GRIGDESK_LOCK_WAIT_MS=0\n');
   write(path.join(data, 'state/server.lock'), JSON.stringify({
     ...owner(process.pid),
     starttime: processStarttime(process.pid),
@@ -378,7 +453,7 @@ test('DB-12 срок ожидания блокировки читается из
     env: {
       PATH: '/usr/bin:/bin',
       HOME: f.home,
-      COCKPIT_HOME: data,
+      GRIGDESK_HOME: data,
       NODE_ENV: 'test',
     },
     encoding: 'utf8',

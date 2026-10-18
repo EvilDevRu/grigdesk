@@ -16,7 +16,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function withPrefs(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-speech-settings-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-speech-settings-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const prefsPath = path.join(dir, 'prefs.json');
   return { dir, prefsPath, prefs: new PrefsStore({ prefsPath }) };
@@ -174,11 +174,11 @@ test('GET/POST speech возвращают runtime capabilities и рассыл�
   const changed = await app.inject({
     method: 'POST',
     url: '/api/settings/speech',
-    payload: { engine: 'whisper', dictionary: 'Cockpit\r\nFastify' },
+    payload: { engine: 'whisper', dictionary: 'GrigDesk\r\nFastify' },
   });
   assert.equal(changed.statusCode, 200);
   assert.equal(changed.json().settings.engine, 'whisper');
-  assert.equal(changed.json().settings.dictionary, 'Cockpit\nFastify');
+  assert.equal(changed.json().settings.dictionary, 'GrigDesk\nFastify');
   assert.equal(applied.length, 1);
   assert.deepEqual(events, [{ event: 'speech-settings', data: changed.json() }]);
 });

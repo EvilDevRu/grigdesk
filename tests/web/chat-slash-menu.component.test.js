@@ -1,5 +1,5 @@
-// Меню слэш-команд чата: секция Cockpit + секция выбранного исполнителя.
-// Merge с дедупликацией (кокпит глушит дубль), фильтр по префиксу, клавиатурная
+// Меню слэш-команд чата: секция GrigDesk + секция выбранного исполнителя.
+// Merge с дедупликацией (GrigDesk глушит дубль), фильтр по префиксу, клавиатурная
 // навигация мимо пунктов run:'none', dispatch провайдерской команды с признаком
 // slashCommand. Компонентный монтаж ChatSession.vue (test-first, план §3.5).
 import assert from 'node:assert/strict';
@@ -20,7 +20,7 @@ async function browserHarness() {
     return shared;
   }
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/chats' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/chats' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -190,12 +190,12 @@ function menuState(wrapper) {
   return { heads, items };
 }
 
-test('меню объединяет секции Cockpit и исполнителя, дедуп по имени (кокпит сильнее)', async (t) => {
+test('меню объединяет секции GrigDesk и исполнителя, дедуп по имени (GrigDesk сильнее)', async (t) => {
   const { wrapper } = await mountChat(t);
   await wrapper.find('textarea').setValue('/');
   const { heads, items } = menuState(wrapper);
 
-  assert.deepEqual(heads, ['Cockpit', 'Kimi Code']);
+  assert.deepEqual(heads, ['GrigDesk', 'Kimi Code']);
   const cmds = items.map((i) => i.cmd);
   assert.deepEqual(cmds, ['/compact', '/clear', '/reset', '/new', '/status', '/goal']);
   const compact = items.filter((i) => i.cmd === '/compact');
@@ -210,14 +210,14 @@ test('фильтр по префиксу работает по обеим сек
   await wrapper.find('textarea').setValue('/st');
   const { heads, items } = menuState(wrapper);
   assert.deepEqual(items.map((i) => i.cmd), ['/status']);
-  assert.deepEqual(heads, ['Kimi Code'], 'пустая секция кокпита не рисуется');
+  assert.deepEqual(heads, ['Kimi Code'], 'пустая секция GrigDesk не рисуется');
 });
 
 test('клавиатура: стрелки пропускают none-пункты, Enter выбирает подсвеченное', async (t) => {
   const { wrapper, sendCalls } = await mountChat(t);
   const input = wrapper.find('textarea');
   await input.setValue('/');
-  // Выбираемых пять: 4 кокпит + /status. /goal (run:none) пропускается.
+  // Выбираемых пять: 4 GrigDesk + /status. /goal (run:none) пропускается.
   for (let i = 0; i < 5; i += 1) await input.trigger('keydown', { key: 'ArrowDown' });
   let { items } = menuState(wrapper);
   assert.equal(items.find((i) => i.on)?.cmd, '/compact', 'после полного круга — снова первый');
@@ -336,15 +336,15 @@ test('frozen (сжатие/reset): провайдерская команда н�
   assert.equal(sendCalls.length, 0);
 });
 
-test('провайдер не резолвлен — только секция Cockpit', async (t) => {
+test('провайдер не резолвлен — только секция GrigDesk', async (t) => {
   const { wrapper } = await mountChat(t, { session: makeSession({ modelRef: null, model: 'legacy-x' }) });
   await wrapper.find('textarea').setValue('/');
   const { heads, items } = menuState(wrapper);
-  assert.deepEqual(heads, ['Cockpit']);
+  assert.deepEqual(heads, ['GrigDesk']);
   assert.deepEqual(items.map((i) => i.cmd), ['/compact', '/clear', '/reset', '/new']);
 });
 
-test('команды кокпита работают как раньше (/new, /clear)', async (t) => {
+test('команды GrigDesk работают как раньше (/new, /clear)', async (t) => {
   const { wrapper, calls, sendCalls } = await mountChat(t);
   await wrapper.find('textarea').setValue('/new');
   await wrapper.find('textarea').trigger('keydown', { key: 'Enter' });

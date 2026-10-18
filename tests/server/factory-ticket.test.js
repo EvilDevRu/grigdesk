@@ -3,7 +3,7 @@
 // Тикет движок читает НЕ на старте, а при сборке bootstrap-контекста — то есть уже
 // после подъёма песочницы. Кривое поле обернулось бы отказом 78 через 20–25 минут
 // провижининга и потерянным слотом стенда, поэтому правила валидатора продублированы
-// в кокпите. Этот файл держит копию честной: он повторяет ровно те же правила, что
+// в GrigDesk. Этот файл держит копию честной: он повторяет ровно те же правила, что
 // engine/bin/factory-context (read_ticket), и падает, если они разъедутся.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -92,12 +92,12 @@ test('TICKET-06: файл обрезается по 256 КиБ, а не толь
   const ticket = buildTicket({ ...BASE, description: 'я'.repeat(TICKET_LIMITS.description) });
   const size = Buffer.byteLength(serializeTicket(ticket), 'utf8');
   assert.ok(size <= TICKET_LIMITS.fileBytes, `${size} байт при потолке ${TICKET_LIMITS.fileBytes}`);
-  assert.match(ticket.description, /описание обрезано кокпитом/);
+  assert.match(ticket.description, /описание обрезано GrigDesk/);
   assert.equal(ticket.title, BASE.title);
 });
 
-test('TICKET-07: файл пишется абсолютным путём в хранилище кокпита, режимом 600', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ticket-'));
+test('TICKET-07: файл пишется абсолютным путём в хранилище GrigDesk, режимом 600', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ticket-'));
   t.after(async () => rm(dir, { recursive: true, force: true }));
   const file = await writeTicketFile({ dir, task: '8200', ticket: buildTicket(BASE) });
 

@@ -100,14 +100,14 @@ export function installResultText(job: PluginInstallJob): string {
 
   if (job.status === 'done') {
     if (job.kind === 'rollback') {
-      return `Версия v${version} восстановлена. Перезапустите Cockpit.`;
+      return `Версия v${version} восстановлена. Перезапустите GrigDesk.`;
     }
 
     if (job.preview?.replaces.kind === 'none') {
-      return `Плагин «${name}» v${version} установлен. Включите его в каталоге и перезапустите Cockpit.`;
+      return `Плагин «${name}» v${version} установлен. Включите его в каталоге и перезапустите GrigDesk.`;
     }
 
-    return `Плагин «${name}» обновлён до v${version}. Перезапустите Cockpit, чтобы применить.`;
+    return `Плагин «${name}» обновлён до v${version}. Перезапустите GrigDesk, чтобы применить.`;
   }
 
   if (job.status === 'failed') {

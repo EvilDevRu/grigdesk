@@ -54,16 +54,16 @@ jobs:
 
       - name: Контрольная сумма
         working-directory: bin
-        run: sha256sum cockpit-relay > cockpit-relay.sha256
+        run: sha256sum grigdesk-relay > grigdesk-relay.sha256
 
       - name: Файл для проверки
         if: ${{ !inputs.release }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: cockpit-relay-linux-x64
+          name: grigdesk-relay-linux-x64
           path: |
-            bin/cockpit-relay
-            bin/cockpit-relay.sha256
+            bin/grigdesk-relay
+            bin/grigdesk-relay.sha256
           retention-days: 7
           if-no-files-found: error
 
@@ -75,9 +75,9 @@ jobs:
           NODE_VERSION: ${{ steps.tag.outputs.node }}
         run: >-
           gh release create "$TAG"
-          bin/cockpit-relay bin/cockpit-relay.sha256
+          bin/grigdesk-relay bin/grigdesk-relay.sha256
           --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false
           --title "Посредник $TAG"
           --notes "Linux x64, Node $NODE_VERSION.
-          Проверка: sha256sum -c cockpit-relay.sha256.
-          Лицензия Node: cockpit-relay --license"
+          Проверка: sha256sum -c grigdesk-relay.sha256.
+          Лицензия Node: grigdesk-relay --license"

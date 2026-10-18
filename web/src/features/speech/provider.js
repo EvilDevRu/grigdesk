@@ -12,7 +12,7 @@ import {
   speechExecutionFingerprint,
 } from './controller.js';
 
-export const DICTATION_CONTROLLER_KEY = Symbol('cockpit-dictation-controller');
+export const DICTATION_CONTROLLER_KEY = Symbol('grigdesk-dictation-controller');
 
 /**
  * Фабрика нужна тестам lifecycle. Production-export ниже использует реальные Pinia/API.

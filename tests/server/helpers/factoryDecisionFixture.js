@@ -94,7 +94,7 @@ async function writeCheckedJson(dir, name, value, contentAddressed = false) {
  * Подставной factory сначала заменяет runtime, затем засыпает до убийства по сроку.
  */
 export async function factoryDecisionFixture(t, { after = null, before = {}, corruptAfter = false } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-decision-ledger-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-decision-ledger-'));
   const stateDir = path.join(root, 'state');
   const controlDir = path.join(root, 'control');
   const routesDir = path.join(root, 'routes');

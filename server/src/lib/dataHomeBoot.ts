@@ -4,6 +4,9 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseEnv } from 'node:util';
 import { dataHome, dataHomeExplicit, dataPath, envFilePath } from '../../../shared/runtime/dataHome.ts';
+import {
+  LEGACY, LEGACY_DATA_PATHS, legacyEnvWarnings, legacyRootProblem,
+} from '../../../shared/runtime/legacyBrand.ts';
 
 export type BootFs = typeof nodeFs;
 
@@ -31,9 +34,9 @@ export interface LockDeps {
 export interface PrepareDeps extends LockDeps { owner: LockOwner }
 
 // Журнал старой сборки окна в server/.state — след запуска, а не данные: старая сборка без
-// ключа COCKPIT_LOG пишет его туда и после уборки ссылок, сервер из-за этого не встаёт.
+// ключа GRIGDESK_LOG пишет его туда и после уборки ссылок, сервер из-за этого не встаёт.
 const LEGACY_DIRS: Readonly<Record<string, ReadonlyArray<string | RegExp>>> = {
-  'server/.state': [/^cockpit-server\.log/],
+  'server/.state': [/^grigdesk-server\.log/],
   '.state/plugins': [],
   '.state/ui-releases': [],
   '.state/mobile': [],
@@ -116,18 +119,55 @@ export function findLegacyData(codeRoot: string, fs: BootFs): string[] {
 }
 
 function migrationError(reason: string): DataHomeError {
-  return new DataHomeError(`${reason}\nПроверьте node tools/moveDataHome.mts; затем `
-    + 'node tools/moveDataHome.mts --apply (или --back для отмены переноса).\n'
-    + 'Для второй копии репозитория задайте свою COCKPIT_HOME.');
+  return new DataHomeError(`${reason}\nПеренесите данные вручную в выбранную папку GrigDesk.\n`
+    + 'Для второй копии репозитория задайте свою GRIGDESK_HOME.');
+}
+
+/**
+ * Старый каталог не превращается в пустую новую установку, а две базы не смешиваются.
+ * Даже явно выбранная папка требует переноса внутренних имён до первых записей сервера.
+ */
+function checkBrandDataHome(selected: string, input: CheckInput, fs: BootFs): void {
+  if (!dataHomeExplicit(input)) {
+    const old = path.join(input.home, LEGACY.dataHomeDir);
+    const info = stat(old, fs);
+
+    if (info?.isSymbolicLink()) {
+      if (canonical(old, fs) !== canonical(selected, fs)) {
+        throw new DataHomeError(`Ссылка ~/${LEGACY.dataHomeDir} должна вести в ~/.grigdesk.`);
+      }
+    } else if (info) {
+      if (stat(selected, fs)) {
+        throw new DataHomeError('Найдены две папки данных; выберите одну перед запуском.');
+      }
+
+      throw new DataHomeError('Найдена прежняя папка данных. Закройте приложение и выполните '
+        + `mv -T ~/${LEGACY.dataHomeDir} ~/.grigdesk && ln -s .grigdesk ~/${LEGACY.dataHomeDir}.`);
+    }
+  }
+
+  for (const [oldPath] of LEGACY_DATA_PATHS) {
+    if (stat(path.join(selected, oldPath), fs)) {
+      throw new DataHomeError('В папке данных остались прежние внутренние имена: '
+        + 'запустите node tools/brandMove.mts --apply.');
+    }
+  }
 }
 
 // Та же проверка доступна запускалкам без создания папок, чтения .env или захвата блокировки.
 // Явный независимый каталог позволяет запустить вторую копию репозитория.
 export function checkDataHome(input: CheckInput, fs: BootFs): string {
   try {
+    const problem = legacyRootProblem(input.env);
+
+    if (problem) {
+      throw new DataHomeError(problem);
+    }
+
     const selected = dataHome(input);
 
     checkPlacement(selected, input, fs);
+    checkBrandDataHome(selected, input, fs);
 
     if (dataHomeExplicit(input)) {
       return selected;
@@ -136,7 +176,7 @@ export function checkDataHome(input: CheckInput, fs: BootFs): string {
     // Вторая копия репозитория (git worktree: .git — файл) без своей папки взяла бы настоящие
     // данные владельца — чаты, токен Telegram, ключи Б24 — пока основной сервер остановлен.
     if (stat(path.join(input.codeRoot, '.git'), fs)?.isFile()) {
-      throw new DataHomeError('Это вторая копия репозитория (git worktree): задайте ей свою COCKPIT_HOME.');
+      throw new DataHomeError('Это вторая копия репозитория (git worktree): задайте ей свою GRIGDESK_HOME.');
     }
 
     for (const [source, target] of [['.env', 'env'], ['server/.state', 'state']] as const) {
@@ -160,7 +200,7 @@ export function checkDataHome(input: CheckInput, fs: BootFs): string {
       }
 
       if (actual !== expected) {
-        throw migrationError(`Данные в ${actual}: задайте COCKPIT_HOME или верните ссылку ${link}.`);
+        throw migrationError(`Данные в ${actual}: задайте GRIGDESK_HOME или верните ссылку ${link}.`);
       }
     }
 
@@ -189,7 +229,7 @@ export function checkDataHome(input: CheckInput, fs: BootFs): string {
       throw migrationError(`Найдена старая раскладка: ${legacy.join(', ')}.`);
     }
 
-    return selected;
+    return canonical(selected, fs);
   } catch (error) {
     if (error instanceof DataHomeError) {
       throw error;
@@ -208,6 +248,10 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
     text = fs.readFileSync(file, 'utf8');
   } catch (error) {
     if (missing(error)) {
+      for (const warning of legacyEnvWarnings(env)) {
+        process.stderr.write(`${warning}\n`);
+      }
+
       return [];
     }
 
@@ -216,10 +260,10 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
 
   const parsed = parseEnv(text);
 
-  for (const key of ['COCKPIT_HOME', 'COCKPIT_ENV_FILE']) {
-    if (Object.hasOwn(parsed, key)) {
-      throw new DataHomeError(`Ключ ${key} запрещён в файле настроек ${file}.`);
-    }
+  const problem = legacyRootProblem(parsed, true);
+
+  if (problem) {
+    throw new DataHomeError(problem);
   }
 
   const added: string[] = [];
@@ -231,6 +275,10 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
 
     env[key] = value;
     added.push(key);
+  }
+
+  for (const warning of legacyEnvWarnings(env)) {
+    process.stderr.write(`${warning}\n`);
   }
 
   return added;
@@ -340,7 +388,7 @@ export function acquireDataHomeLock(file: string, owner: LockOwner, deps: LockDe
         if (deps.now() >= deadline) {
           throw new DataHomeError(`Папкой данных ${path.dirname(path.dirname(file))} уже пользуется сервер `
             + `(pid ${record!.pid}, копия ${record!.root}). Второй сервер с той же папкой не запускается: `
-            + 'задайте другой COCKPIT_HOME.');
+            + 'задайте другой GRIGDESK_HOME.');
         }
 
         deps.sleep(Math.min(200, deadline - deps.now()));
@@ -373,6 +421,8 @@ export function prepareDataHome(input: CheckInput, deps: PrepareDeps): { home: s
   const { fs } = deps;
   const selected = checkDataHome(input, fs);
 
+  loadDataHomeEnv(envFilePath(input), input.env, fs);
+
   for (const directory of [selected, dataPath(selected, 'state')]) {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     fs.chmodSync(directory, 0o700);
@@ -380,8 +430,7 @@ export function prepareDataHome(input: CheckInput, deps: PrepareDeps): { home: s
 
   const home = fs.realpathSync(selected);
 
-  input.env.COCKPIT_HOME = home;
-  loadDataHomeEnv(envFilePath(input), input.env, fs);
+  input.env.GRIGDESK_HOME = home;
 
   const lockPath = dataPath(home, 'lock');
 

@@ -55,7 +55,7 @@ export const useChatsStore = defineStore('chats', () => {
     try {
       await action();
     } catch (failure) {
-      target.value = failure instanceof Error ? failure.message : 'Нет связи с Кокпитом.';
+      target.value = failure instanceof Error ? failure.message : 'Нет связи с GrigDesk.';
     } finally {
       busy.value = false;
     }

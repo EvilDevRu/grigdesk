@@ -1,8 +1,8 @@
 // Схема v1 совпадает с mobileContract.schema.json; новые поля остаются необязательными.
 export const mobileSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:cockpit:mobile:v1",
-  "title": "Мобильный контракт Кокпита v1",
+  "$id": "urn:grigdesk:mobile:v1",
+  "title": "Мобильный контракт GrigDesk v1",
   "$defs": {
     "hello": {
       "type": "object",
@@ -1979,7 +1979,7 @@ export const mobileSchema = {
           "properties": {
             "kind": {
               "enum": [
-                "cockpit"
+                "grigdesk"
               ]
             }
           },
@@ -2506,7 +2506,7 @@ export const mobileSchema = {
       "status": 202,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "send-request"
     },
@@ -2523,7 +2523,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2546,7 +2546,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "waiting-request"
     },
@@ -2575,7 +2575,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "gate-request"
     },
@@ -2586,7 +2586,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2597,7 +2597,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2626,7 +2626,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "launch-request"
     },
@@ -2676,7 +2676,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "chat-create-request"
     },
@@ -2687,7 +2687,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "chat-settings-request"
     },
@@ -2698,7 +2698,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "action-request"
     },
@@ -2709,7 +2709,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "workspace-request"
     },
@@ -2720,7 +2720,7 @@ export const mobileSchema = {
       "status": 200,
       "headers": [
         "Idempotency-Key",
-        "X-Cockpit-Operation-Created-At"
+        "X-GrigDesk-Operation-Created-At"
       ],
       "request": "workspace-change-request"
     }

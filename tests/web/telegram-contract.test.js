@@ -23,7 +23,7 @@ const BOT = {
   privacyHint: 'Режим приватности включён.',
 };
 const RULE = {
-  project: 'cockpit',
+  project: 'grigdesk',
   chatId: -1_001_000_000_042,
   username: null,
   title: 'Общий чат',

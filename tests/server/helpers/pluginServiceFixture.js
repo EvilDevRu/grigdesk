@@ -23,7 +23,7 @@ export const commandSuccess = {
  * Cleanup сначала закрывает сервис, а затем удаляет дерево fixture.
  */
 export async function serviceFixture(t, overrides = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-install-service-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-install-service-'));
   const pluginsDir = path.join(root, 'plugins');
   const statePath = path.join(root, 'state/install.json');
   const npmCalls = [];
@@ -35,7 +35,7 @@ export async function serviceFixture(t, overrides = {}) {
   const service = new PluginInstallService({
     pluginsDir,
     statePath,
-    cockpitVersion: '1.0.0',
+    grigDeskVersion: '1.0.0',
     reservedIds: ['code'],
     runNpm: async (cwd) => {
       npmCalls.push(cwd);

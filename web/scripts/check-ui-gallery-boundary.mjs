@@ -114,7 +114,7 @@ export function collectUiGalleryBoundary(repoRoot = DEFAULT_REPO_ROOT) {
     const stat = fs.statSync(absoluteFile);
     if (stat.size > 2_000_000) continue;
     const source = fs.readFileSync(absoluteFile, 'utf8');
-    if (/dev\/ui-gallery|Cockpit UI Gallery/.test(source)) {
+    if (/dev\/ui-gallery|GrigDesk UI Gallery/.test(source)) {
       errors.push(`gallery marker попал в dist: ${file}`);
     }
   }

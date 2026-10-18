@@ -1,4 +1,4 @@
-import type { CockpitProbe } from '../../shared/runtime/cockpitReadiness.ts';
+import type { GrigDeskProbe } from '../../shared/runtime/grigDeskReadiness.ts';
 import { DESKTOP_RESTART_EXIT_CODE } from '../../server/src/lib/desktopParent.ts';
 import type { ServerRuntime } from './runtimeConfig.ts';
 
@@ -16,7 +16,7 @@ export interface ChildHandle {
 
 export interface SupervisorAdapters {
   loadRuntime(): Promise<{ runtime: ServerRuntime } | { problem: string; message: string }>;
-  probe(signal: AbortSignal): Promise<CockpitProbe>;
+  probe(signal: AbortSignal): Promise<GrigDeskProbe>;
   unitState(signal: AbortSignal): Promise<string>;
   runGate(runtime: ServerRuntime, signal: AbortSignal): Promise<{ code: number; lastLine: string }>;
   spawnServer(runtime: ServerRuntime): ChildHandle;
@@ -53,8 +53,8 @@ interface OwnedChild {
  * Выбирает действие по ответу HTTP и снимку службы без побочных эффектов.
  * Решение о запуске принимается только при явно закрытом порте и свободной службе.
  */
-export function decideStart(probe: CockpitProbe, unitState: string): StartDecision {
-  if (probe === 'cockpit') {
+export function decideStart(probe: GrigDeskProbe, unitState: string): StartDecision {
+  if (probe === 'grigdesk') {
     return 'connect';
   }
 
@@ -92,10 +92,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     if (!stopping && adapters.now() >= input.deadline) {
       const detail = waitReason ? ` ${waitReason}.` : '';
 
-      return new Error(`Истёк срок запуска сервера Кокпита.${detail}`);
+      return new Error(`Истёк срок запуска сервера GrigDesk.${detail}`);
     }
 
-    return new Error('Старт сервера Кокпита отменён.');
+    return new Error('Старт сервера GrigDesk отменён.');
   }
 
   /**
@@ -155,7 +155,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     if (result === 'conflict') {
       const port = new URL(input.origin).port || '80';
 
-      throw new Error(`Порт ${port} занят другой программой, это не Кокпит.`);
+      throw new Error(`Порт ${port} занят другой программой, это не GrigDesk.`);
     }
 
     return false;
@@ -182,7 +182,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       if (!stopping) {
         const message = error instanceof Error ? error.message : String(error);
 
-        adapters.log(`Сервер Кокпита: ${message}`);
+        adapters.log(`Сервер GrigDesk: ${message}`);
       }
     }
   }
@@ -272,7 +272,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
         break;
       }
 
-      if (probe === 'cockpit') {
+      if (probe === 'grigdesk') {
         ownership = 'owned';
         waitReason = null;
 
@@ -286,7 +286,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
 
     check(input);
 
-    if (probe === 'cockpit') {
+    if (probe === 'grigdesk') {
       ownership = 'external';
       waitReason = null;
 
@@ -295,7 +295,9 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
 
     const code = child.code ?? child.signal ?? 'неизвестен';
 
-    throw new Error(`Сервер Кокпита завершился при запуске (код ${code}). Журнал: ${child.runtime.logPath}.`);
+    throw new Error(
+      `Сервер GrigDesk завершился при запуске (код ${code}). Журнал: ${child.runtime.logPath}.`,
+    );
   }
 
   /**
@@ -366,7 +368,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
    */
   function ensure(input: EnsureInput): Promise<void> {
     if (stopping) {
-      return Promise.reject(new Error('Старт сервера Кокпита отменён.'));
+      return Promise.reject(new Error('Старт сервера GrigDesk отменён.'));
     }
 
     if (pending) {

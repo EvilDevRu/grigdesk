@@ -13,8 +13,8 @@ process.env.NODE_ENV = 'test';
  */
 async function installBrowser(t) {
   // Vite объявляет эти константы через define; node-компиляции нужен тот же контракт.
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://localhost:28140/' });
   for (const [key, value] of Object.entries({
@@ -60,7 +60,7 @@ function copy(value) {
 async function mountSettingsAccess(t, { confirmAnswers = [] } = {}) {
   const browser = await installBrowser(t);
 
-  browser.localStorage.setItem('cockpit-settings-tab', 'access');
+  browser.localStorage.setItem('grigdesk-settings-tab', 'access');
 
   const gets = [];
   const posts = [];
@@ -121,7 +121,7 @@ async function mountSettingsAccess(t, { confirmAnswers = [] } = {}) {
       async install() {},
       async checkForUpdate() {},
     }),
-    useCockpitUpdateStore: () => ({ state: null, status: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, status: null, async load() {} }),
   };
 
   const { mount, flushPromises } = await import(

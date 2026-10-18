@@ -7,7 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 const PERMISSION_PATH = webFile('src/views/chat/ChatPermission.vue');
 
 async function mountPermission(t, req) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   globalThis.__dbPermissionPrompt = async () => null;
   const [{ mount, flushPromises }, component] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),

@@ -6,9 +6,9 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const COCKPIT_DOCS = 'docs/cockpit';
+const GRIGDESK_DOCS = 'docs/grigdesk';
 
-// Папки docs/cockpit, которые не являются областями: контракты продукта и справочник.
+// Папки docs/grigdesk, которые не являются областями: контракты продукта и справочник.
 const NOT_AREAS = new Set(['guide', 'reference']);
 
 // Локальная точка входа Claude Code: в свежем клоне её нет, и это штатное состояние.
@@ -25,7 +25,7 @@ function source(relativePath: string): string {
 }
 
 function areas(): string[] {
-  return readdirSync(path.join(ROOT, COCKPIT_DOCS), { withFileTypes: true })
+  return readdirSync(path.join(ROOT, GRIGDESK_DOCS), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !NOT_AREAS.has(entry.name))
     .map((entry) => entry.name)
     .sort();
@@ -65,10 +65,10 @@ function visibleFiles(prefix: string): string[] {
   return out.split('\0').filter((file) => file && existsSync(path.join(ROOT, file)));
 }
 
-test('в docs/cockpit есть области, и у каждой есть README-оглавление', () => {
+test('в docs/grigdesk есть области, и у каждой есть README-оглавление', () => {
   const list = areas();
   const withoutReadme = list
-    .filter((area) => !existsSync(path.join(ROOT, COCKPIT_DOCS, area, 'README.md')));
+    .filter((area) => !existsSync(path.join(ROOT, GRIGDESK_DOCS, area, 'README.md')));
 
   assert.equal(list.length > 0, true);
   assert.deepEqual(withoutReadme, []);
@@ -80,7 +80,7 @@ test('README области ведёт на каждый документ сво
   const orphans: string[] = [];
 
   for (const area of areas()) {
-    const dir = `${COCKPIT_DOCS}/${area}`;
+    const dir = `${GRIGDESK_DOCS}/${area}`;
     const readme = source(`${dir}/README.md`);
     const linked = new Set([...readme.matchAll(/\]\(([^)\s#]+)(?:#[^)\s]*)?\)/g)]
       .map((match) => path.posix.normalize(path.posix.join(dir, match[1] ?? ''))));
@@ -100,8 +100,8 @@ test('CLAUDE.md и карта документации ведут в кажду�
   const index = source('docs/README.md');
 
   assert.deepEqual({
-    missingInClaude: areas().filter((area) => !claude.includes(`](docs/cockpit/${area}/README.md)`)),
-    missingInIndex: areas().filter((area) => !index.includes(`](cockpit/${area}/README.md)`)),
+    missingInClaude: areas().filter((area) => !claude.includes(`](docs/grigdesk/${area}/README.md)`)),
+    missingInIndex: areas().filter((area) => !index.includes(`](grigdesk/${area}/README.md)`)),
   }, {
     missingInClaude: [],
     missingInIndex: [],
@@ -109,9 +109,9 @@ test('CLAUDE.md и карта документации ведут в кажду�
 });
 
 // Верхний уровень принадлежит папкам: документ без области не попадает ни в одно оглавление.
-test('верхний уровень docs/cockpit держит только папки', () => {
-  const loose = visibleFiles(COCKPIT_DOCS)
-    .filter((file) => path.posix.dirname(file) === COCKPIT_DOCS);
+test('верхний уровень docs/grigdesk держит только папки', () => {
+  const loose = visibleFiles(GRIGDESK_DOCS)
+    .filter((file) => path.posix.dirname(file) === GRIGDESK_DOCS);
 
   assert.deepEqual(loose, []);
 });
@@ -135,7 +135,7 @@ test('AGENTS.md объясняет исполнителю путь к докум
   const agents = source('AGENTS.md');
 
   assert.deepEqual({
-    readmeFirst: /docs\/cockpit\/<область>\/README\.md/u.test(agents),
+    readmeFirst: /docs\/grigdesk\/<область>\/README\.md/u.test(agents),
     search: /`rg`/u.test(agents),
     sameTurn: /исправ[^\n]{0,120}(?:том же|одном) заход/iu.test(agents),
     localTier: /docs\/local\//u.test(agents),

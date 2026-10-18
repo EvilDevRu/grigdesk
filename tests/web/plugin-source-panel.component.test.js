@@ -9,7 +9,7 @@ import { webInstallInfo } from './helpers/pluginInstallFixtures.js';
 
 process.env.NODE_ENV = 'test';
 
-const browser = await createUiBrowser('https://cockpit.test/#/settings');
+const browser = await createUiBrowser('https://grigdesk.test/#/settings');
 const { reactive, nextTick } = await import(singletonUrl('vue'));
 const { mount, flushPromises } = await import(
   '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -140,7 +140,7 @@ test('P6: версия ожидающая рестарта подписана я
 
   assert.equal(wrapper.find('[data-role="plugin-source-restart"]').exists(), true);
   assert.equal(wrapper.get('[data-role="plugin-source-restart"]').text(),
-    'Новая версия ждёт перезапуска Cockpit.');
+    'Новая версия ждёт перезапуска GrigDesk.');
 });
 
 test('P7: повреждённая previous остаётся видимой с отказом отката', async (t) => {

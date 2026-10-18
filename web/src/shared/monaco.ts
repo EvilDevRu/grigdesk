@@ -1,4 +1,4 @@
-// Общая обвязка Monaco для всех вьюх кокпита (диф приёмки, плагин «Код»).
+// Общая обвязка Monaco для всех вьюх GrigDesk (диф приёмки, плагин «Код»).
 // Ядро редактора + подсветка всех базовых языков (Monarch, главный поток).
 // НЕ тянем language/typescript|json (им нужны свои воркеры и они сыплют «Missing requestHandler»);
 // для read-only просмотра языковые сервисы не нужны — только подсветка.
@@ -16,8 +16,8 @@ declare global {
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
-// Тема под палитру кокпита (определяется один раз на модуль).
-monaco.editor.defineTheme('cockpit-dark', {
+// Тема под палитру GrigDesk (определяется один раз на модуль).
+monaco.editor.defineTheme('grigdesk-dark', {
   base: 'vs-dark',
   inherit: true,
   rules: [],
@@ -85,7 +85,7 @@ export function langOf(path: string): string {
 // Общие опции read-only редакторов. Фичи, которым нужен языковой воркер
 // (у нас только editor.worker), выключены — чтобы не сыпать в консоль.
 export const READONLY_OPTS: monaco.editor.IStandaloneEditorConstructionOptions = {
-  theme: 'cockpit-dark',
+  theme: 'grigdesk-dark',
   readOnly: true,
   automaticLayout: true,
   fontSize: 12.5,

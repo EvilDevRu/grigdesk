@@ -164,7 +164,7 @@ export function migrateChatModelRecord(
   };
   if (resolved.ok) {
     next.modelRef = resolved.modelRef;
-    // Rollback window: предыдущая версия Cockpit умеет читать только legacy model.
+    // Rollback window: предыдущая версия GrigDesk умеет читать только legacy model.
     if (LEGACY_DUAL_WRITE_PROVIDERS.has(resolved.modelRef.provider)) {
       next.model = resolved.modelRef.model;
     } else {

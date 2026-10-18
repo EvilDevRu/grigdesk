@@ -79,7 +79,7 @@ test('отказ API записывается шаблоном из катало
 });
 
 test('срок уровня соблюдается до и после F5 без связи с сервером', async () => {
-  const key = 'cockpit-diagnostic-level-v2';
+  const key = 'grigdesk-diagnostic-level-v2';
   const values = new Map([[key, JSON.stringify({
     level: 'verbose', expiresAt: Math.floor(Date.now() / 1000) - 1,
   })]]);

@@ -33,7 +33,7 @@ export interface Sandbox {
   installWindow(): void;
   installRuntime(text?: string): void;
   lock(target: string): void;
-  serve(kind: 'cockpit' | 'other' | 'hang', mobile?: unknown): Promise<void>;
+  serve(kind: 'grigdesk' | 'other' | 'hang', mobile?: unknown): Promise<void>;
   requests(): string[];
   run(args: string[], env?: Record<string, string | undefined>): Promise<RunOutput>;
   spawn(args: string[], env?: Record<string, string | undefined>): ChildProcess;
@@ -142,7 +142,7 @@ fs.appendFileSync(path.join(base, 'calls.log'), command + ' ' + args.join(' ') +
  * До запуска доказывает через command -v, что ни один системный инструмент не достижим.
  */
 export async function createSandbox(t: TestContext): Promise<Sandbox> {
-  const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'cockpit-cli-')));
+  const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'grigdesk-cli-')));
   const root = path.join(home, 'репозиторий с пробелами');
   const stubs = path.join(home, 'stubs');
   const stubDir = path.join(home, 'stub');
@@ -152,19 +152,19 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
   const requests: string[] = [];
 
   for (const dir of [stubs, stubDir, path.join(root, 'bin'), path.join(root, 'tools'),
-    path.join(root, 'deploy/lib'), path.join(root, 'shared'), path.join(home, '.cockpit/state'),
+    path.join(root, 'deploy/lib'), path.join(root, 'shared'), path.join(home, '.grigdesk/state'),
     path.join(root, 'relay')]) {
     mkdirSync(dir, { recursive: true });
   }
 
-  for (const name of ['bin/cockpit', 'cli', 'deploy/lib/runtime-env.sh',
-    'shared/runtime/dataHome.ts', 'shared/runtime/cockpitReadiness.ts', 'shared/desktop/desktopRuntime.ts',
-    'shared/runtime/runtimeSettings.ts', 'shared/package.json', 'VERSION']) {
+  for (const name of ['bin/grigdesk-ctl', 'cli', 'deploy/lib/runtime-env.sh',
+    'shared/runtime/dataHome.ts', 'shared/runtime/grigDeskReadiness.ts', 'shared/desktop/desktopRuntime.ts',
+    'shared/runtime/runtimeSettings.ts', 'shared/runtime/legacyBrand.ts', 'shared/package.json', 'VERSION']) {
     cpSync(path.join(repo, name), path.join(root, name), { recursive: true });
   }
 
   writeFileSync(path.join(root, 'relay/compose.yaml'), '');
-  writeFileSync(path.join(home, '.cockpit/state/cli-token'), 'sandbox-cli-token');
+  writeFileSync(path.join(home, '.grigdesk/state/cli-token'), 'sandbox-cli-token');
   writeFileSync(path.join(home, 'cgroup'), '0::/user.slice/test.scope');
   writeFileSync(path.join(stubs, 'stub.cjs'), stubSource);
 
@@ -174,7 +174,7 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
       ` ${shellQuote(name)} "$@"\n`, { mode: 0o755 });
   }
 
-  // Команды, которые bin/cockpit передаёт отдельным скриптам: имя — путь заглушки.
+  // Команды, которые bin/grigdesk-ctl передаёт отдельным скриптам: имя — путь заглушки.
   const delegated: Record<string, string> = {
     desktop: 'deploy/desktop.sh',
     b24: 'bin/b24',
@@ -191,21 +191,22 @@ exit 7
 
   const env: NodeJS.ProcessEnv = { ...process.env };
 
-  for (const key of ['COCKPIT_ENV_FILE', 'COCKPIT_PORT', 'COCKPIT_CLI_TOKEN_PATH', 'COCKPIT_WINDOW_KEY_PATH',
-    'COCKPIT_RELAY_PROJECT', 'COCKPIT_DESKTOP_DATA_DIR', 'NO_COLOR', 'WAYLAND_DISPLAY',
-    'COCKPIT_NODE_DIR', 'SECRET_TOKEN']) {
+  for (const key of [
+    'GRIGDESK_ENV_FILE', 'GRIGDESK_PORT', 'GRIGDESK_CLI_TOKEN_PATH', 'GRIGDESK_WINDOW_KEY_PATH',
+    'GRIGDESK_RELAY_PROJECT', 'GRIGDESK_DESKTOP_DATA_DIR', 'NO_COLOR', 'WAYLAND_DISPLAY',
+    'GRIGDESK_NODE_DIR', 'SECRET_TOKEN']) {
     delete env[key];
   }
 
   Object.assign(env, {
     HOME: home,
-    COCKPIT_HOME: path.join(home, '.cockpit'),
+    GRIGDESK_HOME: path.join(home, '.grigdesk'),
     XDG_CONFIG_HOME: path.join(home, 'config'),
     XDG_DATA_HOME: path.join(home, 'data'),
     PATH: `${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
     STUB_HOME: home,
-    COCKPIT_CLI_CGROUP_FILE: path.join(home, 'cgroup'),
-    COCKPIT_WAIT_SEC: '5',
+    GRIGDESK_CLI_CGROUP_FILE: path.join(home, 'cgroup'),
+    GRIGDESK_WAIT_SEC: '5',
     DISPLAY: ':99',
   });
 
@@ -230,7 +231,7 @@ exit 7
   const port = address.port;
 
   await new Promise<void>((resolve) => reserve.close(() => resolve()));
-  writeFileSync(path.join(home, '.cockpit/.env'), `COCKPIT_PORT=${port}\n`);
+  writeFileSync(path.join(home, '.grigdesk/.env'), `GRIGDESK_PORT=${port}\n`);
   t.after(async () => {
     for (const child of children) {
       child.kill('SIGKILL');
@@ -318,13 +319,13 @@ exit 7
       };
     },
     installWindow() {
-      const app = path.join(env.XDG_DATA_HOME!, 'cockpit/desktop/cockpit-desktop.AppImage');
+      const app = path.join(root, 'bin/grigdesk-app');
 
       mkdirSync(path.dirname(app), { recursive: true });
       writeFileSync(app, `#!/bin/bash
 printf 'app %s\\n' "$*" >> "$STUB_HOME/calls.log"
 printf 'app-argc %s\\n' "$#" >> "$STUB_HOME/calls.log"
-printf 'app-key %s\\n' "\${COCKPIT_WINDOW_KEY_PATH:-}" >> "$STUB_HOME/calls.log"
+printf 'app-key %s\\n' "\${GRIGDESK_WINDOW_KEY_PATH:-}" >> "$STUB_HOME/calls.log"
 printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
 `, { mode: 0o755 });
     },
@@ -333,7 +334,7 @@ printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
      * Без аргумента — исправное описание этой копии, иначе переданный текст как есть.
      */
     installRuntime(text) {
-      const file = path.join(env.XDG_DATA_HOME!, 'cockpit/desktop/runtime.json');
+      const file = path.join(env.XDG_DATA_HOME!, 'grigdesk/desktop/runtime.json');
 
       mkdirSync(path.dirname(file), { recursive: true });
       writeFileSync(file, text ?? JSON.stringify({
@@ -343,7 +344,7 @@ printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
       }), { mode: 0o600 });
     },
     lock(target) {
-      const directory = path.join(env.XDG_CONFIG_HOME!, 'Кокпит');
+      const directory = path.join(env.XDG_CONFIG_HOME!, 'GrigDesk');
 
       mkdirSync(directory, { recursive: true });
       symlinkSync(target, path.join(directory, 'SingletonLock'));
@@ -374,7 +375,7 @@ printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
             authenticated: false,
           }));
         } else if (request.url === '/api/mobile/status' &&
-          request.headers['x-cockpit-token'] === 'sandbox-cli-token') {
+          request.headers['x-grigdesk-token'] === 'sandbox-cli-token') {
           response.end(JSON.stringify(mobile));
         } else {
           response.writeHead(401).end();
@@ -405,7 +406,7 @@ printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
         }
       }
 
-      const child = spawnChild('bash', [path.join(root, 'bin/cockpit'), ...args], {
+      const child = spawnChild('bash', [path.join(root, 'bin/grigdesk-ctl'), ...args], {
         env: childEnv,
         cwd: '/',
       });

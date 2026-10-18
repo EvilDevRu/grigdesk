@@ -14,7 +14,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-rebase-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-rebase-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const routesDir = path.join(root, 'routes');
   const profilesDir = path.join(root, 'profiles');

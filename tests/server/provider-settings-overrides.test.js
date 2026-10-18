@@ -22,7 +22,7 @@ test('адресная запись false сохраняет SSH и соседн
     path: [],
     writeChannel: {
       id: 'overlay',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
     ownership: [],
@@ -130,7 +130,7 @@ test('CAS и no-op сохраняют ревизию, а reset последне�
     ownership: [],
     writeChannel: {
       id: 'overlay',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
   });

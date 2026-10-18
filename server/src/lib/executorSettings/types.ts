@@ -23,7 +23,7 @@ export interface NativeSettingsContext {
 
 export interface NativeSettingsWriteChannel {
   id: string;
-  scope: 'cockpit-chats' | 'cockpit-chats-and-pipelines';
+  scope: 'grigdesk-chats' | 'grigdesk-chats-and-pipelines';
   state: 'verified' | 'unsupported' | 'unverified';
   reason?: string;
 }

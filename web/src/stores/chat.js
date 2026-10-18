@@ -1,6 +1,6 @@
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
-// размер контекста. История хранится НА СЕРВЕРЕ (файл в .state кокпита) — общая для всех
+// размер контекста. История хранится НА СЕРВЕРЕ (файл в .state GrigDesk) — общая для всех
 // окон/устройств и переживает чистку браузера. Это единый источник истории для
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
@@ -155,7 +155,7 @@ export function normalizeSpeechSnapshot(payload, previous = DEFAULT_SPEECH) {
   };
 }
 // Старое браузерное хранилище — остаётся только как источник одноразовой миграции.
-const LS_KEY = 'cockpit-chat-v2';
+const LS_KEY = 'grigdesk-chat-v2';
 
 function uid() { return `s${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`; }
 
@@ -170,7 +170,7 @@ function pickStore(j) {
     defEffort: j?.defEffort || '',
     // Режим прав по умолчанию для новых чатов (пусто = как решит сервер по странице).
     defMode: j?.defMode || '',
-    defWorkdir: normalizeChatWorkdir(j?.defWorkdir) || { kind: 'cockpit' },
+    defWorkdir: normalizeChatWorkdir(j?.defWorkdir) || { kind: 'grigdesk' },
     recentWorkdirs: normalizeRecentWorkdirs(j?.recentWorkdirs),
   };
 }
@@ -704,7 +704,7 @@ function archivedSlimOf(s) {
 // Сервер пишет историю в файлы, но между «ответ пришёл» и «PUT долетел» есть окно:
 // если в него попадает рестарт сервера, последний ответ пропадает. Снимок закрывает
 // именно это окно — при загрузке берём его, если он свежее серверного.
-const SNAP_KEY = 'cockpit-chat-snapshot';
+const SNAP_KEY = 'grigdesk-chat-snapshot';
 // Сколько последних чатов оставляем, когда снимок целиком не влез в квоту.
 const SNAP_FALLBACK_CHATS = 20;
 
@@ -1845,7 +1845,7 @@ export const useChatStore = defineStore('chat', {
         s.totalInputTokens ??= 0;
         s.cachedInputTokens ??= 0;
         s.contextCache = normalizeContextCache(s.contextCache);
-        // До active-input-v1 Cockpit сохранял cumulative input как «контекст».
+        // До active-input-v1 GrigDesk сохранял cumulative input как «контекст».
         // Старые миллионы переносим в расход и гасим кольцо до следующего точного хода.
         if (s.sessionId && isCodexChat(s) && s.contextMetric !== CODEX_CONTEXT_METRIC) {
           s.totalInputTokens = Math.max(s.totalInputTokens, s.contextTokens);
@@ -1862,7 +1862,7 @@ export const useChatStore = defineStore('chat', {
         s.pendingSeed ??= '';
 
         if (s.workdir === undefined) {
-          s.workdir = { kind: 'cockpit' };
+          s.workdir = { kind: 'grigdesk' };
         }
 
         s.compactedAt ??= 0;
@@ -1932,7 +1932,7 @@ export const useChatStore = defineStore('chat', {
         taskId: opts.taskId ? String(opts.taskId) : null,
         title: opts.title || '',
 
-        workdir: opts.workdir === undefined ? this.defWorkdir || { kind: 'cockpit' } : opts.workdir,
+        workdir: opts.workdir === undefined ? this.defWorkdir || { kind: 'grigdesk' } : opts.workdir,
 
         workdirInitializing: true,
 
@@ -2968,8 +2968,8 @@ export const useChatStore = defineStore('chat', {
           throw error;
         }
 
-        session.workdir = { kind: 'cockpit' };
-        session.error = 'Папка по умолчанию недоступна. Для нового чата выбран Кокпит.';
+        session.workdir = { kind: 'grigdesk' };
+        session.error = 'Папка по умолчанию недоступна. Для нового чата выбран GrigDesk.';
       }
 
       session.workdirInitializing = false;
@@ -3267,7 +3267,7 @@ export const useChatStore = defineStore('chat', {
     },
     /**
      * Сброс памяти агента: следующее сообщение уйдёт БЕЗ --resume, то есть в чистую
-     * сессию. Переписка на экране остаётся (история кокпита к сессии CLI не привязана),
+     * сессию. Переписка на экране остаётся (история GrigDesk к сессии CLI не привязана),
      * поэтому визуально «ничего не произошло» — это ловушка, из-за которой сброс легко
      * спутать со сжатием. Ждущую выжимку тоже гасим: раз память сбрасывают осознанно,
      * подсовывать агенту старое состояние нельзя.
@@ -3439,7 +3439,7 @@ export const useChatStore = defineStore('chat', {
       const slashCommand = typeof opts.slashCommand === 'string' && opts.slashCommand.startsWith('/')
         ? opts.slashCommand
         : '';
-      // Cockpit просит семантическое имя только в первом ходе безымянного чата.
+      // GrigDesk просит семантическое имя только в первом ходе безымянного чата.
       // Пока агент работает, мгновенно показываем локальный запасной вариант.
       const requestTitle = slashCommand ? false : shouldRequestChatTitle(s);
       const autoTitle = slashCommand ? '' : firstMessageTitle(s, text, attachments);

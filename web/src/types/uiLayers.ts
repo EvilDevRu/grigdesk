@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'vue';
 
 /**
- * Семантические уровни Cockpit. Числа остаются внутренней деталью runtime и CSS.
+ * Семантические уровни GrigDesk. Числа остаются внутренней деталью runtime и CSS.
  */
 export type UiLayerName =
   | 'tools'

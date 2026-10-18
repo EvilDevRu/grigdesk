@@ -88,7 +88,7 @@ test('Claude untrusted input передаёт изображения байта�
 
 for (const [requested, expected] of [['ultracode', 'xhigh'], ['max', 'max'], [undefined, undefined]]) {
   test(`Claude untrusted изоляция фактического запуска с effort ${requested}`, async (t) => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-untrusted-'));
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-claude-untrusted-'));
     const bin = path.join(dir, 'fake-claude');
     const capture = path.join(dir, 'capture');
     await writeFile(bin, [
@@ -119,7 +119,7 @@ for (const [requested, expected] of [['ultracode', 'xhigh'], ['max', 'max'], [un
     assert.equal(out.sessionId, null);
 
     const cwd = (await readFile(`${capture}.cwd`, 'utf8')).trim();
-    assert.match(cwd, /^\/tmp\/cockpit-inbox-model-/u);
+    assert.match(cwd, /^\/tmp\/grigdesk-inbox-model-/u);
     assert.notEqual(cwd, process.cwd());
     await assert.rejects(access(cwd));
 
@@ -133,7 +133,7 @@ for (const [requested, expected] of [['ultracode', 'xhigh'], ['max', 'max'], [un
 }
 
 test('Claude untrusted ход сохраняет причину ошибки из result при exit code 1', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-auth-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-claude-auth-'));
   const bin = path.join(dir, 'fake-claude');
   await writeFile(bin, [
     '#!/bin/sh',
@@ -160,7 +160,7 @@ test('Claude untrusted ход сохраняет причину ошибки и�
 });
 
 test('Claude untrusted ход, убитый по сроку, называет срок, а не «без результата»', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-slow-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-claude-slow-'));
   const bin = path.join(dir, 'fake-claude');
   // Медленная модель: читает prompt и молчит дольше срока; result-события не будет.
   await writeFile(bin, [
@@ -187,7 +187,7 @@ test('Claude untrusted ход, убитый по сроку, называет с
 });
 
 test('Claude untrusted ход, убитый по сроку после повторов запроса, называет транспорт', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-retry-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-claude-retry-'));
   const bin = path.join(dir, 'fake-claude');
   // Сеть рвётся: CLI успевает объявить два повтора запроса и молчит дольше срока.
   await writeFile(bin, [
@@ -220,7 +220,7 @@ test('Claude untrusted ход, убитый по сроку после повт�
 });
 
 test('Claude untrusted ход отличает потерянное соединение с API от ответа модели', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-lost-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-claude-lost-'));
   const bin = path.join(dir, 'fake-claude');
   await writeFile(bin, [
     '#!/bin/sh',

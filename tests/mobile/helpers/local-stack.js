@@ -24,7 +24,7 @@ export async function localStack(t) {
       method,
       url,
       payload,
-      headers: { 'x-cockpit-internal': 'test' },
+      headers: { 'x-grigdesk-internal': 'test' },
     });
   const added = await admin('POST', '/api/mobile/relays', {
     name: 'Локальный тестовый посредник',

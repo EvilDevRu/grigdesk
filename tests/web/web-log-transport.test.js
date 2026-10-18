@@ -41,7 +41,7 @@ test('ACK удаляет только подтверждённую пачку и
 
   assert.deepEqual(transport.snapshot().pending.map((item) => item.seq), [second.seq]);
   assert.ok(deliveries.some((event) => event.key.seq === first.seq && event.status === 'ack'));
-  assert.ok(queueStorage.values.get('cockpit-web-log-queue-v1').includes('"seq":2'));
+  assert.ok(queueStorage.values.get('grigdesk-web-log-queue-v1').includes('"seq":2'));
   transport.dispose();
 });
 

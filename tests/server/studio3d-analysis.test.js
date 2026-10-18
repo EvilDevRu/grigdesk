@@ -17,7 +17,7 @@ import { makeGlb } from './helpers/studio3dGlb.js';
  * Уборка не затрагивает живую библиотеку и чужие дочерние процессы.
  */
 async function analysisFixture(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-analysis-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-analysis-'));
   const input = path.join(dir, 'model.glb');
 
   await fs.writeFile(input, makeGlb({ triangles: 2, size: [1, 2, 1] }));

@@ -25,7 +25,7 @@ const uiStub = `
 `;
 
 test('RE-G2-02/03: конфликтующие route и bootstrap требуют двух явных решений', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteRebaseDialog.vue'), {
     stubs: { '../../ui': (uiStub) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },

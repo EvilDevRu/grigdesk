@@ -27,11 +27,11 @@ async function migrationAnalyzer(t, { initial = {}, legacy = 'sonnet' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'analysis-model-migration-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const prefs = memoryPrefs(initial);
-  const previous = process.env.COCKPIT_ANALYSIS_MODEL;
-  process.env.COCKPIT_ANALYSIS_MODEL = legacy;
+  const previous = process.env.GRIGDESK_ANALYSIS_MODEL;
+  process.env.GRIGDESK_ANALYSIS_MODEL = legacy;
   t.after(() => {
-    if (previous === undefined) delete process.env.COCKPIT_ANALYSIS_MODEL;
-    else process.env.COCKPIT_ANALYSIS_MODEL = previous;
+    if (previous === undefined) delete process.env.GRIGDESK_ANALYSIS_MODEL;
+    else process.env.GRIGDESK_ANALYSIS_MODEL = previous;
   });
   const analyzer = new Analyzer({
     config: {
@@ -71,15 +71,15 @@ async function startAnalyzer(analyzer) {
 }
 
 test('legacy env не остаётся второй runtime-настройкой модели триажа', async () => {
-  const saved = process.env.COCKPIT_ANALYSIS_MODEL;
-  process.env.COCKPIT_ANALYSIS_MODEL = 'legacy-sonnet';
+  const saved = process.env.GRIGDESK_ANALYSIS_MODEL;
+  process.env.GRIGDESK_ANALYSIS_MODEL = 'legacy-sonnet';
   try {
     const { config } = await import(`${CONFIG_URL}?analysis-model-migration=${Date.now()}`);
 
     assert.equal(Object.hasOwn(config, 'analysisModel'), false);
   } finally {
-    if (saved === undefined) delete process.env.COCKPIT_ANALYSIS_MODEL;
-    else process.env.COCKPIT_ANALYSIS_MODEL = saved;
+    if (saved === undefined) delete process.env.GRIGDESK_ANALYSIS_MODEL;
+    else process.env.GRIGDESK_ANALYSIS_MODEL = saved;
   }
 });
 

@@ -167,7 +167,7 @@ test('сборка JSON сохраняет форму снимка и обнов
     sessions,
     archived,
     activeId: 'active',
-    defWorkdir: { kind: 'cockpit' },
+    defWorkdir: { kind: 'grigdesk' },
   };
   const serialize = () => stringifyChatStoreSnapshot(
     payload,
@@ -236,7 +236,7 @@ test('прогретый стор сохраняет вложенные прав
       chat._persist(true);
       await new Promise(setImmediate);
 
-      const snapshot = JSON.parse(saved.get('cockpit-chat-snapshot'));
+      const snapshot = JSON.parse(saved.get('grigdesk-chat-snapshot'));
       const expected = JSON.parse(JSON.stringify(message));
 
       assert.equal(sent.length, index + 1, 'каждая вложенная правка отправляется');

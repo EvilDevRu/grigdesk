@@ -84,7 +84,7 @@ async function fixture(t, env = {}) {
   const adapter = (overrides = {}) => createGlmAdapter({
     env: {
       PATH: process.env.PATH,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: 'synthetic-zai-key',
       ...env,
     },
@@ -154,7 +154,7 @@ test('недопущенный режим или нет ключа — catalog()
   const f = await fixture(t);
 
   assert.equal(await f.adapter({ admission: [] }).catalog(f.config), null);
-  assert.equal(await f.adapter({ env: { PATH: process.env.PATH, COCKPIT_GLM_API_MODE: 'api' } })
+  assert.equal(await f.adapter({ env: { PATH: process.env.PATH, GRIGDESK_GLM_API_MODE: 'api' } })
     .catalog(f.config), null);
   assert.equal(await f.adapter({ admission: [{ mode: 'api', compatibility: 'other' }] }).catalog(f.config),
     null);
@@ -168,14 +168,14 @@ test('catalogCacheKey меняется от identity, режима и ключа
     f.adapter({
       env: {
         PATH: process.env.PATH,
-        COCKPIT_GLM_API_MODE: 'api',
+        GRIGDESK_GLM_API_MODE: 'api',
         ZAI_API_KEY: 'other-key',
       },
     }).catalogCacheKey(f.config),
     f.adapter({
       env: {
         PATH: process.env.PATH,
-        COCKPIT_GLM_API_MODE: 'coding-plan',
+        GRIGDESK_GLM_API_MODE: 'coding-plan',
         ZAI_CODING_API_KEY: 'synthetic-zai-key',
       },
     }).catalogCacheKey(f.config),

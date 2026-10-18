@@ -116,7 +116,7 @@ export function deriveInstallDialogView(input: InstallDialogInput): InstallDialo
   const footerHint = screen === 'source' ? 'Установка — только после подтверждения.'
     : screen === 'ready' ? 'Проверьте источник перед установкой.'
     : screen === 'progress' ? 'Закрытие окна не отменяет установку.'
-    : completed ? 'Изменения сохранены в Cockpit.'
+    : completed ? 'Изменения сохранены в GrigDesk.'
     : screen === 'result' ? 'Результат операции сохранён.' : 'Проверяем состояние установки.';
   const resultHeading = completed
     ? input.job?.kind === 'rollback' ? 'Версия восстановлена' : 'Установка завершена'
@@ -126,7 +126,7 @@ export function deriveInstallDialogView(input: InstallDialogInput): InstallDialo
   const resultTone = input.job?.status === 'done' ? 'success'
     : input.job?.status === 'failed' ? 'danger' : 'neutral';
   const stageHeading = screen === 'loading' ? 'Проверяем состояние'
-    : screen === 'unavailable' ? 'Нет связи с Cockpit'
+    : screen === 'unavailable' ? 'Нет связи с GrigDesk'
     : screen === 'source' ? input.mode === 'update' ? 'Выберите новую версию' : 'Подключите репозиторий'
     : screen === 'progress' ? progressHeading
     : screen === 'ready' ? 'Всё готово к установке' : resultHeading;

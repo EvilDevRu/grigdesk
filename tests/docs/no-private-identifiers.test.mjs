@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 const PUBLIC_UPSTREAM = ['Evil', 'DevRu'].join('');
 const PUBLIC_UPSTREAM_FILES = new Set([
   'README.md',
-  'tests/server/cockpit-release.test.js',
+  'tests/server/grigdesk-release.test.js',
 ]);
 
 // Эти значения выбраны как очевидно синтетические и используются общими Telegram fixtures.
@@ -124,7 +124,7 @@ test('detector ловит runtime UUID и в бывшей ссылке карт�
   ];
 
   assert.deepEqual(
-    cases.map((source) => scanText('docs/cockpit/example/README.md', source).length),
+    cases.map((source) => scanText('docs/grigdesk/example/README.md', source).length),
     [1, 1],
   );
 });

@@ -11,10 +11,10 @@ import { parseQr } from '../../mobile/src/link/qr.ts';
 
 /**
  * Ключ эмулятора принадлежит только этому тесту и удаляется после закрытия всех сокетов.
- * Ни параметры, ни сертификаты живого Кокпита тест не использует.
+ * Ни параметры, ни сертификаты живого GrigDesk тест не использует.
  */
 async function phoneFixture(t) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'cockpit-phone-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'grigdesk-phone-'));
   const phone = new PhoneEmulator(directory);
 
   t.after(async () => {
@@ -255,7 +255,7 @@ test('MV-03/04: повреждённая сохранённая очередь �
 
   qr.brain.fp = '0'.repeat(64);
   await assert.rejects(
-    phone.addFromText('cockpitlink:1:' + Buffer.from(JSON.stringify(qr)).toString('base64url')),
+    phone.addFromText('grigdesklink:1:' + Buffer.from(JSON.stringify(qr)).toString('base64url')),
     /brain_pin_mismatch/,
   );
   assert.equal(phone.getState().unlocked, false);
@@ -285,7 +285,7 @@ test('MV-03/04: повреждённая сохранённая очередь �
   relayQr.relay.fp = '0'.repeat(64);
   await assert.rejects(
     other.addFromText(
-      'cockpitlink:1:' + Buffer.from(JSON.stringify(relayQr)).toString('base64url'),
+      'grigdesklink:1:' + Buffer.from(JSON.stringify(relayQr)).toString('base64url'),
     ),
     /relay_pin_mismatch/,
   );

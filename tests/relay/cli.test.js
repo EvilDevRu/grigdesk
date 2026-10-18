@@ -26,7 +26,7 @@ test('RL-30: ошибка не повторяет аргумент', () => {
   const result = parseCommand(['--token=секрет']);
 
   assert.equal(result.kind, 'error');
-  assert.equal(result.message, 'Неизвестная команда. Справка: cockpit-relay --help');
+  assert.equal(result.message, 'Неизвестная команда. Справка: grigdesk-relay --help');
   assert.equal(result.message.includes('секрет'), false);
 });
 
@@ -39,6 +39,6 @@ test('RL-31: справка и версия', () => {
   assert.ok(HELP_TEXT.endsWith('\n'));
   assert.equal(
     versionLine('0.1.0', 'v24.21.0', 'linux', 'x64'),
-    'cockpit-relay 0.1.0 (Node v24.21.0, linux x64)',
+    'grigdesk-relay 0.1.0 (Node v24.21.0, linux x64)',
   );
 });

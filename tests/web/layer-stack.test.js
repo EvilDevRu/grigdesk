@@ -4,7 +4,7 @@ import test from 'node:test';
 import { Window } from '../../web/node_modules/happy-dom/lib/index.js';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const browser = new Window({ url: 'http://cockpit.test/' });
+const browser = new Window({ url: 'http://grigdesk.test/' });
 for (const [key, value] of Object.entries({
   window: browser,
   document: browser.document,

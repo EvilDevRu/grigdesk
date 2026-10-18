@@ -21,7 +21,7 @@ function shellQuote(value) {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-profile-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-profile-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const launchDir = path.join(root, 'launch');
   const cwd = path.join(root, 'project with spaces', 'sub');

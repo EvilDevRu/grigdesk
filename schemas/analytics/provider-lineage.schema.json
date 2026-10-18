@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cockpit.local/schemas/analytics/provider-lineage.schema.json",
+  "$id": "https://grigdesk.local/schemas/analytics/provider-lineage.schema.json",
   "title": "Долговечная цепочка возобновления провайдера Factory",
   "type": "object",
   "additionalProperties": false,

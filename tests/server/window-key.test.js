@@ -32,7 +32,7 @@ async function waitFor(predicate) {
  * Ни положительный, ни отрицательный контроль не читают рабочий runtime.
  */
 async function keyRoot(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-window-key-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-window-key-'));
 
   t.after(() => rm(root, {
     recursive: true,
@@ -49,39 +49,39 @@ test('DW-K1: путь явный либо runtime', () => {
     port: 28140,
   };
 
-  assert.equal(windowKeyPath(input), '/run/user/1234/cockpit/window-key-28140');
+  assert.equal(windowKeyPath(input), '/run/user/1234/grigdesk/window-key-28140');
   assert.equal(windowKeyPath({
     ...input,
     port: 80,
-  }), '/run/user/1234/cockpit/window-key-80');
+  }), '/run/user/1234/grigdesk/window-key-80');
   assert.equal(windowKeyPath({
     ...input,
     uid: 0,
-  }), '/run/user/0/cockpit/window-key-28140');
+  }), '/run/user/0/grigdesk/window-key-28140');
   assert.equal(windowKeyPath({
     ...input,
     port: 65535,
-  }), '/run/user/1234/cockpit/window-key-65535');
+  }), '/run/user/1234/grigdesk/window-key-65535');
 
   const runtime = { XDG_RUNTIME_DIR: '/tmp/own-runtime' };
 
   assert.equal(windowKeyPath({
     ...input,
     env: runtime,
-  }), '/tmp/own-runtime/cockpit/window-key-28140');
+  }), '/tmp/own-runtime/grigdesk/window-key-28140');
   assert.equal(windowKeyPath({
     ...input,
     env: { XDG_RUNTIME_DIR: '/tmp//own/../runtime/' },
-  }), '/tmp/runtime/cockpit/window-key-28140');
+  }), '/tmp/runtime/grigdesk/window-key-28140');
   assert.equal(windowKeyPath({
     ...input,
     env: { XDG_RUNTIME_DIR: '/' },
-  }), '/cockpit/window-key-28140');
+  }), '/grigdesk/window-key-28140');
   assert.equal(windowKeyPath({
     ...input,
     env: {
       ...runtime,
-      COCKPIT_WINDOW_KEY_PATH: '/tmp/own-key',
+      GRIGDESK_WINDOW_KEY_PATH: '/tmp/own-key',
     },
   }), '/tmp/own-key');
 
@@ -90,7 +90,7 @@ test('DW-K1: путь явный либо runtime', () => {
       ...input,
       env: {
         ...runtime,
-        COCKPIT_WINDOW_KEY_PATH: value,
+        GRIGDESK_WINDOW_KEY_PATH: value,
       },
     }), null, value);
   }
@@ -118,26 +118,26 @@ test('DW-K1: путь явный либо runtime', () => {
 });
 
 test('DW-K7: фикстура использует только собственный ключ', { timeout: 60000 }, async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-window-key-'));
-  const original = process.env.COCKPIT_WINDOW_KEY_PATH;
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-window-key-'));
+  const original = process.env.GRIGDESK_WINDOW_KEY_PATH;
 
-  process.env.COCKPIT_WINDOW_KEY_PATH = '/untrusted-parent/window-key';
+  process.env.GRIGDESK_WINDOW_KEY_PATH = '/untrusted-parent/window-key';
   t.after(() => {
     if (original === undefined) {
-      delete process.env.COCKPIT_WINDOW_KEY_PATH;
+      delete process.env.GRIGDESK_WINDOW_KEY_PATH;
     } else {
-      process.env.COCKPIT_WINDOW_KEY_PATH = original;
+      process.env.GRIGDESK_WINDOW_KEY_PATH = original;
     }
   });
 
-  assert.equal(isolatedEnv(root, 28140).COCKPIT_WINDOW_KEY_PATH,
+  assert.equal(isolatedEnv(root, 28140).GRIGDESK_WINDOW_KEY_PATH,
     path.join(root, 'window-auth/window-key'));
 
   const override = path.join(root, 'own-window-auth/override-key');
   let observed;
   const fixture = await pluginBootFixture(t, {
     root,
-    env: { COCKPIT_WINDOW_KEY_PATH: override },
+    env: { GRIGDESK_WINDOW_KEY_PATH: override },
     before: async ({ env }) => {
       observed = env;
       await mkdir(path.join(root, 'own-window-auth'), { mode: 0o700 });
@@ -149,9 +149,9 @@ test('DW-K7: фикстура использует только собствен
     force: true,
   }));
 
-  assert.equal(observed.COCKPIT_WINDOW_KEY_PATH, override);
+  assert.equal(observed.GRIGDESK_WINDOW_KEY_PATH, override);
   assert.strictEqual(fixture.env, observed);
-  assert.equal(fixture.env.COCKPIT_WINDOW_KEY_PATH, override);
+  assert.equal(fixture.env.GRIGDESK_WINDOW_KEY_PATH, override);
 });
 
 test('DW-K7: внешний или относительный override отвергается до spawn', async (t) => {
@@ -159,7 +159,7 @@ test('DW-K7: внешний или относительный override отве�
     let beforeCalled = false;
 
     await assert.rejects(pluginBootFixture(t, {
-      env: { COCKPIT_WINDOW_KEY_PATH: value },
+      env: { GRIGDESK_WINDOW_KEY_PATH: value },
       before: async () => {
         beforeCalled = true;
       },
@@ -267,7 +267,7 @@ test('DW-K5: ошибка записи не оставляет мусора', as
 });
 
 test('DW-K6: неудачный bind не ротирует ключ', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-window-listen-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-window-listen-'));
   const first = Fastify({ logger: false });
   const second = Fastify({ logger: false });
   const state = {

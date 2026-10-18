@@ -390,7 +390,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
         approve: guard.approve,
         settle: guard.settle,
         // Блокировка — определённый исход: DSH отказал до модели, повтора и эффекта нет.
-        blocked: () => glmAccessError('glm_turn_blocked', 'Политика Cockpit заблокировала ход GLM.'),
+        blocked: () => glmAccessError('glm_turn_blocked', 'Политика GrigDesk заблокировала ход GLM.'),
       },
     });
   } catch (error) {

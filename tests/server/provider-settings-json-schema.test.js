@@ -11,7 +11,7 @@ test('новый boolean из схемы появляется без ручно�
     path: [],
     writeChannel: {
       id: 'overlay',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
     ownership: [],
@@ -30,7 +30,7 @@ test('OpenAPI exclusiveMinimum и nullable следуют dialect; draft-07 bool
     ownership: [],
     writeChannel: {
       id: 'fixture',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
   };
@@ -58,7 +58,7 @@ test('скаляры и typed enum берут типы, ограничения �
     path: [],
     writeChannel: {
       id: 'overlay',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
     ownership: [],
@@ -95,7 +95,7 @@ test('локальный ref раскрывается с описанием, ц�
       path: [],
       writeChannel: {
         id: 'overlay',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
       ownership: [],
@@ -129,13 +129,13 @@ test('объекты являются группами; managed и неизве�
       path: [],
       writeChannel: {
         id: 'overlay',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
       ownership: [
         {
           path: ['managed'],
-          owner: 'Cockpit',
+          owner: 'GrigDesk',
           reason: 'Служебная ветка',
         },
       ],
@@ -170,7 +170,7 @@ test('массив примитивов атомарен, сложный или 
       path: [],
       writeChannel: {
         id: 'overlay',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
       ownership: [],
@@ -206,7 +206,7 @@ test('nullable union и enum из const доступны, остальные uni
       path: [],
       writeChannel: {
         id: 'overlay',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
       ownership: [],
@@ -242,7 +242,7 @@ test('типизированный словарь раскрывает толь�
       path: [],
       writeChannel: {
         id: 'overlay',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
       ownership: [],
@@ -282,7 +282,7 @@ test('упрощение union не теряет ограничения конс
       ownership: [],
       writeChannel: {
         id: 'fixture',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
     },
@@ -307,7 +307,7 @@ test('некорректный constraint и неизвестный dialect за
     ownership: [],
     writeChannel: {
       id: 'fixture',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
   };
@@ -336,7 +336,7 @@ test('enum сложных значений и пустой enum не откры�
       ownership: [],
       writeChannel: {
         id: 'fixture',
-        scope: 'cockpit-chats',
+        scope: 'grigdesk-chats',
         state: 'verified',
       },
     },

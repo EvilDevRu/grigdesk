@@ -12,7 +12,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-binding-capability-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-binding-capability-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const calls = [];
   let auth = 'auth-a';
@@ -137,7 +137,7 @@ test('смена identity до summary не ротирует исходную с
 
   const stored = (await f.app.inject('/api/chat/store/chat/capability-chat')).json().chat;
 
-  assert.deepEqual(stored.workdir, { kind: 'cockpit' });
+  assert.deepEqual(stored.workdir, { kind: 'grigdesk' });
   assert.equal(stored.sessionId, before.sessionId);
 
   const compact = await f.app.inject({
@@ -210,7 +210,7 @@ test('недоступный профиль исполнителя отклон�
   assert.equal((await run(f.app)).statusCode, 200);
 
   // Код адаптера с его id в префиксе — безопасная причина; прочие ошибки текст не раскрывают.
-  f.setSecurityError(Object.assign(new Error('Публикация runtime Cockpit не завершена'), {
+  f.setSecurityError(Object.assign(new Error('Публикация runtime GrigDesk не завершена'), {
     code: 'sidecar-test_runtime_publish_pending',
   }));
 

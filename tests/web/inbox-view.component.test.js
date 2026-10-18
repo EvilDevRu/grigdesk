@@ -48,7 +48,7 @@ const item = (over = {}) => ({
   revision: `v1_${'a'.repeat(43)}`,
   channel: { id: 'github', label: 'GitHub' },
   source: { title: 'example-org/example-repo #9', url: 'https://github.com/example-org/example-repo/issues/9' },
-  project: 'cockpit',
+  project: 'grigdesk',
   kind: 'bug',
   status: 'new',
   decision: null,
@@ -588,7 +588,7 @@ test('Inbox объясняет окно тишины, отсутствие мо�
   assert.ok(wrapper.findAll('.auto-state').some((entry) => /Автосоздание выключено/.test(entry.text())));
 
   await notice.get('a').trigger('click');
-  assert.equal(localStorage.getItem('cockpit-settings-tab'), 'plugins');
+  assert.equal(localStorage.getItem('grigdesk-settings-tab'), 'plugins');
 });
 
 test('Inbox явно показывает несовместимую с безопасным разбором модель', async (t) => {

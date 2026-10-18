@@ -46,7 +46,7 @@ let observer: ResizeObserver | null = null;
 
 const text = computed(() => props.block.text || '');
 const imageHref = (href: string) => chatImageHref(href, props.chatId || '');
-// Документ по ссылке агента ищется и в папках этого разговора, не только в Cockpit.
+// Документ по ссылке агента ищется и в папках этого разговора, не только в GrigDesk.
 const fileHref = (href: string) => chatFileLinkHref(href, {
   scope: props.chatId ? `chat:${props.chatId}` : '',
 });

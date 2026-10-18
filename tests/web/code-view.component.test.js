@@ -42,7 +42,7 @@ function projectFixture(id, directories) {
 }
 
 function query(url) {
-  return new URL(url, 'http://cockpit.test').searchParams;
+  return new URL(url, 'http://grigdesk.test').searchParams;
 }
 
 async function compileCodeView() {
@@ -88,7 +88,7 @@ async function compileCodeView() {
 
 function installBrowser(t, storage = {}) {
   return import('../../web/node_modules/happy-dom/lib/index.js').then(({ Window }) => {
-    sharedBrowser ||= new Window({ url: 'http://cockpit.test/#/code' });
+    sharedBrowser ||= new Window({ url: 'http://grigdesk.test/#/code' });
     const browser = sharedBrowser;
 
     browser.localStorage.clear();
@@ -423,11 +423,11 @@ test('холодный запуск Code сразу занимает финал�
 test('CodeView показывает два подписанных уровня, хранит контекст по проекту и сообщает о недоступном repo', async (t) => {
   const calls = [];
   const projects = [
-    projectFixture('cockpit', ['/engine', '/web', '/broken']),
+    projectFixture('grigdesk', ['/engine', '/web', '/broken']),
     projectFixture('solo', ['/solo']),
   ];
   const repos = {
-    cockpit: [
+    grigdesk: [
       {
         key: 'engine', dir: '/engine', trees: [
           mainTree('/engine', 'master'),
@@ -462,8 +462,8 @@ test('CodeView показывает два подписанных уровня, 
   const { browser, wrapper, flushPromises } = await mountCodeView(t, {
     api,
     storage: {
-      'cockpit-project': 'cockpit',
-      'cockpit-code-context:cockpit': storedWeb,
+      'grigdesk-project': 'grigdesk',
+      'grigdesk-code-context:grigdesk': storedWeb,
     },
   });
 
@@ -483,20 +483,20 @@ test('CodeView показывает два подписанных уровня, 
   assert.match(wrapper.get('.context-warning').text(), /broken.*\/missing\/broken/s);
   assert.match(wrapper.get('.context-warning a').text(), /Проекты/);
 
-  const restoredLs = calls.find((url) => url.includes('/api/code/cockpit/ls?'));
+  const restoredLs = calls.find((url) => url.includes('/api/code/grigdesk/ls?'));
   assert.equal(query(restoredLs).get('repo'), 'web');
   assert.equal(query(restoredLs).get('root'), '/work/web-preview');
 
   await wrapper.get('#code-context').setValue(JSON.stringify(['engine', '/engine']));
   await settle(flushPromises);
-  assert.deepEqual(JSON.parse(browser.localStorage.getItem('cockpit-code-context:cockpit')), {
+  assert.deepEqual(JSON.parse(browser.localStorage.getItem('grigdesk-code-context:grigdesk')), {
     v: 1,
     repoKey: 'engine',
     treePath: '/engine',
   });
-  const latestCockpitLs = calls.filter((url) => url.includes('/api/code/cockpit/ls?')).at(-1);
-  assert.equal(query(latestCockpitLs).get('repo'), 'engine');
-  assert.equal(query(latestCockpitLs).get('root'), '/engine');
+  const latestGrigDeskLs = calls.filter((url) => url.includes('/api/code/grigdesk/ls?')).at(-1);
+  assert.equal(query(latestGrigDeskLs).get('repo'), 'engine');
+  assert.equal(query(latestGrigDeskLs).get('root'), '/engine');
 
   // Переключатель рабочей копии остаётся и у проекта с единственным вариантом:
   // человек должен видеть, где вообще меняют копию, а не угадывать.
@@ -509,10 +509,10 @@ test('CodeView показывает два подписанных уровня, 
   );
   assert.equal(wrapper.find('.code-head .tlabel').exists(), false);
 
-  await wrapper.get('#code-project').setValue('cockpit');
+  await wrapper.get('#code-project').setValue('grigdesk');
   await settle(flushPromises);
   assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['engine', '/engine']));
-  assert.equal(browser.localStorage.getItem('cockpit-code-context:solo'), JSON.stringify({
+  assert.equal(browser.localStorage.getItem('grigdesk-code-context:solo'), JSON.stringify({
     v: 1,
     repoKey: 'solo',
     treePath: '/solo',
@@ -687,7 +687,7 @@ test('Git по умолчанию показан деревом, доступн�
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, {
     api,
-    storage: { 'cockpit-code-git-view': 'damaged' },
+    storage: { 'grigdesk-code-git-view': 'damaged' },
   });
 
   await selectCodeTab(wrapper, 'changes');
@@ -780,7 +780,7 @@ test('настройки diff восстанавливаются, меняют M
   };
   const { browser, wrapper, flushPromises, monacoState } = await mountCodeView(t, {
     api,
-    storage: { 'cockpit-diff-wrap': '1', 'cockpit-diff-ws': '1' },
+    storage: { 'grigdesk-diff-wrap': '1', 'grigdesk-diff-ws': '1' },
   });
 
   await selectCodeTab(wrapper, 'changes');
@@ -805,8 +805,8 @@ test('настройки diff восстанавливаются, меняют M
 
   assert.equal(editor.options.diffWordWrap, 'off');
   assert.equal(editor.options.ignoreTrimWhitespace, false);
-  assert.equal(browser.localStorage.getItem('cockpit-diff-wrap'), '0');
-  assert.equal(browser.localStorage.getItem('cockpit-diff-ws'), '0');
+  assert.equal(browser.localStorage.getItem('grigdesk-diff-wrap'), '0');
+  assert.equal(browser.localStorage.getItem('grigdesk-diff-ws'), '0');
   assert.ok(editor.optionCalls.some((options) => options.diffWordWrap === 'off'));
   assert.ok(editor.optionCalls.some((options) => options.ignoreTrimWhitespace === false));
 });
@@ -844,7 +844,7 @@ test('узкий CodePanel показывает одну область, сох�
   };
   const { browser, wrapper, flushPromises, monacoState } = await mountCodeView(t, {
     api,
-    storage: { 'cockpit-diff-side': '1' },
+    storage: { 'grigdesk-diff-side': '1' },
   });
   const lay = wrapper.get('.lay').element;
 
@@ -924,7 +924,7 @@ test('узкий CodePanel показывает одну область, сох�
   assert.equal(monacoState.diffEditors.length, 1);
   assert.equal(monacoState.diffEditors[0].model, narrowModels);
   assert.equal(monacoState.diffEditors[0].options.renderSideBySide, true);
-  assert.equal(browser.localStorage.getItem('cockpit-diff-side'), '1');
+  assert.equal(browser.localStorage.getItem('grigdesk-diff-side'), '1');
   assert.deepEqual(monacoState.fileEditors[0].position, { lineNumber: 1, column: 7 });
   assert.deepEqual(monacoState.fileEditors[0].selection, {
     startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 7,
@@ -977,7 +977,7 @@ test('«Ссылка» копирует текущий файл и строку,
   assert.deepEqual(parseCodeRouteHref(copied[0]), {
     project: 'demo', repo: 'demo', root: '/demo', path: 'новый файл.ts', line: 2,
   });
-  assert.match(copied[0], /^http:\/\/cockpit\.test\/#\/code\?/);
+  assert.match(copied[0], /^http:\/\/grigdesk\.test\/#\/code\?/);
 
   await wrapper.get('button[data-action="file-actions"]').trigger('click');
   await settle(flushPromises);
@@ -1635,7 +1635,7 @@ test('Code оставляет навигатор слева и хранит ра
   await separator.trigger('keydown', { key: 'ArrowLeft' });
   await settle(flushPromises);
   assert.equal(wrapper.get('.code-split').attributes('aria-valuenow'), '404');
-  assert.equal(browser.localStorage.getItem('cockpit-code-dock-nav-width'), '404');
+  assert.equal(browser.localStorage.getItem('grigdesk-code-dock-nav-width'), '404');
 
   await wrapper.get('.navigator-toggle').trigger('click');
   assert.equal(wrapper.get('.lay').classes().includes('navigator-collapsed'), true);
@@ -1907,7 +1907,7 @@ test('Git-кнопки индексируют, генерируют сообще
       if (url.includes('/commit-message?')) {
         return {
           ok: true,
-          title: 'Кокпит: добавить Git-действия',
+          title: 'GrigDesk: добавить Git-действия',
           model: 'claude/claude-test',
           effort: null,
           truncated: false,
@@ -1983,12 +1983,12 @@ test('Git-кнопки индексируют, генерируют сообще
   await wrapper.get('button.generate-commit').trigger('click');
   await settle(flushPromises);
   assert.equal(wrapper.get('textarea.commit-message').element.value,
-    'Кокпит: добавить Git-действия');
+    'GrigDesk: добавить Git-действия');
   assert.match(wrapper.get('.git-notice').text(), /claude\/claude-test/);
 
   await wrapper.get('button.commit-action').trigger('click');
   await settle(flushPromises);
-  assert.deepEqual(posts[4].body, { message: 'Кокпит: добавить Git-действия' });
+  assert.deepEqual(posts[4].body, { message: 'GrigDesk: добавить Git-действия' });
   assert.equal(wrapper.get('textarea.commit-message').element.value, '');
   assert.match(wrapper.get('.git-notice').text(), /abc1234/);
   assert.equal(wrapper.get('button.push-action').attributes('aria-label'), 'Опубликовать');
@@ -2506,7 +2506,7 @@ test('в diff «Спросить агента» берёт patch файла и �
   };
   const { wrapper, flushPromises } = await mountCodeView(t, {
     api,
-    storage: { 'cockpit-code-context:demo': JSON.stringify({
+    storage: { 'grigdesk-code-context:demo': JSON.stringify({
       v: 1, repoKey: 'demo', treePath: '/work/t46',
     }) },
     chat: { newSession: (options) => { sessions.push(options); return 'chat-2'; } },
@@ -2702,11 +2702,11 @@ test('blame рисует строки, отбрасывает поздний ф�
   assert.equal(decorations.decorations.length, 2);
   assert.match(decorations.decorations[0].options.after.content, /aaaaaaa · Анна · сейчас/);
   assert.match(decorations.decorations[1].options.after.content, /не в коммите/);
-  assert.equal(browser.localStorage.getItem('cockpit-code-blame'), '1');
+  assert.equal(browser.localStorage.getItem('grigdesk-code-blame'), '1');
 
   browser.document.querySelector('button[data-action="blame"]').click();
   assert.equal(decorations.decorations.length, 0);
-  assert.equal(browser.localStorage.getItem('cockpit-code-blame'), '0');
+  assert.equal(browser.localStorage.getItem('grigdesk-code-blame'), '0');
 
   browser.document.querySelector('button[data-action="blame"]').click();
   await settle(flushPromises);
@@ -2965,7 +2965,7 @@ test('Enter набирает тело сообщения, а коммит ухо
     },
   );
   const field = wrapper.get('textarea.commit-message');
-  await field.setValue('Кокпит: правка');
+  await field.setValue('GrigDesk: правка');
 
   // Голый Enter принадлежит тексту: иначе тело сообщения набрать нечем.
   await field.trigger('keydown', { key: 'Enter' });
@@ -2976,7 +2976,7 @@ test('Enter набирает тело сообщения, а коммит ухо
   await settle(flushPromises);
   assert.equal(posts.length, 1);
   assert.match(posts[0].url, /\/api\/code\/demo\/commit\?/);
-  assert.deepEqual(posts[0].body, { message: 'Кокпит: правка' });
+  assert.deepEqual(posts[0].body, { message: 'GrigDesk: правка' });
 });
 
 test('пустое поле сообщения остаётся в ритме композера, а не в общих 92px', async () => {
@@ -3024,7 +3024,7 @@ test('строка под композером говорит только то,
   assert.match(detached.wrapper.get('.git-notice').text(), /detached HEAD/);
 
   // `refresh` перечитывает гит, но не список рабочих копий: после смены ветки мимо
-  // кокпита шапка устаревает, и промолчать здесь значило бы соврать.
+  // GrigDesk шапка устаревает, и промолчать здесь значило бы соврать.
   const switched = await mountGitPanel(t, {
     branch: 'task-77',
     tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
@@ -3619,7 +3619,7 @@ test('«с текущими» включён по умолчанию: отрез
   const committedCall = calls.filter((url) => url.includes('/commits-diff?')).at(-1);
   assert.equal(query(committedCall).has('work'), false);
   assert.equal(wrapper.get('.subhead[data-group="commits"] .subtitle').text().includes('текущие'), false);
-  assert.equal(localStorage.getItem('cockpit-code-commits-work'), '0');
+  assert.equal(localStorage.getItem('grigdesk-code-commits-work'), '0');
   const committedFile = calls.filter((url) => url.includes('/file-diff?') && url.includes('group=commits')).at(-1);
   assert.equal(query(committedFile).has('work'), false);
   assert.equal(query(committedFile).get('to'), 'ccccccc'.padEnd(40, '2'));
@@ -3850,7 +3850,7 @@ test('дерево несохранённых изменений сворачи�
   // Счётчик и итог группы остаются в заголовке: свёрнуто — не значит пусто.
   assert.equal(wrapper.get('.subhead[data-group="work"] .cnt').text(), '1');
   assert.equal(wrapper.findAll('button.commit').length, 0);
-  assert.deepEqual(JSON.parse(localStorage.getItem('cockpit-code-collapsed-groups')), ['work']);
+  assert.deepEqual(JSON.parse(localStorage.getItem('grigdesk-code-collapsed-groups')), ['work']);
 
   await selectCodeTab(wrapper, 'commits');
   await settle(flushPromises);
@@ -3862,7 +3862,7 @@ test('дерево несохранённых изменений сворачи�
   await wrapper.get('.subhead[data-group="work"] [data-action="toggle-group"]').trigger('click');
   await settle(flushPromises);
   assert.equal(wrapper.findAll('button.git-file[data-group="work"]').length, 1);
-  assert.deepEqual(JSON.parse(localStorage.getItem('cockpit-code-collapsed-groups')), []);
+  assert.deepEqual(JSON.parse(localStorage.getItem('grigdesk-code-collapsed-groups')), []);
 });
 
 test('клики по коммитам строят общий отрезок, Shift заполняет промежуток и ✕ снимает выбор', async (t) => {
@@ -4028,7 +4028,7 @@ test('«Вся ветка» показывает diff worktree, а клик по
   };
   const { wrapper, flushPromises } = await mountCodeView(t, {
     api,
-    storage: { 'cockpit-code-context:demo': JSON.stringify({
+    storage: { 'grigdesk-code-context:demo': JSON.stringify({
       v: 1,
       repoKey: 'demo',
       treePath: '/work/t46',

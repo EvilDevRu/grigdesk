@@ -83,7 +83,7 @@ test('настоящий candidate публикует embedded readiness и об
 
   assert.equal(card.distribution.kind, 'embedded');
   assert.equal(card.distribution.ready, true);
-  assert.equal(card.distribution.label, 'Входит в Cockpit');
+  assert.equal(card.distribution.label, 'Входит в GrigDesk');
   assert.equal(card.available, false);
   assert.equal(card.installed, true);
   assert.equal(card.install, null);
@@ -100,7 +100,7 @@ test('настоящий candidate публикует embedded readiness и об
   );
   const fieldId = '["llm-deepseek","maxTokens"]';
 
-  assert.equal(first.scope.id, 'cockpit-chats-and-pipelines');
+  assert.equal(first.scope.id, 'grigdesk-chats-and-pipelines');
   assert.equal(flattenNativeSettings(first.fields)
     .find((field) => field.id === fieldId).consumerSupport.pipeline.state, 'verified');
 
@@ -152,7 +152,7 @@ test('отсутствующая встроенная сборка объясн�
   assert.equal(card.distribution.ready, false);
   assert.equal(card.distribution.error, 'deepseek_runtime_missing');
   assert.match(card.distribution.problem.message, /не подготовлена/u);
-  assert.equal(card.distribution.problem.command, `${path.join(root, 'bin/cockpit')} deps`);
+  assert.equal(card.distribution.problem.command, `${path.join(root, 'bin/grigdesk-ctl')} deps`);
   assert.equal(card.install, null);
 });
 

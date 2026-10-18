@@ -1,6 +1,6 @@
 // Карточка «Арбитр остановок» во вкладке «Настройки → Запуски».
 //
-// Здесь живёт единственный выключатель автономного действия кокпита: включённый арбитр
+// Здесь живёт единственный выключатель автономного действия GrigDesk: включённый арбитр
 // сам двигает курсор чужой задачи по решению модели. Поэтому проверяется, что выключатель
 // действительно доходит до сервера (иначе это тот самый мёртвый тумблер, за который в
 // gotchas уже удаляли `autoRecoverPipelines`), и что пара «исполнитель:модель» разбирается
@@ -12,10 +12,10 @@ import { compileSettingsView } from './helpers/settings-view.js';
 process.env.NODE_ENV = 'test';
 
 async function installBrowser(t, storage = {}) {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -86,7 +86,7 @@ function makeProvidersStore() {
 }
 
 async function mountSettings(t, { arbiter = null } = {}) {
-  const browser = await installBrowser(t, { 'cockpit-settings-tab': 'runs' });
+  const browser = await installBrowser(t, { 'grigdesk-settings-tab': 'runs' });
   const prov = makeProvidersStore();
   const saved = [];
   let storedPrefs = {
@@ -118,7 +118,7 @@ async function mountSettings(t, { arbiter = null } = {}) {
     }),
     useChatStore: () => ({ compactWindow: 0 }),
     useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
   const [{ mount, flushPromises }, SettingsView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),

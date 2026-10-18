@@ -4,7 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { normalizeChatWorkdir, sameChatWorkdir } from '../../shared/chat/chatWorkdir.ts';
+import {
+  normalizeChatWorkdir,
+  normalizeRecentWorkdirs,
+  sameChatWorkdir,
+} from '../../shared/chat/chatWorkdir.ts';
+import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
 import { resolveChatWorkdir, validateWorkdirPath } from '../../server/src/lib/chat/workdir.ts';
 
 /**
@@ -45,10 +50,10 @@ async function fixture(t) {
 }
 
 test('форма выбора строгая, отсутствие поля отдельно от повреждения', () => {
-  assert.deepEqual(normalizeChatWorkdir(undefined), { kind: 'cockpit' });
+  assert.deepEqual(normalizeChatWorkdir(undefined), { kind: 'grigdesk' });
   assert.equal(normalizeChatWorkdir({ kind: 'path', path: 'relative' }), null);
-  assert.equal(normalizeChatWorkdir({ kind: 'cockpit', path: '/tmp' }), null);
-  assert.ok(sameChatWorkdir(undefined, { kind: 'cockpit' }));
+  assert.equal(normalizeChatWorkdir({ kind: 'grigdesk', path: '/tmp' }), null);
+  assert.ok(sameChatWorkdir(undefined, { kind: 'grigdesk' }));
 });
 
 test('проект: default, явный ключ, single без расширения до общего предка', async (t) => {
@@ -138,7 +143,7 @@ test('старый snapshot не откатывает выбор и память
   assert.equal(saved.taskId, '12');
   assert.equal(saved.sessionId, null);
   assert.equal(saved.workdirState.seed, 'Память');
-  await assert.rejects(history.saveOne({ ...saved, workdir: { kind: 'cockpit' } }), {
+  await assert.rejects(history.saveOne({ ...saved, workdir: { kind: 'grigdesk' } }), {
     code: 'workdir_change_required',
   });
 });
@@ -196,4 +201,12 @@ test('несколько repo keys одного realpath сохраняются 
   assert.equal(result.cwd, f.first);
   assert.deepEqual(result.extraDirs, [f.second]);
   assert.deepEqual(result.copies.map((entry) => entry.key), ['a', 'alias', 'b']);
+});
+
+test('старое значение рабочей папки читается как grigdesk', () => {
+  const legacy = { kind: LEGACY_VALUES.workdirKind };
+
+  assert.deepEqual(normalizeChatWorkdir(legacy), { kind: 'grigdesk' });
+  assert.ok(sameChatWorkdir(legacy, { kind: 'grigdesk' }));
+  assert.deepEqual(normalizeRecentWorkdirs([legacy]), [{ kind: 'grigdesk' }]);
 });

@@ -16,7 +16,7 @@ const REPO_ROOT = path.resolve(TEST_DIR, '../..');
 const FIXTURE_ROOT = path.join(TEST_DIR, 'fixtures/ui');
 
 function writeFixtureRepo(t, files) {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-ui-boundary-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-ui-boundary-'));
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
   for (const [relative, source] of Object.entries(files)) {
     const target = path.join(repoRoot, relative);

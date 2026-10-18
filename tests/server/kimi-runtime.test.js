@@ -126,7 +126,7 @@ class FakeAcpProcess extends EventEmitter {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-runtime-test-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-runtime-test-'));
   const cwd = path.join(root, 'workspace');
   const chatsDir = path.join(root, 'chats');
   await Promise.all([cwd, chatsDir].map((dir) => fs.mkdir(dir, { recursive: true })));
@@ -174,7 +174,7 @@ test('contained runtime даже при false сохраняет сетевую 
       buildLaunch: async (options) => {
         launchOptions = options;
         launchConfig = options.config;
-        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'cockpit-kimi-fake.service' };
+        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'grigdesk-kimi-fake.service' };
       },
       spawn: () => process,
       stopUnit: async () => {},
@@ -219,7 +219,7 @@ test('contained runtime объявляет сессии рабочий MCP по 
     mcpServers: [
       { name: 'other', command: 'node', args: ['keep-me.js'] },
       {
-        name: 'cockpit-work',
+        name: 'grigdesk-work',
         command: process.execPath,
         args: [hostScript, '--socket', hostSocket, '--nonce', 'nonce-42'],
       },
@@ -231,7 +231,7 @@ test('contained runtime объявляет сессии рабочий MCP по 
       preflight: async () => ({ decision: 'GO_CONTAINED_MVP', checks: {} }),
       buildLaunch: async (options) => {
         launchOptions = options;
-        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'cockpit-kimi-fake.service' };
+        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'grigdesk-kimi-fake.service' };
       },
       spawn: () => child,
       stopUnit: async () => {},
@@ -242,7 +242,7 @@ test('contained runtime объявляет сессии рабочий MCP по 
   assert.deepEqual(launchOptions.workMcp, { scriptPath: hostScript, socketPath: hostSocket });
   const opened = child.messages.find((message) => message.method === 'session/new');
   const servers = opened.params.mcpServers;
-  // Чужая запись не переписывается: подменяется ровно мост кокпита.
+  // Чужая запись не переписывается: подменяется ровно мост GrigDesk.
   assert.deepEqual(servers[0], { name: 'other', command: 'node', args: ['keep-me.js'] });
   assert.equal(servers[1].command, KIMI_SANDBOX_NODE);
   assert.deepEqual(servers[1].args, [
@@ -283,7 +283,7 @@ test('permission mapper выбирает только allow_once/reject и ACP q
 });
 
 // Запрос разрешения не несёт ни kind, ни аргументов вызова: buildPermissionToolCallUpdate
-// кладёт только title и content. Всё остальное кокпит восстанавливает по toolCallId —
+// кладёт только title и content. Всё остальное GrigDesk восстанавливает по toolCallId —
 // без этого всплывашка показывала голый JSON, а «Авто» спрашивал на каждое действие.
 test('permission presentation: команда, путь и дифф разбираются в читаемые поля', () => {
   const params = {

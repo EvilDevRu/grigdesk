@@ -5,7 +5,7 @@ import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
-const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
 
 for (const key of ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement',
   'SVGElement', 'Event', 'CustomEvent']) {

@@ -34,7 +34,7 @@ type Options = {
 
 /**
  * Владеет только мобильным входом и исходящими соединениями с посредниками.
- * Ошибка private store, ключа или порта не прерывает основной сервер Кокпита.
+ * Ошибка private store, ключа или порта не прерывает основной сервер GrigDesk.
  */
 export class MobileService {
   readonly devices: DeviceStore;
@@ -229,7 +229,7 @@ export class MobileService {
     const payload = {
       v: 1,
       brain: {
-        name: this.options.name ?? 'Кокпит',
+        name: this.options.name ?? 'GrigDesk',
         fp: this.identity!.fp,
       },
       relay: {
@@ -238,7 +238,7 @@ export class MobileService {
       },
       ...(issued ? { pair: issued } : {}),
     };
-    const text = `cockpitlink:1:${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
+    const text = `grigdesklink:1:${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
 
     if (Buffer.byteLength(text) > 4096) {
       throw new MobileInputError('qr_too_large', 'Данные посредника не помещаются в QR.');

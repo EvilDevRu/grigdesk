@@ -322,7 +322,7 @@ test('MA-10…31: экраны используют native bridge, провер�
   bridge.state.revoked = true;
   useLinkStore(pinia).fatal('device_revoked');
   await flushPromises();
-  assert.match(wrapper.text(), /Телефон отозван в кокпите/);
+  assert.match(wrapper.text(), /Телефон отозван в GrigDesk/);
   await clickText(wrapper, 'Отвязать');
   await flushPromises();
   assert.equal(document.body.querySelectorAll('[role="dialog"]').length, 1);
@@ -333,5 +333,5 @@ test('MA-10…31: экраны используют native bridge, провер�
 
   confirm.click();
   await flushPromises();
-  assert.match(wrapper.text(), /Подключить Кокпит/);
+  assert.match(wrapper.text(), /Подключить GrigDesk/);
 });

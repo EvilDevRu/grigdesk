@@ -16,7 +16,7 @@ async function loadComponent() {
 }
 
 async function browserFixture(t) {
-  return installUiBrowser(t, 'http://cockpit.test/#/board');
+  return installUiBrowser(t, 'http://grigdesk.test/#/board');
 }
 
 test('UI-01/02: кнопка отражает состояние, подписана и эмитит toggle', async (t) => {

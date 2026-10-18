@@ -86,7 +86,7 @@ export const COMPATIBILITY: readonly CompatibilityEntry[] = Object.freeze([
     {
         path: 'server/src/lib/executors/work-mcp.js',
         reason: 'Живой сервер запускает файл на каждую сессию; он же монтируется в песочницу.',
-        removeWhen: 'Сервер перезапущен, инструменты cockpit-work доступны в чате.',
+        removeWhen: 'Сервер перезапущен, инструменты grigdesk-work доступны в чате.',
     },
     {
         path: 'server/src/lib/executors/_direct-ssh-policy-hook.js',
@@ -94,12 +94,12 @@ export const COMPATIBILITY: readonly CompatibilityEntry[] = Object.freeze([
         removeWhen: 'Сервер перезапущен, прямой SSH в чате по-прежнему блокируется.',
     },
     {
-        path: 'server/src/workers/cockpit-update-worker.js',
+        path: 'server/src/workers/grigdesk-update-worker.js',
         reason: 'Обновлятель прошлой версии запускает воркер по этому имени.',
         removeWhen: 'Обновление прошло хотя бы один релиз с новым именем воркера.',
     },
     {
-        path: 'tests/server/cockpit-release.test.js',
+        path: 'tests/server/grigdesk-release.test.js',
         reason: 'Старый воркер обновления прогоняет этот файл в НОВОМ дереве без флагов.',
         removeWhen: 'Обновлятель на TypeScript установлен минимум один релиз.',
     },

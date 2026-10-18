@@ -37,7 +37,7 @@ test('E2: полная таблица содержит все контрактн
     "api_unsupported",
     "version_invalid",
     "version_mismatch",
-    "cockpit_too_old",
+    "grigdesk_too_old",
     "web_invalid",
     "symlink_forbidden",
     "submodules_forbidden",

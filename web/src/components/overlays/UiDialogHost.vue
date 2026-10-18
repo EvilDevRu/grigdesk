@@ -125,7 +125,7 @@ const dialogTitle = computed(() => {
     return current.options.title ?? 'Пояснение';
   }
 
-  return current.options.title ?? 'Кокпит';
+  return current.options.title ?? 'GrigDesk';
 });
 const dialogText = computed(() => {
   const current = request.value;

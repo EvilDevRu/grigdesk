@@ -32,7 +32,7 @@ export function createNpmRunner(
     await validateNpmDirectory(cwd);
 
     const cache = options.cacheRoot ?? (workspaceBudget ? path.join(workspaceBudget.root, 'npm') : null);
-    const root = cache ?? await mkdtemp(path.join(os.tmpdir(), 'cockpit-npm-policy-'));
+    const root = cache ?? await mkdtemp(path.join(os.tmpdir(), 'grigdesk-npm-policy-'));
 
     await mkdir(root, { recursive: true, mode: 0o700 });
 

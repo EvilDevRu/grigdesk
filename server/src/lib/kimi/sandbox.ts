@@ -39,9 +39,9 @@ const WORKSPACE_LOCAL_TOML_FILE = 'local.toml';
 // объявлено ровно то, что читает сборка запуска.
 // Пути внутри песочницы: их знают и сборка монтирований, и объявление MCP-сервера
 // сессии — иначе две копии литерала разъезжаются молча.
-export const KIMI_SANDBOX_WORK_MCP = '/opt/cockpit/work-mcp.js';
-export const KIMI_SANDBOX_NODE = '/opt/cockpit/node';
-export const KIMI_SANDBOX_WORK_SOCKET = '/run/cockpit-work/work.sock';
+export const KIMI_SANDBOX_WORK_MCP = '/opt/grigdesk/work-mcp.js';
+export const KIMI_SANDBOX_NODE = '/opt/grigdesk/node';
+export const KIMI_SANDBOX_WORK_SOCKET = '/run/grigdesk-work/work.sock';
 
 export interface KimiSandboxConfig {
   dataHome?: string;
@@ -62,7 +62,7 @@ export interface KimiSandboxConfig {
 
 function buildWorkspaceLocalToml(extraDirs: readonly unknown[]): string {
   return `${[
-    '# Сгенерировано Cockpit из дополнительных рабочих копий чата',
+    '# Сгенерировано GrigDesk из дополнительных рабочих копий чата',
     '# и дополнительные worktree задачи). Не редактировать: пересоздаётся на каждый ход.',
     '[workspace]',
     `additional_dir = [${extraDirs.map((dir) => JSON.stringify(String(dir))).join(', ')}]`,
@@ -101,12 +101,12 @@ set -eu
 umask 077
 /usr/sbin/ip link set lo up
 /usr/bin/setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
-  /usr/bin/socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/cockpit-egress/${KIMI_EGRESS_SOCKET_FILE} &
+  /usr/bin/socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/grigdesk-egress/${KIMI_EGRESS_SOCKET_FILE} &
 bridge=$!
 api_bridge=
 if [ "$#" -gt 0 ] && [ "$1" = web ]; then
   /usr/bin/setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- \
-    /usr/bin/socat UNIX-LISTEN:/run/cockpit-control/s,unlink-early,fork \
+    /usr/bin/socat UNIX-LISTEN:/run/grigdesk-control/s,unlink-early,fork \
     TCP-CONNECT:127.0.0.1:58627 &
   api_bridge=$!
 fi
@@ -273,7 +273,7 @@ function workspaceMountBoundaryError(
 
 /**
  * Control-state пути, попавшие внутрь смонтированных extras. Широкий доверенный
- * каталог (например, родитель репозитория cockpit) не отклоняется: он монтируется
+ * каталог (например, родитель репозитория grigdesk) не отклоняется: он монтируется
  * целиком, а эти пути прячутся пустым read-only mount-ом поверх.
  */
 function workspaceControlStateMasks(
@@ -298,8 +298,8 @@ export function validateKimiWorkdir({ config, cwd, extraDirs }: {
   const error = workspaceMountBoundaryError(cwd, config);
   const reasons: Record<string, string> = {
     kimi_workspace_mount_too_broad: 'Слишком широкий системный каталог для рабочей папки Kimi.',
-    kimi_workspace_mount_is_control_state: 'Каталог содержит служебное состояние Кокпита.',
-    kimi_workspace_mount_contains_control_state: 'Рабочая папка включает служебное состояние Кокпита.',
+    kimi_workspace_mount_is_control_state: 'Каталог содержит служебное состояние GrigDesk.',
+    kimi_workspace_mount_contains_control_state: 'Рабочая папка включает служебное состояние GrigDesk.',
   };
   const rejected: Array<{ path: string; reason: string; }> = [];
   const accepted: string[] = [];
@@ -339,7 +339,7 @@ export async function buildKimiSandboxLaunch({
   workMcp = null,
   serverControlDir,
   serverMcpFile,
-  unit = `cockpit-kimi-${randomUUID()}.service`,
+  unit = `grigdesk-kimi-${randomUUID()}.service`,
 }: {
   config: KimiSandboxConfig;
   cwd: unknown;
@@ -381,7 +381,7 @@ export async function buildKimiSandboxLaunch({
     workSocketDir = path.dirname(workSocket);
     workScript = await fs.realpath(workMcp.scriptPath);
     if (!(await fs.lstat(workScript)).isFile()) throw new Error('kimi_work_mcp_invalid');
-    // Рабочий MCP исполняет Node САМОГО кокпита. Хостовый /usr смонтирован read-only,
+    // Рабочий MCP исполняет Node САМОГО GrigDesk. Хостовый /usr смонтирован read-only,
     // и `/usr/bin/node` в нём может отсутствовать вовсе (nvm, asdf, сборка из исходников):
     // тогда сервер молча не поднимался. Берём ровно тот бинарь, которым запущен сервер, —
     // снятие типов у него встроено, поэтому флаги в argv песочницы не нужны.
@@ -401,7 +401,7 @@ export async function buildKimiSandboxLaunch({
     '--uid', '0', '--gid', '0',
     '--cap-drop', 'ALL',
     '--cap-add', 'CAP_NET_ADMIN', '--cap-add', 'CAP_SYS_ADMIN', '--cap-add', 'CAP_SETPCAP',
-    '--hostname', 'cockpit-kimi', '--clearenv',
+    '--hostname', 'grigdesk-kimi', '--clearenv',
   ];
   for (const [key, value] of Object.entries(env)) bwrap.push('--setenv', key, value);
   const madeDirs = new Set(['/']);
@@ -433,21 +433,21 @@ export async function buildKimiSandboxLaunch({
     : home.emptyMcp;
 
   addMount(bwrap, '--ro-bind', mcpSource, '/kimi-home/mcp.json', madeDirs);
-  addMount(bwrap, '--ro-bind', egressDir, '/run/cockpit-egress', madeDirs);
+  addMount(bwrap, '--ro-bind', egressDir, '/run/grigdesk-egress', madeDirs);
 
   if (serverControlDir) {
     const controlReal = await canonicalDirectory(serverControlDir, 'kimi_server_control');
 
-    addMount(bwrap, '--bind', controlReal, '/run/cockpit-control', madeDirs);
+    addMount(bwrap, '--bind', controlReal, '/run/grigdesk-control', madeDirs);
   }
   if (workMcp) {
     // Только каталог одного per-scope UDS и неизменяемый bridge; сетевой egress
     // contained Kimi этим не расширяется.
-    addMount(bwrap, '--ro-bind', workSocketDir, '/run/cockpit-work', madeDirs);
+    addMount(bwrap, '--ro-bind', workSocketDir, '/run/grigdesk-work', madeDirs);
     addMount(bwrap, '--ro-bind', workScript, KIMI_SANDBOX_WORK_MCP, madeDirs);
     addMount(bwrap, '--ro-bind', workNodeBin, KIMI_SANDBOX_NODE, madeDirs);
   }
-  addMount(bwrap, '--ro-bind', scripts.wrapperPath, '/opt/cockpit/run-kimi', madeDirs);
+  addMount(bwrap, '--ro-bind', scripts.wrapperPath, '/opt/grigdesk/run-kimi', madeDirs);
   addMount(bwrap, '--ro-bind', kimiBin, '/opt/kimi/bin/kimi', madeDirs);
   if (fdBin) addMount(bwrap, '--ro-bind', fdBin, '/opt/kimi/bin/fd', madeDirs);
 
@@ -526,7 +526,7 @@ export async function buildKimiSandboxLaunch({
   } else {
     bwrap.push('--dir', '/attachments');
   }
-  bwrap.push('--chdir', cwdReal, '/opt/cockpit/run-kimi');
+  bwrap.push('--chdir', cwdReal, '/opt/grigdesk/run-kimi');
 
   if (serverControlDir) {
     bwrap.push('web', '--port', '58627', '--host', '127.0.0.1', '--no-open');
@@ -563,7 +563,7 @@ export async function stopKimiUnit(unit: string, {
     options: { timeout: number },
   ) => Promise<unknown>,
 } = {}): Promise<void> {
-  if (!/^cockpit-kimi-[a-zA-Z0-9_.-]+\.service$/.test(unit || '')) throw new Error('invalid_kimi_unit');
+  if (!/^grigdesk-kimi-[a-zA-Z0-9_.-]+\.service$/.test(unit || '')) throw new Error('invalid_kimi_unit');
   await runner(systemctlBin, ['--user', 'stop', unit], { timeout: 8_000 }).catch(() => {});
 }
 

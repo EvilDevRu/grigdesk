@@ -73,7 +73,7 @@ test('выбранное фото читается только из per-run inp
   await writeFile(path.join(analysisDir, 't42.clarify.md'), [
     '## Ответ человека',
     'Снимок приложен.',
-    `<!-- cockpit-clarification:v1 ${marker} -->`,
+    `<!-- grigdesk-clarification:v1 ${marker} -->`,
     '',
   ].join('\n'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -195,7 +195,7 @@ test('пропавший token и symlink наружу становятся не
   await writeFile(path.join(analysisDir, 't42.clarify.md'), [
     '## Ответ человека',
     'Два снимка приложены.',
-    `<!-- cockpit-clarification:v1 ${marker} -->`,
+    `<!-- grigdesk-clarification:v1 ${marker} -->`,
     '',
   ].join('\n'));
   t.after(() => rm(root, { recursive: true, force: true }));

@@ -4,16 +4,16 @@ import test from 'node:test';
 import { factoryLaunchEnv } from '../../server/src/lib/factoryLaunch.ts';
 import { routeStartArgs, stageAutoCompactEnv } from '../../server/src/lib/factoryRouteCli.ts';
 
-test('Cockpit passes every factory runtime root into the detached pipeline scope', () => {
+test('GrigDesk passes every factory runtime root into the detached pipeline scope', () => {
   assert.deepEqual(factoryLaunchEnv({
-    dataHome: '/data/cockpit',
+    dataHome: '/data/grigdesk',
     factoryHome: '/engine',
     profilesDir: '/profiles',
     stateDir: '/state',
     factoryConfigRoot: '/config',
   }, { FACTORY_SB_K: '7' }), {
     FACTORY_SB_K: '7',
-    COCKPIT_HOME: '/data/cockpit',
+    GRIGDESK_HOME: '/data/grigdesk',
     FACTORY_HOME: '/engine',
     FACTORY_PROFILES_DIR: '/profiles',
     FACTORY_STATE: '/state',

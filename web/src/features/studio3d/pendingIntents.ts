@@ -42,7 +42,7 @@ export function createStudioPending(factory?: IDBFactory): PendingStudioStorage 
         return;
       }
       
-      const request = indexed.open('cockpit-studio3d-intents', 1);
+      const request = indexed.open('grigdesk-studio3d-intents', 1);
       
       request.onupgradeneeded = () => {
         request.result.createObjectStore('intents', { keyPath: 'key' });

@@ -1,4 +1,4 @@
-# Cockpit overlay для штатного профиля acp. Генерируется на каждый запуск.
+# GrigDesk overlay для штатного профиля acp. Генерируется на каждый запуск.
 - id: "sandbox-policy"
   config:
     mode: "workspace-write"

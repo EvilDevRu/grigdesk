@@ -128,7 +128,7 @@ function createRuntime() {
  * конструкторы после размонтирования, чтобы проверки не зависели друг от друга.
  */
 async function mountStream(t, name) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/docker');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/docker');
   const runtime = createRuntime();
   const originals = new Map(['WebSocket', 'ResizeObserver'].map((key) => [
     key,
@@ -165,7 +165,7 @@ async function mountStream(t, name) {
   const component = await compileVue(webFile(`src/views/docker/${name}.vue`), {
     stubs: {
       '../../shared/apiClient.ts': (
-        'export const api = { wsUrl: (path) => `ws://cockpit.test${path}` };'
+        'export const api = { wsUrl: (path) => `ws://grigdesk.test${path}` };'
       ),
       '@xterm/xterm': 'export const Terminal = globalThis.__dockerStreamsRuntime.FakeTerminal;',
       '@xterm/addon-fit': 'export const FitAddon = globalThis.__dockerStreamsRuntime.FakeFitAddon;',

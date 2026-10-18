@@ -55,7 +55,7 @@ async function compileView(view) {
 
 async function installBrowser(t, view) {
   const { Window } = await import(HAPPY_DOM);
-  const browser = new Window({ url: `http://cockpit.test/#/${view}` });
+  const browser = new Window({ url: `http://grigdesk.test/#/${view}` });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

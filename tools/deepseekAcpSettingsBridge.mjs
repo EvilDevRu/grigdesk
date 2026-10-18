@@ -3,7 +3,7 @@
 
 import { RequestError } from '@agentclientprotocol/sdk';
 
-export const name = 'cockpit-acp-settings';
+export const name = 'grigdesk-acp-settings';
 export const inject = ['settingsController', 'settings'];
 
 /**
@@ -37,11 +37,11 @@ function parameters(value) {
 export function apply(ctx) {
   const controller = ctx.settingsController;
 
-  ctx.provide('cockpitAcpSettingsBridge', {
-    capabilities: { 'cockpit.settings': { contract: 1 } },
+  ctx.provide('grigdeskAcpSettingsBridge', {
+    capabilities: { 'grigdesk.settings': { contract: 1 } },
     configure(app) {
-      app.onRequest('_cockpit/settings/describe', parameters, () => delegate(() => controller.describe()));
-      app.onRequest('_cockpit/settings/mutate', parameters, async ({ params }) => {
+      app.onRequest('_grigdesk/settings/describe', parameters, () => delegate(() => controller.describe()));
+      app.onRequest('_grigdesk/settings/mutate', parameters, async ({ params }) => {
         if (
           typeof params.ns !== 'string' || !Array.isArray(params.ops) ||
           !Number.isSafeInteger(params.expectedRevision)

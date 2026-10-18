@@ -188,7 +188,7 @@ test('RE-G3-04: noResult не выдаётся за исход команды, �
 
 test('RE-G3-06: пробный шаг не создаёт runtime state и не вызывает профиль',
   async (t) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-route-simulation-'));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-route-simulation-'));
     t.after(() => fs.rm(root, { recursive: true, force: true }));
     const marker = path.join(root, 'profile-command-marker');
     const state = path.join(root, 'state');
@@ -219,7 +219,7 @@ test('RE-G3-06: пробный шаг не создаёт runtime state и не 
 
 test('RE-G3-02: API шага привязывает ответ к ревизии черновика и не пишет runtime',
   async (t) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-route-step-api-'));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-route-step-api-'));
     t.after(() => fs.rm(root, { recursive: true, force: true }));
     const routesDir = path.join(root, 'routes');
     const app = Fastify({ logger: false });

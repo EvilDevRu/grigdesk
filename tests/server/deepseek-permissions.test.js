@@ -43,7 +43,7 @@ test('read-only и Factory отклоняют запрос без вызова U
 });
 
 test('известный work MCP разрешается только в чате и только известным descriptor', async () => {
-  const context = { title: 'mcp__cockpit-work__supervised_ssh', rawInput: {} };
+  const context = { title: 'mcp__grigdesk-work__supervised_ssh', rawInput: {} };
   const known = await resolveDeepSeekPermission({
     params,
     context,

@@ -6,7 +6,7 @@ import type { HighlighterCore, LanguageInput } from 'shiki/core';
 import type { FenceToken } from './fenceLines.ts';
 
 const MAX_HIGHLIGHT_CHARS = 20_000;
-const THEME = 'cockpit';
+const THEME = 'grigdesk';
 
 // Каждый import — отдельный чанк сборки. Строки обязаны быть литералами: Vite видит
 // только их.
@@ -65,7 +65,7 @@ export function canonicalLanguage(lang: string): string {
 
 /**
  * Один подсветчик на вкладку. Тема css-variables: цвета задаёт tokens.css, поэтому
- * подсветка меняется вместе с палитрой кокпита, а не живёт своей.
+ * подсветка меняется вместе с палитрой GrigDesk, а не живёт своей.
  */
 async function createHighlighter(): Promise<HighlighterCore> {
   const [core, engine] = await Promise.all([

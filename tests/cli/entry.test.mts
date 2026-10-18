@@ -33,8 +33,8 @@ test('CE-2 сервер, посредник и журнал', () => {
 
 test('CE-3 ошибки аргументов', () => {
   const cases: [string[], RegExp][] = [
-    [['frobnicate'], /Неизвестная команда: frobnicate\. Справка: cockpit --help/],
-    [['server'], /Не указано действие: cockpit server start \| stop \| restart \| status \| logs/],
+    [['frobnicate'], /Неизвестная команда: frobnicate\. Справка: grigdesk-ctl --help/],
+    [['server'], /Не указано действие: grigdesk-ctl server start \| stop \| restart \| status \| logs/],
     [['server', 'start', '--json'], /Неизвестный флаг/],
     [['relay', 'start', '--force'], /Неизвестный флаг/],
     [['server', 'status', '--wait'], /Неизвестный флаг/],
@@ -70,8 +70,8 @@ test('CE-5 справка без эффектов', async (t) => {
   const result = await box.run(['--help']);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /cockpit server start/);
-  assert.match(result.stdout, /cockpit relay logs/);
+  assert.match(result.stdout, /grigdesk-ctl server start/);
+  assert.match(result.stdout, /grigdesk-ctl relay logs/);
   assert.deepEqual(box.calls(), []);
 });
 
@@ -83,7 +83,7 @@ test('CE-6 версия из своего корня', async (t) => {
   const result = await box.run(['--version']);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout, 'Кокпит 9.8.7\n');
+  assert.equal(result.stdout, 'GrigDesk 9.8.7\n');
   assert.deepEqual(box.calls(), []);
 });
 
@@ -99,10 +99,10 @@ test('CE-7 неизвестная команда не делает эффект�
 test('CE-8 ссылка из каталога с пробелами, cwd /', async (t) => {
   const box = await createSandbox(t);
   const directory = path.join(box.home, 'ссылки с пробелами');
-  const link = path.join(directory, 'cockpit');
+  const link = path.join(directory, 'grigdesk');
 
   mkdirSync(directory);
-  symlinkSync(path.join(box.root, 'bin/cockpit'), link);
+  symlinkSync(path.join(box.root, 'bin/grigdesk-ctl'), link);
   writeFileSync(path.join(box.root, 'VERSION'), '9.8.7\n');
 
   const result = await completed(spawn('bash', [link, '--version'], {
@@ -111,7 +111,7 @@ test('CE-8 ссылка из каталога с пробелами, cwd /', asy
   }));
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout, 'Кокпит 9.8.7\n');
+  assert.equal(result.stdout, 'GrigDesk 9.8.7\n');
 });
 
 test('CE-9 старые скрипты получают argv и возвращают код', async (t) => {
@@ -133,7 +133,7 @@ test('CE-10 старый Node отвергается до TypeScript', async (t)
   const result = await box.run(['--help']);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Cockpit требует Node/);
+  assert.match(result.stderr, /GrigDesk требует Node/);
   assert.deepEqual(box.calls(), []);
 });
 
@@ -145,7 +145,7 @@ test('CE-11 справка команд разработчика ничего н
     const result = await box.run(argv);
 
     assert.equal(result.code, 0, `${argv.join(' ')}: ${result.stderr}`);
-    assert.match(result.stdout, /cockpit dev \| build \| deps \| run/, argv.join(' '));
+    assert.match(result.stdout, /grigdesk-ctl dev \| build \| deps \| run/, argv.join(' '));
     assert.doesNotMatch(result.stdout + result.stderr, /Сборка web|npm i|уже слушает/, argv.join(' '));
   }
 
@@ -185,7 +185,7 @@ async function b24Sandbox(t: TestContext) {
   };
 }
 
-test('CE-B24-1: без бинарника cockpit запускает source и передаёт argv', async (t) => {
+test('CE-B24-1: без бинарника grigdesk запускает source и передаёт argv', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
   rmSync(path.join(box.root, 'bin/b24'));
@@ -223,7 +223,7 @@ test('CE-B24-2: готовый b24 не требует Node', async (t) => {
 test('CE-B24-3: ошибка готового b24 не запускает fallback', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
-  writeFileSync(path.join(box.root, 'bin/b24'), '#!/bin/bash\necho "Запрос к Cockpit" >&2\nexit 22\n',
+  writeFileSync(path.join(box.root, 'bin/b24'), '#!/bin/bash\necho "Запрос к GrigDesk" >&2\nexit 22\n',
     { mode: 0o755 });
 
   const result = await box.run(['b24', 'start', '42']);

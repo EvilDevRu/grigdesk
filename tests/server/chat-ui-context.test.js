@@ -21,7 +21,7 @@ test('COMP-SCTX-01/02: safe snapshot даёт один server-owned context bloc
     page: 'Конвейер', path: '/pipeline', details: { pipeline: { stage: 'review' } },
   });
   const prefix = contextPrefix(normalized, pageHint(normalized.path));
-  assert.equal((prefix.match(/\[Контекст кокпита\]/g) || []).length, 1);
+  assert.equal((prefix.match(/\[Контекст GrigDesk\]/g) || []).length, 1);
   assert.match(prefix, /недоверенные данные интерфейса/i);
   assert.match(prefix, /"stage":"review"/);
   assert.equal(normalizeUiContext({ page: 'x', path: 'https://evil.test/' }), null);
@@ -93,7 +93,7 @@ test('COMP-SCTX-06: подсказка паспорта проекта выда�
 
 test('телеграм-пульт добавляет server-owned запрет перезапуска сервера', () => {
   const hint = pageHint('/telegram/pult');
-  assert.match(hint, /не перезапускай сервер Cockpit|нельзя перезапускать сервер Cockpit/iu);
+  assert.match(hint, /не перезапускай сервер GrigDesk|нельзя перезапускать сервер GrigDesk/iu);
 });
 
 test('COMP-SCTX-03/04: accessor, cycle, prototype и overflow отбрасываются без чтения getter', () => {
@@ -121,7 +121,7 @@ test('COMP-SCTX-03/04: accessor, cycle, prototype и overflow отбрасыва
 });
 
 test('COMP-SCTX-06/07/08/10: живые chat routes используют context только как prompt data', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-ui-context-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-ui-context-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const worktree = path.join(root, 'task-worktree');
   await fs.mkdir(worktree, { recursive: true });
@@ -196,7 +196,7 @@ test('COMP-SCTX-06/07/08/10: живые chat routes используют context
   assert.notEqual(calls[0].permissionMode, 'acceptEdits', 'страница /agents не выдаёт acceptEdits');
   assert.equal(calls[1].cwd, worktree, 'task route остаётся единственным владельцем worktree');
   for (const call of calls) {
-    assert.equal((call.message.match(/\[Контекст кокпита\]/g) || []).length, 1);
+    assert.equal((call.message.match(/\[Контекст GrigDesk\]/g) || []).length, 1);
     assert.match(call.message, /"selectedAgent":"reviewer"/);
     assert.doesNotMatch(call.message, /must-not-leak|\/tmp\/evil|secret-output|rm -rf|acceptEdits|"taskId"/);
   }

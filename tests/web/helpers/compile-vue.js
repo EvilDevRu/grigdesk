@@ -24,7 +24,7 @@ let nonce = 0;
 // идентификатор модуля. Короткий file: URL удерживает только загруженный модуль;
 // исходник после import уже не нужен.
 async function importCompiled(code) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'cockpit-vue-test-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'grigdesk-vue-test-'));
   const filename = path.join(directory, `module-${process.pid}-${nonce += 1}.mjs`);
 
   try {
@@ -37,13 +37,13 @@ async function importCompiled(code) {
 
 function vuePlugin() {
   return {
-    name: 'cockpit-vue-sfc',
+    name: 'grigdesk-vue-sfc',
     setup(builder) {
       builder.onResolve({ filter: /\.vue$/ }, (args) => ({
         path: path.isAbsolute(args.path) ? args.path : path.resolve(args.resolveDir, args.path),
-        namespace: 'cockpit-vue',
+        namespace: 'grigdesk-vue',
       }));
-      builder.onLoad({ filter: /\.vue$/, namespace: 'cockpit-vue' }, async (args) => {
+      builder.onLoad({ filter: /\.vue$/, namespace: 'grigdesk-vue' }, async (args) => {
         const source = await readFile(args.path, 'utf8');
         const parsed = parse(source, { filename: args.path });
         if (parsed.errors.length) {
@@ -66,7 +66,7 @@ function vuePlugin() {
 
 function dependencyPlugin(stubs) {
   return {
-    name: 'cockpit-test-dependencies',
+    name: 'grigdesk-test-dependencies',
     setup(builder) {
       for (const [specifier, singletonPath] of SINGLETONS) {
         if (Object.hasOwn(stubs, specifier)) {
@@ -85,14 +85,14 @@ function dependencyPlugin(stubs) {
 
         builder.onResolve({ filter }, () => ({
           path: specifier,
-          namespace: 'cockpit-stub',
+          namespace: 'grigdesk-stub',
         }));
         // resolveDir нужен стабам, которые реэкспортируют кусок настоящего модуля:
         // без него esbuild некуда разрешать пути из подменённого кода.
         builder.onLoad(
           {
             filter,
-            namespace: 'cockpit-stub',
+            namespace: 'grigdesk-stub',
           },
           () => ({ contents, loader: 'js', resolveDir: WEB_ROOT }),
         );

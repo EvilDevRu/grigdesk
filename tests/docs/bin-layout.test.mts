@@ -12,18 +12,22 @@ const REPO = new URL('../../', import.meta.url);
 
 // Сервер кладёт bin/ первым в PATH каждого агента (server/src/lib/cliPath.ts), поэтому любой
 // исполняемый файл здесь становится командой агента по голому имени. Набор закрыт: единая
-// команда, иконка ярлыка и два собранных файла (b24 и посредник), которые в git не попадают.
-const COMMANDS = ['cockpit'];
-const BUILT = ['b24', 'cockpit-relay'];
-const ALLOWED = new Set([...COMMANDS, ...BUILT, 'cockpit.png']);
+// команда, иконка ярлыка и собранные файлы (b24, посредник и установленное окно), которые в git
+// не попадают.
+const COMMANDS = ['grigdesk-ctl'];
+const BUILT = ['b24', 'grigdesk-relay', 'grigdesk-app'];
+const ALLOWED = new Set([...COMMANDS, ...BUILT, 'grigdesk.png']);
 
-// Скрипты, которым bin/cockpit передаёт `desktop`, `mobile` и `release`. Им нужен
+// Эти собранные файлы проверяются по содержимому: ELF с правами 0755 либо отсутствие.
+const ELF_BUILT = ['b24', 'grigdesk-app'];
+
+// Скрипты, которым bin/grigdesk-ctl передаёт `desktop`, `mobile` и `release`. Им нужен
 // бит исполнения: команда зовёт их через exec, а не через bash. b24 — собранный файл или исходник.
 const DELEGATED = ['deploy/desktop.sh', 'tools/mobile', 'tools/release'];
 
 /**
- * Проверяет каталог bin: только разрешённые имена, исполняемая команда cockpit и
- * собранный b24 — только ELF с правами 0755. Отсутствие b24 до сборки — штатно.
+ * Проверяет каталог bin: только разрешённые имена, исполняемая команда grigdesk-ctl, а
+ * собранный b24 и окно — только ELF с правами 0755. Их отсутствие до сборки — штатно.
  */
 function binProblems(directory: string): string[] {
   const problems = readdirSync(directory).filter((name) => !ALLOWED.has(name))
@@ -35,11 +39,15 @@ function binProblems(directory: string): string[] {
     }
   }
 
-  const b24 = path.join(directory, 'b24');
+  for (const name of ELF_BUILT) {
+    const file = path.join(directory, name);
 
-  if (existsSync(b24)) {
+    if (!existsSync(file)) {
+      continue;
+    }
+
     const magic = Buffer.alloc(4);
-    const handle = openSync(b24, 'r');
+    const handle = openSync(file, 'r');
 
     try {
       readSync(handle, magic, 0, 4, 0);
@@ -48,11 +56,11 @@ function binProblems(directory: string): string[] {
     }
 
     if (!magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
-      problems.push('b24 не ELF');
+      problems.push(`${name} не ELF`);
     }
 
-    if ((statSync(b24).mode & 0o777) !== 0o755) {
-      problems.push('b24 без прав 0755');
+    if ((statSync(file).mode & 0o777) !== 0o755) {
+      problems.push(`${name} без прав 0755`);
     }
   }
 
@@ -69,7 +77,7 @@ test('BD-01: b24 отсутствует до сборки и допустим т
   const fixture = (b24?: { bytes: Buffer; mode: number }) => {
     const directory = mkdtempSync(path.join(os.tmpdir(), 'b24-bin-layout-'));
 
-    writeFileSync(path.join(directory, 'cockpit'), '#!/bin/bash\n', { mode: 0o755 });
+    writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
 
     if (b24) {
       writeFileSync(path.join(directory, 'b24'), b24.bytes);
@@ -95,15 +103,32 @@ test('BD-01: b24 отсутствует до сборки и допустим т
   })), ['b24 без прав 0755']);
 });
 
-test('иконка ярлыка совпадает с иконкой интерфейса', () => {
-  const icon = readFileSync(new URL('bin/cockpit.png', REPO));
-  const web = readFileSync(new URL('web/public/icon-512.png', REPO));
+test('BD-02: окно в bin/ допустимо только как ELF с правами 0755, временная копия — лишняя', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'app-bin-layout-'));
+  const app = path.join(directory, 'grigdesk-app');
 
-  assert.ok(icon.equals(web), 'bin/cockpit.png — копия web/public/icon-512.png');
+  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
+  assert.deepEqual(binProblems(directory), []);
+
+  writeFileSync(app, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+  chmodSync(app, 0o755);
+  assert.deepEqual(binProblems(directory), []);
+
+  chmodSync(app, 0o644);
+  writeFileSync(path.join(directory, '.grigdesk-app.Ab12Cd'), '');
+  assert.deepEqual(binProblems(directory),
+    ['лишний файл .grigdesk-app.Ab12Cd', 'grigdesk-app без прав 0755']);
 });
 
-test('bin/cockpit передаёт команды существующим исполняемым скриптам', () => {
-  const dispatcher = readFileSync(new URL('bin/cockpit', REPO), 'utf8');
+test('иконка ярлыка совпадает с иконкой интерфейса', () => {
+  const icon = readFileSync(new URL('bin/grigdesk.png', REPO));
+  const web = readFileSync(new URL('web/public/icon-512.png', REPO));
+
+  assert.ok(icon.equals(web), 'bin/grigdesk.png — копия web/public/icon-512.png');
+});
+
+test('bin/grigdesk-ctl передаёт команды существующим исполняемым скриптам', () => {
+  const dispatcher = readFileSync(new URL('bin/grigdesk-ctl', REPO), 'utf8');
 
   assert.match(dispatcher, /exec "\$DIR\/deploy\/desktop\.sh"/);
   assert.match(dispatcher, /if \[\[ -x "\$DIR\/bin\/b24" \]\]; then\n\s+exec "\$DIR\/bin\/b24" "\$@"/);

@@ -19,7 +19,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function apiFixture(t, executor = null) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-perm-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-perm-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   const events = [];
@@ -108,7 +108,7 @@ test('отказ без пояснения: прежний дефолтный т
     input: { plan: 'Шаг 1' },
     answer: { allow: false },
   });
-  assert.deepEqual(body, { behavior: 'deny', message: 'Пользователь отклонил действие в кокпите' });
+  assert.deepEqual(body, { behavior: 'deny', message: 'Пользователь отклонил действие в GrigDesk' });
 });
 
 test('разрешение по-прежнему проходит в allow-ветку с updatedInput', async (t) => {
@@ -195,7 +195,7 @@ test('прямой канал без текстового обратного х�
     'фронт обязан узнать, что текст не доехал, и отправить его обычным сообщением');
 });
 
-test('прямой канал: «разрешать до конца сессии» едет вариантом ответа, а не политикой кокпита', async (t) => {
+test('прямой канал: разрешение до конца сессии — вариант ответа, а не политика GrigDesk', async (t) => {
   const { outcome, ack } = await askDirectly(t, {
     presentation: { tool: 'Bash', acceptsComment: true, input: { kind: 'execute', command: 'ls' } },
     answer: { allow: true, remember: true },

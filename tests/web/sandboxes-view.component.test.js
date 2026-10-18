@@ -90,7 +90,7 @@ function entry(overrides = {}) {
 async function mountView(t, {
   sandboxes = [entry()], jobs = [], confirmed = true, answers = [],
 } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/sandboxes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/sandboxes');
   const calls = [];
   const harness = {
     confirmed,

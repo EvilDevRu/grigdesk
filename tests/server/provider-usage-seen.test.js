@@ -9,7 +9,7 @@ import { ProviderUsageSeenStore, isFreshGroup } from '../../server/src/lib/provi
 const DAY = 24 * 60 * 60 * 1000;
 
 function tempStore(now) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-usage-seen-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-usage-seen-'));
 
   return {
     dir,

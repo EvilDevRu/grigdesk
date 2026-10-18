@@ -6,7 +6,7 @@ import { request } from '../../b24/src/http.ts';
 import { sendChunked, startHttpFixture } from './helpers/httpFixture.mts';
 
 const TOKEN = 'secret-token-value';
-const TIMEOUT_MESSAGE = 'Cockpit не ответил за 300 с: операция могла выполниться — '
+const TIMEOUT_MESSAGE = 'GrigDesk не ответил за 300 с: операция могла выполниться — '
   + 'проверьте результат перед повтором.';
 
 /**
@@ -74,7 +74,7 @@ test('BH-02: HTTP-отказ скрывает тело и возвращает 2
     }, {
       method: 'GET',
       path: '/api/b24/dashboard',
-    }), `Запрос к Cockpit завершился ошибкой HTTP ${status}.`);
+    }), `Запрос к GrigDesk завершился ошибкой HTTP ${status}.`);
   }
 });
 
@@ -92,7 +92,7 @@ test('BH-03: redirect не получает второй запрос и ток�
   }, {
     method: 'GET',
     path: '/api/b24/dashboard',
-  }), 'Запрос к Cockpit завершился ошибкой HTTP 302.');
+  }), 'Запрос к GrigDesk завершился ошибкой HTTP 302.');
   assert.equal(source.requests.length, 1);
   assert.equal(target.requests.length, 0);
 });
@@ -111,7 +111,7 @@ test('BH-04: сетевой обрыв, в том числе после 200, в�
       response.socket?.destroy();
     }, 20);
   });
-  const network = 'Не удалось связаться с Cockpit.';
+  const network = 'Не удалось связаться с GrigDesk.';
 
   for (const fixture of [before, middle]) {
     await rejects22(request({
@@ -175,7 +175,7 @@ test('BH-05: JSON-заголовок ставится только по RequestS
   assert.equal(create.body.toString(), '{"title":"т"}\n');
 
   for (const recorded of fixture.requests) {
-    assert.equal(recorded.headers['x-cockpit-token'], TOKEN);
+    assert.equal(recorded.headers['x-grigdesk-token'], TOKEN);
   }
 });
 
@@ -185,24 +185,24 @@ test('BH-02a: HTTP-отказ называет причину из поля mess
     [
       { error: 'b24_not_configured', message: 'B24 не настроен: заполните логин/пароль в Настройках.' },
       'application/json; charset=utf-8',
-      'Запрос к Cockpit завершился ошибкой HTTP 400: B24 не настроен: заполните логин/пароль в Настройках.',
+      'Запрос к GrigDesk завершился ошибкой HTTP 400: B24 не настроен: заполните логин/пароль в Настройках.',
     ],
     [
       { message: 'строка1\nстрока2\u001b[31m' },
       'application/json',
-      'Запрос к Cockpit завершился ошибкой HTTP 400: строка1 строка2 [31m.',
+      'Запрос к GrigDesk завершился ошибкой HTTP 400: строка1 строка2 [31m.',
     ],
     [
       { message: long },
       'application/json',
-      `Запрос к Cockpit завершился ошибкой HTTP 400: ${'я'.repeat(500)}…`,
+      `Запрос к GrigDesk завершился ошибкой HTTP 400: ${'я'.repeat(500)}…`,
     ],
-    [{ message: 42 }, 'application/json', 'Запрос к Cockpit завершился ошибкой HTTP 400.'],
-    [{ message: 'не JSON-тип' }, 'text/plain', 'Запрос к Cockpit завершился ошибкой HTTP 400.'],
+    [{ message: 42 }, 'application/json', 'Запрос к GrigDesk завершился ошибкой HTTP 400.'],
+    [{ message: 'не JSON-тип' }, 'text/plain', 'Запрос к GrigDesk завершился ошибкой HTTP 400.'],
     [
       { message: 'слишком большое тело', pad: 'x'.repeat(70 * 1024) },
       'application/json',
-      'Запрос к Cockpit завершился ошибкой HTTP 400.',
+      'Запрос к GrigDesk завершился ошибкой HTTP 400.',
     ],
   ];
 
@@ -234,7 +234,7 @@ test('BH-02a: повреждённый JSON не становится причи
   }, {
     method: 'GET',
     path: '/api/b24/dashboard',
-  }), 'Запрос к Cockpit завершился ошибкой HTTP 502.');
+  }), 'Запрос к GrigDesk завершился ошибкой HTTP 502.');
 });
 
 const unsafeReasons = [
@@ -258,7 +258,7 @@ for (const [label, message, expected] of unsafeReasons) {
     }, {
       method: 'GET',
       path: '/api/b24/dashboard',
-    }), `Запрос к Cockpit завершился ошибкой HTTP 400: ${expected}${end}`);
+    }), `Запрос к GrigDesk завершился ошибкой HTTP 400: ${expected}${end}`);
   });
 }
 

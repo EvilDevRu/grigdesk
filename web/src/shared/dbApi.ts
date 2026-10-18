@@ -99,7 +99,7 @@ export const dbApi = {
   async openSession(profileId: string, password: string, sshSessionId = '') {
     const bytes = new TextEncoder().encode(String(password || ''));
     const options = sshSessionId
-      ? { headers: { 'x-cockpit-ssh-session-id': sshSessionId } }
+      ? { headers: { 'x-grigdesk-ssh-session-id': sshSessionId } }
       : undefined;
 
     try {

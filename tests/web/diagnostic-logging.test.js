@@ -102,7 +102,7 @@ test('понижение уровня чистит кольцо, плоский 
   assert.deepEqual(transport.snapshot().pending.map((entry) => entry.seq), [mark.seq]);
   assert.equal(transport.snapshot().pending[0].dump.entries.length, 0);
   assert.ok(deliveries.some((item) => item.key.seq === context.seq && item.status === 'drop'));
-  assert.ok(queueStorage.values.get('cockpit-web-log-queue-v1').includes('"seq":3'));
+  assert.ok(queueStorage.values.get('grigdesk-web-log-queue-v1').includes('"seq":3'));
 
   log.setLevel('off');
   assert.equal(log.mark('Выключено', null), null);

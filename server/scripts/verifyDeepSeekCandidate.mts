@@ -32,7 +32,7 @@ async function runGate(): Promise<void> {
   });
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    COCKPIT_TEST_DEEPSEEK_ARTIFACT: artifact,
+    GRIGDESK_TEST_DEEPSEEK_ARTIFACT: artifact,
     NODE_TEST_MAX_RSS_MB: '4096',
   };
 

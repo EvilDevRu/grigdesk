@@ -88,4 +88,4 @@ async function staticPlugin(fastify: FastifyInstance, opts: StaticPluginOptions)
   });
 }
 
-export default fp(staticPlugin, { name: 'cockpit-static' });
+export default fp(staticPlugin, { name: 'grigdesk-static' });

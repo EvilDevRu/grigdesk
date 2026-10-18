@@ -4,7 +4,7 @@ import { diagnosticLevel, filterWebLogEntry } from '../../../shared/web-log/diag
 import type { WebLogData, WebLogEntry, WebLogKey } from '../../../shared/web-log/webLogContracts.ts';
 import type { WebLog, WebLogLoss } from './webLog.ts';
 
-const STORAGE_KEY = 'cockpit-web-log-queue-v1';
+const STORAGE_KEY = 'grigdesk-web-log-queue-v1';
 
 export type TransportAuth = {
   ready: boolean;

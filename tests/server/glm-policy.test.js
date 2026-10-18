@@ -115,15 +115,15 @@ test(DB_TEST, async (t) => {
 });
 
 test('mcp__ сервера не из этого запуска — exit 2', async (t) => {
-  for (const name of ['mcp__fixture__echo', 'mcp__cockpit_work__repo_history', 'mcp__a__b__c']) {
+  for (const name of ['mcp__fixture__echo', 'mcp__grigdesk_work__repo_history', 'mcp__a__b__c']) {
     assert.equal((await runHook(t, preToolUse(name))).code, 2, name);
   }
 });
 
-test('инструмент cockpit-work не из инвентаря — exit 2', async (t) => {
-  assert.equal((await runHook(t, preToolUse('mcp__cockpit-work__repo_history'))).code, 0);
+test('инструмент grigdesk-work не из инвентаря — exit 2', async (t) => {
+  assert.equal((await runHook(t, preToolUse('mcp__grigdesk-work__repo_history'))).code, 0);
 
-  const outside = ['mcp__cockpit-work__repo_historyx', 'mcp__cockpit-work__other', 'mcp__cockpit-work__'];
+  const outside = ['mcp__grigdesk-work__repo_historyx', 'mcp__grigdesk-work__other', 'mcp__grigdesk-work__'];
 
   for (const name of outside) {
     assert.equal((await runHook(t, preToolUse(name))).code, 2, name);

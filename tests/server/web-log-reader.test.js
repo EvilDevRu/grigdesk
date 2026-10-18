@@ -19,7 +19,7 @@ function marked(page = 'page-aaaaaaaaaaaaaaaa') {
 }
 
 test('reader объединяет дубли и раскрывает debug-дамп через UTC-полночь', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-reader-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-reader-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const entry = marked();
   const line = JSON.stringify({ ...entry, rx: '2026-09-23T00:00:01Z' });
@@ -37,14 +37,14 @@ test('reader объединяет дубли и раскрывает debug-да�
 
   const result = spawnSync(process.execPath, ['server/scripts/web-log.mjs', '--day', '2026-09-23',
     '--level', 'warn', '--json'], { cwd: new URL('../..', import.meta.url),
-    env: { ...process.env, COCKPIT_WEB_LOG_DIR: dir }, encoding: 'utf8' });
+    env: { ...process.env, GRIGDESK_WEB_LOG_DIR: dir }, encoding: 'utf8' });
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim().split('\n').length, 1);
   assert.doesNotMatch(result.stderr, /\{"bad"/u);
 });
 
 test('reader ограничивает индекс, сообщает об этом и не скрывает новые строки', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-index-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-index-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const first = marked();
   const second = marked('page-cccccccccccccccc');
@@ -71,13 +71,13 @@ test('reader ограничивает индекс, сообщает об это
 });
 
 test('CLI в тексте показывает время окна, маршрут и предысторию под записью', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-cli-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-cli-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const entry = marked();
   await writeFile(path.join(dir, '2026-09-23.ndjson'),
     `${JSON.stringify({ ...entry, rx: '2026-09-23T00:00:01Z' })}\n`);
   const cli = (args) => spawnSync(process.execPath, ['server/scripts/web-log.mjs', ...args], {
-    cwd: new URL('../..', import.meta.url), env: { ...process.env, COCKPIT_WEB_LOG_DIR: dir },
+    cwd: new URL('../..', import.meta.url), env: { ...process.env, GRIGDESK_WEB_LOG_DIR: dir },
     encoding: 'utf8',
   });
 

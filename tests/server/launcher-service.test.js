@@ -28,7 +28,7 @@ function enabledAfterToggle(initial) {
   };
 }
 
-const UNIT = 'cockpit-server.service';
+const UNIT = 'grigdesk-server.service';
 const SHORTCUT = 'bash /repo/deploy/shortcut.sh';
 
 function service(answers) {

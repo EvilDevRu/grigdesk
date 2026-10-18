@@ -123,7 +123,7 @@ function resolveChromeBinary() {
 
 /**
  * Без внешнего URL gallery поднимается отдельным Vite-процессом без product auth/store.
- * Это оставляет browser baseline воспроизводимым и не перезапускает работающий Cockpit.
+ * Это оставляет browser baseline воспроизводимым и не перезапускает работающий GrigDesk.
  */
 async function startGalleryServer() {
   const externalBase = process.env.UI_GEOMETRY_BASE_URL;
@@ -177,7 +177,7 @@ async function startGalleryServer() {
 async function startChrome() {
   const binary = resolveChromeBinary();
   const port = await freePort();
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-ui-chrome-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-ui-chrome-'));
   const child = spawn(
     binary,
     [

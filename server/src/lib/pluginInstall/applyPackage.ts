@@ -187,7 +187,7 @@ async function verifyLayout(fs: ApplyFs, intent: PluginApplyIntent): Promise<voi
   const relative = path.relative(fs.roots.pluginsDir, fs.roots.workDir);
   const inverse = path.relative(fs.roots.workDir, fs.roots.pluginsDir);
   const disjoint = [relative, inverse].every((value) => value === '..' || value.startsWith(`..${path.sep}`));
-  const permitted = relative === '.cockpit-install' || disjoint;
+  const permitted = relative === '.grigdesk-install' || disjoint;
 
   if (!plugins || !work || !permitted || plugins.dev !== work.dev
     || [intent.current, intent.candidate, intent.previous]

@@ -58,7 +58,7 @@ function vendorBalance(total, { currency = 'USD', available = true } = {}) {
 }
 
 async function runtimeHome(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-usage-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-usage-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return path.join(root, 'runtime');
 }

@@ -30,7 +30,7 @@ export const UiSelectableRow = defineComponent({ emits: ['select'],
 `;
 
 async function catalogFixture(t, initial, initialSelection = '') {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteCatalog.vue'), {
     stubs: { '../../ui.ts': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";", '../../ui': (UI_STUB) +
@@ -53,7 +53,7 @@ async function catalogFixture(t, initial, initialSelection = '') {
 }
 
 test('RE-F7-01: редактор bootstrap использует свои entry, scope и prompt', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteBootstrapEditor.vue'), {
     stubs: {
       '../../ui': (UI_STUB) +

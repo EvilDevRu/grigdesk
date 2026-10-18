@@ -151,7 +151,7 @@ test('resolveSpeechOptions даёт совместимые дефолты и о�
 });
 
 test('pythonEnv очищает HF override и добавляет cublas из выбранного venv', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-env-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-env-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const sitePackages = path.join(root, 'venv', 'lib', 'python3.10', 'site-packages');
   mkdirSync(sitePackages, { recursive: true });
@@ -179,7 +179,7 @@ test('pythonEnv очищает HF override и добавляет cublas из в�
 });
 
 test('SpeechRuntime кэширует capabilities и маршрутизирует оба сценария', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-runtime-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-runtime-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'audio.webm');
   writeFileSync(filePath, 'audio');
@@ -274,7 +274,7 @@ test('SpeechRuntime кэширует capabilities и маршрутизируе�
 // временный каталог сам. Разбор идёт минуты, и каталог обязан дожить до его конца:
 // прежде finally срабатывал на самом `return`, и ffmpeg писал wav в уже снесённый путь.
 test('собственный временный каталог живёт до конца разбора, а не до его запуска', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-workdir-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-workdir-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'audio.wav');
   writeFileSync(filePath, 'audio');

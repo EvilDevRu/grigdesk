@@ -119,7 +119,7 @@ function installStubs(store, upload) {
  * для переключения чатов и `find` для проверки того, что записано в сам чат.
  */
 async function harness(t, { upload = async () => SHOT } = {}) {
-  const browser = await installUiBrowser(t, 'https://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/chats');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const sessions = reactive([sessionOf('a'), sessionOf('b')]);
   const find = (id) => sessions.find((session) => session.id === id);

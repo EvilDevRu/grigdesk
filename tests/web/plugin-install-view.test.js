@@ -45,7 +45,7 @@ test('Проекция: отказ bootstrap предлагает перечит
   const view = deriveInstallDialogView(input({ bootFailed: true, error: 'Нет связи.' }));
 
   assert.equal(view.screen, 'unavailable');
-  assert.equal(view.stageHeading, 'Нет связи с Cockpit');
+  assert.equal(view.stageHeading, 'Нет связи с GrigDesk');
   assert.equal(view.footer.primary.action, 'reload');
   assert.equal(view.footer.primary.label, 'Повторить загрузку');
   assert.equal(view.footer.primary.disabled, false);
@@ -142,10 +142,10 @@ test('Проекция: done install, update и rollback сохраняют ра
   assert.equal(install.stageHeading, 'Установка завершена');
   assert.equal(rollback.stageHeading, 'Версия восстановлена');
   assert.equal(install.resultText,
-    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите Cockpit.');
+    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите GrigDesk.');
   assert.equal(update.resultText,
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите Cockpit, чтобы применить.');
-  assert.equal(rollback.resultText, 'Версия v1.0.0 восстановлена. Перезапустите Cockpit.');
+    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk, чтобы применить.');
+  assert.equal(rollback.resultText, 'Версия v1.0.0 восстановлена. Перезапустите GrigDesk.');
   assert.equal(rollback.completed, true);
   assert.equal(rollback.footer.primary.label, 'Готово');
 });

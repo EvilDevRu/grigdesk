@@ -1,4 +1,4 @@
-// Контракт запуска из Cockpit. Движок по-прежнему получает только явные CLI-аргументы:
+// Контракт запуска из GrigDesk. Движок по-прежнему получает только явные CLI-аргументы:
 // этот модуль читает trusted profile topology, валидирует редактируемый ввод браузера
 // и строит безопасные immutable-параметры из профиля и локального триажа задачи.
 import { execFile } from 'node:child_process';
@@ -114,7 +114,7 @@ function validBranch(branch: string | undefined): boolean {
 }
 
 /**
- * Читает generic repository topology и целевые ветки Cockpit из профиля.
+ * Читает generic repository topology и целевые ветки GrigDesk из профиля.
  * `profile_delivery_targets` не ослабляет engine contract: сервер передаёт каждую
  * настроенную ветку движку явным `--delivery-target`, но браузер их не выбирает.
  * Опциональный `profile_delivery_actions` (по строке на действие) решает, какие
@@ -350,7 +350,7 @@ export function normalizeFactoryLaunchInputs({
       ? repoList.map((repo) => `${repo.name}=${configuredTargets.get(repo.name)}`)
       : [],
     // Дополнительные действия доставки — решение профиля (`profile_delivery_actions`),
-    // а не кокпита: движок выдаёт `task-comment` только по явному флагу.
+    // а не GrigDesk: движок выдаёт `task-comment` только по явному флагу.
     taskComment: deliveryMode === 'publish' && profileDeliveryActions.includes('task-comment'),
     instrumentationFiles: [...instrumentation].sort(),
     diagnosisKind: kind,

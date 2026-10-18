@@ -22,7 +22,7 @@ const DB_ACTIONS_STUB = `
 `;
 
 async function mountPanel(t, store, props = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/db');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/db');
   globalThis.__dbPanelStore = store;
   const component = await compileVue(PANEL, {
     stubs: {
@@ -48,7 +48,7 @@ async function mountPanel(t, store, props = {}) {
 }
 
 test('панель БД объединяет сессии схему консоль ленту отмену и журнал', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/db');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/db');
   globalThis.__dbPanelStore = {
     profiles: [],
     sessions: [],
@@ -94,15 +94,15 @@ test('панель БД объединяет сессии схему консо�
 });
 
 test('панель передаёт выбранную SSH-сессию при открытии DB via ssh', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/db');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/db');
   const calls = [];
   globalThis.__dbPanelStore = {
     profiles: [{
-      id: 'profile-a', projectId: 'cockpit', label: 'Прод', role: 'read',
+      id: 'profile-a', projectId: 'grigdesk', label: 'Прод', role: 'read',
       engine: 'clickhouse', via: 'ssh',
     }],
     sessions: [],
-    sshSessions: [{ id: 'ssh-session-a', projectId: 'cockpit', label: 'Бастион' }],
+    sshSessions: [{ id: 'ssh-session-a', projectId: 'grigdesk', label: 'Бастион' }],
     engines: [{ id: 'clickhouse', label: 'ClickHouse' }],
     queries: [],
     audit: [],
@@ -198,7 +198,7 @@ test('сессии БД работают вкладками, а результа
     projects: [],
     sessions: [
       {
-        id: 'session-a', profileId: 'profile-a', projectId: 'cockpit',
+        id: 'session-a', profileId: 'profile-a', projectId: 'grigdesk',
         label: 'Аналитика', engine: 'clickhouse', role: 'read', agentAllowed: false,
       },
       {
@@ -278,7 +278,7 @@ test('форма нового профиля сохраняет описание
   const saved = [];
   const { wrapper, flushPromises } = await mountPanel(t, {
     profiles: [],
-    projects: [{ id: 'cockpit' }],
+    projects: [{ id: 'grigdesk' }],
     sessions: [],
     sshSessions: [],
     engines: [{ id: 'mysql', label: 'MySQL' }],
@@ -293,7 +293,7 @@ test('форма нового профиля сохраняет описание
     },
   });
 
-  await wrapper.get('[data-db-project-select]').setValue('cockpit');
+  await wrapper.get('[data-db-project-select]').setValue('grigdesk');
   await wrapper.get('[aria-label="Метка профиля"]').setValue('Заказы');
   await wrapper.get('[aria-label="Адрес базы"]').setValue('db.internal');
   await wrapper.get('[aria-label="Порт базы"]').setValue('3306');
@@ -302,7 +302,7 @@ test('форма нового профиля сохраняет описание
   await flushPromises();
 
   assert.deepEqual(saved, [{
-    projectId: 'cockpit',
+    projectId: 'grigdesk',
     label: 'Заказы',
     engine: 'mysql',
     role: 'read',
@@ -326,7 +326,7 @@ test('архивный проект не предлагается новому �
     audit: [],
     schemas: {},
     projects: [
-      { id: 'cockpit', archivedAt: null },
+      { id: 'grigdesk', archivedAt: null },
       { id: 'kopeika', archivedAt: '2026-09-22T10:00:00.000Z' },
     ],
     load: async () => {},
@@ -337,5 +337,5 @@ test('архивный проект не предлагается новому �
     .filter(Boolean);
 
   // Новый профиль базы заводят только на активный проект: архивным уже не работают.
-  assert.deepEqual(options, ['cockpit']);
+  assert.deepEqual(options, ['grigdesk']);
 });

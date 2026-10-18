@@ -26,10 +26,10 @@ interface ConfigProbe {
 
 /**
  * Конфигурация читается в отдельном процессе с синтетическим окружением.
- * Проба не наследует настройки Cockpit и возвращает только проверяемые поля.
+ * Проба не наследует настройки GrigDesk и возвращает только проверяемые поля.
  */
 async function readConfig(t: TestContext, extraEnv: Record<string, string> = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loopback-config-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loopback-config-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -60,7 +60,7 @@ async function readConfig(t: TestContext, extraEnv: Record<string, string> = {})
  * Fastify использует адрес сокета и не доверяет заголовкам пересылки.
  */
 async function authFixture(t: TestContext) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-loopback-auth-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-loopback-auth-'));
   const authStore = new AuthStore({
     legacyAccountPath: path.join(root, 'account.json'),
     sessionsPath: path.join(root, 'sessions.json'),
@@ -99,19 +99,19 @@ function assertLocalCookie(value: string | string[] | undefined): string {
 
 test('LO-01: сервер выбирает только loopback и сохраняет настройку порта', async (t) => {
   for (const host of [undefined, '0.0.0.0', '::', '192.0.2.10']) {
-    const config = await readConfig(t, host === undefined ? {} : { COCKPIT_HOST: host });
+    const config = await readConfig(t, host === undefined ? {} : { GRIGDESK_HOST: host });
 
     assert.equal(config.host, '127.0.0.1');
     assert.equal(config.port, 8140);
   }
 
-  assert.equal((await readConfig(t, { COCKPIT_PORT: '28140' })).port, 28140);
+  assert.equal((await readConfig(t, { GRIGDESK_PORT: '28140' })).port, 28140);
 });
 
 test('LO-02: GitHub callback задаётся только явной переменной', async (t) => {
-  const legacy = await readConfig(t, { COCKPIT_PUBLIC_DOMAIN: 'example.test' });
+  const legacy = await readConfig(t, { GRIGDESK_PUBLIC_DOMAIN: 'example.test' });
   const explicit = await readConfig(t, {
-    COCKPIT_GITHUB_WEBHOOK_BASE_URL: 'https://hooks.example.test/hooks/github',
+    GRIGDESK_GITHUB_WEBHOOK_BASE_URL: 'https://hooks.example.test/hooks/github',
   });
 
   assert.equal(legacy.githubWebhookBaseUrl, '');
@@ -131,7 +131,7 @@ test('LO-08: cookie обмена ключа ограничена хостом, �
     remoteAddress: '127.0.0.1',
     headers: {
       ...headers,
-      'x-cockpit-window-key': windowKey,
+      'x-grigdesk-window-key': windowKey,
     },
   });
 
@@ -145,7 +145,7 @@ test('LO-08: cookie обмена ключа ограничена хостом, �
     remoteAddress: '127.0.0.1',
     headers: {
       host: new URL(origin).host,
-      'x-cockpit-window-key': windowKey,
+      'x-grigdesk-window-key': windowKey,
     },
   });
 
@@ -192,7 +192,7 @@ test('удалённые парольные пути недоступны и с 
       method: 'POST',
       url: path,
       remoteAddress: '127.0.0.1',
-      headers: { cookie: 'cockpit_sid=fixture-session' },
+      headers: { cookie: 'grigdesk_sid=fixture-session' },
       payload: { login: 'test', password: 'test-password-123' },
     });
 

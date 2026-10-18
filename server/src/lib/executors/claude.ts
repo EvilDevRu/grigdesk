@@ -64,7 +64,7 @@ interface ClaudeSettings {
   fastMode?: unknown;
 }
 
-// OAuth-пара хостового CLI из ~/.claude/.credentials.json. Кокпит её только читает
+// OAuth-пара хостового CLI из ~/.claude/.credentials.json. GrigDesk её только читает
 // и обновляет тем же способом, что и сам CLI.
 interface ClaudeOauth {
   accessToken?: string;
@@ -177,7 +177,7 @@ function exec(bin: string, args: readonly string[], { timeout = 15_000, anyExit 
 const CLAUDE_EFFORT_BASES: Readonly<Record<string, string>> = Object.freeze({
   ultracode: 'xhigh',
 });
-const CLAUDE_INVALID_EFFORT = '__cockpit_invalid_effort__';
+const CLAUDE_INVALID_EFFORT = '__grigdesk_invalid_effort__';
 
 interface ClaudeEffortProbe {
   success: boolean;
@@ -330,7 +330,7 @@ function tokenNeedsRefresh(oauth: ClaudeOauth | null | undefined, now: number) {
 
 /**
  * Claude Code вращает refresh token и защищает это общей директорией-lock.
- * Используем тот же lock, иначе одновременный ход CLI и фоновая проверка Cockpit
+ * Используем тот же lock, иначе одновременный ход CLI и фоновая проверка GrigDesk
  * могут оба обновить один refresh token и затереть рабочие credentials.
  */
 async function acquireOauthRefreshLock(
@@ -1348,7 +1348,7 @@ export async function runClaudeUntrusted({
 }) {
   const input = buildClaudeUntrustedInput(message, images);
   const limitMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : UNTRUSTED_TIMEOUT_MS;
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-inbox-model-'));
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-inbox-model-'));
   await fs.chmod(cwd, 0o500);
   try {
     return await new Promise<ReturnType<typeof claudeUntrustedResult>>((resolve, reject) => {
@@ -1422,7 +1422,7 @@ export async function runClaudeUntrusted({
 // состав проверен contract gate на claude 2.1.220. /status, /vim и
 // прочие TUI-only отвечают «isn't available in this environment» — не берём; /clear
 // ОПАСЕН (молча начинает НОВУЮ сессию с пустым stdout → ложный emptyRun) — не берём.
-// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (кокпит сильнее).
+// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (GrigDesk сильнее).
 const CLAUDE_BUILTIN_COMMANDS = [
   { cmd: '/cost', desc: 'Стоимость и длительность сессии', run: 'prompt' },
   { cmd: '/usage', desc: 'Расход токенов сессии', run: 'prompt' },
@@ -1497,7 +1497,7 @@ const CLAUDE_MCP_GROUPS = [{
 
 function claudeMcpAuthHint(name: string, scope: string) {
   return scope === 'account'
-    ? 'Авторизуется в настройках коннекторов на claude.ai, не из Cockpit.'
+    ? 'Авторизуется в настройках коннекторов на claude.ai, не из GrigDesk.'
     : `Нужен вход: \`claude mcp login ${name}\` в терминале.`;
 }
 
@@ -1623,7 +1623,7 @@ export function composeMcpServers({
   ];
 }
 
-// Имена без определения читаются из конфига CLI; кокпит его только ЧИТАЕТ.
+// Имена без определения читаются из конфига CLI; GrigDesk его только ЧИТАЕТ.
 async function readJsonQuiet(file: string): Promise<Record<string, unknown> | null> {
   try {
     return JSON.parse(await fs.readFile(file, 'utf8'));
@@ -1655,7 +1655,7 @@ export default {
   workToolsTransport: 'mcp',
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   // Официальная страница состояния вендора. Всплывашка ведёт туда, когда лимиты не
-  // пришли не по нашей вине: иначе сбой Anthropic человек разбирает как поломку кокпита.
+  // пришли не по нашей вине: иначе сбой Anthropic человек разбирает как поломку GrigDesk.
   statusPage: 'https://status.claude.com',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
   workdir: { switch: 'resume', roots: 'multi' },
@@ -1758,14 +1758,14 @@ export default {
   },
 
   /**
-   * Авторизация — через ClaudeAuthStore кокпита (apikey/env/cli/none).
+   * Авторизация — через ClaudeAuthStore GrigDesk (apikey/env/cli/none).
    */
   auth(config: ClaudeConfig, { claudeAuth }: {
     claudeAuth?: { publicView: () => { mode?: string } };
   } = {}) {
     const mode = claudeAuth?.publicView().mode || 'none';
     const labels: Record<string, string> = {
-      apikey: 'API-ключ кокпита',
+      apikey: 'API-ключ GrigDesk',
       env: 'ANTHROPIC_API_KEY окружения',
       cli: 'CLI хоста (claude login)',
       none: 'не авторизован',
@@ -2075,7 +2075,7 @@ export default {
     }
     args.push(...providerArgs);
     if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
-    if (mcpConfig?.mcpServers?.['cockpit-work']) {
+    if (mcpConfig?.mcpServers?.['grigdesk-work']) {
       const descriptors = (Array.isArray(workTools?.descriptors)
         ? workTools.descriptors
         : defaultWorkToolDescriptors('claude')) as Array<{
@@ -2083,11 +2083,11 @@ export default {
           function?: { name?: string };
         }>;
       const allowed = scoped
-        ? 'mcp__cockpit-work__repo_history'
+        ? 'mcp__grigdesk-work__repo_history'
         : descriptors
           .map((descriptor) => descriptor?.name || descriptor?.function?.name)
           .filter(Boolean)
-          .map((name) => `mcp__cockpit-work__${name}`)
+          .map((name) => `mcp__grigdesk-work__${name}`)
           .join(',');
       if (allowed) {
         args.push('--allowedTools', allowed);

@@ -79,7 +79,7 @@
             Не гасить экран
           </UiSwitch>
           <p class="muted small">
-            Удерживает экран включённым на всех страницах кокпита. При сворачивании окна
+            Удерживает экран включённым на всех страницах GrigDesk. При сворачивании окна
             блокировка снимается системой и автоматически возвращается после открытия.
           </p>
         </div>
@@ -87,7 +87,7 @@
         <p v-else-if="device.wakeLockError" class="msg err">{{ device.wakeLockError }}</p>
         <p v-else-if="!device.wakeLockSupported" class="msg warn">
           {{ wakeLockNeedsHttps
-            ? 'Функция доступна только при открытии кокпита по адресу localhost.'
+            ? 'Функция доступна только при открытии GrigDesk по адресу localhost.'
             : 'Этот браузер не поддерживает удержание экрана.' }}
         </p>
         <p v-else-if="device.wakeLockEnabled" class="muted small">
@@ -99,8 +99,8 @@
             <div>
               <b>Системные оповещения</b>
               <p class="muted small">
-                Когда кокпит свёрнут или открыт не он: ответы агентов, вопросы и остановки конвейера.
-                Пока окно перед тобой, оповещения появляются в самом кокпите.
+                Когда GrigDesk свёрнут или открыт не он: ответы агентов, вопросы и остановки конвейера.
+                Пока окно перед тобой, оповещения появляются в самом GrigDesk.
               </p>
             </div>
             <UiButton
@@ -119,7 +119,7 @@
           <p v-else-if="device.notificationError" class="msg err">{{ device.notificationError }}</p>
           <p v-else-if="!device.notificationSupported" class="msg warn">
             {{ notificationNeedsHttps
-              ? 'Оповещения доступны только при открытии кокпита по адресу localhost.'
+              ? 'Оповещения доступны только при открытии GrigDesk по адресу localhost.'
               : 'Этот браузер не поддерживает системные оповещения.' }}
           </p>
           <p v-else class="muted small">
@@ -144,7 +144,7 @@
           <div class="card-head">
             <div>
               <h3>Движок диктовки</h3>
-              <p class="muted small">Выбор хранится на сервере и действует во всех окнах Cockpit.</p>
+              <p class="muted small">Выбор хранится на сервере и действует во всех окнах GrigDesk.</p>
             </div>
             <span class="scope-pill">Все устройства</span>
           </div>
@@ -173,7 +173,7 @@
                 <span class="speech-choice-copy">
                   <b>Whisper</b>
                   <small>
-                    Запись уходит только на сервер Cockpit и распознаётся локальной моделью.
+                    Запись уходит только на сервер GrigDesk и распознаётся локальной моделью.
                   </small>
                 </span>
               </UiRadio>
@@ -213,7 +213,8 @@
               </div>
             </div>
             <p v-if="speech.browserProcessing === 'auto'" class="msg warn" data-testid="speech-cloud-warning">
-              До первой записи Cockpit отдельно попросит согласие: браузер может передать звук своему сервису.
+              До первой записи GrigDesk отдельно попросит согласие:
+              браузер может передать звук своему сервису.
               {{ speech.browserAutoConsent ? 'Согласие уже дано.' : 'Согласие ещё не дано.' }}
             </p>
             <p v-else-if="browserLocalBusy" class="muted small">Проверяю локальную модель этого браузера…</p>
@@ -423,9 +424,9 @@
             <UiButton
               data-role="settings-action"
               data-testid="speech-dictionary-template"
-              @click="fillCockpitDictionary"
+              @click="fillGrigDeskDictionary"
             >
-              Подставить термины кокпита
+              Подставить термины GrigDesk
             </UiButton>
             <span class="muted small">{{ [...speech.dictionary].length }} / 800 символов</span>
           </div>
@@ -549,7 +550,7 @@
             </UiButton>
           </div>
           <p v-if="!benchmarkAvailable" class="msg warn" data-testid="speech-benchmark-unavailable">
-            {{ benchmarkReason }} Укажи эталонный WAV через <code>COCKPIT_SPEECH_BENCHMARK_AUDIO</code>.
+            {{ benchmarkReason }} Укажи эталонный WAV через <code>GRIGDESK_SPEECH_BENCHMARK_AUDIO</code>.
           </p>
           <div v-if="benchmarkJob()" class="speech-job" :class="benchmarkJob().status">
             <div>
@@ -940,7 +941,7 @@
             data-role="settings-action"
             :disabled="checking"
             v-tooltip="
-              'Кокпит и сам проверяет раз в 6 часов; ' +
+              'GrigDesk и сам проверяет раз в 6 часов; ' +
               'обновление никогда не запускается автоматически'
             "
             @click="checkUpdates"
@@ -973,7 +974,7 @@
             <div>
               <p class="run-kicker">Подготовка</p>
               <h3>Старт и восстановление</h3>
-              <p class="muted small">Что Cockpit делает до и сразу после запуска фабрики.</p>
+              <p class="muted small">Что GrigDesk делает до и сразу после запуска фабрики.</p>
             </div>
           </div>
 
@@ -1212,7 +1213,7 @@
             <div class="run-threshold-copy">
               <b>Молчание хода</b>
               <p class="muted small">
-                Cockpit только оповещает о тишине и никогда сам не останавливает работу.
+                GrigDesk только оповещает о тишине и никогда сам не останавливает работу.
               </p>
             </div>
             <div class="run-value-control">
@@ -1359,7 +1360,7 @@
       </div>
     </section>
 
-    <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
+    <!-- Плагины: отключаемые блоки GrigDesk. Системные — из коробки; пользовательские —
          папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера.
          Каталог плиток и форма параметров живут отдельным подразделом. -->
     <section v-else-if="tab === 'plugins'">
@@ -1369,44 +1370,45 @@
     <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
     <section v-else-if="tab === 'server'">
 
-      <div class="card cockpit-release-card">
+      <div class="card grigdesk-release-card">
         <div class="card-head">
           <div>
-            <h3>Версия Cockpit</h3>
+            <h3>Версия GrigDesk</h3>
             <p class="muted small">Запущенный процесс, текущий checkout и стабильный канал релизов.</p>
           </div>
-          <span v-if="cockpitStatus" class="status-pill"
-                :class="cockpitJob?.status === 'failed' ? 'danger' : cockpitStatus.updateAvailable ? 'warn' : 'ok'">
+          <span v-if="grigDeskStatus" class="status-pill"
+                :class="grigDeskJob?.status === 'failed' ? 'danger' : grigDeskStatus.updateAvailable ? 'warn' : 'ok'">
             <span class="dot"></span>
-            {{ cockpitJob?.status === 'failed' ? 'Ошибка применения' : cockpitStatus.updateAvailable ? 'Есть релиз' : 'Актуально' }}
+            {{ grigDeskJob?.status === 'failed' ? 'Ошибка применения' : grigDeskStatus.updateAvailable ? 'Есть релиз' : 'Актуально' }}
           </span>
         </div>
-        <div v-if="cockpitUpdate.loading && !cockpitStatus" class="muted">Читаю локальную версию…</div>
-        <template v-else-if="cockpitStatus">
+        <div v-if="grigDeskUpdate.loading && !grigDeskStatus" class="muted">Читаю локальную версию…</div>
+        <template v-else-if="grigDeskStatus">
           <dl class="version-facts">
             <div>
               <dt>Запущено</dt>
-              <dd><b>{{ cockpitStatus.running.version }}</b> · <code>{{ shortSha(cockpitStatus.running.sha) }}</code></dd>
+              <dd><b>{{ grigDeskStatus.running.version }}</b> · <code>{{ shortSha(grigDeskStatus.running.sha) }}</code></dd>
             </div>
             <div>
               <dt>Checkout</dt>
               <dd>
-                <b>{{ cockpitStatus.checkout.version }}</b> · <code>{{ shortSha(cockpitStatus.checkout.sha) }}</code>
-                · {{ cockpitStatus.checkout.branch || 'detached HEAD' }}
-                <span v-if="cockpitStatus.checkout.dirty" class="dirty-mark">dirty</span>
+                <b>{{ grigDeskStatus.checkout.version }}</b> · <code>{{ shortSha(grigDeskStatus.checkout.sha) }}</code>
+                · {{ grigDeskStatus.checkout.branch || 'detached HEAD' }}
+                <span v-if="grigDeskStatus.checkout.dirty" class="dirty-mark">dirty</span>
               </dd>
             </div>
             <div>
               <dt>Стабильный канал</dt>
-              <dd v-if="cockpitStatus.latest">
-                <b>{{ cockpitStatus.latest.tag }}</b> · <code>{{ shortSha(cockpitStatus.latest.sha) }}</code>
-                <a v-if="cockpitStatus.latest.url" :href="cockpitStatus.latest.url" target="_blank" rel="noopener noreferrer">Что изменилось ↗</a>
+              <dd v-if="grigDeskStatus.latest">
+                <b>{{ grigDeskStatus.latest.tag }}</b> ·
+                <code>{{ shortSha(grigDeskStatus.latest.sha) }}</code>
+                <a v-if="grigDeskStatus.latest.url" :href="grigDeskStatus.latest.url" target="_blank" rel="noopener noreferrer">Что изменилось ↗</a>
               </dd>
               <dd v-else>релизы пока не найдены</dd>
             </div>
             <div>
               <dt>Последняя проверка</dt>
-              <dd>{{ fmtChecked(cockpitStatus.checkedAt) }}</dd>
+              <dd>{{ fmtChecked(grigDeskStatus.checkedAt) }}</dd>
             </div>
             <div>
               <dt>Интерфейс приложения</dt>
@@ -1417,68 +1419,68 @@
             </div>
           </dl>
 
-          <p v-if="cockpitStatus.checkoutChanged" class="msg info">
+          <p v-if="grigDeskStatus.checkoutChanged" class="msg info">
             Checkout изменился после запуска сервера. Чтобы сервер использовал этот код,
             примените локальные изменения. Интерфейс приложения обновляется установкой нового пакета.
           </p>
-          <p v-if="cockpitStatus.checkError" class="msg warn">
-            {{ cockpitStatus.checkError.message }} Последний успешный результат сохранён.
+          <p v-if="grigDeskStatus.checkError" class="msg warn">
+            {{ grigDeskStatus.checkError.message }} Последний успешный результат сохранён.
           </p>
 
-          <div v-if="cockpitJob" class="update-job" :class="cockpitJob.status">
-            <b>{{ UPDATE_STAGE_LABELS[cockpitJob.stage] || cockpitJob.stage }}</b>
+          <div v-if="grigDeskJob" class="update-job" :class="grigDeskJob.status">
+            <b>{{ UPDATE_STAGE_LABELS[grigDeskJob.stage] || grigDeskJob.stage }}</b>
             <span class="muted small">
-              {{ cockpitJob.kind === 'update' ? `Релиз ${cockpitJob.targetTag}` : 'Локальный checkout' }}
-              · {{ shortSha(cockpitJob.targetSha) }}
+              {{ grigDeskJob.kind === 'update' ? `Релиз ${grigDeskJob.targetTag}` : 'Локальный checkout' }}
+              · {{ shortSha(grigDeskJob.targetSha) }}
             </span>
-            <p v-if="cockpitJob.error" class="msg err">{{ cockpitJob.error.message }}</p>
+            <p v-if="grigDeskJob.error" class="msg err">{{ grigDeskJob.error.message }}</p>
           </div>
 
           <div class="row update-actions">
             <UiButton
               data-role="settings-action"
-              :disabled="cockpitUpdate.checking || cockpitUpdate.active"
-              @click="cockpitUpdate.check"
+              :disabled="grigDeskUpdate.checking || grigDeskUpdate.active"
+              @click="grigDeskUpdate.check"
             >
-              {{ cockpitUpdate.checking ? 'Проверяю…' : 'Проверить обновления' }}
+              {{ grigDeskUpdate.checking ? 'Проверяю…' : 'Проверить обновления' }}
             </UiButton>
             <UiButton
               data-role="settings-action"
-              :disabled="!cockpitStatus.canApplyCheckout || cockpitUpdate.actionBusy"
-              @click="startCockpitAction('apply')"
+              :disabled="!grigDeskStatus.canApplyCheckout || grigDeskUpdate.actionBusy"
+              @click="startGrigDeskAction('apply')"
             >
               Применить локальные изменения
             </UiButton>
             <UiButton
-              v-if="cockpitStatus.latest"
+              v-if="grigDeskStatus.latest"
               variant="solid"
               tone="accent"
               data-role="settings-action"
-              :disabled="!cockpitStatus.canInstallRelease || cockpitUpdate.actionBusy"
-              @click="startCockpitAction('update')"
+              :disabled="!grigDeskStatus.canInstallRelease || grigDeskUpdate.actionBusy"
+              @click="startGrigDeskAction('update')"
             >
-              Обновить до {{ cockpitStatus.latest.tag }}
+              Обновить до {{ grigDeskStatus.latest.tag }}
             </UiButton>
           </div>
 
-          <ul v-if="cockpitStatus.applyBlockReasons?.length" class="block-reasons">
-            <li v-for="reason in cockpitStatus.applyBlockReasons" :key="`apply-${reason}`">
+          <ul v-if="grigDeskStatus.applyBlockReasons?.length" class="block-reasons">
+            <li v-for="reason in grigDeskStatus.applyBlockReasons" :key="`apply-${reason}`">
               Локальное применение: {{ blockReasonLabel(reason) }}
             </li>
           </ul>
-          <ul v-if="cockpitStatus.installBlockReasons?.length" class="block-reasons">
-            <li v-for="reason in cockpitStatus.installBlockReasons" :key="`install-${reason}`">
+          <ul v-if="grigDeskStatus.installBlockReasons?.length" class="block-reasons">
+            <li v-for="reason in grigDeskStatus.installBlockReasons" :key="`install-${reason}`">
               Установка релиза: {{ blockReasonLabel(reason) }}
             </li>
           </ul>
-          <p v-if="cockpitUpdate.error" class="msg err">{{ cockpitUpdate.error }}</p>
+          <p v-if="grigDeskUpdate.error" class="msg err">{{ grigDeskUpdate.error }}</p>
         </template>
-        <p v-else class="msg err">Не удалось прочитать состояние версии Cockpit.</p>
+        <p v-else class="msg err">Не удалось прочитать состояние версии GrigDesk.</p>
       </div>
       <div class="card">
         <div class="card-head">
           <div>
-            <h3>Процесс Cockpit</h3>
+            <h3>Процесс GrigDesk</h3>
             <p class="muted small">Перезапуск применяет свежий серверный код и состав плагинов.</p>
           </div>
           <span v-if="srv" class="status-pill" :class="serverText.tone">
@@ -1537,7 +1539,7 @@
       </p></details>
     </section>
 
-    <!-- Доступ: вход в сам кокпит (один пользователь) -->
+    <!-- Доступ: вход в сам GrigDesk (один пользователь) -->
     <section v-else-if="tab === 'access'">
       <MobileAccess />
       <details class="access-account">
@@ -1581,8 +1583,8 @@ import { useDeviceStore } from '../stores/device.js';
 import {
   blockReasonLabel,
   UPDATE_STAGE_LABELS,
-  useCockpitUpdateStore,
-} from '../stores/cockpit-update.js';
+  useGrigDeskUpdateStore,
+} from '../stores/grigdesk-update.js';
 import {
   confirmDialog,
   UiButton,
@@ -1613,7 +1615,7 @@ const TABS = [
     label: 'Приложение',
     group: 'Основное',
     short: 'Экран и оповещения',
-    description: 'Поведение Cockpit на этом устройстве: экран, оповещения и локальные возможности.',
+    description: 'Поведение GrigDesk на этом устройстве: экран, оповещения и локальные возможности.',
     icon: 'M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M9 21h6 M12 17v4',
   },
   {
@@ -1637,13 +1639,13 @@ const TABS = [
     icon: 'M8 5v14l11-7z M4 5v14',
   },
   {
-    id: 'plugins', label: 'Плагины', group: 'Автоматизация', short: 'Модули Cockpit',
+    id: 'plugins', label: 'Плагины', group: 'Автоматизация', short: 'Модули GrigDesk',
     description: 'Включение системных и пользовательских модулей и их собственные параметры.',
     icon: 'M8 3v4 M16 3v4 M5 7h14v4a7 7 0 0 1-14 0z M12 18v3',
   },
   {
     id: 'server', label: 'Сервер', group: 'Система', short: 'Процесс, рестарт, автозапуск',
-    description: 'Состояние процесса Cockpit и безопасное применение серверных обновлений.',
+    description: 'Состояние процесса GrigDesk и безопасное применение серверных обновлений.',
     icon: 'M5 4h14v6H5z M5 14h14v6H5z M8 7h.01 M8 17h.01',
   },
   {
@@ -1659,7 +1661,7 @@ const TAB_GROUPS = ['Основное', 'Автоматизация', 'Сист�
   label,
   items: TABS.filter((item) => item.group === label),
 }));
-const savedTab = localStorage.getItem('cockpit-settings-tab');
+const savedTab = localStorage.getItem('grigdesk-settings-tab');
 const tab = ref(TABS.some((item) => item.id === savedTab) ? savedTab : 'app');
 const currentTab = computed(() => TABS.find((item) => item.id === tab.value) || TABS[0]);
 const settingsNav = ref(null);
@@ -1676,7 +1678,7 @@ function revealTab(id, smooth = true) {
 }
 function setTab(id) {
   tab.value = id;
-  localStorage.setItem('cockpit-settings-tab', id);
+  localStorage.setItem('grigdesk-settings-tab', id);
   revealTab(id);
 }
 
@@ -1809,8 +1811,8 @@ const SPEECH_MODELS = [
   { id: 'large-v3-turbo', label: 'Large v3 Turbo' },
 ];
 const QUALITY_MODELS = { fast: 'small', balanced: 'medium', accurate: 'large-v3-turbo' };
-const COCKPIT_DICTIONARY = [
-  'кокпит',
+const GRIGDESK_DICTIONARY = [
+  'GrigDesk',
   'конвейер',
   'worktree',
   'песочница',
@@ -1885,7 +1887,7 @@ const browserSpeechReason = computed(() => {
 const speechEffective = computed(() => {
   if (speech.value.engine === 'whisper') {
     return speech.value.local.ready
-      ? 'Whisper на сервере Cockpit'
+      ? 'Whisper на сервере GrigDesk'
       : `Недоступно${speech.value.local.reason ? `: ${speech.value.local.reason}` : ''}`;
   }
   if (!browserSpeechReady.value
@@ -2107,7 +2109,7 @@ function setNullableInteger(field, value, min, max) {
   const number = Number(value);
   if (Number.isInteger(number)) speech.value[field] = Math.max(min, Math.min(max, number));
 }
-function fillCockpitDictionary() { speech.value.dictionary = COCKPIT_DICTIONARY; }
+function fillGrigDeskDictionary() { speech.value.dictionary = GRIGDESK_DICTIONARY; }
 function speechModelLabel(modelId) {
   return SPEECH_MODELS.find((model) => model.id === modelId)?.label || modelId;
 }
@@ -2784,7 +2786,7 @@ function hiddenCount(p) {
 /**
  * Подпись точки версии рядом с именем исполнителя. Пусто, пока фоновая проверка не
  * назвала последнюю версию: точки нет вовсе — придумывать «всё в порядке» за
- * непроведённую проверку нельзя. Обновляет человек кнопкой, кокпит только сообщает.
+ * непроведённую проверку нельзя. Обновляет человек кнопкой, GrigDesk только сообщает.
  */
 function updateHint(p) {
   if (!p.latest) return '';
@@ -2820,11 +2822,11 @@ const srv = ref(null);          // { systemd, mode, pid, uptimeSec }
 const serverText = computed(() => serverModeText(srv.value));
 const restarting = ref(false);
 const srvMsg = ref(null);
-const cockpitUpdate = useCockpitUpdateStore();
-const cockpitStatus = computed(() => cockpitUpdate.status);
-const cockpitJob = computed(() => cockpitStatus.value?.job || null);
-const clientBuildVersion = __COCKPIT_VERSION__;
-const clientBuildSha = __COCKPIT_SHA__;
+const grigDeskUpdate = useGrigDeskUpdateStore();
+const grigDeskStatus = computed(() => grigDeskUpdate.status);
+const grigDeskJob = computed(() => grigDeskStatus.value?.job || null);
+const clientBuildVersion = __GRIGDESK_VERSION__;
+const clientBuildSha = __GRIGDESK_SHA__;
 let confirmedUpdateJob = null;
 const shortSha = (sha) => sha?.slice(0, 7) || '—';
 const fmtChecked = (value) => {
@@ -2838,8 +2840,8 @@ async function activeChatTurns() {
   catch { return 0; }
 }
 
-async function startCockpitAction(kind) {
-  const status = cockpitStatus.value;
+async function startGrigDeskAction(kind) {
+  const status = grigDeskStatus.value;
   if (!status) return;
   const active = await activeChatTurns();
   const warning = active
@@ -2850,21 +2852,21 @@ async function startCockpitAction(kind) {
   const action = isRelease
     ? `Установить ${status.latest?.tag} fast-forward-ом на чистую main? Будет применён только commit ${shortSha(status.latest?.sha)}.`
     : `Собрать и применить текущий checkout ${status.checkout.branch || 'detached HEAD'} · ${shortSha(status.checkout.sha)}? Git-ветка и файлы не изменятся.`;
-  const details = ' Cockpit ненадолго станет недоступен после успешной сборки.';
+  const details = ' GrigDesk ненадолго станет недоступен после успешной сборки.';
   if (!(await confirmDialog(action + details + warning, {
     danger: !!active,
     okText: isRelease ? `Обновить до ${status.latest?.tag}` : 'Применить checkout',
   }))) return;
   const job = isRelease
-    ? await cockpitUpdate.installRelease()
-    : await cockpitUpdate.applyCheckout();
-  if (!job && cockpitUpdate.error) srvMsg.value = { type: 'err', text: cockpitUpdate.error };
+    ? await grigDeskUpdate.installRelease()
+    : await grigDeskUpdate.applyCheckout();
+  if (!job && grigDeskUpdate.error) srvMsg.value = { type: 'err', text: grigDeskUpdate.error };
 }
 
 // Обновление сервера не меняет закреплённый интерфейс приложения.
 // Здесь перечитываем карточку процесса после завершения задания.
 watchEffect(() => {
-  const job = cockpitJob.value;
+  const job = grigDeskJob.value;
   if (job?.status !== 'done' || job.id === confirmedUpdateJob) return;
   confirmedUpdateJob = job.id;
   loadServer();
@@ -2889,7 +2891,7 @@ async function restartServer() {
     ? ` Сейчас идут ходы агентов: ${active} — им дадут закончить, остальные прервут`
       + ' как «стоп»: лента и память сессии сохранятся.'
     : '';
-  if (!(await confirmDialog(`Перезапустить сервер кокпита? ${mode}${warn}`, { danger: !!active, okText: 'Перезапустить' }))) return;
+  if (!(await confirmDialog(`Перезапустить сервер GrigDesk? ${mode}${warn}`, { danger: !!active, okText: 'Перезапустить' }))) return;
   restarting.value = true; srvMsg.value = null;
   try { await api.post('/api/system/restart'); } catch { /* процесс мог умереть раньше ответа — это норм */ }
   // Сервер обновляется независимо от закреплённого интерфейса приложения.
@@ -2912,8 +2914,8 @@ async function restartServer() {
   restarting.value = false;
   srvMsg.value = {
     type: 'err',
-    text: 'Сервер не вернулся за 60 секунд — смотри journalctl --user -u cockpit-server '
-      + 'или state/cockpit-server.log в папке данных.',
+    text: 'Сервер не вернулся за 60 секунд — смотри journalctl --user -u grigdesk-server '
+      + 'или state/grigdesk-server.log в папке данных.',
   };
 }
 
@@ -2985,7 +2987,7 @@ onMounted(() => {
   loadFactoryDebug();
   pluginsStore.load();
   loadServer();
-  cockpitUpdate.load();
+  grigDeskUpdate.load();
 });
 </script>
 

@@ -56,7 +56,7 @@ export function openKimiEventStream({
   baseUrl,
   token,
   sessionIds,
-  clientId = `cockpit-${Math.random().toString(36).slice(2, 10)}`,
+  clientId = `grigdesk-${Math.random().toString(36).slice(2, 10)}`,
   onEvent,
   onClose,
   onError,
@@ -127,7 +127,7 @@ export function openKimiEventStream({
       closed = true;
 
       try {
-        socket.close(1000, 'cockpit');
+        socket.close(1000, 'grigdesk');
       } catch {
         // Сокет мог закрыться сам — закрытию это не мешает.
       }

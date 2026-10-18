@@ -37,7 +37,7 @@ function modelOf(value) {
 }
 
 test('метка доставки в пузыре', async (t) => {
-  const browser = await installUiBrowser(t, 'https://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/chats');
   const { reactive, nextTick } = await import('../../web/node_modules/vue/index.mjs');
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs');

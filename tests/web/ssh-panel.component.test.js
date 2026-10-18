@@ -8,13 +8,13 @@ import { installUiBrowser } from './helpers/ui-components.js';
 const PANEL_PATH = webFile('src/views/ssh/SshPanel.vue');
 
 async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props = {} } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/ssh');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/ssh');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const savedConnections = [];
   const store = reactive({
     connections: [],
     projects: [
-      { id: 'cockpit', factory: false },
+      { id: 'grigdesk', factory: false },
       { id: 'factory-project', factory: true },
     ],
     files: [],
@@ -23,14 +23,14 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
     sessions: [
       {
         id: 'session-a',
-        projectId: 'cockpit',
+        projectId: 'grigdesk',
         label: 'Боевой код',
         role: 'code',
         agentAllowed: true,
       },
       {
         id: 'session-b',
-        projectId: 'cockpit',
+        projectId: 'grigdesk',
         label: 'База',
         role: 'db',
         agentAllowed: false,
@@ -160,8 +160,8 @@ test('две server-owned сессии показаны вкладками пр�
       inTitle: true, inSummary: false,
     },
     tabs: [
-      { project: 'cockpit', target: 'Боевой код · code' },
-      { project: 'cockpit', target: 'База · db' },
+      { project: 'grigdesk', target: 'Боевой код · code' },
+      { project: 'grigdesk', target: 'База · db' },
     ],
     terminals: 1,
     terminalHosts: 1,
@@ -227,13 +227,13 @@ test('повторные сессии одного сервера получаю
       sessions: [
         {
           id: 'session-first',
-          projectId: 'cockpit',
+          projectId: 'grigdesk',
           label: 'production',
           role: 'backend',
         },
         {
           id: 'session-second',
-          projectId: 'cockpit',
+          projectId: 'grigdesk',
           label: 'production',
           role: 'backend',
         },
@@ -263,7 +263,7 @@ test('подключённый сервер открывает живую сес
   let probes = 0;
   const connection = {
     id: 'connection-a',
-    projectId: 'cockpit',
+    projectId: 'grigdesk',
     label: 'Production',
     role: 'backend',
     host: 'server.internal',
@@ -357,7 +357,7 @@ test('стрелки переключают сессии и фокус без в
     terminals: globalThis.__sshPanelTerminals.length,
   }, {
     activeId: 'session-b',
-    focused: 'Проект cockpit, сессия База · db',
+    focused: 'Проект grigdesk, сессия База · db',
     terminals: 1,
   });
 });
@@ -385,10 +385,10 @@ test('закрытие активной сессии выбирает сосед
     focused: wrapper.element.ownerDocument.activeElement?.getAttribute('aria-label'),
   }, {
     activeId: 'session-b',
-    labels: ['ПроектcockpitБаза · db'],
+    labels: ['ПроектgrigdeskБаза · db'],
     selected: 'true',
     tabindex: '0',
-    focused: 'Проект cockpit, сессия База · db',
+    focused: 'Проект grigdesk, сессия База · db',
   });
 });
 
@@ -480,16 +480,16 @@ test('новое соединение выбирает проект из рее�
     })),
     [
       { value: '', text: 'Выберите проект' },
-      { value: 'cockpit', text: 'cockpit' },
+      { value: 'grigdesk', text: 'grigdesk' },
       { value: 'factory-project', text: 'factory-project' },
     ],
   );
 
-  await project.setValue('cockpit');
+  await project.setValue('grigdesk');
   await wrapper.find('.ssh-profile-form').trigger('submit');
   await flushPromises();
 
-  assert.equal(savedConnections[0]?.projectId, 'cockpit');
+  assert.equal(savedConnections[0]?.projectId, 'grigdesk');
 });
 
 test('повторный вход не дублирует probe, а пароль очищается после подключения', async (t) => {
@@ -501,7 +501,7 @@ test('повторный вход не дублирует probe, а пароль
   });
   const connection = {
     id: 'connection-a',
-    projectId: 'cockpit',
+    projectId: 'grigdesk',
     label: 'Production',
     role: 'backend',
     host: 'server.internal',
@@ -620,7 +620,7 @@ test('архивный проект не предлагается новой с�
   const { wrapper } = await mountPanel(t, {
     store: {
       projects: [
-        { id: 'cockpit', factory: false, archivedAt: null },
+        { id: 'grigdesk', factory: false, archivedAt: null },
         { id: 'kopeika', factory: false, archivedAt: '2026-09-22T10:00:00.000Z' },
       ],
       connections: [
@@ -642,7 +642,7 @@ test('архивный проект не предлагается новой с�
     .filter(Boolean);
 
   // Новый сервер заводят только на активный проект: архивным больше не работают.
-  assert.deepEqual(options, ['cockpit']);
+  assert.deepEqual(options, ['grigdesk']);
   // Архив ничего не рвёт: уже заведённая связь остаётся на месте вместе со своим проектом.
   assert.equal(wrapper.text().includes('Старый сервер'), true);
 });

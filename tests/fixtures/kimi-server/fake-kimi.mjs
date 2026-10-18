@@ -17,12 +17,12 @@ if (argv[0] !== 'web' || !port) {
 
 mkdirSync(home, { recursive: true });
 
-if (process.env.COCKPIT_KIMI_FIXTURE_MODE === 'crash') {
+if (process.env.GRIGDESK_KIMI_FIXTURE_MODE === 'crash') {
   process.stderr.write('fake-kimi: сервер не поднялся (сценарий crash)\n');
   process.exit(3);
 }
 
-const token = process.env.COCKPIT_KIMI_FIXTURE_TOKEN || 'fixture-token-0123456789';
+const token = process.env.GRIGDESK_KIMI_FIXTURE_TOKEN || 'fixture-token-0123456789';
 const server = createServer((request, response) => {
   if (request.url === '/api/v1/meta') {
     if (request.headers.authorization !== `Bearer ${token}`) {

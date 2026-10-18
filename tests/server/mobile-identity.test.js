@@ -24,12 +24,14 @@ test('MB-01…MB-04: постоянная личность, приватные �
   assert.equal((await stat(path.join(directory, 'brain-cert.pem'))).mode & 0o777, 0o600);
   assert.equal(fingerprintOf(brain.certPem), brain.fp);
   assert.equal(brain.fp.length, 64);
+  assert.equal(new X509Certificate(brain.certPem).subject, 'CN=grigdesk-brain');
 
   const relay = await createRelayCredentials(directory, 'r12345678');
 
   assert.equal(Buffer.from(relay.brainToken, 'base64url').length, 32);
   assert.equal(Buffer.from(relay.deviceToken, 'base64url').length, 32);
   assert.equal(new X509Certificate(relay.certPem).checkPrivateKey(relay.privateKey), true);
+  assert.equal(new X509Certificate(relay.certPem).subject, 'CN=grigdesk-relay');
 
   const rendered = renderRelayEnv(relay);
 

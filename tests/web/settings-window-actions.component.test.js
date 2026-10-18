@@ -4,8 +4,8 @@ import test from 'node:test';
 import { compileSettingsView } from './helpers/settings-view.js';
 
 process.env.NODE_ENV = 'test';
-globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-globalThis.__COCKPIT_SHA__ = 'test';
+globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+globalThis.__GRIGDESK_SHA__ = 'test';
 
 const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
 const browser = new Window({ url: 'http://127.0.0.1:8140/#/settings' });
@@ -27,7 +27,7 @@ const { mount, flushPromises } = await import(
  * Launcher отдельно наблюдаем, чтобы намерение окна не открывало второй терминал.
  */
 async function fixture(t, tab = 'providers', desktop = true) {
-  browser.localStorage.setItem('cockpit-settings-tab', tab);
+  browser.localStorage.setItem('grigdesk-settings-tab', tab);
   browser.location.hash = '#/settings';
 
   setActivePinia(createPinia());
@@ -117,7 +117,7 @@ async function fixture(t, tab = 'providers', desktop = true) {
     }),
     useChatStore: () => ({ compactWindow: 0, setActive: (key) => calls.push(['setActive', key]) }),
     useDeviceStore: () => device,
-    useCockpitUpdateStore: () => ({ state: null, load: async () => { } }),
+    useGrigDeskUpdateStore: () => ({ state: null, load: async () => { } }),
   };
 
   const component = await compileSettingsView({ confirm: true, terminal: true });

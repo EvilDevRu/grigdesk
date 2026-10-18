@@ -25,7 +25,7 @@ const success = {
  * Шпион получает уже созданные приватные config и может проверить их содержимое.
  */
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-npm-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-npm-'));
   const cwd = path.join(root, 'package');
 
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -127,7 +127,7 @@ test('N3: настоящий worker не наследует импорт, Git/np
     GIT_CONFIG_COUNT: '1',
     GIT_CONFIG_KEY_0: 'core.sshCommand',
     GIT_CONFIG_VALUE_0: './wrapper',
-    COCKPIT_INTERNAL_TOKEN: 'fixture-secret',
+    GRIGDESK_INTERNAL_TOKEN: 'fixture-secret',
     OPENAI_API_KEY: 'fixture-secret',
     PATH: `${root}/node_modules/.bin`,
   };
@@ -139,7 +139,7 @@ test('N3: настоящий worker не наследует импорт, Git/np
     '--input-type=module',
     '--eval',
     'process.stdout.write(JSON.stringify(Object.keys(process.env).filter('
-      + '(key) => /^(NODE_|npm_config_|NPM_CONFIG_|GIT_|COCKPIT_|OPENAI_)/.test(key))));',
+      + '(key) => /^(NODE_|npm_config_|NPM_CONFIG_|GIT_|GRIGDESK_|OPENAI_)/.test(key))));',
   ], options), { baseEnv: fixtureEnv });
   const result = await runner(root);
 

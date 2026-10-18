@@ -39,7 +39,7 @@ let command: (action: string, extra?: Record<string, unknown>) => Promise<any>;
 
 /**
  * Ожидание ограничено deadline и относится только к собственному изолированному стенду.
- * Внешние аккаунты, рабочий Cockpit, VPN и системные службы не меняются.
+ * Внешние аккаунты, рабочий GrigDesk, VPN и системные службы не меняются.
  */
 async function until(test: () => Promise<boolean>, milliseconds = 35000) {
   const deadline = performance.now() + milliseconds;
@@ -54,7 +54,7 @@ async function until(test: () => Promise<boolean>, milliseconds = 35000) {
 }
 
 /**
- * Child Cockpit получает прежние каталоги только из metadata своего предыдущего запуска.
+ * Child GrigDesk получает прежние каталоги только из metadata своего предыдущего запуска.
  * IPC и stderr принадлежат этому прогону, секреты не выводятся в отчёт.
  */
 async function startWorker(rootDirectory?: string) {
@@ -111,14 +111,14 @@ async function startWorker(rootDirectory?: string) {
   });
   child.once('exit', () => {
     for (const item of pending.values()) {
-      item.reject(new Error('Изолированный Cockpit завершился'));
+      item.reject(new Error('Изолированный GrigDesk завершился'));
     }
   });
   await Promise.race([
     startup,
     new Promise<void>((_, reject) => {
       const timer = setTimeout(
-        () => reject(new Error('Изолированный Cockpit не запустился')),
+        () => reject(new Error('Изолированный GrigDesk не запустился')),
         30000,
       );
 
@@ -160,7 +160,7 @@ async function admin(method: string, route: string, body?: unknown) {
   const response = await fetch(`http://127.0.0.1:${metadata.httpPort}` + route, {
     method,
     headers: {
-      'X-Cockpit-Token': metadata.cliToken,
+      'X-GrigDesk-Token': metadata.cliToken,
       'Content-Type': 'application/json',
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -260,12 +260,12 @@ async function json(
 
 /**
  * Сценарий проверяет HTTP/SSE/media/команды и восстановление без браузерного владельца истории.
- * SIGKILL направлен только дочернему тестовому Cockpit; операции и fingerprint читаются после нового boot.
+ * SIGKILL направлен только дочернему тестовому GrigDesk; операции и fingerprint читаются после нового boot.
  */
 async function main() {
   await mkdir(output, { recursive: true });
 
-  const temporary = await mkdtemp(path.join(tmpdir(), 'cockpit-e2e-'));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'grigdesk-e2e-'));
 
   cleanup.push(() =>
     rm(temporary, {
@@ -506,7 +506,7 @@ async function main() {
   checks.push({
     id: 'MV-10',
     state: 'PASS',
-    detail: 'SIGKILL Cockpit, тот же fingerprint/outbox и durable result; эффект не повторяется',
+    detail: 'SIGKILL GrigDesk, тот же fingerprint/outbox и durable result; эффект не повторяется',
   });
 
   const docker = process.argv.includes('--without-docker')
@@ -616,7 +616,7 @@ async function main() {
 
   const payload = parseQr(qr);
   const badQr =
-    'cockpitlink:1:' +
+    'grigdesklink:1:' +
     Buffer.from(
       JSON.stringify({
         ...payload,
@@ -643,7 +643,7 @@ try {
   const safe =
     error instanceof Error
       ? error.message
-          .replace(/cockpitlink:1:[A-Za-z0-9_-]+/g, '[QR скрыт]')
+          .replace(/grigdesklink:1:[A-Za-z0-9_-]+/g, '[QR скрыт]')
           .replace(/[A-Za-z0-9_-]{32,}/g, '[скрыто]')
       : 'Стенд отказал';
 

@@ -119,7 +119,7 @@ export interface ShowcaseServiceOptions {
   listProjects: () => Promise<string[]>;
   sandboxOverview?: () => Promise<Pick<SandboxOverview, 'sandboxes'>>;
   sandboxActivityGuard?: SandboxActivityGuard;
-  // Расшифровка приходит функцией: раздел пользуется общим речевым runtime кокпита,
+  // Расшифровка приходит функцией: раздел пользуется общим речевым runtime GrigDesk,
   // но не знает, как тот устроен, и без него обязан работать — с пометкой, что
   // проверка речи пропущена.
   transcribe?: ((file: string) => Promise<string | SpeechTranscript>) | null;
@@ -820,7 +820,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
         : {
           label: staleBrowser ? 'Переустановить Chromium' : 'Установить Chromium',
           hint: 'Скачается сборка Chromium под текущий Playwright: около 170 МБ по сети, '
-            + 'около 400 МБ на диске в каталоге кокпита.',
+            + 'около 400 МБ на диске в каталоге GrigDesk.',
         },
       job: setupJobOf(browser.job),
     });
@@ -886,7 +886,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
       reason: speech?.status === 'ready'
         ? speech.reason
         : `${speech?.reason ?? ''} Распознавание ставит deploy/install.sh вместе с остальным `
-          + 'речевым runtime кокпита.',
+          + 'речевым runtime GrigDesk.',
       action: null,
       job: null,
     });
@@ -1015,7 +1015,7 @@ export function createShowcaseService(options: ShowcaseServiceOptions) {
     await recoverRecordingAttempts();
     await buildOps.recover();
 
-    // Старт — первый удобный момент для уборки: кокпит мог простоять выключенным
+    // Старт — первый удобный момент для уборки: GrigDesk мог простоять выключенным
     // дольше срока хранения, и тогда протухшие ролики ждут не следующего часа, а
     // именно этого прохода.
     await sweepRetention({ force: true });

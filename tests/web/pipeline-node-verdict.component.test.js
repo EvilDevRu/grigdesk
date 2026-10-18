@@ -31,7 +31,7 @@ function makeFixture({
 
 async function mountPipeline(t, { factoryTask, graph }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

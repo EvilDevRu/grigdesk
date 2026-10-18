@@ -13,8 +13,8 @@ mobile/android/**/*.jks
 mobile/android/**/*.keystore
 # Краткоживущие rollback-копии update-worker-а. Они удаляются только после того,
 # как новый сервер подтвердил SHA, и не должны делать checkout dirty в это окно.
-web/dist.cockpit-backup-*/
-server/node_modules.cockpit-backup-*/
+web/dist.grigdesk-backup-*/
+server/node_modules.grigdesk-backup-*/
 server/runtime/deepseek/
 # Исходники DeepSeek Harness — кэш по commit из upstream.lock.json: в Git лежат только manifest,
 # патчи и лицензии, а `npm --prefix server run deepseek:prepare` подкачивает и сверяет остальное.
@@ -46,12 +46,12 @@ BUGS.md
 # Локальные планы реализации — рабочие заметки, а не документация проекта.
 /docs/plans/
 
-# Карты снятой базы знаний: её записи перенесены в папки областей docs/cockpit/<область>/,
-# а верхний уровень docs/cockpit/ держит только папки. Правило уйдёт вместе со старыми картами.
-/docs/cockpit/*.md
+# Карты снятой базы знаний: её записи перенесены в папки областей docs/grigdesk/<область>/,
+# а верхний уровень docs/grigdesk/ держит только папки. Правило уйдёт вместе со старыми картами.
+/docs/grigdesk/*.md
 
 # Опыт этой машины: рабочие проекты, номера задач и прочее, чему не место в публичном
-# репозитории. Устроен как docs/cockpit/ — папки областей с README-оглавлениями.
+# репозитории. Устроен как docs/grigdesk/ — папки областей с README-оглавлениями.
 /docs/local/
 
 # Локальная точка входа Claude Code: ведёт в docs/local/. В свежем клоне её нет.
@@ -61,12 +61,16 @@ BUGS.md
 web/.generated/markdown/
 
 # Готовый посредник и проверяемый кэш сборки SEA.
-/bin/cockpit-relay
-/bin/cockpit-relay.sha256
-/bin/.cockpit-relay-*.tmp
+/bin/grigdesk-relay
+/bin/grigdesk-relay.sha256
+/bin/.grigdesk-relay-*.tmp
 /relay/.cache/
 
 # Готовый b24 и проверяемый кэш его сборки SEA.
 /bin/b24
 /bin/.b24-*.tmp
 /b24/.cache/
+
+# Установленное окно: AppImage из desktop/release под именем программы.
+/bin/grigdesk-app
+/bin/.grigdesk-app.*

@@ -63,7 +63,7 @@ assert_eq '' "$(cat "$LOOP_CALLS")" "без подъёма потолка мод
 assert_contains "$(cat "$state/logs/t${task}.stages.log")" 'потолок кругов цикла не поднят' \
   "журнал объясняет, почему цикл не продолжен"
 # Отказ продолжать не снимает ожидание человека ни в реестре, ни в lifecycle: иначе
-# кокпит после выхода демона принял бы штатную остановку за падение.
+# GrigDesk после выхода демона принял бы штатную остановку за падение.
 assert_eq 1 "$(registry_value STALLED_HUMAN)" "реестр по-прежнему ждёт человека"
 assert_eq stopped-loop-ceiling "$(registry_value RESULT)" "реестр по-прежнему называет остановку"
 assert_eq "$interventions_before" "$(human_interventions)" \

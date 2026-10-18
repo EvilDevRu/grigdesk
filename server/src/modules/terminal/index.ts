@@ -1,5 +1,5 @@
 // Модуль «Терминал» — веб-терминал на «мозге» через WebSocket.
-// Нужен, чтобы авторизовать Claude (`claude login`) и чинить что-то руками, не отходя от кокпита.
+// Нужен, чтобы авторизовать Claude (`claude login`) и чинить что-то руками, не отходя от GrigDesk.
 //
 // PTY выделяет stdlib Python-helper: stdin/stdout — сырые байты, fd 3 — resize/close.
 // Нативных npm-зависимостей нет, но размер меняется у НАСТОЯЩЕГО PTY, а не только у xterm.
@@ -36,7 +36,7 @@ export function spawnPty({
   rows,
   shell,
   home,
-  python = process.env.COCKPIT_TERMINAL_PYTHON || 'python3',
+  python = process.env.GRIGDESK_TERMINAL_PYTHON || 'python3',
 }: {
   cols: number;
   rows: number;

@@ -21,7 +21,7 @@ async function systemHarness(t, {
   authKind = 'cli',
   restarting = true,
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-desktop-system-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-desktop-system-'));
   const app = Fastify({ logger: false });
   const begins = [];
   const scriptRoots = [];
@@ -54,7 +54,7 @@ async function systemHarness(t, {
     system: { read: () => ({}) },
     config: {
       rootDir: root,
-      cockpitUpdateStatePath: path.join(root, 'update.json'),
+      grigDeskUpdateStatePath: path.join(root, 'update.json'),
     },
     releases: {
       start() {},
@@ -131,7 +131,7 @@ test('DP-09 отключённый IPC даёт 503 и не планирует �
   assert.equal(response.statusCode, 503);
   assert.deepEqual(response.json(), {
     error: 'desktop_parent_unavailable',
-    message: 'Приложение Кокпита не на связи.',
+    message: 'Приложение GrigDesk не на связи.',
   });
   t.mock.timers.tick(400);
   assert.deepEqual(fixture.begins, []);
@@ -252,7 +252,7 @@ test('UP-07 update-restart отвечает 202 и планирует один �
   t.mock.timers.tick(399);
   assert.deepEqual(fixture.begins, []);
   t.mock.timers.tick(1);
-  assert.deepEqual(fixture.begins, [['обновление Кокпита', 75]]);
+  assert.deepEqual(fixture.begins, [['обновление GrigDesk', 75]]);
 
   fixture.shutdown.active = true;
 

@@ -1,7 +1,7 @@
 import { isUiDocumentPath } from '../runtime/uiRelease.ts';
 
 export const DESKTOP_WINDOW_VERSION = 1;
-export const SETTINGS_CHANNEL_NAME = 'cockpit-desktop-settings-v1';
+export const SETTINGS_CHANNEL_NAME = 'grigdesk-desktop-settings-v1';
 export const TERMINAL_INSERT_LIMIT_BYTES = 16384;
 export const INTENT_TIMEOUT_MS = 5000;
 
@@ -61,9 +61,9 @@ export function isSettingsWindowRequest(target: string, origin: string): boolean
  */
 export function desktopUserAgent(base: string, role: DesktopWindowRole): string {
   const tokens = base.split(/\s+/).filter((token) => token
-    && !token.startsWith('CockpitSettings/') && !token.startsWith('CockpitWindow/'));
+    && !token.startsWith('GrigDeskSettings/') && !token.startsWith('GrigDeskWindow/'));
 
-  return [...tokens, 'CockpitSettings/1', `CockpitWindow/${role}`].join(' ');
+  return [...tokens, 'GrigDeskSettings/1', `GrigDeskWindow/${role}`].join(' ');
 }
 
 /**
@@ -72,18 +72,18 @@ export function desktopUserAgent(base: string, role: DesktopWindowRole): string 
  */
 export function desktopWindowRole(userAgent: string): DesktopWindowRole | null {
   const tokens = userAgent.split(/\s+/);
-  const versions = tokens.filter((token) => token.startsWith('CockpitSettings/'));
-  const roles = tokens.filter((token) => token.startsWith('CockpitWindow/'));
+  const versions = tokens.filter((token) => token.startsWith('GrigDeskSettings/'));
+  const roles = tokens.filter((token) => token.startsWith('GrigDeskWindow/'));
 
-  if (versions.length !== 1 || versions[0] !== 'CockpitSettings/1' || roles.length !== 1) {
+  if (versions.length !== 1 || versions[0] !== 'GrigDeskSettings/1' || roles.length !== 1) {
     return null;
   }
 
-  if (roles[0] === 'CockpitWindow/main') {
+  if (roles[0] === 'GrigDeskWindow/main') {
     return 'main';
   }
 
-  return roles[0] === 'CockpitWindow/settings' ? 'settings' : null;
+  return roles[0] === 'GrigDeskWindow/settings' ? 'settings' : null;
 }
 
 /**

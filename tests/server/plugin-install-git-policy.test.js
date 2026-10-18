@@ -48,7 +48,7 @@ async function markerScript(root, name) {
 }
 
 test('GS10: policy не исполняет реальные Git handlers до preview', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-policy-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-policy-'));
   const repo = await createPluginRepo(t);
   const markers = {};
 
@@ -154,7 +154,7 @@ test('GS11: env overrides и чужой parent repository не подменяю�
 
   await hijack.release('1.0.0');
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-env-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-env-'));
   const config = path.join(root, 'config');
   const trace = path.join(root, 'trace');
 
@@ -199,7 +199,7 @@ test('GS11: env overrides и чужой parent repository не подменяю�
 });
 
 test('GS12: private global config содержит только helper, SSH остаётся фиксированным', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-credentials-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-credentials-'));
   const config = path.join(root, 'trusted');
   const contents = '[credential "https://git.example.invalid"]\nhelper = !fixture-credential-helper\n'
     + '[url "ext::fixture-secret"]\ninsteadOf = https://git.example.invalid/\n'

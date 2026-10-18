@@ -1,7 +1,7 @@
 // Микрофон браузера обычно работает с частотой 44,1/48 кГц и блоками по 128
 // samples. Серверный streaming-контракт принимает непрерывный mono PCM16 16 кГц;
 // ресемплинг выполняем здесь, вне main thread, и отдаём кадры примерно по 100 мс.
-const PROCESSOR_NAME = 'cockpit-speech-pcm16';
+const PROCESSOR_NAME = 'grigdesk-speech-pcm16';
 const DEFAULT_TARGET_RATE = 16000;
 const DEFAULT_FRAME_SAMPLES = 1600;
 
@@ -12,7 +12,7 @@ function pcm16(sample) {
     : Math.round(clamped * 0x7fff);
 }
 
-class CockpitSpeechPcmProcessor extends AudioWorkletProcessor {
+class GrigDeskSpeechPcmProcessor extends AudioWorkletProcessor {
   constructor(options = {}) {
     super();
     const processorOptions = options.processorOptions || {};
@@ -109,4 +109,4 @@ class CockpitSpeechPcmProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor(PROCESSOR_NAME, CockpitSpeechPcmProcessor);
+registerProcessor(PROCESSOR_NAME, GrigDeskSpeechPcmProcessor);

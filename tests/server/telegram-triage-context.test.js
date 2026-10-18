@@ -46,7 +46,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 const ME = {
   id: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
 };
@@ -57,7 +57,7 @@ const link = (chatId, id) => `https://t.me/c/${String(chatId).replace('-100', ''
 const msg = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   chatType: 'supergroup',
   isForum: false,
   messageId: 100,
@@ -96,7 +96,7 @@ async function fixture(t, {
   discussion: discussionStub = null,
   task = TASK,
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-triage-tg-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-triage-tg-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const creds = new TelegramModuleCredentials();
@@ -194,7 +194,7 @@ test('переписка по ссылке из задачи доезжает в
   const prompt = await run();
   assert.ok(prompt.includes(DISCUSSION_SECTION_TITLE), 'секции обсуждения нет вовсе');
   assert.match(prompt, new RegExp(SECRET));
-  assert.match(prompt, /Чат «Кокпит · баги»/);
+  assert.match(prompt, /Чат «GrigDesk · баги»/);
   assert.match(prompt, /← ссылка/);
 
   // Обсуждение — часть ВХОДА оценки: агент читает его вместе с задачей, до
@@ -245,7 +245,7 @@ test('чат чужого проекта закрыт и для триажа: п
 
   const prompt = await run();
   assert.equal(prompt.includes(SECRET), false, 'переписка чужого проекта уехала оценщику');
-  assert.equal(prompt.includes('Кокпит · баги'), false, 'даже имя чужого чата наружу не уезжает');
+  assert.equal(prompt.includes('GrigDesk · баги'), false, 'даже имя чужого чата наружу не уезжает');
   assert.match(prompt, /Ссылка не раскрыта/);
   assert.match(prompt, /привязан к проекту/i);
 });

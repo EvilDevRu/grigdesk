@@ -31,7 +31,7 @@ test('снятый адаптер отсутствует в карточках �
 });
 
 async function tempStore(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-schema-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-schema-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return {
     root,

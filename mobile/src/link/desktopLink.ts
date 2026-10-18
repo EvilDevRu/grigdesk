@@ -1,4 +1,4 @@
-import type { CockpitLink, Listener } from './types.ts';
+import type { GrigDeskLink, Listener } from './types.ts';
 
 export type DesktopBridge = {
   invoke(method: string, input?: unknown): Promise<any>;
@@ -9,7 +9,7 @@ export type DesktopBridge = {
  * Desktop использует только закрытый preload-мост, без browser fetch и native-плагина.
  * Слушатели разделяют одну подписку IPC, которая снимается после последней отписки.
  */
-export function createDesktopLink(bridge: DesktopBridge | undefined): CockpitLink {
+export function createDesktopLink(bridge: DesktopBridge | undefined): GrigDeskLink {
   const listeners = new Map<string, Set<(value: any) => void>>();
   let unsubscribe: (() => void) | null = null;
 
@@ -43,7 +43,7 @@ export function createDesktopLink(bridge: DesktopBridge | undefined): CockpitLin
     async scanQr() {
       requireBridge();
 
-      throw new Error('Камеры нет: вставьте текст кода из настроек Кокпита.');
+      throw new Error('Камеры нет: вставьте текст кода из настроек GrigDesk.');
     },
     async downloadUpdate() {
       requireBridge();
@@ -66,7 +66,7 @@ export function createDesktopLink(bridge: DesktopBridge | undefined): CockpitLin
         return { error: 'network' };
       }
 
-      return { path: 'cockpit-media://media/' + result.generation + '/' + result.file };
+      return { path: 'grigdesk-media://media/' + result.generation + '/' + result.file };
     },
     /**
      * Все слушатели используют одну подписку IPC без передачи IpcRendererEvent странице.
@@ -103,5 +103,5 @@ export function createDesktopLink(bridge: DesktopBridge | undefined): CockpitLin
 }
 
 export const desktopLink = createDesktopLink((globalThis as typeof globalThis & {
-  cockpitDesktop?: DesktopBridge;
-}).cockpitDesktop);
+  grigDeskDesktop?: DesktopBridge;
+}).grigDeskDesktop);

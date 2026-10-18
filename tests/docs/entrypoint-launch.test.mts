@@ -20,12 +20,12 @@ const SQLITE_WARNING_ALLOWED = new Set<string>();
 // Где действительно запускают собственные программы: лаунчеры, юнит, установщик,
 // команды пакетов и общий прогон. Приватные каталоги и сборку сюда не включаем.
 const LAUNCH_FILES = [
-  'bin/cockpit',
+  'bin/grigdesk-ctl',
   'deploy/restart.sh',
   'deploy/lib/runtime-env.sh',
   'deploy/install.sh',
   'deploy/shortcut.sh',
-  'deploy/cockpit-server.service',
+  'deploy/grigdesk-server.service',
   'desktop/src/serverProcess.ts',
   'server/package.json',
   'web/package.json',
@@ -72,8 +72,8 @@ test('минимум Node объявлен и проверяется на зап
   assert.equal(JSON.parse(webPkg).engines.node, '^22.19.0 || >=24.0.0');
   // Отказ должен наступать до запуска: иначе человек получит ошибку разрешения
   // модуля `.ts` вместо ответа «нужен Node новее».
-  assert.match(runtimeEnv, /COCKPIT_MIN_NODE=22\.19\.0/);
-  assert.match(runtimeEnv, /cockpit_require_node\s*\(\)/);
+  assert.match(runtimeEnv, /GRIGDESK_MIN_NODE=22\.19\.0/);
+  assert.match(runtimeEnv, /grigdesk_require_node\s*\(\)/);
   assert.match(gate, /MIN_NODE_VERSION = '22\.19\.0'/);
   assert.match(await source('server/src/app.ts'), /assertSupportedNode\(\)/);
 

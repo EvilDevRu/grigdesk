@@ -10,7 +10,7 @@ import {
 } from '../../server/src/lib/taskSeenStore.ts';
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-seen-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-task-seen-'));
   const filePath = path.join(root, 'task-seen.json');
   t.after(() => rm(root, { recursive: true, force: true }));
   return { filePath, store: new TaskSeenStore({ filePath }) };

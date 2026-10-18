@@ -10,7 +10,7 @@ process.env.NODE_ENV = 'test';
 const PREFIX = '__routesEditorPipeline';
 
 test('RE-H1-04: графический scope ворот не попадает в API решения', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/pipeline');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/pipeline');
   const [{ mount, flushPromises }, { createPinia, defineStore }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),

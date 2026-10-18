@@ -69,7 +69,7 @@ export interface NarrationOpsDeps {
   readProject: (id: string) => Promise<ShowcaseProject>;
   store: ShowcaseStore;
   // Расшифровка приходит функцией: раздел пользуется общим речевым runtime
-  // кокпита, но не знает, как тот устроен, и без него обязан работать — с
+  // GrigDesk, но не знает, как тот устроен, и без него обязан работать — с
   // пометкой, что проверка речи пропущена.
   transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;
   voiceInstaller: VoiceInstaller;

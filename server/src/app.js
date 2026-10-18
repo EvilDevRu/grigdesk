@@ -21,7 +21,7 @@ if (major === 23 || major < needMajor
   || (major === needMajor && minor < needMinor)
   || (major === needMajor && minor === needMinor && patch < needPatch)) {
   process.stderr.write(
-    `Cockpit требует Node ^${MIN_NODE_VERSION} || >=24.0.0, запущен ${process.versions.node}. `
+    `GrigDesk требует Node ^${MIN_NODE_VERSION} || >=24.0.0, запущен ${process.versions.node}. `
     + `Обнови Node (nvm install ${MIN_NODE_VERSION}) и повтори запуск.\n`,
   );
   process.exit(1);

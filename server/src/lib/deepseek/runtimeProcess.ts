@@ -114,7 +114,9 @@ function selectDeepSeekRuntime(config: DeepSeekRuntimeConfig): RuntimeSelection 
   const runtimeRoot = path.resolve(config.deepseekGenerationRoot || defaultRoot);
 
   if (!config.deepseekArtifactDir && fs.existsSync(path.join(runtimeRoot, 'publish-pending.json'))) {
-    throw deepSeekRuntimeError('deepseek_runtime_publish_pending', 'Публикация runtime Cockpit не завершена');
+    throw deepSeekRuntimeError(
+      'deepseek_runtime_publish_pending', 'Публикация runtime GrigDesk не завершена',
+    );
   }
 
   return {
@@ -334,7 +336,7 @@ export function verifyDeepSeekRuntimeDescriptor(runtime: DeepSeekRuntimeDescript
 
 /**
  * Асинхронная перепроверка перед spawn для серверных путей: тот же контракт,
- * но обход поколения не блокирует остальные запросы Cockpit.
+ * но обход поколения не блокирует остальные запросы GrigDesk.
  */
 export async function verifyDeepSeekRuntimeDescriptorAsync(
   runtime: DeepSeekRuntimeDescriptor,

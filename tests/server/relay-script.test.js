@@ -23,7 +23,7 @@ const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
  * Фальшивый npm записывает argv и код сборки, не устанавливая зависимости.
  */
 function sandbox(t, { dependencies = false, buildCode = 0 } = {}) {
-  const directory = mkdtempSync(path.join(os.tmpdir(), 'cockpit-relay-script-'));
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-relay-script-'));
   const root = path.join(directory, 'копия проекта');
   const home = path.join(directory, 'Домашняя папка');
   const commands = path.join(directory, 'команды');
@@ -78,7 +78,7 @@ fi
     env: {
       PATH: commands,
       HOME: home,
-      COCKPIT_NODE_DIR: nodeDir,
+      GRIGDESK_NODE_DIR: nodeDir,
       RELAY_TEST_NODE: process.execPath,
       RELAY_TEST_LOG: journal,
       RELAY_TEST_BUILD_CODE: String(buildCode),

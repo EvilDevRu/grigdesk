@@ -25,7 +25,7 @@ export const UiTextarea = defineComponent({
 
 test('RE-H4-01: подтверждение публикации получает фокус и возвращает его кнопке открытия',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const document = browser.document;
     const opener = document.createElement('button');
     opener.textContent = 'Опубликовать';

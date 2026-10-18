@@ -8,7 +8,7 @@ export const uiComponentStubs = {
   UiSelect: { template: '<select :value="$attrs.modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><slot /></select>' },
 };
 
-export async function createUiBrowser(url = 'https://cockpit.test/ui-gallery.html') {
+export async function createUiBrowser(url = 'https://grigdesk.test/ui-gallery.html') {
   const { Window } = await import('../../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url });
   for (const [key, value] of Object.entries({
@@ -50,7 +50,7 @@ export async function createUiBrowser(url = 'https://cockpit.test/ui-gallery.htm
   return browser;
 }
 
-export async function installUiBrowser(t, url = 'https://cockpit.test/ui-gallery.html') {
+export async function installUiBrowser(t, url = 'https://grigdesk.test/ui-gallery.html') {
   const browser = await createUiBrowser(url);
 
   t.after(() => browser.close());

@@ -77,7 +77,7 @@ async function fixture(t, plugin = GLM_FIXTURE_PLUGIN, dependencyLock) {
       return createGlmAdapter({
         env: {
           PATH: process.env.PATH,
-          COCKPIT_GLM_API_MODE: mode,
+          GRIGDESK_GLM_API_MODE: mode,
           ZAI_API_KEY: KEYS.api,
           ZAI_CODING_API_KEY: KEYS['coding-plan'],
         },
@@ -147,7 +147,7 @@ test('загрузчик в новом процессе видит run толь�
       env: {
         PATH: process.env.PATH,
         HOME: f.root,
-        COCKPIT_GLM_API_MODE: mode,
+        GRIGDESK_GLM_API_MODE: mode,
         ZAI_API_KEY: KEYS.api,
         ZAI_CODING_API_KEY: KEYS['coding-plan'],
       },
@@ -177,7 +177,7 @@ test('допущенный режим использует ровно свой �
 
     assert.equal(result.reply, 'ok');
     assert.deepEqual(providers, { zai: buildGlmRoute(mode) });
-    assert.equal(launch.env.COCKPIT_GLM_ROUTE_KEY, KEYS[mode]);
+    assert.equal(launch.env.GRIGDESK_GLM_ROUTE_KEY, KEYS[mode]);
 
     for (const name of ['ZAI_API_KEY', 'ZAI_CODING_API_KEY']) {
       assert.equal(Object.hasOwn(launch.env, name), false, `${mode} ${name}`);

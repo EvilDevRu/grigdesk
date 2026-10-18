@@ -109,7 +109,7 @@ function choice(overrides = {}) {
  * а применение записывается так же, как его получил бы вид.
  */
 async function mountPanel(t, props = {}, { confirmed = true } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/showcase');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/showcase');
   const harness = {
     confirmed,
     confirmations: [],

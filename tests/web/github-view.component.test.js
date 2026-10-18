@@ -122,7 +122,7 @@ test('пустой allowlist виден явно, PUT передаёт rules[0..
   assert.match(wrapper.text(), /Issues .* не попадут в Inbox/);
 
   await button(wrapper, 'Допустить в Inbox').trigger('click');
-  await wrapper.get('input[name="project"]').setValue(' cockpit ');
+  await wrapper.get('input[name="project"]').setValue(' grigdesk ');
   await wrapper.get('select[name="kind"]').setValue('wish');
   await button(wrapper, 'Сохранить').trigger('click');
   await settle();
@@ -130,7 +130,7 @@ test('пустой allowlist виден явно, PUT передаёт rules[0..
   assert.deepEqual(calls, [[
     'PUT', '/api/github/rules', {
       repositoryId: '123456',
-      rules: [{ repositoryId: '123456', project: 'cockpit', kind: 'wish' }],
+      rules: [{ repositoryId: '123456', project: 'grigdesk', kind: 'wish' }],
     },
   ]]);
   assert.match(wrapper.text(), /Новое правило не включает автоматическое/);
@@ -143,7 +143,7 @@ test('agentSearch legacy-default закрыт и включается отдел
   let fingerprint = 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   let storedRule = {
     repositoryId: '123456',
-    project: 'cockpit',
+    project: 'grigdesk',
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
     autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
@@ -197,7 +197,7 @@ test('agentSearch после потерянного ответа PUT переч�
       ruleGets += 1;
       return {
         rules: [{
-          repositoryId: '123456', project: 'cockpit', kind: 'bug',
+          repositoryId: '123456', project: 'grigdesk', kind: 'bug',
           agentSearch: storedEnabled,
         }],
         policyFingerprint: ruleGets === 1
@@ -230,7 +230,7 @@ test('agentSearch после ошибки PUT не выдаёт непримен
       ruleGets += 1;
       return {
         rules: [{
-          repositoryId: '123456', project: 'cockpit', kind: 'bug', agentSearch: false,
+          repositoryId: '123456', project: 'grigdesk', kind: 'bug', agentSearch: false,
         }],
         policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       };
@@ -258,7 +258,7 @@ test('agentSearch не выдаёт старое значение за дост�
       if (mutationStarted) throw new Error('Не удалось перечитать rules.');
       return {
         rules: [{
-          repositoryId: '123456', project: 'cockpit', kind: 'bug', agentSearch: true,
+          repositoryId: '123456', project: 'grigdesk', kind: 'bug', agentSearch: true,
         }],
         policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       };
@@ -287,7 +287,7 @@ test('обычное редактирование rule не переносит a
   const calls = [];
   const storedRule = {
     repositoryId: '123456',
-    project: 'cockpit',
+    project: 'grigdesk',
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
     autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
@@ -307,7 +307,7 @@ test('обычное редактирование rule не переносит a
     },
   };
   const { wrapper, settle } = await mountChannelView(t, 'github', { api });
-  await wrapper.get('input[name="project"]').setValue('cockpit-next');
+  await wrapper.get('input[name="project"]').setValue('grigdesk-next');
   await button(wrapper, 'Сохранить').trigger('click');
   await settle();
   assert.equal(Object.hasOwn(calls[0][2].rules[0], 'agentSearch'), false);

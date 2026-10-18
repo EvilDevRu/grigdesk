@@ -51,15 +51,15 @@ test('рабочие контексты объединяют репозитор�
   const { contexts, unavailable } = buildCodeContexts([
     {
       key: 'engine',
-      dir: '/srv/cockpit/engine',
+      dir: '/srv/grigdesk/engine',
       trees: [
-        tree('/srv/cockpit/engine', { main: true, name: 'основной', branch: 'master' }),
+        tree('/srv/grigdesk/engine', { main: true, name: 'основной', branch: 'master' }),
         tree('/srv/worktrees/t46', { name: 't46', task: 't46', branch: 'task-46' }),
       ],
     },
     {
       key: 'web',
-      dir: '/srv/cockpit/web',
+      dir: '/srv/grigdesk/web',
       trees: [
         tree('/srv/worktrees/web-preview', { name: 'web-preview', branch: '(detached)' }),
         tree('/srv/worktrees/web-empty', { name: 'web-empty', branch: '' }),
@@ -75,7 +75,7 @@ test('рабочие контексты объединяют репозитор�
     [
       {
         repoKey: 'engine',
-        treePath: '/srv/cockpit/engine',
+        treePath: '/srv/grigdesk/engine',
         label: 'engine · Основная · master',
         branchLabel: 'master',
       },

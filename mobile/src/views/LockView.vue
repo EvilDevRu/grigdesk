@@ -4,7 +4,7 @@
       <span class="auth-icon" :data-tone="link.state?.revoked ? 'bad' : 'accent'">
         <UiIcon :name="link.state?.revoked ? 'unlink' : 'lock'" />
       </span>
-      <h1>{{ link.state?.revoked ? 'Телефон отозван в кокпите' : 'Приложение заблокировано' }}</h1>
+      <h1>{{ link.state?.revoked ? 'Телефон отозван в GrigDesk' : 'Приложение заблокировано' }}</h1>
       <p class="mobile-muted">{{ link.state?.brainName }}</p>
     </div>
     <p v-if="!link.state?.revoked && isDesktop">
@@ -38,7 +38,7 @@
         reset = false;
       "
     >
-      <p>Для следующего входа понадобится новый QR-код из кокпита.</p>
+      <p>Для следующего входа понадобится новый QR-код из GrigDesk.</p>
     </UiDialog>
   </UiAuthLayout>
 </template>

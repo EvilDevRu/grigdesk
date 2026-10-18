@@ -1,7 +1,7 @@
 // Журнал и очередь заданий раздела.
 //
 // Долгие шаги — синтез, запись браузера, сборка — исполняет отдельный процесс,
-// который обязан пережить перезапуск кокпита. Отсюда три правила:
+// который обязан пережить перезапуск GrigDesk. Отсюда три правила:
 //  • ЕДИНСТВЕННЫЙ писатель журнала — сервер. Worker пишет свой отчёт о попытке,
 //    а актуальные ссылки публикует сервер, сверив хеши входов;
 //  • живость процесса проверяется по снимку identity (время старта и командная
@@ -204,7 +204,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
         ...record,
         state: 'interrupted',
         sequence: record.sequence + 1,
-        error: 'Исполнитель задания не пережил перезапуск кокпита.',
+        error: 'Исполнитель задания не пережил перезапуск GrigDesk.',
         finishedAt: new Date().toISOString(),
       };
 
@@ -222,7 +222,7 @@ export function createShowcaseJobs(options: ShowcaseJobsOptions) {
     if (!recovered) {
       throw new ShowcaseError(
         'not_recovered',
-        'Кокпит ещё сверяет журнал заданий с процессами.',
+        'GrigDesk ещё сверяет журнал заданий с процессами.',
         503,
       );
     }

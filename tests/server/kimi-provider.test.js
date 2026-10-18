@@ -17,7 +17,7 @@ import {
 } from '../../server/src/lib/kimi/usage.ts';
 
 test('Kimi setup-карточка проверяет системный CLI и login без чтения credentials', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-provider-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-provider-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'kimi');
   const kimiHome = path.join(root, '.kimi-code');
@@ -131,7 +131,7 @@ test('Kimi usage распознаёт фактический silent-баннер
 });
 
 test('Kimi usage broker не возвращает bearer token и штатно закрывает child', async (t) => {
-  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-usage-'));
+  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-usage-'));
   t.after(() => fs.rm(runtimeRoot, { recursive: true, force: true }));
   let child;
   let spawnArgs;

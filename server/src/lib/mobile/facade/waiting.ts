@@ -82,7 +82,7 @@ function questionsOf(value: Payload): Question[] {
     };
 
     // Исходный текст не сокращается: неверный размер переводит всё ожидание в unsupported.
-    // Пользователь продолжает с полной схемой через обычный Кокпит.
+    // Пользователь продолжает с полной схемой через обычный GrigDesk.
     if (
       result.question.length > 32768 ||
       result.header.length > 800 ||
@@ -150,7 +150,7 @@ export function registerWaitingRoutes(app: MobileApp, deps: FacadeDeps) {
           pid,
           chatId,
           kind: 'unsupported',
-          reason: 'Этот запрос доступен в обычном Кокпите.',
+          reason: 'Этот запрос доступен в обычном GrigDesk.',
         };
       }
       if (Array.isArray(item.questions)) {
@@ -193,7 +193,7 @@ export function registerWaitingRoutes(app: MobileApp, deps: FacadeDeps) {
             pid,
             chatId,
             kind: 'unsupported',
-            reason: 'Форма вопроса требует обычного Кокпита.',
+            reason: 'Форма вопроса требует обычного GrigDesk.',
           };
         }
       }

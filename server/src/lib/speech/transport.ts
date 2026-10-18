@@ -198,7 +198,7 @@ export function decodeSpeechTranscript(
 }
 
 /**
- * Изолирует HuggingFace-кэш каждого Python spawn внутри каталога кокпита.
+ * Изолирует HuggingFace-кэш каждого Python spawn внутри каталога GrigDesk.
  * Сигнатура с объектом не позволяет случайно перепутать base env и путь.
  */
 function sitePackagesDir(pythonPath: string): string | null {

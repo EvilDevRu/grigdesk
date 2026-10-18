@@ -17,7 +17,7 @@ const TOKEN = 'tok-cli';
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 
 /**
- * Фейк Cockpit отвечает телом, в котором виден метод и путь запроса.
+ * Фейк GrigDesk отвечает телом, в котором виден метод и путь запроса.
  * Так stdout сверяется побайтно с ожидаемым ответом.
  */
 function echoBody(request: RecordedRequest): Buffer {
@@ -38,8 +38,8 @@ async function runSource(
 
   return await runProcess(t, process.execPath, [SOURCE_MAIN, ...args], {
     env: childEnv(home, {
-      COCKPIT_URL: fixture.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_URL: fixture.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
     }),
     input,
   });
@@ -82,7 +82,7 @@ test('BI-01: весь CLI-контракт проходит через HTTP', as
     assert.equal(fixture.requests.length, before + 1);
     assert.equal(request.method, method);
     assert.equal(request.url, url);
-    assert.equal(request.headers['x-cockpit-token'], TOKEN);
+    assert.equal(request.headers['x-grigdesk-token'], TOKEN);
     assert.equal(request.headers['content-type'], body === null ? undefined : 'application/json');
     assert.equal(request.body.toString(), body ?? '');
     assertSuccess(result, echoBody(request));
@@ -117,7 +117,7 @@ test('BI-02: create сохраняет stdin', async (t) => {
 
   assert.equal(invalid.code, 22);
   assert.equal(invalid.stdout.length, 0);
-  assert.equal(invalid.stderr.toString(), 'Запрос к Cockpit завершился ошибкой HTTP 400.\n');
+  assert.equal(invalid.stderr.toString(), 'Запрос к GrigDesk завершился ошибкой HTTP 400.\n');
 });
 
 test('BI-03: start сохраняет только результат timer', async (t) => {
@@ -150,7 +150,7 @@ test('BI-03: start сохраняет только результат timer', as
       } else {
         assert.equal(result.code, 22);
         assert.equal(result.stdout.length, 0);
-        assert.equal(result.stderr.toString(), 'Запрос к Cockpit завершился ошибкой HTTP 502.\n');
+        assert.equal(result.stderr.toString(), 'Запрос к GrigDesk завершился ошибкой HTTP 502.\n');
       }
     }
   }
@@ -165,7 +165,7 @@ test('BI-04: ошибки HTTP и сети дают пустой stdout', async 
 
     assert.equal(result.code, 22);
     assert.equal(result.stdout.length, 0);
-    assert.equal(result.stderr.toString(), `Запрос к Cockpit завершился ошибкой HTTP ${status}.\n`);
+    assert.equal(result.stderr.toString(), `Запрос к GrigDesk завершился ошибкой HTTP ${status}.\n`);
   }
 
   const before = await startHttpFixture(t, (_request, response) => {
@@ -184,20 +184,20 @@ test('BI-04: ошибки HTTP и сети дают пустой stdout', async 
 
     assert.equal(result.code, 22);
     assert.equal(result.stdout.length, 0);
-    assert.equal(result.stderr.toString(), 'Не удалось связаться с Cockpit.\n');
+    assert.equal(result.stderr.toString(), 'Не удалось связаться с GrigDesk.\n');
   }
 });
 
 test('BI-05: новая папка и отдельный env-файл работают в реальном процессе', async (t) => {
   const fixture = await startHttpFixture(t, (request, response) => {
-    response.end(`{"token":"${String(request.headers['x-cockpit-token'])}"}`);
+    response.end(`{"token":"${String(request.headers['x-grigdesk-token'])}"}`);
   });
   const port = new URL(fixture.baseUrl).port;
   const { home, data } = await syntheticHome();
 
   await mkdir(path.join(data, 'state'), { recursive: true });
   await writeFile(path.join(data, 'state/cli-token'), 'tok-default\r\n');
-  await writeFile(path.join(data, '.env'), `COCKPIT_PORT=${port}\n`);
+  await writeFile(path.join(data, '.env'), `GRIGDESK_PORT=${port}\n`);
 
   const fromLayout = await runProcess(t, process.execPath, [SOURCE_MAIN, 'dashboard'], {
     env: childEnv(home),
@@ -209,13 +209,13 @@ test('BI-05: новая папка и отдельный env-файл работ
 
   await writeFile(path.join(home, 'custom-token'), '\n tok-custom \n');
   await writeFile(separate, [
-    `COCKPIT_PORT="${port}"`,
-    `COCKPIT_CLI_TOKEN_PATH="${path.join(home, 'custom-token')}"`,
+    `GRIGDESK_PORT="${port}"`,
+    `GRIGDESK_CLI_TOKEN_PATH="${path.join(home, 'custom-token')}"`,
     '',
   ].join('\n'));
 
   const fromFile = await runProcess(t, process.execPath, [SOURCE_MAIN, 'dashboard'], {
-    env: childEnv(home, { COCKPIT_ENV_FILE: separate }),
+    env: childEnv(home, { GRIGDESK_ENV_FILE: separate }),
   });
 
   assertSuccess(fromFile, Buffer.from('{"token":"tok-custom"}'));
@@ -224,9 +224,9 @@ test('BI-05: новая папка и отдельный env-файл работ
 
   const exported = await runProcess(t, process.execPath, [SOURCE_MAIN, 'dashboard'], {
     env: childEnv(home, {
-      COCKPIT_ENV_FILE: separate,
-      COCKPIT_CLI_TOKEN_PATH: path.join(home, 'env-token'),
-      COCKPIT_URL: fixture.baseUrl,
+      GRIGDESK_ENV_FILE: separate,
+      GRIGDESK_CLI_TOKEN_PATH: path.join(home, 'env-token'),
+      GRIGDESK_URL: fixture.baseUrl,
     }),
   });
 
@@ -242,10 +242,10 @@ test('BI-06: без токена отказ до HTTP', async (t) => {
 
   await mkdir(legacy, { recursive: true });
   await writeFile(path.join(legacy, 'cli-token'), 'tok-old');
-  await writeFile(path.join(home, 'code/.env'), `COCKPIT_PORT=${new URL(fixture.baseUrl).port}\n`);
+  await writeFile(path.join(home, 'code/.env'), `GRIGDESK_PORT=${new URL(fixture.baseUrl).port}\n`);
 
   const result = await runProcess(t, process.execPath, [SOURCE_MAIN, 'dashboard'], {
-    env: childEnv(home, { COCKPIT_URL: fixture.baseUrl }),
+    env: childEnv(home, { GRIGDESK_URL: fixture.baseUrl }),
     cwd: path.join(home, 'code'),
   });
 
@@ -255,16 +255,16 @@ test('BI-06: без токена отказ до HTTP', async (t) => {
   assert.equal(fixture.requests.length, 0);
 });
 
-test('BI-07: явные URL/токен работают при неверной COCKPIT_HOME', async (t) => {
+test('BI-07: явные URL/токен работают при неверной GRIGDESK_HOME', async (t) => {
   const fixture = await startHttpFixture(t, (_request, response) => {
     response.end('{"ok":true}');
   });
   const { home } = await syntheticHome();
   const result = await runProcess(t, process.execPath, [SOURCE_MAIN, 'dashboard'], {
     env: childEnv(home, {
-      COCKPIT_HOME: 'relative/bad',
-      COCKPIT_URL: fixture.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_HOME: 'relative/bad',
+      GRIGDESK_URL: fixture.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
     }),
     cwd: home,
   });
@@ -280,8 +280,8 @@ test('BI-08: справка и неверные аргументы работа�
   const env = {
     PATH: '',
     HOME: 'relative',
-    COCKPIT_HOME: 'bad',
-    COCKPIT_URL: fixture.baseUrl,
+    GRIGDESK_HOME: 'bad',
+    GRIGDESK_URL: fixture.baseUrl,
   };
   const help = await runProcess(t, process.execPath, [SOURCE_MAIN, '--help'], { env });
 
@@ -316,8 +316,8 @@ test('BI-09: source не требует curl и jq', async (t) => {
   const result = await runProcess(t, process.execPath, [SOURCE_MAIN, 'comment', '7', 'без', 'jq'], {
     env: {
       PATH: '',
-      COCKPIT_URL: fixture.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_URL: fixture.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
     },
   });
   const request = fixture.requests[0];
@@ -342,8 +342,8 @@ test('BI-10: разные cwd и пробелы в пути исходника �
       ' ведущий', 'хвост ', ''], {
       env: {
         PATH: '/usr/bin:/bin',
-        COCKPIT_URL: fixture.baseUrl,
-        COCKPIT_TOKEN: TOKEN,
+        GRIGDESK_URL: fixture.baseUrl,
+        GRIGDESK_TOKEN: TOKEN,
       },
       cwd,
     });
@@ -355,7 +355,7 @@ test('BI-10: разные cwd и пробелы в пути исходника �
   }
 });
 
-test('BI-11: прокси из окружения не используется, запрос идёт к Cockpit напрямую', async (t) => {
+test('BI-11: прокси из окружения не используется, запрос идёт к GrigDesk напрямую', async (t) => {
   const fixture = await startHttpFixture(t, (request, response) => {
     response.end(echoBody(request));
   });
@@ -363,8 +363,8 @@ test('BI-11: прокси из окружения не используется,
   const proxy = await startProxyFixture(t);
   const result = await runProcess(t, process.execPath, [SOURCE_MAIN, 'dashboard'], {
     env: childEnv(home, {
-      COCKPIT_URL: fixture.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_URL: fixture.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
       NODE_USE_ENV_PROXY: '1',
       HTTP_PROXY: proxy.baseUrl,
       http_proxy: proxy.baseUrl,
@@ -388,8 +388,8 @@ test('BI-12: закрытый получатель stdout не роняет ко
   const { home } = await syntheticHome();
   const child = spawn(process.execPath, [SOURCE_MAIN, 'dashboard'], {
     env: childEnv(home, {
-      COCKPIT_URL: fixture.baseUrl,
-      COCKPIT_TOKEN: TOKEN,
+      GRIGDESK_URL: fixture.baseUrl,
+      GRIGDESK_TOKEN: TOKEN,
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -24,7 +24,7 @@ const git = (cwd, args) => exec('git', ['-C', cwd, ...args]);
 
 /** Создаёт линейную историю с корнем, промежуточным файлом и переименованием. */
 async function rangeRepo(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-range-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-range-'));
   const write = (rel, content) => writeFile(path.join(root, rel), content);
 
   await git(root, ['init', '-q', '-b', 'main', '.']);
@@ -73,7 +73,7 @@ async function codeApp(t, root, enabled = true, options = {}) {
 
 /** Создаёт основное дерево и вторую рабочую копию на ветке задачи. */
 async function branchRepo(t) {
-  const parent = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-branch-'));
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-branch-'));
   const root = path.join(parent, 'main');
   const task = path.join(parent, 'task');
 

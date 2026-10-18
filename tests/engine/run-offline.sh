@@ -7,6 +7,20 @@ FACTORY_HOME="$PROJECT_ROOT/engine"
 FACTORY_TESTS_HOME="$PROJECT_ROOT/tests/engine"
 HOST_NODE_BIN=$(command -v node 2>/dev/null || true)
 
+# Очистка действует и в родителе очереди, а env -i ниже изолирует каждого воркера.
+# Старый префикс читается из общего модуля совместимости без доступа к настройкам.
+LEGACY_ENV_PREFIX=$("$HOST_NODE_BIN" -e '
+  const path = require("node:path");
+  const legacy = require(path.resolve(process.argv[1]));
+  process.stdout.write(legacy.LEGACY.envPrefix);
+' "$PROJECT_ROOT/shared/runtime/legacyBrand.ts") || exit $?
+while IFS= read -r key; do
+  if [[ "$key" == "$LEGACY_ENV_PREFIX"* ]]; then
+    unset "$key"
+  fi
+done < <(compgen -e)
+unset GRIGDESK_ENV_FILE GRIGDESK_UI_RELEASES_DIR GRIGDESK_LOG
+
 # Режим воркера: скрипт запускает сам себя по одному файлу на процесс. Изоляция
 # та же, что была у последовательного прогона (свой TEST_ROOT + `env -i`), поэтому
 # файлы не видят друг друга и порядок между ними ничего не значит.
@@ -25,7 +39,7 @@ if [[ "${1:-}" == "--one" ]]; then
   env -i \
     PATH="$FACTORY_TESTS_HOME/fakes/bin:/usr/bin:/bin" \
     LC_ALL=C \
-    COCKPIT_HOME="$test_root/cockpit-home" \
+    GRIGDESK_HOME="$test_root/grigdesk-home" \
     FACTORY_HOME="$FACTORY_HOME" \
     FACTORY_PROFILES_DIR="$test_root/profiles" \
     FACTORY_TESTS_HOME="$FACTORY_TESTS_HOME" \
@@ -40,8 +54,8 @@ if [[ "${1:-}" == "--one" ]]; then
     XDG_CACHE_HOME="$test_root/xdg-cache" \
     TEST_ROOT="$test_root" \
     NODE_BIN="$HOST_NODE_BIN" \
-    COCKPIT_PROVIDER_PREFS_PATH="$test_root/provider-prefs.json" \
-    COCKPIT_DEEPSEEK_RUNTIME_MODE=installed \
+    GRIGDESK_PROVIDER_PREFS_PATH="$test_root/provider-prefs.json" \
+    GRIGDESK_DEEPSEEK_RUNTIME_MODE=installed \
     bash --noprofile --norc "$test_file" >"$out_buf" 2>&1
   test_rc=$?
   # Вывод файла печатается одним куском под общим flock: иначе строки соседних

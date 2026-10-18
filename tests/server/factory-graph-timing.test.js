@@ -15,7 +15,7 @@ async function makeFixture(t, {
   review = 'done', ship = 'waiting', alive = false,
   workTimeReader = null, trusted = false, routeV2 = false, runDurationSec = null,
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-timing-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-graph-timing-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stateDir = path.join(root, 'state');

@@ -1,7 +1,7 @@
 // Подтверждение запуска resume. `systemd-run` возвращает 0 сразу после регистрации
 // юнита, поэтому «прогон продолжен» раньше означало лишь «юнит зарегистрирован»:
 // В регрессионном сценарии юнит умирал через две секунды на разошедшемся контракте профиля (код 75),
-// а кокпит четыре раза подряд отвечал успехом.
+// а GrigDesk четыре раза подряд отвечал успехом.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -66,7 +66,7 @@ test('живой юнит с ЧУЖОЙ попыткой в реестре не 
 });
 
 // Ложная тревога, ради которой окно подтверждения и появилось: реестр не успевал
-// получить ATTEMPT_ID/ORCH_PID за окно быстрых отказов, и кокпит писал «прогон не
+// получить ATTEMPT_ID/ORCH_PID за окно быстрых отказов, и GrigDesk писал «прогон не
 // поехал» над идущим прогоном. Живой замер: возврат курсора в 10:55:14, заход узла
 // в 10:55:33 — девятнадцать секунд, львиная доля на preflight исполнителей.
 test('поздняя запись реестра — не отказ: identity опрашивается после окна', async () => {
@@ -207,7 +207,7 @@ test('мёртвый оркестратор при живом юните — т�
 });
 
 test('в причину попадает только дописанное после запуска, и не в байтах', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-resume-log-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, 't42.stages.log');
   const before = 'старая строка про узел diagnose\n';
@@ -223,7 +223,7 @@ test('в причину попадает только дописанное по�
 });
 
 test('typed preflight прошлого запуска не типизирует новый несвязанный отказ', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-log-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-launch-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, 't43.launch.log');
   await writeFile(file,
@@ -238,7 +238,7 @@ test('typed preflight прошлого запуска не типизирует 
 });
 
 test('пустой журнал не оставляет отказ без текста', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-resume-log-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const res = await confirmRouteResume({
     attempt: ATTEMPT,

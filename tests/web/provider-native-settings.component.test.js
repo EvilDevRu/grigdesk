@@ -55,7 +55,7 @@ test('общая форма нативных настроек', async (t) => {
     await flushPromises();
 
     assert.equal(wrapper.find('[role="switch"]').exists(), true);
-    assert.match(wrapper.text(), /Для чатов Cockpit/);
+    assert.match(wrapper.text(), /Для чатов GrigDesk/);
     assert.match(wrapper.text(), /Наследуется/);
     assert.equal(wrapper.get('[role="switch"]').attributes('aria-label'), 'Новая настройка');
     await wrapper.get('[role="switch"]').setValue(false);
@@ -523,7 +523,7 @@ test('общая форма нативных настроек', async (t) => {
   await t.test('scope и поддержка consumers приходят из общего каталога', async (scenario) => {
     const value = structuredClone(catalog);
 
-    value.scope = { id: 'cockpit-chats-and-pipelines', label: 'Чаты и конвейеры' };
+    value.scope = { id: 'grigdesk-chats-and-pipelines', label: 'Чаты и конвейеры' };
     value.fields[0].appliesTo = ['chat'];
     value.fields[0].consumerSupport = {
       chat: { state: 'verified' },

@@ -176,7 +176,7 @@ test('сборка usage document не превращает неверный т�
 });
 
 test('publish usage document настоящий no-replace: published/idempotent/conflict', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-usage-doc-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-usage-doc-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = path.join(root, 'lifecycle', 'usage');
   const first = document();

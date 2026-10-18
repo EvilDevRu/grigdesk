@@ -1,6 +1,6 @@
 // Кнопка арбитра в плашке затыка.
 //
-// Арбитр — единственное действие кокпита, которое двигает курсор чужой задачи по решению
+// Арбитр — единственное действие GrigDesk, которое двигает курсор чужой задачи по решению
 // модели. Поэтому здесь проверяется прежде всего ГЕЙТ: он обязан читать машинный вид
 // остановки (`stall.stop`), а не заголовок. Заголовок пишется человеку и меняется вместе
 // с формулировками движка; привяжи кнопку к нему — и она однажды появится над остановкой,
@@ -56,7 +56,7 @@ const NO_PROGRESS_STALL = {
 
 async function mountPipeline(t, { factoryTask, graph }, { response, compact = true } = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -76,7 +76,7 @@ async function mountPipeline(t, { factoryTask, graph }, { response, compact = tr
   }
   // Свёрнутая карточка показывает плашку затыка целиком, развёрнутая — только её
   // действенную часть: заголовок и подсказку там уже говорит плашка над схемой.
-  if (compact) browser.localStorage.setItem('cockpit-compact', '1');
+  if (compact) browser.localStorage.setItem('grigdesk-compact', '1');
   browser.document.body.innerHTML = '<div id="mount"></div>';
 
   const [{ mount, flushPromises }, { createPinia, defineStore }] = await Promise.all([

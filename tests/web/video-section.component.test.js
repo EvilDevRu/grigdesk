@@ -8,7 +8,7 @@
 //  - без выбранной модели раздел работает как раньше и объясняет, где её включить;
 //  - задача уезжает с исполнителем, проектом и приоритетом, а пустой выбор идёт как
 //    null: нулевой responsibleId портал понимает буквально и отвечает ошибкой;
-//  - поставленная задача открывается общей карточкой Cockpit прямо из черновика.
+//  - поставленная задача открывается общей карточкой GrigDesk прямо из черновика.
 //
 // Состояние `<script setup>` наружу не выдаётся (`inlineTemplate` держит биндинги в
 // замыкании), и это к лучшему: проверяем тот же путь, что проходит человек — загрузка
@@ -86,7 +86,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
   // Снимок прошлого сеанса кладём ДО монтирования: так же его видит вью после F5 или
   // обновления PWA — на сервере разбор уже идёт, а у браузера остался только jobId.
   if (restore) {
-    browser.localStorage.setItem('cockpit-video-session', JSON.stringify(restore));
+    browser.localStorage.setItem('grigdesk-video-session', JSON.stringify(restore));
   }
   globalThis.__vidApi = api;
   const preview = { calls: [], showImage(v) { this.calls.push(['image', v]); }, showVideo(v) { this.calls.push(['video', v]); } };
@@ -436,7 +436,7 @@ test('задача уезжает с исполнителем и проекто�
     clips: [],
   });
   // Ноль портал понимает буквально и отвечает ошибкой о несуществующем пользователе —
-  // поэтому именно null, а не 0 (docs/cockpit/b24.md).
+  // поэтому именно null, а не 0 (docs/grigdesk/b24.md).
   assert.equal(posted[1].createdById, null, 'пусто — значит от владельца сессии, CREATED_BY не уезжает');
   assert.equal(posted[1].responsibleId, null);
   assert.equal(posted[1].groupId, null);
@@ -515,7 +515,7 @@ test('у каждой задачи своя кнопка, и она ставит
   assert.ok(draftButton(after[1]), 'у нерешённой кнопка остаётся');
 });
 
-test('поставленную задачу можно сразу открыть общей карточкой Cockpit', async (t) => {
+test('поставленную задачу можно сразу открыть общей карточкой GrigDesk', async (t) => {
   const view = await mountVideoView(t, {
     api: fakeApi({ post: async () => ({ id: 5150 }) }),
   });
@@ -568,7 +568,7 @@ test('отказ портала остаётся у своей задачи, с�
 
 test('шапка называет длительность ЗАПИСИ, а не только число реплик', async (t) => {
   // Живой случай: вместо 17-минутной встречи уехал соседний ролик на 1:19, и короткий
-  // разбор прочитался как «кокпит обрезал». Длительность отвечает на это сама.
+  // разбор прочитался как «GrigDesk обрезал». Длительность отвечает на это сама.
   const api = fakeApi({
     job: {
       status: 'done',
@@ -863,7 +863,7 @@ test('запись без видеодорожки оставляет задач
   assert.deepEqual(api.posted('/api/b24/tasks')[0].clips, []);
 });
 
-test('кадр и фрагмент открываются просмотрщиком кокпита, а не новой вкладкой', async (t) => {
+test('кадр и фрагмент открываются просмотрщиком GrigDesk, а не новой вкладкой', async (t) => {
   const { view } = await mountWithClip(t);
 
   // Разбор встречи — работа в одном экране: уход на соседнюю вкладку ради картинки

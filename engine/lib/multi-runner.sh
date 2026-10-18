@@ -315,7 +315,7 @@ _multi_invoke() {
   }
   # Bash передаёт local-переменные вызывающей функции динамически: dispatcher
   # держит здесь доказанную причину перехода (limit/preflight/manual). Публикуем
-  # её до запуска provider, иначе весь долгий run Cockpit показывает устаревшую
+  # её до запуска provider, иначе весь долгий run GrigDesk показывает устаревшую
   # причину предыдущего этапа.
   active_reason=${last_switch_reason:-primary}
   set_st "$MULTI_TASK" "RUNNER_ACTUAL_${MULTI_STAGE}" "$provider" \

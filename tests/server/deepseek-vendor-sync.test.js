@@ -37,7 +37,7 @@ async function publishDeepSeekSync(candidate) {
  * Импорт и публикация используют временные каталоги, без сети и production runtime.
  */
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-vendor-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-vendor-'));
   const sourceDir = path.join(root, 'source');
   const vendorDir = path.join(root, 'vendor');
 

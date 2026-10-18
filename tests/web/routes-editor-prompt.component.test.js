@@ -31,7 +31,7 @@ export default defineComponent({ props: ['modelValue'], emits: ['update:modelVal
 `;
 
 async function fixture(t, initial = makeDraft(), templates = [], focusPath = '') {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RoutePromptEditor.vue'), {
     stubs: {
       '../../ui': (UI_STUB) +
@@ -65,7 +65,7 @@ async function fixture(t, initial = makeDraft(), templates = [], focusPath = '')
 }
 
 test('RE-F7-01: форма инструкции bootstrap меняет только bootstrapPrompts', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RoutePromptEditor.vue'), {
     stubs: { '../../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",

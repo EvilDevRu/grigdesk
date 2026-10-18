@@ -36,7 +36,7 @@ test('LB-04 canonical root нельзя заменить ссылкой на н�
  * Подмены symlink и inode проверяют поведение операции копирования, а не её исходник.
  */
 async function pathFixture(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-path-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-path-'));
   const root = path.join(dir, 'library');
   const outside = path.join(dir, 'outside');
   const source = path.join(root, 'model.glb');

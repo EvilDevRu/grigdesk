@@ -51,7 +51,7 @@ export function withPluginDocsHint(message: string, entries: readonly PluginDocs
   const rest = entries.length - listed.length;
   const root = path.dirname(path.dirname(first.dir));
   const lines = [
-    '[Подсказка Cockpit: документация плагинов]',
+    '[Подсказка GrigDesk: документация плагинов]',
     'Включённые плагины держат документацию у себя, оглавление — docs/README.md в папке плагина.',
     'Открывай его, только если просьба касается плагина, и читай документы по ссылкам из него.',
     ...listed.map(entryLine),

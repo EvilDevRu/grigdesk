@@ -7,7 +7,7 @@ export const RETRY_CONTRACT = Object.freeze({
   NEVER: 'never',
 });
 
-// Что кокпит знает про исход хода: пустой прогон и стадия, на которой он оборвался.
+// Что GrigDesk знает про исход хода: пустой прогон и стадия, на которой он оборвался.
 export interface EmptyRunOutcome {
   emptyRun?: unknown;
   retryState?: string;

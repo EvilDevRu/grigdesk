@@ -84,7 +84,7 @@ import type {
 import type { RouteTicket } from '../../lib/factoryTicket.ts';
 import type { ArbiterExecutor, ArbiterRunOutput } from '../../lib/factoryArbiter.ts';
 import type { SlotDecision } from '../../lib/sandboxSlots.ts';
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 import type { RunnerState } from '../../lib/runnerState.ts';
 
 // Проверенные входы запуска: ровно то, что уедет движку после preflight.
@@ -197,7 +197,7 @@ interface AnalyzerPort {
 // Серверный config в объёме, который читает раздел: контракты движка запуска и
 // маршрута плюс собственные каталоги. Полная его форма объявлена в config.ts.
 type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
-  CockpitConfig, 'ticketsDir' | 'modelsPath' | 'factoryProfile' | 'sandboxDownCmd'
+  GrigDeskConfig, 'ticketsDir' | 'modelsPath' | 'factoryProfile' | 'sandboxDownCmd'
 > & {
   factoryStandsDir?: string;
 };
@@ -770,7 +770,7 @@ async function factoryModule(
     runners: await listInstalledRunners(config),
   }));
 
-  // Правило кокпита: isolated-конвейер стартует со свежего кода (worktree задачи
+  // Правило GrigDesk: isolated-конвейер стартует со свежего кода (worktree задачи
   // создаётся от ветки origin после fetch). Безопасно: ff-only и только чистый master;
   // сбой обновления запуск не блокирует — фиксируется в ответе. Идущий fetch триажа
   // по тому же каталогу запуск ждёт, а не дублирует (lib/gitRefresh.ts).
@@ -791,7 +791,7 @@ async function factoryModule(
   }
 
   // Ссылка на задачу в трекере — обязательное поле immutable ticket (движок требует http(s) URL).
-  // Берём из настроек портала: своего адреса задачи кокпит не выдумывает.
+  // Берём из настроек портала: своего адреса задачи GrigDesk не выдумывает.
   async function taskSourceUrl(id: string) {
     if (!b24) return '';
     try {
@@ -1888,7 +1888,7 @@ async function factoryModule(
     }
     // CAS ворот в движке принимает решение только для узла, на котором стоит
     // курсор журнала (ready|paused). Реестровая проекция опережает журнал, когда
-    // диспетчер встал fail-closed после захода узла: кокпит рисовал ворота, до
+    // диспетчер встал fail-closed после захода узла: GrigDesk рисовал ворота, до
     // которых маршрут не дошёл, и клик уезжал в гарантированный отказ 75.
     // Проверяем сами — ответ «что сейчас делать» вместо голого кода движка.
     const gateNode = key.toLowerCase();
@@ -1981,7 +1981,7 @@ async function factoryModule(
     if (!node) {
       return reply.code(409).send({ error: 'node_unknown', message: `узел ${key} не найден в маршруте попытки` });
     }
-    const sanitized = humanComment((request.body || {}).comment, { fallback: 'возврат из кокпита' });
+    const sanitized = humanComment((request.body || {}).comment, { fallback: 'возврат из GrigDesk' });
     if (!sanitized.ok) {
       return reply.code(400).send({ error: 'comment_too_long', message: sanitized.message });
     }
@@ -2265,7 +2265,7 @@ async function factoryModule(
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
   // разрешённой цепочки этого этапа. Сам engine применяет CAS к run/epoch и завершает
-  // точную process group; Cockpit не пишет control-файлы напрямую.
+  // точную process group; GrigDesk не пишет control-файлы напрямую.
   fastify.post<FactoryRoute>('/api/tasks/:id/runner/switch', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     const stage = String(request.body?.stage || '').toUpperCase();
@@ -2404,10 +2404,10 @@ async function factoryModule(
     } catch (err) { return reply.code(404).send({ error: 'not_found', message: errorMessage(err) }); }
   });
 
-  // Команда сноса стенда: COCKPIT_SANDBOX_DOWN_CMD ({task} подставляется); без неё —
+  // Команда сноса стенда: GRIGDESK_SANDBOX_DOWN_CMD ({task} подставляется); без неё —
   // down.sh только из профиля, подтверждённого trusted attempt ledger. Нет ни того
   // ни другого → null.
-  const NOT_CONFIGURED = 'снос не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля';
+  const NOT_CONFIGURED = 'снос не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля';
   async function sandboxDownCmd(id: string, trustedProfile: string) {
     if (config.sandboxDownCmd) return config.sandboxDownCmd.replaceAll('{task}', id);
     const script = trustedProfile && path.join(config.profilesDir, trustedProfile, 'down.sh');
@@ -2464,7 +2464,7 @@ async function factoryModule(
     if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
       return reply.code(409).send({
         error: 'shared_workspace_lifecycle_forbidden',
-        message: 'Общий checkout и существующий стенд нельзя сносить из Cockpit.',
+        message: 'Общий checkout и существующий стенд нельзя сносить из GrigDesk.',
       });
     }
     const stateDir = config.stateDir;
@@ -2485,7 +2485,7 @@ async function factoryModule(
         task: id,
         profile: trusted.profile,
         attempt,
-        reason: 'стенд снесён из кокпита',
+        reason: 'стенд снесён из GrigDesk',
       }));
       // 73 означает, что попытка успела стать терминальной сама — сносу это не мешает.
       if (!done.ok && done.code !== 73) {
@@ -2541,7 +2541,7 @@ async function factoryModule(
 
     if (!terminal) {
       const done = await runRouteDecision(config, routeAbandonArgs(config, {
-        task: id, profile: trusted.profile, attempt, reason: 'задача закрыта из кокпита',
+        task: id, profile: trusted.profile, attempt, reason: 'задача закрыта из GrigDesk',
       }));
       // 73 здесь означает «попытка и так уже терминальна» — закрытию это не мешает.
       if (!done.ok && done.code !== 73) {
@@ -2616,7 +2616,7 @@ async function factoryModule(
       if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
         return reply.code(409).send({
           error: 'shared_workspace_lifecycle_forbidden',
-          message: 'Общий checkout и существующий стенд нельзя сносить или пересобирать из Cockpit.',
+          message: 'Общий checkout и существующий стенд нельзя сносить или пересобирать из GrigDesk.',
         });
       }
       // Сносить песочницу под работающим конвейером нельзя: агент этапа потеряет и код,
@@ -2634,7 +2634,7 @@ async function factoryModule(
 
       if (trusted.terminal !== 'abandoned') {
         const done = await runRouteDecision(config, routeAbandonArgs(config, {
-          task: id, profile: trusted.profile, attempt: trusted.attempt, reason: 'перезапуск стенда из кокпита',
+          task: id, profile: trusted.profile, attempt: trusted.attempt, reason: 'перезапуск стенда из GrigDesk',
         }));
         if (!done.ok && done.code !== 73) {
           return reply.code(409).send({ error: 'abandon_failed', message: done.message });

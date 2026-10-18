@@ -126,7 +126,7 @@ class KimiDbPermissionProcess extends EventEmitter {
           ],
           toolCall: {
             toolCallId: 'supervised-db-1',
-            title: 'mcp__cockpit-work__supervised_db',
+            title: 'mcp__grigdesk-work__supervised_db',
             content: [{ type: 'content', content: { type: 'text', text: 'SELECT 1' } }],
           },
         },
@@ -214,7 +214,7 @@ test('состав work-tools задаёт реестр без fallback-спис
 test('Claude получает supervised_db в allowedTools только при включённом плагине', () => {
   const mcpConfig = {
     mcpServers: {
-      'cockpit-work': { command: '/tmp/work-mcp', args: ['--socket', '/tmp/work.sock'] },
+      'grigdesk-work': { command: '/tmp/work-mcp', args: ['--socket', '/tmp/work.sock'] },
     },
   };
   const allowed = (enabled) => {
@@ -228,17 +228,17 @@ test('Claude получает supervised_db в allowedTools только при 
 
   assert.deepEqual({ disabled: allowed(false), enabled: allowed(true) }, {
     disabled: [
-      'mcp__cockpit-work__supervised_ssh',
+      'mcp__grigdesk-work__supervised_ssh',
     ],
     enabled: [
-      'mcp__cockpit-work__supervised_db',
-      'mcp__cockpit-work__supervised_ssh',
+      'mcp__grigdesk-work__supervised_db',
+      'mcp__grigdesk-work__supervised_ssh',
     ],
   });
 });
 
 test('Codex получает supervised_db в dynamicTools только при включённом плагине', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-codex-tools-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-codex-tools-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'codex-fixture');
   await copyFile(new URL('../fixtures/codex-app-server/rich-turn-0.149.0.mjs', import.meta.url), bin);
@@ -250,10 +250,10 @@ test('Codex получает supervised_db в dynamicTools только при �
       config: { codexBin: bin },
       env: {
         ...process.env,
-        COCKPIT_CODEX_FIXTURE_TRACE: trace,
-        COCKPIT_CODEX_FIXTURE_SCENARIO: 'commentary-only',
-        COCKPIT_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
-        COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '0',
+        GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+        GRIGDESK_CODEX_FIXTURE_SCENARIO: 'commentary-only',
+        GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
+        GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0',
       },
       message: 'проверь инструменты',
       cwd: root,
@@ -277,7 +277,7 @@ test('Codex получает supervised_db в dynamicTools только при �
 });
 
 test('Kimi считает supervised_db доверенным MCP-tool только при включённом плагине', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-kimi-tools-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-kimi-tools-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const cwd = path.join(root, 'workspace');
   await mkdir(cwd, { recursive: true });
@@ -301,7 +301,7 @@ test('Kimi считает supervised_db доверенным MCP-tool тольк
       providerSettings: { blockDirectSsh: false },
       workTools: workTools(enabled),
       mcpServers: [{
-        name: 'cockpit-work',
+        name: 'grigdesk-work',
         command: '/usr/bin/socat',
         args: ['STDIO', 'UNIX-CONNECT:/tmp/work.sock'],
       }],

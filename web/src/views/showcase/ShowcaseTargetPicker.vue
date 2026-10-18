@@ -206,7 +206,7 @@ function choiceKey(target: TargetChoice): string {
 }
 
 // Постоянный стенд публикует готовую ссылку; у песочницы наружу идёт только порт,
-// и адрес строится относительно хоста, на котором открыт кокпит.
+// и адрес строится относительно хоста, на котором открыт GrigDesk.
 function urlOf(target: TargetChoice): string | null {
   return target.ref.kind === 'sandbox' ? sandboxUrl(target.viewPort) : target.viewUrl;
 }

@@ -26,7 +26,7 @@ const SCOPE = 'typed-scope-ref';
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 async function visualFixture(t, name = 'frame-001.png', bytes = PNG) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-inbox-triage-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-inbox-triage-'));
   const dir = path.join(root, 'inbox-attachment-analysis', 'aa', 'cache-key', 'visual');
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, name);
@@ -108,7 +108,7 @@ test('prompt использует общий transcript и не выпускае
   const prompt = buildInboxTriagePrompt(item(), {
     attachmentAnalysis: {
       text: 'Расшифровка голосового: сохранение зависает.',
-      visualPaths: ['/tmp/cockpit-triage/frame-001.jpg', 'relative-secret.jpg'],
+      visualPaths: ['/tmp/grigdesk-triage/frame-001.jpg', 'relative-secret.jpg'],
     },
   });
   assert.match(prompt.system, /JSON/u);
@@ -117,7 +117,7 @@ test('prompt использует общий transcript и не выпускае
   assert.match(prompt.user, /скриншот error\.png/u);
   assert.match(prompt.user, /Расшифровка голосового/u);
   assert.match(prompt.user, /визуальные вложения и кадры видео: 1/u);
-  assert.doesNotMatch(prompt.user, /\/tmp\/cockpit-triage/u);
+  assert.doesNotMatch(prompt.user, /\/tmp\/grigdesk-triage/u);
   assert.doesNotMatch(prompt.user, /relative-secret/u);
   const serialized = JSON.stringify(prompt);
   for (const secret of [

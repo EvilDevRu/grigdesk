@@ -65,7 +65,7 @@ interface PluginIconSource {
 const ICON_BY_NAME = NAV_ICONS as Record<string, string>;
 
 // Иконка относится к назначению плагина, а не к его происхождению. Встроенные
-// повторяют навигацию Cockpit; неизвестному пользовательскому модулю достаётся
+// повторяют навигацию GrigDesk; неизвестному пользовательскому модулю достаётся
 // нейтральный знак плагина — манифест не получает права передавать произвольный SVG.
 export function pluginIconPath(plugin: PluginIconSource | null | undefined): string {
   const requested = plugin?.nav?.icon || '';

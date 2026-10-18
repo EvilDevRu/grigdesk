@@ -10,7 +10,7 @@ test('uid/refs Schemastery раскрывают поля, enum и шаг отн�
     path: ['namespace'],
     writeChannel: {
       id: 'document',
-      scope: 'cockpit-chats',
+      scope: 'grigdesk-chats',
       state: 'verified',
     },
     ownership: [],

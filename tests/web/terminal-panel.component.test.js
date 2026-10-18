@@ -20,7 +20,7 @@ let browser = null;
 async function ensureBrowser() {
   if (browser) return browser;
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  browser = new Window({ url: 'http://cockpit.test/#/terminal' });
+  browser = new Window({ url: 'http://grigdesk.test/#/terminal' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -85,7 +85,7 @@ function runtimeHarness() {
   }
   globalThis.__terminalPanelTerminal = FakeTerminal;
   globalThis.__terminalPanelFitAddon = FakeFitAddon;
-  globalThis.__terminalPanelApi = { wsUrl: (path) => `ws://cockpit.test${path}` };
+  globalThis.__terminalPanelApi = { wsUrl: (path) => `ws://grigdesk.test${path}` };
   Object.defineProperty(globalThis, 'WebSocket', { value: FakeSocket, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'ResizeObserver', { value: FakeResizeObserver, configurable: true, writable: true });
   let rafId = 0;

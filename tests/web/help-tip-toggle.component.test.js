@@ -6,7 +6,7 @@ process.env.NODE_ENV = 'test';
 
 test('UiPopover закрепляет интерактивное содержимое и закрывается явным action', async () => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/chats' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/chats' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

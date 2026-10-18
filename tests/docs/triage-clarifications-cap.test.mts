@@ -19,7 +19,7 @@ test('вклейка уточнений в тикет режется общим 
 });
 
 test('контракт триажа называет тот же предел уточнений, что и код', async () => {
-  const doc = await readFile(new URL('docs/cockpit/guide/tasks.md', ROOT), 'utf8');
+  const doc = await readFile(new URL('docs/grigdesk/guide/tasks.md', ROOT), 'utf8');
   const stated = CAP_CLARIFICATIONS.toLocaleString('ru-RU').replace(/ /gu, ' ');
 
   assert.match(doc, new RegExp(`Уточнения человека[^\\n]*\\| ${stated} символов`, 'u'));

@@ -15,10 +15,10 @@ import type { AgentRecord } from './store.ts';
 import { installAgents } from './install.ts';
 import { seedAgents } from './seed.ts';
 import type { SeedPreview } from './seed.ts';
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 
 export interface AgentsModuleOptions {
-  config: Pick<CockpitConfig, 'agentsDir' | 'agentsSeedDir' | 'profilesDir'>;
+  config: Pick<GrigDeskConfig, 'agentsDir' | 'agentsSeedDir' | 'profilesDir'>;
 }
 
 // Запрос с id агента в адресе: сам id всё равно сверяется с ID_RE.

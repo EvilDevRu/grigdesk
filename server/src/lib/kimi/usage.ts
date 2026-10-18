@@ -1,4 +1,4 @@
-// Read-only статистика подписки Kimi. Сам Cockpit не открывает OAuth credentials:
+// Read-only статистика подписки Kimi. Сам GrigDesk не открывает OAuth credentials:
 // официальный `kimi web` кратковременно выступает credential broker и отдаёт
 // типизированный `/api/v1/oauth/usage`. Model session/turn при этом не создаётся.
 import { spawn } from 'node:child_process';
@@ -51,7 +51,7 @@ function waitForExit(child: ChildProcess, timeoutMs = EXIT_TIMEOUT_MS): Promise<
 function usageBrokerEnv(config: Record<string, unknown>): Record<string, string> {
   const binDir = path.dirname(String(config.kimiBin));
   // Native binary распаковывает встроенные web-assets перед стартом API. Держим
-  // этот технический кэш в runtime-каталоге Cockpit: systemd unit может не иметь
+  // этот технический кэш в runtime-каталоге GrigDesk: systemd unit может не иметь
   // права писать в host ~/.cache, а OAuth home Kimi остаётся отдельным read-only
   // источником для самого CLI.
   const cacheDir = path.join(String(config.kimiRuntimeHome || config.kimiHome), 'usage-cache');
@@ -99,7 +99,7 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
   fetchImpl?: typeof fetch;
 } = {}): Promise<KimiUsageAttempt> {
   // `kimi web` индексирует cwd как workspace ещё до ready-banner. Если запускать
-  // его из корня Cockpit, read-only проверка лимитов превращается в долгий обход
+  // его из корня GrigDesk, read-only проверка лимитов превращается в долгий обход
   // всего репозитория и не укладывается в startup timeout.
   const workDir = path.join(String(config.kimiRuntimeHome || config.rootDir), 'usage-work');
   try {
@@ -365,8 +365,8 @@ export function classifyKimiUsageResponse({ result = null, error = '', status = 
   }
   if (status === 401) return { state: 'auth_required', bars: [], message: 'Авторизация Kimi недействительна.', action: login };
   const failureMessages: Record<string, string | undefined> = {
-    workspace_prepare_failed: 'Cockpit не смог подготовить каталог проверки лимитов Kimi.',
-    spawn_failed: 'Cockpit не смог запустить локальную проверку лимитов Kimi.',
+    workspace_prepare_failed: 'GrigDesk не смог подготовить каталог проверки лимитов Kimi.',
+    spawn_failed: 'GrigDesk не смог запустить локальную проверку лимитов Kimi.',
     startup_timeout: 'Локальный сервер проверки лимитов Kimi не успел запуститься.',
     request_failed: 'Локальный сервер Kimi запустился, но не ответил на запрос лимитов.',
     response_rejected: 'Kimi отклонил запрос данных о лимитах.',

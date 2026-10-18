@@ -95,7 +95,7 @@ const hookResult = (point, descriptor) => emit('hook/result', {
 
 /**
  * Блок размышления как live-поток DSH: start, reasoning-дельта и block-end reasoning.
- * Нормализатор Кокпита превращает его в шаг think.
+ * Нормализатор GrigDesk превращает его в шаг think.
  */
 function streamThought(value) {
   if (!follow) {

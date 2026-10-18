@@ -85,7 +85,7 @@ export function kimiSettingsSnapshot(
       'mcp',
     ].map((key) => ({
       path: [key],
-      owner: 'Запуск Cockpit',
+      owner: 'Запуск GrigDesk',
       reason: 'Права и служебные инструменты задаёт запуск чата',
     })),
     ...['providers', 'models'].map((key) => ({
@@ -109,7 +109,7 @@ export function kimiSettingsSnapshot(
     base: decodeSettingsJson(data),
     writeChannel: {
       id: 'isolated-config-post',
-      scope: 'cockpit-chats' as const,
+      scope: 'grigdesk-chats' as const,
       state: context.mode === 'contained' ? ('unsupported' as const) : ('verified' as const),
       ...(context.mode === 'contained'
         ? { reason: 'Config contained-профиля смонтирован только для чтения' }
@@ -140,7 +140,7 @@ export async function readKimiSettings(
   context: NativeSettingsContext,
   { signal }: { signal: AbortSignal },
 ): Promise<NativeSettingsSnapshot> {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-settings-kimi-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-settings-kimi-'));
   let server: Awaited<ReturnType<typeof startKimiServer>> | undefined;
 
   try {

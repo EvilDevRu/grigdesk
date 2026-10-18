@@ -127,7 +127,7 @@ function yamlLines(value: YamlValue, indent = 0): string[] {
 
 function serializeOverlay(value: YamlValue, transport: 'acp' | 'web'): string {
   return [
-    `# Cockpit overlay для штатного профиля ${transport}. Генерируется на каждый запуск.`,
+    `# GrigDesk overlay для штатного профиля ${transport}. Генерируется на каждый запуск.`,
     ...yamlLines(value),
     '',
   ].join('\n');
@@ -286,7 +286,7 @@ export async function buildLaunchFiles(
           ...variant?.hooksConfig,
         },
       }, ...webMcp.map((server) => ({
-        id: `cockpit-mcp-${server.name}`,
+        id: `grigdesk-mcp-${server.name}`,
         name: '@deepseek-ai/dsh-mcp-client',
         config: {
           serverName: server.name,

@@ -62,16 +62,16 @@ async function buildRelay(outDir: string): Promise<void> {
     await run(path.join(work, 'bin/node'), ['--experimental-sea-config', 'sea-config.json'], {
       cwd: work,
     });
-    await copyFile(path.join(work, 'bin/node'), path.join(work, 'cockpit-relay'));
+    await copyFile(path.join(work, 'bin/node'), path.join(work, 'grigdesk-relay'));
     await run(process.execPath, [
-      postjectCli, 'cockpit-relay', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
+      postjectCli, 'grigdesk-relay', 'NODE_SEA_BLOB', 'sea-prep.blob', '--sentinel-fuse', SEA_FUSE,
     ], {
       cwd: work,
       maxBuffer: 4 * 1024 * 1024,
     });
-    await chmod(path.join(work, 'cockpit-relay'), 0o755);
+    await chmod(path.join(work, 'grigdesk-relay'), 0o755);
 
-    const version = await run(path.join(work, 'cockpit-relay'), ['--version'], {
+    const version = await run(path.join(work, 'grigdesk-relay'), ['--version'], {
       env: {},
       timeout: 10000,
     });
@@ -81,10 +81,10 @@ async function buildRelay(outDir: string): Promise<void> {
       throw new Error('Версия готового посредника не совпадает с manifest');
     }
 
-    await publishFile(path.join(work, 'cockpit-relay'), path.join(outDir, 'cockpit-relay'));
+    await publishFile(path.join(work, 'grigdesk-relay'), path.join(outDir, 'grigdesk-relay'));
   });
 
-  const output = path.join(outDir, 'cockpit-relay');
+  const output = path.join(outDir, 'grigdesk-relay');
 
   process.stdout.write(`${output}\n${(await stat(output)).size} байт\nsha256 ${await sha256File(output)}\n`);
 }

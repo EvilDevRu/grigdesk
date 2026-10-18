@@ -1,5 +1,5 @@
 // MediaAdapter — локальное распознавание речи из видео/аудио.
-// Node-обвязка + Python whisper (venv через COCKPIT_MEDIA_PYTHON). Async job-модель:
+// Node-обвязка + Python whisper (venv через GRIGDESK_MEDIA_PYTHON). Async job-модель:
 // ingest сразу возвращает jobId, статус читается поллингом (файлы в mediaDir/jobs).
 import path from 'node:path';
 import { cutClipAt, extractFramesAt } from '../lib/media/ingest.ts';

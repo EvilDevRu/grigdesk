@@ -43,8 +43,8 @@ const SCREEN = {
  * только той версии библиотеки, которая её и просила.
  */
 async function findBrowser() {
-  if (process.env.COCKPIT_SHOWCASE_BROWSER) {
-    return process.env.COCKPIT_SHOWCASE_BROWSER;
+  if (process.env.GRIGDESK_SHOWCASE_BROWSER) {
+    return process.env.GRIGDESK_SHOWCASE_BROWSER;
   }
 
   // Список ревизий лежит в самом пакете, но его подпуть не объявлен в exports:

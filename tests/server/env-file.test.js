@@ -38,7 +38,7 @@ test('правка меняет только строки названных п�
   const source = [
     '# Машинные настройки',
     '',
-    'COCKPIT_PORT=8140',
+    'GRIGDESK_PORT=8140',
     'QUOTED="значение с пробелом"   # комментарий',
     'export EXPORTED=1',
     'WIN=crlf\r',
@@ -54,7 +54,7 @@ test('правка меняет только строки названных п�
   assert.equal(await fs.readFile(file, 'utf8'), [
     '# Машинные настройки',
     '',
-    'COCKPIT_PORT=8140',
+    'GRIGDESK_PORT=8140',
     'QUOTED="значение с пробелом"   # комментарий',
     'export EXPORTED=1',
     'WIN=crlf\r',

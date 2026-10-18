@@ -11,7 +11,7 @@
     <UiError v-if="catalog.error" :text="catalog.error" @retry="catalog.load(true)" />
     <UiSelect v-model="choice" label="Модель" :options="models" :disabled="busy || Boolean(intent)" />
     <p v-if="selected && !selected.available" class="mobile-muted">
-      Исполнитель сейчас недоступен. Перед отправкой проверьте подключение в Кокпите.
+      Исполнитель сейчас недоступен. Перед отправкой проверьте подключение в GrigDesk.
     </p>
     <UiSelect
       v-if="chat && selected?.efforts.length"

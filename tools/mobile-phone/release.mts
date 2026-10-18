@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -6,15 +6,19 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { dataHome, dataPath } from '../../shared/runtime/dataHome.ts';
+import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const execute = promisify(execFile);
 const mobile = path.join(root, 'mobile');
-const output = process.env.COCKPIT_MOBILE_APK_DIR
+const output = process.env.GRIGDESK_MOBILE_APK_DIR
   || dataPath(dataHome({ env: process.env, home: homedir() }), 'mobileApk');
 const signing =
-  process.env.COCKPIT_ANDROID_SIGNING_DIR ||
-  path.join(homedir(), '.config/cockpit/android-signing');
+  process.env.GRIGDESK_ANDROID_SIGNING_DIR ||
+  path.join(homedir(), '.config/grigdesk/android-signing');
+
+// Имя ключа для нового хранилища; у существующего имя берётся из release.properties.
+const KEY_ALIAS = 'grigdesk';
 
 /**
  * Пароли передаются только через environment и private properties, не через argv или журнал.
@@ -42,7 +46,7 @@ async function identity() {
     throw new Error('Ключ подписи неполон. Восстановите каталог из резервной копии.');
   }
   if (!keyExists) {
-    if (await stat(path.join(output, 'cockpit-mobile.apk')).catch(() => null)) {
+    if (await stat(path.join(output, 'grigdesk-mobile.apk')).catch(() => null)) {
       throw new Error(
         'Предыдущий APK существует, а ключ подписи утрачен. Восстановите прежний ключ.',
       );
@@ -65,26 +69,26 @@ async function identity() {
           '-validity',
           '10000',
           '-alias',
-          'cockpit',
+          KEY_ALIAS,
           '-dname',
-          'CN=Cockpit',
+          'CN=GrigDesk',
           '-keystore',
           path.join(stage, 'release.jks'),
           '-storepass:env',
-          'COCKPIT_SIGNING_PASSWORD',
+          'GRIGDESK_SIGNING_PASSWORD',
           '-keypass:env',
-          'COCKPIT_SIGNING_PASSWORD',
+          'GRIGDESK_SIGNING_PASSWORD',
         ],
         {
           env: {
             ...process.env,
-            COCKPIT_SIGNING_PASSWORD: password,
+            GRIGDESK_SIGNING_PASSWORD: password,
           },
         },
       );
       await durable(
         path.join(stage, 'release.properties'),
-        `storePassword=${password}\nkeyPassword=${password}\nkeyAlias=cockpit\n`,
+        `storePassword=${password}\nkeyPassword=${password}\nkeyAlias=${KEY_ALIAS}\n`,
       );
       await chmod(path.join(stage, 'release.jks'), 0o600);
       await rename(path.join(stage, 'release.jks'), keyFile);
@@ -117,16 +121,20 @@ async function identity() {
       }),
   );
 
-  if (!properties.storePassword || !properties.keyPassword || properties.keyAlias !== 'cockpit') {
+  // Проверенный alias отдаётся строкой: в аргументах keytool необязательное значение недопустимо.
+  const alias = properties.keyAlias || '';
+  const aliasValid = /^[A-Za-z0-9._-]{1,64}$/u.test(alias);
+
+  if (!properties.storePassword || !properties.keyPassword || !aliasValid) {
     throw new Error('Настройки подписи повреждены. Восстановите резервную копию.');
   }
 
   return {
     ...process.env,
-    COCKPIT_ANDROID_STORE_FILE: keyFile,
-    COCKPIT_ANDROID_STORE_PASSWORD: properties.storePassword,
-    COCKPIT_ANDROID_KEY_PASSWORD: properties.keyPassword,
-    COCKPIT_ANDROID_KEY_ALIAS: properties.keyAlias,
+    GRIGDESK_ANDROID_STORE_FILE: keyFile,
+    GRIGDESK_ANDROID_STORE_PASSWORD: properties.storePassword,
+    GRIGDESK_ANDROID_KEY_PASSWORD: properties.keyPassword,
+    GRIGDESK_ANDROID_KEY_ALIAS: alias,
   };
 }
 
@@ -183,6 +191,20 @@ async function syncDirectory(directory: string) {
  * Ключ подписи всегда находится вне репозитория, в том числе при явном переопределении пути.
  */
 async function release() {
+  const oldSigning = path.join(homedir(), '.config', LEGACY.configDir, 'android-signing');
+  const oldExists = await lstat(oldSigning).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (oldExists) {
+    throw new Error('Сначала перенесите прежний ключ подписи: ' +
+      `mv ~/.config/${LEGACY.configDir} ~/.config/grigdesk`);
+  }
+
   const relative = path.relative(root, path.resolve(signing));
 
   if (
@@ -203,8 +225,10 @@ async function release() {
   const versionCode = parts[0]! * 10000 + parts[1]! * 100 + parts[2]!;
   let previous;
 
+  // Рост номера сверяется только с выпусками GrigDesk: у прежнего приложения другой
+  // applicationId, Android ставит новый пакет отдельно, и его номер ни с чем не конфликтует.
   try {
-    previous = JSON.parse(await readFile(path.join(output, 'cockpit-mobile.json'), 'utf8'));
+    previous = JSON.parse(await readFile(path.join(output, 'grigdesk-mobile.json'), 'utf8'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw new Error('Метаданные прежнего выпуска повреждены.');
@@ -251,7 +275,7 @@ async function release() {
       mode: 0o700,
     });
 
-    const apk = path.join(stage, 'cockpit-mobile.apk');
+    const apk = path.join(stage, 'grigdesk-mobile.apk');
 
     await copyFile(path.join(mobile, 'android/app/build/outputs/apk/release/app-release.apk'), apk);
 
@@ -266,11 +290,11 @@ async function release() {
       [
         '-exportcert',
         '-alias',
-        'cockpit',
+        env.GRIGDESK_ANDROID_KEY_ALIAS,
         '-keystore',
-        env.COCKPIT_ANDROID_STORE_FILE,
+        env.GRIGDESK_ANDROID_STORE_FILE,
         '-storepass:env',
-        'COCKPIT_ANDROID_STORE_PASSWORD',
+        'GRIGDESK_ANDROID_STORE_PASSWORD',
         '-file',
         path.join(stage, 'certificate.der'),
       ],
@@ -289,7 +313,7 @@ async function release() {
       !certificateSha256 ||
       certificateSha256 !== expectedCert ||
       !info ||
-      info[1] !== 'local.cockpit.mobile' ||
+      info[1] !== 'local.grigdesk.mobile' ||
       info[2] !== String(versionCode) ||
       info[3] !== version ||
       (previous?.certificateSha256 && previous.certificateSha256 !== certificateSha256)
@@ -320,11 +344,11 @@ async function release() {
       certificateSha256,
     };
 
-    await durable(path.join(stage, 'cockpit-mobile.json'), JSON.stringify(metadata) + '\n');
-    await rename(apk, path.join(output, 'cockpit-mobile.apk'));
-    await rename(path.join(stage, 'cockpit-mobile.json'), path.join(output, 'cockpit-mobile.json'));
+    await durable(path.join(stage, 'grigdesk-mobile.json'), JSON.stringify(metadata) + '\n');
+    await rename(apk, path.join(output, 'grigdesk-mobile.apk'));
+    await rename(path.join(stage, 'grigdesk-mobile.json'), path.join(output, 'grigdesk-mobile.json'));
     await syncDirectory(output);
-    process.stdout.write(`APK опубликован в ${path.join(output, 'cockpit-mobile.apk')}\n`);
+    process.stdout.write(`APK опубликован в ${path.join(output, 'grigdesk-mobile.apk')}\n`);
   } finally {
     await rm(stage, {
       recursive: true,

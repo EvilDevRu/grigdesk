@@ -66,7 +66,7 @@
                 <span class="workdir-choice">
                   <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path :d="option.workdir.kind === 'cockpit' ? NAV_ICONS.board : NAV_ICONS.projects" />
+                    <path :d="option.workdir.kind === 'grigdesk' ? NAV_ICONS.board : NAV_ICONS.projects" />
                   </svg>
                   <span class="workdir-choice-copy">
                     <span class="workdir-choice-title" v-tooltip="option.title">{{ option.title }}</span>
@@ -91,7 +91,7 @@
               </UiSelect>
             </UiField>
             <form class="workdir-form" @submit.prevent="choosePath(close)">
-              <UiField label="Другая папка" hint="Путь на машине, где работает Кокпит">
+              <UiField label="Другая папка" hint="Путь на машине, где работает GrigDesk">
                 <UiInput v-model="pathInput" placeholder="Абсолютный путь" :disabled="busy"
                          autocomplete="off" :spellcheck="false" />
               </UiField>
@@ -234,15 +234,15 @@ const sourceLabel = computed(() => ({
   'task-project': 'Репозитории проекта задачи',
   project: 'Репозитории проекта',
   path: 'Выбранный каталог',
-  cockpit: 'Репозиторий Кокпита',
+  grigdesk: 'Репозиторий GrigDesk',
 } as Record<string, string>)[preview.value?.target?.source || ''] || '');
 const additionalCopies = computed(() => (
   (preview.value?.target?.copies || []).filter((copy) => copy.path !== directory.value)
 ));
 const quickChoices = computed(() => (
   [
-    { kind: 'cockpit' } as WorkdirChoice,
-    ...normalizeRecentWorkdirs(chat.recentWorkdirs).filter((workdir) => workdir.kind !== 'cockpit'),
+    { kind: 'grigdesk' } as WorkdirChoice,
+    ...normalizeRecentWorkdirs(chat.recentWorkdirs).filter((workdir) => workdir.kind !== 'grigdesk'),
   ].map((workdir) => ({
     key: JSON.stringify(workdir),
     workdir,
@@ -264,7 +264,7 @@ function choiceTitle(workdir: WorkdirChoice): string {
     return workdir.path.split('/').filter(Boolean).at(-1) || workdir.path;
   }
 
-  return 'Кокпит';
+  return 'GrigDesk';
 }
 
 /**
@@ -279,7 +279,7 @@ function choiceDetail(workdir: WorkdirChoice): string {
     return workdir.repoKey ? `Проект · ${workdir.repoKey}` : 'Проект · основной репозиторий';
   }
 
-  return 'Папка Кокпита';
+  return 'Папка GrigDesk';
 }
 
 /**

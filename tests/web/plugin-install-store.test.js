@@ -469,7 +469,7 @@ test('ST16: прежний receipt либо явный revision conflict раз�
   const receipt = webInstallJob('done', 'rollback', { revision: 4 });
 
   for (const conflict of [true, false]) {
-    fixture.storage.set('cockpit-plugin-install-rollback', JSON.stringify(intent));
+    fixture.storage.set('grigdesk-plugin-install-rollback', JSON.stringify(intent));
     fixture.handlers.set('POST ' + ROOT + '/plugins/demo/rollback', (call) => {
       assert.deepEqual(call.body, intent.body);
 
@@ -484,7 +484,7 @@ test('ST16: прежний receipt либо явный revision conflict раз�
 
     await store.loadJob();
     assert.equal(store.reconciling, false);
-    assert.equal(fixture.storage.has('cockpit-plugin-install-rollback'), false);
+    assert.equal(fixture.storage.has('grigdesk-plugin-install-rollback'), false);
 
     if (conflict) {
       assert.equal(store.error, 'Установка уже изменилась.');

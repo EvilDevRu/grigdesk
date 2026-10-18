@@ -33,7 +33,7 @@ export async function dockerCheck(options: {
     };
   }
 
-  const project = 'cockpit-relay-check';
+  const project = 'grigdesk-relay-check';
   const existing = await execute('docker', [
     'ps',
     '-aq',
@@ -52,7 +52,7 @@ export async function dockerCheck(options: {
 
   await writeFile(
     override,
-    'services:\n  relay:\n    image: cockpit-relay-check:check\n    network_mode: bridge\n',
+    'services:\n  relay:\n    image: grigdesk-relay-check:check\n    network_mode: bridge\n',
   );
 
   const args = ['compose', '-p', project, '-f', path.resolve('relay/compose.yaml'), '-f', override];

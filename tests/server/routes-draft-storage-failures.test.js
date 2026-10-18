@@ -12,7 +12,7 @@ import { ROUTES_EDITOR_LIMITS } from '../../shared/pipeline/routesEditorContract
 const DRAFT_ID = '44444444-4444-4444-8444-444444444444';
 
 async function fixture(t, fsPort = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-draft-failures-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-draft-failures-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const baseDir = path.join(root, 'routes.authoring');
   const routesDir = path.join(root, 'routes');

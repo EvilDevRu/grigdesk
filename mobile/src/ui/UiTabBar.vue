@@ -2,7 +2,7 @@
   <nav class="app-nav" aria-label="Разделы">
     <div class="app-nav-brand" aria-hidden="true">
       <UiBrandMark class="brand-mark" />
-      <span class="app-brand-name">Кокпит</span>
+      <span class="app-brand-name">GrigDesk</span>
     </div>
     <RouterLink
       v-for="tab in tabs"

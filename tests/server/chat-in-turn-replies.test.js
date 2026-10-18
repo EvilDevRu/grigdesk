@@ -13,7 +13,7 @@ import { ChatAssistantPublisher } from '../../server/src/lib/chat/assistantPubli
 import { IN_TURN_BLOCK_TEXT_LIMIT, utf8Bytes } from '../../shared/chat/chatInTurnContracts.ts';
 
 async function tmpDir() {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-replies-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-in-turn-replies-'));
 }
 
 test('CORE-14: блок сохраняет assistantMessageId при завершении и очистке текста', async () => {

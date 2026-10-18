@@ -15,8 +15,8 @@ import { usePluginsStore } from './plugins.js';
 import type { PluginVersionRef, PluginInstallJob } from '../../../shared/plugins/pluginInstallContracts.ts';
 import type { PluginListItem } from '../../../shared/plugins/pluginsContracts.ts';
 
-const ROLLBACK_KEY = 'cockpit-plugin-install-rollback';
-const VIEWED_KEY = 'cockpit-plugin-install-viewed';
+const ROLLBACK_KEY = 'grigdesk-plugin-install-rollback';
+const VIEWED_KEY = 'grigdesk-plugin-install-viewed';
 
 interface RollbackIntent {
   pluginId: string;

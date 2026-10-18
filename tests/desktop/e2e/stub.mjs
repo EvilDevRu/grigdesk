@@ -43,7 +43,7 @@ export async function startStub({
    */
   function authenticated(request) {
     const cookie = request.headers.cookie ?? '';
-    const value = cookie.match(/(?:^|;\s*)cockpit_sid=([^;]+)/u)?.[1];
+    const value = cookie.match(/(?:^|;\s*)grigdesk_sid=([^;]+)/u)?.[1];
 
     return sessions.has(value);
   }
@@ -56,7 +56,7 @@ export async function startStub({
     const cookiePresent = (request.headers.cookie ?? '').includes('stub-cookie=present');
 
     return `<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><title>Кокпит — тестовое окно</title></head>
+<html lang="ru"><head><meta charset="utf-8"><title>GrigDesk — тестовое окно</title></head>
 <body><h1 id="stub">Тестовое окно</h1>
 <p id="kind">${second ? 'Дочернее окно' : 'Главное окно'}</p>
 <p id="cookie">cookie:${cookiePresent ? 'yes' : 'no'}</p>
@@ -75,7 +75,7 @@ document.querySelector('#notify').onclick = async () => {
   }
 
   /**
-   * Каждая ручка даёт наблюдаемый результат без обращения к живому Кокпиту.
+   * Каждая ручка даёт наблюдаемый результат без обращения к живому GrigDesk.
    * SW остаётся валидным скриптом: отказ регистрации обязан обеспечивать приложение.
    */
   async function respond(request, response) {
@@ -100,7 +100,7 @@ document.querySelector('#notify').onclick = async () => {
     } else if (pathname === '/api/auth/window-session' && request.method === 'POST') {
       observations.exchanges += 1;
 
-      if (!authKey || request.headers['x-cockpit-window-key'] !== authKey) {
+      if (!authKey || request.headers['x-grigdesk-window-key'] !== authKey) {
         response.writeHead(401);
         response.end('{}');
 
@@ -111,7 +111,7 @@ document.querySelector('#notify').onclick = async () => {
 
       sessions.add(id);
       response.setHeader('Content-Type', 'application/json');
-      response.setHeader('Set-Cookie', `cockpit_sid=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+      response.setHeader('Set-Cookie', `grigdesk_sid=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
       response.end('{}');
     } else if (/^\/ui\/[a-f0-9]{64}\/release\.json$/.test(pathname) && uiReleasesDir) {
       if (!authenticated(request)) {
@@ -126,7 +126,7 @@ document.querySelector('#notify').onclick = async () => {
     } else if (pathname === '/' || pathname === '/second' || /^\/ui\/[a-f0-9]{64}\/$/.test(pathname)) {
       if (!authenticated(request)) {
         response.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
-        response.end('<h1>Кокпит открывается в приложении</h1>');
+        response.end('<h1>GrigDesk открывается в приложении</h1>');
 
         return;
       }
@@ -141,7 +141,7 @@ document.querySelector('#notify').onclick = async () => {
         }
 
         response.end(`<!doctype html><html lang="ru"><meta charset="utf-8">
-<title>Кокпит — пакетная проверка</title><body><h1>Пакетная проверка</h1><script>
+<title>GrigDesk — пакетная проверка</title><body><h1>Пакетная проверка</h1><script>
 (async () => {
   await fetch('/probe/loaded', {
     method: 'POST',

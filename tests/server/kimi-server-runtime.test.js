@@ -20,7 +20,7 @@ const RELAY_FIXTURE = path.join(ROOT, 'tests/fixtures/kimi-server/fake-kimi-rela
  * Обёртка хранит конфигурацию только в каталоге фикстуры.
  */
 async function fixture(t, env = {}) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-runtime-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-runtime-'));
   const bin = path.join(dir, 'kimi-fixture');
 
   await copyFile(FIXTURE, bin);
@@ -56,7 +56,7 @@ test('Kimi runtime: сервер поднимается, отдаёт мету �
 });
 
 test('Kimi runtime: сервер, который не встал, даёт понятную ошибку с хвостом лога', async (t) => {
-  const f = await fixture(t, { COCKPIT_KIMI_FIXTURE_MODE: 'crash' });
+  const f = await fixture(t, { GRIGDESK_KIMI_FIXTURE_MODE: 'crash' });
 
   await assert.rejects(
     () => startKimiServer({
@@ -71,7 +71,7 @@ test('Kimi runtime: сервер, который не встал, даёт по�
 });
 
 test('Kimi runtime: чужой токен в файле не выдаётся за готовность', async (t) => {
-  const f = await fixture(t, { COCKPIT_KIMI_FIXTURE_TOKEN: 'right-token-0123456789' });
+  const f = await fixture(t, { GRIGDESK_KIMI_FIXTURE_TOKEN: 'right-token-0123456789' });
   const started = await startKimiServer({
     bin: f.bin,
     home: f.home,

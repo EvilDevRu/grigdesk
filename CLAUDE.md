@@ -1,7 +1,7 @@
-# Кокпит — общие правила
+# GrigDesk — общие правила
 
-Подробные контракты Кокпита живут в `docs/`; здесь — обязательные правила и карта.
-Контракт браузерного журнала: [журнал окна](docs/cockpit/guide/web-log.md).
+Подробные контракты GrigDesk живут в `docs/`; здесь — обязательные правила и карта.
+Контракт браузерного журнала: [журнал окна](docs/grigdesk/guide/web-log.md).
 
 ## Язык
 
@@ -36,7 +36,7 @@
   ход», а не «брошен», а растущий лог в папке артефактов значит, что результата ждут.
   При перегрузе — назови виновников человеку и спроси, а не прибирай сам.
 - Временные скриншоты, дампы, скрипты проверок и их результаты сохраняй в папку артефактов
-  `artifacts/` папки данных — по умолчанию `~/.cockpit/artifacts/<тема>/`. В `.state/` папки
+  `artifacts/` папки данных — по умолчанию `~/.grigdesk/artifacts/<тема>/`. В `.state/` папки
   кода не пиши: это не рабочая папка агентов.
 - Не читай переписку и приватное состояние; не публикуй секреты и runtime identifiers.
 - Если проверке нужен пароль или ручной шаг, коротко спроси человека через панель действий
@@ -45,7 +45,7 @@
 
 ## Границы реализации
 
-Перед новой мелкой функцией проверь [каталог общего кода](docs/cockpit/overview/shared-code.md).
+Перед новой мелкой функцией проверь [каталог общего кода](docs/grigdesk/overview/shared-code.md).
 Повтор во втором месте — повод вынести общую функцию после сравнения её контракта.
 
 - Сервер — Fastify-модули в `server/src/modules/<тема>/`, общая логика — в `server/src/lib/`.
@@ -64,14 +64,14 @@
 
 ## Сервер, проверка и выкладка
 
-- Cockpit host-native; браузер — окно. Realtime использует общий `/api/events`.
+- GrigDesk host-native; браузер — окно. Realtime использует общий `/api/events`.
 - **Агент из чата — дочерний процесс сервера: перезапуск изнутри такого хода убивает
   исполнителя и ответ.** После серверных правок проси ручной перезапуск; сам процесс не
   останавливай и не перезапускай.
 - Относящиеся тесты запускай только через сторож памяти: `bash tests/run-node-tests-safe.sh
   --test <файлы>` (несколько файлов — с `--test-concurrency=2` и `NODE_TEST_MAX_RSS_MB=4096`).
   Голый `node --test` память не ограничивает и уже клал машину —
-  [ловушка](docs/cockpit/testing/happy-dom-assert-memory.md). Затем `bash tests/run-all.sh`.
+  [ловушка](docs/grigdesk/testing/happy-dom-assert-memory.md). Затем `bash tests/run-all.sh`.
   Сборка web пишет в используемый `web/dist`: `npm --prefix web run build` — после зелёных тестов.
 
 ## Документация
@@ -80,19 +80,19 @@
 области: сначала README области — контракты, устройство и грабли по строке на документ, —
 затем нужные файлы. Поиск по тексту — `rg` по `docs/`.
 
-- [Устройство кокпита](docs/cockpit/overview/README.md) — слои, модули сервера, принципы.
-- [Чат и исполнители](docs/cockpit/chat/README.md) — чат, модели, права, контекст, MCP.
-- [Конвейер](docs/cockpit/pipeline/README.md) — фабрика, маршруты, граф, ворота, арбитр.
-- [Задачи Б24](docs/cockpit/b24/README.md) — портал, статусы, доска и полка.
-- [Входящие](docs/cockpit/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
-- [Telegram-пульт](docs/cockpit/telegram/README.md) — вотчер, действия, ассистент.
-- [Интерфейс](docs/cockpit/web/README.md) — раскладка, слои, всплывашки, пакет приложения.
-- [Сервер и доступ](docs/cockpit/server/README.md) — юнит, авторизация, сеть; только loopback.
-- [Приложение на телефоне](docs/cockpit/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
-- [Видео и речь](docs/cockpit/media/README.md) — записи встреч, расшифровка, речь.
-- [Плагины](docs/cockpit/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
-  Документация пользовательского плагина — в его `docs/README.md`, не в `docs/` кокпита.
-- [Тесты и проверка](docs/cockpit/testing/README.md) — happy-dom, Playwright, ловушки.
+- [Устройство GrigDesk](docs/grigdesk/overview/README.md) — слои, модули сервера, принципы.
+- [Чат и исполнители](docs/grigdesk/chat/README.md) — чат, модели, права, контекст, MCP.
+- [Конвейер](docs/grigdesk/pipeline/README.md) — фабрика, маршруты, граф, ворота, арбитр.
+- [Задачи Б24](docs/grigdesk/b24/README.md) — портал, статусы, доска и полка.
+- [Входящие](docs/grigdesk/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
+- [Telegram-пульт](docs/grigdesk/telegram/README.md) — вотчер, действия, ассистент.
+- [Интерфейс](docs/grigdesk/web/README.md) — раскладка, слои, всплывашки, пакет приложения.
+- [Сервер и доступ](docs/grigdesk/server/README.md) — юнит, авторизация, сеть; только loopback.
+- [Приложение на телефоне](docs/grigdesk/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
+- [Видео и речь](docs/grigdesk/media/README.md) — записи встреч, расшифровка, речь.
+- [Плагины](docs/grigdesk/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
+  Документация пользовательского плагина — в его `docs/README.md`, не в `docs/` GrigDesk.
+- [Тесты и проверка](docs/grigdesk/testing/README.md) — happy-dom, Playwright, ловушки.
 - [Движок фабрики](docs/engine/ENGINE.md) — архитектура и инварианты; остальное — в
   [карте документации](docs/README.md).
 

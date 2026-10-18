@@ -9,10 +9,10 @@
     <div class="pairing-content" :aria-busy="loading">
       <p class="pairing-relay">Посредник: {{ relay.name }}</p>
       <ol class="pairing-steps">
-        <li>Откройте приложение Кокпита на телефоне.</li>
+        <li>Откройте приложение GrigDesk на телефоне.</li>
         <li>
           {{ pair
-            ? 'На экране «Подключить Кокпит» отсканируйте этот QR-код.'
+            ? 'На экране «Подключить GrigDesk» отсканируйте этот QR-код.'
             : 'В разделе «Посредники» нажмите «Добавить посредника» и отсканируйте QR-код.' }}
         </li>
       </ol>
@@ -29,7 +29,7 @@
           </UiButton>
         </div>
         <div v-else-if="qr" class="pairing-code">
-          <img :src="qrImage" alt="QR-код подключения к Кокпиту" width="320" height="320" />
+          <img :src="qrImage" alt="QR-код подключения к GrigDesk" width="320" height="320" />
         </div>
         <div v-else class="pairing-placeholder">
           <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>

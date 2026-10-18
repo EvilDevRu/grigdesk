@@ -18,7 +18,7 @@ const ROUTE_TOOL = fileURLToPath(new URL('../../engine/bin/factory-route', impor
 const DRAFT_BASE = '/api/routes/sample/drafts';
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-editor-preview-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-preview-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const config = {
     routesDir: path.join(root, 'routes'),
@@ -182,7 +182,7 @@ test('RE-C5-03: missing root и секретный ключ дают issue бе�
 });
 
 test('RE-C5-04: shell-похожие строки промпта остаются текстом', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-prompt-literal-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-prompt-literal-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const marker = path.join(root, 'would-run');
   const dollar = '$(' + 'touch ' + marker + ')';
@@ -197,7 +197,7 @@ test('RE-C5-04: shell-похожие строки промпта остаютс�
 });
 
 test('RE-C5-05: зависший и неисправный child не дают пустого успешного preview', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-preview-child-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-preview-child-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const request = {
     scope: 'route', routeId: 'quick', nodeId: 'build', context: { task: { kind: 'audit' } },

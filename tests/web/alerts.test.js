@@ -85,7 +85,7 @@ async function alertsModule(t, {
   for (const [key, value] of Object.entries({
       window: {
         location: {
-          href: 'https://cockpit.test/#/board',
+          href: 'https://grigdesk.test/#/board',
         },
       },
       document: {
@@ -223,7 +223,7 @@ test('A3/A4: скрытое окно получает оба канала и а�
 
   assert.equal(h.shown.length, 1);
   assert.deepEqual(h.system, [
-    ['Ответ', 'Готово', 'a', 'https://cockpit.test/#/chats?openChat=c1']
+    ['Ответ', 'Готово', 'a', 'https://grigdesk.test/#/chats?openChat=c1']
   ]);
 });
 

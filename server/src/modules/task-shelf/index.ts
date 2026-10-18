@@ -1,4 +1,4 @@
-// Account-scoped полка B24-задач. Роуты меняют только state Cockpit и живо
+// Account-scoped полка B24-задач. Роуты меняют только state GrigDesk и живо
 // закрываются гейтом системного плагина; общий auth guard уже закрывает весь /api.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';

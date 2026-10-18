@@ -1,6 +1,6 @@
 // Внутренний вызов ручки через `fastify.inject` обязан нести токен.
 //
-// Гард закрывает ВЕСЬ `/api`, включая GET (см. docs/cockpit/gotchas.md), поэтому inject
+// Гард закрывает ВЕСЬ `/api`, включая GET (см. docs/grigdesk/gotchas.md), поэтому inject
 // без заголовка получает 401. Беда в том, что молча: вотчер арбитра читал пустой список
 // задач и потому не разобрал НИ ОДНОЙ остановки за всё время своей жизни — при включённой
 // настройке и ноле строк в журнале. Отказ был невидим, потому что пустой список это
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const APP = fileURLToPath(new URL('../../server/src/app.ts', import.meta.url));
 
-test('каждый fastify.inject в app.js передаёт x-cockpit-internal', () => {
+test('каждый fastify.inject в app.js передаёт x-grigdesk-internal', () => {
   const src = readFileSync(APP, 'utf8');
   const calls = [...src.matchAll(/fastify\.inject\(\{/g)];
 
@@ -31,7 +31,7 @@ test('каждый fastify.inject в app.js передаёт x-cockpit-internal'
 
     assert.match(
       body,
-      /'x-cockpit-internal'/,
+      /'x-grigdesk-internal'/,
       `fastify.inject в app.js:${line} идёт без внутреннего токена — гард ответит 401`,
     );
   }

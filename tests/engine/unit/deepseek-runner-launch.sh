@@ -14,7 +14,7 @@ mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/run" "$TEST_ROOT/additional"
 fake_bin="$TEST_ROOT/bin/dsh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_bin"
 chmod +x "$fake_bin"
-export COCKPIT_DEEPSEEK_BIN="$fake_bin"
+export GRIGDESK_DEEPSEEK_BIN="$fake_bin"
 export DEEPSEEK_API_KEY=synthetic-factory-key
 export FACTORY_FORBID_LIVE=0
 

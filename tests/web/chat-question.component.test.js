@@ -19,7 +19,7 @@ function compileQuestion() {
 }
 
 async function mountQuestion(t, questions, req = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   const [{ mount }, ChatQuestion] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileQuestion(),

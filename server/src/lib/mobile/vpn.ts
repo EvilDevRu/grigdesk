@@ -28,7 +28,7 @@ export async function relayVpnGate(ip: string): Promise<boolean> {
     });
     const routes = JSON.parse(result.stdout);
     const iface = Array.isArray(routes) ? routes[0]?.dev : null;
-    const expected = process.env.COCKPIT_VPN_IFACE;
+    const expected = process.env.GRIGDESK_VPN_IFACE;
 
     if (
       typeof iface !== 'string' ||

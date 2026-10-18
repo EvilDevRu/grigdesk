@@ -11,7 +11,7 @@ import {
   isInstallPreparedStatus,
 } from '../../../../shared/plugins/pluginInstallValues.ts';
 
-import { parseSemVer } from '../cockpitRelease.ts';
+import { parseSemVer } from '../grigDeskRelease.ts';
 import { PLUGIN_ID_RE, normalizePluginPackagePath } from '../pluginsRegistry.ts';
 import { installError, PLUGIN_INSTALL_ERRORS } from './errors.ts';
 import { normalizeGitUrl } from './gitUrl.ts';

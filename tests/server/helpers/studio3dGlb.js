@@ -121,7 +121,7 @@ export function makeGlb({
 
   const nodes = [{ name: meshName, mesh: 0 }];
   const json = {
-    asset: { version: '2.0', generator: 'cockpit-tests' },
+    asset: { version: '2.0', generator: 'grigdesk-tests' },
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes,

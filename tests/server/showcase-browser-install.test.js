@@ -134,7 +134,7 @@ test('удачная установка оставляет манифест, а 
   assert.equal(done.installed.current, true);
   assert.equal(await installer.installedExecutable(), process.execPath);
 
-  // Тот же манифест глазами кокпита с другим playwright-core: браузер на диске
+  // Тот же манифест глазами GrigDesk с другим playwright-core: браузер на диске
   // есть, но записи с ним верить нельзя.
   const other = createBrowserInstaller({ browserDir, playwrightVersion: '0.0.0' });
   const stale = await other.status();

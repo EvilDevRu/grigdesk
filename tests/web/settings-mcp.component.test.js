@@ -10,10 +10,10 @@ process.env.NODE_ENV = 'test';
 
 async function installBrowser(t, storage = {}) {
   // Vite подставляет их на сборке (define в vite.config.js) — в node их надо объявить.
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -154,7 +154,7 @@ const MCP_CALLS_LIMIT = 30;
  * Дополнительные providers задаются отдельно и сохраняют исходный состав по умолчанию.
  */
 async function mountSettings(t, { mcpByProvider, providerPatch, extraProviders } = {}) {
-  const browser = await installBrowser(t, { 'cockpit-settings-tab': 'providers' });
+  const browser = await installBrowser(t, { 'grigdesk-settings-tab': 'providers' });
   const { store: prov, calls } = await makeProvidersStore(mcpByProvider, providerPatch, extraProviders);
   // Настройки тянут полдюжины разделов сразу — все ответы пустые, кроме нужного нам реестра.
   globalThis.__settingsApi = {
@@ -168,7 +168,7 @@ async function mountSettings(t, { mcpByProvider, providerPatch, extraProviders }
     usePluginsStore: () => ({ loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {} }),
     useChatStore: () => ({ compactWindow: 0 }),
     useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
   const [{ mount, flushPromises }, SettingsView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -210,7 +210,7 @@ const REAL_MCP = {
       scope: 'account',
       state: 'needs-auth',
       detail: 'Needs authentication',
-      hint: 'Авторизуется в настройках коннекторов на claude.ai, не из Cockpit.',
+      hint: 'Авторизуется в настройках коннекторов на claude.ai, не из GrigDesk.',
     },
     // Коннектор аккаунта, про который локально известно только имя.
     { name: 'claude.ai Canva', target: '', scope: 'account', state: 'remote', detail: '' },
@@ -239,7 +239,7 @@ test('серверы сгруппированы по области видимо
 
   const details = wrapper.findAll('.mcpdetail').map((d) => d.text());
   assert.ok(details.some((t2) => t2.includes('Connection closed')), 'причина отказа не показана');
-  // Аккаунтный коннектор из кокпита не авторизуешь — подсказка обязана вести на claude.ai,
+  // Аккаунтный коннектор из GrigDesk не авторизуешь — подсказка обязана вести на claude.ai,
   // а не советовать `claude mcp login`, который для него ничего не сделает.
   assert.ok(details.some((t2) => t2.includes('claude.ai')), 'нет подсказки про коннекторы claude.ai');
   assert.ok(!details.some((t2) => t2.includes('claude mcp login claude.ai Google Drive')));
@@ -435,8 +435,8 @@ test('общего списка доверенных каталогов боль
   assert.doesNotMatch(wrapper.text(), /Доверенные каталоги/u);
 });
 
-const DEEPSEEK_EMPTY_TEXT = 'Для папки кокпита нет MCP-серверов, выбранных для запуска.';
-const DEEPSEEK_NOTE = 'Показана конфигурация MCP для папки кокпита. '
+const DEEPSEEK_EMPTY_TEXT = 'Для папки GrigDesk нет MCP-серверов, выбранных для запуска.';
+const DEEPSEEK_NOTE = 'Показана конфигурация MCP для папки GrigDesk. '
   + 'В другой папке чата список может отличаться. '
   + 'Соединение не проверялось. Показаны только stdio-серверы, выбранные для запуска.';
 const DEEPSEEK_MCP = {
@@ -485,14 +485,14 @@ async function openDeepSeek(fixture, patch = {}) {
   return fixture.wrapper.find('.provider-mcp-slot[data-provider-id="deepseek"]');
 }
 
-test('пустой MCP-ответ показывает emptyText адаптера и пояснение о папке кокпита', async (t) => {
+test('пустой MCP-ответ показывает emptyText адаптера и пояснение о папке GrigDesk', async (t) => {
   const fixture = await mountSettings(t, {
     mcpByProvider: { deepseek: { ...DEEPSEEK_MCP, servers: [] } },
   });
   const slot = await openDeepSeek(fixture);
 
   assert.equal(slot.isVisible(), true);
-  assert.match(slot.text(), /Для папки кокпита нет MCP-серверов, выбранных для запуска\./);
+  assert.match(slot.text(), /Для папки GrigDesk нет MCP-серверов, выбранных для запуска\./);
   assert.doesNotMatch(slot.text(), /Серверов не настроено/);
   assert.equal(slot.get('.mcpnote').text(), DEEPSEEK_NOTE);
 });
@@ -515,7 +515,7 @@ test('DeepSeek показывает configured и границы списка п
   assert.equal(slot.get('.mcpdot').classes().includes('idle'), true);
   assert.equal(slot.get('.mcpname').attributes('title'), undefined);
   assert.equal(slot.get('.mcpnote').text(), DEEPSEEK_NOTE);
-  assert.doesNotMatch(slot.text(), /Подключён|mcp login|cockpit-work|cockpit-perm|canary/);
+  assert.doesNotMatch(slot.text(), /Подключён|mcp login|grigdesk-work|grigdesk-perm|canary/);
 });
 
 test('имя DeepSeek MCP с HTML остаётся текстом без элементов и обработчиков', async (t) => {
@@ -533,7 +533,7 @@ test('имя DeepSeek MCP с HTML остаётся текстом без эле�
 });
 
 test('частичный DeepSeek MCP-ответ показывает хорошую карточку и нейтральный note', async (t) => {
-  const note = `${DEEPSEEK_NOTE} Конфигурация MCP для папки кокпита прочитана или проверена не полностью. `
+  const note = `${DEEPSEEK_NOTE} Конфигурация MCP для папки GrigDesk прочитана или проверена не полностью. `
     + 'Список может быть неполным; проверьте `.mcp.json` и команды запуска.';
   const fixture = await mountSettings(t, {
     mcpByProvider: { deepseek: { ...DEEPSEEK_MCP, note } },
@@ -546,7 +546,7 @@ test('частичный DeepSeek MCP-ответ показывает хорош
 });
 
 test('полная ошибка DeepSeek MCP не выглядит успешным пустым списком', async (t) => {
-  const error = 'Не удалось получить список MCP для папки кокпита. '
+  const error = 'Не удалось получить список MCP для папки GrigDesk. '
     + 'Проверьте `.mcp.json` и команды запуска.';
   const fixture = await mountSettings(t, {
     mcpByProvider: { deepseek: {

@@ -3,7 +3,7 @@
 //
 // Контекст: на 0.31.1 зафиксирован баг — после cancel CLI принимал следующий
 // session/prompt, но не создавал новый llm.request и завершал ход пусто. Из-за
-// этого кокпит после «стопа» пересоздаёт сессию. Скрипт проверяет, воспроизводится
+// этого GrigDesk после «стопа» пересоздаёт сессию. Скрипт проверяет, воспроизводится
 // ли баг на текущей установленной версии (host-режим, реальный KIMI_CODE_HOME).
 //
 // ПРЕДУПРЕЖДЕНИЕ: ходит в реальную модель и тратит квоту (3 коротких prompt'а).
@@ -31,7 +31,7 @@ import { createAcpClient, initializeKimiAcp } from '../server/src/lib/kimi/acpCl
 
 const reportArgIndex = process.argv.indexOf('--report');
 const reportPath = reportArgIndex >= 0 ? (process.argv[reportArgIndex + 1] || '') : '';
-const KIMI_BIN = process.env.COCKPIT_KIMI_BIN || path.join(os.homedir(), '.kimi-code', 'bin', 'kimi');
+const KIMI_BIN = process.env.GRIGDESK_KIMI_BIN || path.join(os.homedir(), '.kimi-code', 'bin', 'kimi');
 const KIMI_HOME = process.env.KIMI_CODE_HOME || path.join(os.homedir(), '.kimi-code');
 const CWD = process.cwd();
 const SHORT_PROMPT = 'Ответь ровно одним словом: «работаю». Без пояснений.';
@@ -72,7 +72,7 @@ function launch() {
         state.text = `${state.text}${textOf(params.update.content)}`.slice(0, 4000);
       }
     },
-    // Инструменты smoke не нужны: любой запрос прав отклоняем, как closed-окно кокпита.
+    // Инструменты smoke не нужны: любой запрос прав отклоняем, как closed-окно GrigDesk.
     async onReverseRequest() { return { outcome: { outcome: 'cancelled' } }; },
   });
   return {

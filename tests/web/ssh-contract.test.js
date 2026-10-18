@@ -16,7 +16,7 @@ import { sshApi } from '../../web/src/shared/sshApi.ts';
 
 const connection = {
   id: 'connection-a',
-  projectId: 'cockpit',
+  projectId: 'grigdesk',
   label: 'Боевой код',
   role: 'code',
   host: 'server.internal',
@@ -39,7 +39,7 @@ const hostKey = {
 };
 const auditEntry = {
   at: '2026-09-08T08:01:00.000Z',
-  projectId: 'cockpit',
+  projectId: 'grigdesk',
   connectionId: 'connection-a',
   sessionId: 'session-a',
   label: 'Боевой код',

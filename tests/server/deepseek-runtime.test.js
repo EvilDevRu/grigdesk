@@ -20,7 +20,7 @@ async function waitFor(probe, attempts = 200) {
 }
 
 async function fixture(t, scenario, { wrapChild } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-runtime-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-runtime-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const cwd = path.join(root, 'workspace');
   const launchDir = path.join(root, 'launch');
@@ -139,7 +139,7 @@ test('new → binding → config → один prompt; updates/usage/steps сох
 
 test('mcpServers без примесей дословно уходят в new и resume', async (t) => {
   const mcpServers = [{
-    name: 'cockpit-work',
+    name: 'grigdesk-work',
     command: process.execPath,
     args: ['/synthetic/work-mcp.mjs', '--nonce', 'fake'],
     env: [{ name: 'SYNTHETIC_SCOPE', value: 'one' }],
@@ -258,13 +258,13 @@ test('невалидный MCP command отклоняется до spawn', async
   const f = await fixture(t, {});
   await assert.rejects(runDeepSeekTurn({
     ...f.base,
-    mcpServers: [{ name: 'cockpit-work', command: 'relative-command', args: [], env: [] }],
+    mcpServers: [{ name: 'grigdesk-work', command: 'relative-command', args: [], env: [] }],
   }), /абсолютную command/u);
   assert.equal(f.children.length, 0);
 
   await assert.rejects(runDeepSeekTurn({
     ...f.base,
-    mcpServers: [{ name: 'cockpit-work', command: process.execPath, args: [] }],
+    mcpServers: [{ name: 'grigdesk-work', command: process.execPath, args: [] }],
   }), /\.env повреждён/u);
   assert.equal(f.children.length, 0);
 });

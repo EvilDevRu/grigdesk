@@ -270,7 +270,7 @@ function toolCall(name, args, id = 'call-1') {
 /**
  * Исследовательский hook отдаёт вход события и имена окружения строкой stderr.
  * Hook исполняется в песочнице DSH: вне рабочей области файл ему не записать,
- * а stderr Кокпит видит в событии hook/result. Поведение задаётся аргументом.
+ * а stderr GrigDesk видит в событии hook/result. Поведение задаётся аргументом.
  */
 async function researchHooks(root, { behavior = '0', timeout = 3, broken = false } = {}) {
   const script = path.join(root, 'research-hook.mjs');

@@ -69,21 +69,21 @@ async function settingsProcess(t) {
 test('настоящий ACP объявляет private settings bridge без ключа и без session/new', async (t) => {
   const { client, initialized, frames } = await settingsProcess(t);
 
-  assert.equal(initialized.agentCapabilities?._meta?.['cockpit.settings']?.contract, 1);
+  assert.equal(initialized.agentCapabilities?._meta?.['grigdesk.settings']?.contract, 1);
 
-  const description = await client.request('_cockpit/settings/describe', {});
+  const description = await client.request('_grigdesk/settings/describe', {});
 
   assert.equal(description.writable, true);
   assert.equal(description.hasDocument, true);
   assert.ok(description.namespaces.some((namespace) => namespace.ns === 'llm-deepseek'));
-  assert.deepEqual(frames.map((frame) => frame.method), ['initialize', '_cockpit/settings/describe']);
+  assert.deepEqual(frames.map((frame) => frame.method), ['initialize', '_grigdesk/settings/describe']);
 });
 
 test('настоящий ACP делегирует CAS и validation upstream settings controller', async (t) => {
   const { client, initialized, frames } = await settingsProcess(t);
-  const description = await client.request('_cockpit/settings/describe', {});
+  const description = await client.request('_grigdesk/settings/describe', {});
   const namespace = description.namespaces.find((item) => item.ns === 'llm-deepseek');
-  const mutate = (ns, revision, leaf, value) => client.request('_cockpit/settings/mutate', {
+  const mutate = (ns, revision, leaf, value) => client.request('_grigdesk/settings/mutate', {
     ns,
     expectedRevision: revision,
     ops: [{
@@ -106,7 +106,7 @@ test('настоящий ACP делегирует CAS и validation upstream set
     }],
   }));
 
-  const readback = await client.request('_cockpit/settings/describe', {});
+  const readback = await client.request('_grigdesk/settings/describe', {});
 
   assert.equal(readback.namespaces.find((item) => item.ns === namespace.ns).value.maxTokens, 64);
   assert.equal(frames.some((frame) => ['session/new', 'session/prompt'].includes(frame.method)), false);

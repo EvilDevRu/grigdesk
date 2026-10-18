@@ -13,8 +13,8 @@ test('DW-H1: добавленный env виден в итоговых options, 
     root,
     dataDir,
     env: {
-      COCKPIT_WINDOW_KEY_PATH: keyFile,
-      COCKPIT_DESKTOP_DATA_DIR: '/tmp/wrong-profile',
+      GRIGDESK_WINDOW_KEY_PATH: keyFile,
+      GRIGDESK_DESKTOP_DATA_DIR: '/tmp/wrong-profile',
       DESKTOP_TEST_VALUE: 'значение фикстуры',
       HOME: '/tmp/wrong-home',
       XDG_DATA_HOME: '/tmp/wrong-data',
@@ -28,8 +28,8 @@ test('DW-H1: добавленный env виден в итоговых options, 
   });
 
   assert.equal(options.env.DESKTOP_TEST_VALUE, 'значение фикстуры');
-  assert.equal(options.env.COCKPIT_DESKTOP_DATA_DIR, dataDir);
-  assert.equal(options.env.COCKPIT_WINDOW_KEY_PATH, keyFile);
+  assert.equal(options.env.GRIGDESK_DESKTOP_DATA_DIR, dataDir);
+  assert.equal(options.env.GRIGDESK_WINDOW_KEY_PATH, keyFile);
   assert.equal(options.chromiumSandbox, true);
   assert.equal(Object.hasOwn(options.env, 'NODE_OPTIONS'), false);
   assert.equal(Object.hasOwn(options.env, 'ELECTRON_RUN_AS_NODE'), false);
@@ -44,9 +44,9 @@ test('DW-H2: второй запуск получает тот же профил
   const first = desktopLaunchOptions({
     root,
     dataDir,
-    args: ['/tmp/desktop-program', '--cockpit-url=http://127.0.0.1:43210'],
+    args: ['/tmp/desktop-program', '--grigdesk-url=http://127.0.0.1:43210'],
     env: {
-      COCKPIT_WINDOW_KEY_PATH: keyFile,
+      GRIGDESK_WINDOW_KEY_PATH: keyFile,
     },
   });
   const second = desktopLaunchOptions({
@@ -57,8 +57,8 @@ test('DW-H2: второй запуск получает тот же профил
     env: first.env,
   });
 
-  assert.equal(first.env.COCKPIT_WINDOW_KEY_PATH, keyFile);
-  assert.equal(second.env.COCKPIT_WINDOW_KEY_PATH, keyFile);
+  assert.equal(first.env.GRIGDESK_WINDOW_KEY_PATH, keyFile);
+  assert.equal(second.env.GRIGDESK_WINDOW_KEY_PATH, keyFile);
   assert.deepEqual(second.env, first.env);
   assert.equal(second.executablePath, first.executablePath);
   assert.deepEqual(second.args, first.args);
@@ -72,7 +72,7 @@ test('DW-H1/пути: профиль и ключ обязательны и ос�
     root,
     dataDir,
     env: {
-      COCKPIT_WINDOW_KEY_PATH: keyFile,
+      GRIGDESK_WINDOW_KEY_PATH: keyFile,
     },
   };
   const badInputs = [
@@ -95,7 +95,7 @@ test('DW-H1/пути: профиль и ключ обязательны и ос�
     {
       ...valid,
       env: {
-        COCKPIT_WINDOW_KEY_PATH: '/tmp/outside-key',
+        GRIGDESK_WINDOW_KEY_PATH: '/tmp/outside-key',
       },
     },
   ];
@@ -111,8 +111,8 @@ test('DW-H3: isolateEnv берёт системное окружение сес�
     dataDir,
     isolateEnv: true,
     env: {
-      COCKPIT_WINDOW_KEY_PATH: keyFile,
-      COCKPIT_PORT: '43210',
+      GRIGDESK_WINDOW_KEY_PATH: keyFile,
+      GRIGDESK_PORT: '43210',
       DESKTOP_TEST_VALUE: 'значение фикстуры',
     },
   });
@@ -130,9 +130,9 @@ test('DW-H3: isolateEnv берёт системное окружение сес�
     'PLAYWRIGHT_BROWSERS_PATH',
     'LANG',
     'PATH',
-    'COCKPIT_WINDOW_KEY_PATH',
-    'COCKPIT_PORT',
-    'COCKPIT_DESKTOP_DATA_DIR',
+    'GRIGDESK_WINDOW_KEY_PATH',
+    'GRIGDESK_PORT',
+    'GRIGDESK_DESKTOP_DATA_DIR',
     'DESKTOP_TEST_VALUE',
   ]);
 
@@ -144,9 +144,9 @@ test('DW-H3: isolateEnv берёт системное окружение сес�
     assert.equal(Object.hasOwn(options.env, name), false, name);
   }
 
-  assert.equal(options.env.COCKPIT_PORT, '43210');
-  assert.equal(options.env.COCKPIT_WINDOW_KEY_PATH, keyFile);
-  assert.equal(options.env.COCKPIT_DESKTOP_DATA_DIR, dataDir);
+  assert.equal(options.env.GRIGDESK_PORT, '43210');
+  assert.equal(options.env.GRIGDESK_WINDOW_KEY_PATH, keyFile);
+  assert.equal(options.env.GRIGDESK_DESKTOP_DATA_DIR, dataDir);
   assert.equal(options.env.DESKTOP_TEST_VALUE, 'значение фикстуры');
   assert.equal(options.env.PATH, `${path.dirname(process.execPath)}:/usr/bin:/bin`);
 
@@ -161,7 +161,7 @@ test('DW-H4: isolateEnv не даёт добавлениям подменить 
     dataDir,
     isolateEnv: true,
     env: {
-      COCKPIT_WINDOW_KEY_PATH: keyFile,
+      GRIGDESK_WINDOW_KEY_PATH: keyFile,
       HOME: '/tmp/wrong-home',
       XDG_DATA_HOME: '/tmp/wrong-data',
       XDG_RUNTIME_DIR: '/tmp/wrong-runtime',

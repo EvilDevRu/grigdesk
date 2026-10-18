@@ -1,5 +1,5 @@
 // Источник DSH читает объявленные namespaces выбранного сервером профиля.
-// Нативный документ не возвращается браузеру и не становится хранилищем Cockpit.
+// Нативный документ не возвращается браузеру и не становится хранилищем GrigDesk.
 
 import type { NativeSettingsContext, NativeSettingsOwnership, NativeSettingsSnapshot } from './types.ts';
 import type { NativeSettingsEvidence, PreparedNativeSettings } from './types.ts';
@@ -80,7 +80,7 @@ export async function readDeepSeekSettings(
   startServer = startDeepSeekServer,
   startAcp = startDeepSeekAcpSettings,
 ): Promise<NativeSettingsSnapshot> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-settings-dsh-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-settings-dsh-'));
   const runtime = contextRuntimes.get(context) || await resolveDeepSeekRuntimeAsync(config);
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
 
@@ -291,8 +291,8 @@ export async function deepSeekSettingsNeedRestart(client: DeepSeekSettingsRpc, p
 const OWNERSHIP: NativeSettingsOwnership[] = [
   {
     path: ['llm-pi-ai'],
-    owner: 'Маршруты моделей Кокпита',
-    reason: 'Подключение и параметры llm-pi-ai задаёт профиль запуска Кокпита',
+    owner: 'Маршруты моделей GrigDesk',
+    reason: 'Подключение и параметры llm-pi-ai задаёт профиль запуска GrigDesk',
   },
   ...['llm-deepseek', 'llm-pi-ai'].flatMap((namespace) =>
     ['reasoningEffort', 'thinking'].map((key) => ({
@@ -316,7 +316,7 @@ const OWNERSHIP: NativeSettingsOwnership[] = [
   ...['permission-presets', 'fs-sandbox'].map((namespace) => ({
     path: [namespace],
     owner: 'Права запуска',
-    reason: 'Sandbox и permissions задаёт Cockpit',
+    reason: 'Sandbox и permissions задаёт GrigDesk',
   })),
   {
     path: ['web-search-deepseek', 'model'],
@@ -331,27 +331,27 @@ const OWNERSHIP: NativeSettingsOwnership[] = [
   {
     path: ['sandbox-policy'],
     owner: 'Права чата',
-    reason: 'Граница файлов задаётся запуском Cockpit',
+    reason: 'Граница файлов задаётся запуском GrigDesk',
   },
   {
     path: ['approval'],
     owner: 'Права чата',
-    reason: 'Политика согласований задаётся запуском Cockpit',
+    reason: 'Политика согласований задаётся запуском GrigDesk',
   },
   {
     path: ['permission'],
     owner: 'Права чата',
-    reason: 'Разрешения задаются запуском Cockpit',
+    reason: 'Разрешения задаются запуском GrigDesk',
   },
   {
     path: ['agent-instructions'],
     owner: 'Инструкции проекта',
-    reason: 'Инструкции готовит Cockpit',
+    reason: 'Инструкции готовит GrigDesk',
   },
   {
     path: ['hooks-claude-code'],
     owner: 'Служебные hooks',
-    reason: 'Проверки SSH и БД готовит Cockpit',
+    reason: 'Проверки SSH и БД готовит GrigDesk',
   },
 ];
 
@@ -415,7 +415,7 @@ export function deepSeekSettingsSnapshot(
       ...(namespace.value !== undefined ? { base: decodeSettingsJson(namespace.value) } : {}),
       writeChannel: {
         id: 'isolated-settings-document',
-        scope: 'cockpit-chats' as const,
+        scope: 'grigdesk-chats' as const,
         state: writable ? ('verified' as const) : ('unverified' as const),
         ...(!writable ? { reason: 'Namespace не подтверждён как изменяемый в этом профиле' } : {}),
       },

@@ -97,9 +97,9 @@ async function createRun(t) {
     run.current = await launchDesktop({
       root,
       dataDir,
-      args: [desktop, `--cockpit-url=${address}`],
+      args: [desktop, `--grigdesk-url=${address}`],
       env: {
-        COCKPIT_WINDOW_KEY_PATH: selectedKey,
+        GRIGDESK_WINDOW_KEY_PATH: selectedKey,
         ...extraEnv,
       },
     });
@@ -165,7 +165,7 @@ async function interceptShell(app) {
 }
 
 /**
- * Без готового веба пропускается только соответствующий реальный Cockpit-сценарий.
+ * Без готового веба пропускается только соответствующий реальный GrigDesk-сценарий.
  * Заглушки и обязательные dev-проверки продолжаются независимо от наличия сборки веба.
  */
 async function requireWeb(t) {
@@ -179,7 +179,7 @@ async function requireWeb(t) {
 async function waitForKey(fixture) {
   await waitFor(async () => {
     try {
-      return (await readFile(fixture.env.COCKPIT_WINDOW_KEY_PATH, 'utf8')).length === 43;
+      return (await readFile(fixture.env.GRIGDESK_WINDOW_KEY_PATH, 'utf8')).length === 43;
     } catch {
       return false;
     }
@@ -385,7 +385,7 @@ test('DW-E7: провал reload и восстановление', options, asyn
   await stub.close();
   await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
   await page.waitForURL(/^data:/u);
-  assert.match(await page.locator('body').textContent(), /Ждём сервер Кокпита/u);
+  assert.match(await page.locator('body').textContent(), /Ждём сервер GrigDesk/u);
   await run.stub({ port: Number(port) });
   await page.locator('#stub').waitFor({ timeout: 20_000 });
   assert.equal(new URL(page.url()).origin, stub.address);
@@ -408,9 +408,9 @@ test('DW-E8: второй экземпляр отдаёт управление �
   const child = run.spawnSecond({
     root: run.root,
     dataDir: run.dataDir,
-    args: [desktop, `--cockpit-url=${other.address}`],
+    args: [desktop, `--grigdesk-url=${other.address}`],
     env: {
-      COCKPIT_WINDOW_KEY_PATH: run.keyFile,
+      GRIGDESK_WINDOW_KEY_PATH: run.keyFile,
     },
   });
 
@@ -428,7 +428,7 @@ test('DW-E8: второй экземпляр отдаёт управление �
   assert.equal(settings.connection.origin, stub.address);
 });
 
-test('DW-E9: настоящий Cockpit входит без пароля и открывает SSE', options, async (t) => {
+test('DW-E9: настоящий GrigDesk входит без пароля и открывает SSE', options, async (t) => {
   if (!await requireWeb(t)) {
     return;
   }
@@ -437,12 +437,12 @@ test('DW-E9: настоящий Cockpit входит без пароля и от
   const fixture = await pluginBootFixture(run.bootContext, {
     root: run.root,
     apiSession: false,
-    env: { COCKPIT_WEB_DIST: await requireWeb(t) },
+    env: { GRIGDESK_WEB_DIST: await requireWeb(t) },
   });
 
   await waitForKey(fixture);
 
-  const { page } = await run.launch(fixture.address, fixture.env.COCKPIT_WINDOW_KEY_PATH);
+  const { page } = await run.launch(fixture.address, fixture.env.GRIGDESK_WINDOW_KEY_PATH);
 
   await page.locator('.shell').waitFor();
 
@@ -492,7 +492,7 @@ test('DW-E10: после показа отсутствующий ключ и н�
   });
 
 test('DW-E11: постоянная сессия переживает окно и сервер без нового обмена', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -503,7 +503,7 @@ test('DW-E11: постоянная сессия переживает окно и
   assert.equal(Object.keys(before.sessions).length, 1);
   await run.closeApp();
   await restartOwnServer(run);
-  Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.COCKPIT_WINDOW_KEY_PATH));
+  Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
   await run.page.locator('.shell').waitFor();
   assert.deepEqual(await readSessions(run), before);
 });
@@ -641,10 +641,10 @@ test('SW-E01 точный адрес открывает модальное ок�
   });
 
   assert.equal(state.modal, true);
-  assert.equal(state.title, 'Настройки — Кокпит');
+  assert.equal(state.title, 'Настройки — GrigDesk');
   assert.equal(state.enabled, false);
-  assert.match(await page.evaluate(() => navigator.userAgent), /CockpitWindow\/main$/);
-  assert.match(await child.evaluate(() => navigator.userAgent), /CockpitWindow\/settings$/);
+  assert.match(await page.evaluate(() => navigator.userAgent), /GrigDeskWindow\/main$/);
+  assert.match(await child.evaluate(() => navigator.userAgent), /GrigDeskWindow\/settings$/);
   assert.equal(await child.evaluate(async () => (await (await fetch('/api/auth/state')).json())
     .authenticated), true);
   await child.close();
@@ -670,8 +670,8 @@ test('SW-E02 одно окно на любые запросы', options, async (
   const second = run.spawnSecond({
     root: run.root,
     dataDir: run.dataDir,
-    args: [desktop, '--cockpit-url=' + stub.address],
-    env: { COCKPIT_WINDOW_KEY_PATH: run.keyFile },
+    args: [desktop, '--grigdesk-url=' + stub.address],
+    env: { GRIGDESK_WINDOW_KEY_PATH: run.keyFile },
   });
 
   await once(second, 'exit');
@@ -714,7 +714,7 @@ test('SW-E04 закрытие главного закрывает настрой
  * Число и неизменность записей подтверждают отсутствие повторного обмена ключа.
  */
 async function readSessions(run) {
-  return JSON.parse(await readFile(run.fixture.env.COCKPIT_AUTH_SESSIONS, 'utf8'));
+  return JSON.parse(await readFile(run.fixture.env.GRIGDESK_AUTH_SESSIONS, 'utf8'));
 }
 
 /**
@@ -771,7 +771,7 @@ async function loseSessionAndRecover(run, child = null) {
   await restartOwnServer(run, async (env) => {
     const state = await readSessions(run);
 
-    await writeFile(env.COCKPIT_AUTH_SESSIONS, JSON.stringify({ ...state, sessions: {} }));
+    await writeFile(env.GRIGDESK_AUTH_SESSIONS, JSON.stringify({ ...state, sessions: {} }));
   });
 
   if (child) {
@@ -803,7 +803,7 @@ async function loseSessionAndRecover(run, child = null) {
  * Отсутствие файлов является явным NOT RUN, а устаревший интерфейс остаётся FAIL.
  */
 async function requireSettingsWeb(t) {
-  const directory = process.env.COCKPIT_E2E_WEB_DIST ?? path.resolve(desktop, '../web/dist');
+  const directory = process.env.GRIGDESK_E2E_WEB_DIST ?? path.resolve(desktop, '../web/dist');
 
   try {
     await access(path.join(directory, 'index.html'));
@@ -820,7 +820,7 @@ async function requireSettingsWeb(t) {
  * Настоящий сервер стартует со своими каталогами и принимает вход через собственный ключ.
  * Listeners ошибок ставятся до действий в обоих документах и проверяются при завершении.
  */
-async function launchSettingsCockpit(t) {
+async function launchSettingsGrigDesk(t) {
   const webDist = await requireSettingsWeb(t);
 
   if (!webDist) {
@@ -831,12 +831,12 @@ async function launchSettingsCockpit(t) {
   const fixture = await pluginBootFixture(run.bootContext, {
     root: run.root,
     apiSession: false,
-    env: { COCKPIT_WEB_DIST: webDist },
+    env: { GRIGDESK_WEB_DIST: webDist },
   });
 
   await waitForKey(fixture);
 
-  const launched = await run.launch(fixture.address, fixture.env.COCKPIT_WINDOW_KEY_PATH);
+  const launched = await run.launch(fixture.address, fixture.env.GRIGDESK_WINDOW_KEY_PATH);
   const errors = [];
   const observe = (page) => page.on('pageerror', (error) => errors.push(error.message));
 
@@ -863,7 +863,7 @@ async function openSettings(run) {
   try {
     await page.locator('[data-settings-window]').waitFor({ timeout: 10_000 });
   } catch {
-    assert.fail('Бандл без окна настроек: проверь COCKPIT_E2E_WEB_DIST.');
+    assert.fail('Бандл без окна настроек: проверь GRIGDESK_E2E_WEB_DIST.');
   }
 
   await page.locator('[data-role=settings-nav]').first().waitFor();
@@ -888,7 +888,7 @@ async function settingsTab(page, id) {
  * По умолчанию — постоянная папка E2E: указатель чужого прогона может отсутствовать.
  */
 async function settingsScreenshot(page, name, screenshotOptions = {}) {
-  const directory = process.env.COCKPIT_E2E_ARTIFACTS ?? screens;
+  const directory = process.env.GRIGDESK_E2E_ARTIFACTS ?? screens;
 
   assert.equal(path.isAbsolute(directory), true, 'Каталог снимков должен быть абсолютным.');
 
@@ -897,7 +897,7 @@ async function settingsScreenshot(page, name, screenshotOptions = {}) {
 }
 
 test('SW-E05 открытие из верхней панели сохраняет основное окно', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -954,14 +954,14 @@ test('SW-E05 открытие из верхней панели сохраняе�
 });
 
 test('SW-E06 раздел из ссылки', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
   }
 
   await run.page.evaluate(() => {
-    localStorage.setItem('cockpit-settings-tab', 'providers');
+    localStorage.setItem('grigdesk-settings-tab', 'providers');
     location.hash = '#/board';
   });
 
@@ -975,7 +975,7 @@ test('SW-E06 раздел из ссылки', options, async (t) => {
 });
 
 test('SW-E07 href #/settings', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1014,7 +1014,7 @@ async function closeSettingsWithEscape(page) {
 }
 
 test('SW-E08 Escape по слоям', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1049,7 +1049,7 @@ test('SW-E08 Escape по слоям', options, async (t) => {
 });
 
 test('SW-E09 сохранённое доходит до основного окна без перезагрузки', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1090,7 +1090,7 @@ test('SW-E09 сохранённое доходит до основного ок�
 });
 
 test('SW-E10 установка исполнителя через терминал основного окна', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1121,7 +1121,7 @@ test('SW-E10 установка исполнителя через термина
 });
 
 test('SW-E11 потеря сессии закрывает настройки, главное входит само', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1139,7 +1139,7 @@ test('SW-E11 потеря сессии закрывает настройки, г
 });
 
 test('SW-E12 Ctrl+Alt+S поверх терминала', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1161,7 +1161,7 @@ test('SW-E12 Ctrl+Alt+S поверх терминала', options, async (t) => 
 });
 
 test('SW-E13 узкое окно', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1189,7 +1189,7 @@ test('SW-E13 узкое окно', options, async (t) => {
 });
 
 test('SW-E14 окно без маркеров — страница', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1202,7 +1202,7 @@ test('SW-E14 окно без маркеров — страница', options, as
   const child = await opened;
 
   await child.locator('.shell .settings').waitFor();
-  assert.doesNotMatch(await child.evaluate(() => navigator.userAgent), /CockpitSettings|CockpitWindow/);
+  assert.doesNotMatch(await child.evaluate(() => navigator.userAgent), /GrigDeskSettings|GrigDeskWindow/);
   assert.equal(await run.app.evaluate(({ BrowserWindow }) => {
     const windows = BrowserWindow.getAllWindows();
 
@@ -1211,7 +1211,7 @@ test('SW-E14 окно без маркеров — страница', options, as
 });
 
 test('DW-E13: чистый браузер не получает документ, deep link и JS', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1230,7 +1230,7 @@ test('DW-E13: чистый браузер не получает документ
     const response = await page.goto(run.fixture.address + pathname);
 
     assert.equal(response.status(), 401);
-    assert.match(await page.locator('body').textContent(), /Кокпит открывается в приложении/u);
+    assert.match(await page.locator('body').textContent(), /GrigDesk открывается в приложении/u);
     assert.equal(await page.locator('.shell, input[type=password], script').count(), 0);
   }
 
@@ -1241,7 +1241,7 @@ test('DW-E13: чистый браузер не получает документ
 });
 
 test('DW-E14: старая cookie отзывается, Electron входит снова и сохраняет scope', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1258,7 +1258,7 @@ test('DW-E14: старая cookie отзывается, Electron входит с
     });
 
     const state = await (await fetch('/api/studio3d/state')).json();
-    const request = indexedDB.open('cockpit-studio3d-intents', 1);
+    const request = indexedDB.open('grigdesk-studio3d-intents', 1);
     const database = await new Promise((resolve, reject) => {
       request.onupgradeneeded = () => request.result.createObjectStore('intents', { keyPath: 'key' });
       request.onsuccess = () => resolve(request.result);
@@ -1286,8 +1286,8 @@ test('DW-E14: старая cookie отзывается, Electron входит с
 
   await run.closeApp();
   await restartOwnServer(run, async (env) => {
-    await writeFile(env.COCKPIT_AUTH_ACCOUNT, JSON.stringify({ login: 'legacy-owner', hash: 'unused' }));
-    await writeFile(env.COCKPIT_AUTH_SESSIONS, JSON.stringify(previous.sessions));
+    await writeFile(env.GRIGDESK_AUTH_ACCOUNT, JSON.stringify({ login: 'legacy-owner', hash: 'unused' }));
+    await writeFile(env.GRIGDESK_AUTH_SESSIONS, JSON.stringify(previous.sessions));
   });
 
   const browser = await chromium.launch({ headless: true, channel: 'chromium' });
@@ -1297,7 +1297,7 @@ test('DW-E14: старая cookie отзывается, Electron входит с
   const context = await browser.newContext();
 
   await context.addCookies([{
-    name: 'cockpit_sid',
+    name: 'grigdesk_sid',
     value: oldId,
     url: run.fixture.address,
   }]);
@@ -1306,7 +1306,7 @@ test('DW-E14: старая cookie отзывается, Electron входит с
   const response = await page.goto(run.fixture.address + '/#/chats');
 
   assert.equal(response.status(), 401);
-  Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.COCKPIT_WINDOW_KEY_PATH));
+  Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
   await run.page.locator('.shell').waitFor();
 
   const state = await readSessions(run);
@@ -1352,7 +1352,7 @@ test('DW-E16: восстановление того же hash загружает
 });
 
 test('DW-E15: потеря сессии в чате восстанавливает тот же адрес', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1370,17 +1370,17 @@ test('DW-E15: потеря сессии в чате восстанавливае
  * исполнитель не запускается; durable запись проверяется штатным методом chat store.
  */
 async function launchLayoutChat(t) {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return null;
   }
 
   await run.page.evaluate(() => {
-    localStorage.setItem('cockpit-chats-list-width', '357');
-    localStorage.setItem('cockpit-chat-composer-h', '140');
-    localStorage.setItem('cockpit-code-dock-nav-width', '330');
-    localStorage.setItem('cockpit-sidebar', '0');
+    localStorage.setItem('grigdesk-chats-list-width', '357');
+    localStorage.setItem('grigdesk-chat-composer-h', '140');
+    localStorage.setItem('grigdesk-code-dock-nav-width', '330');
+    localStorage.setItem('grigdesk-sidebar', '0');
     location.hash = '#/chats';
   });
   await run.page.getByRole('button', { name: 'Новый чат', exact: true }).click();
@@ -1436,8 +1436,8 @@ async function layoutState(page) {
       time: performance.timeOrigin,
       active: pinia._s.get('chat').activeId,
       draft: document.querySelector('[data-role=chat-composer]')?.value,
-      sizes: ['cockpit-chats-list-width', 'cockpit-chat-composer-h',
-        'cockpit-code-dock-nav-width', 'cockpit-sidebar'].map((key) => localStorage.getItem(key)),
+      sizes: ['grigdesk-chats-list-width', 'grigdesk-chat-composer-h',
+        'grigdesk-code-dock-nav-width', 'grigdesk-sidebar'].map((key) => localStorage.getItem(key)),
     };
   });
 }
@@ -1474,7 +1474,7 @@ async function titlebarGeometry(page) {
 }
 
 test('WT-E01 системные кнопки встроены в топбар при ресайзе и масштабе', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1562,13 +1562,13 @@ test('WT-E01 системные кнопки встроены в топбар п
 
     return sources[0].thumbnail.toPNG().toString('base64');
   });
-  const directory = process.env.COCKPIT_E2E_ARTIFACTS ?? screens;
+  const directory = process.env.GRIGDESK_E2E_ARTIFACTS ?? screens;
 
   await writeFile(path.join(directory, 'window-titlebar-native.png'), Buffer.from(nativeImage, 'base64'));
 });
 
 test('DU-E01 первый кадр и прежняя плотность используют одну геометрию', options, async (t) => {
-  const run = await launchSettingsCockpit(t);
+  const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
@@ -1594,7 +1594,7 @@ test('DU-E01 первый кадр и прежняя плотность испо
   await run.page.reload();
   await run.page.waitForFunction(() => Boolean(window.__duFirstFrame));
   assert.deepEqual(await run.page.evaluate(() => window.__duFirstFrame), { height: 36 });
-  await run.page.evaluate(() => localStorage.setItem('cockpit-ui-density', 'compact'));
+  await run.page.evaluate(() => localStorage.setItem('grigdesk-ui-density', 'compact'));
   await run.page.reload();
   await run.page.waitForFunction(() => Boolean(window.__duFirstFrame));
   assert.deepEqual(await run.page.evaluate(() => window.__duFirstFrame), { height: 36 });
@@ -1645,7 +1645,7 @@ test('DU-E03 повтор окна сохраняет размеры и durable 
 
   await child.close();
   await run.closeApp();
-  Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.COCKPIT_WINDOW_KEY_PATH));
+  Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
   run.page.on('pageerror', (error) => run.errors.push(error.message));
   await run.page.locator('.shell').waitFor();
   await run.page.evaluate(() => {
@@ -1855,10 +1855,10 @@ test('UI-E01 закреплённая версия переживает заме
     const fixture = await pluginBootFixture(run.bootContext, {
       root: run.root,
       apiSession: false,
-      env: { COCKPIT_WEB_DIST: working },
+      env: { GRIGDESK_WEB_DIST: working },
       async before({ env }) {
-        await mkdir(path.dirname(env.COCKPIT_PREFS_PATH), { recursive: true });
-        await writeFile(env.COCKPIT_PREFS_PATH, JSON.stringify({
+        await mkdir(path.dirname(env.GRIGDESK_PREFS_PATH), { recursive: true });
+        await writeFile(env.GRIGDESK_PREFS_PATH, JSON.stringify({
           plugins: {
             studio3d: true,
             ssh: true,
@@ -1871,8 +1871,8 @@ test('UI-E01 закреплённая версия переживает заме
 
     await waitForKey(fixture);
 
-    const launched = await run.launch(fixture.address, fixture.env.COCKPIT_WINDOW_KEY_PATH, {
-      COCKPIT_UI_RELEASES_DIR: fixture.env.COCKPIT_UI_RELEASES_DIR,
+    const launched = await run.launch(fixture.address, fixture.env.GRIGDESK_WINDOW_KEY_PATH, {
+      GRIGDESK_UI_RELEASES_DIR: fixture.env.GRIGDESK_UI_RELEASES_DIR,
     });
 
     Object.assign(run, launched, { fixture });
@@ -1923,8 +1923,8 @@ test('UI-E01 закреплённая версия переживает заме
 
     // Новый документ получает намеренный отказ lazy-ресурса: проверяем видимое сообщение.
     await run.closeApp();
-    Object.assign(run, await run.launch(fixture.address, fixture.env.COCKPIT_WINDOW_KEY_PATH, {
-      COCKPIT_UI_RELEASES_DIR: fixture.env.COCKPIT_UI_RELEASES_DIR,
+    Object.assign(run, await run.launch(fixture.address, fixture.env.GRIGDESK_WINDOW_KEY_PATH, {
+      GRIGDESK_UI_RELEASES_DIR: fixture.env.GRIGDESK_UI_RELEASES_DIR,
     }));
     await run.page.locator('.shell').waitFor();
     await run.page.route(/\/CodePanel-[^/]+\.js$/, (route) => route.abort('failed'));

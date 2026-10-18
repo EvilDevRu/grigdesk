@@ -78,7 +78,7 @@ test('откат на несовместимый host/journal contract отка�
       inputIdentity: metadata.inputIdentity,
       payload: metadata.payload,
     })).digest('hex');
-    metadata.runtimeVersion = `${metadata.source.version}.cockpit.b${metadata.buildId.slice(0, 16)}`;
+    metadata.runtimeVersion = `${metadata.source.version}.grigdesk.b${metadata.buildId.slice(0, 16)}`;
 
     const directory = path.join(runtimeRoot, 'builds', metadata.buildId);
 
@@ -183,7 +183,7 @@ async function cleanCheckout(sourceRoot, root) {
 }
 
 test('настоящая общая подготовка clean checkout работает в production без dsh и staging', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-clean-deepseek-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-clean-deepseek-'));
   const sourceRoot = REPO_ROOT;
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -197,7 +197,7 @@ test('настоящая общая подготовка clean checkout рабо
     NODE_ENV: 'production',
     npm_config_cache: path.join(artifactsPath({ env: process.env, home: os.homedir() }),
       'deepseek-vendoring/npm-cache'),
-    COCKPIT_DEEPSEEK_UPSTREAM_SEED: path.join(sourceRoot, 'third_party/deepseek-harness/upstream'),
+    GRIGDESK_DEEPSEEK_UPSTREAM_SEED: path.join(sourceRoot, 'third_party/deepseek-harness/upstream'),
   };
   const staleLock = path.join(root, 'server/runtime/deepseek/.prepare-lock');
 
@@ -224,7 +224,7 @@ test('настоящая общая подготовка clean checkout рабо
 
   // Те же входы в другом checkout дают тот же buildId: предложенная установка берётся
   // как есть, без исходников, npm ci и сборки.
-  const other = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-reuse-deepseek-'));
+  const other = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-reuse-deepseek-'));
 
   t.after(() => fs.rm(other, { recursive: true, force: true }));
   await cleanCheckout(sourceRoot, other);
@@ -232,7 +232,7 @@ test('настоящая общая подготовка clean checkout рабо
   const { stdout: reusedOutput } = await exec(process.execPath,
     [path.join(other, 'server/scripts/prepareDeepSeekRuntime.mts')], {
       cwd: other,
-      env: { ...env, COCKPIT_DEEPSEEK_REUSE_RUNTIME: path.join(root, 'server/runtime/deepseek') },
+      env: { ...env, GRIGDESK_DEEPSEEK_REUSE_RUNTIME: path.join(root, 'server/runtime/deepseek') },
       timeout: 60_000,
     });
   const reused = JSON.parse(reusedOutput.trim().split('\n').at(-1));

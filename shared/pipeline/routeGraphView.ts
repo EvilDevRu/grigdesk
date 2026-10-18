@@ -89,7 +89,7 @@ export interface RouteGraphOptions {
   workspaceMode?: string;
   // Разведка каталога, если маршрут её запускает.
   bootstrap?: RouteMachine;
-  // Подпись узла без label; сервер берёт её из каталога стадий кокпита.
+  // Подпись узла без label; сервер берёт её из каталога стадий GrigDesk.
   labelOf?: (id: string) => string;
   // Как рисовать ромб песочницы.
   sandboxNode?: RouteGraphNode;

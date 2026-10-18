@@ -106,7 +106,7 @@ export async function resolveDeepSeekPermission({
   cancelled?: () => boolean;
 }) {
   const title = String(context?.title || '');
-  const workPrefix = 'mcp__cockpit-work__';
+  const workPrefix = 'mcp__grigdesk-work__';
   if (factory || mode === 'read-only' || cancelled()) {
     return permissionOutcome(params, { allow: false });
   }

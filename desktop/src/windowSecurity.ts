@@ -12,7 +12,7 @@ import type { WindowState } from './settings.ts';
 import type { SettingsWindowGeometry } from './settingsWindowController.ts';
 import { isSettingsWindowRequest } from '../../shared/desktop/desktopWindowContract.ts';
 
-export const LOCAL_PARTITION = 'persist:cockpit-local';
+export const LOCAL_PARTITION = 'persist:grigdesk-local';
 
 export type SessionLike = Pick<Session,
   'setSpellCheckerEnabled' | 'setSpellCheckerDictionaryDownloadURL' | 'setSpellCheckerLanguages' |
@@ -65,7 +65,7 @@ export function settingsWindowOptions(options: {
     show: false,
     minimizable: false,
     fullscreenable: false,
-    title: 'Настройки — Кокпит',
+    title: 'Настройки — GrigDesk',
     backgroundColor: '#0b0d11',
     icon: options.icon,
     webPreferences: {
@@ -91,7 +91,7 @@ export function windowOptions(
     height: size.height,
     minWidth: 600,
     minHeight: 600,
-    title: 'Кокпит',
+    title: 'GrigDesk',
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       height: 36,
@@ -165,7 +165,7 @@ export function permissionAllowed(
 
 /**
  * Блокирует ровно штатный script service worker своего origin независимо от query.
- * Остальные запросы остаются доступными браузерному интерфейсу Кокпита.
+ * Остальные запросы остаются доступными браузерному интерфейсу GrigDesk.
  */
 export function serviceWorkerBlocked(target: string, origin: string): boolean {
   return sameOrigin(target, origin) && new URL(target).pathname === '/sw.js';

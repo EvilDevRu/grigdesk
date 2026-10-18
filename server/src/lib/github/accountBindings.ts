@@ -1,4 +1,4 @@
-// Durable binding проверенного GitHub repository к случайному accountRef Cockpit.
+// Durable binding проверенного GitHub repository к случайному accountRef GrigDesk.
 //
 // Provider identity здесь намеренно не строка owner/name: репозиторий можно
 // переименовать или перенести. Единственный owner namespace — exact tuple с

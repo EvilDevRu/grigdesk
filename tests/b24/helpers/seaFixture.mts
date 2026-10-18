@@ -67,21 +67,21 @@ export async function runBuild(args: readonly string[]): Promise<BuildRun> {
 }
 
 /**
- * Готовит проверяемый файл: явный COCKPIT_B24_TEST_BINARY или свежую сборку в mkdtemp.
+ * Готовит проверяемый файл: явный GRIGDESK_B24_TEST_BINARY или свежую сборку в mkdtemp.
  * Кэш b24/.cache только копируется — build.mts заново сверяет SHA256; иначе качается pin.
  */
 export async function prepareCandidate(): Promise<SeaCandidate> {
-  const explicit = process.env.COCKPIT_B24_TEST_BINARY;
+  const explicit = process.env.GRIGDESK_B24_TEST_BINARY;
 
   if (explicit !== undefined) {
     if (!path.isAbsolute(explicit)) {
-      throw new Error('COCKPIT_B24_TEST_BINARY должен быть абсолютным путём');
+      throw new Error('GRIGDESK_B24_TEST_BINARY должен быть абсолютным путём');
     }
 
     await access(explicit, constants.X_OK);
 
     if (!(await stat(explicit)).isFile()) {
-      throw new Error('COCKPIT_B24_TEST_BINARY должен указывать на файл');
+      throw new Error('GRIGDESK_B24_TEST_BINARY должен указывать на файл');
     }
 
     return {

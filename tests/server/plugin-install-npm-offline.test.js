@@ -12,7 +12,7 @@ const expected = {
   version: '1.0.0',
   expectedId: null,
   reservedIds: new Set(['code']),
-  cockpitVersion: '1.0.0',
+  grigDeskVersion: '1.0.0',
 };
 
 test('N4: offline npm устанавливает production graph, omit dev и не исполняет lifecycle', async (t) => {

@@ -37,9 +37,9 @@ async function fixture(t) {
     FACTORY_STATE: path.join(root, 'state'),
     STATE_DIR: path.join(root, 'state'),
     NODE_BIN: process.execPath,
-    COCKPIT_DEEPSEEK_NODE_BIN: process.execPath,
-    COCKPIT_DEEPSEEK_RUNTIME_MODE: 'embedded',
-    COCKPIT_DEEPSEEK_GENERATION_ROOT: runtimeRoot,
+    GRIGDESK_DEEPSEEK_NODE_BIN: process.execPath,
+    GRIGDESK_DEEPSEEK_RUNTIME_MODE: 'embedded',
+    GRIGDESK_DEEPSEEK_GENERATION_ROOT: runtimeRoot,
   };
 
   return {

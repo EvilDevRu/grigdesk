@@ -15,7 +15,7 @@ import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
  * Evidence проверяется на настоящем файловом дереве, файлы сохраняются при отказе.
  */
 async function fixture(t, overrides = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-install-state-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-install-state-'));
   const statePath = path.join(root, 'state/install.json');
   const evidence = path.join(root, 'work/jobs/interrupted/package/server.js');
   const options = {

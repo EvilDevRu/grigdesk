@@ -69,7 +69,7 @@ function actionUrl(
   action: string,
   values: Record<string, string | undefined>,
 ) {
-  const url = new URL(contextUrl(context, action), 'http://cockpit.local');
+  const url = new URL(contextUrl(context, action), 'http://grigdesk.local');
 
   for (const [key, value] of Object.entries(values)) {
     if (value !== undefined) {

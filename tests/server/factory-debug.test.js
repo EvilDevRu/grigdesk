@@ -92,7 +92,7 @@ test('factory debug adapter builds only allowlisted argv', async () => {
 });
 
 test('factory debug adapter conforms to the real engine CLI without model calls', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-factory-debug.'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-factory-debug.'));
   t.after(async () => rm(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
   const configRoot = path.join(root, 'config');

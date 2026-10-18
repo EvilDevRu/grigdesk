@@ -8,7 +8,7 @@ import type { ChatWorkdir, WorkdirCapability } from '../../../../shared/chat/cha
 import { projectRepos, readProjectRecord, isProjectArchived } from '../projects.ts';
 import { listProjects } from '../profiles.ts';
 import { parseSandboxRepositories } from '../sandboxEnv.ts';
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 import type { ProjectsPrefsReader } from '../projects.ts';
 
 export interface WorkdirValidation {
@@ -122,7 +122,7 @@ export async function resolveChatWorkdir({
   provider: string;
   caps: WorkdirCapability | null;
   validateWorkdir?: WorkdirValidator;
-  config: CockpitConfig;
+  config: GrigDeskConfig;
   prefs: ProjectsPrefsReader & { read?: () => { projects?: Record<string, unknown>; } | null; };
   factoryState: { readEnv: (id: string) => Promise<unknown>; };
   trustedProject: (id: string) => Promise<string | null>;

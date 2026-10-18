@@ -91,7 +91,7 @@ function fixture(over = {}) {
     attachments: messages.flatMap((entry) => entry.attachments),
     policy: {
       scopeId: 'repository-101',
-      project: 'cockpit',
+      project: 'grigdesk',
       kind: 'bug',
       b24: { groupId: 77, responsibleId: 12, priority: 2 },
       autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
@@ -202,7 +202,7 @@ function fixture(over = {}) {
     listProjects: async () => {
       calls.projects += 1;
       if (over.disconnectB24DuringProjects) b24.configured = false;
-      return over.projects || ['cockpit'];
+      return over.projects || ['grigdesk'];
     },
     attachmentAnalyzer: over.attachmentAnalyzer === null ? null : {
       async analyze(args) {
@@ -1128,7 +1128,7 @@ test('глобальная очередь не допускает две B24-з�
       attachments: [],
       policy: {
         scopeId: 'repository-101',
-        project: 'cockpit',
+        project: 'grigdesk',
         kind: 'bug',
         b24: { groupId: 77, responsibleId: 12, priority: 2 },
         autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
@@ -1179,7 +1179,7 @@ test('глобальная очередь не допускает две B24-з�
         return { id: 9001 };
       },
     },
-    listProjects: async () => ['cockpit'],
+    listProjects: async () => ['grigdesk'],
     taskUrlFor: async () => 'https://b24.example/tasks/9001',
     isEnabled: () => true,
     now: () => 2_000,

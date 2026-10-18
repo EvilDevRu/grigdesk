@@ -45,15 +45,15 @@ export async function git(cwd, ...args) {
  * `release` пишет файлы версии, коммитит, ставит тег и публикует его в origin.
  */
 export async function createPluginRepo(t, { id = 'demo', name = 'Демо' } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-repo-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-repo-'));
   const work = path.join(root, 'work');
   const origin = path.join(root, 'origin.git');
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
   await git(root, 'init', '-q', '-b', 'main', work);
-  await git(work, 'config', 'user.name', 'Cockpit Test');
-  await git(work, 'config', 'user.email', 'cockpit@example.invalid');
+  await git(work, 'config', 'user.name', 'GrigDesk Test');
+  await git(work, 'config', 'user.email', 'grigdesk@example.invalid');
   await git(root, 'init', '-q', '--bare', origin);
   await git(work, 'remote', 'add', 'origin', origin);
 

@@ -17,7 +17,7 @@ const REPO_ROOT = path.resolve(TEST_DIR, '../..');
 const EMPTY = { version: 1, findings: {} };
 
 function fixtureRepo(t, source) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-ui-injection-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-ui-injection-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const target = path.join(root, 'web/src/runtime.ts');
   fs.mkdirSync(path.dirname(target), { recursive: true });

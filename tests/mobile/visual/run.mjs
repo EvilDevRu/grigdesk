@@ -33,7 +33,7 @@ const pick = (flag, all, key = (item) => item) => {
   return names ? all.filter((item) => names.includes(key(item))) : all;
 };
 /**
- * Сборка принадлежит этому прогону и не меняет web/dist работающего Кокпита.
+ * Сборка принадлежит этому прогону и не меняет web/dist работающего GrigDesk.
  * Chromium и static server закрываются в finally даже при ошибке кадра.
  */
 async function main() {
@@ -254,7 +254,7 @@ async function main() {
                 outbox: data.outbox,
               };
 
-              globalThis.__COCKPIT_MOBILE_MOCK__ = options;
+              globalThis.__GRIGDESK_MOBILE_MOCK__ = options;
             },
             {
               data,

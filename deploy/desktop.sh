@@ -10,6 +10,12 @@ desktop_temporary=''
 desktop_data_home=''
 desktop_explicit_home=0
 
+# Окно ставится в bin/ настоящего каталога копии: путь не зависит от ссылки, через которую
+# вызвана установка, и совпадает с корнем в runtime.json.
+desktop_app() {
+  grigdesk_desktop_app_path "$(cd "$ROOT" && pwd -P)"
+}
+
 # Уборка знает только уникальный temporary текущего шага установки.
 # После успешного rename имя забывается, остальные файлы не удаляются.
 cleanup_desktop_copy() {
@@ -26,7 +32,7 @@ write_runtime_descriptor() {
   local root
   local node_path
 
-  runtime="$(cockpit_desktop_runtime_path)"
+  runtime="$(grigdesk_desktop_runtime_path)"
   root="$(cd "$ROOT" && pwd -P)"
   node_path="$(node -p 'process.execPath')"
 
@@ -45,15 +51,15 @@ write_runtime_descriptor() {
 # Node ищется только в явном каталоге и штатном PATH, без менеджеров версий.
 # Источник берётся по manifest, установка не читает .env и не запускает сборку.
 install_desktop() {
-  if [ -n "${COCKPIT_NODE_DIR:-}" ] && [ -x "$COCKPIT_NODE_DIR/node" ]; then
-    export PATH="$COCKPIT_NODE_DIR:$PATH"
+  if [ -n "${GRIGDESK_NODE_DIR:-}" ] && [ -x "$GRIGDESK_NODE_DIR/node" ]; then
+    export PATH="$GRIGDESK_NODE_DIR:$PATH"
   fi
 
   source "$ROOT/deploy/lib/runtime-env.sh"
-  cockpit_add_cli_paths "$ROOT"
-  cockpit_require_node
-  desktop_data_home=$(cockpit_data_home) || return 1
-  if [[ -n "${COCKPIT_HOME:-}" && "$desktop_data_home" != "${HOME%/}/.cockpit" ]]; then
+  grigdesk_add_cli_paths "$ROOT"
+  grigdesk_require_node
+  desktop_data_home=$(grigdesk_data_home) || return 1
+  if [[ -n "${GRIGDESK_HOME:-}" && "$desktop_data_home" != "${HOME%/}/.grigdesk" ]]; then
     desktop_explicit_home=1
   fi
 
@@ -82,13 +88,15 @@ install_desktop() {
   local destination
 
   version="$(node -p 'require(process.argv[1]).version' "$ROOT/desktop/package.json")"
-  source_file="$ROOT/desktop/release/cockpit-desktop-$version-x86_64.AppImage"
-  destination="$(cockpit_desktop_app_path)"
+  source_file="$ROOT/desktop/release/grigdesk-desktop-$version-x86_64.AppImage"
+  destination="$(desktop_app)"
 
   if [ ! -f "$source_file" ]; then
     echo 'Готового окна нет. Собери: npm --prefix desktop run dist' >&2
     return 1
   fi
+
+  grigdesk_migrate_desktop_profile || return $?
 
   # Версия 1 совместима с установленным окном и пишется перед заменой AppImage.
   # Версия 2 становится доступна только после установки окна, умеющего читать home.
@@ -97,8 +105,9 @@ install_desktop() {
     write_runtime_descriptor
   fi
 
+  # Временная копия скрыта и не исполняема до chmod: bin/ стоит первым в PATH агентов.
   mkdir -p -- "$(dirname "$destination")"
-  desktop_temporary="$(mktemp "$destination.tmp.XXXXXX")"
+  desktop_temporary="$(mktemp "$(dirname "$destination")/.grigdesk-app.XXXXXX")"
   cp -- "$source_file" "$desktop_temporary"
   chmod 755 "$desktop_temporary"
   mv -fT -- "$desktop_temporary" "$destination"
@@ -109,7 +118,14 @@ install_desktop() {
 
   # Метка: установлена сборка, которая знает папку данных. Без неё команда переноса не уберёт
   # ссылки совместимости — старая сборка окна пишет журнал и интерфейс через них.
-  : > "$(dirname "$destination")/data-home"
+  : > "$(grigdesk_desktop_marker_path)"
+
+  # Окно до переноса в bin/ лежало в XDG_DATA_HOME. Открытое старое окно продолжит работать:
+  # удаляется только имя файла. Ярлык, если он есть, переписывается на новый путь.
+  rm -f -- "$(grigdesk_desktop_legacy_app_path)"
+  if [ -x "$ROOT/deploy/shortcut.sh" ]; then
+    "$ROOT/deploy/shortcut.sh" refresh || echo '⚠ Ярлык не обновлён: deploy/shortcut.sh install' >&2
+  fi
 }
 
 # Статус отражает пригодный к запуску файл и общий путь без требования Node.
@@ -121,8 +137,8 @@ desktop_status() {
   local installed=0
   local described=0
 
-  destination="$(cockpit_desktop_app_path)"
-  runtime="$(cockpit_desktop_runtime_path)"
+  destination="$(desktop_app)"
+  runtime="$(grigdesk_desktop_runtime_path)"
 
   if [ -f "$destination" ] && [ -x "$destination" ]; then
     installed=1
@@ -140,14 +156,14 @@ case "${1:-}" in
     install_desktop
     ;;
   remove)
-    desktop_app="$(cockpit_desktop_app_path)"
-    rm -f -- "$desktop_app" "$(cockpit_desktop_runtime_path)" "$(dirname "$desktop_app")/data-home"
+    rm -f -- "$(desktop_app)" "$(grigdesk_desktop_legacy_app_path)" \
+      "$(grigdesk_desktop_runtime_path)" "$(grigdesk_desktop_marker_path)"
     ;;
   status)
     desktop_status
     ;;
   *)
-    echo 'использование: cockpit desktop install|remove|status' >&2
+    echo 'использование: grigdesk-ctl desktop install|remove|status' >&2
     exit 2
     ;;
 esac

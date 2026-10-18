@@ -4,8 +4,8 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { dataHome, dataPath } from '../shared/runtime/dataHome.ts';
 import path from 'node:path';
 
-import { probeCockpit } from '../shared/runtime/cockpitReadiness.ts';
-import type { CockpitProbe } from '../shared/runtime/cockpitReadiness.ts';
+import { probeGrigDesk } from '../shared/runtime/grigDeskReadiness.ts';
+import type { GrigDeskProbe } from '../shared/runtime/grigDeskReadiness.ts';
 import type { CliArgs } from './args.ts';
 import type { Settings } from './commands.ts';
 import { printable, renderText } from './status.ts';
@@ -28,7 +28,7 @@ export interface ServerState {
   reason: string | null;
 }
 
-export const UNIT = 'cockpit-server.service';
+export const UNIT = 'grigdesk-server.service';
 const PROPERTIES = 'LoadState,ActiveState,SubState,Result,WorkingDirectory';
 
 function serverState(state: ServerStateName, managed: boolean | null, reason: string | null): ServerState {
@@ -65,12 +65,12 @@ export function parseShow(text: string): UnitInfo {
  */
 export function deriveServerState(input: {
   unit: UnitInfo | null;
-  probe: CockpitProbe;
+  probe: GrigDeskProbe;
   expectedDirectory: string;
   gate: string | null;
 }): ServerState {
   const { unit, probe, expectedDirectory, gate } = input;
-  const ready = probe === 'cockpit';
+  const ready = probe === 'grigdesk';
   const refused = probe === 'refused';
 
   if (!unit) {
@@ -169,7 +169,7 @@ export function gateReason(journal: string): string | null {
 export async function readServer(root: string, settings: Settings): Promise<ServerState & { url: string }> {
   const [show, probe] = await Promise.all([
     run('systemctl', ['--user', 'show', UNIT, `--property=${PROPERTIES}`], 5000),
-    probeCockpit(settings.origin),
+    probeGrigDesk(settings.origin),
   ]);
   const unit = show.code === 0 ? parseShow(show.stdout) : null;
   let gate: string | null = null;
@@ -198,7 +198,7 @@ export async function readServer(root: string, settings: Settings): Promise<Serv
  * Срок проверяется после каждого снимка; падение службы даёт отдельный отказ.
  */
 async function waitForServer(root: string, settings: Settings): Promise<number> {
-  const seconds = Number(process.env.COCKPIT_WAIT_SEC) || 90;
+  const seconds = Number(process.env.GRIGDESK_WAIT_SEC) || 90;
   const deadline = Date.now() + seconds * 1000;
   let state = await readServer(root, settings);
 
@@ -240,7 +240,7 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
     const unit = show.code === 0 ? parseShow(show.stdout) : null;
 
     if (unit?.load === 'not-found') {
-      console.error('Служба сервера не установлена; журнал ручного запуска: ' + (process.env.COCKPIT_LOG
+      console.error('Служба сервера не установлена; журнал ручного запуска: ' + (process.env.GRIGDESK_LOG
         || dataPath(dataHome({ env: process.env, home: process.env.HOME || os.homedir() }), 'log')));
 
       return 1;
@@ -278,16 +278,16 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
     return args.wait ? waitForServer(root, settings) : 0;
   }
 
-  // Вне службы порт держит сервер приложения Кокпита или ручной запуск: systemd им не владеет.
+  // Вне службы порт держит сервер приложения GrigDesk или ручной запуск: systemd им не владеет.
   if (state.state === 'ready' && state.managed === false) {
-    console.error('Сервер работает вне службы (приложение Кокпита или ручной запуск); '
+    console.error('Сервер работает вне службы (приложение GrigDesk или ручной запуск); '
       + 'systemd им не управляет');
 
     return 1;
   }
 
   if (state.state === 'not_responding' && action === 'start') {
-    console.error('Сервер не отвечает: cockpit server restart');
+    console.error('Сервер не отвечает: grigdesk-ctl server restart');
 
     return 1;
   }

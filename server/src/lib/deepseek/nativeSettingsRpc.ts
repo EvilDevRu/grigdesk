@@ -18,7 +18,7 @@ export interface DeepSeekSettingsRpc {
 export function acpDeepSeekSettingsRpc(client: AcpClient, initialized: unknown): DeepSeekSettingsRpc {
   const capability = (initialized as {
     agentCapabilities?: { _meta?: Record<string, { contract?: number }> };
-  } | null)?.agentCapabilities?._meta?.['cockpit.settings'];
+  } | null)?.agentCapabilities?._meta?.['grigdesk.settings'];
 
   if (capability?.contract !== 1) {
     throw new Error('Приватный мост настроек ACP не подтверждён');
@@ -46,7 +46,7 @@ export function acpDeepSeekSettingsRpc(client: AcpClient, initialized: unknown):
 
       try {
         return await Promise.race([
-          client.request(`_cockpit/${method}`, args, timeoutMs), cancellation,
+          client.request(`_grigdesk/${method}`, args, timeoutMs), cancellation,
         ]);
       } finally {
         if (aborted) {

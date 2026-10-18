@@ -140,7 +140,7 @@ async function linkWorkspace(
     for (const [name, version] of Object.entries(closure.external[item.name] ?? {})) {
       const alias = buildManifest.dependencies[name] === version
         ? name
-        : `cockpit-${name.replaceAll('@', '').replaceAll('/', '-')}-${version}`;
+        : `grigdesk-${name.replaceAll('@', '').replaceAll('/', '-')}-${version}`;
       const dependency = path.join(moduleRoot, alias);
 
       await fs.stat(dependency);
@@ -463,7 +463,7 @@ export async function buildDeepSeekRuntime(options: {
     const descriptor = {
       ...contract,
       buildId,
-      runtimeVersion: `${manifest.version}.cockpit.b${buildId.slice(0, 16)}`,
+      runtimeVersion: `${manifest.version}.grigdesk.b${buildId.slice(0, 16)}`,
       inputIdentity,
       payload,
     };

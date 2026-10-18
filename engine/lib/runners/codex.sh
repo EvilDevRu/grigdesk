@@ -85,7 +85,7 @@ runner_codex_run() {
     local codex_native codex_alias_dir
     local -a codex_native_candidates
     # Не наследуем :workspace: у него широкое host-read, а same-UID
-    # bearer Cockpit превращает localhost в косвенный Docker/worktree lifecycle.
+    # bearer GrigDesk превращает localhost в косвенный Docker/worktree lifecycle.
     # Custom profile видит только runtime minimum, workspace roots и
     # точные trusted tools; .git/.codex остаются read-only. Deny для
     # существующего каталога на Linux bwrap непереносим; read даёт ту же
@@ -248,7 +248,7 @@ import json
 import sys
 
 # reasoning_output_tokens у codex входит в output_tokens и отдельным ключом не
-# едет: набор полей общий для всех раннеров, иначе кокпиту пришлось бы знать,
+# едет: набор полей общий для всех раннеров, иначе GrigDesk пришлось бы знать,
 # какой вендор какими словами называет свой расход.
 FIELDS = (
     ("TOKENS_IN", "input_tokens"),

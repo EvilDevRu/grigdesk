@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
-const version = process.env.COCKPIT_APP_VERSION || JSON.parse(
+const version = process.env.GRIGDESK_APP_VERSION || JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
 ).version;
 

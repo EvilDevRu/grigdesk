@@ -1,4 +1,4 @@
-// Клиент к порталу Битрикс24 (адрес портала — из настроек кокпита).
+// Клиент к порталу Битрикс24 (адрес портала — из настроек GrigDesk).
 //
 // Авторизация — как в браузере: POST формы логина /salary/?login=yes отдаёт
 // сессионные куки (BITRIX_SM_*, PHPSESSID), дальше все запросы идут с этими
@@ -863,7 +863,7 @@ export class B24Client {
 
     /**
      * Нормализует элементы socialnetwork.api.workgroup.list. Метод отдаёт строки
-     * даже для числовых id; наружу кокпит держит единый числовой GROUP_ID.
+     * даже для числовых id; наружу GrigDesk держит единый числовой GROUP_ID.
      *
      * @param {Array<object>} items
      * @returns {Array<{id:number,name:string,type:string}>}

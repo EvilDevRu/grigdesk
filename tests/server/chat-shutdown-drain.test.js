@@ -16,7 +16,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function apiFixture(t, { executor }) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-drain-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-drain-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   const events = [];

@@ -111,9 +111,9 @@ test('Codex передаёт native план в argv и thread; resume посл�
     tokenInfoReader: async () => null,
     env: {
       ...process.env,
-      COCKPIT_CODEX_FIXTURE_TRACE: trace,
-      COCKPIT_CODEX_FIXTURE_SCENARIO: 'native-settings',
-      COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '0',
+      GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+      GRIGDESK_CODEX_FIXTURE_SCENARIO: 'native-settings',
+      GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0',
     },
   };
   const first = await codex.run({ ...options, nativeSettings: plan });

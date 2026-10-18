@@ -1,4 +1,4 @@
-import type { CockpitLink, LinkEvent, LinkState, OperationIntent, RequestInput } from './types.ts';
+import type { GrigDeskLink, LinkEvent, LinkState, OperationIntent, RequestInput } from './types.ts';
 import { parseQr } from './qr.ts';
 
 type Options = {
@@ -15,7 +15,7 @@ type Options = {
  * Dev/test мост получает синтетические данные извне; release не включает fixtures.
  * Один mock повторяет generation, lock и durable outbox контракт нативного владельца.
  */
-export class MockLink implements CockpitLink {
+export class MockLink implements GrigDeskLink {
   state: LinkState;
   calls: RequestInput[] = [];
   private options: Options;
@@ -29,7 +29,7 @@ export class MockLink implements CockpitLink {
     this.outbox = structuredClone(options.outbox || []);
     this.state = {
       paired: true,
-      brainName: 'Синтетический Кокпит',
+      brainName: 'Синтетический GrigDesk',
       deviceName: 'Тестовый телефон',
       deviceId: 'd12345678',
       relays: [

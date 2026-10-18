@@ -154,7 +154,7 @@ test('без ключа движок заблокирован и называе�
   const voices = await engine.voices();
 
   assert.equal(doctor.status, 'blocked');
-  assert.match(doctor.install, /COCKPIT_SHOWCASE_YANDEX_API_KEY/);
+  assert.match(doctor.install, /GRIGDESK_SHOWCASE_YANDEX_API_KEY/);
   assert.ok(voices.length > 5, 'голоса видны и до настройки — с причиной');
   assert.ok(voices.every((voice) => !voice.available && /ключ/i.test(voice.reason)));
 });

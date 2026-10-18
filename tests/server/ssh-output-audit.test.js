@@ -126,7 +126,7 @@ test('broker возвращает агенту ограниченный выво
 });
 
 test('журнал пишет ограниченный результат без пароля с приватными правами', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-audit-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-audit-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await loadModule(
     '../../server/src/lib/ssh/audit.ts',

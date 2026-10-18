@@ -8,7 +8,7 @@ import { sealUiRelease } from '../src/uiRelease.ts';
 
 const desktop = path.resolve(import.meta.dirname, '..');
 const distribution = path.join(desktop, 'dist');
-const splashFiles = ['index.html', 'style.css', 'illustration.png'];
+const splashFiles = ['index.html', 'style.css', 'background.png', 'wordmark.svg'];
 const execute = promisify(execFile);
 
 /**
@@ -45,7 +45,7 @@ async function buildDesktop(): Promise<void> {
       external: ['electron'],
     });
     // Окно получает заранее сглаженный растр: уменьшение упаковочной иконки 512 px
-    // самой панелью задач теряет сглаживание и делает дугу зубчатой.
+    // самой панелью задач теряет сглаживание и делает края букв зубчатыми.
     await copyFile(path.join(desktop, 'build/window-icon.png'), path.join(output, 'icon.png'));
     await mkdir(path.join(output, 'splash'));
 

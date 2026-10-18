@@ -25,7 +25,7 @@ const FIXTURE = path.join(ROOT, 'tests/fixtures/claude-in-turn/fake-claude.mjs')
  */
 async function fixture(t, { holdFinal = false, steers = 1, mode = 'merge',
   noLifecycle = false, holdStart = false } = {}) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-in-turn-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-in-turn-'));
   const bin = path.join(dir, 'claude-fixture');
   const trace = path.join(dir, 'trace.jsonl');
 
@@ -39,12 +39,12 @@ async function fixture(t, { holdFinal = false, steers = 1, mode = 'merge',
     trace,
     env: {
       ...process.env,
-      COCKPIT_CLAUDE_FIXTURE_TRACE: trace,
-      ...(holdFinal ? { COCKPIT_CLAUDE_FIXTURE_HOLD_FINAL: '1' } : {}),
-      COCKPIT_CLAUDE_FIXTURE_MODE: mode,
-      ...(noLifecycle ? { COCKPIT_CLAUDE_FIXTURE_NO_LIFECYCLE: '1' } : {}),
-      ...(holdStart ? { COCKPIT_CLAUDE_FIXTURE_HOLD_START: '1' } : {}),
-      ...(steers > 1 ? { COCKPIT_CLAUDE_FIXTURE_STEERS: String(steers) } : {}),
+      GRIGDESK_CLAUDE_FIXTURE_TRACE: trace,
+      ...(holdFinal ? { GRIGDESK_CLAUDE_FIXTURE_HOLD_FINAL: '1' } : {}),
+      GRIGDESK_CLAUDE_FIXTURE_MODE: mode,
+      ...(noLifecycle ? { GRIGDESK_CLAUDE_FIXTURE_NO_LIFECYCLE: '1' } : {}),
+      ...(holdStart ? { GRIGDESK_CLAUDE_FIXTURE_HOLD_START: '1' } : {}),
+      ...(steers > 1 ? { GRIGDESK_CLAUDE_FIXTURE_STEERS: String(steers) } : {}),
     },
   };
 }
@@ -353,7 +353,7 @@ async function lifecycleFixture(t, options = {}) {
 
   await waitFor(() => port, 'порт уточнения');
   await port.deliver({
-    messageId: 'cockpit-non-uuid',
+    messageId: 'grigdesk-non-uuid',
     text: 'Вопрос',
     sequence: 1,
   });
@@ -382,7 +382,7 @@ test('Claude merge: consumed приходит на started до единстве
   await writeFile(`${f.trace}.start`, '');
   await waitFor(() => f.receipts.some((event) => event.state === 'consumed'), 'consumed на started');
 
-  assert.deepEqual(f.receipts, [{ messageId: 'cockpit-non-uuid', state: 'consumed' }]);
+  assert.deepEqual(f.receipts, [{ messageId: 'grigdesk-non-uuid', state: 'consumed' }]);
   assert.equal((await readTrace(f.trace)).some((row) => row.message?.type === 'result'), false);
   assert.equal(f.isSettled(), false);
 
@@ -454,7 +454,7 @@ test('Claude: stop очереди даёт failed, поздний запуск C
   await waitFor(f.isSettled, 'stop закрыл ход');
   await rejected;
 
-  assert.deepEqual(f.receipts, [{ messageId: 'cockpit-non-uuid', state: 'failed' }]);
+  assert.deepEqual(f.receipts, [{ messageId: 'grigdesk-non-uuid', state: 'failed' }]);
   assert.equal(f.session.busy, false);
 
   let nextSettled = false;
@@ -537,7 +537,7 @@ test('Claude late: queued после финала даёт consumed, ответ 
   await writeFile(`${f.trace}.next`, '');
   await waitFor(() => nextSettled, 'новый ход после позднего уточнения');
 
-  assert.deepEqual(f.receipts, [{ messageId: 'cockpit-non-uuid', state: 'consumed' }]);
+  assert.deepEqual(f.receipts, [{ messageId: 'grigdesk-non-uuid', state: 'consumed' }]);
   assert.deepEqual(f.background.map((event) => event.reply), ['Отвечаю: Вопрос']);
   assert.equal((await next).reply, 'Новый ход завершён.');
 });
@@ -568,7 +568,7 @@ async function startFixture(t, { mode = 'session', exit = false, blocks = '1' } 
   const messages = new ChatAssistantMessages({ dir: journalDir });
   const env = {
     ...process.env,
-    COCKPIT_CLAUDE_FIXTURE_BLOCKS: blocks,
+    GRIGDESK_CLAUDE_FIXTURE_BLOCKS: blocks,
     CLAUDE_BLOCKS_RELEASE: release,
     CLAUDE_BLOCKS_EXIT: exit ? '1' : '0',
   };
@@ -812,7 +812,7 @@ test('Claude: разовый запуск и живая сессия получ�
 });
 
 test('Claude: документация плагинов читается без вопроса, смена каталогов переоткрывает сессию', async (t) => {
-  const docsDir = '/srv/cockpit plugins/audit/docs';
+  const docsDir = '/srv/grigdesk plugins/audit/docs';
   const once = await runWithAttachments(t, (f, attachmentsDir, onInTurnReady) => claude.run({
     config: { claudeBin: f.bin },
     env: f.env,

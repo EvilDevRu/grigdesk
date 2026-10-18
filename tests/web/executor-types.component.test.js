@@ -72,7 +72,7 @@ function compileShell() {
     providers: 'useProvidersStore',
     plugins: 'usePluginsStore',
     'notify-watch': 'useNotifyWatchStore',
-    'cockpit-update': 'useCockpitUpdateStore',
+    'grigdesk-update': 'useGrigDeskUpdateStore',
     chat: 'useChatStore',
     board: 'useBoardStore',
     tasks: 'useTasksStore',
@@ -133,8 +133,8 @@ function compileShell() {
 test('типы исполнителей в настоящих настройках и топбаре', async (t) => {
   const browser = await installUiBrowser(t);
 
-  globalThis.__COCKPIT_VERSION__ = 'test';
-  globalThis.__COCKPIT_SHA__ = 'test';
+  globalThis.__GRIGDESK_VERSION__ = 'test';
+  globalThis.__GRIGDESK_SHA__ = 'test';
 
   const { reactive, ref, nextTick } = await import('../../web/node_modules/vue/index.mjs');
   const { createPinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
@@ -148,7 +148,7 @@ test('типы исполнителей в настоящих настройка
 
   await t.test('две группы: общая гармошка, ARIA, поля, API и credits', async (s) => {
     browser.document.body.innerHTML = '<div id="mount"></div>';
-    browser.localStorage.setItem('cockpit-settings-tab', 'providers');
+    browser.localStorage.setItem('grigdesk-settings-tab', 'providers');
 
     const providers = reactive({
       providers: [card('universal'), card('tripo', '3d', false)],
@@ -175,7 +175,7 @@ test('типы исполнителей в настоящих настройка
       }),
       useChatStore: () => ({ compactWindow: 0 }),
       useDeviceStore: () => ({ canInstall: false }),
-      useCockpitUpdateStore: () => ({ state: null, load: async () => {} }),
+      useGrigDeskUpdateStore: () => ({ state: null, load: async () => {} }),
     };
 
     const wrapper = mount(SettingsView, {
@@ -270,7 +270,7 @@ test('типы исполнителей в настоящих настройка
 
       globalThis.__typesShellStores = Object.fromEntries([
         'useSystemStore', 'useDeviceStore', 'usePluginsStore', 'useNotifyWatchStore',
-        'useCockpitUpdateStore', 'useChatStore', 'useBoardStore',
+        'useGrigDeskUpdateStore', 'useChatStore', 'useBoardStore',
         'useTasksStore', 'useUiStore', 'useDockStore',
       ].map((name) => [name, base]));
       globalThis.__typesShellStores.useProvidersStore = prov;

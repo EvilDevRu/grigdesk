@@ -22,7 +22,7 @@ const windowKey = 'AUTH_STORE_WINDOW_KEY_MARKER'.padEnd(43, '_');
  * неизменность после миграции.
  */
 async function storeFixture(t, options = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-auth-store-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-auth-store-'));
   const legacyAccountPath = path.join(root, 'auth-account.json');
   const sessionsPath = path.join(root, 'auth-sessions.json');
   let clock = options.start ?? Date.parse('2026-01-01T00:00:00.000Z');
@@ -264,7 +264,7 @@ test('AS-11: auth/state не раскрывает scope анонимно и от
     remoteAddress: '127.0.0.1',
     headers: {
       host: new URL(origin).host,
-      'x-cockpit-window-key': windowKey,
+      'x-grigdesk-window-key': windowKey,
     },
   });
   const authorized = await app.inject({

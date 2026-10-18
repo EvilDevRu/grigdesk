@@ -12,8 +12,8 @@ export interface RequestSpec {
   json?: boolean;
 }
 
-const NETWORK_ERROR = 'Не удалось связаться с Cockpit.';
-const TIMEOUT_ERROR = 'Cockpit не ответил за 300 с: операция могла выполниться — '
+const NETWORK_ERROR = 'Не удалось связаться с GrigDesk.';
+const TIMEOUT_ERROR = 'GrigDesk не ответил за 300 с: операция могла выполниться — '
   + 'проверьте результат перед повтором.';
 const TIMEOUT_MS = 300_000;
 const REASON_BYTES = 64 * 1024;
@@ -59,7 +59,7 @@ async function failureReason(response: IncomingMessage, token: string): Promise<
 }
 
 /**
- * Выполняет один запрос к Cockpit без повторов и без перехода по redirect.
+ * Выполняет один запрос к GrigDesk без повторов и без перехода по redirect.
  * Собственный агент без proxyEnv игнорирует прокси; простой сокета ограничен 300 секундами.
  * Успешное тело читается целиком до выдачи, агент закрывается при любом исходе.
  */
@@ -68,7 +68,7 @@ export async function request(
   spec: RequestSpec,
   options: { timeoutMs?: number } = {},
 ): Promise<Uint8Array> {
-  const headers: Record<string, string> = { 'X-Cockpit-Token': connection.token };
+  const headers: Record<string, string> = { 'X-GrigDesk-Token': connection.token };
 
   if (spec.json) {
     headers['Content-Type'] = 'application/json';
@@ -104,7 +104,7 @@ export async function request(
       const detail = reason ? `: ${reason}` : '';
       const end = /[.!?…]$/.test(detail) ? '' : '.';
 
-      throw new B24Error(22, `Запрос к Cockpit завершился ошибкой HTTP ${status}${detail}${end}`);
+      throw new B24Error(22, `Запрос к GrigDesk завершился ошибкой HTTP ${status}${detail}${end}`);
     }
 
     const chunks: Buffer[] = [];

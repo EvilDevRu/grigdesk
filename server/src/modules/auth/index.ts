@@ -78,7 +78,7 @@ async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Pr
       return reply.code(403).send({ error: 'bad_window_origin' });
     }
 
-    if (!windowKeyMatches(request.headers['x-cockpit-window-key'], state.key)) {
+    if (!windowKeyMatches(request.headers['x-grigdesk-window-key'], state.key)) {
       return reply.code(401).send({ error: 'bad_window_key' });
     }
 

@@ -9,7 +9,7 @@ import { canonDocs, rootDoc } from './helpers/canon.mjs';
 test('COMP-DOC-01: канон не возвращает legacy floating chat и компактного компаньона', async () => {
   const combined = `${await rootDoc('CLAUDE.md')}\n${await canonDocs()}`;
 
-  assert.doesNotMatch(combined, /\bChatPanel\b|\bChatTabs\b|cockpit-chat-panel-composer-h/);
+  assert.doesNotMatch(combined, /\bChatPanel\b|\bChatTabs\b|grigdesk-chat-panel-composer-h/);
   assert.doesNotMatch(combined, /CompanionHost|CompanionBubble|speechSynthesis/);
   assert.match(combined, /logicalIdentity/);
   assert.match(combined, /companion:global/);

@@ -48,7 +48,7 @@ export async function writeDeepSeekArtifactFixture(root: string, marker: string)
   const metadata = {
     ...contract,
     buildId,
-    runtimeVersion: `${contract.source.version}.cockpit.b${buildId.slice(0, 16)}`,
+    runtimeVersion: `${contract.source.version}.grigdesk.b${buildId.slice(0, 16)}`,
     inputIdentity,
     payload,
   };

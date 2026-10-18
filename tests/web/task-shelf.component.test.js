@@ -19,7 +19,7 @@ function row(overrides = {}) {
     message: '',
     source: null,
     details: {
-      project: 'Кокпит',
+      project: 'GrigDesk',
       responsible: 'Иван Петров',
       deadline: '29.08.2026',
       overdue: false,
@@ -94,7 +94,7 @@ test('Нейтральная карточка показывает задачу,
     state: item.attributes('data-shelf-state'),
   }, {
     id: '#42',
-    project: 'Кокпит',
+    project: 'GrigDesk',
     title: 'Проверить поставку',
     waiting: 'Ожидание Жду оценку',
     activities: ['Битрикс24: В работе', 'Оценка: В очереди'],
@@ -205,7 +205,7 @@ test('Поиск объединяет номер, название, проект
     row({ taskId: '77', title: 'Другая задача' }),
   ]);
 
-  await wrapper.get('input[type="search"]').setValue(' #42  РАСЧЕТ кокпит ПЕТРОВ ');
+  await wrapper.get('input[type="search"]').setValue(' #42  РАСЧЕТ GrigDesk ПЕТРОВ ');
 
   assert.deepEqual(
     wrapper.findAll('[data-task-id]').map((item) => item.attributes('data-task-id')),

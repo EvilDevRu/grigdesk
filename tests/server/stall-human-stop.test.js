@@ -79,10 +79,10 @@ test('прошлый no-progress не перебивает свежую оста
   assert.equal(stall.stage, 'HYPOSKEPTIC');
 });
 
-// Формат строки принадлежит движку, а разбирает её кокпит. Разъезжаются они молча:
+// Формат строки принадлежит движку, а разбирает её GrigDesk. Разъезжаются они молча:
 // именно так «маршрут завершён» когда-то показывался как оборванный прогон. Сверяем
 // шаблон в `bin/factory` с тем, что фактически ловит правило.
-test('формат строки движка и правило кокпита сходятся', async () => {
+test('формат строки движка и правило GrigDesk сходятся', async () => {
   const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
   const factory = await fs.readFile(path.join(root, 'engine', 'bin', 'factory'), 'utf8');
 
@@ -189,7 +189,7 @@ test('исчерпание без цифр остаётся исчерпание
 
 // Формат суффикса принадлежит движку: комментарий узла собирает route-runtime, суффикс
 // строки остановки — `route_v2_stop_line_suffix`. Сверяем оба источника с правилом.
-test('формат исчерпания в движке и правило кокпита сходятся', async () => {
+test('формат исчерпания в движке и правило GrigDesk сходятся', async () => {
   const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
   const runtime = await fs.readFile(path.join(root, 'engine', 'lib', 'route-runtime.sh'), 'utf8');
   const factory = await fs.readFile(path.join(root, 'engine', 'bin', 'factory'), 'utf8');

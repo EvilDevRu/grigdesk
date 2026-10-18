@@ -43,7 +43,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 const ME = {
   id: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
 };
@@ -55,7 +55,7 @@ const link = (chatId, id) => `https://t.me/c/${String(chatId).replace('-100', ''
 const msg = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   chatType: 'supergroup',
   isForum: false,
   messageId: 100,
@@ -93,7 +93,7 @@ async function fixture(t, {
   enabled = true,
   archive: archiveStub = null,
 } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-tg-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-tg-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const ticketsDir = path.join(root, 'tickets');
   await fs.mkdir(ticketsDir, { recursive: true });
@@ -213,7 +213,7 @@ test('переписка по ссылке из задачи доезжает в
   const sent = await send();
   assert.ok(sent.includes(DISCUSSION_SECTION_TITLE), 'секции обсуждения нет вовсе');
   assert.match(sent, new RegExp(SECRET));
-  assert.match(sent, /Чат «Кокпит · баги»/);
+  assert.match(sent, /Чат «GrigDesk · баги»/);
   // Обсуждение — часть конверта задачи, а не отдельная реплика человека.
   assert.ok(
     sent.indexOf(DISCUSSION_SECTION_TITLE) < sent.indexOf('[/Задача чата]'),
@@ -227,7 +227,7 @@ test('закреплённая в тикете секция не дублиру�
   const { send } = await fixture(t, {
     ticket: {
       ...TICKET,
-      description: `${TICKET.description}\n\n${DISCUSSION_SECTION_TITLE}\nЧат «Кокпит · баги»\n[01.08.2026 09:00] Аня: ${STALE}`,
+      description: `${TICKET.description}\n\n${DISCUSSION_SECTION_TITLE}\nЧат «GrigDesk · баги»\n[01.08.2026 09:00] Аня: ${STALE}`,
     },
     messages: [msg()],
   });
@@ -267,7 +267,7 @@ test('чат чужого проекта закрыт и в чате: причи
 
   const sent = await send();
   assert.equal(sent.includes(SECRET), false, 'переписка чужого проекта уехала агенту');
-  assert.equal(sent.includes('Кокпит · баги'), false, 'даже имя чужого чата наружу не уезжает');
+  assert.equal(sent.includes('GrigDesk · баги'), false, 'даже имя чужого чата наружу не уезжает');
   assert.match(sent, /Ссылка не раскрыта/);
   assert.match(sent, /привязан к проекту/i);
 });

@@ -27,7 +27,7 @@ export interface TriageComment {
 export interface TriageAnsweredQuestion {
   question: string;
   answer: string;
-  actor: 'human' | 'cockpit-arbiter';
+  actor: 'human' | 'grigdesk-arbiter';
 }
 
 export interface TriageRouteChoice {

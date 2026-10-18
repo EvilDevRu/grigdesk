@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  cockpitAlive,
+  grigDeskAlive,
   offlineHtml,
   offlineUrl,
-  waitForCockpit,
+  waitForGrigDesk,
 } from '../../desktop/src/offline.ts';
 
 const origin = 'http://127.0.0.1:12345';
@@ -25,10 +25,10 @@ test('DW-21: HTML безопасно показывает адрес', () => {
 
   assert.match(html, /lang="ru"/);
   assert.match(html, /charset="utf-8"/);
-  assert.match(html, /Ждём сервер Кокпита/);
+  assert.match(html, /Ждём сервер GrigDesk/);
 
   const expectedMessage = 'Окно подключится само, как только сервер ответит\\. ' +
-    'Если ожидание затянулось, выполните в терминале <code>cockpit status</code>\\.';
+    'Если ожидание затянулось, выполните в терминале <code>grigdesk-ctl status</code>\\.';
 
   assert.match(html, new RegExp(expectedMessage));
   assert.match(html, /http:\/\/127\.0\.0\.1:1\/\?x=&quot;&lt;&gt;&amp;&#39;/);
@@ -48,7 +48,7 @@ test('DW-22: data URL обратимо кодирует HTML', () => {
 test('DW-23: готовность требует ответ auth/state', async () => {
   for (const configured of [true, false]) {
     for (const authenticated of [true, false]) {
-      assert.equal(await cockpitAlive(origin, {
+      assert.equal(await grigDeskAlive(origin, {
         fetchImpl: async (url, options) => {
           assert.equal(url, origin + '/api/auth/state');
           assert.equal(options.method, 'GET');
@@ -83,10 +83,10 @@ test('DW-23: готовность требует ответ auth/state', async (
       },
     },
   ]) {
-    assert.equal(await cockpitAlive(origin, { fetchImpl: async () => reply }), false);
+    assert.equal(await grigDeskAlive(origin, { fetchImpl: async () => reply }), false);
   }
 
-  assert.equal(await cockpitAlive(origin, {
+  assert.equal(await grigDeskAlive(origin, {
     fetchImpl: async () => {
       throw new Error('Тестовый сетевой отказ');
     },
@@ -97,7 +97,7 @@ test('DW-23/таймаут: зависший fetch получает abort чер
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   let signal;
-  const pending = cockpitAlive(origin, {
+  const pending = grigDeskAlive(origin, {
     fetchImpl: (_url, options) => {
       signal = options.signal;
 
@@ -119,7 +119,7 @@ test('DW-23/JSON: позднее тело ответа после внешней
   const controller = new AbortController();
   const body = Promise.withResolvers();
   let reading = false;
-  const pending = cockpitAlive(origin, {
+  const pending = grigDeskAlive(origin, {
     signal: controller.signal,
     fetchImpl: async () => ({
       status: 200,
@@ -147,7 +147,7 @@ test('DW-24: ожидание ограничено отменой — два о�
   let requests = 0;
   const sleeps = [];
 
-  assert.equal(await waitForCockpit(origin, {
+  assert.equal(await waitForGrigDesk(origin, {
     fetchImpl: async () => {
       requests += 1;
 
@@ -167,7 +167,7 @@ test('DW-24/до начала: отмена не вызывает fetch или s
   let requests = 0;
 
   controller.abort();
-  assert.equal(await waitForCockpit(origin, {
+  assert.equal(await waitForGrigDesk(origin, {
     signal: controller.signal,
     fetchImpl: async () => {
       requests += 1;
@@ -182,7 +182,7 @@ test('DW-24/до начала: отмена не вызывает fetch или s
 test('DW-24/запрос: отмена прерывает fetch без последующего сна', async () => {
   const controller = new AbortController();
   let signal;
-  const pending = waitForCockpit(origin, {
+  const pending = waitForGrigDesk(origin, {
     signal: controller.signal,
     fetchImpl: (_url, options) => {
       signal = options.signal;
@@ -205,7 +205,7 @@ test('DW-24/сон: отмена собственного сна заверша�
 
   const controller = new AbortController();
   let requests = 0;
-  const pending = waitForCockpit(origin, {
+  const pending = waitForGrigDesk(origin, {
     signal: controller.signal,
     intervalMs: 30,
     fetchImpl: async () => {
@@ -226,7 +226,7 @@ test('DW-24/сон: отмена собственного сна заверша�
 test('DW-24/подмена сна: Abort rejection не уходит в caller', async () => {
   const controller = new AbortController();
 
-  assert.equal(await waitForCockpit(origin, {
+  assert.equal(await waitForGrigDesk(origin, {
     signal: controller.signal,
     fetchImpl: async () => response(500),
     sleep: async (_ms, signal) => {
@@ -242,7 +242,7 @@ test('DW-24/поздний ответ: успех после abort не загр
   const controller = new AbortController();
   const reply = Promise.withResolvers();
   let requests = 0;
-  const pending = waitForCockpit(origin, {
+  const pending = waitForGrigDesk(origin, {
     signal: controller.signal,
     fetchImpl: async () => {
       requests += 1;

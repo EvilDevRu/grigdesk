@@ -79,10 +79,10 @@ test('W4: result различает fresh/update/rollback, ошибки и ос�
     sourceChanged: false,
   };
   assert.equal(installResultText(fresh),
-    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите Cockpit.');
+    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите GrigDesk.');
   assert.equal(installResultText(update),
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите Cockpit, чтобы применить.');
-  assert.equal(installResultText(rollback), 'Версия v1.0.0 восстановлена. Перезапустите Cockpit.');
+    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk, чтобы применить.');
+  assert.equal(installResultText(rollback), 'Версия v1.0.0 восстановлена. Перезапустите GrigDesk.');
 
   const failed = installJob('failed');
 

@@ -79,7 +79,7 @@ function ids(registry) {
 async function registryFixture(t) {
   const executors = await getExecutors();
   const original = new Map(executors);
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-registry-cache-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-registry-cache-'));
   const gates = new Map();
   const state = {
     builds: 0,

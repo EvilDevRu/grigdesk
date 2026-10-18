@@ -1,4 +1,4 @@
-// Реестр песочниц глазами кокпита: t<номер>.env фабрики + собственный журнал подъёмов.
+// Реестр песочниц глазами GrigDesk: t<номер>.env фабрики + собственный журнал подъёмов.
 // Раздел «Песочницы» не имеет своего источника правды о стендах: он читает тот же
 // каталог состояния, в который пишет подъём профиля, и отделяет стенд конвейера
 // (есть t<номер>.pipeline) от поднятого руками.
@@ -17,7 +17,7 @@ import {
 } from '../../server/src/lib/sandboxes/registry.ts';
 
 async function stateFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandboxes-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandboxes-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stateDir = path.join(root, 'state');
@@ -72,7 +72,7 @@ test('реестр читает поднятые стенды и отделяе�
 
 // Профиль движка кладёт ссылку на реестр ДО подъёма, и все минуты провижининга она
 // висит битой. Обрыв чтения на такой ссылке уже ронял status.sh, поэтому реестр
-// кокпита обязан её просто пропускать.
+// GrigDesk обязан её просто пропускать.
 test('битая ссылка и мусорный env не роняют чтение реестра', async (t) => {
   const { stateDir, journalDir } = await stateFixture(t);
 
@@ -113,7 +113,7 @@ test('прогресс подъёма читается по последней �
   assert.equal(await readSandboxStage(stateDir, '990008'), null);
 });
 
-test('журнал кокпита переживает перезапись и отбрасывает повреждённую запись', async (t) => {
+test('журнал GrigDesk переживает перезапись и отбрасывает повреждённую запись', async (t) => {
   const { journalDir } = await stateFixture(t);
   const record = {
     task: '990009',

@@ -167,8 +167,8 @@ test('нативные метки кандидата optional и проходя�
 
 test('канонический текст не тащит в синтез разметку ввода', () => {
   assert.equal(
-    canonicalTextOf('  Открываем   обзор\nкокпита.  '),
-    'Открываем обзор кокпита.',
+    canonicalTextOf('  Открываем   обзор\nGrigDesk.  '),
+    'Открываем обзор GrigDesk.',
   );
   assert.equal(canonicalTextOf('Я купил з+амок.'), 'Я купил замок.');
 });
@@ -200,8 +200,8 @@ test('знак «+» перед гласной — ударение, любой 
 
 test('нечитаемые обрывки называются словами, а не флагом', () => {
   assert.deepEqual(
-    unreadableFragments('Открываем API и Cockpit за 2026 год, v2.', ['latin', 'digits']),
-    ['API', 'Cockpit', '2026', 'v2'],
+    unreadableFragments('Открываем API и GrigDesk за 2026 год, v2.', ['latin', 'digits']),
+    ['API', 'GrigDesk', '2026', 'v2'],
   );
   assert.deepEqual(unreadableFragments('Отчёт за 2026 год и API.', ['digits']), ['2026']);
   assert.deepEqual(unreadableFragments('Отчёт за 2026 год.', undefined), []);
@@ -423,7 +423,7 @@ test('тишина вместо речи ловится без распозна�
   const file = await makeSilence(path.join(dir, 'silence.wav'), 1.5);
   const result = await checkSpeech({
     audioFile: file,
-    expectedText: 'Открываем обзор кокпита.',
+    expectedText: 'Открываем обзор GrigDesk.',
     // Распознавание тут не нужно: пустая дорожка видна по цифрам, и тратить на
     // неё минуту работы модели незачем.
     transcribe: async () => {
@@ -443,7 +443,7 @@ test('недоступное распознавание даёт пропуск,
   const file = await makeWav(path.join(dir, 'tone.wav'), { seconds: 1.2 });
   const result = await checkSpeech({
     audioFile: file,
-    expectedText: 'Открываем обзор кокпита.',
+    expectedText: 'Открываем обзор GrigDesk.',
     transcribe: null,
   });
 
@@ -459,7 +459,7 @@ test('сорванное распознавание тоже пропуск, и 
   const file = await makeWav(path.join(dir, 'tone.wav'), { seconds: 1.2 });
   const result = await checkSpeech({
     audioFile: file,
-    expectedText: 'Открываем обзор кокпита.',
+    expectedText: 'Открываем обзор GrigDesk.',
     transcribe: async () => {
       throw new Error('модель речи не запущена');
     },
@@ -475,8 +475,8 @@ test('пропущенное слово показывается словом, �
   t.after(() => rm(dir, { recursive: true, force: true }));
 
   const file = await makeWav(path.join(dir, 'tone.wav'), { seconds: 1.2 });
-  const expected = 'Эта настройка не включает запись экрана в разделе презентаций кокпита сейчас';
-  const heard = 'Эта настройка включает запись экрана в разделе презентаций кокпита сейчас';
+  const expected = 'Эта настройка не включает запись экрана в разделе презентаций GrigDesk сейчас';
+  const heard = 'Эта настройка включает запись экрана в разделе презентаций GrigDesk сейчас';
   const result = await checkSpeech({
     audioFile: file,
     expectedText: expected,
@@ -495,8 +495,8 @@ test('совпавшая расшифровка проходит, а перег�
   const quiet = await makeWav(path.join(dir, 'quiet.wav'), { seconds: 1.2, volume: '-12dB' });
   const passed = await checkSpeech({
     audioFile: quiet,
-    expectedText: 'Открываем обзор кокпита.',
-    transcribe: async () => 'открываем обзор кокпита',
+    expectedText: 'Открываем обзор GrigDesk.',
+    transcribe: async () => 'открываем обзор GrigDesk',
   });
 
   assert.equal(passed.status, 'passed');
@@ -510,8 +510,8 @@ test('совпавшая расшифровка проходит, а перег�
 
   const clipped = await checkSpeech({
     audioFile: loud,
-    expectedText: 'Открываем обзор кокпита.',
-    transcribe: async () => 'открываем обзор кокпита',
+    expectedText: 'Открываем обзор GrigDesk.',
+    transcribe: async () => 'открываем обзор GrigDesk',
   });
 
   assert.equal(clipped.status, 'warning');

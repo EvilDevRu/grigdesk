@@ -20,7 +20,7 @@ function entry() {
 }
 
 test('сервер добавляет rx, сериализует квоту и учитывает размер после рестарта', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-store-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-store-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const now = () => new Date('2026-09-23T23:59:59Z');
   const dailyBytes = Buffer.byteLength(`${JSON.stringify({ ...entry(), rx: now().toISOString() })}\n`) + 1;
@@ -43,7 +43,7 @@ test('сервер добавляет rx, сериализует квоту и �
 });
 
 test('сервер чинит только незавершённый хвост и удаляет старые UTC-дни', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-repair-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-repair-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const line = `${JSON.stringify({ ...entry(), rx: '2026-09-23T00:00:00Z' })}\n`;
   await writeFile(path.join(dir, '2026-09-23.ndjson'), `${line}{"unfinished":`);
@@ -64,7 +64,7 @@ test('сервер чинит только незавершённый хвост
 // дескриптора, а сборщик мусора позже закрывал его ещё раз — уже чужой файл
 // или сокет, либо ронял процесс исключением EBADF.
 test('скачивание закрывает FileHandle само: сборка мусора не трогает чужой дескриптор', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-download-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-download-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const store = createWebLogStore({ dir, now: () => new Date('2026-09-23T01:00:00Z') });
   t.after(() => store.close());

@@ -42,7 +42,7 @@ export const FORECAST_BASES = ['current', 'average'] as const;
 export type ForecastBasis = typeof FORECAST_BASES[number];
 
 // Откуда взялся сброс: `scheduled` — окно истекло само, `own` — за минуты до него в
-// кокпите нажали «Использовать сброс лимита», `external` — всё остальное, то есть
+// GrigDesk нажали «Использовать сброс лимита», `external` — всё остальное, то есть
 // вендор сбросил сам.
 export const RESET_ORIGINS = ['scheduled', 'own', 'external'] as const;
 

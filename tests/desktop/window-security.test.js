@@ -28,7 +28,7 @@ test('DC-26/externalUrl: прежняя проверка внешних HTTP(S)-
   for (const url of [
     'file:///etc/passwd',
     'javascript:alert(1)',
-    'cockpit-media://media/x',
+    'grigdesk-media://media/x',
     'https://user:password@example.org/',
     'не url',
     'https://example.org/' + 'a'.repeat(8192),
@@ -41,12 +41,12 @@ test('DW-12: окно получает безопасные опции', () => {
   const options = windowOptions('/app/icon.png', true, size);
 
   assert.equal(options.webPreferences.partition, LOCAL_PARTITION);
-  assert.equal(LOCAL_PARTITION, 'persist:cockpit-local');
+  assert.equal(LOCAL_PARTITION, 'persist:grigdesk-local');
   assert.equal(options.width, 900);
   assert.equal(options.height, 700);
   assert.equal(options.minWidth, 600);
   assert.equal(options.minHeight, 600);
-  assert.equal(options.title, 'Кокпит');
+  assert.equal(options.title, 'GrigDesk');
   assert.equal(options.show, false);
   assert.equal(options.autoHideMenuBar, false);
   assert.equal(options.backgroundColor, '#0b0d11');
@@ -614,7 +614,7 @@ test('SW-N03 опции окна настроек', () => {
   assert.equal(options.show, false);
   assert.equal(options.minimizable, false);
   assert.equal(options.fullscreenable, false);
-  assert.equal(options.title, 'Настройки — Кокпит');
+  assert.equal(options.title, 'Настройки — GrigDesk');
 
   for (const [key, value] of Object.entries(geometry)) {
     assert.equal(options[key], value);

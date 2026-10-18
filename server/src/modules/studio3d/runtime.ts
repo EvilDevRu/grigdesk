@@ -448,7 +448,7 @@ class StudioRuntimeInstance {
 
   /**
    * onReady выключенного плагина не открывает диск. Недоступность configured root
-   * видна в state, но не срывает весь Cockpit; mutations остаются закрыты.
+   * видна в state, но не срывает весь GrigDesk; mutations остаются закрыты.
    */
   async start(): Promise<void> {
     if (!this.options.enabled()) {

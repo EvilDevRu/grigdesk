@@ -249,7 +249,7 @@ export async function fixture(name) {
       needsHuman: {
         kind: 'other',
         gate: null,
-        text: 'Решение доступно в кокпите',
+        text: 'Решение доступно в GrigDesk',
         actionToken: null,
       },
     });
@@ -296,9 +296,9 @@ export async function fixture(name) {
       parts: [{
         type: 'text',
         text: message.role === 'user'
-          ? 'Проверь экраны приложения и приблизь их к Кокпиту.'
+          ? 'Проверь экраны приложения и приблизь их к GrigDesk.'
           : 'Проверил навигацию, списки и карточки задач. Поиск и состояния ожидания теперь ' +
-            'устроены как в Кокпите. Дальше проверю диалоги и увеличенный шрифт.',
+            'устроены как в GrigDesk. Дальше проверю диалоги и увеличенный шрифт.',
       }],
     }));
 
@@ -317,7 +317,7 @@ export async function fixture(name) {
           pid: 'unsupported-visual',
           chatId: data.chat.chat.id,
           kind: 'unsupported',
-          reason: 'Это действие требует решения в Кокпите на компьютере.',
+          reason: 'Это действие требует решения в GrigDesk на компьютере.',
         }];
       }
     }
@@ -334,7 +334,7 @@ export async function fixture(name) {
   }
   if (['task-overview', 'task-stop', 'task-resume'].includes(name)) {
     options.route = '/tasks/' + data.task.task.id;
-    data.task.task.title = 'Привести мобильные экраны к дизайну Кокпита';
+    data.task.task.title = 'Привести мобильные экраны к дизайну GrigDesk';
     data.task.task.actions.stop = 'a'.repeat(48);
     data.task.task.actions.resume = 'b'.repeat(48);
   }
@@ -377,7 +377,7 @@ export async function fixture(name) {
   if (name === 'pair-error') {
     options.state.paired = false;
     options.state.unlocked = false;
-    options.state.error = 'Срок действия кода истёк. Создайте новый код в настройках Кокпита.';
+    options.state.error = 'Срок действия кода истёк. Создайте новый код в настройках GrigDesk.';
   }
 
   const directory = new URL(`visual/${name}/`, root);

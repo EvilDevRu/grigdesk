@@ -158,7 +158,7 @@ test('GL-08 обёртка поворачивает и масштабирует,
   assert.equal(wrapped.byteLength % 4, 0);
   assert.deepEqual(Buffer.from(after.bin), Buffer.from(before.bin));
   assert.equal(after.json.scenes[0].nodes.length, 1);
-  assert.equal(after.json.nodes.at(-1).name, 'cockpit-transform');
+  assert.equal(after.json.nodes.at(-1).name, 'grigdesk-transform');
   assert.deepEqual(inspectGlb(staticWrapped).size, [0.75, 1.5, 3]);
   assert.equal(stats.size, null);
   assert.equal(stats.triangles, 4);

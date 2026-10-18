@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -14,7 +14,12 @@ import {
 import { secureWebPreferences } from '../../desktop/src/windowSecurity.ts';
 
 const assets = new URL('../../desktop/assets/splash/', import.meta.url);
-const IMAGE_SHA256 = '3c6bf305047dccbe6215d1f1e625c4a7846bd63dd97eae431c8180cb42e2457c';
+const SPLASH_HASHES = {
+  'background.png': 'dfdcded22be22703db57e8a5b96e2ab34019f7789d1e9ff6e142021ea43a9188',
+  'wordmark.svg': '732ca732444dd5df453748cbec861562ec5fa344c124210f43fb6b7dd8925ba7',
+  'index.html': 'acf8133f47d09ab8e2b49842fd25f16551197434df3cdbe10a19bc082a1a65e5',
+  'style.css': 'b8a9538d1b90ec7792923f708d61a2ef2b5f94680883821a7522cd8b914aa18f',
+};
 
 /**
  * Фикстура webContents копит обработчики по событиям и запоминает обработчик window.open.
@@ -102,7 +107,7 @@ test('SP-01: опции заставки точно по решению, сес�
     frame: false,
     resizable: false,
     fullscreenable: false,
-    title: 'Кокпит',
+    title: 'GrigDesk',
     icon: '/app/icon.png',
     backgroundColor: '#15191f',
     webPreferences: {
@@ -184,7 +189,7 @@ test('SP-03: охрана заставки отменяет навигацию, 
   assert.equal(session.check(null, 'notifications', 'file://', {}), false);
 });
 
-test('SP-04: документ заставки — картинка и единственный текст без скриптов', async () => {
+test('GS-01: документ заставки — фон, надпись и статус без скриптов', async () => {
   const html = await readFile(new URL('index.html', assets), 'utf8');
   const csp = "default-src 'none'; img-src 'self'; style-src 'self'";
   const text = html
@@ -195,10 +200,12 @@ test('SP-04: документ заставки — картинка и един�
 
   assert.match(html, /<html lang="ru">/u);
   assert.match(html, /<meta charset="utf-8">/u);
-  assert.match(html, /<title>Кокпит<\/title>/u);
+  assert.match(html, /<title>GrigDesk<\/title>/u);
   assert.ok(html.includes(`<meta http-equiv="Content-Security-Policy" content="${csp}">`));
   assert.match(html, /<link rel="stylesheet" href="style\.css">/u);
-  assert.match(html, /<img src="illustration\.png" alt="" decoding="sync">/u);
+  assert.equal([...html.matchAll(/<img\b/g)].length, 2);
+  assert.match(html, /<img class="background" src="background\.png" alt="" decoding="sync">/u);
+  assert.match(html, /<img class="wordmark" src="wordmark\.svg" alt="GrigDesk" decoding="sync">/u);
   assert.equal(text, 'Загрузка…');
   assert.equal(html.includes('...'), false);
   assert.doesNotMatch(html, /<script|https?:\/\//iu);
@@ -208,7 +215,8 @@ test('SP-05: стиль — фон, отступы, шрифт и вписанн
   const css = await readFile(new URL('style.css', assets), 'utf8');
 
   assert.match(css, /background:\s*#15191f/u);
-  assert.match(css, /object-fit:\s*contain/u);
+  assert.match(css, /width:\s*min\(100vw, 150vh\)/u);
+  assert.match(css, /width:\s*40%/u);
   assert.match(css, /left:\s*24px/u);
   assert.match(css, /bottom:\s*24px/u);
   assert.match(css, /font:\s*14px\/[^;]*system-ui/u);
@@ -216,8 +224,20 @@ test('SP-05: стиль — фон, отступы, шрифт и вписанн
   assert.doesNotMatch(css, /url\(|@import|https?:/u);
 });
 
-test('SP-06: картинка заставки совпадает с утверждённой', async () => {
-  const image = await readFile(new URL('illustration.png', assets));
+test('GS-01: четыре файла заставки совпадают с утверждёнными хешами', async () => {
+  assert.deepEqual((await readdir(assets)).sort(), Object.keys(SPLASH_HASHES).sort());
 
-  assert.equal(createHash('sha256').update(image).digest('hex'), IMAGE_SHA256);
+  for (const [name, expected] of Object.entries(SPLASH_HASHES)) {
+    const image = await readFile(new URL(name, assets));
+
+    assert.equal(createHash('sha256').update(image).digest('hex'), expected, name);
+  }
+});
+
+test('GS-04: SVG надписи не загружает внешние ресурсы и не выполняет код', async () => {
+  assert.ok((await readdir(assets)).includes('wordmark.svg'));
+
+  const svg = await readFile(new URL('wordmark.svg', assets), 'utf8');
+
+  assert.doesNotMatch(svg, /href|<script|url\(/i);
 });

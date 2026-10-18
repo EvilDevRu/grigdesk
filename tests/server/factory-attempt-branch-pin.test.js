@@ -1,5 +1,5 @@
 // Ветка закреплена НА РЕПОЗИТОРИЙ. У проекта из нескольких репозиториев каноничные
-// ветки не обязаны совпадать (service-a живёт на main, service-b — на master), и кокпит обязан
+// ветки не обязаны совпадать (service-a живёт на main, service-b — на master), и GrigDesk обязан
 // сверять env прогона с веткой КАЖДОГО репозитория, а не с одной общей. Манифесты,
 // записанные до этой правки, короче на одно поле — журнал читается и по ним.
 import test from 'node:test';
@@ -45,7 +45,7 @@ async function trustedLedger({
   attemptSchema = 1, queueDispatchId = null, runnerPrimaryOverride = '',
   terminalState = null, terminalReason = null,
 }) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-branch-pin-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-branch-pin-'));
   const controlDir = path.join(root, 'control');
   const stateDir = path.join(root, 'state');
   const taskRoot = path.join(controlDir, 'protocol-v2', 'tasks', `t${TASK}`);
@@ -304,10 +304,10 @@ test('terminal RESULT без trusted terminal по-прежнему отверг
   );
 });
 
-// Границы terminal-причины у кокпита и движка обязаны совпадать. Живой случай: движку
+// Границы terminal-причины у GrigDesk и движка обязаны совпадать. Живой случай: движку
 // ослабили лимит до 20 000 символов с переносами ради многострочных замечаний человека,
 // а этот ридер остался на 500 без переносов. `factory abandon` принимал длинную причину
-// и отвечал успехом, после чего кокпит не мог прочитать СВОЮ ЖЕ закрытую попытку
+// и отвечал успехом, после чего GrigDesk не мог прочитать СВОЮ ЖЕ закрытую попытку
 // (`attempt_integrity_failed`), и карточка не убиралась с экрана ничем. Прежние тесты
 // этого не ловили: все они писали короткие однострочные причины.
 test('terminal-причина сходится с границами движка', async (t) => {

@@ -19,18 +19,18 @@ import {
 test('хук добавляется только к первому ходу, не создавая отдельного запроса', () => {
   assert.equal(withChatTitleHook('Проверь авторизацию', false), 'Проверь авторизацию');
   const prompt = withChatTitleHook('Проверь авторизацию', true);
-  assert.match(prompt, /COCKPIT_CHAT_TITLE/);
+  assert.match(prompt, /GRIGDESK_CHAT_TITLE/);
   assert.match(prompt, /ровно три слова/i);
   assert.match(prompt, /^Проверь авторизацию/);
-  assert.match(prompt, /\[\/Служебный хук Cockpit\]$/);
+  assert.match(prompt, /\[\/Служебный хук GrigDesk\]$/);
 });
 
 test('семантическое название извлекается, а служебный маркер исчезает из ответа и шагов', () => {
   const result = finishChatTitleHook({
-    reply: 'Авторизация исправлена.\n\n[[COCKPIT_CHAT_TITLE|Исправление Ошибки Авторизации]]',
+    reply: 'Авторизация исправлена.\n\n[[GRIGDESK_CHAT_TITLE|Исправление Ошибки Авторизации]]',
     steps: [
       { k: 'think', text: 'Проверяю код.' },
-      { k: 'text', text: 'Готово.\n[[COCKPIT_CHAT_TITLE|Исправление Ошибки Авторизации]]' },
+      { k: 'text', text: 'Готово.\n[[GRIGDESK_CHAT_TITLE|Исправление Ошибки Авторизации]]' },
     ],
   }, true);
 
@@ -40,7 +40,7 @@ test('семантическое название извлекается, а с�
     { k: 'think', text: 'Проверяю код.' },
     { k: 'text', text: 'Готово.' },
   ]);
-  assert.doesNotMatch(JSON.stringify(result), /COCKPIT_CHAT_TITLE/);
+  assert.doesNotMatch(JSON.stringify(result), /GRIGDESK_CHAT_TITLE/);
 });
 
 test('в протокол проходит только безопасное название ровно из трёх слов', () => {
@@ -49,7 +49,7 @@ test('в протокол проходит только безопасное н�
   assert.equal(normalizeChatTitle('<b>Опасная HTML вставка</b>'), '');
 
   const invalid = finishChatTitleHook({
-    reply: 'Обычный ответ.\n[[COCKPIT_CHAT_TITLE|Слишком Длинное Имя Чата]]',
+    reply: 'Обычный ответ.\n[[GRIGDESK_CHAT_TITLE|Слишком Длинное Имя Чата]]',
     steps: [],
   }, true);
   assert.equal(invalid.reply, 'Обычный ответ.');
@@ -59,16 +59,16 @@ test('в протокол проходит только безопасное н�
 test('маркер без пользовательского текста не создаёт пустой шаг', () => {
   assert.equal(visibleChatTitleStep({
     k: 'text',
-    text: '[[COCKPIT_CHAT_TITLE|Краткое Имя Чата]]',
+    text: '[[GRIGDESK_CHAT_TITLE|Краткое Имя Чата]]',
   }, true), null);
 });
 
 test('в обычных ходах похожий текст не считается служебным протоколом', () => {
   const result = finishChatTitleHook({
-    reply: 'Пример: [[COCKPIT_CHAT_TITLE|Краткое Имя Чата]]',
+    reply: 'Пример: [[GRIGDESK_CHAT_TITLE|Краткое Имя Чата]]',
     steps: [],
   }, false);
-  assert.match(result.reply, /COCKPIT_CHAT_TITLE/);
+  assert.match(result.reply, /GRIGDESK_CHAT_TITLE/);
   assert.equal(result.title, undefined);
 });
 
@@ -77,7 +77,7 @@ test('маркер названия очищается из SSE и журнал�
   const { app, events } = await chatAppFixture(t, { executor });
   const chatKey = 'chat-title-fixture';
   const assistantMessageId = 'assistant-title-final';
-  const reply = 'Документы проверены.\n[[COCKPIT_CHAT_TITLE|Проверка Трёх Документов]]';
+  const reply = 'Документы проверены.\n[[GRIGDESK_CHAT_TITLE|Проверка Трёх Документов]]';
 
   await saveChat(app, chatKey);
 

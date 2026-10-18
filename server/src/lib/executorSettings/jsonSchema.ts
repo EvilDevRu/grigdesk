@@ -224,8 +224,8 @@ function scalarShape(
     }
   }
 
-  if (options.dialect === 'schemastery' && typeof schema['x-cockpit-step'] === 'number') {
-    constraints.step = schema['x-cockpit-step'];
+  if (options.dialect === 'schemastery' && typeof schema['x-grigdesk-step'] === 'number') {
+    constraints.step = schema['x-grigdesk-step'];
     constraints.stepOrigin = typeof schema.minimum === 'number' ? schema.minimum : 0;
   }
 
@@ -387,7 +387,7 @@ function normalizeNode(
   const secret = parentSecret || declaredSecret || schema.writeOnly === true;
   const keys = shape.kind === 'object' ? OBJECT_KEYS : shape.kind === 'array' ? ARRAY_KEYS : SCALAR_KEYS;
   const unsupported = Object.keys(schema).some(
-    (keyword) => !keys.has(keyword) && !(options.dialect === 'schemastery' && keyword === 'x-cockpit-step'),
+    (keyword) => !keys.has(keyword) && !(options.dialect === 'schemastery' && keyword === 'x-grigdesk-step'),
   );
   const unsafePath = path.some((part) => ['__proto__', 'prototype', 'constructor'].includes(part));
   const missingBase = Array.isArray(schema.required) && schema.required.length > 0 && base === undefined;

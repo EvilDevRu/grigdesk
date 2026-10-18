@@ -15,7 +15,7 @@ function session(overrides = {}) {
   return {
     id: 'session-a',
     connectionId: 'connection-a',
-    projectId: 'cockpit',
+    projectId: 'grigdesk',
     label: 'Боевой код',
     role: 'code',
     host: 'server.internal',
@@ -31,7 +31,7 @@ function session(overrides = {}) {
 function connection(overrides = {}) {
   return {
     id: 'connection-a',
-    projectId: 'cockpit',
+    projectId: 'grigdesk',
     label: 'Боевой код',
     role: 'code',
     host: 'server.internal',
@@ -42,7 +42,7 @@ function connection(overrides = {}) {
 }
 
 async function sshSection(t, api, sockets = []) {
-  await installUiBrowser(t, 'http://cockpit.test/#/ssh');
+  await installUiBrowser(t, 'http://grigdesk.test/#/ssh');
   globalThis.__sshStoreApi = api;
   globalThis.__sshStoreSocket = class {
     constructor(url) {
@@ -104,7 +104,7 @@ test('пароль отправляется байтами без JSON-сери�
 });
 
 test('raw API не ставит JSON Content-Type на парольный connect', async (t) => {
-  await installUiBrowser(t, 'https://cockpit.test/#/ssh');
+  await installUiBrowser(t, 'https://grigdesk.test/#/ssh');
   const requests = [];
 
   globalThis.fetch = async (url, options) => {
@@ -190,7 +190,7 @@ test('повреждённая сводка не становится списк
 test('переключение вкладки держит только один attach WebSocket', async (t) => {
   const sockets = [];
   const { module, store } = await sshSection(t, {
-    wsUrl: (path) => `ws://cockpit.test${path}`,
+    wsUrl: (path) => `ws://grigdesk.test${path}`,
   }, sockets);
 
   store.sessions = [session(), session({ id: 'session-b', label: 'База', role: 'db' })];
@@ -202,8 +202,8 @@ test('переключение вкладки держит только один
     closed: sockets.map((socket) => socket.closed),
   }, {
     created: [
-      'ws://cockpit.test/api/ssh/sessions/session-a/terminal',
-      'ws://cockpit.test/api/ssh/sessions/session-b/terminal',
+      'ws://grigdesk.test/api/ssh/sessions/session-a/terminal',
+      'ws://grigdesk.test/api/ssh/sessions/session-b/terminal',
     ],
     closed: [true, false],
   });
@@ -212,7 +212,7 @@ test('переключение вкладки держит только один
 test('последний размер PTY отправляется после открытия WebSocket', async (t) => {
   const sockets = [];
   const { module } = await sshSection(t, {
-    wsUrl: (path) => `ws://cockpit.test${path}`,
+    wsUrl: (path) => `ws://grigdesk.test${path}`,
   }, sockets);
 
   module.activateSshSession('session-a');
@@ -230,7 +230,7 @@ test('последний размер PTY отправляется после о
 test('detach панели не удаляет server-owned сессию', async (t) => {
   const calls = [];
   const { module, store } = await sshSection(t, {
-    wsUrl: (path) => `ws://cockpit.test${path}`,
+    wsUrl: (path) => `ws://grigdesk.test${path}`,
     async del(path) {
       calls.push(path);
     },

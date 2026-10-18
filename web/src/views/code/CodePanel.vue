@@ -1356,7 +1356,7 @@ const commitAnchor = ref('');
 const commitsLoadedSelection = ref<CommitSelectionSnapshot | null>(null);
 // «С текущими изменениями» — настройка устройства, по умолчанию включена: диф отрезка до
 // HEAD показывает и несохранённые правки. Для более старого конца режим молча не действует.
-const commitsWithWork = ref(localStorage.getItem('cockpit-code-commits-work') !== '0');
+const commitsWithWork = ref(localStorage.getItem('grigdesk-code-commits-work') !== '0');
 const commitMessage = ref('');
 const amendCommit = ref(false);
 const amendHeadMessage = ref('');
@@ -1479,7 +1479,7 @@ const pushTitle = computed(() => (git.value?.tracking?.upstream
  *
  * Исключение — расхождение живой ветки с той, что отдал каталог рабочих копий:
  * `refresh` перечитывает гит, но не `/repos`, поэтому после переключения ветки мимо
- * кокпита шапка остаётся устаревшей, и промолчать здесь значило бы соврать.
+ * GrigDesk шапка остаётся устаревшей, и промолчать здесь значило бы соврать.
  */
 const trackingNote = computed<TrackingNote | null>(() => {
   const tracking = git.value?.tracking || null;
@@ -1533,26 +1533,26 @@ const narrowBackLabel = computed(() => ({
   changes: 'К изменениям',
   commits: 'К коммитам',
 }[mainTab.value]));
-const fullSide = ref(localStorage.getItem('cockpit-diff-side') !== '0');
-const compactSide = ref(localStorage.getItem('cockpit-dock-diff-side') === '1');
+const fullSide = ref(localStorage.getItem('grigdesk-diff-side') !== '0');
+const compactSide = ref(localStorage.getItem('grigdesk-dock-diff-side') === '1');
 const side = computed({
   get: () => (props.compact ? compactSide.value : fullSide.value),
   set: (value) => {
     if (props.compact) {
       compactSide.value = !!value;
-      localStorage.setItem('cockpit-dock-diff-side', value ? '1' : '0');
+      localStorage.setItem('grigdesk-dock-diff-side', value ? '1' : '0');
     } else {
       fullSide.value = !!value;
-      localStorage.setItem('cockpit-diff-side', value ? '1' : '0');
+      localStorage.setItem('grigdesk-diff-side', value ? '1' : '0');
     }
   },
 });
 const renderSideBySide = computed(() => (
   side.value && !oneSidedDiff.value && !editorForcesInlineDiff.value
 ));
-const diffWrap = ref(localStorage.getItem('cockpit-diff-wrap') === '1');
-const ignoreTrimWhitespace = ref(localStorage.getItem('cockpit-diff-ws') === '1');
-const gitView = ref(normalizeGitView(localStorage.getItem('cockpit-code-git-view')));
+const diffWrap = ref(localStorage.getItem('grigdesk-diff-wrap') === '1');
+const ignoreTrimWhitespace = ref(localStorage.getItem('grigdesk-diff-ws') === '1');
+const gitView = ref(normalizeGitView(localStorage.getItem('grigdesk-code-git-view')));
 // Свёрнутые группы изменений — настройка устройства: свёрнутое дерево правок открывает
 // список коммитов без прокрутки, а счётчик и итог группы остаются в заголовке.
 const collapsedGroups = ref(readCollapsedGroups());
@@ -1746,7 +1746,7 @@ const canShowFileHistory = computed(() => !fileHistoryActive.value && !patchRevi
 // Обновление относится ко всему текущему контексту, поэтому меню остаётся доступным
 // и в чистом Git-состоянии, когда выбрать файл ещё невозможно.
 const canShowFileMenu = computed(() => !patchReviewActive.value);
-const blameEnabled = ref(localStorage.getItem('cockpit-code-blame') === '1');
+const blameEnabled = ref(localStorage.getItem('grigdesk-code-blame') === '1');
 const blameLines = ref<CodeBlameLine[]>([]);
 const blamePath = ref('');
 const blameLoading = ref(false);
@@ -1989,7 +1989,7 @@ const imageError = ref('');
 // тем файлам, которые действительно нечем показать.
 const showsImage = computed(() => !!imageSrc.value && !imageError.value);
 
-const contextStorageKey = (id: string) => `cockpit-code-context:${id}`;
+const contextStorageKey = (id: string) => `grigdesk-code-context:${id}`;
 const captureContext = (): ContextSnapshot => ({
   generation: contextGeneration,
   project: project.value,
@@ -2034,7 +2034,7 @@ const clampNavigatorWidth = (value: string | number | null, max = navigatorMaxWi
  */
 function readNavigatorWidth() {
   try {
-    return localStorage.getItem('cockpit-code-dock-nav-width');
+    return localStorage.getItem('grigdesk-code-dock-nav-width');
   } catch {
     return null;
   }
@@ -2046,7 +2046,7 @@ function readNavigatorWidth() {
  */
 function storeNavigatorWidth() {
   try {
-    localStorage.setItem('cockpit-code-dock-nav-width', String(Math.round(navigatorWidth.value)));
+    localStorage.setItem('grigdesk-code-dock-nav-width', String(Math.round(navigatorWidth.value)));
   } catch {
     // Недоступный storage не должен ломать сам разделитель.
   }
@@ -2295,7 +2295,7 @@ async function setProject(id: string, { activation = null }: ActivationOptions =
   const requestId = ++reposRequestId;
 
   project.value = id;
-  localStorage.setItem('cockpit-project', id); // общий выбор проекта с «Маршрутами» и «Проектами»
+  localStorage.setItem('grigdesk-project', id); // общий выбор проекта с «Маршрутами» и «Проектами»
   repos.value = [];
   repoKey.value = '';
   treePath.value = '';
@@ -2508,7 +2508,7 @@ async function setTab(t: CodeTab) {
  */
 function readCollapsedGroups(): Set<GitGroupId> {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem('cockpit-code-collapsed-groups') || '[]');
+    const parsed: unknown = JSON.parse(localStorage.getItem('grigdesk-code-collapsed-groups') || '[]');
     const ids = Array.isArray(parsed) ? parsed : [];
 
     const known = new Set<string>(['staged', 'work', 'commits']);
@@ -2533,12 +2533,12 @@ function toggleGroupCollapsed(id: GitGroupId) {
   }
 
   collapsedGroups.value = next;
-  localStorage.setItem('cockpit-code-collapsed-groups', JSON.stringify([...next]));
+  localStorage.setItem('grigdesk-code-collapsed-groups', JSON.stringify([...next]));
 }
 
 function setGitView(view: 'list' | 'tree') {
   gitView.value = normalizeGitView(view);
-  localStorage.setItem('cockpit-code-git-view', gitView.value);
+  localStorage.setItem('grigdesk-code-git-view', gitView.value);
 }
 
 /** Выбирает расположение напрямую: popover не должен зависеть от прежнего toggle-состояния. */
@@ -2550,12 +2550,12 @@ function setDiffLayout(value: boolean) {
 
 function toggleDiffWrap() {
   diffWrap.value = !diffWrap.value;
-  localStorage.setItem('cockpit-diff-wrap', diffWrap.value ? '1' : '0');
+  localStorage.setItem('grigdesk-diff-wrap', diffWrap.value ? '1' : '0');
 }
 
 function toggleDiffWhitespace() {
   ignoreTrimWhitespace.value = !ignoreTrimWhitespace.value;
-  localStorage.setItem('cockpit-diff-ws', ignoreTrimWhitespace.value ? '1' : '0');
+  localStorage.setItem('grigdesk-diff-ws', ignoreTrimWhitespace.value ? '1' : '0');
 }
 
 /** Учитывает только текстовую модель, которую Monaco действительно показывает. */
@@ -2683,7 +2683,7 @@ function toggleBlame() {
   }
 
   blameEnabled.value = !blameEnabled.value;
-  localStorage.setItem('cockpit-code-blame', blameEnabled.value ? '1' : '0');
+  localStorage.setItem('grigdesk-code-blame', blameEnabled.value ? '1' : '0');
 
   if (blameEnabled.value) {
     void loadBlame(captureContext(), fileSel.value);
@@ -4107,7 +4107,7 @@ async function toggleCommitsWork() {
   }
 
   commitsWithWork.value = !commitsWithWork.value;
-  localStorage.setItem('cockpit-code-commits-work', commitsWithWork.value ? '1' : '0');
+  localStorage.setItem('grigdesk-code-commits-work', commitsWithWork.value ? '1' : '0');
 
   if (branchMode.value) {
     return loadBranchDiff();
@@ -4725,7 +4725,7 @@ async function activate({ preserve = false } = {}) {
 
     projects.value = loaded;
 
-    const wanted = previous?.project || localStorage.getItem('cockpit-project') || '';
+    const wanted = previous?.project || localStorage.getItem('grigdesk-project') || '';
     const pick = pickCodeProject(projects.value, wanted);
     let revalidatedInPlace = false;
 

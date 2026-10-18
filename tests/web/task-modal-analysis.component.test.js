@@ -62,7 +62,7 @@ function triageClarifications() {
       id: 'answer-1',
       questionId: 'q-label',
       questionText: 'Как подписать кнопку?',
-      actor: 'cockpit-arbiter',
+      actor: 'grigdesk-arbiter',
       status: 'answered',
       selection: [],
       selectionLabels: [],
@@ -83,7 +83,7 @@ async function mountTriage(t, {
   nonce += 1;
   const prefix = `__taskModalAnalysis${nonce}`;
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

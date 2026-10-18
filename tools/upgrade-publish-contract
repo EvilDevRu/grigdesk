@@ -3,7 +3,7 @@
 # Checkout сохраняется при dirty/diverged; restart остаётся отдельной командой оператора.
 set -euo pipefail
 
-ROOT=${COCKPIT_UPGRADE_ROOT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}
+ROOT=${GRIGDESK_UPGRADE_ROOT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}
 [[ "$#" == 4 && "$1" == --tag && "$3" == --sha ]] || {
   echo 'Использование: tools/upgrade-publish-contract --tag vX.Y.Z --sha <40 hex>' >&2
   exit 2
@@ -37,6 +37,6 @@ git -C "$ROOT" show "$TARGET_SHA:server/deepseek-runtime-contract.json" |
     }
   '
 git -C "$ROOT" merge --ff-only "$TARGET_SHA"
-bash "$ROOT/bin/cockpit" deps
-bash "$ROOT/bin/cockpit" build
-echo 'Промежуточный релиз подготовлен. Перезапусти Cockpit вручную, затем обновись штатной кнопкой.'
+bash "$ROOT/bin/grigdesk-ctl" deps
+bash "$ROOT/bin/grigdesk-ctl" build
+echo 'Промежуточный релиз подготовлен. Перезапусти GrigDesk вручную, затем обновись штатной кнопкой.'

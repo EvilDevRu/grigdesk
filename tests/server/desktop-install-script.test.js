@@ -23,6 +23,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
+import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 const repository = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -35,15 +36,17 @@ function shellQuote(value) {
  * PATH содержит собственные команды, HOME/XDG — собственные каталоги с пробелами.
  */
 function sandbox(t, { build = true } = {}) {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-desktop-install-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-desktop-install-'));
   const repo = path.join(root, 'копия проекта');
   const home = path.join(root, 'home');
   const fakeBin = path.join(root, 'команды');
   const nodeDir = path.join(root, 'Node каталог');
   const data = path.join(home, 'данные XDG');
-  const destination = path.join(data, 'cockpit/desktop/cockpit-desktop.AppImage');
-  const runtime = path.join(data, 'cockpit/desktop/runtime.json');
-  const source = path.join(repo, 'desktop/release/cockpit-desktop-9.9.9-x86_64.AppImage');
+  const destination = path.join(repo, 'bin/grigdesk-app');
+  const runtime = path.join(data, 'grigdesk/desktop/runtime.json');
+  const marker = path.join(data, 'grigdesk/desktop/data-home');
+  const legacy = path.join(data, 'grigdesk/desktop/grigdesk-desktop.AppImage');
+  const source = path.join(repo, 'desktop/release/grigdesk-desktop-9.9.9-x86_64.AppImage');
 
   t.after(() => rmSync(root, {
     recursive: true,
@@ -66,7 +69,7 @@ function sandbox(t, { build = true } = {}) {
     mode: 0o755,
   });
   writeFileSync(path.join(repo, 'desktop/package.json'), JSON.stringify({ version: '9.9.9' }));
-  writeFileSync(path.join(repo, '.env'), 'COCKPIT_PORT=не_нужен_установке\n');
+  writeFileSync(path.join(repo, '.env'), 'GRIGDESK_PORT=не_нужен_установке\n');
 
   if (build) {
     writeFileSync(source, 'сборка 9.9.9', { mode: 0o644 });
@@ -77,7 +80,7 @@ function sandbox(t, { build = true } = {}) {
     HOME: home,
     XDG_DATA_HOME: data,
     XDG_CONFIG_HOME: path.join(home, 'config'),
-    COCKPIT_NODE_DIR: nodeDir,
+    GRIGDESK_NODE_DIR: nodeDir,
   };
   const runVia = (script, action, overrides = {}) => spawnSync('/bin/bash', [script, action], {
     env: {
@@ -98,6 +101,8 @@ function sandbox(t, { build = true } = {}) {
     source,
     destination,
     runtime,
+    marker,
+    legacy,
     run,
     runVia,
   };
@@ -119,6 +124,110 @@ function previousInstallation(box) {
   mkdirSync(path.dirname(box.destination), { recursive: true });
   writeFileSync(box.destination, 'прежнее окно', { mode: 0o755 });
 }
+
+/**
+ * Старый профиль содержит настройки и обе базы браузера, но только искусственные данные.
+ * Служебные файлы и кэши позволяют проверить исключения при копировании профиля.
+ */
+function legacyProfile(box) {
+  const directory = path.join(box.home, 'config', LEGACY.profileDir);
+  const partition = `Partitions/${LEGACY.partition}`;
+  const caches = ['Cache', 'Code Cache', 'GPUCache', 'DawnGraphiteCache',
+    'DawnWebGPUCache', 'GPUPersistentCache'];
+  const files = ['settings.json', `${partition}/Local Storage/leveldb/settings`,
+    `${partition}/IndexedDB/marker`, 'SingletonCookie', 'SingletonSocket',
+    `${partition}/Cookies`, `${partition}/Cookies-journal`, `${partition}/Network/Cookies`,
+    ...caches.flatMap((name) => [`${name}/cache`, `${partition}/${name}/cache`])];
+
+  for (const file of files) {
+    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    writeFileSync(path.join(directory, file), `fixture:${file}`);
+  }
+
+  return {
+    directory,
+    partition,
+    caches,
+  };
+}
+
+test('GO-03: установка копирует профиль, переименовывает раздел и исключает cookie и кэши', (t) => {
+  const box = sandbox(t);
+  const old = legacyProfile(box);
+  const target = path.join(box.home, 'config/GrigDesk');
+  const result = box.run('install');
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(target), true, 'Профиль должен быть скопирован');
+  assert.equal(statSync(target).mode & 0o777, 0o700);
+  assert.equal(readFileSync(path.join(target, 'settings.json'), 'utf8'), 'fixture:settings.json');
+
+  for (const file of ['Local Storage/leveldb/settings', 'IndexedDB/marker']) {
+    assert.equal(readFileSync(path.join(target, 'Partitions/grigdesk-local', file), 'utf8'),
+      `fixture:${old.partition}/${file}`);
+  }
+
+  for (const file of ['SingletonCookie', 'SingletonSocket', old.partition,
+    'Partitions/grigdesk-local/Cookies', 'Partitions/grigdesk-local/Cookies-journal',
+    'Partitions/grigdesk-local/Network/Cookies',
+    ...old.caches.flatMap((name) => [name, `Partitions/grigdesk-local/${name}`])]) {
+    assert.equal(existsSync(path.join(target, file)), false, file);
+  }
+
+  assert.equal(existsSync(path.join(old.directory, old.partition, 'Cookies')), true);
+});
+
+test('GO-04: существующий новый профиль не меняется', (t) => {
+  const box = sandbox(t);
+  const target = path.join(box.home, 'config/GrigDesk');
+
+  legacyProfile(box);
+  mkdirSync(target);
+  writeFileSync(path.join(target, 'own'), 'new profile');
+  assert.equal(box.run('install').status, 0);
+  assert.deepEqual(readdirSync(target), ['own']);
+});
+
+test('GO-05: живой замок старого профиля запрещает перенос без копии', (t) => {
+  const box = sandbox(t);
+  const old = legacyProfile(box);
+
+  symlinkSync(`${os.hostname()}-${process.pid}`, path.join(old.directory, 'SingletonLock'));
+
+  const result = box.run('install');
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /профиль.*занят/i);
+  assert.deepEqual(readdirSync(path.join(box.home, 'config')), [LEGACY.profileDir]);
+});
+
+test('GO-06: явный каталог данных окна отключает перенос профиля', (t) => {
+  const box = sandbox(t);
+
+  legacyProfile(box);
+  assert.equal(box.run('install', { GRIGDESK_DESKTOP_DATA_DIR: path.join(box.home, 'custom') }).status, 0);
+  assert.deepEqual(readdirSync(path.join(box.home, 'config')), [LEGACY.profileDir]);
+});
+
+test('GO-07: ошибка копирования не публикует частичный профиль и убирает временный каталог', (t) => {
+  const box = sandbox(t);
+
+  legacyProfile(box);
+  rmSync(path.join(box.fakeBin, 'cp'));
+  writeFileSync(path.join(box.fakeBin, 'cp'), '#!/bin/bash\nexit 17\n', { mode: 0o755 });
+
+  const result = box.run('install');
+
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(readdirSync(path.join(box.home, 'config')), [LEGACY.profileDir]);
+});
+
+test('GO-09: Bash использует старые имена из единого контракта', () => {
+  const source = readFileSync(path.join(repository, 'deploy/lib/desktop-app.sh'), 'utf8');
+
+  assert.equal(source.match(/local legacy_profile='([^']+)'/)?.[1], LEGACY.profileDir);
+  assert.equal(source.match(/local legacy_partition='([^']+)'/)?.[1], LEGACY.partition);
+});
 
 test('DW-I1: install и status', (t) => {
   const box = sandbox(t);
@@ -168,16 +277,17 @@ test('DW-I3: повторная установка заменяет атомар
   writeFileSync(box.source, 'новая сборка');
   assert.equal(box.run('install').status, 0);
   assert.equal(readFileSync(box.destination, 'utf8'), 'новая сборка');
-  // data-home — метка сборки, знающей папку данных: без неё перенос не уберёт ссылки.
-  assert.deepEqual(readdirSync(path.dirname(box.destination)).sort(),
-    ['cockpit-desktop.AppImage', 'data-home', 'runtime.json']);
+  // В bin/ — только окно, без временных копий. data-home — метка сборки, знающей папку данных;
+  // она лежит рядом с runtime.json, а не в bin/.
+  assert.deepEqual(readdirSync(path.dirname(box.destination)), ['grigdesk-app']);
+  assert.deepEqual(readdirSync(path.dirname(box.runtime)).sort(), ['data-home', 'runtime.json']);
   assert.equal(box.run('remove').status, 0);
-  assert.equal(existsSync(path.join(path.dirname(box.destination), 'data-home')), false);
+  assert.equal(existsSync(box.marker), false);
 });
 
 test('DW-I4: remove не трогает профиль', (t) => {
   const box = sandbox(t);
-  const profile = path.join(box.home, 'config/Кокпит/settings.json');
+  const profile = path.join(box.home, 'config/GrigDesk/settings.json');
 
   previousInstallation(box);
   mkdirSync(path.dirname(profile), { recursive: true });
@@ -190,7 +300,7 @@ test('DW-I4: remove не трогает профиль', (t) => {
 
 test('DW-I5: неизвестная команда без Node', (t) => {
   const box = sandbox(t);
-  const result = box.run('unknown', { COCKPIT_NODE_DIR: '' });
+  const result = box.run('unknown', { GRIGDESK_NODE_DIR: '' });
 
   assert.equal(result.status, 2);
   assert.match(result.stderr, /install\|remove\|status/u);
@@ -209,32 +319,64 @@ test('DW-I6: отказ cp, chmod или mv сохраняет старый фа
     assert.notEqual(response.status, 0, command);
     assert.equal(readFileSync(box.destination, 'utf8'), 'прежнее окно');
     assert.equal(statSync(box.destination).mode & 0o777, 0o755);
-    // runtime.json пишется раньше AppImage (Р9): при отказе cp он новый, временных файлов нет.
-    assert.deepEqual(readdirSync(path.dirname(box.destination)).filter((name) => name !== 'runtime.json'),
-      ['cockpit-desktop.AppImage']);
+    // runtime.json пишется раньше окна (Р9): при отказе cp он новый, временных файлов в bin/ нет.
+    assert.deepEqual(readdirSync(path.dirname(box.destination)), ['grigdesk-app']);
   }
 });
 
-test('DW-I7: Node найден явно, XDG и fallback работают', (t) => {
+test('DW-I7: Node найден явно; окно в bin/ при любом XDG, runtime.json — с fallback', (t) => {
   const box = sandbox(t);
-  const fallback = path.join(box.home, '.local/share/cockpit/desktop/cockpit-desktop.AppImage');
+  const fallback = path.join(box.home, '.local/share/grigdesk/desktop/runtime.json');
 
   assert.equal(box.run('install').status, 0);
-  assert.equal(box.run('install', { COCKPIT_NODE_DIR: '' }).status, 1);
+  assert.equal(box.run('install', { GRIGDESK_NODE_DIR: '' }).status, 1);
   assert.equal(readFileSync(box.destination, 'utf8'), 'сборка 9.9.9');
-  assert.equal(status(box, { COCKPIT_NODE_DIR: '' }).installed, '1');
-  assert.equal(box.run('remove', { COCKPIT_NODE_DIR: '' }).status, 0);
+  assert.equal(status(box, { GRIGDESK_NODE_DIR: '' }).installed, '1');
+  assert.equal(box.run('remove', { GRIGDESK_NODE_DIR: '' }).status, 0);
   assert.equal(status(box, {
-    COCKPIT_NODE_DIR: '',
+    GRIGDESK_NODE_DIR: '',
     XDG_DATA_HOME: '',
-  }).path, fallback);
+  }).path, box.destination);
   assert.equal(box.run('install', { XDG_DATA_HOME: '' }).status, 0);
   assert.equal(existsSync(fallback), true);
+  assert.equal(existsSync(box.destination), true);
   assert.equal(box.run('remove', {
-    COCKPIT_NODE_DIR: '',
+    GRIGDESK_NODE_DIR: '',
     XDG_DATA_HOME: '',
   }).status, 0);
   assert.equal(existsSync(fallback), false);
+  assert.equal(existsSync(box.destination), false);
+});
+
+test('DW-I8: установка убирает окно со старого места и обновляет ярлык', (t) => {
+  const box = sandbox(t);
+  const shortcut = path.join(box.repo, 'deploy/shortcut.sh');
+  const log = path.join(box.root, 'shortcut.log');
+
+  mkdirSync(path.dirname(box.legacy), { recursive: true });
+  writeFileSync(box.legacy, 'окно до переноса в bin', { mode: 0o755 });
+  writeFileSync(shortcut, `#!/bin/bash\nprintf '%s\\n' "$*" >> ${shellQuote(log)}\nexit 0\n`, {
+    mode: 0o755,
+  });
+
+  const installed = box.run('install');
+
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.equal(existsSync(box.legacy), false);
+  assert.equal(readFileSync(box.destination, 'utf8'), 'сборка 9.9.9');
+  assert.equal(readFileSync(log, 'utf8'), 'refresh\n');
+
+  // Отказ ярлыка не отменяет установленное окно: человек получает подсказку.
+  writeFileSync(shortcut, '#!/bin/bash\nexit 3\n', { mode: 0o755 });
+
+  const warned = box.run('install');
+
+  assert.equal(warned.status, 0, warned.stderr);
+  assert.match(warned.stderr, /Ярлык не обновлён/u);
+
+  writeFileSync(box.legacy, 'окно до переноса в bin', { mode: 0o755 });
+  assert.equal(box.run('remove').status, 0);
+  assert.equal(existsSync(box.legacy), false);
 });
 
 /**
@@ -308,6 +450,7 @@ test('SC-02 сбой записи descriptor — AppImage и прежний desc
     const box = sandbox(t);
 
     previousInstallation(box);
+    mkdirSync(path.dirname(box.runtime), { recursive: true });
     writeFileSync(box.runtime, previous, { mode: 0o600 });
     failOnRuntime(box, command);
 
@@ -318,15 +461,15 @@ test('SC-02 сбой записи descriptor — AppImage и прежний desc
     assert.equal(statSync(box.destination).mode & 0o777, 0o755, command);
     assert.equal(readFileSync(box.runtime, 'utf8'), previous, command);
     assert.equal(statSync(box.runtime).mode & 0o777, 0o600, command);
-    assert.deepEqual(readdirSync(path.dirname(box.destination)).sort(),
-      ['cockpit-desktop.AppImage', 'runtime.json'], command);
+    assert.deepEqual(readdirSync(path.dirname(box.destination)), ['grigdesk-app'], command);
+    assert.deepEqual(readdirSync(path.dirname(box.runtime)), ['runtime.json'], command);
   }
 });
 
 test('SC-03 status: строка runtime 0 и 1; remove удаляет AppImage и descriptor, профиль цел', (t) => {
   const box = sandbox(t);
-  const profile = path.join(box.home, 'config/Кокпит/settings.json');
-  const withoutNode = { COCKPIT_NODE_DIR: '' };
+  const profile = path.join(box.home, 'config/GrigDesk/settings.json');
+  const withoutNode = { GRIGDESK_NODE_DIR: '' };
 
   assert.deepEqual(status(box, withoutNode), {
     installed: '0',
@@ -355,7 +498,7 @@ test('SC-03 status: строка runtime 0 и 1; remove удаляет AppImage 
 test('SC-04 путь в bash равен desktopRuntimePath для пустого, относительного и абсолютного XDG', (t) => {
   const box = sandbox(t);
   const library = path.join(box.repo, 'deploy/lib/desktop-app.sh');
-  const script = 'set -euo pipefail; source "$1"; cockpit_desktop_runtime_path';
+  const script = 'set -euo pipefail; source "$1"; grigdesk_desktop_runtime_path';
 
   for (const dataHome of [undefined, '', 'относительный каталог/данные', path.join(box.home, 'данные XDG')]) {
     const env = {
@@ -384,7 +527,7 @@ test('SC-04 путь в bash равен desktopRuntimePath для пустого
 /**
  * Установщик исполняется в копии с отдельным HOME и заглушками системных команд.
  * Проверяем итоговую инструкцию без сборок, настоящего systemd и установки пользователя.
- * С port — настоящий Node и runtime-env.sh: порт приходит через COCKPIT_PORT, как у человека.
+ * С port — настоящий Node и runtime-env.sh: порт приходит через GRIGDESK_PORT, как у человека.
  */
 function serverInstaller(t, {
   autostart = 0,
@@ -397,11 +540,11 @@ function serverInstaller(t, {
   codeName = 'code',
   homeName = 'home',
 } = {}) {
-  const container = mkdtempSync(path.join(os.tmpdir(), 'cockpit-server-install-text-'));
+  const container = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-server-install-text-'));
   const root = path.join(container, codeName);
   const fakeBin = path.join(container, 'commands');
   const home = path.join(container, homeName);
-  const dataHome = explicit ? path.join(container, 'data') : path.join(home, '.cockpit');
+  const dataHome = explicit ? path.join(container, 'data') : path.join(home, '.grigdesk');
   const systemctlLog = path.join(container, 'systemctl.log');
   const otherLog = path.join(container, 'other.log');
 
@@ -412,16 +555,17 @@ function serverInstaller(t, {
     mkdirSync(directory, { recursive: true });
   }
 
-  for (const file of ['deploy/install.sh', 'deploy/cockpit-server.service', 'deploy/lib/b24-cli.sh',
+  for (const file of ['deploy/install.sh', 'deploy/grigdesk-server.service', 'deploy/lib/b24-cli.sh',
     'deploy/lib/install-choices.sh', 'deploy/lib/runtime-env.sh', 'shared/runtime/dataHome.ts',
-    'shared/package.json', 'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts']) {
+    'shared/package.json', 'shared/runtime/legacyBrand.ts',
+    'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts']) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     copyFileSync(path.join(repository, file), path.join(root, file));
   }
 
   writeFileSync(path.join(root, 'deploy/lib/media-runtime.sh'),
-    `cockpit_install_media() { echo speech >> ${shellQuote(otherLog)}; }\n`);
-  writeFileSync(path.join(root, 'deploy/lib/cli-link.sh'), 'cockpit_link_cli() { :; }\n');
+    `grigdesk_install_media() { echo speech >> ${shellQuote(otherLog)}; }\n`);
+  writeFileSync(path.join(root, 'deploy/lib/cli-link.sh'), 'grigdesk_link_cli() { :; }\n');
   writeFileSync(path.join(fakeBin, 'systemctl'),
     `#!/bin/bash\nprintf '%s\\n' "$*" >> ${shellQuote(systemctlLog)}\nexit 0\n`, { mode: 0o755 });
 
@@ -462,8 +606,8 @@ function serverInstaller(t, {
       XDG_CONFIG_HOME: path.join(home, 'config'),
       XDG_DATA_HOME: path.join(home, 'data'),
       PATH: fakeBin + ':/usr/bin:/bin',
-      ...(explicit ? { COCKPIT_HOME: dataHome } : {}),
-      ...(port === null ? {} : { COCKPIT_PORT: String(port) }),
+      ...(explicit ? { GRIGDESK_HOME: dataHome } : {}),
+      ...(port === null ? {} : { GRIGDESK_PORT: String(port) }),
     },
     encoding: 'utf8',
     timeout: 10000,
@@ -474,7 +618,7 @@ function serverInstaller(t, {
     root,
     home,
     dataHome,
-    unit: path.join(home, '.config/systemd/user/cockpit-server.service'),
+    unit: path.join(home, '.config/systemd/user/grigdesk-server.service'),
     others: existsSync(otherLog) ? readFileSync(otherLog, 'utf8') : '',
     systemctl: existsSync(systemctlLog) ? readFileSync(systemctlLog, 'utf8').trim().split('\n') : [],
   };
@@ -484,8 +628,8 @@ test('DW-I9: установка сервера объясняет запуск �
   const result = serverInstaller(t);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /cockpit desktop install/u);
-  assert.match(result.stdout, /cockpit open/u);
+  assert.match(result.stdout, /grigdesk-ctl desktop install/u);
+  assert.match(result.stdout, /grigdesk-ctl open/u);
   assert.match(result.stdout, /локальному ключу/u);
   assert.doesNotMatch(result.stdout, /парол|открой.*https?:|браузер/iu);
 });
@@ -496,7 +640,7 @@ const PORT_STUB = `
 const http = require('node:http');
 const kind = process.argv[1];
 const server = http.createServer((request, response) => {
-  if (kind === 'cockpit' && request.url === '/api/auth/state') {
+  if (kind === 'grigdesk' && request.url === '/api/auth/state') {
     response.setHeader('Content-Type', 'application/json');
     response.end(JSON.stringify({ configured: true, authenticated: false }));
     return;
@@ -507,7 +651,7 @@ server.listen(0, '127.0.0.1', () => process.stdout.write(server.address().port +
 `;
 
 /**
- * Заглушка на свободном порту: 'cockpit' отвечает схемой auth/state, 'other' — 404 на всё.
+ * Заглушка на свободном порту: 'grigdesk' отвечает схемой auth/state, 'other' — 404 на всё.
  * Возвращает порт; процесс убирается после теста.
  */
 function portStub(t, kind) {
@@ -538,9 +682,9 @@ async function closedPort() {
   return port;
 }
 
-test('SC-08 порт отвечает Кокпитом — start и enable --now не вызываются; иначе прежний старт', async (t) => {
-  const port = await portStub(t, 'cockpit');
-  const notice = `Кокпит уже работает на порту ${port} — юнит не запускаю`;
+test('SC-08 порт отвечает GrigDesk — start и enable --now не вызываются; иначе прежний старт', async (t) => {
+  const port = await portStub(t, 'grigdesk');
+  const notice = `GrigDesk уже работает на порту ${port} — юнит не запускаю`;
   const starts = (calls) => calls.filter((call) => /(^|\s)(start|--now)(\s|$)/u.test(call));
 
   for (const autostart of [0, 1]) {
@@ -552,7 +696,7 @@ test('SC-08 порт отвечает Кокпитом — start и enable --now
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(starts(result.systemctl), [], result.systemctl.join('\n'));
     assert.ok(result.stdout.includes(notice), result.stdout);
-    assert.equal(result.systemctl.includes('--user enable cockpit-server.service'), autostart === 1);
+    assert.equal(result.systemctl.includes('--user enable grigdesk-server.service'), autostart === 1);
   }
 
   for (const free of [await closedPort(), await portStub(t, 'other')]) {
@@ -564,14 +708,14 @@ test('SC-08 порт отвечает Кокпитом — start и enable --now
 
     assert.equal(manual.status, 0, manual.stderr);
     assert.equal(automatic.status, 0, automatic.stderr);
-    assert.deepEqual(starts(manual.systemctl), ['--user start cockpit-server.service']);
-    assert.deepEqual(starts(automatic.systemctl), ['--user enable --now cockpit-server.service']);
+    assert.deepEqual(starts(manual.systemctl), ['--user start grigdesk-server.service']);
+    assert.deepEqual(starts(automatic.systemctl), ['--user enable --now grigdesk-server.service']);
     assert.doesNotMatch(manual.stdout + automatic.stdout, /уже работает/u);
   }
 });
 
 
-test('INS-DH-1/2 шаблон юнита получает env и только явный COCKPIT_HOME', (t) => {
+test('INS-DH-1/2 шаблон юнита получает env и только явный GRIGDESK_HOME', (t) => {
   for (const explicit of [false, true]) {
     const result = serverInstaller(t, { explicit });
 
@@ -581,7 +725,7 @@ test('INS-DH-1/2 шаблон юнита получает env и только я
 
     assert.ok(unit.includes(`EnvironmentFile=-${result.dataHome}/.env`));
     assert.match(unit, /RestartPreventExitStatus=78/);
-    assert.equal(unit.includes(`Environment=COCKPIT_HOME=${result.dataHome}`), explicit);
+    assert.equal(unit.includes(`Environment=GRIGDESK_HOME=${result.dataHome}`), explicit);
     assert.equal(statSync(result.dataHome).mode & 0o777, 0o700);
   }
 });
@@ -658,7 +802,7 @@ test('SC-DH-2 явная папка пишется в версии 2 после 
   const box = sandbox(t);
   const moves = recordMoves(box);
   const home = path.join(box.root, 'data');
-  const result = box.run('install', { COCKPIT_HOME: home });
+  const result = box.run('install', { GRIGDESK_HOME: home });
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(readFileSync(box.runtime, 'utf8')), {
@@ -676,7 +820,7 @@ test('SC-DH-3 неверная папка не меняет прежнее оп�
   assert.equal(box.run('install').status, 0);
 
   const previous = readFileSync(box.runtime, 'utf8');
-  const result = box.run('install', { COCKPIT_HOME: 'relative' });
+  const result = box.run('install', { GRIGDESK_HOME: 'relative' });
 
   assert.equal(result.status, 1);
   assert.equal(readFileSync(box.runtime, 'utf8'), previous);

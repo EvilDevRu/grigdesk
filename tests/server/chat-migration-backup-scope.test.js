@@ -16,7 +16,7 @@ const registry = {
 };
 
 async function tempChats(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-backup-scope-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-backup-scope-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return path.join(root, 'chats');
 }

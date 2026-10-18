@@ -38,7 +38,7 @@ test('SSE: фронт подписан на все события, которы�
   for (const file of await walk(WEB_SRC, ['.js', '.ts', '.vue'])) {
     if (file.endsWith(path.join('composables', 'useSse.ts'))) continue;
     const source = await readFile(file, 'utf8');
-    // Ветки вида `name === 'chat-step'` — единственная форма реакции на SSE в кокпите.
+    // Ветки вида `name === 'chat-step'` — единственная форма реакции на SSE в GrigDesk.
     for (const match of source.matchAll(/name === '([a-z-]+)'/g)) handled.add(match[1]);
   }
 

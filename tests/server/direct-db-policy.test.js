@@ -142,7 +142,7 @@ test('Claude PreToolUse применяет host-aware DB-политику к в�
 });
 
 test('Codex process hook применяет host-aware DB-политику к вызову Bash', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-codex-policy-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-codex-policy-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'codex-fixture');
   const trace = path.join(root, 'trace.jsonl');
@@ -152,10 +152,10 @@ test('Codex process hook применяет host-aware DB-политику к в
     config: { codexBin: bin },
     env: {
       ...process.env,
-      COCKPIT_CODEX_FIXTURE_TRACE: trace,
-      COCKPIT_CODEX_FIXTURE_SCENARIO: 'commentary-only',
-      COCKPIT_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
-      COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '1',
+      GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+      GRIGDESK_CODEX_FIXTURE_SCENARIO: 'commentary-only',
+      GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
+      GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '1',
     },
     message: 'проверь команду',
     cwd: root,

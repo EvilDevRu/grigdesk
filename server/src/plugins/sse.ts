@@ -111,4 +111,4 @@ async function ssePlugin(fastify: FastifyInstance, opts: SsePluginOptions): Prom
   });
 }
 
-export default fp(ssePlugin, { name: 'cockpit-sse' });
+export default fp(ssePlugin, { name: 'grigdesk-sse' });

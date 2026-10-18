@@ -16,7 +16,7 @@ const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '../..');
 
 function fixtureRepo(t, names) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-ui-naming-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-ui-naming-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const name of names) {
     const target = path.join(root, 'web/src/example', name);

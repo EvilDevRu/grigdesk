@@ -26,7 +26,7 @@ async function mountModal(t, task) {
   compileNonce += 1;
 
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

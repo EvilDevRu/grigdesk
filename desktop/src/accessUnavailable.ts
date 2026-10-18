@@ -23,7 +23,7 @@ export function accessUnavailableHtml(origin: string): string {
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Нет входа в Кокпит</title>
+  <title>Нет входа в GrigDesk</title>
   <style>
     body {
       margin: 0;
@@ -51,7 +51,7 @@ export function accessUnavailableHtml(origin: string): string {
 </head>
 <body>
   <main>
-    <h1>Нет входа в Кокпит</h1>
+    <h1>Нет входа в GrigDesk</h1>
     <p class="address">${escapeHtml(origin)}</p>
     <p>${UNAVAILABLE_MESSAGE}</p>
   </main>

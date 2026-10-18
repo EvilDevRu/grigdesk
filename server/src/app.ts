@@ -1,4 +1,4 @@
-// Ядро сервера кокпита. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
+// Ядро сервера GrigDesk. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
 import './startDataHome.ts';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -21,7 +21,7 @@ import { recoverChatOperation } from './lib/mobile/chatTurns.ts';
 import { registerMobileFacade } from './lib/mobile/facade/index.ts';
 import { relayVpnGate } from './lib/mobile/vpn.ts';
 import mobileModule from './modules/mobile/index.ts';
-import { cockpitCliPath } from './lib/cliPath.ts';
+import { grigDeskCliPath } from './lib/cliPath.ts';
 import { AuthStore } from './lib/authStore.ts';
 import { registerWindowKeyLifecycle } from './lib/windowKey.ts';
 import type { WindowAuthState } from './lib/windowKey.ts';
@@ -150,7 +150,7 @@ import { DocumentReader } from './lib/documents/reader.ts';
 
 // npm start и существующий systemd-юнит тоже дают агентам CLI текущей установки.
 // Дочерние процессы наследуют этот PATH независимо от рабочего каталога задачи.
-process.env.PATH = cockpitCliPath(config.rootDir);
+process.env.PATH = grigDeskCliPath(config.rootDir);
 
 // Общие настройки передаются сервисам из одного хранилища.
 // Чтение не изменяет сохранённые настройки этой установки.
@@ -792,12 +792,12 @@ async function build() {
       folderId: config.showcaseYandexFolderId,
     },
     edgeVoice: { enabled: config.showcaseEdgeTts },
-    bootstrapPython: process.env.COCKPIT_MEDIA_BOOTSTRAP_PYTHON || 'python3',
+    bootstrapPython: process.env.GRIGDESK_MEDIA_BOOTSTRAP_PYTHON || 'python3',
     listProjects: () => listProjects(config, prefs),
     sandboxOverview: () => sandboxService.overview(),
     sandboxActivityGuard,
     broadcast: (event: string, data?: unknown) => fastify.sse?.broadcast?.(event, data),
-    // Расшифровка для самопроверки речи идёт через общий речевой runtime кокпита —
+    // Расшифровка для самопроверки речи идёт через общий речевой runtime GrigDesk —
     // тот же, что у диктовки и «Видео». Своей копии распознавания у раздела нет,
     // а его недоступность делает проверку пропущенной, а не проваленной.
     transcribe: async (file: string) => {
@@ -963,10 +963,10 @@ async function build() {
     legacyAccountPath: config.authAccountPath,
     sessionsPath: config.authSessionsPath,
   });
-  // Просмотрщик ничего не знает о структуре Cockpit: приложение подключает первый
+  // Просмотрщик ничего не знает о структуре GrigDesk: приложение подключает первый
   // источник явно. Следующие корни/источники добавляются здесь provider-функциями.
   const documentReader = new DocumentReader({
-    rootProviders: [() => [{ id: 'cockpit', label: 'Cockpit', path: config.rootDir }]],
+    rootProviders: [() => [{ id: 'grigdesk', label: 'GrigDesk', path: config.rootDir }]],
   });
 
   // Секрет ЭТОГО процесса для внутренних запросов: permission-prompt-tool чата работает
@@ -977,7 +977,7 @@ async function build() {
   // Токен ЛОКАЛЬНЫХ CLI-потребителей (bin/b24, ship-этап фабрики, скиллы): у них нет ни
   // cookie, ни памяти нашего процесса. Файл 0600 на диске машины-мозга — владение файлом
   // эквивалентно владению остальными кредами .state. Стабилен между рестартами:
-  // демоны фабрики живут дольше процесса кокпита.
+  // демоны фабрики живут дольше процесса GrigDesk.
   let cliToken = '';
   try { cliToken = readFileSync(config.cliTokenPath, 'utf8').trim(); } catch { /* ещё не создан */ }
   if (!cliToken) {
@@ -1260,14 +1260,14 @@ async function build() {
   });
 
   // ── Телеграм-пульт: вотчер «требует человека» + команды/кнопки владельца ──
-  // Пульт — ещё одно «окно» кокпита: действия идут через inject в те же ручки,
-  // что жмёт браузер (X-Cockpit-Internal — как у permission-mcp чата).
+  // Пульт — ещё одно «окно» GrigDesk: действия идут через inject в те же ручки,
+  // что жмёт браузер (X-GrigDesk-Internal — как у permission-mcp чата).
   const internalCallApi = async (method: string, url: string, payload?: unknown) => {
     const res = await fastify.inject({
       method,
       url,
       ...(payload === undefined ? {} : { payload }),
-      headers: { 'x-cockpit-internal': internalToken },
+      headers: { 'x-grigdesk-internal': internalToken },
     } as InjectOptions);
     let body = null;
     try { body = res.json(); } catch { /* не-JSON ответа у этих ручек не бывает */ }
@@ -1277,7 +1277,7 @@ async function build() {
     const res = await fastify.inject({
       method,
       url,
-      headers: { 'x-cockpit-internal': internalToken },
+      headers: { 'x-grigdesk-internal': internalToken },
     } as InjectOptions);
 
     return {
@@ -1376,7 +1376,7 @@ async function build() {
       const response = await fastify.inject({
         method: 'GET',
         url: '/api/tasks',
-        headers: { 'x-cockpit-internal': internalToken },
+        headers: { 'x-grigdesk-internal': internalToken },
       });
       if (response.statusCode !== 200) {
         fastify.log.warn({ status: response.statusCode }, 'арбитр: список задач не прочитан');
@@ -1471,8 +1471,8 @@ const desktopParent = attachDesktopParent({
 
 const app = await build();
 
-if (process.env.COCKPIT_HOST !== undefined) {
-  app.log.warn('COCKPIT_HOST больше не поддерживается: кокпит слушает только 127.0.0.1');
+if (process.env.GRIGDESK_HOST !== undefined) {
+  app.log.warn('GRIGDESK_HOST больше не поддерживается: GrigDesk слушает только 127.0.0.1');
 }
 
 try {
@@ -1482,7 +1482,7 @@ try {
   process.exit(1);
 }
 
-app.log.info(`Кокпит слушает http://127.0.0.1:${config.port}`);
+app.log.info(`GrigDesk слушает http://127.0.0.1:${config.port}`);
 app.shutdown?.arm();
 
 if (desktopParent && app.shutdown) {

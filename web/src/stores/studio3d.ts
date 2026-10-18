@@ -135,7 +135,7 @@ export const useStudio3dStore = defineStore('studio3d', () => {
    */
   const syncSeen = () => {
     try {
-      const saved: unknown = JSON.parse(localStorage.getItem(`cockpit-studio3d-seen:${owner}`) ?? '[]');
+      const saved: unknown = JSON.parse(localStorage.getItem(`grigdesk-studio3d-seen:${owner}`) ?? '[]');
 
       if (Array.isArray(saved)) {
         for (const key of saved.slice(-500)) {
@@ -159,7 +159,7 @@ export const useStudio3dStore = defineStore('studio3d', () => {
     }
 
     try {
-      localStorage.setItem(`cockpit-studio3d-seen:${owner}`, JSON.stringify([...seen]));
+      localStorage.setItem(`grigdesk-studio3d-seen:${owner}`, JSON.stringify([...seen]));
     } catch {
       // При запрете записи остаётся ограниченный список в памяти.
     }

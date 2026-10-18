@@ -91,7 +91,7 @@ function install(
   const stubs = path.join(path.dirname(box.log), 'stubs');
   const script = mode === 'source'
     ? 'set -euo pipefail; source "$1"'
-    : 'set -euo pipefail; source "$1"; cockpit_install_b24_cli "$2" "$3"';
+    : 'set -euo pipefail; source "$1"; grigdesk_install_b24_cli "$2" "$3"';
   const args = mode === 'direct'
     ? [HELPER, box.root, box.linkDir]
     : ['-c', script, 'b24-install-test', HELPER, box.root, box.linkDir];
@@ -104,7 +104,7 @@ function install(
       FAKE_NPM_LOG: box.log,
       FAKE_NPM_FAIL: fail,
       NODE_ENV: 'production',
-      COCKPIT_B24_INSTALL_PAUSE: '0',
+      GRIGDESK_B24_INSTALL_PAUSE: '0',
     },
     timeout: 10000,
   });

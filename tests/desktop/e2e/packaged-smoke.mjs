@@ -24,11 +24,11 @@ const execute = promisify(execFile);
 const modes = [
   {
     name: 'linux-unpacked',
-    executable: process.env.COCKPIT_PACKAGED_EXECUTABLE,
+    executable: process.env.GRIGDESK_PACKAGED_EXECUTABLE,
   },
   {
     name: 'AppImage',
-    executable: process.env.COCKPIT_PACKAGED_APPIMAGE,
+    executable: process.env.GRIGDESK_PACKAGED_APPIMAGE,
   },
 ];
 
@@ -44,6 +44,10 @@ async function available(t, mode) {
   }
 
   assert.equal(path.isAbsolute(mode.executable), true);
+
+  if (mode.name === 'linux-unpacked') {
+    assert.equal(path.basename(mode.executable), 'grigdesk', 'GO-08: имя ELF готового окна');
+  }
 
   try {
     await access(mode.executable);
@@ -111,10 +115,10 @@ async function packagedRun(t, mode) {
       root,
       dataDir,
       executablePath: mode.executable,
-      args: [`--cockpit-url=${stub.address}`, '--password-store=gnome-libsecret'],
+      args: [`--grigdesk-url=${stub.address}`, '--password-store=gnome-libsecret'],
       env: {
-        COCKPIT_WINDOW_KEY_PATH: keyFile,
-        COCKPIT_UI_RELEASES_DIR: path.join(root, 'ui-releases'),
+        GRIGDESK_WINDOW_KEY_PATH: keyFile,
+        GRIGDESK_UI_RELEASES_DIR: path.join(root, 'ui-releases'),
       },
     });
     const child = spawn(selected.executablePath, selected.args, {
@@ -157,7 +161,7 @@ async function packagedRun(t, mode) {
  * При ошибке перечисляется только этот подкаталог профиля, без глобального поиска.
  */
 async function cookieDatabase(dataDir) {
-  const partition = path.join(dataDir, 'Partitions/cockpit-local');
+  const partition = path.join(dataDir, 'Partitions/grigdesk-local');
 
   for (const relative of ['Cookies', 'Network/Cookies']) {
     const candidate = path.join(partition, relative);
@@ -267,11 +271,11 @@ for (const mode of modes) {
 const fuseTargets = [
   {
     name: 'linux-unpacked',
-    executable: process.env.COCKPIT_PACKAGED_EXECUTABLE,
+    executable: process.env.GRIGDESK_PACKAGED_EXECUTABLE,
   },
   {
     name: 'AppImage-ELF',
-    executable: process.env.COCKPIT_PACKAGED_EXTRACTED_EXECUTABLE,
+    executable: process.env.GRIGDESK_PACKAGED_EXTRACTED_EXECUTABLE,
   },
 ];
 
@@ -302,10 +306,15 @@ for (const target of fuseTargets) {
   });
 }
 
-const IMAGE_SHA256 = '3c6bf305047dccbe6215d1f1e625c4a7846bd63dd97eae431c8180cb42e2457c';
+const SPLASH_HASHES = {
+  'background.png': 'dfdcded22be22703db57e8a5b96e2ab34019f7789d1e9ff6e142021ea43a9188',
+  'wordmark.svg': '732ca732444dd5df453748cbec861562ec5fa344c124210f43fb6b7dd8925ba7',
+  'index.html': 'acf8133f47d09ab8e2b49842fd25f16551197434df3cdbe10a19bc082a1a65e5',
+  'style.css': 'b8a9538d1b90ec7792923f708d61a2ef2b5f94680883821a7522cd8b914aa18f',
+};
 
 test('DW-P4: ресурсы заставки лежат в пакете без изменений', async (t) => {
-  const executable = process.env.COCKPIT_PACKAGED_EXECUTABLE;
+  const executable = process.env.GRIGDESK_PACKAGED_EXECUTABLE;
 
   if (!executable) {
     t.skip('Не задан путь готового пакета.');
@@ -325,13 +334,15 @@ test('DW-P4: ресурсы заставки лежат в пакете без �
 
   const files = listPackage(archive, { isPack: false });
 
-  for (const name of ['index.html', 'style.css', 'illustration.png']) {
+  for (const [name, expected] of Object.entries(SPLASH_HASHES)) {
     assert.ok(files.includes(`/dist/splash/${name}`), name);
+
+    const bytes = extractFile(archive, `dist/splash/${name}`);
+
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), expected, name);
   }
 
-  const image = extractFile(archive, 'dist/splash/illustration.png');
-
-  assert.equal(createHash('sha256').update(image).digest('hex'), IMAGE_SHA256);
+  assert.equal(files.includes('/dist/splash/illustration.png'), false);
 });
 
 /**
@@ -358,7 +369,7 @@ function insideAppDir(value, appDir) {
 
 test('DW-P5: распакованный AppImage сам поднимает сервер с чистым окружением', { timeout: 120_000 },
   async (t) => {
-    const extracted = process.env.COCKPIT_PACKAGED_EXTRACTED_EXECUTABLE;
+    const extracted = process.env.GRIGDESK_PACKAGED_EXTRACTED_EXECUTABLE;
 
     if (!extracted || process.env.XDG_DATA_HOME?.startsWith('/tmp/') !== true) {
       t.skip('Нужны распакованный AppImage и одноразовая сессия isolated-session.sh.');
@@ -378,9 +389,9 @@ test('DW-P5: распакованный AppImage сам поднимает се�
     }
 
     const root = await mkdtemp(path.join(tmpdir(), 'desktop-packaged-server-'));
-    const fixture = path.join(root, 'cockpit');
+    const fixture = path.join(root, 'grigdesk');
     const fixtureLog = path.join(root, 'fixture.log');
-    const runtimeFile = path.join(process.env.XDG_DATA_HOME, 'cockpit/desktop/runtime.json');
+    const runtimeFile = path.join(process.env.XDG_DATA_HOME, 'grigdesk/desktop/runtime.json');
     const port = await freePort();
     let child;
 
@@ -408,13 +419,13 @@ test('DW-P5: распакованный AppImage сам поднимает се�
       root,
       dataDir: path.join(root, 'profile'),
       executablePath: appRun,
-      args: [`--cockpit-url=http://127.0.0.1:${port}`, '--password-store=gnome-libsecret'],
+      args: [`--grigdesk-url=http://127.0.0.1:${port}`, '--password-store=gnome-libsecret'],
       isolateEnv: true,
       env: {
-        COCKPIT_PORT: String(port),
-        COCKPIT_WINDOW_KEY_PATH: path.join(root, 'window-auth/key'),
-        COCKPIT_E2E_FIXTURE_LOG: fixtureLog,
-        COCKPIT_E2E_FIXTURE_PACKAGED_COOKIE: randomBytes(24).toString('base64url'),
+        GRIGDESK_PORT: String(port),
+        GRIGDESK_WINDOW_KEY_PATH: path.join(root, 'window-auth/key'),
+        GRIGDESK_E2E_FIXTURE_LOG: fixtureLog,
+        GRIGDESK_E2E_FIXTURE_PACKAGED_COOKIE: randomBytes(24).toString('base64url'),
       },
     });
     let log = '';

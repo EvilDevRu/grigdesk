@@ -7,7 +7,7 @@
 
 # Разбирает аргументы install.sh: --autostart/--no-autostart, --shortcut/--no-shortcut.
 # Пустое значение переменной означает «ещё не решено».
-cockpit_install_parse_args() {
+grigdesk_install_parse_args() {
   INSTALL_UNIT_ONLY=0
   INSTALL_AUTOSTART=""
   INSTALL_SHORTCUT=""
@@ -28,7 +28,7 @@ cockpit_install_parse_args() {
 
 # Доопределяет выбор: переменная $1 остаётся, если задана флагом; при терминале задаётся
 # вопрос $2 с подсказкой по умолчанию $3 (1 — да, 0 — нет); без терминала берётся $3.
-cockpit_install_choice() {
+grigdesk_install_choice() {
   local var=$1
   local question=$2
   local default=$3

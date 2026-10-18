@@ -1,4 +1,4 @@
-export const DESKTOP_CHILD_ENV = 'COCKPIT_DESKTOP_CHILD';
+export const DESKTOP_CHILD_ENV = 'GRIGDESK_DESKTOP_CHILD';
 export const DESKTOP_RESTART_EXIT_CODE = 75;
 
 export interface ParentChannel {
@@ -35,7 +35,7 @@ export function attachDesktopParent(input: {
   channel.channel?.unref();
   channel.once('disconnect', () => {
     if (beginShutdown) {
-      void beginShutdown('приложение Кокпита закрылось');
+      void beginShutdown('приложение GrigDesk закрылось');
     } else {
       input.exit(0);
     }

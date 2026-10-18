@@ -9,7 +9,7 @@ import { versionDto } from '../web/helpers/studio3d-fixtures.js';
 import { TOOL_CATALOG } from '../../web/src/shared/tools/catalog.ts';
 import { VIEWER_MEMORY } from '../../web/src/shared/viewer3d/resourcePolicy.ts';
 
-const read = (name) => readFile(new URL(`../../docs/cockpit/${name}`, import.meta.url), 'utf8');
+const read = (name) => readFile(new URL(`../../docs/grigdesk/${name}`, import.meta.url), 'utf8');
 
 test('3D документы описывают док, сроки ожидания и действующий бюджет viewer', async () => {
   const tool = TOOL_CATALOG.find((item) => item.id === 'studio3d');

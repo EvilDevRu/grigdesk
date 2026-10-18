@@ -204,7 +204,7 @@ export async function runCodexUntrusted({
   const maxStreamBytes = MAX_OUTPUT_BYTES + 2 * Buffer.byteLength(JSON.stringify(input));
   signal?.throwIfAborted();
 
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-model-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-model-'));
   const limitMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TIMEOUT_MS;
 
   try {
@@ -307,7 +307,7 @@ export async function runCodexUntrusted({
             selectedCapabilityRoots: [],
             baseInstructions: INSTRUCTIONS,
             developerInstructions: '',
-            serviceName: 'cockpit',
+            serviceName: 'grigdesk',
           });
           return;
         }
@@ -425,7 +425,7 @@ export async function runCodexUntrusted({
         abort();
       } else {
         send(1, 'initialize', {
-          clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+          clientInfo: { name: 'grigdesk', title: 'GrigDesk', version: '0.1.0' },
           capabilities: { experimentalApi: true, requestAttestation: false },
         });
       }

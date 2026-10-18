@@ -171,7 +171,7 @@ export async function readRelay(root: string, settings: Settings): Promise<Relay
   if (selection.kind === 'none') {
     return {
       state: 'not_deployed',
-      reason: 'Локальный посредник не найден: docs/cockpit/mobile/relay-deploy.md',
+      reason: 'Локальный посредник не найден: docs/grigdesk/mobile/relay-deploy.md',
       ...empty,
     };
   }
@@ -180,7 +180,7 @@ export async function readRelay(root: string, settings: Settings): Promise<Relay
     return {
       state: 'ambiguous',
       reason: `Найдено несколько посредников: ${selection.names.map(printable).join(', ')}. ` +
-        'Выберите COCKPIT_RELAY_PROJECT в .env',
+        'Выберите GRIGDESK_RELAY_PROJECT в .env',
       ...empty,
     };
   }
@@ -209,7 +209,7 @@ export async function readLinks(settings: Settings): Promise<RelayStatus['links'
   }
 
   return parseLinks(await fetchJson(settings.origin + '/api/mobile/status',
-    { 'X-Cockpit-Token': token }, 3000));
+    { 'X-GrigDesk-Token': token }, 3000));
 }
 
 /**

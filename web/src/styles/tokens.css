@@ -1,6 +1,6 @@
 /* Глобальные стили и токены.
    Палитра — точная тёмная тема со старого дашборда фабрики (factory/lib/dashboard.py,
-   :root стр. 982–992). Кокпит коммитится в ТЁМНУЮ тему (как и старый дашборд). */
+   :root стр. 982–992). GrigDesk коммитится в ТЁМНУЮ тему (как и старый дашборд). */
 :root {
   --ground: #0a0c10;      /* фон контента (самый тёмный слой) */
   --sidebar: #0f141c;     /* панель сайдбара (слой выше) */
@@ -77,7 +77,7 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
 
   /* Подсветка кода в ответах: shiki (тема css-variables) пишет цвета как var(--md-code-*).
-     Тона — тёмная тема GitHub, приглушённые роли — из палитры кокпита. */
+     Тона — тёмная тема GitHub, приглушённые роли — из палитры GrigDesk. */
   --md-code-foreground: var(--ink);
   --md-code-background: transparent;
   --md-code-token-comment: var(--ink-low);

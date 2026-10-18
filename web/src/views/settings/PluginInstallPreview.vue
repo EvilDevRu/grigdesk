@@ -63,7 +63,7 @@
       <p v-if="preview.changes.truncated" class="preview-sensitive">Список сокращён.</p>
     </div>
     <UiInlineMessage tone="warning">
-      Код плагина выполняется внутри Cockpit с его правами.
+      Код плагина выполняется внутри GrigDesk с его правами.
       Ставьте плагины только из источников, которым доверяете.
     </UiInlineMessage>
   </section>

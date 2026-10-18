@@ -1,6 +1,6 @@
 // Проекты (профили): у каждого — свой конвейер; агенты — общая библиотека.
 // Список — объединение корневых profiles/<name>/graph.json и проектов, заведённых
-// в самом кокпите. Вторые живут реестром в prefs (там же их пути репозиториев для
+// в самом GrigDesk. Вторые живут реестром в prefs (там же их пути репозиториев для
 // плагина «Код»): каталог-маркер под них держал legacy-стор маршрутов, а он выпилен
 // вместе с v1 — проект без профиля фабрики не должен зависеть от мёртвой базы.
 // Хардкода имён нет.
@@ -13,7 +13,7 @@ export const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 
 /**
  * Готовность профиля к чему-либо он заявляет САМ — списком `capabilities` в graph.json
- * (тот же ключ читает движок: `profile_has_capability` в bin/factory). Кокпит не
+ * (тот же ключ читает движок: `profile_has_capability` в bin/factory). GrigDesk не
  * догадывается по косвенным признакам: поддержку route protocol решает профиль.
  */
 export async function profileHasCapability(
@@ -53,15 +53,15 @@ export interface ProjectsPrefsPort {
   read?: () => { projects?: Record<string, unknown> } | null | undefined;
 }
 
-/** Проекты, заведённые в кокпите: ключи реестра prefs.projects. */
-function listCockpitProjects(prefs: ProjectsPrefsPort | null): string[] {
+/** Проекты, заведённые в GrigDesk: ключи реестра prefs.projects. */
+function listGrigDeskProjects(prefs: ProjectsPrefsPort | null): string[] {
   try {
     return Object.keys(prefs?.read?.()?.projects || {}).filter((name) => PROFILE_RE.test(name));
   } catch { return []; }
 }
 
 /**
- * Все проекты: фабрика + заведённые в кокпите (объединение, отсортировано).
+ * Все проекты: фабрика + заведённые в GrigDesk (объединение, отсортировано).
  * По умолчанию список полный — архив ничего не рвёт, и уже созданное продолжает
  * открываться. `includeArchived: false` просят там, где начинают НОВОЕ: форма
  * запуска, подъём песочницы, выбор проекта в новом правиле.
@@ -73,7 +73,7 @@ export async function listProjects(
 ): Promise<string[]> {
   const all = new Set([
     ...(await listFactoryProfiles(profilesDir)),
-    ...listCockpitProjects(prefs),
+    ...listGrigDeskProjects(prefs),
   ]);
 
   if (includeArchived) {

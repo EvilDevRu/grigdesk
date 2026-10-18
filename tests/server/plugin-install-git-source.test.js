@@ -46,7 +46,7 @@ test('GS3: fetch устанавливает точный HEAD, origin и detache
 
   await repo.release('1.1.0');
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-fetch-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-fetch-'));
   const destination = path.join(root, 'package');
   const source = new GitPluginSource();
   const progress = [];
@@ -86,7 +86,7 @@ test('GS4: сдвинутый после listing тег отвергнут до 
   await git(repo.work, 'tag', '-f', 'v1.0.0');
   await git(repo.work, 'push', '-f', 'origin', 'refs/tags/v1.0.0');
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-tag-moved-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-tag-moved-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -103,7 +103,7 @@ test('GS4: сдвинутый после listing тег отвергнут до 
 test('GS5: fetch отменяется до запуска и после наблюдаемого clone stderr', async (t) => {
   const repo = await createPluginRepo(t);
   const sha = await repo.release('1.0.0');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-abort-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-abort-'));
   const target = {
     version: '1.0.0',
     tag: 'v1.0.0',
@@ -166,7 +166,7 @@ test('GS6: changes возвращает commit и NUL paths; иной отказ
   const repo = await createPluginRepo(t);
   const one = await repo.release('1.0.0');
   const two = await repo.release('1.1.0', { files: { 'server.js': 'export default async function () {}' } });
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-changes-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-changes-'));
   const directory = path.join(root, 'package');
   const source = new GitPluginSource();
 
@@ -213,7 +213,7 @@ test('GS6: changes возвращает commit и NUL paths; иной отказ
 test('GS7: inspect не теряет tracked/new/ignored изменения и допускает generated npm', async (t) => {
   const repo = await createPluginRepo(t);
   const sha = await repo.release('1.0.0', { files: { '.gitignore': 'ignored.txt\nnode_modules/\n' } });
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-inspect-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-inspect-'));
   const directory = path.join(root, 'package');
   const source = new GitPluginSource();
 
@@ -295,7 +295,7 @@ test('GS9: tag не подменяется одноимённой веткой; 
   await git(repo.work, 'branch', 'v1.0.0', two);
   await git(repo.work, 'push', 'origin', 'refs/heads/v1.0.0:refs/heads/v1.0.0');
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-ref-kind-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-ref-kind-'));
   const source = new GitPluginSource();
   const directory = path.join(root, 'tag');
 
@@ -347,7 +347,7 @@ test('GS13: Git tree отклоняет gitlink без gitmodules и symlink д�
     await git(repo.work, 'push', '-f', 'origin', 'main', '--tags');
 
     const sha = await git(repo.work, 'rev-parse', 'HEAD');
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-tree-modes-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-tree-modes-'));
     const directory = path.join(root, 'package');
     const source = new GitPluginSource({
       run: (file, args, options) => runCommand(file, ['-c', 'core.symlinks=false', ...args], options),
@@ -378,7 +378,7 @@ test('GS14: filters/LFS и управляющие файлы отвергают�
   ]) {
     const repo = await createPluginRepo(t);
     const sha = await repo.release('1.0.0', { files: { [file]: body } });
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-control-files-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-control-files-'));
     const directory = path.join(root, 'package');
     const source = new GitPluginSource();
 
@@ -412,7 +412,7 @@ test('GS15: tree limits и полный history budget отклоняют пак
       maxManifestBytes: 65536,
     },
   ]) {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-tree-limits-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-tree-limits-'));
     const directory = path.join(root, 'package');
     const source = new GitPluginSource({ packageLimits: limits });
 
@@ -440,7 +440,7 @@ test('GS15: tree limits и полный history budget отклоняют пак
   await rm(path.join(historical.work, 'history.bin'));
 
   const latest = await historical.release('1.1.0');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-history-budget-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-history-budget-'));
   const job = path.join(root, 'job');
   const untouched = path.join(root, 'current');
 
@@ -488,7 +488,7 @@ test('GS16: история и diff сокращаются честно; source �
   await git(repo.work, 'tag', '-f', 'v1.1.0');
   await git(repo.work, 'push', '-f', 'origin', 'main', '--tags');
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-source-output-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-source-output-'));
   const directory = path.join(root, 'package');
   const source = new GitPluginSource({
     run: async (file, args, options) => {
@@ -553,7 +553,7 @@ test('GS16: история и diff сокращаются честно; source �
 test('GS17: .git file/symlink и неизвестная metadata проверяются без Git', async (t) => {
   const repo = await createPluginRepo(t);
   const sha = await repo.release('1.0.0');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-metadata-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-metadata-'));
   const directory = path.join(root, 'package');
   const calls = [];
   const source = new GitPluginSource({

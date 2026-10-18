@@ -243,6 +243,6 @@ export function initializeAcp(client: AcpClient, timeoutMs = 15_000): Promise<un
     clientCapabilities: {
       fs: { readTextFile: false, writeTextFile: false },
     },
-    clientInfo: { name: 'Cockpit', version: '1' },
+    clientInfo: { name: 'GrigDesk', version: '1' },
   }, timeoutMs);
 }

@@ -130,7 +130,7 @@ export async function chatAppFixture(t, {
   // боевых минут, чтобы тест ждал событие, а не реальное время.
   autoContinueDelaysMs = null,
 } = {}) {
-  const root = givenRoot || await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-turns-'));
+  const root = givenRoot || await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-turns-'));
 
   // Как у рабочего сервера: закрытие рвёт и висящие ответы, иначе красный прогон
   // (POST держится до конца хода) повис бы на уборке, а не упал на проверке.

@@ -18,7 +18,7 @@ const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '../..');
 
 function fixtureRepo(t, files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-readability-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-readability-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   for (const [file, source] of Object.entries(files)) {

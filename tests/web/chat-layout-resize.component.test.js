@@ -23,7 +23,7 @@ const PINIA_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
 )).href;
 
-const LIST_WIDTH_KEY = 'cockpit-chats-list-width';
+const LIST_WIDTH_KEY = 'grigdesk-chats-list-width';
 
 let nonce = 0;
 async function compileSfc(path, id, patch = (code) => code) {
@@ -82,7 +82,7 @@ async function browserHarness() {
     return shared;
   }
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/chats' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/chats' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -244,7 +244,7 @@ test('строка чата: знак исполнителя красится ц
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const rows = [
-    { id: 'a', title: 'Про кокпит', snippet: '', ts: Date.now(), model: 'claude-opus-5' },
+    { id: 'a', title: 'Про GrigDesk', snippet: '', ts: Date.now(), model: 'claude-opus-5' },
     { id: 'b', title: 'Про парсер', snippet: '', ts: Date.now(), model: 'gpt-5.6', sending: true },
     { id: 'c', title: 'Без модели', snippet: '', ts: Date.now(), model: 'ктотоещё' },
   ];
@@ -342,8 +342,8 @@ test('раскладка чата: JS и CSS считают одни и те ж�
     actions,
     /data-context='chat-list-action'\]\s*\{[^}]*background:\s*var\(--ground\);/,
   );
-  assert.match(session, /'cockpit-chat-composer-h'/);
-  assert.doesNotMatch(session, /cockpit-chat-panel-composer-h/);
+  assert.match(session, /'grigdesk-chat-composer-h'/);
+  assert.doesNotMatch(session, /grigdesk-chat-panel-composer-h/);
 });
 
 test('COMP-ALERT: ссылка раскрывает сам чат на узком экране', async (t) => {

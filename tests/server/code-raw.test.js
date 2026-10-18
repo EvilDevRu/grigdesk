@@ -30,9 +30,9 @@ const PNG = Buffer.from(
 );
 
 async function fixture(t, { enabled = true } = {}) {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-raw-')));
-  const main = path.join(root, 'cockpit');
-  const wt = path.join(root, 'cockpit-worktree');
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-raw-')));
+  const main = path.join(root, 'grigdesk');
+  const wt = path.join(root, 'grigdesk-worktree');
 
   await mkdir(path.join(main, 'web/public'), { recursive: true });
   await mkdir(path.join(main, 'chats'), { recursive: true });
@@ -50,7 +50,7 @@ async function fixture(t, { enabled = true } = {}) {
   await exec('git', ['-C', main, 'worktree', 'add', '-q', '-b', 'task-1234', wt]);
 
   const config = {
-    profilesDir: path.join(root, 'profiles'), // не существует → проект кокпитный
+    profilesDir: path.join(root, 'profiles'), // не существует → проект GrigDesk
     chatsDir: path.join(main, 'chats'),
     telegramDir: path.join(main, 'telegram'),
     githubDir: path.join(main, 'github'),

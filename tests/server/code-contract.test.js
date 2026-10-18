@@ -35,7 +35,7 @@ const actionUrl = (action) => `/api/code/demo/${action}?repo=main`;
  * не затрагивая рабочую копию человека и не обращаясь к внешнему remote.
  */
 async function fixture(t, resolveCommitTarget = async () => ({ ok: false, error: 'no_model' })) {
-  const temp = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-contract-'));
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-contract-'));
   const root = path.join(temp, 'repo');
   const remote = path.join(temp, 'remote');
 

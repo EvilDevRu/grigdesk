@@ -24,13 +24,13 @@ test('RT-01 путь descriptor: абсолютный XDG_DATA_HOME или до�
   assert.equal(desktopRuntimePath({
     env: { XDG_DATA_HOME: '/fixture/data' },
     home,
-  }), '/fixture/data/cockpit/desktop/runtime.json');
+  }), '/fixture/data/grigdesk/desktop/runtime.json');
 
   for (const env of [{}, { XDG_DATA_HOME: '' }, { XDG_DATA_HOME: 'relative/data' }]) {
     assert.equal(desktopRuntimePath({
       env,
       home,
-    }), '/home/user/.local/share/cockpit/desktop/runtime.json');
+    }), '/home/user/.local/share/grigdesk/desktop/runtime.json');
   }
 });
 
@@ -87,7 +87,7 @@ test('RT-02 разбор descriptor: только известная верси�
 
 test('RT-03 окружение важнее файла, включая пустую строку и undefined', () => {
   const file = {
-    COCKPIT_PORT: '9100',
+    GRIGDESK_PORT: '9100',
     VALUE: 'из файла',
   };
 
@@ -97,21 +97,21 @@ test('RT-03 окружение важнее файла, включая пуст�
   assert.equal(effectiveValue({}, file, 'VALUE'), 'из файла');
   assert.equal(effectiveValue({}, file, 'ABSENT'), undefined);
   assert.equal(effectiveValue(Object.create({ VALUE: 'унаследованное' }), file, 'VALUE'), 'из файла');
-  assert.equal(effectivePort({ COCKPIT_PORT: '9200' }, file), 9200);
+  assert.equal(effectivePort({ GRIGDESK_PORT: '9200' }, file), 9200);
   assert.equal(effectivePort({}, file), 9100);
   assert.equal(effectivePort({}, {}), 8140);
-  assert.equal(effectivePort({ COCKPIT_PORT: '' }, file), 8140);
-  assert.equal(effectivePort({ COCKPIT_PORT: 'мусор' }, file), 8140);
+  assert.equal(effectivePort({ GRIGDESK_PORT: '' }, file), 8140);
+  assert.equal(effectivePort({ GRIGDESK_PORT: 'мусор' }, file), 8140);
 });
 
 test('RT-04 срок остановки: минимум и запас для настроенного слива', () => {
   assert.equal(stopGraceMs({}, {}), 45_000);
-  assert.equal(stopGraceMs({ COCKPIT_SHUTDOWN_TIMEOUT_MS: '30000' }, {}), 45_000);
-  assert.equal(stopGraceMs({ COCKPIT_SHUTDOWN_TIMEOUT_MS: '60000' }, {}), 75_000);
-  assert.equal(stopGraceMs({ COCKPIT_SHUTDOWN_TIMEOUT_MS: 'мусор' }, {}), 45_000);
-  assert.equal(stopGraceMs({}, { COCKPIT_SHUTDOWN_TIMEOUT_MS: '60000' }), 75_000);
-  assert.equal(stopGraceMs({ COCKPIT_SHUTDOWN_TIMEOUT_MS: '' }, {
-    COCKPIT_SHUTDOWN_TIMEOUT_MS: '60000',
+  assert.equal(stopGraceMs({ GRIGDESK_SHUTDOWN_TIMEOUT_MS: '30000' }, {}), 45_000);
+  assert.equal(stopGraceMs({ GRIGDESK_SHUTDOWN_TIMEOUT_MS: '60000' }, {}), 75_000);
+  assert.equal(stopGraceMs({ GRIGDESK_SHUTDOWN_TIMEOUT_MS: 'мусор' }, {}), 45_000);
+  assert.equal(stopGraceMs({}, { GRIGDESK_SHUTDOWN_TIMEOUT_MS: '60000' }), 75_000);
+  assert.equal(stopGraceMs({ GRIGDESK_SHUTDOWN_TIMEOUT_MS: '' }, {
+    GRIGDESK_SHUTDOWN_TIMEOUT_MS: '60000',
   }), 45_000);
 });
 
@@ -132,10 +132,10 @@ function runtimeFixture({
     home,
   });
   const parsed = parseRuntimeDescriptor(descriptorText || 'null');
-  const data = parsed?.home || env.COCKPIT_HOME || home + '/.cockpit';
+  const data = parsed?.home || env.GRIGDESK_HOME || home + '/.grigdesk';
   const texts = new Map([
     [descriptorPath, descriptorText],
-    [env.COCKPIT_ENV_FILE || data + '/.env', fileText],
+    [env.GRIGDESK_ENV_FILE || data + '/.env', fileText],
   ]);
   const reads = [];
   const checked = [];
@@ -168,7 +168,7 @@ test('RT-05 нет descriptor: отказ с подсказкой установ
 
   assert.deepEqual(result, {
     problem: 'not_installed',
-    message: 'Сервер Кокпита не установлен для приложения: выполните cockpit desktop install.',
+    message: 'Сервер GrigDesk не установлен для приложения: выполните grigdesk-ctl desktop install.',
   });
 });
 
@@ -178,7 +178,7 @@ test('RT-06 битый descriptor: invalid с его путём', async () => {
 
   assert.equal(result.problem, 'invalid');
   assert.ok(result.message.includes(desktopRuntimePath(fixture)));
-  assert.ok(result.message.includes('cockpit desktop install'));
+  assert.ok(result.message.includes('grigdesk-ctl desktop install'));
 });
 
 test('RT-07 неполная установка: отказ называет недостающий файл или каталог', async () => {
@@ -198,8 +198,8 @@ test('RT-07 неполная установка: отказ называет н�
 });
 
 test('RT-08 проверяется index.html выбранного web dist', async () => {
-  for (const env of [{}, { COCKPIT_WEB_DIST: '/fixture/web-dist' }]) {
-    const dist = env.COCKPIT_WEB_DIST || '/fixture/project/web/dist';
+  for (const env of [{}, { GRIGDESK_WEB_DIST: '/fixture/web-dist' }]) {
+    const dist = env.GRIGDESK_WEB_DIST || '/fixture/project/web/dist';
     const fixture = runtimeFixture({
       env,
       missing: [`file:${dist}/index.html`],
@@ -229,12 +229,12 @@ test('RT-09 исполняемый Node проверяется общей про
 test('RT-10 окружение важнее файла: порт, origin, файл настроек, журнал и бюджет', async () => {
   const fixture = runtimeFixture({
     env: {
-      COCKPIT_ENV_FILE: '/fixture/custom.env',
-      COCKPIT_PORT: '9400',
-      COCKPIT_LOG: '/fixture/custom.log',
-      COCKPIT_SHUTDOWN_TIMEOUT_MS: '60000',
+      GRIGDESK_ENV_FILE: '/fixture/custom.env',
+      GRIGDESK_PORT: '9400',
+      GRIGDESK_LOG: '/fixture/custom.log',
+      GRIGDESK_SHUTDOWN_TIMEOUT_MS: '60000',
     },
-    fileText: 'COCKPIT_PORT=9300\nCOCKPIT_LOG=/fixture/file.log\nCOCKPIT_SHUTDOWN_TIMEOUT_MS=30000\n',
+    fileText: 'GRIGDESK_PORT=9300\nGRIGDESK_LOG=/fixture/file.log\nGRIGDESK_SHUTDOWN_TIMEOUT_MS=30000\n',
   });
   const result = await loadServerRuntime(fixture);
 
@@ -243,17 +243,17 @@ test('RT-10 окружение важнее файла: порт, origin, фай
   assert.equal(result.runtime.origin, 'http://127.0.0.1:9400');
   assert.equal(result.runtime.logPath, '/fixture/custom.log');
   assert.equal(result.runtime.graceMs, 75_000);
-  assert.equal(result.runtime.env.COCKPIT_PORT, '9400');
+  assert.equal(result.runtime.env.GRIGDESK_PORT, '9400');
   assert.ok(fixture.reads.includes('/fixture/custom.env'));
-  assert.equal(fixture.reads.includes('/home/user/.cockpit/.env'), false);
+  assert.equal(fixture.reads.includes('/home/user/.grigdesk/.env'), false);
 
   const fromFile = await loadServerRuntime(runtimeFixture({
-    fileText: 'COCKPIT_PORT=9300\nCOCKPIT_SHUTDOWN_TIMEOUT_MS=60000\n',
+    fileText: 'GRIGDESK_PORT=9300\nGRIGDESK_SHUTDOWN_TIMEOUT_MS=60000\n',
   }));
 
   assert.equal(fromFile.runtime.port, 9300);
   assert.equal(fromFile.runtime.graceMs, 75_000);
-  assert.equal(fromFile.runtime.logPath, '/home/user/.cockpit/state/cockpit-server.log');
+  assert.equal(fromFile.runtime.logPath, '/home/user/.grigdesk/state/grigdesk-server.log');
 });
 
 test('RT-11 окружение очищается от AppImage, Electron, systemd и признаков исполнителя', () => {
@@ -276,7 +276,7 @@ test('RT-11 окружение очищается от AppImage, Electron, syste
     'LISTEN_FDS',
     'LISTEN_FDNAMES',
     'CLAUDECODE',
-    'COCKPIT_DESKTOP_DATA_DIR',
+    'GRIGDESK_DESKTOP_DATA_DIR',
   ];
   const parent = {
     ...Object.fromEntries(removed.map((key) => [key, 'след упаковки'])),
@@ -349,7 +349,7 @@ test('RT-12 PATH повторяет юнит без дублей, NODE_ENV со�
     parent: {
       PATH: '/usr/bin:/fixture/node/bin:/home/user/.local/bin:/usr/bin',
       NODE_ENV: 'production',
-      COCKPIT_DESKTOP_CHILD: 'старый маркер',
+      GRIGDESK_DESKTOP_CHILD: 'старый маркер',
     },
     dotenv: {},
     node: RUNTIME_DESCRIPTOR.node,
@@ -358,7 +358,7 @@ test('RT-12 PATH повторяет юнит без дублей, NODE_ENV со�
 
   assert.equal(result.PATH, EXPECTED_SERVER_PATH);
   assert.equal(result.NODE_ENV, 'production');
-  assert.equal(result.COCKPIT_DESKTOP_CHILD, '1');
+  assert.equal(result.GRIGDESK_DESKTOP_CHILD, '1');
   assert.equal(Object.hasOwn(buildServerEnv({
     parent: {},
     dotenv: {},
@@ -387,7 +387,7 @@ test('RT-13 файл дополняет окружение, включая пу�
   assert.equal(result.OVERRIDE, '');
   assert.equal(Object.hasOwn(result, 'ABSENT_VALUE'), false);
   assert.equal(result.FILE_ONLY, 'из файла');
-  assert.equal(result.COCKPIT_DESKTOP_CHILD, '1');
+  assert.equal(result.GRIGDESK_DESKTOP_CHILD, '1');
   assert.equal(dotenv.OVERRIDE, 'из файла');
 });
 
@@ -400,15 +400,15 @@ test('упакованный интерфейс не зависит от раб�
 });
 
 
-test('RC-DH-1 версия 1 выбирает умолчание без навязывания COCKPIT_HOME ребёнку', async () => {
+test('RC-DH-1 версия 1 выбирает умолчание без навязывания GRIGDESK_HOME ребёнку', async () => {
   const f = runtimeFixture();
   const { runtime } = await loadServerRuntime(f);
 
   assert.ok(runtime);
-  assert.ok(f.reads.includes('/home/user/.cockpit/.env'));
-  assert.equal(runtime.logPath, '/home/user/.cockpit/state/cockpit-server.log');
-  assert.equal(runtime.uiReleasesDir, '/home/user/.cockpit/state/ui-releases');
-  assert.equal(Object.hasOwn(runtime.env, 'COCKPIT_HOME'), false);
+  assert.ok(f.reads.includes('/home/user/.grigdesk/.env'));
+  assert.equal(runtime.logPath, '/home/user/.grigdesk/state/grigdesk-server.log');
+  assert.equal(runtime.uiReleasesDir, '/home/user/.grigdesk/state/ui-releases');
+  assert.equal(Object.hasOwn(runtime.env, 'GRIGDESK_HOME'), false);
 });
 
 test('RC-DH-2 версия 2 сильнее окружения окна', async () => {
@@ -418,33 +418,33 @@ test('RC-DH-2 версия 2 сильнее окружения окна', async 
       version: 2, 
       home: '/data/descriptor' 
     }),
-    env: { COCKPIT_HOME: '/data/window' },
+    env: { GRIGDESK_HOME: '/data/window' },
   });
   const { runtime } = await loadServerRuntime(f);
 
   assert.ok(runtime);
   assert.ok(f.reads.includes('/data/descriptor/.env'));
-  assert.equal(runtime.env.COCKPIT_HOME, '/data/descriptor');
+  assert.equal(runtime.env.GRIGDESK_HOME, '/data/descriptor');
 });
 
 test('RC-DH-3 явные пути из файла и окружения сильнее умолчаний', async () => {
   for (const env of [{}, { 
-    COCKPIT_ENV_FILE: '/custom/env', 
-    COCKPIT_LOG: '/custom/log',
-    COCKPIT_UI_RELEASES_DIR: '/custom/ui' 
+    GRIGDESK_ENV_FILE: '/custom/env', 
+    GRIGDESK_LOG: '/custom/log',
+    GRIGDESK_UI_RELEASES_DIR: '/custom/ui' 
   }]) {
     const { runtime } = await loadServerRuntime(runtimeFixture({
       env,
-      fileText: 'COCKPIT_LOG=/file/log\nCOCKPIT_UI_RELEASES_DIR=/file/ui',
+      fileText: 'GRIGDESK_LOG=/file/log\nGRIGDESK_UI_RELEASES_DIR=/file/ui',
     }));
 
-    assert.equal(runtime.logPath, env.COCKPIT_LOG || '/file/log');
-    assert.equal(runtime.uiReleasesDir, env.COCKPIT_UI_RELEASES_DIR || '/file/ui');
+    assert.equal(runtime.logPath, env.GRIGDESK_LOG || '/file/log');
+    assert.equal(runtime.uiReleasesDir, env.GRIGDESK_UI_RELEASES_DIR || '/file/ui');
   }
 });
 
 test('RC-DH-4 настройки не переназначают папку и файл окружения', async () => {
-  for (const key of ['COCKPIT_HOME', 'COCKPIT_ENV_FILE']) {
+  for (const key of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
     const result = await loadServerRuntime(runtimeFixture({ fileText: `${key}=/other` }));
 
     assert.equal(result.problem, 'invalid');

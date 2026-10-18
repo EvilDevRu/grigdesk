@@ -159,7 +159,7 @@ function transportHarness({
     mediaStream,
     sessionId: 'speech-session-1',
     revision: 'opaque-revision-1',
-    apiClient: { wsUrl: (path) => `wss://cockpit.test${path}` },
+    apiClient: { wsUrl: (path) => `wss://grigdesk.test${path}` },
     WebSocketCtor: FakeSocket,
     AudioContextCtor: FakeAudioContext,
     AudioWorkletNodeCtor: FakeWorkletNode,
@@ -205,7 +205,7 @@ test('live transport ждёт ready, шлёт PCM по seq и делает bound
   });
 
   assert.equal(session.state, 'recording');
-  assert.equal(socket.url, 'wss://cockpit.test/api/chat/transcribe/stream');
+  assert.equal(socket.url, 'wss://grigdesk.test/api/chat/transcribe/stream');
   assert.equal(harness.state.contexts[0].loadedModules.length, 1);
   assert.equal(harness.state.workletNodes[0].name, SPEECH_PCM_WORKLET_NAME);
   assert.deepEqual(harness.state.workletNodes[0].options.processorOptions, {

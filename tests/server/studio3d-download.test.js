@@ -17,7 +17,7 @@ const SHA = createHash('sha256').update(BYTES).digest('hex');
  */
 async function fixture(t) {
   const fake = await startFakeTripo();
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-download-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-download-'));
 
   fake.setFile('model.glb', BYTES);
   t.after(async () => {

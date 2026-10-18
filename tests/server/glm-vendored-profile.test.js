@@ -99,7 +99,7 @@ test('настоящий процесс GLM не берёт DEEPSEEK_API_KEY и 
     'DEEPSEEK_API_KEY=dotenv-deepseek',
     'ZAI_API_KEY=dotenv-zai',
     'ZAI_CODING_API_KEY=dotenv-zai-coding',
-    'COCKPIT_GLM_ROUTE_KEY=dotenv-route',
+    'GRIGDESK_GLM_ROUTE_KEY=dotenv-route',
     '',
   ].join('\n');
 
@@ -137,7 +137,7 @@ test('настоящий процесс GLM не применяет retryPolicy,
         'llm-pi-ai': { providers: { zai: {
           baseURL: other.endpoint,
           retryPolicy: { mode: 'always' },
-          headers: { 'x-cockpit-hijack': '1' },
+          headers: { 'x-grigdesk-hijack': '1' },
         } } },
       })),
     });
@@ -156,10 +156,10 @@ test('настоящий процесс GLM не применяет retryPolicy,
     assert.equal(turn.turnEnd.data.reason.error.code, 'AUTH');
     assert.equal(other.requests.length, 0);
     assert.equal(f.mock.requests.length, 1);
-    assert.equal(f.mock.requests[0].headerNames.includes('x-cockpit-hijack'), false);
+    assert.equal(f.mock.requests[0].headerNames.includes('x-grigdesk-hijack'), false);
   });
 
-test('настоящий hook процесса GLM не видит COCKPIT_GLM_ROUTE_KEY', async (t) => {
+test('настоящий hook процесса GLM не видит GRIGDESK_GLM_ROUTE_KEY', async (t) => {
   const f = await fixture(t, { respond: (_payload, index) => index === 0
     ? glmToolCall('read', { file_path: 'note.txt' })
     : glmTextReply() });
@@ -175,7 +175,7 @@ test('настоящий hook процесса GLM не видит COCKPIT_GLM_R
   assert.equal(entries.length, 1);
   assert.ok(entries[0].envNames.includes('CLAUDE_PROJECT_DIR'), 'положительный контроль окружения hook');
 
-  for (const name of ['COCKPIT_GLM_ROUTE_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY', 'DEEPSEEK_API_KEY']) {
+  for (const name of ['GRIGDESK_GLM_ROUTE_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY', 'DEEPSEEK_API_KEY']) {
     assert.equal(entries[0].envNames.includes(name), false, name);
   }
 });

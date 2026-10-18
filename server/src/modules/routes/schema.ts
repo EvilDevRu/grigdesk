@@ -494,7 +494,7 @@ function validateNode(
   const doc = node as unknown as RouteNodeDoc;
 
   assertIdentifier(doc.runKey, RUN_KEY_RE, `${path}.runKey`);
-  // Cockpit пока разрешает решение ворот через runKey.toLowerCase(). Если эти
+  // GrigDesk пока разрешает решение ворот через runKey.toLowerCase(). Если эти
   // значения расходятся, UI покажет одни ворота, а runtime зафиксирует другие.
   if (doc.id !== String(doc.runKey).toLowerCase()) {
     fail(

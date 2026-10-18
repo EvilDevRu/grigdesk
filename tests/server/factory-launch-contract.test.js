@@ -14,7 +14,7 @@ import {
 } from '../../server/src/lib/factoryLaunchContract.ts';
 
 async function fixture(t, { deliveryActions = 'task-comment' } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-contract-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-launch-contract-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   const profileDir = path.join(profilesDir, 'demo');

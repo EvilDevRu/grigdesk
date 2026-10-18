@@ -25,7 +25,7 @@ export function assertRuntimeClosure(
 
 const requireBuild = createRequire(new URL('./deepseek-build/package.json', import.meta.url));
 
-export const COMPOSITION_REVISION = 'cockpit-host-web-acp-v3';
+export const COMPOSITION_REVISION = 'grigdesk-host-web-acp-v3';
 
 export const HOST_OVERLAY_PACKAGES = [
   '@deepseek-ai/dsh-hooks-claude-code',
@@ -159,7 +159,7 @@ export async function discoverRuntimeClosure(sourceDir: string): Promise<{
   addRows(layers, 'host YAML composition');
 
   for (const name of HOST_OVERLAY_PACKAGES) {
-    add(name, 'Cockpit server-owned overlay');
+    add(name, 'GrigDesk server-owned overlay');
   }
 
   for (const name of ['base', 'web-app', 'acp-app', 'app-boot', 'cmdline',

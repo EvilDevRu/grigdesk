@@ -12,7 +12,7 @@ import { claudeSessionArgs } from '../../server/src/lib/executors/_claudeStream.
 
 const ORDINARY = ['low', 'medium', 'high', 'xhigh', 'max'];
 const VERSION = '2.1.293 (Claude Code)\n';
-const CONTROL = '__cockpit_invalid_effort__';
+const CONTROL = '__grigdesk_invalid_effort__';
 const REJECTION = `Unknown --effort value: ${CONTROL}, ignoring it\n`;
 
 /**
@@ -20,7 +20,7 @@ const REJECTION = `Unknown --effort value: ${CONTROL}, ignoring it\n`;
  * Каждый тест владеет своим процессом; зависание ограничивает production-таймаут пробы.
  */
 async function fakeEffortCli(t, options = {}) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-effort-probe-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-effort-probe-'));
   const bin = path.join(dir, 'claude');
   const capture = path.join(dir, 'calls.jsonl');
   const spec = {

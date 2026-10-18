@@ -17,7 +17,7 @@ const run = promisify(execFile);
 export interface SpeechCheckInput {
   audioFile: string;
   expectedText: string;
-  // Расшифровку делает общий речевой runtime кокпита. Она внедряется функцией:
+  // Расшифровку делает общий речевой runtime GrigDesk. Она внедряется функцией:
   // раздел не должен знать, как именно устроен запуск распознавания, а тесты —
   // поднимать его целиком ради сверки токенов.
   transcribe: ((file: string) => Promise<string | SpeechTranscript>) | null;

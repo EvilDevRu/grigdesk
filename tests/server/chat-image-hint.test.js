@@ -9,7 +9,7 @@ import {
 } from './helpers/chat-turns.js';
 
 const FIXED_HINT = [
-  '[Подсказка Cockpit: картинки в ответе]',
+  '[Подсказка GrigDesk: картинки в ответе]',
   'Чтобы показать картинку, вставь Markdown ![подпись](путь).',
   'Поддержаны PNG, JPEG, GIF и WebP до 10 МБ из рабочей папки разговора и папки артефактов.',
   'Относительный путь считается от основной папки; абсолютный — также из дополнительных папок.',
@@ -27,7 +27,7 @@ test('CHAT-HINT-01: helper добавляет точный блок и сохр�
 });
 
 test('CHAT-HINT-02: пользовательский маркер не подавляет серверный блок', () => {
-  const original = '[Подсказка Cockpit: картинки в ответе]\nЦитирую пример';
+  const original = '[Подсказка GrigDesk: картинки в ответе]\nЦитирую пример';
 
   assert.equal(withChatImageHint(original, '/data/artifacts'), original + '\n\n' + FIXED_HINT);
 });
@@ -49,8 +49,8 @@ test('CHAT-HINT-03: обычный ход получает одну подска
   const [run] = await control.waitForRuns(1);
 
   assert.equal(run.message, withChatTitleHook('Покажи картинку\n\n' + liveHint(root), true));
-  assert.equal(run.message.split('[Подсказка Cockpit: картинки в ответе]').length - 1, 1);
-  assert.equal(run.message.endsWith('[/Служебный хук Cockpit]'), true);
+  assert.equal(run.message.split('[Подсказка GrigDesk: картинки в ответе]').length - 1, 1);
+  assert.equal(run.message.endsWith('[/Служебный хук GrigDesk]'), true);
   run.release('Готово');
 });
 
@@ -117,7 +117,7 @@ test('CHAT-HINT-04: подсказка только порту, оригинал
   assert.equal(page.json().entries[0].text, payload.text);
   assert.equal(page.json().entries[0].state, 'forwarded');
   assert.equal(events.filter((event) => event.event === 'chat-in-turn')
-    .some((event) => JSON.stringify(event.data).includes('[Подсказка Cockpit:')), false);
+    .some((event) => JSON.stringify(event.data).includes('[Подсказка GrigDesk:')), false);
   run.release('Готово');
   await waitFor(async () => (await app.inject('/api/chat/active')).json().active.length === 0);
 
@@ -134,7 +134,7 @@ test('CHAT-HINT-04: подсказка только порту, оригинал
   const history = await app.inject('/api/chat/store/chat/hint-chat');
 
   assert.equal(history.json().chat.messages.some((message) => message.text === payload.text), true);
-  assert.equal(JSON.stringify(history.json()).includes('[Подсказка Cockpit:'), false);
+  assert.equal(JSON.stringify(history.json()).includes('[Подсказка GrigDesk:'), false);
   assert.equal(closed.length > 0, true);
 });
 

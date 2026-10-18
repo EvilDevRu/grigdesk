@@ -20,7 +20,7 @@ export function chatSettings(chat: Payload, run: Payload | undefined, deps: Faca
   const live = normalizeContextUsage(run);
   const current = Object.hasOwn(live, 'contextTokens') || live.contextMetric
     ? live : normalizeContextUsage(chat);
-  const workdir = normalizeChatWorkdir(chat.workdir) || { kind: 'cockpit' as const };
+  const workdir = normalizeChatWorkdir(chat.workdir) || { kind: 'grigdesk' as const };
   const committed = recordOrEmpty(recordOrEmpty(chat.workdirState).committed);
 
   return {

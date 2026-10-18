@@ -110,7 +110,7 @@ class KimiWorkMcpProcess extends EventEmitter {
           ],
           toolCall: {
             toolCallId: `${this.toolName}-1`,
-            title: `mcp__cockpit-work__${this.toolName}`,
+            title: `mcp__grigdesk-work__${this.toolName}`,
             content: [{ type: 'content', content: { type: 'text', text: 'id' } }],
           },
         },
@@ -154,7 +154,7 @@ async function workTools(options) {
   assert.equal(
     typeof create,
     'function',
-    'provider-neutral Cockpit work tools ещё не реализованы в executors/index.js',
+    'provider-neutral GrigDesk work tools ещё не реализованы в executors/index.js',
   );
   return create(options);
 }
@@ -331,7 +331,7 @@ test('MCP tool-result для Claude и Kimi не записывает private me
   try {
     module = await import('../../server/src/lib/executors/work-mcp.js');
   } catch (error) {
-    assert.fail(`Cockpit work MCP ещё не реализован: ${error.message}`);
+    assert.fail(`GrigDesk work MCP ещё не реализован: ${error.message}`);
   }
   const tools = await workTools({
     projectId: 'project-a',
@@ -409,7 +409,7 @@ test('persistent Claude и Codex ротируют процесс при смен
 });
 
 test('Claude строит one-shot и persistent argv с точечным SSH preallow', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-claude-argv-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-claude-argv-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'fake-claude');
   const trace = path.join(root, 'argv.json');
@@ -420,7 +420,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"ok","session_id":"
   await chmod(bin, 0o755);
   const mcpConfig = {
     mcpServers: {
-      'cockpit-work': { command: '/tmp/cockpit-work-mcp', args: ['--socket', '/tmp/work.sock'] },
+      'grigdesk-work': { command: '/tmp/grigdesk-work-mcp', args: ['--socket', '/tmp/work.sock'] },
     },
   };
   const snapshot = (argv) => ({
@@ -446,7 +446,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"ok","session_id":"
 
   const expected = {
     config: mcpConfig,
-    allowed: 'mcp__cockpit-work__supervised_ssh',
+    allowed: 'mcp__grigdesk-work__supervised_ssh',
     permissionPrompt: false,
   };
   assert.deepEqual(pairs, modes.map((permissionMode) => ({
@@ -457,7 +457,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"ok","session_id":"
 });
 
 test('Codex передаёт dynamicTools и ровно раз диспатчит item/tool/call во всех режимах', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-codex-tool-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-codex-tool-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'codex-fixture');
   await copyFile(new URL('../fixtures/codex-app-server/rich-turn-0.149.0.mjs', import.meta.url), bin);
@@ -476,10 +476,10 @@ test('Codex передаёт dynamicTools и ровно раз диспатчи�
       config: { codexBin: bin },
       env: {
         ...process.env,
-        COCKPIT_CODEX_FIXTURE_TRACE: trace,
-        COCKPIT_CODEX_FIXTURE_SCENARIO: 'ssh-tool',
-        COCKPIT_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
-        COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '0',
+        GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+        GRIGDESK_CODEX_FIXTURE_SCENARIO: 'ssh-tool',
+        GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
+        GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0',
       },
       message: 'run id',
       cwd: root,
@@ -520,15 +520,15 @@ test('Codex передаёт dynamicTools и ровно раз диспатчи�
 });
 
 test('Kimi передаёт work MCP в ACP и не создаёт вторую provider-карточку', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-kimi-mcp-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-kimi-mcp-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const cwd = path.join(root, 'workspace');
   await import('node:fs/promises').then(({ mkdir }) => mkdir(cwd, { recursive: true }));
   const providerPrompts = [];
   const mcpServers = [{
-    name: 'cockpit-work',
+    name: 'grigdesk-work',
     command: '/usr/bin/socat',
-    args: ['STDIO', 'UNIX-CONNECT:/run/cockpit-work/server.sock'],
+    args: ['STDIO', 'UNIX-CONNECT:/run/grigdesk-work/server.sock'],
   }];
   const modes = ['default', 'auto', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
   const snapshots = [];
@@ -584,7 +584,7 @@ test('Kimi передаёт work MCP в ACP и не создаёт вторую 
 });
 
 test('Claude разрешает exact набор рабочих tools в one-shot и persistent ходах', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-work-claude-argv-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-work-claude-argv-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'fake-claude');
   const trace = path.join(root, 'argv.json');
@@ -598,7 +598,7 @@ printf '%s\n' \
   await chmod(bin, 0o755);
   const mcpConfig = {
     mcpServers: {
-      'cockpit-work': { command: '/tmp/cockpit-work-mcp', args: ['--socket', '/tmp/work.sock'] },
+      'grigdesk-work': { command: '/tmp/grigdesk-work-mcp', args: ['--socket', '/tmp/work.sock'] },
     },
   };
   const descriptors = [
@@ -621,18 +621,18 @@ printf '%s\n' \
 
   assert.deepEqual({ oneShot: allowed(oneShot), persistent: allowed(persistent) }, {
     oneShot: [
-      'mcp__cockpit-work__supervised_db',
-      'mcp__cockpit-work__supervised_ssh',
+      'mcp__grigdesk-work__supervised_db',
+      'mcp__grigdesk-work__supervised_ssh',
     ],
     persistent: [
-      'mcp__cockpit-work__supervised_db',
-      'mcp__cockpit-work__supervised_ssh',
+      'mcp__grigdesk-work__supervised_db',
+      'mcp__grigdesk-work__supervised_ssh',
     ],
   });
 });
 
 test('Codex объявляет и диспатчит рабочий tool как dynamic tool и отдаёт его результат', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-work-codex-tool-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-work-codex-tool-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = path.join(root, 'codex-fixture');
   const trace = path.join(root, 'trace.jsonl');
@@ -652,10 +652,10 @@ test('Codex объявляет и диспатчит рабочий tool как 
     config: { codexBin: bin },
     env: {
       ...process.env,
-      COCKPIT_CODEX_FIXTURE_TRACE: trace,
-      COCKPIT_CODEX_FIXTURE_SCENARIO: 'lookup-tool',
-      COCKPIT_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
-      COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '0',
+      GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+      GRIGDESK_CODEX_FIXTURE_SCENARIO: 'lookup-tool',
+      GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.150.1',
+      GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0',
     },
     message: 'search',
     cwd: root,

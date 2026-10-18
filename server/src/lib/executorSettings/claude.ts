@@ -55,7 +55,7 @@ export function claudeSettingsSnapshot(
       'deniedMcpServers',
     ].map((key) => ({
       path: [key],
-      owner: 'Запуск Cockpit',
+      owner: 'Запуск GrigDesk',
       reason: 'Управляется существующими параметрами чата',
     })),
     ...['env', 'apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper'].map((key) => ({
@@ -79,7 +79,7 @@ export function claudeSettingsSnapshot(
     base: decodeSettingsJson(effective),
     writeChannel: {
       id: 'settings-json-overlay',
-      scope: 'cockpit-chats' as const,
+      scope: 'grigdesk-chats' as const,
       state: 'verified' as const,
     },
   };

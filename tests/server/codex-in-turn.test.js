@@ -20,7 +20,7 @@ const CODEX_THREAD_ID = '00000000-0000-7000-8000-000000000049';
 const CODEX_TURN_ID = '00000000-0000-7000-8000-00000000004a';
 
 async function fixture(t, scenario = 'steer', env = {}) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-in-turn-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-in-turn-'));
   const bin = path.join(dir, 'codex-fixture');
   const trace = path.join(dir, 'trace.jsonl');
 
@@ -34,9 +34,9 @@ async function fixture(t, scenario = 'steer', env = {}) {
     trace,
     env: {
       ...process.env,
-      COCKPIT_CODEX_FIXTURE_TRACE: trace,
-      COCKPIT_CODEX_FIXTURE_SCENARIO: scenario,
-      COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '0',
+      GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+      GRIGDESK_CODEX_FIXTURE_SCENARIO: scenario,
+      GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0',
       ...env,
     },
   };
@@ -88,7 +88,7 @@ async function waitFor(check, what, timeoutMs = 3000) {
 }
 
 test('Codex: уточнение доходит в активный ход и не создаёт второй turn/start', async (t) => {
-  const f = await fixture(t, 'steer', { COCKPIT_CODEX_FIXTURE_REQUIRE_RESUME: '1' });
+  const f = await fixture(t, 'steer', { GRIGDESK_CODEX_FIXTURE_REQUIRE_RESUME: '1' });
   const statuses = [];
   const assistant = [];
   let port = null;
@@ -188,7 +188,7 @@ test('Codex: уточнение доходит в активный ход и н�
 });
 
 test('Codex: два уточнения подряд идут в один ход по порядку', async (t) => {
-  const f = await fixture(t, 'steer', { COCKPIT_CODEX_FIXTURE_STEERS: '2' });
+  const f = await fixture(t, 'steer', { GRIGDESK_CODEX_FIXTURE_STEERS: '2' });
   const assistant = [];
   let port = null;
   let releasePort;

@@ -149,7 +149,7 @@ export async function browserFlow(options: Options) {
     await page.goto(`http://127.0.0.1:${(vite.httpServer!.address() as AddressInfo).port}`);
     await page
       .getByRole('heading', {
-        name: 'Подключить Кокпит',
+        name: 'Подключить GrigDesk',
         exact: true,
       })
       .waitFor();
@@ -352,7 +352,7 @@ export async function browserFlow(options: Options) {
       await options.revoke();
       await page
         .getByRole('heading', {
-          name: 'Телефон отозван в кокпите',
+          name: 'Телефон отозван в GrigDesk',
           exact: true,
         })
         .waitFor();

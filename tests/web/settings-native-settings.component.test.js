@@ -8,12 +8,12 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 test('карточка загружает нативную схему только при раскрытии', async (t) => {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
 
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/settings');
 
-  browser.localStorage.setItem('cockpit-settings-tab', 'providers');
+  browser.localStorage.setItem('grigdesk-settings-tab', 'providers');
 
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const { mount, flushPromises } = await import(
@@ -51,7 +51,7 @@ test('карточка загружает нативную схему тольк
     }),
     useChatStore: () => ({ compactWindow: 0 }),
     useDeviceStore: () => ({ canInstall: false, wakeLock: false }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
   globalThis.__nativeSettingsPageApi = {
     async get() {

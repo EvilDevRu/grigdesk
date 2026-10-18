@@ -7,8 +7,8 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 _runner_deepseek_node() {
-  local node=${COCKPIT_DEEPSEEK_NODE_BIN:-${NODE_BIN:-}}
-  if [[ -n "${COCKPIT_DEEPSEEK_NODE_BIN:-}" ]]; then
+  local node=${GRIGDESK_DEEPSEEK_NODE_BIN:-${NODE_BIN:-}}
+  if [[ -n "${GRIGDESK_DEEPSEEK_NODE_BIN:-}" ]]; then
     [[ -x "$node" && ! -d "$node" ]] || return 4
   else
     [[ -n "$node" && -x "$node" ]] || node=$(command -v node 2>/dev/null) || return 4
@@ -17,8 +17,8 @@ _runner_deepseek_node() {
 }
 
 _runner_deepseek_embedded() {
-  [[ -z "${COCKPIT_DEEPSEEK_BIN:-}" ]] || return 1
-  local mode=${COCKPIT_DEEPSEEK_RUNTIME_MODE:-}
+  [[ -z "${GRIGDESK_DEEPSEEK_BIN:-}" ]] || return 1
+  local mode=${GRIGDESK_DEEPSEEK_RUNTIME_MODE:-}
   if [[ -z "$mode" ]]; then
     local node
     node=$(_runner_deepseek_node) || return 4
@@ -28,9 +28,9 @@ _runner_deepseek_embedded() {
     ' "$FACTORY_HOME/../server/src/lib/deepseek/distribution.ts" \
       "$FACTORY_HOME/../server/deepseek-runtime-contract.json" 2>/dev/null) || mode=embedded
   fi
-  [[ -z "${COCKPIT_DEEPSEEK_BIN:-}" ]] &&
+  [[ -z "${GRIGDESK_DEEPSEEK_BIN:-}" ]] &&
     [[ "$mode" == embedded ||
-       -n "${COCKPIT_DEEPSEEK_ARTIFACT_DIR:-}" ]]
+       -n "${GRIGDESK_DEEPSEEK_ARTIFACT_DIR:-}" ]]
 }
 
 # Metadata helper использует тот же Node и descriptor, что рабочий процесс.
@@ -47,14 +47,14 @@ runner_deepseek_refresh_probe() {
 
 _runner_deepseek_bin() {
   local candidate runtime_home state_root
-  if [[ -n "${COCKPIT_DEEPSEEK_BIN:-}" ]]; then
-    [[ -x "$COCKPIT_DEEPSEEK_BIN" && ! -d "$COCKPIT_DEEPSEEK_BIN" ]] || return 4
-    printf '%s\n' "$COCKPIT_DEEPSEEK_BIN"
+  if [[ -n "${GRIGDESK_DEEPSEEK_BIN:-}" ]]; then
+    [[ -x "$GRIGDESK_DEEPSEEK_BIN" && ! -d "$GRIGDESK_DEEPSEEK_BIN" ]] || return 4
+    printf '%s\n' "$GRIGDESK_DEEPSEEK_BIN"
     return 0
   fi
 
   state_root=${FACTORY_STATE:-${STATE_DIR:-${HOME:?}/.factory/state}}
-  runtime_home=${COCKPIT_DEEPSEEK_RUNTIME_HOME:-"$state_root/cockpit-deepseek"}
+  runtime_home=${GRIGDESK_DEEPSEEK_RUNTIME_HOME:-"$state_root/grigdesk-deepseek"}
   candidate="$runtime_home/install/current/node_modules/.bin/dsh"
   if [[ -x "$candidate" && ! -d "$candidate" ]]; then
     printf '%s\n' "$candidate"

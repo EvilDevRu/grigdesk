@@ -25,7 +25,7 @@ async function allText(root) {
 }
 
 test('пароль не сохраняется в профиле БД и публичном DTO', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-profile-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-profile-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await load(
     '../../server/src/lib/db/store.ts',
@@ -96,7 +96,7 @@ test('DB-сессия затирает входной буфер пароля п
 });
 
 test('пароль DB-сессии отсутствует в prefs журнале argv env и артефактах', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-session-secret-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-session-secret-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sentinel = 'DB_PASSWORD_SENTINEL_91012_FULL_BOUNDARY';
   const prefsPath = path.join(root, 'prefs.json');

@@ -5,19 +5,19 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-env.sh"
 # Воспроизводимый Python-runtime речи. Функции вынесены из deploy/install.sh, чтобы
 # выбор состава и запись .env проверялись офлайн без npm/systemd.
 
-cockpit_media_env_value() {
+grigdesk_media_env_value() {
   local file=${1:?env-файл обязателен}
   local key=${2:?ключ обязателен}
   [[ -f "$file" ]] || return 0
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file"
 }
 
-cockpit_media_set_env_default() {
+grigdesk_media_set_env_default() {
   local file=${1:?env-файл обязателен}
   local key=${2:?ключ обязателен}
   local value=${3:?значение обязательно}
   local current
-  current=$(cockpit_media_env_value "$file" "$key")
+  current=$(grigdesk_media_env_value "$file" "$key")
   [[ -n "$current" ]] && return 0
 
   mkdir -p "$(dirname "$file")"
@@ -47,7 +47,7 @@ cockpit_media_set_env_default() {
   )
 }
 
-cockpit_media_cuda_choice() {
+grigdesk_media_cuda_choice() {
   local media_python=${1:?python обязателен}
   shift
   local explicit=
@@ -64,11 +64,11 @@ cockpit_media_cuda_choice() {
     printf '%s\n' "$explicit"
     return 0
   fi
-  case "${COCKPIT_MEDIA_CUDA:-}" in
+  case "${GRIGDESK_MEDIA_CUDA:-}" in
     1|true|yes) printf '1\n'; return 0 ;;
     0|false|no) printf '0\n'; return 0 ;;
     '') ;;
-    *) echo 'COCKPIT_MEDIA_CUDA: допустимо 1|0' >&2; return 2 ;;
+    *) echo 'GRIGDESK_MEDIA_CUDA: допустимо 1|0' >&2; return 2 ;;
   esac
 
   if "$media_python" -m pip show nvidia-cublas-cu12 >/dev/null 2>&1; then
@@ -88,24 +88,24 @@ cockpit_media_cuda_choice() {
   printf '0\n'
 }
 
-cockpit_install_media() {
-  local root=${1:?корень cockpit обязателен}
+grigdesk_install_media() {
+  local root=${1:?корень grigdesk обязателен}
   shift
   local env_file data_home
-  env_file=$(cockpit_env_file) || return 1
-  data_home=$(cockpit_data_home) || return 1
-  local previous_python=${COCKPIT_MEDIA_PYTHON:-}
-  [[ -n "$previous_python" ]] || previous_python=$(cockpit_media_env_value "$env_file" COCKPIT_MEDIA_PYTHON)
+  env_file=$(grigdesk_env_file) || return 1
+  data_home=$(grigdesk_data_home) || return 1
+  local previous_python=${GRIGDESK_MEDIA_PYTHON:-}
+  [[ -n "$previous_python" ]] || previous_python=$(grigdesk_media_env_value "$env_file" GRIGDESK_MEDIA_PYTHON)
 
   local media_python=$previous_python
   if [[ -z "$media_python" ]]; then
     media_python="$data_home/state/media-venv/bin/python"
   elif [[ ! -x "$media_python" ]]; then
-    echo "Настроенный COCKPIT_MEDIA_PYTHON не исполняемый: $media_python" >&2
+    echo "Настроенный GRIGDESK_MEDIA_PYTHON не исполняемый: $media_python" >&2
     return 1
   fi
   if [[ ! -x "$media_python" ]]; then
-    local bootstrap_python=${COCKPIT_MEDIA_BOOTSTRAP_PYTHON:-python3}
+    local bootstrap_python=${GRIGDESK_MEDIA_BOOTSTRAP_PYTHON:-python3}
     command -v "$bootstrap_python" >/dev/null 2>&1 || {
       echo "Python не найден: $bootstrap_python" >&2
       return 1
@@ -118,12 +118,12 @@ cockpit_install_media() {
   "$media_python" -m pip install -r "$root/server/requirements-media.txt"
 
   local with_cuda
-  with_cuda=$(cockpit_media_cuda_choice "$media_python" "$@") || return
+  with_cuda=$(grigdesk_media_cuda_choice "$media_python" "$@") || return
   if [[ "$with_cuda" == 1 ]]; then
     echo '→ Media runtime: CUDA-библиотеки…'
     "$media_python" -m pip install -r "$root/server/requirements-media-cuda.txt"
   else
-    # Явные --no-cuda/COCKPIT_MEDIA_CUDA=0 означают состав, а не только
+    # Явные --no-cuda/GRIGDESK_MEDIA_CUDA=0 означают состав, а не только
     # «не доустанавливать»: иначе прежний cublas остаётся и device:auto всё равно
     # уходит на GPU вопреки выбору человека.
     if "$media_python" -m pip show nvidia-cublas-cu12 >/dev/null 2>&1; then
@@ -132,6 +132,6 @@ cockpit_install_media() {
     echo '→ Media runtime: CPU-состав (CUDA позже: deploy/install.sh --with-cuda)'
   fi
 
-  cockpit_media_set_env_default "$env_file" COCKPIT_MEDIA_PYTHON "$media_python"
-  cockpit_media_set_env_default "$env_file" COCKPIT_MEDIA_HF_DIR "$data_home/state/hf"
+  grigdesk_media_set_env_default "$env_file" GRIGDESK_MEDIA_PYTHON "$media_python"
+  grigdesk_media_set_env_default "$env_file" GRIGDESK_MEDIA_HF_DIR "$data_home/state/hf"
 }

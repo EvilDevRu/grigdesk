@@ -144,7 +144,7 @@ export function ensureBrainIdentity(directory: string) {
       return existing;
     }
 
-    const identity = await generate(directory, 'cockpit-brain');
+    const identity = await generate(directory, 'grigdesk-brain');
 
     await privateWrite(keyFile, identity.keyPem);
     await privateWrite(certFile, identity.certPem);
@@ -163,7 +163,7 @@ export async function createRelayCredentials(directory: string, id: string) {
   }
 
   const folder = path.join(directory, 'relays', id);
-  const identity = await generate(folder, 'cockpit-relay');
+  const identity = await generate(folder, 'grigdesk-relay');
 
   await privateWrite(path.join(folder, 'relay-key.pem'), identity.keyPem);
   await privateWrite(path.join(folder, 'relay-cert.pem'), identity.certPem);

@@ -64,14 +64,14 @@ export function installPortFixture() {
  * Production Fastify defaults сохраняются; installer сам задаёт локальный validator.
  */
 export async function installHttpFixture(t, options = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-install-http-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-install-http-'));
   const pluginsDir = path.join(root, 'plugins');
   const userPluginsDataDir = path.join(root, 'data');
   const stub = installPortFixture();
   const installs = options.realService ? new PluginInstallService({
     pluginsDir,
     statePath: path.join(root, 'state/installs.json'),
-    cockpitVersion: '1.0.0',
+    grigDeskVersion: '1.0.0',
     reservedIds: ['code'],
     ...options.serviceOptions,
   }) : options.installs ?? stub.port;
@@ -154,9 +154,9 @@ export async function installHttpFixture(t, options = {}) {
   await app.ready();
 
 
-  const session = { cookie: `cockpit_sid=${authStore.createSession().id}` };
-  const cli = { 'x-cockpit-token': 'fixture-cli' };
-  const internal = { 'x-cockpit-internal': 'fixture-internal' };
+  const session = { cookie: `grigdesk_sid=${authStore.createSession().id}` };
+  const cli = { 'x-grigdesk-token': 'fixture-cli' };
+  const internal = { 'x-grigdesk-internal': 'fixture-internal' };
 
   return {
     root,
@@ -175,7 +175,7 @@ export async function installHttpFixture(t, options = {}) {
 
 /**
  * Manifest и файлы пишутся в собственном plugin root до регистрации module.
- * Helper никогда не обращается к настоящему каталогу установленного Cockpit.
+ * Helper никогда не обращается к настоящему каталогу установленного GrigDesk.
  */
 export async function writeHttpPlugin(pluginsDir, id, manifest = {}, files = {}) {
   const directory = path.join(pluginsDir, id);

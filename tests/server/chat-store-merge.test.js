@@ -12,7 +12,7 @@ import { mergeMessages, mergeChat } from '../../server/src/lib/chat/mergeChat.ts
 const msg = (role, text) => ({ role, text });
 
 async function freshStore(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-merge-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-chat-merge-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
 }

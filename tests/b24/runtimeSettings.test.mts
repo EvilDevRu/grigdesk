@@ -7,7 +7,7 @@ import type { RuntimeSettingsInput } from '../../shared/runtime/runtimeSettings.
 
 const HOME = '/home/user';
 
-test('BR-01: runtimeSettings сохраняет defaults и все поля cockpit status', () => {
+test('BR-01: runtimeSettings сохраняет defaults и все поля grigdesk-ctl status', () => {
   assert.deepEqual(resolveRuntimeSettings({
     env: {},
     file: {},
@@ -17,14 +17,14 @@ test('BR-01: runtimeSettings сохраняет defaults и все поля cock
     origin: 'http://127.0.0.1:8140',
     windowKeyPath: null,
     relayProject: null,
-    cliTokenPath: '/home/user/.cockpit/state/cli-token',
+    cliTokenPath: '/home/user/.grigdesk/state/cli-token',
   });
   assert.deepEqual(resolveRuntimeSettings({
-    env: { COCKPIT_HOME: '/data/c/' },
+    env: { GRIGDESK_HOME: '/data/c/' },
     file: {
-      COCKPIT_PORT: '8123',
-      COCKPIT_WINDOW_KEY_PATH: '/run/key',
-      COCKPIT_RELAY_PROJECT: 'relay-home',
+      GRIGDESK_PORT: '8123',
+      GRIGDESK_WINDOW_KEY_PATH: '/run/key',
+      GRIGDESK_RELAY_PROJECT: 'relay-home',
     },
     home: HOME,
   }), {
@@ -43,24 +43,24 @@ test('BR-02: env имеет приоритет над файлом, включа
     home: HOME,
   });
 
-  assert.equal(resolve({ COCKPIT_PORT: '8181' }, { COCKPIT_PORT: '8123' }).port, 8181);
-  assert.equal(resolve({ COCKPIT_PORT: '' }, { COCKPIT_PORT: '8123' }).port, 8140);
+  assert.equal(resolve({ GRIGDESK_PORT: '8181' }, { GRIGDESK_PORT: '8123' }).port, 8181);
+  assert.equal(resolve({ GRIGDESK_PORT: '' }, { GRIGDESK_PORT: '8123' }).port, 8140);
 
   for (const value of ['0', 'abc', '']) {
-    assert.equal(resolve({}, { COCKPIT_PORT: value }).port, 8140, value);
+    assert.equal(resolve({}, { GRIGDESK_PORT: value }).port, 8140, value);
   }
 
-  const standard = '/home/user/.cockpit/state/cli-token';
+  const standard = '/home/user/.grigdesk/state/cli-token';
 
-  assert.equal(resolve({ COCKPIT_CLI_TOKEN_PATH: '/env-token' }, { COCKPIT_CLI_TOKEN_PATH: '/file-token' })
+  assert.equal(resolve({ GRIGDESK_CLI_TOKEN_PATH: '/env-token' }, { GRIGDESK_CLI_TOKEN_PATH: '/file-token' })
     .cliTokenPath, '/env-token');
-  assert.equal(resolve({ COCKPIT_CLI_TOKEN_PATH: '' }, { COCKPIT_CLI_TOKEN_PATH: '/file-token' })
+  assert.equal(resolve({ GRIGDESK_CLI_TOKEN_PATH: '' }, { GRIGDESK_CLI_TOKEN_PATH: '/file-token' })
     .cliTokenPath, standard);
-  assert.equal(resolve({}, { COCKPIT_CLI_TOKEN_PATH: '' }).cliTokenPath, standard);
+  assert.equal(resolve({}, { GRIGDESK_CLI_TOKEN_PATH: '' }).cliTokenPath, standard);
 });
 
 test('BR-03: ключи выбора файла запрещены даже пустыми', () => {
-  for (const key of ['COCKPIT_HOME', 'COCKPIT_ENV_FILE']) {
+  for (const key of ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE']) {
     for (const value of ['/other', '']) {
       assert.throws(() => resolveRuntimeSettings({
         env: {},
@@ -78,7 +78,7 @@ test('BR-04: legacyTokenPath используется только по явно
     env: { HOME },
     file: {},
     home: HOME,
-  }).cliTokenPath, '/home/user/.cockpit/state/cli-token');
+  }).cliTokenPath, '/home/user/.grigdesk/state/cli-token');
   assert.equal(resolveRuntimeSettings({
     env: { HOME },
     file: {},
@@ -86,8 +86,8 @@ test('BR-04: legacyTokenPath используется только по явно
     legacyTokenPath: legacy,
   }).cliTokenPath, legacy);
 
-  for (const [envFile, legacyPath] of [[null, undefined], [null, legacy], ['COCKPIT_PORT=8123', legacy],
-    ['COCKPIT_CLI_TOKEN_PATH=/file-token', legacy]] as const) {
+  for (const [envFile, legacyPath] of [[null, undefined], [null, legacy], ['GRIGDESK_PORT=8123', legacy],
+    ['GRIGDESK_CLI_TOKEN_PATH=/file-token', legacy]] as const) {
     const env = { HOME };
 
     assert.deepEqual(readSettings('/example', env, envFile, legacyPath), resolveRuntimeSettings({
@@ -102,9 +102,9 @@ test('BR-04: legacyTokenPath используется только по явно
 test('BR-05: общий resolver не мутирует входы', () => {
   const env = Object.freeze({
     HOME,
-    COCKPIT_PORT: '8181',
+    GRIGDESK_PORT: '8181',
   });
-  const file = Object.freeze({ COCKPIT_RELAY_PROJECT: 'relay' });
+  const file = Object.freeze({ GRIGDESK_RELAY_PROJECT: 'relay' });
   const input: RuntimeSettingsInput = Object.freeze({
     env,
     file,
@@ -114,16 +114,16 @@ test('BR-05: общий resolver не мутирует входы', () => {
   assert.equal(resolveRuntimeSettings(input).port, 8181);
   assert.deepEqual(env, {
     HOME,
-    COCKPIT_PORT: '8181',
+    GRIGDESK_PORT: '8181',
   });
-  assert.deepEqual(file, { COCKPIT_RELAY_PROJECT: 'relay' });
+  assert.deepEqual(file, { GRIGDESK_RELAY_PROJECT: 'relay' });
 });
 
 test('BR-06: явный путь токена не требует верной папки данных', () => {
   const settings = resolveRuntimeSettings({
     env: {
-      COCKPIT_HOME: 'bad path',
-      COCKPIT_CLI_TOKEN_PATH: '/token/file',
+      GRIGDESK_HOME: 'bad path',
+      GRIGDESK_CLI_TOKEN_PATH: '/token/file',
     },
     file: {},
     home: '/home/user',
@@ -131,8 +131,8 @@ test('BR-06: явный путь токена не требует верной �
 
   assert.equal(settings.cliTokenPath, '/token/file');
   assert.throws(() => resolveRuntimeSettings({
-    env: { COCKPIT_HOME: 'bad path' },
+    env: { GRIGDESK_HOME: 'bad path' },
     file: {},
     home: '/home/user',
-  }), /COCKPIT_HOME/);
+  }), /GRIGDESK_HOME/);
 });

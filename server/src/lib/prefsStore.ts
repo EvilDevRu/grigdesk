@@ -1,4 +1,4 @@
-// Общие настройки кокпита (не креды): JSON-файл в .state, редактируются из UI.
+// Общие настройки GrigDesk (не креды): JSON-файл в .state, редактируются из UI.
 // Дефолты заданы здесь — отсутствующий файл означает «всё по умолчанию».
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +36,7 @@ const DEFAULTS = {
   // FACTORY_STAGE_AUTO_COMPACT, дальше раннер переводит её на диалект своего CLI.
   // 0 — не вмешиваться, оставить дефолт CLI (его собственный порог обычно задан долей окна).
   stageAutoCompactWindow: 200000,
-  // Порог молчания хода конвейера (секунды): дольше — кокпит зовёт человека.
+  // Порог молчания хода конвейера (секунды): дольше — GrigDesk зовёт человека.
   // Порог должен пропускать долгую сборку, но срабатывать раньше таймаута зависшего MCP.
   // 0 — не оповещать.
   runSilenceWindow: 900,
@@ -58,7 +58,7 @@ const DEFAULTS = {
   // `auto: false` по умолчанию: арбитр действует САМ, двигая курсор чужой задачи, и
   // включённым по умолчанию делал бы это там, где его решений ещё никто не читал.
   arbiter: ARBITER_DEFAULTS,
-  // Паспорта КОКПИТНЫХ проектов (раздел «Проекты»): { <id>: { repos: [{key, dir}] } }.
+  // Паспорта проектов GrigDesk (раздел «Проекты»): { <id>: { repos: [{key, dir}] } }.
   // Пути локальны для машины-мозга, поэтому живут в .state, а не в гитуемой базе.
   // У проектов фабрики источник путей — их bash-профиль; сюда они не пишутся.
   projects: {},
@@ -72,14 +72,14 @@ const DEFAULTS = {
 // Сырое чтение остаётся прежним: диск меняется только после успешного write().
 const REMOVED_PREF_KEYS = ['accessLocalHttps', 'accessGateway'];
 
-// Настройки кокпита целиком: актуальные ключи DEFAULTS и сохранённые соседние значения.
-export type CockpitPrefs = Record<string, unknown>;
+// Настройки GrigDesk целиком: актуальные ключи DEFAULTS и сохранённые соседние значения.
+export type GrigDeskPrefs = Record<string, unknown>;
 
 /**
  * Общий prefs API сохраняет прежние локальные ручки исполнителей.
  * Нативный контейнер выдаётся только через проверенную проекцию своего каталога.
  */
-export function publicPrefsView(prefs: CockpitPrefs): CockpitPrefs {
+export function publicPrefsView(prefs: GrigDeskPrefs): GrigDeskPrefs {
   const providers = asRecord(prefs.providerSettings);
   const providerSettings = Object.fromEntries(Object.entries(providers).map(([id, value]) => {
     const { nativeSettings: _private, ...local } = asRecord(value);
@@ -91,9 +91,9 @@ export function publicPrefsView(prefs: CockpitPrefs): CockpitPrefs {
 }
 
 /** Запись настроек из недоверенного файла: не объект читается как пустая. */
-function asRecord(value: unknown): CockpitPrefs {
+function asRecord(value: unknown): GrigDeskPrefs {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as CockpitPrefs
+    ? value as GrigDeskPrefs
     : {};
 }
 
@@ -118,14 +118,14 @@ export class PrefsStore {
    * «настроек нет» от «настройки испорчены» и запишет поверх чужой порчи умолчания.
    * Отсутствие файла — не порча: его ещё не заводили, и это штатное состояние.
    */
-  readStored(): CockpitPrefs {
+  readStored(): GrigDeskPrefs {
     try {
       const loaded = JSON.parse(fs.readFileSync(this.prefsPath, 'utf8'));
       if (loaded === null || typeof loaded !== 'object' || Array.isArray(loaded)) {
         throw new PrefsCorruptedError();
       }
 
-      return loaded as CockpitPrefs;
+      return loaded as GrigDeskPrefs;
     } catch (err) {
       if ((err as { code?: unknown } | null)?.code === 'ENOENT') return {};
       throw err;
@@ -137,7 +137,7 @@ export class PrefsStore {
    * он ни был испорчен — формой или битым JSON. Для вызывающего это один отказ «писать
    * некуда», и HTTP отвечает на него 500 prefs_corrupted. Различие причин остаётся в cause.
    */
-  readForWrite(): CockpitPrefs {
+  readForWrite(): GrigDeskPrefs {
     try {
       return this.readStored();
     } catch (err) {
@@ -153,8 +153,8 @@ export class PrefsStore {
    * Публичный снимок объединяет умолчания и сохранённые настройки.
    * Удалённые настройки доступа не выдаются наружу и не переносятся следующей записью.
    */
-  read(): CockpitPrefs {
-    let loaded: CockpitPrefs = {};
+  read(): GrigDeskPrefs {
+    let loaded: GrigDeskPrefs = {};
     try { loaded = this.readStored(); } catch { /* прежний fail-soft контракт read() */ }
     // Старый общий доступ больше не участвует в запуске. Следующая запись prefs
     // удалит устаревший ключ с диска, не перенося его в настройки отдельных чатов.
@@ -212,9 +212,9 @@ export class PrefsStore {
    * чужих настроек и паспортов проектов. Отсутствие файла — не порча: его заводят
    * этой же записью, и только для неё здесь допустима пустая основа.
    */
-  write(patch: CockpitPrefs | null | undefined): CockpitPrefs {
+  write(patch: GrigDeskPrefs | null | undefined): GrigDeskPrefs {
     const stored = this.readForWrite();
-    const next: CockpitPrefs = { ...this.read() };
+    const next: GrigDeskPrefs = { ...this.read() };
 
     for (const k of Object.keys(DEFAULTS)) {
       if (patch && k in patch) {

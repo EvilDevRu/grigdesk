@@ -1,7 +1,7 @@
 // Loopback-корень сохраняет штатную cookie authorization без browser application.
 // Авторизация и RPC принадлежат исходному Connection service.
 
-export const name = 'cockpit-web-host';
+export const name = 'grigdesk-web-host';
 export const inject = ['webServer', 'connection'];
 
 /**
@@ -25,5 +25,5 @@ export function apply(ctx) {
 
     response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     response.end(request.method === 'HEAD' ? '' : '{"ok":true}\n');
-  }), 'cockpit-web-host: authentication root');
+  }), 'grigdesk-web-host: authentication root');
 }

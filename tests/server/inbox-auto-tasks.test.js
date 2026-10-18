@@ -48,7 +48,7 @@ function inboxItem(channel, id, over = {}) {
     policy: {
       scopeId: 'scope:1',
       scopeRef: refs.scope('scope:1'),
-      project: 'cockpit',
+      project: 'grigdesk',
       kind: 'bug',
       b24: { groupId: 10, responsibleId: 20, priority: 2 },
       autoTask: { enabled: true, minConfidence: 0.8, maxPerDay: 5 },

@@ -9,7 +9,7 @@ import { sha256 } from '../../shared/node/hash.ts';
 import { deepSeekBuildInputs, hashRuntimePayload } from '../../tools/buildDeepSeekRuntime.mts';
 
 import { readDeepSeekArtifact } from '../../server/src/lib/deepseek/runtimeArtifact.ts';
-import { artifactsPath } from '../../shared/runtime/dataHome.ts';
+import { artifactsPath, dataHome } from '../../shared/runtime/dataHome.ts';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -40,12 +40,24 @@ export async function verifyTestDeepSeekArtifact(directory: string): Promise<Rec
  * Отсутствие подготовленных зависимостей является отказом, а не skip или скрытой загрузкой.
  */
 export async function ensureTestDeepSeekArtifact(): Promise<string> {
-  const explicit = process.env.COCKPIT_TEST_DEEPSEEK_ARTIFACT;
+  const explicit = process.env.GRIGDESK_TEST_DEEPSEEK_ARTIFACT;
 
   if (explicit) {
     await verifyTestDeepSeekArtifact(path.resolve(explicit));
 
     return path.resolve(explicit);
+  }
+
+  if (!process.env.GRIGDESK_ARTIFACTS_DIR) {
+    const selected = dataHome({
+      env: process.env,
+      home: os.homedir(),
+    });
+    const exists = await fs.stat(selected).then((info) => info.isDirectory(), () => false);
+
+    if (!exists) {
+      throw new Error('Папки данных нет: задайте GRIGDESK_ARTIFACTS_DIR для тестового runtime.');
+    }
   }
 
   const inputs = await deepSeekBuildInputs(path.join(repositoryRoot, 'third_party/deepseek-harness'));

@@ -36,7 +36,7 @@ const UiButtonStub = `
 
 test('RE-G1-03: история открывает exact hash и создаёт черновик из выбранной ревизии',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RouteRevisionHistory.vue'), {
       stubs: { '../../ui': (UiButtonStub) +
         "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
@@ -66,7 +66,7 @@ test('RE-G1-03: история открывает exact hash и создаёт �
   });
 
 test('RE-G1-01: сравнение выбирает две произвольные целые ревизии', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteRevisionHistory.vue'), {
     stubs: { '../../ui': (UiButtonStub) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
@@ -89,7 +89,7 @@ test('RE-G1-01: сравнение выбирает две произвольн�
 });
 
 test('RE-G1-04: повреждённая ревизия видна с причиной, откат недоступен', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteRevisionHistory.vue'), {
     stubs: { '../../ui': (UiButtonStub) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
@@ -139,7 +139,7 @@ test('RE-G1-05: комментарий уходит с публикацией т
 });
 
 test('RE-G1-05: диалог передаёт введённый комментарий при подтверждении', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RoutePublishDialog.vue'), {
     stubs: { '../../ui': (UiButtonStub) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },

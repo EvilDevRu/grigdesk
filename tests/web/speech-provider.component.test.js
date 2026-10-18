@@ -6,7 +6,7 @@ import { compileModule, webFile } from './helpers/compile-vue.js';
 
 test('COMP-STT-13: authenticated provider создаёт один controller, inject и dispose при logout', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'https://cockpit.test/' });
+  const browser = new Window({ url: 'https://grigdesk.test/' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

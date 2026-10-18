@@ -25,7 +25,7 @@ async function createArbiter(options) {
 
 function markerEntries(markdown) {
   return [...String(markdown || '').matchAll(
-    /<!-- cockpit-clarification:v1 ([A-Za-z0-9_-]+) -->/g,
+    /<!-- grigdesk-clarification:v1 ([A-Za-z0-9_-]+) -->/g,
   )].map((match) => JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8')));
 }
 
@@ -149,28 +149,28 @@ test('арбитр отвечает на factual-вопрос, а выбор и 
     entries: [
       {
         questionId: 'q-code',
-        actor: 'cockpit-arbiter',
+        actor: 'grigdesk-arbiter',
         status: 'answered',
         text: 'Поле effort уже записывается в meta.',
         proof: ['server/src/lib/analysis/analyzer.js:420'],
       },
       {
         questionId: 'q-product',
-        actor: 'cockpit-arbiter',
+        actor: 'grigdesk-arbiter',
         status: 'human_required',
         text: '',
         proof: [],
       },
       {
         questionId: 'q-priority',
-        actor: 'cockpit-arbiter',
+        actor: 'grigdesk-arbiter',
         status: 'human_required',
         text: '',
         proof: [],
       },
       {
         questionId: 'q-scope',
-        actor: 'cockpit-arbiter',
+        actor: 'grigdesk-arbiter',
         status: 'human_required',
         text: '',
         proof: [],

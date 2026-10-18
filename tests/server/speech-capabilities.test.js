@@ -42,7 +42,7 @@ function fakeModels(cachedIds) {
 }
 
 test('model cache учитывает точную revision, обязательные файлы и фактический размер', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-model-cache-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-model-cache-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
   const medium = SPEECH_MODEL_CATALOG.medium;
@@ -80,7 +80,7 @@ test('model cache учитывает точную revision, обязательн
 });
 
 test('alias-репозиторий turbo распознаётся только с catalog revision', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-model-alias-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-model-alias-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const turbo = SPEECH_MODEL_CATALOG['large-v3-turbo'];
   const snapshot = snapshotPath(root, turbo.aliases[0], turbo.revision);
@@ -97,7 +97,7 @@ test('alias-репозиторий turbo распознаётся только �
 });
 
 test('Python cache probe пропускает partial canonical и выбирает полный pinned alias', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-model-alias-probe-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-model-alias-probe-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const canonical = path.join(root, 'canonical');
   const alias = path.join(root, 'alias');
@@ -139,7 +139,7 @@ print(json.dumps({'result': module.inspect_model(snapshot_download, model), 'cal
 });
 
 test('Python cache probe не бракует полный pinned snapshot из-за orphan incomplete', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-model-orphan-incomplete-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-model-orphan-incomplete-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const snapshot = path.join(root, 'model', 'snapshots', 'revision');
   const blobs = path.join(root, 'model', 'blobs');
@@ -262,7 +262,7 @@ test('applyRuntimeSettings инвалидирует snapshot и проверяе
 });
 
 test('CUDA canary нормализует JSON subprocess без наличия GPU в тесте', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-cuda-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-cuda-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const pythonPath = path.join(root, 'venv', 'bin', 'python');
   mkdirSync(path.dirname(pythonPath), { recursive: true });
@@ -310,7 +310,7 @@ test('CUDA canary нормализует JSON subprocess без наличия G
 });
 
 test('Python model probe подтверждает путь, а Node считает размер только после него', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-hf-probe-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-hf-probe-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const pythonPath = path.join(root, 'venv', 'bin', 'python');
   mkdirSync(path.dirname(pythonPath), { recursive: true });
@@ -344,7 +344,7 @@ test('Python model probe подтверждает путь, а Node считае
 });
 
 test('production cache probe fail-closed отличает поломку диагностики от missing model', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-hf-probe-failure-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-hf-probe-failure-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const pythonPath = path.join(root, 'venv', 'bin', 'python');
   mkdirSync(path.dirname(pythonPath), { recursive: true });

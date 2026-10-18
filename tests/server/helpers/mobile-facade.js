@@ -56,7 +56,7 @@ export function mutation(app, url, payload, key = 'test-operation-1', createdAt 
     payload,
     headers: {
       'idempotency-key': key,
-      'x-cockpit-operation-created-at': String(createdAt),
+      'x-grigdesk-operation-created-at': String(createdAt),
     },
   });
 }

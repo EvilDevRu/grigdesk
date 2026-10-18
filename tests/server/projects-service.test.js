@@ -1,6 +1,6 @@
 // Сервис паспортов проектов: запись, чтение и защита от чужих правок.
 //
-// Паспорт лежит в том же файле настроек, что и остальные настройки кокпита, и пишется
+// Паспорт лежит в том же файле настроек, что и остальные настройки GrigDesk, и пишется
 // целиком. Отсюда два свойства, которые и проверяются здесь: каждая мутация идёт через
 // одну очередь и перечитывает файл внутри неё (иначе параллельные правки затирают друг
 // друга), а нечитаемый файл не превращается в «пустые настройки» (иначе порча стирает
@@ -24,7 +24,7 @@ const EMPTY_IMPORT = {
 };
 
 async function withPrefs(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-projects-service-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-projects-service-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const prefsPath = path.join(dir, 'prefs.json');
   const profilesDir = path.join(dir, 'profiles');
@@ -433,7 +433,7 @@ test('list отдаёт сводки: exists, pathsSource, пустые routes �
 
   const { service } = serviceFor(env);
 
-  await service.create(inputFor('cockpit', [
+  await service.create(inputFor('grigdesk', [
     { key: 'be', dir: here },
     { key: 'fe', dir: gone },
   ]));
@@ -447,19 +447,19 @@ test('list отдаёт сводки: exists, pathsSource, пустые routes �
   const summaries = await service.list();
   const byId = new Map(summaries.map((summary) => [summary.id, summary]));
 
-  assert.deepEqual([...byId.keys()].sort(), ['cockpit', 'factory', 'old']);
-  assert.deepEqual(byId.get('cockpit').repos, [
+  assert.deepEqual([...byId.keys()].sort(), ['factory', 'grigdesk', 'old']);
+  assert.deepEqual(byId.get('grigdesk').repos, [
     { key: 'be', dir: here, exists: true },
     { key: 'fe', dir: gone, exists: false },
   ]);
-  assert.equal(byId.get('cockpit').profile.pathsSource, 'passport');
+  assert.equal(byId.get('grigdesk').profile.pathsSource, 'passport');
   assert.equal(byId.get('factory').profile.pathsSource, 'profile');
   assert.deepEqual(byId.get('factory').repos, [{ key: 'be', dir: here, exists: true }]);
-  assert.deepEqual(byId.get('cockpit').routes, []);
+  assert.deepEqual(byId.get('grigdesk').routes, []);
   assert.equal(byId.get('old').archivedAt, '2026-09-01T00:00:00.000Z');
   assert.equal(byId.get('old').revision, 2);
   // Ненайденный путь — предупреждение: после восстановления из архива о нём надо сказать.
-  assert.deepEqual(byId.get('cockpit').warnings, [`Каталог ${gone} не найден.`]);
+  assert.deepEqual(byId.get('grigdesk').warnings, [`Каталог ${gone} не найден.`]);
 });
 
 test('list предупреждает об одинаковых физических корнях', async (t) => {

@@ -1,4 +1,4 @@
-// Нормализация JSON-RPC notifications `codex app-server` в нейтральную ленту Cockpit.
+// Нормализация JSON-RPC notifications `codex app-server` в нейтральную ленту GrigDesk.
 // Legacy JSONL `codex exec --json` остаётся совместимым для старых fixture/потребителей.
 // Показываем только краткое reasoning-поле, которое отдал сам Codex; raw_content
 // намеренно игнорируем, чтобы не превращать ленту в раскрытие приватной цепочки мыслей.
@@ -250,7 +250,7 @@ function describeItem(item: CodexItem): string {
 /**
  * Незнакомый тип элемента обязан деградировать в честную строку ленты, а не исчезать.
  * Codex дописывает типы (`functionCallOutput`, `sleep`, …) быстрее, чем
- * Кокпит разбирает их поимённо, а молча пропущенное действие заставляет человека
+ * GrigDesk разбирает их поимённо, а молча пропущенное действие заставляет человека
  * читать ленту как полный отчёт и верить, что агент сделал меньше, чем сделал.
  */
 function fallbackTool(item: CodexItem, id: string): Record<string, unknown> {

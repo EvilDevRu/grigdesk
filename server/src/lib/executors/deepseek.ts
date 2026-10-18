@@ -38,7 +38,7 @@ const DEEPSEEK_EFFORTS = Object.freeze(['off', 'low', 'high', 'max']);
 const DISTRIBUTION_PROBLEMS: Readonly<Record<string, string>> = Object.freeze({
   deepseek_runtime_missing: 'Сборка DeepSeek ещё не подготовлена.',
   deepseek_runtime_corrupt: 'Файлы сборки DeepSeek повреждены; подготовка соберёт её заново.',
-  deepseek_runtime_incompatible: 'Сборка DeepSeek собрана под другую версию Node, чем у службы Cockpit; '
+  deepseek_runtime_incompatible: 'Сборка DeepSeek собрана под другую версию Node, чем у службы GrigDesk; '
     + 'подготовь её тем же Node, которым запущена служба.',
   deepseek_runtime_changed: 'Сборка DeepSeek сменилась во время проверки; перепроверь карточку.',
 });
@@ -57,7 +57,7 @@ function deepSeekDistributionProblem(
   code: string | undefined,
 ): { message: string; command?: string } {
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
-  const prepare = `${shellArgument(root ? path.join(root, 'bin/cockpit') : 'bin/cockpit')} deps`;
+  const prepare = `${shellArgument(root ? path.join(root, 'bin/grigdesk-ctl') : 'bin/grigdesk-ctl')} deps`;
 
   if (code === 'deepseek_runtime_publish_pending') {
     const runtimeRoot = config.deepseekGenerationRoot
@@ -73,7 +73,7 @@ function deepSeekDistributionProblem(
     const script = path.join(root, 'server/scripts/prepareDeepSeekRuntime.mts');
 
     return jobId ? {
-      message: 'Обновление Cockpit не завершило публикацию DeepSeek. Восстанови его и перезапусти Cockpit.',
+      message: 'Обновление GrigDesk не завершило публикацию DeepSeek. Восстанови его и перезапусти GrigDesk.',
       command: `node ${shellArgument(script)} --recover-job ${jobId}`,
     } : {
       message: 'Маркер незавершённой публикации DeepSeek не читается: сверь checkout и сборку по журналу '
@@ -146,7 +146,7 @@ export default {
 
     const base = {
       kind: 'embedded' as const,
-      label: 'Входит в Cockpit',
+      label: 'Входит в GrigDesk',
       authHint: 'Задайте ключ кнопкой «Ключи доступа» ниже или DEEPSEEK_API_KEY в .env папки данных.',
     };
 

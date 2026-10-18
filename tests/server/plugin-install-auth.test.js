@@ -71,7 +71,7 @@ test('R13: чужой Origin/content type отклонён до port, same-origi
   const fixture = await installHttpFixture(t);
   const url = '/api/plugin-installs/versions';
   const payload = { url: 'file:///fixture-plugin.git' };
-  const host = 'cockpit.fixture.invalid:1234';
+  const host = 'grigdesk.fixture.invalid:1234';
 
   for (const [headers, body, status, code] of [
     [{

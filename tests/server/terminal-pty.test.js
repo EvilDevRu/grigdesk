@@ -23,7 +23,7 @@ function waitFor(check, message, timeout = 4000) {
 }
 
 test('PTY helper меняет реальный stty size и не оставляет фоновый процесс', async (t) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'cockpit-pty-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-pty-'));
   t.after(() => rm(home, { recursive: true, force: true }));
 
   const child = spawnPty({ cols: 80, rows: 24, shell: '/bin/sh', home });
@@ -55,7 +55,7 @@ test('PTY helper меняет реальный stty size и не оставля�
 });
 
 test('естественный exit shell тоже завершает его фоновые process groups', async (t) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'cockpit-pty-exit-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-pty-exit-'));
   t.after(() => rm(home, { recursive: true, force: true }));
 
   const child = spawnPty({ cols: 80, rows: 24, shell: '/bin/sh', home });

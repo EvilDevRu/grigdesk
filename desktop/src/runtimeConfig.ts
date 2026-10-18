@@ -1,6 +1,7 @@
 import { readTextOrNull } from '../../shared/node/files.ts';
 
 import { dataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
+import { legacyRootProblem } from '../../shared/runtime/legacyBrand.ts';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import {
@@ -59,7 +60,7 @@ const PACKAGED_ENV_KEYS = new Set([
   'LISTEN_FDS',
   'LISTEN_FDNAMES',
   'CLAUDECODE',
-  'COCKPIT_DESKTOP_DATA_DIR',
+  'GRIGDESK_DESKTOP_DATA_DIR',
 ]);
 const PACKAGED_PATH_KEYS = ['PATH', 'LD_LIBRARY_PATH', 'XDG_DATA_DIRS', 'GSETTINGS_SCHEMA_DIR'];
 
@@ -170,7 +171,7 @@ export function buildServerEnv(input: {
   ];
 
   env.PATH = [...new Set(entries.filter(Boolean))].join(':');
-  env.COCKPIT_DESKTOP_CHILD = '1';
+  env.GRIGDESK_DESKTOP_CHILD = '1';
 
   return env;
 }
@@ -198,7 +199,7 @@ export async function loadServerRuntime(input: {
   if (text === null) {
     return {
       problem: 'not_installed',
-      message: 'Сервер Кокпита не установлен для приложения: выполните cockpit desktop install.',
+      message: 'Сервер GrigDesk не установлен для приложения: выполните grigdesk-ctl desktop install.',
     };
   }
 
@@ -207,7 +208,8 @@ export async function loadServerRuntime(input: {
   if (!descriptor) {
     return {
       problem: 'invalid',
-      message: `Описание установки сервера повреждено: ${descriptorPath}. Выполните cockpit desktop install.`,
+      message: `Описание установки сервера повреждено: ${descriptorPath}. `
+        + 'Выполните grigdesk-ctl desktop install.',
     };
   }
 
@@ -222,16 +224,22 @@ export async function loadServerRuntime(input: {
     if (!await input.deps.exists(path.join(root, relative), kind)) {
       return {
         problem: 'root',
-        message: `В каталоге Кокпита ${root} нет ${relative}.`,
+        message: `В каталоге GrigDesk ${root} нет ${relative}.`,
       };
     }
   }
 
-  const parent = descriptor.version === 2 ? { ...input.env, COCKPIT_HOME: descriptor.home } : input.env;
+  const parent = descriptor.version === 2 ? { ...input.env, GRIGDESK_HOME: descriptor.home } : input.env;
   let envPath: string;
   let selectedHome: string;
 
   try {
+    const problem = legacyRootProblem(parent);
+
+    if (problem) {
+      throw new Error(problem);
+    }
+
     selectedHome = dataHome({ env: parent, home: input.home });
     envPath = envFilePath({ env: parent, home: input.home });
   } catch (error) {
@@ -252,13 +260,16 @@ export async function loadServerRuntime(input: {
     };
   }
 
-  for (const key of ['COCKPIT_HOME', 'COCKPIT_ENV_FILE']) {
-    if (Object.hasOwn(dotenv, key)) {
-      return { problem: 'invalid', message: `Ключ ${key} запрещён в файле настроек ${envPath}.` };
-    }
+  const problem = legacyRootProblem(dotenv, true);
+
+  if (problem) {
+    return {
+      problem: 'invalid',
+      message: problem,
+    };
   }
 
-  const dist = effectiveValue(input.env, dotenv, 'COCKPIT_WEB_DIST') || path.join(root, 'web/dist');
+  const dist = effectiveValue(input.env, dotenv, 'GRIGDESK_WEB_DIST') || path.join(root, 'web/dist');
   const index = path.join(dist, 'index.html');
 
   if (!input.bundledUi && !await input.deps.exists(index, 'file')) {
@@ -284,7 +295,7 @@ export async function loadServerRuntime(input: {
   if (!origin) {
     return {
       problem: 'invalid',
-      message: `Некорректный порт Кокпита: ${port}.`,
+      message: `Некорректный порт GrigDesk: ${port}.`,
     };
   }
 
@@ -302,9 +313,9 @@ export async function loadServerRuntime(input: {
         appDir: input.appDir,
       }),
       graceMs: stopGraceMs(input.env, dotenv),
-      logPath: effectiveValue(input.env, dotenv, 'COCKPIT_LOG')
+      logPath: effectiveValue(input.env, dotenv, 'GRIGDESK_LOG')
         || dataPath(selectedHome, 'log'),
-      uiReleasesDir: effectiveValue(input.env, dotenv, 'COCKPIT_UI_RELEASES_DIR')
+      uiReleasesDir: effectiveValue(input.env, dotenv, 'GRIGDESK_UI_RELEASES_DIR')
         || dataPath(selectedHome, 'uiReleases'),
     },
   };

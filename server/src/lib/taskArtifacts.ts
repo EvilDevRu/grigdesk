@@ -3,7 +3,7 @@ import path from 'node:path';
 
 // Артефакты прогона — в архив своего же каталога состояния: чего нет, то и не
 // переносится. Доверенный журнал попытки здесь не участвует и не принадлежит
-// Cockpit: t<id>.pipeline — лишь его проекция для интерфейса.
+// GrigDesk: t<id>.pipeline — лишь его проекция для интерфейса.
 const TASK_ARTIFACTS = ['pipeline', 'env', 'stage', 'plan.md', 'recon.md', 'diag.md',
   'ship.md', 'report.md', 'tests.sha256', 'instrumentation-scope.list'];
 

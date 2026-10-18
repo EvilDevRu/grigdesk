@@ -13,7 +13,7 @@ import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 const SESSION = 'mcp-fixture-session';
-const EMPTY_TEXT = 'Для папки кокпита нет MCP-серверов, выбранных для запуска.';
+const EMPTY_TEXT = 'Для папки GrigDesk нет MCP-серверов, выбранных для запуска.';
 
 /**
  * Копия настоящего адаптера сохраняет его mcpStatus и объявление capability.
@@ -206,7 +206,7 @@ test('настоящий mcpStatus DeepSeek возвращает configured, п�
     state: 'configured',
     detail: '',
   }]);
-  assert.match(data.note, /для папки кокпита/);
+  assert.match(data.note, /для папки GrigDesk/);
   assert.match(data.note, /Соединение не проверялось/);
   assert.equal(data.emptyText, EMPTY_TEXT);
   assert.equal(typeof data.checkedAt, 'number');
@@ -291,7 +291,7 @@ test('ошибка JSON безопасна в HTTP и снимается чер�
   assert.equal(response.statusCode, 200);
   assert.equal(data.state, 'error');
   assert.deepEqual(data.servers, []);
-  assert.match(data.error, /для папки кокпита/);
+  assert.match(data.error, /для папки GrigDesk/);
   assert.equal(response.body.includes('json-canary'), false);
   assert.equal(response.body.includes(fixture.root), false);
 
@@ -316,8 +316,8 @@ test('частичный MCP-ответ сохраняет карточки бе
   await writeServers(fixture, {
     Документы: entry,
     missing: { command: path.join(fixture.root, 'command-canary') },
-    'cockpit-work': entry,
-    'cockpit-perm': entry,
+    'grigdesk-work': entry,
+    'grigdesk-perm': entry,
   });
 
   const response = await fixture.app.inject('/api/providers/deepseek/mcp');
@@ -329,7 +329,7 @@ test('частичный MCP-ответ сохраняет карточки бе
   assert.match(data.note, /прочитана или проверена не полностью/);
   assert.equal(response.body.includes('canary'), false);
   assert.equal(response.body.includes(fixture.root), false);
-  assert.equal(response.body.includes('cockpit-'), false);
+  assert.equal(response.body.includes('grigdesk-'), false);
   assert.equal(Object.hasOwn(data, 'warnings'), false);
   assert.equal(Object.hasOwn(data, 'file'), false);
 });

@@ -11,7 +11,7 @@ import { decideGlmTool, glmArgumentsHash, parseGlmToolPolicy } from '../src/lib/
  * поэтому любой путь отказа завершается кодом 2.
  */
 function deny(reason: string): never {
-  process.stderr.write(`Инструмент запрещён политикой Cockpit (GLM): ${reason}\n`);
+  process.stderr.write(`Инструмент запрещён политикой GrigDesk (GLM): ${reason}\n`);
   process.exit(2);
 }
 

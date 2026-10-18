@@ -1,8 +1,8 @@
-// Вызовы route-движка из кокпита: аргументы, запуск в отвязанном юните и разбор отказов.
+// Вызовы route-движка из GrigDesk: аргументы, запуск в отвязанном юните и разбор отказов.
 //
 // ТРИ ВЕЩИ, КОТОРЫЕ ЗДЕСЬ НЕЛЬЗЯ ДЕЛАТЬ ИНАЧЕ.
 //
-// 1. Каталоги — только явными аргументами. Cockpit и движок используют один каталог
+// 1. Каталоги — только явными аргументами. GrigDesk и движок используют один каталог
 //    runtime-состояния и один опубликованный каталог маршрутов; скрытых legacy roots нет.
 //
 // 2. Окружение transient-**сервиса** не наследуется вовсе (в отличие от `--scope`).
@@ -10,7 +10,7 @@
 //    значит вернуть гонку слотов: подъём выберет индекс сам, и два прогона возьмут один.
 //
 // 3. `systemd-run` без `--scope` возвращает 0 сразу после регистрации юнита, поэтому
-//    код возврата движка до кокпита НЕ доходит. Исход читаем из состояния: жив ли юнит
+//    код возврата движка до GrigDesk НЕ доходит. Исход читаем из состояния: жив ли юнит
 //    и появился ли ORCH_PID; текст отказа — из журнала запуска.
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -20,7 +20,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { config as runtimeConfig } from '../config.ts';
 
 import { factoryUnitArgs } from './factoryLaunch.ts';
-import { cockpitCliPath } from './cliPath.ts';
+import { grigDeskCliPath } from './cliPath.ts';
 
 /**
  * На длинной попытке goto записал решение, но прежних 30 секунд не хватило на выход.
@@ -314,7 +314,7 @@ export function startRegistryIdentity(registry: Record<string, string | undefine
 
 /**
  * Окружение прогона. Runtime roots передаются аргументами, здесь остаются только
- * process-level настройки профилей и runner control. Пути от корня Cockpit выводятся,
+ * process-level настройки профилей и runner control. Пути от корня GrigDesk выводятся,
  * только если корень известен и абсолютен — как и для PATH; иначе wrapper берёт свои.
  */
 export function routeLaunchEnv(
@@ -328,17 +328,17 @@ export function routeLaunchEnv(
 
   return {
     ...extra,
-    PATH: cockpitCliPath(config.rootDir),
-    COCKPIT_HOME: config.dataHome ?? runtimeConfig.dataHome,
-    ...(prefsPath ? { COCKPIT_PROVIDER_PREFS_PATH: path.resolve(prefsPath) } : {}),
-    COCKPIT_DEEPSEEK_NODE_BIN: process.execPath,
-    COCKPIT_DEEPSEEK_RUNTIME_MODE: config.deepseekRuntimeMode || 'embedded',
-    ...(generationRoot ? { COCKPIT_DEEPSEEK_GENERATION_ROOT: generationRoot } : {}),
-    COCKPIT_DEEPSEEK_ARTIFACT_DIR: config.deepseekArtifactDir || '',
-    COCKPIT_DEEPSEEK_BIN: config.deepseekBinOverride
+    PATH: grigDeskCliPath(config.rootDir),
+    GRIGDESK_HOME: config.dataHome ?? runtimeConfig.dataHome,
+    ...(prefsPath ? { GRIGDESK_PROVIDER_PREFS_PATH: path.resolve(prefsPath) } : {}),
+    GRIGDESK_DEEPSEEK_NODE_BIN: process.execPath,
+    GRIGDESK_DEEPSEEK_RUNTIME_MODE: config.deepseekRuntimeMode || 'embedded',
+    ...(generationRoot ? { GRIGDESK_DEEPSEEK_GENERATION_ROOT: generationRoot } : {}),
+    GRIGDESK_DEEPSEEK_ARTIFACT_DIR: config.deepseekArtifactDir || '',
+    GRIGDESK_DEEPSEEK_BIN: config.deepseekBinOverride
       || (config.deepseekRuntimeMode === 'installed' ? config.deepseekBin || '' : ''),
     ...(config.deepseekRuntimeHome
-      ? { COCKPIT_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
+      ? { GRIGDESK_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),
     HOME: process.env.HOME || '',
     FACTORY_HOME: config.factoryHome,
@@ -353,7 +353,7 @@ export function routeLaunchEnv(
  * Передаётся ЯВНО и всегда, включая `0`: пустое значение движок читает как «спроси
  * профиль» (`AUTO_COMPACT_WINDOW` в его `runners.env`), и осознанный ноль человека молча
  * проигрывал бы настройке проекта. Дальше движок отдаёт разрешённое значение раннеру
- * своим `RUNNER_AUTO_COMPACT_WINDOW` — диалект CLI знает уже раннер, не кокпит.
+ * своим `RUNNER_AUTO_COMPACT_WINDOW` — диалект CLI знает уже раннер, не GrigDesk.
  */
 export function stageAutoCompactEnv(
   prefsData: { stageAutoCompactWindow?: unknown } | null | undefined,
@@ -583,7 +583,7 @@ export async function readLogSince(
  *
  * `systemd-run` возвращает 0 сразу после регистрации юнита, поэтому мёртвый прогон
  * выглядел запущенным: юнит умирал через пару секунд на fail-closed преflight
- * (например, контракт профиля разошёлся с закреплённым — код 75), а кокпит отвечал
+ * (например, контракт профиля разошёлся с закреплённым — код 75), а GrigDesk отвечал
  * «продолжено». Человек жал кнопку снова и снова видел успех — так могли пройти
  * четыре попытки подряд.
  *
@@ -594,7 +594,7 @@ export async function readLogSince(
  *
  * Второе окно — на ЗАПИСЬ identity, и оно оплачено ложной тревогой. Раньше после
  * settle делался ОДИН снимок реестра: не успел движок дописать `ATTEMPT_ID`/`ORCH_PID`
- * за шесть секунд — и кокпит отвечал «оркестратор не подтвердил запуск», хотя прогон
+ * за шесть секунд — и GrigDesk отвечал «оркестратор не подтвердил запуск», хотя прогон
  * поехал. Живой замер: возврат курсора записан в 10:55:14, узел зашёл в 10:55:33 —
  * девятнадцать секунд, из них львиная доля на preflight исполнителей. Человек при этом
  * видел плашку «Записано, но прогон не поехал» над идущим прогоном.
@@ -651,7 +651,7 @@ export async function confirmRouteResume({
  * Запустить route-движок в отвязанном юните.
  *
  * Юнит именно transient-**сервис**, а не scope: оркестратор живёт часами и обязан
- * пережить рестарт кокпита, а его собственный обработчик TERM должен успеть снять
+ * пережить рестарт GrigDesk, а его собственный обработчик TERM должен успеть снять
  * инструментацию (KillMode=mixed в factoryUnitArgs).
  */
 /**
@@ -738,7 +738,7 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   const argv = [
     ...factoryUnitArgs(task),
     // Без этого отказ движка не оставит следа: у сервиса stdout уходит в журнал
-    // systemd, а кокпит его не читает и читать не должен.
+    // systemd, а GrigDesk его не читает и читать не должен.
     `--property=StandardOutput=append:${logFile}`,
     ...Object.entries(env).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => `--setenv=${k}=${v}`),
     // Секрет едет файлом 0600, а не аргументом: в argv systemd-run его нет. Форма

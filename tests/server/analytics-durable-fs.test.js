@@ -27,7 +27,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const permissions = (stat) => stat.mode & 0o777;
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-analytics-fs-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-analytics-fs-'));
   const directory = path.join(root, 'private', 'analytics');
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, directory };

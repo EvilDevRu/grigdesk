@@ -31,7 +31,7 @@ async function fixture(t, {
   // ни реестра, ни демона. Тест снимает флаг между двумя запусками одной задачи.
   preflightFlag = false,
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-runner-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-launch-runner-'));
   const stateDir = path.join(root, 'state');
   const profilesDir = path.join(root, 'profiles');
   const binDir = path.join(root, 'bin');
@@ -90,7 +90,7 @@ done
 [ -n "$task" ] || exit 1
 # Отказ runner preflight: движок печатает типизированный маркер и уходит ДО создания
 # попытки — на диске остаётся только launch.log. Регистрация transient-юнита при этом
-# успешна, поэтому здесь exit 0: провал виден кокпиту не по коду, а по состоянию.
+# успешна, поэтому здесь exit 0: провал виден GrigDesk не по коду, а по состоянию.
 if [ -f "${path.join(root, 'preflight-fails')}" ]; then
   printf '%s\\n' "runner preflight не пройден: недоступны codex [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=codex]" \\
     >> "${stateDir}/t$task.launch.log"
@@ -268,13 +268,13 @@ test('два start одной задачи сериализованы даже �
   const first = app.inject({
     method: 'POST',
     url: '/api/tasks/46/launch',
-    headers: { 'x-cockpit-internal': auth.internalToken },
+    headers: { 'x-grigdesk-internal': auth.internalToken },
     payload: { ...LAUNCH_PAYLOAD, expectedCatalogHash: 'b'.repeat(64) },
   });
   const second = app.inject({
     method: 'POST',
     url: '/api/tasks/46/launch',
-    headers: { 'x-cockpit-token': auth.cliToken },
+    headers: { 'x-grigdesk-token': auth.cliToken },
     payload: LAUNCH_PAYLOAD,
   });
 

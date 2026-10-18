@@ -51,7 +51,7 @@ function payload(overrides = {}) {
 
 async function fixture(t, { enabled = true, identityError = null } = {}) {
   const { storeModule, serviceModule, apiModule } = requireModules();
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-shelf-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-task-shelf-api-'));
   const filePath = path.join(root, 'task-shelf.json');
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -317,7 +317,7 @@ test('Приложение регистрирует account-scoped полку п
   const shelfPosition = app.lastIndexOf('register(taskShelfModule');
 
   assert.deepEqual({
-    configPath: /taskShelfPath[\s\S]*COCKPIT_TASK_SHELF_PATH/.test(config),
+    configPath: /taskShelfPath[\s\S]*GRIGDESK_TASK_SHELF_PATH/.test(config),
     store: /TaskShelfStore/.test(app),
     service: /TaskShelfService/.test(app),
     module: /taskShelfModule/.test(app),

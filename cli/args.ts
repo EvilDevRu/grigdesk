@@ -10,30 +10,30 @@ export type CliArgs = {
   follow: boolean;
 };
 
-export const HELP_TEXT = `Кокпит — окно и управление локальными компонентами
+export const HELP_TEXT = `GrigDesk — окно и управление локальными компонентами
 
-cockpit                         Открыть окно Кокпита; сервер поднимает само окно
+grigdesk-ctl                     Открыть окно GrigDesk; сервер поднимает само окно
                                 (без runtime.json — через службу)
-cockpit open [--force]
-cockpit status [--json]
-cockpit server start [--wait]
-cockpit server stop [--force]
-cockpit server restart [--wait] [--force]
-cockpit server status [--json]
-cockpit server logs [-n N|--lines N] [-f|--follow]
-cockpit relay start | stop | restart
-cockpit relay status [--json]
-cockpit relay logs [-n N|--lines N] [-f|--follow]
-cockpit desktop … | b24 … | mobile … | release …
-cockpit dev | build | deps | run
-cockpit --help | -h | help | <группа> --help
-cockpit --version
+grigdesk-ctl open [--force]
+grigdesk-ctl status [--json]
+grigdesk-ctl server start [--wait]
+grigdesk-ctl server stop [--force]
+grigdesk-ctl server restart [--wait] [--force]
+grigdesk-ctl server status [--json]
+grigdesk-ctl server logs [-n N|--lines N] [-f|--follow]
+grigdesk-ctl relay start | stop | restart
+grigdesk-ctl relay status [--json]
+grigdesk-ctl relay logs [-n N|--lines N] [-f|--follow]
+grigdesk-ctl desktop … | b24 … | mobile … | release …
+grigdesk-ctl dev | build | deps | run
+grigdesk-ctl --help | -h | help | <группа> --help
+grigdesk-ctl --version
 
 --force разрешает открытие окна, stop и restart из хода агента.
 Число строк журнала: 1–10000, по умолчанию 100.
 `;
 
-const HELP_HINT = 'Справка: cockpit --help';
+const HELP_HINT = 'Справка: grigdesk-ctl --help';
 
 /**
  * Разбирает только объявленные формы без внешних вызовов и чтения окружения.
@@ -77,7 +77,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     const action = argv[index++];
 
     if (!action) {
-      throw new Error(`Не указано действие: cockpit ${command} start | stop | restart | status | logs`);
+      throw new Error(`Не указано действие: grigdesk-ctl ${command} start | stop | restart | status | logs`);
     }
 
     if (!['start', 'stop', 'restart', 'status', 'logs'].includes(action)) {

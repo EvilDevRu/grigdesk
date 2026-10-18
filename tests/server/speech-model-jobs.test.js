@@ -25,7 +25,7 @@ import settingsModule from '../../server/src/modules/settings/index.ts';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function tempRoot(t, prefix = 'cockpit-model-jobs-') {
+async function tempRoot(t, prefix = 'grigdesk-model-jobs-') {
   const root = await mkdtemp(path.join(os.tmpdir(), prefix));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
@@ -109,7 +109,7 @@ test('benchmark fail-fast требует доступный operator-supplied au
   );
   assert.equal(missing.launches.length, 0);
 
-  const audioRoot = await tempRoot(t, 'cockpit-benchmark-audio-');
+  const audioRoot = await tempRoot(t, 'grigdesk-benchmark-audio-');
   const audioPath = path.join(audioRoot, 'reference.wav');
   await writeFile(audioPath, 'test audio fixture');
   const ready = await managerFixture(t, { benchmarkAudioPath: audioPath });
@@ -124,7 +124,7 @@ test('benchmark fail-fast требует доступный operator-supplied au
 });
 
 test('default launcher изолирует HF cache, добавляет CUDA path и закрепляет worker nonce', async (t) => {
-  const root = await tempRoot(t, 'cockpit-model-launch-');
+  const root = await tempRoot(t, 'grigdesk-model-launch-');
   const jobsDir = path.join(root, 'jobs');
   const calls = [];
   const child = new EventEmitter();
@@ -185,7 +185,7 @@ test('default launcher изолирует HF cache, добавляет CUDA path
 });
 
 test('default launcher не сигналит по raw PID при сбое capture identity', async (t) => {
-  const root = await tempRoot(t, 'cockpit-model-launch-identity-failure-');
+  const root = await tempRoot(t, 'grigdesk-model-launch-identity-failure-');
   const child = new EventEmitter();
   const signals = [];
   child.pid = 5432;
@@ -504,7 +504,7 @@ test('cancelled status до выхода worker сохраняет dedupe, PID r
 });
 
 test('restart делает active job interrupted и при PID reuse не сигналит чужой процесс', async (t) => {
-  const root = await tempRoot(t, 'cockpit-model-recovery-');
+  const root = await tempRoot(t, 'grigdesk-model-recovery-');
   const jobsDir = path.join(root, 'jobs');
   const identity = {
     pid: 4242,
@@ -552,7 +552,7 @@ test('restart делает active job interrupted и при PID reuse не си�
 });
 
 test('restart держит dedupe до TERM/KILL и подтверждённой смерти прежнего worker', async (t) => {
-  const root = await tempRoot(t, 'cockpit-model-recovery-wait-');
+  const root = await tempRoot(t, 'grigdesk-model-recovery-wait-');
   const jobsDir = path.join(root, 'jobs');
   const identity = {
     pid: 4343,
@@ -630,7 +630,7 @@ test('restart держит dedupe до TERM/KILL и подтверждённой
 });
 
 test('terminal status прежнего worker не освобождает dedupe без подтверждения смерти', async (t) => {
-  const root = await tempRoot(t, 'cockpit-model-recovery-terminal-');
+  const root = await tempRoot(t, 'grigdesk-model-recovery-terminal-');
   const jobsDir = path.join(root, 'jobs');
   const identity = {
     pid: 4444,
@@ -708,7 +708,7 @@ with tempfile.TemporaryDirectory() as root:
     status = pathlib.Path(root) / 'job.json'
     status.write_text('{}', encoding='utf-8')
     sys.argv = [sys.argv[0], str(status), 'nonce']
-    spec = importlib.util.spec_from_file_location('cockpit_model_worker', worker_path)
+    spec = importlib.util.spec_from_file_location('grigdesk_model_worker', worker_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     real_open = module.os.open
@@ -783,7 +783,7 @@ test('readProcessIdentity читает Linux starttime даже со скобк�
 });
 
 async function settingsApp(t, modelJobs) {
-  const root = await tempRoot(t, 'cockpit-model-api-');
+  const root = await tempRoot(t, 'grigdesk-model-api-');
   const app = Fastify({ logger: false });
   t.after(() => app.close());
   await app.register(settingsModule, {
@@ -929,7 +929,7 @@ test('settings HTTP сохраняет реальную manager-дедуплик
 });
 
 test('settings HTTP запускает benchmark только с доступным эталоном', async (t) => {
-  const audioRoot = await tempRoot(t, 'cockpit-benchmark-http-');
+  const audioRoot = await tempRoot(t, 'grigdesk-benchmark-http-');
   const audioPath = path.join(audioRoot, 'reference.wav');
   await writeFile(audioPath, 'test audio fixture');
   const { manager } = await managerFixture(t, { benchmarkAudioPath: audioPath });
@@ -984,7 +984,7 @@ sys.modules['huggingface_hub.constants'] = constants
 sys.modules['tqdm'] = types.ModuleType('tqdm')
 sys.modules['tqdm.auto'] = tqdm_auto
 
-spec = importlib.util.spec_from_file_location('cockpit_model_worker', sys.argv[1])
+spec = importlib.util.spec_from_file_location('grigdesk_model_worker', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 module.shutil.disk_usage = lambda _path: types.SimpleNamespace(free=1)
@@ -1076,7 +1076,7 @@ constants.HF_HUB_CACHE = str(target_hub)
 sys.modules['huggingface_hub'] = hf
 sys.modules['huggingface_hub.constants'] = constants
 
-spec = importlib.util.spec_from_file_location('cockpit_model_worker', sys.argv[1])
+spec = importlib.util.spec_from_file_location('grigdesk_model_worker', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 module.source_hub = lambda _env: common_hub
@@ -1136,13 +1136,13 @@ print(json.dumps({
     'targetExists': (target_snapshot / 'model.bin').exists(),
     'targetIsSymlink': (target_snapshot / 'model.bin').is_symlink(),
     'targetBytes': (target_snapshot / 'model.bin').read_bytes().decode(),
-    'tempExists': (target_hub / '.cockpit-copy-copy-job').exists(),
+    'tempExists': (target_hub / '.grigdesk-copy-copy-job').exists(),
     'calls': public_calls(canonical_calls),
     'aliasResult': alias_result,
     'aliasSourceExists': (alias_source_snapshot / 'model.bin').exists(),
     'aliasTargetExists': (alias_target_snapshot / 'model.bin').exists(),
     'aliasTargetBytes': (alias_target_snapshot / 'model.bin').read_bytes().decode(),
-    'aliasTempExists': (target_hub / '.cockpit-copy-alias-copy-job').exists(),
+    'aliasTempExists': (target_hub / '.grigdesk-copy-alias-copy-job').exists(),
     'aliasCalls': public_calls(calls),
 }))
 `;
@@ -1212,7 +1212,7 @@ print(json.dumps({
 });
 
 test('benchmark worker использует pinned alias-кэш, если canonical snapshot отсутствует', async (t) => {
-  const root = await tempRoot(t, 'cockpit-benchmark-alias-');
+  const root = await tempRoot(t, 'grigdesk-benchmark-alias-');
   const audioPath = path.join(root, 'reference.wav');
   await writeFile(audioPath, 'audio');
   const workerPath = fileURLToPath(new URL('../../server/src/lib/speech/model-jobs-worker.py', import.meta.url));
@@ -1237,7 +1237,7 @@ fw = types.ModuleType('faster_whisper')
 fw.WhisperModel = WhisperModel
 sys.modules['huggingface_hub'] = hf
 sys.modules['faster_whisper'] = fw
-spec = importlib.util.spec_from_file_location('cockpit_model_worker', sys.argv[1])
+spec = importlib.util.spec_from_file_location('grigdesk_model_worker', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 result = module.benchmark({

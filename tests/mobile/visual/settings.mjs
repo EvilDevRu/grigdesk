@@ -24,7 +24,7 @@ const sizes = [
 const report = [];
 
 /**
- * Настройки читают настоящий административный API отдельного Cockpit с временным CLI токеном.
+ * Настройки читают настоящий административный API отдельного GrigDesk с временным CLI токеном.
  * Измеряется поддерево MobileAccess и открытый общий диалог, без перезапуска рабочего сервера.
  */
 async function main() {
@@ -44,7 +44,7 @@ async function main() {
     const added = await seed.core.inject({
       method: 'POST',
       url: '/api/mobile/relays',
-      headers: { 'x-cockpit-token': seed.cliToken },
+      headers: { 'x-grigdesk-token': seed.cliToken },
       payload: {
         name: 'Посредник ' + statuses[index],
         host: '127.0.0.1',
@@ -109,7 +109,7 @@ async function main() {
         await route.continue({
           headers: {
             ...route.request().headers(),
-            'X-Cockpit-Token': seed.cliToken,
+            'X-GrigDesk-Token': seed.cliToken,
           },
         });
 
@@ -119,7 +119,7 @@ async function main() {
       const response = await route.fetch({
         headers: {
           ...route.request().headers(),
-          'X-Cockpit-Token': seed.cliToken,
+          'X-GrigDesk-Token': seed.cliToken,
         },
       });
 
@@ -209,7 +209,7 @@ try {
   await main();
 } catch (error) {
   const message = String(error.message)
-    .replace(/X-Cockpit-Token: [^\s]+/gi, 'X-Cockpit-Token: [скрыто]')
+    .replace(/X-GrigDesk-Token: [^\s]+/gi, 'X-GrigDesk-Token: [скрыто]')
     .replace(/[a-f0-9]{64}/g, '[скрыто]');
 
   console.error('Проверка административного интерфейса не завершена:', message);

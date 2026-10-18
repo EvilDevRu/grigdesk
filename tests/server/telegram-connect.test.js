@@ -26,7 +26,7 @@ const SECRET = 'AAHrEaLLyLoNgSeCrEtPaRt';
 const ME = {
   id: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: false,
 };
@@ -175,7 +175,7 @@ test('другой bot требует явного disconnect и только п
 });
 
 // Перепроверка нужна ровно из-за режима приватности: его выключают в @BotFather
-// ПОСЛЕ подключения, и без неё кокпит показывал бы состояние на момент, когда
+// ПОСЛЕ подключения, и без неё GrigDesk показывал бы состояние на момент, когда
 // токен вставили.
 test('перепроверка обновляет данные бота тем же токеном', async (t) => {
   let privacyOff = false;
@@ -218,7 +218,7 @@ test('отказ на перепроверке токен НЕ стирает', 
   fail = true;
   const res = await recheck();
   assert.equal(res.statusCode, 502);
-  // Удалять рабочий ключ из-за одного неудачного ответа — не решение кокпита.
+  // Удалять рабочий ключ из-за одного неудачного ответа — не решение GrigDesk.
   assert.equal(creds.read().token, TOKEN);
   assert.equal(res.json().error, 'telegram_unreachable');
 });

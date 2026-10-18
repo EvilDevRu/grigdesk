@@ -34,7 +34,7 @@ export async function writeGlmResearchOverlay(options: GlmResearchOverlayOptions
 
   await fs.mkdir(options.root, { recursive: true, mode: 0o700 });
   await fs.writeFile(guard, [
-    'export const name = "cockpit-glm-loopback-guard";',
+    'export const name = "grigdesk-glm-loopback-guard";',
     'export function apply() {',
     '  const original = globalThis.fetch;',
     '  globalThis.fetch = (input, ...args) => {',
@@ -81,7 +81,7 @@ export async function writeGlmResearchOverlay(options: GlmResearchOverlayOptions
           config: {
             providers: {
               zai: {
-                apiKeyEnv: 'COCKPIT_GLM_ROUTE_KEY',
+                apiKeyEnv: 'GRIGDESK_GLM_ROUTE_KEY',
                 baseURL: options.endpoint,
                 retryPolicy: {
                   mode: 'normal',
@@ -93,7 +93,7 @@ export async function writeGlmResearchOverlay(options: GlmResearchOverlayOptions
           },
         },
         {
-          id: 'cockpit-glm-loopback-guard',
+          id: 'grigdesk-glm-loopback-guard',
           name: pathToFileURL(guard).href,
         },
         ...(options.hooksPath ? [{
@@ -107,7 +107,7 @@ export async function writeGlmResearchOverlay(options: GlmResearchOverlayOptions
           },
         }] : []),
         ...(options.mcpServers ?? []).map((server) => ({
-          id: `cockpit-mcp-${server.name}`,
+          id: `grigdesk-mcp-${server.name}`,
           name: '@deepseek-ai/dsh-mcp-client',
           config: {
             serverName: server.name,

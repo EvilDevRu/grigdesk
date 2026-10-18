@@ -82,7 +82,7 @@ test('настоящий web maxTokens 64/128 меняет max_tokens HTTP бе�
         PATH: process.env.PATH,
         HOME: home,
         DSH_HOME: home,
-        DEEPSEEK_API_KEY: 'cockpit-loopback-only',
+        DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
         DSH_TELEMETRY_DISABLED: '1',
       },
       nativeSettings: plan([['llm-deepseek', 'maxTokens', maxTokens]]),
@@ -125,12 +125,12 @@ test('настоящий ACP maxTokens и restart owner переживают д�
         PATH: process.env.PATH,
         HOME: home,
         DSH_HOME: home,
-        DEEPSEEK_API_KEY: 'cockpit-loopback-only',
+        DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
         DSH_TELEMETRY_DISABLED: '1',
       },
     };
     const selected = plan([
-      ['llm-deepseek', 'maxTokens', maxTokens], ['cockpit-restart-test', 'enabled', false],
+      ['llm-deepseek', 'maxTokens', maxTokens], ['grigdesk-restart-test', 'enabled', false],
     ]);
     const preparatory = await startDeepSeekAcpSettings(options);
 
@@ -263,9 +263,9 @@ test('настоящий web restart запускает owner из изменё�
       HOME: root,
       DSH_HOME: root,
       DSH_TELEMETRY_DISABLED: '1',
-      DEEPSEEK_API_KEY: 'cockpit-loopback-only',
+      DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
     },
-    nativeSettings: plan([['cockpit-restart-test', 'enabled', false]]),
+    nativeSettings: plan([['grigdesk-restart-test', 'enabled', false]]),
     message: 'fixture',
     signal: AbortSignal.timeout(30_000),
     startServer: async (options) => {
@@ -309,7 +309,7 @@ test('настоящий ACP отклоняет override до worker, session и
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      DEEPSEEK_API_KEY: 'cockpit-loopback-only',
+      DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
     },
     nativeSettings: plan([['llm-deepseek', 'maxTokens', -1]]),
     deps: {

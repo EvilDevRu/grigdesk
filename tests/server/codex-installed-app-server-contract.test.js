@@ -1,5 +1,5 @@
 // Сторож на обновление установленного Codex: схема app-server генерируется локально,
-// без запуска модели, и фиксирует ровно тот transport, на который опирается Cockpit.
+// без запуска модели, и фиксирует ровно тот transport, на который опирается GrigDesk.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import codex from '../../server/src/lib/executors/codex.ts';
 
 const execFileAsync = promisify(execFile);
-const CODEX_BIN = process.env.COCKPIT_CODEX_BIN || 'codex';
+const CODEX_BIN = process.env.GRIGDESK_CODEX_BIN || 'codex';
 const DIRECT_SSH_HOOK = fileURLToPath(new URL(
   '../../server/src/lib/executors/_direct-ssh-policy-hook.js',
   import.meta.url,
@@ -72,7 +72,7 @@ test('установленный Codex сохраняет необходимый
     assert.fail(`Не удалось определить версию установленного Codex (${CODEX_BIN}): ${errorOutput(error)}`);
   }
 
-  const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-app-server-contract-'));
+  const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-app-server-contract-'));
   t.after(() => fs.rm(schemaDir, { recursive: true, force: true }));
 
   try {
@@ -221,7 +221,7 @@ test('установленный Codex сохраняет необходимый
   assertSchemaPattern(dynamicToolSpec, /"type"\s*:\s*"function"/,
     'function discriminant', version, 'DynamicToolSpec');
 
-  // Канал уточнений Cockpit опирается на turn/steer с обязательным expectedTurnId:
+  // Канал уточнений GrigDesk опирается на turn/steer с обязательным expectedTurnId:
   // без него сообщение могло бы уехать в следующий ход того же thread.
   assertField(turnSteerParams, 'threadId', 'string', version, 'TurnSteerParams');
   assertField(turnSteerParams, 'expectedTurnId', 'string', version, 'TurnSteerParams');
@@ -326,7 +326,7 @@ function startThread({ capabilities, params, codexHome }) {
       }
     });
     send({ method: 'initialize', id: 1, params: {
-      clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+      clientInfo: { name: 'grigdesk', title: 'GrigDesk', version: '0.1.0' },
       capabilities,
     } });
   });
@@ -371,7 +371,7 @@ function installedHooksList({ codexHome }) {
       }
     });
     send({ method: 'initialize', id: 1, params: {
-      clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+      clientInfo: { name: 'grigdesk', title: 'GrigDesk', version: '0.1.0' },
       capabilities: { experimentalApi: true, requestAttestation: false },
     } });
   });
@@ -382,7 +382,7 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
 }, async (t) => {
   // Живой app-server создаёт SQLite state даже без model call. Изолированный state-dir
   // не зависит от прав на пользовательский ~/.codex и не изменяет настоящую сессию.
-  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-state-'));
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-state-'));
   t.after(() => fs.rm(codexHome, { recursive: true, force: true }));
 
   const params = {
@@ -390,8 +390,8 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
     approvalPolicy: 'never',
     sandbox: 'workspace-write',
     ephemeral: true,
-    serviceName: 'cockpit',
-    runtimeWorkspaceRoots: [os.tmpdir(), path.join(os.tmpdir(), 'cockpit-contract-root')],
+    serviceName: 'grigdesk',
+    runtimeWorkspaceRoots: [os.tmpdir(), path.join(os.tmpdir(), 'grigdesk-contract-root')],
   };
 
   const declared = await startThread({
@@ -424,7 +424,7 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
 test('установленный Codex объявляет process hook как enabled sessionFlags без model call', {
   timeout: 60_000,
 }, async (t) => {
-  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-hooks-state-'));
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-hooks-state-'));
   t.after(() => fs.rm(codexHome, { recursive: true, force: true }));
 
   const response = await installedHooksList({ codexHome });

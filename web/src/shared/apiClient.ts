@@ -1,4 +1,4 @@
-// Единый клиент к серверу кокпита.
+// Единый клиент к серверу GrigDesk.
 //
 // Граница сети: наружу отсюда уходит `unknown`. Ответ сервера — это JSON, а не
 // доменная модель, и превращать одно в другое обязан декодер раздела. Пока клиент
@@ -13,7 +13,7 @@ const WS_BASE = (typeof location !== 'undefined' ? location.origin : '').replace
 );
 
 // Авторизация — сессионная httpOnly-cookie, её ставит сервер на входе. Никаких секретов
-// в клиентском коде: прежний VITE_COCKPIT_TOKEN попадал в бандл открытым текстом (Vite
+// в клиентском коде: прежний VITE_GRIGDESK_TOKEN попадал в бандл открытым текстом (Vite
 // подставляет env на сборке), то есть был доступен любому, кто открыл страницу.
 // Сессионная cookie сопровождает все запросы к своему серверу.
 const FETCH_OPTS: RequestInit = { credentials: 'include' };
@@ -533,7 +533,7 @@ async function postBytes(
   return handle(res, path);
 }
 
-// Транспорт кокпита. Все методы отдают `unknown`: форму подтверждает декодер раздела.
+// Транспорт GrigDesk. Все методы отдают `unknown`: форму подтверждает декодер раздела.
 export interface ApiClient {
   url: (path: string) => string;
   onUnauthorized: (handler: UnauthorizedHandler) => () => void;

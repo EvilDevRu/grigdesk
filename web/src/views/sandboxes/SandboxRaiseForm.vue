@@ -82,12 +82,12 @@ const withoutTask = ref(true);
 const taskError = ref('');
 
 const taskHint = computed(() => (withoutTask.value
-  ? 'Номер выдаст кокпит: он не пересекается с номерами задач портала.'
+  ? 'Номер выдаст GrigDesk: он не пересекается с номерами задач портала.'
   : 'Стенд получит имя этой задачи, и позже её можно пустить по конвейеру на готовый стенд.'));
 
 // Выключенное поле не должно звать вводить номер: подсказка внутри него говорит,
-// что номер сейчас выдаёт сам кокпит.
-const taskPlaceholder = computed(() => (withoutTask.value ? 'выдаст кокпит' : 'например 1234'));
+// что номер сейчас выдаёт сам GrigDesk.
+const taskPlaceholder = computed(() => (withoutTask.value ? 'выдаст GrigDesk' : 'например 1234'));
 
 const profileError = computed(() => (props.options.length
   ? ''

@@ -1,5 +1,5 @@
 // Плагин «Код» отдаёт по HTTP любой файл под деревом репозитория — а служебные
-// каталоги кокпита лежат ВНУТРИ его собственного дерева и гитигнорятся, поэтому
+// каталоги GrigDesk лежат ВНУТРИ его собственного дерева и гитигнорятся, поэтому
 // в дифе их не видно, а в `ls`/`file` было видно целиком: chats/ — вся переписка
 // с агентами, telegram/ и github/ — архивы каналов, server/.state — креды B24, cli-token
 // и хеш пароля входа. Закрыты оба роута, куда путь приходит от клиента.
@@ -31,13 +31,13 @@ async function writeTree(root, files) {
 }
 
 /**
- * Два репозитория проекта: `main` — сам кокпит (его chats/, telegram/ и github/ названы
+ * Два репозитория проекта: `main` — сам GrigDesk (его chats/, telegram/ и github/ названы
  * в config), `other` — чужой код, где каталог с тем же именем ничей и прятать его
  * не за что.
  */
 async function fixture(t) {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-hidden-')));
-  const main = path.join(root, 'cockpit');
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-hidden-')));
+  const main = path.join(root, 'grigdesk');
   const other = path.join(root, 'other');
 
   await writeTree(main, {
@@ -61,7 +61,7 @@ async function fixture(t) {
     dataStateDir: path.join(main, 'private-data/state'),
     mobileDir: path.join(main, 'private-data/mobile'),
     envPath: path.join(main, 'settings.env'),
-    profilesDir: path.join(root, 'profiles'), // не существует → проект кокпитный
+    profilesDir: path.join(root, 'profiles'), // не существует → проект GrigDesk
     chatsDir: path.join(main, 'chats'),
     telegramDir: path.join(main, 'telegram'),
     githubDir: path.join(main, 'github'),
@@ -92,7 +92,7 @@ async function fixture(t) {
 
 const names = (res) => res.json().entries.map((e) => e.name);
 
-test('ls не показывает служебные каталоги кокпита и внутренности гита', async (t) => {
+test('ls не показывает служебные каталоги GrigDesk и внутренности гита', async (t) => {
   const { ls } = await fixture(t);
 
   const top = await ls('');
@@ -154,16 +154,16 @@ test('в чужом репозитории каталог с тем же име�
 });
 
 test('isHiddenPath: сегмент в любом месте дерева, каталог — по точному пути', async () => {
-  const dirs = ['/srv/cockpit/chats', '/srv/cockpit/telegram', '/srv/cockpit/github'];
-  assert.equal(isHiddenPath('/srv/cockpit/chats', dirs), true);
-  assert.equal(isHiddenPath('/srv/cockpit/chats/2026-08/x.json', dirs), true);
-  assert.equal(isHiddenPath('/srv/cockpit/github/accounts/acc_1/issues.ndjson', dirs), true);
-  assert.equal(isHiddenPath('/srv/cockpit/server/.state/creds.json', dirs), true);
+  const dirs = ['/srv/grigdesk/chats', '/srv/grigdesk/telegram', '/srv/grigdesk/github'];
+  assert.equal(isHiddenPath('/srv/grigdesk/chats', dirs), true);
+  assert.equal(isHiddenPath('/srv/grigdesk/chats/2026-08/x.json', dirs), true);
+  assert.equal(isHiddenPath('/srv/grigdesk/github/accounts/acc_1/issues.ndjson', dirs), true);
+  assert.equal(isHiddenPath('/srv/grigdesk/server/.state/creds.json', dirs), true);
   assert.equal(isHiddenPath('/srv/other/.git/config', dirs), true);
-  assert.equal(isHiddenPath('/srv/cockpit/src/app.js', dirs), false);
+  assert.equal(isHiddenPath('/srv/grigdesk/src/app.js', dirs), false);
   // Префикс имени — не вложенность: chats-backup рядом с chats остаётся видимым.
-  assert.equal(isHiddenPath('/srv/cockpit/chats-backup/x.json', dirs), false);
-  assert.equal(isHiddenPath('/srv/cockpit/src/.stateful/x.js', dirs), false);
+  assert.equal(isHiddenPath('/srv/grigdesk/chats-backup/x.json', dirs), false);
+  assert.equal(isHiddenPath('/srv/grigdesk/src/.stateful/x.js', dirs), false);
 });
 
 

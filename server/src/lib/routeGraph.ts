@@ -1,6 +1,6 @@
 // Форма графа route-задачи из ЗАКРЕПЛЁННОГО каталога попытки. Построитель общий с холстом
 // редактора и живёт в shared/pipeline/routeGraphView.ts; сервер добавляет подписи из своего каталога
-// стадий, чтобы узел без label назывался так же, как в остальном кокпите.
+// стадий, чтобы узел без label назывался так же, как в остальном GrigDesk.
 import { resolveNode } from './stages.ts';
 import { buildRouteGraph } from '../../../shared/pipeline/routeGraphView.ts';
 import type { RouteGraphDef, RouteMachine } from '../../../shared/pipeline/routeGraphView.ts';

@@ -41,7 +41,7 @@ const message = ({ channel, accountRef, sourceId = 'source:1', id = '1', over = 
 
 const policy = (scopeId = 'scope:1', over = {}) => ({
   scopeId,
-  project: 'cockpit',
+  project: 'grigdesk',
   kind: 'bug',
   b24: { groupId: 10, responsibleId: 20, priority: 2 },
   autoTask: { enabled: false, minConfidence: 0.8, maxPerDay: 5 },

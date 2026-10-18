@@ -63,7 +63,7 @@ function barrier() {
 }
 
 test('RC7: durable ACK обязателен до запуска target, отказ записи не исполняет target', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-ack-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-ack-'));
   const marker = path.join(root, 'marker');
   const started = barrier();
   const ack = barrier();
@@ -140,7 +140,7 @@ async function alive(pid) {
 }
 
 test('RC8: отмена завершает внука, игнорирующего SIGTERM и держащего pipe', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-group-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-group-'));
   const marker = path.join(root, 'writer');
   const controller = new AbortController();
   let worker = null;
@@ -198,7 +198,7 @@ test('RC8: отмена завершает внука, игнорирующег�
 });
 
 test('RC9: выход child не оставляет внука с pipe и не зависает навсегда', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-group-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-group-'));
   const marker = path.join(root, 'writer');
   const controller = new AbortController();
   let worker = null;
@@ -276,7 +276,7 @@ async function waitStopped(pids, timeoutMs = 4000) {
 }
 
 test('RC10: crash владельца после ACK завершает supervisor и всю группу', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-owner-crash-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-owner-crash-'));
   const child = fork(new URL('./fixtures/plugin-command-crash-owner.mjs', import.meta.url), [root], {
     env: { PATH: '/usr/bin:/bin' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -318,7 +318,7 @@ test('RC10: crash владельца после ACK завершает superviso
 });
 
 test('RC11: несовпадающая identity чужого fixture не разрешает сигнал', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-foreign-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-foreign-'));
   const marker = path.join(root, 'signalled');
   const child = spawn(process.execPath, ['-e', `
     process.on('SIGTERM', () => require('node:fs').writeFileSync(process.argv[1], 'SIGNAL'));
@@ -352,7 +352,7 @@ test('RC11: несовпадающая identity чужого fixture не раз
 });
 
 test('RC13: независимый durable registry workers и evidence при отказе finished', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-registry-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-registry-'));
   const registry = path.join(root, 'workers.json');
   const release = path.join(root, 'release');
   const controllers = Array.from({ length: 3 }, () => new AbortController());
@@ -445,7 +445,7 @@ test('RC13: независимый durable registry workers и evidence при �
 });
 
 test('RC14: supervisor ограничивает весь root, свободное место и последний замер', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-budget-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-budget-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -494,7 +494,7 @@ test('RC14: supervisor ограничивает весь root, свободно�
 
 
 test('RC8-timeout: deadline завершает внука через независимый SIGKILL', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-command-group-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-command-group-'));
   const marker = path.join(root, 'writer');
   const controller = new AbortController();
   let worker = null;

@@ -139,7 +139,7 @@ async function mountCatalog(t, {
   makeStores = null,
 } = {}) {
   const prefix = `__pluginCatalog${mountNonce += 1}`;
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/settings');
 
   const toggles = [];
   const saves = [];

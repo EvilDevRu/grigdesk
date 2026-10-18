@@ -10,7 +10,7 @@ import path from 'node:path';
  * Настоящий npm получает tarballs по integrity из одноразового кеша без сети.
  */
 export async function createOfflineNpmFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-offline-npm-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-offline-npm-'));
   const cwd = path.join(root, 'package');
   const cache = path.join(root, 'cache');
   const markers = path.join(root, 'markers');

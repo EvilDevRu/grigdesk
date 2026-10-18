@@ -360,7 +360,7 @@ export function createShowcaseBuildRuns(options: ShowcaseBuildRunsOptions) {
     if (!recovered) {
       throw new ShowcaseError(
         'builds_not_recovered',
-        'Кокпит ещё восстанавливает журнал полных запусков.',
+        'GrigDesk ещё восстанавливает журнал полных запусков.',
         503,
       );
     }

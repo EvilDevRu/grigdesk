@@ -34,7 +34,7 @@ function prefsDouble() {
 }
 
 async function profilesFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-lifecycle-consumers-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-lifecycle-consumers-'));
   const profilesDir = path.join(root, 'profiles');
 
   t.after(() => rm(root, { recursive: true, force: true }));

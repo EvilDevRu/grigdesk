@@ -12,12 +12,12 @@ const ARCHIVED_AT = '2026-09-22T10:00:00.000Z';
 
 const PROJECTS = [
   { id: 'kopeika', repos: [{ key: 'main', dir: '/srv/kopeika' }], archivedAt: ARCHIVED_AT },
-  { id: 'cockpit', repos: [{ key: 'cockpit', dir: '/srv/cockpit' }], archivedAt: null },
+  { id: 'grigdesk', repos: [{ key: 'grigdesk', dir: '/srv/grigdesk' }], archivedAt: null },
   { id: 'empty', repos: [], archivedAt: null },
 ];
 
 test('сам панель открывает активный проект с репозиториями, а не первый в списке', () => {
-  assert.equal(pickCodeProject(PROJECTS, '')?.id, 'cockpit');
+  assert.equal(pickCodeProject(PROJECTS, '')?.id, 'grigdesk');
 });
 
 test('явно выбранный проект открывается даже из архива', () => {
@@ -34,5 +34,5 @@ test('без активных проектов с путями остаётся 
 test('проект без путей выбирается последним: открывать в нём нечего', () => {
   const noRepos = [{ id: 'empty', repos: [], archivedAt: null }, PROJECTS[1]];
 
-  assert.equal(pickCodeProject(noRepos, '')?.id, 'cockpit');
+  assert.equal(pickCodeProject(noRepos, '')?.id, 'grigdesk');
 });

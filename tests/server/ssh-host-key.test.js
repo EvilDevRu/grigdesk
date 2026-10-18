@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 async function hostKeys(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-host-key-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-ssh-host-key-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   let module;
   try {

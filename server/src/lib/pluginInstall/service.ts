@@ -45,7 +45,7 @@ import { terminateOwnedWorker } from './workerIdentity.ts';
 import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
 import { installedSnapshot, sameSource, sensitivePluginFile } from './serviceSnapshots.ts';
-import { compareSemVer } from '../cockpitRelease.ts';
+import { compareSemVer } from '../grigDeskRelease.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
 
 export interface PluginRecoveryResult {
@@ -66,7 +66,7 @@ export interface PluginInstallRuntime {
 export interface PluginInstallServiceOptions {
   pluginsDir: string;
   statePath: string;
-  cockpitVersion: string;
+  grigDeskVersion: string;
   reservedIds: readonly string[];
   sources?: PluginSourceRegistry;
   runNpm?: NpmRunner;
@@ -142,7 +142,7 @@ export class PluginInstallService {
    */
   constructor(options: PluginInstallServiceOptions) {
     this.options = options;
-    this.workDir = path.join(options.pluginsDir, '.cockpit-install');
+    this.workDir = path.join(options.pluginsDir, '.grigdesk-install');
     this.now = options.now ?? (() => new Date());
     this.store = new PluginInstallStateStore({
       statePath: options.statePath,
@@ -552,7 +552,7 @@ export class PluginInstallService {
         version: job.target.version,
         expectedId: pluginId,
         reservedIds: new Set(this.options.reservedIds),
-        cockpitVersion: this.options.cockpitVersion,
+        grigDeskVersion: this.options.grigDeskVersion,
       }).catch(() => {
         throw installError('preview_stale');
       });
@@ -1154,7 +1154,7 @@ export class PluginInstallService {
         version: target.version,
         expectedId: request.expectedId ?? null,
         reservedIds: new Set(this.options.reservedIds),
-        cockpitVersion: this.options.cockpitVersion,
+        grigDeskVersion: this.options.grigDeskVersion,
       });
 
       const fs = this.filesystem();
@@ -1215,7 +1215,7 @@ export class PluginInstallService {
           sourceChanged: !sameSource(record.source, initial.source),
         } : current ? { kind: 'unmanaged' } : { kind: 'none' },
         changes: null,
-        warnings: validated.hasServer ? ['Код плагина выполняется с правами Cockpit.'] : [],
+        warnings: validated.hasServer ? ['Код плагина выполняется с правами GrigDesk.'] : [],
       };
 
       if (record) {

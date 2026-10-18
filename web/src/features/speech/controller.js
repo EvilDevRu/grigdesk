@@ -942,7 +942,7 @@ export function createDictationController({
     if (!browser.isSecureContext() || !media.hasGetUserMedia()) {
       failRun(run, speechError(
         'speech_secure_context_required',
-        'Микрофон требует https или localhost — открой кокпит по защищённому адресу',
+        'Микрофон требует https или localhost — открой GrigDesk по защищённому адресу',
       ));
       return;
     }

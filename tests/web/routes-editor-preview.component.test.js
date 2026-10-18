@@ -9,7 +9,7 @@ process.env.NODE_ENV = 'test';
 
 test('RE-G3-01: preview показывает точный текст, блоки, пробелы контекста и устаревание',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RoutePromptPreview.vue'));
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

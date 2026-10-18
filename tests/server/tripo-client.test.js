@@ -84,7 +84,7 @@ async function fixture(t) {
     baseUrl: fake.baseUrl,
     sleep: async () => {}
   });
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-tripo-client-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-tripo-client-'));
 
   t.after(async () => {
     await fake.close();

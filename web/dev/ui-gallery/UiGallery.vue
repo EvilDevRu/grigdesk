@@ -2,7 +2,7 @@
   <main class="ui-gallery" :data-ui-touch="touch ? '' : undefined">
     <header class="ui-gallery__header">
       <p class="muted">Dev/test entry · без store, API и авторизации</p>
-      <h1>UI-kit Cockpit</h1>
+      <h1>UI-kit GrigDesk</h1>
     </header>
 
     <section class="ui-gallery__section">
@@ -374,7 +374,7 @@ const touch = new URLSearchParams(location.search).has('touch');
 
 const variants: UiActionVariant[] = ['solid', 'outline', 'ghost', 'text'];
 const tones: UiActionTone[] = ['neutral', 'accent', 'success', 'warning', 'danger'];
-const text = ref('Cockpit');
+const text = ref('GrigDesk');
 const invalidText = ref('');
 const password = ref('секрет');
 const search = ref('длинная строка поиска');

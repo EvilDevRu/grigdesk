@@ -14,7 +14,7 @@ const capacity = 'Selected model is at capacity. Please try a different model.';
  * Проверяем оба публичных пути чтения без запуска сервера и изменения журнала попытки.
  */
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runner-stall-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runner-stall-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 

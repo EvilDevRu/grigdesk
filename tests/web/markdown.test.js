@@ -44,7 +44,7 @@ test('обычная внешняя ссылка защищена от дост�
 
 test('viewer документов показывает разрешённый HTML и удаляет исполняемые атрибуты', async () => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/' });
+  const browser = new Window({ url: 'http://grigdesk.test/' });
   const html = mdToHtml([
     '<p align="center"><strong>Заголовок</strong><br><script>alert(1)</script></p>',
     '<img src="assets/logo.png" width="88" onerror="alert(2)">',

@@ -107,13 +107,13 @@
   name: '@deepseek-ai/dsh-subprocess-local'
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: sandbox-policy
   name: '@deepseek-ai/dsh-sandbox-policy'
   config:
     mode: workspace-write
     workspaceRoot: >-
-      <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-project
+      <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-project
 # == @deepseek-ai/dsh-base
 - id: bash-sandbox
   name: '@deepseek-ai/dsh-bash-sandbox'
@@ -123,7 +123,7 @@
 - id: pwsh-sandbox
   name: '@deepseek-ai/dsh-pwsh-sandbox'
   disabled: !!js process.platform !== 'win32'
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: approval
   name: '@deepseek-ai/dsh-user-approval'
   config:
@@ -150,7 +150,7 @@
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: tool-jobs
   name: '@deepseek-ai/dsh-tool-jobs'
   disabled: true
@@ -163,7 +163,7 @@
   name: '@deepseek-ai/dsh-tool-fs-search'
   config:
     sampleOverCapGlobResults: false
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
@@ -244,7 +244,7 @@
   name: '@deepseek-ai/dsh-compaction-basic'
 - id: command-compact
   name: '@deepseek-ai/dsh-command-compact'
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: subagent
   name: '@deepseek-ai/dsh-subagent'
   disabled: true
@@ -309,7 +309,7 @@
     allowParallelInProgress: true
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: tool-ralph
   name: '@deepseek-ai/dsh-tool-ralph'
   config:
@@ -325,7 +325,7 @@
       - 5
       - 8
     argumentsPreviewChars: 500
-# == @deepseek-ai/dsh-base, patched by <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == @deepseek-ai/dsh-base, patched by <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: web
   name: '@deepseek-ai/dsh-web'
   config:
@@ -374,11 +374,11 @@
   config:
     provider: deepseek-official
     model: deepseek-v4-flash
-# == <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
+# == <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-overlay.yml
 - id: hooks-claude-code
   name: '@deepseek-ai/dsh-hooks-claude-code'
   config:
     configPath: >-
-      <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-hooks.json
+      <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-hooks.json
     projectDir: >-
-      <COCKPIT_ROOT>/.state/artifacts/deepseek-harness/p0-project
+      <GRIGDESK_ROOT>/.state/artifacts/deepseek-harness/p0-project

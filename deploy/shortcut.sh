@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# Ярлык «Кокпит»: файл .desktop на рабочем столе и в меню приложений. Оба ведут прямо в
-# установленное окно (AppImage с runtime.json), а до его установки — в этот скрипт с open.
+# Ярлык GrigDesk: файл .desktop на рабочем столе и в меню приложений. Оба ведут прямо в
+# установленное окно (bin/grigdesk-app с runtime.json), а до его установки — в этот скрипт с open.
 # Одна реализация на два входа: вопрос установщика (deploy/install.sh) и кнопка
-# «Настройки → Сервер» (через сервер кокпита).
+# «Настройки → Сервер» (через сервер GrigDesk).
 #
 #   deploy/shortcut.sh install   создать или обновить оба файла
 #   deploy/shortcut.sh remove    убрать оба
+#   deploy/shortcut.sh refresh   переписать Exec в уже созданных файлах (после установки окна)
 #   deploy/shortcut.sh status    состояние строками «ключ<TAB>значение» — их читает сервер
-#   deploy/shortcut.sh open      щелчок по ярлыку до установки окна: cockpit open
+#   deploy/shortcut.sh open      щелчок по ярлыку до установки окна: grigdesk-ctl open
 #
-# Переходный ярлык запоминает каталог node на момент создания (COCKPIT_NODE_DIR в Exec):
+# Переходный ярлык запоминает каталог node на момент создания (GRIGDESK_NODE_DIR в Exec):
 # сессия рабочего стола не знает nvm, а единая команда без node не запустится.
 set -euo pipefail
 
-COCKPIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$COCKPIT_DIR/deploy/lib/desktop-app.sh"
-NAME="cockpit.desktop"
+GRIGDESK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$GRIGDESK_DIR/deploy/lib/desktop-app.sh"
+NAME="grigdesk.desktop"
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
-LAUNCHER="$COCKPIT_DIR/deploy/shortcut.sh"
-ICON="$COCKPIT_DIR/bin/cockpit.png"
+LAUNCHER="$GRIGDESK_DIR/deploy/shortcut.sh"
+ICON="$GRIGDESK_DIR/bin/grigdesk.png"
 
 # Каталог рабочего стола: xdg-user-dir, иначе его же конфиг, иначе классический Desktop.
 # Пустой ответ и «сам $HOME» (так xdg-user-dir отвечает без настроенного каталога) —
@@ -49,14 +50,14 @@ desktop_quote() {
   printf '"%s"' "$s"
 }
 
-# Новое окно установлено, если есть исполняемый AppImage и его runtime.json: такое окно само
+# Новое окно установлено, если есть исполняемый bin/grigdesk-app и runtime.json: такое окно само
 # поднимает сервер, поэтому ярлыку не нужны ни переходный open, ни Node в PATH.
 window_installed() {
   local app
 
-  app="$(cockpit_desktop_app_path)"
+  app="$(grigdesk_desktop_app_path "$GRIGDESK_DIR")"
 
-  [ -f "$app" ] && [ -x "$app" ] && [ -f "$(cockpit_desktop_runtime_path)" ]
+  [ -f "$app" ] && [ -x "$app" ] && [ -f "$(grigdesk_desktop_runtime_path)" ]
 }
 
 # Строка Exec: прямо в установленное окно либо, в переходном режиме, в этот скрипт с open и
@@ -65,13 +66,13 @@ entry_exec() {
   local node_dir
 
   if window_installed; then
-    desktop_quote "$(cockpit_desktop_app_path)"
+    desktop_quote "$(grigdesk_desktop_app_path "$GRIGDESK_DIR")"
     return 0
   fi
 
   node_dir="$(dirname "$(command -v node)")"
   printf '/usr/bin/env %s %s open' \
-    "$(desktop_quote "COCKPIT_NODE_DIR=$node_dir")" "$(desktop_quote "$LAUNCHER")"
+    "$(desktop_quote "GRIGDESK_NODE_DIR=$node_dir")" "$(desktop_quote "$LAUNCHER")"
 }
 
 # Файл ярлыка целиком переписывается одной записью: меню и рабочий стол всегда одинаковы.
@@ -83,15 +84,15 @@ write_entry() {
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Кокпит
-Name[en]=Cockpit
-Comment=Открыть кокпит; спящий сервер поднимется сам
-Comment[en]=Open the cockpit; a stopped server is started first
+Name=GrigDesk
+StartupWMClass=grigdesk
+Comment=Открыть GrigDesk; спящий сервер поднимется сам
+Comment[en]=Open the grigdesk; a stopped server is started first
 Exec=$exec_line
 Icon=$ICON
 Terminal=false
 Categories=Development;
-Keywords=cockpit;кокпит;
+Keywords=grigdesk;
 StartupNotify=false
 EOF
   chmod 755 "$file"
@@ -132,7 +133,31 @@ install_shortcut() {
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
   fi
-  echo "ярлык «Кокпит»: $dir/$NAME и меню приложений"
+  echo "ярлык GrigDesk: $dir/$NAME и меню приложений"
+}
+
+# Установка окна меняет путь в Exec. Переписываются только существующие файлы ярлыка:
+# убранный человеком ярлык не возвращается, а без ярлыка команда ничего не делает.
+refresh_shortcut() {
+  local dir
+  local file
+  local exec_line=''
+
+  dir="$(desktop_dir 2>/dev/null || true)"
+
+  for file in "$APPS_DIR/$NAME" ${dir:+"$dir/$NAME"}; do
+    if [ -f "$file" ]; then
+      if [ -z "$exec_line" ]; then
+        exec_line="$(entry_exec)"
+      fi
+
+      write_entry "$file" "$exec_line"
+    fi
+  done
+
+  if [ -n "$exec_line" ] && command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+  fi
 }
 
 remove_shortcut() {
@@ -143,14 +168,14 @@ remove_shortcut() {
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
   fi
-  echo "ярлык «Кокпит» убран"
+  echo "ярлык GrigDesk убран"
 }
 
 # Уведомление остаётся best-effort, если графическая сессия его не поддерживает.
 # Причина также печатается, чтобы shell-запуск ярлыка можно было проверить.
 notify() {
   if command -v notify-send >/dev/null 2>&1; then
-    notify-send --app-name=Кокпит "Кокпит" "$1" >/dev/null 2>&1 || true
+    notify-send --app-name=GrigDesk "GrigDesk" "$1" >/dev/null 2>&1 || true
   fi
 
   echo "$1"
@@ -159,15 +184,15 @@ notify() {
 # Щелчок по переходному ярлыку: окно открывает единая команда, запуск службы она запрашивает
 # сама. Каталог Node из Exec ставится первым в PATH — графическая сессия его обычно не знает.
 # Терминала у ярлыка нет, поэтому отказ показывается уведомлением с причиной из stderr.
-open_cockpit() {
+open_grigdesk() {
   local problem
 
-  if [ -n "${COCKPIT_NODE_DIR:-}" ] && [ -x "$COCKPIT_NODE_DIR/node" ]; then
-    export PATH="$COCKPIT_NODE_DIR:$PATH"
+  if [ -n "${GRIGDESK_NODE_DIR:-}" ] && [ -x "$GRIGDESK_NODE_DIR/node" ]; then
+    export PATH="$GRIGDESK_NODE_DIR:$PATH"
   fi
 
-  if ! problem="$("$COCKPIT_DIR/bin/cockpit" open 2>&1 >/dev/null)"; then
-    notify "${problem:-Кокпит не запустился.}"
+  if ! problem="$("$GRIGDESK_DIR/bin/grigdesk-ctl" open 2>&1 >/dev/null)"; then
+    notify "${problem:-GrigDesk не запустился.}"
     return 1
   fi
 }
@@ -175,10 +200,11 @@ open_cockpit() {
 case "${1:-}" in
   install) install_shortcut ;;
   remove) remove_shortcut ;;
+  refresh) refresh_shortcut ;;
   status) status ;;
-  open) open_cockpit ;;
+  open) open_grigdesk ;;
   *)
-    echo "использование: deploy/shortcut.sh install|remove|status|open" >&2
+    echo "использование: deploy/shortcut.sh install|remove|status|open|refresh" >&2
     exit 2
     ;;
 esac

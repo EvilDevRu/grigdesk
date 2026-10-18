@@ -35,7 +35,7 @@ export type GlmAdapterDeps = GlmRuntimeDeps & {
 
 type Problem = { message: string; command?: string };
 
-const EXTERNAL_MESSAGE = 'GLM работает только на встроенной сборке Cockpit; '
+const EXTERNAL_MESSAGE = 'GLM работает только на встроенной сборке GrigDesk; '
   + 'внешний DeepSeek не используется.';
 
 // Что видит человек при недоступной сборке DSH и чем это лечится. Коды DeepSeek-проверки
@@ -44,16 +44,16 @@ const RUNTIME_PROBLEMS: Readonly<Record<string, string>> = Object.freeze({
   glm_runtime_missing: 'Встроенная сборка DSH ещё не подготовлена.',
   glm_plugin_missing: 'В сборке DSH нет модельного плагина GLM (llm-pi-ai); подготовь сборку заново.',
   deepseek_runtime_corrupt: 'Файлы встроенной сборки DSH повреждены; подготовка соберёт её заново.',
-  deepseek_runtime_incompatible: 'Сборка DSH собрана под другую версию Node, чем у службы Cockpit.',
+  deepseek_runtime_incompatible: 'Сборка DSH собрана под другую версию Node, чем у службы GrigDesk.',
   deepseek_runtime_changed: 'Сборка DSH сменилась во время проверки; перепроверь карточку.',
 });
 
 const AUTH_LABELS: Readonly<Record<string, (mode: GlmAccessMode | null) => string>> = Object.freeze({
-  glm_access_mode_missing: () => 'нужен COCKPIT_GLM_API_MODE (api или coding-plan) в окружении службы',
-  glm_access_mode_invalid: () => 'COCKPIT_GLM_API_MODE: допустимо api или coding-plan',
+  glm_access_mode_missing: () => 'нужен GRIGDESK_GLM_API_MODE (api или coding-plan) в окружении службы',
+  glm_access_mode_invalid: () => 'GRIGDESK_GLM_API_MODE: допустимо api или coding-plan',
   glm_key_missing: (mode) => `нужен ${keyName(mode)} в окружении службы`,
   glm_mode_not_admitted: (mode) => `режим ${mode} ещё не допущен: нужны проверка сборки и живой запуск`,
-  glm_runtime_home_invalid: () => 'COCKPIT_GLM_RUNTIME_HOME должен быть абсолютным путём',
+  glm_runtime_home_invalid: () => 'GRIGDESK_GLM_RUNTIME_HOME должен быть абсолютным путём',
 });
 
 
@@ -67,18 +67,18 @@ function shellArgument(value: string): string {
 
 /**
  * Подсказка и команда исправления для карточки; внешний DeepSeek лечится только конфигом.
- * Остальные отказы лечит общая подготовка зависимостей Cockpit.
+ * Остальные отказы лечит общая подготовка зависимостей GrigDesk.
  */
 function problemFor(config: GlmConfig, code: string): Problem {
   if (code === 'glm_runtime_external') {
-    return { message: `${EXTERNAL_MESSAGE} Убери COCKPIT_DEEPSEEK_BIN из окружения службы.` };
+    return { message: `${EXTERNAL_MESSAGE} Убери GRIGDESK_DEEPSEEK_BIN из окружения службы.` };
   }
 
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
 
   return {
     message: RUNTIME_PROBLEMS[code] || 'Сборка DSH не прошла проверку версии.',
-    command: `${shellArgument(root ? path.join(root, 'bin/cockpit') : 'bin/cockpit')} deps`,
+    command: `${shellArgument(root ? path.join(root, 'bin/grigdesk-ctl') : 'bin/grigdesk-ctl')} deps`,
   };
 }
 
@@ -201,7 +201,7 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     // выбранного режима, ключ другого режима не подставляется.
     credentials: [
       {
-        env: 'COCKPIT_GLM_API_MODE',
+        env: 'GRIGDESK_GLM_API_MODE',
         kind: 'choice',
         label: 'Режим доступа Z.ai',
         options: [
@@ -222,14 +222,14 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
         kind: 'secret',
         label: 'API-ключ',
         hint: 'Кабинет z.ai → API Keys. Ключ целиком, вида «id.secret», около 49 символов.',
-        when: { env: 'COCKPIT_GLM_API_MODE', value: 'api' },
+        when: { env: 'GRIGDESK_GLM_API_MODE', value: 'api' },
       },
       {
         env: 'ZAI_CODING_API_KEY',
         kind: 'secret',
         label: 'API-ключ Coding Plan',
         hint: 'Ключ аккаунта с подпиской Coding Plan: кабинет z.ai → API Keys.',
-        when: { env: 'COCKPIT_GLM_API_MODE', value: 'coding-plan' },
+        when: { env: 'GRIGDESK_GLM_API_MODE', value: 'coding-plan' },
       },
     ],
 
@@ -240,8 +240,8 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     distribution(config: GlmConfig, probe?: { ok: boolean; code?: string }) {
       const base = {
         kind: 'embedded' as const,
-        label: 'Входит в Cockpit',
-        authHint: 'Задайте режим и ключ кнопкой «Ключи доступа» ниже или COCKPIT_GLM_API_MODE '
+        label: 'Входит в GrigDesk',
+        authHint: 'Задайте режим и ключ кнопкой «Ключи доступа» ниже или GRIGDESK_GLM_API_MODE '
           + 'и ZAI_API_KEY / ZAI_CODING_API_KEY в .env папки данных.',
       };
 

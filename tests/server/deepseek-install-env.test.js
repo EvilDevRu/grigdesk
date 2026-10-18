@@ -25,7 +25,7 @@ const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL_SCRIPT = path.join(REPO_ROOT, 'server/scripts/deepseekHarnessInstall.mts');
 
-async function tempRoot(t, prefix = 'cockpit-deepseek-p1-') {
+async function tempRoot(t, prefix = 'grigdesk-deepseek-p1-') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
@@ -46,7 +46,7 @@ test('дочернее окружение DSH — allowlist без чужих cr
     PATH: '/bin', HOME: '/home/test', LANG: 'ru_RU.UTF-8', LC_ALL: 'C.UTF-8',
     TZ: 'Asia/Novosibirsk', TMPDIR: '/tmp/test', DEEPSEEK_API_KEY: 'deepseek-test-secret',
     ANTHROPIC_API_KEY: 'anthropic-secret', OPENAI_API_KEY: 'openai-secret',
-    KIMI_API_KEY: 'kimi-secret', COCKPIT_PRIVATE: 'cockpit-secret', HTTPS_PROXY: 'http://proxy',
+    KIMI_API_KEY: 'kimi-secret', GRIGDESK_PRIVATE: 'grigdesk-secret', HTTPS_PROXY: 'http://proxy',
     NODE_OPTIONS: '--inspect', FACTORY_RUN_ID: 'run-secret', MCP_TOOL_TIMEOUT: '99',
   };
   const env = buildDeepSeekChildEnv({ source, dshHome: '/private/dsh-home' });
@@ -94,7 +94,7 @@ test('probe допускает только pinned dsh', async (t) => {
 });
 
 test('install проверяет version/integrity, атомарно переключает current и идемпотентен', async (t) => {
-  const root = await tempRoot(t, 'cockpit-deepseek-install-');
+  const root = await tempRoot(t, 'grigdesk-deepseek-install-');
   const binDir = path.join(root, 'bin');
   const runtimeHome = path.join(root, 'runtime');
   const log = path.join(root, 'npm-log.ndjson');

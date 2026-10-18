@@ -27,13 +27,13 @@ const FOREIGN = {
   OPENAI_API_KEY: 'synthetic-openai',
   ANTHROPIC_API_KEY: 'synthetic-anthropic',
   HTTPS_PROXY: 'http://proxy.invalid',
-  COCKPIT_PROVIDER_PREFS_PATH: '/private-prefs',
+  GRIGDESK_PROVIDER_PREFS_PATH: '/private-prefs',
 };
 
-test('без COCKPIT_GLM_API_MODE причина glm_access_mode_missing', () => {
+test('без GRIGDESK_GLM_API_MODE причина glm_access_mode_missing', () => {
   for (const mode of [undefined, '']) {
     const access = resolveGlmAccess({
-      env: { ...FOREIGN, COCKPIT_GLM_API_MODE: mode },
+      env: { ...FOREIGN, GRIGDESK_GLM_API_MODE: mode },
       admission: ADMITTED,
     });
 
@@ -41,10 +41,10 @@ test('без COCKPIT_GLM_API_MODE причина glm_access_mode_missing', () =>
   }
 });
 
-test('COCKPIT_GLM_API_MODE вне списка — glm_access_mode_invalid', () => {
+test('GRIGDESK_GLM_API_MODE вне списка — glm_access_mode_invalid', () => {
   for (const mode of ['API', 'coding', 'bigmodel', ' api']) {
     const access = resolveGlmAccess({
-      env: { ...FOREIGN, COCKPIT_GLM_API_MODE: mode },
+      env: { ...FOREIGN, GRIGDESK_GLM_API_MODE: mode },
       admission: ADMITTED,
     });
 
@@ -57,7 +57,7 @@ const API_KEY_TEST = 'режим api без ZAI_API_KEY даёт glm_key_missing
 
 test(API_KEY_TEST, () => {
   const env = {
-    COCKPIT_GLM_API_MODE: 'api',
+    GRIGDESK_GLM_API_MODE: 'api',
     ZAI_CODING_API_KEY: 'synthetic-zai-coding',
     DEEPSEEK_API_KEY: 'synthetic-deepseek',
   };
@@ -77,7 +77,7 @@ test(API_KEY_TEST, () => {
 
 test('режим coding-plan без ZAI_CODING_API_KEY даёт glm_key_missing и не берёт ZAI_API_KEY', () => {
   const env = {
-    COCKPIT_GLM_API_MODE: 'coding-plan',
+    GRIGDESK_GLM_API_MODE: 'coding-plan',
     ZAI_API_KEY: 'synthetic-zai-api',
   };
 
@@ -99,7 +99,7 @@ test('режим coding-plan без ZAI_CODING_API_KEY даёт glm_key_missing 
 
 test('режим не из GLM_ADMISSION с ключом даёт glm_mode_not_admitted', () => {
   const env = {
-    COCKPIT_GLM_API_MODE: 'coding-plan',
+    GRIGDESK_GLM_API_MODE: 'coding-plan',
     ZAI_CODING_API_KEY: 'synthetic-zai-coding',
   };
 
@@ -112,7 +112,7 @@ test('режим не из GLM_ADMISSION с ключом даёт glm_mode_not_a
     reason: 'glm_mode_not_admitted',
   });
   assert.deepEqual(resolveGlmAccess({
-    env: { COCKPIT_GLM_API_MODE: 'api', ZAI_API_KEY: 'synthetic-zai-api' },
+    env: { GRIGDESK_GLM_API_MODE: 'api', ZAI_API_KEY: 'synthetic-zai-api' },
     admission: ADMITTED,
   }), {
     mode: 'api',
@@ -120,7 +120,7 @@ test('режим не из GLM_ADMISSION с ключом даёт glm_mode_not_a
   });
 });
 
-test('окружение процесса GLM — только allowlist и COCKPIT_GLM_ROUTE_KEY', () => {
+test('окружение процесса GLM — только allowlist и GRIGDESK_GLM_ROUTE_KEY', () => {
   for (const [mode, key] of [['api', 'synthetic-zai-api'], ['coding-plan', 'synthetic-zai-coding']]) {
     const env = buildGlmChildEnv({
       source: { ...SYSTEM, ...FOREIGN },
@@ -133,7 +133,7 @@ test('окружение процесса GLM — только allowlist и COCK
       DSH_HOME: '/state/glm/home',
       DSH_TELEMETRY_DISABLED: '1',
       NO_COLOR: '1',
-      COCKPIT_GLM_ROUTE_KEY: key,
+      GRIGDESK_GLM_ROUTE_KEY: key,
     });
   }
 });
@@ -146,21 +146,21 @@ test('окружение процесса DeepSeek не содержит ZAI_API
 
   assert.equal(env.DEEPSEEK_API_KEY, 'synthetic-deepseek');
 
-  const foreign = ['ZAI_API_KEY', 'ZAI_CODING_API_KEY', 'ZAI_CODING_CN_API_KEY', 'COCKPIT_GLM_ROUTE_KEY'];
+  const foreign = ['ZAI_API_KEY', 'ZAI_CODING_API_KEY', 'ZAI_CODING_CN_API_KEY', 'GRIGDESK_GLM_ROUTE_KEY'];
 
   for (const name of foreign) {
     assert.equal(Object.hasOwn(env, name), false, name);
   }
 });
 
-test('относительный COCKPIT_GLM_RUNTIME_HOME — отказ, по умолчанию корень внутри config.stateDir', () => {
+test('относительный GRIGDESK_GLM_RUNTIME_HOME — отказ, по умолчанию корень внутри config.stateDir', () => {
   for (const value of ['relative/home', './home', '', 'home\0x']) {
     assert.throws(() => assertGlmRuntimeHome(value), { code: 'glm_runtime_home_invalid' });
   }
 
   const relative = path.relative(config.stateDir, assertGlmRuntimeHome(config.glmRuntimeHome));
 
-  assert.equal(config.glmRuntimeHome, path.join(config.stateDir, 'cockpit-glm'));
+  assert.equal(config.glmRuntimeHome, path.join(config.stateDir, 'grigdesk-glm'));
   assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
   assert.equal(assertGlmRuntimeHome('/srv/glm'), '/srv/glm');
 });

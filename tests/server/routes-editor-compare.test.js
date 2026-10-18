@@ -81,7 +81,7 @@ test('RE-G1-02: порядок ключей незначим; массивы и 
 
 test('RE-E6-02: GET compare привязывает изменения к exact current и source revision',
   async (t) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-compare-'));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-compare-'));
     t.after(() => fs.rm(root, { recursive: true, force: true }));
     const routesDir = path.join(root, 'routes');
     const profilesDir = path.join(root, 'profiles');
@@ -125,7 +125,7 @@ test('RE-E6-02: GET compare привязывает изменения к exact c
   });
 
 test('RE-G1-03: история сравнивает exact hashes и копирует не-current в новый draft', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-history-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-history-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const routesDir = path.join(root, 'routes');
   const profilesDir = path.join(root, 'profiles');
@@ -170,7 +170,7 @@ test('RE-G1-03: история сравнивает exact hashes и копиру
 });
 
 test('RE-G1-04: повреждённая ревизия остаётся в списке с integrity-кодом', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-damaged-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-damaged-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new RoutesStore({ baseDir: root });
   const prepared = await prepareDraftCatalog(store, makeDraft());

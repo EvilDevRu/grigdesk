@@ -8,7 +8,7 @@ export interface DataHomeInput {
 export const DATA_LAYOUT = {
   env: '.env',
   state: 'state',
-  log: 'state/cockpit-server.log',
+  log: 'state/grigdesk-server.log',
   cliToken: 'state/cli-token',
   lock: 'state/server.lock',
   pluginData: 'state/plugins',
@@ -30,7 +30,7 @@ export const DATA_LAYOUT = {
 
 export type DataLayoutKey = keyof typeof DATA_LAYOUT;
 
-const PATH_ERROR = 'COCKPIT_HOME должен быть абсолютным путём из латинских букв, цифр и символов '
+const PATH_ERROR = 'GRIGDESK_HOME должен быть абсолютным путём из латинских букв, цифр и символов '
   + '. _ + - / @ , = : — получено: ';
 
 /**
@@ -47,12 +47,12 @@ function validPath(value: string): boolean {
  * Умолчание проходит ту же проверку, что явный путь, и даёт подсказку при отказе.
  */
 export function dataHome({ env, home }: DataHomeInput): string {
-  const override = env.COCKPIT_HOME;
-  const source = override || `${home.replace(/\/+$/, '')}/.cockpit`;
+  const override = env.GRIGDESK_HOME;
+  const source = override || `${home.replace(/\/+$/, '')}/.grigdesk`;
   const result = source.replace(/\/+$/, '');
 
   if ((!override && (!home || !home.startsWith('/'))) || !validPath(result)) {
-    throw new Error(PATH_ERROR + (override || home) + (!override ? '; задайте COCKPIT_HOME' : ''));
+    throw new Error(PATH_ERROR + (override || home) + (!override ? '; задайте GRIGDESK_HOME' : ''));
   }
 
   return result;
@@ -65,7 +65,7 @@ export function dataHome({ env, home }: DataHomeInput): string {
 export function dataHomeExplicit(input: DataHomeInput): boolean {
   const resolved = dataHome(input);
 
-  return Boolean(input.env.COCKPIT_HOME) && resolved !== `${input.home.replace(/\/+$/, '')}/.cockpit`;
+  return Boolean(input.env.GRIGDESK_HOME) && resolved !== `${input.home.replace(/\/+$/, '')}/.grigdesk`;
 }
 
 /**
@@ -81,13 +81,13 @@ export function dataPath(homeDir: string, key: DataLayoutKey): string {
  * Это сохраняет ленивое разрешение путей для команд, которым папка не нужна.
  */
 export function envFilePath(input: DataHomeInput): string {
-  return input.env.COCKPIT_ENV_FILE || dataPath(dataHome(input), 'env');
+  return input.env.GRIGDESK_ENV_FILE || dataPath(dataHome(input), 'env');
 }
 
 /**
  * Рабочая папка агентов и инструментов: снимки, дампы, временные стенды и отчёты проверок.
- * Явная COCKPIT_ARTIFACTS_DIR важнее папки данных: так сторож тестов сохраняет настоящую папку.
+ * Явная GRIGDESK_ARTIFACTS_DIR важнее папки данных: так сторож тестов сохраняет настоящую папку.
  */
 export function artifactsPath(input: DataHomeInput): string {
-  return input.env.COCKPIT_ARTIFACTS_DIR || dataPath(dataHome(input), 'artifacts');
+  return input.env.GRIGDESK_ARTIFACTS_DIR || dataPath(dataHome(input), 'artifacts');
 }

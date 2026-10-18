@@ -55,9 +55,9 @@ function sceneFixture(overrides = {}) {
     startState: null,
     readyCondition: null,
     actions: [{ kind: 'hover', targetId: 'run' }],
-    narration: 'Открываем обзор кокпита.',
+    narration: 'Открываем обзор GrigDesk.',
     caption: 'Обзор',
-    subtitleText: 'Открываем обзор кокпита.',
+    subtitleText: 'Открываем обзор GrigDesk.',
     direction: {
       tone: null,
       pace: null,

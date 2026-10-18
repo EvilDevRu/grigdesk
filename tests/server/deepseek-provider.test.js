@@ -64,7 +64,7 @@ test('auth и cache key зависят от наличия ключа, но не
 });
 
 test('metadata probe делает initialize/new/close без prompt и возвращает каталог', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-catalog-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-catalog-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const metadata = JSON.parse(await fs.readFile(METADATA, 'utf8'));
   const scenarioFile = path.join(root, 'scenario.json');

@@ -7,7 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 test('клик по конвейерам раскрывает агрегированную сводку и не уводит со страницы', async (t) => {
-  const browser = await installUiBrowser(t, 'https://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'https://grigdesk.test/#/chats');
   const [{ nextTick }, { mount }, PipelineTopbarPopover] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),

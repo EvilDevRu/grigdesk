@@ -7,7 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 test('числовая настройка SSH рисуется с границами схемы и сохраняется числом', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/settings');
   const saves = [];
   const plugins = {
     loaded: true,

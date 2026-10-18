@@ -124,7 +124,7 @@ export async function startMobileServer(options: {
     request.mobileDevice = device;
 
     if (device && device.revokedAt !== null) {
-      throw new MobileInputError('device_revoked', 'Телефон отозван в кокпите.', 403);
+      throw new MobileInputError('device_revoked', 'Телефон отозван в GrigDesk.', 403);
     }
 
     const publicRequest =
@@ -132,7 +132,7 @@ export async function startMobileServer(options: {
       (request.method === 'POST' && url === '/api/mobile/v1/pair');
 
     if (!device && !publicRequest) {
-      throw new MobileInputError('device_unknown', 'Телефон ещё не привязан к кокпиту.', 401);
+      throw new MobileInputError('device_unknown', 'Телефон ещё не привязан к GrigDesk.', 401);
     }
 
     if (device) {
@@ -169,7 +169,7 @@ export async function startMobileServer(options: {
     minApp: '0.1.0',
     serverTime: Date.now(),
     server: {
-      name: request.mobileDevice ? (options.serverName ?? 'Кокпит') : 'Кокпит',
+      name: request.mobileDevice ? (options.serverName ?? 'GrigDesk') : 'GrigDesk',
       version: options.version ?? '0.1.0',
     },
     device: request.mobileDevice

@@ -123,7 +123,7 @@ export class DeviceStore {
       const existing = devices.find((item) => item.fp === input.fp);
 
       if (existing?.revokedAt !== null && existing) {
-        throw new MobileInputError('device_revoked', 'Телефон отозван в кокпите.', 403);
+        throw new MobileInputError('device_revoked', 'Телефон отозван в GrigDesk.', 403);
       }
 
       if (existing) {

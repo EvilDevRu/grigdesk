@@ -93,7 +93,7 @@ test('active failover reason comes from completed primary attempt, not stale reg
 });
 
 test('runner config and attempts are read from canonical profile files', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runner-state-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runner-state-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
   await mkdir(path.join(profilesDir, 'demo'), { recursive: true });
@@ -181,7 +181,7 @@ test('runner config and attempts are read from canonical profile files', async (
 });
 
 test('runner work time sums process spans instead of gaps between route events', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runner-work-time-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runner-work-time-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
 

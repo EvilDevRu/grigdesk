@@ -69,7 +69,7 @@ onMounted(() => {
 // на планшете и на большом мониторе удобны разные списки, а серверные prefs уехали бы
 // сразу во все окна. Пока разделитель не трогали, значения нет вовсе — ширину решает
 // CSS вместе со своими медиазапросами (см. ChatList).
-const LIST_WIDTH_KEY = 'cockpit-chats-list-width';
+const LIST_WIDTH_KEY = 'grigdesk-chats-list-width';
 const LIST_MIN_W = 220;
 const LIST_DEF_W = 300;
 // Столько остаётся самому чату. Уже — и ряд настроек в его шапке начинает рваться

@@ -23,7 +23,7 @@ async function apiFixture(t, {
   telegramDiscussion = null,
   workProject = null,
 } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-mode-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-companion-mode-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const worktree = path.join(root, 'task-worktree');
   await fs.mkdir(worktree, { recursive: true });

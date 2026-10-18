@@ -54,7 +54,7 @@
       @close="removing = ''"
       @confirm="remove"
     >
-      <p>Вы сможете добавить его снова по QR-коду из кокпита.</p>
+      <p>Вы сможете добавить его снова по QR-коду из GrigDesk.</p>
     </UiDialog>
   </section>
 </template>

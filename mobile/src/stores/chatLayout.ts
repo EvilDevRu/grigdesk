@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 
-const key = 'cockpit-mobile-chat-layout';
+const key = 'grigdesk-mobile-chat-layout';
 
 /**
  * На устройстве сохраняется только геометрия, без текста, чатов и данных привязки.

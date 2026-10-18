@@ -30,7 +30,7 @@ const fileUrl = (modelId, versionId, name) => `/api/studio3d/files/${modelId}/${
  * Подменённые часы делают период и порядок независимыми от длительности теста.
  */
 async function fixture(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-search-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-search-'));
   let at = Date.parse('2026-10-10T10:00:00Z');
   const library = createLibrary({ dir, now: () => at });
 

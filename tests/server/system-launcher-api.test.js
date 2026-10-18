@@ -17,7 +17,7 @@ async function build(t, launcher) {
   t.after(() => app.close());
   await app.register(systemModule, {
     system: { read: () => ({}) },
-    config: { rootDir: '/tmp/noop', cockpitUpdateStatePath: '/tmp/noop-state' },
+    config: { rootDir: '/tmp/noop', grigDeskUpdateStatePath: '/tmp/noop-state' },
     releases: { async getStatus() { return {}; }, start() {}, stop() {} },
     updates: { async getJob() { return null; }, async assertIdle() {} },
     launcher,

@@ -359,7 +359,7 @@ export async function glmUsage({
   fetchImpl = fetch,
   now = Date.now,
 }: GlmUsageOptions): Promise<Record<string, unknown>> {
-  const mode: GlmAccessMode | null = parseGlmAccessMode(env.COCKPIT_GLM_API_MODE);
+  const mode: GlmAccessMode | null = parseGlmAccessMode(env.GRIGDESK_GLM_API_MODE);
 
   if (!mode) {
     return usageFailure(failed('auth_required', 'Выбери режим доступа Z.ai в «Ключах доступа».'));

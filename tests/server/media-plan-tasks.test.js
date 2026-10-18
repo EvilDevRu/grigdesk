@@ -144,14 +144,14 @@ test('выключенный плагин закрывает разбор жив
 // ── Загрузка ────────────────────────────────────────────────────────────────
 // Обрезанная загрузка обязана быть ОТКАЗОМ, а не короткой расшифровкой: multipart
 // при упоре в лимит обрывает поток молча, обрезанный webm воспроизводится и честно
-// разбирается — со стороны это неотличимо от «кокпит потерял половину встречи».
+// разбирается — со стороны это неотличимо от «GrigDesk потерял половину встречи».
 
 test('обрезанная загрузка отвергается, а не уезжает в распознавание огрызком', async (t) => {
   const multipart = requireFromServer('@fastify/multipart');
   const fs = await import('node:fs');
   const os = await import('node:os');
   const path = await import('node:path');
-  const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-media-upload-'));
+  const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-media-upload-'));
   t.after(() => fs.rmSync(mediaDir, { recursive: true, force: true }));
 
   const ingested = [];

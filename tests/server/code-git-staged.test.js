@@ -28,7 +28,7 @@ const git = (cwd, args) => exec('git', ['-C', cwd, ...args]);
 
 /** Репозиторий со всеми интересными состояниями индекса разом. */
 async function repo(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-staged-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-staged-'));
   const write = (rel, text) => writeFile(path.join(root, rel), text);
 
   await git(root, ['init', '-q', '-b', 'main', '.']);
@@ -72,7 +72,7 @@ async function repo(t) {
 
 /** Создаёт настоящий текстовый merge-конфликт с нашей и их версией одной строки. */
 async function conflictRepo(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-git-conflict-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-git-conflict-'));
   const file = path.join(root, 'conflict.txt');
 
   await git(root, ['init', '-q', '-b', 'main', '.']);

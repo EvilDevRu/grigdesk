@@ -19,7 +19,7 @@ function compileThinking() {
 }
 
 async function mountThinking(t, props) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   const [{ mount }, ChatThinking] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileThinking(),

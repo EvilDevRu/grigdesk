@@ -11,10 +11,10 @@ import { compileSettingsView } from './helpers/settings-view.js';
 process.env.NODE_ENV = 'test';
 
 async function installBrowser(t, storage = {}) {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -55,7 +55,7 @@ function sessionsPayload() {
         model: 'claude-opus-5',
         effort: 'high',
         permissionMode: 'plan',
-        cwd: '/home/user/cockpit',
+        cwd: '/home/user/grigdesk',
         pid: 4242,
         running: false,
         unsolicited: true,
@@ -71,7 +71,7 @@ function sessionsPayload() {
         model: 'claude-opus-5',
         effort: '',
         permissionMode: 'default',
-        cwd: '/home/user/cockpit',
+        cwd: '/home/user/grigdesk',
         pid: 4243,
         running: true,
         unsolicited: true,
@@ -84,7 +84,7 @@ function sessionsPayload() {
 }
 
 async function mountRuns(t, { confirmAnswer = true } = {}) {
-  const browser = await installBrowser(t, { 'cockpit-settings-tab': 'runs' });
+  const browser = await installBrowser(t, { 'grigdesk-settings-tab': 'runs' });
   const deleted = [];
   const confirms = [];
 
@@ -143,7 +143,7 @@ async function mountRuns(t, { confirmAnswer = true } = {}) {
     }),
     useChatStore: () => ({ compactWindow: 0, setActive() {} }),
     useDeviceStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
 
   const [{ mount, flushPromises }, SettingsView] = await Promise.all([

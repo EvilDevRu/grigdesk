@@ -252,9 +252,9 @@ export class SpeechRuntime {
   constructor({
     mediaDir,
     jobsDir = path.join(mediaDir, 'jobs'),
-    mediaHfDir = process.env.COCKPIT_MEDIA_HF_DIR || path.join(path.dirname(mediaDir), 'hf'),
-    pythonPath = process.env.COCKPIT_MEDIA_PYTHON || '',
-    transcribePath = process.env.COCKPIT_TRANSCRIBE_PY || undefined,
+    mediaHfDir = process.env.GRIGDESK_MEDIA_HF_DIR || path.join(path.dirname(mediaDir), 'hf'),
+    pythonPath = process.env.GRIGDESK_MEDIA_PYTHON || '',
+    transcribePath = process.env.GRIGDESK_TRANSCRIBE_PY || undefined,
     baseEnv = process.env,
     settings = {},
     lastDictionaryMeasure = null,

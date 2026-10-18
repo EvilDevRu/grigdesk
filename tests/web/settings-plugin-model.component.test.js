@@ -1,5 +1,5 @@
 // Настройка плагина типа `model` («Настройки → Плагины»). Смысл проверки: модель для
-// автомата общего Inbox человек выбирает ИЗ ОБЩЕГО РЕЕСТРА исполнителей кокпита, а не из
+// автомата общего Inbox человек выбирает ИЗ ОБЩЕГО РЕЕСТРА исполнителей GrigDesk, а не из
 // зашитого в код списка вендора, и хранится выбор парой «исполнитель + модель». Склеенной
 // строкой её не разобрать: у локальных исполнителей id модели сам бывает со слэшами и
 // двоеточиями (`hf.co/user/repo:tag`) — разбор такой строки молча увёл бы ход не туда.
@@ -141,7 +141,7 @@ async function mountSettings(t, {
   value = null, plugin = INBOX_PLUGIN, prepareProviders = () => {},
 } = {}) {
   const prefix = `__pluginModel${mountNonce += 1}`;
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/settings');
   const prov = makeProvidersStore();
   prepareProviders(prov);
   const { store: plugins, saved } = makePluginsStore(value, plugin);

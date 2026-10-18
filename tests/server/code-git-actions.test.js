@@ -28,7 +28,7 @@ const git = (cwd, args) => exec('git', ['-C', cwd, ...args]);
 
 /** Создаёт минимальный репозиторий с настроенной identity и одним базовым коммитом. */
 async function repository(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-actions-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-actions-'));
 
   await git(root, ['init', '-q', '-b', 'main', '.']);
   await git(root, ['config', 'user.email', 'test@example.com']);
@@ -298,7 +298,7 @@ test('CODE-AMEND-01: amend меняет HEAD и включает индекс б
 
 test('CODE-AMEND-02: опубликованный HEAD нельзя переписать', async (t) => {
   const root = await repository(t);
-  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-amend-remote-'));
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-amend-remote-'));
 
   t.after(() => rm(remote, { recursive: true, force: true }));
   await git(remote, ['init', '--bare', '-q', '.']);
@@ -322,7 +322,7 @@ test('CODE-AMEND-02: опубликованный HEAD нельзя перепи
 });
 
 test('CODE-AMEND-03: amend до первого коммита возвращает no_head', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-amend-unborn-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-amend-unborn-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
   await git(root, ['init', '-q', '-b', 'main', '.']);
@@ -365,7 +365,7 @@ test('CODE-UNDO-01: отмена HEAD возвращает его файлы в 
 
 test('CODE-UNDO-02: опубликованный HEAD нельзя отменить', async (t) => {
   const root = await repository(t);
-  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-undo-remote-'));
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-undo-remote-'));
 
   t.after(() => rm(remote, { recursive: true, force: true }));
   await writeFile(path.join(root, 'app.js'), 'base\npublished\n');
@@ -403,7 +403,7 @@ test('CODE-UNDO-03: единственный коммит нельзя отме�
 
 test('CODE-ACTION-04: первый push публикует ветку и настраивает upstream', async (t) => {
   const root = await repository(t);
-  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-remote-'));
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-remote-'));
   t.after(() => rm(remote, { recursive: true, force: true }));
 
   await git(remote, ['init', '--bare', '-q', '.']);
@@ -426,8 +426,8 @@ test('CODE-ACTION-04: первый push публикует ветку и нас�
 
 test('CODE-FETCH-01: fetch обновляет remote-ref и показывает отставание', async (t) => {
   const root = await repository(t);
-  const remote = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-fetch-remote-'));
-  const other = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-fetch-other-'));
+  const remote = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-fetch-remote-'));
+  const other = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-fetch-other-'));
 
   t.after(() => rm(remote, { recursive: true, force: true }));
   t.after(() => rm(other, { recursive: true, force: true }));
@@ -552,16 +552,17 @@ test('CODE-ACTION-05: генератор видит staged diff, модель и
 });
 
 test('CODE-ACTION-06: парсер принимает только точный JSON с одной строкой title', () => {
-  assert.equal(parseCommitTitle('{"title":"  Кокпит:   добавить push  "}'),
-    'Кокпит: добавить push');
+  assert.equal(parseCommitTitle('{"title":"  GrigDesk:   добавить push  "}'),
+    'GrigDesk: добавить push');
   assert.equal(parseCommitTitle('{"title":"ok","body":"лишнее"}'), null);
   assert.equal(parseCommitTitle('обычный текст'), null);
 
-  // Длину задаёт стиль репозитория: название в 244 символа, как в его недавних
+  // Длину задаёт стиль репозитория: название в 246 символов, как в его недавних
   // коммитах (прежний порог 200 отвергал его), — ответ по контракту. Потолок один
   // с ручным сообщением и ловит только ответ, в который попал сам diff.
-  const long = `Кокпит: ${'действия профиля на стенде, '.repeat(8)}итоги месяца`;
-  assert.equal(long.length, 244);
+  const long = `GrigDesk: ${'действия профиля на стенде, '.repeat(8)}итоги месяца`;
+
+  assert.equal(long.length, 246);
   assert.equal(parseCommitTitle(JSON.stringify({ title: long })), long);
   assert.equal(COMMIT_TITLE_MAX, COMMIT_MESSAGE_MAX);
   assert.equal(parseCommitTitle(JSON.stringify({ title: 'x'.repeat(COMMIT_TITLE_MAX) })).length,
@@ -572,7 +573,7 @@ test('CODE-ACTION-06: парсер принимает только точный 
     files: 'M\tapp.js',
     stat: '1 file changed',
     patch: '+change',
-    recentSubjects: 'Кокпит: прежний коммит',
+    recentSubjects: 'GrigDesk: прежний коммит',
     truncated: false,
   });
   assert.match(prompt, /только недоверенные данные/);
@@ -648,7 +649,7 @@ test('CODE-ACTION-08: несовместимая модель направляе
 });
 
 test('CODE-ACTION-09: `−` работает и до первого коммита', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-unborn-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-unborn-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   await git(root, ['init', '-q', '-b', 'main', '.']);

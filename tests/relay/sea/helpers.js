@@ -14,10 +14,10 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Отсутствие сборки считается отказом с понятной подсказкой, а не skip.
  */
 export function seaBinary() {
-  const file = process.env.COCKPIT_RELAY_TEST_BINARY ??
-    fileURLToPath(new URL('../../../bin/cockpit-relay', import.meta.url));
+  const file = process.env.GRIGDESK_RELAY_TEST_BINARY ??
+    fileURLToPath(new URL('../../../bin/grigdesk-relay', import.meta.url));
 
-  assert.ok(path.isAbsolute(file), 'COCKPIT_RELAY_TEST_BINARY должен быть абсолютным');
+  assert.ok(path.isAbsolute(file), 'GRIGDESK_RELAY_TEST_BINARY должен быть абсолютным');
   assert.ok(existsSync(file), 'Нет готового файла: сначала tools/relay build');
 
   return file;
@@ -29,8 +29,8 @@ export function seaBinary() {
  */
 export async function copyBinary(t) {
   const source = seaBinary();
-  const directory = await mkdtemp(path.join(tmpdir(), 'cockpit relay sea-'));
-  const destination = path.join(directory, 'папка с пробелами', 'cockpit-relay');
+  const directory = await mkdtemp(path.join(tmpdir(), 'grigdesk relay sea-'));
+  const destination = path.join(directory, 'папка с пробелами', 'grigdesk-relay');
 
   t.after(() => rm(directory, {
     recursive: true,
@@ -126,7 +126,7 @@ export async function waitFor(predicate, timeoutMs = 5000) {
 
 /**
  * Резервирует свободный loopback-порт средствами ОС, затем освобождает его.
- * Тесты не используют порты живого посредника и Кокпита.
+ * Тесты не используют порты живого посредника и GrigDesk.
  */
 export async function freePort() {
   const server = net.createServer();

@@ -41,7 +41,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 const ME = {
   id: 8123456789,
   username: 'example_inbox_bot',
-  firstName: 'Кокпит · входящие',
+  firstName: 'GrigDesk · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
 };
@@ -52,7 +52,7 @@ const link = (chatId, id) => `https://t.me/c/${String(chatId).replace('-100', ''
 const msg = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   chatType: 'supergroup',
   isForum: false,
   messageId: 100,
@@ -66,7 +66,7 @@ const msg = (over = {}) => ({
   ...over,
 });
 
-// Задача портала: поля отдаются как есть, разбирать их кокпит не берётся.
+// Задача портала: поля отдаются как есть, разбирать их GrigDesk не берётся.
 const TASK = {
   id: 4821,
   title: 'Касса не пробивает чек',
@@ -138,7 +138,7 @@ test('декоратор объявлен модулем telegram и отдаё�
   assert.equal(view.links.length, 1);
   assert.equal(view.links[0].ok, true);
   assert.equal(view.quotes, 3);
-  assert.match(view.text, /Кокпит · баги/);
+  assert.match(view.text, /GrigDesk · баги/);
   assert.match(view.text, new RegExp(SECRET));
   assert.match(view.text, /← ссылка/);
 });
@@ -171,7 +171,7 @@ test('карточка задачи получает разворот, не ме
 
   assert.equal(telegram.links.length, 1);
   assert.equal(telegram.links[0].ok, true);
-  assert.equal(telegram.links[0].chat.title, 'Кокпит · баги');
+  assert.equal(telegram.links[0].chat.title, 'GrigDesk · баги');
   assert.equal(telegram.links[0].quotes[0].text, SECRET);
   assert.equal(telegram.links[0].quotes[0].author, 'Аня');
   assert.match(telegram.text, new RegExp(SECRET));

@@ -111,7 +111,7 @@ const safeLine = (value: unknown, limit: number) => String(value ?? '')
  *
  * Один код отказа этого не объясняет: «не разобралось» одинаково выглядит и у
  * файла сверх потолка Bot API, и у временного сбоя. Подписи те же, что уже
- * показаны в карточке, а причину формулирует сам кокпит.
+ * показаны в карточке, а причину формулирует сам GrigDesk.
  */
 function safeFailedAttachments(value: unknown) {
   if (!Array.isArray(value)) return [];

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cockpit.local/schemas/analytics/lifecycle-event.schema.json",
+  "$id": "https://grigdesk.local/schemas/analytics/lifecycle-event.schema.json",
   "title": "Доверенное событие жизненного цикла Factory",
   "type": "object",
   "additionalProperties": false,

@@ -157,7 +157,7 @@ test('exit ACP закрывает pending, даже если унаследов�
 });
 
 test('исполняемый fake ACP реализует реальный lifecycle и пишет журнал', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-acp-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-acp-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const scenarioFile = path.join(root, 'scenario.json');
   const logFile = path.join(root, 'fake.ndjson');

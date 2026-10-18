@@ -44,7 +44,7 @@ test('кандидат reseed живёт в диалоге, фактическа
   assert.deepEqual(session.workdir, FIRST);
   assert.equal(session.workdirPreview.target.cwd, FIRST.path);
   assert.equal(session.workdirProposal.preview.target.cwd, SECOND.path);
-  assert.deepEqual(chat.defWorkdir, { kind: 'cockpit' });
+  assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
 });
 
 test('повтор после потери ACK использует то же тело; draft и defaults переживают commit', async () => {
@@ -105,7 +105,7 @@ test('dirty SSE обновляет папку, но не даёт старой �
   assert.deepEqual(session.workdir, SECOND);
 });
 
-test('implicit default: подтверждённое отсутствие даёт cockpit, ошибка сети сохраняет выбор', async () => {
+test('implicit default: подтверждённое отсутствие даёт grigdesk, ошибка сети сохраняет выбор', async () => {
   const { chat, session } = await fixture();
 
   session.workdirInitializing = true;
@@ -116,7 +116,7 @@ test('implicit default: подтверждённое отсутствие даё
     });
   };
   await chat._initializeWorkdir(session);
-  assert.deepEqual(session.workdir, { kind: 'cockpit' });
+  assert.deepEqual(session.workdir, { kind: 'grigdesk' });
   session.workdir = FIRST;
   session.workdirInitializing = true;
   apiHarness.post = async () => {
@@ -126,7 +126,7 @@ test('implicit default: подтверждённое отсутствие даё
   assert.deepEqual(session.workdir, FIRST);
 });
 
-test('явный проект с цифрой в projectId сохраняется без подмены на cockpit', async () => {
+test('явный проект с цифрой в projectId сохраняется без подмены на grigdesk', async () => {
   const { chat } = await fixture();
 
   apiHarness.post = async (_url, body) => {

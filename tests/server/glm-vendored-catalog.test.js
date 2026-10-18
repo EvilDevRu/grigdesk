@@ -29,7 +29,7 @@ test('настоящий ACP-каталог GLM без prompt и без прое
     await mock.stop();
   });
 
-  // Проектный MCP в корне Кокпита: каталог не должен его запускать.
+  // Проектный MCP в корне GrigDesk: каталог не должен его запускать.
   await fs.writeFile(path.join(root, 'project-mcp.mjs'),
     `import { appendFileSync } from "node:fs"; appendFileSync(${JSON.stringify(marker)}, "spawn\\n");\n`);
   await fs.writeFile(path.join(root, '.mcp.json'), JSON.stringify({ mcpServers: {
@@ -47,7 +47,7 @@ test('настоящий ACP-каталог GLM без prompt и без прое
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: GLM_SERVICE_KEY,
     },
     admission: [{ mode: 'api', compatibility: identity }],

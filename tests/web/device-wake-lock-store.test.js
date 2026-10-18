@@ -33,7 +33,7 @@ class FakeWakeLock extends EventTarget {
 
 async function fixture(t, { supported = true, saved = false } = {}) {
   const document = new FakeDocument();
-  const values = new Map(saved ? [['cockpit-screen-wake-lock', '1']] : []);
+  const values = new Map(saved ? [['grigdesk-screen-wake-lock', '1']] : []);
   const localStorage = {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, String(value)),
@@ -69,7 +69,7 @@ test('Screen Wake Lock включается глобальной настрой�
 
   assert.equal(await store.setWakeLockEnabled(true), true);
   assert.equal(store.wakeLockActive, true);
-  assert.equal(values.get('cockpit-screen-wake-lock'), '1');
+  assert.equal(values.get('grigdesk-screen-wake-lock'), '1');
   assert.equal(locks.length, 1);
 });
 
@@ -97,7 +97,7 @@ test('выключение Screen Wake Lock освобождает экран и
   assert.equal(await store.setWakeLockEnabled(false), true);
   assert.equal(locks[0].released, true);
   assert.equal(store.wakeLockActive, false);
-  assert.equal(values.get('cockpit-screen-wake-lock'), '0');
+  assert.equal(values.get('grigdesk-screen-wake-lock'), '0');
 
   const unsupported = await fixture(t, { supported: false });
   assert.equal(unsupported.store.wakeLockSupported, false);

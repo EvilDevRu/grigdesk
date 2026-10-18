@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
 
 const execute = promisify(execFile);
 const root = path.resolve(new URL('../../', import.meta.url).pathname);
@@ -15,7 +16,7 @@ const root = path.resolve(new URL('../../', import.meta.url).pathname);
  * Тест не создаёт реальный ключ подписи и не заменяет существующий Android SDK.
  */
 async function fixture(t) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'cockpit-mobile-build-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'grigdesk-mobile-build-'));
   const project = path.join(directory, 'project');
   const dataHome = path.join(directory, 'data');
   const signing = path.join(directory, 'signing');
@@ -44,6 +45,7 @@ async function fixture(t) {
   for (const file of [
     'deploy/lib/runtime-env.sh',
     'shared/runtime/dataHome.ts',
+    'shared/runtime/legacyBrand.ts',
     'shared/package.json',
     'server/scripts/dataHomeCheck.mts',
     'server/src/lib/dataHomeBoot.ts',
@@ -65,17 +67,17 @@ async function fixture(t) {
   await writeFile(path.join(signing, 'release.jks'), 'existing-private-key');
   await writeFile(
     path.join(signing, 'release.properties'),
-    'storePassword=test-only\nkeyPassword=test-only\nkeyAlias=cockpit\n',
+    'storePassword=test-only\nkeyPassword=test-only\nkeyAlias=grigdesk\n',
   );
-  await writeFile(path.join(dataHome, 'state/mobile-apk/cockpit-mobile.apk'), 'previous-apk');
-  await writeFile(path.join(dataHome, 'state/mobile-apk/cockpit-mobile-debug.apk'), 'previous-debug');
-  await writeFile(path.join(dataHome, 'state/mobile-apk/cockpit-mobile.json'), '{"versionCode":99}');
+  await writeFile(path.join(dataHome, 'state/mobile-apk/grigdesk-mobile.apk'), 'previous-apk');
+  await writeFile(path.join(dataHome, 'state/mobile-apk/grigdesk-mobile-debug.apk'), 'previous-debug');
+  await writeFile(path.join(dataHome, 'state/mobile-apk/grigdesk-mobile.json'), '{"versionCode":99}');
 
   for (const [file, script] of [
     [
       path.join(jdk, 'bin/java'),
       'printf \'openjdk version "21.0.12"\\n\' >&2\n' +
-        'if [[ "$COCKPIT_FAKE_FAIL" == doctor ]]; then printf \'version "11.0"\\n\' >&2; exit 7; fi',
+        'if [[ "$GRIGDESK_FAKE_FAIL" == doctor ]]; then printf \'version "11.0"\\n\' >&2; exit 7; fi',
     ],
     [path.join(sdk, 'platform-tools/adb'), 'exit 0'],
     [path.join(sdk, 'build-tools/36.0.0/aapt2'), 'exit 0'],
@@ -83,19 +85,19 @@ async function fixture(t) {
     [
       path.join(project, 'mobile/node_modules/.bin/cap'),
       'if [[ "$1" == --version ]]; then echo 8.5.3; exit 0; fi\n' +
-        'printf "cap:%s\\n" "$PWD" >> "$COCKPIT_FAKE_LOG"',
+        'printf "cap:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"',
     ],
     [
       path.join(commands, 'npm'),
-      'printf "npm:%s\\n" "$PWD" >> "$COCKPIT_FAKE_LOG"\n' +
-        'if [[ "$COCKPIT_FAKE_FAIL" == npm ]]; then exit 17; fi',
+      'printf "npm:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"\n' +
+        'if [[ "$GRIGDESK_FAKE_FAIL" == npm ]]; then exit 17; fi',
     ],
-    [path.join(commands, 'keytool'), 'echo keytool >> "$COCKPIT_FAKE_LOG"\nexit 23'],
+    [path.join(commands, 'keytool'), 'echo keytool >> "$GRIGDESK_FAKE_LOG"\nexit 23'],
     [cachedGradle, 'exit 0'],
     [
       path.join(project, 'mobile/android/gradlew'),
-      'printf "gradle:%s\\n" "$PWD" >> "$COCKPIT_FAKE_LOG"\n' +
-      'if [[ "$COCKPIT_FAKE_FAIL" != success ]]; then exit 19; fi\n' +
+      'printf "gradle:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"\n' +
+      'if [[ "$GRIGDESK_FAKE_FAIL" != success ]]; then exit 19; fi\n' +
       'mkdir -p app/build/outputs/apk/debug\nprintf debug-apk > app/build/outputs/apk/debug/app-debug.apk',
     ],
   ]) {
@@ -113,14 +115,14 @@ async function fixture(t) {
     logs,
     env: {
       HOME: directory,
-      COCKPIT_HOME: dataHome,
+      GRIGDESK_HOME: dataHome,
       NODE_ENV: 'test',
       npm_config_cache: process.env.npm_config_cache,
       PATH: commands + ':' + process.env.PATH,
-      COCKPIT_ANDROID_HOME: sdk,
-      COCKPIT_ANDROID_JDK: jdk,
-      COCKPIT_ANDROID_SIGNING_DIR: signing,
-      COCKPIT_FAKE_LOG: logs,
+      GRIGDESK_ANDROID_HOME: sdk,
+      GRIGDESK_ANDROID_JDK: jdk,
+      GRIGDESK_ANDROID_SIGNING_DIR: signing,
+      GRIGDESK_FAKE_LOG: logs,
       // sha256sum пишет OK/FAILED на языке машины; проверки ждут вывод без перевода.
       LC_ALL: 'C',
     },
@@ -142,7 +144,7 @@ test('MB-24: shell синтаксис и явные команды сборки/
   assert.match(release, /apksigner/);
 });
 
-test('MB-24: сбой Gradle сохраняет прежний APK/ключ и запускает cap из mobile', async (t) => {
+test('GP-03/MB-24: прежний alias принят, сбой Gradle сохраняет APK/ключ', async (t) => {
   const fx = await fixture(t);
 
   await assert.rejects(
@@ -150,13 +152,13 @@ test('MB-24: сбой Gradle сохраняет прежний APK/ключ и �
       cwd: fx.project,
       env: {
         ...fx.env,
-        COCKPIT_FAKE_FAIL: 'gradle',
+        GRIGDESK_FAKE_FAIL: 'gradle',
       },
     }),
     (error) => error.code !== 0,
   );
   assert.equal(
-    await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile.apk'), 'utf8'),
+    await readFile(path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk/grigdesk-mobile.apk'), 'utf8'),
     'previous-apk',
   );
   assert.equal(
@@ -171,6 +173,65 @@ test('MB-24: сбой Gradle сохраняет прежний APK/ключ и �
   assert.doesNotMatch(calls, /keytool/);
 });
 
+test('GP-01: приложение имеет новый пакет, версию 0.1.0 и versionCode 100', async () => {
+  const pkg = JSON.parse(await readFile(path.join(root, 'mobile/package.json'), 'utf8'));
+  const gradle = await readFile(path.join(root, 'mobile/android/app/build.gradle'), 'utf8');
+
+  assert.equal(pkg.version, '0.1.0');
+
+  const [major, minor, patch] = pkg.version.split('.').map(Number);
+
+  assert.equal(major * 10000 + minor * 100 + patch, 100);
+  assert.match(gradle, /namespace = "local\.grigdesk\.mobile"/);
+  assert.match(gradle, /applicationId "local\.grigdesk\.mobile"/);
+  assert.match(gradle, /versionCode mobileCode/);
+});
+
+test('GP-02: прежний каталог подписи останавливает выпуск до генерации ключа', async (t) => {
+  const fx = await fixture(t);
+  const oldSigning = path.join(fx.env.HOME, '.config', LEGACY.configDir, 'android-signing');
+
+  await mkdir(oldSigning, { recursive: true });
+  await rm(fx.signing, { recursive: true });
+
+  const env = { ...fx.env };
+
+  delete env.GRIGDESK_ANDROID_SIGNING_DIR;
+  await assert.rejects(execute(process.execPath, ['tools/mobile-phone/release.mts'], {
+    cwd: fx.project, env,
+  }), (error) => {
+    assert.ok(error.stderr.includes(`mv ~/.config/${LEGACY.configDir} ~/.config/grigdesk`));
+
+    return true;
+  });
+  assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
+  await assert.rejects(readFile(path.join(fx.env.HOME, '.config/grigdesk/android-signing/release.jks')),
+    { code: 'ENOENT' });
+});
+
+test('GP-04: рост versionCode сверяется только с выпусками GrigDesk', async (t) => {
+  const fx = await fixture(t);
+  const output = path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk');
+  const run = () => execute(process.execPath, ['tools/mobile-phone/release.mts'], {
+    cwd: fx.project, env: { ...fx.env, GRIGDESK_FAKE_FAIL: 'gradle' },
+  });
+
+  // Номер прежнего приложения (другой applicationId) больше, но выпуск 0.1.0 не останавливает.
+  await rm(path.join(output, 'grigdesk-mobile.json'));
+  await writeFile(path.join(output, `${LEGACY.apkBase}.json`), '{"versionCode":109}');
+  await assert.rejects(run(), (error) => /кодом 19/.test(error.stderr));
+  assert.match(await readFile(fx.logs, 'utf8'), /gradle:/);
+
+  await rm(fx.logs);
+  await writeFile(path.join(output, 'grigdesk-mobile.json'), '{"versionCode":100}');
+  await assert.rejects(run(), (error) => {
+    assert.match(error.stderr, /Номер версии должен быть больше/);
+
+    return true;
+  });
+  assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
+});
+
 test('MB-24: незелёный doctor останавливает сборку до npm/cap/Gradle', async (t) => {
   const fx = await fixture(t);
 
@@ -179,14 +240,14 @@ test('MB-24: незелёный doctor останавливает сборку �
       cwd: fx.project,
       env: {
         ...fx.env,
-        COCKPIT_FAKE_FAIL: 'doctor',
+        GRIGDESK_FAKE_FAIL: 'doctor',
       },
     }),
     (error) => error.code !== 0,
   );
   assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
   assert.equal(
-    await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile-debug.apk'), 'utf8'),
+    await readFile(path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk/grigdesk-mobile-debug.apk'), 'utf8'),
     'previous-debug',
   );
 });
@@ -217,7 +278,7 @@ test('MB-24: подменённый gradle-wrapper.jar останавливае�
   );
   assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
   assert.equal(
-    await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile-debug.apk'), 'utf8'),
+    await readFile(path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk/grigdesk-mobile-debug.apk'), 'utf8'),
     'previous-debug',
   );
 });
@@ -228,10 +289,10 @@ test('MB-DH успешная сборка публикует APK только в
 
   await execute('bash', ['tools/mobile', 'build'], {
     cwd: fx.project,
-    env: { ...fx.env, COCKPIT_FAKE_FAIL: 'success' },
+    env: { ...fx.env, GRIGDESK_FAKE_FAIL: 'success' },
   });
-  assert.equal(await readFile(path.join(fx.env.COCKPIT_HOME, 'state/mobile-apk/cockpit-mobile-debug.apk'),
+  assert.equal(await readFile(path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk/grigdesk-mobile-debug.apk'),
     'utf8'), 'debug-apk');
-  await assert.rejects(readFile(path.join(fx.project, '.state/mobile/cockpit-mobile-debug.apk')),
+  await assert.rejects(readFile(path.join(fx.project, '.state/mobile/grigdesk-mobile-debug.apk')),
     (error) => error.code === 'ENOENT');
 });

@@ -40,7 +40,7 @@ async function checkPipelineContracts(
   const badTimeout: AgentDraft = { ...agent, timeout: '900' };
 
   // @ts-expect-error Источник пути назначает сервер: клиент его не присылает.
-  const badRepo: ProjectRepoInput = { key: 'be', dir: '/srv/be', from: 'cockpit' };
+  const badRepo: ProjectRepoInput = { key: 'be', dir: '/srv/be', from: 'grigdesk' };
 
   // @ts-expect-error Каталог повреждённой ревизии может отсутствовать целиком.
   revision.routes.length;
@@ -49,10 +49,10 @@ async function checkPipelineContracts(
   const statuses: Record<string, string> = graph.statuses;
 
   // @ts-expect-error Публикация несёт ожидаемый хеш: без него CAS невозможен.
-  await routesApi.publish('cockpit', 'publish');
+  await routesApi.publish('grigdesk', 'publish');
 
   // @ts-expect-error Режим публикации закрыт перечислением.
-  await routesApi.publish('cockpit', 'deploy', null);
+  await routesApi.publish('grigdesk', 'deploy', null);
 
   void rawAgents;
   void badTimeout;

@@ -46,7 +46,7 @@ test('одновременные чтения boolean-каталога испо�
             coverage: 'complete',
             writeChannel: {
               id: 'overlay',
-              scope: 'cockpit-chats',
+              scope: 'grigdesk-chats',
               state: 'verified',
             },
             base: { enabled: true },

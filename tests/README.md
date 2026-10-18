@@ -1,4 +1,4 @@
-# Тесты Cockpit
+# Тесты GrigDesk
 
 Все тесты проекта собраны в одном корневом каталоге и разделены по подсистемам:
 
@@ -10,7 +10,7 @@ tests/
 └── web/      # UI-контракты
 ```
 
-Полный безопасный прогон без запуска Cockpit и без вызовов реальных ИИ:
+Полный безопасный прогон без запуска GrigDesk и без вызовов реальных ИИ:
 
 ```bash
 bash tests/run-all.sh
@@ -43,7 +43,7 @@ npm --prefix web test
 
 Отдельные файлы — тоже через сторож памяти: голый `node --test` его не получает, и упавший
 веб-тест однажды занял всю ОЗУ и подкачку
-([ловушка](../docs/cockpit/testing/happy-dom-assert-memory.md)).
+([ловушка](../docs/grigdesk/testing/happy-dom-assert-memory.md)).
 
 ```bash
 bash tests/run-node-tests-safe.sh --test tests/web/<файл>.test.js

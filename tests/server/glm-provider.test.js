@@ -14,7 +14,7 @@ import { GLM_FIXTURE_PLUGIN, writeGlmArtifactFixture } from '../helpers/glmArtif
 const KEY = 'synthetic-zai-secret-value';
 
 /**
- * Каталог стенда карточки: поколение-фикстура и корень Кокпита для MCP-статуса.
+ * Каталог стенда карточки: поколение-фикстура и корень GrigDesk для MCP-статуса.
  * Процессов фикстура не запускает: entry отвергает всё, кроме -V.
  */
 async function fixture(t, { plugin = true } = {}) {
@@ -30,7 +30,7 @@ async function fixture(t, { plugin = true } = {}) {
     config: {
       rootDir: root,
       stateDir: path.join(root, 'state'),
-      glmRuntimeHome: path.join(root, 'state', 'cockpit-glm'),
+      glmRuntimeHome: path.join(root, 'state', 'grigdesk-glm'),
       deepseekArtifactDir: artifact,
       deepseekRuntimeMode: 'embedded',
       deepseekBin: '/no-global-dsh',
@@ -41,7 +41,7 @@ async function fixture(t, { plugin = true } = {}) {
 function adapter(env = {}) {
   return createGlmAdapter({
     env: {
-      COCKPIT_GLM_API_MODE: 'api',
+      GRIGDESK_GLM_API_MODE: 'api',
       ZAI_API_KEY: KEY,
       ...env,
     },
@@ -114,11 +114,11 @@ test('distribution встроенный: buildId и версия runtime, без
   const distribution = adapter().distribution(f.config);
 
   assert.equal(distribution.kind, 'embedded');
-  assert.equal(distribution.label, 'Входит в Cockpit');
+  assert.equal(distribution.label, 'Входит в GrigDesk');
   assert.equal(distribution.buildId, f.metadata.buildId);
   assert.equal(distribution.runtimeVersion, f.metadata.runtimeVersion);
   assert.equal(distribution.error, undefined);
-  assert.match(distribution.authHint, /COCKPIT_GLM_API_MODE/u);
+  assert.match(distribution.authHint, /GRIGDESK_GLM_API_MODE/u);
   assert.equal(adapter().updateCmd, undefined);
   assert.equal(adapter().latestVersion, undefined);
 });
@@ -133,7 +133,7 @@ test('внешний override DeepSeek даёт карточке GLM glm_runtime
     ok: false,
     version: null,
     code: 'glm_runtime_external',
-    error: 'GLM работает только на встроенной сборке Cockpit; внешний DeepSeek не используется.',
+    error: 'GLM работает только на встроенной сборке GrigDesk; внешний DeepSeek не используется.',
   });
 });
 
@@ -170,7 +170,7 @@ test('mcpStatus карточки не выдаёт проектные серве
 
     assert.equal(status.state, 'ok');
     assert.deepEqual(status.servers, []);
-    assert.match(status.note, /cockpit-work/u);
+    assert.match(status.note, /grigdesk-work/u);
     assert.match(status.emptyText, /проектные MCP/u);
 
     const secrets = ['synthetic-arg-secret', 'synthetic-env-secret', 'SECRET_TOKEN', '/usr/bin/env', KEY];
@@ -186,10 +186,10 @@ test('карточка, причины и ошибки не содержат к�
 
   for (const env of [
     {},
-    { COCKPIT_GLM_API_MODE: '' },
-    { COCKPIT_GLM_API_MODE: 'wrong' },
+    { GRIGDESK_GLM_API_MODE: '' },
+    { GRIGDESK_GLM_API_MODE: 'wrong' },
     { ZAI_API_KEY: '' },
-    { COCKPIT_GLM_API_MODE: 'coding-plan', ZAI_CODING_API_KEY: KEY },
+    { GRIGDESK_GLM_API_MODE: 'coding-plan', ZAI_CODING_API_KEY: KEY },
   ]) {
     const card = adapter(env);
 

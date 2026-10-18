@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 export async function createInstructionProject(t: { after: (fn: () => unknown) => void }) {
-  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-instructions-'));
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-instructions-'));
   const root = path.join(parent, 'project');
   const sub = path.join(root, 'sub');
   const docs = path.join(root, 'docs');

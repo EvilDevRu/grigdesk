@@ -46,7 +46,7 @@ const FIXTURE = [
 
 async function mountPipeline(t, { project = 'all', status = 'all' } = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -64,9 +64,9 @@ async function mountPipeline(t, { project = 'all', status = 'all' } = {}) {
   })) {
     Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   }
-  browser.localStorage.setItem('cockpit-compact', '1');
-  browser.localStorage.setItem('cockpit-pipeline-project', project);
-  browser.localStorage.setItem('cockpit-pipeline-status', status);
+  browser.localStorage.setItem('grigdesk-compact', '1');
+  browser.localStorage.setItem('grigdesk-pipeline-project', project);
+  browser.localStorage.setItem('grigdesk-pipeline-status', status);
   browser.document.body.innerHTML = '<div id="mount"></div>';
 
   const [{ mount, flushPromises }, { createPinia, defineStore }] = await Promise.all([
@@ -295,7 +295,7 @@ test('пустая выборка сбрасывает состояние, но 
   );
   assert.equal(wrapper.find('.filter-empty').exists(), false);
   assert.equal(wrapper.findAll('.card').length, 1);
-  assert.equal(localStorage.getItem('cockpit-pipeline-status'), 'all');
+  assert.equal(localStorage.getItem('grigdesk-pipeline-status'), 'all');
 });
 
 // Цвет точки живёт в CSS и берётся из тона самой кнопки. Переименуй тон — и точки молча

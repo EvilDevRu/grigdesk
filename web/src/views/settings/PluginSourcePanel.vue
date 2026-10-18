@@ -31,7 +31,7 @@
         </p>
       </div>
       <UiInlineMessage v-if="plugin.install.restartRequired" tone="warning" data-role="plugin-source-restart">
-        Новая версия ждёт перезапуска Cockpit.
+        Новая версия ждёт перезапуска GrigDesk.
       </UiInlineMessage>
       <UiInlineMessage
         v-if="plugin.install.localChanges"
@@ -153,7 +153,7 @@ async function rollback(): Promise<void> {
   try {
     confirmed = await confirmDialog(
       `Вернуть v${previous.version}? Текущая версия станет прежней; `
-        + 'применится после перезапуска Cockpit.',
+        + 'применится после перезапуска GrigDesk.',
       { okText: 'Вернуть' },
     );
   } finally {

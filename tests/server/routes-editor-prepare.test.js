@@ -13,7 +13,7 @@ import { makeCatalogInput, makeDraft } from '../fixtures/routes-editor.mjs';
 const ROUTE_TOOL = fileURLToPath(new URL('../../engine/bin/factory-route', import.meta.url));
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-editor-prepare-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-prepare-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return { root, store: new RoutesStore({ baseDir: root }) };
 }

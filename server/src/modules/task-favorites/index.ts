@@ -1,4 +1,4 @@
-// Локальное избранное B24-задач. Мутации меняют только state Cockpit и не пишут в B24.
+// Локальное избранное B24-задач. Мутации меняют только state GrigDesk и не пишут в B24.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 

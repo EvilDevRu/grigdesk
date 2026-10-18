@@ -27,7 +27,7 @@ export function registerOperationGuard(
 
     route.handler = async (request, reply) => {
       const key = request.headers['idempotency-key'];
-      const rawDate = request.headers['x-cockpit-operation-created-at'];
+      const rawDate = request.headers['x-grigdesk-operation-created-at'];
 
       if (typeof key !== 'string' || typeof rawDate !== 'string' || !/^\d{1,16}$/.test(rawDate)) {
         throw new MobileInputError(
@@ -116,7 +116,7 @@ export function registerOperationGuard(
         : request.mobileDevice;
 
       if (!current || current.revokedAt !== null) {
-        throw new MobileInputError('device_revoked', 'Телефон отозван в кокпите.', 403);
+        throw new MobileInputError('device_revoked', 'Телефон отозван в GrigDesk.', 403);
       }
 
       return reply.code(result.status).send(result.body);

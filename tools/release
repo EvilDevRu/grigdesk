@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Выпуск стабильного релиза Cockpit одной командой.
+# Выпуск стабильного релиза GrigDesk одной командой.
 #
 #   tools/release patch|minor|major   поднять VERSION, сделать release-коммит, прогнать тесты и
 #                                   production-сборку, поставить аннотированный тег vX.Y.Z
@@ -14,7 +14,7 @@
 #
 # До publish наружу ничего не уходит. Отказ тестов не ставит тег: release-коммит остаётся
 # локально, скрипт печатает команду отката. Проверки те же, что у read-only tools/release-check.
-# COCKPIT_RELEASE_CHECK_COMMAND подменяет тесты и сборку — нужно только тестам самого скрипта.
+# GRIGDESK_RELEASE_CHECK_COMMAND подменяет тесты и сборку — нужно только тестам самого скрипта.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -177,13 +177,13 @@ build_notes() {
 
   prev="$(previous_release)"
   if [ -z "$prev" ]; then
-    echo "Первый стабильный релиз Cockpit."
+    echo "Первый стабильный релиз GrigDesk."
     return
   fi
 
   echo "Изменения с $prev:"
   echo
-  git_root log --no-merges --format='- %s' "$prev..HEAD" | grep -v '^- Кокпит: релиз v' || true
+  git_root log --no-merges --format='- %s' "$prev..HEAD" | grep -v '^- GrigDesk: релиз v' || true
 }
 
 # ── Тесты, тег и публикация ──────────────────────────────────────────────────────
@@ -191,15 +191,15 @@ build_notes() {
 # Тот же набор, что в tools/release-check. Каждый шаг возвращает отказ явно: внутри условия
 # errexit не действует, и без return сборка web пошла бы после упавших тестов сервера.
 run_checks() {
-  if [ -n "${COCKPIT_RELEASE_CHECK_COMMAND:-}" ]; then
-    ( cd "$ROOT" && bash -c "$COCKPIT_RELEASE_CHECK_COMMAND" ) || return 1
+  if [ -n "${GRIGDESK_RELEASE_CHECK_COMMAND:-}" ]; then
+    ( cd "$ROOT" && bash -c "$GRIGDESK_RELEASE_CHECK_COMMAND" ) || return 1
     return 0
   fi
   ( cd "$ROOT/server" && npm run deepseek:prepare && npm run deepseek:verify && npm test ) || return 1
   ( cd "$ROOT/web" && npm test && npm run build ) || return 1
 }
 
-# GitHub Release не влияет на обнаружение релиза кокпитом (он смотрит теги), но входит в
+# GitHub Release не влияет на обнаружение релиза GrigDesk (он смотрит теги), но входит в
 # штатный процесс выпуска. Повторный вызов существующий Release не трогает.
 github_release() {
   local tmp
@@ -210,7 +210,7 @@ github_release() {
   fi
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
     echo "! gh недоступен или не авторизован. Тег уже опубликован; Release создай вручную:" >&2
-    echo "  gh release create $TAG --title \"Cockpit $TAG\" --notes-file <файл заметок>" >&2
+    echo "  gh release create $TAG --title \"GrigDesk $TAG\" --notes-file <файл заметок>" >&2
     return 1
   fi
   if ( cd "$ROOT" && gh release view "$TAG" >/dev/null 2>&1 ); then
@@ -220,8 +220,8 @@ github_release() {
 
   tmp="$(mktemp)"
   git_root for-each-ref "refs/tags/$TAG" --format='%(contents:body)' > "$tmp"
-  [ -s "$tmp" ] || printf 'Cockpit %s\n' "$TAG" > "$tmp"
-  if ! ( cd "$ROOT" && gh release create "$TAG" --title "Cockpit $TAG" --notes-file "$tmp" ); then
+  [ -s "$tmp" ] || printf 'GrigDesk %s\n' "$TAG" > "$tmp"
+  if ! ( cd "$ROOT" && gh release create "$TAG" --title "GrigDesk $TAG" --notes-file "$tmp" ); then
     rm -f "$tmp"
     fail "GitHub Release не создан; тег уже опубликован — повтори tools/release publish"
   fi
@@ -236,7 +236,7 @@ do_publish() {
 
   tag_sha="$(git_root rev-parse "refs/tags/$TAG")"
   [ "$(git_root cat-file -t "$tag_sha")" = "tag" ] \
-    || fail "тег $TAG не аннотированный: кокпит его не увидит"
+    || fail "тег $TAG не аннотированный: GrigDesk его не увидит"
   [ "$(git_root rev-parse "$TAG^{commit}")" = "$(git_root rev-parse HEAD)" ] \
     || fail "тег $TAG указывает не на HEAD"
 
@@ -253,7 +253,7 @@ do_publish() {
 
   github_release
   echo "Релиз $TAG опубликован."
-  echo "Кокпит найдёт его при плановой проверке или по кнопке «Проверить обновления»."
+  echo "GrigDesk найдёт его при плановой проверке или по кнопке «Проверить обновления»."
 }
 
 # ── Режим publish ────────────────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ printf '%s\n' "$NOTES" | sed 's/^/  /'
 if [ "$DRY_RUN" = 1 ]; then
   PLAN="тесты и сборка → тег $TAG"
   if [ "$NEEDS_COMMIT" = 1 ]; then
-    PLAN="коммит «Кокпит: релиз $TAG» → $PLAN"
+    PLAN="коммит «GrigDesk: релиз $TAG» → $PLAN"
   fi
   if [ "$PUSH" = 1 ]; then
     PLAN="$PLAN → publish"
@@ -327,8 +327,8 @@ BASE_SHA="$(git_root rev-parse HEAD)"
 if [ "$NEEDS_COMMIT" = 1 ]; then
   printf '%s\n' "$TARGET" > "$ROOT/VERSION"
   git_root add VERSION
-  git_root commit -q -m "Кокпит: релиз $TAG"
-  ok "Release-коммит «Кокпит: релиз $TAG» создан"
+  git_root commit -q -m "GrigDesk: релиз $TAG"
+  ok "Release-коммит «GrigDesk: релиз $TAG» создан"
 fi
 HEAD_SHA="$(git_root rev-parse HEAD)"
 
@@ -349,7 +349,7 @@ fi
 
 MESSAGE_FILE="$(mktemp)"
 trap 'rm -f "$MESSAGE_FILE"' EXIT
-printf 'Cockpit %s\n\n%s\n' "$TAG" "$NOTES" > "$MESSAGE_FILE"
+printf 'GrigDesk %s\n\n%s\n' "$TAG" "$NOTES" > "$MESSAGE_FILE"
 git_root tag -a "$TAG" -F "$MESSAGE_FILE"
 ok "Аннотированный тег $TAG поставлен на $(git_root rev-parse --short HEAD)"
 

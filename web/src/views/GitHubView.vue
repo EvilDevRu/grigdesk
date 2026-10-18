@@ -25,7 +25,7 @@
               если они есть, остаются в общем Inbox только для чтения.
             </p>
             <UiField label="Owner" required><UiInput v-model="connectForm.owner" name="owner" autocomplete="off" placeholder="example-org" /></UiField>
-            <UiField label="Repository" required><UiInput v-model="connectForm.repo" name="repo" autocomplete="off" placeholder="ai-cockpit" /></UiField>
+            <UiField label="Repository" required><UiInput v-model="connectForm.repo" name="repo" autocomplete="off" placeholder="grigdesk" /></UiField>
             <UiField label="Personal access token" required>
               <UiPasswordInput v-model="connectForm.token" name="token" autocomplete="new-password" spellcheck="false" placeholder="github_pat_…" />
             </UiField>
@@ -80,7 +80,7 @@
             <p v-if="!providerWritable" class="read-only">
               Правило показано без права записи, пока GitHub не переподключён.
             </p>
-            <UiField label="Проект" required><UiInput v-model="ruleForm.project" name="project" placeholder="cockpit"
+            <UiField label="Проект" required><UiInput v-model="ruleForm.project" name="project" placeholder="grigdesk"
                      :disabled="!providerWritable || !!busy" /></UiField>
             <UiField label="Тип">
               <UiSelect v-model="ruleForm.kind" name="kind" :disabled="!providerWritable || !!busy"><option value="bug">Ошибка</option><option value="wish">Пожелание</option></UiSelect>

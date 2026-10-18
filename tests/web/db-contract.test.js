@@ -16,7 +16,7 @@ import { dbApi } from '../../web/src/shared/dbApi.ts';
 
 const PROFILE = {
   id: 'profile-a',
-  projectId: 'cockpit',
+  projectId: 'grigdesk',
   label: 'Боевая',
   role: 'read',
   engine: 'mysql',
@@ -30,7 +30,7 @@ const PROFILE = {
 const SESSION = {
   id: 'session-a',
   profileId: 'profile-a',
-  projectId: 'cockpit',
+  projectId: 'grigdesk',
   label: 'Боевая',
   role: 'read',
   engine: 'mysql',

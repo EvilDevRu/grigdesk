@@ -10,10 +10,10 @@ async function compileSettingsView() {
 }
 
 async function installBrowser(t) {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'https://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'https://grigdesk.test/#/settings' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -32,7 +32,7 @@ async function installBrowser(t) {
     CustomEvent: browser.CustomEvent,
     getComputedStyle: browser.getComputedStyle.bind(browser),
   })) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  browser.localStorage.setItem('cockpit-settings-tab', 'speech');
+  browser.localStorage.setItem('grigdesk-settings-tab', 'speech');
   browser.document.body.innerHTML = '<div id="mount"></div>';
   t.after(() => browser.close());
   return browser;
@@ -45,7 +45,7 @@ function speechResponse(overrides = {}, revision = 'sha256:first-revision') {
       browserProcessing: 'auto',
       browserAutoConsent: false,
       language: 'auto',
-      dictionary: 'Cockpit',
+      dictionary: 'GrigDesk',
       quality: 'balanced',
       videoQuality: 'balanced',
       model: null,
@@ -90,7 +90,7 @@ function stores(chatStore) {
     usePluginsStore: () => ({ loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {} }),
     useChatStore: () => chatStore,
     useDeviceStore: () => ({ canInstall: false, wakeLock: false, notificationSupported: false, async install() {} }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
 }
 
@@ -351,7 +351,7 @@ test('пресеты, advanced overrides, CUDA gate и шаблон словар
   assert.match(section.get('[data-testid="speech-cuda-command"]').text(), /deploy\/install\.sh --with-cuda/);
 
   await section.get('[data-testid="speech-dictionary-template"]').trigger('click');
-  assert.match(section.get('[data-testid="speech-dictionary"]').element.value, /кокпит/);
+  assert.match(section.get('[data-testid="speech-dictionary"]').element.value, /GrigDesk/);
   assert.match(section.get('[data-testid="speech-dictionary"]').element.value, /Битрикс24/);
   await section.get('[data-testid="speech-save"]').trigger('click');
   await flushPromises();
@@ -412,7 +412,7 @@ test('benchmark capability не запускает заведомо failed job �
 
   assert.equal(button.element.disabled, true);
   assert.match(section.get('[data-testid="speech-benchmark-unavailable"]').text(), /Эталонная запись отсутствует/);
-  assert.match(section.get('[data-testid="speech-benchmark-unavailable"]').text(), /COCKPIT_SPEECH_BENCHMARK_AUDIO/);
+  assert.match(section.get('[data-testid="speech-benchmark-unavailable"]').text(), /GRIGDESK_SPEECH_BENCHMARK_AUDIO/);
   await button.trigger('click');
   assert.equal(posts.some((item) => item.path === '/api/settings/speech/benchmark'), false);
 });

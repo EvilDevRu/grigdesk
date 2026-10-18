@@ -1,11 +1,11 @@
 // Жизненный цикл ручной песочницы: подъём, слежение за прогрессом и снос.
 //
-// ГРАНИЦА. Стенд поднимает и сносит СКРИПТ ПРОФИЛЯ (up.sh/down.sh) — кокпит не знает
+// ГРАНИЦА. Стенд поднимает и сносит СКРИПТ ПРОФИЛЯ (up.sh/down.sh) — GrigDesk не знает
 // ни про контейнеры, ни про схемы. Его дело: выдать слот тем же распределителем, что
 // и перед запуском конвейера, снять fail-closed гард подъёма, запомнить запуск в
 // журнале и довести до человека прогресс и отказ.
 //
-// ПОЧЕМУ ГАРД СНИМАЕТ КОКПИТ. `up.sh` без `FACTORY_WORKSPACE_MODE=isolated` и
+// ПОЧЕМУ ГАРД СНИМАЕТ GrigDesk. `up.sh` без `FACTORY_WORKSPACE_MODE=isolated` и
 // `FACTORY_REQUIRE_NEW_SANDBOX=1` отказывается подниматься: занять слот на четверть
 // часа не должен ни агент, ни случайный вызов. Раздел «Песочницы» — второе место,
 // где это решение принимает ЧЕЛОВЕК: его ручки закрыты сессией.
@@ -144,7 +144,7 @@ export class SandboxError extends Error {
 /**
  * Живость стенда проверяется реальностью — ответом порта. Реестр переживает и
  * остановленные контейнеры, и убитый руками стенд, а профильный ответ на этот
- * вопрос (`profile_stand_alive`) кокпиту недоступен без запуска bash профиля.
+ * вопрос (`profile_stand_alive`) GrigDesk недоступен без запуска bash профиля.
  */
 function probePort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -303,7 +303,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
 
   /**
    * Чей down.sh звать. Обычно профиль известен из журнала собственного подъёма;
-   * стенд, поднятый мимо кокпита, опознаётся только когда песочницу на машине
+   * стенд, поднятый мимо GrigDesk, опознаётся только когда песочницу на машине
    * умеет ровно один профиль. Иначе снос остаётся человеку и его терминалу.
    */
   function ownerOf(record: SandboxJournalRecord | null, capable: string[]): string | null {
@@ -316,7 +316,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
 
   /**
    * Профиль считается привязанным к ТЕКУЩЕМУ поколению стенда, только если env
-   * появился во время успешного up, запущенного самим кокпитом. Старый journal с
+   * появился во время успешного up, запущенного самим GrigDesk. Старый journal с
    * тем же номером задачи не получает полномочия над пересозданной песочницей.
    */
   function profileBinding(
@@ -641,7 +641,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
 
   /**
    * Профиль стенда для запуска действия: у ручного — владелец по журналу, у стенда
-   * конвейера — реестр попытки. Без профиля действий нет: кокпит не гадает, чьи
+   * конвейера — реестр попытки. Без профиля действий нет: GrigDesk не гадает, чьи
    * скрипты запускать.
    */
   async function profileForRun(
@@ -823,13 +823,13 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
         if (!profile) {
           throw new SandboxError(
             'profile_unknown',
-            'кокпит не знает, чей это стенд: профилей с песочницей несколько, а журнала подъёма нет',
+            'GrigDesk не знает, чей это стенд: профилей с песочницей несколько, а журнала подъёма нет',
           );
         }
 
         const script = path.join(profilesDir, profile, 'down.sh');
 
-        // Машинный override сноса (COCKPIT_SANDBOX_DOWN_CMD) уважает и карточка задачи:
+        // Машинный override сноса (GRIGDESK_SANDBOX_DOWN_CMD) уважает и карточка задачи:
         // одна установка не может иметь двух разных способов снести стенд.
         if (!downCmd && !await fileExists(script)) {
           throw new SandboxError('sandbox_unsupported', `профиль ${profile} не объявил down.sh`);
@@ -916,7 +916,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
         if (!profile) {
           throw new SandboxError(
             'profile_unknown',
-            'кокпит не знает, чей это стенд, и не запускает чужие скрипты наугад',
+            'GrigDesk не знает, чей это стенд, и не запускает чужие скрипты наугад',
           );
         }
 
@@ -959,7 +959,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
         await fs.rm(journalRecord.log, { force: true });
 
         // Аргументы уходят argv в порядке объявления — скрипту не нужен разбор JSON,
-        // а кокпиту — знание о том, что они значат.
+        // а GrigDesk — знание о том, что они значат.
         const started = await launch(
           journalRecord,
           { file: 'bash', args: [action.script, task, ...checked.argv] },
@@ -987,7 +987,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       const record = running.get(task) || await readSandboxJournalRecord(journalDir, task);
 
       if (!record) {
-        throw new SandboxError('job_missing', `по стенду ${task} заданий кокпита не было`, 404);
+        throw new SandboxError('job_missing', `по стенду ${task} заданий GrigDesk не было`, 404);
       }
 
       let text = '';

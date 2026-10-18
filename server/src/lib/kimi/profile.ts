@@ -66,12 +66,12 @@ function tomlArray(values: readonly unknown[]): string {
 }
 
 /**
- * Cockpit-owned минимальный config: только managed Kimi OAuth и проверенный каталог.
+ * GrigDesk-owned минимальный config: только managed Kimi OAuth и проверенный каталог.
  * Ни один байт host config.toml сюда не переносится.
  */
 export function buildContainedKimiConfig(): string {
   const lines = [
-    '# Сгенерировано Cockpit. Host config/hooks/plugins/MCP сюда не импортируются.',
+    '# Сгенерировано GrigDesk. Host config/hooks/plugins/MCP сюда не импортируются.',
     `default_model = ${tomlString(KIMI_MODELS[0]?.id)}`,
     'default_permission_mode = "manual"',
     'default_plan_mode = false',

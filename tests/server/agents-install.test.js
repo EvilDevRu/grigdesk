@@ -16,7 +16,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const REAL_SEED_DIR = path.join(REPO_ROOT, 'server', 'seed', 'agents');
 
 async function fixture(t, { seedFiles = {}, seedDir } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-agents-install-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-agents-install-'));
   const config = {
     agentsDir: path.join(root, 'agents'),
     agentsSeedDir: seedDir || path.join(root, 'seed'),

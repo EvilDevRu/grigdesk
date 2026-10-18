@@ -86,7 +86,7 @@ export class FactoryRunnerControl {
         timeout: 15_000,
         maxBuffer: 1024 * 1024,
         env: {
-          COCKPIT_HOME: runtimeConfig.dataHome,
+          GRIGDESK_HOME: runtimeConfig.dataHome,
           PATH: process.env.PATH || '/usr/bin:/bin',
           HOME: process.env.HOME || '',
           LANG: process.env.LANG || 'C',

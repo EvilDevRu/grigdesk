@@ -134,7 +134,7 @@ function routeRegistry(extra = {}) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-single-engine-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-single-engine-'));
   const stateDir = path.join(root, 'state');
   const routesDir = path.join(root, 'routes');
   const profilesDir = path.join(root, 'profiles');

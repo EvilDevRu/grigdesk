@@ -383,7 +383,7 @@
                     >
                       {{ answerFor(question).status === 'human_required'
                         ? 'Арбитр оставил вопрос человеку'
-                        : answerFor(question).actor === 'cockpit-arbiter'
+                        : answerFor(question).actor === 'grigdesk-arbiter'
                           ? 'Арбитр — машинный ответ'
                           : 'Ответил человек' }}
                     </span>
@@ -1106,7 +1106,7 @@ const editGroupOptions = computed(() => optionsWithCurrent(
 
 /**
  * Собирает только изменённые поля. Это защищает нетронутое HTML-описание и уменьшает
- * окно, в котором правка из Cockpit может затереть параллельную правку в портале.
+ * окно, в котором правка из GrigDesk может затереть параллельную правку в портале.
  */
 function taskEditPayload() {
   const form = editForm.value;
@@ -1632,7 +1632,7 @@ async function sandboxDown() {
     sandboxMsg.value = 'Стенд снесён, прогон перенесён в архив';
   } catch (e) {
     err.value = e.status === 501
-      ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
       : e.message;
   } finally { sandboxBusy.value = false; }
 }

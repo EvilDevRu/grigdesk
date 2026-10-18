@@ -3,7 +3,7 @@
     <section class="auth-card">
       <div class="auth-brand">
         <UiBrandMark class="brand-mark" />
-        <span class="auth-brand-name">Кокпит</span>
+        <span class="auth-brand-name">GrigDesk</span>
       </div>
       <slot />
     </section>

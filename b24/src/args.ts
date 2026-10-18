@@ -36,7 +36,7 @@ export type ApiCommand =
 
 export type Command = ApiCommand | { kind: 'help' } | { kind: 'version' } | { kind: 'license' };
 
-export const HELP_TEXT = `b24 — команды задач Б24 через локальный Кокпит.
+export const HELP_TEXT = `b24 — команды задач Б24 через локальный GrigDesk.
 
 Использование:
   b24 dashboard                    доска: мои задачи, показатели и графики
@@ -52,7 +52,7 @@ export const HELP_TEXT = `b24 — команды задач Б24 через ло
   b24 --license                    показать лицензию Node.js
   b24 --help                       показать эту справку
 
-Адрес и токен: COCKPIT_URL и COCKPIT_TOKEN либо настройки папки данных Кокпита.
+Адрес и токен: GRIGDESK_URL и GRIGDESK_TOKEN либо настройки папки данных GrigDesk.
 `;
 
 const LOCAL_FLAGS = new Map<string, 'help' | 'version' | 'license'>([

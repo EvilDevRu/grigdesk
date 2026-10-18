@@ -1,8 +1,8 @@
-// Плагин авторизации кокпита.
+// Плагин авторизации GrigDesk.
 //
 // Модель: ОДИН пользователь, вход только обменом локального ключа окна на сессионную
 // httpOnly-cookie. Гард стоит на ВСЁМ `/api`, включая GET и upgrade вебсокета. Модель
-// «читать свободно внутри доверенной сети» не годится: кокпит отдаёт историю чатов, дифы,
+// «читать свободно внутри доверенной сети» не годится: GrigDesk отдаёт историю чатов, дифы,
 // состояние фабрики, а через терминал — шелл на машину, поэтому чтение закрыто наравне
 // с мутациями.
 //
@@ -26,7 +26,7 @@ export interface SessionCookieOptions {
   secure: boolean;
 }
 
-export const SESSION_COOKIE = 'cockpit_sid';
+export const SESSION_COOKIE = 'grigdesk_sid';
 
 // Эндпоинты, доступные без сессии: ТОЛЬКО состояние входа и обмен ключа окна.
 // `/api/health` сознательно НЕ здесь: он отдаёт имя хоста и абсолютные пути (`stateDir`,
@@ -52,7 +52,7 @@ const DENIED_PAGE = `<!doctype html>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Кокпит открывается в приложении</title>
+  <title>GrigDesk открывается в приложении</title>
   <style>
     body {
       margin: 0;
@@ -69,8 +69,8 @@ const DENIED_PAGE = `<!doctype html>
 </head>
 <body>
   <main>
-    <h1>Кокпит открывается в приложении</h1>
-    <p>Запустите ярлык «Кокпит». Из браузера интерфейс больше не открывается.</p>
+    <h1>GrigDesk открывается в приложении</h1>
+    <p>Запустите ярлык GrigDesk. Из браузера интерфейс больше не открывается.</p>
   </main>
 </body>
 </html>`;
@@ -239,7 +239,7 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     // Внутренние запросы САМОГО сервера: permission-prompt-tool чата живёт в дочернем
     // процессе claude, cookie у него нет и быть не может, а спросить разрешение он должен.
     // Пускаем по секрету, который живёт только в памяти процесса и передаётся тому child'у.
-    if (internalToken && request.headers['x-cockpit-internal'] === internalToken) {
+    if (internalToken && request.headers['x-grigdesk-internal'] === internalToken) {
       request.authKind = 'internal';
       return;
     }
@@ -247,7 +247,7 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     // Локальные CLI-потребители (bin/b24, ship-этап фабрики, скиллы): токен из файла 0600
     // в .state — прочитать его может только владелец машины, которому и так принадлежит
     // всё содержимое .state. Cookie у CLI нет, а публиковать PR/комментарии он обязан.
-    if (cliToken && request.headers['x-cockpit-token'] === cliToken) {
+    if (cliToken && request.headers['x-grigdesk-token'] === cliToken) {
       request.authKind = 'cli';
       return;
     }
@@ -264,9 +264,9 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
 
     reply.code(401).send({
       error: 'unauthorized',
-      message: 'Требуется вход в кокпит.',
+      message: 'Требуется вход в GrigDesk.',
     });
   });
 }
 
-export default fp(authPlugin, { name: 'cockpit-auth' });
+export default fp(authPlugin, { name: 'grigdesk-auth' });

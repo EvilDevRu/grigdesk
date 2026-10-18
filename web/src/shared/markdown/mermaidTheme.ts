@@ -29,7 +29,7 @@ const THEME_COLORS: Record<string, [string, string]> = {
 
 /**
  * Палитра протокола содержит только разрешённые переменные темы Mermaid.
- * Без документа используется та же тёмная палитра, что у интерфейса Кокпита.
+ * Без документа используется та же тёмная палитра, что у интерфейса GrigDesk.
  */
 export function mermaidThemeVariables(documentImpl?: Document): Record<string, string> {
   const style = documentImpl?.defaultView?.getComputedStyle(documentImpl.documentElement);

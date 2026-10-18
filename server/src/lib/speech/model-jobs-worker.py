@@ -98,7 +98,7 @@ def report_progress(done: float, total: float, filename: str = "") -> None:
 
 def source_hub(source_env: dict[str, str]) -> Path:
     # Приоритеты переменных принадлежат huggingface_hub. Worker уже запущен с
-    # cockpit HF_HOME, поэтому спрашиваем библиотеку в отдельном процессе с исходным
+    # grigdesk HF_HOME, поэтому спрашиваем библиотеку в отдельном процессе с исходным
     # окружением сервера, вместо того чтобы дублировать её правила здесь.
     env = dict(os.environ)
     for name in ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_XET_CACHE"):
@@ -285,7 +285,7 @@ def copy_cached(task: dict[str, Any], job_id: str) -> dict[str, Any]:
     size = tree_size(source_model)
     if shutil.disk_usage(target_hub).free < size:
         raise OSError("недостаточно свободного места для копирования модели")
-    temp_root = target_hub / f".cockpit-copy-{job_id}"
+    temp_root = target_hub / f".grigdesk-copy-{job_id}"
     temp_hub = temp_root / "hub"
     temp_model = temp_hub / target_model.name
     try:

@@ -52,7 +52,7 @@ function buttonByText(browser, text) {
 }
 
 /**
- * Чат без задачи в Кокпите с уже известным предпросмотром сервера.
+ * Чат без задачи в GrigDesk с уже известным предпросмотром сервера.
  * Состояние реактивное: компонент видит изменения стора так же, как в окне.
  */
 async function workdirSession(extra = {}) {
@@ -61,11 +61,11 @@ async function workdirSession(extra = {}) {
   return reactive({
     id: 'chat',
     taskId: null,
-    workdir: { kind: 'cockpit' },
+    workdir: { kind: 'grigdesk' },
     workdirPreview: {
       target: {
         cwd: '/workspace/current',
-        source: 'cockpit',
+        source: 'grigdesk',
         copies: [],
         warnings: []
       }

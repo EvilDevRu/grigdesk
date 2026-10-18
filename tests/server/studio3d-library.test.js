@@ -17,7 +17,7 @@ const projectRoot = fileURLToPath(new URL('../../', import.meta.url));
  * Close освобождает только её owner lock до удаления синтетических данных.
  */
 async function fixture(t, options = {}) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-studio-library-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-studio-library-'));
   let sequence = 0;
   const library = createLibrary({
     dir,

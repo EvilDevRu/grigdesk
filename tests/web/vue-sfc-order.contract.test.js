@@ -21,7 +21,7 @@ function fixture(name) {
 }
 
 function writeFixtureRepo(t, files) {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-sfc-order-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'grigdesk-sfc-order-'));
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
   for (const [relative, source] of Object.entries(files)) {
     const target = path.join(repoRoot, relative);

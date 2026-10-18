@@ -888,7 +888,7 @@ export function wrapGlb(bytes: Uint8Array, options: WrapOptions): Uint8Array {
   }
 
   const root: GltfNode = {
-    name: options.name ?? 'cockpit-transform',
+    name: options.name ?? 'grigdesk-transform',
     children: [...(scene.nodes ?? [])]
   };
 

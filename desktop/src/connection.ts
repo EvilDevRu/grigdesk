@@ -7,7 +7,7 @@ export type Connection = LocalConnection;
 
 export const DEFAULT_ORIGIN = 'http://127.0.0.1:8140';
 
-const ADDRESS_ERROR = 'Адрес Кокпита должен быть вида http://127.0.0.1:<порт>/.';
+const ADDRESS_ERROR = 'Адрес GrigDesk должен быть вида http://127.0.0.1:<порт>/.';
 
 type ArgumentOrigin = { origin: string } | { error: string } | null;
 type ResolvedConnection = {
@@ -46,17 +46,17 @@ export function localPort(origin: string): number {
  * Ошибка явного ключа должна сохраняться независимо от наличия настройки.
  */
 export function originFromArgs(argv: readonly string[]): ArgumentOrigin {
-  const args = argv.filter((arg) => arg === '--cockpit-url' || arg.startsWith('--cockpit-url='));
+  const args = argv.filter((arg) => arg === '--grigdesk-url' || arg.startsWith('--grigdesk-url='));
 
   if (args.length === 0) {
     return null;
   }
 
-  if (args.length !== 1 || args[0] === '--cockpit-url') {
+  if (args.length !== 1 || args[0] === '--grigdesk-url') {
     return { error: ADDRESS_ERROR };
   }
 
-  const origin = localOrigin(args[0]?.slice('--cockpit-url='.length));
+  const origin = localOrigin(args[0]?.slice('--grigdesk-url='.length));
 
   return origin ? { origin } : { error: ADDRESS_ERROR };
 }

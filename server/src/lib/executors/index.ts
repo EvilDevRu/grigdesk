@@ -24,7 +24,7 @@
 //                              рекомендаций шаблонов агентов с политикой профиля.
 //                              Не объявлен → сверка для этого ИИ не проводится
 //   statusPage?              — URL официальной страницы состояния вендора. Когда лимиты
-//                              не пришли по причине на его стороне, кокпит читает её сам
+//                              не пришли по причине на его стороне, GrigDesk читает её сам
 //                              (`lib/provider-status.js`, формат Atlassian Statuspage) и
 //                              кладёт разобранное состояние в `usage.vendorStatus`;
 //                              незнакомый движок страницы даёт `unknown`, и остаётся
@@ -85,7 +85,7 @@
 //                              Признак уезжает в `/api/providers`, чтобы UI называл
 //                              поддерживающих исполнителей без списка вендоров в Vue.
 //   autoCompactEnv?          — имя переменной окружения, которой CLI задаётся ПОРОГ
-//                              автокомпакта в токенах. Есть → кокпит подставляет туда
+//                              автокомпакта в токенах. Есть → GrigDesk подставляет туда
 //                              значение из «Настроек → Запуски». Нет → у этого CLI
 //                              может быть свой transport через opts.compactWindow.
 //   chatAutoCompact?         — адаптер применяет opts.compactWindow своим transport.
@@ -109,7 +109,7 @@
 //   compaction?              — как сжимать контекст по кнопке на кольце:
 //                              { kind: 'native', message } — CLI понимает слэш-команду
 //                              и в неинтерактивном режиме, сессия сохраняется;
-//                              { kind: 'summary' } — родного компакта нет, кокпит
+//                              { kind: 'summary' } — родного компакта нет, GrigDesk
 //                              заказывает выжимку текстом и начинает новую сессию с неё.
 //                              Поле не объявлено = 'summary' (безопасный дефолт).
 //   commands?(config)        — команды CLI/навыки для меню чата:
@@ -118,7 +118,7 @@
 //                              desc — однострочное описание
 //                              (сервер режет до 120); run: 'prompt' — исполняется отправкой
 //                              текста ходом (доказано гейтом исполняемости), 'none' — только
-//                              информационный показ (в кокпите не исполняется, живёт в TUI),
+//                              информационный показ (в GrigDesk не исполняется, живёт в TUI),
 //                              тогда hint — короткая пометка («только в TUI»); args: true —
 //                              обязательный аргумент: команда вставляется в композер, а не
 //                              отправляется. Не объявлен → у исполнителя нет секции в меню.
@@ -170,7 +170,7 @@ import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 import type {
   InTurnAssistantEvent,
   InTurnCapability,
@@ -207,7 +207,7 @@ export interface ExecutorAuth {
 // Общая часть запуска: её используют и чат, и арбитр. Дополнительные каналы
 // взаимодействия описывает вызывающая подсистема, а не имя конкретного провайдера.
 export interface ExecutorRunInput {
-  config: Partial<CockpitConfig>;
+  config: Partial<GrigDeskConfig>;
   message?: string;
   model?: string;
   cwd?: string;
@@ -281,7 +281,7 @@ export interface ExecutorAdapter {
   order?: number;
   install?: string;
   login?: string;
-  // Сборку, входящую в Cockpit, описывает адаптер; probe передаётся, чтобы причина отказа
+  // Сборку, входящую в GrigDesk, описывает адаптер; probe передаётся, чтобы причина отказа
   // проверки версии тоже дошла до карточки. problem — текст и команда исправления.
   distribution?: (config: unknown, probe?: { ok: boolean; code?: string }) => {
     kind: 'embedded';
@@ -416,7 +416,7 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
 
 /**
  * Только реально подключённые исполнители. Setup-only карточки намеренно отфильтрованы:
- * наличие CLI на машине не означает, что Cockpit уже умеет безопасно передать ему ход.
+ * наличие CLI на машине не означает, что GrigDesk уже умеет безопасно передать ему ход.
  */
 export async function getExecutors(): Promise<Map<string, ExecutorAdapter>> {
   if (loadedExecutors) {

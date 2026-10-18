@@ -9,7 +9,7 @@
       </div>
       <MediaImage v-else :chat-id="chatId" :media-ref="part.ref" :alt="part.alt" />
       <p v-if="'truncated' in part && part.truncated" class="mobile-muted">
-        Продолжение текста — в кокпите.
+        Продолжение текста — в GrigDesk.
       </p>
     </template>
     <MediaImage

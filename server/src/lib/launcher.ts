@@ -1,12 +1,12 @@
-// Автозапуск и ярлык кокпита для «Настройки → Сервер».
+// Автозапуск и ярлык GrigDesk для «Настройки → Сервер».
 //
-// Автозапуск — это состояние юнита systemd (deploy/cockpit-server.service) плюс linger:
+// Автозапуск — это состояние юнита systemd (deploy/grigdesk-server.service) плюс linger:
 // enable без linger поднимает сервер только при входе в сессию, с linger — при включении
-// машины, до входа. Ярлык «Кокпит» на рабочем столе и в меню делает deploy/shortcut.sh:
+// машины, до входа. Ярлык GrigDesk на рабочем столе и в меню делает deploy/shortcut.sh:
 // одна реализация с установщиком, здесь только вызов и разбор его status-строк.
 import os from 'node:os';
 import path from 'node:path';
-import { type CommandRunner, defaultCommandRunner } from './cockpitRelease.ts';
+import { type CommandRunner, defaultCommandRunner } from './grigDeskRelease.ts';
 
 // Что systemctl знает о юните: нет файла → ставить нечего, переключатель бессмыслен.
 export type AutostartUnitState = 'enabled' | 'disabled' | 'missing';
@@ -62,7 +62,7 @@ export class LauncherService {
 
   constructor({
     rootDir,
-    unitName = 'cockpit-server.service',
+    unitName = 'grigdesk-server.service',
     runner = defaultCommandRunner,
     userName = os.userInfo().username,
   }: LauncherServiceOptions) {

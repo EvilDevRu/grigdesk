@@ -1,5 +1,5 @@
 // Своя страница пользовательского плагина: манифест называет папку `web` с index.html,
-// кокпит раздаёт её под /api/ext/<id>/web/ только включённому плагину и не исполняет
+// GrigDesk раздаёт её под /api/ext/<id>/web/ только включённому плагину и не исполняет
 // её код. Абсолютный путь, выход за каталог и папка без index.html — не страница.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -29,7 +29,7 @@ async function pluginDir(root, id, manifest, files = {}) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-plugin-web-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-web-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 

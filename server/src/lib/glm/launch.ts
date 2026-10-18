@@ -13,7 +13,7 @@ import { glmMcpStartupError, selectGlmMcpServers } from './mcp.ts';
 import { buildGlmLaunchFiles } from './profile.ts';
 import type { GlmLaunchFilesOptions } from './profile.ts';
 
-export const GLM_WORK_SERVER = 'cockpit-work';
+export const GLM_WORK_SERVER = 'grigdesk-work';
 
 export interface GlmLaunchOptions extends Omit<GlmLaunchFilesOptions, 'launchDir' | 'settingsDocument'> {
   runtimeHome: string;
@@ -36,7 +36,7 @@ export function glmChatHome(runtimeHome: string, identity: string, chatKey: stri
 /**
  * Готовит один запуск процесса GLM: private home чата, одноразовый каталог запуска,
  * server-owned settings-документ и overlay. Проектные MCP не подключаются (факт G2):
- * каждый проектный сервер даёт предупреждение, а в overlay попадает только cockpit-work.
+ * каждый проектный сервер даёт предупреждение, а в overlay попадает только grigdesk-work.
  */
 export async function prepareGlmLaunch(options: GlmLaunchOptions) {
   const runtimeHome = assertGlmRuntimeHome(options.runtimeHome);

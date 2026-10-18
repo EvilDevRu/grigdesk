@@ -165,7 +165,7 @@ export class MobileEventStream {
 }
 
 /**
- * Использует общую in-process подписку Кокпита, не добавляя watcher или второй источник событий.
+ * Использует общую in-process подписку GrigDesk, не добавляя watcher или второй источник событий.
  * Закрытие TLS при отзыве телефона автоматически снимает эту подписку.
  */
 export function registerEventRoutes(app: MobileApp, deps: Pick<FacadeDeps, 'subscribe'>) {

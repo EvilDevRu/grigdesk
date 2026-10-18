@@ -9,7 +9,7 @@
       </span>
       <div>
         <h3 id="mobile-access-title">Приложение на телефоне</h3>
-        <p>Подключите телефон по QR-коду, чтобы пользоваться Кокпитом в приложении.</p>
+        <p>Подключите телефон по QR-коду, чтобы пользоваться GrigDesk в приложении.</p>
       </div>
       <span class="mobile-loading-indicator">
         <UiSpinner v-if="loading" label="Загружаем подключения" />
@@ -29,7 +29,7 @@
       <header class="mobile-card-head">
         <div>
           <h4 id="mobile-relays-title">Подключение через посредника</h4>
-          <p>Выберите, через какой адрес телефон будет подключаться к этому Кокпиту.</p>
+          <p>Выберите, через какой адрес телефон будет подключаться к этому GrigDesk.</p>
         </div>
         <UiButton
           data-role="settings-action"
@@ -159,7 +159,7 @@ docker compose ps</pre>
           <h4 id="mobile-devices-title">
             Привязанные телефоны <span class="mobile-count">{{ status ? activeDevices.length : '—' }}</span>
           </h4>
-          <p>Устройства, которым разрешён доступ к этому Кокпиту.</p>
+          <p>Устройства, которым разрешён доступ к этому GrigDesk.</p>
         </div>
       </header>
       <div class="mobile-device-list">

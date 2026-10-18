@@ -13,7 +13,7 @@ async function registryModule() {
 }
 
 test('реестр подхватывает новый движок из одного файла без правки ядра', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-engine-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-engine-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const enginePath = path.join(root, 'fourth-engine.mjs');
   const source = `

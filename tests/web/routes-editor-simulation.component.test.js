@@ -9,7 +9,7 @@ process.env.NODE_ENV = 'test';
 
 test('RE-G3-05: действия сценария хранят cursor в store и останавливаются на 200 шагах',
   async (t) => {
-    await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const { createPinia, setActivePinia } = await import(
       '../../web/node_modules/pinia/dist/pinia.mjs'
     );
@@ -47,7 +47,7 @@ test('RE-G3-05: действия сценария хранят cursor в store �
 
 test('RE-G3-03: экран показывает запрос решения человека и блокирует терминальный шаг',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RouteSimulation.vue'));
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'

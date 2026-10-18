@@ -16,7 +16,7 @@ const Fastify = requireFromServer('fastify');
 const CHILD = fileURLToPath(new URL('./fixtures/routes-source-writer.mjs', import.meta.url));
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-editor-source-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-source-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const routesDir = path.join(root, 'routes');
   const app = Fastify({ logger: false });

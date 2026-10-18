@@ -325,7 +325,7 @@ test('выключенный настройкой движок заблокир�
   const voices = await engine.voices();
 
   assert.equal(doctor.status, 'blocked');
-  assert.match(doctor.install, /COCKPIT_SHOWCASE_EDGE_TTS/);
+  assert.match(doctor.install, /GRIGDESK_SHOWCASE_EDGE_TTS/);
   assert.equal(voices.length, EDGE_VOICES_SNAPSHOT.length);
   assert.ok(voices.every((voice) => !voice.available && /выключен/.test(voice.reason)));
   assert.equal(voices[0].id, EDGE_DEFAULT_VOICE_ID);

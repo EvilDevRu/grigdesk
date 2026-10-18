@@ -67,7 +67,7 @@ const profileList = objectOf({ profiles: listOf(text) });
 const graphResponse = objectOf({ graph: record });
 
 // Итог публикации. `result` — вывод скрипта самого профиля: его формат принадлежит
-// профилю, и объявлять его контрактом кокпита нельзя. Раздел читает из него ровно
+// профилю, и объявлять его контрактом GrigDesk нельзя. Раздел читает из него ровно
 // два необязательных поля и показывает остальное как есть.
 const publishResponse = objectOf({
   profile: text,

@@ -150,7 +150,7 @@ catalog и отдельное включение capability. Эти два де�
 
 ## Проверки
 
-Структурная проверка без Cockpit и model call:
+Структурная проверка без GrigDesk и model call:
 
 ~~~bash
 engine/bin/factory-check <name> --quick

@@ -12,7 +12,7 @@ import { factoryDecisionFixture } from './helpers/factoryDecisionFixture.js';
  * Временные пути принадлежат одному тесту и удаляются после его завершения.
  */
 async function fixture(t, script, overrides = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-route-decision-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-route-decision-'));
   const factoryBin = path.join(root, 'factory');
 
   await writeFile(factoryBin, `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });

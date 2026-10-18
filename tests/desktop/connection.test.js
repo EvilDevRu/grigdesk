@@ -66,26 +66,26 @@ test('DW-03: аргумент отсутствует, корректен или 
     'electron',
     '/app',
     '--disable-gpu',
-    '--cockpit-url=http://127.0.0.1:80/',
+    '--grigdesk-url=http://127.0.0.1:80/',
   ]), { origin: 'http://127.0.0.1' });
 
   for (const argv of [
-    ['--cockpit-url='],
-    ['--cockpit-url'],
-    ['--cockpit-url', 'http://127.0.0.1:8140'],
-    ['--cockpit-url=http://localhost:8140'],
-    ['--cockpit-url=http://127.0.0.1:1', '--cockpit-url=http://127.0.0.1:2'],
-    ['--cockpit-url', '--cockpit-url=http://127.0.0.1:8140'],
+    ['--grigdesk-url='],
+    ['--grigdesk-url'],
+    ['--grigdesk-url', 'http://127.0.0.1:8140'],
+    ['--grigdesk-url=http://localhost:8140'],
+    ['--grigdesk-url=http://127.0.0.1:1', '--grigdesk-url=http://127.0.0.1:2'],
+    ['--grigdesk-url', '--grigdesk-url=http://127.0.0.1:8140'],
   ]) {
     assert.deepEqual(originFromArgs(argv), {
-      error: 'Адрес Кокпита должен быть вида http://127.0.0.1:<порт>/.',
+      error: 'Адрес GrigDesk должен быть вида http://127.0.0.1:<порт>/.',
     });
   }
 });
 
 test('DW-04: аргумент важнее настройки', () => {
   assert.deepEqual(resolveConnection({
-    argv: ['--cockpit-url=http://127.0.0.1:1/'],
+    argv: ['--grigdesk-url=http://127.0.0.1:1/'],
     saved: {
       kind: 'local',
       origin: 'http://127.0.0.1:2',
@@ -153,7 +153,7 @@ test('DW-05: настройка или default', () => {
 });
 
 test('DW-06: неверный аргумент не скрывается настройкой', () => {
-  for (const argv of [['--cockpit-url='], ['--cockpit-url=http://localhost:8140']]) {
+  for (const argv of [['--grigdesk-url='], ['--grigdesk-url=http://localhost:8140']]) {
     assert.deepEqual(resolveConnection({
       argv,
       saved: {
@@ -161,7 +161,7 @@ test('DW-06: неверный аргумент не скрывается нас�
         origin: DEFAULT_ORIGIN,
       },
     }), {
-      error: 'Адрес Кокпита должен быть вида http://127.0.0.1:<порт>/.',
+      error: 'Адрес GrigDesk должен быть вида http://127.0.0.1:<порт>/.',
     });
   }
 });
@@ -185,7 +185,7 @@ test('CN-01 установленный адрес важнее сохранён�
       fromArgs: false,
     });
     assert.equal(resolveConnection({
-      argv: ['--cockpit-url=http://127.0.0.1:9400'],
+      argv: ['--grigdesk-url=http://127.0.0.1:9400'],
       saved,
       installed,
     }).connection.origin, 'http://127.0.0.1:9400');

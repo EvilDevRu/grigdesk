@@ -31,7 +31,7 @@ const linkOf = (text) => {
 const msg = (over = {}) => ({
   chatId: BUGS,
   chatUsername: '',
-  chatTitle: 'Кокпит · баги',
+  chatTitle: 'GrigDesk · баги',
   chatType: 'supergroup',
   isForum: false,
   messageId: 100,
@@ -109,7 +109,7 @@ test('нашлось в архиве — отдаётся ветка, в сет�
   // Окно вокруг цитируемого — это и есть «ветка целиком», а не одно сообщение.
   assert.deepEqual(res.messages.map((m) => m.messageId), [2, 3, 4, 5, 6]);
   assert.equal(res.chat.id, BUGS);
-  assert.equal(res.chat.title, 'Кокпит · баги');
+  assert.equal(res.chat.title, 'GrigDesk · баги');
   assert.equal(res.rule.project, 'alpha');
   // Ни одного обращения к Телеграму: архив на то и первый источник.
   assert.deepEqual(api.methods(), []);
@@ -313,7 +313,7 @@ test('ссылка на комментарий к посту канала: че�
 
 test('messageOfForward: копия описывает оригинал, а не служебный чат', () => {
   const fromChannel = messageOfForward(forwardCopy({
-    forward_origin: { type: 'channel', chat: { id: -100777, title: 'Кокпит · новости' }, message_id: 900, date: T0 },
+    forward_origin: { type: 'channel', chat: { id: -100777, title: 'GrigDesk · новости' }, message_id: 900, date: T0 },
     text: '',
     caption: 'релиз выложен',
     photo: [{ file_id: 'AgAC', file_unique_id: 'u1', width: 90, height: 60, file_size: 900 }],
@@ -326,7 +326,7 @@ test('messageOfForward: копия описывает оригинал, а не 
   assert.equal(fromChannel.date, T0);
   assert.equal(fromChannel.text, 'релиз выложен');
   assert.equal(fromChannel.media[0].kind, 'photo');
-  assert.equal(fromChannel.from.name, 'Кокпит · новости');
+  assert.equal(fromChannel.from.name, 'GrigDesk · новости');
 
   // Автор скрыл себя настройками пересылки — имя всё равно должно быть человеческим.
   const hidden = messageOfForward(forwardCopy({

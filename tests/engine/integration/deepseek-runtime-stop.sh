@@ -39,7 +39,7 @@ printf '#!/usr/bin/env bash\nbash -c '\''trap "" TERM; exec -a "%s" sleep 60'\''
   "$scenario" "$fake_log" >"$fake_bin"
 chmod +x "$fake_bin"
 
-export COCKPIT_DEEPSEEK_BIN="$fake_bin"
+export GRIGDESK_DEEPSEEK_BIN="$fake_bin"
 export DEEPSEEK_API_KEY=synthetic-factory-key
 export FACTORY_FORBID_LIVE=0
 export FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write

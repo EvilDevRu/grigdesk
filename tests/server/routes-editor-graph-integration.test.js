@@ -69,7 +69,7 @@ test('RE-H1-03: змейка рисует только этапы, остано�
 });
 
 test('RE-H1-04: ответ схемы задачи несёт происхождение узлов змейки', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-origins-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-graph-origins-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
   const profilesDir = path.join(root, 'profiles');
@@ -108,7 +108,7 @@ test('RE-H1-04: ответ схемы задачи несёт происхожд
 });
 
 test('RE-H1-02: граф точного catalogHash читает его bootstrap, не current', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-catalog-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-graph-catalog-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new RoutesStore({ baseDir: path.join(root, 'routes') });
   const fixture = makeCatalogInput();

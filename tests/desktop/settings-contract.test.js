@@ -13,8 +13,8 @@ import {
 } from '../../shared/desktop/desktopWindowContract.ts';
 
 const origin = 'http://127.0.0.1:8140';
-const mainUa = 'Electron CockpitSettings/1 CockpitWindow/main';
-const settingsUa = 'Electron CockpitSettings/1 CockpitWindow/settings';
+const mainUa = 'Electron GrigDeskSettings/1 GrigDeskWindow/main';
+const settingsUa = 'Electron GrigDeskSettings/1 GrigDeskWindow/settings';
 
 test('SW-C01 точный адрес окна', () => {
   assert.equal(settingsWindowUrl(origin), origin + '/?window=settings#/settings');
@@ -47,8 +47,8 @@ test('SW-C03 один комплект маркеров', () => {
   const first = desktopUserAgent('Mozilla Electron', 'main');
   const second = desktopUserAgent(first, 'settings');
 
-  assert.equal(first, 'Mozilla Electron CockpitSettings/1 CockpitWindow/main');
-  assert.equal(second, 'Mozilla Electron CockpitSettings/1 CockpitWindow/settings');
+  assert.equal(first, 'Mozilla Electron GrigDeskSettings/1 GrigDeskWindow/main');
+  assert.equal(second, 'Mozilla Electron GrigDeskSettings/1 GrigDeskWindow/settings');
   assert.equal(desktopWindowRole(second), 'settings');
 });
 
@@ -56,10 +56,10 @@ test('SW-C04 роль только из полного комплекта', () =
   assert.equal(desktopWindowRole(mainUa), 'main');
 
   for (const value of [
-    '', 'Electron', 'CockpitSettings/2 CockpitWindow/main',
-    'CockpitSettings/1 CockpitWindow/auxiliary', 'CockpitSettings/1',
-    mainUa + ' CockpitSettings/1', mainUa + ' CockpitWindow/settings',
-    'XCockpitSettings/1 CockpitWindow/main',
+    '', 'Electron', 'GrigDeskSettings/2 GrigDeskWindow/main',
+    'GrigDeskSettings/1 GrigDeskWindow/auxiliary', 'GrigDeskSettings/1',
+    mainUa + ' GrigDeskSettings/1', mainUa + ' GrigDeskWindow/settings',
+    'XGrigDeskSettings/1 GrigDeskWindow/main',
   ]) {
     assert.equal(desktopWindowRole(value), null, value);
   }

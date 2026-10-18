@@ -57,7 +57,7 @@ async function buildFixture(outDir) {
 /** Запуск CLI журнала на каталоге приёмника fixture. */
 function runCli(logDir, args) {
   return spawnSync(process.execPath, ['server/scripts/web-log.mjs', ...args], {
-    cwd: root, env: { ...process.env, COCKPIT_WEB_LOG_DIR: logDir }, encoding: 'utf8',
+    cwd: root, env: { ...process.env, GRIGDESK_WEB_LOG_DIR: logDir }, encoding: 'utf8',
   });
 }
 
@@ -111,7 +111,7 @@ async function main() {
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
       viewport: { width: 900, height: 700 },
     });
-    await context.addCookies([{ name: 'cockpit_sid', value: 'fixture-session', url: address }]);
+    await context.addCookies([{ name: 'grigdesk_sid', value: 'fixture-session', url: address }]);
     page = await context.newPage();
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
@@ -194,7 +194,7 @@ async function main() {
     assert.doesNotMatch(file, /private-42|token=secret/u);
 
     const download = await fetch(`${address}/api/web-log/download?day=${day}`, {
-      headers: { cookie: 'cockpit_sid=fixture-session' },
+      headers: { cookie: 'grigdesk_sid=fixture-session' },
     });
     assert.equal(download.status, 200);
     assert.equal(await download.text(), file);

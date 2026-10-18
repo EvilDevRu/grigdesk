@@ -59,7 +59,7 @@ async function recoverPendingJob(jobId: string): Promise<void> {
 
   await exec('npm', ['run', 'build'], {
     cwd: path.join(root, 'web'),
-    env: { ...process.env, VITE_COCKPIT_SHA: sha.trim() },
+    env: { ...process.env, VITE_GRIGDESK_SHA: sha.trim() },
     timeout: 15 * 60_000,
     maxBuffer: 4 * 1024 * 1024,
   });
@@ -108,13 +108,13 @@ function currentGeneration(
 }
 
 /**
- * Update worker предлагает runtime установленного Cockpit: при тех же входах целевой релиз
+ * Update worker предлагает runtime установленного GrigDesk: при тех же входах целевой релиз
  * берёт его как есть, без npm ci, компиляции и нового поколения. Ошибка значит «собрать».
  */
 function reusableGeneration(
   inputs: Record<string, unknown>,
 ): { buildId: string; generationDir: string } | null {
-  const offered = process.env.COCKPIT_DEEPSEEK_REUSE_RUNTIME;
+  const offered = process.env.GRIGDESK_DEEPSEEK_REUSE_RUNTIME;
 
   if (!offered || !path.isAbsolute(offered)) {
     return null;
@@ -129,7 +129,7 @@ function reusableGeneration(
 
 /**
  * Сборка идёт под lock: исходники подкачиваются по manifest (сначала из проверенной копии
- * установленного Cockpit, иначе по сети), compiler dependencies ставятся по exact lock.
+ * установленного GrigDesk, иначе по сети), compiler dependencies ставятся по exact lock.
  */
 async function buildAndPublish(): Promise<Record<string, unknown>> {
   await fs.mkdir(runtimeRoot, { recursive: true });
@@ -144,7 +144,7 @@ async function buildAndPublish(): Promise<Record<string, unknown>> {
   let staging: string | null = null;
 
   try {
-    const seed = process.env.COCKPIT_DEEPSEEK_UPSTREAM_SEED;
+    const seed = process.env.GRIGDESK_DEEPSEEK_UPSTREAM_SEED;
 
     await materializeDeepSeekSnapshot(vendor, {
       ...(seed && path.isAbsolute(seed) ? { seedDir: seed } : {}),
@@ -153,7 +153,7 @@ async function buildAndPublish(): Promise<Record<string, unknown>> {
 
     const dependencyDir = path.join(root, 'tools/deepseek-build');
     const lockHash = sha256(await fs.readFile(path.join(dependencyDir, 'package-lock.json')));
-    const stamp = path.join(dependencyDir, 'node_modules/.cockpit-lock');
+    const stamp = path.join(dependencyDir, 'node_modules/.grigdesk-lock');
     let prepared = false;
 
     try {
@@ -221,7 +221,7 @@ async function prepare() {
   }
 
   if (args[0] === '--check') {
-    throw new Error('Embedded DeepSeek требует общей подготовки Cockpit');
+    throw new Error('Embedded DeepSeek требует общей подготовки GrigDesk');
   }
 
   const published = await buildAndPublish();

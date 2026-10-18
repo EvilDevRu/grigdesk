@@ -18,7 +18,7 @@ async function compileSlider() {
 }
 
 async function mountSlider(t, props) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/');
   const [{ mount }, EffortSlider] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileSlider(),

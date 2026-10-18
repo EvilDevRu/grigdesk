@@ -5,7 +5,7 @@ import { defineStore } from 'pinia';
 import { TOOL_CATALOG } from '../shared/tools/catalog.ts';
 import { comboIssue, normalizeCombo } from '../shared/hotkeys/combo.ts';
 
-export const HOTKEYS_KEY = 'cockpit-tool-hotkeys';
+export const HOTKEYS_KEY = 'grigdesk-tool-hotkeys';
 
 export const DEFAULT_HOTKEYS = Object.fromEntries(TOOL_CATALOG
   .map((item) => [item.id, normalizeCombo(item.hotkey)])

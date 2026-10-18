@@ -86,7 +86,7 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     if (args.kind === 'version') {
       const version = await readText(path.join(root, 'VERSION'));
 
-      console.log(`Кокпит ${version?.trim() ?? ''}`);
+      console.log(`GrigDesk ${version?.trim() ?? ''}`);
 
       return 0;
     }
@@ -95,7 +95,7 @@ export async function runCli(argv: readonly string[]): Promise<number> {
       ['stop', 'restart'].includes(args.action ?? '');
 
     if (guarded && !args.force) {
-      const cgroup = await readText(process.env.COCKPIT_CLI_CGROUP_FILE || '/proc/self/cgroup');
+      const cgroup = await readText(process.env.GRIGDESK_CLI_CGROUP_FILE || '/proc/self/cgroup');
 
       if (insideUnit(cgroup ?? '', UNIT)) {
         console.error('Команда прервёт ход агента или откроет окно из него. Используйте --force.');
@@ -111,14 +111,14 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     const found = async (file: string) => await lstat(file).catch(() => null);
     const legacyToken = !await found(dataPath(home, 'cliToken'))
       && Boolean((await found(path.join(root, 'server/.state')))?.isDirectory());
-    const legacyEnv = !process.env.COCKPIT_ENV_FILE && !await found(dataPath(home, 'env'))
+    const legacyEnv = !process.env.GRIGDESK_ENV_FILE && !await found(dataPath(home, 'env'))
       && Boolean((await found(path.join(root, '.env')))?.isFile());
     const envPath = legacyEnv ? path.join(root, '.env') : envFilePath(input);
     const settings = readSettings(root, process.env, await readText(envPath),
       legacyToken ? path.join(root, 'server/.state/cli-token') : undefined);
 
     if (args.kind === 'open') {
-      const windowCode = await openWindow(settings, process.env);
+      const windowCode = await openWindow(root, settings, process.env);
 
       if (await windowStartsServer(process.env)) {
         return windowCode;

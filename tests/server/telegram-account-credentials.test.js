@@ -11,7 +11,7 @@ import {
 const token = '8123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghi';
 
 async function fixture(now = () => 1_800_000_000_000) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-telegram-account-creds-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-telegram-account-creds-'));
   const file = path.join(dir, 'telegram-account-creds.json');
   return {
     dir,

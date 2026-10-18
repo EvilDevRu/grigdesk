@@ -127,12 +127,12 @@ test('RS-5 управляющие символы очищаются, кирил�
 test('RS-6 текст, цвета и подсказки', () => {
   const plain = renderText(ready, { color: false });
 
-  assert.match(plain, /Кокпит\n/);
+  assert.match(plain, /GrigDesk\n/);
   assert.match(plain, /Сервер.*Работает.*http:\/\/127.0.0.1:8140\//);
   assert.match(plain, /Окно.*Закрыто/);
   assert.match(plain, /Посредник.*Работает.*example-relay-1/);
   assert.match(plain, /связь: Дом — на связи/);
-  assert.match(plain, /Открыть окно: cockpit/);
+  assert.match(plain, /Открыть окно: grigdesk/);
   assert.doesNotMatch(plain, /\x1b/);
   assert.match(renderText(ready, { color: true }), /\x1b\[32m/);
   assert.match(renderText({ relay: {
@@ -150,15 +150,15 @@ test('RS-6 текст, цвета и подсказки', () => {
   }, { color: false });
 
   assert.match(starting, /Запускается.*ждёт VPN/);
-  assert.match(starting, /Журнал сервера: cockpit server logs/);
-  assert.doesNotMatch(starting, /Кокпит\n/);
+  assert.match(starting, /Журнал сервера: grigdesk-ctl server logs/);
+  assert.doesNotMatch(starting, /GrigDesk\n/);
   assert.match(renderText({ server: {
     ...ready.server!,
     state: 'stopped',
   } }, { color: false }),
-    /Запустить сервер: cockpit server start/);
+    /Запустить сервер: grigdesk-ctl server start/);
   assert.match(renderText({ window: { state: 'not_installed' } }, { color: false }),
-    /Установить окно: cockpit desktop install/);
+    /Установить окно: grigdesk-ctl desktop install/);
 });
 
 test('RS-7 JSON содержит только публичные поля и очищает причины', () => {
@@ -248,10 +248,10 @@ test('RS-10 несколько контейнеров требуют явный 
 
   assert.equal(ambiguous.code, 1);
   assert.match(ambiguous.stderr, /несколько посредников/);
-  assert.match(ambiguous.stderr, /COCKPIT_RELAY_PROJECT/);
+  assert.match(ambiguous.stderr, /GRIGDESK_RELAY_PROJECT/);
   assert.ok(!box.calls().some((call) => call.startsWith('docker start ')));
 
-  const selected = await box.run(['relay', 'start'], { COCKPIT_RELAY_PROJECT: 'second' });
+  const selected = await box.run(['relay', 'start'], { GRIGDESK_RELAY_PROJECT: 'second' });
 
   assert.equal(selected.code, 0, selected.stderr);
   assert.ok(box.calls().includes('docker start two'));
@@ -279,7 +279,7 @@ test('RS-12 полный JSON без токена, устройств и упр�
   const box = await createSandbox(t);
 
   box.unit({ ActiveState: 'active' });
-  await box.serve('cockpit', {
+  await box.serve('grigdesk', {
     relays: [
       {
         name: 'Дом\x1b[31m',

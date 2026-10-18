@@ -19,7 +19,7 @@ const OTHER_TOKEN = 'github_pat_other_private_value_654321';
 const ACCOUNT = 'acc_connection_github_0001';
 const REPOSITORY = '123456';
 const FULL_NAME = 'acme/support';
-const BASE_URL = 'https://cockpit.example.test/hooks/github';
+const BASE_URL = 'https://grigdesk.example.test/hooks/github';
 const NOW = 1_786_172_400_000;
 
 const deferred = () => {

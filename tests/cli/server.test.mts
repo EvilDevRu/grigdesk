@@ -6,10 +6,10 @@ import test from 'node:test';
 import { insideUnit, readSettings } from '../../cli/commands.ts';
 import { deriveServerState, gateReason, parseShow } from '../../cli/server.ts';
 import type { UnitInfo } from '../../cli/server.ts';
-import type { CockpitProbe } from '../../shared/runtime/cockpitReadiness.ts';
+import type { GrigDeskProbe } from '../../shared/runtime/grigDeskReadiness.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
-const unitName = 'cockpit-server.service';
+const unitName = 'grigdesk-server.service';
 const startCall = `systemctl --user start --no-block ${unitName}`;
 const defaultUnit: UnitInfo = {
   load: 'loaded',
@@ -30,25 +30,25 @@ test('CS-1 свойства show в произвольном порядке и �
 });
 
 test('CS-2 все 19 строк таблицы состояний', () => {
-  const cases: [Partial<UnitInfo> | null, CockpitProbe, string, boolean | null, string | null][] = [
-    [null, 'cockpit', 'ready', null, 'systemd недоступен — служба не проверена'],
+  const cases: [Partial<UnitInfo> | null, GrigDeskProbe, string, boolean | null, string | null][] = [
+    [null, 'grigdesk', 'ready', null, 'systemd недоступен — служба не проверена'],
     [null, 'refused', 'unknown', null, 'systemd недоступен'],
-    [{ load: 'not-found' }, 'cockpit', 'ready', false, 'работает вне службы'],
+    [{ load: 'not-found' }, 'grigdesk', 'ready', false, 'работает вне службы'],
     [{ load: 'not-found' }, 'refused', 'not_installed', false,
       'служба не установлена: deploy/install.sh --no-autostart'],
     [{ load: 'not-found' }, 'no_answer', 'conflict', false, 'порт занят другой программой'],
-    [{ load: 'masked' }, 'cockpit', 'mismatch', null, 'служба в состоянии masked'],
-    [{ workingDirectory: '/elsewhere/server' }, 'cockpit', 'mismatch', false,
+    [{ load: 'masked' }, 'grigdesk', 'mismatch', null, 'служба в состоянии masked'],
+    [{ workingDirectory: '/elsewhere/server' }, 'grigdesk', 'mismatch', false,
       'служба указывает на другую копию: /elsewhere/server'],
-    [{}, 'cockpit', 'ready', true, null],
+    [{}, 'grigdesk', 'ready', true, null],
     [{}, 'refused', 'starting', true, 'процесс запущен, порт ещё не открыт'],
     [{}, 'no_answer', 'not_responding', true, 'не отвечает на проверку'],
     [{}, 'other', 'conflict', true, 'порт занят другой программой'],
-    [{ active: 'activating' }, 'cockpit', 'conflict', false,
+    [{ active: 'activating' }, 'grigdesk', 'conflict', false,
       'порт держит ручной запуск, служба не может стартовать'],
     [{ active: 'activating' }, 'refused', 'starting', true, 'ждёт VPN: нет маршрута'],
     [{ active: 'deactivating' }, 'refused', 'stopping', true, null],
-    [{ active: 'inactive' }, 'cockpit', 'ready', false, 'работает вне службы, служба остановлена'],
+    [{ active: 'inactive' }, 'grigdesk', 'ready', false, 'работает вне службы, служба остановлена'],
     [{
       active: 'failed',
       result: 'exit-code',
@@ -92,27 +92,27 @@ test('CS-4 точный сегмент cgroup и несколько строк v
 
 test('CS-5 настройки: приоритет env, данные файла и defaults', () => {
   assert.equal(readSettings('/example', {}, null).port, 8140);
-  assert.equal(readSettings('/example', {}, 'COCKPIT_PORT=abc').port, 8140);
-  assert.equal(readSettings('/example', { COCKPIT_PORT: '8181' }, 'COCKPIT_PORT=8123').port, 8181);
+  assert.equal(readSettings('/example', {}, 'GRIGDESK_PORT=abc').port, 8140);
+  assert.equal(readSettings('/example', { GRIGDESK_PORT: '8181' }, 'GRIGDESK_PORT=8123').port, 8181);
   assert.deepEqual(readSettings('/example', { HOME: '/home/user' }, [
-    'COCKPIT_PORT=8123',
-    'COCKPIT_WINDOW_KEY_PATH=/run/test/key',
-    'COCKPIT_RELAY_PROJECT=$(printf danger)',
+    'GRIGDESK_PORT=8123',
+    'GRIGDESK_WINDOW_KEY_PATH=/run/test/key',
+    'GRIGDESK_RELAY_PROJECT=$(printf danger)',
   ].join('\n')), {
     port: 8123,
     origin: 'http://127.0.0.1:8123',
     windowKeyPath: '/run/test/key',
     relayProject: '$(printf danger)',
-    cliTokenPath: '/home/user/.cockpit/state/cli-token',
+    cliTokenPath: '/home/user/.grigdesk/state/cli-token',
   });
-  assert.equal(readSettings('/example', { COCKPIT_CLI_TOKEN_PATH: '/token' }, null).cliTokenPath, '/token');
+  assert.equal(readSettings('/example', { GRIGDESK_CLI_TOKEN_PATH: '/token' }, null).cliTokenPath, '/token');
 });
 
 test('CS-6 status подтверждает ready и ничего не меняет', async (t) => {
   const box = await createSandbox(t);
 
   box.unit({ ActiveState: 'active' });
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   const result = await box.run(['server', 'status', '--json']);
 
@@ -142,7 +142,7 @@ test('CS-8 start готового сервера', async (t) => {
   const box = await createSandbox(t);
 
   box.unit({ ActiveState: 'active' });
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   const result = await box.run(['server', 'start']);
 
@@ -155,7 +155,7 @@ test('CS-9 сервер вне службы не останавливается 
   const box = await createSandbox(t);
 
   box.unit({ LoadState: 'not-found' });
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   const start = await box.run(['server', 'start']);
 
@@ -167,7 +167,7 @@ test('CS-9 сервер вне службы не останавливается 
 
     assert.equal(result.code, 1);
     assert.equal(result.stderr.trim(),
-      'Сервер работает вне службы (приложение Кокпита или ручной запуск); systemd им не управляет');
+      'Сервер работает вне службы (приложение GrigDesk или ручной запуск); systemd им не управляет');
     assert.ok(!box.calls().includes(`systemctl --user ${action} ${unitName}`));
   }
 });
@@ -197,7 +197,7 @@ test('CS-11 без юнита start и logs объясняют отказ', asyn
   assert.match(start.stderr, /deploy\/install.sh --no-autostart/);
   assert.equal(logs.code, 1);
   assert.match(logs.stderr, /Служба сервера не установлена/);
-  assert.ok(logs.stderr.includes(path.join(box.home, '.cockpit/state/cockpit-server.log')));
+  assert.ok(logs.stderr.includes(path.join(box.home, '.grigdesk/state/grigdesk-server.log')));
   assert.ok(!box.calls().some((call) => call.startsWith('journalctl ')));
 });
 
@@ -228,7 +228,7 @@ test('CS-14 stop и restart передаются systemd; stop остановл�
   const box = await createSandbox(t);
 
   box.unit({ ActiveState: 'active' });
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   for (const action of ['stop', 'restart']) {
     const result = await box.run(['server', action]);
@@ -286,7 +286,7 @@ test('CS-15 сторож раньше внешних вызовов, force ра�
 
   assert.deepEqual(box.calls(), []);
   box.unit({ ActiveState: 'active' });
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   assert.equal((await box.run(['server', 'stop', '--force'])).code, 0);
   assert.ok(box.calls().includes(`systemctl --user stop ${unitName}`));
@@ -311,7 +311,7 @@ test('CS-17 wait дожидается готовности после событ
   const result = completed(box.spawn(['server', 'start', '--wait']));
 
   await box.waitFor(() => box.calls().includes(startCall));
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   const output = await result;
 
@@ -328,7 +328,7 @@ test('CS-18 wait истёк: последнее состояние и причи
   });
   box.journal('VPN-ворота: нет маршрута — запуск запрещён');
 
-  const result = await box.run(['server', 'start', '--wait'], { COCKPIT_WAIT_SEC: '2' });
+  const result = await box.run(['server', 'start', '--wait'], { GRIGDESK_WAIT_SEC: '2' });
 
   assert.equal(result.code, 3);
   assert.match(result.stderr, /не ответил за/);
@@ -349,19 +349,19 @@ test('CS-19 logs наследует поток и возвращает код р
 
 test('CLI-DH-1 токен вычисляется из общей папки без чтения файлов', () => {
   assert.equal(readSettings('/example', { HOME: '/home/user' }, null).cliTokenPath,
-    '/home/user/.cockpit/state/cli-token');
-  assert.equal(readSettings('/example', { HOME: '/home/user', COCKPIT_HOME: '/data/c' }, null).cliTokenPath,
+    '/home/user/.grigdesk/state/cli-token');
+  assert.equal(readSettings('/example', { HOME: '/home/user', GRIGDESK_HOME: '/data/c' }, null).cliTokenPath,
     '/data/c/state/cli-token');
 });
 
 test('CLI-DH-3 файл не может переназначать общую папку', async (t) => {
   const box = await createSandbox(t);
 
-  writeFileSync(path.join(box.home, '.cockpit/.env'), 'COCKPIT_HOME=/other');
+  writeFileSync(path.join(box.home, '.grigdesk/.env'), 'GRIGDESK_HOME=/other');
 
   const result = await box.run(['server', 'status']);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /COCKPIT_HOME.*запрещён/);
+  assert.match(result.stderr, /GRIGDESK_HOME.*запрещён/);
   assert.deepEqual(box.calls(), []);
 });

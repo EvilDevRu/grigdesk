@@ -1,3 +1,4 @@
+import { LEGACY_VALUES } from '../runtime/legacyBrand.ts';
 import type { DraftMachine } from './routeDefinition.ts';
 
 export const ROUTES_EDITOR_LIMITS = {
@@ -51,7 +52,7 @@ export interface RouteDraftContent {
 }
 
 export interface RouteTransferBundle {
-  format: 'cockpit-route-authoring';
+  format: 'grigdesk-route-authoring';
   schema: 1;
   sourceProfile: string;
   content: RouteDraftContent;
@@ -621,7 +622,11 @@ export function parseRouteTransferBundle(value: unknown): RouteTransferBundle {
   const bundle = recordAt(value, [
     'format', 'schema', 'sourceProfile', 'content', 'dependencies',
   ], [], 'routeTransfer');
-  if (bundle.format !== 'cockpit-route-authoring' || bundle.schema !== 1) {
+
+  // Выгрузки до второго этапа переименования несут прежнее имя формата.
+  const formats: readonly unknown[] = ['grigdesk-route-authoring', LEGACY_VALUES.routeAuthoringFormat];
+
+  if (!formats.includes(bundle.format) || bundle.schema !== 1) {
     throw new RoutesEditorContractError('routeTransfer.format/schema');
   }
   if (typeof bundle.sourceProfile !== 'string'
@@ -635,7 +640,8 @@ export function parseRouteTransferBundle(value: unknown): RouteTransferBundle {
     || id === 'catalog') || new Set(dependencies).size !== dependencies.length) {
     throw new RoutesEditorContractError('routeTransfer.dependencies');
   }
-  return value as RouteTransferBundle;
+
+  return { ...(value as RouteTransferBundle), format: 'grigdesk-route-authoring' };
 }
 
 export function parseRouteTransferImportResult(value: unknown): RouteTransferImportResult {

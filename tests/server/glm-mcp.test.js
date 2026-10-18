@@ -27,16 +27,16 @@ test('сервер с __ в имени, с _ на краю или длиннее
     assert.equal(glmMcpServerNameAllowed(name), false, name);
   }
 
-  for (const name of ['ab', 'cockpit-work', 'a_b', 'a-b-c', 'x'.repeat(32)]) {
+  for (const name of ['ab', 'grigdesk-work', 'a_b', 'a-b-c', 'x'.repeat(32)]) {
     assert.equal(glmMcpServerNameAllowed(name), true, name);
   }
 
   const selected = selectGlmMcpServers({
-    chat: [server('cockpit-work'), server('a__b')],
+    chat: [server('grigdesk-work'), server('a__b')],
     project: [server('valid'), server('edge_')],
   });
 
-  assert.deepEqual(selected.mounted.map((item) => item.name), ['cockpit-work']);
+  assert.deepEqual(selected.mounted.map((item) => item.name), ['grigdesk-work']);
   assert.deepEqual(selected.excluded, [
     { name: 'a__b', reason: 'name_invalid' },
     { name: 'valid', reason: 'project_unsupported' },
@@ -45,19 +45,19 @@ test('сервер с __ в имени, с _ на краю или длиннее
   assert.equal(selected.warnings.length, 3);
 });
 
-test('проектный сервер с именем cockpit-work исключается', () => {
+test('проектный сервер с именем grigdesk-work исключается', () => {
   const selected = selectGlmMcpServers({
-    chat: [server('cockpit-work')],
-    project: [server('cockpit-work')],
+    chat: [server('grigdesk-work')],
+    project: [server('grigdesk-work')],
   });
 
   assert.equal(selected.mounted.length, 1);
-  assert.equal(selected.mounted[0], selected.mounted.find((item) => item.name === 'cockpit-work'));
-  assert.deepEqual(selected.excluded, [{ name: 'cockpit-work', reason: 'reserved' }]);
+  assert.equal(selected.mounted[0], selected.mounted.find((item) => item.name === 'grigdesk-work'));
+  assert.deepEqual(selected.excluded, [{ name: 'grigdesk-work', reason: 'reserved' }]);
 });
 
 test('имя инструмента считается формулой DSH: нормализация, 64 символа, хвост sha256[:12]', () => {
-  assert.equal(glmMcpToolName('cockpit-work', 'repo_history'), 'mcp__cockpit-work__repo_history');
+  assert.equal(glmMcpToolName('grigdesk-work', 'repo_history'), 'mcp__grigdesk-work__repo_history');
   assert.equal(glmMcpToolName('a__b', 'c'), 'mcp__a__b__c');
   assert.equal(glmMcpToolName('long', 'x'.repeat(70)),
     `mcp__long__${'x'.repeat(40)}_3a94a9b9fe67`);
@@ -86,23 +86,25 @@ test('публичный статус MCP — configured и rootDir, без env,
   assert.equal(status.state, 'ok');
   assert.deepEqual(status.servers, []);
   assert.match(status.note, /1 проектн/u);
-  assert.match(status.note, /cockpit-work/u);
+  assert.match(status.note, /grigdesk-work/u);
 
   for (const secret of ['synthetic-arg-secret', 'synthetic-env-secret', 'SECRET_TOKEN', 'secretive']) {
     assert.equal(text.includes(secret), false, secret);
   }
 });
 
-test('отказ запуска и потеря cockpit-work распознаются как glm_mcp_not_ready', () => {
-  const startup = 'dsh: plugin tree failed to load: failed to apply loader entry cockpit-mcp-cockpit-work '
-    + '(@deepseek-ai/dsh-mcp-client): mcp-client(cockpit-work): '
+test('отказ запуска и потеря grigdesk-work распознаются как glm_mcp_not_ready', () => {
+  const startup = 'dsh: plugin tree failed to load: failed to apply loader entry grigdesk-mcp-grigdesk-work '
+    + '(@deepseek-ai/dsh-mcp-client): mcp-client(grigdesk-work): '
     + 'initial connection or tool synchronization failed';
 
   assert.equal(glmMcpStartupError(startup)?.code, 'glm_mcp_not_ready');
   assert.equal(glmMcpStartupError('Таймаут запуска'), null);
-  assert.equal(glmMcpLossError('mcp__cockpit-work__echo', [{ type: 'text', text: 'Error: Not connected' }],
+  assert.equal(glmMcpLossError('mcp__grigdesk-work__echo', [{ type: 'text', text: 'Error: Not connected' }],
     true)?.code, 'glm_mcp_not_ready');
-  assert.equal(glmMcpLossError('mcp__cockpit-work__echo', [{ type: 'text', text: 'Error: bad input' }], true),
-    null);
+  assert.equal(
+    glmMcpLossError('mcp__grigdesk-work__echo', [{ type: 'text', text: 'Error: bad input' }], true),
+    null,
+  );
   assert.equal(glmMcpLossError('read', [{ type: 'text', text: 'Error: Not connected' }], true), null);
 });

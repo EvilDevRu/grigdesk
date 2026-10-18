@@ -90,7 +90,7 @@ async function activeRun(app, chatKey) {
 }
 
 async function tmpHistory() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-history-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-in-turn-history-'));
 
   return {
     dir,

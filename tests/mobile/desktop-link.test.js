@@ -50,7 +50,7 @@ test('DC-28/29/30: методы, media и недоступные возможн�
     assert.deepEqual(calls.at(-1), input === undefined ? [method] : [method, input]);
   }
 
-  assert.deepEqual(await link.fetchMedia({}), { path: 'cockpit-media://media/7/' + 'a'.repeat(64) });
+  assert.deepEqual(await link.fetchMedia({}), { path: 'grigdesk-media://media/7/' + 'a'.repeat(64) });
   media = { error: 'locked' };
   assert.deepEqual(await link.fetchMedia({}), media);
 

@@ -144,7 +144,7 @@ test('QC-06: отказ пишет строку в журнал и показы�
     exitCode: 1,
     message: 'Сервер не готов.',
   });
-  assert.equal(failed.calls[0], 'log:Кокпит: Сервер не готов.');
+  assert.equal(failed.calls[0], 'log:GrigDesk: Сервер не готов.');
   assert.ok(failed.calls.includes('dialog:Сервер не готов.'));
   assert.equal(failed.calls.at(-1), 'exit:1');
 

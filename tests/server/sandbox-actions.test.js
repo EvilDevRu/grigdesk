@@ -1,7 +1,7 @@
 // Действия профиля на поднятом стенде: манифест `profiles/<профиль>/actions.json`,
 // запуск скрипта из карточки и его журнал.
 //
-// Кокпит знает про действие ровно то, что объявил профиль: подпись, аргументы и путь
+// GrigDesk знает про действие ровно то, что объявил профиль: подпись, аргументы и путь
 // скрипта внутри каталога профиля. Аргументы уходят argv в порядке объявления,
 // прогон идёт под shared-арендой стенда (снос ждёт его конца), а итог — код выхода
 // скрипта и хвост его вывода. Стенду конвейера действия тоже доступны: на воротах
@@ -78,7 +78,7 @@ async function script(file, body) {
   await chmod(file, 0o755);
 }
 
-/** Реестр стенда, как его пишет подъём профиля: кокпиту нужен только номер и порты. */
+/** Реестр стенда, как его пишет подъём профиля: GrigDesk нужен только номер и порты. */
 async function registryEntry(stateDir, task, extra = '') {
   await writeFile(path.join(stateDir, `t${task}.env`), [
     `TASK=${task}`,
@@ -98,10 +98,10 @@ async function registryEntry(stateDir, task, extra = '') {
 
 /**
  * Профиль-двойник с манифестом действий и скриптами-заглушками. Настоящих
- * контейнеров нет: проверяется то, чем управляет кокпит, — argv, аренда и журнал.
+ * контейнеров нет: проверяется то, чем управляет GrigDesk, — argv, аренда и журнал.
  */
 async function fixture(t, { action = ACTION_STUB, manifest = MANIFEST } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-actions-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-actions-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stateDir = path.join(root, 'state');

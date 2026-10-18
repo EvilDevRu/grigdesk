@@ -50,11 +50,11 @@ export function createQuitController(adapters: QuitAdapters): QuitController {
    */
   async function run(request: QuitRequest): Promise<void> {
     if (request.message) {
-      adapters.log(`Кокпит: ${request.message}`);
+      adapters.log(`GrigDesk: ${request.message}`);
     }
 
-    await attempt(() => adapters.cancelStartup(), 'Кокпит: старт окна не отменился.');
-    await attempt(() => adapters.closeSplash(), 'Кокпит: заставка не закрылась.');
+    await attempt(() => adapters.cancelStartup(), 'GrigDesk: старт окна не отменился.');
+    await attempt(() => adapters.closeSplash(), 'GrigDesk: заставка не закрылась.');
 
     const parallel = [];
 
@@ -62,17 +62,17 @@ export function createQuitController(adapters: QuitAdapters): QuitController {
       const message = request.message;
 
       parallel.push(attempt(() => adapters.showError(message, dialog.signal),
-        'Кокпит: диалог ошибки не показан.'));
+        'GrigDesk: диалог ошибки не показан.'));
     }
 
-    parallel.push(attempt(() => adapters.stopOwnServer(), 'Кокпит: свой сервер не остановился штатно.'));
+    parallel.push(attempt(() => adapters.stopOwnServer(), 'GrigDesk: свой сервер не остановился штатно.'));
 
     if (adapters.revealed()) {
-      parallel.push(attempt(() => adapters.saveWindow(), 'Кокпит: не удалось сохранить настройки окна.'));
+      parallel.push(attempt(() => adapters.saveWindow(), 'GrigDesk: не удалось сохранить настройки окна.'));
     }
 
     await Promise.all(parallel);
-    await attempt(() => adapters.flushCookies(), 'Кокпит: не удалось сохранить данные сессии окна.');
+    await attempt(() => adapters.flushCookies(), 'GrigDesk: не удалось сохранить данные сессии окна.');
     adapters.exit(request.exitCode);
   }
 

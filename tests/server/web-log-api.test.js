@@ -14,7 +14,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 test('приёмник закрыт auth guard и пишет только очищенные поля', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-api-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-api-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   t.after(() => app.close());
@@ -33,7 +33,7 @@ test('приёмник закрыт auth guard и пишет только очи
     data: { persisted: false, private: 'secret' } }] };
 
   assert.equal((await app.inject({ method: 'POST', url: '/api/web-log', payload: body })).statusCode, 401);
-  const authorized = { cookie: 'cockpit_sid=test-session' };
+  const authorized = { cookie: 'grigdesk_sid=test-session' };
   const posted = await app.inject({ method: 'POST', url: '/api/web-log',
     headers: authorized, payload: body });
   assert.equal(posted.statusCode, 200);
@@ -52,7 +52,7 @@ test('приёмник закрыт auth guard и пишет только очи
 });
 
 test('приёмник отвергает неверную пачку целиком', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-api-invalid-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-api-invalid-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   t.after(() => app.close());
@@ -61,7 +61,7 @@ test('приёмник отвергает неверную пачку целик
   } });
   await app.register(webLogModule, { dir, policy: { level: async () => 'verbose' } });
 
-  const headers = { cookie: 'cockpit_sid=test-session' };
+  const headers = { cookie: 'grigdesk_sid=test-session' };
   const invalid = await app.inject({ method: 'POST', url: '/api/web-log', headers,
     payload: { v: 2, entries: [] } });
   assert.equal(invalid.statusCode, 400);
@@ -72,7 +72,7 @@ test('приёмник отвергает неверную пачку целик
 });
 
 test('сервер проверяет глобальный уровень для корня и вложенной предыстории', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-policy-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-policy-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   t.after(() => app.close());
@@ -91,7 +91,7 @@ test('сервер проверяет глобальный уровень для
   log.record('ui.focus', { target: { tag: 'INPUT', context: 'other' } });
   log.mark('Сбой', null);
   const entries = log.snapshot().entries;
-  const headers = { cookie: 'cockpit_sid=test-session' };
+  const headers = { cookie: 'grigdesk_sid=test-session' };
   const post = (entry) => app.inject({ method: 'POST', url: '/api/web-log', headers,
     payload: { v: 1, entries: [entry] } });
 
@@ -114,7 +114,7 @@ test('сервер проверяет глобальный уровень для
 });
 
 test('каталог шаблонов /api закрыт auth guard, а приёмник сверяет с ним пути', async (t) => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-web-log-routes-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-routes-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
   t.after(() => app.close());
@@ -129,7 +129,7 @@ test('каталог шаблонов /api закрыт auth guard, а приё�
   await app.register(webLogModule, { dir, policy: { level: async () => 'verbose' }, apiRoutes,
     now: () => new Date('2026-09-23T11:00:00Z') });
 
-  const headers = { cookie: 'cockpit_sid=test-session' };
+  const headers = { cookie: 'grigdesk_sid=test-session' };
   assert.equal((await app.inject({ method: 'GET', url: '/api/web-log/routes' })).statusCode, 401);
   const listed = await app.inject({ method: 'GET', url: '/api/web-log/routes', headers });
   assert.equal(listed.statusCode, 200);

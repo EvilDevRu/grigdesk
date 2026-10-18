@@ -236,7 +236,7 @@ async function handle(message: RpcRequest): Promise<void> {
     send(message.id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'cockpit-deepseek-status', version: '1' },
+      serverInfo: { name: 'grigdesk-deepseek-status', version: '1' },
     });
     return;
   }

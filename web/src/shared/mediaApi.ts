@@ -11,7 +11,7 @@ import type { MediaClipRequest, MediaPlanRequest } from '../../../shared/media/m
 /**
  * Загрузка записи идёт СВОИМ fetch, а не общим клиентом: тело — multipart на сотни
  * мегабайт, и заголовкам общего клиента здесь делать нечего. Авторизация — сессионной
- * cookie: заголовок `X-Cockpit-Token` принадлежит локальным CLI и из браузера уехал бы
+ * cookie: заголовок `X-GrigDesk-Token` принадлежит локальным CLI и из браузера уехал бы
  * в публичный бандл.
  */
 async function uploadPart(file: File): Promise<unknown> {

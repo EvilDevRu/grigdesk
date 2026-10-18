@@ -15,7 +15,7 @@ import { createProjectsService } from '../../server/src/modules/projects/service
 const NOW = '2026-09-22T10:00:00.000Z';
 
 async function withPrefs(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-projects-dependencies-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-projects-dependencies-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const prefsPath = path.join(dir, 'prefs.json');
   const profilesDir = path.join(dir, 'profiles');

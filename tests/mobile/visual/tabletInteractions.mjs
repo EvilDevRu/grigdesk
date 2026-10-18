@@ -40,7 +40,7 @@ export async function tabletInteractions(page, { width, height, directory }) {
   await page.getByRole('textbox', { name: 'Сообщение', exact: true }).fill('Черновик с планшета');
   await page.getByRole('navigation').getByRole('link', { name: 'Настройки', exact: true }).click();
   await page.getByRole('navigation').getByRole('link', { name: 'Чаты', exact: true }).click();
-  await page.getByRole('link', { name: 'Дизайн мобильного Кокпита', exact: true }).click();
+  await page.getByRole('link', { name: 'Дизайн мобильного GrigDesk', exact: true }).click();
   await page.waitForFunction(() =>
     document.querySelector('.composer-input')?.value === 'Черновик с планшета',
   );

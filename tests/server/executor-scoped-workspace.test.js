@@ -33,7 +33,7 @@ test('Claude читает repo/input, но писать разрешает то�
   ]);
   await writeFile(bin, [
     '#!/bin/sh',
-    'printf \'%s\\n\' "$@" > "$COCKPIT_SCOPED_TRACE"',
+    'printf \'%s\\n\' "$@" > "$GRIGDESK_SCOPED_TRACE"',
     'printf \'%s\\n\' \'{"type":"result","subtype":"success","result":"ok","session_id":"scoped"}\'',
   ].join('\n'));
   await chmod(bin, 0o755);
@@ -41,7 +41,7 @@ test('Claude читает repo/input, но писать разрешает то�
 
   await claude.run({
     config: { claudeBin: bin },
-    env: { ...process.env, COCKPIT_SCOPED_TRACE: trace },
+    env: { ...process.env, GRIGDESK_SCOPED_TRACE: trace },
     message: 'Оцени задачу',
     cwd: output,
     model: 'claude-opus-5',

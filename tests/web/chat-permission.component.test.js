@@ -38,7 +38,7 @@ const PLAN_REQ = {
 };
 
 async function mountPermission(t, req = PLAN_REQ) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   globalThis.__chatPermissionPrompt = async () => null;
 
   const [{ mount, flushPromises }, ChatPermission] = await Promise.all([

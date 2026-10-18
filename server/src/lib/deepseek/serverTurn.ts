@@ -71,7 +71,7 @@ export interface DeepSeekTurnVariant {
   classifyModelError: (failure: Record<string, unknown>) => Error | null;
   // Обратное чтение выбора модели по snapshot session/follow до prompt; Error — отказ.
   verifySnapshot?: (snapshot: Record<string, unknown>) => Error | null;
-  // Разрешение без человека; заменяет автоодобрение DeepSeek по префиксу cockpit-work.
+  // Разрешение без человека; заменяет автоодобрение DeepSeek по префиксу grigdesk-work.
   autoApprove: (toolName: string) => boolean;
   // Событие хода, при котором ход нужно остановить (например, нарушена регистрация hooks).
   inspectEvent?: (event: Record<string, unknown>) => Error | null;
@@ -121,7 +121,7 @@ function modelSelection(value: string): { provider: string; model: string } {
 }
 
 /**
- * Модель из пары provider/model DSH — в id каталога Cockpit: JSON-пару, как у выбора модели.
+ * Модель из пары provider/model DSH — в id каталога GrigDesk: JSON-пару, как у выбора модели.
  * Неполная пара значит, что DSH модель не назвал, и подтверждения нет.
  */
 function catalogModelId(value: unknown): string {
@@ -599,8 +599,8 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         if (item.event === 'approval/request') {
           const tool = String(request.toolName || labels.action);
           const automatic = variant ? variant.autoApprove(tool)
-            : tool.startsWith('mcp__cockpit-work__')
-              && options.workToolNames?.has(tool.slice('mcp__cockpit-work__'.length));
+            : tool.startsWith('mcp__grigdesk-work__')
+              && options.workToolNames?.has(tool.slice('mcp__grigdesk-work__'.length));
           const blocked = options.factory || options.permissionMode === 'read-only';
           let answer: PermissionAnswer | null | undefined;
 

@@ -32,7 +32,7 @@ const EXPECTED_CHANGES = [
 ];
 
 async function fixture(t, scenario = 'rich') {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-app-server-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-app-server-'));
   const bin = path.join(dir, 'codex-fixture');
   const trace = path.join(dir, 'trace.jsonl');
   await copyFile(FIXTURE, bin);
@@ -44,9 +44,9 @@ async function fixture(t, scenario = 'rich') {
     trace,
     env: {
       ...process.env,
-      COCKPIT_CODEX_FIXTURE_TRACE: trace,
-      COCKPIT_CODEX_FIXTURE_SCENARIO: scenario,
-      COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '1',
+      GRIGDESK_CODEX_FIXTURE_TRACE: trace,
+      GRIGDESK_CODEX_FIXTURE_SCENARIO: scenario,
+      GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '1',
     },
   };
 }
@@ -193,7 +193,7 @@ test('Codex run использует app-server и не теряет rich events
 
   // `runtimeWorkspaceRoots` живёт за experimentalApi: без объявленной capability
   // app-server отвечает «requires experimentalApi capability». `requestAttestation`
-  // обязан оставаться false — он включает server request, который кокпит завершает
+  // обязан оставаться false — он включает server request, который GrigDesk завершает
   // fail-closed, то есть ход упал бы на ровном месте.
   for (const init of client.filter((message) => message.method === 'initialize')) {
     assert.deepEqual(init.params.capabilities, {
@@ -328,7 +328,7 @@ test('Codex проверяет sessionFlags SSH-hook до создания threa
 
 test('Codex отказывает до thread и turn, если app-server не подтвердил SSH-hook', async (t) => {
   const f = await fixture(t);
-  f.env.COCKPIT_CODEX_FIXTURE_HOOK_STATE = 'missing';
+  f.env.GRIGDESK_CODEX_FIXTURE_HOOK_STATE = 'missing';
   let error;
   try {
     await codex.run(runOptions(f));
@@ -354,7 +354,7 @@ test('Codex отказывает до thread и turn, если app-server не �
 
 test('Codex при explicit false запускает прежний app-server без SSH-hook', async (t) => {
   const f = await fixture(t);
-  f.env.COCKPIT_CODEX_FIXTURE_EXPECT_HOOK = '0';
+  f.env.GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK = '0';
   const result = await codex.run(runOptions(f, {
     providerSettings: { blockDirectSsh: false },
   }));

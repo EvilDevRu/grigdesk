@@ -34,7 +34,7 @@ async function waitForEvent(body, name, timeoutMs) {
 }
 
 test('SSE watches the single factory state directory', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sse-gen.'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sse-gen.'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
   await mkdir(stateDir, { recursive: true });

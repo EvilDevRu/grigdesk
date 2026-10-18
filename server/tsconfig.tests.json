@@ -14,6 +14,7 @@
     "../tests/server/**/*",
     "../tests/shared/**/*.mts",
     "../tests/desktop/e2e/**/*.mjs",
+    "../tests/desktop/e2e/**/*.mts",
     "../tests/cli/**/*.mts",
     "../tests/engine/**/*.js",
     "../tests/engine/**/*.mjs",

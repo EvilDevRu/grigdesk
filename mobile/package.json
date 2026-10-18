@@ -1,6 +1,6 @@
 {
-  "name": "cockpit-mobile",
-  "version": "0.1.9",
+  "name": "grigdesk-mobile",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "engines": {

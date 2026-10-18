@@ -1,4 +1,4 @@
-import type { CockpitLink, Listener } from '../link/types.ts';
+import type { GrigDeskLink, Listener } from '../link/types.ts';
 
 /**
  * SSE reconnect и watchdog принадлежат native; JS только принимает сигналы invalidate.
@@ -7,11 +7,11 @@ import type { CockpitLink, Listener } from '../link/types.ts';
 export class LinkEvents {
   private listeners: Listener[] = [];
   private start: Promise<void> | null = null;
-  private link: CockpitLink;
+  private link: GrigDeskLink;
   private generation: () => number;
   private epoch = 0;
 
-  constructor(link: CockpitLink, generation: () => number) {
+  constructor(link: GrigDeskLink, generation: () => number) {
     this.link = link;
     this.generation = generation;
   }

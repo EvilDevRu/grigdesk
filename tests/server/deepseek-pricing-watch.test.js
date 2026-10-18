@@ -32,7 +32,7 @@ function htmlResponse(status, body) {
 }
 
 async function runtimeHome(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-deepseek-pricing-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-pricing-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return path.join(root, 'runtime');
 }

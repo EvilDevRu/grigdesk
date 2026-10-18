@@ -21,7 +21,7 @@ function deferred() {
 }
 
 async function storeFixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-ensure-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-companion-ensure-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return {
     root,
@@ -212,7 +212,7 @@ test('COMP-ENSURE-06: обычный save не создаёт и не переп
 });
 
 test('COMP-ENSURE-06: DELETE сериализован с point/full PUT и не даёт воскресить identity', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-delete-race-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-companion-delete-race-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const writeStarted = deferred();
   const releaseWrite = deferred();
@@ -267,7 +267,7 @@ test('COMP-ENSURE-06: DELETE сериализован с point/full PUT и не 
 });
 
 test('COMP-ENSURE-01/02/06: HTTP ensure атомарен, scope берёт только top-level taskId', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-ensure-api-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-companion-ensure-api-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const events = [];
   let executorCalls = 0;
@@ -403,7 +403,7 @@ test('COMP-ENSURE-01/02/06: HTTP ensure атомарен, scope берёт то�
 });
 
 test('COMP-ENSURE-05: HTTP conflict возвращает 409 и оба кандидата для handoff', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-conflict-api-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-companion-conflict-api-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const month = path.join(root, 'chats', '2026-08');
   await fs.mkdir(month, { recursive: true });

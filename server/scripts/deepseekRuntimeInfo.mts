@@ -25,7 +25,7 @@ try {
     }
   }
 
-  const mode = process.env.COCKPIT_DEEPSEEK_RUNTIME_MODE;
+  const mode = process.env.GRIGDESK_DEEPSEEK_RUNTIME_MODE;
 
   if (mode && mode !== 'installed' && mode !== 'embedded') {
     throw new Error('Неизвестный режим runtime DeepSeek');
@@ -34,10 +34,10 @@ try {
   const runtimeConfig = {
     ...config,
     ...(mode ? { deepseekRuntimeMode: mode as 'installed' | 'embedded' } : {}),
-    ...(process.env.COCKPIT_DEEPSEEK_GENERATION_ROOT
-      ? { deepseekGenerationRoot: process.env.COCKPIT_DEEPSEEK_GENERATION_ROOT } : {}),
-    ...(process.env.COCKPIT_DEEPSEEK_ARTIFACT_DIR
-      ? { deepseekArtifactDir: process.env.COCKPIT_DEEPSEEK_ARTIFACT_DIR } : {}),
+    ...(process.env.GRIGDESK_DEEPSEEK_GENERATION_ROOT
+      ? { deepseekGenerationRoot: process.env.GRIGDESK_DEEPSEEK_GENERATION_ROOT } : {}),
+    ...(process.env.GRIGDESK_DEEPSEEK_ARTIFACT_DIR
+      ? { deepseekArtifactDir: process.env.GRIGDESK_DEEPSEEK_ARTIFACT_DIR } : {}),
     ...(candidate ? { deepseekArtifactDir: candidate } : {}),
   };
   const runtime = resolveDeepSeekRuntime(runtimeConfig);

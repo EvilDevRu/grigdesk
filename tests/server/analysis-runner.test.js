@@ -91,7 +91,7 @@ test('каждый запуск берёт выбранные provider/model/eff
   await mkdir(analysisDir);
   await writeFile(legacyBin, [
     '#!/bin/sh',
-    'printf \'%s\' "$COCKPIT_TEST_ANALYSIS" > "$COCKPIT_TEST_ANALYSIS_JSON"',
+    'printf \'%s\' "$GRIGDESK_TEST_ANALYSIS" > "$GRIGDESK_TEST_ANALYSIS_JSON"',
     'printf \'%s\\n\' \'{"result":"legacy","total_cost_usd":0.01}\'',
   ].join('\n'));
   await chmod(legacyBin, 0o755);
@@ -137,8 +137,8 @@ test('каждый запуск берёт выбранные provider/model/eff
     claudeAuth: {
       env: () => ({
         ...process.env,
-        COCKPIT_TEST_ANALYSIS: JSON.stringify(RESULT),
-        COCKPIT_TEST_ANALYSIS_JSON: legacyJson,
+        GRIGDESK_TEST_ANALYSIS: JSON.stringify(RESULT),
+        GRIGDESK_TEST_ANALYSIS_JSON: legacyJson,
       }),
     },
     b24: {

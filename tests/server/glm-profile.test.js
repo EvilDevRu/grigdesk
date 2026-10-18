@@ -153,7 +153,7 @@ test('homes GLM вне homes DeepSeek, разделены по identity и хэ�
       const relative = path.relative(f.runtimeHome, home);
 
       assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), home);
-      assert.equal(home.includes('cockpit-deepseek'), false);
+      assert.equal(home.includes('grigdesk-deepseek'), false);
     }
   });
 
@@ -228,7 +228,7 @@ test('overlay с подменой адреса отличается от product
   const rightInsert = insertRows(right);
   const guard = rightInsert.filter((row) => !leftInsert.some((other) => other.id === row.id));
 
-  assert.deepEqual(guard.map((row) => row.id), ['cockpit-glm-egress-guard']);
+  assert.deepEqual(guard.map((row) => row.id), ['grigdesk-glm-egress-guard']);
   assert.equal(guard[0]?.name, `file://${path.join(f.root, 'guard.mjs')}`);
   assert.equal(rightInsert.find((row) => row.id === 'llm-pi-ai')?.config.providers.zai.baseURL,
     'http://127.0.0.1:1/api/paas/v4');
@@ -245,7 +245,7 @@ test('overlay с подменой адреса отличается от product
 });
 
 const PROJECT_MCP_TEST = 'проектные MCP-серверы исключаются с предупреждением, запуск не падает; '
-  + 'cockpit-work остаётся';
+  + 'grigdesk-work остаётся';
 
 test(PROJECT_MCP_TEST, async (t) => {
   const f = await fixture(t);
@@ -258,7 +258,7 @@ test(PROJECT_MCP_TEST, async (t) => {
   const warnings = [];
   const launch = await prepareGlmLaunch(prepareOptions(f, {
     mcpServers: [{
-      name: 'cockpit-work',
+      name: 'grigdesk-work',
       command: process.execPath,
       args: ['work-mcp.js'],
       env: [],
@@ -268,7 +268,7 @@ test(PROJECT_MCP_TEST, async (t) => {
   const rows = insertRows(await overlayRows(launch));
   const mcp = rows.filter((row) => row.name === '@deepseek-ai/dsh-mcp-client');
 
-  assert.deepEqual(mcp.map((row) => row.config.serverName), ['cockpit-work']);
+  assert.deepEqual(mcp.map((row) => row.config.serverName), ['grigdesk-work']);
   assert.equal(mcp[0]?.config.failOnStartupError, true);
   assert.deepEqual(mcp[0]?.config.reconnect, { enabled: false });
   assert.equal(warnings.length, 2);

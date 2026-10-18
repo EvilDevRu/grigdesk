@@ -12,7 +12,7 @@ import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 // стоит отказ, хуже отсутствующей (t7989: «отдать арбитру» рядом с «раннер не получил
 // результат»). Вид остановки при этом остаётся `human`, а исход — `exhausted`.
 test('сводка исчерпанной остановки не предлагает арбитра и называет исход', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-stall-exhausted-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-stall-exhausted-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const attempt = 'a_0e20a3fdcaca6f2bdc2ede03470c9ee4';

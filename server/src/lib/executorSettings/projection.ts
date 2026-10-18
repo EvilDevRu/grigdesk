@@ -86,7 +86,7 @@ export function projectNativeSettingsCatalog(
     protocolVersion: 1,
     providerId: read.context.providerId,
     state: read.state,
-    scope: read.snapshot?.scope ?? { id: 'cockpit-chats', label: 'Для чатов Cockpit' },
+    scope: read.snapshot?.scope ?? { id: 'grigdesk-chats', label: 'Для чатов GrigDesk' },
     source: read.snapshot?.source ?? {
       kind: 'cli',
       version: null,

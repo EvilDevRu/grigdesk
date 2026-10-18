@@ -27,11 +27,11 @@ test('маршрут coding-plan не задаёт baseURL, маршрут api �
   assert.equal(buildGlmRoute('api').baseURL, 'https://api.z.ai/api/paas/v4');
 });
 
-test('маршрут задаёт apiKeyEnv COCKPIT_GLM_ROUTE_KEY и retryPolicy normal с maxRetries 10', () => {
+test('маршрут задаёт apiKeyEnv GRIGDESK_GLM_ROUTE_KEY и retryPolicy normal с maxRetries 10', () => {
   for (const mode of ['api', 'coding-plan']) {
     const route = buildGlmRoute(mode);
 
-    assert.equal(route.apiKeyEnv, 'COCKPIT_GLM_ROUTE_KEY');
+    assert.equal(route.apiKeyEnv, 'GRIGDESK_GLM_ROUTE_KEY');
     // Повторяются только транзиентные коды dsh-llm-retry по умолчанию: обрыв, 429, 5xx, таймаут.
     assert.deepEqual(route.retryPolicy, { mode: 'normal', maxRetries: 10 });
   }
@@ -54,7 +54,7 @@ function runtimeFixture() {
   return {
     source: { commit: 'synthetic-upstream-commit' },
     inputIdentity: {
-      composition: 'cockpit-host-web-acp-v3',
+      composition: 'grigdesk-host-web-acp-v3',
       dependencyLock: 'build-lock-hash',
     },
     llmPiAi: {

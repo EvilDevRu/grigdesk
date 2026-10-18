@@ -31,7 +31,7 @@ export const UiSelect = defineComponent({ props: ['modelValue'], emits: ['update
 `;
 
 async function fixture(t, initial = makeDraft(), scope = { kind: 'route', routeId: 'quick' }) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteCanvas.vue'), {
     stubs: { '../../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },
@@ -53,7 +53,7 @@ async function fixture(t, initial = makeDraft(), scope = { kind: 'route', routeI
 }
 
 async function stageFixture(t) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const Component = await compileVue(webFile('src/views/routes/RouteStageList.vue'), {
     stubs: { '../../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";" },

@@ -104,7 +104,7 @@ test('api: баланс счёта Z.ai по ключу — наличные, б
       { type: 11, balance: 0.5 },
     ], 2.97),
   });
-  const { root, usage } = await usageOf(t, { COCKPIT_GLM_API_MODE: 'api', ZAI_API_KEY: API_KEY }, fake);
+  const { root, usage } = await usageOf(t, { GRIGDESK_GLM_API_MODE: 'api', ZAI_API_KEY: API_KEY }, fake);
   const balance = usage.resources.find((item) => item.key === 'balance-usd');
 
   assert.equal(usage.state, 'ok');
@@ -136,7 +136,7 @@ test('api: нулевой баланс подсвечен как исчерпа�
     '/api/biz/customerService/zaiUserInfo': USER,
     '/api/platform-charge-zai/business/accountBalance': balanceRoute([{ type: 10, balance: 0 }], 0),
   });
-  const { usage } = await usageOf(t, { COCKPIT_GLM_API_MODE: 'api', ZAI_API_KEY: API_KEY }, fake);
+  const { usage } = await usageOf(t, { GRIGDESK_GLM_API_MODE: 'api', ZAI_API_KEY: API_KEY }, fake);
 
   assert.equal(usage.resources.find((item) => item.key === 'balance-usd').tone, 'bad');
 });
@@ -146,7 +146,7 @@ test('api: обрыв сети повторяется, отказ ключа —
     '/api/biz/customerService/zaiUserInfo': USER,
     '/api/platform-charge-zai/business/accountBalance': balanceRoute([{ type: 10, balance: 1 }], 1),
   };
-  const env = { COCKPIT_GLM_API_MODE: 'api', ZAI_API_KEY: API_KEY };
+  const env = { GRIGDESK_GLM_API_MODE: 'api', ZAI_API_KEY: API_KEY };
   const retried = await usageOf(t, env, fakeZai(routes, { networkFailures: 2 }));
   const offline = await usageOf(t, env, fakeZai(routes, { networkFailures: 50 }));
   const rejected = await usageOf(t, env, fakeZai({
@@ -208,7 +208,7 @@ test('coding-plan: полоски 5 часов, недели и MCP за мес�
     },
   });
   const { usage } = await usageOf(t, {
-    COCKPIT_GLM_API_MODE: 'coding-plan',
+    GRIGDESK_GLM_API_MODE: 'coding-plan',
     ZAI_API_KEY: API_KEY,
     ZAI_CODING_API_KEY: CODING_KEY,
   }, fake);
@@ -250,7 +250,7 @@ test('coding-plan: полоски 5 часов, недели и MCP за мес�
 test('без режима или ключа — auth_required и ни одного запроса', async (t) => {
   const fake = fakeZai({});
   const none = await usageOf(t, { ZAI_API_KEY: API_KEY }, fake);
-  const keyless = await usageOf(t, { COCKPIT_GLM_API_MODE: 'coding-plan', ZAI_API_KEY: API_KEY }, fake);
+  const keyless = await usageOf(t, { GRIGDESK_GLM_API_MODE: 'coding-plan', ZAI_API_KEY: API_KEY }, fake);
 
   assert.equal(none.usage.state, 'auth_required');
   assert.equal(keyless.usage.state, 'auth_required');

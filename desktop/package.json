@@ -1,9 +1,9 @@
 {
-  "name": "cockpit-desktop",
-  "productName": "Кокпит",
-  "version": "0.3.0",
-  "description": "Окно Кокпита для компьютера",
-  "author": "Кокпит",
+  "name": "grigdesk-desktop",
+  "productName": "GrigDesk",
+  "version": "0.1.0",
+  "description": "Окно GrigDesk для компьютера",
+  "author": "GrigDesk",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -26,15 +26,16 @@
     "typescript": "5.9.3"
   },
   "build": {
-    "appId": "local.cockpit.desktop",
+    "appId": "local.grigdesk.desktop",
+    "executableName": "grigdesk",
     "electronFuses": {
       "enableCookieEncryption": true,
       "runAsNode": false,
       "enableNodeOptionsEnvironmentVariable": false,
       "enableNodeCliInspectArguments": false
     },
-    "productName": "Кокпит",
-    "artifactName": "cockpit-desktop-${version}-${arch}.${ext}",
+    "productName": "GrigDesk",
+    "artifactName": "grigdesk-desktop-${version}-${arch}.${ext}",
     "directories": {
       "output": "release",
       "buildResources": "build"

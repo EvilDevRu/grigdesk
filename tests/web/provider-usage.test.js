@@ -204,7 +204,7 @@ test('missing or passed reset date has no copy at all', () => {
   assert.equal(resetAt('не дата', now), '');
 });
 
-// Сбой у вендора выглядел как поломка кокпита: человек читал «не удалось получить
+// Сбой у вендора выглядел как поломка GrigDesk: человек читал «не удалось получить
 // лимиты» и шёл гадать в журналы вместо страницы состояния сервиса.
 test('vendor fault points at the status page declared by the adapter', () => {
   const hint = providerStatusHint(

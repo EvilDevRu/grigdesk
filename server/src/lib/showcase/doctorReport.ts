@@ -27,7 +27,7 @@ export interface DoctorDeps {
   // Состояние голосовых движков берётся у реестра: у раздела не должно быть
   // второго мнения о том, чем он умеет говорить.
   voiceStatuses: () => Promise<VoiceEngineStatus[]>;
-  // Расшифровка приходит из общего речевого runtime кокпита. Её отсутствие не
+  // Расшифровка приходит из общего речевого runtime GrigDesk. Её отсутствие не
   // закрывает раздел, но и проверка речи тогда не выдаётся за пройденную.
   transcribeAvailable: boolean;
   resolveTarget: (ref: ShowcaseTargetRef, profile?: string) => Promise<ShowcaseTarget>;
@@ -145,7 +145,7 @@ export function createDoctorReport(deps: DoctorDeps) {
           reason: browserReady
             ? 'Исполняемый файл браузера на месте.'
             : 'Браузер записи не установлен. Поставьте Chromium в настройках плагина '
-              + '«Презентации» или задайте COCKPIT_SHOWCASE_BROWSER.',
+              + '«Презентации» или задайте GRIGDESK_SHOWCASE_BROWSER.',
           manual: false,
         },
         await mediaOperation(),
@@ -155,7 +155,7 @@ export function createDoctorReport(deps: DoctorDeps) {
           title: 'Проверка речи',
           status: deps.transcribeAvailable ? 'ready' : 'unknown',
           reason: deps.transcribeAvailable
-            ? 'Синтезированная речь сверяется с текстом распознаванием кокпита.'
+            ? 'Синтезированная речь сверяется с текстом распознаванием GrigDesk.'
             : 'Распознавание недоступно: проверка речи будет помечена как пропущенная.',
           manual: false,
         },

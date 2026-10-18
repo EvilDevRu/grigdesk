@@ -15,7 +15,7 @@ const props = defineProps<{
 
 // Путь на диске ищется сервером в текущей рабочей области именно этого разговора.
 const imageHref = (href: string) => chatImageHref(href, props.chatId || '');
-// Документ по ссылке агента ищется и в папках этого разговора, не только в Cockpit.
+// Документ по ссылке агента ищется и в папках этого разговора, не только в GrigDesk.
 const fileHref = (href: string) => chatFileLinkHref(href, {
   scope: props.chatId ? `chat:${props.chatId}` : '',
 });

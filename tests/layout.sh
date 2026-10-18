@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RC=0
 
 for required in \
-  docs/cockpit \
+  docs/grigdesk \
   docs/engine \
   tests/docs \
   tests/engine \

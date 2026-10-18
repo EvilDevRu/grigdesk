@@ -64,7 +64,7 @@ test('Codex не превращает пустые и некорректные t
 });
 
 test('Codex rollout читается с конца и находит thread по безопасному UUIDv7', async (t) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-home-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-home-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const threadId = '01b8dac5-b400-7000-8000-000000000042';
   const day = path.join(home, 'sessions', '2030', '01', '01');

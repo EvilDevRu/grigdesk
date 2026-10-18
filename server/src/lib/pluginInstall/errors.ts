@@ -74,7 +74,7 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
   },
   id_reserved: {
     status: 422,
-    message: "id совпадает со встроенным плагином Cockpit.",
+    message: "id совпадает со встроенным плагином GrigDesk.",
   },
   id_mismatch: {
     status: 422,
@@ -82,7 +82,7 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
   },
   api_unsupported: {
     status: 422,
-    message: "Плагин рассчитан на другую версию контракта (api). Этот Cockpit поддерживает api 1.",
+    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1.",
   },
   version_invalid: {
     status: 422,
@@ -92,9 +92,9 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
     status: 422,
     message: "version в plugin.json не совпадает с тегом.",
   },
-  cockpit_too_old: {
+  grigdesk_too_old: {
     status: 422,
-    message: "Плагину нужна более новая версия Cockpit.",
+    message: "Плагину нужна более новая версия GrigDesk.",
   },
   web_invalid: {
     status: 422,
@@ -130,7 +130,7 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
   },
   service_closed: {
     status: 503,
-    message: "Сервис установки завершает работу. Повторите после запуска Cockpit.",
+    message: "Сервис установки завершает работу. Повторите после запуска GrigDesk.",
   },
   job_not_found: {
     status: 404,
@@ -174,7 +174,7 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
   },
   plugin_stop_required: {
     status: 409,
-    message: "Плагин не умеет приостанавливать работу. Выключите его и перезапустите Cockpit перед "
+    message: "Плагин не умеет приостанавливать работу. Выключите его и перезапустите GrigDesk перед "
       + "заменой.",
   },
   previous_modified: {

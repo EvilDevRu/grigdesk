@@ -33,10 +33,10 @@ async function fixture(t, { permission = 'granted', registration = null } = {}) 
 
   const window = {
     Notification: FakeNotification,
-    location: { href: 'https://cockpit.test/#/chats' },
+    location: { href: 'https://grigdesk.test/#/chats' },
     focus() {},
   };
-  const document = { hidden: false, title: 'Кокпит' };
+  const document = { hidden: false, title: 'GrigDesk' };
   const navigator = registration
     ? { serviceWorker: { async getRegistration() { return registration; } } }
     : {};
@@ -64,7 +64,7 @@ test('уведомление использует Notification и встроен
   assert.equal(shown.length, 0);
   assert.equal(constructed.length, 1);
   assert.match(constructed[0].options.icon, /^data:image\/png;base64,/);
-  assert.equal(constructed[0].options.data.url, 'https://cockpit.test/#/chats');
+  assert.equal(constructed[0].options.data.url, 'https://grigdesk.test/#/chats');
 });
 
 test('десктоп без service worker использует обычный Notification', async (t) => {
@@ -84,7 +84,7 @@ test('разрешение запрашивается только явным в
 
 test('N1: уведомление без serviceWorker получает ссылку нужного чата', async (t) => {
   const { api, constructed } = await fixture(t);
-  const url = 'https://cockpit.test/#/chats?openChat=c1';
+  const url = 'https://grigdesk.test/#/chats?openChat=c1';
 
   await api.notify('t', 'b', 'chat-1', url);
   assert.equal(constructed[0].options.data.url, url);
@@ -92,7 +92,7 @@ test('N1: уведомление без serviceWorker получает ссыл�
 
 test('N2: щелчок по обычному уведомлению открывает адрес и закрывает его', async (t) => {
   const { api, constructed } = await fixture(t);
-  const url = 'https://cockpit.test/#/chats?openChat=c1';
+  const url = 'https://grigdesk.test/#/chats?openChat=c1';
 
   await api.notify('t', 'b', 'chat-1', url);
   constructed[0].instance.onclick();

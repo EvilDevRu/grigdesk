@@ -1,7 +1,7 @@
 // Kimi Code подключён по ACP. Два режима запуска (config.kimiLaunchMode):
 // host (умолчание) — прямой хост-процесс, parity с claude: host fs/config/credentials;
 // contained — server-owned contained ACP profile (bwrap + cgroup + egress allowlist),
-// host config/skills/plugins/MCP процесс чата не видит. Откат: COCKPIT_KIMI_LAUNCH_MODE=contained.
+// host config/skills/plugins/MCP процесс чата не видит. Откат: GRIGDESK_KIMI_LAUNCH_MODE=contained.
 // Режимный securityProfile для session bindings вычисляет chat-модуль
 // (kimiSecurityProfile), статичное поле ниже — каталожная подпись contained-профиля.
 import { execFile } from 'node:child_process';
@@ -78,7 +78,7 @@ function probe(bin: string) {
 // TUI-команды (/new, /clear, /model, /goal…)
 // ACP не знает — отвечает «Unknown ACP command», в список их брать нельзя. При смене
 // pinned-версии список пересматривается вместе с contract gate.
-// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (кокпит сильнее).
+// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (GrigDesk сильнее).
 const KIMI_ACP_COMMANDS = [
   { cmd: '/status', desc: 'Состояние сессии: модель, режим, контекст', run: 'prompt' },
   { cmd: '/usage', desc: 'Расход контекста и токенов сессии', run: 'prompt' },
@@ -238,7 +238,7 @@ export function composeKimiMcpServers({
     if (!entries || typeof entries !== 'object' || Array.isArray(entries)) continue;
     for (const [rawName, entry] of Object.entries(entries)) {
       const name = String(rawName || '').trim();
-      if (!name || name === 'cockpit-work') continue;
+      if (!name || name === 'grigdesk-work') continue;
       merged.set(name, kimiMcpServer(name, entry, layer.scope));
     }
   }
@@ -357,7 +357,7 @@ export default {
 
   probe(config: KimiConfig) { return probe(config.kimiBin); },
 
-  // Проверяем только наличие credential-файла. Его содержимое Cockpit не читает,
+  // Проверяем только наличие credential-файла. Его содержимое GrigDesk не читает,
   // не копирует и не логирует; самой авторизацией по-прежнему владеет `kimi login`.
   async auth(config: KimiConfig) {
     try {
@@ -415,14 +415,14 @@ export default {
   async modes() {
     return [
       { id: 'default', order: 1, label: 'Спрашивать', hint: 'Kimi спрашивает перед изменениями и командами.' },
-      // «Авто» — кокпит-политика поверх ACP-режима default: безопасные действия
+      // «Авто» — политика GrigDesk поверх ACP-режима default: безопасные действия
       // разрешает классификатор (lib/chat/auto-approve.js), деструктивные и
       // неизвестные уходят человеку. На ACP-режим `auto` он намеренно НЕ мапится:
-      // там решение принимает сам Kimi, и всплывашка кокпита перестаёт появляться.
+      // там решение принимает сам Kimi, и всплывашка GrigDesk перестаёт появляться.
       { id: 'auto', order: 2, label: 'Авто', hint: 'Правки и команды без спроса; деструктивные — только с подтверждением.' },
       { id: 'plan', order: 3, label: 'План', hint: 'Сначала составить план и дождаться его подтверждения.' },
       // «Без подтверждений» — родной ACP-режим `yolo` самого Kimi (ACP_MODES бинаря:
-      // default | plan | auto | yolo). Кокпит его не имитирует: спросов не будет
+      // default | plan | auto | yolo). GrigDesk его не имитирует: спросов не будет
       // вовсе, поэтому и классификатор к нему не применяется.
       { id: 'yolo', order: 4, label: 'Без подтверждений', hint: 'Kimi делает всё сам, не спрашивая (родной режим yolo).' },
     ];
@@ -447,7 +447,7 @@ export default {
 
   /**
    * Официальный read-only `/api/v1/oauth/usage` через краткоживущий loopback
-   * server самого Kimi. Cockpit не открывает OAuth credential file и не создаёт
+   * server самого Kimi. GrigDesk не открывает OAuth credential file и не создаёт
    * model session/turn.
    */
   async usage(config: KimiConfig, deps: { sleep?: (ms: number) => Promise<void> } = {}) {

@@ -17,7 +17,7 @@ import { onUnmounted, watch, watchEffect } from 'vue';
 import { UiDialogHost, UiTooltipHost, UiToastHost, useUiLayer, showToast } from '../../ui.ts';
 import { useAuthStore } from '../../stores/auth.js';
 import { useProvidersStore } from '../../stores/providers.js';
-import { useCockpitUpdateStore } from '../../stores/cockpit-update.js';
+import { useGrigDeskUpdateStore } from '../../stores/grigdesk-update.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useSse } from '../../composables/useSse.ts';
 import DocumentModal from '../../views/DocumentModal.vue';
@@ -29,7 +29,7 @@ import { closeCurrentWindow } from '../windowControl.ts';
 const SettingsView = asyncView(() => import('../../views/SettingsView.vue'));
 const auth = useAuthStore();
 const prov = useProvidersStore();
-const cockpitUpdate = useCockpitUpdateStore();
+const grigDeskUpdate = useGrigDeskUpdateStore();
 const chat = useChatStore();
 const channel = createSettingsWindowChannel();
 const actions = createSettingsWindowActions({
@@ -124,8 +124,8 @@ const { connected } = useSse((name, data) => {
     }
   } else if (name === 'providers-usage') {
     prov.applyUsage(record && 'usage' in record ? record.usage : undefined);
-  } else if (name === 'cockpit-update') {
-    void cockpitUpdate.load({ quiet: true });
+  } else if (name === 'grigdesk-update') {
+    void grigDeskUpdate.load({ quiet: true });
   } else if (name === 'speech-settings') {
     chat.setSpeechSnapshot(data);
   }

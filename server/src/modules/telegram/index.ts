@@ -670,8 +670,8 @@ async function telegramModule(
       const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
       await checked(lease, (context) => callWithLease(context, token, 'sendMessage', {
         chat_id: id,
-        text: `Код пульта кокпита: ${code}\nВведи его в карточке «Пульт». Код действует 10 минут; `
-          + 'если запрашивал не ты — не вводи его и проверь, кто открыл кокпит.',
+        text: `Код пульта GrigDesk: ${code}\nВведи его в карточке «Пульт». Код действует 10 минут; `
+          + 'если запрашивал не ты — не вводи его и проверь, кто открыл GrigDesk.',
       }, { timeoutMs: 15_000 }));
       pultPending.set(String(lease.accountRef), {
         botId: normalizeTelegramBotId(lease.context.botId),
@@ -750,7 +750,7 @@ async function telegramModule(
           chat_id: settings.pultChatId,
           text: 'Пульт выключен, клавиатура убрана.'
             + `${lastCode ? ` Код ${lastCode} погашен.` : ''}`
-            + ' Для нового включения запроси код в кокпите.',
+            + ' Для нового включения запроси код в GrigDesk.',
           reply_markup: { remove_keyboard: true },
         }, { timeoutMs: 15_000 }));
       }

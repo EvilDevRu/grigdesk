@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Python-дашборд читает тот же generic env, что сервер Cockpit: single-repo
+# Python-дашборд читает тот же generic env, что сервер GrigDesk: single-repo
 # показывается без выдуманных BE/FE, а повреждённый REPO_* не падает в legacy.
 python3 - "$FACTORY_HOME/lib/dashboard.py" <<'PY'
 import importlib.util

@@ -65,7 +65,7 @@ export const CLAUDE_DIRECT_SSH_DENY = Object.freeze([
 ]);
 
 export const DIRECT_SSH_CONFIRM_TEXT =
-  'Агент сможет запускать прямые SSH-клиенты с правами процесса Cockpit. '
+  'Агент сможет запускать прямые SSH-клиенты с правами процесса GrigDesk. '
   + 'Режим прав Bash не заменяет этот запрет. '
   + 'Подтверждений и журнала SSH-инструмента не будет.';
 

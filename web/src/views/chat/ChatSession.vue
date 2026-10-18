@@ -429,7 +429,7 @@
           </div>
           <UiSpinner v-if="attachBusy" decorative />
         </div>
-        <!-- Меню команд/навыков над композером: секция кокпита + секция исполнителя модели -->
+        <!-- Меню команд/навыков над композером: секция GrigDesk + секция исполнителя модели -->
         <div v-if="cmdMenu.length" ref="cmdMenuEl" class="cmd-menu">
           <template v-for="item in cmdMenu" :key="item.key">
             <div v-if="item.header" class="cmd-head">
@@ -849,7 +849,7 @@ const modelOptionTitle = (model, provider) => modelContextTitle(model, model.id)
 const modelOptionLabel = (model) => model.name
   + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
   + (model.unknown ? ' ?' : '');
-// Группы моделей для селекта (что именно видно — решает стор, правило одно на весь кокпит).
+// Группы моделей для селекта (что именно видно — решает стор, правило одно на весь GrigDesk).
 const provGroups = computed(() => prov.providers
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
@@ -1350,7 +1350,7 @@ function scrollDown() { if (body.value) body.value.scrollTop = body.value.scroll
 // ── Высота поля ввода ───────────────────────────────────────────────────────────
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
 // высоту решает CSS, как раньше.
-const COMPOSER_KEY = 'cockpit-chat-composer-h';
+const COMPOSER_KEY = 'grigdesk-chat-composer-h';
 // Минимум совпадает с CSS (`[data-role='chat-composer'] { min-height: 48px }`): иначе
 // нижняя часть хода разделителя мертва — тянешь, число меняется, поле стоит.
 const COMPOSER_MIN = 48;
@@ -1547,12 +1547,12 @@ async function submit() {
 }
 
 // Ход прерван перезапуском сервера или оборван самим CLI (сеть, лимит): сессия
-// исполнителя цела (транскрипт CLI живёт на диске отдельно от кокпита), поэтому
+// исполнителя цела (транскрипт CLI живёт на диске отдельно от GrigDesk), поэтому
 // продолжение — обычное сообщение в ту же сессию. Текст называет причину по метке:
 // агент должен сверить сделанное, а не переделывать с нуля.
 const RESUME_TAIL = 'Продолжай с места остановки: сверь, что уже сделано, и доведи работу до конца.';
 const RESUME_TEXT = Object.freeze({
-  server_shutdown: `Сервер кокпита перезапустился, и твой ход был прерван. ${RESUME_TAIL}`,
+  server_shutdown: `Сервер GrigDesk перезапустился, и твой ход был прерван. ${RESUME_TAIL}`,
   delivery_failure: 'Твой прошлый ход оборвал сам CLI (сеть или лимит), ответ до меня не дошёл. '
     + RESUME_TAIL,
 });
@@ -1630,13 +1630,13 @@ function onKey(e) {
 }
 
 // ── Команды и навыки: «/» открывает CLI-команды, «$» — skills Codex ──
-// Две секции: клиентские команды кокпита и команды CLI выбранной модели (провайдерский
+// Две секции: клиентские команды GrigDesk и команды CLI выбранной модели (провайдерский
 // список приезжает в /api/providers, контракт — server/src/lib/executors/index.js).
 const COMMANDS = [
-  { cmd: '/compact', desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки', source: 'cockpit', run: 'local' },
-  { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента', source: 'cockpit', run: 'local' },
-  { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)', source: 'cockpit', run: 'local' },
-  { cmd: '/new', desc: 'Открыть новый чат', source: 'cockpit', run: 'local' },
+  { cmd: '/compact', desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки', source: 'grigdesk', run: 'local' },
+  { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента', source: 'grigdesk', run: 'local' },
+  { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)', source: 'grigdesk', run: 'local' },
+  { cmd: '/new', desc: 'Открыть новый чат', source: 'grigdesk', run: 'local' },
 ];
 // Команды исполнителя текущей модели. Резолвер тот же, что у селекта модели: для
 // legacy-чатов без modelRef провайдер достаётся из сохранённого id модели.
@@ -1646,8 +1646,8 @@ const providerCommands = computed(() => {
   return (Array.isArray(p?.commands) ? p.commands : [])
     .map((c) => ({ ...c, source: p.id }));
 });
-// Объединённый список: команда кокпита глушит провайдерскую с тем же именем
-// (/compact уже есть у кокпита — дубль не показываем, поведение не меняется).
+// Объединённый список: команда GrigDesk глушит провайдерскую с тем же именем
+// (/compact уже есть у GrigDesk — дубль не показываем, поведение не меняется).
 const allCommands = computed(() => {
   const merged = [...COMMANDS];
   for (const c of providerCommands.value) {
@@ -1671,10 +1671,10 @@ const cmdMenu = computed(() => {
   const items = [];
   let nav = 0;
   const push = (c) => items.push({ ...c, key: `${c.source}:${c.cmd}`, nav: c.run === 'none' ? -1 : nav++ });
-  const cockpit = cmdMatches.value.filter((c) => c.source === 'cockpit');
-  const own = cmdMatches.value.filter((c) => c.source !== 'cockpit');
-  if (cockpit.length) items.push({ header: 'Cockpit', key: 'h:cockpit' });
-  cockpit.forEach(push);
+  const grigdesk = cmdMatches.value.filter((c) => c.source === 'grigdesk');
+  const own = cmdMatches.value.filter((c) => c.source !== 'grigdesk');
+  if (grigdesk.length) items.push({ header: 'GrigDesk', key: 'h:grigdesk' });
+  grigdesk.forEach(push);
   if (own.length) items.push({ header: providerInfo.value?.name || 'Исполнитель', color: providerInfo.value?.color || '', key: 'h:provider' });
   own.forEach(push);
   return items;
@@ -1693,7 +1693,7 @@ async function runCommand(command) {
     ? allCommands.value.find((x) => x.cmd === command)
     : command;
   if (!c || c.run === 'none') return;
-  if (c.source !== 'cockpit') {
+  if (c.source !== 'grigdesk') {
     // Провайдерская команда/навык. Гард тот же, что у submit():
     // пока чат заморожен (сжатие/reset), ничего не выполняем и ввод не трогаем.
     if (!sess.value || frozen.value) return;
@@ -2183,7 +2183,7 @@ function skipQuestion() {
   color: var(--bad); padding: 8px 12px; border-radius: 10px; font-size: 12.5px; }
 .msg.error .text::before { content: '⚠ '; }
 
-/* Служебная плашка самого кокпита (сжали контекст, сбросили память агента) — это не
+/* Служебная плашка самого GrigDesk (сжали контекст, сбросили память агента) — это не
    реплика: её не говорил ни агент, ни человек. Поэтому по центру, без пузыря и подписи. */
 .msg.note { align-self: center; max-width: 90%; }
 .msg.note .text { font-size: 12.5px; color: var(--ink-mid); background: var(--surface-2);

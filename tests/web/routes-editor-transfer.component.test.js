@@ -13,7 +13,7 @@ function singleRouteBundle(draft) {
     escalate: { routes: ['audit'] },
   };
   return {
-    format: 'cockpit-route-authoring', schema: 1, sourceProfile: 'sample',
+    format: 'grigdesk-route-authoring', schema: 1, sourceProfile: 'sample',
     content: {
       routes: { quick: route },
       bootstrap: { schema: 2, kind: 'bootstrap', profile: 'sample', id: 'scout',
@@ -26,7 +26,7 @@ function singleRouteBundle(draft) {
 
 test('RE-G4-03/05: файл показывает источник, зависимости и выбор при совпадении ID',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RouteTransferDialog.vue'));
     const { mount, flushPromises } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -54,7 +54,7 @@ test('RE-G4-03/05: файл показывает источник, зависи�
 
 test('RE-G4-02: смена целевого проекта оставляет только создание нового черновика',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RouteTransferDialog.vue'));
     const { mount, flushPromises } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -75,7 +75,7 @@ test('RE-G4-02: смена целевого проекта оставляет т
 
 test('RE-G4-01/05: web actions передают точную ревизию и перечитывают результат PATCH',
   async (t) => {
-    await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const { createPinia, setActivePinia } = await import(
       '../../web/node_modules/pinia/dist/pinia.mjs'
     );

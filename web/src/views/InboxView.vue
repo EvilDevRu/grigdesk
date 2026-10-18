@@ -166,7 +166,7 @@
                     </span>
                   </span>
                   <span class="attachment-note">
-                    Перед задачей Cockpit проверит содержимое. Без полного разбора
+                    Перед задачей GrigDesk проверит содержимое. Без полного разбора
                     автозадача не создастся, а вручную задача ставится с вашим пояснением.
                   </span>
                   <span v-for="(attachment, attachmentIndex) in message.attachments"
@@ -875,7 +875,7 @@ function channelSettingsHref(id: string): string {
 }
 
 // Время приходит и в секундах, и в миллисекундах: у сообщений канала — Unix seconds,
-// у служебных отметок кокпита — миллисекунды. Различаем их по величине, а не по полю:
+// у служебных отметок GrigDesk — миллисекунды. Различаем их по величине, а не по полю:
 // поле у разных каналов называется по-разному, а порядок величины — общий.
 function formatTime(value: number): string {
   const numeric = Number(value);
@@ -1058,7 +1058,7 @@ function autoTaskState(item: InboxItem) {
 }
 
 function rememberPluginsTab() {
-  localStorage.setItem('cockpit-settings-tab', 'plugins');
+  localStorage.setItem('grigdesk-settings-tab', 'plugins');
 }
 
 useSse((name: string) => {

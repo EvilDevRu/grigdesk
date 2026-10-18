@@ -108,7 +108,7 @@ test('запись без видеодорожки оставляет задач
 // ── Имя кадра — единственное, что уходит наружу ─────────────────────────────
 
 test('имя кадра проверяется буквально, путь снаружи не принимается', (t) => {
-  const root = tempDir(t, 'cockpit-frames-');
+  const root = tempDir(t, 'grigdesk-frames-');
   fs.mkdirSync(path.join(root, RUN), { recursive: true });
   fs.writeFileSync(path.join(root, RUN, 'p0-00271s.jpg'), 'jpeg-bytes');
 
@@ -130,7 +130,7 @@ test('имя кадра проверяется буквально, путь сн
 });
 
 test('кадры прошлых разборов убираются по возрасту', (t) => {
-  const root = tempDir(t, 'cockpit-frames-ttl-');
+  const root = tempDir(t, 'grigdesk-frames-ttl-');
   const old = path.join(root, 'aaaaaaaaaaaaaaaa');
   const fresh = path.join(root, 'bbbbbbbbbbbbbbbb');
   fs.mkdirSync(old, { recursive: true });
@@ -191,7 +191,7 @@ async function buildMediaApp(t, { framesRoot, meetingFrames }) {
 }
 
 test('к задаче приезжает кадр её таймкода, и его байты отдаёт отдельная ручка', async (t) => {
-  const root = tempDir(t, 'cockpit-frames-api-');
+  const root = tempDir(t, 'grigdesk-frames-api-');
   const asked = [];
   const app = await buildMediaApp(t, {
     framesRoot: root,
@@ -225,7 +225,7 @@ test('к задаче приезжает кадр её таймкода, и ег
 });
 
 test('отказ ffmpeg оставляет задачи без кадра, а не рушит разбор', async (t) => {
-  const root = tempDir(t, 'cockpit-frames-fail-');
+  const root = tempDir(t, 'grigdesk-frames-fail-');
   const app = await buildMediaApp(t, {
     framesRoot: root,
     meetingFrames: async () => { throw new Error('ffmpeg упал'); },

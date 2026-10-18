@@ -18,6 +18,9 @@ export type QrPayload = {
   };
 };
 
+// Префикс держит длину в одном месте: смещение payload считается по нему, а не числом.
+const LINK_PREFIX = 'grigdesklink:1:';
+
 /**
  * Канонический base64url не принимает мусор, padding или скрытую повторную кодировку.
  * Проверка одинакова для внешнего QR и 32-байтного токена посредника.
@@ -42,12 +45,12 @@ function decode(value: string) {
  */
 export function parseQr(source: string): QrPayload {
   try {
-    if (!source.startsWith('cockpitlink:1:') || new TextEncoder().encode(source).length > 4096) {
+    if (!source.startsWith(LINK_PREFIX) || new TextEncoder().encode(source).length > 4096) {
       throw new Error('bad_prefix');
     }
 
     const value = JSON.parse(
-      new TextDecoder('utf-8', { fatal: true }).decode(decode(source.slice(14))),
+      new TextDecoder('utf-8', { fatal: true }).decode(decode(source.slice(LINK_PREFIX.length))),
     );
     const { brain, relay, pair } = value;
     const name = (item: unknown) => typeof item === 'string' && item.trim() && item.length <= 200;
@@ -77,6 +80,6 @@ export function parseQr(source: string): QrPayload {
 
     return value as QrPayload;
   } catch {
-    throw new Error('Неверный код привязки. Возьмите QR в настройках Кокпита.');
+    throw new Error('Неверный код привязки. Возьмите QR в настройках GrigDesk.');
   }
 }

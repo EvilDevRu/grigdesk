@@ -149,7 +149,7 @@ test('всплывашка исполнителя короткая и сама �
   assert.doesNotMatch(source, /@mouseenter="prov\.loadUsage\(\)"/u);
   assert.doesNotMatch(source, /@pointerdown="prov\.loadUsage\(\)"/u);
   // Установку новой версии начинают из самой всплывашки: раньше точка о ней только
-  // сообщала. Ход один на кокпит, поэтому кнопка ждёт чужую установку тоже.
+  // сообщала. Ход один на GrigDesk, поэтому кнопка ждёт чужую установку тоже.
   assert.match(popover, /:disabled="!!prov\.updating"/u);
   assert.match(popover, /:loading="prov\.updating === p\.id"/u);
   assert.match(popover, /@click="prov\.updateCli\(p\.id\)"/u);

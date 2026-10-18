@@ -10,25 +10,16 @@ import { parseLockTarget, readWindow, windowAppPath, windowDataDir } from '../..
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
 test('CO-1 пути установки и профиля', () => {
-  assert.equal(windowAppPath({
-    HOME: '/home/user',
-    XDG_DATA_HOME: '/data',
-  }),
-    '/data/cockpit/desktop/cockpit-desktop.AppImage');
-  assert.equal(windowAppPath({
-    HOME: '/home/user',
-    XDG_DATA_HOME: '',
-  }),
-    '/home/user/.local/share/cockpit/desktop/cockpit-desktop.AppImage');
+  assert.equal(windowAppPath('/opt/копия grigdesk'), '/opt/копия grigdesk/bin/grigdesk-app');
   assert.equal(windowDataDir({
     HOME: '/home/user',
-    COCKPIT_DESKTOP_DATA_DIR: '/profile',
+    GRIGDESK_DESKTOP_DATA_DIR: '/profile',
   }), '/profile');
   assert.equal(windowDataDir({
     HOME: '/home/user',
-    COCKPIT_DESKTOP_DATA_DIR: 'relative',
+    GRIGDESK_DESKTOP_DATA_DIR: 'relative',
   }),
-    '/home/user/.config/Кокпит');
+    '/home/user/.config/GrigDesk');
 });
 
 test('CO-2 блокировка: последний дефис и положительный целый PID', () => {
@@ -51,8 +42,8 @@ test('CO-3 настоящие ссылки и завершившийся про�
   };
 
   box.lock(`${os.hostname()}-${process.pid}`);
-  assert.equal(await readWindow(env), 'open');
-  rmSync(path.join(env.XDG_CONFIG_HOME, 'Кокпит/SingletonLock'));
+  assert.equal(await readWindow(box.root, env), 'open');
+  rmSync(path.join(env.XDG_CONFIG_HOME, 'GrigDesk/SingletonLock'));
   box.installWindow();
 
   const child = spawn(process.execPath, ['-e', '']);
@@ -61,10 +52,10 @@ test('CO-3 настоящие ссылки и завершившийся про�
   assert.ok(pid);
   await completed(child);
   box.lock(`${os.hostname()}-${pid}`);
-  assert.equal(await readWindow(env), 'closed');
-  rmSync(path.join(env.XDG_CONFIG_HOME, 'Кокпит/SingletonLock'));
-  rmSync(path.join(env.XDG_DATA_HOME, 'cockpit/desktop/cockpit-desktop.AppImage'));
-  assert.equal(await readWindow(env), 'not_installed');
+  assert.equal(await readWindow(box.root, env), 'closed');
+  rmSync(path.join(env.XDG_CONFIG_HOME, 'GrigDesk/SingletonLock'));
+  rmSync(path.join(box.root, 'bin/grigdesk-app'));
+  assert.equal(await readWindow(box.root, env), 'not_installed');
 });
 
 test('CO-4 с descriptor: окно запущено, systemctl не вызывался, HTTP-запросов нет', async (t) => {
@@ -72,7 +63,7 @@ test('CO-4 с descriptor: окно запущено, systemctl не вызыва
 
   box.installWindow();
   box.installRuntime();
-  await box.serve('cockpit');
+  await box.serve('grigdesk');
 
   const result = await box.run([]);
 
@@ -84,7 +75,7 @@ test('CO-4 с descriptor: окно запущено, systemctl не вызыва
 
   // Справка не обещает запрос сервера без оговорки про переходный режим.
   const help = HELP_TEXT.replace(/\s+/gu, ' ');
-  const promise = 'Открыть окно Кокпита; сервер поднимает само окно (без runtime.json — через службу)';
+  const promise = 'Открыть окно GrigDesk; сервер поднимает само окно (без runtime.json — через службу)';
 
   assert.ok(help.includes(promise), HELP_TEXT);
   assert.doesNotMatch(help, /запросить запуск сервера/u);
@@ -94,9 +85,9 @@ test('CO-5 ровно один аргумент, только путь ключ�
   const box = await createSandbox(t);
 
   box.installWindow();
-  writeFileSync(path.join(box.home, '.cockpit/.env'), [
-    `COCKPIT_PORT=${box.port}`,
-    'COCKPIT_WINDOW_KEY_PATH=/run/test/key',
+  writeFileSync(path.join(box.home, '.grigdesk/.env'), [
+    `GRIGDESK_PORT=${box.port}`,
+    'GRIGDESK_WINDOW_KEY_PATH=/run/test/key',
     'SECRET_TOKEN=s3cret',
   ].join('\n'));
 
@@ -104,7 +95,7 @@ test('CO-5 ровно один аргумент, только путь ключ�
 
   assert.equal(result.code, 0, result.stderr);
   await box.waitFor(() => box.calls().some((call) => call.startsWith('app-secret ')));
-  assert.ok(box.calls().includes(`app --cockpit-url=http://127.0.0.1:${box.port}/`));
+  assert.ok(box.calls().includes(`app --grigdesk-url=http://127.0.0.1:${box.port}/`));
   assert.ok(box.calls().includes('app-argc 1'));
   assert.ok(box.calls().includes('app-key /run/test/key'));
   assert.ok(box.calls().includes('app-secret '));
@@ -115,7 +106,7 @@ test('CO-6 без descriptor: готовый сервер не стартует 
 
   ready.installWindow();
   ready.unit({ ActiveState: 'active' });
-  await ready.serve('cockpit');
+  await ready.serve('grigdesk');
 
   assert.equal((await ready.run([])).code, 0);
   assert.ok(!ready.calls().some((call) => call.includes(' start ')));
@@ -148,19 +139,19 @@ test('CO-6 без descriptor: готовый сервер не стартует 
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Окно открывается/);
   assert.equal(stopped.calls().filter((call) =>
-    call === 'systemctl --user start --no-block cockpit-server.service').length, 1);
+    call === 'systemctl --user start --no-block grigdesk-server.service').length, 1);
 });
 
 test('CO-7 нет окна: с descriptor — ошибка без запроса сервера; без — прежнее поведение', async (t) => {
   const described = await createSandbox(t);
 
   described.installRuntime();
-  await described.serve('cockpit');
+  await described.serve('grigdesk');
 
   const refused = await described.run([]);
 
   assert.equal(refused.code, 1);
-  assert.match(refused.stderr, /cockpit desktop install/);
+  assert.match(refused.stderr, /grigdesk-ctl desktop install/);
   assert.deepEqual(described.calls(), []);
   assert.deepEqual(described.requests(), []);
 
@@ -168,8 +159,8 @@ test('CO-7 нет окна: с descriptor — ошибка без запроса
   const result = await legacy.run([]);
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /cockpit desktop install/);
-  assert.ok(legacy.calls().includes('systemctl --user start --no-block cockpit-server.service'));
+  assert.match(result.stderr, /grigdesk-ctl desktop install/);
+  assert.ok(legacy.calls().includes('systemctl --user start --no-block grigdesk-server.service'));
   assert.ok(!legacy.calls().some((call) => call.startsWith('xdg-open ')));
 });
 
@@ -182,7 +173,7 @@ test('CO-8 нет графического сеанса: с descriptor — ош�
 
   described.installWindow();
   described.installRuntime();
-  await described.serve('cockpit');
+  await described.serve('grigdesk');
 
   const refused = await described.run([], headless);
 
@@ -200,14 +191,14 @@ test('CO-8 нет графического сеанса: с descriptor — ош�
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Нет графического сеанса/);
   assert.ok(!legacy.calls().some((call) => call.startsWith('app ')));
-  assert.ok(legacy.calls().includes('systemctl --user start --no-block cockpit-server.service'));
+  assert.ok(legacy.calls().includes('systemctl --user start --no-block grigdesk-server.service'));
 });
 
 test('CO-9 сторож окна до эффектов, force разрешает', async (t) => {
   const box = await createSandbox(t);
 
   box.installWindow();
-  writeFileSync(path.join(box.home, 'cgroup'), '0::/user.slice/cockpit-server.service');
+  writeFileSync(path.join(box.home, 'cgroup'), '0::/user.slice/grigdesk-server.service');
 
   const refused = await box.run([]);
 

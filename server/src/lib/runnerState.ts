@@ -1,4 +1,4 @@
-// Представление multi-AI маршрутизации для API Cockpit.
+// Представление multi-AI маршрутизации для API GrigDesk.
 //
 // Источник истины не дублируется: профиль читается из того же
 // profiles/<profile>/runners.env, а task override и фактический результат —

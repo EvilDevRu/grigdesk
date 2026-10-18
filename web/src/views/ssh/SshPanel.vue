@@ -255,7 +255,7 @@
               </span>
               <span>
                 <strong>{{ activeSession.label }}</strong>
-                <small>Сессия хранится на сервере кокпита</small>
+                <small>Сессия хранится на сервере GrigDesk</small>
               </span>
             </div>
 

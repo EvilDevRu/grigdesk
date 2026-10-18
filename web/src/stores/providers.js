@@ -55,7 +55,7 @@ export const useProvidersStore = defineStore('providers', {
         : null;
     },
     /**
-     * Модели исполнителя, которые видно в выборе. Правило одно на весь кокпит: краткий
+     * Модели исполнителя, которые видно в выборе. Правило одно на весь GrigDesk: краткий
      * список = только свежие версии, `extra` (старые версии) — под настройкой; выбранную
      * сейчас модель показываем всегда, иначе селект потеряет значение.
      */
@@ -200,7 +200,7 @@ export const useProvidersStore = defineStore('providers', {
         }
 
         this.usageTransport.status = 'error';
-        this.usageTransport.error = error?.message || 'Не удалось получить лимиты от Cockpit.';
+        this.usageTransport.error = error?.message || 'Не удалось получить лимиты от GrigDesk.';
         this.usageTransport.deliveryStale = this.usageTransport.receivedAt > 0;
       }
     },

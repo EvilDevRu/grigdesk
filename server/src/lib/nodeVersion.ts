@@ -1,4 +1,4 @@
-// Минимальная версия Node для Cockpit.
+// Минимальная версия Node для GrigDesk.
 //
 // Сервер исполняет собственный TypeScript снятием типов, и с 22.18 оно включено по
 // умолчанию. Ниже этой версии запуск невозможен физически: импорт `.ts` падает на
@@ -54,7 +54,7 @@ export function assertSupportedNode(actual: string = process.versions.node): voi
     }
 
     throw new Error(
-        `Cockpit требует Node ^${MIN_NODE_VERSION} || >=24.0.0, запущен ${actual}. `
+        `GrigDesk требует Node ^${MIN_NODE_VERSION} || >=24.0.0, запущен ${actual}. `
         + `Обнови Node (nvm install ${MIN_NODE_VERSION}) и повтори запуск.`,
     );
 }

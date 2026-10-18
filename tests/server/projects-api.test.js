@@ -24,7 +24,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function withPrefs(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-projects-api-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-projects-api-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const prefsPath = path.join(dir, 'prefs.json');
   const profilesDir = path.join(dir, 'profiles');
@@ -98,7 +98,7 @@ function updateBody(repos, overrides = {}) {
   };
 }
 
-test('GET /api/projects проходит parseProjectSummaries, профиль и кокпитный проект на месте', async (t) => {
+test('GET /api/projects проходит parseProjectSummaries, профиль и проект GrigDesk на месте', async (t) => {
   const { app, env } = await projectsApp(t);
   const dir = await makeRepoDir(env, 'be');
 

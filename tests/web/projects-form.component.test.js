@@ -124,7 +124,7 @@ async function mountForm(t, {
   lifecycleResult = { ok: true, error: '', message: '' },
   confirmed = true,
 } = {}) {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/projects/demo');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/projects/demo');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const route = reactive({ path: '/projects/demo', params: { id: 'demo' }, query: {} });
   const store = reactive({

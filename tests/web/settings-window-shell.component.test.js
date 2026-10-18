@@ -67,8 +67,8 @@ async function fixture(t, authenticated = true, pending = 0) {
       '../../stores/providers.js': `
         export const useProvidersStore = () => globalThis.__settingsShell.providers;`,
       '../../stores/chat.js': 'export const useChatStore = () => globalThis.__settingsShell.chat;',
-      '../../stores/cockpit-update.js': `
-        export const useCockpitUpdateStore = () => globalThis.__settingsShell.update;`,
+      '../../stores/grigdesk-update.js': `
+        export const useGrigDeskUpdateStore = () => globalThis.__settingsShell.update;`,
       '../../composables/useSse.ts': `export const useSse = (fn) => {
         globalThis.__settingsShell.sse = fn;
         return { connected: globalThis.__settingsShell.connected };
@@ -142,7 +142,7 @@ test('SW-U02 серверные события доходят до настро�
   h.sse('providers-update', { credentials: 'claude' });
   h.sse('providers-update', {});
   h.sse('providers-usage', { usage: { claude: 1 } });
-  h.sse('cockpit-update', {});
+  h.sse('grigdesk-update', {});
   h.sse('speech-settings', { enabled: true });
   h.connected.value = true;
   assert.deepEqual(h.calls.map((call) => call[0]),

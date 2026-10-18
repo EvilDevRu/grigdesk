@@ -26,12 +26,12 @@ export function askAgentDraft(detail: Studio3dModelDetail, version: Studio3dVers
     + `Файл: ${detail.modelDirectory}/${version.id}/${file.name}\n`
     + `${statsText(version.stats)}.\n`
     + (detail.model.project ? `Проект: ${detail.model.project}.\n` : '')
-    + `Результат положи в ${detail.modelDirectory}/incoming/ — кокпит предложит добавить его версией.`;
+    + `Результат положи в ${detail.modelDirectory}/incoming/ — GrigDesk предложит добавить его версией.`;
 }
 
 /**
  * До создания разговора штатный resolver проверяет папку и capability выбранного исполнителя.
- * Черновик не отправляется сам; библиотека вне Cockpit не наследует чужой default cwd.
+ * Черновик не отправляется сам; библиотека вне GrigDesk не наследует чужой default cwd.
  */
 export async function askStudioAgent(detail: Studio3dModelDetail, version: Studio3dVersion,
   chat: ChatPort, router: { push(path: string): Promise<unknown> },

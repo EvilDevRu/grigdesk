@@ -15,7 +15,7 @@ import { InTurnMessages } from '../../server/src/lib/chat/inTurnMessages.ts';
 import { IN_TURN_ATTACHMENT_LIMIT, IN_TURN_BACKLOG_LIMIT } from '../../shared/chat/chatInTurnContracts.ts';
 
 async function tmpDir() {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-in-turn-core-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-in-turn-core-'));
 }
 
 /** Сборка координатора с журналами во временном каталоге: никакого общего состояния. */

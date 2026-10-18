@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Кокпит</string>
-    <string name="title_activity_main">Кокпит</string>
-    <string name="package_name">local.cockpit.mobile</string>
-    <string name="custom_url_scheme">local.cockpit.mobile</string>
+    <string name="app_name">GrigDesk</string>
+    <string name="title_activity_main">GrigDesk</string>
+    <string name="package_name">local.grigdesk.mobile</string>
+    <string name="custom_url_scheme">local.grigdesk.mobile</string>
 </resources>

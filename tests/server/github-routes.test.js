@@ -19,7 +19,7 @@ const STATUS = {
   cleanupPending: false,
 };
 
-async function fixture(t, { enabled = true, connectionOver = {}, projects = ['cockpit'] } = {}) {
+async function fixture(t, { enabled = true, connectionOver = {}, projects = ['grigdesk'] } = {}) {
   const calls = {
     status: 0,
     connect: [],
@@ -35,7 +35,7 @@ async function fixture(t, { enabled = true, connectionOver = {}, projects = ['co
   const events = [];
   const rules = [{
     repositoryId: '123456',
-    project: 'cockpit',
+    project: 'grigdesk',
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
     autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
@@ -186,12 +186,12 @@ test('rules читаются offline с fingerprint, а запись требу�
   });
   const body = {
     repositoryId: '123456',
-    rules: [{ repositoryId: '123456', project: 'cockpit', kind: 'bug' }],
+    rules: [{ repositoryId: '123456', project: 'grigdesk', kind: 'bug' }],
   };
   const write = await app.inject({ method: 'PUT', url: '/api/github/rules', payload: body });
   assert.equal(write.statusCode, 409);
   assert.equal(write.json().error, 'github_account_changed');
-  assert.deepEqual(calls.rulesWrite, [{ value: body.rules, options: { projects: ['cockpit'] } }]);
+  assert.deepEqual(calls.rulesWrite, [{ value: body.rules, options: { projects: ['grigdesk'] } }]);
   assert.equal(calls.release, 2);
 });
 
@@ -278,7 +278,7 @@ test('human rules PUT не может пронести agentSearch в общий
       repositoryId: '123456',
       rules: [{
         repositoryId: '123456',
-        project: 'cockpit',
+        project: 'grigdesk',
         kind: 'bug',
         agentSearch: true,
       }],

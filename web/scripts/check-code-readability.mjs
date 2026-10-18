@@ -11,7 +11,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
 const DEFAULT_BASELINE = 'tests/web/fixtures/ui/code-readability-baseline.json';
 const MAX_LINE_LENGTH = 110;
-// Проверка по списку файлов: правила те же, но для любого слоя кода Кокпита. Сторож по
+// Проверка по списку файлов: правила те же, но для любого слоя кода GrigDesk. Сторож по
 // базовой линии видит только TypeScript в web/, и нарушения в JS-сторах, сервере,
 // скриптах и тестах проходили молча.
 const CODE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.vue']);
@@ -312,7 +312,7 @@ export function collectCodeReadability(repoRoot = DEFAULT_REPO_ROOT) {
 }
 
 /**
- * Любой исходник Кокпита: JS и TS по расширению, у SFC — оба блока script на любом
+ * Любой исходник GrigDesk: JS и TS по расширению, у SFC — оба блока script на любом
  * языке. Базовая линия так не делает (она держит только TypeScript), поэтому этот путь
  * живёт отдельно и её числа не меняет.
  */
@@ -419,10 +419,10 @@ function git(repoRoot, args) {
 }
 
 /**
- * Исходник Кокпита: код по расширению в известных корнях, без зависимостей и сборки.
+ * Исходник GrigDesk: код по расширению в известных корнях, без зависимостей и сборки.
  * Чужие каталоги в дереве (временные лаборатории, артефакты) проверку не засоряют.
  */
-function isCockpitCode(file) {
+function isGrigDeskCode(file) {
   return CODE_EXTENSIONS.has(path.extname(file))
     && CODE_ROOTS.some((root) => file.startsWith(root))
     && !/(^|\/)(node_modules|dist)\//.test(file);
@@ -439,7 +439,7 @@ export function changedCodeFiles(repoRoot = DEFAULT_REPO_ROOT) {
   ];
 
   return [...new Set(listed.map((file) => file.trim()).filter(Boolean))]
-    .filter((file) => isCockpitCode(file) && fs.existsSync(path.join(repoRoot, file)))
+    .filter((file) => isGrigDeskCode(file) && fs.existsSync(path.join(repoRoot, file)))
     .sort();
 }
 

@@ -5,7 +5,7 @@
 // Редактируемого legacy-стора `routes/<проект>/<id>.json` больше нет. Он ничего не
 // исполнял: движок читал profile.sh и graph.json, а apply у reseed был отключён ещё
 // раньше — вторая «схема» рядом с бандлом только путала, чью правку увидит прогон.
-// Проекты, заведённые в кокпите, держались подпапкой этого стора; теперь их реестр —
+// Проекты, заведённые в GrigDesk, держались подпапкой этого стора; теперь их реестр —
 // prefs.projects, где и так лежат их пути репозиториев для плагина «Код».
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -19,9 +19,9 @@ import { registerRoutesEditorApi } from './editorApi.ts';
 import { CatalogObserver } from './catalogObserver.ts';
 import type { CatalogObserverScheduler } from './catalogObserver.ts';
 import { RoutesStore } from './store.ts';
-import type { CockpitConfig } from '../../config.ts';
+import type { GrigDeskConfig } from '../../config.ts';
 
-// Реестр проектов кокпита живёт в ещё нетипизированном сторе настроек: объявлено
+// Реестр проектов GrigDesk живёт в ещё нетипизированном сторе настроек: объявлено
 // ровно то, что читает и пишет этот модуль.
 export interface RoutesPrefsPort extends ProjectsPrefsPort {
   read: () => { projects?: Record<string, unknown> };
@@ -29,7 +29,7 @@ export interface RoutesPrefsPort extends ProjectsPrefsPort {
 }
 
 export interface RoutesModuleOptions {
-  config: Pick<CockpitConfig, 'routesDir' | 'profilesDir'> & { routesAuthoringDir?: string };
+  config: Pick<GrigDeskConfig, 'routesDir' | 'profilesDir'> & { routesAuthoringDir?: string };
   prefs: RoutesPrefsPort;
   catalogScheduler?: CatalogObserverScheduler;
 }
@@ -60,12 +60,12 @@ async function routesModule(fastify: FastifyInstance, opts: RoutesModuleOptions)
   // ── Проекты ──
   fastify.get('/api/profiles', async () => ({ profiles: await listProjects(config, prefs) }));
 
-  // Новый проект кокпита — запись реестра паспортов; дальше ему задают пути репозиториев
+  // Новый проект GrigDesk — запись реестра паспортов; дальше ему задают пути репозиториев
   // («Проекты»), и его видит плагин «Код». Заводит её сервис раздела «Проекты»: у реестра
   // одна очередь мутаций, одна ревизия и одно событие на оба входа, а своя очередь здесь
   // означала бы две независимые записи в тот же файл настроек.
   // Профиль фабрики так НЕ заводится: его route-контракт создают вручную по
-  // PROFILE-CONTRACT/NEW-PROJECT, а кокпит не подделывает локальный каталог profiles/.
+  // PROFILE-CONTRACT/NEW-PROJECT, а GrigDesk не подделывает локальный каталог profiles/.
   fastify.post('/api/profiles', async (
     req: FastifyRequest<{ Body: { id?: unknown } | null }>,
     reply,

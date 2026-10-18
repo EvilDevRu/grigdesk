@@ -1,7 +1,7 @@
 <template>
   <UiCard class="wait-card" :data-kind="item.kind">
     <template v-if="item.kind === 'unsupported'">
-      <h2>Нужно решение в кокпите</h2>
+      <h2>Нужно решение в GrigDesk</h2>
       <p>{{ item.reason }}</p>
     </template>
     <template v-else-if="item.kind === 'permission'">

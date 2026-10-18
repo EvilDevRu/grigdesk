@@ -6,10 +6,10 @@ diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
  import { AcpSession } from './session.ts'
  
 +// Host-мост регистрирует приватные методы SDK; инструментов модели здесь нет.
-+// Сервис монтируется launcher-ом Cockpit поверх исходного settings controller.
++// Сервис монтируется launcher-ом GrigDesk поверх исходного settings controller.
 +declare module '@deepseek-ai/cordis' {
 +  interface Context {
-+    cockpitAcpSettingsBridge: {
++    grigdeskAcpSettingsBridge: {
 +      capabilities: Record<string, { contract: number }>
 +      configure(app: ReturnType<typeof createAcpAgentApp>): void
 +    }
@@ -21,7 +21,7 @@ diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
  export const name = 'acp'
  /** Core services required by the standard automation controls. */
 -export const inject = ['agents', 'llm', 'sessionPersistence', 'sessions']
-+export const inject = ['agents', 'llm', 'sessionPersistence', 'sessions', 'cockpitAcpSettingsBridge']
++export const inject = ['agents', 'llm', 'sessionPersistence', 'sessions', 'grigdeskAcpSettingsBridge']
  
  /** Preserve invalid-parameter detail in the SDK wire error message. */
  function invalidParams(detail: string): RequestError {
@@ -29,7 +29,7 @@ diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
  export function apply(ctx: Context, config: AcpConfig): void {
    // ACP handlers execute outside this plugin's injection scope, so capture the
    // injected service during apply rather than reading it lazily in a callback.
-+  const cockpitSettings = ctx.cockpitAcpSettingsBridge
++  const grigdeskSettings = ctx.grigdeskAcpSettingsBridge
    const persistence = ctx.sessionPersistence
    const logger = ctx.logger
    const sessionListPageSize = resolveSessionListPageSize(config.sessionListPageSize)
@@ -37,7 +37,7 @@ diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
          protocolVersion: PROTOCOL_VERSION,
          agentInfo: { name: 'deepseek-harness-acp', version: '0.0.1' },
          agentCapabilities: {
-+          _meta: cockpitSettings.capabilities,
++          _meta: grigdeskSettings.capabilities,
            mcpCapabilities: { http: true },
            promptCapabilities: { image: imagePromptEnabled, audio: false, embeddedContext: false },
            sessionCapabilities: { close: {}, list: {}, resume: {} },
@@ -45,7 +45,7 @@ diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
      .onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal))
      .onRequest(methods.agent.session.prompt, ({ params, signal }) => implementation.prompt(params, signal))
      .onNotification(methods.agent.session.cancel, ({ params }) => implementation.cancel(params))
-+  cockpitSettings.configure(app)
++  grigdeskSettings.configure(app)
    const connection = app.connect(stream)
    const conn: AgentContext = connection.client
  

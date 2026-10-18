@@ -299,7 +299,7 @@ const updatedLabel = computed(() => {
 const BLOCKED: Record<string, string> = {
   pipeline_owned: 'Стендом владеет конвейер или общий checkout: он сносится из карточки задачи.',
   job_running: 'По стенду сейчас идёт работа.',
-  unknown_owner: 'Кокпит не знает, чей это стенд, — снос остаётся за скриптом профиля в терминале.',
+  unknown_owner: 'GrigDesk не знает, чей это стенд, — снос остаётся за скриптом профиля в терминале.',
 };
 
 const blockedReason = computed(() => BLOCKED[props.entry.removableReason || ''] || '');

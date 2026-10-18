@@ -240,7 +240,7 @@ test('кнопка «Все узлы» живой карточки правит 
   assert.equal(pult.answers().length, 1, 'callback обязан быть отвечен, иначе «часики»');
 });
 
-test('снятые команды больше не работают: ни одного вызова кокпита', async (t) => {
+test('снятые команды больше не работают: ни одного вызова GrigDesk', async (t) => {
   const pult = await fixture(t);
   for (const text of [
     '/task Починить экспорт\nописание',

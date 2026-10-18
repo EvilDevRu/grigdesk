@@ -11,10 +11,10 @@ const CONFIG_URL = pathToFileURL(path.join(ROOT, 'server/src/config.ts')).href;
 
 test('по умолчанию сервер использует встроенный engine', async () => {
   const savedHome = process.env.FACTORY_HOME;
-  const savedBin = process.env.COCKPIT_FACTORY_BIN;
+  const savedBin = process.env.GRIGDESK_FACTORY_BIN;
   const savedProfiles = process.env.FACTORY_PROFILES_DIR;
   delete process.env.FACTORY_HOME;
-  delete process.env.COCKPIT_FACTORY_BIN;
+  delete process.env.GRIGDESK_FACTORY_BIN;
   delete process.env.FACTORY_PROFILES_DIR;
   try {
     const { config } = await import(`${CONFIG_URL}?defaults-test=${Date.now()}`);
@@ -24,8 +24,8 @@ test('по умолчанию сервер использует встроенн
   } finally {
     if (savedHome === undefined) delete process.env.FACTORY_HOME;
     else process.env.FACTORY_HOME = savedHome;
-    if (savedBin === undefined) delete process.env.COCKPIT_FACTORY_BIN;
-    else process.env.COCKPIT_FACTORY_BIN = savedBin;
+    if (savedBin === undefined) delete process.env.GRIGDESK_FACTORY_BIN;
+    else process.env.GRIGDESK_FACTORY_BIN = savedBin;
     if (savedProfiles === undefined) delete process.env.FACTORY_PROFILES_DIR;
     else process.env.FACTORY_PROFILES_DIR = savedProfiles;
   }
@@ -34,7 +34,7 @@ test('по умолчанию сервер использует встроенн
 // Конфигурацию читаем отдельным процессом с закрытым окружением: живые пути не наследуются.
 // Импорт чистый: его вывод достаточно сравнить с ожидаемой раскладкой.
 function dataConfig(t, extra = {}) {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'cockpit-config-home-'));
+  const home = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-config-home-'));
 
   t.after(() => rmSync(home, { recursive: true, force: true }));
 
@@ -43,7 +43,7 @@ function dataConfig(t, extra = {}) {
     env: { 
       PATH: '/usr/bin:/bin', 
       HOME: home, 
-      COCKPIT_HOME: home + '/h', 
+      GRIGDESK_HOME: home + '/h', 
       NODE_ENV: 'test', 
       ...extra 
     },
@@ -109,7 +109,7 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
     authAccountPath: 'state/auth-account.json',
     authSessionsPath: 'state/auth-sessions.json',
     cliTokenPath: 'state/cli-token',
-    cockpitUpdateStatePath: 'state/cockpit-update.json',
+    grigDeskUpdateStatePath: 'state/grigdesk-update.json',
     pluginInstallsStatePath: 'state/plugin-installs.json',
   };
 
@@ -128,20 +128,20 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
 });
 
 test('CD-DH-2 умолчание и CD-DH-5 чистый импорт не создаёт данных', (t) => {
-  const { home, config: c, result } = dataConfig(t, { COCKPIT_HOME: '' });
+  const { home, config: c, result } = dataConfig(t, { GRIGDESK_HOME: '' });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(c.dataHome, home + '/.cockpit');
-  assert.equal(existsSync(home + '/.cockpit'), false);
+  assert.equal(c.dataHome, home + '/.grigdesk');
+  assert.equal(existsSync(home + '/.grigdesk'), false);
 });
 
 test('CD-DH-3 явный путь хранилища сильнее общего умолчания', (t) => {
-  assert.equal(dataConfig(t, { COCKPIT_CHATS_DIR: '/x/chats' }).config.chatsDir, '/x/chats');
+  assert.equal(dataConfig(t, { GRIGDESK_CHATS_DIR: '/x/chats' }).config.chatsDir, '/x/chats');
 });
 
 test('CD-DH-4 относительная папка отвергается', (t) => {
-  const { result } = dataConfig(t, { COCKPIT_HOME: 'relative' });
+  const { result } = dataConfig(t, { GRIGDESK_HOME: 'relative' });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /COCKPIT_HOME должен быть абсолютным путём/);
+  assert.match(result.stderr, /GRIGDESK_HOME должен быть абсолютным путём/);
 });

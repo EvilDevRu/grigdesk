@@ -47,7 +47,7 @@ function convertNode(raw: unknown): Record<string, unknown> {
   for (const [native, json] of [
     ['min', 'minimum'],
     ['max', 'maximum'],
-    ['step', 'x-cockpit-step'],
+    ['step', 'x-grigdesk-step'],
   ] as const) {
     if (typeof meta[native] === 'number') {
       const key =

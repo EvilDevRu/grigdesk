@@ -29,7 +29,7 @@ export async function createWorkIpc({ workTools, root = os.tmpdir() }: {
   workTools: WorkToolsPort;
   root?: string;
 }): Promise<WorkIpc> {
-  const dir = await fs.mkdtemp(path.join(root, 'cockpit-work-'));
+  const dir = await fs.mkdtemp(path.join(root, 'grigdesk-work-'));
   await fs.chmod(dir, 0o700);
   const socketPath = path.join(dir, 'work.sock');
   const nonce = randomUUID();

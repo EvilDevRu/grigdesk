@@ -13,7 +13,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t, { identity, identityError } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-seen-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-task-seen-api-'));
   const filePath = path.join(root, 'task-seen.json');
   t.after(() => rm(root, { recursive: true, force: true }));
 

@@ -431,7 +431,7 @@
                   </span>
                   <span>
                     <strong>{{ activeSession.label }}</strong>
-                    <small>{{ activeSession.projectId }} · сессия хранится в кокпите</small>
+                    <small>{{ activeSession.projectId }} · сессия хранится в GrigDesk</small>
                   </span>
                 </div>
 

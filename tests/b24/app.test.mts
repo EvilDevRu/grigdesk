@@ -73,7 +73,7 @@ test('BP-01: импорт библиотечных модулей не имее�
     env: {
       PATH: '/usr/bin:/bin',
       HOME: '/nonexistent-home',
-      COCKPIT_HOME: 'relative-invalid',
+      GRIGDESK_HOME: 'relative-invalid',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -140,13 +140,13 @@ test('BP-03: ошибки конфигурации и stdin не открыва�
 
   assert.equal(await runB24(['dashboard'], RUNTIME, missingToken), 1);
   assert.deepEqual(missingToken.stdout, []);
-  assert.deepEqual(missingToken.stderr, ['Нет токена: /home/user/.cockpit/state/cli-token.\n']);
+  assert.deepEqual(missingToken.stderr, ['Нет токена: /home/user/.grigdesk/state/cli-token.\n']);
   assert.ok(!missingToken.calls.includes('request'));
 
   const badStdin = harness({
     env: {
-      COCKPIT_URL: 'http://127.0.0.1:9',
-      COCKPIT_TOKEN: 'tok',
+      GRIGDESK_URL: 'http://127.0.0.1:9',
+      GRIGDESK_TOKEN: 'tok',
     },
   });
 
@@ -156,22 +156,22 @@ test('BP-03: ошибки конфигурации и stdin не открыва�
 
   const badAddress = harness({
     env: {
-      COCKPIT_URL: 'ftp://host',
-      COCKPIT_TOKEN: 'tok',
+      GRIGDESK_URL: 'ftp://host',
+      GRIGDESK_TOKEN: 'tok',
     },
   });
 
   assert.equal(await runB24(['dashboard'], RUNTIME, badAddress), 1);
   assert.deepEqual(badAddress.stderr, [
-    'Некорректный адрес Cockpit: нужен HTTP(S) URL без учётных данных и query.\n',
+    'Некорректный адрес GrigDesk: нужен HTTP(S) URL без учётных данных и query.\n',
   ]);
   assert.deepEqual(badAddress.calls, []);
 });
 
 test('BP-04: отказ записи не оставляет необработанного исключения', async () => {
   const env = {
-    COCKPIT_URL: 'http://127.0.0.1:9',
-    COCKPIT_TOKEN: 'tok',
+    GRIGDESK_URL: 'http://127.0.0.1:9',
+    GRIGDESK_TOKEN: 'tok',
   };
   const epipe = harness({
     env,

@@ -6,7 +6,7 @@ import path from 'node:path';
  *
  * Claude и Kimi читают этот файл сами, Codex — свой `.codex/config.toml`. DSH же получает
  * список серверов только через ACP `session/new`/`session/resume`, и до этой правки в него
- * попадал лишь служебный `cockpit-work`. Здесь та же схема файла (`{ mcpServers: { name:
+ * попадал лишь служебный `grigdesk-work`. Здесь та же схема файла (`{ mcpServers: { name:
  * { command, args, env } } }`), но только stdio: DSH требует абсолютную command, поэтому
  * относительная команда разрешается по PATH сервера, а запись без исполняемого файла
  * пропускается с предупреждением, а не роняет ход.
@@ -25,8 +25,8 @@ export interface ProjectMcpRead {
   warnings: string[];
 }
 
-// Имя внутреннего сервера Cockpit нельзя перекрыть проектным файлом.
-const RESERVED_NAMES = new Set(['cockpit-work', 'cockpit-perm']);
+// Имя внутреннего сервера GrigDesk нельзя перекрыть проектным файлом.
+const RESERVED_NAMES = new Set(['grigdesk-work', 'grigdesk-perm']);
 
 /** Ближайший каталог с `.git` вверх от cwd; без репозитория корнем считается сам cwd. */
 export async function nearestProjectRoot(cwd: string): Promise<string> {
@@ -106,7 +106,7 @@ export async function parseProjectMcpServers(
   for (const [rawName, entry] of Object.entries(entries as Record<string, unknown>)) {
     const name = String(rawName || '').trim();
     if (!name || RESERVED_NAMES.has(name)) {
-      warnings.push(`${rawName}: имя пустое или зарезервировано Cockpit`);
+      warnings.push(`${rawName}: имя пустое или зарезервировано GrigDesk`);
       continue;
     }
     const record = entry as {
@@ -193,7 +193,7 @@ export async function readProjectMcpServers(
 }
 
 /**
- * Служебные серверы Cockpit идут первыми и выигрывают у одноимённых проектных;
+ * Служебные серверы GrigDesk идут первыми и выигрывают у одноимённых проектных;
  * проектные дубликаты по имени тоже не пропускаются — DSH отвергает повтор имени.
  */
 export function mergeMcpServers(

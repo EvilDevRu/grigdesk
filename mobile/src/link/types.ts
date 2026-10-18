@@ -41,7 +41,7 @@ export type LinkEvent = {
   generation: number;
 };
 export type Listener = { remove: () => Promise<void> };
-export interface CockpitLink {
+export interface GrigDeskLink {
   getState(): Promise<LinkState>;
   addFromText(input: { text: string }): Promise<void>;
   scanQr(): Promise<{ text: string }>;

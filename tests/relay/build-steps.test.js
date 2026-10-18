@@ -19,6 +19,13 @@ import { temporary } from './helpers.js';
 const root = new URL('../../', import.meta.url).pathname;
 const manifest = JSON.parse(await readFile(new URL('../../relay/build/node-runtime.json', import.meta.url)));
 
+test('GR-01: сборщик публикует SEA под новым именем', async () => {
+  const source = await readFile(path.join(root, 'relay/scripts/build.mts'), 'utf8');
+
+  assert.ok(source.includes("publishFile(path.join(work, 'grigdesk-relay'), " +
+    "path.join(outDir, 'grigdesk-relay'))"));
+});
+
 test('RL-41: аргументы сборки', () => {
   const relay = path.join(root, 'relay');
   const cwd = '/tmp/папка с пробелами';
@@ -134,7 +141,7 @@ test('RL-44: атомарная публикация сохраняет преж
   const directory = await temporary(t);
   const source = path.join(directory, 'source');
   const output = path.join(directory, 'новая папка');
-  const target = path.join(output, 'cockpit-relay');
+  const target = path.join(output, 'grigdesk-relay');
 
   await mkdir(output);
   await writeFile(source, 'новый файл');
@@ -142,12 +149,12 @@ test('RL-44: атомарная публикация сохраняет преж
   await publishFile(source, target);
   assert.equal(await readFile(target, 'utf8'), 'новый файл');
   assert.equal((await stat(target)).mode & 0o777, 0o755);
-  assert.deepEqual(await readdir(output), ['cockpit-relay']);
+  assert.deepEqual(await readdir(output), ['grigdesk-relay']);
   await assert.rejects(() => publishFile(path.join(directory, 'нет'), target));
   assert.equal(await readFile(target, 'utf8'), 'новый файл');
-  assert.deepEqual(await readdir(output), ['cockpit-relay']);
-  await publishFile(source, path.join(directory, 'ещё нет', 'cockpit-relay'));
-  assert.equal(await readFile(path.join(directory, 'ещё нет', 'cockpit-relay'), 'utf8'), 'новый файл');
+  assert.deepEqual(await readdir(output), ['grigdesk-relay']);
+  await publishFile(source, path.join(directory, 'ещё нет', 'grigdesk-relay'));
+  assert.equal(await readFile(path.join(directory, 'ещё нет', 'grigdesk-relay'), 'utf8'), 'новый файл');
 });
 
 test('RL-44: SEA config точно задаёт лицензию и изоляцию аргументов Node', () => {

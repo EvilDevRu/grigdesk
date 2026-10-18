@@ -97,7 +97,7 @@ export async function writeDeepSeekLoopbackOverlay(options: {
   const source = [
     `import Schema from ${JSON.stringify(schemaModule)};`,
     'import { writeFileSync } from "node:fs";',
-    'export const name = "cockpit-loopback-fixture";',
+    'export const name = "grigdesk-loopback-fixture";',
     'export const inject = ["settings"];',
     'export function apply(ctx) {',
     '  const original = globalThis.fetch;',
@@ -109,7 +109,7 @@ export async function writeDeepSeekLoopbackOverlay(options: {
     '    return original(input, ...args);',
     '  };',
     ...(options.restartOwner ? [
-      '  const scope = ctx.settings.register("cockpit-restart-test",',
+      '  const scope = ctx.settings.register("grigdesk-restart-test",',
       '    Schema.object({ enabled: Schema.boolean().default(true) }), { applies: "restart" });',
       `  writeFileSync(${JSON.stringify(options.restartOwner)}, String(scope.get().enabled));`,
     ] : []),
@@ -133,7 +133,7 @@ export async function writeDeepSeekLoopbackOverlay(options: {
     '      mode: normal',
     '      maxRetries: 0',
     '- insert:',
-    '    - id: cockpit-loopback-fixture',
+    '    - id: grigdesk-loopback-fixture',
     `      name: ${JSON.stringify(pathToFileURL(plugin).href)}`,
   ].join('\n') + '\n', { mode: 0o600 });
 

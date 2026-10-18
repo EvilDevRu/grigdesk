@@ -2,8 +2,8 @@
 //
 // Почему синглтон обязателен: браузерный лимит HTTP/1.1 — 6 соединений на хост.
 // Раньше каждый useSse() и пермишены чата открывали СВОЙ EventSource (3 на вкладку);
-// две вкладки кокпита съедали весь пул, и все fetch вставали в очередь «(ожидает)»
-// навсегда — выглядело как «кокпит завис», хотя сервер отвечал за миллисекунды.
+// две вкладки GrigDesk съедали весь пул, и все fetch вставали в очередь «(ожидает)»
+// навсегда — выглядело как «GrigDesk завис», хотя сервер отвечал за миллисекунды.
 import { ref, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
 
@@ -15,7 +15,7 @@ const EVENT_NAMES = [
   'state-change',
   'providers-update',
   'providers-usage',
-  'cockpit-update',
+  'grigdesk-update',
   'chat-permission',
   'chat-question',
   'chat-permission-done',

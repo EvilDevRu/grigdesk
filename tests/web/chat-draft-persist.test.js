@@ -11,7 +11,7 @@ import test from 'node:test';
 
 import { apiHarness, chatStoreFixture } from './helpers/chat-store.js';
 
-const SNAP_KEY = 'cockpit-chat-snapshot';
+const SNAP_KEY = 'grigdesk-chat-snapshot';
 
 /** localStorage в тестовом Node отсутствует, а снимок пишется именно туда. */
 function fakeStorage({ quota = Infinity } = {}) {

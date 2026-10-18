@@ -46,7 +46,7 @@ test('PR-01 spawn получает системный Node, точные опц�
 });
 
 test('PR-02 журнал создаётся 0600, ротируется свыше 10 МБ и открывается на дозапись', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-server-log-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-server-log-'));
   const log = path.join(root, 'nested/server.log');
 
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -87,7 +87,7 @@ test('PR-02 журнал создаётся 0600, ротируется свыш�
  * Окружение полностью задаётся фикстурой и не содержит параметров живого сервера.
  */
 async function gateRuntime(t, script, extraEnv = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-vpn-gate-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-vpn-gate-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'deploy'));
@@ -180,7 +180,7 @@ test('PR-05 снимок службы обрезает пробелы, ошиб�
     const state = await readUnitState(signal, (file, args, options, callback) => {
       assert.equal(file, 'systemctl');
       assert.deepEqual(args, [
-        '--user', 'show', 'cockpit-server.service', '--property=ActiveState', '--value',
+        '--user', 'show', 'grigdesk-server.service', '--property=ActiveState', '--value',
       ]);
       assert.equal(options.timeout, 5000);
       assert.equal(options.signal, signal);

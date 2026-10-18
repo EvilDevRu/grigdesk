@@ -95,7 +95,7 @@ function fakeController() {
 }
 
 function tempSession(t, options = {}) {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-stream-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-stream-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const harness = fakeController();
   const filePath = path.join(root, 'audio.pcm');
@@ -144,7 +144,7 @@ test('stream argv закрепляет тот же pinned local model contract',
       device: 'cpu',
       computeType: 'int8',
       beamSize: 3,
-      hotwords: 'Cockpit',
+      hotwords: 'GrigDesk',
       vadSilenceMs: 700,
       conditionOnPreviousText: false,
     },
@@ -160,7 +160,7 @@ test('stream argv закрепляет тот же pinned local model contract',
     '--compute-type', 'int8',
     '--beam-size', '3',
     '--vad-silence-ms', '700',
-    '--hotwords', 'Cockpit',
+    '--hotwords', 'GrigDesk',
     '--no-condition-previous',
   ]);
 });
@@ -429,7 +429,7 @@ test('session делает один decode, схлопывает watermark и St
 });
 
 test('пустые VAD-окна продвигают безопасный watermark и не теряют позднюю речь', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-stream-silence-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-stream-silence-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const calls = [];
   let cancels = 0;
@@ -480,7 +480,7 @@ test('пустые VAD-окна продвигают безопасный waterm
 
 test('session deadlines fail-closed гасят idle и hard-limit диктовки', async (t) => {
   async function expectDeadline(innerT, options, feed = null) {
-    const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-stream-deadline-'));
+    const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-stream-deadline-'));
     innerT.after(() => rmSync(root, { recursive: true, force: true }));
     let cancels = 0;
     const session = new SpeechStreamSession({
@@ -577,7 +577,7 @@ test('Stop timeout гасит worker, а поздний decode не создаё
 });
 
 test('cancel во время finishing не воскресает в final/done после death barrier', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-stream-finish-cancel-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-stream-finish-cancel-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const barrier = deferred();
   let cancels = 0;
@@ -632,7 +632,7 @@ test('cancel удаляет raw и не выпускает поздний тек
 });
 
 test('повторный cancel ждёт тот же process death barrier', async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-stream-cancel-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-speech-stream-cancel-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const barrier = deferred();
   let cancels = 0;
@@ -663,7 +663,7 @@ test('повторный cancel ждёт тот же process death barrier', asy
 });
 
 test('Python worker работает офлайн с local_files_only и абсолютными timestamps', (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-stream-worker-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-stream-worker-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const modules = path.join(root, 'modules');
   const audio = path.join(root, 'audio.pcm');

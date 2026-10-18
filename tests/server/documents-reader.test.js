@@ -12,7 +12,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function fixture(t, { maxBytes = 1024, deps = {} } = {}) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-documents-'));
   const root = path.join(dir, 'root');
   const outside = path.join(dir, 'outside');
   await fs.mkdir(root);
@@ -208,7 +208,7 @@ test('DOC-09: изменение уже открытого файла после
 });
 
 test('DOC-10: generic text reader ограничен максимумом 16 MiB', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-limit-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-documents-limit-'));
   const root = path.join(dir, 'root');
   await fs.mkdir(root);
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
@@ -229,7 +229,7 @@ test('DOC-10: generic text reader ограничен максимумом 16 MiB
 });
 
 test('DOC-11: самый узкий root владеет document и asset при вложенных sources', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-nested-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-documents-nested-'));
   const outer = path.join(dir, 'outer');
   const inner = path.join(outer, 'inner');
   await fs.mkdir(inner, { recursive: true });
@@ -288,7 +288,7 @@ test('DOC-12: папки области видны только ссылке, н
   assert.equal(document.content, '# Герой\n');
   assert.equal(asset.contentType, 'image/png');
 
-  // Общий корень с тем же путём побеждает: документ Cockpit остаётся ссылкой `test`.
+  // Общий корень с тем же путём побеждает: документ GrigDesk остаётся ссылкой `test`.
   const own = await reader.resolveAbsolute(path.join(root, 'own.md'), 'chat:a1');
 
   assert.deepEqual(own.ref, { source: 'test', path: 'own.md' });

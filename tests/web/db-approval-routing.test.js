@@ -7,7 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 const CHAT_STORE = webFile('src/stores/chat.js');
 
 async function chatStore(t, api) {
-  await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   globalThis.__dbApprovalApi = api;
   const module = await compileModule(CHAT_STORE, {
     stubs: {

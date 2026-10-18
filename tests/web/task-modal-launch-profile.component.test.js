@@ -8,7 +8,7 @@ process.env.NODE_ENV = 'test';
 // launchOptions/launch задаёт тест, остальные вызовы — безобидные пустышки.
 async function mountLaunchForm(t, { launchOptions }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -116,7 +116,7 @@ async function mountLaunchForm(t, { launchOptions }) {
 
 test('TaskModal выбирает project-beta, перечитывает feature и шлёт profile в launch', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,

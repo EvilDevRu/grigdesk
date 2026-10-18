@@ -21,7 +21,7 @@ const Fastify = requireServer('fastify');
  * Только модель заменена функцией; живой сервер, systemd и профиль проекта не вызываются.
  */
 async function fixture(t, outcome = 'failed') {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cockpit-bootstrap-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-bootstrap-'));
 
   t.after(async () => rm(directory, { recursive: true, force: true }));
 

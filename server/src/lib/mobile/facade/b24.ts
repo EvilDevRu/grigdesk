@@ -33,11 +33,11 @@ function status(task: Payload) {
 
 /**
  * Запуск с телефона доступен только без отсутствующих обязательных полей формы.
- * Explicit instrumentation требует основного Кокпита; приложение не угадывает файлы.
+ * Explicit instrumentation требует основного GrigDesk; приложение не угадывает файлы.
  */
 function disabledReason(option: Payload) {
   return option.instrumentationRequired || option.instrumentationMode === 'explicit'
-    ? 'Нужны параметры инструментации в Кокпите.'
+    ? 'Нужны параметры инструментации в GrigDesk.'
     : null;
 }
 
@@ -119,7 +119,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
           : snapshot.profileContractError
             ? text(snapshot.profileContractError, 4000)
             : routes.length > 100
-              ? 'Слишком много вариантов; используйте Кокпит.'
+              ? 'Слишком много вариантов; используйте GrigDesk.'
               : !snapshot.profile || !/^[a-f0-9]{64}$/.test(String(snapshot.catalogHash))
                 ? text(snapshot.message || 'Варианты запуска недоступны.', 4000)
                 : null;
@@ -153,7 +153,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
               hash: factorySnapshotHash(snapshot),
             })
           : null,
-        reason: reason || (available ? null : 'Нужна форма запуска в Кокпите.'),
+        reason: reason || (available ? null : 'Нужна форма запуска в GrigDesk.'),
       });
     },
   );

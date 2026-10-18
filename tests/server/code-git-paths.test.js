@@ -24,7 +24,7 @@ const otherPath = 'outside.txt';
  * обе команды снятия с индекса: restore и rm --cached.
  */
 async function repository(t, withHead) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-literal-paths-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-code-literal-paths-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   await git(root, ['init', '-q', '-b', 'main', '.']);

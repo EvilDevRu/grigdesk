@@ -134,7 +134,7 @@ async function writeContentAddressedJson(dir, prefix, value) {
 // Синтетическое состояние воспроизводит trusted контракт движка во временном каталоге.
 // Помощник не обращается к пользовательским прогонам или внешним аккаунтам.
 export async function seedFactory(t, { cursor = null, rootDirectory = null } = {}) {
-  const root = rootDirectory || (await mkdtemp(path.join(os.tmpdir(), 'cockpit-gate-cursor-')));
+  const root = rootDirectory || (await mkdtemp(path.join(os.tmpdir(), 'grigdesk-gate-cursor-')));
   const stateDir = path.join(root, 'state');
   const controlDir = path.join(root, 'control');
   const routesDir = path.join(root, 'routes');
@@ -511,7 +511,7 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
           method,
           url,
           payload,
-          headers: { 'x-cockpit-internal': 'test' },
+          headers: { 'x-grigdesk-internal': 'test' },
         });
 
         return {
@@ -531,7 +531,7 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
               const response = await app.inject({
                 method,
                 url,
-                headers: { 'x-cockpit-internal': 'test' },
+                headers: { 'x-grigdesk-internal': 'test' },
               });
 
               return {
@@ -555,7 +555,7 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
     const saved = await core.app.inject({
       method: 'PUT',
       url: '/api/chat/store/chat',
-      headers: { 'x-cockpit-internal': 'test' },
+      headers: { 'x-grigdesk-internal': 'test' },
       payload: {
         chat: {
           id: 'integration-chat',

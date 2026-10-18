@@ -17,17 +17,17 @@ const CLOSED_VALUES = [
   'extra-canary',
 ];
 
-const ROOT = '/fixture/cockpit-root';
-const NOTE = 'Показана конфигурация MCP для папки кокпита. '
+const ROOT = '/fixture/grigdesk-root';
+const NOTE = 'Показана конфигурация MCP для папки GrigDesk. '
   + 'В другой папке чата список может отличаться. '
   + 'Соединение не проверялось. Показаны только stdio-серверы, выбранные для запуска.';
-const PARTIAL_NOTE = 'Конфигурация MCP для папки кокпита прочитана или проверена не полностью. '
+const PARTIAL_NOTE = 'Конфигурация MCP для папки GrigDesk прочитана или проверена не полностью. '
   + 'Список может быть неполным; проверьте `.mcp.json` и команды запуска.';
-const EMPTY_TEXT = 'Для папки кокпита нет MCP-серверов, выбранных для запуска.';
-const LIST_ERROR = 'Не удалось получить список MCP для папки кокпита. '
+const EMPTY_TEXT = 'Для папки GrigDesk нет MCP-серверов, выбранных для запуска.';
+const LIST_ERROR = 'Не удалось получить список MCP для папки GrigDesk. '
   + 'Проверьте `.mcp.json` и команды запуска.';
-const READ_ERROR = 'Не удалось прочитать конфигурацию MCP для папки кокпита.';
-const ROOT_ERROR = 'Для списка MCP не задана абсолютная папка кокпита.';
+const READ_ERROR = 'Не удалось прочитать конфигурацию MCP для папки GrigDesk.';
+const ROOT_ERROR = 'Для списка MCP не задана абсолютная папка GrigDesk.';
 const RAW_ERROR = '/fixture/private-path warning-canary {"secret":"json-canary"}';
 
 /**
@@ -380,8 +380,8 @@ test('файлы DeepSeek: хорошие записи сохраняются р
     missing: { command: path.join(fixture.root, 'missing-canary') },
     badArgs: { ...fixture.entry, args: [12] },
     badEnv: { ...fixture.entry, env: { 'secret-canary=bad': 'token-canary' } },
-    'cockpit-work': fixture.entry,
-    'cockpit-perm': fixture.entry,
+    'grigdesk-work': fixture.entry,
+    'grigdesk-perm': fixture.entry,
   });
 
   const result = await unchangedStatus(fixture);
@@ -391,7 +391,7 @@ test('файлы DeepSeek: хорошие записи сохраняются р
   assert.equal(result.note, `${NOTE} ${PARTIAL_NOTE}`);
   assert.equal(JSON.stringify(result).includes('canary'), false);
   assert.equal(JSON.stringify(result).includes(fixture.root), false);
-  assert.equal(JSON.stringify(result).includes('cockpit-'), false);
+  assert.equal(JSON.stringify(result).includes('grigdesk-'), false);
 });
 
 test('файлы DeepSeek: повреждённый JSON и только HTTP дают безопасную ошибку', async (t) => {
@@ -408,7 +408,7 @@ test('файлы DeepSeek: повреждённый JSON и только HTTP д
   await writeProject(fixture.root, { http: { url: 'https://fixture.invalid/secret-canary' } });
   assert.deepEqual(await unchangedStatus(fixture), expected);
 
-  await writeProject(fixture.root, { 'cockpit-work': fixture.entry, 'cockpit-perm': fixture.entry });
+  await writeProject(fixture.root, { 'grigdesk-work': fixture.entry, 'grigdesk-perm': fixture.entry });
   assert.deepEqual(await unchangedStatus(fixture), expected);
 });
 

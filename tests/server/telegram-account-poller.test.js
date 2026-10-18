@@ -81,7 +81,7 @@ test('поллер передаёт id автора сообщения, на к�
         text: 'свой ответ',
         reply_to_message: {
           message_id: 3,
-          from: { id: 8123456789, first_name: 'Кокпит', is_bot: true },
+          from: { id: 8123456789, first_name: 'GrigDesk', is_bot: true },
           text: 'карточка вопроса',
         },
       },

@@ -24,6 +24,7 @@ import {
 import { resolveLegacyModel, resolveModelRef } from '../chat/modelRef.ts';
 import { stripDiscussionSection } from '../telegram/discussion.ts';
 import { questionKey } from '../../../../shared/pipeline/analysisContracts.ts';
+import { LEGACY_VALUES } from '../../../../shared/runtime/legacyBrand.ts';
 import type {
   Analysis,
   AnalysisArbiterAnswerInput,
@@ -80,7 +81,7 @@ export interface ClarificationBatchResult {
   entries?: AnalysisClarificationEntry[];
 }
 
-const CLARIFICATION_MARKER_RE = /<!-- cockpit-clarification:v1 ([A-Za-z0-9_-]+) -->/g;
+const CLARIFICATION_MARKER_RE = /<!-- grigdesk-clarification:v1 ([A-Za-z0-9_-]+) -->/g;
 // Сколько живёт посчитанный diff sha..ref: анализы одной волны делят одну ревизию.
 const DIFF_CACHE_MS = 120_000;
 // Насколько свежим должно быть обновление репозиториев перед заходом: волна задач
@@ -188,7 +189,11 @@ function clarificationEntries(markdown: unknown): AnalysisClarificationEntry[] {
   for (const match of String(markdown || '').matchAll(CLARIFICATION_MARKER_RE)) {
     try {
       const parsed = JSON.parse(Buffer.from(String(match[1] || ''), 'base64url').toString('utf8'));
-      if (!parsed?.questionId || !['human', 'cockpit-arbiter'].includes(parsed.actor)) {
+
+      // Ответы арбитра до второго этапа переименования записаны прежним именем.
+      const actors: readonly unknown[] = ['human', 'grigdesk-arbiter', LEGACY_VALUES.arbiterActor];
+
+      if (!parsed?.questionId || !actors.includes(parsed.actor)) {
         continue;
       }
       entries.push({
@@ -197,7 +202,7 @@ function clarificationEntries(markdown: unknown): AnalysisClarificationEntry[] {
         // Текст вопроса и подписи вариантов записаны в самой записи: оценка триажа
         // перезаписывается следующим заходом, и без копии ответ теряет свой вопрос.
         questionText: boundedText(parsed.questionText, 1000),
-        actor: parsed.actor === 'human' ? 'human' : 'cockpit-arbiter',
+        actor: parsed.actor === 'human' ? 'human' : 'grigdesk-arbiter',
         status: parsed.status === 'human_required' ? 'human_required' : 'answered',
         selection: Array.isArray(parsed.selection)
           ? parsed.selection.map((value: unknown) => boundedText(value, 100)).filter(Boolean)
@@ -359,7 +364,7 @@ export class Analyzer {
     }
 
     const registry = await this.providerRegistry();
-    const legacy = process.env.COCKPIT_ANALYSIS_MODEL || 'sonnet';
+    const legacy = process.env.GRIGDESK_ANALYSIS_MODEL || 'sonnet';
     const resolved = resolveLegacyModel(legacy, { claude: registry?.claude || [] });
     this._legacyMigrationUnavailable = !resolved.ok;
     const next = {
@@ -511,7 +516,7 @@ export class Analyzer {
   async appendClarificationBatch(
     id: string | number,
     answers: ClarificationAnswer[],
-    { actor = 'human' }: { actor?: 'human' | 'cockpit-arbiter' } = {},
+    { actor = 'human' }: { actor?: 'human' | 'grigdesk-arbiter' } = {},
   ): Promise<ClarificationBatchResult> {
     const analysis = await this._readJson(this._paths(id).json);
     const questions = new Map(
@@ -553,7 +558,7 @@ export class Analyzer {
         });
       }
 
-      const machine = actor === 'cockpit-arbiter';
+      const machine = actor === 'grigdesk-arbiter';
       const status = machine && answer?.status === 'human_required'
         ? 'human_required'
         : 'answered';
@@ -564,7 +569,7 @@ export class Analyzer {
         id: boundedText(answer?.id, 100) || `answer-${randomUUID()}`,
         questionId: question.id,
         questionText: question.text,
-        actor: machine ? 'cockpit-arbiter' : 'human',
+        actor: machine ? 'grigdesk-arbiter' : 'human',
         status,
         selection,
         selectionLabels,
@@ -578,11 +583,11 @@ export class Analyzer {
 
     const current = await this.readClarifications(id);
     const blocks = entries.map((entry: AnalysisClarificationEntry) => {
-      const heading = entry.actor === 'cockpit-arbiter'
+      const heading = entry.actor === 'grigdesk-arbiter'
         ? 'Разбор арбитра — машинный'
         : 'Ответ человека';
       const marker = Buffer.from(JSON.stringify(entry)).toString('base64url');
-      return `${clarificationBlock(entry, heading)}\n<!-- cockpit-clarification:v1 ${marker} -->`;
+      return `${clarificationBlock(entry, heading)}\n<!-- grigdesk-clarification:v1 ${marker} -->`;
     });
     const next = `${current}${current ? '\n' : ''}${blocks.join('\n\n')}\n`;
     await fs.mkdir(this.dir, { recursive: true });
@@ -890,7 +895,7 @@ export class Analyzer {
           providerSettings: this.prefs?.read?.().providerSettings?.[String(selected.provider)] || {},
           workspaceAccess,
           workTools,
-          ...(workIpc ? { mcpConfig: { mcpServers: { 'cockpit-work': workIpc.mcpServer } } } : {}),
+          ...(workIpc ? { mcpConfig: { mcpServers: { 'grigdesk-work': workIpc.mcpServer } } } : {}),
         });
       } finally {
         await workIpc?.close().catch(() => {});
@@ -939,7 +944,7 @@ export class Analyzer {
   }
 
   /**
-   * Обновление репозиториев перед заходом — правило кокпита, выключается в настройках.
+   * Обновление репозиториев перед заходом — правило GrigDesk, выключается в настройках.
    * Итог не старше REFRESH_MAX_AGE_MS переиспользуется, идущий fetch ждут, а не читают
    * код посреди него (общий механизм в lib/gitRefresh.ts).
    */

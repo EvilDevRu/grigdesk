@@ -12,11 +12,11 @@ process.env.NODE_ENV = 'test';
 // Поднимает happy-dom и раздаёт его узлы в globalThis: компонент настроек
 // рассчитывает на браузерные глобали (см. соседний тест живых сессий).
 async function installBrowser(t, storage = {}) {
-  globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
-  globalThis.__COCKPIT_SHA__ = 'testsha';
+  globalThis.__GRIGDESK_VERSION__ = '0.0.0-test';
+  globalThis.__GRIGDESK_SHA__ = 'testsha';
 
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/settings' });
+  const browser = new Window({ url: 'http://grigdesk.test/#/settings' });
 
   for (const [key, value] of Object.entries({
     window: browser,
@@ -56,7 +56,7 @@ async function installBrowser(t, storage = {}) {
  * заданный снимок prefs и записывает каждый POST, а работающий сервер не читается.
  */
 async function mountRuns(t, { prefs, postError = null } = {}) {
-  const browser = await installBrowser(t, { 'cockpit-settings-tab': 'runs' });
+  const browser = await installBrowser(t, { 'grigdesk-settings-tab': 'runs' });
   const writes = [];
   const snapshot = prefs || {
     chatLiveSessions: true,
@@ -148,7 +148,7 @@ async function mountRuns(t, { prefs, postError = null } = {}) {
       wakeLock: false,
       async install() {},
     }),
-    useCockpitUpdateStore: () => ({ state: null, async load() {} }),
+    useGrigDeskUpdateStore: () => ({ state: null, async load() {} }),
   };
 
   const [{ mount, flushPromises }, SettingsView] = await Promise.all([

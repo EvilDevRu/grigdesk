@@ -59,7 +59,7 @@ async function admin(t, unavailable = false) {
       method,
       url,
       payload,
-      headers: authenticated ? { cookie: 'cockpit_sid=test-session' } : {},
+      headers: authenticated ? { cookie: 'grigdesk_sid=test-session' } : {},
     });
 
   return {
@@ -109,7 +109,7 @@ test('MB-18…MB-22, MB-31: настройки закрыты, QR/env не кэ�
 
   const qr = await call('POST', `/api/mobile/relays/${relay.id}/qr`, { pair: true });
   const value = qr.json();
-  const decoded = JSON.parse(Buffer.from(value.text.slice('cockpitlink:1:'.length), 'base64url'));
+  const decoded = JSON.parse(Buffer.from(value.text.slice('grigdesklink:1:'.length), 'base64url'));
 
   assert.match(value.svg, /^<svg/);
   assert.equal(decoded.relay.token, stored.deviceToken);

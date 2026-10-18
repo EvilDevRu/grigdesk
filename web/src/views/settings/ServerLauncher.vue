@@ -5,7 +5,7 @@
         <h3>Автозапуск и ярлык</h3>
         <p>
           Механизм — юнит systemd: он ждёт VPN, поднимает сервер после падения и стартует
-          до входа в систему. Здесь — только решение, нужен ли такой старт, и ярлык «Кокпит»,
+          до входа в систему. Здесь — только решение, нужен ли такой старт, и ярлык GrigDesk,
           который открывает окно, а спящий сервер поднимает сам.
         </p>
       </div>
@@ -27,7 +27,7 @@
         </UiSwitch>
         <p class="launcher-note" data-testid="autostart-note">{{ autostartNote }}</p>
         <p v-if="systemd === false && mode === 'desktop'" class="launcher-note">
-          Сейчас сервером управляет приложение Кокпита — переключатель касается юнита, а не этого
+          Сейчас сервером управляет приложение GrigDesk — переключатель касается юнита, а не этого
           процесса.
         </p>
         <p v-else-if="systemd === false" class="launcher-note">
@@ -38,7 +38,7 @@
       <div class="launcher-row">
         <div class="launcher-shortcut">
           <span class="launcher-shortcut__state">
-            <b>Ярлык «Кокпит»</b>
+            <b>Ярлык GrigDesk</b>
             <span class="launcher-note" data-testid="shortcut-state">{{ shortcutLabel }}</span>
           </span>
           <UiButton
@@ -51,8 +51,8 @@
           </UiButton>
         </div>
         <p class="launcher-note">
-          Файл кладётся на рабочий стол и в меню приложений и запускает <code>cockpit open</code>:
-          открывает кокпит в браузере, а если сервер не отвечает — сначала поднимает его.
+          Файл кладётся на рабочий стол и в меню приложений и запускает <code>grigdesk-ctl open</code>:
+          открывает GrigDesk в браузере, а если сервер не отвечает — сначала поднимает его.
         </p>
       </div>
 
@@ -69,7 +69,7 @@ import { computed, onMounted, ref } from 'vue';
 import { api } from '../../shared/apiClient.ts';
 import { UiButton, UiSwitch } from '../../ui';
 
-// Режим процесса из карточки «Процесс Cockpit»: null — ещё не известен.
+// Режим процесса из карточки «Процесс GrigDesk»: null — ещё не известен.
 // mode — 'desktop', 'systemd' или 'manual'; у сервера до перезапуска его нет.
 defineProps({
   systemd: { type: Boolean, default: null },
@@ -114,8 +114,8 @@ const autostartNote = computed(() => {
     return 'Юнит systemd не установлен — один раз выполни deploy/install.sh, тогда переключатель заработает.';
   }
   if (autostart.unit === 'disabled') {
-    return 'После перезагрузки сервер поднимет ярлык «Кокпит», cockpit open'
-      + ' или systemctl --user start cockpit-server.';
+    return 'После перезагрузки сервер поднимет ярлык GrigDesk, grigdesk-ctl open'
+      + ' или systemctl --user start grigdesk-server.';
   }
   if (autostart.linger === true) {
     return 'Сервер стартует при включении машины, до входа в систему — Telegram-пульт жив сразу.';
@@ -189,7 +189,7 @@ async function toggleShortcut() {
       type: 'ok',
       text: removing
         ? 'Ярлык убран с рабочего стола и из меню.'
-        : `Ярлык создан: ${shortcut.desktopDir}/cockpit.desktop и меню приложений.`,
+        : `Ярлык создан: ${shortcut.desktopDir}/grigdesk.desktop и меню приложений.`,
     };
   } catch (error) {
     message.value = { type: 'err', text: error?.message || 'Не удалось изменить ярлык.' };

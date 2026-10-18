@@ -6,7 +6,7 @@ import { statusOverflow, statusSummaryLayout } from '../../web/src/views/chat/ch
 const facts = {
   modelKind: 'выбрана',
   modelLabel: 'Opus 5.5',
-  cwd: '/home/user/Workspace/cockpit',
+  cwd: '/home/user/Workspace/grigdesk',
   extraDirs: [],
   usageItems: [
     {
@@ -74,7 +74,7 @@ test('STATUS-LAYOUT-02: при нехватке места уходят папк
     label: 'Модель',
     value: 'выбрана Opus 5.5',
   });
-  assert.equal(tiny[1].value, '/home/user/Workspace/cockpit', 'во всплывашке путь полный');
+  assert.equal(tiny[1].value, '/home/user/Workspace/grigdesk', 'во всплывашке путь полный');
   assert.equal(tiny[2].label, 'Сессия (5ч)', 'окно без подписи в строке получает её во всплывашке');
 });
 

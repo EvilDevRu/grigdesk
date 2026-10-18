@@ -69,7 +69,7 @@ export async function collectStatus(
 ): Promise<StatusSnapshot> {
   const [server, window, relay] = await Promise.all([
     readServer(root, settings),
-    readWindow(env),
+    readWindow(root, env),
     readRelay(root, settings),
   ]);
 
@@ -102,7 +102,7 @@ function row(label: string, words: [string, number], detail: string | null, colo
  */
 export function renderText(snapshot: StatusSnapshot, options: { color: boolean }): string {
   const { server, window, relay } = snapshot;
-  const lines: string[] = server && window && relay ? ['Кокпит', ''] : [];
+  const lines: string[] = server && window && relay ? ['GrigDesk', ''] : [];
   const hints: string[] = [];
 
   if (server) {
@@ -111,11 +111,11 @@ export function renderText(snapshot: StatusSnapshot, options: { color: boolean }
     lines.push(row('Сервер', serverWords[server.state]!, detail, options.color));
 
     if (['stopped', 'failed'].includes(server.state)) {
-      hints.push('Запустить сервер: cockpit server start');
+      hints.push('Запустить сервер: grigdesk-ctl server start');
     }
 
     if (['not_responding', 'failed'].includes(server.state) || server.state === 'starting' && server.reason) {
-      hints.push('Журнал сервера: cockpit server logs');
+      hints.push('Журнал сервера: grigdesk-ctl server logs');
     }
 
     if (server.state === 'not_installed') {
@@ -127,9 +127,9 @@ export function renderText(snapshot: StatusSnapshot, options: { color: boolean }
     lines.push(row('Окно', windowWords[window.state]!, null, options.color));
 
     if (window.state === 'not_installed') {
-      hints.push('Установить окно: cockpit desktop install');
+      hints.push('Установить окно: grigdesk-ctl desktop install');
     } else if (window.state === 'closed') {
-      hints.push('Открыть окно: cockpit');
+      hints.push('Открыть окно: grigdesk-ctl');
     }
   }
 
@@ -143,11 +143,11 @@ export function renderText(snapshot: StatusSnapshot, options: { color: boolean }
     }
 
     if (relay.state === 'stopped') {
-      hints.push('Запустить посредника: cockpit relay start');
+      hints.push('Запустить посредника: grigdesk-ctl relay start');
     } else if (relay.state === 'unhealthy') {
-      hints.push('Журнал посредника: cockpit relay logs');
+      hints.push('Журнал посредника: grigdesk-ctl relay logs');
     } else if (relay.state === 'ambiguous') {
-      hints.push('Выбрать посредника: COCKPIT_RELAY_PROJECT в .env');
+      hints.push('Выбрать посредника: GRIGDESK_RELAY_PROJECT в .env');
     }
   }
 

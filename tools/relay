@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Собирает один исполняемый файл посредника через общий npm-конвейер.
-# Настройки работающего посредника и Кокпита не читаются.
+# Настройки работающего посредника и GrigDesk не читаются.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,13 +8,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Использует тот же поиск совместимого Node, что и локальное окно.
 # Устанавливает зависимости только при отсутствии инструмента сборки.
 build_relay() {
-  if [ -n "${COCKPIT_NODE_DIR:-}" ] && [ -x "$COCKPIT_NODE_DIR/node" ]; then
-    export PATH="$COCKPIT_NODE_DIR:$PATH"
+  if [ -n "${GRIGDESK_NODE_DIR:-}" ] && [ -x "$GRIGDESK_NODE_DIR/node" ]; then
+    export PATH="$GRIGDESK_NODE_DIR:$PATH"
   fi
 
   source "$ROOT/deploy/lib/runtime-env.sh"
-  cockpit_add_cli_paths "$ROOT"
-  cockpit_require_node
+  grigdesk_add_cli_paths "$ROOT"
+  grigdesk_require_node
 
   if [ ! -d "$ROOT/relay/node_modules/esbuild" ] || [ ! -d "$ROOT/relay/node_modules/postject" ]; then
     env NODE_ENV=development npm --prefix "$ROOT/relay" ci --include=dev --no-audit --no-fund

@@ -10,14 +10,14 @@ export type Command =
     message: string;
   };
 
-export const HELP_TEXT = `cockpit-relay — посредник между телефоном и Кокпитом.
+export const HELP_TEXT = `grigdesk-relay — посредник между телефоном и GrigDesk.
 
 Использование:
-  cockpit-relay                 запустить посредник; настройки — переменные RELAY_*
-  cockpit-relay --healthcheck   проверить посредник на 127.0.0.1, порт RELAY_PORT (по умолчанию 7443)
-  cockpit-relay --version       показать версию
-  cockpit-relay --license       показать лицензию встроенного Node.js
-  cockpit-relay --help          показать эту справку
+  grigdesk-relay                 запустить посредник; настройки — переменные RELAY_*
+  grigdesk-relay --healthcheck   проверить посредник на 127.0.0.1, порт RELAY_PORT (по умолчанию 7443)
+  grigdesk-relay --version       показать версию
+  grigdesk-relay --license       показать лицензию встроенного Node.js
+  grigdesk-relay --help          показать эту справку
 `;
 
 /**
@@ -45,7 +45,7 @@ export function parseCommand(args: readonly string[]): Command {
 
   return {
     kind: 'error',
-    message: 'Неизвестная команда. Справка: cockpit-relay --help',
+    message: 'Неизвестная команда. Справка: grigdesk-relay --help',
   };
 }
 
@@ -54,5 +54,5 @@ export function parseCommand(args: readonly string[]): Command {
  * Версия Node берётся у исполняющего процесса, версия приложения — при сборке.
  */
 export function versionLine(app: string, node: string, platform: string, arch: string): string {
-  return `cockpit-relay ${app} (Node ${node}, ${platform} ${arch})`;
+  return `grigdesk-relay ${app} (Node ${node}, ${platform} ${arch})`;
 }

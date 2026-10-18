@@ -81,9 +81,9 @@ async function script(file, body) {
 }
 
 /**
- * Стенд для службы: каталог состояния фабрики, журнал кокпита и профиль-двойник со
+ * Стенд для службы: каталог состояния фабрики, журнал GrigDesk и профиль-двойник со
  * скриптами подъёма и сноса. Настоящих контейнеров и БД здесь нет — проверяется
- * ровно то, чем кокпит управляет сам: окружение запуска, журнал и реестр.
+ * ровно то, чем GrigDesk управляет сам: окружение запуска, журнал и реестр.
  */
 async function serviceFixture(t, {
   up = UP_STUB,
@@ -92,7 +92,7 @@ async function serviceFixture(t, {
   manualRange = { from: 990000, to: 990004 },
   probe = async () => false,
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-life-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-life-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stateDir = path.join(root, 'state');
@@ -425,7 +425,7 @@ test('после перезапуска служба доводит журнал
   assert.equal(job.state, 'failed');
 });
 
-// Журнал кокпита — история запусков и не чистится, но обзор не обязан возить её всю:
+// Журнал GrigDesk — история запусков и не чистится, но обзор не обязан возить её всю:
 // показывать нужно задания живых стендов, незавершённые и свежие.
 test('обзор не возит задания давно снесённых стендов', async (t) => {
   const { service, journalDir } = await serviceFixture(t);

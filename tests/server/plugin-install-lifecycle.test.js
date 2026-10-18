@@ -95,7 +95,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
  * Его socket и временная static папка закрываются до удаления root.
  */
 async function admissionFixture(t, options = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-admission-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-admission-'));
   const app = requireFromServer('fastify')({ logger: false });
   const lifecycle = createPluginLifecycle();
   const gate = new PluginAdmission({
@@ -472,7 +472,7 @@ test('B13: failed import/register остаётся potentially loaded, marker н
   const { installPortFixture } = await import('./helpers/pluginInstallHttpFixture.js');
 
   for (const registerFailure of [false, true]) {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-failed-user-runtime-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-failed-user-runtime-'));
     const pluginsDir = path.join(root, 'plugins');
     const boomDir = path.join(pluginsDir, 'boom');
     const marker = path.join(root, 'marker.txt');

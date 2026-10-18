@@ -25,7 +25,7 @@ test('адаптеры объявляют смену папки вместо о�
 });
 
 test('старые prefs читаются без trustedDirectories и удаляют ключ при следующей записи', async (t) => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-prefs-'));
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-prefs-'));
 
   t.after(() => fs.rm(temp, { recursive: true, force: true }));
 

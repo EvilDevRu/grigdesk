@@ -74,9 +74,9 @@ export async function runIngestWorker(
       workDir: job.workDir,
       frames: job.frames,
       speech,
-      pythonPath: job.runtime.pythonPath || process.env.COCKPIT_MEDIA_PYTHON,
-      transcribePath: job.runtime.transcribePath || process.env.COCKPIT_TRANSCRIBE_PY,
-      mediaHfDir: job.runtime.mediaHfDir || process.env.COCKPIT_MEDIA_HF_DIR,
+      pythonPath: job.runtime.pythonPath || process.env.GRIGDESK_MEDIA_PYTHON,
+      transcribePath: job.runtime.transcribePath || process.env.GRIGDESK_TRANSCRIBE_PY,
+      mediaHfDir: job.runtime.mediaHfDir || process.env.GRIGDESK_MEDIA_HF_DIR,
     });
     try {
       job.result = await ingestWithSpeech(job.speech);

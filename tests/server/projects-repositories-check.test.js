@@ -20,7 +20,7 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 async function withDirs(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-repository-check-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-repository-check-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 

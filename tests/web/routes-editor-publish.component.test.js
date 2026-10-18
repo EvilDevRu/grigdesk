@@ -8,7 +8,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 test('RE-E6-01: проблема адресует узел и путь, правка делает отчёт устаревшим', async (t) => {
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const { createPinia, setActivePinia } = await import(
     '../../web/node_modules/pinia/dist/pinia.mjs'
   );
@@ -145,7 +145,7 @@ test('RE-E6-03: правка после compare запрещает подтве�
 
 test('RE-E6-02: compare показывает человеку инструкции и политики до подтверждения',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RouteCompare.vue'), {
       stubs: { '../../ui': (`
         import { defineComponent, h } from 'vue';
@@ -271,7 +271,7 @@ test('RE-E6-05: timeout и двойной клик узнают один committ
 
 test('RE-E6-06: подтверждение показывает точный снимок и отправляет одно действие',
   async (t) => {
-    const browser = await installUiBrowser(t, 'http://cockpit.test/#/routes');
+    const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
     const Component = await compileVue(webFile('src/views/routes/RoutePublishDialog.vue'), {
       stubs: { '../../ui': (`
         import { defineComponent, h } from 'vue';

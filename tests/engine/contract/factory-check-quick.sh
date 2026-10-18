@@ -8,7 +8,7 @@ printf 'do-not-read-or-write\n' >"$user_state/canary"
 report="$TEST_ROOT/quick-state"
 
 FACTORY_STATE="$user_state" FACTORY_CHECK_STATE_REPORT="$report" \
-  FACTORY_CHECK_ONLY_ISOLATION=1 "$FACTORY_HOME/bin/factory-check" cockpit --quick \
+  FACTORY_CHECK_ONLY_ISOLATION=1 "$FACTORY_HOME/bin/factory-check" grigdesk --quick \
   >"$TEST_ROOT/check.out" 2>&1
 assert_rc 0 "$?" "quick check can initialize without profile/model work"
 assert_file_exists "$report" "quick check reports isolated state in test mode"

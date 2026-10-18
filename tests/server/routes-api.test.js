@@ -161,7 +161,7 @@ function catalogPayload(routeHash, expectedCatalogHash) {
 }
 
 async function fixture(t, { store, viaRoutesModule = false } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-routes-api-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-api-'));
   const baseDir = path.join(root, 'routes');
   const app = Fastify({ logger: false });
   if (viaRoutesModule) {
@@ -519,7 +519,7 @@ test('ROUTES-API-10: публикация идёт скриптом профил
   assert.equal(validated.statusCode, 200);
   assert.deepEqual(validated.json().result.argv, ['--validate']);
 
-  // Публикация получает ровно два аргумента кокпита: куда писать и поверх чего.
+  // Публикация получает ровно два аргумента GrigDesk: куда писать и поверх чего.
   const publishedEmpty = await app.inject({
     method: 'POST',
     url: `/api/routes/${PROFILE}/publish`,

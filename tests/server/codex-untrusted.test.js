@@ -69,7 +69,7 @@ test('Codex не передаёт ввод CLI, который не подтве
  * Поддельный процесс сохраняет протокол, чтобы проверить границу и очистку при отказах.
  */
 async function fakeCli(t, behavior) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-codex-untrusted-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-fake-codex-untrusted-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const bin = path.join(directory, 'codex');
   const capture = path.join(directory, 'capture.jsonl');
@@ -161,7 +161,7 @@ test('установленный Codex изолирует сценарий и к
     throw error;
   }
 
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-untrusted-contract-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-untrusted-contract-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const state = path.join(directory, 'state');
   await mkdir(state);

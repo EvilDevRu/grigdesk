@@ -189,7 +189,7 @@ export class AnalysisArbiter {
             tools: ['Read', 'Glob', 'Grep', 'repo_history'],
           },
           workTools,
-          ...(workIpc ? { mcpConfig: { mcpServers: { 'cockpit-work': workIpc.mcpServer } } } : {}),
+          ...(workIpc ? { mcpConfig: { mcpServers: { 'grigdesk-work': workIpc.mcpServer } } } : {}),
         });
       } finally {
         await workIpc?.close().catch(() => {});
@@ -223,7 +223,7 @@ export class AnalysisArbiter {
       }
 
       const appended = await this.analyzer.appendClarificationBatch(id, answers, {
-        actor: 'cockpit-arbiter',
+        actor: 'grigdesk-arbiter',
       });
       if (!appended.ok) {
         return appended;

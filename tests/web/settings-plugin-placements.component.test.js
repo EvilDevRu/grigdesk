@@ -110,7 +110,7 @@ async function makePluginsStore({ settings = FORECAST_PLUGIN.settings, values } 
  */
 async function mountPlacements(t, options = {}) {
   const prefix = '__pluginPlacements';
-  const browser = await installUiBrowser(t, 'http://cockpit.test/#/settings');
+  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/settings');
   const prov = makeProvidersStore();
   const fixture = await makePluginsStore(options);
   const { defineComponent, h } = await import('../../web/node_modules/vue/index.mjs');

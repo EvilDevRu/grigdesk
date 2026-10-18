@@ -41,7 +41,7 @@ export class RoutesEditorService {
   }
 
   /**
-   * Проверяет существование проекта в общем реестре фабрики и Cockpit.
+   * Проверяет существование проекта в общем реестре фабрики и GrigDesk.
    * Чтение маршрутов не создаёт паспорт или каталог профиля.
    */
   async ensureProject(profile: string): Promise<void> {

@@ -38,7 +38,7 @@ export async function readCodexSettings(
   context: NativeSettingsContext,
   { signal, refresh = false }: { signal: AbortSignal; refresh?: boolean },
 ): Promise<NativeSettingsSnapshot> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-settings-codex-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-settings-codex-'));
 
   try {
     const schemas = path.join(root, 'schema');
@@ -94,7 +94,7 @@ export async function readCodexSettings(
         };
         const initialized = recordOrEmpty(
           await rpc('initialize', {
-            clientInfo: { name: 'cockpit-settings', version: '1' },
+            clientInfo: { name: 'grigdesk-settings', version: '1' },
             capabilities: { experimentalApi: true },
           }),
         );
@@ -105,7 +105,7 @@ export async function readCodexSettings(
 
         snapshot.source.version =
           typeof initialized.userAgent === 'string'
-            ? (initialized.userAgent.match(/cockpit-settings\/([^ ]+)/)?.[1] ?? null)
+            ? (initialized.userAgent.match(/grigdesk-settings\/([^ ]+)/)?.[1] ?? null)
             : null;
 
         snapshot.source.version ??= await readSettingsCliVersion(config.codexBin, signal);
@@ -226,7 +226,7 @@ export async function codexSettingsSnapshot(
   const ownership: NativeSettingsOwnership[] = [
     ...OWNED.map((key) => ({
       path: [key],
-      owner: 'Запуск Cockpit',
+      owner: 'Запуск GrigDesk',
       reason: 'Управляется параметрами чата',
     })),
     ...SECRET_BRANCHES.map((key) => ({
@@ -321,7 +321,7 @@ export async function codexSettingsSnapshot(
 
   const channel = {
     id: 'app-server-config',
-    scope: 'cockpit-chats' as const,
+    scope: 'grigdesk-chats' as const,
     state: 'verified' as const,
   };
   const areas = [
