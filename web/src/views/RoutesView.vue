@@ -1,7 +1,12 @@
 <template>
-  <div class="routes-page">
+  <div class="routes-page" :data-pane="mobilePane">
+    <UiTabs v-model="mobilePane" class="route-pane-nav" data-ui-workspace-tabs label="Область маршрута">
+      <UiTab value="catalog" controls="route-catalog-pane">Каталог</UiTab>
+      <UiTab value="work" controls="route-work-pane">Маршрут</UiTab>
+      <UiTab value="inspector" controls="route-work-pane" :disabled="!selectedRoute">Свойства</UiTab>
+    </UiTabs>
     <!-- Черновики и состав опубликованного каталога -->
-    <aside class="list">
+    <aside id="route-catalog-pane" class="list">
       <div class="list-head">
         <span class="ttl">Маршруты</span>
         <UiTooltip :text="helpPanel" />
@@ -30,7 +35,7 @@
       </UiSelectableRow>
     </aside>
 
-    <section class="panel" @keydown="onEditorKeydown">
+    <section id="route-work-pane" class="panel" @keydown="onEditorKeydown">
       <div v-if="editorQueryError || routesStore.error" class="bad" role="alert">
         {{ editorQueryError || routesStore.error }}
       </div>
@@ -47,7 +52,9 @@
                            :read-only="routesStore.opened.readOnly"
                            :saved="!routesStore.dirty" :saving="routesStore.saving"
                            @save="saveDraft" />
-        <div class="route-editor-actions">
+        <details class="route-actions-disclosure">
+          <summary>Действия черновика</summary>
+          <div class="route-editor-actions">
           <UiButton :disabled="!routesStore.historyPast.length" @click="undoDraft">Отменить</UiButton>
           <UiButton :disabled="!routesStore.historyFuture.length" @click="redoDraft">Повторить</UiButton>
           <UiButton :disabled="routesStore.saving || routesStore.conflict
@@ -69,6 +76,7 @@
             Перенести на current
           </UiButton>
         </div>
+        </details>
         <p v-if="routesStore.rebaseError" class="bad" role="alert">{{ routesStore.rebaseError }}</p>
         <RouteRebaseDialog v-if="routesStore.rebasePreview"
                            :preview="routesStore.rebasePreview"
@@ -254,6 +262,8 @@ import type { DraftCreateRequest } from '../shared/routesApi.ts';
 import { agentsApi } from '../shared/agentsApi.ts';
 import {
   UiButton,
+  UiTabs,
+  UiTab,
   UiSelectableRow,
   UiSpinner,
   UiTooltip,
@@ -352,6 +362,7 @@ const currentHash = ref<string | null>(null);
 const revisions = ref<RouteRevision[]>([]);
 const historyCompareReport = ref<RouteRevisionCompareReport | null>(null);
 const selectedRoute = ref('');
+const mobilePane = ref(route.query.draft || route.query.catalog ? 'work' : 'catalog');
 const selectedNode = ref('');
 const templates = ref<AgentCard[]>([]);
 const templatesLoaded = ref(false);
@@ -556,6 +567,8 @@ async function load(): Promise<void> {
  * Действие синхронизирует выбор в интерфейсе с открытым снимком редактора.
  */
 function selectRoute(id: string): void {
+  mobilePane.value = 'work';
+
   if (id === selectedRoute.value && route.query.scope !== 'bootstrap') {
     return;
   }
@@ -840,6 +853,8 @@ function replaceEditorDocument(next: RouteDraft): void {
  * Действие синхронизирует выбор в интерфейсе с открытым снимком редактора.
  */
 function selectCanvasNode(value: { scope: RouteCommandScope; nodeId: string }): void {
+  mobilePane.value = 'inspector';
+
   if (!routesStore.opened?.draftId) {
     return;
   }
@@ -868,6 +883,7 @@ function selectCanvasNode(value: { scope: RouteCommandScope; nodeId: string }): 
 }
 
 async function openDraft(id: string): Promise<void> {
+  mobilePane.value = 'work';
   await router.push({ path: '/routes', query: {
     profile: profile.value,
     draft: id,
@@ -1325,7 +1341,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.routes-page { height: 100%; display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
+.routes-page { grid-template-rows: auto minmax(0, 1fr); height: 100%; display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; container: routes / inline-size; }
+
+.routes-page > .list, .routes-page > .panel { grid-row: 1 / -1; }
 
 /* ── Состав каталога ── */
 .list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
@@ -1389,9 +1407,22 @@ onUnmounted(() => {
 
 .bad { color: var(--bad); }
 
-@media (max-width: 820px) {
-  .routes-page { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .list { border-right: none; border-bottom: 1px solid var(--line); max-height: 32vh; }
-  .route-editor-workspace__sidebar { grid-template-columns: 1fr; }
+/* В небольшом контейнере выбранная область занимает всю рабочую высоту.
+   Панели скрываются без размонтирования: undo, буферы и выбор остаются прежними. */
+.route-pane-nav { display: none; }
+.route-actions-disclosure > summary { cursor: pointer; color: var(--ink-mid); }
+.route-actions-disclosure[open] > summary { margin-bottom: 8px; }
+@container routes (max-width: 1100px) {
+  .route-pane-nav { display: inline-flex; grid-column: 1 / -1; grid-row: 1; margin-bottom: 8px; }
+  .routes-page > .list, .routes-page > .panel { grid-column: 1 / -1; grid-row: 2; }
+  .list { max-height: none; border: 0; }
+  .panel { padding: 8px; }
+  [data-pane='catalog'] > .panel { display: none; }
+  [data-pane='work'] > .list, [data-pane='inspector'] > .list { display: none; }
+  [data-pane='work'] .route-editor-workspace__sidebar { display: none; }
+  [data-pane='inspector'] .route-editor-workspace > :deep(.route-canvas),
+  [data-pane='inspector'] .route-editor-workspace > :deep(.route-draft-panel) { display: none; }
+  .route-editor-workspace__sidebar { grid-template-columns: minmax(0, 1fr); }
 }
+
 </style>

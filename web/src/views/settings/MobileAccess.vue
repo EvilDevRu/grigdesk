@@ -859,4 +859,13 @@ onUnmounted(() => {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+@media (max-width: 900px), (max-height: 500px) {
+  .mobile-access { gap: 12px; }
+  .mobile-heading { gap: 8px; }
+  .mobile-icon { display: none; }
+  .mobile-heading p { margin-bottom: 0; }
+  .mobile-card-head { padding: 12px; }
+  .mobile-relays { padding: 0 12px 12px; }
+  .mobile-empty { padding: 12px; }
+}
 </style>

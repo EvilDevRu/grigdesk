@@ -906,4 +906,12 @@ onBeforeUnmount(() => {
     margin-top: 0.5rem;
   }
 }
+@media (max-height: 500px) {
+  .install-header { gap: 8px; }
+  .install-head-copy p { display: none; }
+  .install-head-row { height: auto; }
+  .install-stage-heading { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; padding-block: 8px; }
+  .install-stage-icon { display: none; }
+  .install-content { padding: 8px 16px; }
+}
 </style>

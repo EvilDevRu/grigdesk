@@ -825,4 +825,10 @@ onBeforeUnmount(() => {
     border-top: 1px solid var(--line);
   }
 }
+@media (max-height: 500px) {
+  .docker-containers { gap: 8px; }
+  .docker-containers__caption > :last-child { display: none; }
+  .docker-group__head { padding: 6px 12px; }
+  .docker-row { padding-block: 8px; }
+}
 </style>

@@ -1,36 +1,42 @@
 <template>
-  <div class="agents-page">
+  <div class="agents-page" :class="{ 'has-editor': mobileEditor && form }">
     <!-- Список -->
     <aside class="list">
       <div class="list-head">
-        <span class="ttl">База агентов</span>
-        <!-- На планшете ховера нет, а объяснение раздела длинное — его открывают явно. -->
-        <UiPopover
-          trigger-mode="both"
-          focus-policy="none"
-          placement="top-start"
-          :style="{ maxWidth: '330px' }"
-        >
-          <template #trigger>
-            <UiIconButton class="page-tip" role="embedded" label="О разделе">?</UiIconButton>
-          </template>
-          <span class="doc">
-            <b class="doc-ttl">Библиотека ролей конвейера</b>
-            <span v-for="(p, i) in helpPage" :key="i" class="doc-p">{{ p }}</span>
-          </span>
-        </UiPopover>
-        <span class="grow"></span>
-        <UiButton class="btn" :loading="installing"
-                v-tooltip="'Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются'"
-                loading-label="Устанавливаю набор" @click="install">⇩ Набор</UiButton>
-        <UiButton class="btn accent" tone="accent" @click="createNew">+ Новый</UiButton>
+        <div class="list-title">
+          <span class="ttl">База агентов</span>
+          <!-- На планшете ховера нет, а объяснение раздела длинное — его открывают явно. -->
+          <UiPopover
+            trigger-mode="both"
+            focus-policy="none"
+            placement="top-start"
+            :style="{ maxWidth: '330px' }"
+          >
+            <template #trigger>
+              <UiIconButton class="page-tip" role="embedded" label="О разделе">?</UiIconButton>
+            </template>
+            <span class="doc">
+              <b class="doc-ttl">Библиотека ролей конвейера</b>
+              <span v-for="(p, i) in helpPage" :key="i" class="doc-p">{{ p }}</span>
+            </span>
+          </UiPopover>
+        </div>
+        <div class="list-actions">
+          <UiButton class="btn" :loading="installing"
+                    v-tooltip="'Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются'"
+                    loading-label="Устанавливаю набор" @click="install">⇩ Набор</UiButton>
+          <UiButton class="btn accent" tone="accent" @click="createNew">+ Новый</UiButton>
+        </div>
       </div>
+      <UiButton v-if="form" class="agent-resume" variant="text" @click="mobileEditor = true">
+        Вернуться к {{ isNew ? 'новому агенту' : 'редактору' }}
+      </UiButton>
       <p class="list-sub">Заготовки ролей для схем конвейера. На запуск не влияют: боевой промпт и модель живут в маршруте проекта.</p>
       <p v-if="installNotice" class="list-sub" :class="{ bad: installNotice.startsWith('Ошибка') }">{{ installNotice }}</p>
       <div v-if="loading && !agents.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
       <div v-else-if="error && !agents.length" class="pad bad">{{ error }}</div>
       <div v-else-if="!agents.length" class="pad empty-list">
-        <p class="muted">Библиотека пуста. На свежей установке это нормально: наполнение агентов — данные машины и не едет с репозиторием.</p>
+        <p class="muted">Добавьте свою роль или установите стандартный набор агентов для конвейера.</p>
         <UiButton class="btn accent" tone="accent" :loading="installing"
                   loading-label="Устанавливаю набор" @click="install">Установить стандартный набор</UiButton>
       </div>
@@ -55,6 +61,7 @@
     <!-- Редактор -->
     <section v-if="form" class="editor">
       <header class="ehead">
+        <UiButton class="agent-back" variant="text" @click="mobileEditor = false">← Агенты</UiButton>
         <template v-if="isNew">
           <UiInput v-model.trim="form.id" class="fld idfld mono" placeholder="id (латиница, напр. my_agent)" spellcheck="false" />
         </template>
@@ -70,14 +77,25 @@
                   :disabled="!dirty || (isNew && !form.id)" loading-label="Сохраняю" @click="save">Сохранить</UiButton>
       </header>
 
-      <!-- Обычные настройки -->
-      <div class="fields">
         <label class="f f-label">
           <span class="lbl">
             Подпись <UiTooltip :text="help.label" placement="top-start" />
           </span>
           <UiInput v-model="form.label" class="fld" placeholder="Название блока на схеме" />
         </label>
+
+      <div class="prompt-wrap">
+        <div class="lbl prompt-lbl">
+          Заготовка задания <UiTooltip :text="help.prompt" placement="top-start" />
+          <span class="muted sm">
+            — основа для промпта этапа; боевой текст живёт в маршруте проекта
+          </span>
+        </div>
+        <UiTextarea v-model="form.prompt" class="prompt mono" spellcheck="false"
+                    :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'" />
+      </div>
+      <!-- Рекомендации к роли не оттесняют саму инструкцию. -->
+      <div class="fields">
         <label class="f">
           <span class="lbl">Форма блока <UiTooltip :text="help.kind" /></span>
           <UiSelect v-model="form.kind" class="fld">
@@ -135,16 +153,7 @@
         </div>
       </div>
 
-      <div class="prompt-wrap">
-        <div class="lbl prompt-lbl">
-          Заготовка задания <UiTooltip :text="help.prompt" placement="top-start" />
-          <span class="muted sm">
-            — основа для промпта этапа; боевой текст живёт в маршруте проекта
-          </span>
-        </div>
-        <UiTextarea v-model="form.prompt" class="prompt mono" spellcheck="false"
-                    :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'" />
-      </div>
+
     </section>
 
     <section v-else class="editor empty">
@@ -200,6 +209,7 @@ const selectedId = ref('');
 const form = ref<AgentForm | null>(null);
 // Режим создания: у нового агента ещё нет id, и удалять его нечего.
 const isNew = ref(false);
+const mobileEditor = ref(false);
 const saving = ref(false);
 const notice = ref('');
 // Идёт установка стандартного набора; её итог показывается в шапке списка.
@@ -375,6 +385,12 @@ async function load(): Promise<void> {
  * спрашивают, и отказ оставляет его на прежней карточке.
  */
 async function select(id: string): Promise<void> {
+  if (selectedId.value === id && form.value && !isNew.value) {
+    mobileEditor.value = true;
+
+    return;
+  }
+
   const agent = agents.value.find((item) => item.id === id);
 
   if (!agent) {
@@ -392,6 +408,7 @@ async function select(id: string): Promise<void> {
   isNew.value = false;
   notice.value = '';
   form.value = editableCopy(agent);
+  mobileEditor.value = true;
 }
 
 /**
@@ -408,6 +425,7 @@ async function createNew(): Promise<void> {
 
   selectedId.value = '';
   isNew.value = true;
+  mobileEditor.value = true;
   notice.value = '';
   form.value = {
     id: '',
@@ -526,11 +544,22 @@ onMounted(load);
 </script>
 
 <style scoped>
-.agents-page { height: 100%; display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
+.agents-page { height: 100%; display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; container: agents / inline-size; }
 
 /* ── Список ── */
 .list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
-.list-head { display: flex; align-items: center; gap: 7px; padding: 2px 4px 6px; }
+.list-head {
+  display: grid;
+  gap: 8px;
+  padding: 2px 4px 10px;
+}
+.list-title, .list-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.list-actions > .btn { flex: none; }
 .ttl { font-weight: 700; font-size: 13.5px; }
 .page-tip { flex: none; }
 /* Ответ на «что это вообще за раздел» виден без ховера: на планшете его иначе не прочитать */
@@ -558,19 +587,20 @@ onMounted(load);
 .empty-list p { margin: 0; }
 
 /* ── Редактор ── */
-.editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 18px 18px; gap: 12px; }
+.editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 16px; gap: 12px; }
 .editor.empty { align-items: center; justify-content: center; }
-.ehead { display: flex; align-items: center; gap: 10px; }
-.eid { font-size: 14px; font-weight: 700; color: var(--node-code); }
+.ehead { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.ehead > .btn, .ehead > .ui-switch { flex: none; }
+.eid { min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 700; color: var(--node-code); }
 .idfld { max-width: 280px; }
 .grow { flex: 1; }
 .notice { font-size: 12.5px; color: var(--good); }
 .notice.bad { color: var(--bad); }
 
-.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; }
+.fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; }
 .fields.pro { padding: 12px; border: 1px dashed var(--line-2); border-radius: 10px; background: color-mix(in srgb, var(--surface) 55%, transparent); }
 .f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.f-label { grid-column: span 2; }
+.f-label { flex: none; }
 .lbl { font-size: 11px; font-weight: 600; color: var(--ink-mid); text-transform: uppercase; letter-spacing: .04em;
   display: inline-flex; align-items: center; gap: 5px; }
 .fld { width: 100%; }
@@ -578,17 +608,29 @@ onMounted(load);
 .row { display: flex; gap: 6px; flex-wrap: wrap; }
 .tag { font-family: var(--mono); }
 
-.prompt-wrap { flex: 1; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.prompt-wrap { flex: 1 0 200px; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
 .prompt-lbl .sm { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 11px; }
 .prompt { flex: 1; min-height: 180px; resize: none; line-height: 1.55; }
 
 .bad { color: var(--bad); }
 .sm { font-size: 11px; }
 
-/* Планшет/узкий экран: список сверху, редактор ниже */
-@media (max-width: 820px) {
-  .agents-page { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .list { border-right: none; border-bottom: 1px solid var(--line); max-height: 38vh; }
-  .f-label { grid-column: span 1; }
+/* В узкой рабочей области каталог и редактор занимают одно место.
+   Скрытие CSS сохраняет форму и её черновик при возврате и повороте. */
+.agent-back, .agent-resume { display: none; }
+@container agents (max-width: 900px) {
+  .list, .editor { grid-column: 1 / -1; grid-row: 1; }
+  .list { border-right: 0; }
+  .has-editor > .list, .agents-page:not(.has-editor) > .editor { display: none; }
+  .agent-back, .agent-resume { display: inline-flex; }
+  .editor { padding: 8px; }
+  .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ehead { gap: 8px; }
+  .ehead .grow { display: none; }
+  .prompt-lbl { flex-wrap: wrap; }
+  .prompt-lbl .sm { display: none; }
+}
+@container agents (max-width: 480px) {
+  .fields { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

@@ -17,18 +17,11 @@
             aria-description="Поиск по номеру, названию, проекту и ответственному"
           />
         </div>
-        <UiControlGroup label="Фильтр задач на полке">
-          <UiButton
-            v-for="filter in filters"
-            :key="filter.id"
-            :data-shelf-filter="filter.id"
-            variant="ghost"
-            :pressed="activeFilter === filter.id"
-            @click="activeFilter = filter.id"
-          >
+        <UiSelect v-model="activeFilter" aria-label="Фильтр задач на полке">
+          <option v-for="filter in filters" :key="filter.id" :value="filter.id">
             {{ filter.label }} · {{ filter.count }}
-          </UiButton>
-        </UiControlGroup>
+          </option>
+        </UiSelect>
       </div>
       <div v-if="hasFilters" class="shelf-filter-summary">
         <span role="status">Показано {{ visibleCount }} из {{ shelf.rows.length }}</span>
@@ -44,7 +37,10 @@
         <path d="M12 3 2.8 19h18.4z" />
         <path d="M12 9v4 M12 17h.01" />
       </svg>
-      <span>{{ shelf.sourceIssues.join(' · ') }}</span>
+      <details>
+        <summary>Часть данных временно недоступна</summary>
+        <span>{{ shelf.sourceIssues.join(' · ') }}</span>
+      </details>
     </div>
     <div v-if="!shelf.loading && !shelf.error && !shelf.rows.length" class="shelf-empty">
       <span class="shelf-empty-icon" aria-hidden="true">◇</span>
@@ -223,7 +219,7 @@ import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../store
 import { useUiStore } from '../../stores/ui.js';
 import {
   UiButton,
-  UiControlGroup,
+  UiSelect,
   UiIconButton,
   UiProgress,
   UiSearchInput,
@@ -462,8 +458,8 @@ defineExpose({ focus: () => panel.value?.focus?.() });
   z-index: 3;
   top: 0;
   display: grid;
-  gap: 14px;
-  padding: calc(var(--tool-dock-action-top, 13px) + 3px) 16px 16px;
+  gap: 8px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--ground) 96%, transparent);
   backdrop-filter: blur(12px);
@@ -496,7 +492,7 @@ defineExpose({ focus: () => panel.value?.focus?.() });
 }
 
 .shelf-search {
-  flex: 1 1 280px;
+  flex: 1 1 160px;
   min-width: 0;
 }
 

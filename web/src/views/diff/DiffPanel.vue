@@ -7,9 +7,9 @@
       <p class="muted sm">Правки задачи уже закоммичены — смотри их в PR.</p>
     </div>
 
-    <div v-else class="split">
+    <div v-else class="split" :class="{ 'files-collapsed': filesCollapsed }">
       <!-- Дерево изменённых файлов (иерархия папок, как в VS Code) -->
-      <aside class="filelist">
+      <aside :id="fileListId" class="filelist">
         <div v-for="r in treeRepos" :key="r.name" class="grp">
           <div class="grphead">
             <span class="badge" :class="r.name">{{ r.name === 'be' ? 'Бэкенд' : 'Фронт' }}</span>
@@ -25,7 +25,7 @@
             </UiPressable>
             <UiPressable v-else class="trow frow" :class="{ sel: selectedKey === `${r.name}:${row.file.path}` }"
                          :pressed="selectedKey === `${r.name}:${row.file.path}`"
-                         :style="{ paddingLeft: indent(row.depth) }" @click="selectedKey = `${r.name}:${row.file.path}`">
+                         :style="{ paddingLeft: indent(row.depth) }" @click="selectedKey = `${r.name}:${row.file.path}`; filesCollapsed = true">
               <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
               <span class="nm">{{ row.name }}</span>
               <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
@@ -37,6 +37,10 @@
       <!-- Диф-редактор -->
       <section class="editorwrap">
         <div class="ehead">
+          <UiButton class="file-toggle" variant="text" :aria-expanded="!filesCollapsed"
+                    :aria-controls="fileListId" @click="filesCollapsed = !filesCollapsed">
+            Файлы · {{ files.length }}
+          </UiButton>
           <template v-if="selected">
             <span class="st" :class="selected.status">{{ STLABEL[selected.status] || selected.status }}</span>
             <span class="epath mono">{{ selected.path }}</span>
@@ -58,7 +62,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useId } from 'vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.ts';
 import { api } from '../../shared/apiClient.ts';
 import {
@@ -86,6 +90,8 @@ const showLoading = computed(() => loading.value && !repos.value.length);
 // Плоский список файлов (для выбора первого).
 const files = computed(() => repos.value.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name, branch: r.branch }))));
 const selectedKey = ref('');
+const filesCollapsed = ref(false);
+const fileListId = `diff-files-${useId()}`;
 const selected = computed(() => files.value.find((f) => `${f.repo}:${f.path}` === selectedKey.value) || null);
 function fkey(f) { return `${f.repo}:${f.path}`; }
 const STLABEL = { A: 'A', M: 'M', D: 'D', R: 'R' };
@@ -192,14 +198,14 @@ onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(
 </script>
 
 <style scoped>
-.diff-core { height: 100%; min-height: 0; }
+.diff-core { height: 100%; min-height: 0; min-width: 0; container: diff-panel / inline-size; }
 .state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; }
 .state p { margin: 0; }
 .sm { font-size: 12.5px; }
 .bad { color: var(--bad); font-weight: 600; }
 
-.split { height: 100%; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
-.filelist { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px; background: var(--sidebar); }
+.split { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 0; }
+.filelist { min-width: 0; min-height: 0; border-right: 1px solid var(--line); overflow-y: auto; padding: 8px; background: var(--sidebar); }
 .grp { margin-bottom: 10px; }
 .grphead { display: flex; align-items: center; gap: 8px; padding: 6px 6px 8px; }
 .badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 6px; }
@@ -229,4 +235,21 @@ onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(
 .editor { flex: 1; min-height: 0; }
 
 .layout-toggle { flex: none; }
+.file-toggle { display: none; }
+
+/* Узкая панель отдаёт всю ширину коду, а дерево остаётся доступным над ним.
+   Контейнер учитывает и страницу, и диалог независимо от ширины всего окна. */
+@container diff-panel (max-width: 700px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .filelist { max-height: min(160px, 30dvh); border-right: 0; border-bottom: 1px solid var(--line); }
+  .file-toggle { display: inline-flex; }
+  .files-collapsed { grid-template-rows: minmax(0, 1fr); }
+  .files-collapsed .filelist { display: none; }
+  .ehead { flex-wrap: wrap; gap: 8px; }
+  .epath { flex: 1; min-width: 0; }
+  .ehead .grow { display: none; }
+}
 </style>

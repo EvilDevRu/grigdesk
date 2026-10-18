@@ -8,6 +8,7 @@ export const TASK_MODAL_PATH = webFile('src/views/TaskModal.vue');
  */
 function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   const componentImports = [
+    ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiButton', 'src/components/primitives/UiButton.vue'],
     ['UiChoiceList', 'src/components/composites/UiChoiceList.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],

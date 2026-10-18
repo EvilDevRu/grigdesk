@@ -760,16 +760,39 @@ function flippedPlacement(placement: UiOverlayPlacement): UiOverlayPlacement {
 }
 
 /**
- * Плитка топбара сохраняет непрерывный стык с полосой даже у кнопки высотой 24 px.
- * Высота ограничивается оставшимся экраном: длинное содержимое прокручивается, а не уезжает вверх.
+ * Клавиатура и масштабирование могут сдвинуть видимую область без resize окна.
+ * Координаты остаются в системе layout viewport, как getBoundingClientRect триггера.
+ */
+function visibleBounds(): {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+} {
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft ?? 0;
+  const top = viewport?.offsetTop ?? 0;
+
+  return {
+    left,
+    top,
+    right: left + (viewport?.width || window.innerWidth),
+    bottom: top + (viewport?.height || window.innerHeight),
+  };
+}
+
+/**
+ * Плитка сохраняет стык с топбаром и прокручивает длинное содержимое внутри
+ * оставшейся видимой области, в том числе при открытой экранной клавиатуре.
  */
 function placeTopbarPanel(trigger: TriggerElement, surface: HTMLElement): void {
   const rect = trigger.getBoundingClientRect();
   const bar = trigger.closest('[data-ui-topbar]')?.getBoundingClientRect() ?? rect;
+  const bounds = visibleBounds();
   const edge = 8;
-  const top = bar.bottom - 1;
-  const left = Math.max(edge, Math.min(rect.right - surface.offsetWidth,
-    window.innerWidth - surface.offsetWidth - edge));
+  const top = Math.max(bounds.top, bar.bottom - 1);
+  const left = Math.max(bounds.left + edge, Math.min(rect.right - surface.offsetWidth,
+    bounds.right - surface.offsetWidth - edge));
 
   attachedTriggerStyle.value = {
     '--ui-topbar-trigger-top': `${bar.top - rect.top}px`,
@@ -780,7 +803,8 @@ function placeTopbarPanel(trigger: TriggerElement, surface: HTMLElement): void {
     position: 'fixed',
     left: `${left}px`,
     top: `${top}px`,
-    maxHeight: `${Math.max(0, window.innerHeight - top - edge)}px`,
+    maxHeight: `${Math.max(0, bounds.bottom - top - edge)}px`,
+    maxWidth: `${Math.max(0, bounds.right - bounds.left - edge * 2)}px`,
     visibility: 'visible',
   };
 }
@@ -804,6 +828,7 @@ function place(): void {
   }
 
   const triggerRect = trigger.getBoundingClientRect();
+  const bounds = visibleBounds();
   const width = surface.offsetWidth;
   const height = surface.offsetHeight;
   const edge = 8;
@@ -811,10 +836,10 @@ function place(): void {
   let placement = requestedPlacement.value;
   let axis = axisPlacement(placement);
   const room = {
-    top: triggerRect.top - edge,
-    right: window.innerWidth - triggerRect.right - edge,
-    bottom: window.innerHeight - triggerRect.bottom - edge,
-    left: triggerRect.left - edge,
+    top: triggerRect.top - bounds.top - edge,
+    right: bounds.right - triggerRect.right - edge,
+    bottom: bounds.bottom - triggerRect.bottom - edge,
+    left: triggerRect.left - bounds.left - edge,
   };
   const needed =
     axis === 'top' || axis === 'bottom' ? height + gap : width + gap;
@@ -856,18 +881,20 @@ function place(): void {
   }
 
   left = Math.min(
-    Math.max(left, edge),
-    Math.max(edge, window.innerWidth - width - edge),
+    Math.max(left, bounds.left + edge),
+    Math.max(bounds.left + edge, bounds.right - width - edge),
   );
   top = Math.min(
-    Math.max(top, edge),
-    Math.max(edge, window.innerHeight - height - edge),
+    Math.max(top, bounds.top + edge),
+    Math.max(bounds.top + edge, bounds.bottom - height - edge),
   );
   actualPlacement.value = placement;
   positionStyle.value = {
     position: 'fixed',
     left: `${Math.round(left)}px`,
     top: `${Math.round(top)}px`,
+    maxHeight: `${Math.max(0, bounds.bottom - bounds.top - edge * 2)}px`,
+    maxWidth: `${Math.max(0, bounds.right - bounds.left - edge * 2)}px`,
     visibility: 'visible',
     '--ui-overlay-anchor-x': `${Math.round(triggerRect.left + triggerRect.width / 2 - left)}px`,
     '--ui-overlay-anchor-y': `${Math.round(triggerRect.top + triggerRect.height / 2 - top)}px`,
@@ -913,6 +940,8 @@ watch(
         passive: true,
       });
       window.addEventListener('resize', onViewportMove, { passive: true });
+      window.visualViewport?.addEventListener('resize', onViewportMove, { passive: true });
+      window.visualViewport?.addEventListener('scroll', onViewportMove, { passive: true });
       await nextTick();
       place();
       prepareCompositeItems();
@@ -948,6 +977,8 @@ watch(
     document.removeEventListener('pointerdown', onDocumentPointerdown, true);
     window.removeEventListener('scroll', onViewportMove, true);
     window.removeEventListener('resize', onViewportMove);
+    window.visualViewport?.removeEventListener('resize', onViewportMove);
+    window.visualViewport?.removeEventListener('scroll', onViewportMove);
     resizeObserver?.disconnect();
     resizeObserver = null;
     clearHoverTimer();
@@ -975,6 +1006,8 @@ onBeforeUnmount(() => {
     document.removeEventListener('pointerdown', onDocumentPointerdown, true);
     window.removeEventListener('scroll', onViewportMove, true);
     window.removeEventListener('resize', onViewportMove);
+    window.visualViewport?.removeEventListener('resize', onViewportMove);
+    window.visualViewport?.removeEventListener('scroll', onViewportMove);
   }
 
   resizeObserver?.disconnect();

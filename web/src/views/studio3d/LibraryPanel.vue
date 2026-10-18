@@ -7,9 +7,14 @@
       </div>
       <UiButton tone="accent" variant="solid" @click="$emit('create')">Создать модель</UiButton>
     </header>
+    <div class="studio-library-search">
     <UiSearchInput :model-value="store.query" placeholder="Поиск моделей" aria-label="Поиск моделей"
       @update:model-value="store.search($event)" />
-    <div class="studio-filters">
+      <UiButton :aria-expanded="filtersOpen" aria-controls="studio-library-filters"
+        @click="filtersOpen = !filtersOpen">Фильтры{{ filterCount ? ` · ${filterCount}` : '' }}</UiButton>
+    </div>
+    <p v-if="filterCount && !filtersOpen" class="studio-library-count">{{ filterSummary }}</p>
+    <div v-show="filtersOpen" id="studio-library-filters" class="studio-filters">
       <UiField label="Проект"><UiSelect :model-value="store.filters.project || ''"
         @update:model-value="filter('project', $event)">
         <option value="">Все</option><option v-for="item in projects" :key="item.id" :value="item.id">
@@ -105,6 +110,12 @@ defineEmits<{ open: [modelId: string]; create: [] }>();
 const store = useStudio3dStore();
 const projects = ref<ProjectSummary[]>([]);
 const error = ref('');
+const filtersOpen = ref(false);
+const filterCount = computed(() => Object.values(store.filters).filter(Boolean).length);
+const filterSummary = computed(() => Object.entries(store.filters).filter(([, value]) => value)
+  .map(([key, value]) => key === 'project'
+    ? projects.value.find((project) => project.id === value)?.title || value
+    : valueLabels[value] || providerLabel(value, store.state?.providers)).join(' · '));
 const filtered = computed(() => Boolean(store.query || Object.values(store.filters).some(Boolean)));
 let alive = true;
 
@@ -149,9 +160,8 @@ onUnmounted(() => {
 .studio-library {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 1440px;
-  margin: 0 auto;
+  gap: 12px;
+  min-width: 0;
 }
 
 .studio-library-heading {
@@ -279,5 +289,13 @@ onUnmounted(() => {
   margin-top: 4px;
   color: var(--ink-low);
   font-size: 11px;
+}
+.studio-library-search { display: flex; gap: 8px; align-items: center; }
+.studio-library-search > :first-child { flex: 1; min-width: 0; }
+@media (max-height: 500px) {
+  .studio-library { gap: 8px; }
+  .studio-library-heading p { display: none; }
+  .studio-model-preview { height: 68px; aspect-ratio: auto; }
+  .studio-model-caption { padding: 8px 12px; }
 }
 </style>

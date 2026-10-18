@@ -489,11 +489,6 @@
   color: var(--accent);
 }
 
-.ui-icon-button[data-context='tool-dock-hide']:hover {
-  border-color: color-mix(in srgb, var(--bad) 42%, var(--line));
-  color: var(--bad);
-}
-
 .ui-icon-button[data-context^='tool-dock-']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -1968,7 +1963,9 @@
   }
 }
 
-@media (max-width: 1000px) {
+/* Порог совпадает с горизонтальной навигацией SettingsView: между 1001 и 1099 px
+   вкладки иначе сжимались как вертикальные кнопки и теряли полные названия. */
+@media (max-width: 1099px) {
   .ui-button[data-role='settings-nav'] {
     flex: 0 0 auto;
     width: auto;
@@ -2077,4 +2074,24 @@
 
 .ui-pressable[data-context='topbar-network'] .ip {
   letter-spacing: .01em;
+}
+
+/* Полное название задачи остаётся доступным в две строки узкой карточки. */
+@media (max-width: 600px) {
+  .ui-button[data-role='pipeline-title'] {
+    height: auto;
+    text-align: left;
+    white-space: normal;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-button[data-role='pipeline-title'] .ui-button__label {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    text-overflow: clip;
+  }
 }

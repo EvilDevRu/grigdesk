@@ -6,6 +6,7 @@
       'is-compact': props.compact,
       'is-dock': props.presentation === 'dock',
     }"
+    :data-pane="activeSession ? mobilePane : 'profiles'"
     aria-labelledby="db-panel-title"
     :aria-busy="refreshLoading || undefined"
   >
@@ -81,6 +82,13 @@
       </header>
 
       <div class="db-panel__body">
+        <UiTabs v-if="activeSession" v-model="mobilePane" class="db-pane-nav" data-ui-workspace-tabs label="Рабочая область базы">
+          <UiTab value="query" controls="db-workbench">Запрос</UiTab>
+          <UiTab value="result" controls="db-workbench">Результат</UiTab>
+          <UiTab value="schema" controls="db-workbench">Схема</UiTab>
+          <UiTab value="profiles" controls="db-profiles-pane">Профили</UiTab>
+          <UiTab value="activity" controls="db-queries-pane">Запросы · {{ store.queries?.length || 0 }}</UiTab>
+        </UiTabs>
         <UiInlineMessage v-if="visibleError" tone="danger">
           {{ visibleError }}
         </UiInlineMessage>
@@ -90,6 +98,7 @@
             <section
               class="db-live-queries"
               :class="{ 'has-active': activeQueryCount }"
+              id="db-queries-pane"
               data-db-queries
               aria-label="Живая лента запросов"
             >
@@ -478,7 +487,7 @@
             </details>
           </div>
 
-          <aside class="db-profiles" data-db-profiles aria-label="Профили баз данных">
+          <aside id="db-profiles-pane" class="db-profiles" data-db-profiles aria-label="Профили баз данных">
             <header class="db-section-heading">
               <div>
                 <h3>Профили</h3>
@@ -786,6 +795,7 @@ const selectedSessionId = ref('');
 const sshSessionId = ref('');
 const password = ref('');
 const query = ref('');
+const mobilePane = ref('query');
 const resultQueryIds = reactive<Record<string, string>>({});
 const fallbackResults = reactive<Record<string, DbResult | null>>({});
 const localError = ref('');
@@ -1123,6 +1133,7 @@ async function openSession(): Promise<void> {
 
     if (session.id) {
       selectedSessionId.value = session.id;
+      mobilePane.value = 'query';
     }
   } catch (error) {
     localError.value = errorMessage(error, 'Не удалось открыть сессию базы');
@@ -1172,6 +1183,7 @@ async function runQuery(): Promise<void> {
   try {
     resultQueryIds[sessionId] = await runDbQuery(sessionId, query.value);
     fallbackResults[sessionId] = null;
+    mobilePane.value = 'result';
   } catch (error) {
     localError.value = errorMessage(error, 'Не удалось запустить запрос');
   } finally {
@@ -1189,6 +1201,7 @@ function inspectQuery(item: DbQuery): void {
   }
 
   selectedSessionId.value = matchingSession.id;
+  mobilePane.value = 'result';
   resultQueryIds[matchingSession.id] = item.id || '';
   fallbackResults[matchingSession.id] = rowsOf(item.result).length
     ? item.result as DbResult
@@ -2054,6 +2067,8 @@ onMounted(refresh);
 
 .db-result-stage__header {
   flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
   min-height: 38px;
   padding: 6px 9px;
   border-bottom: 1px solid var(--line);
@@ -2061,6 +2076,7 @@ onMounted(refresh);
 }
 
 .db-result-stage__header > div {
+  flex-wrap: wrap;
   gap: 7px;
   min-width: 0;
 }
@@ -2532,6 +2548,7 @@ onMounted(refresh);
 @container (max-width: 940px) {
   .db-panel__surface {
     grid-template-rows: auto auto;
+    align-content: start;
     overflow: auto;
   }
 
@@ -2707,5 +2724,30 @@ onMounted(refresh);
   .db-result-state__pulse {
     animation: none;
   }
+}
+/* Области телефона переключаются без пересоздания сессии и текста запроса.
+   На широком экране сохраняются одновременные схема, запрос и результат. */
+.db-pane-nav { display: none; flex: none; }
+@container (max-width: 940px) {
+  .db-pane-nav { display: inline-flex; }
+  .db-panel__brand small { display: none; }
+  .db-panel[data-pane='profiles'] .db-workspace { display: none; }
+  .db-panel:not([data-pane='profiles']) .db-profiles { display: none; }
+  .db-panel:not([data-pane='activity']) .db-live-queries { display: none; }
+  .db-panel[data-pane='activity'] .db-console { display: none; }
+  .db-console, .db-console:not(.has-session) { min-height: 0; }
+  .db-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  .db-panel:not([data-pane='schema']) .db-schema { display: none; }
+  .db-panel[data-pane='schema'] .db-query-console { display: none; }
+  .db-query-console { min-height: 0; grid-template-rows: auto; }
+  .db-panel[data-pane='result'] .db-query-editor { display: none; }
+  .db-panel[data-pane='query'] .db-result-stage { display: none; }
+  .db-result-stage { min-height: 220px; }
+  .db-schema { min-height: 200px; }
+}
+@media (max-height: 500px) {
+  .db-profiles__empty { padding: 8px 10px; }
+  .db-profiles__empty svg { display: none; }
+  .db-panel__heading p { display: none; }
 }
 </style>

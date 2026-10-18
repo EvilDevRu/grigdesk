@@ -10,9 +10,11 @@
         <div class="studio-create-grid">
           <div class="studio-create-primary">
             <section class="studio-create-card">
-              <h4><span class="studio-section-number" aria-hidden="true">01</span> Источник модели</h4>
+              <h4>Источник модели</h4>
               <UiSegmentedControl v-model="mode" :options="modes" :disabled="importing" label="Источник модели"
                 data-ui-studio-choice />
+              <OperationForm v-if="mode !== 'file' && sourceFields.length" v-model="values"
+                :fields="sourceFields" :errors="fieldErrors" />
               <p class="studio-create-hint">{{ sourceHint }}</p>
               <template v-if="mode === 'file'">
                 <div class="studio-upload-area">
@@ -72,8 +74,6 @@
                   <SheetCutter :open="Boolean(sheetFile)" :file="sheetFile" @close="sheetFile = null"
                     @confirm="viewFiles = { ...viewFiles, ...$event }" />
                 </template>
-                <OperationForm v-if="sourceFields.length" v-model="values" :fields="sourceFields"
-                  :errors="fieldErrors" />
                 <p v-if="batch && mode === 'text'" class="studio-create-hint">
                   Одно описание на строку · до 50 {{ firstImage ? 'эскизов' : 'моделей' }}.
                   Перед запуском появится общая стоимость пачки.
@@ -82,7 +82,7 @@
             </section>
             <section v-if="mode !== 'file' && offer" class="studio-create-card">
               <div class="studio-card-heading">
-                <h4><span class="studio-section-number" aria-hidden="true">02</span> Параметры генерации</h4>
+                <h4>Параметры генерации</h4>
                 <span>{{ offer.providerName }}</span>
               </div>
               <UiField v-if="providers.length > 1" label="Исполнитель">
@@ -102,19 +102,6 @@
             </section>
           </div>
           <aside class="studio-create-meta">
-            <section class="studio-create-card studio-result-plan">
-              <h4>{{ mode === 'file' ? 'После добавления' : 'Что получится' }}</h4>
-              <strong>{{ resultLabel }}</strong>
-              <ol class="studio-result-steps">
-                <li>{{ mode === 'file' ? 'Откройте файл в просмотрщике' : 'Дождитесь результата во вкладке «Задачи»' }}</li>
-                <li>{{ firstImage && mode === 'text' ? 'Проверьте эскиз и создайте по нему модель'
-                  : 'Оцените модель, при необходимости создайте новую версию' }}</li>
-                <li>Сохраните готовый файл в проект</li>
-              </ol>
-              <p v-if="mode === 'text' && firstImage" class="studio-create-hint">
-                В текущую стоимость входит только эскиз.
-              </p>
-            </section>
             <section class="studio-create-card">
               <h4>В библиотеке</h4>
               <UiField label="Имя" hint="Необязательно. Можно переименовать позже.">
@@ -134,6 +121,19 @@
                 </UiSelect>
               </UiField>
             </section>
+            <details class="studio-create-card studio-result-plan">
+              <summary>{{ mode === 'file' ? 'После добавления' : 'Что получится' }}</summary>
+              <strong>{{ resultLabel }}</strong>
+              <ol class="studio-result-steps">
+                <li>{{ mode === 'file' ? 'Откройте файл в просмотрщике' : 'Дождитесь результата во вкладке «Задачи»' }}</li>
+                <li>{{ firstImage && mode === 'text' ? 'Проверьте эскиз и создайте по нему модель'
+                  : 'Оцените модель, при необходимости создайте новую версию' }}</li>
+                <li>Сохраните готовый файл в проект</li>
+              </ol>
+              <p v-if="mode === 'text' && firstImage" class="studio-create-hint">
+                В текущую стоимость входит только эскиз.
+              </p>
+            </details>
             <div class="studio-create-note">
               <strong>{{ mode === 'file' ? 'Бесплатный импорт' : 'Результат останется в библиотеке' }}</strong>
               <p>{{ mode === 'file' ? 'Добавьте файл, чтобы просматривать его и сохранять версии.'
@@ -492,16 +492,16 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 20px;
+  padding: 16px;
   scrollbar-gutter: stable;
 }
 
 .studio-create-content {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   max-width: 1160px;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .studio-create-heading h3 {
@@ -708,7 +708,7 @@ onUnmounted(() => {
 
 @container studio-create (max-width: 559px) {
   .studio-create-scroll {
-    padding: 16px 14px;
+    padding: 12px 16px;
   }
 
   .studio-create-card {
@@ -716,7 +716,14 @@ onUnmounted(() => {
   }
 
   .studio-create-footer {
-    padding: 12px 14px;
+    padding: 8px 16px;
   }
+}
+@media (max-height: 500px) {
+  .studio-create-scroll { padding: 8px 16px; }
+  .studio-create-heading { display: none; }
+  .studio-create-primary > .studio-create-card:first-child > h4 { display: none; }
+  .studio-create-card { padding: 8px; gap: 8px; }
+  .studio-create-footer { padding: 8px 16px; }
 }
 </style>

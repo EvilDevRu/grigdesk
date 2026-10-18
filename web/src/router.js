@@ -19,7 +19,15 @@ const routes = [
     },
   },
   { path: '/agents', name: 'agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Агенты' } },
-  { path: '/diff', name: 'diff', component: () => import('./views/DiffView.vue'), meta: { title: 'Диф' } },
+  {
+    path: '/diff',
+    name: 'diff',
+    component: () => import('./views/DiffView.vue'),
+    meta: {
+      title: 'Диф',
+      layout: 'workspace',
+    },
+  },
   { path: '/documents', name: 'documents', component: () => import('./views/DocumentsView.vue'), meta: { title: 'Документ' } },
   {
     path: '/terminal',

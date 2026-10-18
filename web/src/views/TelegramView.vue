@@ -1,5 +1,5 @@
 <template>
-  <div class="tg">
+  <div class="tg ui-page">
     <section v-if="pluginOff" class="card disabled-card">
       <div class="disabled-mark">TG</div>
       <div>
@@ -12,45 +12,12 @@
     </section>
 
     <template v-else>
-      <header class="tg-hero">
-        <div class="hero-copy">
-          <div class="eyebrow">Канал Telegram</div>
-          <h2 class="ttl">
-            <template v-if="loading">Готовим рабочее пространство…</template>
-            <template v-else-if="connected">Бот подключён и хранит сообщения в своём канале</template>
-            <template v-else>Подключи бота — это займёт несколько минут</template>
-          </h2>
-          <p class="muted lead">
-            Здесь управляются подключение, архив и allowlist Telegram. Очередь и отдельный
-            переключатель приёма новых обращений находятся в общем разделе «Входящие».
-            Бот читает только явно разрешённые ниже чаты и пишет туда лишь включённые
-            подтверждения уже созданных задач.
-          </p>
+      <header class="tg-hero ui-page-head">
+        <div>
+          <h1>Телеграм</h1>
+          <p>{{ loading ? 'Загружаю состояние бота…' : connected ? `Подключён @${bot?.username}` : 'Подключите бота токеном от @BotFather.' }}</p>
         </div>
-
-        <div v-if="!loading && connected" class="hero-stats" aria-label="Сводка Телеграма">
-          <a class="hero-stat" href="#/inbox">
-            <strong>Inbox</strong>
-            <span>приём и общая очередь</span>
-          </a>
-          <a class="hero-stat" href="#tg-chats">
-            <strong>{{ chats.length }}</strong>
-            <span>{{ plural(chats.length, ['чат пишет', 'чата пишут', 'чатов пишут']) }} боту</span>
-          </a>
-          <a class="hero-stat" href="#tg-rules">
-            <strong>{{ rules.length }}</strong>
-            <span>{{ plural(rules.length, ['правило', 'правила', 'правил']) }} доступа</span>
-          </a>
-        </div>
-
-        <div v-else-if="!loading" class="setup-summary">
-          <span class="setup-time">≈ 3 минуты</span>
-          <span>Нужен только Телеграм и токен от @BotFather</span>
-        </div>
-
-        <div v-else class="hero-loading">
-          <UiSpinner decorative /> Загружаю состояние бота
-        </div>
+        <UiActionLink v-if="connected" href="#/inbox">Общая очередь</UiActionLink>
       </header>
 
       <div v-if="error || note" class="feedback" role="status" aria-live="polite">
@@ -699,14 +666,76 @@
       <!-- Первое подключение: два шага стоят рядом и не требуют знания архитектуры. -->
       <template v-else-if="!loading">
         <div class="setup-grid">
-          <section class="card setup-card">
+          <section class="card setup-card token-card">
             <div class="setup-card-head">
-              <span class="setup-number">1</span>
+
+              <div>
+                <div class="section-kicker">В кокпите</div>
+                <div class="h">Вставь токен и подключи</div>
+              </div>
+            </div>
+
+            <p class="muted">
+              Кокпит сначала проверит токен у Телеграма. Если всё в порядке, покажет имя
+              бота и начнёт слушать новые сообщения.
+            </p>
+
+            <label class="control token-control">
+              <span class="field-label">Токен от @BotFather</span>
+              <UiInput
+                v-model="token"
+                class="inp"
+                type="password"
+                data-role="secret-token"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="8123456789:AA…"
+                @keydown.enter="connect"
+              />
+            </label>
+            <UiButton
+              class="btn primary connect-btn"
+              variant="solid"
+              tone="success"
+              :disabled="!canConnect || !token.trim() || Boolean(busy)"
+              :loading="busy === 'connect'"
+              loading-label="Проверяю токен"
+              @click="connect"
+            >
+              {{ busy === 'connect' ? 'Проверяю токен…' : 'Подключить' }}
+            </UiButton>
+
+            <div class="state" :class="providerConnection === 'degraded' ? 'warn' : ''"
+                 data-state="provider-disconnected">
+              Telegram не подключён: новые сообщения не принимаются. Ранее принятые обращения,
+              если они есть, остаются в общем Inbox только для чтения.
+              <template v-if="providerReason"> Причина: {{ providerReason }}.</template>
+            </div>
+
+            <div class="security-note">
+              <b>Токен останется на сервере.</b>
+              <span>
+                В браузер вернутся только последние четыре знака. Если токен утечёт,
+                отзови его у @BotFather командой <code>/revoke</code>.
+              </span>
+            </div>
+
+            <details class="technical">
+              <summary>Где хранится токен</summary>
+              <div class="muted sub technical-data">
+                В файле <code>state/telegram-account-creds.json</code> в папке данных,
+                доступном только владельцу.
+              </div>
+            </details>
+          </section>
+          <details class="card setup-card setup-guide">
+            <summary class="setup-card-head">
+
               <div>
                 <div class="section-kicker">В Телеграме</div>
                 <div class="h">Создай отдельного бота</div>
               </div>
-            </div>
+            </summary>
 
             <ol class="steps">
               <li>
@@ -736,70 +765,9 @@
               Бота нельзя создать кнопкой на сайте: Телеграм разрешает делать это только
               в переписке с @BotFather. После выдачи токена всё остальное настроит кокпит.
             </div>
-          </section>
+          </details>
 
-          <section class="card setup-card token-card">
-            <div class="setup-card-head">
-              <span class="setup-number">2</span>
-              <div>
-                <div class="section-kicker">В кокпите</div>
-                <div class="h">Вставь токен и подключи</div>
-              </div>
-            </div>
 
-            <p class="muted">
-              Кокпит сначала проверит токен у Телеграма. Если всё в порядке, покажет имя
-              бота и начнёт слушать новые сообщения.
-            </p>
-
-            <div class="state" :class="providerConnection === 'degraded' ? 'warn' : ''"
-                 data-state="provider-disconnected">
-              Telegram не подключён: новые сообщения не принимаются. Ранее принятые обращения,
-              если они есть, остаются в общем Inbox только для чтения.
-              <template v-if="providerReason"> Причина: {{ providerReason }}.</template>
-            </div>
-
-            <label class="control token-control">
-              <span class="field-label">Токен от @BotFather</span>
-              <UiInput
-                v-model="token"
-                class="inp"
-                type="password"
-                data-role="secret-token"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="8123456789:AA…"
-                @keydown.enter="connect"
-              />
-            </label>
-            <UiButton
-              class="btn primary connect-btn"
-              variant="solid"
-              tone="success"
-              :disabled="!canConnect || !token.trim() || Boolean(busy)"
-              :loading="busy === 'connect'"
-              loading-label="Проверяю токен"
-              @click="connect"
-            >
-              {{ busy === 'connect' ? 'Проверяю токен…' : 'Подключить' }}
-            </UiButton>
-
-            <div class="security-note">
-              <b>Токен останется на сервере.</b>
-              <span>
-                В браузер вернутся только последние четыре знака. Если токен утечёт,
-                отзови его у @BotFather командой <code>/revoke</code>.
-              </span>
-            </div>
-
-            <details class="technical">
-              <summary>Где хранится токен</summary>
-              <div class="muted sub technical-data">
-                В файле <code>state/telegram-account-creds.json</code> в папке данных,
-                доступном только владельцу.
-              </div>
-            </details>
-          </section>
         </div>
 
         <section class="after-connect">
@@ -848,6 +816,7 @@ import { errorMessage } from '../../../shared/lib/errors.ts';
 
 import {
   confirmDialog,
+  UiActionLink,
   UiButton,
   UiCheckbox,
   UiIconButton,
@@ -2285,5 +2254,16 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .savebar .row, .savebar .btn { width: 100%; }
   .empty-rules { align-items: stretch; flex-direction: column; }
   .after-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.tg { width: 100%; margin: 0; }
+.tg-hero { display: flex; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; gap: 12px; }
+.tg-hero::after { display: none; }
+.setup-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.setup-card { padding: 16px; }
+.token-control { margin-top: 0; }
+.setup-guide > summary { cursor: pointer; }
+@media (max-width: 900px) {
+  .setup-grid { grid-template-columns: minmax(0, 1fr); }
+  .setup-path { display: none; }
 }
 </style>

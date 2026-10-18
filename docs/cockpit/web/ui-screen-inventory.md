@@ -45,7 +45,8 @@
 `SettingsView.vue` содержит восемь вкладок: `app`, `speech`, `b24`, `providers`,
 `runs`, `plugins`, `server`, `access`. Отдельное окно настроек использует
 `shared/layout/SettingsWindowShell.vue`; обычный маршрут и это окно имеют
-разные оболочки. Контракт определения окна — `shared/desktop/desktopWindowContract.ts`.
+разные оболочки. Контракт определения окна — `shared/desktop/desktopWindowContract.ts`
+от корня репозитория.
 
 В `App.vue` также находятся `NoAccessView`, общие hosts диалогов, подсказок
 и тостов, `TaskModal`, `DiffModal`, `DocumentModal`. Проверка одних маршрутов

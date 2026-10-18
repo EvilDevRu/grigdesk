@@ -2,12 +2,12 @@
   <section class="route-canvas">
     <div class="route-canvas__toolbar">
       <div class="route-canvas__zoom" role="group" aria-label="Масштаб схемы">
-        <UiButton data-test="zoom-out" :disabled="scale <= MIN_SCALE" @click="zoomBy(1 / ZOOM_STEP)">
-          Уменьшить
+        <UiButton aria-label="Уменьшить масштаб" data-test="zoom-out" :disabled="scale <= MIN_SCALE" @click="zoomBy(1 / ZOOM_STEP)">
+          −
         </UiButton>
         <UiButton data-test="zoom-reset" :disabled="scale === 1" @click="scale = 1">100%</UiButton>
-        <UiButton data-test="zoom-in" :disabled="scale >= MAX_SCALE" @click="zoomBy(ZOOM_STEP)">
-          Увеличить
+        <UiButton aria-label="Увеличить масштаб" data-test="zoom-in" :disabled="scale >= MAX_SCALE" @click="zoomBy(ZOOM_STEP)">
+          +
         </UiButton>
         <UiButton data-test="fit-all" @click="fitAll">Показать всё</UiButton>
       </div>
@@ -16,6 +16,9 @@
                  @update:model-value="searchTerm = String($event ?? '')"
                  @keydown.enter="searchNode" />
       </label>
+      <details class="route-canvas__connections">
+        <summary>Соединения</summary>
+        <div class="route-canvas__connection-fields">
       <label>Источник
         <UiSelect data-test="connect-source" :model-value="connectSourceId"
                   @update:model-value="changeConnectSource(String($event ?? ''))">
@@ -33,7 +36,8 @@
         </UiSelect>
       </label>
       <UiButton data-test="connect-start" :disabled="!connectSourceId || !connectOutcome"
-                @click="connecting = true">Соединить с узлом</UiButton>
+                @click="connecting = true">Соединить с узлом</UiButton>        </div>
+      </details>
       <span v-if="connecting" class="muted">Выберите цель на схеме</span>
       <span v-if="connectError" class="bad">{{ connectError }}</span>
     </div>
@@ -283,5 +287,8 @@ watch(() => props.focusedIssue, (issue) => {
 .route-canvas__toolbar label { display: grid; gap: 3px; }
 .route-canvas__search { width: min(100%, 240px); }
 .route-canvas__zoom { display: flex; flex-wrap: wrap; gap: 6px; }
+.route-canvas__connections { flex: 1 0 100%; }
+.route-canvas__connections summary { cursor: pointer; color: var(--ink-mid); }
+.route-canvas__connection-fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .route-canvas__graph { min-width: 0; padding: 8px 10px; }
 </style>

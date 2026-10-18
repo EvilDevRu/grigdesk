@@ -5,15 +5,22 @@
         <span class="dot"></span>
         {{ status === 'open' ? 'подключено' : status === 'connecting' ? 'подключение…' : 'отключено' }}
       </span>
-      <div class="chips">
-        <UiCommandButton class="chip" v-tooltip="'Авторизация Claude'" @click="insert('claude\n')">claude login</UiCommandButton>
-        <UiCommandButton class="chip" @click="insert('claude --version\n')">claude --version</UiCommandButton>
-        <UiCommandButton class="chip" @click="insert('clear\n')">clear</UiCommandButton>
-      </div>
+      <UiPopover placement="bottom-start" aria-label="Быстрые команды терминала">
+        <template #trigger><UiButton variant="text">Команды</UiButton></template>
+        <template #default="{ close }">
+          <div class="ui-action-menu">
+            <UiCommandButton @click="insert('claude\n'); close('action')">claude login</UiCommandButton>
+            <UiCommandButton @click="insert('claude --version\n'); close('action')">
+              claude --version
+            </UiCommandButton>
+            <UiCommandButton @click="insert('clear\n'); close('action')">clear</UiCommandButton>
+          </div>
+        </template>
+      </UiPopover>
       <UiButton v-if="status === 'closed'" class="reconnect" variant="solid" tone="accent"
                 @click="reconnect">Переподключить</UiButton>
       <UiButton v-else class="end" tone="danger"
-                @click="closeSession({ announce: true })">Завершить сессию</UiButton>
+                @click="closeSession({ announce: true })" aria-label="Завершить сессию">Завершить</UiButton>
     </div>
     <div ref="host" class="term-host" data-escape-owner="terminal"></div>
   </div>
@@ -24,7 +31,7 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { api } from '../../shared/apiClient.ts';
-import { UiButton, UiCommandButton, vTooltip } from '../../ui';
+import { UiButton, UiCommandButton, UiPopover } from '../../ui';
 
 const props = defineProps({
   active: { type: Boolean, default: true },

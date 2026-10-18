@@ -212,7 +212,7 @@ test('Поиск объединяет номер, название, проект
     ['42'],
   );
   assert.equal(wrapper.get('.shelf-filter-summary [role="status"]').text(), 'Показано 1 из 2');
-  assert.equal(wrapper.get('[data-shelf-filter="all"]').text(), 'Все · 2');
+  assert.equal(wrapper.get('option[value="all"]').text(), 'Все · 2');
   assert.deepEqual(calls, { opened: [], acknowledged: [], removed: [] });
 
   await wrapper.get('button[aria-label="Очистить поиск"]').trigger('click');
@@ -230,26 +230,26 @@ test('Фильтр внимания учитывает просмотренны�
   ]);
 
   assert.equal(wrapper.get('.shelf-heading p').text(), '4 задачи · требуют внимания: 2');
-  await wrapper.get('[data-shelf-filter="attention"]').trigger('click');
+  await wrapper.get('select[aria-label=\"Фильтр задач на полке\"]').setValue('attention');
 
   assert.deepEqual(
     wrapper.findAll('[data-task-id]').map((item) => item.attributes('data-task-id')),
     ['22', '33'],
   );
-  assert.equal(wrapper.get('[data-shelf-filter="attention"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.get('select[aria-label=\"Фильтр задач на полке\"]').element.value, 'attention');
   assert.match(wrapper.get('[data-task-id="22"] .shelf-waiting').text(), /Требует внимания/);
 
   await wrapper.get('input[type="search"]').setValue('план');
 
   assert.equal(wrapper.findAll('[data-task-id]').length, 1);
   assert.equal(wrapper.get('[data-task-id]').attributes('data-task-id'), '22');
-  assert.equal(wrapper.get('[data-shelf-filter="attention"]').text(), 'Внимание · 2');
+  assert.equal(wrapper.get('option[value="attention"]').text(), 'Внимание · 2');
 });
 
 test('Пустой результат отличается от пустой полки и позволяет сбросить оба фильтра', async (t) => {
   const { wrapper } = await mountPanel(t, [row()]);
 
-  await wrapper.get('[data-shelf-filter="completed"]').trigger('click');
+  await wrapper.get('select[aria-label=\"Фильтр задач на полке\"]').setValue('completed');
   await wrapper.get('input[type="search"]').setValue('несуществующая задача');
 
   assert.equal(wrapper.get('.shelf-empty h3').text(), 'Ничего не найдено');
@@ -258,28 +258,28 @@ test('Пустой результат отличается от пустой п�
 
   assert.equal(wrapper.get('input').element.value, '');
   assert.equal(wrapper.element.ownerDocument.activeElement === wrapper.get('input').element, true);
-  assert.equal(wrapper.get('[data-shelf-filter="all"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.get('select[aria-label=\"Фильтр задач на полке\"]').element.value, 'all');
   assert.equal(wrapper.findAll('[data-task-id]').length, 1);
 });
 
 test('Новые данные обновляют выбранную группу и её счётчик без сброса поиска', async (t) => {
   const { wrapper } = await mountPanel(t, [row({ needsHuman: true })]);
 
-  await wrapper.get('[data-shelf-filter="attention"]').trigger('click');
+  await wrapper.get('select[aria-label=\"Фильтр задач на полке\"]').setValue('attention');
   await wrapper.get('input[type="search"]').setValue('поставку');
   globalThis.__taskShelfPanel.shelf.rows[0].needsHuman = false;
   await wrapper.vm.$nextTick();
 
   assert.equal(wrapper.findAll('[data-task-id]').length, 0);
-  assert.equal(wrapper.get('[data-shelf-filter="attention"]').text(), 'Внимание · 0');
-  assert.equal(wrapper.get('[data-shelf-filter="attention"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.get('option[value="attention"]').text(), 'Внимание · 0');
+  assert.equal(wrapper.get('select[aria-label=\"Фильтр задач на полке\"]').element.value, 'attention');
   assert.equal(wrapper.get('input').element.value, 'поставку');
 
   globalThis.__taskShelfPanel.shelf.rows.push(row({ taskId: '77', needsHuman: true }));
   await wrapper.vm.$nextTick();
 
   assert.equal(wrapper.get('[data-task-id]').attributes('data-task-id'), '77');
-  assert.equal(wrapper.get('[data-shelf-filter="attention"]').text(), 'Внимание · 1');
+  assert.equal(wrapper.get('option[value="attention"]').text(), 'Внимание · 1');
 });
 
 test('Ошибка обновления не скрывает уже загруженные задачи', async (t) => {

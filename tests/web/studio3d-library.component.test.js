@@ -37,7 +37,18 @@ test('WL-01/02 библиотека и дерево родителей', async (
   assert.match(panel.text(), /потрачено 85/);
   await panel.get('input[type="search"]').setValue('герой');
   assert.deepEqual(calls[0], ['search', 'герой']);
+
+  const filtersButton = () => panel.findAll('button').find((button) => button.text().startsWith('Фильтры'));
+
+  assert.equal(filtersButton().attributes('aria-expanded'), 'false');
+  await filtersButton().trigger('click');
+  assert.equal(filtersButton().attributes('aria-expanded'), 'true');
   await panel.get('[data-context="studio-filter-origin"]').setValue('agent');
+  await filtersButton().trigger('click');
+  assert.equal(filtersButton().attributes('aria-expanded'), 'false');
+  assert.match(filtersButton().text(), /1/);
+  await filtersButton().trigger('click');
+  assert.equal(panel.get('[data-context="studio-filter-origin"]').element.value, 'agent');
   assert.equal(store.filters.origin, 'agent');
   await panel.findAll('button').find((button) => button.text() === 'Показать ещё').trigger('click');
   assert.equal(calls.some((call) => call[0] === 'models' && call[1] === true), true);

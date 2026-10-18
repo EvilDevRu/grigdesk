@@ -1,6 +1,6 @@
 <template>
-  <main class="github-page">
-    <header class="page-head">
+  <main class="github-page ui-page">
+    <header class="page-head ui-page-head">
       <div><h1>GitHub Issues</h1><p>Один проверенный репозиторий как канал общего Inbox.</p></div>
       <UiButton class="btn" :loading="loading" :disabled="!!busy"
                 loading-label="Обновляю" @click="load">Обновить</UiButton>
@@ -38,11 +38,11 @@
               <strong>{{ status.fullName || 'Репозиторий проверяется' }}</strong>
               <span class="pill" :class="status.connection">{{ stateLabel(status.state) }}</span>
             </div>
-            <dl>
+            <details><summary>Данные подключения</summary><dl>
               <template v-if="status.repositoryId"><dt>Repository ID</dt><dd>{{ status.repositoryId }}</dd></template>
 
               <template v-if="status.connectedAt"><dt>Подключён</dt><dd>{{ formatTime(status.connectedAt) }}</dd></template>
-            </dl>
+            </dl></details>
             <p v-if="status.state === 'pending'" class="warn">Привязка уже сохранена, но канал станет active только после signed ping.</p>
             <p v-if="status.cleanupPending" class="bad">Очистка webhook не завершена. Повторите отключение.</p>
             <p v-if="status.reason" class="bad">{{ status.reason }}</p>
@@ -50,9 +50,7 @@
               Provider сейчас не готов к записи. Ранее принятые обращения доступны в Inbox только для чтения.
             </p>
             <p v-else class="lifecycle-note">
-              Подключение provider не включает очередь автоматически. Allowlist задаётся справа,
-              а начать или остановить приём новых issues можно отдельно в
-              <a href="#/inbox">общем Inbox</a>.
+              Подключение не включает очередь автоматически. Задайте проект и включите приём в <a href="#/inbox">общих Входящих</a>.
             </p>
             <div class="actions">
               <UiButton class="btn" :loading="busy === 'recheck'" :disabled="!!busy && busy !== 'recheck'"
@@ -66,7 +64,7 @@
         </section>
 
         <section class="card rules-card">
-          <h2>Allowlist Inbox</h2>
+          <h2>Разрешённые источники Inbox</h2>
           <p v-if="!verified" class="hint">Сначала подключите и проверьте репозиторий.
           </p>
           <p v-else-if="!rulesLoaded" class="hint"><UiSpinner decorative /> Загружаю правило…</p>
@@ -570,13 +568,25 @@ onMounted(load);
 </script>
 
 <style scoped>
-.github-page { height: 100%; overflow: auto; padding: 22px; background: var(--ground); }.page-head, .grid, .banner, .card { max-width: 980px; margin-left: auto; margin-right: auto; }
-.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }.page-head h1 { margin: 0; font-size: 24px; }.page-head p, .hint { color: var(--ink-mid); margin: 4px 0; }
+.github-page { background: var(--ground); }
+.grid { max-width: 1100px; }
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.page-head h1 { margin: 0; font-size: 24px; }
+.page-head p, .hint { color: var(--ink-mid); margin: 4px 0; }
+.page-head > div { flex: 1 1 240px; min-width: 0; }
+.page-head > .btn { flex: none; }
 .grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(340px, 1fr); gap: 14px; }.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }.card h2 { margin: 0 0 13px; font-size: 17px; }
 .form { display: grid; gap: 11px; }
 .connection-head, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.connection-head { justify-content: space-between; }.pill { border-radius: 999px; background: var(--surface-2); padding: 3px 8px; font-size: 12px; }.pill.connected, .good { color: var(--good); }.pill.degraded, .bad, .read-only { color: var(--bad); }.pill.connecting, .warn { color: var(--warn); }.lifecycle-note { color: var(--ink-mid); }.lifecycle-note a { color: var(--accent); }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }dt { color: var(--ink-mid); }dd { margin: 0; overflow-wrap: anywhere; }.actions { margin-top: 13px; }
 .banner { padding: 10px 13px; border: 1px solid currentColor; border-radius: 9px; }.empty-allowlist { padding: 13px; margin-bottom: 12px; border: 1px dashed var(--warn); border-radius: 9px; }.empty-allowlist p { margin-bottom: 0; color: var(--ink-mid); }details { border-top: 1px solid var(--line); padding-top: 9px; }summary { cursor: pointer; }.b24-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 9px; }
 .agent-search-policy { border-top: 1px solid var(--line); padding-top: 10px; }.check-row { justify-self: start; }
-@media (max-width: 760px) { .github-page { padding: 14px; }.grid { grid-template-columns: 1fr; }.b24-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; }.b24-grid { grid-template-columns: 1fr; } }
 </style>

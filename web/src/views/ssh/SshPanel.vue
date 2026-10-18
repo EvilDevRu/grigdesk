@@ -4,6 +4,8 @@
     :class="{
       'is-compact': props.compact,
       'is-dock': props.presentation === 'dock',
+      'has-session': Boolean(activeSession),
+      'show-connections': showConnections,
     }"
     aria-labelledby="ssh-panel-title"
     :aria-busy="refreshLoading || undefined"
@@ -40,6 +42,10 @@
       </div>
 
       <div class="ssh-panel__summary" aria-label="Сводка SSH">
+        <UiButton v-if="activeSession" class="ssh-pane-toggle" variant="text"
+                  :pressed="showConnections" @click="showConnections = !showConnections">
+          {{ showConnections ? 'К терминалу' : 'Серверы' }}
+        </UiButton>
         <span class="ssh-summary-item" :class="{ active: store.sessions?.length }">
           <i aria-hidden="true"></i>
           {{ store.sessions?.length || 0 }} сесс.
@@ -659,6 +665,7 @@ const connectionsRegion = ref<HTMLElement | null>(null);
 const passwords = reactive<Record<string, string>>({});
 const comments = reactive<Record<string, string>>({});
 const remotePath = ref('.');
+const showConnections = ref(false);
 const savingConnection = ref(false);
 const connectingId = ref('');
 const closingSessionId = ref('');
@@ -863,6 +870,10 @@ async function refresh(): Promise<void> {
   await Promise.all([loadSsh(), loadSshProjects()]);
 }
 
+/**
+ * Выбор сеанса возвращает терминал, в том числе при повторном выборе того же сервера.
+ * Каталог скрывается после подготовки xterm, а само соединение остаётся в store.
+ */
 async function activateSession(sessionId: string): Promise<void> {
   const ready = await ensureTerminal();
 
@@ -871,6 +882,7 @@ async function activateSession(sessionId: string): Promise<void> {
   }
 
   activateSshSession(sessionId);
+  showConnections.value = false;
 }
 
 function sessionTabId(sessionId: string): string {
@@ -1040,6 +1052,8 @@ onMounted(async () => {
 });
 
 watch(activeSession, async (session) => {
+  showConnections.value = false;
+
   if (!session) {
     lastTerminalSize = '';
 
@@ -2358,6 +2372,7 @@ function deny(approval: ChatApproval): void {
 @container (max-width: 880px) {
   .ssh-panel__surface {
     grid-template-rows: auto auto;
+    align-content: start;
     overflow: auto;
   }
 
@@ -2529,5 +2544,17 @@ function deny(approval: ChatApproval): void {
   .ssh-disclosure-icon {
     transition: none;
   }
+}
+/* На узкой панели исходный шаг — сервер; подключение получает собственную область.
+   Один xterm остаётся смонтированным и при возврате к списку серверов. */
+.ssh-pane-toggle { display: none; }
+@container (max-width: 880px) {
+  .ssh-pane-toggle { display: inline-flex; }
+  .ssh-panel:not(.has-session) .ssh-connections { order: -1; }
+  .ssh-console:not(.has-session) { display: none; }
+  .ssh-panel.has-session:not(.show-connections) .ssh-connections { display: none; }
+  .ssh-panel.has-session.show-connections .ssh-workspace { display: none; }
+  .ssh-console.has-session { height: max(260px, calc(100dvh - 230px)); min-height: 260px; }
+  .ssh-panel__brand small { display: none; }
 }
 </style>

@@ -3,6 +3,7 @@
     :open="preview.visible"
     class="document-dialog"
     layer="document"
+    initial-focus="#document-dialog-title"
     size="workspace"
     :label="title"
     :body-inset="false"
@@ -13,12 +14,10 @@
     <template #header="{ close }">
       <div class="document-dialog__header">
         <div class="document-dialog__title">
-          <span>{{ title }}</span>
+          <span id="document-dialog-title" tabindex="-1">{{ title }}</span>
           <small v-if="preview.image" class="mono">Изображение из чата</small>
           <small v-else-if="preview.video" class="mono">Фрагмент записи</small>
-          <small v-else-if="documentValue?.displayPath" class="mono">
-            {{ documentValue.displayPath }}
-          </small>
+
         </div>
         <UiIconButton
           role="embedded"

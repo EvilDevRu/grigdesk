@@ -1,6 +1,11 @@
 <template>
-  <div class="tools-page">
-    <p class="hint">Редкие рабочие разделы собраны здесь, чтобы основная навигация оставалась короткой.</p>
+  <div class="tools-page ui-page">
+    <header class="ui-page-head">
+      <div>
+        <h1>Инструменты</h1>
+        <p>Дополнительные разделы и подключённые плагины.</p>
+      </div>
+    </header>
     <ToolsGrid v-if="items.length" :items="items" :badges="badges" />
     <div v-else class="empty">Включённых инструментов с отдельными страницами пока нет.</div>
   </div>
@@ -24,7 +29,6 @@ const badges = {};
 </script>
 
 <style scoped>
-.tools-page { max-width: 820px; margin: 0 auto; }
-.hint { margin: 0 0 16px; color: var(--ink-mid); font-size: 13px; }
+.tools-page :deep(.tools-grid) { max-width: 1100px; }
 .empty { padding: 42px 16px; color: var(--ink-mid); text-align: center; }
 </style>

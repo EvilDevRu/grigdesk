@@ -1,6 +1,6 @@
 <template>
-  <main class="inbox-page">
-    <header class="page-head">
+  <main class="inbox-page ui-page">
+    <header class="page-head ui-page-head">
       <div>
         <h1>Входящие</h1>
         <p>Общая очередь Telegram, GitHub и других подключённых каналов.</p>
@@ -24,6 +24,8 @@
       </p>
       <p v-if="payload.truncated" class="banner warn">Показана только часть очереди: достигнут лимит ответа.</p>
 
+      <details class="channels-disclosure">
+        <summary>Каналы · {{ payload.channels.length }} · подключено {{ payload.channels.filter(channel => channel.connection === 'connected').length }}</summary>
       <section class="channels" aria-label="Каналы Inbox">
         <article v-for="channel in payload.channels" :key="channel.id" class="channel-card"
                  :data-channel="channel.id">
@@ -71,6 +73,8 @@
         </div>
       </section>
 
+      </details>
+
       <section v-if="payload.errors.length" class="channel-errors" aria-label="Ошибки каналов">
         <p v-for="entry in payload.errors" :key="`${entry.channel}:${entry.code}`" class="banner bad">
           {{ entry.channel }}: {{ entry.message }}
@@ -81,7 +85,7 @@
       <template v-else-if="payload.items.length">
         <section class="queue-head" aria-labelledby="inbox-items-title">
           <h2 id="inbox-items-title">Обращения</h2>
-          <UiTabs v-model="activeSection" class="section-tabs" label="Разделы входящих">
+          <UiTabs v-model="activeSection" class="section-tabs" data-ui-workspace-tabs label="Разделы входящих">
             <UiTab class="section-tab" value="review" data-section="review">
               К разбору <span>{{ reviewItems.length }}</span>
             </UiTab>
@@ -1079,11 +1083,21 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.inbox-page { height: 100%; overflow: auto; padding: 22px; background: var(--ground); }
-.page-head { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; max-width: 1160px; margin: 0 auto 18px; }
+.inbox-page { min-width: 0; background: var(--ground); }
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  max-width: 1160px;
+  margin: 0 0 16px;
+}
+.page-head > div { flex: 1 1 240px; min-width: 0; }
+.page-head > .btn { flex: none; }
 h1 { font-size: 24px; margin: 0; } h2 { font-size: 16px; margin: 0 0 8px; }
 .page-head p, .channel-card p, .state-card p { color: var(--ink-mid); margin: 4px 0 0; }
-.channels, .items, .queue-head, .channel-errors, .banner, .state-card { max-width: 1160px; margin-left: auto; margin-right: auto; }
+.channels, .items, .queue-head, .channel-errors, .banner, .state-card { max-width: 1160px; margin-left: 0; margin-right: 0; }
 .channels { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .channel-card, .item-card, .state-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .channel-card { padding: 14px; }.channel-main, .item-head, .message-head, .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -1116,5 +1130,8 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 16px; margin: 0 0 8px; }
 .attachment-chip small { color: var(--accent); }.attachment-chip[data-analysis="ready"] small, .attachment-chip[data-analysis="completed"] small, .attachment-chip[data-analysis="done"] small { color: var(--good); }.attachment-chip[data-analysis="failed"] small, .attachment-chip[data-analysis="error"] small { color: var(--bad); }
 .attachment-note { font-size: 11px; }.attachment-transcript { display: block; padding: 7px 9px; border-left: 2px solid var(--accent); white-space: pre-wrap; color: var(--ink-mid); }
 .actions { justify-content: flex-end; }.selected-count { margin-right: auto; }.action-help { flex: 1 1 260px; color: var(--ink-mid); font-size: 12px; text-align: right; }
-@media (max-width: 680px) { .inbox-page { padding: 14px; }.page-head, .queue-head { align-items: center; }.queue-head { align-items: stretch; flex-direction: column; }.section-tabs { display: flex; }.section-tab { flex: 1; justify-content: center; }.actions .btn { flex: 1 1 130px; }.selected-count { flex-basis: 100%; }.action-help { flex-basis: 100%; text-align: left; } }
+@media (max-width: 680px) { .inbox-page { padding: 0; }.page-head, .queue-head { align-items: center; }.queue-head { align-items: stretch; flex-direction: column; }.section-tabs { display: flex; }.section-tab { flex: 1; justify-content: center; }.actions .btn { flex: 1 1 130px; }.selected-count { flex-basis: 100%; }.action-help { flex-basis: 100%; text-align: left; } }
+.channels-disclosure { margin-bottom: 12px; }
+.channels-disclosure > summary { padding-block: 8px; color: var(--ink-mid); }
+.channels-disclosure[open] > summary { margin-bottom: 8px; }
 </style>

@@ -1,11 +1,11 @@
 <template>
-  <div class="page projects">
-    <header class="page-heading">
+  <div class="page projects ui-page">
+    <header v-if="!formVisible || splitView" class="page-heading ui-page-head">
       <div>
         <h1>Проекты</h1>
         <p>Рабочие пространства, репозитории и связи с фабрикой.</p>
       </div>
-      <UiButton data-role="project-create" tone="accent" variant="solid" @click="createProject">
+      <UiButton v-if="!creating" data-role="project-create" tone="accent" variant="solid" @click="createProject">
         <template #leading>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
@@ -32,6 +32,7 @@
       </div>
 
       <section v-if="formVisible" class="pane form-pane" data-role="project-form">
+        <header class="project-heading">
         <UiButton
           v-if="!splitView"
           variant="text"
@@ -41,10 +42,9 @@
           ← К списку
         </UiButton>
 
-        <header class="project-heading">
-          <ProjectAvatar :title="creating ? '' : formTitle" large />
+
+          <ProjectAvatar :title="creating ? '' : formTitle" />
           <div class="project-identity">
-            <span class="eyebrow">{{ creating ? 'Рабочее пространство' : 'Настройки проекта' }}</span>
             <h2 class="fhead">{{ formTitle }}</h2>
             <span v-if="!creating" class="project-id">{{ openedId }}</span>
           </div>
@@ -105,7 +105,7 @@
             <path d="M8 19h32M19 19v19M24 25h10M24 30h7" />
           </svg>
         </div>
-        <h2>Всё начинается с проекта</h2>
+        <h2>{{ store.items.length ? 'Выберите проект' : 'Создайте первый проект' }}</h2>
         <p>Выберите проект слева, чтобы настроить его репозитории и связи с фабрикой.</p>
         <UiButton variant="outline" @click="createProject">Создать проект</UiButton>
       </section>
@@ -457,11 +457,9 @@ function retry(): void {
 .projects {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
   height: 100%;
   min-height: 0;
-  max-width: 1600px;
-  margin: 0 auto;
   container: projects-page / inline-size;
 }
 
@@ -475,7 +473,7 @@ function retry(): void {
 
 .page-heading h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.035em;
 }
@@ -524,7 +522,7 @@ function retry(): void {
   flex: none;
   align-items: center;
   gap: 16px;
-  padding: 26px 28px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -576,7 +574,7 @@ function retry(): void {
 
 .form-content {
   flex: 1;
-  padding: 0 28px;
+  padding: 0 16px;
 }
 
 .welcome {
@@ -624,11 +622,11 @@ function retry(): void {
 @container project-detail (max-width: 580px) {
   .project-heading {
     flex-wrap: wrap;
-    padding: 20px;
+    padding: 12px 16px;
   }
 
   .form-content {
-    padding: 0 20px;
+    padding: 0 16px;
   }
 
   .project-status {
@@ -644,7 +642,7 @@ function retry(): void {
 
 @media (max-width: 899px) {
   .projects {
-    gap: 18px;
+    gap: 8px;
   }
 
   .workspace {

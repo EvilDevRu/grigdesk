@@ -6,7 +6,6 @@
           <h3 class="sttl">Основное</h3>
           <p class="section-description">Название и детали, по которым легко найти проект.</p>
         </div>
-        <span class="section-index" aria-hidden="true">01</span>
       </header>
 
       <div class="basics">
@@ -62,7 +61,6 @@
           <h3 class="sttl">Репозитории <span class="repo-count">{{ draft.repos.length }}</span></h3>
           <p class="section-description">Рабочие копии кода и репозиторий по умолчанию.</p>
         </div>
-        <span class="section-index" aria-hidden="true">02</span>
       </header>
 
       <ProjectRepoRows
@@ -105,7 +103,6 @@
           <h3 class="sttl">Фабрика и связи</h3>
           <p class="section-description">Профиль и маршруты автоматизации проекта.</p>
         </div>
-        <span class="section-index" aria-hidden="true">03</span>
       </header>
 
       <ProjectProfileStatus
@@ -122,7 +119,6 @@
           <h3 class="sttl">Управление</h3>
           <p class="section-description">Архив проекта и связи, которые его держат.</p>
         </div>
-        <span class="section-index" aria-hidden="true">04</span>
       </header>
 
       <p v-if="archived" class="hint">
@@ -390,8 +386,8 @@ async function submit(): Promise<void> {
 .section {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 26px 0;
+  gap: 12px;
+  padding: 16px 0;
   border-bottom: 1px solid var(--line);
 }
 
@@ -418,7 +414,7 @@ async function submit(): Promise<void> {
   display: grid;
   align-items: start;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
+  gap: 12px;
 }
 
 .description {
@@ -494,8 +490,8 @@ async function submit(): Promise<void> {
   position: sticky;
   bottom: 0;
   z-index: 1;
-  margin: auto -28px 0;
-  padding: 16px 28px;
+  margin: auto -16px 0;
+  padding: 10px 16px;
   border-top: 1px solid var(--line);
   background: var(--sidebar);
 }
@@ -527,16 +523,16 @@ async function submit(): Promise<void> {
 @container project-detail (max-width: 580px) {
   .basics {
     grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+    gap: 12px;
   }
 
   .section {
-    padding: 22px 0;
+    padding: 12px 0;
   }
 
   .savebar {
-    margin-inline: -20px;
-    padding: 14px 20px;
+    margin-inline: -16px;
+    padding: 8px 16px;
   }
 }
 

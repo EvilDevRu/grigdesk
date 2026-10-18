@@ -13,20 +13,9 @@
     <UiInlineMessage v-if="scanResult">{{ scanResult }}</UiInlineMessage>
     <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     <template v-if="store.tasks">
-      <dl class="studio-task-summary">
-        <div :class="{ 'studio-task-attention': attentionRows.length }">
-          <dt>Требуют внимания</dt><dd>{{ attentionRows.length }}</dd>
-        </div>
-        <div><dt>В работе</dt><dd>{{ runningRows.length }}</dd></div>
-        <div><dt>Готовы за 24 часа</dt><dd>{{ readyCount }}</dd></div>
-      </dl>
-      <p v-if="runningRows.length" class="studio-task-empty">
-        Можно уйти из раздела. Принятые задачи продолжатся, готовые результаты останутся в библиотеке.
+      <p v-if="store.tasks.historyPartial || store.tasks.week.partial" class="studio-task-history" role="status">
+        История неполная · только известные заказы. {{ store.tasks.historyError }}
       </p>
-      <UiInlineMessage v-if="store.tasks.historyPartial || store.tasks.week.partial" tone="warning">
-        История неполная. Показаны только известные заказы; это не полный счёт аккаунта.
-        {{ store.tasks.historyError }}
-      </UiInlineMessage>
       <section v-for="group in rowGroups" :key="group.id" class="studio-task-group" :data-group="group.id">
         <h4>{{ group.label }} <span>{{ group.rows.length }}</span></h4>
         <p v-if="group.id === 'attention'">Проверьте причину и доступные действия у каждого заказа.</p>
@@ -60,6 +49,13 @@
           <p v-if="row.retryReason">{{ row.retryReason }}</p>
         </article>
       </section>
+      <dl class="studio-task-summary">
+        <div :class="{ 'studio-task-attention': attentionRows.length }">
+          <dt>Требуют внимания</dt><dd>{{ attentionRows.length }}</dd>
+        </div>
+        <div><dt>В работе</dt><dd>{{ runningRows.length }}</dd></div>
+        <div><dt>Готовы за 24 часа</dt><dd>{{ readyCount }}</dd></div>
+      </dl>
       <section class="studio-task-group">
         <h4>Сделано вне раздела <span>{{ store.tasks.external.length }}</span></h4>
         <p v-if="!store.tasks.external.length" class="studio-task-empty">Нет новых наблюдений.</p>
@@ -374,5 +370,11 @@ async function importTask(provider: string, taskId: string): Promise<void> {
 
 .studio-task-status[data-status='failed'] {
   color: var(--bad);
+}
+.studio-task-history { color: var(--warn); }
+@media (max-height: 500px) {
+  .studio-tasks { gap: 8px; }
+  .studio-tasks-heading p { display: none; }
+  .studio-task-group { padding: 10px 12px; gap: 6px; }
 }
 </style>

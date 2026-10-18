@@ -23,7 +23,8 @@
       }}</span>
     </div>
 
-    <div class="graph-viewport">
+    <div ref="viewport" class="graph-viewport"
+         @pointerdown="initialPositioned = true" @wheel="initialPositioned = true">
       <svg
         class="graph"
         :viewBox="viewBox"
@@ -239,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 
 import { UiSvgPressable, vTooltip } from '../../ui';
 import {
@@ -359,6 +360,57 @@ const props = withDefaults(
 const emit = defineEmits<{
   node: [node: GraphNodeElement, event: MouseEvent | KeyboardEvent];
 }>();
+
+const viewport = ref<HTMLElement | null>(null);
+const initialStageId = computed(() => {
+  const statuses = Object.entries(props.graph.statuses ?? {});
+
+  return statuses.find(([, status]) => status === 'run')?.[0]
+    || statuses.find(([, status]) => ['wait', 'fail'].includes(status))?.[0];
+});
+let initialPositioned = false;
+let viewportObserver: ResizeObserver | null = null;
+
+/**
+ * При первом показе живого графа открывает текущий этап в пределах его полосы.
+ * После ручной прокрутки и обновлений данных положение остаётся у человека.
+ */
+function revealInitialStage(): void {
+  const host = viewport.value;
+  const current = initialStageId.value;
+
+  if (props.reference || initialPositioned || !host?.clientWidth || !current) {
+    return;
+  }
+
+  const node = Array.from(host.querySelectorAll<SVGElement>('[data-node]'))
+    .find((element) => element.dataset.node === current);
+
+  if (!node) {
+    return;
+  }
+
+  const bounds = host.getBoundingClientRect();
+  const target = node.getBoundingClientRect();
+
+  host.scrollLeft += target.left + target.width / 2 - bounds.left - bounds.width / 2;
+  initialPositioned = true;
+}
+
+watch(() => initialStageId.value, () => {
+  void nextTick(revealInitialStage);
+});
+
+onMounted(() => {
+  revealInitialStage();
+
+  if (typeof ResizeObserver !== 'undefined' && viewport.value) {
+    viewportObserver = new ResizeObserver(revealInitialStage);
+    viewportObserver.observe(viewport.value);
+  }
+});
+
+onBeforeUnmount(() => viewportObserver?.disconnect());
 
 const markerId = `graph-arrow-${useId()}`;
 const focusedNode = ref<string | null>(null);

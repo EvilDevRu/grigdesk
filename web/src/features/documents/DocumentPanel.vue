@@ -159,7 +159,7 @@ function formatTime(value) {
 .state.error span { color: var(--ink-mid); }
 .document-shell { min-height: 100%; }
 .document-meta { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
-  min-height: 36px; padding: 7px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--ground) 94%, transparent);
+  min-height: 36px; padding: 7px max(24px, calc((100% - 872px) / 2)); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--ground) 94%, transparent);
   backdrop-filter: blur(8px); color: var(--ink-mid); font-size: 11px; }
 .document-meta > span + span::before { content: '·'; margin-right: 8px; color: var(--line-2); }
 .document-meta .source { color: var(--ink); font-weight: 600; }
@@ -191,7 +191,7 @@ function formatTime(value) {
 .markdown :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 1.6em 0; }
 .markdown :deep(img) { display: block; max-width: 100%; height: auto; margin: 10px auto; border-radius: 8px; }
 @media (max-width: 759px) {
-  .document-meta { padding: 7px 10px; }
+  .document-meta { padding: 7px 14px; }
   .document-meta .size, .document-meta .modified { display: none; }
   .document-body { width: 100%; padding: 22px 14px 56px; font-size: 14px; }
   .plain { font-size: 12.5px; }

@@ -2,22 +2,21 @@
   <div class="settings" :class="{ 'settings-plugins': tab === 'plugins' }">
     <header v-if="!props.windowActions" class="settings-hero">
       <div>
-        <p class="eyebrow">Центр управления</p>
-        <h2>Настройте Cockpit под свой процесс</h2>
-        <p>
-          Подключения, исполнители и системные параметры собраны в одном месте.
-          Изменения применяются только там, где это явно указано.
-        </p>
-      </div>
-      <div class="hero-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 6h10 M18 6h2 M10 12h10 M4 12h2 M4 18h7 M15 18h5 M14 4v4 M6 10v4 M11 16v4" />
-        </svg>
+        <h1>Настройки</h1>
+        <p>Приложение, подключения и исполнители.</p>
       </div>
     </header>
 
     <div class="settings-layout">
       <aside class="settings-nav-wrap">
+        <label class="settings-mobile-nav">
+          <span>Настройки</span>
+          <UiSelect :model-value="tab" aria-label="Раздел настроек" @update:model-value="setTab">
+            <optgroup v-for="group in TAB_GROUPS" :key="group.label" :label="group.label">
+              <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.label }}</option>
+            </optgroup>
+          </UiSelect>
+        </label>
         <nav ref="settingsNav" class="settings-nav" aria-label="Разделы настроек">
           <div v-for="group in TAB_GROUPS" :key="group.label" class="nav-group">
             <div class="nav-group-label">{{ group.label }}</div>
@@ -55,7 +54,7 @@
             </svg>
           </span>
           <div>
-            <p class="eyebrow">{{ currentTab.group }}</p>
+
             <h2>{{ currentTab.label }}</h2>
             <p>{{ currentTab.description }}</p>
           </div>
@@ -987,12 +986,12 @@
               >
                 Обновлять репозитории перед запуском
               </UiSwitch>
-              <p class="muted small">
+              <details class="muted small"><summary>Как обновляются рабочие копии</summary><p>
                 Всегда выполняется <code>git fetch</code>; <code>git pull --ff-only</code> —
                 только для чистого master. Ветки задач и локальные правки не трогаются.
                 Если конвейер проекта работает в отдельных worktree, триаж читает свой
                 снимок свежей ветки origin, а не рабочую копию.
-              </p>
+              </p></details>
             </div>
           </div>
         </div>
@@ -1369,13 +1368,7 @@
 
     <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
     <section v-else-if="tab === 'server'">
-      <p class="section-note">
-        Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
-        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, а с автозапуском переживает
-        и перезагрузки).
-        Локальный checkout и опубликованный релиз применяются разными явными действиями:
-        ни одно из них не выполняет неявный <code>git pull</code> и не затирает WIP.
-      </p>
+
       <div class="card cockpit-release-card">
         <div class="card-head">
           <div>
@@ -1535,12 +1528,20 @@
       <div class="card">
         <WebLogPanel />
       </div>
+      <details class="section-note"><summary>Установка и применение обновлений</summary><p>
+        Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
+        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, а с автозапуском переживает
+        и перезагрузки).
+        Локальный checkout и опубликованный релиз применяются разными явными действиями:
+        ни одно из них не выполняет неявный <code>git pull</code> и не затирает WIP.
+      </p></details>
     </section>
 
     <!-- Доступ: вход в сам кокпит (один пользователь) -->
     <section v-else-if="tab === 'access'">
-      <section class="access-account" aria-labelledby="access-account-title">
-        <h3 id="access-account-title" class="sechead">Вход в приложение</h3>
+      <MobileAccess />
+      <details class="access-account">
+        <summary>Вход на этом компьютере</summary>
         <div class="card">
           <p>Автоматический вход по локальному ключу этого компьютера.</p>
           <p class="muted small">
@@ -1548,8 +1549,8 @@
             Чтобы защитить доступ, блокируйте экран компьютера.
           </p>
         </div>
-      </section>
-      <MobileAccess />
+      </details>
+
     </section>
       </div>
     </div>
@@ -2990,41 +2991,19 @@ onMounted(() => {
 
 <style scoped>
 .settings {
-  width: min(100%, 1280px);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 .settings-hero {
-  position: relative;
-  min-height: 150px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 28px 30px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background:
-    radial-gradient(circle at 82% 20%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 28%),
-    linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, var(--accent)) 0%, var(--surface) 72%);
-  box-shadow: var(--shadow);
+  padding: 4px 0 16px;
+  border-bottom: 1px solid var(--line);
 }
-.settings-hero::after {
-  content: '';
-  position: absolute;
-  inset: auto -70px -110px auto;
-  width: 280px;
-  height: 220px;
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
-  border-radius: 50%;
-}
-.settings-hero > div:first-child { position: relative; z-index: 1; max-width: 680px; }
-.settings-hero h2, .section-intro h2 { margin: 0; letter-spacing: -.025em; }
-.settings-hero h2 { font-size: clamp(23px, 2vw, 30px); line-height: 1.2; }
-.settings-hero p:last-child { max-width: 620px; margin: 10px 0 0; color: var(--ink-mid); }
+.settings-hero h1, .section-intro h2 { margin: 0; letter-spacing: -.025em; }
+.settings-hero h1 { font-size: 24px; line-height: 1.3; }
+.settings-hero p { margin: 6px 0 0; color: var(--ink-mid); }
 .eyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -3034,22 +3013,6 @@ onMounted(() => {
   line-height: 1.2;
   text-transform: uppercase;
 }
-.hero-mark {
-  position: relative;
-  z-index: 1;
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--accent) 10%, var(--ground));
-  color: var(--accent);
-  transform: rotate(3deg);
-}
-.hero-mark svg { width: 34px; height: 34px; }
-
 .settings-layout {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
@@ -3079,11 +3042,11 @@ onMounted(() => {
 .settings-workspace { min-width: 0; max-width: 860px; }
 .settings-workspace.wide { max-width: none; }
 .section-intro {
-  min-height: 80px;
+  min-height: 0;
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  padding: 2px 0 20px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--line);
 }
 .section-icon {
@@ -3223,7 +3186,7 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .plug-model-grid.solo { grid-template-columns: minmax(0, 1fr); }
 .plug-model-grid .plugrow .inp { width: 100%; max-width: none; }
 .effort-row { min-width: 0; }
-label:not([class^='ui-']):not([class*=' ui-']) {
+label:not([class^='ui-']):not([class*=' ui-']):not(.settings-mobile-nav) {
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -3561,11 +3524,9 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .settings { gap: 12px; }
   .settings.settings-plugins .settings-hero { display: none; }
   .settings.settings-plugins .section-intro p:last-child { display: none; }
-  .settings-hero { min-height: 0; padding: 19px; border-radius: 14px; }
-  .settings-hero h2 { font-size: 21px; }
-  .settings-hero p:last-child { display: none; }
-  .hero-mark { width: 48px; height: 48px; border-radius: 14px; }
-  .hero-mark svg { width: 24px; height: 24px; }
+  .settings-hero { padding: 0 0 12px; }
+  .settings-hero h1 { font-size: 22px; }
+  .settings-hero p { font-size: 12.5px; }
   .settings-nav-wrap { margin: 0 -16px; padding: 7px 16px; }
   .settings-nav { margin: 0 -7px; }
   .section-intro { min-height: 0; gap: 11px; padding: 4px 0 16px; }
@@ -3612,5 +3573,20 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .notification-line { align-items: stretch; flex-direction: column; }
   .notification-line .ui-button { width: 100%; }
   .version-facts > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+.settings-mobile-nav { display: none; }
+@media (max-width: 1099px) {
+  .settings-hero, .settings-nav, .section-intro { display: none; }
+  .settings-nav-wrap { margin: 0; padding: 0 0 8px; }
+  .settings-mobile-nav { display: flex; flex-direction: row; align-items: center; gap: 12px; }
+  .settings-mobile-nav > span { font-weight: 600; }
+  .settings-mobile-nav > :last-child { min-width: 0; flex: 1; }
+  .settings-workspace, .settings-workspace.wide { margin: 0; max-width: none; }
+  section { padding-top: 4px; }
+}
+@media (max-height: 500px) {
+  .settings { gap: 8px; }
+  .card { padding: 12px; }
+  .card-head { margin-bottom: 8px; }
 }
 </style>

@@ -301,7 +301,7 @@ test('включённое состояние видно по самой кно�
   const { wrapper } = await mountCatalog(t);
   const power = (id) => wrapper.get(`[data-plugin-id="${id}"] .plugin-tile-power button`);
 
-  assert.equal(power('code').attributes('data-variant'), 'solid');
+  assert.equal(power('code').attributes('data-variant'), 'ghost');
   assert.equal(power('code').attributes('data-tone'), 'accent');
   assert.equal(power('code').attributes('data-ui-tooltip'), 'Плагин включён');
 
@@ -361,7 +361,7 @@ test('поиск находит по name, id и description без учёта �
 test('фильтр состояния пересекается с фильтром наличия параметров', async (t) => {
   const { wrapper, flushPromises } = await mountCatalog(t);
 
-  await wrapper.get('.plugin-filter [data-option-value="disabled"]').trigger('click');
+  await wrapper.get('select[aria-label="Состояние плагинов"]').setValue('disabled');
   await flushPromises();
   assert.deepEqual(groupIds(wrapper), [
     ['dev', ['secure-shell']],
@@ -377,7 +377,7 @@ test('пустая выдача предлагает reset, который оч�
   const { wrapper, flushPromises } = await mountCatalog(t);
   const search = wrapper.get('input[aria-label="Поиск плагинов"]');
 
-  await wrapper.get('.plugin-filter [data-option-value="disabled"]').trigger('click');
+  await wrapper.get('select[aria-label="Состояние плагинов"]').setValue('disabled');
   await configurableButton(wrapper).trigger('click');
   await search.setValue('такого плагина нет');
   await flushPromises();
@@ -389,8 +389,8 @@ test('пустая выдача предлагает reset, который оч�
 
   assert.equal(search.element.value, '');
   assert.equal(
-    wrapper.get('.plugin-filter [data-option-value="all"]').attributes('aria-pressed'),
-    'true',
+    wrapper.get('select[aria-label="Состояние плагинов"]').element.value,
+    'all',
   );
   assert.equal(configurableButton(wrapper).attributes('aria-pressed'), 'false');
   assert.deepEqual(groupIds(wrapper), [

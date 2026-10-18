@@ -16,11 +16,21 @@
   >
     <p v-if="dialogText" class="ui-dialog-host__message">{{ dialogText }}</p>
 
+    <UiInput
+      v-if="request?.kind === 'prompt' && request.options.multiline === false"
+      ref="promptInput"
+      v-model="promptValue"
+      :aria-label="dialogTitle"
+      :placeholder="request.options.placeholder"
+      :disabled="busy"
+      @keydown="onPromptKeydown"
+    />
     <UiTextarea
-      v-if="request?.kind === 'prompt'"
+      v-else-if="request?.kind === 'prompt'"
       ref="promptInput"
       v-model="promptValue"
       class="ui-dialog-host__prompt"
+      :aria-label="dialogTitle"
       :placeholder="request.options.placeholder"
       :disabled="busy"
       @keydown="onPromptKeydown"
@@ -69,6 +79,7 @@ import {
   shallowRef,
 } from 'vue';
 import UiButton from '../primitives/UiButton.vue';
+import UiInput from '../primitives/UiInput.vue';
 import UiTextarea from '../primitives/UiTextarea.vue';
 import UiInlineMessage from '../feedback/UiInlineMessage.vue';
 import UiDialog from './UiDialog.vue';

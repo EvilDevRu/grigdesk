@@ -173,6 +173,9 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
   assert.deepEqual(toggled, ['42']);
   assert.match(wrapper.text(), /Не удалось сохранить звезду/);
 
+  await wrapper.findAll('button').find((item) => item.text() === 'Ещё').trigger('click');
+  await flushPromises();
+
   const shelfButton = wrapper.get('[data-role="task-shelf-toggle"]');
   assert.ok(shelfButton, 'в карточке должна быть кнопка полки');
   assert.equal(shelfButton.attributes('aria-pressed'), 'true');

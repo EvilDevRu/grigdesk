@@ -23,16 +23,27 @@
         </template>
         <template v-if="toolsNav.length">
           <div class="navsep"></div>
-          <UiPressable ref="toolsTrigger" class="navitem tools-trigger" data-ui-shell-nav
+          <UiPopover v-model:open="toolsOpen" class="tools-popover" layer="tools"
+                     placement="right-start" aria-label="Инструменты">
+          <template #trigger>
+          <UiPressable class="navitem tools-trigger" data-ui-shell-nav
                        :class="{ active: toolsActive }" :aria-label="navTitle({ to: '/tools', label: 'Инструменты' })"
-                       v-tooltip.right="navTitle({ to: '/tools', label: 'Инструменты' })"
-                       :aria-expanded="toolsOpen" aria-haspopup="true" @click="toggleTools">
+                       v-tooltip.right="navTitle({ to: '/tools', label: 'Инструменты' })">
             <span class="icwrap">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                    stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
               <NavigationCount :badge="badges['/tools']" />
             </span>
           </UiPressable>
+          </template>
+          <template #default="{ close }">
+            <header>
+              <strong>Инструменты</strong>
+              <router-link to="/tools" @click="close('action')">Все на странице →</router-link>
+            </header>
+            <ToolsGrid :items="toolsNav" :badges="badges" @select="close('action')" />
+          </template>
+          </UiPopover>
         </template>
       </nav>
       <nav class="nav nav-bottom dock-route-nav">
@@ -340,33 +351,22 @@
           :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
     <ToolHost />
 
-    <Teleport to="body">
-      <section v-if="toolsOpen" ref="toolsPopover" class="tools-popover" :style="toolsPopoverStyle"
-               :aria-label="navTitle({ to: '/tools', label: 'Инструменты' })">
-        <header>
-          <strong>Инструменты</strong>
-          <router-link to="/tools" @click="closeTools()">Все на странице →</router-link>
-        </header>
-        <ToolsGrid :items="toolsNav" :badges="badges" @select="closeTools()" />
-      </section>
-    </Teleport>
-
   </div>
 </template>
 
 <script setup>
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import { setAlertTargetOpener } from '../alerts.ts';
-import { ref, computed, nextTick, onUnmounted, watch } from 'vue';
+import { ref, computed, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import {
   UiActionLink,
   UiButton,
   UiIconButton,
+  UiPopover,
   UiTopbarPanel,
   UiPressable,
-  useUiLayer,
   vTooltip,
 } from '../../ui';
 import { useSse } from '../../composables/useSse.ts';
@@ -717,56 +717,11 @@ const dockRouteNav = computed(() => [
 ].sort((a, b) => (a.order || 0) - (b.order || 0) || a.label.localeCompare(b.label, 'ru')));
 
 const toolsOpen = ref(false);
-const toolsTrigger = ref(null);
-const toolsPopover = ref(null);
-const toolsPopoverStyle = ref({});
-const toolsActive = computed(() => route.path === '/tools' || toolsNav.value.some((item) => item.to === route.path));
-useUiLayer('tools', {
-  id: 'tools-popover',
-  enabled: toolsOpen,
-  element: toolsPopover,
-  onEscape: () => {
-    closeTools({ focus: true });
-  },
-});
+const toolsActive = computed(() => route.path === '/tools'
+  || toolsNav.value.some((item) => item.to === route.path));
 
-function placeToolsPopover() {
-  const rect = toolsTrigger.value?.el?.getBoundingClientRect?.();
-  if (!rect) return;
-  const width = Math.min(360, window.innerWidth - 24);
-  const left = Math.min(rect.right + 8, window.innerWidth - width - 12);
-  toolsPopoverStyle.value = { left: `${Math.max(12, left)}px`, top: `${Math.max(62, rect.top)}px`, width: `${width}px` };
-}
-function closeTools({ focus = false } = {}) {
-  if (!toolsOpen.value) return;
+watch(() => route.fullPath, () => {
   toolsOpen.value = false;
-  if (focus) nextTick(() => toolsTrigger.value?.focus?.());
-}
-async function toggleTools() {
-  if (toolsOpen.value) { closeTools({ focus: true }); return; }
-  placeToolsPopover();
-  toolsOpen.value = true;
-  await nextTick();
-  toolsPopover.value?.querySelector?.('a')?.focus?.();
-}
-function toolsOutside(event) {
-  if (toolsTrigger.value?.el?.contains(event.target)
-      || toolsPopover.value?.contains(event.target)) return;
-  closeTools();
-}
-watch(toolsOpen, (open) => {
-  if (open) {
-    document.addEventListener('pointerdown', toolsOutside, true);
-    window.addEventListener('resize', placeToolsPopover, { passive: true });
-  } else {
-    document.removeEventListener('pointerdown', toolsOutside, true);
-    window.removeEventListener('resize', placeToolsPopover);
-  }
-});
-watch(() => route.fullPath, () => closeTools());
-onUnmounted(() => {
-  document.removeEventListener('pointerdown', toolsOutside, true);
-  window.removeEventListener('resize', placeToolsPopover);
 });
 
 const { connected } = useSse((name, data) => {
@@ -955,18 +910,6 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
    раздела. Не overflow-y: scroll: на полноэкранных страницах (чаты) внешний скролл
    не нужен, и принудительная полоса висела бы там мёртвой. */
 .content { grid-row: 2; grid-column: 2; overflow-y: auto; scrollbar-gutter: stable; padding: var(--page-gutter); }
-
-.tools-popover {
-  position: fixed; z-index: 75; max-height: calc(100vh - 74px); overflow: auto;
-  padding: 12px; border: 1px solid var(--line-2); border-radius: 14px;
-  background: var(--surface); box-shadow: 0 18px 48px #000c;
-}
-.tools-popover header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 2px 2px 10px; }
-.tools-popover header strong { font-size: 13px; }
-.tools-popover header a { color: var(--accent); font-size: 11px; }
-.tools-popover :deep(.tools-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.tools-popover :deep(.tool-tile) { min-height: 86px; }
 
 .content.is-workspace { padding: 0; scrollbar-gutter: auto; overflow: hidden; }
 @media (max-width: 899px) {

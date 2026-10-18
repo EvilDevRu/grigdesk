@@ -1,3 +1,29 @@
+.ui-page {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+/* Внешние поля обычной страницы принадлежат AppShell.
+   Внутренние формы могут ограничивать ширину, сохраняя ось заголовка. */
+.ui-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ui-page-head > div { min-width: 0; }
+.ui-page-head h1 { margin: 0; font-size: 24px; line-height: 1.3; }
+.ui-page-head p { margin: 4px 0 0; color: var(--ink-mid); font-size: 13px; }
+
+@media (max-height: 500px) {
+  .ui-page-head { margin-bottom: 8px; gap: 8px; }
+  .ui-page-head h1 { font-size: 20px; }
+}
+
 .ui-control-group,
 .ui-form-actions {
   display: flex;
@@ -108,6 +134,16 @@
 
 .ui-tabs[data-ui-studio-tabs] > .ui-tab:hover {
   background: var(--surface);
+}
+
+/* Фильтры каталога переносятся целиком: различие между включёнными и выключенными
+   плагинами должно читаться и на узком экране, без многоточий в каждом варианте. */
+.ui-segmented-control[data-context='plugin-state-filter'] {
+  flex-wrap: wrap;
+}
+
+.ui-segmented-control[data-context='plugin-state-filter'] > .ui-button {
+  flex: 1 0 auto;
 }
 
 /* Источник и набор параметров могут переноситься внутри узкого дока.
@@ -469,4 +505,20 @@
 [data-ui-task-shelf-row] .ui-icon-button svg {
   width: 14px;
   height: 14px;
+}
+
+.ui-action-menu { display: flex; flex-direction: column; gap: 4px; }
+.ui-action-menu > .ui-button { justify-content: flex-start; text-align: left; white-space: normal; }
+
+/* Переключение рабочей области сохраняет смонтированные редакторы и соединения. */
+.ui-tabs[data-ui-workspace-tabs] { width: 100%; flex-wrap: wrap; gap: 4px; }
+.ui-tabs[data-ui-workspace-tabs] > .ui-tab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1 1 auto; padding: 4px 10px; min-height: var(--control-height); height: auto; white-space: nowrap; }
+@media (pointer: coarse) {
+  .ui-tabs[data-ui-workspace-tabs] > .ui-tab { min-height: 44px; }
+}
+
+@container studio (max-width: 440px) {
+  .ui-tabs[data-ui-studio-tabs] { gap: 2px; }
+  .ui-tabs[data-ui-studio-tabs] > .ui-tab { flex: 1; padding-inline: 4px; gap: 4px; }
+  .ui-tabs[data-ui-studio-tabs] > .ui-tab > svg { display: none; }
 }

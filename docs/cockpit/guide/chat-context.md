@@ -10,8 +10,12 @@
 | --- | --- | --- | --- |
 | Claude | Вход последнего основного assistant-события, включая чтение и запись кэша | Проверенный каталог CLI | После каждого обращения к модели |
 | Codex | `tokenUsage.last.inputTokens`; в резервном чтении rollout — `last_token_usage.input_tokens` | `modelContextWindow` того же замера | На `thread/tokenUsage/updated` |
-| Kimi | Локальные `/status` или `/usage` открытой ACP-сессии | Из той же строки статуса | После хода |
-| DeepSeek | ACP `usage_update.used` — заполненность контекста, не billing | ACP `usage_update.size` | Во время хода; без update значение недоступно |
+| Kimi | Server-путь читает `session.usage_updated`, но пропускает фактический `agent.status.updated` CLI; старый ACP-путь читает `/status` или `/usage` | Server-ветка ждёт `context_limit`; фактический статус называет поле `maxContextTokens` | Полнота server-телеметрии не обеспечена; см. аудит ниже |
+| DeepSeek / GLM | Web-транспорт DSH: сумма `inputTokens + cacheReadTokens + cacheWriteTokens` последнего обращения | Этот обработчик usage окно не передаёт | Во время хода; итоговый runtime пока возвращает `unavailable` |
+
+Подтверждённые пробелы текущих server/web-адаптеров и границы сверки с консолью:
+[аудит метрик](../chat/usage-metrics-audit.md). Описанный ниже контракт передачи не
+означает, что каждый адаптер уже заполняет все его поля.
 
 У Claude `result.usage` суммирует обращения и не заменяет отсутствующий замер.
 События с `parent_tool_use_id` принадлежат субагенту: его модель, сессия и контекст
@@ -76,8 +80,8 @@
 | --- | --- | --- |
 | Claude | По ходу — оценка (`tokensIsEstimate: true`, «≈»): рассуждения по дельтам `system/thinking_tokens` самого CLI, текст и аргументы инструментов — по символам; субагенты не в счёт. `usage.output_tokens` в assistant-событиях — снимок начала ответа (единицы токенов при сотнях по итогу), расходом не считается. Точная цифра за ход — `result.usage.output_tokens` (она за ход, не за сессию), ею оценка заменяется | Дельты рассуждений с прореживанием, каждое обращение к модели, итог хода |
 | Codex | Прирост `total.outputTokens` потока с начала хода; рассуждения уже входят в `output_tokens` и отдельно не прибавляются | На `thread/tokenUsage/updated` |
-| DeepSeek | Оценка вывода по потоку (символы / средний токен, `tokensIsEstimate: true`); ACP `usage_update.used` идёт только заполненностью контекста | Во время хода, с прореживанием |
-| Kimi | Не публикует: локальный `/status` даёт размер контекста, а не расход | — |
+| DeepSeek / GLM | Web-транспорт DSH складывает точный `outputTokens` по обращениям; запрос без итога пока оценивает по символам текста и размышления. `tokensIsEstimate` передаётся явно | Во время потока и после usage каждого обращения |
+| Kimi | Server-адаптер читает `output_tokens` из `session.usage_updated`, но пропускает `turn.step.completed.usage.output`, который использует установленный CLI | При ожидаемом адаптером событии; фактический поток шагов пока не даёт счётчика |
 
 Событие со счётчиком не стирает снимок контекста: у того свои поля (`contextTokens`,
 `contextWindow`, `contextMetric`, `contextCache`) и своя достоверность. Время хода и

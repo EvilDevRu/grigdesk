@@ -26,12 +26,9 @@
           placeholder="Найти плагин"
         />
         <div class="plugin-filter-group">
-          <UiSegmentedControl
-            v-model="stateFilter"
-            class="plugin-filter"
-            :options="filterOptions"
-            label="Состояние плагинов"
-          />
+          <UiSelect v-model="stateFilter" aria-label="Состояние плагинов">
+            <option v-for="option in filterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </UiSelect>
           <UiToggleButton v-model="configurableOnly">
             С параметрами {{ stats.configurable }}
           </UiToggleButton>
@@ -127,7 +124,7 @@
             <span class="plugin-tile-power">
               <UiIconButton
                 role="rail"
-                :variant="plugin.enabled ? 'solid' : 'ghost'"
+                variant="ghost"
                 :tone="plugin.enabled ? 'accent' : 'neutral'"
                 :disabled="togglingId === plugin.id || recoveryBlocked"
                 :label="`${plugin.enabled ? 'Выключить' : 'Включить'} ${plugin.name}`"
@@ -215,7 +212,7 @@ import {
   UiInlineMessage,
   UiPressable,
   UiSearchInput,
-  UiSegmentedControl,
+  UiSelect,
   UiSpinner,
   UiToggleButton,
   vTooltip,
@@ -505,7 +502,7 @@ onMounted(() => {
   .plugin-toolbar { display: grid; }
   .plugin-search { max-width: none; }
   .plugin-filter-group {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible;
+    display: grid; grid-template-columns: minmax(0, 1fr); overflow: visible;
   }
   .plugin-filter { grid-column: 1 / -1; overflow: visible; }
   .plugin-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); }

@@ -367,6 +367,9 @@
              уровнем выше — лесенка читалась рваной. Каталог на тысячи файлов рисуется
              окном VirtualRows: целиком он замораживал панель. -->
         <div v-else-if="tab === 'files'" class="scroll tree file-tree">
+          <p v-if="!rows.length && !contextLoading && !error" class="pnote">
+            {{ context ? 'В этой рабочей копии пока нет файлов.' : 'Выберите рабочую копию репозитория.' }}
+          </p>
           <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey">
             <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
                          :data-dir-path="row.rel" :data-depth="row.depth"
@@ -3042,6 +3045,7 @@ async function copyCodeLink() {
   if (!copied) {
     await promptDialog({
       title: 'Ссылка на файл',
+      multiline: false,
       text: 'Буфер обмена недоступен. Скопируй адрес вручную.',
       value: href,
       okText: 'Готово',

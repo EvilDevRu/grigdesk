@@ -10,11 +10,11 @@
           <span>v{{ String(version.seq).padStart(2, '0') }}</span>
           <span class="studio-model-status" :data-status="version.status">{{ statusLabels[version.status] }}</span>
         </div>
+        <div v-if="version.status === 'ready' && mainFile" class="studio-model-shortcuts"
+          :class="{ 'is-forced': showSaveShortcut }">
+          <UiButton tone="accent" variant="solid" @click="$emit('save')">Сохранить в проект</UiButton>
+        </div>
       </header>
-      <div v-if="version.status === 'ready' && mainFile" class="studio-model-shortcuts"
-        :class="{ 'is-forced': showSaveShortcut }">
-        <UiButton tone="accent" variant="solid" @click="$emit('save')">Сохранить в проект</UiButton>
-      </div>
       <UiInlineMessage v-for="name in detail.incoming" :key="name">
         Агент положил {{ name }} — добавить версией?
         <UiButton variant="ghost" :disabled="busy" @click="addIncoming(name)">Добавить версией</UiButton>
@@ -532,6 +532,17 @@ const snapshotHandler = computed(() => {
   overflow-wrap: anywhere;
 }
 
+.studio-model-page:not(.is-inspector) {
+  height: 100%;
+  --studio-viewer-min-height: 200px;
+  --studio-canvas-min-height: 140px;
+  --studio-canvas-height: auto;
+  --studio-canvas-flex: 1;
+}
+
+.studio-model-page > :deep(.studio-viewer) { flex: 1; }
+.studio-model-page > :not(.studio-viewer) { flex: none; }
+
 .studio-model-page h2,
 .studio-model-page h3,
 .studio-model-page p {
@@ -551,6 +562,7 @@ const snapshotHandler = computed(() => {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1;
 }
 
 .studio-model-version {
@@ -693,5 +705,16 @@ const snapshotHandler = computed(() => {
   .studio-model-shortcuts {
     display: flex;
   }
+}
+
+@media (max-height: 500px) {
+  .studio-model-page { gap: 8px; }
+  .studio-model-page:not(.is-inspector) {
+    --studio-viewer-min-height: 120px;
+    --studio-canvas-min-height: 60px;
+  }
+  .studio-model-breadcrumb { display: none; }
+  .studio-model-heading { gap: 8px; }
+  .studio-model-heading h2 { font-size: 16px; }
 }
 </style>

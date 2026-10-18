@@ -10,13 +10,13 @@
   cursor: pointer;
 }
 
-/* UiSwitch продолжает визуальный контракт прежнего общего ToggleSwitch: компактная
-   дорожка и мягкий accent вместо крупной заливки обычного form-control. */
+/* Компактная дорожка сохраняет плотность toolbar, а подпись использует шрифт интерфейса.
+   Моноширинное начертание остаётся у кода и технических значений, не у обычных действий. */
 .ui-switch {
   gap: 7px;
   padding: 4px 2px;
   color: var(--ink-mid);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 12px;
 }
 

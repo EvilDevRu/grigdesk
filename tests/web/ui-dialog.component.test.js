@@ -69,4 +69,89 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
   await nextTick();
 
   assert.equal(Boolean(browser.document.querySelector('.ui-dialog-overlay')), false);
+  await checkPromptFields(browser, t);
 });
+
+/**
+ * Настоящий host разделяет DOM с проверкой UiDialog, как в приложении.
+ * Подменяем только очередь запросов, чтобы наблюдать результат ввода и отмены.
+ */
+async function checkPromptFields(browser, t) {
+  const results = [];
+
+  globalThis.__layoutDialogs = { controller: null, results };
+
+  const Host = await compileVue(webFile('src/components/overlays/UiDialogHost.vue'), {
+    stubs: {
+      '../../services/dialogs': `
+        export const registerDialogHost = (controller) => {
+          globalThis.__layoutDialogs.controller = controller;
+          return () => {};
+        };
+        export const completeDialogRequest = (id, value) => {
+          globalThis.__layoutDialogs.results.push([id, value]);
+          globalThis.__layoutDialogs.controller.hide(id);
+          return true;
+        };
+      `,
+    },
+  });
+  const { mount, flushPromises, DOMWrapper } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const wrapper = mount(Host, { attachTo: browser.document.querySelector('#mount') });
+
+  t.after(() => {
+    wrapper.unmount();
+    delete globalThis.__layoutDialogs;
+  });
+
+  const controller = globalThis.__layoutDialogs.controller;
+
+  controller.show({
+    id: 1,
+    kind: 'prompt',
+    options: {
+      title: 'Название',
+      multiline: false,
+      value: 'Первое',
+    },
+  });
+  await flushPromises();
+
+  const input = browser.document.querySelector('input');
+
+  assert.ok(input);
+  assert.equal(Boolean(browser.document.querySelector('textarea')), false);
+  await new DOMWrapper(input).setValue('Новое название');
+  await new DOMWrapper(input).trigger('keydown', { key: 'Enter', isComposing: true });
+  assert.equal(results.length, 0, 'IME не подтверждает незавершённое слово');
+  await new DOMWrapper(input).trigger('keydown', { key: 'Enter' });
+  await flushPromises();
+  assert.deepEqual(results, [[1, 'Новое название']]);
+
+  controller.show({
+    id: 2,
+    kind: 'prompt',
+    options: {
+      title: 'Пояснение',
+      value: 'Строка 1\nСтрока 2',
+    },
+  });
+  await flushPromises();
+
+  const textarea = browser.document.querySelector('textarea');
+
+  assert.ok(textarea);
+  assert.equal(textarea.value, 'Строка 1\nСтрока 2');
+  await new DOMWrapper(textarea).trigger('keydown', { key: 'Enter', shiftKey: true });
+  assert.equal(results.length, 1, 'Shift+Enter оставляет многострочный ввод открытым');
+
+  const cancel = [...browser.document.querySelectorAll('button')]
+    .find((button) => button.textContent.trim() === 'Отмена');
+
+  assert.ok(cancel);
+  await new DOMWrapper(cancel).trigger('click');
+  await flushPromises();
+  assert.deepEqual(results.at(-1), [2, null]);
+}

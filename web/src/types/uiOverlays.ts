@@ -74,6 +74,7 @@ export interface ConfirmDialogOptions {
 }
 
 export interface PromptDialogOptions {
+  multiline?: boolean;
   title?: string;
   text?: string;
   placeholder?: string;

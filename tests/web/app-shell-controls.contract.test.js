@@ -13,7 +13,7 @@ const PIPELINE_POPOVER_PATH = new URL(
 );
 const ACTIONS_PATH = new URL('../../web/src/styles/components/actions.css', import.meta.url);
 
-test('AppShell использует public UI controls и DOM handle триггера инструментов', async () => {
+test('AppShell использует public UI controls и общую поверхность инструментов', async () => {
   const [source, providerUsage, pipelinePopover, actions] = await Promise.all([
     readFile(APP_SHELL_PATH, 'utf8'),
     readFile(PROVIDER_USAGE_PATH, 'utf8'),
@@ -32,8 +32,8 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.doesNotMatch(source, /instbar|canInstall|installDismissed/u);
   assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 3);
   assert.doesNotMatch(source, /<button\b/u);
-  assert.match(source, /toolsTrigger\.value\?\.el\?\.getBoundingClientRect/u);
-  assert.match(source, /toolsTrigger\.value\?\.el\?\.contains/u);
+  assert.match(source, /<UiPopover[^>]*v-model:open="toolsOpen"[^>]*layer="tools"/u);
+  assert.doesNotMatch(source, /placeToolsPopover|toolsOutside/u);
   assert.doesNotMatch(source, /\.pu-state button|\.ptip-go button|\.instbar button/u);
   assert.match(source, /data-context="topbar-popover-action"/u);
   assert.match(source, /data-context="topbar-popover-settings"/u);

@@ -1,33 +1,7 @@
 <template>
-  <div class="video">
-    <header class="video-hero" :class="{ compact: meetingReady }">
-      <div class="hero-copy">
-        <p class="eyebrow">Разбор встреч</p>
-        <h2 class="ttl">Видео → задачи</h2>
-        <p class="lead">
-          Загрузи запись — Cockpit расшифрует разговор, выделит договорённости
-          и подготовит черновики для Битрикс24.
-        </p>
-      </div>
-      <div class="hero-route" aria-hidden="true">
-        <span class="route-node active">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
-          </svg>
-        </span>
-        <i></i>
-        <span class="route-node">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 5h16 M4 10h10 M4 15h16 M4 20h8" />
-          </svg>
-        </span>
-        <i></i>
-        <span class="route-node good">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-        </span>
-      </div>
+  <div class="video ui-page">
+    <header class="video-hero ui-page-head" :class="{ compact: meetingReady }">
+      <div><h1>Видео → задачи</h1><p v-if="!meetingReady">Выберите запись встречи для расшифровки и подготовки задач.</p></div>
     </header>
 
     <div v-if="pluginOff" class="empty-state">
@@ -53,7 +27,7 @@
       <!-- Мастер оставляет на экране только текущую работу. Шаги после записи
            заперты до готовой расшифровки, но назад можно вернуться без потери сеанса. -->
       <div class="wizard-bar">
-        <UiTabs v-model="wizardStep" class="video-steps" label="Шаги разбора видео">
+        <UiTabs v-model="wizardStep" class="video-steps" data-ui-workspace-tabs label="Шаги разбора видео">
           <UiTab
             id="video-step-record"
             class="video-step"
@@ -147,7 +121,7 @@
             ? 'Загружаю запись…'
             : meetingReady
               ? 'Разобрать другую запись'
-              : 'Выбрать видео или аудио' }}
+              : 'Выбрать файл' }}
           <template #hint>
             <template v-if="!meetingReady">
               Сама запись останется в Cockpit — на портал уйдут только подтверждённые задачи и их кадры
@@ -1563,5 +1537,12 @@ section.wizard-panel { display: grid; gap: 16px; }
 
 @media (prefers-reduced-motion: reduce) {
   .upload-card, .pbar span, .seg-add { transition: none; }
+}
+.video { width: 100%; margin: 0; }
+.video-hero, .video-hero.compact { min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.video-hero::after { display: none; }
+@media (max-height: 500px) {
+  .video { gap: 8px; }
+  .upload-card { padding: 12px; }
 }
 </style>

@@ -1,13 +1,13 @@
 <template>
-  <section class="sandboxes" aria-labelledby="sandboxes-title">
-    <header class="sandboxes__head">
+  <section class="sandboxes ui-page" aria-labelledby="sandboxes-title">
+    <header class="sandboxes__head ui-page-head">
       <div class="sandboxes__intro">
         <h1 id="sandboxes-title">Песочницы</h1>
-        <p>
-          Полный стенд задачи без запуска конвейера: свой worktree, свои контейнеры и свои
-          данные. Поднимается и сносится отсюда, работать в нём можно руками.
-        </p>
+        <p>Стенды задач для проверки и ручной работы.</p>
       </div>
+      <UiButton v-if="store.manualSandboxes.length" tone="accent" @click="createOpen = !createOpen">
+        {{ createOpen ? 'Скрыть создание' : 'Поднять стенд' }}
+      </UiButton>
       <UiButton
         class="sandboxes__refresh"
         variant="ghost"
@@ -20,7 +20,7 @@
 
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
 
-    <section class="sandboxes__panel" aria-labelledby="sandboxes-raise-title">
+    <section v-show="createOpen || !store.manualSandboxes.length" class="sandboxes__panel" aria-labelledby="sandboxes-raise-title">
       <h2 id="sandboxes-raise-title" class="sandboxes__panel-title">Поднять стенд</h2>
       <SandboxRaiseForm
         :options="store.capableProfiles"
@@ -127,6 +127,7 @@ import SandboxRaiseForm from './sandboxes/SandboxRaiseForm.vue';
 
 const store = useSandboxesStore();
 const raising = ref(false);
+const createOpen = ref(false);
 
 onMounted(() => {
   watchSandboxes();
@@ -259,7 +260,7 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  max-width: 1040px;
+  min-width: 0;
   margin-inline: auto;
 }
 

@@ -433,7 +433,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 320px;
+  min-height: var(--studio-viewer-min-height, 320px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -484,8 +484,9 @@ onUnmounted(() => {
 
 .studio-canvases {
   display: grid;
-  min-height: 280px;
-  height: clamp(280px, 53vh, 680px);
+  min-height: var(--studio-canvas-min-height, 280px);
+  height: var(--studio-canvas-height, clamp(280px, 53vh, 680px));
+  flex: var(--studio-canvas-flex, none);
   min-width: 0;
 }
 

@@ -3133,4 +3133,8 @@ function cardState(g) {
   .live-feed { max-height: 190px; }
   .runner-attempts { max-height: 200px; }
 }
+@media (max-width: 600px) {
+  .head { flex-wrap: wrap; gap: 6px 8px; }
+  .head .ctitle { order: 10; flex: 1 0 100%; white-space: normal; overflow-wrap: anywhere; }
+}
 </style>

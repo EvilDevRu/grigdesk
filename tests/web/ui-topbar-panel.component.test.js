@@ -8,6 +8,16 @@ process.env.NODE_ENV = 'test';
 
 test('плитки топбара: стык, переключение, клавиатура и короткий экран', async (t) => {
   const browser = await installUiBrowser(t);
+  const viewport = new browser.EventTarget();
+
+  Object.assign(viewport, {
+    width: 0,
+    height: 0,
+    offsetTop: 0,
+    offsetLeft: 0,
+  });
+  Object.defineProperty(browser, 'visualViewport', { configurable: true, value: viewport });
+
   const [{ h, nextTick }, { mount }, UiTopbarPanel] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -75,6 +85,24 @@ test('плитки топбара: стык, переключение, клав�
   assert.equal(surface.style.top, '35px', 'длинная плитка должна оставаться под топбаром');
   assert.equal(surface.style.left, '198px');
   assert.equal(surface.style.maxHeight, '137px');
+
+  Object.assign(viewport, {
+    width: 390,
+    height: 100,
+    offsetTop: 10,
+    offsetLeft: 0,
+  });
+  viewport.dispatchEvent(new browser.Event('resize'));
+  await nextTick();
+
+  assert.equal(surface.style.maxHeight, '67px', 'клавиатура ограничивает плитку без resize окна');
+  assert.equal(surface.style.left, '30px');
+
+  viewport.offsetTop = 50;
+  viewport.dispatchEvent(new browser.Event('scroll'));
+  await nextTick();
+
+  assert.equal(surface.style.top, '50px', 'плитка остаётся внутри сдвинутой видимой области');
 
   await wrapper.get('#one').trigger('mouseleave');
   await wrapper.get('#two').trigger('mouseenter');

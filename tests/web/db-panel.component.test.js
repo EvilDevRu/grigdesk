@@ -240,15 +240,16 @@ test('сессии БД работают вкладками, а результа
     async closeSession(id) { closed.push(id); },
   };
   const { wrapper, flushPromises } = await mountPanel(t, store);
-  const tabs = wrapper.findAll('[role="tab"]');
+  const tabs = wrapper.findAll('.db-tabs [role="tab"]');
 
   assert.equal(tabs.length, 2);
   assert.equal(tabs[0].attributes('aria-selected'), 'true');
   const closedResult = wrapper.findAll('button')
     .find((button) => button.text() === 'Сессия закрыта');
   assert.equal(closedResult.attributes('disabled'), '');
-  await wrapper.findAll('button').find((button) => button.text() === 'Результат').trigger('click');
+  await wrapper.get('.db-query-row__actions button').trigger('click');
   await flushPromises();
+  assert.equal(wrapper.get('.db-panel').attributes('data-pane'), 'result');
   assert.deepEqual(
     wrapper.findAll('.db-result-table th').map((cell) => cell.text()),
     ['id', 'state'],

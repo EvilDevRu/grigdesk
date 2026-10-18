@@ -1,11 +1,10 @@
 <template>
-  <section class="showcase" :class="{ 'showcase--film': store.opened }" aria-labelledby="showcase-title">
-    <header v-if="!store.opened" class="showcase__head">
+  <section class="showcase ui-page" :class="{ 'showcase--film': store.opened }" aria-labelledby="showcase-title">
+    <header v-if="!store.opened" class="showcase__head ui-page-head">
       <div class="showcase__intro">
         <h1 id="showcase-title">Презентации</h1>
         <p>
-          Короткий ролик о готовой задаче: выберите стенд, проверьте сцены и голос —
-          и получите mp4 с озвучкой и субтитрами.
+          Выберите стенд, чтобы создать ролик с озвучкой и субтитрами.
         </p>
       </div>
       <UiButton
@@ -592,6 +591,7 @@ async function rename() {
 
   const title = await promptDialog({
     title: 'Название ролика',
+      multiline: false,
     value: opened.title,
     okText: 'Сохранить',
   });
@@ -805,11 +805,11 @@ async function check() {
 
 <style scoped>
 .showcase {
-  width: min(100%, 1160px);
-  margin-inline: auto;
+  width: 100%;
+  margin-inline: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -852,7 +852,7 @@ async function check() {
 }
 
 .showcase__panel {
-  padding: 18px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
   border-radius: 15px;
   background: linear-gradient(

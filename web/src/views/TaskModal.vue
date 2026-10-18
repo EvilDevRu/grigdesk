@@ -3,6 +3,7 @@
     :open="Boolean(taskId)"
     data-role="task-modal"
     size="workspace"
+    initial-focus="#task-modal-title"
     :label="detail?.title || `Задача #${taskId || ''}`"
     :body-inset="false"
     fade-only
@@ -14,7 +15,7 @@
             <span class="meyebrow">Задача Битрикс24</span>
             <span class="mid mono">#{{ taskId }}</span>
           </div>
-          <h3 id="task-modal-title" class="mtitle">
+          <h3 id="task-modal-title" class="mtitle" tabindex="-1">
             <UiSpinner v-if="loading && !detail" decorative />
             {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
           </h3>
@@ -677,20 +678,6 @@
             </UiButton>
           </div>
           <div class="cbtns">
-            <UiButton
-              v-if="shelfEnabled"
-              data-context="task-footer-action"
-              data-role="task-shelf-toggle"
-              tone="neutral"
-              variant="outline"
-              :pressed="shelf.isOnShelf(taskId)"
-              :loading="shelf.isPending(taskId)"
-              :disabled="shelf.isPending(taskId)"
-              loading-label="Обновляю полку"
-              @click="toggleShelf"
-            >
-              {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
-            </UiButton>
             <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован.
                  Затык виден прямо на кнопке: карточку задачи открывают чаще, чем конвейер, а
                  «Уже на конвейере» одинаково выглядело и у идущей задачи, и у вставшей, поэтому
@@ -722,25 +709,6 @@
             >
               🏭 На конвейер
             </UiButton>
-            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
-                 задачу, и ради одной кнопки идти в конвейер незачем. -->
-            <UiButton
-              v-if="sandbox"
-              data-context="task-footer-action"
-              tone="danger"
-              variant="outline"
-              :loading="sandboxBusy"
-              :disabled="sandboxBusy"
-              loading-label="Сношу стенд"
-              v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
-              @click="sandboxDown"
-            >
-              ⏏ Снести стенд
-            </UiButton>
-            <OpenDiffButton
-              data-context="task-footer-action"
-              :task-id="taskId"
-            />
             <UiButton
               data-context="task-footer-action"
               tone="success"
@@ -752,6 +720,47 @@
             >
               ✓ Завершить
             </UiButton>
+            <UiPopover placement="top-end" aria-label="Другие действия с задачей">
+              <template #trigger><UiButton>Ещё</UiButton></template>
+              <template #default="{ close }">
+                <div class="ui-action-menu">
+            <UiButton
+              v-if="shelfEnabled"
+              data-context="task-footer-action"
+              data-role="task-shelf-toggle"
+              tone="neutral"
+              variant="outline"
+              :pressed="shelf.isOnShelf(taskId)"
+              :loading="shelf.isPending(taskId)"
+              :disabled="shelf.isPending(taskId)"
+              loading-label="Обновляю полку"
+              @click="close('action'); toggleShelf()"
+            >
+              {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
+            </UiButton>
+            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
+                 задачу, и ради одной кнопки идти в конвейер незачем. -->
+            <UiButton
+              v-if="sandbox"
+              data-context="task-footer-action"
+              tone="danger"
+              variant="outline"
+              :loading="sandboxBusy"
+              :disabled="sandboxBusy"
+              loading-label="Сношу стенд"
+              v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+              @click="close('action'); sandboxDown()"
+            >
+              ⏏ Снести стенд
+            </UiButton>
+            <OpenDiffButton
+              @click="close('action')"
+              data-context="task-footer-action"
+              :task-id="taskId"
+            />
+                </div>
+              </template>
+            </UiPopover>
           </div>
           <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
@@ -948,6 +957,7 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import {
   confirmDialog,
   UiButton,
+  UiPopover,
   UiChoiceList,
   UiDialog,
   UiDisclosureButton,
@@ -2567,8 +2577,8 @@ onUnmounted(() => {
   .timer-group { gap: 10px; }
   .timer { min-width: 90px; }
   .tclock { font-size: 17px; }
-  .cbtns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-  .cbtns > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .cbtns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+
   .convstall, .lmsg { grid-column: 1 / -1; }
   .lform { left: -10px; right: -10px; max-height: 60dvh;
     padding: 12px 12px 14px; border-radius: 12px 12px 0 0; }

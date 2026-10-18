@@ -21,6 +21,8 @@ export const UiSelectableRow = defineComponent({
     }, slots.default?.());
   },
 });
+export { default as UiTabs } from './src/components/composites/UiTabs.vue';
+export { default as UiTab } from './src/components/composites/UiTab.vue';
 export const UiSpinner = defineComponent({ setup: () => () => h('span', '…') });
 export const UiTooltip = defineComponent({ setup: () => () => h('span') });
 export const confirmDialog = async () => true;

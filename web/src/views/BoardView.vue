@@ -1,5 +1,5 @@
 <template>
-  <div class="board">
+  <div class="board" :class="{ 'stats-expanded': statsExpanded }">
     <p v-if="!data && !error" class="muted"><UiSpinner decorative /> Загрузка доски…</p>
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
@@ -8,7 +8,12 @@
 
     <template v-else-if="data">
       <!-- Показатели + месяц -->
-      <section class="stats" aria-label="Учёт времени и выполненные задачи">
+      <div class="stats-summary">
+        <span>Сегодня {{ hoursToHM(data.today.hours) }} · {{ data.today.tasks_count }} задач</span>
+        <UiButton variant="text" :aria-expanded="statsExpanded" aria-controls="board-stats"
+                  @click="statsExpanded = !statsExpanded">Показатели</UiButton>
+      </div>
+      <section id="board-stats" class="stats" aria-label="Учёт времени и выполненные задачи">
         <div v-for="s in statTiles" :key="s.key" class="tile" :class="'t-' + s.tone">
           <div class="thead">
             <span class="tico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="TILE_ICONS[s.icon]" /></svg></span>
@@ -605,6 +610,7 @@ const analysisEnabled = computed(() => {
   return manifest ? manifest.enabled !== false : true;
 });
 const favoriteOnly = ref(false);
+const statsExpanded = ref(false);
 const filtersOpen = ref(false);
 // Новая задача — та, которую ещё не открывали. Отметки серверные, поэтому до их
 // загрузки (и до базовой линии) новых не бывает: см. геттер ready.
@@ -775,7 +781,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 @container board-page (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 12px 16px; display: flex; flex-direction: column; gap: 7px; }
-.thead { display: flex; align-items: center; gap: 9px; }
+.thead { min-height: 36px; display: flex; align-items: center; gap: 9px; }
 .tico { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center; flex: none; }
 .tico svg { width: 15px; height: 15px; }
 .t-accent .tico { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
@@ -1197,5 +1203,17 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
   .thead { gap: 6px; }
   .tico { width: 22px; height: 22px; }
   .tval { font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+}
+.stats-summary { display: none; align-items: center; justify-content: space-between; gap: 8px; }
+@media (max-height: 500px) {
+  .stats-summary { display: flex; }
+  .board:not(.stats-expanded) .stats { display: none; }
+  .filter-toggle { display: inline-flex; }
+  .filterbar:not(.expanded) { display: none; }
+  .colhead { grid-template-columns: minmax(0, 1fr) auto minmax(180px, 1fr); }
+}
+@container board-page (max-width: 500px) {
+  .stats-summary { display: flex; flex-wrap: wrap; }
+  .board:not(.stats-expanded) .stats { display: none; }
 }
 </style>

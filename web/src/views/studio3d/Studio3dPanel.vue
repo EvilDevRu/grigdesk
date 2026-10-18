@@ -5,6 +5,7 @@
       'is-active': active,
       'is-compact': !wide,
       'is-dock': presentation === 'dock',
+      'is-model': tab === 'models' && Boolean(modelId),
       'is-page': presentation === 'page'
     }"
   >
@@ -59,9 +60,14 @@
       <div :id="panelId" class="studio-content" role="tabpanel" :aria-labelledby="`${panelId}-${tab}`">
         <CreatePanel :key="store.libraryId" v-show="tab === 'create'" :active="active && tab === 'create'"
           @created="openCreated" @tasks="choose('tasks')" />
-        <div v-if="tab === 'models' && modelId" class="studio-layout"
+        <div v-if="tab === 'models' && modelId" class="studio-layout" :data-pane="modelPane"
           :class="{ 'studio-compact-column': !wide }" :style="{ '--studio-nav-width': `${navWidth}px` }">
-          <aside class="studio-navigator">
+          <UiTabs v-model="modelPane" class="studio-model-panes" data-ui-workspace-tabs label="Работа с моделью">
+            <UiTab value="viewer" :controls="`${panelId}-viewer`">Модель</UiTab>
+            <UiTab value="versions" :controls="`${panelId}-versions`">Версии</UiTab>
+            <UiTab value="details" :controls="`${panelId}-details`">Сведения</UiTab>
+          </UiTabs>
+          <aside :id="`${panelId}-versions`" class="studio-navigator">
             <div class="studio-tree-heading">
               <UiButton variant="ghost" @click="back">← Все модели</UiButton>
               <div class="studio-tree-title">
@@ -95,7 +101,7 @@
               @dblclick="resizeReset"
             />
           </aside>
-          <main class="studio-main">
+          <main :id="`${panelId}-viewer`" class="studio-main">
             <ModelPage
               :active="active"
               :show-save-shortcut="!wide"
@@ -105,7 +111,7 @@
               @tasks="choose('tasks')"
             />
           </main>
-          <aside class="studio-side">
+          <aside :id="`${panelId}-details`" class="studio-side">
             <ModelPage
               ref="detailPage"
               section="details"
@@ -173,6 +179,7 @@ const detailPage = ref<InstanceType<typeof ModelPage> | null>(null);
 
 const tab = ref<StudioTab>('create');
 const modelId = ref('');
+const modelPane = ref('viewer');
 const compareVersion = ref('');
 const pendingVersion = ref('');
 const selectionEpoch = ref(0);
@@ -217,6 +224,7 @@ const wide = computed(() => props.presentation === 'page' || !props.compact || d
 function showModel(model: string, version = ''): void {
   tab.value = 'models';
   modelId.value = model;
+  modelPane.value = 'viewer';
   pendingVersion.value = version;
   selectionEpoch.value += 1;
 }
@@ -245,6 +253,8 @@ watch(modelId, () => {
  * Так выбор из тоста и клик по версии неотличимы для store.
  */
 function selectVersion(version: string): void {
+  modelPane.value = 'viewer';
+
   if (!modelId.value) {
     return;
   }
@@ -726,5 +736,21 @@ onUnmounted(() => {
   .studio-page-scroll {
     padding: 14px;
   }
+}
+.studio-model-panes { display: none; }
+@container studio (max-width: 1100px) {
+  .studio-model-panes { display: flex; flex: none; }
+  .studio-layout[data-pane] { display: flex; flex-direction: column; overflow: hidden; }
+  .studio-layout[data-pane] > .studio-main,
+  .studio-layout[data-pane] > .studio-navigator,
+  .studio-layout[data-pane] > .studio-side { flex: 1; min-height: 0; overflow: auto; max-height: none; }
+  .studio-layout:not([data-pane='viewer']) > .studio-main,
+  .studio-layout:not([data-pane='versions']) > .studio-navigator,
+  .studio-layout:not([data-pane='details']) > .studio-side { display: none; }
+}
+@media (max-height: 500px) {
+  .studio-header { padding-block: 8px; }
+  .is-model .studio-header { display: none; }
+  .studio-main, .studio-side { padding: 8px; }
 }
 </style>

@@ -123,36 +123,25 @@
         </UiPressable>
 
         <span v-if="editId !== r.id" class="acts">
-          <UiIconButton
-            v-if="r.archived"
-            data-context="chat-list-action"
-            role="rail"
-            label="Достать чат из архива"
-            v-tooltip="'Достать из архива'"
-            tone="accent"
-            @click="restore(r)"
-          >
-            ↩
-          </UiIconButton>
-          <UiIconButton
-            data-context="chat-list-action"
-            role="rail"
-            label="Переименовать чат"
-            v-tooltip="'Переименовать'"
-            @click="startEdit(r)"
-          >
-            ✎
-          </UiIconButton>
-          <UiIconButton
-            data-context="chat-list-action"
-            role="rail"
-            :label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
-            v-tooltip="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
-            :tone="r.archived ? 'danger' : 'accent'"
-            @click="del(r)"
-          >
-            ✕
-          </UiIconButton>
+          <UiPopover has-popup="menu" placement="bottom-end" :aria-label="`Действия: ${r.title}`">
+            <template #trigger>
+              <UiIconButton data-context="chat-list-action" role="rail" :label="`Действия: ${r.title}`">
+                ⋯
+              </UiIconButton>
+            </template>
+            <template #default="{ close }">
+              <div class="ui-action-menu">
+                <UiButton v-if="r.archived" role="menuitem" variant="ghost"
+                          @click="close('action'); restore(r)">Достать из архива</UiButton>
+                <UiButton role="menuitem" variant="ghost"
+                          @click="close('action'); startEdit(r)">Переименовать</UiButton>
+                <UiButton role="menuitem" variant="ghost" :tone="r.archived ? 'danger' : 'neutral'"
+                          @click="close('action'); del(r)">
+                  {{ r.archived ? 'Удалить навсегда' : 'Переместить в архив' }}
+                </UiButton>
+              </div>
+            </template>
+          </UiPopover>
         </span>
       </div>
     </div>
@@ -166,6 +155,8 @@ import { useProvidersStore } from '../../stores/providers.js';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
 import {
   confirmDialog,
+  UiButton,
+  UiPopover,
   UiIconButton,
   UiInput,
   UiPressable,
@@ -429,22 +420,8 @@ async function del(r) {
   white-space: nowrap; margin-top: 1px; }
 .edit { width: 100%; }
 
-/* Действия — siblings primary pressable; focus-within сохраняет их доступными с клавиатуры. */
-.acts { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  display: none; align-items: center; gap: 3px; }
-.row:hover .acts, .row:focus-within .acts { display: inline-flex; }
-.row:hover .ago, .row:focus-within .ago { visibility: hidden; }
-.row:hover, .row:focus-within { padding-right: 66px; }
-.row.archived:hover, .row.archived:focus-within { padding-right: 96px; }
-
-/* Пальцем ховера нет — на сенсорном экране действия строки были бы недостижимы.
-   Показываем их всегда, а место под них освобождаем отступом самой строки. */
-@media (hover: none) {
-  .acts { display: inline-flex; }
-  .row { padding-right: 66px; }
-  .row.archived { padding-right: 96px; }
-  .ago { display: none; }
-}
+/* Одно постоянное место меню не меняет ширину названия при hover и focus. */
+.acts { display: flex; flex: none; align-items: center; }
 
 /* Планшет-альбом: список уже, но остаётся на экране рядом с чатом */
 @media (min-width: 900px) and (max-width: 1099px) { .cl { width: var(--chat-list-w, 232px); } }
