@@ -6,6 +6,8 @@
 
 ## Грабли
 
+- [Transition-stub создаёт inert-предка Teleport-модалки в тесте фокуса](modal-transition-stub.md)
+
 - [Фикстура чистой установки копирует общий код вместе с инструментами](clean-checkout-shared-sources.md)
 
 - [Общий Node-модуль не должен попадать в браузерную программу типов по шаблону](shared-node-typecheck.md)
@@ -57,3 +59,5 @@
 - [Тест проходит из корня, но падает из папки своего пакета](package-test-working-directory.md)
 - [Настройки роняют вкладку headless-проверки = нужен полный Chromium](headless-shell-settings-crash.md)
 - [Тест ждёт `OK`, а утилита пишет `ЦЕЛ` = вывод coreutils переведён на язык машины](coreutils-locale.md)
+
+- [settings-modal-browser-fixture.md](settings-modal-browser-fixture.md) — изолированный стенд общего модала настроек.

@@ -19,6 +19,8 @@ const SOURCE_EXTENSIONS = new Set(['.vue', '.js', '.ts']);
 
 // UiPressable остаётся skinless-исключением, поэтому его consumers перечислены явно.
 const PRESSABLE_CONSUMERS = new Set([
+  'web/src/views/settings/SettingsNavigation.vue',
+  'web/src/views/settings/SettingsWorkspace.vue',
   'web/src/views/studio3d/Studio3dPanel.vue',
   'web/src/views/studio3d/ViewSlots.vue',
   'web/src/views/studio3d/LibraryPanel.vue',
@@ -40,7 +42,6 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/views/diff/DiffPanel.vue',
   // Строка списка проектов — такой же пункт-плитка, как карточка задачи на доске.
   'web/src/views/projects/ProjectList.vue',
-  'web/src/views/settings/PluginsCatalog.vue',
   'web/src/views/VideoView.vue',
 ]);
 const SVG_PRESSABLE_CONSUMERS = new Set([

@@ -115,9 +115,12 @@ async function mountApp(t, options = {}) {
     load: () => {}, start: () => {}, stop: () => {}, clear: () => {}, stopPoll: () => {},
     ${extra} });`;
   const stubs = {
+    './stores/settings.ts': `export const useSettingsStore = () => ({
+      isOpen: false, setAuthenticated() {}, dispose() {},
+    });`,
+    './views/settings/SettingsModal.vue': 'export default { render: () => null };',
     './shared/desktopSettings.ts': 'export const currentDesktopMode = () => "page";',
     './shared/layout/AppShell.vue': marker('main'),
-    './shared/layout/SettingsWindowShell.vue': marker('settings'),
     './views/LoginView.vue': marker('login'),
     './features/speech/provider.js': `import { h } from 'vue';
       export const SpeechProvider = {

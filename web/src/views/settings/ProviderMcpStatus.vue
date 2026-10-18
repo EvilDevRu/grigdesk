@@ -25,10 +25,18 @@
       </p>
       <template v-else>
         <p v-if="status.note" class="mcpnote muted small">{{ status.note }}</p>
-        <div v-for="group in groups" :key="group.id" class="mcpgrp">
+        <div
+          v-for="group in groups"
+          :key="group.id"
+          class="mcpgrp"
+        >
           <div class="mcpgrpttl muted">{{ group.label }} ({{ group.servers.length }})</div>
           <div v-if="group.hint" class="mcpgrphint muted">{{ group.hint }}</div>
-          <div v-for="server in group.servers" :key="server.name" class="mcprow">
+          <div
+            v-for="server in group.servers"
+            :key="server.name"
+            class="mcprow"
+          >
             <div class="mcpline">
               <span class="mcpdot" :class="mcpState(server).cls"></span>
               <span class="mcpname" v-tooltip="server.target || undefined">{{ server.name }}</span>
@@ -41,9 +49,7 @@
             <div v-if="server.hint" class="mcpdetail muted">{{ server.hint }}</div>
           </div>
         </div>
-        <p v-if="!groups.length" class="muted small">
-          {{ status.emptyText || 'Серверов не настроено.' }}
-        </p>
+        <p v-if="!groups.length" class="muted small">{{ status.emptyText || 'Серверов не настроено.' }}</p>
         <p v-if="status.checkedAt" class="muted small">
           обновлено {{ new Date(status.checkedAt).toLocaleTimeString('ru') }}
         </p>

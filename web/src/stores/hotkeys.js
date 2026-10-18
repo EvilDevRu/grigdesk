@@ -12,6 +12,52 @@ export const DEFAULT_HOTKEYS = Object.fromEntries(TOOL_CATALOG
   .filter(([, combo]) => combo));
 
 /**
+ * Проверяет итоговую карту целиком, включая стандартные сочетания остальных строк.
+ * Обмен клавиш двух инструментов не проходит через временный конфликт первой записи.
+ */
+export function validateHotkeyOverrides(overrides) {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+    return { ok: false, error: 'Некорректная карта сочетаний.' };
+  }
+
+  const known = new Set(TOOL_CATALOG.map((item) => item.id));
+  const normalized = {};
+
+  for (const [id, value] of Object.entries(overrides)) {
+    if (!known.has(id) || typeof value !== 'string') {
+      return { ok: false, error: 'Неизвестный инструмент или сочетание.' };
+    }
+
+    const combo = value ? normalizeCombo(value) : '';
+    const issue = value ? comboIssue(combo) : '';
+
+    if (issue) {
+      return { ok: false, error: issue };
+    }
+
+    normalized[id] = combo;
+  }
+
+  const owners = new Map();
+
+  for (const item of TOOL_CATALOG) {
+    const combo = Object.hasOwn(normalized, item.id) ? normalized[item.id] : DEFAULT_HOTKEYS[item.id];
+
+    if (!combo) {
+      continue;
+    }
+
+    if (owners.has(combo)) {
+      return { ok: false, error: `Это сочетание уже открывает «${owners.get(combo)}».` };
+    }
+
+    owners.set(combo, item.label);
+  }
+
+  return { ok: true, overrides: normalized };
+}
+
+/**
  * Читает device-local переопределения. Пустая строка значит осознанно выключенную
  * клавишу, отсутствие ключа — сочетание по умолчанию; различать их обязательно,
  * иначе выключенный инструмент вернул бы себе клавишу при следующем открытии.
@@ -69,45 +115,27 @@ export const useHotkeysStore = defineStore('hotkeys', {
   },
   actions: {
     /**
+     * Заменяет полную карту одним подтверждённым действием и одной записью storage.
+     * Неуспешная проверка не меняет ни работающие клавиши, ни сохранённую карту.
+     */
+    replaceOverrides(map) {
+      const result = validateHotkeyOverrides(map);
+
+      if (!result.ok) {
+        return result;
+      }
+
+      this.overrides = result.overrides;
+      persistOverrides(this.overrides);
+
+      return result;
+    },
+    /**
      * Перечитывает настройки другого окна без обратной записи в storage.
      * Текущая запись сочетания остаётся в прежнем состоянии.
      */
     reload() {
       this.overrides = storedOverrides();
-    },
-    /**
-     * Назначает сочетание инструменту. Отказ возвращается текстом для человека:
-     * системные комбинации до страницы не доходят, а дубль тихо увёл бы клавишу
-     * у соседней панели.
-     */
-    assign(id, value) {
-      const combo = normalizeCombo(value);
-      const issue = comboIssue(combo);
-      if (issue) return { ok: false, error: issue };
-
-      const busy = this.toolByCombo[combo];
-      if (busy && busy !== id) {
-        const label = TOOL_CATALOG.find((item) => item.id === busy)?.label || busy;
-        return { ok: false, error: `Это сочетание уже открывает «${label}».` };
-      }
-
-      this.overrides = { ...this.overrides, [id]: combo };
-      persistOverrides(this.overrides);
-      return { ok: true, combo };
-    },
-    disable(id) {
-      this.overrides = { ...this.overrides, [id]: '' };
-      persistOverrides(this.overrides);
-    },
-    restore(id) {
-      const overrides = { ...this.overrides };
-      delete overrides[id];
-      this.overrides = overrides;
-      persistOverrides(this.overrides);
-    },
-    resetAll() {
-      this.overrides = {};
-      persistOverrides(this.overrides);
     },
     startRecording(id) { this.recording = id || null; },
     stopRecording() { this.recording = null; },

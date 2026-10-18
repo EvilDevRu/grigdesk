@@ -491,7 +491,7 @@ for (const target of fuseTargets) {
 
     assert.deepEqual(actual, expected);
     assert.ok(actual.files.some((file) => /assets\/CodePanel-.*\.js$/.test(file.path)));
-    assert.ok(actual.files.some((file) => /assets\/SettingsWindowShell-.*\.js$/.test(file.path)));
+    assert.ok(actual.files.some((file) => /assets\/SettingsModal-.*\.js$/.test(file.path)));
     assert.equal(actual.files.some((file) => /(?:^|\/)(?:sw\.js|.*\.webmanifest)$/.test(file.path)), false);
   });
 }

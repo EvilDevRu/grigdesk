@@ -8,28 +8,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { type CommandRunner, defaultCommandRunner } from './grigDeskRelease.ts';
 
-// Что systemctl знает о юните: нет файла → ставить нечего, переключатель бессмыслен.
-export type AutostartUnitState = 'enabled' | 'disabled' | 'missing';
+import type {
+  AutostartUnitState, AutostartState, ShortcutState, LauncherState,
+} from '../../../shared/runtime/launcherContracts.ts';
 
-export interface AutostartState {
-  unit: AutostartUnitState;
-  active: boolean;
-  // null — logind не ответил (нет loginctl или пользователь ему неизвестен).
-  linger: boolean | null;
-  // Итог для интерфейса: при включении машины, при входе в систему или никогда.
-  mode: 'boot' | 'login' | 'off' | 'unavailable';
-}
-
-export interface ShortcutState {
-  desktopDir: string | null;
-  desktop: boolean;
-  menu: boolean;
-}
-
-export interface LauncherState {
-  autostart: AutostartState;
-  shortcut: ShortcutState;
-}
+export type {
+  AutostartUnitState, AutostartState, ShortcutState, LauncherState,
+} from '../../../shared/runtime/launcherContracts.ts';
 
 // Отказ с кодом для интерфейса: маршрут переводит его в HTTP-статус.
 export class LauncherError extends Error {

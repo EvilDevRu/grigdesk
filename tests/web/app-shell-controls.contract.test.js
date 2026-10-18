@@ -30,8 +30,15 @@ test('AppShell использует public UI controls и общую повер�
   assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 4);
   assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 1);
   assert.doesNotMatch(source, /instbar|canInstall|installDismissed/u);
-  assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 3);
+  assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 4);
   assert.doesNotMatch(source, /<button\b/u);
+
+  const gear = source.match(/<UiIconButton label="Настройки"[^>]*>/u)?.[0] ?? '';
+
+  assert.match(gear, /v-tooltip="'Настройки'"/u);
+  assert.match(gear, /aria-haspopup="dialog"/u);
+  assert.match(gear, /:pressed="settings.isOpen"/u);
+  assert.doesNotMatch(source, /<router-link to="\/settings"/u);
   assert.match(source, /<UiPopover[^>]*v-model:open="toolsOpen"[^>]*layer="tools"/u);
   assert.doesNotMatch(source, /placeToolsPopover|toolsOutside/u);
   assert.doesNotMatch(source, /\.pu-state button|\.ptip-go button|\.instbar button/u);

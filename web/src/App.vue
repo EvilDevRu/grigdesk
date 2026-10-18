@@ -1,6 +1,4 @@
 <template>
-  <SettingsWindowShell v-if="settingsWindow" />
-  <template v-else>
   <!-- До проверки сессии не рисуем интерфейс или отказ: оба могут оказаться неверными
        в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
@@ -19,17 +17,17 @@
       <TaskModal />
       <DiffModal />
       <DocumentModal />
+      <SettingsModal v-if="settings.isOpen" />
       <UiToastHost />
     </SpeechProvider>
-  </template>
   </template>
 </template>
 
 <script setup>
 import { asyncView } from './shared/asyncView.ts';
+import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import { onMounted, watch } from 'vue';
 import { UiDialogHost, UiTooltipHost, UiToastHost } from './ui';
-import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import NoAccessView from './views/NoAccessView.vue';
@@ -40,21 +38,25 @@ import { SpeechProvider } from './features/speech/provider.js';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
+import { useSettingsStore } from './stores/settings.ts';
 import { useTaskFavoritesStore } from './stores/task-favorites.js';
 import { useTaskShelfStore } from './stores/taskShelf.ts';
 import { useTaskSeenStore } from './stores/task-seen.js';
 import { useVideoSessionStore } from './stores/videoSession.ts';
 
 const auth = useAuthStore();
-const settingsWindow = currentDesktopMode() === 'settings';
-const SettingsWindowShell = asyncView(() => import('./shared/layout/SettingsWindowShell.vue'));
+const settings = useSettingsStore();
+const SettingsModal = asyncView(() => import('./views/settings/SettingsModal.vue'), undefined, () => {
+  settings.dispose('load-failed');
+  showSectionLoadFailure();
+});
 
 let pollingStarted = false;
 
 // Фоновые поллинги запускаем ТОЛЬКО после входа: иначе они молотят в закрытый API,
 // ловят 401 и засоряют консоль на экране отказа.
 function startPolling() {
-  if (settingsWindow || pollingStarted) {
+  if (pollingStarted) {
     return;
   }
 
@@ -80,6 +82,7 @@ onMounted(async () => {
   await auth.load();
 
   if (auth.authenticated) {
+    settings.setAuthenticated(true);
     startPolling();
   }
 });
@@ -87,15 +90,13 @@ onMounted(async () => {
 // Подтверждённый вход запускает поллинги. Потеря сессии останавливает их:
 // иначе интервалы продолжают долбить закрытый API и сыплют 401 в консоль на экране входа.
 watch(() => auth.authenticated, (on, was) => {
-  if (settingsWindow) {
-    return;
-  }
-
   if (on && !was) {
+    settings.setAuthenticated(true);
     startPolling();
   }
 
   if (!on && was) {
+    settings.dispose('auth-lost');
     pollingStarted = false;
     useBoardStore().stopPolling();
     useSystemStore().stopPolling();

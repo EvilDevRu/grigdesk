@@ -42,7 +42,6 @@
     "src/views/LoginView.vue",
     "src/views/OpenDiffButton.vue",
     "src/views/PipelineView.vue",
-    "src/views/SettingsView.vue",
     "src/views/TaskModal.vue",
     "src/views/TerminalView.vue",
     "src/views/ToolsView.vue",
@@ -56,7 +55,6 @@
     "src/views/chat/StepList.vue",
     "src/views/diff/DiffPanel.vue",
     "src/views/pipeline/ArbiterDecision.vue",
-    "src/views/settings/ToolHotkeys.vue",
     "src/views/terminal/TerminalPanel.vue"
   ]
 }

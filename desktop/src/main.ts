@@ -21,11 +21,10 @@ import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { uiReleaseUrl } from '../../shared/runtime/uiRelease.ts';
 import { publishUiRelease } from './uiRelease.ts';
-import { createSettingsWindow } from './settingsWindowFactory.ts';
-import type { SettingsWindowController } from './settingsWindowController.ts';
+import { createSettingsRequest } from './settingsRequest.ts';
 
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
-import { ensureSession, sessionCookieActive } from './autoLogin.ts';
+import { ensureSession } from './autoLogin.ts';
 import { localPort, resolveConnection } from './connection.ts';
 import { createConnectionLifecycle } from './connectionLifecycle.ts';
 import { loadDocument, loadPinnedDocument } from './windowDocuments.ts';
@@ -60,7 +59,7 @@ import {
   windowOptions,
 } from './windowSecurity.ts';
 
-let settingsController: SettingsWindowController | null = null;
+let settingsRequest: ReturnType<typeof createSettingsRequest> | null = null;
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let localSession: Session | null = null;
@@ -153,14 +152,10 @@ function revealed(): boolean {
 
 /**
  * Второй экземпляр после показа возвращает главное окно, не меняя его подключение.
- * Открытое окно настроек получает фокус вместо главного.
+ * Общий модал остаётся в том же документе и получает фокус вместе с ним.
  */
 function focusMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-
-  if (settingsController?.focusOpen()) {
     return;
   }
 
@@ -263,7 +258,7 @@ function configureWindow(
     openExternal,
     childOptions: options,
     onSettingsRequest: () => {
-      void settingsController?.open();
+      settingsRequest?.open();
     },
     onChild: (child) => configureWindow(child, origin, options),
   });
@@ -278,13 +273,13 @@ function configureWindow(
 
 /**
  * Нативный ввод обрабатывается до страницы, включая xterm с preventDefault.
- * Оба управляемых окна открывают или фокусируют единственное окно настроек.
+ * Фиксированное событие открывает общий модал в главном документе.
  */
 function installSettingsShortcut(window: BrowserWindow): void {
   window.webContents.on('before-input-event', (event, input) => {
     if (isSettingsShortcut(input)) {
       event.preventDefault();
-      void settingsController?.open();
+      settingsRequest?.open();
     }
   });
 }
@@ -449,7 +444,7 @@ async function createMainWindow(
 ): Promise<void> {
   Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate({
     openSettings: () => {
-      void settingsController?.open();
+      settingsRequest?.open();
     },
   })));
 
@@ -509,20 +504,10 @@ async function createMainWindow(
   mainWindow = window;
   window.webContents.setUserAgent(desktopUserAgent(window.webContents.getUserAgent(), 'main'));
   installSettingsShortcut(window);
-  settingsController = createSettingsWindow({
-    parent: window,
-    session: grigDeskSession,
-    origin,
-    icon: path.join(__dirname, 'icon.png'),
-    packaged: app.isPackaged,
-    createWindow: (childOptions) => new BrowserWindow(childOptions),
-    workArea: (bounds) => screen.getDisplayMatching(bounds).workArea,
+  settingsRequest = createSettingsRequest({
+    getWindow: () => mainWindow,
     revealed,
-    sessionActive: () => sessionCookieActive({ origin, cookies: grigDeskSession.cookies }),
-    pinnedUrl: () => pinnedUi?.url,
-    configureChild: (child) => configureWindow(child, origin, options),
-    installShortcut: installSettingsShortcut,
-    showLoadError: () => dialog.showErrorBox('GrigDesk', 'Не удалось открыть настройки.')
+    origin,
   });
   lifecycle = connection;
   configureWindow(window, origin, options);
@@ -759,6 +744,8 @@ if (app.requestSingleInstanceLock()) {
     }
   });
   app.on('before-quit', (event) => {
+    settingsRequest?.dispose();
+
     if (exiting) {
       return;
     }

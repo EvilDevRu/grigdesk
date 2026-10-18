@@ -12,7 +12,7 @@ Node CLI inspector. Подготовка отдельной тестовой с�
 `@electron/fuses`, не изменяя wire: RunAsNode, NodeOptions и CLIInspect должны быть
 DISABLE=48, EnableCookieEncryption — ENABLE=49.
 
-В текущем Linux manifest имя executable — `grigdesk-desktop`. Builder выбирает
+В текущем Linux manifest имя executable — `grigdesk`. Builder выбирает
 `build.linux.executableName`, затем `build.executableName`, иначе очищенное имя пакета
 в нижнем регистре. Русское productName не является именем ELF.
 
@@ -37,18 +37,18 @@ encrypted_value и положительный expires_utc. Защищённый 
 проверкой main до session, собственным GNOME Keyring и fuse wire готового пакета.
 
 ```bash
-export GRIGDESK_PACKAGED_EXECUTABLE="$PWD/desktop/release/linux-unpacked/grigdesk-desktop"
+export GRIGDESK_PACKAGED_EXECUTABLE="$PWD/desktop/release/linux-unpacked/grigdesk"
 export GRIGDESK_PACKAGED_APPIMAGE="$PWD/desktop/release/grigdesk-desktop-0.1.0-x86_64.AppImage"
 desktop_package_extract="$HOME/.grigdesk/artifacts/desktop-window/package-extract"
 mkdir -p "$desktop_package_extract"
 (cd "$desktop_package_extract" && "$GRIGDESK_PACKAGED_APPIMAGE" --appimage-extract)
-export GRIGDESK_PACKAGED_EXTRACTED_EXECUTABLE="$desktop_package_extract/squashfs-root/grigdesk-desktop"
+export GRIGDESK_PACKAGED_EXTRACTED_EXECUTABLE="$desktop_package_extract/squashfs-root/grigdesk"
 NODE_TEST_MAX_RSS_MB=4096 bash tests/desktop/e2e/isolated-session.sh \
   bash tests/run-node-tests-safe.sh --test-concurrency=1 --test tests/desktop/e2e/packaged-smoke.mjs
 ```
 
 DW-P4 читает `resources/app.asar` пакета через `@electron/asar`, Electron не запускает:
-`dist/splash/{index.html,style.css,illustration.png}` на месте, SHA-256 картинки совпадает с
+`dist/splash/{index.html,style.css,background.png,wordmark.svg}` на месте, SHA-256 картинки совпадает с
 утверждённым. DW-P5 запускает `squashfs-root/AppRun` распакованного AppImage (FUSE не нужен)
 с [корнем-фикстурой](desktop-startup-e2e.md) и `runtime.json` в XDG_DATA_HOME сессии: пакет
 сам поднимает свой сервер, страница фикстуры закрывает окно, выход 0 за 60 с, сервер

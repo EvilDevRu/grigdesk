@@ -1,71 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { settingsHarness } from './helpers/settings-harness.js';
 
-import { compilePluginsCatalog } from './helpers/plugins-catalog.js';
-import { installUiBrowser } from './helpers/ui-components.js';
-
-process.env.NODE_ENV = 'test';
-
-test('числовая настройка SSH рисуется с границами схемы и сохраняется числом', async (t) => {
-  const browser = await installUiBrowser(t, 'http://grigdesk.test/#/settings');
-  const saves = [];
-  const plugins = {
-    loaded: true,
-    list: [{
-      id: 'ssh', name: 'SSH', version: '1.0.0', system: true, enabled: true,
-      category: 'dev', description: 'Надзорный SSH', nav: { label: 'SSH', icon: 'terminal' },
-      needsRestart: false,
-      settings: [{
-        key: 'outputLimitKiB', label: 'Лимит вывода, KiB', type: 'number',
-        min: 4, max: 1024, step: 4, default: 64,
-      }],
-      values: { outputLimitKiB: 64 },
-    }],
-    enabled: () => true,
-    async load() {},
-    async toggle() {},
-    async saveSettings(id, values) { saves.push([id, structuredClone(values)]); },
-  };
-  globalThis.__pluginNumberStores = {
-    usePluginsStore: () => plugins,
-    useProvidersStore: () => ({
-      providers: [],
-      visibleModels: () => [],
-      modelOf: () => ({ id: '', provider: null, model: null }),
-    }),
-  };
-
-  const [{ mount, flushPromises }, PluginsCatalog] = await Promise.all([
-    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compilePluginsCatalog({ prefix: '__pluginNumber' }),
-  ]);
-  const wrapper = mount(PluginsCatalog, {
-    attachTo: browser.document.querySelector('#mount'),
-    global: { stubs: { teleport: true } },
+test('Числовое поле: границы манифеста, число в полном PUT и общий Apply', async (t) => {
+  const h = await settingsHarness(t, 'plugins.installed', 'PluginPage', {
+    prepare({ plugins }) {
+      plugins.list = [{
+        id: 'ssh-fixture',
+        name: 'SSH',
+        enabled: true,
+        system: true,
+        settings: [{
+          key: 'limit',
+          label: 'Лимит вывода',
+          type: 'number',
+          min: 4,
+          max: 1024,
+          step: 4,
+        }],
+        values: { limit: 64 },
+      }];
+    },
   });
-  t.after(() => {
-    wrapper.unmount();
-    delete globalThis.__pluginNumberStores;
-  });
-  await flushPromises();
+  const input = h.wrapper.get('input[type="number"]');
 
-  await wrapper.get('[data-plugin-id="ssh"] .plugin-tile-open').trigger('click');
-  await flushPromises();
-
-  const input = wrapper.get('.ui-dialog input[type="number"]');
+  assert.deepEqual(['min', 'max', 'step'].map((name) => input.attributes(name)), ['4', '1024', '4']);
   await input.setValue('68');
-  await wrapper.get('.plugin-save').trigger('click');
-  await flushPromises();
-
-  assert.deepEqual({
-    min: input.attributes('min'),
-    max: input.attributes('max'),
-    step: input.attributes('step'),
-    save: saves[0],
-  }, {
-    min: '4',
-    max: '1024',
-    step: '4',
-    save: ['ssh', { outputLimitKiB: 68 }],
-  });
+  assert.equal(h.writes().length, 0);
+  await h.settings.apply();
+  assert.deepEqual(h.writes()[0].body, { values: { limit: 68 }, placements: {} });
 });

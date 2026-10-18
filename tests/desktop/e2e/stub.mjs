@@ -67,7 +67,16 @@ export async function startStub({
 <a id="redirect" href="/redirect">Перенаправление</a>
 <button id="notify">Разрешить уведомления</button>
 <p id="notification-result"></p>
+<dialog id="stub-settings"><button id="stub-settings-close">Закрыть настройки</button></dialog>
 <script>
+window.__settingsEvents = 0;
+window.addEventListener('grigdesk:open-settings', () => {
+  window.__settingsEvents += 1;
+  document.querySelector('#stub-settings').showModal();
+});
+document.querySelector('#stub-settings-close').onclick = () => {
+  document.querySelector('#stub-settings').close();
+};
 document.querySelector('#notify').onclick = async () => {
   document.querySelector('#notification-result').textContent = await Notification.requestPermission();
 };

@@ -53,9 +53,10 @@ test('bootstrap запускает возможности устройства �
       });`,
       './ui.ts': `export const showToast = () => {}; export const getUiLayerDiagnostics = () => ({});
         export const subscribeUiLayerDiagnostics = () => {};`,
-      './shared/desktopSettings.ts': `export const currentDesktopMode = () => 'main';
-        export const installSettingsRouteGuard = () => () => {};
-        export const openSettingsWindow = () => {};`,
+      './stores/settings.ts': 'export const useSettingsStore = () => ({});',
+      './shared/sectionLoadFailure.ts': 'export const showSectionLoadFailure = () => {};',
+      './shared/settingsNavigation.ts': `export const installSettingsRouteGuard = () => () => {};
+        export const installSettingsOpenListener = () => () => {};`,
     },
   });
 

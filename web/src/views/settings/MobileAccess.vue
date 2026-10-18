@@ -1,9 +1,25 @@
 <template>
-  <section class="mobile-access" data-ui-touch aria-labelledby="mobile-access-title" :aria-busy="loading">
+  <section
+    class="mobile-access"
+    data-ui-touch
+    aria-labelledby="mobile-access-title"
+    :aria-busy="loading"
+  >
     <header class="mobile-heading">
       <span class="mobile-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <rect x="6" y="2" width="12" height="20" rx="3" />
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+        >
+          <rect
+            x="6"
+            y="2"
+            width="12"
+            height="20"
+            rx="3"
+          />
           <path d="M10 5h4M10 19h4" />
         </svg>
       </span>
@@ -15,10 +31,14 @@
         <UiSpinner v-if="loading" label="Загружаем подключения" />
       </span>
     </header>
-
     <UiInlineMessage v-if="error || loadError" tone="danger">
       {{ error || loadError }}
-      <UiButton v-if="loadError" variant="text" :disabled="loading" @click="load">
+      <UiButton
+        v-if="loadError"
+        variant="text"
+        :disabled="loading"
+        @click="load"
+      >
         Повторить загрузку
       </UiButton>
     </UiInlineMessage>
@@ -62,7 +82,11 @@
         <p>Укажите его адрес, скачайте настройки и запустите. Затем здесь появится QR для телефона.</p>
       </div>
       <div v-else class="mobile-relays">
-        <article v-for="relay in status.relays" :key="relay.id" class="mobile-relay">
+        <article
+          v-for="relay in status.relays"
+          :key="relay.id"
+          class="mobile-relay"
+        >
           <div class="mobile-relay-summary">
             <div class="mobile-identity">
               <div class="mobile-name-line">
@@ -105,20 +129,32 @@
                   d="m10 3-.6 2.2-2 .9-2.1-.6-2 3.5 1.6 1.6v2.8L3.3 15l2 3.5 2.1-.6 2 .9L10 21h4
                      l.6-2.2 2-.9 2.1.6 2-3.5-1.6-1.6v-2.8L20.7 9l-2-3.5-2.1.6-2-.9L14 3Z"
                 />
-                <circle cx="12" cy="12" r="3" />
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="3"
+                />
               </svg>
             </UiIconButton>
           </div>
           <p v-if="relay.link.state !== 'online'" class="mobile-connection-note">
             {{ relay.link.lastError || 'Для привязки телефона посредник должен быть в сети.' }}
           </p>
-          <div v-if="expandedRelay === relay.id" :id="`mobile-relay-${relay.id}`" class="mobile-relay-setup">
+          <div
+            v-if="expandedRelay === relay.id"
+            :id="`mobile-relay-${relay.id}`"
+            class="mobile-relay-setup"
+          >
             <div class="mobile-row">
               <div class="mobile-identity">
                 <b>Уже привязали телефон?</b>
                 <p>Добавьте этот адрес в приложении как ещё один способ подключения.</p>
               </div>
-              <UiButton data-role="settings-action" :disabled="busy" @click="showQr(relay, false)">
+              <UiButton
+                data-role="settings-action"
+                :disabled="busy"
+                @click="showQr(relay, false)"
+              >
                 QR посредника
               </UiButton>
             </div>
@@ -127,11 +163,19 @@
                 <b>Установка посредника</b>
                 <p>Скачайте файл настроек для запуска на выбранном сервере.</p>
               </div>
-              <UiButton data-role="settings-action" :disabled="busy" @click="downloadEnv(relay.id)">
+              <UiButton
+                data-role="settings-action"
+                :disabled="busy"
+                @click="downloadEnv(relay.id)"
+              >
                 Скачать relay.env
               </UiButton>
             </div>
-            <div v-if="created === relay.id" class="mobile-install" role="status">
+            <div
+              v-if="created === relay.id"
+              class="mobile-install"
+              role="status"
+            >
               <p>Сохраните relay.env в приватный каталог вне проекта с правами 0600 и запустите:</p>
               <pre>RELAY_ENV_FILE=/путь/вне-проекта/relay.env docker compose up -d --build
 docker compose ps</pre>
@@ -152,12 +196,12 @@ docker compose ps</pre>
         </article>
       </div>
     </section>
-
     <section class="mobile-card" aria-labelledby="mobile-devices-title">
       <header class="mobile-card-head">
         <div>
           <h4 id="mobile-devices-title">
-            Привязанные телефоны <span class="mobile-count">{{ status ? activeDevices.length : '—' }}</span>
+            Привязанные телефоны
+            <span class="mobile-count">{{ status ? activeDevices.length : '—' }}</span>
           </h4>
           <p>Устройства, которым разрешён доступ к этому GrigDesk.</p>
         </div>
@@ -169,7 +213,11 @@ docker compose ps</pre>
           :class="{ 'is-loading': loading }"
           aria-hidden="true"
         >
-          <div v-for="row in 2" :key="row" class="mobile-device mobile-row">
+          <div
+            v-for="row in 2"
+            :key="row"
+            class="mobile-device mobile-row"
+          >
             <div class="mobile-identity">
               <span class="mobile-skeleton-line mobile-skeleton-name" />
               <span class="mobile-skeleton-line mobile-skeleton-address" />
@@ -182,7 +230,11 @@ docker compose ps</pre>
           <p>Нажмите «Подключить телефон» у посредника и отсканируйте QR в приложении.</p>
         </div>
         <div v-else class="mobile-devices">
-          <div v-for="device in activeDevices" :key="device.id" class="mobile-device mobile-row">
+          <div
+            v-for="device in activeDevices"
+            :key="device.id"
+            class="mobile-device mobile-row"
+          >
             <div class="mobile-identity">
               <b>{{ device.name }}</b>
               <span class="mobile-device-status">Доступ разрешён</span>
@@ -202,7 +254,11 @@ docker compose ps</pre>
         </div>
       </div>
       <div class="mobile-history">
-        <div v-if="!status" class="mobile-skeleton mobile-history-placeholder" aria-hidden="true">
+        <div
+          v-if="!status"
+          class="mobile-skeleton mobile-history-placeholder"
+          aria-hidden="true"
+        >
           <span class="mobile-skeleton-line mobile-skeleton-address" />
         </div>
         <UiDisclosureButton
@@ -213,15 +269,22 @@ docker compose ps</pre>
           Отозванные телефоны · {{ revokedDevices.length }}
         </UiDisclosureButton>
         <p v-else class="mobile-history-empty">Отозванных телефонов нет</p>
-        <div v-if="historyOpen && revokedDevices.length" id="mobile-revoked-devices" class="mobile-devices">
-          <div v-for="device in revokedDevices" :key="device.id" class="mobile-device mobile-row">
+        <div
+          v-if="historyOpen && revokedDevices.length"
+          id="mobile-revoked-devices"
+          class="mobile-devices"
+        >
+          <div
+            v-for="device in revokedDevices"
+            :key="device.id"
+            class="mobile-device mobile-row"
+          >
             <b>{{ device.name }}</b>
             <span class="mobile-badge">Доступ отозван</span>
           </div>
         </div>
       </div>
     </section>
-
     <UiDialog
       v-model:open="addOpen"
       title="Добавить посредника"
@@ -231,14 +294,32 @@ docker compose ps</pre>
       :busy="busy"
       data-ui-touch
     >
-      <form id="mobile-relay-form" class="mobile-form" @submit.prevent="addRelay">
+      <form
+        id="mobile-relay-form"
+        class="mobile-form"
+        @submit.prevent="addRelay"
+      >
         <p class="mobile-form-hint">Укажите адрес сервера, доступный вашему телефону.</p>
         <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-        <UiField id="mobile-relay-name" label="Название" hint="Чтобы отличать подключения, например «Дом».">
-          <UiInput v-model="form.name" maxlength="40" autocomplete="off" :disabled="busy" required />
+        <UiField
+          id="mobile-relay-name"
+          label="Название"
+          hint="Чтобы отличать подключения, например «Дом»."
+        >
+          <UiInput
+            v-model="form.name"
+            maxlength="40"
+            autocomplete="off"
+            :disabled="busy"
+            required
+          />
         </UiField>
         <div class="mobile-form-address">
-          <UiField id="mobile-relay-host" label="Адрес" hint="IP или имя хоста, без https:// и порта.">
+          <UiField
+            id="mobile-relay-host"
+            label="Адрес"
+            hint="IP или имя хоста, без https:// и порта."
+          >
             <UiInput
               v-model="form.host"
               placeholder="relay.example.com"
@@ -248,12 +329,24 @@ docker compose ps</pre>
             />
           </UiField>
           <UiField id="mobile-relay-port" label="Порт">
-            <UiNumberInput v-model="form.port" :min="1" :max="65535" :disabled="busy" required />
+            <UiNumberInput
+              v-model="form.port"
+              :min="1"
+              :max="65535"
+              :disabled="busy"
+              required
+            />
           </UiField>
         </div>
       </form>
       <template #footer>
-        <UiButton data-role="settings-action" :disabled="busy" @click="addOpen = false">Отмена</UiButton>
+        <UiButton
+          data-role="settings-action"
+          :disabled="busy"
+          @click="addOpen = false"
+        >
+          Отмена
+        </UiButton>
         <UiButton
           type="submit"
           form="mobile-relay-form"

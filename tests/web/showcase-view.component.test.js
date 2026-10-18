@@ -198,6 +198,10 @@ let compiledViewPromise = null;
 function showcaseViewComponent() {
   compiledViewPromise ??= compileVue(VIEW, {
     stubs: {
+      '../shared/settingsNavigation.ts': `
+        export const openSettings = (request) =>
+          globalThis.__showcaseViewHarness.calls.push(['settings', request]);
+      `,
       '../actions/showcase': ACTIONS_STUB,
       '../../actions/showcase': ACTIONS_STUB,
       '../shared/showcaseApi': API_STUB,
@@ -793,7 +797,10 @@ test('готовая установка не занимает список ро�
     /Whisper нет/,
     'рекомендательная проверка речи блокером не считается',
   );
-  assert.ok(blocked.wrapper.find('a[href="#/settings"]').exists(), 'блокер ведёт в настройки');
+  await blocked.wrapper.findAll('button').find((entry) => entry.text() === 'Открыть настройки')
+    .trigger('click');
+  assert.ok(blocked.calls.some(([name, request]) =>
+    name === 'settings' && request.pageId === 'plugins.installed'));
 });
 
 test('идущая установка показывает шаг и даёт её отменить', async (t) => {

@@ -27,7 +27,7 @@ stdio-серверов, выбранных reader для запуска, и по
 - [Проектные MCP](../../../server/src/lib/deepseek/projectMcp.ts) — разбор и приоритет слоёв.
 - [Публичный список](../../../server/src/lib/deepseek/mcpStatus.ts) — проекция и безопасные ошибки.
 - [Каталог исполнителей](../../../server/src/modules/providers/index.ts) — вычисление `mcp`.
-- [Страница настроек](../../../web/src/views/SettingsView.vue) — условие показа блока.
+- [Страница настроек](../../../web/src/views/settings/pages/ProviderPage.vue) — условие показа блока.
 
 Поддержка внешних MCP также описана в
 [официальной документации клиента DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/mcp/mcp-client/README.md).

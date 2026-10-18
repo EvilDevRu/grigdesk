@@ -1,11 +1,9 @@
-# Подразделы настроек не наследуют стили SettingsView (scoped CSS)
+# Scoped-стили страниц настроек
 
-`.card`, `.row` и `.msg` объявлены в `SettingsView.vue` под `<style scoped>`, поэтому на
-вынесенный дочерний компонент (`views/settings/*.vue`) они НЕ действуют; `.muted` приходит из
-`web/src/styles/utilities.css`, а control skin — из канонических `Ui*` компонентов. Симптом
-обманчивый: вёрстка выглядит «поехавшей» (текст
-наложился на картинку, у карточек нет фона), и кажется, что дело в разметке, а не в отсутствии
-правил. Новый подраздел задаёт у себя только domain layout/card styles и собирает controls из
-`web/src/ui.ts`; копировать button/input skin из `SettingsView` нельзя.
+Страницы `views/settings/pages/` владеют только своей раскладкой. Scoped CSS оболочки
+не распространяется на дочерние SFC и Teleport-поверхности. Controls, диалоги и их
+оформление приходят из `web/src/ui.ts`; локальные button/input skins не создаются.
 
-Источник до переноса: docs/grigdesk/gotchas.md § Подразделы настроек не наследуют стили SettingsView (scoped CSS)
+`MobileAccess.vue` и `ProviderMcpStatus.vue` сохраняют собственную раскладку карточек
+и списков. Общие параметры геометрии наследуются через CSS-токены, включая вложенные
+диалоги в body. Проверки форм выполняются на настоящих SFC с общим CSS.

@@ -156,7 +156,7 @@ test('SW-N05 сочетание по физической клавише', () =>
   assert.equal(isSettingsShortcut(input), true);
 
   for (const change of [
-    { type: 'keyUp' }, { shift: true }, { meta: true },
+    { type: 'keyUp' }, { isAutoRepeat: true }, { shift: true }, { meta: true },
     { control: false }, { alt: false }, { code: 'KeyA' },
   ]) {
     assert.equal(isSettingsShortcut({ ...input, ...change }), false);

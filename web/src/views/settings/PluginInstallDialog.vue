@@ -13,7 +13,12 @@
       <div class="install-header">
         <div class="install-head-row">
           <span class="install-brand-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
               <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5M12 12 4 7.5M12 12v9M8 5.3l8 4.5" />
             </svg>
           </span>
@@ -22,7 +27,13 @@
             <h2 class="install-heading" data-role="install-heading">{{ heading }}</h2>
           </div>
           <UiIconButton label="Закрыть окно установки" @click="onOpenChange(false)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
               <path d="m6 6 12 12M6 18 18 6" />
             </svg>
           </UiIconButton>
@@ -44,11 +55,25 @@
       </div>
     </template>
     <div class="install-workspace">
-      <div ref="contentElement" class="install-content" data-role="install-scroll">
-        <div class="install-stage-heading" :data-tone="stageTone" role="status">
+      <div
+        ref="contentElement"
+        class="install-content"
+        data-role="install-scroll"
+      >
+        <div
+          class="install-stage-heading"
+          :data-tone="stageTone"
+          role="status"
+        >
           <span class="install-stage-icon" aria-hidden="true">
             <UiSpinner v-if="view === 'loading' || view === 'progress'" decorative />
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+            >
               <path :d="stageIcon" />
             </svg>
           </span>
@@ -57,12 +82,21 @@
             <p>{{ stageDescription }}</p>
           </div>
         </div>
-        <div v-if="view === 'loading'" class="install-bootstrap" data-role="install-loading" role="status">
+        <div
+          v-if="view === 'loading'"
+          class="install-bootstrap"
+          data-role="install-loading"
+          role="status"
+        >
           <div class="install-skeleton" aria-hidden="true"></div>
           <div class="install-skeleton" aria-hidden="true"></div>
           <div class="install-skeleton install-skeleton-short" aria-hidden="true"></div>
         </div>
-        <form v-else-if="view === 'source'" class="install-source" @submit.prevent="findVersions">
+        <form
+          v-else-if="view === 'source'"
+          class="install-source"
+          @submit.prevent="findVersions"
+        >
           <template v-if="mode === 'install'">
             <UiField id="plugin-install-url" label="Адрес репозитория">
               <div class="install-repository-input">
@@ -88,11 +122,16 @@
           </template>
           <template v-else-if="plugin?.install">
             <p class="install-current-version">
-              Установлена v{{ plugin.install.version }} из <span>{{ plugin.install.source.url }}</span>
+              Установлена v{{ plugin.install.version }} из
+              <span>{{ plugin.install.source.url }}</span>
             </p>
             <template v-if="plugin.install.localChanges">
               <UiInlineMessage tone="warning">В установленной копии есть ручные правки.</UiInlineMessage>
-              <UiCheckbox v-model="replaceModified" data-role="install-replace-modified" :disabled="locked">
+              <UiCheckbox
+                v-model="replaceModified"
+                data-role="install-replace-modified"
+                :disabled="locked"
+              >
                 Отложить правки в резерв и поставить версию начисто
               </UiCheckbox>
             </template>
@@ -106,20 +145,33 @@
                 :disabled="locked || store.versionsLoading || !store.versions.length"
               >
                 <option value="">— выберите версию —</option>
-                <option v-for="version in store.versions" :key="version.tag" :value="version.version">
+                <option
+                  v-for="version in store.versions"
+                  :key="version.tag"
+                  :value="version.version"
+                >
                   v{{ version.version }}
                 </option>
               </UiSelect>
             </UiField>
-            <div id="plugin-install-version-status" class="install-version-status" role="status">
+            <div
+              id="plugin-install-version-status"
+              class="install-version-status"
+              role="status"
+            >
               <p v-if="store.versionsLoading" class="install-loading-label">
-                <UiSpinner decorative /> Ищем версии в репозитории…
+                <UiSpinner decorative />
+                Ищем версии в репозитории…
               </p>
               <UiInlineMessage v-else-if="store.versionsError" tone="danger">
                 {{ store.versionsError }}
               </UiInlineMessage>
-              <p v-else-if="store.versionsUrl && !store.versions.length">В источнике нет тегов вида vX.Y.Z.</p>
-              <p v-else-if="store.versions.length">Выберите релиз. По умолчанию выбрана самая новая версия.</p>
+              <p v-else-if="store.versionsUrl && !store.versions.length">
+                В источнике нет тегов вида vX.Y.Z.
+              </p>
+              <p v-else-if="store.versions.length">
+                Выберите релиз. По умолчанию выбрана самая новая версия.
+              </p>
               <p v-else>Укажите адрес и нажмите «Найти версии».</p>
             </div>
             <UiButton
@@ -135,18 +187,30 @@
             <UiDisclosureButton v-model:open="sourceHelpOpen" controls="plugin-install-source-help">
               SSH и приватные репозитории
             </UiDisclosureButton>
-            <p v-if="sourceHelpOpen" id="plugin-install-source-help" class="install-source-help">
-              Поддерживаются https://…, ssh://…, git@хост:путь и file:///путь.
-              Для приватного репозитория настройте доступ Git на машине, где запущен GrigDesk.
+            <p
+              v-if="sourceHelpOpen"
+              id="plugin-install-source-help"
+              class="install-source-help"
+            >
+              Поддерживаются https://…, ssh://…, git@хост:путь и file:///путь. Для приватного репозитория
+              настройте доступ Git на машине, где запущен GrigDesk.
             </p>
           </template>
         </form>
         <section v-else-if="view === 'progress'" class="install-preparation">
-          <div v-if="store.job" class="install-job-source" data-role="install-job-source">
+          <div
+            v-if="store.job"
+            class="install-job-source"
+            data-role="install-job-source"
+          >
             <span>{{ store.job.source.kind }} · {{ store.job.source.url }}</span>
             <code data-role="install-job-id">{{ store.job.pluginId ?? '' }}</code>
           </div>
-          <ol v-if="store.job" class="install-stage-list" data-role="install-stages">
+          <ol
+            v-if="store.job"
+            class="install-stage-list"
+            data-role="install-stages"
+          >
             <li
               v-for="row in installStageRows(store.job)"
               :key="row.id"
@@ -187,19 +251,39 @@
               <dd class="install-package-sha">{{ shortSha(store.job.preview.target.sha) }}</dd>
             </dl>
           </div>
-          <p v-if="completed" class="install-result-message" data-role="install-result">
+          <p
+            v-if="completed"
+            class="install-result-message"
+            data-role="install-result"
+          >
             {{ installResultText(store.job) }}
           </p>
-          <UiInlineMessage v-else data-role="install-result" :tone="resultTone">
+          <UiInlineMessage
+            v-else
+            data-role="install-result"
+            :tone="resultTone"
+          >
             {{ installResultText(store.job) }}
           </UiInlineMessage>
         </section>
       </div>
-      <div v-if="store.error || store.recoveryError" class="install-alerts" data-role="install-alerts">
-        <UiInlineMessage v-if="store.error" tone="danger" data-role="install-error">
+      <div
+        v-if="store.error || store.recoveryError"
+        class="install-alerts"
+        data-role="install-alerts"
+      >
+        <UiInlineMessage
+          v-if="store.error"
+          tone="danger"
+          data-role="install-error"
+        >
           {{ store.error }}
         </UiInlineMessage>
-        <UiInlineMessage v-if="store.recoveryError" tone="danger" data-role="install-recovery">
+        <UiInlineMessage
+          v-if="store.recoveryError"
+          tone="danger"
+          data-role="install-recovery"
+        >
           {{ store.recoveryError.message }}
         </UiInlineMessage>
       </div>
@@ -218,7 +302,8 @@
               Отмена
             </UiButton>
             <UiButton
-              v-else-if="view === 'ready' || view === 'progress' && !clarifying && store.job?.status === 'running'"
+              v-else-if="view === 'ready'
+                || view === 'progress' && !clarifying && store.job?.status === 'running'"
               block
               data-role="install-cancel"
               :disabled="locked"
@@ -236,7 +321,14 @@
             </UiButton>
           </div>
           <div class="install-primary">
-            <UiButton v-if="view === 'loading'" block disabled loading>Проверяем состояние</UiButton>
+            <UiButton
+              v-if="view === 'loading'"
+              block
+              disabled
+              loading
+            >
+              Проверяем состояние
+            </UiButton>
             <UiButton
               v-else-if="view === 'unavailable'"
               block
@@ -268,7 +360,8 @@
               :disabled="locked"
               @click="confirmApply"
             >
-              {{ store.job?.kind === 'update' || preview?.replaces.kind === 'managed' ? 'Обновить' : 'Установить' }}
+              {{ store.job?.kind === 'update' || preview?.replaces.kind === 'managed'
+                ? 'Обновить' : 'Установить' }}
             </UiButton>
             <UiButton
               v-else-if="view === 'result' && store.job?.status === 'failed'"

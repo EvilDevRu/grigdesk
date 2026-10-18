@@ -1,6 +1,5 @@
 import type {
   BrowserWindow,
-  BaseWindow,
   BrowserWindowConstructorOptions,
   Event,
   Session,
@@ -9,7 +8,6 @@ import type {
   WebContentsWillRedirectEventParams,
 } from 'electron';
 import type { WindowState } from './settings.ts';
-import type { SettingsWindowGeometry } from './settingsWindowController.ts';
 import { isSettingsWindowRequest } from '../../shared/desktop/desktopWindowContract.ts';
 
 export const LOCAL_PARTITION = 'persist:grigdesk-local';
@@ -44,34 +42,6 @@ export function secureWebPreferences(packaged: boolean) {
     webviewTag: false,
     nodeIntegrationInWorker: false,
     nodeIntegrationInSubFrames: false,
-  };
-}
-
-/**
- * Модальное окно разделяет сессию главного и не сохраняет собственную геометрию.
- * Размеры уже ограничены рабочей областью дисплея вызывающей стороной.
- */
-export function settingsWindowOptions(options: {
-  icon: string;
-  packaged: boolean;
-  parent: BaseWindow;
-  geometry: SettingsWindowGeometry;
-  session: Session;
-}): BrowserWindowConstructorOptions {
-  return {
-    ...options.geometry,
-    parent: options.parent,
-    modal: true,
-    show: false,
-    minimizable: false,
-    fullscreenable: false,
-    title: 'Настройки — GrigDesk',
-    backgroundColor: '#0b0d11',
-    icon: options.icon,
-    webPreferences: {
-      ...secureWebPreferences(options.packaged),
-      session: options.session,
-    },
   };
 }
 

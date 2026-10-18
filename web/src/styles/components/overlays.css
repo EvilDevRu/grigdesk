@@ -311,6 +311,11 @@
   flex-direction: column;
 }
 
+.ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='settings-modal'] {
+  width: min(1240px, calc(100vw - 40px));
+  height: min(900px, calc(100dvh - 40px));
+}
+
 /* Модалка плагина с блоком готовности: список приходит с сервера после открытия,
    и высота по содержимому прыгала бы. Высота задана по окну, тело прокручивается. */
 .ui-dialog[data-role='plugin-settings'][data-setup='true'] {
@@ -376,7 +381,9 @@
   .ui-dialog-overlay[data-size='workspace']
     .ui-dialog[data-role='pipeline-stage'],
   .ui-dialog-overlay[data-size='workspace']
-    .ui-dialog[data-role='task-modal'] {
+    .ui-dialog[data-role='task-modal'],
+  .ui-dialog-overlay[data-size='workspace']
+    .ui-dialog[data-role='settings-modal'] {
     width: 100%;
     height: 100dvh;
     max-height: 100dvh;

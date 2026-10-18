@@ -1,0 +1,245 @@
+{
+  "prefs": {
+    "gitRefreshBeforeRun": true,
+    "chatLiveSessions": true,
+    "chatAutoContinue": true,
+    "showAllModels": false,
+    "chatAutoCompactWindow": 12000,
+    "stageAutoCompactWindow": 22000,
+    "runSilenceWindow": 90,
+    "arbiter": {
+      "auto": true,
+      "modelRef": {
+        "provider": "fixture",
+        "model": "retired"
+      },
+      "effort": "high"
+    }
+  },
+  "providers": {
+    "providers": [
+      {
+        "id": "fixture",
+        "name": "Тестовый исполнитель",
+        "type": "universal",
+        "available": true,
+        "installed": true,
+        "mcp": true,
+        "settingsCatalog": true,
+        "settings": [
+          {
+            "id": "sample",
+            "kind": "toggle",
+            "label": "Пример возможности",
+            "value": false
+          }
+        ],
+        "credentials": [
+          {
+            "env": "SAMPLE_KEY",
+            "kind": "secret",
+            "label": "Ключ доступа",
+            "set": false,
+            "inFile": false,
+            "value": null
+          }
+        ],
+        "models": [
+          {
+            "id": "model-1",
+            "name": "Тестовая модель",
+            "efforts": [
+              "low",
+              "high"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "three-d",
+        "name": "Тестовый 3D",
+        "type": "3d",
+        "kind": "api",
+        "available": false
+      }
+    ]
+  },
+  "factoryDebug": {
+    "scope": "global",
+    "configured": "verbose",
+    "configuredExpiresAt": 0,
+    "effective": "errors",
+    "source": "env",
+    "expiresAt": 0
+  },
+  "speech": {
+    "settings": {
+      "engine": "browser",
+      "browserProcessing": "local",
+      "browserAutoConsent": false,
+      "language": "auto",
+      "dictionary": "GrigDesk\nконвейер\nworktree",
+      "quality": "balanced",
+      "videoQuality": "balanced",
+      "videoInitialPrompt": "Стенограмма рабочей встречи.",
+      "model": null,
+      "videoModel": null,
+      "device": "auto",
+      "computeType": null,
+      "beamSize": null,
+      "vadSilenceMs": 500,
+      "conditionOnPreviousText": true
+    },
+    "revision": "sha256:browser-fixture",
+    "capabilities": {
+      "local": {
+        "ready": true,
+        "reason": "",
+        "checks": [
+          {
+            "name": "ffmpeg",
+            "ok": true
+          }
+        ]
+      },
+      "cuda": {
+        "state": "missing_library",
+        "reason": "Библиотеки CUDA не установлены."
+      },
+      "models": [
+        {
+          "modelId": "small",
+          "repo": "Systran/faster-whisper-small",
+          "cached": true,
+          "sizeMb": 244.5
+        },
+        {
+          "modelId": "medium",
+          "repo": "Systran/faster-whisper-medium",
+          "cached": false,
+          "sizeMb": 0
+        }
+      ],
+      "languages": [
+        "ru",
+        "en",
+        "auto"
+      ],
+      "benchmark": {
+        "available": true,
+        "reason": ""
+      }
+    }
+  },
+  "plugins": {
+    "plugins": [
+      {
+        "id": "sample",
+        "name": "Тестовый плагин",
+        "version": "1.0.0",
+        "system": true,
+        "category": "dev",
+        "description": "Проверка параметров и размещений",
+        "enabled": false,
+        "needsRestart": true,
+        "nav": null,
+        "settings": [
+          {
+            "key": "limit",
+            "type": "number",
+            "label": "Лимит",
+            "min": 4,
+            "max": 100,
+            "step": 4
+          },
+          {
+            "key": "name",
+            "type": "text",
+            "label": "Имя"
+          },
+          {
+            "key": "model",
+            "type": "model",
+            "label": "Модель"
+          }
+        ],
+        "values": {
+          "limit": 12,
+          "name": "Пример",
+          "model": {
+            "provider": "missing",
+            "model": "removed",
+            "effort": "retired"
+          }
+        },
+        "placements": [
+          {
+            "slot": "chat.header",
+            "label": "Заголовок чата",
+            "enabled": true
+          }
+        ]
+      }
+    ]
+  },
+  "b24": {
+    "configured": true,
+    "baseUrl": "https://portal.example.test",
+    "login": "Синтетический логин"
+  },
+  "launcher": {
+    "autostart": {
+      "unit": "disabled",
+      "active": true,
+      "linger": true,
+      "mode": "off"
+    },
+    "shortcut": {
+      "desktopDir": "/fixture/Desktop",
+      "desktop": false,
+      "menu": false
+    }
+  },
+  "server": {
+    "mode": "desktop",
+    "systemd": false,
+    "pid": 1234,
+    "uptimeSec": 3600
+  },
+  "mobile": {
+    "server": {
+      "up": true
+    },
+    "relays": [],
+    "devices": []
+  },
+  "sessions": {
+    "enabled": true,
+    "maxSessions": 4,
+    "idleMs": 1800000,
+    "sessions": []
+  },
+  "release": {
+    "running": {
+      "version": "1.0.0",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "checkout": {
+      "version": "1.0.0",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "branch": "fixture",
+      "dirty": false
+    },
+    "latest": null,
+    "checkedAt": null,
+    "canApplyCheckout": false,
+    "canInstallRelease": false,
+    "applyBlockReasons": [
+      "working_tree_dirty"
+    ],
+    "installBlockReasons": [
+      "no_release_checked"
+    ],
+    "job": null
+  }
+}

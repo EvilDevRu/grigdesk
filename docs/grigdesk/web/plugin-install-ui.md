@@ -75,9 +75,9 @@ Pending apply и reconciliation имеют приоритет над ready и б
 проверяется и после await. Двойной click, recovery во время confirm и unmount
 не разрешают новый intent. При неизвестном исходе доступно явное reconciliation.
 
-`PluginsCatalog.vue` читает current/health при монтировании, добавляет install/check
-и badges с приоритетом restart. Переход update/bind закрывает прежнюю карточку.
-Health блокирует изменения, сохраняя SYSTEM плитки и объяснение; job recovery
+`pages/PluginPage.vue` читает current/health при монтировании, добавляет install/check
+и badges с приоритетом restart. Действия update/bind открывают прежний wizard поверх общей формы.
+Health блокирует изменения, сохраняя системные элементы списка и объяснение; job recovery
 показывается и без отдельного recoveryError. `plugins.load` декодирует optional install
 всего ответа до замены списка; невалидный DTO сохраняет прежний каталог целиком.
 

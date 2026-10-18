@@ -51,6 +51,7 @@ export { vTooltip } from './services/tooltipDirective.ts';
 export { useUiLayer } from './composables/useUiLayer';
 export { getUiLayerDiagnostics, subscribeUiLayerDiagnostics } from './services/layers/stack';
 export { alertDialog, confirmDialog, promptDialog } from './services/dialogs';
+export { hasOpenModal } from './services/layers/modalQueries';
 export type * from './types/uiActions';
 export type * from './types/uiFields';
 export type * from './types/uiLayers';

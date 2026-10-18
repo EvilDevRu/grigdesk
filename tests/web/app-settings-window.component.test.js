@@ -48,8 +48,11 @@ async function fixture(t, mode, authenticated) {
       return () => h('div', { 'data-app': '${name}' }, slots.default?.());
     }};`;
   const stubs = {
+    './stores/settings.ts': `export const useSettingsStore = () => ({
+      isOpen: false, setAuthenticated() {}, dispose() {},
+    });`,
+    './views/settings/SettingsModal.vue': 'export default { render: () => null };',
     './shared/desktopSettings.ts': 'export const currentDesktopMode = () => globalThis.__settingsApp.mode;',
-    './shared/layout/SettingsWindowShell.vue': marker('settings'),
     './shared/layout/AppShell.vue': marker('main'),
     './views/LoginView.vue': marker('login'),
     './views/NoAccessView.vue': marker('noaccess'),
@@ -91,17 +94,6 @@ async function fixture(t, mode, authenticated) {
 
   return { h, wrapper };
 }
-
-test('SW-U07 App выбирает оболочку один раз', async (t) => {
-  const { h, wrapper } = await fixture(t, 'settings', true);
-
-  assert.equal(wrapper.find('[data-app=settings]').exists(), true);
-  assert.equal(wrapper.find('[data-app=main], [data-app=noaccess], [data-app=version]').exists(), false);
-  assert.deepEqual(h.calls, ['auth.watch', 'auth.load']);
-  h.mode = 'page';
-  await flushPromises();
-  assert.equal(wrapper.find('[data-app=settings]').exists(), true);
-});
 
 for (const mode of ['main', 'page']) {
   test('SW-U07/' + mode + ' прежняя оболочка и polling', async (t) => {

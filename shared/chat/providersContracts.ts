@@ -6,6 +6,42 @@
 
 import { contractDecoders } from '../lib/contractDecoders.ts';
 import type { InTurnCapability } from './chatInTurnContracts.ts';
+import type { JsonValue } from './providerSettingsContracts.ts';
+
+export interface ProviderSettingEntry {
+  id: string;
+  kind: 'toggle' | 'text' | 'number' | 'range';
+  label: string;
+  value: JsonValue;
+  hint?: string;
+  disabled?: boolean;
+  note?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  confirm?: Partial<Record<'on' | 'off', {
+    text: string;
+    label?: string;
+    danger?: boolean;
+  }>>;
+}
+
+export interface ProviderCredentialEntry {
+  env: string;
+  kind: 'secret' | 'choice';
+  label: string;
+  hint?: string;
+  options?: Array<{
+    value: string;
+    label: string;
+    hint?: string;
+  }>;
+  when?: { env: string; value: string };
+  set: boolean;
+  inFile: boolean | null;
+  preview?: string;
+  value: string | null;
+}
 
 // Модель реестра в том объёме, в каком её читают соседние разделы при выборе.
 // `extra` — старая версия семейства: в кратком списке её не показывают.
@@ -13,6 +49,8 @@ export interface ProviderModelEntry {
   id: string;
   name: string;
   extra?: boolean;
+  unknown?: boolean;
+  hidden?: boolean;
   efforts?: string[];
   effortHints?: Record<string, string>;
 }
@@ -23,7 +61,28 @@ export interface ProviderEntry {
   id: string;
   name: string;
   available?: boolean;
+  type?: string;
+  vendor?: string;
+  kind?: string;
+  installed?: boolean;
+  mcp?: boolean;
+  chatEnabled?: boolean;
+  modes?: Array<{ id: string; label: string }>;
+  canUpdate?: boolean;
+  updateAvailable?: boolean;
+  version?: string;
+  authLabel?: string;
+  setupCommand?: string;
+  install?: string;
+  distribution?: {
+    label?: string;
+    ready: boolean;
+    authHint?: string;
+    problem?: { message: string; command?: string };
+  };
   settingsCatalog?: boolean;
+  settings?: ProviderSettingEntry[];
+  credentials?: ProviderCredentialEntry[];
   models?: ProviderModelEntry[];
   capabilities?: Record<string, boolean>;
   // Канал ввода в активный ход: подробный контракт отдельным полем, а не boolean-флагом.

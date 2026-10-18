@@ -1,8 +1,13 @@
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
+import { classifyWriteError } from '../features/settings/contracts.ts';
+
 import { api } from '../shared/apiClient.ts';
 import { familyModels } from '../../../shared/chat/modelFamily.ts';
+
+const registryReads = new WeakMap();
+const registryStatuses = new WeakMap();
 
 export const useProvidersStore = defineStore('providers', {
   // showAllModels — настройка «показывать все модели, включая старые версии» (server prefs).
@@ -124,24 +129,51 @@ export const useProvidersStore = defineStore('providers', {
      * Только последний запрос текущей проекции может заменить карточки.
      * Смена credentials отсеивает поздний GET прежнего аккаунта вместе с его ошибкой.
      */
-    async load(refresh = false) {
+    load(refresh = false) {
       const request = ++this.registryRequest;
       const version = this.registryVersion;
+      const pending = (async () => {
+        try {
+          const { providers, showAllModels } = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
 
-      try {
-        const { providers, showAllModels } = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
+          if (request !== this.registryRequest || version !== this.registryVersion) {
+            return;
+          }
 
-        if (request !== this.registryRequest || version !== this.registryVersion) {
-          return;
+          this.providers = providers || [];
+          this.showAllModels = !!showAllModels;
+          registryStatuses.set(this, { ok: true });
+        } catch (error) {
+          if (request === this.registryRequest && version === this.registryVersion) {
+            registryStatuses.set(this, {
+              ok: false,
+              message: error?.message || 'Не удалось перечитать реестр исполнителей',
+            });
+          }
         }
 
-        this.providers = providers || [];
-        this.showAllModels = !!showAllModels;
-      } catch { /* сервер молчит — иконок просто нет */ }
+        if (request === this.registryRequest && version === this.registryVersion) {
+          this.loaded = true;
+        }
+      })();
 
-      if (request === this.registryRequest && version === this.registryVersion) {
-        this.loaded = true;
-      }
+      registryReads.set(this, pending);
+
+      return pending;
+    },
+    /**
+     * Координатор настроек ждёт актуальное чтение реестра после записи ключа.
+     * Сам ACK доменного store остаётся быстрым и не ждёт usage-проверку.
+     */
+    async whenRegistryReady() {
+      let pending;
+
+      do {
+        pending = registryReads.get(this);
+        await pending;
+      } while (pending !== registryReads.get(this));
+
+      return registryStatuses.get(this) || { ok: true };
     },
     /**
      * Сбрасывает счёт изменённого аккаунта сразу при ACK или общем SSE-событии.
@@ -315,7 +347,14 @@ export const useProvidersStore = defineStore('providers', {
     async saveSetting(providerId, settingId, value, confirmed) {
       const p = this.providers.find((x) => x.id === providerId);
       const s = (p?.settings || []).find((x) => x.id === settingId);
-      if (!s) return { ok: false, error: 'настройка не объявлена исполнителем' };
+
+      if (!s) {
+        return {
+          ok: false,
+          outcome: 'failed',
+          error: 'настройка не объявлена исполнителем',
+        };
+      }
       const before = s.value;
       s.value = value;
       try {
@@ -328,12 +367,35 @@ export const useProvidersStore = defineStore('providers', {
           `/api/providers/${encodeURIComponent(providerId)}/settings`,
           body,
         );
-        if (!r?.ok) { s.value = before; return { ok: false, error: r?.message || 'сервер не принял значение' }; }
-        if (r.settings) p.settings = r.settings;
-        return { ok: true };
+
+        if (!r?.ok) {
+          s.value = before;
+
+          return {
+            ok: false,
+            outcome: r?.ok === false ? 'failed' : 'unknown',
+            error: r?.message || 'сервер не принял значение',
+          };
+        }
+        if (r.settings) {
+          p.settings = r.settings;
+        }
+
+        const accepted = (r.settings || []).find((setting) => setting.id === settingId);
+
+        return { ok: true, ...(accepted && Object.hasOwn(accepted, 'value')
+          ? { serverValue: accepted.value } : {}) };
       } catch (e) {
         s.value = before;
-        return { ok: false, error: e.data?.message || e.message };
+
+        const result = classifyWriteError(e);
+
+        return {
+          ok: false,
+          outcome: result.outcome,
+          ...(result.status === undefined ? {} : { status: result.status }),
+          error: e.data?.message || e.message,
+        };
       }
     },
     /**
@@ -349,14 +411,25 @@ export const useProvidersStore = defineStore('providers', {
         );
 
         if (!r?.ok) {
-          return { ok: false, error: r?.message || 'сервер не принял ключи' };
+          return {
+            ok: false,
+            outcome: r?.ok === false ? 'failed' : 'unknown',
+            error: r?.message || 'сервер не принял ключи',
+          };
         }
 
         void this.invalidateCredentials(providerId);
 
         return { ok: true };
       } catch (e) {
-        return { ok: false, error: e.data?.message || e.message };
+        const result = classifyWriteError(e);
+
+        return {
+          ok: false,
+          outcome: result.outcome,
+          ...(result.status === undefined ? {} : { status: result.status }),
+          error: e.data?.message || e.message,
+        };
       }
     },
     /**

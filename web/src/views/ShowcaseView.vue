@@ -105,7 +105,7 @@
           <span v-for="operation in doctorBlockers" :key="operation.id">
             {{ operation.title }} — {{ operation.reason }}
           </span>
-          <UiActionLink href="#/settings" variant="ghost">Открыть настройки</UiActionLink>
+          <UiButton variant="ghost" @click="openSettings({ pageId: 'plugins.installed' })">Открыть настройки</UiButton>
         </span>
       </UiInlineMessage>
 
@@ -150,6 +150,7 @@
 </template>
 
 <script setup lang="ts">
+import { openSettings } from '../shared/settingsNavigation.ts';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 

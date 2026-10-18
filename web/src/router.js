@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
+import SettingsRouteStub from './views/settings/settingsRouteStub.ts';
 
 // Hash history сохраняет навигацию SPA при обычной отдаче статики.
 // Переходы между разделами не требуют серверных rewrite-правил.
@@ -71,7 +72,12 @@ const routes = [
   { path: '/inbox', name: 'inbox', component: () => import('./views/InboxView.vue'), meta: { title: 'Входящие' } },
   { path: '/github', name: 'github', component: () => import('./views/GitHubView.vue'), meta: { title: 'GitHub' } },
   { path: '/telegram', name: 'telegram', component: () => import('./views/TelegramView.vue'), meta: { title: 'Телеграм' } },
-  { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue'), meta: { title: 'Настройки' } },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: SettingsRouteStub,
+    meta: { title: 'Настройки' },
+  },
 ];
 
 export const router = createRouter({

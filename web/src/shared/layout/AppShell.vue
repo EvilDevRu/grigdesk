@@ -339,14 +339,15 @@
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
         <AlertHistoryPopover />
-        <router-link to="/settings" class="settings-link" active-class="active"
-                   v-tooltip="'Настройки'" aria-label="Настройки">
+        <UiIconButton label="Настройки" v-tooltip="'Настройки'"
+          aria-haspopup="dialog" :pressed="settings.isOpen"
+          @click="openSettings()">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path :d="ICONS.settings" />
           <circle cx="12" cy="12" r="3" />
         </svg>
-        </router-link>
+        </UiIconButton>
       </div>
     </header>
 
@@ -417,15 +418,13 @@ import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
 import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
+import { openSettings } from '../settingsNavigation.ts';
+import { useSettingsStore } from '../../stores/settings.ts';
 import { currentDesktopMode } from '../desktopSettings.ts';
-import { useDesktopSettingsSync } from '../../composables/useDesktopSettingsSync.ts';
 
 const isDesktopMain = currentDesktopMode() === 'main';
 
-if (isDesktopMain) {
-  useDesktopSettingsSync();
-}
-
+const settings = useSettingsStore();
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
@@ -480,12 +479,12 @@ function provTitle(p) {
   return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
     + (p.version ? ` · ${p.version}` : '');
 }
-// Кнопка «Настройки исполнителей» во всплывашке — на вкладку «Исполнители» настроек
-// (таб настроек запоминается в localStorage, поэтому просто задаём его).
+// Кнопка выбирает страницу в общей сессии, не меняя маршрут и текущий инструмент.
+// Popover закрывается вызывающей кнопкой до запроса открытия модала.
 const { openTerminal } = useToolLauncher();
+
 function toProviders() {
-  localStorage.setItem('grigdesk-settings-tab', 'providers');
-  router.push('/settings');
+  openSettings({ pageId: 'agents.providers' });
 }
 const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
@@ -818,13 +817,6 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   white-space: nowrap;
 }
 .topbar-actions { display: flex; align-items: center; flex: none; gap: 0; }
-.settings-link {
-  width: var(--app-rail-w); height: 32px; flex: none; display: grid; place-items: center;
-  border-radius: 8px; color: var(--ink-mid); line-height: 0; transition: background .12s, color .12s;
-}
-.settings-link .ic { display: block; width: 16px; height: 16px; }
-.settings-link:hover { background: var(--surface); color: var(--ink); }
-.settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
 .stale-note { color: var(--warn); border-top: 0; padding-top: 4px; }
 /* Разделитель не зависит от шрифта: центр и отступы задаёт та же flex-строка.
    Внутри метрик и между группами используется одна геометрия без отрицательных полей. */

@@ -7,12 +7,13 @@ import { useAuthStore } from './stores/auth.js';
 import { api, isReportedApiError, setApiLogSink } from './shared/apiClient.ts';
 import { setSseLogSink } from './composables/useSse.ts';
 import { createWebLogRuntime } from './shared/webLogRuntime.ts';
-import { getUiLayerDiagnostics, subscribeUiLayerDiagnostics, showToast } from './ui.ts';
+import { getUiLayerDiagnostics, subscribeUiLayerDiagnostics } from './ui.ts';
 import {
-  currentDesktopMode,
   installSettingsRouteGuard,
-  openSettingsWindow,
-} from './shared/desktopSettings.ts';
+  installSettingsOpenListener,
+} from './shared/settingsNavigation.ts';
+import { useSettingsStore } from './stores/settings.ts';
+import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import App from './App.vue';
 import './styles/index.css';
 // Системные плагины веба регистрируют свои размещения в слотах до первой отрисовки.
@@ -56,13 +57,12 @@ setSseLogSink((event, data) => {
 app.use(pinia);
 webLog.attachAuthStore(useAuthStore(pinia));
 
-const removeSettingsGuard = installSettingsRouteGuard(router, currentDesktopMode(), openSettingsWindow);
+const settings = useSettingsStore(pinia);
+const removeSettingsGuard = installSettingsRouteGuard(router, settings);
+const removeSettingsListener = installSettingsOpenListener(window,
+  (request) => settings.requestOpen(request));
 
-const removeRouteError = router.onError(() => showToast({
-  id: 'section-load-failed',
-  title: 'Не удалось открыть раздел. Закройте и снова запустите приложение.',
-  tone: 'danger',
-}));
+const removeRouteError = router.onError(showSectionLoadFailure);
 
 app.use(router).mount('#app');
 import.meta.hot?.dispose(() => {
@@ -70,6 +70,7 @@ import.meta.hot?.dispose(() => {
   setSseLogSink(null);
   webLog.dispose();
   removeSettingsGuard();
+  removeSettingsListener();
   removeRouteError();
 });
 

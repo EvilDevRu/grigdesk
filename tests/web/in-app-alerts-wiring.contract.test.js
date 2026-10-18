@@ -26,5 +26,5 @@ test('P1/P2: хост после модалок и очистка при вых�
 test('история: колокольчик стоит в верхней панели рядом с настройками', async () => {
   const source = await readFile(webFile('src/shared/layout/AppShell.vue'), 'utf8');
 
-  assert.match(source, /<AlertHistoryPopover \/>\s*<router-link to="\/settings"/);
+  assert.match(source, /<AlertHistoryPopover \/>\s*<UiIconButton label="Настройки"/);
 });

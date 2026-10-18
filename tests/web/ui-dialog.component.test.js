@@ -1,18 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compileVue, webFile } from './helpers/compile-vue.js';
+import { compileModule, compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 test('UiDialog централизует workspace layer, edge-to-edge body и Escape', async (t) => {
   const browser = await installUiBrowser(t);
-  const [{ h, nextTick }, { mount, flushPromises }, UiDialog] = await Promise.all([
+  const [{ h, nextTick }, { mount, flushPromises }, facade] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileVue(webFile('src/components/overlays/UiDialog.vue')),
+    compileModule(webFile('src/ui.ts')),
   ]);
+  const { UiDialog, hasOpenModal } = facade;
   const updates = [];
   const closes = [];
   let wrapper;
+
+  assert.equal(hasOpenModal(), false);
 
   wrapper = mount(UiDialog, {
     attachTo: browser.document.querySelector('#mount'),
@@ -49,6 +52,7 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
   assert.equal(surface.dataset.bodyInset, 'false');
   assert.equal(surface.getAttribute('aria-label'), 'Диф задачи');
   assert.equal(browser.document.body.classList.contains('ui-modal-scroll-lock'), true);
+  assert.equal(hasOpenModal(), true);
 
   const escape = new browser.KeyboardEvent('keydown', {
     key: 'Escape',
@@ -64,6 +68,7 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
   assert.deepEqual(updates, [false]);
   assert.deepEqual(closes, ['escape']);
   assert.equal(browser.document.body.classList.contains('ui-modal-scroll-lock'), false);
+  assert.equal(hasOpenModal(), false);
 
   await new Promise((resolve) => setTimeout(resolve, 50));
   await nextTick();

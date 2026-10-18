@@ -41,6 +41,15 @@ async function compileView(view) {
     componentPromises.set(view, compileVue(VIEWS[view], {
       stubs: {
         '../shared/apiClient.ts': API_STUB,
+        '../shared/settingsNavigation.ts': `
+          export const openSettings = (request) => globalThis.__channelSettingsRequests.push(request);
+        `,
+        '../stores/plugins.js': `
+          export const usePluginsStore = () => ({
+            loaded: true,
+            list: [{ id: 'synthetic-inbox', nav: { path: '/inbox' } }],
+          });
+        `,
         // Транспорт раздела импортирует клиента соседним путём: заглушка
         // сопоставляется по точной строке, и обе формы нужны одновременно.
         './apiClient.ts': API_STUB,
@@ -102,21 +111,26 @@ export async function mountChannelView(t, view, {
   globalThis.__channelConfirm = confirm;
   globalThis.__channelPrompt = prompt;
   globalThis.__channelSse = [];
+  globalThis.__channelSettingsRequests = [];
   const [{ mount, flushPromises }, component] = await Promise.all([
     import(TEST_UTILS),
     compileView(view),
   ]);
   const wrapper = mount(component, { attachTo: browser.document.querySelector('#mount') });
+
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__channelApi;
     delete globalThis.__channelConfirm;
     delete globalThis.__channelPrompt;
     delete globalThis.__channelSse;
+    delete globalThis.__channelSettingsRequests;
   });
   await settle(flushPromises);
+
   return {
     browser,
+    settingsRequests: globalThis.__channelSettingsRequests,
     wrapper,
     flushPromises,
     settle: (cycles) => settle(flushPromises, cycles),

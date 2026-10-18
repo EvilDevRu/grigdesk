@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { compileVue, webFile } from './helpers/compile-vue.js';
-import { compileSettingsView } from './helpers/settings-view.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
@@ -100,6 +99,8 @@ function compileShell() {
   return compileVue(webFile('src/shared/layout/AppShell.vue'), {
     stubs: {
       ...stubs,
+      '../../stores/settings.ts': 'export const useSettingsStore = () => ({ isOpen: false });',
+      '../settingsNavigation.ts': 'export const openSettings = () => {};',
       '../apiClient.ts': 'export const api = { get: async () => ({}) };',
       '../../composables/useSse.ts': `
         export const useSse = (handler) => {
@@ -119,7 +120,8 @@ function compileShell() {
         export const startInboxSummary = () => {};
         export const stopInboxSummary = () => {};
       `,
-      '../../composables/useDesktopSettingsSync.ts': 'export const useDesktopSettingsSync = () => {};',
+      '../../stores/settings.ts': 'export const useSettingsStore = () => ({ isOpen: false });',
+      '../settingsNavigation.ts': 'export const openSettings = () => {};',
       '../tools/launcher.ts': 'export const useToolLauncher = () => ({ openTerminal() {} });',
       '../tools/registry.ts': 'export const toolById = () => null;',
     },
@@ -137,96 +139,14 @@ test('типы исполнителей в настоящих настройка
   globalThis.__GRIGDESK_SHA__ = 'test';
 
   const { reactive, ref, nextTick } = await import('../../web/node_modules/vue/index.mjs');
-  const { createPinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
+  const { createPinia, setActivePinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
 
+  setActivePinia(createPinia());
+
   globalThis.__typesApi = { get: async () => ({}), post: async () => ({}) };
-
-  const SettingsView = await compileSettingsView({ prefix: '__types' });
-
-  await t.test('две группы: общая гармошка, ARIA, поля, API и credits', async (s) => {
-    browser.document.body.innerHTML = '<div id="mount"></div>';
-    browser.localStorage.setItem('grigdesk-settings-tab', 'providers');
-
-    const providers = reactive({
-      providers: [card('universal'), card('tripo', '3d', false)],
-      loaded: true,
-      usage: { tripo: credits() },
-      mcp: {},
-      updating: '',
-      updateResults: {},
-      visibleModels: () => [],
-      load: async () => {},
-      loadUsage: async () => {},
-      saveSetting: async () => ({ ok: true }),
-      saveCredentials: async () => ({ ok: true }),
-    });
-
-    globalThis.__typesStores = {
-      useProvidersStore: () => providers,
-      useAuthStore: () => ({ login: 'fixture' }),
-      usePluginsStore: () => ({
-        loaded: true,
-        list: [],
-        enabled: () => false,
-        load: async () => {}
-      }),
-      useChatStore: () => ({ compactWindow: 0 }),
-      useDeviceStore: () => ({ canInstall: false }),
-      useGrigDeskUpdateStore: () => ({ state: null, load: async () => {} }),
-    };
-
-    const wrapper = mount(SettingsView, {
-      attachTo: browser.document.querySelector('#mount'),
-      global: { plugins: [createPinia()] },
-    });
-
-    s.after(() => wrapper.unmount());
-    await flushPromises();
-
-    assert.deepEqual(wrapper.findAll('[data-executor-type] h3').map((item) => item.text()),
-      ['Универсальные', '3D-генерация']);
-
-    const universal = wrapper.get('[data-provider-id="universal"]');
-    const tripo = wrapper.get('[data-provider-id="tripo"]');
-    const toggleA = universal.get('[data-testid="provider-toggle"]');
-    const toggleB = tripo.get('[data-testid="provider-toggle"]');
-
-    assert.equal(toggleA.attributes('aria-expanded'), 'false');
-    // happy-dom не синтезирует native click из keyboard, поэтому посылаем оба события браузера.
-    await toggleA.trigger('keydown', { key: 'Enter' });
-    await toggleA.trigger('click');
-    assert.equal(toggleA.attributes('aria-expanded'), 'true');
-    assert.equal(universal.get('[role="region"]').attributes('aria-labelledby'), toggleA.attributes('id'));
-    await toggleB.trigger('keydown', { key: ' ' });
-    await toggleB.trigger('click');
-    assert.equal(toggleB.attributes('aria-expanded'), 'true');
-    assert.equal(toggleA.attributes('aria-expanded'), 'false');
-    assert.match(tripo.text(), /API/);
-    assert.doesNotMatch(tripo.text(), /подключение к чатам|Обновить CLI|Установка:/);
-    assert.match(tripo.text(), /API-ключ Tripo/);
-    assert.match(tripo.text(), /215 кредитов/);
-    assert.equal(tripo.get('a[href="https://example.test/billing"]').text(), 'Пополнить');
-
-    const edit = tripo.findAll('button').find((item) => item.text() === 'Задать ключи…');
-
-    await edit.trigger('click');
-    await flushPromises();
-
-    const input = browser.document.querySelector('input[name="TRIPO_API_KEY"]');
-
-    assert.ok(input);
-    input.value = 'draft-value';
-    input.dispatchEvent(new browser.Event('input', { bubbles: true }));
-    await toggleA.trigger('click');
-    await toggleB.trigger('click');
-    assert.equal(browser.document.querySelector('input[name="TRIPO_API_KEY"]').value, 'draft-value');
-    providers.providers = [card('universal')];
-    await nextTick();
-    assert.equal(wrapper.find('[data-executor-type]').exists(), false);
-  });
 
   await t.test('реактивный топбар показывает Tripo с ключом, credits/ошибку и удаление; SSE invalidation',
     async (s) => {

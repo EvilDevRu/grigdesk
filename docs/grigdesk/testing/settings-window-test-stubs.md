@@ -10,7 +10,7 @@ Memory-router под `NODE_ENV=production` при установке в app чи
 `__VUE_PROD_DEVTOOLS__`: fixture объявляет `globalThis.__VUE_PROD_DEVTOOLS__ = false` до
 установки роутера. Vue и vue-router берутся из тех же singleton, что compiler helper.
 
-Новый composable AppShell тоже подменяется в старом тесте топбара. Его непрямой импорт
-launcher иначе тянет registry, Monaco CSS и шрифты в esbuild без output path. Подмена
-`../../composables/useDesktopSettingsSync.ts` экспортирует useDesktopSettingsSync;
-поведение самого composable проверяется отдельной обёрткой с настоящим lifecycle Vue.
+AppShell получает `useSettingsStore` и `openSettings` через явные подмены, если тест
+проверяет только топбар. Иначе непрямой импорт launcher может втянуть registry, Monaco
+CSS и шрифты. Полная фикстура новых страниц использует настоящие Pinia и сессию,
+подменяет HTTP и router, не копирует бизнес-логику формы.

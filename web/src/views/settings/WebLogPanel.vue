@@ -20,9 +20,18 @@
     />
     <p class="muted small">Комментарий сохраняется в локальном журнале.</p>
     <div class="web-log-actions">
-      <UiButton data-role="settings-action" :disabled="!status.level || status.level === 'off'"
-        @click="createMark">Отметить сбой</UiButton>
-      <UiButton data-role="settings-action" :disabled="downloading" @click="downloadToday">
+      <UiButton
+        data-role="settings-action"
+        :disabled="!status.level || status.level === 'off'"
+        @click="createMark"
+      >
+        Отметить сбой
+      </UiButton>
+      <UiButton
+        data-role="settings-action"
+        :disabled="downloading"
+        @click="downloadToday"
+      >
         {{ downloading ? 'Скачиваю…' : 'Скачать журнал за сегодня (UTC)' }}
       </UiButton>
     </div>
@@ -31,7 +40,7 @@
     <p class="muted small">
       В кольце {{ status.ringCount }} записей, ожидают отправки {{ status.pendingCount }}.
       <span v-if="status.ringFrom">Охват: {{ status.ringFrom }} — {{ status.ringTo }}.</span>
-      <span v-if="status.lossCount"> Не доставлено записей: {{ status.lossCount }}.</span>
+      <span v-if="status.lossCount">Не доставлено записей: {{ status.lossCount }}.</span>
     </p>
   </div>
 </template>

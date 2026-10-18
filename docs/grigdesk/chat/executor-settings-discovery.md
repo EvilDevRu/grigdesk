@@ -26,8 +26,9 @@ DeepSeek Harness 0.1.5-rc.2. Номера и количества ниже оп�
 их отсутствие именно в `settings[]` не означает отсутствия во всём интерфейсе.
 
 Цепочка сейчас: `executor.settings` → `resolveProviderSettings` →
-`GET /api/providers` → `SettingsView.vue`. Сохранение проходит через
-`POST /api/providers/:id/settings` и кладёт значение в `prefs.providerSettings`.
+`GET /api/providers` → `views/settings/pages/ProviderPage.vue`. Адаптеры
+`features/settings/resources/providers.ts` сохраняют общий черновик по «Применить» через
+`POST /api/providers/:id/settings` и кладут значение в `prefs.providerSettings`.
 Этот маршрут не вызывает универсальный нативный setter исполнителя.
 
 Наблюдаемые ограничения:
@@ -35,10 +36,9 @@ DeepSeek Harness 0.1.5-rc.2. Номера и количества ниже оп�
 - `providerSettings.ts` проверяет объявленный id и `kind: info`, приводит boolean/number
   и обрабатывает подтверждение. Проверок схемы, enum, границ числа и серверного запрета
   для `disabled` нет. `!!value` превращает строку `"false"` в `true`.
-- Форма умеет toggle, text, number, range и подпись для остальных видов. Выбора enum,
-  массивов, вложенных объектов и сброса переопределения нет. У числового поля остался
-  частный fallback `Number(s.min) || 512`: для общей формы он непригоден, в том числе
-  при законном `min: 0`.
+- Обычная форма умеет toggle, text, number, range и подпись для остальных видов.
+  Enum, массивы, вложенные значения и явный unset доступны отдельно через нативный каталог.
+  Числовая форма обычных параметров сохраняет законный `min: 0`.
 - Для Claude `claudeProviderSettingsArgs` собирает `fastMode` и служебные hooks.
   Для Codex `codexAppServerConfig` задаёт несколько фиксированных параметров, включая
   `model_reasoning_summary: detailed`. Простое добавление поля в `settings[]` не
@@ -49,7 +49,8 @@ DeepSeek Harness 0.1.5-rc.2. Номера и количества ниже оп�
 
 Опорные файлы: `server/src/lib/providerSettings.ts`,
 `server/src/modules/providers/index.ts`, `server/src/lib/executors/{claude,codex,kimi,deepseek}.ts`,
-`web/src/views/SettingsView.vue`, `web/src/stores/providers.js`.
+`web/src/views/settings/pages/ProviderPage.vue`,
+`web/src/features/settings/resources/providers.ts`, `web/src/stores/providers.js`.
 
 ## Codex: каталог флагов, схема протокола и конфигурация
 

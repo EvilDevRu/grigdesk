@@ -26,7 +26,7 @@
             <span class="studio-resource-note">{{ provider.balance.reserved }} в резерве</span>
           </template>
           <template v-else-if="provider.available">баланс неизвестен</template>
-          <UiActionLink v-else href="#/settings" @click="providerSettings">нужен ключ</UiActionLink>
+          <UiActionLink v-else href="#/settings" @click.prevent="providerSettings(provider.id)">нужен ключ</UiActionLink>
         </div>
         <div class="studio-resource" :class="{ 'studio-disk-warning': store.state.library.lowDisk }">
           <span class="studio-resource-label">Библиотека</span>
@@ -135,6 +135,7 @@
 import { computed, onUnmounted, ref, watch, useId } from 'vue';
 import { UiButton, UiTabs, UiTab, UiActionLink, UiInlineMessage, UiPressable } from '../../ui.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
+import { openSettings } from '../../shared/settingsNavigation.ts';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useDockStore } from '../../stores/dock.js';
 import { formatPrice } from '../../../../shared/studio3d/studio3dOperations.ts';
@@ -340,10 +341,10 @@ watch([tab, modelId, () => props.active], () => {
 
 /**
  * Ссылка ведёт сразу к исполнителям, не раскрывая ключ в этой панели.
- * Настройка выбранной вкладки локальна текущему браузеру.
+ * Entity берётся из строки реестра исполнителей, без собственного vendor id в UI.
  */
-function providerSettings(): void {
-  localStorage.setItem('grigdesk-settings-tab', 'providers');
+function providerSettings(id: string): void {
+  openSettings({ pageId: 'agents.providers', entityId: id });
 }
 
 /**

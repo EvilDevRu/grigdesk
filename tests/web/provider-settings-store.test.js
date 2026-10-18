@@ -64,7 +64,7 @@ test('сохранение false использует ответ сервера 
   assert.equal(store.panel('future-provider').catalog.fields[0].base.value, true);
 });
 
-test('409 останавливает очередь provider, перечитывает каталог и сохраняет оба drafts', async () => {
+test('409 перечитывает каталог и возвращает конфликты всей очереди', async () => {
   const { createPinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
   const { defineProviderSettingsStore } = await compileModule(webFile('src/stores/providerSettings.ts'));
   let writes = 0;
@@ -90,12 +90,13 @@ test('409 останавливает очередь provider, перечитыв
   const second = store.save('future-provider', '["future"]', true);
 
   conflict.resolve();
-  await Promise.all([first, second]);
+
+  const outcomes = await Promise.all([first, second]);
+
+  assert.deepEqual(outcomes.map((item) => item.outcome), ['conflict', 'conflict']);
 
   assert.equal(writes, 1);
   assert.equal(reads, 2);
-  assert.equal(store.panel('future-provider').drafts['["enabled"]'], false);
-  assert.equal(store.panel('future-provider').drafts['["future"]'], true);
   assert.equal(store.panel('future-provider').saving, false);
 });
 
@@ -124,9 +125,8 @@ test('успешный unset убирает прежний черновик и �
   })(createPinia());
 
   await store.load('future-provider');
-  store.draft('future-provider', fieldId, false);
   await store.reset('future-provider', fieldId);
 
-  assert.equal(Object.hasOwn(store.panel('future-provider').drafts, fieldId), false);
+  assert.equal(Object.hasOwn(store.panel('future-provider'), 'drafts'), false);
   assert.equal(store.panel('future-provider').catalog.fields[0].base.value, true);
 });

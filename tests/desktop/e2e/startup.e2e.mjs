@@ -556,18 +556,12 @@ test('SE-09: закрытие настроек не выключает прил�
   await page.locator('#stub').waitFor();
 
   const pid = await startedPid(run);
-  const opened = run.app.waitForEvent('window');
 
   await page.evaluate((origin) => window.open(origin + '/?window=settings#/settings'), run.origin);
-
-  const child = await opened;
-
-  await child.locator('#stub').waitFor();
-  await run.app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows().find((window) => window.isModal())?.close();
-  });
-  await waitFor(async () => (await windowsState(run.app)).length === 1);
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await page.locator('#stub-settings[open]').waitFor();
+  assert.equal((await windowsState(run.app)).length, 1);
+  await page.locator('#stub-settings-close').click();
+  await page.locator('#stub-settings[open]').waitFor({ state: 'hidden' });
   assert.equal(run.child.exitCode, null);
   assert.equal(await alive(pid), true);
   await run.app.evaluate(({ BrowserWindow }) => {

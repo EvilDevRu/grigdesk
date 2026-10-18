@@ -580,7 +580,7 @@ test('Inbox объясняет окно тишины, отсутствие мо�
     },
     async post() { assert.fail('тест состояния ничего не меняет'); },
   };
-  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+  const { wrapper, settingsRequests } = await mountChannelView(t, 'inbox', { api });
 
   const notice = wrapper.get('[data-state="automation-notice"]');
   assert.match(notice.text(), /не выбрана модель/);
@@ -588,7 +588,7 @@ test('Inbox объясняет окно тишины, отсутствие мо�
   assert.ok(wrapper.findAll('.auto-state').some((entry) => /Автосоздание выключено/.test(entry.text())));
 
   await notice.get('a').trigger('click');
-  assert.equal(localStorage.getItem('grigdesk-settings-tab'), 'plugins');
+  assert.deepEqual(settingsRequests, [{ pageId: 'plugins.installed', entityId: 'synthetic-inbox' }]);
 });
 
 test('Inbox явно показывает несовместимую с безопасным разбором модель', async (t) => {

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { after } from 'node:test';
+import { createUiBrowser } from './helpers/ui-components.js';
 import { readFile } from 'node:fs/promises';
 
-import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
+
 import {
   comboFromEvent,
   comboIssue,
@@ -10,8 +11,15 @@ import {
   isLayoutSwitch,
   normalizeCombo,
 } from '../../web/src/shared/hotkeys/combo.ts';
-import { DEFAULT_HOTKEYS, HOTKEYS_KEY, useHotkeysStore } from '../../web/src/stores/hotkeys.js';
-import { TOOL_CATALOG } from '../../web/src/shared/tools/catalog.ts';
+
+const browser = await createUiBrowser();
+
+const { createPinia, setActivePinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
+const { DEFAULT_HOTKEYS, HOTKEYS_KEY, useHotkeysStore } =
+  await import('../../web/src/stores/hotkeys.js');
+const { TOOL_CATALOG } = await import('../../web/src/shared/tools/catalog.ts');
+
+after(() => browser.close());
 
 const source = (relative) => readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
 
@@ -74,7 +82,7 @@ test('пару Alt+Shift забирает переключатель раскл�
   assert.equal(isLayoutSwitch({ key: 'ModeChange' }), true);
   assert.equal(isLayoutSwitch({ key: 'Shift' }), false, 'обычный модификатор не перехват');
 
-  const card = await source('web/src/views/settings/ToolHotkeys.vue');
+  const card = await source('web/src/views/settings/pages/InterfacePage.vue');
   assert.match(card, /isLayoutSwitch\(event\)/, 'запись обязана отличать перехваченную клавишу');
 });
 
@@ -85,28 +93,28 @@ test('назначение клавиши живёт на устройстве, 
   assert.equal(hotkeys.comboOf('code'), DEFAULT_HOTKEYS.code);
   assert.equal(hotkeys.toolByCombo[DEFAULT_HOTKEYS.terminal], 'terminal');
 
-  assert.deepEqual(hotkeys.assign('code', 'Ctrl+KeyW').ok, false, 'системную комбинацию не берём');
+  assert.equal(hotkeys.replaceOverrides({ code: 'Ctrl+KeyW' }).ok, false);
   assert.equal(storage.value(HOTKEYS_KEY), undefined, 'отказ ничего не сохраняет');
 
-  assert.equal(hotkeys.assign('code', 'Ctrl+Alt+KeyK').ok, true);
+  assert.equal(hotkeys.replaceOverrides({ code: 'Ctrl+Alt+KeyK' }).ok, true);
   assert.equal(hotkeys.comboOf('code'), 'Ctrl+Alt+KeyK');
   assert.deepEqual(JSON.parse(storage.value(HOTKEYS_KEY)), { code: 'Ctrl+Alt+KeyK' });
 
-  const busy = hotkeys.assign('shelf', 'Ctrl+Alt+KeyK');
+  const busy = hotkeys.replaceOverrides({ ...hotkeys.overrides, shelf: 'Ctrl+Alt+KeyK' });
   assert.equal(busy.ok, false);
   assert.match(busy.error, /Код/, 'человек должен узнать, кто занял клавишу');
   assert.equal(hotkeys.comboOf('shelf'), DEFAULT_HOTKEYS.shelf);
 
-  hotkeys.disable('terminal');
+  hotkeys.replaceOverrides({ ...hotkeys.overrides, terminal: '' });
   assert.equal(hotkeys.comboOf('terminal'), '');
   assert.equal(hotkeys.toolByCombo[DEFAULT_HOTKEYS.terminal], undefined);
   assert.equal(hotkeys.isDefault('terminal'), false);
 
-  hotkeys.restore('terminal');
+  hotkeys.replaceOverrides({ code: hotkeys.overrides.code });
   assert.equal(hotkeys.comboOf('terminal'), DEFAULT_HOTKEYS.terminal);
   assert.equal(hotkeys.isDefault('terminal'), true);
 
-  hotkeys.resetAll();
+  hotkeys.replaceOverrides({});
   assert.equal(hotkeys.comboOf('code'), DEFAULT_HOTKEYS.code);
   assert.deepEqual(JSON.parse(storage.value(HOTKEYS_KEY)), {});
 });
@@ -140,28 +148,16 @@ test('ToolHost слушает клавиши в capture, молчит во вр�
   assert.match(host, /v-tooltip\.left="railTitle\(item\)"/);
 });
 
-test('настройка клавиш открыта в разделе устройства и не заводит второй источник состава', async () => {
-  const [settings, card, store] = await Promise.all([
-    source('web/src/views/SettingsView.vue'),
-    source('web/src/views/settings/ToolHotkeys.vue'),
-    source('web/src/stores/hotkeys.js'),
-  ]);
+test('страница сочетаний показывает паспорт инструментов и запись без немедленной записи', async (t) => {
+  const { settingsHarness } = await import('./helpers/settings-harness.js');
+  const h = await settingsHarness(t, 'interface.shortcuts', 'InterfacePage');
 
-  assert.match(settings, /import ToolHotkeys from '\.\/settings\/ToolHotkeys\.vue';/);
-  assert.match(settings, /<ToolHotkeys \/>/);
-  assert.match(card, /TOOL_CATALOG\.map\(/, 'список строк берётся из паспорта инструментов');
-  assert.match(card, /window\.addEventListener\('keydown', onRecordKey, true\)/);
-  assert.match(card, /event\.key === 'Escape'/);
-  assert.doesNotMatch(card, /<button|<input/, 'контролы приходят только из общей границы UI');
-
-  // Паспорт инструментов отделён от панелей ровно ради этого: настройка и store читают
-  // список, не втягивая Monaco и терминал в свой граф загрузки.
-  for (const text of [card, store]) {
-    assert.doesNotMatch(text, /tools\/registry\.ts/, 'списка панелей здесь быть не должно');
-    assert.match(text, /tools\/catalog\.ts/);
-  }
+  assert.deepEqual(h.wrapper.findAll('[data-hotkey-tool]').map((row) => row.attributes('data-hotkey-tool')),
+    TOOL_CATALOG.map((tool) => tool.id));
+  await h.wrapper.get('[data-record]').trigger('click');
+  assert.match(h.wrapper.text(), /Нажмите сочетание/);
+  assert.equal(h.settings.snapshot.dirtyCount, 0);
 });
-
 
 test('SW-D04 Ctrl+Alt+S занято настройками', () => {
   installStorage({ [HOTKEYS_KEY]: JSON.stringify({ terminal: 'Ctrl+Alt+KeyS' }) });
@@ -169,6 +165,6 @@ test('SW-D04 Ctrl+Alt+S занято настройками', () => {
   const hotkeys = useHotkeysStore();
 
   assert.match(comboIssue('Ctrl+Alt+KeyS'), /настройки/);
-  assert.equal(hotkeys.assign('terminal', 'Ctrl+Alt+KeyS').ok, false);
+  assert.equal(hotkeys.replaceOverrides({ terminal: 'Ctrl+Alt+KeyS' }).ok, false);
   assert.equal(hotkeys.comboOf('terminal'), DEFAULT_HOTKEYS.terminal);
 });

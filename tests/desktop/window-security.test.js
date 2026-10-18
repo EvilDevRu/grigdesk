@@ -12,7 +12,6 @@ import {
   sameOrigin,
   serviceWorkerBlocked,
   windowOptions,
-  settingsWindowOptions,
 } from '../../desktop/src/windowSecurity.ts';
 
 const origin = 'http://127.0.0.1:8140';
@@ -588,37 +587,4 @@ test('SW-N02 похожие адреса — прежняя политика', (
   assert.equal(contents.open({ url: 'https://example.org/?window=settings#/settings' }).action, 'deny');
   assert.equal(opened.length, 1);
   assert.equal(calls, 0);
-});
-
-test('SW-N03 опции окна настроек', () => {
-  const parent = {};
-  const session = {};
-  const geometry = {
-    x: 180,
-    y: 70,
-    width: 1120,
-    height: 820,
-    minWidth: 800,
-    minHeight: 600,
-  };
-  const options = settingsWindowOptions({
-    icon: '/icon.png',
-    packaged: true,
-    parent,
-    geometry,
-    session,
-  });
-
-  assert.equal(options.parent === parent, true);
-  assert.equal(options.modal, true);
-  assert.equal(options.show, false);
-  assert.equal(options.minimizable, false);
-  assert.equal(options.fullscreenable, false);
-  assert.equal(options.title, 'Настройки — GrigDesk');
-
-  for (const [key, value] of Object.entries(geometry)) {
-    assert.equal(options[key], value);
-  }
-
-  assert.deepEqual(options.webPreferences, { ...windowOptions('', true, size).webPreferences, session });
 });
