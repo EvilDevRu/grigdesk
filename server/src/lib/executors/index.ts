@@ -36,6 +36,9 @@
 //                              показывает значение текстом. `scope: 'live'` — операция
 //                              над рантаймом (выгрузить модель, использовать сброс
 //                              лимита): такую ручку видно и во всплывашке
+//   onProviderUsage?         — callback opts разового запуска и hooks живого процесса:
+//                              (patch: ProviderUsagePatch) => boolean. Живёт вместе с
+//                              процессом, работает между ходами; не привязан к runId.
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
 //   studio3d?                — исполнитель раздела «3D» (тип 3d): действия, цены,
 //                              заказы; см. lib/studio3d/provider.ts
@@ -178,6 +181,7 @@ import type {
   InTurnReceiptEvent,
   InTurnUnavailableReason,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
+import type { ProviderUsagePatch } from '../providerUsage.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import type {
@@ -220,6 +224,7 @@ export interface ExecutorRunInput {
   nativeSettings?: PreparedNativeSettings;
   nativeSettingsFingerprint?: string;
   env?: NodeJS.ProcessEnv;
+  onProviderUsage?: (patch: ProviderUsagePatch) => boolean;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onStep?: (step: ChatStep) => void;
   onSessionCreated?: (sessionId: string) => void | Promise<void>;

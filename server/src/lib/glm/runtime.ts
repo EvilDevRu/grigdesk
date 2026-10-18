@@ -407,7 +407,6 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
   return {
     ...rest,
     ...(empty ? { emptyRun: true, retryState: 'post_prompt' } : {}),
-    contextMetric: 'unavailable',
     contextCache: contextCacheStatus('unavailable'),
   };
 }

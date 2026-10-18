@@ -10,6 +10,7 @@
 
 import 'fastify';
 
+import type { ProviderUsagePatch } from './providerUsage.ts';
 import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
 import type { StudioRuntime } from '../modules/studio3d/runtime.ts';
@@ -49,6 +50,8 @@ declare module 'fastify' {
     // Перечитать лимиты исполнителей, если снимок устарел, и разослать их событием
     // `providers-usage`. Для фоновых потребителей, которым снимок нужен и без окон.
     refreshProvidersUsage?(): Promise<void>;
+    // Обработчик живёт вместе с процессом и принимает только поколение своего аккаунта.
+    providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
     factoryArbitrate?(...args: unknown[]): Promise<unknown>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { useProvidersStore } from '../../web/src/stores/providers.js';
 import { api } from '../../web/src/shared/apiClient.ts';
-import { providerUsageSummary, remainingUsagePercent }
+import { providerUsageSummary, remainingUsagePercent, usedUsagePercent }
   from '../../web/src/features/providers/providerUsageSummary.ts';
 
 const fresh = { status: 'success' };
@@ -146,4 +146,40 @@ test('ошибка первичной загрузки завершается, r
   store.applyUsage({ any: quota(30) });
   assert.equal(store.usageTransport.deliveryStale, false);
   assert.equal(store.usageTransport.error, '');
+});
+
+
+test('расход и остаток не выдают округлённые крайние значения за точные', () => {
+  for (const [used, spent, remaining] of [
+    [0, '0%', '100%'],
+    [0.4, '<1%', '>99%'],
+    [6, '6%', '94%'],
+    [28, '28%', '72%'],
+    [33.33, '33%', '67%'],
+    [99.6, '>99%', '<1%'],
+    [100, '100%', '0%'],
+  ]) {
+    assert.equal(usedUsagePercent(used), spent);
+    assert.equal(remainingUsagePercent(used), remaining);
+  }
+
+  for (const value of [null, '', true, '42', NaN, Infinity, -1, 101]) {
+    assert.equal(usedUsagePercent(value), 'нет данных');
+  }
+});
+
+
+test('сброс истёк: прежний остаток сохраняется с expired и stale вместо выдуманных 100%', () => {
+  const now = Date.UTC(2030, 0, 1);
+  const entry = {
+    ...quota(25),
+    bars: [{ ...quota(25).bars[0], resetsAt: new Date(now + 1000).toISOString() }],
+  };
+  const before = providerUsageSummary('any', entry, fresh, true, now);
+  const expired = providerUsageSummary('any', entry, fresh, true, now + 1000);
+
+  assert.equal(before.stale, false);
+  assert.equal(expired.windows[0].expired, true);
+  assert.equal(expired.stale, true);
+  assert.equal(expired.windows[0].value, '75%');
 });

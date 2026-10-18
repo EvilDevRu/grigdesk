@@ -187,3 +187,37 @@ test('Kimi usage broker не возвращает bearer token и штатно �
   assert.equal(requests[1].url, 'http://127.0.0.1:43123/api/v1/shutdown');
   assert.equal(child.exitCode, 0);
 });
+
+
+test('Kimi сохраняет сотые процента и убирает шум деления', () => {
+  for (const [used, limit, expected] of [
+    [996, 1000, 99.6],
+    [1, 3, 33.33],
+    [29, 100, 29],
+    [0, 100, 0],
+    [6, 100, 6],
+    [28, 100, 28],
+    [100, 100, 100],
+    [130, 100, 100],
+  ]) {
+    const bars = parseKimiUsageBars({ kind: 'ok', summary: { used, limit } });
+
+    assert.equal(bars.length, 1);
+    assert.ok(Math.abs(bars[0].pct - expected) < 1e-9, `${used}/${limit}: ${bars[0].pct}`);
+  }
+});
+
+
+test('Kimi не превращает отсутствующий расход и неверный лимит в полосу', () => {
+  for (const used of [undefined, null, '', true, -5, '996', NaN, Infinity]) {
+    const bars = parseKimiUsageBars({ kind: 'ok', summary: { used, limit: 1000 } });
+
+    assert.equal(bars.some((bar) => bar.key === 'kimi:0:0:limit'), false, String(used));
+  }
+
+  for (const limit of [undefined, null, '', true, 0, -1, '100', NaN, Infinity]) {
+    const bars = parseKimiUsageBars({ kind: 'ok', summary: { used: 1, limit } });
+
+    assert.equal(bars.some((bar) => bar.key === 'kimi:0:0:limit'), false, String(limit));
+  }
+});

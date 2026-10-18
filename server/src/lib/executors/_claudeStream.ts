@@ -14,6 +14,9 @@
 // копия правил про usage, компакт и пустой ответ разошлась бы с первой.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+
+import { usagePercentOrNull } from '../providerUsage.ts';
+import type { ProviderUsagePatch, UsageBar } from '../providerUsage.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { verifyNativeSettings } from '../executorSettings/capability.ts';
@@ -32,9 +35,83 @@ import type {
 import { toClaudeSteps } from './_claudeSteps.ts';
 import { claudeTurnFailure } from './_claudeTurnFailures.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
+import { createClaudeTokenMeter } from './_claudeTokenMeter.ts';
 
 // Служебная модель внутренних вызовов CLI: её usage к контексту разговора не относится.
 export const SYNTHETIC_MODEL = '<synthetic>';
+
+const CLAUDE_RATE_WINDOWS = [
+  {
+    native: 'five_hour',
+    key: 'session',
+    label: 'Сессия (5ч)',
+    minutes: 300
+  },
+  {
+    native: 'seven_day',
+    key: 'weekly_all',
+    label: 'Неделя (7д)',
+    minutes: 10080
+  },
+] as const;
+
+/**
+ * Событие аккаунта перехватывается до коллектора хода, включая простой процесса.
+ * Доли CLI переводятся в проценты один раз; модельные недели обновляет только опрос.
+ */
+export function consumeClaudeRateLimitEvent(
+  value: unknown,
+  onProviderUsage?: (patch: ProviderUsagePatch) => unknown,
+): boolean {
+  const event = value as { type?: unknown; rate_limit_info?: unknown } | null;
+
+  if (event?.type !== 'rate_limit_event') {
+    return false;
+  }
+
+  const info = event.rate_limit_info as Record<string, unknown> | null;
+
+  if (!info || typeof info !== 'object') {
+    return true;
+  }
+
+  const windows = info.unifiedWindows as Record<string, unknown> | null;
+  const bars: UsageBar[] = [];
+
+  for (const window of CLAUDE_RATE_WINDOWS) {
+    const raw = windows?.[window.native] ?? (info.rateLimitType === window.native ? info : null);
+    const source = raw as { utilization?: unknown; resetsAt?: unknown } | null;
+    const fraction = source?.utilization;
+    const pct = typeof fraction === 'number' ? usagePercentOrNull(fraction * 100) : null;
+
+    if (pct === null) {
+      continue;
+    }
+
+    const seconds = source?.resetsAt;
+    const reset = typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+      ? new Date(seconds * 1000) : null;
+
+    bars.push({
+      key: window.key,
+      group: 'subscription',
+      label: window.label,
+      pct,
+      resetsAt: reset && Number.isFinite(reset.getTime()) ? reset.toISOString() : null,
+      windowMinutes: window.minutes,
+    });
+  }
+
+  if (bars.length) {
+    try {
+      onProviderUsage?.({ bars });
+    } catch {
+      // Сбой доставки аккаунтных квот не меняет исход модельного хода.
+    }
+  }
+
+  return true;
+}
 
 /**
  * Текст assistant-сообщения потока: блоки content склеиваются, всё нетекстовое
@@ -150,52 +227,16 @@ interface ClaudeEvent {
   error?: unknown;
 }
 
-/**
- * Длина вывода модели в символах: текст и аргументы вызовов инструментов. Рассуждения
- * не считаются — их оценку CLI присылает сам (system/thinking_tokens), а несериализуемые
- * аргументы честно считаются нулём.
- */
-function claudeOutputChars(message: { content?: unknown } | undefined): number {
-  const blocks = Array.isArray(message?.content) ? message.content : [];
-  let chars = 0;
-
-  for (const block of blocks) {
-    if (!block || typeof block !== 'object') {
-      continue;
-    }
-
-    const item = block as { type?: unknown; text?: unknown; input?: unknown };
-
-    if (item.type === 'text' && typeof item.text === 'string') {
-      chars += item.text.length;
-    } else if (item.type === 'tool_use' && item.input !== undefined) {
-      try {
-        chars += JSON.stringify(item.input).length;
-      } catch { /* аргументы без представления — ноль */ }
-    }
-  }
-
-  return chars;
-}
-
-// Грубая оценка вывода по символам, пока ход идёт: тот же способ оценки, что у DeepSeek.
-const CHARS_PER_TOKEN = 3;
 // Дельты рассуждений идут часто; в окно уходит не каждая — как у остальных исполнителей.
 const PROGRESS_THROTTLE_MS = 400;
 
 // Состояние одного хода: что уже сказал CLI про токены, модель и сессию.
 interface TurnState {
   resultEv: ClaudeEvent | null;
-  // Расход ВЫВОДА хода. Пока ход идёт — оценка по потоку (spentIsEstimate = true):
-  // `usage.output_tokens` в assistant-событиях — снимок НАЧАЛА ответа (единицы токенов,
-  // проверено на CLI: 4 и 2 при 188 по итогу), расходом он не является. Точная цифра за ход
-  // приезжает только с `result.usage.output_tokens` — тогда оценка заменяется ею.
+  // Последние измерения обращений заменяют оценки, result исправляет весь ход.
+  // Reasoning уже входит в точный output и повторно не прибавляется.
   spentTokens: number;
   spentIsEstimate: boolean;
-  // Слагаемые оценки: рассуждения считает сам CLI (system/thinking_tokens, по запросу
-  // накопительно — берём дельты), текст и аргументы инструментов — по символам.
-  thinkingEstimated: number;
-  contentChars: number;
   lastTurnInput: number | null;
   lastContextCache: ContextCache | null;
   actualModel: string;
@@ -240,13 +281,13 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
 } = {}): ClaudeTurnCollector {
   const stepSink = createStepSink(onStep);
   let lastReportAt = 0;
+  let hadCompactBoundary = false;
 
+  const tokenMeter = createClaudeTokenMeter();
   const state: TurnState = {
     resultEv: null,
     spentTokens: 0,
     spentIsEstimate: true,
-    thinkingEstimated: 0,
-    contentChars: 0,
     lastTurnInput: null,
     lastContextCache: null,
     actualModel: '',
@@ -278,6 +319,27 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     // контекст основного разговора, хотя сами шаги остаются в ленте.
     if (ev.parent_tool_use_id) return;
 
+    // Assistant-replay в CLI 2.1.302 не наблюдался; это защита парсера повторов.
+    // Лента уже восстановлена выше, а повторный кадр метрики не изменяет.
+    if (ev.isReplay === true) {
+      return;
+    }
+
+    tokenMeter.push(ev);
+    refreshTokens();
+
+    if (ev.type === 'stream_event') {
+      const partial = (ev as { event?: {
+        type?: string;
+      } }).event;
+
+      if (partial?.type === 'message_delta' || Date.now() - lastReportAt >= PROGRESS_THROTTLE_MS) {
+        reportProgress();
+      }
+
+      return;
+    }
+
     // session_id CLI проставляет во всех событиях, начиная с init. Забираем сразу:
     // у оборванного хода финального result нет, а продолжать разговор всё равно нужно.
     if (ev.session_id) state.streamSessionId = ev.session_id;
@@ -293,6 +355,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
       // измерения, а не пустой контекст; ближайший запрос вернёт точную цифру.
       state.lastTurnInput = null;
       state.lastContextCache = contextCacheStatus('unavailable');
+      hadCompactBoundary = true;
       reportProgress();
       log?.info?.({ meta: ev.compactMetadata || null }, 'чат: CLI сжал контекст сам');
       return;
@@ -302,12 +365,7 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     // складываем дельты, иначе следующий запрос обнулил бы счётчик хода. В окно уходит не
     // каждая дельта — ближайшее событие всё равно унесёт накопленное.
     if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
-      const delta = Number(ev.estimated_tokens_delta);
-
       if (claudeThinkingDelta(ev)) {
-        state.thinkingEstimated += delta;
-        refreshEstimate();
-
         if (Date.now() - lastReportAt >= PROGRESS_THROTTLE_MS) {
           reportProgress();
         }
@@ -340,8 +398,6 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
       // Событие несёт один блок содержимого. Текст и аргументы инструмента — вывод модели,
       // считаем по символам; рассуждения уже сосчитал CLI, второй раз их не берём.
       // `usage.output_tokens` здесь — снимок начала ответа, к расходу отношения не имеет.
-      state.contentChars += claudeOutputChars(ev.message);
-      refreshEstimate();
 
       if (ev.message.model) state.actualModel = ev.message.model;
       const inputs = [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens];
@@ -371,43 +427,43 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     if (ev.type === 'result') {
       state.resultEv = ev;
 
-      // Точный расход вывода — только здесь, и он за ЭТОТ ход, а не за сессию (проверено
-      // двумя ходами одного процесса: 75 и 68, а не 75 и 143). Оценка заменяется им, и
-      // окно с пультом узнают итог уже без «≈». Пустой usage (ход без обращений к модели)
-      // цифры не выдумывает.
-      const output = Number(ev.usage?.output_tokens);
-      const known = Number.isSafeInteger(output) && output >= 0;
+      // Итог сегмента авторитетно исправляет сумму его обращений, в том числе вниз.
+      // Без числового usage последняя оценка остаётся оценкой, а 0 принимается явно.
+      const output = ev.usage?.output_tokens;
 
-      if (known && (output > 0 || state.spentTokens > 0)) {
-        state.spentTokens = output;
-        state.spentIsEstimate = false;
+      if (typeof output === 'number' && Number.isSafeInteger(output) && output >= 0) {
         reportProgress();
       }
     }
   }
 
-  // Оценка расхода по потоку: рассуждения — от CLI, текст и аргументы — по символам.
-  // После точной цифры из result оценка уже не нужна и её не перезатирает.
-  function refreshEstimate(): void {
-    if (!state.spentIsEstimate) {
-      return;
-    }
+  /**
+   * Публикует сумму независимых обращений с общей достоверностью измерения.
+   * Точная поправка result уже учтена счётчиком и не удерживается прежним максимумом.
+   */
+  function refreshTokens(): void {
+    const total = tokenMeter.total();
 
-    state.spentTokens = state.thinkingEstimated + Math.round(state.contentChars / CHARS_PER_TOKEN);
+    state.spentTokens = total.tokens;
+    state.spentIsEstimate = total.tokensIsEstimate;
   }
 
   // Событие прогресса: расход хода и снимок контекста ПОСЛЕДНЕГО обращения к модели.
-  // После границы сжатия замера нет — и это честно уходит как «unavailable», а не ноль.
+  // До первого замера прежний контекст сохраняется; только сжатие явно его инвалидирует.
   function reportProgress(): void {
     lastReportAt = Date.now();
+
+    const context = state.lastTurnInput !== null || hadCompactBoundary ? {
+      contextTokens: state.lastTurnInput ?? 0,
+      contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
+      contextIsEstimate: false,
+      contextCache: state.lastContextCache,
+    } : {};
 
     try {
       onProgress?.(state.spentTokens, {
         tokensIsEstimate: state.spentIsEstimate,
-        contextTokens: state.lastTurnInput ?? 0,
-        contextMetric: state.lastTurnInput === null ? 'unavailable' : 'active-input-v1',
-        contextIsEstimate: false,
-        contextCache: state.lastContextCache,
+        ...context,
       });
     } catch { /* прогресс не критичен */ }
   }
@@ -531,6 +587,7 @@ export function claudeSessionArgs({
   const args = [
     '-p',
     '--input-format', 'stream-json',
+    '--include-partial-messages',
     '--output-format', 'stream-json',
     '--verbose',
     '--replay-user-messages',
@@ -1010,6 +1067,10 @@ export function openClaudeStreamSession({
    * После result ждать разрешено только подтверждённую очередь без started; stop закрывает всё.
    */
   function handleEvent(ev: ClaudeEvent): void {
+    if (consumeClaudeRateLimitEvent(ev, (patch) => hooks.onProviderUsage?.(patch as never))) {
+      return;
+    }
+
     if (ev?.type === 'control_response') {
       const requestId = String(ev.response?.request_id || ev.request_id || '');
       const waiter = controls.get(requestId);
@@ -1060,7 +1121,7 @@ export function openClaudeStreamSession({
           || (ev.type === 'system' && ev.subtype === 'init'));
 
       if (!opensBackground) {
-        if (preBackground.length < 20) {
+        if (ev.type !== 'stream_event' && preBackground.length < 20) {
           preBackground.push(ev);
         }
 

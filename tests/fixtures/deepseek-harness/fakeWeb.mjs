@@ -187,6 +187,17 @@ function playUpdate(update, describe) {
     streamText(String(update.content?.text || ''));
   }
 
+  if (update.sessionUpdate === 'usage') {
+    send(follow.socket, follow.streamId, {
+      type: 'assistant-stream',
+      frame: {
+        type: 'chunk',
+        attemptId: update.attemptId || `usage-${turn}`,
+        chunk: { type: 'usage', usage: update.usage },
+      },
+    });
+  }
+
   if (update.sessionUpdate === 'tool_call') {
     emit('tool/call', {
       turn,

@@ -84,7 +84,7 @@ Claude-сессии, а не тарифная граница.** После эт�
 Provider-neutral контракт:
 `contextCache: { scope: 'request', status: 'reported'|'unavailable'|'not-applicable',`
 `readTokens?, writeTokens?, uncachedTokens? }`. Claude сообщает все три числа; Codex —
-чтение и некэшированный вход без выдуманной записи; Kimi честно сообщает `unavailable`;
+чтение и некэшированный вход без выдуманной записи; Kimi для prompt cache сообщает `unavailable`, но контекст уже принимает из частичных статусов;
 Отсутствующий `writeTokens` у Codex означает «CLI не сообщил»,
 а не нулевую запись. Формулировка о перезаписи допустима только по фактически пришедшему
 `writeTokens`; по одному `contextTokens` нельзя утверждать, что ход подорожал.

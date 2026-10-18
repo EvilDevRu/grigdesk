@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { ChatTurnLocks } from '../../server/src/lib/chat/turnLocks.ts';
 import { ChatSessionBindingStore } from '../../server/src/lib/chat/sessionBindingStore.ts';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 import {
   KIMI_RETRY_CONTRACT,
@@ -17,6 +18,7 @@ import {
   KIMI_SECURITY_PROFILE,
 } from '../../server/src/lib/kimi/profile.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
+import { createClaudeTurnCollector } from '../../server/src/lib/executors/_claudeStream.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -853,3 +855,304 @@ test('ход Kimi не получает общую папку артефакто
   assert.equal(seen.length, 1);
   assert.equal(seen[0].includes(path.join(root, 'artifacts')), false);
 });
+
+
+test('R1: ошибка Claude после message_start сохраняет замер прошлого хода', async (t) => {
+  const previous = {
+    contextTokens: 4200,
+    contextMetric: 'active-input-v1',
+    contextIsEstimate: false,
+    contextCache: {
+      scope: 'request',
+      status: 'reported',
+      uncachedTokens: 4200,
+    },
+  };
+  const { app } = await apiFixture(t, { executor: {
+    id: 'claude',
+    async run(options) {
+      const collector = createClaudeTurnCollector({ onProgress: options.onProgress });
+
+      collector.push({
+        type: 'stream_event',
+        event: { type: 'message_start', message: { id: 'failed-response' } },
+      });
+
+      throw new Error('fixture-before-context');
+    },
+  } });
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: { chat: {
+      id: 'context-before-measurement',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      sessionId: 'previous-context-session',
+      messages: [],
+      revision: 0,
+      ...previous,
+    } },
+  });
+
+  assert.equal(saved.statusCode, 200);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'context-before-measurement',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'Проверь',
+    },
+  });
+  const state = await app.inject({ method: 'GET', url: '/api/chat/store' });
+  const current = state.json().sessions.find((chat) => chat.id === 'context-before-measurement');
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.json().message, 'fixture-before-context');
+
+  for (const [key, value] of Object.entries(previous)) {
+    assert.deepEqual(current[key], value, key);
+  }
+});
+
+for (const accepted of [false, true]) {
+  test(`R6: отказ записи контекста сохраняет исходную ошибку, accepted=${accepted}`, async (t) => {
+    const { app } = await apiFixture(t, { executor: {
+      id: 'claude',
+      async run(options) {
+        options.onProgress(8, { contextTokens: 3300, contextMetric: 'active-input-v1' });
+        t.mock.method(ChatHistoryStore.prototype, 'patchExecution', async () => {
+          throw new Error('fixture-history-unavailable');
+        });
+
+        throw Object.assign(new Error('fixture-original-turn-error'), { code: 'fixture_turn_failed' });
+      },
+    } });
+    const warnings = t.mock.method(app.log, 'warn');
+
+    await app.inject({
+      method: 'PUT',
+      url: '/api/chat/store/chat',
+      payload: { chat: {
+        id: 'context-write-error',
+        modelRef: { provider: 'claude', model: 'claude-test' },
+        messages: [],
+        revision: 0,
+      } },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: {
+        chatKey: 'context-write-error',
+        modelRef: { provider: 'claude', model: 'claude-test' },
+        message: 'Проверь',
+        ...(accepted ? { turnId: 'turn-history-failure-0001' } : {}),
+      },
+    });
+
+    if (accepted) {
+      assert.equal(response.statusCode, 202);
+
+      let pending;
+
+      for (let attempt = 0; attempt < 100 && !pending; attempt += 1) {
+        const result = await app.inject({ method: 'GET', url: '/api/chat/pending' });
+
+        pending = result.json().pending.find((item) => item.turnId === 'turn-history-failure-0001');
+
+        if (!pending) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+
+      assert.equal(pending?.role, 'error');
+      assert.equal(pending?.reply, 'fixture-original-turn-error');
+    } else {
+      assert.equal(response.statusCode, 500);
+      assert.equal(response.json().message, 'fixture-original-turn-error');
+      assert.equal(response.json().error, 'fixture_turn_failed');
+    }
+
+    assert.ok(warnings.mock.calls.some((call) => call.arguments[0]?.err === 'fixture-history-unavailable'));
+  });
+}
+
+test('R6: ошибка без контекстного замера не пишет пустую правку истории', async (t) => {
+  let writes = 0;
+  const { app } = await apiFixture(t, { executor: {
+    id: 'claude',
+    async run() {
+      t.mock.method(ChatHistoryStore.prototype, 'patchExecution', async () => {
+        writes += 1;
+      });
+
+      throw new Error('fixture-no-context');
+    },
+  } });
+
+  await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: { chat: {
+      id: 'empty-context-error',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      messages: [],
+      revision: 0,
+    } },
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'empty-context-error',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'Проверь',
+    },
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.json().message, 'fixture-no-context');
+  assert.equal(writes, 0);
+});
+
+test('ошибка хода сохраняет последний контекст для повторного открытия чата', async (t) => {
+  const { app } = await apiFixture(t, { executor: {
+    id: 'claude',
+    async run(options) {
+      options.onProgress(8, { contextTokens: 3300, contextMetric: 'deepseek-web-usage' });
+
+      throw new Error('fixture-turn-error');
+    },
+  } });
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: { chat: {
+      id: 'context-error',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      messages: [],
+      revision: 0,
+    } },
+  });
+
+  assert.equal(saved.statusCode, 200);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'context-error',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'Проверь',
+    },
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.json().contextTokens, 3300);
+
+  const state = await app.inject({ method: 'GET', url: '/api/chat/store' });
+  const current = state.json().sessions.find((chat) => chat.id === 'context-error');
+
+  assert.equal(current.contextTokens, 3300);
+  assert.equal(response.json().message, 'fixture-turn-error');
+
+  const accepted = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      turnId: 'turn-context-error-0001',
+      chatKey: 'context-error',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'Повтори проверку',
+    },
+  });
+
+  assert.equal(accepted.statusCode, 202);
+
+  let pending;
+
+  for (let attempt = 0; attempt < 100 && !pending; attempt += 1) {
+    const result = await app.inject({ method: 'GET', url: '/api/chat/pending' });
+
+    pending = result.json().pending.find((item) => item.turnId === 'turn-context-error-0001');
+
+    if (!pending) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  assert.equal(pending?.role, 'error');
+  assert.equal(pending?.contextTokens, 3300);
+});
+
+
+for (const stopped of [false, true]) {
+  test(`снимок контекста переживает повтор прогресса и открытие, стоп=${stopped}`, async (t) => {
+    const sample = {
+      contextTokens: 3300,
+      contextWindow: 262144,
+      contextMetric: 'deepseek-web-usage',
+      contextIsEstimate: false,
+    };
+    const { app, events } = await apiFixture(t, { executor: {
+      id: 'claude',
+      /**
+       * Повтор прогресса передаёт тот же замер, а не добавочный расход.
+       * Успех и остановка проверяют сохранение этого снимка общим путём.
+       */
+      async run(options) {
+        options.onProgress(8, sample);
+        options.onProgress(8, sample);
+
+        if (stopped) {
+          throw Object.assign(new Error('Остановлен'), { stopped: true });
+        }
+
+        return {
+          reply: 'Готово',
+          steps: [],
+          sessionId: 'usage-session',
+          ...sample
+        };
+      },
+    } });
+    const saved = await app.inject({
+      method: 'PUT',
+      url: '/api/chat/store/chat',
+      payload: { chat: {
+        id: 'usage-roundtrip',
+        modelRef: { provider: 'claude', model: 'claude-test' },
+        messages: [],
+        revision: 0,
+      } },
+    });
+
+    assert.equal(saved.statusCode, 200);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: {
+        chatKey: 'usage-roundtrip',
+        modelRef: { provider: 'claude', model: 'claude-test' },
+        message: 'Сверь метрики',
+      },
+    });
+    const state = await app.inject({ method: 'GET', url: '/api/chat/store' });
+    const current = state.json().sessions.find((chat) => chat.id === 'usage-roundtrip');
+
+    assert.equal(response.statusCode, 200);
+
+    for (const [key, value] of Object.entries(sample)) {
+      assert.equal(response.json()[key], value);
+      assert.equal(current[key], value);
+    }
+
+    assert.deepEqual(events.filter((entry) => entry.event === 'chat-progress')
+      .map((entry) => [entry.data.tokens, entry.data.contextTokens]), [[8, 3300], [8, 3300]]);
+  });
+}

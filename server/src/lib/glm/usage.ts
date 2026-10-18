@@ -3,6 +3,7 @@ import {
   balanceForecastResource,
   formatDeepSeekMoney,
 } from '../deepseek/balance.ts';
+import { usagePercentOrNull } from '../providerUsage.ts';
 import { parseGlmAccessMode, selectGlmServiceKey } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
 
@@ -284,7 +285,12 @@ function tokenWindow(limit: Record<string, unknown>): Record<string, unknown> {
  * Строки других типов пропускаются: их смысл кабинет не объявляет.
  */
 function quotaBar(limit: Record<string, unknown>): Record<string, unknown> | null {
-  const pct = Math.min(100, Math.max(0, money(limit.percentage) ?? 0));
+  const pct = usagePercentOrNull(money(limit.percentage));
+
+  if (pct === null) {
+    return null;
+  }
+
   const resetsAt = resetIso(limit.nextResetTime);
 
   if (limit.type === 'TIME_LIMIT') {

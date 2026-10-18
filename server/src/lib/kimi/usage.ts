@@ -6,6 +6,8 @@ import type { ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { usagePercentOrNull } from '../providerUsage.ts';
+
 const START_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 12_000;
 const EXIT_TIMEOUT_MS = 2_000;
@@ -251,17 +253,23 @@ export function parseKimiUsageBars(result: KimiUsageResult | null | undefined) {
   if (!result || result.kind !== 'ok') return [];
   const rows = [result.summary, ...(Array.isArray(result.limits) ? result.limits : [])]
     .filter(Boolean) as Array<Record<string, unknown>>;
+
   return rows.flatMap((row, index) => {
-    const used = Number(row.used);
-    const limit = Number(row.limit);
-    if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return [];
+    const used = row.used;
+    const limit = row.limit;
+
+    if (typeof used !== 'number' || !Number.isFinite(used) || used < 0
+      || typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+      return [];
+    }
     const window = (row.window || {}) as { duration?: unknown; unit?: unknown };
     const named = String(row.name || '').trim();
+
     return [{
       key: `kimi:${index}:${window.duration || 0}:${window.unit || 'limit'}`,
       group: named ? `named:${named}` : 'subscription',
       label: windowLabel(window, named),
-      pct: Math.max(0, Math.min(100, Math.round((used / limit) * 100))),
+      pct: usagePercentOrNull(used * 100 / limit),
       resetsAt: resetIso(row.reset_at),
     }];
   });

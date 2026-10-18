@@ -86,11 +86,9 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       workToolNames,
       startServer: options.startServer,
     });
+
     return {
       ...result,
-      contextTokens: undefined as number | undefined,
-      contextWindow: undefined as number | undefined,
-      contextMetric: 'unavailable',
       contextCache: contextCacheStatus('unavailable'),
       retryState: 'post_prompt',
     };

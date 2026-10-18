@@ -801,12 +801,52 @@ const status = computed(() => {
 
   return view;
 });
+const usageNow = ref(Date.now());
+let usageResetTimer = null;
+
 const statusUsage = computed(() => providerUsageSummary(
   status.value.providerId,
   prov.usage?.[status.value.providerId],
   prov.usageTransport,
   !!prov.providers.find((provider) => provider.id === status.value.providerId),
+  usageNow.value,
 ));
+
+/**
+ * Один таймер на ближайший сброс помечает сохранённый замер устаревшим без опроса API.
+ * Часы принадлежат компоненту: смена данных переставляет таймер, размонтирование снимает его.
+ */
+function scheduleUsageReset() {
+  if (usageResetTimer !== null) {
+    clearTimeout(usageResetTimer);
+    usageResetTimer = null;
+  }
+
+  usageNow.value = Date.now();
+
+  const future = statusUsage.value.windows
+    .map((item) => item.resetsAt ? Date.parse(item.resetsAt) : NaN)
+    .filter((at) => Number.isFinite(at) && at > usageNow.value);
+  const nearest = Math.min(...future);
+
+  if (Number.isFinite(nearest)) {
+    usageResetTimer = setTimeout(scheduleUsageReset, Math.min(2147483647, nearest - usageNow.value + 1));
+  }
+}
+
+watch([
+  () => status.value.providerId,
+  () => prov.usage?.[status.value.providerId],
+], scheduleUsageReset, {
+  immediate: true,
+});
+onUnmounted(() => {
+  if (usageResetTimer !== null) {
+    clearTimeout(usageResetTimer);
+    usageResetTimer = null;
+  }
+});
+
 const modelId = computed(() => current.value.id);
 const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
@@ -1187,32 +1227,52 @@ const ctxTooltip = computed(() => {
 
   if (s?.compacting) {
     return {
-      title: 'Контекст', percent: '', tone: 'active', status: 'Сжимаю контекст…',
-      detail: 'Агент готовит рабочую выжимку разговора.', rows: [], actions: false,
+      title: 'Контекст сессии',
+      percent: '',
+      tone: 'active',
+      status: 'Сжимаю контекст…',
+      detail: 'Агент готовит рабочую выжимку разговора.',
+      rows: [],
+      actions: false,
     };
   }
   if (!s?.sessionId && !ctxHasLiveUsage.value) {
     return {
-      title: 'Контекст', percent: '', tone: '',
+      title: 'Контекст сессии',
+      percent: '',
+      tone: '',
       status: s?.pendingSeed ? 'Контекст сжат' : 'Контекст пуст',
       detail: s?.pendingSeed
         ? 'Выжимка уедет агенту со следующим сообщением.'
         : 'Размер появится после первого хода.',
-      rows, actions: false,
+      rows,
+      actions: false,
     };
   }
   if (s?.compactedAt && !ctxTokens.value) {
     addSessionRows();
+
     return {
-      title: 'Контекст', percent: '', tone: '', status: 'Контекст сжат',
-      detail: 'Новый размер появится после следующего хода.', rows, actions: true,
+      title: 'Контекст сессии',
+      percent: '',
+      tone: '',
+      status: 'Контекст сжат',
+      detail: 'Новый размер появится после следующего хода.',
+      rows,
+      actions: true,
     };
   }
   if (ctxUnavailable.value) {
     addSessionRows();
+
     return {
-      title: 'Контекст', percent: '', tone: '', status: 'Точная заполненность пока недоступна',
-      detail: 'Исполнитель пока не сообщил свежий размер контекста.', rows, actions: true,
+      title: 'Контекст сессии',
+      percent: '',
+      tone: '',
+      status: 'Точная заполненность пока недоступна',
+      detail: 'Исполнитель пока не сообщил свежий размер контекста.',
+      rows,
+      actions: true,
     };
   }
 
@@ -1224,8 +1284,9 @@ const ctxTooltip = computed(() => {
     { label: 'Порог', value: `${fmtTokens(ctxLimit.value)} · ${ctxLimitShort.value}` },
   );
   addSessionRows();
+
   return {
-    title: 'Контекст',
+    title: 'Контекст сессии',
     percent: `${ctxPct.value}%`,
     tone: ctxLimitReached.value ? 'bad' : (ctxAtWarning.value ? 'warn' : ''),
     status: ctxLimitReached.value

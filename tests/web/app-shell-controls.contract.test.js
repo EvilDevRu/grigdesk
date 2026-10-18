@@ -116,6 +116,11 @@ test('всплывашка исполнителя короткая и сама �
   assert.match(source, /<b class="ptip-name">\{\{ p\.name \}\}<\/b>/u);
   assert.doesNotMatch(source, /<span>\{\{ provTitle\(p\) \}\}<\/span>/u);
   assert.match(source, /class="ptip-upd"/u);
+  assert.match(source, /usedUsagePercent\(b\.pct\)/u);
+  assert.match(
+    source,
+    /v-tooltip="`Израсходовано: \$\{usedUsagePercent\(b\.pct\)\} окна «\$\{b\.label\}»`"/u,
+  );
   assert.match(source, /v-if="!p\.available" class="ptip-off">недоступен/u);
   assert.match(source, /data-context="topbar-popover-status-link"/u);
   assert.match(source, /:href="statusHintOf\(p\)\.url"/u);

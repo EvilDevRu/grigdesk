@@ -3504,6 +3504,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       const runArgs: ExecutorTurnOptions = {
+        // Это поколение аккаунта процесса: callback работает после хода и в простое.
+        // Сверка activeRuns здесь отвергла бы события живой сессии следующего хода.
+        onProviderUsage: fastify.providerUsageSink?.(executor.id),
         config,
         chatKey,
         signal: ac.signal,
@@ -4107,12 +4110,36 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
         return channel.settled();
       }
+      // Ошибка сохраняет тот же последний замер, что и остановка: он нужен после F5.
+      // Поля ошибки уточняют прогресс, отсутствие поля не стирает уже полученное.
+      const errorCache = normalizeContextCache(err.contextCache) || runRec.contextCache;
+      const errorContext = {
+        ...normalizeContextUsage(runRec),
+        ...normalizeContextUsage(err),
+        ...(errorCache ? { contextCache: errorCache } : {}),
+      };
+
+      if (chatKey && !summaryWorkspace && !err.sessionReset && Object.keys(errorContext).length > 0) {
+        try {
+          await history.patchExecution(chatKey, () => ({
+            executionRunId: runId,
+            ...errorContext,
+          }));
+        } catch (historyError) {
+          fastify.log.warn({
+            err: (historyError as Error)?.message,
+            chatKey,
+          }, 'чат: не удалось сохранить контекст после ошибки хода');
+        }
+      }
+
       if (channel.detached() && chatKey) {
         // Лента упавшего хода едет вместе с ошибкой: по ней видно, докуда агент дошёл,
         // а окно, не видевшее хода живьём (F5, второе устройство), иначе её не получит.
         await channel.park({
           chatKey,
           role: 'error',
+          ...errorContext,
           reply: err.message,
           ...orphanUser,
           steps: summarySteps ? [...summarySteps] : [...runRec.steps],
@@ -4125,6 +4152,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       return channel.refuse(500, {
+        ...errorContext,
         runId,
         error: err.code || 'chat_failed',
         message: err.message,

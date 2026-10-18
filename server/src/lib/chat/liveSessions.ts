@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import type { ProviderUsagePatch } from '../providerUsage.ts';
 import type { BackgroundIdentity, BackgroundSession } from './backgroundRuns.ts';
 
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
@@ -33,6 +34,7 @@ export interface LiveSessionSpec {
   cwd?: string;
   extraDirs?: string[];
   signal?: AbortSignal;
+  onProviderUsage?: (patch: ProviderUsagePatch) => boolean;
   [field: string]: unknown;
 }
 
@@ -432,6 +434,18 @@ export class ChatLiveSessions {
       ...spec,
       log: this.log,
       hooks: {
+        onProviderUsage: (patch: ProviderUsagePatch): boolean => {
+          try {
+            return spec.onProviderUsage?.(patch) ?? false;
+          } catch (error) {
+            this.log?.warn?.(
+              { err: (error as Error)?.message, chatKey },
+              'чат: живые квоты не приняты обработчиком',
+            );
+
+            return false;
+          }
+        },
         onBackgroundStart: () => {
           if (entry.background || entry.closedNotified) {
             return;

@@ -92,3 +92,13 @@ test('LINE-04: троеточие — три точки в постоянной 
   assert.equal(wrapper.find('.said .word').exists(), true, 'слово потеряло свою ячейку');
   assert.equal(wrapper.find('.dots').attributes('aria-hidden'), 'true', 'точки читаются вслух');
 });
+
+
+test('подсказка счётчика прямо называет выход текущего хода', async (t) => {
+  t.mock.method(Date, 'now', () => 1700000000000);
+
+  const wrapper = await mountThinking(t, { tokens: 1200, tokensEstimate: true });
+  const tooltip = wrapper.get('.tok').attributes('data-ui-tooltip').replace(/\u00a0/g, ' ');
+
+  assert.equal(tooltip, 'Выход текущего хода: ≈1 200 ток.');
+});

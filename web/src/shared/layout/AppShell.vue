@@ -275,6 +275,7 @@
                       {{ usageOf(p).action.label }}
                     </UiButton>
                   </span>
+                  <span v-if="usageOf(p).stale" class="pu-reset">Данные лимитов устарели</span>
                   <!-- Потребление лимитов подписки — как /usage в CLI -->
                   <span class="pu">
                     <span
@@ -290,7 +291,9 @@
                                иначе замечается только случайно. Гаснет само. -->
                           <span v-if="b.fresh" class="pu-new" v-tooltip="'Это ведро лимитов появилось недавно'">новое</span>
                         </span>
-                        <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
+                        <b :class="{ hot: b.pct >= 85 }"
+                           v-tooltip="`Израсходовано: ${usedUsagePercent(b.pct)} окна «${b.label}»`"
+                        >{{ usedUsagePercent(b.pct) }}</b>
                       </span>
                       <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                       <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
@@ -390,6 +393,7 @@ import {
   resetAt,
   resetIn,
 } from '../../features/providers/providerUsage.js';
+import { usedUsagePercent } from '../../features/providers/providerUsageSummary';
 import {
   aggregateNavBadges,
   chatNavBadge,

@@ -406,7 +406,8 @@ test('ChatSession передаёт в тултип полное загружен
   assert.match(ringLabel, /за сессию обработано 240[\s\u00a0]000 входных токенов/);
   assert.match(ringLabel, /кэш: 90% · чт\. 72 тыс\. · мимо 8 тыс\./);
   const contextTip = await openContextTooltip(wrapper);
-  assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
+
+  assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст сессии');
   assert.equal(contextTip.get('.ctx-pop-unit').text(), '· токены');
   assert.equal(contextTip.get('.ctx-pop-pct').text(), '39%');
   const rows = contextTooltipRows(contextTip);
@@ -723,7 +724,8 @@ test('ChatSession рисует дугу и процент кольца по то
   // Окно модели остаётся справочным: как основная шкала оно и обещало запас, которого нет.
   assert.match(ring.attributes('aria-label'), /окно модели 1[\s ]000[\s ]000/);
   const contextTip = await openContextTooltip(wrapper);
-  assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
+
+  assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст сессии');
   assert.equal(contextTip.get('.ctx-pop-pct').text(), '80%');
   assert.equal(contextTip.get('.ctx-pop-status').text(), 'Порог близко — пора сжать');
   assert.match(contextTooltipRows(contextTip).Порог, /200[\s\u00a0]000 · автосжатие/);

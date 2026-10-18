@@ -10,6 +10,7 @@ export interface UsageSummaryItem {
   label: string;
   value: string;
   resetsAt?: string;
+  expired?: boolean;
 }
 
 export interface UsageSummary {
@@ -40,7 +41,32 @@ export function remainingUsagePercent(value: unknown): string {
 
   const remaining = 100 - value;
 
-  return remaining > 0 && remaining < 1 ? '<1%' : `${Math.round(remaining)}%`;
+  if (remaining > 0 && remaining < 1) {
+    return '<1%';
+  }
+  if (remaining > 99 && remaining < 100) {
+    return '>99%';
+  }
+
+  return `${Math.round(remaining)}%`;
+}
+
+/**
+ * Расход и остаток используют одинаковые границы точного нуля и полного окна.
+ * Ненулевые дроби у края шкалы остаются видимыми без ложного округления.
+ */
+export function usedUsagePercent(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    return 'нет данных';
+  }
+  if (value > 0 && value < 1) {
+    return '<1%';
+  }
+  if (value > 99 && value < 100) {
+    return '>99%';
+  }
+
+  return `${Math.round(value)}%`;
 }
 
 /**
@@ -65,6 +91,7 @@ export function providerUsageSummary(
   entry: unknown,
   delivery: UsageDelivery = {},
   knownProvider = true,
+  now = Date.now(),
 ): UsageSummary {
   const raw = entry && typeof entry === 'object' ? entry as Record<string, unknown> : null;
   const bars = Array.isArray(raw?.bars) ? raw.bars : [];
@@ -77,7 +104,10 @@ export function providerUsageSummary(
       key: String(value.key || `window-${index}`),
       label: String(value.label || `Окно ${index + 1}`),
       value: remainingUsagePercent(value.pct),
-      ...(typeof value.resetsAt === 'string' ? { resetsAt: value.resetsAt } : {}),
+      ...(typeof value.resetsAt === 'string' ? {
+        resetsAt: value.resetsAt,
+        ...(Date.parse(value.resetsAt) <= now ? { expired: true } : {}),
+      } : {}),
     };
   });
   const balances = resources.flatMap((resource): UsageSummaryItem[] => {
@@ -108,7 +138,7 @@ export function providerUsageSummary(
     label: '',
     detail: typeof raw?.message === 'string' ? raw.message : '',
     tone: 'muted',
-    stale: raw?.stale === true || delivery.deliveryStale === true,
+    stale: raw?.stale === true || delivery.deliveryStale === true || windows.some((item) => item.expired),
     measuredAt: typeof raw?.dataCheckedAt === 'number' && Number.isFinite(raw.dataCheckedAt)
       && raw.dataCheckedAt > 0 ? raw.dataCheckedAt : null,
   };
