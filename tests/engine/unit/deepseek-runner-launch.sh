@@ -12,7 +12,8 @@ source "$runner"
 
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/run" "$TEST_ROOT/additional"
 fake_bin="$TEST_ROOT/bin/dsh"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_bin"
+printf '#!/usr/bin/env bash\nexec "%s" "%s" "$@"\n' \
+  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeBinary.mts" >"$fake_bin"
 chmod +x "$fake_bin"
 export GRIGDESK_DEEPSEEK_BIN="$fake_bin"
 export DEEPSEEK_API_KEY=synthetic-factory-key
@@ -20,6 +21,13 @@ export FACTORY_FORBID_LIVE=0
 
 capture="$TEST_ROOT/argv"
 factory_exec() {
+  # Metadata исполняется на собственной synthetic fixture; захват относится к рабочему wrapper.
+  if [[ "$1" == local ]] \
+    || [[ "$1" == provider && "${3:-}" == "$FACTORY_HOME/../server/scripts/deepseekRuntimeInfo.mts" ]]; then
+    shift
+    "$@"
+    return
+  fi
   : >"$capture"
   printf '%s\n' "$@" >"$capture"
 }

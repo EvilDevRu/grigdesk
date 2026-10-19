@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExecutorAdapter } from '../executors/index.ts';
-import type { NativeSettingsContext } from './types.ts';
+import type { NativeSettingsContext, PreparedExecutorRuntime } from './types.ts';
 import type { SettingsConsumer } from '../../../../shared/chat/providerSettingsContracts.ts';
 
 /**
@@ -16,9 +16,10 @@ export async function nativeSettingsContext(
   config: unknown,
   cwd = String((config as { rootDir?: unknown } | null)?.rootDir ?? process.cwd()),
   consumer: SettingsConsumer = 'chat',
+  preparedRuntime?: PreparedExecutorRuntime,
 ): Promise<NativeSettingsContext> {
   if (adapter.nativeSettings?.context) {
-    const context = await adapter.nativeSettings.context(config, cwd, consumer);
+    const context = await adapter.nativeSettings.context(config, cwd, consumer, preparedRuntime);
 
     context.consumer = consumer;
 

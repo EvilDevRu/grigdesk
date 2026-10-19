@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+import { decodeDeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
+import { runtimeInfoFixture } from './deepseekMetadataFixture.mts';
 
 export const GLM_FIXTURE_PLUGIN = Object.freeze({
   piAi: {
@@ -67,6 +71,52 @@ export async function writeGlmArtifactFixture(root: string, options: {
   };
 
   await fs.writeFile(path.join(root, 'runtime.json'), JSON.stringify(metadata));
+
+  // Unit double содержит metadata в своих bytes и не выдаёт generation за готовый ELF.
+  // Настоящие compiled/parity наборы используют исключительно ensureTestDeepSeekBinary.
+  const original = runtimeInfoFixture();
+  const info = decodeDeepSeekRuntimeInfo({
+    ...original,
+    buildId,
+    upstreamVersion: contract.source.version,
+    runtimeVersion: metadata.runtimeVersion,
+    journal: { write: 3, read: [0, 1, 2, 3] },
+    glm: {
+      ...original.glm,
+      inputs: {
+        source: { commit: contract.source.commit },
+        inputIdentity: {
+          composition: inputIdentity.composition,
+          dependencyLock: inputIdentity.dependencyLock,
+        },
+        llmPiAi: options.llmPiAi ?? null,
+      },
+      admission: [],
+    },
+  });
+
+  info.packageId = createHash('sha256')
+    .update(JSON.stringify({ ...info, packageId: undefined })).digest('hex');
+
+  const body = [
+    `#!${process.execPath}`,
+    `const info = ${JSON.stringify(info)};`,
+    'const args = process.argv.slice(2);',
+    'if (args.includes("--runtime-info")) { console.log(JSON.stringify(info)); process.exit(0); }',
+    'if (args.includes("-V") || args.includes("--version")) {',
+    '  console.log(info.upstreamVersion); process.exit(0);',
+    '}',
+    'const stripped = [];',
+    'for (let i = 0; i < args.length; i++) {',
+    '  if (["--expect-package-id", "--cache-dir"].includes(args[i])) { i++; continue; }',
+    '  stripped.push(args[i]);',
+    '}',
+    `process.argv = [process.execPath, ${JSON.stringify(path.join(root, 'entry.mjs'))}, ...stripped];`,
+    `await import(${JSON.stringify(pathToFileURL(path.join(root, 'entry.mjs')).href)});`,
+  ].join('\n');
+
+  await fs.writeFile(path.join(root, 'deepseek'), body, { mode: 0o755 });
+
 
   return metadata;
 }

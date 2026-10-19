@@ -76,8 +76,8 @@ async function fixture(t, env = {}) {
 
   const config = {
     rootDir: root,
-    deepseekArtifactDir: artifact,
-    deepseekRuntimeMode: 'embedded',
+    deepseekBin: path.join(artifact, 'deepseek'),
+    deepseekRuntimeMode: 'binary',
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
   const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');
@@ -163,16 +163,16 @@ test('недопущенный режим или нет ключа — catalog()
 
 test('catalogCacheKey меняется от identity, режима и ключа', async (t) => {
   const f = await fixture(t);
-  const base = f.adapter().catalogCacheKey(f.config);
+  const base = await f.adapter().catalogCacheKey(f.config);
   const keys = [
-    f.adapter({
+    await f.adapter({
       env: {
         PATH: process.env.PATH,
         GRIGDESK_GLM_API_MODE: 'api',
         ZAI_API_KEY: 'other-key',
       },
     }).catalogCacheKey(f.config),
-    f.adapter({
+    await f.adapter({
       env: {
         PATH: process.env.PATH,
         GRIGDESK_GLM_API_MODE: 'coding-plan',
@@ -185,7 +185,9 @@ test('catalogCacheKey меняется от identity, режима и ключа
   await writeGlmArtifactFixture(otherArtifact, {
     llmPiAi: { ...GLM_FIXTURE_PLUGIN, sourceHash: 'b'.repeat(64) },
   });
-  keys.push(f.adapter().catalogCacheKey({ ...f.config, deepseekArtifactDir: otherArtifact }));
+  keys.push(await f.adapter().catalogCacheKey({
+    ...f.config, deepseekBin: path.join(otherArtifact, 'deepseek'),
+  }));
 
   assert.equal(new Set([base, ...keys]).size, 4);
   assert.equal([base, ...keys].some((key) => key.includes('synthetic-zai-key')), false);

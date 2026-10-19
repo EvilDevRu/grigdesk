@@ -22,6 +22,10 @@ export const ENTRYPOINTS: readonly string[] = [
     // Команда задач Б24: исходный вход и сборка единственного файла SEA.
     'b24/src/main.ts',
     'b24/scripts/build.mts',
+    // Launcher и worker DeepSeek имеют отдельные SEA/Node точки входа.
+    'deepseek/src/launcher/main.ts',
+    'deepseek/src/launcher/workerBootstrap.ts',
+    'deepseek/src/runtime/verifyWorker.ts',
     'tools/brandMove.mts',
     'server/scripts/dataHomeCheck.mts',
     'server/src/app.js',
@@ -51,6 +55,7 @@ const SCANNED_DIRS: readonly { dir: string; skip: (name: string) => boolean }[] 
     // Зонды и guard-ы: каждый файл здесь — самостоятельная программа, и ссылку на неё
     // держит либо package script, либо человек в терминале.
     { dir: 'tools', skip: () => false },
+    { dir: 'deepseek/scripts', skip: () => false },
     { dir: 'web/scripts', skip: (name) => name.endsWith('.py') },
 ];
 
@@ -62,6 +67,14 @@ const URL_RE = /new URL\(\s*(['"])(\.[^'"]*)\1\s*,\s*import\.meta\.url\s*\)/g;
 export interface BrokenReference {
     from: string;
     spec: string;
+}
+
+/**
+ * Установленная dependency не является собственным source графа переименования.
+ * Существование входящего файла проверяет вызывающий до исключения его внутренних imports.
+ */
+function isInstalledDependency(file: string): boolean {
+    return file.split(sep).includes('node_modules');
 }
 
 /** Обход графа от одного файла: множество достижимых собственных модулей. */
@@ -81,7 +94,11 @@ function reachableFrom(root: string, entry: string, broken: BrokenReference[]): 
             const target = resolve(dirname(current), spec);
 
             if (isFile(target)) {
-                queue.push(target);
+                // Установленная dependency проверяется как существующий файл, а не свой source.
+                // В bundled JS строки динамических imports могут обозначать чужие исходники.
+                if (!isInstalledDependency(target)) {
+                    queue.push(target);
+                }
             } else {
                 broken.push({ from: relative(root, current).split(sep).join('/'), spec });
             }
@@ -124,9 +141,15 @@ export function referencesOf(source: string): string[] {
 
             // Каталог — не модуль: так собирают корень состояния и префикс
             // динамического импорта, и проверять его как файл нечего.
-            if (spec && !spec.includes('${') && !spec.endsWith('/')) {
-                specs.push(spec);
+            if (!spec || spec.includes('${') || spec.endsWith('/')) {
+                continue;
             }
+
+            if (pattern === URL_RE && spec.split('/').every((part) => part === '.' || part === '..')) {
+                continue;
+            }
+
+            specs.push(spec);
         }
     }
 
@@ -151,8 +174,9 @@ export function brokenEntrypointReferences(root: string = REPO_ROOT): BrokenRefe
         if (!existsSync(absolute)) {
             continue;
         }
+
         for (const name of readdirSync(absolute)) {
-            if (!skip(name) && (name.endsWith('.js') || name.endsWith('.ts'))) {
+            if (!skip(name) && /\.[cm]?[jt]s$/u.test(name)) {
                 roots.push(`${dir}/${name}`);
             }
         }
@@ -192,9 +216,11 @@ export function brokenEntrypointReferences(root: string = REPO_ROOT): BrokenRefe
                 });
                 continue;
             }
-            // Дальше идут только собственные модули: чужие пакеты сюда не попадают,
-            // потому что относительным путём их не импортируют.
-            queue.push(target);
+            // Явный путь установленного package проверен выше, но его bundle не наш source.
+            // Такой файл может содержать строки imports, не являющиеся модулями продукта.
+            if (!isInstalledDependency(target)) {
+                queue.push(target);
+            }
         }
     }
 

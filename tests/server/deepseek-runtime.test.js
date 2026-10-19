@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
+
 import { runDeepSeekTurn } from '../../server/src/lib/deepseek/runtime.ts';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -19,7 +21,12 @@ async function waitFor(probe, attempts = 200) {
   throw new Error('ожидаемое состояние не наступило');
 }
 
+/**
+ * Transport unit double исполняет настоящий ACP wire, не подменяя проверки metadata.
+ * Spawn сохраняет отдельную группу managed binary, чтобы stop проверял своё дерево.
+ */
 async function fixture(t, scenario, { wrapChild } = {}) {
+  const { binary } = await writeDeepSeekMetadataStub(t);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-runtime-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const cwd = path.join(root, 'workspace');
@@ -42,8 +49,9 @@ async function fixture(t, scenario, { wrapChild } = {}) {
         overlayPath: path.join(launchDir, 'overlay.yml'),
       };
     },
-    spawn: () => {
+    spawn: (_command, _args, options) => {
       const child = spawn(process.execPath, [FAKE_ACP, '--scenario', scenarioFile, '--log', logFile], {
+        detached: options.detached,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       children.push(child);
@@ -53,6 +61,7 @@ async function fixture(t, scenario, { wrapChild } = {}) {
     closeTimeoutMs: 80,
     termTimeoutMs: 80,
   };
+
   return {
     root,
     cwd,
@@ -62,7 +71,8 @@ async function fixture(t, scenario, { wrapChild } = {}) {
     base: {
       config: {
         deepseekRuntimeHome: path.join(root, 'runtime'),
-        deepseekBin: path.join(root, 'fake-dsh'),
+        deepseekBin: binary,
+        deepseekCacheDir: path.join(root, 'cache'),
       },
       env: { ...process.env, DEEPSEEK_API_KEY: 'synthetic-runtime-key' },
       cwd,
@@ -382,16 +392,33 @@ test('неизвестный reverse method получает error, но ход 
   assert.equal(response.message.error.code, -32603);
 });
 
-test('зависший close проходит SIGTERM → SIGKILL и возвращается', async (t) => {
+test('зависший binary close проходит SIGTERM → SIGKILL и честно сообщает cleanup failure', async (t) => {
   const signals = [];
   const f = await fixture(t, { hangOnClose: true, ignoreTerm: true }, {
+    /**
+     * Наблюдаем TERM launcher и KILL собственной группы, пропуская реальные сигналы.
+     * Чужие PID и probe0 не меняют таблицу наблюдаемых исходов остановки.
+     */
     wrapChild(child) {
       const kill = child.kill.bind(child);
       child.kill = (signal) => { signals.push(signal); return kill(signal); };
+
+      const groupKill = process.kill.bind(process);
+
+      process.kill = (pid, signal) => {
+        if (pid === -child.pid && signal === 'SIGKILL') {
+          signals.push(signal);
+        }
+
+        return groupKill(pid, signal);
+      };
+      t.after(() => {
+        process.kill = groupKill;
+      });
     },
   });
-  const out = await runDeepSeekTurn(f.base);
-  assert.equal(out.stopReason, 'end_turn');
+
+  await assert.rejects(runDeepSeekTurn(f.base), { code: 'deepseek_binary_cleanup' });
   assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
 });
 

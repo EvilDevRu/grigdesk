@@ -1,3 +1,5 @@
+// Только legacy fixtures первого перехода: Node22 generation не выбирается production resolver.
+// Общие transport/parity наборы получают автономный ELF через deepseekBinary.mts.
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -6,10 +8,11 @@ import { fileURLToPath } from 'node:url';
 
 import { sha256 } from '../../shared/node/hash.ts';
 
-import { deepSeekBuildInputs, hashRuntimePayload } from '../../tools/buildDeepSeekRuntime.mts';
+import { deepSeekBuildInputs, hashRuntimePayload } from '../../deepseek/scripts/buildRuntime.mts';
 
-import { readDeepSeekArtifact } from '../../server/src/lib/deepseek/runtimeArtifact.ts';
+import { readDeepSeekArtifact } from '../helpers/deepseekLegacyArtifact.mts';
 import { artifactsPath, dataHome } from '../../shared/runtime/dataHome.ts';
+import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -60,7 +63,7 @@ export async function ensureTestDeepSeekArtifact(): Promise<string> {
     }
   }
 
-  const inputs = await deepSeekBuildInputs(path.join(repositoryRoot, 'third_party/deepseek-harness'));
+  const inputs = await deepSeekBuildInputs(deepSeekPackagePaths().vendorDir);
   const identity = sha256(JSON.stringify(inputs));
   const cache = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
     'deepseek-vendoring/test-builds');
@@ -92,7 +95,7 @@ export async function ensureTestDeepSeekArtifact(): Promise<string> {
 
       try {
         const child = spawn(process.execPath, ['--max-old-space-size=4096',
-          path.join(repositoryRoot, 'tools/buildDeepSeekRuntime.mts'), '--output-dir', directory], {
+          deepSeekPackagePaths().scripts.runtime, '--output-dir', directory], {
           cwd: repositoryRoot,
           stdio: ['ignore', handle.fd, handle.fd],
         });
@@ -103,7 +106,7 @@ export async function ensureTestDeepSeekArtifact(): Promise<string> {
 
         if (code !== 0) {
           throw new Error(`Сборка DeepSeek завершилась ${code}; журнал ${directory}.log. `
-            + 'Подготовка: npm ci --prefix tools/deepseek-build');
+            + 'Подготовка: npm ci --include=dev --prefix deepseek/build/runtime-deps');
         }
       } finally {
         await handle.close();

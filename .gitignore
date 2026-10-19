@@ -16,11 +16,10 @@ mobile/android/**/*.keystore
 web/dist.grigdesk-backup-*/
 server/node_modules.grigdesk-backup-*/
 server/runtime/deepseek/
-# Исходники DeepSeek Harness — кэш по commit из upstream.lock.json: в Git лежат только manifest,
-# патчи и лицензии, а `npm --prefix server run deepseek:prepare` подкачивает и сверяет остальное.
-third_party/deepseek-harness/upstream/
-third_party/.deepseek-*/
-third_party/deepseek-harness.sync-lock/
+# Пакет DeepSeek владеет snapshot по commit из upstream.lock.json; в Git — manifest и патчи.
+/deepseek/vendor/deepseek-harness/upstream/
+/deepseek/vendor/.deepseek-*/
+/deepseek/vendor/deepseek-harness.sync-lock/
 # Кэш пребандла dev-сервера vite. Локальные стенды предпросмотра поднимают его с root в корне
 # репозитория, где нет package.json, — тогда vite кладёт кэш не в web/node_modules/.vite, а сюда.
 .vite/
@@ -70,6 +69,15 @@ web/.generated/markdown/
 /bin/b24
 /bin/.b24-*.tmp
 /b24/.cache/
+
+# Готовый DeepSeek и отдельные зависимости и кэш его SEA-сборки.
+/bin/deepseek
+/bin/deepseek.grigdesk-deepseek.json
+/bin/deepseek.install-lock/
+/bin/.deepseek-install-*/
+/bin/.deepseek-*.tmp
+/deepseek/node_modules/
+/deepseek/.cache/
 
 # Установленное окно: AppImage из desktop/release под именем программы.
 /bin/grigdesk-app

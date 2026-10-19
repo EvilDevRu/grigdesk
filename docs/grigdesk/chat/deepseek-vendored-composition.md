@@ -3,7 +3,7 @@
 Выбранные исходники Harness `0.1.5-rc.2` закреплены commit
 `c291e7961a515f6d7af9304e7fd1d257929aef26`. Сборка использует upstream host-проекты,
 TypeScript 6.0.3, upstream Typert generator и отдельный npm lock. Проверены Linux x64
-с glibc и Node 22.22.1. Остальные платформы не подтверждены этой проверкой.
+с glibc и закреплённым worker Node 24; серверный Node может отличаться. Остальные платформы не подтверждены этой проверкой.
 
 Состав содержит 180 workspace-пакетов для компиляции; 179 входят в готовый runtime.
 Compiler, bundler, их executable dependencies и Typert generator удаляются после
@@ -36,39 +36,34 @@ external dependency доступны владельцам через внутр�
 Статические зависимости проверяются TypeScript-компилятором. YAML plugin names,
 presets и host references входят в closure. Двенадцать известных dynamic references
 (восемь host и четыре в dist pi-ai) имеют точные выражения и причины в
-`tools/deepseek-build/dynamic-imports.json`;
+`deepseek/build/dynamic-imports.json`;
 новая неизвестная ссылка запрещает сборку. После компиляции проверяются generated
 exports, worker bundles и native addon. Workspace package boundary сохраняется:
 bundler не встраивает один общий native module в несколько пакетов.
 Host-owned overlays явно добавляют Claude-compatible hooks и MCP client с их
 зависимостями; один upstream YAML без overlays не определяет полный состав GrigDesk.
 
+Worker bundles включают code-runtime, workflow и JSONL migration verifier
+`session-persistence-jsonl/lib/worker.cjs`. Последний нужен при чтении исторических журналов;
+его отсутствие не обнаруживается одним запуском новой сессии.
+
 ## Подготовка и проверка
 
-```bash
-npm --prefix server run deepseek:prepare
-npm --prefix server run deepseek:build
-npm --prefix server run deepseek:verify
-```
+Владелец source/build цепочки — пакет `deepseek/`. Чистый checkout требует явной
+подготовки pinned Node dependencies и snapshot, затем сборки ELF:
+[README пакета](../../../deepseek/README.md). Production default — `bin/deepseek`;
+обычная подготовка и обновление GrigDesk только проверяют metadata установленного ELF.
+Они не устанавливают npm dependencies Harness и не переключают legacy current.
 
-`prepare` и `build` — общая подготовка: сверяют входы готовой generation по manifest (без
-исходников и сети), при изменении входов под lock подготавливают кэш исходников,
-устанавливают exact зависимости по lock, собирают и атомарно выбирают новое поколение.
-Брошенный после kill или Ctrl-C lock с мёртвым владельцем снимается сам. `verify`
-собирает отдельный candidate и выполняет compiled loopback проверки без переключения
-`current`. Первая подготовка требует сети (npm-пакеты сборки и, без копии, исходники);
-дальше сборки идут offline. В `bin/grigdesk-ctl` и `deploy/install.sh` сбой подготовки DeepSeek
-не останавливает GrigDesk: выводится предупреждение, карточка DeepSeek показывает
-причину недоступности и команду исправления; `tools/release` и `tools/release-check` подготовку требуют. Нужны C compiler, Node
-headers выбранного runtime и native prerequisites npm-пакетов. Для Linux sandbox
-сохраняется требование работоспособного bubblewrap. Native flock использует stable
-Node-API; остальные native dependencies остаются привязаны к ABI Node сборки.
+Generation собирается закреплённым worker Node из `deepseek/build/node-runtime.json`.
+ABI сверяется с worker, а не с Node сервера. Нужны C compiler и системные native prerequisites;
+инструменты по-прежнему требуют работоспособного bubblewrap и shell. Source closure,
+dynamic imports, worker bundles, native modules и лицензии проверяются до упаковки.
+[Общие и SEA гейты](../testing/deepseek-test-gates.md) используют настоящий ELF.
 
-Общий test helper создаёт один candidate под writer lock в `~/.grigdesk/artifacts/`
-(сторож тестов передаёт настоящую папку артефактов, и candidate переживает прогон),
-переиспользует его только при совпадении всех входов и проверяет весь payload.
-Отсутствующие зависимости дают отказ с командой подготовки; скрытого download/skip
-нет. Homes и порты проверок изолированы. Тесты не меняют production `current`.
+Test helper держит проверенный candidate и A/B варианты в артефактах, готовит их
+последовательно перед parallel группами. Отсутствующие pinned dependencies дают команду
+подготовки; скрытого download/skip нет. Homes и порты изолированы, production current не меняется.
 
 Generation содержит `entry.mjs`, `runtime.json`, собственные dependencies,
 resources и licenses. При наличии исходников `llm-pi-ai` контракт `runtime.json`
@@ -78,9 +73,10 @@ GrigDesk. Поле входит в `inputIdentity.contract`, поэтому за
 без плагина поля не имеет. Внутренние ссылки сохраняют работоспособность при переносе;
 ссылки на server node_modules или staging запрещены. BuildId учитывает входы,
 payload bytes и modes, платформу, архитектуру, major и ABI Node и native toolchain.
-Патч-версия Node в него не входит. Сборка воспроизводима: комментарии бандлов содержат
-пути от корня поколения, поэтому те же входы в любом каталоге дают тот же payload и
-buildId (проверено двумя сборками и тестом на отсутствие путей staging). Изменение
+Патч-версия Node в него не входит. Комментарии бандлов содержат пути от корня поколения. Служебные `.tsbuildinfo`
+могут учитывать пути компилятора и менять buildId при переносе; их hashes остаются
+частью полного integrity manifest. Защищённые lock, патчи и GLM compatibility от этого
+не меняются: [identity сборки](deepseek-build-identity.md). Изменение
 входов во время сборки запрещает готовый candidate.
 
 Проверки настоящего артефакта подтверждают `-V`, перенос в путь с пробелами, web
@@ -88,10 +84,10 @@ startup/cookie/settings RPC без ключа и prompt, а также ACP initi
 только для protocol frames. [Приватный settings-мост](deepseek-private-settings-bridge.md)
 проверяется отдельно по CAS, readback, restart owner и `max_tokens` HTTP payload
 обоих транспортов на loopback mock API. Публикация source snapshot запускает эти gates.
-Production default — embedded; отсутствующая generation даёт отказ до prompt.
-Доставка runtime при обновлении описана в [контракте публикации](../server/deepseek-release-transition.md).
+Отсутствующий ELF даёт отказ до prompt. Независимые установка и откат описаны
+в [контракте поставки](deepseek-binary.md).
 
 Исходные MIT copyright и licenses сохранены. Native BSD и npm notices учитываются
 отдельно; для libvips сохраняется опубликованная таблица лицензий и тексты LGPL/GPL.
 Отсутствующий в npm-пакете xterm MIT-файл взят из его закреплённого commit;
-происхождение и SHA-256 supplement находятся в `tools/deepseek-build/licenses/sources.json`.
+происхождение и SHA-256 supplement находятся в `deepseek/build/licenses/sources.json`.

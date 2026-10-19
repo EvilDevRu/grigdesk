@@ -12,18 +12,18 @@ import {
   discoverRuntimeClosure,
   readRuntimeComposition,
   runtimeYaml,
-} from '../../tools/runtimeComposition.ts';
+} from '../../deepseek/scripts/runtimeComposition.ts';
 import {
   assertKnownDynamicReferences,
   llmPiAiExternalDependencies,
   scanDynamicRuntimeReferences,
-} from '../../tools/deepseekBuildInputs.ts';
-import { writeDeepSeekLicenseInventory } from '../../tools/deepseekBuildLicenses.ts';
-import { deepSeekBuildInputs } from '../../tools/buildDeepSeekRuntime.mts';
+} from '../../deepseek/scripts/deepseekBuildInputs.ts';
+import { writeDeepSeekLicenseInventory } from '../../deepseek/scripts/deepseekBuildLicenses.ts';
+import { deepSeekBuildInputs } from '../../deepseek/scripts/buildRuntime.mts';
 
 const PLUGIN = '@deepseek-ai/dsh-llm-pi-ai';
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G1');
-const UPSTREAM = path.resolve(import.meta.dirname, '../../third_party/deepseek-harness/upstream');
+const UPSTREAM = path.resolve(import.meta.dirname, '../../deepseek/vendor/deepseek-harness/upstream');
 
 /**
  * Малый стенд проверяет обход manifests и фильтрацию YAML настоящими функциями сборки.
@@ -137,7 +137,7 @@ test('каждый внешний пакет closure pi-ai имеет лицен
   const root = await fs.mkdtemp(path.join(ARTIFACTS, 'licenses-'));
   const lock = runtimeYaml().load(await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'));
   const dependencies = llmPiAiExternalDependencies(lock);
-  const modules = path.resolve(import.meta.dirname, '../../tools/deepseek-build/node_modules');
+  const modules = path.resolve(import.meta.dirname, '../../deepseek/build/runtime-deps/node_modules');
   const compilerPackages = ['typescript', 'esbuild', '@esbuild'];
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -169,14 +169,14 @@ test('каждый внешний пакет closure pi-ai имеет лицен
 });
 
 test('license supplements входят в identity сборки и не разрешают соседнюю версию', async (t) => {
-  const directory = path.resolve(import.meta.dirname, '../../tools/deepseek-build/licenses');
+  const directory = path.resolve(import.meta.dirname, '../../deepseek/build/licenses');
   const sources = JSON.parse(await fs.readFile(path.join(directory, 'sources.json'), 'utf8'));
   const inputs = await deepSeekBuildInputs(path.dirname(UPSTREAM));
 
   for (const source of sources.files) {
     const bytes = await fs.readFile(path.join(directory, source.file));
 
-    assert.equal(inputs.hashes[`tools/deepseek-build/licenses/${source.file}`], sha256(bytes));
+    assert.equal(inputs.hashes[`deepseek/build/licenses/${source.file}`], sha256(bytes));
   }
 
   const root = await fs.mkdtemp(path.join(ARTIFACTS, 'unknown-license-'));
@@ -204,7 +204,7 @@ test('вычисляемый import вне dynamic-imports.json даёт отк�
 
   const references = await scanDynamicRuntimeReferences(root, [], [directory]);
   const known = JSON.parse(await fs.readFile(
-    path.resolve(import.meta.dirname, '../../tools/deepseek-build/dynamic-imports.json'), 'utf8',
+    path.resolve(import.meta.dirname, '../../deepseek/build/dynamic-imports.json'), 'utf8',
   ));
 
   assert.deepEqual(references, [{ file: `${directory}/loader.js`, expression: 'import(moduleId)' }]);

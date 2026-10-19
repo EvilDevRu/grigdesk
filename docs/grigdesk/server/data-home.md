@@ -30,6 +30,7 @@ GrigDesk хранит настройки и рабочие данные вне �
 | `lock` | `state/server.lock` | Владелец папки данных |
 | `pluginData` | `state/plugins` | Рабочие данные пользовательских плагинов |
 | `uiReleases` | `state/ui-releases` | Неизменяемые версии интерфейса окна |
+| `deepseekRuntime` | `runtimes/deepseek` | Приватный кэш распакованных поставок DeepSeek |
 | `mobileApk` | `state/mobile-apk` | APK, описание выпуска и журнал DevLink |
 | `mediaVenv` | `state/media-venv` | Python для речи |
 | `mediaHf` | `state/hf` | Модели речи |
@@ -53,10 +54,16 @@ GrigDesk хранит настройки и рабочие данные вне �
   `~/.local/share/grigdesk/desktop`, каталог данных окна `~/.config/GrigDesk`: это клиентская
   программа.
 - Разработка: Android SDK, Gradle, загрузки, ключи подписи APK и состояние DevLink. Неиспользуемые каталоги прежней конфигурации не удаляются.
-- Сборки и ресурсы кода: `node_modules`, `web/dist`, runtime DeepSeek,
+- Сборки и ресурсы кода: `node_modules`, `web/dist`, legacy generation DeepSeek,
   `server/seed/agents`, `third_party`, `bin/grigdesk-relay`, `desktop/release`.
   Обновлятель получает отдельный `--work-root <код>/.state` для временной копии git.
 - Homes внешних исполнителей: `~/.claude`, `~/.codex`, `~/.kimi-code`.
+
+Распакованная автономная поставка DeepSeek — данные в `runtimes/deepseek`,
+в отличие от legacy generation в дереве кода. Явный абсолютный `--cache-dir`
+выбирает другой приватный кэш; относительный путь отвергается без fallback.
+Внутри `packages/<packageId>/` лежат проверенные поколения. Они не удаляются
+автоматически при ошибке или появлении нового выпуска.
 
 ## Папка артефактов
 

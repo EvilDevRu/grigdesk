@@ -5,7 +5,7 @@
 подготовленный supplement для точной пары имени и версии и соответствующей declaration.
 Соседняя версия не получает разрешение автоматически. Отсутствующий notice остаётся ошибкой.
 
-Источники и SHA-256 текстов находятся в `tools/deepseek-build/licenses/sources.json`.
+Источники и SHA-256 текстов находятся в `deepseek/build/licenses/sources.json`.
 Там же записаны exact-версии и integrity npm-пакетов. Тексты сохранены в этой папке;
 сборка generation не скачивает их. Перед копированием writer проверяет SHA-256.
 Все supplements входят в fingerprint входов сборки, их копии — в payload generation.

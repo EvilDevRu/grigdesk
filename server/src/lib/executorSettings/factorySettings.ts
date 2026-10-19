@@ -4,6 +4,7 @@
 import path from 'node:path';
 
 import type { ExecutorAdapter } from '../executors/index.ts';
+import type { PreparedExecutorRuntime } from './types.ts';
 import { PrefsStore } from '../prefsStore.ts';
 import { prepareNativeSettings } from './launch.ts';
 
@@ -19,12 +20,14 @@ export async function prepareFactoryNativeSettings({
   prefsPath,
   cwd,
   mode,
+  preparedRuntime,
 }: {
   adapter: ExecutorAdapter;
   config: unknown;
   prefsPath: string;
   cwd: string;
   mode?: string;
+  preparedRuntime?: PreparedExecutorRuntime;
 }) {
   if (!prefsPath || !path.isAbsolute(prefsPath) || prefsPath.includes('\0')) {
     throw new Error('Factory требует абсолютный host-owned prefs path');
@@ -34,6 +37,7 @@ export async function prepareFactoryNativeSettings({
   const nativeSettings = await prepareNativeSettings(adapter, config, cwd, saved, {
     consumer: 'pipeline',
     mode,
+    preparedRuntime,
   });
 
   return { nativeSettings };

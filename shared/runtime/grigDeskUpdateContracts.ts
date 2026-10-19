@@ -35,6 +35,7 @@ export interface UpdateJob extends Record<string, unknown> {
   targetSha?: string | null;
   previousRunningInstanceId?: string | null;
   expectedRuntimeBuildId?: string | null;
+  expectedDeepSeekBinary?: string | null;
   previousRuntimeBuildId?: string | null;
   publicationStage?: string | null;
   backups?: Record<string, string | null> | null;

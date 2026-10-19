@@ -12,6 +12,8 @@ import {
   parseDeepSeekConfigOptions,
   readDeepSeekCatalog,
 } from '../../server/src/lib/deepseek/catalog.ts';
+import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
+
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import {
   deepSeekAuthProfileId,
@@ -43,7 +45,7 @@ test('парсер сохраняет opaque model id и берёт efforts то
   ]);
 });
 
-test('auth и cache key зависят от наличия ключа, но не раскрывают его', () => {
+test('auth и cache key зависят от наличия ключа, но не раскрывают его', async (t) => {
   const secret = 'synthetic-deepseek-key-never-print';
   assert.deepEqual(deepSeekAuth({}), {
     mode: 'env',
@@ -55,28 +57,32 @@ test('auth и cache key зависят от наличия ключа, но не
     label: 'ключ в окружении службы',
     available: true,
   });
-  const config = { deepseekRuntimeHome: '/tmp/deepseek-catalog-contract' };
-  const first = deepSeekCatalogCacheKey(config, { DEEPSEEK_API_KEY: secret });
-  const second = deepSeekCatalogCacheKey(config, { DEEPSEEK_API_KEY: `${secret}-other` });
+
+  const { binary, root } = await writeDeepSeekMetadataStub(t);
+  const config = { deepseekBin: binary, deepseekRuntimeHome: root };
+  const first = await deepSeekCatalogCacheKey(config, { DEEPSEEK_API_KEY: secret });
+  const second = await deepSeekCatalogCacheKey(config, { DEEPSEEK_API_KEY: `${secret}-other` });
   assert.notEqual(first, second);
   assert.equal(first.includes(secret), false);
-  assert.match(first, /0\.1\.5-rc\.2/u);
+  assert.match(first, /9\.2\.0/u);
 });
 
 test('metadata probe делает initialize/new/close без prompt и возвращает каталог', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-catalog-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const metadata = JSON.parse(await fs.readFile(METADATA, 'utf8'));
+  const { binary } = await writeDeepSeekMetadataStub(t);
   const scenarioFile = path.join(root, 'scenario.json');
   const logFile = path.join(root, 'fake.ndjson');
   await fs.writeFile(scenarioFile, JSON.stringify({ configOptions: metadata.configOptions }));
+
   const result = await readDeepSeekCatalog({
-    config: { deepseekRuntimeHome: root, deepseekBin: '/synthetic/dsh' },
+    config: { deepseekRuntimeHome: root, deepseekBin: binary },
     env: { ...process.env, DEEPSEEK_API_KEY: 'synthetic-catalog-key' },
   }, {
-    spawnProcess: () => spawn(process.execPath, [
+    spawnProcess: (_command, _args, options) => spawn(process.execPath, [
       FAKE_ACP, '--scenario', scenarioFile, '--log', logFile,
-    ], { stdio: ['pipe', 'pipe', 'pipe'] }),
+    ], { detached: options.detached, stdio: ['pipe', 'pipe', 'pipe'] }),
   });
   assert.equal(result.models.length, 4);
   const methods = (await fs.readFile(logFile, 'utf8')).trim().split('\n').map(JSON.parse)
@@ -87,12 +93,12 @@ test('metadata probe делает initialize/new/close без prompt и возв
   // Повторный probe в том же runtime home: синтетический project с `.git` уже существует,
   // и это не должно ронять каталог обратно в seed или оставлять launch-каталоги.
   const again = await readDeepSeekCatalog({
-    config: { deepseekRuntimeHome: root, deepseekBin: '/synthetic/dsh' },
+    config: { deepseekRuntimeHome: root, deepseekBin: binary },
     env: { ...process.env, DEEPSEEK_API_KEY: 'synthetic-catalog-key' },
   }, {
-    spawnProcess: () => spawn(process.execPath, [
+    spawnProcess: (_command, _args, options) => spawn(process.execPath, [
       FAKE_ACP, '--scenario', scenarioFile, '--log', logFile,
-    ], { stdio: ['pipe', 'pipe', 'pipe'] }),
+    ], { detached: options.detached, stdio: ['pipe', 'pipe', 'pipe'] }),
   });
   assert.equal(again.models.length, 4);
 

@@ -2,7 +2,7 @@
 // Служебный run и runUntrusted не наследуют этот путь через общее чтение prefs.
 
 import type { ExecutorAdapter } from '../executors/index.ts';
-import type { AcceptedNativeSetting, PreparedNativeSettings } from './types.ts';
+import type { AcceptedNativeSetting, PreparedNativeSettings, PreparedExecutorRuntime } from './types.ts';
 import { ProviderSettingsCatalogCache } from './catalog.ts';
 import { nativeSettingsContext } from './context.ts';
 import { readNativeSettingsStorage } from './overrides.ts';
@@ -42,10 +42,12 @@ export async function prepareNativeSettings(
     consumer = 'chat',
     cache = chatCatalogCache,
     mode,
+    preparedRuntime,
   }: {
     consumer?: SettingsConsumer;
     cache?: ProviderSettingsCatalogCache;
     mode?: string;
+    preparedRuntime?: PreparedExecutorRuntime;
   } = {},
 ): Promise<PreparedNativeSettings | undefined> {
   const storage = readNativeSettingsStorage(allSaved, adapter.id);
@@ -64,7 +66,7 @@ export async function prepareNativeSettings(
     throw new NativeSettingsError('settings_unavailable', 503, 'Источник нативных настроек недоступен');
   }
 
-  const baseContext = await nativeSettingsContext(adapter, config, undefined, consumer);
+  const baseContext = await nativeSettingsContext(adapter, config, undefined, consumer, preparedRuntime);
 
   if (mode) {
     baseContext.mode = mode;
@@ -104,7 +106,7 @@ export async function prepareNativeSettings(
     return undefined;
   }
 
-  const context = await nativeSettingsContext(adapter, config, cwd, consumer);
+  const context = await nativeSettingsContext(adapter, config, cwd, consumer, preparedRuntime);
 
   if (mode) {
     context.mode = mode;
@@ -204,6 +206,11 @@ export function prepareChatNativeSettings(
   cwd: string,
   allSaved: unknown,
   cache = chatCatalogCache,
+  preparedRuntime?: PreparedExecutorRuntime,
 ): Promise<PreparedNativeSettings | undefined> {
-  return prepareNativeSettings(adapter, config, cwd, allSaved, { consumer: 'chat', cache });
+  return prepareNativeSettings(adapter, config, cwd, allSaved, {
+    consumer: 'chat',
+    cache,
+    preparedRuntime,
+  });
 }

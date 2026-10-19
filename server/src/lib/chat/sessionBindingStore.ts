@@ -193,6 +193,7 @@ export class ChatSessionBindingStore {
   async compareAndSwap(
     input: BindingInput,
     expectedGeneration: number | null = null,
+    options: { legacySecurityProfiles?: readonly string[] } = {},
   ): Promise<BindingRecord> {
     return this._serialized(async () => {
       const chatKey = requiredText(input?.chatKey, 'chatKey');
@@ -206,7 +207,14 @@ export class ChatSessionBindingStore {
           actualGeneration: actual,
         });
       }
-      if (current && !sameIdentity(current, identity) && input?.sessionId) {
+
+      const legacyProfile = current && options.legacySecurityProfiles?.includes(current.securityProfile)
+        && REQUIRED_IDENTITY.filter((field) => field !== 'securityProfile')
+          .every((field) => current[field as keyof BindingIdentity]
+            === identity[field as keyof BindingIdentity])
+        && input.sessionId === current.sessionId;
+
+      if (current && !sameIdentity(current, identity) && input?.sessionId && !legacyProfile) {
         throw new BindingStoreError('binding_identity_changed', 'нельзя перенести sessionId между профилями binding');
       }
       const sessionId = input?.sessionId == null ? null : requiredText(input.sessionId, 'sessionId');

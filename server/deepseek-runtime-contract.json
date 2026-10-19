@@ -1,5 +1,5 @@
 {
   "format": 1,
-  "publishContract": 1,
-  "mode": "embedded"
+  "publishContract": 2,
+  "mode": "binary"
 }

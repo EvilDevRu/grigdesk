@@ -1,4 +1,4 @@
-# Профиль запуска GLM на встроенной сборке DSH
+# Профиль запуска GLM на общей сборке DSH
 
 Процесс GLM — штатный web- (ход) или ACP-профиль (каталог) общей generation DSH с
 server-owned overlay. Overlay и hooks строит общий `buildLaunchFiles` с вариантом GLM;
@@ -32,11 +32,15 @@ server-owned overlay. Overlay и hooks строит общий `buildLaunchFiles
 
 ## Homes и запуск
 
-- Home чата — `<корень homes>/<identity[:16]>/<sha256(chatKey)>`, отдельно от homes DeepSeek;
-  смена identity сборки даёт новый home. Каталог запуска —
-  `<корень homes>/<identity[:16]>/turns/<uuid>`. Каталоги 0700, файлы 0600.
+- Binary home чата — `<корень homes GLM>/chats/<sha256(chatKey)>`, marker принадлежит GLM,
+  каталог запуска — `turns/<uuid>` внутри home. Обновление/откат совместимого ELF сохраняет
+  память. Переходная embedded-ветка использует прежний compatibility prefix:
+  `<корень homes>/<compatibility[:16]>/<sha256(chatKey)>` и
+  `<корень homes>/<compatibility[:16]>/turns/<uuid>`. Каталоги 0700, файлы 0600.
 - Окружение процесса — общий allowlist и `GRIGDESK_GLM_ROUTE_KEY`; `.env` проекта и home ключ
   маршрута не меняют (окружение процесса приоритетнее).
 - Отпечаток запуска — sha256 версии DSH, `GLM_PROFILE_REVISION`, overlay и hooks.
 - Остановка завершает только свой процесс (порт закрывается) и удаляет каталог запуска;
   home с журналом сессии сохраняется. Простой ход делает ровно один модельный запрос.
+
+Настоящий binary-путь проверяет [общий набор GLM parity](glm-binary-parity.md).

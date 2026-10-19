@@ -1,18 +1,18 @@
 # Снимок исходников DeepSeek
 
-`third_party/deepseek-harness/` закрепляет выбранный набор DeepSeek Harness `0.1.5-rc.2`,
+`deepseek/vendor/deepseek-harness/` закрепляет выбранный набор DeepSeek Harness `0.1.5-rc.2`,
 commit `c291e7961a515f6d7af9304e7fd1d257929aef26`: 181 выбранный корень, 2490 файлов,
 22 726 718 байт. Состав и настоящая host-сборка описаны в
 [отчёте композиции](deepseek-vendored-composition.md). Чаты и конвейеры используют
-встроенное проверенное поколение.
+автономный ELF, который включает проверенное поколение.
 
 ## Что лежит в Git, а что в кэше
 
 В Git хранятся только `upstream.lock.json`, `patches/`, `LICENSE` и `THIRD_PARTY_NOTICES.md`.
-Сами исходники `upstream/` — игнорируемый кэш: `npm --prefix server run deepseek:prepare`
-подготавливает его по manifest перед сборкой. Источник по порядку: проверенная копия
-(`GRIGDESK_DEEPSEEK_UPSTREAM_SEED`, её передаёт update worker из кэша установки), локальный
-Git с нужным commit или сеть (`git fetch --depth 1` точного SHA из закреплённого repository).
+Сами исходники `upstream/` — игнорируемый кэш, который перед сборкой пакета явно
+подготавливает `materializeDeepSeekSnapshot`: [команды чистого checkout](../../../deepseek/README.md).
+Функция принимает проверяемый `seedDir` или локальный Git `sourceDir` с нужным commit;
+иначе получает точный SHA из закреплённого repository. Update worker исходники не готовит.
 Каждый извлечённый файл сверяется с Git blob ID и SHA-256 из manifest; любое расхождение
 отвергает commit, прежний кэш не трогается. Испорченный или неполный кэш заменяется целиком
 проверенной копией. Без подготовленного кэша сборка отказывает с командой подготовки.
@@ -27,7 +27,7 @@ notices upstream охватывают его полный проект, а не 
 
 ## Подготовка и публикация обновления
 
-`tools/syncDeepSeekHarness.mts` требует явный полный `--commit`. Прежний снимок сначала
+`deepseek/scripts/syncDeepSeekHarness.mts` требует явный полный `--commit`. Прежний снимок сначала
 подготавливается по своему manifest (из `--source-dir`, если там есть его commit, иначе по
 сети). Подготовка создаёт staging и JSON recipe, показывает added/changed/deleted, включая
 изменения executable mode. `--source-dir` читает Git objects локального репозитория без
@@ -38,10 +38,10 @@ source-dir не используются. Для первичного импор
 Публикация — отдельная команда с тем же SHA:
 
 ```bash
-node tools/syncDeepSeekHarness.mts --commit "$upstream_sha" \
+node deepseek/scripts/syncDeepSeekHarness.mts --commit "$upstream_sha" \
   --candidate "$candidate_file"
 
-node tools/syncDeepSeekHarness.mts --commit "$upstream_sha" \
+node deepseek/scripts/syncDeepSeekHarness.mts --commit "$upstream_sha" \
   --publish "$candidate_file"
 ```
 

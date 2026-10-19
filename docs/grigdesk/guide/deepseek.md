@@ -1,40 +1,31 @@
 # DeepSeek Harness
 
-DeepSeek входит в GrigDesk: выбранные исходники Harness `0.1.5-rc.2` закреплены
-commit `c291e7961a515f6d7af9304e7fd1d257929aef26` и собираются при общей подготовке.
-Чат использует штатный профиль `web` и его серверный RPC/events на loopback;
-каталог моделей и Factory используют ACP.
-Каждая сборка содержит собственные зависимости, ресурсы и лицензии. API-ключ
-остаётся только в окружении сервиса.
+DeepSeek и GLM используют автономный бинарник `bin/deepseek`, собранный пакетом
+`deepseek/`. В нём закреплённые Harness, worker Node, зависимости и лицензии. Чат использует
+web RPC/events на loopback, каталог моделей и Factory — ACP. Ключи остаются в данных службы.
 
 ## Установка
 
-Отдельная установка DSH не требуется. Штатные установка, обновление и подготовка
-GrigDesk собирают runtime; из корня можно выполнить:
+Сборка из чистого checkout и подготовка pinned dependencies описаны в
+[README пакета](../../../deepseek/README.md). После сборки в отдельный каталог:
 
 ```bash
-bin/grigdesk-ctl deps
-bin/grigdesk-ctl build
-```
-
-Артефакт находится в `server/runtime/deepseek/builds/<buildId>/`, указатель `current`
-выбирает поколение. Исходники Harness в Git не хранятся: первая подготовка скачивает
-закреплённый commit в игнорируемый кэш `third_party/deepseek-harness/upstream/` и сверяет
-каждый файл с manifest. Повторная подготовка проверяет входы и переиспользует исправную
-сборку без сети. Сбой подготовки DeepSeek не мешает запуску остального GrigDesk.
-Первый prompt ничего не устанавливает. Адресная подготовка и проверка:
-
-```bash
-npm --prefix server run deepseek:prepare
-node server/scripts/prepareDeepSeekRuntime.mts --check
+npm --prefix deepseek run install:binary -- --binary /absolute/release/deepseek \
+  --target bin/deepseek --host-contract server/deepseek-host-contract.json
 node server/scripts/deepseekRuntimeInfo.mts --probe
 ```
 
-Probe сообщает версию вида `0.1.5-rc.2.grigdesk.b<hash16>`; buildId различает сборки
-одного upstream. Нужны Node `^22.19.0 || >=24.0.0`, npm, C compiler, Node headers и
-native prerequisites зависимостей; для Linux sandbox — bubblewrap. Проверены Linux
-x64/glibc и Node 22.22.1. Другие платформы и Node 24 этой проверкой не подтверждены.
-Состав и лицензии описаны в [композиции runtime](../chat/deepseek-vendored-composition.md).
+Первый переход требует обновления сервера и ручного перезапуска владельцем. Последующие
+совместимые замены ELF не требуют перезапуска: текущий ход завершится на прежнем бинарнике,
+следующий получит новый. `grigdesk-ctl deps` и обновление GrigDesk проверяют поставку,
+а Harness не собирают. Отсутствующий ELF не мешает остальным исполнителям.
+
+Harness не требует системного Node. Поддерживается Linux x64/glibc; shell, bubblewrap
+и средства управляемых команд остаются требованиями инструментов. Первая распаковка
+занимает время и диск; приватные поколения кэша пока не удаляются автоматически.
+`GRIGDESK_DEEPSEEK_BIN` задаёт абсолютный путь другого совместимого ELF GrigDesk.
+Stock `dsh` и режимы `installed`/`external` не поддерживаются.
+[Состав](../chat/deepseek-vendored-composition.md) и [поставка](../chat/deepseek-binary.md).
 
 Ключ задаётся в «Настройки → Исполнители → DeepSeek → Ключи доступа». Сервер записывает
 `DEEPSEEK_API_KEY` в `.env` папки данных GrigDesk и сразу применяет его без перезапуска
@@ -168,17 +159,13 @@ preflight и disposable-smoke обоих файловых режимов. Док
 
 ## Обновление и откат
 
-Runtime обновляется вместе с GrigDesk. Старый updater сначала требует совместимый
-промежуточный релиз: [переход и восстановление обновления](../server/deepseek-release-transition.md).
-Обновление исходников использует явный полный SHA, отдельный review candidate и
-обязательные compiled gates. Публикация snapshot не переключает работающий runtime.
-Порядок сборки, активации, совместимого отката и копирования журналов:
-[обновление upstream и откат](../chat/deepseek-upstream-update-rollback.md).
+Бинарник обновляется отдельно от GrigDesk. Откат — установка прежнего ELF тем же
+установщиком. Совместимый журнал сохраняет сессию и память; несовместимый вызывает новую
+сессию с заметкой, сохраняя ленту. Первый переход переносит legacy home по identity
+установленного прежнего runtime. Обновление upstream требует source review, compiled gates
+и отдельного допуска изменившегося GLM compatibility; любой будущий upstream автоматически
+совместимым не считается. [Обновление и откат](../chat/deepseek-upstream-update-rollback.md).
 
-`GRIGDESK_DEEPSEEK_BIN` остаётся явным диагностическим override для внешнего pinned
-`0.1.5-rc.2`. Автоматического fallback на установленный DSH или PATH нет. Внешний
-ACP без приватного settings-моста не допускает pipeline с активными общими overrides.
-Неисправный embedded artifact запрещает prompt; боевые маршруты автоматически не меняются.
-
-Технические доказательства pinned-версии и точные ограничения собраны в
+Нативные настройки требуют metadata приватного ACP-моста. Неисправный ELF даёт отказ
+до prompt; автоматического fallback нет. Технические ограничения —
 [DEEPSEEK.md](../../engine/DEEPSEEK.md).

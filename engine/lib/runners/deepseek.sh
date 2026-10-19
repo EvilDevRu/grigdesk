@@ -16,79 +16,38 @@ _runner_deepseek_node() {
   printf '%s\n' "$node"
 }
 
-_runner_deepseek_embedded() {
-  [[ -z "${GRIGDESK_DEEPSEEK_BIN:-}" ]] || return 1
-  local mode=${GRIGDESK_DEEPSEEK_RUNTIME_MODE:-}
-  if [[ -z "$mode" ]]; then
-    local node
-    node=$(_runner_deepseek_node) || return 4
-    mode=$("$node" --input-type=module -e '
-      const { deepSeekDistributionMode } = await import(process.argv[1]);
-      console.log(deepSeekDistributionMode(process.argv[2]));
-    ' "$FACTORY_HOME/../server/src/lib/deepseek/distribution.ts" \
-      "$FACTORY_HOME/../server/deepseek-runtime-contract.json" 2>/dev/null) || mode=embedded
-  fi
-  [[ -z "${GRIGDESK_DEEPSEEK_BIN:-}" ]] &&
-    [[ "$mode" == embedded ||
-       -n "${GRIGDESK_DEEPSEEK_ARTIFACT_DIR:-}" ]]
-}
-
 # Metadata helper использует тот же Node и descriptor, что рабочий процесс.
 # Здесь нет API key, settings home, model call или автоматической сборки.
+# Offline отказ126 сохраняется; недоступный CLI даёт штатный runner-код4.
 _runner_deepseek_runtime_info() {
-  local node
+  local node rc
   node=$(_runner_deepseek_node) || return 4
-  factory_exec local "$node" "$FACTORY_HOME/../server/scripts/deepseekRuntimeInfo.mts" "$@"
+  factory_exec provider "$node" "$FACTORY_HOME/../server/scripts/deepseekRuntimeInfo.mts" "$@"
+  rc=$?
+  if [[ "$rc" == 0 || "$rc" == 126 ]]; then
+    return "$rc"
+  fi
+  return 4
 }
 
 runner_deepseek_refresh_probe() {
-  _runner_deepseek_embedded
+  return 0
 }
 
+# Только наш абсолютный binary; stock dsh и PATH не участвуют в выборе исполнителя.
+# Metadata остаются обязательными и для явно переданного override.
 _runner_deepseek_bin() {
-  local candidate runtime_home state_root
-  if [[ -n "${GRIGDESK_DEEPSEEK_BIN:-}" ]]; then
-    [[ -x "$GRIGDESK_DEEPSEEK_BIN" && ! -d "$GRIGDESK_DEEPSEEK_BIN" ]] || return 4
-    printf '%s\n' "$GRIGDESK_DEEPSEEK_BIN"
-    return 0
-  fi
-
-  state_root=${FACTORY_STATE:-${STATE_DIR:-${HOME:?}/.factory/state}}
-  runtime_home=${GRIGDESK_DEEPSEEK_RUNTIME_HOME:-"$state_root/grigdesk-deepseek"}
-  candidate="$runtime_home/install/current/node_modules/.bin/dsh"
-  if [[ -x "$candidate" && ! -d "$candidate" ]]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-  command -v dsh 2>/dev/null || return 4
+  local candidate=${GRIGDESK_DEEPSEEK_BIN:-"$FACTORY_HOME/../bin/deepseek"}
+  [[ "$candidate" == /* && -x "$candidate" && ! -d "$candidate" ]] || return 4
+  printf '%s\n' "$candidate"
 }
 
 runner_deepseek_probe() {
-  local bin version
-  if _runner_deepseek_embedded; then
-    _runner_deepseek_runtime_info --probe
-    return
-  fi
-  bin=$(_runner_deepseek_bin) || return 4
-  version=$(factory_exec provider "$bin" -V) || return
-  version=${version%%[[:space:]]*}
-  [[ "$version" == 0.1.5-rc.2 ]] || return 4
-  printf '%s\n' "$version"
+  _runner_deepseek_runtime_info --probe
 }
 
 runner_deepseek_catalog() {
-  if _runner_deepseek_embedded; then
-    _runner_deepseek_runtime_info --catalog
-    return
-  fi
-  # Opaque ACP ids и их доступность сняты pinned metadata-probe P0. У id нет
-  # стабильного family metadata, поэтому family честно `default`; release задаёт
-  # только default (V4 Flash), а не сравнительную «силу» моделей.
-  printf '%s\n' \
-    $'["deepseek-official","deepseek-v4-flash"]\tdeepseek\tdefault\t1\tdefault\t100\t1\t0\t1\t0.1.5-rc.2\t0.1.5-rc.2' \
-    $'["deepseek-official","deepseek-v4-pro"]\tdeepseek\tdefault\t1\tdefault\t90\t1\t0\t1\t0.1.5-rc.2\t0.1.5-rc.2' \
-    $'["deepseek-official","deepseek-flash"]\tdeepseek\tdefault\t1\tdefault\t80\t1\t0\t1\t0.1.5-rc.2\t0.1.5-rc.2' \
-    $'["deepseek-official","deepseek-v4-flash-vision-exp"]\tdeepseek\tdefault\t1\tdefault\t70\t1\t0\t1\t0.1.5-rc.2\t0.1.5-rc.2'
+  _runner_deepseek_runtime_info --catalog
 }
 
 runner_deepseek_default_policy() {
@@ -119,7 +78,7 @@ _runner_deepseek_model_valid() {
 runner_deepseek_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   local mode bin node wrapper prompt_dir prompt_file runtime_home cwd descriptor
-  local generation='' runtime_identity='' runtime_version=''
+  local generation='' runtime_identity='' runtime_version='' runner_version='' cache_dir=''
 
   case "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" in
     state-only) mode=read-only ;;
@@ -144,32 +103,36 @@ runner_deepseek_run() {
   [[ "$timeout_s" =~ ^[1-9][0-9]*$ && "$run_dir" == /* ]] || return 4
 
   node=$(_runner_deepseek_node) || return 4
-  if _runner_deepseek_embedded; then
+  {
     descriptor=$(_runner_deepseek_runtime_info) || return 4
     local -a fields=()
     mapfile -t fields < <(printf '%s' "$descriptor" | "$node" --input-type=module -e '
       let data = "";
       for await (const chunk of process.stdin) data += chunk;
       const runtime = JSON.parse(data);
-      const fields = [runtime.command, runtime.generationDir, runtime.identity, runtime.runtimeVersion];
-      if (runtime.kind !== "embedded" || fields.some(v => typeof v !== "string" || /[\r\n\0]/u.test(v))) {
+      const cache = runtime.kind === "binary"
+        ? runtime.prefixArgs[runtime.prefixArgs.indexOf("--cache-dir") + 1] : "";
+      const fields = [runtime.command, runtime.generationDir ?? "", runtime.identity,
+        runtime.runtimeVersion, runtime.runnerVersion, cache];
+      if (runtime.kind !== "binary"
+        || fields.some(v => typeof v !== "string" || /[\r\n\0]/u.test(v))) {
         process.exit(4);
       }
       console.log(fields.join("\n"));
     ')
-    [[ "${#fields[@]}" == 4 ]] || return 4
+    [[ "${#fields[@]}" == 6 ]] || return 4
     bin=${fields[0]}
     generation=${fields[1]}
     runtime_identity=${fields[2]}
     runtime_version=${fields[3]}
+    runner_version=${fields[4]}
+    cache_dir=${fields[5]}
     if [[ -n "${FACTORY_RUNNER_VERSION:-}" &&
-          "$FACTORY_RUNNER_VERSION" != "$runtime_version" ]]; then
+          "$FACTORY_RUNNER_VERSION" != "$runner_version" ]]; then
       printf 'FACTORY_ERROR=runtime_changed RUNNERS=deepseek\n' >&2
       return 4
     fi
-  else
-    bin=$(_runner_deepseek_bin) || return 4
-  fi
+  }
   wrapper="$FACTORY_HOME/../server/scripts/deepseekRunner.mts"
   [[ -f "$wrapper" ]] || return 4
   cwd=$(realpath -e -- "$PWD" 2>/dev/null) || return 4
@@ -194,9 +157,11 @@ runner_deepseek_run() {
   )
   [[ -z "$effort" ]] || args+=(--effort "$effort")
   if [[ -n "$generation" ]]; then
-    args+=(--artifact-dir "$generation" --runtime-identity "$runtime_identity"
-      --runtime-version "$runtime_version")
+    args+=(--artifact-dir "$generation")
   fi
+  [[ -z "$runtime_identity" ]] || args+=(--runtime-identity "$runtime_identity"
+    --runtime-version "$runtime_version")
+  [[ -z "$cache_dir" ]] || args+=(--cache-dir "$cache_dir")
 
   # Prompt остаётся private-файлом, status identity — только server-owned env.
   # RUNNER_DEEPSEEK_ADD_DIRS намеренно не становится дополнительной writable root.

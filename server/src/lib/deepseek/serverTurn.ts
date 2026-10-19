@@ -233,6 +233,9 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     signal: options.signal,
   });
   let server = await start();
+  let promptAttempted = false;
+  let cleanupSession: string | undefined;
+  let cleanupSteps: ChatStep[] | undefined;
 
   try {
     checkpoint();
@@ -252,6 +255,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
     const sessionId = await server.client.createSession(options.cwd, options.sessionId);
 
+    cleanupSession = sessionId;
     checkpoint();
     await options.onSessionCreated?.(sessionId);
     checkpoint();
@@ -273,6 +277,9 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
     let cancellation: Promise<void> | null = null;
     const sink = createStepSink(options.onStep);
+
+    cleanupSteps = sink.steps;
+
     const thoughts = createDeepSeekServerThoughtNormalizer();
     const drafts = new Map<string, string>();
     const completed = new Set<string>();
@@ -685,6 +692,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       if (failure) throw failure;
 
       options.onPromptAttempted?.();
+      promptAttempted = true;
       await server.client.prompt(sessionId, options.message, randomUUID(), 'queue');
 
       const port: InTurnPort = {
@@ -764,6 +772,18 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       remote.close();
     }
   } finally {
-    await server.stop();
+    try {
+      await server.stop();
+    } catch (error) {
+      if (error && typeof error === 'object') {
+        Object.assign(error, {
+          retryState: promptAttempted ? 'post_prompt' : 'pre_prompt',
+          ...(cleanupSession ? { sessionId: cleanupSession } : {}),
+          ...(cleanupSteps ? { steps: cleanupSteps } : {}),
+        });
+      }
+
+      throw error;
+    }
   }
 }

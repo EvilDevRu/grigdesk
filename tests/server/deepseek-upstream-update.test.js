@@ -8,7 +8,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import { prepareDeepSeekSync, publishDeepSeekSync, verifyDeepSeekSnapshot }
-  from '../../tools/deepseekVendorManifest.ts';
+  from '../../deepseek/scripts/deepseekVendorManifest.ts';
 
 const exec = promisify(execFile);
 // Корень репозитория не зависит от cwd: `npm test` запускает набор из server/.
@@ -19,7 +19,7 @@ test('настоящий новый SHA проходит build/transport gates; 
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-upstream-update-'));
     const sourceDir = path.join(root, 'source');
     const vendorDir = path.join(root, 'vendor');
-    const installedVendor = path.join(REPO_ROOT, 'third_party/deepseek-harness');
+    const installedVendor = path.join(REPO_ROOT, 'deepseek/vendor/deepseek-harness');
     const git = async (...args) => (await exec('git', ['-C', sourceDir, ...args])).stdout.trim();
 
     t.after(() => fs.rm(root, { recursive: true, force: true }));

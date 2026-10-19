@@ -36,6 +36,7 @@ const DATA_ROOT_DIRS = new Set(['agents', 'telegram', 'github', 'plugins', 'rout
 // Область плана: у каждой свой владелец правок и свой этап. Порядок важен —
 // файл относится к ПЕРВОЙ подошедшей области, поэтому вложенные пути идут выше.
 const AREAS: readonly { id: string; prefix: string }[] = [
+    { id: 'deepseek', prefix: 'deepseek/' },
     { id: 'b24', prefix: 'b24/' },
     { id: 'bin', prefix: 'bin/' },
     { id: 'cli', prefix: 'cli/' },
@@ -134,7 +135,9 @@ function walk(dir: string, out: string[] = [], root: string = dir): string[] {
             if (SKIP_DIRS.has(entry.name)
                 || (dir === root && DATA_ROOT_DIRS.has(entry.name))
                 || nestedPath === 'desktop/release'
-                || nestedPath === 'b24/.cache') {
+                || nestedPath === 'b24/.cache'
+                || nestedPath === 'deepseek/.cache'
+                || nestedPath === 'deepseek/vendor') {
                 continue;
             }
 

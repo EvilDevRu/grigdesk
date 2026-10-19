@@ -13,6 +13,7 @@ export const DATA_LAYOUT = {
   lock: 'state/server.lock',
   pluginData: 'state/plugins',
   uiReleases: 'state/ui-releases',
+  deepseekRuntime: 'runtimes/deepseek',
   mobileApk: 'state/mobile-apk',
   mediaVenv: 'state/media-venv',
   mediaHf: 'state/hf',

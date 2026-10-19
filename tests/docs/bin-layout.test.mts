@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync, closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, statSync,
-  writeFileSync,
+  writeFileSync, symlinkSync, lstatSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,11 +16,12 @@ const REPO = new URL('../../', import.meta.url);
 // команда, иконка ярлыка и собранные файлы (b24, посредник и установленное окно), которые в git
 // не попадают.
 const COMMANDS = ['grigdesk-ctl'];
-const BUILT = ['b24', 'grigdesk-relay', 'grigdesk-app'];
-const ALLOWED = new Set([...COMMANDS, ...BUILT, 'grigdesk.png']);
+const BUILT = ['b24', 'deepseek', 'grigdesk-relay', 'grigdesk-app'];
+const RECEIPT = 'deepseek.grigdesk-deepseek.json';
+const ALLOWED = new Set([...COMMANDS, ...BUILT, 'grigdesk.png', RECEIPT]);
 
-// Эти собранные файлы проверяются по содержимому: ELF с правами 0755 либо отсутствие.
-const ELF_BUILT = ['b24', 'grigdesk-app'];
+// ELF сборки имеет 0755; установленный DeepSeek публикуется без записи, с правами 0555.
+const ELF_BUILT = ['b24', 'deepseek', 'grigdesk-app'];
 
 // Скрипты, которым bin/grigdesk-ctl передаёт `desktop`, `mobile` и `release`. Им нужен
 // бит исполнения: команда зовёт их через exec, а не через bash. b24 — собранный файл или исходник.
@@ -27,7 +29,8 @@ const DELEGATED = ['deploy/desktop.sh', 'tools/mobile', 'tools/release'];
 
 /**
  * Проверяет каталог bin: только разрешённые имена, исполняемая команда grigdesk-ctl, а
- * собранный b24 и окно — только ELF с правами 0755. Их отсутствие до сборки — штатно.
+ * ELF имеет права сборки либо readonly установки DeepSeek. Квитанция не становится
+ * командой агента: только обычный приватный файл; отсутствие ELF до установки штатно.
  */
 function binProblems(directory: string): string[] {
   const problems = readdirSync(directory).filter((name) => !ALLOWED.has(name))
@@ -59,8 +62,24 @@ function binProblems(directory: string): string[] {
       problems.push(`${name} не ELF`);
     }
 
-    if ((statSync(file).mode & 0o777) !== 0o755) {
-      problems.push(`${name} без прав 0755`);
+    const mode = statSync(file).mode & 0o777;
+
+    if (mode !== 0o755 && !(name === 'deepseek' && mode === 0o555)) {
+      const expected = name === 'deepseek' ? '0755 или 0555' : '0755';
+
+      problems.push(`${name} без прав ${expected}`);
+    }
+  }
+
+  if (readdirSync(directory).includes(RECEIPT)) {
+    const receipt = lstatSync(path.join(directory, RECEIPT));
+
+    if (!receipt.isFile()) {
+      problems.push('квитанция DeepSeek не обычный файл');
+    }
+
+    if ((receipt.mode & 0o777) !== 0o600) {
+      problems.push('квитанция DeepSeek без прав 0600');
     }
   }
 
@@ -118,6 +137,49 @@ test('BD-02: окно в bin/ допустимо только как ELF с пр
   writeFileSync(path.join(directory, '.grigdesk-app.Ab12Cd'), '');
   assert.deepEqual(binProblems(directory),
     ['лишний файл .grigdesk-app.Ab12Cd', 'grigdesk-app без прав 0755']);
+});
+
+test('BD-03: установленный DeepSeek — ELF 0555 и только приватная обычная квитанция', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'deepseek-bin-layout-'));
+  const binary = path.join(directory, 'deepseek');
+  const receipt = path.join(directory, 'deepseek.grigdesk-deepseek.json');
+
+  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
+  writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o555 });
+  writeFileSync(receipt, '{}\n', { mode: 0o600 });
+  assert.deepEqual(binProblems(directory), []);
+
+  chmodSync(binary, 0o755);
+  assert.deepEqual(binProblems(directory), []);
+  chmodSync(binary, 0o777);
+  assert.ok(binProblems(directory).includes('deepseek без прав 0755 или 0555'));
+  chmodSync(binary, 0o555);
+  chmodSync(receipt, 0o755);
+  assert.ok(binProblems(directory).includes('квитанция DeepSeek без прав 0600'));
+
+  const linked = mkdtempSync(path.join(os.tmpdir(), 'deepseek-bin-link-'));
+
+  writeFileSync(path.join(linked, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
+  symlinkSync(receipt, path.join(linked, 'deepseek.grigdesk-deepseek.json'));
+  assert.ok(binProblems(linked).includes('квитанция DeepSeek не обычный файл'));
+  writeFileSync(path.join(linked, 'foreign.json'), '{}');
+  assert.ok(binProblems(linked).includes('лишний файл foreign.json'));
+});
+
+test('BD-04: состояние установки DeepSeek игнорируется Git только по закрытым именам', () => {
+  const cwd = fileURLToPath(REPO);
+
+  for (const relative of [
+    'bin/deepseek.grigdesk-deepseek.json',
+    'bin/deepseek.install-lock/owner.json',
+    'bin/.deepseek-install-Ab12Cd/receipt.json',
+  ]) {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', relative], { cwd });
+  }
+
+  assert.throws(() => execFileSync('git', [
+    'check-ignore', '-q', '--no-index', 'bin/foreign.json',
+  ], { cwd }), { status: 1 });
 });
 
 test('иконка ярлыка совпадает с иконкой интерфейса', () => {

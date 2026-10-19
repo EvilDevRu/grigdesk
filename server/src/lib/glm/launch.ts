@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { ensurePrivateDir } from '../deepseek/env.ts';
+import { chatHomeFor, ensureHarnessChatHome, ensurePrivateDir } from '../deepseek/env.ts';
 import { readProjectMcpServers } from '../deepseek/projectMcp.ts';
 import type { DeepSeekRuntimeDescriptor } from '../deepseek/runtimeProcess.ts';
 import { startDeepSeekServer } from '../deepseek/serverRuntime.ts';
@@ -11,6 +11,7 @@ import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from '../deeps
 import { assertGlmRuntimeHome } from './env.ts';
 import { glmMcpStartupError, selectGlmMcpServers } from './mcp.ts';
 import { buildGlmLaunchFiles } from './profile.ts';
+import { adoptLegacyChatHome } from '../deepseek/legacyCutover.ts';
 import type { GlmLaunchFilesOptions } from './profile.ts';
 
 export const GLM_WORK_SERVER = 'grigdesk-work';
@@ -21,16 +22,34 @@ export interface GlmLaunchOptions extends Omit<GlmLaunchFilesOptions, 'launchDir
   chatKey: string;
   launchDir?: string;
   warn?: (message: string) => void;
+  homeLayout?: 'stable' | 'legacy';
 }
 
 /**
- * Home чата GLM: корень, первые 16 символов identity сборки и sha256 ключа чата.
- * Любой chatKey, в том числе с `../`, превращается в имя файла и не выходит из корня.
+ * Новый home GLM зависит только от chatKey; три аргумента сохраняют legacy layout.
+ * Любой chatKey хешируется и не превращается в путь вне private корня провайдера.
  */
-export function glmChatHome(runtimeHome: string, identity: string, chatKey: string): string {
-  const digest = createHash('sha256').update(chatKey).digest('hex');
+export function glmChatHome(runtimeHome: string, identityOrChatKey: string, legacyChatKey?: string): string {
+  if (legacyChatKey === undefined) {
+    return chatHomeFor(runtimeHome, identityOrChatKey, 'stable');
+  }
 
-  return path.join(runtimeHome, identity.slice(0, 16), digest);
+  const digest = createHash('sha256').update(legacyChatKey).digest('hex');
+
+  return path.join(runtimeHome, identityOrChatKey.slice(0, 16), digest);
+}
+
+/**
+ * Переносится только home совместимости, уже подтверждённой выбранным runtime.
+ * Этот шаг предшествует проверке журнала и повторяется безопасно при подготовке overlay.
+ */
+export async function adoptLegacyGlmHome(runtimeHome: string, identity: string, chatKey: string) {
+  await adoptLegacyChatHome({
+    directory: glmChatHome(runtimeHome, chatKey),
+    legacyDirectory: glmChatHome(runtimeHome, identity, chatKey),
+    provider: 'glm',
+    legacyIdentity: identity,
+  });
 }
 
 /**
@@ -45,9 +64,18 @@ export async function prepareGlmLaunch(options: GlmLaunchOptions) {
     throw new TypeError('GLM launch требует identity сборки и server-owned chatKey');
   }
 
-  const dshHome = await ensurePrivateDir(glmChatHome(runtimeHome, options.identity, options.chatKey));
+  const stable = options.homeLayout === 'stable';
+  const home = stable ? glmChatHome(runtimeHome, options.chatKey)
+    : glmChatHome(runtimeHome, options.identity, options.chatKey);
+
+  if (stable) {
+    await adoptLegacyGlmHome(runtimeHome, options.identity, options.chatKey);
+  }
+
+  const dshHome = stable ? await ensureHarnessChatHome(home, 'glm') : await ensurePrivateDir(home);
   const launchDir = await ensurePrivateDir(options.launchDir
-    ?? path.join(runtimeHome, options.identity.slice(0, 16), 'turns', randomUUID()));
+    ?? (stable ? path.join(dshHome, 'turns', randomUUID())
+      : path.join(runtimeHome, options.identity.slice(0, 16), 'turns', randomUUID())));
   const settingsDocument = path.join(dshHome, 'settings.yaml');
   const project = await readProjectMcpServers(options.cwd);
   const selected = selectGlmMcpServers({ chat: options.mcpServers ?? [], project: project.servers });
@@ -112,7 +140,9 @@ export async function startGlmProcess(options: {
       spawnProcess,
     });
   } catch (error) {
-    await fs.rm(options.launch.launchDir, { recursive: true, force: true });
+    if ((error as { code?: unknown }).code !== 'deepseek_binary_cleanup') {
+      await fs.rm(options.launch.launchDir, { recursive: true, force: true });
+    }
 
     throw glmMcpStartupError(diagnostics) ?? error;
   }

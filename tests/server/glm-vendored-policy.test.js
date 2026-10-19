@@ -8,10 +8,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
-import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
-import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { ensureGlmTestRuntime } from '../helpers/glmTestRuntime.mts';
 import { runGlmTurn } from '../helpers/glmDriver.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import {
@@ -72,7 +70,7 @@ async function workMcp(root) {
  * identity этой сборки. Запуск процесса можно перехватить, чтобы испортить файлы запуска.
  */
 async function fixture(t, loopbackOptions = {}, { beforeSpawn } = {}) {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { artifact, config: runtimeConfig, identity } = await ensureGlmTestRuntime();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -85,11 +83,9 @@ async function fixture(t, loopbackOptions = {}, { beforeSpawn } = {}) {
   const work = await workMcp(root);
   const config = {
     rootDir: root,
-    deepseekArtifactDir: artifact,
-    deepseekRuntimeMode: 'embedded',
+    ...runtimeConfig,
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
-  const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');
   const adapter = createGlmAdapter({
     env: {
       PATH: process.env.PATH,
@@ -144,6 +140,7 @@ async function fixture(t, loopbackOptions = {}, { beforeSpawn } = {}) {
     async events(message) {
       const started = await startGlmProductionProcess({
         artifact,
+        runtimeConfig,
         root,
         cwd: project,
         endpoint: mock.endpoint,

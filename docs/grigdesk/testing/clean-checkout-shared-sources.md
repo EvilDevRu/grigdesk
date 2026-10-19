@@ -1,11 +1,17 @@
 # Общий код в фикстуре чистой установки
 
 Тест `tests/server/deepseek-runtime-packaging.test.js` создаёт отдельный checkout
-для настоящей подготовки runtime. Он копирует `tools/`, `shared/`, manifest, патчи,
-лицензии и нужные серверные точки входа. Кэш `upstream/`, `node_modules` и собранный
+для настоящей подготовки runtime. Он копирует `tools/`, `shared/`, scripts/build/host
+пакета DeepSeek, manifest, патчи, лицензии и нужные серверные точки входа.
+Кэш `upstream/`, `node_modules` и собранный
 runtime в исходную фикстуру не входят.
 
-После выноса хеша `tools/deepseekVendorManifest.ts` импортирует `shared/node/hash.ts`.
+Серверная часть fixture включает import closure runtime resolver: `binaryProbe.ts`,
+`distribution.ts` и `server/deepseek-host-contract.json` вместе с artifact/process
+модулями. Отсутствие любого из них ломает prepare до сборки; добавление этих исходников
+сохраняет запрет переносить готовый runtime или зависимости в clean checkout.
+
+После выноса хеша `deepseek/scripts/deepseekVendorManifest.ts` импортирует `shared/node/hash.ts`.
 Если копировать только инструменты, подготовка завершается `ERR_MODULE_NOT_FOUND`
 до проверки установки. Фикстура должна переносить общий исходный слой целиком,
 как настоящий checkout, сохраняя ограничения на кэш и зависимости.

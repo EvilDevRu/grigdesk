@@ -3,6 +3,7 @@
 
 import type { NativeSettingsContext, NativeSettingsOwnership, NativeSettingsSnapshot } from './types.ts';
 import type { NativeSettingsEvidence, PreparedNativeSettings } from './types.ts';
+import type { PreparedExecutorRuntime } from './types.ts';
 import { startDeepSeekAcpSettings } from '../deepseek/nativeSettingsRpc.ts';
 import type { DeepSeekSettingsRpc } from '../deepseek/nativeSettingsRpc.ts';
 import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
@@ -21,6 +22,7 @@ import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { readSettingsCliVersion } from './probe.ts';
 import { resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig, DeepSeekRuntimeDescriptor } from '../deepseek/runtimeProcess.ts';
+import { preparedDeepSeekRuntime } from '../deepseek/preparedRuntime.ts';
 
 type DeepSeekSettingsConfig = DeepSeekRuntimeConfig & { deepseekBin: string };
 
@@ -35,8 +37,9 @@ async function deepSeekSettingsContext(
   config: DeepSeekSettingsConfig,
   cwd: string,
   consumer: SettingsConsumer,
+  preparedRuntime?: PreparedExecutorRuntime,
 ) {
-  const runtime = await resolveDeepSeekRuntimeAsync(config);
+  const runtime = await preparedDeepSeekRuntime(config, preparedRuntime);
 
   if (consumer === 'pipeline' && !runtime.capabilities.settingsAcp) {
     throw Object.assign(new Error('Настройки DeepSeek для конвейера не подтверждены этим runtime'), {
@@ -81,7 +84,7 @@ export async function readDeepSeekSettings(
   startAcp = startDeepSeekAcpSettings,
 ): Promise<NativeSettingsSnapshot> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-settings-dsh-'));
-  const runtime = contextRuntimes.get(context) || await resolveDeepSeekRuntimeAsync(config);
+  const runtime = contextRuntimes.get(context) || await resolveDeepSeekRuntimeAsync(config, { signal });
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
 
   try {
@@ -108,7 +111,7 @@ export async function readDeepSeekSettings(
       context,
     );
 
-    snapshot.source.version = runtime.kind === 'embedded'
+    snapshot.source.version = runtime.kind !== 'external'
       ? runtime.upstreamVersion : await readSettingsCliVersion(runtime.command, signal);
 
     if (!runtime.capabilities.settingsAcp) {

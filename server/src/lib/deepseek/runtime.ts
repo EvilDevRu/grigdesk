@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import type { ChildProcess } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { AcpRpcError, createAcpClient, initializeAcp } from '../acp/client.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
-import { buildDeepSeekChildEnv, chatHomeFor, ensurePrivateDir } from './env.ts';
+import { buildDeepSeekChildEnv, chatHomeFor, ensureHarnessChatHome, ensurePrivateDir } from './env.ts';
 import {
   resolveDeepSeekPermission,
 } from './permissions.ts';
@@ -22,7 +22,8 @@ import { createDeepSeekStepNormalizer } from './steps.ts';
 import type { DeepSeekUpdate } from './steps.ts';
 import { DEEPSEEK_BASH_TOOL } from './contract.ts';
 import { buildLaunchFiles } from './profile.ts';
-import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import type { PreparedExecutorRuntime, PreparedNativeSettings } from '../executorSettings/types.ts';
+import { preparedDeepSeekRuntime } from './preparedRuntime.ts';
 import {
   assertDeepSeekPreparedRuntime,
   resolveDeepSeekRuntimeAsync,
@@ -31,6 +32,8 @@ import {
 import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
 import { acpDeepSeekSettingsRpc, startDeepSeekAcpSettings } from './nativeSettingsRpc.ts';
 import { applyDeepSeekNativeSettings, verifyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
+import { spawnDeepSeekBinary, type OwnedDeepSeekBinary } from './binaryProcess.ts';
+import { adoptLegacyChatHome, installedLegacyBuildId } from './legacyCutover.ts';
 
 interface DeepSeekConfig extends DeepSeekRuntimeConfig {
   deepseekRuntimeHome: string;
@@ -144,22 +147,40 @@ export async function prepareDeepSeekLaunch({
   runtime?: import('./runtimeProcess.ts').DeepSeekRuntimeDescriptor;
 }) {
   const runtime = preparedRuntime || await resolveDeepSeekRuntimeAsync(config);
-  const runtimeHome = runtime.buildId
+  const runtimeHome = runtime.kind !== 'binary' && runtime.buildId
     ? path.join(config.deepseekRuntimeHome, 'generations', runtime.buildId) : config.deepseekRuntimeHome;
-  const dshHome = chatHomeFor(runtimeHome, chatKey);
-  const chatDir = path.dirname(dshHome);
+  const dshHome = chatHomeFor(runtimeHome, chatKey, runtime.kind === 'binary' ? 'stable' : 'legacy');
+  const chatDir = runtime.kind === 'binary' ? dshHome : path.dirname(dshHome);
   const launchDir = path.join(chatDir, 'turns', randomUUID());
-  await ensurePrivateDir(dshHome);
 
-  try {
-    const binding = JSON.parse(await fs.readFile(path.join(dshHome, '.grigdesk-runtime.json'), 'utf8'));
+  if (runtime.kind === 'binary') {
+    const legacyBuildId = await installedLegacyBuildId(config);
 
-    if (binding.buildId !== runtime.buildId || binding.journalFormat !== 1) {
-      throw new Error('Копия home закреплена за другим или несовместимым runtime');
+    if (legacyBuildId) {
+      await adoptLegacyChatHome({
+        directory: dshHome,
+        legacyDirectory: chatHomeFor(
+          path.join(config.deepseekRuntimeHome, 'generations', legacyBuildId), chatKey,
+        ),
+        provider: 'deepseek',
+        legacyIdentity: legacyBuildId,
+      });
     }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
+
+    await ensureHarnessChatHome(dshHome, 'deepseek');
+  } else {
+    await ensurePrivateDir(dshHome);
+
+    try {
+      const binding = JSON.parse(await fs.readFile(path.join(dshHome, '.grigdesk-runtime.json'), 'utf8'));
+
+      if (binding.buildId !== runtime.buildId || binding.journalFormat !== 1) {
+        throw new Error('Копия home закреплена за другим или несовместимым runtime');
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
     }
   }
 
@@ -347,6 +368,7 @@ export async function runDeepSeekTurn({
   projectRoot,
   providerSettings,
   nativeSettings,
+  preparedRuntime,
   extraDirs = [],
   attachmentPaths = [],
   factory = false,
@@ -378,6 +400,7 @@ export async function runDeepSeekTurn({
   projectRoot?: string;
   providerSettings?: DeepSeekProviderSettings | null;
   nativeSettings?: PreparedNativeSettings;
+  preparedRuntime?: PreparedExecutorRuntime;
   extraDirs?: readonly string[];
   attachmentPaths?: readonly string[];
   factory?: boolean;
@@ -405,7 +428,7 @@ export async function runDeepSeekTurn({
     : await nearestProjectRoot(realCwd);
   const approval = factory ? 'never' : 'ask';
   const sessionMcpServers = validateMcpServers(mcpServers);
-  const runtime = await resolveDeepSeekRuntimeAsync(config);
+  const runtime = await preparedDeepSeekRuntime(config, preparedRuntime);
 
   assertDeepSeekPreparedRuntime(runtime, nativeSettings);
   signal?.throwIfAborted();
@@ -423,6 +446,9 @@ export async function runDeepSeekTurn({
     transport: 'acp',
     runtime,
   });
+  let owned: OwnedDeepSeekBinary | undefined;
+  let cleanupFailed = false;
+
   /**
    * Подготовка и spawn владеют одним временным документом, даже при раннем отказе.
    * Отмена между фазами не создаёт рабочий процесс или неполную сессию.
@@ -451,13 +477,22 @@ export async function runDeepSeekTurn({
       await verifyDeepSeekRuntimeDescriptorAsync(runtime);
       signal?.throwIfAborted();
 
-      return (deps.spawn || spawn)(runtime.command, [
+      const args = [
         ...runtime.prefixArgs, '--profile', 'acp', '--patch', launch.overlayPath,
-      ], {
+      ];
+      const spawnOptions: SpawnOptions = {
         cwd: launch.launchDir,
         env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      };
+
+      if (runtime.kind === 'binary') {
+        owned = spawnDeepSeekBinary(runtime.command, args, spawnOptions, deps.spawn || spawn);
+
+        return owned.child;
+      }
+
+      return (deps.spawn || spawn)(runtime.command, args, spawnOptions);
     } catch (error) {
       await preparation?.stop();
       preparation = undefined;
@@ -585,7 +620,14 @@ export async function runDeepSeekTurn({
     if (currentSession) {
       try { client.notify('session/cancel', { sessionId: currentSession }); } catch { /* уже закрыт */ }
     }
-    abortTimer = setTimeout(() => child.kill('SIGTERM'), 1_500);
+
+    abortTimer = setTimeout(() => {
+      if (owned) {
+        void owned.stop().catch(() => {});
+      } else {
+        child.kill('SIGTERM');
+      }
+    }, 1_500);
     abortTimer.unref?.();
   };
   signal?.addEventListener('abort', abort, { once: true });
@@ -598,6 +640,21 @@ export async function runDeepSeekTurn({
     if (currentSession && !client.closed) {
       await client.request('session/close', { sessionId: currentSession }, 5_000).catch(() => {});
     }
+
+    if (owned) {
+      try {
+        await owned.stop();
+      } catch (error) {
+        cleanupFailed = true;
+
+        throw error;
+      } finally {
+        client.close();
+      }
+
+      return;
+    }
+
     client.close();
     let ended = await Promise.race([
       exit,
@@ -724,14 +781,30 @@ export async function runDeepSeekTurn({
       stopReason: result?.stopReason,
     };
   } catch (error) {
-    await shutdown().catch(() => {});
-    log?.error?.({ reason: String((error as Error)?.message || error), stderr: stderrTail }, 'DeepSeek turn failed');
-    if ((error as { retryState?: unknown })?.retryState) throw error;
-    throw annotateError(error, retryState);
+    let failure = error;
+
+    try {
+      await shutdown();
+    } catch (cleanupError) {
+      failure = cleanupError;
+    }
+
+    log?.error?.({
+      reason: String((failure as Error)?.message || failure),
+      stderr: stderrTail,
+    }, 'DeepSeek turn failed');
+
+    if ((failure as { retryState?: unknown })?.retryState) {
+      throw failure;
+    }
+
+    throw annotateError(failure, retryState);
   } finally {
     signal?.removeEventListener('abort', abort);
     // Overlay и hooks хода нужны только живому процессу: после shutdown каталог хода
     // становится мусором, который иначе копился бы по одному на каждое сообщение.
-    await fs.rm(launch.launchDir, { recursive: true, force: true }).catch(() => {});
+    if (!cleanupFailed) {
+      await fs.rm(launch.launchDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }

@@ -8,6 +8,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
+
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { DeepSeekWebClient } from '../../server/src/lib/deepseek/serverClient.ts';
 import { assertInTurnConformance } from './helpers/in-turn-conformance.js';
@@ -17,7 +19,12 @@ const requireServer = createRequire(path.join(ROOT, 'server/package.json'));
 const Fastify = requireServer('fastify');
 const websocket = requireServer('@fastify/websocket');
 
+/**
+ * Wire fixture поднимает только собственный loopback web и совместимый metadata double.
+ * Управление steer остаётся настоящим адаптером, модель и subprocess не исполняются.
+ */
 async function fixture(t, { askQuestion = false, expectedSteers = 1 } = {}) {
+  const { binary } = await writeDeepSeekMetadataStub(t);
   const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-deepseek-web-'));
   const app = Fastify();
   await app.register(websocket);
@@ -112,7 +119,14 @@ async function fixture(t, { askQuestion = false, expectedSteers = 1 } = {}) {
   await app.listen({ host: '127.0.0.1', port: 0 });
   const client = await DeepSeekWebClient.authenticate(`${app.listeningOrigin}/?token=fixture`);
   t.after(async () => { await app.close(); await rm(dir, { recursive: true, force: true }); });
-  return { dir, client, calls, finishSecondStep };
+
+  return {
+    dir,
+    binary,
+    client,
+    calls,
+    finishSecondStep,
+  };
 }
 
 async function waitFor(check) {
@@ -130,7 +144,7 @@ test('DeepSeek web: steer отвечает до финала и исходный
   let port;
   let settled = false;
   const run = deepseek.run({
-    config: { deepseekBin: '/bin/true', deepseekRuntimeHome: path.join(f.dir, 'runtime') },
+    config: { deepseekBin: f.binary, deepseekRuntimeHome: path.join(f.dir, 'runtime') },
     env: { ...process.env, DEEPSEEK_API_KEY: 'fixture-key' },
     cwd: f.dir,
     chatKey: 'fixture-chat',
@@ -184,7 +198,7 @@ test('DeepSeek web: вопрос агента закрывает steer до от
   let answerQuestion;
   const pendingAnswer = new Promise((resolve) => { answerQuestion = resolve; });
   const run = deepseek.run({
-    config: { deepseekBin: '/bin/true', deepseekRuntimeHome: path.join(f.dir, 'runtime') },
+    config: { deepseekBin: f.binary, deepseekRuntimeHome: path.join(f.dir, 'runtime') },
     env: { ...process.env, DEEPSEEK_API_KEY: 'fixture-key' },
     cwd: f.dir,
     chatKey: 'fixture-chat',
@@ -226,7 +240,7 @@ test('DeepSeek web: два steer идут по порядку в одном serv
   const blocks = [];
   let port;
   const turn = deepseek.run({
-    config: { deepseekBin: '/bin/true', deepseekRuntimeHome: path.join(f.dir, 'runtime') },
+    config: { deepseekBin: f.binary, deepseekRuntimeHome: path.join(f.dir, 'runtime') },
     env: { ...process.env, DEEPSEEK_API_KEY: 'fixture-key' },
     cwd: f.dir,
     chatKey: 'fixture-chat',

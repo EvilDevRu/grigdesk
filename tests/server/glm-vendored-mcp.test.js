@@ -6,10 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
-import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
-import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { ensureGlmTestRuntime } from '../helpers/glmTestRuntime.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import {
   GLM_SERVICE_KEY,
@@ -61,7 +59,7 @@ const MCP_SCRIPT = [
  * Журнал фикстуры показывает этапы готовности и каждый вызов инструмента.
  */
 async function fixture(t, loopbackOptions = {}) {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { config: runtimeConfig, identity } = await ensureGlmTestRuntime();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -74,11 +72,9 @@ async function fixture(t, loopbackOptions = {}) {
   });
   const config = {
     rootDir: root,
-    deepseekArtifactDir: artifact,
-    deepseekRuntimeMode: 'embedded',
+    ...runtimeConfig,
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
-  const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');
   const adapter = createGlmAdapter({
     env: {
       PATH: process.env.PATH,

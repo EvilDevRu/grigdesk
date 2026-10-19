@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { buildHarnessChildEnv } from '../deepseek/env.ts';
-import { parseGlmAccessMode, selectGlmServiceKey } from './contract.ts';
+import { GLM_ALLOWED_MODES, parseGlmAccessMode, selectGlmServiceKey } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
 
 export type GlmAccessReason =
@@ -37,7 +37,7 @@ export function resolveGlmAccess({
   admission,
 }: {
   env: GlmEnv;
-  admission: readonly { mode: GlmAccessMode; compatibility: string }[];
+  admission?: readonly { mode: GlmAccessMode; compatibility: string }[];
 }): GlmAccess {
   const raw = env.GRIGDESK_GLM_API_MODE;
 
@@ -55,7 +55,10 @@ export function resolveGlmAccess({
     return { mode, reason: 'glm_key_missing' };
   }
 
-  if (!admission.some((entry) => entry.mode === mode)) {
+  const supported = admission
+    ? admission.some((entry) => entry.mode === mode) : GLM_ALLOWED_MODES.includes(mode);
+
+  if (!supported) {
     return { mode, reason: 'glm_mode_not_admitted' };
   }
 

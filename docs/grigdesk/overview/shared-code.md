@@ -28,7 +28,7 @@
 разрешены только в `shared/node/`; зависимости пакетов со своим `node_modules` передаются
 параметром. Импорт общего модуля не запускает процессы, таймеры или файловые операции.
 Синтаксис совместим со снятием типов Node: без enum, namespace и parameter properties.
-Корневой `package.json` сохраняет ESM-границу. Общего barrel на все области нет: потребитель
+ESM-границу задаёт `package.json` соответствующего пакета. Общего barrel на все области нет: потребитель
 импортирует нужный модуль, чтобы не включать посторонние области в сборку.
 
 ## Области
@@ -64,11 +64,18 @@
 | `lib/errors.ts` | Строковый code, message с fallback и отдельное преобразование Error/String |
 | `lib/delay.ts` | Пауза с отменой самим signal.reason; обычная Node-пауза — node:timers/promises |
 | `lib/text.ts` | UTF-16 границы, лексический порядок, текст unknown, URI и JSON Pointer |
-| `node/files.ts` | UTF-8 ENOENT→null, временная папка с очисткой, fsync каталога без следования ссылке |
+| `node/files.ts` | ENOENT→null, временная папка, fsync; read-only modes готового дерева без обхода symlinks |
 | `node/seaBuild.ts` | Имя архива Node, SEA config и потоковая загрузка; инструменты сборки остаются у пакетов |
+| `node/binaryBuild.ts` | Pin Node 24, SHA архива, запрет tracked output и atomic публикация ELF Б24/DeepSeek |
+| `node/packageTests.ts` | Выбор *.test.mts и запуск пакетов Б24/DeepSeek через общий сторож памяти |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
+| `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
+| `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
+| `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, ограниченным ожиданием и своим release |
+| `runtime/nodeVersion.ts` | Общая чистая политика версий Node без чтения процесса вызывающего |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |
 | `lib/contractDecoders.ts` | Проверка сетевого JSON с выводом типов и ошибкой вызывающей области |
+| `lib/canonicalJson.ts` | Сортировка ключей JSON для отпечатков; порядок массивов сохраняется |
 
 Структуру, внешние зависимости и циклы между областями держит
 `tests/docs/shared-layout.test.mts`; он также проверяет недостижимость `shared/node/` из web.

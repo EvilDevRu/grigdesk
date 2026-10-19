@@ -45,7 +45,12 @@ test('BG-02: общий прогон включает быстрый b24 и ис
   const runAll = source('tests/run-all.sh');
 
   assert.match(runAll, /npm --prefix "\$PROJECT_ROOT\/b24" test \|\| RC=1/);
-  assert.doesNotMatch(runAll, /test:sea|b24" run build|b24\/scripts\/build/);
+
+  // SEA DeepSeek входит в свой обязательный gate; прежний запрет относится к b24.
+  // Проверяем именно команды этого пакета, сохраняя запрет его сборки в общем прогоне.
+  const b24Commands = runAll.split('\n').filter((line) => line.includes('b24')).join('\n');
+
+  assert.doesNotMatch(b24Commands, /test:sea|b24" run build|b24\/scripts\/build/);
 });
 
 test('BG-03: b24 включён в покрытие TypeScript', () => {

@@ -1,8 +1,11 @@
 # DeepSeek Harness в GrigDesk: контракт и статус внедрения
 
+Metadata helper относится к provider и сохраняет offline-отказ 126; см.
+[границу offline executor](../grigdesk/pipeline/deepseek-offline-guard.md).
+
 GrigDesk содержит выбранные исходники Harness `0.1.5-rc.2`, upstream commit
-`c291e7961a515f6d7af9304e7fd1d257929aef26`. Общая подготовка собирает самодостаточное
-поколение; отдельная установка DSH больше не требуется. Generic-контракт раннера:
+`c291e7961a515f6d7af9304e7fd1d257929aef26`. Независимый пакет `deepseek/` собирает самодостаточный ELF;
+его установка отделена от подготовки сервера. Generic-контракт раннера:
 [ADDING-RUNNER.md](ADDING-RUNNER.md).
 
 Настоящий compiled runtime проверен с loopback API: web RPC/events для чата,
@@ -11,10 +14,16 @@ cancel/resume, обновление и совместимый откат. Эти
 Состав и ограничения: [композиция](../grigdesk/chat/deepseek-vendored-composition.md),
 [чатовый паритет](../grigdesk/chat/deepseek-compiled-chat-parity.md),
 [настройки Factory](../grigdesk/pipeline/deepseek-native-settings-runtime.md),
-[переход updater](../grigdesk/server/deepseek-release-transition.md).
+[переход updater](../grigdesk/server/deepseek-binary-update.md).
 
 Инструкция оператора по установке, режимам и откату:
 [guide/deepseek.md](../grigdesk/guide/deepseek.md).
+
+Текущий способ доставки — независимый `bin/deepseek` с bundled Node. Resolver и Factory
+не выбирают stock `dsh`, `installed` или `embedded`; явный override тоже проходит metadata.
+Установка/откат ELF выполняются отдельно, GrigDesk update сохраняет его bytes, cache и homes.
+`grigdesk-ctl deps/run/dev` проверяют наличие без сборки Harness. Подробнее:
+[contract 2 и readiness](../grigdesk/server/deepseek-binary-update.md).
 
 ## Реализация GrigDesk и Factory
 
@@ -31,7 +40,7 @@ run identity нельзя передать или подменить tool argume
 в MCP env, retained event stream или launcher argv. Text-only успех без terminal status
 повышается launcher-ом до protocol failure.
 
-Embedded runner различает сборки версией `0.1.5-rc.2.grigdesk.b<hash16>`, проверяет её
+Runner различает поставки наблюдаемой версией с полным packageId, проверяет её
 перед каждым узлом и публикует четыре opaque model id, capabilities
 `status status_request tools structured_output` и не заявляет sandbox/fanout только по
 факту наличия upstream-механизма. Billing dialect намеренно не зарегистрирован: usage
@@ -39,11 +48,16 @@ Factory остаётся `unavailable`. Автоматический failover р
 invalid-key до model/tool activity; timeout различим отдельно, все неоднозначные исходы
 остаются `unknown`.
 
+Binary-ветка использует тот же async descriptor, что чат, с явным cache-dir и полным
+packageId в observed coverage version. Замена ELF после prefs отклоняется подготовленным
+handle до ACP/prompt. Реальные binary Factory native/status проверки и устройство —
+[в контракте бинарной Factory](../grigdesk/pipeline/deepseek-binary-factory.md).
+
 ## Исторический аудит внешнего npm-артефакта
 
 Следующие сведения и live fixtures описывают первоначальную интеграцию внешнего
 `@deepseek-ai/dsh@0.1.5-rc.2`. Они сохраняют происхождение исходных протокольных
-наблюдений; текущий embedded runtime доказывается отдельными compiled тестами выше.
+наблюдений; текущий автономный runtime доказывается отдельными binary compiled тестами выше.
 Обезличенные трассы лежат в `tests/fixtures/deepseek-harness/`, с manifest происхождения.
 
 Проверено на Node `v22.22.1`:

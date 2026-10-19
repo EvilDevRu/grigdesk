@@ -1,34 +1,29 @@
-// Descriptor выбирается до подготовки запуска и хранит абсолютный путь поколения.
-// После переключения current уже выбранный процесс продолжает использовать свою сборку.
+// Descriptor закрепляет packageId ELF до подготовки настроек и запуска.
+// Независимая замена файла не меняет argv уже подготовленного запуска.
 
-import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { DEEPSEEK_PIN } from './contract.ts';
-import {
-  deepSeekRuntimeError,
-  readDeepSeekArtifact,
-  readDeepSeekArtifactAsync,
-  readDeepSeekArtifactHeader,
-} from './runtimeArtifact.ts';
-import type {
-  DeepSeekArtifact,
-  DeepSeekArtifactContract,
-  DeepSeekArtifactHeader,
-} from './runtimeArtifact.ts';
+import { probeDeepSeekBinaryCached, probeDeepSeekBinarySync } from './binaryProbe.ts';
+import { selectedDeepSeekBinary } from './distribution.ts';
+import type { DeepSeekBinaryFile } from './binaryProbe.ts';
+import type { ExecutorProbe } from '../executors/index.ts';
+import { dataHome, dataPath } from '../../../../shared/runtime/dataHome.ts';
+import type { DeepSeekRuntimeInfo } from '../../../../shared/chat/deepSeekBinary.ts';
+import { deepSeekRuntimeError, type DeepSeekArtifactContract }
+  from '../../../../shared/node/deepSeekArtifact.ts';
 
 export interface DeepSeekRuntimeConfig {
+  rootDir?: string;
   deepseekBin?: string;
   deepseekBinOverride?: string;
-  deepseekRuntimeMode?: 'installed' | 'embedded';
+  deepseekRuntimeMode?: 'installed' | 'embedded' | 'binary';
+  deepseekCacheDir?: string;
   deepseekArtifactDir?: string;
   deepseekGenerationRoot?: string;
 }
 
 export interface DeepSeekRuntimeDescriptor {
-  readonly kind: 'embedded' | 'external';
+  readonly kind: 'embedded' | 'external' | 'binary';
   readonly command: string;
   readonly prefixArgs: readonly string[];
   readonly upstreamVersion: string;
@@ -37,130 +32,39 @@ export interface DeepSeekRuntimeDescriptor {
   readonly generationDir: string | null;
   readonly identity: string;
   readonly capabilities: Readonly<DeepSeekArtifactContract['capabilities']>;
+  readonly metadata?: DeepSeekRuntimeInfo;
+  readonly binaryFile?: DeepSeekBinaryFile;
 }
 
-const exec = promisify(execFile);
-const defaultRoot = path.resolve(import.meta.dirname, '../../../runtime/deepseek');
-
 /**
- * Legacy и явный override имеют отдельный отпечаток бинаря, а не identity Node.
- * Недоступность отражается в identity; probe и spawn дадут собственную проверяемую ошибку.
+ * Server-owned cache и ожидаемый packageId закрепляются до любого запуска Harness.
+ * Worker ABI берётся из metadata; generation не должна существовать рядом с ELF.
  */
-function externalDescriptor(binary: string): DeepSeekRuntimeDescriptor {
-  let command = binary;
-  let identity = `${binary}:unavailable`;
+function binaryDescriptor(
+  command: string,
+  metadata: DeepSeekRuntimeInfo,
+  config: DeepSeekRuntimeConfig,
+  binaryFile?: DeepSeekBinaryFile,
+): DeepSeekRuntimeDescriptor {
+  const cacheDir = config.deepseekCacheDir
+    ?? dataPath(dataHome({ env: process.env, home: os.homedir() }), 'deepseekRuntime');
 
-  if (!binary.includes(path.sep)) {
-    command = (process.env.PATH ?? '').split(path.delimiter)
-      .map((directory) => path.resolve(directory, binary))
-      .find((file) => {
-        try {
-          fs.accessSync(file, fs.constants.X_OK);
-
-          return true;
-        } catch {
-          return false;
-        }
-      }) ?? binary;
-  }
-
-  try {
-    command = fs.realpathSync(command);
-    identity = `${command}:${createHash('sha256').update(fs.readFileSync(command)).digest('hex')}`;
-  } catch {
-    // Проверка версии не объявит отсутствующий внешний CLI установленным.
+  if (!path.isAbsolute(cacheDir) || cacheDir === '/' || cacheDir.includes('\0')) {
+    throw deepSeekRuntimeError('deepseek_cache_invalid', 'Кэш DeepSeek требует абсолютный путь');
   }
 
   return Object.freeze({
-    kind: 'external',
+    kind: 'binary',
     command,
-    prefixArgs: Object.freeze([]),
-    upstreamVersion: DEEPSEEK_PIN.version,
-    buildId: null,
-    runtimeVersion: DEEPSEEK_PIN.version,
+    prefixArgs: Object.freeze(['--expect-package-id', metadata.packageId, '--cache-dir', cacheDir]),
+    upstreamVersion: metadata.upstreamVersion,
+    buildId: metadata.buildId,
+    runtimeVersion: metadata.runtimeVersion,
     generationDir: null,
-    identity,
-    capabilities: Object.freeze({
-      web: true,
-      acp: true,
-      settingsWeb: true,
-      settingsAcp: false,
-    }),
-  });
-}
-
-interface GenerationSelection {
-  directory: string;
-  runtimeRoot: string;
-  pinned: boolean;
-}
-
-type RuntimeSelection = { external: DeepSeekRuntimeDescriptor } | GenerationSelection;
-
-/**
- * Приоритет имеет только явный внешний override; embedded не ищет dsh в PATH.
- * Candidate передаётся тестами явно, а незавершённая публикация запрещает выбор current
- * ещё до чтения поколения.
- */
-function selectDeepSeekRuntime(config: DeepSeekRuntimeConfig): RuntimeSelection {
-  if (config.deepseekBinOverride) {
-    return { external: externalDescriptor(config.deepseekBinOverride) };
-  }
-
-  if (!config.deepseekArtifactDir && config.deepseekRuntimeMode !== 'embedded') {
-    return { external: externalDescriptor(config.deepseekBin || 'dsh') };
-  }
-
-  const runtimeRoot = path.resolve(config.deepseekGenerationRoot || defaultRoot);
-
-  if (!config.deepseekArtifactDir && fs.existsSync(path.join(runtimeRoot, 'publish-pending.json'))) {
-    throw deepSeekRuntimeError(
-      'deepseek_runtime_publish_pending', 'Публикация runtime GrigDesk не завершена',
-    );
-  }
-
-  return {
-    directory: config.deepseekArtifactDir || path.join(runtimeRoot, 'current'),
-    runtimeRoot,
-    pinned: Boolean(config.deepseekArtifactDir),
-  };
-}
-
-/**
- * Production current обязан указывать внутрь immutable builds; явный candidate — как есть.
- * Сравнение каноническое: путь корня через символическую ссылку не считается выходом.
- */
-function assertWithinBuilds(selection: GenerationSelection, root: string): void {
-  if (selection.pinned) {
-    return;
-  }
-
-  let builds: string;
-
-  try {
-    builds = fs.realpathSync(path.join(selection.runtimeRoot, 'builds'));
-  } catch {
-    throw deepSeekRuntimeError('deepseek_runtime_corrupt', 'Current DeepSeek выходит из builds');
-  }
-
-  const relative = path.relative(builds, root);
-
-  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw deepSeekRuntimeError('deepseek_runtime_corrupt', 'Current DeepSeek выходит из builds');
-  }
-}
-
-function embeddedDescriptor(root: string, artifact: DeepSeekArtifact): DeepSeekRuntimeDescriptor {
-  return Object.freeze({
-    kind: 'embedded',
-    command: process.execPath,
-    prefixArgs: Object.freeze([path.join(root, artifact.entry)]),
-    upstreamVersion: artifact.source.version,
-    buildId: artifact.buildId,
-    runtimeVersion: artifact.runtimeVersion,
-    generationDir: root,
-    identity: `deepseek-build:${artifact.buildId}`,
-    capabilities: Object.freeze({ ...artifact.capabilities }),
+    identity: `deepseek-package:${metadata.packageId}`,
+    capabilities: Object.freeze({ ...metadata.capabilities }),
+    metadata: Object.freeze(metadata),
+    ...(binaryFile ? { binaryFile } : {}),
   });
 }
 
@@ -169,17 +73,9 @@ function embeddedDescriptor(root: string, artifact: DeepSeekArtifact): DeepSeekR
  * Синхронная версия для CLI и wrapper конвейера, у которых нет общего event loop.
  */
 export function resolveDeepSeekRuntime(config: DeepSeekRuntimeConfig): DeepSeekRuntimeDescriptor {
-  const selection = selectDeepSeekRuntime(config);
+  const binary = selectedDeepSeekBinary(config);
 
-  if ('external' in selection) {
-    return selection.external;
-  }
-
-  const { root, artifact } = readDeepSeekArtifact(selection.directory);
-
-  assertWithinBuilds(selection, root);
-
-  return embeddedDescriptor(root, artifact);
+  return binaryDescriptor(binary, probeDeepSeekBinarySync(binary), config);
 }
 
 /**
@@ -188,18 +84,16 @@ export function resolveDeepSeekRuntime(config: DeepSeekRuntimeConfig): DeepSeekR
  */
 export async function resolveDeepSeekRuntimeAsync(
   config: DeepSeekRuntimeConfig,
+  options: { signal?: AbortSignal } = {},
 ): Promise<DeepSeekRuntimeDescriptor> {
-  const selection = selectDeepSeekRuntime(config);
+  options.signal?.throwIfAborted();
 
-  if ('external' in selection) {
-    return selection.external;
-  }
+  const binary = selectedDeepSeekBinary(config);
+  const { info, file } = await probeDeepSeekBinaryCached(binary, options.signal);
 
-  const { root, artifact } = await readDeepSeekArtifactAsync(selection.directory);
+  options.signal?.throwIfAborted();
 
-  assertWithinBuilds(selection, root);
-
-  return embeddedDescriptor(root, artifact);
+  return binaryDescriptor(binary, info, config, file);
 }
 
 /**
@@ -212,34 +106,6 @@ export function requireDeepSeekRuntimeIdentity(config: DeepSeekRuntimeConfig): s
 }
 
 /**
- * Заголовок выбранного поколения без проверки файлов. Отсутствие каталога и выход
- * за каталог сборок дают стабильные коды runtime.
- */
-function headerOf(selection: GenerationSelection): DeepSeekArtifactHeader {
-  let root: string;
-
-  try {
-    root = fs.realpathSync(selection.directory);
-  } catch {
-    throw deepSeekRuntimeError('deepseek_runtime_missing', 'Встроенный runtime DeepSeek отсутствует');
-  }
-
-  assertWithinBuilds(selection, root);
-
-  return readDeepSeekArtifactHeader(root);
-}
-
-/**
- * Заголовок выбранного встроенного поколения для адаптеров на той же сборке; внешний бинарь — null.
- * Целостность файлов здесь не доказывается — её проверяют descriptor и probe.
- */
-export function readSelectedDeepSeekHeader(config: DeepSeekRuntimeConfig): DeepSeekArtifactHeader | null {
-  const selection = selectDeepSeekRuntime(config);
-
-  return 'external' in selection ? null : headerOf(selection);
-}
-
-/**
  * Лёгкое описание выбранной сборки для карточки и ключей кэша: identity и версии.
  * Целостность файлов здесь не доказывается — её проверяют descriptor и probe.
  */
@@ -248,22 +114,12 @@ export function describeDeepSeekRuntime(config: DeepSeekRuntimeConfig): {
   buildId: string | null;
   runtimeVersion: string;
 } {
-  const selection = selectDeepSeekRuntime(config);
-
-  if ('external' in selection) {
-    return {
-      identity: selection.external.identity,
-      buildId: null,
-      runtimeVersion: selection.external.runtimeVersion,
-    };
-  }
-
-  const header = headerOf(selection);
+  const runtime = resolveDeepSeekRuntime(config);
 
   return {
-    identity: `deepseek-build:${header.buildId}`,
-    buildId: header.buildId,
-    runtimeVersion: header.runtimeVersion,
+    identity: runtime.identity,
+    buildId: runtime.buildId,
+    runtimeVersion: runtime.runtimeVersion,
   };
 }
 
@@ -271,21 +127,25 @@ export function describeDeepSeekRuntime(config: DeepSeekRuntimeConfig): {
  * Проверенный descriptor остаётся единственным источником argv и upstream version.
  * Node без целого артефакта никогда не означает installed DeepSeek.
  */
-export async function probeDeepSeekRuntime(config: DeepSeekRuntimeConfig) {
+export async function probeDeepSeekRuntime(
+  config: DeepSeekRuntimeConfig,
+  prepared?: DeepSeekRuntimeDescriptor,
+): Promise<ExecutorProbe> {
   try {
-    const runtime = await resolveDeepSeekRuntimeAsync(config);
-    const { stdout } = await exec(runtime.command, [...runtime.prefixArgs, '-V'], {
-      encoding: 'utf8',
-      timeout: 10_000,
-      maxBuffer: 64 * 1024,
-    });
-    const version = stdout.trim().split(/\s+/u)[0] || null;
+    const runtime = prepared ?? await resolveDeepSeekRuntimeAsync(config);
+    const described = {
+      ...(runtime.buildId ? { buildId: runtime.buildId } : {}),
+      runtimeVersion: runtime.runtimeVersion,
+      ...(runtime.metadata ? {
+        packageId: runtime.metadata.packageId,
+        binaryVersion: runtime.metadata.binaryVersion,
+      } : {}),
+    };
 
     return {
-      ok: version === runtime.upstreamVersion,
-      version,
-      ...(version !== runtime.upstreamVersion
-        ? { error: 'Версия DeepSeek не соответствует descriptor' } : {}),
+      ok: true,
+      version: runtime.upstreamVersion,
+      ...described,
     };
   } catch (error) {
     const rawCode = (error as { code?: unknown }).code;
@@ -295,7 +155,7 @@ export async function probeDeepSeekRuntime(config: DeepSeekRuntimeConfig) {
       ok: false,
       version: null,
       code,
-      error: code?.startsWith('deepseek_runtime_')
+      error: code?.startsWith('deepseek_')
         ? (error as Error).message
         : 'Бинарь DeepSeek Harness недоступен',
     };
@@ -319,36 +179,22 @@ export function assertDeepSeekPreparedRuntime(
 }
 
 /**
- * Перед spawn перепроверяется закреплённая generation, без нового выбора current.
- * Повреждение A после discovery не позволяет выполнить prompt в частично изменённом runtime.
- */
-export function verifyDeepSeekRuntimeDescriptor(runtime: DeepSeekRuntimeDescriptor): void {
-  if (runtime.kind !== 'embedded') {
-    return;
-  }
-
-  const { artifact } = readDeepSeekArtifact(runtime.generationDir || '');
-
-  if (artifact.buildId !== runtime.buildId) {
-    throw deepSeekRuntimeError('deepseek_runtime_changed', 'Закреплённое поколение DeepSeek изменилось');
-  }
-}
-
-/**
  * Асинхронная перепроверка перед spawn для серверных путей: тот же контракт,
  * но обход поколения не блокирует остальные запросы GrigDesk.
  */
 export async function verifyDeepSeekRuntimeDescriptorAsync(
   runtime: DeepSeekRuntimeDescriptor,
 ): Promise<void> {
-  if (runtime.kind !== 'embedded') {
-    return;
-  }
+  try {
+    const current = await probeDeepSeekBinaryCached(runtime.command);
 
-  const { artifact } = await readDeepSeekArtifactAsync(runtime.generationDir || '');
-
-  if (artifact.buildId !== runtime.buildId) {
-    throw deepSeekRuntimeError('deepseek_runtime_changed', 'Закреплённое поколение DeepSeek изменилось');
+    if (current.info.packageId !== runtime.metadata?.packageId
+      || runtime.binaryFile && (current.file.signature !== runtime.binaryFile.signature
+        || current.file.sha256 !== runtime.binaryFile.sha256)) {
+      throw new Error('changed');
+    }
+  } catch {
+    throw deepSeekRuntimeError('deepseek_runtime_changed', 'Закреплённый бинарник DeepSeek изменился');
   }
 }
 

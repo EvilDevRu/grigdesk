@@ -5,8 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { runtimeYaml } from '../../tools/runtimeComposition.ts';
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
+import { ensureGlmTestRuntime } from '../helpers/glmTestRuntime.mts';
 import { runGlmTurn } from '../helpers/glmDriver.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import {
@@ -24,7 +24,7 @@ const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir()
  * Процесс поднимает production launcher; тест подменяет только адрес модели (Р16).
  */
 async function fixture(t, loopbackOptions = {}, { dirName = 'profile-' } = {}) {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { artifact, config: runtimeConfig } = await ensureGlmTestRuntime();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -58,6 +58,7 @@ async function fixture(t, loopbackOptions = {}, { dirName = 'profile-' } = {}) {
     async start(options = {}) {
       const item = await startGlmProductionProcess({
         artifact,
+        runtimeConfig,
         root,
         cwd,
         endpoint: mock.endpoint,

@@ -72,8 +72,8 @@ async function fixture(t, scenario = TEXT) {
 
   const config = {
     rootDir: root,
-    deepseekArtifactDir: path.join(root, 'generation'),
-    deepseekRuntimeMode: 'embedded',
+    deepseekBin: path.join(root, 'generation', 'deepseek'),
+    deepseekRuntimeMode: 'binary',
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
   const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');
@@ -103,7 +103,7 @@ async function fixture(t, scenario = TEXT) {
     async methods() {
       return (await this.log()).map((entry) => entry.message?.method).filter(Boolean);
     },
-    turns: () => path.join(config.glmRuntimeHome, identity.slice(0, 16), 'turns'),
+    turns: () => path.join(glmChatHome(config.glmRuntimeHome, 'chat-a'), 'turns'),
     run(options = {}) {
       return adapter.run({
         config,
@@ -169,7 +169,7 @@ test(HANG_TEST, async (t) => {
   const started = Date.now();
 
   controller.abort();
-  await assert.rejects(running, (error) => error.stopped === true);
+  await assert.rejects(running, { code: 'deepseek_binary_cleanup' });
 
   const elapsed = Date.now() - started;
 
@@ -192,7 +192,7 @@ test('очистка идемпотентна: таймеры, слушател�
   assert.equal(result.reply, 'ok');
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0, 'слушатели abort сняты');
   assert.deepEqual(await fs.readdir(f.turns()), [], 'каталоги запуска удалены');
-  assert.ok((await fs.stat(glmChatHome(f.config.glmRuntimeHome, f.identity, 'chat-a'))).isDirectory());
+  assert.ok((await fs.stat(glmChatHome(f.config.glmRuntimeHome, 'chat-a'))).isDirectory());
   assert.ok(f.children.every((child) => child.exitCode !== null || child.signalCode !== null));
 
   // Повторный ход в том же чате после очистки идёт штатно: ничего не осталось занятым.

@@ -60,6 +60,8 @@ test('TIP-GUARD-03: SVG title запрещён', () => {
 });
 
 test('TIP-GUARD-04: API и CLI возвращают ошибки чтения, разбора и пустого списка', (t) => {
+  fs.mkdirSync(path.dirname(ARTIFACT_PREFIX), { recursive: true });
+
   const root = fs.mkdtempSync(ARTIFACT_PREFIX);
 
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -4,11 +4,13 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
+
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { readDeepSeekSettings } from '../../server/src/lib/executorSettings/deepseek.ts';
 import { deepSeekCatalogCacheKey } from '../../server/src/lib/deepseek/catalog.ts';
 
-const artifactModule = await import('../../server/src/lib/deepseek/runtimeArtifact.ts').catch(() => null);
+const artifactModule = await import('../helpers/deepseekLegacyArtifact.mts');
 const processModule = await import('../../server/src/lib/deepseek/runtimeProcess.ts').catch(() => null);
 
 /**
@@ -16,9 +18,11 @@ const processModule = await import('../../server/src/lib/deepseek/runtimeProcess
  * Разные payload дают разные поколения при одинаковой upstream version.
  */
 async function fixture(t, marker = 'A', changes = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek runtime '));
+  const container = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek runtime '));
+  const root = path.join(container, 'generation');
 
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(container, { recursive: true, force: true }));
+  await fs.mkdir(root);
 
   const contract = {
     format: 1,
@@ -65,36 +69,49 @@ async function fixture(t, marker = 'A', changes = {}) {
 
   await fs.writeFile(path.join(root, 'runtime.json'), JSON.stringify(metadata));
 
-  return { root, metadata };
+  const info = {
+    ...runtimeInfoFixture(),
+    packageId: metadata.buildId,
+    buildId: metadata.buildId,
+    upstreamVersion: metadata.source.version,
+    runtimeVersion: metadata.runtimeVersion,
+    hostContract: metadata.hostContract,
+  };
+  const binary = path.join(container, 'deepseek');
+
+  await fs.writeFile(binary, `#!${process.execPath}\nconsole.log(${JSON.stringify(JSON.stringify(info))});`, {
+    mode: 0o755,
+  });
+
+  return {
+    root,
+    metadata,
+    binary,
+    info,
+  };
 }
 
 test('descriptor читает candidate при произвольном cwd и пробелах, не выбирает PATH dsh', async (t) => {
   assert.ok(artifactModule && processModule, 'Единый проверяющий descriptor пока отсутствует');
 
-  const { root, metadata } = await fixture(t);
-  const descriptor = processModule.resolveDeepSeekRuntime({ deepseekArtifactDir: root });
+  const { root, metadata, binary, info } = await fixture(t);
+  const descriptor = processModule.resolveDeepSeekRuntime({ deepseekBin: binary, deepseekCacheDir: root });
 
-  assert.equal(descriptor.command, process.execPath);
-  assert.deepEqual(descriptor.prefixArgs, [path.join(root, 'entry.mjs')]);
+  assert.equal(descriptor.command, binary);
+  assert.deepEqual(descriptor.prefixArgs, ['--expect-package-id', info.packageId, '--cache-dir', root]);
+  assert.equal(descriptor.generationDir, null);
   assert.equal(descriptor.upstreamVersion, metadata.source.version);
   assert.equal(descriptor.buildId, metadata.buildId);
   assert.ok(Object.isFrozen(descriptor));
 });
 
-test('повреждение зависимости при прежнем entry инвалидирует integrity cache', async (t) => {
-  assert.ok(artifactModule && processModule, 'Проверка payload пока отсутствует');
-
+test('legacy integrity для cutover обнаруживает повреждение зависимости при прежнем entry', async (t) => {
   const { root } = await fixture(t);
-  const runtime = processModule.resolveDeepSeekRuntime({ deepseekArtifactDir: root });
 
+  artifactModule.readDeepSeekArtifact(root);
   await fs.writeFile(path.join(root, 'dependency.js'), 'corrupt');
-  assert.throws(
-    () => processModule.resolveDeepSeekRuntime({ deepseekArtifactDir: root }),
-    { code: 'deepseek_runtime_corrupt' },
-  );
-  assert.throws(() => processModule.verifyDeepSeekRuntimeDescriptor(runtime), {
-    code: 'deepseek_runtime_corrupt',
-  });
+  assert.throws(() => artifactModule.readDeepSeekArtifact(root), { code: 'deepseek_runtime_corrupt' });
+  await assert.rejects(artifactModule.readDeepSeekArtifactAsync(root), { code: 'deepseek_runtime_corrupt' });
 });
 
 test('host contract отвергается даже с целыми хешами; capabilities защищены identity', async (t) => {
@@ -103,8 +120,8 @@ test('host contract отвергается даже с целыми хешами
   const incompatible = await fixture(t, 'A', { hostContract: 999 });
 
   assert.throws(
-    () => processModule.resolveDeepSeekRuntime({ deepseekArtifactDir: incompatible.root }),
-    { code: 'deepseek_runtime_incompatible' },
+    () => processModule.resolveDeepSeekRuntime({ deepseekBin: incompatible.binary }),
+    { code: 'deepseek_binary_unsupported' },
   );
 
   const { root, metadata } = await fixture(t);
@@ -112,41 +129,26 @@ test('host contract отвергается даже с целыми хешами
   metadata.capabilities.settingsAcp = true;
   await fs.writeFile(path.join(root, 'runtime.json'), JSON.stringify(metadata));
   assert.throws(
-    () => processModule.resolveDeepSeekRuntime({ deepseekArtifactDir: root }),
+    () => artifactModule.readDeepSeekArtifact(root),
     { code: 'deepseek_runtime_corrupt' },
   );
 });
 
-test('смена current сохраняет descriptor A и запрещает подготовленный A запуск на B', async (t) => {
-  assert.ok(artifactModule && processModule, 'Закрепление generation пока отсутствует');
-
+test('смена выбранного binary сохраняет descriptor A и запрещает native план A на B', async (t) => {
   const first = await fixture(t);
   const second = await fixture(t, 'B');
-  const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-current-'));
-
-  t.after(() => fs.rm(runtimeRoot, { recursive: true, force: true }));
-  await fs.mkdir(path.join(runtimeRoot, 'builds'));
-  await fs.rename(first.root, path.join(runtimeRoot, 'builds', 'A'));
-  await fs.rename(second.root, path.join(runtimeRoot, 'builds', 'B'));
-  await fs.symlink('builds/A', path.join(runtimeRoot, 'current'));
-
-  const config = { deepseekRuntimeMode: 'embedded', deepseekGenerationRoot: runtimeRoot };
-  const a = processModule.resolveDeepSeekRuntime(config);
-
-  await fs.unlink(path.join(runtimeRoot, 'current'));
-  await fs.symlink('builds/B', path.join(runtimeRoot, 'current'));
-
-  const b = processModule.resolveDeepSeekRuntime(config);
+  const a = processModule.resolveDeepSeekRuntime({ deepseekBin: first.binary });
+  const b = processModule.resolveDeepSeekRuntime({ deepseekBin: second.binary });
 
   assert.notEqual(a.identity, b.identity);
-  assert.equal(a.prefixArgs[0], path.join(runtimeRoot, 'builds', 'A', 'entry.mjs'));
-  assert.throws(
-    () => processModule.assertDeepSeekPreparedRuntime(b, { runtimeIdentity: a.identity }),
-    { code: 'deepseek_runtime_changed' },
-  );
+  assert.equal(a.command, first.binary);
+  assert.equal(a.prefixArgs[1], first.info.packageId);
+  assert.throws(() => processModule.assertDeepSeekPreparedRuntime(b, { runtimeIdentity: a.identity }), {
+    code: 'deepseek_runtime_changed',
+  });
 });
 
-test('missing embedded не выбирает dsh; внешний override имеет отдельную identity', async (t) => {
+test('старые flags не выбирают PATH dsh; override требует автономную поставку', async (t) => {
   assert.ok(artifactModule && processModule, 'Выбор runtime пока отсутствует');
 
   const { root } = await fixture(t);
@@ -157,32 +159,29 @@ test('missing embedded не выбирает dsh; внешний override име
       deepseekGenerationRoot: path.join(root, 'missing'),
       deepseekBin: 'dsh',
     }),
-    { code: 'deepseek_runtime_missing' },
+    { code: 'deepseek_binary_unsupported' },
   );
 
-  const external = processModule.resolveDeepSeekRuntime({
+  await assert.rejects(processModule.resolveDeepSeekRuntimeAsync({
     deepseekArtifactDir: root,
     deepseekBinOverride: path.join(root, 'entry.mjs'),
-  });
-
-  assert.equal(external.kind, 'external');
-  assert.equal(external.command, path.join(root, 'entry.mjs'));
-  assert.deepEqual(external.prefixArgs, []);
+  }), { code: 'deepseek_binary_not_executable' });
 
   const probe = await processModule.probeDeepSeekRuntime({ deepseekBinOverride: process.execPath });
 
   assert.equal(probe.ok, false);
+  assert.equal(probe.code, 'deepseek_binary_unsupported');
 });
 
-test('discovery закрепляет A: version, cache, settings и security binding различают B', async (t) => {
+test('discovery закрепляет A; cache/settings различают B, профиль прав остаётся прежним', async (t) => {
   assert.ok(processModule, 'Descriptor пока отсутствует');
 
   const a = await fixture(t);
   const b = await fixture(t, 'B');
-  const config = { deepseekBin: process.execPath, deepseekArtifactDir: a.root };
+  const config = { deepseekBin: a.binary };
   const context = await deepseek.nativeSettings.context(config, a.root);
 
-  config.deepseekArtifactDir = b.root;
+  config.deepseekBin = b.binary;
 
   let launched;
   const snapshot = await readDeepSeekSettings(config, context, { signal: new AbortController().signal },
@@ -208,10 +207,11 @@ test('discovery закрепляет A: version, cache, settings и security bin
   assert.equal(prepared.runtimeIdentity, context.runtimeIdentity);
   assert.notEqual(other.binaryIdentity, context.binaryIdentity);
   assert.notEqual(
-    deepSeekCatalogCacheKey({ ...config, deepseekArtifactDir: a.root }), deepSeekCatalogCacheKey(config),
+    await deepSeekCatalogCacheKey({ ...config, deepseekBin: a.binary }),
+    await deepSeekCatalogCacheKey(config),
   );
-  assert.notEqual(
-    deepseek.sessionBinding.securityProfile({ ...config, deepseekArtifactDir: a.root }),
-    deepseek.sessionBinding.securityProfile(config),
+  assert.equal(
+    await deepseek.sessionBinding.securityProfile({ ...config, deepseekBin: a.binary }),
+    await deepseek.sessionBinding.securityProfile(config),
   );
 });

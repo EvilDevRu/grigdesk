@@ -10,7 +10,7 @@ import type { DeepSeekUpdate } from '../src/lib/deepseek/steps.ts';
 import deepseek from '../src/lib/executors/deepseek.ts';
 import type { ExecutorAdapter } from '../src/lib/executors/index.ts';
 import { prepareFactoryNativeSettings } from '../src/lib/executorSettings/factorySettings.ts';
-import { resolveDeepSeekRuntime } from '../src/lib/deepseek/runtimeProcess.ts';
+import { prepareDeepSeekRuntime, preparedDeepSeekRuntime } from '../src/lib/deepseek/preparedRuntime.ts';
 import { deepSeekDistributionMode } from '../src/lib/deepseek/distribution.ts';
 
 interface Arguments {
@@ -25,6 +25,7 @@ interface Arguments {
   artifactDir?: string;
   runtimeIdentity?: string;
   runtimeVersion?: string;
+  cacheDir?: string;
 }
 
 const STATUS_ENV_NAMES = Object.freeze([
@@ -68,6 +69,7 @@ function parseArguments(argv: readonly string[]): Arguments {
   const known = new Set([
     '--bin', '--cwd', '--run-dir', '--runtime-home', '--prompt-file',
     '--model', '--effort', '--mode', '--artifact-dir', '--runtime-identity', '--runtime-version',
+    '--cache-dir',
   ]);
   for (const name of values.keys()) {
     if (!known.has(name)) throw new Error(`DeepSeek Factory: неизвестный аргумент ${name}`);
@@ -92,6 +94,7 @@ function parseArguments(argv: readonly string[]): Arguments {
     artifactDir: values.get('--artifact-dir'),
     runtimeIdentity: values.get('--runtime-identity'),
     runtimeVersion: values.get('--runtime-version'),
+    cacheDir: values.get('--cache-dir'),
   };
 }
 
@@ -107,6 +110,7 @@ async function validatePaths(args: Arguments): Promise<Arguments> {
     runDir: args.runDir,
     runtimeHome: args.runtimeHome,
     promptFile: args.promptFile,
+    ...(args.cacheDir ? { cacheDir: args.cacheDir } : {}),
   })) {
     if (!path.isAbsolute(value)) throw new Error(`DeepSeek Factory: ${name} не абсолютный`);
   }
@@ -226,7 +230,7 @@ export async function runDeepSeekFactory(
   const runtimeMode = env.GRIGDESK_DEEPSEEK_RUNTIME_MODE
     || deepSeekDistributionMode(path.join(ROOT, 'server/deepseek-runtime-contract.json'));
 
-  if (runtimeMode !== 'installed' && runtimeMode !== 'embedded') {
+  if (runtimeMode !== 'installed' && runtimeMode !== 'embedded' && runtimeMode !== 'binary') {
     throw new Error('DeepSeek Factory: неизвестный режим runtime');
   }
 
@@ -234,13 +238,15 @@ export async function runDeepSeekFactory(
     deepseekRuntimeHome: args.runtimeHome,
     deepseekBin: args.bin,
     deepseekBinOverride: env.GRIGDESK_DEEPSEEK_BIN || undefined,
-    deepseekRuntimeMode: runtimeMode as 'installed' | 'embedded',
+    deepseekRuntimeMode: runtimeMode as 'installed' | 'embedded' | 'binary',
+    deepseekCacheDir: args.cacheDir || env.GRIGDESK_DEEPSEEK_CACHE_DIR || undefined,
     deepseekGenerationRoot: env.GRIGDESK_DEEPSEEK_GENERATION_ROOT
       || path.join(ROOT, 'server/runtime/deepseek'),
     deepseekArtifactDir: args.artifactDir || env.GRIGDESK_DEEPSEEK_ARTIFACT_DIR || undefined,
     rootDir: ROOT,
   };
-  const runtime = resolveDeepSeekRuntime(config);
+  const preparedRuntime = await prepareDeepSeekRuntime(config, { signal: AbortSignal.timeout(15000) });
+  const runtime = await preparedDeepSeekRuntime(config, preparedRuntime);
 
   if ((args.runtimeIdentity && args.runtimeIdentity !== runtime.identity)
       || (args.runtimeVersion && args.runtimeVersion !== runtime.runtimeVersion)) {
@@ -249,15 +255,12 @@ export async function runDeepSeekFactory(
     });
   }
 
-  if (runtime.generationDir) {
-    config.deepseekArtifactDir = runtime.generationDir;
-  }
-
   const { nativeSettings } = await prepareFactoryNativeSettings({
     adapter: deepseek as ExecutorAdapter,
     config,
     cwd: args.cwd,
     mode: args.mode,
+    preparedRuntime,
     prefsPath: env.GRIGDESK_PROVIDER_PREFS_PATH || env.GRIGDESK_PREFS_PATH
       || path.join(dataHome({ env, home: env.HOME || os.homedir() }), 'state/prefs.json'),
   });
@@ -282,6 +285,7 @@ export async function runDeepSeekFactory(
       config,
       env,
       nativeSettings,
+      preparedRuntime,
       // Чатовые тумблеры прямого SSH/БД сюда не идут: дефолт адаптера блокирует SSH.
       message: prompt,
       model: args.model,

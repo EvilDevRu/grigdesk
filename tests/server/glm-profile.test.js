@@ -9,7 +9,7 @@ import { buildLaunchFiles } from '../../server/src/lib/deepseek/profile.ts';
 import { GLM_PROFILE_REVISION, buildGlmRoute } from '../../server/src/lib/glm/contract.ts';
 import { glmChatHome, prepareGlmLaunch } from '../../server/src/lib/glm/launch.ts';
 import { buildGlmLaunchFiles, glmLaunchFingerprint } from '../../server/src/lib/glm/profile.ts';
-import { runtimeYaml } from '../../tools/runtimeComposition.ts';
+import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const GOLDEN = path.join(REPO_ROOT, 'tests/fixtures/glm/deepseek-launch-golden.json');

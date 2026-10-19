@@ -1,0 +1,22 @@
+# Проверка GLM с явно выбранным бинарником
+
+`server/scripts/glmLiveSmoke.mts` требует `--mode api --confirm-live --binary <абсолютный ELF>
+--cache-dir <отдельный абсолютный cache>`. Проверка аргументов предшествует чтению env.
+Настройки службы не подменяют выбранный ELF или cache-dir; инструмент использует async
+descriptor и metadata generation. Потолок остаётся восемь ходов.
+
+Только этот явный entrypoint рассчитывает временный DI-допуск для api. Серверная проверка
+host contract, profile/policy и наличия plugin сохраняется. Coding Plan отклоняется до
+файловых эффектов. Обычный production adapter продолжает проверять admission самого выпуска.
+Способ чтения ключа для ручного запуска сохранён: env-файл папки данных поверх окружения;
+ключ не передаётся в argv и не печатается.
+
+Отчёт содержит kind (`loopback` для локального model endpoint, иначе `live`), mode,
+compatibility, packageId и SHA выбранного файла. Offline-тест передаёт синтетический ключ,
+loopback модель и fetch guard; ветка main, читающая env-файл, не вызывается. Этот результат
+проверяет инструмент и протокол, живого допуска выпуска он не выдаёт.
+
+`tests/server/glm-live-binary.test.js` использует настоящий ELF: ответ, read/write/bash,
+reasoning, resume, запрет SSH, остановка в approval и duplicate turnId. У model fixture
+отдельные callId, а путь для approval извлекается из строки перед добавленной подсказкой
+GrigDesk. Проверка CLI с неполными аргументами не запускает модель и не читает env.

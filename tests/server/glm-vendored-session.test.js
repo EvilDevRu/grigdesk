@@ -8,13 +8,11 @@ import test from 'node:test';
 import { ChatSessionBindingStore } from '../../server/src/lib/chat/sessionBindingStore.ts';
 import { chatHomeFor } from '../../server/src/lib/deepseek/env.ts';
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
-import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
-import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
 import { glmChatHome } from '../../server/src/lib/glm/launch.ts';
 import { glmSessionJournalDir } from '../../server/src/lib/glm/session.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { ensureGlmTestRuntime } from '../helpers/glmTestRuntime.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_SERVICE_KEY, glmTextReply, writeGlmEgressGuard } from '../helpers/glmProductionFixture.mts';
 
@@ -28,7 +26,7 @@ const MODEL = '["zai","glm-5.3"]';
  * Каталог homes GLM и корень DeepSeek разведены, как в конфигурации службы.
  */
 async function fixture(t, loopbackOptions) {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { config: runtimeConfig, identity } = await ensureGlmTestRuntime();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -40,12 +38,10 @@ async function fixture(t, loopbackOptions) {
   });
   const config = {
     rootDir: project,
-    deepseekArtifactDir: artifact,
-    deepseekRuntimeMode: 'embedded',
+    ...runtimeConfig,
     deepseekRuntimeHome: path.join(root, 'deepseek-home'),
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
-  const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');
   const adapter = createGlmAdapter({
     env: {
       PATH: process.env.PATH,
@@ -72,7 +68,9 @@ async function fixture(t, loopbackOptions) {
     identity,
     adapter,
     mock,
-    home: (chatKey) => glmChatHome(config.glmRuntimeHome, identity, chatKey),
+    home: (chatKey) => config.deepseekRuntimeMode === 'binary'
+      ? glmChatHome(config.glmRuntimeHome, chatKey)
+      : glmChatHome(config.glmRuntimeHome, identity, chatKey),
     run: (options = {}) => adapter.run({
       config,
       cwd: project,

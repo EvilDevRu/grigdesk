@@ -278,6 +278,7 @@ interface ChatExecutor {
   id: string;
   bin?: ExecutorAdapter['bin'];
   nativeSettings?: ExecutorAdapter['nativeSettings'];
+  prepareRuntime?: ExecutorAdapter['prepareRuntime'];
   // Канал ввода в активный ход объявляет сам адаптер; отсутствие — честное «не умею».
   inTurnInput?: ExecutorAdapter['inTurnInput'];
   workToolsTransport?: string;
@@ -3182,9 +3183,29 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ?.strictClientPolicy === true,
     };
     let nativeSettings: ExecutorRunInput['nativeSettings'];
+    let preparedRuntime: ExecutorRunInput['preparedRuntime'];
+
+    // Подготовка принадлежит серверу: тело HTTP не выбирает handle или descriptor.
+    // Один объект проходит settings, binding и запуск даже при пустых overrides.
+    if (executor.prepareRuntime) {
+      try {
+        preparedRuntime = await executor.prepareRuntime(config, { signal: AbortSignal.timeout(15_000) });
+
+        if (!preparedRuntime || typeof preparedRuntime !== 'object' || Array.isArray(preparedRuntime)) {
+          throw new TypeError('Адаптер вернул некорректный runtime handle');
+        }
+      } catch {
+        return channel.refuse(503, {
+          error: 'executor_unavailable',
+          message: 'Не удалось подготовить runtime исполнителя',
+        });
+      }
+    }
 
     try {
-      nativeSettings = await prepareChatNativeSettings(executor, config, cwd, currentPrefs.providerSettings);
+      nativeSettings = await prepareChatNativeSettings(
+        executor, config, cwd, currentPrefs.providerSettings, undefined, preparedRuntime,
+      );
     } catch (error) {
       if (error instanceof NativeSettingsError) {
         return channel.refuse(error.statusCode, {
@@ -3214,13 +3235,19 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       const cwdRealpath = await fs.realpath(cwd);
       let authProfileId: string;
       let securityProfile: string;
+      let legacySecurityProfiles: readonly string[] = [];
 
       // Привязку сравниваем только с доступным исполнителем: недоступная сборка или профиль
       // дают отказ хода, а не новую сессию без памяти под отпечатком «недоступно».
       // Текст показываем лишь у ошибок адаптера с кодом `<id исполнителя>_…`.
       try {
         authProfileId = String(await executor.sessionBinding.authProfileId(config, providerSettings));
-        securityProfile = String(await executor.sessionBinding.securityProfile(config, providerSettings));
+        securityProfile = String(await executor.sessionBinding.securityProfile(
+          config, providerSettings, preparedRuntime,
+        ));
+        legacySecurityProfiles = await executor.sessionBinding.legacySecurityProfiles?.(
+          config, providerSettings, preparedRuntime,
+        ) ?? [];
       } catch (error) {
         const code = (error as { code?: unknown })?.code;
 
@@ -3240,7 +3267,20 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         authProfileId,
         securityProfile,
       };
-      const current = await bindingStore.read(chatKey!);
+
+      let current = await bindingStore.read(chatKey!);
+
+      // Только адаптер знает прежнюю формулу; остальные поля identity должны совпадать.
+      // CAS сохраняет sessionId и отвергает конкурентную смену binding до resume.
+      if (current && current.securityProfile !== securityProfile
+        && legacySecurityProfiles.includes(current.securityProfile)
+        && (['provider', 'cwdRealpath', 'model', 'authProfileId'] as const)
+          .every((field) => current![field] === providerIdentity![field])) {
+        current = await bindingStore.compareAndSwap({
+          ...providerIdentity, sessionId: current.sessionId,
+        }, current.generation, { legacySecurityProfiles });
+      }
+
       const identityMatches = current
         && (['provider', 'cwdRealpath', 'model', 'authProfileId', 'securityProfile'] as const)
           .every((field) => current[field] === providerIdentity![field]);
@@ -3529,6 +3569,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         workToolScopeKey,
         providerSettings,
         nativeSettings,
+        preparedRuntime,
         nativeSettingsFingerprint: nativeSettings?.fingerprint ?? '',
         // Claude получает порог через env выше, Codex — как официальный config override
         // в своих exec-args. Одно значение настроек, transport выбирает сам executor.

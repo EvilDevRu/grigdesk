@@ -1,207 +1,108 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
-import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from '../helpers/deepseekLoopback.mts';
-import { runDeepSeekWebTurn } from '../../server/src/lib/deepseek/webRuntime.ts';
-import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
+import { ensureTestDeepSeekBinaryPair } from '../helpers/deepseekBinary.mts';
+import { deepSeekProductionChatFixture } from '../helpers/deepseekChatParity.mjs';
 import { chatHomeFor } from '../../server/src/lib/deepseek/env.ts';
-import { readDeepSeekArtifactAsync } from '../../server/src/lib/deepseek/runtimeArtifact.ts';
-import { activateDeepSeekGeneration, publishDeepSeekGeneration }
-  from '../../tools/deepseekRuntimePublication.ts';
-import { forkDeepSeekHome } from '../../tools/deepseekHomeFork.ts';
+import { sessionJournalDirectory } from '../../server/src/lib/deepseek/journal.ts';
 
 /**
- * B сохраняет настоящий compiled runtime A, добавляя собственный host resource в identity.
- * Оба поколения имеют реальный SDK и одинаковый доказанный journal codec v3.
+ * Совместимый rollback больше не копирует home по buildId: версии продолжают один журнал.
+ * Активный A, другой чат B и несовместимый будущий codec наблюдаются на настоящих ELF.
  */
-async function variant(source, destination) {
-  await fs.cp(source, destination, { recursive: true, verbatimSymlinks: true });
+test('настоящий binary rollback сохраняет активный A, память B→A и будущий журнал', {
+  timeout: 900000,
+}, async (t) => {
+  const { a, b } = await ensureTestDeepSeekBinaryPair();
+  const arrived = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const f = await deepSeekProductionChatFixture(t, {
+    respond: async (_payload, index) => {
+      if (index === 0) {
+        arrived.resolve();
+        await release.promise;
+      }
 
-  const file = path.join(destination, 'runtime.json');
-  const metadata = JSON.parse(await fs.readFile(file, 'utf8'));
-
-  await fs.writeFile(path.join(destination, 'rollback-fixture.txt'), 'generation-B', { mode: 0o644 });
-  metadata.payload['rollback-fixture.txt'] = createHash('sha256')
-    .update(`420:${Buffer.from('generation-B').toString('base64')}`).digest('hex');
-  metadata.payload = Object.fromEntries(Object.entries(metadata.payload)
-    .sort(([a], [b]) => a.localeCompare(b, 'en')));
-  metadata.inputIdentity.composition += ':rollback-fixture-B';
-  metadata.buildId = createHash('sha256').update(JSON.stringify({
-    inputIdentity: metadata.inputIdentity,
-    payload: metadata.payload,
-  })).digest('hex');
-  metadata.runtimeVersion = `${metadata.source.version}.grigdesk.b${metadata.buildId.slice(0, 16)}`;
-  await fs.writeFile(file, JSON.stringify(metadata));
-
-  return (await readDeepSeekArtifactAsync(destination)).artifact;
-}
-
-/**
- * Журналы перечисляются только в home собственной fixture, без production data.
- * Bytes используются для проверки refusal без изменения оригинальной записи B.
- */
-async function journals(root, relative = '') {
-  const files = [];
-
-  for (const entry of await fs.readdir(path.join(root, relative), { withFileTypes: true })) {
-    const name = path.join(relative, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(...await journals(root, name));
-    } else if (/\.jsonl(?:\.zstd)?$/u.test(name)) {
-      files.push(name);
+      return { deltas: [{ content: 'rollback-memory' }] };
     }
-  }
+  }, { mode: 'binary', candidate: a });
+  const starts = [];
+  const startServer = (options) => {
+    starts.push(options.runtime.metadata.packageId);
 
-  return files;
-}
-
-test('настоящий B сохраняет журнал, A продолжает совместимую копию и отвергает будущий формат', async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-rollback-'));
-  const runtimeRoot = path.join(root, 'runtime');
-  const homeRoot = path.join(root, 'homes');
-  const a = (await readDeepSeekArtifactAsync(artifact)).artifact;
-  const launches = [];
-  const firstAbort = new AbortController();
-  let firstDeadline;
-  let first;
-  let release;
-  let entered;
-  const held = new Promise((resolve) => {
-    release = resolve;
-  });
-  const firstHttp = new Promise((resolve) => {
-    entered = resolve;
-  });
-  const mock = await startDeepSeekLoopback({ respond: async (_payload, index) => {
-    if (index === 0) {
-      entered();
-      await held;
-    }
-
-    return { deltas: [{ content: 'rollback-memory' }], finishReason: 'stop' };
-  } });
-
-  t.after(async () => {
-    clearTimeout(firstDeadline);
-    firstAbort.abort();
-    release();
-    await first?.catch(() => {});
-    await mock.stop();
-    await fs.rm(root, { recursive: true, force: true });
-  });
-  await publishDeepSeekGeneration(artifact, runtimeRoot);
-
-  const config = {
-    deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: runtimeRoot,
-    deepseekRuntimeHome: homeRoot,
-    deepseekBin: '/absent/dsh',
-  };
-  // Запуск использует выбранный runtime и original overlay, меняя только loopback endpoint.
-  // Профиль, journal backend, hooks и sandbox остаются настоящими.
-  const run = (chatKey, extra = {}) => runDeepSeekWebTurn({
-    config,
-    cwd: root,
-    projectRoot: root,
-    chatKey,
-    message: 'rollback-fixture-prompt',
-    model: '["deepseek-official","deepseek-v4-flash"]',
-    effort: 'off',
-    env: {
-      PATH: process.env.PATH,
-      HOME: root,
-      DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
-    },
-    signal: AbortSignal.timeout(45_000),
-    startServer: async (options) => {
-      const launchDir = path.dirname(options.overlayPath);
-      const original = await fs.readFile(options.overlayPath, 'utf8');
-      const patch = await writeDeepSeekLoopbackOverlay({
-        root: launchDir,
-        artifact: options.runtime.generationDir,
-        endpoint: mock.endpoint,
-        document: path.join(launchDir, 'native-settings.yaml'),
-      });
-      const combined = path.join(launchDir, 'combined.yml');
-
-      await fs.writeFile(combined, original + await fs.readFile(patch, 'utf8'));
-      launches.push({ buildId: options.runtime.buildId, home: options.env.DSH_HOME });
-
-      return startDeepSeekServer({ ...options, overlayPath: combined });
-    },
-    ...extra,
-  });
-  // Срок ограничивает активную работу первого хода, а не намеренный HTTP-барьер.
-  // После снятия барьера тот же срок снова ограничивает завершение и очистку.
-  const armFirstDeadline = () => {
-    firstDeadline = setTimeout(() => {
-      firstAbort.abort();
-    }, 45_000);
+    return f.startServer(options);
   };
 
-  armFirstDeadline();
-  first = run('running-A', { signal: firstAbort.signal });
+  t.after(() => release.resolve());
 
-  // Остановка первого хода до HTTP должна завершить тест и вызвать очистку ресурсов.
-  await Promise.race([firstHttp, first]);
-  clearTimeout(firstDeadline);
+  const active = f.run({
+    chatKey: 'running-a',
+    message: 'first-on-a',
+    startServer
+  });
 
-  const candidateB = path.join(root, 'candidate-B');
-  const b = await variant(artifact, candidateB);
+  active.catch(arrived.reject);
+  await arrived.promise;
+  f.config.deepseekBin = b.binary;
 
-  await publishDeepSeekGeneration(candidateB, runtimeRoot);
+  const other = await f.run({
+    chatKey: 'other-b',
+    message: 'other-on-b',
+    startServer
+  });
 
-  const second = await run('written-B');
+  assert.deepEqual(starts, [a.info.packageId, b.info.packageId]);
+  release.resolve();
 
-  armFirstDeadline();
-  release();
-  await first;
-  clearTimeout(firstDeadline);
-  assert.deepEqual(launches.slice(0, 2).map((launch) => launch.buildId), [a.buildId, b.buildId]);
-  assert.notEqual(launches[0].home, launches[1].home);
+  const first = await active;
+  const second = await f.run({
+    chatKey: 'running-a',
+    sessionId: first.sessionId,
+    message: 'second-on-b',
+    startServer,
+  });
 
-  const sourceHome = launches[1].home;
-  const logs = await journals(sourceHome);
-  const originalBytes = await Promise.all(logs.map((name) => fs.readFile(path.join(sourceHome, name))));
+  f.config.deepseekBin = a.binary;
 
-  assert.ok(logs.length);
-  await activateDeepSeekGeneration(runtimeRoot, a.buildId);
+  const third = await f.run({
+    chatKey: 'running-a',
+    sessionId: second.sessionId,
+    message: 'third-back-on-a',
+    startServer,
+  });
 
-  const copied = chatHomeFor(path.join(homeRoot, 'generations', a.buildId), 'compatible-copy');
+  assert.equal(second.sessionId, first.sessionId);
+  assert.equal(third.sessionId, first.sessionId);
+  assert.notEqual(other.sessionId, first.sessionId);
+  assert.match(JSON.stringify(f.mock.payloads.at(-1).messages), /first-on-a/u);
+  assert.match(JSON.stringify(f.mock.payloads.at(-1).messages), /second-on-b/u);
+  assert.equal(f.launches[0].home, f.launches[2].home);
+  assert.equal(f.launches[2].home, f.launches[3].home);
+  assert.notEqual(f.launches[0].home, f.launches[1].home);
 
-  await forkDeepSeekHome(sourceHome, copied, path.join(runtimeRoot, 'builds', a.buildId));
+  const home = chatHomeFor(f.config.deepseekRuntimeHome, 'running-a', 'stable');
+  const directory = sessionJournalDirectory(home, f.cwd, third.sessionId);
+  const current = (await fs.readdir(directory)).find((name) => /^session\.v3\.jsonl(?:\.zstd)?$/u.test(name));
 
-  const resumed = await run('compatible-copy', { sessionId: second.sessionId });
+  assert.ok(current);
 
-  assert.equal(resumed.sessionId, second.sessionId);
-  assert.equal(mock.payloads.at(-1).messages.some((message) => message.content === 'rollback-memory'), true);
+  const bytes = await fs.readFile(path.join(directory, current));
+  const future = path.join(directory, `session.v99.jsonl${current.endsWith('.zstd') ? '.zstd' : ''}`);
 
-  const future = chatHomeFor(path.join(homeRoot, 'generations', a.buildId), 'future-copy');
+  await fs.writeFile(future, bytes);
 
-  await forkDeepSeekHome(sourceHome, future, path.join(runtimeRoot, 'builds', a.buildId));
+  const rotated = await f.run({
+    chatKey: 'running-a',
+    sessionId: third.sessionId,
+    message: 'future-codec-on-a',
+    startServer,
+  });
 
-  const sourceLog = path.join(future, logs[0]);
-  const futureLog = sourceLog.replace(/\.v3\.jsonl/u, '.v99.jsonl');
-
-  assert.notEqual(sourceLog, futureLog);
-  await fs.rename(sourceLog, futureLog);
-
-  const refusedBytes = await fs.readFile(futureLog);
-  const requests = mock.payloads.length;
-
-  await assert.rejects(run('future-copy', { sessionId: second.sessionId }));
-  assert.equal(mock.payloads.length, requests);
-  assert.deepEqual(await fs.readFile(futureLog), refusedBytes);
-
-  const after = await Promise.all(logs.map((name) => fs.readFile(path.join(sourceHome, name))));
-
-  assert.deepEqual(after, originalBytes);
-  await assert.rejects(forkDeepSeekHome(sourceHome, copied, path.join(runtimeRoot, 'builds', a.buildId)));
+  assert.notEqual(rotated.sessionId, third.sessionId);
+  assert.match(JSON.stringify(rotated.steps), /формат журнала несовместим/u);
+  assert.deepEqual(await fs.readFile(future), bytes);
+  assert.deepEqual(starts, [a.info.packageId, b.info.packageId, b.info.packageId,
+  a.info.packageId, a.info.packageId]);
 });

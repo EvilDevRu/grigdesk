@@ -9,6 +9,10 @@ import type {
   ProviderSettingsCatalog,
 } from '../../../../shared/chat/providerSettingsContracts.ts';
 
+// Opaque handle живёт только внутри серверного хода и не входит в JSON-контракт.
+// Содержимое и принадлежность проверяет адаптер, создавший handle.
+export type PreparedExecutorRuntime = object;
+
 export interface NativeSettingsContext {
   providerId: string;
   binaryIdentity: string;
@@ -103,6 +107,7 @@ export interface NativeSettingsCapability {
     config: unknown,
     cwd: string,
     consumer?: SettingsConsumer,
+    preparedRuntime?: PreparedExecutorRuntime,
   ) => NativeSettingsContext | Promise<NativeSettingsContext>;
   discover: (
     context: NativeSettingsContext,

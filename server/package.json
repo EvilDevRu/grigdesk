@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node src/app.ts",
     "dev": "node --watch src/app.ts",
-    "test": "npm run typecheck && npm run typecheck:tests && GRIGDESK_RELEASE_PUBLISH_CONTRACT=1 NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=6144 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=6 ../tests/server/*.test.js ../tests/server/loopback-only.test.mts ../tests/server/data-home-boot.test.mts ../tests/server/data-home.test.mts ../tests/server/brand-move.test.mts ../tests/server/brand-env.test.mts",
+    "test": "npm run typecheck && npm run typecheck:tests && GRIGDESK_RELEASE_PUBLISH_CONTRACT=2 NODE_TEST_HEAP_MB=1024 NODE_TEST_MAX_RSS_MB=6144 bash ../tests/run-node-tests-safe.sh --test --test-concurrency=6 ../tests/server/*.test.js ../tests/server/loopback-only.test.mts ../tests/server/data-home-boot.test.mts ../tests/server/data-home.test.mts ../tests/server/brand-move.test.mts ../tests/server/brand-env.test.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "tsc -p tsconfig.code.json --noEmit",
@@ -26,7 +26,7 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "deepseek:prepare": "node scripts/prepareDeepSeekRuntime.mts",
     "deepseek:build": "node scripts/prepareDeepSeekRuntime.mts",
-    "deepseek:verify": "node scripts/verifyDeepSeekCandidate.mts --vendor-dir ../third_party/deepseek-harness"
+    "deepseek:verify": "node scripts/verifyDeepSeekCandidate.mts --vendor-dir ../deepseek/vendor/deepseek-harness"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

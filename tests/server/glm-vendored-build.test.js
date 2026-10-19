@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,10 +16,8 @@ import {
 } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import {
-  ensureTestDeepSeekArtifact,
-  verifyTestDeepSeekArtifact,
-} from '../helpers/deepseekRuntimeArtifact.mts';
+import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
+import { readWorkerArtifact } from '../../deepseek/src/runtime/artifact.ts';
 
 const exec = promisify(execFile);
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G1');
@@ -49,7 +47,7 @@ const LOAD_RECORDER = `
  * Импорт compiled-плагина и встроенного маршрута zai идёт отдельным процессом без сети.
  * Окружение синтетическое: ни ключей, ни настоящего home в процесс не попадает.
  */
-async function importZaiRoute(artifact, home) {
+async function importZaiRoute(artifact, home, worker) {
   const plugin = pathToFileURL(path.join(artifact, 'packages/llm/llm-pi-ai/lib/index.js')).href;
   const provider = pathToFileURL(path.join(artifact,
     'node_modules/@earendil-works/pi-ai/dist/providers/zai.js')).href;
@@ -67,7 +65,7 @@ async function importZaiRoute(artifact, home) {
       models: route.getModels().map((model) => model.id),
     }));
   `;
-  const result = await exec(process.execPath, ['--input-type=module', '-e', script, plugin, provider], {
+  const result = await exec(worker, ['--input-type=module', '-e', script, plugin, provider], {
     cwd: home,
     env: {
       PATH: process.env.PATH,
@@ -82,7 +80,7 @@ async function importZaiRoute(artifact, home) {
 }
 
 test('настоящая generation содержит llm-pi-ai и загружает маршрут zai без сети', async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, worker, config, candidate } = await testDeepSeekBinarySelection();
   const composition = JSON.parse(await fs.readFile(path.join(artifact, 'composition.json'), 'utf8'));
 
   assert.ok(composition.packages.some((item) => item.name === PLUGIN), 'llm-pi-ai отсутствует в generation');
@@ -92,7 +90,7 @@ test('настоящая generation содержит llm-pi-ai и загружа
 
   t.after(() => fs.rm(home, { recursive: true, force: true }));
 
-  const route = await importZaiRoute(artifact, home);
+  const route = await importZaiRoute(artifact, home, worker);
 
   assert.equal(route.adapter, 'function');
   assert.equal(route.id, 'zai');
@@ -105,7 +103,7 @@ const DEEPSEEK_MOUNT_TEST = 'настоящий процесс DeepSeek не м�
   + 'и его settings/describe не содержит llm-pi-ai';
 
 test(DEEPSEEK_MOUNT_TEST, async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, worker, config, candidate } = await testDeepSeekBinarySelection();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -142,8 +140,9 @@ test(DEEPSEEK_MOUNT_TEST, async (t) => {
   });
 
   server = await startDeepSeekServer({
-    runtime: resolveDeepSeekRuntime({ deepseekArtifactDir: artifact }),
-    bin: process.execPath,
+    bin: worker,
+    spawnProcess: (_command, args, settings) => spawn(worker,
+      ['--import', recorder, path.join(artifact, 'entry.mjs'), ...args], settings),
     overlayPath: launch.overlayPath,
     cwd,
     env: {
@@ -152,7 +151,6 @@ test(DEEPSEEK_MOUNT_TEST, async (t) => {
       DSH_HOME: home,
       DSH_TELEMETRY_DISABLED: '1',
       NO_COLOR: '1',
-      NODE_OPTIONS: `--import=${pathToFileURL(recorder).href}`,
       GLM_LOAD_JOURNAL: journal,
     },
   });
@@ -166,13 +164,35 @@ test(DEEPSEEK_MOUNT_TEST, async (t) => {
   assert.ok(namespaces.includes('llm-deepseek'));
   assert.equal(namespaces.includes('llm-pi-ai'), false);
   assert.deepEqual(loads.filter((url) => /llm-pi-ai|\/pi-ai\//u.test(url)), []);
+  await server.stop();
+
+  // NODE_OPTIONS намеренно не проходит launcher; mounting дополнительно проверяется на самом ELF.
+  // Closure recorder выше запускает реальный bundled Node явно, не маскируясь binary descriptor.
+  server = await startDeepSeekServer({
+    runtime: resolveDeepSeekRuntime(config),
+    bin: candidate.binary,
+    overlayPath: launch.overlayPath,
+    cwd,
+    env: {
+      PATH: process.env.PATH,
+      HOME: home,
+      DSH_HOME: home,
+      DSH_TELEMETRY_DISABLED: '1',
+    },
+  });
+
+  const binaryDescription = await server.client.rpc('settings/describe');
+  const binaryNamespaces = binaryDescription.namespaces.map((namespace) => namespace.ns);
+
+  assert.ok(binaryNamespaces.includes('llm-deepseek'));
+  assert.equal(binaryNamespaces.includes('llm-pi-ai'), false);
 });
 
 const RELOCATION_TEST = 'настоящая generation проходит полную проверку payload и ABI '
   + 'после переноса в путь с пробелами';
 
 test(RELOCATION_TEST, async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, worker, config, candidate } = await testDeepSeekBinarySelection();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -183,12 +203,22 @@ test(RELOCATION_TEST, async (t) => {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.cp(artifact, relocated, { recursive: true, verbatimSymlinks: true });
   await fs.mkdir(home);
-  await verifyTestDeepSeekArtifact(relocated);
+  await readWorkerArtifact(relocated, {
+    nodeVersion: candidate.info.workerNode.version,
+    nativeAbi: candidate.info.workerNode.abi,
+    platform: candidate.info.platform,
+    arch: candidate.info.arch,
+  });
 
-  const probe = await probeDeepSeekRuntime({ deepseekArtifactDir: relocated });
-  const route = await importZaiRoute(relocated, home);
+  const binary = path.join(root, 'deepseek with spaces');
+
+  await fs.copyFile(candidate.binary, binary);
+  await fs.chmod(binary, 0o555);
+
+  const probe = await probeDeepSeekRuntime({ ...config, deepseekBin: binary });
+  const route = await importZaiRoute(relocated, home, worker);
   // Native addon грузится по-настоящему: flock на файле внутри перенесённой generation.
-  const addon = await exec(process.execPath, ['--input-type=module', '-e', `
+  const addon = await exec(worker, ['--input-type=module', '-e', `
     import { openSync, closeSync } from 'node:fs';
     import { createRequire } from 'node:module';
 
@@ -253,11 +283,11 @@ async function pluginSources(artifact) {
 }
 
 test('настоящий runtime.json содержит версию и integrity pi-ai и хэш исходников llm-pi-ai', async () => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, worker, config, candidate } = await testDeepSeekBinarySelection();
   const metadata = JSON.parse(await fs.readFile(path.join(artifact, 'runtime.json'), 'utf8'));
-  const lock = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'tools/deepseek-build/package-lock.json'),
-    'utf8'));
-  const patchesDir = path.join(REPO_ROOT, 'third_party/deepseek-harness/patches');
+  const lockFile = path.join(REPO_ROOT, 'deepseek/build/runtime-deps/package-lock.json');
+  const lock = JSON.parse(await fs.readFile(lockFile, 'utf8'));
+  const patchesDir = path.join(REPO_ROOT, 'deepseek/vendor/deepseek-harness/patches');
   const patches = await Promise.all((await fs.readdir(patchesDir)).sort().map(async (name) => ({
     path: name,
     sha256: sha256(await fs.readFile(path.join(patchesDir, name))),

@@ -1,9 +1,12 @@
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-import type { ChildProcess } from 'node:child_process';
-
-import { createAcpClient, initializeKimiAcp } from '../src/lib/kimi/acpClient.ts';
+import { createAcpClient, initializeAcp } from '../src/lib/acp/client.ts';
+import { spawnDeepSeekBinary } from '../src/lib/deepseek/binaryProcess.ts';
+import { buildHarnessChildEnv } from '../src/lib/deepseek/env.ts';
+import {
+  resolveDeepSeekRuntimeAsync,
+  verifyDeepSeekRuntimeDescriptorAsync,
+} from '../src/lib/deepseek/runtimeProcess.ts';
 
 interface ProbeArguments {
   bin: string;
@@ -11,11 +14,7 @@ interface ProbeArguments {
   dshHome: string;
   launchDir: string;
   overlay: string;
-}
-
-interface ProcessExit {
-  code: number | null;
-  signal: NodeJS.Signals | null;
+  cacheDir: string;
 }
 
 function argumentValue(argv: readonly string[], name: string): string {
@@ -36,13 +35,8 @@ function parseArguments(argv: readonly string[]): ProbeArguments {
     dshHome: argumentValue(argv, '--home'),
     launchDir: argumentValue(argv, '--launch-dir'),
     overlay: argumentValue(argv, '--overlay'),
+    cacheDir: argumentValue(argv, '--cache-dir'),
   };
-}
-
-function waitForExit(child: ChildProcess): Promise<ProcessExit> {
-  return new Promise((resolve) => {
-    child.once('close', (code, signal) => resolve({ code, signal }));
-  });
 }
 
 /**
@@ -51,16 +45,25 @@ function waitForExit(child: ChildProcess): Promise<ProcessExit> {
  */
 async function runProbe(args: ProbeArguments) {
   const startedAt = Date.now();
-  const child = spawn(args.bin, ['--profile', 'acp', '--patch', args.overlay], {
+  const runtime = await resolveDeepSeekRuntimeAsync({
+    deepseekRuntimeMode: 'binary',
+    deepseekBin: args.bin,
+    deepseekCacheDir: args.cacheDir,
+  });
+
+  await verifyDeepSeekRuntimeDescriptorAsync(runtime);
+
+  const owned = spawnDeepSeekBinary(runtime.command, [
+    ...runtime.prefixArgs, '--profile', 'acp', '--patch', args.overlay,
+  ], {
     cwd: args.launchDir,
-    env: {
-      ...process.env,
-      DSH_HOME: args.dshHome,
-      DSH_TELEMETRY_DISABLED: '1',
-    },
+    env: buildHarnessChildEnv({
+      source: { ...process.env, HOME: args.dshHome },
+      dshHome: args.dshHome,
+    }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  const exited = waitForExit(child);
+  const child = owned.child;
   let stderr = '';
 
   child.stderr?.on('data', (chunk: Buffer) => {
@@ -71,7 +74,7 @@ async function runProbe(args: ProbeArguments) {
   let sessionId = '';
 
   try {
-    const initialized = await initializeKimiAcp(client);
+    const initialized = await initializeAcp(client, 15000);
     const initializedAfterMs = Date.now() - startedAt;
     const created = await client.request('session/new', {
       cwd: args.cwd,
@@ -88,22 +91,14 @@ async function runProbe(args: ProbeArguments) {
     }
 
     await client.request('session/close', { sessionId }, 15_000);
-    client.close();
+    await owned.stop();
 
-    const processExit = await Promise.race([
-      exited,
-      new Promise<ProcessExit>((resolve) => {
-        const timer = setTimeout(() => resolve({ code: null, signal: null }), 8_000);
-        timer.unref?.();
-      }),
-    ]);
-
-    if (processExit.code === null && processExit.signal === null) {
-      child.kill('SIGTERM');
-    }
+    const processExit = await owned.closed;
 
     return {
       ok: true,
+      packageId: runtime.metadata!.packageId,
+      prefixArgs: runtime.prefixArgs,
       initialized,
       configOptions: created?.configOptions ?? null,
       initializedAfterMs,
@@ -115,13 +110,15 @@ async function runProbe(args: ProbeArguments) {
     if (sessionId) {
       await client.request('session/close', { sessionId }, 2_000).catch(() => {});
     }
-    client.close();
-    child.kill('SIGTERM');
+
+    await owned.stop();
 
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
       probeStderr: stderr.trim(),
       probeElapsedMs: Date.now() - startedAt,
     });
+  } finally {
+    client.close();
   }
 }
 

@@ -18,6 +18,10 @@
     "../tools/**/*.mts",
     "../tools/*.ts",
     "../tests/helpers/*.mts",
+    "../tests/deepseek/**/*.mts",
+    "../deepseek/src/**/*.ts",
+    "../deepseek/scripts/*.ts",
+    "../deepseek/scripts/*.mts",
     "../tests/types/*.mts",
     "../tests/docs/*.mts"
   ]

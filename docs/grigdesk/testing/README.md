@@ -1,10 +1,20 @@
 # Тесты и проверка
 
+- [Гейты DeepSeek: unit, SEA, source candidate и host parity](deepseek-test-gates.md)
+
 Веб-тесты на happy-dom, Playwright и ловушки, из-за которых тест врёт.
 
 Читай перед правкой: `tests`.
 
 ## Грабли
+
+- [Родитель временной фикстуры в артефактах создаётся самим тестом](artifact-fixture-parent.md)
+
+- [Реальный GLM: policy и home фикстуры вне системного tmp, скрываемого песочницей](glm-sandbox-fixture-root.md)
+
+- [Короткий engine-фильтр может совпасть с именем checkout](engine-filter-path.md)
+
+- [Временная папка вложенного сторожа при явном TMPDIR](node-guard-temp-root.md)
 
 - [Фикстура чистой установки копирует общий код вместе с инструментами](clean-checkout-shared-sources.md)
 

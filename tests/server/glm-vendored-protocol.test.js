@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_RESEARCH_KEY, writeGlmResearchOverlay } from '../helpers/glmResearchOverlay.mts';
 import { glmResearchEnv, runGlmTurn, startGlmAcp, startGlmWeb } from '../helpers/glmDriver.mts';
@@ -18,7 +18,7 @@ const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir()
  * Всё созданное удаляется после теста; фейк проверяет полноту сценария при остановке.
  */
 async function fixture(t, loopbackOptions = {}) {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact } = await testDeepSeekBinarySelection();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 

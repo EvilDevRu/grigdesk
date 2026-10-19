@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
 import {
-  describeDeepSeekRuntime,
   probeDeepSeekRuntime,
-  requireDeepSeekRuntimeIdentity,
 } from '../deepseek/runtimeProcess.ts';
+import { prepareDeepSeekRuntime, preparedDeepSeekRuntime } from '../deepseek/preparedRuntime.ts';
+import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
+import { selectedDeepSeekBinary } from '../deepseek/distribution.ts';
+import type { ExecutorDistributionProbe } from './index.ts';
 import {
   deepSeekAuth,
   deepSeekCatalogCacheKey,
@@ -24,6 +25,7 @@ import { RETRY_CONTRACT } from '../chat/retryContract.ts';
 import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
+import { installedLegacyBuildId } from '../deepseek/legacyCutover.ts';
 
 type DeepSeekConfig = DeepSeekRuntimeConfig & {
   rootDir?: string;
@@ -33,57 +35,21 @@ type DeepSeekConfig = DeepSeekRuntimeConfig & {
 
 const DEEPSEEK_EFFORTS = Object.freeze(['off', 'low', 'high', 'max']);
 
-// Что видит человек в карточке при недоступной встроенной сборке и чем это лечится.
-// Подготовка пересобирает отсутствующую, повреждённую или чужую по ABI сборку.
-const DISTRIBUTION_PROBLEMS: Readonly<Record<string, string>> = Object.freeze({
-  deepseek_runtime_missing: 'Сборка DeepSeek ещё не подготовлена.',
-  deepseek_runtime_corrupt: 'Файлы сборки DeepSeek повреждены; подготовка соберёт её заново.',
-  deepseek_runtime_incompatible: 'Сборка DeepSeek собрана под другую версию Node, чем у службы GrigDesk; '
-    + 'подготовь её тем же Node, которым запущена служба.',
-  deepseek_runtime_changed: 'Сборка DeepSeek сменилась во время проверки; перепроверь карточку.',
-});
-
 function shellArgument(value: string): string {
   return /^[\w./-]+$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /**
- * Причина недоступности встроенной сборки и команда исправления для терминала.
- * Незавершённую публикацию лечит только recovery своего job, поэтому команда берёт
- * его id из маркера; нечитаемый маркер требует ручной сверки, а не подготовки.
+ * Недоступная поставка исправляется явной установкой отдельного ELF.
+ * Карточка не предлагает пересборку сервера или восстановление legacy current.
  */
-function deepSeekDistributionProblem(
-  config: DeepSeekConfig,
-  code: string | undefined,
-): { message: string; command?: string } {
+function deepSeekDistributionProblem(config: DeepSeekConfig): { message: string; command: string } {
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
-  const prepare = `${shellArgument(root ? path.join(root, 'bin/grigdesk-ctl') : 'bin/grigdesk-ctl')} deps`;
-
-  if (code === 'deepseek_runtime_publish_pending') {
-    const runtimeRoot = config.deepseekGenerationRoot
-      || (root ? path.join(root, 'server/runtime/deepseek') : '');
-    let jobId = '';
-
-    try {
-      const pending = JSON.parse(fs.readFileSync(path.join(runtimeRoot, 'publish-pending.json'), 'utf8'));
-
-      jobId = /^[0-9a-f-]{36}$/u.test(pending?.jobId || '') ? pending.jobId : '';
-    } catch { /* Нечитаемый маркер: команды recovery нет. */ }
-
-    const script = path.join(root, 'server/scripts/prepareDeepSeekRuntime.mts');
-
-    return jobId ? {
-      message: 'Обновление GrigDesk не завершило публикацию DeepSeek. Восстанови его и перезапусти GrigDesk.',
-      command: `node ${shellArgument(script)} --recover-job ${jobId}`,
-    } : {
-      message: 'Маркер незавершённой публикации DeepSeek не читается: сверь checkout и сборку по журналу '
-        + 'обновлений вручную.',
-    };
-  }
+  const prefix = root ? shellArgument(path.join(root, 'deepseek')) : 'deepseek';
 
   return {
-    message: DISTRIBUTION_PROBLEMS[code || ''] || 'Сборка DeepSeek не прошла проверку версии.',
-    command: prepare,
+    message: 'Автономная поставка DeepSeek недоступна или не прошла проверку.',
+    command: `npm --prefix ${prefix} run install:binary`,
   };
 }
 
@@ -94,16 +60,15 @@ export function deepSeekAuthProfileId(env: NodeJS.ProcessEnv = process.env): str
 }
 
 /**
- * Привязка сессии включает и host-права, и identity конкретного runtime.
- * Обновление композиции не продолжает разговор под прежним security binding.
+ * У бинарной поставки профиль содержит права и ревизию политики без версии runtime.
+ * Legacy identity сохраняется только до явного cutover установленного home.
  */
 export function deepSeekSecurityProfile(
   settings: Record<string, unknown> = {},
   runtimeIdentity?: string,
 ): string {
   const fingerprint = createHash('sha256').update(JSON.stringify({
-    version: DEEPSEEK_PIN.version,
-    runtimeIdentity,
+    ...(runtimeIdentity ? { version: DEEPSEEK_PIN.version, runtimeIdentity } : {}),
     profile: DEEPSEEK_PROFILE_REVISION,
     ssh: settings.blockDirectSsh !== false,
     db: settings.blockDirectDb === true,
@@ -121,6 +86,7 @@ export default {
     max: 'Максимальное усилие рассуждения для самых трудных задач.',
   },
   nativeSettings: deepSeekNativeSettings,
+  prepareRuntime: prepareDeepSeekRuntime,
   name: 'DeepSeek',
   vendor: 'DeepSeek',
   color: '#4D6BFE',
@@ -128,49 +94,58 @@ export default {
   workToolsTransport: 'mcp',
   workdir: { switch: 'reseed', roots: 'single' },
   sessionBinding: {
+    /**
+     * Только установленный legacy current определяет прежнюю формулу binding.
+     * Проверка handle не позволяет использовать профиль от другого подготовленного runtime.
+     */
+    legacySecurityProfiles: async (
+      config: DeepSeekConfig,
+      settings: Record<string, unknown> = {},
+      preparedRuntime?: PreparedExecutorRuntime,
+    ) => {
+      await preparedDeepSeekRuntime(config, preparedRuntime);
+
+      const buildId = await installedLegacyBuildId(config);
+
+      return buildId ? [deepSeekSecurityProfile(settings, `deepseek-build:${buildId}`)] : [];
+    },
     authProfileId: () => deepSeekAuthProfileId(process.env),
-    securityProfile: (config: DeepSeekConfig, settings: Record<string, unknown> = {}) => (
-      deepSeekSecurityProfile(settings, requireDeepSeekRuntimeIdentity(config))
-    ),
+    securityProfile: async (
+      config: DeepSeekConfig,
+      settings: Record<string, unknown> = {},
+      preparedRuntime?: PreparedExecutorRuntime,
+    ) => {
+      await preparedDeepSeekRuntime(config, preparedRuntime);
+
+      return deepSeekSecurityProfile(settings);
+    },
   },
-  install: 'node server/scripts/deepseekHarnessInstall.mts',
   /**
    * Доставка объявляется адаптером; общий UI не перечисляет провайдеров.
-   * Отсутствующий embedded artifact остаётся встроенным с причиной отказа.
+   * Доступность отдельного ELF приходит только из готового async probe.
    */
-  distribution(config: DeepSeekConfig, probe?: { ok: boolean; code?: string }) {
-    if (config.deepseekBinOverride
-      || (!config.deepseekArtifactDir && config.deepseekRuntimeMode !== 'embedded')) {
-      return null;
-    }
-
+  distribution(config: DeepSeekConfig, probe?: ExecutorDistributionProbe) {
     const base = {
-      kind: 'embedded' as const,
-      label: 'Входит в GrigDesk',
+      kind: 'binary' as const,
+      managed: true,
+      label: 'Отдельная поставка DeepSeek',
       authHint: 'Задайте ключ кнопкой «Ключи доступа» ниже или DEEPSEEK_API_KEY в .env папки данных.',
     };
 
-    try {
-      const runtime = describeDeepSeekRuntime(config);
-      const described = {
-        ...base,
-        buildId: runtime.buildId!,
-        runtimeVersion: runtime.runtimeVersion,
-      };
-
-      // Выбор поколения прошёл, но полную проверку и запуск `-V` выполняет только probe.
-      return !probe || probe.ok
-        ? described
-        : { ...described, problem: deepSeekDistributionProblem(config, probe.code) };
-    } catch (error) {
-      const code = String((error as { code?: string }).code || 'deepseek_runtime_missing');
-
-      return {
-        ...base,
-        error: code,
-        problem: deepSeekDistributionProblem(config, code),
-      };
+    if (!probe) {
+      return base;
     }
+
+    return {
+      ...base,
+      ...(probe.buildId ? { buildId: probe.buildId } : {}),
+      ...(probe.runtimeVersion ? { runtimeVersion: probe.runtimeVersion } : {}),
+      ...(probe.packageId ? { packageId: probe.packageId, binaryVersion: probe.binaryVersion } : {}),
+      ...(!probe.ok ? {
+        error: probe.code,
+        problem: deepSeekDistributionProblem(config),
+      } : {}),
+    };
   },
   // Страница не в формате Statuspage: при сбое счёта остаётся ссылкой, а не разобранным
   // состоянием, — контракт допускает и это.
@@ -197,7 +172,9 @@ export default {
     hint: 'Ключ из личного кабинета platform.deepseek.com.',
   }],
 
-  bin(config: DeepSeekConfig) { return config.deepseekBin; },
+  bin(config: DeepSeekConfig) {
+    return selectedDeepSeekBinary(config);
+  },
   probe(config: DeepSeekConfig) {
     return probeDeepSeekRuntime(config);
   },

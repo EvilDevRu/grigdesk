@@ -1,5 +1,32 @@
 # Чат и исполнители
 
+- [Самостоятельная поставка DeepSeek: установка, память и границы](deepseek-binary.md)
+
+- [Первый переход на автономный Harness: home и CAS без потери сессии](deepseek-binary-cutover.md)
+
+- [GLM parity: те же сценарии на ELF, policy/MCP и исходы остановки](glm-binary-parity.md)
+
+- [Offline/live проверка GLM: явный ELF, cache и временный api admission](glm-smoke-binary.md)
+
+- [Память GLM: A→B→A, несовместимый журнал и закрепление ELF до prompt](glm-binary-memory.md)
+
+- [GLM в бинарной поставке: metadata, допуск выпуска и проверка plugin](glm-binary-admission.md)
+
+- [Память DeepSeek: стабильный home, обновление/откат и несовместимый журнал](deepseek-binary-memory.md)
+
+- [Подготовленный runtime: внутренний handle адаптера и native context](prepared-executor-runtime.md)
+
+- [Управляемая поставка: чистые distribution/bin и запрет обновления через карточку](provider-managed-delivery.md)
+
+- [Сборка автономного DeepSeek и явная подготовка pinned Node](deepseek-binary-build.md)
+- [Kernel fingerprints прогретого кэша DeepSeek](deepseek-cache-fingerprints.md)
+- [Физические codec журналов и worker миграции DeepSeek](deepseek-journal-codecs.md)
+
+- [Целостность generation и проверка ABI выбранного Node](deepseek-runtime-integrity.md)
+- [Проверяемый ZIP поставки, индекс файлов и обязательные лицензии](deepseek-payload.md)
+- [Приватная атомарная распаковка и восстановление после SIGKILL](deepseek-extraction-cache.md)
+- [Освобождение directory lock во время уборки reclaim](deepseek-cache-lock-release.md)
+
 Чат, исполнители ИИ, каталог моделей, режимы прав, кольцо контекста и MCP.
 
 Читай перед правкой: `server/src/modules/chat`, `server/src/lib/chat`, `server/src/lib/executors`, `server/src/modules/providers`, `server/src/lib/kimi`, `server/src/lib/deepseek`, `server/src/lib/acp`, `web/src/views/chat`.
@@ -86,9 +113,15 @@
 - [GLM в маршруте чата: auth guard, turnId и pending, режимы, знак и modelRef](glm-chat-route.md)
 - [Снимок исходников DeepSeek: manifest в Git, кэш исходников по commit, integrity и публикация](deepseek-source-snapshot.md)
 - [Состав host runtime DeepSeek: воспроизводимая сборка, ресурсы и compiled проверки](deepseek-vendored-composition.md)
+- [Identity generation DeepSeek: код сборки, compiler metadata и защищённые входы](deepseek-build-identity.md)
 - [Граница LLM-провайдеров DSH: исключённый pi-ai, зависимости и пределы проверки](deepseek-llm-provider-boundary.md)
 - [Descriptor DeepSeek: integrity без блокировки сервера, generation и привязка запуска](deepseek-runtime-descriptor.md)
-- [Публикация и fork DeepSeek не блокируют heartbeat живого WebSocket](deepseek-publication-event-loop.md)
+- [Metadata автономной поставки DeepSeek: чистая схема и требования host](deepseek-binary-metadata.md)
+- [Descriptor автономного DeepSeek: metadata probe, cache-dir и безопасные отказы](deepseek-binary-descriptor.md)
+- [Async cache metadata DeepSeek: single-flight, замена файла и отмена waiter](deepseek-binary-probe-cache.md)
+- [Остановка автономного DeepSeek: IPC bootstrap, disposal и честный timeout](deepseek-binary-lifecycle.md)
+- [Отказ запуска GLM: выход процесса прерывает ожидание URL и HTTP-авторизацию](glm-startup-failure.md)
+- [Замена DeepSeek сохраняет heartbeat живого WebSocket](deepseek-publication-event-loop.md)
 - [Приватный settings-мост DeepSeek: ACP, readback и restart](deepseek-private-settings-bridge.md)
 - [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)
 - [Обновление upstream DeepSeek и совместимый откат журналов](deepseek-upstream-update-rollback.md)

@@ -1,3 +1,5 @@
+// Исторический publisher остаётся только для legacy fixtures перехода.
+// Readiness проверяет текущий binary consumer и никогда не вызывает этот publisher.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -11,15 +13,18 @@ import { createHash } from 'node:crypto';
 import { writeDeepSeekArtifactFixture } from '../helpers/deepSeekArtifactFixture.mts';
 import { resolveDeepSeekRuntime } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { forkDeepSeekHome } from '../../tools/deepseekHomeFork.ts';
-import { verifyDeepSeekSnapshot } from '../../tools/deepseekVendorManifest.ts';
+import { forkDeepSeekHome } from '../helpers/deepseekLegacyHomeFork.mts';
+import { readDeepSeekArtifact } from '../helpers/deepseekLegacyArtifact.mts';
+import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
+import { ensureTestDeepSeekBinary } from '../helpers/deepseekBinary.mts';
+import { sha256File } from '../../shared/node/hash.ts';
 
-const publication = await import('../../tools/deepseekRuntimePublication.ts').catch(() => null);
+const publication = await import('../helpers/deepseekLegacyPublication.mts').catch(() => null);
 const exec = promisify(execFile);
 // Корень репозитория не зависит от cwd: `npm test` запускает набор из server/.
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
-test('generation отделена от staging и проверяется при activation/rollback', async (t) => {
+test('legacy publication отделяет generation от staging и проверяет activation/rollback', async (t) => {
   assert.ok(publication, 'publication API отсутствует');
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-publish-'));
@@ -30,34 +35,31 @@ test('generation отделена от staging и проверяется при 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await publication.publishDeepSeekGeneration(path.join(root, 'staging/A'), runtimeRoot);
   await fs.rm(path.join(root, 'staging/A'), { recursive: true });
-  assert.equal(resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: runtimeRoot }).buildId, a.buildId);
+  assert.equal(readDeepSeekArtifact(path.join(runtimeRoot, 'current')).artifact.buildId, a.buildId);
 
   await publication.publishDeepSeekGeneration(path.join(root, 'staging/B'), runtimeRoot);
   await publication.activateDeepSeekGeneration(runtimeRoot, a.buildId);
-  assert.equal(resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: runtimeRoot }).buildId, a.buildId);
+  assert.equal(readDeepSeekArtifact(path.join(runtimeRoot, 'current')).artifact.buildId, a.buildId);
   assert.ok(await fs.stat(path.join(runtimeRoot, 'builds', b.buildId)));
 
   await fs.appendFile(path.join(runtimeRoot, 'builds', b.buildId, 'entry.mjs'), '// corruption');
   await assert.rejects(publication.activateDeepSeekGeneration(runtimeRoot, b.buildId));
-  assert.equal(resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: runtimeRoot }).buildId, a.buildId);
+  assert.equal(readDeepSeekArtifact(path.join(runtimeRoot, 'current')).artifact.buildId, a.buildId);
 });
 
-test('незавершённая публикация блокирует новый prompt и не скрывается PATH dsh', async (t) => {
-  assert.ok(publication);
-
+test('legacy pending не блокирует выбранный binary и остаётся нетронутым', async (t) => {
+  const { binary } = await writeDeepSeekMetadataStub(t);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-pending-'));
-  const artifact = path.join(root, 'source');
   const runtimeRoot = path.join(root, 'runtime');
+  const pending = path.join(runtimeRoot, 'publish-pending.json');
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await writeDeepSeekArtifactFixture(artifact, 'A');
-  await publication.publishDeepSeekGeneration(artifact, runtimeRoot);
-  await fs.writeFile(path.join(runtimeRoot, 'publish-pending.json'), '{}');
-  assert.throws(() => resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: runtimeRoot }), { code: 'deepseek_runtime_publish_pending' });
+  await fs.mkdir(runtimeRoot);
+  await fs.writeFile(pending, '{}');
+  assert.equal(resolveDeepSeekRuntime({
+    deepseekBin: binary, deepseekGenerationRoot: runtimeRoot,
+  }).kind, 'binary');
+  assert.equal(await fs.readFile(pending, 'utf8'), '{}');
 });
 
 test('откат на несовместимый host/journal contract отказывает до смены current', async (t) => {
@@ -154,148 +156,75 @@ test('повреждённое поколение с тем же buildId зам�
   await fs.appendFile(entry, '// corruption');
   await publication.publishDeepSeekGeneration(path.join(root, 'A'), runtimeRoot);
   assert.equal(await fs.readFile(entry, 'utf8'), original);
-  assert.equal(resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: runtimeRoot }).buildId, a.buildId);
+  assert.equal(readDeepSeekArtifact(path.join(runtimeRoot, 'current')).artifact.buildId, a.buildId);
   assert.deepEqual(await fs.readdir(path.join(runtimeRoot, 'builds')), [a.buildId]);
 });
 
 /**
- * Clean checkout содержит то же, что Git: manifest, патчи и лицензии без кэша исходников
- * `upstream/`, без node_modules и без собранного runtime.
+ * Readiness потребителя использует только server/shared и выбранный ELF.
+ * Копия намеренно не содержит source package, vendor, tools или runtime generation.
  */
 async function cleanCheckout(sourceRoot, root) {
-  const upstream = path.join(sourceRoot, 'third_party/deepseek-harness/upstream');
-
-  for (const relative of ['tools', 'shared', 'third_party/deepseek-harness']) {
-    await fs.cp(path.join(sourceRoot, relative), path.join(root, relative), {
-      recursive: true,
-      filter: (source) => source !== upstream
-        && !source.split(path.sep).some((part) => ['node_modules', '.git'].includes(part)),
-    });
+  for (const relative of ['shared', 'server/src/lib/deepseek']) {
+    await fs.cp(path.join(sourceRoot, relative), path.join(root, relative), { recursive: true });
   }
 
-  for (const relative of ['server/scripts/prepareDeepSeekRuntime.mts',
-    'server/src/lib/deepseek/runtimeArtifact.ts', 'server/src/lib/deepseek/runtimeProcess.ts',
-    'server/src/lib/deepseek/contract.ts', 'server/src/lib/nodeVersion.ts', 'server/package.json']) {
+  for (const relative of ['server/package.json', 'server/deepseek-host-contract.json',
+    'server/scripts/prepareDeepSeekRuntime.mts']) {
     await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
     await fs.copyFile(path.join(sourceRoot, relative), path.join(root, relative));
   }
 }
 
-test('настоящая общая подготовка clean checkout работает в production без dsh и staging', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-clean-deepseek-'));
-  const sourceRoot = REPO_ROOT;
+test('read-only readiness clean checkout использует ELF без source package и не трогает legacy state',
+  async (t) => {
+    const candidate = await ensureTestDeepSeekBinary();
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-clean-deepseek-'));
 
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await cleanCheckout(sourceRoot, root);
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    await cleanCheckout(REPO_ROOT, root);
+    await fs.mkdir(path.join(root, 'bin'));
+    await fs.copyFile(candidate.binary, path.join(root, 'bin/deepseek'));
+    await fs.chmod(path.join(root, 'bin/deepseek'), 0o555);
 
-  // Исходники Harness приходят из проверенной копии вместо сети, как у update worker;
-  // брошенный после kill lock подготовки не блокирует сборку навсегда.
-  const env = {
-    PATH: process.env.PATH,
-    HOME: root,
-    NODE_ENV: 'production',
-    npm_config_cache: path.join(artifactsPath({ env: process.env, home: os.homedir() }),
-      'deepseek-vendoring/npm-cache'),
-    GRIGDESK_DEEPSEEK_UPSTREAM_SEED: path.join(sourceRoot, 'third_party/deepseek-harness/upstream'),
-  };
-  const staleLock = path.join(root, 'server/runtime/deepseek/.prepare-lock');
+    const runtimeRoot = path.join(root, 'server/runtime/deepseek');
+    const pending = path.join(runtimeRoot, 'publish-pending.json');
 
-  await fs.mkdir(staleLock, { recursive: true });
-  await fs.writeFile(path.join(staleLock, 'owner.json'), JSON.stringify({ pid: 2147483647 }));
+    await fs.mkdir(runtimeRoot, { recursive: true });
+    await fs.writeFile(pending, '{}');
 
-  const args = [path.join(root, 'server/scripts/prepareDeepSeekRuntime.mts')];
-  const { stdout } = await exec(process.execPath, args, {
-    cwd: root,
-    env,
-    timeout: 240_000,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  const info = JSON.parse(stdout.trim().split('\n').at(-1));
-
-  assert.match(info.buildId, /^[a-f0-9]{64}$/);
-  await assert.rejects(fs.stat(staleLock), { code: 'ENOENT' });
-  await verifyDeepSeekSnapshot(path.join(root, 'third_party/deepseek-harness'));
-  await exec(process.execPath, [...args, '--check'], {
-    cwd: root,
-    env,
-    timeout: 30_000,
-  });
-
-  // Те же входы в другом checkout дают тот же buildId: предложенная установка берётся
-  // как есть, без исходников, npm ci и сборки.
-  const other = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-reuse-deepseek-'));
-
-  t.after(() => fs.rm(other, { recursive: true, force: true }));
-  await cleanCheckout(sourceRoot, other);
-
-  const { stdout: reusedOutput } = await exec(process.execPath,
-    [path.join(other, 'server/scripts/prepareDeepSeekRuntime.mts')], {
-      cwd: other,
-      env: { ...env, GRIGDESK_DEEPSEEK_REUSE_RUNTIME: path.join(root, 'server/runtime/deepseek') },
-      timeout: 60_000,
+    const original = await sha256File(path.join(root, 'bin/deepseek'));
+    const args = [path.join(root, 'server/scripts/prepareDeepSeekRuntime.mts')];
+    const env = {
+      PATH: '',
+      HOME: root,
+      GRIGDESK_HOME: root,
+      NODE_ENV: 'production',
+    };
+    const { stdout } = await exec(process.execPath, args, {
+      cwd: root,
+      env,
+      timeout: 30000,
     });
-  const reused = JSON.parse(reusedOutput.trim().split('\n').at(-1));
+    const info = JSON.parse(stdout);
 
-  assert.equal(reused.reused, true);
-  assert.equal(reused.buildId, info.buildId);
-  await assert.rejects(fs.stat(path.join(other, 'server/runtime/deepseek/builds')), { code: 'ENOENT' });
-  await assert.rejects(fs.stat(path.join(other, 'third_party/deepseek-harness/upstream')), {
-    code: 'ENOENT',
+    assert.equal(info.packageId, candidate.info.packageId);
+    assert.equal(info.runtimeVersion, candidate.info.runtimeVersion);
+    assert.equal(await sha256File(path.join(root, 'bin/deepseek')), original);
+    assert.equal(await fs.readFile(pending, 'utf8'), '{}');
+    await assert.rejects(fs.access(path.join(root, 'deepseek')));
+    await assert.rejects(fs.access(path.join(runtimeRoot, 'builds')));
+    await assert.rejects(exec(process.execPath, [...args, '--recover-job', 'legacy-job'], {
+      cwd: root, env,
+    }));
+    assert.equal(await fs.readFile(pending, 'utf8'), '{}');
+    await fs.rm(path.join(root, 'bin/deepseek'));
+    await assert.rejects(exec(process.execPath, args, { cwd: root, env }), (error) => {
+      assert.match(error.stderr, /install:binary/u);
+
+      return true;
+    });
   });
-
-  // Recovery работает в собственном clean checkout и исполняет npm только через fixture shim.
-  // Нормальная сборка выше использовала настоящий npm и реальные native prerequisites.
-  await fs.writeFile(path.join(root, '.gitignore'),
-    'node_modules/\nserver/runtime/\nweb/dist/\nthird_party/deepseek-harness/upstream/\n');
-  await exec('git', ['init', '-b', 'main'], { cwd: root });
-  await exec('git', ['add', '.'], { cwd: root });
-  await exec('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
-    'commit', '-m', 'owned recovery fixture'], { cwd: root });
-
-  const sha = (await exec('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
-  const runtimeRoot = path.join(root, 'server/runtime/deepseek');
-  const pending = path.join(runtimeRoot, 'publish-pending.json');
-  const jobId = '00000000-0000-4000-8000-000000000001';
-  const marker = {
-    jobId,
-    workerPid: process.pid,
-    targetSha: sha,
-    previousSha: sha,
-  };
-
-  await fs.writeFile(pending, JSON.stringify(marker));
-  await assert.rejects(exec(process.execPath, [...args, '--recover-job', jobId], { cwd: root, env }));
-  assert.ok(await fs.stat(pending));
-  marker.workerPid = 2147483647;
-  await fs.writeFile(pending, JSON.stringify(marker));
-
-  const shim = path.join(root, 'server/.state/recovery-shim');
-
-  await fs.mkdir(shim, { recursive: true });
-  await fs.mkdir(path.join(root, 'web'), { recursive: true });
-  await fs.writeFile(path.join(root, '.git/info/exclude'), 'server/.state/\nweb/\n');
-  await fs.writeFile(path.join(shim, 'npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  await exec(process.execPath, [...args, '--recover-job', jobId], {
-    cwd: root,
-    env: { ...env, PATH: `${shim}:${env.PATH}` },
-    timeout: 30_000,
-  });
-  await assert.rejects(fs.stat(pending), { code: 'ENOENT' });
-
-  await fs.rm(path.join(root, 'tools/deepseek-build/node_modules'), { recursive: true });
-
-  const moved = path.join(root, 'moved generation');
-
-  await fs.rename(info.generationDir, moved);
-  await fs.rm(path.join(root, 'server/runtime/deepseek'), { recursive: true });
-
-  const { stdout: version } = await exec(process.execPath, [path.join(moved, 'entry.mjs'), '-V'], {
-    env, timeout: 30_000,
-  });
-
-  assert.equal(version.trim(), '0.1.5-rc.2');
-});
 
 test('fork home отвергает вложенную папку и symlink parent без изменения источника', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-fork-boundaries-'));

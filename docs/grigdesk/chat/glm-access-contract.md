@@ -13,7 +13,10 @@
 и `retryPolicy: { mode: normal, maxRetries: 10 }`: сеть до Z.ai нестабильна, транзиентные сбои
 запроса повторяются ([ход GLM](glm-turn-runtime.md)). Константа усилия без выбора — `high`.
 
-Список `GLM_ADMISSION` заморожен и допускает только режим `api`. Отпечаток совместимости — SHA-256
+Список `GLM_ADMISSION` пакета берётся из `deepseek/compatibility/glm.json`, заморожен и
+допускает только режим `api`. Сервер получает его из metadata актуального бинарника,
+а политика разрешённых режимов остаётся у сервера ([бинарный допуск](glm-binary-admission.md)).
+Отпечаток совместимости — SHA-256
 канонического JSON, ключи объектов сортируются рекурсивно. Входы: commit Harness,
 пути и хеши его патчей, ревизия композиции, хеш lock сборки, версия и integrity pi-ai,
 хеш исходников llm-pi-ai, ревизии профиля и политики GLM, адрес выбранного режима.
@@ -21,9 +24,10 @@ BuildId, платформа и путь generation в отпечаток не в
 
 ## Карточка исполнителя
 
-Адаптер `glm` («GLM (Z.ai)») зарегистрирован как setup-only: карточка видна в настройках
-исполнителей, а `run` у него нет, поэтому выбрать GLM в чате нельзя. Доставка — только
-встроенная generation DSH (та же, что у DeepSeek). Отказы карточки:
+Адаптер `glm` («GLM (Z.ai)») без разрешённого режима остаётся setup-only. Для `api`
+способность `run` не зависит от наличия ELF при загрузке: файл можно установить позже,
+а probe перечитает metadata без пересоздания registry. Доставка DeepSeek/GLM имеет
+`managed: true`; установка stock CLI и обновление через карточку запрещены. Отказы карточки:
 
 | Код | Когда |
 | --- | --- |
@@ -31,9 +35,11 @@ BuildId, платформа и путь generation в отпечаток не в
 | `glm_key_missing` | нет ключа своего режима (`ZAI_API_KEY` или `ZAI_CODING_API_KEY`) |
 | `glm_mode_not_admitted` | режим с ключом не входит в список допуска |
 | `glm_runtime_home_invalid` | `GRIGDESK_GLM_RUNTIME_HOME` не абсолютный |
-| `glm_runtime_external` | задан внешний `GRIGDESK_DEEPSEEK_BIN`: GLM его не использует |
-| `glm_runtime_missing` | встроенной generation нет |
-| `glm_plugin_missing` | в `runtime.json` нет поля `llmPiAi` (или нет кода плагина и pi-ai в поколении) |
+| `deepseek_binary_unsupported` | override не является нашей бинарной поставкой с metadata |
+| `deepseek_binary_missing`, `glm_runtime_missing` | выбранного ELF нет |
+| `glm_runtime_not_admitted` | compatibility не совпадает с admission актуального выпуска |
+| `glm_runtime_incompatible`, `deepseek_binary_incompatible` | host contract или ревизии несовместимы |
+| `glm_plugin_missing` | metadata не объявляет полный контракт плагина |
 
 Корень private homes — `GRIGDESK_GLM_RUNTIME_HOME` или `<stateDir>/grigdesk-glm`. Окружение
 процесса GLM строится тем же allowlist, что у DeepSeek (системные имена, `DSH_HOME`, флаги),

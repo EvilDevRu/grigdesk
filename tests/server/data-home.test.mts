@@ -94,6 +94,7 @@ const expectedLayout = {
   lock: 'state/server.lock',
   pluginData: 'state/plugins',
   uiReleases: 'state/ui-releases',
+  deepseekRuntime: 'runtimes/deepseek',
   mobileApk: 'state/mobile-apk',
   mediaVenv: 'state/media-venv',
   mediaHf: 'state/hf',
@@ -162,7 +163,7 @@ test('DH-06: отдельный файл настроек вычисляется
   assert.equal(envFilePath({ env: {}, home }), '/home/user/.grigdesk/.env');
 });
 
-test('DH-07: раскладка содержит ровно 20 относительных путей', () => {
+test('DH-07: раскладка содержит ровно 21 относительный путь', () => {
   assert.deepEqual(DATA_LAYOUT, expectedLayout);
 
   for (const value of Object.values(DATA_LAYOUT)) {
@@ -229,6 +230,7 @@ test('DH-11: сторож выделяет и удаляет свою време
     env: {
       PATH: process.env.PATH,
       HOME: os.tmpdir(),
+      TMPDIR: os.tmpdir(),
       GRIGDESK_HOME: '/should/not/leak',
     },
     timeout: 10_000,

@@ -10,14 +10,13 @@ import { promisify } from 'node:util';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import {
-  GLM_ADMISSION,
   GLM_POLICY_REVISION,
   GLM_PROFILE_REVISION,
   buildGlmRoute,
   glmCompatibilityIdentity,
 } from '../../server/src/lib/glm/contract.ts';
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
-import { runtimeYaml } from '../../tools/runtimeComposition.ts';
+import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
 import { GLM_FIXTURE_PLUGIN, writeGlmArtifactFixture } from '../helpers/glmArtifactFixture.mts';
 
 const exec = promisify(execFile);
@@ -59,8 +58,8 @@ async function fixture(t, plugin = GLM_FIXTURE_PLUGIN, dependencyLock) {
 
   const config = {
     rootDir: project,
-    deepseekArtifactDir: path.join(root, 'generation'),
-    deepseekRuntimeMode: 'embedded',
+    deepseekBin: path.join(root, 'generation', 'deepseek'),
+    deepseekRuntimeMode: 'binary',
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
 
@@ -109,9 +108,6 @@ async function fixture(t, plugin = GLM_FIXTURE_PLUGIN, dependencyLock) {
 
 test('недопущенный режим с ключом: у адаптера нет run, процесса нет', async (t) => {
   const f = await fixture(t);
-
-  // Поставка допускает только api; coding-plan без подтверждения права подписки закрыт.
-  assert.deepEqual(GLM_ADMISSION.map((entry) => entry.mode), ['api']);
 
   for (const mode of ['api', 'coding-plan']) {
     assert.equal(f.adapter(mode, []).run, undefined, mode);
@@ -166,10 +162,10 @@ test('загрузчик в новом процессе видит run толь�
   assert.equal(f.adapter('coding-plan', [{ mode: 'api', compatibility: f.identity('api') }]).run, undefined);
 });
 
-test('допущенный режим использует ровно свой маршрут', async (t) => {
+test('допущенный api использует свой маршрут; DI не расширяет политику Coding Plan', async (t) => {
   const f = await fixture(t);
 
-  for (const mode of ['api', 'coding-plan']) {
+  for (const mode of ['api']) {
     const result = await f.run(f.adapter(mode, [{ mode, compatibility: f.identity(mode) }]));
     const launch = f.launches.at(-1);
     const insert = launch.overlay.find((row) => Array.isArray(row.insert)).insert;
@@ -184,6 +180,12 @@ test('допущенный режим использует ровно свой �
     }
   }
 
+  const launches = f.launches.length;
+
+  await assert.rejects(f.run(f.adapter('coding-plan', [{
+    mode: 'coding-plan', compatibility: f.identity('coding-plan'),
+  }])), { code: 'glm_mode_not_admitted' });
+  assert.equal(f.launches.length, launches);
   assert.notEqual(f.identity('api'), f.identity('coding-plan'));
 });
 

@@ -34,13 +34,46 @@ else
   echo "Внимание: flock недоступен, защита от параллельного прогона выключена." >&2
 fi
 
-# Все дочерние проверки получают одну проверенную generation под общим build lock.
-# Helper не загружает зависимости и не переключает production current.
-if ! GRIGDESK_TEST_DEEPSEEK_ARTIFACT=$(node "$PROJECT_ROOT/tests/helpers/deepseekRuntimeArtifact.mts"); then
+# Fixtures остаются внутри темы; pinned Node cache сохраняет отдельный явный root.
+if [[ -z "${GRIGDESK_TEST_DEEPSEEK_ROOT:-}" ]]; then
+  GRIGDESK_TEST_DEEPSEEK_ROOT=$(node --input-type=module -e '
+    import os from "node:os";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    const { artifactsPath } = await import(pathToFileURL(process.argv[1]).href);
+    console.log(path.join(artifactsPath({env: process.env, home: os.homedir()}), "deepseek-binary"));
+  ' "$PROJECT_ROOT/shared/runtime/dataHome.ts")
+fi
+export GRIGDESK_TEST_DEEPSEEK_ROOT
+export GRIGDESK_ARTIFACTS_DIR="$GRIGDESK_TEST_DEEPSEEK_ROOT"
+export GRIGDESK_DEEPSEEK_NODE_CACHE="${GRIGDESK_DEEPSEEK_NODE_CACHE:-$GRIGDESK_TEST_DEEPSEEK_ROOT/node-cache}"
+
+# Один проверенный ELF передаётся всем наборам; исходники Harness рядом с ним не нужны.
+# Preflight сам проходит сторож памяти, не загружает зависимости и не меняет рабочий bin.
+if ! DEEPSEEK_TEST_INFO=$(NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" \
+  "$PROJECT_ROOT/tests/helpers/deepseekBinary.mts" --prepare-suite); then
+  exit 1
+fi
+GRIGDESK_TEST_DEEPSEEK_BINARY=$(node -e \
+  'process.stdout.write(JSON.parse(process.argv[1]).binary)' "$DEEPSEEK_TEST_INFO")
+GRIGDESK_TEST_DEEPSEEK_CACHE_DIR=$(node -e \
+  'process.stdout.write(JSON.parse(process.argv[1]).cacheDir)' "$DEEPSEEK_TEST_INFO")
+GRIGDESK_TEST_DEEPSEEK_PAYLOAD=$(node -e \
+  'process.stdout.write(JSON.parse(process.argv[1]).payloadFile)' "$DEEPSEEK_TEST_INFO")
+export GRIGDESK_TEST_DEEPSEEK_BINARY GRIGDESK_TEST_DEEPSEEK_CACHE_DIR GRIGDESK_TEST_DEEPSEEK_PAYLOAD
+export GRIGDESK_RELEASE_PUBLISH_CONTRACT=2
+export GRIGDESK_TEST_GLM_DELIVERY=binary
+
+# Только cutover сценарии используют проверенную legacy Node22 fixture, не production resolver.
+if ! GRIGDESK_TEST_DEEPSEEK_ARTIFACT=$(NODE_TEST_MAX_RSS_MB=4096 \
+  bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" "$PROJECT_ROOT/tests/helpers/deepseekRuntimeArtifact.mts"); then
   exit 1
 fi
 export GRIGDESK_TEST_DEEPSEEK_ARTIFACT
-export GRIGDESK_RELEASE_PUBLISH_CONTRACT=1
+
+npm --prefix "$PROJECT_ROOT/deepseek" run typecheck || RC=1
+npm --prefix "$PROJECT_ROOT/deepseek" test || RC=1
+npm --prefix "$PROJECT_ROOT/deepseek" run test:sea || RC=1
 
 bash "$PROJECT_ROOT/tests/layout.sh" || RC=1
 # Часть проверок уже на TypeScript: с минимумом Node 22.18 они исполняются как есть.

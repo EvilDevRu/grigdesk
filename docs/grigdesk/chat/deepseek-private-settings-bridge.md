@@ -1,9 +1,8 @@
 # Приватный мост настроек DeepSeek
 
-Встроенный candidate сохраняет web RPC для чатов и ACP stdio для автоматизации.
-Сокращённый runtime загружает исходный settings provider/controller в обоих профилях.
-Production default — встроенная сборка. Внешний Harness (`GRIGDESK_DEEPSEEK_BIN` или
-релиз с `mode: installed`) такого моста в ACP-профиле не предоставляет.
+Автономный ELF сохраняет web RPC для чатов и ACP stdio для автоматизации.
+Упакованный runtime загружает исходный settings provider/controller в обоих профилях.
+Default и override требуют metadata с приватным settings-мостом; stock CLI не допускается.
 
 В ACP initialize capability `_meta["grigdesk.settings"].contract` равна 1. Два приватных
 метода `_grigdesk/settings/describe` и `_grigdesk/settings/mutate` регистрируются через

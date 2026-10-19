@@ -108,11 +108,16 @@ export const config = {
   // Pinned DeepSeek Harness живёт в server-owned runtime home. API key намеренно
   // не попадает в config: дочернее окружение строится отдельным allowlist-ом.
   deepseekRuntimeHome,
-  deepseekRuntimeMode: deepSeekDistributionMode(path.join(rootDir, 'server/deepseek-runtime-contract.json')),
+  deepseekCacheDir: dataPath(dataHome, 'deepseekRuntime'),
+  // Переходный marker пока выбирает legacy default; внутренний config уже принимает binary.
+  // Это расширение типа не переключает поставку до отдельного изменения контракта.
+  deepseekRuntimeMode: deepSeekDistributionMode(
+    path.join(rootDir, 'server/deepseek-runtime-contract.json'),
+  ) as 'binary',
   deepseekBinOverride: process.env.GRIGDESK_DEEPSEEK_BIN,
   deepseekGenerationRoot: path.join(rootDir, 'server', 'runtime', 'deepseek'),
   deepseekBin: process.env.GRIGDESK_DEEPSEEK_BIN
-    || path.join(deepseekRuntimeHome, 'install', 'current', 'node_modules', '.bin', 'dsh'),
+    || path.join(rootDir, 'bin', 'deepseek'),
   // GLM (Z.ai) работает на той же встроенной сборке DSH, но со своими homes и ключами.
   glmRuntimeHome,
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).

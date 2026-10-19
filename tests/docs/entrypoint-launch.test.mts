@@ -61,11 +61,12 @@ test('ни один запуск в репозитории не передаёт
 });
 
 test('минимум Node объявлен и проверяется на запуске', async () => {
-  const [serverPkg, webPkg, runtimeEnv, gate] = await Promise.all([
+  const [serverPkg, webPkg, runtimeEnv, gate, nodePolicy] = await Promise.all([
     source('server/package.json'),
     source('web/package.json'),
     source('deploy/lib/runtime-env.sh'),
     source('server/src/lib/nodeVersion.ts'),
+    source('shared/runtime/nodeVersion.ts'),
   ]);
 
   assert.equal(JSON.parse(serverPkg).engines.node, '^22.19.0 || >=24.0.0');
@@ -74,7 +75,8 @@ test('минимум Node объявлен и проверяется на зап
   // модуля `.ts` вместо ответа «нужен Node новее».
   assert.match(runtimeEnv, /GRIGDESK_MIN_NODE=22\.19\.0/);
   assert.match(runtimeEnv, /grigdesk_require_node\s*\(\)/);
-  assert.match(gate, /MIN_NODE_VERSION = '22\.19\.0'/);
+  assert.match(gate, /shared\/runtime\/nodeVersion\.ts/);
+  assert.match(nodePolicy, /MIN_NODE_VERSION = '22\.19\.0'/);
   assert.match(await source('server/src/app.ts'), /assertSupportedNode\(\)/);
 
   // Лаунчер юнита проверяет версию САМ и на голом JavaScript: до `import('./app.ts')`

@@ -41,7 +41,8 @@ export interface RouteConfig {
   factoryConfigRoot: string;
   deepseekBin?: string;
   deepseekBinOverride?: string;
-  deepseekRuntimeMode?: 'installed' | 'embedded';
+  deepseekRuntimeMode?: 'binary';
+  deepseekCacheDir?: string;
   deepseekArtifactDir?: string;
   deepseekGenerationRoot?: string;
   deepseekRuntimeHome?: string;
@@ -335,8 +336,9 @@ export function routeLaunchEnv(
     GRIGDESK_DEEPSEEK_RUNTIME_MODE: config.deepseekRuntimeMode || 'embedded',
     ...(generationRoot ? { GRIGDESK_DEEPSEEK_GENERATION_ROOT: generationRoot } : {}),
     GRIGDESK_DEEPSEEK_ARTIFACT_DIR: config.deepseekArtifactDir || '',
+    GRIGDESK_DEEPSEEK_CACHE_DIR: config.deepseekCacheDir || '',
     GRIGDESK_DEEPSEEK_BIN: config.deepseekBinOverride
-      || (config.deepseekRuntimeMode === 'installed' ? config.deepseekBin || '' : ''),
+      || (['installed', 'binary'].includes(config.deepseekRuntimeMode || '') ? config.deepseekBin || '' : ''),
     ...(config.deepseekRuntimeHome
       ? { GRIGDESK_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),

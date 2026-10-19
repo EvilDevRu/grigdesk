@@ -1,37 +1,19 @@
-import { createHash } from 'node:crypto';
+import { canonicalJson as canonicalGlmJson } from '../../../../shared/lib/canonicalJson.ts';
+import {
+  glmCompatibilityHash,
+  type GlmCompatibilityRuntime,
+} from '../../../../shared/node/glmCompatibility.ts';
+
+export { canonicalGlmJson };
 
 export type GlmAccessMode = 'api' | 'coding-plan';
 
-export interface GlmCompatibilityRuntime {
-  source: {
-    commit: string;
-  };
-  inputIdentity: {
-    composition: string;
-    dependencyLock: string;
-  };
-  llmPiAi: {
-    piAi: {
-      version: string;
-      integrity: string;
-    };
-    sourceHash: string;
-    patches: readonly { path: string; sha256: string }[];
-  };
-}
+export type { GlmCompatibilityRuntime };
 
 export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v2';
 export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v1';
 export const GLM_DEFAULT_EFFORT = 'high';
-
-// Допуск — только после зелёной живой проверки режима на этой identity (06.10.2026: api на
-// glm-5.3-flash, 7/7 шагов). Coding Plan закрыт до подтверждения права использовать подписку.
-export const GLM_ADMISSION: readonly { mode: GlmAccessMode; compatibility: string }[] = Object.freeze([
-  Object.freeze({
-    mode: 'api',
-    compatibility: 'f38161e4c8bd327edc0b27bd1919ff61fec7c96e0e5a31ced0dcf2ac022d66e5',
-  }),
-]);
+export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api']);
 
 // Факты G2 на настоящей generation. Инструменты профиля, которые hook разрешает по точному
 // имени: без делегирующих, субагентных, workflow, jobs, goal, plan, skill и web-инструментов.
@@ -106,46 +88,7 @@ export function glmCompatibilityIdentity(
   mode: GlmAccessMode,
   revisions = { profile: GLM_PROFILE_REVISION, policy: GLM_POLICY_REVISION },
 ): string {
-  const inputs = {
-    commit: runtime.source.commit,
-    patches: runtime.llmPiAi.patches,
-    composition: runtime.inputIdentity.composition,
-    dependencyLock: runtime.inputIdentity.dependencyLock,
-    piAi: runtime.llmPiAi.piAi,
-    pluginSource: runtime.llmPiAi.sourceHash,
-    profile: revisions.profile,
-    policy: revisions.policy,
-    baseURL: mode === 'api'
-      ? 'https://api.z.ai/api/paas/v4'
-      : 'https://api.z.ai/api/coding/paas/v4',
-  };
-
-  return createHash('sha256').update(canonicalGlmJson(inputs)).digest('hex');
-}
-
-/**
- * Ключи JSON сортируются на каждом уровне для стабильных отпечатков.
- * Порядок массивов сохраняется: он является частью переданных аргументов.
- */
-export function canonicalGlmJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalGlmJson).join(',')}]`;
-  }
-
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-    const fields = entries.map(([key, child]) => `${JSON.stringify(key)}:${canonicalGlmJson(child)}`);
-
-    return `{${fields.join(',')}}`;
-  }
-
-  const encoded = JSON.stringify(value);
-
-  if (encoded === undefined) {
-    throw new TypeError('Значение не представимо в JSON');
-  }
-
-  return encoded;
+  return glmCompatibilityHash(runtime, mode, revisions);
 }
 
 /**

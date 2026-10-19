@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
 import { resolveDeepSeekRuntime } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { createAcpClient } from '../../server/src/lib/acp/client.ts';
 import { acpDeepSeekSettingsRpc } from '../../server/src/lib/deepseek/nativeSettingsRpc.ts';
@@ -16,8 +16,11 @@ import { applyDeepSeekNativeSettings } from '../../server/src/lib/executorSettin
  * Наблюдение request frames подтверждает отсутствие session/new и prompt при metadata.
  */
 async function settingsProcess(t) {
-  const artifact = await ensureTestDeepSeekArtifact();
-  const runtime = resolveDeepSeekRuntime({ deepseekArtifactDir: artifact });
+  const { config } = await testDeepSeekBinarySelection();
+  const runtime = resolveDeepSeekRuntime(config);
+
+  assert.equal(runtime.kind, 'binary');
+
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-settings-acp-'));
   const overlay = path.join(root, 'overlay.yml');
   const document = path.join(root, 'native-settings.yaml');

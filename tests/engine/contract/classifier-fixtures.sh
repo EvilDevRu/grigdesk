@@ -46,7 +46,7 @@ for name in kimi kimi-beta; do
   factory_exec local "$TEST_ROOT/$name" >/dev/null 2>&1
   assert_rc 126 "$?" "$name basename denied even when mislabeled local"
 done
-for name in dsh dsh-beta; do
+for name in dsh dsh-beta deepseek deepseek-beta; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_ROOT/$name"
   chmod +x "$TEST_ROOT/$name"
   factory_exec local "$TEST_ROOT/$name" >/dev/null 2>&1

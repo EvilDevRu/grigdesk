@@ -31,9 +31,8 @@ async function fixture(t, { plugin = true } = {}) {
       rootDir: root,
       stateDir: path.join(root, 'state'),
       glmRuntimeHome: path.join(root, 'state', 'grigdesk-glm'),
-      deepseekArtifactDir: artifact,
-      deepseekRuntimeMode: 'embedded',
-      deepseekBin: '/no-global-dsh',
+      deepseekBin: path.join(artifact, 'deepseek'),
+      deepseekRuntimeMode: 'binary',
     },
   };
 }
@@ -109,12 +108,18 @@ test("карточка glm есть в getProviderAdapters, а без режим
   assert.deepEqual((await glm.modes()).map((mode) => mode.id), ['default', 'auto']);
 });
 
-test('distribution встроенный: buildId и версия runtime, без установки и обновления', async (t) => {
+test('distribution binary: buildId и версия runtime, без обновления из карточки', async (t) => {
   const f = await fixture(t);
-  const distribution = adapter().distribution(f.config);
+  // Distribution получает уже готовые версии: малой fixture не нужны native closure и запуск.
+  // Поведение настоящего probe отдельно проверяет отсутствие поколения/плагина ниже.
+  const distribution = adapter().distribution(f.config, {
+    ok: true,
+    buildId: f.metadata.buildId,
+    runtimeVersion: f.metadata.runtimeVersion,
+  });
 
-  assert.equal(distribution.kind, 'embedded');
-  assert.equal(distribution.label, 'Входит в GrigDesk');
+  assert.equal(distribution.kind, 'binary');
+  assert.equal(distribution.label, 'Отдельная поставка DeepSeek');
   assert.equal(distribution.buildId, f.metadata.buildId);
   assert.equal(distribution.runtimeVersion, f.metadata.runtimeVersion);
   assert.equal(distribution.error, undefined);
@@ -123,30 +128,37 @@ test('distribution встроенный: buildId и версия runtime, без
   assert.equal(adapter().latestVersion, undefined);
 });
 
-test('внешний override DeepSeek даёт карточке GLM glm_runtime_external', async (t) => {
+test('stock override DeepSeek отвергается без fallback на встроенную generation', async (t) => {
   const f = await fixture(t);
-  const config = { ...f.config, deepseekBinOverride: '/opt/external/dsh' };
-  const card = adapter();
+  const stock = path.join(f.root, 'stock-dsh');
 
-  assert.equal(card.distribution(config).error, 'glm_runtime_external');
-  assert.deepEqual(await card.probe(config), {
-    ok: false,
-    version: null,
-    code: 'glm_runtime_external',
-    error: 'GLM работает только на встроенной сборке GrigDesk; внешний DeepSeek не используется.',
-  });
+  await fs.writeFile(stock, `#!${process.execPath}\n`
+    + 'if (process.argv[2] === "-V") console.log("0.1.5-rc.2"); else process.exit(64);\n',
+  { mode: 0o755 });
+
+  const config = { ...f.config, deepseekBinOverride: stock };
+  const card = adapter();
+  const probe = await card.probe(config);
+
+  assert.equal(card.distribution(config, probe).error, 'deepseek_binary_unsupported');
+  assert.equal(probe.ok, false);
+  assert.equal(probe.version, null);
+  assert.equal(probe.code, 'deepseek_binary_unsupported');
+  assert.match(probe.error, /install:binary/u);
 });
 
-test('отсутствующая generation даёт glm_runtime_missing', async (t) => {
+test('отсутствующий binary даёт deepseek_binary_missing без legacy fallback', async (t) => {
   const f = await fixture(t);
-  const config = { ...f.config, deepseekArtifactDir: path.join(f.root, 'missing') };
+  const config = { ...f.config, deepseekBin: path.join(f.root, 'missing') };
 
-  assert.equal(adapter().distribution(config).error, 'glm_runtime_missing');
+  const distribution = adapter().distribution(config, await adapter().probe(config));
+
+  assert.equal(distribution.error, 'deepseek_binary_missing');
 });
 
 test('generation без поля llm-pi-ai в runtime.json даёт glm_plugin_missing', async (t) => {
   const f = await fixture(t, { plugin: false });
-  const distribution = adapter().distribution(f.config);
+  const distribution = adapter().distribution(f.config, await adapter().probe(f.config));
 
   assert.equal(distribution.error, 'glm_plugin_missing');
   assert.equal(distribution.buildId, f.metadata.buildId);
@@ -196,7 +208,7 @@ test('карточка, причины и ошибки не содержат к�
     outputs.push(await card.auth(f.config));
     outputs.push(card.distribution(f.config));
     outputs.push(card.distribution({ ...f.config, deepseekBinOverride: '/x' }));
-    outputs.push(card.catalogCacheKey(f.config));
+    outputs.push(await card.catalogCacheKey(f.config));
     outputs.push(await card.catalog(f.config));
   }
 

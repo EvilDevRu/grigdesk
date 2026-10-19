@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "runtimeInfoFormat": 1,
+  "hostContract": 1,
+  "requiredCapabilities": ["web", "acp", "settingsWeb", "settingsAcp"],
+  "glm": {
+    "mode": "api",
+    "profileRevision": "grigdesk-glm-profile-v2",
+    "policyRevision": "grigdesk-glm-policy-v1"
+  }
+}

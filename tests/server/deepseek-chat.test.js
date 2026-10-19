@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
+import { pathToFileURL } from 'node:url';
+
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
 import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
@@ -35,11 +38,16 @@ async function fixture(t) {
   const logFile = path.join(root, 'fake.ndjson');
   const bin = path.join(root, 'dsh');
   await fs.mkdir(path.join(root, '.git'));
+
+  const info = { ...runtimeInfoFixture(), journal: { write: 3, read: [0, 1, 2, 3] } };
+
   await fs.writeFile(bin, [
-    '#!/bin/sh',
-    'if [ "$1" = "-V" ]; then printf "0.1.5-rc.2\\n"; exit 0; fi',
-    `exec ${shellQuote(process.execPath)} ${shellQuote(FAKE_WEB)} --scenario ${shellQuote(scenarioFile)} --log ${shellQuote(logFile)} "$@"`,
-    '',
+    `#!${process.execPath}`,
+    `const info = ${JSON.stringify(info)};`,
+    'if (process.argv.includes("--runtime-info")) { console.log(JSON.stringify(info)); process.exit(0); }',
+    'if (process.argv.includes("-V")) { console.log(info.upstreamVersion); process.exit(0); }',
+    `process.argv.push("--scenario", ${JSON.stringify(scenarioFile)}, "--log", ${JSON.stringify(logFile)});`,
+    `await import(${JSON.stringify(pathToFileURL(FAKE_WEB).href)});`,
   ].join('\n'), { mode: 0o755 });
   const events = [];
   const app = Fastify({ logger: false });
@@ -175,10 +183,10 @@ test('полный fake-чат: permission → binding → resume, шаги ви
   assert.equal(permissionResponse.message.result.value, 'allowed-once');
   // Каталоги ходов (overlay + hooks) живут только вместе с процессом DSH: после двух ходов
   // в runtime home чата не должно остаться ни одного `turns/<uuid>`.
-  const chatDirs = await fs.readdir(path.join(f.root, 'deepseek-runtime', 'chat'));
+  const chatDirs = await fs.readdir(path.join(f.root, 'deepseek-runtime', 'chats'));
   assert.equal(chatDirs.length, 1);
   assert.deepEqual(
-    await fs.readdir(path.join(f.root, 'deepseek-runtime', 'chat', chatDirs[0], 'turns')),
+    await fs.readdir(path.join(f.root, 'deepseek-runtime', 'chats', chatDirs[0], 'turns')),
     [],
   );
 });

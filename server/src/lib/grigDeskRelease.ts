@@ -178,21 +178,32 @@ export const defaultCommandRunner: CommandRunner = (file, args, options = {}) =>
 );
 
 /**
- * Target smoke требует возможности installed worker публиковать embedded generation.
- * Промежуточный installed-релиз допускает legacy worker для перехода в два релиза.
+ * Target smoke проверяет независимый установленный ELF, переданный старым деревом явно.
+ * Контракт 1 безопасно отказывает контракту 2 до переключения checkout.
  */
-export async function assertReleasePublishContract(rootDir: string, supplied: string | undefined) {
+export async function assertReleasePublishContract(
+  rootDir: string,
+  supplied: string | undefined,
+  options: { binary?: string; fullVerify?: boolean } = {},
+) {
   const file = path.join(rootDir, 'server/deepseek-runtime-contract.json');
   const contract = JSON.parse(await readFile(file, 'utf8'));
 
-  if (contract.format !== 1 || contract.publishContract !== 1
-      || !['installed', 'embedded'].includes(contract.mode)) {
+  if (contract.format !== 1 || contract.publishContract !== 2 || contract.mode !== 'binary') {
     throw new Error('Неподдерживаемый контракт публикации DeepSeek');
   }
 
-  if (contract.mode === 'embedded' && supplied !== String(contract.publishContract)) {
-    throw new Error('Updater требует промежуточного релиза с publish contract 1');
+  if (supplied !== '2') {
+    throw new Error('Updater не поддерживает независимый binary publish contract 2');
   }
+
+  const { assertDeepSeekBinaryReady } = await import('./deepseek/binaryReadiness.ts');
+
+  await assertDeepSeekBinaryReady(
+    options.binary ?? process.env.GRIGDESK_DEEPSEEK_BIN ?? path.join(rootDir, 'bin/deepseek'),
+    path.join(rootDir, 'server/deepseek-host-contract.json'),
+    { fullVerify: options.fullVerify },
+  );
 }
 
 /**
@@ -504,17 +515,14 @@ export class GrigDeskReleaseService {
       const finished = job;
       let runtimeError: string | null = null;
 
-      if (job.expectedRuntimeBuildId) {
+      if (job.expectedDeepSeekBinary) {
         try {
-          const { resolveDeepSeekRuntime } = await import('./deepseek/runtimeProcess.ts');
-          const runtime = resolveDeepSeekRuntime({ deepseekRuntimeMode: 'embedded',
-            deepseekGenerationRoot: path.join(this.rootDir, 'server/runtime/deepseek') });
+          const { assertDeepSeekBinaryReady } = await import('./deepseek/binaryReadiness.ts');
 
-          if (runtime.buildId !== job.expectedRuntimeBuildId) {
-            runtimeError = 'runtime_build_mismatch';
-          }
+          await assertDeepSeekBinaryReady(job.expectedDeepSeekBinary,
+            path.join(this.rootDir, 'server/deepseek-host-contract.json'), { fullVerify: false });
         } catch {
-          runtimeError = 'runtime_readiness_failed';
+          runtimeError = 'deepseek_binary_readiness_failed';
         }
       }
 
@@ -528,7 +536,7 @@ export class GrigDeskReleaseService {
             completedAt,
             error: runtimeError ? {
               code: runtimeError,
-              message: 'Runtime не подтверждён; восстанови согласованный checkout и current.',
+              message: 'DeepSeek не совместим с новым GrigDesk; установите совместимый ELF.',
             } : null,
           }
           : state.job,

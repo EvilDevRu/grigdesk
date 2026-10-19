@@ -1,5 +1,7 @@
 # Конвейер
 
+- [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
+
 Фабрика и движок маршрутов, граф попытки, ворота, арбитр и триаж.
 
 Читай перед правкой: `engine`, `server/src/modules/factory`, `server/src/modules/routes`, `server/src/modules/agents`, `web/src/views/pipeline`, `web/src/views/routes`.
@@ -12,6 +14,8 @@
 - [Задача: постановка и триаж](../guide/tasks.md)
 
 ## Устройство
+
+- [Бинарный DeepSeek в Factory: descriptor, package coverage, cache и prepared handle](deepseek-binary-factory.md)
 
 - [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)
 

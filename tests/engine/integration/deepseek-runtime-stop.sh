@@ -34,9 +34,9 @@ printf '%s\n' '{
 
 marker="deepseek-stubborn-${RANDOM}-${RANDOM}"
 fake_bin="$TEST_ROOT/dsh-stop-fake"
-printf '#!/usr/bin/env bash\nbash -c '\''trap "" TERM; exec -a "%s" sleep 60'\'' &\nexec "%s" "%s" --scenario "%s" --log "%s"\n' \
-  "$marker" "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeAcp.mts" \
-  "$scenario" "$fake_log" >"$fake_bin"
+printf '#!/usr/bin/env bash\nexec "%s" "%s" --scenario "%s" --log "%s" --stubborn-marker "%s" "$@"\n' \
+  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeBinary.mts" \
+  "$scenario" "$fake_log" "$marker" >"$fake_bin"
 chmod +x "$fake_bin"
 
 export GRIGDESK_DEEPSEEK_BIN="$fake_bin"

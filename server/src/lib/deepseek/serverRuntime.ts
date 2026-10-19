@@ -3,11 +3,12 @@
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 
-import type { ChildProcess } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { DeepSeekWebClient } from './serverClient.ts';
 import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
+import { spawnDeepSeekBinary } from './binaryProcess.ts';
 
 export interface DeepSeekServerProcess {
   client: DeepSeekWebClient;
@@ -86,20 +87,30 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
     options.signal?.throwIfAborted();
   }
 
-  const child = (options.spawnProcess || spawn)(options.runtime?.command || options.bin, [
+  const command = options.runtime?.command || options.bin;
+  const args = [
     ...(options.runtime?.prefixArgs || []),
     '--profile', 'web', '--patch', options.overlayPath,
     '--host', '127.0.0.1', '--port', String(port), '--no-open',
-  ], {
+  ];
+  const spawnOptions: SpawnOptions = {
     cwd: options.cwd,
     env: options.env,
     stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  };
+  const spawnProcess = options.spawnProcess || spawn;
+  const owned = options.runtime?.kind === 'binary'
+    ? spawnDeepSeekBinary(command, args, spawnOptions, spawnProcess) : null;
+  const child = owned?.child ?? spawnProcess(command, args, spawnOptions);
+  const stop = () => owned ? owned.stop() : stopChild(child);
   let output = '';
   let outputBytes = 0;
   let resolved = false;
   let resolveUrl!: (url: string) => void;
   let rejectUrl!: (error: Error) => void;
+  const startupAbort = new AbortController();
+  const startupSignal = options.signal
+    ? AbortSignal.any([options.signal, startupAbort.signal]) : startupAbort.signal;
   const url = new Promise<string>((resolve, reject) => {
     resolveUrl = resolve;
     rejectUrl = reject;
@@ -113,7 +124,7 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
 
     if (options.signal && outputBytes > 2_097_152) {
       rejectUrl(new Error('Probe DeepSeek превысил предел вывода'));
-      child.kill('SIGTERM');
+      void stop().catch(() => {});
 
       return;
     }
@@ -127,19 +138,32 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
   };
   child.stdout?.on('data', accept);
   child.stderr?.on('data', accept);
-  child.once('error', (error) => {
-    if (!resolved) rejectUrl(error);
-  });
-  child.once('exit', () => {
-    if (!resolved) rejectUrl(new Error('DeepSeek web завершился до запуска'));
-  });
+  // URL ещё не означает готовность: child может завершиться во время cookie-auth.
+  // Его отказ должен прервать и ожидание URL, и уже начавшийся HTTP-запрос.
+  const startupFailed = (error: Error) => {
+    startupAbort.abort(error);
+    rejectUrl(error);
+  };
+  const startupExited = () => startupFailed(new Error('DeepSeek web завершился до запуска'));
+
+  child.once('error', startupFailed);
+  child.once('exit', startupExited);
+
+  if (child.exitCode !== null || child.signalCode !== null) {
+    startupExited();
+  }
+
   let startupTimer: ReturnType<typeof setTimeout>;
   const abort = () => {
     rejectUrl(new Error('Probe DeepSeek остановлен'));
-    void stopChild(child);
+    void stop().catch(() => {});
   };
 
   options.signal?.addEventListener('abort', abort, { once: true });
+
+  if (options.signal?.aborted) {
+    abort();
+  }
 
   try {
     const authenticatedUrl = await Promise.race([
@@ -151,11 +175,13 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
 
     clearTimeout(startupTimer!);
 
-    const client = await DeepSeekWebClient.authenticate(authenticatedUrl, options.signal);
+    const client = await DeepSeekWebClient.authenticate(authenticatedUrl, startupSignal);
 
     // После startup отменой хода владеет session/cancel; процесс освобождается в finally.
     // Metadata-запросы передают свой signal в RPC и также закрываются единственным owner.
     options.signal?.removeEventListener('abort', abort);
+    child.off('error', startupFailed);
+    child.off('exit', startupExited);
     child.stdout?.off('data', accept);
     child.stderr?.off('data', accept);
     child.stdout?.resume();
@@ -163,12 +189,14 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
 
     return { client, stop: async () => {
       options.signal?.removeEventListener('abort', abort);
-      await stopChild(child);
+      await stop();
     } };
   } catch (error) {
     clearTimeout(startupTimer!);
     options.signal?.removeEventListener('abort', abort);
-    await stopChild(child);
+    child.off('error', startupFailed);
+    child.off('exit', startupExited);
+    await stop();
     throw error;
   }
 }

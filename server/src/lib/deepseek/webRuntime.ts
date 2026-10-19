@@ -15,10 +15,16 @@ import { nearestProjectRoot, prepareDeepSeekLaunch, validateMcpServers } from '.
 import type { runDeepSeekTurn } from './runtime.ts';
 import { runDeepSeekServerTurn } from './serverTurn.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './serverRuntime.ts';
-import { assertDeepSeekPreparedRuntime, resolveDeepSeekRuntimeAsync } from './runtimeProcess.ts';
+import { assertDeepSeekPreparedRuntime, verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
+import { preparedDeepSeekRuntime } from './preparedRuntime.ts';
+import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
+import { inspectSessionJournal } from './journal.ts';
+import { deepSeekRuntimeError } from './runtimeArtifact.ts';
+import type { ChatStep } from '../chat/streamSteps.ts';
 
 type BaseOptions = Parameters<typeof runDeepSeekTurn>[0];
 type WebOptions = BaseOptions & {
+  preparedRuntime?: PreparedExecutorRuntime;
   onInTurnReady?: (port: InTurnPort) => void;
   onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
@@ -36,9 +42,10 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
     ? await fs.realpath(options.projectRoot) : await nearestProjectRoot(cwd);
   const mode = options.permissionMode === 'read-only' ? 'read-only' : 'workspace-write';
   const mcpServers = validateMcpServers(options.mcpServers || []);
-  const runtime = await resolveDeepSeekRuntimeAsync(options.config);
+  const runtime = await preparedDeepSeekRuntime(options.config, options.preparedRuntime);
 
   assertDeepSeekPreparedRuntime(runtime, options.nativeSettings);
+  await verifyDeepSeekRuntimeDescriptorAsync(runtime);
 
   const launch = await prepareDeepSeekLaunch({
     config: options.config, cwd, workspaceRoot: cwd, chatKey: options.chatKey,
@@ -48,7 +55,33 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
     transport: 'web', mcpServers,
     runtime,
   });
+  let cleanupFailed = false;
+
   try {
+    let sessionId = options.sessionId;
+    let journalNote: ChatStep | undefined;
+
+    if (runtime.kind === 'binary' && sessionId) {
+      const journal = await inspectSessionJournal(
+        launch.dshHome, cwd, sessionId, runtime.metadata!.journal.read,
+      );
+
+      if (journal.state === 'missing') {
+        throw deepSeekRuntimeError(
+          'deepseek_session_missing', 'Журнал сессии DeepSeek не найден; сбрось память чата.',
+        );
+      }
+      if (journal.state === 'incompatible') {
+        sessionId = null;
+        journalNote = {
+          k: 'note',
+          text: 'Память исполнителя начата заново: формат журнала несовместим.',
+          at: Date.now(),
+        };
+        options.onStep?.(journalNote);
+      }
+    }
+
     const env = buildDeepSeekChildEnv({ source: options.env || process.env, dshHome: launch.dshHome });
     const tools = (options.workTools as { descriptors?: Array<{ name?: unknown; function?: { name?: unknown } }> } | null)?.descriptors;
     const workToolNames = new Set((Array.isArray(tools) ? tools : [])
@@ -61,7 +94,7 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       env,
       nativeSettings: options.nativeSettings,
       message: String(options.message || ''),
-      sessionId: options.sessionId,
+      sessionId,
       model: options.model,
       effort: options.effort,
       signal: options.signal,
@@ -86,15 +119,26 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       workToolNames,
       startServer: options.startServer,
     });
+
     return {
       ...result,
+      ...(journalNote ? {
+        reply: `${journalNote.text}\n\n${result.reply || ''}`,
+        steps: [journalNote, ...(result.steps || [])],
+      } : {}),
       contextTokens: undefined as number | undefined,
       contextWindow: undefined as number | undefined,
       contextMetric: 'unavailable',
       contextCache: contextCacheStatus('unavailable'),
       retryState: 'post_prompt',
     };
+  } catch (error) {
+    cleanupFailed = (error as { code?: unknown }).code === 'deepseek_binary_cleanup';
+
+    throw error;
   } finally {
-    await fs.rm(launch.launchDir, { recursive: true, force: true }).catch(() => {});
+    if (!cleanupFailed) {
+      await fs.rm(launch.launchDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }

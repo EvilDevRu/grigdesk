@@ -57,12 +57,12 @@ async function fixture(t, scenario = TEXT) {
 
   const config = {
     rootDir: root,
-    deepseekArtifactDir: path.join(root, 'generation'),
-    deepseekRuntimeMode: 'embedded',
+    deepseekBin: path.join(root, 'generation', 'deepseek'),
+    deepseekRuntimeMode: 'binary',
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
   const identities = ['generation', 'generation-b'].map((name) => glmCompatibilityIdentity(
-    describeGlmGeneration({ ...config, deepseekArtifactDir: path.join(root, name) }).runtime, 'api'));
+    describeGlmGeneration({ ...config, deepseekBin: path.join(root, name, 'deepseek') }).runtime, 'api'));
   const env = {
     PATH: process.env.PATH,
     GRIGDESK_GLM_API_MODE: 'api',
@@ -95,7 +95,7 @@ async function fixture(t, scenario = TEXT) {
      * Фейковый web журналов не пишет, поэтому resume-тесты создают его сами.
      */
     async journal(chatKey, cwd, sessionId, identity = identities[0]) {
-      const directory = glmSessionJournalDir(glmChatHome(config.glmRuntimeHome, identity, chatKey), cwd,
+      const directory = glmSessionJournalDir(glmChatHome(config.glmRuntimeHome, chatKey), cwd,
         sessionId);
 
       await fs.mkdir(directory, { recursive: true });
@@ -115,7 +115,7 @@ async function fixture(t, scenario = TEXT) {
   };
 }
 
-test('смена ключа, режима, identity или cwd ротирует binding', async (t) => {
+test('ключ, режим, права и cwd меняют binding, а identity сборки не меняет профиль', async (t) => {
   const f = await fixture(t);
   const binding = f.adapter.sessionBinding;
   const auth = await binding.authProfileId(f.config);
@@ -131,10 +131,10 @@ test('смена ключа, режима, identity или cwd ротирует 
   assert.equal(await binding.authProfileId(f.config), auth);
   assert.equal(auth.includes('synthetic-key-a'), false);
 
-  assert.notEqual(await binding.securityProfile({
+  assert.equal(await binding.securityProfile({
     ...f.config,
-    deepseekArtifactDir: path.join(f.root, 'generation-b'),
-  }, {}), security, 'identity');
+    deepseekBin: path.join(f.root, 'generation-b', 'deepseek'),
+  }, {}), security, 'identity сборки не входит в профиль прав');
   assert.notEqual(await binding.securityProfile(f.config, { blockDirectSsh: false }), security, 'SSH');
   assert.notEqual(await binding.securityProfile(f.config, { blockDirectDb: true }), security, 'БД');
 

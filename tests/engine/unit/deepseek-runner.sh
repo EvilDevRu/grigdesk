@@ -17,7 +17,11 @@ assert_rc 0 "$?" "DeepSeek runner autoloads"
 runner_contract_check deepseek
 assert_rc 0 "$?" "DeepSeek runner satisfies the common contract"
 
-unset GRIGDESK_DEEPSEEK_BIN GRIGDESK_DEEPSEEK_RUNTIME_HOME
+unset GRIGDESK_DEEPSEEK_RUNTIME_HOME
+export GRIGDESK_DEEPSEEK_BIN="$TEST_ROOT/missing-private-elf"
+PATH="$TEST_ROOT/empty-bin" runner_call deepseek probe >/dev/null 2>&1
+assert_rc 126 "$?" "offline guard блокирует metadata probe до внешнего executable"
+export FACTORY_FORBID_LIVE=0
 PATH="$TEST_ROOT/empty-bin" runner_call deepseek probe >/dev/null 2>&1
 assert_rc 4 "$?" "probe reports a missing binary without falling through"
 
@@ -26,7 +30,7 @@ probe_bin="$TEST_ROOT/bin/dsh"
 printf '#!/usr/bin/env bash\nprintf "0.1.5-rc.2\\n"\n' >"$probe_bin"
 chmod +x "$probe_bin"
 
-unset GRIGDESK_DEEPSEEK_BIN
+export GRIGDESK_DEEPSEEK_BIN="$TEST_ROOT/missing-private-elf"
 runtime_bin="$TEST_ROOT/runtime/install/current/node_modules/.bin/dsh"
 path_bin="$TEST_ROOT/path-bin/dsh"
 mkdir -p "$(dirname "$runtime_bin")" "$(dirname "$path_bin")"
@@ -36,19 +40,23 @@ chmod +x "$runtime_bin" "$path_bin"
 export GRIGDESK_DEEPSEEK_RUNTIME_HOME="$TEST_ROOT/runtime"
 export FACTORY_FORBID_LIVE=0
 version=$(PATH="$TEST_ROOT/path-bin:/usr/bin:/bin" runner_call deepseek probe)
-assert_rc 0 "$?" "runtime-current binary precedes command -v fallback"
-assert_eq 0.1.5-rc.2 "$version" "runtime-current resolution uses the pinned binary"
+assert_rc 4 "$?" "stock runtime-current и PATH dsh больше не выбираются"
+assert_eq "" "$version" "без нашего binary metadata probe не выдаёт stock version"
 export GRIGDESK_DEEPSEEK_BIN="$probe_bin"
 unset GRIGDESK_DEEPSEEK_RUNTIME_HOME
 export GRIGDESK_DEEPSEEK_BIN="$probe_bin" FACTORY_FORBID_LIVE=0
+printf '#!/usr/bin/env bash\nexec "%s" "%s" "$@"\n' \
+  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeBinary.mts" >"$probe_bin"
 version=$(runner_call deepseek probe)
-assert_rc 0 "$?" "probe accepts the pinned executable"
-assert_eq 0.1.5-rc.2 "$version" "probe returns the real CLI version"
-printf '#!/usr/bin/env bash\nprintf "0.1.5-rc.3\\n"\n' >"$probe_bin"
+assert_rc 0 "$?" "probe принимает совместимый binary metadata независимо от upstream pin"
+assert_contains "$version" '9.2.0-grigdesk.' "probe сохраняет upstream и полную observed identity"
+assert_contains "$version" ".p$(printf 'a%.0s' {1..64})" "coverage включает полный packageId"
+printf '#!/usr/bin/env bash\nprintf "0.1.5-rc.2\\n"\n' >"$probe_bin"
 chmod +x "$probe_bin"
 runner_call deepseek probe >/dev/null 2>&1
-assert_rc 4 "$?" "probe rejects an unpinned DSH version"
-printf '#!/usr/bin/env bash\nprintf "0.1.5-rc.2\\n"\n' >"$probe_bin"
+assert_rc 4 "$?" "stock dsh без metadata отклоняется даже с прежним pinned номером"
+printf '#!/usr/bin/env bash\nexec "%s" "%s" "$@"\n' \
+  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeBinary.mts" >"$probe_bin"
 chmod +x "$probe_bin"
 
 catalog=$(runner_call deepseek catalog)
@@ -79,7 +87,7 @@ assert_eq 'status status_request tools structured_output' \
 snapshot="$TEST_ROOT/catalog"
 mkdir -p "$snapshot"
 printf '%s\n' "$catalog" >"$snapshot/models.tsv"
-resolved=$(catalog_resolve "$snapshot" deepseek default latest auto 0.1.5-rc.2)
+resolved=$(catalog_resolve "$snapshot" deepseek default latest auto "$version")
 assert_rc 0 "$?" "minimal policy resolves without MODEL_DEFAULT_DEEPSEEK overrides"
 assert_eq "$model" "$resolved" "catalog resolver preserves the opaque model id"
 

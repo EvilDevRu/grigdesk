@@ -27,7 +27,9 @@
 - [Авторизация и CLI-токен](authentication-and-cli-token.md)
 - [Ключ локального окна: атомарная публикация после listen и обмен на сессию](window-key.md)
 - [Программная правка .env — только через общий писатель lib/envFile.ts](env-file-writer.md)
-- [Встроенный DeepSeek: переход updater, публикация и восстановление](deepseek-release-transition.md)
+- [Исторический embedded переход DeepSeek: публикация и восстановление](deepseek-release-transition.md)
+- [Установка и откат DeepSeek ELF: staged verify, receipt, резервирование и память](deepseek-binary-install.md)
+- [Обновление GrigDesk с независимым ELF: contract 2, readiness и сохранение runtime](deepseek-binary-update.md)
 
 ## Грабли
 

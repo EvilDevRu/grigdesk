@@ -34,11 +34,11 @@ developer_command() {
     command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q "[:.]${PORT}[[:space:]]"
   }
 
-  # Встроенный DeepSeek — один из исполнителей: сбой его подготовки (нет сети, компилятора,
-  # прерванная сборка) не мешает запуску GrigDesk; карточка DeepSeek покажет недоступность.
+  # Независимый DeepSeek проверяется без сборки, установки и изменения его homes.
+  # Отказ optional исполнителя не мешает запуску GrigDesk; карточка покажет причину.
   prepare_deepseek() {
     ( cd "$DIR/server" && npm run --silent deepseek:prepare ) || {
-      echo "⚠ DeepSeek не подготовлен; GrigDesk работает без него. Повтор: bin/grigdesk-ctl deps" >&2
+      echo "⚠ DeepSeek недоступен; GrigDesk работает без него. Установите совместимый ELF через install:binary" >&2
     }
   }
 

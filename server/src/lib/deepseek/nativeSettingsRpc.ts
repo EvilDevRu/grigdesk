@@ -1,11 +1,12 @@
 // Приватные extensions существуют только между host и дочерним ACP процессом.
 // Они сохраняют интерфейс web settings RPC, не добавляя model/MCP инструменты.
 
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import type { AcpClient } from '../acp/client.ts';
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
 import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
+import { spawnDeepSeekBinary } from './binaryProcess.ts';
 
 export interface DeepSeekSettingsRpc {
   rpc(method: string, args?: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<unknown>;
@@ -72,13 +73,17 @@ export async function startDeepSeekAcpSettings(options: {
   await verifyDeepSeekRuntimeDescriptorAsync(options.runtime);
   options.signal?.throwIfAborted();
 
-  const child = spawn(options.runtime.command, [
+  const args = [
     ...options.runtime.prefixArgs, '--profile', 'acp', '--patch', options.overlayPath,
-  ], {
+  ];
+  const spawnOptions: SpawnOptions = {
     cwd: options.cwd,
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  };
+  const owned = options.runtime.kind === 'binary'
+    ? spawnDeepSeekBinary(options.runtime.command, args, spawnOptions) : null;
+  const child = owned?.child ?? spawn(options.runtime.command, args, spawnOptions);
   const client = createAcpClient(child, { requestTimeoutMs: 15_000 });
   const exit = new Promise<void>((resolve) => {
     child.once('exit', () => resolve());
@@ -88,7 +93,21 @@ export async function startDeepSeekAcpSettings(options: {
   // stderr ограничивается pipe, но не публикуется: он может содержать внутренние значения.
   child.stderr?.resume();
 
+  /**
+   * Binary owner подтверждает завершение раньше EOF, исключая повторный TERM worker.
+   * Client закрывается и при cleanup отказе; исход владельца остаётся видимым caller.
+   */
   const stop = async () => {
+    if (owned) {
+      try {
+        await owned.stop();
+      } finally {
+        client.close();
+      }
+
+      return;
+    }
+
     client.close();
 
     if (child.pid && child.exitCode === null && child.signalCode === null) {
@@ -100,9 +119,13 @@ export async function startDeepSeekAcpSettings(options: {
       clearTimeout(timeout);
     }
   };
-  const abort = () => void stop();
+  const abort = () => void stop().catch(() => {});
 
   options.signal?.addEventListener('abort', abort, { once: true });
+
+  if (options.signal?.aborted) {
+    abort();
+  }
 
   try {
     const initialized = await initializeAcp(client, 10_000);

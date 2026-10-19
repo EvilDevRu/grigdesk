@@ -5,7 +5,7 @@ import { ProviderSettingsCatalogCache } from '../../server/src/lib/executorSetti
 import { projectNativeSettingsCatalog } from '../../server/src/lib/executorSettings/projection.ts';
 import { decodeProviderSettingsCatalog } from '../../shared/chat/providerSettingsContracts.ts';
 import { prepareChatNativeSettings } from '../../server/src/lib/executorSettings/launch.ts';
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
 import { flattenNativeSettings } from '../../server/src/lib/executorSettings/validation.ts';
 
@@ -170,8 +170,7 @@ test('несовместимые schemas не становятся writable, sec
 });
 
 test('настоящий candidate объединяет web/ACP схемы без ключа и сохраняет opaque field IDs', async () => {
-  const artifact = await ensureTestDeepSeekArtifact();
-  const config = { deepseekBin: process.execPath, deepseekArtifactDir: artifact };
+  const { config } = await testDeepSeekBinarySelection();
   const context = await deepseek.nativeSettings.context(config, process.cwd(), 'pipeline');
   const read = await new ProviderSettingsCatalogCache().read(deepseek.nativeSettings, context);
   const fields = flattenNativeSettings(read.fields);

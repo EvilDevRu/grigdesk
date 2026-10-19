@@ -54,7 +54,7 @@
 - В собственных TS/MTS и TS-script Vue вне tests найдено 77 явных типов `any`
   в 23 файлах. Подсчёт сделан по TypeScript AST, без комментариев и строковых литералов.
   Самые большие группы: `server/src/lib/analysis/analyzer.ts` — 21,
-  `tools/runtimeComposition.ts` — 11, `server/src/lib/analysis/arbiter.ts` — 7.
+  `deepseek/scripts/runtimeComposition.ts` — 11, `server/src/lib/analysis/arbiter.ts` — 7.
   Это места без конкретного типа, а не число доказанных runtime-ошибок.
 
 ## Совместимость не равна перенесённой реализации
@@ -90,8 +90,9 @@ AudioWorklet. Переименование исходника и получен�
   но не сравнивает `typecheckDebt`; его собирает настоящий web-компилятор.
 - Vue JS-script учитывается лишь в областях `web*`. Нынешние mobile SFC уже TS,
   но такое правило само по себе не защищает mobile от нового JS-script.
-- `tools/entrypointGraph.mts` в `SCANNED_DIRS` отбирает только `.js` и `.ts`.
-  MJS/MTS вне явного `ENTRYPOINTS` не покрываются этим отбором.
+- `tools/entrypointGraph.mts` обходит TS/JS, MTS/MJS и CJS/CTS в `SCANNED_DIRS`,
+  включая scripts пакета DeepSeek. Installed dependency entry проверяется на наличие,
+  внутренние bundled string imports чужих зависимостей не считаются source проекта.
 - `web/tsconfig.scripts.json` включает `scripts/**/*.ts` и `scripts/**/*.mjs`:
   новые `.mts` и Vite config требуют явного включения. В `server/tsconfig.json`
   source-glob — `src/**/*.ts`; будущий `.mts` под `src` также не становится корневым

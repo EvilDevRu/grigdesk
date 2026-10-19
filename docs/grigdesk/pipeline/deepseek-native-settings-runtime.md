@@ -11,11 +11,13 @@ Busy процесс сохраняет immutable snapshot. Только ENOENT �
 обычному spawn и transient systemd service. Эти значения перекрывают extra env. Native
 контейнер не передаётся generic provider settings, model shell или project MCP.
 Частный ACP мост применяет общие overrides и проверяет readback до рабочей session.
-Внешний диагностический runtime без доказанного ACP settings канала при активных overrides
-останавливается с `native_settings_unverified`.
+Default и override со stock CLI без metadata отвергаются до запуска; metadata без
+обязательного ACP bridge также несовместима. Активные overrides не игнорируются.
 
 Probe и 11-колоночный каталог используют версию вида
-`0.1.5-rc.2.grigdesk.b<hash16>`. Host coverage сохраняет эту observed версию и сверяет её
+`<runtimeVersion>.p<packageId>`; packageId полный
+и сохраняется общим parser даже при стабильной upstream-версии.
+Host coverage сохраняет эту observed версию и сверяет её
 перед каждым узлом даже до истечения TTL. Несовпадение, в том числе после штатной
 публикации новой сборки, обрабатывается как истёкший снимок: один повтор host preflight и
 новая сверка. Узел любого исполнителя профиля встаёт с `coverage_unavailable`, только если
@@ -23,8 +25,10 @@ Probe и 11-колоночный каталог используют верси�
 `FACTORY_ERROR=runtime_changed`. Внутри узла dispatcher заново проверяет runtime-sensitive
 runner: смена сборки между попытками даёт `runtime_changed` без автоматического failover,
 а отказ каталога той же сборки остаётся `invalid_config` или `route_unavailable`.
-`catalog_changed` остаётся причиной изменения hash маршрутов. Wrapper закрепляет generation,
-identity и runtimeVersion перед prompt. Уже запущенный процесс сохраняет своё поколение.
+`catalog_changed` остаётся причиной изменения hash маршрутов. Wrapper закрепляет opaque
+runtime handle до prefs и передаёт его native context и ACP run. Подмена ELF после prefs
+останавливает узел до prompt. Уже запущенный процесс сохраняет своё поколение.
+Подробности — [бинарная Factory-ветка](deepseek-binary-factory.md).
 
 MCP `stage_progress` и `stage_result` получают host-owned run identity. Настоящий compiled
 ACP с loopback API проверен вместе со штатным host status consumer: терминальный результат

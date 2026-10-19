@@ -10,6 +10,7 @@ import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
 import { ensurePrivateDir } from '../deepseek/env.ts';
 import { resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
+import { glmRuntimeConfig } from './generation.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
 import { GLM_ACP_EFFORT_CONFIG, GLM_ACP_MODEL_CONFIG } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
@@ -108,15 +109,18 @@ export async function readGlmCatalog({
   identity,
   accessMode,
   spawnProcess = spawn,
+  modelEndpoint,
+  egressGuard,
 }: {
   config: DeepSeekRuntimeConfig & { glmRuntimeHome?: string };
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;
   identity: string;
   accessMode: GlmAccessMode;
   spawnProcess?: typeof spawn;
+  modelEndpoint?: string;
+  egressGuard?: string;
 }): Promise<GlmCatalogEntry[]> {
-  const embedded = { ...config, deepseekRuntimeMode: 'embedded' as const };
-  const runtime = await resolveDeepSeekRuntimeAsync(embedded);
+  const runtime = await resolveDeepSeekRuntimeAsync(glmRuntimeConfig(config));
   const root = path.join(assertGlmRuntimeHome(String(config.glmRuntimeHome ?? '')), identity.slice(0, 16));
   const home = await ensurePrivateDir(path.join(root, 'catalog'));
   const project = await ensurePrivateDir(path.join(home, 'project'));
@@ -134,6 +138,8 @@ export async function readGlmCatalog({
       projectRoot: project,
       accessMode,
       model: 'glm-5.3',
+      modelEndpoint,
+      egressGuard,
       transport: 'acp',
       settingsDocument,
       hooks: {

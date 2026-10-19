@@ -19,6 +19,8 @@ import { prepareDeepSeekLaunch } from '../../server/src/lib/deepseek/runtime.ts'
 import { runDeepSeekWebTurn } from '../../server/src/lib/deepseek/webRuntime.ts';
 import { runDeepSeekServerTurn } from '../../server/src/lib/deepseek/serverTurn.ts';
 import { acpDeepSeekSettingsRpc } from '../../server/src/lib/deepseek/nativeSettingsRpc.ts';
+import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
+import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 
 const context = {
   providerId: 'deepseek',
@@ -233,11 +235,12 @@ test('DSH отправляет новый leaf через адресный mutat
 
 test('DSH готовит отдельный документ каждого запуска, сохраняя shared home при set и reset', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'native-dsh-layer-'));
+  const { binary } = await writeDeepSeekMetadataStub(t);
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   const options = {
-    config: { deepseekRuntimeHome: root, deepseekBin: '/fake' },
+    config: { deepseekRuntimeHome: root, deepseekBin: binary },
     cwd: root,
     workspaceRoot: root,
     projectRoot: root,
@@ -286,13 +289,17 @@ test('DSH web CLI получает новый leaf до prompt и resume пос�
   const bin = path.join(root, 'dsh');
   const scenarioFile = path.join(root, 'scenario.json');
   const trace = path.join(root, 'trace.jsonl');
+  const info = { ...runtimeInfoFixture(), journal: { write: 3, read: [0, 1, 2, 3] } };
   const fixture = new URL('../fixtures/deepseek-harness/fakeWeb.mjs', import.meta.url).pathname;
   const quote = (value) => `'${String(value).replaceAll("'", `'"'"'`)}'`;
 
   await fs.writeFile(scenarioFile, JSON.stringify({ updates: [] }));
   await fs.writeFile(
     bin,
-    `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ` +
+    '#!/bin/sh\n' +
+      `if [ "$1" = "--runtime-info" ]; then printf '%s\\n' ` +
+      `${quote(JSON.stringify(info))}; exit 0; fi\n` +
+      `exec ${quote(process.execPath)} ${quote(fixture)} ` +
       `--scenario ${quote(scenarioFile)} --log ${quote(trace)} "$@"\n`,
     { mode: 0o755 },
   );

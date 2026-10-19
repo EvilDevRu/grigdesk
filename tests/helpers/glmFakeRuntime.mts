@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 import { createGlmAdapter } from '../../server/src/lib/executors/glm.ts';
 import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
-import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
+import { describeGlmGenerationAsync } from '../../server/src/lib/glm/generation.ts';
 import { GLM_FIXTURE_PLUGIN, writeGlmArtifactFixture } from './glmArtifactFixture.mts';
 
 const FAKE_WEB = path.resolve(import.meta.dirname, '../fixtures/deepseek-harness/fakeWeb.mjs');
@@ -48,11 +48,11 @@ export async function createGlmFakeRuntime(t: { after: (fn: () => unknown) => vo
 
   const config = {
     rootDir: project,
-    deepseekArtifactDir: path.join(root, 'generation'),
-    deepseekRuntimeMode: 'embedded' as const,
+    deepseekBin: path.join(root, 'generation', 'deepseek'),
+    deepseekCacheDir: path.join(root, 'cache'),
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
-  const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');
+  const identity = glmCompatibilityIdentity((await describeGlmGenerationAsync(config)).runtime, 'api');
   const adapter = createGlmAdapter({
     env: {
       PATH: process.env.PATH,

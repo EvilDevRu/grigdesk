@@ -1,23 +1,28 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
 import { probeDeepSeekRuntime, resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
+import { selectedDeepSeekBinary } from '../deepseek/distribution.ts';
+import type { ExecutorDistributionProbe, ExecutorProbe } from './index.ts';
 import {
-  GLM_ADMISSION,
+  GLM_ALLOWED_MODES,
+  GLM_POLICY_REVISION,
   GLM_PROFILE_REVISION,
+  buildGlmRoute,
   glmCompatibilityIdentity,
   selectGlmServiceKey,
 } from '../glm/contract.ts';
 import type { GlmAccessMode } from '../glm/contract.ts';
 import { assertGlmRuntimeHome, glmAccessError, glmAuthProfileId, resolveGlmAccess } from '../glm/env.ts';
-import { describeGlmGeneration } from '../glm/generation.ts';
+import { assertGlmGenerationAdmission, describeGlmGenerationAsync } from '../glm/generation.ts';
 import { readGlmCatalog } from '../glm/catalog.ts';
 import { glmMcpStatus } from '../glm/mcp.ts';
 import { runGlmTurn } from '../glm/runtime.ts';
 import { glmUsage } from '../glm/usage.ts';
+import { prepareGlmRuntime, preparedGlmRuntime } from '../glm/preparedRuntime.ts';
+import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
 import type { GlmRuntimeDeps, GlmTurnOptions } from '../glm/runtime.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
@@ -34,19 +39,6 @@ export type GlmAdapterDeps = GlmRuntimeDeps & {
 };
 
 type Problem = { message: string; command?: string };
-
-const EXTERNAL_MESSAGE = 'GLM работает только на встроенной сборке GrigDesk; '
-  + 'внешний DeepSeek не используется.';
-
-// Что видит человек при недоступной сборке DSH и чем это лечится. Коды DeepSeek-проверки
-// поколения переводятся в ту же подсказку: GLM живёт на той же встроенной сборке.
-const RUNTIME_PROBLEMS: Readonly<Record<string, string>> = Object.freeze({
-  glm_runtime_missing: 'Встроенная сборка DSH ещё не подготовлена.',
-  glm_plugin_missing: 'В сборке DSH нет модельного плагина GLM (llm-pi-ai); подготовь сборку заново.',
-  deepseek_runtime_corrupt: 'Файлы встроенной сборки DSH повреждены; подготовка соберёт её заново.',
-  deepseek_runtime_incompatible: 'Сборка DSH собрана под другую версию Node, чем у службы GrigDesk.',
-  deepseek_runtime_changed: 'Сборка DSH сменилась во время проверки; перепроверь карточку.',
-});
 
 const AUTH_LABELS: Readonly<Record<string, (mode: GlmAccessMode | null) => string>> = Object.freeze({
   glm_access_mode_missing: () => 'нужен GRIGDESK_GLM_API_MODE (api или coding-plan) в окружении службы',
@@ -66,19 +58,17 @@ function shellArgument(value: string): string {
 }
 
 /**
- * Подсказка и команда исправления для карточки; внешний DeepSeek лечится только конфигом.
- * Остальные отказы лечит общая подготовка зависимостей GrigDesk.
+ * Карточка направляет к установке совместимого бинарного выпуска.
+ * Плагин и допуск проверяются по его metadata без файлов legacy generation.
  */
 function problemFor(config: GlmConfig, code: string): Problem {
-  if (code === 'glm_runtime_external') {
-    return { message: `${EXTERNAL_MESSAGE} Убери GRIGDESK_DEEPSEEK_BIN из окружения службы.` };
-  }
-
-  const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
+  const directory = config.rootDir ? path.join(config.rootDir, 'deepseek') : 'deepseek';
 
   return {
-    message: RUNTIME_PROBLEMS[code] || 'Сборка DSH не прошла проверку версии.',
-    command: `${shellArgument(root ? path.join(root, 'bin/grigdesk-ctl') : 'bin/grigdesk-ctl')} deps`,
+    message: code === 'glm_plugin_missing'
+      ? 'В поставке нет модельного плагина GLM (llm-pi-ai); установите совместимый бинарник.'
+      : 'Поставка DeepSeek для GLM не прошла проверку.',
+    command: `npm --prefix ${shellArgument(directory)} run install:binary`,
   };
 }
 
@@ -87,7 +77,7 @@ function keyFingerprint(key: string | null): string {
 }
 
 /**
- * Карточка GLM (Z.ai): встроенная generation DSH, режим доступа и ключ из окружения службы.
+ * Карточка GLM (Z.ai): выбранная поставка DSH, режим доступа и ключ из окружения службы.
  * Зависимости передаются явно, поэтому тесты проверяют допуск без правки process.env.
  */
 export function createGlmAdapter(deps: GlmAdapterDeps) {
@@ -113,7 +103,9 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
 
   // run есть только у допущенного режима из окружения (Р9): иначе карточка setup-only.
   const mode = resolveGlmAccess({ env: deps.env, admission: [] }).mode;
-  const admitted = Boolean(mode) && deps.admission.some((entry) => entry.mode === mode);
+
+  const admitted = mode !== null && (deps.admission
+    ? deps.admission.some((entry) => entry.mode === mode) : GLM_ALLOWED_MODES.includes(mode));
 
   return {
     // Ввод в активный ход — как у DeepSeek на той же сборке DSH: steer встаёт в следующий шаг
@@ -127,6 +119,7 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
       } as const,
     } : {}),
     id: 'glm',
+    prepareRuntime: prepareGlmRuntime,
     name: 'GLM (Z.ai)',
     vendor: 'Z.ai',
     // Белый, как знак на логотипе Z.ai: тёмный цвет читался как «недоступен».
@@ -135,6 +128,35 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     workToolsTransport: 'mcp',
     workdir: { switch: 'reseed', roots: 'single' },
     sessionBinding: {
+      /**
+       * Прежний binding содержит только compatibility, режим и прежние флаги прав.
+       * Подготовленный runtime и допуск проверяются до принятия этой формулы ядром.
+       */
+      legacySecurityProfiles: async (
+        config: GlmConfig,
+        settings: Record<string, unknown> = {},
+        preparedRuntime?: PreparedExecutorRuntime,
+      ) => {
+        const { mode } = resolveGlmAccess({ env: deps.env, admission: deps.admission });
+
+        if (!mode) {
+          throw glmAccessError('glm_access_mode_missing', 'Режим доступа GLM не задан.');
+        }
+
+        const runtime = await preparedGlmRuntime(config, preparedRuntime);
+        const generation = await describeGlmGenerationAsync(config, runtime);
+        const identity = assertGlmGenerationAdmission(generation, mode, deps.admission);
+        const fingerprint = createHash('sha256').update(JSON.stringify({
+          profile: GLM_PROFILE_REVISION,
+          identity,
+          mode,
+          ssh: settings.blockDirectSsh !== false,
+          db: settings.blockDirectDb === true,
+          strictDb: settings.strictUnknownDbClient === true,
+        })).digest('hex');
+
+        return [`${GLM_PROFILE_REVISION}:${fingerprint}`];
+      },
       /**
        * Учётная запись привязки — режим и отпечаток ключа; ключ наружу не выходит.
        * Смена ключа или режима начинает новую сессию.
@@ -146,21 +168,33 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
         return mode && key ? glmAuthProfileId(mode, key) : 'glm-env-key:missing';
       },
       /**
-       * Профиль безопасности — ревизия профиля, identity сборки, режим и флаги SSH/БД.
-       * Недоступная сборка — отказ с кодом glm_*, который чат показывает человеку.
+       * Профиль безопасности — ревизии, режим, endpoint и права без identity сборки.
+       * Runtime проверяется для допуска до CAS, но его версия не ротирует память.
        */
-      securityProfile: (config: GlmConfig, settings: Record<string, unknown> = {}) => {
+      securityProfile: async (
+        config: GlmConfig,
+        settings: Record<string, unknown> = {},
+        preparedRuntime?: PreparedExecutorRuntime,
+      ) => {
         const { mode } = resolveGlmAccess({ env: deps.env, admission: deps.admission });
 
         if (!mode) {
           throw glmAccessError('glm_access_mode_missing', 'Режим доступа GLM не задан.');
         }
 
-        const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, mode);
+        const runtime = await preparedGlmRuntime(config, preparedRuntime);
+        const generation = await describeGlmGenerationAsync(config, runtime);
+
+        if (generation.release) {
+          assertGlmGenerationAdmission(generation, mode, deps.admission);
+        }
+
+        const endpoint = deps.modelEndpoint ?? buildGlmRoute(mode).baseURL ?? 'zai:built-in-coding-plan';
         const fingerprint = createHash('sha256').update(JSON.stringify({
           profile: GLM_PROFILE_REVISION,
-          identity,
+          policy: GLM_POLICY_REVISION,
           mode,
+          endpoint,
           ssh: settings.blockDirectSsh !== false,
           db: settings.blockDirectDb === true,
           strictDb: settings.strictUnknownDbClient === true,
@@ -234,92 +268,68 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     ],
 
     /**
-     * Доставка — только встроенная generation; внешний override DeepSeek для GLM — отказ.
-     * Поколение без модельного плагина видно с buildId, чтобы было ясно, какую сборку чинить.
+     * Способ доставки определяется конфигурацией, состояние приходит из готового probe.
+     * Карточка без probe не проверяет файлы и не объявляет сборку работоспособной.
      */
-    distribution(config: GlmConfig, probe?: { ok: boolean; code?: string }) {
+    distribution(config: GlmConfig, probe?: ExecutorDistributionProbe) {
       const base = {
-        kind: 'embedded' as const,
-        label: 'Входит в GrigDesk',
+        kind: 'binary' as const,
+        managed: true,
+        label: 'Отдельная поставка DeepSeek',
         authHint: 'Задайте режим и ключ кнопкой «Ключи доступа» ниже или GRIGDESK_GLM_API_MODE '
           + 'и ZAI_API_KEY / ZAI_CODING_API_KEY в .env папки данных.',
       };
 
-      try {
-        const generation = describeGlmGeneration(config);
-        const described = {
-          ...base,
-          buildId: generation.buildId,
-          runtimeVersion: generation.runtimeVersion,
-        };
-
-        return !probe || probe.ok
-          ? described
-          : { ...described, problem: problemFor(config, String(probe.code || '')) };
-      } catch (error) {
-        const failure = error as {
-          code?: string;
-          buildId?: string;
-          runtimeVersion?: string;
-        };
-        const code = String(failure.code || 'glm_runtime_missing');
-
-        return {
-          ...base,
-          ...(failure.buildId ? { buildId: failure.buildId, runtimeVersion: failure.runtimeVersion } : {}),
-          error: code,
-          problem: problemFor(config, code),
-        };
+      if (!probe) {
+        return base;
       }
-    },
 
-    bin(config: GlmConfig) {
-      return config.deepseekArtifactDir
-        || (config.deepseekGenerationRoot ? path.join(config.deepseekGenerationRoot, 'current') : '');
+      return {
+        ...base,
+        ...(probe.buildId ? { buildId: probe.buildId } : {}),
+        ...(probe.runtimeVersion ? { runtimeVersion: probe.runtimeVersion } : {}),
+        ...(probe.packageId ? { packageId: probe.packageId, binaryVersion: probe.binaryVersion } : {}),
+        ...(!probe.ok ? {
+          error: probe.code,
+          problem: problemFor(config, String(probe.code || '')),
+        } : {}),
+      };
     },
 
     /**
-     * Общий probe встроенной сборки и проверка closure GLM: поле плагина, его код и pi-ai
-     * той версии, что записана в runtime.json проверенного поколения.
+     * Путь поставки возвращается из config без проверки executable или generation.
+     * Карточка получает доступность только из отдельного async probe.
+     */
+    bin(config: GlmConfig) {
+      return selectedDeepSeekBinary(config);
+    },
+
+    /**
+     * Probe использует metadata одного закреплённого descriptor и допуск выпуска.
+     * Отказ не подменяется проверкой legacy generation или установленного stock CLI.
      */
     async probe(config: GlmConfig) {
-      if (config.deepseekBinOverride) {
-        return {
-          ok: false,
-          version: null,
-          code: 'glm_runtime_external',
-          error: EXTERNAL_MESSAGE,
-        };
-      }
-
-      const embedded = { ...config, deepseekRuntimeMode: 'embedded' as const };
-      const result = await probeDeepSeekRuntime(embedded);
-
-      if (!result.ok) {
-        return result;
-      }
+      let result: ExecutorProbe = { ok: false, version: null };
 
       try {
-        const generation = describeGlmGeneration(embedded);
-        const runtime = await resolveDeepSeekRuntimeAsync(embedded);
-        const root = String(runtime.generationDir || '');
-        const piAi = JSON.parse(await fs.readFile(
-          path.join(root, 'node_modules/@earendil-works/pi-ai/package.json'), 'utf8',
-        ));
+        const runtime = await resolveDeepSeekRuntimeAsync(config);
 
-        await fs.access(path.join(root, 'packages/llm/llm-pi-ai/lib/index.js'));
+        result = await probeDeepSeekRuntime(config, runtime);
 
-        if (piAi.version !== generation.runtime.llmPiAi.piAi.version) {
-          throw new Error('pi-ai');
-        }
+        const generation = await describeGlmGenerationAsync(config, runtime);
+        const { mode } = resolveGlmAccess({ env: deps.env, admission: deps.admission });
+
+        assertGlmGenerationAdmission(generation, mode ?? 'api', deps.admission);
 
         return result;
-      } catch {
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+
         return {
+          ...result,
           ok: false,
-          version: result.version,
-          code: 'glm_plugin_missing',
-          error: RUNTIME_PROBLEMS.glm_plugin_missing,
+          code: failure.code ?? 'glm_runtime_missing',
+          error: failure.message ?? 'Поставка DSH для GLM недоступна',
         };
       }
     },
@@ -378,12 +388,10 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
       let identity: string;
 
       try {
-        identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, mode);
+        identity = assertGlmGenerationAdmission(
+          await describeGlmGenerationAsync(config), mode, deps.admission,
+        );
       } catch {
-        return null;
-      }
-
-      if (!deps.admission.some((entry) => entry.mode === mode && entry.compatibility === identity)) {
         return null;
       }
 
@@ -393,20 +401,26 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
         identity,
         accessMode: mode,
         spawnProcess: deps.spawn,
+        modelEndpoint: deps.modelEndpoint,
+        egressGuard: deps.egressGuard,
       });
     },
 
     /**
-     * Ключ кэша каталога: identity сборки, режим и отпечаток ключа без самого ключа.
+     * Ключ кэша каталога: packageId, compatibility, режим и отпечаток ключа без самого ключа.
      * Недоступная сборка даёт свой стабильный код вместо identity.
      */
-    catalogCacheKey(config: GlmConfig) {
+    async catalogCacheKey(config: GlmConfig) {
       const { mode } = resolveGlmAccess({ env: deps.env, admission: deps.admission });
       let identity: string;
+      let packageId: string | undefined;
 
       try {
+        const generation = await describeGlmGenerationAsync(config);
+
+        packageId = generation.packageId;
         identity = mode
-          ? glmCompatibilityIdentity(describeGlmGeneration(config).runtime, mode)
+          ? glmCompatibilityIdentity(generation.runtime, mode)
           : 'mode-missing';
       } catch (error) {
         identity = String((error as { code?: string }).code || 'glm_runtime_missing');
@@ -414,9 +428,9 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
 
       const fingerprint = keyFingerprint(mode ? selectGlmServiceKey(mode, deps.env) : null);
 
-      return ['glm', identity, mode || 'none', fingerprint].join(':');
+      return ['glm', ...(packageId ? [packageId] : []), identity, mode || 'none', fingerprint].join(':');
     },
   };
 }
 
-export default createGlmAdapter({ env: process.env, admission: GLM_ADMISSION });
+export default createGlmAdapter({ env: process.env });

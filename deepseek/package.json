@@ -1,0 +1,25 @@
+{
+  "name": "grigdesk-deepseek",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "esbuild": "0.25.12",
+    "fflate": "0.8.3",
+    "postject": "1.0.0-alpha.6",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "build": "node scripts/buildBinary.mts",
+    "test": "node scripts/test.mts",
+    "test:sea": "node scripts/test.mts --sea",
+    "verify": "node scripts/verify.mts",
+    "prepare:runtime": "node scripts/prepareRuntimeDeps.mts",
+    "install:binary": "node scripts/install.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

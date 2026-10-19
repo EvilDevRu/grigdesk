@@ -17,8 +17,8 @@ function envError(message: string): DeepSeekEnvError {
 }
 
 /**
- * Общий allowlist процесса DSH: системные имена, служебные флаги и один ключ маршрута.
- * Имя и значение ключа задаёт исполнитель; остальные credentials и proxy не наследуются.
+ * Общий allowlist процесса DSH: системные имена, служебные флаги и явный ключ маршрута.
+ * Metadata caller обходится без ключа; остальные credentials и proxy не наследуются.
  */
 export function buildHarnessChildEnv({
   source,
@@ -27,7 +27,7 @@ export function buildHarnessChildEnv({
 }: {
   source: NodeJS.ProcessEnv | Record<string, string | undefined>;
   dshHome: string;
-  credential: { name: string; value: string };
+  credential?: { name: string; value: string };
 }): Record<string, string> {
   if (!path.isAbsolute(dshHome)) {
     throw new TypeError('DSH_HOME должен быть абсолютным путём');
@@ -45,7 +45,11 @@ export function buildHarnessChildEnv({
 
   env.DSH_HOME = dshHome;
   env.DSH_TELEMETRY_DISABLED = '1';
-  env[credential.name] = credential.value;
+
+  if (credential) {
+    env[credential.name] = credential.value;
+  }
+
   env.NO_COLOR = '1';
 
   return env;
@@ -71,13 +75,57 @@ export function buildDeepSeekChildEnv({
   });
 }
 
-export function chatHomeFor(runtimeHome: string, chatKey: string): string {
+/**
+ * Новая поставка хранит home по chatKey без версии бинарника или generation.
+ * Legacy layout остаётся доступен до явного переноса установленной памяти.
+ */
+export function chatHomeFor(
+  runtimeHome: string,
+  chatKey: string,
+  layout: 'legacy' | 'stable' = 'legacy',
+): string {
   const digest = createHash('sha256').update(chatKey).digest('hex');
+
+  if (layout === 'stable') {
+    return path.join(runtimeHome, 'chats', digest);
+  }
+
   return path.join(runtimeHome, 'chat', digest, 'home');
 }
 
 export function runHomeFor(runDir: string): string {
   return path.join(runDir, 'deepseek', 'home');
+}
+
+/**
+ * Стабильный home принадлежит одному провайдеру, а не версии runtime.
+ * Закрытый marker создаётся без перезаписи чужого файла и проверяется до запуска.
+ */
+export async function ensureHarnessChatHome(
+  directory: string,
+  provider: 'deepseek' | 'glm',
+): Promise<string> {
+  await ensurePrivateDir(directory);
+
+  const marker = path.join(directory, '.grigdesk-runtime.json');
+
+  await fs.writeFile(marker, JSON.stringify({ format: 1, provider }), {
+    mode: 0o600,
+    flag: 'wx',
+  }).catch((error) => {
+    if (error.code !== 'EEXIST') {
+      throw error;
+    }
+  });
+
+  const binding = JSON.parse(await fs.readFile(marker, 'utf8'));
+
+  if (binding.format !== 1 || binding.provider !== provider
+    || !Object.keys(binding).every((key) => ['format', 'provider'].includes(key))) {
+    throw new Error('Каталог памяти DSH имеет другой или несовместимый контракт');
+  }
+
+  return directory;
 }
 
 export async function ensurePrivateDir(directory: string): Promise<string> {

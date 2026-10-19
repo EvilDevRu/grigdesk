@@ -1,9 +1,9 @@
 // Живая проверка режима GLM до допуска (G12). Запускает человек, когда выбран режим, ключ
-// режима лежит в окружении службы, а для coding-plan подтверждено право использовать подписку.
+// режима лежит в окружении службы; отдельный DI-допуск разрешён только для обычного api.
 // Скрипт не меняет GLM_ADMISSION, не читает и не печатает ключ, ограничивает число ходов
 // сценарием и пишет очищенный отчёт в glm/G12/ папки артефактов.
 //
-// Запуск: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan --confirm-live
+// Запуск: node server/scripts/glmLiveSmoke.mts --mode api --confirm-live --binary <ELF> --cache-dir <cache>
 // Файл .env папки данных скрипт читает сам и ставит выше унаследованного окружения: окно ключей пишет в .env,
 // а оболочка из чата держит значения со старта сервера, которые `node --env-file` не перекрывает.
 import { randomUUID } from 'node:crypto';
@@ -20,7 +20,9 @@ import { createGlmAdapter } from '../src/lib/executors/glm.ts';
 import type { GlmAdapterDeps } from '../src/lib/executors/glm.ts';
 import { glmCompatibilityIdentity, parseGlmAccessMode } from '../src/lib/glm/contract.ts';
 import type { GlmAccessMode } from '../src/lib/glm/contract.ts';
-import { describeGlmGeneration } from '../src/lib/glm/generation.ts';
+import { assertGlmGenerationAdmission, describeGlmGenerationAsync } from '../src/lib/glm/generation.ts';
+import { glmAccessError } from '../src/lib/glm/env.ts';
+import { resolveDeepSeekRuntimeAsync } from '../src/lib/deepseek/runtimeProcess.ts';
 import chatModule from '../src/modules/chat/index.ts';
 
 const requireServer = createRequire(new URL('../package.json', import.meta.url));
@@ -39,6 +41,8 @@ export interface GlmSmokeOptions {
   mode: GlmAccessMode;
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;
   config: typeof serviceConfig;
+  binary: string;
+  cacheDir: string;
   model?: string;
   workRoot: string;
   // Только для проверки скрипта на стенде: адрес фейковой модели и сторож fetch (Р16).
@@ -82,24 +86,43 @@ function answered(status: number, body: Record<string, any>): boolean {
  * стоп во время approval, повтор принятого хода по turnId. Возвращает шаги отчёта.
  */
 export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
+  if (options.mode !== 'api') {
+    throw glmAccessError('glm_mode_not_admitted', 'Живая проверка разрешает временный допуск только api.');
+  }
+  if (!path.isAbsolute(options.binary) || !path.isAbsolute(options.cacheDir)) {
+    throw new TypeError('Smoke требует абсолютные --binary и --cache-dir');
+  }
+
   const root = await fs.mkdtemp(path.join(options.workRoot, 'live-'));
   const project = path.join(root, 'project');
   const marker = `GLM-SMOKE-${randomUUID().slice(0, 8)}`;
   const model = JSON.stringify(['zai', options.model ?? 'glm-5.3']);
   const config = {
     ...options.config,
+    deepseekRuntimeMode: 'binary' as const,
+    deepseekBin: options.binary,
+    deepseekBinOverride: undefined,
+    deepseekCacheDir: options.cacheDir,
     rootDir: project,
     chatsDir: path.join(root, 'chats'),
     chatStoreLegacyPath: path.join(root, 'legacy.json'),
     chatBindingsDir: path.join(root, 'bindings'),
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
-  const runtime = describeGlmGeneration(config).runtime;
-  const compatibility = glmCompatibilityIdentity(runtime, options.mode);
+  const runtime = await resolveDeepSeekRuntimeAsync(config);
+  const generation = await describeGlmGenerationAsync(config, runtime);
+  const compatibility = glmCompatibilityIdentity(generation.runtime, options.mode);
+  const admission = [{ mode: options.mode, compatibility }];
+
+  assertGlmGenerationAdmission(generation, options.mode, admission);
+
+  const endpoint = options.adapterDeps?.modelEndpoint;
+  const kind = endpoint && ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(endpoint).hostname)
+    ? 'loopback' : 'live';
   const adapter = createGlmAdapter({
-    env: options.env,
-    admission: [{ mode: options.mode, compatibility }],
     ...options.adapterDeps,
+    env: { ...options.env, GRIGDESK_GLM_API_MODE: options.mode },
+    admission,
   });
   const steps: GlmSmokeStep[] = [];
   const events: Array<{ event: string; data: Record<string, unknown> }> = [];
@@ -232,8 +255,11 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
   }
 
   return {
+    kind,
     mode: options.mode,
     compatibility,
+    packageId: runtime.metadata!.packageId,
+    sha256: runtime.binaryFile!.sha256,
     model,
     turns,
     ok: steps.every((item) => item.ok),
@@ -247,10 +273,13 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
  */
 async function main(): Promise<void> {
   const mode = parseGlmAccessMode(shellArgument('--mode'));
+  const binary = shellArgument('--binary');
+  const cacheDir = shellArgument('--cache-dir');
 
-  if (!mode || !process.argv.includes('--confirm-live')) {
-    process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan '
-      + '--confirm-live [--model glm-5.3]\n');
+  if (mode !== 'api' || !process.argv.includes('--confirm-live')
+    || !path.isAbsolute(binary) || !path.isAbsolute(cacheDir)) {
+    process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api '
+      + '--confirm-live --binary <абсолютный ELF> --cache-dir <отдельный cache> [--model glm-5.3]\n');
     process.exitCode = 2;
 
     return;
@@ -271,6 +300,8 @@ async function main(): Promise<void> {
         ...fileEnv,
       },
       config: serviceConfig,
+      binary,
+      cacheDir,
       model: shellArgument('--model') || undefined,
       workRoot: work,
     });

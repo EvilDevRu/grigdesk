@@ -10,8 +10,10 @@ import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import { nearestProjectRoot } from '../deepseek/projectMcp.ts';
-import { resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
+import { inspectSessionJournal } from '../deepseek/journal.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
+import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
+import { preparedGlmRuntime } from './preparedRuntime.ts';
 import { DeepSeekWebError } from '../deepseek/serverClient.ts';
 import { runDeepSeekServerTurn } from '../deepseek/serverTurn.ts';
 import type { DeepSeekTurnVariant } from '../deepseek/serverTurn.ts';
@@ -19,14 +21,13 @@ import {
   GLM_DEFAULT_EFFORT,
   GLM_MODEL_ERROR_CODES,
   GLM_MODEL_UNAVAILABLE,
-  glmCompatibilityIdentity,
 } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
 import { assertGlmRuntimeHome, buildGlmChildEnv, glmAccessError, resolveGlmAccess } from './env.ts';
-import { describeGlmGeneration } from './generation.ts';
-import { glmChatHome, prepareGlmLaunch, startGlmProcess } from './launch.ts';
+import { assertGlmGenerationAdmission, describeGlmGenerationAsync, glmRuntimeConfig } from './generation.ts';
+import { adoptLegacyGlmHome, glmChatHome, prepareGlmLaunch, startGlmProcess } from './launch.ts';
 import { createGlmTurnGuard } from './permissions.ts';
-import { assertGlmSessionJournal, isGlmSessionCorrupt } from './session.ts';
+import { assertGlmSessionJournal, glmSessionJournalDir, isGlmSessionCorrupt } from './session.ts';
 
 type PermissionAnswer = {
   allow?: boolean;
@@ -40,7 +41,7 @@ export interface GlmCatalogModel {
 
 export interface GlmRuntimeDeps {
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;
-  admission: readonly { mode: GlmAccessMode; compatibility: string }[];
+  admission?: readonly { mode: GlmAccessMode; compatibility: string }[];
   catalog?: readonly GlmCatalogModel[];
   // Только тестовая подмена (Р16): адрес фейковой модели, сторож fetch и запуск процесса.
   modelEndpoint?: string;
@@ -58,6 +59,7 @@ export interface GlmTurnOptions {
   sessionId?: string | null;
   permissionMode?: string;
   signal?: AbortSignal;
+  preparedRuntime?: PreparedExecutorRuntime;
   factory?: boolean;
   workspaceAccess?: unknown;
   untrustedInput?: unknown;
@@ -201,7 +203,8 @@ function turnFailure(error: unknown, state: { promptAttempted: boolean; bindingE
     ...(failure?.steps ? { steps: failure.steps } : {}),
   };
 
-  if (failure?.stopped || String(failure?.code || '').startsWith('glm_')) {
+  if (failure?.stopped || failure?.code === 'deepseek_binary_cleanup'
+    || String(failure?.code || '').startsWith('glm_')) {
     return Object.assign(failure, carried);
   }
 
@@ -236,31 +239,52 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     throw Object.assign(new Error(LABELS.stopped), { stopped: true });
   }
 
-  const config = { ...options.config, deepseekRuntimeMode: 'embedded' as const };
-  const runtime = await resolveDeepSeekRuntimeAsync(config).catch(() => {
+  const config = glmRuntimeConfig(options.config);
+  const runtime = await preparedGlmRuntime(config, options.preparedRuntime).catch((error) => {
+    if ((error as { code?: string }).code === 'glm_runtime_changed') {
+      throw error;
+    }
+
     throw glmAccessError('glm_runtime_missing', 'Встроенная сборка DSH недоступна.');
   });
-  const generation = describeGlmGeneration(config);
+  const generation = await describeGlmGenerationAsync(config, runtime);
 
   if (generation.buildId !== runtime.buildId) {
     throw glmAccessError('glm_runtime_start_failed', 'Сборка DSH сменилась во время подготовки хода.');
   }
 
-  const identity = glmCompatibilityIdentity(generation.runtime, selected.accessMode);
-
-  const admitted = deps.admission.some((entry) => entry.mode === selected.accessMode
-    && entry.compatibility === identity);
-
-  if (!admitted) {
-    throw glmAccessError('glm_runtime_not_admitted', 'Эта сборка DSH не прошла допуск GLM.');
-  }
+  const identity = assertGlmGenerationAdmission(generation, selected.accessMode, deps.admission);
 
   const cwd = await fs.realpath(options.cwd!);
-  const home = glmChatHome(assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? '')), identity,
-    options.chatKey!);
+  const runtimeHome = assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? ''));
+  const home = runtime.kind === 'binary' ? glmChatHome(runtimeHome, options.chatKey!)
+    : glmChatHome(runtimeHome, identity, options.chatKey!);
+  let sessionId = options.sessionId;
+  let journalNote: ChatStep | undefined;
 
-  if (options.sessionId) {
-    await assertGlmSessionJournal(home, cwd, options.sessionId);
+  if (runtime.kind === 'binary') {
+    await adoptLegacyGlmHome(runtimeHome, identity, options.chatKey!);
+  }
+
+  if (sessionId && runtime.kind === 'binary') {
+    glmSessionJournalDir(home, cwd, sessionId);
+
+    const journal = await inspectSessionJournal(home, cwd, sessionId, runtime.metadata!.journal.read);
+
+    if (journal.state === 'missing') {
+      throw glmAccessError('glm_session_missing', 'Журнал сессии GLM не найден; сбрось память чата.');
+    }
+    if (journal.state === 'incompatible') {
+      sessionId = null;
+      journalNote = {
+        k: 'note',
+        text: 'Память исполнителя начата заново: формат журнала несовместим.',
+        at: Date.now(),
+      };
+      options.onStep?.(journalNote);
+    }
+  } else if (sessionId) {
+    await assertGlmSessionJournal(home, cwd, sessionId);
   }
 
   const descriptors = (options.workTools as { descriptors?: unknown } | null)?.descriptors;
@@ -273,6 +297,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
   const launch = await prepareGlmLaunch({
     runtimeHome: assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? '')),
     identity,
+    homeLayout: runtime.kind === 'binary' ? 'stable' : 'legacy',
     chatKey: options.chatKey!,
     cwd,
     workspaceRoot: cwd,
@@ -321,6 +346,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
   }
 
   let result: Awaited<ReturnType<typeof runDeepSeekServerTurn>>;
+  let cleanupFailed = false;
 
   try {
     result = await runDeepSeekServerTurn({
@@ -330,7 +356,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       cwd,
       env,
       message: String(options.message || ''),
-      sessionId: options.sessionId,
+      sessionId,
       model: options.model,
       effort: selected.effort,
       signal: options.signal,
@@ -394,9 +420,13 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       },
     });
   } catch (error) {
+    cleanupFailed = (error as { code?: unknown }).code === 'deepseek_binary_cleanup';
+
     throw turnFailure(error, state);
   } finally {
-    await fs.rm(launch.launchDir, { recursive: true, force: true }).catch(() => {});
+    if (!cleanupFailed) {
+      await fs.rm(launch.launchDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   const steps = result.steps as ChatStep[];
@@ -406,6 +436,10 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
 
   return {
     ...rest,
+    ...(journalNote ? {
+      reply: `${journalNote.text}\n\n${result.reply || ''}`,
+      steps: [journalNote, ...steps],
+    } : {}),
     ...(empty ? { emptyRun: true, retryState: 'post_prompt' } : {}),
     contextMetric: 'unavailable',
     contextCache: contextCacheStatus('unavailable'),

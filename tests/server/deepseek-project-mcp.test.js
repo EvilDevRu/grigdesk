@@ -1,3 +1,4 @@
+import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -125,11 +126,14 @@ test('адаптер DeepSeek добавляет проектные MCP к сл�
       broken: { command: 'definitely-missing-binary-xyz' },
     },
   }));
+
+  const { binary } = await writeDeepSeekMetadataStub(t);
   const warnings = [];
   const work = { name: 'grigdesk-work', command: process.execPath, args: ['work.js'], env: [] };
   let overlay = '';
+
   await assert.rejects(deepseek.run({
-    config: { deepseekRuntimeHome: path.join(root, 'runtime'), deepseekBin: path.join(root, 'fake-dsh') },
+    config: { deepseekRuntimeHome: path.join(root, 'runtime'), deepseekBin: binary },
     env: { ...process.env, DEEPSEEK_API_KEY: 'synthetic-runtime-key' },
     cwd,
     chatKey: 'chat-project-mcp',

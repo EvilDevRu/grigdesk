@@ -89,8 +89,8 @@ async function fixture(t, scenario = { updates: [] }, options = {}) {
 
   const config = {
     rootDir: root,
-    deepseekArtifactDir: artifact,
-    deepseekRuntimeMode: 'embedded',
+    deepseekBin: path.join(artifact, 'deepseek'),
+    deepseekRuntimeMode: 'binary',
     glmRuntimeHome: path.join(root, 'glm-home'),
   };
   const identity = glmCompatibilityIdentity(describeGlmGeneration(config).runtime, 'api');

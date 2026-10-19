@@ -6,12 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { assertRuntimeClosure } from '../../tools/runtimeComposition.ts';
-import { assertKnownDynamicReferences } from '../../tools/deepseekBuildInputs.ts';
-import {
-  ensureTestDeepSeekArtifact,
-  verifyTestDeepSeekArtifact,
-} from '../helpers/deepseekRuntimeArtifact.mts';
+import { assertRuntimeClosure } from '../../deepseek/scripts/runtimeComposition.ts';
+import { assertKnownDynamicReferences } from '../../deepseek/scripts/deepseekBuildInputs.ts';
+import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { createAcpClient } from '../../server/src/lib/acp/client.ts';
 import {
@@ -85,9 +82,8 @@ test('registry проверяет точное выражение dynamic import
 });
 
 test('настоящий runtime переносится и сохраняет web startup, cookie и settings RPC', async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, config, candidate } = await testDeepSeekBinarySelection();
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-dsh-build-'));
-  const relocated = path.join(temporary, 'runtime with spaces');
   const home = path.join(temporary, 'private-home');
   const cwd = path.join(temporary, 'workspace');
   let server;
@@ -96,13 +92,15 @@ test('настоящий runtime переносится и сохраняет we
     await server?.stop();
     await fs.rm(temporary, { recursive: true, force: true });
   });
-  await fs.cp(artifact, relocated, { recursive: true, verbatimSymlinks: true });
-  await verifyTestDeepSeekArtifact(relocated);
+
+  const binary = path.join(temporary, 'deepseek with spaces');
+
+  await fs.copyFile(candidate.binary, binary);
+  await fs.chmod(binary, 0o555);
   await fs.mkdir(home);
   await fs.mkdir(cwd);
 
-  const entry = path.join(relocated, 'entry.mjs');
-  const version = await exec(process.execPath, [entry, '-V'], { cwd, env: { PATH: process.env.PATH } });
+  const version = await exec(binary, ['-V'], { cwd, env: { PATH: '' } });
 
   assert.equal(version.stdout.trim(), '0.1.5-rc.2');
 
@@ -111,8 +109,8 @@ test('настоящий runtime переносится и сохраняет we
   await fs.writeFile(overlay, '[]\n');
 
   server = await startDeepSeekServer({
-    runtime: resolveDeepSeekRuntime({ deepseekArtifactDir: relocated }),
-    bin: process.execPath,
+    runtime: resolveDeepSeekRuntime({ ...config, deepseekBin: binary }),
+    bin: binary,
     overlayPath: overlay,
     cwd,
     env: {
@@ -128,12 +126,12 @@ test('настоящий runtime переносится и сохраняет we
 
   assert.equal(description.writable, true);
   assert.ok(description.namespaces.some((namespace) => namespace.ns === 'llm-deepseek'));
-  assert.equal((await probeDeepSeekRuntime({ deepseekArtifactDir: relocated })).ok, true);
+  assert.equal((await probeDeepSeekRuntime({ ...config, deepseekBin: binary })).ok, true);
   await server.stop();
 });
 
 test('настоящий runtime воспроизводим: в payload нет путей временной сборки', async () => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, config, candidate } = await testDeepSeekBinarySelection();
   const metadata = JSON.parse(await fs.readFile(path.join(artifact, 'runtime.json'), 'utf8'));
   const leaked = [];
 
@@ -156,9 +154,9 @@ test('настоящий runtime воспроизводим: в payload нет �
 });
 
 test('настоящий ACP initialize не требует ключа и сохраняет stdout только для frames', async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
+  const { generation: artifact, config, candidate } = await testDeepSeekBinarySelection();
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-dsh-acp-build-'));
-  const runtime = resolveDeepSeekRuntime({ deepseekArtifactDir: artifact });
+  const runtime = resolveDeepSeekRuntime(config);
   const child = spawn(runtime.command, [...runtime.prefixArgs, '--profile', 'acp'], {
     cwd: temporary,
     env: {

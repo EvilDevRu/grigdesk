@@ -11,7 +11,7 @@ import { syntheticProvider } from '../fixtures/executor-settings/syntheticProvid
 import { decodeProviderSettingsCatalog } from '../../shared/chat/providerSettingsContracts.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
 import deepseek from '../../server/src/lib/executors/deepseek.ts';
-import { ensureTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { ensureTestDeepSeekBinary } from '../helpers/deepseekBinary.mts';
 import { flattenNativeSettings } from '../../server/src/lib/executorSettings/validation.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -60,8 +60,8 @@ export async function nativeRouteFixture(t, provider = syntheticProvider(), {
   };
 }
 
-test('настоящий candidate публикует embedded readiness и общую форму без ключа', async (t) => {
-  const artifact = await ensureTestDeepSeekArtifact();
+test('настоящий candidate публикует binary readiness и общую форму без ключа', async (t) => {
+  const candidate = await ensureTestDeepSeekBinary();
   const provider = {
     ...deepseek,
     auth: () => ({
@@ -76,14 +76,14 @@ test('настоящий candidate публикует embedded readiness и об
     },
   };
   const { app, root, prefs } = await nativeRouteFixture(t, provider, {
-    config: { deepseekArtifactDir: artifact },
+    config: { deepseekBin: candidate.binary, deepseekCacheDir: candidate.cacheDir },
   });
   const registry = (await app.inject('/api/providers')).json().providers;
   const card = registry.find((entry) => entry.id === 'deepseek');
 
-  assert.equal(card.distribution.kind, 'embedded');
+  assert.equal(card.distribution.kind, 'binary');
   assert.equal(card.distribution.ready, true);
-  assert.equal(card.distribution.label, 'Входит в GrigDesk');
+  assert.equal(card.distribution.label, 'Отдельная поставка DeepSeek');
   assert.equal(card.available, false);
   assert.equal(card.installed, true);
   assert.equal(card.install, null);
@@ -124,13 +124,14 @@ test('настоящий candidate публикует embedded readiness и об
 
   assert.equal(flattenNativeSettings(reloaded.fields)
     .find((field) => field.id === '["llm-deepseek","apiKeyEnv"]').writable, false);
-  assert.equal(serialized.includes(artifact), false);
+  assert.equal(serialized.includes(path.join(candidate.cacheDir, 'packages',
+    candidate.info.packageId, 'generation')), false);
   assert.equal(serialized.includes(root), false);
   assert.equal(serialized.includes('normalizedFields'), false);
   assert.equal(serialized.includes('consumerFields'), false);
 });
 
-test('отсутствующая встроенная сборка объясняет причину и команду подготовки в карточке', async (t) => {
+test('отсутствующий binary объясняет причину и команду установки в карточке', async (t) => {
   const provider = {
     ...deepseek,
     auth: () => ({
@@ -145,18 +146,18 @@ test('отсутствующая встроенная сборка объясн�
   t.after(() => fs.rmSync(generationRoot, { recursive: true, force: true }));
 
   const { app, root } = await nativeRouteFixture(t, provider, {
-    config: { deepseekRuntimeMode: 'embedded', deepseekGenerationRoot: generationRoot },
+    config: { deepseekBin: path.join(generationRoot, 'missing-binary') },
   });
   const card = (await app.inject('/api/providers')).json().providers.find((entry) => entry.id === 'deepseek');
 
   assert.equal(card.distribution.ready, false);
-  assert.equal(card.distribution.error, 'deepseek_runtime_missing');
-  assert.match(card.distribution.problem.message, /не подготовлена/u);
-  assert.equal(card.distribution.problem.command, `${path.join(root, 'bin/grigdesk-ctl')} deps`);
+  assert.equal(card.distribution.error, 'deepseek_binary_missing');
+  assert.match(card.distribution.problem.message, /поставка DeepSeek недоступна/u);
+  assert.match(card.distribution.problem.command, /run install:binary/);
   assert.equal(card.install, null);
 });
 
-test('installed default не объявляет embedded delivery до cutover', async (t) => {
+test('прежний installed flag не возвращает stock установку после cutover', async (t) => {
   const provider = {
     ...deepseek,
     probe: async () => ({ ok: false, version: null }),
@@ -172,8 +173,8 @@ test('installed default не объявляет embedded delivery до cutover',
   });
   const card = (await app.inject('/api/providers')).json().providers.find((entry) => entry.id === 'deepseek');
 
-  assert.equal(card.distribution, null);
-  assert.match(card.install, /deepseekHarnessInstall/);
+  assert.equal(card.distribution.kind, 'binary');
+  assert.equal(card.install, null);
   assert.equal(card.available, false);
 });
 

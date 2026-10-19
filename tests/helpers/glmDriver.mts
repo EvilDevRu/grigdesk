@@ -4,12 +4,13 @@ import { randomUUID } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 
 import { createAcpClient, initializeAcp } from '../../server/src/lib/acp/client.ts';
-import { resolveDeepSeekRuntime } from '../../server/src/lib/deepseek/runtimeProcess.ts';
+import { resolveDeepSeekRuntimeAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { openDeepSeekStream } from '../../server/src/lib/deepseek/serverEvents.ts';
 import type { DeepSeekWireFrame } from '../../server/src/lib/deepseek/serverEvents.ts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import type { DeepSeekServerProcess } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { GLM_RESEARCH_KEY } from './glmResearchOverlay.mts';
+import { testDeepSeekBinarySelection } from './deepseekBinary.mts';
 
 export interface GlmWaterfall {
   event: string;
@@ -55,7 +56,7 @@ export async function startGlmWeb(options: {
 }): Promise<DeepSeekServerProcess & { diagnostics: () => string }> {
   let diagnostics = '';
   const server = await startDeepSeekServer({
-    runtime: resolveDeepSeekRuntime({ deepseekArtifactDir: options.artifact }),
+    runtime: await resolveDeepSeekRuntimeAsync((await testDeepSeekBinarySelection()).config),
     bin: process.execPath,
     overlayPath: options.overlayPath,
     cwd: options.cwd,
@@ -222,7 +223,7 @@ export async function startGlmAcp(options: {
   cwd: string;
   env: NodeJS.ProcessEnv;
 }) {
-  const runtime = resolveDeepSeekRuntime({ deepseekArtifactDir: options.artifact });
+  const runtime = await resolveDeepSeekRuntimeAsync((await testDeepSeekBinarySelection()).config);
   const child: ChildProcess = spawn(runtime.command, [
     ...runtime.prefixArgs, '--profile', 'acp', '--patch', options.overlayPath,
   ], {

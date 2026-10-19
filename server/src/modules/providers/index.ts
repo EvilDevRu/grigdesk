@@ -205,7 +205,7 @@ async function providersModule(
       const [probe, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
       const { ok, version } = probe;
       const distribution = ex.distribution?.(config, probe) || null;
-      const embedded = distribution?.kind === 'embedded';
+      const managed = distribution?.managed === true;
       // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
       let modes = null;
 
@@ -248,23 +248,23 @@ async function providersModule(
         workdir: universal ? await resolveWorkdirCapability(ex, config) : null,
         directSshPolicy: await directSshPolicyOf(ex),
         installed: ok,
-        install: embedded ? null : ex.install || null,
+        install: managed ? null : ex.install || null,
         distribution: distribution ? { ...distribution, ready: ok } : null,
         // Куда смотреть при сбое вендора. Какой домен «свой» — знает только адаптер,
         // поэтому Vue домены не перечисляет и по вендорам не ветвится.
         statusPage: ex.statusPage || null,
         // Установка и login могут быть разными сценариями. Старые адаптеры пока
         // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
-        setupCommand: embedded ? null : ok ? (ex.login || ex.install || null) : (ex.install || null),
-        canUpdate: !embedded && !!ex.updateCmd,
+        setupCommand: managed ? null : ok ? (ex.login || ex.install || null) : (ex.install || null),
+        canUpdate: !managed && !!ex.updateCmd,
         // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
         // адаптер может делать health-check или читать конфиг, UI ходит отдельным маршрутом.
         mcp: typeof ex.mcpStatus === 'function',
         settingsCatalog: typeof ex.nativeSettings?.discover === 'function',
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
-        latest: embedded ? null : updates.get(ex.id)?.latest || null,
-        updateAvailable: !embedded && !!updates.get(ex.id)?.outdated,
+        latest: managed ? null : updates.get(ex.id)?.latest || null,
+        updateAvailable: !managed && !!updates.get(ex.id)?.outdated,
         checkedAt: updates.get(ex.id)?.at || null,
         models: chatEnabled ? models[ex.id] || [] : [],
         modes: modes || [],
@@ -505,7 +505,7 @@ async function providersModule(
     let changed = false;
 
     for (const ex of executors.values()) {
-      if (ex.distribution?.(config)?.kind === 'embedded') {
+      if (ex.distribution?.(config)?.managed === true) {
         changed = updates.delete(ex.id) || changed;
 
         continue;
@@ -733,8 +733,8 @@ async function providersModule(
   fastify.post<ProviderRoute>('/api/providers/:id/update', async (request, reply) => {
     const ex = (await adaptersOf()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
-    if (ex.distribution?.(config)?.kind === 'embedded') {
-      return reply.code(400).send({ error: 'no_update', message: 'Обновление доступно вместе с GrigDesk' });
+    if (ex.distribution?.(config)?.managed === true) {
+      return reply.code(400).send({ error: 'no_update', message: 'Обновите управляемую поставку отдельно' });
     }
     if (!ex.updateCmd) {
       return reply.code(400).send({

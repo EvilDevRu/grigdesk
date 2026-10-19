@@ -1,8 +1,12 @@
-# Встроенный DeepSeek: публикация и переход updater
+# Исторический embedded DeepSeek: публикация и переход updater
 
-Production source использует `server/deepseek-runtime-contract.json` с
-`format: 1`, `publishContract: 1`, `mode: embedded`. Runtime собирается общей
-подготовкой GrigDesk. Отдельная установка Harness пользователем не нужна.
+Этот документ сохраняет прежний контракт 1. Актуальная поставка использует
+[независимый ELF и contract 2](deepseek-binary-update.md); команды публикации generation
+из production удалены. Ниже описан исторический путь до этого перехода.
+
+Прежний production source использовал `server/deepseek-runtime-contract.json` с
+`format: 1`, `publishContract: 1`, `mode: embedded`. Runtime собирался общей
+подготовкой GrigDesk. Отдельная установка Harness тогда не требовалась.
 
 ## Переход со старой установки
 

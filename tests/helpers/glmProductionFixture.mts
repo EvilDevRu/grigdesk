@@ -5,9 +5,10 @@ import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 
 import { resolveDeepSeekRuntimeAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
+import type { DeepSeekRuntimeConfig } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
 import { buildGlmChildEnv } from '../../server/src/lib/glm/env.ts';
-import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
+import { describeGlmGenerationAsync } from '../../server/src/lib/glm/generation.ts';
 import { prepareGlmLaunch, startGlmProcess } from '../../server/src/lib/glm/launch.ts';
 import type { GlmLaunchOptions } from '../../server/src/lib/glm/launch.ts';
 
@@ -44,6 +45,7 @@ export async function writeGlmEgressGuard(root: string): Promise<string> {
  */
 export async function startGlmProductionProcess(options: {
   artifact: string;
+  runtimeConfig?: DeepSeekRuntimeConfig;
   root: string;
   cwd: string;
   projectRoot?: string;
@@ -53,16 +55,18 @@ export async function startGlmProductionProcess(options: {
   beforeLaunch?: (paths: { dshHome: string }) => Promise<void>;
   launch?: Partial<GlmLaunchOptions>;
 }) {
-  const config = { deepseekArtifactDir: options.artifact, deepseekRuntimeMode: 'embedded' as const };
-  const generation = describeGlmGeneration(config);
-  const identity = glmCompatibilityIdentity(generation.runtime, 'api');
+  const config = options.runtimeConfig
+    ?? { deepseekArtifactDir: options.artifact, deepseekRuntimeMode: 'embedded' as const };
   const runtime = await resolveDeepSeekRuntimeAsync(config);
+  const generation = await describeGlmGenerationAsync(config, runtime);
+  const identity = glmCompatibilityIdentity(generation.runtime, 'api');
   const runtimeHome = path.join(options.root, 'glm-runtime');
   const warnings: string[] = [];
   const children: ChildProcess[] = [];
   const base = {
     runtimeHome,
     identity,
+    homeLayout: runtime.kind === 'binary' ? 'stable' as const : 'legacy' as const,
     chatKey: options.chatKey ?? 'fixture-chat',
     cwd: options.cwd,
     workspaceRoot: options.cwd,
@@ -82,7 +86,8 @@ export async function startGlmProductionProcess(options: {
 
   if (options.beforeLaunch) {
     const { glmChatHome } = await import('../../server/src/lib/glm/launch.ts');
-    const dshHome = glmChatHome(runtimeHome, identity, base.chatKey);
+    const dshHome = runtime.kind === 'binary' ? glmChatHome(runtimeHome, base.chatKey)
+      : glmChatHome(runtimeHome, identity, base.chatKey);
 
     await fs.mkdir(dshHome, { recursive: true, mode: 0o700 });
     await options.beforeLaunch({ dshHome });
@@ -120,6 +125,7 @@ export async function startGlmProductionProcess(options: {
   });
 
   return {
+    runtime,
     server,
     launch,
     identity,

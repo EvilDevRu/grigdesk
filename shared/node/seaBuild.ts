@@ -23,10 +23,10 @@ export function nodeArchive(runtime: { version: string; platform: string }): {
 }
 
 /**
- * Возвращает новый SEA config с лицензией и запретом расширения аргументов Node.
+ * Возвращает новый SEA config с ресурсами, лицензией и запретом расширения аргументов Node.
  * Имена ресурсов относятся к work-папке; импорт модуля ничего не собирает.
  */
-export function seaConfig(): Record<string, unknown> {
+export function seaConfig(assets: Readonly<Record<string, string>> = {}): Record<string, unknown> {
   return {
     main: 'bundle.cjs',
     output: 'sea-prep.blob',
@@ -34,7 +34,10 @@ export function seaConfig(): Record<string, unknown> {
     useSnapshot: false,
     useCodeCache: false,
     execArgvExtension: 'none',
-    assets: { 'NODE-LICENSE': 'LICENSE' },
+    assets: {
+      ...assets,
+      'NODE-LICENSE': 'LICENSE',
+    },
   };
 }
 

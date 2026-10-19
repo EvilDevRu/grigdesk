@@ -4,8 +4,6 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeDeepSeekArtifactFixture } from '../helpers/deepSeekArtifactFixture.mts';
-import { publishDeepSeekGeneration } from '../../tools/deepseekRuntimePublication.ts';
 
 import {
   GrigDeskReleaseService,
@@ -21,9 +19,19 @@ import {
 const SHA_A = '1'.repeat(40);
 const SHA_B = '2'.repeat(40);
 
-test('embedded релиз требует publish contract установленного worker до merge', async () => {
-  await assertReleasePublishContract(fileURLToPath(new URL('../../', import.meta.url)),
-    process.env.GRIGDESK_RELEASE_PUBLISH_CONTRACT);
+test('binary релиз требует contract 2 и явно установленный ELF до merge', async () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const supplied = process.env.GRIGDESK_RELEASE_PUBLISH_CONTRACT;
+
+  if (supplied !== '2') {
+    await assertReleasePublishContract(root, supplied);
+  }
+
+  const binary = process.env.GRIGDESK_RELEASE_BINARY_PATH ?? (
+    await import('../helpers/deepseekBinary.mts').then((helper) => helper.ensureTestAdmittedDeepSeekBinary())
+  ).binary;
+
+  await assertReleasePublishContract(root, supplied, { binary, fullVerify: false });
 });
 
 // Старый worker запускает этот JS-файл в новом дереве обычным node --test.
@@ -221,40 +229,27 @@ test('the old process cannot confirm apply of the same SHA before it actually re
   newProcess.stop();
 });
 
-test('новый running SHA без ожидаемого целого runtime не подтверждает обновление', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runtime-readiness-'));
+test('новый running SHA без совместимого binary не подтверждает обновление', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-binary-readiness-'));
   const statePath = path.join(root, 'state.json');
-  const runtimeRoot = path.join(root, 'server/runtime/deepseek');
 
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'VERSION'), '0.1.0\n');
+  await writePersistentState(statePath, { job: {
+    id: 'binary-readiness',
+    status: 'restarting',
+    targetSha: SHA_A,
+    expectedDeepSeekBinary: path.join(root, 'missing-binary'),
+  } });
 
-  const a = await writeDeepSeekArtifactFixture(path.join(root, 'A'), 'A');
+  const service = new GrigDeskReleaseService({
+    rootDir: root,
+    statePath,
+    runner: fakeRunner({ remoteResult: null, calls: [] }),
+  });
+  const status = await service.getStatus({ fresh: true });
 
-  await publishDeepSeekGeneration(path.join(root, 'A'), runtimeRoot);
-
-  for (const [scenario, expected] of [['mismatch', 'f'.repeat(64)], ['corrupt', a.buildId]]) {
-    await writePersistentState(statePath, { job: {
-      id: `readiness-${scenario}`,
-      status: 'restarting',
-      targetSha: SHA_A,
-      expectedRuntimeBuildId: expected,
-    } });
-
-    if (scenario === 'corrupt') {
-      await writeFile(path.join(runtimeRoot, 'builds', a.buildId, 'entry.mjs'), 'corrupt');
-    }
-
-    const service = new GrigDeskReleaseService({
-      rootDir: root,
-      statePath,
-      runner: fakeRunner({ remoteResult: null, calls: [] }),
-    });
-    const status = await service.getStatus({ fresh: true });
-
-    assert.equal(status.job.status, 'failed');
-    assert.equal(status.job.error.code, scenario === 'mismatch'
-      ? 'runtime_build_mismatch' : 'runtime_readiness_failed');
-    service.stop();
-  }
+  assert.equal(status.job.status, 'failed');
+  assert.equal(status.job.error.code, 'deepseek_binary_readiness_failed');
+  service.stop();
 });

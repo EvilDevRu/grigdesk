@@ -51,8 +51,8 @@ printf '%s\n' "{
 }" >"$scenario"
 
 fake_bin="$TEST_ROOT/dsh-factory-fake"
-printf '#!/usr/bin/env bash\nexec "%s" "%s" --scenario "%s" --log "%s"\n' \
-  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeAcp.mts" \
+printf '#!/usr/bin/env bash\nexec "%s" "%s" --scenario "%s" --log "%s" "$@"\n' \
+  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeBinary.mts" \
   "$scenario" "$fake_log" >"$fake_bin"
 chmod +x "$fake_bin"
 
@@ -126,8 +126,8 @@ scenario_text="$TEST_ROOT/deepseek-text-scenario.json"
 log_text="$TEST_ROOT/deepseek-text-acp.jsonl"
 # Keep this second fixture deliberately small and valid instead of mutating the first.
 printf '%s\n' '{"configOptions":[{"id":"model","options":[{"value":"[\"deepseek-official\",\"deepseek-v4-flash\"]"}]},{"id":"reasoning_effort","options":[{"value":"high"}]}],"updates":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"готово"}}]}' >"$scenario_text"
-printf '#!/usr/bin/env bash\nexec "%s" "%s" --scenario "%s" --log "%s"\n' \
-  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeAcp.mts" \
+printf '#!/usr/bin/env bash\nexec "%s" "%s" --scenario "%s" --log "%s" "$@"\n' \
+  "$NODE_BIN" "$FACTORY_HOME/../tests/fixtures/deepseek-harness/fakeBinary.mts" \
   "$scenario_text" "$log_text" >"$fake_bin"
 chmod +x "$fake_bin"
 runner_launch deepseek "$task_text" "say ready" "$stage" \

@@ -185,7 +185,11 @@ import type {
   TurnFailureSignal,
   TurnRecovery,
 } from '../chat/turnFailures.ts';
-import type { NativeSettingsCapability, PreparedNativeSettings } from '../executorSettings/types.ts';
+import type {
+  NativeSettingsCapability,
+  PreparedNativeSettings,
+  PreparedExecutorRuntime,
+} from '../executorSettings/types.ts';
 import type { Studio3dProvider } from '../studio3d/provider.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
@@ -195,7 +199,16 @@ import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts'
 export interface ExecutorProbe {
   ok: boolean;
   version: string | null;
+  code?: string;
+  error?: string;
+  buildId?: string;
+  runtimeVersion?: string;
+  packageId?: string;
+  binaryVersion?: string;
+  pendingJobId?: string;
 }
+
+export type ExecutorDistributionProbe = Partial<ExecutorProbe> & { ok: boolean };
 
 // Ответ проверки авторизации: способ входа, подпись для карточки и готовность к ходу.
 export interface ExecutorAuth {
@@ -218,6 +231,7 @@ export interface ExecutorRunInput {
   permissionMode?: string;
   signal?: AbortSignal;
   nativeSettings?: PreparedNativeSettings;
+  preparedRuntime?: PreparedExecutorRuntime;
   nativeSettingsFingerprint?: string;
   env?: NodeJS.ProcessEnv;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
@@ -257,6 +271,11 @@ export interface ExecutorRunResult {
 }
 
 export interface ExecutorSessionBinding {
+  legacySecurityProfiles?: (
+    config: unknown,
+    providerSettings?: Record<string, unknown>,
+    preparedRuntime?: PreparedExecutorRuntime,
+  ) => readonly string[] | Promise<readonly string[]>;
   authProfileId: (
     config: unknown,
     providerSettings?: Record<string, unknown>,
@@ -264,6 +283,7 @@ export interface ExecutorSessionBinding {
   securityProfile: (
     config: unknown,
     providerSettings?: Record<string, unknown>,
+    preparedRuntime?: PreparedExecutorRuntime,
   ) => string | Promise<string>;
 }
 
@@ -283,12 +303,15 @@ export interface ExecutorAdapter {
   login?: string;
   // Сборку, входящую в GrigDesk, описывает адаптер; probe передаётся, чтобы причина отказа
   // проверки версии тоже дошла до карточки. problem — текст и команда исправления.
-  distribution?: (config: unknown, probe?: { ok: boolean; code?: string }) => {
-    kind: 'embedded';
+  distribution?: (config: unknown, probe?: ExecutorDistributionProbe) => {
+    kind: 'embedded' | 'binary';
+    managed: boolean;
     label: string;
     authHint?: string;
     buildId?: string;
     runtimeVersion?: string;
+    packageId?: string;
+    binaryVersion?: string;
     error?: string;
     problem?: { message: string; command?: string };
   } | null;
@@ -311,6 +334,10 @@ export interface ExecutorAdapter {
   settings?: unknown;
   credentials?: unknown;
   nativeSettings?: NativeSettingsCapability;
+  prepareRuntime?: (
+    config: unknown,
+    options: { signal: AbortSignal },
+  ) => Promise<PreparedExecutorRuntime>;
   sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;
   compaction?: Record<string, unknown>;

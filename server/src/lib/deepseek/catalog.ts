@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -6,16 +6,15 @@ import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
-import { DEEPSEEK_PIN } from './contract.ts';
 import { buildDeepSeekChildEnv, ensurePrivateDir } from './env.ts';
 import { buildLaunchFiles, DEEPSEEK_PROFILE_REVISION } from './profile.ts';
 import { DEEPSEEK_BASH_TOOL } from './contract.ts';
 import {
-  deepSeekRuntimeIdentity,
   resolveDeepSeekRuntimeAsync,
   verifyDeepSeekRuntimeDescriptorAsync,
 } from './runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
+import { spawnDeepSeekBinary } from './binaryProcess.ts';
 
 interface SelectOption {
   value?: unknown;
@@ -121,7 +120,7 @@ export function deepSeekAuth(env: NodeJS.ProcessEnv = process.env) {
  * Каталог зависит от payload runtime, host-профиля и текущего источника credentials.
  * Одинаковая upstream version двух поколений не позволяет переиспользовать старый каталог.
  */
-export function deepSeekCatalogCacheKey(
+export async function deepSeekCatalogCacheKey(
   config: DeepSeekRuntimeConfig & { deepseekRuntimeHome?: string },
   env: NodeJS.ProcessEnv = process.env,
 ) {
@@ -130,7 +129,9 @@ export function deepSeekCatalogCacheKey(
     ? createHash('sha256').update(key).digest().subarray(0, 8).toString('hex')
     : 'missing';
 
-  return [DEEPSEEK_PIN.version, deepSeekRuntimeIdentity(config),
+  const runtime = await resolveDeepSeekRuntimeAsync(config);
+
+  return [runtime.upstreamVersion, runtime.identity,
     DEEPSEEK_PROFILE_REVISION, keyFingerprint].join(':');
 }
 
@@ -182,13 +183,17 @@ export async function readDeepSeekCatalog({
 
   await verifyDeepSeekRuntimeDescriptorAsync(runtime);
 
-  const child = spawnProcess(runtime.command, [
+  const args = [
     ...runtime.prefixArgs, '--profile', 'acp', '--patch', launch.overlayPath,
-  ], {
+  ];
+  const spawnOptions: SpawnOptions = {
     cwd: launchDir,
     env: buildDeepSeekChildEnv({ source: env, dshHome }),
     stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  };
+  const owned = runtime.kind === 'binary'
+    ? spawnDeepSeekBinary(runtime.command, args, spawnOptions, spawnProcess) : null;
+  const child = owned?.child ?? spawnProcess(runtime.command, args, spawnOptions);
   const exit = waitForExit(child);
   const client = createAcpClient(child);
   let sessionId = '';
@@ -202,6 +207,13 @@ export async function readDeepSeekCatalog({
     if (!sessionId) throw new Error('DeepSeek catalog probe не получил sessionId');
     const result = parseDeepSeekConfigOptions(created?.configOptions);
     await client.request('session/close', { sessionId }, 5_000);
+
+    if (owned) {
+      await owned.stop();
+
+      return result;
+    }
+
     client.close();
     const ended = await Promise.race([
       exit.then(() => true),
@@ -212,9 +224,21 @@ export async function readDeepSeekCatalog({
   } finally {
     if (!client.closed) {
       if (sessionId) await client.request('session/close', { sessionId }, 1_000).catch(() => {});
-      client.close();
+      if (!owned) {
+        client.close();
+      }
     }
-    if (child.exitCode === null) child.kill('SIGTERM');
+
+    if (owned) {
+      try {
+        await owned.stop();
+      } finally {
+        client.close();
+      }
+    } else if (child.exitCode === null) {
+      child.kill('SIGTERM');
+    }
+
     await fs.rm(launchDir, { recursive: true, force: true });
   }
 }

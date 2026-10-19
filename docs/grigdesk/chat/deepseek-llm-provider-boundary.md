@@ -2,7 +2,7 @@
 
 Проверено по исходникам 2 октября 2026 года. Встроенный source snapshot закрепляет
 DSH `0.1.5-rc.2`, commit `c291e7961a515f6d7af9304e7fd1d257929aef26`.
-`tools/runtimeComposition.ts` исключает `@deepseek-ai/dsh-llm-pi-ai` через
+`deepseek/scripts/runtimeComposition.ts` исключает `@deepseek-ai/dsh-llm-pi-ai` через
 `OMITTED_BUNDLE_PACKAGES`; его source root не входит в выбранный snapshot.
 Нынешний runtime поэтому нельзя перевести на этот adapter одной настройкой.
 

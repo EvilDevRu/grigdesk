@@ -8,6 +8,7 @@ import type {
   NativeSettingsEvidence,
   NativeSettingsReadback,
   PreparedNativeSettings,
+  PreparedExecutorRuntime,
 } from './types.ts';
 import { nativeSettingsContext } from './context.ts';
 import { overlayNativeSettings } from './values.ts';
@@ -17,7 +18,12 @@ export interface SettingsSourceOptions<Config> {
   id: string;
   consumers?: readonly SettingsConsumer[];
   bin(config: Config): string;
-  context?: (config: Config, cwd: string, consumer: SettingsConsumer) => Promise<NativeSettingsContext>;
+  context?: (
+    config: Config,
+    cwd: string,
+    consumer: SettingsConsumer,
+    preparedRuntime?: PreparedExecutorRuntime,
+  ) => Promise<NativeSettingsContext>;
   profile(config: Config, consumer: SettingsConsumer): {
     transport: string;
     mode: string;
@@ -44,11 +50,11 @@ export function createNativeSettingsCapability<Config>(
      * Профиль строится сервером для того же транспорта, который откроет чат.
      * Приватный config привязан к объекту контекста и не попадает в каталог.
      */
-    async context(input, cwd, consumer = 'chat') {
+    async context(input, cwd, consumer = 'chat', preparedRuntime) {
       const config = input as Config;
       const profile = options.profile(config, consumer);
       const common = options.context
-        ? await options.context(config, cwd, consumer)
+        ? await options.context(config, cwd, consumer, preparedRuntime)
         : await nativeSettingsContext(
           { id: options.id, bin: () => options.bin(config) }, config, cwd, consumer,
         );
