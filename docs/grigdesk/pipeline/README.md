@@ -95,6 +95,7 @@
 - [Перечитывать по каждому state-change можно только дешёвое](state-change-read-cost.md)
 - [Повтор без паузы — не повтор](retry-backoff.md)
 - [Поле комментария у ворот обещало доставку, которой при принятии нет](gate-comment-delivery.md)
+- [Мелкую поправку к плану вносят в сам план до «Принять», а не комментарием](plan-edit-before-approve.md)
 - [Правка репозитория GrigDesk убивает прогон, который в нём же работает](running-checkout-mutations.md)
 - [Причина остановки ищется в ОКНЕ текущего захода, а не по всему журналу](current-attempt-stall-diagnosis.md)
 - [Проверяющий узел (state-only) не может сравнить файл с HEAD внутри worktree](state-only-worktree-head.md)

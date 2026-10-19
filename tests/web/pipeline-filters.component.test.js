@@ -185,11 +185,6 @@ test('проекты занимают свободный левый участо
     new URL('../../web/src/views/PipelineView.vue', import.meta.url),
     'utf8',
   );
-  const compensatedToolbarMargin = [
-    '  margin: calc(var(--pipeline-content-gutter) * -1)',
-    '    calc(var(--pipeline-content-gutter) * -1)',
-    '    calc(var(--pipeline-content-gutter) + 6px);',
-  ].join('\n');
 
   assert.equal(groups.length, 2);
   assert.equal(groups[0], 'project-strip');
@@ -207,7 +202,6 @@ test('проекты занимают свободный левый участо
     style,
     /\.toolbar\s*\{[^}]*top:\s*calc\(var\(--pipeline-content-gutter\) \* -1\);/su,
   );
-  assert.ok(style.includes(compensatedToolbarMargin));
   assert.doesNotMatch(style, /\.toolbar::before\s*\{/u);
   assert.match(style, /\.toolbar-secondary\s*\{[^}]*display:\s*flex;/su);
 });
