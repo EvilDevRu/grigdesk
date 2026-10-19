@@ -88,16 +88,17 @@ export function desktopLaunchOptions({
 }
 
 /**
- * Origin окна берётся из --grigdesk-url; без аргумента подходит любая HTTP-страница.
- * Ошибка разбора адреса не прерывает ожидание, а сужает его до HTTP.
+ * Главное окно загружает локальный документ трубы, независимо от адреса сервера.
+ * Фиксированный диапазон принадлежит профилям оболочки; заставка остаётся file:.
  */
-function selectedOrigin(args = []) {
-  const argument = args.find((value) => value.startsWith('--grigdesk-url='));
-
+export function isPipePage(page) {
   try {
-    return argument ? new URL(argument.slice('--grigdesk-url='.length)).origin : null;
+    const url = new URL(page.url());
+
+    return url.protocol === 'http:' && url.hostname === '127.0.0.1'
+      && Number(url.port) >= 47100 && Number(url.port) <= 47199;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -115,22 +116,16 @@ export function isSplashPage(page) {
  * Показ главного окна: заставки уже нет, видимое окно main открыло выбранный origin.
  * Страница возвращается только после показа, а не при скрытой загрузке во время старта.
  */
-async function waitForMainWindow(app, origin, timeout = 30_000) {
+async function waitForMainWindow(app, timeout = 30_000) {
   const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
     const pages = app.windows();
-    const main = pages.find((page) => {
-      const url = page.url();
-
-      return origin ? url.startsWith(origin + '/') : /^https?:/u.test(url);
-    });
+    const main = pages.find(isPipePage);
 
     if (main && !pages.some(isSplashPage)) {
       const visible = await app.evaluate(({ BrowserWindow }, selected) => BrowserWindow.getAllWindows()
-        .some((window) => window.isVisible() && (selected
-          ? window.webContents.getURL().startsWith(selected + '/')
-          : /^https?:/u.test(window.webContents.getURL()))), origin);
+        .some((window) => window.isVisible() && window.webContents.getURL() === selected), main.url());
 
       if (visible) {
         return main;
@@ -151,7 +146,7 @@ export async function launchDesktop(input) {
   const app = await _electron.launch(desktopLaunchOptions(input));
 
   try {
-    const page = await waitForMainWindow(app, selectedOrigin(input.args));
+    const page = await waitForMainWindow(app);
 
     page.setDefaultTimeout(30000);
 

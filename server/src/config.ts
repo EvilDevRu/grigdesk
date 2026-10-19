@@ -5,6 +5,7 @@ import { dataHome as resolveDataHome, dataPath, envFilePath } from '../../shared
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
+import { readClientConfig } from './lib/clientAccess/config.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
@@ -55,6 +56,8 @@ export const config = {
   mobileDir: process.env.GRIGDESK_MOBILE_DIR || dataPath(dataHome, 'mobile'),
   mobilePort: Number(process.env.GRIGDESK_MOBILE_PORT) || 8144,
   mobileApkDir: process.env.GRIGDESK_MOBILE_APK_DIR || dataPath(dataHome, 'mobileApk'),
+  clientAccess: readClientConfig(),
+  serverName: process.env.GRIGDESK_SERVER_NAME || os.hostname(),
   // Бюджет остановки целиком: слив ходов чата, закрытие сессий исполнителей и сокетов.
   // Должен быть меньше ожидания deploy/restart.sh и TimeoutStopSec юнита — иначе SIGKILL
   // придёт раньше, чем сервер успеет сохранить прерванные ходы.
@@ -175,10 +178,6 @@ export const config = {
   // Черновики — отдельная область авторства рядом с опубликованным store.
   routesAuthoringDir: process.env.GRIGDESK_ROUTES_AUTHORING_DIR || `${routesDir}.authoring`,
 
-  // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
-  webDist: process.env.GRIGDESK_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
-  uiReleasesDir: process.env.GRIGDESK_UI_RELEASES_DIR
-    || dataPath(dataHome, 'uiReleases'),
   // Файловый журнал окна: дневные NDJSON, доступны только владельцу сервера.
   webLogDir: process.env.GRIGDESK_WEB_LOG_DIR || path.join(dataStateDir, 'web-log'),
 

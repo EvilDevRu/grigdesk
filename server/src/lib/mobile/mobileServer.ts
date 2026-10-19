@@ -197,6 +197,8 @@ export async function startMobileServer(options: {
       request.body.code,
       request.mobileFingerprint,
       request.body.name,
+      'mobile-v1',
+      request.raw.socket.remoteAddress ?? request.ip,
     );
 
     return {

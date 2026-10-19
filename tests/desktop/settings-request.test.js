@@ -20,7 +20,7 @@ function fixture() {
     loading: false,
     detached: false,
     frameDead: false,
-    url: origin + '/ui/' + 'a'.repeat(64) + '/#/chats',
+    url: origin + '/#/chats',
     result: Promise.resolve(),
   };
   const frame = {

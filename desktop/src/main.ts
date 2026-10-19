@@ -12,6 +12,8 @@ import {
 import type { BrowserWindowConstructorOptions, Session } from 'electron';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,27 +21,25 @@ import { delayWithAbort } from '../../shared/lib/delay.ts';
 
 import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
-import { uiReleaseUrl } from '../../shared/runtime/uiRelease.ts';
-import { publishUiRelease } from './uiRelease.ts';
 import { createSettingsRequest } from './settingsRequest.ts';
 
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
-import { ensureSession } from './autoLogin.ts';
-import { localPort, resolveConnection } from './connection.ts';
-import { createConnectionLifecycle } from './connectionLifecycle.ts';
-import { loadDocument, loadPinnedDocument } from './windowDocuments.ts';
-import type { ConnectionLifecycle } from './connectionLifecycle.ts';
+import { clientUiDirectory } from './clientUi.ts';
+import { loadDocument } from './windowDocuments.ts';
 import {
   applicationMenuTemplate, contextMenuTemplate, isReloadShortcut, isSettingsShortcut,
 } from './menu.ts';
-import { grigDeskAlive, offlineUrl, waitForGrigDesk } from './offline.ts';
-import { accessUnavailableUrl } from './accessUnavailable.ts';
 import { createQuitController } from './quitController.ts';
 import { loadServerRuntime, runtimeDependencies } from './runtimeConfig.ts';
 import type { ServerRuntime } from './runtimeConfig.ts';
 import { openServerLog, readUnitState, runVpnGate, spawnServer } from './serverProcess.ts';
 import { createServerSupervisor } from './serverSupervisor.ts';
 import { readSettings, writeSettings } from './settings.ts';
+import { API_VERSION } from '../../shared/client/apiVersion.ts';
+import { createClientRuntime } from './clientRuntime.ts';
+import { electronSealer, sealedIdentity } from './identity.ts';
+import { readWindowKey } from './autoLogin.ts';
+import { localPort, originFromArgs } from './connection.ts';
 import type { DesktopSettings } from './settings.ts';
 import { guardSplash, splashBounds, splashWindowOptions } from './splashWindow.ts';
 import {
@@ -50,9 +50,9 @@ import {
   STARTUP_HOLD_LIMIT_MS,
 } from './startupController.ts';
 import type { StartupPhase } from './startupController.ts';
-import { requireProtectedStorage } from './storageProtection.ts';
 import {
   configureSession,
+  clearLegacyCookies,
   guardContents,
   LOCAL_PARTITION,
   sameOrigin,
@@ -63,16 +63,18 @@ let settingsRequest: ReturnType<typeof createSettingsRequest> | null = null;
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let localSession: Session | null = null;
-let lifecycle: ConnectionLifecycle | null = null;
+let client: ReturnType<typeof createClientRuntime> | null = null;
+let pipeOrigin: string | null = null;
+const pipeOrigins = new Set<string>();
+const lifetime = new AbortController();
+const pipeSecret = randomBytes(32).toString('base64url');
 let settings: DesktopSettings | null = null;
 let settingsFile: string | null = null;
 let saving: Promise<void> = Promise.resolve();
 // Адрес выбирается при подготовке старта; supervisor проверяет именно его.
 let selectedOrigin: string | null = null;
-let pinnedUi: { id: string; url: string } | null = null;
 // Код последнего главного документа своего origin: показ окна — только после 200.
 let mainDocumentCode: number | null = null;
-let connected = false;
 let bootStartedAt = 0;
 let exiting = false;
 
@@ -211,13 +213,10 @@ function saveMainWindow(): void {
 
   const bounds = mainWindow.getNormalBounds();
 
-  settings = {
-    ...settings,
-    window: {
-      width: bounds.width,
-      height: bounds.height,
-      maximized: mainWindow.isMaximized(),
-    },
+  settings.window = {
+    width: bounds.width,
+    height: bounds.height,
+    maximized: mainWindow.isMaximized(),
   };
   saving = writeSettings(settingsFile, settings);
   saving.catch(() => undefined);
@@ -254,7 +253,7 @@ function configureWindow(
     }
   });
   guardContents(window.webContents, {
-    origin,
+    origin: pipeOrigins,
     openExternal,
     childOptions: options,
     onSettingsRequest: () => {
@@ -315,16 +314,8 @@ async function showFatalDialog(message: string, signal: AbortSignal): Promise<vo
 }
 
 /**
- * Ожидание VPN-ворот своего сервера: после загрузки машины VPN поднимается минутами, а
- * служба в этом случае ждала молча. Такое ожидание не расходует срок старта окна.
- */
-function waitingForVpn(): boolean {
-  return supervisor.waitReason?.startsWith('VPN-ворота') === true;
-}
-
-/**
- * Сообщение о сроке называет фазу, на которой старт остановился.
- * Для сервера добавляется то, чего supervisor ждал последним.
+ * Срок относится к локальной подготовке встроенного документа и его первому кадру.
+ * Сервер и VPN работают в фоне и не могут задерживать показ окна.
  */
 function timeoutMessage(phase: StartupPhase): string {
   if (phase === 'splash') {
@@ -332,19 +323,7 @@ function timeoutMessage(phase: StartupPhase): string {
   }
 
   if (phase === 'server') {
-    const reason = supervisor.waitReason;
-
-    if (waitingForVpn()) {
-      return `VPN не поднялся за 10 минут (${reason}).`;
-    }
-
-    return reason
-      ? `Сервер GrigDesk не готов за 90 секунд (${reason}).`
-      : 'Сервер GrigDesk не готов за 90 секунд.';
-  }
-
-  if (phase === 'connect') {
-    return 'Не удалось войти по локальному ключу за 90 секунд.';
+    return 'Не удалось подготовить локальный интерфейс за 90 секунд.';
   }
 
   return 'Интерфейс GrigDesk не отрисовался.';
@@ -435,13 +414,9 @@ function showSplash(signal: AbortSignal): Promise<void> {
 
 /**
  * Создаёт скрытое главное окно со всеми обработчиками и lifecycle, без показа.
- * До показа offline и страница отказа ничего не грузят, а повтор входа — через 500 мс.
+ * Документ трубы грузится независимо от доступности выбранной машины.
  */
-async function createMainWindow(
-  origin: string,
-  runtime: ServerRuntime | null,
-  stored: DesktopSettings,
-): Promise<void> {
+async function createMainWindow(origin: string, stored: DesktopSettings): Promise<void> {
   Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate({
     openSettings: () => {
       settingsRequest?.open();
@@ -451,57 +426,26 @@ async function createMainWindow(
   const grigDeskSession = session.fromPartition(LOCAL_PARTITION);
 
   localSession = grigDeskSession;
-  await configureSession(grigDeskSession, origin);
+  await clearLegacyCookies(grigDeskSession.cookies);
+  await configureSession(grigDeskSession, pipeOrigins);
+  await grigDeskSession.cookies.set({
+    url: 'http://127.0.0.1',
+    name: 'grigdesk_pipe',
+    value: pipeSecret,
+    path: '/',
+    httpOnly: true,
+    sameSite: 'strict',
+  });
 
   const base = windowOptions(path.join(__dirname, 'icon.png'), app.isPackaged, stored.window);
   const options: BrowserWindowConstructorOptions = {
     ...base,
-    webPreferences: {
-      ...base.webPreferences,
-      session: grigDeskSession,
-    },
+    webPreferences: { ...base.webPreferences, session: grigDeskSession },
   };
   const window = new BrowserWindow(options);
-  // Ярлык запускает приложение без --grigdesk-url и пути ключа: путь берётся из окружения сервера.
-  const keyFile = windowKeyPath({
-    env: runtime?.env ?? process.env,
-    uid: process.getuid?.(),
-    port: localPort(origin),
-  });
-  const connection = createConnectionLifecycle({
-    origin,
-    alive: (signal) => grigDeskAlive(origin, { signal }),
-    wait: (signal) => waitForGrigDesk(origin, { signal }),
-    ensureSession: (signal) => ensureSession({
-      origin,
-      keyFile,
-      cookies: grigDeskSession.cookies,
-      signal,
-    }),
-    loadOffline: (signal) => revealed()
-      ? loadDocument(window, offlineUrl(origin), signal)
-      : Promise.resolve(),
-    showUnavailable: (signal) => revealed()
-      ? loadDocument(window, accessUnavailableUrl(origin), signal)
-      : Promise.resolve(),
-    /**
-     * Проверяет выбранную версию до загрузки документа и сохраняет её при восстановлении входа.
-     * Старый сервер не подменяет интерфейс рабочей сборкой и не запускает бесконечный retry.
-     */
-    loadGrigDesk: (address, signal) => loadPinnedDocument({
-      fetch: (url, init) => grigDeskSession.fetch(url, init),
-      pinned: pinnedUi,
-      window,
-      address,
-      signal
-    }),
-    onConnected: () => {
-      connected = true;
-    },
-    retryMs: () => revealed() ? 10_000 : 500,
-  });
 
   mainWindow = window;
+  pipeOrigin = origin;
   window.webContents.setUserAgent(desktopUserAgent(window.webContents.getUserAgent(), 'main'));
   installSettingsShortcut(window);
   settingsRequest = createSettingsRequest({
@@ -509,9 +453,7 @@ async function createMainWindow(
     revealed,
     origin,
   });
-  lifecycle = connection;
   configureWindow(window, origin, options);
-  // У ни разу не показанного окна ready-to-show приходит на каждый документ: это кадр.
   window.on('ready-to-show', () => frames.painted());
   window.on('close', () => {
     if (revealed() && !quit.stopping) {
@@ -519,55 +461,25 @@ async function createMainWindow(
     }
   });
   window.on('closed', () => {
-    connection.stop();
     mainWindow = null;
-    void quit.request({
-      reason: 'main-closed',
-      exitCode: 0,
-    });
+    void quit.request({ reason: 'main-closed', exitCode: 0 });
   });
-  window.webContents.on('did-fail-load', (_event, code, _description, url, isMainFrame) => {
-    if (sameOrigin(url, origin)) {
-      void connection.loadFailed({
-        code,
-        url,
-        isMainFrame,
-      }).catch(fatal);
-    }
-  });
-  // Решение о восстановлении входа принимает lifecycle: окно передаёт только
-  // адрес главного документа и код ответа, включая навигацию внутри страницы.
-  // Сбой восстановления обрабатывается как сбой загрузки, а не теряется.
   window.webContents.on('did-navigate', (_event, url, httpResponseCode) => {
-    if (sameOrigin(url, origin)) {
+    if (sameOrigin(url, pipeOrigins)) {
       frames.navigated();
       mainDocumentCode = httpResponseCode;
     }
-
-    void connection.navigated({
-      url,
-      httpResponseCode,
-    }).catch(fatal);
-  });
-  window.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-    void connection.navigated({
-      url,
-      isMainFrame,
-    }).catch(fatal);
   });
 }
 
 /**
  * Подготовка после показа заставки: настройки, установка сервера, адрес и скрытое окно.
- * Затем supervisor — единственный опрос сервера на время старта, при нужде свой запуск.
+ * Supervisor запускается в фоне после выбора местного профиля и не задерживает UI.
  */
 async function prepare(signal: AbortSignal): Promise<void> {
   settingsFile = path.join(app.getPath('userData'), 'settings.json');
 
   const stored = await readSettings(settingsFile);
-
-  signal.throwIfAborted();
-
   const loaded = await loadServerRuntime({
     env: process.env,
     home: os.homedir(),
@@ -575,78 +487,159 @@ async function prepare(signal: AbortSignal): Promise<void> {
     appDir: packageDir,
     bundledUi: true,
   });
-
-  signal.throwIfAborted();
-
   const runtime = 'runtime' in loaded ? loaded.runtime : null;
-  const resolved = resolveConnection({
-    argv: process.argv,
-    saved: stored.connection,
-    installed: runtime?.origin ?? null,
-  });
+  const argument = originFromArgs(process.argv);
 
-  if ('error' in resolved) {
-    throw new Error(resolved.error);
+  signal.throwIfAborted();
+
+  if (argument && 'error' in argument) {
+    throw new Error(argument.error);
   }
 
-  stored.connection = resolved.connection;
   settings = stored;
-  selectedOrigin = resolved.connection.origin;
 
-  // Без описания установки окно не связано с сервером: папку данных оно не выбирает само,
-  // иначе создало бы её до переноса, а в Windows-сборке упало бы на чужом формате пути.
-  const releases = runtime
-    ? runtime.uiReleasesDir
-    : process.env.GRIGDESK_UI_RELEASES_DIR;
+  const uiDir = clientUiDirectory({
+    packaged: app.isPackaged,
+    resources: process.resourcesPath,
+    source: __dirname,
+    override: process.env.GRIGDESK_CLIENT_UI_DIR,
+  });
+  const appApi = await readFile(path.join(uiDir, 'api-version.json'), 'utf8')
+    .then((text) => JSON.parse(text) as typeof API_VERSION).catch(() => API_VERSION);
+  let supervising = false;
 
-  if (releases) {
-    if (!path.isAbsolute(releases)) {
-      throw new Error('Каталог релизов интерфейса должен быть абсолютным.');
-    }
+  client = createClientRuntime({
+    settings: stored,
+    save: () => writeSettings(settingsFile!, stored),
+    uiDir,
+    secret: pipeSecret,
+    appApi,
+    identity: sealedIdentity(electronSealer(safeStorage, process.platform)),
+    identityDirectory: path.join(app.getPath('userData'), 'identity'),
+    localAvailable: () => runtime !== null,
+    localAddress: () => runtime?.origin || '',
+    windowKey: async (profile) => {
+      const file = windowKeyPath({
+        env: runtime?.env || process.env,
+        uid: process.getuid?.(),
+        port: localPort(profile.address),
+      });
 
-    const source = app.isPackaged
-      ? path.join(process.resourcesPath, 'ui') : path.join(__dirname, 'ui');
-    const release = await publishUiRelease(source, releases);
+      return await readWindowKey(file) || '';
+    },
+    /**
+     * Supervisor работает независимо от показа окна и сообщает ожидание в shell.
+     * Управление касается только собственного сервера исправной установки.
+     */
+    prepareLocal(profile) {
+      if (!runtime || supervising || profile.address !== runtime.origin) {
+        return;
+      }
 
-    pinnedUi = { id: release.id, url: uiReleaseUrl(selectedOrigin, release.id) };
-  } else if (app.isPackaged) {
-    throw new Error('Приложение не связано с установкой сервера. Выполните grigdesk-ctl desktop install.');
+      supervising = true;
+      selectedOrigin = profile.address;
+
+      const progress = setInterval(() => {
+        if (supervisor.waitReason) {
+          client?.shell.reportBackground(profile.id, {
+            status: 'connecting',
+            detail: { code: 'server_starting', message: supervisor.waitReason },
+            serverApi: null,
+          });
+        }
+      }, 500);
+
+      void supervisor.ensure({
+        origin: profile.address,
+        signal: lifetime.signal,
+        deadline: Date.now() + STARTUP_HOLD_LIMIT_MS + STARTUP_DEADLINE_MS,
+      }).then(() => {
+        clearInterval(progress);
+        void client?.shell.connect(profile.id, false);
+      }).catch((error: Error) => {
+        clearInterval(progress);
+        supervising = false;
+        client?.shell.reportBackground(profile.id, {
+          status: 'offline',
+          detail: { code: 'server_start_failed', message: error.message },
+          serverApi: null,
+        });
+      });
+    },
+    /**
+     * Повторно занятый порт не наследует данные прежней удалённой машины.
+     * Cookie хоста остаётся общей: очищаются только хранилища конкретного origin.
+     */
+    async onOrigin(origin, resetStorage) {
+      if (resetStorage) {
+        await session.fromPartition(LOCAL_PARTITION).clearStorageData({
+          origin,
+          storages: ['localstorage', 'indexdb', 'cachestorage', 'serviceworkers'],
+        });
+      }
+
+      pipeOrigins.add(origin);
+    },
+    onOriginRemoved: (origin) => {
+      pipeOrigins.delete(origin);
+    },
+    /**
+     * Смена origin создаёт новый документ с отдельными настройками localStorage.
+     * Дочерние окна прежней машины закрываются перед переходом главного.
+     */
+    async navigate(origin) {
+      pipeOrigin = origin;
+
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (window !== mainWindow && window !== splashWindow) {
+          window.destroy();
+        }
+      }
+
+      settingsRequest?.dispose();
+      settingsRequest = createSettingsRequest({
+        getWindow: () => mainWindow,
+        revealed,
+        origin,
+      });
+
+      if (mainWindow) {
+        await loadDocument(mainWindow, origin + '/', lifetime.signal);
+      }
+    },
+  });
+
+  if (argument && 'origin' in argument) {
+    const profile = await client.profiles.add({
+      name: 'Этот компьютер',
+      kind: 'local',
+      address: argument.origin,
+      fp: null,
+    });
+
+    await client.profiles.select(profile.id);
   }
 
+  const origin = await client.start();
+
   signal.throwIfAborted();
-  await createMainWindow(selectedOrigin, runtime, stored);
-  signal.throwIfAborted();
-  // Срок supervisor-а покрывает и удержание на VPN; обычный срок 90 с держит контроллер старта.
-  await supervisor.ensure({
-    origin: selectedOrigin,
-    signal,
-    deadline: bootStartedAt + STARTUP_HOLD_LIMIT_MS + STARTUP_DEADLINE_MS,
-  });
+  await createMainWindow(origin, stored);
 }
 
 /**
- * Подключение главного окна успешно только по onConnected lifecycle и коду 200
- * последнего главного документа своего origin; иначе отказ с причиной.
+ * Загружается только встроенный документ трубы; доступность сервера здесь не ожидается.
+ * HTTP-отказ локального пакета остаётся явной ошибкой установки.
  */
 async function connectMain(signal: AbortSignal): Promise<void> {
-  const connection = lifecycle;
-
-  if (!connection) {
+  if (!mainWindow || !pipeOrigin) {
     throw new Error('Главное окно GrigDesk не создано.');
   }
 
-  connected = false;
-  await connection.connect();
+  await loadDocument(mainWindow, pipeOrigin + '/', signal);
   signal.throwIfAborted();
 
-  if (!connected) {
-    throw new Error('Интерфейс GrigDesk не загрузился.');
-  }
-
   if (mainDocumentCode !== 200) {
-    throw new Error(mainDocumentCode
-      ? `Интерфейс GrigDesk не загрузился (HTTP ${mainDocumentCode}).`
-      : 'Интерфейс GrigDesk не загрузился.');
+    throw new Error('Установка повреждена. Переустановите приложение.');
   }
 }
 
@@ -683,7 +676,6 @@ const startup = createStartupController({
   reveal: () => revealMain(),
   focusMain: () => focusMainWindow(),
   timeoutMessage: (phase) => timeoutMessage(phase),
-  holdDeadline: () => waitingForVpn(),
   fail: (message) => {
     void quit.request({
       reason: 'failure',
@@ -696,11 +688,15 @@ const startup = createStartupController({
 const quit = createQuitController({
   cancelStartup: () => {
     startup.cancel();
-    lifecycle?.stop();
+    lifetime.abort();
+    client?.shell.close();
   },
   closeSplash: () => destroySplash(),
   showError: (message, signal) => showFatalDialog(message, signal),
-  stopOwnServer: () => supervisor.stop(),
+  stopOwnServer: async () => {
+    await client?.close();
+    await supervisor.stop();
+  },
   revealed: () => revealed(),
   saveWindow: () => {
     saveMainWindow();
@@ -722,7 +718,6 @@ const quit = createQuitController({
 async function boot(): Promise<void> {
   try {
     await app.whenReady();
-    requireProtectedStorage(safeStorage);
   } catch (error) {
     fatal(error);
 

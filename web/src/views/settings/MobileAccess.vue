@@ -371,6 +371,7 @@ docker compose ps</pre>
 </template>
 
 <script setup lang="ts">
+import { saveFile } from '../../shared/saveFile.ts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import {
@@ -559,13 +560,8 @@ function showQr(relay: Relay, pair: boolean) {
 async function downloadEnv(id: string) {
   await action(async () => {
     const value = await api.downloadGet(`/api/mobile/relays/${id}/env`);
-    const url = URL.createObjectURL(value.blob);
-    const anchor = document.createElement('a');
 
-    anchor.href = url;
-    anchor.download = 'relay.env';
-    anchor.click();
-    URL.revokeObjectURL(url);
+    await saveFile(value.blob, 'relay.env');
   });
 }
 

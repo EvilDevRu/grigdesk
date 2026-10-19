@@ -11,7 +11,8 @@ RC=0
 # так что kill и падение не оставляют мусора; дескриптор наследуют дети, поэтому лок
 # держится, пока жив хоть один процесс прогона — его и называем в отказе, ведь
 # записанный в файле pid к этому моменту мог уже смениться на потомка.
-RUN_ALL_LOCK="$PROJECT_ROOT/.state/run-all.lock"
+# Изолированный прогон может хранить замок вместе с журналом вне дерева исходников.
+RUN_ALL_LOCK="${GRIGDESK_RUN_ALL_LOCK:-$PROJECT_ROOT/.state/run-all.lock}"
 mkdir -p "$(dirname "$RUN_ALL_LOCK")"
 
 if command -v flock >/dev/null 2>&1; then

@@ -29,7 +29,7 @@ GrigDesk хранит настройки и рабочие данные вне �
 | `cliToken` | `state/cli-token` | Токен локальных команд |
 | `lock` | `state/server.lock` | Владелец папки данных |
 | `pluginData` | `state/plugins` | Рабочие данные пользовательских плагинов |
-| `uiReleases` | `state/ui-releases` | Неизменяемые версии интерфейса окна |
+| `uiReleases` | `state/ui-releases` | Прежние UI-версии; новым сервером не используются |
 | `mobileApk` | `state/mobile-apk` | APK, описание выпуска и журнал DevLink |
 | `mediaVenv` | `state/media-venv` | Python для речи |
 | `mediaHf` | `state/hf` | Модели речи |

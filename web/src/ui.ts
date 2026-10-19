@@ -49,7 +49,10 @@ export { default as UiTooltipHost } from './components/overlays/UiTooltipHost.vu
 export { vTooltip } from './services/tooltipDirective.ts';
 
 export { useUiLayer } from './composables/useUiLayer';
-export { getUiLayerDiagnostics, subscribeUiLayerDiagnostics } from './services/layers/stack';
+export {
+  closeTopLayer, getUiLayerDiagnostics, subscribeUiLayerDiagnostics,
+} from './services/layers/stack';
+export { setUiDownloadAdapter } from './services/downloads.ts';
 export { alertDialog, confirmDialog, promptDialog } from './services/dialogs';
 export { hasOpenModal } from './services/layers/modalQueries';
 export type * from './types/uiActions';

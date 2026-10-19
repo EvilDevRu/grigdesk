@@ -58,6 +58,13 @@ async function mountApp(t, options = {}) {
     polling: [],
     reloads: 0,
     unauthorized: null,
+    shell: {
+      initialized: true,
+      present: false,
+      status: 'none',
+      start: async () => {},
+      stop: () => {},
+    },
     state: options.state ?? {
       method: 'window-key',
       configured: true,
@@ -122,6 +129,8 @@ async function mountApp(t, options = {}) {
     './shared/desktopSettings.ts': 'export const currentDesktopMode = () => "page";',
     './shared/layout/AppShell.vue': marker('main'),
     './views/LoginView.vue': marker('login'),
+    './views/ConnectionsView.vue': marker('machines'),
+    './shared/layout/LockOverlay.vue': marker('lock'),
     './features/speech/provider.js': `import { h } from 'vue';
       export const SpeechProvider = {
         setup(_props, { slots }) { return () => h('div', slots.default?.()); }
@@ -148,6 +157,8 @@ async function mountApp(t, options = {}) {
       onUnauthorized: (handler) => globalThis.__noAccess.register(handler),
     };`,
     './stores/auth.js': `export { useAuthStore } from ${JSON.stringify(webFile('src/stores/auth.js'))};`,
+    './stores/shell.ts': 'export const useShellStore = () => globalThis.__noAccess.shell;',
+    './shell.ts': 'export const useShellStore = () => globalThis.__noAccess.shell;',
     './stores/board.js': store('useBoardStore'),
     './stores/system.js': store('useSystemStore'),
     './stores/task-favorites.js': store('useTaskFavoritesStore'),

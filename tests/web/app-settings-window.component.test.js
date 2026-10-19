@@ -22,11 +22,18 @@ const { mount, flushPromises } = await import(
  * App получает независимые подмены областей, чтобы видеть запуск каждого polling.
  * Подмена режима меняется после mount и проверяет однократный выбор оболочки.
  */
-async function fixture(t, mode, authenticated) {
+async function fixture(t, mode, authenticated, present = false) {
   const h = {
     mode,
     calls: [],
     auth: reactive({ ready: true, authenticated }),
+    shell: reactive({
+      initialized: true,
+      present,
+      status: 'none',
+      start: async (options) => h.startOptions = options,
+      stop: () => {},
+    }),
   };
 
   h.auth.load = async () => h.calls.push('auth.load');
@@ -56,6 +63,8 @@ async function fixture(t, mode, authenticated) {
     './shared/layout/AppShell.vue': marker('main'),
     './views/LoginView.vue': marker('login'),
     './views/NoAccessView.vue': marker('noaccess'),
+    './views/ConnectionsView.vue': marker('machines'),
+    './shared/layout/LockOverlay.vue': marker('lock'),
     './features/speech/provider.js': `import { h } from 'vue';
       export const SpeechProvider = {
         setup(_props, { slots }) { return () => h('div', slots.default?.()); }
@@ -72,6 +81,7 @@ async function fixture(t, mode, authenticated) {
       export const clearAlertHistory = () => {};
       export const dismissAllAlerts = () => {};`,
     './stores/auth.js': 'export const useAuthStore = () => globalThis.__settingsApp.auth;',
+    './stores/shell.ts': 'export const useShellStore = () => globalThis.__settingsApp.shell;',
   };
 
   for (const [file, name] of [

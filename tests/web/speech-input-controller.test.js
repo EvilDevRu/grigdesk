@@ -33,7 +33,8 @@ test('COMP-STT-01/12: root provider — единственная точка fact
   ]);
 
   assert.match(provider, /controllerFactory\(\{/);
-  assert.match(app, /<SpeechProvider\s+v-else>/);
+  assert.match(app, /<SpeechProvider\s+v-else-if="shell\.present \|\| auth\.authenticated">/);
+  assert.equal((app.match(/<SpeechProvider\b/g) || []).length, 1);
   assert.match(chatSession, /useDictationController\(\)/);
   assert.doesNotMatch(chatSession, /createDictationController|createSpeechStream|getUserMedia|SpeechRecognition|MediaRecorder|speechGeneration/);
   assert.doesNotMatch(controller, /from\s+['"][^'"]*(?:stores\/chat|features\/companion)/);

@@ -1,5 +1,3 @@
-import { isUiDocumentPath } from '../runtime/uiRelease.ts';
-
 export const TERMINAL_INSERT_LIMIT_BYTES = 16384;
 
 export type DesktopWindowRole = 'main';
@@ -14,7 +12,7 @@ export function isSettingsWindowRequest(target: string, origin: string): boolean
     const url = new URL(target);
 
     return url.protocol === 'http:' && !url.username && !url.password
-      && url.origin === origin && isUiDocumentPath(url.pathname)
+      && url.origin === origin && url.pathname === '/'
       && url.search === '?window=settings' && url.hash === '#/settings';
   } catch {
     return false;

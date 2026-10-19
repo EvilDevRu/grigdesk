@@ -90,6 +90,7 @@ function compileShell() {
     '../../plugins/PluginSlot.vue',
     './ToolHost.vue',
     './ToolsGrid.vue',
+    './ConnectionButton.vue',
   ];
 
   for (const child of children) {

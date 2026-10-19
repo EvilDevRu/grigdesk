@@ -74,3 +74,6 @@ web/.generated/markdown/
 # Установленное окно: AppImage из desktop/release под именем программы.
 /bin/grigdesk-app
 /bin/.grigdesk-app.*
+
+# Встроенный общий интерфейс готовит tools/client-ui.mts.
+mobile/android/client/src/main/assets/ui/

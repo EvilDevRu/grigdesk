@@ -88,8 +88,9 @@ test('SW-C06 строка терминала и ключ чата', () => {
 
 test('настройки сохраняют версию интерфейса главного окна', () => {
   const root = origin + '/ui/' + 'a'.repeat(64) + '/';
-  const target = root + '?window=settings#/settings';
+  const target = origin + '/?window=settings#/settings';
 
   assert.equal(isSettingsWindowRequest(target, origin), true);
+  assert.equal(isSettingsWindowRequest(root + '?window=settings#/settings', origin), false);
   assert.equal(isSettingsWindowRequest(origin + '/ui/invalid/?window=settings#/settings', origin), false);
 });

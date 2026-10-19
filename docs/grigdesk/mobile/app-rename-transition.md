@@ -14,15 +14,17 @@ Gradle вычисляет код как major × 10000 + minor × 100 + patch.
 
 ## Подпись и метаданные
 
-Владелец переносит служебную папку командой [brandMove](../server/brand-migration.md).
-Подпись по умолчанию лежит в `~/.config/grigdesk/android-signing`. Если прежний каталог
-ещё существует, выпуск отказывает до создания нового ключа и сообщает команду переноса.
-Alias существующего ключа сохраняется; потеря ключа не лечится молчаливой генерацией.
+Полное приложение :client использует существующий ключ владельца через явные
+GRIGDESK_ANDROID_STORE_FILE, GRIGDESK_ANDROID_STORE_PASSWORD, GRIGDESK_ANDROID_KEY_PASSWORD
+и GRIGDESK_ANDROID_KEY_ALIAS. Отсутствие параметров прекращает выпуск до сборки. Новый ключ
+не генерируется; сертификат APK сверяется с указанным хранилищем через keytool/apksigner.
 
-Release сверяет рост versionCode и тот же сертификат только с `grigdesk-mobile.json`.
-Метаданные прежнего пакета (`LEGACY.apkBase`) не учитываются: у него другой applicationId.
-Повреждённые метаданные запрещают выпуск. Фасад выдаёт `grigdesk-mobile.json` и `grigdesk-mobile.apk`
-после проверки размера и SHA-256. Debug-файл — `grigdesk-mobile-debug.apk`.
+Результат tools/mobile release —grigdesk-mobile-release.apk и grigdesk-mobile-release.json,
+debug —grigdesk-mobile-debug.apk. Метаданные содержат размер, SHA-256, сертификат и версию.
+Номер 0.1.0/versionCode100 сохраняется до первого выпуска; автоматической проверки роста
+по прежнему серверному grigdesk-mobile.json здесь нет. Сервер не раздаёт APK полного клиента.
+Прежний release-helper для :app остаётся историческим инструментом протокола v1 и не вызывается
+командой tools/mobile release.
 
 ## Имена протокола v1
 

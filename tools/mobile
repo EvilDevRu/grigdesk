@@ -166,9 +166,14 @@ check() {
   NODE_TEST_MAX_RSS_MB=4096 bash "$MOBILE_ROOT/tests/run-node-tests-safe.sh" --test \
     --test-concurrency=2 "$MOBILE_ROOT"/tests/mobile/*.test.js
   npm --prefix "$MOBILE_ROOT/mobile" run typecheck
+  npm --prefix "$MOBILE_ROOT/mobile" run build
+  (
+    cd "$MOBILE_ROOT/mobile"
+    ./node_modules/.bin/cap sync android
+  )
   (
     cd "$MOBILE_ROOT/mobile/android"
-    ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintDebug
+    ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintDebug :client:testDebugUnitTest :client:lintDebug
   )
 }
 
@@ -177,18 +182,7 @@ check() {
 build() {
   doctor
   gradle_archive
-  npm --prefix "$MOBILE_ROOT/mobile" run build
-  (
-    cd "$MOBILE_ROOT/mobile"
-    ./node_modules/.bin/cap sync android
-  )
-  (
-    cd "$MOBILE_ROOT/mobile/android"
-    ./gradlew --no-daemon --max-workers=2 :app:assembleDebug
-  )
-  mkdir -p "$MOBILE_APK_DIR"
-  cp "$MOBILE_ROOT/mobile/android/app/build/outputs/apk/debug/app-debug.apk" \
-    "$MOBILE_APK_DIR/grigdesk-mobile-debug.apk"
+  GRIGDESK_MOBILE_APK_DIR="$MOBILE_APK_DIR" node "$MOBILE_ROOT/tools/mobile-client.mts" build
 }
 
 # DevLink — браузерный телефон для разработки поверх настоящего посредника и мозга.
@@ -274,7 +268,7 @@ case "$MOBILE_COMMAND" in
   release)
     doctor
     gradle_archive
-    node "$MOBILE_ROOT/tools/mobile-phone/release.mts"
+    GRIGDESK_MOBILE_APK_DIR="$MOBILE_APK_DIR" node "$MOBILE_ROOT/tools/mobile-client.mts" release
     ;;
   *)
     echo 'Команды: tools/mobile deps|doctor|check|build|release|devlink' >&2

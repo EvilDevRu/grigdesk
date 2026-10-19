@@ -15,6 +15,7 @@ export const SETTINGS_PAGE_COMPONENTS: Record<string, Component> = {
   'automation.monitoring': preferences,
   'automation.arbiter': preferences,
   'agents.models': preferences,
+  'connections.devices': asyncView(() => import('./pages/DevicesPage.vue')),
   'connections.b24': asyncView(() => import('./pages/ConnectionsPage.vue')),
   'connections.mobile': asyncView(() => import('./pages/ConnectionsPage.vue')),
   'system.startup': asyncView(() => import('./pages/SystemPage.vue')),

@@ -297,7 +297,7 @@
                       </span>
                       <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                       <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
-                           одному «через 4д» нельзя. Полоса своей ширины не меняет, поэтому
+                           одному «через 4 д» нельзя. Полоса своей ширины не меняет, поэтому
                            вторая половина уходит к правому краю, а не удлиняет строку. -->
                       <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">
                         <span>{{ b.note || resetIn(b.resetsAt) }}</span>
@@ -338,6 +338,7 @@
       </div>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
+        <ConnectionButton :icon="ICONS.connection" />
         <AlertHistoryPopover />
         <UiIconButton label="Настройки" v-tooltip="'Настройки'"
           aria-haspopup="dialog" :pressed="settings.isOpen"
@@ -360,6 +361,7 @@
 
 <script setup>
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
+import ConnectionButton from './ConnectionButton.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
 import { ref, computed, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -671,6 +673,7 @@ function navTitle(item) {
 }
 
 const ICONS = {
+  connection: 'M4 5h16v10H4z M8 20h8 M12 15v5',
   cube: 'M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5',
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
   pipeline: 'M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9',

@@ -85,6 +85,7 @@
 </template>
 
 <script setup lang="ts">
+import { saveFile } from '../../shared/saveFile.ts';
 import { computed, ref, watch } from 'vue';
 
 import {
@@ -197,13 +198,8 @@ async function exportFile(): Promise<void> {
     const exported = await exportRouteTransfer(exportRouteId.value || null);
     const blob = new Blob([`${JSON.stringify(exported, null, 2)}\n`],
       { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
 
-    anchor.href = url;
-    anchor.download = `routes-${exportRouteId.value || 'catalog'}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    await saveFile(blob, `routes-${exportRouteId.value || 'catalog'}.json`);
   } catch (failure) {
     error.value = failureText(failure, 'Не удалось экспортировать комплект.');
   } finally {

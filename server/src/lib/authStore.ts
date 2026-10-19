@@ -24,6 +24,7 @@ export interface SessionsDocument {
   version: number;
   clientScope: string;
   sessions: Record<string, number>;
+  shortSessions?: string[];
 }
 
 export interface AuthStoreOptions {
@@ -53,6 +54,7 @@ function readSessionsDocument(file: string): SessionsDocument | null {
       version: SESSIONS_VERSION,
       clientScope: document.clientScope,
       sessions: document.sessions as Record<string, number>,
+      shortSessions: Array.isArray(document.shortSessions) ? document.shortSessions : [],
     };
   } catch {
     return null;
@@ -70,6 +72,8 @@ export class AuthStore {
 
   // Владелец сохранённых локальных данных. Пустая строка — как в прежнем API.
   clientScope = '';
+
+  private readonly shortSessions = new Set<string>();
 
   private readonly _now: () => number;
 
@@ -106,6 +110,10 @@ export class AuthStore {
     for (const [id, expiresAt] of Object.entries(document.sessions)) {
       if (typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt > now) {
         this.sessions.set(id, expiresAt);
+
+        if (document.shortSessions?.includes(id)) {
+          this.shortSessions.add(id);
+        }
       }
     }
   }
@@ -131,14 +139,23 @@ export class AuthStore {
    * Новая сессия сохраняется на диск: рестарт сервера не должен разлогинивать окно.
    * Перед записью лишние сессии вытесняются, чтобы файл не противоречил памяти.
    */
-  createSession(): { id: string; maxAgeSec: number } {
+  createSession({ ttlMs = SESSION_TTL_MS }: { ttlMs?: number } = {}): { id: string; maxAgeSec: number } {
+    if (!Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > SESSION_TTL_MS) {
+      throw new Error('Срок сессии должен быть от секунды до 400 дней.');
+    }
+
     const id = crypto.randomBytes(SESSION_ID_BYTES).toString('hex');
 
-    this.sessions.set(id, this._now() + SESSION_TTL_MS);
-    this._evictOldest();
+    this.sessions.set(id, this._now() + ttlMs);
+
+    if (ttlMs <= 600000) {
+      this.shortSessions.add(id);
+    }
+
+    this._evictOldest(id);
     this._save();
 
-    return { id, maxAgeSec: Math.floor(SESSION_TTL_MS / 1000) };
+    return { id, maxAgeSec: Math.floor(ttlMs / 1000) };
   }
 
   /**
@@ -160,6 +177,7 @@ export class AuthStore {
 
     if (expiresAt <= this._now()) {
       this.sessions.delete(id);
+      this.shortSessions.delete(id);
       this._save();
 
       return false;
@@ -169,26 +187,28 @@ export class AuthStore {
   }
 
   /**
-   * Вытеснение самой старой сессии: двадцатая по счёту остаётся, предыдущие уходят.
-   * Самая старая определяется по сроку годности, а не по порядку ключей в файле.
+   * Короткие CLI-сессии имеют отдельный предел и не вытесняются сессиями окна.
+   * Новая запись сохраняется; истёкшие и самые ранние записи своей группы уходят первыми.
    */
-  private _evictOldest(): void {
-    while (this.sessions.size > SESSION_LIMIT) {
-      let oldestId: string | null = null;
-      let oldestExpiry = Infinity;
-
-      for (const [id, expiresAt] of this.sessions) {
-        if (expiresAt < oldestExpiry) {
-          oldestId = id;
-          oldestExpiry = expiresAt;
-        }
+  private _evictOldest(created: string): void {
+    for (const [id, expiresAt] of this.sessions) {
+      if (expiresAt <= this._now()) {
+        this.sessions.delete(id);
+        this.shortSessions.delete(id);
       }
+    }
 
-      if (oldestId === null) {
-        return;
+    for (const short of [false, true]) {
+      const group = [...this.sessions].filter(([id]) => this.shortSessions.has(id) === short)
+        .sort((left, right) => left[1] - right[1]);
+
+      while (group.length > SESSION_LIMIT) {
+        const index = group.findIndex(([id]) => id !== created);
+        const [id] = group.splice(index, 1)[0]!;
+
+        this.sessions.delete(id);
+        this.shortSessions.delete(id);
       }
-
-      this.sessions.delete(oldestId);
     }
   }
 
@@ -207,6 +227,7 @@ export class AuthStore {
         version: SESSIONS_VERSION,
         clientScope: this.clientScope,
         sessions: Object.fromEntries(this.sessions),
+        shortSessions: [...this.shortSessions],
       }), { mode: 0o600, flag: 'wx' });
       fs.renameSync(temporary, this.sessionsPath);
     } catch {

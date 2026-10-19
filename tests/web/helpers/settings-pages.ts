@@ -24,3 +24,5 @@ export { default as ConnectionsPage } from '../../../web/src/views/settings/page
 export { default as SystemPage } from '../../../web/src/views/settings/pages/SystemPage.vue';
 export { default as ProcessesPage } from '../../../web/src/views/settings/pages/ProcessesPage.vue';
 export { createProviderSettingsAdapter } from '../../../web/src/features/settings/resources/providers.ts';
+
+export { default as DevicesPage } from '../../../web/src/views/settings/pages/DevicesPage.vue';

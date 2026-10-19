@@ -75,6 +75,7 @@ type SseLogSink = (
 
 let logSink: SseLogSink | null = null;
 let es: EventSource | null = null;
+let accessEnabled = true;
 let retry: ReturnType<typeof setTimeout> | null = null;
 let retries = 0;
 let openedAt = 0;
@@ -97,6 +98,7 @@ export function setSseLogSink(sink: SseLogSink | null): void {
 export function resetSseForTests(): void {
   es?.close();
   es = null;
+  accessEnabled = true;
 
   if (retry) {
     clearTimeout(retry);
@@ -137,7 +139,7 @@ function report(
  * безопасен и обязателен: подписчики появляются в разное время, а поток один.
  */
 function ensure(): void {
-  if (es) {
+  if (es || !accessEnabled) {
     return;
   }
 
@@ -177,7 +179,10 @@ function ensure(): void {
     retries += 1;
     source.close();
     es = null;
-    retry = setTimeout(ensure, 3000); // авто-переподключение
+
+    if (accessEnabled) {
+      retry = setTimeout(ensure, 3000);
+    } // авто-переподключение
   };
 
   for (const name of EVENT_NAMES) {
@@ -243,4 +248,34 @@ export function useSse(onEvent?: SseListener) {
   });
 
   return { connected };
+}
+
+/**
+ * Отзыв доступа гасит поток и его таймер, сохраняя подписчиков рабочего документа.
+ * Возврат подтверждённого входа поднимает одну общую связь без перемонтирования экрана.
+ */
+export function setSseEnabled(enabled: boolean): void {
+  accessEnabled = enabled;
+
+  if (enabled) {
+    if (listeners.size > 0) {
+      ensure();
+    }
+
+    return;
+  }
+
+  es?.close();
+  es = null;
+  connected.value = false;
+
+  if (retry) {
+    clearTimeout(retry);
+    retry = null;
+  }
+
+  if (stableTimer) {
+    clearTimeout(stableTimer);
+    stableTimer = null;
+  }
 }

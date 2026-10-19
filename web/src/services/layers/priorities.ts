@@ -14,6 +14,7 @@ export const UI_LAYER_PRIORITIES = Object.freeze({
   tooltip: 300,
   popover: 300,
   confirm: 400,
+  'session-lock': 500,
 } satisfies Record<UiLayerName, number>);
 
 const UI_LAYER_NAMES = new Set<UiLayerName>(Object.keys(UI_LAYER_PRIORITIES) as UiLayerName[]);

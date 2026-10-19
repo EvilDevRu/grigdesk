@@ -50,6 +50,12 @@ async function fixture(t) {
     'server/scripts/dataHomeCheck.mts',
     'server/src/lib/dataHomeBoot.ts',
     'tools/mobile',
+    'tools/mobile-client.mts',
+    'tools/client-ui.mts',
+    'desktop/src/uiRelease.ts',
+    'shared/client/apiVersion.ts',
+    'shared/node/hash.ts',
+    'shared/runtime/uiRelease.ts',
     'tools/mobile-phone/release.mts',
     'mobile/toolchain.lock.json',
     'mobile/android/gradle/wrapper/gradle-wrapper.jar',
@@ -90,15 +96,25 @@ async function fixture(t) {
     [
       path.join(commands, 'npm'),
       'printf "npm:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"\n' +
-        'if [[ "$GRIGDESK_FAKE_FAIL" == npm ]]; then exit 17; fi',
+        'if [[ "$GRIGDESK_FAKE_FAIL" == npm ]]; then exit 17; fi\n' +
+        'while (( $# )); do\n' +
+        '  if [[ "$1" == --outDir ]]; then\n' +
+        '    shift\n' +
+        '    mkdir -p -- "$1"\n' +
+        '    printf \'<html>UI</html>\' > "$1/index.html"\n' +
+        '    break\n' +
+        '  fi\n' +
+        '  shift\n' +
+        'done',
     ],
     [path.join(commands, 'keytool'), 'echo keytool >> "$GRIGDESK_FAKE_LOG"\nexit 23'],
     [cachedGradle, 'exit 0'],
     [
       path.join(project, 'mobile/android/gradlew'),
-      'printf "gradle:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"\n' +
+      'printf "gradle:%s:%s\\n" "$PWD" "$*" >> "$GRIGDESK_FAKE_LOG"\n' +
       'if [[ "$GRIGDESK_FAKE_FAIL" != success ]]; then exit 19; fi\n' +
-      'mkdir -p app/build/outputs/apk/debug\nprintf debug-apk > app/build/outputs/apk/debug/app-debug.apk',
+      'mkdir -p client/build/outputs/apk/debug\n' +
+      'printf debug-apk > client/build/outputs/apk/debug/client-debug.apk',
     ],
   ]) {
     await mkdir(path.dirname(file), { recursive: true });
@@ -122,6 +138,10 @@ async function fixture(t) {
       GRIGDESK_ANDROID_HOME: sdk,
       GRIGDESK_ANDROID_JDK: jdk,
       GRIGDESK_ANDROID_SIGNING_DIR: signing,
+      GRIGDESK_ANDROID_STORE_FILE: path.join(signing, 'release.jks'),
+      GRIGDESK_ANDROID_STORE_PASSWORD: 'test-only',
+      GRIGDESK_ANDROID_KEY_PASSWORD: 'test-only',
+      GRIGDESK_ANDROID_KEY_ALIAS: 'grigdesk',
       GRIGDESK_FAKE_LOG: logs,
       // sha256sum пишет OK/FAILED на языке машины; проверки ждут вывод без перевода.
       LC_ALL: 'C',
@@ -133,18 +153,19 @@ test('MB-24: shell синтаксис и явные команды сборки/
   await execute('bash', ['-n', path.join(root, 'tools/mobile')]);
 
   const script = await readFile(path.join(root, 'tools/mobile'), 'utf8');
-  const release = await readFile(path.join(root, 'tools/mobile-phone/release.mts'), 'utf8');
+  const release = await readFile(path.join(root, 'tools/mobile-client.mts'), 'utf8');
 
   for (const command of ['deps', 'doctor', 'check', 'build', 'release']) {
     assert.match(script, new RegExp(command + '\\)'));
   }
 
   assert.doesNotMatch(script, /^\s*sudo\b/m);
-  assert.match(release, /android-signing/);
+  assert.match(script, /tools\/mobile-client\.mts.*release/);
+  assert.match(release, /GRIGDESK_ANDROID_STORE_FILE/);
   assert.match(release, /apksigner/);
 });
 
-test('GP-03/MB-24: прежний alias принят, сбой Gradle сохраняет APK/ключ', async (t) => {
+test('GP-03/MB-24: явный прежний ключ, сбой :client Gradle сохраняет APK/ключ', async (t) => {
   const fx = await fixture(t);
 
   await assert.rejects(
@@ -168,8 +189,9 @@ test('GP-03/MB-24: прежний alias принят, сбой Gradle сохра
 
   const calls = await readFile(fx.logs, 'utf8');
 
-  assert.match(calls, new RegExp('cap:' + fx.project + '/mobile\\n'));
-  assert.match(calls, new RegExp('gradle:' + fx.project + '/mobile/android\\n'));
+  assert.match(calls, new RegExp('npm:' + fx.project + '\\n'));
+  assert.match(calls, new RegExp('gradle:' + fx.project + '/mobile/android:.*:client:assembleRelease'));
+  assert.doesNotMatch(calls, /cap:|:app:/);
   assert.doesNotMatch(calls, /keytool/);
 });
 
@@ -185,6 +207,12 @@ test('GP-01: приложение имеет новый пакет, версию
   assert.match(gradle, /namespace = "local\.grigdesk\.mobile"/);
   assert.match(gradle, /applicationId "local\.grigdesk\.mobile"/);
   assert.match(gradle, /versionCode mobileCode/);
+
+  const client = await readFile(path.join(root, 'mobile/android/client/build.gradle'), 'utf8');
+
+  assert.match(client, /namespace 'local\.grigdesk\.client'/);
+  assert.match(client, /applicationId 'local\.grigdesk\.mobile'/);
+  assert.match(client, /versionCode parts\[0\] \* 10000 \+ parts\[1\] \* 100 \+ parts\[2\]/);
 });
 
 test('GP-02: прежний каталог подписи останавливает выпуск до генерации ключа', async (t) => {

@@ -4,6 +4,8 @@
 
 Читай перед правкой: `tests`.
 
+- [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
+
 ## Грабли
 
 - [Transition-stub создаёт inert-предка Teleport-модалки в тесте фокуса](modal-transition-stub.md)

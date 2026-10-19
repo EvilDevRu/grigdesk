@@ -81,7 +81,13 @@ function fakeApi({ users = [], groups = [], job = DONE_JOB, storage = null, post
   };
 }
 
-async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, restore = null } = {}) {
+/**
+ * Настоящая вью получает только подмены внешних API и системных действий.
+ * Сохранение, восстановление и взаимодействия проверяются через видимые элементы.
+ */
+async function mountVideoView(t, {
+  api, planModel = null, confirmAnswer = true, restore = null, saveFailure = false,
+} = {}) {
   const browser = await installBrowser(t);
   // Снимок прошлого сеанса кладём ДО монтирования: так же его видит вью после F5 или
   // обновления PWA — на сервере разбор уже идёт, а у браузера остался только jobId.
@@ -89,6 +95,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
     browser.localStorage.setItem('grigdesk-video-session', JSON.stringify(restore));
   }
   globalThis.__vidApi = api;
+  globalThis.__vidSaveFailure = saveFailure;
   const preview = { calls: [], showImage(v) { this.calls.push(['image', v]); }, showVideo(v) { this.calls.push(['video', v]); } };
   const confirms = [];
   globalThis.__vidConfirm = async (...args) => { confirms.push(args); return confirmAnswer; };
@@ -126,6 +133,9 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
         url: (path) => path,
         get: (...args) => globalThis.__vidApi.get(...args),
         post: (...args) => globalThis.__vidApi.post(...args),
+      };`,
+      '../shared/saveFile.ts': `export const saveFile = async () => {
+        if (globalThis.__vidSaveFailure) throw new Error('Сохранение отменено.');
       };`,
       '../shared/clipboard.ts': 'export const writeClipboardText = async () => true;',
       '../stores/plugins.js': `
@@ -988,4 +998,24 @@ test('пустое хранилище строкой не отчитываетс
   const view = await mountVideoView(t, { api: fakeApi({ storage: { files: 0, bytes: 0, ttlMs: 0 } }) });
 
   assert.equal(view.wrapper.find('.storage-note').exists(), false);
+});
+
+
+test('W10: отказ нативного сохранения расшифровки виден человеку', async (t) => {
+  const view = await mountVideoView(t, { api: fakeApi(), saveFailure: true });
+
+  await view.upload({ step: 'review' });
+
+  const wrapper = view.wrapper;
+
+  await wrapper.find('.transcript .fold').trigger('click');
+  await view.run();
+
+  const download = wrapper.findAll('button').find((button) => button.text().includes('Скачать .txt'));
+
+  assert.ok(download !== undefined);
+  wrapper.vm.$.appContext.config.errorHandler = () => {};
+  await download.trigger('click');
+  await view.run();
+  assert.match(wrapper.text(), /Сохранение отменено/);
 });

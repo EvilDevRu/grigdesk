@@ -1,5 +1,10 @@
-include ':app'
-include ':capacitor-cordova-android-plugins'
-project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+// Полный :client собирается из чистого клона без cap sync.
+// Прежний :app и плагины доступны после генерации Cordova-модуля командой tools/mobile check.
+if (file('capacitor-cordova-android-plugins/cordova.variables.gradle').exists()) {
+    include ':app'
+    include ':capacitor-cordova-android-plugins'
+    project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+    apply from: 'capacitor.settings.gradle'
+}
 
-apply from: 'capacitor.settings.gradle'
+include ':client'

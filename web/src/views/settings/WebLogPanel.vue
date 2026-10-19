@@ -46,6 +46,7 @@
 </template>
 
 <script setup lang="ts">
+import { saveFile } from '../../shared/saveFile.ts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import { UiButton, UiTextarea } from '../../ui';
@@ -124,34 +125,18 @@ async function downloadToday(): Promise<void> {
   downloading.value = true;
   downloadError.value = '';
 
-  let objectUrl: string | null = null;
-
   try {
     const day = new Date().toISOString().slice(0, 10);
     const file = await api.downloadGet(`/api/web-log/download?day=${day}`);
 
-    objectUrl = URL.createObjectURL(file.blob);
-
-    const link = document.createElement('a');
-
-    link.href = objectUrl;
-    link.download = /^web-log-\d{4}-\d{2}-\d{2}\.ndjson$/u.test(file.filename || '')
+    const filename = /^web-log-\d{4}-\d{2}-\d{2}\.ndjson$/u.test(file.filename || '')
       ? file.filename!
       : `web-log-${day}.ndjson`;
-    document.body.append(link);
 
-    try {
-      link.click();
-    } finally {
-      link.remove();
-    }
+    await saveFile(file.blob, filename);
   } catch {
     downloadError.value = 'Не удалось скачать журнал за сегодня.';
   } finally {
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-    }
-
     downloading.value = false;
   }
 }

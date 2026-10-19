@@ -1,5 +1,4 @@
 import type { BrowserWindow, WebContents } from 'electron';
-import { isUiDocumentPath } from '../../shared/runtime/uiRelease.ts';
 import { sameOrigin } from './windowSecurity.ts';
 
 export const OPEN_SETTINGS_SCRIPT =
@@ -40,7 +39,7 @@ export function createSettingsRequest(options: SettingsRequestOptions) {
   }
 
   function allowed(url: string): boolean {
-    return sameOrigin(url, options.origin) && isUiDocumentPath(new URL(url).pathname);
+    return sameOrigin(url, options.origin) && new URL(url).pathname === '/';
   }
 
   function navigation(details: { url: string; isMainFrame: boolean }): void {

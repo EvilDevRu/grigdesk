@@ -23,6 +23,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { uiDownloadAvailable, saveUiDownload } from '../../services/downloads.ts';
+import { showToast } from '../../services/toasts.ts';
 import type { UiActionTone, UiActionVariant } from '../../types/uiActions';
 import {
   normalizeActionTone,
@@ -68,7 +70,11 @@ const safeRel = computed(
     (props.target === '_blank' ? 'noopener noreferrer' : undefined),
 );
 
-function onClick(event: MouseEvent): void {
+/**
+ * Скачивание в нативной оболочке передаём системному выбору файла.
+ * Пользовательский обработчик сохраняет право отменить действие ссылки.
+ */
+async function onClick(event: MouseEvent): Promise<void> {
   if (guarded.value) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -77,6 +83,23 @@ function onClick(event: MouseEvent): void {
   }
 
   emit('click', event);
+
+  if (event.defaultPrevented || props.download === undefined
+    || props.download === false || !uiDownloadAvailable()) {
+    return;
+  }
+
+  event.preventDefault();
+
+  try {
+    await saveUiDownload(props.href, typeof props.download === 'string' ? props.download : undefined);
+  } catch {
+    showToast({
+      id: 'save-file-failed',
+      title: 'Не удалось сохранить файл.',
+      tone: 'danger',
+    });
+  }
 }
 
 defineExpose({

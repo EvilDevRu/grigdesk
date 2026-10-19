@@ -1,7 +1,10 @@
 export type Action = 'start' | 'stop' | 'restart' | 'status' | 'logs';
 
 export type CliArgs = {
-  kind: 'open' | 'status' | 'server' | 'relay' | 'help' | 'version';
+  kind: 'open' | 'status' | 'server' | 'relay' | 'device' | 'help' | 'version';
+  deviceAction?: 'add' | 'list' | 'revoke';
+  deviceValue?: string;
+  address?: string;
   action?: Action;
   force: boolean;
   wait: boolean;
@@ -24,6 +27,9 @@ grigdesk-ctl server logs [-n N|--lines N] [-f|--follow]
 grigdesk-ctl relay start | stop | restart
 grigdesk-ctl relay status [--json]
 grigdesk-ctl relay logs [-n N|--lines N] [-f|--follow]
+grigdesk-ctl device add <имя> [--address host:port] [--json]
+grigdesk-ctl device list [--json]
+grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | b24 … | mobile … | release …
 grigdesk-ctl dev | build | deps | run
 grigdesk-ctl --help | -h | help | <группа> --help
@@ -63,6 +69,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       ...args,
       kind: 'version',
     };
+  }
+
+  if (command === 'device') {
+    return parseDevice(argv.slice(1), args);
   }
 
   if (!['open', 'status', 'server', 'relay'].includes(command)) {
@@ -117,6 +127,54 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       throw new Error(`Неизвестный флаг: ${flag}. ${HELP_HINT}`);
     } else {
       throw new Error(`Неизвестная команда: лишний аргумент ${flag}. ${HELP_HINT}`);
+    }
+  }
+
+  return args;
+}
+
+/**
+ * Устройства имеют собственные формы аргументов, независимые от управления службами.
+ * Ошибки разбора возникают до чтения ключа и любых запросов к серверу.
+ */
+function parseDevice(argv: readonly string[], defaults: CliArgs): CliArgs {
+  const [action, ...tail] = argv;
+
+  if (!['add', 'list', 'revoke'].includes(action ?? '')) {
+    throw new Error('Укажите grigdesk-ctl device add <имя> | list | revoke <id>.');
+  }
+
+  const args: CliArgs = {
+    ...defaults,
+    kind: 'device',
+    deviceAction: action as CliArgs['deviceAction'],
+  };
+
+  if (action !== 'list') {
+    const value = tail.shift();
+
+    if (!value?.trim() || value.startsWith('-')) {
+      throw new Error('Укажите имя или id: grigdesk-ctl device --help.');
+    }
+
+    args.deviceValue = value;
+  }
+
+  while (tail.length) {
+    const flag = tail.shift();
+
+    if (flag === '--json' && action !== 'revoke') {
+      args.json = true;
+    } else if (flag === '--address' && action === 'add' && !args.address) {
+      const address = tail.shift();
+
+      if (!address || address.startsWith('-')) {
+        throw new Error('Укажите host:port после --address. Справка: grigdesk-ctl device --help.');
+      }
+
+      args.address = address;
+    } else {
+      throw new Error('Неизвестный аргумент устройства. Справка: grigdesk-ctl device --help.');
     }
   }
 

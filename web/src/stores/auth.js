@@ -2,6 +2,7 @@
 // HttpOnly-cookie и локальный ключ недоступны этому стору и остальному renderer.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
+import { useShellStore } from './shell.ts';
 
 const RELOAD_KEY = 'grigdesk-auth-reload-at';
 const RELOAD_INTERVAL_MS = 60_000;
@@ -59,9 +60,17 @@ export const useAuthStore = defineStore('auth', {
      * Метка переживает reload; закрытый storage запрещает цикл повторных навигаций.
      */
     handleUnauthorized() {
+      const shell = useShellStore();
+
       this.logEpoch += 1;
       this.logReason = '401';
       this.authenticated = false;
+
+      if (shell.present) {
+        void shell.refresh().catch(() => {});
+
+        return;
+      }
 
       try {
         const previous = Number(sessionStorage.getItem(RELOAD_KEY));

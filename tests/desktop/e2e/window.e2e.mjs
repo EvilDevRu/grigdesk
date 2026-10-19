@@ -70,7 +70,7 @@ async function createRun(t) {
       }
 
       for (const stub of stubs) {
-        await stub.close();
+        await stub.dispose();
       }
 
       for (const cleanup of bootCleanups) {
@@ -97,9 +97,13 @@ async function createRun(t) {
     run.current = await launchDesktop({
       root,
       dataDir,
-      args: [desktop, `--grigdesk-url=${address}`],
+      args: [desktop, '--password-store=gnome-libsecret', `--grigdesk-url=${address}`],
+      isolateEnv: true,
       env: {
         GRIGDESK_WINDOW_KEY_PATH: selectedKey,
+        GRIGDESK_HOME: path.join(root, 'data'),
+        GRIGDESK_CLIENT_UI_DIR: stubs.find((stub) => stub.address === address)?.uiDir
+          || process.env.GRIGDESK_E2E_WEB_DIST || path.join(desktop, 'dist/ui'),
         ...extraEnv,
       },
     });
@@ -221,7 +225,8 @@ test('DW-E1: окно загружает выбранный origin с sandbox', 
   const { app, page } = await run.launch(stub.address);
 
   await page.locator('#same').waitFor();
-  assert.equal(new URL(page.url()).origin, stub.address);
+  assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
+  assert.notEqual(new URL(page.url()).origin, stub.address);
   assert.deepEqual(await page.evaluate(() => [typeof require, typeof process]), ['undefined', 'undefined']);
 
   const security = await app.evaluate(({ app, BrowserWindow }) => {
@@ -248,8 +253,8 @@ test('DW-E1: окно загружает выбранный origin с sandbox', 
 
   const paths = stub.observations.requests.map((request) => request.pathname);
 
-  assert.equal(paths[0], '/api/auth/state');
-  assert.ok(paths.indexOf('/') > paths.indexOf('/api/auth/state'));
+  assert.ok(paths.includes('/api/auth/window-session'));
+  assert.equal(paths.some((value) => !value.startsWith('/api/')), false);
   assert.ok(stub.observations.requests.every((request) => request.host === new URL(stub.address).host));
 });
 
@@ -331,7 +336,8 @@ test('DW-E3: внешняя навигация, popup и redirect идут в sh
   }
 
   assert.deepEqual(await app.evaluate(() => globalThis.__opened), Object.values(stub.links));
-  assert.equal(new URL(page.url()).origin, stub.address);
+  assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
+  assert.notEqual(new URL(page.url()).origin, stub.address);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   assert.deepEqual(external.observations.requests, []);
   await app.evaluate(() => globalThis.__restoreShell());
@@ -354,7 +360,7 @@ test('DW-E5: SW не регистрируется, обычная сеть ра�
   const stub = await run.stub();
   const { page } = await run.launch(stub.address);
 
-  await page.addScriptTag({ url: stub.address + '/assets/probe.js' });
+  await page.addScriptTag({ url: new URL('/assets/probe.js', page.url()).href });
   assert.equal(await page.evaluate(() => globalThis.desktopNetworkProbe), 'loaded');
 
   for (const url of ['/sw.js', '/sw.js?probe=1']) {
@@ -375,20 +381,24 @@ test('DW-E5: SW не регистрируется, обычная сеть ра�
   assert.equal(await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length), 0);
 });
 
-test('DW-E7: провал reload и восстановление', options, async (t) => {
+test('DW-E7: перезагрузка встроенного UI без сервера и восстановление профиля', options, async (t) => {
   const run = await createRun(t);
   const stub = await run.stub();
   const port = new URL(stub.address).port;
   const { page } = await run.launch(stub.address);
+  const origin = new URL(page.url()).origin;
 
   await page.locator('#stub').waitFor();
   await stub.close();
-  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-  await page.waitForURL(/^data:/u);
-  assert.match(await page.locator('body').textContent(), /Ждём сервер GrigDesk/u);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#stub').waitFor();
+  assert.equal(await page.evaluate(() => fetch('/api/auth/state').then((response) => response.status)), 503);
+  await page.waitForFunction(async () => (await fetch('/api/auth/state')).status === 503);
+  assert.equal(new URL(page.url()).origin, origin);
   await run.stub({ port: Number(port) });
-  await page.locator('#stub').waitFor({ timeout: 20_000 });
-  assert.equal(new URL(page.url()).origin, stub.address);
+  await page.waitForFunction(async () => (await (await fetch('/__shell/state')).json()).status === 'online');
+  assert.equal(await page.evaluate(() => fetch('/api/auth/state').then((response) => response.json()))
+    .then((state) => state.authenticated), true);
 });
 
 test('DW-E8: второй экземпляр отдаёт управление первому', options, async (t) => {
@@ -418,14 +428,15 @@ test('DW-E8: второй экземпляр отдаёт управление �
   assert.equal(child.exitCode, 0);
   assert.equal(child.signalCode, null);
   await waitFor(async () => await app.evaluate(() => globalThis.__secondEvents) === 1);
-  assert.equal(new URL(page.url()).origin, stub.address);
+  assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
+  assert.notEqual(new URL(page.url()).origin, stub.address);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   assert.deepEqual(other.observations.requests, []);
   await run.closeApp();
 
   const settings = JSON.parse(await readFile(path.join(run.dataDir, 'settings.json'), 'utf8'));
 
-  assert.equal(settings.connection.origin, stub.address);
+  assert.equal(settings.profiles.find((profile) => profile.id === settings.selected).address, stub.address);
 });
 
 test('DW-E9: настоящий GrigDesk входит без пароля и открывает SSE', options, async (t) => {
@@ -468,30 +479,36 @@ test('DW-E9: настоящий GrigDesk входит без пароля и о�
     Boolean(await navigator.serviceWorker.getRegistration())), false);
 });
 
-test('DW-E10: после показа отсутствующий ключ и неверные права восстанавливаются без формы', options,
+test('DW-E10: недоступный ключ меняет состояние профиля, UI остаётся и восстанавливает связь', options,
   async (t) => {
     const run = await createRun(t);
     const stub = await run.stub();
     const { page } = await run.launch(stub.address);
     const key = await readFile(run.keyFile);
+    const origin = new URL(page.url()).origin;
 
-    await page.locator('#stub').waitFor();
+    await page.locator('#cookie').getByText('cookie:yes').waitFor();
     stub.revokeSessions();
     await rm(run.keyFile);
-    await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-    await page.waitForURL(/^data:/u);
-    assert.match(await page.locator('body').textContent(), /Не удалось войти по локальному ключу/u);
-    assert.equal(await page.locator('input').count(), 0);
+    assert.equal(await page.evaluate(() => fetch('/api/auth/state')
+      .then((response) => response.status)), 503);
+    assert.equal(new URL(page.url()).origin, origin);
+    assert.equal(await page.locator('input[type=password]').count(), 0);
     await writeFile(run.keyFile, key, { mode: 0o644 });
     await chmod(run.keyFile, 0o644);
-    await new Promise((resolve) => setTimeout(resolve, 11_000));
-    assert.match(page.url(), /^data:/u);
+    await page.evaluate(() => fetch('/__shell/connect', { method: 'POST' }));
+    await page.waitForFunction(async () =>
+      (await (await fetch('/__shell/state')).json()).status === 'offline');
+    assert.equal(await page.evaluate(() => fetch('/api/auth/state')
+      .then((response) => response.status)), 503);
     await chmod(run.keyFile, 0o600);
-    await page.locator('#stub').waitFor({ timeout: 20_000 });
-    assert.equal(await page.locator('input[type=password]').count(), 0);
+    await page.waitForFunction(async () =>
+      (await (await fetch('/__shell/state')).json()).status === 'online');
+    assert.equal(new URL(page.url()).origin, origin);
+    assert.equal(await page.locator('#stub').count(), 1);
   });
 
-test('DW-E11: постоянная сессия переживает окно и сервер без нового обмена', options, async (t) => {
+test('DW-E11: новое окно получает сессию в трубе и сохраняет серверный scope', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
@@ -505,7 +522,13 @@ test('DW-E11: постоянная сессия переживает окно и
   await restartOwnServer(run);
   Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
   await run.page.locator('.shell').waitFor();
-  assert.deepEqual(await readSessions(run), before);
+
+  const after = await readSessions(run);
+
+  assert.equal(after.clientScope, before.clientScope);
+  assert.equal(Object.keys(after.sessions).length, 2);
+  assert.ok(Object.keys(before.sessions).every((id) => Object.hasOwn(after.sessions, id)));
+  assert.equal(await run.page.evaluate(() => document.cookie.includes('grigdesk_sid')), false);
 });
 
 test('DW-E12: размер и maximized переживают закрытие', options, async (t) => {
@@ -532,7 +555,7 @@ test('DW-E12: размер и maximized переживают закрытие', 
   await child.locator('#stub').waitFor();
   await app.evaluate(({ BrowserWindow }) => {
     const child = BrowserWindow.getAllWindows().find((window) =>
-      window.webContents.getURL().endsWith('/second'));
+      window.webContents.getURL().endsWith('/second.html'));
 
     child.setSize(820, 630);
     child.close();
@@ -594,10 +617,12 @@ async function launchSettingsStub(t) {
 }
 
 /**
- * Listener нового окна ставится раньше запроса из страницы.
- * Контракт модальности проверяется в main, а не по видимости меню.
+ * Прежний адрес преобразуется в событие общего модала без новой навигации.
+ * Единственное главное окно и DOM-диалог проверяются независимо.
  */
-async function openNativeSettings(app, page, origin) {
+async function openNativeSettings(app, page, _serverOrigin) {
+  const origin = new URL(page.url()).origin;
+
   await page.evaluate((origin) => window.open(origin + '/?window=settings#/settings'), origin);
   await page.locator('#stub-settings[open]').waitFor();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
@@ -607,7 +632,7 @@ async function openNativeSettings(app, page, origin) {
 
 /**
  * Нативное событие проходит before-input-event в отличие от клавиш CDP.
- * Выбирается окно с нужной ролью, даже если модальное окно отключило родителя.
+ * Ввод доставляется единственному главному BrowserWindow, включая фокус терминала.
  */
 async function sendSettingsShortcut(app) {
   await app.evaluate(({ BrowserWindow }) => {
@@ -663,18 +688,19 @@ test('SW-E02 повтор, меню и native shortcut используют од
   assert.equal(await page.locator('#stub-settings[open]').count(), 1);
 });
 
-test('SW-E03 без входа окна нет', options, async (t) => {
+test('SW-E03 настройки оболочки открываются без связи с сервером', options, async (t) => {
   const { run, app, page, stub } = await launchSettingsStub(t);
 
+  await page.locator('#cookie').getByText('cookie:yes').waitFor();
   stub.revokeSessions();
   await rm(run.keyFile);
-  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-  await page.waitForURL(/^data:/u);
-  assert.match(await page.locator('body').textContent(), /Не удалось войти по локальному ключу/u);
-  await page.evaluate((origin) => window.open(origin + '/?window=settings#/settings'), stub.address);
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items[0].submenu.items[0].click());
-  await sendSettingsShortcut(app);
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await page.evaluate(() => fetch('/api/auth/state'));
+  await page.waitForFunction(async () => (await fetch('/api/auth/state')).status === 503);
+
+  const child = await openNativeSettings(app, page, stub.address);
+
+  assert.equal(await child.locator('#stub').count(), 1);
+  assert.equal(await child.evaluate(() => fetch('/api/auth/state').then((response) => response.status)), 503);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 });
 
@@ -722,34 +748,16 @@ async function restartOwnServer(run, change = async () => {}) {
 
 /**
  * Потеря сессии моделируется файлом и рестартом своего сервера, без удалённого logout.
- * Настройки закрываются по 401, основной документ восстанавливает тот же раздел по ключу.
+ * Оба документа сохраняются, пока труба сама восстанавливает безопасное чтение по ключу.
  */
 async function loseSessionAndRecover(run, child = null) {
   const address = run.page.url();
-  const denied = [];
-  let markedRequests = 0;
-  const observe = (page) => {
-    page.on('response', (response) => {
-      if (response.status() === 401) {
-        denied.push(new URL(response.url()).pathname);
-      }
-    });
-    page.on('request', (request) => {
-      if (request.url().endsWith('/api/providers?refresh=1')) {
-        markedRequests += 1;
-      }
-    });
-  };
+  const documents = [...new Set([run.page, ...(child ? [child] : [])])];
+  const origins = await Promise.all(documents.map((page) => page.evaluate(() => {
+    globalThis.recoveryDocumentProbe = 'retained';
 
-  observe(run.page);
-
-  if (child && child !== run.page) {
-    observe(child);
-  }
-
-  // Ответ наблюдается до рестарта: фоновый GET тоже может первым обнаружить потерю сессии.
-  const recovered = run.page.waitForResponse((response) =>
-    response.request().isNavigationRequest() && response.status() === 200);
+    return performance.timeOrigin;
+  })));
 
   await restartOwnServer(run, async (env) => {
     const state = await readSessions(run);
@@ -757,16 +765,18 @@ async function loseSessionAndRecover(run, child = null) {
     await writeFile(env.GRIGDESK_AUTH_SESSIONS, JSON.stringify({ ...state, sessions: {} }));
   });
 
-  await run.page.evaluate(() => {
-    void document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('providers')
-      .load(true);
-  });
-  await recovered;
+  for (const [index, page] of documents.entries()) {
+    await waitFor(async () => await page.evaluate(() => fetch('/api/providers?refresh=1')
+      .then((response) => response.status)) === 200, 30_000,
+    'Труба не восстановила безопасное чтение после перезапуска своего сервера.');
+    assert.equal(page.isClosed(), false);
+    assert.equal(await page.evaluate(() => globalThis.recoveryDocumentProbe), 'retained');
+    assert.equal(await page.evaluate(() => performance.timeOrigin), origins[index]);
+  }
+
   await run.page.locator('.shell').waitFor();
   assert.equal(run.page.url(), address);
-  assert.equal(Object.keys((await readSessions(run)).sessions).length, 1, 'Ровно один обмен ключа.');
-  assert.equal(markedRequests, 1, 'Запросы с 401 автоматически не повторяются.');
-  assert.ok(denied.length > 0 && denied.length < 12, 'Нет шквала отказов.');
+  assert.equal(Object.keys((await readSessions(run)).sessions).length, 1, 'Один общий обмен ключа в трубе.');
   assert.equal(await run.page.locator('input[type=password]').count(), 0);
 }
 
@@ -1098,6 +1108,22 @@ test('SM-E06 native shortcut при фокусе xterm', options, async (t) => {
   assert.equal(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 });
 
+test('SW-E11: модал и документ сохраняются при обновлении сессии трубы', options, async (t) => {
+  const run = await launchSettingsGrigDesk(t);
+
+  if (!run) {
+    return;
+  }
+
+  await openSettings(run);
+
+  const modal = run.page.locator('[data-role=settings-modal]');
+
+  await loseSessionAndRecover(run);
+  assert.equal(await modal.isVisible(), true);
+  assert.equal(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+});
+
 test('SM-E07 закреплённый UI и документ сохраняются при открытии настроек', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
@@ -1107,7 +1133,7 @@ test('SM-E07 закреплённый UI и документ сохраняют�
 
   const before = await run.page.evaluate(() => ({ url: location.href, time: performance.timeOrigin }));
 
-  assert.match(new URL(before.url).pathname, /^\/ui\/[a-f0-9]{64}\/$/);
+  assert.equal(new URL(before.url).pathname, '/');
   await openSettings(run);
   await settingsTab(run.page, 'speech.video');
   await closeSettings(run.page);
@@ -1142,7 +1168,7 @@ test('SM-E09 второй экземпляр сохраняет открытый
   assert.equal(await run.page.locator('[data-role=settings-modal]').count(), 1);
 });
 
-test('DW-E13: чистый браузер не получает документ, deep link и JS', options, async (t) => {
+test('DW-E13: браузер получает инструкцию сервера, UI и JS остаются в трубе', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
@@ -1161,14 +1187,16 @@ test('DW-E13: чистый браузер не получает документ
   for (const pathname of ['/', '/chats', '/#/chats']) {
     const response = await page.goto(run.fixture.address + pathname);
 
-    assert.equal(response.status(), 401);
+    assert.equal(response.status(), 200);
     assert.match(await page.locator('body').textContent(), /GrigDesk открывается в приложении/u);
     assert.equal(await page.locator('.shell, input[type=password], script').count(), 0);
   }
 
-  const response = await context.request.get(asset);
+  assert.equal((await context.request.get(asset)).status(), 403);
 
-  assert.equal(response.status(), 401);
+  const response = await context.request.get(run.fixture.address + new URL(asset).pathname);
+
+  assert.equal(response.status(), 404);
   assert.match(response.headers()['content-type'], /application\/json/u);
 });
 
@@ -1235,7 +1263,7 @@ test('DW-E14: старая cookie отзывается, Electron входит с
   }]);
 
   const page = await context.newPage();
-  const response = await page.goto(run.fixture.address + '/#/chats');
+  const response = await context.request.get(run.fixture.address + '/api/studio3d/state');
 
   assert.equal(response.status(), 401);
   Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
@@ -1280,7 +1308,7 @@ test('DW-E16: восстановление того же hash загружает
   await recovered;
   await page.locator('#stub').waitFor();
   assert.equal(new URL(page.url()).hash, '#/chats');
-  assert.equal(stub.observations.exchanges, 2);
+  await waitFor(() => stub.observations.exchanges === 2);
 });
 
 test('DW-E15: потеря сессии в чате восстанавливает тот же адрес', options, async (t) => {
@@ -1725,6 +1753,9 @@ test('DU-E07 key-only recovery сохраняет геометрию и сост
   assert.equal(after.draft, before.draft);
   assert.deepEqual(after.sizes, before.sizes);
 
+  assert.equal(child.isClosed(), false);
+  await closeSettings(child);
+
   const reopened = await openSettings(run);
 
   assert.equal(await reopened.locator('[data-role=settings-modal]').count(), 1);
@@ -1776,7 +1807,7 @@ async function checkReloadBlocked(run, page) {
   });
 }
 
-test('UI-E01 закреплённая версия переживает замену dist, открывает разделы и настройки',
+test('UI-E01 встроенный пакет переживает замену серверного dist, открывает разделы и настройки',
   { timeout: 150_000 }, async (t) => {
     const run = await createRun(t);
     const working = path.join(run.root, 'working-dist');
@@ -1809,7 +1840,8 @@ test('UI-E01 закреплённая версия переживает заме
 
     Object.assign(run, launched, { fixture });
     await run.page.locator('.shell').waitFor();
-    assert.match(new URL(run.page.url()).pathname, /^\/ui\/[a-f0-9]{64}\/$/);
+    assert.equal(new URL(run.page.url()).pathname, '/');
+    assert.notEqual(new URL(run.page.url()).origin, fixture.address);
 
     const errors = [];
     const assets = [];
@@ -1850,7 +1882,8 @@ test('UI-E01 закреплённая версия переживает заме
     await closeSettings(child);
     await settingsScreenshot(run.page, 'packaged-ui-after-dist-replacement.png');
     assert.ok(assets.length >= 7, 'Lazy-ресурсы действительно загружались после замены рабочей сборки.');
-    assert.ok(assets.every((asset) => asset.status === 200 && /\/ui\/[a-f0-9]{64}\//.test(asset.url)));
+    assert.ok(assets.every((asset) => asset.status === 200
+    && new URL(asset.url).origin === new URL(run.page.url()).origin));
     assert.deepEqual(errors, []);
 
     // Новый документ получает намеренный отказ lazy-ресурса: проверяем видимое сообщение.

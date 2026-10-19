@@ -3,7 +3,7 @@ import { chmod, mkdir, open, readdir, rename, rm } from 'node:fs/promises';
 import { createPrivateKey, randomBytes, X509Certificate } from 'node:crypto';
 import path from 'node:path';
 
-import type { DeviceIdentity, IdentityStore } from '../../tools/mobile-phone/emulator.mts';
+import type { DeviceIdentity, IdentityStore } from '../../shared/desktop/deviceIdentity.ts';
 import { selfSignedCertificate } from './selfSignedCert.ts';
 
 export type SafeStorageLike = {

@@ -7,93 +7,85 @@ import test from 'node:test';
 
 import staticPlugin from '../../server/src/plugins/static.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
-import { publishUiRelease, sealUiRelease } from '../../desktop/src/uiRelease.ts';
+import pluginsModule from '../../server/src/modules/plugins/index.ts';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = require('fastify');
 const cookie = 'grigdesk_sid=fixture-session';
 
 /**
- * Настоящие static/auth плагины обслуживают две разные сборки и собственное состояние.
- * Удаление working dist не должно менять ответы версии, которую уже открыл desktop.
+ * На диске намеренно лежат прежние UI-сборки: сервер не должен раздать их даже с сессией.
+ * Настоящие plugins/auth/static сохраняют доступ к снимкам и странице включённого плагина.
  */
-async function fixture(t, working = true) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'ui-static-'));
+async function fixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-api-static-'));
   const webDist = path.join(root, 'working');
-  const source = path.join(root, 'bundle');
   const uiReleasesDir = path.join(root, 'releases');
+  const base = '/ui/' + 'a'.repeat(64) + '/';
   const app = Fastify();
 
   t.after(async () => {
     await app.close();
     await rm(root, { recursive: true, force: true });
   });
-  await mkdir(path.join(source, 'assets'), { recursive: true });
-  await writeFile(path.join(source, 'index.html'), '<p>упакованный интерфейс</p>');
-  await writeFile(path.join(source, 'assets/panel.js'), 'export default "панель";');
-
-  const release = await sealUiRelease(source);
-
-  await publishUiRelease(source, uiReleasesDir);
-
-  if (working) {
-    await mkdir(webDist);
-    await writeFile(path.join(webDist, 'index.html'), '<p>рабочий интерфейс</p>');
-  }
-
+  await mkdir(path.join(webDist, 'assets'), { recursive: true });
+  await writeFile(path.join(webDist, 'index.html'), '<p>СЕКРЕТНЫЙ_СТАРЫЙ_UI</p>');
+  await writeFile(path.join(webDist, 'assets/x.js'), 'const OLD_UI = true;');
+  await mkdir(path.join(uiReleasesDir, base.slice(4)), { recursive: true });
+  await writeFile(path.join(uiReleasesDir, base.slice(4), 'index.html'), '<p>СТАРЫЙ_ПАКЕТ</p>');
+  await mkdir(path.join(root, 'plugins/viewer/web'), { recursive: true });
+  await writeFile(path.join(root, 'plugins/viewer/plugin.json'), JSON.stringify({
+    id: 'viewer',
+    name: 'Фикстура',
+    web: 'web',
+  }));
+  await writeFile(path.join(root, 'plugins/viewer/web/index.html'), '<h1>Страница плагина</h1>');
   await app.register(authPlugin, {
     authStore: { isValidSession: (id) => id === 'fixture-session' },
+  });
+  await app.register(pluginsModule, {
+    config: { userPluginsDir: path.join(root, 'plugins') },
+    prefs: { read: () => ({ plugins: { viewer: true } }) },
   });
   await app.register(staticPlugin, {
     webDist,
     uiReleasesDir,
     stateDir: path.join(root, 'state'),
   });
+  await writeFile(path.join(root, 'state/shots/fixture.txt'), 'закрытый снимок');
 
-  const get = (url, headers = { cookie }) => app.inject({ url, headers });
-
-  return {
-    app,
-    get,
-    webDist,
-    base: '/ui/' + release.id + '/',
-  };
+  return { app, base };
 }
 
-for (const working of [true, false]) {
-  test(`релиз работает без зависимости от рабочей сборки: working=${working}`, async (t) => {
-    const { get, webDist, base } = await fixture(t, working);
+test('сервер сообщает об приложении и не раздаёт прежние UI и assets', async (t) => {
+  const { app, base } = await fixture(t);
 
-    if (working) {
-      assert.match((await get('/chats')).body, /рабочий интерфейс/);
-      await rm(webDist, { recursive: true });
+  for (const url of ['/', '/chats', '/unknown-document']) {
+    for (const headers of [{ accept: 'text/html' }, { cookie, accept: 'text/html' }]) {
+      const response = await app.inject({ url, headers });
+
+      assert.equal(response.statusCode, 200);
+      assert.match(response.body, /GrigDesk открывается в приложении/);
+      assert.doesNotMatch(response.body, /СЕКРЕТНЫЙ_СТАРЫЙ_UI|СТАРЫЙ_ПАКЕТ/);
+      assert.equal(response.headers['cache-control'], 'no-store');
     }
-
-    const document = await get(base);
-    const asset = await get(base + 'assets/panel.js');
-
-    assert.equal(document.statusCode, 200);
-    assert.match(document.body, /упакованный интерфейс/);
-    assert.equal(asset.statusCode, 200);
-    assert.match(asset.headers['content-type'], /javascript/);
-    assert.match(asset.headers['cache-control'], /immutable/);
-    assert.equal((await get(base + '?window=settings')).statusCode, 200);
-  });
-}
-
-test('ресурсы и staging не подменяются SPA, новая статика требует сессию', async (t) => {
-  const { get, base } = await fixture(t);
-
-  for (const url of [base, base + 'release.json', base + 'assets/panel.js', '/%75i/' + base.slice(4)]) {
-    assert.equal((await get(url, {})).statusCode, 401, url);
   }
 
-  for (const url of ['/assets/missing.js', '/%61ssets/missing.js', '/missing.js',
-    '/ui/.pending-fixture/index.html', '/ui/' + 'b'.repeat(64) + '/', base + 'assets/missing.js',
-    '/api/missing']) {
-    const response = await get(url);
+  for (const url of ['/assets/x.js', '/assets/missing.js', '/%61ssets/x.js', base,
+    base + 'index.html', '/ui/.pending/index.html', '/api/missing', '/missing.js']) {
+    const response = await app.inject({ url, headers: { cookie, accept: 'text/html' } });
 
     assert.equal(response.statusCode, 404, url);
+    assert.doesNotMatch(response.body, /СЕКРЕТНЫЙ_СТАРЫЙ_UI|СТАРЫЙ_ПАКЕТ/);
     assert.doesNotMatch(response.headers['content-type'], /html/);
+  }
+});
+
+test('снимки и страницы плагинов остаются под общим гардом', async (t) => {
+  const { app } = await fixture(t);
+
+  for (const url of ['/shots/fixture.txt', '/%73hots/fixture.txt', '/api/ext/viewer/web/']) {
+    assert.equal((await app.inject({ url })).statusCode, 401, url);
+    assert.equal((await app.inject({ url, headers: { cookie } })).statusCode, 200, url);
   }
 });

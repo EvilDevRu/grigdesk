@@ -1,3 +1,4 @@
+import { assertCancelledStartupSettings } from './startup-settings.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -11,7 +12,7 @@ import test from 'node:test';
 import { probeGrigDesk } from '../../../shared/runtime/grigDeskReadiness.ts';
 import { splashBounds } from '../../../desktop/src/splashWindow.ts';
 import { freePort, isolatedEnv } from '../../server/helpers/pluginBootFixture.js';
-import { desktopLaunchOptions, isSplashPage, launchDesktopRaw } from './launch.mjs';
+import { desktopLaunchOptions, isSplashPage, isPipePage, launchDesktopRaw } from './launch.mjs';
 import {
   fixtureEntries as readFixtureLog,
   writeRuntimeDescriptor,
@@ -127,12 +128,6 @@ async function createRun(t, { descriptor = true } = {}) {
     splashSeen: false,
   };
 
-  await writeServerFixture(run.fixture);
-
-  if (descriptor) {
-    await writeRuntimeDescriptor(run.runtimeFile, run.fixture);
-  }
-
   t.after(async () => {
     try {
       await closeApp(run);
@@ -156,6 +151,11 @@ async function createRun(t, { descriptor = true } = {}) {
       await rm(root, { recursive: true, force: true });
     }
   });
+  await writeServerFixture(run.fixture);
+
+  if (descriptor) {
+    await writeRuntimeDescriptor(run.runtimeFile, run.fixture);
+  }
 
   // Окружение по списку-разрешению не несёт XDG_CURRENT_DESKTOP: связку ключей задаём явно,
   // как packaged smoke, иначе Chromium выберет открытое хранилище и окно откажется стартовать.
@@ -166,6 +166,8 @@ async function createRun(t, { descriptor = true } = {}) {
     isolateEnv: true,
     env: {
       GRIGDESK_PORT: String(port),
+      GRIGDESK_CLIENT_UI_DIR: process.env.GRIGDESK_E2E_WEB_DIST || path.join(desktop, 'dist/ui'),
+      GRIGDESK_HOME: path.join(root, 'data'),
       GRIGDESK_WINDOW_KEY_PATH: run.keyFile,
       GRIGDESK_REQUIRE_VPN: '0',
       GRIGDESK_E2E_FIXTURE_LOG: run.fixtureLog,
@@ -205,12 +207,12 @@ async function createRun(t, { descriptor = true } = {}) {
 
 /**
  * Штатное закрытие через Playwright (app.quit), а зависшее — SIGKILL своего процесса.
- * Уже завершившийся процесс не трогается.
+ * Playwright закрывается и после выхода приложения: его соединение не держит раннер.
  */
 async function closeApp(run) {
   const child = run.child;
 
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
+  if (!run.app || !child) {
     return;
   }
 
@@ -287,7 +289,7 @@ async function waitForMain(run, timeout = 60_000) {
   await waitFor(async () => {
     const windows = await windowsState(run.app);
     const splash = windows.some((window) => window.url.endsWith('/splash/index.html'));
-    const main = windows.some((window) => window.visible && window.url.startsWith(run.origin + '/'));
+    const main = windows.some((window) => window.visible && isPipePage({ url: () => window.url }));
 
     at = Date.now();
     assert.equal(splash && main, false, 'Главное окно видно, пока жива заставка.');
@@ -295,7 +297,7 @@ async function waitForMain(run, timeout = 60_000) {
     return main && !splash;
   }, timeout, () => `Главное окно не показано. stderr: ${run.stderr.slice(-1500)}`);
 
-  const page = run.app.windows().find((candidate) => candidate.url().startsWith(run.origin + '/'));
+  const page = run.app.windows().find(isPipePage);
 
   page?.setDefaultTimeout(30_000);
 
@@ -317,7 +319,7 @@ async function expectFailure(run, pattern) {
 
   const windows = await windowsState(run.app).catch(() => []);
 
-  assert.equal(windows.some((window) => window.visible && window.url.startsWith(run.origin + '/')), false);
+  assert.equal(windows.some((window) => window.visible && isPipePage({ url: () => window.url })), false);
   run.child.kill('SIGTERM');
 
   const [code] = await within(run.exited, 10_000, 'Приложение не вышло после SIGTERM.');
@@ -401,6 +403,8 @@ test('SE-02: сервера нет — приложение запускает �
   });
   await waitForMain(run);
 
+  await waitFor(async () => (await fixtureEntries(run)).some((entry) => entry.event === 'start'));
+
   const start = (await fixtureEntries(run)).find((entry) => entry.event === 'start');
   const home = process.env.HOME;
 
@@ -455,7 +459,7 @@ test('SE-05: закрытие заставки во время ворот — в
     assert.deepEqual(await fixtureEntries(run), []);
   });
 
-test('SE-06: второй экземпляр во время заставки не создаёт окон и второго сервера', options, async (t) => {
+test('SE-06: второй экземпляр сохраняет одно главное окно и один запуск ворот', options, async (t) => {
   const run = await createRun(t);
 
   if (!run) {
@@ -469,7 +473,6 @@ test('SE-06: второй экземпляр во время заставки н
   await waitForSplash(run);
 
   const gate = (await readFile(run.gatePid, 'utf8')).trim();
-  const before = await windowsState(run.app);
   const selected = desktopLaunchOptions(run.launchOptions(extra));
   const second = run.spawn(selected.executablePath, selected.args, {
     env: selected.env,
@@ -482,8 +485,8 @@ test('SE-06: второй экземпляр во время заставки н
 
   const after = await windowsState(run.app);
 
-  assert.equal(after.length, before.length);
-  assert.equal(after.some((window) => window.visible && window.url.startsWith(run.origin + '/')), false);
+  assert.equal(after.filter((window) => isPipePage({ url: () => window.url })).length, 1);
+  assert.equal(after.filter((window) => window.url.startsWith('file:')).length <= 1, true);
   assert.equal((await readFile(run.gatePid, 'utf8')).trim(), gate);
   assert.deepEqual(await fixtureEntries(run), []);
   await run.app.close();
@@ -507,23 +510,23 @@ test('SE-07: после показа перезагрузка и 401 не соз
     authKey,
   });
 
-  t.after(() => stub.close());
+  t.after(() => stub.dispose());
   await run.launch();
 
   const { page } = await waitForMain(run);
 
-  await page.locator('#stub').waitFor();
+  await page.locator('.shell').waitFor();
   run.splashSeen = false;
   await page.reload();
-  await page.locator('#stub').waitFor();
+  await page.locator('.shell').waitFor();
   stub.revokeSessions();
   await page.reload().catch(() => undefined);
-  await page.locator('#stub').waitFor({ timeout: 20_000 });
+  await page.locator('.shell').waitFor({ timeout: 20_000 });
   assert.equal(run.splashSeen, false);
   assert.equal((await windowsState(run.app)).length, 1);
 });
 
-test('SE-08: чужой HTTP на порту — отказ «это не GrigDesk», чужой сервер жив', options, async (t) => {
+test('SE-08: чужой HTTP — состояние профиля с причиной, окно и чужой сервер живы', options, async (t) => {
   const run = await createRun(t);
 
   if (!run) {
@@ -538,7 +541,16 @@ test('SE-08: чужой HTTP на порту — отказ «это не GrigDe
   await new Promise((resolve) => foreign.listen(run.port, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => foreign.close(resolve)));
   await run.launch();
-  await expectFailure(run, /это не GrigDesk\./u);
+
+  const { page } = await waitForMain(run);
+
+  await page.waitForFunction(async () => {
+    const state = await (await fetch('/__shell/state')).json();
+
+    return state.status === 'offline' && /это не GrigDesk/.test(state.detail?.message || '');
+  });
+  assert.equal(run.child.exitCode, null);
+  assert.ok(await page.getByRole('button', { name: 'Добавить машину', exact: true }).isVisible());
   assert.equal((await fetch(run.origin + '/api/auth/state')).status, 200);
 });
 
@@ -553,15 +565,15 @@ test('SE-09: закрытие настроек не выключает прил�
 
   const { page } = await waitForMain(run);
 
-  await page.locator('#stub').waitFor();
+  await page.locator('.shell').waitFor();
 
   const pid = await startedPid(run);
 
-  await page.evaluate((origin) => window.open(origin + '/?window=settings#/settings'), run.origin);
-  await page.locator('#stub-settings[open]').waitFor();
+  await page.evaluate(() => window.open(location.origin + '/?window=settings#/settings'));
+  await page.locator('[data-role=settings-modal]').waitFor();
   assert.equal((await windowsState(run.app)).length, 1);
-  await page.locator('#stub-settings-close').click();
-  await page.locator('#stub-settings[open]').waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+  await page.locator('[data-role=settings-modal]').waitFor({ state: 'hidden' });
   assert.equal(run.child.exitCode, null);
   assert.equal(await alive(pid), true);
   await run.app.evaluate(({ BrowserWindow }) => {
@@ -631,7 +643,7 @@ test('SE-11: перезапуск своего сервера кодом 75 — 
 
   const { page } = await waitForMain(run);
 
-  await page.locator('#stub').waitFor();
+  await page.locator('.shell').waitFor();
 
   const first = await startedPid(run);
 
@@ -639,6 +651,9 @@ test('SE-11: перезапуск своего сервера кодом 75 — 
     .filter((entry) => entry.event === 'listen').length;
 
   run.splashSeen = false;
+
+  const documentOrigin = await page.evaluate(() => performance.timeOrigin);
+
   process.kill(first, 'SIGUSR2');
   await waitFor(async () => await listening() === 2, 60_000, 'Новое поколение сервера не поднялось.');
 
@@ -646,8 +661,10 @@ test('SE-11: перезапуск своего сервера кодом 75 — 
 
   assert.notEqual(second, first);
   assert.equal(await alive(first), false);
-  await page.reload().catch(() => undefined);
-  await page.locator('#stub').waitFor({ timeout: 30_000 });
+  assert.equal(await page.evaluate(() => fetch('/api/auth/state').then((response) => response.json()))
+    .then((state) => state.authenticated), true);
+  await page.locator('.shell').waitFor({ timeout: 30_000 });
+  assert.equal(await page.evaluate(() => performance.timeOrigin), documentOrigin);
   assert.equal(run.splashSeen, false);
   await run.app.close();
   assert.equal((await run.exited)[0], 0);
@@ -706,7 +723,7 @@ test('SE-12: геометрия и вид заставки', options, async (t) 
   await waitForMain(run);
 });
 
-test('SE-13: сервер не отвечает и runtime.json нет — отказ «не установлен»', options, async (t) => {
+test('SE-13: без сервера и runtime.json открывается экран машин', options, async (t) => {
   const run = await createRun(t, { descriptor: false });
 
   if (!run) {
@@ -715,7 +732,13 @@ test('SE-13: сервер не отвечает и runtime.json нет — от�
 
   await rm(run.runtimeFile, { force: true });
   await run.launch();
-  await expectFailure(run, /не установлен для приложения/u);
+
+  const { page } = await waitForMain(run);
+  const state = await page.evaluate(() => fetch('/__shell/state').then((response) => response.json()));
+
+  assert.equal(state.localAvailable, false);
+  assert.equal(await page.getByRole('button', { name: 'Добавить машину', exact: true }).isVisible(), true);
+  assert.equal(run.child.exitCode, null);
 });
 
 test('SE-14: SIGTERM приложению после показа — код 0, свой сервер завершён', options, async (t) => {
@@ -738,7 +761,7 @@ test('SE-14: SIGTERM приложению после показа — код 0, 
   await waitFor(async () => !await alive(pid), 10_000, 'Свой сервер жив после SIGTERM приложению.');
 });
 
-test('SE-15: закрытие заставки до показа не трогает settings.json', options, async (t) => {
+test('SE-15: закрытие заставки до показа сохраняет геометрию settings.json', options, async (t) => {
   const run = await createRun(t);
 
   if (!run) {
@@ -759,18 +782,21 @@ test('SE-15: закрытие заставки до показа не трога
   await mkdir(run.dataDir, { recursive: true });
   await writeFile(file, content);
   await run.launch({ GRIGDESK_E2E_GATE_HOLD: run.gatePid });
-  await waitFor(async () => /^\d+$/u.test((await readFile(run.gatePid, 'utf8')).trim()));
+  await waitForSplash(run);
   await closeSplashLikeHuman(run);
 
   const [code] = await within(run.exited, 20_000, 'Приложение не вышло после закрытия заставки.');
 
   assert.equal(code, 0);
-  assert.equal(await readFile(file, 'utf8'), content);
+
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+
+  assertCancelledStartupSettings(JSON.parse(content), saved, run.origin);
 });
 
 // Нестабильный: 95 с свободный порт сценария никто не держит, и под общей нагрузкой (например,
 // параллельный run-all) его может занять чужой HTTP — приложение верно ответит «не GrigDesk».
-test('SE-16: VPN дольше 90 с не роняет старт — окно ждёт ворота (нестабильный)', {
+test('SE-16: окно показано до VPN, ожидание больше 90 с не закрывает документ', {
   timeout: 240_000,
 }, async (t) => {
   const run = await createRun(t);
@@ -783,13 +809,25 @@ test('SE-16: VPN дольше 90 с не роняет старт — окно ж
   const started = Date.now();
 
   await run.launch({ GRIGDESK_E2E_GATE_OPEN_FILE: open });
-  await waitForSplash(run);
+
+  const first = await waitForMain(run);
+  const origin = new URL(first.page.url()).origin;
+
+  await first.page.evaluate(() => {
+    globalThis.startupDocumentProbe = 'retained';
+  });
   await new Promise((resolve) => setTimeout(resolve, 95_000));
   assert.equal(run.child.exitCode, null, `Окно вышло во время ожидания VPN: ${run.stderr.slice(-1500)}`);
   assert.equal(run.stderr.includes('GrigDesk: '), false, run.stderr.slice(-1500));
   assert.deepEqual(await fixtureEntries(run), []);
   await writeFile(open, '');
-  await waitForMain(run, 60_000);
+
+  const restored = await waitForMain(run, 60_000);
+
+  await restored.page.waitForFunction(async () => (await (await fetch('/__shell/state')).json())
+    .status === 'online');
+  assert.equal(new URL(restored.page.url()).origin, origin);
+  assert.equal(await restored.page.evaluate(() => globalThis.startupDocumentProbe), 'retained');
   assert.ok(Date.now() - started > 95_000);
   assert.equal(run.stderr.includes('GrigDesk: '), false, run.stderr.slice(-1500));
   await run.app.close();

@@ -1,270 +1,153 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import http from 'node:http';
+import { constants as fsConstants } from 'node:fs';
 import { once } from 'node:events';
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-
 import { extractFile, listPackage } from '../../../desktop/node_modules/@electron/asar/lib/asar.js';
 import {
-  FuseV1Options,
-  getCurrentFuseWire,
+  FuseV1Options, getCurrentFuseWire,
 } from '../../../desktop/node_modules/@electron/fuses/dist/index.js';
 import { FuseState } from '../../../desktop/node_modules/@electron/fuses/dist/constants.js';
-import { freePort } from '../../server/helpers/pluginBootFixture.js';
 import { desktopLaunchOptions } from './launch.mjs';
+import { freePort } from '../../server/helpers/pluginBootFixture.js';
 import { fixtureEntries, writeRuntimeDescriptor, writeServerFixture } from './server-fixture.mjs';
-import { startStub } from './stub.mjs';
-import { verifyUiRelease } from '../../../desktop/src/uiRelease.ts';
+import { sealUiRelease, verifyUiRelease } from '../../../desktop/src/uiRelease.ts';
 
 const execute = promisify(execFile);
 const modes = [
-  {
-    name: 'linux-unpacked',
-    executable: process.env.GRIGDESK_PACKAGED_EXECUTABLE,
-  },
-  {
-    name: 'AppImage',
-    executable: process.env.GRIGDESK_PACKAGED_APPIMAGE,
-  },
+  { name: 'linux-unpacked', executable: process.env.GRIGDESK_PACKAGED_EXECUTABLE },
+  { name: 'AppImage', executable: process.env.GRIGDESK_PACKAGED_APPIMAGE },
 ];
 
 /**
- * Отсутствующий пакет и FUSE дают отдельный NOT RUN до запуска Electron.
- * При готовом бинарнике любая ошибка приложения остаётся FAIL самого smoke.
+ * AppImage может оставить оболочку между spawn и главным процессом Electron.
+ * Читается только дерево собственного child, чтобы завершить приложение штатным SIGTERM.
  */
-async function available(t, mode) {
-  if (!mode.executable) {
-    t.skip('Не задан путь готового пакета.');
-
-    return false;
-  }
-
-  assert.equal(path.isAbsolute(mode.executable), true);
-
-  if (mode.name === 'linux-unpacked') {
-    assert.equal(path.basename(mode.executable), 'grigdesk', 'GO-08: имя ELF готового окна');
-  }
-
+async function electronMain(pid) {
   try {
-    await access(mode.executable);
-  } catch {
-    t.skip('Готовый пакет отсутствует.');
+    const executable = await readlink(`/proc/${pid}/exe`);
 
-    return false;
-  }
-
-  if (mode.name === 'AppImage') {
-    try {
-      await access('/dev/fuse');
-    } catch {
-      t.skip('В песочнице отсутствует /dev/fuse; прямой запуск AppImage невозможен.');
-
-      return false;
+    if (path.basename(executable) === 'grigdesk') {
+      return pid;
     }
+
+    const children = await readFile(`/proc/${pid}/task/${pid}/children`, 'utf8');
+
+    for (const child of children.trim().split(/\s+/).filter(Boolean)) {
+      const main = await electronMain(Number(child));
+
+      if (main) {
+        return main;
+      }
+    }
+  } catch {
+    return null;
   }
 
-  return true;
+  return null;
 }
 
 /**
- * Каждый режим имеет собственный профиль и случайную постоянную cookie.
- * Cleanup ждёт exit только своего child до остановки HTTP и удаления root.
+ * Пакет запускается обычным spawn: защитные fuses остаются штатными.
+ * Видимость проверяет собственный Xvfb; кадр сохраняется для визуальной проверки экрана машин.
  */
-async function packagedRun(t, mode) {
-  const root = await mkdtemp(path.join(tmpdir(), 'desktop-packaged-'));
+async function standaloneRun(t, mode) {
+  const root = await mkdtemp(path.join(tmpdir(), 'grigdesk-package-'));
   const dataDir = path.join(root, 'profile');
-  const marker = randomBytes(24).toString('base64url');
-  const children = [];
-  let stub;
+  const screenshotDir = process.env.GRIGDESK_E2E_ARTIFACTS;
 
+  assert.ok(screenshotDir && path.isAbsolute(screenshotDir));
+  await mkdir(screenshotDir, { recursive: true });
+
+  const selected = desktopLaunchOptions({
+    root,
+    dataDir,
+    isolateEnv: true,
+    executablePath: mode.executable,
+    args: [...(mode.name === 'AppImage' ? ['--appimage-extract-and-run'] : []),
+      '--password-store=gnome-libsecret'],
+    env: {
+      GRIGDESK_HOME: path.join(root, 'server-data'),
+      GRIGDESK_WINDOW_KEY_PATH: path.join(root, 'auth/key'),
+    },
+  });
+  const child = spawn(selected.executablePath, selected.args, {
+    env: selected.env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    detached: true,
+  });
+  const exited = once(child, 'exit');
+  let log = '';
+
+  child.stderr.on('data', (chunk) => {
+    log += chunk;
+  });
   t.after(async () => {
-    for (const child of children) {
-      if (child.exitCode === null && child.signalCode === null) {
-        const exited = once(child, 'exit');
-
-        child.kill('SIGKILL');
-        await exited;
-      }
+    if (child.exitCode === null && child.signalCode === null) {
+      process.kill(-child.pid, 'SIGKILL');
+      await exited;
     }
 
-    await stub?.close();
     await rm(root, { recursive: true, force: true });
   });
 
-  const authKey = randomBytes(32).toString('base64url');
-  const keyFile = path.join(root, 'window-auth/key');
+  const deadline = Date.now() + 30000;
+  let screen;
+  let visible = false;
 
-  await mkdir(path.dirname(keyFile), { mode: 0o700 });
-  await writeFile(keyFile, authKey, { mode: 0o600 });
-  stub = await startStub({
-    packagedCookie: marker,
-    authKey,
-    uiReleasesDir: path.join(root, 'ui-releases'),
-  });
+  while (Date.now() < deadline && child.exitCode === null) {
+    const { stdout } = await execute('python3', ['-I',
+      path.join(import.meta.dirname, 'x11-windows.py')]);
 
-  /**
-   * Пакет стартует без inspector/CDP и закрывается только через window.close страницы.
-   * Код 0 без сигнала доказывается до чтения SQLite и повторного запуска профиля.
-   */
-  async function launch() {
-    const selected = desktopLaunchOptions({
-      root,
-      dataDir,
-      executablePath: mode.executable,
-      args: [`--grigdesk-url=${stub.address}`, '--password-store=gnome-libsecret'],
-      env: {
-        GRIGDESK_WINDOW_KEY_PATH: keyFile,
-        GRIGDESK_UI_RELEASES_DIR: path.join(root, 'ui-releases'),
-      },
-    });
-    const child = spawn(selected.executablePath, selected.args, {
-      env: selected.env,
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    const exited = once(child, 'exit');
-    let log = '';
-    let deadline;
+    screen = JSON.parse(stdout);
+    visible = screen.windows.some((window) => window.visible && window.width > 800);
 
-    children.push(child);
-    child.stderr.on('data', (chunk) => {
-      log += chunk;
-    });
-
-    try {
-      const [code, signal] = await Promise.race([
-        exited,
-        new Promise((_resolve, reject) => {
-          deadline = setTimeout(() => reject(new Error('Окно не закрылось штатно за 30 с.')), 30_000);
-        }),
-      ]);
-
-      assert.equal(signal, null);
-      assert.equal(code, 0, `Пакет завершился с ошибкой: ${log.slice(-2000)}`);
-    } finally {
-      clearTimeout(deadline);
+    if (visible) {
+      break;
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  return {
-    dataDir,
-    stub,
-    launch,
-  };
-}
+  t.diagnostic(JSON.stringify(screen));
+  await execute('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'x11grab',
+    '-video_size', `${screen.width}x${screen.height}`, '-i', process.env.DISPLAY,
+    '-frames:v', '1', '-y', path.join(screenshotDir, `${mode.name}.png`)]);
+  assert.equal(visible, true, log.slice(-2000));
 
-/**
- * SQLite ищется только в двух известных местах собственной partition.
- * При ошибке перечисляется только этот подкаталог профиля, без глобального поиска.
- */
-async function cookieDatabase(dataDir) {
-  const partition = path.join(dataDir, 'Partitions/grigdesk-local');
+  const mainPid = await electronMain(child.pid);
 
-  for (const relative of ['Cookies', 'Network/Cookies']) {
-    const candidate = path.join(partition, relative);
+  assert.ok(mainPid, 'должен работать главный процесс Electron');
+  process.kill(mainPid, 'SIGTERM');
 
-    try {
-      await access(candidate);
+  const [code, signal] = await exited;
 
-      return candidate;
-    } catch {
-      // Следующий известный кандидат остаётся в той же собственной partition.
-    }
-  }
+  assert.equal(code, 0, log.slice(-2000));
+  assert.equal(signal, null);
 
-  const files = await readdir(partition, { recursive: true }).catch(() => []);
+  const settings = JSON.parse(await readFile(path.join(dataDir, 'settings.json'), 'utf8'));
 
-  assert.fail(`Cookie DB отсутствует; собственная partition содержит: ${files.join(', ')}`);
-}
-
-/**
- * Read-only запрос выводит лишь размеры и признаки строки, без cookie и BLOB.
- * Изолированный Python не читает пользовательские site-packages или настройки.
- */
-async function encryptedCookie(database) {
-  const source = `
-import json, sqlite3, sys
-from pathlib import Path
-connection = sqlite3.connect(Path(sys.argv[1]).as_uri() + '?mode=ro', uri=True)
-rows = connection.execute(
-    "SELECT length(value), length(encrypted_value), expires_utc > 0 "
-    "FROM cookies WHERE name = 'stub' AND host_key = '127.0.0.1'"
-).fetchall()
-connection.close()
-print(json.dumps(rows))
-`;
-  const { stdout } = await execute('python3', ['-I', '-c', source, database], { timeout: 10_000 });
-  const rows = JSON.parse(stdout);
-
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0][0], 0, 'Открытый value должен быть пустым.');
-  assert.ok(rows[0][1] > 0, 'encrypted_value должен быть непустым.');
-  assert.equal(rows[0][2], 1);
+  assert.equal(settings.version, 2);
+  assert.deepEqual(settings.profiles, []);
+  assert.equal(settings.selected, null);
 }
 
 for (const mode of modes) {
-  test(`DW-P1/${mode.name}: готовое окно загружает свою страницу`, { timeout: 45_000 }, async (t) => {
-    if (!await available(t, mode)) {
-      return;
-    }
+  test(`UC-P1/${mode.name}: пакет без сервера показывает встроенный экран`,
+    { timeout: 60000 }, async (t) => {
+      if (!mode.executable) {
+        t.skip('Не задан путь пакета.');
 
-    const run = await packagedRun(t, mode);
-
-    await run.launch();
-    assert.deepEqual(run.stub.observations.probes, [{
-      origin: run.stub.address,
-      requireType: 'undefined',
-      processType: 'undefined',
-    }]);
-
-    const probe = run.stub.observations.requests.find((request) => request.pathname === '/probe/loaded');
-
-    assert.equal(probe?.packagedCookiePresent, true);
-  });
-
-  test(`DW-P2/${mode.name}: постоянная cookie зашифрована и читается после перезапуска`,
-    { timeout: 90_000 }, async (t) => {
-      if (!await available(t, mode)) {
         return;
       }
 
-      const run = await packagedRun(t, mode);
-
-      await run.launch();
-
-      await t.test(`DW-P2/${mode.name}/SQLite: на диске только шифрованная строка`, async (subtest) => {
-        try {
-          await execute('python3', ['-I', '-c', 'import sqlite3'], { timeout: 5000 });
-        } catch (error) {
-          if (error.code === 'ENOENT' || /No module named .sqlite3/u.test(error.stderr ?? '')) {
-            subtest.skip('Недоступны python3/sqlite3 для проверки базы.');
-
-            return;
-          }
-
-          throw error;
-        }
-
-        const database = await cookieDatabase(run.dataDir);
-
-        await encryptedCookie(database);
-        subtest.diagnostic(`Cookie DB: ${path.relative(run.dataDir, database)}`);
-      });
-      await run.launch();
-
-      const documents = run.stub.observations.requests.filter((request) =>
-        /^\/ui\/[a-f0-9]{64}\/$/.test(request.pathname));
-
-      assert.equal(documents.length, 2);
-      assert.equal(documents[0].packagedCookiePresent, false);
-      assert.equal(documents[1].packagedCookiePresent, true);
-      assert.equal(run.stub.observations.cookieSets, 1, 'Сервер не устанавливает cookie повторно.');
-      assert.equal(run.stub.observations.probes.length, 2);
-      assert.ok(run.stub.observations.requests.filter((request) => request.pathname === '/probe/loaded')
-        .every((request) => request.packagedCookiePresent));
+      await standaloneRun(t, mode);
     });
 }
 
@@ -344,6 +227,28 @@ test('DW-P4: ресурсы заставки лежат в пакете без �
 
   assert.equal(files.includes('/dist/splash/illustration.png'), false);
 });
+
+for (const target of fuseTargets) {
+  test(`UI-P1/${target.name}: пакет содержит целый интерфейс с проверяемым id`, async (t) => {
+    if (!target.executable) {
+      t.skip('Не задан путь готового пакета.');
+
+      return;
+    }
+
+    const source = path.join(import.meta.dirname, '../../../desktop/dist/ui');
+    const packaged = path.join(path.dirname(target.executable), 'resources/ui');
+    const expected = await verifyUiRelease(source);
+    const actual = await verifyUiRelease(packaged);
+
+    assert.deepEqual(actual, expected);
+    assert.deepEqual(JSON.parse(await readFile(path.join(packaged, 'api-version.json'), 'utf8')),
+      { major: 0, minor: 1 });
+    assert.ok(actual.files.some((file) => /assets\/CodePanel-.*\.js$/.test(file.path)));
+    assert.ok(actual.files.some((file) => /assets\/SettingsModal-.*\.js$/.test(file.path)));
+    assert.equal(actual.files.some((file) => /(?:^|\/)(?:sw\.js|.*\.webmanifest)$/.test(file.path)), false);
+  });
+}
 
 /**
  * Живой процесс — есть в /proc и не зомби; отсутствие записи значит, что процесса нет.
@@ -442,12 +347,28 @@ test('DW-P5: распакованный AppImage сам поднимает се�
     let deadline;
 
     try {
+      const ready = Date.now() + 30000;
+
+      while (Date.now() < ready && child.exitCode === null) {
+        if ((await fixtureEntries(fixtureLog)).some((entry) => entry.event === 'listen')) {
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      assert.ok((await fixtureEntries(fixtureLog)).some((entry) => entry.event === 'listen'),
+        `Свой сервер не запущен: ${log.slice(-2000)}`);
+
+      const mainPid = await electronMain(child.pid);
+
+      assert.ok(mainPid);
+      process.kill(mainPid, 'SIGTERM');
+
       const [code, signal] = await Promise.race([
         exited,
         new Promise((_resolve, reject) => {
-          deadline = setTimeout(() => {
-            reject(new Error(`Пакет не закрылся за 60 с: ${log.slice(-2000)}`));
-          }, 60_000);
+          deadline = setTimeout(() => reject(new Error('Пакет не закрылся за 60 с.')), 60000);
         }),
       ]);
 
@@ -476,22 +397,129 @@ test('DW-P5: распакованный AppImage сам поднимает се�
     assert.deepEqual(entries.filter((entry) => entry.event === 'exit').map((entry) => entry.code), [0]);
   });
 
-for (const target of fuseTargets) {
-  test(`UI-P1/${target.name}: пакет содержит целый интерфейс с проверяемым id`, async (t) => {
-    if (!target.executable) {
-      t.skip('Не задан путь готового пакета.');
+/**
+ * Копия готового пакета сохраняет main и fuses, заменяется только запечатанный UI фикстуры.
+ * Renderer сообщает typeof require/process через обычный API трубы без inspector/CDP.
+ */
+async function rendererProbe(t, executable) {
+  const root = await mkdtemp(path.join(tmpdir(), 'grigdesk-packaged-renderer-'));
+  const packageCopy = path.join(root, 'package');
+  const uiDir = path.join(packageCopy, 'resources/ui');
+  const key = randomBytes(32).toString('base64url');
+  const keyFile = path.join(root, 'auth/key');
+  const probes = [];
+  let child;
+  const server = http.createServer(async (request, response) => {
+    response.setHeader('X-GrigDesk-Api', '0.1');
+    response.setHeader('Content-Type', 'application/json');
 
-      return;
+    if (request.url === '/api/auth/window-session') {
+      response.setHeader('Set-Cookie', 'grigdesk_sid=packaged-fixture; HttpOnly');
+      response.end('{}');
+    } else if (request.url === '/api/auth/state') {
+      response.end('{"configured":true,"authenticated":true}');
+    } else if (request.url === '/api/packaged-probe') {
+      let body = '';
+
+      for await (const chunk of request) {
+        body += chunk;
+      }
+
+      probes.push(JSON.parse(body));
+      response.end('{}');
+    } else {
+      response.end('{}');
+    }
+  });
+
+  t.after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+
+      process.kill(-child.pid, 'SIGKILL');
+      await exited;
     }
 
-    const source = path.join(import.meta.dirname, '../../../desktop/dist/ui');
-    const packaged = path.join(path.dirname(target.executable), 'resources/ui');
-    const expected = await verifyUiRelease(source);
-    const actual = await verifyUiRelease(packaged);
-
-    assert.deepEqual(actual, expected);
-    assert.ok(actual.files.some((file) => /assets\/CodePanel-.*\.js$/.test(file.path)));
-    assert.ok(actual.files.some((file) => /assets\/SettingsModal-.*\.js$/.test(file.path)));
-    assert.equal(actual.files.some((file) => /(?:^|\/)(?:sw\.js|.*\.webmanifest)$/.test(file.path)), false);
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
   });
+  await cp(path.dirname(executable), packageCopy, {
+    recursive: true, mode: fsConstants.COPYFILE_FICLONE,
+  });
+  await rm(uiDir, { recursive: true, force: true });
+  await mkdir(uiDir, { recursive: true });
+  await mkdir(path.dirname(keyFile), { mode: 0o700 });
+  await writeFile(keyFile, key, { mode: 0o600 });
+  await writeFile(path.join(uiDir, 'api-version.json'), '{"major":0,"minor":1}');
+  await writeFile(path.join(uiDir, 'index.html'), `<!doctype html><meta charset="utf-8">
+<title>GrigDesk — проверка renderer</title><h1>Проверка renderer</h1><script>
+(async () => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const state = await fetch('/__shell/state').then(response => response.json());
+    if (state.status === 'online') break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  await fetch('/api/packaged-probe', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requireType: typeof require, processType: typeof process }),
+  });
+  window.close();
+})();
+</script>`);
+  await sealUiRelease(uiDir);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const selected = desktopLaunchOptions({
+    root,
+    dataDir: path.join(root, 'profile'),
+    isolateEnv: true,
+    executablePath: path.join(packageCopy, path.basename(executable)),
+    args: [`--grigdesk-url=http://127.0.0.1:${server.address().port}`, '--password-store=gnome-libsecret'],
+    env: { GRIGDESK_HOME: path.join(root, 'server-data'), GRIGDESK_WINDOW_KEY_PATH: keyFile },
+
+  });
+
+  child = spawn(selected.executablePath, selected.args, {
+    env: selected.env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    detached: true,
+
+  });
+
+  let log = '';
+
+  child.stderr.on('data', (chunk) => {
+    log += chunk;
+  });
+
+  let timer;
+
+  try {
+    const [code, signal] = await Promise.race([
+      once(child, 'exit'),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`Renderer не завершил probe: ${log.slice(-2000)}`)), 30000);
+      }),
+    ]);
+
+    assert.equal(code, 0, log.slice(-2000));
+    assert.equal(signal, null);
+    assert.deepEqual(probes, [{ requireType: 'undefined', processType: 'undefined' }]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+for (const target of fuseTargets) {
+  test(`DW-P1/${target.name}: renderer готового пакета не имеет require/process`,
+    { timeout: 60000 }, async (t) => {
+      if (!target.executable) {
+        t.skip('Не задан путь готового ELF пакета.');
+
+        return;
+      }
+
+      await rendererProbe(t, target.executable);
+    });
 }

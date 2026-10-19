@@ -17,3 +17,8 @@ runtime в исходную фикстуру не входят.
 b24 в путь с пробелами и запускает их из разных cwd. Он копирует весь `shared/`,
 поскольку main использует `shared/node/files.ts` наряду с runtime-настройками.
 Копирование только прежних отдельных runtime-файлов теряет зависимость до HTTP-запроса.
+
+Фикстура `mobile-build-script.test.js` переносит также `tools/mobile-client.mts`, общий
+сборщик `client-ui.mts`, `desktop/src/uiRelease.ts` и его зависимости из shared. Подменённый
+npm создаёт index.html в переданном staging outDir, Gradle — APK модуля :client. Это сохраняет
+проверку настоящего sealing и публикации файла, не вызывая внешние компиляторы.

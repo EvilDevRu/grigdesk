@@ -93,3 +93,54 @@ test('MB-08: потерянный ответ pair, конкуренция, exp �
   now = issued.exp + 1;
   await assert.rejects(() => pairing.pair(issued.code, fp, 'Телефон'));
 });
+
+test('S1: перебор ограничен IP независимо от сертификата и не запирает весь вход', async (t) => {
+  const devices = new DeviceStore(await temporary(t));
+  const pairing = new PairingCodes({ devices });
+
+  for (let index = 0; index < 5; index += 1) {
+    await assert.rejects(pairing.pair('invalid', index.toString(16).padStart(64, '0'),
+      'Чужой', 'client', '192.0.2.1'));
+  }
+
+  const issued = pairing.issue({ scope: 'client', name: 'Фикстура' });
+
+  await assert.rejects(pairing.pair(issued.code, 'a'.repeat(64), 'Чужой', 'client', '192.0.2.1'),
+    (error) => error.code === 'pair_locked');
+  assert.equal((await pairing.pair(issued.code, 'b'.repeat(64), 'Фикстура', 'client', '192.0.2.2'))
+    .scope, 'client');
+});
+
+test('S1: заполнение таблицы не блокирует привязку с другого IP', async (t) => {
+  const devices = new DeviceStore(await temporary(t));
+  const pairing = new PairingCodes({ devices });
+
+  for (let index = 0; index < 4096; index += 1) {
+    await assert.rejects(pairing.pair('invalid', index.toString(16).padStart(64, '0'),
+      'Чужой', 'client', `fixture-${index}`));
+  }
+
+  const issued = pairing.issue({ scope: 'client', name: 'Фикстура' });
+
+  assert.equal((await pairing.pair(issued.code, 'f'.repeat(64), 'Фикстура', 'client', '192.0.2.2'))
+    .scope, 'client');
+});
+
+test('S3: другой scope возвращает409 и сохраняет код для подходящего сертификата', async (t) => {
+  const devices = new DeviceStore(await temporary(t));
+  const pairing = new PairingCodes({ devices });
+  const fp = 'a'.repeat(64);
+
+  await devices.add({
+    name: 'Прежнее приложение',
+    fp,
+    scope: 'mobile-v1'
+  });
+
+  const issued = pairing.issue({ name: 'Полное приложение', scope: 'client' });
+
+  await assert.rejects(pairing.pair(issued.code, fp, 'Полное приложение', 'client'),
+    (error) => error.status === 409 && error.code === 'device_scope_conflict');
+  assert.equal((await pairing.pair(issued.code, 'b'.repeat(64), 'Полное приложение', 'client')).scope,
+    'client');
+});

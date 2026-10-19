@@ -160,6 +160,19 @@ SETTINGS_FIELDS.push(...CONNECTION_FIELDS.map(([key, control, label, description
   scope: 'Эта машина',
 });
 
+SETTINGS_FIELDS.push(...[
+  ['name', 'Имя устройства', 'Название приложения в списке доступа машины.'],
+  ['address', 'Адрес машины', 'Необязательный доступный адрес для строки и QR привязки.'],
+].map(([key, label, description]) => ({
+  address: { pageId: 'connections.devices', fieldPath: [key!] },
+  resourceId: 'devicePairing',
+  key: key!,
+  control: 'text' as const,
+  label: label!,
+  description: description!,
+  scope: 'Эта машина',
+})));
+
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
 export const DEFAULT_SETTINGS_PAGE = 'interface.behavior';
 
@@ -290,6 +303,12 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     groupId: 'connections',
     label: 'Битрикс24',
     description: 'Портал, учётные данные и проверка подключения.',
+  },
+  {
+    id: 'connections.devices',
+    groupId: 'connections',
+    label: 'Устройства приложений',
+    description: 'Привязка приложения, QR, имя устройства и адрес машины, отзыв доступа.',
   },
   {
     id: 'connections.mobile',

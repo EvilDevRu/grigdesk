@@ -12,16 +12,23 @@ import {
 } from '../../desktop/src/settings.ts';
 
 const defaults = {
-  version: 1,
-  connection: null,
+  version: 2,
+  profiles: [],
+  selected: null,
   window: { ...DEFAULT_WINDOW },
 };
 const first = {
-  version: 1,
-  connection: {
+  version: 2,
+  selected: 'local',
+  profiles: [{
+    id: 'local',
+    name: 'Этот компьютер',
     kind: 'local',
-    origin: 'http://127.0.0.1',
-  },
+    address: 'http://127.0.0.1',
+    fp: null,
+    port: 47101,
+    createdAt: 0,
+  }],
   window: {
     width: 900,
     height: 700,
@@ -29,11 +36,17 @@ const first = {
   },
 };
 const second = {
-  version: 1,
-  connection: {
+  version: 2,
+  selected: 'local',
+  profiles: [{
+    id: 'local',
+    name: 'Этот компьютер',
     kind: 'local',
-    origin: 'http://127.0.0.1:2',
-  },
+    address: 'http://127.0.0.1:2',
+    fp: null,
+    port: 47101,
+    createdAt: 0,
+  }],
   window: {
     width: 1400,
     height: 1000,
@@ -80,14 +93,14 @@ test('DW-08: битый JSON, массив и чужая version — defaults', 
     JSON.stringify([first]),
     JSON.stringify({
       ...first,
-      version: 2,
+      version: 99,
     }),
     JSON.stringify({
       ...first,
       version: '1',
     }),
     JSON.stringify({
-      connection: first.connection,
+      profiles: first.profiles,
       window: first.window,
     }),
     'null',
@@ -97,50 +110,44 @@ test('DW-08: битый JSON, массив и чужая version — defaults', 
   }
 });
 
-test('DW-09: неверная connection не портит окно версии 1', async (t) => {
+test('DW-09: неверный профиль не портит окно, v1 мигрирует без записи', async (t) => {
   const { root } = await fixture(t);
   const file = path.join(root, 'settings.json');
+  const input = { ...first, profiles: [{ kind: 'unexpected' }] };
+  const expected = {
+    ...first,
+    profiles: [],
+    selected: null,
+  };
 
-  for (const connection of [
-    null,
-    [],
-    'http://127.0.0.1:2',
-    {
-      kind: 'remote',
-      origin: 'http://127.0.0.1:2',
-    },
-    {
-      kind: 'local',
-      origin: 'http://localhost:8140',
-    },
-    {
-      kind: 'local',
-      origin: 'http://127.0.0.1:80',
-    },
-  ]) {
-    const input = {
-      ...first,
-      connection,
-    };
-    const expected = {
-      ...first,
-      connection: null,
-    };
-
-    assert.deepEqual(normalizeSettings(input), expected);
-    await fs.writeFile(file, JSON.stringify(input));
-    assert.deepEqual(await readSettings(file), expected);
-  }
-
+  assert.deepEqual(normalizeSettings(input), expected);
+  await fs.writeFile(file, JSON.stringify(input));
+  assert.deepEqual(await readSettings(file), expected);
+  assert.equal(await fs.readFile(file, 'utf8'), JSON.stringify(input));
   assert.deepEqual(normalizeSettings(first), first);
   assert.deepEqual(normalizeSettings(second), second);
-  assert.deepEqual(normalizeSettings({
-    ...first,
-    window: null,
-  }), {
-    ...first,
-    window: { ...DEFAULT_WINDOW },
-  });
+  assert.deepEqual(normalizeSettings({ ...first, window: null }).window, { ...DEFAULT_WINDOW });
+});
+
+test('D6/DW-09: шесть неверных v1-подключений не портят геометрию при миграции', async (t) => {
+  const { file } = await fixture(t);
+
+  for (const connection of [null, [], 'http://127.0.0.1:2',
+    { kind: 'local', origin: 'http://127.0.0.1:80' }, { kind: 'remote', origin: 'http://127.0.0.1' },
+    { kind: 'local', origin: 'https://127.0.0.1:8140' },
+    { kind: 'local', origin: 'http://localhost:8140' },
+    { kind: 'local', origin: 'http://127.0.0.1:8140/path' }]) {
+    const input = {
+      version: 1,
+      connection,
+      window: first.window
+    };
+    const expected = { ...defaults, window: first.window };
+
+    await writeSettings(file, input);
+    assert.deepEqual(normalizeSettings(input), expected);
+    assert.deepEqual(await readSettings(file), expected);
+  }
 });
 
 test('DW-10: размеры нормализованы', () => {

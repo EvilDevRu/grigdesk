@@ -20,6 +20,11 @@ import type { PluginDocsEntry } from './pluginDocs.ts';
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
 export type AuthKind = 'session' | 'internal' | 'cli' | null;
 
+export interface AuthPrincipal {
+  kind: 'device';
+  deviceId: string;
+}
+
 // Рассылка событий вкладкам и внутренним слушателям. Один поток на вкладку —
 // второй `EventSource` в браузере создавать нельзя.
 export interface SseBus {
@@ -63,5 +68,6 @@ declare module 'fastify' {
 
   interface FastifyRequest {
     authKind?: AuthKind;
+    authPrincipal?: AuthPrincipal | null;
   }
 }

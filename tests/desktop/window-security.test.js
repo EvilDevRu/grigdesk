@@ -322,7 +322,7 @@ test('DW-17: адаптеры Session соблюдают поля и дожда�
     securityOrigin: origin,
     isMainFrame: false,
     mediaType: 'audio',
-  }), true);
+  }), false);
   assert.equal(handlers.check(null, 'openExternal', origin, { isMainFrame: true }), false);
 });
 
@@ -587,4 +587,66 @@ test('SW-N02 похожие адреса — прежняя политика', (
   assert.equal(contents.open({ url: 'https://example.org/?window=settings#/settings' }).action, 'deny');
   assert.equal(opened.length, 1);
   assert.equal(calls, 0);
+});
+test('D2: подфрейм своего origin не получает разрешения и API оболочки', async () => {
+  const { session, handlers, storage } = sessionFixture();
+
+  storage.resolve();
+  await configureSession(session, origin);
+  assert.equal(requestGranted(handlers.request, 'media', {
+    requestingUrl: origin,
+    mediaTypes: ['audio'],
+    isMainFrame: false,
+
+  }), false);
+  assert.equal(handlers.check({}, 'media', origin, {
+    mediaType: 'audio', isMainFrame: false,
+  }), false);
+
+  for (const parent of [{}, null]) {
+    let cancel;
+
+    handlers.before({ url: origin + '/__shell/state', frame: { parent } }, (result) => {
+      cancel = result.cancel;
+    });
+    assert.equal(cancel, parent !== null);
+  }
+});
+
+test('R6: все прежние loopback-cookie удаляются до установки нового секрета', async () => {
+  const { clearLegacyCookies } = await import('../../desktop/src/windowSecurity.ts');
+  const removed = [];
+
+  await clearLegacyCookies({
+    async get() {
+      return [
+        {
+          name: 'grigdesk_sid',
+          domain: '127.0.0.1',
+          path: '/api',
+          secure: false
+        },
+        {
+          name: 'grigdesk_pipe',
+          domain: '127.0.0.1',
+          path: '/',
+          secure: false
+        },
+        {
+          name: 'old',
+          domain: '127.0.0.1',
+          path: '/',
+          secure: true
+        },
+      ];
+    },
+    async remove(url, name) {
+      removed.push([url, name]);
+    },
+  });
+  assert.deepEqual(removed, [
+    ['http://127.0.0.1/api', 'grigdesk_sid'],
+    ['http://127.0.0.1/', 'grigdesk_pipe'],
+    ['https://127.0.0.1/', 'old'],
+  ]);
 });

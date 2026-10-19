@@ -24,6 +24,12 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
             return loader();
           }, ...options);
         `,
+        './stores/shell.ts': `export const useShellStore = () => ({
+          initialized: true, present: false, status: 'none', start: async () => {}, stop() {},
+        });`,
+        './composables/useSse.ts': 'export const setSseEnabled = () => {};',
+        './views/ConnectionsView.vue': 'export default { render: () => null };',
+        './shared/layout/LockOverlay.vue': 'export default { render: () => null };',
         './shared/desktopSettings.ts': 'export const currentDesktopMode = () => "page";',
         './stores/auth.js': 'export const useAuthStore = () => globalThis.__modalAppAuth;',
         './features/speech/provider.js': `

@@ -16,6 +16,11 @@ import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { attachDesktopParent } from './lib/desktopParent.ts';
 import { config } from './config.ts';
 import { MobileService } from './lib/mobile/service.ts';
+import { ensureBrainIdentity } from './lib/mobile/identity.ts';
+import { startClientListener } from './lib/clientAccess/listener.ts';
+import type { ClientListener } from './lib/clientAccess/listener.ts';
+import { createClientBootstrap, registerClientPairRoute } from './lib/clientAccess/bootstrap.ts';
+import devicesModule from './modules/devices/index.ts';
 import { ActionTokens } from './lib/mobile/actionTokens.ts';
 import { recoverChatOperation } from './lib/mobile/chatTurns.ts';
 import { registerMobileFacade } from './lib/mobile/facade/index.ts';
@@ -100,6 +105,7 @@ import { createSandboxService } from './lib/sandboxes/service.ts';
 import { createShowcaseService } from './lib/showcase/service.ts';
 import { resolveInboxTriageTarget } from './lib/inbox/triage.ts';
 
+import apiVersionPlugin from './plugins/apiVersion.ts';
 import authPlugin from './plugins/auth.ts';
 import ssePlugin from './plugins/sse.ts';
 import webLogModule from './modules/web-log/index.ts';
@@ -214,6 +220,9 @@ async function build() {
     // на AVV_ERR_PLUGIN_EXEC_TIMEOUT и уходил в бесконечный цикл перезапусков systemd.
     pluginTimeout: 60_000,
   });
+
+  await fastify.register(apiVersionPlugin);
+
   // Журнал окна хранит пути /api шаблонами; каталог шаблонов собирается здесь,
   // до регистрации модулей, чтобы в него попал каждый маршрут сервера.
   const apiRoutes = createApiRouteRegistry();
@@ -1252,11 +1261,9 @@ async function build() {
   await analyzer.start();
   await fastify.register(analysisModule, { analyzer, arbiter: analysisArbiter });
 
-  // Статика — последней (SPA-fallback перехватывает не-API 404).
+  // Закрытые снимки и самостоятельное сообщение о запуске приложения — последними.
   await fastify.register(staticPlugin, {
-    webDist: config.webDist,
     stateDir: config.stateDir,
-    uiReleasesDir: config.uiReleasesDir,
   });
 
   // ── Телеграм-пульт: вотчер «требует человека» + команды/кнопки владельца ──
@@ -1301,6 +1308,7 @@ async function build() {
     }),
     recoverOperation: (device, proof) => recoverChatOperation(fastify.mobileChat!, device, proof),
     changed: () => fastify.sse?.broadcast?.('mobile-changed', { at: Date.now() }),
+    disconnectClient: (fp) => clientListener?.disconnect(fp),
     log: (event) => fastify.log.warn({ event }, 'мобильный доступ: изменение состояния'),
   });
 
@@ -1308,6 +1316,60 @@ async function build() {
   fastify.addHook('onListen', () => mobile.start());
   shutdown.register('mobile', () => mobile.close());
   fastify.addHook('onClose', () => mobile.close());
+
+  let clientIdentity: Awaited<ReturnType<typeof ensureBrainIdentity>> | null = null;
+  const clientBootstrapOptions = {
+    pairing: mobile.pairing,
+    identity: () => clientIdentity,
+    name: config.serverName,
+  };
+  const clientBootstrap = await createClientBootstrap(clientBootstrapOptions);
+  let clientListener: ClientListener | null = null;
+
+  registerClientPairRoute(fastify, clientBootstrapOptions);
+  await fastify.register(devicesModule, {
+    devices: mobile.devices,
+    pairing: mobile.pairing,
+    listener: () => clientListener,
+    identity: async () => clientIdentity ??= await ensureBrainIdentity(config.mobileDir),
+    address: config.clientAccess.address,
+    name: config.serverName,
+    disconnectMobile: (fp) => mobile.disconnectDevice(fp),
+  });
+  fastify.addHook('onListen', async () => {
+    let error = config.clientAccess.reason;
+
+    if (config.clientAccess.state === 'configured') {
+      try {
+        clientIdentity = await ensureBrainIdentity(config.mobileDir);
+      } catch {
+        error = 'Клиентский вход не запущен: личность сервера недоступна.';
+        fastify.log.warn({ event: 'client_identity_failed' }, error);
+      }
+    }
+
+    clientListener = await startClientListener({
+      addresses: config.clientAccess.addresses,
+      identity: clientIdentity,
+      devices: mobile.devices,
+      app: fastify,
+      bootstrap: clientBootstrap,
+      error,
+      log: fastify.log,
+    });
+  });
+
+  /**
+   * Переданные основному HTTP-серверу TLS-сокеты остаются собственностью входа.
+   * Закрываем их и bootstrap при сливе, а также при прямом fastify.close в тестах.
+   */
+  const closeClientListener = async () => {
+    await clientListener?.close();
+    await clientBootstrap.close();
+  };
+
+  shutdown.register('client', closeClientListener);
+  fastify.addHook('onClose', closeClientListener);
 
   const pultStores = new Map<string, TelegramPultStateStore>();
   // Одна фабрика state на вотчер и действия: карточки, экран навигации и реестр

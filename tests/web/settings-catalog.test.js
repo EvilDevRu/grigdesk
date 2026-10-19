@@ -14,7 +14,7 @@ const EXPECTED_PAGES = [
   ['agents', ['providers', 'models']],
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter']],
   ['speech', ['dictation', 'video', 'language', 'models', 'advanced']],
-  ['connections', ['b24', 'mobile']],
+  ['connections', ['b24', 'devices', 'mobile']],
   ['plugins', ['installed', 'install']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];
@@ -167,4 +167,14 @@ test('CAT05 (guard): реестр содержит только публичны
     assert.deepEqual(Object.keys(page).sort(), ['description', 'groupId', 'id', 'label']);
     assert.equal(Object.values(page).every((value) => typeof value === 'string'), true);
   }
+});
+
+test('единый клиент: устройства имеют страницу и адресуемые поля поиска', async () => {
+  const { searchSettings } = await import('../../web/src/features/settings/search.ts');
+
+  assert.ok(SETTINGS_PAGES.some((page) => page.id === 'connections.devices'));
+  assert.ok(searchSettings('Имя устройства').some((result) =>
+    result.address?.pageId === 'connections.devices' && result.address.fieldPath[0] === 'name'));
+  assert.ok(searchSettings('Адрес машины').some((result) =>
+    result.address?.pageId === 'connections.devices' && result.address.fieldPath[0] === 'address'));
 });

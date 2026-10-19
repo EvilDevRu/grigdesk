@@ -1980,3 +1980,10 @@
     text-overflow: clip;
   }
 }
+
+/* Сенсорная площадка общих действий сохраняется и в компактных embedded-контекстах.
+   Минимум переопределяет размер роли, оставляя цвета и поведение её обычному skin. */
+:root[data-ui-touch] :is(.ui-button, .ui-pressable, .ui-action-link, [data-ui-shell-nav]) {
+  min-height: 44px;
+  min-width: 44px;
+}

@@ -102,3 +102,9 @@
   --toolbar-control-h: 44px;
   --tool-dock-action-size: 44px;
 }
+
+:root[data-ui-touch] {
+  --app-rail-w: 44px;
+  --app-topbar-h: 44px;
+  --app-nav-row-h: 44px;
+}
