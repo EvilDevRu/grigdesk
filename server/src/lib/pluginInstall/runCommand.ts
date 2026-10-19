@@ -2,6 +2,7 @@ import { fork } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 
+import { helperCommand } from '../runtimePaths.ts';
 import { liveGroupMembers } from './workerIdentity.ts';
 
 export interface PluginCommandResult {
@@ -110,7 +111,9 @@ export const runCommand: PluginCommandRunner = (file, args, options) => new Prom
     return;
   }
 
-  const child = fork(new URL('./commandSupervisor.mjs', import.meta.url), [], {
+  const supervisor = helperCommand('plugin-command-supervisor', []);
+  const child = fork(supervisor.args[0]!, [], {
+    execPath: supervisor.command,
     env: { PATH: '/usr/bin:/bin' },
     execArgv: [],
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],

@@ -45,7 +45,7 @@ import { terminateOwnedWorker } from './workerIdentity.ts';
 import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
 import { installedSnapshot, sameSource, sensitivePluginFile } from './serviceSnapshots.ts';
-import { compareSemVer } from '../grigDeskRelease.ts';
+import { compareSemVer } from '../releaseCommon.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
 
 export interface PluginRecoveryResult {

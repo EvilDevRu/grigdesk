@@ -20,11 +20,11 @@ export function openServerLog(file: string): number {
 }
 
 /**
- * Запускает системный Node из описания установки через явный порт spawn.
+ * Запускает явную команду source или SEA из проверенного runtime через порт spawn.
  * Значения окружения не входят в аргументы командной строки.
  */
 export function spawnServer(runtime: ServerRuntime, logFd: number, spawnImpl = spawn): ChildProcess {
-  return spawnImpl(runtime.node, [path.join(runtime.root, 'server/src/app.ts')], {
+  return spawnImpl(runtime.serverCommand, runtime.serverArgs, {
     cwd: path.join(runtime.root, 'server'),
     env: runtime.env,
     stdio: ['ignore', logFd, logFd, 'ipc'],

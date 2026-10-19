@@ -2,6 +2,8 @@
 import * as fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
+import { nodeExecutable, runtimeKind } from './lib/runtimePaths.ts';
 import {
   prepareDataHome, releaseDataHomeLock, processAlive, processStarttime,
 } from './lib/dataHomeBoot.ts';
@@ -40,6 +42,15 @@ try {
   });
 
   process.on('exit', () => releaseDataHomeLock(prepared.lockPath, owner, fs));
+
+  if (runtimeKind() === 'packaged') {
+    Object.assign(process.env, packagedChildEnvironment({
+      node: nodeExecutable(),
+      env: process.env,
+      home: os.homedir(),
+    }));
+    delete process.env.NPM_CONFIG_PREFIX;
+  }
 } catch (error) {
   process.stderr.write(`Папка данных: ${(error as Error).message}\n`);
   process.exit(78);

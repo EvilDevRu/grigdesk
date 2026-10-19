@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { evaluateDirectCommand } from './_directSshPolicy.ts';
+import { isDirectRun } from '../helperEntry.ts';
 
 function deny(reason) {
   process.stdout.write(`${JSON.stringify({
@@ -11,7 +11,15 @@ function deny(reason) {
   })}\n`);
 }
 
-async function main() {
+/**
+ * Читает PreToolUse JSON, разбирает аргументы хука и отвечает deny при запрете.
+ * Неподдерживаемый вызов тоже отклоняется fail-closed.
+ */
+async function run() {
+  // Ошибка загрузки политики, включая каталог helper-ов, попадает в main/deny.
+  // Статический импорт завершал хук до обработчика и открывал команду при сбое.
+  const { evaluateDirectCommand } = await import('./_directSshPolicy.ts');
+
   let raw = '';
   for await (const chunk of process.stdin) raw += chunk;
 
@@ -74,6 +82,18 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  deny('Проверка прямого SSH завершилась ошибкой; команда отклонена fail-closed.');
-});
+/**
+ * Выполняет проверку и в любом отказе отвечает запретом fail-closed.
+ * Экспорт нужен сгенерированному helper-entry; прямой запуск идёт через guard.
+ */
+export async function main() {
+  try {
+    await run();
+  } catch {
+    deny('Проверка прямого SSH завершилась ошибкой; команда отклонена fail-closed.');
+  }
+}
+
+if (isDirectRun(import.meta.url)) {
+  void main();
+}

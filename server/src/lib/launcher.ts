@@ -6,7 +6,7 @@
 // одна реализация с установщиком, здесь только вызов и разбор его status-строк.
 import os from 'node:os';
 import path from 'node:path';
-import { type CommandRunner, defaultCommandRunner } from './grigDeskRelease.ts';
+import { type CommandRunner, defaultCommandRunner } from './releaseCommon.ts';
 
 import type {
   AutostartUnitState, AutostartState, ShortcutState, LauncherState,

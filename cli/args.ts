@@ -31,6 +31,7 @@ grigdesk-ctl device add <имя> [--address host:port] [--json]
 grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | b24 … | mobile … | release …
+grigdesk-ctl desktop use-server <R>  Выбрать серверный SEA-комплект для установленного окна
 grigdesk-ctl dev | build | deps | run
 grigdesk-ctl --help | -h | help | <группа> --help
 grigdesk-ctl --version

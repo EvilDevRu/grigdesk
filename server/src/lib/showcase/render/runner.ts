@@ -11,15 +11,13 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { captureProcessIdentity } from '../../speech/modelJobsProcess.ts';
 import { ShowcaseError } from '../errors.ts';
 import type { JobIdentity } from '../jobs.ts';
 import { processAlive } from '../processIdentity.ts';
 import type { RecordingTimingWorkerCandidate } from './recorder.ts';
-
-const WORKER_SCRIPT = fileURLToPath(new URL('../../../../scripts/showcaseWorker.mts', import.meta.url));
+import { helperCommand, runtimeKind } from '../../runtimePaths.ts';
 
 export interface WorkerLaunchInput {
   workDir: string;
@@ -32,6 +30,9 @@ export interface WorkerLaunchInput {
   // использует ту же машинерию отсоединённого процесса, но свой скрипт, поэтому
   // метка для сверки identity приходит вместе с ним.
   script?: { file: string; marker: string };
+  // Штатный worker комплекта: id helper-а вместо пути исходника. В source
+  // helperCommand даёт прежний Node и скрипт, в SEA — вложенный Node и .mjs.
+  helper?: string;
 }
 
 export interface WorkerHandle {
@@ -72,6 +73,33 @@ export interface WorkerResult {
   }[];
 }
 
+export interface WorkerCommand {
+  command: string;
+  args: string[];
+  marker: string;
+}
+
+/**
+ * Выбирает команду worker-а: явный тестовый script/nodeBin или штатный helper.
+ * Возвращает и метку identity, чтобы сверка процесса не зависела от способа запуска.
+ */
+export function resolveWorkerCommand(
+  input: Pick<WorkerLaunchInput, 'script' | 'nodeBin' | 'helper'>,
+  taskFile: string,
+): WorkerCommand {
+  const helperId = input.helper ?? 'showcase-worker';
+  const command = input.script
+    ? { command: process.execPath, args: [input.script.file, taskFile] }
+    : helperCommand(helperId, [taskFile]);
+  const file = command.args[0]!;
+
+  return {
+    ...command,
+    command: input.nodeBin ?? command.command,
+    marker: input.script?.marker ?? path.basename(file, path.extname(file)),
+  };
+}
+
 /**
  * Запускает исполнителя и возвращает его снимок identity. Метка попытки попадает
  * в командную строку: по ней сверка отличает СВОЙ процесс от постороннего, занявшего
@@ -93,16 +121,20 @@ export async function launchWorker(input: WorkerLaunchInput): Promise<WorkerHand
 
   const logFile = path.join(workDir, 'worker.log');
   const log = await fs.open(logFile, 'a', 0o600);
-  const script = input.script ?? { file: WORKER_SCRIPT, marker: 'showcaseWorker' };
+  const resolved = resolveWorkerCommand(input, taskFile);
   const child = spawn(
-    input.nodeBin ?? process.execPath,
-    [script.file, taskFile],
+    resolved.command,
+    resolved.args,
     {
       detached: true,
       stdio: ['ignore', log.fd, log.fd, ...(input.inheritedFds ?? [])],
       env: {
         PATH: process.env.PATH ?? '',
         HOME: process.env.HOME ?? '',
+        ...(runtimeKind() === 'packaged' ? {
+          PYTHONDONTWRITEBYTECODE: '1',
+          npm_config_prefix: process.env.npm_config_prefix,
+        } : {}),
         // Установка голоса ходит в сеть, и за шлюзом без этих переменных она
         // молча упрётся в таймаут. Записи они не мешают: браузер ходит только
         // через свой прокси и системных переменных не читает.
@@ -124,7 +156,7 @@ export async function launchWorker(input: WorkerLaunchInput): Promise<WorkerHand
   }
 
   const identity = captureProcessIdentity(child.pid, {
-    script: script.marker,
+    script: resolved.marker,
     nonce: attemptId,
   }) as JobIdentity | null;
 

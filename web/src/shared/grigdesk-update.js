@@ -27,6 +27,7 @@ export const UPDATE_STAGE_SHORT_LABELS = {
 };
 
 export const BLOCK_REASON_LABELS = {
+  packaged_update_requires_package: 'Установите новый пакет GrigDesk',
   no_release_checked: 'Сначала выполните проверку опубликованных релизов.',
   branch_not_main: 'Релиз устанавливается только на ветку main.',
   detached_head: 'Checkout находится в detached HEAD.',

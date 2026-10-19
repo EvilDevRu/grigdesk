@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { installError } from './errors.ts';
+import { nodeExecutable } from '../runtimePaths.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
 import { validateNpmDirectory } from './validatePackage.ts';
 import { capturePackageSnapshot, validatePreparedPayload } from './payloadDigest.ts';
@@ -39,7 +40,7 @@ export function createNpmRunner(
     const scope = await mkdtemp(path.join(root, 'policy-'));
     const user = path.join(scope, 'user.npmrc');
     const global = path.join(scope, 'global.npmrc');
-    const nodeBin = path.dirname(process.execPath);
+    const nodeBin = path.dirname(nodeExecutable());
 
     await writeFile(user, '', { mode: 0o600 });
     await writeFile(global, '', { mode: 0o600 });

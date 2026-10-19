@@ -18,7 +18,29 @@
 
 - [Переход на GrigDesk: подготовка, brandMove, журнал, откат и второй этап](brand-migration.md)
 
-- [Node SEA: возможности версий, пробная упаковка и привязки сервера к файловой установке](node-sea.md)
+- [Node SEA: готовый Linux-комплект, проверка, данные и ручной выбор версии](node-sea.md)
+
+- [SEA и единое приложение: труба UI, TLS-вход, устройства и общий модал настроек](sea-unified-client.md)
+
+- [Сборка ESM-помощников: контекст комплекта, ресурсы, явный вход и self-fork](sea-helpers.md)
+
+- [Состав серверного комплекта: ресурсы, production npm, native ABI и лицензии](sea-package.md)
+
+- [Выпуск серверного SEA: сборка, manifest, атомарная публикация и проверка архива](sea-release.md)
+
+- [Обновление SEA-пакета: manifest status, ранние отказы и отделение source updater](sea-update-mode.md)
+
+- [Окно с SEA-сервером: descriptor v3, выбор пакета, профили и возврат](sea-desktop.md)
+
+- [Запуск SEA и регистрация службы: свой Node, unit, окружение и проверки на заглушках](sea-launch.md)
+
+- [Окружение SEA и проверка: пользовательский PATH, Python/npm и быстрый либо полный режим](sea-runtime-checks.md)
+
+- [Изолированная SEA-приёмка: закрытый checkout, host Node stub, read-only R и перенос](sea-isolation.md)
+
+- [Отдельная приёмка SEA: сборка, полный slow gate, npm cache и коды отказа](sea-release-gate.md)
+
+- [Зависимости SEA от хоста: системные библиотеки, Python, CLI и дополнительные runtime](sea-host-requirements.md)
 
 - [Единая папка данных: раскладка, перенос, ранний старт и блокировка](data-home.md)
 

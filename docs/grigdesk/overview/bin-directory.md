@@ -27,6 +27,9 @@
 - `tools/` — инструменты разработчика: `release` и `release-check` (выпуск GrigDesk), `mobile`
   (сборка APK), `relay` (сборка посредника), `upgrade-publish-contract` (переход старых установок).
 
+Серверный release gate `bash tools/server-sea-check` собирает SEA в отдельный каталог
+и выполняет его изолированную приёмку; вызывается также общими release-проверками.
+
 Человек зовёт их через единую команду: `grigdesk-ctl desktop install`, `grigdesk-ctl mobile build`,
 `grigdesk-ctl release patch`. По пути, без единой команды, вызываются `tools/relay build`,
 `tools/release-check`, `tools/upgrade-publish-contract` и `deploy/restart.sh`.

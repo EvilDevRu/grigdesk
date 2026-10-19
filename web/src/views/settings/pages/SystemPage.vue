@@ -36,7 +36,13 @@
     </template>
     <template v-else>
       <h4>Версия GrigDesk</h4>
-      <template v-if="release">
+      <PackagedServerVersion
+        v-if="packageCapability"
+        :version="release?.running.version || '—'"
+        :client-version="buildVersion"
+        :message="packageCapability.message"
+      />
+      <template v-else-if="release">
         <p>Запущено: {{ release.running.version }} · {{ shortSha(release.running.sha) }}</p>
         <p>
           Checkout: {{ release.checkout.version }} · {{ shortSha(release.checkout.sha) }} ·
@@ -94,11 +100,13 @@
         </p>
       </template>
       <p v-if="updates.error" role="alert">{{ updates.error }}</p>
-      <UiButton :disabled="busy || updates.active" @click="rebuild">Пересобрать web-бандл</UiButton>
-      <p>
-        Сборка из рабочего дерева включает незакоммиченные правки. Состояние задания перечитывается при
-        возвращении на страницу.
-      </p>
+      <template v-if="!packageCapability">
+        <UiButton :disabled="busy || updates.active" @click="rebuild">Пересобрать web-бандл</UiButton>
+        <p>
+          Сборка из рабочего дерева включает незакоммиченные правки. Состояние задания перечитывается при
+          возвращении на страницу.
+        </p>
+      </template>
     </template>
   </section>
 </template>
@@ -117,6 +125,7 @@ import { sseSubscribe } from '../../../composables/useSse.ts';
 import type { LauncherState } from '../../../../../shared/runtime/launcherContracts.ts';
 import type { ReleaseStatus } from '../../../../../shared/runtime/grigDeskUpdateContracts.ts';
 import SettingsField from '../SettingsField.vue';
+import PackagedServerVersion from '../PackagedServerVersion.vue';
 
 type ServerView = {
   mode?: string;
@@ -143,6 +152,11 @@ const opening = settings.snapshot.sessionId;
 const startupFields = SETTINGS_FIELDS.filter((field) => field.resourceId === 'autostart');
 const serverText = computed(() => serverModeText(server.value));
 const release = computed(() => updates.status as ReleaseStatus | null);
+const packageCapability = computed(() => {
+  const capability = release.value?.updateCapability;
+
+  return capability?.kind === 'package' ? capability : null;
+});
 const stageLabel = computed(() =>
   (UPDATE_STAGE_LABELS as Record<string, string>)[release.value?.job?.stage ?? '']
   || release.value?.job?.stage);
@@ -325,7 +339,7 @@ async function shortcut(): Promise<void> {
 async function update(kind: 'apply' | 'update'): Promise<void> {
   const status = release.value;
 
-  if (!status || busy.value || updates.actionBusy || !current()
+  if (!status || packageCapability.value || busy.value || updates.actionBusy || !current()
       || (kind === 'apply' ? !status.canApplyCheckout : !status.canInstallRelease)) {
     return;
   }
@@ -400,7 +414,7 @@ async function pollRebuild(): Promise<void> {
  * Отказ чтения или POST показывается в этой странице без перезагрузки рабочего документа.
  */
 async function rebuild(): Promise<void> {
-  if (busy.value || updates.active || !current()) {
+  if (packageCapability.value || busy.value || updates.active || !current()) {
     return;
   }
 
@@ -441,7 +455,10 @@ async function load(): Promise<void> {
       launcher.value = resource.view();
     } else {
       await updates.load();
-      await pollRebuild();
+
+      if (!packageCapability.value) {
+        await pollRebuild();
+      }
     }
 
     ready.value = true;

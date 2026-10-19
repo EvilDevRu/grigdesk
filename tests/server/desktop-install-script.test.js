@@ -57,7 +57,10 @@ function sandbox(t, { build = true } = {}) {
     mkdirSync(directory, { recursive: true });
   }
 
-  for (const name of ['deploy/desktop.sh', 'deploy/lib/desktop-app.sh', 'deploy/lib/runtime-env.sh']) {
+  mkdirSync(path.join(repo, 'shared/desktop'), { recursive: true });
+
+  for (const name of ['deploy/desktop.sh', 'deploy/lib/desktop-app.sh', 'deploy/lib/runtime-env.sh',
+    'shared/desktop/desktopRuntime.ts']) {
     copyFileSync(path.join(repository, name), path.join(repo, name));
   }
 
@@ -280,7 +283,9 @@ test('DW-I3: повторная установка заменяет атомар
   // В bin/ — только окно, без временных копий. data-home — метка сборки, знающей папку данных;
   // она лежит рядом с runtime.json, а не в bin/.
   assert.deepEqual(readdirSync(path.dirname(box.destination)), ['grigdesk-app']);
-  assert.deepEqual(readdirSync(path.dirname(box.runtime)).sort(), ['data-home', 'runtime.json']);
+  assert.deepEqual(readdirSync(path.dirname(box.runtime)).sort(),
+    ['data-home', 'runtime-version', 'runtime.json']);
+  assert.equal(readFileSync(path.join(path.dirname(box.runtime), 'runtime-version'), 'utf8'), '3\n');
   assert.equal(box.run('remove').status, 0);
   assert.equal(existsSync(box.marker), false);
 });
@@ -491,6 +496,7 @@ test('SC-03 status: строка runtime 0 и 1; remove удаляет AppImage 
   assert.equal(removed.status, 0, removed.stderr);
   assert.equal(existsSync(box.destination), false);
   assert.equal(existsSync(box.runtime), false);
+  assert.equal(existsSync(path.join(path.dirname(box.runtime), 'runtime-version')), false);
   assert.equal(readFileSync(profile, 'utf8'), 'сентинел профиля');
   assert.equal(status(box, withoutNode).runtime, '0');
 });
@@ -824,4 +830,27 @@ test('SC-DH-3 неверная папка не меняет прежнее оп�
 
   assert.equal(result.status, 1);
   assert.equal(readFileSync(box.runtime, 'utf8'), previous);
+});
+
+test('REVIEW-P11: source desktop install сохраняет выбранный SEA v3 и сообщает об этом', (t) => {
+  for (const explicit of [false, true]) {
+    const box = sandbox(t);
+    const descriptor = JSON.stringify({
+      version: 3,
+      kind: 'sea',
+      root: path.join(box.root, 'selected-release'),
+      home: path.join(box.root, 'selected-data'),
+    }) + '\n';
+
+    mkdirSync(path.dirname(box.runtime), { recursive: true });
+    writeFileSync(box.runtime, descriptor, { mode: 0o600 });
+
+    const result = box.run('install', explicit ? { GRIGDESK_HOME: path.join(box.root, 'other-data') } : {});
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(box.runtime, 'utf8'), descriptor);
+    assert.equal(statSync(box.runtime).mode & 0o777, 0o600);
+    assert.equal(readFileSync(box.destination, 'utf8'), 'сборка 9.9.9');
+    assert.match(result.stdout, /выбор.*SEA.*сохранён/i);
+  }
 });

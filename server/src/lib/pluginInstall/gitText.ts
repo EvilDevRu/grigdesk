@@ -4,7 +4,7 @@ import type {
   PluginVersionRef,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
 import type { PluginCommandResult } from './runCommand.ts';
-import { parseStableTag, compareSemVer } from '../grigDeskRelease.ts';
+import { parseStableTag, compareSemVer } from '../releaseCommon.ts';
 
 import { installError } from './errors.ts';
 import type { PluginInstallError } from './errors.ts';

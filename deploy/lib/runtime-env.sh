@@ -3,6 +3,8 @@
 # Общий host и DeepSeek используют один Node со снятием TypeScript-типов.
 # Закреплённый Harness допускает ветку 22 с 22.19 или Node 24 и новее.
 GRIGDESK_MIN_NODE=22.19.0
+_grigdesk_verified_package_root=''
+_grigdesk_packaged_node=''
 
 # Вычисляет папку теми же правилами, что shared/runtime/dataHome.ts, без внешних команд.
 # Пустой PATH и set -u допустимы; неверный HOME не превращается в корень диска.
@@ -61,8 +63,9 @@ grigdesk_env_file() {
 # Проверка выполняется до чтения TS-модулей и подготовки встроенного runtime.
 # Node 23 не входит в compatibility закреплённого Harness.
 grigdesk_require_node() {
+  grigdesk_select_packaged_node || return $?
   local actual
-  actual=$(node -p 'process.versions.node' 2>/dev/null) || {
+  actual=$(grigdesk_node -p 'process.versions.node' 2>/dev/null) || {
     echo "node не найден в PATH" >&2
     return 1
   }
@@ -77,6 +80,70 @@ grigdesk_require_node() {
   echo "GrigDesk требует Node ^22.19.0 || >=24.0.0, найден $actual." >&2
   echo "Обнови Node (nvm install $GRIGDESK_MIN_NODE) и повтори запуск." >&2
   return 1
+}
+
+# Внутренние проверки используют собственный Node явно, не меняя выбор Node у детей.
+# Source-режим сохраняет обычный поиск интерпретатора в окружении разработчика.
+grigdesk_node() {
+  "${_grigdesk_packaged_node:-node}" "$@"
+}
+
+# Комплект использует собственный интерпретатор как запасной для внешних команд.
+# Проверки GrigDesk запускают его явно; Python не создаёт bytecode в комплекте.
+grigdesk_select_packaged_node() {
+  local runtime_root
+  runtime_root=$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd -P) || return 1
+
+  [[ -f "$runtime_root/release.json" ]] || return 0
+
+  # Флаги не должны сработать даже во время проверки версии вложенного Node.
+  # Значение из .env также не передаётся самому SEA при ручном/служебном запуске.
+  unset NODE_OPTIONS
+
+  if [[ ! -x "$runtime_root/runtime/node/bin/node" ]]; then
+    echo "Повреждён комплект: нет вложенного Node в $runtime_root/runtime/node/bin/node" >&2
+    return 1
+  fi
+
+  if [[ "$_grigdesk_verified_package_root" != "$runtime_root" ]]; then
+    if [[ ! -x "$runtime_root/server/grigdesk-server" ]] \
+      || ! "$runtime_root/server/grigdesk-server" --check-startup >/dev/null; then
+      echo "Повреждён серверный комплект GrigDesk: проверка manifest не пройдена." >&2
+      return 1
+    fi
+
+    _grigdesk_verified_package_root=$runtime_root
+  fi
+
+  _grigdesk_packaged_node="$runtime_root/runtime/node/bin/node"
+  local entry
+  local -a entries
+  IFS=: read -r -a entries <<<"${PATH:-}"
+  PATH=''
+
+  for entry in "${entries[@]}"; do
+    [[ -z "$entry" || "$entry" == "$runtime_root/runtime/node/bin" ]] && continue
+    PATH+="${PATH:+:}$entry"
+  done
+
+  PATH+="${PATH:+:}$runtime_root/runtime/node/bin"
+  export PYTHONDONTWRITEBYTECODE=1
+
+  export PATH
+}
+
+# Готовит argv отдельно от запуска: SEA не принимает флаги интерпретатора.
+# Source сохраняет обычный Node и уже вычисленные аргументы файла окружения.
+grigdesk_server_command() {
+  local runtime_root=${1:?корень GrigDesk обязателен}
+
+  if [[ -f "$runtime_root/release.json" ]]; then
+    grigdesk_select_packaged_node || return $?
+    GRIGDESK_SERVER_COMMAND=("$runtime_root/runtime/node/bin/node" \
+      "$runtime_root/server/runtime/helpers/launch-sea-server.mjs")
+  else
+    GRIGDESK_SERVER_COMMAND=(node "${GRIGDESK_NODE_ENV_ARGS[@]}" "$runtime_root/server/src/app.ts")
+  fi
 }
 
 # CLI текущей установки доступны без повторного запуска installer. Абсолютный bin
@@ -108,6 +175,10 @@ grigdesk_add_cli_paths() {
     PATH+=":$cli_path_entry"
   done
 
+  if [[ -f "$grigdesk_root/release.json" ]]; then
+    grigdesk_select_packaged_node || return $?
+  fi
+
   export PATH
 }
 
@@ -125,7 +196,7 @@ grigdesk_load_runtime_env() {
   GRIGDESK_NODE_ENV_ARGS=()
   [[ -f "$env_file" ]] && GRIGDESK_NODE_ENV_ARGS=(--env-file "$env_file")
 
-  if output=$(node --input-type=module -e '
+  if output=$(grigdesk_node --input-type=module -e '
     import fs from "node:fs";
     import { parseEnv } from "node:util";
     import { pathToFileURL } from "node:url";
@@ -177,7 +248,7 @@ grigdesk_require_migrated() {
   local helper_root
   helper_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P) || return 1
   grigdesk_require_node || return 1
-  node "$helper_root/server/scripts/dataHomeCheck.mts" --code-root "$code_root" || return $?
+  grigdesk_node "$helper_root/server/scripts/dataHomeCheck.mts" --code-root "$code_root" || return $?
 }
 
 # Ждём выхода владельцев PID, даже если они уже отпустили HTTP-порт.

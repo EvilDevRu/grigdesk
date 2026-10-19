@@ -33,12 +33,26 @@ write_runtime_descriptor() {
   local node_path
 
   runtime="$(grigdesk_desktop_runtime_path)"
+
+  # Обновление окна из исходников не отменяет отдельный выбор серверного комплекта.
+  # Общий parser проверяет форму v3; целостность выбранного R проверяется при его запуске.
+  if [[ ! -f "$ROOT/release.json" && -f "$runtime" ]] && grigdesk_node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const { parseRuntimeDescriptor } = await import(pathToFileURL(process.argv[2]).href);
+    const descriptor = parseRuntimeDescriptor(readFileSync(process.argv[1], "utf8"));
+    process.exit(descriptor?.version === 3 ? 0 : 1);
+  ' -- "$runtime" "$ROOT/shared/desktop/desktopRuntime.ts"; then
+    echo 'Выбор сервера SEA сохранён; для смены используйте grigdesk-ctl desktop use-server <R>.'
+    return 0
+  fi
+
   root="$(cd "$ROOT" && pwd -P)"
-  node_path="$(node -p 'process.execPath')"
+  node_path="$(grigdesk_node -p 'process.execPath')"
 
   mkdir -p -- "$(dirname "$runtime")"
   desktop_temporary="$(mktemp "$(dirname "$runtime")/runtime.json.tmp.XXXXXX")"
-  node -e '
+  grigdesk_node -e '
     const [root, node, home, explicit] = process.argv.slice(1);
     const descriptor = explicit === "1" ? { version: 2, root, node, home } : { version: 1, root, node };
     process.stdout.write(JSON.stringify(descriptor) + "\n");
@@ -65,7 +79,7 @@ install_desktop() {
 
   # Папка может ещё отсутствовать; проверяем реальные границы по ближайшему предку.
   # Установка окна не создаёт папку и не переносит данные сервера.
-  node -e '
+  grigdesk_node -e '
     const fs = require("node:fs");
     const path = require("node:path");
     function canonical(file) {
@@ -87,7 +101,7 @@ install_desktop() {
   local source_file
   local destination
 
-  version="$(node -p 'require(process.argv[1]).version' "$ROOT/desktop/package.json")"
+  version="$(grigdesk_node -p 'require(process.argv[1]).version' "$ROOT/desktop/package.json")"
   source_file="$ROOT/desktop/release/grigdesk-desktop-$version-x86_64.AppImage"
   destination="$(desktop_app)"
 
@@ -119,6 +133,7 @@ install_desktop() {
   # Метка: установлена сборка, которая знает папку данных. Без неё команда переноса не уберёт
   # ссылки совместимости — старая сборка окна пишет журнал и интерфейс через них.
   : > "$(grigdesk_desktop_marker_path)"
+  printf '3\n' > "$(dirname "$(grigdesk_desktop_runtime_path)")/runtime-version"
 
   # Окно до переноса в bin/ лежало в XDG_DATA_HOME. Открытое старое окно продолжит работать:
   # удаляется только имя файла. Ярлык, если он есть, переписывается на новый путь.
@@ -157,13 +172,26 @@ case "${1:-}" in
     ;;
   remove)
     rm -f -- "$(desktop_app)" "$(grigdesk_desktop_legacy_app_path)" \
-      "$(grigdesk_desktop_runtime_path)" "$(grigdesk_desktop_marker_path)"
+      "$(grigdesk_desktop_runtime_path)" "$(grigdesk_desktop_marker_path)" \
+      "$(dirname "$(grigdesk_desktop_runtime_path)")/runtime-version"
     ;;
   status)
     desktop_status
     ;;
+  use-server)
+    shift
+    source "$ROOT/deploy/lib/runtime-env.sh"
+    grigdesk_add_cli_paths "$ROOT"
+    grigdesk_require_node
+
+    if [[ -f "$ROOT/release.json" ]]; then
+      exec "$_grigdesk_packaged_node" "$ROOT/server/runtime/helpers/select-sea-server.mjs" "$@"
+    fi
+
+    exec node "$ROOT/server/scripts/selectSeaServer.mts" "$@"
+    ;;
   *)
-    echo 'использование: grigdesk-ctl desktop install|remove|status' >&2
+    echo 'использование: grigdesk-ctl desktop install|remove|status|use-server <R>' >&2
     exit 2
     ;;
 esac

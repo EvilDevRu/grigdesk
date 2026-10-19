@@ -9,6 +9,8 @@
 // три метода, тянуть SDK ради этого незачем.
 import readline from 'node:readline';
 
+import { isDirectRun } from '../helperEntry.ts';
+
 const PERM_URL = process.env.GRIGDESK_PERM_URL || '';
 const CHAT_KEY = process.env.GRIGDESK_CHAT_KEY || '';
 // Секрет процесса-сервера: вход в GrigDesk закрывает весь /api, а этот MCP живёт в дочернем
@@ -34,43 +36,53 @@ function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
 
-const rl = readline.createInterface({ input: process.stdin });
-rl.on('line', async (line) => {
-  line = line.trim();
-  if (!line) return;
-  let req;
-  try { req = JSON.parse(line); } catch { return; }
-  const { id, method, params } = req;
+/**
+ * Запускает MCP-цикл разрешений поверх stdin/stdout.
+ * Пока человек не ответил, вызов approve ждёт; без URL решение остаётся deny.
+ */
+export function main() {
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on('line', async (line) => {
+    line = line.trim();
+    if (!line) return;
+    let req;
+    try { req = JSON.parse(line); } catch { return; }
+    const { id, method, params } = req;
 
-  if (method === 'initialize') {
-    send({
-      jsonrpc: '2.0', id,
-      result: {
-        protocolVersion: params?.protocolVersion || '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'grigdesk-perm', version: '1.0.0' },
-      },
-    });
-  } else if (method === 'tools/list') {
-    send({ jsonrpc: '2.0', id, result: { tools: [TOOL] } });
-  } else if (method === 'tools/call') {
-    // Долгий запрос: GrigDesk держит его, пока пользователь не ответит (или таймаут → deny).
-    let decision = { behavior: 'deny', message: 'GrigDesk недоступен — действие отклонено' };
-    try {
-      const r = await fetch(PERM_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Прежний X-GrigDesk-Token убран вместе с самим GRIGDESK_TOKEN.
-          ...(INTERNAL ? { 'X-GrigDesk-Internal': INTERNAL } : {}),
+    if (method === 'initialize') {
+      send({
+        jsonrpc: '2.0', id,
+        result: {
+          protocolVersion: params?.protocolVersion || '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'grigdesk-perm', version: '1.0.0' },
         },
-        body: JSON.stringify({ ...(params?.arguments || {}), chatKey: CHAT_KEY }),
       });
-      if (r.ok) decision = await r.json();
-    } catch { /* GrigDesk упал — остаётся deny */ }
-    send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(decision) }] } });
-  } else if (id !== undefined) {
-    // ping и прочие неизвестные запросы — пустой успех, чтобы не ронять клиента
-    send({ jsonrpc: '2.0', id, result: {} });
-  }
-});
+    } else if (method === 'tools/list') {
+      send({ jsonrpc: '2.0', id, result: { tools: [TOOL] } });
+    } else if (method === 'tools/call') {
+      // Долгий запрос: GrigDesk держит его, пока пользователь не ответит (или таймаут → deny).
+      let decision = { behavior: 'deny', message: 'GrigDesk недоступен — действие отклонено' };
+      try {
+        const r = await fetch(PERM_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // Прежний X-GrigDesk-Token убран вместе с самим GRIGDESK_TOKEN.
+            ...(INTERNAL ? { 'X-GrigDesk-Internal': INTERNAL } : {}),
+          },
+          body: JSON.stringify({ ...(params?.arguments || {}), chatKey: CHAT_KEY }),
+        });
+        if (r.ok) decision = await r.json();
+      } catch { /* GrigDesk упал — остаётся deny */ }
+      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(decision) }] } });
+    } else if (id !== undefined) {
+      // ping и прочие неизвестные запросы — пустой успех, чтобы не ронять клиента
+      send({ jsonrpc: '2.0', id, result: {} });
+    }
+  });
+}
+
+if (isDirectRun(import.meta.url)) {
+  main();
+}

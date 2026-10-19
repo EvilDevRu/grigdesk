@@ -4,8 +4,12 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
-import { GrigDeskReleaseService } from '../../lib/grigDeskRelease.ts';
-import { GrigDeskUpdateManager } from '../../lib/grigDeskUpdate.ts';
+import type { GrigDeskReleaseService } from '../../lib/grigDeskRelease.ts';
+import type { GrigDeskUpdateManager } from '../../lib/grigDeskUpdate.ts';
+import { createReleaseServices } from '../../lib/releaseServices.ts';
+import { PACKAGE_UPDATE_ERROR, PACKAGE_UPDATE_MESSAGE } from '../../lib/packagedRelease.ts';
+import { runtimeKind } from '../../lib/runtimePaths.ts';
+import type { RuntimeKind } from '../../lib/runtimePaths.ts';
 import { DESKTOP_RESTART_EXIT_CODE } from '../../lib/desktopParent.ts';
 import type { DesktopParent } from '../../lib/desktopParent.ts';
 import { LauncherError, LauncherService } from '../../lib/launcher.ts';
@@ -69,6 +73,7 @@ export interface SystemModuleOptions {
   serverMode?: () => 'desktop' | 'systemd' | 'manual';
   restartViaScript?: (rootDir: string) => void;
   desktop?: DesktopParent | null;
+  runtimeKind?: () => RuntimeKind;
 }
 
 /**
@@ -98,15 +103,14 @@ async function systemModule(
     : process.env.INVOCATION_ID ? 'systemd' : 'manual');
   const restartScript = opts.restartViaScript ?? restartViaScript;
 
-  const releases = opts.releases || new GrigDeskReleaseService({
+  const packaged = (opts.runtimeKind ?? runtimeKind)() === 'packaged';
+  const { releases, updates } = createReleaseServices({
     rootDir: config.rootDir,
     statePath: config.grigDeskUpdateStatePath,
+    kind: packaged ? 'packaged' : 'source',
+    releases: opts.releases,
+    updates: opts.updates,
     broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
-  });
-  const updates = opts.updates || new GrigDeskUpdateManager({
-    releases,
-    rootDir: config.rootDir,
-    statePath: config.grigDeskUpdateStatePath,
     desktop: () => Boolean(opts.desktop?.connected),
     origin: `http://127.0.0.1:${config.port}`,
     cliTokenPath: config.cliTokenPath,
@@ -124,7 +128,8 @@ async function systemModule(
   // GET принципиально локальный: HEAD/status + сохранённый результат последней remote-
   // проверки. Сеть разрешена только явному POST и редкому фоновому таймеру.
   fastify.get('/api/system/version', async () => releases.getStatus());
-  fastify.post('/api/system/version/check', async () => releases.checkRemote());
+  fastify.post('/api/system/version/check', async () => packaged
+    ? releases.getStatus() : releases.checkRemote());
   fastify.get('/api/system/update-job', async () => ({ job: await updates.getJob() }));
 
   /**
@@ -151,6 +156,10 @@ async function systemModule(
       },
     },
   }, async (request, reply) => {
+    if (packaged) {
+      return packageRequired(reply);
+    }
+
     // Гонка с пересборкой web: worker обновления публикует dist атомарным rename,
     // а бегущий vite build писал бы в него поверх старых исходников — мешанина.
     if (rebuildBusy()) return rebuildConflict(reply);
@@ -173,6 +182,10 @@ async function systemModule(
       },
     },
   }, async (request, reply) => {
+    if (packaged) {
+      return packageRequired(reply);
+    }
+
     if (rebuildBusy()) return rebuildConflict(reply);
     try {
       const job = await updates.startUpdate(request.body);
@@ -385,6 +398,10 @@ async function systemModule(
   fastify.get('/api/system/web-rebuild', async () => ({ rebuild: webRebuild || { status: 'idle' } }));
 
   fastify.post('/api/system/web-rebuild', async (_request, reply) => {
+    if (packaged) {
+      return packageRequired(reply);
+    }
+
     try { await updates.assertIdle(); }
     catch (error) { return sendReleaseError(reply, error); }
     if (rebuildBusy()) return rebuildConflict(reply);
@@ -417,9 +434,20 @@ async function systemModule(
     return reply.code(202).send({ ok: true });
   });
 
-  await updates.recover?.();
-  releases.start?.();
+  if (!packaged) {
+    await updates.recover?.();
+    releases.start?.();
+  }
+
   fastify.addHook('onClose', async () => { releases.stop?.(); });
+}
+
+/**
+ * Общие ранние ворота source-мутаций не вызывают менеджер или npm.
+ * UI получает тот же код, что и прямой вызов packaged-менеджера.
+ */
+function packageRequired(reply: FastifyReply) {
+  return reply.code(409).send({ error: PACKAGE_UPDATE_ERROR, message: PACKAGE_UPDATE_MESSAGE });
 }
 
 export default fp(systemModule, { name: 'module-system' });

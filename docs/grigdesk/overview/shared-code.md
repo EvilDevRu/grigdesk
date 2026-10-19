@@ -67,6 +67,9 @@
 | `lib/text.ts` | UTF-16 границы, лексический порядок, текст unknown, URI и JSON Pointer |
 | `node/files.ts` | UTF-8 ENOENT→null, временная папка с очисткой, fsync каталога без следования ссылке |
 | `node/seaBuild.ts` | Имя архива Node, SEA config и потоковая загрузка; инструменты сборки остаются у пакетов |
+| `node/nodeRuntime.ts` | Манифест Node 24, кэш архива с SHA256, `SEA_FUSE` и атомарная публикация файла; шаги конкретного сборщика остаются у пакета |
+| `node/seaRuntime.ts` | Проверка готового R без boot: startup для окна, полный хеш для выбора пакета |
+| `node/packagedEnvironment.ts` | Окружение детей SEA: свой Node запасным, Python без pyc, глобальный npm вне R |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |
 | `lib/contractDecoders.ts` | Проверка сетевого JSON с выводом типов и ошибкой вызывающей области |

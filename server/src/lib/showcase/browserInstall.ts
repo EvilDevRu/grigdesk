@@ -13,7 +13,6 @@
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { processAlive } from './processIdentity.ts';
 import { launchWorker, readProgressSince, stopWorker } from './render/runner.ts';
@@ -21,10 +20,6 @@ import type { JobIdentity } from './jobs.ts';
 import { ShowcaseError } from './errors.ts';
 
 const require = createRequire(import.meta.url);
-
-const WORKER_SCRIPT = fileURLToPath(
-  new URL('../../../scripts/showcaseBrowserInstall.mts', import.meta.url),
-);
 
 // Скачивание ограничено по времени: без срока оборванная загрузка держала бы
 // кнопку занятой навсегда.
@@ -318,7 +313,8 @@ export function createBrowserInstaller(options: BrowserInstallerOptions) {
     const handle = await launchWorker({
       workDir: path.join(options.browserDir, 'install'),
       nodeBin: options.nodeBin,
-      script: options.workerScript ?? { file: WORKER_SCRIPT, marker: 'showcaseBrowserInstall' },
+      helper: 'showcase-browser-install',
+      script: options.workerScript,
       task: {
         browsersDir,
         manifestFile,

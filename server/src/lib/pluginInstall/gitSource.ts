@@ -1,17 +1,17 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type {
   PluginInstalledVersion,
   PluginVersionRef,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { parseStableTag } from '../grigDeskRelease.ts';
+import { parseStableTag } from '../releaseCommon.ts';
 import { installError, PluginInstallError } from './errors.ts';
 
 import { normalizeGitUrl } from './gitUrl.ts';
 import { runCommand } from './runCommand.ts';
+import { helperCommand } from '../runtimePaths.ts';
 import type { PluginCommandRunner } from './runCommand.ts';
 import { safeGitConfigDigest, installedPayloadFiles } from './gitMetadata.ts';
 import { createGitPolicyRunner, gitPolicyEnv, GIT_POLICY_ARGS } from './gitPolicy.ts';
@@ -206,11 +206,10 @@ export class GitPluginSource implements PluginSource {
       }
 
       {
+        const blobHelper = helperCommand('plugin-git-blob-prefix', [blob]);
         const content = base === '.gitattributes'
           ? await this.localGit(request.destination, ['cat-file', 'blob', blob], request)
-          : await this.run(process.execPath, [
-            fileURLToPath(new URL('./gitBlobPrefix.mjs', import.meta.url)), blob,
-          ], {
+          : await this.run(blobHelper.command, blobHelper.args, {
             cwd: request.destination,
             env: gitPolicyEnv(request.destination, this.baseEnv),
             timeoutMs: this.localTimeoutMs,

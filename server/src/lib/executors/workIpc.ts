@@ -3,9 +3,8 @@ import { promises as fs } from 'node:fs';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const WORK_MCP = fileURLToPath(new URL('./work-mcp.js', import.meta.url));
+import { helperCommand } from '../runtimePaths.ts';
 
 /**
  * Приватный UDS привязывает MCP-процесс к конкретному server-owned workTools.
@@ -62,12 +61,14 @@ export async function createWorkIpc({ workTools, root = os.tmpdir() }: {
   });
   await fs.chmod(socketPath, 0o600);
 
+  const mcp = helperCommand('work-mcp', ['--socket', socketPath, '--nonce', nonce]);
+
   return {
     socketPath,
     nonce,
     mcpServer: {
-      command: process.execPath,
-      args: [WORK_MCP, '--socket', socketPath, '--nonce', nonce],
+      command: mcp.command,
+      args: mcp.args,
       // ACP V1 требует поле даже при пустом наследуемом окружении.
       env: [],
     },

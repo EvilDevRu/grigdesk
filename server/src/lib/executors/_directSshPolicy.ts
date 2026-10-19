@@ -2,6 +2,9 @@ import path from 'node:path';
 import { isIP } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { helperCommand } from '../runtimePaths.ts';
+import { shellQuote } from '../../../../shared/lib/shellQuote.ts';
+
 
 const DIRECT_CLIENTS = new Set([
   'ssh',
@@ -50,11 +53,13 @@ export const DIRECT_SSH_HOOK_PATH = fileURLToPath(
   new URL('./_direct-ssh-policy-hook.js', import.meta.url),
 );
 
-// Хук запускает чужой CLI отдельным процессом — тем же Node, что и сервер. Минимум
-// 22.18 исполняет TypeScript сам, поэтому команда состоит из пути к рантайму и пути
-// к хуку: неудачный запуск рубежа означал бы разрешённую команду, и лишних условий
-// в этой строке быть не должно.
-export const DIRECT_SSH_HOOK_COMMAND = `${process.execPath} ${DIRECT_SSH_HOOK_PATH}`;
+// Хук запускает чужой CLI отдельным процессом. В source это тот же Node и исходный
+// хук, в комплекте — вложенный Node и собранный helper. Пути экранируются: пробел
+// в каталоге комплекта не должен разорвать команду.
+const DIRECT_SSH_HOOK = helperCommand('direct-ssh-policy-hook', []);
+export const DIRECT_SSH_HOOK_COMMAND = [DIRECT_SSH_HOOK.command, ...DIRECT_SSH_HOOK.args]
+  .map(shellQuote)
+  .join(' ');
 export const CLAUDE_DIRECT_SSH_DENY = Object.freeze([
   'Bash(ssh:*)',
   'Bash(slogin:*)',

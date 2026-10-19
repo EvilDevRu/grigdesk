@@ -104,6 +104,7 @@ const expectedLayout = {
   studio3d: '3d',
   agents: 'agents',
   plugins: 'plugins',
+  profiles: 'profiles',
   artifacts: 'artifacts',
   moveJournal: '.move-journal.json',
   moveLock: '.move-lock',
@@ -162,7 +163,7 @@ test('DH-06: отдельный файл настроек вычисляется
   assert.equal(envFilePath({ env: {}, home }), '/home/user/.grigdesk/.env');
 });
 
-test('DH-07: раскладка содержит ровно 20 относительных путей', () => {
+test('DH-07: раскладка содержит ровно 21 относительный путь', () => {
   assert.deepEqual(DATA_LAYOUT, expectedLayout);
 
   for (const value of Object.values(DATA_LAYOUT)) {

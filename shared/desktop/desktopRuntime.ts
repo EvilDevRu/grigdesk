@@ -7,6 +7,11 @@ export type RuntimeDescriptor = {
   root: string;
   node: string;
   home: string;
+} | {
+  version: 3;
+  kind: 'sea';
+  root: string;
+  home: string;
 };
 
 export type EnvMap = Record<string, string | undefined>;
@@ -42,6 +47,23 @@ export function parseRuntimeDescriptor(text: string): RuntimeDescriptor | null {
   const descriptor = value as Record<string, unknown>;
 
   const version = descriptor.version;
+
+  if (version === 3) {
+    if (Object.keys(descriptor).length !== 4 || descriptor.kind !== 'sea'
+      || typeof descriptor.root !== 'string' || !descriptor.root.startsWith('/')
+      || descriptor.root.includes('\0') || typeof descriptor.home !== 'string'
+      || !descriptor.home.startsWith('/') || descriptor.home.includes('\0')) {
+      return null;
+    }
+
+    return {
+      version,
+      kind: 'sea',
+      root: descriptor.root,
+      home: descriptor.home,
+    };
+  }
+
   const validVersion = version === 1 || version === 2;
 
   if (!validVersion || Object.keys(descriptor).length !== (version === 2 ? 4 : 3)

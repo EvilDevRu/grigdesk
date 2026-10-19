@@ -2,9 +2,9 @@
 // в общих transport-контрактах, поэтому этот файл можно импортировать в unit-тесте.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
+import { isDirectRun } from '../helperEntry.ts';
 import { ingestRecording, writeIngestJobFile } from './ingest.ts';
 import type { IngestFileDeps, IngestJob, SpeechOptions } from './ingest.ts';
 import { isCudaRuntimeFailure } from '../speech/errors.ts';
@@ -111,14 +111,22 @@ export async function runIngestWorker(
   return encodeJob(job);
 }
 
-const invokedAsCli = process.argv[1]
-  && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+/**
+ * Запускает worker через явный вход, одинаковый в исходниках и ESM-бандле.
+ * Guard исходного URL после упаковки не должен превращать задание в пустой успех.
+ */
+export async function main(args: readonly string[] = process.argv.slice(2)): Promise<number> {
+  const statusPath = args[0];
 
-if (invokedAsCli) {
-  const statusPath = process.argv[2];
   if (!statusPath) {
-    process.exitCode = 2;
-  } else {
-    await runIngestWorker(statusPath);
+    return 2;
   }
+
+  await runIngestWorker(statusPath);
+
+  return 0;
+}
+
+if (isDirectRun(import.meta.url)) {
+  process.exitCode = await main();
 }

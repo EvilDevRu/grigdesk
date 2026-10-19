@@ -17,6 +17,8 @@ import {
 const SYNTHETIC_RUNTIME = {
   root: '/fixture/project',
   node: '/fixture/node',
+  serverCommand: '/fixture/node',
+  serverArgs: ['/fixture/project/server/src/app.ts'],
   port: 9300,
   origin: 'http://127.0.0.1:9300',
   env: { SYNTHETIC_SECRET: 'fixture-secret-value' },
@@ -43,6 +45,25 @@ test('PR-01 spawn получает системный Node, точные опц�
     shell: false,
   }]]);
   assert.equal(JSON.stringify(calls[0][1]).includes('fixture-secret-value'), false);
+});
+
+test('SEA-PR-01: явная команда SEA получает пустой argv и прежний IPC', () => {
+  const calls = [];
+  const runtime = {
+    ...SYNTHETIC_RUNTIME,
+    serverCommand: '/fixture/sea/server/grigdesk-server',
+    serverArgs: [],
+  };
+
+  spawnServer(runtime, 123, (...args) => {
+    calls.push(args);
+
+    return new EventEmitter();
+  });
+  assert.equal(calls[0][0], runtime.serverCommand);
+  assert.deepEqual(calls[0][1], []);
+  assert.deepEqual(calls[0][2].stdio, ['ignore', 123, 123, 'ipc']);
+  assert.equal(calls[0][2].detached, false);
 });
 
 test('PR-02 журнал создаётся 0600, ротируется свыше 10 МБ и открывается на дозапись', async (t) => {

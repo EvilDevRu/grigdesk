@@ -16,6 +16,8 @@ import { freePort } from '../server/helpers/pluginBootFixture.js';
 const RUNTIME = {
   root: '/fixture/project',
   node: '/fixture/node',
+  serverCommand: '/fixture/node',
+  serverArgs: ['/fixture/project/server/src/app.ts'],
   port: 9300,
   origin: 'http://127.0.0.1:9300',
   env: {},
@@ -610,6 +612,8 @@ test('SV-17 настоящий Node запускается и останавли
     ...RUNTIME,
     root,
     node: process.execPath,
+    serverCommand: process.execPath,
+    serverArgs: [path.join(root, 'server/src/app.ts')],
     port,
     origin: `http://127.0.0.1:${port}`,
     env: {

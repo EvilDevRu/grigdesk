@@ -1,4 +1,6 @@
 import { readTextOrNull } from '../../shared/node/files.ts';
+import { verifySeaRuntime } from '../../shared/node/seaRuntime.ts';
+import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
 
 import { dataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import { legacyRootProblem } from '../../shared/runtime/legacyBrand.ts';
@@ -22,11 +24,13 @@ import type { EnvMap } from '../../shared/desktop/desktopRuntime.ts';
 import { isNodeVersionSupported, MIN_NODE_VERSION } from '../../server/src/lib/nodeVersion.ts';
 import { localOrigin } from './connection.ts';
 
-export type RuntimeProblem = 'not_installed' | 'invalid' | 'root' | 'web' | 'node';
+export type RuntimeProblem = 'not_installed' | 'invalid' | 'root' | 'web' | 'node' | 'package';
 
 export interface ServerRuntime {
   root: string;
   node: string;
+  serverCommand: string;
+  serverArgs: string[];
   port: number;
   origin: string;
   env: Record<string, string>;
@@ -39,6 +43,7 @@ export interface RuntimeDependencies {
   readText(path: string): Promise<string | null>;
   exists(path: string, kind: 'file' | 'dir' | 'exec'): Promise<boolean>;
   nodeVersion(node: string): Promise<string | null>;
+  checkRelease(root: string): Promise<boolean>;
 }
 
 const executeFile = promisify(execFile);
@@ -65,6 +70,19 @@ const PACKAGED_ENV_KEYS = new Set([
 const PACKAGED_PATH_KEYS = ['PATH', 'LD_LIBRARY_PATH', 'XDG_DATA_DIRS', 'GSETTINGS_SCHEMA_DIR'];
 
 export const runtimeDependencies: RuntimeDependencies = {
+  /**
+   * Сверяет пакет настоящим SEA без запуска API и чтения папки данных.
+   * Безопасное сообщение об отказе формирует загрузчик; вывод процесса не раскрывается.
+   */
+  async checkRelease(root) {
+    try {
+      await verifySeaRuntime(root, { mode: 'startup' });
+
+      return true;
+    } catch {
+      return false;
+    }
+  },
   /**
    * Отсутствующий файл отличается от ошибки доступа или чтения.
    * Загрузчик сам переводит отказ в безопасную причину без содержимого настроек.
@@ -122,6 +140,7 @@ export function buildServerEnv(input: {
   node: string;
   home: string;
   appDir?: string | null;
+  sea?: boolean;
 }): Record<string, string> {
   const env: Record<string, string> = Object.fromEntries(Object.entries({
     ...input.dotenv,
@@ -173,6 +192,16 @@ export function buildServerEnv(input: {
   env.PATH = [...new Set(entries.filter(Boolean))].join(':');
   env.GRIGDESK_DESKTOP_CHILD = '1';
 
+  if (input.sea) {
+    delete env.NODE_OPTIONS;
+
+    return packagedChildEnvironment({
+      node: input.node,
+      env,
+      home: input.home,
+    });
+  }
+
   return env;
 }
 
@@ -213,8 +242,18 @@ export async function loadServerRuntime(input: {
     };
   }
 
-  const { root, node } = descriptor;
-  const required: [string, 'file' | 'dir'][] = [
+  const { root } = descriptor;
+  const sea = descriptor.version === 3;
+  const node = descriptor.version === 3 ? path.join(root, 'runtime/node/bin/node') : descriptor.node;
+  const serverCommand = sea ? path.join(root, 'server/grigdesk-server') : node;
+  const serverArgs = sea ? [] : [path.join(root, 'server/src/app.ts')];
+  const required: [string, 'file' | 'dir' | 'exec'][] = sea ? [
+    ['release.json', 'file'],
+    ['server/grigdesk-server', 'exec'],
+    ['runtime/node/bin/node', 'exec'],
+    ['server/node_modules', 'dir'],
+    ['deploy/require-vpn.sh', 'file'],
+  ] : [
     ['server/src/app.ts', 'file'],
     ['server/node_modules', 'dir'],
     ['deploy/require-vpn.sh', 'file'],
@@ -229,7 +268,11 @@ export async function loadServerRuntime(input: {
     }
   }
 
-  const parent = descriptor.version === 2 ? { ...input.env, GRIGDESK_HOME: descriptor.home } : input.env;
+  if (sea && !await input.deps.checkRelease(root)) {
+    return { problem: 'package', message: `Серверный пакет GrigDesk повреждён: ${root}.` };
+  }
+
+  const parent = descriptor.version !== 1 ? { ...input.env, GRIGDESK_HOME: descriptor.home } : input.env;
   let envPath: string;
   let selectedHome: string;
 
@@ -272,21 +315,23 @@ export async function loadServerRuntime(input: {
   const dist = effectiveValue(input.env, dotenv, 'GRIGDESK_WEB_DIST') || path.join(root, 'web/dist');
   const index = path.join(dist, 'index.html');
 
-  if (!input.bundledUi && !await input.deps.exists(index, 'file')) {
+  if (!sea && !input.bundledUi && !await input.deps.exists(index, 'file')) {
     return {
       problem: 'web',
       message: `Нет собранного интерфейса: ${index}.`,
     };
   }
 
-  const version = await input.deps.exists(node, 'exec') ? await input.deps.nodeVersion(node) : null;
+  if (!sea) {
+    const version = await input.deps.exists(node, 'exec') ? await input.deps.nodeVersion(node) : null;
 
-  if (!version || !isNodeVersionSupported(version)) {
-    return {
-      problem: 'node',
-      message: `Node ${node} недоступен или старше ${MIN_NODE_VERSION.split('.').slice(0, 2).join('.')}`
-        + ` (нужно ^${MIN_NODE_VERSION} || >=24.0.0).`,
-    };
+    if (!version || !isNodeVersionSupported(version)) {
+      return {
+        problem: 'node',
+        message: `Node ${node} недоступен или старше ${MIN_NODE_VERSION.split('.').slice(0, 2).join('.')}`
+          + ` (нужно ^${MIN_NODE_VERSION} || >=24.0.0).`,
+      };
+    }
   }
 
   const port = effectivePort(input.env, dotenv);
@@ -303,6 +348,8 @@ export async function loadServerRuntime(input: {
     runtime: {
       root,
       node,
+      serverCommand,
+      serverArgs,
       port,
       origin,
       env: buildServerEnv({
@@ -311,6 +358,7 @@ export async function loadServerRuntime(input: {
         node,
         home: input.home,
         appDir: input.appDir,
+        sea,
       }),
       graceMs: stopGraceMs(input.env, dotenv),
       logPath: effectiveValue(input.env, dotenv, 'GRIGDESK_LOG')

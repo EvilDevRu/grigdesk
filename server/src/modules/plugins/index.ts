@@ -7,7 +7,6 @@ import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import {
   SYSTEM,
   scanUserPlugins,
@@ -25,6 +24,8 @@ import type { PluginInstallPort } from '../../lib/pluginInstall/service.ts';
 import { createPluginLifecycle, PluginAdmission } from './lifecycle.ts';
 import installRoutes from './installRoutes.ts';
 import { preparePluginDataDir, preparePluginDataRoot } from './pluginData.ts';
+import { importRuntimeModule } from '../../lib/runtimeImport.ts';
+import type { PluginServerModule } from '../../lib/runtimeImport.ts';
 import { assertRealPackageRoot } from '../../lib/pluginInstall/packageTree.ts';
 import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
 
@@ -206,7 +207,8 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       loaded.add(m.id);
 
       try {
-        const mod = await import(pathToFileURL(path.join(String(m.dir), 'server.js')).href);
+        const mod = await importRuntimeModule<PluginServerModule>(
+          path.join(String(m.dir), 'server.js'));
 
         await scope.register(async (serverScope) => {
           try {

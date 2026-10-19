@@ -3,15 +3,15 @@
 import os from 'node:os';
 import { dataHome as resolveDataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
 import { readClientConfig } from './lib/clientAccess/config.ts';
+import { profilesDirFor } from './lib/runtimeLayout.ts';
+import { runtimeKind, runtimeRoot } from './lib/runtimePaths.ts';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
 const dataHome = resolveDataHome({ env: process.env, home });
 const dataStateDir = dataPath(dataHome, 'state');
-const rootDir = path.join(__dirname, '..', '..');
+const rootDir = runtimeRoot();
 const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
 const chatsDir = process.env.GRIGDESK_CHATS_DIR || dataPath(dataHome, 'chats');
 const telegramDir = process.env.GRIGDESK_TELEGRAM_DIR || dataPath(dataHome, 'telegram');
@@ -79,7 +79,12 @@ export const config = {
   // Движок входит в этот же репозиторий. Внешний checkout поддерживается только явным env.
   factoryHome,
   // Проектные профили живут отдельно от движка, в корне репозитория.
-  profilesDir: process.env.FACTORY_PROFILES_DIR || path.join(rootDir, 'profiles'),
+  profilesDir: profilesDirFor({
+    kind: runtimeKind(),
+    rootDir,
+    dataHome,
+    env: process.env,
+  }),
   factoryBin: process.env.GRIGDESK_FACTORY_BIN || path.join(factoryHome, 'bin', 'factory'),
   // Debug settings принадлежат engine writer-у, GrigDesk передаёт этот root его CLI.
   factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(home, '.factory', 'config'),
@@ -111,7 +116,11 @@ export const config = {
   // Pinned DeepSeek Harness живёт в server-owned runtime home. API key намеренно
   // не попадает в config: дочернее окружение строится отдельным allowlist-ом.
   deepseekRuntimeHome,
-  deepseekRuntimeMode: deepSeekDistributionMode(path.join(rootDir, 'server/deepseek-runtime-contract.json')),
+  // Первая SEA-поставка не включает generation: адаптер сообщит runtime_missing.
+  // Source сохраняет проверку своего обязательного контракта поставки.
+  deepseekRuntimeMode: runtimeKind() === 'packaged' ? 'embedded' : deepSeekDistributionMode(
+    path.join(rootDir, 'server/deepseek-runtime-contract.json'),
+  ),
   deepseekBinOverride: process.env.GRIGDESK_DEEPSEEK_BIN,
   deepseekGenerationRoot: path.join(rootDir, 'server', 'runtime', 'deepseek'),
   deepseekBin: process.env.GRIGDESK_DEEPSEEK_BIN
@@ -166,7 +175,8 @@ export const config = {
   agentsDir: process.env.GRIGDESK_AGENTS_DIR || dataPath(dataHome, 'agents'),
   // Версионируемый стандартный набор агентов: отсюда кнопка «Установить набор»
   // доустанавливает отсутствующих (create-only, существующие файлы не трогает).
-  agentsSeedDir: process.env.GRIGDESK_AGENTS_SEED_DIR || path.join(__dirname, '..', 'seed', 'agents'),
+  agentsSeedDir: process.env.GRIGDESK_AGENTS_SEED_DIR
+    || path.join(rootDir, 'server', 'seed', 'agents'),
   // Рабочая папка агентов: снимки, дампы, скрипты и отчёты проверок. Вне дерева кода;
   // ход чата получает её на запись, картинки и документы из неё показываются.
   artifactsDir: process.env.GRIGDESK_ARTIFACTS_DIR || dataPath(dataHome, 'artifacts'),

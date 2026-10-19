@@ -14,6 +14,7 @@ import websocket from '@fastify/websocket';
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { attachDesktopParent } from './lib/desktopParent.ts';
+import type { DesktopParent } from './lib/desktopParent.ts';
 import { config } from './config.ts';
 import { MobileService } from './lib/mobile/service.ts';
 import { ensureBrainIdentity } from './lib/mobile/identity.ts';
@@ -188,7 +189,7 @@ function readPluginSettings(
  * Пути installer и VERSION проверяются до создания ресурсов приложения.
  * Закрытие Fastify ждёт installer lifetime прежде завершения процесса.
  */
-async function build() {
+async function build(desktopParent: DesktopParent | null) {
   const installOptions = await readPluginInstallConfiguration(config);
   const factoryDebug = new FactoryDebugSettings({
     factoryBin: config.factoryBin,
@@ -1521,34 +1522,55 @@ async function build() {
   return fastify;
 }
 
-// Версию проверяем до сборки сервисов: дальше отказ выглядел бы поломкой
-// конкретного модуля, а не устаревшим рантаймом.
-assertSupportedNode();
+/**
+ * Проверяет рантайм, собирает сервисы и включает сервер.
+ * Ошибка listen закрывает частично поднятый Fastify и возвращается вызывающему;
+ * ошибка папки данных приходит раньше, из startDataHome, и сюда не попадает.
+ */
+export async function startServer(): Promise<FastifyInstance> {
+  // Версию проверяем до сборки сервисов: дальше отказ выглядел бы поломкой
+  // конкретного модуля, а не устаревшим рантаймом.
+  assertSupportedNode();
 
-const desktopParent = attachDesktopParent({
-  env: process.env,
-  channel: typeof process.send === 'function' ? process : null,
-  exit: (code) => process.exit(code),
-});
+  const desktopParent = attachDesktopParent({
+    env: process.env,
+    channel: typeof process.send === 'function' ? process : null,
+    exit: (code) => process.exit(code),
+  });
+  const app = await build(desktopParent);
 
-const app = await build();
+  if (process.env.GRIGDESK_HOST !== undefined) {
+    app.log.warn('GRIGDESK_HOST больше не поддерживается: GrigDesk слушает только 127.0.0.1');
+  }
 
-if (process.env.GRIGDESK_HOST !== undefined) {
-  app.log.warn('GRIGDESK_HOST больше не поддерживается: GrigDesk слушает только 127.0.0.1');
+  try {
+    await app.listen({ port: config.port, host: config.host });
+  } catch (error) {
+    app.log.error(error);
+    await app.close().catch(() => {});
+
+    throw error;
+  }
+
+  app.log.info(`GrigDesk слушает http://127.0.0.1:${config.port}`);
+  app.shutdown?.arm();
+
+  if (desktopParent && app.shutdown) {
+    const shutdown = app.shutdown;
+
+    desktopParent.bindShutdown((reason) => shutdown.begin(reason));
+  }
+
+  return app;
 }
 
-try {
-  await app.listen({ port: config.port, host: config.host });
-} catch (err) {
-  app.log.error(err);
+// app.ts запускается и как исполняемый вход, и через app.js/SEA-вход: guard по argv[1]
+// здесь запрещён. Ошибка старта не оставляет процесс с успешным кодом.
+void startServer().catch((error: unknown) => {
+  const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+
+  process.stderr.write(`GrigDesk не запустился: ${detail}\n`);
+  // Живые таймеры, watchers или дочерние процессы могли стартовать до отказа:
+  // exitCode их не остановит, и сервер повис бы без признака падения для окна/systemd.
   process.exit(1);
-}
-
-app.log.info(`GrigDesk слушает http://127.0.0.1:${config.port}`);
-app.shutdown?.arm();
-
-if (desktopParent && app.shutdown) {
-  const shutdown = app.shutdown;
-
-  desktopParent.bindShutdown((reason) => shutdown.begin(reason));
-}
+});

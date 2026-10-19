@@ -18,6 +18,22 @@ const RUNTIME_DESCRIPTOR = {
 const EXPECTED_SERVER_PATH = '/home/user/.kimi-code/bin:/home/user/.local/bin'
   + ':/fixture/node/bin:/usr/bin';
 
+test('REVIEW-P1/P5: окно оставляет пакетный Node запасным и задаёт безопасное окружение детей', () => {
+  const nodeDir = '/fixture/R/runtime/node/bin';
+  const env = buildServerEnv({
+    parent: { PATH: `${nodeDir}:/user-node/bin:/usr/bin`, GRIGDESK_HOME: '/data/fixture' },
+    dotenv: {},
+    home: '/home/user',
+    node: `${nodeDir}/node`,
+    sea: true,
+  });
+
+  assert.equal(env.PATH.split(':').at(-1), nodeDir);
+  assert.ok(env.PATH.indexOf('/user-node/bin') < env.PATH.indexOf(nodeDir));
+  assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
+  assert.equal(env.npm_config_prefix, '/data/fixture/state/npm-global');
+});
+
 test('RT-01 путь descriptor: абсолютный XDG_DATA_HOME или домашний каталог', () => {
   const home = '/home/user';
 
@@ -239,6 +255,8 @@ test('RT-10 окружение важнее файла: порт, origin, фай
   const result = await loadServerRuntime(fixture);
 
   assert.ok(result.runtime);
+  assert.equal(result.runtime.serverCommand, '/fixture/node/bin/node');
+  assert.deepEqual(result.runtime.serverArgs, ['/fixture/project/server/src/app.ts']);
   assert.equal(result.runtime.port, 9400);
   assert.equal(result.runtime.origin, 'http://127.0.0.1:9400');
   assert.equal(result.runtime.logPath, '/fixture/custom.log');
@@ -254,6 +272,69 @@ test('RT-10 окружение важнее файла: порт, origin, фай
   assert.equal(fromFile.runtime.port, 9300);
   assert.equal(fromFile.runtime.graceMs, 75_000);
   assert.equal(fromFile.runtime.logPath, '/home/user/.grigdesk/state/grigdesk-server.log');
+});
+
+test('SEA-RT-01: v3 выбирает SEA, вложенный Node и D без исходников или системного Node', async () => {
+  const descriptor = {
+    version: 3,
+    kind: 'sea',
+    root: '/fixture/SEA release',
+    home: '/data/selected',
+  };
+
+  assert.deepEqual(parseRuntimeDescriptor(JSON.stringify(descriptor)), descriptor);
+
+  const fixture = runtimeFixture({
+    descriptorText: JSON.stringify(descriptor),
+    env: { GRIGDESK_HOME: '/data/window', NODE_OPTIONS: '--require=/bad/fixture.cjs' },
+    missing: ['file:/fixture/SEA release/server/src/app.ts',
+      'file:/fixture/SEA release/web/dist/index.html'],
+  });
+  let checks = 0;
+
+  fixture.deps.checkRelease = async (root) => {
+    assert.equal(root, descriptor.root);
+    checks += 1;
+
+    return true;
+  };
+  fixture.deps.nodeVersion = async () => assert.fail('SEA не запускается как обычный Node');
+
+  const { runtime } = await loadServerRuntime(fixture);
+
+  assert.ok(runtime);
+  assert.equal(checks, 1);
+  assert.equal(runtime.serverCommand, '/fixture/SEA release/server/grigdesk-server');
+  assert.deepEqual(runtime.serverArgs, []);
+  assert.equal(runtime.node, '/fixture/SEA release/runtime/node/bin/node');
+  assert.equal(runtime.env.GRIGDESK_HOME, descriptor.home);
+  assert.equal(Object.hasOwn(runtime.env, 'NODE_OPTIONS'), false);
+  assert.ok(fixture.reads.includes('/data/selected/.env'));
+  assert.equal(fixture.checked.some((file) => file.includes('server/src/app.ts')), false);
+});
+
+test('SEA-RT-02: повреждённый пакет или executable отклоняются до чтения D', async () => {
+  const descriptor = {
+    version: 3,
+    kind: 'sea',
+    root: '/fixture/sea',
+    home: '/data/selected',
+  };
+
+  for (const missing of [[], ['exec:/fixture/sea/server/grigdesk-server'],
+    ['exec:/fixture/sea/runtime/node/bin/node']]) {
+    const fixture = runtimeFixture({ descriptorText: JSON.stringify(descriptor), missing });
+
+    fixture.deps.checkRelease = async () => false;
+
+    const result = await loadServerRuntime(fixture);
+
+    assert.ok(result.problem);
+    assert.equal(fixture.reads.includes('/data/selected/.env'), false);
+  }
+
+  assert.equal(parseRuntimeDescriptor(JSON.stringify({ ...descriptor, version: 4 })), null);
+  assert.equal(parseRuntimeDescriptor(JSON.stringify({ ...descriptor, node: '/bad/node' })), null);
 });
 
 test('RT-11 окружение очищается от AppImage, Electron, systemd и признаков исполнителя', () => {

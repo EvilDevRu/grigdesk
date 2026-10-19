@@ -2,7 +2,6 @@
 // приходят из серверного каталога; ответ модели не участвует в их разрешении.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { setTimeout as pause } from 'node:timers/promises';
 
@@ -13,8 +12,6 @@ import { processAlive } from '../processIdentity.ts';
 import type { ShowcaseTargets, ShowcaseResolvedScope } from '../targets.ts';
 import type { DraftScript } from './writer.ts';
 import type { RehearsalResult } from './rehearsal.ts';
-
-const WORKER = fileURLToPath(new URL('../../../../scripts/showcaseRehearsal.mts', import.meta.url));
 
 /** Один полный проход с конечным сроком; неудачный проход сохраняет свои наблюдения. */
 export async function launchRehearsal(input: {
@@ -40,7 +37,7 @@ export async function launchRehearsal(input: {
   const handle = await launchWorker({
     workDir: input.workDir,
     inheritedFds: input.inheritedFds,
-    script: { file: WORKER, marker: 'showcaseRehearsal' },
+    helper: 'showcase-rehearsal',
     task: {
       baseUrl: scope.recordUrl,
       allowedOrigins: scope.allowedOrigins,

@@ -5,12 +5,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# node нужен и серверу, и безопасному чтению .env из папки данных.
-if ! command -v node >/dev/null 2>&1; then
-  echo "node не найден в PATH" >&2
-  exit 1
-fi
-
 # Машинные настройки — из .env папки данных, как у bin/grigdesk-ctl и systemd-юнита. Раньше путь к
 # venv распознавания был прописан прямо здесь, и работа диктовки зависела от способа запуска:
 # поднятый этим скриптом GrigDesk распознавал, поднятый systemd падал со spawn ... ENOENT.
@@ -21,7 +15,7 @@ grigdesk_load_runtime_env "$ROOT"
 DATA_HOME=$(grigdesk_data_home) || exit 1
 LOG="${GRIGDESK_EFFECTIVE_LOG:-$DATA_HOME/state/grigdesk-server.log}"
 PORT="$GRIGDESK_EFFECTIVE_PORT"
-ENV_ARG=("${GRIGDESK_NODE_ENV_ARGS[@]}")
+grigdesk_server_command "$ROOT"
 
 listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
 busy() { listening "$PORT"; }
@@ -42,7 +36,7 @@ fi
 
 ( umask 077; mkdir -p "$(dirname "$LOG")" )
 cd "$ROOT"
-setsid nohup node "${ENV_ARG[@]}" server/src/app.ts </dev/null >>"$LOG" 2>&1 &
+setsid nohup "${GRIGDESK_SERVER_COMMAND[@]}" </dev/null >>"$LOG" 2>&1 &
 disown
 
 # Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health
