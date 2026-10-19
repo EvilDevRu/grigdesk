@@ -86,5 +86,5 @@ test('REVIEW-P6: обычный preflight не вызывает SEA, отдел�
   const trace = (await readFile(path.join(root, 'trace'), 'utf8')).trim().split('\n');
 
   assert.equal(trace.some((line) => /build:sea|test:sea/.test(line)), false);
-  assert.equal(trace.length, 5);
+  assert.deepEqual(trace, ['test', 'test', 'run build']);
 });

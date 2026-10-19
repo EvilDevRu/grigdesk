@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import {
@@ -29,8 +30,12 @@ import {
   runtimeKind,
   runtimeRoot,
 } from '../../server/src/lib/runtimePaths.ts';
+import { createRuntimeContextPlugin } from '../../server/scripts/sea/context.mts';
+import { createModuleUrlsPlugin } from '../../server/scripts/sea/moduleUrls.mts';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
+const require = createRequire(new URL('../../server/package.json', import.meta.url));
+const { build } = require('esbuild');
 
 /**
  * Временная папка одного сценария; уборка привязана к тесту.
@@ -281,4 +286,60 @@ test('SEA-RP-08: вычисления не создают файлов и не �
 
   assert.deepEqual(await readdir(directory), []);
   assert.equal(existsSync(path.join(directory, '.env')), false);
+});
+
+/**
+ * Настоящие плагины сборки сохраняют fallback внешнего ELF после переноса в R.
+ * Factory получает обычный Node комплекта, не бинарник SEA и не embedded generation.
+ */
+test('SEA-RP-09: packaged DeepSeek выбирает внешний ELF и обычный Node без source-контракта', async (t) => {
+  const R = await packagedLayout(t);
+  const dataHome = await scratch(t);
+  const outfile = path.join(R, 'server/runtime/helpers/deepseek-paths.mjs');
+  const urls = createModuleUrlsPlugin({
+    root: ROOT,
+    runtimeModule: path.join(ROOT, 'server/src/lib/runtimePaths.ts'),
+  });
+  const result = await build({
+    stdin: {
+      contents: [
+        'import { config } from "./server/src/config.ts";',
+        'import { routeLaunchEnv } from "./server/src/lib/factoryRouteCli.ts";',
+        'import { selectedDeepSeekBinary } from "./server/src/lib/deepseek/distribution.ts";',
+        'const env = routeLaunchEnv(config);',
+        'process.stdout.write(JSON.stringify({',
+        '  selected: selectedDeepSeekBinary({}), mode: config.deepseekRuntimeMode,',
+        '  node: env.GRIGDESK_DEEPSEEK_NODE_BIN, binary: env.GRIGDESK_DEEPSEEK_BIN,',
+        '}));',
+      ].join('\n'),
+      resolveDir: ROOT,
+      loader: 'ts',
+    },
+    outfile,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    packages: 'external',
+    plugins: [createRuntimeContextPlugin(ROOT, 'helper'), urls.plugin],
+    logLevel: 'silent',
+  });
+
+  assert.deepEqual(result.warnings, []);
+  assert.equal(existsSync(path.join(R, 'server/deepseek-runtime-contract.json')), false);
+
+  const output = execFileSync(process.execPath, [outfile], {
+    env: {
+      PATH: '',
+      HOME: dataHome,
+      GRIGDESK_HOME: dataHome,
+    },
+    encoding: 'utf8',
+  });
+
+  assert.deepEqual(JSON.parse(output), {
+    selected: path.join(R, 'bin/deepseek'),
+    mode: 'binary',
+    node: path.join(R, 'runtime/node/bin/node'),
+    binary: path.join(R, 'bin/deepseek'),
+  });
 });

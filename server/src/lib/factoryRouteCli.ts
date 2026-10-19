@@ -21,6 +21,7 @@ import { config as runtimeConfig } from '../config.ts';
 
 import { factoryUnitArgs } from './factoryLaunch.ts';
 import { grigDeskCliPath } from './cliPath.ts';
+import { nodeExecutable } from './runtimePaths.ts';
 
 /**
  * На длинной попытке goto записал решение, но прежних 30 секунд не хватило на выход.
@@ -324,21 +325,19 @@ export function routeLaunchEnv(
 ): Record<string, string> {
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
   const prefsPath = config.prefsPath;
-  const generationRoot = config.deepseekGenerationRoot
-    || (root ? path.join(root, 'server/runtime/deepseek') : '');
 
   return {
     ...extra,
     PATH: grigDeskCliPath(config.rootDir),
     GRIGDESK_HOME: config.dataHome ?? runtimeConfig.dataHome,
     ...(prefsPath ? { GRIGDESK_PROVIDER_PREFS_PATH: path.resolve(prefsPath) } : {}),
-    GRIGDESK_DEEPSEEK_NODE_BIN: process.execPath,
-    GRIGDESK_DEEPSEEK_RUNTIME_MODE: config.deepseekRuntimeMode || 'embedded',
-    ...(generationRoot ? { GRIGDESK_DEEPSEEK_GENERATION_ROOT: generationRoot } : {}),
+    GRIGDESK_DEEPSEEK_NODE_BIN: nodeExecutable(),
+    GRIGDESK_DEEPSEEK_RUNTIME_MODE: 'binary',
+    GRIGDESK_DEEPSEEK_GENERATION_ROOT: config.deepseekGenerationRoot || '',
     GRIGDESK_DEEPSEEK_ARTIFACT_DIR: config.deepseekArtifactDir || '',
     GRIGDESK_DEEPSEEK_CACHE_DIR: config.deepseekCacheDir || '',
-    GRIGDESK_DEEPSEEK_BIN: config.deepseekBinOverride
-      || (['installed', 'binary'].includes(config.deepseekRuntimeMode || '') ? config.deepseekBin || '' : ''),
+    GRIGDESK_DEEPSEEK_BIN: config.deepseekBinOverride || config.deepseekBin
+      || (root ? path.join(root, 'bin/deepseek') : ''),
     ...(config.deepseekRuntimeHome
       ? { GRIGDESK_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),

@@ -48,6 +48,9 @@ test('изолированный server и Factory работают через �
     path.join(root, 'server/deepseek-host-contract.json'));
   await fs.copyFile(path.join(repository, 'server/deepseek-runtime-contract.json'),
     path.join(root, 'server/deepseek-runtime-contract.json'));
+  await fs.mkdir(path.join(root, 'server/build'));
+  await fs.copyFile(path.join(repository, 'server/build/helpers.json'),
+    path.join(root, 'server/build/helpers.json'));
   await fs.symlink(path.join(repository, 'server/node_modules'), path.join(root, 'server/node_modules'));
   await fs.mkdir(path.join(root, 'bin'));
   await fs.mkdir(path.join(root, 'project'));

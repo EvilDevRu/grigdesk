@@ -425,15 +425,13 @@ function registerFactoryStatus(delivery) {
 
 registerFactoryStatus('binary');
 
-test('Factory env закрепляет host prefs, Node и runtime поверх extra env', () => {
+test('Factory env по умолчанию закрепляет binary без embedded roots поверх extra env', () => {
   const config = {
     rootDir: '/opt/grigdesk',
     factoryHome: '/opt/grigdesk/engine',
     profilesDir: '/opt/profiles',
     factoryConfigRoot: '/opt/config',
     prefsPath: '/private/host-prefs.json',
-    deepseekRuntimeMode: 'embedded',
-    deepseekGenerationRoot: '/opt/grigdesk/server/runtime/deepseek',
   };
   const env = routeLaunchEnv(config, {
     GRIGDESK_PROVIDER_PREFS_PATH: '/project/fake-prefs',
@@ -446,10 +444,10 @@ test('Factory env закрепляет host prefs, Node и runtime поверх 
 
   assert.equal(env.GRIGDESK_PROVIDER_PREFS_PATH, config.prefsPath);
   assert.equal(env.GRIGDESK_DEEPSEEK_NODE_BIN, process.execPath);
-  assert.equal(env.GRIGDESK_DEEPSEEK_BIN, '');
+  assert.equal(env.GRIGDESK_DEEPSEEK_BIN, '/opt/grigdesk/bin/deepseek');
   assert.equal(env.GRIGDESK_DEEPSEEK_ARTIFACT_DIR, '');
-  assert.equal(env.GRIGDESK_DEEPSEEK_RUNTIME_MODE, 'embedded');
-  assert.equal(env.GRIGDESK_DEEPSEEK_GENERATION_ROOT, config.deepseekGenerationRoot);
+  assert.equal(env.GRIGDESK_DEEPSEEK_RUNTIME_MODE, 'binary');
+  assert.equal(env.GRIGDESK_DEEPSEEK_GENERATION_ROOT, '');
 });
 
 test('Factory env закрепляет ELF и cache binary-поставки поверх extra env', () => {
@@ -461,6 +459,7 @@ test('Factory env закрепляет ELF и cache binary-поставки по
     deepseekRuntimeMode: 'binary',
     deepseekBin: '/opt/grigdesk/bin/deepseek',
     deepseekCacheDir: '/private/deepseek-cache',
+    deepseekGenerationRoot: '/private/installed-legacy',
   };
   const env = routeLaunchEnv(config, {
     GRIGDESK_DEEPSEEK_BIN: '/project/fake-binary',
@@ -470,6 +469,7 @@ test('Factory env закрепляет ELF и cache binary-поставки по
   assert.equal(env.GRIGDESK_DEEPSEEK_RUNTIME_MODE, 'binary');
   assert.equal(env.GRIGDESK_DEEPSEEK_BIN, config.deepseekBin);
   assert.equal(env.GRIGDESK_DEEPSEEK_CACHE_DIR, config.deepseekCacheDir);
+  assert.equal(env.GRIGDESK_DEEPSEEK_GENERATION_ROOT, config.deepseekGenerationRoot);
 });
 
 test('stock override с активной общей настройкой отклоняется до launch по metadata contract', async (t) => {

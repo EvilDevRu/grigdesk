@@ -130,15 +130,6 @@
     {
       "file": "engine/lib/runners/deepseek.sh",
       "construct": "shell-ref",
-      "target": "server/deepseek-runtime-contract.json",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "engine/lib/runners/deepseek.sh",
-      "construct": "shell-ref",
       "target": "server/scripts/deepseekRunner.mts",
       "count": 1,
       "owner": "deepseek-plan",
@@ -149,15 +140,6 @@
       "file": "engine/lib/runners/deepseek.sh",
       "construct": "shell-ref",
       "target": "server/scripts/deepseekRuntimeInfo.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "engine/lib/runners/deepseek.sh",
-      "construct": "shell-ref",
-      "target": "server/src/lib/deepseek/distribution.ts",
       "count": 1,
       "owner": "deepseek-plan",
       "fate": "deferred-deepseek",
@@ -254,13 +236,13 @@
       "detail": "Корень кода для data-home считается от расположения helper."
     },
     {
-      "file": "server/scripts/deepseekHarnessInstall.mts",
-      "construct": "import-meta",
-      "target": "url",
+      "file": "server/scripts/deepSeekCandidateGate.ts",
+      "construct": "exec-path",
+      "target": "",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "development-only",
+      "detail": "Source-sync gate запускает отдельный builder обычным Node; не входит в серверный SEA или runtime DeepSeek."
     },
     {
       "file": "server/scripts/deepseekRunner.mts",
@@ -623,6 +605,24 @@
       "detail": "Исходная таблица движков; сборщик заменяет её литеральными импортами."
     },
     {
+      "file": "server/src/lib/deepseek/distribution.ts",
+      "construct": "import-meta",
+      "target": "dirname",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "server-bundle",
+      "detail": "AST-плагин сохраняет виртуальный путь модуля внутри R; fallback выбирает внешний R/bin/deepseek, не Harness source."
+    },
+    {
+      "file": "server/src/lib/deepseek/distribution.ts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "server-bundle",
+      "detail": "Вычисляется корень комплекта R для внешнего ELF; ссылка не требует копирования source-каталога."
+    },
+    {
       "file": "server/src/lib/deepseek/profile.ts",
       "construct": "exec-path",
       "target": "",
@@ -644,33 +644,6 @@
       "file": "server/src/lib/deepseek/profile.ts",
       "construct": "resource-ref",
       "target": "server/scripts/deepseekInstructionsHook.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "server/src/lib/deepseek/runtimeProcess.ts",
-      "construct": "exec-path",
-      "target": "",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "server/src/lib/deepseek/runtimeProcess.ts",
-      "construct": "import-meta",
-      "target": "dirname",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "server/src/lib/deepseek/runtimeProcess.ts",
-      "construct": "resource-ref",
-      "target": "server/runtime/deepseek",
       "count": 1,
       "owner": "deepseek-plan",
       "fate": "deferred-deepseek",
@@ -740,15 +713,6 @@
       "detail": "MCP-хук остаётся отдельным helper; guard входа проверяет argv helper-файла."
     },
     {
-      "file": "server/src/lib/factoryRouteCli.ts",
-      "construct": "exec-path",
-      "target": "",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
       "file": "server/src/lib/glm/profile.ts",
       "construct": "exec-path",
       "target": "",
@@ -778,11 +742,11 @@
     {
       "file": "server/src/lib/grigDeskRelease.ts",
       "construct": "dynamic-import",
-      "target": "./deepseek/runtimeProcess.ts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "target": "./deepseek/binaryReadiness.ts",
+      "count": 2,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Обе проверки внешнего ELF принадлежат git-updater исходников. SEA заменяет releaseServices на packagedRelease и не включает grigDeskRelease в bundle."
     },
     {
       "file": "server/src/lib/grigDeskRelease.ts",
@@ -1290,27 +1254,9 @@
     },
     {
       "file": "server/src/workers/grigdesk-update-worker.js",
-      "construct": "dynamic-import",
-      "target": "../../../tools/deepseekRuntimePublication.ts",
-      "count": 1,
-      "owner": "task-15",
-      "fate": "development-only",
-      "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
-    },
-    {
-      "file": "server/src/workers/grigdesk-update-worker.js",
-      "construct": "dynamic-import",
-      "target": "../lib/deepseek/runtimeArtifact.ts",
-      "count": 1,
-      "owner": "task-15",
-      "fate": "development-only",
-      "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
-    },
-    {
-      "file": "server/src/workers/grigdesk-update-worker.js",
       "construct": "exec-path",
       "target": "",
-      "count": 2,
+      "count": 1,
       "owner": "task-15",
       "fate": "development-only",
       "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
@@ -1638,36 +1584,28 @@
       "detail": "Status MCP DeepSeek отложен."
     },
     {
-      "path": "server/scripts/deepseekHarnessInstall.mts",
-      "kind": "file",
-      "expect": "source",
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Установщик harness DeepSeek отложен."
-    },
-    {
       "path": "server/scripts/prepareDeepSeekRuntime.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Подготовка runtime DeepSeek отложена."
+      "fate": "development-only",
+      "detail": "Source-команда или контракт независимого DeepSeek; не входит в R и не строит Harness при обновлении серверного SEA."
     },
     {
       "path": "server/scripts/verifyDeepSeekCandidate.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Проверка кандидата DeepSeek отложена."
+      "fate": "development-only",
+      "detail": "Source-команда или контракт независимого DeepSeek; не входит в R и не строит Harness при обновлении серверного SEA."
     },
     {
       "path": "server/scripts/glmLiveSmoke.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Живой smoke GLM отложен."
+      "fate": "development-only",
+      "detail": "Source-команда или контракт независимого DeepSeek; не входит в R и не строит Harness при обновлении серверного SEA."
     },
     {
       "path": "server/src/lib/chat/permission-mcp.js",
@@ -1762,8 +1700,8 @@
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Контракт runtime DeepSeek отложен."
+      "fate": "development-only",
+      "detail": "Source-команда или контракт независимого DeepSeek; не входит в R и не строит Harness при обновлении серверного SEA."
     },
     {
       "path": "server/node_modules/",
@@ -1772,14 +1710,6 @@
       "owner": "task-13",
       "fate": "package",
       "detail": "Production-зависимости ставятся npm ci --omit=dev в staging."
-    },
-    {
-      "path": "server/runtime/deepseek/",
-      "kind": "dir",
-      "expect": "generated",
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Runtime DeepSeek появится после плана deepseek-binary-tdd."
     },
     {
       "path": "server/runtime/helpers/",

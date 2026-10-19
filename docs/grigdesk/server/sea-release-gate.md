@@ -25,6 +25,11 @@ npm-командами из [контракта сборки](sea-release.md). �
 тегов и не публикует. Подмена `GRIGDESK_RELEASE_CHECK_COMMAND` остаётся портом
 существующих тестов обычного release-скрипта.
 
+После отделения DeepSeek обычный preflight выполняет три npm-команды: server test,
+web test и web build. Он не строит source candidate Harness и не требует установленного
+optional ELF. Совместимость установленного DeepSeek проверяют отдельный установщик и
+git-updater целевой установки; серверные тесты получают собственный проверенный candidate.
+
 `test:sea` находит все `tests/server/sea/*.test.mts` и передаёт их memory guard
 с concurrency1. Отсутствующий release или пустой набор тестов дают отказ;
 код сторожа сохраняется. Этот тяжёлый набор отделён от быстрых server tests.

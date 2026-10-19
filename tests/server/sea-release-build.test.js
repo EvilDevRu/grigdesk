@@ -135,12 +135,21 @@ test('SEA-RELEASE-05: полный CJS граф включает реестры 
   assert.equal(inputs.some((file) => file.endsWith('server/src/lib/executors/claude.ts')), true);
 
   for (const file of ['server/src/plugins/apiVersion.ts', 'server/src/lib/clientAccess/bootstrap.ts',
-    'server/src/lib/clientAccess/listener.ts', 'server/src/modules/devices/index.ts']) {
+    'server/src/lib/clientAccess/listener.ts', 'server/src/modules/devices/index.ts',
+    'server/src/lib/deepseek/distribution.ts']) {
     assert.equal(inputs.some((input) => input.endsWith(file)), true, file);
   }
 
-  assert.equal(inputs.some((file) => file.endsWith('server/src/lib/grigDeskUpdate.ts')), false);
-  assert.equal(inputs.some((file) => file.endsWith('server/src/lib/grigDeskRelease.ts')), false);
+  for (const file of [
+    'server/src/lib/grigDeskUpdate.ts',
+    'server/src/lib/grigDeskRelease.ts',
+    'server/src/lib/deepseek/binaryReadiness.ts',
+    'server/src/workers/grigdesk-update-worker.js',
+    'server/scripts/deepSeekCandidateGate.ts',
+  ]) {
+    assert.equal(inputs.some((input) => input.endsWith(file)), false, file);
+  }
+
   assert.equal((await readFile(outfile, 'utf8')).includes(SOURCE), false);
 });
 
