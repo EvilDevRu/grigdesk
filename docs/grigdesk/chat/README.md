@@ -70,6 +70,10 @@
 
 ### Исполнители и модели
 
+- [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
+
+- [GigaCode CLI: документированные возможности и граница проверки](gigacode-cli-contract.md)
+- [Qwen Code: две точки подключения и проверенные внешние источники](qwen-integration-boundaries.md)
 - [Исполнитель GLM (Z.ai): допуск режима, живая проверка и ограничения](glm-executor.md)
 - [Контракт доступа и допуска GLM: два режима, отдельные ключи, отпечаток и setup-only карточка](glm-access-contract.md)
 - [Входы сборки GLM: exact-версии, проверка notices и запрет записи llm-pi-ai](glm-build-inputs.md)
