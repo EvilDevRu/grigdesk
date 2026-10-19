@@ -1200,6 +1200,79 @@
   font-size: 12px;
 }
 
+/* Панель конвейера использует плотность toolbar, а не кнопок формы.
+   Тон остаётся у точек и выбранного состояния; проекты отмечены нижней линией. */
+.ui-button[data-context='pipeline-project'],
+.ui-button[data-context='pipeline-toolbar-more'],
+.ui-button[data-context='pipeline-status'],
+.ui-button[data-context='pipeline-status-trigger'],
+.ui-icon-button[data-context='pipeline-view'] {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: color-mix(in srgb, var(--ink) 3%, transparent);
+  --ui-action-color: var(--ink-mid);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.ui-button[data-context='pipeline-project'] {
+  padding-inline: 10px;
+}
+
+.ui-button[data-context='pipeline-project'][aria-pressed='true'] {
+  --ui-action-color: var(--accent);
+}
+
+.ui-button[data-context='pipeline-project'][aria-pressed='true']::after {
+  position: absolute;
+  right: 10px;
+  bottom: -4px;
+  left: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  content: '';
+}
+
+.ui-button[data-context='pipeline-status-menu-option'] {
+  --ui-action-background-hover: color-mix(in srgb, var(--ink) 3%, transparent);
+  --ui-action-color: var(--ink-mid);
+  border-color: transparent;
+}
+
+.ui-button[data-context='pipeline-status'][data-empty='true'],
+.ui-button[data-context='pipeline-status-menu-option'][data-empty='true'] {
+  --ui-action-color: var(--ink-low);
+}
+
+.ui-button[data-context='pipeline-status'][aria-pressed='true'],
+.ui-button[data-context='pipeline-status-menu-option'][aria-checked='true'] {
+  --ui-action-background: var(--ui-action-soft);
+  --ui-action-background-hover: var(--ui-action-soft);
+  --ui-action-color: var(--ui-action-tone);
+  background: var(--ui-action-background);
+}
+
+.ui-button[data-context='pipeline-status'][data-tone='neutral'][aria-pressed='true'],
+.ui-button[data-context='pipeline-status-menu-option'][data-tone='neutral'][aria-checked='true'] {
+  --ui-action-background: var(--surface-2);
+  --ui-action-background-hover: var(--surface-2);
+  --ui-action-color: var(--ink);
+}
+
+.ui-icon-button[data-context='pipeline-view'] {
+  width: var(--toolbar-control-h);
+  padding: 0;
+}
+
+.ui-icon-button[data-context='pipeline-view'][aria-pressed='true'] {
+  --ui-action-background: var(--ui-action-soft);
+  --ui-action-color: var(--accent);
+}
+
 .ui-button[data-role='pipeline-task-id'],
 .ui-button[data-role='pipeline-title'] {
   height: auto;

@@ -17,6 +17,7 @@
           <UiButton
             class="project-option"
             data-role="pipeline-project"
+            data-context="pipeline-project"
             :data-project="option.id"
             tone="accent"
             variant="ghost"
@@ -44,6 +45,7 @@
             <UiButton
               class="project-more"
               data-role="pipeline-project-overflow"
+              data-context="pipeline-toolbar-more"
               variant="ghost"
               :aria-label="`Ещё проектов: ${hiddenProjectOptions.length}`"
               v-tooltip="`Ещё проектов: ${hiddenProjectOptions.length}`"
@@ -87,7 +89,13 @@
             class="project-button-frame"
             :data-project-measure="option.id"
           >
-            <UiButton class="project-option" tone="accent" variant="ghost" tabindex="-1">
+            <UiButton
+              class="project-option"
+              data-context="pipeline-project"
+              tone="accent"
+              variant="ghost"
+              tabindex="-1"
+            >
               <span class="project-option-copy">
                 <span class="project-option-label">{{ option.label }}</span>
                 <b class="project-count mono">{{ option.count }}</b>
@@ -97,6 +105,7 @@
           <UiButton
             data-project-more-measure
             class="project-more"
+            data-context="pipeline-toolbar-more"
             variant="ghost"
             tabindex="-1"
           >
@@ -117,7 +126,9 @@
               :key="option.id"
               class="status-filter"
               data-role="pipeline-status-filter"
+              data-context="pipeline-status"
               :data-status="option.id"
+              :data-empty="option.count === 0 || undefined"
               :tone="option.tone"
               variant="text"
               :pressed="activeStatus === option.id"
@@ -126,8 +137,15 @@
               @click="setStatus(option.id)"
             >
               <span class="status-filter-copy">
-                <span class="status-dot" :data-tone="option.tone" aria-hidden="true"></span>
-                <span class="status-filter-label">{{ option.label }}</span>
+                <span
+                  v-if="option.id !== 'all'"
+                  class="status-dot"
+                  :data-tone="option.tone"
+                  aria-hidden="true"
+                ></span>
+                <span class="status-filter-label" :class="{ 'is-all': option.id === 'all' }">
+                  {{ option.label }}
+                </span>
                 <b class="status-count mono">{{ option.count }}</b>
               </span>
             </UiButton>
@@ -145,17 +163,21 @@
               <UiButton
                 class="status-menu-trigger"
                 data-role="pipeline-status-overflow"
+                data-context="pipeline-status-trigger"
                 :tone="currentStatusOption.tone"
                 variant="text"
                 :aria-label="`Состояние: ${currentStatusOption.label}, ${currentStatusOption.count}`"
                 v-tooltip="currentStatusOption.label"
               >
                 <span class="status-menu-trigger-copy">
+                  <span class="status-menu-label">Состояние:</span>
                   <span
+                    v-if="activeStatus !== 'all'"
                     class="status-dot"
                     :data-tone="currentStatusOption.tone"
                     aria-hidden="true"
                   ></span>
+                  <span class="status-menu-current">{{ currentStatusOption.label }}</span>
                   <b class="status-count mono">{{ currentStatusOption.count }}</b>
                   <svg class="project-more-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="m4 6 4 4 4-4" />
@@ -170,7 +192,9 @@
                   v-for="option in statusOptions"
                   :key="option.id"
                   data-role="pipeline-status-menu-option"
+                  data-context="pipeline-status-menu-option"
                   :data-status="option.id"
+                  :data-empty="option.count === 0 || undefined"
                   role="menuitemradio"
                   block
                   :tone="option.tone"
@@ -192,6 +216,7 @@
         <div class="compact-view-controls" role="group" aria-label="Вид карточек">
           <UiIconButton
             data-option="loops"
+            data-context="pipeline-view"
             role="peer"
             tone="accent"
             variant="ghost"
@@ -209,6 +234,7 @@
           </UiIconButton>
           <UiIconButton
             data-option="compact"
+            data-context="pipeline-view"
             role="peer"
             tone="accent"
             variant="ghost"
@@ -2465,23 +2491,24 @@ function cardState(g) {
   gap: 14px;
 }
 
-/* Одна строка: проекты получают всё свободное место, состояния и вид прижаты вправо. */
+/* Панель заполняет верхний отступ оболочки и оставляет до карточек 12 px.
+   Проекты получают свободное место, состояния и вид собраны справа. */
 .toolbar {
-  --pipeline-content-gutter: 22px;
+  --pipeline-content-gutter: var(--page-gutter);
   position: sticky;
   top: calc(var(--pipeline-content-gutter) * -1);
   z-index: 30;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  min-height: calc(var(--toolbar-control-h) + 8px);
   margin: calc(var(--pipeline-content-gutter) * -1)
     calc(var(--pipeline-content-gutter) * -1)
-    calc(var(--pipeline-content-gutter) + 6px);
-  padding: 8px var(--pipeline-content-gutter);
+    -2px;
+  padding: 3px var(--pipeline-content-gutter) 4px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--topbar) 88%, var(--ground));
-  box-shadow: 0 8px 18px #00000024;
+  background: var(--topbar);
 }
 
 .status-filter-copy {
@@ -2491,11 +2518,11 @@ function cardState(g) {
 }
 
 .status-dot {
-  width: 7px;
-  height: 7px;
+  flex: none;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--ink-mid);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-mid) 12%, transparent);
 }
 
 /* Цвет точки задаётся её собственным тоном, а не классом кнопки. Селектор вида
@@ -2504,17 +2531,14 @@ function cardState(g) {
    рядом с той, что уже уехала в `tone` самой кнопки. */
 .status-dot[data-tone='accent'] {
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
 .status-dot[data-tone='warning'] {
   background: var(--warn);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 13%, transparent);
 }
 
 .status-dot[data-tone='danger'] {
   background: var(--bad);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 13%, transparent);
 }
 
 .status-count {
@@ -2523,7 +2547,6 @@ function cardState(g) {
   font-size: 11px;
   line-height: 1;
   text-align: center;
-  opacity: .75;
 }
 
 .toolbar-icon {
@@ -2558,18 +2581,6 @@ function cardState(g) {
   text-transform: uppercase;
 }
 
-@media (min-width: 760px) and (max-width: 1099px) {
-  .toolbar {
-    --pipeline-content-gutter: 18px;
-  }
-}
-
-@media (max-width: 759px) {
-  .toolbar {
-    --pipeline-content-gutter: 16px;
-  }
-}
-
 @container pipeline-view (max-width: 620px) {
   .filter-empty {
     align-items: flex-start;
@@ -2583,10 +2594,10 @@ function cardState(g) {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow: clip visible;
 }
 
 .project-button-frame {
@@ -2616,7 +2627,7 @@ function cardState(g) {
   flex: none;
   color: currentColor;
   font-size: 11px;
-  opacity: .68;
+  font-weight: 500;
 }
 
 .project-more-icon {
@@ -2648,7 +2659,7 @@ function cardState(g) {
   left: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   overflow: hidden;
   visibility: hidden;
@@ -2660,7 +2671,7 @@ function cardState(g) {
 .toolbar-secondary {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   flex: none;
 }
 
@@ -2671,9 +2682,8 @@ function cardState(g) {
 .secondary-status-filters {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   width: max-content;
-  opacity: .82;
 }
 
 .secondary-status-filters > .ui-button {
@@ -2703,18 +2713,26 @@ function cardState(g) {
   gap: 7px;
 }
 
+.status-menu-current {
+  min-width: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .compact-view-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding-left: 4px;
+  gap: 2px;
+  padding-left: 8px;
   border-left: 1px solid var(--line);
 }
 
 /* Состояния вторичны: сначала у них исчезает текст, но точки, числа и доступные
    названия остаются. Проекты получают освободившуюся ширину автоматически. */
-@container pipeline-view (max-width: 1250px) {
-  .secondary-status-filters .status-filter-label {
+@container pipeline-view (max-width: 1160px) {
+  .secondary-status-filters .status-filter-label:not(.is-all) {
     display: none;
   }
 }
@@ -2735,6 +2753,10 @@ function cardState(g) {
   .project-button-frame {
     max-width: 130px;
   }
+
+  .status-menu-label {
+    display: none;
+  }
 }
 
 @container pipeline-view (max-width: 420px) {
@@ -2744,6 +2766,19 @@ function cardState(g) {
 
   .project-more .project-more-icon {
     display: none;
+  }
+
+  .status-menu-current {
+    display: none;
+  }
+
+  .toolbar,
+  .toolbar-secondary {
+    gap: 4px;
+  }
+
+  .compact-view-controls {
+    padding-left: 4px;
   }
 }
 
