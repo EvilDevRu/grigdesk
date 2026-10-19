@@ -6,6 +6,10 @@ DSH `0.1.5-rc.2`, commit `c291e7961a515f6d7af9304e7fd1d257929aef26`.
 `OMITTED_BUNDLE_PACKAGES`; его source root не входит в выбранный snapshot.
 Нынешний runtime поэтому нельзя перевести на этот adapter одной настройкой.
 
+После подключения GLM строка о snapshot устарела: workspace-замыкание добавило исходники
+`llm-pi-ai`, а пакет входит в host-overlay. Исключение из base YAML сохранено, поэтому плагин
+монтируется только в процесс GLM, не в DeepSeek — см. [входы сборки GLM](glm-build-inputs.md).
+
 В полном upstream того же commit пакет существует и принадлежит проекту DeepSeek Harness.
 Он использует модельную библиотеку Pi, без обязательного отдельного агента Pi.
 Manifest задаёт MIT и зависимость `@earendil-works/pi-ai: ^0.85.1`; сохранённый
