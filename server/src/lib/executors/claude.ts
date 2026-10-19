@@ -14,6 +14,8 @@ import {
 } from './_claudeCatalog.ts';
 import { npmLatest } from './_npmLatest.ts';
 import { withRetry } from '../retry.ts';
+import { usagePercentOrNull } from '../providerUsage.ts';
+import type { ProviderUsagePatch } from '../providerUsage.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import {
   CLAUDE_DIRECT_SSH_DENY,
@@ -25,6 +27,7 @@ import {
 import {
   buildClaudeTurnResult,
   claudeSessionArgs,
+  consumeClaudeRateLimitEvent,
   createClaudeTurnCollector,
   openClaudeStreamSession,
 } from './_claudeStream.ts';
@@ -766,7 +769,6 @@ function creditsNote(c: NonNullable<ReturnType<typeof creditsOf>>) {
  * разделитель, не зная ни про Anthropic, ни про имена семейств.
  */
 export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
-  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
   const bars: ClaudeUsageBar[] = [];
   const KIND: Record<string, string> = { session: 'Сессия (5ч)', weekly_all: 'Неделя (7д)' };
   const KIND_MINUTES: Record<string, number> = {
@@ -781,8 +783,11 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
     resets_at?: string;
     scope?: { model?: { display_name?: string }; surface?: string };
   }>;
+
   for (const l of limits) {
-    if (typeof l.percent !== 'number') {
+    const pct = usagePercentOrNull(l.percent);
+
+    if (pct === null) {
       continue;
     }
 
@@ -798,7 +803,7 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
       key: String(l.kind) + (l.scope?.model?.display_name || ''),
       group: scoped ? `scoped:${scopeName}` : 'subscription',
       label,
-      pct: clamp(l.percent),
+      pct,
       resetsAt: l.resets_at || null,
       windowMinutes: KIND_MINUTES[String(l.kind)] ?? null,
     });
@@ -807,7 +812,9 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
   if (!bars.length) {
     for (const [key, raw] of Object.entries((d || {}) as Record<string, unknown>)) {
       const value = raw as { utilization?: unknown; resets_at?: string } | null;
-      if (!value || typeof value !== 'object' || typeof value.utilization !== 'number') {
+      const pct = usagePercentOrNull(value?.utilization);
+
+      if (pct === null) {
         continue;
       }
 
@@ -815,8 +822,8 @@ export function parseClaudeUsagePayload(d: unknown): ClaudeUsageBar[] {
         key,
         group: 'subscription',
         label: key.replace(/_/g, ' '),
-        pct: clamp(value.utilization),
-        resetsAt: value.resets_at || null,
+        pct,
+        resetsAt: value?.resets_at || null,
         windowMinutes: null,
       });
     }
@@ -1990,7 +1997,7 @@ export default {
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, nativeSettings, log, onProgress, onStep, signal,
     workspaceAccess, workTools, onSessionCreated, onRunMetadata, attachmentsDir, pluginDocsDirs = [],
-    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage,
+    onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onProviderUsage,
   }: {
     config: ClaudeConfig;
     env?: NodeJS.ProcessEnv;
@@ -2008,6 +2015,7 @@ export default {
     providerSettings?: ClaudeSettings;
     nativeSettings?: PreparedNativeSettings;
     log?: StreamLog;
+    onProviderUsage?: (patch: ProviderUsagePatch) => boolean;
     onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
     onRunMetadata?: (metadata: ChatRunMetadata) => void;
     onStep?: (step: ChatStep) => void;
@@ -2106,7 +2114,8 @@ export default {
     // писать — `claude -p <текст>` читает stdin только как признак конца.
     if (nativeSettings || onInTurnReady || onInTurnAvailability || onInTurnReceipt || onAssistantMessage) {
       const streamArgs = [
-        '-p', '--input-format', 'stream-json', '--replay-user-messages', ...args.slice(2),
+        '-p', '--input-format', 'stream-json', '--include-partial-messages',
+        '--replay-user-messages', ...args.slice(2),
       ];
 
       return (async () => {
@@ -2118,6 +2127,7 @@ export default {
           sessionId: sessionId || null,
           nativeSettings,
           log,
+          hooks: { onProviderUsage },
         });
         const onAbort = () => {
           void session.interrupt();
@@ -2208,6 +2218,11 @@ export default {
           if (!line.startsWith('{')) continue;
           let ev: unknown;
           try { ev = JSON.parse(line); } catch { continue; }
+
+          if (consumeClaudeRateLimitEvent(ev, onProviderUsage)) {
+            continue;
+          }
+
           collector.push(ev);
           if (!sessionAnnounced && state.streamSessionId && onSessionCreated) {
             sessionAnnounced = true;

@@ -10,6 +10,7 @@
 
 import 'fastify';
 
+import type { ProviderUsagePatch } from './providerUsage.ts';
 import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
 import type { StudioRuntime } from '../modules/studio3d/runtime.ts';
@@ -18,6 +19,11 @@ import type { PluginDocsEntry } from './pluginDocs.ts';
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
 export type AuthKind = 'session' | 'internal' | 'cli' | null;
+
+export interface AuthPrincipal {
+  kind: 'device';
+  deviceId: string;
+}
 
 // Рассылка событий вкладкам и внутренним слушателям. Один поток на вкладку —
 // второй `EventSource` в браузере создавать нельзя.
@@ -49,6 +55,8 @@ declare module 'fastify' {
     // Перечитать лимиты исполнителей, если снимок устарел, и разослать их событием
     // `providers-usage`. Для фоновых потребителей, которым снимок нужен и без окон.
     refreshProvidersUsage?(): Promise<void>;
+    // Обработчик живёт вместе с процессом и принимает только поколение своего аккаунта.
+    providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
     factoryArbitrate?(...args: unknown[]): Promise<unknown>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
@@ -60,5 +68,6 @@ declare module 'fastify' {
 
   interface FastifyRequest {
     authKind?: AuthKind;
+    authPrincipal?: AuthPrincipal | null;
   }
 }

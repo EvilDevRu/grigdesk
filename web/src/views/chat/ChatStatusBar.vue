@@ -67,6 +67,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import { UiPopover, UiPressable, UiSpinner, vTooltip } from '../../ui';
+import { clockOf, resetIn } from '../../features/providers/providerUsage.js';
 import type { UsageSummary } from '../../features/providers/providerUsageSummary.ts';
 import type { ChatStatus } from './chatStatus.ts';
 import { statusOverflow, statusSummaryLayout } from './chatStatusLayout.ts';
@@ -120,7 +121,13 @@ const fullSummary = computed(() => [
   `${props.status.modelKind} ${props.status.modelLabel}`.trim(),
   props.status.cwd || props.status.cwdLabel,
   props.status.extraDirs.length ? `Дополнительные каталоги: ${props.status.extraDirs.join(', ')}` : '',
-  usageItems.value.map((item) => `${item.label}: ${item.value}`).join(' · '),
+  usageItems.value.length ? `Осталось по аккаунту: ${usageItems.value.map((item) => {
+    const reset = resetIn(item.resetsAt);
+
+    return `${item.label}: ${item.value}${reset ? ` (${reset})` : ''}`;
+  }).join(' · ')}` : '',
+  usageItems.value.length && props.usage.measuredAt
+    ? `замер ${clockOf(new Date(props.usage.measuredAt))}` : '',
   usageItems.value.length && props.usage.stale ? 'Данные устарели' : '',
 ].filter(Boolean).join(' · '));
 

@@ -43,6 +43,7 @@ test('bootstrap запускает возможности устройства �
         initWakeLock: () => globalThis.__desktopBootstrap.push('wake'),
         initNotifications: () => globalThis.__desktopBootstrap.push('notify'),
       });`,
+      './stores/shell.ts': 'export const useShellStore = () => ({ showConnections: false });',
       './stores/auth.js': 'export const useAuthStore = () => ({});',
       './shared/apiClient.ts': `export const api = { url: (path) => path };
         export const isReportedApiError = () => false;
@@ -52,12 +53,25 @@ test('bootstrap запускает возможности устройства �
         attachAuthStore() {},
       });`,
       './ui.ts': `export const showToast = () => {}; export const getUiLayerDiagnostics = () => ({});
+        export const setUiDownloadAdapter = () => globalThis.__desktopBootstrap.push('download');
         export const subscribeUiLayerDiagnostics = () => {};`,
-      './shared/desktopSettings.ts': `export const currentDesktopMode = () => 'main';
-        export const installSettingsRouteGuard = () => () => {};
-        export const openSettingsWindow = () => {};`,
+      './stores/settings.ts': 'export const useSettingsStore = () => ({});',
+      './shared/sectionLoadFailure.ts': 'export const showSectionLoadFailure = () => {};',
+      './shared/settingsNavigation.ts': `export const installSettingsRouteGuard = () => () => {};
+        export const installSettingsOpenListener = () => () => {};`,
+      './shared/saveFile.ts': `export const canSaveInShell = () => false;
+        export const saveLinkedFile = async () => {};`,
+      './shared/backAction.ts': `export const installBackAction = () => {
+        globalThis.__desktopBootstrap.push('back');
+        return () => {};
+      };`,
+      './shared/appViewport.ts': `export const installAppViewport = () => {
+        globalThis.__desktopBootstrap.push('viewport');
+        return () => {};
+      };`,
+
     },
   });
 
-  assert.deepEqual(calls, ['wake', 'notify']);
+  assert.deepEqual(calls, ['download', 'back', 'viewport', 'wake', 'notify']);
 });

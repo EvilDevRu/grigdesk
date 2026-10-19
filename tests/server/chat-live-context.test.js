@@ -9,7 +9,7 @@
 // а границу компакта называет вслух шагом ленты — иначе падение цифры втрое читается
 // как «кольцо врёт».
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -19,12 +19,19 @@ import {
   buildClaudeTurnResult, createClaudeTurnCollector,
 } from '../../server/src/lib/executors/_claudeStream.ts';
 
-/** Фальшивый CLI: печатает готовый stream-json и завершается. */
-async function fakeClaude(t, events) {
+/**
+ * Фальшивый CLI печатает готовый stream-json без запроса к модели.
+ * Stream-сценарий сначала принимает prompt, чтобы не закрыть stdin до отправки.
+ */
+async function fakeClaude(t, events, { stream = false } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-claude-ctx-'));
   const bin = path.join(dir, 'fake-claude');
   const lines = events.map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
-  await writeFile(bin, `#!/bin/sh\n${lines}\n`);
+  const trace = path.join(dir, 'args.txt');
+
+  const input = stream ? 'IFS= read -r line\n' : '';
+
+  await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > '${trace}'\n${input}${lines}\n`);
   await chmod(bin, 0o755);
   t.after(() => rm(dir, { recursive: true, force: true }));
   return { dir, bin };
@@ -32,6 +39,49 @@ async function fakeClaude(t, events) {
 
 /** Русская группировка разрядов — неразрывные пробелы; сверяем по цифрам. */
 const digits = (s) => String(s).replace(/[\s ]/g, '');
+
+test('R1: partial-прогресс до замера не объявляет контекст недоступным', () => {
+  const progress = [];
+  const collector = createClaudeTurnCollector({
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  collector.push({
+    type: 'stream_event',
+    event: { type: 'message_start', message: { id: 'first-response' } },
+  });
+  assert.deepEqual(progress, [{ tokens: 0, tokensIsEstimate: true }]);
+
+  collector.push({ type: 'system', subtype: 'compact_boundary' });
+  assert.equal(progress.at(-1).contextTokens, 0);
+  assert.equal(progress.at(-1).contextMetric, 'unavailable');
+  assert.equal(progress.at(-1).contextIsEstimate, false);
+  assert.equal(progress.at(-1).contextCache.status, 'unavailable');
+});
+
+test('R8: коллектор суммирует result двух сегментов одного хода с уточнением', () => {
+  const progress = [];
+  const collector = createClaudeTurnCollector({
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  for (const [id, tokens] of [['first-segment', 100], ['queued-segment', 50]]) {
+    collector.push({ type: 'stream_event', event: { type: 'message_start', message: { id } } });
+    collector.push({
+      type: 'stream_event',
+      event: { type: 'message_delta', usage: { output_tokens: tokens } },
+    });
+    collector.push({
+      type: 'result',
+      result: 'Готово',
+      usage: { output_tokens: tokens },
+    });
+  }
+
+  assert.equal(collector.state.spentTokens, 150);
+  assert.equal(progress.at(-1).tokens, 150);
+  assert.equal(progress.at(-1).tokensIsEstimate, false);
+});
 
 test('Claude отдаёт размер контекста живьём, а не одной цифрой в конце хода', async (t) => {
   const events = [
@@ -295,4 +345,162 @@ test('Claude без обращений к модели расход не выд�
     },
   });
   assert.deepEqual(progress.at(-1), { tokens: 2, estimate: true });
+});
+
+
+test('явный assistant replay не меняет расход, контекст и кэш основного агента', () => {
+  const collector = createClaudeTurnCollector();
+  const original = {
+    type: 'assistant',
+    message: {
+      id: 'msg-1',
+      model: 'claude-fixture',
+      content: [{ type: 'text', text: 'abcdef' }],
+      usage: {
+        input_tokens: 500,
+        cache_read_input_tokens: 200,
+        cache_creation_input_tokens: 30
+      },
+    },
+  };
+
+  collector.push(original);
+
+  const before = structuredClone(collector.state);
+
+  collector.push({
+    ...original,
+    isReplay: true,
+    message: { ...original.message, usage: { input_tokens: 100 } },
+  });
+  assert.equal(collector.state.spentTokens, before.spentTokens);
+  assert.equal(collector.state.lastTurnInput, before.lastTurnInput);
+  assert.deepEqual(collector.state.lastContextCache, before.lastContextCache);
+});
+
+
+test('коллектор Claude использует точный partial-output по обращениям и поправку result', () => {
+  const collector = createClaudeTurnCollector();
+  const push = (event) => collector.push({ type: 'stream_event', event });
+
+  push({ type: 'message_start', message: { id: 'request-a' } });
+  collector.push({
+    type: 'assistant',
+    message: {
+      id: 'request-a',
+      model: 'fixture-model',
+      usage: { input_tokens: 500 },
+      content: [{ type: 'text', text: 'abcdef' }],
+    },
+  });
+  push({ type: 'message_delta', usage: { output_tokens: 20 } });
+  push({ type: 'message_delta', usage: { output_tokens: 120 } });
+  push({ type: 'message_stop' });
+  push({ type: 'message_start', message: { id: 'request-b' } });
+  push({ type: 'message_delta', usage: { output_tokens: 80 } });
+  collector.push({
+    type: 'system',
+    subtype: 'thinking_tokens',
+    estimated_tokens_delta: 100
+  });
+  assert.equal(collector.state.spentTokens, 200);
+  assert.equal(collector.state.spentIsEstimate, false);
+  collector.push({ type: 'result', usage: { output_tokens: 188 } });
+  assert.equal(collector.state.spentTokens, 188);
+  assert.equal(collector.state.spentIsEstimate, false);
+});
+
+
+test('stream-путь Claude отдаёт точный output до result без дублирования шагов', async (t) => {
+  const partial = (event) => ({ type: 'stream_event', event });
+  const events = [
+    partial({ type: 'message_start', message: { id: 'partial-a' } }),
+    partial({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' }
+    }),
+    partial({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: 'abcdef' }
+    }),
+    { type: 'assistant', message: {
+      id: 'partial-a',
+      model: 'fixture-model',
+      usage: { input_tokens: 500 },
+      content: [{ type: 'text', text: 'abcdef' }],
+    } },
+    partial({ type: 'message_delta', usage: { output_tokens: 120 } }),
+    partial({ type: 'message_stop' }),
+    partial({ type: 'message_start', message: { id: 'partial-b' } }),
+    { type: 'assistant', message: {
+      id: 'partial-b',
+      model: 'fixture-model',
+      usage: { input_tokens: 700 },
+      content: [{
+        type: 'tool_use',
+        id: 'partial-tool',
+        name: 'Read',
+        input: { file_path: 'a' }
+      }],
+    } },
+    partial({ type: 'message_delta', usage: { output_tokens: 80 } }),
+    partial({ type: 'message_stop' }),
+    {
+      type: 'result',
+      subtype: 'success',
+      result: 'Готово',
+      usage: { output_tokens: 188 }
+    },
+  ];
+  const { dir, bin } = await fakeClaude(t, events, { stream: true });
+  const progress = [];
+  const result = await claude.run({
+    config: { claudeBin: bin },
+    cwd: dir,
+    message: 'Проверь',
+    onInTurnReady: () => {},
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  assert.ok(progress.some((item) => item.tokens === 200 && item.tokensIsEstimate === false));
+  assert.equal(progress.at(-1).tokens, 188);
+  assert.equal(progress.at(-1).tokensIsEstimate, false);
+  assert.equal(result.steps.filter((step) => step.k === 'text').length, 1);
+  assert.equal(result.steps.filter((step) => step.k === 'tool').length, 1);
+  assert.equal(result.contextTokens, 700);
+
+  const args = await readFile(path.join(dir, 'args.txt'), 'utf8');
+
+  assert.equal(args.includes('--include-partial-messages'), true);
+});
+
+
+test('разовый execFile Claude сохраняет ограниченный stdout без partial-флага', async (t) => {
+  const { dir, bin } = await fakeClaude(t, [
+    { type: 'assistant', message: {
+      model: 'fixture-model',
+      content: [{ type: 'text', text: 'abcdef' }],
+      usage: { input_tokens: 500 },
+    } },
+    {
+      type: 'result',
+      result: 'Готово',
+      subtype: 'success'
+    },
+  ]);
+  const progress = [];
+
+  await claude.run({
+    config: { claudeBin: bin },
+    cwd: dir,
+    message: 'Проверь',
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  const args = await readFile(path.join(dir, 'args.txt'), 'utf8');
+
+  assert.equal(args.includes('--include-partial-messages'), false);
+  assert.equal(progress.at(-1).tokensIsEstimate, true);
 });

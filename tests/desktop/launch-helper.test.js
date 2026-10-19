@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { createClientRuntime } from '../../desktop/src/clientRuntime.ts';
+import { originFromArgs } from '../../desktop/src/connection.ts';
+import { normalizeSettings } from '../../desktop/src/settings.ts';
 import { desktopLaunchOptions } from './e2e/launch.mjs';
 
 const root = '/tmp/desktop-helper-unit';
@@ -177,4 +183,60 @@ test('DW-H4: isolateEnv не даёт добавлениям подменить 
 
   assert.equal(Object.hasOwn(options.env, 'ELECTRON_RUN_AS_NODE'), false);
   assert.equal(Object.hasOwn(options.env, 'NODE_OPTIONS'), false);
+});
+
+test('SEA-GUI-FIXTURE: argv свежего SEA-окна выбирает местный профиль и включает supervisor', async (t) => {
+  const { seaDesktopArguments } = await import('./e2e/serverSeaFixture.mts');
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sea-desktop-argv-'));
+  const server = createServer((_request, response) => response.writeHead(503).end());
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const port = server.address().port;
+  const address = `http://127.0.0.1:${port}`;
+  const settings = normalizeSettings(null);
+  const prepared = [];
+  const client = createClientRuntime({
+    settings,
+    save: async () => {},
+    uiDir: temporary,
+    secret: 'synthetic-sea-desktop-secret',
+    identity: { load: async () => assert.fail('местный профиль не читает ключ устройства') },
+    identityDirectory: temporary,
+    localAvailable: () => true,
+    localAddress: () => address,
+    windowKey: async () => '',
+    prepareLocal: (profile) => prepared.push(profile.address),
+    onOrigin: () => {},
+    navigate: async () => {},
+  });
+
+  t.after(async () => {
+    await client.close();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  });
+
+  // Это тот же разбор argv и явный выбор, что main.ts выполняет перед client.start.
+  // Свежий профиль без аргумента остаётся на экране машин и не запускает supervisor.
+  const argument = originFromArgs(seaDesktopArguments('/fixture/desktop', port));
+
+  if (argument && 'origin' in argument) {
+    const profile = await client.profiles.add({
+      name: 'Этот компьютер',
+      kind: 'local',
+      address: argument.origin,
+      fp: null,
+    });
+
+    await client.profiles.select(profile.id);
+  }
+
+  await client.start();
+
+  const state = client.shell.state();
+
+  assert.equal(state.profile?.kind, 'local');
+  assert.equal(state.profile?.address, address);
+  assert.deepEqual(prepared, [address]);
 });

@@ -278,3 +278,29 @@ test('AS-11: auth/state не раскрывает scope анонимно и от
   assert.equal(authorized.json().clientScope, 'owner-scope-marker');
   assert.equal(authorized.json().configured, true);
 });
+
+
+test('S2: двадцать долгих сессий не вытесняют новую короткую CLI-сессию', async (t) => {
+  const fixture = await storeFixture(t);
+  const store = fixture.open();
+  const long = [];
+
+  for (let index = 0; index < 20; index += 1) {
+    long.push(store.createSession().id);
+    fixture.advance(1);
+  }
+
+  const short = store.createSession({ ttlMs: 600000 }).id;
+
+  assert.equal(store.isValidSession(short), true);
+  assert.equal(long.every((id) => store.isValidSession(id)), true);
+
+  for (let index = 0; index < 21; index += 1) {
+    store.createSession({ ttlMs: 600000 });
+    fixture.advance(1);
+  }
+
+  assert.equal(store.isValidSession(short), false);
+  assert.equal(long.every((id) => store.isValidSession(id)), true);
+  assert.equal(fixture.open().sessions.size, 40);
+});

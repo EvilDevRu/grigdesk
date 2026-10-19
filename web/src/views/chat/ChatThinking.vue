@@ -30,7 +30,7 @@
     </span>
     <!-- Факты подписаны знаками, а не словами: секундомер у времени, монета у расхода —
          строка остаётся короткой, а два числа рядом не путаются между собой. Знаки
-         декоративные (aria-hidden): смысл чисел объясняют подсказки title. -->
+         декоративные (aria-hidden): смысл чисел объясняют подсказки v-tooltip. -->
     <span v-if="elapsed" class="fact" v-tooltip="ELAPSED_HINT">
       <svg class="fico" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="13.5" r="7.5" />
@@ -73,7 +73,7 @@ const WORD_MS = 4_000;
 const TICK_MS = 1_000;
 
 const ELAPSED_HINT = 'Сколько идёт этот ход — минуты:секунды по часам этого окна';
-const TOKENS_HINT = 'Вывод хода: сколько токенов модель написала с его начала';
+const TOKENS_HINT = 'Выход текущего хода';
 
 const mountedAt = ref(Date.now());
 const now = ref(mountedAt.value);
@@ -89,7 +89,11 @@ const word = computed(() => thinkingWord(props.steps, tick.value, order));
 const elapsed = computed(() => formatElapsed(props.startedAt, now.value));
 // В строке — короткая запись («113 тыс.»), точное число — в подсказке.
 const tokensText = computed(() => formatTurnTokensShort(props.tokens, props.tokensEstimate));
-const tokensHint = computed(() => `${TOKENS_HINT}: ${formatTurnTokens(props.tokens, props.tokensEstimate)}`);
+const tokensHint = computed(() => {
+  const value = formatTurnTokens(props.tokens, props.tokensEstimate).replace('≈ ', '≈');
+
+  return `${TOKENS_HINT}: ${value}`;
+});
 
 // Слово, не влезшее в ячейку, уже кончается многоточием обрезки — анимированные точки
 // после него дали бы второе («Работаю с инструме… ...»). Поэтому обрезанное слово точки

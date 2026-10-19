@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
-import { MobileInputError } from './errors.ts';
+import { deviceName, MobileInputError } from './errors.ts';
 import { serialized } from './files.ts';
-import type { Device, DeviceStore } from './store.ts';
+import type { Device, DeviceScope, DeviceStore } from './store.ts';
 
 type Code = {
   exp: number;
+  scope: DeviceScope;
+  name?: string;
   fp?: string;
   result?: Device;
 };
@@ -49,7 +51,7 @@ export class PairingCodes {
    * Выдаёт одноразовый код только в памяти процесса на десять минут.
    * Переполнение отказывает новой выдаче без удаления ещё действующих кодов.
    */
-  issue(): {
+  issue(input: { scope?: DeviceScope; name?: unknown } = {}): {
     code: string;
     exp: number;
   } {
@@ -62,7 +64,11 @@ export class PairingCodes {
     const code = randomBytes(24).toString('base64url');
     const exp = this.now() + 600000;
 
-    this.codes.set(code, { exp });
+    this.codes.set(code, {
+      exp,
+      scope: input.scope ?? 'mobile-v1',
+      ...(input.name === undefined ? {} : { name: deviceName(input.name) }),
+    });
 
     return {
       code,
@@ -74,13 +80,14 @@ export class PairingCodes {
    * Связывает код с сертификатом текущего TLS только после устойчивой записи устройства.
    * Конкурентные повторы тем же ключом получают прежний результат без второго устройства.
    */
-  pair(code: string, fp: string, name: unknown): Promise<Device> {
+  pair(code: string, fp: string, name: unknown, scope: DeviceScope = 'mobile-v1',
+    peer = fp): Promise<Device> {
     return serialized(`pair:${code}`, async () => {
       this.sweep();
 
-      const failed = this.failures.get(fp);
+      const failed = this.failures.get(peer);
 
-      if ((failed?.count ?? 0) >= 5 || this.failures.size >= 4096) {
+      if ((failed?.count ?? 0) >= 5) {
         throw new MobileInputError(
           'pair_locked',
           'Слишком много попыток привязки. Повторите позже.',
@@ -90,8 +97,12 @@ export class PairingCodes {
 
       const item = this.codes.get(code);
 
-      if (!item || (item.fp && item.fp !== fp)) {
-        this.failures.set(fp, {
+      if (!item || item.scope !== scope || (item.fp && item.fp !== fp)) {
+        if (!failed && this.failures.size >= 4096) {
+          this.failures.delete(this.failures.keys().next().value!);
+        }
+
+        this.failures.set(peer, {
           count: (failed?.count ?? 0) + 1,
           exp: failed?.exp ?? this.now() + 600000,
         });
@@ -108,8 +119,9 @@ export class PairingCodes {
       }
 
       const device = await this.devices.add({
-        name,
+        name: item.name ?? name,
         fp,
+        scope,
       });
 
       item.fp = fp;

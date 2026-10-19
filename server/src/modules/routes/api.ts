@@ -9,6 +9,7 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { buildRouteDef } from '../../lib/routeGraph.ts';
+import { nodeExecutable } from '../../lib/runtimePaths.ts';
 import type { CatalogObserver } from './catalogObserver.ts';
 import { RoutesEditorStoreError } from './draftStore.ts';
 import { assertProfileId, assertRevisionHash, assertRouteId, RoutesError } from './schema.ts';
@@ -483,8 +484,9 @@ export async function registerRoutesApi(
       let stdout = '';
       let stderr = '';
       let failure: string | null = null;
+
       try {
-        const finished = await runScript(process.execPath, args, {
+        const finished = await runScript(nodeExecutable(), args, {
           cwd: path.join(String(profilesDir), profile),
           timeout: PUBLISH_TIMEOUT_MS,
           maxBuffer: PUBLISH_MAX_OUTPUT,

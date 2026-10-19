@@ -417,7 +417,11 @@ test('модуль чата гейтит живую сессию настрой�
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function apiFixture(t, { liveEnabled = true } = {}) {
+/**
+ * Поднимает модуль чата с синтетической живой сессией во временном каталоге.
+ * Необязательный sink проверяет передачу аккаунтных квот после завершения runId.
+ */
+async function apiFixture(t, { liveEnabled = true, providerUsageSink = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -425,6 +429,11 @@ async function apiFixture(t, { liveEnabled = true } = {}) {
   const handles = [];
   const app = Fastify({ logger: false });
   app.decorate('sse', { broadcast(event, data) { events.push({ event, data }); } });
+
+  if (providerUsageSink) {
+    app.decorate('providerUsageSink', providerUsageSink);
+  }
+
 
   // Фейковая живая сессия: настоящий CLI здесь не нужен, проверяется владение
   // временем жизни процесса, а не его протокол.
@@ -1711,4 +1720,100 @@ test('сбой записи итога фона не изображает дос
   assert.equal(f.events.some((e) => e.event === 'chat-orphan'), false);
   assert.equal(f.events.filter((e) => e.event === 'chat-done' && e.data.source === 'background').length, 1);
   assert.deepEqual((await f.app.inject('/api/chat/active')).json().active, []);
+});
+
+
+test('пул держит один обработчик квот на процесс, включая простой и ошибку обработчика', async (t) => {
+  const opened = [];
+  const executor = fakeExecutor({ opened });
+  const pool = new ChatLiveSessions();
+  const first = [];
+  const next = [];
+  const patch = { bars: [{
+    key: 'session',
+    pct: 8,
+    resetsAt: null
+  }] };
+  const spec = {
+    chatKey: 'usage-process',
+    executor,
+    model: 'a',
+    onProviderUsage: (value) => {
+      first.push(value);
+
+      return true;
+    },
+  };
+
+  t.after(() => pool.closeAll());
+  await pool.run(spec, { message: 'один' });
+  await pool.run({
+    ...spec,
+    onProviderUsage: (value) => {
+      next.push(value);
+
+      return true;
+    },
+  }, { message: 'два' });
+  assert.equal(opened.length, 1);
+  assert.equal(typeof opened[0].spec.hooks.onProviderUsage, 'function');
+  assert.equal(opened[0].spec.hooks.onProviderUsage(patch), true);
+  assert.deepEqual(first, [patch], 'в простое используется обработчик первого spec');
+  assert.deepEqual(next, []);
+
+  await pool.run({
+    ...spec,
+    model: 'b',
+    onProviderUsage: () => {
+      throw new Error('fixture-sink-error');
+    },
+  }, { message: 'три' });
+  assert.equal(opened.length, 2);
+  assert.doesNotThrow(() => opened[1].spec.hooks.onProviderUsage(patch));
+  assert.equal(opened[1].alive, true);
+  assert.equal((await pool.run({ ...spec, model: 'b' }, { message: 'четыре' })).reply, 'ответ:четыре');
+});
+
+
+test('модуль чата передаёт обработчик аккаунта в spec без привязки к завершённому runId', async (t) => {
+  const calls = [];
+  let factories = 0;
+  const f = await apiFixture(t, {
+    providerUsageSink: (id) => {
+      const number = ++factories;
+
+      return (patch) => {
+        calls.push({
+          id,
+          number,
+          patch
+        });
+
+        return true;
+      };
+    },
+  });
+  const chatKey = await f.chat('usage-module');
+
+  await f.turn(chatKey);
+  await f.turn(chatKey);
+
+  const patch = { bars: [{
+    key: 'session',
+    pct: 8,
+    resetsAt: null
+  }] };
+
+  assert.equal(f.handles.length, 1);
+  assert.equal(f.handles[0].spec.hooks.onProviderUsage(patch), true);
+  assert.deepEqual(calls, [{
+    id: 'claude',
+    number: 1,
+    patch
+  }]);
+});
+
+
+test('partial-флаг включён у живой сессии Claude', () => {
+  assert.equal(claudeSessionArgs({ permissionMode: 'default' }).includes('--include-partial-messages'), true);
 });

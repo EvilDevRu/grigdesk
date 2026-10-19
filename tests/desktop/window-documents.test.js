@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter, getEventListeners } from 'node:events';
 import test from 'node:test';
-import { loadDocument, loadPinnedDocument } from '../../desktop/src/windowDocuments.ts';
-import { PermanentConnectionError } from '../../desktop/src/connectionLifecycle.ts';
+import { loadDocument } from '../../desktop/src/windowDocuments.ts';
 
 /**
  * WebContents выдаёт события вручную; каждый исход обязан снять все свои listeners.
@@ -159,67 +158,4 @@ test('WD-06 loadURL сохраняет собственный исход; abort 
       ]);
     }
   }
-});
-
-test('WD-07 закреплённый release проверяется и сохраняет hash адреса', async (t) => {
-  const f = fixture(t, '');
-  const id = 'a'.repeat(64);
-  const url = `http://127.0.0.1:8140/ui/${id}/`;
-  const requests = [];
-
-  await loadPinnedDocument({
-    fetch: async (address, init) => {
-      requests.push([address, init.cache, init.signal.aborted]);
-
-      return new Response(JSON.stringify({ version: 1, id }));
-    },
-    pinned: { id, url },
-    window: f.window,
-    address: 'http://127.0.0.1:8140/#/chats',
-    signal: f.controller.signal,
-  });
-  assert.deepEqual(requests, [[url + 'release.json', 'no-store', false]]);
-  assert.deepEqual(f.calls, [['load', url + '#/chats']]);
-});
-
-test('WD-08 несовместимый release даёт прежний PermanentConnectionError без загрузки', async (t) => {
-  const id = 'a'.repeat(64);
-  const responses = [
-    [true, JSON.stringify({ version: 2, id })],
-    [true, JSON.stringify({ version: 1, id: 'b'.repeat(64) })],
-    [false, JSON.stringify({ version: 1, id })],
-    [true, 'битый JSON'],
-  ];
-
-  for (const [ok, body] of responses) {
-    const f = fixture(t, '');
-
-    await assert.rejects(loadPinnedDocument({
-      fetch: async () => new Response(body, { status: ok ? 200 : 500 }),
-      pinned: { id, url: `http://127.0.0.1:8140/ui/${id}/` },
-      window: f.window,
-      address: 'http://127.0.0.1:8140/#/chats',
-      signal: f.controller.signal,
-    }), (error) => {
-      assert.equal(error instanceof PermanentConnectionError, true);
-      assert.equal(error.message, 'Сервер не обслуживает интерфейс этого приложения. '
-        + 'Обновите сервер GrigDesk и запустите приложение заново.');
-
-      return true;
-    });
-    assert.deepEqual(f.calls, []);
-  }
-});
-
-test('WD-09 без закрепления загружается исходный адрес без fetch', async (t) => {
-  const f = fixture(t, '');
-
-  await loadPinnedDocument({
-    fetch: async () => assert.fail('Fetch без закрепления не нужен.'),
-    pinned: null,
-    window: f.window,
-    address: 'http://127.0.0.1:8140/#/tasks',
-    signal: f.controller.signal,
-  });
-  assert.deepEqual(f.calls, [['load', 'http://127.0.0.1:8140/#/tasks']]);
 });

@@ -51,6 +51,9 @@ function harness(patch = {}) {
 
 function panelStubs(h) {
   return {
+    '../../shared/settingsNavigation.ts': `
+      export const openSettings = (request) => globalThis.__studioPanel.openCalls.push(['settings', request]);
+    `,
     './CreatePanel.vue': CREATE_STUB,
     './LibraryPanel.vue': LIBRARY_STUB,
     './TasksPanel.vue': TASKS_STUB,
@@ -357,4 +360,23 @@ test('ModelPage: active управляет монтажом ModelViewer', async 
 
   await wrapper.setProps({ active: true });
   assert.equal(wrapper.find('.stub-viewer').exists(), true);
+});
+
+
+test('IN05: ссылка ключа берёт исполнителя из DTO и открывает его параметры', async (t) => {
+  await installUiBrowser(t);
+
+  const h = harness();
+
+  h.store.state.providers[0].id = 'synthetic-provider';
+  h.store.state.providers[0].available = false;
+
+  const wrapper = await mountPanel(t, h, { presentation: 'page' });
+
+  await wrapper.findAll('a').find((entry) => entry.text() === 'нужен ключ').trigger('click');
+
+  assert.deepEqual(h.openCalls.at(-1), ['settings', {
+    pageId: 'agents.providers',
+    entityId: 'synthetic-provider',
+  }]);
 });

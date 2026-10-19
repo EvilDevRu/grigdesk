@@ -47,6 +47,21 @@ patch-релизом. Теги с prerelease/build-суффиксами и light
 commit релиза, а запущенный процесс — на предыдущем: примените checkout в
 «Настройки → Сервер» или перезапустите сервер, чтобы `running` совпал с релизом.
 
+## Серверный SEA-комплект
+
+Обычные `tools/release` и `tools/release-check` не собирают серверный SEA и не запускают
+его тяжёлую приёмку. Для готового Linux-комплекта есть отдельная явная команда:
+
+```bash
+bash tools/server-sea-check /path/to/releases /path/to/cache
+```
+
+Она выполняет `build:sea`, затем весь `test:sea` по полученному `build-result.json`,
+сохраняет код отказа и ничего не публикует. Архив Node с закреплённым SHA256 готовится
+заранее; production npm staging использует отдельный cache. Команды и prerequisites —
+[выпуск SEA](grigdesk/server/sea-release.md),
+[контракт отдельной проверки](grigdesk/server/sea-release-gate.md).
+
 ## Совместимость Node перед обновлением
 
 Worker проверяет Node в распакованном целевом релизе до установки зависимостей,

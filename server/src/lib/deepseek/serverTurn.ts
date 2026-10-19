@@ -1,6 +1,8 @@
 // Веб-ход DeepSeek: Remote follow, события спросов и steer в тот же Agent loop.
 import { createHash, randomUUID } from 'node:crypto';
 
+import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
 import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 
 import type { InTurnAssistantEvent, InTurnPort } from '../../../../shared/chat/chatInTurnContracts.ts';
@@ -289,6 +291,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     const writes = new Set<Promise<void>>();
     let currentAttempt = '';
     let reply = '';
+    let lastContextUsage: ChatContextUsage = { contextMetric: 'unavailable' };
     let replyMessageId = '';
     let turnStarted = false;
     let finished = false;
@@ -473,14 +476,26 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         // Размер контекста — весь вход запроса. DSH делит его на некешированную часть и
         // кеш, поэтому один `inputTokens` при работающем кеше давал сотни токенов вместо тысяч.
         const prompt = ['inputTokens', 'cacheReadTokens', 'cacheWriteTokens']
-          .map((key) => Number(usage[key]) || 0)
+          .map((key) => {
+            const value = usage[key];
+
+            return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+          })
           .reduce((sum, value) => sum + value, 0);
 
-        options.onProgress?.(tokens, {
-          tokensIsEstimate,
-          ...(Number.isFinite(Number(usage.inputTokens)) ? { contextTokens: prompt } : {}),
+        const input = usage.inputTokens;
+        const validInput = typeof input === 'number' && Number.isFinite(input) && input >= 0;
+        const context = validInput ? normalizeContextUsage({
+          contextTokens: prompt,
+          contextWindow: usage.contextWindow,
           contextMetric: 'deepseek-web-usage',
-        });
+        }) : {};
+
+        if (context.contextTokens !== undefined) {
+          lastContextUsage = context;
+        }
+
+        options.onProgress?.(tokens, { tokensIsEstimate, ...context });
       }
     };
     /**
@@ -739,6 +754,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       await Promise.all([...writes]);
 
       return {
+        ...lastContextUsage,
         reply: deliveryFailure || reply,
         assistantMessageId: deliveryFailure || !replyMessageId ? '' : storageMessageId(replyMessageId),
         sessionId,

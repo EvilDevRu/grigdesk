@@ -32,7 +32,7 @@
 | `/telegram` | `TelegramView.vue` |
 | `/documents` | `DocumentsView.vue` |
 | `/diff` | `DiffView.vue` |
-| `/settings` | `SettingsView.vue` |
+| `/settings` | `settings/settingsRouteStub.ts`; guard открывает общий модал |
 | `/ext/:id` | `ExtPluginView.vue` |
 
 Панели инструментов монтирует `shared/layout/ToolHost.vue`; route-adapter
@@ -42,11 +42,12 @@
 
 ## Дополнительные поверхности
 
-`SettingsView.vue` содержит восемь вкладок: `app`, `speech`, `b24`, `providers`,
-`runs`, `plugins`, `server`, `access`. Отдельное окно настроек использует
-`shared/layout/SettingsWindowShell.vue`; обычный маршрут и это окно имеют
-разные оболочки. Контракт определения окна — `shared/desktop/desktopWindowContract.ts`
-от корня репозитория.
+`settings/SettingsModal.vue` открывает 23 страницы семи групп через общий `UiDialog`.
+Дерево и поиск находятся слева; на узком экране навигацию открывает «Разделы».
+Формы используют одну сессию и footer «Отмена / Применить / ОК». Каталог страниц —
+`features/settings/catalog.ts`; [контракт оболочки](settings-modal.md).
+Вход `/settings` сохраняет текущий маршрут, а первая навигация переводится на `/board`
+с отложенным до входа запросом открытия. Отдельного renderer настроек нет.
 
 В `App.vue` также находятся `NoAccessView`, общие hosts диалогов, подсказок
 и тостов, `TaskModal`, `DiffModal`, `DocumentModal`. Проверка одних маршрутов

@@ -1,15 +1,12 @@
-import { execFile } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { build } from 'esbuild';
-import { sealUiRelease } from '../src/uiRelease.ts';
+import { prepareClientUi } from '../../tools/client-ui.mts';
 
 const desktop = path.resolve(import.meta.dirname, '..');
 const distribution = path.join(desktop, 'dist');
 const splashFiles = ['index.html', 'style.css', 'background.png', 'wordmark.svg'];
-const execute = promisify(execFile);
 
 /**
  * Сначала собирает неизменяемый интерфейс в отдельном staging, не затрагивая рабочий web/dist.
@@ -27,14 +24,7 @@ async function buildDesktop(): Promise<void> {
   try {
     await mkdir(output);
 
-    const result = await execute('npm', [
-      '--prefix', path.join(desktop, '../web'), 'run', 'build', '--',
-      '--outDir', path.join(output, 'ui'), '--emptyOutDir',
-    ], { maxBuffer: 8 * 1024 * 1024 });
-
-    process.stdout.write(result.stdout);
-    process.stderr.write(result.stderr);
-    await sealUiRelease(path.join(output, 'ui'));
+    await prepareClientUi({ destination: path.join(output, 'ui') });
     await build({
       entryPoints: [path.join(desktop, 'src/main.ts')],
       outfile: path.join(output, 'main.cjs'),

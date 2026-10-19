@@ -12,7 +12,7 @@ import { createStepSink } from '../../server/src/lib/chat/streamSteps.ts';
 import { classifyTurnFailure } from '../../server/src/lib/chat/turnFailures.ts';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
 import { CODEX_TURN_FAILURE_RULES } from '../../server/src/lib/executors/_codexTurnFailures.ts';
-import codex from '../../server/src/lib/executors/codex.ts';
+import codex, { parseCodexRateLimits } from '../../server/src/lib/executors/codex.ts';
 import { CODEX_APP_SERVER_COMPATIBILITY } from '../fixtures/codex-app-server/rich-turn-0.149.0.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -123,8 +123,12 @@ test('Codex передаёт контекст до конца хода и сох
 test('Codex считает расход ХОДА приростом накопителя потока, а не замером последнего запроса', async (t) => {
   const f = await fixture(t, 'token-progress');
   const spent = [];
+  const contexts = [];
   const result = await codex.run(runOptions(f, {
-    onProgress(value) { spent.push(value); },
+    onProgress(value, info) {
+      spent.push(value);
+      contexts.push(info.contextTokens);
+    },
   }));
 
   // Накопитель потока 100 → 350: расход хода растёт и не прыгает на `last` (50, 40).
@@ -134,6 +138,7 @@ test('Codex считает расход ХОДА приростом накопи
   // удваивали расход.
   assert.deepEqual([...new Set(spent)], [50, 300], 'счётчик хода взят не из накопителя');
   assert.equal(result.reply, 'Расход хода посчитан.');
+  assert.ok(contexts.every((value) => value === 1000));
 });
 
 test('Codex run использует app-server и не теряет rich events, steps и resume sessionId', async (t) => {
@@ -694,4 +699,73 @@ test('два send в одном thread: сбой, затем успех с но�
     .map((entry) => entry.message?.params?.turn?.id);
 
   assert.ok(serverTurns.length >= 1);
+});
+
+
+test('Codex 0.163: квоты в ходе и простое имеют ключи опроса и не меняют токены', async (t) => {
+  const f = await fixture(t, 'live-limits');
+  const patches = [];
+  const progress = [];
+  const session = codex.session.open({
+    ...runOptions(f),
+    env: { ...f.env, GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.163.0' },
+
+    hooks: { onProviderUsage: (patch) => {
+      patches.push(patch);
+
+      return true;
+    } },
+  });
+
+  t.after(() => session.close());
+
+  const result = await session.send({
+    message: 'Квоты',
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+  const deadline = Date.now() + 1000;
+
+  while (patches.length < 3 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(patches.length, 3, JSON.stringify(patches));
+  assert.deepEqual(patches.map((patch) => patch.bars[0].key),
+    ['codex:primary', 'codex_reserve:primary', 'codex:primary']);
+  assert.deepEqual(patches.map((patch) => patch.bars[0].pct), [8, 11, 9]);
+  assert.equal(patches[2].bars[0].resetsAt, '2030-01-01T05:00:00.000Z');
+  assert.equal(patches[2].bars[0].windowMinutes, 300);
+  assert.equal(patches[0].bars[0].key, parseCodexRateLimits({
+    rateLimits: { limitId: null, primary: { usedPercent: 8 } },
+  })[0].key);
+  assert.deepEqual([...new Set(progress.map((item) => item.tokens))], [50, 300]);
+
+  const contexts = progress.filter((item) => item.contextTokens !== undefined);
+
+  assert.ok(contexts.length > 0);
+  assert.ok(contexts.every((item) => item.contextTokens === 1000));
+  assert.equal(result.contextTokens, 1000);
+});
+
+test('Codex разовый запуск передаёт квоты в hook и переживает его исключение', async (t) => {
+  for (const throwing of [false, true]) {
+    const f = await fixture(t, 'live-limits');
+    const patches = [];
+    const result = await codex.run(runOptions(f, {
+      env: { ...f.env, GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.163.0' },
+      onProviderUsage: (patch) => {
+        patches.push(patch);
+
+        if (throwing) {
+          throw new Error('fixture-sink-error');
+        }
+
+        return true;
+      },
+    }));
+
+    assert.equal(result.reply, 'Расход хода посчитан.');
+    assert.equal(patches[0]?.bars[0].pct, 8);
+    assert.equal(patches.filter((patch) => patch.bars[0].key === 'codex_reserve:primary').length, 1);
+  }
 });

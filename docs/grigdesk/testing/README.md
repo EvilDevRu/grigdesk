@@ -6,6 +6,8 @@
 
 Читай перед правкой: `tests`.
 
+- [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
+
 ## Грабли
 
 - [Родитель временной фикстуры в артефактах создаётся самим тестом](artifact-fixture-parent.md)
@@ -15,6 +17,8 @@
 - [Короткий engine-фильтр может совпасть с именем checkout](engine-filter-path.md)
 
 - [Временная папка вложенного сторожа при явном TMPDIR](node-guard-temp-root.md)
+
+- [Transition-stub создаёт inert-предка Teleport-модалки в тесте фокуса](modal-transition-stub.md)
 
 - [Фикстура чистой установки копирует общий код вместе с инструментами](clean-checkout-shared-sources.md)
 
@@ -35,6 +39,7 @@
 - [Локальное окно: наблюдение событий, запрет SW, настоящий вход и SSE](desktop-window-e2e.md)
 - [Готовый пакет окна: spawn без inspector, fuses и постоянная шифрованная cookie](desktop-window-package.md)
 - [E2E старта окна: корень-фикстура, окружение по списку и отказ через stderr и SIGTERM](desktop-startup-e2e.md)
+- [SEA GUI-фикстура: явный выбор местной машины до ожидания рабочего экрана](sea-desktop-fixture.md)
 - [Горячая клавиша меню не срабатывает в тесте = Playwright не доводит клавиши до главного процесса Electron](electron-synthetic-keys.md)
 - [Файл теста висит до таймаута = в Node остался открытый BroadcastChannel](node-broadcast-channel.md)
 - [Сквозной тест «сервер + store окна» не выходит = окно ещё ходит в сервер при закрытии](window-store-fixture-close.md)
@@ -67,3 +72,5 @@
 - [Тест проходит из корня, но падает из папки своего пакета](package-test-working-directory.md)
 - [Настройки роняют вкладку headless-проверки = нужен полный Chromium](headless-shell-settings-crash.md)
 - [Тест ждёт `OK`, а утилита пишет `ЦЕЛ` = вывод coreutils переведён на язык машины](coreutils-locale.md)
+
+- [settings-modal-browser-fixture.md](settings-modal-browser-fixture.md) — изолированный стенд общего модала настроек.

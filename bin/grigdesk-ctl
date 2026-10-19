@@ -7,6 +7,47 @@ SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 CMD="${1:-open}"
 
+# Готовая поставка запускает собранный CLI своим Node и не ищет исходники.
+# Явные команды разработки требуют checkout, готовые b24/окно сохраняют свои входы.
+if [[ -f "$DIR/release.json" ]]; then
+  source "$DIR/deploy/lib/runtime-env.sh"
+  grigdesk_require_node
+
+  case "$CMD" in
+    b24)
+      shift
+
+      if [[ ! -x "$DIR/bin/b24" ]]; then
+        echo "Повреждён комплект: нет bin/b24" >&2
+        exit 1
+      fi
+
+      exec "$DIR/bin/b24" "$@"
+      ;;
+    desktop)
+      shift
+      exec "$DIR/deploy/desktop.sh" "$@"
+      ;;
+    run)
+      exec "$DIR/runtime/node/bin/node" \
+        "$DIR/server/runtime/helpers/launch-sea-server.mjs" "${@:2}"
+      ;;
+    dev|build|deps|mobile|release)
+      for argument in "${@:2}"; do
+        if [[ "$argument" == --help || "$argument" == -h ]]; then
+          exec "$DIR/runtime/node/bin/node" "$DIR/server/runtime/helpers/grigdesk-cli.mjs" --help
+        fi
+      done
+
+      echo "Команда $CMD доступна в установке из исходников." >&2
+      exit 1
+      ;;
+    *)
+      exec "$DIR/runtime/node/bin/node" "$DIR/server/runtime/helpers/grigdesk-cli.mjs" "$@"
+      ;;
+  esac
+fi
+
 # Сохраняет прежний запуск разработчика, включая подготовку зависимостей и сборку.
 # Этот путь вызывается только явными dev/build/deps/run и не участвует в обычном открытии.
 developer_command() {

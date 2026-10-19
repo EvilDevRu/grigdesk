@@ -7,10 +7,13 @@ import { deviceName, MobileInputError } from './errors.ts';
 import { privateRead, privateWrite, serialized } from './files.ts';
 import { createRelayCredentials } from './identity.ts';
 
+export type DeviceScope = 'mobile-v1' | 'client';
+
 export type Device = {
   id: string;
   name: string;
   fp: string;
+  scope: DeviceScope;
   createdAt: number;
   lastSeenAt: number;
   revokedAt: number | null;
@@ -70,6 +73,7 @@ function validDevice(item: Device) {
     ID.test(item.id) &&
     FINGERPRINT.test(item.fp) &&
     typeof item.name === 'string' &&
+    (item.scope === undefined || item.scope === 'mobile-v1' || item.scope === 'client') &&
     Number.isSafeInteger(item.createdAt) &&
     Number.isSafeInteger(item.lastSeenAt) &&
     (item.revokedAt === null || Number.isSafeInteger(item.revokedAt))
@@ -99,8 +103,17 @@ export class DeviceStore {
     this.file = path.join(directory, 'devices.json');
   }
 
-  list(): Promise<Device[]> {
-    return collection(this.file, 'devices', validDevice);
+  /**
+   * Старые привязки читаются с областью прежнего мобильного протокола.
+   * Чтение не переписывает файл и не расширяет права ранее выпущенного сертификата.
+   */
+  async list(): Promise<Device[]> {
+    const devices = await collection(this.file, 'devices', validDevice);
+
+    return devices.map((device) => ({
+      ...device,
+      scope: device.scope ?? 'mobile-v1',
+    }));
   }
 
   async findByFp(fp: string): Promise<Device | null> {
@@ -111,7 +124,11 @@ export class DeviceStore {
    * Добавляет сертификат атомарно; конкурирующий pair возвращает ту же запись.
    * Отозванный ключ нельзя снова привязать одноразовым кодом.
    */
-  async add(input: { name: unknown; fp: string }): Promise<Device> {
+  async add(input: {
+    name: unknown;
+    fp: string;
+    scope?: DeviceScope;
+  }): Promise<Device> {
     const name = deviceName(input.name);
 
     if (!FINGERPRINT.test(input.fp)) {
@@ -126,6 +143,11 @@ export class DeviceStore {
         throw new MobileInputError('device_revoked', 'Телефон отозван в GrigDesk.', 403);
       }
 
+      if (existing && existing.scope !== (input.scope ?? 'mobile-v1')) {
+        throw new MobileInputError('device_scope_conflict',
+          'Сертификат уже привязан для другого приложения. Используйте новый ключ.', 409);
+      }
+
       if (existing) {
         return existing;
       }
@@ -134,6 +156,7 @@ export class DeviceStore {
         id: `d${randomBytes(8).toString('hex')}`,
         name,
         fp: input.fp,
+        scope: input.scope ?? 'mobile-v1',
         createdAt: Date.now(),
         lastSeenAt: Date.now(),
         revokedAt: null,

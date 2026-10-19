@@ -7,7 +7,7 @@ import {
   decodeUserPluginManifest,
   normalizePluginPackagePath,
 } from '../pluginsRegistry.ts';
-import { compareSemVer, parseSemVer } from '../grigDeskRelease.ts';
+import { compareSemVer, parseSemVer } from '../releaseCommon.ts';
 import { installError } from './errors.ts';
 import { assertRealPackageRoot, readPackageTree } from './packageTree.ts';
 import type { PackageEntry } from './packageTree.ts';

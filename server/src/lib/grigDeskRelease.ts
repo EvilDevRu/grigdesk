@@ -1,4 +1,11 @@
-import { execFile } from 'node:child_process';
+import { compareSemVer, defaultCommandRunner, parseSemVer, parseStableTag }
+  from './releaseCommon.ts';
+import type { CommandResult, CommandRunner } from './releaseCommon.ts';
+
+export { compareSemVer, defaultCommandRunner, parseSemVer, parseStableTag }
+  from './releaseCommon.ts';
+export type { CommandResult, CommandRunner, SemVer } from './releaseCommon.ts';
+
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -18,40 +25,10 @@ import type {
 // общем контракте, а здесь остаётся доступной прежним импортёрам.
 export type { ReleaseStatus, UpdateJob } from '../../../shared/runtime/grigDeskUpdateContracts.ts';
 
-const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-const TAG_RE = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const SHA_RE = /^[0-9a-f]{40,64}$/i;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const LOCAL_CACHE_MS = 1500;
 const STATE_SCHEMA = 1;
-
-// Разобранная строгая версия. Всё, что не `x.y.z`, разбору не подлежит.
-export interface SemVer {
-  major: number;
-  minor: number;
-  patch: number;
-}
-
-// Итог внешней команды. Форма одна на все вызовы, чтобы `code`/`timedOut`
-// проверялись одинаково и в git, и в проверке runtime целевого релиза.
-export interface CommandResult {
-  code: number;
-  signal: string | null;
-  timedOut: boolean;
-  stdout: string;
-  stderr: string;
-}
-
-export type CommandRunner = (
-  file: string,
-  args: string[],
-  options?: {
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    timeout?: number;
-    maxBuffer?: number;
-  },
-) => Promise<CommandResult>;
 
 // Тег релиза из `ls-remote`. `sha` заполняется только у аннотированного тега —
 // см. разбор ниже, там же и причина.
@@ -89,24 +66,6 @@ export class GrigDeskReleaseError extends Error {
     this.code = code;
     this.statusCode = statusCode;
   }
-}
-
-export function parseSemVer(value: unknown): SemVer | null {
-  const match = VERSION_RE.exec(String(value || '').trim());
-  if (!match) return null;
-  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
-}
-
-export function compareSemVer(left: string | SemVer | null, right: string | SemVer | null): number {
-  const a = typeof left === 'string' ? parseSemVer(left) : left;
-  const b = typeof right === 'string' ? parseSemVer(right) : right;
-  if (!a || !b) throw new TypeError('Ожидалась строгая SemVer-версия');
-  return a.major - b.major || a.minor - b.minor || a.patch - b.patch;
-}
-
-export function parseStableTag(value: unknown): string | null {
-  const match = TAG_RE.exec(String(value || '').trim());
-  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
 }
 
 /**
@@ -156,26 +115,6 @@ export function releaseUrl(remote: unknown, tag: unknown): string | null {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return null;
   return `https://github.com/${repo}/releases/tag/${encodeURIComponent(String(tag))}`;
 }
-
-export const defaultCommandRunner: CommandRunner = (file, args, options = {}) => (
-  new Promise<CommandResult>((resolve) => {
-    execFile(file, args, {
-      cwd: options.cwd,
-      env: options.env,
-      timeout: options.timeout ?? 10_000,
-      maxBuffer: options.maxBuffer ?? 2 * 1024 * 1024,
-      encoding: 'utf8',
-    }, (error, stdout = '', stderr = '') => {
-      resolve({
-        code: error ? (Number.isInteger(error.code) ? Number(error.code) : 1) : 0,
-        signal: error?.signal || null,
-        timedOut: !!error?.killed,
-        stdout: String(stdout),
-        stderr: String(stderr),
-      });
-    });
-  })
-);
 
 /**
  * Target smoke проверяет независимый установленный ELF, переданный старым деревом явно.

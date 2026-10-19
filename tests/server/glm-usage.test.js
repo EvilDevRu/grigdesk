@@ -257,3 +257,35 @@ test('без режима или ключа — auth_required и ни одног
   assert.match(keyless.usage.message, /ZAI_CODING_API_KEY/u);
   assert.equal(fake.calls.length, 0);
 });
+
+
+test('coding-plan: отсутствие percentage не означает свободные окна или MCP', async (t) => {
+  for (const percentage of [undefined, null, '', true, -5, 'NaN', 'Infinity', 0, '42']) {
+    const fake = fakeZai({
+      '/api/monitor/usage/quota/limit': {
+        json: {
+          code: 200,
+          data: {
+            limits: [
+              tokensLimit(3, 5, percentage, NOW),
+              { type: 'TIME_LIMIT', percentage },
+            ],
+          },
+        },
+      },
+    });
+    const { usage } = await usageOf(t, {
+      GRIGDESK_GLM_API_MODE: 'coding-plan',
+      ZAI_CODING_API_KEY: CODING_KEY,
+    }, fake);
+    const valid = percentage === 0 || percentage === '42';
+
+    for (const key of ['zai:5h', 'zai:mcp']) {
+      assert.equal(usage.bars.some((bar) => bar.key === key), valid, `${key}: ${percentage}`);
+
+      if (valid) {
+        assert.equal(usage.bars.find((bar) => bar.key === key).pct, Number(percentage));
+      }
+    }
+  }
+});

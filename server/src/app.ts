@@ -14,8 +14,14 @@ import websocket from '@fastify/websocket';
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { attachDesktopParent } from './lib/desktopParent.ts';
+import type { DesktopParent } from './lib/desktopParent.ts';
 import { config } from './config.ts';
 import { MobileService } from './lib/mobile/service.ts';
+import { ensureBrainIdentity } from './lib/mobile/identity.ts';
+import { startClientListener } from './lib/clientAccess/listener.ts';
+import type { ClientListener } from './lib/clientAccess/listener.ts';
+import { createClientBootstrap, registerClientPairRoute } from './lib/clientAccess/bootstrap.ts';
+import devicesModule from './modules/devices/index.ts';
 import { ActionTokens } from './lib/mobile/actionTokens.ts';
 import { recoverChatOperation } from './lib/mobile/chatTurns.ts';
 import { registerMobileFacade } from './lib/mobile/facade/index.ts';
@@ -100,6 +106,7 @@ import { createSandboxService } from './lib/sandboxes/service.ts';
 import { createShowcaseService } from './lib/showcase/service.ts';
 import { resolveInboxTriageTarget } from './lib/inbox/triage.ts';
 
+import apiVersionPlugin from './plugins/apiVersion.ts';
 import authPlugin from './plugins/auth.ts';
 import ssePlugin from './plugins/sse.ts';
 import webLogModule from './modules/web-log/index.ts';
@@ -182,7 +189,7 @@ function readPluginSettings(
  * Пути installer и VERSION проверяются до создания ресурсов приложения.
  * Закрытие Fastify ждёт installer lifetime прежде завершения процесса.
  */
-async function build() {
+async function build(desktopParent: DesktopParent | null) {
   const installOptions = await readPluginInstallConfiguration(config);
   const factoryDebug = new FactoryDebugSettings({
     factoryBin: config.factoryBin,
@@ -214,6 +221,9 @@ async function build() {
     // на AVV_ERR_PLUGIN_EXEC_TIMEOUT и уходил в бесконечный цикл перезапусков systemd.
     pluginTimeout: 60_000,
   });
+
+  await fastify.register(apiVersionPlugin);
+
   // Журнал окна хранит пути /api шаблонами; каталог шаблонов собирается здесь,
   // до регистрации модулей, чтобы в него попал каждый маршрут сервера.
   const apiRoutes = createApiRouteRegistry();
@@ -1252,11 +1262,9 @@ async function build() {
   await analyzer.start();
   await fastify.register(analysisModule, { analyzer, arbiter: analysisArbiter });
 
-  // Статика — последней (SPA-fallback перехватывает не-API 404).
+  // Закрытые снимки и самостоятельное сообщение о запуске приложения — последними.
   await fastify.register(staticPlugin, {
-    webDist: config.webDist,
     stateDir: config.stateDir,
-    uiReleasesDir: config.uiReleasesDir,
   });
 
   // ── Телеграм-пульт: вотчер «требует человека» + команды/кнопки владельца ──
@@ -1301,6 +1309,7 @@ async function build() {
     }),
     recoverOperation: (device, proof) => recoverChatOperation(fastify.mobileChat!, device, proof),
     changed: () => fastify.sse?.broadcast?.('mobile-changed', { at: Date.now() }),
+    disconnectClient: (fp) => clientListener?.disconnect(fp),
     log: (event) => fastify.log.warn({ event }, 'мобильный доступ: изменение состояния'),
   });
 
@@ -1308,6 +1317,60 @@ async function build() {
   fastify.addHook('onListen', () => mobile.start());
   shutdown.register('mobile', () => mobile.close());
   fastify.addHook('onClose', () => mobile.close());
+
+  let clientIdentity: Awaited<ReturnType<typeof ensureBrainIdentity>> | null = null;
+  const clientBootstrapOptions = {
+    pairing: mobile.pairing,
+    identity: () => clientIdentity,
+    name: config.serverName,
+  };
+  const clientBootstrap = await createClientBootstrap(clientBootstrapOptions);
+  let clientListener: ClientListener | null = null;
+
+  registerClientPairRoute(fastify, clientBootstrapOptions);
+  await fastify.register(devicesModule, {
+    devices: mobile.devices,
+    pairing: mobile.pairing,
+    listener: () => clientListener,
+    identity: async () => clientIdentity ??= await ensureBrainIdentity(config.mobileDir),
+    address: config.clientAccess.address,
+    name: config.serverName,
+    disconnectMobile: (fp) => mobile.disconnectDevice(fp),
+  });
+  fastify.addHook('onListen', async () => {
+    let error = config.clientAccess.reason;
+
+    if (config.clientAccess.state === 'configured') {
+      try {
+        clientIdentity = await ensureBrainIdentity(config.mobileDir);
+      } catch {
+        error = 'Клиентский вход не запущен: личность сервера недоступна.';
+        fastify.log.warn({ event: 'client_identity_failed' }, error);
+      }
+    }
+
+    clientListener = await startClientListener({
+      addresses: config.clientAccess.addresses,
+      identity: clientIdentity,
+      devices: mobile.devices,
+      app: fastify,
+      bootstrap: clientBootstrap,
+      error,
+      log: fastify.log,
+    });
+  });
+
+  /**
+   * Переданные основному HTTP-серверу TLS-сокеты остаются собственностью входа.
+   * Закрываем их и bootstrap при сливе, а также при прямом fastify.close в тестах.
+   */
+  const closeClientListener = async () => {
+    await clientListener?.close();
+    await clientBootstrap.close();
+  };
+
+  shutdown.register('client', closeClientListener);
+  fastify.addHook('onClose', closeClientListener);
 
   const pultStores = new Map<string, TelegramPultStateStore>();
   // Одна фабрика state на вотчер и действия: карточки, экран навигации и реестр
@@ -1459,34 +1522,55 @@ async function build() {
   return fastify;
 }
 
-// Версию проверяем до сборки сервисов: дальше отказ выглядел бы поломкой
-// конкретного модуля, а не устаревшим рантаймом.
-assertSupportedNode();
+/**
+ * Проверяет рантайм, собирает сервисы и включает сервер.
+ * Ошибка listen закрывает частично поднятый Fastify и возвращается вызывающему;
+ * ошибка папки данных приходит раньше, из startDataHome, и сюда не попадает.
+ */
+export async function startServer(): Promise<FastifyInstance> {
+  // Версию проверяем до сборки сервисов: дальше отказ выглядел бы поломкой
+  // конкретного модуля, а не устаревшим рантаймом.
+  assertSupportedNode();
 
-const desktopParent = attachDesktopParent({
-  env: process.env,
-  channel: typeof process.send === 'function' ? process : null,
-  exit: (code) => process.exit(code),
-});
+  const desktopParent = attachDesktopParent({
+    env: process.env,
+    channel: typeof process.send === 'function' ? process : null,
+    exit: (code) => process.exit(code),
+  });
+  const app = await build(desktopParent);
 
-const app = await build();
+  if (process.env.GRIGDESK_HOST !== undefined) {
+    app.log.warn('GRIGDESK_HOST больше не поддерживается: GrigDesk слушает только 127.0.0.1');
+  }
 
-if (process.env.GRIGDESK_HOST !== undefined) {
-  app.log.warn('GRIGDESK_HOST больше не поддерживается: GrigDesk слушает только 127.0.0.1');
+  try {
+    await app.listen({ port: config.port, host: config.host });
+  } catch (error) {
+    app.log.error(error);
+    await app.close().catch(() => {});
+
+    throw error;
+  }
+
+  app.log.info(`GrigDesk слушает http://127.0.0.1:${config.port}`);
+  app.shutdown?.arm();
+
+  if (desktopParent && app.shutdown) {
+    const shutdown = app.shutdown;
+
+    desktopParent.bindShutdown((reason) => shutdown.begin(reason));
+  }
+
+  return app;
 }
 
-try {
-  await app.listen({ port: config.port, host: config.host });
-} catch (err) {
-  app.log.error(err);
+// app.ts запускается и как исполняемый вход, и через app.js/SEA-вход: guard по argv[1]
+// здесь запрещён. Ошибка старта не оставляет процесс с успешным кодом.
+void startServer().catch((error: unknown) => {
+  const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+
+  process.stderr.write(`GrigDesk не запустился: ${detail}\n`);
+  // Живые таймеры, watchers или дочерние процессы могли стартовать до отказа:
+  // exitCode их не остановит, и сервер повис бы без признака падения для окна/systemd.
   process.exit(1);
-}
-
-app.log.info(`GrigDesk слушает http://127.0.0.1:${config.port}`);
-app.shutdown?.arm();
-
-if (desktopParent && app.shutdown) {
-  const shutdown = app.shutdown;
-
-  desktopParent.bindShutdown((reason) => shutdown.begin(reason));
-}
+});

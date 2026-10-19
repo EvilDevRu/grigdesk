@@ -1,17 +1,8 @@
 // Загрузка документа и проверка закреплённого релиза отделены от главного процесса.
 // Модуль использует только типы Electron и вызывается без его запуска в Node.
-import type { BrowserWindow, Session } from 'electron';
-import { PermanentConnectionError } from './connectionLifecycle.ts';
+import type { BrowserWindow } from 'electron';
 
 type DocumentWindow = Pick<BrowserWindow, 'webContents' | 'loadURL' | 'isDestroyed'>;
-interface PinnedDocumentOptions {
-  fetch: Session['fetch'];
-  pinned: { id: string; url: string } | null;
-  window: DocumentWindow;
-  address: string;
-  signal: AbortSignal;
-}
-
 /**
  * Повтор того же URL с hash через loadURL может остаться навигацией внутри страницы.
  * Reload гарантирует новый документ; ожидание и listeners заканчиваются вместе с загрузкой.
@@ -82,34 +73,4 @@ export async function loadDocument(window: DocumentWindow, url: string, signal: 
   } finally {
     signal.removeEventListener('abort', cancel);
   }
-}
-
-/**
- * Проверяет выбранную версию до загрузки документа и сохраняет её при восстановлении входа.
- * Старый сервер не подменяет интерфейс рабочей сборкой и не запускает бесконечный retry.
- */
-export async function loadPinnedDocument(options: PinnedDocumentOptions): Promise<void> {
-  const { fetch, pinned, window, address, signal } = options;
-
-  if (!pinned) {
-    await loadDocument(window, address, signal);
-
-    return;
-  }
-
-  const response = await fetch(`${pinned.url}release.json`, {
-    signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-    cache: 'no-store',
-  });
-  const release = response.ok ? await response.json().catch(() => null) : null;
-
-  if (release?.version !== 1 || release?.id !== pinned.id) {
-    throw new PermanentConnectionError('Сервер не обслуживает интерфейс этого приложения. '
-      + 'Обновите сервер GrigDesk и запустите приложение заново.');
-  }
-
-  const hash = new URL(address).hash;
-
-  await loadDocument(window, pinned.url + hash, signal);
-
 }

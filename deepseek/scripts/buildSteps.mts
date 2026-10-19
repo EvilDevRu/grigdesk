@@ -1,15 +1,15 @@
 import { chmod, copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { assertUntracked, ensureNodeArchive, publishFile, readPinnedNodeRuntime }
-  from '../../shared/node/binaryBuild.ts';
+import { assertUntracked, ensureNodeArchive, publishFile, readNodeRuntime }
+  from '../../shared/node/nodeRuntime.ts';
 import { withWorkDirectory } from '../../shared/node/files.ts';
 import { sha256File } from '../../shared/node/hash.ts';
 import { nodeArchive, seaConfig } from '../../shared/node/seaBuild.ts';
 import { createDeepSeekMetadata, manifestBytes } from '../src/runtime/metadata.ts';
 import type { DeepSeekManifest } from '../src/runtime/metadata.ts';
 import type { DeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
-import type { NodeRuntime } from '../../shared/node/binaryBuild.ts';
+import type { NodeRuntime } from '../../shared/node/nodeRuntime.ts';
 
 export interface BinaryBuildOptions {
   outDir: string;
@@ -90,7 +90,7 @@ export async function executeBinaryBuild(
     throw new Error('Сборка DeepSeek поддерживает только Linux x64');
   }
 
-  const runtime = readPinnedNodeRuntime(steps.runtime, 'deepseek/build/node-runtime.json');
+  const runtime = readNodeRuntime(steps.runtime, 'deepseek/build/node-runtime.json');
   const target = path.join(options.outDir, 'deepseek');
 
   await assertUntracked(target);

@@ -10,12 +10,9 @@ export interface B24Creds {
   password: string;
 }
 
-// Безопасное представление для UI: без пароля.
-export interface B24CredsView {
-  configured: boolean;
-  baseUrl: string;
-  login: string;
-}
+import type { B24CredsView } from '../../../../shared/b24/credentialsContracts.ts';
+
+export type { B24CredsView } from '../../../../shared/b24/credentialsContracts.ts';
 
 export class CredsStore {
   readonly credsPath: string;

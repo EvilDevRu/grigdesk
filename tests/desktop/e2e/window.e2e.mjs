@@ -70,7 +70,7 @@ async function createRun(t) {
       }
 
       for (const stub of stubs) {
-        await stub.close();
+        await stub.dispose();
       }
 
       for (const cleanup of bootCleanups) {
@@ -97,9 +97,13 @@ async function createRun(t) {
     run.current = await launchDesktop({
       root,
       dataDir,
-      args: [desktop, `--grigdesk-url=${address}`],
+      args: [desktop, '--password-store=gnome-libsecret', `--grigdesk-url=${address}`],
+      isolateEnv: true,
       env: {
         GRIGDESK_WINDOW_KEY_PATH: selectedKey,
+        GRIGDESK_HOME: path.join(root, 'data'),
+        GRIGDESK_CLIENT_UI_DIR: stubs.find((stub) => stub.address === address)?.uiDir
+          || process.env.GRIGDESK_E2E_WEB_DIST || path.join(desktop, 'dist/ui'),
         ...extraEnv,
       },
     });
@@ -221,7 +225,8 @@ test('DW-E1: окно загружает выбранный origin с sandbox', 
   const { app, page } = await run.launch(stub.address);
 
   await page.locator('#same').waitFor();
-  assert.equal(new URL(page.url()).origin, stub.address);
+  assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
+  assert.notEqual(new URL(page.url()).origin, stub.address);
   assert.deepEqual(await page.evaluate(() => [typeof require, typeof process]), ['undefined', 'undefined']);
 
   const security = await app.evaluate(({ app, BrowserWindow }) => {
@@ -248,8 +253,8 @@ test('DW-E1: окно загружает выбранный origin с sandbox', 
 
   const paths = stub.observations.requests.map((request) => request.pathname);
 
-  assert.equal(paths[0], '/api/auth/state');
-  assert.ok(paths.indexOf('/') > paths.indexOf('/api/auth/state'));
+  assert.ok(paths.includes('/api/auth/window-session'));
+  assert.equal(paths.some((value) => !value.startsWith('/api/')), false);
   assert.ok(stub.observations.requests.every((request) => request.host === new URL(stub.address).host));
 });
 
@@ -331,7 +336,8 @@ test('DW-E3: внешняя навигация, popup и redirect идут в sh
   }
 
   assert.deepEqual(await app.evaluate(() => globalThis.__opened), Object.values(stub.links));
-  assert.equal(new URL(page.url()).origin, stub.address);
+  assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
+  assert.notEqual(new URL(page.url()).origin, stub.address);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   assert.deepEqual(external.observations.requests, []);
   await app.evaluate(() => globalThis.__restoreShell());
@@ -354,7 +360,7 @@ test('DW-E5: SW не регистрируется, обычная сеть ра�
   const stub = await run.stub();
   const { page } = await run.launch(stub.address);
 
-  await page.addScriptTag({ url: stub.address + '/assets/probe.js' });
+  await page.addScriptTag({ url: new URL('/assets/probe.js', page.url()).href });
   assert.equal(await page.evaluate(() => globalThis.desktopNetworkProbe), 'loaded');
 
   for (const url of ['/sw.js', '/sw.js?probe=1']) {
@@ -375,20 +381,24 @@ test('DW-E5: SW не регистрируется, обычная сеть ра�
   assert.equal(await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length), 0);
 });
 
-test('DW-E7: провал reload и восстановление', options, async (t) => {
+test('DW-E7: перезагрузка встроенного UI без сервера и восстановление профиля', options, async (t) => {
   const run = await createRun(t);
   const stub = await run.stub();
   const port = new URL(stub.address).port;
   const { page } = await run.launch(stub.address);
+  const origin = new URL(page.url()).origin;
 
   await page.locator('#stub').waitFor();
   await stub.close();
-  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-  await page.waitForURL(/^data:/u);
-  assert.match(await page.locator('body').textContent(), /Ждём сервер GrigDesk/u);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#stub').waitFor();
+  assert.equal(await page.evaluate(() => fetch('/api/auth/state').then((response) => response.status)), 503);
+  await page.waitForFunction(async () => (await fetch('/api/auth/state')).status === 503);
+  assert.equal(new URL(page.url()).origin, origin);
   await run.stub({ port: Number(port) });
-  await page.locator('#stub').waitFor({ timeout: 20_000 });
-  assert.equal(new URL(page.url()).origin, stub.address);
+  await page.waitForFunction(async () => (await (await fetch('/__shell/state')).json()).status === 'online');
+  assert.equal(await page.evaluate(() => fetch('/api/auth/state').then((response) => response.json()))
+    .then((state) => state.authenticated), true);
 });
 
 test('DW-E8: второй экземпляр отдаёт управление первому', options, async (t) => {
@@ -418,14 +428,15 @@ test('DW-E8: второй экземпляр отдаёт управление �
   assert.equal(child.exitCode, 0);
   assert.equal(child.signalCode, null);
   await waitFor(async () => await app.evaluate(() => globalThis.__secondEvents) === 1);
-  assert.equal(new URL(page.url()).origin, stub.address);
+  assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
+  assert.notEqual(new URL(page.url()).origin, stub.address);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   assert.deepEqual(other.observations.requests, []);
   await run.closeApp();
 
   const settings = JSON.parse(await readFile(path.join(run.dataDir, 'settings.json'), 'utf8'));
 
-  assert.equal(settings.connection.origin, stub.address);
+  assert.equal(settings.profiles.find((profile) => profile.id === settings.selected).address, stub.address);
 });
 
 test('DW-E9: настоящий GrigDesk входит без пароля и открывает SSE', options, async (t) => {
@@ -468,30 +479,36 @@ test('DW-E9: настоящий GrigDesk входит без пароля и о�
     Boolean(await navigator.serviceWorker.getRegistration())), false);
 });
 
-test('DW-E10: после показа отсутствующий ключ и неверные права восстанавливаются без формы', options,
+test('DW-E10: недоступный ключ меняет состояние профиля, UI остаётся и восстанавливает связь', options,
   async (t) => {
     const run = await createRun(t);
     const stub = await run.stub();
     const { page } = await run.launch(stub.address);
     const key = await readFile(run.keyFile);
+    const origin = new URL(page.url()).origin;
 
-    await page.locator('#stub').waitFor();
+    await page.locator('#cookie').getByText('cookie:yes').waitFor();
     stub.revokeSessions();
     await rm(run.keyFile);
-    await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-    await page.waitForURL(/^data:/u);
-    assert.match(await page.locator('body').textContent(), /Не удалось войти по локальному ключу/u);
-    assert.equal(await page.locator('input').count(), 0);
+    assert.equal(await page.evaluate(() => fetch('/api/auth/state')
+      .then((response) => response.status)), 503);
+    assert.equal(new URL(page.url()).origin, origin);
+    assert.equal(await page.locator('input[type=password]').count(), 0);
     await writeFile(run.keyFile, key, { mode: 0o644 });
     await chmod(run.keyFile, 0o644);
-    await new Promise((resolve) => setTimeout(resolve, 11_000));
-    assert.match(page.url(), /^data:/u);
+    await page.evaluate(() => fetch('/__shell/connect', { method: 'POST' }));
+    await page.waitForFunction(async () =>
+      (await (await fetch('/__shell/state')).json()).status === 'offline');
+    assert.equal(await page.evaluate(() => fetch('/api/auth/state')
+      .then((response) => response.status)), 503);
     await chmod(run.keyFile, 0o600);
-    await page.locator('#stub').waitFor({ timeout: 20_000 });
-    assert.equal(await page.locator('input[type=password]').count(), 0);
+    await page.waitForFunction(async () =>
+      (await (await fetch('/__shell/state')).json()).status === 'online');
+    assert.equal(new URL(page.url()).origin, origin);
+    assert.equal(await page.locator('#stub').count(), 1);
   });
 
-test('DW-E11: постоянная сессия переживает окно и сервер без нового обмена', options, async (t) => {
+test('DW-E11: новое окно получает сессию в трубе и сохраняет серверный scope', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
@@ -505,7 +522,13 @@ test('DW-E11: постоянная сессия переживает окно и
   await restartOwnServer(run);
   Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
   await run.page.locator('.shell').waitFor();
-  assert.deepEqual(await readSessions(run), before);
+
+  const after = await readSessions(run);
+
+  assert.equal(after.clientScope, before.clientScope);
+  assert.equal(Object.keys(after.sessions).length, 2);
+  assert.ok(Object.keys(before.sessions).every((id) => Object.hasOwn(after.sessions, id)));
+  assert.equal(await run.page.evaluate(() => document.cookie.includes('grigdesk_sid')), false);
 });
 
 test('DW-E12: размер и maximized переживают закрытие', options, async (t) => {
@@ -532,7 +555,7 @@ test('DW-E12: размер и maximized переживают закрытие', 
   await child.locator('#stub').waitFor();
   await app.evaluate(({ BrowserWindow }) => {
     const child = BrowserWindow.getAllWindows().find((window) =>
-      window.webContents.getURL().endsWith('/second'));
+      window.webContents.getURL().endsWith('/second.html'));
 
     child.setSize(820, 630);
     child.close();
@@ -594,78 +617,64 @@ async function launchSettingsStub(t) {
 }
 
 /**
- * Listener нового окна ставится раньше запроса из страницы.
- * Контракт модальности проверяется в main, а не по видимости меню.
+ * Прежний адрес преобразуется в событие общего модала без новой навигации.
+ * Единственное главное окно и DOM-диалог проверяются независимо.
  */
-async function openNativeSettings(app, page, origin) {
-  const opened = app.waitForEvent('window');
+async function openNativeSettings(app, page, _serverOrigin) {
+  const origin = new URL(page.url()).origin;
 
   await page.evaluate((origin) => window.open(origin + '/?window=settings#/settings'), origin);
+  await page.locator('#stub-settings[open]').waitFor();
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 
-  const child = await opened;
-
-  await child.locator('#stub').waitFor();
-
-  return child;
+  return page;
 }
 
 /**
  * Нативное событие проходит before-input-event в отличие от клавиш CDP.
- * Выбирается окно с нужной ролью, даже если модальное окно отключило родителя.
+ * Ввод доставляется единственному главному BrowserWindow, включая фокус терминала.
  */
-async function sendSettingsShortcut(app, modal = false) {
-  await app.evaluate(({ BrowserWindow }, modal) => {
-    const window = BrowserWindow.getAllWindows().find((window) => window.isModal() === modal);
+async function sendSettingsShortcut(app) {
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
 
-    window.webContents.sendInputEvent({
+    window.focus();
+    window.webContents.focus();
+  });
+  await waitFor(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused()));
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.sendInputEvent({
       type: 'keyDown',
       keyCode: 'S',
       modifiers: ['control', 'alt'],
     });
-  }, modal);
+    BrowserWindow.getAllWindows()[0].webContents.sendInputEvent({
+      type: 'keyUp',
+      keyCode: 'S',
+      modifiers: ['control', 'alt'],
+    });
+  });
 }
 
-test('SW-E01 точный адрес открывает модальное окно', options, async (t) => {
+test('SW-E01 точный прежний адрес доставляет событие в главный документ', options, async (t) => {
   const { app, page, stub } = await launchSettingsStub(t);
-  const child = await openNativeSettings(app, page, stub.address);
-  const state = await app.evaluate(({ BrowserWindow }) => {
-    const windows = BrowserWindow.getAllWindows();
-    const main = windows.find((window) => !window.getParentWindow());
-    const child = windows.find((window) => window !== main);
+  const before = await page.evaluate(() => performance.timeOrigin);
 
-    return {
-      modal: child.isModal(),
-      title: child.getTitle(),
-      enabled: main.isEnabled(),
-    };
-  });
-
-  assert.equal(state.modal, true);
-  assert.equal(state.title, 'Настройки — GrigDesk');
-  assert.equal(state.enabled, false);
+  await openNativeSettings(app, page, stub.address);
   assert.match(await page.evaluate(() => navigator.userAgent), /GrigDeskWindow\/main$/);
-  assert.match(await child.evaluate(() => navigator.userAgent), /GrigDeskWindow\/settings$/);
-  assert.equal(await child.evaluate(async () => (await (await fetch('/api/auth/state')).json())
-    .authenticated), true);
-  await child.close();
-  await waitFor(() => app.evaluate(({ BrowserWindow }) => {
-    const main = BrowserWindow.getAllWindows()[0];
-
-    return main.isEnabled() && BrowserWindow.getFocusedWindow() === main;
-  }));
+  assert.equal(await page.evaluate(() => window.__settingsEvents), 1);
+  assert.equal(await page.evaluate(() => performance.timeOrigin), before);
+  await page.locator('#stub-settings-close').click();
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isEnabled()), true);
 });
 
-test('SW-E02 одно окно на любые запросы', options, async (t) => {
+test('SW-E02 повтор, меню и native shortcut используют одно окно', options, async (t) => {
   const { run, app, page, stub } = await launchSettingsStub(t);
-  const child = await openNativeSettings(app, page, stub.address);
 
-  await page.evaluate((origin) => {
-    window.open(origin + '/?window=settings#/settings');
-    window.open(origin + '/?window=settings#/settings');
-  }, stub.address);
+  await openNativeSettings(app, page, stub.address);
   await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items[0].submenu.items[0].click());
   await sendSettingsShortcut(app);
-  await sendSettingsShortcut(app, true);
+  await waitFor(() => page.evaluate(() => window.__settingsEvents === 3));
 
   const second = run.spawnSecond({
     root: run.root,
@@ -675,23 +684,23 @@ test('SW-E02 одно окно на любые запросы', options, async (
   });
 
   await once(second, 'exit');
-  await waitFor(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.isModal()));
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);
-  assert.equal(child.isClosed(), false);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  assert.equal(await page.locator('#stub-settings[open]').count(), 1);
 });
 
-test('SW-E03 без входа окна нет', options, async (t) => {
+test('SW-E03 настройки оболочки открываются без связи с сервером', options, async (t) => {
   const { run, app, page, stub } = await launchSettingsStub(t);
 
+  await page.locator('#cookie').getByText('cookie:yes').waitFor();
   stub.revokeSessions();
   await rm(run.keyFile);
-  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-  await page.waitForURL(/^data:/u);
-  assert.match(await page.locator('body').textContent(), /Не удалось войти по локальному ключу/u);
-  await page.evaluate((origin) => window.open(origin + '/?window=settings#/settings'), stub.address);
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items[0].submenu.items[0].click());
-  await sendSettingsShortcut(app);
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await page.evaluate(() => fetch('/api/auth/state'));
+  await page.waitForFunction(async () => (await fetch('/api/auth/state')).status === 503);
+
+  const child = await openNativeSettings(app, page, stub.address);
+
+  assert.equal(await child.locator('#stub').count(), 1);
+  assert.equal(await child.evaluate(() => fetch('/api/auth/state').then((response) => response.status)), 503);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 });
 
@@ -739,34 +748,16 @@ async function restartOwnServer(run, change = async () => {}) {
 
 /**
  * Потеря сессии моделируется файлом и рестартом своего сервера, без удалённого logout.
- * Настройки закрываются по 401, основной документ восстанавливает тот же раздел по ключу.
+ * Оба документа сохраняются, пока труба сама восстанавливает безопасное чтение по ключу.
  */
 async function loseSessionAndRecover(run, child = null) {
   const address = run.page.url();
-  const denied = [];
-  let markedRequests = 0;
-  const observe = (page) => {
-    page.on('response', (response) => {
-      if (response.status() === 401) {
-        denied.push(new URL(response.url()).pathname);
-      }
-    });
-    page.on('request', (request) => {
-      if (request.url().endsWith('/api/providers?refresh=1')) {
-        markedRequests += 1;
-      }
-    });
-  };
+  const documents = [...new Set([run.page, ...(child ? [child] : [])])];
+  const origins = await Promise.all(documents.map((page) => page.evaluate(() => {
+    globalThis.recoveryDocumentProbe = 'retained';
 
-  observe(run.page);
-
-  if (child) {
-    observe(child);
-  }
-
-  // Ответ наблюдается до рестарта: фоновый GET тоже может первым обнаружить потерю сессии.
-  const recovered = run.page.waitForResponse((response) =>
-    response.request().isNavigationRequest() && response.status() === 200);
+    return performance.timeOrigin;
+  })));
 
   await restartOwnServer(run, async (env) => {
     const state = await readSessions(run);
@@ -774,27 +765,18 @@ async function loseSessionAndRecover(run, child = null) {
     await writeFile(env.GRIGDESK_AUTH_SESSIONS, JSON.stringify({ ...state, sessions: {} }));
   });
 
-  if (child) {
-    const closed = child.waitForEvent('close', { timeout: 10_000 });
-
-    await child.evaluate(() => {
-      void document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('providers')
-        .load(true);
-    });
-
-    await closed;
+  for (const [index, page] of documents.entries()) {
+    await waitFor(async () => await page.evaluate(() => fetch('/api/providers?refresh=1')
+      .then((response) => response.status)) === 200, 30_000,
+    'Труба не восстановила безопасное чтение после перезапуска своего сервера.');
+    assert.equal(page.isClosed(), false);
+    assert.equal(await page.evaluate(() => globalThis.recoveryDocumentProbe), 'retained');
+    assert.equal(await page.evaluate(() => performance.timeOrigin), origins[index]);
   }
 
-  await run.page.evaluate(() => {
-    void document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('providers')
-      .load(true);
-  });
-  await recovered;
   await run.page.locator('.shell').waitFor();
   assert.equal(run.page.url(), address);
-  assert.equal(Object.keys((await readSessions(run)).sessions).length, 1, 'Ровно один обмен ключа.');
-  assert.equal(markedRequests, child ? 2 : 1, 'Запросы с 401 автоматически не повторяются.');
-  assert.ok(denied.length > 0 && denied.length < 12, 'Нет шквала отказов.');
+  assert.equal(Object.keys((await readSessions(run)).sessions).length, 1, 'Один общий обмен ключа в трубе.');
   assert.equal(await run.page.locator('input[type=password]').count(), 0);
 }
 
@@ -836,7 +818,9 @@ async function launchSettingsGrigDesk(t) {
 
   await waitForKey(fixture);
 
-  const launched = await run.launch(fixture.address, fixture.env.GRIGDESK_WINDOW_KEY_PATH);
+  const launched = await run.launch(fixture.address, fixture.env.GRIGDESK_WINDOW_KEY_PATH, {
+    GRIGDESK_UI_RELEASES_DIR: fixture.env.GRIGDESK_UI_RELEASES_DIR,
+  });
   const errors = [];
   const observe = (page) => page.on('pageerror', (error) => errors.push(error.message));
 
@@ -854,33 +838,100 @@ async function launchSettingsGrigDesk(t) {
  * Ограниченный срок отличает устаревший web-бандл от отсутствующего файла подготовки.
  */
 async function openSettings(run) {
-  const opened = run.app.waitForEvent('window', { timeout: 10_000 });
+  const pendingAssets = new Set();
+  const requested = (request) => pendingAssets.add(new URL(request.url()).pathname);
+  const finished = (request) => pendingAssets.delete(new URL(request.url()).pathname);
 
-  await run.page.locator('.settings-link').click();
-
-  const page = await opened;
+  run.page.on('request', requested);
+  run.page.on('requestfinished', finished);
+  run.page.on('requestfailed', finished);
+  await run.page.evaluate(() => {
+    window.__settingsClicks = 0;
+    document.querySelector('[aria-label="Настройки"]').addEventListener('click', () => {
+      window.__settingsClicks += 1;
+    }, { once: true });
+  });
+  await run.page.getByRole('button', { name: 'Настройки', exact: true }).click();
 
   try {
-    await page.locator('[data-settings-window]').waitFor({ timeout: 10_000 });
-  } catch {
-    assert.fail('Бандл без окна настроек: проверь GRIGDESK_E2E_WEB_DIST.');
+    await run.page.locator('[data-role=settings-modal]').waitFor();
+  } catch (error) {
+    const diagnostic = await run.page.evaluate(() => {
+      const stores = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s;
+      const gear = document.querySelector('[aria-label="Настройки"]');
+      const box = gear.getBoundingClientRect();
+
+      return {
+        clicks: window.__settingsClicks,
+        open: stores.get('settings')?.isOpen,
+        pending: Boolean(stores.get('settings')?.pendingOpen),
+        auth: stores.get('auth')?.authenticated,
+        pressed: gear.getAttribute('aria-pressed'),
+        dialogs: document.querySelectorAll('[role=dialog]').length,
+        failures: [...document.querySelectorAll('[role=alert]')].map((element) => element.textContent),
+        resources: performance.getEntriesByType('resource').filter((entry) => entry.name.includes('/assets/'))
+          .slice(-10).map((entry) => new URL(entry.name).pathname.split('/').at(-1)),
+        active: document.activeElement?.className,
+        hit: document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.className,
+      };
+    });
+
+    await settingsScreenshot(run.page, 'DU05-debug.png');
+
+    throw new Error(`${error.message}; состояние: ${JSON.stringify(diagnostic)}; pending: `
+      + JSON.stringify([...pendingAssets]) + '; errors: ' + JSON.stringify(run.errors));
+  } finally {
+    run.page.off('request', requested);
+    run.page.off('requestfinished', finished);
+    run.page.off('requestfailed', finished);
   }
 
-  await page.locator('[data-role=settings-nav]').first().waitFor();
+  assert.equal(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 
-  return page;
+  return run.page;
 }
 
 /**
- * Выбор раздела идёт настоящим кликом с прокруткой узкой полосы навигации.
- * aria-current подтверждает смену раздела после обработки события Vue.
+ * Дерево раскрывает группу и выбирает адресуемую страницу настоящим кликом.
+ * Старые имена используются только существующими независимыми сценариями плотности.
  */
 async function settingsTab(page, id) {
-  const tab = page.locator(`[data-settings-tab=${id}]`);
+  const mapping = {
+    app: 'interface.behavior',
+    speech: 'speech.dictation',
+    b24: 'connections.b24',
+    providers: 'agents.providers',
+    runs: 'automation.context',
+    plugins: 'plugins.installed',
+    server: 'system.startup',
+    access: 'connections.mobile',
+  };
+  const target = mapping[id] ?? id;
+  const sections = page.getByRole('button', { name: 'Разделы', exact: true });
 
-  await tab.scrollIntoViewIfNeeded();
-  await tab.click();
-  await waitFor(async () => await tab.getAttribute('aria-current') === 'page');
+  if (await sections.isVisible()) {
+    await sections.click();
+  }
+
+  const group = page.locator(`[data-settings-node="${target.split('.')[0]}"]`);
+
+  if (await group.getAttribute('aria-expanded') !== 'true') {
+    await group.click();
+  }
+
+  const item = page.locator(`[data-settings-node="${target}"]`);
+
+  await item.click();
+  await waitFor(async () => await item.getAttribute('aria-selected') === 'true');
+}
+
+/**
+ * Закрывается общий UI-слой; сам документ и BrowserWindow остаются живыми.
+ * Для clean-сценариев отсутствие модала является наблюдаемым завершением.
+ */
+async function closeSettings(page) {
+  await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+  await page.locator('[data-role=settings-modal]').waitFor({ state: 'hidden' });
 }
 
 /**
@@ -896,249 +947,152 @@ async function settingsScreenshot(page, name, screenshotOptions = {}) {
   await page.screenshot({ path: path.join(directory, name), ...screenshotOptions });
 }
 
-test('SW-E05 открытие из верхней панели сохраняет основное окно', options, async (t) => {
+test('SM-E01 кнопка и native shortcut открывают общий модал без нового окна', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
   }
 
-  await run.page.evaluate(() => {
-    location.hash = '#/chats';
-    window.__swMarker = 1;
+  await openSettings(run);
+
+  for (const zoom of [1.25, 2]) {
+    await run.app.evaluate(({ BrowserWindow }, factor) => {
+      BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(factor);
+    }, zoom);
+    await waitFor(() => run.page.locator('[data-role=settings-modal]').evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const footer = element.querySelector('.settings-actions').getBoundingClientRect();
+
+      return box.right <= innerWidth + 1 && footer.bottom <= innerHeight + 1;
+    }));
+  }
+
+  await run.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1);
   });
-  await run.page.locator('.agents').waitFor();
-
-  let field = run.page.locator('.composer textarea:enabled').first();
-
-  if (!await field.count()) {
-    field = run.page.locator(
-      'input[type=text]:enabled, input[type=search]:enabled, textarea:enabled',
-    ).first();
-    t.diagnostic('SW-E05: composer недоступен, используется поле поиска/формы страницы чатов.');
-  }
-
-  if (!await field.count()) {
-    await run.page.evaluate(() => {
-      const field = document.createElement('input');
-
-      field.id = 'sw-draft-fixture';
-      document.querySelector('main').append(field);
-    });
-    field = run.page.locator('#sw-draft-fixture');
-    t.diagnostic('SW-E05: в пустом чате нет доступного поля; добавлено собственное текстовое поле страницы.');
-  }
-
-  await field.fill('Несохранённый текст проверки');
-
-  const before = await run.page.evaluate(() => [window.__swMarker, performance.timeOrigin, location.hash]);
-  const child = await openSettings(run);
-
-  assert.equal(await run.app.evaluate(({ BrowserWindow }) => {
-    const modal = BrowserWindow.getAllWindows().find((window) => window.isModal());
-
-    return Boolean(modal) && !modal.getParentWindow().isEnabled();
-  }), true);
-  assert.equal(await child.locator('[data-role=settings-nav]').count(), 8);
-  assert.equal(await child.locator('.shell, .settings-hero').count(), 0);
-  await settingsScreenshot(child, 'settings-1120x820.png');
-  await child.close();
-  await waitFor(() => run.app.evaluate(({ BrowserWindow }) => {
-    const main = BrowserWindow.getAllWindows()[0];
-
-    return main.isEnabled() && BrowserWindow.getFocusedWindow() === main;
-  }));
-  assert.deepEqual(await run.page.evaluate(() =>
-    [window.__swMarker, performance.timeOrigin, location.hash]), before);
-  assert.equal(await field.inputValue(), 'Несохранённый текст проверки');
+  await closeSettings(run.page);
+  await sendSettingsShortcut(run.app);
+  await run.page.locator('[data-role=settings-modal]').waitFor();
+  assert.equal(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 });
 
-test('SW-E06 раздел из ссылки', options, async (t) => {
-  const run = await launchSettingsGrigDesk(t);
+test('SM-E02 документ, маршрут и текст сохраняются после open/close', options, async (t) => {
+  const run = await launchLayoutChat(t);
 
   if (!run) {
     return;
   }
 
-  await run.page.evaluate(() => {
-    localStorage.setItem('grigdesk-settings-tab', 'providers');
-    location.hash = '#/board';
-  });
+  const before = await layoutState(run.page);
 
-  const opened = run.app.waitForEvent('window');
-
-  await run.page.getByText('→ Настройки', { exact: true }).click();
-
-  const child = await opened;
-
-  await child.locator('[data-settings-tab=providers][aria-current=page]').waitFor();
+  await openSettings(run);
+  await closeSettings(run.page);
+  assert.deepEqual(await layoutState(run.page), before);
+  assert.equal(await run.page.evaluate(() => window.__duChatNode === document.querySelector('.cs')), true);
 });
 
-test('SW-E07 href #/settings', options, async (t) => {
+test('SM-E03 prefs, локальная клавиша и плагин применяются в главном UI', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
   }
 
-  await run.page.evaluate(() => {
-    location.hash = '#/chats';
-  });
-  await run.page.locator('.agents').waitFor();
+  const page = await openSettings(run);
 
-  const opened = run.app.waitForEvent('window');
+  await settingsTab(page, 'interface.shortcuts');
+  await page.locator('[data-hotkey-tool=terminal] [data-record]').click();
+  await page.keyboard.press('Control+Shift+Digit9');
+  await page.getByRole('button', { name: 'Применить', exact: true }).click();
+  await settingsTab(page, 'automation.context');
+  await page.getByRole('spinbutton', {
+    name: 'Порог сжатия чата, токены',
+    exact: true,
+  }).fill('64000');
+  await page.getByRole('button', { name: 'Применить', exact: true }).click();
+  await waitFor(() => page.evaluate(() => document.querySelector('#app').__vue_app__
+    .config.globalProperties.$pinia._s.get('chat').compactWindow === 64000));
+  await settingsTab(page, 'plugins.installed');
 
+  const before = await page.evaluate(() => document.querySelector('#app').__vue_app__
+    .config.globalProperties.$pinia._s.get('plugins').byId('inbox').enabled);
+
+  await page.getByRole('switch', { name: 'Включить Входящие', exact: true }).first().press('Space');
+  await page.getByRole('button', { name: 'Применить', exact: true }).click();
+  await waitFor(() => page.evaluate((before) => document.querySelector('#app').__vue_app__
+    .config.globalProperties.$pinia._s.get('plugins').byId('inbox').enabled !== before, before));
+  await closeSettings(page);
+  await page.keyboard.press('Control+Shift+Digit9');
+  await page.locator('.xterm').first().waitFor();
+});
+
+test('SM-E04 вложенный диалог, Escape, dirty-close, ошибка и повтор', options, async (t) => {
+  const run = await launchSettingsGrigDesk(t);
+
+  if (!run) {
+    return;
+  }
+
+  const page = await openSettings(run);
+
+  await settingsTab(page, 'connections.mobile');
+  await page.locator('[data-testid=mobile-open-add]').click();
+  await page.getByRole('dialog', { name: 'Добавить посредника', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: 'Добавить посредника', exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('[data-role=settings-modal]').count(), 1);
+  await settingsTab(page, 'automation.chats');
+  await page.getByRole('switch').first().press('Space');
+  await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+  await page.getByRole('button', { name: 'Продолжить редактирование', exact: true }).click();
+  await page.route('**/api/settings/prefs', (route) => route.request().method() === 'POST'
+    ? route.fulfill({ status: 500, json: { error: 'Синтетический отказ записи' } }) : route.continue());
+  await page.getByRole('button', { name: 'Применить', exact: true }).click();
+  await page.getByText('Синтетический отказ записи', { exact: false }).first().waitFor();
+  await page.unroute('**/api/settings/prefs');
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click();
+  await page.locator('[data-role=settings-modal]').waitFor({ state: 'hidden' });
+  await openSettings(run);
+});
+
+test('SM-E05 cold settings, legacy query, browser mode и восстановление auth', options, async (t) => {
+  const run = await launchSettingsGrigDesk(t);
+
+  if (!run) {
+    return;
+  }
+
+  const cold = new URL('?window=settings#/settings?page=speech.video', run.page.url());
+
+  await run.page.goto(cold.href);
+  await run.page.locator('[data-role=settings-modal]').waitFor();
+  assert.match(run.page.url(), /#\/board$/);
+  await closeSettings(run.page);
+
+  const canonical = new URL(run.page.url());
+
+  canonical.search = '';
+  await run.page.goto(canonical.href);
+  await run.page.locator('.shell').waitFor();
   await run.page.evaluate(() => {
     location.hash = '#/settings';
   });
+  await run.page.locator('[data-role=settings-modal]').waitFor();
+  await loseSessionAndRecover(run, run.page);
 
-  const child = await opened;
+  const opened = run.app.waitForEvent('window');
 
-  await child.locator('[data-settings-window]').waitFor();
-  await waitFor(async () => await run.page.evaluate(() => location.hash) === '#/chats');
+  await run.page.evaluate(() => window.open('/#/settings'));
+
+  const browserPage = await opened;
+
+  await browserPage.locator('[data-role=settings-modal]').waitFor();
+  assert.doesNotMatch(await browserPage.evaluate(() => navigator.userAgent), /GrigDeskWindow/);
+  await browserPage.close();
 });
 
-/**
- * Второй Escape закрывает renderer уже на keyDown, раньше keyUp протокола Playwright.
- * Ошибка закрытого target допускается только вместе с наблюдаемым событием close.
- */
-async function closeSettingsWithEscape(page) {
-  const closed = page.waitForEvent('close', { timeout: 5000 });
-
-  await page.keyboard.press('Escape').catch((error) => {
-    if (!error.message.includes('Target page, context or browser has been closed')) {
-      throw error;
-    }
-  });
-  await closed;
-}
-
-test('SW-E08 Escape по слоям', options, async (t) => {
-  const run = await launchSettingsGrigDesk(t);
-
-  if (!run) {
-    return;
-  }
-
-  let child = await openSettings(run);
-
-  await settingsTab(child, 'runs');
-
-  const field = child.getByRole('spinbutton', {
-    name: 'Порог сжатия контекста чата в токенах', exact: true,
-  });
-
-  await field.focus();
-  await child.keyboard.press('Escape');
-  assert.equal(child.isClosed(), false);
-  assert.equal(await field.evaluate((field) => document.activeElement === field), false);
-  await closeSettingsWithEscape(child);
-  child = await openSettings(run);
-  await settingsTab(child, 'access');
-  await child.locator('[data-testid=mobile-open-add]').click();
-  await child.getByRole('dialog').waitFor();
-  await child.keyboard.press('Escape');
-  await child.getByRole('dialog').waitFor({ state: 'hidden' });
-  assert.equal(child.isClosed(), false);
-  await settingsTab(child, 'app');
-  await child.locator('[data-testid=hotkey-record-terminal]').click();
-  await child.keyboard.press('Escape');
-  assert.equal(await child.locator('[data-testid=hotkey-record-terminal]').textContent(), 'Изменить');
-  assert.equal(child.isClosed(), false);
-  await loseSessionAndRecover(run, child);
-});
-
-test('SW-E09 сохранённое доходит до основного окна без перезагрузки', options, async (t) => {
-  const run = await launchSettingsGrigDesk(t);
-
-  if (!run) {
-    return;
-  }
-
-  await run.page.evaluate(() => {
-    window.__swMarker = 1;
-  });
-
-  let child = await openSettings(run);
-
-  await settingsTab(child, 'app');
-  await child.locator('[data-testid=hotkey-record-terminal]').click();
-  await child.keyboard.press('Control+Shift+Digit9');
-  await child.close();
-  await run.page.keyboard.press('Control+Shift+Digit9');
-  await run.page.locator('.xterm').first().waitFor();
-  child = await openSettings(run);
-  await settingsTab(child, 'plugins');
-
-  const nav = run.page.locator('.sidebar a[href="#/inbox"]');
-  const hadNav = await nav.count() > 0;
-  const tile = child.locator('[data-plugin-id=inbox]');
-
-  await tile.locator('.plugin-tile-power button').click();
-  await waitFor(async () => (await nav.count() > 0) !== hadNav);
-  t.diagnostic('SW-E09: переключён системный плагин inbox с пунктом навигации.');
-  await settingsTab(child, 'runs');
-
-  const field = child.getByRole('spinbutton', { name: 'Порог сжатия контекста чата в токенах', exact: true });
-
-  await field.fill('64000');
-  await field.locator('xpath=ancestor::div[contains(@class,"run-value-control")]')
-    .getByRole('button', { name: 'Сохранить', exact: true }).click();
-  await waitFor(() => run.page.evaluate(() => document.querySelector('#app').__vue_app__
-    .config.globalProperties.$pinia._s.get('chat').compactWindow === 64000));
-  assert.equal(await run.page.evaluate(() => window.__swMarker), 1);
-});
-
-test('SW-E10 установка исполнителя через терминал основного окна', options, async (t) => {
-  const run = await launchSettingsGrigDesk(t);
-
-  if (!run) {
-    return;
-  }
-
-  const child = await openSettings(run);
-
-  await settingsTab(child, 'providers');
-  await child.locator('[data-testid=provider-panel]').first().waitFor({ state: 'attached' });
-
-  const toggle = child.locator('[aria-controls^="provider-panel-"]').first();
-
-  await toggle.click();
-
-  const command = child.locator('[data-role=settings-command]:visible').first();
-  const insert = (await command.textContent()).trim();
-
-  await command.click();
-  await waitFor(() => child.isClosed());
-  await run.page.locator('.xterm').first().waitFor();
-  await waitFor(async () => (await run.page.locator('.xterm-rows').first().textContent()).includes(insert));
-
-  const before = await run.page.locator('.xterm-rows').first().textContent();
-
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  assert.equal(await run.page.locator('.xterm-rows').first().textContent(), before);
-  t.diagnostic('SW-E10: команда вставлена, Enter не отправлялся; вывод через 2 с прежний.');
-});
-
-test('SW-E11 потеря сессии закрывает настройки, главное входит само', options, async (t) => {
-  const run = await launchSettingsGrigDesk(t);
-
-  if (!run) {
-    return;
-  }
-
-  await run.page.evaluate(() => {
-    location.hash = '#/chats';
-  });
-  await run.page.locator('.agents').waitFor();
-
-  const child = await openSettings(run);
-
-  await loseSessionAndRecover(run, child);
-  assert.equal(new URL(run.page.url()).hash, '#/chats');
-});
-
-test('SW-E12 Ctrl+Alt+S поверх терминала', options, async (t) => {
+test('SM-E06 native shortcut при фокусе xterm', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
@@ -1148,69 +1102,73 @@ test('SW-E12 Ctrl+Alt+S поверх терминала', options, async (t) => 
   await run.page.evaluate(() => {
     location.hash = '#/terminal';
   });
-  await run.page.locator('.xterm').first().waitFor();
   await run.page.locator('.xterm-helper-textarea').first().focus();
-
-  const opened = run.app.waitForEvent('window');
-
   await sendSettingsShortcut(run.app);
-
-  const child = await opened;
-
-  await child.locator('[data-settings-window]').waitFor();
+  await run.page.locator('[data-role=settings-modal]').waitFor();
+  assert.equal(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 });
 
-test('SW-E13 узкое окно', options, async (t) => {
+test('SW-E11: модал и документ сохраняются при обновлении сессии трубы', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
     return;
   }
 
-  const child = await openSettings(run);
+  await openSettings(run);
 
-  await run.app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows().find((window) => window.isModal()).setSize(800, 600);
+  const modal = run.page.locator('[data-role=settings-modal]');
+
+  await loseSessionAndRecover(run);
+  assert.equal(await modal.isVisible(), true);
+  assert.equal(await run.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+});
+
+test('SM-E07 закреплённый UI и документ сохраняются при открытии настроек', options, async (t) => {
+  const run = await launchSettingsGrigDesk(t);
+
+  if (!run) {
+    return;
+  }
+
+  const before = await run.page.evaluate(() => ({ url: location.href, time: performance.timeOrigin }));
+
+  assert.equal(new URL(before.url).pathname, '/');
+  await openSettings(run);
+  await settingsTab(run.page, 'speech.video');
+  await closeSettings(run.page);
+  assert.deepEqual(await run.page.evaluate(() => ({
+    url: location.href,
+    time: performance.timeOrigin,
+  })), before);
+});
+
+test('SM-E09 второй экземпляр сохраняет открытый модал и фокус главного окна', options, async (t) => {
+  const run = await launchSettingsGrigDesk(t);
+
+  if (!run) {
+    return;
+  }
+
+  await openSettings(run);
+
+  const second = run.spawnSecond({
+    root: run.root,
+    dataDir: run.dataDir,
+    args: [desktop, '--grigdesk-url=' + run.fixture.address],
+    env: { GRIGDESK_WINDOW_KEY_PATH: run.fixture.env.GRIGDESK_WINDOW_KEY_PATH },
   });
 
-  for (const id of ['app', 'speech', 'b24', 'providers', 'runs', 'plugins', 'server', 'access']) {
-    await settingsTab(child, id);
-    assert.equal(await child.locator('.settings-window-scroll').evaluate((scroll) =>
-      scroll.scrollWidth <= scroll.clientWidth + 1), true, id);
-  }
-
-  await settingsTab(child, 'app');
-  await settingsScreenshot(child, 'settings-800x600.png');
-  await settingsTab(child, 'access');
-  await child.locator('[data-testid=mobile-open-add]').click();
-  await child.getByRole('dialog').waitFor();
-  await settingsScreenshot(child, 'settings-dialog.png');
-  await loseSessionAndRecover(run, child);
-});
-
-test('SW-E14 окно без маркеров — страница', options, async (t) => {
-  const run = await launchSettingsGrigDesk(t);
-
-  if (!run) {
-    return;
-  }
-
-  const opened = run.app.waitForEvent('window');
-
-  await run.page.evaluate(() => window.open('/#/settings'));
-
-  const child = await opened;
-
-  await child.locator('.shell .settings').waitFor();
-  assert.doesNotMatch(await child.evaluate(() => navigator.userAgent), /GrigDeskSettings|GrigDeskWindow/);
-  assert.equal(await run.app.evaluate(({ BrowserWindow }) => {
+  await once(second, 'exit');
+  await waitFor(() => run.app.evaluate(({ BrowserWindow }) => {
     const windows = BrowserWindow.getAllWindows();
 
-    return windows.length === 2 && windows.every((window) => !window.isModal() && window.isEnabled());
-  }), true);
+    return windows.length === 1 && BrowserWindow.getFocusedWindow() === windows[0];
+  }));
+  assert.equal(await run.page.locator('[data-role=settings-modal]').count(), 1);
 });
 
-test('DW-E13: чистый браузер не получает документ, deep link и JS', options, async (t) => {
+test('DW-E13: браузер получает инструкцию сервера, UI и JS остаются в трубе', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
@@ -1229,14 +1187,16 @@ test('DW-E13: чистый браузер не получает документ
   for (const pathname of ['/', '/chats', '/#/chats']) {
     const response = await page.goto(run.fixture.address + pathname);
 
-    assert.equal(response.status(), 401);
+    assert.equal(response.status(), 200);
     assert.match(await page.locator('body').textContent(), /GrigDesk открывается в приложении/u);
     assert.equal(await page.locator('.shell, input[type=password], script').count(), 0);
   }
 
-  const response = await context.request.get(asset);
+  assert.equal((await context.request.get(asset)).status(), 403);
 
-  assert.equal(response.status(), 401);
+  const response = await context.request.get(run.fixture.address + new URL(asset).pathname);
+
+  assert.equal(response.status(), 404);
   assert.match(response.headers()['content-type'], /application\/json/u);
 });
 
@@ -1303,7 +1263,7 @@ test('DW-E14: старая cookie отзывается, Electron входит с
   }]);
 
   const page = await context.newPage();
-  const response = await page.goto(run.fixture.address + '/#/chats');
+  const response = await context.request.get(run.fixture.address + '/api/studio3d/state');
 
   assert.equal(response.status(), 401);
   Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
@@ -1348,7 +1308,7 @@ test('DW-E16: восстановление того же hash загружает
   await recovered;
   await page.locator('#stub').waitFor();
   assert.equal(new URL(page.url()).hash, '#/chats');
-  assert.equal(stub.observations.exchanges, 2);
+  await waitFor(() => stub.observations.exchanges === 2);
 });
 
 test('DW-E15: потеря сессии в чате восстанавливает тот же адрес', options, async (t) => {
@@ -1412,7 +1372,7 @@ async function launchLayoutChat(t) {
 }
 
 /**
- * Настройки остаются отдельным окном с общими controls.
+ * Настройки используют общий модал в постоянном документе.
  * У единственного desktop-вида больше нет переключателя плотности.
  */
 async function layoutSettings(run) {
@@ -1451,7 +1411,7 @@ async function titlebarGeometry(page) {
     const overlay = navigator.windowControlsOverlay;
     const safe = overlay.getTitlebarAreaRect();
     const header = document.querySelector('.topbar');
-    const settings = document.querySelector('.settings-link');
+    const settings = document.querySelector('[aria-label=Настройки]');
     const mark = document.querySelector('.app-mark');
     const status = document.querySelector('.status');
     const headerBox = header.getBoundingClientRect();
@@ -1540,8 +1500,8 @@ test('WT-E01 системные кнопки встроены в топбар п
 
     const child = await openSettings(run);
 
-    assert.equal(await child.evaluate(() => navigator.windowControlsOverlay.visible), false);
-    await child.close();
+    assert.equal(await child.evaluate(() => navigator.windowControlsOverlay.visible), true);
+    await closeSettings(child);
   }
 
   await run.app.evaluate(({ BrowserWindow }) => {
@@ -1600,7 +1560,7 @@ test('DU-E01 первый кадр и прежняя плотность испо
   assert.deepEqual(await run.page.evaluate(() => window.__duFirstFrame), { height: 36 });
 });
 
-test('DU-E02 отдельные настройки сохраняют документ и состояние разговора', options, async (t) => {
+test('DU-E02 общие настройки сохраняют документ и состояние разговора', options, async (t) => {
   const run = await launchLayoutChat(t);
 
   if (!run) {
@@ -1612,14 +1572,14 @@ test('DU-E02 отдельные настройки сохраняют докум
 
   assert.deepEqual(await layoutState(run.page), before);
   assert.equal(await run.page.evaluate(() => window.__duChatNode === document.querySelector('.cs')), true);
-  assert.equal(await child.locator('.shell, .tool-surface, .xterm').count(), 0);
+  assert.equal(await child.locator('.shell').count(), 1);
   await run.app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows().find((window) => window.isModal()).setContentSize(800, 600);
+    BrowserWindow.getAllWindows().find((window) => !window.isModal()).setContentSize(800, 600);
   });
   await child.waitForFunction(() => innerWidth === 800 && innerHeight === 600);
   assert.equal(await child.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await settingsScreenshot(child, 'layout-settings.png');
-  await child.close();
+  await closeSettings(child);
   await run.app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().find((window) => !window.isModal()).setContentSize(1600, 900);
   });
@@ -1643,7 +1603,7 @@ test('DU-E03 повтор окна сохраняет размеры и durable 
   const before = await layoutState(run.page);
   const child = await layoutSettings(run);
 
-  await child.close();
+  await closeSettings(child);
   await run.closeApp();
   Object.assign(run, await run.launch(run.fixture.address, run.fixture.env.GRIGDESK_WINDOW_KEY_PATH));
   run.page.on('pageerror', (error) => run.errors.push(error.message));
@@ -1677,15 +1637,15 @@ test('DU-E04 body overlays сохраняют controls, Escape и возврат
   const trigger = child.locator('[data-testid=mobile-open-add]');
 
   await trigger.click();
-  await child.getByRole('dialog').waitFor();
-  assert.equal(await child.getByRole('dialog').evaluate((el) =>
+  await child.getByRole('dialog', { name: 'Добавить посредника', exact: true }).waitFor();
+  assert.equal(await child.getByRole('dialog', { name: 'Добавить посредника', exact: true }).evaluate((el) =>
     getComputedStyle(el).getPropertyValue('--control-height').trim()), '44px');
   await child.keyboard.press('Escape');
-  await child.getByRole('dialog').waitFor({ state: 'hidden' });
+  await child.getByRole('dialog', { name: 'Добавить посредника', exact: true }).waitFor({ state: 'hidden' });
   assert.equal(child.isClosed(), false);
   assert.equal(await trigger.evaluate((el) => document.activeElement === el), true);
-  await child.close();
-  await run.page.locator('.settings-link').hover();
+  await closeSettings(child);
+  await run.page.locator('[aria-label=Настройки]').hover();
   await run.page.getByRole('tooltip').waitFor();
   assert.equal(await run.page.getByRole('tooltip').evaluate((el) =>
     getComputedStyle(el).getPropertyValue('--control-height').trim()), '36px');
@@ -1707,7 +1667,7 @@ test('DU-E05 настройки и ресайз сохраняют terminal/PTY,
       terminals += 1;
     }
   });
-  await run.page.locator('.tool-rail [aria-label="Терминал"]').click();
+  await run.page.locator('.tool-rail [aria-label^="Терминал"]').click();
   await run.page.locator('.xterm').waitFor();
   await waitFor(() => terminals === 1);
   await run.page.evaluate(() => {
@@ -1716,7 +1676,7 @@ test('DU-E05 настройки и ресайз сохраняют terminal/PTY,
 
   const child = await layoutSettings(run);
 
-  await child.close();
+  await closeSettings(child);
   await run.app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().find((window) => !window.isModal()).setContentSize(1400, 860);
   });
@@ -1745,7 +1705,7 @@ test('DU-E06 узкое окно и zoom сохраняют боковую ре�
 
   const child = await layoutSettings(run);
 
-  await child.close();
+  await closeSettings(child);
 
   const before = await layoutState(run.page);
 
@@ -1793,9 +1753,12 @@ test('DU-E07 key-only recovery сохраняет геометрию и сост
   assert.equal(after.draft, before.draft);
   assert.deepEqual(after.sizes, before.sizes);
 
+  assert.equal(child.isClosed(), false);
+  await closeSettings(child);
+
   const reopened = await openSettings(run);
 
-  assert.equal(await reopened.locator('[data-settings-window]').count(), 1);
+  assert.equal(await reopened.locator('[data-role=settings-modal]').count(), 1);
 });
 
 /**
@@ -1844,7 +1807,7 @@ async function checkReloadBlocked(run, page) {
   });
 }
 
-test('UI-E01 закреплённая версия переживает замену dist, открывает разделы и настройки',
+test('UI-E01 встроенный пакет переживает замену серверного dist, открывает разделы и настройки',
   { timeout: 150_000 }, async (t) => {
     const run = await createRun(t);
     const working = path.join(run.root, 'working-dist');
@@ -1877,7 +1840,8 @@ test('UI-E01 закреплённая версия переживает заме
 
     Object.assign(run, launched, { fixture });
     await run.page.locator('.shell').waitFor();
-    assert.match(new URL(run.page.url()).pathname, /^\/ui\/[a-f0-9]{64}\/$/);
+    assert.equal(new URL(run.page.url()).pathname, '/');
+    assert.notEqual(new URL(run.page.url()).origin, fixture.address);
 
     const errors = [];
     const assets = [];
@@ -1905,7 +1869,7 @@ test('UI-E01 закреплённая версия переживает заме
       ['SSH', '.ssh-panel'], ['Базы', '.db-panel'], ['Докер', '.docker-panel'],
       ['Терминал', '.term-view'],
     ]) {
-      await run.page.locator(`.tool-rail [aria-label="${label}"]`).click();
+      await run.page.locator(`.tool-rail [aria-label^="${label}"]`).click();
       await run.page.locator(selector).waitFor();
     }
 
@@ -1915,10 +1879,11 @@ test('UI-E01 закреплённая версия переживает заме
 
     assert.equal(new URL(child.url()).pathname, new URL(run.page.url()).pathname);
     await checkReloadBlocked(run, child);
-    await child.close();
+    await closeSettings(child);
     await settingsScreenshot(run.page, 'packaged-ui-after-dist-replacement.png');
     assert.ok(assets.length >= 7, 'Lazy-ресурсы действительно загружались после замены рабочей сборки.');
-    assert.ok(assets.every((asset) => asset.status === 200 && /\/ui\/[a-f0-9]{64}\//.test(asset.url)));
+    assert.ok(assets.every((asset) => asset.status === 200
+    && new URL(asset.url).origin === new URL(run.page.url()).origin));
     assert.deepEqual(errors, []);
 
     // Новый документ получает намеренный отказ lazy-ресурса: проверяем видимое сообщение.
@@ -1928,7 +1893,7 @@ test('UI-E01 закреплённая версия переживает заме
     }));
     await run.page.locator('.shell').waitFor();
     await run.page.route(/\/CodePanel-[^/]+\.js$/, (route) => route.abort('failed'));
-    await run.page.locator('.tool-rail [aria-label="Код"]').click();
+    await run.page.locator('.tool-rail [aria-label^="Код"]').click();
     await run.page.getByRole('alert').filter({ hasText: 'Не удалось загрузить раздел' }).waitFor();
     await settingsScreenshot(run.page, 'packaged-ui-load-error.png');
     await run.page.route(/\/VideoView-[^/]+\.js$/, (route) => route.abort('failed'));

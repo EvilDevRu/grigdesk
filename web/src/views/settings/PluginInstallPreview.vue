@@ -31,16 +31,26 @@
         controls="plugin-install-changes"
         data-role="install-changes-toggle"
       >
-        Изменения · коммитов: {{ preview.changes.commits.length }} · файлов: {{ preview.changes.files.length }}
+        Изменения · коммитов: {{ preview.changes.commits.length }} · файлов:
+        {{ preview.changes.files.length }}
       </UiDisclosureButton>
       <p v-if="preview.changes.sensitive.length" class="preview-sensitive">
         Затронута серверная часть или зависимости.
       </p>
-      <div v-if="changesOpen" id="plugin-install-changes" class="preview-diff">
+      <div
+        v-if="changesOpen"
+        id="plugin-install-changes"
+        class="preview-diff"
+      >
         <h4>Коммиты</h4>
         <ul v-if="preview.changes.commits.length">
-          <li v-for="commit in preview.changes.commits" :key="commit.sha" data-role="install-commit">
-            <code>{{ shortSha(commit.sha) }}</code> {{ commit.subject }}
+          <li
+            v-for="commit in preview.changes.commits"
+            :key="commit.sha"
+            data-role="install-commit"
+          >
+            <code>{{ shortSha(commit.sha) }}</code>
+            {{ commit.subject }}
           </li>
         </ul>
         <p v-else>Нет новых коммитов.</p>
@@ -63,8 +73,8 @@
       <p v-if="preview.changes.truncated" class="preview-sensitive">Список сокращён.</p>
     </div>
     <UiInlineMessage tone="warning">
-      Код плагина выполняется внутри GrigDesk с его правами.
-      Ставьте плагины только из источников, которым доверяете.
+      Код плагина выполняется внутри GrigDesk с его правами. Ставьте плагины только из источников, которым
+      доверяете.
     </UiInlineMessage>
   </section>
 </template>

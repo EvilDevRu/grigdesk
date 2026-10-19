@@ -1,14 +1,17 @@
 import path from 'node:path';
 
-import { readPinnedNodeRuntime, type NodeRuntime } from '../../shared/node/binaryBuild.ts';
+import {
+  readNodeRuntime as readSharedRuntime,
+} from '../../shared/node/nodeRuntime.ts';
+import type { NodeRuntime } from '../../shared/node/nodeRuntime.ts';
 
 export {
   assertUntracked,
   ensureNodeArchive,
   publishFile,
   SEA_FUSE,
-  type NodeRuntime,
-} from '../../shared/node/binaryBuild.ts';
+} from '../../shared/node/nodeRuntime.ts';
+export type { NodeRuntime } from '../../shared/node/nodeRuntime.ts';
 
 export interface BuildOptions {
   outDir: string;
@@ -50,9 +53,10 @@ export function parseBuildArgs(args: readonly string[], cwd: string, packageDir:
 }
 
 /**
- * Политика pin общая для сборщиков SEA, имя manifest остаётся частью ошибки Б24.
- * Публичная функция пакета сохраняет прежний контракт входа и результата.
+ * Читает манифест runtime с меткой своего выпуска.
+ * Общая проверка версии, платформы и SHA256 живёт в shared/node/nodeRuntime.ts.
  */
 export function readNodeRuntime(value: unknown): NodeRuntime {
-  return readPinnedNodeRuntime(value, 'b24/build/node-runtime.json');
+  return readSharedRuntime(value, 'b24/build/node-runtime.json');
 }
+

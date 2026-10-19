@@ -24,7 +24,7 @@
 перечислением через `git ls-files --cached --others --exclude-standard`.
 
 Основной продуктовый остаток — точка входа web, router, 17 stores, функции речи,
-часть shared/helpers и крупные Vue: `ChatSession`, `PipelineView`, `SettingsView`,
+часть shared/helpers и крупные Vue: `ChatSession`, `PipelineView`,
 `TaskModal`, `BoardView`, `AppShell`. Новые JS-helper сервера:
 `server/src/lib/pluginInstall/commandSupervisor.mjs` и `gitBlobPrefix.mjs`.
 
@@ -45,9 +45,11 @@
 
 - Общие server/web конфигурации, проекты их тестов и web scripts используют
   `allowJs: true`, `checkJs: false`: JavaScript не получает собственных диагностик.
-- В `web/tsconfig.json.exclude` перечислены 36 Vue. Четыре других Vue с JS-script
-  не названы там: `views/ExtPluginView.vue`, `views/pipeline/BootstrapDecision.vue`,
-  `views/pipeline/DeferredFindings.vue`, `views/settings/ServerLauncher.vue`.
+- После переноса настроек (проверка 2026-10-19) `web/tsconfig.json.exclude` содержит
+  34 пути Vue: 33 существующих компонента и прежний отсутствующий `views/LoginView.vue`.
+  Три существующих Vue с JS-script не названы там: `views/ExtPluginView.vue`,
+  `views/pipeline/BootstrapDecision.vue`, `views/pipeline/DeferredFindings.vue`.
+  Страницы общего модала, включая `views/settings/pages/SystemPage.vue`, используют TS.
   Исключение из начального набора файлов не запрещает транзитивные импорты.
 - `web/src/shared/chatApprovals.d.ts` описывает узкий контракт соседнего JS-adapter,
   но не проверяет реализацию `web/src/stores/chat.js`.

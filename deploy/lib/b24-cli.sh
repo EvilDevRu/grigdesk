@@ -33,24 +33,34 @@ grigdesk_install_b24_cli() {
   local temporary
   local ci_ran=0
 
-  if [[ ! -d "$root/b24/node_modules/esbuild" || ! -d "$root/b24/node_modules/postject" ]]; then
-    grigdesk_install_b24_dependencies "$root" "$pause" || return 1
-    ci_ran=1
-  fi
-
-  if ! npm --prefix "$root/b24" run build; then
-    if (( ci_ran )); then
-      echo "✗ Не удалось собрать b24." >&2
+  if [[ -f "$root/release.json" ]]; then
+    # Проверенный комплект уже содержит CLI: запись в R и инструменты сборки не нужны.
+    # Ни при повреждении, ни при чужом файле fallback на исходники не выполняется.
+    if [[ ! -f "$target" || ! -x "$target" ]]; then
+      echo "✗ Повреждён комплект: нет готового b24 $target." >&2
       return 1
     fi
-
-    echo "⚠ Сборка b24 не удалась; переустанавливаю зависимости и повторяю сборку." >&2
-    grigdesk_install_b24_dependencies "$root" "$pause" || return 1
+  else
+    if [[ ! -d "$root/b24/node_modules/esbuild" || ! -d "$root/b24/node_modules/postject" ]]; then
+      grigdesk_install_b24_dependencies "$root" "$pause" || return 1
+      ci_ran=1
+    fi
 
     if ! npm --prefix "$root/b24" run build; then
-      echo "✗ Не удалось собрать b24." >&2
-      return 1
+      if (( ci_ran )); then
+        echo "✗ Не удалось собрать b24." >&2
+        return 1
+      fi
+
+      echo "⚠ Сборка b24 не удалась; переустанавливаю зависимости и повторяю сборку." >&2
+      grigdesk_install_b24_dependencies "$root" "$pause" || return 1
+
+      if ! npm --prefix "$root/b24" run build; then
+        echo "✗ Не удалось собрать b24." >&2
+        return 1
+      fi
     fi
+
   fi
 
   if [[ ! -f "$target" || ! -x "$target" ]]; then

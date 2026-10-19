@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { build } from 'esbuild';
 
 import { decodeDeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
-import { readPinnedNodeRuntime, SEA_FUSE } from '../../shared/node/binaryBuild.ts';
+import { readNodeRuntime, SEA_FUSE } from '../../shared/node/nodeRuntime.ts';
 import { downloadFile } from '../../shared/node/seaBuild.ts';
 
 import { prepareBinaryPayload } from './buildPayload.mts';
@@ -49,7 +49,7 @@ async function bundle(work: string): Promise<void> {
  */
 export async function buildDeepSeekBinary(options: BinaryBuildOptions) {
   const manifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
-  const runtime = readPinnedNodeRuntime(JSON.parse(await readFile(
+  const runtime = readNodeRuntime(JSON.parse(await readFile(
     path.join(packageDir, 'build/node-runtime.json'), 'utf8',
   )), 'deepseek/build/node-runtime.json');
 

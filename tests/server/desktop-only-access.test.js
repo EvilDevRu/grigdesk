@@ -23,9 +23,8 @@ const DENIED_TITLE = 'GrigDesk открывается в приложении';
 const legacyCookie = 'grigdesk_sid=legacy-session-marker';
 
 /**
- * Настоящие auth и static плагины работают на собственной сборке интерфейса.
- * Маркеры документа, ассета и снимка уникальны: их отсутствие в отказе доказывает,
- * что приложение действительно не отдано.
+ * Старый каталог интерфейса намеренно оставлен рядом с настоящими auth/static.
+ * Его маркеры не должны появляться ни при каких учётных данных; снимки остаются закрыты.
  */
 async function accessFixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-desktop-only-'));
@@ -56,7 +55,7 @@ async function accessFixture(t) {
     internalToken: 'test-internal-token',
   });
   await app.register(authModule, { authStore, windowAuth: { origin, key: windowKey } });
-  await app.register(staticPlugin, { webDist, stateDir });
+  await app.register(staticPlugin, { stateDir });
   app.get('/api/private', async (request) => ({ authKind: request.authKind }));
   app.post('/api/private', async (request) => ({ authKind: request.authKind }));
   await app.register(async (scope) => {
@@ -128,59 +127,57 @@ function upgradeRequest(url, headers = {}) {
   });
 }
 
-test('DO-01: анонимный браузер не получает оболочку, ассеты и снимки', async (t) => {
+test('DO-01: UI и ассеты отсутствуют, снимки и API требуют входа', async (t) => {
   const fixture = await accessFixture(t);
-  const rows = [
+  const absent = [
     ['GET', '/'],
     ['HEAD', '/'],
     ['GET', '/index.html'],
     ['GET', '/chats'],
     ['GET', '/assets/app-fixture.js'],
     ['HEAD', '/assets/app-fixture.js'],
-    ['GET', '/shots/t1-fixture.png'],
-    ['GET', '/api/private'],
-    ['GET', '/api/ext/demo/web/'],
-    ['GET', '/%61pi/private'],
   ];
 
-  for (const [method, url] of rows) {
-    for (const [label, headers] of [['без сессии', {}], ['со старой cookie', { cookie: legacyCookie }]]) {
-      const denied = await fixture.app.inject({
+  for (const [method, url] of absent) {
+    for (const headers of [{}, { cookie: legacyCookie }, { cookie: fixture.sessionCookie }]) {
+      const response = await fixture.app.inject({
         method,
         url,
         headers,
       });
-      const place = `${method} ${url} ${label}`;
+      const place = `${method} ${url}`;
 
-      assert.equal(denied.statusCode, 401, place);
-      assert.equal(denied.payload.includes(SHELL_MARKER), false, place);
-      assert.equal(denied.payload.includes(ASSET_MARKER), false, place);
-      assert.equal(denied.payload.includes(SHOT_MARKER), false, place);
-      assert.equal(denied.headers['cache-control'], 'no-store', place);
+      assert.equal(response.statusCode, 404, place);
+      assert.equal(response.payload.includes(SHELL_MARKER), false, place);
+      assert.equal(response.payload.includes(ASSET_MARKER), false, place);
+      assert.equal(response.headers['cache-control'], 'no-store', place);
+    }
+  }
+
+  for (const url of ['/shots/t1-fixture.png', '/api/private', '/api/ext/demo/web/', '/%61pi/private']) {
+    for (const headers of [{}, { cookie: legacyCookie }]) {
+      const response = await fixture.app.inject({
+        url,
+        headers,
+      });
+
+      assert.equal(response.statusCode, 401, url);
+      assert.equal(response.payload.includes(SHELL_MARKER), false, url);
+      assert.equal(response.payload.includes(ASSET_MARKER), false, url);
+      assert.equal(response.payload.includes(SHOT_MARKER), false, url);
+      assert.equal(response.headers['cache-control'], 'no-store', url);
     }
 
     const allowed = await fixture.app.inject({
-      method,
       url,
       headers: { cookie: fixture.sessionCookie },
     });
 
-    assert.equal(allowed.statusCode, 200, `${method} ${url} с сессией`);
+    assert.equal(allowed.statusCode, 200, url);
   }
-
-  assert.equal((await fixture.app.inject({
-    method: 'GET',
-    url: '/assets/app-fixture.js',
-    headers: { cookie: fixture.sessionCookie },
-  })).payload.includes(ASSET_MARKER), true);
-  assert.equal((await fixture.app.inject({
-    method: 'GET',
-    url: '/',
-    headers: { cookie: fixture.sessionCookie },
-  })).payload.includes(SHELL_MARKER), true);
 });
 
-test('DO-02: анонимная навигация получает короткий HTML, ассет — JSON', async (t) => {
+test('DO-02: навигация получает публичную инструкцию, ассет — JSON404', async (t) => {
   const fixture = await accessFixture(t);
   const navigation = await fixture.app.inject({
     method: 'GET',
@@ -188,7 +185,7 @@ test('DO-02: анонимная навигация получает коротк
     headers: { accept: 'text/html,application/xhtml+xml' },
   });
 
-  assert.equal(navigation.statusCode, 401);
+  assert.equal(navigation.statusCode, 200);
   assert.match(navigation.headers['content-type'], /text\/html/u);
   assert.equal(navigation.payload.includes(DENIED_TITLE), true);
   assert.equal(navigation.payload.includes('<script'), false);
@@ -203,12 +200,9 @@ test('DO-02: анонимная навигация получает коротк
     headers: { accept: '*/*' },
   });
 
-  assert.equal(asset.statusCode, 401);
+  assert.equal(asset.statusCode, 404);
   assert.match(asset.headers['content-type'], /application\/json/u);
-  assert.deepEqual(asset.json(), {
-    error: 'unauthorized',
-    message: 'Требуется вход в GrigDesk.',
-  });
+  assert.deepEqual(asset.json(), { error: 'not_found' });
 
   const electron = await fixture.app.inject({
     method: 'GET',
@@ -219,7 +213,8 @@ test('DO-02: анонимная навигация получает коротк
     },
   });
 
-  assert.equal(electron.statusCode, 401);
+  assert.equal(electron.statusCode, 200);
+  assert.equal(electron.payload, navigation.payload);
 });
 
 test('DO-03: неизвестные API и POST не отдают SPA ни с сессией, ни без', async (t) => {
@@ -304,7 +299,7 @@ test('DO-05: SSE защищённого маршрута закрыт без с�
   allowed.destroy();
 });
 
-test('DO-06: CLI и internal-токен открывают то же, что сессия', async (t) => {
+test('DO-06: CLI/internal открывают API и снимки, UI остаётся отсутствующим', async (t) => {
   const fixture = await accessFixture(t);
 
   const tokens = [
@@ -313,7 +308,7 @@ test('DO-06: CLI и internal-токен открывают то же, что с�
   ];
 
   for (const token of tokens) {
-    for (const [method, url] of [['GET', '/'], ['GET', '/assets/app-fixture.js'], ['GET', '/api/private'],
+    for (const [method, url] of [['GET', '/shots/t1-fixture.png'], ['GET', '/api/private'],
       ['GET', '/%61pi/private']]) {
       const response = await fixture.app.inject({
         method,
@@ -322,6 +317,17 @@ test('DO-06: CLI и internal-токен открывают то же, что с�
       });
 
       assert.equal(response.statusCode, 200, `${method} ${url} ${JSON.stringify(token)}`);
+    }
+
+    for (const url of ['/', '/assets/app-fixture.js']) {
+      const response = await fixture.app.inject({
+        url,
+        headers: token,
+      });
+
+      assert.equal(response.statusCode, 404, url);
+      assert.equal(response.payload.includes(SHELL_MARKER), false, url);
+      assert.equal(response.payload.includes(ASSET_MARKER), false, url);
     }
   }
 
@@ -332,11 +338,11 @@ test('DO-06: CLI и internal-токен открывают то же, что с�
   })).json().authKind, 'cli');
 });
 
-test('DO-07: снятие cookie снова закрывает статику, а 304 не подтверждает вход', async (t) => {
+test('DO-07: снятие cookie закрывает снимки, условный запрос не даёт304', async (t) => {
   const fixture = await accessFixture(t);
   const first = await fixture.app.inject({
     method: 'GET',
-    url: '/assets/app-fixture.js',
+    url: '/shots/t1-fixture.png',
     headers: { cookie: fixture.sessionCookie },
   });
   const etag = first.headers.etag;
@@ -345,23 +351,23 @@ test('DO-07: снятие cookie снова закрывает статику, �
 
   const conditional = await fixture.app.inject({
     method: 'GET',
-    url: '/assets/app-fixture.js',
+    url: '/shots/t1-fixture.png',
     headers: { 'if-none-match': String(etag) },
   });
 
   assert.equal(conditional.statusCode, 401);
-  assert.equal(conditional.payload.includes(ASSET_MARKER), false);
+  assert.equal(conditional.payload.includes(SHOT_MARKER), false);
 
   fixture.authStore.sessions.clear();
 
   const revoked = await fixture.app.inject({
     method: 'GET',
-    url: '/',
+    url: '/shots/t1-fixture.png',
     headers: { cookie: fixture.sessionCookie },
   });
 
   assert.equal(revoked.statusCode, 401);
-  assert.equal(revoked.payload.includes(SHELL_MARKER), false);
+  assert.equal(revoked.payload.includes(SHOT_MARKER), false);
 });
 
 test('DO-08: нечитаемая cookie даёт 401, а не 500', async (t) => {
@@ -394,7 +400,7 @@ test('DO-09: подписанный GitHub-хук доходит до своей
 test('DO-10: браузерный fetch с Sec-Fetch-Dest: empty получает JSON 401', async (t) => {
   const fixture = await accessFixture(t);
 
-  for (const url of ['/api/private', '/assets/app-fixture.js']) {
+  for (const url of ['/api/private', '/shots/t1-fixture.png']) {
     const response = await fixture.app.inject({
       method: 'GET',
       url,

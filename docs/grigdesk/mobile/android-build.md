@@ -23,33 +23,22 @@ tools/mobile build
 `GRIGDESK_ANDROID_USER_HOME`, `GRIGDESK_ANDROID_GRADLE_HOME`, `GRIGDESK_MOBILE_DOWNLOADS`.
 Конкретные пути машины относятся к локальной документации.
 
-`check` запускает мобильные unit/UI/contract тесты под memory guard, typecheck и app-scoped
-Gradle unit/lint. `build` собирает интерфейс для native bridge, делает cap sync из `mobile/`
-и создаёт `<папка данных>/state/mobile-apk/grigdesk-mobile-debug.apk`. Android-сборка не входит в общий
+`check` запускает прежние мобильные unit/UI/contract тесты под memory guard, typecheck и
+подготовку прежнего :app (mobile build и cap sync), Gradle unit/lint обоих модулей. `build` собирает общий web атомарно через
+`tools/client-ui.mts` в client/src/main/assets/ui с api-version.json и release.json, затем
+:client:assembleDebug. Результат — grigdesk-mobile-debug.apk в GRIGDESK_MOBILE_APK_DIR.
+В build/release Capacitor sync и web/dist не участвуют; старый :app остаётся только в проверках. Android-сборка не входит в общий
 `tests/run-all.sh` и не перезапускает рабочий GrigDesk.
 
 ## Подписанный выпуск
 
-Первый `tools/mobile release` создаёт ключ только после решения владельца.
-По умолчанию каталог — `~/.config/grigdesk/android-signing/` с правами 0700:
-`release.jks` и `release.properties` с правами 0600. Перенесённый каталог задаётся
-`GRIGDESK_ANDROID_SIGNING_DIR` и также обязан быть вне репозитория. Частично существующее
-хранилище закрывает выпуск, а не создаёт новый ключ поверх прежнего.
+`tools/mobile release` собирает :client:assembleRelease с уже существующим ключом из
+GRIGDESK_ANDROID_STORE_FILE, GRIGDESK_ANDROID_STORE_PASSWORD, GRIGDESK_ANDROID_KEY_PASSWORD,
+GRIGDESK_ANDROID_KEY_ALIAS. Новый ключ автоматически не создаётся. Подпись APK сверяется с
+этим ключом через apksigner/keytool, пакет и версия — через aapt2 и mobile/package.json.
+До первого выпуска версия остаётся 0.1.0, versionCode 100.
 
-Ключ RSA 3072/alias grigdesk и случайный пароль нужно сохранить в отдельной защищённой
-резервной копии. Потеря подписи исключает обновление установленного приложения поверх
-прежнего: потребуется переустановка и новая привязка. Debug и release подписаны разными
-ключами и не являются взаимозаменяемыми обновлениями.
-
-Версия берётся из `mobile/package.json`, versionCode — `major*10000+minor*100+patch`;
-minor/patch ограничены 99. Новый выпуск должен иметь больший versionCode и прежнюю подпись.
-Сборка, apksigner verify, сверка packageId/versionCode/сертификата проходят до публикации.
-Ошибка сохраняет предыдущий опубликованный APK.
-
-Готовые файлы — `<папка данных>/state/mobile-apk/grigdesk-mobile.apk` и `grigdesk-mobile.json` с
-`version`, `versionCode`, `size`, `sha256`, `builtAt`. APK публикуется атомарно, JSON последним.
-`GRIGDESK_MOBILE_APK_DIR` переопределяет каталог. Сборка и выпуск заранее проверяют,
-закончен ли перенос данных; ключ подписи и Android SDK остаются снаружи.
-Сервер сверяет fixed файл через no-follow FD; конкурентная замена даёт согласованный hash
-либо явный `apk_mismatch`. Телефон проверяет размер/hash до FileProvider-установщика;
-системное разрешение установки из этого источника выдаёт человек на устройстве.
+Готовые grigdesk-mobile-release.apk и grigdesk-mobile-release.json остаются в каталоге
+сборки GRIGDESK_MOBILE_APK_DIR. Публикации, установки на устройство и раздачи обновления
+с сервером эта команда не выполняет. APK legacy-приложения и его протокол обновлений
+остаются отдельными. Прежний пакет того же applicationId перед установкой удаляет человек.

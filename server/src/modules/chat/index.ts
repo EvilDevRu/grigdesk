@@ -9,7 +9,6 @@ import { promises as fs, createWriteStream, rmSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
@@ -17,6 +16,7 @@ import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
 import { prepareChatNativeSettings } from '../../lib/executorSettings/launch.ts';
 import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
+import { helperCommand } from '../../lib/runtimePaths.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
 import { MobileChatControls } from '../../lib/chat/mobileControls.ts';
 import { resolveRequestedEffort } from '../../lib/modelEffort.ts';
@@ -447,7 +447,6 @@ interface SpeechStreamStart {
   revision: string;
 }
 
-const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
 const SPEECH_STREAM_START_MAX_BYTES = 4 * 1024;
 const SPEECH_STREAM_START_TIMEOUT_MS = 10_000;
 // Слив на остановке: короткое окно закончить ход самому, потом прерывание как «стоп».
@@ -3323,11 +3322,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
     // Разрешения (claude): default-режим, на действия агент спрашивает через
     // наш MCP-инструмент → всплывашка в браузере.
+    const permissionMcp = helperCommand('chat-permission-mcp', []);
     const mcpConfig = {
       mcpServers: {
         'grigdesk-perm': {
-          command: process.execPath,
-          args: [PERM_MCP_PATH],
+          command: permissionMcp.command,
+          args: permissionMcp.args,
           // Сколько CLI готов ждать ответа на вызов инструмента. Без этого он обрывает
           // ожидание своим дефолтом (минуты) — и вопрос «висел» бы только у нас на экране,
           // а агент уже пошёл дальше. Дублируется переменной MCP_TOOL_TIMEOUT ниже.
@@ -3544,6 +3544,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       const runArgs: ExecutorTurnOptions = {
+        // Это поколение аккаунта процесса: callback работает после хода и в простое.
+        // Сверка activeRuns здесь отвергла бы события живой сессии следующего хода.
+        onProviderUsage: fastify.providerUsageSink?.(executor.id),
         config,
         chatKey,
         signal: ac.signal,
@@ -4148,12 +4151,36 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
         return channel.settled();
       }
+      // Ошибка сохраняет тот же последний замер, что и остановка: он нужен после F5.
+      // Поля ошибки уточняют прогресс, отсутствие поля не стирает уже полученное.
+      const errorCache = normalizeContextCache(err.contextCache) || runRec.contextCache;
+      const errorContext = {
+        ...normalizeContextUsage(runRec),
+        ...normalizeContextUsage(err),
+        ...(errorCache ? { contextCache: errorCache } : {}),
+      };
+
+      if (chatKey && !summaryWorkspace && !err.sessionReset && Object.keys(errorContext).length > 0) {
+        try {
+          await history.patchExecution(chatKey, () => ({
+            executionRunId: runId,
+            ...errorContext,
+          }));
+        } catch (historyError) {
+          fastify.log.warn({
+            err: (historyError as Error)?.message,
+            chatKey,
+          }, 'чат: не удалось сохранить контекст после ошибки хода');
+        }
+      }
+
       if (channel.detached() && chatKey) {
         // Лента упавшего хода едет вместе с ошибкой: по ней видно, докуда агент дошёл,
         // а окно, не видевшее хода живьём (F5, второе устройство), иначе её не получит.
         await channel.park({
           chatKey,
           role: 'error',
+          ...errorContext,
           reply: err.message,
           ...orphanUser,
           steps: summarySteps ? [...summarySteps] : [...runRec.steps],
@@ -4166,6 +4193,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       }
 
       return channel.refuse(500, {
+        ...errorContext,
         runId,
         error: err.code || 'chat_failed',
         message: err.message,

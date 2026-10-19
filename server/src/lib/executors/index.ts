@@ -36,6 +36,9 @@
 //                              показывает значение текстом. `scope: 'live'` — операция
 //                              над рантаймом (выгрузить модель, использовать сброс
 //                              лимита): такую ручку видно и во всплывашке
+//   onProviderUsage?         — callback opts разового запуска и hooks живого процесса:
+//                              (patch: ProviderUsagePatch) => boolean. Живёт вместе с
+//                              процессом, работает между ходами; не привязан к runId.
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
 //   studio3d?                — исполнитель раздела «3D» (тип 3d): действия, цены,
 //                              заказы; см. lib/studio3d/provider.ts
@@ -164,11 +167,10 @@
 // для поэтапного подключения нового CLI: сначала обычная установка/авторизация, затем
 // отдельным изменением transport и модели.
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
+import path from 'node:path';
+
 import type { WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
 import type { WorkdirValidator } from '../chat/workdir.ts';
-import { readdirSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { GrigDeskConfig } from '../../config.ts';
 import type {
@@ -178,6 +180,7 @@ import type {
   InTurnReceiptEvent,
   InTurnUnavailableReason,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
+import type { ProviderUsagePatch } from '../providerUsage.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import type {
@@ -193,6 +196,7 @@ import type {
 import type { Studio3dProvider } from '../studio3d/provider.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
+import { executorLoaders } from './registryTable.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 
 // Ответ проверки установки: найден ли бинарь и какую версию он назвал сам.
@@ -234,6 +238,7 @@ export interface ExecutorRunInput {
   preparedRuntime?: PreparedExecutorRuntime;
   nativeSettingsFingerprint?: string;
   env?: NodeJS.ProcessEnv;
+  onProviderUsage?: (patch: ProviderUsagePatch) => boolean;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onStep?: (step: ChatStep) => void;
   onSessionCreated?: (sessionId: string) => void | Promise<void>;
@@ -374,13 +379,6 @@ export interface ExecutorAdapter {
   [field: string]: unknown;
 }
 
-const DIR = path.dirname(fileURLToPath(import.meta.url));
-
-// Один файл = один ИИ, и язык файла на это не влияет: сервер исполняет TypeScript
-// снятием типов. Пока список знал только .js, перевод исполнителя молча убирал бы
-// его из реестра — с зелёными типами и пустым выбором модели в чате.
-const ADAPTER_EXTENSIONS = ['.js', '.ts'];
-
 /**
  * Provider-neutral рабочие инструменты замкнуты на server-owned scope. Никакое
  * поле аргументов модели не способно назначить проект, чат или живую сессию.
@@ -416,21 +414,19 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
   if (loadedAdapters) return loadedAdapters;
   const map = new Map<string, ExecutorAdapter>();
   const seenNames = new Set<string>();
-  for (const f of readdirSync(DIR).sort()) {
-    // Файлы на `_` — вспомогательные модули исполнителей (каталоги моделей и т.п.), не ИИ.
-    const extension = ADAPTER_EXTENSIONS.find((suffix) => f.endsWith(suffix));
-    if (!extension || f.startsWith('_')) continue;
-    // Один ИИ — один файл. Переименование в TypeScript оставляет прежний .js на
-    // диске незамеченным, и тогда карточка подключилась бы дважды, из разных версий.
-    const name = f.slice(0, -extension.length);
-    // Сам загрузчик исполнителем не является — независимо от расширения файла.
-    if (name === 'index') continue;
-    if (seenNames.has(name)) {
-      throw new Error(`Исполнитель ${name} объявлен дважды: убери лишний файл в ${DIR}`);
+
+  for (const loader of executorLoaders()) {
+    // Таблица исходников проверяет дубли имён; собранная проверяет это в генераторе.
+    // Повторная сверка здесь не даёт незамеченной паре .js/.ts из ручной правки.
+    if (seenNames.has(loader.name)) {
+      throw new Error(`Исполнитель ${loader.name} объявлен дважды: убери лишний файл в `
+        + path.dirname(loader.file));
     }
-    seenNames.add(name);
-    const mod = await import(pathToFileURL(path.join(DIR, f)).href);
-    const adapter = mod.default;
+
+    seenNames.add(loader.name);
+
+    const mod = await loader.load();
+    const adapter = mod.default as ExecutorAdapter | undefined;
     if (adapter?.id && typeof adapter.probe === 'function' && typeof adapter.auth === 'function') {
       map.set(adapter.id, adapter);
     }

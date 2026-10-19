@@ -55,7 +55,7 @@ function windowKeyMatches(provided: unknown, key: string): boolean {
 async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Promise<void> {
   const { authStore } = opts;
 
-  fastify.post('/api/auth/window-session', {
+  fastify.post<{ Querystring: { short?: string } }>('/api/auth/window-session', {
     logLevel: 'silent',
     onRequest: async (_request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -82,7 +82,7 @@ async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Pr
       return reply.code(401).send({ error: 'bad_window_key' });
     }
 
-    const session = authStore.createSession();
+    const session = authStore.createSession(request.query.short === '1' ? { ttlMs: 600000 } : {});
 
     return reply.header('Set-Cookie', sessionCookie(session.id, {
       maxAgeSec: session.maxAgeSec,
@@ -98,6 +98,16 @@ async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Pr
       reply.header('Cache-Control', 'no-store');
     },
   }, async (request) => {
+    if (request.authPrincipal?.kind === 'device') {
+      return {
+        authenticated: true,
+        method: 'device',
+        configured: true,
+        secure: isSecureRequest(request),
+        clientScope: authStore.clientScope,
+      };
+    }
+
     const sid = readCookie(request.headers.cookie, SESSION_COOKIE);
     const authenticated = authStore.isValidSession(sid);
 

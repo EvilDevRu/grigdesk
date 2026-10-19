@@ -1,8 +1,7 @@
-import { readdir } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { DbEngineLoader } from './engineDirectory.ts';
+import { loadersFromDirectory } from './engineDirectory.ts';
+import { dbEngineLoaders } from './engineTable.ts';
 
-const DEFAULT_DIR = fileURLToPath(new URL('./engines/', import.meta.url));
 const REQUIRED = [
   'open', 'close', 'schema', 'analyze',
   'inspectRights', 'estimate', 'execute', 'cancel',
@@ -17,25 +16,40 @@ export interface DbEngineAdapter {
   [method: string]: unknown;
 }
 
-/** Реестр загружает self-describing адаптеры; ядро не знает ни одного имени СУБД. */
-export async function createEngineRegistry({ dir = DEFAULT_DIR }: { dir?: string } = {}) {
+export interface EngineRegistryOptions {
+  dir?: string | null;
+  loaders?: readonly DbEngineLoader[] | null;
+}
+
+/**
+ * Реестр загружает self-describing адаптеры; ядро не знает ни одного имени СУБД.
+ *
+ * По умолчанию используется таблица своего режима: в исходниках — обход каталога,
+ * в SEA — сгенерированные литеральные импорты. Явный dir сохраняет контракт тестов
+ * и временных каталогов, loaders — проверки сгенерированной таблицы.
+ */
+export async function createEngineRegistry({
+  dir = null,
+  loaders = null,
+}: EngineRegistryOptions = {}) {
   const engines = new Map<string, DbEngineAdapter>();
-  // Адаптеры лежат рядом файлами, и расширение у них теперь TypeScript. Оставить
-  // здесь только .js значило бы тихо потерять все движки: реестр не находит их —
-  // и раздел уверенно показывает пустой список вместо отказа.
-  const names = (await readdir(dir)).filter((name) => /\.(?:m?[jt]s)$/u.test(name)).sort();
-  for (const name of names) {
-    const module = await import(pathToFileURL(path.join(dir, name)).href) as {
+  const resolved = loaders ?? (dir ? await loadersFromDirectory(dir) : await dbEngineLoaders());
+
+  for (const loader of resolved) {
+    const module = await loader.load() as {
       default?: DbEngineAdapter;
     };
     const engine = module.default;
+
     if (!engine?.id || !engine?.label || !engine?.capabilities
       || REQUIRED.some((method) => typeof engine[method] !== 'function')) {
-      throw new Error(`Движок ${name} не соответствует DB SPI`);
+      throw new Error(`Движок ${loader.name} не соответствует DB SPI`);
     }
+
     if (engines.has(engine.id)) {
       throw new Error(`Движок DB с id ${engine.id} зарегистрирован дважды`);
     }
+
     engines.set(engine.id, engine);
   }
 

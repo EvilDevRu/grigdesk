@@ -9,8 +9,6 @@
 set -euo pipefail
 
 GRIGDESK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE_BIN="$(command -v node)"
-NODE_DIR="$(dirname "$NODE_BIN")"   # в PATH сервиса: nvm-каталог node виден только так
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="grigdesk-server.service"
 
@@ -26,6 +24,8 @@ fi
 # .env разбирает Node: его содержимое не исполняется shell'ом.
 source "$GRIGDESK_DIR/deploy/lib/runtime-env.sh"
 grigdesk_require_migrated "$GRIGDESK_DIR"
+NODE_BIN="${_grigdesk_packaged_node:-$(command -v node)}"
+NODE_DIR="$(dirname "$NODE_BIN")"
 DATA_HOME=$(grigdesk_data_home) || exit 1
 ENV_FILE=$(grigdesk_env_file) || exit 1
 HOME_ENV=
@@ -57,10 +57,24 @@ grigdesk_load_runtime_env "$GRIGDESK_DIR" || exit $?
 # Обновляет только описание службы. Смена запуска и установка зависимостей — отдельные шаги.
 # Один шаблон используется обычной установкой и --unit-only после переноса данных.
 install_unit() {
+  local -a packaged_options=()
+
+  if [[ -f "$GRIGDESK_DIR/release.json" ]]; then
+    packaged_options=(
+      -e "s#^ExecStart=.*#ExecStart=\"$GRIGDESK_DIR/server/grigdesk-server\"#"
+      -e "s#^ExecStartPre=.*#ExecStartPre=\"$GRIGDESK_DIR/deploy/require-vpn.sh\"#"
+      -e "s#^WorkingDirectory=.*#WorkingDirectory=\"$GRIGDESK_DIR/server\"#"
+      -e "s#^Environment=PATH=.*#Environment=\"PATH=$PATH\"#"
+      -e '/^Environment=NODE_ENV=production/a UnsetEnvironment=NODE_OPTIONS'
+      -e '/^Environment=NODE_ENV=production/a Environment=PYTHONDONTWRITEBYTECODE=1'
+    )
+  fi
+
   mkdir -p "$UNIT_DIR"
   sed -e "s#__NODE__#$NODE_BIN#g" -e "s#__NODE_DIR__#$NODE_DIR#g" \
     -e "s#__GRIGDESK_DIR__#$GRIGDESK_DIR#g" -e "s#__ENV_FILE__#$ENV_FILE#g" \
     -e "s#__HOME_ENV__#$HOME_ENV#g" -e "s#__ENV_FILE_ENV__#$ENV_FILE_ENV#g" \
+    "${packaged_options[@]}" \
     "$GRIGDESK_DIR/deploy/$UNIT" > "$UNIT_DIR/$UNIT"
 }
 
@@ -85,21 +99,25 @@ case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.lo
 
 ( umask 077; mkdir -p "$DATA_HOME"; chmod 700 "$DATA_HOME" )
 source "$GRIGDESK_DIR/deploy/lib/media-runtime.sh"
-grigdesk_install_media "$GRIGDESK_DIR" ${INSTALL_PASSTHRU[@]+"${INSTALL_PASSTHRU[@]}"}
-grigdesk_load_runtime_env "$GRIGDESK_DIR"
+if [[ ! -f "$GRIGDESK_DIR/release.json" ]]; then
+  grigdesk_install_media "$GRIGDESK_DIR" ${INSTALL_PASSTHRU[@]+"${INSTALL_PASSTHRU[@]}"}
+  grigdesk_load_runtime_env "$GRIGDESK_DIR"
+fi
 PORT="$GRIGDESK_EFFECTIVE_PORT"
 
 echo "→ GrigDesk: $GRIGDESK_DIR"
-echo "→ node:   $NODE_BIN ($(node -v))"
+echo "→ node:   $NODE_BIN ("$("$NODE_BIN" -v)")"
 
-echo "→ Зависимости сервера…"
-( cd "$GRIGDESK_DIR/server" && npm install --no-audit --no-fund )
-# DeepSeek — один из исполнителей: без компилятора или сети установка GrigDesk продолжается.
-( cd "$GRIGDESK_DIR/server" && npm run deepseek:prepare ) || \
-  echo "⚠ DeepSeek не подготовлен; повтор после установки: bin/grigdesk-ctl deps" >&2
+if [[ ! -f "$GRIGDESK_DIR/release.json" ]]; then
+  echo "→ Зависимости сервера…"
+  ( cd "$GRIGDESK_DIR/server" && npm install --no-audit --no-fund )
+  # DeepSeek — один из исполнителей: без компилятора или сети установка GrigDesk продолжается.
+  ( cd "$GRIGDESK_DIR/server" && npm run deepseek:prepare ) || \
+    echo "⚠ DeepSeek не подготовлен; повтор после установки: bin/grigdesk-ctl deps" >&2
 
-echo "→ Зависимости web + сборка…"
-( cd "$GRIGDESK_DIR/web" && npm install --no-audit --no-fund && npm run build )
+  echo "→ Зависимости web + сборка…"
+  ( cd "$GRIGDESK_DIR/web" && npm install --no-audit --no-fund && npm run build )
+fi
 
 echo "→ systemd user-юнит…"
 install_unit
@@ -114,7 +132,7 @@ grigdesk_link_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || true
 grigdesk_answers_on_port() {
   local answer
 
-  answer="$(node -e '
+  answer="$("$NODE_BIN" -e '
     fetch(process.argv[1], { redirect: "error", signal: AbortSignal.timeout(2000) })
       .then((response) => (response.status === 200 ? response.json() : null))
       .then((state) => {

@@ -11,6 +11,8 @@
 import os from 'node:os';
 import { dataHome, dataPath } from '../../../../shared/runtime/dataHome.ts';
 import { spawn } from 'node:child_process';
+
+import { helperCommand } from '../runtimePaths.ts';
 import { randomUUID } from 'node:crypto';
 import {
     existsSync, mkdirSync, statSync, rmSync, readdirSync, writeFileSync, readFileSync,
@@ -632,7 +634,7 @@ export function startIngestJob(
         transcribePath = DEFAULT_TRANSCRIBE_PY,
         mediaHfDir = DEFAULT_MEDIA_HF_DIR,
         baseEnv = process.env,
-        workerPath = DEFAULT_WORKER_PATH,
+        workerPath = null,
     } = opts;
     if (!existsSync(filePath)) {
         throw new Error(`Файл не найден: ${filePath}`);
@@ -675,7 +677,12 @@ export function startIngestJob(
     if (pythonPath) childEnv.GRIGDESK_MEDIA_PYTHON = pythonPath;
     childEnv.GRIGDESK_TRANSCRIBE_PY = transcribePath || DEFAULT_TRANSCRIBE_PY;
     childEnv.GRIGDESK_MEDIA_HF_DIR = mediaHfDir;
-    const child = (deps.spawn || spawn)(process.execPath, [workerPath, statusPath], {
+
+    const worker = workerPath
+        ? { command: process.execPath, args: [workerPath, statusPath] }
+        : helperCommand('media-ingest-worker', [statusPath]);
+
+    const child = (deps.spawn || spawn)(worker.command, worker.args, {
         detached: true,
         stdio: 'ignore',
         env: childEnv,

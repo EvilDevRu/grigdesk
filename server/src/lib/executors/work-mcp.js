@@ -1,6 +1,7 @@
 import { createConnection } from 'node:net';
 import { createInterface } from 'node:readline';
-import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function toolDeclaration(descriptor) {
   return {
@@ -116,8 +117,22 @@ async function runCli() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await runCli();
+/**
+ * Точка входа собранного helper-а: обслуживает MCP поверх stdio.
+ * Параметры сокета и nonce остаются в argv, как у прямого запуска исходника.
+ */
+export async function main() {
+  return runCli();
+}
+
+// Kimi contained монтирует только этот файл, без соседних модулей.
+// Маркер собранного entry исключает повторный вызов main после esbuild.
+if (!globalThis.__grigdeskHelperEntry && process.argv[1]
+    && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
 }
 
 export default createWorkMcpHandler;

@@ -22,11 +22,18 @@ const { mount, flushPromises } = await import(
  * App получает независимые подмены областей, чтобы видеть запуск каждого polling.
  * Подмена режима меняется после mount и проверяет однократный выбор оболочки.
  */
-async function fixture(t, mode, authenticated) {
+async function fixture(t, mode, authenticated, present = false) {
   const h = {
     mode,
     calls: [],
     auth: reactive({ ready: true, authenticated }),
+    shell: reactive({
+      initialized: true,
+      present,
+      status: 'none',
+      start: async (options) => h.startOptions = options,
+      stop: () => {},
+    }),
   };
 
   h.auth.load = async () => h.calls.push('auth.load');
@@ -48,11 +55,16 @@ async function fixture(t, mode, authenticated) {
       return () => h('div', { 'data-app': '${name}' }, slots.default?.());
     }};`;
   const stubs = {
+    './stores/settings.ts': `export const useSettingsStore = () => ({
+      isOpen: false, setAuthenticated() {}, dispose() {},
+    });`,
+    './views/settings/SettingsModal.vue': 'export default { render: () => null };',
     './shared/desktopSettings.ts': 'export const currentDesktopMode = () => globalThis.__settingsApp.mode;',
-    './shared/layout/SettingsWindowShell.vue': marker('settings'),
     './shared/layout/AppShell.vue': marker('main'),
     './views/LoginView.vue': marker('login'),
     './views/NoAccessView.vue': marker('noaccess'),
+    './views/ConnectionsView.vue': marker('machines'),
+    './shared/layout/LockOverlay.vue': marker('lock'),
     './features/speech/provider.js': `import { h } from 'vue';
       export const SpeechProvider = {
         setup(_props, { slots }) { return () => h('div', slots.default?.()); }
@@ -69,6 +81,7 @@ async function fixture(t, mode, authenticated) {
       export const clearAlertHistory = () => {};
       export const dismissAllAlerts = () => {};`,
     './stores/auth.js': 'export const useAuthStore = () => globalThis.__settingsApp.auth;',
+    './stores/shell.ts': 'export const useShellStore = () => globalThis.__settingsApp.shell;',
   };
 
   for (const [file, name] of [
@@ -91,17 +104,6 @@ async function fixture(t, mode, authenticated) {
 
   return { h, wrapper };
 }
-
-test('SW-U07 App выбирает оболочку один раз', async (t) => {
-  const { h, wrapper } = await fixture(t, 'settings', true);
-
-  assert.equal(wrapper.find('[data-app=settings]').exists(), true);
-  assert.equal(wrapper.find('[data-app=main], [data-app=noaccess], [data-app=version]').exists(), false);
-  assert.deepEqual(h.calls, ['auth.watch', 'auth.load']);
-  h.mode = 'page';
-  await flushPromises();
-  assert.equal(wrapper.find('[data-app=settings]').exists(), true);
-});
 
 for (const mode of ['main', 'page']) {
   test('SW-U07/' + mode + ' прежняя оболочка и polling', async (t) => {

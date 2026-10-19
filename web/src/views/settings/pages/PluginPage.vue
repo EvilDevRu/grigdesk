@@ -1,0 +1,613 @@
+<template>
+  <div
+    class="settings-plugin"
+    :data-plugin-page="plugin?.id"
+    :data-ready="ready"
+  >
+    <p v-if="error" role="alert">{{ error }}</p>
+    <div class="settings-plugin-filters">
+      <UiInput
+        v-model="filters.query"
+        data-plugin-filter
+        type="search"
+        aria-label="Поиск плагинов"
+        placeholder="Найти плагин"
+      />
+      <UiSelect v-model="filters.state" aria-label="Состояние плагинов">
+        <option value="all">Все</option>
+        <option value="enabled">Включены</option>
+        <option value="disabled">Выключены</option>
+      </UiSelect>
+      <UiCheckbox v-model="filters.configurable">С параметрами</UiCheckbox>
+      <UiCheckbox v-model="filters.custom">Только пользовательские</UiCheckbox>
+      <UiButton @click="clearFilters">Сбросить фильтры</UiButton>
+    </div>
+    <section
+      v-for="group in groups"
+      :key="group.id"
+      :data-plugin-category="group.id"
+    >
+      <h4>{{ group.label }}</h4>
+      <p>{{ group.hint }}</p>
+      <div class="settings-plugin-list">
+        <div v-for="entry in group.plugins" :key="entry.id">
+          <UiButton
+            :data-select-plugin="entry.id"
+            :aria-pressed="plugin?.id === entry.id"
+            @click="selectPlugin(entry.id)"
+          >
+            {{ entry.name }} · {{ draftEnabled(entry.id) ? 'Включён' : 'Выключен' }}
+            <span v-if="pluginInstallBadge(entry)">
+              · {{ pluginInstallBadge(entry) === 'restart' ? 'Ждёт перезапуска' : 'Обновление' }}
+            </span>
+          </UiButton>
+          <UiSwitch
+            :model-value="draftEnabled(entry.id)"
+            :disabled="recoveryBlocked"
+            :aria-label="`Включить ${entry.name}`"
+            @update:model-value="toggleEntry(entry, $event)"
+          />
+        </div>
+      </div>
+    </section>
+    <p v-if="!groups.length">Плагины не найдены. Измените запрос или сбросьте фильтры.</p>
+    <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
+    <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
+      {{ installer.job.error?.message }}
+    </p>
+    <div class="settings-plugin-actions">
+      <UiButton :disabled="recoveryBlocked" @click="settings.selectPage('plugins.install')">
+        Установить из git
+      </UiButton>
+      <UiButton
+        v-if="list.some((entry) => entry.install)"
+        :disabled="recoveryBlocked || installer.checking"
+        @click="installer.checkUpdates()"
+      >
+        Проверить обновления
+      </UiButton>
+    </div>
+    <template v-if="plugin && ready">
+      <h4>{{ plugin.name }} · {{ plugin.version }}</h4>
+      <p>{{ plugin.description }}</p>
+      <PluginSourcePanel
+        v-if="!plugin.system"
+        :key="plugin.id"
+        :plugin="plugin"
+        @update="openInstall('update')"
+        @bind="openInstall('install')"
+      />
+      <PluginSetupPanel
+        v-if="baselineEnabled && plugin.setup && setupPlugin"
+        :key="plugin.id"
+        :plugin="setupPlugin"
+        :active="active"
+      />
+      <p>Все устройства · Значения и размещения сохранятся по «Применить».</p>
+      <SettingsField :address="address('enabled')">
+        <UiSwitch
+          :model-value="enabled"
+          :disabled="recoveryBlocked"
+          :aria-label="`Включить ${plugin.name}`"
+          @update:model-value="setEnabled"
+        />
+      </SettingsField>
+      <p v-if="restartPending">Ждёт перезапуска</p>
+      <p v-else-if="plugin.needsRestart">Изменение состояния серверной части потребует перезапуска.</p>
+      <h4 v-if="plugin.placements?.length">Размещение</h4>
+      <SettingsField
+        v-for="slot in plugin.placements ?? []"
+        :key="slot.slot"
+        :address="address('placements', slot.slot)"
+      >
+        <UiCheckbox
+          :model-value="value('placements', slot.slot) === true"
+          @update:model-value="set('placements', slot.slot, $event === true)"
+        >
+          {{ slot.label }} · {{ slot.slot }}
+        </UiCheckbox>
+      </SettingsField>
+      <h4 v-if="plugin.settings.length">Параметры</h4>
+      <SettingsField
+        v-for="field in plugin.settings"
+        :key="field.key"
+        :address="address('values', field.key)"
+      >
+        <UiCheckbox
+          :disabled="fieldUnavailable(field.key)"
+          v-if="field.type === 'checkbox'"
+          :model-value="value('values', field.key) === true"
+          @update:model-value="set('values', field.key, $event === true)"
+        >
+          {{ field.label }}
+        </UiCheckbox>
+        <template v-else-if="field.type === 'providers'">
+          <UiCheckbox
+            :disabled="fieldUnavailable(field.key)"
+            v-for="entry in registry"
+            :key="entry.id"
+            :model-value="providerIds(field.key).includes(entry.id)"
+            @update:model-value="setProvider(field.key, entry.id, $event === true)"
+          >
+            {{ entry.name }}
+          </UiCheckbox>
+          <p v-for="id in missingProviders(field.key)" :key="id">
+            {{ id }} — нет в реестре
+            <UiButton @click="setProvider(field.key, id, false)">Убрать</UiButton>
+          </p>
+          <p>Ни один не отмечен — значит все.</p>
+        </template>
+        <template v-else-if="field.type === 'model'">
+          <UiSelect
+            :disabled="fieldUnavailable(field.key)"
+            :model-value="modelOption(field.key)"
+            :aria-label="field.label"
+            @update:model-value="setModel(field.key, $event)"
+          >
+            <option value="">— не выбрана —</option>
+            <option
+              v-if="lostModel(field)"
+              :value="modelOption(field.key)"
+              disabled
+            >
+              {{ lostModel(field) }}
+            </option>
+            <optgroup
+              v-for="group in modelGroups(field)"
+              :key="group.id"
+              :label="group.name + (group.available ? '' : ' — недоступен')"
+            >
+              <option
+                v-for="entry in group.models"
+                :key="entry.id"
+                :value="modelId(group.id, entry.id)"
+              >
+                {{ entry.name }}
+              </option>
+            </optgroup>
+          </UiSelect>
+          <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
+            <p>Усилие</p>
+            <UiSelect
+              :disabled="fieldUnavailable(field.key)"
+              :model-value="modelValue(field.key)?.effort || ''"
+              aria-label="Усилие"
+              @update:model-value="setEffort(field.key, $event)"
+            >
+              <option value="">По умолчанию исполнителя</option>
+              <option v-if="lostEffort(field.key)" :value="lostEffort(field.key)">
+                {{ lostEffort(field.key) }} — нет у этой модели
+              </option>
+              <option
+                v-for="effort in efforts(field.key)"
+                :key="effort"
+                :value="effort"
+              >
+                {{ effort }}
+              </option>
+            </UiSelect>
+            <p>{{ selectedModel(field.key)?.effortHints?.[modelValue(field.key)?.effort || ''] }}</p>
+          </template>
+        </template>
+        <UiNumberInput
+          :disabled="fieldUnavailable(field.key)"
+          v-else-if="field.type === 'number'"
+          :model-value="numberValue(field.key)"
+          :min="field.min"
+          :max="field.max"
+          :step="field.step ?? 'any'"
+          :aria-label="field.label"
+          @update:model-value="set('values', field.key, $event)"
+        />
+        <UiSelect
+          :disabled="fieldUnavailable(field.key)"
+          v-else-if="field.type === 'select'"
+          :model-value="textValue(field.key)"
+          :aria-label="field.label"
+          @update:model-value="set('values', field.key, String($event))"
+        >
+          <option
+            v-if="!field.options?.includes(textValue(field.key))"
+            :value="textValue(field.key)"
+            disabled
+          >
+            {{ textValue(field.key) }} — нет в списке
+          </option>
+          <option
+            v-for="option in field.options"
+            :key="option"
+            :value="option"
+          >
+            {{ option }}
+          </option>
+        </UiSelect>
+        <UiPasswordInput
+          :disabled="fieldUnavailable(field.key)"
+          v-else-if="['password', 'secret'].includes(field.type ?? '')"
+          :model-value="textValue(field.key)"
+          :aria-label="field.label"
+          autocomplete="new-password"
+          @update:model-value="set('values', field.key, $event)"
+        />
+        <UiInput
+          :disabled="fieldUnavailable(field.key)"
+          v-else
+          :model-value="textValue(field.key)"
+          :aria-label="field.label"
+          @update:model-value="set('values', field.key, $event)"
+        />
+        <UiButton v-if="fieldUnavailable(field.key)" @click="discard(pluginValueKey('values', field.key))">
+          Отменить правку
+        </UiButton>
+      </SettingsField>
+    </template>
+    <p v-else-if="!plugin && settings.entityId">Плагин больше недоступен.</p>
+    <SettingsField
+      v-for="field in unavailable"
+      :key="field.key"
+      :address="field.address"
+    >
+      <UiButton @click="discard(field.key)">Отменить правку</UiButton>
+    </SettingsField>
+    <PluginInstallDialog
+      v-if="installOpen"
+      v-model:open="installOpen"
+      :mode="installMode"
+      :plugin="plugin ?? null"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, reactive, ref, watch, onMounted } from 'vue';
+import {
+  UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton,
+} from '../../../ui.ts';
+import type {
+  PluginListItem, PluginModelValue, PluginSetting,
+} from '../../../../../shared/plugins/pluginsContracts.ts';
+import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
+import { useSettingsStore } from '../../../stores/settings.ts';
+import { pluginCategoryOf, usePluginsStore } from '../../../stores/plugins.js';
+import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';
+import { pluginInstallBadge } from '../../../shared/pluginInstall.ts';
+import { PLUGIN_CATEGORIES } from '../../../../../shared/plugins/pluginsContracts.ts';
+import PluginSourcePanel from '../PluginSourcePanel.vue';
+import PluginInstallDialog from '../PluginInstallDialog.vue';
+import PluginSetupPanel from './PluginSetupPanel.vue';
+import { useProvidersStore } from '../../../stores/providers.js';
+import { createPluginEditor } from '../../../features/settings/pluginEditor.ts';
+import { pluginValueKey, type PluginStorePort } from '../../../features/settings/resources/plugins.ts';
+import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
+import { failureText } from '../../../shared/apiClient.ts';
+import SettingsField from '../SettingsField.vue';
+
+const props = defineProps<{ active: boolean }>();
+const settings = useSettingsStore();
+const plugins = usePluginsStore();
+const installer = usePluginInstallStore();
+const filters = settings.sessionService('plugin-filters', () => reactive({
+  query: '',
+  state: 'all',
+  configurable: false,
+  custom: false,
+}));
+const list = computed(() => plugins.list as PluginListItem[]);
+const visible = computed(() => list.value.filter((entry) => {
+  const needle = filters.query.trim().toLocaleLowerCase('ru');
+  const text = [entry.id, entry.name, entry.description, entry.nav?.label,
+    entry.system ? 'системный' : 'пользовательский'].join(' ').toLocaleLowerCase('ru');
+
+  return (!needle || text.includes(needle))
+    && (filters.state === 'all' || (filters.state === 'enabled') === draftEnabled(entry.id))
+    && (!filters.custom || !entry.system)
+    && (!filters.configurable || entry.settings.length > 0 || Boolean(entry.placements?.length));
+}));
+const groups = computed(() => PLUGIN_CATEGORIES.map((category) => ({
+  ...category,
+  plugins: visible.value.filter((entry) => pluginCategoryOf(entry) === category.id),
+})).filter((group) => group.plugins.length));
+const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
+  || installer.job?.status === 'recovery_required');
+const installOpen = ref(false);
+const installMode = ref<'install' | 'update'>('install');
+const providers = useProvidersStore();
+const registry = computed(() => providers.providers as ProviderEntry[]);
+const plugin = computed(() => (plugins.list as PluginListItem[])
+  .find((entry) => entry.id === settings.entityId));
+const resourceId = computed(() => `pluginSettings:${settings.entityId}`);
+const enabledId = computed(() => `pluginEnabled:${settings.entityId}`);
+const baselineEnabled = computed(() => {
+  settings.snapshot;
+
+  return settings.getBaseline(enabledId.value).enabled === true;
+});
+const setupPlugin = computed(() => plugin.value ? { ...plugin.value, enabled: baselineEnabled.value } : null);
+const enabled = computed(() => {
+  settings.snapshot;
+
+  return settings.getValue(enabledId.value, 'enabled') === true;
+});
+const restartPending = computed(() =>
+  (plugins.restartPending as Record<string, boolean>)[settings.entityId ?? '']);
+const ready = ref(false);
+const error = ref('');
+const unavailable = computed(() => settings.snapshot.resources.find((item) => item.id === resourceId.value)
+  ?.fields.filter((field) => field.dirty && field.unavailable
+    && !plugin.value?.settings.some((item) => pluginValueKey('values', item.key) === field.key)
+    && !plugin.value?.placements?.some((item) =>
+      pluginValueKey('placements', item.slot) === field.key)) ?? []);
+let editor: ReturnType<typeof createPluginEditor> | null = null;
+
+function selectPlugin(id: string): void {
+  settings.selectPage('plugins.installed', id);
+}
+
+function draftEnabled(id: string): boolean {
+  settings.snapshot;
+
+  return settings.getValue(`pluginEnabled:${id}`, 'enabled') === undefined
+    ? list.value.find((entry) => entry.id === id)?.enabled === true
+    : settings.getValue(`pluginEnabled:${id}`, 'enabled') === true;
+}
+
+/**
+ * Тумблер списка ставит намерение в свой ресурс, не меняя действующий plugin gate.
+ * Фильтр состояния сбрасывается, чтобы выбранная строка не исчезла под указателем.
+ */
+async function toggleEntry(entry: PluginListItem, next: boolean): Promise<void> {
+  const service = settings.sessionService(`plugin-editor:${entry.id}`, () =>
+    createPluginEditor(entry.id, settings, plugins as unknown as PluginStorePort));
+
+  const loaded = settings.snapshot.resources.some((resource) =>
+    resource.id === `pluginEnabled:${entry.id}` && resource.loaded);
+
+  if (!loaded) {
+    await service.load();
+  }
+
+  if (!settings.isOpen || settings.snapshot.applying) {
+    return;
+  }
+
+  filters.state = 'all';
+  settings.setField(`pluginEnabled:${entry.id}`, 'enabled', next);
+}
+
+/**
+ * Сброс возвращает список целиком, не затрагивая выбор и параметры плагина.
+ * Значения фильтров хранятся лишь до завершения текущей сессии настроек.
+ */
+function clearFilters(): void {
+  filters.query = '';
+  filters.state = 'all';
+  filters.configurable = false;
+  filters.custom = false;
+}
+
+function openInstall(mode: 'install' | 'update'): void {
+  if (!recoveryBlocked.value) {
+    installMode.value = mode;
+    installOpen.value = true;
+  }
+}
+
+/**
+ * Адреса настроек и размещений не пересекаются при одинаковых непрозрачных ключах.
+ * Значения формы читаются из сессии, без второго локального draft record.
+ */
+function address(section: string, key?: string): FieldAddress {
+  return {
+    pageId: 'plugins.installed',
+    entityId: settings.entityId,
+    fieldPath: key === undefined ? [section] : [section, key],
+  };
+}
+
+function fieldUnavailable(key: string): boolean {
+  return settings.snapshot.resources.find((entry) => entry.id === resourceId.value)?.fields
+    .some((field) => field.key === pluginValueKey('values', key) && Boolean(field.unavailable)) === true;
+}
+
+function value(section: 'values' | 'placements', key: string): JsonValue | undefined {
+  settings.snapshot;
+
+  return settings.getValue(resourceId.value, pluginValueKey(section, key));
+}
+
+function set(section: 'values' | 'placements', key: string, next: JsonValue): void {
+  settings.setField(resourceId.value, pluginValueKey(section, key), next);
+}
+
+function setEnabled(next: boolean): void {
+  settings.setField(enabledId.value, 'enabled', next);
+}
+
+function textValue(key: string): string {
+  return String(value('values', key) ?? '');
+}
+
+function numberValue(key: string): number | '' {
+  const current = value('values', key);
+
+  return typeof current === 'number' ? current : '';
+}
+
+function providerIds(key: string): string[] {
+  const current = value('values', key);
+
+  return Array.isArray(current) ? current.filter((id): id is string => typeof id === 'string') : [];
+}
+
+function missingProviders(key: string): string[] {
+  return providerIds(key).filter((id) => !registry.value.some((entry) => entry.id === id));
+}
+
+function setProvider(key: string, id: string, on: boolean): void {
+  set('values', key, on ? [...providerIds(key).filter((item) => item !== id), id]
+    : providerIds(key).filter((item) => item !== id));
+}
+
+function modelValue(key: string): PluginModelValue | null {
+  const current = value('values', key);
+
+  return current && typeof current === 'object' && !Array.isArray(current)
+    && typeof current.provider === 'string' && typeof current.model === 'string'
+    ? current as unknown as PluginModelValue : null;
+}
+
+function modelId(provider: string, model: string): string {
+  return JSON.stringify({ provider, model });
+}
+
+function modelOption(key: string): string {
+  const current = modelValue(key);
+
+  return current ? modelId(current.provider, current.model) : '';
+}
+
+function selectedModel(key: string) {
+  const current = modelValue(key);
+
+  return registry.value.find((entry) => entry.id === current?.provider)?.models
+    ?.find((entry) => entry.id === current?.model);
+}
+
+function efforts(key: string): string[] {
+  return selectedModel(key)?.efforts ?? [];
+}
+
+function lostEffort(key: string): string {
+  const effort = modelValue(key)?.effort ?? '';
+
+  return effort && !efforts(key).includes(effort) ? effort : '';
+}
+
+function modelGroups(field: PluginSetting) {
+  return registry.value.filter((entry) =>
+    !field.requiresCapability || entry.capabilities?.[field.requiresCapability])
+    .map((entry) => ({ ...entry, models: (providers.visibleModels as (
+      entry: ProviderEntry, selected: string | null,
+    ) => NonNullable<ProviderEntry['models']>)(entry, modelValue(field.key)?.model ?? null) }))
+    .filter((entry) => entry.models.length);
+}
+
+/**
+ * Пропавшая или несовместимая модель остаётся явным option сохранённого выбора.
+ * Временная недоступность исполнителя сама по себе не запрещает выбор модели.
+ */
+function lostModel(field: PluginSetting): string {
+  const current = modelValue(field.key);
+
+  if (!current) {
+    return '';
+  }
+
+  const provider = registry.value.find((entry) => entry.id === current.provider);
+  const model = selectedModel(field.key);
+
+  if (!model) {
+    return `${current.provider}: ${current.model} — нет в реестре`;
+  }
+
+  return field.requiresCapability && !provider?.capabilities?.[field.requiresCapability]
+    ? `${provider?.name}: ${model.name} — не подходит для этой настройки` : '';
+}
+
+/**
+ * Option сопоставляется с исходной парой, без разбора двоеточий внутри model id.
+ * Усилие переносится только если новая модель действительно его объявляет.
+ */
+function setModel(key: string, option: unknown): void {
+  const selected = registry.value.flatMap((entry) => (entry.models ?? []).map((model) => ({ entry, model })))
+    .find(({ entry, model }) => modelId(entry.id, model.id) === option);
+  const effort = modelValue(key)?.effort;
+
+  set('values', key, selected ? {
+    provider: selected.entry.id,
+    model: selected.model.id,
+    ...effort && selected.model.efforts?.includes(effort) ? { effort } : {},
+  } : null);
+}
+
+/**
+ * Пустой выбор удаляет effort, сохраняя целую пару модели.
+ * Отсутствующий уровень не подменяется произвольным значением из нового каталога.
+ */
+function setEffort(key: string, value: unknown): void {
+  const current = modelValue(key);
+
+  if (current) {
+    const { effort: _drop, ...rest } = current;
+
+    set('values', key, { ...rest, ...(value ? { effort: String(value) } : {}) });
+  }
+}
+
+function discard(key: string): void {
+  settings.discardField(resourceId.value, key);
+  editor?.sync();
+}
+
+/**
+ * Ресурсы всех объявленных плагинов регистрируются без чтений отдельных API.
+ * Посещение выбранного плагина загружает baseline один раз для текущего открытия.
+ */
+async function load(): Promise<void> {
+  if (!props.active || !settings.isOpen || settings.pageId !== 'plugins.installed') {
+    return;
+  }
+
+  ready.value = false;
+
+  try {
+    if (!plugins.loaded) {
+      await plugins.load();
+    }
+
+    for (const entry of plugins.list as PluginListItem[]) {
+      settings.sessionService(`plugin-editor:${entry.id}`, () =>
+        createPluginEditor(entry.id, settings, plugins as unknown as PluginStorePort));
+    }
+
+    if (!settings.entityId && plugins.list[0] && !settings.navigationError) {
+      settings.selectPage('plugins.installed', (plugins.list[0] as PluginListItem).id);
+
+      return;
+    }
+    if (plugin.value) {
+      const id = plugin.value.id;
+      const opening = settings.snapshot.sessionId;
+
+      editor = settings.sessionService(`plugin-editor:${plugin.value.id}`, () =>
+        createPluginEditor(plugin.value!.id, settings, plugins as unknown as PluginStorePort));
+      await editor.load();
+
+      if (!providers.loaded && plugin.value.settings.some((field) =>
+        ['model', 'providers'].includes(field.type ?? ''))) {
+        await providers.load();
+      }
+
+      if (settings.isOpen && settings.entityId === id && settings.snapshot.sessionId === opening) {
+        ready.value = true;
+      }
+    }
+  } catch (cause) {
+    error.value = failureText(cause);
+  }
+}
+
+onMounted(() => {
+  void installer.loadJob();
+});
+
+watch([() => props.active, () => settings.pageId, () => settings.entityId, () => settings.snapshot.sessionId],
+  load, { immediate: true });
+</script>
+
+<style scoped>
+.settings-plugin-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.settings-plugin-filters, .settings-plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-plugin { display: grid; gap: 16px; min-width: 0; align-content: start; }
+.settings-plugin p, .settings-plugin h4 { margin: 0; }
+</style>

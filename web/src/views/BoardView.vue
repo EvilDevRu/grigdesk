@@ -3,7 +3,7 @@
     <p v-if="!data && !error" class="muted"><UiSpinner decorative /> Загрузка доски…</p>
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
-      <router-link to="/settings" class="link">→ Настройки</router-link>
+      <UiButton variant="text" @click="openSettings({ pageId: 'connections.b24' })">→ Настройки</UiButton>
     </div>
 
     <template v-else-if="data">
@@ -429,6 +429,7 @@
 </template>
 
 <script setup>
+import { openSettings } from '../shared/settingsNavigation.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.ts';

@@ -15,9 +15,9 @@ export function isReloadShortcut(input: Pick<Input, 'code' | 'control' | 'meta' 
  * Лишние модификаторы и keyUp не должны повторно открывать окно.
  */
 export function isSettingsShortcut(
-  input: Pick<Input, 'type' | 'code' | 'control' | 'alt' | 'shift' | 'meta'>,
+  input: Pick<Input, 'type' | 'code' | 'control' | 'alt' | 'shift' | 'meta' | 'isAutoRepeat'>,
 ): boolean {
-  return input.type === 'keyDown' && input.code === 'KeyS'
+  return input.type === 'keyDown' && !input.isAutoRepeat && input.code === 'KeyS'
     && input.control && input.alt && !input.shift && !input.meta;
 }
 

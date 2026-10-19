@@ -60,6 +60,34 @@ function realTurn(events, fallbackSessionId = null) {
   return buildClaudeTurnResult(collector, { fallbackSessionId });
 }
 
+test('R7: одни partial-дельты не подтверждают работу для автопродолжения', () => {
+  const collector = createClaudeTurnCollector();
+
+  collector.push({
+    type: 'stream_event',
+    event: { type: 'message_start', message: { id: 'interrupted-response' } },
+  });
+  collector.push({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: 'Connection closed mid-response' },
+    },
+  });
+  assert.equal(collector.state.madeProgress, false);
+
+  collector.push({
+    type: 'assistant',
+    message: {
+      id: 'interrupted-response',
+      model: 'fixture-model',
+      content: [{ type: 'text', text: 'Настоящий полный блок' }],
+    },
+  });
+  assert.equal(collector.state.madeProgress, true);
+});
+
 test('четыре synthetic-сбоя подряд дают три продолжения и exhausted', async () => {
   const script = [
     [initEvent(), syntheticEvent('unknown'), resultEvent(API_ERROR)],

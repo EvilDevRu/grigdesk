@@ -3,6 +3,9 @@
 // Драйвер связывает три части: runtime (`kimi web`), REST-клиент и поток событий. Он же
 // отдаёт наружу порт уточнений: сообщение уходит prompt'ом и уводится в идущий ход через
 // `prompts:steer`, а видимый ответ приходит событиями `assistant.delta`/`assistant.completed`.
+import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+
 import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type {
@@ -63,7 +66,7 @@ export interface KimiServerTurnOptions {
   } | null;
 }
 
-export interface KimiServerTurnResult {
+export interface KimiServerTurnResult extends ChatContextUsage {
   reply: string;
   assistantMessageId?: string;
   sessionId: string;
@@ -123,6 +126,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     const completed = new Map<string, string>();
     let reply = '';
     let replyMessageId = '';
+    let lastContextUsage: ChatContextUsage = {};
     let awaitingAnswer = false;
     let finished = false;
     let failure: Error | null = null;
@@ -131,6 +135,9 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     let stepNumber = 0;
     let turnNumber = '';
     const writes = new Set<Promise<void>>();
+    const outputByStep = new Map<string, number>();
+
+    const outputTokens = () => [...outputByStep.values()].reduce((sum, value) => sum + value, 0);
 
     const saveMessage = (event: InTurnAssistantEvent) => {
       const write = Promise.resolve(options.onAssistantMessage?.(event));
@@ -211,10 +218,12 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       // сессии — с префиксом. Принимаем обе формы: протокол принадлежит серверу, и
       // потерять из-за префикса видимый текст нельзя.
       const kind = event.type.startsWith('event.') ? event.type.slice(6) : event.type;
-      const agentId = String(event.agentId || payload.agentId || payload.agent_id || 'main');
+      const agentId = String(payload.agentId || event.agentId || payload.agent_id || 'main');
 
       if (agentId !== 'main' && (
         kind === 'assistant.delta' || kind === 'assistant.completed' || kind === 'thinking.delta'
+        || kind === 'turn.started' || kind === 'turn.step.started' || kind === 'turn.step.completed'
+        || kind === 'turn.ended' || kind === 'agent.status.updated' || kind === 'turn.step.interrupted'
       )) {
         return;
       }
@@ -236,6 +245,19 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       if (kind === 'turn.step.completed') {
         finishText(currentTextId);
 
+        const usage = (payload.usage || {}) as Record<string, unknown>;
+        const output = usage.output;
+
+        if (typeof output === 'number' && Number.isSafeInteger(output) && output >= 0) {
+          // Повтор шага заменяет свой вклад; внутренний turn.started не начинает новый ход человека.
+          // При старом протоколе без stepId пару turnId/step сохраняем раздельно.
+          const key = payload.stepId != null ? `${agentId}:${payload.stepId}`
+            : `${agentId}:${payload.turnId ?? turnNumber}:${payload.step ?? stepNumber}`;
+
+          outputByStep.set(key, output);
+          options.onProgress?.(outputTokens(), { tokensIsEstimate: false });
+        }
+
         return;
       }
 
@@ -249,18 +271,40 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         return;
       }
 
+      if (kind === 'agent.status.updated') {
+        const patch = normalizeContextUsage({
+          contextTokens: payload.contextTokens,
+          contextWindow: payload.maxContextTokens,
+        });
+
+        if (patch.contextTokens === undefined && patch.contextWindow === undefined) {
+          return;
+        }
+
+        // Статусы приходят частями; модель, usage и режимы не обнуляют замер.
+        // Меньший contextTokens заменяет прежний после сжатия основного агента.
+        lastContextUsage = { ...lastContextUsage, ...patch };
+
+        if (lastContextUsage.contextTokens !== undefined) {
+          lastContextUsage.contextMetric = 'kimi-agent-status-v1';
+          options.onProgress?.(outputTokens(), { tokensIsEstimate: false, ...lastContextUsage });
+        }
+
+        return;
+      }
+
       if (kind === 'session.usage_updated') {
         const usage = (payload.usage || {}) as Record<string, unknown>;
-        const contextTokens = Number(usage.context_tokens);
-        const contextLimit = Number(usage.context_limit);
+        const context = normalizeContextUsage({
+          contextTokens: usage.context_tokens,
+          contextWindow: usage.context_limit,
+          contextMetric: 'kimi-active-input-v1',
+          contextIsEstimate: false,
+        });
 
-        if (Number.isFinite(contextTokens)) {
-          options.onProgress?.(Number(usage.output_tokens) || 0, {
-            contextTokens,
-            ...(Number.isFinite(contextLimit) ? { contextWindow: contextLimit } : {}),
-            contextMetric: 'kimi-active-input-v1',
-            contextIsEstimate: false,
-          });
+        if (context.contextTokens !== undefined) {
+          lastContextUsage = { ...lastContextUsage, ...context };
+          options.onProgress?.(outputTokens(), { tokensIsEstimate: false, ...lastContextUsage });
         }
 
         return;
@@ -501,6 +545,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       await Promise.all([...writes]);
 
       return {
+        ...lastContextUsage,
         reply,
         assistantMessageId: replyMessageId,
         sessionId: session.id,

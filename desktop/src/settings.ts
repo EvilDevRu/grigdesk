@@ -9,6 +9,8 @@ import { recordOrNull } from '../../shared/lib/objects.ts';
 import { localOrigin } from './connection.ts';
 
 import type { Connection } from './connection.ts';
+import { normalizeProfile } from './profiles.ts';
+import type { DesktopProfile } from './profiles.ts';
 
 export type WindowState = {
   width: number;
@@ -17,8 +19,9 @@ export type WindowState = {
 };
 
 export type DesktopSettings = {
-  version: 1;
-  connection: Connection | null;
+  version: 2;
+  profiles: DesktopProfile[];
+  selected: string | null;
   window: WindowState;
 };
 
@@ -65,12 +68,42 @@ function normalizedConnection(value: unknown): Connection | null {
  */
 export function normalizeSettings(value: unknown): DesktopSettings {
   const settings = recordOrNull(value);
-  const supported = settings?.version === 1;
+  const supported = settings?.version === 1 || settings?.version === 2;
   const window = supported ? recordOrNull(settings.window) : null;
+  const profiles: DesktopProfile[] = [];
+  let selected: string | null = null;
+
+  if (settings?.version === 1) {
+    const connection = normalizedConnection(settings.connection);
+
+    if (connection) {
+      profiles.push({
+        id: 'local',
+        name: 'Этот компьютер',
+        kind: 'local',
+        address: connection.origin,
+        fp: null,
+        port: 47101,
+        createdAt: 0,
+      });
+      selected = 'local';
+    }
+  } else if (settings?.version === 2 && Array.isArray(settings.profiles)) {
+    for (const candidate of settings.profiles) {
+      const profile = normalizeProfile(candidate);
+
+      if (profile && !profiles.some((item) => item.id === profile.id || item.port === profile.port)) {
+        profiles.push(profile);
+      }
+    }
+
+    selected = profiles.some((item) => item.id === settings.selected) ? settings.selected as string : null;
+  }
 
   return {
-    version: 1,
-    connection: supported ? normalizedConnection(settings.connection) : null,
+    version: 2,
+    profiles,
+    selected,
     window: {
       width: dimension(window?.width, DEFAULT_WINDOW.width),
       height: dimension(window?.height, DEFAULT_WINDOW.height),

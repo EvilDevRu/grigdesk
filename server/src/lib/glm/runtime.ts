@@ -441,7 +441,6 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       steps: [journalNote, ...steps],
     } : {}),
     ...(empty ? { emptyRun: true, retryState: 'post_prompt' } : {}),
-    contextMetric: 'unavailable',
     contextCache: contextCacheStatus('unavailable'),
   };
 }

@@ -427,7 +427,16 @@ function submitStructured(action) {
   background: color-mix(in srgb, var(--accent) 7%, transparent); max-height: 38vh; overflow-y: auto; }
 .col { width: 100%; min-width: 0; }
 .q-item + .q-item { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
-.q-text { display: flex; align-items: baseline; gap: 6px; margin-bottom: 7px; font-size: 13px; }
+.q-text {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 7px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 .q-ico { flex: none; color: var(--accent); font-weight: 700; }
 .q-intro { margin-bottom: 10px; }
 .q-source { color: var(--accent); font-size: 11px; font-weight: 650; }
@@ -436,7 +445,13 @@ function submitStructured(action) {
 .q-required { color: var(--bad); font-size: 10.5px; }
 .q-multi { padding: 0 5px; border: 1px solid var(--line); border-radius: 5px;
   color: var(--ink-mid); font-size: 10.5px; }
-.q-hint { margin: -3px 0 7px 18px; color: var(--ink-mid); font-size: 11px; line-height: 1.45; }
+.q-hint {
+  margin: -3px 0 7px 18px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .q-rule { margin: 5px 0 0 18px; color: var(--ink-mid); font-size: 10.5px; }
 .q-own-toggle { margin-top: 3px; }
 .q-own { margin-top: 5px; }

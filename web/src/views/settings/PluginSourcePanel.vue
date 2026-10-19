@@ -1,5 +1,9 @@
 <template>
-  <section class="plugin-source" data-role="plugin-source" :data-managed="!!plugin.install">
+  <section
+    class="plugin-source"
+    data-role="plugin-source"
+    :data-managed="!!plugin.install"
+  >
     <header class="source-heading">
       <h3>Источник и обновления</h3>
       <span v-if="plugin.install" class="source-version">v{{ plugin.install.version }}</span>
@@ -10,7 +14,11 @@
     </UiInlineMessage>
     <div v-if="store.reconciling" class="source-actions">
       <p>Уточняю исход</p>
-      <UiButton data-role="plugin-source-reconcile" :disabled="store.busy" @click="store.reconcile()">
+      <UiButton
+        data-role="plugin-source-reconcile"
+        :disabled="store.busy"
+        @click="store.reconcile()"
+      >
         Уточнить результат
       </UiButton>
     </div>
@@ -18,7 +26,11 @@
       <p>Плагин установлен вручную и не связан с источником.</p>
       <p class="source-hint">Привяжите репозиторий, чтобы выбирать версии и получать обновления.</p>
       <div class="source-actions">
-        <UiButton data-role="plugin-source-bind" :disabled="locked" @click="emit('bind')">
+        <UiButton
+          data-role="plugin-source-bind"
+          :disabled="locked"
+          @click="emit('bind')"
+        >
           Привязать к git…
         </UiButton>
       </div>
@@ -30,7 +42,11 @@
           v{{ plugin.install.version }} · {{ shortSha(plugin.install.sha) }}
         </p>
       </div>
-      <UiInlineMessage v-if="plugin.install.restartRequired" tone="warning" data-role="plugin-source-restart">
+      <UiInlineMessage
+        v-if="plugin.install.restartRequired"
+        tone="warning"
+        data-role="plugin-source-restart"
+      >
         Новая версия ждёт перезапуска GrigDesk.
       </UiInlineMessage>
       <UiInlineMessage

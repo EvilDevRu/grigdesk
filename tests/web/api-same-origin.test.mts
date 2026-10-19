@@ -32,3 +32,30 @@ test('LO-12b: API, события и WebSocket используют origin ин�
     assert.equal(api.wsUrl('/api/terminal'), websocket);
   }
 });
+
+test('Vite сохраняет API proxy после удаления серверной раздачи UI', async (t) => {
+  const previous = process.env.GRIGDESK_PORT;
+
+  process.env.GRIGDESK_PORT = '28141';
+  t.after(() => {
+    if (previous === undefined) {
+      delete process.env.GRIGDESK_PORT;
+    } else {
+      process.env.GRIGDESK_PORT = previous;
+    }
+  });
+
+  const { loadConfigFromFile } = await import('../../web/node_modules/vite/dist/node/index.js');
+  const loaded = await loadConfigFromFile({ command: 'serve', mode: 'development' },
+    new URL('../../web/vite.config.js', import.meta.url).pathname);
+  const proxy = loaded?.config.server?.proxy;
+
+  assert.ok(proxy);
+  assert.deepEqual(proxy['/api'], {
+    target: 'http://localhost:28141',
+    changeOrigin: true,
+    ws: true,
+    rewriteWsOrigin: true,
+  });
+  assert.equal(proxy['/shots'], 'http://localhost:28141');
+});

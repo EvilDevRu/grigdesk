@@ -1,16 +1,16 @@
 <template>
-  <SettingsWindowShell v-if="settingsWindow" />
-  <template v-else>
   <!-- До проверки сессии не рисуем интерфейс или отказ: оба могут оказаться неверными
        в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
   <UiTooltipHost />
 
-  <template v-if="auth.ready">
-    <NoAccessView v-if="!auth.authenticated" />
-    <!-- Provider существует только в authenticated-ветке: потеря сессии размонтирует его
-         вместе с единственным mic-controller и немедленно отзывает browser resources. -->
-    <SpeechProvider v-else>
+  <template v-if="shell.initialized">
+    <ConnectionsView v-if="showMachines" />
+    <NoAccessView v-else-if="!shell.present && auth.ready && !auth.authenticated" />
+    <!-- Речь принадлежит рабочему документу и сохраняет один controller при потере связи.
+         Без оболочки потеря входа размонтирует Provider и освобождает browser resources. -->
+    <SpeechProvider v-else-if="shell.present || auth.authenticated">
+      <div class="shell-workspace" :inert="shell.present && shell.status === 'locked' ? '' : undefined">
       <AppShell>
         <router-view v-slot="{ Component }">
           <component :is="Component" />
@@ -19,17 +19,19 @@
       <TaskModal />
       <DiffModal />
       <DocumentModal />
+      <SettingsModal v-if="settings.isOpen" />
       <UiToastHost />
+      </div>
     </SpeechProvider>
-  </template>
+    <LockOverlay v-if="shell.present && shell.status === 'locked'" />
   </template>
 </template>
 
 <script setup>
 import { asyncView } from './shared/asyncView.ts';
-import { onMounted, watch } from 'vue';
+import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { UiDialogHost, UiTooltipHost, UiToastHost } from './ui';
-import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import NoAccessView from './views/NoAccessView.vue';
@@ -40,21 +42,34 @@ import { SpeechProvider } from './features/speech/provider.js';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
+import { useSettingsStore } from './stores/settings.ts';
 import { useTaskFavoritesStore } from './stores/task-favorites.js';
 import { useTaskShelfStore } from './stores/taskShelf.ts';
 import { useTaskSeenStore } from './stores/task-seen.js';
 import { useVideoSessionStore } from './stores/videoSession.ts';
+import { setSseEnabled } from './composables/useSse.ts';
+import { useShellStore } from './stores/shell.ts';
+import ConnectionsView from './views/ConnectionsView.vue';
+import LockOverlay from './shared/layout/LockOverlay.vue';
 
 const auth = useAuthStore();
-const settingsWindow = currentDesktopMode() === 'settings';
-const SettingsWindowShell = asyncView(() => import('./shared/layout/SettingsWindowShell.vue'));
+const shell = useShellStore();
+const showMachines = computed(() => shell.present && (
+  shell.showConnections || !shell.profile || !shell.everOnline
+  || ['unpaired', 'revoked', 'identityMismatch', 'incompatible'].includes(shell.status)
+));
+const settings = useSettingsStore();
+const SettingsModal = asyncView(() => import('./views/settings/SettingsModal.vue'), undefined, () => {
+  settings.dispose('load-failed');
+  showSectionLoadFailure();
+});
 
 let pollingStarted = false;
 
 // Фоновые поллинги запускаем ТОЛЬКО после входа: иначе они молотят в закрытый API,
 // ловят 401 и засоряют консоль на экране отказа.
 function startPolling() {
-  if (settingsWindow || pollingStarted) {
+  if (pollingStarted) {
     return;
   }
 
@@ -77,37 +92,65 @@ onMounted(async () => {
     localStorage.removeItem('grigdesk-companion-device-v1');
   } catch { /* storage может быть недоступен */ }
   auth.watchUnauthorized();
-  await auth.load();
+  await shell.start();
+
+  if (!shell.present) {
+    await auth.load();
+  }
 
   if (auth.authenticated) {
+    settings.setAuthenticated(true);
     startPolling();
   }
 });
 
+onBeforeUnmount(() => shell.stop());
+watch(() => shell.status, (status, previous) => {
+  if (shell.present && status !== 'online') {
+    auth.logEpoch += 1;
+    auth.logReason = 'shell-' + status;
+    auth.authenticated = false;
+  }
+
+  if (shell.present && status === 'online' && previous !== 'online') {
+    void auth.load('shell-online');
+  }
+}, { immediate: true });
+
+watch(() => auth.authenticated && (!shell.present || shell.status === 'online'), setSseEnabled,
+  { immediate: true });
+
 // Подтверждённый вход запускает поллинги. Потеря сессии останавливает их:
 // иначе интервалы продолжают долбить закрытый API и сыплют 401 в консоль на экране входа.
 watch(() => auth.authenticated, (on, was) => {
-  if (settingsWindow) {
-    return;
-  }
-
   if (on && !was) {
+    settings.setAuthenticated(true);
     startPolling();
   }
 
   if (!on && was) {
+    settings.dispose('auth-lost');
     pollingStarted = false;
     useBoardStore().stopPolling();
     useSystemStore().stopPolling();
-    useTaskFavoritesStore().clear();
     useTaskShelfStore().stop();
-    useTaskShelfStore().clear();
     dismissAllAlerts();
-    clearAlertHistory();
-    useTaskSeenStore().clear();
+
+    if (!shell.present) {
+      useTaskFavoritesStore().clear();
+      useTaskShelfStore().clear();
+      clearAlertHistory();
+      useTaskSeenStore().clear();
+    }
     // Разбор встречи набран человеком и потому переживает потерю сессии, а вот его поллинг —
     // нет: без сессии он молотил бы в закрытый API теми же 401 каждые две секунды.
     useVideoSessionStore().stopPoll();
   }
 });
 </script>
+
+<style scoped>
+.shell-workspace {
+  display: contents;
+}
+</style>

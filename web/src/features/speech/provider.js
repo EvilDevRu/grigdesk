@@ -16,8 +16,8 @@ export const DICTATION_CONTROLLER_KEY = Symbol('grigdesk-dictation-controller');
 
 /**
  * Фабрика нужна тестам lifecycle. Production-export ниже использует реальные Pinia/API.
- * Сам component монтируется только внутри authenticated-ветки App.vue, поэтому logout
- * естественно уничтожает controller вместе со всеми browser resources.
+ * Component принадлежит рабочей ветке App.vue: offline в оболочке сохраняет controller.
+ * Размонтирование рабочей области уничтожает его вместе со всеми browser resources.
  */
 export function createSpeechProvider({
   useChatStore: chatStoreFactory = useChatStore,

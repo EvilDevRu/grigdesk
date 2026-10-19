@@ -126,9 +126,6 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
         reply: `${journalNote.text}\n\n${result.reply || ''}`,
         steps: [journalNote, ...(result.steps || [])],
       } : {}),
-      contextTokens: undefined as number | undefined,
-      contextWindow: undefined as number | undefined,
-      contextMetric: 'unavailable',
       contextCache: contextCacheStatus('unavailable'),
       retryState: 'post_prompt',
     };

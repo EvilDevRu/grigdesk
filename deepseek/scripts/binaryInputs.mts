@@ -9,7 +9,7 @@ const shared = [
   'shared/chat/deepSeekBinary.ts',
   'shared/lib/canonicalJson.ts',
   'shared/lib/contractDecoders.ts',
-  'shared/node/binaryBuild.ts',
+  'shared/node/nodeRuntime.ts',
   'shared/node/deepSeekArtifact.ts',
   'shared/node/directoryLock.ts',
   'shared/node/files.ts',

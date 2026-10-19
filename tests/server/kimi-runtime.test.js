@@ -6,6 +6,8 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
+import { kimiUsageWire } from '../helpers/kimiUsageWire.mjs';
+
 import {
   parseStatus,
   permissionPresentation,
@@ -612,4 +614,43 @@ test('host runtime: вложения идут по исходным путям, 
     }),
     /kimi_attachment_outside_root/,
   );
+});
+
+
+test('server runtime сохраняет контекст и берёт окно из каталога при отсутствии в статусе', async (t) => {
+  for (const window of [undefined, 262144]) {
+    const f = await fixture(t);
+    const wire = await kimiUsageWire(t, [(send) => {
+      send({
+        type: 'agent.status.updated',
+        contextTokens: 6000,
+        maxContextTokens: window
+      });
+      send({ type: 'turn.ended', reason: 'completed' });
+    }]);
+    const out = await runContainedKimi({
+      config: f.config,
+      chatKey: 'usage-runtime',
+      cwd: f.cwd,
+      message: 'Синтетический ход',
+      model: 'kimi-code/k3',
+      transport: 'server',
+      deps: {
+        assertVersion: async () => '0.33.0',
+        createProxy: () => ({ async start() {}, async close() {} }),
+        preflight: async () => ({ decision: 'GO_CONTAINED_MVP', checks: {} }),
+        buildLaunch: async () => ({
+          command: 'fake',
+          args: [],
+          cwdReal: f.cwd
+        }),
+        stopUnit: async () => {},
+        startServer: wire.startServer,
+      },
+    });
+
+    assert.equal(out.contextTokens, 6000);
+    assert.equal(out.contextWindow, window ?? 1048576);
+    assert.equal(out.contextMetric, 'kimi-agent-status-v1');
+  }
 });

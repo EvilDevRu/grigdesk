@@ -1,0 +1,69 @@
+package local.grigdesk.client.shell;
+
+public final class ClientFailure {
+  private ClientFailure() {
+  }
+
+  /**
+   * CompletableFuture оборачивает нативный отказ в ExecutionException.
+   * Разворачивается только служебная оболочка, причина камеры/биометрии сохраняется.
+   */
+  public static Throwable unwrap(Throwable error) {
+    while ((error instanceof java.util.concurrent.ExecutionException
+      || error instanceof java.util.concurrent.CompletionException) && error.getCause() != null) {
+      error = error.getCause();
+    }
+
+    return error;
+  }
+
+  /**
+   * Ожидание нативного диалога ограничено тремя минутами на сетевом работнике.
+   * Исходное исключение возвращается вызывающему коду, прерывание не теряется.
+   */
+  public static <T> T await(java.util.concurrent.CompletableFuture<T> future) throws Exception {
+    try {
+      return future.get(3, java.util.concurrent.TimeUnit.MINUTES);
+    } catch (java.util.concurrent.ExecutionException error) {
+      Throwable cause = unwrap(error);
+
+      if (cause instanceof Exception) {
+        throw (Exception) cause;
+      }
+
+      throw new IllegalStateException("Не удалось завершить нативное действие.", cause);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw error;
+    }
+  }
+
+  /**
+   * Коды протокола переводятся в действия человека без адреса и внутренних исключений.
+   * Неизвестный отказ подсказывает проверить включение отдельного клиентского входа.
+   */
+  public static String message(String code) {
+    switch (code) {
+      case "server_upgrade_required":
+        return "Обновите GrigDesk на машине.";
+      case "client_upgrade_required":
+        return "Обновите приложение GrigDesk.";
+      case "identityMismatch":
+        return "Это не тот сервер.";
+      case "locked":
+        return "Разблокируйте приложение.";
+      case "invalid_pairing":
+        return "Строка привязки повреждена. Получите новый код на машине.";
+      case "unsupported_address":
+        return "Этот тип адреса пока не поддерживается приложением.";
+      case "pair_code_invalid":
+        return "Код привязки недействителен или истёк. Получите новый код.";
+      case "pair_locked":
+        return "Слишком много попыток привязки. Повторите позже.";
+      case "device_revoked":
+        return "Доступ этого устройства отозван. Привяжите его заново.";
+      default:
+        return "Машина недоступна. Проверьте связь и включён ли GRIGDESK_CLIENT_LISTEN на машине.";
+    }
+  }
+}

@@ -105,6 +105,7 @@ const expectedLayout = {
   studio3d: '3d',
   agents: 'agents',
   plugins: 'plugins',
+  profiles: 'profiles',
   artifacts: 'artifacts',
   moveJournal: '.move-journal.json',
   moveLock: '.move-lock',

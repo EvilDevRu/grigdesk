@@ -24,6 +24,9 @@
 | `grigdesk-ctl relay start \| stop \| restart` | Управление существующим контейнером Docker |
 | `grigdesk-ctl relay status [--json]` | Только локальный посредник и связи сервера |
 | `grigdesk-ctl relay logs [-n N] [-f]` | Журнал выбранного контейнера |
+| `grigdesk-ctl device add <имя> [--address host:port] [--json]` | Строка и QR привязки полного приложения |
+| `grigdesk-ctl device list [--json]` | Привязанные устройства и их scope |
+| `grigdesk-ctl device revoke <id>` | Отзыв сертификата и разрыв соединений |
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
 | `grigdesk-ctl b24 …` | Собранный `bin/b24`, без него — исходник `b24/src/main.ts` ([команда b24](../b24/binary-cli.md)) |
 | `grigdesk-ctl dev`, `build`, `deps`, `run` | Прежние команды разработки |
@@ -31,7 +34,7 @@
 | `grigdesk-ctl --version` | Версия собственной копии из VERSION |
 
 `--lines N` заменяет `-n N`, `--follow` заменяет `-f`; число строк — целое 1…10000,
-по умолчанию 100. Форма `--lines=N` не принимается. `--json` допускается только для status.
+по умолчанию 100. Форма `--lines=N` не принимается. `--json` допускается для status и device add/list.
 Цвет включается только в TTY, при пустом `NO_COLOR` и `TERM`, отличном от `dumb`.
 
 ## Состояния
@@ -124,6 +127,17 @@ links равен null при недоступном сервере, токене
 `grigdesk-ctl desktop install`. Ярлык показывает отказ уведомлением с причиной из stderr.
 
 ## Проверки
+
+Команды device получают ключ через `shared/desktop/windowKeyPath.ts` и обменивают его на
+`POST /api/auth/window-session?short=1`. Сессия живёт 600 секунд, cookie хранится только в
+памяти команды. CLI-токен для выдачи привязки не используется. Без ключа команда сообщает,
+что должна выполняться на машине с запущенным сервером; выключенный вход предлагает
+задать `GRIGDESK_CLIENT_LISTEN`.
+
+Терминальный QR рисуется полублоками с полем 4 модуля. Цвета чёрного на белом включаются
+только в TTY без `NO_COLOR`; JSON не содержит терминальный QR. После строки печатается
+«Действует 10 минут, один раз». Проверки: `tests/cli/device.test.mts`,
+`tests/server/auth-window-session.test.js`; обычный обмен сохраняет прежние 400 дней.
 
 `tests/cli/{readiness,entry,server,open,relay-status,cli-link}.test.mts` проверяют чистые
 правила и CLI через [песочницу](../testing/cli-sandbox.md). Проверки ярлыка —

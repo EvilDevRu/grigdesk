@@ -1,7 +1,8 @@
 // Плагины GrigDesk: список с сервера, вкл/выкл, настройки.
 // Питает блок плагинов в сайдбаре (под разделителем) и вкладку «Настройки → Плагины».
+import { classifyWriteError } from '../features/settings/contracts.ts';
 import { defineStore } from 'pinia';
-import { api } from '../shared/apiClient.ts';
+import { api, failureText } from '../shared/apiClient.ts';
 import { pluginPageRoute } from '../shared/tools/catalog.ts';
 import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
 import { decodeOptionalInstall } from '../shared/pluginInstallApi.ts';
@@ -75,6 +76,7 @@ export const usePluginsStore = defineStore('plugins', {
     list: [],
     loaded: false,
     loadError: null,
+    restartPending: {},
   }),
   getters: {
     // Размещение объявляет manifest, но Vue-страницу/панель он не загружает.
@@ -129,39 +131,110 @@ export const usePluginsStore = defineStore('plugins', {
         this.loadError = error instanceof Error ? error.message : 'Не удалось получить каталог плагинов.';
       }
     },
+    /**
+     * Доменный тумблер вызывается только из операции сохранения, возвращая явный исход.
+     * Ошибка восстанавливает прежнее состояние и не выглядит успешным resolved Promise.
+     */
     async toggle(id, enabled) {
       const p = this.byId(id);
-      if (!p) return;
-      p.enabled = enabled; // оптимистично — мгновенный отклик тумблера
+
+      if (!p) {
+        return {
+          ok: false,
+          outcome: 'failed',
+          message: 'Плагин больше недоступен',
+        };
+      }
+
+      const before = p.enabled;
+
+      p.enabled = enabled;
+
       try {
-        await api.post(`/api/plugins/${id}/toggle`, { enabled });
+        const reply = await api.post(`/api/plugins/${encodeURIComponent(id)}/toggle`, { enabled });
+
+        if (reply?.ok !== true || typeof reply.enabled !== 'boolean') {
+          p.enabled = before;
+
+          return {
+            ok: false,
+            outcome: reply?.ok === false ? 'failed' : 'unknown',
+            message: 'Сервер не подтвердил переключение плагина',
+          };
+        }
+
+        p.enabled = reply.enabled;
+
+        if (p.needsRestart) {
+          this.restartPending = { ...this.restartPending, [id]: true };
+        }
         if (id === 'analysis') {
           const { useAnalysisStore } = await import('./analysis.js');
           const analysis = useAnalysisStore();
-          if (enabled) analysis.startPolling();
-          else {
+
+          if (p.enabled) {
+            analysis.startPolling();
+          } else {
             analysis.error = null;
             analysis.stopPolling();
           }
         }
+
+        return { ok: true, enabled: reply.enabled };
+      } catch (error) {
+        p.enabled = before;
+
+        return { ...classifyWriteError(error), message: failureText(error) };
       }
-      catch { p.enabled = !enabled; }
     },
-    // Значения и размещения уходят одним запросом: у формы одна кнопка «Сохранить».
+    /**
+     * Сервер заменяет values целиком; полный набор собирает адаптер общей сессии.
+     * Только явный ответ обновляет доменное состояние и подтверждает поля формы.
+     */
     async saveSettings(id, values, placements = null) {
       const p = this.byId(id);
-      if (!p) return;
-      const r = await api.put(`/api/plugins/${id}/settings`, {
-        values,
-        ...(placements && { placements }),
-      });
-      p.values = r.values;
-      if (Array.isArray(r.placements)) p.placements = r.placements;
+
+      if (!p) {
+        return {
+          ok: false,
+          outcome: 'failed',
+          message: 'Плагин больше недоступен',
+        };
+      }
+
+      try {
+        const reply = await api.put(`/api/plugins/${encodeURIComponent(id)}/settings`, {
+          values,
+          ...(placements && { placements }),
+        });
+
+        if (reply?.ok !== true || !reply.values || typeof reply.values !== 'object') {
+          return {
+            ok: false,
+            outcome: reply?.ok === false ? 'failed' : 'unknown',
+            message: 'Сервер не подтвердил параметры плагина',
+          };
+        }
+
+        p.values = reply.values;
+
+        if (Array.isArray(reply.placements)) {
+          p.placements = reply.placements;
+        }
+
+        return {
+          ok: true,
+          values: reply.values,
+          placements: reply.placements,
+        };
+      } catch (error) {
+        return { ...classifyWriteError(error), message: failureText(error) };
+      }
     },
     // Готовность плагина: ручку объявляет манифест, форму ответа — общий контракт.
     // Установка запускается по пункту и только по нажатию человека.
-    async loadSetup(plugin) {
-      return api.get(plugin.setup.path);
+    async loadSetup(plugin, signal) {
+      return api.get(plugin.setup.path, { signal });
     },
     async runSetup(plugin, itemId) {
       return api.post(`${plugin.setup.path}/${encodeURIComponent(itemId)}`, {});

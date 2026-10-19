@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { ensureNodeArchive, readPinnedNodeRuntime } from '../../shared/node/binaryBuild.ts';
+import { ensureNodeArchive, readNodeRuntime } from '../../shared/node/nodeRuntime.ts';
 import { withWorkDirectory } from '../../shared/node/files.ts';
 import { sha256File } from '../../shared/node/hash.ts';
 import { downloadFile } from '../../shared/node/seaBuild.ts';
@@ -32,7 +32,7 @@ export async function readPreparedRuntimeDependencies(
   const node = path.join(cacheDir, 'node-runtime/bin/node');
 
   try {
-    const pin = readPinnedNodeRuntime(JSON.parse(await readFile(
+    const pin = readNodeRuntime(JSON.parse(await readFile(
       path.join(packageDir, 'build/node-runtime.json'), 'utf8',
     )), 'deepseek/build/node-runtime.json');
     const stamp = JSON.parse(await readFile(path.join(directory, '.prepared.json'), 'utf8'));
@@ -71,7 +71,7 @@ export async function readPreparedRuntimeDependencies(
  * Legacy dependencies не изменяются; HOME, npm cache и временные файлы принадлежат сборке.
  */
 export async function prepareRuntimeDependencies(cacheDir: string): Promise<PreparedRuntimeDependencies> {
-  const pin = readPinnedNodeRuntime(JSON.parse(await readFile(
+  const pin = readNodeRuntime(JSON.parse(await readFile(
     path.join(packageDir, 'build/node-runtime.json'), 'utf8',
   )), 'deepseek/build/node-runtime.json');
   const archive = await ensureNodeArchive(pin, cacheDir, { download: downloadFile });

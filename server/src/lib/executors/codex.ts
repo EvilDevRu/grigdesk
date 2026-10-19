@@ -13,6 +13,8 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { npmLatest } from './_npmLatest.ts';
 import { withRetry } from '../retry.ts';
+import { usagePercentOrNull } from '../providerUsage.ts';
+import type { ProviderUsagePatch, UsageBar } from '../providerUsage.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
 import { CODEX_TURN_FAILURE_RULES, codexTurnFailure } from './_codexTurnFailures.ts';
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
@@ -82,7 +84,7 @@ interface CodexBucket {
 
 // Полоса лимита для всплывашки: ведро, подпись, процент и длина окна в минутах —
 // по ней прогноз отличает неделю от сессии и считает средний темп с начала окна.
-interface CodexUsageBar {
+interface CodexUsageBar extends UsageBar {
   key: string;
   group: string;
   label: string;
@@ -337,6 +339,33 @@ function bucketWindows(bucket: CodexBucket) {
 }
 
 /**
+ * Уведомления квот разрежены: null в метаданных не стирает предыдущее окно.
+ * Состояние принадлежит процессу, а подписи и ключи разбирает общий парсер опроса.
+ */
+function mergeCodexRateLimitSnapshot(previous: CodexBucket | undefined, next: CodexBucket): CodexBucket {
+  const merged = { ...previous };
+
+  for (const [key, value] of Object.entries(next)) {
+    if (value == null) {
+      continue;
+    }
+
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const known = merged[key];
+
+      merged[key] = {
+        ...(known && typeof known === 'object' ? known : {}),
+        ...Object.fromEntries(Object.entries(value).filter(([, field]) => field != null)),
+      };
+    } else {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
+}
+
+/**
  * Контракт app-server: account/rateLimits/read. `rateLimitsByLimitId` — текущий
  * многовёдерный вид, `rateLimits` остаётся совместимым запасным. Имена вёдер
  * приходят от сервиса, поэтому новое семейство Codex появляется в шапке без
@@ -357,7 +386,6 @@ export function parseCodexRateLimits(value: unknown): CodexUsageBar[] {
   const source = (byId && typeof byId === 'object' && Object.keys(byId).length
     ? Object.values(byId)
     : (result?.rateLimits ? [result.rateLimits] : [])) as CodexBucket[];
-  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
   const buckets: Array<{ id: string; bucket: CodexBucket; scope: string }> = [];
 
@@ -380,12 +408,19 @@ export function parseCodexRateLimits(value: unknown): CodexUsageBar[] {
 
   for (const { id, bucket, scope } of buckets) {
     for (const { slot, window } of bucketWindows(bucket)) {
+      const pct = usagePercentOrNull(window.usedPercent);
+
+      if (pct === null) {
+        continue;
+      }
+
       const base = windowLabel(window.windowDurationMins);
+
       bars.push({
         key: `${id}:${slot}`,
         group: id,
         label: scope ? `${base.replace(/ \([^)]+\)$/, '')} · ${scope}` : base,
-        pct: clamp(Number(window.usedPercent)),
+        pct,
         resetsAt: resetIso(window.resetsAt),
         windowMinutes: typeof window.windowDurationMins === 'number' ? window.windowDurationMins : null,
       });
@@ -1213,7 +1248,10 @@ export function openCodexSession({
   providerSettings?: CodexSettings | null;
   nativeSettings?: PreparedNativeSettings;
   log?: CodexLog;
-  hooks?: { onExit?: (info: { code?: number | null; reason: string }) => void };
+  hooks?: {
+    onExit?: (info: { code?: number | null; reason: string }) => void;
+    onProviderUsage?: (patch: ProviderUsagePatch) => boolean;
+  };
   tokenInfoReader?: typeof readCodexThreadTokenInfo;
   workTools?: CodexWorkToolsPort | null;
   workspaceAccess?: CodexWorkspaceAccess | null;
@@ -1224,6 +1262,7 @@ export function openCodexSession({
   const writableRoots = workspaceAccess
     ? codexWorkspaceRoots('', workspaceAccess.writableRoots)
     : roots;
+  const rateLimitSnapshots = new Map<string, CodexBucket>();
   const pending = new Map<number, {
     method: string;
     owner: CodexTurn | null;
@@ -1743,6 +1782,28 @@ export function openCodexSession({
     }
 
     if (!ownsAppNotification(params, current)) return;
+
+    if (method === 'account/rateLimits/updated') {
+      const snapshot = params.rateLimits as CodexBucket | null;
+
+      if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+        const id = String(snapshot.limitId || 'codex');
+        const merged = mergeCodexRateLimitSnapshot(rateLimitSnapshots.get(id), snapshot);
+        const bars = parseCodexRateLimits({ rateLimits: merged });
+
+        rateLimitSnapshots.set(id, merged);
+
+        if (bars.length) {
+          try {
+            hooks.onProviderUsage?.({ bars });
+          } catch {
+            log?.warn?.({}, 'чат: квоты Codex не приняты обработчиком');
+          }
+        }
+      }
+
+      return;
+    }
 
     if (method === 'thread/started') {
       threadId = params.thread?.id || threadId;
@@ -2348,6 +2409,7 @@ export async function runCodexAppServer({
   providerSettings, nativeSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   workTools, workspaceAccess, onPermission, log, onSessionCreated,
   onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
+  onProviderUsage,
 }: {
   config: CodexConfig;
   env?: NodeJS.ProcessEnv;
@@ -2361,6 +2423,7 @@ export async function runCodexAppServer({
   providerSettings?: CodexSettings | null;
   nativeSettings?: PreparedNativeSettings;
   signal?: AbortSignal;
+  onProviderUsage?: (patch: ProviderUsagePatch) => boolean;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onStep?: (step: ChatStep) => void;
@@ -2392,6 +2455,7 @@ export async function runCodexAppServer({
     workTools,
     workspaceAccess,
     log,
+    hooks: { onProviderUsage },
   });
   const onAbort = () => { void session.interrupt(); };
 
@@ -2904,6 +2968,7 @@ export default {
     providerSettings, nativeSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
     workTools, workspaceAccess, onPermission, log, onSessionCreated,
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
+    onProviderUsage,
   }: Parameters<typeof runCodexAppServer>[0]) {
     return runCodexAppServer({
       config,
@@ -2919,6 +2984,7 @@ export default {
       nativeSettings,
       signal,
       onProgress,
+      onProviderUsage,
       onStep,
       tokenInfoReader,
       workTools,

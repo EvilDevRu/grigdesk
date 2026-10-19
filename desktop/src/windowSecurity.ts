@@ -1,6 +1,5 @@
 import type {
   BrowserWindow,
-  BaseWindow,
   BrowserWindowConstructorOptions,
   Event,
   Session,
@@ -9,10 +8,11 @@ import type {
   WebContentsWillRedirectEventParams,
 } from 'electron';
 import type { WindowState } from './settings.ts';
-import type { SettingsWindowGeometry } from './settingsWindowController.ts';
 import { isSettingsWindowRequest } from '../../shared/desktop/desktopWindowContract.ts';
 
 export const LOCAL_PARTITION = 'persist:grigdesk-local';
+
+export type PipeOrigins = string | ReadonlySet<string>;
 
 export type SessionLike = Pick<Session,
   'setSpellCheckerEnabled' | 'setSpellCheckerDictionaryDownloadURL' | 'setSpellCheckerLanguages' |
@@ -21,7 +21,7 @@ export type SessionLike = Pick<Session,
 export type ContentsLike = Pick<WebContents, 'on' | 'setWindowOpenHandler'>;
 
 export type ContentsGuardOptions = {
-  origin: string;
+  origin: PipeOrigins;
   openExternal: (url: string) => Promise<unknown> | void;
   childOptions: BrowserWindowConstructorOptions;
   onChild?: (child: BrowserWindow) => void;
@@ -44,34 +44,6 @@ export function secureWebPreferences(packaged: boolean) {
     webviewTag: false,
     nodeIntegrationInWorker: false,
     nodeIntegrationInSubFrames: false,
-  };
-}
-
-/**
- * Модальное окно разделяет сессию главного и не сохраняет собственную геометрию.
- * Размеры уже ограничены рабочей областью дисплея вызывающей стороной.
- */
-export function settingsWindowOptions(options: {
-  icon: string;
-  packaged: boolean;
-  parent: BaseWindow;
-  geometry: SettingsWindowGeometry;
-  session: Session;
-}): BrowserWindowConstructorOptions {
-  return {
-    ...options.geometry,
-    parent: options.parent,
-    modal: true,
-    show: false,
-    minimizable: false,
-    fullscreenable: false,
-    title: 'Настройки — GrigDesk',
-    backgroundColor: '#0b0d11',
-    icon: options.icon,
-    webPreferences: {
-      ...secureWebPreferences(options.packaged),
-      session: options.session,
-    },
   };
 }
 
@@ -110,11 +82,12 @@ export function windowOptions(
  * Собственным считается только обычный HTTP-адрес без встроенных credentials.
  * Совпадение вложенного origin у blob не даёт документу полномочий окна.
  */
-export function sameOrigin(target: string, origin: string): boolean {
+export function sameOrigin(target: string, origin: PipeOrigins): boolean {
   try {
     const url = new URL(target);
 
-    return url.protocol === 'http:' && !url.username && !url.password && url.origin === origin;
+    return url.protocol === 'http:' && !url.username && !url.password
+      && (typeof origin === 'string' ? url.origin === origin : origin.has(url.origin));
   } catch {
     return false;
   }
@@ -124,7 +97,7 @@ export function sameOrigin(target: string, origin: string): boolean {
  * Политика главного фрейма отделяет свой сайт, системный браузер и отказ.
  * Обработчики событий применяют это решение также к redirect.
  */
-export function navigationDecision(target: string, origin: string): 'allow' | 'external' | 'deny' {
+export function navigationDecision(target: string, origin: PipeOrigins): 'allow' | 'external' | 'deny' {
   if (sameOrigin(target, origin)) {
     return 'allow';
   }
@@ -136,7 +109,7 @@ export function navigationDecision(target: string, origin: string): 'allow' | 'e
  * Собственная ссылка в новом окне должна получить защищённое дочернее окно.
  * Все остальные адреса проходят ту же границу схем, что и навигация.
  */
-export function openDecision(target: string, origin: string): 'child' | 'external' | 'deny' {
+export function openDecision(target: string, origin: PipeOrigins): 'child' | 'external' | 'deny' {
   const decision = navigationDecision(target, origin);
 
   return decision === 'allow' ? 'child' : decision;
@@ -149,7 +122,7 @@ export function openDecision(target: string, origin: string): 'child' | 'externa
 export function permissionAllowed(
   permission: string,
   requestingUrl: string,
-  origin: string,
+  origin: PipeOrigins,
   mediaTypes: readonly string[],
 ): boolean {
   if (!sameOrigin(requestingUrl, origin)) {
@@ -167,7 +140,7 @@ export function permissionAllowed(
  * Блокирует ровно штатный script service worker своего origin независимо от query.
  * Остальные запросы остаются доступными браузерному интерфейсу GrigDesk.
  */
-export function serviceWorkerBlocked(target: string, origin: string): boolean {
+export function serviceWorkerBlocked(target: string, origin: PipeOrigins): boolean {
   return sameOrigin(target, origin) && new URL(target).pathname === '/sw.js';
 }
 
@@ -175,9 +148,12 @@ export function serviceWorkerBlocked(target: string, origin: string): boolean {
  * Подготавливает отдельную сессию до загрузки сайта: запрет SW и очистка его кэшей.
  * Обработчики разрешений используют реальные поля обоих callback Electron.
  */
-export async function configureSession(session: SessionLike, origin: string): Promise<void> {
+export async function configureSession(session: SessionLike, origin: PipeOrigins): Promise<void> {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
-    callback({ cancel: serviceWorkerBlocked(details.url, origin) });
+    const shell = sameOrigin(details.url, origin) && new URL(details.url).pathname.startsWith('/__shell/');
+
+    callback({ cancel: serviceWorkerBlocked(details.url, origin)
+      || (shell && (!details.frame || details.frame.parent !== null)) });
   });
   await session.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
 
@@ -190,14 +166,16 @@ export async function configureSession(session: SessionLike, origin: string): Pr
     const securityAllowed = permission !== 'media' || securityOrigin === undefined ||
       (typeof securityOrigin === 'string' && sameOrigin(securityOrigin, origin));
 
-    callback(securityAllowed && permissionAllowed(permission, details.requestingUrl, origin, mediaTypes));
+    callback(details.isMainFrame === true && securityAllowed
+      && permissionAllowed(permission, details.requestingUrl, origin, mediaTypes));
   });
   session.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
     const securityAllowed = details.securityOrigin === undefined ||
       sameOrigin(details.securityOrigin, origin);
     const mediaTypes = details.mediaType === undefined ? [] : [details.mediaType];
 
-    return securityAllowed && permissionAllowed(permission, requestingOrigin, origin, mediaTypes);
+    return details.isMainFrame === true && securityAllowed
+      && permissionAllowed(permission, requestingOrigin, origin, mediaTypes);
   });
 }
 
@@ -261,7 +239,8 @@ export function guardContents(contents: ContentsLike, options: ContentsGuardOpti
   contents.on('will-redirect', (event) => guardNavigation(event, options));
   contents.on('will-attach-webview', (event) => event.preventDefault());
   contents.setWindowOpenHandler((details) => {
-    if (options.onSettingsRequest && isSettingsWindowRequest(details.url, options.origin)) {
+    if (options.onSettingsRequest && sameOrigin(details.url, options.origin)
+      && isSettingsWindowRequest(details.url, new URL(details.url).origin)) {
       try {
         options.onSettingsRequest();
       } catch {
@@ -318,5 +297,17 @@ export function externalUrl(target: string): string | null {
       !url.username && !url.password ? url.href : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Прежнее окно сохраняло сессию сервера в общей partition и могло переслать её другому порту.
+ * Перед установкой нового секрета удаляются и прежние секреты трубы с любыми Path.
+ */
+export async function clearLegacyCookies(cookies: Pick<Session['cookies'], 'get' | 'remove'>): Promise<void> {
+  for (const cookie of await cookies.get({ domain: '127.0.0.1' })) {
+    const url = `${cookie.secure ? 'https' : 'http'}://127.0.0.1${cookie.path || '/'}`;
+
+    await cookies.remove(url, cookie.name);
   }
 }

@@ -81,7 +81,6 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
     mobileDir: 'mobile', 
     chatBindingsDir: 'chats/.bindings',
     userPluginsDataDir: 'state/plugins', 
-    uiReleasesDir: 'state/ui-releases', 
     mobileApkDir: 'state/mobile-apk',
     modelsPath: 'state/models.json',
     usageForecastPath: 'state/usage-forecast.json',
@@ -122,7 +121,8 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
 
   assert.equal(c.rootDir, ROOT);
   assert.equal(c.profilesDir, path.join(ROOT, 'profiles'));
-  assert.equal(c.webDist, path.join(ROOT, 'web/dist'));
+  assert.equal('webDist' in c, false);
+  assert.equal('uiReleasesDir' in c, false);
   assert.equal(c.deepseekGenerationRoot, path.join(ROOT, 'server/runtime/deepseek'));
   assert.equal(c.agentsSeedDir, path.join(ROOT, 'server/seed/agents'));
 });

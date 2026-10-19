@@ -577,3 +577,52 @@ test('web: остановка и прерванный ход не получаю
     assert.equal(result.turnRecovery, undefined, `${reason.kind}: Р2 не подтверждён`);
   }
 });
+
+
+for (const compacted of [false, true]) {
+  test(`web: итог хранит последний измеренный контекст, сжатие=${compacted}`, async (t) => {
+    const frames = [streamChunk({
+      type: 'usage',
+      usage: {
+        inputTokens: 1000,
+        cacheReadTokens: 2000,
+        cacheWriteTokens: 300,
+        outputTokens: 40
+      },
+    })];
+
+    if (compacted) {
+      frames.push(streamChunk({ type: 'usage', usage: { inputTokens: 700, outputTokens: 10 } }, 'a-2'));
+    }
+
+    const { result, progress } = await runWire(t, frames);
+    const expected = compacted ? [3300, 700] : [3300];
+
+    assert.deepEqual(progress.map((item) => item.contextTokens), expected);
+    assert.equal(result.contextTokens, expected.at(-1));
+    assert.equal(result.contextMetric, 'deepseek-web-usage');
+    assert.equal(result.contextWindow, undefined);
+  });
+}
+
+
+test('web: null и некорректный вход не создают измеренный нулевой контекст', async (t) => {
+  for (const inputTokens of [null, undefined, '', true, -1, NaN, Infinity]) {
+    const { result, progress } = await runWire(t, [streamChunk({
+      type: 'usage', usage: { inputTokens, outputTokens: 4 },
+    })]);
+
+    assert.equal(Object.hasOwn(progress.at(-1), 'contextTokens'), false, String(inputTokens));
+    assert.equal(Object.hasOwn(result, 'contextTokens'), false, String(inputTokens));
+  }
+
+  const { result } = await runWire(t, [streamChunk({
+    type: 'usage', usage: {
+      inputTokens: 0,
+      cacheReadTokens: null,
+      cacheWriteTokens: -1
+    },
+  })]);
+
+  assert.equal(result.contextTokens, 0);
+});

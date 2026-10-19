@@ -25,6 +25,7 @@ type Options = {
   name?: string;
   version?: string;
   changed?: () => void;
+  disconnectClient?: (fp: string) => void;
   log?: (event: string) => void;
   registerRoutes?: (app: MobileApp) => void | Promise<void>;
   recoverOperation?: Parameters<typeof startMobileServer>[0]['recoverOperation'];
@@ -182,7 +183,16 @@ export class MobileService {
     const device = await this.devices.revoke(id);
 
     this.server!.disconnectDevice(device.fp);
+    this.options.disconnectClient?.(device.fp);
     this.options.changed?.();
+  }
+
+  /**
+   * Общий API устройств отзывает durable запись независимо от готовности мобильного входа.
+   * Этот адаптер закрывает только существующие v1-сокеты и не требует requireReady.
+   */
+  disconnectDevice(fp: string): void {
+    this.server?.disconnectDevice(fp);
   }
 
   /**

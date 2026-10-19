@@ -24,6 +24,11 @@
         </div>
       </div>
 
+      <div v-if="error" class="notice danger err">
+        <span class="notice-icon" aria-hidden="true">!</span>
+        <p>{{ error }}</p>
+      </div>
+
       <!-- Мастер оставляет на экране только текущую работу. Шаги после записи
            заперты до готовой расшифровки, но назад можно вернуться без потери сеанса. -->
       <div class="wizard-bar">
@@ -138,10 +143,7 @@
 
       <p v-if="storageNote" class="muted storage-note">{{ storageNote }}</p>
 
-      <div v-if="error" class="notice danger err">
-        <span class="notice-icon" aria-hidden="true">!</span>
-        <p>{{ error }}</p>
-      </div>
+
 
       <!-- Прогресс распознавания. Показывается и до первого ответа сервера: разбор
            живёт на сервере, и после возврата на страницу его состояние сначала надо
@@ -707,6 +709,7 @@ import {
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
 import { mediaApi } from '../shared/mediaApi.ts';
+import { saveFile } from '../shared/saveFile.ts';
 import { writeClipboardText } from '../shared/clipboard.ts';
 import { mmss } from '../shared/format.ts';
 import { usePluginsStore } from '../stores/plugins.js';
@@ -1017,20 +1020,17 @@ async function copyText() {
 }
 
 /**
- * Скачивание расшифровки файлом. Object URL освобождается сразу после клика: ссылка
- * нужна ровно на время, пока браузер забирает содержимое.
+ * Сохраняет расшифровку общим способом для браузера и нативной оболочки.
+ * Имя содержит дату, а содержимое не проходит через прикладной журнал.
  */
-function downloadText() {
+async function downloadText() {
   const blob = new Blob([plainText.value], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
 
-  a.href = url;
-  a.download = `расшифровка-${new Date().toISOString().slice(0, 10)}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  try {
+    await saveFile(blob, `расшифровка-${new Date().toISOString().slice(0, 10)}.txt`);
+  } catch (failure) {
+    error.value = failure instanceof Error ? failure.message : 'Не удалось сохранить расшифровку.';
+  }
 }
 
 /** Вся расшифровка одним черновиком — запасной путь, когда разбирать модели нечем. */

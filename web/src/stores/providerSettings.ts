@@ -3,6 +3,7 @@
 
 import { defineStore } from 'pinia';
 import { reactive } from 'vue';
+import { classifyWriteError, type WriteOutcome } from '../features/settings/contracts.ts';
 import { providerSettingsApi } from '../shared/providerSettingsApi.ts';
 import type { ProviderSettingsApi } from '../shared/providerSettingsApi.ts';
 import type { JsonValue, ProviderSettingsCatalog } from '../../../shared/chat/providerSettingsContracts.ts';
@@ -14,8 +15,6 @@ export interface NativeSettingsPanelState {
   saving: boolean;
   error: string;
   message: string;
-  drafts: Record<string, JsonValue>;
-  errors: Record<string, string>;
 }
 
 /**
@@ -31,7 +30,7 @@ export function defineProviderSettingsStore(
     const loads = new Map<string, Promise<void>>();
     const checkedAt = new Map<string, number>();
     const generations = new Map<string, number>();
-    const writes = new Map<string, Promise<void>>();
+    const writes = new Map<string, Promise<WriteOutcome>>();
     const writeEpochs = new Map<string, number>();
     const writeCounts = new Map<string, number>();
 
@@ -42,8 +41,6 @@ export function defineProviderSettingsStore(
         saving: false,
         error: '',
         message: '',
-        drafts: {},
-        errors: {},
       };
 
       return entries[id];
@@ -104,15 +101,10 @@ export function defineProviderSettingsStore(
       fieldId: string,
       operation: 'set' | 'unset',
       value?: JsonValue,
-    ): Promise<void> {
+    ): Promise<WriteOutcome> {
       const state = panel(id);
 
-      if (operation === 'set' && value !== undefined) {
-        state.drafts[fieldId] = value;
-      }
-
-      const chosenDraft = JSON.stringify(operation === 'set' ? value : state.drafts[fieldId]);
-      const previous = writes.get(id) ?? Promise.resolve();
+      const previous = writes.get(id) ?? Promise.resolve({ ok: true } as WriteOutcome);
       const epoch = writeEpochs.get(id) ?? 0;
 
       writeCounts.set(id, (writeCounts.get(id) ?? 0) + 1);
@@ -121,9 +113,14 @@ export function defineProviderSettingsStore(
       const pending = previous.then(async () => {
         try {
           if (epoch !== (writeEpochs.get(id) ?? 0)) {
-            state.errors[fieldId] = 'Запись отменена из-за конфликта; проверьте и повторите выбор';
+            const message = 'Запись отменена из-за конфликта; проверьте и повторите выбор';
 
-            return;
+            return {
+              ok: false,
+              outcome: 'conflict',
+              status: 409,
+              message,
+            } as WriteOutcome;
           }
 
           const catalog = state.catalog;
@@ -154,14 +151,12 @@ export function defineProviderSettingsStore(
           state.loading = false;
           state.catalog = response.catalog;
           checkedAt.set(id, clock());
-          state.errors[fieldId] = '';
+
           state.message = 'Сохранено для следующего запуска';
 
-          if (JSON.stringify(state.drafts[fieldId]) === chosenDraft) {
-            delete state.drafts[fieldId];
-          }
+          return { ok: true } as WriteOutcome;
         } catch (error) {
-          state.errors[fieldId] = error instanceof Error ? error.message : 'Не удалось сохранить настройку';
+          const message = error instanceof Error ? error.message : 'Не удалось сохранить настройку';
 
           const status =
             (error as { status?: unknown; statusCode?: unknown } | null)?.status ??
@@ -171,6 +166,14 @@ export function defineProviderSettingsStore(
             writeEpochs.set(id, epoch + 1);
             await load(id, true);
           }
+
+          return typeof status === 'number'
+            ? classifyWriteError({
+              ok: false,
+              outcome: status === 409 ? 'conflict' : 'failed',
+              status,
+              message,
+            }) : classifyWriteError(error);
         } finally {
           writeCounts.set(id, (writeCounts.get(id) ?? 1) - 1);
           state.saving = (writeCounts.get(id) ?? 0) > 0;
@@ -189,9 +192,9 @@ export function defineProviderSettingsStore(
 
     const save = (id: string, fieldId: string, value: JsonValue) => mutate(id, fieldId, 'set', value);
     const reset = (id: string, fieldId: string) => mutate(id, fieldId, 'unset');
-    const draft = (id: string, fieldId: string, value: JsonValue) => {
-      panel(id).drafts[fieldId] = value;
-    };
+    const commit = (id: string, fieldId: string, operation: 'set' | 'unset', value?: JsonValue) =>
+      mutate(id, fieldId, operation, value);
+
 
     return {
       entries,
@@ -199,7 +202,7 @@ export function defineProviderSettingsStore(
       load,
       save,
       reset,
-      draft,
+      commit,
     };
   });
 }

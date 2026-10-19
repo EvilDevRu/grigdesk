@@ -13,7 +13,8 @@ export type UiLayerName =
   | 'banner'
   | 'tooltip'
   | 'popover'
-  | 'confirm';
+  | 'confirm'
+  | 'session-lock';
 
 export type UiLayerCloseHandler = (event: KeyboardEvent) => boolean | void;
 

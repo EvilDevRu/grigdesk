@@ -41,6 +41,22 @@ export interface UsageResource {
   controls: UsageControl[];
 }
 
+// Полоса окна аккаунта: ключ задаёт идентичность, подписи принадлежат опросу.
+export interface UsageBar {
+  key: string;
+  pct: number;
+  label?: string;
+  group?: string;
+  resetsAt?: string | null;
+  windowMinutes?: number | null;
+  [field: string]: unknown;
+}
+
+// Живое сообщение процесса дополняет последний опрос, не меняя его свежесть.
+export interface ProviderUsagePatch {
+  bars: UsageBar[];
+}
+
 // Состояние лимитов исполнителя целиком.
 export interface ProviderUsage {
   state: string;
@@ -52,6 +68,18 @@ export interface ProviderUsage {
   dataCheckedAt: number;
   stale: boolean;
   retryAt?: number;
+}
+
+/**
+ * Сохраняет сотые процента расхода без шума арифметики с плавающей точкой.
+ * Отсутствующий или некорректный замер не означает свободную квоту.
+ */
+export function usagePercentOrNull(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  return Math.min(100, Math.round(value * 100) / 100);
 }
 
 export function safeHttpsUrl(value: unknown): string | null {

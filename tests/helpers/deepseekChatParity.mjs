@@ -199,7 +199,8 @@ export function registerDeepSeekChatParity(mode = 'binary') {
     assert.match(JSON.stringify(payload.messages), /first-fixture-prompt/);
     assert.match(JSON.stringify(payload.messages), /fixture-instructions-in-cwd/);
     assert.match(JSON.stringify(payload.messages), /second-fixture-prompt/);
-    assert.equal(second.contextMetric, 'unavailable');
+    assert.equal(second.contextMetric, 'deepseek-web-usage');
+    assert.equal(second.contextTokens, 8);
     assert.ok(second.steps.length < 12, 'Дельты не размножают шаги ленты');
     assert.equal(f.launches[0].home, f.launches[1].home);
     assert.notEqual(f.launches[0].launchDir, f.launches[1].launchDir);

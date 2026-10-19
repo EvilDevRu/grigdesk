@@ -20,11 +20,18 @@ test('P1/P2: хост после модалок и очистка при вых�
   const source = await readFile(webFile('src/App.vue'), 'utf8');
 
   assert.match(source, /<DocumentModal \/>[\s\S]*<UiToastHost \/>/);
-  assert.match(source, /useTaskShelfStore\(\)\.clear\(\);\s*dismissAllAlerts\(\);\s*clearAlertHistory\(\)/);
+
+  const clearOnBrowserLogout = [...source.matchAll(/if \(!shell\.present\) \{([\s\S]*?)\n  \}/g)]
+    .find((match) => match[1].includes('useTaskFavoritesStore'));
+
+  assert.ok(clearOnBrowserLogout);
+  assert.match(clearOnBrowserLogout[1], /useTaskFavoritesStore\(\)\.clear\(\)/);
+  assert.match(clearOnBrowserLogout[1], /useTaskShelfStore\(\)\.clear\(\)/);
+  assert.match(clearOnBrowserLogout[1], /clearAlertHistory\(\)/);
 });
 
 test('история: колокольчик стоит в верхней панели рядом с настройками', async () => {
   const source = await readFile(webFile('src/shared/layout/AppShell.vue'), 'utf8');
 
-  assert.match(source, /<AlertHistoryPopover \/>\s*<router-link to="\/settings"/);
+  assert.match(source, /<AlertHistoryPopover \/>\s*<UiIconButton label="Настройки"/);
 });

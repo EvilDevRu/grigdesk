@@ -52,7 +52,11 @@ function rateLimitedAdapter(onUsage, { retryAfterMs = 0 } = {}) {
   };
 }
 
-async function tickFixture(t, { clients, usageTickMs, adapter }) {
+/**
+ * Изолирует реестр, окружение и файлы квот, сохраняя настоящий таймер модуля.
+ * Счётчик чтений отличает опрос адаптера от публикации уже полученного patch.
+ */
+async function tickFixture(t, { clients, usageTickMs, adapter, extraAdapters = [] }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-usage-tick-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const events = [];
@@ -69,18 +73,25 @@ async function tickFixture(t, { clients, usageTickMs, adapter }) {
     config: {
       modelsPath: path.join(root, 'models.json'),
       providerUsageSeenPath: path.join(root, 'usage-seen.json'),
+      envPath: path.join(root, 'fixture.env'),
     },
     claudeAuth: null,
+    env: {},
     usageTickMs,
     getProviderAdapters: async () => new Map([[
       'ticking-provider',
       (adapter ?? tickingAdapter)(() => { usageReads += 1; }),
-    ]]),
+    ], ...extraAdapters.map((entry) => [entry.id, entry])]),
     getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
 
-  return { app, events, reads: () => usageReads };
+  return {
+    app,
+    root,
+    events,
+    reads: () => usageReads
+  };
 }
 
 // Тик короткий, но таймеры Node точности не обещают: ждём условие с запасом.
@@ -230,4 +241,298 @@ test('после отказа вендора снимок называет ср�
   // Своя пауза — три тика по минуте: срок лежит между «через 3 минуты от начала» и «сейчас + 3».
   assert.ok(snapshot.retryAt >= before + 3 * 60_000, 'срок короче собственной паузы');
   assert.ok(snapshot.retryAt <= Date.now() + 3 * 60_000, 'срок длиннее собственной паузы');
+});
+
+
+test('usage-actions использует подменённый реестр исполнителей', async (t) => {
+  const f = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 60000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usageActions: { 'fixture-action': async () => ({ ok: true }) },
+    }),
+  });
+  const response = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/ticking-provider/usage-actions/fixture-action',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, true);
+});
+
+
+const LIVE_RESET = '2030-01-01T05:00:00.000Z';
+const liveBar = (pct) => ({
+  key: 'session',
+  label: 'Сессия',
+  pct,
+  resetsAt: LIVE_RESET
+});
+const liveSnapshot = (pct = 6) => ({ state: 'ok', bars: [liveBar(pct)] });
+
+/**
+ * Стенд живых квот управляет ответом опроса через Promise и держит тик без окон.
+ * У адаптера есть синтетические ключ и действие для проверки независимых сбросов.
+ */
+function liveFixture(t, load = () => liveSnapshot(), options = {}) {
+  return tickFixture(t, {
+    clients: 0,
+    usageTickMs: 60000,
+    ...options,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usage: async () => {
+        onUsage();
+
+        return load();
+      },
+      credentials: [{
+        env: 'SYNTHETIC_USAGE_KEY',
+        kind: 'secret',
+        label: 'Ключ стенда'
+      }],
+      usageActions: { 'fixture-action': async () => ({ ok: true }) },
+    }),
+  });
+}
+
+function sinkOf(app, id = 'ticking-provider') {
+  assert.equal(typeof app.providerUsageSink, 'function');
+
+  return app.providerUsageSink(id);
+}
+
+test('R3: GET сохраняет patch до завершения общего опроса медленного соседа', async (t) => {
+  let slowReads = 0;
+  let finishSlow;
+  let startedSlow;
+  const slowBegun = new Promise((resolve) => {
+    startedSlow = resolve;
+  });
+  let fastValue = 6;
+  const f = await liveFixture(t, () => liveSnapshot(fastValue), {
+    usageTickMs: 2000,
+    extraAdapters: [{
+      ...tickingAdapter(() => {}),
+      id: 'slow-provider',
+      usage: async () => {
+        slowReads += 1;
+
+        if (slowReads === 1) {
+          return liveSnapshot(6);
+        }
+
+        startedSlow();
+
+        return new Promise((resolve) => {
+          finishSlow = resolve;
+        });
+      },
+    }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(8)] }), true);
+  fastValue = 8;
+  await sleep(1050);
+
+  const refreshing = f.app.refreshProvidersUsage();
+
+  await slowBegun;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  try {
+    const during = (await f.app.inject('/api/providers/usage')).json().usage;
+
+    assert.equal(during['ticking-provider'].bars[0].pct, 8);
+  } finally {
+    finishSlow(liveSnapshot(8));
+    await refreshing;
+  }
+
+  const after = (await f.app.inject('/api/providers/usage')).json().usage;
+
+  assert.equal(after['ticking-provider'].bars[0].pct, 8);
+});
+
+test('живой patch во время опроса сохраняется на GET и в полной карте SSE', async (t) => {
+  let finish;
+  let started;
+  const begun = new Promise((resolve) => {
+    started = resolve;
+  });
+  const f = await liveFixture(t, () => new Promise((resolve) => {
+    finish = resolve;
+    started();
+  }), {
+    extraAdapters: [{ ...tickingAdapter(() => {}), id: 'other-provider' }],
+  });
+  const sink = sinkOf(f.app);
+  const reading = f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+
+  await begun;
+  assert.equal(sink({ bars: [liveBar(8)] }), true);
+  assert.equal(f.events.filter((event) => event.event === 'providers-usage').length, 0);
+  finish(liveSnapshot(6));
+
+  const response = await reading;
+  const current = (await f.app.inject('/api/providers/usage')).json().usage;
+  const event = f.events.find((entry) => entry.event === 'providers-usage');
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(current['ticking-provider'].bars[0].pct, 8);
+  assert.equal(event.data.usage['ticking-provider'].bars[0].pct, 8);
+  assert.ok(event.data.usage['other-provider']);
+});
+
+test('опрос после patch вправе уменьшить расход того же окна', async (t) => {
+  let value = 6;
+  const f = await liveFixture(t, () => liveSnapshot(value), { usageTickMs: 20 });
+
+  await f.app.inject('/api/providers/usage');
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(8)] }), true);
+  value = 7;
+  await sleep(25);
+
+  const response = await f.app.inject('/api/providers/usage');
+
+  assert.equal(response.json().usage['ticking-provider'].bars[0].pct, 7);
+});
+
+test('R4: patch соседа после сброса ключа не рассылает неполную карту', async (t) => {
+  const f = await liveFixture(t, () => liveSnapshot(), {
+    extraAdapters: [{
+      ...tickingAdapter(() => {}),
+      id: 'kimi',
+      credentials: [{
+        env: 'SYNTHETIC_KIMI_USAGE_KEY',
+        kind: 'secret',
+        label: 'Ключ стенда',
+      }],
+    }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+
+  const changed = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/kimi/credentials',
+    payload: { values: { SYNTHETIC_KIMI_USAGE_KEY: 'replacement-fixture-key' } },
+  });
+  const before = f.events.filter((entry) => entry.event === 'providers-usage').length;
+  const sink = sinkOf(f.app);
+
+  assert.equal(changed.statusCode, 200);
+  assert.equal(sink({ bars: [liveBar(8)] }), true);
+  assert.equal(sink({ bars: [liveBar(8)] }), false, 'оверлей сохранён без публикации');
+  assert.equal(f.events.filter((entry) => entry.event === 'providers-usage').length, before);
+
+  await f.app.inject({ method: 'POST', url: '/api/providers/usage/refresh' });
+
+  const event = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
+
+  assert.ok(event.data.usage.kimi, 'ближайший опрос публикует полную карту');
+  assert.ok(event.data.usage['ticking-provider']);
+});
+
+test('первый отказ без полос принимает patch без изменения состояния и времени', async (t) => {
+  const f = await liveFixture(t, () => ({ state: 'unavailable', message: 'нет замера' }));
+  const before = (await f.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(8)] }), true);
+
+  const after = (await f.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+
+  assert.equal(after.state, 'unavailable');
+  assert.equal(after.dataCheckedAt, before.dataCheckedAt);
+  assert.deepEqual(after.bars, [liveBar(8)]);
+});
+
+test('повтор и неверный patch не читают вендора и не рассылают повторов', async (t) => {
+  const f = await liveFixture(t);
+
+  await f.app.inject('/api/providers/usage');
+
+  const sink = sinkOf(f.app);
+  const seenBefore = await fs.readFile(path.join(f.root, 'usage-seen.json'), 'utf8').catch(() => null);
+
+  assert.equal(sink({ bars: [liveBar(8)] }), true);
+  assert.equal(sink({ bars: [liveBar(8)] }), false);
+  assert.equal(sink({ bars: [{ key: 'session', pct: NaN }] }), false);
+  assert.equal(sink(null), false);
+  assert.equal(f.reads(), 1);
+  assert.equal(f.events.filter((entry) => entry.event === 'providers-usage').length, 1);
+  assert.equal(await fs.readFile(path.join(f.root, 'usage-seen.json'), 'utf8').catch(() => null), seenBefore);
+});
+
+test('смена ключа инвалидирует только sink своего аккаунта и сохраняет паузу соседа', async (t) => {
+  let neighborReads = 0;
+  const f = await liveFixture(t, () => liveSnapshot(), {
+    extraAdapters: [{
+      ...rateLimitedAdapter(() => {
+        neighborReads += 1;
+      }, { retryAfterMs: 600000 }),
+      id: 'other-provider',
+    }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+
+  const old = sinkOf(f.app);
+  const neighbor = sinkOf(f.app, 'other-provider');
+  const changed = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/ticking-provider/credentials',
+    payload: { values: { SYNTHETIC_USAGE_KEY: 'fixture-key' } },
+  });
+
+  assert.equal(changed.statusCode, 200);
+  assert.equal(old({ bars: [liveBar(8)] }), false);
+  assert.equal(sinkOf(f.app)({ bars: [liveBar(9)] }), true);
+  assert.equal(neighbor({ bars: [liveBar(11)] }), true);
+  await f.app.inject('/api/providers/usage');
+  assert.equal(neighborReads, 1);
+});
+
+test('успешное действие очищает свой оверлей, сохраняя sink и оверлей соседа', async (t) => {
+  const f = await liveFixture(t, () => liveSnapshot(), {
+    extraAdapters: [{ ...tickingAdapter(() => {}), id: 'other-provider' }],
+  });
+
+  await f.app.inject('/api/providers/usage');
+
+  const sink = sinkOf(f.app);
+
+  sink({ bars: [liveBar(8)] });
+  sinkOf(f.app, 'other-provider')({ bars: [{
+    key: 'week',
+    pct: 50,
+    resetsAt: null
+  }] });
+
+  const response = await f.app.inject({
+    method: 'POST',
+    url: '/api/providers/ticking-provider/usage-actions/fixture-action',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  sinkOf(f.app, 'other-provider')({ bars: [{
+    key: 'week',
+    pct: 51,
+    resetsAt: null
+  }] });
+
+  const cleared = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
+
+  assert.equal(cleared.data.usage['ticking-provider'].bars[0].pct, 6);
+  assert.equal(sink({ bars: [liveBar(6)] }), false, 'повтор снимка после очистки');
+  assert.equal(sink({ bars: [liveBar(9)] }), true, 'поколение не сменилось');
+
+  const event = f.events.filter((entry) => entry.event === 'providers-usage').at(-1);
+
+  assert.equal(event.data.usage['other-provider'].bars[0].pct, 51);
 });

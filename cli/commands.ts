@@ -15,6 +15,7 @@ import { readServer, serverCommand, UNIT } from './server.ts';
 import { collectStatus, printable, renderText, toJson } from './status.ts';
 import { readText, realPath } from './system.ts';
 import { openWindow } from './window.ts';
+import { deviceCommand } from './device.ts';
 
 export type { Settings } from '../shared/runtime/runtimeSettings.ts';
 
@@ -116,6 +117,10 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     const envPath = legacyEnv ? path.join(root, '.env') : envFilePath(input);
     const settings = readSettings(root, process.env, await readText(envPath),
       legacyToken ? path.join(root, 'server/.state/cli-token') : undefined);
+
+    if (args.kind === 'device') {
+      return await deviceCommand(args, settings);
+    }
 
     if (args.kind === 'open') {
       const windowCode = await openWindow(root, settings, process.env);

@@ -29,6 +29,7 @@ async function authFixture(t, options = {}) {
   const authStore = new AuthStore({
     legacyAccountPath: path.join(root, 'account.json'),
     sessionsPath: path.join(root, 'sessions.json'),
+    now: options.now,
   });
   let log = '';
   const stream = new Writable({
@@ -456,4 +457,26 @@ test('DW-A10: форма, preflight и query не выдают сессию', as
       assert.equal(response.headers['cache-control'], 'no-store');
     }
   }
+});
+
+test('ключ окна: short=1 даёт сессию на 600 секунд, обычный вход сохраняет 400 дней', async (t) => {
+  let now = 1;
+  const fixture = await authFixture(t, { now: () => now });
+  const short = await request(fixture, {
+    url: '/api/auth/window-session?short=1',
+    headers: { 'x-grigdesk-window-key': windowKey },
+  });
+
+  assert.equal(short.statusCode, 200);
+  assert.match(short.headers['set-cookie'], /Max-Age=600(?:;|$)/);
+
+  const sid = short.headers['set-cookie'].split(';')[0].split('=')[1];
+
+  assert.equal(fixture.authStore.isValidSession(sid), true);
+  now += 600000;
+  assert.equal(fixture.authStore.isValidSession(sid), false);
+
+  const regular = await request(fixture, { headers: { 'x-grigdesk-window-key': windowKey } });
+
+  assert.match(regular.headers['set-cookie'], /Max-Age=34560000(?:;|$)/);
 });

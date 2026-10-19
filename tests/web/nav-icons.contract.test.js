@@ -56,24 +56,13 @@ test('каждый системный пункт навигации имеет �
   assert.deepEqual(missing, []);
 });
 
-// Вторая копия карты иконок уже расходилась с первой: у SSH её просто не было, и
-// карточка плагина падала на запасную «деталь пазла».
-test('настройки берут иконки из общей карты, а не из своей копии', async () => {
-  const catalog = await readFile(
-    new URL('web/src/views/settings/PluginsCatalog.vue', root), 'utf8',
-  );
-  const dialog = await readFile(
-    new URL('web/src/views/settings/PluginSettingsDialog.vue', root), 'utf8',
-  );
+// Список и страницы берут controls и иконки из общей границы UI.
+// После переноса формы не поддерживают собственные карты рисунков.
+test('страницы плагинов используют общую границу UI без собственной карты', async () => {
+  for (const name of ['PluginPage', 'PluginInstallPage']) {
+    const source = await readFile(new URL(`web/src/views/settings/pages/${name}.vue`, root), 'utf8');
 
-  assert.deepEqual({
-    ownMap: catalog.includes('const PLUGIN_ICON_PATHS = {')
-      || dialog.includes('const PLUGIN_ICON_PATHS = {'),
-    catalogImport: catalog.includes("pluginIconPath } from '../../shared/navIcons.ts'"),
-    dialogImport: dialog.includes("pluginIconPath } from '../../shared/navIcons.ts'"),
-  }, {
-    ownMap: false,
-    catalogImport: true,
-    dialogImport: true,
-  });
+    assert.doesNotMatch(source, /const PLUGIN_ICON_PATHS/);
+    assert.match(source, /from '\.\.\/\.\.\/\.\.\/ui\.ts'/);
+  }
 });

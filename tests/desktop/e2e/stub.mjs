@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import { sealUiRelease } from '../../../desktop/src/uiRelease.ts';
 import path from 'node:path';
 
 /**
@@ -60,14 +62,26 @@ export async function startStub({
 <body><h1 id="stub">Тестовое окно</h1>
 <p id="kind">${second ? 'Дочернее окно' : 'Главное окно'}</p>
 <p id="cookie">cookie:${cookiePresent ? 'yes' : 'no'}</p>
-<a id="same" href="/second" target="_blank">Своё окно</a>
+<a id="same" href="/second.html" target="_blank">Своё окно</a>
 <a id="ext" href="${links.popup}" target="_blank">Внешнее окно</a>
 <a id="nav-ext" href="${links.navigation}">Внешний переход</a>
 <a id="stand" href="${links.stand}">Другой порт</a>
-<a id="redirect" href="/redirect">Перенаправление</a>
+<a id="redirect" href="/api/redirect">Перенаправление</a>
 <button id="notify">Разрешить уведомления</button>
 <p id="notification-result"></p>
+<dialog id="stub-settings"><button id="stub-settings-close">Закрыть настройки</button></dialog>
 <script>
+fetch('/api/auth/state').then(response => response.json()).then(state => {
+  document.querySelector('#cookie').textContent = 'cookie:' + (state.authenticated ? 'yes' : 'no');
+});
+window.__settingsEvents = 0;
+window.addEventListener('grigdesk:open-settings', () => {
+  window.__settingsEvents += 1;
+  document.querySelector('#stub-settings').showModal();
+});
+document.querySelector('#stub-settings-close').onclick = () => {
+  document.querySelector('#stub-settings').close();
+};
 document.querySelector('#notify').onclick = async () => {
   document.querySelector('#notification-result').textContent = await Notification.requestPermission();
 };
@@ -90,8 +104,14 @@ document.querySelector('#notify').onclick = async () => {
         (request.headers.cookie ?? '').split(/;\s*/u).includes(`stub=${packagedCookie}`),
     });
     response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('X-GrigDesk-Api', '0.1');
 
-    if (pathname === '/api/auth/state') {
+    if (pathname === '/api/client/hello') {
+      response.setHeader('Content-Type', 'application/json');
+      response.statusCode = authenticated(request) ? 200 : 401;
+      response.end(JSON.stringify(authenticated(request)
+        ? { name: 'Фикстура окна' } : { error: 'unauthorized' }));
+    } else if (pathname === '/api/auth/state') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({
         configured: Boolean(authKey),
@@ -166,7 +186,7 @@ document.querySelector('#notify').onclick = async () => {
       observations.swRequests += 1;
       response.setHeader('Content-Type', 'application/javascript');
       response.end('self.addEventListener("install", () => self.skipWaiting());');
-    } else if (pathname === '/redirect') {
+    } else if ((pathname === '/redirect' || pathname === '/api/redirect')) {
       response.writeHead(302, { Location: links.redirect });
       response.end();
     } else if (pathname === '/probe/loaded' && request.method === 'POST') {
@@ -183,6 +203,16 @@ document.querySelector('#notify').onclick = async () => {
       response.end();
     }
   }
+
+  const uiDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-window-ui-'));
+
+  await mkdir(path.join(uiDir, 'assets'));
+  await writeFile(path.join(uiDir, 'index.html'), html({ headers: {} }, false));
+  await writeFile(path.join(uiDir, 'second.html'), html({ headers: {} }, true));
+  await writeFile(path.join(uiDir, 'assets/probe.js'), 'globalThis.desktopNetworkProbe = "loaded";');
+  await writeFile(path.join(uiDir, 'sw.js'), 'self.addEventListener("fetch", () => {});');
+  await writeFile(path.join(uiDir, 'api-version.json'), '{"major":0,"minor":1}');
+  await sealUiRelease(uiDir);
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -206,10 +236,15 @@ document.querySelector('#notify').onclick = async () => {
 
   return {
     server,
+    uiDir,
     address,
     observations,
     links,
     close,
+    async dispose() {
+      await close();
+      await rm(uiDir, { recursive: true, force: true });
+    },
     revokeSessions: () => sessions.clear(),
   };
 }

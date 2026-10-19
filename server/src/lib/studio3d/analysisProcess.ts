@@ -1,11 +1,12 @@
 // Единственная очередь тяжёлых GLB операций. Buffer/native память ограничивается
 // watchdog дочернего процесса, heap — флагом Node; Fastify получает типизированный отказ.
 import { spawn } from 'node:child_process';
+
+import { helperCommand } from '../runtimePaths.ts';
 import { constants as FS, promises as fs } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { parseStudio3d } from '../../../../shared/studio3d/studio3dContracts.ts';
 import { DocumentReader } from '../documents/reader.ts';
@@ -15,7 +16,6 @@ import type { GlbStats, WrapOptions } from './glb.ts';
 import { openVerified, pinDirectory } from './safePath.ts';
 import type { PinnedDirectory } from './safePath.ts';
 
-const workerFile = fileURLToPath(new URL('./analysisWorker.ts', import.meta.url));
 const reader = new DocumentReader();
 const queueKey = 'studio3d:analysis-process';
 const OUTPUT_MAX_BYTES = 16 * 1024 * 1024;
@@ -153,9 +153,10 @@ function runWorker(
   deps: AnalysisDeps,
 ): Promise<GlbStats> {
   return new Promise((resolve, reject) => {
-    const child = (deps.spawnImpl ?? spawn)(process.execPath, [
+    const worker = helperCommand('studio3d-analysis-worker', []);
+    const child = (deps.spawnImpl ?? spawn)(worker.command, [
       '--max-old-space-size=256',
-      workerFile,
+      ...worker.args,
       JSON.stringify(request),
     ], {
       env: { PATH: process.env.PATH, LANG: 'C.UTF-8' },

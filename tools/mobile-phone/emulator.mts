@@ -1,3 +1,4 @@
+import type { DeviceIdentity, IdentityStore } from '../../shared/desktop/deviceIdentity.ts';
 import { createServer } from 'node:http';
 import https from 'node:https';
 import type { ClientRequest, IncomingHttpHeaders } from 'node:http';
@@ -101,16 +102,6 @@ function validIntent(item: any): item is OperationIntent {
     item.createdAt > 0
   );
 }
-
-export type DeviceIdentity = {
-  key: string;
-  cert: string;
-};
-
-export type IdentityStore = {
-  load(directory: string): Promise<DeviceIdentity>;
-  create(directory: string, name: string): Promise<DeviceIdentity>;
-};
 
 export type PhoneOptions = {
   monotonic?: () => number;

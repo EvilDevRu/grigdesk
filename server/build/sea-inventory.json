@@ -1,0 +1,1857 @@
+{
+  "schema": 1,
+  "points": [
+    {
+      "file": "cli/commands.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "helper",
+      "detail": "CLI собирается отдельным helper; корень и пути берутся из runtimePaths."
+    },
+    {
+      "file": "cli/commands.ts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "helper",
+      "detail": "CLI собирается отдельным helper; корень и пути берутся из runtimePaths."
+    },
+    {
+      "file": "deploy/desktop.sh",
+      "construct": "shell-ref",
+      "target": "server/runtime/helpers/select-sea-server.mjs",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "asset",
+      "detail": "Выбор и проверка SEA-комплекта окна; runtime командой --check-runtime, данные отдельно."
+    },
+    {
+      "file": "deploy/desktop.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/selectSeaServer.mts",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "asset",
+      "detail": "Выбор и проверка SEA-комплекта окна; runtime командой --check-runtime, данные отдельно."
+    },
+    {
+      "file": "deploy/desktop.sh",
+      "construct": "shell-ref",
+      "target": "shared/desktop/desktopRuntime.ts",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "development-only",
+      "detail": "Source install сохраняет выбор SEA v3 общим parser; пакетный путь использует helper, этот TS ему не нужен."
+    },
+    {
+      "file": "deploy/install.sh",
+      "construct": "shell-ref",
+      "target": "server/grigdesk-server",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "package",
+      "detail": "Явная команда SEA и проверка готового R; source app.ts только в прежней ветке."
+    },
+    {
+      "file": "deploy/lib/media-runtime.sh",
+      "construct": "shell-ref",
+      "target": "server/requirements-media-cuda.txt",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "requirements копируются в комплект и ставятся из него."
+    },
+    {
+      "file": "deploy/lib/media-runtime.sh",
+      "construct": "shell-ref",
+      "target": "server/requirements-media.txt",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "requirements копируются в комплект и ставятся из него."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/grigdesk-server",
+      "count": 2,
+      "owner": "task-17",
+      "fate": "package",
+      "detail": "Явная команда SEA и проверка готового R; source app.ts только в прежней ветке."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/runtime/helpers/launch-sea-server.mjs",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "helper",
+      "detail": "Раннее окружение ручного запуска, без NODE_OPTIONS; helper заменяет себя собственным SEA через execve."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/dataHomeCheck.mts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "Shell на прежнем пути находит helper data-home и модуль legacyBrand комплекта."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/src/app.ts",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "development-only",
+      "detail": "Явная команда SEA и проверка готового R; source app.ts только в прежней ветке."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "shared/runtime/legacyBrand.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "Shell на прежнем пути находит helper data-home и модуль legacyBrand комплекта."
+    },
+    {
+      "file": "engine/lib/codex-failure.mjs",
+      "construct": "shell-ref",
+      "target": "server/src/lib/runnerFailure.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "JS движка в staging получает обёртку на модуль сервера."
+    },
+    {
+      "file": "engine/lib/runners/deepseek.sh",
+      "construct": "shell-ref",
+      "target": "server/deepseek-runtime-contract.json",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "engine/lib/runners/deepseek.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/deepseekRunner.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "engine/lib/runners/deepseek.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/deepseekRuntimeInfo.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "engine/lib/runners/deepseek.sh",
+      "construct": "shell-ref",
+      "target": "server/src/lib/deepseek/distribution.ts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "engine/lib/runtime-usage.mjs",
+      "construct": "shell-ref",
+      "target": "server/src/lib/analytics/canonical.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
+    },
+    {
+      "file": "engine/lib/runtime-usage.mjs",
+      "construct": "shell-ref",
+      "target": "server/src/lib/analytics/durableFs.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
+    },
+    {
+      "file": "engine/lib/runtime-usage.mjs",
+      "construct": "shell-ref",
+      "target": "server/src/lib/analytics/normalizers.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
+    },
+    {
+      "file": "engine/lib/runtime-usage.mjs",
+      "construct": "shell-ref",
+      "target": "server/src/lib/analytics/usageDocument.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
+    },
+    {
+      "file": "engine/lib/runtime-usage.mjs",
+      "construct": "shell-ref",
+      "target": "server/src/lib/runnerFailure.ts",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
+    },
+    {
+      "file": "server/scripts/buildSea.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "development-only",
+      "detail": "Сборка и локальная проверка релиза, не входит в runtime."
+    },
+    {
+      "file": "server/scripts/buildSea.mts",
+      "construct": "import-meta",
+      "target": "dirname",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "development-only",
+      "detail": "Сборка и локальная проверка релиза, не входит в runtime."
+    },
+    {
+      "file": "server/scripts/buildSea.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "development-only",
+      "detail": "Сборка и локальная проверка релиза, не входит в runtime."
+    },
+    {
+      "file": "server/scripts/dataHomeCheck.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "helper",
+      "detail": "dataHomeCheck становится helper; свой корень берётся из runtimePaths."
+    },
+    {
+      "file": "server/scripts/dataHomeCheck.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "server-bundle",
+      "detail": "Корень кода для data-home считается от расположения helper."
+    },
+    {
+      "file": "server/scripts/deepseekHarnessInstall.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekRunner.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekRunner.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 3,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekRunner.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekRunner.mts",
+      "construct": "resource-ref",
+      "target": "server/scripts/deepseekStatusMcp.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekStatusMcp.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 2,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekStatusMcp.mts",
+      "construct": "resource-ref",
+      "target": "engine/lib/stage-progress.sh",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/deepseekStatusMcp.mts",
+      "construct": "resource-ref",
+      "target": "engine/lib/stage-result.sh",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/glmLiveSmoke.mts",
+      "construct": "create-require",
+      "target": "",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/glmLiveSmoke.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 2,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/glmLiveSmoke.mts",
+      "construct": "resource-ref",
+      "target": "server/package.json",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/launchSeaServer.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "helper",
+      "detail": "Раннее окружение ручного запуска, без NODE_OPTIONS; helper заменяет себя собственным SEA через execve."
+    },
+    {
+      "file": "server/scripts/prepareDeepSeekRuntime.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/prepareDeepSeekRuntime.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/sea/buildSteps.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-1",
+      "fate": "helper",
+      "detail": "Сборщик SEA запускает postject своим Node; в бандл и helper комплекта не входит."
+    },
+    {
+      "file": "server/scripts/sea/dependencies.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 2,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencies.mts",
+      "construct": "resource-ref",
+      "target": "server/build/licenses/npm-fallbacks.json",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencies.mts",
+      "construct": "resource-ref",
+      "target": "server/scripts/sea/dependencyProbe.mts",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencyProbe.mts",
+      "construct": "create-require",
+      "target": "",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencyProbe.mts",
+      "construct": "dynamic-import",
+      "target": "<computed>",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencyProbe.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencyProbe.mts",
+      "construct": "require-resolve",
+      "target": "<computed>",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/sea/dependencyProbe.mts",
+      "construct": "require-resolve",
+      "target": "playwright-core/package.json",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Проба production dependencies, native ABI и сбор лицензий выполняются только при сборке staging."
+    },
+    {
+      "file": "server/scripts/selectSeaServer.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "helper",
+      "detail": "Выбор и проверка SEA-комплекта окна; runtime командой --check-runtime, данные отдельно."
+    },
+    {
+      "file": "server/scripts/showcaseBrowserInstall.mts",
+      "construct": "dynamic-import",
+      "target": "playwright-core",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "package",
+      "detail": "Playwright остаётся внешним npm-пакетом; импорт ленивый."
+    },
+    {
+      "file": "server/scripts/showcaseBrowserInstall.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Установщик браузера запускается вложенным Node как helper."
+    },
+    {
+      "file": "server/scripts/showcaseVoiceBench.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "development-only",
+      "detail": "Стенд сравнения голосов не входит в runtime-поставку."
+    },
+    {
+      "file": "server/scripts/showcaseVoiceInstall.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 3,
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Установщик голосов запускается вложенным Node как helper."
+    },
+    {
+      "file": "server/scripts/showcaseVoiceInstall.mts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/showcase/voice/piperSynth.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Скрипты синтеза копируются рядом с helper."
+    },
+    {
+      "file": "server/scripts/showcaseVoiceInstall.mts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/showcase/voice/qwenSynth.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Скрипты синтеза копируются рядом с helper."
+    },
+    {
+      "file": "server/scripts/showcaseVoiceInstall.mts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/showcase/voice/sileroSynth.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Скрипты синтеза копируются рядом с helper."
+    },
+    {
+      "file": "server/scripts/testSea.mts",
+      "construct": "import-meta",
+      "target": "dirname",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "development-only",
+      "detail": "Сборка и локальная проверка релиза, не входит в runtime."
+    },
+    {
+      "file": "server/scripts/testSea.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "development-only",
+      "detail": "Сборка и локальная проверка релиза, не входит в runtime."
+    },
+    {
+      "file": "server/scripts/verifyDeepSeekCandidate.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/verifyDeepSeekCandidate.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/app.js",
+      "construct": "dynamic-import",
+      "target": "./app.ts",
+      "count": 1,
+      "owner": "task-3",
+      "fate": "development-only",
+      "detail": "Исходная точка входа app.js остаётся только для запуска из дерева."
+    },
+    {
+      "file": "server/src/lib/analytics/durableFs.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-4",
+      "fate": "server-bundle",
+      "detail": "URL python-helper переписывается плагином задачи 4."
+    },
+    {
+      "file": "server/src/lib/analytics/durableFs.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/analytics/dirfd-helper.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "dirfd-helper.py копируется в комплект как ресурс."
+    },
+    {
+      "file": "server/src/lib/chat/permission-mcp.js",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "MCP разрешений собирается как helper; guard использует isDirectRun."
+    },
+    {
+      "file": "server/src/lib/db/engineDirectory.ts",
+      "construct": "dynamic-import",
+      "target": "<computed>",
+      "count": 1,
+      "owner": "task-5",
+      "fate": "server-bundle",
+      "detail": "Обход каталога остаётся для явного dir; в SEA по умолчанию используется таблица."
+    },
+    {
+      "file": "server/src/lib/db/engineTable.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-5",
+      "fate": "server-bundle",
+      "detail": "Исходная таблица движков; сборщик заменяет её литеральными импортами."
+    },
+    {
+      "file": "server/src/lib/deepseek/profile.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 2,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/deepseek/profile.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/deepseek/profile.ts",
+      "construct": "resource-ref",
+      "target": "server/scripts/deepseekInstructionsHook.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/deepseek/runtimeProcess.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/deepseek/runtimeProcess.ts",
+      "construct": "import-meta",
+      "target": "dirname",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/deepseek/runtimeProcess.ts",
+      "construct": "resource-ref",
+      "target": "server/runtime/deepseek",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/executors/_direct-ssh-policy-hook.js",
+      "construct": "dynamic-import",
+      "target": "./_directSshPolicy.ts",
+      "count": 1,
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "Литеральная политика входит в helper; загрузка внутри try превращает сбой каталога в deny."
+    },
+    {
+      "file": "server/src/lib/executors/_direct-ssh-policy-hook.js",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "Хук SSH собирается как helper; guard использует isDirectRun."
+    },
+    {
+      "file": "server/src/lib/executors/_directSshPolicy.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "Путь хука берётся из контракта helper, не из исходника."
+    },
+    {
+      "file": "server/src/lib/executors/_directSshPolicy.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/executors/_direct-ssh-policy-hook.js",
+      "count": 1,
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "_direct-ssh-policy-hook.js собирается как helper."
+    },
+    {
+      "file": "server/src/lib/executors/registryTable.ts",
+      "construct": "dynamic-import",
+      "target": "<computed>",
+      "count": 1,
+      "owner": "task-5",
+      "fate": "server-bundle",
+      "detail": "Исходная таблица исполнителей; сборщик заменяет её литеральными импортами."
+    },
+    {
+      "file": "server/src/lib/executors/registryTable.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-5",
+      "fate": "server-bundle",
+      "detail": "Исходная таблица исполнителей; сборщик заменяет её литеральными импортами."
+    },
+    {
+      "file": "server/src/lib/executors/work-mcp.js",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-7",
+      "fate": "helper",
+      "detail": "MCP-хук остаётся отдельным helper; guard входа проверяет argv helper-файла."
+    },
+    {
+      "file": "server/src/lib/factoryRouteCli.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/glm/profile.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/glm/profile.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/glm/profile.ts",
+      "construct": "resource-ref",
+      "target": "server/scripts/glmToolPolicyHook.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/grigDeskRelease.ts",
+      "construct": "dynamic-import",
+      "target": "./deepseek/runtimeProcess.ts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/src/lib/grigDeskRelease.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Проверка Node для git-обновления не входит в packaged-ветку."
+    },
+    {
+      "file": "server/src/lib/grigDeskUpdate.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 2,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Исходный git-обновлятель в packaged-режиме не запускается."
+    },
+    {
+      "file": "server/src/lib/grigDeskUpdate.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Исходный git-обновлятель в packaged-режиме не запускается."
+    },
+    {
+      "file": "server/src/lib/grigDeskUpdate.ts",
+      "construct": "resource-ref",
+      "target": "server/src/workers/grigdesk-update-worker.js",
+      "count": 1,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Исходный git-обновлятель в packaged-режиме не запускается."
+    },
+    {
+      "file": "server/src/lib/kimi/sandbox.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-11",
+      "fate": "deferred-deepseek",
+      "detail": "Отложено: песочница Kimi/DeepSeek входит в отложенную задачу 11."
+    },
+    {
+      "file": "server/src/lib/media/ingest.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Медиа-worker запускается вложенным Node."
+    },
+    {
+      "file": "server/src/lib/media/ingest.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 2,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Пути worker и python-скрипта берутся из контракта ресурсов."
+    },
+    {
+      "file": "server/src/lib/media/ingest.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/media/ingestWorker.ts",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "ingestWorker.ts собирается как helper."
+    },
+    {
+      "file": "server/src/lib/media/ingest.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/media/transcribe.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "transcribe.py копируется как ресурс."
+    },
+    {
+      "file": "server/src/lib/media/ingestWorker.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-7",
+      "fate": "helper",
+      "detail": "Worker медиа собирается как helper; guard входа сравнивает argv с entry helper."
+    },
+    {
+      "file": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "construct": "fork",
+      "target": "",
+      "count": 1,
+      "owner": "task-10",
+      "fate": "helper",
+      "detail": "Supervisor собирается как helper; самоперезапуск берёт реальный entry."
+    },
+    {
+      "file": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-10",
+      "fate": "helper",
+      "detail": "Supervisor собирается как helper; самоперезапуск берёт реальный entry."
+    },
+    {
+      "file": "server/src/lib/pluginInstall/runCommand.ts",
+      "construct": "fork",
+      "target": "",
+      "count": 1,
+      "owner": "task-10",
+      "fate": "helper",
+      "detail": "fork получает execPath вложенного Node и путь собранного helper."
+    },
+    {
+      "file": "server/src/lib/runtimeBuildContext.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-2",
+      "fate": "server-bundle",
+      "detail": "Исходная реализация контекста; сборщик заменяет её контекстом SEA или helper."
+    },
+    {
+      "file": "server/src/lib/runtimeBuildContext.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-2",
+      "fate": "server-bundle",
+      "detail": "Исходная реализация контекста; сборщик заменяет её контекстом SEA или helper."
+    },
+    {
+      "file": "server/src/lib/runtimeBuildContext.ts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-2",
+      "fate": "server-bundle",
+      "detail": "Исходная реализация контекста; сборщик заменяет её контекстом SEA или helper."
+    },
+    {
+      "file": "server/src/lib/runtimeImport.ts",
+      "construct": "create-require",
+      "target": "",
+      "count": 1,
+      "owner": "task-6",
+      "fate": "server-bundle",
+      "detail": "Внешний bridge комплекта; вычисляемый import остаётся только в source-ветке."
+    },
+    {
+      "file": "server/src/lib/runtimeImport.ts",
+      "construct": "dynamic-import",
+      "target": "<computed>",
+      "count": 1,
+      "owner": "task-6",
+      "fate": "server-bundle",
+      "detail": "Внешний bridge комплекта; вычисляемый import остаётся только в source-ветке."
+    },
+    {
+      "file": "server/src/lib/seaCli.ts",
+      "construct": "dynamic-import",
+      "target": "../app.ts",
+      "count": 1,
+      "owner": "task-3",
+      "fate": "server-bundle",
+      "detail": "Литеральный ленивый import app.ts входит в SEA-бандл; help/version его не вызывают."
+    },
+    {
+      "file": "server/src/lib/showcase/browserInstall.ts",
+      "construct": "create-require",
+      "target": "",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "package",
+      "detail": "playwright-core остаётся внешним пакетом server/node_modules."
+    },
+    {
+      "file": "server/src/lib/showcase/browserInstall.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-4",
+      "fate": "server-bundle",
+      "detail": "База createRequire переписывается на URL пакета комплекта."
+    },
+    {
+      "file": "server/src/lib/showcase/browserInstall.ts",
+      "construct": "require-resolve",
+      "target": "playwright-core/package.json",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "package",
+      "detail": "package.json Playwright разрешается из server/node_modules комплекта."
+    },
+    {
+      "file": "server/src/lib/showcase/render/recorder.ts",
+      "construct": "dynamic-import",
+      "target": "playwright-core",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "package",
+      "detail": "Playwright импортируется лениво из внешнего npm-пакета."
+    },
+    {
+      "file": "server/src/lib/showcase/render/runner.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Рендер-worker запускается вложенным Node."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/install.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 3,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Пути установщика и requirements берутся из контракта ресурсов."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/install.ts",
+      "construct": "resource-ref",
+      "target": "server/requirements-showcase-qwen.txt",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "requirements копируются как ресурсы."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/install.ts",
+      "construct": "resource-ref",
+      "target": "server/requirements-showcase-silero.txt",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "requirements копируются как ресурсы."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/install.ts",
+      "construct": "resource-ref",
+      "target": "server/requirements-showcase-voice.txt",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "requirements копируются как ресурсы."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/piper.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "piperSynth.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/piper.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/showcase/voice/piperSynth.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "piperSynth.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/qwen.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "qwenSynth.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/qwen.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/showcase/voice/qwenSynth.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "qwenSynth.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/silero.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "sileroSynth.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/lib/showcase/voice/silero.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/showcase/voice/sileroSynth.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "sileroSynth.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/lib/speech/capabilities.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 2,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-пробы речи копируются как ресурсы."
+    },
+    {
+      "file": "server/src/lib/speech/capabilities.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/speech/cuda-probe.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-пробы речи копируются как ресурсы."
+    },
+    {
+      "file": "server/src/lib/speech/capabilities.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/speech/model-cache-probe.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-пробы речи копируются как ресурсы."
+    },
+    {
+      "file": "server/src/lib/speech/modelJobs.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-worker моделей копируется как ресурс."
+    },
+    {
+      "file": "server/src/lib/speech/modelJobs.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/speech/model-jobs-worker.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-worker моделей копируется как ресурс."
+    },
+    {
+      "file": "server/src/lib/speech/streamProcess.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-stream-worker копируется как ресурс."
+    },
+    {
+      "file": "server/src/lib/speech/streamProcess.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/speech/stream-worker.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-stream-worker копируется как ресурс."
+    },
+    {
+      "file": "server/src/lib/speech/warmup.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-warmup копируется как ресурс."
+    },
+    {
+      "file": "server/src/lib/speech/warmup.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/speech/warmup-worker.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-warmup копируется как ресурс."
+    },
+    {
+      "file": "server/src/modules/routes/draftStore.ts",
+      "construct": "dynamic-import",
+      "target": "./publicationJournal.ts",
+      "count": 2,
+      "owner": "task-14",
+      "fate": "server-bundle",
+      "detail": "Ленивый литеральный import включается esbuild в CJS-бандл."
+    },
+    {
+      "file": "server/src/modules/routes/editorCapabilities.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-4",
+      "fate": "server-bundle",
+      "detail": "URL engine CLI переписывается плагином задачи 4."
+    },
+    {
+      "file": "server/src/modules/routes/editorCapabilities.ts",
+      "construct": "resource-ref",
+      "target": "engine/bin/factory-route",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "asset",
+      "detail": "engine/bin/factory-route поставляется вместе с движком."
+    },
+    {
+      "file": "server/src/modules/routes/editorEngine.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-4",
+      "fate": "server-bundle",
+      "detail": "URL engine CLI переписывается плагином задачи 4."
+    },
+    {
+      "file": "server/src/modules/routes/editorEngine.ts",
+      "construct": "resource-ref",
+      "target": "engine/bin/factory-route",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "asset",
+      "detail": "engine/bin/factory-route поставляется вместе с движком."
+    },
+    {
+      "file": "server/src/modules/routes/publicationService.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-4",
+      "fate": "server-bundle",
+      "detail": "URL engine CLI переписывается плагином задачи 4."
+    },
+    {
+      "file": "server/src/modules/routes/publicationService.ts",
+      "construct": "resource-ref",
+      "target": "engine/bin/factory-route",
+      "count": 1,
+      "owner": "task-12",
+      "fate": "asset",
+      "detail": "engine/bin/factory-route поставляется вместе с движком."
+    },
+    {
+      "file": "server/src/modules/routes/store.ts",
+      "construct": "dynamic-import",
+      "target": "./publicationJournal.ts",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "server-bundle",
+      "detail": "Ленивый литеральный import включается esbuild в CJS-бандл."
+    },
+    {
+      "file": "server/src/modules/studio3d/files.ts",
+      "construct": "dynamic-import",
+      "target": "node:fs",
+      "count": 1,
+      "owner": "task-14",
+      "fate": "server-bundle",
+      "detail": "Встроенный модуль node:fs разрешается Node и не требует файлового loader-а."
+    },
+    {
+      "file": "server/src/modules/terminal/index.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "pty-helper.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/modules/terminal/index.ts",
+      "construct": "resource-ref",
+      "target": "server/src/modules/terminal/pty-helper.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "pty-helper.py копируется как ресурс, путь переписывается задачей 4."
+    },
+    {
+      "file": "server/src/startDataHome.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-2",
+      "fate": "server-bundle",
+      "detail": "Корень кода для data-home берётся из runtime-контракта, а не из import.meta исходника."
+    },
+    {
+      "file": "server/src/startDataHome.ts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-2",
+      "fate": "server-bundle",
+      "detail": "Корень кода для data-home берётся из runtime-контракта, а не из import.meta исходника."
+    },
+    {
+      "file": "server/src/workers/grigdesk-update-worker.js",
+      "construct": "dynamic-import",
+      "target": "../../../tools/deepseekRuntimePublication.ts",
+      "count": 1,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
+    },
+    {
+      "file": "server/src/workers/grigdesk-update-worker.js",
+      "construct": "dynamic-import",
+      "target": "../lib/deepseek/runtimeArtifact.ts",
+      "count": 1,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
+    },
+    {
+      "file": "server/src/workers/grigdesk-update-worker.js",
+      "construct": "exec-path",
+      "target": "",
+      "count": 2,
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
+    }
+  ],
+  "resources": [
+    {
+      "path": "VERSION",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Версия комплекта читается при сборке и в --version."
+    },
+    {
+      "path": "server/build/node-runtime.json",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-1",
+      "fate": "development-only",
+      "detail": "Закреплённые Node 24.21.0 и SHA256 архива для сборки."
+    },
+    {
+      "path": "server/build/helpers.json",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-2",
+      "fate": "asset",
+      "detail": "Каталог helper-ов: id, исходный вход и описание."
+    },
+    {
+      "path": "server/build/esmBridge.cjs",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-6",
+      "fate": "asset",
+      "detail": "Шаблон внешнего bridge для файлового import() плагинов."
+    },
+    {
+      "path": "server/package.json",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "package",
+      "detail": "Манифест серверных зависимостей и точка файлового require."
+    },
+    {
+      "path": "server/package-lock.json",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "package",
+      "detail": "Lockfile для npm ci --omit=dev при упаковке."
+    },
+    {
+      "path": "server/seed/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Начальные описания агентов копируются в комплект."
+    },
+    {
+      "path": "server/requirements-media.txt",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Зависимости медиа ставятся из комплекта."
+    },
+    {
+      "path": "server/requirements-media-cuda.txt",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "CUDA-вариант зависимостей медиа."
+    },
+    {
+      "path": "server/requirements-showcase-qwen.txt",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Зависимости голосового движка qwen."
+    },
+    {
+      "path": "server/requirements-showcase-silero.txt",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Зависимости голосового движка silero."
+    },
+    {
+      "path": "server/requirements-showcase-voice.txt",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Общие зависимости голосовой части."
+    },
+    {
+      "path": "server/src/lib/analytics/dirfd-helper.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-helper надёжной записи аналитики."
+    },
+    {
+      "path": "server/src/lib/analytics/dirfd-replace-helper.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "development-only",
+      "detail": "Ссылок в дереве нет; в поставку не копировать без отдельной проверки."
+    },
+    {
+      "path": "server/src/lib/media/transcribe.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-расшифровка медиа."
+    },
+    {
+      "path": "server/src/lib/showcase/voice/piperSynth.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-синтез piper."
+    },
+    {
+      "path": "server/src/lib/showcase/voice/qwenSynth.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-синтез qwen."
+    },
+    {
+      "path": "server/src/lib/showcase/voice/sileroSynth.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-синтез silero."
+    },
+    {
+      "path": "server/src/lib/speech/cuda-probe.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Проба CUDA для речи."
+    },
+    {
+      "path": "server/src/lib/speech/model-cache-probe.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Проба кэша моделей речи."
+    },
+    {
+      "path": "server/src/lib/speech/model-jobs-worker.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-worker заданий моделей."
+    },
+    {
+      "path": "server/src/lib/speech/stream-worker.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-worker потоковой речи."
+    },
+    {
+      "path": "server/src/lib/speech/warmup-worker.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python-worker прогрева речи."
+    },
+    {
+      "path": "server/src/modules/terminal/pty-helper.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Python PTY-helper терминала."
+    },
+    {
+      "path": "engine/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-12",
+      "fate": "asset",
+      "detail": "Движок копируется в комплект; JS bridge-файлы заменяются в staging."
+    },
+    {
+      "path": "deploy/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-17",
+      "fate": "asset",
+      "detail": "Запускалки и shell-зависимости комплекта."
+    },
+    {
+      "path": "bin/grigdesk-ctl",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-17",
+      "fate": "compat-wrapper",
+      "detail": "Единая команда выбирает бинарник комплекта или исходный сервер."
+    },
+    {
+      "path": "shared/runtime/legacyBrand.ts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-12",
+      "fate": "compat-wrapper",
+      "detail": "Shell читает префиксы через обёртку комплекта."
+    },
+    {
+      "path": "server/scripts/dataHomeCheck.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-12",
+      "fate": "helper",
+      "detail": "Проверка data-home из shell запускается helper-ом."
+    },
+    {
+      "path": "server/scripts/showcaseWorker.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Worker рендера презентаций."
+    },
+    {
+      "path": "server/scripts/showcaseRehearsal.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Worker репетиции презентаций."
+    },
+    {
+      "path": "server/scripts/showcaseVoiceInstall.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Установщик голосовых движков."
+    },
+    {
+      "path": "server/scripts/showcaseBrowserInstall.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Установщик браузера Playwright."
+    },
+    {
+      "path": "server/scripts/showcaseVoiceBench.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "development-only",
+      "detail": "Стенд сравнения голосов не входит в поставку."
+    },
+    {
+      "path": "server/scripts/web-log.mjs",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-3",
+      "fate": "development-only",
+      "detail": "Локальный просмотр журнала окна."
+    },
+    {
+      "path": "server/scripts/glmToolPolicyHook.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Хук GLM меняет отдельный план DeepSeek."
+    },
+    {
+      "path": "server/scripts/deepseekInstructionsHook.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Хук инструкций DeepSeek отложен."
+    },
+    {
+      "path": "server/scripts/deepseekRunner.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Runner DeepSeek отложен."
+    },
+    {
+      "path": "server/scripts/deepseekRuntimeInfo.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "RuntimeInfo DeepSeek отложен."
+    },
+    {
+      "path": "server/scripts/deepseekStatusMcp.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Status MCP DeepSeek отложен."
+    },
+    {
+      "path": "server/scripts/deepseekHarnessInstall.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Установщик harness DeepSeek отложен."
+    },
+    {
+      "path": "server/scripts/prepareDeepSeekRuntime.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Подготовка runtime DeepSeek отложена."
+    },
+    {
+      "path": "server/scripts/verifyDeepSeekCandidate.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Проверка кандидата DeepSeek отложена."
+    },
+    {
+      "path": "server/scripts/glmLiveSmoke.mts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Живой smoke GLM отложен."
+    },
+    {
+      "path": "server/src/lib/chat/permission-mcp.js",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "Permission MCP чата."
+    },
+    {
+      "path": "server/src/lib/executors/work-mcp.js",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "Work MCP исполнителя."
+    },
+    {
+      "path": "server/src/lib/executors/_direct-ssh-policy-hook.js",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-8",
+      "fate": "helper",
+      "detail": "Хук политики прямого SSH."
+    },
+    {
+      "path": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-10",
+      "fate": "helper",
+      "detail": "Supervisor установки плагинов."
+    },
+    {
+      "path": "server/src/lib/pluginInstall/gitBlobPrefix.mjs",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-10",
+      "fate": "helper",
+      "detail": "Разбор git-blob префикса."
+    },
+    {
+      "path": "server/src/lib/media/ingestWorker.ts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Worker приёма медиа."
+    },
+    {
+      "path": "server/src/lib/studio3d/analysisWorker.ts",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "helper",
+      "detail": "Worker анализа 3D."
+    },
+    {
+      "path": "server/src/lib/db/engines/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-5",
+      "fate": "server-bundle",
+      "detail": "Исходные адаптеры БД заменяются сгенерированным реестром."
+    },
+    {
+      "path": "server/src/lib/executors/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-5",
+      "fate": "server-bundle",
+      "detail": "Динамический каталог исполнителей заменяется сгенерированным реестром."
+    },
+    {
+      "path": "server/src/workers/grigdesk-update-worker.js",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-15",
+      "fate": "development-only",
+      "detail": "Worker git-обновления не входит в packaged-поставку."
+    },
+    {
+      "path": "server/src/app.js",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-3",
+      "fate": "development-only",
+      "detail": "Исходная точка входа для запуска из дерева."
+    },
+    {
+      "path": "server/deepseek-runtime-contract.json",
+      "kind": "file",
+      "expect": "source",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Контракт runtime DeepSeek отложен."
+    },
+    {
+      "path": "server/node_modules/",
+      "kind": "dir",
+      "expect": "generated",
+      "owner": "task-13",
+      "fate": "package",
+      "detail": "Production-зависимости ставятся npm ci --omit=dev в staging."
+    },
+    {
+      "path": "server/runtime/deepseek/",
+      "kind": "dir",
+      "expect": "generated",
+      "owner": "deepseek-plan",
+      "fate": "deferred-deepseek",
+      "detail": "Runtime DeepSeek появится после плана deepseek-binary-tdd."
+    },
+    {
+      "path": "server/runtime/helpers/",
+      "kind": "dir",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "helper",
+      "detail": "Собранные ESM-helperы комплекта."
+    },
+    {
+      "path": "server/runtime/esmBridge.cjs",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-6",
+      "fate": "helper",
+      "detail": "Внешний bridge файлового import() для плагинов."
+    },
+    {
+      "path": "server/grigdesk-server",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "server-bundle",
+      "detail": "SEA-бинарник сервера."
+    },
+    {
+      "path": "runtime/node/",
+      "kind": "dir",
+      "expect": "generated",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Node 24.21.0 из проверенного архива для helper-ов и npm."
+    },
+    {
+      "path": "licenses/",
+      "kind": "dir",
+      "expect": "generated",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Лицензии Node, npm и поставляемых пакетов."
+    },
+    {
+      "path": "release.json",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Манифест состава, версий и хешей комплекта."
+    },
+    {
+      "path": "bin/b24",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Готовая команда b24 из своего выпуска."
+    },
+    {
+      "path": "bin/grigdesk-relay",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Готовый посредник из своего выпуска."
+    },
+    {
+      "path": "server/build/licenses/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Полные SPDX тексты для точных версий npm-пакетов без собственного LICENSE; SHA256 и метаданные сохраняются."
+    }
+  ]
+}

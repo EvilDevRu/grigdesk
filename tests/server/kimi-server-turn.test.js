@@ -9,6 +9,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { kimiUsageWire } from '../helpers/kimiUsageWire.mjs';
+
 import { runKimiServerTurn } from '../../server/src/lib/kimi/serverTurn.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -245,4 +247,169 @@ test('Kimi: реальные границы шага сохраняют текс
     diff: { old: 'старое', new: 'новое' },
   }]);
   assert.ok(result.steps.some((step) => step.k === 'res' && step.id === 'tool-edit-1'));
+});
+
+
+test('Kimi: шаги основного агента заменяют вклад и не смешиваются с прошлым ходом', async (t) => {
+  const wire = await kimiUsageWire(t, [async (send) => {
+    send({ type: 'turn.started', turnId: 1 });
+    send({
+      type: 'turn.step.started',
+      turnId: 1,
+      step: 1
+    });
+    send({ type: 'assistant.delta', delta: 'Первый ответ' });
+    send({
+      type: 'turn.step.completed',
+      turnId: 1,
+      step: 1,
+      stepId: 'a',
+      usage: { output: 42 }
+    });
+    send({
+      type: 'turn.step.completed',
+      turnId: 1,
+      step: 1,
+      stepId: 'a',
+      usage: { output: 42 }
+    });
+    send({ type: 'session.usage_updated', usage: { output_tokens: 1000, context_tokens: 900 } });
+    send({
+      type: 'turn.started',
+      agentId: 'sub-1',
+      turnId: 99
+    });
+    send({
+      type: 'turn.step.started',
+      agentId: 'sub-1',
+      turnId: 99,
+      step: 1
+    });
+    send({
+      type: 'turn.step.completed',
+      agentId: 'sub-1',
+      stepId: 'sub',
+      usage: { output: 999 }
+    });
+    send({
+      type: 'turn.ended',
+      agentId: 'sub-1',
+      reason: 'completed'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    send({ type: 'turn.started', turnId: 2 });
+    send({
+      type: 'turn.step.started',
+      turnId: 2,
+      step: 1
+    });
+    send({ type: 'assistant.delta', delta: 'Последний ответ' });
+    send({
+      type: 'turn.step.completed',
+      turnId: 2,
+      step: 1,
+      usage: { output: 58 }
+    });
+    send({
+      type: 'turn.step.completed',
+      turnId: 2,
+      step: 1,
+      usage: { output: 58 }
+    });
+    send({ type: 'turn.ended', reason: 'completed' });
+  }, (send) => {
+    send({ type: 'turn.started', turnId: 3 });
+    send({
+      type: 'turn.step.completed',
+      turnId: 3,
+      step: 1,
+      usage: { output: 7 }
+    });
+    send({ type: 'turn.ended', reason: 'completed' });
+  }]);
+  const progress = [];
+  const base = {
+    bin: '/bin/true',
+    home: '/tmp',
+    message: 'Синтетический ход',
+    startServer: wire.startServer,
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  };
+  const first = await runKimiServerTurn(base);
+
+  assert.equal(first.reply, 'Последний ответ');
+  assert.deepEqual(progress.map((item) => item.tokens), [42, 42, 42, 100, 100]);
+  assert.ok(progress.every((item) => item.tokensIsEstimate === false));
+
+  progress.length = 0;
+  await runKimiServerTurn({ ...base, sessionId: first.sessionId });
+  assert.deepEqual(progress.map((item) => item.tokens), [7]);
+});
+
+
+test('Kimi: частичные статусы основного агента сохраняют окно и уменьшение контекста', async (t) => {
+  const wire = await kimiUsageWire(t, [(send) => {
+    send({
+      type: 'turn.step.completed',
+      turnId: 1,
+      step: 1,
+      usage: { output: 42 }
+    });
+    send({ type: 'agent.status.updated', maxContextTokens: 262144 });
+    send({ type: 'agent.status.updated', contextTokens: 12345 });
+    send({ type: 'agent.status.updated', usage: { currentTurn: { output: 42 } } });
+    send({ type: 'agent.status.updated', planMode: true });
+    send({ type: 'agent.status.updated', swarmMode: true });
+    send({ type: 'agent.status.updated', model: 'fixture' });
+    send({
+      type: 'agent.status.updated',
+      agentId: 'sub-1',
+      contextTokens: 99999,
+      maxContextTokens: 100000
+    });
+    send({ type: 'agent.status.updated', contextTokens: 6000 });
+    send({ type: 'agent.status.updated', contextTokens: 0 });
+    send({ type: 'turn.ended', reason: 'completed' });
+  }]);
+  const progress = [];
+  const result = await runKimiServerTurn({
+    bin: '/bin/true',
+    home: '/tmp',
+    message: 'Контекст',
+    ...wire,
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+  const samples = progress.filter((item) => item.contextTokens !== undefined);
+
+  assert.deepEqual(samples.map((item) => item.contextTokens), [12345, 6000, 0]);
+  assert.ok(samples.every((item) => item.contextWindow === 262144));
+  assert.ok(samples.every((item) => item.tokens === 42 && item.tokensIsEstimate === false));
+  assert.ok(samples.every((item) => !Object.hasOwn(item, 'contextIsEstimate')));
+  assert.equal(result.contextTokens, 0);
+  assert.equal(result.contextWindow, 262144);
+  assert.equal(result.contextMetric, 'kimi-agent-status-v1');
+});
+
+test('Kimi: служебный статус без контекста не создаёт нулевой замер', async (t) => {
+  const wire = await kimiUsageWire(t, [(send) => {
+    send({ type: 'agent.status.updated' });
+    send({ type: 'agent.status.updated', contextTokens: null });
+    send({
+      type: 'agent.status.updated',
+      usage: {},
+      planMode: true
+    });
+    send({ type: 'turn.ended', reason: 'completed' });
+  }]);
+  const progress = [];
+  const result = await runKimiServerTurn({
+    bin: '/bin/true',
+    home: '/tmp',
+    message: 'Без замера',
+    ...wire,
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  assert.deepEqual(progress, []);
+  assert.equal(Object.hasOwn(result, 'contextTokens'), false);
 });

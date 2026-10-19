@@ -2,6 +2,8 @@
 
 Устройство web/src: раскладка, слои и Escape, всплывашки, пакет приложения, настройки устройства.
 
+Связь оболочки, трубы и сервера — в [схеме единого приложения](../overview/unified-client.md).
+
 Читай перед правкой: `web/src/shared`, `web/src/services`, `web/src/composables`, `web/src/stores`.
 
 ## Контракты продукта
@@ -11,6 +13,30 @@
 - [Журнал окна](../guide/web-log.md)
 
 ## Устройство
+
+- [Локальная труба приложения: встроенный UI, запросы и потоки](client-pipe.md)
+- [Сенсорная раскладка полного приложения](client-responsive.md)
+- [Клиент оболочки: обнаружение, состояния и опрос](client-shell.md)
+- [Машины и связь: выбор, привязка и восстановление](connections.md)
+- [Сохранение файлов и системная кнопка «Назад»](native-actions.md)
+
+- [Общее открытие настроек: маршрут, авторизация и переходы к инструментам](settings-navigation.md)
+
+- [Подключения: Б24, пароль и прежняя привязка телефона](settings-connections.md)
+
+- [Система: staged-автозапуск, обновления, журнал и процессы](settings-system.md)
+
+- [Параметры плагинов: полный PUT, размещения и порядок включения](settings-plugins.md)
+
+- [Параметры исполнителей: общая сессия, ключи и существующая очередь CAS](settings-providers.md)
+
+- [Оболочка настроек: общий диалог, закрытие, авторизация и UI-контекст](settings-modal.md)
+
+- [Каталог страниц настроек: порядок, перенос старой вкладки и адрес поля](settings-catalog.md)
+
+- [Сессия настроек: черновик, конфликты, секреты и поздние ответы](settings-session.md)
+
+- [Применение настроек: последовательная очередь, частичный результат и неизвестный исход](settings-apply.md)
 
 - [Общая оболочка модальных окон и исключения редактора маршрутов](modal-shell.md)
 
@@ -28,7 +54,7 @@
 
 - [Наблюдения аудита: знаки действий, подписи switch, ghost/text и контекстные размеры](ui-audit-observations.md)
 
-- [Главный процесс окна: загрузка документов и фабрика настроек](desktop-main-boundaries.md)
+- [Главный процесс окна: загрузка документов и доставка настроек](desktop-main-boundaries.md)
 
 - [Модули просмотрщика 3D: parser, ресурсы, общий бюджет и lifecycle загрузки](studio3d-viewer-modules.md)
 
@@ -41,11 +67,11 @@
 - [Сенсорный размер общих элементов и диалогов через data-ui-touch](touch-control-size.md)
 
 - [Интерфейс обращается к своему origin](same-origin-transport.md)
-- [Локальное окно: вход, защита, цикл подключения, сборка и установка](desktop-window.md)
+- [Окно приложения: профили, защита, меню, сборка и установка](desktop-window.md)
 - [Кнопки окна в топбаре: системный overlay, свободное место и перетаскивание](desktop-titlebar.md)
 - [Иконка окна: отдельный сглаженный растр для панели задач](desktop-window-icon.md)
 - [Старт окна: заставка, свой сервер, ворота показа, сроки и единый выход](desktop-startup.md)
-- [Модальные настройки: открытие, Escape, синхронизация и действия главного окна](desktop-settings-window.md)
+- [Общие настройки: native-команда и совместимость прежнего адреса](desktop-settings-window.md)
 - [Несколько окон Electron: UA не наследуется, window.close, связь документов](electron-windows-behavior.md)
 - [Скрытое окно Electron: ready-to-show на каждый документ, модальность при скрытом родителе, выход](electron-hidden-window-startup.md)
 - [Окружение потомков Electron и AppImage: APPDIR в путях, CHROME_DESKTOP, IPC с системным node](electron-child-environment.md)
@@ -103,11 +129,13 @@
 
 ## Грабли
 
+- [Восстановление настроек после отказа чтения или загрузки](settings-recovery.md)
+
 - [Фризы при перестановке чатов и ответе агента: Markdown всех строк, сравнение истории и старые ленты](chat-update-freezes.md)
 - [«Связь теряется при отправках в несколько чатов» = POST держал соединение весь ход](../chat/concurrent-send-transport.md)
 - [«GrigDesk завис, все запросы (ожидает)» = съеден лимит соединений браузера](browser-connection-limit.md)
 - [Колонка чата без min-width: 0 — длинная команда выталкивает кнопки за экран](chat-column-overflow.md)
-- [Подразделы настроек не наследуют стили SettingsView (scoped CSS)](settings-scoped-styles.md)
+- [Scoped-стили страниц настроек](settings-scoped-styles.md)
 - [Событие есть на сервере, ветка есть во фронте, а не работает — забыли EVENT_NAMES](sse-event-registration.md)
 - [Таймер в state стора + $subscribe = бесконечный круг](store-timer-subscription-loop.md)
 - [Интерфейс внутри AppImage: неизменяемые версии, lazy-ресурсы и клавиши](packaged-ui.md)
@@ -119,3 +147,9 @@
 - [Обновление интерфейса установкой пакета](service-worker-cache-refresh.md)
 - [Возможности устройства в локальном окне без PWA](pwa-secure-context.md)
 - [Tooltip/popover живут в <body>: scoped-селектор consumer-а до surface не дотянется](teleported-overlay-styles.md)
+
+- [settings-search.md](settings-search.md) — поиск метаданных, дерево и показ поля настроек.
+
+- [settings-preferences.md](settings-preferences.md) — черновики prefs, клавиш, экрана и диагностики.
+
+- [settings-speech.md](settings-speech.md) — речь, гонки снимков и UI-опрос заданий в общем модале.

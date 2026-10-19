@@ -129,3 +129,63 @@ test('ошибка, записанная как api.fail, помечена дл�
     setApiLogSink(null);
   }
 });
+
+// Живые проверки транспорта перенесены из удалённого теста межоконного наблюдателя.
+// Ошибка мутации по-прежнему возвращается caller без автоматической повторной записи.
+test('мутации сохраняют отказ HTTP, сети, JSON и отмены после удаления наблюдателя', async (t) => {
+  const original = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+
+  for (const status of [503, 401]) {
+    globalThis.fetch = async () => new Response('{}', { status });
+    await assert.rejects(api.post('/probe'), (error) => error.status === status);
+  }
+
+  globalThis.fetch = async () => {
+    throw new TypeError('сеть');
+  };
+  await assert.rejects(api.post('/probe'), TypeError);
+  globalThis.fetch = async () => new Response('не JSON');
+  await assert.rejects(api.post('/probe'), SyntaxError);
+
+  const abort = new AbortController();
+
+  abort.abort();
+  globalThis.fetch = async (_url, options) => {
+    options.signal.throwIfAborted();
+
+    return new Response('{}');
+  };
+  await assert.rejects(api.post('/probe', {}, { signal: abort.signal }), { name: 'AbortError' });
+});
+
+test('успешные формы мутаций выполняют по одному запросу с сессионной cookie', async (t) => {
+  const original = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (_url, options) => {
+    calls.push(options);
+
+    return new Response('{"ok":true}');
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+
+  for (const work of [
+    () => api.post('/probe'), () => api.put('/probe'), () => api.patch('/probe'),
+    () => api.del('/probe'), () => api.postBytes('/probe', new Uint8Array([1])),
+    () => api.postBlob('/probe', {}), () => api.download('/probe'),
+    () => api.upload('/probe', new FormData()),
+  ]) {
+    await work();
+  }
+
+  assert.deepEqual(calls.map((call) => call.method), [
+    'POST', 'PUT', 'PATCH', 'DELETE', 'POST', 'POST', 'POST', 'POST',
+  ]);
+  assert.equal(calls.every((call) => call.credentials === 'include'), true);
+});

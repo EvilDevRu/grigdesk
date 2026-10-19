@@ -11,25 +11,42 @@
       <ol class="pairing-steps">
         <li>Откройте приложение GrigDesk на телефоне.</li>
         <li>
-          {{ pair
-            ? 'На экране «Подключить GrigDesk» отсканируйте этот QR-код.'
+          {{ pair ? 'На экране «Подключить GrigDesk» отсканируйте этот QR-код.'
             : 'В разделе «Посредники» нажмите «Добавить посредника» и отсканируйте QR-код.' }}
         </li>
       </ol>
       <div class="pairing-code-stage">
-        <div v-if="loading" class="pairing-placeholder" role="status">
+        <div
+          v-if="loading"
+          class="pairing-placeholder"
+          role="status"
+        >
           <UiSpinner decorative />
           Готовим QR-код…
         </div>
-        <div v-else-if="expired" class="pairing-placeholder pairing-expired" role="status">
+        <div
+          v-else-if="expired"
+          class="pairing-placeholder pairing-expired"
+          role="status"
+        >
           <b>Срок действия QR-кода истёк</b>
           <p>Создайте новый код, чтобы продолжить подключение.</p>
-          <UiButton variant="solid" tone="accent" data-testid="mobile-refresh-qr" @click="loadQr">
+          <UiButton
+            variant="solid"
+            tone="accent"
+            data-testid="mobile-refresh-qr"
+            @click="loadQr"
+          >
             Создать новый QR
           </UiButton>
         </div>
         <div v-else-if="qr" class="pairing-code">
-          <img :src="qrImage" alt="QR-код подключения к GrigDesk" width="320" height="320" />
+          <img
+            :src="qrImage"
+            alt="QR-код подключения к GrigDesk"
+            width="320"
+            height="320"
+          />
         </div>
         <div v-else class="pairing-placeholder">
           <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
@@ -38,7 +55,8 @@
       </div>
       <p class="pairing-expiry" aria-live="off">
         <template v-if="qr?.expiresAt && !expired && !loading">
-          Код действует ещё <b>{{ remainingLabel }}</b>
+          Код действует ещё
+          <b>{{ remainingLabel }}</b>
         </template>
       </p>
       <div class="pairing-copy">
@@ -60,9 +78,22 @@
       >
         Подключить без камеры
       </UiDisclosureButton>
-      <div v-if="textOpen && qr && !expired && !loading" id="mobile-qr-manual" class="pairing-manual">
-        <UiField id="mobile-qr-text" label="Код подключения" hint="Скопируйте и вставьте в приложении.">
-          <UiTextarea :model-value="qr.text" readonly rows="4" spellcheck="false" />
+      <div
+        v-if="textOpen && qr && !expired && !loading"
+        id="mobile-qr-manual"
+        class="pairing-manual"
+      >
+        <UiField
+          id="mobile-qr-text"
+          label="Код подключения"
+          hint="Скопируйте и вставьте в приложении."
+        >
+          <UiTextarea
+            :model-value="qr.text"
+            readonly
+            rows="4"
+            spellcheck="false"
+          />
         </UiField>
       </div>
     </div>

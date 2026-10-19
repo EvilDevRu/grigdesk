@@ -3,7 +3,7 @@ import { lstat, open } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { GrigDeskConfig } from '../../config.ts';
-import { parseSemVer } from '../grigDeskRelease.ts';
+import { parseSemVer } from '../releaseCommon.ts';
 
 export type PluginInstallConfiguration = Pick<GrigDeskConfig,
   'rootDir' | 'userPluginsDir' | 'userPluginsDataDir' | 'pluginInstallsStatePath'>;

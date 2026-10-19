@@ -144,7 +144,11 @@ test('store откатывает подтверждённый optimistic toggle 
     result,
     value: providers.providers[0].settings[0].value,
   }, {
-    result: { ok: false, error: 'confirmation_required' },
+    result: {
+      ok: false,
+      outcome: 'unknown',
+      error: 'confirmation_required',
+    },
     value: true,
   });
 });

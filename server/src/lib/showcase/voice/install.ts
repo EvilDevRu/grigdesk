@@ -31,9 +31,6 @@ import { readInstalledSileroModels } from './silero.ts';
 import type { JobIdentity } from '../jobs.ts';
 import { ShowcaseError } from '../errors.ts';
 
-const WORKER_SCRIPT = fileURLToPath(
-  new URL('../../../../scripts/showcaseVoiceInstall.mts', import.meta.url),
-);
 const REQUIREMENTS: Record<VoiceEngineId, string> = {
   piper: fileURLToPath(new URL('../../../../requirements-showcase-voice.txt', import.meta.url)),
   silero: fileURLToPath(new URL('../../../../requirements-showcase-silero.txt', import.meta.url)),
@@ -400,7 +397,8 @@ export function createVoiceInstaller(options: VoiceInstallerOptions) {
     const handle = await launchWorker({
       workDir: path.join(options.voiceDir, 'install'),
       nodeBin: options.nodeBin,
-      script: options.workerScript ?? { file: WORKER_SCRIPT, marker: 'showcaseVoiceInstall' },
+      helper: 'showcase-voice-install',
+      script: options.workerScript,
       task: {
         voice: pack,
         venvDir: runtime[engineId].venvDir,

@@ -57,10 +57,18 @@ function onKeydown(event: KeyboardEvent): void {
     return;
   }
 
+  closeTopLayer(event);
+}
+
+/**
+ * Escape и системный Назад обращаются к одному верхнему слою.
+ * Отказ закрыться удерживает навигацию за постоянным диалогом.
+ */
+export function closeTopLayer(event: KeyboardEvent): boolean {
   const layer = topLayer();
 
   if (!layer) {
-    return;
+    return false;
   }
 
   let handled: boolean | void = false;
@@ -75,16 +83,18 @@ function onKeydown(event: KeyboardEvent): void {
       throw error;
     });
 
-    return;
+    return true;
   }
 
   // `false` означает: верхний слой осознанно оставил Escape себе, но не закрылся.
   if (handled === false) {
-    return;
+    return true;
   }
 
   event.preventDefault();
   event.stopImmediatePropagation();
+
+  return true;
 }
 
 /**

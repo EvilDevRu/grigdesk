@@ -9,8 +9,32 @@ import { api } from '../../web/src/shared/apiClient.ts';
 globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 process.env.NODE_ENV = 'test';
 
-test('ChatSession: snapshot, живые квоты, один таймер и сведения обычным текстом', async (t) => {
+test('R9: ChatSession обновляет квоты с одним таймером независимо от прочего статуса', async (t) => {
+  const now = Date.UTC(2030, 0, 1);
+
+  t.mock.method(Date, 'now', () => now);
+
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
+  const nativeSetTimeout = globalThis.setTimeout;
+  const nativeClearTimeout = globalThis.clearTimeout;
+  const activeUsageTimers = new Set();
+  let usageTimerStarts = 0;
+
+  t.mock.method(globalThis, 'setTimeout', (...args) => {
+    const timer = nativeSetTimeout(...args);
+
+    if (args[1] === 7200001) {
+      usageTimerStarts += 1;
+      activeUsageTimers.add(timer);
+    }
+
+    return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', (timer) => {
+    activeUsageTimers.delete(timer);
+    nativeClearTimeout(timer);
+  });
+
   const chat = await chatStoreFixture({ sessions: [{
     id: 'status-component',
     model: 'next-model',
@@ -44,10 +68,13 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   ];
   providers.load = async () => {};
   providers.applyUsage({ 'running-provider': {
-    state: 'ok', bars: [{
+    state: 'ok',
+    dataCheckedAt: now,
+    bars: [{
       key: 'week',
       label: 'Неделя',
       pct: 20,
+      resetsAt: new Date(now + 7200000).toISOString(),
     }],
   } });
   t.mock.method(api, 'get', async () => ({ tasks: [] }));
@@ -71,7 +98,10 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
     attachTo: browser.document.querySelector('#mount'), props: { sid: 'status-component' },
   });
 
-  t.after(() => wrapper.unmount());
+  t.after(() => {
+    wrapper.unmount();
+    assert.equal(activeUsageTimers.size, 0, 'размонтирование снимает таймер квот');
+  });
   await flushPromises();
   assert.equal(wrapper.find('[data-role="chat-status"]').exists(), false);
 
@@ -103,16 +133,31 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   assert.match(wrapper.find('[data-role="chat-status-model"]').text(), /Модель запуска/);
   assert.match(wrapper.find('[data-role="chat-status-cwd"]').text(), /running\/source/);
   assert.match(wrapper.find('[data-role="chat-status-usage"]').text(), /80%/);
+  assert.equal(activeUsageTimers.size, 1);
+
+  const startsBeforeStatusChange = usageTimerStarts;
+
+  chat.sessions[0].workdirProposal = { cwd: '/proposed/source' };
+  await flushPromises();
+  assert.equal(usageTimerStarts, startsBeforeStatusChange, 'статус не переставляет таймер квот');
+  chat.sessions[0].workdirProposal = null;
+  await flushPromises();
+  assert.equal(usageTimerStarts, startsBeforeStatusChange);
 
   providers.applyUsage({ 'running-provider': {
-    state: 'ok', bars: [{
+    state: 'ok',
+    dataCheckedAt: now,
+    bars: [{
       key: 'week',
       label: 'Неделя',
       pct: 35,
+      resetsAt: new Date(now + 7200000).toISOString(),
     }],
   } });
   await flushPromises();
   assert.match(wrapper.find('[data-role="chat-status-usage"]').text(), /65%/);
+  assert.equal(usageTimerStarts, startsBeforeStatusChange + 1, 'новая запись квот переставляет таймер');
+  assert.equal(activeUsageTimers.size, 1);
 
   const summary = wrapper.find('[data-role="chat-status-summary"]');
 
@@ -122,6 +167,9 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   assert.equal(more.text(), '+1');
   assert.equal(summary.findAll('button, [role="button"], [tabindex]').length, 1, 'кнопка в сведениях только «+N»');
   assert.match(summary.attributes('data-ui-tooltip'), /\/running\/source/);
+  assert.match(summary.attributes('data-ui-tooltip'),
+    /Осталось по аккаунту: Неделя: 65% \(сброс через 2ч\)/u);
+  assert.match(summary.attributes('data-ui-tooltip'), /замер \d{2}:\d{2}/u);
   assert.match(summary.attributes('data-ui-tooltip'), /\/running\/shared/);
 
   await more.trigger('click');
@@ -152,6 +200,7 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
 
   providers.applyUsage({ 'running-provider': {
     state: 'ok',
+    dataCheckedAt: now,
     bars: [{
       key: 'unknown',
       label: 'Неизвестное окно',
@@ -219,4 +268,16 @@ test('ChatSession: snapshot, живые квоты, один таймер и с�
   });
   await flushPromises();
   assert.equal(wrapper.find('[data-role="chat-status"]').exists(), false);
+
+  providers.applyUsage({ 'next-provider': {
+    state: 'ok',
+    bars: [{
+      key: 'week',
+      label: 'Неделя',
+      pct: 35,
+      resetsAt: new Date(now + 7200000).toISOString(),
+    }],
+  } });
+  await flushPromises();
+  assert.equal(activeUsageTimers.size, 1, 'перед размонтированием есть ровно один таймер');
 });

@@ -19,8 +19,8 @@
       <p v-if="automationNotice" class="banner" :class="automationNotice.kind"
          data-state="automation-notice" role="status">
         {{ automationNotice.text }}
-        <a v-if="automationNotice.settings" href="#/settings" class="inline-link"
-           @click="rememberPluginsTab">Выбрать модель</a>
+        <UiActionLink v-if="automationNotice.settings" href="#/settings" variant="text"
+           @click.prevent="openInboxSettings">Выбрать модель</UiActionLink>
       </p>
       <p v-if="payload.truncated" class="banner warn">Показана только часть очереди: достигнут лимит ответа.</p>
 
@@ -251,6 +251,9 @@ import {
   confirmDialog,
   promptDialog,
 } from '../ui';
+import { openSettings } from '../shared/settingsNavigation.ts';
+import { usePluginsStore } from '../stores/plugins.js';
+import type { PluginListItem } from '../../../shared/plugins/pluginsContracts.ts';
 import { useSse } from '../composables/useSse.ts';
 
 // Inbox показывает только public projection общего API. Provider identity,
@@ -1057,8 +1060,20 @@ function autoTaskState(item: InboxItem) {
   };
 }
 
-function rememberPluginsTab() {
-  localStorage.setItem('grigdesk-settings-tab', 'plugins');
+/**
+ * Идентификатор берётся из публичного каталога по объявленному маршруту раздела.
+ * Ожидание каталога не подменяет цель строкой id, которой нет в DTO самой очереди.
+ */
+async function openInboxSettings(): Promise<void> {
+  const plugins = usePluginsStore();
+
+  if (!plugins.loaded) {
+    await plugins.load();
+  }
+
+  const entry = (plugins.list as PluginListItem[]).find((plugin) => plugin.nav?.path === '/inbox');
+
+  openSettings({ pageId: 'plugins.installed', entityId: entry?.id });
 }
 
 useSse((name: string) => {

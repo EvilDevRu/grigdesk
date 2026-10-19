@@ -50,7 +50,7 @@ CLI-токене. Другие режимы дают 404 или удержива
 
 ```bash
 NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test --test-concurrency=2 \
-  tests/cli/*.test.mts tests/server/launch-script.test.js tests/desktop/offline.test.js
+  tests/cli/*.test.mts tests/server/launch-script.test.js tests/desktop/client-runtime.test.js
 ```
 
 Настоящие start/stop/restart, Docker-действия, AppImage и ярлык эти тесты не запускают.

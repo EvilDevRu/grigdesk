@@ -275,6 +275,7 @@
                       {{ usageOf(p).action.label }}
                     </UiButton>
                   </span>
+                  <span v-if="usageOf(p).stale" class="pu-reset">Данные лимитов устарели</span>
                   <!-- Потребление лимитов подписки — как /usage в CLI -->
                   <span class="pu">
                     <span
@@ -290,11 +291,13 @@
                                иначе замечается только случайно. Гаснет само. -->
                           <span v-if="b.fresh" class="pu-new" v-tooltip="'Это ведро лимитов появилось недавно'">новое</span>
                         </span>
-                        <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
+                        <b :class="{ hot: b.pct >= 85 }"
+                           v-tooltip="`Израсходовано: ${usedUsagePercent(b.pct)} окна «${b.label}»`"
+                        >{{ usedUsagePercent(b.pct) }}</b>
                       </span>
                       <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                       <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
-                           одному «через 4д» нельзя. Полоса своей ширины не меняет, поэтому
+                           одному «через 4 д» нельзя. Полоса своей ширины не меняет, поэтому
                            вторая половина уходит к правому краю, а не удлиняет строку. -->
                       <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">
                         <span>{{ b.note || resetIn(b.resetsAt) }}</span>
@@ -335,15 +338,17 @@
       </div>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
+        <ConnectionButton :icon="ICONS.connection" />
         <AlertHistoryPopover />
-        <router-link to="/settings" class="settings-link" active-class="active"
-                   v-tooltip="'Настройки'" aria-label="Настройки">
+        <UiIconButton label="Настройки" v-tooltip="'Настройки'"
+          aria-haspopup="dialog" :pressed="settings.isOpen"
+          @click="openSettings()">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path :d="ICONS.settings" />
           <circle cx="12" cy="12" r="3" />
         </svg>
-        </router-link>
+        </UiIconButton>
       </div>
     </header>
 
@@ -356,6 +361,7 @@
 
 <script setup>
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
+import ConnectionButton from './ConnectionButton.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
 import { ref, computed, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -390,6 +396,7 @@ import {
   resetAt,
   resetIn,
 } from '../../features/providers/providerUsage.js';
+import { usedUsagePercent } from '../../features/providers/providerUsageSummary';
 import {
   aggregateNavBadges,
   chatNavBadge,
@@ -413,15 +420,13 @@ import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
 import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
+import { openSettings } from '../settingsNavigation.ts';
+import { useSettingsStore } from '../../stores/settings.ts';
 import { currentDesktopMode } from '../desktopSettings.ts';
-import { useDesktopSettingsSync } from '../../composables/useDesktopSettingsSync.ts';
 
 const isDesktopMain = currentDesktopMode() === 'main';
 
-if (isDesktopMain) {
-  useDesktopSettingsSync();
-}
-
+const settings = useSettingsStore();
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
@@ -476,12 +481,12 @@ function provTitle(p) {
   return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
     + (p.version ? ` · ${p.version}` : '');
 }
-// Кнопка «Настройки исполнителей» во всплывашке — на вкладку «Исполнители» настроек
-// (таб настроек запоминается в localStorage, поэтому просто задаём его).
+// Кнопка выбирает страницу в общей сессии, не меняя маршрут и текущий инструмент.
+// Popover закрывается вызывающей кнопкой до запроса открытия модала.
 const { openTerminal } = useToolLauncher();
+
 function toProviders() {
-  localStorage.setItem('grigdesk-settings-tab', 'providers');
-  router.push('/settings');
+  openSettings({ pageId: 'agents.providers' });
 }
 const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
@@ -668,6 +673,7 @@ function navTitle(item) {
 }
 
 const ICONS = {
+  connection: 'M4 5h16v10H4z M8 20h8 M12 15v5',
   cube: 'M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5',
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
   pipeline: 'M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9',
@@ -814,13 +820,6 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   white-space: nowrap;
 }
 .topbar-actions { display: flex; align-items: center; flex: none; gap: 0; }
-.settings-link {
-  width: var(--app-rail-w); height: 32px; flex: none; display: grid; place-items: center;
-  border-radius: 8px; color: var(--ink-mid); line-height: 0; transition: background .12s, color .12s;
-}
-.settings-link .ic { display: block; width: 16px; height: 16px; }
-.settings-link:hover { background: var(--surface); color: var(--ink); }
-.settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
 .stale-note { color: var(--warn); border-top: 0; padding-top: 4px; }
 /* Разделитель не зависит от шрифта: центр и отступы задаёт та же flex-строка.
    Внутри метрик и между группами используется одна геометрия без отрицательных полей. */

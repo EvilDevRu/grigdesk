@@ -70,6 +70,8 @@
 - [Границы модулей уточнений: ключи истории, публикация блоков и проекция окна](in-turn-module-boundaries.md)
 - [Живая сессия исполнителя: агент переживает свой ход](persistent-executor-session.md)
 - [Фоновый запуск: поколения процесса, очередь, публикация и стоп](background-run-lifecycle.md)
+- [Выход хода и последний контекст: источники, partial-поток Claude, шаги Kimi и сохранение итога](turn-usage-metrics.md)
+- [Живые квоты аккаунта: оверлей, порядок событий, поколения и ограничения прогноза](live-account-quotas.md)
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)

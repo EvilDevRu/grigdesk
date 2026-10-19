@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "@npmcli/agent",
+      "version": "4.0.2",
+      "license": "ISC",
+      "file": "ISC.txt",
+      "sha256": "521c6f0ed8e64736684f89843d16a4df6b4b7449acbcfc6ca6630a3037ca8c53",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/ISC.txt"
+    },
+    {
+      "name": "@sigstore/verify",
+      "version": "3.1.1",
+      "license": "Apache-2.0",
+      "file": "Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Apache-2.0.txt"
+    },
+    {
+      "name": "spdx-exceptions",
+      "version": "2.5.0",
+      "license": "CC-BY-3.0",
+      "file": "CC-BY-3.0.txt",
+      "sha256": "e6bc9e9c474700b708f568bac9e5a8a9bcb2b1dad53442f5ba449fcb848b8e76",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/CC-BY-3.0.txt"
+    },
+    {
+      "name": "spdx-license-ids",
+      "version": "3.0.23",
+      "license": "CC0-1.0",
+      "file": "CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/CC0-1.0.txt"
+    },
+    {
+      "name": "abstract-logging",
+      "version": "2.0.1",
+      "license": "MIT",
+      "file": "MIT.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt"
+    },
+    {
+      "name": "qrcode-generator",
+      "version": "2.0.4",
+      "license": "MIT",
+      "file": "MIT.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt"
+    }
+  ]
+}

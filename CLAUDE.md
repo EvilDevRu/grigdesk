@@ -87,8 +87,9 @@
 - [Входящие](docs/grigdesk/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
 - [Telegram-пульт](docs/grigdesk/telegram/README.md) — вотчер, действия, ассистент.
 - [Интерфейс](docs/grigdesk/web/README.md) — раскладка, слои, всплывашки, пакет приложения.
-- [Сервер и доступ](docs/grigdesk/server/README.md) — юнит, авторизация, сеть; только loopback.
-- [Приложение на телефоне](docs/grigdesk/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
+- [Сервер и доступ](docs/grigdesk/server/README.md) — юнит, авторизация, сеть;
+  основной HTTP на loopback, вход приложений — явная настройка.
+- [Приложение на телефоне](docs/grigdesk/mobile/README.md) — полный клиент и труба, привязка, прежний v1, APK.
 - [Видео и речь](docs/grigdesk/media/README.md) — записи встреч, расшифровка, речь.
 - [Плагины](docs/grigdesk/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
   Документация пользовательского плагина — в его `docs/README.md`, не в `docs/` GrigDesk.

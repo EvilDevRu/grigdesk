@@ -25,7 +25,9 @@ import {
 } from '../../lib/providerUsage.ts';
 import { createProviderStatusProbe, VENDOR_FAULT_USAGE_STATES } from '../../lib/providerStatus.ts';
 import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/providerUsageSeen.ts';
-import type { ProviderUsage } from '../../lib/providerUsage.ts';
+import type { ProviderUsage, ProviderUsagePatch, UsageBar } from '../../lib/providerUsage.ts';
+import { acceptPatch, projectUsage, settlePoll } from '../../lib/providerUsageLive.ts';
+import type { LiveUsage } from '../../lib/providerUsageLive.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import { registerProviderNativeSettings } from './settings.ts';
 import { registerProviderCredentials } from './credentials.ts';
@@ -70,13 +72,6 @@ interface ProviderSettingRoute {
 
 interface ProvidersListRoute {
   Querystring: { refresh?: string };
-}
-
-// Полоса лимита в ответе адаптера. Ведро называет сам исполнитель, поэтому поле
-// остаётся необязательным, а всё прочее содержимое полосы ядру безразлично.
-interface UsageBar {
-  group?: string;
-  [field: string]: unknown;
 }
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
@@ -350,6 +345,57 @@ async function providersModule(
   const usageBackoff = new Map<string, { until: number; ticks: number }>();
   // Адресный сброс общего кэша сохраняет прошлые снимки и паузы соседних аккаунтов.
   const usagePrevious = new Map<string, ProviderUsage>();
+  const usageGenerations = new Map<string, number>();
+  const liveUsage = new Map<string, LiveUsage>();
+  let usageProviderIds: string[] = [];
+
+  /**
+   * Все выходы накладывают живые значения одним способом, сохраняя сырой кэш опроса.
+   * Полная карта не удаляет соседнего исполнителя в сторе, который заменяет снимок целиком.
+   */
+  function projectUsageMap(usage: Record<string, ProviderUsage>): Record<string, ProviderUsage> {
+    return Object.fromEntries(Object.entries(usage).map(([id, entry]) => [
+      id,
+      projectUsage(entry, liveUsage.get(id)),
+    ]));
+  }
+
+  fastify.decorate('providerUsageSink', (providerId: string) => {
+    const generation = usageGenerations.get(providerId) ?? 0;
+
+    return (patch: ProviderUsagePatch): boolean => {
+      try {
+        if ((usageGenerations.get(providerId) ?? 0) !== generation) {
+          return false;
+        }
+
+        const previous = usagePrevious.get(providerId);
+        const current = liveUsage.get(providerId) ?? {
+          generation,
+          seq: 0,
+          bars: new Map()
+        };
+        const accepted = acceptPatch(current, previous?.bars ?? [], patch, { now: Date.now() });
+
+        if (!accepted.changed) {
+          return false;
+        }
+
+        liveUsage.set(providerId, accepted.state);
+
+        if (previous && usageProviderIds.every((id) => usagePrevious.has(id))) {
+          fastify.sse?.broadcast?.('providers-usage', {
+            usage: projectUsageMap(Object.fromEntries(usagePrevious)),
+          });
+        }
+
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  });
+
 
   /**
    * Отказ по частоте — единственная беда, на которую GrigDesk отвечает молчанием. Сеть,
@@ -402,10 +448,19 @@ async function providersModule(
       return {};
     }
 
+    usageProviderIds = [...executors.keys()];
+
     const checkedAt = Date.now();
+    const completedPolls: Array<{
+      id: string;
+      startSeq: number;
+      generation: number;
+    }> = [];
+
     // Аккаунты независимы: медленная проверка одного исполнителя не должна
     // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
     const entries = await Promise.all([...executors.values()].map(async (ex) => {
+      const generation = usageGenerations.get(ex.id) ?? 0;
       const held = usageBackoff.get(ex.id);
       const previous = previousUsage?.[ex.id] ?? usagePrevious.get(ex.id);
 
@@ -417,10 +472,13 @@ async function providersModule(
       }
 
       let current: ProviderUsage;
+      let startSeq = 0;
+
       if (typeof ex.usage !== 'function') {
         current = unsupportedProviderUsage(String(ex.name), checkedAt);
       } else {
         try {
+          startSeq = liveUsage.get(ex.id)?.seq ?? 0;
           current = normalizeProviderUsage(await ex.usage(config as never, deps as never), {
             providerName: String(ex.name),
             checkedAt,
@@ -436,8 +494,16 @@ async function providersModule(
           }, { providerName: String(ex.name), checkedAt });
         }
       }
-      if (!context.isCurrent()) {
+      if (!context.isCurrent() || (usageGenerations.get(ex.id) ?? 0) !== generation) {
         return [ex.id, current] as const;
+      }
+
+      if (current.state === 'ok') {
+        completedPolls.push({
+          id: ex.id,
+          startSeq,
+          generation,
+        });
       }
 
       rememberUsageBackoff(ex.id, current, checkedAt);
@@ -456,12 +522,25 @@ async function providersModule(
       const vendorStatus = await statusProbe.read(ex.statusPage);
       const result = vendorStatus ? { ...merged, vendorStatus } : merged;
 
-      if (context.isCurrent()) {
+      if (context.isCurrent() && (usageGenerations.get(ex.id) ?? 0) === generation) {
         usagePrevious.set(ex.id, result);
       }
 
       return [ex.id, result] as const;
     }));
+
+    // Пока соседний адаптер отвечает, GET читает прежний общий кэш с его оверлеем.
+    // Снимать события можно лишь вместе с готовым результатом всего опроса.
+    if (context.isCurrent()) {
+      for (const poll of completedPolls) {
+        const live = liveUsage.get(poll.id);
+
+        if (live && (usageGenerations.get(poll.id) ?? 0) === poll.generation) {
+          liveUsage.set(poll.id, settlePoll(live, poll.startSeq));
+        }
+      }
+    }
+
     return Object.fromEntries(entries);
   }, { maxAgeMs: usageTickMs });
 
@@ -478,7 +557,7 @@ async function providersModule(
       const usage = await (refresh ? usageCache.refresh() : usageCache.read());
 
       if (version === usageCache.version()) {
-        return consume(usage);
+        return consume(projectUsageMap(usage));
       }
 
       refresh = false;
@@ -649,7 +728,7 @@ async function providersModule(
    * requestId crosses the boundary for idempotent irreversible actions.
    */
   fastify.post<ProviderActionRoute>('/api/providers/:id/usage-actions/:actionId', async (request, reply) => {
-    const ex = (await getProviderAdapters()).get(String(request.params.id));
+    const ex = (await adaptersOf()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     const body = request.body || {};
     const r = await executeProviderUsageAction(ex, {
@@ -665,8 +744,17 @@ async function providersModule(
         message: `исполнитель ${ex.name} не поддерживает это действие`,
       });
     }
-    if (r?.ok) usageCache.clear();
-    else fastify.log.warn({ provider: ex.id, action: request.params.actionId, err: r?.error }, 'действие usage не выполнено');
+    if (r?.ok) {
+      liveUsage.delete(ex.id);
+      usageCache.clear();
+    } else {
+      fastify.log.warn({
+        provider: ex.id,
+        action: request.params.actionId,
+        err: r?.error,
+      }, 'действие usage не выполнено');
+    }
+
     return r;
   });
 
@@ -717,6 +805,8 @@ async function providersModule(
       registryCache.clear();
     },
     resetUsage: (id) => {
+      usageGenerations.set(id, (usageGenerations.get(id) ?? 0) + 1);
+      liveUsage.delete(id);
       usageCache.clear();
       usageBackoff.delete(id);
       usagePrevious.delete(id);

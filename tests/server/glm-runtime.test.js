@@ -636,3 +636,25 @@ test('GLM сообщает подтверждённую модель сесси�
   assert.deepEqual(metadata, [{ actualModelId: MODEL, modelSource: 'session' }]);
   assert.equal(result.actualModel, MODEL);
 });
+
+
+test('GLM сохраняет последний контекст DSH в результате после уменьшения', async (t) => {
+  const f = await fixture(t, {
+    updates: [
+      { sessionUpdate: 'usage', usage: {
+        inputTokens: 1000,
+        cacheReadTokens: 2000,
+        cacheWriteTokens: 300,
+        outputTokens: 40,
+      } },
+      { sessionUpdate: 'usage', usage: { inputTokens: 700, outputTokens: 50 } },
+    ],
+  });
+  const progress = [];
+  const result = await f.run({ onProgress: (tokens, info) => progress.push({ tokens, ...info }) });
+
+  assert.deepEqual(progress.map((item) => item.contextTokens), [3300, 700]);
+  assert.equal(result.contextTokens, 700);
+  assert.equal(result.contextMetric, 'deepseek-web-usage');
+  assert.equal(result.contextWindow, undefined);
+});

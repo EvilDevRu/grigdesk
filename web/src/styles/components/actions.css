@@ -1718,94 +1718,6 @@
   font-size: 11px;
 }
 
-.ui-button[data-role='settings-nav'] {
-  position: relative;
-  justify-content: flex-start;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  padding: 10px;
-  border-radius: 10px;
-  color: var(--ink-mid);
-  text-align: left;
-  white-space: normal;
-}
-
-.ui-button[data-role='settings-nav'] > .ui-button__content,
-.ui-button[data-role='settings-nav'] .ui-button__label {
-  width: 100%;
-  min-width: 0;
-}
-
-.ui-button[data-role='settings-nav'] > .ui-button__content {
-  justify-content: flex-start;
-}
-
-.ui-button[data-role='settings-nav'] .ui-button__label {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  overflow: visible;
-}
-
-.ui-button[data-role='settings-nav']::before {
-  position: absolute;
-  left: -11px;
-  width: 3px;
-  height: 22px;
-  border-radius: 0 4px 4px 0;
-  background: transparent;
-  content: '';
-}
-
-.ui-button[data-role='settings-nav']:hover:not(:disabled) {
-  border-color: var(--line);
-  background: var(--surface-2);
-  color: var(--ink);
-}
-
-.ui-button[data-role='settings-nav'].active {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-  background: color-mix(in srgb, var(--accent) 11%, var(--surface-2));
-  color: var(--ink);
-}
-
-.ui-button[data-role='settings-nav'].active::before {
-  background: var(--accent);
-}
-
-.ui-button[data-role='settings-nav'] .ui-button__label > svg {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  color: currentColor;
-}
-
-.ui-button[data-role='settings-nav'].active .ui-button__label > svg {
-  color: var(--accent);
-}
-
-.ui-button[data-role='settings-nav'] .ui-button__label > span {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.ui-button[data-role='settings-nav'] strong {
-  overflow: hidden;
-  font-size: 13.5px;
-  font-weight: 630;
-  text-overflow: ellipsis;
-}
-
-.ui-button[data-role='settings-nav'] small {
-  overflow: hidden;
-  color: var(--ink-mid);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .speech-field-actions .ui-button[data-role='settings-action'],
 .speech-model-actions .ui-button[data-role='settings-action'] {
   height: 30px;
@@ -1963,33 +1875,6 @@
   }
 }
 
-/* Порог совпадает с горизонтальной навигацией SettingsView: между 1001 и 1099 px
-   вкладки иначе сжимались как вертикальные кнопки и теряли полные названия. */
-@media (max-width: 1099px) {
-  .ui-button[data-role='settings-nav'] {
-    flex: 0 0 auto;
-    width: auto;
-    min-width: 132px;
-    padding: 9px 11px;
-    scroll-snap-align: start;
-  }
-
-  .ui-button[data-role='settings-nav']::before {
-    display: none;
-  }
-}
-
-@media (max-width: 639px) {
-  .ui-button[data-role='settings-nav'] {
-    min-width: auto;
-    padding: 9px 11px;
-  }
-
-  .ui-button[data-role='settings-nav'] small {
-    display: none;
-  }
-}
-
 @media (max-width: 600px) {
   .ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
     width: 100%;
@@ -2094,4 +1979,11 @@
     white-space: normal;
     text-overflow: clip;
   }
+}
+
+/* Сенсорная площадка общих действий сохраняется и в компактных embedded-контекстах.
+   Минимум переопределяет размер роли, оставляя цвета и поведение её обычному skin. */
+:root[data-ui-touch] :is(.ui-button, .ui-pressable, .ui-action-link, [data-ui-shell-nav]) {
+  min-height: 44px;
+  min-width: 44px;
 }

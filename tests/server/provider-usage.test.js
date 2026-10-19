@@ -210,8 +210,8 @@ test('Codex app-server rate limits become generic and model-family bars', () => 
   });
 
   assert.deepEqual(bars.map((bar) => [bar.key, bar.label, bar.pct]), [
-    ['codex:primary', 'Сессия (5ч)', 18],
-    ['codex:secondary', 'Неделя (7д)', 37],
+    ['codex:primary', 'Сессия (5ч)', 18.4],
+    ['codex:secondary', 'Неделя (7д)', 36.6],
     ['codex_spark:primary', 'Неделя · GPT-5.3-Codex-Spark', 7],
   ]);
   assert.equal(bars[0].resetsAt, '2026-08-05T03:20:00.000Z');
@@ -595,9 +595,10 @@ test('Claude usage payload is converted to subscription and scoped family bars',
       },
     ],
   });
+
   assert.deepEqual(bars.map((bar) => [bar.label, bar.pct]), [
-    ['Сессия (5ч)', 12],
-    ['Неделя · Opus', 92],
+    ['Сессия (5ч)', 12.4],
+    ['Неделя · Opus', 91.6],
   ]);
 });
 
@@ -865,5 +866,38 @@ test('usage cache: clear перенаправляет старый резуль�
 
     assert.equal(await cache.read(), 'B');
     assert.equal(calls, 2);
+  }
+});
+
+
+test('проценты Claude и Codex сохраняют дробь и ограничивают верхнюю границу', () => {
+  for (const [value, expected] of [[99.6, 99.6], [0, 0], [6, 6], [28, 28], [100, 100], [130, 100]]) {
+    const window = { usedPercent: value, windowDurationMins: 300 };
+    const variants = [
+      parseClaudeUsagePayload({ limits: [{ kind: 'session', percent: value }] }),
+      parseClaudeUsagePayload({ five_hour: { utilization: value } }),
+      parseCodexRateLimits({ rateLimits: { primary: window } }),
+      parseCodexRateLimits({ rateLimitsByLimitId: { codex: { primary: window } } }),
+    ];
+
+    for (const bars of variants) {
+      assert.equal(bars.length, 1);
+      assert.ok(Math.abs(bars[0].pct - expected) < 1e-9, `${value}: ${bars[0].pct}`);
+    }
+  }
+});
+
+
+test('нечисловые и отрицательные замеры Claude и Codex не создают полосу', () => {
+  for (const value of [undefined, null, '', true, '42', NaN, Infinity, -5]) {
+    const variants = [
+      [parseClaudeUsagePayload({ limits: [{ kind: 'session', percent: value }] }), 'session'],
+      [parseClaudeUsagePayload({ five_hour: { utilization: value } }), 'five_hour'],
+      [parseCodexRateLimits({ rateLimits: { primary: { usedPercent: value } } }), 'codex:primary'],
+    ];
+
+    for (const [bars, key] of variants) {
+      assert.equal(bars.some((bar) => bar.key === key), false, String(value));
+    }
   }
 });

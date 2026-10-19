@@ -57,59 +57,6 @@ export function failureText(error: unknown, fallback = 'Не удалось вы
 
 export type UnauthorizedHandler = (data: unknown) => void;
 
-export type MutationListener = () => void;
-
-const mutationListeners = new Set<MutationListener>();
-let mutationCount = 0;
-
-/**
- * Подписка сообщает об успешном изменении без знания адресов API.
- * Отписка удаляет только этого слушателя и безопасна при повторном вызове.
- */
-export function onMutationSuccess(listener: MutationListener): () => void {
-  mutationListeners.add(listener);
-
-  return () => {
-    mutationListeners.delete(listener);
-  };
-}
-
-/**
- * Оболочка ждёт завершения уже начатых изменений перед закрытием окна.
- * Значение не включает чтения и не зависит от подписчиков успеха.
- */
-export function pendingMutations(): number {
-  return mutationCount;
-}
-
-/**
- * Счётчик растёт до первого await и уменьшается при любом исходе.
- * Исключение слушателя не меняет ответ запроса и не запускает повторную мутацию.
- */
-async function trackMutation<T>(method: Method, work: () => Promise<T>): Promise<T> {
-  if (method === 'GET') {
-    return work();
-  }
-
-  mutationCount += 1;
-
-  try {
-    const result = await work();
-
-    for (const listener of mutationListeners) {
-      try {
-        listener();
-      } catch {
-        // Подписчики не влияют на результат уже завершившегося изменения.
-      }
-    }
-
-    return result;
-  } finally {
-    mutationCount -= 1;
-  }
-}
-
 // Слушатели 401: истёкшая или отозванная сессия должна сразу возвращать на экран входа,
 // из какого бы места её ни поймали. Подписывается стор auth (без импорта стора сюда —
 // иначе circular import).
@@ -272,7 +219,7 @@ async function observed<T>(method: Method, path: string, work: () => Promise<T>)
   const start = performance.now();
 
   try {
-    const result = await trackMutation(method, work);
+    const result = await work();
 
     reportAttempt(method, path, elapsed(start), 1);
 
@@ -303,20 +250,7 @@ const DEFAULT_GET_TIMEOUT_MS = 30000;
  * Здесь же живут таймаут и единственный повтор чтения — оба нужны из-за docker,
  * который рвёт летящие запросы при смене сети стенда.
  */
-function request(
-  method: Method,
-  path: string,
-  body?: unknown,
-  options: RequestOptions = {},
-): Promise<unknown> {
-  return trackMutation(method, () => performRequest(method, path, body, options));
-}
-
-/**
- * Сетевой цикл сохраняет прежние таймауты, журнал и повтор только чтения.
- * Учёт мутаций оборачивает весь результат, включая разбор ответа сервера.
- */
-async function performRequest(
+async function request(
   method: Method,
   path: string,
   body?: unknown,

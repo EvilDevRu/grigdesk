@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "wrappers": [
+    {
+      "path": "engine/lib/runtime-usage.mjs",
+      "helper": "engine-runtime-usage",
+      "kind": "script"
+    },
+    {
+      "path": "engine/lib/codex-failure.mjs",
+      "helper": "engine-codex-failure",
+      "kind": "script"
+    },
+    {
+      "path": "server/scripts/dataHomeCheck.mts",
+      "helper": "data-home-check",
+      "kind": "script"
+    },
+    {
+      "path": "shared/runtime/legacyBrand.ts",
+      "helper": "legacy-brand",
+      "kind": "library"
+    }
+  ]
+}

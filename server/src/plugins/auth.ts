@@ -12,6 +12,7 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import type { AuthStore } from '../lib/authStore.ts';
+import { deviceOf } from '../lib/clientAccess/principal.ts';
 
 export interface AuthPluginOptions {
   authStore: AuthStore;
@@ -36,17 +37,16 @@ const PUBLIC_API = new Set([
   '/api/auth/window-session',
 ]);
 
-// Шаблоны статики, которые тоже обязаны проверять вход: корневой wildcard @fastify/static
-// (оболочка, ассеты, SPA-fallback) и артефакты приёмки. Решение принимается по шаблону
-// маршрута, а не по сырому URL: закодированный префикс не должен обходить проверку.
-const GUARDED_STATIC = ['/*', '/shots/', '/ui/'];
+// Снимки содержат данные проектов и закрываются наравне с API.
+// Матченный шаблон не позволяет закодированному префиксу обойти проверку.
+const GUARDED_STATIC = ['/shots/'];
 
 // Назначения fetch, для которых ответ — документ, а не данные. Форма отказа зависит
 // только от этого: доступ решён раньше и от заголовков не зависит.
 const DOCUMENT_DESTINATIONS = new Set(['document', 'iframe', 'frame']);
 
 // Короткая самостоятельная страница отказа: без скриптов, ссылок и личных сведений.
-const DENIED_PAGE = `<!doctype html>
+export const APPLICATION_PAGE = `<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -164,6 +164,10 @@ export function isSecureRequest(request: FastifyRequest): boolean {
  * поэтому любой forwarded-заголовок по-прежнему запрещает обмен.
  */
 export function isLocalRequest(request: FastifyRequest): boolean {
+  if (deviceOf(request.raw.socket)) {
+    return false;
+  }
+
   const ip = request.ip || '';
   const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
   const forwarded = !!(request.headers['x-forwarded-for']
@@ -208,6 +212,7 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
   // валидной сессии само по себе не делает запрос серверным: queue dispatch identity
   // вправе назначать только process-local internal caller.
   fastify.decorateRequest('authKind', null);
+  fastify.decorateRequest('authPrincipal', null);
 
   fastify.addHook('onRequest', async (request, reply) => {
     // Решение принимаем по МАТЧЕННОМУ РОУТУ, а НЕ по `request.raw.url`.
@@ -220,13 +225,29 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     //
     // Матченный роут — это шаблон вида `/api/tasks/:id/graph`: он не зависит ни от кодирования,
     // ни от query, ни от лишних слэшей. Если роут не совпал (404) — пусто, и запрос уходит
-    // в SPA-fallback, никаких данных API там нет.
+    // к сообщению о запуске приложения, никаких данных API там нет.
     const routeUrl = request.routeOptions?.url || '';
 
     // Гард решает по матченному роуту; статика закрывается наравне с API.
     const guarded = routeUrl.startsWith('/api/')
       || GUARDED_STATIC.some((prefix) => routeUrl === prefix || routeUrl.startsWith(prefix));
     if (!guarded) return;
+
+    const device = deviceOf(request.raw.socket);
+
+    if (device) {
+      if (device.revoked) {
+        return reply.header('Cache-Control', 'no-store').code(403).send({ error: 'device_revoked' });
+      }
+
+      request.authKind = 'session';
+      request.authPrincipal = {
+        kind: 'device',
+        deviceId: device.deviceId,
+      };
+
+      return;
+    }
 
     if (PUBLIC_API.has(routeUrl)) return;
 
@@ -259,7 +280,7 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     reply.header('Cache-Control', 'no-store');
 
     if (wantsDocument(request)) {
-      return reply.code(401).type('text/html; charset=utf-8').send(DENIED_PAGE);
+      return reply.code(401).type('text/html; charset=utf-8').send(APPLICATION_PAGE);
     }
 
     reply.code(401).send({

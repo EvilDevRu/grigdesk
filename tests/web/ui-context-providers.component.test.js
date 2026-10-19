@@ -494,7 +494,7 @@ test('COMP-PROV-12: реальный ToolHost не публикует hidden pan
 test('COMP-PROV-01..08: реальные страницы используют owner helper и bounded positive schemas', async () => {
   const files = Object.fromEntries(await Promise.all([
     ['routes', 'web/src/views/RoutesView.vue'],
-    ['settings', 'web/src/views/SettingsView.vue'],
+    ['settings', 'web/src/views/settings/SettingsModal.vue'],
     ['tool', 'web/src/shared/layout/ToolHost.vue'],
     ['task', 'web/src/views/TaskModal.vue'],
     ['pipeline', 'web/src/views/PipelineView.vue'],

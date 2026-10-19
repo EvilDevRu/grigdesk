@@ -746,6 +746,8 @@ export async function runContainedKimi({
 
       return {
         ...result,
+        ...(result.contextWindow === undefined && modelInfo.context > 0
+          ? { contextWindow: modelInfo.context } : {}),
         cost: null,
         contextCache: contextCacheStatus('unavailable'),
         emptyRun: !result.reply && result.steps.length === 0,

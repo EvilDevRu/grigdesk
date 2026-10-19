@@ -164,11 +164,51 @@ function runFixture() {
     }
   }
 
+  /**
+   * Квоты аккаунта приходят без threadId и продолжаются после завершения хода.
+   * Второе событие того же ведра разреженное: null не стирает метаданные окна.
+   */
+  function emitLiveLimitsTurn() {
+    send({ method: 'account/rateLimits/updated', params: { rateLimits: {
+      limitId: null,
+      primary: {
+        usedPercent: 8,
+        windowDurationMins: 300,
+        resetsAt: 1893474000
+      },
+    } } });
+    send({ method: 'account/rateLimits/updated', params: { rateLimits: {
+      limitId: 'codex_reserve',
+      limitName: 'Модель стенда',
+      primary: {
+        usedPercent: 11,
+        windowDurationMins: 10080,
+        resetsAt: 1894060800
+      },
+    } } });
+    emitTokenProgressTurn(true);
+    setTimeout(() => {
+      send({ method: 'account/rateLimits/updated', params: { rateLimits: {
+        limitId: null,
+        limitName: null,
+        primary: {
+          usedPercent: 9,
+          windowDurationMins: null,
+          resetsAt: null
+        },
+      } } });
+    }, 35);
+  }
+
   // Расход хода: накопитель потока (`total`) растёт, а `last` у каждого обращения к модели
   // свой. Счётчик хода обязан брать прирост накопителя — по `last` цифра прыгала бы вниз.
   // Рассуждения в замере идут ВНУТРИ outputTokens (в аналитике они атрибут той же метрики),
   // поэтому отдельным слагаемым их прибавлять нельзя.
-  function emitTokenProgressTurn() {
+  /**
+   * Снимки total проверяют прирост выхода за ход без повторного reasoning.
+   * Сценарий квот сохраняет процесс для последующего служебного события в простое.
+   */
+  function emitTokenProgressTurn(keepAlive = false) {
     for (const [lastOutput, totalOutput] of [[50, 100], [40, 350]]) {
       send({ method: 'thread/tokenUsage/updated', params: {
         threadId: THREAD_ID,
@@ -202,7 +242,10 @@ function runFixture() {
         durationMs: 1_000,
       },
     } });
-    setTimeout(() => process.exit(0), 20);
+
+    if (!keepAlive) {
+      setTimeout(() => process.exit(0), 20);
+    }
   }
 
   /**
@@ -951,6 +994,12 @@ function runFixture() {
 
       if (scenario === 'stream-retry') {
         emitStreamRetryTurn();
+
+        return;
+      }
+
+      if (scenario === 'live-limits') {
+        emitLiveLimitsTurn();
 
         return;
       }
