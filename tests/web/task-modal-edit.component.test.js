@@ -9,8 +9,11 @@ process.env.NODE_ENV = 'test';
 
 let nonce = 0;
 
-/** Монтирует карточку с живыми UI-primitives и управляемыми B24-справочниками. */
-async function mountEditor(t) {
+/**
+ * Монтирует карточку с живыми UI-primitives и управляемыми B24-справочниками.
+ * Представление dialog или document выбирает тест, остальные подмены общие.
+ */
+async function mountEditor(t, presentation = 'dialog') {
   nonce += 1;
   const prefix = `__taskModalEdit${nonce}`;
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -126,6 +129,7 @@ async function mountEditor(t) {
 
   const TaskModal = await compileTaskModal(prefix);
   const wrapper = mount(TaskModal, {
+    props: { presentation },
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()], stubs: { teleport: true } },
   });
@@ -199,4 +203,18 @@ test('TaskModal не перезаписывает нетронутые поля 
     id: '42',
     fields: { title: 'Только новый заголовок' },
   }]);
+});
+
+test('TF-01: та же карточка редактируется как документ без модального backdrop', async (t) => {
+  const { wrapper, flushPromises, updates } = await mountEditor(t, 'document');
+
+  assert.equal(wrapper.find('.task-card-document').exists(), true);
+  assert.equal(wrapper.find('[aria-modal="true"]').exists(), false);
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+  await wrapper.get('[data-role="task-edit-title"]').setValue('Заголовок отдельного окна');
+  await wrapper.get('[data-role="task-edit-save"]').trigger('click');
+  await flushPromises();
+  assert.deepEqual(updates, [{ id: '42', fields: { title: 'Заголовок отдельного окна' } }]);
+  assert.match(wrapper.text(), /Изменения сохранены/);
 });

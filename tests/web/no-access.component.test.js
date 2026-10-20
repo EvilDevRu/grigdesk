@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import { appWindowStubs } from './helpers/app-window-stubs.js';
+
 import { compileVue, webFile } from './helpers/compile-vue.js';
 
 const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -122,6 +124,7 @@ async function mountApp(t, options = {}) {
     load: () => {}, start: () => {}, stop: () => {}, clear: () => {}, stopPoll: () => {},
     ${extra} });`;
   const stubs = {
+    ...appWindowStubs,
     './stores/settings.ts': `export const useSettingsStore = () => ({
       isOpen: false, setAuthenticated() {}, dispose() {},
     });`,

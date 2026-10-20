@@ -6,6 +6,7 @@
 // навсегда — выглядело как «GrigDesk завис», хотя сервер отвечал за миллисекунды.
 import { ref, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
+import type { RelayChannel } from '../shared/windowRelay.ts';
 
 // Все именованные события сервера — новые добавлять сюда (иначе подписчик их не увидит).
 // `as const` не украшение: из списка выводится тип имени, и опечатка в ветке подписчика
@@ -83,6 +84,26 @@ let lastClosedAt = 0;
 let knownBoot: string | null = null;
 let stableTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Роль документа в общем потоке desktop: главное окно — источник, окно карточки — зеркало,
+// браузер и Android держат собственный поток вкладки без ретрансляции.
+export type SseRelayRole = 'off' | 'source' | 'mirror';
+
+// События, нужные окну карточки: журнал окна, полка и речь. Поток ходов чата и прогресс
+// через канал не идут. Новый подписчик внутри карточки — добавить его событие сюда.
+const RELAYED_EVENTS: readonly SseEventName[] = [
+  'hello',
+  'diagnostic-logging',
+  'task-shelf-changed',
+  'speech-settings',
+];
+const SSE_RELAY_NAME = 'grigdesk-sse-v1';
+const defaultRelayFactory = (): RelayChannel => new BroadcastChannel(SSE_RELAY_NAME);
+
+let relayRole: SseRelayRole = 'off';
+let relayFactory: () => RelayChannel = defaultRelayFactory;
+let relay: RelayChannel | null = null;
+
+
 /**
  * Передаём диагностические события SSE внешнему runtime.
  * Замена обработчика безопасна при повторном запуске приложения.
@@ -117,6 +138,9 @@ export function resetSseForTests(): void {
   openedAt = 0;
   lastClosedAt = 0;
   knownBoot = null;
+  closeRelay();
+  relayRole = 'off';
+  relayFactory = defaultRelayFactory;
 }
 
 /**
@@ -135,10 +159,128 @@ function report(
 }
 
 /**
+ * Роль задаёт вход приложения до первого подписчика; тест передаёт свою фабрику канала.
+ * Смена роли и HMR освобождают прежние канал, поток и таймеры переподключения.
+ */
+export function configureSseRelay(
+  role: SseRelayRole,
+  factory: () => RelayChannel = defaultRelayFactory,
+): void {
+  closeRelay();
+  es?.close();
+  es = null;
+  connected.value = false;
+
+  if (retry) {
+    clearTimeout(retry);
+    retry = null;
+  }
+
+  if (stableTimer) {
+    clearTimeout(stableTimer);
+    stableTimer = null;
+  }
+
+  relayRole = role;
+  relayFactory = factory;
+}
+
+/**
+ * Канал ретрансляции закрывается вместе с обработчиком: поздние сообщения не доходят.
+ * Повторный вызов без канала ничего не делает.
+ */
+function closeRelay(): void {
+  if (!relay) {
+    return;
+  }
+
+  relay.onmessage = null;
+  relay.close();
+  relay = null;
+}
+
+/**
+ * Событие доходит до подписчиков одинаково из своего потока и из ретрансляции.
+ * hello обновляет метку запуска сервера для журнала окна в обоих режимах.
+ */
+function deliver(name: SseEventName, data: unknown): void {
+  if (name === 'hello') {
+    const hello = data && typeof data === 'object' ? (data as { bootId?: unknown }) : {};
+    const value =
+      typeof hello.bootId === 'string' && /^[A-Za-z0-9_-]{8,64}$/u.test(hello.bootId)
+        ? hello.bootId
+        : null;
+    const changed = knownBoot !== null && value !== null && knownBoot !== value;
+
+    knownBoot = value;
+    report('sse.hello', { boot: value, changed });
+  }
+
+  for (const fn of listeners) {
+    try {
+      fn(name, data);
+    } catch {
+      /* один сломанный подписчик не мешает остальным */
+    }
+  }
+}
+
+/**
+ * Главный документ отдаёт уже разобранное событие окнам карточек того же origin.
+ * Канал создаётся при первом событии; сбой ретрансляции не мешает своим подписчикам.
+ */
+function publish(name: SseEventName, data: unknown): void {
+  try {
+    relay ??= relayFactory();
+    relay.postMessage({
+      version: 1,
+      name,
+      data,
+    });
+  } catch {
+    /* окно карточки получит следующее событие */
+  }
+}
+
+/**
+ * Окно карточки не открывает своё соединение: события приходят от главного документа.
+ * Принимаются только известные имена в точной форме, ответ в канал не отправляется.
+ */
+function ensureMirror(): void {
+  if (relay || !accessEnabled) {
+    return;
+  }
+
+  const channel = relayFactory();
+
+  relay = channel;
+  connected.value = true;
+  channel.onmessage = ({ data }) => {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return;
+    }
+
+    const message = data as Record<string, unknown>;
+    const name = RELAYED_EVENTS.find((item) => item === message.name);
+
+    if (name && message.version === 1 && Object.keys(message).length === 3 && 'data' in message) {
+      deliver(name, message.data);
+    }
+  };
+}
+
+/**
  * Поднимает единственное соединение вкладки, если его ещё нет. Повторный вызов
  * безопасен и обязателен: подписчики появляются в разное время, а поток один.
  */
 function ensure(): void {
+  if (relayRole === 'mirror') {
+    ensureMirror();
+
+    return;
+  }
+
+
   if (es || !accessEnabled) {
     return;
   }
@@ -195,24 +337,10 @@ function ensure(): void {
         /* событие без тела */
       }
 
-      if (name === 'hello') {
-        const hello = data && typeof data === 'object' ? (data as { bootId?: unknown }) : {};
-        const value =
-          typeof hello.bootId === 'string' && /^[A-Za-z0-9_-]{8,64}$/u.test(hello.bootId)
-            ? hello.bootId
-            : null;
-        const changed = knownBoot !== null && value !== null && knownBoot !== value;
+      deliver(name, data);
 
-        knownBoot = value;
-        report('sse.hello', { boot: value, changed });
-      }
-
-      for (const fn of listeners) {
-        try {
-          fn(name, data);
-        } catch {
-          /* один сломанный подписчик не мешает остальным */
-        }
+      if (relayRole === 'source' && RELAYED_EVENTS.includes(name)) {
+        publish(name, data);
       }
     });
   }
@@ -267,6 +395,7 @@ export function setSseEnabled(enabled: boolean): void {
 
   es?.close();
   es = null;
+  closeRelay();
   connected.value = false;
 
   if (retry) {

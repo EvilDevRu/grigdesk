@@ -7,6 +7,8 @@ import type { FileHandle } from 'node:fs/promises';
 import { recordOrNull } from '../../shared/lib/objects.ts';
 
 import { localOrigin } from './connection.ts';
+import { normalizeSurfaceGeometry } from './surfaceGeometry.ts';
+import type { SurfaceGeometry } from './surfaceGeometry.ts';
 
 import type { Connection } from './connection.ts';
 import { normalizeProfile } from './profiles.ts';
@@ -23,6 +25,7 @@ export type DesktopSettings = {
   profiles: DesktopProfile[];
   selected: string | null;
   window: WindowState;
+  surfaceWindows?: { task: SurfaceGeometry };
 };
 
 export const DEFAULT_WINDOW: Readonly<WindowState> = Object.freeze({
@@ -100,7 +103,12 @@ export function normalizeSettings(value: unknown): DesktopSettings {
     selected = profiles.some((item) => item.id === settings.selected) ? settings.selected as string : null;
   }
 
+  const taskWindow = supported
+    ? normalizeSurfaceGeometry(recordOrNull(settings?.surfaceWindows)?.task)
+    : null;
+
   return {
+    ...(taskWindow ? { surfaceWindows: { task: taskWindow } } : {}),
     version: 2,
     profiles,
     selected,

@@ -1,5 +1,6 @@
 <template>
-  <UiDialog
+  <TaskCardFrame
+    :presentation="presentation"
     :open="Boolean(taskId)"
     data-role="task-modal"
     size="workspace"
@@ -945,7 +946,7 @@
           <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
       </footer>
-  </UiDialog>
+  </TaskCardFrame>
 </template>
 
 <script setup>
@@ -953,13 +954,15 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/apiClient.ts';
+import { shellAction } from '../shared/shellClient.ts';
+import { leaveTaskForPipeline } from '../shared/taskWindowNavigation.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import {
   confirmDialog,
+  showToast,
   UiButton,
   UiPopover,
   UiChoiceList,
-  UiDialog,
   UiDisclosureButton,
   UiField,
   UiFilePicker,
@@ -989,7 +992,12 @@ import { liveTimerSec, mmss, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
+import TaskCardFrame from './TaskCardFrame.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
+
+const props = defineProps({
+  presentation: { type: String, default: 'dialog' },
+});
 
 const router = useRouter();
 
@@ -1610,7 +1618,24 @@ async function loadConveyor() {
     }
   } catch { /* графа нет — кнопку сноса просто не покажем */ }
 }
-function openConveyor() { ui.close(); router.push('/pipeline'); }
+/**
+ * Карточка документа ждёт подтверждения перехода в главном окне, сохраняя контекст при отказе.
+ * Диалог продолжает использовать маршрут своего документа и прежний порядок закрытия.
+ */
+function openConveyor() {
+  return leaveTaskForPipeline({
+    document: props.presentation === 'document',
+    send: () => shellAction('POST', '/surfaces/main', { destination: 'pipeline' },
+      AbortSignal.timeout(20000)),
+    route: () => router.push('/pipeline'),
+    close: () => ui.close(),
+    failure: () => showToast({
+      id: 'task-window-pipeline',
+      title: 'Не удалось открыть конвейер. Повторите переход.',
+      tone: 'warning',
+    }),
+  });
+}
 
 // Снести стенд, не уходя в конвейер: стенд убирают из карточки, и возвращаться
 // на страницу конвейера ради одной кнопки незачем. Снос идёт до пары минут

@@ -1,7 +1,7 @@
 export const TERMINAL_INSERT_LIMIT_BYTES = 16384;
 
-export type DesktopWindowRole = 'main';
-export type DesktopDocumentMode = 'page' | 'main';
+export type DesktopWindowRole = 'main' | 'surface';
+export type DesktopDocumentMode = 'page' | DesktopWindowRole;
 
 /**
  * Только точный адрес своего HTTP-документа означает запрос модального окна.
@@ -47,6 +47,10 @@ export function desktopWindowRole(userAgent: string): DesktopWindowRole | null {
     return 'main';
   }
 
+  if (roles[0] === 'GrigDeskWindow/surface') {
+    return 'surface';
+  }
+
   return null;
 }
 
@@ -55,7 +59,7 @@ export function desktopWindowRole(userAgent: string): DesktopWindowRole | null {
  * Старый query настроек остаётся обычным адресом того же документа.
  */
 export function desktopDocumentMode(userAgent: string, _search: string): DesktopDocumentMode {
-  return desktopWindowRole(userAgent) === 'main' ? 'main' : 'page';
+  return desktopWindowRole(userAgent) ?? 'page';
 }
 
 /**

@@ -2634,6 +2634,14 @@ export const useChatStore = defineStore('chat', {
       if (this.activeId === id) this.activeId = this.sessions[0]?.id || this.archived[0]?.id || null;
     },
     /**
+     * Документ карточки сверяет только речь без загрузки истории и подписок чата.
+     * Общая сверка сохраняет дедупликацию и защиту от позднего ответа.
+     */
+    syncSpeech() {
+      return this._resyncSpeech();
+    },
+
+    /**
      * Speech SSE не имеет replay-буфера: после reconnect всегда сверяем
      * полный server-owned snapshot. Ошибка не ломает остальной reconnect.
      */

@@ -83,6 +83,7 @@ interface ShelfTaskDetail {
 }
 
 interface ShelfController {
+  passive: boolean;
   analysis: ShelfAnalysisSource;
   pipeline: ShelfPipelineSource;
   board: ShelfBoardSource;
@@ -220,6 +221,7 @@ function ensureController(store: object): ShelfController {
   }
 
   controller = {
+    passive: false,
     // Соседние сторы объявлены собственным контрактом чтения выше: пока они на
     // JavaScript, вывод типов из них не был бы проверенным знанием.
     analysis: useAnalysisStore(),
@@ -739,6 +741,14 @@ export const useTaskShelfStore = defineStore('taskShelf', {
   },
   actions: {
     /**
+     * Режим принадлежит документу карточки и переживает очистку данных при выходе.
+     * Главное окно строит строки полки, читает детали и отправляет оповещения.
+     */
+    setPassive(value: boolean) {
+      ensureController(this).passive = value;
+    },
+
+    /**
      * Принимает подтверждённый сервером снимок. Поздний ответ по чужой области и
      * снимок с меньшей ревизией отбрасываются: они старее уже показанного.
      */
@@ -765,8 +775,11 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       pruneTaskDetails(controller, snapshot.entries);
       this.loaded = true;
       this._scopeRequestSeq = Math.max(this._scopeRequestSeq, seq);
-      this.reconcile({ silent });
-      hydrateMissingTaskDetails(this, controller);
+
+      if (!controller.passive) {
+        this.reconcile({ silent });
+        hydrateMissingTaskDetails(this, controller);
+      }
 
       return true;
     },
@@ -1039,9 +1052,29 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       return this._put(id, { reason: 'analysis', createIfMissing: true });
     },
 
+    /**
+     * Просмотр перебазирует запись полки по полному наблюдению главного документа.
+     * Карточка передаёт намерение главному окну, не подставляя неполный pipeline-снимок.
+     */
     acknowledge(id: unknown) {
       if (!this.isOnShelf(id)) {
         return false;
+      }
+
+      if (ensureController(this).passive) {
+        const channel = new BroadcastChannel('grigdesk-task-data-v1');
+
+        try {
+          channel.postMessage({
+            version: 1,
+            type: 'shelf-acknowledge',
+            taskId: taskKey(id),
+          });
+        } finally {
+          channel.close();
+        }
+
+        return true;
       }
 
       const entry = this.entries.find((item) => item.taskId === taskKey(id));

@@ -8,10 +8,12 @@ import type { DesktopProfile } from './profiles.ts';
 import { Profiles } from './profiles.ts';
 import { createPairing, pinnedJson } from './pairing.ts';
 import { createShellApi } from './pipe/shellApi.ts';
+import type { NativeWindows } from './pipe/shellApi.ts';
 import { json, startPipe } from './pipe/pipeServer.ts';
 import { createUpstream } from './pipe/upstream.ts';
 
 interface RuntimeOptions {
+  nativeWindows?: NativeWindows;
   settings: DesktopSettings;
   save(): Promise<void>;
   uiDir: string;
@@ -44,6 +46,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     directory: options.identityDirectory,
   });
   const shell = createShellApi({
+    nativeWindows: options.nativeWindows,
     profiles,
     pairing,
     appApi,

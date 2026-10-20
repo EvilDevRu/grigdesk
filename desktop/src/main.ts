@@ -9,7 +9,7 @@ import {
   session,
   shell,
 } from 'electron';
-import type { BrowserWindowConstructorOptions, Session } from 'electron';
+import type { BrowserWindowConstructorOptions, Rectangle, Session } from 'electron';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -22,6 +22,9 @@ import { delayWithAbort } from '../../shared/lib/delay.ts';
 import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { createSettingsRequest } from './settingsRequest.ts';
+import { createSurfaceWindows } from './surfaceWindows.ts';
+import { placeSurfaceBounds } from './surfaceGeometry.ts';
+import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
 
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { clientUiDirectory } from './clientUi.ts';
@@ -59,6 +62,9 @@ import {
   windowOptions,
 } from './windowSecurity.ts';
 
+let surfaceWindows: ReturnType<typeof createSurfaceWindows> | null = null;
+const surfaceWindowOrder: BrowserWindow[] = [];
+const maximizeOnShow = new WeakSet<object>();
 let settingsRequest: ReturnType<typeof createSettingsRequest> | null = null;
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
@@ -229,6 +235,128 @@ function saveMainWindow(): void {
  */
 function openExternal(url: string): Promise<void> {
   return shell.openExternal(url).catch(() => undefined);
+}
+
+/**
+ * Карточки сохраняют нормальные размеры отдельно от главного окна.
+ * Скрытые и уничтоженные окна не подменяют последнее видимое положение.
+ */
+function captureSurfaceGeometry(window: BrowserWindow): void {
+  if (window.isDestroyed() || !window.isVisible() || !settings) {
+    return;
+  }
+
+  settings.surfaceWindows = {
+    task: { ...window.getNormalBounds(), maximized: window.isMaximized() },
+  };
+}
+
+/**
+ * Закрытие страницы может дать только closed: сохраняем уже снятое состояние.
+ * Выход приложения записывает всю настройку обычной очередью saveMainWindow.
+ */
+function persistSurfaceGeometry(): void {
+  if (!settings?.surfaceWindows || !settingsFile || quit.stopping) {
+    return;
+  }
+
+  saving = writeSettings(settingsFile, settings);
+  saving.catch(() => writeLog('GrigDesk: не удалось сохранить положение карточки.'));
+}
+
+/**
+ * Предпочитаем экран главного окна, если сохранённый монитор больше недоступен.
+ * Остальные рабочие области сохраняют возможность отрицательных координат.
+ */
+function surfaceWorkAreas(): [Rectangle, ...Rectangle[]] {
+  const primary = screen.getPrimaryDisplay();
+  const preferred = screen.getDisplayMatching(mainWindow?.getNormalBounds() ?? primary.workArea);
+
+  return [
+    preferred.workArea,
+    ...screen.getAllDisplays().filter((display) => display.id !== preferred.id)
+      .map((display) => display.workArea),
+  ];
+}
+
+/**
+ * Загрузки могут завершиться в обратном порядке: размещение проверяется перед показом.
+ * Разворачивается только первое видимое окно, остальные оставляют предыдущее доступным.
+ */
+function prepareSurfaceShow(window: BrowserWindow): void {
+  const visible = surfaceWindowOrder.filter((other) => other !== window
+    && !other.isDestroyed() && other.isVisible());
+  const previous = visible.at(-1);
+  const bounds = window.getBounds();
+  const placed = placeSurfaceBounds({ ...bounds, maximized: false }, 0,
+    surfaceWorkAreas(), previous?.getBounds(), visible.map((other) => other.getBounds()));
+
+  window.setMinimumSize(Math.min(600, placed.width), Math.min(600, placed.height));
+  window.setBounds(placed);
+
+  if (maximizeOnShow.delete(window) && !previous) {
+    window.maximize();
+  }
+}
+
+/**
+ * Только встроенный документ текущей машины получает окно в стиле приложения.
+ * UA и guards назначаются до первой загрузки, сессия совпадает с главным окном.
+ */
+function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number): BrowserWindow {
+  const areas = surfaceWorkAreas();
+  const saved = settings?.surfaceWindows?.task ?? {
+    x: areas[0].x,
+    y: areas[0].y,
+    width: 1000,
+    height: 800,
+    maximized: false,
+  };
+  const previous = surfaceWindowOrder.findLast((other) => !other.isDestroyed());
+  const bounds = placeSurfaceBounds(saved, index, areas, previous?.getBounds());
+  const options = windowOptions(path.join(__dirname, 'icon.png'), app.isPackaged, {
+    width: bounds.width,
+    height: bounds.height,
+    maximized: false,
+  });
+  const window = new BrowserWindow({
+    ...options,
+    ...bounds,
+    minWidth: Math.min(600, bounds.width),
+    minHeight: Math.min(600, bounds.height),
+    webPreferences: {
+      ...options.webPreferences,
+      session: session.fromPartition(LOCAL_PARTITION),
+    },
+  });
+
+  surfaceWindowOrder.push(window);
+
+  const remember = () => captureSurfaceGeometry(window);
+
+  window.on('move', remember);
+  window.on('resize', remember);
+  window.on('maximize', remember);
+  window.on('unmaximize', remember);
+  window.on('close', remember);
+  window.on('closed', () => {
+    const index = surfaceWindowOrder.indexOf(window);
+
+    if (index >= 0) {
+      surfaceWindowOrder.splice(index, 1);
+    }
+
+    persistSurfaceGeometry();
+  });
+
+  if (saved.maximized && !previous) {
+    maximizeOnShow.add(window);
+  }
+
+  window.webContents.setUserAgent(desktopUserAgent(window.webContents.getUserAgent(), 'surface'));
+  configureWindow(window, new URL(url).origin, options);
+
+  return window;
 }
 
 /**
@@ -510,12 +638,61 @@ async function prepare(signal: AbortSignal): Promise<void> {
     .then((text) => JSON.parse(text) as typeof API_VERSION).catch(() => API_VERSION);
   let supervising = false;
 
+  surfaceWindows = createSurfaceWindows({
+    allowedOrigin: () => quit.stopping ? null : pipeOrigin,
+    create: createSurfaceWindow,
+    beforeShow: (window) => prepareSurfaceShow(window as BrowserWindow),
+  });
+
   client = createClientRuntime({
     settings: stored,
     save: () => writeSettings(settingsFile!, stored),
     uiDir,
     secret: pipeSecret,
     appApi,
+    nativeWindows: {
+      open: async (origin, target) => surfaceWindows?.open(origin, target) ?? false,
+
+      /**
+       * Закрытый запрос выполняется только в текущем главном документе своей машины.
+       * Подтверждение страницы и повторная проверка поколения предшествуют фокусу.
+       */
+      async main(origin, request) {
+        const window = mainWindow;
+
+        if (quit.stopping || origin !== pipeOrigin || !revealed()
+          || !window || window.isDestroyed() || window.webContents.isDestroyed()) {
+          return false;
+        }
+
+        const frame = window.webContents.mainFrame;
+
+        if (frame.isDestroyed() || frame.detached || !sameOrigin(frame.url, origin)
+          || new URL(frame.url).pathname !== '/') {
+          return false;
+        }
+
+        try {
+          const script = 'typeof window.grigdeskSurfaceMain === "function"'
+            + ' && window.grigdeskSurfaceMain(' + JSON.stringify(request) + ')';
+          const opened = await frame.executeJavaScript(script);
+
+          if (opened !== true || quit.stopping || mainWindow !== window || origin !== pipeOrigin
+            || window.isDestroyed() || frame.isDestroyed() || frame.detached
+            || window.webContents.mainFrame !== frame || !sameOrigin(frame.url, origin)
+            || new URL(frame.url).pathname !== '/') {
+            return false;
+          }
+
+          focusMainWindow();
+
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    },
+
     identity: sealedIdentity(electronSealer(safeStorage, process.platform)),
     identityDirectory: path.join(app.getPath('userData'), 'identity'),
     localAvailable: () => runtime !== null,
@@ -590,6 +767,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
      * Дочерние окна прежней машины закрываются перед переходом главного.
      */
     async navigate(origin) {
+      surfaceWindows?.closeAll();
       pipeOrigin = origin;
 
       for (const window of BrowserWindow.getAllWindows()) {
@@ -690,6 +868,7 @@ const startup = createStartupController({
 const quit = createQuitController({
   cancelStartup: () => {
     startup.cancel();
+    surfaceWindows?.closeAll();
     lifetime.abort();
     client?.shell.close();
   },

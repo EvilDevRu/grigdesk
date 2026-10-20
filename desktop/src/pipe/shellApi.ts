@@ -7,12 +7,20 @@ import type { DesktopProfile, Profiles } from '../profiles.ts';
 import type { PipeUpstream } from './pipeServer.ts';
 import { json } from './pipeServer.ts';
 import type { UpstreamState } from './upstream.ts';
+import { parseSurfaceTarget, parseMainRequest } from '../../../shared/desktop/surfaceContract.ts';
+import type { MainRequest, SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 
 interface ProbeUpstream extends PipeUpstream {
   probe(): Promise<void>;
 }
 
+export interface NativeWindows {
+  open(origin: string, target: SurfaceTarget): Promise<boolean>;
+  main(origin: string, request: MainRequest): Promise<boolean>;
+}
+
 interface ShellOptions {
+  nativeWindows?: NativeWindows;
   profiles: Profiles;
   pairing: { addByPairing(text: string): Promise<DesktopProfile> };
   appApi?: ApiVersion;
@@ -98,7 +106,7 @@ export function createShellApi(options: ShellOptions) {
       detail: connection?.detail || null,
       serverApi: connection?.serverApi || null,
       appApi,
-      capabilities: [],
+      capabilities: options.nativeWindows ? ['windows'] : [],
       localAvailable: options.localAvailable(),
     };
   };
@@ -298,6 +306,33 @@ export function createShellApi(options: ShellOptions) {
       }
 
       const body = await readBody(req);
+
+      if (req.method === 'POST' && pathname.startsWith('/__shell/surfaces/')) {
+        if (!options.nativeWindows) {
+          json(res, 404, { error: 'not_found' });
+
+          return;
+        }
+
+        const target = pathname === '/__shell/surfaces/open' ? parseSurfaceTarget(body) : null;
+        const request = pathname === '/__shell/surfaces/main' ? parseMainRequest(body) : null;
+
+        if (!target && !request) {
+          json(res, 400, { error: 'invalid_surface', message: 'Неверное действие окна.' });
+
+          return;
+        }
+
+        const origin = new URL('http://' + req.headers.host).origin;
+        const opened = target
+          ? await options.nativeWindows.open(origin, target)
+          : await options.nativeWindows.main(origin, request!);
+
+        json(res, 200, { opened });
+
+        return;
+      }
+
       let navigation: string | null | undefined;
       let removed: string | undefined;
 

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { appWindowStubs } from './helpers/app-window-stubs.js';
+
 import { compileModule, compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
@@ -43,6 +45,7 @@ test('оболочка: интерфейс открыт до сервера, м�
     };
 
     const stubs = {
+    ...appWindowStubs,
       './stores/settings.ts': `export const useSettingsStore = () => ({
         isOpen: false, setAuthenticated() {}, dispose() {},
       });`,
