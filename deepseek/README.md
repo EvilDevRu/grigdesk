@@ -35,7 +35,7 @@ objects нужного commit или `seedDir` с проверяемыми ис�
 
 ```bash
 npm --prefix deepseek run install:binary -- --binary /absolute/release/deepseek \
-  --target bin/deepseek --host-contract server/deepseek-host-contract.json
+  --target "$PWD/bin/deepseek" --host-contract "$PWD/server/deepseek-host-contract.json"
 ```
 
 Установщик проверяет metadata, полный payload и серверный host/GLM contract до atomic rename.

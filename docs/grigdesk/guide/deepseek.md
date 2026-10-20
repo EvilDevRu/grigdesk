@@ -11,9 +11,12 @@ web RPC/events на loopback, каталог моделей и Factory — ACP. 
 
 ```bash
 npm --prefix deepseek run install:binary -- --binary /absolute/release/deepseek \
-  --target bin/deepseek --host-contract server/deepseek-host-contract.json
+  --target "$PWD/bin/deepseek" --host-contract "$PWD/server/deepseek-host-contract.json"
 node server/scripts/deepseekRuntimeInfo.mts --probe
 ```
+
+Пути передаются абсолютными: `npm --prefix deepseek` запускает установщик из `deepseek/`, и
+относительный `bin/deepseek` превращается в несуществующий `deepseek/bin`.
 
 Первый переход требует обновления сервера и ручного перезапуска владельцем. Последующие
 совместимые замены ELF не требуют перезапуска: текущий ход завершится на прежнем бинарнике,

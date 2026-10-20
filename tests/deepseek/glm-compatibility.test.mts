@@ -6,7 +6,7 @@ import { GLM_ADMISSION } from '../../deepseek/src/runtime/glmCompatibility.ts';
 test('GLM_ADMISSION допускает только api с identity, прошедшей живую проверку', () => {
   assert.deepEqual(GLM_ADMISSION, [{
     mode: 'api',
-    compatibility: 'f38161e4c8bd327edc0b27bd1919ff61fec7c96e0e5a31ced0dcf2ac022d66e5',
+    compatibility: 'ea7a8933ab635014610ba0be5d6ea70f2459293e05dba4799ea6faccda93347e',
   }]);
   assert.equal(Object.isFrozen(GLM_ADMISSION), true);
   assert.equal(GLM_ADMISSION.every((entry) => Object.isFrozen(entry)), true);
