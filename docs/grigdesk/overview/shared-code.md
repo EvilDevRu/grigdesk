@@ -74,7 +74,8 @@
 | `runtime/serverBinary.ts` | Чистый decoder публичной metadata одиночного ELF: identity, Node/ABI, capabilities, без приватного индекса |
 | `node/serverBinaryRuntime.ts` | Пробы ELF, prepare/release и удержание preparation при запуске; [контракт launcher](../server/server-binary.md#launcher-ipc-и-кэш) |
 | `node/packagedEnvironment.ts` | Окружение детей SEA: свой Node запасным, Python без pyc, глобальный npm вне R; с готовыми каталогами CLI — общий порядок PATH |
-| `node/userCliPaths.ts` | [Порядок PATH packaged-запуска](../server/server-binary-path.md) и однократный поиск CLI: явный список, умолчания, nvm без shell rc |
+| `node/cliPathOrder.ts` | Синхронный [порядок PATH packaged-запуска](../server/server-binary-path.md) без файлового discovery в раннем графе |
+| `node/userCliPaths.ts` | Однократный поиск CLI: явный список, умолчания, nvm без shell rc; совместимый экспорт порядка PATH |
 | `node/packageTests.ts` | Выбор *.test.mts и запуск пакетов Б24/DeepSeek через общий сторож памяти |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |

@@ -11,6 +11,10 @@ host contract, profile/policy и наличия plugin сохраняется. C
 Способ чтения ключа для ручного запуска сохранён: env-файл папки данных поверх окружения;
 ключ не передаётся в argv и не печатается.
 
+Тест не предполагает, что production admission всегда пуст: допущенный api ELF работает
+без DI, несовместимая identity отклоняется до процесса. Проверка остаётся offline:
+[фикстура допуска выбранного выпуска](../testing/glm-release-admission-fixture.md).
+
 Отчёт содержит kind (`loopback` для локального model endpoint, иначе `live`), mode,
 compatibility, packageId и SHA выбранного файла. Offline-тест передаёт синтетический ключ,
 loopback модель и fetch guard; ветка main, читающая env-файл, не вызывается. Этот результат

@@ -13,6 +13,12 @@ export interface BinaryBuildOptions {
   cacheDir: string;
 }
 
+export interface BinarySmokeMetrics {
+  warmRatio: number | null;
+  warmP95Ratio: number | null;
+  warmRatioNote: string | null;
+}
+
 /**
  * Отпечаток сборочных контрактов снимается до стадий и повторяется перед упаковкой.
  * В manifest входят только относительные имена и SHA, без путей машины и timestamp.
@@ -52,7 +58,7 @@ export interface BinaryBuildSteps {
   package(work: string, options: BinaryBuildOptions): Promise<ServerPackageManifest>;
   copy?: typeof copyFile;
   postject(work: string): Promise<void>;
-  smoke(binary: string, manifest: ServerPackageManifest, work: string): Promise<void>;
+  smoke(binary: string, manifest: ServerPackageManifest, work: string): Promise<BinarySmokeMetrics | void>;
 }
 
 /**
@@ -167,7 +173,7 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
       throw new Error('ELF превышает ворота 450 MiB');
     }
 
-    await steps.smoke(staged, manifest, work);
+    const smoke = await steps.smoke(staged, manifest, work);
 
     const result = {
       binary: target,
@@ -175,6 +181,11 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
       size: (await stat(staged)).size,
       packageId: manifest.packageId,
       node: runtime.version,
+      ...smoke ? {
+        warmRatio: smoke.warmRatio,
+        warmP95Ratio: smoke.warmP95Ratio,
+        warmRatioNote: smoke.warmRatioNote,
+      } : {},
     };
     const resultTemporary = path.join(work, 'build-result.json');
 

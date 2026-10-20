@@ -254,6 +254,24 @@
       "detail": "Сборка и локальная проверка релиза, не входит в runtime."
     },
     {
+      "file": "server/scripts/ctlBuild.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 2,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Source-команда build готовит закреплённый Node и читает descriptor окна; в payload не входит."
+    },
+    {
+      "file": "server/scripts/ctlBuild.mts",
+      "construct": "resource-ref",
+      "target": "server/build/node-runtime.json",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Версия и SHA архива читаются только перед сборкой из исходников."
+    },
+    {
       "file": "server/scripts/deepSeekCandidateGate.ts",
       "construct": "exec-path",
       "target": "",

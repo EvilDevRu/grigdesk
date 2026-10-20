@@ -13,6 +13,11 @@ import path from 'node:path';
 
 import { computeNodeStatuses } from '../../server/src/lib/factoryGraph.ts';
 import { readFactoryAttemptLedger } from '../../server/src/lib/factoryAttemptLedger.ts';
+import { prepareFactoryRouteLaunch } from '../../server/src/lib/factoryLaunch.ts';
+import {
+  factoryRuntimeScope,
+  readFactoryRuntimeAttempt,
+} from '../../server/src/lib/factoryRuntimePins.ts';
 import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 import factoryModule from '../../server/src/modules/factory/index.ts';
 
@@ -95,7 +100,9 @@ async function fixture(t, { cursor = null } = {}) {
   const profilesDir = path.join(root, 'profiles');
   const binDir = path.join(root, 'bin');
   const worktree = path.join(root, 'worktree');
+
   await Promise.all([
+    mkdir(controlDir, { mode: 0o700 }),
     mkdir(path.join(stateDir, 'logs'), { recursive: true }),
     mkdir(routesDir, { recursive: true }),
     mkdir(path.join(profilesDir, 'demo'), { recursive: true }),
@@ -159,6 +166,8 @@ async function fixture(t, { cursor = null } = {}) {
   t.after(() => { process.env.PATH = oldPath; });
 
   const config = {
+    rootDir: root,
+    dataHome: path.join(root, 'data'),
     factoryHome: root,
     factoryBin,
     factoryConfigRoot: path.join(root, 'config'),
@@ -286,6 +295,57 @@ test('/gate без инициализированного курсора отк�
   assert.equal(response.statusCode, 409, response.body);
   assert.equal(response.json().error, 'gate_not_current');
   await assert.rejects(access(fx.callsLog), 'движок не вызван: курсора ещё нет');
+});
+
+test('/gate закрепляет source runtime legacy-попытки с настоящими trusted файлами', async (t) => {
+  const fx = await fixture(t, { cursor: { node: 'gate_accept', state: 'paused' } });
+  const roots = {
+    controlRoot: fx.controlDir,
+    stateRoot: fx.stateDir,
+    profileRoot: fx.config.profilesDir,
+  };
+  const scope = factoryRuntimeScope(roots);
+  const authority = path.join(fx.controlDir, 'server-runtimes', scope, `${ATTEMPT}.json`);
+  const trusted = await readFactoryRuntimeAttempt(roots, '7', ATTEMPT);
+
+  assert.equal(trusted.profile, 'demo');
+  await assert.rejects(access(authority), { code: 'ENOENT' });
+
+  // Подставной движок фиксирует вызовы, но не поднимает оркестратор.
+  // Неактивный unit завершает подтверждение resume без ожидания настоящей службы.
+  await writeFile(path.join(fx.root, 'bin/systemctl'), '#!/usr/bin/env bash\necho inactive\nexit 3\n');
+
+  const app = await server(t, fx);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/gate/GATE_ACCEPT/approve',
+    payload: {},
+  });
+
+  if (response.statusCode !== 200) {
+    await prepareFactoryRouteLaunch(fx.config, [
+      '7', 'gate', '--profile', 'demo', '--attempt', ATTEMPT,
+    ]).catch((error) => t.diagnostic(`Причина отказа выбора runtime: ${error.code}`));
+  }
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().ok, true);
+
+  const pin = JSON.parse(await readFile(authority, 'utf8'));
+
+  assert.equal(pin.task, '7');
+  assert.equal(pin.attempt, ATTEMPT);
+  assert.equal(pin.scope, scope);
+  assert.equal(pin.protocol, 'route-v2');
+  assert.equal(pin.packageId, null);
+  assert.equal(pin.reservationToken, null);
+  assert.equal(pin.runtimeRoot, fx.root);
+  assert.equal(pin.engineHome, fx.root);
+  assert.equal(pin.engineBin, fx.config.factoryBin);
+  assert.deepEqual(JSON.parse(await readFile(path.join(
+    fx.config.dataHome, 'runtimes/server/attempt-pins', scope, `${ATTEMPT}.json`,
+  ), 'utf8')), pin);
+  assert.match(await readFile(fx.callsLog, 'utf8'), /7 gate --profile demo/);
 });
 
 test('/gate на припаркованных воротах передаёт решение движку', async (t) => {

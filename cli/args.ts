@@ -31,8 +31,10 @@ grigdesk-ctl device add <имя> [--address host:port] [--json]
 grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | b24 … | mobile … | release …
-grigdesk-ctl desktop use-server <R>  Выбрать серверный SEA-комплект для установленного окна
-grigdesk-ctl dev | build | deps | run
+grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
+grigdesk-ctl build [all|server|web|window]
+                                Без аргументов: сервер → веб → окно (all по умолчанию)
+grigdesk-ctl dev | deps | run
 grigdesk-ctl --help | -h | help | <группа> --help
 grigdesk-ctl --version
 

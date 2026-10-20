@@ -18,6 +18,13 @@
 | `bin/grigdesk-app` | установленное окно: AppImage из `desktop/release` без расширения в имени, вне git; кладёт `grigdesk-ctl desktop install` ([установка](../web/desktop-window.md)) |
 | `bin/grigdesk.png` | иконка ярлыка; копия `web/public/icon-512.png` |
 
+В папке исходников `bin/grigdesk-ctl build [all|server|web|window]` собирает и ставит
+компоненты; без цели — сервер, веб, затем окно. Установленный рядом ELF не перехватывает
+`dev|build|deps|mobile|release`: эти команды используют исходники и Node разработчика.
+Готовый `release.json` и ELF без исходников сохраняют прежний отказ команд разработки.
+Сборка не перезапускает процессы и не меняет выбор сервера окна:
+[порядок, кэш и отказы](../server/ctl-build.md).
+
 Остальное разложено по назначению, а в `cli/` лежит только TypeScript единой команды:
 
 - `deploy/` — установка и запуск на машине: `install.sh` (сервер и служба), `desktop.sh` (окно,

@@ -11,10 +11,12 @@ import { LEGACY, LEGACY_DATA_PATHS } from '../../shared/runtime/legacyBrand.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const helper = path.join(root, 'deploy', 'lib', 'runtime-env.sh');
+// Это source-проверки окружения разработчика, даже если в checkout установлен серверный ELF.
+// Штатный аргумент source исключает подготовку packaged runtime и чтение его реестра.
 const probe = String.raw`
 set -euo pipefail
 source "$1"
-grigdesk_load_runtime_env "$2"
+grigdesk_load_runtime_env "$2" source
 printf '%s\n' "$GRIGDESK_EFFECTIVE_PORT"
 `;
 
@@ -35,7 +37,7 @@ test('GE-07: запускалки отвергают старые ключи к�
 
   for (const suffix of ['HOME', 'ENV_FILE']) {
     for (const command of ['grigdesk_load_runtime_env', 'grigdesk_require_migrated']) {
-      const result = spawnSync('bash', ['-c', 'source "$1"; "$2" "$3"',
+      const result = spawnSync('bash', ['-c', 'source "$1"; "$2" "$3" source',
         '_', helper, command, home], {
         env: {
           PATH: process.env.PATH,
@@ -77,7 +79,7 @@ test('GB-07: bash сохраняет отказы матрицы папки да
       writeFileSync(file, '{}');
     }
 
-    const result = spawnSync('bash', ['-c', 'source "$1"; grigdesk_require_migrated "$2"',
+    const result = spawnSync('bash', ['-c', 'source "$1"; grigdesk_require_migrated "$2" source',
       '_', helper, code], {
       env: {
         PATH: process.env.PATH,
@@ -97,7 +99,7 @@ source "$1"
 node() {
   printf '%s\n' "$DSH_TEST_NODE_VERSION"
 }
-grigdesk_require_node
+grigdesk_require_node source
 `;
 
   for (const version of ['20.19.0', '22.18.0', '23.0.0']) {
@@ -249,7 +251,7 @@ test('RE-DH-4 проверка запускалки не создаёт данн
   mkdirSync(home);
 
   const run = () => spawnSync('bash', ['-c',
-    'source "$1"; grigdesk_require_migrated "$2"', '_', helper, code], {
+    'source "$1"; grigdesk_require_migrated "$2" source', '_', helper, code], {
     env: { 
       PATH: process.env.PATH, 
       HOME: home, 

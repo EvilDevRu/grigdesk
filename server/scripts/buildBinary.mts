@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { readNodeRuntime, SEA_FUSE } from '../../shared/node/nodeRuntime.ts';
 import { postjectCli } from './sea/buildSteps.mts';
 import { executeBinaryBuild, localRuntimeArchive, parseBuildArgs, readBuildInputs,
-  type BinaryBuildOptions } from './binary/buildSteps.mts';
+  type BinaryBuildOptions, type BinarySmokeMetrics } from './binary/buildSteps.mts';
 import type { ServerPackageManifest } from '../src/binary/metadata.ts';
 
 const sourceRoot = path.resolve(import.meta.dirname, '../..');
@@ -162,6 +162,14 @@ export async function buildBinary(options: BinaryBuildOptions) {
         env,
         prefix,
       });
+
+      const report = JSON.parse(await readFile(reportFile, 'utf8')) as BinarySmokeMetrics;
+
+      return {
+        warmRatio: report.warmRatio,
+        warmP95Ratio: report.warmP95Ratio,
+        warmRatioNote: report.warmRatioNote,
+      };
     },
   });
 }

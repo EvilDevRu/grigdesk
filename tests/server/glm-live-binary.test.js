@@ -128,10 +128,11 @@ function smokeModel() {
   };
 }
 
-test('smoke выбирает явный ELF/cache, отчёт loopback и временный api admission', {
+test('smoke выбирает явный ELF/cache, отчёт loopback и не меняет допуск выпуска', {
   timeout: 900000,
 }, async (t) => {
   const candidate = await ensureTestDeepSeekBinary();
+  const binarySha = await sha256File(candidate.binary);
   const root = await createGlmBinaryFixtureRoot('glm-live-binary-');
   const mock = await startGlmLoopback({ expectedKey: GLM_SERVICE_KEY, respond: smokeModel() });
   const env = {
@@ -173,7 +174,8 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и вре
   assert.equal(report.kind, 'loopback');
   assert.equal(report.mode, 'api');
   assert.equal(report.packageId, candidate.info.packageId);
-  assert.equal(report.sha256, await sha256File(candidate.binary));
+  assert.equal(report.sha256, binarySha);
+  assert.equal(await sha256File(candidate.binary), binarySha);
   assert.match(report.compatibility, /^[a-f0-9]{64}$/u);
   assert.ok(report.turns <= GLM_SMOKE_MAX_TURNS);
   assert.ok(launches.length >= 6);
@@ -183,9 +185,13 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и вре
   assert.ok(mock.requests.every((request) => request.authorizationMatches));
   assert.equal(JSON.stringify(report).includes(GLM_SERVICE_KEY), false);
 
-  const production = createGlmAdapter({ env });
-
-  await assert.rejects(production.run({
+  const productionDeps = {
+    env,
+    modelEndpoint: mock.endpoint,
+    egressGuard: await writeGlmEgressGuard(root),
+  };
+  const production = createGlmAdapter(productionDeps);
+  const input = {
     config: {
       deepseekRuntimeMode: 'binary',
       deepseekBin: candidate.binary,
@@ -193,11 +199,29 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и вре
       glmRuntimeHome: path.join(root, 'production-home'),
     },
     cwd: root,
-    chatKey: 'production-still-denied',
+    chatKey: 'production-admission',
     model: '["zai","glm-5.3"]',
-    message: 'Не отправлять',
+    message: 'Проверка production admission через loopback',
+    signal: AbortSignal.timeout(60000),
     onSessionCreated: async () => {},
+  };
+
+  assert.ok(candidate.info.glm.admission.some((entry) => entry.mode === 'api'
+    && entry.compatibility === report.compatibility));
+  assert.equal((await production.run(input)).reply, 'готово');
+
+  const requests = mock.requests.length;
+  const denied = createGlmAdapter({
+    ...productionDeps,
+    admission: [{ mode: 'api', compatibility: '0'.repeat(64) }],
+    spawn: () => assert.fail('Несовместимый admission обязан отказать до процесса'),
+  });
+
+  await assert.rejects(denied.run({
+    ...input,
+    chatKey: 'incompatible-admission',
   }), { code: 'glm_runtime_not_admitted' });
+  assert.equal(mock.requests.length, requests);
 });
 
 test('smoke не выдаёт DI admission для Coding Plan', async () => {

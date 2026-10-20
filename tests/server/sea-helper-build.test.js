@@ -12,6 +12,7 @@ import {
   loadHelpers,
   renderHelperEntry,
 } from '../../server/scripts/sea/helpers.mts';
+import { auditStage } from '../../server/scripts/sea/stage.mts';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const { build } = require('esbuild');
@@ -252,4 +253,47 @@ test('SEA-HELP-07: сгенерированный entry вызывает ров�
   assert.match(source, /const \{ main \} = await import/);
   assert.match(source, /await main\(process\.argv\.slice\(2\)\)/);
   assert.equal(source.match(/await main\(/g)?.length, 1);
+});
+
+test('SEA-HELP-08: байты helper не зависят от workDir и проходят аудит временных путей', async (t) => {
+  const root = await scratch(t);
+  const workDirs = [path.join(root, 'first work'), path.join(root, 'nested/second work')];
+  const outputs = [];
+
+  for (const [index, workDir] of workDirs.entries()) {
+    const outDir = path.join(root, `output-${index}`);
+    const built = await buildHelper({
+      manifestPath: path.join(ROOT, 'server/build/helpers.json'),
+      id: 'chat-permission-mcp',
+      root: ROOT,
+      workDir,
+      outDir,
+    });
+
+    outputs.push({ outDir, bytes: await readFile(built.file) });
+  }
+
+  await t.test('одинаковые байты без абсолютных и относительных путей workDir', () => {
+    assert.ok(outputs[0].bytes.equals(outputs[1].bytes), 'Байты одного helper зависят от workDir');
+
+    for (const { bytes } of outputs) {
+      for (const workDir of workDirs) {
+        assert.equal(bytes.includes(workDir), false, 'Абсолютный workDir попал в бандл');
+        assert.equal(bytes.includes(path.relative(process.cwd(), workDir)), false,
+          'Относительный workDir попал в бандл');
+      }
+    }
+  });
+
+  await t.test('неизменённый аудит отвергает пути staging, но принимает оба бандла', async () => {
+    for (const { outDir } of outputs) {
+      const files = await auditStage(outDir, {
+        required: ['chat-permission-mcp.mjs'],
+        sourceRoot: ROOT,
+        forbiddenRoots: workDirs,
+      });
+
+      assert.equal(files.length, 1);
+    }
+  });
 });

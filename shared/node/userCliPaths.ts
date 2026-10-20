@@ -2,21 +2,10 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { dataPath } from '../runtime/dataHome.ts';
+import type { UserCliDirectories } from './cliPathOrder.ts';
 
-export interface UserCliDirectories {
-  explicit: string[];
-  defaults: string[];
-  discovered: string[];
-}
-
-/**
- * Готовые каталоги CLI packaged-запуска: найденные один раз при подготовке
- * плюс I/bin установки и сохранённые descriptor пути.
- */
-export interface PackagedCliInput extends UserCliDirectories {
-  installationBin: string;
-  saved: readonly string[];
-}
+export { userCliPath } from './cliPathOrder.ts';
+export type { UserCliDirectories, PackagedCliInput } from './cliPathOrder.ts';
 
 export interface UserCliFileSystem {
   readdir(directory: string): Promise<string[]>;
@@ -29,28 +18,6 @@ const nodeFileSystem: UserCliFileSystem = {
   readdir: (directory) => readdir(directory),
   stat: (file) => stat(file),
 };
-
-/**
- * Один порядок CLI применяется ко всем способам packaged-запуска.
- * Относительный/пустой элемент не открывает поиск команды в cwd задачи.
- */
-export function userCliPath(input: {
-  installationBin: string;
-  bundledNode: string;
-  explicit: readonly string[];
-  saved: readonly string[];
-  defaults: readonly string[];
-  inherited: string;
-  discovered: readonly string[];
-}): string {
-  const nodeDirectory = path.dirname(input.bundledNode);
-  const entries = [input.installationBin, ...input.explicit, ...input.saved,
-    ...input.defaults, ...input.inherited.split(':'), ...input.discovered];
-  const selected = entries.filter((entry) => path.isAbsolute(entry))
-    .map((entry) => path.normalize(entry)).filter((entry) => entry !== nodeDirectory);
-
-  return [...new Set([...selected, nodeDirectory])].join(':');
-}
 
 /**
  * Список каталогов из строки PATH-формата: пустые и относительные элементы отбрасываются,
