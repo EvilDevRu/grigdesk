@@ -29,7 +29,8 @@
 | `grigdesk-ctl device revoke <id>` | Отзыв сертификата и разрыв соединений |
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
 | `grigdesk-ctl b24 …` | Собранный `bin/b24`, без него — исходник `b24/src/main.ts` ([команда b24](../b24/binary-cli.md)) |
-| `grigdesk-ctl dev`, `build`, `deps`, `run` | Прежние команды разработки |
+| `grigdesk-ctl build [all\|server\|web\|window]` | Сборка и установка; без цели — сервер, веб, окно ([контракт](ctl-build.md)) |
+| `grigdesk-ctl dev`, `deps`, `run` | Прежние команды разработки |
 | `grigdesk-ctl --help`, `-h`, `help`; `--help` или `-h` в любой команде | Справка без внешних вызовов |
 | `grigdesk-ctl --version` | Версия собственной копии из VERSION |
 

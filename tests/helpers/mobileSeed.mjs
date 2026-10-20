@@ -149,6 +149,7 @@ export async function seedFactory(t, { cursor = null, rootDirectory = null } = {
   } else {
     await writeFile(path.join(root, '.test-mobile-seed'), 'Синтетический стенд\n', { mode: 0o600 });
     await Promise.all([
+      mkdir(controlDir, { mode: 0o700 }),
       mkdir(path.join(stateDir, 'logs'), { recursive: true }),
       mkdir(routesDir, { recursive: true }),
       mkdir(path.join(profilesDir, 'demo'), { recursive: true }),
@@ -283,6 +284,8 @@ export async function seedFactory(t, { cursor = null, rootDirectory = null } = {
   });
 
   const config = {
+    rootDir: root,
+    dataHome: path.join(root, 'data'),
     factoryHome: root,
     factoryBin,
     factoryConfigRoot: path.join(root, 'config'),

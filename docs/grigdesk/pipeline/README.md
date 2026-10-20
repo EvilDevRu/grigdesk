@@ -113,6 +113,7 @@
 - [Скрипты публикации маршрутов в profiles/ импортируют .js, которых после миграции на TS нет](route-publisher-typescript-imports.md)
 - [Старт route engine из GrigDesk: сервис возвращает 0 всегда, а отказ приходит позже](start-route-engine.md)
 - [Подтверждение resume ждёт lifecycle: стоимость чтения и второе окно в 120 секунд](resume-lifecycle-read-cost.md)
+- [После перезагрузки «Продолжить» вставало кодом 73: стенд задачи поднимает GrigDesk](stand-restore-on-resume.md)
 - [Решение человека записано, а кнопка показала отказ: 30 секунд на синхронный вызов движка](engine-decision-timeout.md)
 - [Проверка исполнителей обновляется внутри длинного маршрута](coverage-expiry-during-route.md)
 - [Resume читает закреплённый hash каталога из загрузчика попытки](bootstrap-resume-catalog-hash.md)

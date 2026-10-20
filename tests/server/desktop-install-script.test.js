@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
 import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
+import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
 
 const repository = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -565,7 +566,7 @@ function serverInstaller(t, {
     'deploy/lib/install-choices.sh', 'deploy/lib/runtime-env.sh', 'shared/runtime/dataHome.ts',
     'shared/package.json', 'shared/runtime/legacyBrand.ts',
     'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts',
-    'server/src/lib/runtimePaths.ts', 'server/src/lib/runtimeBuildContext.ts']) {
+    ...SOURCE_RUNTIME_FILES]) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     copyFileSync(path.join(repository, file), path.join(root, file));
   }

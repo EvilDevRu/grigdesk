@@ -143,7 +143,9 @@ async function fixture(t) {
   const taskSourceDir = path.join(root, 'task-source');
   const taskWorktreeDir = path.join(root, 'task-worktree');
   const controlDir = path.join(root, 'control');
+
   await Promise.all([
+    mkdir(controlDir, { mode: 0o700 }),
     mkdir(path.join(stateDir, 'logs'), { recursive: true }),
     mkdir(routesDir, { recursive: true }),
     mkdir(path.join(profilesDir, 'demo'), { recursive: true }),
@@ -239,6 +241,8 @@ async function fixture(t) {
   t.after(() => { process.env.PATH = oldPath; });
 
   const config = {
+    rootDir: root,
+    dataHome: path.join(root, 'data'),
     factoryHome: root,
     factoryBin,
     factoryConfigRoot: path.join(root, 'config'),

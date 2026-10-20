@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { LEGACY } from '../../shared/runtime/legacyBrand.ts';
+import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
 
 const execute = promisify(execFile);
 const root = path.resolve(new URL('../../', import.meta.url).pathname);
@@ -49,6 +50,7 @@ async function fixture(t) {
     'shared/package.json',
     'server/scripts/dataHomeCheck.mts',
     'server/src/lib/dataHomeBoot.ts',
+    ...SOURCE_RUNTIME_FILES,
     'tools/mobile',
     'tools/mobile-client.mts',
     'tools/client-ui.mts',

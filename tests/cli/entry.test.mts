@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import type { TestContext } from 'node:test';
 
-import { parseArgs } from '../../cli/args.ts';
+import { HELP_TEXT, parseArgs } from '../../cli/args.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
 test('CE-1 пустой argv и force', () => {
@@ -63,6 +63,12 @@ test('CE-4 справка и версия', () => {
 
   assert.equal(parseArgs(['--version']).kind, 'version');
   assert.throws(() => parseArgs(['--version', 'x']), /Неизвестная команда/);
+});
+
+test('CE-BUILD: справка перечисляет цели сборки и оба типа серверной установки окна', () => {
+  assert.match(HELP_TEXT, /grigdesk-ctl build \[all\|server\|web\|window\]/);
+  assert.match(HELP_TEXT, /grigdesk-ctl desktop use-server <ELF\|R>/);
+  assert.match(HELP_TEXT, /по умолчанию|без аргументов/);
 });
 
 test('CE-5 справка без эффектов', async (t) => {
@@ -141,11 +147,12 @@ test('CE-11 справка команд разработчика ничего н
   const box = await createSandbox(t);
 
   // dev в проверку не входит: на прежнем коде он оставил бы сиротский node --watch.
-  for (const argv of [['build', '--help'], ['run', '-h'], ['deps', '--help']]) {
+  for (const argv of [['build', '--help'], ['build', 'window', '-h'],
+    ['build', 'unknown', '--help'], ['run', '-h'], ['deps', '--help']]) {
     const result = await box.run(argv);
 
     assert.equal(result.code, 0, `${argv.join(' ')}: ${result.stderr}`);
-    assert.match(result.stdout, /grigdesk-ctl dev \| build \| deps \| run/, argv.join(' '));
+    assert.match(result.stdout, /grigdesk-ctl build \[all\|server\|web\|window\]/, argv.join(' '));
     assert.doesNotMatch(result.stdout + result.stderr, /Сборка web|npm i|уже слушает/, argv.join(' '));
   }
 

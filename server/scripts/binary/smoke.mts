@@ -175,26 +175,49 @@ async function boot(input: {
   }
 }
 
+export interface BinarySmokePorts {
+  probe: typeof probeServerBinary;
+  prepare: typeof prepareServerBinary;
+  verify: typeof verifyServerBinary;
+  boot: typeof boot;
+}
+
 /**
- * Короткие ворота E0 используют один warm cache candidate и исторический отдельный R.
- * Полная статистическая приёмка S27 выполняет больше пар, эти пороги уже обязательны.
+ * E0 всегда проверяет функциональность и cold-порог; отдельный прежний R включает warm ratio.
+ * Существующий baseline сохраняет прежние пары и пороги; полная приёмка S27 не меняется.
  */
 export async function runBinarySmoke(input: {
   binary: string;
   manifest: ServerPackageManifest;
   cacheDir: string;
   reportFile: string;
-}) {
+}, ports: Partial<BinarySmokePorts> = {}) {
+  const probe = ports.probe ?? probeServerBinary;
+  const prepare = ports.prepare ?? prepareServerBinary;
+  const verify = ports.verify ?? verifyServerBinary;
+  const run = ports.boot ?? boot;
   const root = await mkdtemp(path.join(input.cacheDir, 'e0-'));
   const data = path.join(root, 'data');
   const baselineData = path.join(root, 'baseline-data');
-  const baseline = path.join(input.cacheDir, 'baseline-release/server/grigdesk-server');
-
-  await mkdir(path.join(root, 'home'));
-  await stat(baseline);
+  const baselineRoot = path.join(input.cacheDir, 'baseline-release');
+  const baseline = path.join(baselineRoot, 'server/grigdesk-server');
 
   try {
-    const metadata = await probeServerBinary(input.binary, { expectPackageId: input.manifest.packageId });
+    await mkdir(path.join(root, 'home'));
+
+    const hasBaseline = await stat(baselineRoot).then(() => true, (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+
+      return false;
+    });
+
+    if (hasBaseline) {
+      await stat(baseline);
+    }
+
+    const metadata = await probe(input.binary, { expectPackageId: input.manifest.packageId });
 
     assert.equal(await stat(data).then(() => true, () => false), false, 'metadata не создаёт D');
 
@@ -209,12 +232,12 @@ export async function runBinarySmoke(input: {
       root,
       data: baselineData,
     };
-    const coldMs = await boot(candidateInput);
-    const prepared = await prepareServerBinary(input.binary, {
+    const coldMs = await run(candidateInput);
+    const prepared = await prepare(input.binary, {
       home: data,
       expectPackageId: metadata.packageId,
     });
-    const ipcMs = await boot({
+    const ipcMs = await run({
       binary: input.binary,
       root,
       data,
@@ -222,20 +245,22 @@ export async function runBinarySmoke(input: {
       preparationToken: prepared.preparationToken,
       ipc: true,
     });
-    const verified = await verifyServerBinary(input.binary, {
+    const verified = await verify(input.binary, {
       home: data,
       expectPackageId: metadata.packageId,
       timeoutMs: 120000,
     });
 
-    await boot(baselineInput);
-
     const warm: number[] = [];
     const previous: number[] = [];
 
-    for (let index = 0; index < 3; index += 1) {
-      previous.push(await boot(baselineInput));
-      warm.push(await boot(candidateInput));
+    if (hasBaseline) {
+      await run(baselineInput);
+
+      for (let index = 0; index < 3; index += 1) {
+        previous.push(await run(baselineInput));
+        warm.push(await run(candidateInput));
+      }
     }
 
     const sorted = (values: number[]) => [...values].sort((a, b) => a - b);
@@ -249,16 +274,20 @@ export async function runBinarySmoke(input: {
       ipcMs,
       warm,
       baseline: previous,
-      warmRatio: median(warm) / median(previous),
-      warmP95Ratio: p95(warm) / p95(previous),
+      warmRatio: hasBaseline ? median(warm) / median(previous) : null,
+      warmP95Ratio: hasBaseline ? p95(warm) / p95(previous) : null,
+      warmRatioNote: hasBaseline ? null : 'warm ratio не измерялся: нет baseline',
       verified,
     };
 
     await writeFile(input.reportFile, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
     assert.ok(report.size <= 450 * 1024 * 1024, 'ELF ≤450MiB');
     assert.ok(coldMs <= 30000, 'cold API ≤30с');
-    assert.ok(report.warmRatio <= 2, `warm median ratio ${report.warmRatio} ≤2`);
-    assert.ok(report.warmP95Ratio <= 2, `warm p95 ratio ${report.warmP95Ratio} ≤2`);
+
+    if (report.warmRatio !== null && report.warmP95Ratio !== null) {
+      assert.ok(report.warmRatio <= 2, `warm median ratio ${report.warmRatio} ≤2`);
+      assert.ok(report.warmP95Ratio <= 2, `warm p95 ratio ${report.warmP95Ratio} ≤2`);
+    }
 
     return report;
   } finally {

@@ -28,8 +28,27 @@ export const useTasksStore = defineStore('tasks', {
       await api.post(`/api/b24/task/${id}/timer/${action}`);
       await useBoardStore().load(true);
     },
+    // После успешного завершения старые детали больше не описывают задачу. Снимок помечаем
+    // устаревшим до обновления доски: повторное открытие читает новый статус, а название
+    // остаётся конвейеру, который берёт его из этого же кеша.
     async complete(id) {
       await api.post(`/api/b24/task/${id}/complete`);
+
+      if (this.details[id]) {
+        this.details[id].loadedAt = 0;
+      }
+
+      await useBoardStore().load(true);
+    },
+    // Ответ возобновления не содержит нового статуса: его получает читатель деталей.
+    // Помечаем прежний снимок устаревшим и обновляем доску после успешного запроса порталу.
+    async renew(id) {
+      await api.post(`/api/b24/task/${id}/renew`);
+
+      if (this.details[id]) {
+        this.details[id].loadedAt = 0;
+      }
+
       await useBoardStore().load(true);
     },
     async comment(id, text) {

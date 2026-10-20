@@ -244,6 +244,8 @@
       "tests/server/codex-resume-args.test.js",
       "tests/server/codex-untrusted.test.js",
       "tests/server/config-defaults.test.js",
+      "tests/server/ctl-build-runtime.test.js",
+      "tests/server/ctl-build.test.js",
       "tests/server/db-auto-read.test.js",
       "tests/server/db-broker.test.js",
       "tests/server/db-engine-registry.test.js",

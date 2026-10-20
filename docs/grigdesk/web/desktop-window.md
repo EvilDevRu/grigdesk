@@ -93,6 +93,13 @@ AppImage без FUSE проверяется через --appimage-extract-and-ru
 
 ## Установка и ярлык
 
+В исходниках `grigdesk-ctl build window` готовит веб, собирает AppImage и вызывает установку.
+`grigdesk-ctl build` сначала собирает и ставит сервер, затем веб и окно. Выбранный descriptor
+v3/v4 сохраняется; на тот же путь ELF повторный `desktop use-server` не нужен.
+После успешной установки закройте окно и откройте снова — запустится новый код.
+Команда не закрывает окно и не перезапускает сервер:
+[цели и порядок сборки](../server/ctl-build.md).
+
 `grigdesk-ctl desktop install` требует уже собранного
 `desktop/release/grigdesk-desktop-<версия>-x86_64.AppImage` текущей версии manifest.
 Node берётся из явного GRIGDESK_NODE_DIR либо PATH; установка не читает .env и не

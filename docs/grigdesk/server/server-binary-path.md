@@ -3,7 +3,7 @@
 Обозначения I/D/R и границы source/legacy R/payload — в [обзоре сервера](server-binary.md).
 Хранение выбранных каталогов и запуск supervisor описаны в [контракте окна](server-binary-desktop.md).
 
-Packaged-запуск строит PATH одной функцией `userCliPath` (`shared/node/userCliPaths.ts`):
+Packaged-запуск строит PATH одной функцией `userCliPath` (`shared/node/cliPathOrder.ts`):
 I/bin установки, явный `GRIGDESK_CLI_PATH`, сохранённые каталоги descriptor, существующие
 `~/.kimi-code/bin`, `~/.local/bin`, `D/state/npm-global/bin`, унаследованный PATH, найденные
 версии nvm и последним — собственный Node `R/runtime/node/bin`. Пустые и относительные
@@ -15,7 +15,9 @@ I/bin установки, явный `GRIGDESK_CLI_PATH`, сохранённые
 явный каталог `GRIGDESK_CLI_PATH` сохраняется даже отсутствующим, а EACCES/EPERM на нём —
 отказ `cli_path_inaccessible`.
 
-Поиск выполняется один раз при подготовке запуска. `packagedLaunchEnvironment`
+Поиск из `shared/node/userCliPaths.ts` выполняется один раз при подготовке запуска.
+Ранний `startDataHome` импортирует только синхронный порядок через `packagedEnvironment`:
+[граница раннего графа](early-data-home-imports.md). `packagedLaunchEnvironment`
 (`server/src/lib/seaLaunch.ts`) читает раннюю `.env` с приоритетом env, сверяет D с корнем
 установки I, удаляет NODE_OPTIONS и передаёт каталоги в `packagedChildEnvironment`. Окно
 передаёт те же каталоги через `buildServerEnv({cli})`. PTY и фабрика наследуют PATH сервера:

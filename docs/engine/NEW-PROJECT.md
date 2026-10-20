@@ -76,6 +76,10 @@ profile_container TASK
 profile_stand_alive TASK       # только health, без lifecycle
 ~~~
 
+Isolated-профиль, чей стенд не переживает перезагрузку машины, объявляет ещё
+`profile_stand_start TASK` — идемпотентный подъём процессов существующего стенда. GrigDesk
+зовёт его перед продолжением попытки, если стенд не отвечает (см. PROFILE-CONTRACT.md).
+
 Shared-профиль дополнительно реализует:
 
 ~~~bash
