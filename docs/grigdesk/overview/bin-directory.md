@@ -12,6 +12,8 @@
 | `bin/b24` | задачи Б24 по имени для навыков и этапа SHIP фабрики: собранный ELF Node SEA из `b24/`, вне git, до сборки отсутствует ([сборка](../b24/binary-cli.md)); ссылка `~/.local/bin/b24` ведёт сюда |
 | `bin/deepseek` | автономный Harness для DeepSeek и GLM, виден агентам как `deepseek`; отдельные сборка и установка ([поставка](../chat/deepseek-binary.md)) |
 | `bin/deepseek.grigdesk-deepseek.json` | приватная SHA-квитанция установщика, обычный файл 0600, не команда |
+| `bin/grigdesk-server` | автономный серверный ELF: 0755 после сборки, 0555 после установки; до установки отсутствует ([установщик и откат](../server/server-binary-install.md)) |
+| `bin/grigdesk-server.grigdesk-server.json` | private SHA-квитанция серверного установщика, обычный файл 0600 |
 | `bin/grigdesk-relay` | собранный посредник, вне git ([сборка](../mobile/relay-binary.md)) |
 | `bin/grigdesk-app` | установленное окно: AppImage из `desktop/release` без расширения в имени, вне git; кладёт `grigdesk-ctl desktop install` ([установка](../web/desktop-window.md)) |
 | `bin/grigdesk.png` | иконка ярлыка; копия `web/public/icon-512.png` |
@@ -29,8 +31,10 @@
 - `tools/` — инструменты разработчика: `release` и `release-check` (выпуск GrigDesk), `mobile`
   (сборка APK), `relay` (сборка посредника), `upgrade-publish-contract` (переход старых установок).
 
-Серверный release gate `bash tools/server-sea-check` собирает SEA в отдельный каталог
-и выполняет его изолированную приёмку; вызывается также общими release-проверками.
+`bash tools/server-sea-check` явно собирает прежний SEA-каталог и выполняет его изолированную
+приёмку. Обычные `tools/release-check` и `tools/release` этот gate не вызывают:
+[разделение путей выпуска](../server/sea-release-gate.md). Сборка и приёмка
+[сервера одним ELF](../server/server-binary.md#сборка-и-приёмка) тоже выполняются отдельно.
 
 Человек зовёт их через единую команду: `grigdesk-ctl desktop install`, `grigdesk-ctl mobile build`,
 `grigdesk-ctl release patch`. По пути, без единой команды, вызываются `tools/relay build`,
@@ -38,10 +42,11 @@
 
 Все исполняемые файлы копии лежат в `bin/`, как в готовом архиве выпуска. Состав закрепляет
 `tests/docs/bin-layout.test.mts`: лишний файл в `bin/` (включая брошенную временную копию окна),
-публичная или исполняемая квитанция DeepSeek, не TypeScript в `cli/`, расхождение иконки или пропавший бит исполнения у скрипта, которому
+публичная или исполняемая квитанция DeepSeek/сервера, не TypeScript в `cli/`, расхождение иконки или пропавший бит исполнения у скрипта, которому
 `bin/grigdesk-ctl` передаёт команду, валят тест. `bin/b24` и `bin/grigdesk-app` до сборки или
 установки могут отсутствовать, а после допускаются только как ELF с правами 0755;
-`bin/deepseek` допускает 0755 после сборки или 0555 после установки, до неё отсутствует.
+`bin/deepseek` и `bin/grigdesk-server` допускают 0755 после сборки или 0555 после установки,
+до неё отсутствуют. Символические ссылки ELF и receipt запрещены; allowlist содержит точные имена.
 Постоянная квитанция, lock и staging установщика исключены из Git; оставленный staging
 в `bin/` всё равно отклоняется проверкой раскладки. Управляемую поставку собирают в отдельный
 release-каталог и затем устанавливают; установщик сохраняет старый ELF для отката.

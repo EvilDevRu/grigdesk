@@ -230,6 +230,7 @@ export function renderHelperEntry(helper: HelperDefinition, outputFile: string, 
     + `import { markHelperEntry } from ${marker};\n`
     + '\nmarkHelperEntry(' + JSON.stringify(helper.id) + ');\n'
     + `\nconst { ${imports} } = await import(${specifier});\n`
+    + `\nexport { ${imports} };\n`
     + '\nconst result = await main(process.argv.slice(2));\n'
     + '\nif (typeof result === \'number\') {\n  process.exitCode = result;\n}\n';
 }

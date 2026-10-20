@@ -23,6 +23,7 @@ fi
 # Сообщения после установки должны показывать тот же порт, что прочитает сервер.
 # .env разбирает Node: его содержимое не исполняется shell'ом.
 source "$GRIGDESK_DIR/deploy/lib/runtime-env.sh"
+trap 'grigdesk_release_binary_preparation' EXIT
 grigdesk_require_migrated "$GRIGDESK_DIR"
 NODE_BIN="${_grigdesk_packaged_node:-$(command -v node)}"
 NODE_DIR="$(dirname "$NODE_BIN")"
@@ -59,7 +60,16 @@ grigdesk_load_runtime_env "$GRIGDESK_DIR" || exit $?
 install_unit() {
   local -a packaged_options=()
 
-  if [[ -f "$GRIGDESK_DIR/release.json" ]]; then
+  if [[ -n "$_grigdesk_server_binary" ]]; then
+    packaged_options=(
+      -e "s#^ExecStart=.*#ExecStart=\"$_grigdesk_server_binary\"#"
+      -e "s#^ExecStartPre=.*#ExecStartPre=\"$GRIGDESK_DIR/deploy/require-vpn.sh\"#"
+      -e "s#^WorkingDirectory=.*#WorkingDirectory=\"$GRIGDESK_DIR\"#"
+      -e "s#^Environment=PATH=.*#Environment=\"PATH=$GRIGDESK_DIR/bin:$PATH\"#"
+      -e '/^Environment=NODE_ENV=production/a UnsetEnvironment=NODE_OPTIONS'
+      -e '/^Environment=NODE_ENV=production/a Environment=PYTHONDONTWRITEBYTECODE=1'
+    )
+  elif [[ -f "$GRIGDESK_DIR/release.json" ]]; then
     packaged_options=(
       -e "s#^ExecStart=.*#ExecStart=\"$GRIGDESK_DIR/server/grigdesk-server\"#"
       -e "s#^ExecStartPre=.*#ExecStartPre=\"$GRIGDESK_DIR/deploy/require-vpn.sh\"#"
@@ -87,10 +97,14 @@ fi
 # Команда b24 — собранный файл серверной поставки. Отказ сборки (код 1) не прерывает установку:
 # прежняя ссылка остаётся, повторить шаг можно одной командой из предупреждения. Код 2 — сборка
 # прошла, но чужой файл в PATH не тронут; об этом helper уже предупредил сам.
-echo "→ CLI b24 в PATH…"
-source "$GRIGDESK_DIR/deploy/lib/b24-cli.sh"
 b24_status=0
-grigdesk_install_b24_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || b24_status=$?
+if [[ -n "$_grigdesk_server_binary" ]]; then
+  echo "→ Отдельные утилиты: готовые ELF в $GRIGDESK_DIR/bin"
+else
+  echo "→ CLI b24 в PATH…"
+  source "$GRIGDESK_DIR/deploy/lib/b24-cli.sh"
+  grigdesk_install_b24_cli "$GRIGDESK_DIR" "$HOME/.local/bin" || b24_status=$?
+fi
 if (( b24_status == 1 )); then
   printf '  ⚠ b24 не собран; повтор: bash %q %q %q\n' \
     "$GRIGDESK_DIR/deploy/lib/b24-cli.sh" "$GRIGDESK_DIR" "$HOME/.local/bin" >&2
@@ -98,8 +112,8 @@ fi
 case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.local/bin в PATH" ;; esac
 
 ( umask 077; mkdir -p "$DATA_HOME"; chmod 700 "$DATA_HOME" )
-source "$GRIGDESK_DIR/deploy/lib/media-runtime.sh"
-if [[ ! -f "$GRIGDESK_DIR/release.json" ]]; then
+if [[ ! -f "$GRIGDESK_DIR/release.json" && -z "$_grigdesk_server_binary" ]]; then
+  source "$GRIGDESK_DIR/deploy/lib/media-runtime.sh"
   grigdesk_install_media "$GRIGDESK_DIR" ${INSTALL_PASSTHRU[@]+"${INSTALL_PASSTHRU[@]}"}
   grigdesk_load_runtime_env "$GRIGDESK_DIR"
 fi
@@ -108,7 +122,7 @@ PORT="$GRIGDESK_EFFECTIVE_PORT"
 echo "→ GrigDesk: $GRIGDESK_DIR"
 echo "→ node:   $NODE_BIN ("$("$NODE_BIN" -v)")"
 
-if [[ ! -f "$GRIGDESK_DIR/release.json" ]]; then
+if [[ ! -f "$GRIGDESK_DIR/release.json" && -z "$_grigdesk_server_binary" ]]; then
   echo "→ Зависимости сервера…"
   ( cd "$GRIGDESK_DIR/server" && npm install --no-audit --no-fund )
   # DeepSeek — один из исполнителей: без компилятора или сети установка GrigDesk продолжается.

@@ -32,3 +32,8 @@
 обрыв, а нажавшему окну причину называет ответ `/gate` (`resumed: false`).
 
 Проверка: `tests/server/factory-gate-cursor.test.js`, тесты «передача хода…».
+
+Пауза между gate и resume также удерживает runtime попытки durable pin-ом, независимо от PID
+оркестратора. Замена серверного ELF не переключает engine остановленной на воротах попытки:
+обе команды выбирают authority runtime до мутации. Сборщик мусора читает control authority,
+даже если производный индекс в кэше утрачен; подробности — [кэш runtime](../server/server-binary-cache.md).

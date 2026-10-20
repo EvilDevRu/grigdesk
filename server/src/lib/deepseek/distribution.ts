@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { runtimeInstallationBin, runtimeKind } from '../runtimePaths.ts';
+
 interface DeepSeekDeliveryConfig {
   deepseekBin?: string;
   deepseekBinOverride?: string;
   deepseekRuntimeMode?: string;
   rootDir?: string;
+  installationBin?: string;
 }
 
 /**
@@ -21,10 +24,11 @@ export function usesDeepSeekBinary(_config: DeepSeekDeliveryConfig): boolean {
  * Проверка абсолютности и executable принадлежит async resolver.
  */
 export function selectedDeepSeekBinary(config: DeepSeekDeliveryConfig): string {
-  const root = config.rootDir && path.isAbsolute(config.rootDir)
-    ? config.rootDir : path.resolve(import.meta.dirname, '../../../..');
+  const sourceBin = runtimeKind() === 'source' && config.rootDir && path.isAbsolute(config.rootDir)
+    ? path.join(config.rootDir, 'bin') : undefined;
+  const bin = config.installationBin ?? sourceBin ?? runtimeInstallationBin();
 
-  return config.deepseekBinOverride || config.deepseekBin || path.join(root, 'bin/deepseek');
+  return config.deepseekBinOverride || config.deepseekBin || path.join(bin, 'deepseek');
 }
 
 /**

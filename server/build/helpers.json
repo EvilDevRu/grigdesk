@@ -2,17 +2,30 @@
   "schema": 1,
   "helpers": [
     {
+      "id": "factory-runtime-pin",
+      "entry": "server/scripts/factoryRuntimePin.mts",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Host-side привязка runtime до active pointer новой попытки."
+    },
+    {
       "id": "launch-sea-server",
       "entry": "server/scripts/launchSeaServer.mts",
       "entryKind": "main",
-      "exports": ["main"],
+      "exports": [
+        "main"
+      ],
       "description": "Раннее окружение ручного запуска и execve своего SEA."
     },
     {
       "id": "select-sea-server",
-      "entry": "server/scripts/selectSeaServer.mts",
+      "entry": "server/src/lib/selectSeaServer.ts",
       "entryKind": "main",
-      "exports": ["main"],
+      "exports": [
+        "main"
+      ],
       "description": "Выбор проверенного SEA-комплекта для установленного окна."
     },
     {
@@ -26,7 +39,11 @@
       "id": "legacy-brand",
       "entry": "shared/runtime/legacyBrand.ts",
       "entryKind": "library",
-      "exports": ["LEGACY", "legacyRootProblem", "legacyEnvWarnings"],
+      "exports": [
+        "LEGACY",
+        "legacyRootProblem",
+        "legacyEnvWarnings"
+      ],
       "description": "Библиотечные exports прежнего shell-контракта имён."
     },
     {
@@ -88,7 +105,10 @@
       "id": "media-ingest-worker",
       "entry": "server/src/lib/media/ingestWorker.ts",
       "entryKind": "main",
-      "exports": ["main", "runIngestWorker"],
+      "exports": [
+        "main",
+        "runIngestWorker"
+      ],
       "description": "Worker приёма медиа: статус и результат задания."
     },
     {
@@ -132,6 +152,61 @@
       "entryKind": "script",
       "exports": [],
       "description": "Проверка папки данных из shell-скриптов."
+    },
+    {
+      "id": "deepseek-instructions-hook",
+      "entry": "server/scripts/deepseekInstructionsHook.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Инструкции DeepSeek из host hook."
+    },
+    {
+      "id": "glm-tool-policy-hook",
+      "entry": "server/scripts/glmToolPolicyHook.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Политика инструментов и marker GLM."
+    },
+    {
+      "id": "deepseek-runtime-info",
+      "entry": "server/scripts/deepseekRuntimeInfo.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Metadata автономного DeepSeek для Factory без model call."
+    },
+    {
+      "id": "deepseek-runner",
+      "entry": "server/scripts/deepseekRunner.mts",
+      "entryKind": "main",
+      "exports": [
+        "main",
+        "runDeepSeekFactory"
+      ],
+      "description": "Host-wrapper DeepSeek для автономного узла Factory."
+    },
+    {
+      "id": "glm-runtime-info",
+      "entry": "server/scripts/glmRuntimeInfo.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Metadata этапа GLM для Factory без ключа и model call."
+    },
+    {
+      "id": "glm-runner",
+      "entry": "server/scripts/glmRunner.mts",
+      "entryKind": "main",
+      "exports": [
+        "main",
+        "runGlmFactory"
+      ],
+      "description": "Host-wrapper GLM для автономного узла Factory."
+    },
+    {
+      "id": "factory-status-mcp",
+      "entry": "server/scripts/deepseekStatusMcp.mts",
+      "entryKind": "script",
+      "exports": [],
+      "description": "Run-scoped статус Factory через настоящий stage-result/progress."
     }
   ]
 }

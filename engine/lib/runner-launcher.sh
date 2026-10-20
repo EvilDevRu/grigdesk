@@ -441,6 +441,9 @@ _runner_runtime_usage_dialect() {
     # ACP usage_update — заполненность контекста, не billing counters. Диалект
     # намеренно не зарегистрирован у runtime analytics и остаётся unavailable.
     deepseek) printf 'deepseek-jsonl-unknown\n' ;;
+    # Поток wrapper-а GLM несёт только события хода без billing counters: диалект
+    # закреплён явно и остаётся unavailable, а не нулевым расходом.
+    glm) printf 'glm-jsonl-unknown\n' ;;
     claude)
       if [[ "$version" == 2.1.220 || "$version" == *2.1.220* ]]; then
         printf 'claude-code-jsonl-2.1.220\n'

@@ -1,0 +1,2 @@
+{"event":"glm_start","mode":"read-only","model":"[\"zai\",\"glm-5.3\"]"}
+{"event":"wrapper_error","code":"glm_auth_failed","message":"GLM: 401 Unauthorized"}

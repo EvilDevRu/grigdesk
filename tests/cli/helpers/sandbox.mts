@@ -158,6 +158,7 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
   }
 
   for (const name of ['bin/grigdesk-ctl', 'cli', 'deploy/lib/runtime-env.sh',
+    'server/src/lib/runtimePaths.ts', 'server/src/lib/runtimeBuildContext.ts',
     'shared/runtime/dataHome.ts', 'shared/runtime/grigDeskReadiness.ts', 'shared/desktop/desktopRuntime.ts',
     'shared/runtime/runtimeSettings.ts', 'shared/runtime/legacyBrand.ts', 'shared/desktop/windowKeyPath.ts',
     'shared/package.json', 'VERSION']) {

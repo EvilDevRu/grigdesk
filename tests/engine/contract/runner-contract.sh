@@ -3,7 +3,8 @@ set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
 missing=0
-for file in lib/runners/index.sh lib/runners/deepseek.sh lib/runner-launcher.sh lib/runner-bridge.sh; do
+for file in lib/runners/index.sh lib/runners/deepseek.sh lib/runners/glm.sh lib/runner-launcher.sh \
+  lib/runner-bridge.sh; do
   if [[ ! -f "$FACTORY_HOME/$file" ]]; then
     test_fail "$file exists" "missing $file"
     missing=1
@@ -29,6 +30,11 @@ runner_registry_add deepseek "$FACTORY_HOME/lib/runners/deepseek.sh"
 assert_rc 0 "$?" "DeepSeek module registers explicitly"
 runner_contract_check deepseek
 assert_rc 0 "$?" "DeepSeek module passes the common contract"
+
+runner_registry_add glm "$FACTORY_HOME/lib/runners/glm.sh"
+assert_rc 0 "$?" "GLM module registers explicitly"
+runner_contract_check glm
+assert_rc 0 "$?" "GLM module passes the common contract"
 
 bad_module="$TEST_ROOT/bad-runner.sh"
 printf 'runner_bad_probe() { :; }\n' >"$bad_module"

@@ -15,6 +15,10 @@
 
 ## Устройство
 
+- [Холодный запуск ACP: единый бюджет без повтора initialize](deepseek-acp-startup.md)
+
+- [Упакованные Factory helpers и границы стадий status MCP](../server/server-binary-factory-helpers.md)
+
 - [Бинарный DeepSeek в Factory: descriptor, package coverage, cache и prepared handle](deepseek-binary-factory.md)
 
 - [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)

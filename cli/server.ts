@@ -1,8 +1,10 @@
 import os from 'node:os';
+import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 
+import { runtimeInstallationRoot, runtimeRoot } from '../server/src/lib/runtimePaths.ts';
+
 import { dataHome, dataPath } from '../shared/runtime/dataHome.ts';
-import path from 'node:path';
 
 import { probeGrigDesk } from '../shared/runtime/grigDeskReadiness.ts';
 import type { GrigDeskProbe } from '../shared/runtime/grigDeskReadiness.ts';
@@ -30,6 +32,14 @@ export interface ServerState {
 
 export const UNIT = 'grigdesk-server.service';
 const PROPERTIES = 'LoadState,ActiveState,SubState,Result,WorkingDirectory';
+
+/**
+ * Внешний ELF работает из I; прежний комплект и source используют корень server.
+ * Контекст сборки сохраняет прежнюю раскладку независимо от env исходного CLI.
+ */
+function serverWorkingDirectory(root: string): string {
+  return runtimeRoot() === runtimeInstallationRoot() ? path.join(root, 'server') : root;
+}
 
 function serverState(state: ServerStateName, managed: boolean | null, reason: string | null): ServerState {
   return {
@@ -186,7 +196,7 @@ export async function readServer(root: string, settings: Settings): Promise<Serv
     ...deriveServerState({
       unit,
       probe,
-      expectedDirectory: path.join(root, 'server'),
+      expectedDirectory: serverWorkingDirectory(root),
       gate,
     }),
     url: settings.origin + '/',
@@ -249,7 +259,7 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
     const state = deriveServerState({
       unit,
       probe: 'refused',
-      expectedDirectory: path.join(root, 'server'),
+      expectedDirectory: serverWorkingDirectory(root),
       gate: null,
     });
 

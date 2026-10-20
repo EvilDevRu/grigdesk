@@ -11,9 +11,9 @@
 `index`, `policy`, `catalog` и проверяет формат id. Проверки ключа, CLI и допуска
 runtime здесь нет: «установлен» означает наличие модуля раннера.
 
-В дереве движка есть `claude.sh`, `codex.sh`, `deepseek.sh`, `kimi.sh`. У GLM нет
-`engine/lib/runners/glm.sh`. Добавление GLM только во Vue или чатовый реестр не
-создаёт поддержку конвейера; endpoint назначения также проверяет каталог раннеров.
+В дереве движка есть `claude.sh`, `codex.sh`, `deepseek.sh`, `kimi.sh`, `glm.sh`.
+Endpoint назначения проверяет каталог раннеров; отдельная регистрация карточки
+исполнителя в чате сама по себе не создаёт поддержку конвейера.
 
 ## Состояние узла меняет список
 
@@ -47,19 +47,22 @@ stage override, а `multi_runner_run` запускает новую цепочк
 
 ## Граница GLM
 
-`server/src/lib/glm/runtime.ts` явно отклоняет `factory: true` кодом
-`glm_consumer_unsupported`. Текущий чатовый запуск требует привязку сессии,
-использует web-транспорт DSH и профиль `workspace-write` / `approval: ask`.
-`selectGlmMcpServers` допускает только служебный `grigdesk-work`, а политика
-инструментов тоже проверяет этот сервер. Статусный `factory-status` этим путём
-не подключается.
+`engine/lib/runners/glm.sh` вызывает host-wrapper `glmRunner.mts` поверх того же
+отдельного DeepSeek ELF. Этап поддерживает только Обычный API; каталог моделей
+статичен. Node, ELF и кэш приходят из `GRIGDESK_DEEPSEEK_*`.
 
-Кроме раннера нужны доказанные headless-режимы, завершение стадии через хостовый
-статусный канал и передача доступа в отвязанный процесс. В systemd-ветке
-`spawnRouteEngine` из `server/src/lib/factoryRouteCli.ts` файл секретов сейчас
-содержит только `DEEPSEEK_API_KEY`; режим GLM также отсутствует в `routeLaunchEnv`.
-Ветка без systemd наследует `process.env`, поэтому одна её проверка не доказывает
-работоспособность обычного запуска через transient service.
+`server/src/lib/glm/runtime.ts` принимает `factory: true` только с проверенным
+контекстом task/stage/run/epoch. Узел `state-only` получает `read-only`, узел
+`workspace-write` — запись в рабочей папке; оба работают с `approval: never`.
+Вопрос получает отказ без ожидания человека. Монтируется только host-owned
+`factory-status` с точными `stage_progress` и `stage_result`; текст модели не
+завершает этап. Fanout и native resume не объявлены. Сигнатуры GLM не переключают
+исполнителя автоматически.
+
+`routeLaunchEnv` передаёт режим GLM и пути хоста в обе ветки отвязанного запуска.
+Transient-юнит получает `DEEPSEEK_API_KEY` и `ZAI_API_KEY` только через
+`route-secrets.env` с режимом 0600. Ключ Coding Plan не передаётся, ключи в argv
+не попадают. Проверка systemd-run исполняет команду с окружением, собранным с нуля.
 
 ## Проверки
 
@@ -70,6 +73,9 @@ stage override, а `multi_runner_run` запускает новую цепочк
   состояниях узла, сохранение модалки и отображение выбора.
 - `tests/engine/integration/runtime-switch.sh` — CAS, однократное потребление
   switch, DeepSeek как цель и завершение собственного дерева процессов.
+- `tests/server/binary/factory.test.mts` — настоящие упакованные этапы и status MCP,
+  оба режима GLM, nvm-only Codex через dispatcher, EnvironmentFile и продолжение
+  попытки через authenticated API нового ELF и возврат к обновлённому source.
 
 Эти границы описывают код, а не состояние конкретного открытого пользователем
 прогона. Отсутствие DeepSeek в остановленном узле требует проверки ответа каталога,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
+import { spawn } from 'node:child_process';
 import { closeSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -12,6 +13,16 @@ import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { openServerLog, runVpnGate, spawnServer } from '../../desktop/src/serverProcess.ts';
 import { createServerSupervisor, decideStart } from '../../desktop/src/serverSupervisor.ts';
 import { freePort } from '../server/helpers/pluginBootFixture.js';
+import { packagePayload } from '../../deepseek/scripts/packagePayload.mts';
+import { deepSeekPayloadFixture } from '../helpers/deepseekPayload.mts';
+import { createServerManifest, packageIdFor, serverManifestBytes } from '../../server/src/binary/metadata.ts';
+import {
+  inspectRuntimeLeases,
+  materializeWithLease,
+  readProcessOwner,
+  releaseRuntimeLeaseOwner,
+} from '../../server/src/binary/leases.ts';
+import fs from 'node:fs/promises';
 
 const RUNTIME = {
   root: '/fixture/project',
@@ -702,4 +713,461 @@ test('SV-18 строка ворот со своим префиксом «VPN-в�
   });
 
   await assert.rejects(bare.run(), /VPN-ворота: нет туннеля/u);
+});
+
+/**
+ * Каждый load выдаёт отдельный handle, повторное release не меняет счётчик.
+ * Остаток leases виден тесту независимо от результата supervisor.ensure.
+ */
+function preparations() {
+  const active = new Set();
+  const releases = [];
+  let count = 0;
+
+  return {
+    active,
+    releases,
+    load() {
+      const token = `fixture-token-${++count}`;
+
+      active.add(token);
+
+      return {
+        runtime: {
+          ...RUNTIME,
+          preparation: {
+            token,
+            packageId: 'a'.repeat(64),
+            async release() {
+              if (active.delete(token)) {
+                releases.push(token);
+              }
+            },
+          },
+        },
+      };
+    },
+  };
+}
+
+test('SB24-prepare-vpn: три VPN отказа и abort освобождают все handles', async () => {
+  const leases = preparations();
+  let fixture;
+  let pauses = 0;
+
+  fixture = supervisorFixture({
+    probes: ['refused'],
+    loadRuntime: () => leases.load(),
+    gates: [{ code: 1, lastLine: 'VPN denied' }],
+    sleep: async () => {
+      if (++pauses === 3) {
+        fixture.controller.abort();
+      }
+    },
+  });
+
+  await assert.rejects(fixture.run(), /отмен/u);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(leases.active.size, 0, 'VPN/abort не оставляют prepare leases');
+  assert.equal(leases.releases.length, 3);
+  assert.equal(fixture.calls.includes('spawn'), false);
+});
+
+test('SB24-prepare: external, origin mismatch, spawn throws и поздний load не оставляют leases', async () => {
+  for (const mode of ['external', 'origin', 'spawn', 'late']) {
+    const leases = preparations();
+    const entered = Promise.withResolvers();
+    const loaded = Promise.withResolvers();
+    const fixture = supervisorFixture({
+      probes: mode === 'external' ? ['refused', 'grigdesk'] : undefined,
+      loadRuntime: () => {
+        entered.resolve();
+
+        return mode === 'late' ? loaded.promise : leases.load();
+      },
+    });
+
+    if (mode === 'spawn') {
+      fixture.adapters.spawnServer = () => {
+        throw new Error('spawn failed');
+      };
+    }
+
+    const result = fixture.run(mode === 'origin' ? { origin: 'http://127.0.0.1:9400' } : {})
+      .catch((error) => error);
+
+    if (mode === 'late') {
+      await entered.promise;
+      fixture.controller.abort();
+      loaded.resolve(leases.load());
+    }
+
+    await result;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(leases.active.size, 0, `${mode}: prepare lease снят`);
+    assert.equal(leases.releases.length, 1);
+  }
+});
+
+test('SB24-prepare-ack: readiness ждёт точный ACK собственного child; prepare держится до ACK', async () => {
+  const leases = preparations();
+  const fixture = supervisorFixture({ loadRuntime: () => leases.load() });
+  const spawned = Promise.withResolvers();
+
+  fixture.adapters.spawnServer = () => {
+    spawned.resolve();
+
+    return fixture.child;
+  };
+
+  let ready = false;
+  const started = fixture.run().then(() => {
+    ready = true;
+  });
+
+  await spawned.promise;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ready, false, 'HTTP readiness не заменяет ACK launcher');
+  assert.equal(leases.active.size, 1);
+  fixture.child.emit('message', {
+    type: 'grigdesk:preparation-adopted',
+    packageId: 'a'.repeat(64),
+    token: 'foreign-token',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(leases.active.size, 1, 'чужой token не передаёт владение');
+  fixture.child.emit('message', {
+    type: 'grigdesk:preparation-adopted',
+    packageId: 'a'.repeat(64),
+    token: [...leases.active][0],
+  });
+  await started;
+  assert.equal(ready, true);
+  assert.equal(leases.active.size, 0);
+  assert.equal(fixture.child.exitCode, null);
+  assert.equal(fixture.child.listenerCount('message'), 0);
+});
+
+test('SB24-prepare-child-exit: exit до ACK отвергает старт и освобождает handle', async () => {
+  const leases = preparations();
+  const fixture = supervisorFixture({ loadRuntime: () => leases.load() });
+
+  fixture.adapters.spawnServer = () => {
+    queueMicrotask(() => fixture.child.exit(1));
+
+    return fixture.child;
+  };
+
+  await assert.rejects(fixture.run(), /ACK|подтвержд/u);
+  assert.equal(leases.active.size, 0);
+});
+
+test('SB24-prepare-foreign-ack: неверные ACK и spawn не снимают lease, abort ждёт exit child', async () => {
+  const leases = preparations();
+  const fixture = supervisorFixture({ loadRuntime: () => leases.load() });
+  const spawned = Promise.withResolvers();
+
+  fixture.adapters.spawnServer = () => {
+    spawned.resolve();
+
+    return fixture.child;
+  };
+  fixture.child.kill = (signal) => {
+    assert.equal(leases.active.size, 1, 'до подтверждённого exit lease ещё удерживается');
+    fixture.child.signals.push(signal);
+    fixture.child.exit(1);
+
+    return true;
+  };
+
+  const result = assert.rejects(fixture.run(), /отмен/u);
+
+  await spawned.promise;
+  fixture.child.emit('spawn');
+  fixture.child.emit('message', {
+    type: 'grigdesk:preparation-adopted',
+    packageId: 'b'.repeat(64),
+    token: [...leases.active][0],
+  });
+  fixture.child.emit('message', {
+    type: 'grigdesk:preparation-adopted',
+    packageId: 'a'.repeat(64),
+    token: [...leases.active][0],
+    extra: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(leases.active.size, 1);
+  fixture.controller.abort();
+  await result;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fixture.child.signals, ['SIGTERM']);
+  assert.equal(leases.active.size, 0);
+});
+
+test('SB24-prepare-A-port: настоящий lease A, ACK G1 и child exit', async (t) => {
+  const archive = await deepSeekPayloadFixture(t);
+  const payload = await packagePayload(archive.options);
+  const packageId = packageIdFor({ payload });
+  const cacheDir = path.join(archive.root, 'server-cache');
+  const owner = await readProcessOwner(process.pid);
+  const options = {
+    cacheDir,
+    packageId,
+    payload,
+    archive: async function* () {
+      yield await fs.readFile(archive.options.outputFile);
+    },
+  };
+  const ready = Promise.withResolvers();
+  let token;
+  let released;
+  let child;
+  let exited;
+  const fixture = supervisorFixture({
+    loadRuntime: async () => {
+      const prepared = await materializeWithLease(options, { kind: 'prepare', ownerPid: process.pid });
+
+      token = prepared.lease.token;
+
+      return {
+        runtime: {
+          ...RUNTIME,
+          root: prepared.root,
+          preparation: {
+            token,
+            packageId,
+            release: () => released ??= releaseRuntimeLeaseOwner({
+              ...options,
+              token,
+              owner,
+            }),
+          },
+        },
+      };
+    },
+  });
+  const module = new URL('../../server/src/binary/leases.ts', import.meta.url).href;
+
+  fixture.adapters.spawnServer = () => {
+    const location = {
+      cacheDir,
+      packageId,
+      token,
+    };
+    const script = `
+      const leaseApi = await import(${JSON.stringify(module)});
+      const { adoptPreparation, readProcessOwner, releaseRuntimeLeaseOwner } = leaseApi;
+      const location = ${JSON.stringify(location)};
+      process.on('message', async (message) => {
+        if (message === 'adopt') {
+          await adoptPreparation(location);
+          process.send({
+            type:'grigdesk:preparation-adopted',
+            packageId:location.packageId,
+            token:location.token
+          });
+        } else if (message === 'stop') {
+          await releaseRuntimeLeaseOwner({...location,owner:await readProcessOwner(process.pid)});
+          process.disconnect();
+        }
+      });
+      process.send('ready');
+    `;
+
+    child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      env: { PATH: '' },
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
+    exited = once(child, 'exit');
+    child.once('message', () => ready.resolve());
+
+    return child;
+  };
+
+  t.after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+
+    await exited;
+  });
+
+  const started = fixture.run();
+
+  await ready.promise;
+  assert.equal((await inspectRuntimeLeases(options)).state, 'protected');
+  child.send('adopt');
+  await started;
+
+  const leases = await inspectRuntimeLeases(options);
+
+  assert.equal(leases.state, 'protected');
+  assert.deepEqual(leases.leases[0].owners, [await readProcessOwner(child.pid)]);
+  child.send('stop');
+  await exited;
+  assert.equal((await inspectRuntimeLeases(options)).state, 'unprotected');
+});
+
+test('SB24-prepare-deadline: отсутствие ACK останавливает свой child до снятия lease', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const leases = preparations();
+  const fixture = supervisorFixture({ loadRuntime: () => leases.load() });
+  const spawned = Promise.withResolvers();
+
+  fixture.adapters.spawnServer = () => {
+    spawned.resolve();
+
+    return fixture.child;
+  };
+  fixture.child.kill = (signal) => {
+    assert.equal(leases.active.size, 1);
+    fixture.child.signals.push(signal);
+    fixture.child.exit(1);
+
+    return true;
+  };
+
+  const failed = assert.rejects(fixture.run(), /ACK/u);
+
+  await spawned.promise;
+  t.mock.timers.tick(10000);
+  await failed;
+  assert.deepEqual(fixture.child.signals, ['SIGTERM']);
+  assert.equal(leases.active.size, 0);
+});
+
+test('SB24-prepare-B-port: supervisor принимает ACK настоящего runServerBinary линии B', async (t) => {
+  const archive = await deepSeekPayloadFixture(t);
+  const payload = await packagePayload(archive.options);
+  const manifest = createServerManifest(payload, {
+    launcherSha256: 'b'.repeat(64),
+    engineSha256: 'c'.repeat(64),
+    buildInputs: {},
+  });
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'desktop-launcher-'));
+  const home = path.join(runtimeRoot, 'home');
+  const data = path.join(runtimeRoot, 'data');
+
+  t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
+
+  const binary = path.join(archive.root, 'installation/bin/grigdesk-server');
+  const cacheDir = path.join(data, 'runtimes/server');
+  const owner = await readProcessOwner(process.pid);
+  const options = {
+    cacheDir,
+    packageId: manifest.packageId,
+    payload,
+    archive: async function* () {
+      yield await fs.readFile(archive.options.outputFile);
+    },
+  };
+
+  await mkdir(home);
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(binary, 'fixture ELF');
+
+  const ready = Promise.withResolvers();
+  const workerEntered = Promise.withResolvers();
+  let token;
+  let released;
+  let child;
+  let exited;
+  const fixture = supervisorFixture({
+    loadRuntime: async () => {
+      const prepared = await materializeWithLease(options, { kind: 'prepare', ownerPid: process.pid });
+
+      token = prepared.lease.token;
+
+      return {
+        runtime: {
+          ...RUNTIME,
+          root: prepared.root,
+          preparation: {
+            token,
+            packageId: manifest.packageId,
+            release: () => released ??= releaseRuntimeLeaseOwner({
+              ...options,
+              token,
+              owner,
+            }),
+          },
+        },
+      };
+    },
+  });
+  const module = new URL('../../server/src/binary/main.ts', import.meta.url).href;
+
+  fixture.adapters.spawnServer = () => {
+    const script = `
+      import fs from 'node:fs/promises';
+      const { runServerBinary } = await import(${JSON.stringify(module)});
+      process.once('message', async () => {
+        process.exitCode = await runServerBinary([
+          '--expect-package-id', '${manifest.packageId}', '--preparation-token', '${token}'
+        ], {
+          assets: {
+            manifest: () => ({bytes:${JSON.stringify(serverManifestBytes(manifest))},
+              packageId:'${manifest.packageId}'}),
+            license: () => 'fixture',
+            archive: async function* () {
+              yield await fs.readFile(${JSON.stringify(archive.options.outputFile)});
+            }
+          },
+          env: {PATH:'',HOME:${JSON.stringify(home)},GRIGDESK_HOME:${JSON.stringify(data)}},
+          home: () => ${JSON.stringify(home)},
+          binary: () => ${JSON.stringify(binary)},
+          worker: async () => {
+            await new Promise((resolve) => {
+              process.once('message', resolve);
+              process.send('worker-entered');
+            });
+            return {code:0,stdout:'',stderr:''};
+          }
+        });
+        process.disconnect();
+      });
+      process.send('ready');
+    `;
+
+    child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      env: { PATH: '' },
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
+    child.stderr.on('data', (chunk) => t.diagnostic(String(chunk)));
+    exited = once(child, 'exit');
+    child.on('message', (message) => {
+      if (message === 'ready') {
+        ready.resolve();
+      } else if (message === 'worker-entered') {
+        workerEntered.resolve();
+      }
+    });
+
+    return child;
+  };
+
+  t.after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+
+    await exited;
+  });
+
+  const started = fixture.run();
+
+  await ready.promise;
+  assert.equal((await inspectRuntimeLeases(options)).state, 'protected');
+  child.send('start');
+  await started;
+  await workerEntered.promise;
+
+  const leases = await inspectRuntimeLeases(options);
+
+  assert.equal(leases.state, 'protected');
+  assert.deepEqual(leases.leases[0].owners, [await readProcessOwner(child.pid)]);
+  child.send('stop');
+  assert.deepEqual(await exited, [0, null]);
+  assert.equal((await inspectRuntimeLeases(options)).state, 'unprotected');
 });

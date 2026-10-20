@@ -39,6 +39,12 @@ test('deepseek label comes from PROVIDER_LABELS, not from the id fallback', () =
   assert.equal(providerLabel('deepseek'), 'DeepSeek');
 });
 
+test('glm label comes from PROVIDER_LABELS, not from the id fallback', () => {
+  assert.ok(Object.hasOwn(PROVIDER_LABELS, 'glm'));
+  assert.equal(PROVIDER_LABELS.glm, 'GLM');
+  assert.equal(providerLabel('glm'), 'GLM');
+});
+
 test('provider_unavailable attempt result has a human-readable label', () => {
   const label = attemptResultLabel('provider_unavailable');
   assert.equal(label, 'провайдер недоступен');

@@ -13,6 +13,16 @@ export interface DeepSeekSettingsRpc {
 }
 
 /**
+ * Первый запрос ждёт также распаковку и полную проверку холодного ELF до появления ACP reader.
+ * Единый бюджет запуска равен verify: 120 с; один id сохраняется без повторной отправки initialize.
+ */
+export async function initializeDeepSeekAcp(client: AcpClient, signal?: AbortSignal): Promise<unknown> {
+  signal?.throwIfAborted();
+
+  return initializeAcp(client, 120_000);
+}
+
+/**
  * Неизвестный bridge contract запрещает запись до создания рабочей сессии.
  * Request отменяется host-ом; владелец процесса обязан закрыть частично изменённый запуск.
  */
@@ -128,7 +138,7 @@ export async function startDeepSeekAcpSettings(options: {
   }
 
   try {
-    const initialized = await initializeAcp(client, 10_000);
+    const initialized = await initializeDeepSeekAcp(client, options.signal);
     const rpc = acpDeepSeekSettingsRpc(client, initialized);
 
     return {

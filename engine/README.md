@@ -172,7 +172,7 @@ bin/
 lib/
   core.sh              ЯДРО: provider-neutral orchestration и вход в dispatcher
   multi-runner.sh      routing, model resolution, failover, telemetry и coverage gate
-  runners/             независимые модули CLI (Claude, Codex, Kimi, DeepSeek, будущие providers —
+  runners/             независимые модули CLI (Claude, Codex, Kimi, DeepSeek, GLM, будущие providers —
                        добавление по ../docs/engine/ADDING-RUNNER.md)
   dispatcher.sh        белый список причин переключения + circuit breaker
   run-state.sh         run-id/epoch/capability CAS terminal status

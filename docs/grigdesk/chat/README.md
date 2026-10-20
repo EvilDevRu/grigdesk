@@ -127,6 +127,7 @@
 - [Async cache metadata DeepSeek: single-flight, замена файла и отмена waiter](deepseek-binary-probe-cache.md)
 - [Остановка автономного DeepSeek: IPC bootstrap, disposal и честный timeout](deepseek-binary-lifecycle.md)
 - [Отказ запуска GLM: выход процесса прерывает ожидание URL и HTTP-авторизацию](glm-startup-failure.md)
+- [Этап фабрики на GLM: политика без вопросов, typed контекст хоста, wrapper и metadata](glm-factory-stage.md)
 - [Замена DeepSeek сохраняет heartbeat живого WebSocket](deepseek-publication-event-loop.md)
 - [Приватный settings-мост DeepSeek: ACP, readback и restart](deepseek-private-settings-bridge.md)
 - [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)

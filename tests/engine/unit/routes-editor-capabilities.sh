@@ -7,7 +7,7 @@ source "$FACTORY_HOME/lib/route-runtime.sh"
 declared=$("$FACTORY_HOME/bin/factory-route" --profile sample editor-capabilities |
   python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["nativeFanoutRunners"]))')
 actual=""
-for runner in claude codex kimi deepseek; do
+for runner in claude codex kimi deepseek glm; do
   source "$FACTORY_HOME/lib/runners/$runner.sh"
   capabilities=$("runner_${runner}_capabilities")
   if [[ " $capabilities " == *' fanout '* ]]; then

@@ -1,55 +1,19 @@
-import { constants } from 'node:fs';
-import fs from 'node:fs/promises';
+import { copyInstallFile } from '../../shared/node/binaryInstall.ts';
 
 export { removePrivateTree as removeInstallStage } from '../../shared/node/files.ts';
 
 /**
- * Источник открывается один раз и должен быть обычным файлом, а не FIFO или устройством.
- * После закрытия копии все проверки относятся только к ней; источник больше не нужен.
+ * Адаптер сохраняет сообщения об ошибках и формат candidate своего потребителя.
+ * Копированием обычного fd, закрытием и fsync владеет общий install core.
  */
 export async function copyInstallCandidate(source: string, target: string): Promise<void> {
-  const input = await fs.open(source, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-  let output;
+  const messages = {
+    source: 'Candidate DeepSeek должен быть непустым обычным файлом',
+    read: 'Копирование candidate DeepSeek оборвалось',
+    write: 'Запись candidate DeepSeek оборвалась',
+  };
 
-  try {
-    const stat = await input.stat();
-
-    if (!stat.isFile() || stat.size === 0) {
-      throw new Error('Candidate DeepSeek должен быть непустым обычным файлом');
-    }
-
-    output = await fs.open(target, 'wx', 0o600);
-
-    const buffer = Buffer.alloc(1024 * 1024);
-    let offset = 0;
-
-    while (offset < stat.size) {
-      const { bytesRead } = await input.read(buffer, 0, Math.min(buffer.length, stat.size - offset), offset);
-
-      if (bytesRead === 0) {
-        throw new Error('Копирование candidate DeepSeek оборвалось');
-      }
-
-      let written = 0;
-
-      while (written < bytesRead) {
-        const result = await output.write(buffer, written, bytesRead - written);
-
-        if (result.bytesWritten === 0) {
-          throw new Error('Запись candidate DeepSeek оборвалась');
-        }
-
-        written += result.bytesWritten;
-      }
-
-      offset += bytesRead;
-    }
-
-    await output.chmod(0o555);
-    await output.sync();
-  } finally {
-    await output?.close();
-    await input.close();
-  }
+  await copyInstallFile(source, target, {
+    failure: (phase) => new Error(messages[phase]),
+  });
 }
-

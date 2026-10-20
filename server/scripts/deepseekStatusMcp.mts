@@ -4,6 +4,8 @@ import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
+import { factoryStatusBoundaryArgs } from '../src/lib/factoryStatusArgs.ts';
+
 const execFileAsync = promisify(execFile);
 const STAGE_PROGRESS = fileURLToPath(new URL('../../engine/lib/stage-progress.sh', import.meta.url));
 const STAGE_RESULT = fileURLToPath(new URL('../../engine/lib/stage-result.sh', import.meta.url));
@@ -16,6 +18,7 @@ interface RunContext {
   epoch: string;
   requestDir: string;
   stateDir: string;
+  loopRole: string;
 }
 
 interface RpcRequest {
@@ -45,7 +48,16 @@ function runContext(env: NodeJS.ProcessEnv): RunContext {
   if (path.resolve(requestDir) !== path.resolve(expected)) {
     throw new Error('factory status request directory mismatch');
   }
-  return { task, stage, runId, epoch, requestDir, stateDir };
+
+  return {
+    task,
+    stage,
+    runId,
+    epoch,
+    requestDir,
+    stateDir,
+    loopRole: String(env.FACTORY_LOOP_ROLE || ''),
+  };
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -86,6 +98,7 @@ function childEnvironment(context: RunContext): NodeJS.ProcessEnv {
     FACTORY_RUN_EPOCH: context.epoch,
     FACTORY_STATUS_MODE: 'request',
     FACTORY_STATUS_REQUEST_DIR: context.requestDir,
+    FACTORY_LOOP_ROLE: context.loopRole,
   };
   const resultCheck = process.env.FACTORY_STAGE_RESULT_CHECK;
   if (resultCheck && path.isAbsolute(resultCheck) && !resultCheck.includes('\0')) {
@@ -150,6 +163,7 @@ async function stageResult(argumentsValue: unknown, context: RunContext) {
   const allowed = [
     'result', 'comment', 'failureOwner', 'findings', 'deferredFindings',
     'findingAnchors', 'reviewed',
+    'nextStage', 'stageClosed', 'stageSummary',
   ];
   if (!record(argumentsValue) || !exactKeys(argumentsValue, allowed)) {
     throw new Error('stage_result arguments invalid');
@@ -175,7 +189,8 @@ async function stageResult(argumentsValue: unknown, context: RunContext) {
   for (const finding of deferred) args.push('--finding-deferred', finding);
   for (const anchor of anchors) args.push('--finding-anchor', anchor);
   for (const item of reviewed) args.push('--reviewed', item);
-  args.push(result, comment);
+
+  args.push(...factoryStatusBoundaryArgs(argumentsValue, context.loopRole), result, comment);
   return invoke(STAGE_RESULT, args, context);
 }
 
@@ -213,6 +228,13 @@ const tools = [
         deferredFindings: { type: 'array', items: { type: 'string' } },
         findingAnchors: { type: 'array', items: { type: 'string' } },
         reviewed: { type: 'array', items: { type: 'string' } },
+        nextStage: { type: 'boolean' },
+        stageClosed: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: 128,
+        },
+        stageSummary: { type: 'string', maxLength: 2000 },
       },
     },
   },

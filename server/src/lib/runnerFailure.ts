@@ -130,6 +130,40 @@ export function inspectCodexFailure(raw: string): CodexFailureEvidence {
 }
 
 /**
+ * Отказ host-wrapper-а GLM этапа — последнее событие wrapper_error retained-потока.
+ * Код попадает в однострочный meta.env, поэтому непредсказуемая форма становится unknown.
+ */
+export function inspectGlmFactoryFailure(raw: string): RunnerFailure | null {
+  let failure: RunnerFailure | null = null;
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    let event: Row | null;
+
+    try {
+      event = object(JSON.parse(line));
+    } catch {
+      continue;
+    }
+
+    if (event?.event !== 'wrapper_error') {
+      continue;
+    }
+
+    const code = typeof event.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/u.test(event.code)
+      ? event.code : 'unknown';
+    const message = typeof event.message === 'string' ? event.message : '';
+
+    failure = { code, message: cleanRunnerFailureMessage(message || code) };
+  }
+
+  return failure;
+}
+
+/**
  * Номер CLI остаётся диагностикой. Разрешение сменить провайдера определяется
  * подтверждённой ошибкой и отсутствием активности, а не сходством номера версии.
  */

@@ -79,6 +79,12 @@ web/.generated/markdown/
 /deepseek/node_modules/
 /deepseek/.cache/
 
+# Установленный серверный ELF, private receipt и собственный install staging.
+/bin/grigdesk-server
+/bin/grigdesk-server.grigdesk-server.json
+/bin/grigdesk-server.install-lock/
+/bin/.grigdesk-server-install-*/
+
 # Установленное окно: AppImage из desktop/release под именем программы.
 /bin/grigdesk-app
 /bin/.grigdesk-app.*

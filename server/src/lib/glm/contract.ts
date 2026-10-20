@@ -12,6 +12,10 @@ export type { GlmCompatibilityRuntime };
 
 export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v2';
 export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v1';
+// Ревизии отвязанного этапа фабрики отдельны от чата: смена Factory профиля или политики
+// не меняет отпечаток, допуск и память обычного чата GLM.
+export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v1';
+export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v1';
 export const GLM_DEFAULT_EFFORT = 'high';
 export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api']);
 

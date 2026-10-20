@@ -95,6 +95,7 @@ const expectedLayout = {
   pluginData: 'state/plugins',
   uiReleases: 'state/ui-releases',
   deepseekRuntime: 'runtimes/deepseek',
+  serverRuntime: 'runtimes/server',
   mobileApk: 'state/mobile-apk',
   mediaVenv: 'state/media-venv',
   mediaHf: 'state/hf',

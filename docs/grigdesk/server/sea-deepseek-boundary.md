@@ -1,5 +1,8 @@
 # DeepSeek на границе исходников и серверного SEA
 
+Здесь сохранён контракт прежнего R и перехода; граница внешнего DeepSeek действует
+и в payload. Его раскладка и launcher описаны в [обзоре одиночного ELF](server-binary.md).
+
 Сервер выбирает автономный внешний ELF через `bin/deepseek` или явный override.
 В packaged-режиме конфигурация сразу объявляет `binary`: исходный
 `server/deepseek-runtime-contract.json` внутри R не нужен. Harness source и его
@@ -12,7 +15,7 @@ legacy generation не входят в серверный комплект.
 
 | Точка | Судьба и проверка |
 | --- | --- |
-| `deepseek/distribution.ts`: `import.meta.dirname`, корень `.` | Входит в server bundle. AST-плагин сохраняет виртуальный путь модуля в R; fallback выбирает внешний `R/bin/deepseek`. |
+| `deepseek/distribution.ts`: runtimeInstallationBin | Входит в server bundle. Fallback выбирает внешний `I/bin/deepseek`; source сохраняет свой bin. |
 | `deepSeekCandidateGate.ts`: `process.execPath` | Только разработка: source-sync строит и принимает отдельный ELF обычным Node. В серверный SEA этот builder не входит. |
 | `grigDeskRelease.ts`: два импорта `binaryReadiness.ts` | Только git-updater исходников. SEA подменяет `releaseServices` на `packagedRelease`; `grigDeskRelease` отсутствует в CJS-графе. |
 | `grigdesk-update-worker.js`: `process.execPath` | Только git-updater исходников; серверный SEA не запускает этот worker. |
@@ -43,5 +46,6 @@ Factory берёт Node через `nodeExecutable()`, чтобы `process.execP
 `process.execPath` и пути `server/scripts/deepseekInstructionsHook.mts` или
 `glmToolPolicyHook.mts` рядом с модулем. В SEA `process.execPath` — сам `grigdesk-server`,
 а `server/scripts` в комплект не входит. Hook не запускается, маркер не появляется, и DSH
-блокирует ход. Эти точки в описи помечены `deferred-deepseek`. Пока их не упакуют helpers
-с явным Node, DeepSeek и GLM работают только при source-запуске сервера.
+блокирует ход. Эти точки в описи помечены `deferred-deepseek`. Нынешний исходный код уже собирает эти hooks как helpers и выбирает явный Node в packaged
+profiles. Маленькая compiled fixture подтверждает их исполнение, включая отказ прямого SSH;
+это исправление требует новой сборки сервера и не меняет уже работающий комплект.

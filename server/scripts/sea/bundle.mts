@@ -8,6 +8,13 @@ import { createRuntimeContextPlugin } from './context.mts';
 import { createModuleUrlsPlugin } from './moduleUrls.mts';
 import { engineEntries, executorEntries, renderEngineTable, renderExecutorTable } from './registries.mts';
 
+export interface ServerBundleInput {
+  sourceRoot: string;
+  workDir: string;
+  outfile: string;
+  plugins?: Plugin[];
+}
+
 /**
  * Подменяет только таблицы сборки, не записывая сгенерированный код в исходники.
  * Относительные импорты разрешаются от прежнего каталога таблицы, без абсолютных строк в bundle.
@@ -46,26 +53,28 @@ function registryPlugin(root: string): Plugin {
  * Собирает весь собственный CJS-граф; внешними остаются только npm и builtin.
  * Любое предупреждение или наружный собственный import запрещает подготовку SEA blob.
  */
-export async function bundleServer(input: {
-  sourceRoot: string;
-  workDir: string;
-  outfile: string;
-}): Promise<BuildResult & { metafile: Metafile }> {
+async function bundleServerGraph(
+  input: ServerBundleInput,
+  mode: 'sea' | 'payload',
+): Promise<BuildResult & { metafile: Metafile }> {
   const urls = createModuleUrlsPlugin({
     root: input.sourceRoot,
     runtimeModule: path.join(input.sourceRoot, 'server/src/lib/runtimePaths.ts'),
   });
   const result = await build({
     absWorkingDir: input.sourceRoot,
-    entryPoints: ['server/src/sea.ts'],
+    entryPoints: [mode === 'sea' ? 'server/src/sea.ts' : 'server/src/binary/serverEntry.ts'],
     outfile: input.outfile,
     bundle: true,
     platform: 'node',
     format: 'cjs',
     target: 'node24',
     packages: 'external',
-    banner: { js: SEA_REQUIRE_BANNER },
-    plugins: [registryPlugin(input.sourceRoot), createRuntimeContextPlugin(input.sourceRoot, 'sea'),
+    banner: {
+      js: mode === 'sea' ? SEA_REQUIRE_BANNER : "require = require('node:module').createRequire(__filename);",
+    },
+    plugins: [...input.plugins ?? [], registryPlugin(input.sourceRoot),
+      createRuntimeContextPlugin(input.sourceRoot, mode),
       urls.plugin],
     metafile: true,
     logLevel: 'silent',
@@ -84,4 +93,20 @@ export async function bundleServer(input: {
   }
 
   return result;
+}
+
+/**
+ * Прежний SEA сохраняет свой entry и require от физического execPath.
+ * Общий граф реестров и URL теперь используется также ordinary Node payload.
+ */
+export function bundleServer(input: ServerBundleInput): Promise<BuildResult & { metafile: Metafile }> {
+  return bundleServerGraph(input, 'sea');
+}
+
+/**
+ * CJS payload экспортирует ленивый entry и привязывает require к собственному файлу.
+ * Node launcher и рабочий ordinary Node остаются отдельными от графа приложения.
+ */
+export function bundlePayloadServer(input: ServerBundleInput): Promise<BuildResult & { metafile: Metafile }> {
+  return bundleServerGraph(input, 'payload');
 }

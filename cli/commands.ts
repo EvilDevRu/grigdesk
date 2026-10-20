@@ -1,8 +1,9 @@
 import { lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
+
+import { runtimeInstallationRoot, runtimeRoot } from '../server/src/lib/runtimePaths.ts';
 
 import { dataHome, dataPath, envFilePath } from '../shared/runtime/dataHome.ts';
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../shared/desktop/desktopRuntime.ts';
@@ -82,10 +83,10 @@ export async function runCli(argv: readonly string[]): Promise<number> {
       return 0;
     }
 
-    const root = await realPath(fileURLToPath(new URL('../', import.meta.url)));
+    const root = await realPath(runtimeInstallationRoot());
 
     if (args.kind === 'version') {
-      const version = await readText(path.join(root, 'VERSION'));
+      const version = await readText(path.join(runtimeRoot(), 'VERSION'));
 
       console.log(`GrigDesk ${version?.trim() ?? ''}`);
 

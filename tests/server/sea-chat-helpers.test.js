@@ -452,3 +452,11 @@ test('REVIEW-R4: отсутствие каталога helper-ов оставл�
   assert.equal(code, 0, wire.stderr);
   assert.equal(wire.lines[0]?.hookSpecificOutput.permissionDecision, 'deny');
 });
+
+test('SB06: каталог содержит оба host hook', () => {
+  const catalog = readHelperCatalog(path.join(ROOT, 'server/build/helpers.json'));
+
+  for (const id of ['deepseek-instructions-hook', 'glm-tool-policy-hook']) {
+    assert.ok(catalog.helpers.some((entry) => entry.id === id), id);
+  }
+});

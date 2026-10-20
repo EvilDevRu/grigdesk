@@ -64,7 +64,7 @@ EDITOR_CONTEXT_SECTIONS = (
     "diagnosis", "instrumentation", "evidence", "decisions", "delivery",
     "routeCatalog", "stage",
 )
-# Декларации адаптеров: claude.sh заявляет fanout; codex/kimi/deepseek — нет.
+# Декларации адаптеров: claude.sh заявляет fanout; codex/kimi/deepseek/glm — нет.
 EDITOR_NATIVE_FANOUT_RUNNERS = ("claude",)
 
 

@@ -1241,6 +1241,8 @@ run_agent() {
   # DeepSeek V1 не получает дополнительные writable roots: список остаётся только
   # prompt-контекстом движка, а DSH sandbox пишет ровно в cwd сессии.
   export RUNNER_DEEPSEEK_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
+  # GLM идёт тем же DSH sandbox: каталоги — только prompt-контекст, не writable roots.
+  export RUNNER_GLM_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
 
   # Shared-профиль может дать агенту узкий engine-owned control channel. Hook
   # стартует до provider CLI, stop выполняется при любом результате runner-а.

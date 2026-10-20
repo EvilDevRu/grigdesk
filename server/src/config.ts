@@ -5,14 +5,32 @@ import { dataHome as resolveDataHome, dataPath, envFilePath } from '../../shared
 import path from 'node:path';
 import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
 import { readClientConfig } from './lib/clientAccess/config.ts';
+import { factoryProfilesRoot, factoryRuntimePaths } from './lib/factoryRuntime.ts';
 import { profilesDirFor } from './lib/runtimeLayout.ts';
-import { runtimeKind, runtimeRoot } from './lib/runtimePaths.ts';
+import {
+  runtimeInstallationBin, runtimeKind, runtimeMode, runtimeRoot,
+} from './lib/runtimePaths.ts';
 
 const home = os.homedir();
 const dataHome = resolveDataHome({ env: process.env, home });
 const dataStateDir = dataPath(dataHome, 'state');
 const rootDir = runtimeRoot();
-const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
+const installationBin = runtimeInstallationBin();
+// Одиночный ELF не зависит от checkout: движок поставки и физические профили D.
+// Source и прежний SEA-комплект сохраняют переопределения и умолчания байт в байт.
+const singleBinary = runtimeMode() === 'payload';
+const factoryRuntime = factoryRuntimePaths({
+  kind: singleBinary ? 'packaged' : 'source',
+  root: rootDir,
+  env: process.env,
+});
+const factoryHome = factoryRuntime.home;
+
+if (factoryRuntime.ignored.length > 0) {
+  process.stderr.write(`Фабрика: ${factoryRuntime.ignored.join(', ')} из прежней настройки не используются, `
+    + 'движок берётся из поставки. Внешний движок — GRIGDESK_ENGINE_MODE=external.\n');
+}
+
 const chatsDir = process.env.GRIGDESK_CHATS_DIR || dataPath(dataHome, 'chats');
 const telegramDir = process.env.GRIGDESK_TELEGRAM_DIR || dataPath(dataHome, 'telegram');
 const githubDir = process.env.GRIGDESK_GITHUB_DIR || dataPath(dataHome, 'github');
@@ -66,6 +84,7 @@ export const config = {
   // Пути «мозга».
   // Корень репозитория GrigDesk — от него считаются скрипты запуска и ресурсы кода.
   rootDir,
+  installationBin,
   dataHome,
   dataStateDir,
   // Библиотека 3D отделена от чатов и проектных деревьев; плагин открывает её
@@ -79,13 +98,20 @@ export const config = {
   // Движок входит в этот же репозиторий. Внешний checkout поддерживается только явным env.
   factoryHome,
   // Проектные профили живут отдельно от движка, в корне репозитория.
-  profilesDir: profilesDirFor({
-    kind: runtimeKind(),
-    rootDir,
-    dataHome,
-    env: process.env,
-  }),
-  factoryBin: process.env.GRIGDESK_FACTORY_BIN || path.join(factoryHome, 'bin', 'factory'),
+  profilesDir: singleBinary
+    ? factoryProfilesRoot({
+      kind: 'packaged',
+      rootDir,
+      dataHome,
+      env: process.env,
+    })
+    : profilesDirFor({
+      kind: runtimeKind(),
+      rootDir,
+      dataHome,
+      env: process.env,
+    }),
+  factoryBin: factoryRuntime.bin,
   // Debug settings принадлежат engine writer-у, GrigDesk передаёт этот root его CLI.
   factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(home, '.factory', 'config'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
@@ -125,7 +151,7 @@ export const config = {
   deepseekBinOverride: process.env.GRIGDESK_DEEPSEEK_BIN,
   deepseekGenerationRoot: path.join(rootDir, 'server', 'runtime', 'deepseek'),
   deepseekBin: process.env.GRIGDESK_DEEPSEEK_BIN
-    || path.join(rootDir, 'bin', 'deepseek'),
+    || path.join(installationBin, 'deepseek'),
   // GLM (Z.ai) работает на той же встроенной сборке DSH, но со своими homes и ключами.
   glmRuntimeHome,
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).

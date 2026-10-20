@@ -343,3 +343,60 @@ test('SEA-RP-09: packaged DeepSeek выбирает внешний ELF и обы
     binary: path.join(R, 'bin/deepseek'),
   });
 });
+
+test('SB05: payload root не выводится из execPath ordinary Node', async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'server-payload-paths-'));
+  const R = path.join(base, 'D/runtimes/server/packages', 'a'.repeat(64));
+  const binary = path.join(base, 'installation with space/bin/grigdesk-server');
+
+  t.after(() => rm(base, { recursive: true, force: true }));
+  await mkdir(path.join(R, 'server'), { recursive: true });
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(path.join(R, 'server/payload.cjs'), 'module.exports = {};');
+  await writeFile(binary, 'ELF');
+
+  let value;
+
+  assert.doesNotThrow(() => {
+    value = createRuntimePaths({
+      mode: 'payload',
+      bundleFile: path.join(R, 'server/payload.cjs'),
+      binary,
+    });
+  });
+
+  assert.equal(value.kind, 'packaged');
+  assert.equal(value.root, R);
+  assert.equal(value.node, path.join(R, 'runtime/node/bin/node'));
+  assert.equal(value.installationBin, path.dirname(binary));
+});
+
+test('SB05: helper сохраняет R и получает I только из явного physical binary', async (t) => {
+  const R = await packagedLayout(t);
+  const helper = path.join(R, 'server/runtime/helpers/paths.mjs');
+  const installation = await scratch(t);
+  const binary = path.join(installation, 'bin/grigdesk-server');
+
+  await writeFile(helper, '// helper');
+  await mkdir(path.dirname(binary));
+  await writeFile(binary, 'ELF');
+
+  const context = {
+    mode: 'helper',
+    helperUrl: pathToFileURL(helper).href,
+  };
+  const legacy = createRuntimePaths(context);
+  const payload = createRuntimePaths({ ...context, binary });
+
+  assert.equal(legacy.installationRoot, R);
+  assert.equal(legacy.installationBin, path.join(R, 'bin'));
+  assert.equal(payload.root, R);
+  assert.equal(payload.installationRoot, installation);
+  assert.equal(payload.installationBin, path.dirname(binary));
+  assert.throws(() => createRuntimePaths({ ...context, binary: 'relative' }), /абсолютный/);
+  assert.throws(() => createRuntimePaths({
+    mode: 'payload',
+    bundleFile: 'relative',
+    binary,
+  }), /абсолютные/);
+});

@@ -46,8 +46,8 @@ CLI. Поэтому отсутствие model prompt в metadata-проверк
   если другой запуск изменит файл до его чтения systemd.
   Ошибка вызова `systemd-run` также не доказывает отсутствие юнита: текущий callback
   возвращает `ok: false` и при timeout ожидания, установленном в 15 секунд.
-- `engine/lib/runtime-usage.mjs` извлекает terminal failure только для Codex;
-  `server/src/lib/runnerStall.ts` также ограничивает чтение diagnostics этим раннером.
+- `engine/lib/runtime-usage.mjs` извлекает terminal failure только для Codex и GLM;
+  `server/src/lib/runnerStall.ts` также ограничивает чтение diagnostics этими раннерами.
   Поддержка нового формата в `readAgentLive` сама по себе не сохраняет причину
   завершившейся попытки в карточке остановки.
 

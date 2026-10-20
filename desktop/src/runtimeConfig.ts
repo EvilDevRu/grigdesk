@@ -1,6 +1,16 @@
+import { assertServerBinaryFile, recoverRuntimeSelection } from '../../server/src/lib/selectSeaServer.ts';
 import { readTextOrNull } from '../../shared/node/files.ts';
 import { verifySeaRuntime } from '../../shared/node/seaRuntime.ts';
 import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
+import { discoverUserCliDirectories, type PackagedCliInput } from '../../shared/node/userCliPaths.ts';
+import {
+  decodePreparedRuntime,
+  prepareServerBinary,
+  probeServerBinary,
+  releaseServerPreparation,
+  type ServerBinaryProbeOptions,
+  type PreparedServerRuntime,
+} from '../../shared/node/serverBinaryRuntime.ts';
 
 import { dataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import { legacyRootProblem } from '../../shared/runtime/legacyBrand.ts';
@@ -8,6 +18,7 @@ import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import {
   access,
+  realpath,
   stat,
 } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +32,7 @@ import {
   stopGraceMs,
 } from '../../shared/desktop/desktopRuntime.ts';
 import type { EnvMap } from '../../shared/desktop/desktopRuntime.ts';
+import type { RuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
 import { isNodeVersionSupported, MIN_NODE_VERSION } from '../../server/src/lib/nodeVersion.ts';
 import { localOrigin } from './connection.ts';
 
@@ -37,6 +49,28 @@ export interface ServerRuntime {
   graceMs: number;
   logPath: string;
   uiReleasesDir: string;
+  preparation?: PreparationHandle;
+}
+
+export type PreparedBinary = PreparedServerRuntime;
+
+export interface PreparationHandle {
+  token: string | null;
+  packageId: string | null;
+  release(): Promise<void>;
+}
+
+export type RuntimeInspection = Pick<ServerRuntime, 'origin' | 'port' | 'env'>;
+type RuntimeFailure = { problem: RuntimeProblem; message: string };
+type RuntimeLoadResult = { runtime: ServerRuntime } | { inspection: RuntimeInspection } | RuntimeFailure;
+
+interface RuntimeLoadInput {
+  env: EnvMap;
+  home: string;
+  deps: RuntimeDependencies;
+  appDir?: string | null;
+  bundledUi?: boolean;
+  purpose?: 'inspect' | 'start';
 }
 
 export interface RuntimeDependencies {
@@ -44,6 +78,11 @@ export interface RuntimeDependencies {
   exists(path: string, kind: 'file' | 'dir' | 'exec'): Promise<boolean>;
   nodeVersion(node: string): Promise<string | null>;
   checkRelease(root: string): Promise<boolean>;
+  binaryRun?: ServerBinaryProbeOptions['run'];
+  prepareBinary?(binary: string, env: EnvMap, run?: ServerBinaryProbeOptions['run']):
+    Promise<PreparedBinary>;
+  releasePreparation?(binary: string, prepared: PreparedBinary, env: EnvMap,
+    run?: ServerBinaryProbeOptions['run']): Promise<void>;
 }
 
 const executeFile = promisify(execFile);
@@ -70,6 +109,8 @@ const PACKAGED_ENV_KEYS = new Set([
 const PACKAGED_PATH_KEYS = ['PATH', 'LD_LIBRARY_PATH', 'XDG_DATA_DIRS', 'GSETTINGS_SCHEMA_DIR'];
 
 export const runtimeDependencies: RuntimeDependencies = {
+  prepareBinary,
+  releasePreparation,
   /**
    * Сверяет пакет настоящим SEA без запуска API и чтения папки данных.
    * Безопасное сообщение об отказе формирует загрузчик; вывод процесса не раскрывается.
@@ -87,7 +128,17 @@ export const runtimeDependencies: RuntimeDependencies = {
    * Отсутствующий файл отличается от ошибки доступа или чтения.
    * Загрузчик сам переводит отказ в безопасную причину без содержимого настроек.
    */
-  readText: readTextOrNull,
+  async readText(file) {
+    if (path.basename(file) === 'runtime.json') {
+      const parent = await stat(path.dirname(file)).catch(() => null);
+
+      if (parent) {
+        await recoverRuntimeSelection(file);
+      }
+    }
+
+    return readTextOrNull(file);
+  },
   /**
    * Проверяет вид объекта и доступ к исполняемому файлу до запуска.
    * Ошибка файловой системы закрывает проверку, не превращаясь в успешное наличие.
@@ -129,8 +180,213 @@ export const runtimeDependencies: RuntimeDependencies = {
 };
 
 /**
+ * Закрытый JSON подготовки связывает packageId и физические пути с выбранным ELF.
+ * Ни сохранённый cache path, ни Node вне R не становятся командой окна.
+ */
+export function decodePreparedBinary(value: unknown, binary: string, expected?: string): PreparedBinary {
+  const prepared = decodePreparedRuntime(value, expected ?? (value as PreparedBinary)?.packageId);
+
+  if (prepared.installationBin !== path.dirname(binary)) {
+    throw new Error('Подготовка не соответствует выбранному серверному ELF');
+  }
+
+  return prepared;
+}
+
+/**
+ * Снимает только prepare-владение координатора; путь ELF мог уже измениться A→B.
+ * Команда ограничена по времени и не запускает API, helper или произвольный JavaScript.
+ */
+async function releasePreparation(
+  binary: string,
+  prepared: PreparedBinary,
+  env: EnvMap,
+  run?: ServerBinaryProbeOptions['run'],
+): Promise<void> {
+  await releaseServerPreparation(binary, {
+    home: env.GRIGDESK_HOME!,
+    packageId: prepared.packageId,
+    token: prepared.preparationToken,
+    timeoutMs: 10000,
+    run,
+  });
+}
+
+/**
+ * Сначала читает metadata без D, затем закрепляет её packageId в prepare.
+ * Все возвращённые пути проверяются физически; неудачная проверка снимает полученный lease.
+ */
+async function prepareBinary(
+  binary: string,
+  env: EnvMap,
+  run?: ServerBinaryProbeOptions['run'],
+): Promise<PreparedBinary> {
+  await assertServerBinaryFile(binary);
+
+  let raw: PreparedBinary | undefined;
+  /**
+   * Запоминает только закрытый prepare JSON для cleanup при отказе декодера.
+   * Содержимое env и stderr не сохраняется и не выводится в диагностику окна.
+   */
+  const capture: ServerBinaryProbeOptions['run'] = async (file, args, options) => {
+    const result = await (run ?? executeFile)(file, args, options);
+
+    if (args.includes('--prepare')) {
+      try {
+        raw = JSON.parse(result.stdout);
+      } catch {
+        // Неразборчивый JSON не даёт полномочий снимать неизвестный lease.
+        // Launcher сохраняет защиту консервативно до проверки kernel owner.
+      }
+    }
+
+    return result;
+  };
+  const info = await probeServerBinary(binary, { run: capture });
+
+  try {
+    const prepared = decodePreparedBinary(await prepareServerBinary(binary, {
+      home: env.GRIGDESK_HOME!,
+      expectPackageId: info.packageId,
+      timeoutMs: 120000,
+      run: capture,
+    }), binary, info.packageId);
+
+    for (const file of [prepared.root, prepared.node, prepared.engine, prepared.installationBin]) {
+      if (await realpath(file) !== file) {
+        throw new Error('Подготовка вернула путь через символическую ссылку');
+      }
+    }
+
+    return prepared;
+  } catch (error) {
+    if (raw?.packageId === info.packageId && typeof raw?.preparationToken === 'string'
+      && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(raw.preparationToken)) {
+      await releasePreparation(binary, raw, env, run);
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Ветка v4 читает D из descriptor и готовит runtime отдельной командой ELF.
+ * Discovery CLI выполняется один раз; каждый отказ после prepare освобождает handle.
+ */
+async function loadBinaryRuntime(
+  input: RuntimeLoadInput,
+  descriptor: Extract<RuntimeDescriptor, { version: 4 }>,
+): Promise<RuntimeLoadResult> {
+  let handle: PreparationHandle | undefined;
+
+  try {
+    const parent = { ...input.env, GRIGDESK_HOME: descriptor.home };
+    const fileText = await input.deps.readText(envFilePath({ env: parent, home: input.home }));
+    const dotenv: Record<string, string> = fileText === null ? {}
+      : Object.fromEntries(Object.entries(parseEnv(fileText))
+        .filter((entry): entry is [string, string] => entry[1] !== undefined));
+    const problem = legacyRootProblem(parent) || legacyRootProblem(dotenv, true);
+
+    if (problem) {
+      throw new Error(problem);
+    }
+
+    const port = effectivePort(parent, dotenv);
+    const origin = localOrigin(`http://127.0.0.1:${port}`);
+
+    if (!origin) {
+      throw new Error('Некорректный порт GrigDesk');
+    }
+
+    if (input.purpose === 'inspect') {
+      return {
+        inspection: {
+          origin,
+          port,
+          env: parent,
+        },
+      };
+    }
+
+    const probeEnv = buildServerEnv({
+      parent,
+      dotenv,
+      node: process.execPath,
+      home: input.home,
+      appDir: input.appDir,
+      sea: true,
+    });
+
+    delete probeEnv.NODE_PATH;
+    delete probeEnv.LD_PRELOAD;
+
+    const prepared = decodePreparedBinary(
+      await (input.deps.prepareBinary ?? prepareBinary)(
+        descriptor.binary, probeEnv, input.deps.binaryRun,
+      ), descriptor.binary,
+    );
+    let released: Promise<void> | undefined;
+
+    handle = {
+      token: prepared.preparationToken,
+      packageId: prepared.packageId,
+      release() {
+        released ??= (input.deps.releasePreparation ?? releasePreparation)(
+          descriptor.binary, prepared, probeEnv, input.deps.binaryRun,
+        );
+
+        return released;
+      },
+    };
+
+    const cli = await discoverUserCliDirectories({
+      env: probeEnv,
+      home: input.home,
+      dataHome: descriptor.home,
+    });
+
+    return {
+      runtime: {
+        root: prepared.root,
+        node: prepared.node,
+        serverCommand: descriptor.binary,
+        serverArgs: [
+          '--expect-package-id', prepared.packageId, '--preparation-token', prepared.preparationToken,
+        ],
+        port,
+        origin,
+        env: buildServerEnv({
+          parent,
+          dotenv,
+          node: prepared.node,
+          home: input.home,
+          appDir: input.appDir,
+          sea: true,
+          cli: {
+            ...cli,
+            installationBin: prepared.installationBin,
+            saved: descriptor.cliPaths,
+          },
+        }),
+        graceMs: stopGraceMs(parent, dotenv),
+        logPath: effectiveValue(parent, dotenv, 'GRIGDESK_LOG') || dataPath(descriptor.home, 'log'),
+        uiReleasesDir: effectiveValue(parent, dotenv, 'GRIGDESK_UI_RELEASES_DIR')
+          || dataPath(descriptor.home, 'uiReleases'),
+        preparation: handle,
+      },
+    };
+  } catch {
+    await handle?.release();
+
+    return { problem: 'package', message: 'Серверный ELF недоступен или повреждён; повторите выбор.' };
+  }
+}
+
+/**
  * Очищает объединённое окружение от упаковки, сохраняя приоритет родителя над файлом.
  * Сервер и VPN-ворота получают один PATH и маркер; исходные снимки не меняются.
+ * Packaged-запуск с готовыми каталогами CLI строит PATH общим userCliPath; без них
+ * прежние source и v3 сохраняют свой порядок байт в байт.
  * Каталог пакета — APPDIR окружения и appDir главного процесса: распакованный AppRun
  * вычисляет APPDIR, но не экспортирует его, а пути пакета в PATH всё равно дописывает.
  */
@@ -141,6 +397,7 @@ export function buildServerEnv(input: {
   home: string;
   appDir?: string | null;
   sea?: boolean;
+  cli?: PackagedCliInput;
 }): Record<string, string> {
   const env: Record<string, string> = Object.fromEntries(Object.entries({
     ...input.dotenv,
@@ -182,14 +439,18 @@ export function buildServerEnv(input: {
     delete env.ORIGINAL_XDG_CURRENT_DESKTOP;
   }
 
-  const entries = [
-    path.join(input.home, '.kimi-code/bin'),
-    path.join(input.home, '.local/bin'),
-    path.dirname(input.node),
-    ...(env.PATH?.split(':') ?? []),
-  ];
+  // Packaged-сервер с готовыми каталогами CLI получает общий порядок в packagedChildEnvironment.
+  if (!input.sea || !input.cli) {
+    const entries = [
+      path.join(input.home, '.kimi-code/bin'),
+      path.join(input.home, '.local/bin'),
+      path.dirname(input.node),
+      ...(env.PATH?.split(':') ?? []),
+    ];
 
-  env.PATH = [...new Set(entries.filter(Boolean))].join(':');
+    env.PATH = [...new Set(entries.filter(Boolean))].join(':');
+  }
+
   env.GRIGDESK_DESKTOP_CHILD = '1';
 
   if (input.sea) {
@@ -199,6 +460,7 @@ export function buildServerEnv(input: {
       node: input.node,
       env,
       home: input.home,
+      cli: input.cli,
     });
   }
 
@@ -209,19 +471,29 @@ export function buildServerEnv(input: {
  * Проверяет описание установки через явные порты файлов и версии Node.
  * Проблема установки запрещает только свой запуск, подключение к внешнему серверу остаётся возможным.
  */
-export async function loadServerRuntime(input: {
-  env: EnvMap;
-  home: string;
-  deps: RuntimeDependencies;
-  appDir?: string | null;
-  bundledUi?: boolean;
-}): Promise<{ runtime: ServerRuntime } | { problem: RuntimeProblem; message: string }> {
+export function loadServerRuntime(input: RuntimeLoadInput & { purpose: 'inspect' }):
+  Promise<{ inspection: RuntimeInspection } | RuntimeFailure>;
+
+export function loadServerRuntime(input: RuntimeLoadInput & { purpose?: 'start' }):
+  Promise<{ runtime: ServerRuntime } | RuntimeFailure>;
+
+/**
+ * Проверяет descriptor через явные файловые порты и выбранную цель загрузки.
+ * Inspect не выдаёт spawn-ready runtime, start передаёт владение preparation handle.
+ */
+export async function loadServerRuntime(input: RuntimeLoadInput): Promise<RuntimeLoadResult> {
   const descriptorPath = desktopRuntimePath(input);
   let text: string | null;
 
   try {
     text = await input.deps.readText(descriptorPath);
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code?.startsWith('server_selection_')) {
+      return { problem: 'invalid', message: `Выбор сервера не завершён: ${code}. Проверьте descriptor.` };
+    }
+
     text = '';
   }
 
@@ -240,6 +512,10 @@ export async function loadServerRuntime(input: {
       message: `Описание установки сервера повреждено: ${descriptorPath}. `
         + 'Выполните grigdesk-ctl desktop install.',
     };
+  }
+
+  if (descriptor.version === 4) {
+    return loadBinaryRuntime(input, descriptor);
   }
 
   const { root } = descriptor;
@@ -344,6 +620,23 @@ export async function loadServerRuntime(input: {
     };
   }
 
+  if (input.purpose === 'inspect') {
+    return {
+      inspection: {
+        origin,
+        port,
+        env: buildServerEnv({
+          parent,
+          dotenv,
+          node,
+          home: input.home,
+          appDir: input.appDir,
+          sea,
+        }),
+      },
+    };
+  }
+
   return {
     runtime: {
       root,
@@ -365,6 +658,11 @@ export async function loadServerRuntime(input: {
         || dataPath(selectedHome, 'log'),
       uiReleasesDir: effectiveValue(input.env, dotenv, 'GRIGDESK_UI_RELEASES_DIR')
         || dataPath(selectedHome, 'uiReleases'),
+      preparation: {
+        token: null,
+        packageId: null,
+        release: async () => {},
+      },
     },
   };
 }

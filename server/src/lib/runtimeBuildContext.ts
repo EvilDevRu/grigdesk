@@ -22,6 +22,12 @@ export type RuntimeBuildContext =
   | {
     mode: 'helper';
     helperUrl: string;
+    binary?: string;
+  }
+  | {
+    mode: 'payload';
+    bundleFile: string;
+    binary: string;
   };
 
 /**
@@ -34,4 +40,14 @@ export function runtimeBuildContext(): RuntimeBuildContext {
     root: path.resolve(fileURLToPath(new URL('../../../', import.meta.url))),
     execPath: process.execPath,
   };
+}
+
+/**
+ * Source не может принять контекст внешнего payload и сменить собственную раскладку.
+ * При сборке payload plugin заменяет этот export закрытым состоянием once-state.
+ */
+export function configurePayloadContext(_context: Extract<RuntimeBuildContext, { mode: 'payload' }>): never {
+  throw Object.assign(new Error('Контекст payload недоступен в source'), {
+    code: 'server_payload_context_unavailable',
+  });
 }

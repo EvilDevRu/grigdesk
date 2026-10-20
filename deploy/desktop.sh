@@ -36,14 +36,14 @@ write_runtime_descriptor() {
 
   # Обновление окна из исходников не отменяет отдельный выбор серверного комплекта.
   # Общий parser проверяет форму v3; целостность выбранного R проверяется при его запуске.
-  if [[ ! -f "$ROOT/release.json" && -f "$runtime" ]] && grigdesk_node --input-type=module -e '
+  if [[ -f "$runtime" ]] && grigdesk_node --input-type=module -e '
     import { readFileSync } from "node:fs";
     import { pathToFileURL } from "node:url";
     const { parseRuntimeDescriptor } = await import(pathToFileURL(process.argv[2]).href);
     const descriptor = parseRuntimeDescriptor(readFileSync(process.argv[1], "utf8"));
-    process.exit(descriptor?.version === 3 ? 0 : 1);
+    process.exit([3, 4].includes(descriptor?.version) ? 0 : 1);
   ' -- "$runtime" "$ROOT/shared/desktop/desktopRuntime.ts"; then
-    echo 'Выбор сервера SEA сохранён; для смены используйте grigdesk-ctl desktop use-server <R>.'
+    echo 'Выбор сервера SEA/ELF сохранён; для смены используйте grigdesk-ctl desktop use-server <ELF|R>.'
     return 0
   fi
 
@@ -133,7 +133,7 @@ install_desktop() {
   # Метка: установлена сборка, которая знает папку данных. Без неё команда переноса не уберёт
   # ссылки совместимости — старая сборка окна пишет журнал и интерфейс через них.
   : > "$(grigdesk_desktop_marker_path)"
-  printf '3\n' > "$(dirname "$(grigdesk_desktop_runtime_path)")/runtime-version"
+  printf '4\n' > "$(dirname "$(grigdesk_desktop_runtime_path)")/runtime-version"
 
   # Окно до переноса в bin/ лежало в XDG_DATA_HOME. Открытое старое окно продолжит работать:
   # удаляется только имя файла. Ярлык, если он есть, переписывается на новый путь.
@@ -178,8 +178,12 @@ case "${1:-}" in
   status)
     desktop_status
     ;;
-  use-server)
+  use-server|use-source)
+    desktop_selection=$1
     shift
+    if [[ "$desktop_selection" == use-source ]]; then
+      set -- --source "$@"
+    fi
     source "$ROOT/deploy/lib/runtime-env.sh"
     grigdesk_add_cli_paths "$ROOT"
     grigdesk_require_node
@@ -188,10 +192,14 @@ case "${1:-}" in
       exec "$_grigdesk_packaged_node" "$ROOT/server/runtime/helpers/select-sea-server.mjs" "$@"
     fi
 
-    exec node "$ROOT/server/scripts/selectSeaServer.mts" "$@"
+    exec node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      const { main } = await import(pathToFileURL(process.argv[2]).href);
+      process.exitCode = await main(process.argv.slice(3));
+    ' -- desktop-selection "$ROOT/server/src/lib/selectSeaServer.ts" "$@"
     ;;
   *)
-    echo 'использование: grigdesk-ctl desktop install|remove|status|use-server <R>' >&2
+    echo 'использование: grigdesk-ctl desktop install|remove|status|use-server <ELF|R>|use-source <root> --node <node>' >&2
     exit 2
     ;;
 esac

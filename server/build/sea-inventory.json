@@ -2,24 +2,6 @@
   "schema": 1,
   "points": [
     {
-      "file": "cli/commands.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "helper",
-      "detail": "CLI собирается отдельным helper; корень и пути берутся из runtimePaths."
-    },
-    {
-      "file": "cli/commands.ts",
-      "construct": "resource-ref",
-      "target": ".",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "helper",
-      "detail": "CLI собирается отдельным helper; корень и пути берутся из runtimePaths."
-    },
-    {
       "file": "deploy/desktop.sh",
       "construct": "shell-ref",
       "target": "server/runtime/helpers/select-sea-server.mjs",
@@ -31,11 +13,11 @@
     {
       "file": "deploy/desktop.sh",
       "construct": "shell-ref",
-      "target": "server/scripts/selectSeaServer.mts",
+      "target": "server/src/lib/selectSeaServer.ts",
       "count": 1,
       "owner": "task-16",
       "fate": "asset",
-      "detail": "Выбор и проверка SEA-комплекта окна; runtime командой --check-runtime, данные отдельно."
+      "detail": "Общий выбор ELF/R/source; прямой CLI guard отключён в собранном helper."
     },
     {
       "file": "deploy/desktop.sh",
@@ -133,8 +115,8 @@
       "target": "server/scripts/deepseekRunner.mts",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "compat-wrapper",
+      "detail": "Прежний Bash путь вызывает собранный helper через тонкий script import в staging."
     },
     {
       "file": "engine/lib/runners/deepseek.sh",
@@ -142,8 +124,26 @@
       "target": "server/scripts/deepseekRuntimeInfo.mts",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "compat-wrapper",
+      "detail": "Прежний Bash путь вызывает собранный helper через тонкий script import в staging."
+    },
+    {
+      "file": "engine/lib/runners/glm.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/glmRunner.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "compat-wrapper",
+      "detail": "Раннер GLM этапа вызывает собранный helper через тонкий script import в staging."
+    },
+    {
+      "file": "engine/lib/runners/glm.sh",
+      "construct": "shell-ref",
+      "target": "server/scripts/glmRuntimeInfo.mts",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "compat-wrapper",
+      "detail": "Раннер GLM этапа вызывает собранный helper через тонкий script import в staging."
     },
     {
       "file": "engine/lib/runtime-usage.mjs",
@@ -191,6 +191,42 @@
       "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
     },
     {
+      "file": "server/scripts/buildBinary.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 2,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/scripts/buildBinary.mts",
+      "construct": "import-meta",
+      "target": "dirname",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/scripts/buildBinary.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/scripts/buildBinary.mts",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
       "file": "server/scripts/buildSea.mts",
       "construct": "exec-path",
       "target": "",
@@ -218,24 +254,6 @@
       "detail": "Сборка и локальная проверка релиза, не входит в runtime."
     },
     {
-      "file": "server/scripts/dataHomeCheck.mts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "helper",
-      "detail": "dataHomeCheck становится helper; свой корень берётся из runtimePaths."
-    },
-    {
-      "file": "server/scripts/dataHomeCheck.mts",
-      "construct": "resource-ref",
-      "target": ".",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "server-bundle",
-      "detail": "Корень кода для data-home считается от расположения helper."
-    },
-    {
       "file": "server/scripts/deepSeekCandidateGate.ts",
       "construct": "exec-path",
       "target": "",
@@ -246,21 +264,12 @@
     },
     {
       "file": "server/scripts/deepseekRunner.mts",
-      "construct": "exec-path",
-      "target": "",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "server/scripts/deepseekRunner.mts",
       "construct": "import-meta",
       "target": "url",
-      "count": 3,
+      "count": 2,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Явный main helper сохраняет runDeepSeekFactory и выбирает вложенный status через каталог R."
     },
     {
       "file": "server/scripts/deepseekRunner.mts",
@@ -268,17 +277,8 @@
       "target": ".",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
-    },
-    {
-      "file": "server/scripts/deepseekRunner.mts",
-      "construct": "resource-ref",
-      "target": "server/scripts/deepseekStatusMcp.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Явный main helper сохраняет runDeepSeekFactory и выбирает вложенный status через каталог R."
     },
     {
       "file": "server/scripts/deepseekStatusMcp.mts",
@@ -286,8 +286,8 @@
       "target": "url",
       "count": 2,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Factory metadata/status входят в исполняемый helper; engine assets разрешаются внутри R."
     },
     {
       "file": "server/scripts/deepseekStatusMcp.mts",
@@ -295,8 +295,8 @@
       "target": "engine/lib/stage-progress.sh",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Factory metadata/status входят в исполняемый helper; engine assets разрешаются внутри R."
     },
     {
       "file": "server/scripts/deepseekStatusMcp.mts",
@@ -304,8 +304,17 @@
       "target": "engine/lib/stage-result.sh",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Factory metadata/status входят в исполняемый helper; engine assets разрешаются внутри R."
+    },
+    {
+      "file": "server/scripts/factoryRuntimePin.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "helper",
+      "detail": "Host-side runtime reservation и bind до active pointer; линия A."
     },
     {
       "file": "server/scripts/glmLiveSmoke.mts",
@@ -333,6 +342,15 @@
       "owner": "deepseek-plan",
       "fate": "deferred-deepseek",
       "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+    },
+    {
+      "file": "server/scripts/glmRunner.mts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "deepseek-plan",
+      "fate": "helper",
+      "detail": "Явный main helper GLM сохраняет runGlmFactory и выбирает вложенный status через каталог R."
     },
     {
       "file": "server/scripts/launchSeaServer.mts",
@@ -560,6 +578,123 @@
       "detail": "Исходная точка входа app.js остаётся только для запуска из дерева."
     },
     {
+      "file": "server/src/binary/leases.ts",
+      "construct": "dynamic-import",
+      "target": "./cache.ts",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "server-bundle",
+      "detail": "Host runtime leases, pins, resume и ручной GC; линия A."
+    },
+    {
+      "file": "server/src/binary/main.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "package",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../../scripts/deepseekRunner.mts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../../scripts/glmRunner.mts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../app.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/deepseek/runtime.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/deepseek/serverRuntime.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/deepseek/webRuntime.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/executors/glm.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/glm/contract.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/glm/runtime.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/workerBootstrap.ts",
+      "construct": "create-require",
+      "target": "",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "package",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/src/binary/workerBootstrap.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "package",
+      "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
       "file": "server/src/lib/analytics/durableFs.ts",
       "construct": "import-meta",
       "target": "url",
@@ -605,31 +740,13 @@
       "detail": "Исходная таблица движков; сборщик заменяет её литеральными импортами."
     },
     {
-      "file": "server/src/lib/deepseek/distribution.ts",
-      "construct": "import-meta",
-      "target": "dirname",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "server-bundle",
-      "detail": "AST-плагин сохраняет виртуальный путь модуля внутри R; fallback выбирает внешний R/bin/deepseek, не Harness source."
-    },
-    {
-      "file": "server/src/lib/deepseek/distribution.ts",
-      "construct": "resource-ref",
-      "target": ".",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "server-bundle",
-      "detail": "Вычисляется корень комплекта R для внешнего ELF; ссылка не требует копирования source-каталога."
-    },
-    {
       "file": "server/src/lib/deepseek/profile.ts",
       "construct": "exec-path",
       "target": "",
       "count": 2,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "server-bundle",
+      "detail": "Source сохраняет прежний hook argv; packaged profile использует helperCommand и явный Node из R."
     },
     {
       "file": "server/src/lib/deepseek/profile.ts",
@@ -637,8 +754,8 @@
       "target": "url",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "server-bundle",
+      "detail": "Source сохраняет прежний hook argv; packaged profile использует helperCommand и явный Node из R."
     },
     {
       "file": "server/src/lib/deepseek/profile.ts",
@@ -646,8 +763,8 @@
       "target": "server/scripts/deepseekInstructionsHook.mts",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Source сохраняет прежний hook argv; packaged profile использует helperCommand и явный Node из R."
     },
     {
       "file": "server/src/lib/executors/_direct-ssh-policy-hook.js",
@@ -718,8 +835,8 @@
       "target": "",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "server-bundle",
+      "detail": "Source сохраняет прежний hook argv; packaged profile использует helperCommand и явный Node из R."
     },
     {
       "file": "server/src/lib/glm/profile.ts",
@@ -727,8 +844,8 @@
       "target": "url",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "server-bundle",
+      "detail": "Source сохраняет прежний hook argv; packaged profile использует helperCommand и явный Node из R."
     },
     {
       "file": "server/src/lib/glm/profile.ts",
@@ -736,8 +853,8 @@
       "target": "server/scripts/glmToolPolicyHook.mts",
       "count": 1,
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Отложено: generation DeepSeek и её обёртки меняет отдельный план deepseek-binary-tdd."
+      "fate": "helper",
+      "detail": "Source сохраняет прежний hook argv; packaged profile использует helperCommand и явный Node из R."
     },
     {
       "file": "server/src/lib/grigDeskRelease.ts",
@@ -918,6 +1035,15 @@
       "owner": "task-3",
       "fate": "server-bundle",
       "detail": "Литеральный ленивый import app.ts входит в SEA-бандл; help/version его не вызывают."
+    },
+    {
+      "file": "server/src/lib/selectSeaServer.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "helper",
+      "detail": "Общий выбор ELF/R/source; прямой CLI guard отключён в собранном helper."
     },
     {
       "file": "server/src/lib/showcase/browserInstall.ts",
@@ -1235,24 +1361,6 @@
       "detail": "pty-helper.py копируется как ресурс, путь переписывается задачей 4."
     },
     {
-      "file": "server/src/startDataHome.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-2",
-      "fate": "server-bundle",
-      "detail": "Корень кода для data-home берётся из runtime-контракта, а не из import.meta исходника."
-    },
-    {
-      "file": "server/src/startDataHome.ts",
-      "construct": "resource-ref",
-      "target": ".",
-      "count": 1,
-      "owner": "task-2",
-      "fate": "server-bundle",
-      "detail": "Корень кода для data-home берётся из runtime-контракта, а не из import.meta исходника."
-    },
-    {
       "file": "server/src/workers/grigdesk-update-worker.js",
       "construct": "exec-path",
       "target": "",
@@ -1260,6 +1368,33 @@
       "owner": "task-15",
       "fate": "development-only",
       "detail": "Worker git-обновления не входит в packaged-ветку и не запускается из комплекта."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/packages",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "helper",
+      "detail": "Standalone shell: проверенный ELF, свой Node и собранные helper-ы; source/v3 сохранены."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/runtime/helpers/data-home-check.mjs",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "helper",
+      "detail": "Standalone shell: проверенный ELF, свой Node и собранные helper-ы; source/v3 сохранены."
+    },
+    {
+      "file": "deploy/lib/runtime-env.sh",
+      "construct": "shell-ref",
+      "target": "server/runtime/helpers/legacy-brand.mjs",
+      "count": 1,
+      "owner": "task-16",
+      "fate": "helper",
+      "detail": "Standalone shell: проверенный ELF, свой Node и собранные helper-ы; source/v3 сохранены."
     }
   ],
   "resources": [
@@ -1464,6 +1599,14 @@
       "detail": "Движок копируется в комплект; JS bridge-файлы заменяются в staging."
     },
     {
+      "path": "schemas/analytics/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-12",
+      "fate": "asset",
+      "detail": "Схемы analytics движка: lifecycle и provider lineage читаются от FACTORY_HOME/../schemas."
+    },
+    {
       "path": "deploy/",
       "kind": "dir",
       "expect": "source",
@@ -1548,40 +1691,40 @@
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Хук GLM меняет отдельный план DeepSeek."
+      "fate": "helper",
+      "detail": "Собранный script helper выполняет настоящий host hook; source-скрипт не копируется в payload."
     },
     {
       "path": "server/scripts/deepseekInstructionsHook.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Хук инструкций DeepSeek отложен."
+      "fate": "helper",
+      "detail": "Собранный script helper выполняет настоящий host hook; source-скрипт не копируется в payload."
     },
     {
       "path": "server/scripts/deepseekRunner.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Runner DeepSeek отложен."
+      "fate": "helper",
+      "detail": "Собранный Factory helper; source shell пути поддерживают совместимые staging wrappers."
     },
     {
       "path": "server/scripts/deepseekRuntimeInfo.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "RuntimeInfo DeepSeek отложен."
+      "fate": "helper",
+      "detail": "Собранный Factory helper; source shell пути поддерживают совместимые staging wrappers."
     },
     {
       "path": "server/scripts/deepseekStatusMcp.mts",
       "kind": "file",
       "expect": "source",
       "owner": "deepseek-plan",
-      "fate": "deferred-deepseek",
-      "detail": "Status MCP DeepSeek отложен."
+      "fate": "helper",
+      "detail": "Собранный Factory helper; source shell пути поддерживают совместимые staging wrappers."
     },
     {
       "path": "server/scripts/prepareDeepSeekRuntime.mts",

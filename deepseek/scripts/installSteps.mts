@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import type { BigIntStats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -10,7 +9,7 @@ import {
   decodeDeepSeekRuntimeInfo,
   type DeepSeekRuntimeInfo,
 } from '../../shared/chat/deepSeekBinary.ts';
-import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
+import { acquireInstallLock, assertInstallFileUnchanged } from '../../shared/node/binaryInstall.ts';
 import { syncDirectory } from '../../shared/node/files.ts';
 import { assertDeepSeekGlmApiAdmission } from '../../shared/node/glmCompatibility.ts';
 import { sha256File } from '../../shared/node/hash.ts';
@@ -18,6 +17,10 @@ import { copyInstallCandidate, removeInstallStage } from './installFiles.mts';
 import { approveInstall, previousInstall, savePrevious } from './installOwnership.mts';
 
 const run = promisify(execFile);
+const snapshotPolicy = {
+  invalid: () => new Error('Проверенная копия DeepSeek изменилась во время проб'),
+  fields: ['ino', 'size', 'mode', 'mtimeNs', 'ctimeNs'],
+};
 
 export interface InstallOptions {
   binary: string;
@@ -88,21 +91,6 @@ async function checkCandidate(binary: string, stage: string, hostFile: string): 
 }
 
 /**
- * Хэш и lstat связывают публикацию с закрытой копией до первого запуска probes.
- * Проверка повторяется после любых запусков старого ELF и подготовки резервной копии.
- */
-async function assertCandidateUnchanged(binary: string, stamp: BigIntStats, digest: string): Promise<void> {
-  const checked = await fs.lstat(binary, { bigint: true });
-
-  if (!checked.isFile() || (checked.mode & 0o777n) !== 0o555n
-    || ['ino', 'size', 'mode', 'mtimeNs', 'ctimeNs'].some((field) =>
-      Reflect.get(checked, field) !== Reflect.get(stamp, field))
-    || await sha256File(binary) !== digest) {
-    throw new Error('Проверенная копия DeepSeek изменилась во время проб');
-  }
-}
-
-/**
  * Установка проверяет отдельную копию до изменения команды потребителя.
  * Атомарный rename публикует ровно те байты, чьи пробы завершились успешно.
  */
@@ -118,7 +106,7 @@ export async function installBinary(
 
   const parent = await fs.realpath(path.dirname(options.target));
   const target = path.join(parent, path.basename(options.target));
-  const lock = await acquireDirectoryLock(`${target}.install-lock`, { waitMs: 120000 });
+  const lock = await acquireInstallLock(target);
   let stage: string | undefined;
 
   try {
@@ -137,7 +125,7 @@ export async function installBinary(
     const digest = await sha256File(staged);
     const info = await checkCandidate(staged, stage, options.hostContract);
 
-    await assertCandidateUnchanged(staged, stamp, digest);
+    await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
 
     const old = await previousInstall(target, stage);
     const oldInfo = old.snapshot
@@ -147,7 +135,7 @@ export async function installBinary(
       : info.journal.read.includes(oldInfo.journal.write) ? 'continues' : 'resets';
     const previous = await savePrevious(old, options.releasesDir);
 
-    await assertCandidateUnchanged(staged, stamp, digest);
+    await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
     await approveInstall(old, digest, stage);
     await (hooks.publish ?? fs.rename)(staged, target);
     await syncDirectory(parent);

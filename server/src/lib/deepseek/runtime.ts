@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
-import { AcpRpcError, createAcpClient, initializeAcp } from '../acp/client.ts';
+import { AcpRpcError, createAcpClient } from '../acp/client.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
@@ -30,7 +30,11 @@ import {
   verifyDeepSeekRuntimeDescriptorAsync,
 } from './runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
-import { acpDeepSeekSettingsRpc, startDeepSeekAcpSettings } from './nativeSettingsRpc.ts';
+import {
+  acpDeepSeekSettingsRpc,
+  initializeDeepSeekAcp,
+  startDeepSeekAcpSettings,
+} from './nativeSettingsRpc.ts';
 import { applyDeepSeekNativeSettings, verifyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 import { spawnDeepSeekBinary, type OwnedDeepSeekBinary } from './binaryProcess.ts';
 import { adoptLegacyChatHome, installedLegacyBuildId } from './legacyCutover.ts';
@@ -674,7 +678,7 @@ export async function runDeepSeekTurn({
   };
 
   try {
-    const initialized = await initializeAcp(client, 10_000);
+    const initialized = await initializeDeepSeekAcp(client, signal);
     const settingsRpc = nativeSettings?.accepted.length
       ? acpDeepSeekSettingsRpc(client, initialized) : undefined;
 

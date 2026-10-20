@@ -65,15 +65,21 @@
 | `lib/errors.ts` | Строковый code, message с fallback и отдельное преобразование Error/String |
 | `lib/delay.ts` | Пауза с отменой самим signal.reason; обычная Node-пауза — node:timers/promises |
 | `lib/text.ts` | UTF-16 границы, лексический порядок, текст unknown, URI и JSON Pointer |
+| `node/payloadCache.ts` | Atomic extraction, package lock, полный verifier и kernel fingerprints; политика marker задаётся адаптером |
+| `node/payloadArchive.ts` | Индекс и потоковая проверка ZIP; error и ZIP ports передаёт пакет |
 | `node/files.ts` | ENOENT→null, временная папка, fsync; read-only modes готового дерева без обхода symlinks |
 | `node/seaBuild.ts` | Имя архива Node, SEA config и потоковая загрузка; инструменты сборки остаются у пакетов |
 | `node/nodeRuntime.ts` | Манифест Node 24, кэш архива с SHA256, `SEA_FUSE`, запрет tracked output и атомарная публикация файла Б24/DeepSeek/посредника/сервера; шаги конкретного сборщика остаются у пакета |
 | `node/seaRuntime.ts` | Проверка готового R без boot: startup для окна, полный хеш для выбора пакета |
-| `node/packagedEnvironment.ts` | Окружение детей SEA: свой Node запасным, Python без pyc, глобальный npm вне R |
+| `runtime/serverBinary.ts` | Чистый decoder публичной metadata одиночного ELF: identity, Node/ABI, capabilities, без приватного индекса |
+| `node/serverBinaryRuntime.ts` | Пробы ELF, prepare/release и удержание preparation при запуске; [контракт launcher](../server/server-binary.md#launcher-ipc-и-кэш) |
+| `node/packagedEnvironment.ts` | Окружение детей SEA: свой Node запасным, Python без pyc, глобальный npm вне R; с готовыми каталогами CLI — общий порядок PATH |
+| `node/userCliPaths.ts` | [Порядок PATH packaged-запуска](../server/server-binary-path.md) и однократный поиск CLI: явный список, умолчания, nvm без shell rc |
 | `node/packageTests.ts` | Выбор *.test.mts и запуск пакетов Б24/DeepSeek через общий сторож памяти |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
+| `node/binaryInstall.ts` | Общий протокол установщиков: O_NOFOLLOW copy/fsync, inode/SHA, uid/mode receipt, approved CAS и target lock; формат ELF, backup и admission задают потребители ([сервер](../server/server-binary-install.md)) |
 | `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, ограниченным ожиданием и своим release |
 | `runtime/nodeVersion.ts` | Общая чистая политика версий Node без чтения процесса вызывающего |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DIRECT_SSH_HOOK_PATH } from '../executors/_directSshPolicy.ts';
+import { helperCommand, runtimeKind } from '../runtimePaths.ts';
+import { shellQuote as quoteShellArgument } from '../../../../shared/lib/shellQuote.ts';
 import {
   DEEPSEEK_BASH_COMMAND_FIELD,
   DEEPSEEK_BASH_TOOL,
@@ -205,7 +207,24 @@ export async function buildLaunchFiles(
     ...(hooks.db ? ['--db'] : []),
     ...(hooks.db && hooks.strictDb ? ['--strict-db'] : []),
   ];
-  const policyCommand = [
+  const policyArgs = [
+    '--tool-name',
+    hooks.bashToolName,
+    '--command-field',
+    DEEPSEEK_BASH_COMMAND_FIELD,
+    ...commandFlags,
+  ];
+  const policyHelper = helperCommand('direct-ssh-policy-hook', policyArgs);
+  const instructionsHelper = helperCommand('deepseek-instructions-hook', [
+    '--root',
+    hooks.instructions.projectRoot,
+    '--cwd',
+    cwd,
+  ]);
+  // Source golden сохраняет прежние bytes/fingerprint; packaged использует свои Node и helpers.
+  // Единый POSIX serializer экранирует каждый аргумент физического runtime отдельно.
+  const policyCommand = runtimeKind() === 'packaged'
+    ? [policyHelper.command, ...policyHelper.args].map(quoteShellArgument).join(' ') : [
     shellQuote(process.execPath),
     shellQuote(DIRECT_SSH_HOOK_PATH),
     '--tool-name',
@@ -214,7 +233,8 @@ export async function buildLaunchFiles(
     DEEPSEEK_BASH_COMMAND_FIELD,
     ...commandFlags,
   ].join(' ');
-  const instructionsCommand = [
+  const instructionsCommand = runtimeKind() === 'packaged'
+    ? [instructionsHelper.command, ...instructionsHelper.args].map(quoteShellArgument).join(' ') : [
     shellQuote(process.execPath),
     shellQuote(INSTRUCTIONS_HOOK_PATH),
     '--root',

@@ -20,6 +20,26 @@
       "path": "shared/runtime/legacyBrand.ts",
       "helper": "legacy-brand",
       "kind": "library"
+    },
+    {
+      "path": "server/scripts/deepseekRunner.mts",
+      "helper": "deepseek-runner",
+      "kind": "script"
+    },
+    {
+      "path": "server/scripts/deepseekRuntimeInfo.mts",
+      "helper": "deepseek-runtime-info",
+      "kind": "script"
+    },
+    {
+      "path": "server/scripts/glmRunner.mts",
+      "helper": "glm-runner",
+      "kind": "script"
+    },
+    {
+      "path": "server/scripts/glmRuntimeInfo.mts",
+      "helper": "glm-runtime-info",
+      "kind": "script"
     }
   ]
 }

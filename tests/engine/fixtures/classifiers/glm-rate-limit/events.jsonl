@@ -1,0 +1,3 @@
+{"event":"glm_start","mode":"read-only","model":"[\"zai\",\"glm-5.3\"]"}
+{"event":"session_created"}
+{"event":"wrapper_error","code":"glm_turn_failed","message":"GLM: 429 Too Many Requests"}

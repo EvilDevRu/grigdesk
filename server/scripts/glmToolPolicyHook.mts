@@ -4,6 +4,7 @@
 // который DSH публикует в событии hook/result. Аргументы вызова в stderr не попадают.
 import { readFileSync } from 'node:fs';
 
+import { decideGlmFactoryTool, parseGlmFactoryToolPolicy } from '../src/lib/glm/factoryPolicy.ts';
 import { decideGlmTool, glmArgumentsHash, parseGlmToolPolicy } from '../src/lib/glm/policy.ts';
 
 /**
@@ -47,7 +48,12 @@ if (!policyFile) {
   deny('не задана политика запуска');
 }
 
-const policy = parseGlmToolPolicy(JSON.parse(readFileSync(policyFile!, 'utf8')));
+const document = JSON.parse(readFileSync(policyFile!, 'utf8')) as unknown;
+// Потребитель различается до разбора: у чата прежний JSON без consumer, у этапа фабрики
+// строгий документ; любой отказ parser ловит fail-closed обработчик выше (exit 2).
+const factoryPolicy = document && typeof document === 'object' && Object.hasOwn(document, 'consumer')
+  ? parseGlmFactoryToolPolicy(document) : null;
+const policy = factoryPolicy ? null : parseGlmToolPolicy(document);
 const payload = JSON.parse(await stdin()) as Record<string, unknown> | null;
 
 if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -70,7 +76,8 @@ if (payload!.hook_event_name !== 'PreToolUse' || typeof payload!.tool_name !== '
 }
 
 const name = String(payload!.tool_name);
-const decision = decideGlmTool(name, payload!.tool_input, policy);
+const decision = factoryPolicy ? decideGlmFactoryTool(name, payload!.tool_input, factoryPolicy)
+  : decideGlmTool(name, payload!.tool_input, policy!);
 
 report({
   event: 'PreToolUse',

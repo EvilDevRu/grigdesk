@@ -27,21 +27,23 @@ export function glmMcpServerNameAllowed(name: string): boolean {
 }
 
 /**
- * Какие MCP получает процесс GLM: только служебный grigdesk-work от чата. Проектные серверы
- * в эту поставку не входят (DSH не спрашивает approval для MCP), каждый — с предупреждением.
+ * Какие MCP получает процесс GLM: только служебный сервер хоста — grigdesk-work чата либо
+ * статус этапа фабрики. Проектные серверы в поставку не входят, каждый — с предупреждением.
  */
 export function selectGlmMcpServers({
   chat,
   project,
+  hostServer = GLM_WORK_SERVER_NAME,
 }: {
   chat: readonly GlmMcpServer[];
   project: readonly GlmMcpServer[];
+  hostServer?: string;
 }) {
   const mounted: GlmMcpServer[] = [];
   const excluded: { name: string; reason: GlmMcpExclusion }[] = [];
 
   for (const server of chat) {
-    if (server.name === GLM_WORK_SERVER_NAME && glmMcpServerNameAllowed(server.name)) {
+    if (server.name === hostServer && glmMcpServerNameAllowed(server.name)) {
       mounted.push(server);
     } else {
       excluded.push({
@@ -54,7 +56,7 @@ export function selectGlmMcpServers({
   for (const server of project) {
     excluded.push({
       name: server.name,
-      reason: server.name === GLM_WORK_SERVER_NAME ? 'reserved'
+      reason: server.name === hostServer ? 'reserved'
         : glmMcpServerNameAllowed(server.name) ? 'project_unsupported' : 'name_invalid',
     });
   }
@@ -90,27 +92,33 @@ export async function glmMcpStatus(config: { rootDir?: string }) {
 }
 
 /**
- * Отказ запуска из-за grigdesk-work: с failOnStartupError DSH завершается до адреса web
- * с диагностикой mcp-client. Остальные сбои запуска остаются сбоем запуска.
+ * Отказ запуска из-за служебного MCP хоста: с failOnStartupError DSH завершается до адреса
+ * web с диагностикой mcp-client. Остальные сбои запуска остаются сбоем запуска.
  */
-export function glmMcpStartupError(text: string): (Error & { code: string }) | null {
-  return /mcp-client\(grigdesk-work\): initial connection or tool synchronization failed/u.test(text)
-    ? glmAccessError('glm_mcp_not_ready', NOT_READY) : null;
+export function glmMcpStartupError(
+  text: string,
+  hostServer = GLM_WORK_SERVER_NAME,
+): (Error & { code: string }) | null {
+  return text.includes(`mcp-client(${hostServer}): initial connection or tool synchronization failed`)
+    ? glmAccessError('glm_mcp_not_ready', hostServer === GLM_WORK_SERVER_NAME ? NOT_READY
+      : `Служебный MCP ${hostServer} не готов или потерян; действие не выполнено.`) : null;
 }
 
 /**
- * Потеря grigdesk-work после готовности: DSH отвечает на вызов ошибкой «Not connected»
+ * Потеря служебного MCP хоста после готовности: DSH отвечает на вызов ошибкой «Not connected»
  * и продолжает ход. Для GLM это остановка хода, а не обычная ошибка инструмента.
  */
 export function glmMcpLossError(
   name: string,
   content: unknown,
   isError: boolean,
+  hostServer = GLM_WORK_SERVER_NAME,
 ): (Error & { code: string }) | null {
-  if (!isError || !name.startsWith(`mcp__${GLM_WORK_SERVER_NAME}__`)) {
+  if (!isError || !name.startsWith(`mcp__${hostServer}__`)) {
     return null;
   }
 
   return /\bNot connected\b|Connection closed/iu.test(JSON.stringify(content ?? ''))
-    ? glmAccessError('glm_mcp_not_ready', NOT_READY) : null;
+    ? glmAccessError('glm_mcp_not_ready', hostServer === GLM_WORK_SERVER_NAME ? NOT_READY
+      : `Служебный MCP ${hostServer} не готов или потерян; действие не выполнено.`) : null;
 }

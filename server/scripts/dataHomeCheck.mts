@@ -1,8 +1,8 @@
 // Проверка запускалок не создаёт данных и не запускает приложение.
 import * as fs from 'node:fs';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { checkDataHome } from '../src/lib/dataHomeBoot.ts';
+import { runtimeInstallationRoot } from '../src/lib/runtimePaths.ts';
 
 const args = process.argv.slice(2);
 
@@ -11,7 +11,7 @@ try {
     throw new Error('Допустим только --code-root <путь>.');
   }
 
-  const codeRoot = args[1] || fileURLToPath(new URL('../../', import.meta.url));
+  const codeRoot = args[1] || runtimeInstallationRoot();
 
   checkDataHome({
     codeRoot,

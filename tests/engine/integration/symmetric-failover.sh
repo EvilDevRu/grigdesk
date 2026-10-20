@@ -49,6 +49,11 @@ fixture_resolve() {
       DISPATCH_RESOLVED_MODEL='["deepseek-official","deepseek-v4-flash"]'
       DISPATCH_FAMILY_FAILOVER=""
       DISPATCH_CREDENTIAL_FINGERPRINT=acct-deepseek ;;
+    glm)
+      DISPATCH_RESOLVED_FAMILY=${requested_family:-default}
+      DISPATCH_RESOLVED_MODEL='["zai","glm-5.3"]'
+      DISPATCH_FAMILY_FAILOVER=""
+      DISPATCH_CREDENTIAL_FINGERPRINT=acct-glm ;;
     *)
       return 4 ;;
   esac
@@ -75,6 +80,7 @@ reset_fixture() {
   breaker_clear codex acct-codex provider "" "" 2>/dev/null || true
   breaker_clear kimi acct-kimi provider "" "" 2>/dev/null || true
   breaker_clear deepseek acct-deepseek provider "" "" 2>/dev/null || true
+  breaker_clear glm acct-glm provider "" "" 2>/dev/null || true
 }
 
 reset_fixture
@@ -274,6 +280,23 @@ for nonswitch in transient context_overflow unknown; do
   dispatcher_run_chain 53 PLAN deepseek codex 200 fixture_resolve fixture_invoke
   assert_rc 1 "$?" "$nonswitch DeepSeek result does not replay the stage"
   assert_eq deepseek "$DISPATCH_RESULT_RUNNER" "$nonswitch remains on DeepSeek"
+done
+
+reset_fixture
+FIXTURE_RESULT[codex]=limited
+FIXTURE_RESULT[glm]=ok
+dispatcher_run_chain 56 PLAN codex glm 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "GLM works as a failover target"
+assert_eq glm "$DISPATCH_RESULT_RUNNER" "limited primary selects GLM"
+
+# GLM classify не выдаёт переключающих классов без live spike: любой отказ остаётся у GLM.
+for nonswitch in transient context_overflow unknown; do
+  reset_fixture
+  FIXTURE_RESULT[glm]=$nonswitch
+  FIXTURE_RESULT[codex]=ok
+  dispatcher_run_chain 57 PLAN glm codex 200 fixture_resolve fixture_invoke
+  assert_rc 1 "$?" "$nonswitch GLM result does not replay the stage"
+  assert_eq glm "$DISPATCH_RESULT_RUNNER" "$nonswitch remains on GLM"
 done
 
 reset_fixture

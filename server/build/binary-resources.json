@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "source": "VERSION",
+      "target": "VERSION",
+      "kind": "file"
+    },
+    {
+      "source": "server/seed/agents",
+      "target": "server/seed/agents",
+      "kind": "dir"
+    },
+    {
+      "source": "engine/bin",
+      "target": "engine/bin",
+      "kind": "dir"
+    },
+    {
+      "source": "engine/lib",
+      "target": "engine/lib",
+      "kind": "dir"
+    },
+    {
+      "source": "schemas/analytics",
+      "target": "schemas/analytics",
+      "kind": "dir"
+    },
+    {
+      "source": "server/build/helpers.json",
+      "target": "server/runtime/helpers/helpers.json",
+      "kind": "file"
+    },
+    {
+      "source": "server/build/esmBridge.cjs",
+      "target": "server/runtime/esmBridge.cjs",
+      "kind": "file"
+    },
+    {
+      "source": "server/requirements-media.txt",
+      "target": "server/requirements-media.txt",
+      "kind": "file"
+    },
+    {
+      "source": "server/requirements-media-cuda.txt",
+      "target": "server/requirements-media-cuda.txt",
+      "kind": "file"
+    },
+    {
+      "source": "server/requirements-showcase-qwen.txt",
+      "target": "server/requirements-showcase-qwen.txt",
+      "kind": "file"
+    },
+    {
+      "source": "server/requirements-showcase-silero.txt",
+      "target": "server/requirements-showcase-silero.txt",
+      "kind": "file"
+    },
+    {
+      "source": "server/requirements-showcase-voice.txt",
+      "target": "server/requirements-showcase-voice.txt",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/analytics/dirfd-helper.py",
+      "target": "server/src/lib/analytics/dirfd-helper.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/media/transcribe.py",
+      "target": "server/src/lib/media/transcribe.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/showcase/voice/piperSynth.py",
+      "target": "server/src/lib/showcase/voice/piperSynth.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/showcase/voice/qwenSynth.py",
+      "target": "server/src/lib/showcase/voice/qwenSynth.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/showcase/voice/sileroSynth.py",
+      "target": "server/src/lib/showcase/voice/sileroSynth.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/speech/cuda-probe.py",
+      "target": "server/src/lib/speech/cuda-probe.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/speech/model-cache-probe.py",
+      "target": "server/src/lib/speech/model-cache-probe.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/speech/model-jobs-worker.py",
+      "target": "server/src/lib/speech/model-jobs-worker.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/speech/stream-worker.py",
+      "target": "server/src/lib/speech/stream-worker.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/lib/speech/warmup-worker.py",
+      "target": "server/src/lib/speech/warmup-worker.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/src/modules/terminal/pty-helper.py",
+      "target": "server/src/modules/terminal/pty-helper.py",
+      "kind": "file"
+    },
+    {
+      "source": "server/deepseek-host-contract.json",
+      "target": "server/deepseek-host-contract.json",
+      "kind": "file"
+    },
+    {
+      "source": "deploy/require-vpn.sh",
+      "target": "deploy/require-vpn.sh",
+      "kind": "file"
+    }
+  ]
+}

@@ -128,7 +128,8 @@ function startOwnServer(runtime: ServerRuntime): ChildProcess {
 const packageDir = app.isPackaged ? path.dirname(process.execPath) : null;
 
 const supervisor = createServerSupervisor({
-  loadRuntime: () => loadServerRuntime({
+  loadRuntime: ({ purpose }) => loadServerRuntime({
+    purpose,
     env: process.env,
     home: os.homedir(),
     deps: runtimeDependencies,
@@ -481,13 +482,14 @@ async function prepare(signal: AbortSignal): Promise<void> {
 
   const stored = await readSettings(settingsFile);
   const loaded = await loadServerRuntime({
+    purpose: 'inspect',
     env: process.env,
     home: os.homedir(),
     deps: runtimeDependencies,
     appDir: packageDir,
     bundledUi: true,
   });
-  const runtime = 'runtime' in loaded ? loaded.runtime : null;
+  const runtime = 'inspection' in loaded ? loaded.inspection : null;
   const argument = originFromArgs(process.argv);
 
   signal.throwIfAborted();

@@ -23,6 +23,8 @@ export interface RuntimePaths {
   node: string;
   execPath: string;
   helperDirectory: string;
+  installationRoot: string;
+  installationBin: string;
 }
 
 export interface HelperEntry {
@@ -85,12 +87,45 @@ export function createRuntimePaths(context: RuntimeBuildContext): RuntimePaths {
       node: context.execPath,
       execPath: context.execPath,
       helperDirectory: path.join(context.root, 'server/runtime/helpers'),
+      installationRoot: context.root,
+      installationBin: path.join(context.root, 'bin'),
+    };
+  }
+
+  if (context.mode === 'payload') {
+    if (!path.isAbsolute(context.bundleFile) || !path.isAbsolute(context.binary)) {
+      throw new Error('Payload требует абсолютные пути bundleFile и binary');
+    }
+
+    const bundleFile = realpathSync(context.bundleFile);
+    const binary = realpathSync(context.binary);
+    const root = path.dirname(path.dirname(bundleFile));
+    const installationBin = path.dirname(binary);
+
+    return {
+      mode: 'payload',
+      kind: 'packaged',
+      root,
+      node: path.join(root, 'runtime/node/bin/node'),
+      execPath: binary,
+      helperDirectory: path.join(root, 'server/runtime/helpers'),
+      installationBin,
+      installationRoot: path.dirname(installationBin),
     };
   }
 
   const root = context.mode === 'sea'
     ? packagedRootFromExecPath(context.execPath)
     : helperRootFromUrl(context.helperUrl);
+  let installationBin = path.join(root, 'bin');
+
+  if (context.mode === 'helper' && context.binary !== undefined) {
+    if (!path.isAbsolute(context.binary)) {
+      throw new Error('Helper требует абсолютный путь серверного binary');
+    }
+
+    installationBin = path.dirname(realpathSync(context.binary));
+  }
 
   return {
     mode: context.mode,
@@ -101,6 +136,8 @@ export function createRuntimePaths(context: RuntimeBuildContext): RuntimePaths {
       ? realpathSync(context.execPath)
       : fileURLToPath(context.helperUrl),
     helperDirectory: path.join(root, 'server/runtime/helpers'),
+    installationBin,
+    installationRoot: path.dirname(installationBin),
   };
 }
 
@@ -243,11 +280,35 @@ export function runtimeKind(): RuntimeKind {
 }
 
 /**
+ * Возвращает режим сборки: source, sea, helper или payload одиночного ELF.
+ * Политики ELF отличают его от прежнего SEA-комплекта только этим режимом.
+ */
+export function runtimeMode(): RuntimeMode {
+  return currentPaths().mode;
+}
+
+/**
  * Возвращает корень текущего дерева или комплекта.
  * Для SEA это физический каталог R, вычисленный от execPath.
  */
 export function runtimeRoot(): string {
   return currentPaths().root;
+}
+
+/**
+ * Корень установки отделён от ресурсов payload, распакованных внутри данных.
+ * Source и прежний SEA сохраняют свой корень без дополнительных настроек.
+ */
+export function runtimeInstallationRoot(): string {
+  return currentPaths().installationRoot;
+}
+
+/**
+ * Внешние команды принадлежат bin установки, а не распакованному payload.
+ * Физический путь ELF закрепляет этот каталог независимо от cwd и ordinary Node.
+ */
+export function runtimeInstallationBin(): string {
+  return currentPaths().installationBin;
 }
 
 /**

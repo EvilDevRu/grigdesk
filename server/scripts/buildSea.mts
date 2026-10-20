@@ -10,13 +10,10 @@ import { nodeArchive } from '../../shared/node/seaBuild.ts';
 import { checkRuntime, writeReleaseManifest } from '../src/lib/releaseManifest.ts';
 import { buildSeaBinary } from './sea/buildSteps.mts';
 import { bundleServer } from './sea/bundle.mts';
-import { writeCompatibility } from './sea/compatibility.mts';
-import { assertRuntimeDependencies, cleanNativeBuilds, collectLicenses, extractRuntime,
-  installDependencies, probeDependencies, runtimeSpecifiers } from './sea/dependencies.mts';
-import { buildHelper, loadHelpers } from './sea/helpers.mts';
+import { collectLicenses } from './sea/dependencies.mts';
 import { createReleaseArchive, parseBuildArgs, publishRelease } from './sea/release.mts';
 import type { BuildArgs } from './sea/release.mts';
-import { copyResources } from './sea/resources.mts';
+import { prepareRelease } from './sea/prepare.mts';
 import { smokeRelease } from './sea/smoke.mts';
 import { auditStage, normalizeStageModes } from './sea/stage.mts';
 
@@ -100,46 +97,15 @@ export async function buildRelease(options: BuildArgs) {
       outDir: options.outDir,
       name: `grigdesk-server-${version}-linux-x64`,
       prepare: async (directory) => {
-        process.stdout.write('SEA: runtime и production dependencies\n');
-        assertRuntimeDependencies(await json('server/package.json'), await runtimeSpecifiers(
-          sourceRoot, ['server/src', 'shared/runtime'],
-        ));
-        await extractRuntime({
+        const { helpers, dependencies } = await prepareRelease({
+          sourceRoot,
+          directory,
           archive,
           runtime,
-          target: path.join(directory, 'runtime/node'),
+          cacheDir: options.cacheDir,
+          work,
         });
-        await installDependencies({
-          sourceRoot,
-          stageRoot: directory,
-          cacheDir: path.resolve(
-            process.env.npm_config_cache ?? path.join(options.cacheDir, 'npm'),
-          ),
-        });
-        await cleanNativeBuilds(directory);
 
-        const dependencies = await probeDependencies(directory);
-
-        if (dependencies.node !== runtime.version || dependencies.abi !== '137') {
-          throw new Error(`Неверный runtime dependencies: ${JSON.stringify(dependencies)}`);
-        }
-
-        await copyResources(sourceRoot, directory, await json('server/build/resources.json'));
-
-        const helpers = await loadHelpers(path.join(sourceRoot, 'server/build/helpers.json'), sourceRoot);
-
-        for (const helper of helpers.helpers) {
-          process.stdout.write(`SEA: helper ${helper.id}\n`);
-          await buildHelper({
-            manifest: helpers,
-            id: helper.id,
-            root: sourceRoot,
-            outDir: path.join(directory, 'server/runtime/helpers'),
-            workDir: path.join(work, 'helpers'),
-          });
-        }
-
-        await writeCompatibility(directory, await json('server/build/compatibility.json'), helpers);
         await buildCli(directory, options.cacheDir);
         process.stdout.write('SEA: CJS, blob и postject\n');
         await buildSeaBinary({

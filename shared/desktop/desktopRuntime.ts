@@ -12,6 +12,12 @@ export type RuntimeDescriptor = {
   kind: 'sea';
   root: string;
   home: string;
+} | {
+  version: 4;
+  kind: 'binary';
+  binary: string;
+  home: string;
+  cliPaths: string[];
 };
 
 export type EnvMap = Record<string, string | undefined>;
@@ -47,6 +53,25 @@ export function parseRuntimeDescriptor(text: string): RuntimeDescriptor | null {
   const descriptor = value as Record<string, unknown>;
 
   const version = descriptor.version;
+
+  if (version === 4) {
+    const absolute = (value: unknown): value is string => typeof value === 'string'
+      && value.startsWith('/') && !value.includes('\0');
+
+    if (Object.keys(descriptor).length !== 5 || descriptor.kind !== 'binary'
+      || !absolute(descriptor.binary) || !absolute(descriptor.home)
+      || !Array.isArray(descriptor.cliPaths) || !descriptor.cliPaths.every(absolute)) {
+      return null;
+    }
+
+    return {
+      version,
+      kind: 'binary',
+      binary: descriptor.binary,
+      home: descriptor.home,
+      cliPaths: descriptor.cliPaths,
+    };
+  }
 
   if (version === 3) {
     if (Object.keys(descriptor).length !== 4 || descriptor.kind !== 'sea'

@@ -12,10 +12,13 @@ export interface ChildHandle {
   kill(signal: 'SIGTERM' | 'SIGKILL'): boolean;
   once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   once(event: 'error', listener: (error: Error) => void): unknown;
+  on?(event: 'message', listener: (message: unknown) => void): unknown;
+  off?(event: 'message', listener: (message: unknown) => void): unknown;
 }
 
 export interface SupervisorAdapters {
-  loadRuntime(): Promise<{ runtime: ServerRuntime } | { problem: string; message: string }>;
+  loadRuntime(input: { purpose: 'start' }):
+    Promise<{ runtime: ServerRuntime } | { problem: string; message: string }>;
   probe(signal: AbortSignal): Promise<GrigDeskProbe>;
   unitState(signal: AbortSignal): Promise<string>;
   runGate(runtime: ServerRuntime, signal: AbortSignal): Promise<{ code: number; lastLine: string }>;
@@ -43,6 +46,8 @@ interface OwnedChild {
   handle: ChildHandle;
   runtime: ServerRuntime;
   ended: boolean;
+  adopted: boolean;
+  adoption: Promise<boolean>;
   code: number | null;
   signal: NodeJS.Signals | null;
   exited: Promise<void>;
@@ -196,15 +201,47 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     const exited = new Promise<void>((resolve) => {
       completeExit = resolve;
     });
+    let completeAdoption: (accepted: boolean) => void = () => {};
+    const adoption = new Promise<boolean>((resolve) => {
+      completeAdoption = resolve;
+    });
+    const preparation = runtime.preparation;
     const child: OwnedChild = {
       handle,
       runtime,
       ended: false,
+      adopted: !preparation?.token,
+      adoption,
       code: null,
       signal: null,
       exited,
       termination: null,
     };
+
+    /**
+     * ACK принимается только от наблюдаемого child и с точными token/packageId.
+     * Событие spawn и HTTP readiness не доказывают принятие server lease launcher-ом.
+     */
+    function adopted(message: unknown): void {
+      const value = message as Record<string, unknown> | null;
+
+      if (child.ended || !preparation?.token || !value || typeof value !== 'object'
+        || Object.keys(value).sort().join(',') !== 'packageId,token,type'
+        || value.type !== 'grigdesk:preparation-adopted'
+        || value.token !== preparation.token || value.packageId !== preparation.packageId) {
+        return;
+      }
+
+      child.adopted = true;
+      handle.off?.('message', adopted);
+      completeAdoption(true);
+    }
+
+    if (preparation?.token) {
+      handle.on?.('message', adopted);
+    } else {
+      completeAdoption(true);
+    }
 
     current = child;
     ownership = 'owned';
@@ -220,6 +257,8 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       }
 
       child.ended = true;
+      handle.off?.('message', adopted);
+      completeAdoption(false);
       child.code = code;
       child.signal = signal;
       completeExit();
@@ -301,6 +340,42 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
   }
 
   /**
+   * Подтверждение передачи ограничено общим сроком и отдельным бюджетом ACK.
+   * При отмене protection остаётся до завершения собственного ребёнка в finally.
+   */
+  async function waitAdoption(child: OwnedChild, input: EnsureInput): Promise<void> {
+    if (child.adopted) {
+      return;
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort = () => {};
+    const cancelled = new Promise<boolean>((resolve) => {
+      onAbort = () => resolve(false);
+      input.signal.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(() => resolve(false), Math.max(0,
+        Math.min(10000, input.deadline - adapters.now())));
+
+      if (input.signal.aborted) {
+        onAbort();
+      }
+    });
+
+    try {
+      const accepted = await Promise.race([child.adoption, cancelled]);
+
+      check(input);
+
+      if (!accepted) {
+        throw new Error('Сервер не подтвердил передачу preparation: ACK launcher не получен.');
+      }
+    } finally {
+      clearTimeout(timer);
+      input.signal.removeEventListener('abort', onAbort);
+    }
+  }
+
+  /**
    * Проходит проверки заново после ожидания службы или VPN и непосредственно перед spawn.
    * Runtime читается только при необходимости своего запуска, внешнему серверу установка не нужна.
    */
@@ -317,48 +392,67 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
         continue;
       }
 
-      const loaded = await adapters.loadRuntime();
+      const loaded = await adapters.loadRuntime({ purpose: 'start' });
 
-      check(input);
+      const runtime = 'runtime' in loaded ? loaded.runtime : null;
+      let spawned: OwnedChild | null = null;
 
-      if ('problem' in loaded) {
-        throw new Error(loaded.message);
-      }
+      try {
+        check(input);
 
-      const runtime = loaded.runtime;
+        if (!runtime) {
+          throw new Error('problem' in loaded ? loaded.message : 'Сервер не подготовлен.');
+        }
 
-      if (input.origin !== runtime.origin) {
-        throw new Error(`Окно открыто для ${input.origin}, а установка слушает порт ${runtime.port}:`
-          + ' автозапуск невозможен.');
-      }
+        if (input.origin !== runtime.origin) {
+          throw new Error(`Окно открыто для ${input.origin}, а установка слушает порт ${runtime.port}:`
+            + ' автозапуск невозможен.');
+        }
 
-      const gate = await adapters.runGate(runtime, input.signal);
+        const gate = await adapters.runGate(runtime, input.signal);
 
-      if (gate.code !== 0) {
-        // Строки скрипта ворот уже начинаются с «VPN-ворота:», префикс не дублируется.
-        waitReason = gate.lastLine.startsWith('VPN-ворота') ? gate.lastLine : `VPN-ворота: ${gate.lastLine}`;
-        await sleep(5000, input);
-        continue;
-      }
+        if (gate.code !== 0) {
+          // Строки скрипта ворот уже начинаются с «VPN-ворота:», префикс не дублируется.
+          waitReason = gate.lastLine.startsWith('VPN-ворота')
+            ? gate.lastLine : `VPN-ворота: ${gate.lastLine}`;
+          await sleep(5000, input);
+          continue;
+        }
 
-      check(input);
+        check(input);
 
-      const repeated = await decision(input);
+        const repeated = await decision(input);
 
-      if (connectedOrConflict(repeated, input)) {
+        if (connectedOrConflict(repeated, input)) {
+          return;
+        }
+
+        if (repeated !== 'spawn') {
+          await sleep(500, input);
+          continue;
+        }
+
+        spawned = observe(adapters.spawnServer(runtime), runtime);
+
+        await waitAdoption(spawned, input);
+        await runtime.preparation?.release();
+        await waitOwn(spawned, input);
+
         return;
+      } finally {
+        if (spawned && runtime?.preparation?.token && !spawned.adopted && !spawned.ended) {
+          spawned.termination ??= drain(spawned);
+          await spawned.termination;
+
+          if (alive(spawned)) {
+            adapters.log('Не подтверждён выход своего сервера; preparation lease сохранён.');
+
+            throw new Error('Не подтверждён выход своего сервера после отказа ACK.');
+          }
+        }
+
+        await runtime?.preparation?.release();
       }
-
-      if (repeated !== 'spawn') {
-        await sleep(500, input);
-        continue;
-      }
-
-      const child = observe(adapters.spawnServer(runtime), runtime);
-
-      await waitOwn(child, input);
-
-      return;
     }
   }
 

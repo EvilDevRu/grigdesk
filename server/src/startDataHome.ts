@@ -1,14 +1,15 @@
 // Этот импорт обязан завершиться до вычисления config.ts.
 import * as fs from 'node:fs';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
-import { nodeExecutable, runtimeKind } from './lib/runtimePaths.ts';
+import {
+  nodeExecutable, runtimeInstallationRoot, runtimeKind, runtimeRoot,
+} from './lib/runtimePaths.ts';
 import {
   prepareDataHome, releaseDataHomeLock, processAlive, processStarttime,
 } from './lib/dataHomeBoot.ts';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
+const root = runtimeRoot();
 const owner = {
   pid: process.pid,
   starttime: processStarttime(process.pid) ?? '',
@@ -18,7 +19,7 @@ const owner = {
 
 try {
   const prepared = prepareDataHome({
-    codeRoot: root,
+    codeRoot: runtimeInstallationRoot(),
     home: os.homedir(),
     env: process.env
   }, {

@@ -3,7 +3,8 @@ set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
 missing=0
-for file in lib/runners/claude.sh lib/runners/codex.sh lib/runners/kimi.sh lib/runners/deepseek.sh; do
+for file in lib/runners/claude.sh lib/runners/codex.sh lib/runners/kimi.sh lib/runners/deepseek.sh \
+  lib/runners/glm.sh; do
   if [[ ! -f "$FACTORY_HOME/$file" ]]; then
     test_fail "$file exists" "missing $file"
     missing=1
@@ -20,6 +21,7 @@ runner_registry_add claude "$FACTORY_HOME/lib/runners/claude.sh"
 runner_registry_add codex "$FACTORY_HOME/lib/runners/codex.sh"
 runner_registry_add kimi "$FACTORY_HOME/lib/runners/kimi.sh"
 runner_registry_add deepseek "$FACTORY_HOME/lib/runners/deepseek.sh"
+runner_registry_add glm "$FACTORY_HOME/lib/runners/glm.sh"
 runner_contract_check claude
 assert_rc 0 "$?" "Claude module passes runner contract"
 runner_contract_check codex
@@ -28,6 +30,8 @@ runner_contract_check kimi
 assert_rc 0 "$?" "Kimi module passes runner contract"
 runner_contract_check deepseek
 assert_rc 0 "$?" "DeepSeek module passes runner contract"
+runner_contract_check glm
+assert_rc 0 "$?" "GLM module passes runner contract"
 runner_call claude probe >/dev/null 2>&1
 assert_rc 126 "$?" "Claude probe cannot escape offline executor"
 runner_call codex probe >/dev/null 2>&1
@@ -36,6 +40,8 @@ runner_call kimi probe >/dev/null 2>&1
 assert_rc 126 "$?" "Kimi probe cannot escape offline executor"
 runner_call deepseek probe >/dev/null 2>&1
 assert_rc 126 "$?" "DeepSeek probe cannot escape offline executor"
+runner_call glm probe >/dev/null 2>&1
+assert_rc 126 "$?" "GLM probe cannot escape offline executor"
 
 # Пин проводки: OFFLINE_GUARD в engine/lib/executor.sh пока не знает basename
 # kimi (пункт `kimi|kimi-*` из плана). Тест RED до обновления executor.sh:
@@ -46,7 +52,7 @@ for name in kimi kimi-beta; do
   factory_exec local "$TEST_ROOT/$name" >/dev/null 2>&1
   assert_rc 126 "$?" "$name basename denied even when mislabeled local"
 done
-for name in dsh dsh-beta deepseek deepseek-beta; do
+for name in dsh dsh-beta deepseek deepseek-beta glm glm-beta; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_ROOT/$name"
   chmod +x "$TEST_ROOT/$name"
   factory_exec local "$TEST_ROOT/$name" >/dev/null 2>&1
@@ -96,6 +102,20 @@ materialize_fixture() {
         'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
         >"$target/stderr.log"
       : >"$target/stdout.log" ;;
+    # Логи GLM-fixtures создаются здесь: *.log игнорируется git, а fixture обязана
+    # воспроизводиться из чистого checkout. Текст ошибки остаётся только в stderr.
+    glm-auth-after-work|glm-auth-no-work)
+      printf 'GLM Factory: 401 Unauthorized\n' >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    glm-rate-limit)
+      printf 'GLM Factory: 429 Too Many Requests\n' >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    glm-context-overflow)
+      printf 'GLM Factory: 413 request too large\n' >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    glm-*)
+      : >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
   esac
   printf '%s\n' "$target"
 }
@@ -142,6 +162,21 @@ check_fixture deepseek deepseek-auth-no-work
 check_fixture deepseek deepseek-auth-after-work
 check_fixture deepseek deepseek-truncated
 check_fixture deepseek deepseek-unknown
+check_fixture glm glm-ok
+check_fixture glm glm-timeout
+check_fixture glm glm-auth-after-work
+check_fixture glm glm-auth-no-work
+check_fixture glm glm-rate-limit
+check_fixture glm glm-context-overflow
+check_fixture glm glm-truncated
+check_fixture glm glm-unknown
+
+# Без live-доказанной сигнатуры даже «проверенная» отметка не открывает переключение GLM.
+glm_verified="$TEST_ROOT/glm-verified-auth"
+cp -a "$fixture_root/glm-auth-no-work" "$glm_verified"
+sed -i 's/FIXTURE_VERIFIED=.*/FIXTURE_VERIFIED=1/; s/SOURCE=.*/SOURCE=runtime/' "$glm_verified/meta.env"
+actual=$(runner_call glm classify "$glm_verified" 1)
+assert_eq unknown "$actual" "GLM auth text without a live spike fails closed"
 
 deepseek_unverified="$TEST_ROOT/deepseek-unverified"
 cp -a "$fixture_root/deepseek-auth-no-work" "$deepseek_unverified"

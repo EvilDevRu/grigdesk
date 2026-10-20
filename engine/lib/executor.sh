@@ -22,7 +22,8 @@ factory_exec_check() {
   local executable=${command_name##*/}
   if [[ "${FACTORY_FORBID_LIVE:-0}" == "1" ]]; then
     case "$executable" in
-      claude|claude-*|codex|codex-*|kimi|kimi-*|dsh|dsh-*|deepseek|deepseek-*|gemini|gemini-*|curl|wget|ssh|scp|nc|ncat)
+      claude|claude-*|codex|codex-*|kimi|kimi-*|dsh|dsh-*|deepseek|deepseek-*|glm|glm-*|gemini|gemini-*|\
+      curl|wget|ssh|scp|nc|ncat)
         _factory_exec_log_violation \
           "OFFLINE_GUARD: blocked executable regardless of declared kind: $command_name"
         return 126

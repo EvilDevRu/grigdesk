@@ -285,7 +285,7 @@ test('DW-I3: повторная установка заменяет атомар
   assert.deepEqual(readdirSync(path.dirname(box.destination)), ['grigdesk-app']);
   assert.deepEqual(readdirSync(path.dirname(box.runtime)).sort(),
     ['data-home', 'runtime-version', 'runtime.json']);
-  assert.equal(readFileSync(path.join(path.dirname(box.runtime), 'runtime-version'), 'utf8'), '3\n');
+  assert.equal(readFileSync(path.join(path.dirname(box.runtime), 'runtime-version'), 'utf8'), '4\n');
   assert.equal(box.run('remove').status, 0);
   assert.equal(existsSync(box.marker), false);
 });
@@ -564,7 +564,8 @@ function serverInstaller(t, {
   for (const file of ['deploy/install.sh', 'deploy/grigdesk-server.service', 'deploy/lib/b24-cli.sh',
     'deploy/lib/install-choices.sh', 'deploy/lib/runtime-env.sh', 'shared/runtime/dataHome.ts',
     'shared/package.json', 'shared/runtime/legacyBrand.ts',
-    'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts']) {
+    'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts',
+    'server/src/lib/runtimePaths.ts', 'server/src/lib/runtimeBuildContext.ts']) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     copyFileSync(path.join(repository, file), path.join(root, file));
   }

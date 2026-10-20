@@ -1,3 +1,15 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+import { dataPath } from '../../../shared/runtime/dataHome.ts';
+import { PACKAGE_ID, runtimeError } from '../binary/leases.ts';
+import {
+  reserveFactoryRuntime,
+  resolveFactoryRuntimePin,
+  type FactoryRuntimeSelection,
+} from './factoryRuntimePins.ts';
+import { helperCommandFor, nodeExecutable, readHelperCatalog, runtimeMode } from './runtimePaths.ts';
+
 import { config as runtimeConfig } from '../config.ts';
 
 // Аргументы transient-юнита route-оркестратора (resume после ворот и после возврата).
@@ -44,5 +56,155 @@ export function factoryLaunchEnv(
     FACTORY_STATE: config.stateDir,
     STATE_DIR: config.stateDir,
     FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
+  };
+}
+
+export interface FactoryRouteLaunchPaths extends FactoryLaunchPaths {
+  rootDir: string;
+  factoryBin: string;
+  factoryControlDir: string;
+  runtime?: FactoryRuntimeSelection & { cacheDir: string };
+  runtimeNode?: string;
+  runtimeHostEnv?: Record<string, string>;
+}
+
+/**
+ * Команда helper-а строится по каталогу выбранного A, а не по текущему процессу B.
+ * Таким образом его Node, ресурсы и движок принадлежат одному закреплённому runtime.
+ */
+function selectedRuntimeHelper(runtime: FactoryRuntimeSelection) {
+  const packaged = runtime.packageId !== null;
+  const helperDirectory = path.join(runtime.runtimeRoot, 'server/runtime/helpers');
+  const catalog = readHelperCatalog(packaged ? path.join(helperDirectory, 'helpers.json')
+    : path.join(runtime.runtimeRoot, 'server/build/helpers.json'));
+
+  return helperCommandFor({
+    mode: packaged ? 'helper' : 'source',
+    kind: packaged ? 'packaged' : 'source',
+    root: runtime.runtimeRoot,
+    node: runtime.node,
+    execPath: runtime.node,
+    helperDirectory,
+    installationRoot: runtime.runtimeRoot,
+    installationBin: path.join(runtime.runtimeRoot, 'bin'),
+  }, catalog, 'factory-runtime-pin', []);
+}
+
+/**
+ * До engine spawn выбирается pin существующей попытки либо reservation нового start.
+ * Административные команды и прежние source/v3 без host context сохраняют свой запуск.
+ */
+export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPaths>(config: T, args: string[])
+  : Promise<{
+    config: T;
+    command: string;
+    args: string[];
+  }> {
+  const raw = {
+    config,
+    command: config.factoryBin,
+    args,
+  };
+  const task = args[0] ?? '';
+  const action = args[1] ?? '';
+
+  if (!/^[1-9][0-9]{0,18}$/u.test(task)) {
+    return raw;
+  }
+
+  const attemptIndex = args.indexOf('--attempt');
+  const attempt = attemptIndex >= 0 ? args[attemptIndex + 1] ?? '' : '';
+  const profile = args[args.indexOf('--profile') + 1] ?? '';
+  const context = config.runtime ?? (runtimeMode() === 'payload' ? {
+    cacheDir: path.dirname(path.dirname(config.rootDir)),
+    packageId: path.basename(config.rootDir),
+    runtimeRoot: config.rootDir,
+    engineHome: config.factoryHome,
+    engineBin: config.factoryBin,
+    node: nodeExecutable(),
+  } : null);
+
+  if (!context && !attempt) {
+    return raw;
+  }
+
+  if (!context && !(await fs.lstat(path.join(config.factoryControlDir,
+    'protocol-v2/tasks', `t${task}`, 'attempts', attempt, 'attempt.json')).catch(() => null))) {
+    return raw;
+  }
+
+  if (!attempt && action !== 'start' && action !== 'recover') {
+    return raw;
+  }
+
+  const roots = {
+    controlRoot: config.factoryControlDir,
+    stateRoot: config.stateDir,
+    profileRoot: config.profilesDir,
+  };
+  const current = context ?? {
+    cacheDir: dataPath(config.dataHome ?? runtimeConfig.dataHome, 'serverRuntime'),
+    packageId: null,
+    runtimeRoot: config.rootDir,
+    engineHome: config.factoryHome,
+    engineBin: config.factoryBin,
+    node: nodeExecutable(),
+  };
+
+  if (current.packageId !== null && !PACKAGE_ID.test(current.packageId)) {
+    throw runtimeError('factory_runtime_pin_invalid');
+  }
+
+  const selected = attempt ? await resolveFactoryRuntimePin({
+    ...roots,
+    task,
+    attempt,
+    profile,
+    current,
+    cacheDir: current.cacheDir,
+  }) : current;
+  const prepared = {
+    ...config,
+    rootDir: selected.runtimeRoot,
+    factoryHome: selected.engineHome,
+    factoryBin: selected.engineBin,
+    runtimeNode: selected.node,
+    runtimeHostEnv: {
+      GRIGDESK_SERVER_RUNTIME_RESERVATION: '',
+      GRIGDESK_SERVER_RUNTIME_NODE: '',
+      GRIGDESK_SERVER_RUNTIME_PIN_HELPER: '',
+    },
+  };
+
+  if (selected.packageId === null) {
+    return {
+      config: prepared,
+      command: selected.engineBin,
+      args,
+    };
+  }
+
+  const helper = selectedRuntimeHelper(selected);
+
+  if (!attempt) {
+    const reservation = await reserveFactoryRuntime({
+      ...roots,
+      ...selected,
+      task,
+      cacheDir: current.cacheDir,
+    });
+
+    prepared.runtimeHostEnv = {
+      GRIGDESK_SERVER_RUNTIME_RESERVATION: reservation.reservation,
+      GRIGDESK_SERVER_RUNTIME_NODE: helper.command,
+      GRIGDESK_SERVER_RUNTIME_PIN_HELPER: helper.args[0]!,
+    };
+  }
+
+  return {
+    config: prepared,
+    command: helper.command,
+    args: [...helper.args, 'run', '--cache-dir', current.cacheDir,
+      '--package-id', selected.packageId, '--engine', selected.engineBin, '--', ...args],
   };
 }

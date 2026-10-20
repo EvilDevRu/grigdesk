@@ -1,8 +1,7 @@
 import os from 'node:os';
 import { dataHome } from '../../shared/runtime/dataHome.ts';
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { DEEPSEEK_DIALECT } from '../src/lib/deepseek/contract.ts';
 import { runDeepSeekTurn } from '../src/lib/deepseek/runtime.ts';
@@ -12,6 +11,18 @@ import type { ExecutorAdapter } from '../src/lib/executors/index.ts';
 import { prepareFactoryNativeSettings } from '../src/lib/executorSettings/factorySettings.ts';
 import { prepareDeepSeekRuntime, preparedDeepSeekRuntime } from '../src/lib/deepseek/preparedRuntime.ts';
 import { deepSeekDistributionMode } from '../src/lib/deepseek/distribution.ts';
+import { isDirectRun } from '../src/lib/helperEntry.ts';
+import { helperCommand, runtimeKind } from '../src/lib/runtimePaths.ts';
+import {
+  emitRunnerEvent as emit,
+  factoryRunIdentity,
+  factoryStatusEnvironment,
+  parseRunnerArguments,
+  readRunnerPrompt,
+  redactRunnerError,
+  validateRunnerPaths,
+  writeRunnerLast,
+} from '../src/lib/factoryProviderRunner.ts';
 
 interface Arguments {
   bin: string;
@@ -28,19 +39,7 @@ interface Arguments {
   cacheDir?: string;
 }
 
-const STATUS_ENV_NAMES = Object.freeze([
-  'FACTORY_RUN_TASK',
-  'FACTORY_RUN_STAGE',
-  'FACTORY_RUN_ID',
-  'FACTORY_RUN_EPOCH',
-  'FACTORY_STATUS_MODE',
-  'FACTORY_STATUS_REQUEST_DIR',
-  'FACTORY_STATE',
-  'STATE_DIR',
-  'FACTORY_STAGE_RESULT_CHECK',
-]);
-
-const STATUS_MCP = fileURLToPath(new URL('./deepseekStatusMcp.mts', import.meta.url));
+const LABEL = 'DeepSeek Factory';
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const MODEL_IDS = new Set([
   '["deepseek-official","deepseek-flash"]',
@@ -50,30 +49,16 @@ const MODEL_IDS = new Set([
 ]);
 const EFFORTS = new Set(['', 'off', 'low', 'high', 'max']);
 
+/**
+ * Общий разбор пар argv, затем DeepSeek-специфичные режим, модель и effort узла.
+ * Сообщения отказов сохраняют прежнюю подпись DeepSeek Factory.
+ */
 function parseArguments(argv: readonly string[]): Arguments {
-  const values = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 2) {
-    const name = argv[index];
-    const value = argv[index + 1];
-    if (!name?.startsWith('--') || value === undefined || value.includes('\0')) {
-      throw new Error('DeepSeek Factory: повреждены аргументы wrapper-а');
-    }
-    if (values.has(name)) throw new Error(`DeepSeek Factory: повторён аргумент ${name}`);
-    values.set(name, value);
-  }
-  const required = (name: string): string => {
-    const value = values.get(name) || '';
-    if (!value) throw new Error(`DeepSeek Factory: не задан ${name}`);
-    return value;
-  };
-  const known = new Set([
+  const { values, required } = parseRunnerArguments(argv, LABEL, [
     '--bin', '--cwd', '--run-dir', '--runtime-home', '--prompt-file',
     '--model', '--effort', '--mode', '--artifact-dir', '--runtime-identity', '--runtime-version',
     '--cache-dir',
   ]);
-  for (const name of values.keys()) {
-    if (!known.has(name)) throw new Error(`DeepSeek Factory: неизвестный аргумент ${name}`);
-  }
   const mode = required('--mode');
   if (mode !== 'read-only' && mode !== 'workspace-write') {
     throw new Error(`DeepSeek Factory: режим не поддерживается: ${mode}`);
@@ -98,77 +83,12 @@ function parseArguments(argv: readonly string[]): Arguments {
   };
 }
 
-function inside(parent: string, child: string): boolean {
-  const relative = path.relative(parent, child);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
-async function validatePaths(args: Arguments): Promise<Arguments> {
-  for (const [name, value] of Object.entries({
-    bin: args.bin,
-    cwd: args.cwd,
-    runDir: args.runDir,
-    runtimeHome: args.runtimeHome,
-    promptFile: args.promptFile,
-    ...(args.cacheDir ? { cacheDir: args.cacheDir } : {}),
-  })) {
-    if (!path.isAbsolute(value)) throw new Error(`DeepSeek Factory: ${name} не абсолютный`);
-  }
-  const [cwd, runDir, bin, promptFile] = await Promise.all([
-    fs.realpath(args.cwd),
-    fs.realpath(args.runDir),
-    fs.realpath(args.bin),
-    fs.realpath(args.promptFile),
-  ]);
-  const promptStat = await fs.lstat(args.promptFile);
-  const binStat = await fs.stat(bin);
-  if (promptStat.isSymbolicLink() || !promptStat.isFile() || (promptStat.mode & 0o077) !== 0) {
-    throw new Error('DeepSeek Factory: prompt-file должен быть private regular file');
-  }
-  if (!binStat.isFile() || (binStat.mode & 0o111) === 0) {
-    throw new Error('DeepSeek Factory: DSH binary не исполняемый файл');
-  }
-  if (!inside(runDir, promptFile) || !inside(runDir, args.runtimeHome)) {
-    throw new Error('DeepSeek Factory: служебные пути вышли из RUN_DIR');
-  }
-  return { ...args, cwd, runDir, bin, promptFile };
-}
-
-function runIdentity(env: NodeJS.ProcessEnv) {
-  const task = String(env.FACTORY_RUN_TASK || '');
-  const stage = String(env.FACTORY_RUN_STAGE || '');
-  const runId = String(env.FACTORY_RUN_ID || '');
-  const epoch = String(env.FACTORY_RUN_EPOCH || '');
-  if (!/^[0-9]+$/.test(task)
-      || !/^[A-Z][A-Z0-9_]*$/.test(stage)
-      || !/^[A-Za-z0-9._-]+$/.test(runId)
-      || !/^[1-9][0-9]*$/.test(epoch)
-      || env.FACTORY_STATUS_MODE !== 'request'
-      || !path.isAbsolute(String(env.FACTORY_STATUS_REQUEST_DIR || ''))) {
-    throw new Error('DeepSeek Factory: server-owned run/status identity повреждена');
-  }
-  return { task, stage, runId, epoch };
-}
-
-function statusEnvironment(env: NodeJS.ProcessEnv): Array<{ name: string; value: string }> {
-  const output: Array<{ name: string; value: string }> = [];
-  for (const name of STATUS_ENV_NAMES) {
-    const value = env[name];
-    if (typeof value === 'string' && value && !value.includes('\0')) output.push({ name, value });
-  }
-  return output;
-}
-
 function textContent(value: unknown): string {
   const content = value as { type?: unknown; text?: unknown } | null;
   if (content?.type === 'text') return String(content.text || '');
   if (!Array.isArray(value)) return '';
   return value.map((entry) => textContent((entry as { content?: unknown })?.content))
     .filter(Boolean).join('\n');
-}
-
-function emit(value: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
 /**
@@ -196,10 +116,7 @@ function emitUpdate(update: DeepSeekUpdate, publish = emit): void {
 }
 
 function safeError(error: unknown): string {
-  let message = String((error as { message?: unknown } | null)?.message || error);
-  const key = process.env.DEEPSEEK_API_KEY;
-  if (key) message = message.replaceAll(key, '<redacted>');
-  return message.slice(0, 8_192);
+  return redactRunnerError(error, [process.env.DEEPSEEK_API_KEY]);
 }
 
 function errorCode(error: unknown, message: string): string {
@@ -208,12 +125,6 @@ function errorCode(error: unknown, message: string): string {
   return /sandbox.{0,40}unavailable|SANDBOX_UNAVAILABLE/iu.test(message)
     ? 'sandbox_unavailable'
     : 'deepseek_wrapper_error';
-}
-
-async function writeLast(runDir: string, text: string): Promise<void> {
-  const target = path.join(runDir, 'last.md');
-  await fs.writeFile(target, text, { mode: 0o600 });
-  await fs.chmod(target, 0o600);
 }
 
 /**
@@ -225,10 +136,12 @@ export async function runDeepSeekFactory(
   env = process.env,
   deps: { runTurn?: typeof runDeepSeekTurn; emit?: typeof emit } = {},
 ): Promise<void> {
-  const args = await validatePaths(parseArguments(argv));
-  const identity = runIdentity(env);
+  const args = await validateRunnerPaths(parseArguments(argv), LABEL);
+  const identity = factoryRunIdentity(env, LABEL);
   const runtimeMode = env.GRIGDESK_DEEPSEEK_RUNTIME_MODE
-    || deepSeekDistributionMode(path.join(ROOT, 'server/deepseek-runtime-contract.json'));
+    || (runtimeKind() === 'packaged'
+      ? 'binary'
+      : deepSeekDistributionMode(path.join(ROOT, 'server/deepseek-runtime-contract.json')));
 
   if (runtimeMode !== 'installed' && runtimeMode !== 'embedded' && runtimeMode !== 'binary') {
     throw new Error('DeepSeek Factory: неизвестный режим runtime');
@@ -265,10 +178,7 @@ export async function runDeepSeekFactory(
       || path.join(dataHome({ env, home: env.HOME || os.homedir() }), 'state/prefs.json'),
   });
   const publish = deps.emit || emit;
-  const prompt = await fs.readFile(args.promptFile, 'utf8');
-  if (Buffer.byteLength(prompt, 'utf8') > 2 * 1024 * 1024) {
-    throw new Error('DeepSeek Factory: prompt превышает 2 MiB');
-  }
+  const prompt = await readRunnerPrompt(args.promptFile, LABEL);
   const controller = new AbortController();
   let interruptedBySignal = false;
   const cancel = () => {
@@ -281,6 +191,7 @@ export async function runDeepSeekFactory(
   publish({ event: 'deepseek_start', dialect: DEEPSEEK_DIALECT, mode: args.mode, model: args.model });
 
   try {
+    const status = helperCommand('factory-status-mcp', []);
     const result = await (deps.runTurn || runDeepSeekTurn)({
       config,
       env,
@@ -297,9 +208,9 @@ export async function runDeepSeekFactory(
       factory: true,
       mcpServers: [{
         name: 'factory-status',
-        command: process.execPath,
-        args: [STATUS_MCP],
-        env: statusEnvironment(env),
+        command: status.command,
+        args: status.args,
+        env: factoryStatusEnvironment(env),
       }],
       onRawUpdate: (update) => emitUpdate(update, publish),
       onSessionCreated: () => publish({ event: 'session_created' }),
@@ -312,7 +223,8 @@ export async function runDeepSeekFactory(
           : {}),
       }),
     });
-    await writeLast(args.runDir, result.reply || (result.stopReason === 'cancelled'
+
+    await writeRunnerLast(args.runDir, result.reply || (result.stopReason === 'cancelled'
       ? '⏹ Ход остановлен.\n'
       : ''));
     // Внешний timeout/stop уже выбрал терминальный исход. ACP может успеть
@@ -335,9 +247,13 @@ export async function runDeepSeekFactory(
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+/**
+ * Явный helper entry вызывает тот же wrapper и сохраняет его catch/emit протокол.
+ * Библиотечный import runDeepSeekFactory сам не начинает ход и не читает argv запуска.
+ */
+export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
-    await runDeepSeekFactory();
+    await runDeepSeekFactory(argv);
   } catch (error) {
     const message = safeError(error);
 
@@ -345,4 +261,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }
+}
+
+if (isDirectRun(import.meta.url)) {
+  void main();
 }

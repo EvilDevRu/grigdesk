@@ -155,3 +155,25 @@ test('ошибка в хвосте большого журнала читает�
 
   assert.match((await f.adapter.getTaskDetail('49')).stall.title, /перегружена/);
 });
+
+test('остановка этапа GLM показывает отказ wrapper-а из mirror и из потока', async (t) => {
+  const f = await fixture(t);
+  const glm = f.meta.replace('RUNNER=codex', 'RUNNER=glm')
+    .replace('MODEL=example-sol', 'MODEL=["zai","glm-5.3"]');
+  const events = path.join(f.runDir, 'events.jsonl');
+
+  await writeFile(path.join(f.runDir, 'meta.env'), `${glm}\nFAILURE_CODE=glm_key_missing\n`
+    + 'FAILURE_MESSAGE=GLM: нет ключа Обычного API\n');
+  assert.match((await f.adapter.getTaskDetail('49')).stall.title, /нет ключа Обычного API/);
+
+  await writeFile(path.join(f.runDir, 'meta.env'), glm);
+  await writeFile(events, `${JSON.stringify({
+    event: 'wrapper_error',
+    code: 'glm_turn_failed',
+    message: 'GLM: сеть оборвалась',
+  })}\n`);
+  assert.match((await f.adapter.getTaskDetail('49')).stall.title, /сеть оборвалась/);
+
+  await writeFile(events, `${JSON.stringify({ type: 'turn.failed', error: { message: capacity } })}\n`);
+  assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /перегружена/);
+});

@@ -7,6 +7,48 @@ SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 CMD="${1:-open}"
 
+# Внешний ELF сам читает раннее окружение и запускает сервер своим Node.
+# Для CLI удерживаем preparation до завершения собранного helper-а, затем освобождаем.
+if [[ -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/grigdesk-server" ]]; then
+  source "$DIR/deploy/lib/runtime-env.sh"
+  grigdesk_select_server_binary "$DIR"
+  trap 'grigdesk_release_binary_preparation' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  case "$CMD" in
+    run)
+      cd "$DIR"
+      exec "$_grigdesk_server_binary" "${@:2}"
+      ;;
+    b24)
+      [[ -f "$DIR/bin/b24" && -x "$DIR/bin/b24" ]] || {
+        echo 'Установите отдельный ELF b24 в bin этой установки.' >&2
+        exit 1
+      }
+      exec "$DIR/bin/b24" "${@:2}"
+      ;;
+    desktop)
+      exec "$DIR/deploy/desktop.sh" "${@:2}"
+      ;;
+    dev|build|deps|mobile|release)
+      help=0
+      for argument in "${@:2}"; do
+        [[ "$argument" != --help && "$argument" != -h ]] || help=1
+      done
+      if [[ "$help" == 0 ]]; then
+        echo "Команда $CMD доступна в установке из исходников." >&2
+        exit 1
+      fi
+      set -- --help
+      ;;
+  esac
+
+  grigdesk_require_node
+  grigdesk_node "$_grigdesk_binary_root/server/runtime/helpers/grigdesk-cli.mjs" "$@"
+  exit $?
+fi
+
 # Готовая поставка запускает собранный CLI своим Node и не ищет исходники.
 # Явные команды разработки требуют checkout, готовые b24/окно сохраняют свои входы.
 if [[ -f "$DIR/release.json" ]]; then

@@ -24,6 +24,9 @@ import {
 } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
 import { assertGlmRuntimeHome, buildGlmChildEnv, glmAccessError, resolveGlmAccess } from './env.ts';
+import { assertGlmFactoryContext } from './factoryContext.ts';
+import type { GlmFactoryTurnContext } from './factoryContext.ts';
+import { GLM_FACTORY_STATUS_SERVER, GLM_FACTORY_STATUS_TOOLS, glmFactoryPolicy } from './factoryPolicy.ts';
 import { assertGlmGenerationAdmission, describeGlmGenerationAsync, glmRuntimeConfig } from './generation.ts';
 import { adoptLegacyGlmHome, glmChatHome, prepareGlmLaunch, startGlmProcess } from './launch.ts';
 import { createGlmTurnGuard } from './permissions.ts';
@@ -61,6 +64,8 @@ export interface GlmTurnOptions {
   signal?: AbortSignal;
   preparedRuntime?: PreparedExecutorRuntime;
   factory?: boolean;
+  // Контекст отвязанного этапа от host-wrapper; без него factory=true отвергается.
+  factoryContext?: GlmFactoryTurnContext;
   workspaceAccess?: unknown;
   untrustedInput?: unknown;
   scopedWorkspace?: unknown;
@@ -137,23 +142,52 @@ function hasToolSteps(steps: readonly ChatStep[]): boolean {
 }
 
 /**
+ * Этап фабрики принимается только с typed context хоста: свежая сессия, единственный
+ * статусный MCP из контекста и файловый режим узла. Чатовые режимы прав сюда не входят.
+ */
+function factoryPreflight(options: GlmTurnOptions) {
+  const factory = assertGlmFactoryContext(options.factoryContext);
+  const policy = glmFactoryPolicy(factory.filesystem);
+
+  if (options.sessionId || options.mcpServers?.length) {
+    throw glmAccessError('glm_factory_context_invalid', 'Этап GLM начинает свою сессию без чужих MCP.');
+  }
+
+  if (options.permissionMode !== undefined && options.permissionMode !== policy.mode) {
+    throw glmAccessError('glm_mode_unsupported', 'Режим прав этапа GLM задаёт только контекст хоста.');
+  }
+
+  return {
+    context: factory,
+    policy,
+  };
+}
+
+/**
  * Предполётная проверка до любого процесса: потребитель, режим, доступ, модель и effort.
  * Возвращает выбранные значения; любой отказ — ошибка с публичным кодом glm_*.
  */
 function preflight(options: GlmTurnOptions, deps: GlmRuntimeDeps) {
-  if (options.factory || options.workspaceAccess || options.untrustedInput || options.scopedWorkspace) {
-    throw glmAccessError('glm_consumer_unsupported', 'GLM работает только в обычном чате.');
+  if (options.workspaceAccess || options.untrustedInput || options.scopedWorkspace
+    || Boolean(options.factory) !== (options.factoryContext !== undefined)) {
+    throw glmAccessError('glm_consumer_unsupported', 'GLM работает только в обычном чате и этапе фабрики.');
   }
 
   if (!options.chatKey || !options.onSessionCreated) {
     throw glmAccessError('glm_consumer_unsupported', 'GLM требует server-owned chatKey и привязку сессии.');
   }
 
-  const mode = chatMode(options.permissionMode);
+  const factory = options.factory ? factoryPreflight(options) : null;
+  const mode = factory ? null : chatMode(options.permissionMode);
   const access = resolveGlmAccess({ env: deps.env, admission: deps.admission });
 
   if (access.reason || !access.mode) {
     throw glmAccessError(access.reason || 'glm_access_mode_missing', 'GLM недоступен: проверь карточку.');
+  }
+
+  // Этап фабрики объявлен только для Обычного API: Coding Plan сюда не подставляется.
+  if (factory && access.mode !== 'api') {
+    throw glmAccessError('glm_factory_mode_unsupported', 'Этап GLM поддерживает только Обычный API.');
   }
 
   const model = modelPair(options.model);
@@ -177,6 +211,7 @@ function preflight(options: GlmTurnOptions, deps: GlmRuntimeDeps) {
 
   return {
     mode,
+    factory,
     accessMode: access.mode,
     model,
     effort,
@@ -259,10 +294,12 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
   const runtimeHome = assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? ''));
   const home = runtime.kind === 'binary' ? glmChatHome(runtimeHome, options.chatKey!)
     : glmChatHome(runtimeHome, identity, options.chatKey!);
+  const factory = selected.factory;
   let sessionId = options.sessionId;
   let journalNote: ChatStep | undefined;
 
-  if (runtime.kind === 'binary') {
+  // У этапа home живёт в RUN_DIR попытки: прежних chat homes для переноса у него нет.
+  if (runtime.kind === 'binary' && !factory) {
     await adoptLegacyGlmHome(runtimeHome, identity, options.chatKey!);
   }
 
@@ -287,7 +324,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     await assertGlmSessionJournal(home, cwd, sessionId);
   }
 
-  const descriptors = (options.workTools as { descriptors?: unknown } | null)?.descriptors;
+  const descriptors = factory ? [] : (options.workTools as { descriptors?: unknown } | null)?.descriptors;
   const workTools = (Array.isArray(descriptors) ? descriptors : [])
     .map((entry) => String(
       recordOrEmpty(entry).name || recordOrEmpty(recordOrEmpty(entry).function).name || ''
@@ -305,12 +342,21 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     accessMode: selected.accessMode,
     model: selected.model,
     transport: 'web',
-    hooks: {
+    // Этап не читает чатовые тумблеры: прямые SSH и клиенты БД закрыты строгой политикой.
+    hooks: factory ? {
+      ssh: true,
+      db: true,
+      strictDb: true,
+    } : {
       ssh: settings.blockDirectSsh !== false,
       db: settings.blockDirectDb === true,
       strictDb: settings.strictUnknownDbClient === true,
     },
-    mcpServers: options.mcpServers,
+    mcpServers: factory ? [factory.context.statusServer] : options.mcpServers,
+    ...(factory ? {
+      factory: { filesystem: factory.context.filesystem },
+      hostServer: GLM_FACTORY_STATUS_SERVER,
+    } : {}),
     workTools,
     modelEndpoint: deps.modelEndpoint,
     egressGuard: deps.egressGuard,
@@ -330,7 +376,15 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     model: selected.model,
     reasoningEffort: selected.effort,
   };
-  const guard = createGlmTurnGuard({ workTools, signal: options.signal });
+  // MCP mount, hook и сторож хода используют один точный inventory этапа.
+  const guard = createGlmTurnGuard({
+    workTools,
+    signal: options.signal,
+    ...(factory ? {
+      rawMcpTools: GLM_FACTORY_STATUS_TOOLS,
+      hostServer: GLM_FACTORY_STATUS_SERVER,
+    } : {}),
+  });
   const ignored = [
     ...(options.attachmentPaths?.length ? ['вложения'] : []),
     ...(options.extraDirs?.length ? ['дополнительные каталоги'] : []),
@@ -379,8 +433,10 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
           throw error;
         }
       },
-      onPermission: options.onPermission,
-      permissionMode: options.permissionMode,
+      // Отвязанный этап не ждёт человека: вопрос и approval получают отказ сразу.
+      onPermission: factory ? async () => ({ allow: false }) : options.onPermission,
+      permissionMode: factory ? factory.policy.mode : options.permissionMode,
+      factory: Boolean(factory),
       onPromptAttempted: () => {
         state.promptAttempted = true;
       },
@@ -391,6 +447,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
         env,
         signal: options.signal,
         spawnProcess: deps.spawn,
+        ...(factory ? { hostServer: GLM_FACTORY_STATUS_SERVER } : {}),
       }),
       variant: {
         labels: LABELS,

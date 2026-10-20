@@ -274,8 +274,14 @@ export async function runtimeSpecifiers(root: string, directories: readonly stri
    * Учитывает пакеты по имени npm, а builtin и относительные пути исключает.
    * Подпуть scoped-пакета относится к его исходной записи dependencies.
    */
-  function record(specifier: string): void {
+  function record(specifier: string, file: string): void {
     if (specifier.startsWith('.') || specifier.startsWith('/') || isBuiltin(specifier)) {
+      return;
+    }
+
+    // Единственный npm adapter launcher встраивается целиком отдельным бандлом.
+    // Исключение привязано к файлу и пакету, остальной server/src остаётся под проверкой.
+    if (path.relative(root, file) === 'server/src/binary/payload.ts' && specifier === 'fflate') {
       return;
     }
 
@@ -288,7 +294,7 @@ export async function runtimeSpecifiers(root: string, directories: readonly stri
    * Находит статические импорты и обычный require/import с литеральным пакетом.
    * Комментарии и строки с похожим текстом не становятся зависимостями.
    */
-  function visit(node: ts.Node): void {
+  function visit(node: ts.Node, file: string): void {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const clause = node.importClause;
       const bindings = clause?.namedBindings;
@@ -297,17 +303,17 @@ export async function runtimeSpecifiers(root: string, directories: readonly stri
         && bindings.elements.every((binding) => binding.isTypeOnly));
 
       if (!onlyTypes) {
-        record(node.moduleSpecifier.text);
+        record(node.moduleSpecifier.text, file);
       }
     }
 
     if (ts.isCallExpression(node) && node.arguments[0] && ts.isStringLiteral(node.arguments[0])
       && (node.expression.kind === ts.SyntaxKind.ImportKeyword
         || ts.isIdentifier(node.expression) && node.expression.text === 'require')) {
-      record(node.arguments[0].text);
+      record(node.arguments[0].text, file);
     }
 
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, file));
   }
 
   /**
@@ -321,7 +327,7 @@ export async function runtimeSpecifiers(root: string, directories: readonly stri
       if (entry.isDirectory() && !['node_modules', '.git', '.cache'].includes(entry.name)) {
         await scan(file);
       } else if (entry.isFile() && /\.[cm]?[jt]s$/.test(entry.name)) {
-        visit(ts.createSourceFile(file, await readFile(file, 'utf8'), ts.ScriptTarget.Latest, true));
+        visit(ts.createSourceFile(file, await readFile(file, 'utf8'), ts.ScriptTarget.Latest, true), file);
       }
     }
   }

@@ -9,11 +9,12 @@ const FALLBACK_PATH = '/usr/local/bin:/usr/bin:/bin';
 export function grigDeskCliPath(
     rootDir: string,
     inheritedPath: string | undefined = process.env.PATH,
+    binDirectory?: string,
 ): string {
     const directories = String(inheritedPath || FALLBACK_PATH).split(path.delimiter);
 
     if (rootDir && path.isAbsolute(rootDir)) {
-        directories.unshift(path.join(rootDir, 'bin'));
+        directories.unshift(binDirectory ?? path.join(rootDir, 'bin'));
     }
 
     return [...new Set(directories)].join(path.delimiter);

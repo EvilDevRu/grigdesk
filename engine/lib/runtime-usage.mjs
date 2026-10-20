@@ -31,7 +31,11 @@ import {
   publishUsageDocument,
 } from '../../server/src/lib/analytics/usageDocument.ts';
 import { ensurePrivateDirectory } from '../../server/src/lib/analytics/durableFs.ts';
-import { inspectCodexFailure, runnerFailureDetail } from '../../server/src/lib/runnerFailure.ts';
+import {
+  inspectCodexFailure,
+  inspectGlmFactoryFailure,
+  runnerFailureDetail,
+} from '../../server/src/lib/runnerFailure.ts';
 
 const EVENTS_READ_FD = 7;
 const EVENTS_WRITE_FD = 8;
@@ -496,12 +500,24 @@ function prepare(contextPath) {
     sourceFingerprint: source.sourceFingerprint,
     observedProviderScope: observedScope(context.provider, source.raw, normalization),
     normalization,
-    failure: context.provider === 'codex' && context.rc !== 0
-      && ![124, 130, 143].includes(context.rc)
-      ? inspectCodexFailure(source.raw.toString('utf8')).failure
-      : null,
+    failure: retainedFailure(context, source.raw.toString('utf8')),
   };
   process.stdout.write(`${canonicalJson(prepared, { bytes: MAX_PREPARED_BYTES })}\n`);
+}
+
+/**
+ * Диагностика остановки читается из того же retained-потока, что и usage: второго
+ * писателя meta.env нет. Таймаут и сигналы прерывания пояснения ошибки не получают.
+ */
+function retainedFailure(context, raw) {
+  if (context.rc === 0 || [124, 130, 143].includes(context.rc)) {
+    return null;
+  }
+  if (context.provider === 'codex') {
+    return inspectCodexFailure(raw).failure;
+  }
+
+  return context.provider === 'glm' ? inspectGlmFactoryFailure(raw) : null;
 }
 
 function invalidate(preparedPath, code) {

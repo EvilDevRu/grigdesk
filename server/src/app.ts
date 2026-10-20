@@ -157,7 +157,7 @@ import { DocumentReader } from './lib/documents/reader.ts';
 
 // npm start и существующий systemd-юнит тоже дают агентам CLI текущей установки.
 // Дочерние процессы наследуют этот PATH независимо от рабочего каталога задачи.
-process.env.PATH = grigDeskCliPath(config.rootDir);
+process.env.PATH = grigDeskCliPath(config.rootDir, process.env.PATH, config.installationBin);
 
 // Общие настройки передаются сервисам из одного хранилища.
 // Чтение не изменяет сохранённые настройки этой установки.

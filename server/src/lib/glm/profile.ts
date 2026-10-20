@@ -6,8 +6,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
 import { buildLaunchFiles } from '../deepseek/profile.ts';
 import type { DeepSeekLaunchFiles, YamlValue } from '../deepseek/profile.ts';
-import { GLM_PROFILE_REVISION, buildGlmRoute } from './contract.ts';
+import { GLM_FACTORY_PROFILE_REVISION, GLM_PROFILE_REVISION, buildGlmRoute } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
+import { glmFactoryPolicy, glmFactoryToolPolicy } from './factoryPolicy.ts';
+import type { GlmFactoryFilesystem } from './factoryPolicy.ts';
+import { helperCommand, runtimeKind } from '../runtimePaths.ts';
+import { shellQuote as quoteShellArgument } from '../../../../shared/lib/shellQuote.ts';
 
 export interface GlmLaunchFilesOptions {
   launchDir: string;
@@ -34,6 +38,12 @@ export interface GlmLaunchFilesOptions {
   // Только тестовая подмена (DI): адрес фейковой модели и плагин запрета внешнего fetch.
   modelEndpoint?: string;
   egressGuard?: string;
+  // Отвязанный этап фабрики: без него профиль чата остаётся прежним байт в байт.
+  factory?: GlmFactoryProfileContext;
+}
+
+export interface GlmFactoryProfileContext {
+  filesystem: GlmFactoryFilesystem;
 }
 
 export const GLM_POLICY_HOOK_PATH = fileURLToPath(
@@ -75,13 +85,19 @@ export function glmLaunchFingerprint({
  * Политику любого инструмента решает server-owned PreToolUse hook с matcher `*`.
  */
 export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promise<DeepSeekLaunchFiles> {
+  // Режим и approval этапа выбирает только проверенная функция политики, до записи файлов.
+  const factory = options.factory ? glmFactoryPolicy(options.factory.filesystem) : null;
   const route = {
     ...buildGlmRoute(options.accessMode),
     ...(options.modelEndpoint ? { baseURL: options.modelEndpoint } : {}),
   } as { [key: string]: YamlValue };
   const defaultModel = { provider: 'zai', model: options.model };
   const policyFile = path.join(path.resolve(options.launchDir), 'glm-policy.json');
-  const policyCommand = [
+  const policyHelper = helperCommand('glm-tool-policy-hook', ['--policy', policyFile]);
+  // Source-сериализация сохраняет обычный chat profile и его fingerprint байт в байт.
+  // В payload команда берётся из каталога, пути и аргументы экранируются общим serializer.
+  const policyCommand = runtimeKind() === 'packaged'
+    ? [policyHelper.command, ...policyHelper.args].map(quoteShellArgument).join(' ') : [
     shellQuote(process.execPath),
     shellQuote(GLM_POLICY_HOOK_PATH),
     '--policy',
@@ -91,8 +107,8 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
     launchDir: options.launchDir,
     cwd: options.cwd,
     workspaceRoot: options.workspaceRoot,
-    mode: 'workspace-write',
-    approval: 'ask',
+    mode: factory?.mode ?? 'workspace-write',
+    approval: factory?.approval ?? 'ask',
     transport: options.transport,
     mcpServers: options.mcpServers,
     nativeSettingsDocument: options.settingsDocument,
@@ -104,7 +120,7 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
       instructions: { projectRoot: options.projectRoot },
     },
   }, {
-    pin: `${DEEPSEEK_PIN.version}\0${GLM_PROFILE_REVISION}`,
+    pin: `${DEEPSEEK_PIN.version}\0${factory ? GLM_FACTORY_PROFILE_REVISION : GLM_PROFILE_REVISION}`,
     rows: [
       { id: 'llm-deepseek', disabled: true },
       { id: 'session-title-llm', disabled: true },
@@ -138,12 +154,15 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
     },
   });
 
-  await fs.writeFile(policyFile, `${JSON.stringify({
+  // Hook различает потребителя по форме документа: у чата прежний JSON без consumer.
+  const policy = options.factory ? glmFactoryToolPolicy(options.factory.filesystem) : {
     workTools: [...options.workTools ?? []],
     ssh: options.hooks.ssh,
     db: options.hooks.db,
     strictDb: options.hooks.strictDb,
-  })}\n`, { mode: 0o600 });
+  };
+
+  await fs.writeFile(policyFile, `${JSON.stringify(policy)}\n`, { mode: 0o600 });
   await fs.chmod(policyFile, 0o600);
 
   return files;

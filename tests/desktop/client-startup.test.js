@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { createClientRuntime } from '../../desktop/src/clientRuntime.ts';
 import { normalizeSettings } from '../../desktop/src/settings.ts';
+import { loadServerRuntime } from '../../desktop/src/runtimeConfig.ts';
 import { temporary } from '../relay/helpers.js';
 
 /**
@@ -123,4 +124,34 @@ test('старт: без локальной установки профиль н
   assert.equal(new URL(origin).port, '47100');
   assert.deepEqual(fixture.saved, []);
   assert.deepEqual(fixture.prepared, []);
+});
+
+test('SB24-main-inspect: загрузка адреса для UI не вызывает prepareBinary', async () => {
+  let calls = 0;
+  const loaded = await loadServerRuntime({
+    purpose: 'inspect',
+    env: {},
+    home: '/fixture/home',
+    deps: {
+      readText: async (file) => file.endsWith('runtime.json') ? JSON.stringify({
+        version: 4,
+        kind: 'binary',
+        binary: '/fixture/bin/grigdesk-server',
+        home: '/fixture/data',
+        cliPaths: [],
+      }) : 'GRIGDESK_PORT=9311\n',
+      exists: async () => false,
+      nodeVersion: async () => null,
+      checkRelease: async () => false,
+      prepareBinary: async () => {
+        calls += 1;
+
+        throw new Error('inspect не должен готовить runtime');
+      },
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(loaded.inspection.origin, 'http://127.0.0.1:9311');
+  assert.equal('runtime' in loaded, false);
 });

@@ -17,6 +17,7 @@ GrigDesk — пульт (запускает `engine/bin/factory`, читает �
 | [../docs/engine/NEW-PROJECT.md](../docs/engine/NEW-PROJECT.md) | как завести конвейер под новый проект — с вопросами, которые надо задать человеку |
 | [../docs/engine/ADDING-RUNNER.md](../docs/engine/ADDING-RUNNER.md) | как добавить нового ИИ-исполнителя (раннера): контракт, TDD-порядок, тесты, live-допуск |
 | [../docs/engine/DEEPSEEK.md](../docs/engine/DEEPSEEK.md) | pinned DeepSeek Harness: ACP, файловые режимы, permissions, Factory status и доказательства live |
+| [../docs/engine/GLM.md](../docs/engine/GLM.md) | GLM на этапах: раннер поверх DSH ELF, допуск Обычного API, fail-closed классификатор |
 | [README.md](README.md) | что это вообще такое и как выглядит для человека |
 
 При работе с локальным `../profiles/<имя>/` сначала прочитай его `README.md`, если файл

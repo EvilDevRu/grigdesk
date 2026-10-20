@@ -152,3 +152,11 @@ test('GE-06: список ключей хоста совпадает с исхо
 
   assert.deepEqual([...HOST_ENV_SUFFIXES], [...found].sort());
 });
+
+// Эти три host-owned значения образуют один неделимый контекст bind новой попытки.
+// Частичный набор отвергается движком до active pointer и первого provider.
+test('GE-runtime-pin: host inventory содержит все поля reservation context', () => {
+  for (const name of ['SERVER_RUNTIME_RESERVATION', 'SERVER_RUNTIME_NODE', 'SERVER_RUNTIME_PIN_HELPER']) {
+    assert.ok(HOST_ENV_SUFFIXES.includes(name));
+  }
+});

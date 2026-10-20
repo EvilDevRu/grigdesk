@@ -34,6 +34,47 @@ test('REVIEW-P1/P5: окно оставляет пакетный Node запас
   assert.equal(env.npm_config_prefix, '/data/fixture/state/npm-global');
 });
 
+test('SB08-desktop: packaged окно строит PATH общим порядком, source-ветка не меняется', () => {
+  const nodeDir = '/fixture/D/runtimes/server/packages/id/runtime/node/bin';
+  const parent = {
+    PATH: `/tmp/.mount_fixture/usr/bin:${nodeDir}:/usr/bin:.:/bin`,
+    APPDIR: '/tmp/.mount_fixture',
+    GRIGDESK_HOME: '/data/fixture',
+  };
+  const env = buildServerEnv({
+    parent,
+    dotenv: {},
+    home: '/home/user',
+    node: `${nodeDir}/node`,
+    sea: true,
+    cli: {
+      installationBin: '/I/bin',
+      explicit: ['/explicit/bin'],
+      saved: ['/saved/node/bin'],
+      defaults: ['/home/user/.local/bin'],
+      discovered: ['/home/user/.nvm/versions/node/v24.21.0/bin'],
+    },
+  });
+
+  assert.deepEqual(env.PATH.split(':'), ['/I/bin', '/explicit/bin', '/saved/node/bin',
+    '/home/user/.local/bin', '/usr/bin', '/bin', '/home/user/.nvm/versions/node/v24.21.0/bin', nodeDir]);
+  assert.equal(env.GRIGDESK_DESKTOP_CHILD, '1');
+  assert.equal(env.npm_config_prefix, '/data/fixture/state/npm-global');
+  assert.equal(buildServerEnv({
+    parent: { PATH: '/usr/bin:/fixture/node/bin:/home/user/.local/bin:/usr/bin' },
+    dotenv: {},
+    node: RUNTIME_DESCRIPTOR.node,
+    home: '/home/user',
+    cli: {
+      installationBin: '/I/bin',
+      explicit: [],
+      saved: [],
+      defaults: [],
+      discovered: ['/nvm/bin'],
+    },
+  }).PATH, EXPECTED_SERVER_PATH);
+});
+
 test('RT-01 путь descriptor: абсолютный XDG_DATA_HOME или домашний каталог', () => {
   const home = '/home/user';
 

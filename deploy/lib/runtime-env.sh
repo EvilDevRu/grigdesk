@@ -5,6 +5,178 @@
 GRIGDESK_MIN_NODE=22.19.0
 _grigdesk_verified_package_root=''
 _grigdesk_packaged_node=''
+_grigdesk_server_binary=''
+_grigdesk_binary_package_id=''
+_grigdesk_binary_root=''
+_grigdesk_preparation_token=''
+_grigdesk_preparation_home=''
+
+# Bootstrap не требует системного Node: Python хоста разбирает только JSON как данные.
+# Закрытая preparation привязывает свой Node к физическому R и текущему bin установки.
+grigdesk_decode_binary_json() {
+  local mode=$1
+  local value=$2
+  local data=${3:-}
+
+  [[ ${#value} -le 65536 ]] || return 1
+  python3 -I -S -c '
+import json, os, re, sys
+
+try:
+    mode, binary, data, text = sys.argv[1:]
+    value = json.loads(text)
+    if not isinstance(value, dict):
+        raise ValueError()
+    package = value.get("packageId", "")
+    if not isinstance(package, str) or not re.fullmatch("[a-f0-9]{64}", package):
+        raise ValueError()
+    if mode == "metadata":
+        for key, expected in [("format", 1), ("hostContract", 1), ("packagingVersion", 2)]:
+            if type(value.get(key)) is not int or value[key] != expected:
+                raise ValueError()
+        if value.get("version") != "0.1.0" or value.get("runtime") != {
+            "node": "24.21.0", "abi": "137", "platform": "linux", "arch": "x64"
+        }:
+            raise ValueError()
+        capabilities = value.get("capabilities")
+        if not isinstance(capabilities, list) or sorted(capabilities) != ["api", "engine", "helpers", "ipc"]:
+            raise ValueError()
+        engine, payload = value.get("engine", {}), value.get("payload", {})
+        if engine.get("protocol") != "route-v2":
+            raise ValueError()
+        for item in [engine.get("sha256"), payload.get("sha256")]:
+            if not isinstance(item, str) or not re.fullmatch("[a-f0-9]{64}", item):
+                raise ValueError()
+        for key in ["size", "entryCount"]:
+            if type(payload.get(key)) is not int or payload[key] < 0:
+                raise ValueError()
+        print(package)
+    elif mode == "ownership":
+        token = value.get("preparationToken", "")
+        if not isinstance(token, str) or not re.fullmatch(
+            "[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}", token
+        ):
+            raise ValueError()
+        print(package, token, sep="\n")
+    else:
+        keys = ["packageId", "root", "node", "engine", "installationBin", "preparationToken"]
+        if sorted(value) != sorted(keys) or any(not isinstance(value[key], str) for key in keys):
+            raise ValueError()
+        if any(any(char in item for char in "\r\n\0") for item in value.values()):
+            raise ValueError()
+        root = os.path.join(data, "runtimes/server/packages", package)
+        if value["root"] != root or os.path.realpath(root) != root:
+            raise ValueError()
+        for key, relative in [("node", "runtime/node/bin/node"), ("engine", "engine/bin/factory")]:
+            item = os.path.join(root, relative)
+            if value[key] != item or os.path.realpath(item) != item:
+                raise ValueError()
+            if not os.path.isfile(item) or not os.access(item, os.X_OK):
+                raise ValueError()
+        if value["installationBin"] != os.path.dirname(binary):
+            raise ValueError()
+        if not re.fullmatch("[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}",
+                            value["preparationToken"]):
+            raise ValueError()
+        print(package, root, value["node"], value["preparationToken"], sep="\n")
+except (ValueError, TypeError, AttributeError):
+    sys.exit(1)
+' "$mode" "$_grigdesk_server_binary" "$data" "$value"
+}
+
+# Наличие внешнего файла выбирает standalone до source и прежнего комплекта.
+# Повреждённый ELF не разрешает fallback; metadata не читает D или файл настроек.
+grigdesk_select_server_binary() {
+  local root=${1:-}
+  local magic metadata package
+
+  if [[ -z "$root" ]]; then
+    root=$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd -P) || return 1
+  fi
+
+  local binary="$root/bin/grigdesk-server"
+  [[ -e "$binary" || -L "$binary" ]] || return 0
+  [[ "$_grigdesk_server_binary" != "$binary" ]] || return 0
+  unset NODE_OPTIONS
+
+  if [[ ! -f "$binary" || -L "$binary" || ! -x "$binary" ]]; then
+    echo 'Нужен обычный исполняемый серверный ELF в bin/grigdesk-server.' >&2
+    return 1
+  fi
+
+  IFS= read -r -N 4 magic < "$binary" || true
+  if [[ "$magic" != $'\x7fELF' ]]; then
+    echo 'Файл bin/grigdesk-server не является ELF.' >&2
+    return 1
+  fi
+
+  _grigdesk_server_binary=$binary
+  if ! metadata=$("$binary" --runtime-info --json) \
+    || ! package=$(grigdesk_decode_binary_json metadata "$metadata"); then
+    echo 'Некорректное описание серверного ELF.' >&2
+    _grigdesk_server_binary=''
+    return 1
+  fi
+
+  _grigdesk_binary_package_id=$package
+}
+
+# Prepare выполняется непосредственно дочерним процессом shell, а не subshell/pipeline.
+# Поэтому lease принадлежит живому потребителю до release после последнего helper-а.
+grigdesk_prepare_binary() {
+  [[ -z "$_grigdesk_preparation_token" ]] || return 0
+  local data output temporary decoded ownership
+  local -a values
+
+  data=$(grigdesk_data_home) || return 1
+  temporary=$(mktemp) || return 1
+  if "$_grigdesk_server_binary" --prepare --json \
+    --expect-package-id "$_grigdesk_binary_package_id" > "$temporary"; then
+    output=$(< "$temporary")
+    rm -f -- "$temporary"
+  else
+    local code=$?
+    rm -f -- "$temporary"
+    return "$code"
+  fi
+
+  if ownership=$(grigdesk_decode_binary_json ownership "$output"); then
+    mapfile -t values <<< "$ownership"
+    if [[ "${values[0]}" == "$_grigdesk_binary_package_id" ]]; then
+      _grigdesk_preparation_token=${values[1]}
+      _grigdesk_preparation_home=$data
+    fi
+  fi
+
+  if ! decoded=$(grigdesk_decode_binary_json preparation "$output" "$data"); then
+    echo 'Некорректный ответ подготовки серверного ELF.' >&2
+    return 1
+  fi
+
+  mapfile -t values <<< "$decoded"
+  if [[ "${values[0]}" != "$_grigdesk_binary_package_id" ]]; then
+    echo 'PackageId подготовки серверного ELF изменился.' >&2
+    return 1
+  fi
+
+  _grigdesk_binary_root=${values[1]}
+  _grigdesk_packaged_node=${values[2]}
+  _grigdesk_preparation_token=${values[3]}
+  _grigdesk_preparation_home=$data
+  export GRIGDESK_SERVER_BINARY=$_grigdesk_server_binary
+  export PYTHONDONTWRITEBYTECODE=1
+}
+
+# CLI и установщик вызывают release в EXIT, включая отказ helper-а и unit-only.
+# Старый packageId передаётся явно: замена ELF на новую сборку не теряет прежний lease.
+grigdesk_release_binary_preparation() {
+  [[ -n "$_grigdesk_preparation_token" ]] || return 0
+
+  GRIGDESK_HOME=$_grigdesk_preparation_home "$_grigdesk_server_binary" \
+    --release-preparation "$_grigdesk_preparation_token" \
+    --package-id "$_grigdesk_binary_package_id" --json >/dev/null || return $?
+  _grigdesk_preparation_token=''
+}
 
 # Вычисляет папку теми же правилами, что shared/runtime/dataHome.ts, без внешних команд.
 # Пустой PATH и set -u допустимы; неверный HOME не превращается в корень диска.
@@ -94,6 +266,12 @@ grigdesk_select_packaged_node() {
   local runtime_root
   runtime_root=$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd -P) || return 1
 
+  grigdesk_select_server_binary "$runtime_root" || return $?
+  if [[ -n "$_grigdesk_server_binary" ]]; then
+    grigdesk_prepare_binary
+    return $?
+  fi
+
   [[ -f "$runtime_root/release.json" ]] || return 0
 
   # Флаги не должны сработать даже во время проверки версии вложенного Node.
@@ -137,7 +315,11 @@ grigdesk_select_packaged_node() {
 grigdesk_server_command() {
   local runtime_root=${1:?корень GrigDesk обязателен}
 
-  if [[ -f "$runtime_root/release.json" ]]; then
+  grigdesk_select_server_binary "$runtime_root" || return $?
+
+  if [[ -n "$_grigdesk_server_binary" ]]; then
+    GRIGDESK_SERVER_COMMAND=("$_grigdesk_server_binary")
+  elif [[ -f "$runtime_root/release.json" ]]; then
     grigdesk_select_packaged_node || return $?
     GRIGDESK_SERVER_COMMAND=("$runtime_root/runtime/node/bin/node" \
       "$runtime_root/server/runtime/helpers/launch-sea-server.mjs")
@@ -192,6 +374,10 @@ grigdesk_load_runtime_env() {
   local brand_module="${BASH_SOURCE[0]%/*}/../../shared/runtime/legacyBrand.ts"
 
   grigdesk_require_node || return 1
+
+  if [[ -n "$_grigdesk_binary_root" ]]; then
+    brand_module="$_grigdesk_binary_root/server/runtime/helpers/legacy-brand.mjs"
+  fi
 
   GRIGDESK_NODE_ENV_ARGS=()
   [[ -f "$env_file" ]] && GRIGDESK_NODE_ENV_ARGS=(--env-file "$env_file")
@@ -248,6 +434,13 @@ grigdesk_require_migrated() {
   local helper_root
   helper_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P) || return 1
   grigdesk_require_node || return 1
+
+  if [[ -n "$_grigdesk_binary_root" ]]; then
+    grigdesk_node "$_grigdesk_binary_root/server/runtime/helpers/data-home-check.mjs" \
+      --code-root "$code_root"
+    return $?
+  fi
+
   grigdesk_node "$helper_root/server/scripts/dataHomeCheck.mts" --code-root "$code_root" || return $?
 }
 

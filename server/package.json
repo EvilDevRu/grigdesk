@@ -6,6 +6,8 @@
   "description": "GrigDesk: API-сервер (Fastify). Host-native, читает состояние фабрики и командует ей.",
   "main": "src/app.ts",
   "scripts": {
+    "build:binary": "node scripts/buildBinary.mts",
+    "install:binary": "node scripts/installBinary.mts",
     "build:sea": "node scripts/buildSea.mts",
     "test:sea": "node scripts/testSea.mts",
     "start": "node src/app.ts",
@@ -54,6 +56,7 @@
     "@types/node": "22.20.1",
     "@types/ws": "8.18.1",
     "esbuild": "0.25.12",
+    "fflate": "0.8.3",
     "postject": "1.0.0-alpha.6",
     "typescript": "5.9.3"
   }

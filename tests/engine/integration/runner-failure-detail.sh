@@ -65,4 +65,63 @@ for scenario in capacity unknown timeout; do
   esac
 done
 
+# GLM: отказ wrapper-а виден человеку из того же retained-потока, класс остаётся unknown.
+glm_module="$TEST_ROOT/glm-fixture.sh"
+cat >"$glm_module" <<'BASH'
+source "$FACTORY_HOME/lib/runners/glm.sh"
+
+runner_glm_run() {
+  printf '%s\n' '{"event":"glm_start","mode":"read-only","model":"[\"zai\",\"glm-5.3\"]"}'
+  case "$2" in
+    key-missing)
+      printf '%s%s\n' '{"event":"wrapper_error","code":"glm_key_missing",' \
+        '"message":"GLM: нет ключа Обычного API"}'
+      ;;
+    hostile-code)
+      printf '%s\n' '{"event":"wrapper_error","code":"bad\ncode","message":"GLM: api_key=leaked-value"}'
+      ;;
+    timeout)
+      printf '%s\n' '{"event":"wrapper_error","code":"glm_turn_failed","message":"GLM: прервано"}'
+      return 124
+      ;;
+  esac
+  return 1
+}
+BASH
+
+runner_registry_add glm "$glm_module"
+export FACTORY_RUNNER_VERSION=9.2.0-grigdesk.fixture
+for scenario in key-missing hostile-code timeout; do
+  epoch=$((epoch + 1))
+  run_dir="$STATE_DIR/logs/runs/t43/CHECK/run-glm-$scenario"
+  runner_launch glm 43 "$scenario" CHECK '["zai","glm-5.3"]' high 5 \
+    "$run_dir" "run-glm-$scenario" "$epoch" fixture-token >/dev/null 2>&1
+  assert_file_exists "$run_dir/meta.env" "GLM $scenario публикует metadata"
+  case "$scenario" in
+    key-missing)
+      assert_eq unknown "$(_run_state_get "$run_dir/meta.env" RESULT_CLASS)" \
+        "отказ wrapper-а GLM не открывает переключение"
+      assert_eq glm_key_missing "$(_run_state_get "$run_dir/meta.env" FAILURE_CODE)" \
+        "машинная причина GLM сохранена"
+      assert_contains "$(_run_state_get "$run_dir/meta.env" FAILURE_DETAIL)" 'нет ключа Обычного API' \
+        "пояснение GLM доходит до карточки остановки"
+      ;;
+    hostile-code)
+      assert_eq unknown "$(_run_state_get "$run_dir/meta.env" FAILURE_CODE)" \
+        "код с переводом строки не становится полем meta.env"
+      if grep -Fq leaked-value "$run_dir/meta.env"; then
+        test_fail "секрет из сообщения wrapper-а не попадает в meta.env" "leaked"
+      else
+        test_ok "секрет из сообщения wrapper-а не попадает в meta.env"
+      fi
+      ;;
+    timeout)
+      assert_eq timeout "$(_run_state_get "$run_dir/meta.env" RESULT_CLASS)" \
+        "timeout GLM имеет приоритет над ошибкой wrapper-а"
+      assert_eq '' "$(_run_state_get "$run_dir/meta.env" FAILURE_DETAIL)" \
+        "timeout GLM не получает пояснение ошибки"
+      ;;
+  esac
+done
+
 finish_tests

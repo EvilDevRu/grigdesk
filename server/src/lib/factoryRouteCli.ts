@@ -19,8 +19,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { config as runtimeConfig } from '../config.ts';
 
-import { factoryUnitArgs } from './factoryLaunch.ts';
+import { factoryUnitArgs, prepareFactoryRouteLaunch } from './factoryLaunch.ts';
+import type { FactoryRuntimeSelection } from './factoryRuntimePins.ts';
 import { grigDeskCliPath } from './cliPath.ts';
+import { parseGlmAccessMode } from './glm/contract.ts';
+import { GLM_ROUTE_KEY_ENV } from './glm/env.ts';
 import { nodeExecutable } from './runtimePaths.ts';
 
 /**
@@ -28,6 +31,38 @@ import { nodeExecutable } from './runtimePaths.ts';
  * Lifecycle-журнал растёт с кругами; 180 секунд дают запас до серверного предела запроса.
  */
 export const ROUTE_DECISION_TIMEOUT_MS = 180_000;
+
+// Модельные ключи, которые этапы получают от сервера: только файлом EnvironmentFile 0600
+// и в detached-ветке — окружением процесса, никогда аргументом systemd-run.
+const ROUTE_SECRET_NAMES = ['DEEPSEEK_API_KEY', 'ZAI_API_KEY'] as const;
+
+// Ключ Coding Plan и служебный ключ маршрута GLM этапам не передаются ни в одной ветке:
+// этап GLM объявлен только для Обычного API.
+const ROUTE_WITHHELD_NAMES = ['ZAI_CODING_API_KEY', GLM_ROUTE_KEY_ENV];
+
+// Имена, которыми владеет хост. Значение из extraEnv их не подменяет, даже если сам
+// хост переменную не задал (необязательные пути не открываются вызывающему).
+const ROUTE_HOST_NAMES = [
+  'PATH',
+  'HOME',
+  'GRIGDESK_HOME',
+  'GRIGDESK_PROVIDER_PREFS_PATH',
+  'GRIGDESK_GLM_API_MODE',
+  'GRIGDESK_DEEPSEEK_NODE_BIN',
+  'GRIGDESK_DEEPSEEK_RUNTIME_MODE',
+  'GRIGDESK_DEEPSEEK_GENERATION_ROOT',
+  'GRIGDESK_DEEPSEEK_ARTIFACT_DIR',
+  'GRIGDESK_DEEPSEEK_CACHE_DIR',
+  'GRIGDESK_DEEPSEEK_BIN',
+  'GRIGDESK_DEEPSEEK_RUNTIME_HOME',
+  'FACTORY_HOME',
+  'FACTORY_PROFILES_DIR',
+  'FACTORY_CONFIG_ROOT',
+  'NODE_BIN',
+  'GRIGDESK_SERVER_RUNTIME_RESERVATION',
+  'GRIGDESK_SERVER_RUNTIME_NODE',
+  'GRIGDESK_SERVER_RUNTIME_PIN_HELPER',
+];
 
 // Пути и бинари, без которых команду движку не собрать.
 export interface RouteConfig {
@@ -37,6 +72,7 @@ export interface RouteConfig {
   factoryControlDir: string;
   factoryBin: string;
   rootDir: string;
+  installationBin?: string;
   factoryHome: string;
   profilesDir: string;
   factoryConfigRoot: string;
@@ -49,6 +85,9 @@ export interface RouteConfig {
   deepseekRuntimeHome?: string;
   prefsPath?: string;
   decisionTimeoutMs?: number;
+  runtime?: FactoryRuntimeSelection & { cacheDir: string };
+  runtimeNode?: string;
+  runtimeHostEnv?: Record<string, string>;
 }
 
 // Кого именно продолжаем: задача, профиль и закреплённая попытка.
@@ -318,6 +357,7 @@ export function startRegistryIdentity(registry: Record<string, string | undefine
  * Окружение прогона. Runtime roots передаются аргументами, здесь остаются только
  * process-level настройки профилей и runner control. Пути от корня GrigDesk выводятся,
  * только если корень известен и абсолютен — как и для PATH; иначе wrapper берёт свои.
+ * Host-owned имена и модельные ключи из extraEnv отбрасываются: ключи едут отдельно.
  */
 export function routeLaunchEnv(
   config: RouteConfig,
@@ -325,13 +365,17 @@ export function routeLaunchEnv(
 ): Record<string, string> {
   const root = config.rootDir && path.isAbsolute(config.rootDir) ? config.rootDir : '';
   const prefsPath = config.prefsPath;
+  const blocked = new Set<string>([...ROUTE_HOST_NAMES, ...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES]);
+  const safeExtra = Object.fromEntries(Object.entries(extra).filter(([name]) => !blocked.has(name)));
 
   return {
-    ...extra,
-    PATH: grigDeskCliPath(config.rootDir),
+    ...safeExtra,
+    PATH: grigDeskCliPath(config.rootDir, process.env.PATH, config.installationBin),
     GRIGDESK_HOME: config.dataHome ?? runtimeConfig.dataHome,
     ...(prefsPath ? { GRIGDESK_PROVIDER_PREFS_PATH: path.resolve(prefsPath) } : {}),
-    GRIGDESK_DEEPSEEK_NODE_BIN: nodeExecutable(),
+    // Режим доступа GLM — явный выбор человека; неизвестное значение этапу не передаётся.
+    GRIGDESK_GLM_API_MODE: parseGlmAccessMode(process.env.GRIGDESK_GLM_API_MODE) ?? '',
+    GRIGDESK_DEEPSEEK_NODE_BIN: config.runtimeNode ?? nodeExecutable(),
     GRIGDESK_DEEPSEEK_RUNTIME_MODE: 'binary',
     GRIGDESK_DEEPSEEK_GENERATION_ROOT: config.deepseekGenerationRoot || '',
     GRIGDESK_DEEPSEEK_ARTIFACT_DIR: config.deepseekArtifactDir || '',
@@ -345,7 +389,37 @@ export function routeLaunchEnv(
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
+    ...(config.runtimeNode ? { NODE_BIN: config.runtimeNode } : {}),
+    ...config.runtimeHostEnv,
   };
+}
+
+/**
+ * Разрешённые модельные ключи сервера для этапов. Перевод строки, CR и NUL отвергаются
+ * до любой записи: иначе значение стало бы новой переменной EnvironmentFile.
+ */
+export function routeSecrets(
+  source: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const secrets: Record<string, string> = {};
+
+  for (const name of ROUTE_SECRET_NAMES) {
+    const value = source[name];
+
+    if (!value) {
+      continue;
+    }
+
+    if (/[\r\n\0]/u.test(value)) {
+      throw Object.assign(new Error(`Ключ ${name} содержит перевод строки или NUL — маршрут не запущен`), {
+        code: 'route_secret_invalid',
+      });
+    }
+
+    secrets[name] = value;
+  }
+
+  return secrets;
 }
 
 /**
@@ -364,16 +438,49 @@ export function stageAutoCompactEnv(
 }
 
 /**
+ * Ошибка выбора закреплённого runtime возвращается до любых engine mutations.
+ * Код и человеческая причина одинаковы у синхронной и transient веток запуска.
+ */
+function runtimeLaunchFailure(error: unknown): RouteFailure {
+  const code = (error as NodeJS.ErrnoException).code ?? 'factory_runtime_pin_invalid';
+
+  return {
+    error: code.startsWith('factory_runtime_') ? code : 'factory_runtime_pin_invalid',
+    message: 'Закреплённый runtime попытки недоступен или несовместим',
+  };
+}
+
+/**
  * Синхронный вызов движка сохраняет код выхода и отдельно отмечает убийство по сроку.
  * При таймауте stderr не объясняет отказ: решение могло уже попасть в журнал.
  */
-export function runRouteEngine(
+export async function runRouteEngine(
   config: RouteConfig,
   args: string[],
   { timeout = 30000 } = {},
 ): Promise<RouteEngineResult> {
+  let prepared;
+
+  try {
+    prepared = await prepareFactoryRouteLaunch(config, args);
+  } catch (error) {
+    const failure = runtimeLaunchFailure(error);
+
+    return {
+      code: 78,
+      ok: false,
+      timedOut: false,
+      stdout: '',
+      stderr: `FACTORY_ERROR=${failure.error}`,
+      message: failure.message,
+      failure,
+    };
+  }
+
+  config = prepared.config;
+
   return new Promise<RouteEngineResult>((resolve) => {
-    execFile(config.factoryBin, args, {
+    execFile(prepared.command, prepared.args, {
       timeout,
       env: { ...process.env, ...routeLaunchEnv(config) },
       maxBuffer: 1024 * 1024,
@@ -440,6 +547,12 @@ export async function readRouteWorkTime(
  */
 export function routeFailure(output: string | null | undefined): RouteFailure | null {
   const text = String(output || '');
+  const pinned = /FACTORY_ERROR=(factory_runtime_[a-z_]+)/u.exec(text);
+
+  if (pinned) {
+    return { error: pinned[1]!, message: 'Закреплённый runtime попытки недоступен или несовместим' };
+  }
+
   const runtime = /FACTORY_ERROR=runtime_changed(?:\s+RUNNERS=([a-z][a-z0-9_,.-]*))?/.exec(text);
 
   if (runtime) {
@@ -660,25 +773,60 @@ export async function confirmRouteResume({
  *
  * Через `--setenv=NAME=VALUE` значение попало бы в argv systemd-run и в `ps`, а форму
  * `--setenv=NAME` без значения systemd 249 не поддерживает. Файл один на все запуски:
- * содержимое у него всегда одно и то же, юнит читает его на старте. Пустые значения
- * пропускаются; без единого секрета файла нет и возвращается null.
+ * содержимое у него всегда одно и то же, юнит читает его на старте. Запись атомарна
+ * (эксклюзивный временный файл и rename), а без единого ключа прежний файл удаляется:
+ * старый секрет не переживает запуск, которому он уже не положен.
  */
 async function writeRouteSecretsFile(
   stateDir: string,
-  secrets: Record<string, string | undefined>,
+  secrets: Record<string, string>,
 ): Promise<string | null> {
+  const file = path.join(stateDir, 'route-secrets.env');
   const lines = Object.entries(secrets)
-    .filter((entry): entry is [string, string] => Boolean(entry[1]))
     .map(([name, value]) => `${name}="${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+
   if (!lines.length) {
+    await fs.rm(file, { force: true });
+
     return null;
   }
 
-  const file = path.join(stateDir, 'route-secrets.env');
+  const temp = path.join(stateDir, `.route-secrets.${process.pid}.${Date.now()}.tmp`);
+
   await fs.mkdir(stateDir, { recursive: true });
-  await fs.writeFile(file, `${lines.join('\n')}\n`, { mode: 0o600 });
-  await fs.chmod(file, 0o600);
+
+  try {
+    await fs.writeFile(temp, `${lines.join('\n')}\n`, { mode: 0o600, flag: 'wx' });
+    await fs.chmod(temp, 0o600);
+    await fs.rename(temp, file);
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+
+    throw error;
+  }
+
   return file;
+}
+
+/**
+ * Окружение detached-ветки: env сервера без модельных ключей и Coding Plan, затем
+ * host-owned маршрут и только разрешённые ключи — тот же набор, что у transient-юнита.
+ */
+function detachedRouteEnv(
+  env: Record<string, string>,
+  secrets: Record<string, string>,
+): Record<string, string | undefined> {
+  const inherited: Record<string, string | undefined> = { ...process.env };
+
+  for (const name of [...ROUTE_SECRET_NAMES, ...ROUTE_WITHHELD_NAMES]) {
+    delete inherited[name];
+  }
+
+  return {
+    ...inherited,
+    ...env,
+    ...secrets,
+  };
 }
 
 export async function spawnRouteEngine(config: RouteConfig, { task, args, extraEnv = {} }: {
@@ -695,10 +843,45 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   failure?: RouteFailure | null;
 }> {
   const logFile = path.join(config.stateDir, `t${task}.launch.log`);
-  await fs.mkdir(config.stateDir, { recursive: true });
   // launch.log переиспользуется задачей. Typed-ошибку разрешено брать только из
   // текущего запуска, иначе старый preflight замаскирует новый несвязанный отказ.
   const logOffset = await logLength(logFile);
+  let secrets: Record<string, string>;
+
+  // Повреждённый ключ — отказ до любой записи и до регистрации юнита.
+  try {
+    secrets = routeSecrets();
+  } catch (error) {
+    return {
+      ok: false,
+      unit: null,
+      logFile,
+      logOffset,
+      message: (error as Error).message,
+    };
+  }
+
+  let prepared;
+
+  try {
+    prepared = await prepareFactoryRouteLaunch(config, args);
+  } catch (error) {
+    const failure = runtimeLaunchFailure(error);
+
+    return {
+      ok: false,
+      unit: null,
+      logFile,
+      logOffset,
+      message: failure.message,
+      failure,
+    };
+  }
+
+  config = prepared.config;
+  args = prepared.args;
+  await fs.mkdir(config.stateDir, { recursive: true });
+
   const env = routeLaunchEnv(config, extraEnv);
   const haveSystemd = await new Promise<boolean>((res) => {
     execFile('systemd-run', ['--version'], (err) => res(!err));
@@ -707,8 +890,10 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   if (!haveSystemd) {
     // Без systemd — полная отвязка: код возврата виден сразу, вывод в тот же журнал.
     const out = await fs.open(logFile, 'a');
-    const child = spawn(config.factoryBin, args, {
-      detached: true, stdio: ['ignore', out.fd, out.fd], env: { ...process.env, ...env },
+    const child = spawn(prepared.command, args, {
+      detached: true,
+      stdio: ['ignore', out.fd, out.fd],
+      env: detachedRouteEnv(env, secrets),
     });
     child.unref();
     const exited = await new Promise<number | null>((res) => {
@@ -733,9 +918,7 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
   }
 
   const unit = routeUnitName(task);
-  const secretsFile = await writeRouteSecretsFile(config.stateDir, {
-    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-  });
+  const secretsFile = await writeRouteSecretsFile(config.stateDir, secrets);
   const argv = [
     ...factoryUnitArgs(task),
     // Без этого отказ движка не оставит следа: у сервиса stdout уходит в журнал
@@ -744,10 +927,10 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
     ...Object.entries(env).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => `--setenv=${k}=${v}`),
     // Секрет едет файлом 0600, а не аргументом: в argv systemd-run его нет. Форма
     // `--setenv=NAME` без значения здесь не годится — systemd 249 (Ubuntu 22.04) её не
-    // знает и отвергает весь юнит как «Invalid environment block». В non-systemd ветке
-    // child и так наследует process.env.
+    // знает и отвергает весь юнит как «Invalid environment block». Non-systemd ветка
+    // получает тот же разрешённый набор ключей окружением отвязанного процесса.
     ...(secretsFile ? [`--property=EnvironmentFile=${secretsFile}`] : []),
-    config.factoryBin, ...args,
+    prepared.command, ...args,
   ];
   const started = await new Promise<{ ok: boolean; message?: string }>((resolve) => {
     execFile('systemd-run', argv, { timeout: 15000 }, (err, stdout, stderr) => {

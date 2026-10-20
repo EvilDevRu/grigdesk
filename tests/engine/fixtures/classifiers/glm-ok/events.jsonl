@@ -1,0 +1,5 @@
+{"event":"glm_start","mode":"read-only","model":"[\"zai\",\"glm-5.3\"]"}
+{"event":"session_created"}
+{"event":"tool_call","name":"read"}
+{"event":"tool_result"}
+{"event":"result","stopReason":"end_turn"}

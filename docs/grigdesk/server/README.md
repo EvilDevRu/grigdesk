@@ -8,6 +8,30 @@
 
 ## Устройство
 
+- [Выбор ELF/R/source и владение preparation в окне](server-binary-desktop.md)
+
+- [Сервер одним ELF: I/D/R, argv, launcher, приёмка и действия владельца](server-binary.md)
+
+- [Установка, private receipt и откат серверного ELF](server-binary-install.md)
+
+- [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
+
+- [Движок поставки и физические профили одиночного ELF](server-binary-factory.md)
+
+- [Factory helpers и полный статусный протокол payload](server-binary-factory-helpers.md)
+
+- [Host hooks DeepSeek и GLM в payload](server-binary-hooks.md)
+
+- [Guard данных и внешние команды payload](server-binary-placement.md)
+
+- [CJS payload и ленивый запуск приложения](server-binary-entry.md)
+
+- [Ресурсы payload и физическая установка сервера](server-binary-paths.md)
+
+- [Кэш payload: marker, leases/pins, продолжение попытки и ручной GC](server-binary-cache.md)
+
+- [Контракт metadata и CLI автономного сервера](server-binary-contract.md)
+
 - [Внешний DeepSeek: опись SEA, обычный Node Factory и граница исходников](sea-deepseek-boundary.md)
 
 - [Привязка полного приложения: строка, QR, срок и повтор потерянного ответа](device-pairing.md)

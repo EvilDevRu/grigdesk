@@ -23,6 +23,8 @@ export interface GlmLaunchOptions extends Omit<GlmLaunchFilesOptions, 'launchDir
   launchDir?: string;
   warn?: (message: string) => void;
   homeLayout?: 'stable' | 'legacy';
+  // Служебный MCP хоста: grigdesk-work чата либо статус этапа фабрики.
+  hostServer?: string;
 }
 
 /**
@@ -78,7 +80,11 @@ export async function prepareGlmLaunch(options: GlmLaunchOptions) {
       : path.join(runtimeHome, options.identity.slice(0, 16), 'turns', randomUUID())));
   const settingsDocument = path.join(dshHome, 'settings.yaml');
   const project = await readProjectMcpServers(options.cwd);
-  const selected = selectGlmMcpServers({ chat: options.mcpServers ?? [], project: project.servers });
+  const selected = selectGlmMcpServers({
+    chat: options.mcpServers ?? [],
+    project: project.servers,
+    ...(options.hostServer ? { hostServer: options.hostServer } : {}),
+  });
 
   for (const warning of selected.warnings) {
     options.warn?.(warning);
@@ -115,6 +121,7 @@ export async function startGlmProcess(options: {
   signal?: AbortSignal;
   spawnProcess?: StartDeepSeekServerOptions['spawnProcess'];
   startServer?: (options: StartDeepSeekServerOptions) => Promise<DeepSeekServerProcess>;
+  hostServer?: string;
 }): Promise<DeepSeekServerProcess> {
   let server: DeepSeekServerProcess;
   let diagnostics = '';
@@ -144,7 +151,7 @@ export async function startGlmProcess(options: {
       await fs.rm(options.launch.launchDir, { recursive: true, force: true });
     }
 
-    throw glmMcpStartupError(diagnostics) ?? error;
+    throw glmMcpStartupError(diagnostics, options.hostServer) ?? error;
   }
 
   let stopped: Promise<void> | null = null;

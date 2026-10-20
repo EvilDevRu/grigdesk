@@ -44,11 +44,17 @@ function descriptorsOf(summary: unknown): Record<string, unknown>[] {
  */
 export function createGlmTurnGuard(options: {
   workTools: readonly string[];
+  // Точные сырые имена host MCP этапа фабрики; у чата — инструменты grigdesk-work.
+  rawMcpTools?: readonly string[];
+  // Служебный сервер хоста, потеря которого останавливает ход.
+  hostServer?: string;
   sessionId?: string;
   signal?: AbortSignal;
   waitMs?: number;
 }) {
-  const workNames = new Set(options.workTools.map((tool) => glmMcpToolName(GLM_WORK_SERVER_NAME, tool)));
+  const workNames = new Set(options.rawMcpTools
+    ?? options.workTools.map((tool) => glmMcpToolName(GLM_WORK_SERVER_NAME, tool)));
+  const hostServer = options.hostServer ?? GLM_WORK_SERVER_NAME;
   const calls = new Map<string, CallRecord>();
   const descriptors = new Map<string, Descriptor>();
   const waitMs = options.waitMs ?? 2000;
@@ -113,7 +119,7 @@ export function createGlmTurnGuard(options: {
 
       const block = content.find((item) => item.toolCallId === id) ?? message;
 
-      return glmMcpLossError(calls.get(id)?.name ?? '', block.content, block.isError === true);
+      return glmMcpLossError(calls.get(id)?.name ?? '', block.content, block.isError === true, hostServer);
     }
 
     return null;

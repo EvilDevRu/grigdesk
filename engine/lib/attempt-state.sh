@@ -698,6 +698,8 @@ _attempt_state_current_absent() {
      ! -e "$current" && ! -L "$current" ]]
 }
 
+# ID генерирует только движок, а immutable final публикуется прежде mutable active pointer.
+# Runtime bind между ними сохраняет reservation при отказе и не допускает первый provider.
 _attempt_state_create_locked() {
   local root=$1 task=$2 profile=$3 routes=$4 origin=$5 previous=$6 recovery=$7
   local expected=${8:-} dispatch=${9:-} runner=${10:-}
@@ -762,6 +764,24 @@ _attempt_state_create_locked() {
     rm -rf -- "$staging"
     return 1
   }
+
+  # Runtime sidecar привязывается после immutable final, но до active pointer.
+  # Ошибка сохраняет orphan directory/reservation и не даёт первому provider стартовать.
+  if [[ -n "${GRIGDESK_SERVER_RUNTIME_RESERVATION:-}" ||
+        -n "${GRIGDESK_SERVER_RUNTIME_NODE:-}" ||
+        -n "${GRIGDESK_SERVER_RUNTIME_PIN_HELPER:-}" ]]; then
+    if [[ "${GRIGDESK_SERVER_RUNTIME_NODE:-}" != /* ||
+          "${GRIGDESK_SERVER_RUNTIME_PIN_HELPER:-}" != /* ||
+          "${GRIGDESK_SERVER_RUNTIME_RESERVATION:-}" != /* ]]; then
+      return 78
+    fi
+
+    _attempt_state_validate_attempt_locked "$root" "$task" "$attempt" >/dev/null || return "$?"
+
+    "$GRIGDESK_SERVER_RUNTIME_NODE" "$GRIGDESK_SERVER_RUNTIME_PIN_HELPER" bind \
+      --reservation "$GRIGDESK_SERVER_RUNTIME_RESERVATION" \
+      --task "$task" --attempt "$attempt" --attempt-dir "$final" || return "$?"
+  fi
 
   pointer_tmp=$(mktemp "$root/.active.XXXXXX") || return 1
   _attempt_state_json make-active "$attempt" "$task" >"$pointer_tmp" || {

@@ -5,7 +5,12 @@ import { open } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 
 import { parsePipeline } from './pipelineParse.ts';
-import { cleanRunnerFailureMessage, inspectCodexFailure, runnerFailureDetail } from './runnerFailure.ts';
+import {
+  cleanRunnerFailureMessage,
+  inspectCodexFailure,
+  inspectGlmFactoryFailure,
+  runnerFailureDetail,
+} from './runnerFailure.ts';
 import type { RunnerFailure } from './runnerFailure.ts';
 import type { StallEvent, StallInfo } from './stall.ts';
 
@@ -82,6 +87,13 @@ async function readRunFile(directory: FileHandle, name: string, tail = false): P
   }
 }
 
+// Раннеры с доказанным разбором терминального отказа в retained-потоке. Остальные
+// остановки сохраняют прежнюю карточку: чужой формат не угадывается.
+const RUNNER_FAILURE_READERS: Record<string, (raw: string) => RunnerFailure | null> = {
+  codex: (raw) => inspectCodexFailure(raw).failure,
+  glm: inspectGlmFactoryFailure,
+};
+
 /**
  * Сверка attempt/run/epoch и временного окна отсеивает ошибку прошлой попытки или визита.
  * Остановленный по таймауту или вручную процесс не наследует старый ответ провайдера.
@@ -101,7 +113,7 @@ function matchingRun(meta: Record<string, string>, input: RunnerStallInput): boo
   return Boolean(expectedAttempt && meta.ATTEMPT_ID === expectedAttempt
     && meta.TASK === `t${input.task}` && meta.STAGE === stage && meta.SOURCE === 'runtime'
     && meta.RUN_ID === registry[`ACTIVE_RUN_${stage}`] && meta.EPOCH === registry[`ACTIVE_EPOCH_${stage}`]
-    && meta.RUNNER === 'codex' && /^-?\d+$/.test(meta.RC || '')
+    && RUNNER_FAILURE_READERS[meta.RUNNER || ''] !== undefined && /^-?\d+$/.test(meta.RC || '')
     && ![0, 124, 130, 143].includes(Number(meta.RC))
     && !['ok', 'timeout', 'manual_switch'].includes(meta.RESULT_CLASS || '')
     && Number.isFinite(started) && Number.isFinite(finished) && Number.isFinite(stopped)
@@ -133,7 +145,7 @@ async function readFailure(input: RunnerStallInput): Promise<RunFailure | null> 
 
     const failure = meta.FAILURE_CODE && meta.FAILURE_MESSAGE
       ? { code: meta.FAILURE_CODE, message: cleanRunnerFailureMessage(meta.FAILURE_MESSAGE) }
-      : inspectCodexFailure(await readRunFile(directory, 'events.jsonl', true)).failure;
+      : RUNNER_FAILURE_READERS[meta.RUNNER || '']!(await readRunFile(directory, 'events.jsonl', true));
 
     return failure ? { failure, model: meta.RESOLVED_MODEL || meta.MODEL || '' } : null;
   } finally {
