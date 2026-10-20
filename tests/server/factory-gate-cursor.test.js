@@ -485,3 +485,88 @@ test('/gate держит передачу хода от записи решен�
   assert.match(marks[1].calls, /systemd-run .* resume /, 'отметка снята только после попытки продолжения');
   assert.equal(fx.adapter.isRunLive('', '7'), false, 'после ответа отметки не остаётся');
 });
+
+/**
+ * Профиль demo со стендом задачи, который «умер» после перезагрузки: проверка живости
+ * смотрит файл-флаг, хук подъёма отмечает вызов в общем журнале и ведёт себя по `start`.
+ * systemd-run пишет в тот же журнал — по порядку строк видно, что было раньше.
+ */
+async function deadStandFixture(t, start) {
+  const fx = await fixture(t, { cursor: { node: 'gate_accept', state: 'paused' } });
+  const binDir = path.join(fx.root, 'bin');
+  const flag = path.join(fx.stateDir, 'stand-7.up');
+
+  await writeFile(path.join(fx.config.profilesDir, 'demo', 'profile.sh'), `
+profile_stand_alive() { [[ -f "${flag}" ]]; }
+profile_stand_start() {
+  printf 'stand-start %s\\n' "$1" >> "${fx.callsLog}"
+  ${start}
+}
+`);
+  await writeFile(
+    path.join(binDir, 'systemd-run'),
+    `#!/usr/bin/env bash\nprintf 'systemd-run %s\\n' "$*" >> "${fx.callsLog}"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  // Юнит «вышел сразу»: подтверждение не ждёт полного окна, а сам запуск уже записан.
+  await writeFile(path.join(binDir, 'systemctl'), '#!/usr/bin/env bash\necho inactive\nexit 3\n', {
+    mode: 0o755,
+  });
+
+  return { fx, flag };
+}
+
+test('/gate поднимает мёртвый стенд задачи до запуска движка', async (t) => {
+  const { fx, flag } = await deadStandFixture(t, `touch "${path.join('$STATE_DIR', 'stand-7.up')}"`);
+  const app = await server(t, fx);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/gate/GATE_ACCEPT/approve',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(existsSync(flag), true, 'хук получил STATE_DIR сервера');
+
+  const calls = readFileSync(fx.callsLog, 'utf8');
+
+  assert.match(calls, /^stand-start 7$/m);
+  assert.match(calls, /stand-start 7\n[\s\S]*systemd-run .* resume /, 'движок запущен после подъёма');
+});
+
+test('/gate не запускает движок, если стенд задачи не поднялся', async (t) => {
+  const { fx } = await deadStandFixture(t, 'echo "ОШИБКА: порт 8150 занят" >&2; return 1');
+  const app = await server(t, fx);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/gate/GATE_ACCEPT/approve',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+
+  const body = response.json();
+
+  assert.equal(body.resumed, false);
+  assert.equal(body.resumeFailure?.error, 'stand_unavailable');
+  assert.match(body.resumeError, /стенд задачи не поднялся: .*порт 8150 занят/);
+  assert.doesNotMatch(readFileSync(fx.callsLog, 'utf8'), /systemd-run .* resume /);
+});
+
+test('«Продолжить» с мёртвым стендом, который не поднялся, отвечает причиной', async (t) => {
+  const { fx } = await deadStandFixture(t, 'echo "ОШИБКА: реестра песочницы t7 нет" >&2; return 73');
+  const app = await server(t, fx);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/resume',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 500, response.body);
+  assert.equal(response.json().error, 'stand_unavailable');
+  assert.match(response.json().message, /реестра песочницы t7 нет/);
+  assert.doesNotMatch(readFileSync(fx.callsLog, 'utf8'), /systemd-run .* resume /);
+});
