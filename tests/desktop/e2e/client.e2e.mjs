@@ -249,7 +249,7 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
 
     assert.match(event, /first/);
     await page.evaluate(() => localStorage.setItem('profile-probe', 'A'));
-    await page.locator('.connection-trigger').click();
+    await page.locator('[data-context="connection-trigger"]').click();
     await page.locator('[data-connection-menu]').getByText('Добавить машину', { exact: true }).click();
     await page.getByRole('textbox').fill(second.pairing);
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();
@@ -265,8 +265,8 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
 
     await page.evaluate(() => localStorage.setItem('removed-profile-probe', 'B'));
     // Удаление меняет документ. Нажатие кнопки не ждёт ответ в уничтожаемом evaluate-контексте.
-    await page.locator('.connection-trigger').click();
-    await page.locator('[data-connection-menu]').getByText('Все машины…', { exact: true }).click();
+    await page.locator('[data-context="connection-trigger"]').click();
+    await page.getByRole('button', { name: 'Все машины', exact: true }).click();
     await page.locator('.machine-row').filter({ hasText: 'Машина B' })
       .getByRole('button', { name: 'Удалить', exact: true }).click();
     await page.getByRole('dialog', { name: 'Подтверди действие', exact: true })
@@ -284,7 +284,7 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
     const profiles = await page.evaluate(async () => (await (await fetch('/__shell/state')).json()).profiles);
     const profileA = profiles.find((profile) => profile.name === 'Машина A');
 
-    await page.locator('.connection-trigger').click();
+    await page.locator('[data-context="connection-trigger"]').click();
     await page.locator('[data-connection-menu]').getByText('Машина A', { exact: true }).click();
     await page.waitForURL(originA + '/**');
     assert.equal(await page.evaluate(() => localStorage.getItem('profile-probe')), 'A');

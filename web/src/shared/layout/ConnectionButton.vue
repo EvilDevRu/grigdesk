@@ -3,30 +3,82 @@
     <UiTopbarPanel v-model:open="open" title="Машины" trigger-mode="click">
       <template #trigger>
         <UiButton v-tooltip="label" variant="ghost" :aria-label="label" :aria-expanded="open"
-                  class="connection-trigger">
-          <svg class="connection-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.7" aria-hidden="true">
-            <path :d="icon" />
-          </svg>
-          <span class="connection-dot" :data-status="shell.status" />
-          <span class="connection-label">{{ label }}</span>
+                  data-context="connection-trigger">
+          <template #leading>
+            <span class="connection-symbol">
+              <svg class="connection-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.7" aria-hidden="true">
+                <path :d="icon" />
+              </svg>
+              <ConnectionStatus class="connection-trigger-dot" :status="shell.status"
+                                :disconnected="disconnected" compact aria-hidden="true" />
+            </span>
+          </template>
+          <span class="connection-label">{{ shell.profile?.name ?? 'Машины' }}</span>
+          <template #trailing>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg>
+          </template>
         </UiButton>
       </template>
+      <template #meta>{{ shell.profiles.length }}</template>
       <div data-connection-menu class="connection-menu">
         <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-        <template v-for="(profile, index) in shell.profiles" :key="profile.id">
-          <div v-if="index" class="connection-separator" role="separator" />
-          <UiButton variant="text"
+        <div class="connection-profiles">
+          <UiButton v-for="profile in shell.profiles" :key="profile.id" variant="ghost"
+                    data-context="connection-machine" :aria-label="profile.name"
                     :aria-current="profile.id === shell.profile?.id ? 'true' : undefined"
                     @click="select(profile.id)">
-            {{ profile.name }}{{ profile.id === shell.profile?.id ? ' ✓' : '' }}
+            <span class="connection-machine-icon" aria-hidden="true">
+              <svg class="connection-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.6">
+                <path v-if="profile.kind === 'local'" d="M3 4h18v12H3z M8 20h8 M12 16v4" />
+                <path v-else d="M5 3h14v18H5z M5 12h14 M8 7h2 M8 16h2" />
+              </svg>
+            </span>
+            <span class="connection-machine-copy">
+              <strong>{{ profile.name }}</strong>
+              <span class="connection-machine-detail">
+                <span>{{ profile.kind === 'local' ? 'Локальная' : 'Удалённая' }}</span>
+                <span aria-hidden="true">·</span>
+                <ConnectionStatus :status="profile.id === shell.profile?.id ? shell.status : profile.status"
+                                  :text="profile.id === shell.profile?.id ? statusText : undefined"
+                                  :disconnected="profile.id === shell.profile?.id && disconnected" />
+              </span>
+            </span>
+            <svg v-if="profile.id === shell.profile?.id" class="connection-check" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="m5 12 4 4L19 6" />
+            </svg>
           </UiButton>
-        </template>
-        <UiButton variant="text" @click="addMachine">Добавить машину</UiButton>
-        <UiButton v-if="!disconnected" variant="text" @click="disconnect">Отключиться</UiButton>
-        <UiButton v-else variant="text" @click="connect">Подключиться</UiButton>
-        <UiButton variant="text" @click="showAll">Все машины…</UiButton>
+          <p v-if="!shell.profiles.length" class="connection-empty">Добавьте первую машину для подключения.</p>
+        </div>
+        <UiButton variant="ghost" data-context="connection-action" @click="addMachine">
+          <template #leading>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 aria-hidden="true"><path d="M12 5v14 M5 12h14" /></svg>
+          </template>
+          Добавить машину
+        </UiButton>
       </div>
+      <template #footer>
+        <UiButton variant="ghost" data-context="connection-action" @click="showAll">
+          Все машины
+          <template #trailing>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 aria-hidden="true"><path d="M5 12h14 m-5-5 5 5-5 5" /></svg>
+          </template>
+        </UiButton>
+        <UiButton v-if="shell.profile" variant="ghost" data-context="connection-action"
+                  :tone="disconnected ? 'accent' : 'neutral'"
+                  @click="disconnected ? connect() : disconnect()">
+          <template #leading>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 aria-hidden="true"><path d="M12 3v9 M7 5.5a8 8 0 1 0 10 0" /></svg>
+          </template>
+          {{ disconnected ? 'Подключиться' : 'Отключиться' }}
+        </UiButton>
+      </template>
     </UiTopbarPanel>
     <AddMachineDialog v-model:open="adding" />
   </template>
@@ -40,6 +92,7 @@ import { UiButton, UiInlineMessage, UiTopbarPanel, useUiLayer, vTooltip } from '
 import { useShellStore } from '../../stores/shell.ts';
 import { failureText } from '../apiClient.ts';
 import AddMachineDialog from './AddMachineDialog.vue';
+import ConnectionStatus from './ConnectionStatus.vue';
 
 withDefaults(defineProps<{ icon?: string }>(), { icon: '' });
 
@@ -144,38 +197,83 @@ async function disconnect(): Promise<void> {
   flex: none;
 }
 .connection-label {
-  max-width: 220px;
+  display: block;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .connection-menu {
   display: grid;
+  gap: 8px;
+}
+
+.connection-symbol {
+  position: relative;
+  display: flex;
+}
+
+.connection-trigger-dot {
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--topbar);
+}
+
+.connection-profiles {
+  display: grid;
   gap: 4px;
 }
-.connection-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ink-mid);
+
+.connection-machine-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
 }
-.connection-dot[data-status="online"] {
-  background: var(--good);
+
+.connection-machine-copy {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
 }
-.connection-dot[data-status="revoked"], .connection-dot[data-status="identityMismatch"] {
-  background: var(--bad);
+
+.connection-machine-copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.connection-dot[data-status="offline"], .connection-dot[data-status="connecting"],
-.connection-dot[data-status="locked"] {
-  background: var(--warn);
+
+.connection-machine-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-mid);
+  font-size: 11px;
 }
-.connection-dot[data-status="incompatible"] {
-  background: var(--bad);
+
+.connection-check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
 }
-.connection-separator {
-  height: 1px;
-  background: var(--line);
+
+.connection-empty {
+  margin: 0;
+  color: var(--ink-mid);
 }
+
 @media (max-width: 1100px) {
   .connection-label {
     display: none;

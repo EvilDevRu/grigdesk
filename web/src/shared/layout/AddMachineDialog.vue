@@ -1,15 +1,25 @@
 <template>
-  <UiDialog :open="open" title="Добавить машину" :busy="busy" @update:open="$emit('update:open', $event)">
-    <UiField label="Строка привязки">
-      <UiTextarea v-model="pairing" placeholder="GRIGDESK:PAIR:1:…" :disabled="busy" />
-    </UiField>
-    <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-    <template #footer>
+  <UiDialog :open="open" title="Добавить машину" size="compact" :busy="busy"
+            @update:open="$emit('update:open', $event)">
+    <div class="pair-machine">
+      <p class="pair-machine-intro">Подключите другой компьютер с GrigDesk, чтобы работать с ним из этого окна.</p>
+      <ol class="pair-machine-steps">
+        <li>На нужном компьютере откройте настройки GrigDesk и создайте код привязки устройства.</li>
+        <li>Скопируйте строку привязки и вставьте её ниже.</li>
+      </ol>
+      <UiField label="Строка привязки" hint="Код действует ограниченное время. Если он истёк, создайте новый.">
+        <UiTextarea v-model="pairing" placeholder="GRIGDESK:PAIR:1:…" :disabled="busy" :rows="3"
+                    spellcheck="false" autocomplete="off" />
+      </UiField>
       <UiButton v-if="shell.capabilities.includes('scan')" :disabled="busy" @click="scan">
-        Сканировать QR
+        Сканировать QR-код
       </UiButton>
-      <UiButton :disabled="busy || !pairing.trim()" @click="add">Добавить</UiButton>
+      <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
+    </div>
+    <template #footer>
       <UiButton variant="text" :disabled="busy" @click="$emit('update:open', false)">Отмена</UiButton>
+      <UiButton variant="solid" tone="accent" :loading="busy" :disabled="busy || !pairing.trim()"
+                @click="add">Добавить</UiButton>
     </template>
   </UiDialog>
 </template>
@@ -65,3 +75,32 @@ async function scan(): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+.pair-machine {
+  display: grid;
+  gap: 18px;
+}
+
+.pair-machine-intro {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+
+.pair-machine-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+.pair-machine-steps li {
+  padding-left: 4px;
+}
+
+.pair-machine-steps li::marker {
+  color: var(--ink-mid);
+}
+</style>

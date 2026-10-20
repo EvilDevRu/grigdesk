@@ -17,10 +17,25 @@ test('связь: видимость, подпись, выбор машины и
   globalThis.__connectionShell = reactive({
     present: false,
     status: 'online',
-    profile: { id: 'one', name: 'Домашний ПК' },
+    profile: {
+      id: 'one',
+      name: 'Домашний ПК',
+      kind: 'local',
+      status: 'online',
+    },
     profiles: [
-      { id: 'one', name: 'Домашний ПК' },
-      { id: 'two', name: 'Другая машина' },
+      {
+        id: 'one',
+        name: 'Домашний ПК',
+        kind: 'local',
+        status: 'online',
+      },
+      {
+        id: 'two',
+        name: 'Другая машина',
+        kind: 'remote',
+        status: 'offline',
+      },
     ],
     detail: null,
     capabilities: [],
@@ -38,22 +53,23 @@ test('связь: видимость, подпись, выбор машины и
   assert.equal(wrapper.find('button').exists(), false);
   globalThis.__connectionShell.present = true;
   await nextTick();
-  assert.match(wrapper.text(), /Домашний ПК · в сети/);
+  assert.match(wrapper.find('button').attributes('aria-label'), /Домашний ПК · в сети/);
   globalThis.__connectionShell.status = 'offline';
   await nextTick();
-  assert.match(wrapper.text(), /нет связи/);
+  assert.match(wrapper.find('button').attributes('aria-label'), /нет связи/);
   globalThis.__connectionShell.status = 'incompatible';
   await nextTick();
-  assert.match(wrapper.text(), /нужно обновить приложение/);
+  assert.match(wrapper.find('button').attributes('aria-label'), /нужно обновить приложение/);
   globalThis.__connectionShell.status = 'online';
   await nextTick();
   await wrapper.find('button').trigger('click');
   await nextTick();
 
-  assert.equal(document.querySelectorAll('[role=separator]').length, 1);
+  assert.equal(document.querySelectorAll('[data-context="connection-machine"]').length, 2);
+  assert.equal(document.querySelector('[aria-current="true"]').getAttribute('aria-label'), 'Домашний ПК');
 
   const target = [...document.querySelectorAll('button')]
-    .find((button) => button.textContent.trim() === 'Другая машина');
+    .find((button) => button.getAttribute('aria-label') === 'Другая машина');
 
   assert.ok(target);
   target.click();
@@ -71,7 +87,7 @@ test('связь: видимость, подпись, выбор машины и
   globalThis.__connectionShell.status = 'offline';
   globalThis.__connectionShell.detail = { code: 'disconnected' };
   await nextTick();
-  assert.match(wrapper.text(), /отключено/);
+  assert.match(wrapper.find('button').attributes('aria-label'), /отключено/);
   await wrapper.find('button').trigger('click');
   await nextTick();
 
@@ -84,7 +100,7 @@ test('связь: видимость, подпись, выбор машины и
   assert.equal(connects, 1);
   globalThis.__connectionShell.detail = { retryAt: Date.now() + 4000 };
   await nextTick();
-  assert.match(wrapper.text(), /повтор через [45] с/);
+  assert.match(wrapper.find('button').attributes('aria-label'), /повтор через [45] с/);
 });
 
 test('W1: цвета состояний и разделители используют объявленные токены', async () => {

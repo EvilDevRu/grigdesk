@@ -1,3 +1,77 @@
+/* Выбор машины сохраняет плотность служебной панели и выделяет текущий профиль.
+   Все интерактивные состояния принадлежат UI-kit, содержимое строки — компоненту связи. */
+.ui-button[data-context='connection-machine'] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  min-height: 64px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  line-height: 1.45;
+  text-align: left;
+}
+
+.ui-button[data-context='connection-machine'][aria-current='true'] {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--topbar-panel));
+}
+
+.ui-button[data-context='connection-machine']:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.ui-button[data-context='connection-machine'] > .ui-button__content,
+.ui-button[data-context='connection-machine'] .ui-button__label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+
+.ui-button[data-context='connection-action'] {
+  height: auto;
+  min-height: var(--control-height);
+  padding: 8px 10px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-button[data-context='connection-action'] > .ui-button__content {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 10px;
+}
+
+.ui-button[data-context='connection-action'][data-tone='accent'] {
+  color: var(--accent);
+}
+
+.ui-button[data-context='connection-action']:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.ui-button[data-context='connection-trigger'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-button[data-context='connection-trigger'][aria-expanded='true'],
+.ui-button[data-context='connection-trigger']:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
 .ui-pressable[data-context='studio-model-card'] {
   display: flex;
   flex-direction: column;
