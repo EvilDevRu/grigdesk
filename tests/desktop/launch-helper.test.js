@@ -218,7 +218,7 @@ test('SEA-GUI-FIXTURE: argv свежего SEA-окна выбирает мес�
   });
 
   // Это тот же разбор argv и явный выбор, что main.ts выполняет перед client.start.
-  // Свежий профиль без аргумента остаётся на экране машин и не запускает supervisor.
+  // Аргумент фиксирует случайный порт фикстуры вместо адреса локальной установки.
   const argument = originFromArgs(seaDesktopArguments('/fixture/desktop', port));
 
   if (argument && 'origin' in argument) {

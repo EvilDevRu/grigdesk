@@ -21,7 +21,8 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
   }
   const [shell, host, codeRoute, shelfRoute, terminalRoute] = files;
 
-  assert.equal(count(shell, /<ToolHost\s*\/>/g), 1);
+  assert.equal(count(shell, /<ToolHost\b/g), 1);
+  assert.match(shell, /<ToolHost v-if="workspaceStarted"/);
   assert.equal(count(host, /<component\s+:is="item\.component"/g), 1);
   // Состав панелей — computed из встроенных и страниц плагинов, а не статический список.
   assert.match(host, /v-for="item in tools"/);

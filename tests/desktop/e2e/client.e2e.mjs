@@ -87,27 +87,36 @@ async function waitState(page, status) {
   }, status);
 }
 
-test('UC-E01: местный сервер выключен — окно показано и доступно добавление машины',
+test('UC-E01: местный сервер выключен — сразу показан интерфейс приложения',
   { timeout: 30000 }, async (t) => {
     const port = await freePort();
     const { app } = await start(t, [`--grigdesk-url=http://127.0.0.1:${port}`]);
     const page = await visibleMain(app);
 
-    assert.match(await page.locator('body').innerText(), /Добавить машину/);
+    await page.locator('.shell').waitFor();
+    assert.equal(await page.locator('.connections').count(), 0);
+    await page.locator('[data-context="connection-trigger"]').click();
+    await page.getByRole('button', { name: 'Добавить машину', exact: true }).waitFor();
     assert.notEqual(new URL(page.url()).port, String(port));
   });
 
-test('UC-E02: без установки и профилей открывается экран машин', { timeout: 30000 }, async (t) => {
+test('UC-E02: без установки открыт интерфейс, машины доступны по кнопке', { timeout: 30000 }, async (t) => {
   const { app } = await start(t);
   const page = await visibleMain(app);
 
-  await page.getByText('Добавить машину', { exact: true }).first().waitFor();
+  await page.locator('.shell').waitFor();
+  assert.equal(await page.locator('.connections').count(), 0);
 
   const state = await page.evaluate(() => fetch('/__shell/state').then((response) => response.json()));
 
   assert.equal(state.profile, null);
   assert.equal(state.profiles.length, 0);
   assert.equal(state.localAvailable, false);
+  await page.locator('[data-context="connection-trigger"]').click();
+  await page.getByRole('button', { name: 'Все машины', exact: true }).click();
+  await page.getByRole('heading', { name: 'Машины', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Вернуться к работе', exact: true }).click();
+  await page.locator('.shell').waitFor();
 });
 
 test('UC-E03: окно показано до отложенного старта; сессия остаётся в трубе',
@@ -141,6 +150,9 @@ test('UC-E03: окно показано до отложенного старта
     const { app } = await start(t, [`--grigdesk-url=http://127.0.0.1:${port}`], key);
     const page = await visibleMain(app);
 
+    await page.locator('.shell').waitFor();
+    assert.equal(await page.locator('.connections').count(), 0);
+    await page.locator('.shell').evaluate((element) => element.dataset.startupRetained = 'true');
     assert.equal(server.listening, false, 'показ не должен ждать сервер');
     await once(server, 'listening');
     await waitState(page, 'online');
@@ -153,6 +165,7 @@ test('UC-E03: окно показано до отложенного старта
     assert.equal(result.state.authenticated, true, JSON.stringify(result.state));
     assert.equal(result.cookie.includes('grigdesk_sid'), false);
     assert.equal(result.cookie.includes('grigdesk_pipe'), false);
+    assert.equal(await page.locator('.shell').getAttribute('data-startup-retained'), 'true');
   });
 
 /**
@@ -215,6 +228,7 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
     const { app } = await start(t);
     const page = await visibleMain(app);
 
+    await page.locator('[data-context="connection-trigger"]').click();
     await page.getByRole('button', { name: 'Добавить машину', exact: true }).click();
     await page.getByRole('textbox').fill(first.pairing);
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();
@@ -272,6 +286,7 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
     await page.getByRole('dialog', { name: 'Подтверди действие', exact: true })
       .getByRole('button', { name: 'Да', exact: true }).click();
     await page.waitForURL((url) => url.port === '47100');
+    await page.locator('[data-context="connection-trigger"]').click();
     await page.getByRole('button', { name: 'Добавить машину', exact: true }).click();
     await page.getByRole('textbox').fill(second.pairing);
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();
@@ -293,7 +308,12 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
     const versionStatus = await page.evaluate(async () => (await fetch('/api/private')).status);
 
     assert.equal(versionStatus, 426);
+    await waitState(page, 'incompatible');
+    assert.equal(await page.locator('.connections').count(), 0);
+    await page.locator('[data-context="connection-trigger"]').click();
+    await page.getByRole('button', { name: 'Все машины', exact: true }).click();
     await page.getByText('Нужна версия приложения не ниже 1.0.', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Вернуться к работе', exact: true }).click();
     first.version('0.1');
     await page.evaluate(() => fetch('/__shell/connect', { method: 'POST' }));
     await waitState(page, 'online');
@@ -304,6 +324,8 @@ test('UC-E04–06: привязка, SSE/WS, версии, разные origin �
     first.fixture.listener.disconnect(device.fp);
     await page.evaluate(() => fetch('/api/private').catch(() => {}));
     await waitState(page, 'revoked');
+    assert.equal(await page.locator('.connections').count(), 0);
+    await page.locator('[data-context="connection-trigger"]').click();
     await page.getByText('устройство отозвано', { exact: false }).first().waitFor();
 
     const lookups = t.mock.method(first.fixture.devices, 'findByFp', first.fixture.devices.findByFp);

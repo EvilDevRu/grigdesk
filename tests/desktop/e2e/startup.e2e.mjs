@@ -723,7 +723,7 @@ test('SE-12: геометрия и вид заставки', options, async (t) 
   await waitForMain(run);
 });
 
-test('SE-13: без сервера и runtime.json открывается экран машин', options, async (t) => {
+test('SE-13: без сервера и runtime.json открыт интерфейс с выбором машины по кнопке', options, async (t) => {
   const run = await createRun(t, { descriptor: false });
 
   if (!run) {
@@ -737,8 +737,60 @@ test('SE-13: без сервера и runtime.json открывается экр
   const state = await page.evaluate(() => fetch('/__shell/state').then((response) => response.json()));
 
   assert.equal(state.localAvailable, false);
+  await page.locator('.shell').waitFor();
+  assert.equal(await page.locator('.connections').count(), 0);
+  await page.locator('[data-context="connection-trigger"]').click();
   assert.equal(await page.getByRole('button', { name: 'Добавить машину', exact: true }).isVisible(), true);
   assert.equal(run.child.exitCode, null);
+});
+
+test('SE-17: первая установка открывает приложение до готовности сервера', options, async (t) => {
+  const run = await createRun(t);
+
+  if (!run) {
+    return;
+  }
+
+  const launchOptions = run.launchOptions;
+
+  run.launchOptions = (extra) => ({
+    ...launchOptions(extra),
+    args: [desktop, '--password-store=gnome-libsecret'],
+  });
+  await run.launch({ GRIGDESK_E2E_FIXTURE_DELAY_MS: '6000' });
+
+  const requests = [];
+
+  run.app.context().on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) {
+      requests.push(request.url());
+    }
+  });
+
+  const { page } = await waitForMain(run);
+
+  await page.locator('.shell').waitFor();
+  assert.equal(await page.locator('.connections').count(), 0);
+  assert.equal((await fixtureEntries(run)).some((entry) => entry.event === 'listen'), false);
+  assert.deepEqual(requests, [], 'прикладные запросы ждут готовности сервера и сессии');
+
+  const state = await page.evaluate(() => fetch('/__shell/state').then((response) => response.json()));
+
+  assert.equal(state.profile.kind, 'local');
+  assert.equal(state.profile.address, run.origin);
+  await page.locator('.shell').evaluate((element) => element.dataset.startupRetained = 'true');
+
+  if (process.env.GRIGDESK_E2E_ARTIFACTS) {
+    await mkdir(process.env.GRIGDESK_E2E_ARTIFACTS, { recursive: true });
+    await page.screenshot({
+      path: path.join(process.env.GRIGDESK_E2E_ARTIFACTS, 'application-before-server.png'),
+    });
+  }
+
+  await page.waitForFunction(async () => (await (await fetch('/__shell/state')).json()).status === 'online');
+  await page.locator('.workspace-waiting').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.shell').getAttribute('data-startup-retained'), 'true');
+  assert.equal(await page.locator('.connections').count(), 0);
 });
 
 test('SE-14: SIGTERM приложению после показа — код 0, свой сервер завершён', options, async (t) => {

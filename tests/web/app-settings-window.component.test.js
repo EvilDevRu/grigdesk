@@ -76,7 +76,9 @@ async function fixture(t, mode, authenticated, present = false) {
       const Host = { render: () => h('div') };
       export const UiDialogHost = Host;
       export const UiTooltipHost = Host;
-      export const UiToastHost = Host;`,
+      export const UiToastHost = Host;
+      export const UiInlineMessage = Host;
+      export const UiSpinner = Host;`,
     './shared/alerts.ts': `
       export const clearAlertHistory = () => {};
       export const dismissAllAlerts = () => {};`,

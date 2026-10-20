@@ -136,7 +136,7 @@
           class="sep"
           aria-hidden="true"
         ></span>
-        <AttentionAlerts />
+        <AttentionAlerts v-if="workspaceStarted" />
         <!-- Наведения на ряд иконок для чтения лимитов больше нет: свежий снимок сервер
              присылает сам (SSE providers-usage), а раскрытие всплывашки перечитывает
              его на случай оборванного потока и тикает, пока она открыта (см. usageWatch). -->
@@ -354,7 +354,7 @@
 
     <main class="content" :class="{ 'is-workspace': route.meta.layout === 'workspace' }" :inert="toolDock.isExpanded"
           :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
-    <ToolHost />
+    <ToolHost v-if="workspaceStarted" />
 
   </div>
 </template>
@@ -424,6 +424,13 @@ import { openSettings } from '../settingsNavigation.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
 import { currentDesktopMode } from '../desktopSettings.ts';
 
+const props = defineProps({
+  active: {
+    type: Boolean,
+    default: true,
+  },
+});
+const workspaceStarted = ref(props.active);
 const isDesktopMain = currentDesktopMode() === 'main';
 
 const settings = useSettingsStore();
@@ -439,7 +446,6 @@ const sysSnapshotTime = computed(() => (sysUpdatedAt.value
 // Снимок обновления общий для настроек и уведомлений. Оболочка запускает опрос
 // и перечитывает его по серверному событию; поток SSE один на вкладку.
 const grigDeskUpdate = useGrigDeskUpdateStore();
-grigDeskUpdate.start();
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
@@ -447,7 +453,6 @@ const prov = useProvidersStore();
 // чат-исполнителя в шапке до появления transport-а и каталога моделей.
 const runtimeProviders = computed(() => prov.providers.filter(isTopbarProvider));
 const plugins = usePluginsStore();
-plugins.load();
 
 const studio3d = useStudio3dStore();
 const studioAuth = useAuthStore();
@@ -464,17 +469,23 @@ watch(() => [studioAuth.authenticated, studioAuth.clientScope, plugins.loaded, p
   }, { immediate: true });
 onUnmounted(() => studio3d.stop());
 const inboxStore = useInboxStore();
-watch(() => (plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
-  if (enabled) startInboxSummary();
-  else stopInboxSummary();
+
+watch(() => (props.active && plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
+  if (enabled) {
+    startInboxSummary();
+  } else {
+    stopInboxSummary();
+  }
 }, { immediate: true });
 onUnmounted(() => stopInboxSummary());
-prov.load();
-prov.loadUsage();
 // Каталог Codex зависит не только от версии CLI, но и от rollout/доступа аккаунта.
 // Пока приложение открыто, перечитываем реестр раз в минуту: новая модель появляется
 // в селекторе без F5 и без обновления GrigDesk.
-const providersTimer = setInterval(() => { prov.load(); }, 60_000);
+const providersTimer = setInterval(() => {
+  if (props.active) {
+    void prov.load();
+  }
+}, 60_000);
 providersTimer.unref?.();
 onUnmounted(() => clearInterval(providersTimer));
 function provTitle(p) {
@@ -561,14 +572,13 @@ const alertLinkDeps = {
   chat: chatStore,
   ui,
 };
-const stopAlertLinks = installAlertDeepLinks(alertLinkDeps);
+let stopAlertLinks = null;
 
 setAlertTargetOpener((target) => openAlertTarget(target, alertLinkDeps));
 onUnmounted(() => {
-  stopAlertLinks();
+  stopAlertLinks?.();
   setAlertTargetOpener(null);
 });
-chatStore.ensure();
 // Таймеры доски показаны в топбаре: оттуда можно открыть задачу и управлять учётом.
 // При паузе сохраняем строку, чтобы таймер можно было сразу продолжить.
 const boardStore = useBoardStore();
@@ -633,7 +643,29 @@ async function toggleBoardTimer(task) {
 // Конвейер: один классифицированный список питает и три числа popover, и его видимость.
 // В боковой навигации считаем только вмешательство, а в топбаре сохраняем обычную работу.
 const notifyWatch = useNotifyWatchStore();
-notifyWatch.start();
+
+// Каркас приложения доступен до готовности сервера, включая кнопку выбора машины.
+// Загрузки и панели с API запускаются после входа; потеря связи сохраняет уже открытые инструменты.
+watch(() => props.active, (active) => {
+  if (!active) {
+    grigDeskUpdate.stop();
+
+    return;
+  }
+
+  workspaceStarted.value = true;
+
+  if (!stopAlertLinks) {
+    stopAlertLinks = installAlertDeepLinks(alertLinkDeps);
+  }
+
+  void chatStore.ensure();
+  grigDeskUpdate.start();
+  void plugins.load();
+  void prov.load();
+  void prov.loadUsage();
+  notifyWatch.start();
+}, { immediate: true });
 const pipelineTopbar = computed(() => {
   return {
     total: notifyWatch.topbarItems.length,

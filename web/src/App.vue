@@ -11,8 +11,16 @@
          Без оболочки потеря входа размонтирует Provider и освобождает browser resources. -->
     <SpeechProvider v-else-if="shell.present || auth.authenticated">
       <div class="shell-workspace" :inert="shell.present && shell.status === 'locked' ? '' : undefined">
-      <AppShell>
-        <router-view v-slot="{ Component }">
+      <AppShell :active="auth.authenticated && (!shell.present || shell.status === 'online')">
+        <div v-if="!workspaceStarted" class="workspace-waiting" role="status">
+          <UiInlineMessage :tone="connectionTone">
+            <span class="workspace-connection-message">
+              <UiSpinner v-if="shell.status === 'connecting' || shell.status === 'online'" decorative />
+              {{ connectionMessage }}
+            </span>
+          </UiInlineMessage>
+        </div>
+        <router-view v-else v-slot="{ Component }">
           <component :is="Component" />
         </router-view>
       </AppShell>
@@ -30,8 +38,9 @@
 <script setup>
 import { asyncView } from './shared/asyncView.ts';
 import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
-import { UiDialogHost, UiTooltipHost, UiToastHost } from './ui';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { CONNECTION_TEXT, connectionDetailText } from '../../shared/client/clientShell.ts';
+import { UiDialogHost, UiTooltipHost, UiToastHost, UiInlineMessage, UiSpinner } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import NoAccessView from './views/NoAccessView.vue';
@@ -54,10 +63,27 @@ import LockOverlay from './shared/layout/LockOverlay.vue';
 
 const auth = useAuthStore();
 const shell = useShellStore();
-const showMachines = computed(() => shell.present && (
-  shell.showConnections || !shell.profile || !shell.everOnline
-  || ['unpaired', 'revoked', 'identityMismatch', 'incompatible'].includes(shell.status)
-));
+const showMachines = computed(() => shell.present && shell.showConnections);
+const workspaceStarted = ref(auth.authenticated);
+const connectionTone = computed(() => ['unpaired', 'revoked', 'identityMismatch', 'incompatible']
+  .includes(shell.status) ? 'warning' : 'info');
+const connectionMessage = computed(() => {
+  const detail = connectionDetailText(shell.detail);
+
+  if (detail) {
+    return detail;
+  }
+
+  if (!shell.profile) {
+    return 'Выберите компьютер через значок машин в верхней панели.';
+  }
+
+  if (shell.status === 'connecting' || shell.status === 'online') {
+    return 'Подключаемся к «' + shell.profile.name + '». Рабочие данные появятся автоматически.';
+  }
+
+  return shell.profile.name + ': ' + CONNECTION_TEXT[shell.status] + '.';
+});
 const settings = useSettingsStore();
 const SettingsModal = asyncView(() => import('./views/settings/SettingsModal.vue'), undefined, () => {
   settings.dispose('load-failed');
@@ -124,6 +150,7 @@ watch(() => auth.authenticated && (!shell.present || shell.status === 'online'),
 // иначе интервалы продолжают долбить закрытый API и сыплют 401 в консоль на экране входа.
 watch(() => auth.authenticated, (on, was) => {
   if (on && !was) {
+    workspaceStarted.value = true;
     settings.setAuthenticated(true);
     startPolling();
   }
@@ -152,5 +179,15 @@ watch(() => auth.authenticated, (on, was) => {
 <style scoped>
 .shell-workspace {
   display: contents;
+}
+
+.workspace-waiting {
+  padding: var(--page-gutter);
+}
+
+.workspace-connection-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

@@ -6,7 +6,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
-test('оболочка: первый offline показывает машины, после online рабочий экран сохраняется и блокируется',
+test('оболочка: интерфейс открыт до сервера, машины появляются только по явному запросу',
   async (t) => {
     await installUiBrowser(t);
 
@@ -14,11 +14,12 @@ test('оболочка: первый offline показывает машины, 
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs');
     const noop = () => {};
+    const authLoads = [];
 
     globalThis.__gateAuth = reactive({
       ready: true,
       authenticated: false,
-      load: async () => {},
+      load: async (reason) => authLoads.push(reason),
       watchUnauthorized: noop,
     });
     globalThis.__gateShell = reactive({
@@ -27,6 +28,7 @@ test('оболочка: первый offline показывает машины, 
       status: 'offline',
       profile: { id: 'machine' },
       everOnline: false,
+      showConnections: false,
       start: async () => {},
       stop: noop,
     });
@@ -73,17 +75,31 @@ test('оболочка: первый offline показывает машины, 
     const component = await compileVue(webFile('src/App.vue'), { stubs });
     const wrapper = mount(component, {
       attachTo: document.body,
-      global: { stubs: { RouterView: { template: '<div />' } } },
+      global: { stubs: { RouterView: { template: '<div data-route />' } } },
     });
 
     t.after(() => wrapper.unmount());
     await nextTick();
+    assert.equal(wrapper.find('[data-machines]').exists(), false);
+    assert.equal(wrapper.find('[data-app-shell]').exists(), true);
+    assert.equal(wrapper.find('[data-route]').exists(), false);
+    assert.deepEqual(authLoads, []);
+
+    globalThis.__gateShell.showConnections = true;
+    await nextTick();
     assert.equal(wrapper.find('[data-machines]').exists(), true);
+    globalThis.__gateShell.showConnections = false;
+    globalThis.__gateShell.status = 'connecting';
+    await nextTick();
+    assert.equal(wrapper.find('[data-app-shell]').exists(), true);
+    assert.equal(wrapper.find('[data-machines]').exists(), false);
 
     globalThis.__gateShell.everOnline = true;
     globalThis.__gateShell.status = 'online';
     globalThis.__gateAuth.authenticated = true;
     await nextTick();
+    assert.deepEqual(authLoads, ['shell-online']);
+    assert.equal(wrapper.find('[data-route]').exists(), true);
 
     const app = wrapper.find('[data-app-shell]').element;
 
@@ -95,6 +111,20 @@ test('оболочка: первый offline показывает машины, 
     await nextTick();
     assert.equal(wrapper.find('[data-lock]').exists(), true);
     assert.equal(wrapper.find('[inert]').exists(), true);
+
+    for (const status of ['unpaired', 'revoked', 'identityMismatch', 'incompatible']) {
+      globalThis.__gateShell.status = status;
+      await nextTick();
+      assert.equal(wrapper.find('[data-machines]').exists(), false);
+      assert.equal(wrapper.find('[data-app-shell]').element === app, true);
+    }
+
+    globalThis.__gateShell.profile = null;
+    globalThis.__gateShell.everOnline = false;
+    globalThis.__gateShell.status = 'none';
+    await nextTick();
+    assert.equal(wrapper.find('[data-app-shell]').element === app, true);
+    assert.equal(wrapper.find('[data-machines]').exists(), false);
     globalThis.__gateShell.present = false;
     globalThis.__gateAuth.authenticated = false;
     await nextTick();

@@ -232,10 +232,22 @@ export function createClientRuntime(options: RuntimeOptions) {
     profiles,
     origin,
     /**
-     * Сначала открывается локальный документ, затем начинается фоновая связь.
-     * Отсутствие профиля не обращается к серверу установки.
+     * Сохранённый выбор приоритетнее локальной установки; первый местный запуск не требует выбора машины.
+     * Документ открывается до готовности сервера, который подготавливается в фоне.
      */
     async start() {
+      if (!options.settings.selected && options.localAvailable()) {
+        const local = options.settings.profiles.find((profile) => profile.kind === 'local')
+          || await profiles.add({
+            name: 'Этот компьютер',
+            kind: 'local',
+            address: options.localAddress(),
+            fp: null,
+          });
+
+        await profiles.select(local.id);
+      }
+
       const id = options.settings.selected;
       const address = await origin(id);
 

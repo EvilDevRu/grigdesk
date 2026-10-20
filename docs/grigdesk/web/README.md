@@ -72,6 +72,7 @@
 - [Кнопки окна в топбаре: системный overlay, свободное место и перетаскивание](desktop-titlebar.md)
 - [Иконка окна: отдельный сглаженный растр для панели задач](desktop-window-icon.md)
 - [Старт окна: заставка, свой сервер, ворота показа, сроки и единый выход](desktop-startup.md)
+- [Приложение до готовности сервера: локальный выбор, каркас и отложенные запросы](application-first-startup.md)
 - [Общие настройки: native-команда и совместимость прежнего адреса](desktop-settings-window.md)
 - [Несколько окон Electron: UA не наследуется, window.close, связь документов](electron-windows-behavior.md)
 - [Скрытое окно Electron: ready-to-show на каждый документ, модальность при скрытом родителе, выход](electron-hidden-window-startup.md)
