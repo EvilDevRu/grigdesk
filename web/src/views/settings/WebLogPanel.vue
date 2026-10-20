@@ -153,6 +153,22 @@ onUnmounted(() => {
 .web-log-panel {
   display: grid;
   gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.web-log-panel h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.web-log-panel p {
+  margin: 0;
+  line-height: 1.6;
+}
+.web-log-panel label {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
 }
 .web-log-actions {
   display: flex;

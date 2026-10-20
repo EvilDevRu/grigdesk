@@ -312,8 +312,13 @@
 }
 
 .ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='settings-modal'] {
-  width: min(1240px, calc(100vw - 40px));
-  height: min(900px, calc(100dvh - 40px));
+  width: min(1120px, calc(100vw - 40px));
+  height: min(780px, calc(100dvh - 40px));
+}
+.ui-dialog[data-role='settings-modal'] .ui-dialog__header,
+.ui-dialog[data-role='settings-modal'] .ui-dialog__footer {
+  padding: 11px 18px;
+  background: var(--sidebar);
 }
 
 /* Модалка плагина с блоком готовности: список приходит с сервера после открытия,

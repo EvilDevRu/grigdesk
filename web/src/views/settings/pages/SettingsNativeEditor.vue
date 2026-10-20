@@ -18,7 +18,7 @@
         />
       </div>
     </template>
-    <SettingsField v-else :address="address">
+    <SettingsField v-else :address="address" layout="stack">
       <p
         v-if="field.consumerSupport?.chat?.state === 'verified'
         && field.consumerSupport?.pipeline?.state === 'unsupported'"

@@ -1,11 +1,12 @@
 <template>
   <div class="settings-interface">
-    <p>Это устройство · Изменения сохранятся по «Применить».</p>
+    <SettingsScope scope="Это устройство" />
     <p v-if="error" role="alert">{{ error }}</p>
     <SettingsField
       v-for="field in fields"
       :key="field.key"
       :address="field.address"
+      :layout="field.resourceId === 'hotkeys' ? 'stack' : 'row'"
     >
       <template v-if="field.resourceId === 'wakeLock'">
         <UiSwitch
@@ -44,9 +45,9 @@
             <small v-if="row.availability === 'disabled'">· плагин выключен — клавиша молчит</small>
             <small v-else-if="row.availability === 'pending'">· состояние плагина ещё не получено</small>
           </span>
-          <span>
+          <kbd class="settings-hotkey-combo" :data-recording="hotkeys.recording === row.id">
             {{ hotkeys.recording === row.id ? 'Нажмите сочетание…' : formatCombo(row.combo) || 'Выключено' }}
-          </span>
+          </kbd>
           <div class="settings-hotkey-actions">
             <UiButton
               data-record
@@ -91,6 +92,7 @@ import { TOOL_CATALOG, toolAvailability } from '../../../shared/tools/catalog.ts
 import { comboFromEvent, formatCombo, isLayoutSwitch } from '../../../shared/hotkeys/combo.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import SettingsField from '../SettingsField.vue';
+import SettingsScope from '../SettingsScope.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
@@ -272,10 +274,53 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.settings-interface { display: grid; gap: 20px; align-content: start; }
-.settings-hotkey-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 16px 0; }
-.settings-hotkey-actions { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
-@media (max-width: 600px) {
-  .settings-hotkey-row { grid-template-columns: minmax(0, 1fr); }
+.settings-interface {
+  display: grid;
+  gap: 0;
+  align-content: start;
+  min-width: 0;
+}
+.settings-hotkey-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-hotkey-row:first-child {
+  padding-top: 0;
+}
+.settings-hotkey-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-low);
+  font-size: 11px;
+}
+.settings-hotkey-combo {
+  justify-self: end;
+  padding: 5px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--ground);
+  color: var(--ink-mid);
+  font: 11px var(--mono);
+}
+.settings-hotkey-combo[data-recording='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.settings-hotkey-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@container settings-field (max-width: 620px) {
+  .settings-hotkey-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .settings-hotkey-actions {
+    grid-column: 1 / -1;
+  }
 }
 </style>

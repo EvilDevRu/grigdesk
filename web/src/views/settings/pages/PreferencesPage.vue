@@ -3,7 +3,7 @@
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="!loaded">Загрузка параметров…</p>
     <template v-else>
-      <p>Все устройства · Изменения сохранятся по «Применить».</p>
+      <SettingsScope />
       <SettingsField
         v-for="field in fields"
         :key="field.key"
@@ -79,6 +79,7 @@ import { useSettingsStore } from '../../../stores/settings.ts';
 import { useChatStore } from '../../../stores/chat.js';
 import { useProvidersStore } from '../../../stores/providers.js';
 import SettingsField from '../SettingsField.vue';
+import SettingsScope from '../SettingsScope.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
@@ -178,5 +179,10 @@ watch(() => settings.pageId, () => {
 </script>
 
 <style scoped>
-.settings-preferences { display: grid; gap: 20px; align-content: start; max-width: 760px; }
+.settings-preferences {
+  display: grid;
+  gap: 0;
+  align-content: start;
+  min-width: 0;
+}
 </style>

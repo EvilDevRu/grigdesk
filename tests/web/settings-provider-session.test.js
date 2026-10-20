@@ -421,6 +421,8 @@ test('Исполнители: очередь и исходы общей сесс
       await page.find('input[type="password"]').setValue('alpha-private-marker');
       await page.find('[data-select-provider="beta"]').trigger('click');
       await flushPromises();
+      assert.equal(page.get('[data-select-provider="beta"]').attributes('aria-pressed'), 'true');
+      assert.equal(page.get('[data-select-provider="alpha"]').attributes('aria-pressed'), 'false');
       await page.find('input[type="password"]').setValue('beta-private-marker');
       await page.find('[data-select-provider="alpha"]').trigger('click');
       await flushPromises();

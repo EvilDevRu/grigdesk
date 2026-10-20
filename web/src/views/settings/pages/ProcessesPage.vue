@@ -4,7 +4,7 @@
     data-processes-page
     :data-ready="loaded"
   >
-    <p>Живые процессы агентов · Операции выполняются сразу, отдельно от «Применить».</p>
+    <SettingsScope scope="Эта машина">Операции с процессами выполняются сразу.</SettingsScope>
     <div class="settings-process-actions">
       <UiButton :disabled="busy || loading" @click="load">Обновить</UiButton>
       <UiButton :disabled="busy || !freeCount" @click="closeFree">Погасить свободные</UiButton>
@@ -14,7 +14,7 @@
       В пуле: {{ sessions.length }} · ведут ход: {{ sessions.length - freeCount }} · свободны: {{ freeCount }}
     </p>
     <p v-if="loaded && !sessions.length">Сейчас ни одного живого процесса.</p>
-    <article v-for="item in sessions" :key="item.chatKey">
+    <article v-for="item in sessions" :key="item.chatKey" :data-running="item.running">
       <h4>{{ title(item) }}</h4>
       <p>{{ runLabel(item) }}</p>
       <p>
@@ -42,6 +42,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import SettingsScope from '../SettingsScope.vue';
 import { useRouter } from 'vue-router';
 import { UiButton, confirmDialog } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
@@ -271,7 +272,34 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.settings-processes, .settings-processes article { display: grid; gap: 12px; min-width: 0; }
-.settings-process-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-processes p, .settings-processes h4 { margin: 0; overflow-wrap: anywhere; }
+.settings-processes, .settings-processes article {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-process-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-processes p, .settings-processes h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-processes article {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-processes article[data-running='true'] {
+  border-bottom-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+.settings-processes article h4 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-processes p {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
 </style>

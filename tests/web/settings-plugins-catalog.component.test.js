@@ -26,6 +26,8 @@ test('Список плагинов: категории, фильтры, draft e
   await h.wrapper.get('[data-select-plugin="entry-1"]').trigger('click');
   await h.flushPromises();
   assert.equal(h.settings.entityId, 'entry-1');
+  assert.equal(h.wrapper.get('[data-select-plugin="entry-1"]').attributes('aria-pressed'), 'true');
+  assert.equal(h.wrapper.get('[data-select-plugin="entry-1"]').classes().includes('is-pressed'), true);
   await h.wrapper.findAll('[role="switch"]').at(-1).setValue(true);
   assert.equal(h.plugins.byId('entry-1').enabled, false);
   assert.equal(h.writes().length, 0);
@@ -35,6 +37,10 @@ test('Список плагинов: категории, фильтры, draft e
   assert.match(h.wrapper.text(), /Плагины не найдены/);
   await h.wrapper.findAll('button').find((item) => item.text() === 'Сбросить фильтры').trigger('click');
   assert.equal(h.wrapper.findAll('[data-select-plugin]').length, PLUGIN_CATEGORIES.length);
+  await h.wrapper.get('select[aria-label="Выберите плагин"]').setValue('entry-0');
+  await h.flushPromises();
+  assert.equal(h.settings.entityId, 'entry-0');
+  assert.equal(h.wrapper.get('[data-select-plugin="entry-0"]').attributes('aria-pressed'), 'true');
 
   const installer = h.module.usePluginInstallStore();
 

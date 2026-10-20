@@ -10,7 +10,10 @@
   >
     <template #header>
       <div class="settings-heading">
-        <h2>Настройки</h2>
+        <div class="settings-heading-title">
+          <span class="settings-heading-icon"><SettingsIcon /></span>
+          <h2>Настройки</h2>
+        </div>
         <UiIconButton
           label="Закрыть настройки"
           :disabled="busy"
@@ -25,10 +28,11 @@
     </div>
     <template #footer>
       <div class="settings-footer">
-        <div role="status" aria-live="polite">
-          <p>
+        <div class="settings-save-status" role="status" aria-live="polite">
+          <p class="settings-save-summary" :data-pending="Boolean(settings.snapshot.dirtyCount)">
+            <span class="settings-save-dot" aria-hidden="true" />
             {{ settings.snapshot.statusMessage || (settings.snapshot.dirtyCount
-              ? `Изменений: ${settings.snapshot.dirtyCount}` : 'Нет неприменённых изменений') }}
+              ? `Изменений: ${settings.snapshot.dirtyCount}` : 'Нет изменений') }}
           </p>
           <div v-if="settings.snapshot.lastResult" class="settings-apply-results">
             <p
@@ -82,6 +86,7 @@ import type { FieldAddress } from '../../features/settings/contracts.ts';
 import { useUiContextSource } from '../../composables/useUiContextSource.ts';
 import SettingsWorkspace from './SettingsWorkspace.vue';
 import SettingsCloseDialog from './SettingsCloseDialog.vue';
+import SettingsIcon from './SettingsIcon.vue';
 
 const settings = useSettingsStore();
 const busy = computed(() => settings.snapshot.applying || settings.actionRunning);
@@ -114,6 +119,19 @@ onBeforeUnmount(() => settings.dispose('unmount'));
   justify-content: space-between;
   width: 100%;
 }
+.settings-heading-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-heading-icon {
+  color: var(--ink-mid);
+}
+.settings-heading h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
 .settings-heading h2, .settings-footer p {
   margin: 0;
 }
@@ -132,6 +150,30 @@ onBeforeUnmount(() => settings.dispose('unmount'));
   gap: 12px;
   width: 100%;
 }
+.settings-save-status {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink-mid);
+}
+.settings-save-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+.settings-save-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ink-low);
+}
+.settings-save-summary[data-pending='true'] {
+  color: var(--ink);
+}
+.settings-save-summary[data-pending='true'] .settings-save-dot {
+  background: var(--accent);
+}
 .settings-apply-results {
   max-height: 120px;
   overflow: auto;
@@ -140,5 +182,13 @@ onBeforeUnmount(() => settings.dispose('unmount'));
 .settings-actions {
   flex-wrap: wrap;
   margin-left: auto;
+}
+@media (max-width: 600px) {
+  .settings-footer {
+    gap: 10px;
+  }
+  .settings-save-status {
+    width: 100%;
+  }
 }
 </style>

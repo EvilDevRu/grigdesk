@@ -22,233 +22,281 @@
       <UiCheckbox v-model="filters.custom">Только пользовательские</UiCheckbox>
       <UiButton @click="clearFilters">Сбросить фильтры</UiButton>
     </div>
-    <section
-      v-for="group in groups"
-      :key="group.id"
-      :data-plugin-category="group.id"
-    >
-      <h4>{{ group.label }}</h4>
-      <p>{{ group.hint }}</p>
-      <div class="settings-plugin-list">
-        <div v-for="entry in group.plugins" :key="entry.id">
-          <UiButton
-            :data-select-plugin="entry.id"
-            :aria-pressed="plugin?.id === entry.id"
-            @click="selectPlugin(entry.id)"
-          >
-            {{ entry.name }} · {{ draftEnabled(entry.id) ? 'Включён' : 'Выключен' }}
-            <span v-if="pluginInstallBadge(entry)">
-              · {{ pluginInstallBadge(entry) === 'restart' ? 'Ждёт перезапуска' : 'Обновление' }}
-            </span>
-          </UiButton>
-          <UiSwitch
-            :model-value="draftEnabled(entry.id)"
-            :disabled="recoveryBlocked"
-            :aria-label="`Включить ${entry.name}`"
-            @update:model-value="toggleEntry(entry, $event)"
-          />
-        </div>
-      </div>
-    </section>
-    <p v-if="!groups.length">Плагины не найдены. Измените запрос или сбросьте фильтры.</p>
-    <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
-    <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
-      {{ installer.job.error?.message }}
-    </p>
-    <div class="settings-plugin-actions">
-      <UiButton :disabled="recoveryBlocked" @click="settings.selectPage('plugins.install')">
-        Установить из git
-      </UiButton>
-      <UiButton
-        v-if="list.some((entry) => entry.install)"
-        :disabled="recoveryBlocked || installer.checking"
-        @click="installer.checkUpdates()"
-      >
-        Проверить обновления
-      </UiButton>
-    </div>
-    <template v-if="plugin && ready">
-      <h4>{{ plugin.name }} · {{ plugin.version }}</h4>
-      <p>{{ plugin.description }}</p>
-      <PluginSourcePanel
-        v-if="!plugin.system"
-        :key="plugin.id"
-        :plugin="plugin"
-        @update="openInstall('update')"
-        @bind="openInstall('install')"
-      />
-      <PluginSetupPanel
-        v-if="baselineEnabled && plugin.setup && setupPlugin"
-        :key="plugin.id"
-        :plugin="setupPlugin"
-        :active="active"
-      />
-      <p>Все устройства · Значения и размещения сохранятся по «Применить».</p>
-      <SettingsField :address="address('enabled')">
-        <UiSwitch
-          :model-value="enabled"
-          :disabled="recoveryBlocked"
-          :aria-label="`Включить ${plugin.name}`"
-          @update:model-value="setEnabled"
-        />
-      </SettingsField>
-      <p v-if="restartPending">Ждёт перезапуска</p>
-      <p v-else-if="plugin.needsRestart">Изменение состояния серверной части потребует перезапуска.</p>
-      <h4 v-if="plugin.placements?.length">Размещение</h4>
-      <SettingsField
-        v-for="slot in plugin.placements ?? []"
-        :key="slot.slot"
-        :address="address('placements', slot.slot)"
-      >
-        <UiCheckbox
-          :model-value="value('placements', slot.slot) === true"
-          @update:model-value="set('placements', slot.slot, $event === true)"
-        >
-          {{ slot.label }} · {{ slot.slot }}
-        </UiCheckbox>
-      </SettingsField>
-      <h4 v-if="plugin.settings.length">Параметры</h4>
-      <SettingsField
-        v-for="field in plugin.settings"
-        :key="field.key"
-        :address="address('values', field.key)"
-      >
-        <UiCheckbox
-          :disabled="fieldUnavailable(field.key)"
-          v-if="field.type === 'checkbox'"
-          :model-value="value('values', field.key) === true"
-          @update:model-value="set('values', field.key, $event === true)"
-        >
-          {{ field.label }}
-        </UiCheckbox>
-        <template v-else-if="field.type === 'providers'">
-          <UiCheckbox
-            :disabled="fieldUnavailable(field.key)"
-            v-for="entry in registry"
-            :key="entry.id"
-            :model-value="providerIds(field.key).includes(entry.id)"
-            @update:model-value="setProvider(field.key, entry.id, $event === true)"
-          >
-            {{ entry.name }}
-          </UiCheckbox>
-          <p v-for="id in missingProviders(field.key)" :key="id">
-            {{ id }} — нет в реестре
-            <UiButton @click="setProvider(field.key, id, false)">Убрать</UiButton>
-          </p>
-          <p>Ни один не отмечен — значит все.</p>
-        </template>
-        <template v-else-if="field.type === 'model'">
+    <div class="settings-plugin-workspace">
+      <aside class="settings-plugin-sidebar" aria-label="Выбор плагина">
+        <div class="settings-plugin-picker">
           <UiSelect
-            :disabled="fieldUnavailable(field.key)"
-            :model-value="modelOption(field.key)"
-            :aria-label="field.label"
-            @update:model-value="setModel(field.key, $event)"
+            :model-value="plugin?.id || ''"
+            aria-label="Выберите плагин"
+            @update:model-value="selectPlugin(String($event))"
           >
-            <option value="">— не выбрана —</option>
-            <option
-              v-if="lostModel(field)"
-              :value="modelOption(field.key)"
-              disabled
-            >
-              {{ lostModel(field) }}
-            </option>
-            <optgroup
-              v-for="group in modelGroups(field)"
-              :key="group.id"
-              :label="group.name + (group.available ? '' : ' — недоступен')"
-            >
-              <option
-                v-for="entry in group.models"
-                :key="entry.id"
-                :value="modelId(group.id, entry.id)"
-              >
+            <optgroup v-for="group in groups" :key="group.id" :label="group.label">
+              <option v-for="entry in group.plugins" :key="entry.id" :value="entry.id">
                 {{ entry.name }}
               </option>
             </optgroup>
           </UiSelect>
-          <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
-            <p>Усилие</p>
+        </div>
+        <div class="settings-plugin-catalog">
+          <SettingsSection
+            v-for="group in groups"
+            :key="group.id"
+            :data-plugin-category="group.id"
+            :heading="group.label"
+          >
+            <div class="settings-plugin-list">
+              <div v-for="entry in group.plugins" :key="entry.id" class="settings-plugin-entry">
+                <UiButton
+                  :data-select-plugin="entry.id"
+                  :pressed="plugin?.id === entry.id"
+                  data-ui-settings-catalog
+                  @click="selectPlugin(entry.id)"
+                >
+                  <span class="ui-settings-catalog-copy">
+                    <span class="ui-settings-catalog-title">{{ entry.name }}</span>
+                    <span class="ui-settings-catalog-status" :data-available="draftEnabled(entry.id)">
+                      {{ draftEnabled(entry.id) ? 'Включён' : 'Выключен' }}
+                      <span v-if="pluginInstallBadge(entry)">
+                        · {{ pluginInstallBadge(entry) === 'restart' ? 'Ждёт перезапуска' : 'Обновление' }}
+                      </span>
+                    </span>
+                  </span>
+                </UiButton>
+                <UiSwitch
+                  :model-value="draftEnabled(entry.id)"
+                  :disabled="recoveryBlocked"
+                  :aria-label="`Включить ${entry.name}`"
+                  @update:model-value="toggleEntry(entry, $event)"
+                />
+              </div>
+            </div>
+          </SettingsSection>
+        </div>
+        <p v-if="!groups.length">Плагины не найдены. Измените запрос или сбросьте фильтры.</p>
+        <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
+        <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
+          {{ installer.job.error?.message }}
+        </p>
+        <div class="settings-plugin-actions">
+          <UiButton
+            variant="ghost"
+            tone="accent"
+            data-ui-settings-sidebar-action
+            :disabled="recoveryBlocked"
+            @click="settings.selectPage('plugins.install')"
+          >
+            Установить из git
+          </UiButton>
+          <UiButton
+            v-if="list.some((entry) => entry.install)"
+            variant="ghost"
+            data-ui-settings-sidebar-action
+            :disabled="recoveryBlocked || installer.checking"
+            @click="installer.checkUpdates()"
+          >
+            Проверить обновления
+          </UiButton>
+        </div>
+      </aside>
+      <section class="settings-plugin-editor" aria-label="Настройки выбранного плагина">
+        <template v-if="plugin && ready">
+          <header class="settings-plugin-title">
+            <SettingsIcon name="plugins" />
+            <h4>{{ plugin.name }}</h4>
+            <span>{{ plugin.version }}</span>
+            <p>{{ plugin.description }}</p>
+          </header>
+          <PluginSourcePanel
+            v-if="!plugin.system"
+            :key="plugin.id"
+            :plugin="plugin"
+            @update="openInstall('update')"
+            @bind="openInstall('install')"
+          />
+          <PluginSetupPanel
+            v-if="baselineEnabled && plugin.setup && setupPlugin"
+            :key="plugin.id"
+            :plugin="setupPlugin"
+            :active="active"
+          />
+          <SettingsScope>Значения и размещения сохранятся по «Применить».</SettingsScope>
+          <SettingsField :address="address('enabled')">
+            <UiSwitch
+              :model-value="enabled"
+              :disabled="recoveryBlocked"
+              :aria-label="`Включить ${plugin.name}`"
+              @update:model-value="setEnabled"
+            />
+          </SettingsField>
+          <p v-if="restartPending">Ждёт перезапуска</p>
+          <p v-else-if="plugin.needsRestart">Изменение состояния серверной части потребует перезапуска.</p>
+          <h4 v-if="plugin.placements?.length">Размещение</h4>
+          <SettingsField
+            v-for="slot in plugin.placements ?? []"
+            :key="slot.slot"
+            :address="address('placements', slot.slot)"
+          >
+            <UiCheckbox
+              :model-value="value('placements', slot.slot) === true"
+              @update:model-value="set('placements', slot.slot, $event === true)"
+            >
+              {{ slot.label }} · {{ slot.slot }}
+            </UiCheckbox>
+          </SettingsField>
+          <h4 v-if="plugin.settings.length">Параметры</h4>
+          <SettingsField
+            v-for="field in plugin.settings"
+            :key="field.key"
+            :address="address('values', field.key)"
+          >
+            <UiCheckbox
+              :disabled="fieldUnavailable(field.key)"
+              v-if="field.type === 'checkbox'"
+              :model-value="value('values', field.key) === true"
+              @update:model-value="set('values', field.key, $event === true)"
+            >
+              {{ field.label }}
+            </UiCheckbox>
+            <template v-else-if="field.type === 'providers'">
+              <UiCheckbox
+                :disabled="fieldUnavailable(field.key)"
+                v-for="entry in registry"
+                :key="entry.id"
+                :model-value="providerIds(field.key).includes(entry.id)"
+                @update:model-value="setProvider(field.key, entry.id, $event === true)"
+              >
+                {{ entry.name }}
+              </UiCheckbox>
+              <p v-for="id in missingProviders(field.key)" :key="id">
+                {{ id }} — нет в реестре
+                <UiButton @click="setProvider(field.key, id, false)">Убрать</UiButton>
+              </p>
+              <p>Ни один не отмечен — значит все.</p>
+            </template>
+            <template v-else-if="field.type === 'model'">
+              <UiSelect
+                :disabled="fieldUnavailable(field.key)"
+                :model-value="modelOption(field.key)"
+                :aria-label="field.label"
+                @update:model-value="setModel(field.key, $event)"
+              >
+                <option value="">— не выбрана —</option>
+                <option
+                  v-if="lostModel(field)"
+                  :value="modelOption(field.key)"
+                  disabled
+                >
+                  {{ lostModel(field) }}
+                </option>
+                <optgroup
+                  v-for="group in modelGroups(field)"
+                  :key="group.id"
+                  :label="group.name + (group.available ? '' : ' — недоступен')"
+                >
+                  <option
+                    v-for="entry in group.models"
+                    :key="entry.id"
+                    :value="modelId(group.id, entry.id)"
+                  >
+                    {{ entry.name }}
+                  </option>
+                </optgroup>
+              </UiSelect>
+              <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
+                <p>Усилие</p>
+                <UiSelect
+                  :disabled="fieldUnavailable(field.key)"
+                  :model-value="modelValue(field.key)?.effort || ''"
+                  aria-label="Усилие"
+                  @update:model-value="setEffort(field.key, $event)"
+                >
+                  <option value="">По умолчанию исполнителя</option>
+                  <option v-if="lostEffort(field.key)" :value="lostEffort(field.key)">
+                    {{ lostEffort(field.key) }} — нет у этой модели
+                  </option>
+                  <option
+                    v-for="effort in efforts(field.key)"
+                    :key="effort"
+                    :value="effort"
+                  >
+                    {{ effort }}
+                  </option>
+                </UiSelect>
+                <p>{{ selectedModel(field.key)?.effortHints?.[modelValue(field.key)?.effort || ''] }}</p>
+              </template>
+            </template>
+            <UiNumberInput
+              :disabled="fieldUnavailable(field.key)"
+              v-else-if="field.type === 'number'"
+              :model-value="numberValue(field.key)"
+              :min="field.min"
+              :max="field.max"
+              :step="field.step ?? 'any'"
+              :aria-label="field.label"
+              @update:model-value="set('values', field.key, $event)"
+            />
             <UiSelect
               :disabled="fieldUnavailable(field.key)"
-              :model-value="modelValue(field.key)?.effort || ''"
-              aria-label="Усилие"
-              @update:model-value="setEffort(field.key, $event)"
+              v-else-if="field.type === 'select'"
+              :model-value="textValue(field.key)"
+              :aria-label="field.label"
+              @update:model-value="set('values', field.key, String($event))"
             >
-              <option value="">По умолчанию исполнителя</option>
-              <option v-if="lostEffort(field.key)" :value="lostEffort(field.key)">
-                {{ lostEffort(field.key) }} — нет у этой модели
+              <option
+                v-if="!field.options?.includes(textValue(field.key))"
+                :value="textValue(field.key)"
+                disabled
+              >
+                {{ textValue(field.key) }} — нет в списке
               </option>
               <option
-                v-for="effort in efforts(field.key)"
-                :key="effort"
-                :value="effort"
+                v-for="option in field.options"
+                :key="option"
+                :value="option"
               >
-                {{ effort }}
+                {{ option }}
               </option>
             </UiSelect>
-            <p>{{ selectedModel(field.key)?.effortHints?.[modelValue(field.key)?.effort || ''] }}</p>
-          </template>
+            <UiPasswordInput
+              :disabled="fieldUnavailable(field.key)"
+              v-else-if="['password', 'secret'].includes(field.type ?? '')"
+              :model-value="textValue(field.key)"
+              :aria-label="field.label"
+              autocomplete="new-password"
+              @update:model-value="set('values', field.key, $event)"
+            />
+            <UiInput
+              :disabled="fieldUnavailable(field.key)"
+              v-else
+              :model-value="textValue(field.key)"
+              :aria-label="field.label"
+              @update:model-value="set('values', field.key, $event)"
+            />
+            <UiButton
+              v-if="fieldUnavailable(field.key)"
+              @click="discard(pluginValueKey('values', field.key))"
+            >
+              Отменить правку
+            </UiButton>
+          </SettingsField>
         </template>
-        <UiNumberInput
-          :disabled="fieldUnavailable(field.key)"
-          v-else-if="field.type === 'number'"
-          :model-value="numberValue(field.key)"
-          :min="field.min"
-          :max="field.max"
-          :step="field.step ?? 'any'"
-          :aria-label="field.label"
-          @update:model-value="set('values', field.key, $event)"
-        />
-        <UiSelect
-          :disabled="fieldUnavailable(field.key)"
-          v-else-if="field.type === 'select'"
-          :model-value="textValue(field.key)"
-          :aria-label="field.label"
-          @update:model-value="set('values', field.key, String($event))"
+        <p v-else-if="!plugin && settings.entityId">Плагин больше недоступен.</p>
+        <div v-else-if="!plugin" class="settings-plugin-empty">
+          <h4>{{ list.length ? 'Выберите плагин' : 'Плагины не установлены' }}</h4>
+          <p>
+            {{ list.length ? 'Выберите плагин в списке, чтобы изменить его параметры.'
+              : 'Установите плагин из Git, чтобы добавить возможности GrigDesk.' }}
+          </p>
+        </div>
+        <SettingsField
+          v-for="field in unavailable"
+          :key="field.key"
+          :address="field.address"
         >
-          <option
-            v-if="!field.options?.includes(textValue(field.key))"
-            :value="textValue(field.key)"
-            disabled
-          >
-            {{ textValue(field.key) }} — нет в списке
-          </option>
-          <option
-            v-for="option in field.options"
-            :key="option"
-            :value="option"
-          >
-            {{ option }}
-          </option>
-        </UiSelect>
-        <UiPasswordInput
-          :disabled="fieldUnavailable(field.key)"
-          v-else-if="['password', 'secret'].includes(field.type ?? '')"
-          :model-value="textValue(field.key)"
-          :aria-label="field.label"
-          autocomplete="new-password"
-          @update:model-value="set('values', field.key, $event)"
-        />
-        <UiInput
-          :disabled="fieldUnavailable(field.key)"
-          v-else
-          :model-value="textValue(field.key)"
-          :aria-label="field.label"
-          @update:model-value="set('values', field.key, $event)"
-        />
-        <UiButton v-if="fieldUnavailable(field.key)" @click="discard(pluginValueKey('values', field.key))">
-          Отменить правку
-        </UiButton>
-      </SettingsField>
-    </template>
-    <p v-else-if="!plugin && settings.entityId">Плагин больше недоступен.</p>
-    <SettingsField
-      v-for="field in unavailable"
-      :key="field.key"
-      :address="field.address"
-    >
-      <UiButton @click="discard(field.key)">Отменить правку</UiButton>
-    </SettingsField>
+          <UiButton @click="discard(field.key)">Отменить правку</UiButton>
+        </SettingsField>
+      </section>
+    </div>
     <PluginInstallDialog
       v-if="installOpen"
       v-model:open="installOpen"
@@ -259,6 +307,9 @@
 </template>
 
 <script setup lang="ts">
+import SettingsSection from '../SettingsSection.vue';
+import SettingsScope from '../SettingsScope.vue';
+import SettingsIcon from '../SettingsIcon.vue';
 import { computed, reactive, ref, watch, onMounted } from 'vue';
 import {
   UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton,
@@ -606,8 +657,139 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
 </script>
 
 <style scoped>
-.settings-plugin-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.settings-plugin-filters, .settings-plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-plugin { display: grid; gap: 16px; min-width: 0; align-content: start; }
-.settings-plugin p, .settings-plugin h4 { margin: 0; }
+.settings-plugin {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  align-content: start;
+}
+.settings-plugin-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-plugin-filters > :first-child {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.settings-plugin-workspace {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 24px;
+  min-width: 0;
+}
+.settings-plugin-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+.settings-plugin-catalog {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.settings-plugin-list {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.settings-plugin-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+.settings-plugin-actions {
+  display: grid;
+  gap: 8px;
+}
+.settings-plugin-picker {
+  display: none;
+}
+.settings-plugin-editor {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  min-width: 0;
+}
+.settings-plugin-editor > h4 {
+  padding: 20px 0 8px;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-plugin p, .settings-plugin h4 {
+  margin: 0;
+}
+.settings-plugin-editor > p {
+  padding: 10px 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.settings-plugin-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.settings-plugin-title h4 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.settings-plugin-title > span {
+  color: var(--ink-low);
+  font-size: 11px;
+}
+.settings-plugin-title p {
+  flex-basis: 100%;
+  max-width: 70ch;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-plugin-empty {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding-block: 16px;
+}
+.settings-plugin-empty h4 {
+  font-size: 14px;
+  font-weight: 500;
+}
+.settings-plugin-empty p {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 1000px) {
+  .settings-plugin-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-plugin-sidebar {
+    padding: 0 0 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    gap: 10px;
+  }
+  .settings-plugin-catalog {
+    display: none;
+  }
+  .settings-plugin-picker {
+    display: block;
+  }
+  .settings-plugin-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
 </style>

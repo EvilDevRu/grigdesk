@@ -15,23 +15,36 @@
       :tabindex="focusId === node.id ? 0 : -1"
       :data-settings-node="node.id"
       :data-dirty="dirty(node.id, node.group)"
+      data-ui-settings-node
       class="settings-tree-node"
       @focus="focusId = node.id"
       @click="activate(node)"
       @keydown="onKey($event, node)"
     >
-      <span>{{ node.group ? (settings.expandedGroups.includes(node.id) ? '▾' : '▸') : '' }}</span>
-      <span>{{ node.label }}</span>
-      <span v-if="dirty(node.id, node.group)" aria-label="Есть изменения">•</span>
+      <SettingsIcon v-if="node.group" :name="node.id" />
+      <span v-else class="settings-tree-branch" aria-hidden="true" />
+      <span class="settings-tree-label">{{ node.label }}</span>
+      <span v-if="dirty(node.id, node.group)" class="settings-tree-dirty" aria-label="Есть изменения" />
+      <svg
+        v-if="node.group"
+        class="settings-tree-chevron"
+        :data-expanded="settings.expandedGroups.includes(node.id)"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="m6 4 4 4-4 4" stroke="currentColor" stroke-width="1.5" />
+      </svg>
     </UiPressable>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { UiPressable } from '../../ui.ts';
 import { SETTINGS_GROUPS, SETTINGS_PAGES } from '../../features/settings/catalog.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
+import SettingsIcon from './SettingsIcon.vue';
 
 interface TreeNode {
   id: string;
@@ -45,6 +58,8 @@ const emit = defineEmits<{ select: [] }>();
 const settings = useSettingsStore();
 const tree = ref<HTMLElement>();
 const focusId = ref(settings.pageId);
+let resizeObserver: ResizeObserver | undefined;
+
 const nodes = computed<TreeNode[]>(() => SETTINGS_GROUPS.flatMap((group) => [
   {
     ...group,
@@ -64,7 +79,16 @@ const nodes = computed<TreeNode[]>(() => SETTINGS_GROUPS.flatMap((group) => [
 
 watch(() => settings.pageId, (id) => {
   focusId.value = id;
-});
+  revealSelection();
+}, { flush: 'post' });
+
+/**
+ * Переход из поиска или внешнего действия может выбрать пункт далеко внизу дерева.
+ * Показываем выбранную строку без переноса фокуса из редактируемого поля.
+ */
+function revealSelection(): void {
+  tree.value?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+}
 
 function dirty(id: string, group: boolean): boolean {
   return settings.snapshot.resources.some((resource) => resource.fields.some((field) =>
@@ -129,10 +153,53 @@ function onKey(event: KeyboardEvent, node: TreeNode): void {
     element?.focus();
   }
 }
+
+onMounted(() => {
+  revealSelection();
+
+  if (typeof ResizeObserver !== 'undefined' && tree.value?.parentElement) {
+    resizeObserver = new ResizeObserver(revealSelection);
+    resizeObserver.observe(tree.value.parentElement);
+  }
+});
+
+onBeforeUnmount(() => resizeObserver?.disconnect());
 </script>
 
 <style scoped>
-.settings-tree { display: grid; align-content: start; gap: 4px; min-width: 0; }
-.settings-tree-node { display: flex; gap: 8px; align-items: center; text-align: start; }
-.settings-tree-node[aria-level='2'] { margin-left: 20px; }
+.settings-tree {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+}
+.settings-tree-node {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: start;
+}
+.settings-tree-label {
+  flex: 1;
+  min-width: 0;
+}
+.settings-tree-branch {
+  width: 20px;
+  flex: none;
+}
+.settings-tree-chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.settings-tree-chevron[data-expanded='true'] {
+  transform: rotate(90deg);
+}
+.settings-tree-dirty {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
 </style>

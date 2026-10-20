@@ -128,7 +128,7 @@ async function mountSettings(t, { value = null, plugin = INBOX_PLUGIN, preparePr
     plugins: { plugin: state.plugins.byId(plugin.id) },
     saved,
     apply: () => state.settings.apply(),
-    select: state.wrapper.find('select[aria-label]:not([aria-label="Состояние плагинов"])'),
+    select: state.wrapper.find('[data-settings-field] select[aria-label]'),
   };
 }
 

@@ -1,8 +1,13 @@
 <template>
   <div
     ref="element"
+    class="settings-field"
+    data-ui-settings-field
+    :data-layout="layout"
     :data-settings-field="JSON.stringify(address)"
     :data-revealed="revealed || undefined"
+    :data-dirty="field?.dirty || undefined"
+    :data-conflict="field?.conflict || undefined"
   >
     <UiField
       :label="metadata?.label"
@@ -11,7 +16,7 @@
     >
       <slot />
     </UiField>
-    <p v-if="field?.conflict" role="status">Параметр изменён снаружи.</p>
+    <UiInlineMessage v-if="field?.conflict" tone="warning">Параметр изменён снаружи.</UiInlineMessage>
     <div v-if="field?.conflict" class="settings-field-actions">
       <UiButton @click="resolve('take-current')">Взять текущее</UiButton>
       <UiButton @click="resolve('keep-mine')">Оставить моё</UiButton>
@@ -21,12 +26,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUpdated, ref, watch } from 'vue';
-import { UiField, UiButton } from '../../ui.ts';
+import { UiField, UiButton, UiInlineMessage } from '../../ui.ts';
 import { equalFieldAddress } from '../../features/settings/catalog.ts';
 import type { FieldAddress } from '../../features/settings/contracts.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
 
-const props = defineProps<{ address: FieldAddress }>();
+const props = withDefaults(defineProps<{
+  address: FieldAddress;
+  layout?: 'row' | 'stack';
+}>(), { layout: 'row' });
 const settings = useSettingsStore();
 const element = ref<HTMLElement>();
 const revealed = ref(false);
@@ -63,5 +71,25 @@ watch(() => settings.revealTarget, reveal, { flush: 'post' });
 </script>
 
 <style scoped>
-.settings-field-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-field {
+  container: settings-field / inline-size;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-block: 16px;
+}
+.settings-field[data-dirty='true'], .settings-field[data-revealed='true'] {
+  border-bottom-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+}
+.settings-field[data-conflict='true'] {
+  border-bottom-color: var(--warn);
+}
+.settings-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 </style>

@@ -9,6 +9,12 @@
       {{ status.listener.error || 'Вход по сети выключен: задайте GRIGDESK_CLIENT_LISTEN и перезапустите сервер.' }}
     </UiInlineMessage>
     <p v-else-if="status">Адреса входа: {{ status.listener.addresses.join(', ') }}</p>
+    <p v-if="loading" role="status">Загрузка устройств…</p>
+    <div v-else-if="status && !status.devices.length" class="devices-empty">
+      <SettingsIcon name="connections" />
+      <strong>Устройства ещё не добавлены</strong>
+      <p>Добавьте устройство и используйте код или QR для подключения приложения.</p>
+    </div>
     <article v-for="device in status?.devices ?? []" :key="device.id" class="device-row">
       <div>
         <strong>{{ device.name }}{{ device.id === status?.currentDeviceId ? " · это устройство" : "" }}</strong>
@@ -29,6 +35,7 @@ import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { UiButton, UiInlineMessage, confirmDialog } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import PairDeviceDialog from './PairDeviceDialog.vue';
+import SettingsIcon from './SettingsIcon.vue';
 
 interface DeviceRow {
   id: string;
@@ -111,12 +118,57 @@ onBeforeUnmount(() => controller.abort());
 .devices-panel {
   display: grid;
   gap: 16px;
-  margin-bottom: 24px;
+  width: 100%;
+  min-width: 0;
 }
 .devices-heading, .device-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
+}
+.devices-heading {
+  flex-wrap: wrap;
+}
+.devices-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.devices-panel p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.device-row {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.device-row > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.devices-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--control-radius);
+  text-align: center;
+}
+.devices-empty svg {
+  color: var(--accent);
+}
+.devices-empty strong {
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .device-row {
+    flex-wrap: wrap;
+  }
 }
 </style>

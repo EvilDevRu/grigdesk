@@ -1,6 +1,6 @@
 <template>
   <div class="settings-diagnostics">
-    <p>Все устройства · Изменения сохранятся по «Применить».</p>
+    <SettingsScope />
     <p v-if="error" role="alert">{{ error }}</p>
     <SettingsField
       v-for="field in fields"
@@ -23,7 +23,9 @@
       </UiSelect>
     </SettingsField>
     <p v-if="details">Действует: {{ details.effective }} · источник: {{ details.source }}</p>
-    <WebLogPanel v-if="active" />
+    <SettingsSection>
+      <WebLogPanel v-if="active" />
+    </SettingsSection>
   </div>
 </template>
 
@@ -38,6 +40,8 @@ import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
 import { createFactoryDebugAdapter } from '../../../features/settings/resources/factoryDebug.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import SettingsField from '../SettingsField.vue';
+import SettingsScope from '../SettingsScope.vue';
+import SettingsSection from '../SettingsSection.vue';
 import WebLogPanel from '../WebLogPanel.vue';
 
 const props = defineProps<{ active: boolean }>();
@@ -117,5 +121,15 @@ watch(() => props.active, load, { immediate: true });
 </script>
 
 <style scoped>
-.settings-diagnostics { display: grid; gap: 20px; align-content: start; max-width: 760px; }
+.settings-diagnostics {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+.settings-diagnostics > p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
 </style>

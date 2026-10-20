@@ -4,7 +4,7 @@
     :data-settings-speech-page="settings.pageId"
     :data-ready="loaded"
   >
-    <p>Все устройства · Изменения сохранятся по «Применить».</p>
+    <SettingsScope />
     <p v-if="error || operations.message.value" role="alert">{{ error || operations.message.value }}</p>
     <p v-if="!loaded">Загрузка речи…</p>
     <template v-else>
@@ -35,13 +35,12 @@
             </option>
           </UiSelect>
         </SettingsField>
-        <section>
-          <h4>Фактический путь</h4>
+        <SettingsSection heading="Как обрабатывается речь">
           <p>{{ effectivePath }}</p>
           <p>Локальная модель браузера: {{ browserStatusLabel }}.</p>
           <p>Согласие на браузерную обработку: {{ view.browserAutoConsent ? 'получено' : 'не получено' }}.</p>
           <p>Диктовка: {{ dictationModel }} · видео: {{ videoModel }}.</p>
-        </section>
+        </SettingsSection>
       </template>
       <template v-else-if="settings.pageId === 'speech.video'">
         <SettingsField :address="address('videoQuality')">
@@ -93,12 +92,12 @@
       <template v-else-if="settings.pageId === 'speech.models'">
         <p>Скачивание, копирование и отмена выполняются сразу. Они продолжаются после ухода со страницы.</p>
         <p v-if="!view.capabilities.models.length">Сервер пока не сообщил каталог моделей.</p>
-        <section
+        <SettingsSection
           v-for="model in view.capabilities.models"
           :key="model.modelId"
           class="settings-speech-model"
+          :heading="model.modelId"
         >
-          <h4>{{ model.modelId }}</h4>
           <p>
             {{ model.repo }} · {{ model.cached ? 'В кэше' : 'Не скачана' }} · {{ modelSize(model.sizeMb) }}
           </p>
@@ -139,10 +138,10 @@
           <p v-if="operations.jobFor(model.modelId)?.error" role="alert">
             {{ operations.jobFor(model.modelId)?.error }}
           </p>
-        </section>
+        </SettingsSection>
       </template>
       <template v-else-if="settings.pageId === 'speech.advanced'">
-        <div class="settings-speech-fields">
+        <SettingsSection heading="Модели распознавания">
           <SettingsField
             v-for="key in ['model', 'videoModel']"
             :key="key"
@@ -159,6 +158,8 @@
               </option>
             </UiSelect>
           </SettingsField>
+        </SettingsSection>
+        <SettingsSection heading="Обработка на сервере">
           <SettingsField :address="address('device')">
             <UiSelect :model-value="text('device')" @update:model-value="edit('device', $event)">
               <option value="auto">Автоматически</option>
@@ -186,6 +187,7 @@
               :model-value="number('beamSize')"
               :min="1"
               :max="10"
+              placeholder="По пресету"
               @update:model-value="edit('beamSize', $event === '' ? null : $event)"
             />
           </SettingsField>
@@ -203,9 +205,8 @@
               @update:model-value="edit('conditionOnPreviousText', $event)"
             />
           </SettingsField>
-        </div>
-        <section>
-          <h4>Окружение и замер</h4>
+        </SettingsSection>
+        <SettingsSection heading="Окружение и замер">
           <p>
             Whisper:
             {{ view.capabilities.local.ready ? 'Готов' : view.capabilities.local.reason || 'Не готов' }}.
@@ -222,9 +223,8 @@
             .
           </p>
           <UiButton :disabled="refreshing" @click="refresh">Перепроверить окружение и кэш</UiButton>
-        </section>
-        <section>
-          <h4>Замер на эталонной записи</h4>
+        </SettingsSection>
+        <SettingsSection heading="Замер на эталонной записи">
           <p>
             Модель {{ benchmarkParameters.modelId }} · {{ benchmarkParameters.language }} ·
             {{ benchmarkParameters.device }} · {{ benchmarkParameters.computeType }}.
@@ -254,7 +254,7 @@
             <p v-if="benchmarkJob.error" role="alert">{{ benchmarkJob.error }}</p>
             <p v-if="benchmarkJob.status === 'done'">{{ speechBenchmarkText(benchmarkJob) }}</p>
           </template>
-        </section>
+        </SettingsSection>
       </template>
     </template>
   </div>
@@ -262,6 +262,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import SettingsScope from '../SettingsScope.vue';
+import SettingsSection from '../SettingsSection.vue';
 import { UiButton, UiSelect, UiTextarea, UiNumberInput, UiSwitch, UiProgress } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
@@ -516,11 +518,32 @@ onBeforeUnmount(() => operations.setActive(false));
 </script>
 
 <style scoped>
-.settings-speech { display: grid; gap: 20px; align-content: start; max-width: 900px; min-width: 0; }
-.settings-speech-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.settings-speech-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-speech-model { display: grid; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 600px) {
-  .settings-speech-fields { grid-template-columns: minmax(0, 1fr); }
+.settings-speech {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 0;
+}
+.settings-speech > p {
+  margin: 10px 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-speech > .settings-section {
+  margin-top: 24px;
+}
+.settings-speech > :deep(.ui-button) {
+  justify-self: start;
+  margin-top: 12px;
+}
+.settings-speech-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-speech-model {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 </style>

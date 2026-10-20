@@ -5,265 +5,335 @@
     :data-ready="ready"
   >
     <p v-if="error" role="alert">{{ error }}</p>
-    <div class="settings-provider-list">
-      <section
-        v-for="group in groups"
-        :key="group.id"
-        :data-executor-type="group.id"
-      >
-        <h4>{{ group.label }}</h4>
-        <p>{{ group.hint }}</p>
+    <aside class="settings-provider-sidebar" aria-label="Выбор исполнителя">
+      <div class="settings-provider-picker">
+        <UiSelect
+          :model-value="selected?.id || ''"
+          aria-label="Выберите исполнителя"
+          @update:model-value="selectProvider(String($event))"
+        >
+          <optgroup v-for="group in groups" :key="group.id" :label="group.label">
+            <option v-for="entry in group.providers" :key="entry.id" :value="entry.id">
+              {{ entry.name }}{{ entry.available ? '' : ' — недоступен' }}
+            </option>
+          </optgroup>
+        </UiSelect>
+      </div>
+      <div class="settings-provider-list">
+        <SettingsSection
+          v-for="group in groups"
+          :key="group.id"
+          :data-executor-type="group.id"
+          :heading="group.label"
+        >
+          <div class="settings-provider-options">
+            <UiButton
+              v-for="entry in group.providers"
+              :key="entry.id"
+              :data-select-provider="entry.id"
+              :pressed="selected?.id === entry.id"
+              data-ui-settings-catalog
+              @click="selectProvider(entry.id)"
+            >
+              <template #leading><ProviderIcon :provider="entry" :size="20" /></template>
+              <span class="ui-settings-catalog-copy">
+                <span class="ui-settings-catalog-title">{{ entry.name }}</span>
+                <span class="ui-settings-catalog-status" :data-available="entry.available">
+                  {{ entry.available ? 'Доступен' : 'Недоступен' }}
+                  <span v-if="entry.updateAvailable"> · Есть обновление</span>
+                  <span v-if="dirtyProvider(entry.id)"> · Не применено</span>
+                </span>
+              </span>
+            </UiButton>
+          </div>
+        </SettingsSection>
+      </div>
+      <div class="settings-provider-actions">
         <UiButton
-          v-for="entry in group.providers"
-          :key="entry.id"
-          :data-select-provider="entry.id"
-          :aria-pressed="selected?.id === entry.id"
-          @click="selectProvider(entry.id)"
+          variant="ghost"
+          data-ui-settings-sidebar-action
+          :disabled="refreshing"
+          @click="refreshRegistry"
         >
-          {{ entry.name }} · {{ entry.available ? 'Доступен' : 'Недоступен' }}
-          <span v-if="entry.updateAvailable">· Есть обновление</span>
-          <span v-if="dirtyProvider(entry.id)">· Не применено</span>
+          Перепроверить
         </UiButton>
-      </section>
-    </div>
-    <div class="settings-provider-actions">
-      <UiButton :disabled="refreshing" @click="refreshRegistry">Перепроверить</UiButton>
-      <UiButton :disabled="checking" @click="checkUpdates">Проверить обновления</UiButton>
-    </div>
-    <template v-if="selected">
-      <h4>{{ selected.name }}</h4>
-      <UiTabs
-        data-ui-workspace-tabs
-        :model-value="tab"
-        label="Параметры исполнителя"
-        @update:model-value="selectTab"
-      >
-        <UiTab
-          v-for="item in tabs"
-          :key="item.id"
-          :value="item.id"
+        <UiButton
+          variant="ghost"
+          data-ui-settings-sidebar-action
+          :disabled="checking"
+          @click="checkUpdates"
         >
-          {{ item.label }}
-        </UiTab>
-      </UiTabs>
-      <p v-if="!ready">Загрузка…</p>
-      <template v-else-if="tab === 'access'">
-        <p>Все устройства · Ключи и режим доступа изменятся после «Применить».</p>
-        <div v-for="field in visibleCredentials" :key="field.env">
-          <SettingsField :address="fieldAddress('credentials', field.env)">
-            <template v-if="field.kind === 'secret'">
-              <UiPasswordInput
+          Проверить обновления
+        </UiButton>
+      </div>
+    </aside>
+    <section class="settings-provider-editor" aria-label="Настройки выбранного исполнителя">
+      <template v-if="selected">
+        <div class="settings-provider-title">
+          <ProviderIcon :provider="selected" :size="22" />
+          <h4>{{ selected.name }}</h4>
+          <span class="settings-provider-status">{{ selected.available ? 'Доступен' : 'Недоступен' }}</span>
+        </div>
+        <UiTabs
+          data-ui-settings-tabs
+          :model-value="tab"
+          label="Параметры исполнителя"
+          @update:model-value="selectTab"
+        >
+          <UiTab
+            v-for="item in tabs"
+            :key="item.id"
+            :value="item.id"
+          >
+            {{ item.label }}
+          </UiTab>
+        </UiTabs>
+        <p v-if="!ready">Загрузка…</p>
+        <template v-else-if="tab === 'access'">
+          <SettingsScope>Ключи и режим доступа изменятся после «Применить».</SettingsScope>
+          <div v-for="field in visibleCredentials" :key="field.env">
+            <SettingsField :address="fieldAddress('credentials', field.env)">
+              <template v-if="field.kind === 'secret'">
+                <UiPasswordInput
+                  :model-value="credentialText(field.env)"
+                  autocomplete="new-password"
+                  :aria-label="field.label"
+                  :placeholder="credentialPlaceholder(field)"
+                  @update:model-value="editCredential(field.env, $event)"
+                />
+                <p v-if="field.set && field.inFile === false">Ключ задан вне файла настроек службы.</p>
+                <UiButton
+                  v-if="field.inFile === true"
+                  data-delete-key
+                  @click="deleteKey(field)"
+                >
+                  Удалить ключ
+                </UiButton>
+                <p v-if="secretRemoval(field.env)">Ключ будет удалён после «Применить».</p>
+              </template>
+              <UiSegmentedControl
+                v-else-if="(field.options?.length ?? 0) <= 4"
                 :model-value="credentialText(field.env)"
-                autocomplete="new-password"
-                :aria-label="field.label"
-                :placeholder="credentialPlaceholder(field)"
+                :options="field.options"
+                :label="field.label"
                 @update:model-value="editCredential(field.env, $event)"
               />
-              <p v-if="field.set && field.inFile === false">Ключ задан вне файла настроек службы.</p>
-              <UiButton
-                v-if="field.inFile === true"
-                data-delete-key
-                @click="deleteKey(field)"
+              <UiSelect
+                v-else
+                :model-value="credentialText(field.env)"
+                :aria-label="field.label"
+                @update:model-value="editCredential(field.env, $event)"
               >
-                Удалить ключ
-              </UiButton>
-              <p v-if="secretRemoval(field.env)">Ключ будет удалён после «Применить».</p>
-            </template>
-            <UiSegmentedControl
-              v-else-if="(field.options?.length ?? 0) <= 4"
-              :model-value="credentialText(field.env)"
-              :options="field.options"
-              :label="field.label"
-              @update:model-value="editCredential(field.env, $event)"
-            />
-            <UiSelect
-              v-else
-              :model-value="credentialText(field.env)"
-              :aria-label="field.label"
-              @update:model-value="editCredential(field.env, $event)"
-            >
-              <option
-                v-for="option in field.options"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </UiSelect>
-            <p v-if="field.kind === 'choice'">
-              {{ field.options?.find((item) => item.value === credentialText(field.env))?.hint }}
-            </p>
-          </SettingsField>
-        </div>
-        <div v-for="field in hiddenCredentialDrafts" :key="field.env">
-          <SettingsField :address="fieldAddress('credentials', field.env)">
-            <p>Поле скрыто выбранным режимом. Вернитесь к нему или отмените неприменённую правку.</p>
-            <UiButton @click="settings.discardField(credentialsId, field.env)">Отменить правку</UiButton>
-          </SettingsField>
-        </div>
-        <p v-if="!selected.credentials?.length">У этого исполнителя нет редактируемых ключей доступа.</p>
-      </template>
-      <template v-else-if="ready && tab === 'parameters'">
-        <p>Для следующих запусков · Изменения сохранятся по «Применить».</p>
-        <SettingsField
-          v-for="field in selected.settings ?? []"
-          :key="field.id"
-          :address="fieldAddress('settings', field.id)"
-          :data-ordinary="field.id"
-        >
-          <UiSwitch
-            v-if="field.kind === 'toggle'"
-            :model-value="ordinaryValue(field.id) === true"
-            :disabled="field.disabled || confirming === field.id"
-            :aria-label="field.label"
-            @update:model-value="editOrdinary(field, $event)"
-          />
-          <UiInput
-            v-else-if="field.kind === 'text'"
-            :model-value="String(ordinaryValue(field.id) ?? '')"
-            :disabled="field.disabled"
-            :aria-label="field.label"
-            @update:model-value="editOrdinary(field, $event)"
-          />
-          <UiRange
-            v-else-if="field.kind === 'range' && typeof field.max === 'number'"
-            :model-value="Number(ordinaryNumber(field.id))"
-            :min="field.min ?? 0"
-            :max="field.max"
-            :step="field.step ?? 1"
-            :disabled="field.disabled"
-            :aria-label="field.label"
-            @update:model-value="editOrdinary(field, $event)"
-          />
-          <UiNumberInput
-            v-else
-            :model-value="ordinaryNumber(field.id)"
-            :min="field.min"
-            :max="field.max"
-            :step="field.step ?? 'any'"
-            :disabled="field.disabled"
-            :aria-label="field.label"
-            @update:model-value="editOrdinary(field, $event)"
-          />
-          <p v-if="field.note">{{ field.note }}</p>
-        </SettingsField>
-        <template v-if="selected.settingsCatalog">
-          <UiDisclosureButton v-model:open="showNative" :controls="nativePanelId">
-            Дополнительные параметры
-          </UiDisclosureButton>
-          <section
-            v-if="showNative"
-            :id="nativePanelId"
-            class="settings-native-panel"
-          >
-            <p v-if="nativeState.loading">Загрузка каталога…</p>
-            <p v-if="nativeState.error" role="alert">{{ nativeState.error }}</p>
-            <template v-if="nativeState.catalog">
-              <p>{{ nativeState.catalog.scope.label }} · Сохранение для следующего запуска.</p>
-              <UiInput
-                v-model="nativeQuery"
-                type="search"
-                aria-label="Найти дополнительный параметр"
-              />
-              <UiButton :disabled="nativeState.loading" @click="reloadNative">Перепроверить каталог</UiButton>
-              <SettingsNativeEditor
-                v-for="field in nativeView.editable"
-                :key="field.id"
-                :field="field"
-                :provider-id="selected.id"
-                :expand="Boolean(nativeQuery)"
-              />
-              <p v-if="!nativeView.editableCount">Нет доступных параметров по этому запросу.</p>
-              <SettingsField
-                v-for="field in nativeState.catalog.inactiveOverrides"
-                :key="field.id"
-                :address="fieldAddress('native', field.path)"
-              >
-                <p>{{ field.reason }}</p>
-                <UiButton @click="settings.unsetField(nativeId, field.id)">Удалить выбор</UiButton>
-              </SettingsField>
-            </template>
-          </section>
+                <option
+                  v-for="option in field.options"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </UiSelect>
+              <p v-if="field.kind === 'choice'">
+                {{ field.options?.find((item) => item.value === credentialText(field.env))?.hint }}
+              </p>
+            </SettingsField>
+          </div>
+          <div v-for="field in hiddenCredentialDrafts" :key="field.env">
+            <SettingsField :address="fieldAddress('credentials', field.env)">
+              <p>Поле скрыто выбранным режимом. Вернитесь к нему или отмените неприменённую правку.</p>
+              <UiButton @click="settings.discardField(credentialsId, field.env)">Отменить правку</UiButton>
+            </SettingsField>
+          </div>
+          <p v-if="!selected.credentials?.length">У этого исполнителя нет редактируемых ключей доступа.</p>
         </template>
-      </template>
-      <template v-else-if="ready && tab === 'overview'">
-        <p>{{ selected.vendor }} · {{ selected.kind === 'api' ? 'API' : 'CLI' }} · {{ selected.version }}</p>
-        <p>{{ selected.authLabel }}</p>
-        <p v-if="normalizeExecutorType(selected.type) === 'universal' && selected.chatEnabled === false">
-          Установка доступна; подключение к чатам пока не включено.
-        </p>
-        <p v-if="selected.distribution">
-          {{ selected.distribution.label }} ·
-          {{ selected.distribution.ready ? 'Сборка готова' : 'Сборка недоступна' }}
-        </p>
-        <p v-if="selected.distribution?.authHint && selected.installed && !selected.available">
-          Авторизация: {{ selected.distribution.authHint }}
-        </p>
-        <div v-if="selected.distribution?.problem && !selected.distribution.ready">
-          <p>{{ selected.distribution.problem.message }}</p>
-          <UiCommandButton
-            v-if="selected.distribution.problem.command"
-            @click="terminal(selected.distribution.problem.command)"
+        <template v-else-if="ready && tab === 'parameters'">
+          <SettingsScope scope="Для следующих запусков" />
+          <SettingsField
+            v-for="field in selected.settings ?? []"
+            :key="field.id"
+            :address="fieldAddress('settings', field.id)"
+            :data-ordinary="field.id"
           >
-            {{ selected.distribution.problem.command }}
+            <UiSwitch
+              v-if="field.kind === 'toggle'"
+              :model-value="ordinaryValue(field.id) === true"
+              :disabled="field.disabled || confirming === field.id"
+              :aria-label="field.label"
+              @update:model-value="editOrdinary(field, $event)"
+            />
+            <UiInput
+              v-else-if="field.kind === 'text'"
+              :model-value="String(ordinaryValue(field.id) ?? '')"
+              :disabled="field.disabled"
+              :aria-label="field.label"
+              @update:model-value="editOrdinary(field, $event)"
+            />
+            <UiRange
+              v-else-if="field.kind === 'range' && typeof field.max === 'number'"
+              :model-value="Number(ordinaryNumber(field.id))"
+              :min="field.min ?? 0"
+              :max="field.max"
+              :step="field.step ?? 1"
+              :disabled="field.disabled"
+              :aria-label="field.label"
+              @update:model-value="editOrdinary(field, $event)"
+            />
+            <UiNumberInput
+              v-else
+              :model-value="ordinaryNumber(field.id)"
+              :min="field.min"
+              :max="field.max"
+              :step="field.step ?? 'any'"
+              :disabled="field.disabled"
+              :aria-label="field.label"
+              @update:model-value="editOrdinary(field, $event)"
+            />
+            <p v-if="field.note">{{ field.note }}</p>
+          </SettingsField>
+          <template v-if="selected.settingsCatalog">
+            <UiDisclosureButton v-model:open="showNative" :controls="nativePanelId">
+              Дополнительные параметры
+            </UiDisclosureButton>
+            <section
+              v-if="showNative"
+              :id="nativePanelId"
+              class="settings-native-panel"
+            >
+              <p v-if="nativeState.loading">Загрузка каталога…</p>
+              <p v-if="nativeState.error" role="alert">{{ nativeState.error }}</p>
+              <template v-if="nativeState.catalog">
+                <p>{{ nativeState.catalog.scope.label }} · Сохранение для следующего запуска.</p>
+                <UiInput
+                  v-model="nativeQuery"
+                  type="search"
+                  aria-label="Найти дополнительный параметр"
+                />
+                <UiButton :disabled="nativeState.loading" @click="reloadNative">
+                  Перепроверить каталог
+                </UiButton>
+                <SettingsNativeEditor
+                  v-for="field in nativeView.editable"
+                  :key="field.id"
+                  :field="field"
+                  :provider-id="selected.id"
+                  :expand="Boolean(nativeQuery)"
+                />
+                <p v-if="!nativeView.editableCount">Нет доступных параметров по этому запросу.</p>
+                <SettingsField
+                  v-for="field in nativeState.catalog.inactiveOverrides"
+                  :key="field.id"
+                  :address="fieldAddress('native', field.path)"
+                >
+                  <p>{{ field.reason }}</p>
+                  <UiButton @click="settings.unsetField(nativeId, field.id)">Удалить выбор</UiButton>
+                </SettingsField>
+              </template>
+            </section>
+          </template>
+        </template>
+        <template v-else-if="ready && tab === 'overview'">
+          <dl class="settings-provider-facts">
+            <div>
+              <dt>Подключение</dt>
+              <dd>{{ selected.kind === 'api' ? 'API' : 'Командная строка' }}</dd>
+            </div>
+            <div v-if="selected.vendor">
+              <dt>Разработчик</dt>
+              <dd>{{ selected.vendor }}</dd>
+            </div>
+            <div v-if="selected.version">
+              <dt>Версия</dt>
+              <dd>{{ selected.version }}</dd>
+            </div>
+            <div>
+              <dt>Доступ</dt>
+              <dd>{{ selected.authLabel || (selected.available ? 'Доступен' : 'Требуется настройка') }}</dd>
+            </div>
+          </dl>
+          <p v-if="normalizeExecutorType(selected.type) === 'universal' && selected.chatEnabled === false">
+            Установка доступна; подключение к чатам пока не включено.
+          </p>
+          <p v-if="selected.distribution">
+            {{ selected.distribution.label }} ·
+            {{ selected.distribution.ready ? 'Сборка готова' : 'Сборка недоступна' }}
+          </p>
+          <p v-if="selected.distribution?.authHint && selected.installed && !selected.available">
+            Авторизация: {{ selected.distribution.authHint }}
+          </p>
+          <div v-if="selected.distribution?.problem && !selected.distribution.ready">
+            <p>{{ selected.distribution.problem.message }}</p>
+            <UiCommandButton
+              v-if="selected.distribution.problem.command"
+              @click="terminal(selected.distribution.problem.command)"
+            >
+              {{ selected.distribution.problem.command }}
+            </UiCommandButton>
+          </div>
+          <UiCommandButton
+            v-if="!selected.available && (selected.setupCommand || selected.install)"
+            @click="terminal(selected.setupCommand || selected.install || '')"
+          >
+            {{ selected.installed ? 'Авторизация' : 'Установка' }}:
+            {{ selected.setupCommand || selected.install }}
           </UiCommandButton>
-        </div>
-        <UiCommandButton
-          v-if="!selected.available && (selected.setupCommand || selected.install)"
-          @click="terminal(selected.setupCommand || selected.install || '')"
-        >
-          {{ selected.installed ? 'Авторизация' : 'Установка' }}:
-          {{ selected.setupCommand || selected.install }}
-        </UiCommandButton>
-        <section v-if="resources.length" data-provider-usage>
-          <h4>Ресурсы исполнителя</h4>
-          <ProviderUsageResources :provider-id="selected.id" :resources="resources" />
-        </section>
-        <UiButton
-          v-if="selected.installed && selected.canUpdate"
-          :disabled="Boolean(providers.updating)"
-          @click="providers.updateCli(selected.id)"
-        >
-          Обновить CLI
-        </UiButton>
-        <p v-if="updateResult">{{ updateResult.text }}</p>
+          <section v-if="resources.length" data-provider-usage>
+            <h4>Ресурсы исполнителя</h4>
+            <ProviderUsageResources :provider-id="selected.id" :resources="resources" />
+          </section>
+          <UiButton
+            v-if="selected.installed && selected.canUpdate"
+            :disabled="Boolean(providers.updating)"
+            @click="providers.updateCli(selected.id)"
+          >
+            Обновить CLI
+          </UiButton>
+          <p v-if="updateResult">{{ updateResult.text }}</p>
+        </template>
+        <template v-else-if="ready && tab === 'models'">
+          <p>Каталог исполнителя · Только чтение. Общая видимость задаётся на странице «Модели».</p>
+          <div v-for="model in selected.models ?? []" :key="model.id" class="settings-provider-model">
+            <strong>{{ model.name }}</strong>
+            <code>{{ model.id }}</code>
+            <span v-if="model.extra || model.hidden">· Скрыта из краткого списка</span>
+            <span v-if="model.unknown">· Неизвестна CLI</span>
+            <span v-if="model.efforts?.length">Усилие: {{ model.efforts.join(', ') }}</span>
+          </div>
+        </template>
+        <ProviderMcpStatus
+          v-else-if="ready && tab === 'mcp' && selected.mcp && selected.installed"
+          :provider-id="selected.id"
+          :provider-name="selected.name"
+          :status="mcpStatus"
+          @refresh="providers.loadMcp(selected.id, true)"
+        />
+        <p v-else-if="ready">Исполнитель не объявил эту возможность.</p>
       </template>
-      <template v-else-if="ready && tab === 'models'">
-        <p>Каталог исполнителя · Только чтение. Общая видимость задаётся на странице «Модели».</p>
-        <p v-for="model in selected.models ?? []" :key="model.id">
-          {{ model.name }} · {{ model.id }}
-          <span v-if="model.extra || model.hidden">· Скрыта из краткого списка</span>
-          <span v-if="model.unknown">· Неизвестна CLI</span>
-          <span v-if="model.efforts?.length">· Усилие: {{ model.efforts.join(', ') }}</span>
-        </p>
-      </template>
-      <ProviderMcpStatus
-        v-else-if="ready && tab === 'mcp' && selected.mcp && selected.installed"
-        :provider-id="selected.id"
-        :provider-name="selected.name"
-        :status="mcpStatus"
-        @refresh="providers.loadMcp(selected.id, true)"
-      />
-      <p v-else-if="ready">Исполнитель не объявил эту возможность.</p>
-    </template>
-    <p v-else-if="settings.entityId">Исполнитель больше недоступен в реестре.</p>
-    <div v-for="item in orphaned" :key="`${item.resourceId}:${item.field.key}`">
-      <SettingsField :address="item.field.address">
-        <p>{{ item.field.unavailable }}</p>
-        <UiButton
-          v-if="item.resourceId === nativeId"
-          @click="settings.unsetField(item.resourceId, item.field.key)"
-        >
-          Сбросить
-        </UiButton>
-        <UiButton @click="settings.discardField(item.resourceId, item.field.key)">Отменить правку</UiButton>
-      </SettingsField>
-    </div>
+      <p v-else-if="settings.entityId">Исполнитель больше недоступен в реестре.</p>
+      <p v-else-if="!providers.loaded" role="status">Загрузка исполнителей…</p>
+      <div v-else class="settings-provider-empty">
+        <h4>Исполнители не найдены</h4>
+        <p>Нажмите «Перепроверить», чтобы заново получить список доступных исполнителей.</p>
+      </div>
+      <div v-for="item in orphaned" :key="`${item.resourceId}:${item.field.key}`">
+        <SettingsField :address="item.field.address">
+          <p>{{ item.field.unavailable }}</p>
+          <UiButton
+            v-if="item.resourceId === nativeId"
+            @click="settings.unsetField(item.resourceId, item.field.key)"
+          >
+            Сбросить
+          </UiButton>
+          <UiButton @click="settings.discardField(item.resourceId, item.field.key)">Отменить правку</UiButton>
+        </SettingsField>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue';
+import ProviderIcon from '../../../shared/ProviderIcon.vue';
+import SettingsSection from '../SettingsSection.vue';
+import SettingsScope from '../SettingsScope.vue';
 import {
   UiTabs,
   UiTab,
@@ -669,13 +739,155 @@ watch(showNative, async (open) => {
 </script>
 
 <style scoped>
-.settings-provider-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.settings-provider h4, .settings-provider p { margin: 0; }
-.settings-provider-list section { display: grid; gap: 8px; }
-.settings-provider-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.settings-provider { display: grid; gap: 12px; min-width: 0; align-content: start; }
-.settings-native-panel { display: grid; gap: 20px; min-width: 0; }
-@media (max-width: 900px) {
-  .settings-provider-list { grid-template-columns: minmax(0, 1fr); }
+.settings-provider {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: 24px;
+  min-width: 0;
+  align-content: start;
+}
+.settings-provider > [role='alert'] {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.settings-provider-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+.settings-provider-list {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.settings-provider-options {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+.settings-provider-picker {
+  display: none;
+}
+.settings-provider-actions {
+  display: grid;
+  gap: 8px;
+}
+.settings-provider-editor {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+.settings-provider-editor > [data-settings-field] + [data-settings-field] {
+  margin-top: -16px;
+}
+.settings-provider-editor > p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-provider-empty {
+  display: grid;
+  gap: 10px;
+  padding-block: 16px;
+}
+.settings-provider-empty h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.settings-provider-empty p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-provider-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.settings-provider-title h4 {
+  flex: 1 1 140px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.settings-provider-status {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.settings-provider-facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  font-size: 12px;
+}
+.settings-provider-facts > div {
+  display: grid;
+  grid-template-columns: minmax(100px, .7fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-provider-facts dt {
+  color: var(--ink-mid);
+}
+.settings-provider-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-native-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.settings-provider-model {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.settings-provider-model strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.settings-provider-model code, .settings-provider-model span {
+  color: var(--ink-mid);
+}
+@media (max-width: 1000px) {
+  .settings-provider {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .settings-provider-sidebar {
+    gap: 10px;
+    padding: 0 0 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-provider-list {
+    display: none;
+  }
+  .settings-provider-picker {
+    display: block;
+  }
+  .settings-provider-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 </style>

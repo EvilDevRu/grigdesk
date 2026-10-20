@@ -4,6 +4,37 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import { startSettingsBrowser } from '../fixtures/settings-modal/browser.mjs';
 
+/**
+ * Каждый снимок дополнен замером обеих областей: форма не расширяет окно,
+ * а прокрутка страницы остаётся вертикальной даже с длинными подписями.
+ */
+async function captureSettingsPage(fixture, filename) {
+  await fixture.page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+
+  const geometry = await fixture.page.locator('[data-role="settings-modal"]').evaluate((modal) => {
+    const page = modal.querySelector('.settings-page-scroll');
+    const navigation = modal.querySelector('.settings-navigation-scroll');
+    const selected = navigation.querySelector('[aria-selected="true"]')?.getBoundingClientRect();
+    const bounds = navigation.getBoundingClientRect();
+
+    return {
+      modalFits: modal.scrollWidth <= modal.clientWidth + 1,
+      pageFits: page.scrollWidth <= page.clientWidth + 1,
+      selectedVisible: !navigation.clientWidth
+        || Boolean(selected && selected.top >= bounds.top - 1 && selected.bottom <= bounds.bottom + 1),
+    };
+  });
+
+  assert.deepEqual(geometry, {
+    modalFits: true,
+    pageFits: true,
+    selectedVisible: true,
+  }, `Геометрия: ${filename}`);
+  await fixture.page.screenshot({ path: path.join(fixture.artifacts, filename) });
+}
+
 test('UI00: общий модал на изолированном браузерном стенде', async (t) => {
   const data = JSON.parse(await fs.readFile('tests/web/fixtures/settings-modal/data.json', 'utf8'));
   const nativeCatalog = JSON.parse(await fs.readFile(
@@ -29,6 +60,10 @@ test('UI00: общий модал на изолированном браузер
     '/api/system/web-rebuild': { rebuild: { status: 'idle' } },
     '/api/chat/sessions': data.sessions,
     '/api/mobile/status': data.mobile,
+    '/api/devices': {
+      listener: { state: 'online', addresses: ['desk.example:8145'] },
+      devices: [],
+    },
     '/api/settings/speech': data.speech,
     '/api/plugins': data.plugins,
     '/api/plugin-installs/jobs/current': { job: null, recoveryError: null },
@@ -42,7 +77,7 @@ test('UI00: общий модал на изолированном браузер
   await fixture.page.getByRole('button', { name: 'Открыть настройки', exact: true }).click();
   await fixture.page.locator('[data-role="settings-modal"]').waitFor({ timeout: 2000 });
   await fixture.page.locator('[data-settings-field]').first().waitFor();
-  await fixture.page.screenshot({ path: path.join(fixture.artifacts, 'UI00-1280x800.png') });
+  await captureSettingsPage(fixture, 'UI00-1280x800.png');
 
   for (const pageId of [
     'interface.behavior', 'interface.notifications', 'interface.shortcuts', 'agents.models',
@@ -60,9 +95,7 @@ test('UI00: общий модал на изолированном браузер
 
     for (const [width, height] of [[1280, 800], [390, 844]]) {
       await fixture.page.setViewportSize({ width, height });
-      await fixture.page.screenshot({
-        path: path.join(fixture.artifacts, `${pageId}-${width}x${height}.png`),
-      });
+      await captureSettingsPage(fixture, `${pageId}-${width}x${height}.png`);
     }
   }
 
@@ -71,6 +104,8 @@ test('UI00: общий модал на изолированном браузер
       window.settingsFixture.settings.selectPage('agents.providers', 'fixture', tabId);
     }, tab);
     await fixture.page.locator('[data-provider-page="fixture"][data-ready="true"]').waitFor();
+    assert.equal(await fixture.page.locator('[data-select-provider="fixture"]')
+      .getAttribute('aria-pressed'), 'true');
 
     if (tab === 'parameters') {
       await fixture.page.getByRole('button', { name: 'Дополнительные параметры', exact: true }).click();
@@ -88,9 +123,18 @@ test('UI00: общий модал на изолированном браузер
         await field.scrollIntoViewIfNeeded();
       }
 
-      await fixture.page.screenshot({
-        path: path.join(fixture.artifacts, `agents.providers-${tab}-${width}.png`),
-      });
+      await captureSettingsPage(fixture, `agents.providers-${tab}-${width}.png`);
+    }
+
+    if (tab === 'overview') {
+      const picker = fixture.page.getByRole('combobox', { name: 'Выберите исполнителя', exact: true });
+
+      await picker.selectOption('three-d');
+      await fixture.page.locator('[data-provider-page="three-d"][data-ready="true"]').waitFor();
+      assert.equal(await fixture.page.locator('[data-select-provider="three-d"]')
+        .getAttribute('aria-pressed'), 'true');
+      await picker.selectOption('fixture');
+      await fixture.page.locator('[data-provider-page="fixture"][data-ready="true"]').waitFor();
     }
   }
 
@@ -102,18 +146,23 @@ test('UI00: общий модал на изолированном браузер
   for (const [width, height] of [[1280, 800], [390, 844]]) {
     await fixture.page.setViewportSize({ width, height });
     await fixture.page.locator('[data-plugin-page] input[type="number"]').scrollIntoViewIfNeeded();
-    await fixture.page.screenshot({ path: path.join(fixture.artifacts, `plugins.installed-${width}.png`) });
+    await captureSettingsPage(fixture, `plugins.installed-${width}.png`);
   }
 
   for (const pageId of [
-    'connections.b24', 'connections.mobile', 'system.startup', 'system.updates', 'system.processes',
+    'connections.b24', 'connections.devices', 'connections.mobile',
+    'system.startup', 'system.updates', 'system.processes',
   ]) {
     await fixture.page.evaluate((id) => window.settingsFixture.settings.selectPage(id), pageId);
 
     const root = pageId.startsWith('connections.') ? `[data-connections-page="${pageId}"]`
       : pageId === 'system.processes' ? '[data-processes-page]' : `[data-system-page="${pageId}"]`;
 
-    await fixture.page.locator(`${root}[data-ready="true"]`).waitFor();
+    if (pageId === 'connections.devices') {
+      await fixture.page.locator('[data-settings-devices] .devices-empty').waitFor();
+    } else {
+      await fixture.page.locator(`${root}[data-ready="true"]`).waitFor();
+    }
 
     if (pageId === 'connections.mobile') {
       await fixture.page.locator('.mobile-empty').first().waitFor();
@@ -121,7 +170,7 @@ test('UI00: общий модал на изолированном браузер
 
     for (const [width, height] of [[1280, 800], [390, 844]]) {
       await fixture.page.setViewportSize({ width, height });
-      await fixture.page.screenshot({ path: path.join(fixture.artifacts, `${pageId}-${width}.png`) });
+      await captureSettingsPage(fixture, `${pageId}-${width}.png`);
     }
   }
 
@@ -130,7 +179,7 @@ test('UI00: общий модал на изолированном браузер
 
   for (const [width, height] of [[1280, 800], [390, 844]]) {
     await fixture.page.setViewportSize({ width, height });
-    await fixture.page.screenshot({ path: path.join(fixture.artifacts, `plugins.install-${width}.png`) });
+    await captureSettingsPage(fixture, `plugins.install-${width}.png`);
   }
 
   assert.deepEqual(fixture.errors, []);

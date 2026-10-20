@@ -7,112 +7,139 @@
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
     <template v-if="settings.pageId === 'system.startup'">
-      <h4>Процесс GrigDesk</h4>
-      <p v-if="server">{{ serverText.pill }} · PID {{ server.pid }} · работает {{ uptime }}</p>
-      <p v-if="serverText.hint">{{ serverText.hint }}</p>
-      <UiButton :disabled="busy || !server" @click="restart">Перезапустить сервер</UiButton>
-      <p>Настройка машины · Автозапуск применяется по «Применить», живой процесс продолжает работу.</p>
-      <SettingsField
-        v-for="field in startupFields"
-        :key="field.key"
-        :address="field.address"
-      >
-        <UiSwitch
-          :model-value="autostartValue"
-          :disabled="!launcher || launcher.autostart.unit === 'missing' || busy"
-          :aria-label="field.label"
-          @update:model-value="settings.setField('autostart', 'enabled', $event)"
-        />
-      </SettingsField>
+      <SettingsSection heading="Процесс GrigDesk" description="Текущее состояние сервера на этой машине.">
+        <dl v-if="server" class="settings-system-facts">
+          <div><dt>Режим работы</dt><dd>{{ serverText.pill }}</dd></div>
+          <div><dt>Время работы</dt><dd>{{ uptime }}</dd></div>
+          <div><dt>Процесс</dt><dd>PID {{ server.pid }}</dd></div>
+        </dl>
+        <p v-if="serverText.hint">{{ serverText.hint }}</p>
+        <UiButton :disabled="busy || !server" @click="restart">Перезапустить сервер</UiButton>
+      </SettingsSection>
+      <SettingsSection heading="Автозапуск">
+        <SettingsScope scope="Эта машина">
+          Автозапуск применяется по «Применить», живой процесс продолжает работу.
+        </SettingsScope>
+        <SettingsField
+          v-for="field in startupFields"
+          :key="field.key"
+          :address="field.address"
+        >
+          <UiSwitch
+            :model-value="autostartValue"
+            :disabled="!launcher || launcher.autostart.unit === 'missing' || busy"
+            :aria-label="field.label"
+            @update:model-value="settings.setField('autostart', 'enabled', $event)"
+          />
+        </SettingsField>
+        <template v-if="launcher">
+          <div class="settings-autostart-note">
+            <p>{{ autostartNote }}</p>
+            <p v-if="server?.mode === 'desktop'">
+              Сервером управляет приложение. Переключатель касается юнита.
+            </p>
+            <p v-else-if="server && !server.systemd">Сервер запущен вручную. Переключатель касается юнита.</p>
+          </div>
+        </template>
+      </SettingsSection>
       <template v-if="launcher">
-        <p>{{ autostartNote }}</p>
-        <p v-if="server?.mode === 'desktop'">Сервером управляет приложение. Переключатель касается юнита.</p>
-        <p v-else-if="server && !server.systemd">Сервер запущен вручную. Переключатель касается юнита.</p>
-        <p>Ярлык: {{ shortcutLabel }}</p>
-        <UiButton :disabled="busy || (!shortcutPresent && !launcher.shortcut.desktopDir)" @click="shortcut">
-          {{ shortcutPresent ? 'Убрать ярлык' : 'Создать ярлык' }}
-        </UiButton>
+        <SettingsSection
+          heading="Ярлык приложения"
+          description="Быстрый доступ с рабочего стола и из меню приложений."
+        >
+          <p>Ярлык: {{ shortcutLabel }}</p>
+          <UiButton :disabled="busy || (!shortcutPresent && !launcher.shortcut.desktopDir)" @click="shortcut">
+            {{ shortcutPresent ? 'Убрать ярлык' : 'Создать ярлык' }}
+          </UiButton>
+        </SettingsSection>
       </template>
     </template>
     <template v-else>
-      <h4>Версия GrigDesk</h4>
-      <PackagedServerVersion
-        v-if="packageCapability"
-        :version="release?.running.version || '—'"
-        :client-version="buildVersion"
-        :message="packageCapability.message"
-      />
-      <template v-else-if="release">
-        <p>Запущено: {{ release.running.version }} · {{ shortSha(release.running.sha) }}</p>
-        <p>
-          Checkout: {{ release.checkout.version }} · {{ shortSha(release.checkout.sha) }} ·
-          {{ release.checkout.branch || 'detached HEAD' }}
-          <span v-if="release.checkout.dirty">· Есть изменения</span>
-        </p>
-        <p>Интерфейс приложения: {{ buildVersion }} · {{ shortSha(buildSha) }}</p>
-        <p v-if="release.latest">
-          Стабильный канал: {{ release.latest.tag }} · {{ shortSha(release.latest.sha) }}
-          <UiActionLink
-            v-if="release.latest.url"
-            :href="release.latest.url"
-            target="_blank"
-          >
-            Что изменилось
-          </UiActionLink>
-        </p>
-        <p v-else>Релизы пока не найдены</p>
-        <p>Последняя проверка: {{ release.checkedAt || 'Ещё не проверялось' }}</p>
-        <p v-if="release.checkError">
-          {{ release.checkError.message }} Последний успешный результат сохранён.
-        </p>
-        <p v-if="release.checkoutChanged">
-          Checkout изменился после запуска. Примените локальные изменения, чтобы сервер использовал новый код.
-        </p>
-        <p>Интерфейс приложения обновляется установкой нового пакета.</p>
-        <p v-if="release.job">
-          {{ stageLabel }} · {{ release.job.kind === 'update' ? 'Релиз' : 'Локальный checkout' }} ·
-          {{ shortSha(release.job.targetSha) }}
-          <span v-if="release.job.error">{{ release.job.error.message }}</span>
-        </p>
-        <div class="settings-system-actions">
-          <UiButton :disabled="updates.checking || updates.active || busy" @click="updates.check()">
-            Проверить обновления
-          </UiButton>
-          <UiButton
-            :disabled="!release.canApplyCheckout || updates.actionBusy || busy"
-            @click="update('apply')"
-          >
-            Применить локальные изменения
-          </UiButton>
-          <UiButton
-            v-if="release.latest"
-            :disabled="!release.canInstallRelease || updates.actionBusy || busy"
-            @click="update('update')"
-          >
-            Обновить до {{ release.latest.tag }}
-          </UiButton>
-        </div>
-        <p v-for="reason in release.applyBlockReasons" :key="`apply:${reason}`">
-          Локальное применение: {{ blockReasonLabel(reason) }}
-        </p>
-        <p v-for="reason in release.installBlockReasons" :key="`install:${reason}`">
-          Установка релиза: {{ blockReasonLabel(reason) }}
-        </p>
-      </template>
-      <p v-if="updates.error" role="alert">{{ updates.error }}</p>
-      <template v-if="!packageCapability">
+      <SettingsSection
+        heading="Версия GrigDesk"
+        description="Установленная версия, стабильный канал и проверка обновлений."
+      >
+        <PackagedServerVersion
+          v-if="packageCapability"
+          :version="release?.running.version || '—'"
+          :client-version="buildVersion"
+          :message="packageCapability.message"
+        />
+        <template v-else-if="release">
+          <p>Запущено: {{ release.running.version }} · {{ shortSha(release.running.sha) }}</p>
+          <p>
+            Checkout: {{ release.checkout.version }} · {{ shortSha(release.checkout.sha) }} ·
+            {{ release.checkout.branch || 'detached HEAD' }}
+            <span v-if="release.checkout.dirty">· Есть изменения</span>
+          </p>
+          <p>Интерфейс приложения: {{ buildVersion }} · {{ shortSha(buildSha) }}</p>
+          <p v-if="release.latest">
+            Стабильный канал: {{ release.latest.tag }} · {{ shortSha(release.latest.sha) }}
+            <UiActionLink
+              v-if="release.latest.url"
+              :href="release.latest.url"
+              target="_blank"
+            >
+              Что изменилось
+            </UiActionLink>
+          </p>
+          <p v-else>Релизы пока не найдены</p>
+          <p>Последняя проверка: {{ release.checkedAt || 'Ещё не проверялось' }}</p>
+          <p v-if="release.checkError">
+            {{ release.checkError.message }} Последний успешный результат сохранён.
+          </p>
+          <p v-if="release.checkoutChanged">
+            Checkout изменился после запуска.
+            Примените локальные изменения, чтобы сервер использовал новый код.
+          </p>
+          <p>Интерфейс приложения обновляется установкой нового пакета.</p>
+          <p v-if="release.job">
+            {{ stageLabel }} · {{ release.job.kind === 'update' ? 'Релиз' : 'Локальный checkout' }} ·
+            {{ shortSha(release.job.targetSha) }}
+            <span v-if="release.job.error">{{ release.job.error.message }}</span>
+          </p>
+          <div class="settings-system-actions">
+            <UiButton :disabled="updates.checking || updates.active || busy" @click="updates.check()">
+              Проверить обновления
+            </UiButton>
+            <UiButton
+              :disabled="!release.canApplyCheckout || updates.actionBusy || busy"
+              @click="update('apply')"
+            >
+              Применить локальные изменения
+            </UiButton>
+            <UiButton
+              v-if="release.latest"
+              :disabled="!release.canInstallRelease || updates.actionBusy || busy"
+              @click="update('update')"
+            >
+              Обновить до {{ release.latest.tag }}
+            </UiButton>
+          </div>
+          <p v-for="reason in release.applyBlockReasons" :key="`apply:${reason}`">
+            Локальное применение: {{ blockReasonLabel(reason) }}
+          </p>
+          <p v-for="reason in release.installBlockReasons" :key="`install:${reason}`">
+            Установка релиза: {{ blockReasonLabel(reason) }}
+          </p>
+        </template>
+        <p v-if="updates.error" role="alert">{{ updates.error }}</p>
+      </SettingsSection>
+      <SettingsSection v-if="!packageCapability" heading="Сборка интерфейса">
         <UiButton :disabled="busy || updates.active" @click="rebuild">Пересобрать web-бандл</UiButton>
         <p>
           Сборка из рабочего дерева включает незакоммиченные правки. Состояние задания перечитывается при
           возвращении на страницу.
         </p>
-      </template>
+      </SettingsSection>
     </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import SettingsSection from '../SettingsSection.vue';
+import SettingsScope from '../SettingsScope.vue';
 import { UiSwitch, UiButton, UiActionLink, confirmDialog } from '../../../ui.ts';
 import { api, ApiError, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
@@ -493,7 +520,56 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.settings-system { display: grid; gap: 16px; align-content: start; min-width: 0; }
-.settings-system p, .settings-system h4 { margin: 0; }
-.settings-system-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-system {
+  display: grid;
+  gap: 28px;
+  align-content: start;
+  min-width: 0;
+}
+.settings-system p, .settings-system h4 {
+  margin: 0;
+}
+.settings-system-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-system-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  margin: 0 0 4px;
+}
+.settings-system-facts > div {
+  display: grid;
+  gap: 7px;
+  align-content: start;
+}
+.settings-system-facts dt {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.settings-system-facts dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-autostart-note {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.6;
+}
+@media (max-width: 600px) {
+  .settings-system-facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .settings-system-facts > div {
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 12px;
+  }
+}
 </style>

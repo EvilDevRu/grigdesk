@@ -5,8 +5,10 @@
     :data-ready="ready"
   >
     <template v-if="settings.pageId === 'connections.b24'">
-      <p>Все устройства · Подключение изменится по «Применить».</p>
-      <p>{{ configured ? 'Подключение настроено' : 'Подключение не настроено' }}</p>
+      <SettingsScope>Подключение изменится по «Применить».</SettingsScope>
+      <UiInlineMessage :tone="configured ? 'success' : 'neutral'">
+        {{ configured ? 'Подключение настроено' : 'Подключение не настроено' }}
+      </UiInlineMessage>
       <SettingsField
         v-for="field in fields"
         :key="field.key"
@@ -24,24 +26,33 @@
           v-else
           :model-value="value(field.key)"
           :aria-label="field.label"
+          :placeholder="field.key === 'baseUrl' ? 'https://company.bitrix24.ru' : 'Логин на портале'"
           @update:model-value="edit(field.key, $event)"
         />
       </SettingsField>
-      <UiButton :disabled="!configured || dirty || testing" @click="testConnection">
+      <UiButton
+        class="settings-connection-test"
+        :disabled="!configured || dirty || testing"
+        @click="testConnection"
+      >
         Проверить подключение
       </UiButton>
       <p v-if="dirty">Сначала примените изменения подключения.</p>
     </template>
     <template v-else>
       <MobileAccess />
-      <UiDisclosureButton v-model:open="help" :controls="helpId">Вход на этом компьютере</UiDisclosureButton>
-      <div v-if="help" :id="helpId">
-        <p>Автоматический вход по локальному ключу этого компьютера.</p>
-        <p>
-          Если сессия потеряется, главное окно восстановит вход само. Чтобы защитить доступ, блокируйте экран
-          компьютера.
-        </p>
-      </div>
+      <SettingsSection>
+        <UiDisclosureButton v-model:open="help" :controls="helpId">
+          Вход на этом компьютере
+        </UiDisclosureButton>
+        <div v-if="help" :id="helpId" class="settings-connection-help">
+          <p>Автоматический вход по локальному ключу этого компьютера.</p>
+          <p>
+            Если сессия потеряется, главное окно восстановит вход само.
+            Чтобы защитить доступ, блокируйте экран компьютера.
+          </p>
+        </div>
+      </SettingsSection>
     </template>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -50,13 +61,15 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, useId } from 'vue';
-import { UiInput, UiPasswordInput, UiButton, UiDisclosureButton } from '../../../ui.ts';
+import { UiInput, UiPasswordInput, UiButton, UiDisclosureButton, UiInlineMessage } from '../../../ui.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
 import { createB24Adapter } from '../../../features/settings/resources/connections.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import MobileAccess from '../MobileAccess.vue';
 import SettingsField from '../SettingsField.vue';
+import SettingsScope from '../SettingsScope.vue';
+import SettingsSection from '../SettingsSection.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
@@ -146,6 +159,22 @@ watch([() => props.active, () => settings.pageId], load, { immediate: true });
 </script>
 
 <style scoped>
-.settings-connections { display: grid; gap: 16px; min-width: 0; align-content: start; }
-.settings-connections p { margin: 0; }
+.settings-connections {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  align-content: start;
+}
+.settings-connections p {
+  margin: 0;
+}
+.settings-connection-test {
+  justify-self: start;
+}
+.settings-connection-help {
+  display: grid;
+  gap: 10px;
+  color: var(--ink-mid);
+  line-height: 1.6;
+}
 </style>
