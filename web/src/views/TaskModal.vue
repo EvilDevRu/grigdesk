@@ -670,8 +670,9 @@
               :tone="running ? 'warning' : 'accent'"
               variant="outline"
               :loading="busy === 'timer'"
-              :disabled="busy === 'timer'"
+              :disabled="busy === 'timer' || timerStartBlocked"
               loading-label="Обновляю учёт времени"
+              v-tooltip="timerStartBlocked ? 'Задача завершена — сначала возобновите её' : null"
               @click="toggleTimer"
             >
               {{ running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
@@ -710,6 +711,19 @@
               🏭 На конвейер
             </UiButton>
             <UiButton
+              v-if="completed"
+              data-context="task-footer-action"
+              tone="success"
+              variant="solid"
+              :loading="busy === 'renew'"
+              :disabled="busy === 'renew'"
+              loading-label="Возобновляю задачу"
+              @click="renew"
+            >
+              ↺ Возобновить
+            </UiButton>
+            <UiButton
+              v-else
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -991,6 +1005,8 @@ import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 
+const COMPLETED_STATUS = 5;
+
 const router = useRouter();
 
 const ui = useUiStore();
@@ -1027,6 +1043,8 @@ function taskContextDetails(id) {
   return { taskId: String(id), ...(title ? { title } : {}) };
 }
 const running = computed(() => !!boardTask.value?.timerRunning);
+const completed = computed(() => detail.value?.status === COMPLETED_STATUS);
+const timerStartBlocked = computed(() => completed.value && !running.value);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
 const taskProject = computed(() => detail.value?.group_name || boardTask.value?.group || '');
@@ -1645,6 +1663,20 @@ async function act(name, fn) {
 }
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.value ? 'pause' : 'start'));
 const complete = async () => { if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
+
+// Возобновление не возвращает детали задачи: после подтверждения перечитываем их.
+// Статус и доступные действия определяет портал, а ошибки остаются в карточке.
+async function renew() {
+  if (!(await confirmDialog('Возобновить задачу?', { okText: 'Возобновить' }))) {
+    return;
+  }
+
+  await act('renew', async () => {
+    await tasks.renew(taskId.value);
+    await loadDetail(true);
+  });
+}
+
 const launchMsg = ref(null);
 
 // ── Запуск на конвейер ──

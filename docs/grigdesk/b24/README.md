@@ -13,6 +13,7 @@
 - [Полка не является фильтром доски и не связана с избранным](task-shelf-independence.md)
 - [Протокол портала](portal-protocol.md)
 - [Статусы и приоритет обработки](statuses-and-priority.md)
+- [Действия завершённой задачи в карточке](completed-task-actions.md)
 - [CLI для агента и оператора](agent-and-operator-cli.md)
 - [Команда b24: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
 - [HTTP API GrigDesk](http-api-grigdesk.md)
