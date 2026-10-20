@@ -33,3 +33,15 @@ Factory берёт Node через `nodeExecutable()`, чтобы `process.execP
 движок и каталог `server/build/helpers.json`. Каталог описывает ordinary helpers и
 не добавляет Harness source или runtime. Это проверяет настоящий ELF-сценарий
 `deepseek-boundary.test.js`, сохраняя запрет на эти деревья.
+
+## Ход чата на настоящем SEA блокируется
+
+Проверено 20.10.2026 на комплекте из dev с установленным `bin/deepseek` и записанным допуском GLM.
+Каталог объявляет DeepSeek и GLM доступными, но первый же ход DeepSeek кончается ошибкой
+«Ход DeepSeek заблокирован»: DSH завершает его с `reason.kind = 'blocked'`. Причина в hooks
+профиля. `lib/deepseek/profile.ts` и `lib/glm/profile.ts` собирают команду hook из
+`process.execPath` и пути `server/scripts/deepseekInstructionsHook.mts` или
+`glmToolPolicyHook.mts` рядом с модулем. В SEA `process.execPath` — сам `grigdesk-server`,
+а `server/scripts` в комплект не входит. Hook не запускается, маркер не появляется, и DSH
+блокирует ход. Эти точки в описи помечены `deferred-deepseek`. Пока их не упакуют helpers
+с явным Node, DeepSeek и GLM работают только при source-запуске сервера.
