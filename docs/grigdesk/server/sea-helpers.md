@@ -35,3 +35,6 @@ permission/work MCP с локальными broker-ами, scope и отказо
 Node или готового b24 отказывает. Source-команды разработки сохраняют прежний вход.
 Публикатор маршрутов остаётся внешним скриптом профиля; сервер выбирает для него
 `nodeExecutable()`, сохраняя validate/publish, cwd, аргументы и ограничения времени.
+Схему и хранилище маршрутов скрипт получает из library-helper-а `routes-publish-kit`: путь к его
+файлу сервер передаёт в `GRIGDESK_ROUTES_KIT` (`helperModule` в `runtimePaths.ts`; вход `main`
+или `script` так не отдаётся — его импорт запустил бы CLI).

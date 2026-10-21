@@ -110,7 +110,7 @@
 - [Ретро оставлял файлы и ничего не менял: генератор предложений без канала решения](retrospective-decision-flow.md)
 - [Ромб «Песочница» на графе — статус из реальности, не из цепочки](sandbox-observed-status.md)
 - [Самая частая остановка маршрута была невидимой и неразбираемой](stall-visibility-and-analysis.md)
-- [Скрипты публикации маршрутов в profiles/ импортируют .js, которых после миграции на TS нет](route-publisher-typescript-imports.md)
+- [Скрипты публикации маршрутов получают схему от сервера (`GRIGDESK_ROUTES_KIT`), а не по относительному пути](route-publisher-typescript-imports.md)
 - [Старт route engine из GrigDesk: сервис возвращает 0 всегда, а отказ приходит позже](start-route-engine.md)
 - [Подтверждение resume ждёт lifecycle: стоимость чтения и второе окно в 120 секунд](resume-lifecycle-read-cost.md)
 - [После перезагрузки «Продолжить» вставало кодом 73: стенд задачи поднимает GrigDesk](stand-restore-on-resume.md)
