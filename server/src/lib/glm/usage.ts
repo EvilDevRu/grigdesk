@@ -6,6 +6,9 @@ import {
 import { usagePercentOrNull } from '../providerUsage.ts';
 import { parseGlmAccessMode, selectGlmServiceKey } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
+import { glmPricingStatus, watchGlmPricing } from './pricingWatch.ts';
+import type { GlmPricingStatus } from './pricingWatch.ts';
+import { glmTariffResource } from './tariff.ts';
 
 // Состояние счёта Z.ai берётся из тех же адресов, что и личный кабинет: открытого API баланса
 // у Z.ai нет, но адреса кабинета принимают ключ API как есть (без Bearer). Ответы проверяются
@@ -317,10 +320,13 @@ function quotaBar(limit: Record<string, unknown>): Record<string, unknown> | nul
 }
 
 /**
- * Режим Coding Plan: окна лимитов подписки и её уровень из адреса квот кабинета.
- * Ссылка ведёт на страницу подписки, где их меняют.
+ * Режим Coding Plan: окна лимитов и уровень из кабинета, тариф из публичной документации.
+ * Сторож запускается только после успешных квот и не превращает их в отказ при своей ошибке.
  */
-async function codingPlanUsage(key: string, fetchImpl: typeof fetch): Promise<Record<string, unknown>> {
+async function codingPlanUsage(
+  key: string,
+  { runtimeHome, fetchImpl, now }: Required<Omit<GlmUsageOptions, 'env'>>,
+): Promise<Record<string, unknown>> {
   const quota = await callZai(fetchImpl, key, 'monitor/usage/quota/limit');
 
   if (!quota.ok) {
@@ -330,6 +336,18 @@ async function codingPlanUsage(key: string, fetchImpl: typeof fetch): Promise<Re
   const list = quota.data.limits;
   const limits = Array.isArray(list) ? list as Record<string, unknown>[] : [];
   const level = quota.data.level;
+  const at = now();
+  let pricing: GlmPricingStatus;
+
+  try {
+    pricing = glmPricingStatus(await watchGlmPricing({
+      runtimeHome,
+      fetchImpl,
+      now: at,
+    }));
+  } catch {
+    pricing = glmPricingStatus(null);
+  }
 
   return {
     state: 'ok',
@@ -350,7 +368,7 @@ async function codingPlanUsage(key: string, fetchImpl: typeof fetch): Promise<Re
         label: 'Подписка',
         href: GLM_CODING_PLAN_URL,
       }],
-    }],
+    }, glmTariffResource({ now: at, pricing })],
   };
 }
 
@@ -380,7 +398,11 @@ export async function glmUsage({
   }
 
   if (mode === 'coding-plan') {
-    return codingPlanUsage(key, fetchImpl);
+    return codingPlanUsage(key, {
+      runtimeHome,
+      fetchImpl,
+      now,
+    });
   }
 
   return apiUsage(key, {

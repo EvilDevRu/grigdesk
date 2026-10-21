@@ -110,6 +110,7 @@
 - [Профиль запуска GLM: overlay, hooks с matcher *, homes и server-owned settings](glm-launch-profile.md)
 - [Ход GLM: порядок, таблица исходов, повторы запроса при обрыве сети, сжатие и replay размышлений](glm-turn-runtime.md)
 - [Счёт и лимиты GLM: баланс Обычного API и окна Coding Plan из адресов кабинета Z.ai](glm-usage.md)
+- [Тариф Coding Plan GLM: местные окна, оба поколения расходов и сторож документации Z.ai](glm-tariff.md)
 - [Кеш Z.ai и цена хода GLM: 97–98% входа из кеша, цену делают шаги × контекст, как сверить по журналу](glm-cache-cost.md)
 - [Политика инструментов GLM: hook с matcher *, сверка approval и остаточный риск fail-open](glm-tool-policy.md)
 - [MCP у GLM: только grigdesk-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
