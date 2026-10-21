@@ -1,3 +1,8 @@
+import { intlLocale } from '../../../../shared/i18n/formats.ts';
+import { localeTranslator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../shared/i18n/catalogs.ts';
+import { localizeUsageBar, localizeUsageResource } from './providerUsage.js';
+
 export interface UsageDelivery {
   status?: string;
   receivedAt?: number;
@@ -34,9 +39,13 @@ export interface UsageSummary {
  * Процент источника означает расход, неизвестность остаётся неизвестностью.
  * Дробный остаток меньше процента не округляется до видимого исчерпания.
  */
-export function remainingUsagePercent(value: unknown): string {
+export function remainingUsagePercent(value: unknown,
+  locale: LocaleSource = 'ru',
+): string {
+  const t = localeTranslator(locale);
+
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
-    return 'нет данных';
+    return t("core.noData");
   }
 
   const remaining = 100 - value;
@@ -55,9 +64,13 @@ export function remainingUsagePercent(value: unknown): string {
  * Расход и остаток используют одинаковые границы точного нуля и полного окна.
  * Ненулевые дроби у края шкалы остаются видимыми без ложного округления.
  */
-export function usedUsagePercent(value: unknown): string {
+export function usedUsagePercent(value: unknown,
+  locale: LocaleSource = 'ru',
+): string {
+  const t = localeTranslator(locale);
+
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
-    return 'нет данных';
+    return t("core.noData");
   }
   if (value > 0 && value < 1) {
     return '<1%';
@@ -73,13 +86,17 @@ export function usedUsagePercent(value: unknown): string {
  * Баланс показывается в основных единицах исходной валюты без пересчёта.
  * Маленькая ненулевая сумма сохраняет значащие цифры, в том числе при долге.
  */
-export function formatUsageBalance(amount: number, currency: string): string {
+export function formatUsageBalance(
+  amount: number,
+  currency: string,
+  locale: LocaleSource = 'ru',
+): string {
   const small = amount !== 0 && Math.abs(amount) < 0.01;
   const options: Intl.NumberFormatOptions = small
     ? { maximumSignificantDigits: 3 }
     : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
-  return `${new Intl.NumberFormat('ru-RU', options).format(amount)} ${currency}`;
+  return `${new Intl.NumberFormat(intlLocale(locale), options).format(amount)} ${currency}`;
 }
 
 /**
@@ -92,18 +109,24 @@ export function providerUsageSummary(
   delivery: UsageDelivery = {},
   knownProvider = true,
   now = Date.now(),
+  locale: LocaleSource = 'ru',
+
 ): UsageSummary {
+  const t = localeTranslator(locale);
+
   const raw = entry && typeof entry === 'object' ? entry as Record<string, unknown> : null;
   const bars = Array.isArray(raw?.bars) ? raw.bars : [];
   const resources = (Array.isArray(raw?.resources) ? raw.resources : [])
-    .filter((resource): resource is Record<string, unknown> => !!resource && typeof resource === 'object');
+    .filter((resource): resource is Record<string, unknown> => !!resource && typeof resource === 'object')
+    .map((resource) => localizeUsageResource(providerId, resource, locale));
   const windows = bars.map((bar, index): UsageSummaryItem => {
-    const value = bar && typeof bar === 'object' ? bar as Record<string, unknown> : {};
+    const value = localizeUsageBar(providerId,
+      bar && typeof bar === 'object' ? bar as Record<string, unknown> : {}, locale);
 
     return {
       key: String(value.key || `window-${index}`),
-      label: String(value.label || `Окно ${index + 1}`),
-      value: remainingUsagePercent(value.pct),
+      label: String(value.label || t("core.window", { value1: index + 1 })),
+      value: remainingUsagePercent(value.pct, locale),
       ...(typeof value.resetsAt === 'string' ? {
         resetsAt: value.resetsAt,
         ...(Date.parse(value.resetsAt) <= now ? { expired: true } : {}),
@@ -121,8 +144,8 @@ export function providerUsageSummary(
 
     return [{
       key: String(resource.key),
-      label: String(resource.label || 'Баланс'),
-      value: formatUsageBalance(balance.amount, balance.currency),
+      label: String(resource.label || t("core.balance")),
+      value: formatUsageBalance(balance.amount, balance.currency, locale),
     }];
   });
   const result: UsageSummary = {
@@ -144,33 +167,34 @@ export function providerUsageSummary(
   };
 
   if (!providerId) {
-    result.label = 'Лимиты запуска неизвестны';
+    result.label = t("core.launchLimitsUnknown");
   } else if (!knownProvider) {
-    result.label = 'Исполнитель недоступен';
+    result.label = t("core.providerUnavailable");
   } else if (!raw && (delivery.status === 'error' || delivery.deliveryStale)) {
-    result.label = 'Лимиты недоступны';
-    result.detail = delivery.error || 'Обновление недоступно';
+    result.label = t("core.limitsUnavailable");
+    result.detail = delivery.error || t("core.updateUnavailable");
     result.tone = 'warn';
   } else if (!raw && (!delivery.status || ['idle', 'loading'].includes(delivery.status))) {
-    result.label = 'Лимиты: …';
+    result.label = t("core.limits");
   } else if (!raw) {
-    result.label = 'Нет данных о лимитах';
+    result.label = t("core.noLimitData");
   } else if (raw.state !== 'ok') {
     result.label = ({
-      auth_required: 'Нужен вход',
-      blocked: 'Лимиты недоступны',
-      rate_limited: 'Проверка отложена',
-      unavailable: 'Лимиты недоступны',
-      unsupported: 'Нет данных о лимитах',
-    } as Record<string, string>)[String(raw.state)] || 'Нет данных о лимитах';
+      auth_required: t("core.signInRequired"),
+      blocked: t("core.limitsUnavailable"),
+      rate_limited: t("core.checkPostponed"),
+      unavailable: t("core.limitsUnavailable"),
+      unsupported: t("core.noLimitData"),
+    } as Record<string, string>)[String(raw.state)] || t("core.noLimitData");
     result.tone = raw.state === 'auth_required' || raw.state === 'blocked' ? 'bad' : 'warn';
     result.stale ||= result.windows.length > 0 || result.balances.length > 0;
   } else if (!result.items.length) {
-    result.label = resources.length ? 'Нет числовых данных' : 'Нет данных о лимитах';
+    result.label = resources.length ? t("core.noNumericData") : t("core.noLimitData");
   }
 
   if (delivery.error || delivery.deliveryStale) {
-    result.detail = [delivery.error || 'Обновление недоступно', result.detail].filter(Boolean).join(' · ');
+    result.detail = [delivery.error || t("core.updateUnavailable"), result.detail]
+      .filter(Boolean).join(' · ');
     result.tone = result.tone === 'bad' ? 'bad' : 'warn';
   }
   if (!providerId || !knownProvider) {

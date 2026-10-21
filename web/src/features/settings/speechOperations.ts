@@ -1,3 +1,6 @@
+import { t } from '../../ui.ts';
+import { localeTranslator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
+import { formatNumber } from '../../../../shared/i18n/formats.ts';
 import { shallowRef } from 'vue';
 import { isPlainRecord } from '../../../../shared/lib/objects.ts';
 import { failureText, type ApiClient } from '../../shared/apiClient.ts';
@@ -27,7 +30,7 @@ const TERMINAL = new Set(['done', 'failed', 'cancelled', 'interrupted']);
  */
 function decodeJob(value: unknown, previous?: SpeechJob): SpeechJob {
   if (!isPlainRecord(value) || typeof value.jobId !== 'string' || !value.jobId) {
-    throw new TypeError('Сервер не вернул задание речи');
+    throw new TypeError(t("settings.theServerDidNotReturnASpeech"));
   }
 
   const progress = isPlainRecord(value.progress) ? value.progress : {};
@@ -253,7 +256,8 @@ export function createSpeechOperations(
  * Результат замера читается в тех же единицах, что и прежний экран речи.
  * Пустой результат остаётся понятным сообщением, а не пустой строкой.
  */
-export function speechBenchmarkText(job?: SpeechJob): string {
+export function speechBenchmarkText(job?: SpeechJob, locale?: LocaleSource): string {
+  const t = localeTranslator(locale);
   const result = job?.result;
 
   if (!result) {
@@ -261,18 +265,22 @@ export function speechBenchmarkText(job?: SpeechJob): string {
   }
 
   const parts = [];
+  const decimal = (value: number, digits: number) => locale === undefined ? value.toFixed(digits)
+    : formatNumber(value, locale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
   if (Number.isFinite(result.audioSec ?? result.audioSeconds)) {
-    parts.push(`${(result.audioSec ?? result.audioSeconds)!.toFixed(1)} с речи`);
+    parts.push(t('settings.sOfSpeech', { value1: decimal((result.audioSec ?? result.audioSeconds)!, 1) }));
   }
   if (Number.isFinite(result.elapsedSec)) {
-    parts.push(`${result.elapsedSec!.toFixed(2)} с обработки`);
+    parts.push(t('settings.sOfProcessing', { value1: decimal(result.elapsedSec!, 2) }));
   } else if (Number.isFinite(result.durationMs ?? result.duration)) {
-    parts.push(`${((result.durationMs ?? result.duration)! / 1000).toFixed(2)} с обработки`);
+    parts.push(t("settings.sOfProcessing", {
+      value1: decimal((result.durationMs ?? result.duration)! / 1000, 2),
+    }));
   }
   if (Number.isFinite(result.realtimeFactor)) {
-    parts.push(`RTF ${result.realtimeFactor!.toFixed(2)}`);
+    parts.push(`RTF ${decimal(result.realtimeFactor!, 2)}`);
   }
 
-  return parts.join(' · ') || 'Замер завершён.';
+  return parts.join(' · ') || t("settings.benchmarkComplete");
 }

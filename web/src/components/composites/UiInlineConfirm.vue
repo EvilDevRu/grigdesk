@@ -17,16 +17,18 @@
         :disabled="disabled"
         @click="$emit('confirm')"
       >
-        {{ confirmText }}
+        {{ (confirmText ?? t('core.confirm')) }}
       </UiButton>
       <UiButton :disabled="disabled || loading" @click="open = false">{{
-        cancelText
+        (cancelText ?? t('settings.cancel'))
       }}</UiButton>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import type { UiActionTone, UiActionVariant } from '../../types/uiActions';
 import UiButton from '../primitives/UiButton.vue';
 
@@ -41,8 +43,8 @@ withDefaults(
     loading?: boolean;
   }>(),
   {
-    confirmText: 'Подтвердить',
-    cancelText: 'Отмена',
+    confirmText: undefined,
+    cancelText: undefined,
     tone: 'danger',
     variant: 'outline',
     disabled: false,

@@ -19,21 +19,32 @@ public final class ProfileStore {
   public final List<JSONObject> profiles = new ArrayList<>();
   private final File file;
   private final IntPredicate available;
+  private final ShellLocale locale;
 
   /**
    * Приватный файл не содержит ключ устройства; повреждённый JSON не перезаписывается.
    * Отсутствующий или пустой файл означает первый запуск без профилей.
    */
   public ProfileStore(File file, IntPredicate available) throws Exception {
+    this(file, available, null);
+  }
+
+  /**
+   * Локаль установки меняет только собственные сообщения хранилища.
+   * Формат файла, проверка адресов и выбор порта остаются прежними.
+   */
+  public ProfileStore(File file, IntPredicate available, ShellLocale locale) throws Exception {
     this.file = file;
     this.available = available;
+    this.locale = locale;
 
     if (!file.exists() || file.length() == 0) {
       return;
     }
 
     if (file.length() > 1024 * 1024) {
-      throw new IllegalArgumentException("Файл машин повреждён.");
+      throw new IllegalArgumentException(
+        ShellLocale.text(locale, "native.profilesDamaged", "Файл машин повреждён."));
     }
 
     JSONObject data = new JSONObject(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
@@ -42,18 +53,20 @@ public final class ProfileStore {
     Set<Integer> ports = new HashSet<>();
 
     if (data.getInt("version") != 1 || list.length() > 99) {
-      throw new IllegalArgumentException("Файл машин повреждён.");
+      throw new IllegalArgumentException(
+        ShellLocale.text(locale, "native.profilesDamaged", "Файл машин повреждён."));
     }
 
     for (int index = 0; index < list.length(); index++) {
       JSONObject profile = list.getJSONObject(index);
 
-      validate(profile.getString("name"), profile.getString("address"), profile.getString("fp"));
+      validate(profile.getString("name"), profile.getString("address"), profile.getString("fp"), locale);
 
       if (!profile.getString("kind").equals("remote") || !ids.add(profile.getString("id"))
         || !ports.add(profile.getInt("port")) || profile.getInt("port") < 47101
         || profile.getInt("port") > 47199) {
-        throw new IllegalArgumentException("Файл машин повреждён.");
+        throw new IllegalArgumentException(
+          ShellLocale.text(locale, "native.profilesDamaged", "Файл машин повреждён."));
       }
 
       profiles.add(profile);
@@ -71,13 +84,22 @@ public final class ProfileStore {
    * Имя ограничено для UI, а pin сохраняется только после проверки привязки.
    */
   public static void validate(String name, String address, String fp) {
+    validate(name, address, fp, null);
+  }
+
+  /**
+   * Валидация адреса использует тот же предикат и не нормализует данные человека.
+   * Оболочка передаёт локаль только для собственного сообщения об отказе.
+   */
+  public static void validate(String name, String address, String fp, ShellLocale locale) {
     URI uri = URI.create(address);
 
     if (name.trim().isEmpty() || name.length() > 128 || !fp.matches("[a-f0-9]{64}")
       || !"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
       || uri.getHost().contains(":") || uri.getRawQuery() != null || uri.getRawFragment() != null
       || !Set.of("", "/").contains(uri.getPath()) || uri.getPort() == 0 || uri.getPort() > 65535) {
-      throw new IllegalArgumentException("Неверное имя или адрес машины.");
+      throw new IllegalArgumentException(
+        ShellLocale.text(locale, "native.invalidMachine", "Неверное имя или адрес машины."));
     }
   }
 
@@ -96,7 +118,8 @@ public final class ProfileStore {
       }
     }
 
-    throw new IllegalStateException("Нет свободного порта для машины.");
+    throw new IllegalStateException(
+      ShellLocale.text(locale, "native.noFreePort", "Нет свободного порта для машины."));
   }
 
   /**
@@ -104,7 +127,7 @@ public final class ProfileStore {
    * Разные машины получают отдельные постоянные порты и случайные идентификаторы.
    */
   public synchronized JSONObject add(String name, String address, String fp) throws Exception {
-    validate(name, address, fp);
+    validate(name, address, fp, locale);
 
     JSONObject profile = profiles.stream().filter(item -> item.optString("fp").equals(fp))
       .findFirst().orElse(null);

@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { installUiBrowser } from './helpers/ui-components.js';
+
 const root = new URL('../../', import.meta.url);
 const source = (path) => readFile(new URL(path, root), 'utf8');
 const count = (text, pattern) => (text.match(pattern) || []).length;
@@ -106,7 +109,8 @@ test('desktop-сайдбар всегда узкий и не содержит п
   assert.match(shell, /class="app-mark"/);
 });
 
-test('док использует строку инструмента, а разворачивание меняет только геометрию того же render-site', async () => {
+test('док использует строку инструмента, а разворачивание меняет только геометрию того же render-site',
+  async (t) => {
   const [dockView, host, dockStore] = await Promise.all([
     source('web/src/shared/layout/ToolDock.vue'),
     source('web/src/shared/layout/ToolHost.vue'),
@@ -115,7 +119,28 @@ test('док использует строку инструмента, а раз
 
   assert.doesNotMatch(dockView, /class="dock-head"/);
   assert.doesNotMatch(dockView, /grid-template-rows:\s*42px/);
-  assert.match(dockView, /expanded \? 'Вернуть ширину панели' : 'Во весь экран'/);
+  await installUiBrowser(t);
+
+  const [{ mount }, Dock] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/shared/layout/ToolDock.vue')),
+  ]);
+  const wrapper = mount(Dock, {
+    attachTo: document.body,
+    props: {
+      mode: 'dock',
+      label: 'Панель',
+      width: 400,
+      minWidth: 200,
+      maxWidth: 800,
+    },
+  });
+
+  t.after(() => wrapper.unmount());
+  assert.equal(wrapper.get('[data-context="tool-dock-expand"]').attributes('aria-label'), 'Во весь экран');
+  await wrapper.setProps({ expanded: true });
+  assert.equal(wrapper.get('[data-context="tool-dock-expand"]').attributes('aria-label'),
+    'Вернуть ширину панели');
   assert.match(dockView, /:pressed="expanded"/);
   assert.match(dockView, /mode === 'dock' && !expanded/);
   assert.match(dockView, /emit\('toggle-expanded'\)/);

@@ -23,7 +23,7 @@
       :disabled="disabled || busy"
       :aria-disabled="ariaDisabled"
       :loading="busy && presentation !== 'dropzone'"
-      :loading-label="loadingLabel"
+      :loading-label="(loadingLabel ?? t('core.uploadingFile'))"
       :block="presentation === 'dropzone'"
       @click="open"
     >
@@ -31,7 +31,7 @@
         <slot name="leading" />
       </template>
       <span class="ui-file-picker__copy">
-        <strong><slot>{{ label }}</slot></strong>
+        <strong><slot>{{ (label ?? t('core.chooseFile')) }}</slot></strong>
         <small v-if="$slots.hint"><slot name="hint" /></small>
       </span>
       <template v-if="$slots.trailing" #trailing>
@@ -41,7 +41,7 @@
     <span v-if="showSummary && summary" class="ui-file-picker__summary">{{ summary }}</span>
     <UiIconButton
       v-if="showReset && files.length"
-      label="Очистить выбранные файлы"
+      :label="t('core.clearSelectedFiles')"
       :disabled="disabled || busy"
       @click="reset"
     >
@@ -51,6 +51,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { computed, ref } from 'vue';
 import UiButton from '../primitives/UiButton.vue';
 import UiFileInput from '../primitives/UiFileInput.vue';
@@ -78,8 +80,8 @@ const props = withDefaults(
     disabled: false,
     ariaDisabled: false,
     busy: false,
-    label: 'Выбрать файл',
-    loadingLabel: 'Загрузка файла',
+    label: undefined,
+    loadingLabel: undefined,
     presentation: 'inline',
     density: 'default',
     showSummary: true,
@@ -108,7 +110,7 @@ const summary = computed(() => {
     return files.value[0]?.name || '';
   }
 
-  return `Выбрано файлов: ${files.value.length}`;
+  return t('core.filesSelected', { filesValueLength: files.value.length });
 });
 
 function onFiles(fileList: FileList): void {

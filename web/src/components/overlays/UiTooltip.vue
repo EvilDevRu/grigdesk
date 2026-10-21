@@ -5,7 +5,7 @@
     class="ui-tooltip__disabled-trigger"
     role="group"
     tabindex="0"
-    :aria-label="disabledLabel || text || 'Подсказка'"
+    :aria-label="disabledLabel || text || t('core.tooltip')"
     v-bind="triggerAttributes"
   >
     <slot v-if="slots.trigger" name="trigger" v-bind="triggerSlotProps" />
@@ -26,7 +26,7 @@
     ref="setTriggerElement"
     class="ui-tooltip__fallback-trigger"
     tabindex="0"
-    aria-label="Подсказка"
+    :aria-label="t('core.tooltip')"
     v-bind="triggerAttributes"
     >?</span
   >
@@ -55,6 +55,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import {
   Comment,
   Fragment,

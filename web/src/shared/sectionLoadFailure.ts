@@ -1,4 +1,4 @@
-import { showToast } from '../ui.ts';
+import { messageRef, showToast } from '../ui.ts';
 
 /**
  * Маршрут и ленивый модал сообщают об отказе чанка одинаковым тостом.
@@ -7,7 +7,7 @@ import { showToast } from '../ui.ts';
 export function showSectionLoadFailure(): void {
   showToast({
     id: 'section-load-failed',
-    title: 'Не удалось открыть раздел. Закройте и снова запустите приложение.',
+    title: messageRef('core.couldNotOpenTheSectionCloseAnd'),
     tone: 'danger',
   });
 }

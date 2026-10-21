@@ -1,8 +1,11 @@
+import { desktopText } from './locale.ts';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { FileHandle } from 'node:fs/promises';
+
+import { locales } from '../../shared/i18n/catalogs.ts';
 
 import { recordOrNull } from '../../shared/lib/objects.ts';
 
@@ -19,6 +22,7 @@ export type WindowState = {
 };
 
 export type DesktopSettings = {
+  uiLanguage?: string;
   version: 2;
   profiles: DesktopProfile[];
   selected: string | null;
@@ -102,6 +106,9 @@ export function normalizeSettings(value: unknown): DesktopSettings {
 
   return {
     version: 2,
+    ...(supported && (settings.uiLanguage === 'system'
+      || locales.some((item) => item.id === settings.uiLanguage))
+      ? { uiLanguage: settings.uiLanguage as string } : {}),
     profiles,
     selected,
     window: {
@@ -140,14 +147,14 @@ async function checkDestination(file: string): Promise<void> {
   const uid = process.getuid?.();
 
   if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o700 || (uid !== undefined && stat.uid !== uid)) {
-    throw new Error('Каталог настроек должен быть личным каталогом с правами 0700.');
+    throw new Error(desktopText('desktop.settingsDirectoryUnsafe'));
   }
 
   try {
     const target = await fs.lstat(file);
 
     if (!target.isFile() || (uid !== undefined && target.uid !== uid)) {
-      throw new Error('Настройки нельзя сохранять через ссылку или в чужой файл.');
+      throw new Error(desktopText('desktop.settingsFileUnsafe'));
     }
   } catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {

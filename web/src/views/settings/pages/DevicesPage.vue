@@ -1,6 +1,6 @@
 <template>
   <section class="settings-devices" data-settings-devices>
-    <SettingsScope scope="Эта машина">Имя и адрес используются при добавлении устройства.</SettingsScope>
+    <SettingsScope :scope="t('settings.thisMachine')">{{ t('settings.theNameAndAddressAreUsedWhen') }}</SettingsScope>
     <SettingsField
       v-for="key in ['name', 'address']"
       :key="key"
@@ -8,7 +8,7 @@
     >
       <UiInput
         v-model="draft[key as 'name' | 'address']"
-        :placeholder="key === 'name' ? 'Например, рабочий ноутбук' : 'Необязательно'"
+        :placeholder="key === 'name' ? t('settings.forExampleWorkLaptop') : t('settings.optional')"
       />
     </SettingsField>
     <SettingsSection><DevicesPanel :draft="draft" /></SettingsSection>
@@ -16,6 +16,8 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../../ui.ts';
+
 import { reactive } from 'vue';
 import { UiInput } from '../../../ui.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';

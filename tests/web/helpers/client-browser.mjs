@@ -17,9 +17,9 @@ export const chatSession = {
  * Настоящие Vue-экраны работают с локальными синтетическими API без живого сервера.
  * Vite не читает конфигурацию проекта с proxy и не наблюдает всё рабочее дерево.
  */
-export async function clientBrowser(t) {
+export async function clientBrowser(t, options = {}) {
   const root = path.resolve(import.meta.dirname, '../../..');
-  const artifacts = path.join(process.env.GRIGDESK_ARTIFACTS_DIR
+  const artifacts = options.artifacts || path.join(process.env.GRIGDESK_ARTIFACTS_DIR
     || path.join(os.homedir(), '.grigdesk/artifacts'), 'client-responsive');
   const profile = {
     id: 'geometry-machine',
@@ -64,6 +64,14 @@ export async function clientBrowser(t) {
 
           res.setHeader('Content-Type', 'application/json');
 
+          if (url.pathname.startsWith('/__shell/') && options.shell === null) {
+            req.resume();
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'not_found' }));
+
+            return;
+          }
+
           if (url.pathname === '/api/events') {
             res.setHeader('Content-Type', 'text/event-stream');
             res.write('event: hello\ndata: {"boot":"fixture"}\n\n');
@@ -81,7 +89,7 @@ export async function clientBrowser(t) {
           }
 
           const responses = {
-            '/__shell/state': shell,
+            '/__shell/state': options.shell || shell,
             '/api/auth/state': {
               authenticated: true,
               configured: true,
@@ -123,7 +131,7 @@ export async function clientBrowser(t) {
           };
 
           req.resume();
-          res.end(JSON.stringify(responses[url.pathname]
+          res.end(JSON.stringify(options.responses?.[url.pathname] || responses[url.pathname]
             || (url.pathname.startsWith("/api/b24/task-seen/") ? responses["/api/b24/task-seen"] : {})));
         });
       },

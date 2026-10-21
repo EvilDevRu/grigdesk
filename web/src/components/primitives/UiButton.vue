@@ -35,12 +35,14 @@
     </span>
     <span v-if="loading" class="ui-button__loading">
       <UiSpinner decorative />
-      <span class="ui-visually-hidden">{{ loadingLabel }}</span>
+      <span class="ui-visually-hidden">{{ (loadingLabel ?? t('core.loading')) }}</span>
     </span>
   </button>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { computed, ref } from 'vue';
 import type {
   UiActionTone,
@@ -72,7 +74,7 @@ const props = withDefaults(
     variant: 'outline',
     tone: 'neutral',
     loading: false,
-    loadingLabel: 'Загрузка',
+    loadingLabel: undefined,
     disabled: false,
     ariaDisabled: false,
     pressed: undefined,

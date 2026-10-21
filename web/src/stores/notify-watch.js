@@ -1,3 +1,5 @@
+import { messageRef } from '../ui.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 // Вотчер конвейера: следит, что остановилось на человеке. Отсюда живут
 // системные оповещения, сводка топбара и счётчик внимания в сайдбаре.
 // Оповещение — только на переходе
@@ -40,7 +42,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
     // Сводка внимания считает только задачи, требующие человека.
     // Обычные живые ходы сохраняются в отдельном runningCount.
     badgeSummary: (s) => pipelineBadgeSummary(s),
-    topbarItems: (s) => pipelineTopbarItems(s),
+    topbarItems: (s) => pipelineTopbarItems(s, uiLocalePort.value),
     attentionCount() { return this.badgeSummary.attentionCount; },
     // Текстовая сводка: количества и причины поимённо для потребителей стора.
     attentionTitle: (s) => {
@@ -120,7 +122,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
                 scope: `task:${id}`,
                 tone: 'danger',
                 sticky: true,
-                title: `${crashed ? 'Конвейер оборвался' : 'Конвейер встал'} — #${id}`,
+                title: messageRef(crashed ? 'core.pipelineCrashed' : 'core.pipelineStalled', { id }),
                 body: (crashed ? t.stall.hint || t.stall.title : t.stall.title) || '',
                 target: { kind: 'pipeline', taskId: id },
               });
@@ -139,7 +141,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
                 scope: `task:${id}`,
                 tone: 'warning',
                 sticky: true,
-                title: `Ход завис — #${id}`,
+                title: messageRef('core.runStalled', { id }),
                 body: q.text,
                 target: { kind: 'pipeline', taskId: id },
               });
@@ -185,7 +187,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
               scope: `task:${id}`,
               tone: 'warning',
               sticky: true,
-              title: `Конвейер ждёт тебя — #${id}`,
+              title: messageRef('core.pipelineWaiting', { id }),
               body: w.text,
               target: { kind: 'pipeline', taskId: id },
             });

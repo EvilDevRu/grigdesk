@@ -1,30 +1,32 @@
 <template>
   <div class="pvset pvmcp provider-mcp-slot" :data-provider-id="providerId">
     <div class="pvsetttl">
-      MCP-серверы
+      {{ t('settings.mcpServers') }}
       <UiButton
         class="mcpbtn"
         data-role="settings-compact-action"
         :disabled="status?.loading"
         @click="emit('refresh')"
       >
-        {{ status?.loading ? 'Обновляем…' : 'Обновить' }}
+        {{ status?.loading ? t('settings.refreshing') : t('settings.update') }}
       </UiButton>
     </div>
     <div
       class="mcpbody"
       tabindex="0"
-      :aria-label="`MCP-серверы ${providerName}`"
+      :aria-label="t('settings.mcpServersFor', { providerName: providerName })"
       aria-live="polite"
     >
       <p v-if="!status || (status.loading && !status.servers)" class="muted small">
-        Получаем список от исполнителя…
+        {{ t('settings.gettingTheListFromTheProvider') }}
       </p>
       <p v-else-if="status.state === 'error'" class="msg err">
-        Не удалось получить список: {{ status.error }}
+        {{ t('settings.couldNotGetTheList') }} {{ status.error }}
       </p>
       <template v-else>
-        <p v-if="status.note" class="mcpnote muted small">{{ status.note }}</p>
+        <p v-if="status.note" class="mcpnote muted small">
+          {{ localizeProviderText(providerId, status.note, uiLocale) }}
+        </p>
         <div
           v-for="group in groups"
           :key="group.id"
@@ -44,14 +46,17 @@
             </div>
             <!-- Причина/подсказка принадлежит адаптеру, поэтому Vue не знает CLI. -->
             <div v-if="server.state !== 'ok' && server.detail" class="mcpdetail muted">
-              {{ server.detail }}
+              {{ localizeProviderText(providerId, server.detail, uiLocale) }}
             </div>
-            <div v-if="server.hint" class="mcpdetail muted">{{ server.hint }}</div>
+            <div v-if="server.hint" class="mcpdetail muted">{{ authHint(server) }}</div>
           </div>
         </div>
-        <p v-if="!groups.length" class="muted small">{{ status.emptyText || 'Серверов не настроено.' }}</p>
+        <p v-if="!groups.length" class="muted small">
+          {{ status.emptyText ? localizeProviderText(providerId, status.emptyText, uiLocale)
+            : t('settings.noServersConfigured') }}
+        </p>
         <p v-if="status.checkedAt" class="muted small">
-          обновлено {{ new Date(status.checkedAt).toLocaleTimeString('ru') }}
+          {{ t('settings.updated') }} {{ new Date(status.checkedAt).toLocaleTimeString(intlLocale(uiLocale)) }}
         </p>
       </template>
     </div>
@@ -59,6 +64,11 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../ui.ts';
+import { intlLocale } from '../../../../shared/i18n/formats.ts';
+import { translator } from '../../../../shared/i18n/catalogs.ts';
+import { localizeProviderText } from '../../features/settings/metadataLocale.ts';
+
 import { computed } from 'vue';
 
 import { UiButton, vTooltip } from '../../ui.ts';
@@ -104,44 +114,64 @@ const emit = defineEmits<{ refresh: [] }>();
 const MCP_SCOPES: readonly McpGroup[] = [
   {
     id: 'user',
-    label: 'Пользователь',
+    get label() {
+    return t('settings.user');
+  },
   },
   {
     id: 'project',
-    label: 'Проект',
+    get label() {
+    return t('settings.project');
+  },
   },
   {
     id: 'account',
-    label: 'Аккаунт',
+    get label() {
+    return t('settings.account');
+  },
   },
 ];
 const MCP_STATES: Record<string, McpState> & { unknown: McpState } = {
   ok: {
-    label: 'Подключён',
+    get label() {
+    return t('settings.connected');
+  },
     cls: 'ok',
   },
   failed: {
-    label: 'Не подключился',
+    get label() {
+    return t('settings.connectionFailed');
+  },
     cls: 'err',
   },
   'needs-auth': {
-    label: 'Нужна авторизация',
+    get label() {
+    return t('settings.authenticationRequired');
+  },
     cls: 'warn',
   },
   configured: {
-    label: 'Настроен',
+    get label() {
+    return t('settings.configured');
+  },
     cls: 'idle',
   },
   disabled: {
-    label: 'Выключен',
+    get label() {
+    return t('settings.disabled');
+  },
     cls: 'idle',
   },
   remote: {
-    label: 'Включён на claude.ai',
+    get label() {
+    return t('settings.enabledOnClaudeAi');
+  },
     cls: 'idle',
   },
   unknown: {
-    label: 'Состояние неизвестно',
+    get label() {
+    return t('settings.unknownStatus');
+  },
     cls: 'warn',
   },
 };
@@ -156,7 +186,12 @@ function mcpGroups(status: McpSnapshot | null) {
   const servers = status?.servers || [];
   const overrides = new Map((Array.isArray(status?.groups) ? status.groups : [])
     .filter((group) => typeof group?.id === 'string' && group.id)
-    .map((group) => [group.id, group]));
+    .map((group) => [group.id, {
+      ...group,
+      hint: group.hint === undefined ? undefined
+        : translator.t(uiLocale.value, `settings.mcpGroups.${props.providerId}.${group.id}.hint`,
+          {}, group.hint),
+    }]));
   const scopes: McpGroup[] = MCP_SCOPES.map((scope) => ({
     ...scope,
     ...(overrides.get(scope.id) || {}),
@@ -186,6 +221,20 @@ function mcpGroups(status: McpSnapshot | null) {
       servers: servers.filter((server) => (server.scope || 'user') === scope.id),
     }))
     .filter((group) => group.servers.length);
+}
+
+/**
+ * Подсказки входа встроенных MCP-адаптеров определяются исполнителем и scope.
+ * Имя сервера остаётся параметром команды; внешняя подсказка возвращается исходной.
+ */
+function authHint(server: McpServer): string | undefined {
+  if (!server.hint || !['claude', 'codex'].includes(props.providerId)) {
+    return server.hint;
+  }
+
+  return props.providerId === 'claude' && server.scope === 'account'
+    ? t('settings.mcpAccountLoginHint')
+    : t('settings.mcpLoginHint', { command: `${props.providerId} mcp login ${server.name}` });
 }
 
 function mcpState(server: McpServer): McpState {

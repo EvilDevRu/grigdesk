@@ -1,3 +1,4 @@
+import { desktopText } from './locale.ts';
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import type { DesktopSettings } from './settings.ts';
@@ -120,14 +121,14 @@ export class Profiles {
       }
     }
 
-    throw new Error('Не удалось выбрать свободный порт приложения.');
+    throw new Error(desktopText('desktop.noAvailablePort'));
   }
 
   get(id: string): DesktopProfile {
     const profile = this.settings.profiles.find((item) => item.id === id);
 
     if (!profile) {
-      throw new Error('Машина не найдена.');
+      throw new Error(desktopText('desktop.machineNotFound'));
     }
 
     return profile;
@@ -157,7 +158,7 @@ export class Profiles {
     });
 
     if (!profile) {
-      throw new Error('Неверные настройки машины.');
+      throw new Error(desktopText('desktop.invalidMachine'));
     }
 
     const used = new Set(this.settings.profiles.map((item) => item.port));
@@ -172,7 +173,7 @@ export class Profiles {
     }
 
     if (!found) {
-      throw new Error('Не осталось свободных портов приложения.');
+      throw new Error(desktopText('desktop.noFreePorts'));
     }
 
     this.settings.profiles.push(profile);

@@ -1,18 +1,18 @@
 <template>
   <UiDialog
     :open="true"
-    :title="pair ? 'Подключить телефон' : 'Добавить адрес на телефон'"
+    :title="pair ? t('settings.connectPhone') : t('settings.addAddressToPhone')"
     size="compact"
     data-ui-touch
     @update:open="emit('close')"
   >
     <div class="pairing-content" :aria-busy="loading">
-      <p class="pairing-relay">Посредник: {{ relay.name }}</p>
+      <p class="pairing-relay">{{ t('settings.relay') }} {{ relay.name }}</p>
       <ol class="pairing-steps">
-        <li>Откройте приложение GrigDesk на телефоне.</li>
+        <li>{{ t('settings.openTheGrigDeskApplicationOnYourPhone') }}</li>
         <li>
-          {{ pair ? 'На экране «Подключить GrigDesk» отсканируйте этот QR-код.'
-            : 'В разделе «Посредники» нажмите «Добавить посредника» и отсканируйте QR-код.' }}
+          {{ pair ? t('settings.onTheConnectGrigDeskScreenScanThis')
+            : t('settings.inRelaysClickAddRelayAndScan') }}
         </li>
       </ol>
       <div class="pairing-code-stage">
@@ -22,40 +22,40 @@
           role="status"
         >
           <UiSpinner decorative />
-          Готовим QR-код…
+          {{ t('settings.preparingQRCode') }}
         </div>
         <div
           v-else-if="expired"
           class="pairing-placeholder pairing-expired"
           role="status"
         >
-          <b>Срок действия QR-кода истёк</b>
-          <p>Создайте новый код, чтобы продолжить подключение.</p>
+          <b>{{ t('settings.qrCodeExpired') }}</b>
+          <p>{{ t('settings.createANewCodeToContinueConnecting') }}</p>
           <UiButton
             variant="solid"
             tone="accent"
             data-testid="mobile-refresh-qr"
             @click="loadQr"
           >
-            Создать новый QR
+            {{ t('settings.createNewQR') }}
           </UiButton>
         </div>
         <div v-else-if="qr" class="pairing-code">
           <img
             :src="qrImage"
-            alt="QR-код подключения к GrigDesk"
+            :alt="t('settings.qrCodeForConnectingToGrigDesk')"
             width="320"
             height="320"
           />
         </div>
         <div v-else class="pairing-placeholder">
-          <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-          <UiButton data-role="settings-action" @click="loadQr">Повторить загрузку QR</UiButton>
+          <UiInlineMessage v-if="error" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
+          <UiButton data-role="settings-action" @click="loadQr">{{ t('settings.retryLoadingQR') }}</UiButton>
         </div>
       </div>
       <p class="pairing-expiry" aria-live="off">
         <template v-if="qr?.expiresAt && !expired && !loading">
-          Код действует ещё
+          {{ t('settings.codeValidFor') }}
           <b>{{ remainingLabel }}</b>
         </template>
       </p>
@@ -66,17 +66,17 @@
           :disabled="!qr || expired || loading"
           @click="copyQr"
         >
-          {{ copied ? 'Код скопирован' : 'Скопировать код подключения' }}
+          {{ copied ? t('settings.codeCopied') : t('settings.copyConnectionCode') }}
         </UiButton>
-        <p class="pairing-hint" role="status">{{ copied ? 'Вставьте код в приложении на телефоне.' : '' }}</p>
+        <p class="pairing-hint" role="status">{{ copied ? t('settings.pasteTheCodeInTheApplicationOn') : '' }}</p>
       </div>
-      <UiInlineMessage v-if="qr && error && !loading" tone="danger">{{ error }}</UiInlineMessage>
+      <UiInlineMessage v-if="qr && error && !loading" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
       <UiDisclosureButton
         v-model:open="textOpen"
         controls="mobile-qr-manual"
         :disabled="!qr || expired || loading"
       >
-        Подключить без камеры
+        {{ t('settings.connectWithoutACamera') }}
       </UiDisclosureButton>
       <div
         v-if="textOpen && qr && !expired && !loading"
@@ -85,8 +85,8 @@
       >
         <UiField
           id="mobile-qr-text"
-          label="Код подключения"
-          hint="Скопируйте и вставьте в приложении."
+          :label="t('settings.connectionCode')"
+          :hint="t('settings.copyPairingHint')"
         >
           <UiTextarea
             :model-value="qr.text"
@@ -98,12 +98,14 @@
       </div>
     </div>
     <template #footer>
-      <UiButton data-role="settings-action" @click="emit('close')">Закрыть</UiButton>
+      <UiButton data-role="settings-action" @click="emit('close')">{{ t('settings.close') }}</UiButton>
     </template>
   </UiDialog>
 </template>
 
 <script setup lang="ts">
+import { t, messageRef, resolveUiText, type UiText } from '../../ui.ts';
+
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import {
@@ -131,7 +133,7 @@ const emit = defineEmits<{ close: [] }>();
 
 const qr = ref<Qr | null>(null);
 const loading = ref(false);
-const error = ref('');
+const error = ref<UiText>('');
 const copied = ref(false);
 const textOpen = ref(false);
 const now = ref(Date.now());
@@ -167,7 +169,7 @@ async function loadQr() {
     }
   } catch (cause) {
     if (!disposed) {
-      error.value = cause instanceof Error ? cause.message : 'Не удалось получить QR-код.';
+      error.value = cause instanceof Error ? cause.message : messageRef('settings.couldNotGetTheQRCode');
     }
   } finally {
     loading.value = false;
@@ -196,7 +198,7 @@ async function copyQr() {
     }
   } catch {
     if (!disposed) {
-      error.value = 'Не удалось скопировать автоматически. Выделите и скопируйте код в поле ниже.';
+      error.value = messageRef('settings.couldNotCopyAutomaticallySelectAndCopy');
       textOpen.value = true;
     }
   }

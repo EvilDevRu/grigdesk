@@ -1,3 +1,7 @@
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../uiLocalePort.ts';
+
+const t = localeTranslator(uiLocalePort);
 // Паспорт встроенного инструмента: где он живёт, как подписан, какой плагин им владеет
 // и какой клавишей он открывается по умолчанию. Vue-компонентов здесь нет намеренно —
 // список читают настройки и сторы, а тянуть ради подписи Monaco и терминал они не должны.
@@ -35,7 +39,9 @@ export const TOOL_CATALOG: ToolMeta[] = [
   {
     id: 'code',
     route: '/code',
-    label: 'Код',
+    get label() {
+      return t('core.code');
+    },
     icon: 'code',
     order: 10,
     hotkey: 'Ctrl+Shift+Digit1',
@@ -44,7 +50,9 @@ export const TOOL_CATALOG: ToolMeta[] = [
   {
     id: 'shelf',
     route: '/shelf',
-    label: 'Полка',
+    get label() {
+      return t('core.shelf');
+    },
     icon: 'shelf',
     order: 20,
     hotkey: 'Ctrl+Shift+Digit2',
@@ -71,7 +79,9 @@ export const TOOL_CATALOG: ToolMeta[] = [
   {
     id: 'db',
     route: '/db',
-    label: 'Базы',
+    get label() {
+      return t('core.databases');
+    },
     icon: 'db',
     order: 50,
     hotkey: 'Ctrl+Shift+Digit5',
@@ -80,7 +90,9 @@ export const TOOL_CATALOG: ToolMeta[] = [
   {
     id: 'docker',
     route: '/docker',
-    label: 'Докер',
+    get label() {
+      return t('core.docker');
+    },
     icon: 'docker',
     order: 60,
     hotkey: 'Ctrl+Shift+Digit6',
@@ -89,7 +101,9 @@ export const TOOL_CATALOG: ToolMeta[] = [
   {
     id: 'terminal',
     route: '/terminal',
-    label: 'Терминал',
+    get label() {
+      return t('core.terminal');
+    },
     icon: 'terminal',
     order: 70,
     hotkey: 'Ctrl+Shift+Digit3',

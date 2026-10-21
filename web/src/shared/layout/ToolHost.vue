@@ -1,5 +1,5 @@
 <template>
-  <aside v-if="dockCapable" class="tool-rail" aria-label="Инструменты в панели">
+  <aside v-if="dockCapable" class="tool-rail" :aria-label="t('core.panelTools')">
     <UiIconButton v-for="item in railItems" :key="item.id"
                   :ref="(value) => setRailButton(item.id, value)" role="rail"
                   data-context="tool-rail-item"
@@ -37,15 +37,18 @@
   </template>
 
   <section v-if="presentation === 'placeholder'" class="tool-placeholder" role="status">
-    <span v-if="routeState === 'pending'">Проверяю доступность инструмента…</span>
+    <span v-if="routeState === 'pending'">{{ t('core.checkingToolAvailability') }}</span>
     <span v-else>
-      Плагин «{{ routeItem?.label || 'Инструмент' }}» выключен.
-      Включить его можно в «Настройки → Плагины».
+      {{ t('core.plugin') }}{{ routeItem?.label || t('core.tool') }}{{ t('core.isDisabledEnableItInSettingsPlugins') }}
     </span>
   </section>
 </template>
 
 <script setup>
+import { uiLocale } from '../../ui.ts';
+
+import { t } from '../../ui.ts';
+
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';
@@ -102,7 +105,7 @@ const railItems = computed(() => tools.value.filter((item) => {
   return plugins.dockNav.some((nav) => nav.id === item.id);
 }));
 
-const toolBadges = computed(() => ({ shelf: shelfNavBadge(shelf.rows) }));
+const toolBadges = computed(() => ({ shelf: shelfNavBadge(shelf.rows, uiLocale) }));
 
 /**
  * Подсказка и доступное имя называют точное число с причинами внимания.

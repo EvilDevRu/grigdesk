@@ -1,14 +1,14 @@
 <template>
   <UiTopbarPanel
     v-if="items.length"
-    title="Прерванные оценки"
+    :title="t('core.interruptedEvaluations')"
     trigger-mode="both"
   >
     <template #trigger>
       <UiButton
         variant="outline"
         tone="warning"
-        :aria-label="`Требуют внимания: ${items.length}`"
+        :aria-label="t('core.needAttention2', { itemsLength: items.length })"
       >
         <template #leading>
           <svg
@@ -36,7 +36,7 @@
 
     <div class="attention-alerts">
       <strong class="attention-heading">
-        Оценки триажа прерваны — перезапуск только вручную
+        {{ t('core.triageEvaluationsInterruptedManualRestartOnly') }}
       </strong>
 
       <UiFormActions align="start">
@@ -44,16 +44,16 @@
           v-if="items.length > 1"
           tone="accent"
           :loading="busy === 'all'"
-          loading-label="Запускаю"
+          :loading-label="t('core.starting')"
           @click="restartAll"
         >
-          ↻ Перезапустить все ({{ items.length }})
+          {{ t('core.restartAll') }}{{ items.length }})
         </UiButton>
         <UiButton
           :disabled="busy === 'all'"
           @click="dismissAll"
         >
-          ✕ Скрыть все
+          {{ t('core.hideAll') }}
         </UiButton>
       </UiFormActions>
 
@@ -68,8 +68,8 @@
 
           <span class="attention-actions">
             <UiIconButton
-              :label="`Перезапустить оценку #${item.task}`"
-              v-tooltip="'Перезапустить оценку'"
+              :label="t('core.restartEvaluation', { itemTask: item.task })"
+              v-tooltip="t('core.restartEvaluation2')"
               role="embedded"
               :disabled="busy === item.task"
               @click="restart(item.task)"
@@ -77,8 +77,8 @@
               ↻
             </UiIconButton>
             <UiIconButton
-              :label="`Скрыть оценку #${item.task}`"
-              v-tooltip="'Скрыть (не перезапускать)'"
+              :label="t('core.hideEvaluation', { itemTask: item.task })"
+              v-tooltip="t('core.hideDoNotRestart')"
               role="embedded"
               :disabled="busy === item.task"
               @click="dismiss(item.task)"
@@ -93,6 +93,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../ui.ts';
+
 import { computed, ref } from 'vue';
 import {
   analyzeTask,
@@ -119,7 +121,7 @@ const busy = ref<string | number | null>(null);
 const items = computed(() => (analysis.disabled ? [] : analysis.issues).map((issue) => ({
   task: issue.task,
   reason: issue.status?.error || (
-    issue.status?.state === 'interrupted' ? 'прерван' : 'упал'
+    issue.status?.state === 'interrupted' ? t('core.interrupted') : t('core.failed')
   ),
 })));
 

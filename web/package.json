@@ -11,6 +11,7 @@
     "typecheck:ui": "vue-tsc -p tsconfig.ui.json --noEmit",
     "check:readability": "node scripts/check-code-readability.mjs",
     "check:sfc": "node scripts/check-vue-sfc-order.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "check:ui": "node scripts/check-ui-suite.mjs",
     "check:ui-styles": "node scripts/check-ui-control-styles.mjs",
     "test:ui-browser": "node scripts/check-ui-geometry.mjs",

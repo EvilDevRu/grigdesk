@@ -1,3 +1,4 @@
+import { desktopText } from './locale.ts';
 // Загрузка документа и проверка закреплённого релиза отделены от главного процесса.
 // Модуль использует только типы Electron и вызывается без его запуска в Node.
 import type { BrowserWindow } from 'electron';
@@ -36,7 +37,7 @@ function reloadDocument(window: DocumentWindow, signal: AbortSignal): Promise<vo
 
     function cancel(): void {
       cleanup();
-      reject(Object.assign(new Error('Загрузка документа отменена.'), { code: 'ERR_ABORTED' }));
+      reject(Object.assign(new Error(desktopText('desktop.documentAborted')), { code: 'ERR_ABORTED' }));
     }
 
     contents.once('did-finish-load', finish);

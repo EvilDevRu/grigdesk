@@ -1,6 +1,10 @@
+import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 // Локальные возможности текущего устройства: уведомления и удержание экрана.
 import { defineStore } from 'pinia';
 import { ensureNotifyPermission, notify } from '../shared/notify.ts';
+
+const t = localeTranslator(uiLocale);
 
 export const WAKE_LOCK_KEY = 'grigdesk-screen-wake-lock';
 
@@ -42,16 +46,20 @@ export const useDeviceStore = defineStore('device', {
     wakeLockSupported: wakeLockSupported(),
     wakeLockActive: false,
     wakeLockBusy: false,
-    wakeLockError: '',
+    wakeLockIssue: '',
     wakeLockInitialized: false,
     // Разрешение браузера нельзя спрашивать на старте: мобильные браузеры принимают
     // запрос только из явного действия пользователя. Кнопка живёт в настройках устройства.
     notificationSupported: notificationSupported(),
     notificationPermission: notificationPermission(),
     notificationBusy: false,
-    notificationError: '',
+    notificationIssue: '',
     notificationInitialized: false,
   }),
+  getters: {
+    wakeLockError: (state) => state.wakeLockIssue ? t(state.wakeLockIssue) : '',
+    notificationError: (state) => state.notificationIssue ? t(state.notificationIssue) : '',
+  },
   actions: {
     /**
      * Применяет сохранённое другим окном значение без записи в localStorage.
@@ -65,7 +73,7 @@ export const useDeviceStore = defineStore('device', {
       }
 
       this.wakeLockEnabled = enabled;
-      this.wakeLockError = '';
+      this.wakeLockIssue = '';
 
       if (enabled) {
         await this.acquireWakeLock();
@@ -91,12 +99,21 @@ export const useDeviceStore = defineStore('device', {
       if (this.wakeLockEnabled) this.acquireWakeLock();
     },
 
+    /**
+     * Сохраняем выбор устройства до обращения к системной блокировке экрана.
+     * Отказ системного API не отменяет принятое человеком предпочтение.
+     */
     async setWakeLockEnabled(enabled) {
       this.wakeLockEnabled = !!enabled;
-      this.wakeLockError = '';
+      this.wakeLockIssue = '';
       saveWakeLockEnabled(this.wakeLockEnabled);
-      if (this.wakeLockEnabled) return this.acquireWakeLock();
+
+      if (this.wakeLockEnabled) {
+        return this.acquireWakeLock();
+      }
+
       await this.releaseWakeLock();
+
       return true;
     },
 
@@ -115,7 +132,7 @@ export const useDeviceStore = defineStore('device', {
       if (wakeLockRequest) return wakeLockRequest;
 
       this.wakeLockBusy = true;
-      this.wakeLockError = '';
+      this.wakeLockIssue = '';
       wakeLockRequest = (async () => {
         try {
           const lock = await navigator.wakeLock.request('screen');
@@ -136,9 +153,10 @@ export const useDeviceStore = defineStore('device', {
         } catch (error) {
           this.wakeLockActive = false;
           if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return false;
-          this.wakeLockError = error?.name === 'NotAllowedError'
-            ? 'Система не разрешила удерживать экран. Проверь режим энергосбережения.'
-            : 'Не удалось удерживать экран включённым.';
+
+          this.wakeLockIssue = error?.name === 'NotAllowedError'
+            ? 'settings.wakeLockDenied'
+            : 'settings.wakeLockFailed';
           return false;
         } finally {
           this.wakeLockBusy = false;
@@ -172,39 +190,62 @@ export const useDeviceStore = defineStore('device', {
     syncNotificationPermission() {
       this.notificationSupported = notificationSupported();
       this.notificationPermission = notificationPermission();
-      if (this.notificationPermission === 'granted') this.notificationError = '';
+
+      if (this.notificationPermission === 'granted') {
+        this.notificationIssue = '';
+      }
     },
 
-    // Вызывается только кнопкой в настройках — иначе Chrome/Android молча блокирует prompt.
+    /**
+     * Системный запрос запускает кнопка настроек, чтобы браузер принял жест человека.
+     * Сохраняем причину отказа отдельно от перевода, который меняется вместе с интерфейсом.
+     */
     async requestNotificationPermission() {
       this.notificationBusy = true;
-      this.notificationError = '';
+      this.notificationIssue = '';
+
       try {
         const granted = await ensureNotifyPermission();
+
         this.syncNotificationPermission();
+
         if (!granted) {
-          this.notificationError = this.notificationPermission === 'denied'
-            ? 'Оповещения заблокированы. Разреши их в системных настройках приложения или браузера.'
-            : 'Браузер не выдал разрешение на оповещения.';
+          this.notificationIssue = this.notificationPermission === 'denied'
+            ? 'settings.notificationDenied'
+            : 'settings.notificationNotGranted';
         }
+
         return granted;
       } finally {
         this.notificationBusy = false;
       }
     },
 
+    /**
+     * Проверка получает системное разрешение в том же действии человека.
+     * Уже отправленное уведомление сохраняется, а причина отказа переводится при показе.
+     */
     async testNotification() {
-      this.notificationError = '';
+      this.notificationIssue = '';
+
       if (this.notificationPermission !== 'granted'
-          && !(await this.requestNotificationPermission())) return false;
+          && !(await this.requestNotificationPermission())) {
+        return false;
+      }
+
       this.notificationBusy = true;
+
       try {
         const shown = await notify(
-          'Оповещения работают',
-          'GrigDesk сообщит, когда агент ответит или работа потребует тебя.',
+          t('settings.notificationTestTitle'),
+          t('settings.notificationTestBody'),
           'grigdesk-notification-test',
         );
-        if (!shown) this.notificationError = 'Браузер не смог показать тестовое оповещение.';
+
+        if (!shown) {
+          this.notificationIssue = 'settings.notificationTestFailed';
+        }
+
         return shown;
       } finally {
         this.notificationBusy = false;

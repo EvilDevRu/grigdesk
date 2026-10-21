@@ -1,8 +1,8 @@
 <template>
   <section class="settings-plugin-setup" data-plugin-setup>
-    <h4>Готовность</h4>
+    <h4>{{ t('settings.readiness') }}</h4>
     <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="loading && !status">Проверяем, что есть на машине…</p>
+    <p v-if="loading && !status">{{ t('settings.checkingWhatIsOnTheMachine') }}</p>
     <div v-for="item in status?.items ?? []" :key="item.id">
       <b>{{ item.title }}</b>
       <p>{{ item.reason }}</p>
@@ -13,7 +13,7 @@
         :disabled="Boolean(busy)"
         @click="operate(item, true)"
       >
-        Отменить
+        {{ t('settings.cancel2') }}
       </UiButton>
       <UiButton
         v-else-if="item.action"
@@ -23,11 +23,13 @@
         {{ item.action.label }}
       </UiButton>
     </div>
-    <UiButton :disabled="loading || Boolean(busy)" @click="load">Перепроверить готовность</UiButton>
+    <UiButton :disabled="loading || Boolean(busy)" @click="load">{{ t('settings.recheckReadiness') }}</UiButton>
   </section>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../../ui.ts';
+
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { UiButton } from '../../../ui.ts';
 import { usePluginsStore } from '../../../stores/plugins.js';

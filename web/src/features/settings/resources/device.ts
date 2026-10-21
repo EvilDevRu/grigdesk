@@ -1,3 +1,5 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import { validateHotkeyOverrides } from '../../../stores/hotkeys.js';
 import type { JsonValue, ResourceAdapter } from '../contracts.ts';
 
@@ -45,7 +47,12 @@ export function createWakeLockAdapter(device: DevicePort): ResourceAdapter {
  * Черновик держит полную карту overrides, а доменный store получает её один раз.
  * Валидация использует ту же итоговую карту, что и атомарная замена сочетаний.
  */
-export function createHotkeysAdapter(hotkeys: HotkeysPort): ResourceAdapter {
+export function createHotkeysAdapter(hotkeys: HotkeysPort,
+  locale: LocaleSource = 'ru',
+): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   return {
     id: 'hotkeys',
     chain: 'device',
@@ -60,9 +67,13 @@ export function createHotkeysAdapter(hotkeys: HotkeysPort): ResourceAdapter {
     validate(intents) {
       const intent = intents.get('overrides');
       const result = intent?.op === 'set'
-        ? validateHotkeyOverrides(intent.value) : { ok: true, error: undefined };
+        ? validateHotkeyOverrides(intent.value, typeof locale === 'string' ? locale : locale.value)
+        : { ok: true, error: undefined };
 
-      return result.ok ? [] : [{ key: 'overrides', message: result.error ?? 'Некорректное сочетание' }];
+      return result.ok ? [] : [{
+        key: 'overrides',
+        message: result.error ?? messageText("settings.invalidShortcut"),
+      }];
     },
     /**
      * Доменный store меняет карту одним действием после проверки.

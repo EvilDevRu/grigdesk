@@ -1,16 +1,24 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../shared/i18n/catalogs.ts';
+
 const PRIORITY = { info: 1, wait: 2, stall: 3 };
 
 /**
  * Счётчик общей очереди живёт на пункте Inbox, а не на странице канала.
  * Нулевая очередь не создаёт отдельную строку под иконкой.
  */
-export function inboxNavBadge({ reviewCount = 0 } = {}) {
+export function inboxNavBadge({ reviewCount = 0 } = {},
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   const count = Math.max(0, Number(reviewCount) || 0);
+
   return count ? {
     '/inbox': {
       n: count,
       kind: 'info',
-      title: `к разбору: ${count}`,
+      title: t("core.toReview", { count: count }),
     },
   } : {};
 }
@@ -19,7 +27,11 @@ export function inboxNavBadge({ reviewCount = 0 } = {}) {
  * Считаем объединение непрочитанных и ожидающих ответа чатов, включая архив.
  * Несколько вопросов одного чата и пересечение двух состояний не увеличивают итог.
  */
-export function chatNavBadge({ sessions = [], archived = [], waitingChats = new Set() } = {}) {
+export function chatNavBadge({ sessions = [], archived = [], waitingChats = new Set() } = {},
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   const unread = new Set([...sessions, ...archived].filter((chat) => chat.unread).map((chat) => chat.id));
   const attention = new Set([...unread, ...waitingChats]);
 
@@ -30,8 +42,11 @@ export function chatNavBadge({ sessions = [], archived = [], waitingChats = new 
   return {
     n: attention.size,
     kind: waitingChats.size ? 'wait' : 'info',
-    title: `Требуют внимания: ${attention.size} · ждут ответа: ${waitingChats.size}`
-      + ` · непрочитанные: ${unread.size}`,
+    title: t("core.needAttentionAwaitingResponse", {
+        attentionSize: attention.size,
+        waitingChatsSize: waitingChats.size,
+      })
+      + t("core.unread", { unreadSize: unread.size }),
   };
 }
 
@@ -39,13 +54,21 @@ export function chatNavBadge({ sessions = [], archived = [], waitingChats = new 
  * Берём уже дедуплицированную сводку конвейера; обычная работа не требует внимания.
  * Проблемы определяют цвет раньше ожидания, а подсказка сохраняет обе причины.
  */
-export function pipelineNavBadge({ errorCount = 0, waitingCount = 0 } = {}) {
+export function pipelineNavBadge({ errorCount = 0, waitingCount = 0 } = {},
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   const count = errorCount + waitingCount;
 
   return count ? {
     n: count,
     kind: errorCount ? 'stall' : 'wait',
-    title: `Требуют вмешательства: ${count} · проблемы: ${errorCount} · ждут решения: ${waitingCount}`,
+    title: t("core.needInterventionIssuesAwaitingDecision", {
+        count,
+        errorCount,
+        waitingCount,
+      }),
   } : null;
 }
 
@@ -53,7 +76,11 @@ export function pipelineNavBadge({ errorCount = 0, waitingCount = 0 } = {}) {
  * Повторяем состав группы «Требуют внимания» полки, не включая завершённые задачи.
  * Цвет берём из готовой проекции состояния; одно событие и ожидание дают одну задачу.
  */
-export function shelfNavBadge(rows = []) {
+export function shelfNavBadge(rows = [],
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   const attention = new Map();
 
   for (const row of rows) {
@@ -82,8 +109,8 @@ export function shelfNavBadge(rows = []) {
   return {
     n: attention.size,
     kind: counts.stall ? 'stall' : counts.wait ? 'wait' : 'info',
-    title: `Требуют внимания: ${attention.size} · проблемы: ${counts.stall}`
-      + ` · ждут решения: ${counts.wait} · новые события: ${counts.info}`,
+    title: t("core.needAttentionIssues", { attentionSize: attention.size, countsStall: counts.stall })
+      + t("core.awaitingDecisionNewEvents", { countsWait: counts.wait, countsInfo: counts.info }),
   };
 }
 

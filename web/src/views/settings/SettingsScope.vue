@@ -1,12 +1,14 @@
 <template>
   <div class="settings-scope">
-    <span class="settings-scope-label">{{ scope }}</span>
-    <p><slot>Изменения сохранятся по «Применить».</slot></p>
+    <span class="settings-scope-label">{{ (scope ?? t('settings.allDevices')) }}</span>
+    <p><slot>{{ t('settings.changesAreSavedWithApply') }}</slot></p>
   </div>
 </template>
 
 <script setup lang="ts">
-withDefaults(defineProps<{ scope?: string }>(), { scope: 'Все устройства' });
+import { t } from '../../ui.ts';
+
+withDefaults(defineProps<{ scope?: string }>(), { scope: undefined });
 </script>
 
 <style scoped>

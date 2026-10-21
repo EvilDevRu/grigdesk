@@ -1,7 +1,7 @@
 <template>
   <div class="settings-preferences">
     <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="!loaded">Загрузка параметров…</p>
+    <p v-if="!loaded">{{ t('settings.loadingParameters') }}</p>
     <template v-else>
       <SettingsScope />
       <SettingsField
@@ -29,12 +29,12 @@
           :model-value="modelValue"
           @update:model-value="selectModel"
         >
-          <option value="">Не выбрана</option>
-          <option v-if="modelLost" :value="modelValue">{{ modelLabel }} — нет в реестре</option>
+          <option value="">{{ t('settings.notSelected2') }}</option>
+          <option v-if="modelLost" :value="modelValue">{{ modelLabel }} {{ t('settings.missingFromRegistry2') }}</option>
           <optgroup
             v-for="provider in providerOptions"
             :key="provider.id"
-            :label="provider.name + (provider.available ? '' : ' — недоступен')"
+            :label="provider.name + (provider.available ? '' : t('settings.unavailable'))"
           >
             <option
               v-for="model in provider.models || []"
@@ -52,8 +52,8 @@
           :disabled="!modelValue"
           @update:model-value="edit(field.key, String($event))"
         >
-          <option value="">По умолчанию</option>
-          <option v-if="effortLost" :value="effortLost">{{ effortLost }} — нет у этой модели</option>
+          <option value="">{{ t('settings.default') }}</option>
+          <option v-if="effortLost" :value="effortLost">{{ effortLost }} {{ t('settings.unavailableForThisModel') }}</option>
           <option
             v-for="level in effortLevels"
             :key="level"
@@ -68,10 +68,12 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../../ui.ts';
+
 import { computed, ref, watch } from 'vue';
 import { UiSwitch, UiNumberInput, UiSelect } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
-import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
+import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createPreferencesAdapter } from '../../../features/settings/resources/preferences.ts';
 import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
 import type { JsonValue } from '../../../features/settings/contracts.ts';
@@ -86,7 +88,7 @@ const settings = useSettingsStore();
 const providers = useProvidersStore();
 const providerOptions = computed(() => providers.providers as ProviderEntry[]);
 const error = ref('');
-const fields = computed(() => SETTINGS_FIELDS.filter((field) =>
+const fields = computed(() => getSettingsFields(uiLocale.value).filter((field) =>
   field.resourceId === 'prefs' && field.address.pageId === settings.pageId));
 const loaded = computed(() => settings.snapshot.resources.some((item) => item.id === 'prefs' && item.loaded));
 const modelValue = computed(() => {
@@ -163,7 +165,7 @@ async function load(): Promise<void> {
       if (typeof values.showAllModels === 'boolean') {
         providers.showAllModels = values.showAllModels;
       }
-    }), SETTINGS_FIELDS.filter((field) => field.resourceId === 'prefs'));
+    }, uiLocale), SETTINGS_FIELDS.filter((field) => field.resourceId === 'prefs'));
     await settings.loadResource('prefs');
   } catch (cause) {
     error.value = failureText(cause);

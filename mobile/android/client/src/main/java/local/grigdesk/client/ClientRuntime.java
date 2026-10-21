@@ -58,7 +58,7 @@ public final class ClientRuntime implements AutoCloseable {
         inventory("", result);
         return result;
       }
-    });
+    }, ClientLocale.initialize(context).text("native.installation_corrupt"));
 
     JSONObject api = new JSONObject(StaticAssets.readText(
       context.getAssets().open("ui/api-version.json"), 1024));
@@ -66,7 +66,7 @@ public final class ClientRuntime implements AutoCloseable {
     int minor = api.getInt("minor");
 
     profiles = new ProfileStore(new File(context.getFilesDir(), "client-profiles.json"),
-      ClientRuntime::available);
+      ClientRuntime::available, ClientLocale.initialize(context));
 
     for (JSONObject profile : profiles.profiles) {
       originalPorts.put(profile.getString("id"), profile.getInt("port"));
@@ -83,7 +83,7 @@ public final class ClientRuntime implements AutoCloseable {
     Pairing pairing = new Pairing(profiles, () -> {
       key.ensure();
       return keys.get();
-    }, major, minor);
+    }, major, minor, ClientLocale.initialize(context));
 
     shell = new ShellApi(profiles, pairing, (profile, gate, report) -> {
       Upstream transport = new Upstream(profile.getString("address"), profile.getString("fp"), keys.get(),
@@ -105,7 +105,8 @@ public final class ClientRuntime implements AutoCloseable {
         callback, delay, TimeUnit.MILLISECONDS);
 
       return () -> future.cancel(false);
-    }, worker::execute, this::show, nativeActions, Math::random, major, minor);
+    }, worker::execute, this::show, nativeActions, Math::random, major, minor,
+      ClientLocale.initialize(context));
   }
 
   /**
@@ -171,7 +172,7 @@ public final class ClientRuntime implements AutoCloseable {
       origins.add(origin);
       navigate.accept(origin, reset);
     } catch (Exception exception) {
-      throw new IllegalStateException("Не удалось открыть локальный интерфейс приложения.", exception);
+      throw new IllegalStateException(ClientLocale.text("interfaceFailure"), exception);
     }
   }
 

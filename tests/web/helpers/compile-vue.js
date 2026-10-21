@@ -54,8 +54,11 @@ function vuePlugin() {
           id: `data-v-test-${nonce += 1}`,
           inlineTemplate: true,
         });
+
+        // Vue распаковывает default динамического импорта по признаку ES-модуля.
+        // Синтетический namespace esbuild сам этого признака не получает.
         return {
-          contents: compiled.content,
+          contents: compiled.content + '\nexport const __esModule = true;\n',
           loader: descriptor.scriptSetup?.lang === 'ts' || descriptor.script?.lang === 'ts' ? 'ts' : 'js',
           resolveDir: path.dirname(args.path),
         };

@@ -20,16 +20,26 @@ public final class Pairing {
   private final Keys keys;
   private final int major;
   private final int minor;
+  private final ShellLocale locale;
 
   /**
    * Привязка разделяет постоянный профиль и фабрику ключа установки.
    * Версия приложения участвует и в pair, и в последующем подтверждении hello.
    */
   public Pairing(ProfileStore store, Keys keys, int major, int minor) {
+    this(store, keys, major, minor, null);
+  }
+
+  /**
+   * Переводчик установки используется только для известных собственных отказов.
+   * Пины, ключи и последовательность pair/hello от языка не зависят.
+   */
+  public Pairing(ProfileStore store, Keys keys, int major, int minor, ShellLocale locale) {
     this.store = store;
     this.keys = keys;
     this.major = major;
     this.minor = minor;
+    this.locale = locale;
   }
 
   /**
@@ -50,7 +60,7 @@ public final class Pairing {
       JSONObject hello = json(upstream, "/api/client/hello", null);
 
       if (!payload.fp.equals(hello.optString("fp")) || !payload.fp.equals(paired.optString("fp"))) {
-        throw new IllegalStateException("Это не тот сервер.");
+        throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
       }
 
       return store.add(paired.getString("name"), address, payload.fp);
@@ -65,7 +75,7 @@ public final class Pairing {
     try (Upstream upstream = new Upstream(profile.getString("address"), profile.getString("fp"),
       keys.get(), new VersionGate(major, minor), (status, code) -> {})) {
       if (!profile.getString("fp").equals(json(upstream, "/api/client/hello", null).optString("fp"))) {
-        throw new IllegalStateException("Это не тот сервер.");
+        throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
       }
     }
   }
@@ -84,7 +94,7 @@ public final class Pairing {
       if (response.status != 200) {
         String error = new JSONObject(StaticAssets.readText(response.body, 65536)).optString("error");
 
-        throw new IllegalStateException(ClientFailure.message(error));
+        throw new IllegalStateException(ClientFailure.message(error, locale));
       }
 
       return new JSONObject(StaticAssets.readText(response.body, 1024 * 1024));

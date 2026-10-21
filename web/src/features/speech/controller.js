@@ -85,8 +85,7 @@ function defaultBrowser() {
     recognitionCtor: () => globalThis.window?.SpeechRecognition
       || globalThis.window?.webkitSpeechRecognition || null,
     phraseCtor: () => globalThis.window?.SpeechRecognitionPhrase || null,
-    uiLanguage: () => globalThis.document?.documentElement?.lang
-      || globalThis.navigator?.language || 'ru-RU',
+    uiLanguage: () => 'ru',
   };
 }
 

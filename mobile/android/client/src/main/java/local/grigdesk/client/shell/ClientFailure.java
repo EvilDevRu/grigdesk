@@ -42,6 +42,10 @@ public final class ClientFailure {
    * Коды протокола переводятся в действия человека без адреса и внутренних исключений.
    * Неизвестный отказ подсказывает проверить включение отдельного клиентского входа.
    */
+  public static String message(String code, ShellLocale locale) {
+    return locale == null ? message(code) : locale.text("native." + code, locale.text("native.offline"));
+  }
+
   public static String message(String code) {
     switch (code) {
       case "server_upgrade_required":

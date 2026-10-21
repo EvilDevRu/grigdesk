@@ -1,14 +1,16 @@
 <template>
-  <UiDialog open layer="session-lock" title="Приложение заблокировано" persistent :dismissible="false">
-    <p>Разблокируйте устройство, чтобы продолжить работу.</p>
+  <UiDialog open layer="session-lock" :title="t('core.applicationLocked')" persistent :dismissible="false">
+    <p>{{ t('core.unlockTheDeviceToContinue') }}</p>
     <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     <template #footer>
-      <UiButton :disabled="busy" @click="unlock">Разблокировать</UiButton>
+      <UiButton :disabled="busy" @click="unlock">{{ t('core.unlock') }}</UiButton>
     </template>
   </UiDialog>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../ui.ts';
+
 import { ref } from 'vue';
 
 import { UiButton, UiDialog, UiInlineMessage } from '../../ui.ts';
@@ -29,7 +31,7 @@ async function unlock(): Promise<void> {
   try {
     await shell.unlock();
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось разблокировать устройство.');
+    error.value = failureText(failure, t('core.couldNotUnlockTheDevice'));
   } finally {
     busy.value = false;
   }

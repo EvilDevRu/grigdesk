@@ -1,3 +1,5 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import type {
   JsonValue,
   ProviderSettingNode,
@@ -12,6 +14,7 @@ import { decodeSettingsJson } from '../../../../../shared/chat/providerSettingsC
 import type { useProviderSettingsStore } from '../../../stores/providerSettings.ts';
 import type { FieldIntent, FieldResult, ResourceAdapter, SessionField, WriteStatus } from '../contracts.ts';
 import { validNativeDraft } from '../nativeValidation.ts';
+import { nativeMetadataMessage, providerMetadataMessage } from '../metadataLocale.ts';
 
 export interface ProviderWriteOutcome {
   ok: boolean;
@@ -56,7 +59,12 @@ export function nativeValues(catalog: ProviderSettingsCatalog): Record<string, J
  * Неактивный override известен по наличию, хотя значение намеренно скрыто сервером.
  * hasStoredValue позволяет поставить unset без выдуманного null в baseline.
  */
-export function nativeSessionFields(catalog: ProviderSettingsCatalog): SessionField[] {
+export function nativeSessionFields(catalog: ProviderSettingsCatalog,
+  locale: LocaleSource = 'ru',
+): SessionField[] {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   const unavailable = !['ready', 'partial'].includes(catalog.state) || catalog.schemaRevision === null;
 
   return [
@@ -70,7 +78,8 @@ export function nativeSessionFields(catalog: ProviderSettingsCatalog): SessionFi
       },
       hasStoredValue: field.override.state === 'known',
       ...(!field.writable || unavailable
-        ? { unavailable: field.reason || 'Параметр сейчас недоступен для записи' } : {}),
+        ? { unavailable: field.reason ? nativeMetadataMessage(field.reason, 'reasons', locale)
+          : messageText("settings.thisParameterCannotBeWrittenRightNow") } : {}),
     })),
     ...catalog.inactiveOverrides.map((field) => ({
       key: field.id,
@@ -81,7 +90,7 @@ export function nativeSessionFields(catalog: ProviderSettingsCatalog): SessionFi
         fieldPath: ['native', ...field.path],
       },
       hasStoredValue: true,
-      unavailable: field.reason,
+      unavailable: nativeMetadataMessage(field.reason, 'reasons', locale),
     })),
   ];
 }
@@ -94,12 +103,17 @@ export function createProviderNativeAdapter(
   id: string,
   store: NativeStore,
   onCatalog: (catalog: ProviderSettingsCatalog) => void = () => {},
+  locale: LocaleSource = 'ru',
+
 ): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   function catalog(): ProviderSettingsCatalog {
     const value = store.panel(id).catalog;
 
     if (!value) {
-      throw new TypeError('Каталог настроек исполнителя не получен');
+      throw new TypeError(t("settings.providerSettingsCatalogNotReceived"));
     }
 
     return value;
@@ -118,7 +132,8 @@ export function createProviderNativeAdapter(
 
       return !field || !field.writable || current.schemaRevision === null
         || !['ready', 'partial'].includes(current.state) || !validNativeDraft(field, intent.value)
-        ? [{ key, message: field?.reason || 'Поле недоступно или значение не соответствует схеме' }] : [];
+        ? [{ key, message: field?.reason ? nativeMetadataMessage(field.reason, 'reasons', locale)
+          : messageText("settings.fieldUnavailableOrValueDoesNotMatch") }] : [];
     });
   }
 
@@ -189,11 +204,20 @@ export function createProviderNativeAdapter(
   };
 }
 
-function currentProvider(id: string, store: ProviderStorePort): ProviderEntry {
+/**
+ * Реестр перечитывается при каждой операции, чтобы не сохранять снятую декларацию.
+ * Отсутствующий провайдер даёт собственную ошибку на текущем языке интерфейса.
+ */
+function currentProvider(id: string, store: ProviderStorePort,
+  locale: LocaleSource = 'ru',
+): ProviderEntry {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   const provider = store.providers.find((item) => item.id === id);
 
   if (!provider) {
-    throw new Error('Исполнитель больше недоступен в реестре');
+    throw new Error(t("settings.providerNoLongerAvailableInTheRegistry"));
   }
 
   return provider;
@@ -233,7 +257,12 @@ export function createProviderSettingsAdapter(
   id: string,
   store: ProviderStorePort,
   registryReady: () => boolean = () => true,
+  locale: LocaleSource = 'ru',
+
 ): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   return {
     id: `providerSettings:${id}`,
     chain: `provider:${id}`,
@@ -246,14 +275,15 @@ export function createProviderSettingsAdapter(
         await store.load(refresh);
       }
 
-      return providerSettingValues(currentProvider(id, store));
+      return providerSettingValues(currentProvider(id, store, locale));
     },
     validate: (intents) => [...intents].flatMap(([key, intent]) => {
-      const field = currentProvider(id, store).settings?.find((entry) => entry.id === key);
+      const field = currentProvider(id, store, locale).settings?.find((entry) => entry.id === key);
 
       return !registryReady() || !field || field.disabled || intent.op !== 'set'
         || !validOrdinary(field, intent.value)
-        ? [{ key, message: field?.note || 'Параметр недоступен; перечитайте реестр исполнителя' }] : [];
+        ? [{ key, message: field?.note ? providerMetadataMessage(id, field.note, locale)
+          : messageText("settings.parameterUnavailableReloadTheProviderRegistry") }] : [];
     }),
     /**
      * Новая декларация после credentials может убрать поле из прежнего черновика.
@@ -263,13 +293,13 @@ export function createProviderSettingsAdapter(
       const fields: FieldResult[] = [];
 
       for (const [key, intent] of intents) {
-        const field = currentProvider(id, store).settings?.find((entry) => entry.id === key);
+        const field = currentProvider(id, store, locale).settings?.find((entry) => entry.id === key);
 
         if (!registryReady() || !field || field.disabled || intent.op !== 'set') {
           return {
             status: 'failed',
             fields,
-            message: 'Поле больше недоступно; перепроверьте реестр',
+            message: messageText("settings.fieldNoLongerAvailableRecheckTheRegistry"),
           };
         }
 
@@ -351,7 +381,12 @@ export function createProviderCredentialsAdapter(
   id: string,
   store: ProviderStorePort,
   onRegistry: (ready: boolean) => Promise<void> = async () => {},
+  locale: LocaleSource = 'ru',
+
 ): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   return {
     id: `providerCredentials:${id}`,
     chain: `provider:${id}`,
@@ -364,10 +399,10 @@ export function createProviderCredentialsAdapter(
         await store.load();
       }
 
-      return credentialValues(currentProvider(id, store));
+      return credentialValues(currentProvider(id, store, locale));
     },
     validate: (intents, baseline) => {
-      const provider = currentProvider(id, store);
+      const provider = currentProvider(id, store, locale);
       const values = { ...baseline };
 
       for (const [key, intent] of intents) {
@@ -383,7 +418,7 @@ export function createProviderCredentialsAdapter(
             || typeof intent.value === 'string' && intent.value.trim().length > 0
             : field.options?.some((option) => option.value === intent.value));
 
-        return valid ? [] : [{ key, message: 'Проверьте поле доступа и выбранный режим' }];
+        return valid ? [] : [{ key, message: messageText("settings.checkTheAccessFieldAndSelectedMode") }];
       });
     },
     /**
@@ -392,7 +427,7 @@ export function createProviderCredentialsAdapter(
      */
     async write(intents) {
       const before: ProviderCredentialEntry[] = JSON.parse(
-        JSON.stringify(currentProvider(id, store).credentials ?? []),
+        JSON.stringify(currentProvider(id, store, locale).credentials ?? []),
       );
       const values = Object.fromEntries([...intents].filter(([, intent]) => intent.op === 'set')
         .map(([key, intent]) => [key, intent.op === 'set' ? intent.value : null]));
@@ -434,7 +469,7 @@ export function createProviderCredentialsAdapter(
           : registry.ok ? 'success' : 'failed',
         fields,
         ...registry.ok ? {} : {
-          message: registry.message || 'Ключи сохранены; перечитайте реестр исполнителя',
+          message: registry.message || messageText("settings.keysSavedReloadTheProviderRegistry"),
         },
       };
     },

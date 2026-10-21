@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia';
-import { computed, onScopeDispose, ref, shallowRef } from 'vue';
+import { computed, watch, onScopeDispose, ref, shallowRef } from 'vue';
 import { createSettingsSession } from '../features/settings/session.ts';
 import {
   DEFAULT_SETTINGS_PAGE,
   SETTINGS_FIELDS,
+  getSettingsFields,
   SETTINGS_GROUPS,
   SETTINGS_PAGES,
   SETTINGS_PAGE_KEY,
@@ -17,7 +18,7 @@ import {
   type SettingsSearchResult,
 } from '../features/settings/search.ts';
 import type { FieldAddress } from '../features/settings/contracts.ts';
-import { hasOpenModal } from '../ui.ts';
+import { uiLocale, hasOpenModal, messageRef, resolveUiText, type UiText } from '../ui.ts';
 
 export interface SettingsOpenRequest {
   source?: 'shortcut' | 'menu' | 'button' | 'link' | 'route';
@@ -39,7 +40,7 @@ function navigationStorage(): Storage | undefined {
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const session = createSettingsSession();
+  const session = createSettingsSession(undefined, uiLocale);
   const snapshot = shallowRef(session.getSnapshot());
   const isOpen = ref(false);
   const pageId = ref(DEFAULT_SETTINGS_PAGE);
@@ -48,7 +49,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const closeChoiceOpen = ref(false);
   const revealTarget = shallowRef<FieldAddress | null>(null);
   const query = ref('');
-  const navigationError = ref('');
+  const navigationMessage = shallowRef<UiText>('');
+  const navigationError = computed(() => resolveUiText(navigationMessage.value));
   const pendingOpen = shallowRef<SettingsOpenRequest | null>(null);
   const dynamicCatalogs = shallowRef<Record<string, SettingsFieldMetadata[]>>({});
   const dynamicFields = computed(() => Object.values(dynamicCatalogs.value).flat());
@@ -102,7 +104,7 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   function selectPage(id: string, entity?: string, tab?: string): boolean {
     if (!SETTINGS_PAGES.some((page) => page.id === id)) {
-      navigationError.value = 'Раздел настроек больше недоступен';
+      navigationMessage.value = messageRef('settings.settingsSectionNoLongerAvailable');
 
       return false;
     }
@@ -110,7 +112,7 @@ export const useSettingsStore = defineStore('settings', () => {
     pageId.value = id;
     entityId.value = entity;
     tabId.value = tab;
-    navigationError.value = '';
+    navigationMessage.value = '';
 
     const group = SETTINGS_PAGES.find((page) => page.id === id)?.groupId;
 
@@ -191,7 +193,7 @@ export const useSettingsStore = defineStore('settings', () => {
     revealTarget.value = null;
     pendingOpen.value = null;
     query.value = '';
-    navigationError.value = '';
+    navigationMessage.value = '';
     entityId.value = undefined;
     tabId.value = undefined;
     dynamicCatalogs.value = {};
@@ -260,7 +262,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function fieldMetadata(address: FieldAddress): SettingsFieldMetadata | undefined {
-    return [...SETTINGS_FIELDS, ...dynamicFields.value].find((field) =>
+    return [...getSettingsFields(uiLocale.value), ...dynamicFields.value].find((field) =>
       equalFieldAddress(field.address, address));
   }
 
@@ -272,7 +274,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (result.address && (!fieldMetadata(result.address)
         || fieldMetadata(result.address)?.available === false)) {
       selectPage(result.pageId);
-      navigationError.value = 'Поле или сущность больше недоступны';
+      navigationMessage.value = messageRef('settings.fieldOrEntityNoLongerAvailable');
 
       return;
     }
@@ -425,17 +427,19 @@ export const useSettingsStore = defineStore('settings', () => {
         if (ok) {
           dispose('action');
         } else {
-          navigationError.value = 'Не удалось открыть действие. Настройки остаются открытыми.';
+          navigationMessage.value = messageRef('settings.couldNotOpenActionSettingsRemainOpen');
         }
       }
     } catch {
       action.resolve(false);
       pendingAction = null;
-      navigationError.value = 'Не удалось открыть действие. Настройки остаются открытыми.';
+      navigationMessage.value = messageRef('settings.couldNotOpenActionSettingsRemainOpen');
     } finally {
       actionRunning.value = false;
     }
   }
+
+  watch(uiLocale, () => snapshot.value = session.getSnapshot());
 
   onScopeDispose(() => {
     releaseBindings();

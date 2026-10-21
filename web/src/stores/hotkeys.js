@@ -2,6 +2,8 @@
 // клавиатура планшета, рабочего компьютера и мозга разные, и общая настройка чинила бы
 // одно устройство за счёт другого. Состав инструментов сюда не дублируется — он в registry.
 import { defineStore } from 'pinia';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 import { TOOL_CATALOG } from '../shared/tools/catalog.ts';
 import { comboIssue, normalizeCombo } from '../shared/hotkeys/combo.ts';
 
@@ -15,9 +17,11 @@ export const DEFAULT_HOTKEYS = Object.fromEntries(TOOL_CATALOG
  * Проверяет итоговую карту целиком, включая стандартные сочетания остальных строк.
  * Обмен клавиш двух инструментов не проходит через временный конфликт первой записи.
  */
-export function validateHotkeyOverrides(overrides) {
+export function validateHotkeyOverrides(overrides, locale = 'ru') {
+  const t = localeTranslator(locale);
+
   if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
-    return { ok: false, error: 'Некорректная карта сочетаний.' };
+    return { ok: false, error: t('settings.hotkeysInvalidMap') };
   }
 
   const known = new Set(TOOL_CATALOG.map((item) => item.id));
@@ -25,11 +29,11 @@ export function validateHotkeyOverrides(overrides) {
 
   for (const [id, value] of Object.entries(overrides)) {
     if (!known.has(id) || typeof value !== 'string') {
-      return { ok: false, error: 'Неизвестный инструмент или сочетание.' };
+      return { ok: false, error: t('settings.hotkeysUnknownTool') };
     }
 
     const combo = value ? normalizeCombo(value) : '';
-    const issue = value ? comboIssue(combo) : '';
+    const issue = value ? comboIssue(combo, locale) : '';
 
     if (issue) {
       return { ok: false, error: issue };
@@ -48,10 +52,10 @@ export function validateHotkeyOverrides(overrides) {
     }
 
     if (owners.has(combo)) {
-      return { ok: false, error: `Это сочетание уже открывает «${owners.get(combo)}».` };
+      return { ok: false, error: t('settings.hotkeysDuplicate', { name: owners.get(combo) }) };
     }
 
-    owners.set(combo, item.label);
+    owners.set(combo, t(`core.builtinNavigation.${item.id}`));
   }
 
   return { ok: true, overrides: normalized };
@@ -119,7 +123,7 @@ export const useHotkeysStore = defineStore('hotkeys', {
      * Неуспешная проверка не меняет ни работающие клавиши, ни сохранённую карту.
      */
     replaceOverrides(map) {
-      const result = validateHotkeyOverrides(map);
+      const result = validateHotkeyOverrides(map, uiLocalePort.value);
 
       if (!result.ok) {
         return result;

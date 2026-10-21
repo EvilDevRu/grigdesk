@@ -1,45 +1,55 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { messageLabels } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
 export const ACTIVE_UPDATE_STATES = new Set([
   'queued', 'preparing', 'installing', 'building', 'testing', 'applying', 'restarting',
 ]);
 
-export const UPDATE_STAGE_LABELS = {
-  queued: 'Задание поставлено в очередь',
-  preparing: 'Проверяю условия и готовлю снимок',
-  installing: 'Устанавливаю зависимости',
-  building: 'Собираю web',
-  testing: 'Запускаю smoke-тест',
-  applying: 'Публикую подготовленную сборку',
-  restarting: 'Перезапускаю GrigDesk',
-  done: 'Обновление применено',
-  failed: 'Обновление завершилось ошибкой',
+const UPDATE_STAGE_MESSAGES = {
+  queued: 'core.jobQueued',
+  preparing: 'core.checkingConditionsAndPreparingASnapshot',
+  installing: 'core.installingDependencies',
+  building: 'core.buildingWeb',
+  testing: 'core.runningSmokeTest',
+  applying: 'core.publishingPreparedBuild',
+  restarting: 'core.restartingGrigDesk',
+  done: 'core.updateApplied',
+  failed: 'core.updateFailed',
 };
+
+export const UPDATE_STAGE_LABELS = messageLabels(UPDATE_STAGE_MESSAGES, uiLocalePort);
 
 // Те же стадии одним-двумя словами — для плитки версии в конце рейки, где полная фраза
 // не помещается. Полная остаётся во всплывашке и в настройках.
-export const UPDATE_STAGE_SHORT_LABELS = {
-  queued: 'В очереди',
-  preparing: 'Готовлю снимок',
-  installing: 'Зависимости',
-  building: 'Собираю web',
-  testing: 'Smoke-тест',
-  applying: 'Публикую сборку',
-  restarting: 'Перезапуск',
+const UPDATE_STAGE_SHORT_MESSAGES = {
+  queued: 'core.queued',
+  preparing: 'core.preparingSnapshot',
+  installing: 'core.dependencies',
+  building: 'core.buildingWeb',
+  testing: 'core.smokeTest',
+  applying: 'core.publishingBuild',
+  restarting: 'core.restarting',
 };
 
-export const BLOCK_REASON_LABELS = {
-  packaged_update_requires_package: 'Установите новый пакет GrigDesk',
-  no_release_checked: 'Сначала выполните проверку опубликованных релизов.',
-  branch_not_main: 'Релиз устанавливается только на ветку main.',
-  detached_head: 'Checkout находится в detached HEAD.',
-  working_tree_dirty: 'В checkout есть незакоммиченные или untracked-файлы.',
-  checkout_ahead: 'Локальная main опережает выбранный релиз.',
-  checkout_diverged: 'История checkout расходится с выбранным релизом.',
-  checkout_at_release: 'Выбранный релиз уже находится в checkout; примените локальный checkout.',
-  release_not_newer: 'Опубликованный релиз не новее запущенной версии.',
-  update_in_progress: 'Уже выполняется другое задание обновления.',
-  version_tag_mismatch: 'VERSION не совпадает с exact-тегом checkout.',
-  dirty_apply_not_supported: 'Dirty checkout пока нельзя применить автоматически; сначала зафиксируйте изменения.',
+export const UPDATE_STAGE_SHORT_LABELS = messageLabels(UPDATE_STAGE_SHORT_MESSAGES, uiLocalePort);
+
+const BLOCK_REASON_MESSAGES = {
+  packaged_update_requires_package: 'core.installTheNewGrigDeskPackage',
+  no_release_checked: 'core.checkPublishedReleasesFirst',
+  branch_not_main: 'core.aReleaseCanOnlyBeInstalledOn',
+  detached_head: 'core.checkoutIsInDetachedHEAD',
+  working_tree_dirty: 'core.checkoutContainsUncommittedOrUntrackedFiles',
+  checkout_ahead: 'core.localMainIsAheadOfTheSelected',
+  checkout_diverged: 'core.checkoutHistoryDivergesFromTheSelectedRelease',
+  checkout_at_release: 'core.theSelectedReleaseIsAlreadyInThe',
+  release_not_newer: 'core.thePublishedReleaseIsNotNewerThan',
+  update_in_progress: 'core.anotherUpdateJobIsAlreadyRunning',
+  version_tag_mismatch: 'core.versionDoesNotMatchTheCheckoutS',
+  dirty_apply_not_supported: 'core.cannotApplyADirtyCheckoutAutomaticallyCommit',
 };
+
+export const BLOCK_REASON_LABELS = messageLabels(BLOCK_REASON_MESSAGES, uiLocalePort);
 
 export function grigDeskUpdateTone(status) {
   if (status?.job?.status === 'failed') return 'error';
@@ -48,6 +58,15 @@ export function grigDeskUpdateTone(status) {
   return '';
 }
 
-export function blockReasonLabel(code) {
-  return BLOCK_REASON_LABELS[code] || `Обновление заблокировано: ${code}`;
+/**
+ * Известная причина обновления разрешается при построении представления.
+ * Неизвестный код остаётся параметром собственной поясняющей подписи.
+ */
+export function blockReasonLabel(code,
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
+  return BLOCK_REASON_MESSAGES[code]
+    ? t(BLOCK_REASON_MESSAGES[code]) : t('core.updateBlocked', { code });
 }

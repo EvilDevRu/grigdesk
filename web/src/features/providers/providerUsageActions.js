@@ -1,3 +1,5 @@
+import { localeTranslator } from '../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 // Provider adapter описывает разрешённые действия декларативно. Клиент только
 // проверяет пользовательский ввод и отправляет opaque action id обратно store.
 
@@ -9,11 +11,19 @@ function numberOf(value) {
   return Number(String(value ?? '').trim().replace(',', '.'));
 }
 
-export function prepareUsageControl(control, input) {
+/**
+ * Проверка значения предшествует подтверждению и отправке действия провайдеру.
+ * Локализованная ошибка не меняет payload и не преобразует неизвестный ответ сервера.
+ */
+export function prepareUsageControl(control, input,
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   if (!control || !control.action) {
     return {
       ok: false,
-      error: 'Действие не поддерживается',
+      error: t("core.actionUnsupported"),
     };
   }
 
@@ -30,7 +40,7 @@ export function prepareUsageControl(control, input) {
     if (!control.field) {
       return {
         ok: false,
-        error: 'Некорректный тумблер',
+        error: t("core.invalidToggle"),
       };
     }
 
@@ -48,7 +58,7 @@ export function prepareUsageControl(control, input) {
     ) {
       return {
         ok: false,
-        error: `${control.label || 'Значение'} — положительное число`,
+        error: t("core.aPositiveNumber", { value1: control.label || t("core.value") }),
       };
     }
 
@@ -56,7 +66,7 @@ export function prepareUsageControl(control, input) {
   } else if (control.kind !== 'button') {
     return {
       ok: false,
-      error: 'Неизвестный тип действия',
+      error: t("core.unknownActionType"),
     };
   }
 
@@ -78,14 +88,22 @@ function confirmationOf(control, value) {
   return control?.confirm;
 }
 
-export function usageControlConfirmation(control, value) {
+/**
+ * Вопрос и кнопки строятся из публичного контракта действия при показе.
+ * Подстановка значения не меняет само значение, отправляемое провайдеру.
+ */
+export function usageControlConfirmation(control, value,
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   const confirmation = confirmationOf(control, value) || {};
   const replacements = {
     value: value ?? '',
     unit: control?.unit || '',
   };
   const text = String(
-    confirmation.text || `Выполнить действие «${control?.label || ''}»?`,
+    confirmation.text || t("core.performAction", { value1: control?.label || '' }),
   )
     .replace(
       /\{(value|unit)\}/g,
@@ -95,7 +113,7 @@ export function usageControlConfirmation(control, value) {
 
   return {
     text,
-    label: String(confirmation.label || control?.label || 'Применить'),
+    label: String(confirmation.label || control?.label || t("settings.apply")),
     danger: confirmation.danger === true,
   };
 }

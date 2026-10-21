@@ -20,7 +20,7 @@
     @focus="onTriggerFocus"
     @click="onTriggerClick"
   >
-    {{ triggerLabel }}
+    {{ (triggerLabel ?? t('core.open')) }}
   </UiButton>
 
   <Teleport to="body">
@@ -49,6 +49,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import {
   Comment,
   Fragment,
@@ -108,7 +110,7 @@ const props = withDefaults(defineProps<Props>(), {
   triggerMode: 'click',
   placement: 'bottom-start',
   layer: 'popover',
-  triggerLabel: 'Открыть',
+  triggerLabel: undefined,
   offset: 8,
   hoverDelay: 120,
   returnFocus: true,

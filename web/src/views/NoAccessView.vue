@@ -1,12 +1,14 @@
 <template>
   <main class="no-access">
-    <h1>Нет входа</h1>
-    <p>GrigDesk открывается в приложении.</p>
-    <p>Закройте и снова запустите приложение — оно войдёт заново по ключу.</p>
+    <h1>{{ t('core.noAccess') }}</h1>
+    <p>{{ t('core.grigdeskOpensInTheApplication') }}</p>
+    <p>{{ t('core.closeAndRestartTheApplicationItWill') }}</p>
   </main>
 </template>
 
 <script setup lang="ts">
+import { t } from '../ui.ts';
+
 defineOptions({ name: 'NoAccessView' });
 </script>
 

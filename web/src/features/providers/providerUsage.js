@@ -1,3 +1,9 @@
+import { intlLocale } from '../../../../shared/i18n/formats.ts';
+import { localeTranslator, translator } from '../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../shared/i18n/catalogs.ts';
+import { localizeUsageAmount, localizeUsageResourceText } from './usageResourceText.ts';
+import { localizeProviderAction } from './providerLocale.ts';
+
 /**
  * Полосы одного ведра лимитов идут в ответе подряд, и различить их можно только по
  * подписи — «Неделя (7д)» и «Неделя · gpt-reserve» выглядят одним плоским списком.
@@ -27,15 +33,19 @@ function withGroupBreaks(bars) {
  * локаль вовсе подменяется чужой. Три буквы одинаковой длины держат строку на месте.
  */
 const RESET_MONTHS = [
-  'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
-  'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+  t("core.jan"), t("core.feb"), t("core.mar"), t("core.apr"), t("core.may"), t("core.jun"),
+  t("core.jul"), t("core.aug"), t("core.sep"), t("core.oct"), t("core.nov"), t("core.dec"),
 ];
 
 /**
  * Местное время в 24-часовом формате едино для сброса и времени замера квоты.
  * Перевод часового пояса делает браузер, а AM/PM не попадает в русский интерфейс.
  */
-export function clockOf(date) {
+export function clockOf(date, locale = 'ru') {
+  if (intlLocale(locale) !== 'ru-RU') {
+    return new Intl.DateTimeFormat(intlLocale(locale), { hour: 'numeric', minute: '2-digit' }).format(date);
+  }
+
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
@@ -60,7 +70,11 @@ function calendarDaysBetween(from, to) {
  * Часы и минуты берутся из одного округления: считать их порознь нельзя — на границе
  * получилось бы «2ч 60м».
  */
-export function resetIn(iso, now = Date.now()) {
+export function resetIn(iso, now = Date.now(),
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   if (!iso) return '';
 
   const ms = new Date(iso).getTime() - now;
@@ -70,11 +84,19 @@ export function resetIn(iso, now = Date.now()) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
 
-  if (hours >= 48) return `сброс через ${Math.round(hours / 24)}д`;
-  if (hours >= 24) return `сброс через ${hours}ч`;
-  if (hours >= 1) return rest ? `сброс через ${hours}ч ${rest}м` : `сброс через ${hours}ч`;
+  if (hours >= 48) {
+    return t("core.resetsInD", { value1: Math.round(hours / 24) });
+  }
 
-  return `сброс через ${rest}м`;
+  if (hours >= 24) {
+    return t("core.resetsInH", { hours });
+  }
+
+  if (hours >= 1) {
+    return rest ? t("core.resetsInHM", { hours, rest }) : t("core.resetsInH", { hours });
+  }
+
+  return t("core.resetsInM", { rest: rest });
 }
 
 /**
@@ -87,18 +109,36 @@ export function resetIn(iso, now = Date.now()) {
  * через 20 часов может прийтись и на завтра, и на послезавтра, и человек читает
  * календарь, а не длительность.
  */
-export function resetAt(iso, now = Date.now()) {
+export function resetAt(iso, now = Date.now(),
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   if (!iso) return '';
 
   const at = new Date(iso).getTime();
   if (!Number.isFinite(at) || at <= now) return '';
 
   const date = new Date(at);
-  const time = clockOf(date);
+  const time = clockOf(date, locale);
   const days = calendarDaysBetween(now, at);
 
-  if (days <= 0) return `сегодня ${time}`;
-  if (days === 1) return `завтра ${time}`;
+  if (days <= 0) {
+    return t("core.today2", { time });
+  }
+
+  if (days === 1) {
+    return t("core.tomorrow", { time });
+  }
+
+  if (intlLocale(locale) !== 'ru-RU') {
+    return new Intl.DateTimeFormat(intlLocale(locale), {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date);
+  }
 
   return `${date.getDate()} ${RESET_MONTHS[date.getMonth()]} ${time}`;
 }
@@ -128,7 +168,11 @@ function vendorFaultDetail(status) {
  * нет ни одного имени вендора и ни одной догадки о причине: пока страница не прочитана,
  * подсказка честно зовёт посмотреть её глазами.
  */
-export function providerStatusHint(provider = {}, usage = {}) {
+export function providerStatusHint(provider = {}, usage = {},
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   const url = String(provider?.statusPage || '');
 
   if (!url || !VENDOR_FAULT_STATES.has(usage?.state)) {
@@ -143,7 +187,7 @@ export function providerStatusHint(provider = {}, usage = {}) {
     return null;
   }
 
-  const vendor = provider?.vendor || provider?.name || 'вендора';
+  const vendor = provider?.vendor || provider?.name || t("core.theVendor");
   const status = usage?.vendorStatus;
   const detail = status ? vendorFaultDetail(status) : '';
 
@@ -152,8 +196,8 @@ export function providerStatusHint(provider = {}, usage = {}) {
       url,
       host,
       text: detail
-        ? `${vendor} о сбое не сообщает (${detail}):`
-        : `${vendor} о сбое не сообщает:`,
+        ? t("core.reportsNoOutage", { vendor: vendor, detail: detail })
+        : t("core.reportsNoOutage2", { vendor: vendor }),
     };
   }
 
@@ -162,27 +206,31 @@ export function providerStatusHint(provider = {}, usage = {}) {
       url,
       host,
       text: detail
-        ? `${vendor} сообщает о сбое: ${detail} —`
-        : `${vendor} сообщает о сбое —`,
+        ? t("core.reportsAnOutage", { vendor: vendor, detail: detail })
+        : t("core.reportsAnOutage2", { vendor: vendor }),
     };
   }
 
   return {
     url,
     host,
-    text: `Причина может быть на стороне ${vendor} — состояние сервиса:`,
+    text: t("core.theIssueMayBeWithServiceStatus", { vendor: vendor }),
   };
 }
 
 // Представление серверного контракта лимитов. Всплывашка всегда получает текст,
 // даже пока данные грузятся или CLI не предоставляет API потребления.
-export function providerUsageView(entry, provider = {}) {
+export function providerUsageView(entry, provider = {},
+  locale = 'ru',
+) {
+  const t = localeTranslator(locale);
+
   if (!entry || typeof entry !== 'object') {
     return {
       state: 'loading',
       bars: [],
       resources: [],
-      message: 'Данные о лимитах ещё не получены.',
+      message: t("core.limitDataHasNotBeenReceivedYet"),
       tone: 'muted',
       action: null,
     };
@@ -199,14 +247,99 @@ export function providerUsageView(entry, provider = {}) {
 
   const fallback = entry.state === 'ok'
     ? ''
-    : `Статус лимитов ${provider.name || 'исполнителя'} недоступен.`;
+    : t("core.limitStatusForIsUnavailable", { value1: provider.name || t("core.provider") });
 
   return {
     ...entry,
-    bars: withGroupBreaks(Array.isArray(entry.bars) ? entry.bars : []),
-    resources: Array.isArray(entry.resources) ? entry.resources : [],
+    bars: withGroupBreaks((Array.isArray(entry.bars) ? entry.bars : [])
+      .map((bar) => localizeUsageBar(provider.id, bar, locale))),
+    resources: (Array.isArray(entry.resources) ? entry.resources : [])
+      .map((resource) => localizeUsageResource(provider.id, resource, locale)),
     message: entry.message || fallback,
     tone,
-    action: entry.action || null,
+    action: entry.action ? localizeProviderAction(provider.id, entry.action, locale) : null,
+  };
+}
+
+/**
+ * Подпись собственного окна определяется ID источника и длительностью из данных.
+ * Суффикс имени ведра остаётся исходным; порядок, проценты и даты не меняются.
+ * @param {import('../../../../shared/i18n/catalogs.ts').LocaleSource} [locale]
+ */
+export function localizeUsageBar(providerId, bar, locale = 'ru') {
+  const id = typeof locale === 'string' ? locale : locale.value;
+  const key = String(bar.key || '');
+  const owned = providerId === 'codex' || providerId === 'glm' && key.startsWith('zai:')
+    || providerId === 'claude' && ['session', 'weekly_all', 'weekly_scoped']
+      .some((kind) => key.startsWith(kind));
+
+  if (id === 'ru' || !owned) {
+    return bar;
+  }
+
+  const t = localeTranslator(locale);
+  const minutes = bar.windowMinutes;
+  const label = key === 'zai:mcp' ? t('core.usageMonthlyMcp')
+    : minutes === 300 ? t('core.usageSession') : minutes === 10080 ? t('core.usageWeek')
+    : Number.isFinite(minutes) && minutes > 0 ? t('core.usageMinutes', { count: minutes })
+      : providerId === 'glm' ? t('core.usageTokenWindow') : t('core.limits');
+  const suffix = String(bar.label || '').split(' · ').slice(1).join(' · ');
+
+  return { ...bar, label: suffix ? `${label} · ${suffix}` : label };
+}
+
+/**
+ * Собственные подписи ресурсов и подтверждений проецируются по provider/key/control ID.
+ * Денежные значения, команды и внешние сводки остаются данными, исходный DTO не мутируется.
+ * @param {import('../../../../shared/i18n/catalogs.ts').LocaleSource} [locale]
+ */
+export function localizeUsageResource(providerId, resource, locale = 'ru') {
+  const id = typeof locale === 'string' ? locale : locale.value;
+
+  if (id === 'ru' || !['claude', 'codex', 'deepseek', 'glm', 'tripo'].includes(providerId)) {
+    return resource;
+  }
+
+  const prefix = `core.usageResources.${providerId}.${resource.key}`;
+  const toggle = resource.controls?.find((control) => control.id === 'extra-usage-toggle');
+  const cap = toggle?.confirm?.on?.text?.match(/Месячный потолок (.+)\.$/)?.[1];
+  const text = (key, fallback) => translator.t(id, key, {
+    value: '{value}',
+    unit: '{unit}',
+    cap: cap ? localizeUsageAmount(cap, locale) : '',
+  }, fallback);
+  const balanceCurrency = /^balance-[a-z]{3}$/.test(resource.key) ? resource.key.slice(8).toUpperCase() : '';
+
+  /**
+   * Шаблон подтверждения сохраняет именованные параметры для существующего action helper.
+   * Язык не меняет payload, сторону toggle или подтверждённое значение.
+   */
+  function confirmation(value, key) {
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+
+    return {
+      ...value,
+      ...typeof value.text === 'string' ? { text: text(`${key}.text`, value.text) } : {},
+      ...typeof value.label === 'string' ? { label: text(`${key}.label`, value.label) } : {},
+      ...value.on ? { on: confirmation(value.on, `${key}.on`) } : {},
+      ...value.off ? { off: confirmation(value.off, `${key}.off`) } : {},
+    };
+  }
+
+  return {
+    ...resource,
+    ...localizeUsageResourceText(providerId, resource, locale),
+    label: balanceCurrency ? translator.t(id, 'core.usageBalance', { currency: balanceCurrency })
+      : text(`${prefix}.label`, resource.label),
+    controls: resource.controls?.map((control) => ({
+      ...control,
+      label: control.id === 'top-up' ? translator.t(id, 'core.topUpAccount')
+        : control.id === 'extra-usage-toggle'
+        ? translator.t(id, control.value ? 'core.extraUsageEnabled' : 'core.extraUsageDisabled')
+        : text(`${prefix}.controls.${control.id}.label`, control.label),
+      confirm: confirmation(control.confirm, `${prefix}.controls.${control.id}.confirm`),
+    })),
   };
 }

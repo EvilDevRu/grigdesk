@@ -1,6 +1,7 @@
 // Нейтральная база серверных проверок: среда Node и общие требования к типам.
 {
   "compilerOptions": {
+    "resolveJsonModule": true,
     // Node 22 — минимум проекта, поэтому библиотеке разрешён весь ES2023
     // (findLast, toSorted и соседи): downlevel-эмита здесь нет, noEmit включён.
     "target": "ES2023",

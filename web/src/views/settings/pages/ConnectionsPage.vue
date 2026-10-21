@@ -5,9 +5,9 @@
     :data-ready="ready"
   >
     <template v-if="settings.pageId === 'connections.b24'">
-      <SettingsScope>Подключение изменится по «Применить».</SettingsScope>
+      <SettingsScope>{{ t('settings.connectionChangesAreSavedWithApply') }}</SettingsScope>
       <UiInlineMessage :tone="configured ? 'success' : 'neutral'">
-        {{ configured ? 'Подключение настроено' : 'Подключение не настроено' }}
+        {{ configured ? t('settings.connectionConfigured') : t('settings.connectionNotConfigured') }}
       </UiInlineMessage>
       <SettingsField
         v-for="field in fields"
@@ -19,14 +19,14 @@
           :model-value="value(field.key)"
           :aria-label="field.label"
           autocomplete="new-password"
-          placeholder="Введите новый пароль для сохранения изменений"
+          :placeholder="t('settings.enterANewPasswordToSaveChanges')"
           @update:model-value="edit(field.key, $event)"
         />
         <UiInput
           v-else
           :model-value="value(field.key)"
           :aria-label="field.label"
-          :placeholder="field.key === 'baseUrl' ? 'https://company.bitrix24.ru' : 'Логин на портале'"
+          :placeholder="field.key === 'baseUrl' ? 'https://company.bitrix24.ru' : t('settings.portalLogin')"
           @update:model-value="edit(field.key, $event)"
         />
       </SettingsField>
@@ -35,21 +35,20 @@
         :disabled="!configured || dirty || testing"
         @click="testConnection"
       >
-        Проверить подключение
+        {{ t('settings.testConnection') }}
       </UiButton>
-      <p v-if="dirty">Сначала примените изменения подключения.</p>
+      <p v-if="dirty">{{ t('settings.applyConnectionChangesFirst') }}</p>
     </template>
     <template v-else>
       <MobileAccess />
       <SettingsSection>
         <UiDisclosureButton v-model:open="help" :controls="helpId">
-          Вход на этом компьютере
+          {{ t('settings.loginOnThisComputer') }}
         </UiDisclosureButton>
         <div v-if="help" :id="helpId" class="settings-connection-help">
-          <p>Автоматический вход по локальному ключу этого компьютера.</p>
+          <p>{{ t('settings.automaticLoginUsingThisComputerSLocal') }}</p>
           <p>
-            Если сессия потеряется, главное окно восстановит вход само.
-            Чтобы защитить доступ, блокируйте экран компьютера.
+            {{ t('settings.ifTheSessionIsLostTheMain') }}
           </p>
         </div>
       </SettingsSection>
@@ -60,10 +59,12 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../../ui.ts';
+
 import { computed, ref, watch, useId } from 'vue';
 import { UiInput, UiPasswordInput, UiButton, UiDisclosureButton, UiInlineMessage } from '../../../ui.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
+import { getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createB24Adapter } from '../../../features/settings/resources/connections.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import MobileAccess from '../MobileAccess.vue';
@@ -73,7 +74,8 @@ import SettingsSection from '../SettingsSection.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
-const fields = SETTINGS_FIELDS.filter((field) => field.resourceId === 'b24');
+const fields = computed(() => getSettingsFields(uiLocale.value)
+  .filter((field) => field.resourceId === 'b24'));
 const configured = computed(() => settings.resourceDetails.b24?.configured === true);
 const dirty = computed(() => settings.snapshot.resources.find((entry) => entry.id === 'b24')
   ?.fields.some((field) => field.dirty) === true);
@@ -112,7 +114,8 @@ async function testConnection(): Promise<void> {
   try {
     const result = await api.post('/api/settings/b24/test') as { ok: boolean; error?: string };
 
-    message.value = result.ok ? 'Подключение проверено.' : result.error || 'Подключение не подтверждено';
+    message.value = result.ok
+      ? t('settings.connectionVerified') : result.error || t('settings.connectionNotConfirmed');
   } catch (cause) {
     error.value = failureText(cause);
   } finally {
@@ -142,9 +145,9 @@ async function load(): Promise<void> {
       if (settings.isOpen && settings.snapshot.sessionId === opening) {
         settings.resourceDetails = { ...settings.resourceDetails, b24: { configured: view.configured } };
       }
-    }));
+    }, uiLocale));
 
-    settings.registerResource(adapter, fields.map((field) => ({
+    settings.registerResource(adapter, fields.value.map((field) => ({
       ...field,
       secret: field.key === 'password',
     })));

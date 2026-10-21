@@ -4,17 +4,17 @@
     :data-provider-page="selected?.id"
     :data-ready="ready"
   >
-    <p v-if="error" role="alert">{{ error }}</p>
-    <aside class="settings-provider-sidebar" aria-label="Выбор исполнителя">
+    <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
+    <aside class="settings-provider-sidebar" :aria-label="t('settings.providerSelection')">
       <div class="settings-provider-picker">
         <UiSelect
           :model-value="selected?.id || ''"
-          aria-label="Выберите исполнителя"
+          :aria-label="t('settings.selectAProvider')"
           @update:model-value="selectProvider(String($event))"
         >
           <optgroup v-for="group in groups" :key="group.id" :label="group.label">
             <option v-for="entry in group.providers" :key="entry.id" :value="entry.id">
-              {{ entry.name }}{{ entry.available ? '' : ' — недоступен' }}
+              {{ entry.name }}{{ entry.available ? '' : t('settings.unavailable') }}
             </option>
           </optgroup>
         </UiSelect>
@@ -39,9 +39,9 @@
               <span class="ui-settings-catalog-copy">
                 <span class="ui-settings-catalog-title">{{ entry.name }}</span>
                 <span class="ui-settings-catalog-status" :data-available="entry.available">
-                  {{ entry.available ? 'Доступен' : 'Недоступен' }}
-                  <span v-if="entry.updateAvailable"> · Есть обновление</span>
-                  <span v-if="dirtyProvider(entry.id)"> · Не применено</span>
+                  {{ entry.available ? t('settings.available') : t('settings.unavailable2') }}
+                  <span v-if="entry.updateAvailable"> {{ t('settings.updateAvailable') }}</span>
+                  <span v-if="dirtyProvider(entry.id)"> {{ t('settings.notApplied') }}</span>
                 </span>
               </span>
             </UiButton>
@@ -55,7 +55,7 @@
           :disabled="refreshing"
           @click="refreshRegistry"
         >
-          Перепроверить
+          {{ t('settings.recheck') }}
         </UiButton>
         <UiButton
           variant="ghost"
@@ -63,21 +63,21 @@
           :disabled="checking"
           @click="checkUpdates"
         >
-          Проверить обновления
+          {{ t('settings.checkForUpdates') }}
         </UiButton>
       </div>
     </aside>
-    <section class="settings-provider-editor" aria-label="Настройки выбранного исполнителя">
+    <section class="settings-provider-editor" :aria-label="t('settings.selectedProviderSettings')">
       <template v-if="selected">
         <div class="settings-provider-title">
           <ProviderIcon :provider="selected" :size="22" />
           <h4>{{ selected.name }}</h4>
-          <span class="settings-provider-status">{{ selected.available ? 'Доступен' : 'Недоступен' }}</span>
+          <span class="settings-provider-status">{{ selected.available ? t('settings.available') : t('settings.unavailable2') }}</span>
         </div>
         <UiTabs
           data-ui-settings-tabs
           :model-value="tab"
-          label="Параметры исполнителя"
+          :label="t('settings.providerParameters')"
           @update:model-value="selectTab"
         >
           <UiTab
@@ -88,9 +88,9 @@
             {{ item.label }}
           </UiTab>
         </UiTabs>
-        <p v-if="!ready">Загрузка…</p>
+        <p v-if="!ready">{{ t('settings.loading') }}</p>
         <template v-else-if="tab === 'access'">
-          <SettingsScope>Ключи и режим доступа изменятся после «Применить».</SettingsScope>
+          <SettingsScope>{{ t('settings.keysAndAccessModeChangeAfterApply') }}</SettingsScope>
           <div v-for="field in visibleCredentials" :key="field.env">
             <SettingsField :address="fieldAddress('credentials', field.env)">
               <template v-if="field.kind === 'secret'">
@@ -101,15 +101,15 @@
                   :placeholder="credentialPlaceholder(field)"
                   @update:model-value="editCredential(field.env, $event)"
                 />
-                <p v-if="field.set && field.inFile === false">Ключ задан вне файла настроек службы.</p>
+                <p v-if="field.set && field.inFile === false">{{ t('settings.theKeyIsConfiguredOutsideTheService') }}</p>
                 <UiButton
                   v-if="field.inFile === true"
                   data-delete-key
                   @click="deleteKey(field)"
                 >
-                  Удалить ключ
+                  {{ t('settings.removeKey') }}
                 </UiButton>
-                <p v-if="secretRemoval(field.env)">Ключ будет удалён после «Применить».</p>
+                <p v-if="secretRemoval(field.env)">{{ t('settings.theKeyWillBeRemovedAfterApply') }}</p>
               </template>
               <UiSegmentedControl
                 v-else-if="(field.options?.length ?? 0) <= 4"
@@ -139,14 +139,14 @@
           </div>
           <div v-for="field in hiddenCredentialDrafts" :key="field.env">
             <SettingsField :address="fieldAddress('credentials', field.env)">
-              <p>Поле скрыто выбранным режимом. Вернитесь к нему или отмените неприменённую правку.</p>
-              <UiButton @click="settings.discardField(credentialsId, field.env)">Отменить правку</UiButton>
+              <p>{{ t('settings.theFieldIsHiddenByTheSelected') }}</p>
+              <UiButton @click="settings.discardField(credentialsId, field.env)">{{ t('settings.discardEdit') }}</UiButton>
             </SettingsField>
           </div>
-          <p v-if="!selected.credentials?.length">У этого исполнителя нет редактируемых ключей доступа.</p>
+          <p v-if="!selected.credentials?.length">{{ t('settings.thisProviderHasNoEditableAccessKeys') }}</p>
         </template>
         <template v-else-if="ready && tab === 'parameters'">
-          <SettingsScope scope="Для следующих запусков" />
+          <SettingsScope :scope="t('settings.forFutureRuns')" />
           <SettingsField
             v-for="field in selected.settings ?? []"
             :key="field.id"
@@ -191,24 +191,24 @@
           </SettingsField>
           <template v-if="selected.settingsCatalog">
             <UiDisclosureButton v-model:open="showNative" :controls="nativePanelId">
-              Дополнительные параметры
+              {{ t('settings.advancedParameters') }}
             </UiDisclosureButton>
             <section
               v-if="showNative"
               :id="nativePanelId"
               class="settings-native-panel"
             >
-              <p v-if="nativeState.loading">Загрузка каталога…</p>
+              <p v-if="nativeState.loading">{{ t('settings.loadingCatalog') }}</p>
               <p v-if="nativeState.error" role="alert">{{ nativeState.error }}</p>
               <template v-if="nativeState.catalog">
-                <p>{{ nativeState.catalog.scope.label }} · Сохранение для следующего запуска.</p>
+                <p>{{ nativeState.catalog.scope.label }} {{ t('settings.savedForTheNextRun') }}</p>
                 <UiInput
                   v-model="nativeQuery"
                   type="search"
-                  aria-label="Найти дополнительный параметр"
+                  :aria-label="t('settings.findAnAdvancedParameter')"
                 />
                 <UiButton :disabled="nativeState.loading" @click="reloadNative">
-                  Перепроверить каталог
+                  {{ t('settings.recheckCatalog') }}
                 </UiButton>
                 <SettingsNativeEditor
                   v-for="field in nativeView.editable"
@@ -217,14 +217,14 @@
                   :provider-id="selected.id"
                   :expand="Boolean(nativeQuery)"
                 />
-                <p v-if="!nativeView.editableCount">Нет доступных параметров по этому запросу.</p>
+                <p v-if="!nativeView.editableCount">{{ t('settings.noAvailableParametersMatchThisQuery') }}</p>
                 <SettingsField
                   v-for="field in nativeState.catalog.inactiveOverrides"
                   :key="field.id"
                   :address="fieldAddress('native', field.path)"
                 >
                   <p>{{ field.reason }}</p>
-                  <UiButton @click="settings.unsetField(nativeId, field.id)">Удалить выбор</UiButton>
+                  <UiButton @click="settings.unsetField(nativeId, field.id)">{{ t('settings.clearSelection') }}</UiButton>
                 </SettingsField>
               </template>
             </section>
@@ -233,31 +233,31 @@
         <template v-else-if="ready && tab === 'overview'">
           <dl class="settings-provider-facts">
             <div>
-              <dt>Подключение</dt>
-              <dd>{{ selected.kind === 'api' ? 'API' : 'Командная строка' }}</dd>
+              <dt>{{ t('settings.connection') }}</dt>
+              <dd>{{ selected.kind === 'api' ? 'API' : t('settings.commandLine') }}</dd>
             </div>
             <div v-if="selected.vendor">
-              <dt>Разработчик</dt>
+              <dt>{{ t('settings.developer') }}</dt>
               <dd>{{ selected.vendor }}</dd>
             </div>
             <div v-if="selected.version">
-              <dt>Версия</dt>
+              <dt>{{ t('settings.version') }}</dt>
               <dd>{{ selected.version }}</dd>
             </div>
             <div>
-              <dt>Доступ</dt>
-              <dd>{{ selected.authLabel || (selected.available ? 'Доступен' : 'Требуется настройка') }}</dd>
+              <dt>{{ t('settings.access') }}</dt>
+              <dd>{{ selected.authLabel || (selected.available ? t('settings.available') : t('settings.setupRequired')) }}</dd>
             </div>
           </dl>
           <p v-if="normalizeExecutorType(selected.type) === 'universal' && selected.chatEnabled === false">
-            Установка доступна; подключение к чатам пока не включено.
+            {{ t('settings.installationIsAvailableConnectionToChatsIs') }}
           </p>
           <p v-if="selected.distribution">
             {{ selected.distribution.label }} ·
-            {{ selected.distribution.ready ? 'Сборка готова' : 'Сборка недоступна' }}
+            {{ selected.distribution.ready ? t('settings.buildReady') : t('settings.buildUnavailable') }}
           </p>
           <p v-if="selected.distribution?.authHint && selected.installed && !selected.available">
-            Авторизация: {{ selected.distribution.authHint }}
+            {{ t('settings.authentication') }} {{ selected.distribution.authHint }}
           </p>
           <div v-if="selected.distribution?.problem && !selected.distribution.ready">
             <p>{{ selected.distribution.problem.message }}</p>
@@ -272,11 +272,11 @@
             v-if="!selected.available && (selected.setupCommand || selected.install)"
             @click="terminal(selected.setupCommand || selected.install || '')"
           >
-            {{ selected.installed ? 'Авторизация' : 'Установка' }}:
+            {{ selected.installed ? t('settings.authentication2') : t('settings.installation') }}:
             {{ selected.setupCommand || selected.install }}
           </UiCommandButton>
           <section v-if="resources.length" data-provider-usage>
-            <h4>Ресурсы исполнителя</h4>
+            <h4>{{ t('settings.providerResources') }}</h4>
             <ProviderUsageResources :provider-id="selected.id" :resources="resources" />
           </section>
           <UiButton
@@ -284,18 +284,18 @@
             :disabled="Boolean(providers.updating)"
             @click="providers.updateCli(selected.id)"
           >
-            Обновить CLI
+            {{ t('settings.updateCLI') }}
           </UiButton>
           <p v-if="updateResult">{{ updateResult.text }}</p>
         </template>
         <template v-else-if="ready && tab === 'models'">
-          <p>Каталог исполнителя · Только чтение. Общая видимость задаётся на странице «Модели».</p>
+          <p>{{ t('settings.providerCatalogReadOnlySharedVisibilityIs') }}</p>
           <div v-for="model in selected.models ?? []" :key="model.id" class="settings-provider-model">
             <strong>{{ model.name }}</strong>
             <code>{{ model.id }}</code>
-            <span v-if="model.extra || model.hidden">· Скрыта из краткого списка</span>
-            <span v-if="model.unknown">· Неизвестна CLI</span>
-            <span v-if="model.efforts?.length">Усилие: {{ model.efforts.join(', ') }}</span>
+            <span v-if="model.extra || model.hidden">{{ t('settings.hiddenFromTheShortlist') }}</span>
+            <span v-if="model.unknown">{{ t('settings.unknownToCLI') }}</span>
+            <span v-if="model.efforts?.length">{{ t('settings.effort3') }} {{ model.efforts.join(', ') }}</span>
           </div>
         </template>
         <ProviderMcpStatus
@@ -305,13 +305,13 @@
           :status="mcpStatus"
           @refresh="providers.loadMcp(selected.id, true)"
         />
-        <p v-else-if="ready">Исполнитель не объявил эту возможность.</p>
+        <p v-else-if="ready">{{ t('settings.theProviderDoesNotDeclareThisCapability') }}</p>
       </template>
-      <p v-else-if="settings.entityId">Исполнитель больше недоступен в реестре.</p>
-      <p v-else-if="!providers.loaded" role="status">Загрузка исполнителей…</p>
+      <p v-else-if="settings.entityId">{{ t('settings.theProviderIsNoLongerAvailableIn') }}</p>
+      <p v-else-if="!providers.loaded" role="status">{{ t('settings.loadingProviders') }}</p>
       <div v-else class="settings-provider-empty">
-        <h4>Исполнители не найдены</h4>
-        <p>Нажмите «Перепроверить», чтобы заново получить список доступных исполнителей.</p>
+        <h4>{{ t('settings.noProvidersFound') }}</h4>
+        <p>{{ t('settings.clickRecheckToGetTheListOf') }}</p>
       </div>
       <div v-for="item in orphaned" :key="`${item.resourceId}:${item.field.key}`">
         <SettingsField :address="item.field.address">
@@ -320,9 +320,9 @@
             v-if="item.resourceId === nativeId"
             @click="settings.unsetField(item.resourceId, item.field.key)"
           >
-            Сбросить
+            {{ t('settings.reset') }}
           </UiButton>
-          <UiButton @click="settings.discardField(item.resourceId, item.field.key)">Отменить правку</UiButton>
+          <UiButton @click="settings.discardField(item.resourceId, item.field.key)">{{ t('settings.discardEdit') }}</UiButton>
         </SettingsField>
       </div>
     </section>
@@ -330,6 +330,8 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+
 import { computed, ref, useId, watch } from 'vue';
 import ProviderIcon from '../../../shared/ProviderIcon.vue';
 import SettingsSection from '../SettingsSection.vue';
@@ -358,6 +360,10 @@ import type {
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useProvidersStore } from '../../../stores/providers.js';
 import { useProviderSettingsStore } from '../../../stores/providerSettings.ts';
+import {
+  localizeProviderMetadata, localizeNativeMetadata, localizeExecutorType,
+  providerSettingConfirmation,
+} from '../../../features/settings/metadataLocale.ts';
 import { createProviderEditor } from '../../../features/settings/providerEditor.ts';
 import {
   credentialVisible,
@@ -379,15 +385,19 @@ const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const providers = useProvidersStore();
 const native = useProviderSettingsStore();
-const registry = computed(() => providers.providers as ProviderEntry[]);
+const registry = computed(() => (providers.providers as ProviderEntry[])
+  .map((entry) => localizeProviderMetadata(entry, uiLocale.value)));
 const selected = computed(() => registry.value.find((entry) => entry.id === settings.entityId));
 const ready = ref(false);
 const showNative = ref(false);
 const nativeQuery = ref('');
-const error = ref('');
+const error = ref<UiText>('');
 const refreshing = ref(false);
 const checking = ref(false);
-const groups = computed(() => executorTypeGroups(registry.value));
+const groups = computed(() => executorTypeGroups(registry.value).map((group) => ({
+  ...group,
+  label: localizeExecutorType(group, uiLocale.value).label,
+})));
 const launcher = useToolLauncher();
 const actions = createSettingsActions({
   requestAction: settings.requestAction,
@@ -396,7 +406,7 @@ const actions = createSettingsActions({
   },
   openTerminal: launcher.openTerminal,
   openChat: async () => false,
-});
+}, uiLocale);
 const resources = computed(() => (providers.usage as Record<string, { resources?: unknown[] }>)[
   settings.entityId ?? ''
 ]?.resources ?? []);
@@ -411,12 +421,27 @@ const tab = computed(() => settings.tabId ?? 'overview');
 const credentialsId = computed(() => `providerCredentials:${settings.entityId}`);
 const ordinaryId = computed(() => `providerSettings:${settings.entityId}`);
 const nativeId = computed(() => `providerNative:${settings.entityId}`);
-const nativeState = computed(() => native.panel(settings.entityId ?? ''));
+const nativeState = computed(() => {
+  const panel = native.panel(settings.entityId ?? '');
+
+  return {
+    ...panel,
+    catalog: panel.catalog ? localizeNativeMetadata(panel.catalog, uiLocale.value) : null,
+  };
+});
 const tabs = [
-  { id: 'overview', label: 'Обзор' },
-  { id: 'access', label: 'Доступ' },
-  { id: 'parameters', label: 'Параметры' },
-  { id: 'models', label: 'Модели' },
+  { id: 'overview', get label() {
+    return t('settings.overview');
+  } },
+  { id: 'access', get label() {
+    return t('settings.access');
+  } },
+  { id: 'parameters', get label() {
+    return t('settings.parameters');
+  } },
+  { id: 'models', get label() {
+    return t('settings.models');
+  } },
   { id: 'mcp', label: 'MCP' },
 ];
 let editor: ReturnType<typeof createProviderEditor> | null = null;
@@ -557,7 +582,7 @@ async function editOrdinary(field: ProviderSettingEntry, value: JsonValue): Prom
   const opening = settings.snapshot.sessionId;
   const resourceId = ordinaryId.value;
   const baseline = settings.getBaseline(resourceId)[field.id];
-  const confirmation = value ? field.confirm?.on : field.confirm?.off;
+  const confirmation = providerSettingConfirmation(selected.value?.id ?? '', field, value, uiLocale);
   let confirmed: true | undefined;
 
   if (JSON.stringify(value) !== JSON.stringify(baseline) && confirmation) {
@@ -605,7 +630,7 @@ function editCredential(key: string, value: unknown): void {
 function credentialPlaceholder(field: ProviderCredentialEntry): string {
   const preview = field.preview?.startsWith('…') && field.preview.length <= 8 ? field.preview : '';
 
-  return field.set ? `Задан ${preview}; пусто — не менять` : 'Введите ключ';
+  return field.set ? t('settings.setLeaveEmptyToKeep', { preview: preview }) : t('settings.enterKey');
 }
 
 function secretRemoval(key: string): boolean {
@@ -622,8 +647,8 @@ function secretRemoval(key: string): boolean {
 async function deleteKey(field: ProviderCredentialEntry): Promise<void> {
   const opening = settings.snapshot.sessionId;
   const resourceId = credentialsId.value;
-  const accepted = await confirmDialog('Ключ будет удалён после «Применить»', {
-    okText: 'Удалить после применения',
+  const accepted = await confirmDialog(messageRef('settings.keyWillBeRemovedAfterApply'), {
+    okText: messageRef('settings.removeAfterApplying'),
     danger: true,
   });
 

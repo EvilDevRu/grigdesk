@@ -1,3 +1,6 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+
+import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
@@ -5,6 +8,8 @@ import { classifyWriteError } from '../features/settings/contracts.ts';
 
 import { api } from '../shared/apiClient.ts';
 import { familyModels } from '../../../shared/chat/modelFamily.ts';
+
+const t = localeTranslator(uiLocale);
 
 const registryReads = new WeakMap();
 const registryStatuses = new WeakMap();
@@ -147,7 +152,7 @@ export const useProvidersStore = defineStore('providers', {
           if (request === this.registryRequest && version === this.registryVersion) {
             registryStatuses.set(this, {
               ok: false,
-              message: error?.message || 'Не удалось перечитать реестр исполнителей',
+              message: error?.message || t('settings.providerRegistryFailure'),
             });
           }
         }
@@ -224,7 +229,7 @@ export const useProvidersStore = defineStore('providers', {
           return;
         }
         if (!this.applyUsage(response?.usage)) {
-          throw new Error('Сервер не вернул снимок лимитов.');
+          throw new Error(t('settings.usageSnapshotMissing'));
         }
       } catch (error) {
         if (request !== this.usageRequest || version !== this.usageVersion) {
@@ -232,7 +237,7 @@ export const useProvidersStore = defineStore('providers', {
         }
 
         this.usageTransport.status = 'error';
-        this.usageTransport.error = error?.message || 'Не удалось получить лимиты от GrigDesk.';
+        this.usageTransport.error = error?.message || t('settings.usageLoadFailure');
         this.usageTransport.deliveryStale = this.usageTransport.receivedAt > 0;
       }
     },
@@ -305,7 +310,9 @@ export const useProvidersStore = defineStore('providers', {
      * поэтому по итогу реестр перечитывается принудительно.
      */
     async updateCli(providerId) {
-      if (this.updating) return { ok: false, error: 'другой CLI уже обновляется' };
+      if (this.updating) {
+        return { ok: false, error: t('settings.cliUpdateBusy') };
+      }
 
       this.updating = providerId;
       this.updateResults = { ...this.updateResults, [providerId]: null };
@@ -318,14 +325,18 @@ export const useProvidersStore = defineStore('providers', {
         result = r.changed
           ? {
             type: 'ok',
-            text: `Обновлён: ${r.before || '?'} → ${r.after}. Список моделей пересобран.`,
+            get text() {
+              return t('settings.providerCliUpdated', { before: r.before || '?', after: r.after });
+            },
             changed: true,
           }
           : {
             type: r.ok ? 'ok' : 'err',
-            text: r.ok
-              ? `Уже последняя версия (${r.after || r.before}).`
-              : `Не получилось: ${(r.output || '').slice(-300)}`,
+            get text() {
+              return r.ok
+                ? t('settings.providerCliCurrent', { version: r.after || r.before })
+                : t('settings.providerCliFailure', { reason: (r.output || '').slice(-300) });
+            },
             changed: false,
           };
         this.updateResults = { ...this.updateResults, [providerId]: result };
@@ -352,7 +363,7 @@ export const useProvidersStore = defineStore('providers', {
         return {
           ok: false,
           outcome: 'failed',
-          error: 'настройка не объявлена исполнителем',
+          error: t('settings.providerUnknownSetting'),
         };
       }
       const before = s.value;
@@ -374,7 +385,7 @@ export const useProvidersStore = defineStore('providers', {
           return {
             ok: false,
             outcome: r?.ok === false ? 'failed' : 'unknown',
-            error: r?.message || 'сервер не принял значение',
+            error: r?.message || t('settings.providerValueRejected'),
           };
         }
         if (r.settings) {
@@ -388,7 +399,7 @@ export const useProvidersStore = defineStore('providers', {
       } catch (e) {
         s.value = before;
 
-        const result = classifyWriteError(e);
+        const result = classifyWriteError(e, uiLocale);
 
         return {
           ok: false,
@@ -414,7 +425,7 @@ export const useProvidersStore = defineStore('providers', {
           return {
             ok: false,
             outcome: r?.ok === false ? 'failed' : 'unknown',
-            error: r?.message || 'сервер не принял ключи',
+            error: r?.message || t('settings.providerCredentialsRejected'),
           };
         }
 
@@ -422,7 +433,7 @@ export const useProvidersStore = defineStore('providers', {
 
         return { ok: true };
       } catch (e) {
-        const result = classifyWriteError(e);
+        const result = classifyWriteError(e, uiLocale);
 
         return {
           ok: false,
@@ -463,7 +474,8 @@ export const useProvidersStore = defineStore('providers', {
           { requestId: operationId, payload },
         );
         if (r?.ok) await this.loadUsage(true);
-        return r || { ok: false, error: 'сервер не ответил' };
+
+        return r || { ok: false, error: t('settings.providerNoResponse') };
       } catch (e) {
         return { ok: false, error: e.data?.message || e.message };
       }

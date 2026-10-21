@@ -29,7 +29,7 @@ export async function probeLocalSpeech(win: Window, language: string): Promise<s
   }
 
   const tag = language === 'ru' ? 'ru-RU' : language === 'en' ? 'en-US'
-    : win.document.documentElement.lang || win.navigator.language || 'ru-RU';
+    : 'ru';
 
   try {
     return await recognition.available({ langs: [tag], processLocally: true });

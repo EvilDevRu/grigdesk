@@ -1,3 +1,4 @@
+import { desktopText } from './locale.ts';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -37,7 +38,7 @@ async function inventory(root: string, relative = ''): Promise<ReleaseFile[]> {
       continue;
     }
     if (!safePath(name)) {
-      throw new Error('Недопустимое имя ресурса интерфейса.');
+      throw new Error(desktopText('desktop.uiInvalidResource'));
     }
     if (entry.isDirectory()) {
       files.push(...await inventory(root, name));
@@ -50,7 +51,7 @@ async function inventory(root: string, relative = ''): Promise<ReleaseFile[]> {
         sha256: sha256(content),
       });
     } else {
-      throw new Error('Пакет интерфейса содержит ссылку или специальный файл.');
+      throw new Error(desktopText('desktop.uiSpecialFile'));
     }
   }
 
@@ -66,7 +67,7 @@ function parseRelease(text: string): UiRelease {
 
   if (value?.version !== UI_RELEASE_VERSION || !UI_RELEASE_ID.test(value.id)
     || !Array.isArray(value.files) || value.files.length > 10000 || !value.files.length) {
-    throw new Error('Повреждено описание сборки интерфейса.');
+    throw new Error(desktopText('desktop.uiInvalidDescription'));
   }
 
   const names = new Set<string>();
@@ -74,7 +75,7 @@ function parseRelease(text: string): UiRelease {
     if (typeof file?.path !== 'string' || !safePath(file.path) || file.path === 'release.json'
       || names.has(file.path) || !Number.isSafeInteger(file.size) || file.size < 0
       || file.size > 256 * 1024 * 1024 || !UI_RELEASE_ID.test(file.sha256)) {
-      throw new Error('Повреждён список ресурсов интерфейса.');
+      throw new Error(desktopText('desktop.uiInvalidResourceList'));
     }
 
     names.add(file.path);
@@ -87,7 +88,7 @@ function parseRelease(text: string): UiRelease {
   });
 
   if (!names.has('index.html') || sha256(JSON.stringify(files)) !== value.id) {
-    throw new Error('Версия интерфейса не соответствует его ресурсам.');
+    throw new Error(desktopText('desktop.uiVersionMismatch'));
   }
 
   return {
@@ -122,20 +123,20 @@ export async function verifyUiRelease(directory: string): Promise<UiRelease> {
   const info = await lstat(directory);
 
   if (!info.isDirectory()) {
-    throw new Error('Каталог интерфейса не является обычным каталогом.');
+    throw new Error(desktopText('desktop.uiNotDirectory'));
   }
 
   const manifest = path.join(directory, 'release.json');
 
   if (!(await lstat(manifest)).isFile()) {
-    throw new Error('Описание интерфейса не является обычным файлом.');
+    throw new Error(desktopText('desktop.uiNotFile'));
   }
 
   const release = parseRelease(await readFile(manifest, 'utf8'));
   const files = await inventory(directory);
 
   if (JSON.stringify(files) !== JSON.stringify(release.files)) {
-    throw new Error('Файлы интерфейса повреждены. Переустановите приложение.');
+    throw new Error(desktopText('desktop.uiDamaged'));
   }
 
   return release;
@@ -151,7 +152,7 @@ export async function publishUiRelease(source: string, releases: string): Promis
   await mkdir(releases, { recursive: true, mode: 0o700 });
 
   if (!(await lstat(releases)).isDirectory()) {
-    throw new Error('Каталог релизов интерфейса не является обычным каталогом.');
+    throw new Error(desktopText('desktop.uiReleasesNotDirectory'));
   }
 
   const target = path.join(releases, release.id);
@@ -162,7 +163,7 @@ export async function publishUiRelease(source: string, releases: string): Promis
     const installed = await verifyUiRelease(target);
 
     if (installed.id !== release.id) {
-      throw new Error('Каталог содержит другую версию интерфейса.');
+      throw new Error(desktopText('desktop.uiOtherVersion'));
     }
 
     return installed;
@@ -196,7 +197,7 @@ export async function publishUiRelease(source: string, releases: string): Promis
     const installed = await verifyUiRelease(target);
 
     if (installed.id !== release.id) {
-      throw new Error('Опубликована другая версия интерфейса.');
+      throw new Error(desktopText('desktop.uiOtherPublishedVersion'));
     }
 
     return installed;

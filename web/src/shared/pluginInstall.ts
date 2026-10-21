@@ -1,3 +1,5 @@
+import { localeTranslator, type LocaleSource } from '../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../shared/i18n/catalogs.ts';
 import type {
   PluginInstallJob,
   PluginInstallStage,
@@ -23,9 +25,9 @@ export function isTerminalInstallJob(job: PluginInstallJob | null | undefined): 
 
 export const INSTALL_STAGE_ORDER: PluginInstallStage[] = ['fetching', 'validating', 'dependencies'];
 export const INSTALL_STAGE_LABELS: Record<PluginInstallStage, string> = {
-  fetching: 'Скачивание из источника',
-  validating: 'Проверка пакета',
-  dependencies: 'Установка зависимостей',
+  fetching: t("settings.downloadingFromSource"),
+  validating: t("settings.verifyingPackage"),
+  dependencies: t("settings.installingDependencies"),
 };
 
 export interface PluginInstallStageRow {
@@ -38,7 +40,10 @@ export interface PluginInstallStageRow {
  * Список шагов отражает только подтверждённый status и место выполнения.
  * Recovery и отмена не обещают законченных шагов после остановки задания.
  */
-export function installStageRows(job: PluginInstallJob): PluginInstallStageRow[] {
+export function installStageRows(
+  job: PluginInstallJob,
+  locale: LocaleSource = 'ru',
+): PluginInstallStageRow[] {
   const current = job.stage ? INSTALL_STAGE_ORDER.indexOf(job.stage) : -1;
   const completed = ['ready', 'applying', 'done'].includes(job.status);
 
@@ -55,7 +60,7 @@ export function installStageRows(job: PluginInstallJob): PluginInstallStageRow[]
 
     return {
       id,
-      label: INSTALL_STAGE_LABELS[id],
+      label: localeTranslator(locale)(`settings.installStage.${id}`),
       state,
     };
   });
@@ -94,37 +99,41 @@ export function installProgress(job: PluginInstallJob | null): {
  * Итог различает новую установку, обновление и восстановленный snapshot.
  * Ошибка и recovery показывают безопасный серверный текст вместе с причиной блокировки.
  */
-export function installResultText(job: PluginInstallJob): string {
-  const name = job.preview?.name ?? job.pluginId ?? 'плагин';
+export function installResultText(job: PluginInstallJob,
+  locale: LocaleSource = 'ru',
+): string {
+  const t = localeTranslator(locale);
+
+  const name = job.preview?.name ?? job.pluginId ?? t("settings.plugin");
   const version = job.target?.version ?? '';
 
   if (job.status === 'done') {
     if (job.kind === 'rollback') {
-      return `Версия v${version} восстановлена. Перезапустите GrigDesk.`;
+      return t("settings.versionVRestoredRestartGrigDesk", { version: version });
     }
 
     if (job.preview?.replaces.kind === 'none') {
-      return `Плагин «${name}» v${version} установлен. Включите его в каталоге и перезапустите GrigDesk.`;
+      return t("settings.pluginVInstalledEnableItInThe", { name: name, version: version });
     }
 
-    return `Плагин «${name}» обновлён до v${version}. Перезапустите GrigDesk, чтобы применить.`;
+    return t("settings.pluginUpdatedToVRestartGrigDeskTo", { name: name, version: version });
   }
 
   if (job.status === 'failed') {
-    return job.error?.message ?? 'Установка завершилась ошибкой.';
+    return job.error?.message ?? t("settings.installationFailed");
   }
 
   if (job.status === 'cancelled') {
-    return 'Установка отменена.';
+    return t("settings.installationCancelled");
   }
 
   if (job.status === 'interrupted') {
-    return job.error?.message ?? 'Сервер перезапустился во время установки. Начните заново.';
+    return job.error?.message ?? t("settings.theServerRestartedDuringInstallationStartAgain");
   }
 
   if (job.status === 'recovery_required') {
-    return `${job.error?.message ?? 'Требуется восстановление.'} `
-      + 'Копии сохранены. Новая установка пока недоступна.';
+    return t("settings.caption", { value1: job.error?.message ?? t("settings.recoveryRequired") })
+      + t("settings.copiesSavedNewInstallationIsCurrentlyUnavailable");
   }
 
   return '';
@@ -134,17 +143,21 @@ export function installResultText(job: PluginInstallJob): string {
  * Короткая подпись объясняет исход прежней копии при конкретном preview.
  * Смена source и ручная папка видны до подтверждения установки.
  */
-export function replacesText(replaces: PluginInstallReplaces): string {
+export function replacesText(replaces: PluginInstallReplaces,
+  locale: LocaleSource = 'ru',
+): string {
+  const t = localeTranslator(locale);
+
   if (replaces.kind === 'none') {
-    return 'Новый плагин.';
+    return t("settings.newPlugin");
   }
 
   if (replaces.kind === 'managed') {
-    return `Заменит установленную v${replaces.version}.`
-      + (replaces.sourceChanged ? ' Источник сменится.' : '');
+    return t("settings.willReplaceInstalledV", { replacesVersion: replaces.version })
+      + (replaces.sourceChanged ? t("settings.sourceWillChange") : '');
   }
 
-  return 'Заменит папку, положенную вручную; она переедет в резерв.';
+  return t("settings.willReplaceTheManuallyPlacedFolderIt");
 }
 
 /**

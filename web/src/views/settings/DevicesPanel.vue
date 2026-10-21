@@ -1,38 +1,42 @@
 <template>
   <section data-ui-touch class="devices-panel" aria-labelledby="devices-heading">
     <header class="devices-heading">
-      <h3 id="devices-heading">Устройства</h3>
-      <UiButton :disabled="loading" @click="adding = true">Добавить устройство</UiButton>
+      <h3 id="devices-heading">{{ t('settings.devices') }}</h3>
+      <UiButton :disabled="loading" @click="adding = true">{{ t('settings.addDevice') }}</UiButton>
     </header>
     <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     <UiInlineMessage v-if="status && status.listener.state !== 'online'" tone="warning">
-      {{ status.listener.error || 'Вход по сети выключен: задайте GRIGDESK_CLIENT_LISTEN и перезапустите сервер.' }}
+      {{ status.listener.error || t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT') }}
     </UiInlineMessage>
-    <p v-else-if="status">Адреса входа: {{ status.listener.addresses.join(', ') }}</p>
-    <p v-if="loading" role="status">Загрузка устройств…</p>
+    <p v-else-if="status">{{ t('settings.connectionAddresses') }} {{ status.listener.addresses.join(', ') }}</p>
+    <p v-if="loading" role="status">{{ t('settings.loadingDevices') }}</p>
     <div v-else-if="status && !status.devices.length" class="devices-empty">
       <SettingsIcon name="connections" />
-      <strong>Устройства ещё не добавлены</strong>
-      <p>Добавьте устройство и используйте код или QR для подключения приложения.</p>
+      <strong>{{ t('settings.noDevicesAddedYet') }}</strong>
+      <p>{{ t('settings.addADeviceAndUseTheCode') }}</p>
     </div>
     <article v-for="device in status?.devices ?? []" :key="device.id" class="device-row">
       <div>
-        <strong>{{ device.name }}{{ device.id === status?.currentDeviceId ? " · это устройство" : "" }}</strong>
-        <p>{{ device.scope === 'client' ? 'Приложение' : 'Старое приложение' }}</p>
-        <p>Последний вход: {{ new Date(device.lastSeenAt).toLocaleString('ru-RU') }}</p>
+        <strong>{{ device.name }}{{ device.id === status?.currentDeviceId ? t('settings.thisDevice') : "" }}</strong>
+        <p>{{ device.scope === 'client' ? t('settings.application') : t('settings.legacyApplication') }}</p>
+        <p>{{ t('settings.lastLogin') }} {{ new Date(device.lastSeenAt).toLocaleString(intlLocale(uiLocale)) }}</p>
       </div>
-      <span v-if="device.revokedAt">Отозвано</span>
-      <UiButton v-else tone="danger" variant="text" @click="revoke(device)">Отозвать</UiButton>
+      <span v-if="device.revokedAt">{{ t('settings.revoked') }}</span>
+      <UiButton v-else tone="danger" variant="text" @click="revoke(device)">{{ t('settings.revoke') }}</UiButton>
     </article>
     <PairDeviceDialog v-model:open="adding" :draft="draft" />
   </section>
 </template>
 
 <script setup lang="ts">
+import { intlLocale } from '../../../../shared/i18n/formats.ts';
+import { uiLocale } from '../../ui.ts';
+import { t } from '../../ui.ts';
+
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
-import { UiButton, UiInlineMessage, confirmDialog } from '../../ui.ts';
+import { UiButton, UiInlineMessage, confirmDialog, messageRef } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import PairDeviceDialog from './PairDeviceDialog.vue';
 import SettingsIcon from './SettingsIcon.vue';
@@ -74,7 +78,7 @@ async function load(): Promise<void> {
     const value = await api.get('/api/devices', { signal: controller.signal }) as DevicesStatus;
 
     if (!value?.listener || !Array.isArray(value.devices)) {
-      throw new Error('Не удалось загрузить устройства.');
+      throw new Error(t('settings.couldNotLoadDevices'));
     }
 
     if (!controller.signal.aborted) {
@@ -83,7 +87,7 @@ async function load(): Promise<void> {
     }
   } catch (cause) {
     if (!controller.signal.aborted) {
-      error.value = errorMessage(cause, 'Не удалось загрузить устройства.');
+      error.value = errorMessage(cause, t('settings.couldNotLoadDevices'));
     }
   } finally {
     loading.value = false;
@@ -95,10 +99,12 @@ async function load(): Promise<void> {
  * Обновляем список после durable ответа, а отмена не отправляет мутацию.
  */
 async function revoke(device: DeviceRow): Promise<void> {
-  const warning = device.id === status.value?.currentDeviceId
-    ? ' Это устройство потеряет доступ. Для возврата потребуется новая привязка.' : '';
+  const params = { deviceName: device.name };
+  const text = device.id === status.value?.currentDeviceId
+    ? messageRef('settings.revokeCurrentDevice', params)
+    : messageRef('settings.revokeDevice', params);
 
-  if (!await confirmDialog(`Отозвать устройство «${device.name}»?${warning}`, { danger: true })) {
+  if (!await confirmDialog(text, { danger: true })) {
     return;
   }
 
@@ -106,7 +112,7 @@ async function revoke(device: DeviceRow): Promise<void> {
     await api.post(`/api/devices/${encodeURIComponent(device.id)}/revoke`);
     await load();
   } catch (cause) {
-    error.value = errorMessage(cause, 'Не удалось отозвать устройство.');
+    error.value = errorMessage(cause, t('settings.couldNotRevokeTheDevice'));
   }
 }
 

@@ -1,3 +1,4 @@
+import { desktopText } from './locale.ts';
 import type { GrigDeskProbe } from '../../shared/runtime/grigDeskReadiness.ts';
 import { DESKTOP_RESTART_EXIT_CODE } from '../../server/src/lib/desktopParent.ts';
 import type { ServerRuntime } from './runtimeConfig.ts';
@@ -97,10 +98,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     if (!stopping && adapters.now() >= input.deadline) {
       const detail = waitReason ? ` ${waitReason}.` : '';
 
-      return new Error(`Истёк срок запуска сервера GrigDesk.${detail}`);
+      return new Error(desktopText('desktop.serverStartTimeout', { detail }));
     }
 
-    return new Error('Старт сервера GrigDesk отменён.');
+    return new Error(desktopText('desktop.serverStartAborted'));
   }
 
   /**
@@ -126,7 +127,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
 
     if (probe !== 'refused') {
       if (probe === 'no_answer') {
-        waitReason = 'сервер не отвечает';
+        waitReason = desktopText('desktop.serverNotResponding');
       }
 
       return decideStart(probe, 'unavailable');
@@ -139,7 +140,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     const result = decideStart(probe, state);
 
     if (result === 'wait') {
-      waitReason = 'служба запускается';
+      waitReason = desktopText('desktop.serviceStarting');
     }
 
     return result;
@@ -160,7 +161,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     if (result === 'conflict') {
       const port = new URL(input.origin).port || '80';
 
-      throw new Error(`Порт ${port} занят другой программой, это не GrigDesk.`);
+      throw new Error(desktopText('desktop.portOccupied', { port: String(port) }));
     }
 
     return false;
@@ -298,7 +299,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
    * После его раннего выхода один новый probe отличает внешнего владельца от отказа запуска.
    */
   async function waitOwn(child: OwnedChild, input: EnsureInput): Promise<void> {
-    waitReason = 'свой сервер запускается';
+    waitReason = desktopText('desktop.ownServerStarting');
 
     while (!child.ended) {
       check(input);
@@ -332,10 +333,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       return;
     }
 
-    const code = child.code ?? child.signal ?? 'неизвестен';
+    const code = child.code ?? child.signal ?? desktopText('desktop.unknownExitCode');
 
     throw new Error(
-      `Сервер GrigDesk завершился при запуске (код ${code}). Журнал: ${child.runtime.logPath}.`,
+      desktopText('desktop.serverExited', { code: String(code), log: child.runtime.logPath }),
     );
   }
 
@@ -367,7 +368,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       check(input);
 
       if (!accepted) {
-        throw new Error('Сервер не подтвердил передачу preparation: ACK launcher не получен.');
+        throw new Error(desktopText('desktop.preparationAckMissing'));
       }
     } finally {
       clearTimeout(timer);
@@ -401,12 +402,14 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
         check(input);
 
         if (!runtime) {
-          throw new Error('problem' in loaded ? loaded.message : 'Сервер не подготовлен.');
+          throw new Error('problem' in loaded ? loaded.message : desktopText('desktop.serverNotPrepared'));
         }
 
         if (input.origin !== runtime.origin) {
-          throw new Error(`Окно открыто для ${input.origin}, а установка слушает порт ${runtime.port}:`
-            + ' автозапуск невозможен.');
+          throw new Error(desktopText('desktop.originMismatch', {
+            origin: input.origin,
+            port: String(runtime.port),
+          }));
         }
 
         const gate = await adapters.runGate(runtime, input.signal);
@@ -447,7 +450,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
           if (alive(spawned)) {
             adapters.log('Не подтверждён выход своего сервера; preparation lease сохранён.');
 
-            throw new Error('Не подтверждён выход своего сервера после отказа ACK.');
+            throw new Error(desktopText('desktop.ownServerExitUnconfirmed'));
           }
         }
 
@@ -462,7 +465,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
    */
   function ensure(input: EnsureInput): Promise<void> {
     if (stopping) {
-      return Promise.reject(new Error('Старт сервера GrigDesk отменён.'));
+      return Promise.reject(new Error(desktopText('desktop.serverStartAborted')));
     }
 
     if (pending) {

@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import { shellContractBrowser } from './helpers/shell-contract-browser.js';
+
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { useProvidersStore } from '../../web/src/stores/providers.js';
@@ -79,11 +81,25 @@ test('принудительная проверка идёт одним POST и 
   assert.equal(providers.usage.claude.bars[0].pct, 7);
 });
 
-test('кнопка проверки стоит в шапке всплывашки и гаснет на паузе вендора', async () => {
+test('кнопка проверки стоит в шапке всплывашки и гаснет на паузе вендора', async (t) => {
   const shell = await readFile(SHELL_PATH, 'utf8');
 
   assert.match(shell, /data-context="topbar-popover-refresh"/u);
   assert.match(shell, /@click="prov\.refreshUsage\(\)"/u);
   assert.match(shell, /:disabled="!!usagePauseOf\(p\)"/u);
-  assert.match(shell, /Следующая проверка \{\{ usagePauseOf\(p\) \}\}/u);
+
+  const h = await shellContractBrowser(t);
+
+  await h.openProvider();
+
+  const refresh = h.page.locator('[data-context="topbar-popover-refresh"]');
+
+  assert.equal(await refresh.isDisabled(), false);
+  await h.setUsage({
+    state: 'rate_limited',
+    bars: [],
+    retryAt: Date.now() + 60000,
+  });
+  await h.page.locator('.pu-state').filter({ hasText: 'Следующая проверка' }).waitFor();
+  assert.equal(await refresh.isDisabled(), true);
 });

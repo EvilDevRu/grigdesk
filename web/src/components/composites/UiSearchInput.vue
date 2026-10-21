@@ -14,7 +14,7 @@
     <UiIconButton
       v-if="model"
       role="embedded"
-      :label="clearLabel"
+      :label="(clearLabel ?? t('core.clearSearch'))"
       :disabled="disabled || readonly"
       @click="clear"
     >
@@ -24,6 +24,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { nextTick, ref } from 'vue';
 import UiIconButton from '../primitives/UiIconButton.vue';
 import UiInput from '../primitives/UiInput.vue';
@@ -41,7 +43,7 @@ const props = withDefaults(
     disabled: false,
     readonly: false,
     invalid: false,
-    clearLabel: 'Очистить поиск',
+    clearLabel: undefined,
   },
 );
 const emit = defineEmits<{

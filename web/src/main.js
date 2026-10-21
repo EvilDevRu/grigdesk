@@ -1,4 +1,5 @@
 import './shared/legacyStorage.ts';
+import { bootstrapUiLocale } from './shared/uiLocale.ts';
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import { router } from './router.js';
@@ -25,6 +26,7 @@ import './plugins/index.ts';
 
 const pinia = createPinia();
 const app = createApp(App);
+const removeUiLocale = bootstrapUiLocale({ window, shell: useShellStore(pinia) });
 let logStorage = null;
 
 try {
@@ -93,6 +95,7 @@ import.meta.hot?.dispose(() => {
   removeRouteError();
   removeBackAction();
   removeAppViewport();
+  removeUiLocale();
 });
 
 const device = useDeviceStore(pinia);

@@ -6,6 +6,8 @@
 // Страница пользовательского плагина — тоже инструмент, но без своего Vue: ядро
 // показывает её одной общей панелью-iframe, а сам плагин рисует, что хочет, и ходит
 // в API сам. Такие инструменты собираются из стора плагинов на лету (`toolsOf`).
+import { uiLocale } from '../../ui.ts';
+import { translator } from '../../../../shared/i18n/catalogs.ts';
 import { asyncView } from '../asyncView.ts';
 import type { Component } from 'vue';
 import CodePanelLoading from '../../views/code/codePanelLoading.ts';
@@ -50,6 +52,9 @@ const PluginFramePanel = asyncView(() => import('../../views/ext/PluginFramePane
 
 export const TOOL_REGISTRY: ToolEntry[] = TOOL_CATALOG.map((item) => ({
   ...item,
+  get label() {
+    return translator.t(uiLocale.value, `core.builtinNavigation.${item.id}`, {}, item.label);
+  },
   component: PANELS[item.id],
 }));
 

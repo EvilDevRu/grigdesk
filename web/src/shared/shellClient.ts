@@ -1,3 +1,6 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
 import type { ShellState } from '../../../shared/client/clientShell.ts';
 
 /**
@@ -42,7 +45,7 @@ export async function shellAction(method: string, path: string, body?: unknown):
   const result = await response.json() as { message?: string };
 
   if (!response.ok) {
-    throw new Error(result.message ?? 'Не удалось выполнить действие подключения.');
+    throw new Error(result.message ?? localeTranslator(uiLocalePort)('settings.connectionActionFailed'));
   }
 
   return result;

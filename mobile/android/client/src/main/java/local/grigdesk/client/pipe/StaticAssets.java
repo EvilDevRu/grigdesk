@@ -29,6 +29,10 @@ public final class StaticAssets {
    * Все файлы, размеры и SHA сверяются до первой загрузки интерфейса.
    */
   public StaticAssets(Source source) throws Exception {
+    this(source, "Установка повреждена");
+  }
+
+  public StaticAssets(Source source, String installationFailure) throws Exception {
     this.source = source;
 
     JSONObject release = new JSONObject(readText(source.open("release.json"), 2 * 1024 * 1024));
@@ -36,7 +40,7 @@ public final class StaticAssets {
     StringBuilder canonical = new StringBuilder("[");
 
     if (release.getInt("version") != 1 || list.length() == 0 || list.length() > 10000) {
-      throw new IOException("Установка повреждена");
+      throw new IOException(installationFailure);
     }
 
     for (int index = 0; index < list.length(); index++) {
@@ -47,7 +51,7 @@ public final class StaticAssets {
 
       if (!safe(name) || name.equals("release.json") || files.containsKey(name)
         || size < 0 || size > 256L * 1024 * 1024 || !hash.matches("[a-f0-9]{64}")) {
-        throw new IOException("Установка повреждена");
+        throw new IOException(installationFailure);
       }
 
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -62,13 +66,13 @@ public final class StaticAssets {
           actual += count;
 
           if (actual > size) {
-            throw new IOException("Установка повреждена");
+            throw new IOException(installationFailure);
           }
         }
       }
 
       if (actual != size || !hex(digest.digest()).equals(hash)) {
-        throw new IOException("Установка повреждена");
+        throw new IOException(installationFailure);
       }
 
       if (index > 0) {
@@ -89,7 +93,7 @@ public final class StaticAssets {
     if (!files.containsKey("index.html") || !actual.equals(files.keySet())
       || !Pins.sha256Hex(canonical.toString().getBytes(StandardCharsets.UTF_8))
         .equals(release.getString("id"))) {
-      throw new IOException("Установка повреждена");
+      throw new IOException(installationFailure);
     }
   }
 

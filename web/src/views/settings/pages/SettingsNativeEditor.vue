@@ -23,33 +23,33 @@
         v-if="field.consumerSupport?.chat?.state === 'verified'
         && field.consumerSupport?.pipeline?.state === 'unsupported'"
       >
-        Только чаты
+        {{ t('settings.chatsOnly') }}
       </p>
       <p v-else-if="field.consumerSupport?.pipeline?.state === 'unverified'">
-        {{ field.consumerSupport.pipeline.reason || 'Совместимость с конвейерами не проверена' }}
+        {{ field.consumerSupport.pipeline.reason || t('settings.compatibilityWithPipelinesHasNotBeenVerified') }}
       </p>
       <template v-if="field.writable && field.kind === 'array' && field.items">
-        <p v-if="value === undefined">Список исполнителя неизвестен. Выбор заменит его целиком.</p>
+        <p v-if="value === undefined">{{ t('settings.theProviderSListIsUnknownSelecting') }}</p>
         <div
           v-for="(item, index) in array"
           :key="index"
           class="settings-native-item"
         >
           <SettingsNativeValue
-            :field="{ ...field.items, label: `Элемент ${index + 1}` }"
+            :field="{ ...field.items, label: t('settings.item', { value1: index + 1 }) }"
             :value="item"
             @change="changeItem(index, $event)"
           />
-          <UiButton :aria-label="`Удалить элемент ${index + 1}`" @click="removeItem(index)">Удалить</UiButton>
+          <UiButton :aria-label="t('settings.removeItem', { value1: index + 1 })" @click="removeItem(index)">{{ t('settings.delete') }}</UiButton>
         </div>
         <UiButton
           :disabled="field.constraints.maxItems !== undefined && array.length >= field.constraints.maxItems"
           @click="addItem"
         >
-          Добавить элемент
+          {{ t('settings.addItem') }}
         </UiButton>
         <UiButton v-if="field.constraints.nullable" @click="set(null)">
-          Задать пустое значение (null)
+          {{ t('settings.setEmptyValueNull') }}
         </UiButton>
       </template>
       <SettingsNativeValue
@@ -61,20 +61,20 @@
       <p v-if="field.reason">{{ field.reason }}</p>
       <p>{{ status }}</p>
       <div class="settings-native-actions">
-        <UiButton v-if="field.override.state === 'known' || state?.dirty" @click="unset">Сбросить</UiButton>
+        <UiButton v-if="field.override.state === 'known' || state?.dirty" @click="unset">{{ t('settings.reset') }}</UiButton>
         <UiButton v-if="state?.dirty" @click="settings.discardField(resourceId, field.id)">
-          Отменить правку
+          {{ t('settings.discardEdit') }}
         </UiButton>
-        <UiDisclosureButton v-model:open="detailsOpen" :controls="detailsId">Подробнее</UiDisclosureButton>
+        <UiDisclosureButton v-model:open="detailsOpen" :controls="detailsId">{{ t('settings.details') }}</UiDisclosureButton>
       </div>
       <div v-if="detailsOpen" :id="detailsId">
         <p>{{ field.description }}</p>
-        <p>Параметр: {{ field.path.join('.') }}</p>
+        <p>{{ t('settings.parameter') }} {{ field.path.join('.') }}</p>
         <p v-if="field.default.state === 'known'">
-          Значение по схеме: {{ JSON.stringify(field.default.value) }}
+          {{ t('settings.schemaValue') }} {{ JSON.stringify(field.default.value) }}
         </p>
         <p v-if="field.base.state === 'unknown'">
-          Исполнитель не сообщает исходное значение; оно наследуется.
+          {{ t('settings.theProviderDoesNotReportTheOriginal') }}
         </p>
       </div>
     </SettingsField>
@@ -82,6 +82,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../../ui.ts';
+
 import { computed, ref, useId, watch } from 'vue';
 import { UiButton, UiDisclosureButton } from '../../../ui.ts';
 import type { JsonValue, ProviderSettingNode } from '../../../../../shared/chat/providerSettingsContracts.ts';
@@ -124,9 +126,9 @@ const value = computed(() => {
 });
 const array = computed(() => Array.isArray(value.value) ? value.value : []);
 const status = computed(() => state.value?.dirty
-  ? state.value.intent?.op === 'unset' ? 'Сброс после «Применить»' : 'Не применено'
-  : props.field.override.state === 'known' ? 'Свой выбор · для следующего запуска'
-    : 'Наследуется · применение в чате не подтверждено');
+  ? state.value.intent?.op === 'unset' ? t('settings.resetAfterApply') : t('settings.notApplied2')
+  : props.field.override.state === 'known' ? t('settings.customChoiceForTheNextRun')
+    : t('settings.inheritedApplicationInChatNotConfirmed'));
 
 function count(fields: ProviderSettingNode[]): number {
   return fields.reduce((total, field) => total + (field.children?.length ? count(field.children) : 1), 0);

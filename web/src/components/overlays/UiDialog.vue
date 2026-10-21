@@ -22,7 +22,7 @@
           :data-body-inset="bodyInset ? 'true' : 'false'"
           :role="normalizedRole"
           aria-modal="true"
-          :aria-label="hasTitle ? undefined : label"
+          :aria-label="hasTitle ? undefined : (label ?? t('core.dialog'))"
           :aria-labelledby="hasTitle ? titleId : undefined"
           :aria-describedby="hasDescription ? descriptionId : undefined"
           :aria-busy="busy || undefined"
@@ -59,6 +59,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import {
   computed,
   nextTick,
@@ -115,7 +117,7 @@ const props = withDefaults(defineProps<Props>(), {
   size: 'content',
   title: '',
   description: '',
-  label: 'Диалог',
+  label: undefined,
   dismissible: true,
   persistent: false,
   busy: false,

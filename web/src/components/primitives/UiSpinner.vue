@@ -4,11 +4,13 @@
     :class="`ui-spinner--${normalizedRole}`"
     :role="decorative ? undefined : 'status'"
     :aria-hidden="decorative ? 'true' : undefined"
-    :aria-label="decorative ? undefined : label"
+    :aria-label="decorative ? undefined : (label ?? t('core.loading'))"
   />
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { computed } from 'vue';
 import type { UiSpinnerRole } from '../../types/uiActions';
 
@@ -19,7 +21,7 @@ const props = withDefaults(
     role?: UiSpinnerRole;
   }>(),
   {
-    label: 'Загрузка',
+    label: undefined,
     decorative: false,
     role: 'inline',
   },

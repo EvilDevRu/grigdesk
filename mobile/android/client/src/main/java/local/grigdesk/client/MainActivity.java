@@ -147,7 +147,7 @@ public class MainActivity extends AppCompatActivity {
 
         runtime.start(!((ClientApplication) getApplication()).lifecycle.isBackground());
       } catch (Exception exception) {
-        startupFailure = "Не удалось открыть приложение. Проверьте целостность установки.";
+        startupFailure = ClientLocale.text("startupFailure");
         MainActivity visible = current.get();
 
         if (visible != null) {
@@ -211,7 +211,7 @@ public class MainActivity extends AppCompatActivity {
 
     runOnUiThread(() -> {
       if (scanning != null) {
-        result.completeExceptionally(new IllegalStateException("Сканер уже открыт."));
+        result.completeExceptionally(new IllegalStateException(ClientLocale.text("scannerOpen")));
         return;
       }
 
@@ -240,7 +240,7 @@ public class MainActivity extends AppCompatActivity {
     scanner.setDesiredBarcodeFormats(com.google.zxing.integration.android.IntentIntegrator.QR_CODE);
     scanner.setBeepEnabled(false);
     scanner.setOrientationLocked(false);
-    scanner.setPrompt("Наведите камеру на QR привязки GrigDesk");
+    scanner.setPrompt(ClientLocale.text("scanPrompt"));
     startActivityForResult(scanner.createScanIntent(),
       com.google.zxing.integration.android.IntentIntegrator.REQUEST_CODE);
   }
@@ -254,7 +254,7 @@ public class MainActivity extends AppCompatActivity {
 
     runOnUiThread(() -> {
       if (unlocking != null) {
-        result.completeExceptionally(new IllegalStateException("Разблокировка уже открыта."));
+        result.completeExceptionally(new IllegalStateException(ClientLocale.text("unlockOpen")));
         return;
       }
 
@@ -275,13 +275,13 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public void onAuthenticationError(int code, @NonNull CharSequence message) {
             ((ClientApplication) getApplication()).nativeFlow(false);
-            result.completeExceptionally(new IllegalStateException("Разблокировка отменена или недоступна."));
+            result.completeExceptionally(new IllegalStateException(ClientLocale.text("unlockCancelled")));
             unlocking = null;
           }
         });
 
       prompt.authenticate(new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
-        .setTitle("Разблокировать GrigDesk")
+        .setTitle(ClientLocale.text("unlockTitle"))
         .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
           | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL).build());
     });
@@ -307,7 +307,7 @@ public class MainActivity extends AppCompatActivity {
         try {
           startActivity(new Intent(Intent.ACTION_VIEW, request.getUrl()));
         } catch (android.content.ActivityNotFoundException exception) {
-          Toast.makeText(MainActivity.this, "Не найден браузер для ссылки.", Toast.LENGTH_LONG).show();
+          Toast.makeText(MainActivity.this, ClientLocale.text("noBrowser"), Toast.LENGTH_LONG).show();
         }
       }
 
@@ -394,7 +394,7 @@ public class MainActivity extends AppCompatActivity {
       if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {
         openScanner();
       } else {
-        scanning.completeExceptionally(new IllegalStateException("Разрешите доступ к камере для QR."));
+        scanning.completeExceptionally(new IllegalStateException(ClientLocale.text("cameraPermission")));
         scanning = null;
         ((ClientApplication) getApplication()).nativeFlow(false);
       }
@@ -426,7 +426,7 @@ public class MainActivity extends AppCompatActivity {
       if (scanned != null && scanned.getContents() != null) {
         scanning.complete(scanned.getContents());
       } else {
-        scanning.completeExceptionally(new IllegalStateException("Сканирование отменено."));
+        scanning.completeExceptionally(new IllegalStateException(ClientLocale.text("scanCancelled")));
       }
 
       scanning = null;
@@ -468,7 +468,7 @@ public class MainActivity extends AppCompatActivity {
       try {
         client.shell.resume(locked);
       } catch (Exception exception) {
-        throw new IllegalStateException("Не удалось восстановить состояние приложения.", exception);
+        throw new IllegalStateException(ClientLocale.text("restoreFailure"), exception);
       }
     }
   }

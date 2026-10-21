@@ -22,7 +22,7 @@
         </option>
       </UiSelect>
     </SettingsField>
-    <p v-if="details">Действует: {{ details.effective }} · источник: {{ details.source }}</p>
+    <p v-if="details">{{ t('settings.effective') }} {{ details.effective }} {{ t('settings.source2') }} {{ details.source }}</p>
     <SettingsSection>
       <WebLogPanel v-if="active" />
     </SettingsSection>
@@ -30,13 +30,15 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../../ui.ts';
+
 import { computed, ref, watch } from 'vue';
 import { UiSelect } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { FACTORY_DEBUG_LEVELS } from '../../../shared/factory-debug.js';
 import { getWebLogRuntime } from '../../../shared/webLogRuntime.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
-import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
+import { getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createFactoryDebugAdapter } from '../../../features/settings/resources/factoryDebug.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import SettingsField from '../SettingsField.vue';
@@ -47,7 +49,8 @@ import WebLogPanel from '../WebLogPanel.vue';
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const error = ref('');
-const fields = SETTINGS_FIELDS.filter((field) => field.resourceId === 'factoryDebug');
+const fields = computed(() => getSettingsFields(uiLocale.value)
+  .filter((field) => field.resourceId === 'factoryDebug'));
 const loaded = computed(() => settings.snapshot.resources.some((item) =>
   item.id === 'factoryDebug' && item.loaded));
 const details = computed(() => settings.resourceDetails.factoryDebug);
@@ -87,10 +90,10 @@ async function load(): Promise<void> {
       factoryDebug: { effective: view.effective, source: view.source },
     };
     getWebLogRuntime()?.applyPolicy(view.effective, view.expiresAt);
-  });
+  }, uiLocale);
 
   try {
-    settings.registerResource(adapter, fields);
+    settings.registerResource(adapter, fields.value);
     await settings.loadResource('factoryDebug');
 
     if (!settings.isOpen || settings.snapshot.sessionId !== opening) {

@@ -1,3 +1,5 @@
+import { localeTranslator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
+
 // Сочетание описывается физической клавишей (event.code), а не символом: раскладок у
 // человека две, и заданное в латинице сочетание обязано срабатывать и в русской.
 // Здесь же живёт единственный список того, что GrigDesk забирать не вправе, — иначе
@@ -47,51 +49,51 @@ const NAMED_KEYS = new Map([
 // Сочетания, которые перехватывает браузер или рабочий стол. Клавишу до GrigDesk они
 // просто не доведут, поэтому настройка обязана отказать сразу, а не молча не работать.
 const RESERVED = new Map([
-  ['Ctrl+Alt+KeyS', 'открывает настройки в приложении GrigDesk'],
-  ['Ctrl+KeyT', 'браузер откроет новую вкладку'],
-  ['Ctrl+KeyN', 'браузер откроет новое окно'],
-  ['Ctrl+KeyW', 'браузер закроет вкладку'],
-  ['Ctrl+KeyR', 'перезагрузка заблокирована приложением'],
-  ['Ctrl+KeyL', 'браузер перейдёт в адресную строку'],
-  ['Ctrl+KeyD', 'браузер добавит закладку'],
-  ['Ctrl+KeyP', 'браузер откроет печать'],
-  ['Ctrl+KeyS', 'браузер сохранит страницу'],
-  ['Ctrl+KeyO', 'браузер откроет файл'],
-  ['Ctrl+KeyF', 'браузер откроет поиск по странице'],
-  ['Ctrl+KeyH', 'браузер откроет историю'],
-  ['Ctrl+KeyJ', 'браузер откроет загрузки'],
-  ['Ctrl+KeyU', 'браузер покажет исходный код'],
-  ['Ctrl+KeyQ', 'браузер завершит работу'],
-  ['Ctrl+KeyA', 'выделение всего текста'],
-  ['Ctrl+KeyC', 'копирование'],
-  ['Ctrl+KeyV', 'вставка'],
-  ['Ctrl+KeyX', 'вырезание'],
-  ['Ctrl+KeyZ', 'отмена ввода'],
-  ['Ctrl+KeyY', 'повтор ввода'],
-  ['Ctrl+Minus', 'браузер уменьшит масштаб'],
-  ['Ctrl+Equal', 'браузер увеличит масштаб'],
-  ['Ctrl+F5', 'перезагрузка заблокирована приложением'],
-  ['Ctrl+Shift+KeyT', 'браузер вернёт закрытую вкладку'],
-  ['Ctrl+Shift+KeyN', 'браузер откроет приватное окно'],
-  ['Ctrl+Shift+KeyW', 'браузер закроет окно'],
-  ['Ctrl+Shift+KeyI', 'браузер откроет инструменты разработчика'],
-  ['Ctrl+Shift+KeyJ', 'браузер откроет консоль'],
-  ['Ctrl+Shift+KeyC', 'браузер откроет выбор элемента'],
-  ['Ctrl+Shift+KeyP', 'браузер откроет приватное окно или командную строку'],
-  ['Ctrl+Shift+KeyR', 'перезагрузка заблокирована приложением'],
-  ['Ctrl+Shift+KeyQ', 'браузер завершит работу'],
-  ['Ctrl+Alt+KeyT', 'рабочий стол откроет системный терминал'],
-  ['Ctrl+Alt+KeyL', 'рабочий стол заблокирует экран'],
-  ['Ctrl+Alt+KeyD', 'рабочий стол свернёт все окна'],
-  ['Alt+Home', 'браузер откроет домашнюю страницу'],
-  ['Alt+ArrowLeft', 'браузер вернётся на шаг назад'],
-  ['Alt+ArrowRight', 'браузер перейдёт на шаг вперёд'],
-  ['Alt+F4', 'система закроет окно'],
+  ['Ctrl+Alt+KeyS', 'settings.reservedShortcut1'],
+  ['Ctrl+KeyT', 'settings.reservedShortcut2'],
+  ['Ctrl+KeyN', 'settings.reservedShortcut3'],
+  ['Ctrl+KeyW', 'settings.reservedShortcut4'],
+  ['Ctrl+KeyR', 'settings.reservedShortcut5'],
+  ['Ctrl+KeyL', 'settings.reservedShortcut6'],
+  ['Ctrl+KeyD', 'settings.reservedShortcut7'],
+  ['Ctrl+KeyP', 'settings.reservedShortcut8'],
+  ['Ctrl+KeyS', 'settings.reservedShortcut9'],
+  ['Ctrl+KeyO', 'settings.reservedShortcut10'],
+  ['Ctrl+KeyF', 'settings.reservedShortcut11'],
+  ['Ctrl+KeyH', 'settings.reservedShortcut12'],
+  ['Ctrl+KeyJ', 'settings.reservedShortcut13'],
+  ['Ctrl+KeyU', 'settings.reservedShortcut14'],
+  ['Ctrl+KeyQ', 'settings.reservedShortcut15'],
+  ['Ctrl+KeyA', 'settings.reservedShortcut16'],
+  ['Ctrl+KeyC', 'settings.reservedShortcut17'],
+  ['Ctrl+KeyV', 'settings.reservedShortcut18'],
+  ['Ctrl+KeyX', 'settings.reservedShortcut19'],
+  ['Ctrl+KeyZ', 'settings.reservedShortcut20'],
+  ['Ctrl+KeyY', 'settings.reservedShortcut21'],
+  ['Ctrl+Minus', 'settings.reservedShortcut22'],
+  ['Ctrl+Equal', 'settings.reservedShortcut23'],
+  ['Ctrl+F5', 'settings.reservedShortcut5'],
+  ['Ctrl+Shift+KeyT', 'settings.reservedShortcut24'],
+  ['Ctrl+Shift+KeyN', 'settings.reservedShortcut25'],
+  ['Ctrl+Shift+KeyW', 'settings.reservedShortcut26'],
+  ['Ctrl+Shift+KeyI', 'settings.reservedShortcut27'],
+  ['Ctrl+Shift+KeyJ', 'settings.reservedShortcut28'],
+  ['Ctrl+Shift+KeyC', 'settings.reservedShortcut29'],
+  ['Ctrl+Shift+KeyP', 'settings.reservedShortcut30'],
+  ['Ctrl+Shift+KeyR', 'settings.reservedShortcut5'],
+  ['Ctrl+Shift+KeyQ', 'settings.reservedShortcut15'],
+  ['Ctrl+Alt+KeyT', 'settings.reservedShortcut31'],
+  ['Ctrl+Alt+KeyL', 'settings.reservedShortcut32'],
+  ['Ctrl+Alt+KeyD', 'settings.reservedShortcut33'],
+  ['Alt+Home', 'settings.reservedShortcut34'],
+  ['Alt+ArrowLeft', 'settings.reservedShortcut35'],
+  ['Alt+ArrowRight', 'settings.reservedShortcut36'],
+  ['Alt+F4', 'settings.reservedShortcut37'],
 ]);
 
 const RESERVED_DIGIT_PREFIXES = new Map([
-  ['Ctrl', 'браузер переключит вкладку по номеру'],
-  ['Alt', 'браузер переключит вкладку по номеру'],
+  ['Ctrl', 'settings.reservedShortcut38'],
+  ['Alt', 'settings.reservedShortcut38'],
 ]);
 
 /**
@@ -220,11 +222,13 @@ export function formatCombo(value: unknown): string {
  * наборе текста, с Win/Cmd его забирает система, а перечисленные комбинации до
  * страницы вообще не доходят. Возврат — готовый текст для человека либо пустая строка.
  */
-export function comboIssue(value: unknown): string {
+export function comboIssue(value: unknown, locale: LocaleSource = 'ru'): string {
+  const t = localeTranslator(locale);
+
   const combo = normalizeCombo(value);
 
   if (!combo) {
-    return 'Эта клавиша не подходит для сочетания — выберите букву, цифру или F-клавишу.';
+    return t('settings.comboInvalidKey');
   }
 
   const parts = combo.split('+');
@@ -232,17 +236,17 @@ export function comboIssue(value: unknown): string {
   const pressed = new Set(parts.slice(0, -1));
 
   if (pressed.has('Meta')) {
-    return 'Клавишу Win/Cmd забирает себе операционная система.';
+    return t('settings.comboMetaReserved');
   }
 
   if (!pressed.has('Ctrl') && !pressed.has('Alt')) {
-    return 'Нужен Ctrl или Alt — иначе сочетание сработает при обычном наборе текста.';
+    return t('settings.comboNeedsModifier');
   }
 
   const reserved = RESERVED.get(combo);
 
   if (reserved) {
-    return `Сочетание занято: ${reserved}.`;
+    return t('settings.comboReserved', { reason: t(reserved) });
   }
 
   const digitPrefix = /^Digit[0-9]$/.test(code) && parts.length === 2
@@ -250,7 +254,7 @@ export function comboIssue(value: unknown): string {
     : null;
 
   if (digitPrefix) {
-    return `Сочетание занято: ${digitPrefix}.`;
+    return t('settings.comboReserved', { reason: t(digitPrefix) });
   }
 
   return '';

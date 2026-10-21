@@ -1,5 +1,8 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 // Плагины GrigDesk: список с сервера, вкл/выкл, настройки.
 // Питает блок плагинов в сайдбаре (под разделителем) и вкладку «Настройки → Плагины».
+import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
+import { translator } from '../../../shared/i18n/catalogs.ts';
 import { classifyWriteError } from '../features/settings/contracts.ts';
 import { defineStore } from 'pinia';
 import { api, failureText } from '../shared/apiClient.ts';
@@ -71,6 +74,8 @@ export function sortNavItems(items) {
     || String(a.id).localeCompare(String(b.id), 'ru'));
 }
 
+const t = localeTranslator(uiLocale);
+
 export const usePluginsStore = defineStore('plugins', {
   state: () => ({
     list: [],
@@ -80,10 +85,14 @@ export const usePluginsStore = defineStore('plugins', {
   }),
   getters: {
     // Размещение объявляет manifest, но Vue-страницу/панель он не загружает.
-    navItems: (s) => s.list.filter((p) => p.enabled && p.nav)
-      .map(normalizeNavItem).filter(Boolean).sort((a, b) => a.order - b.order
-        || String(a.label).localeCompare(String(b.label), 'ru')
-        || String(a.id).localeCompare(String(b.id), 'ru')),
+    navItems: (s) => sortNavItems(s.list.filter((plugin) => plugin.enabled && plugin.nav)
+      .map(normalizeNavItem).filter(Boolean)).map((item) => ({
+        ...item,
+        sourceLabel: item.label,
+        label: s.list.find((plugin) => plugin.id === item.id)?.system
+          ? translator.t(uiLocale.value, `core.builtinNavigation.${item.id}`, {}, item.label)
+          : item.label,
+      })),
     railNav() { return this.navItems.filter((item) => item.group === 'rail'); },
     toolsNav() { return this.navItems.filter((item) => item.group === 'tools'); },
     dockNav() { return this.navItems.filter((item) => item.group === 'dock'); },
@@ -116,7 +125,7 @@ export const usePluginsStore = defineStore('plugins', {
         const { plugins } = await api.get('/api/plugins');
 
         if (!Array.isArray(plugins)) {
-          throw new Error('Сервер вернул некорректный каталог плагинов.');
+          throw new Error(t('settings.invalidPluginCatalog'));
         }
 
         const checked = plugins.map((plugin) => ({
@@ -128,7 +137,7 @@ export const usePluginsStore = defineStore('plugins', {
         this.loaded = true;
         this.loadError = null;
       } catch (error) {
-        this.loadError = error instanceof Error ? error.message : 'Не удалось получить каталог плагинов.';
+        this.loadError = error instanceof Error ? error.message : t('settings.pluginCatalogFailure');
       }
     },
     /**
@@ -142,7 +151,7 @@ export const usePluginsStore = defineStore('plugins', {
         return {
           ok: false,
           outcome: 'failed',
-          message: 'Плагин больше недоступен',
+          message: t('settings.pluginGone'),
         };
       }
 
@@ -159,7 +168,7 @@ export const usePluginsStore = defineStore('plugins', {
           return {
             ok: false,
             outcome: reply?.ok === false ? 'failed' : 'unknown',
-            message: 'Сервер не подтвердил переключение плагина',
+            message: t('settings.pluginToggleUnconfirmed'),
           };
         }
 
@@ -184,7 +193,7 @@ export const usePluginsStore = defineStore('plugins', {
       } catch (error) {
         p.enabled = before;
 
-        return { ...classifyWriteError(error), message: failureText(error) };
+        return { ...classifyWriteError(error, uiLocale), message: failureText(error) };
       }
     },
     /**
@@ -198,7 +207,7 @@ export const usePluginsStore = defineStore('plugins', {
         return {
           ok: false,
           outcome: 'failed',
-          message: 'Плагин больше недоступен',
+          message: t('settings.pluginGone'),
         };
       }
 
@@ -212,7 +221,7 @@ export const usePluginsStore = defineStore('plugins', {
           return {
             ok: false,
             outcome: reply?.ok === false ? 'failed' : 'unknown',
-            message: 'Сервер не подтвердил параметры плагина',
+            message: t('settings.pluginSettingsUnconfirmed'),
           };
         }
 
@@ -228,7 +237,7 @@ export const usePluginsStore = defineStore('plugins', {
           placements: reply.placements,
         };
       } catch (error) {
-        return { ...classifyWriteError(error), message: failureText(error) };
+        return { ...classifyWriteError(error, uiLocale), message: failureText(error) };
       }
     },
     // Готовность плагина: ручку объявляет манифест, форму ответа — общий контракт.

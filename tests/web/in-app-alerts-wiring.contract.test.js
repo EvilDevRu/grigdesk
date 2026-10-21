@@ -4,6 +4,8 @@ import {
 } from 'node:fs/promises';
 import test from 'node:test';
 
+import { shellContractBrowser } from './helpers/shell-contract-browser.js';
+
 import {
   webFile
 } from './helpers/compile-vue.js';
@@ -30,8 +32,12 @@ test('P1/P2: хост после модалок и очистка при вых�
   assert.match(clearOnBrowserLogout[1], /clearAlertHistory\(\)/);
 });
 
-test('история: колокольчик стоит в верхней панели рядом с настройками', async () => {
-  const source = await readFile(webFile('src/shared/layout/AppShell.vue'), 'utf8');
+test('история: колокольчик стоит в верхней панели рядом с настройками', async (t) => {
+  const { page } = await shellContractBrowser(t);
+  const neighbour = await page.locator('[data-ui-topbar] .alert-bell').evaluate((bell) => ({
+    tag: bell.nextElementSibling?.tagName,
+    label: bell.nextElementSibling?.getAttribute('aria-label'),
+  }));
 
-  assert.match(source, /<AlertHistoryPopover \/>\s*<UiIconButton label="Настройки"/);
+  assert.deepEqual(neighbour, { tag: 'BUTTON', label: 'Настройки' });
 });

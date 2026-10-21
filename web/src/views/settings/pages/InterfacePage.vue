@@ -1,7 +1,21 @@
 <template>
   <div class="settings-interface">
-    <SettingsScope scope="Это устройство" />
-    <p v-if="error" role="alert">{{ error }}</p>
+    <SettingsScope :scope="t('settings.thisDevice2')" />
+    <div v-if="settings.pageId === 'interface.behavior'" class="settings-language">
+      <label>{{ t('core.language') }}</label>
+      <UiSelect
+        :aria-label="t('core.language')"
+        :model-value="uiLanguage"
+        :disabled="uiLanguageBusy"
+        @update:model-value="setUiLanguage(String($event))"
+      >
+        <option value="system">{{ t('core.system') }}</option>
+        <option v-for="locale in locales" :key="locale.id" :value="locale.id">{{ locale.name }}</option>
+      </UiSelect>
+      <p>{{ t('settings.languageHint') }}</p>
+      <p v-if="uiLanguageError" role="alert">{{ uiLanguageError }}</p>
+    </div>
+    <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
     <SettingsField
       v-for="field in fields"
       :key="field.key"
@@ -16,22 +30,22 @@
           :disabled="device.wakeLockBusy || (!device.wakeLockSupported && !wakeLockEnabled)"
           @update:model-value="settings.setField('wakeLock', 'enabled', $event)"
         />
-        <p v-if="device.wakeLockActive">Экран удерживается включённым.</p>
+        <p v-if="device.wakeLockActive">{{ t('settings.theScreenIsKeptOn') }}</p>
         <p v-else-if="device.wakeLockError" role="status">{{ device.wakeLockError }}</p>
-        <p v-else-if="!device.wakeLockSupported">Удержание экрана недоступно в этом браузере.</p>
+        <p v-else-if="!device.wakeLockSupported">{{ t('settings.keepingTheScreenOnIsUnavailableIn') }}</p>
       </template>
       <template v-else-if="field.key === 'notificationTest'">
         <UiButton
           :disabled="device.notificationBusy || !device.notificationSupported"
           @click="device.testNotification"
         >
-          {{ device.notificationPermission === 'granted' ? 'Проверить' : 'Включить и проверить' }}
+          {{ device.notificationPermission === 'granted' ? t('settings.test') : t('settings.enableAndTest') }}
         </UiButton>
         <p v-if="device.notificationError" role="status">{{ device.notificationError }}</p>
         <p v-else-if="device.notificationPermission === 'granted'">
-          Оповещения разрешены на этом устройстве.
+          {{ t('settings.notificationsAreAllowedOnThisDevice') }}
         </p>
-        <p v-else-if="!device.notificationSupported">Системные оповещения недоступны в этом браузере.</p>
+        <p v-else-if="!device.notificationSupported">{{ t('settings.systemNotificationsAreUnavailableInThisBrowser') }}</p>
       </template>
       <template v-else-if="loaded('hotkeys')">
         <div
@@ -42,42 +56,46 @@
         >
           <span>
             {{ row.label }}
-            <small v-if="row.availability === 'disabled'">· плагин выключен — клавиша молчит</small>
-            <small v-else-if="row.availability === 'pending'">· состояние плагина ещё не получено</small>
+            <small v-if="row.availability === 'disabled'">{{ t('settings.pluginDisabledShortcutInactive') }}</small>
+            <small v-else-if="row.availability === 'pending'">{{ t('settings.pluginStatusNotReceivedYet') }}</small>
           </span>
           <kbd class="settings-hotkey-combo" :data-recording="hotkeys.recording === row.id">
-            {{ hotkeys.recording === row.id ? 'Нажмите сочетание…' : formatCombo(row.combo) || 'Выключено' }}
+            {{ hotkeys.recording === row.id ? t('settings.pressAShortcut') : formatCombo(row.combo) || t('settings.disabled2') }}
           </kbd>
           <div class="settings-hotkey-actions">
             <UiButton
               data-record
-              :aria-label="`Изменить клавишу: ${row.label}`"
+              :aria-label="t('settings.changeShortcut', { rowLabel: row.label })"
               @click="record(row.id)"
             >
-              {{ hotkeys.recording === row.id ? 'Отменить' : 'Изменить' }}
+              {{ hotkeys.recording === row.id ? t('settings.cancel2') : t('settings.change') }}
             </UiButton>
             <UiButton @click="toggle(row.id, Boolean(row.combo))">
-              {{ row.combo ? 'Выключить' : 'Вернуть' }}
+              {{ row.combo ? t('settings.disable') : t('settings.restore') }}
             </UiButton>
           </div>
         </div>
         <p v-if="mapIssue" role="alert">{{ mapIssue }}</p>
-        <p>Запись использует физическую клавишу. Комбинации системы и браузера недоступны.</p>
-        <UiButton @click="settings.setField('hotkeys', 'overrides', {})">Вернуть стандартные</UiButton>
+        <p>{{ t('settings.recordingUsesThePhysicalKeySystemAnd') }}</p>
+        <UiButton @click="settings.setField('hotkeys', 'overrides', {})">{{ t('settings.restoreDefaults') }}</UiButton>
       </template>
     </SettingsField>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   UiButton,
+  UiSelect,
+  locales,
   UiSwitch,
   getUiLayerDiagnostics,
   subscribeUiLayerDiagnostics,
 } from '../../../ui.ts';
-import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
+import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createHotkeysAdapter, createWakeLockAdapter } from '../../../features/settings/resources/device.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useDeviceStore, WAKE_LOCK_KEY } from '../../../stores/device.js';
@@ -91,6 +109,7 @@ import { usePluginsStore } from '../../../stores/plugins.js';
 import { TOOL_CATALOG, toolAvailability } from '../../../shared/tools/catalog.ts';
 import { comboFromEvent, formatCombo, isLayoutSwitch } from '../../../shared/hotkeys/combo.ts';
 import { failureText } from '../../../shared/apiClient.ts';
+import { uiLanguage, uiLanguageBusy, uiLanguageError, setUiLanguage } from '../../../shared/uiLocale.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
 
@@ -99,8 +118,9 @@ const settings = useSettingsStore();
 const device = useDeviceStore();
 const hotkeys = useHotkeysStore();
 const plugins = usePluginsStore();
-const error = ref('');
-const fields = computed(() => SETTINGS_FIELDS.filter((field) => field.address.pageId === settings.pageId));
+const error = ref<UiText>('');
+const fields = computed(() => getSettingsFields(uiLocale.value)
+  .filter((field) => field.address.pageId === settings.pageId));
 const wakeLockEnabled = computed(() => {
   settings.snapshot;
 
@@ -118,7 +138,7 @@ const rows = computed(() => TOOL_CATALOG.map((tool) => ({
   combo: Object.hasOwn(overrides.value, tool.id) ? overrides.value[tool.id] : DEFAULT_HOTKEYS[tool.id],
 })));
 const mapIssue = computed(() => {
-  const result = validateHotkeyOverrides(overrides.value);
+  const result = validateHotkeyOverrides(overrides.value, uiLocale.value);
 
   return result.ok ? '' : result.error;
 });
@@ -175,7 +195,7 @@ function onRecordKey(event: KeyboardEvent): void {
   }
 
   if (isLayoutSwitch(event)) {
-    error.value = 'Сочетание забрал системный переключатель раскладки. Выберите сочетание с Ctrl.';
+    error.value = messageRef('settings.theSystemKeyboardLayoutSwitchTookThis');
 
     return;
   }
@@ -237,7 +257,8 @@ async function load(): Promise<void> {
   const opening = settings.snapshot.sessionId;
 
   try {
-    const adapter = resourceId === 'wakeLock' ? createWakeLockAdapter(device) : createHotkeysAdapter(hotkeys);
+    const adapter = resourceId === 'wakeLock'
+      ? createWakeLockAdapter(device) : createHotkeysAdapter(hotkeys, uiLocale);
 
     settings.registerResource(adapter, SETTINGS_FIELDS.filter((field) => field.resourceId === resourceId));
     await settings.loadResource(resourceId);

@@ -1,18 +1,18 @@
 <template>
   <div class="settings-workspace" :data-navigation="navigationVisible">
-    <aside class="settings-sidebar" aria-label="Навигация настроек">
+    <aside class="settings-sidebar" :aria-label="t('settings.settingsNavigation')">
       <UiSearchInput
         v-model="settings.query"
-        aria-label="Поиск настроек"
-        placeholder="Найти настройку"
+        :aria-label="t('settings.searchSettings')"
+        :placeholder="t('settings.findASetting')"
       />
-      <p v-if="settings.query.trim()" class="settings-navigation-label">Результаты поиска</p>
+      <p v-if="settings.query.trim()" class="settings-navigation-label">{{ t('settings.searchResults') }}</p>
       <div class="settings-navigation-scroll">
         <SettingsNavigation v-if="!settings.query.trim()" @select="navigationVisible = false" />
         <div
           v-else
           class="settings-results"
-          aria-label="Результаты поиска"
+          :aria-label="t('settings.searchResults')"
         >
           <UiPressable
             v-for="(result, index) in results"
@@ -26,8 +26,8 @@
           </UiPressable>
           <div v-if="!results.length" class="settings-search-empty" role="status">
             <SettingsIcon name="search" />
-            <strong>Ничего не найдено</strong>
-            <p>Попробуйте другое слово или название раздела.</p>
+            <strong>{{ t('settings.noResults') }}</strong>
+            <p>{{ t('settings.tryAnotherWordOrSectionName') }}</p>
           </div>
         </div>
       </div>
@@ -35,9 +35,9 @@
     <section class="settings-page-area" aria-labelledby="settings-page-title">
       <div class="settings-page-heading">
         <UiButton class="settings-sections" variant="ghost" @click="navigationVisible = true">
-          <span aria-hidden="true">‹</span> Разделы
+          <span aria-hidden="true">‹</span> {{ t('settings.sections') }}
         </UiButton>
-        <p aria-label="Путь раздела">
+        <p :aria-label="t('settings.sectionPath')">
           {{ group?.label }} <span aria-hidden="true">/</span> <span>{{ page?.label }}</span>
         </p>
       </div>
@@ -57,7 +57,7 @@
             :active="true"
           />
           <div v-else class="settings-page-loading" role="status">
-            <UiSpinner label="Загрузка раздела" /> Раздел загружается…
+            <UiSpinner :label="t('settings.loadingSection')" /> {{ t('settings.loadingSection2') }}
           </div>
         </div>
       </div>
@@ -66,10 +66,12 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../ui.ts';
+
 import { computed, ref } from 'vue';
 import { UiButton, UiSearchInput, UiPressable, UiInlineMessage, UiSpinner } from '../../ui.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
-import { SETTINGS_GROUPS, SETTINGS_PAGES } from '../../features/settings/catalog.ts';
+import { getSettingsGroups, getSettingsPages } from '../../features/settings/catalog.ts';
 import { searchSettings, type SettingsSearchResult } from '../../features/settings/search.ts';
 import { SETTINGS_PAGE_COMPONENTS } from './pageComponents.ts';
 import SettingsNavigation from './SettingsNavigation.vue';
@@ -78,9 +80,10 @@ import SettingsIcon from './SettingsIcon.vue';
 const settings = useSettingsStore();
 const navigationVisible = ref(false);
 const component = computed(() => SETTINGS_PAGE_COMPONENTS[settings.pageId]);
-const page = computed(() => SETTINGS_PAGES.find((item) => item.id === settings.pageId));
-const group = computed(() => SETTINGS_GROUPS.find((item) => item.id === page.value?.groupId));
-const results = computed(() => searchSettings(settings.query, settings.dynamicFields));
+const page = computed(() => getSettingsPages(uiLocale.value).find((item) => item.id === settings.pageId));
+const group = computed(() => getSettingsGroups(uiLocale.value)
+  .find((item) => item.id === page.value?.groupId));
+const results = computed(() => searchSettings(settings.query, settings.dynamicFields, uiLocale.value));
 
 function openResult(result: SettingsSearchResult): void {
   settings.openSearchResult(result);

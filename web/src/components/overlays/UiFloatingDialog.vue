@@ -9,11 +9,11 @@
     :trigger-mode="triggerMode"
     :placement="placement"
     :layer="layer"
-    :trigger-label="triggerLabel"
+    :trigger-label="(triggerLabel ?? t('core.open'))"
     :offset="offset"
     :hover-delay="hoverDelay"
     :return-focus="returnFocus"
-    :aria-label="hasTitle ? undefined : label"
+    :aria-label="hasTitle ? undefined : (label ?? t('core.popup'))"
     :aria-labelledby="hasTitle ? titleId : undefined"
     :aria-describedby="hasDescription ? descriptionId : undefined"
     :aria-busy="busy || undefined"
@@ -49,6 +49,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { computed, ref, useId, type VNode } from 'vue';
 import UiPopover from './UiPopover.vue';
 import type { UiLayerName } from '../../types/uiLayers';
@@ -83,13 +85,13 @@ const props = withDefaults(defineProps<Props>(), {
   defaultOpen: false,
   title: '',
   description: '',
-  label: 'Всплывающее окно',
+  label: undefined,
   busy: false,
   focusPolicy: 'auto',
   triggerMode: 'click',
   placement: 'bottom-start',
   layer: 'popover',
-  triggerLabel: 'Открыть',
+  triggerLabel: undefined,
   offset: 8,
   hoverDelay: 120,
   returnFocus: true,
