@@ -322,6 +322,9 @@ function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number)
   const window = new BrowserWindow({
     ...options,
     ...bounds,
+    // Карточка оформляется целиком своей шапкой: системных кнопок поверх неё нет,
+    // окно двигают за шапку, а закрывает его собственная кнопка карточки.
+    titleBarOverlay: false,
     minWidth: Math.min(600, bounds.width),
     minHeight: Math.min(600, bounds.height),
     webPreferences: {

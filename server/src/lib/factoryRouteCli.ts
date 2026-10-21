@@ -58,6 +58,7 @@ const ROUTE_HOST_NAMES = [
   'FACTORY_HOME',
   'FACTORY_PROFILES_DIR',
   'FACTORY_CONFIG_ROOT',
+  'PYTHONDONTWRITEBYTECODE',
   'NODE_BIN',
   'GRIGDESK_SERVER_RUNTIME_RESERVATION',
   'GRIGDESK_SERVER_RUNTIME_NODE',
@@ -389,6 +390,9 @@ export function routeLaunchEnv(
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
+    // Transient-юнит env сервера не наследует, а движок закреплённого поколения лежит в R:
+    // без явного запрета первый импорт Python пишет туда __pycache__ и ломает prepare.
+    PYTHONDONTWRITEBYTECODE: '1',
     ...(config.runtimeNode ? { NODE_BIN: config.runtimeNode } : {}),
     ...config.runtimeHostEnv,
   };
