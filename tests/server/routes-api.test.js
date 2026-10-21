@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import routesApi from '../../server/src/modules/routes/api.ts';
 import routesModule from '../../server/src/modules/routes/index.ts';
@@ -565,6 +566,41 @@ test('ROUTES-API-11: провал публикатора — 422 с его же 
   assert.equal(failed.json().error, 'routes_v2_publish_failed');
   assert.equal(failed.json().reason, 'exit');
   assert.equal(failed.json().message, 'sample routes v2: определение сломано');
+});
+
+test('ROUTES-API-14: скрипт публикации получает путь к набору схемы и хранилища', async (t) => {
+  const { app, root } = await fixture(t);
+  const dir = path.join(root, 'profiles', PROFILE, 'routes');
+  const expected = path.join(
+    path.resolve(fileURLToPath(new URL('../../', import.meta.url))),
+    'server/src/modules/routes/publishKit.ts',
+  );
+
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, 'publish.mjs'), [
+    "import { pathToFileURL } from 'node:url';",
+    'const file = process.env.GRIGDESK_ROUTES_KIT;',
+    'const kit = await import(pathToFileURL(file).href);',
+    'process.stdout.write(JSON.stringify({ file, names: Object.keys(kit).sort() }));',
+    '',
+  ].join('\n'));
+
+  const validated = await app.inject({
+    method: 'POST',
+    url: `/api/routes/${PROFILE}/publish`,
+    payload: { mode: 'validate' },
+  });
+
+  assert.equal(validated.statusCode, 200);
+  assert.equal(validated.json().result.file, expected);
+  assert.deepEqual(validated.json().result.names, [
+    'RoutesStore',
+    'validateBootstrap',
+    'validateCatalog',
+    'validatePromptFiles',
+    'validateRoute',
+  ]);
+  assert.ok(pathToFileURL(expected).href.startsWith('file://'));
 });
 
 test('ROUTES-API-12: схема маршрута строится из машины бандла', async (t) => {

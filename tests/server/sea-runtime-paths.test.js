@@ -20,6 +20,8 @@ import {
   createRuntimePaths,
   helperCommand,
   helperCommandFor,
+  helperModule,
+  helperModuleFor,
   helperRootFromUrl,
   moduleUrl,
   moduleUrlFor,
@@ -399,4 +401,52 @@ test('SB05: helper сохраняет R и получает I только из 
     bundleFile: 'relative',
     binary,
   }), /абсолютные/);
+});
+
+test('SEA-RP-10: library-helper отдаёт файл модуля для импорта чужим процессом', async (t) => {
+  const R = await packagedLayout(t);
+  const libraries = {
+    schema: 1,
+    helpers: [{
+      id: 'routes-publish-kit',
+      entry: 'server/src/modules/routes/publishKit.ts',
+      entryKind: 'library',
+      description: 'набор публикации',
+    }, {
+      id: 'data-home-check',
+      entry: 'server/scripts/dataHomeCheck.mts',
+      entryKind: 'script',
+      description: 'проверка data-home',
+    }],
+  };
+  const source = createRuntimePaths({
+    mode: 'source',
+    root: ROOT,
+    execPath: '/usr/bin/node',
+  });
+  const packaged = createRuntimePaths({
+    mode: 'sea',
+    execPath: path.join(R, 'server/grigdesk-server'),
+  });
+
+  assert.equal(helperModuleFor(source, libraries, 'routes-publish-kit'),
+    path.join(ROOT, 'server/src/modules/routes/publishKit.ts'));
+  assert.equal(helperModuleFor(packaged, libraries, 'routes-publish-kit'),
+    path.join(R, 'server/runtime/helpers/routes-publish-kit.mjs'));
+  assert.throws(() => helperModuleFor(source, libraries, 'nope'), /Неизвестный helper: nope/);
+  assert.throws(() => helperModuleFor(source, libraries, 'data-home-check'),
+    /Helper data-home-check не библиотека/);
+
+  // Настоящий каталог дерева: модуль существует и отдаёт ровно пять имён для профилей.
+  const file = helperModule('routes-publish-kit');
+  const kit = await import(pathToFileURL(file).href);
+
+  assert.equal(file, path.join(ROOT, 'server/src/modules/routes/publishKit.ts'));
+  assert.deepEqual(Object.keys(kit).sort(), [
+    'RoutesStore',
+    'validateBootstrap',
+    'validateCatalog',
+    'validatePromptFiles',
+    'validateRoute',
+  ]);
 });

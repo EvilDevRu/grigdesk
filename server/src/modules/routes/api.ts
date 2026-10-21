@@ -9,7 +9,7 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { buildRouteDef } from '../../lib/routeGraph.ts';
-import { nodeExecutable } from '../../lib/runtimePaths.ts';
+import { helperModule, nodeExecutable } from '../../lib/runtimePaths.ts';
 import type { CatalogObserver } from './catalogObserver.ts';
 import { RoutesEditorStoreError } from './draftStore.ts';
 import { assertProfileId, assertRevisionHash, assertRouteId, RoutesError } from './schema.ts';
@@ -43,6 +43,11 @@ export interface RoutesApiOptions {
 const PUBLISH_SCRIPT = ['routes', 'publish.mjs'];
 const PUBLISH_TIMEOUT_MS = 120_000;
 const PUBLISH_MAX_OUTPUT = 4 * 1024 * 1024;
+
+// Скрипт профиля не ищет код сервера сам: в комплекте из бинарника исходников нет,
+// а путь от папки данных никуда не ведёт. Сервер даёт ему путь к набору схемы и хранилища.
+const ROUTES_KIT_ENV = 'GRIGDESK_ROUTES_KIT';
+const ROUTES_KIT_HELPER = 'routes-publish-kit';
 
 const BAD_REQUEST_CODES = new Set([
   'ROUTES_V2_INVALID_SCHEMA',
@@ -481,6 +486,7 @@ export async function registerRoutesApi(
         );
       }
 
+      const routesKit = helperModule(ROUTES_KIT_HELPER);
       let stdout = '';
       let stderr = '';
       let failure: string | null = null;
@@ -488,6 +494,7 @@ export async function registerRoutesApi(
       try {
         const finished = await runScript(nodeExecutable(), args, {
           cwd: path.join(String(profilesDir), profile),
+          env: { ...process.env, [ROUTES_KIT_ENV]: routesKit },
           timeout: PUBLISH_TIMEOUT_MS,
           maxBuffer: PUBLISH_MAX_OUTPUT,
         });

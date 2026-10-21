@@ -30,6 +30,7 @@ export interface RuntimePaths {
 export interface HelperEntry {
   id: string;
   entry: string;
+  entryKind?: 'main' | 'script' | 'library';
   description: string;
 }
 
@@ -227,26 +228,52 @@ export function readHelperCatalog(file: string): HelperCatalog {
 }
 
 /**
- * Собирает команду helper-а по каталогу и режиму путей.
- * В source запускается исходный вход, в комплекте — собранный .mjs вложенным Node.
+ * Находит описание helper-а в каталоге и файл его входа для текущего режима путей.
+ * В source это исходный вход дерева, в комплекте — собранный .mjs рядом с каталогом.
  */
-export function helperCommandFor(paths: RuntimePaths, catalog: HelperCatalog,
-  id: string, args: readonly string[]): HelperCommand {
+function helperEntryFor(paths: RuntimePaths, catalog: HelperCatalog, id: string): {
+  helper: HelperEntry;
+  file: string;
+} {
   const helper = catalog.helpers.find((entry) => entry.id === id);
 
   if (!helper) {
     throw new Error(`Неизвестный helper: ${id}`);
   }
 
-  const command = nodeExecutableFor(paths);
-  const entry = paths.kind === 'source'
+  const file = paths.kind === 'source'
     ? path.resolve(paths.root, helper.entry)
     : path.join(paths.helperDirectory, `${id}.mjs`);
 
+  return { helper, file };
+}
+
+/**
+ * Собирает команду helper-а по каталогу и режиму путей.
+ * В source запускается исходный вход, в комплекте — собранный .mjs вложенным Node.
+ */
+export function helperCommandFor(paths: RuntimePaths, catalog: HelperCatalog,
+  id: string, args: readonly string[]): HelperCommand {
+  const { file } = helperEntryFor(paths, catalog, id);
+
   return {
-    command,
-    args: [entry, ...args],
+    command: nodeExecutableFor(paths),
+    args: [file, ...args],
   };
+}
+
+/**
+ * Возвращает файл library-helper-а, который импортирует чужой процесс (скрипт профиля).
+ * Вход main или script не отдаётся: его импорт запустил бы CLI вместо exports.
+ */
+export function helperModuleFor(paths: RuntimePaths, catalog: HelperCatalog, id: string): string {
+  const { helper, file } = helperEntryFor(paths, catalog, id);
+
+  if (helper.entryKind !== 'library') {
+    throw new Error(`Helper ${id} не библиотека`);
+  }
+
+  return file;
 }
 
 /**
@@ -351,4 +378,14 @@ export function helperCommand(id: string, args: readonly string[]): HelperComman
   const paths = currentPaths();
 
   return helperCommandFor(paths, loadHelperCatalog(paths), id, args);
+}
+
+/**
+ * Возвращает файл library-helper-а по текущему каталогу и режиму путей.
+ * Нужен, когда модуль импортирует внешний скрипт, а не сам сервер.
+ */
+export function helperModule(id: string): string {
+  const paths = currentPaths();
+
+  return helperModuleFor(paths, loadHelperCatalog(paths), id);
 }
