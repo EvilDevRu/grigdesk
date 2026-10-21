@@ -10,7 +10,7 @@
     fade-only
     @update:open="onTaskDialogOpenChange"
   >
-      <header class="mhead">
+      <header class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
         <div class="mheading">
           <div class="midentity">
             <span class="meyebrow">Задача Битрикс24</span>
@@ -2063,6 +2063,15 @@ onUnmounted(() => {
   flex: none;
   align-items: center;
   gap: 4px;
+}
+/* В отдельном окне системной строки нет: окно двигают за шапку карточки,
+   а её кнопки, включая «Закрыть», сохраняют клики и подсказки. */
+.mhead-window {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.mhead-window .mhead-actions {
+  -webkit-app-region: no-drag;
 }
 .malerts { flex: none; display: grid; gap: 4px; max-height: 104px; overflow-y: auto;
   padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));

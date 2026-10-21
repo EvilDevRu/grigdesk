@@ -9,7 +9,9 @@
 запускаются явным путём к вложенному Node и от PATH не зависят.
 
 `PYTHONDONTWRITEBYTECODE=1` запрещает Python писать `__pycache__` в R, в том числе при
-вызове `engine/bin/factory-route`. Глобальный npm использует `D/state/npm-global`,
+вызове `engine/bin/factory-route`. Отвязанные юниты конвейера env сервера не наследуют,
+поэтому `routeLaunchEnv` задаёт переменную явно ([лишний `__pycache__`](stray-pycache-in-package.md)).
+Глобальный npm использует `D/state/npm-global`,
 если пользователь не выбрал абсолютный `npm_config_prefix` вне R. Приоритет Node
 не направляет обычный `npm -g` в `R/runtime/node`. Те же правила применяются к окну,
 ручному запуску и службе; source-режим сохраняет своё окружение.

@@ -9,6 +9,8 @@ test('SM-01: главный процесс подключает закрытый
   assert.match(source, /create: createSurfaceWindow,/);
   assert.match(source, /nativeWindows:\s*\{/);
   assert.match(source, /desktopUserAgent\(window\.webContents\.getUserAgent\(\), 'surface'\)/);
+  // Карточка без системных кнопок поверх шапки: оформление окна целиком своё.
+  assert.match(source, /function createSurfaceWindow\((?:(?!\n}\n)[\s\S])*?titleBarOverlay: false,/);
   assert.match(source, /surfaceWindows\?\.closeAll\(\)/);
   assert.doesNotMatch(source, /deliver:/);
 });

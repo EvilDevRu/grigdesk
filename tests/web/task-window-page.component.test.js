@@ -68,10 +68,25 @@ test('TWP-01: карточка ждёт запуска синхронизаци�
   assert.equal(document.title, 'Задача #42 — GrigDesk');
   assert.equal(wrapper.find('[data-task-modal]').exists(), false);
   assert.equal(wrapper.find('[role="status"]').exists(), true);
+
+  // До карточки окно без системных кнопок закрывается собственной полосой.
+  const closeWindow = window.close;
+  let closed = 0;
+
+  window.close = () => {
+    closed += 1;
+  };
+  t.after(() => {
+    window.close = closeWindow;
+  });
+  await wrapper.get('.task-window-titlebar [aria-label="Закрыть окно"]').trigger('click');
+  assert.equal(closed, 1);
   state.auth.authenticated = true;
   await nextTick();
   await wrapper.setProps({ ready: true });
   assert.equal(wrapper.find('[data-task-modal]').exists(), true);
+  // Карточку оформляет только её собственная шапка, отдельной полосы окна нет.
+  assert.equal(wrapper.find('.task-window-titlebar').exists(), false);
   await wrapper.get('[data-task-modal]').setValue('Сохраняемый черновик');
 
   const input = wrapper.get('[data-task-modal]').element;

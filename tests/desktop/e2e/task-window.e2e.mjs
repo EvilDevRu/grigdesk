@@ -574,16 +574,20 @@ test('TW-E01: второе окно, сохранность повтора, ре
   assert.deepEqual(nodeGlobals, ['undefined', 'undefined']);
   assert.match(await taskPage.evaluate(() => navigator.userAgent), /GrigDeskWindow\/surface/);
 
+  // Системных кнопок нет: окно двигают за шапку карточки, её кнопки остаются кликабельными.
   const titlebar = await taskPage.evaluate(() => ({
-    visible: navigator.windowControlsOverlay.visible,
-    height: navigator.windowControlsOverlay.getTitlebarAreaRect().height,
-    drag: getComputedStyle(document.querySelector('.task-window-titlebar'))
+    overlay: navigator.windowControlsOverlay?.visible ?? false,
+    strip: document.querySelector('.task-window-titlebar') !== null,
+    drag: getComputedStyle(document.querySelector('.task-card-document .mhead'))
+      .getPropertyValue('-webkit-app-region'),
+    actions: getComputedStyle(document.querySelector('.task-card-document .mhead-actions'))
       .getPropertyValue('-webkit-app-region'),
   }));
 
-  assert.equal(titlebar.visible, true);
-  assert.equal(titlebar.height >= 36, true);
+  assert.equal(titlebar.overlay, false);
+  assert.equal(titlebar.strip, false);
   assert.equal(titlebar.drag, 'drag');
+  assert.equal(titlebar.actions, 'no-drag');
   await taskPage.getByRole('tab', { name: /Комментарии/ }).click();
   await taskPage.locator('[data-role="task-comment"]').fill('Несохранённый комментарий');
 
