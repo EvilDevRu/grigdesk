@@ -1,4 +1,4 @@
-import { readFile, stat, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, stat, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { build as esbuildBuild } from 'esbuild';
@@ -270,7 +270,9 @@ export async function buildHelper(input: BuildHelperInput): Promise<BuiltHelper>
     recursive: true
   });
 
-  const generated = path.join(input.workDir, `${helper.id}.mjs`);
+  // Виртуальный вход имеет постоянное имя и разрешает импорты от корня исходников.
+  // Файловый entry в workDir оставлял случайный путь staging в комментариях esbuild.
+  const generated = path.join(input.root, `${helper.id}.mjs`);
   const outfile = path.join(input.outDir, `${helper.id}.mjs`);
   const esbuild = input.esbuild ?? esbuildBuild;
   const moduleUrls = createModuleUrlsPlugin({
@@ -280,10 +282,13 @@ export async function buildHelper(input: BuildHelperInput): Promise<BuiltHelper>
     skip: [generated, path.join(input.root, 'server/src/lib/pluginInstall/commandSupervisor.mjs')],
   });
 
-  await writeFile(generated, renderHelperEntry(helper, generated, input.root));
-
   const result = await esbuild({
-    entryPoints: [generated],
+    stdin: {
+      contents: renderHelperEntry(helper, generated, input.root),
+      sourcefile: `${helper.id}.mjs`,
+      resolveDir: input.root,
+      loader: 'js',
+    },
     outfile,
     bundle: true,
     platform: 'node',

@@ -7,9 +7,19 @@ SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 CMD="${1:-open}"
 
+# Явные команды разработки распознают checkout независимо от установленного ELF.
+# release.json сохраняет приоритет готовой поставки даже при случайных исходниках рядом.
+SOURCE_COMMAND=0
+if [[ ! -f "$DIR/release.json" && -f "$DIR/server/src/app.ts" \
+  && -f "$DIR/web/package.json" && -f "$DIR/desktop/package.json" ]]; then
+  case "$CMD" in
+    dev|build|deps|mobile|release) SOURCE_COMMAND=1 ;;
+  esac
+fi
+
 # Внешний ELF сам читает раннее окружение и запускает сервер своим Node.
 # Для CLI удерживаем preparation до завершения собранного helper-а, затем освобождаем.
-if [[ -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/grigdesk-server" ]]; then
+if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/grigdesk-server" ) ]]; then
   source "$DIR/deploy/lib/runtime-env.sh"
   grigdesk_select_server_binary "$DIR"
   trap 'grigdesk_release_binary_preparation' EXIT
@@ -93,6 +103,16 @@ fi
 # Сохраняет прежний запуск разработчика, включая подготовку зависимостей и сборку.
 # Этот путь вызывается только явными dev/build/deps/run и не участвует в обычном открытии.
 developer_command() {
+  local build_target=${1-all}
+
+  if [[ "$CMD" == build ]]; then
+    if (( $# > 1 )) || [[ "$build_target" != all && "$build_target" != server \
+      && "$build_target" != web && "$build_target" != window ]]; then
+      echo 'Справка: grigdesk-ctl build [all|server|web|window]' >&2
+      return 2
+    fi
+  fi
+
   # node обязателен и должен быть в PATH (в «голом» шелле nvm-node может быть не подхвачен).
   if ! command -v node >/dev/null 2>&1; then
     echo "✗ node не найден в PATH. Загрузи nvm (напр. 'nvm use') или укажи node вручную." >&2
@@ -103,10 +123,10 @@ developer_command() {
   # Экспортированное окружение имеет приоритет. Те же аргументы передаём серверу.
   source "$DIR/deploy/lib/runtime-env.sh"
   grigdesk_add_cli_paths
-  grigdesk_require_node
+  grigdesk_require_node source
   if [[ "$CMD" == dev || "$CMD" == run ]]; then
-    grigdesk_require_migrated "$DIR"
-    grigdesk_load_runtime_env "$DIR"
+    grigdesk_require_migrated "$DIR" source
+    grigdesk_load_runtime_env "$DIR" source
     PORT="$GRIGDESK_EFFECTIVE_PORT"
     ENV_ARG=("${GRIGDESK_NODE_ENV_ARGS[@]}")
   fi
@@ -132,12 +152,12 @@ developer_command() {
       echo "→ npm i (server)"
       cd "$DIR/server"
       npm install --no-audit --no-fund
-    )
+    ) || return $?
     [ -d "$DIR/web/node_modules" ] || (
       echo "→ npm i (web)"
       cd "$DIR/web"
       npm install --no-audit --no-fund
-    )
+    ) || return $?
 
     prepare_deepseek
   }
@@ -152,6 +172,47 @@ developer_command() {
     )
   }
 
+  # Сборщик публикует кандидата в кэше; штатный установщик проверяет его и сохраняет резерв.
+  # Папка данных вычисляется общим контрактом, descriptor окна здесь не меняется.
+  build_server() {
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-binary"
+    local data
+
+    data=$(grigdesk_data_home) || return $?
+    node "$DIR/server/scripts/ctlBuild.mts" prepare-runtime "$cache/cache" || return $?
+    npm --prefix "$DIR/server" run build:binary -- \
+      --out-dir "$cache/out" --cache-dir "$cache/cache" || return $?
+    npm --prefix "$DIR/server" run install:binary -- \
+      --binary "$cache/out/grigdesk-server" --target "$DIR/bin/grigdesk-server" \
+      --releases-dir "$data/runtimes/server/releases" || return $?
+
+    if ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then
+      printf 'Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n' \
+        "$DIR/bin/grigdesk-server"
+    fi
+  }
+
+  # Упаковка берёт уже собранный web/dist, поэтому вызывающая цепочка готовит веб первой.
+  # Установка заменяет файл окна, не запуская приложение и не меняя выбор сервера.
+  build_window() {
+    npm --prefix "$DIR/desktop" run dist || return $?
+    "$DIR/deploy/desktop.sh" install || return $?
+  }
+
+  # Каждая обязательная стадия сохраняет свой код и останавливает общую цепочку.
+  # Вложенные функции явно передают ошибки: условный вызов отключает bash errexit внутри них.
+  build_step() {
+    local step=$1
+    shift
+
+    "$@" || {
+      local code=$?
+
+      echo "не удалось: $step" >&2
+      return "$code"
+    }
+  }
+
   case "$CMD" in
     deps)
       cd "$DIR/server" && npm install --no-audit --no-fund
@@ -159,8 +220,31 @@ developer_command() {
       prepare_deepseek
       ;;
     build)
-      ensure_deps
-      build_web
+      if [[ "$build_target" == all || "$build_target" == server ]]; then
+        build_step server build_server
+      fi
+
+      if [[ "$build_target" == all || "$build_target" == web || "$build_target" == window ]]; then
+        build_step web ensure_deps
+        build_step web build_web
+      fi
+
+      if [[ "$build_target" == all || "$build_target" == window ]]; then
+        build_step window build_window
+      fi
+
+      case "$build_target" in
+        all) echo 'Поставлены сервер, веб и окно.' ;;
+        server) echo "Поставлен сервер: $DIR/bin/grigdesk-server" ;;
+        web) echo "Собран веб: $DIR/web/dist" ;;
+        window) echo "Поставлено окно: $DIR/bin/grigdesk-app; веб собран." ;;
+      esac
+
+      if [[ "$build_target" == web ]]; then
+        echo 'Окно покажет новый веб после grigdesk-ctl build window.'
+      else
+        echo 'Закройте окно и откройте снова — запустится новый код.'
+      fi
       ;;
     dev)
       ensure_deps
@@ -197,12 +281,12 @@ case "$CMD" in
     for argument in "${@:2}"; do
       if [[ $argument == --help || $argument == -h ]]; then
         source "$DIR/deploy/lib/runtime-env.sh"
-        grigdesk_require_node
+        grigdesk_require_node source
         exec node "$DIR/cli/main.ts" --help
       fi
     done
 
-    developer_command
+    developer_command "${@:2}"
     ;;
   desktop)
     shift

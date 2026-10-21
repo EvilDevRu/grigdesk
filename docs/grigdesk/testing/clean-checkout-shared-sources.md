@@ -11,6 +11,12 @@ runtime в исходную фикстуру не входят.
 модулями. Отсутствие любого из них ломает prepare до сборки; добавление этих исходников
 сохраняет запрет переносить готовый runtime или зависимости в clean checkout.
 
+`tests/server/helpers/sourceRuntimeFiles.mts` хранит общий минимальный список
+`runtimePaths.ts` и `runtimeBuildContext.ts`. Их переносят readiness, Docker, mobile
+и desktop installer: `distribution.ts` и ранний data-home guard используют эти модули
+даже без установленного ELF. Отсутствие модулей даёт ERR_MODULE_NOT_FOUND до проверяемой
+команды; фикстура чистого checkout должна включать оба исходника.
+
 После выноса хеша `deepseek/scripts/deepseekVendorManifest.ts` импортирует `shared/node/hash.ts`.
 Если копировать только инструменты, подготовка завершается `ERR_MODULE_NOT_FOUND`
 до проверки установки. Фикстура должна переносить общий исходный слой целиком,

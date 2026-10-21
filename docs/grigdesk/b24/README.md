@@ -6,6 +6,8 @@
 
 ## Устройство
 
+- [Размещение карточки: отдельные окна desktop, диалог браузера и пассивная полка](task-card-placement.md)
+
 - [Авторизация и слои](authentication-layers.md)
 - [Граница B24](integration-boundary.md)
 - [Личное состояние задач B24 живёт на сервере, а не в браузере](server-owned-task-state.md)
@@ -13,6 +15,7 @@
 - [Полка не является фильтром доски и не связана с избранным](task-shelf-independence.md)
 - [Протокол портала](portal-protocol.md)
 - [Статусы и приоритет обработки](statuses-and-priority.md)
+- [Действия завершённой задачи в карточке](completed-task-actions.md)
 - [CLI для агента и оператора](agent-and-operator-cli.md)
 - [Команда b24: один исполняемый файл, настройки, коды выхода и установка](binary-cli.md)
 - [HTTP API GrigDesk](http-api-grigdesk.md)

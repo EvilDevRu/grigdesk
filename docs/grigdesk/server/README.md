@@ -1,5 +1,7 @@
 # Сервер и доступ
 
+- [Синхронный ранний импорт папки данных и отдельный поиск CLI](early-data-home-imports.md)
+
 Запуск и юнит, авторизация, переменные машины, сеть.
 
 Схема приложения и двух входов описана в [устройстве единого приложения](../overview/unified-client.md).
@@ -7,6 +9,10 @@
 Читай перед правкой: `server/src/app.ts`, `server/src/plugins`, `server/src/modules/auth`, `bin`, `deploy`.
 
 ## Устройство
+
+- [Сборка и установка сервера, веба и окна одной командой из исходников](ctl-build.md)
+
+- [E0 без baseline: функциональные ворота, cold-порог и явная пометка отчёта](server-binary-smoke-baseline.md)
 
 - [Выбор ELF/R/source и владение preparation в окне](server-binary-desktop.md)
 
@@ -91,6 +97,8 @@
 - [Обновление GrigDesk с независимым ELF: contract 2, readiness и сохранение runtime](deepseek-binary-update.md)
 
 ## Грабли
+
+- [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 
 - [«Встал агент», «упал прогон», «нет лимитов» — один корень: подсеть docker поверх VPN](docker-vpn-subnet-conflict.md)
 - [Ворота VPN проверяют маршрут, а не конкретный клиент](vpn-route-check.md)

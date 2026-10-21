@@ -234,8 +234,11 @@ grigdesk_env_file() {
 
 # Проверка выполняется до чтения TS-модулей и подготовки встроенного runtime.
 # Node 23 не входит в compatibility закреплённого Harness.
+# Явный source проверяет Node разработчика, даже если рядом уже установлен серверный ELF.
 grigdesk_require_node() {
-  grigdesk_select_packaged_node || return $?
+  if [[ "${1:-}" != source ]]; then
+    grigdesk_select_packaged_node || return $?
+  fi
   local actual
   actual=$(grigdesk_node -p 'process.versions.node' 2>/dev/null) || {
     echo "node не найден в PATH" >&2
@@ -373,7 +376,7 @@ grigdesk_load_runtime_env() {
   local output
   local brand_module="${BASH_SOURCE[0]%/*}/../../shared/runtime/legacyBrand.ts"
 
-  grigdesk_require_node || return 1
+  grigdesk_require_node "${2:-}" || return 1
 
   if [[ -n "$_grigdesk_binary_root" ]]; then
     brand_module="$_grigdesk_binary_root/server/runtime/helpers/legacy-brand.mjs"
@@ -433,7 +436,7 @@ grigdesk_require_migrated() {
   local code_root=${1:?корень grigdesk обязателен}
   local helper_root
   helper_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P) || return 1
-  grigdesk_require_node || return 1
+  grigdesk_require_node "${2:-}" || return 1
 
   if [[ -n "$_grigdesk_binary_root" ]]; then
     grigdesk_node "$_grigdesk_binary_root/server/runtime/helpers/data-home-check.mjs" \

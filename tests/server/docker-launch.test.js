@@ -7,6 +7,8 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
+
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -33,7 +35,7 @@ async function fixture(t, { stubNpm = false } = {}) {
   }
   for (const file of ['shared/runtime/dataHome.ts', 'shared/package.json',
     'shared/runtime/legacyBrand.ts',
-    'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts']) {
+    'server/scripts/dataHomeCheck.mts', 'server/src/lib/dataHomeBoot.ts', ...SOURCE_RUNTIME_FILES]) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await copyFile(path.join(root, file), path.join(directory, file));
   }

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+import { appWindowStubs } from './helpers/app-window-stubs.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
@@ -14,6 +16,7 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
       import('../../web/node_modules/vue-router/dist/vue-router.mjs'),
       import('../../web/node_modules/vue/index.mjs'),
       compileModule(webFile('../tests/web/helpers/settings-app.ts'), { stubs: {
+        ...appWindowStubs,
         './shared/asyncView.ts': `
           import { asyncView as realAsyncView } from './src/shared/asyncView.ts';
           export const asyncView = (loader, ...options) => realAsyncView(async () => {
@@ -27,7 +30,7 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
         './stores/shell.ts': `export const useShellStore = () => ({
           initialized: true, present: false, status: 'none', start: async () => {}, stop() {},
         });`,
-        './composables/useSse.ts': 'export const setSseEnabled = () => {};',
+        './composables/useSse.ts': appWindowStubs['./composables/useSse.ts'],
         './views/ConnectionsView.vue': 'export default { render: () => null };',
         './shared/layout/LockOverlay.vue': 'export default { render: () => null };',
         './shared/desktopSettings.ts': 'export const currentDesktopMode = () => "page";',

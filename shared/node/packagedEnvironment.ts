@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { dataHome, dataPath } from '../runtime/dataHome.ts';
-import { userCliPath, type PackagedCliInput } from './userCliPaths.ts';
+import { userCliPath, type PackagedCliInput } from './cliPathOrder.ts';
 
 /**
  * Дети используют Node пользователя, вложенный Node остаётся последним запасным.

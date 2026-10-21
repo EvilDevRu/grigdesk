@@ -140,3 +140,49 @@ test('SEA-ENGINE-02: внешний публикатор профиля полу
     '--publish', '--base-dir', path.join(fixture.temporary, 'routes'), '--expected-catalog-hash', 'null',
   ]);
 });
+
+test('SEA-ENGINE-03: публикатор профиля импортирует собранный набор схемы без server/src', async (t) => {
+  const fixture = await helperFixture(t, ['routes-fixture', 'routes-publish-kit'], [{
+    id: 'routes-fixture',
+    entry: 'tests/server/sea/fixtures/helpers/routes.mts',
+    entryKind: 'main',
+    exports: ['main'],
+    description: 'Проверка набора схемы для внешнего публикатора.',
+  }]);
+  const profile = path.join(fixture.temporary, 'profiles/fixture/routes');
+
+  await mkdir(profile, { recursive: true });
+  await writeFile(path.join(profile, 'publish.mjs'), [
+    "import { pathToFileURL } from 'node:url';",
+    'const file = process.env.GRIGDESK_ROUTES_KIT;',
+    'const kit = await import(pathToFileURL(file).href);',
+    "const catalog = kit.validateCatalog({ schema: 2, profile: 'fixture',",
+    "  routes: { feature: 'a'.repeat(64) }, bootstrap: { file: 'bootstrap/scout.json' } },",
+    "  { profile: 'fixture' });",
+    'console.log(JSON.stringify({ file, profile: catalog.profile, store: typeof kit.RoutesStore }));',
+    '',
+  ].join('\n'));
+
+  const result = await runFile(process.execPath, [fixture.entry('routes-fixture'), fixture.temporary], {
+    cwd: '/',
+    env: { PATH: '/nonexistent' },
+    timeout: 10000,
+  });
+  const responses = JSON.parse(result.stdout) as Array<{
+    status: number;
+    body: {
+      result: {
+        file: string;
+        profile: string;
+        store: string;
+      };
+    };
+  }>;
+
+  assert.equal(responses[0]!.status, 200);
+  assert.deepEqual(responses[0]!.body.result, {
+    file: fixture.entry('routes-publish-kit'),
+    profile: 'fixture',
+    store: 'function',
+  });
+});

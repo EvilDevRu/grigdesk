@@ -18,6 +18,7 @@ import { readDeepSeekArtifact } from '../helpers/deepseekLegacyArtifact.mts';
 import { writeDeepSeekMetadataStub } from '../helpers/deepseekBinaryStub.mts';
 import { ensureTestDeepSeekBinary } from '../helpers/deepseekBinary.mts';
 import { sha256File } from '../../shared/node/hash.ts';
+import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
 
 const publication = await import('../helpers/deepseekLegacyPublication.mts').catch(() => null);
 const exec = promisify(execFile);
@@ -170,7 +171,7 @@ async function cleanCheckout(sourceRoot, root) {
   }
 
   for (const relative of ['server/package.json', 'server/deepseek-host-contract.json',
-    'server/scripts/prepareDeepSeekRuntime.mts']) {
+    'server/scripts/prepareDeepSeekRuntime.mts', ...SOURCE_RUNTIME_FILES]) {
     await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
     await fs.copyFile(path.join(sourceRoot, relative), path.join(root, relative));
   }

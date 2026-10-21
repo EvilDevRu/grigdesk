@@ -73,6 +73,12 @@ const routes = [
   { path: '/github', name: 'github', component: () => import('./views/GitHubView.vue'), meta: { title: 'GitHub' } },
   { path: '/telegram', name: 'telegram', component: () => import('./views/TelegramView.vue'), meta: { title: 'Телеграм' } },
   {
+    path: '/surface',
+    name: 'surface',
+    component: { render: () => null },
+    meta: { title: 'Карточка задачи' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: SettingsRouteStub,

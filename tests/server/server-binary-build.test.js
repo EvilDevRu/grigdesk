@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeBinaryBuild, parseBuildArgs } from '../../server/scripts/binary/buildSteps.mts';
+import { runBinarySmoke } from '../../server/scripts/binary/smoke.mts';
 import { createServerManifest } from '../../server/src/binary/metadata.ts';
 import { sha256 } from '../../shared/node/hash.ts';
 
@@ -137,4 +138,177 @@ test('SB22: публикация после smoke выдаёт SHA/size/packageI
     ['extract', 'prepare', 'bundle', 'package', 'blob', 'copy', 'postject', 'smoke']);
   assert.deepEqual(JSON.parse(await readFile(path.join(input.options.outDir, 'build-result.json'), 'utf8')),
     result);
+});
+
+/**
+ * Порты заменяют процессы, но реальный smoke выбирает baseline и проверяет свои ворота.
+ * Builder публикует тот же отчёт и ELF, поэтому тест видит сквозной контракт build-result.
+ */
+function smokeHarness(input, options = {}) {
+  const events = [];
+  const reportFile = path.join(input.root, 'e0.json');
+  const warm = options.warm ?? [100, 100, 100];
+  let candidateStarts = 0;
+  let baselineStarts = 0;
+  const record = (phase) => {
+    events.push(phase);
+
+    if (phase === options.failure) {
+      throw new Error(`fixture ${phase} failed`);
+    }
+  };
+  const ports = {
+    probe: async (_binary, settings) => {
+      record('metadata');
+      assert.equal(settings.expectPackageId, input.manifest.packageId);
+
+      return { packageId: input.manifest.packageId };
+    },
+    prepare: async (_binary, settings) => {
+      record('prepare');
+      assert.equal(settings.expectPackageId, input.manifest.packageId);
+
+      return { preparationToken: 'fixture-token' };
+    },
+    verify: async (_binary, settings) => {
+      record('verify');
+      assert.equal(settings.expectPackageId, input.manifest.packageId);
+      assert.equal(settings.timeoutMs, 120000);
+
+      return { elfSha256: sha256('new-ELF') };
+    },
+    boot: async (settings) => {
+      if (!settings.packageId) {
+        record('baseline');
+        baselineStarts += 1;
+
+        return 100;
+      }
+
+      if (settings.ipc) {
+        record('ipc');
+        assert.equal(settings.preparationToken, 'fixture-token');
+
+        return 90;
+      }
+
+      candidateStarts += 1;
+
+      if (candidateStarts === 1) {
+        record('cold');
+
+        return options.coldMs ?? 100;
+      }
+
+      record('warm');
+
+      return warm[candidateStarts - 2];
+    },
+  };
+
+  input.steps.smoke = (binary, manifest) => runBinarySmoke({
+    binary,
+    manifest,
+    cacheDir: input.options.cacheDir,
+    reportFile,
+  }, ports);
+
+  return {
+    events,
+    reportFile,
+    baselineStarts: () => baselineStarts,
+  };
+}
+
+/**
+ * Только существующий каталог baseline включает сравнение тёплых стартов.
+ * Маленький файл не запускается: boot подменён портом с заданными измерениями.
+ */
+async function putBaseline(input) {
+  const binary = path.join(input.options.cacheDir, 'baseline-release/server/grigdesk-server');
+
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(binary, 'baseline');
+}
+
+test('SB22-E0: без baseline проходит полный smoke, отчёт и build-result явно помечают ratio', async (t) => {
+  const input = await fixture(t);
+  const harness = smokeHarness(input);
+  const result = await executeBinaryBuild(input.options, input.steps);
+  const report = JSON.parse(await readFile(harness.reportFile, 'utf8'));
+  const stored = JSON.parse(await readFile(path.join(input.options.outDir, 'build-result.json'), 'utf8'));
+
+  assert.equal(result.warmRatioNote, 'warm ratio не измерялся: нет baseline');
+  assert.equal(result.warmRatio, null);
+  assert.equal(result.warmP95Ratio, null);
+  assert.equal(report.warmRatioNote, result.warmRatioNote);
+  assert.equal(report.warmRatio, null);
+  assert.equal(report.warmP95Ratio, null);
+  assert.equal(report.coldMs, 100);
+  assert.deepEqual(report.warm, []);
+  assert.deepEqual(report.baseline, []);
+  assert.deepEqual(stored, result);
+  assert.deepEqual(harness.events, ['metadata', 'cold', 'prepare', 'ipc', 'verify']);
+});
+
+test('SB22-E0: без baseline холодный старт всё ещё ограничен 30 секундами', async (t) => {
+  const input = await fixture(t);
+
+  smokeHarness(input, { coldMs: 30001 });
+  await assert.rejects(executeBinaryBuild(input.options, input.steps), /cold API/);
+  assert.equal(await readFile(input.target, 'utf8'), 'previous');
+});
+
+test('SB22-E0: без baseline отказ любой функциональной проверки запрещает публикацию', async (t) => {
+  for (const failure of ['metadata', 'cold', 'prepare', 'ipc', 'verify']) {
+    const input = await fixture(t);
+
+    smokeHarness(input, { failure });
+    await assert.rejects(executeBinaryBuild(input.options, input.steps), /fixture.*failed/, failure);
+    assert.equal(await readFile(input.target, 'utf8'), 'previous');
+    assert.equal(await readFile(path.join(input.options.outDir, 'build-result.json'), 'utf8'),
+      'previous-result');
+  }
+});
+
+test('SB22-E0: существующий baseline сохраняет пары замеров и пороги median/p95', async (t) => {
+  const input = await fixture(t);
+  const harness = smokeHarness(input, { warm: [200, 200, 200] });
+
+  await putBaseline(input);
+
+  const result = await executeBinaryBuild(input.options, input.steps);
+  const report = JSON.parse(await readFile(harness.reportFile, 'utf8'));
+
+  assert.equal(result.warmRatio, 2);
+  assert.equal(result.warmP95Ratio, 2);
+  assert.equal(result.warmRatioNote, null);
+  assert.equal(report.warmRatio, 2);
+  assert.equal(report.warmP95Ratio, 2);
+  assert.equal(report.warmRatioNote, null);
+  assert.deepEqual(report.warm, [200, 200, 200]);
+  assert.deepEqual(report.baseline, [100, 100, 100]);
+  assert.equal(harness.baselineStarts(), 4);
+  assert.deepEqual(harness.events.slice(5),
+    ['baseline', 'baseline', 'warm', 'baseline', 'warm', 'baseline', 'warm']);
+});
+
+test('SB22-E0: при baseline превышение median или p95 останавливает сборку', async (t) => {
+  for (const warm of [[201, 201, 201], [100, 100, 300]]) {
+    const input = await fixture(t);
+
+    smokeHarness(input, { warm });
+    await putBaseline(input);
+    await assert.rejects(executeBinaryBuild(input.options, input.steps), /warm.*ratio/);
+    assert.equal(await readFile(input.target, 'utf8'), 'previous');
+  }
+});
+
+test('SB22-E0: неполный явно существующий baseline не считается отсутствующим', async (t) => {
+  const input = await fixture(t);
+  const harness = smokeHarness(input);
+
+  await mkdir(path.join(input.options.cacheDir, 'baseline-release'));
+  await assert.rejects(executeBinaryBuild(input.options, input.steps), /ENOENT/);
+  assert.deepEqual(harness.events, []);
 });

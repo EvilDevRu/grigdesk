@@ -115,8 +115,10 @@ ZIP adapter и `fflate`; библиотека остаётся exact devDependen
 офлайн собственным Node и заголовками поставки и проверяются отдельными процессами.
 
 Сборщику заранее передают архив pinned Node с SHA из `server/build/node-runtime.json`
-в cache и отдельную копию старого R в `cache/baseline-release`. Runtime/dependencies не
-скачиваются при запуске готового сервера. Пример отдельных каталогов сборки:
+в cache. Отдельная копия старого R в `cache/baseline-release` включает сравнение тёплого
+старта; без неё E0 сохраняет функциональные проверки и cold-порог, а E0/build-result
+явно отмечают отсутствие ratio. [Контракт baseline](server-binary-smoke-baseline.md).
+Runtime/dependencies не скачиваются при запуске готового сервера. Пример отдельных каталогов сборки:
 
 ```sh
 npm --prefix server run build:binary -- \

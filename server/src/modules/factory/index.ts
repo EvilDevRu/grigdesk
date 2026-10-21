@@ -55,6 +55,7 @@ import {
 import { listInstalledRunners } from '../../lib/runnersCatalog.ts';
 import { loadRunnerConfig, resolveProjectRunnerState } from '../../lib/runnerState.ts';
 import { parseSandboxRepositories } from '../../lib/sandboxEnv.ts';
+import { restoreTaskStand } from '../../lib/factoryStandRestore.ts';
 import { parsePipeline } from '../../lib/pipelineParse.ts';
 import { archiveTaskFiles } from '../../lib/taskArtifacts.ts';
 import {
@@ -75,7 +76,7 @@ import type { FactoryStateAdapter } from '../../adapters/factoryState.ts';
 import type { ArbiterCardsStore } from '../../lib/arbiterCards.ts';
 import type { FactoryArbiterLive } from '../../lib/factoryArbiterLive.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
-import type { RouteConfig } from '../../lib/factoryRouteCli.ts';
+import type { RouteConfig, RouteFailure } from '../../lib/factoryRouteCli.ts';
 import type {
   LaunchConfig,
   NormalizedLaunchInputs,
@@ -944,12 +945,44 @@ async function factoryModule(
    * профиля, тикет) в первых секундах и выходит кодом 75/78, а `systemd-run` к тому
    * моменту давно вернул 0. Поэтому запуск ПОДТВЕРЖДАЕМ и причину берём из журнала
    * этапов — только то, что дописано после нашего запуска, без чужих строк.
+   *
+   * Стенд задачи поднимаем ДО движка: после перезагрузки машины процессов стенда нет,
+   * а движок на resume их только проверяет и выходит кодом 73. Владелец стенда берётся
+   * из закреплённой попытки — общий стенд GrigDesk не запускает.
    */
-  async function resumeRouteAttempt(id: string, { profile, attempt, why }: {
+  async function resumeRouteAttempt(id: string, { profile, attempt, why, standOwnership }: {
     profile: string;
     attempt: string;
     why: string;
+    standOwnership: string;
   }) {
+    const stand = await restoreTaskStand(config, {
+      profile,
+      task: id,
+      standOwnership,
+    });
+
+    if (!stand.ok) {
+      const failure: RouteFailure = {
+        error: 'stand_unavailable',
+        message: stand.message,
+      };
+
+      fastify.log.warn(
+        { task: id, err: stand.message },
+        `route resume ${why}: стенд не поднялся — прогон стоит`,
+      );
+
+      return {
+        ok: false,
+        message: stand.message,
+        failure,
+      };
+    }
+    if (stand.outcome === 'started') {
+      fastify.log.info({ task: id }, `route resume ${why}: стенд задачи был остановлен — поднят заново`);
+    }
+
     const stagesLog = path.join(config.stateDir, 'logs', `t${id}.stages.log`);
     const from = await logLength(stagesLog);
     const launch = await spawnRouteEngine(config, {
@@ -1941,7 +1974,12 @@ async function factoryModule(
         return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
       }
 
-      const resumed = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'после ворот' });
+      const resumed = await resumeRouteAttempt(id, {
+        profile: trusted.profile,
+        attempt,
+        why: 'после ворот',
+        standOwnership: trusted.standOwnership,
+      });
 
       return {
         ok: true,
@@ -2002,7 +2040,10 @@ async function factoryModule(
       }
 
       const resumed = await resumeRouteAttempt(id, {
-        profile: trusted.profile, attempt: trusted.attempt, why: 'после возврата',
+        profile: trusted.profile,
+        attempt: trusted.attempt,
+        why: 'после возврата',
+        standOwnership: trusted.standOwnership,
       });
 
       return {
@@ -2220,7 +2261,10 @@ async function factoryModule(
       }
 
       const resumed = await resumeRouteAttempt(id, {
-        profile: trusted.profile, attempt: trusted.attempt, why: 'после арбитража',
+        profile: trusted.profile,
+        attempt: trusted.attempt,
+        why: 'после арбитража',
+        standOwnership: trusted.standOwnership,
       });
       // Снятый тупик тоже объясняется человеку: он увидит на схеме возврат курсора и обязан
       // понимать, кто и почему его сделал, — иначе машинное решение неотличимо от сбоя.
@@ -2698,7 +2742,12 @@ async function factoryModule(
       return reply.code(409).send({ error: 'attempt_terminal', message: `попытка закрыта (${trusted.terminal}) — продолжать нечего` });
     }
     const attempt = trusted.attempt;
-    const launch = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'по кнопке' });
+    const launch = await resumeRouteAttempt(id, {
+      profile: trusted.profile,
+      attempt,
+      why: 'по кнопке',
+      standOwnership: trusted.standOwnership,
+    });
     if (!launch.ok) {
       return reply.code(500).send({
         error: launch.failure?.error || 'resume_failed',

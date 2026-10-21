@@ -1,5 +1,6 @@
 <template>
-  <UiDialog
+  <TaskCardFrame
+    :presentation="presentation"
     :open="Boolean(taskId)"
     data-role="task-modal"
     size="workspace"
@@ -670,8 +671,9 @@
               :tone="running ? 'warning' : 'accent'"
               variant="outline"
               :loading="busy === 'timer'"
-              :disabled="busy === 'timer'"
+              :disabled="busy === 'timer' || timerStartBlocked"
               loading-label="Обновляю учёт времени"
+              v-tooltip="timerStartBlocked ? 'Задача завершена — сначала возобновите её' : null"
               @click="toggleTimer"
             >
               {{ running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
@@ -710,6 +712,19 @@
               🏭 На конвейер
             </UiButton>
             <UiButton
+              v-if="completed"
+              data-context="task-footer-action"
+              tone="success"
+              variant="solid"
+              :loading="busy === 'renew'"
+              :disabled="busy === 'renew'"
+              loading-label="Возобновляю задачу"
+              @click="renew"
+            >
+              ↺ Возобновить
+            </UiButton>
+            <UiButton
+              v-else
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -945,7 +960,7 @@
           <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
       </footer>
-  </UiDialog>
+  </TaskCardFrame>
 </template>
 
 <script setup>
@@ -953,13 +968,15 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/apiClient.ts';
+import { shellAction } from '../shared/shellClient.ts';
+import { leaveTaskForPipeline } from '../shared/taskWindowNavigation.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import {
   confirmDialog,
+  showToast,
   UiButton,
   UiPopover,
   UiChoiceList,
-  UiDialog,
   UiDisclosureButton,
   UiField,
   UiFilePicker,
@@ -989,7 +1006,14 @@ import { liveTimerSec, mmss, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
+import TaskCardFrame from './TaskCardFrame.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
+
+const props = defineProps({
+  presentation: { type: String, default: 'dialog' },
+});
+
+const COMPLETED_STATUS = 5;
 
 const router = useRouter();
 
@@ -1027,6 +1051,8 @@ function taskContextDetails(id) {
   return { taskId: String(id), ...(title ? { title } : {}) };
 }
 const running = computed(() => !!boardTask.value?.timerRunning);
+const completed = computed(() => detail.value?.status === COMPLETED_STATUS);
+const timerStartBlocked = computed(() => completed.value && !running.value);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
 const taskProject = computed(() => detail.value?.group_name || boardTask.value?.group || '');
@@ -1610,7 +1636,24 @@ async function loadConveyor() {
     }
   } catch { /* графа нет — кнопку сноса просто не покажем */ }
 }
-function openConveyor() { ui.close(); router.push('/pipeline'); }
+/**
+ * Карточка документа ждёт подтверждения перехода в главном окне, сохраняя контекст при отказе.
+ * Диалог продолжает использовать маршрут своего документа и прежний порядок закрытия.
+ */
+function openConveyor() {
+  return leaveTaskForPipeline({
+    document: props.presentation === 'document',
+    send: () => shellAction('POST', '/surfaces/main', { destination: 'pipeline' },
+      AbortSignal.timeout(20000)),
+    route: () => router.push('/pipeline'),
+    close: () => ui.close(),
+    failure: () => showToast({
+      id: 'task-window-pipeline',
+      title: 'Не удалось открыть конвейер. Повторите переход.',
+      tone: 'warning',
+    }),
+  });
+}
 
 // Снести стенд, не уходя в конвейер: стенд убирают из карточки, и возвращаться
 // на страницу конвейера ради одной кнопки незачем. Снос идёт до пары минут
@@ -1645,6 +1688,20 @@ async function act(name, fn) {
 }
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.value ? 'pause' : 'start'));
 const complete = async () => { if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
+
+// Возобновление не возвращает детали задачи: после подтверждения перечитываем их.
+// Статус и доступные действия определяет портал, а ошибки остаются в карточке.
+async function renew() {
+  if (!(await confirmDialog('Возобновить задачу?', { okText: 'Возобновить' }))) {
+    return;
+  }
+
+  await act('renew', async () => {
+    await tasks.renew(taskId.value);
+    await loadDetail(true);
+  });
+}
+
 const launchMsg = ref(null);
 
 // ── Запуск на конвейер ──

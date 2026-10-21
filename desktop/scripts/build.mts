@@ -33,6 +33,15 @@ async function buildDesktop(): Promise<void> {
       format: 'cjs',
       target: 'node24',
       external: ['electron'],
+      // Импортируемые CLI-модули проверяют свой URL до запуска главного процесса.
+      // В CommonJS он должен указывать на готовый файл, а не исчезать при сборке.
+      define: { 'import.meta.url': 'grigdeskBundleUrl' },
+      banner: {
+        js: [
+          "'use strict';",
+          "const grigdeskBundleUrl = require('node:url').pathToFileURL(__filename).href;",
+        ].join('\n'),
+      },
     });
     // Окно получает заранее сглаженный растр: уменьшение упаковочной иконки 512 px
     // самой панелью задач теряет сглаживание и делает края букв зубчатыми.

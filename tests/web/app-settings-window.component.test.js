@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { appWindowStubs } from './helpers/app-window-stubs.js';
+
 import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
@@ -22,15 +24,18 @@ const { mount, flushPromises } = await import(
  * App получает независимые подмены областей, чтобы видеть запуск каждого polling.
  * Подмена режима меняется после mount и проверяет однократный выбор оболочки.
  */
-async function fixture(t, mode, authenticated, present = false) {
+async function fixture(t, mode, authenticated, present = false, options = {}) {
   const h = {
     mode,
     calls: [],
+    relays: [],
+    channels: [],
     auth: reactive({ ready: true, authenticated }),
     shell: reactive({
       initialized: true,
       present,
-      status: 'none',
+      status: present ? 'online' : 'none',
+      refresh: async () => h.calls.push('shell.refresh'),
       start: async (options) => h.startOptions = options,
       stop: () => {},
     }),
@@ -47,7 +52,42 @@ async function fixture(t, mode, authenticated, present = false) {
     clear: () => { },
     stopPoll: () => { },
   };
+  h.store.$onAction = () => () => {};
+  h.store.setMirror = () => {};
+  h.store.applySnapshot = () => {};
+  h.shelfStore = {
+    ...h.store,
+    setPassive(value) {
+      h.passive = value;
+      h.calls.push('shelf.passive:' + value);
+    },
+    async load() {
+      h.calls.push('shelf.load');
+    },
+  };
+  h.loadPlugins = async () => {
+    h.calls.push('plugins.load');
+    await options.pluginsReady;
+  };
   globalThis.__settingsApp = h;
+
+  const previousChannel = globalThis.BroadcastChannel;
+
+  globalThis.BroadcastChannel = class {
+    constructor(name) {
+      this.name = name;
+      h.channels.push(this);
+    }
+
+    postMessage() {}
+
+    close() {
+      this.closed = true;
+    }
+  };
+  t.after(() => {
+    globalThis.BroadcastChannel = previousChannel;
+  });
 
   const marker = (name) => `import { h } from 'vue';
     export const __esModule = true;
@@ -55,6 +95,27 @@ async function fixture(t, mode, authenticated, present = false) {
       return () => h('div', { 'data-app': '${name}' }, slots.default?.());
     }};`;
   const stubs = {
+    ...appWindowStubs,
+    './views/TaskWindowPage.vue': `import { h } from 'vue';
+      export default {
+        props: ['target', 'ready'],
+        setup: (props) => () => h('div', {
+          'data-app': 'surface',
+          'data-task-id': props.target?.id,
+          'data-ready': String(props.ready),
+        }),
+      };`,
+    './stores/plugins.js': 'export const usePluginsStore = () => globalThis.__settingsApp.plugins;',
+    './shared/windowRelay.ts': `
+      export const startShellRelay = (options) => {
+        globalThis.__settingsApp.relays.push('shell:' + options.role);
+        return () => options.channel.close();
+      };
+      export const startBoardRelay = (options) => {
+        globalThis.__settingsApp.relays.push('board:' + options.role);
+        return () => options.channel.close();
+      };
+      export const startShelfRelay = (options) => () => options.channel.close();`,
     './stores/settings.ts': `export const useSettingsStore = () => ({
       isOpen: false, setAuthenticated() {}, dispose() {},
     });`,
@@ -94,17 +155,33 @@ async function fixture(t, mode, authenticated, present = false) {
     stubs['./stores/' + file] = `export const ${name} = () => globalThis.__settingsApp.store;`;
   }
 
+  h.plugins = { load: h.loadPlugins, enabled: () => true };
+  stubs['./stores/taskShelf.ts'] =
+    'export const useTaskShelfStore = () => globalThis.__settingsApp.shelfStore;';
+
   const component = await compileVue(webFile('src/App.vue'), { stubs });
   const wrapper = mount(component, { global: { stubs: { RouterView: true } } });
 
+  let mounted = true;
+  const unmount = () => {
+    if (mounted) {
+      wrapper.unmount();
+      mounted = false;
+    }
+  };
+
   t.after(() => {
-    wrapper.unmount();
+    unmount();
     delete globalThis.__settingsApp;
   });
   await flushPromises();
   await flushPromises();
 
-  return { h, wrapper };
+  return {
+    h,
+    wrapper,
+    unmount,
+  };
 }
 
 for (const mode of ['main', 'page']) {
@@ -125,3 +202,139 @@ for (const mode of ['main', 'page']) {
     assert.deepEqual(h.calls, ['auth.watch', 'auth.load']);
   });
 }
+
+test('SP-01: документ карточки без AppShell и без системного polling', async (t) => {
+  browser.location.href = 'http://127.0.0.1:8140/?surface=task&id=42#/surface';
+  t.after(() => {
+    browser.location.href = 'http://127.0.0.1:8140/';
+  });
+
+  const { h, wrapper } = await fixture(t, 'surface', true);
+
+  assert.equal(wrapper.find('[data-app=main]').exists(), false);
+  assert.equal(wrapper.find('[data-app=surface]').attributes('data-task-id'), '42');
+  assert.equal(h.calls.includes('poll'), false);
+  assert.equal(h.passive, true);
+  assert.equal(h.calls.indexOf('shelf.passive:true') < h.calls.indexOf('shelf.load'), true);
+  assert.equal(h.calls.indexOf('shelf.passive:true') < h.calls.indexOf('plugins.load'), true);
+  assert.equal(h.calls.includes('plugins.load'), true);
+  assert.equal(h.calls.includes('shelf'), false);
+  assert.equal(h.calls.filter((call) => call === 'shelf.load').length, 1);
+  browser.location.href = 'http://127.0.0.1:8140/';
+});
+
+test('SP-02: старый каталог не запускает полку после выхода или размонтирования', async (t) => {
+  for (const transition of ['logout', 'unmount', 'reauth']) {
+    await t.test(transition, async (t) => {
+      browser.location.href = 'http://127.0.0.1:8140/?surface=task&id=42#/surface';
+      t.after(() => {
+        browser.location.href = 'http://127.0.0.1:8140/';
+      });
+
+      const ready = Promise.withResolvers();
+      const { h, unmount } = await fixture(t, 'surface', true, false, {
+        pluginsReady: ready.promise,
+      });
+
+      assert.equal(h.calls.includes('plugins.load'), true);
+      assert.equal(h.calls.includes('shelf.load'), false);
+
+      if (transition === 'unmount') {
+        unmount();
+      }
+      else {
+        h.auth.authenticated = false;
+        await flushPromises();
+
+        if (transition === 'reauth') {
+          h.auth.authenticated = true;
+          await flushPromises();
+          assert.equal(h.calls.filter((call) => call === 'plugins.load').length, 2);
+        }
+      }
+
+      ready.resolve();
+      await flushPromises();
+      await flushPromises();
+      assert.equal(
+        h.calls.filter((call) => call === 'shelf.load').length,
+        transition === 'reauth' ? 1 : 0,
+      );
+    });
+  }
+});
+
+test('SP-03: окно карточки не держит long-poll и слушает ретрансляцию оболочки', async (t) => {
+  browser.location.href = 'http://127.0.0.1:8140/?surface=task&id=42#/surface';
+  t.after(() => {
+    browser.location.href = 'http://127.0.0.1:8140/';
+  });
+
+  const { h } = await fixture(t, 'surface', true);
+
+  assert.deepEqual(h.startOptions, { poll: false });
+  assert.deepEqual(h.relays.filter((name) => name.startsWith('shell:')), ['shell:mirror']);
+});
+test('SP-04: главное окно держит long-poll и ретранслирует оболочку', async (t) => {
+  const { h } = await fixture(t, 'main', true);
+
+  assert.equal(h.startOptions, undefined);
+  assert.deepEqual(h.relays.filter((name) => name.startsWith('shell:')), ['shell:source']);
+});
+test('SP-05: браузер и Android не создают межоконных каналов', async (t) => {
+  const { h } = await fixture(t, 'page', true);
+
+  assert.equal(h.startOptions, undefined);
+  assert.deepEqual(h.relays, []);
+  assert.deepEqual(h.channels, []);
+  assert.equal(h.passive, undefined);
+});
+
+test('SP-06: окно карточки получает доску снимком и не опрашивает дашборд', async (t) => {
+  browser.location.href = 'http://127.0.0.1:8140/?surface=task&id=42#/surface';
+  t.after(() => {
+    browser.location.href = 'http://127.0.0.1:8140/';
+  });
+
+  const { h } = await fixture(t, 'surface', true);
+
+  assert.equal(h.calls.filter((call) => call === 'seen').length, 1);
+  assert.deepEqual(h.relays.filter((name) => name.startsWith('board:')), ['board:mirror']);
+});
+test('SP-07: главное окно — источник снимка доски', async (t) => {
+  const { h } = await fixture(t, 'main', true);
+
+  assert.deepEqual(h.relays.filter((name) => name.startsWith('board:')), ['board:source']);
+});
+test('SP-08: карточка монтируется только после запуска синхронизации', async (t) => {
+  browser.location.href = 'http://127.0.0.1:8140/?surface=task&id=42#/surface';
+  t.after(() => {
+    browser.location.href = 'http://127.0.0.1:8140/';
+  });
+
+  const { h, wrapper } = await fixture(t, 'surface', false, true);
+  const page = () => wrapper.find('[data-app=surface]');
+
+  assert.equal(page().attributes('data-ready'), 'false');
+  assert.deepEqual(h.relays.filter((name) => name.startsWith('board:')), []);
+  h.auth.authenticated = true;
+  await flushPromises();
+  assert.equal(page().attributes('data-ready'), 'true');
+  assert.deepEqual(h.relays.filter((name) => name.startsWith('board:')), ['board:mirror']);
+
+  const element = page().element;
+
+  h.auth.authenticated = false;
+  await flushPromises();
+  assert.equal(page().element, element);
+  assert.equal(page().attributes('data-ready'), 'true');
+  assert.equal(h.passive, true);
+  h.auth.authenticated = true;
+  await flushPromises();
+  assert.equal(page().element, element);
+  assert.equal(page().attributes('data-ready'), 'true');
+  assert.equal(h.passive, true);
+});
+
+
+test.after(() => browser.close());

@@ -47,6 +47,8 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   return [
     ...imports,
     ...dialogStub,
+    `export { useUiLayer } from ${JSON.stringify(webFile('src/composables/useUiLayer.ts'))};`,
+    `export const showToast = (...args) => globalThis.${prefix}ShowToast?.(...args);`,
     `export { ${names} };`,
     `export const confirmDialog = (...args) => {`,
     `  const handler = globalThis.${prefix}ConfirmDialog;`,
@@ -95,7 +97,9 @@ function favoriteButtonStub(prefix) {
 export function compileTaskModal(prefix, { stubDialog = false } = {}) {
   return compileVue(TASK_MODAL_PATH, {
     stubs: {
-      'vue-router': 'export const useRouter = () => ({ push() {} });',
+      'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
+      '../shared/shellClient.ts':
+        `export const shellAction = (...args) => globalThis.${prefix}ShellAction?.(...args);`,
       '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
       '../composables/useUiContextSource.ts': contextSourceStub(prefix),
       '../stores/ui.js': `export const useUiStore = globalThis.${prefix}UiStore;`,

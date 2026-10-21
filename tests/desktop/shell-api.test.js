@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import http from 'node:http';
+import { Readable } from 'node:stream';
 import { normalizeSettings } from '../../desktop/src/settings.ts';
 import { Profiles } from '../../desktop/src/profiles.ts';
 import { createShellApi } from '../../desktop/src/pipe/shellApi.ts';
@@ -9,7 +10,7 @@ import { createShellApi } from '../../desktop/src/pipe/shellApi.ts';
  * Время повторов управляется очередью, а транспорт даёт явные состояния без сети.
  * Никакие таймеры и случайные порты этой проверки не относятся к живому GrigDesk.
  */
-function fixture() {
+function fixture(overrides = {}) {
   const settings = normalizeSettings({
     version: 1,
     connection: { kind: 'local', origin: 'http://127.0.0.1:12345' },
@@ -27,6 +28,7 @@ function fixture() {
   let paired;
   const addresses = [];
   const shell = createShellApi({
+    ...overrides,
     profiles,
     pairing: { addByPairing: async () => paired },
     localAvailable: () => available,
@@ -238,4 +240,106 @@ test('R4: повторная привязка текущего профиля п
 
   assert.equal(response.status, 200);
   assert.deepEqual(value.addresses, ['http://127.0.0.1:12345', 'http://127.0.0.1:23456']);
+});
+
+/**
+ * Проверка shell-ветки не подменяет pipe security: он уже покрыт соседним файлом.
+ * Поток тела и JSON-ответ остаются реальными контрактами Node HTTP.
+ */
+async function invokeSurface(shell, path, body) {
+  const request = Readable.from([JSON.stringify(body)]);
+
+  request.method = 'POST';
+  request.url = path;
+  request.headers = { host: '127.0.0.1:47101' };
+
+  let status;
+  let result;
+  const response = {
+    headersSent: false,
+    writeHead(value) {
+      status = value;
+      this.headersSent = true;
+    },
+    end(value) {
+      result = JSON.parse(value);
+    },
+  };
+
+  await shell.handle(request, response);
+
+  return { status, result };
+}
+
+test('SA-01: capability и закрытые действия поверхностей', async (t) => {
+  const calls = [];
+  let opened = true;
+  const f = fixture({
+    nativeWindows: {
+      async open(origin, target) {
+        calls.push({ origin, target });
+
+        return opened;
+      },
+      async main(origin, destination) {
+        calls.push({ origin, destination });
+
+        return opened;
+      },
+    },
+  });
+
+  t.after(() => f.shell.close());
+  assert.deepEqual(f.shell.state().capabilities, ['windows']);
+  assert.deepEqual(await invokeSurface(f.shell, '/__shell/surfaces/open', {
+    kind: 'task', id: '42',
+  }), { status: 200, result: { opened: true } });
+  assert.deepEqual(calls[0], {
+    origin: 'http://127.0.0.1:47101', target: { kind: 'task', id: '42' },
+  });
+  assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/main', {
+    destination: 'pipeline',
+  })).result.opened, true);
+  assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/main', {
+    destination: 'task-dialog', target: { kind: 'task', id: '43' },
+  })).result.opened, true);
+
+  for (const body of [
+    {
+      kind: 'task', 
+      id: '42', 
+      url: 'https://example.org'
+    },
+    { kind: 'code', id: '42' }, { kind: 'task', id: '../42' },
+    {
+      kind: 'task',
+      id: '42',
+      options: {},
+    },
+    { kind: 'task', id: 42 },
+  ]) {
+    assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/open', body)).status, 400);
+  }
+
+  assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/main', {
+    destination: 'pipeline', script: 'arbitrary',
+  })).status, 400);
+  assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/main', {
+    destination: 'unknown',
+  })).status, 400);
+  assert.equal(calls.length, 3);
+  opened = false;
+  assert.deepEqual(await invokeSurface(f.shell, '/__shell/surfaces/open', {
+    kind: 'task', id: '44',
+  }), { status: 200, result: { opened: false } });
+  f.shell.close();
+});
+test('SA-02: без адаптера новая возможность отсутствует', async () => {
+  const f = fixture();
+
+  assert.deepEqual(f.shell.state().capabilities, []);
+  assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/open', {
+    kind: 'task', id: '42',
+  })).status, 404);
+  f.shell.close();
 });

@@ -33,9 +33,11 @@ export async function readShellState(rev?: number, signal?: AbortSignal): Promis
  * Все действия оболочки используют same-origin и общий секрет cookie.
  * Повтор мутаций не допускается: человек может повторить действие после явной ошибки.
  */
-export async function shellAction(method: string, path: string, body?: unknown): Promise<unknown> {
+export async function shellAction(method: string, path: string, body?: unknown, signal?: AbortSignal,
+): Promise<unknown> {
   const response = await fetch(`/__shell${path}`, {
     method,
+    signal,
     credentials: 'same-origin',
     ...(body === undefined ? {} : {
       headers: { 'Content-Type': 'application/json' },

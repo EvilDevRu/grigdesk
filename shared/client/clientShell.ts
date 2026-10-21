@@ -30,7 +30,7 @@ export interface ShellState {
   localAvailable: boolean;
   serverApi: ApiVersion | null;
   appApi: ApiVersion;
-  capabilities: ('scan' | 'save' | 'unlock')[];
+  capabilities: ('scan' | 'save' | 'unlock' | 'windows')[];
 }
 
 export const RELEASES_URL = '';

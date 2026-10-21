@@ -47,6 +47,19 @@
       "description": "Библиотечные exports прежнего shell-контракта имён."
     },
     {
+      "id": "routes-publish-kit",
+      "entry": "server/src/modules/routes/publishKit.ts",
+      "entryKind": "library",
+      "exports": [
+        "RoutesStore",
+        "validateBootstrap",
+        "validateCatalog",
+        "validatePromptFiles",
+        "validateRoute"
+      ],
+      "description": "Схема и хранилище маршрутов для скриптов публикации профилей."
+    },
+    {
       "id": "engine-runtime-usage",
       "entry": "engine/lib/runtime-usage.mjs",
       "entryKind": "script",

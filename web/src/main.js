@@ -1,12 +1,15 @@
 import './shared/legacyStorage.ts';
 import { bootstrapUiLocale } from './shared/uiLocale.ts';
-import { createApp } from 'vue';
+import { createApp, nextTick } from 'vue';
 import { createPinia } from 'pinia';
 import { router } from './router.js';
 import { useDeviceStore } from './stores/device.js';
 import { useAuthStore } from './stores/auth.js';
 import { api, isReportedApiError, setApiLogSink } from './shared/apiClient.ts';
-import { setSseLogSink } from './composables/useSse.ts';
+import { setSseLogSink, configureSseRelay } from './composables/useSse.ts';
+import { currentDesktopMode } from './shared/desktopSettings.ts';
+import { parseMainRequest } from '../../shared/desktop/surfaceContract.ts';
+import { useUiStore } from './stores/ui.js';
 import { createWebLogRuntime } from './shared/webLogRuntime.ts';
 import { getUiLayerDiagnostics, subscribeUiLayerDiagnostics, setUiDownloadAdapter } from './ui.ts';
 import { canSaveInShell, saveLinkedFile } from './shared/saveFile.ts';
@@ -23,6 +26,14 @@ import { installAppViewport } from './shared/appViewport.ts';
 import './styles/index.css';
 // Системные плагины веба регистрируют свои размещения в слотах до первой отрисовки.
 import './plugins/index.ts';
+
+const SSE_RELAY_ROLES = {
+  main: 'source',
+  surface: 'mirror',
+  page: 'off',
+};
+
+configureSseRelay(SSE_RELAY_ROLES[currentDesktopMode()]);
 
 const pinia = createPinia();
 const app = createApp(App);
@@ -84,6 +95,60 @@ const removeBackAction = installBackAction(router, () => {
 });
 const removeAppViewport = installAppViewport();
 
+/**
+ * Native передаёт только закрытое назначение в текущий авторизованный main.
+ * Подтверждение ждёт загрузки маршрута, чтобы карточка не закрылась раньше перехода.
+ */
+function installSurfaceMainHandler() {
+  if (currentDesktopMode() !== 'main') {
+    return () => {};
+  }
+
+  const allowed = () => {
+    const auth = useAuthStore(pinia);
+    const shell = useShellStore(pinia);
+
+    return auth.ready && auth.authenticated && shell.initialized && shell.present
+      && shell.status === 'online' && shell.capabilities.includes('windows');
+  };
+  /**
+   * Обработчик отвечает после завершения перехода и повторной проверки доступа.
+   * Отказ маршрута сохраняет открытый документ карточки и его черновик.
+   */
+  const handler = async (value) => {
+    const request = parseMainRequest(value);
+
+    if (!request || !allowed()) {
+      return false;
+    }
+
+    try {
+      if (request.destination === 'pipeline') {
+        await router.push('/pipeline');
+
+        return allowed() && router.currentRoute.value.path === '/pipeline';
+      }
+
+      useUiStore(pinia).openTaskInline(request.target.id);
+      await nextTick();
+
+      return allowed();
+    } catch {
+      return false;
+    }
+  };
+
+  window.grigdeskSurfaceMain = handler;
+
+  return () => {
+    if (window.grigdeskSurfaceMain === handler) {
+      delete window.grigdeskSurfaceMain;
+    }
+  };
+}
+
+const removeSurfaceMain = installSurfaceMainHandler();
+
 app.use(router).mount('#app');
 import.meta.hot?.dispose(() => {
   setApiLogSink(null);
@@ -96,6 +161,8 @@ import.meta.hot?.dispose(() => {
   removeBackAction();
   removeAppViewport();
   removeUiLocale();
+  removeSurfaceMain();
+  configureSseRelay('off');
 });
 
 const device = useDeviceStore(pinia);
